@@ -1,5 +1,76 @@
 const DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
 const MINUTE = 60_000;
+const MAX_TZ_CACHE = 64;
+
+const tzFormatterCache = new Map<string, Intl.DateTimeFormat | null>();
+
+function getTimeZoneFormatter(timeZone: string): Intl.DateTimeFormat | undefined {
+  const trimmed = timeZone.trim();
+  if (trimmed.length === 0) return undefined;
+  const cached = tzFormatterCache.get(trimmed);
+  if (cached !== undefined) return cached ?? undefined;
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: trimmed,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    if (tzFormatterCache.size >= MAX_TZ_CACHE) tzFormatterCache.clear();
+    tzFormatterCache.set(trimmed, fmt);
+    return fmt;
+  } catch {
+    if (tzFormatterCache.size >= MAX_TZ_CACHE) tzFormatterCache.clear();
+    tzFormatterCache.set(trimmed, null);
+    return undefined;
+  }
+}
+
+function zoneOffsetMs(epochMs: number, fmt: Intl.DateTimeFormat): number {
+  let y = 0;
+  let m = 1;
+  let d = 1;
+  let h = 0;
+  let min = 0;
+  let s = 0;
+  for (const part of fmt.formatToParts(new Date(epochMs))) {
+    if (part.type === 'year') y = Number(part.value);
+    else if (part.type === 'month') m = Number(part.value);
+    else if (part.type === 'day') d = Number(part.value);
+    else if (part.type === 'hour') h = Number(part.value) % 24;
+    else if (part.type === 'minute') min = Number(part.value);
+    else if (part.type === 'second') s = Number(part.value);
+  }
+  return Date.UTC(y, m - 1, d, h, min, s) - epochMs;
+}
+
+/**
+ * Converts a wall-clock instant (encoded as UTC ms) to true epoch ms in `timeZone` using
+ * deterministic 2-pass offset resolution. Handles spring-forward gaps by advancing past the gap
+ * and fall-back overlaps deterministically. Falls back to `wallUtcMs` on invalid timezones.
+ */
+function resolveWallClockInTimeZone(wallUtcMs: number, timeZone: string): number {
+  const fmt = getTimeZoneFormatter(timeZone);
+  if (fmt === undefined) return wallUtcMs;
+  const off1 = zoneOffsetMs(wallUtcMs, fmt);
+  const guess1 = wallUtcMs - off1;
+  const off2 = zoneOffsetMs(guess1, fmt);
+  if (off2 === off1) return guess1;
+  const guess2 = wallUtcMs - off2;
+  if (zoneOffsetMs(guess2, fmt) === off2) return guess2;
+  // Spring-forward gap: wall clock does not exist; advance into the post-transition offset.
+  return wallUtcMs - Math.min(off1, off2);
+}
+
+/** Options for {@link parseXmltvTime}. */
+export interface ParseXmltvTimeOptions {
+  /** IANA timezone (e.g. `Europe/Berlin`, `America/New_York`) applied only when the timestamp omits an explicit offset. */
+  readonly defaultTimeZone?: string;
+}
 
 function digits(text: string, at: number, count: number): number {
   let v = 0;
@@ -38,9 +109,10 @@ function parseOffset(text: string): number | undefined {
 
 /**
  * Parses an XMLTV time, `YYYYMMDDHHMMSS ±HHMM`, to epoch milliseconds. Shorter forms down to `YYYY` and a
- * missing offset (UTC) are accepted; any invalid field gives `undefined`. Written by hand: no `Date.parse`.
+ * missing offset (UTC, or `opts.defaultTimeZone` when provided and valid) are accepted; any invalid field
+ * gives `undefined`. Written by hand: no `Date.parse`.
  */
-export function parseXmltvTime(text: string): number | undefined {
+export function parseXmltvTime(text: string, opts?: ParseXmltvTimeOptions): number | undefined {
   const t = text.trim();
   let n = 0;
   while (n < t.length && n < 14) {
@@ -58,7 +130,14 @@ export function parseXmltvTime(text: string): number | undefined {
   if (year < 1000 || month < 1 || month > 12) return undefined;
   if (day < 1 || day > daysIn(year, month) || hour > 23 || minute > 59 || second > 59)
     return undefined;
-  const offset = parseOffset(t.slice(n).trim());
+  const suffix = t.slice(n).trim();
+  const wallUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  if (suffix === '') {
+    return opts?.defaultTimeZone !== undefined
+      ? resolveWallClockInTimeZone(wallUtcMs, opts.defaultTimeZone)
+      : wallUtcMs;
+  }
+  const offset = parseOffset(suffix);
   if (offset === undefined) return undefined;
-  return Date.UTC(year, month - 1, day, hour, minute, second) - offset * MINUTE;
+  return wallUtcMs - offset * MINUTE;
 }

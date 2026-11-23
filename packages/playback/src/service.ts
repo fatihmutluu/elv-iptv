@@ -145,6 +145,7 @@ export function createPlaybackServiceWith(
     const startMs = overrides.startMs ?? current.startMs;
     if (current.kind === 'vod' && startMs !== undefined) lastVodPositionMs = startMs;
     trackPrefs.beginReload();
+    const allowLegacyTls = current.allowLegacyTls ?? stream.allowLegacyTls;
     const baseOptions: LoadOptions = {
       ...(current.bufferPreset === undefined ? {} : { bufferPreset: current.bufferPreset }),
       ...(current.decoderMode === undefined ? {} : { decoderMode: current.decoderMode }),
@@ -154,6 +155,7 @@ export function createPlaybackServiceWith(
       ...(current.filterSdhSubtitles === undefined
         ? {}
         : { filterSdhSubtitles: current.filterSdhSubtitles }),
+      ...(allowLegacyTls === undefined ? {} : { allowLegacyTls }),
       ...overrides.options,
     };
     const options = trackPrefs.loadOptions(

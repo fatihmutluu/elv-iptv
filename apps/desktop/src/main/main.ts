@@ -5,6 +5,8 @@ import { pathToFileURL } from 'node:url';
 import {
   app,
   BrowserWindow,
+  clipboard,
+  dialog,
   ipcMain,
   Menu,
   MessageChannelMain,
@@ -60,6 +62,7 @@ import { mpvRuntimePaths } from './player/runtime-path.ts';
 import { lockDownSession, lockDownWebContents } from './security.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { focusWindow, startSingleInstance } from './single-instance.ts';
+import { registerSourcesIpc } from './sources-ipc.ts';
 import {
   createTaskbarController,
   createTaskbarIconPngs,
@@ -355,6 +358,27 @@ if (hasLock) {
       ipcMain,
       getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
       log: logger.log,
+    });
+    registerSourcesIpc<BrowserWindow>({
+      ipcMain,
+      getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      readClipboardText: () => clipboard.readText(),
+      showOpenDialog: (win, options) =>
+        win && !win.isDestroyed()
+          ? dialog.showOpenDialog(win, {
+              properties: [...options.properties],
+              filters: options.filters.map((f) => ({
+                name: f.name,
+                extensions: [...f.extensions],
+              })),
+            })
+          : dialog.showOpenDialog({
+              properties: [...options.properties],
+              filters: options.filters.map((f) => ({
+                name: f.name,
+                extensions: [...f.extensions],
+              })),
+            }),
     });
     serveRenderer();
     catalogCoordinator = startCatalog();

@@ -10,7 +10,7 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - Source-first (`src/index.ts`, `./testing` -> `src/testing/index.ts`); allowed workspace dep: `domain`; tests `*.test.ts`.
 
 ## Public surface
-- `PlayerEngine` port (`LoadCommand`, `LoadOptions.bufferPreset?`, `setScrubbing?`, `setSpeed?`, `selectAudioTrack?`, `selectSubtitleTrack?`, `MediaTracks`,
+- `PlayerEngine` port (`LoadCommand`, `LoadOptions.bufferPreset?`, `LoadOptions.allowLegacyTls?`, `setScrubbing?`, `setSpeed?`, `selectAudioTrack?`, `selectSubtitleTrack?`, `MediaTracks`,
   `TrackInfo`, `EMPTY_TRACKS`, `EngineEvent`, `EngineState`, `EngineCapabilities`, `AttemptToken`) and
   `bridgeNativeEngine`. `createMonotonicClock(nowFn?)` (`#159`) guards against backwards wall-clock jumps;
   `positionAt(anchor, nowMs)` clamps to `[0, durationMs]`; `isAtLiveEdge(anchor, nowMs, toleranceMs)` applies the 5 s window (`#284`).

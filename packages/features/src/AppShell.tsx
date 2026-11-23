@@ -35,6 +35,7 @@ import { ConnectionLimitDialog } from './player/ConnectionLimitDialog';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
 import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
+import type { SourceImportHost } from './ports/source-import-host';
 import type { VideoHost } from './ports/video-host';
 import { OledScreensaverOverlay, useOledScreensaver } from './screensaver';
 import { SearchScreen } from './search';
@@ -71,6 +72,8 @@ export interface AppShellProps {
   externalRefreshToken?: number;
   /** Optional shared per-account connection tracker for multi-surface pre-flight limits (`#87`). */
   connectionTracker?: ConnectionTracker;
+  /** Optional platform clipboard & sandboxed local playlist picker port (`#51`). */
+  sourceImportHost?: SourceImportHost;
   /** Optional test/host hook notified with the active {@link PlaybackGuard}. */
   onPlaybackGuardReady?: (guard: PlaybackGuard) => void;
 }
@@ -243,6 +246,7 @@ export function AppShell(props: AppShellProps): ReactElement {
     locale,
     uiCache,
     activeTab,
+    groupVodVersions: preferences.preferences.groupVodVersions,
   });
   const handleGuideRefreshed = useCallback(() => {
     void shell.syncSourcesAndBump();
@@ -551,6 +555,9 @@ export function AppShell(props: AppShellProps): ReactElement {
                           catalog={observedCatalog}
                           embedded
                           playbackGuard={playbackGuard}
+                          {...(props.sourceImportHost !== undefined
+                            ? { sourceImportHost: props.sourceImportHost }
+                            : {})}
                           externalRefreshToken={externalRefreshToken + refreshToken}
                           {...(readySourcesCount > 0
                             ? { onOpenMenu: () => selectTab('home') }
@@ -590,6 +597,9 @@ export function AppShell(props: AppShellProps): ReactElement {
                       kind={activeTab}
                       sources={sources}
                       userStateVersion={userStateVersion}
+                      groupVersions={
+                        activeTab === 'movie' ? preferences.preferences.groupVodVersions : false
+                      }
                       memory={catalogMemoryByTab[activeTab]}
                       onMemoryChange={
                         activeTab === 'movie' ? handleMovieMemoryChange : handleSeriesMemoryChange
@@ -615,6 +625,7 @@ export function AppShell(props: AppShellProps): ReactElement {
                       showSourceBadges={preferences.preferences.showSourceBadges}
                       liveOkTwoStepPreview={preferences.preferences.liveOkTwoStepPreview}
                       cleanChannelTitles={preferences.preferences.cleanChannelTitles}
+                      collapseVariants={preferences.preferences.collapseLiveVariants}
                       onEmbeddedPlaybackActiveChange={setLiveEmbeddedPlaybackActive}
                       onPlay={handlePlay}
                       onOpenSources={openSources}

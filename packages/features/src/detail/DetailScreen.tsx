@@ -8,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import {
   type NativeScrollEvent,
@@ -97,6 +98,33 @@ export function DetailScreen({
     computeCatalogLayout(viewport, theme);
 
   const data = useDetailData({ target, catalog, refreshToken, userStateVersion });
+  const [selectedVersionKey, setSelectedVersionKey] = useState<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset user version override on title change
+  useEffect(() => {
+    setSelectedVersionKey(null);
+  }, [target.itemKey]);
+  const activeVersion = useMemo(() => {
+    if (data.versions.length <= 1) return undefined;
+    const picked =
+      (selectedVersionKey !== null
+        ? data.versions.find((v) => v.key === selectedVersionKey)
+        : undefined) ??
+      (data.movieProgress?.preferredItemKey
+        ? data.versions.find((v) => v.key === data.movieProgress?.preferredItemKey)
+        : undefined) ??
+      data.versions.find((v) => v.key === target.itemKey) ??
+      data.versions[0];
+    return picked;
+  }, [data.movieProgress?.preferredItemKey, data.versions, selectedVersionKey, target.itemKey]);
+  const cycleVersion = useCallback(() => {
+    if (data.versions.length <= 1) return;
+    const currentIdx = Math.max(
+      0,
+      data.versions.findIndex((v) => v.key === activeVersion?.key),
+    );
+    const next = data.versions[(currentIdx + 1) % data.versions.length];
+    if (next) setSelectedVersionKey(next.key);
+  }, [activeVersion?.key, data.versions]);
   const relatedQuickActions = useCardQuickActionsState({
     catalog,
     refreshToken,
@@ -105,6 +133,7 @@ export function DetailScreen({
   const extras = useDetailExtrasState({
     target,
     plot: data.plot,
+    hasVersions: data.versions.length > 1,
     ...(preferredAudioLang !== undefined ? { preferredAudioLang } : {}),
     ...(preferredSubtitleLang !== undefined ? { preferredSubtitleLang } : {}),
   });
@@ -158,8 +187,16 @@ export function DetailScreen({
 
   const handlePlayPrimary = useCallback(() => {
     if (primaryAction.kind === 'pending') return;
+    if (primaryAction.kind === 'movie' && activeVersion !== undefined) {
+      onPlay({
+        ...primaryAction.target,
+        itemKey: activeVersion.key,
+        title: activeVersion.title,
+      });
+      return;
+    }
     onPlay(primaryAction.target);
-  }, [onPlay, primaryAction]);
+  }, [activeVersion, onPlay, primaryAction]);
 
   const handleToggleMyList = useCallback(() => void data.toggleMyList(), [data.toggleMyList]);
   const handleToggleWatched = useCallback(() => void data.toggleWatched(), [data.toggleWatched]);
@@ -281,6 +318,7 @@ export function DetailScreen({
       if (rowId === 'hero-play') {
         const slot = extras.heroPlaySlots[colIndex];
         if (slot === 'play') handlePlayPrimary();
+        else if (slot === 'preplay-version') cycleVersion();
         else if (slot === 'preplay-audio') extras.cycleAudio();
         else if (slot === 'preplay-subtitles') extras.cycleSubtitles();
         else if (slot === 'synopsis') extras.toggleSynopsis();
@@ -312,6 +350,7 @@ export function DetailScreen({
       }
     },
     [
+      cycleVersion,
       data.related,
       data.retrySeasons,
       data.selectSeason,
@@ -444,6 +483,12 @@ export function DetailScreen({
           primaryAction={primaryAction}
           audioLang={extras.audioLang}
           subtitleLang={extras.subtitleLang}
+          {...(activeVersion !== undefined
+            ? {
+                versionLabel: activeVersion.versionLabel || activeVersion.title,
+                onCycleVersion: cycleVersion,
+              }
+            : {})}
           onCycleAudio={extras.cycleAudio}
           onCycleSubtitles={extras.cycleSubtitles}
           synopsisExpanded={extras.synopsisExpanded}

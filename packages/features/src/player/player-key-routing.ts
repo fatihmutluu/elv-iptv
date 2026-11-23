@@ -1,3 +1,4 @@
+import type { LiveVariantOption } from '@elv/data';
 import type { AndroidDecoderMode, DefaultResizeModePref, SeekStepSecPref } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import type {
@@ -58,6 +59,8 @@ export interface PlayerControlsParams {
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
   onSelectAudioDevice?: ((name: string) => void) | undefined;
+  qualityVariants?: readonly LiveVariantOption[] | undefined;
+  onSelectQualityVariant?: ((itemKey: string) => void) | undefined;
   androidDecoderMode?: AndroidDecoderMode | undefined;
   onSelectAndroidDecoderMode?: ((mode: AndroidDecoderMode) => void) | undefined;
   onToggleMute?: (() => void) | undefined;
@@ -100,6 +103,9 @@ export interface OverlayKeyRouteDeps {
   readonly hasAudioDevice?: boolean;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
+  readonly hasQuality?: boolean;
+  readonly qualityVariants?: readonly LiveVariantOption[];
+  readonly activeQualityKey?: string;
   readonly hasVideoDecoder?: boolean;
   readonly androidDecoderMode?: AndroidDecoderMode;
   readonly hasChapters?: boolean;
@@ -145,6 +151,7 @@ export interface OverlayKeyRouteDeps {
   readonly selectSleepTimer?: ((minutes: number) => void) | undefined;
   readonly toggleSleepTimerAction?: (() => void) | undefined;
   readonly selectAudioDevice?: ((name: string) => void) | undefined;
+  readonly selectQualityVariant?: ((itemKey: string) => void) | undefined;
   readonly selectAndroidDecoderMode?: ((mode: AndroidDecoderMode) => void) | undefined;
   readonly onExit: () => void;
   readonly onJumpPreviousChannel?: (() => void) | undefined;
@@ -207,6 +214,9 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       hasAudioDevice: d.hasAudioDevice === true,
       ...(d.audioDevices !== undefined ? { audioDevices: d.audioDevices } : {}),
       ...(d.activeAudioDevice !== undefined ? { activeAudioDevice: d.activeAudioDevice } : {}),
+      hasQuality: d.hasQuality === true,
+      ...(d.qualityVariants !== undefined ? { qualityVariants: d.qualityVariants } : {}),
+      ...(d.activeQualityKey !== undefined ? { activeQualityKey: d.activeQualityKey } : {}),
       hasVideoDecoder: d.hasVideoDecoder === true,
       ...(d.androidDecoderMode !== undefined ? { androidDecoderMode: d.androidDecoderMode } : {}),
       hasChapters: d.hasChapters === true,
@@ -232,6 +242,7 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       if (d.selectAudio !== undefined) d.selectAudio(intent.id);
       else d.service?.selectAudioTrack(intent.id);
     } else if (intent?.kind === 'audioDevice') d.selectAudioDevice?.(intent.name);
+    else if (intent?.kind === 'quality') d.selectQualityVariant?.(intent.itemKey);
     else if (intent?.kind === 'videoDecoder') d.selectAndroidDecoderMode?.(intent.mode);
     else if (intent?.kind === 'chapter') d.selectChapter?.(intent.startMs);
     else if (intent?.kind === 'sleepTimer') d.selectSleepTimer?.(intent.minutes);

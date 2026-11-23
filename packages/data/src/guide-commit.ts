@@ -3,20 +3,21 @@ import { resolveMappings } from './guide-match';
 import { type RunCtx, warn } from './import-run';
 
 const PROGRAMME_COLUMNS =
-  'source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags';
+  'source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value';
 
 /** Upserts one staged programme into `programmes_next`. */
 export const STAGE_PROGRAMME_SQL = `INSERT INTO programmes_next (${PROGRAMME_COLUMNS})
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, guide_id, start) DO UPDATE SET stop = excluded.stop, title = excluded.title,
     sub_title = excluded.sub_title, description = excluded.description, categories_json = excluded.categories_json,
     episode_num = excluded.episode_num, icon = excluded.icon, run_id = excluded.run_id,
-    genre = excluded.genre, flags = excluded.flags`;
+    genre = excluded.genre, flags = excluded.flags, rating_system = excluded.rating_system,
+    rating_value = excluded.rating_value`;
 
-const GUIDE_CHANNEL_SQL = `INSERT INTO guide_channels (source_id, guide_id, name, name_fold, icon, run_id)
-  VALUES (?, ?, ?, ?, ?, ?)
+const GUIDE_CHANNEL_SQL = `INSERT INTO guide_channels (source_id, guide_id, name, name_fold, icon, run_id, lcn)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, guide_id) DO UPDATE SET name = excluded.name, name_fold = excluded.name_fold,
-    icon = excluded.icon, run_id = excluded.run_id`;
+    icon = excluded.icon, run_id = excluded.run_id, lcn = excluded.lcn`;
 
 const SWAP_PROGRAMMES = `INSERT INTO programmes (${PROGRAMME_COLUMNS})
   SELECT
@@ -32,7 +33,9 @@ const SWAP_PROGRAMMES = `INSERT INTO programmes (${PROGRAMME_COLUMNS})
     icon,
     run_id,
     genre,
-    flags
+    flags,
+    rating_system,
+    rating_value
   FROM (
     SELECT ${PROGRAMME_COLUMNS},
       LEAD(start) OVER (PARTITION BY guide_id ORDER BY start) AS next_start

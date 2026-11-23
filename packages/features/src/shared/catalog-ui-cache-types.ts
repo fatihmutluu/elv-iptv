@@ -39,6 +39,8 @@ export interface CachedCatalogKindState {
   readonly continueItems: readonly WatchProgressRow[];
   readonly railItemsByCategoryId: ReadonlyMap<string, readonly ItemRow[]>;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
+  /** Whether this cached movie discovery slice was fetched with `groupVersions: true` (`#404`). */
+  readonly groupVersions?: boolean;
 }
 
 /** Cached Live TV categories and favorites state stored in {@link CatalogUiCache}. */
@@ -130,10 +132,22 @@ export interface CatalogUiCache {
   getHome(): CachedHomeEntry | null;
   setHome(snapshot: CachedHomeSnapshot): void;
   setHomeHeroIndex(heroIndex: number): void;
-  getCatalog(kind: 'movie' | 'series'): CachedCatalogKindState | null;
+  getCatalog(
+    kind: 'movie' | 'series',
+    opts?: { readonly groupVersions?: boolean },
+  ): CachedCatalogKindState | null;
   setCatalog(kind: 'movie' | 'series', state: CachedCatalogKindState): void;
-  getGridFirstPage(kind: 'movie' | 'series', categoryId: string): readonly ItemRow[] | undefined;
-  setGridFirstPage(kind: 'movie' | 'series', categoryId: string, rows: readonly ItemRow[]): void;
+  getGridFirstPage(
+    kind: 'movie' | 'series',
+    categoryId: string,
+    opts?: { readonly groupVersions?: boolean },
+  ): readonly ItemRow[] | undefined;
+  setGridFirstPage(
+    kind: 'movie' | 'series',
+    categoryId: string,
+    rows: readonly ItemRow[],
+    opts?: { readonly groupVersions?: boolean },
+  ): void;
   getLive(): CachedLiveState | null;
   setLiveCategories(categories: readonly DisplayCategory[]): void;
   setLiveFavorites(favoriteKeys: ReadonlySet<string>, favoriteChannels: readonly ItemRow[]): void;

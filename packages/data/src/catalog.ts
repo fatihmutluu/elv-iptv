@@ -10,6 +10,7 @@ import {
   type SqlDriver,
 } from '@elv/domain';
 import { isCredentialFingerprint } from './credential-fingerprint';
+import { type DiscoveredCategory, discoverSourceCategories } from './discover-categories';
 import {
   type CrossChannelProgrammeRow,
   type NowNextEntry,
@@ -27,6 +28,7 @@ import { type ManifestStore, saveManifest } from './manifest';
 import { type NextEpisodeRow, queryNextEpisode } from './next-episode';
 import {
   type BrowseKind,
+  type CategoryQueryOptions,
   type CategoryRow,
   type EpisodeRow,
   type ItemDetailRow,
@@ -42,19 +44,30 @@ import {
   querySeries,
   type SeasonRow,
 } from './queries';
+import {
+  type LiveVariantOption,
+  queryItemVersions,
+  queryLiveVariants,
+  type VodVersionOption,
+} from './queries-variants';
 import { listRecentChannels, recordRecentChannel } from './recent-channels-repo';
 import { latestImportHealth, type SourceImportHealth } from './runs';
 import { querySearch, type SearchOptions, type SearchResults } from './search';
 import { addSourceFromLink, type LinkSourceInput } from './source-link';
 import {
+  addLocalM3uSource,
   addM3uSource,
   addXtreamSource,
   getSource,
+  type LocalM3uSourceInput,
+  type LocalPlaylistStore,
   type M3uSourceInput,
   normalizeActiveConnections,
   normalizeMaxConnections,
+  updateSourceSettings as persistSourceSettings,
   removeSource,
   type SourceAccountMeta,
+  type SourceCategorySelection,
   type SourceKind,
   type SourceRecord,
   type SourceSettings,
@@ -123,6 +136,8 @@ export interface CatalogDeps {
   beforeRemoveSource?: (sourceId: string) => void | Promise<void>;
   /** Platform gzip decompressor used for compressed guides and playlists. */
   decompressor?: Decompressor;
+  /** Optional sandboxed local M3U byte store for local file imports (`#51`). */
+  localPlaylistStore?: LocalPlaylistStore;
 }
 
 /** A source as the menu shows it. */
@@ -136,6 +151,10 @@ export interface SourceRow {
   lastGuideSyncAt?: number | null;
   accountMeta?: SourceAccountMeta;
   credentialFingerprint?: string;
+  readonly isLocalPlaylist?: boolean;
+  readonly categorySelection?: SourceCategorySelection;
+  readonly xmltvTimezone?: string;
+  readonly allowLegacyTls?: boolean;
 }
 
 /** Input of {@link CatalogService.addSource}. */
@@ -147,19 +166,36 @@ export type AddSourceInput =
 export interface CatalogService {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
+  /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
+  addLocalM3uSource?(input: LocalM3uSourceInput): Promise<Result<SourceRow>>;
+  /** Streams category metadata and item counts for a source without writing to SQLite (`#39`). */
+  discoverSourceCategories?(
+    sourceId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Result<readonly DiscoveredCategory[]>>;
+  /** Merges a partial settings patch into a source's stored `settings_json`. */
+  updateSourceSettings?(sourceId: string, patch: Partial<SourceSettings>): Promise<void>;
   /** Stops active playback via `beforeRemoveSource`, aborts imports of `id`, and removes rows + secrets. */
   removeSource(id: string): Promise<Result<void>>;
   importSource(id: string, opts?: DeviceImportOptions): Promise<Result<ImportSummary>>;
   importGuide?(sourceId: string, opts?: ImportOptions): Promise<Result<ImportSummary>>;
   listSources(): Promise<SourceRow[]>;
   latestImportHealth?(sourceId?: string): Promise<SourceImportHealth[]>;
-  categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
+  categories(
+    sourceId: string,
+    kind: BrowseKind,
+    opts?: CategoryQueryOptions,
+  ): Promise<CategoryRow[]>;
   items(
     categoryId: string,
     offset: number,
     limit: number,
     opts?: ListItemsOptions,
   ): Promise<ItemRow[]>;
+  /** Lists selectable quality variants of a live channel (`#218`). */
+  liveVariants?(itemKey: string, categoryId?: string): Promise<readonly LiveVariantOption[]>;
+  /** Lists selectable versions of a multi-version VOD movie (`#404`). */
+  itemVersions?(itemKey: string): Promise<readonly VodVersionOption[]>;
   allSourcesItems?(
     kind: BrowseKind,
     offset: number,
@@ -216,15 +252,152 @@ export interface CatalogService {
   close(): Promise<void>;
 }
 
-function parseSourceMeta(
-  settingsJson: string,
-): Pick<SourceRow, 'accountMeta' | 'credentialFingerprint'> {
+const CATEGORY_SELECTION_KEYS = [
+  'live',
+  'movie',
+  'series',
+  'knownLive',
+  'knownMovie',
+  'knownSeries',
+  'pendingLive',
+  'pendingMovie',
+  'pendingSeries',
+] as const;
+
+function sanitizeCategorySelection(raw: unknown): SourceCategorySelection | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const src = raw as Record<string, unknown>;
+  const out: Partial<Record<(typeof CATEGORY_SELECTION_KEYS)[number], readonly string[]>> = {};
+  let hasAny = false;
+  for (const key of CATEGORY_SELECTION_KEYS) {
+    const value = src[key];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) {
+      return undefined;
+    }
+    out[key] = [...value];
+    hasAny = true;
+  }
+  return hasAny ? (out as SourceCategorySelection) : {};
+}
+
+function mergeSourceSettings(
+  existing: SourceSettings,
+  patch: Partial<SourceSettings>,
+): SourceSettings {
+  const next: SourceSettings = { ...existing };
+  let invalidatePlaylistCache = false;
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === 'isLocalPlaylist') {
+      continue;
+    }
+    if (key === 'xmltvTimezone') {
+      if (value === undefined || (typeof value === 'string' && value.trim() === '')) {
+        delete next.xmltvTimezone;
+      } else if (typeof value === 'string') {
+        next.xmltvTimezone = value.trim();
+      }
+      continue;
+    }
+    if (key === 'categorySelection') {
+      const prevJson = JSON.stringify(existing.categorySelection ?? null);
+      if (value === undefined) {
+        delete next.categorySelection;
+      } else {
+        const sanitized = sanitizeCategorySelection(value);
+        if (sanitized !== undefined) next.categorySelection = sanitized;
+      }
+      if (JSON.stringify(next.categorySelection ?? null) !== prevJson) {
+        invalidatePlaylistCache = true;
+      }
+      continue;
+    }
+    if (key === 'transport') {
+      if (value === undefined) {
+        delete next.transport;
+      } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        const mergedTransport = {
+          ...existing.transport,
+          ...(value as SourceSettings['transport']),
+        };
+        if (
+          'allowLegacyTls' in mergedTransport &&
+          mergedTransport.allowLegacyTls !== undefined &&
+          typeof mergedTransport.allowLegacyTls !== 'boolean'
+        ) {
+          delete mergedTransport.allowLegacyTls;
+        }
+        next.transport = mergedTransport;
+      }
+      continue;
+    }
+    if (key === 'vodPlaylist' || key === 'includePlaceholderChannels') {
+      const prevVal = (existing as Record<string, unknown>)[key];
+      if (value === undefined) {
+        delete (next as Record<string, unknown>)[key];
+      } else {
+        (next as Record<string, unknown>)[key] = value;
+      }
+      if ((next as Record<string, unknown>)[key] !== prevVal) {
+        invalidatePlaylistCache = true;
+      }
+      continue;
+    }
+    if (value === undefined) {
+      delete (next as Record<string, unknown>)[key];
+    } else {
+      (next as Record<string, unknown>)[key] = value;
+    }
+  }
+  if (invalidatePlaylistCache && next.httpCache?.playlist !== undefined) {
+    const nextCache = { ...next.httpCache };
+    delete nextCache.playlist;
+    if (Object.keys(nextCache).length === 0) {
+      delete next.httpCache;
+    } else {
+      next.httpCache = nextCache;
+    }
+  }
+  return next;
+}
+
+type ParsedSourceMeta = Pick<
+  SourceRow,
+  | 'accountMeta'
+  | 'credentialFingerprint'
+  | 'isLocalPlaylist'
+  | 'categorySelection'
+  | 'xmltvTimezone'
+  | 'allowLegacyTls'
+>;
+
+function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
   try {
     const parsed = JSON.parse(settingsJson) as Partial<SourceSettings> | null;
     if (parsed === null || typeof parsed !== 'object') return {};
-    const out: Pick<SourceRow, 'accountMeta' | 'credentialFingerprint'> = {};
+    const out: {
+      accountMeta?: SourceAccountMeta;
+      credentialFingerprint?: string;
+      isLocalPlaylist?: boolean;
+      categorySelection?: SourceCategorySelection;
+      xmltvTimezone?: string;
+      allowLegacyTls?: boolean;
+    } = {};
     if (isCredentialFingerprint(parsed.credentialFingerprint)) {
       out.credentialFingerprint = parsed.credentialFingerprint;
+    }
+    if (typeof parsed.isLocalPlaylist === 'boolean') {
+      out.isLocalPlaylist = parsed.isLocalPlaylist;
+    }
+    if (typeof parsed.xmltvTimezone === 'string' && parsed.xmltvTimezone.trim() !== '') {
+      out.xmltvTimezone = parsed.xmltvTimezone.trim();
+    }
+    if (typeof parsed.transport?.allowLegacyTls === 'boolean') {
+      out.allowLegacyTls = parsed.transport.allowLegacyTls;
+    }
+    if (parsed.categorySelection !== undefined) {
+      const sanitized = sanitizeCategorySelection(parsed.categorySelection);
+      if (sanitized !== undefined) out.categorySelection = sanitized;
     }
     const meta = parsed.accountMeta;
     if (meta !== null && typeof meta === 'object') {
@@ -267,6 +440,18 @@ const row = (r: SourceRecord): SourceRow => ({
   ...(isCredentialFingerprint(r.settings.credentialFingerprint)
     ? { credentialFingerprint: r.settings.credentialFingerprint }
     : {}),
+  ...(typeof r.settings.isLocalPlaylist === 'boolean'
+    ? { isLocalPlaylist: r.settings.isLocalPlaylist }
+    : {}),
+  ...(r.settings.categorySelection === undefined
+    ? {}
+    : { categorySelection: r.settings.categorySelection }),
+  ...(typeof r.settings.xmltvTimezone === 'string' && r.settings.xmltvTimezone.trim() !== ''
+    ? { xmltvTimezone: r.settings.xmltvTimezone.trim() }
+    : {}),
+  ...(typeof r.settings.transport?.allowLegacyTls === 'boolean'
+    ? { allowLegacyTls: r.settings.transport.allowLegacyTls }
+    : {}),
 });
 
 const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at, s.settings_json,
@@ -285,7 +470,15 @@ function defaultNewId(clock: () => number): () => string {
 export function createCatalogService(deps: CatalogDeps): CatalogService {
   const { db, secrets, clock } = deps;
   const newId = deps.newId ?? defaultNewId(clock);
-  const addDeps = { db, secrets, clock, newId };
+  const addDeps = {
+    db,
+    secrets,
+    clock,
+    newId,
+    ...(deps.localPlaylistStore === undefined
+      ? {}
+      : { localPlaylistStore: deps.localPlaylistStore }),
+  };
   const importDeps: ImportDeps = {
     db,
     http: deps.http,
@@ -294,6 +487,9 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     clock,
     maxBodyBytes: deps.maxBodyBytes ?? DEVICE_MAX_BODY_BYTES,
     ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
+    ...(deps.localPlaylistStore === undefined
+      ? {}
+      : { localPlaylistStore: deps.localPlaylistStore }),
   };
   const queue = createSerializedImportQueue(db);
   const playtime = createPlaytimeResolverCache({ db, secrets, http: deps.http });
@@ -322,6 +518,17 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         input.kind === 'xtream' ? addXtreamSource(input, addDeps) : addM3uSource(input, addDeps),
       ),
     addSourceFromLink: (input) => mapped(addSourceFromLink(input, addDeps)),
+    addLocalM3uSource: (input) => mapped(addLocalM3uSource(input, addDeps)),
+    discoverSourceCategories: (sourceId, opts) =>
+      discoverSourceCategories(sourceId, importDeps, opts),
+    async updateSourceSettings(sourceId, patch) {
+      const existing = await getSource(db, sourceId);
+      if (existing === undefined) return;
+      const merged = mergeSourceSettings(existing.settings, patch);
+      await persistSourceSettings(db, sourceId, merged);
+      playtime.evict(sourceId);
+      await syncManifest();
+    },
 
     async removeSource(id) {
       queue.markRemoving(id);
@@ -333,7 +540,14 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         }
         await queue.abortForSource(id);
         playtime.evict(id);
-        const removed = await removeSource(id, { db, secrets, scheduler: deps.scheduler });
+        const removed = await removeSource(id, {
+          db,
+          secrets,
+          scheduler: deps.scheduler,
+          ...(deps.localPlaylistStore === undefined
+            ? {}
+            : { localPlaylistStore: deps.localPlaylistStore }),
+        });
         playtime.evict(id);
         await syncManifest();
         await syncUserData();
@@ -406,13 +620,16 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
 
     latestImportHealth: (sourceId) => latestImportHealth(db, sourceId),
 
-    categories: (sourceId, kind) => queryCategories(db, sourceId, kind),
+    categories: (sourceId, kind, opts) => queryCategories(db, sourceId, kind, opts),
 
     async items(categoryId, offset, limit, opts) {
       const ref = parseCategoryId(categoryId);
       if (ref === undefined) return [];
       return playtime.resolveLogos(await queryItems(db, ref, offset, limit, opts), ref.sourceId);
     },
+
+    liveVariants: (itemKey, categoryId) => queryLiveVariants(db, itemKey, categoryId),
+    itemVersions: (itemKey) => queryItemVersions(db, itemKey),
 
     allSourcesItems: async (kind, offset, limit, sourceIds, opts) =>
       playtime.resolveRowLogos(

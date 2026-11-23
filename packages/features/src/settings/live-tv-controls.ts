@@ -175,5 +175,11 @@ export function activateLiveTvControl(
     void preferences.updatePreferences({
       cleanChannelTitles: !preferences.preferences.cleanChannelTitles,
     });
+    return;
+  }
+  if (controlId === 'toggle-collapse-variants') {
+    void preferences.updatePreferences({
+      collapseLiveVariants: !preferences.preferences.collapseLiveVariants,
+    });
   }
 }

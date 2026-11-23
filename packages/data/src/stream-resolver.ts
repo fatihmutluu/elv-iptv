@@ -47,6 +47,8 @@ export interface StreamRequest {
   providerActiveConnections?: number;
   /** Optional resolved backup stream endpoints persisted from M3U `#backup` delimiters (`#430`). */
   alternates?: readonly StreamAlternate[];
+  /** Opt-in legacy TLS flag forwarded from the source's transport settings (`#182`). */
+  readonly allowLegacyTls?: boolean;
 }
 
 /** Alias for {@link StreamRequest}. */
@@ -283,6 +285,7 @@ export function createPlaytimeResolverCache(deps: {
       const connectionMeta = {
         maxConnections,
         ...(providerActiveConnections !== undefined ? { providerActiveConnections } : {}),
+        ...(source.settings.transport?.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
       };
 
       if (play.urlTemplate === null) {

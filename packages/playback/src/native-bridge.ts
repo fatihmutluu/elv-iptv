@@ -19,6 +19,7 @@ export interface NativeLoadCommand {
   softwareAudio?: boolean;
   preferHevcOverDolbyVision?: boolean;
   filterSdhSubtitles?: boolean;
+  readonly allowLegacyTls?: boolean;
   bufferPreset?: BufferPreset;
   decoderMode?: AndroidDecoderMode;
   audioTrackId?: string;
@@ -60,6 +61,7 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
     ...(options?.filterSdhSubtitles === undefined
       ? {}
       : { filterSdhSubtitles: options.filterSdhSubtitles }),
+    ...(options?.allowLegacyTls === undefined ? {} : { allowLegacyTls: options.allowLegacyTls }),
     ...(options?.bufferPreset === undefined ? {} : { bufferPreset: options.bufferPreset }),
     ...(options?.decoderMode === undefined ? {} : { decoderMode: options.decoderMode }),
     ...(options?.audioTrackId === undefined ? {} : { audioTrackId: options.audioTrackId }),

@@ -6,6 +6,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import java.util.concurrent.TimeUnit
 import okhttp3.Call
+import okhttp3.ConnectionSpec
 import okhttp3.Dispatcher
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -348,12 +349,21 @@ private fun sanitizeForOrigin(request: Request, origin: StreamOrigin): Request {
   return request.newBuilder().apply { SENSITIVE_HEADERS.forEach(::removeHeader) }.build()
 }
 
+/** Default strict modern TLS + cleartext specs; never downgraded globally (#182). */
+internal val MODERN_CONNECTION_SPECS: List<ConnectionSpec> =
+  listOf(ConnectionSpec.MODERN_TLS, ConnectionSpec.CLEARTEXT)
+
+/** Opt-in legacy TLS (TLS 1.0/1.1) + cleartext specs preserving full certificate verification (#182). */
+internal val LEGACY_TLS_CONNECTION_SPECS: List<ConnectionSpec> =
+  listOf(ConnectionSpec.COMPATIBLE_TLS, ConnectionSpec.CLEARTEXT)
+
 /**
  * The base of the engines' HTTP clients: React Native's OkHttp library (no second copy), one connection pool, the
  * stream timeouts, and OkHttp's redirects (http and https both ways).
  */
 private val streamClient: OkHttpClient by lazy {
   OkHttpClient.Builder()
+    .connectionSpecs(MODERN_CONNECTION_SPECS)
     .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     .writeTimeout(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -362,14 +372,19 @@ private val streamClient: OkHttpClient by lazy {
 
 /**
  * One engine's client: the shared pool and timeouts with its own dispatcher, exact-origin credential stripping, and
- * bounded per-session [OriginCookieJar] (#171).
+ * bounded per-session [OriginCookieJar] (#171). Uses [MODERN_CONNECTION_SPECS] unless [allowLegacyTls] is explicitly
+ * opted in (#182).
  */
-internal fun engineHttpClient(cookieJar: OriginCookieJar = OriginCookieJar()): OkHttpClient {
+internal fun engineHttpClient(
+  cookieJar: OriginCookieJar = OriginCookieJar(),
+  allowLegacyTls: Boolean = false,
+): OkHttpClient {
   val dispatcher = Dispatcher().apply {
     maxRequests = MAX_REQUESTS
     maxRequestsPerHost = MAX_REQUESTS_PER_HOST
   }
   return streamClient.newBuilder()
+    .connectionSpecs(if (allowLegacyTls) LEGACY_TLS_CONNECTION_SPECS else MODERN_CONNECTION_SPECS)
     .dispatcher(dispatcher)
     .addInterceptor { chain ->
       val req = chain.request()
@@ -392,6 +407,15 @@ internal fun engineHttpClient(cookieJar: OriginCookieJar = OriginCookieJar()): O
     }
     .build()
 }
+
+/**
+ * Derives an opt-in legacy TLS client from [base] sharing its dispatcher, cookie jar, and redirect interceptors
+ * without mutating [base] or disabling certificate validation (#182).
+ */
+internal fun legacyTlsClient(base: OkHttpClient): OkHttpClient =
+  base.newBuilder()
+    .connectionSpecs(LEGACY_TLS_CONNECTION_SPECS)
+    .build()
 
 /**
  * The calls of one data source, so another thread can cancel the current one: OkHttp then closes its socket at once,

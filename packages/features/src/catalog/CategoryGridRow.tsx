@@ -71,6 +71,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
   onQuickToggleWatched,
 }: GridPosterSlotProps): ReactElement {
   const theme = useTheme();
+  const i18n = useI18n();
   const handlePress = useCallback(() => {
     if (!item) return;
     const target = detailTargetFromItem(item, categoryId);
@@ -148,7 +149,11 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
         watchedLabel,
       })
     : {};
-  const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
+  const versionBadge =
+    !isSeries && (item.versionCount ?? 0) > 1
+      ? i18n.t('detail.versionCount', { count: item.versionCount ?? 0 })
+      : undefined;
+  const badge = !isSeries && effectiveWatched ? watchedLabel : versionBadge;
 
   return (
     <PosterCard

@@ -10,8 +10,10 @@ export {
   normalizeEpgGenre,
 } from '@elv/sources';
 export * from './catalog';
+export * from './category-selection';
 export * from './content-hash';
 export * from './credential-fingerprint';
+export * from './discover-categories';
 export * from './driver';
 export * from './fold';
 export * from './guide-match';
@@ -19,6 +21,7 @@ export * from './guide-queries';
 export { importGuide } from './import-guide';
 export * from './import-types';
 export { importCatalog, loadSeriesEpisodes } from './import-xtream';
+export * from './live-variants';
 export * from './manifest';
 export * from './migrate';
 export * from './next-episode';
@@ -27,6 +30,7 @@ export {
   type PlaceholderLiveChannelInput,
 } from './placeholder-filter';
 export * from './queries';
+export * from './queries-variants';
 export {
   DEFAULT_RECENT_CHANNELS_LIMIT,
   isSafeRecentChannelKey,
@@ -64,4 +68,5 @@ export {
 } from './track-preferences-repo';
 export * from './user-state';
 export * from './user-state-backup';
+export * from './vod-versions';
 export * from './write-coalescer';

@@ -7,6 +7,7 @@ import {
   type XtreamClientOptions,
   type XtreamStreamOptions,
 } from '@elv/sources';
+import { allowlistForKind, reconcileCategorySelection } from './category-selection';
 import { fingerprintXtreamCredentials } from './credential-fingerprint';
 import { importM3u } from './import-m3u';
 import {
@@ -29,6 +30,7 @@ import {
   getSource,
   normalizeActiveConnections,
   normalizeMaxConnections,
+  type SourceCategorySelection,
   type SourceRecord,
   type SourceSettings,
   secretKey,
@@ -108,18 +110,49 @@ async function openClients(source: SourceRecord, deps: ImportDeps): Promise<Resu
   return ok({ client: createXtreamClient(capped), retries, credentialFingerprint });
 }
 
-async function importCategories(c: Ctx): Promise<Record<ItemKind, XtreamCategory[]>> {
+interface ImportedCategoriesResult {
+  readonly filtered: Record<ItemKind, XtreamCategory[]>;
+  readonly discoveredIds: Record<ItemKind, string[]>;
+  readonly allowlists: Record<ItemKind, ReadonlySet<string> | undefined>;
+}
+
+async function importCategories(
+  c: Ctx,
+  selection: SourceCategorySelection | undefined,
+): Promise<ImportedCategoriesResult> {
   checkAbort(c);
   const [live, movie, series] = await runParallelFailFast(c.signal, [
     async (signal) => unwrap(await c.client.categories('live', { signal })),
     async (signal) => unwrap(await c.client.categories('movie', { signal })),
     async (signal) => unwrap(await c.client.categories('series', { signal })),
   ]);
-  const lists: Record<ItemKind, XtreamCategory[]> = { live, movie, series };
-  const total = live.length + movie.length + series.length;
+  const rawLists: Record<ItemKind, XtreamCategory[]> = { live, movie, series };
+  const allowlists: Record<ItemKind, ReadonlySet<string> | undefined> = {
+    live: allowlistForKind(selection, 'live'),
+    movie: allowlistForKind(selection, 'movie'),
+    series: allowlistForKind(selection, 'series'),
+  };
+  const discoveredIds: Record<ItemKind, string[]> = {
+    live: live.map((x) => x.id),
+    movie: movie.map((x) => x.id),
+    series: series.map((x) => x.id),
+  };
+  const filtered: Record<ItemKind, XtreamCategory[]> = {
+    live: allowlists.live === undefined ? live : live.filter((x) => allowlists.live?.has(x.id)),
+    movie:
+      allowlists.movie === undefined ? movie : movie.filter((x) => allowlists.movie?.has(x.id)),
+    series:
+      allowlists.series === undefined ? series : series.filter((x) => allowlists.series?.has(x.id)),
+  };
+  for (const kind of ['live', 'movie', 'series'] as const) {
+    if (allowlists[kind] !== undefined && allowlists[kind].size === 0) {
+      c.intentionallyEmptyKinds.add(kind);
+    }
+  }
+  const total = filtered.live.length + filtered.movie.length + filtered.series.length;
   let done = 0;
   for (const kind of ['live', 'movie', 'series'] as const) {
-    const list = lists[kind];
+    const list = filtered[kind];
     for (let i = 0; i < list.length; i += c.batchSize) {
       checkAbort(c);
       const slice = list.slice(i, i + c.batchSize);
@@ -131,7 +164,9 @@ async function importCategories(c: Ctx): Promise<Record<ItemKind, XtreamCategory
   }
   c.meter.markComplete('categories');
   c.counts.categories = total;
-  return lists;
+  // Preserve reference to rawLists only for type clarity
+  void rawLists;
+  return { filtered, discoveredIds, allowlists };
 }
 
 interface ListSpec<T extends Listed> {
@@ -143,6 +178,7 @@ interface ListSpec<T extends Listed> {
     options?: XtreamStreamOptions,
   ): AsyncGenerator<T[], Result<void>>;
   skip?: ((item: T) => boolean) | undefined;
+  allowlist?: ReadonlySet<string> | undefined;
 }
 
 async function clearStagedKind(c: Ctx, kind: ItemKind, dropUncat: boolean): Promise<void> {
@@ -172,13 +208,40 @@ async function importList<T extends Listed>(
   signal: AbortSignal,
 ): Promise<void> {
   const phase = KIND_META[spec.kind][1];
+  if (spec.allowlist !== undefined && spec.allowlist.size === 0) {
+    c.meter.markComplete(phase);
+    c.counts[phase] = 0;
+    return;
+  }
   const dedup = createStreamBatchDeduper<T>();
   const keyOf = (id: number) => xtreamKey(c.sourceId, spec.kind, id);
+  const allow = spec.allowlist;
+
+  function filterItemsForAllowlist(items: readonly T[], only: string | undefined): readonly T[] {
+    if (allow === undefined) return items;
+    if (only !== undefined) return allow.has(only) ? items : [];
+    const out: T[] = [];
+    for (const item of items) {
+      if (item.categoryIds.length === 0) {
+        if (allow.has(UNCATEGORIZED)) out.push(item);
+      } else {
+        const kept = item.categoryIds.filter((cid) => allow.has(cid));
+        if (kept.length === item.categoryIds.length) {
+          out.push(item);
+        } else if (kept.length > 0) {
+          out.push({ ...item, categoryIds: kept });
+        }
+      }
+    }
+    return out;
+  }
 
   async function writeBatch(items: readonly T[], only: string | undefined): Promise<void> {
     checkAbort({ signal });
+    const filteredItems = filterItemsForAllowlist(items, only);
+    if (filteredItems.length === 0) return;
     const { entries, links, createdUncategorized } = dedup.consume(
-      items,
+      filteredItems,
       only,
       keyOf,
       UNCATEGORIZED,
@@ -247,9 +310,18 @@ async function importList<T extends Listed>(
   }
 }
 
-async function execute(c: Ctx, includePlaceholders: boolean): Promise<XtreamAccount> {
+interface XtreamExecuteResult {
+  readonly account: XtreamAccount;
+  readonly discoveredIds: Record<ItemKind, string[]>;
+}
+
+async function execute(
+  c: Ctx,
+  includePlaceholders: boolean,
+  selection: SourceCategorySelection | undefined,
+): Promise<XtreamExecuteResult> {
   const account = unwrap(await c.client.account(c.signal ? { signal: c.signal } : undefined));
-  const cats = await importCategories(c);
+  const { filtered: cats, discoveredIds, allowlists } = await importCategories(c, selection);
   const skip = includePlaceholders
     ? undefined
     : (i: { name: string; id: number }) =>
@@ -260,16 +332,36 @@ async function execute(c: Ctx, includePlaceholders: boolean): Promise<XtreamAcco
       writer: ItemWriter<T>,
       stream: ListSpec<T>['stream'],
       list: readonly XtreamCategory[],
+      allowlist: ReadonlySet<string> | undefined,
       filter?: (item: T) => boolean,
     ) =>
     (signal: AbortSignal) =>
-      importList(c, { kind, writer, stream, skip: filter }, list, signal);
+      importList(c, { kind, writer, stream, skip: filter, allowlist }, list, signal);
   await runParallelFailFast(c.signal, [
-    run('live', liveWriter, (cl, id, o) => cl.streamLiveStreams(id, o), cats.live, skip),
-    run('movie', movieWriter, (cl, id, o) => cl.streamVodStreams(id, o), cats.movie),
-    run('series', seriesWriter, (cl, id, o) => cl.streamSeries(id, o), cats.series),
+    run(
+      'live',
+      liveWriter,
+      (cl, id, o) => cl.streamLiveStreams(id, o),
+      cats.live,
+      allowlists.live,
+      skip,
+    ),
+    run(
+      'movie',
+      movieWriter,
+      (cl, id, o) => cl.streamVodStreams(id, o),
+      cats.movie,
+      allowlists.movie,
+    ),
+    run(
+      'series',
+      seriesWriter,
+      (cl, id, o) => cl.streamSeries(id, o),
+      cats.series,
+      allowlists.series,
+    ),
   ]);
-  return account;
+  return { account, discoveredIds };
 }
 
 async function importXtream(
@@ -280,18 +372,20 @@ async function importXtream(
   const opened = await openClients(source, deps);
   if (!opened.ok) return opened;
   const meter = createMonotonicProgressMeter();
-  let account: XtreamAccount | undefined;
+  let execResult: XtreamExecuteResult | undefined;
   return performRun(source, deps, wrapCleanupProgress(opts, meter, notify), {
     execute: async (base) => {
-      account = await execute(
+      execResult = await execute(
         { ...base, ...opened.value, meter },
         source.settings.includePlaceholderChannels === true,
+        source.settings.categorySelection,
       );
     },
     beforeCleanup: async (tx) => {
       const current = (await getSource(tx, source.id))?.settings ?? source.settings;
       const settings: SourceSettings = { ...current };
-      if (account !== undefined) {
+      if (execResult !== undefined) {
+        const { account, discoveredIds } = execResult;
         if (account.outputFormats.length > 0) settings.outputFormats = account.outputFormats;
         else delete settings.outputFormats;
         const activeConnections = normalizeActiveConnections(account.activeConnections);
@@ -303,6 +397,8 @@ async function importXtream(
             : {}),
           ...(activeConnections !== undefined ? { activeConnections } : {}),
         };
+        const reconciled = reconcileCategorySelection(current.categorySelection, discoveredIds);
+        if (reconciled !== undefined) settings.categorySelection = reconciled;
       }
       if (opened.value.credentialFingerprint !== undefined)
         settings.credentialFingerprint = opened.value.credentialFingerprint;

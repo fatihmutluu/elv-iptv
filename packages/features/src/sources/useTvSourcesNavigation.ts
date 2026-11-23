@@ -1,3 +1,4 @@
+import type { BrowseKind } from '@elv/data';
 import { createFocusStore, type FocusStore, findList } from '@elv/focus-core';
 import { type TvTextInputInstance, useKeyInterpreter } from '@elv/ui-kit';
 import {
@@ -10,6 +11,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { LayoutChangeEvent, ScrollView, View } from 'react-native';
+import { countPendingCategories, discoveredCategoryKey } from './category-selection-model';
 import type { SourcesController } from './useSourcesController';
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
@@ -17,6 +19,7 @@ type ViewHandle = ComponentRef<typeof View>;
 
 const CONTROLS_LIST_ID = 'sources-controls';
 const TV_SCROLL_PADDING = 32;
+const PICKER_KIND_ORDER: readonly BrowseKind[] = ['live', 'movie', 'series'];
 
 type FocusItem =
   | {
@@ -37,6 +40,53 @@ function buildSourcesFocusItems(
   ctrl: SourcesController,
   onOpenMenu: (() => void) | undefined,
 ): readonly FocusItem[] {
+  const picker = ctrl.categoryPicker;
+  if (picker !== null) {
+    const pickerItems: FocusItem[] = [];
+    if (!picker.loading && picker.error === null) {
+      pickerItems.push(
+        {
+          id: 'category-select-all',
+          kind: 'action',
+          rowGroup: 'category-bulk',
+          run: ctrl.selectAllCategories,
+        },
+        {
+          id: 'category-clear-all',
+          kind: 'action',
+          rowGroup: 'category-bulk',
+          run: ctrl.clearAllCategories,
+        },
+      );
+      for (const kind of PICKER_KIND_ORDER) {
+        for (const cat of picker.categories) {
+          if (cat.kind !== kind) continue;
+          const key = discoveredCategoryKey(cat.kind, cat.id);
+          pickerItems.push({
+            id: `category-item-${key}`,
+            kind: 'action',
+            run: () => ctrl.toggleCategorySelection(key),
+          });
+        }
+      }
+    }
+    pickerItems.push({
+      id: 'category-cancel',
+      kind: 'action',
+      rowGroup: 'category-footer',
+      run: ctrl.closeCategoryPicker,
+    });
+    if (!picker.loading && picker.error === null) {
+      pickerItems.push({
+        id: 'category-confirm',
+        kind: 'action',
+        rowGroup: 'category-footer',
+        run: () => void ctrl.confirmCategorySelection(),
+      });
+    }
+    return pickerItems;
+  }
+
   const items: FocusItem[] = [];
   if (onOpenMenu !== undefined) {
     items.push({ id: 'open-menu', kind: 'action', run: onOpenMenu });
@@ -54,6 +104,29 @@ function buildSourcesFocusItems(
     );
   } else {
     items.push({ id: 'input-playlist-url', kind: 'input' });
+    if (ctrl.canPasteClipboard) {
+      items.push({
+        id: 'paste-clipboard',
+        kind: 'action',
+        rowGroup: 'm3u-import-helpers',
+        run: () => void ctrl.pasteFromClipboard(),
+      });
+    }
+    if (ctrl.canPickLocalFile) {
+      items.push({
+        id: 'choose-local-file',
+        kind: 'action',
+        rowGroup: 'm3u-import-helpers',
+        run: () => void ctrl.pickLocalFile(),
+      });
+    }
+    if (ctrl.form.localFile != null) {
+      items.push({
+        id: 'clear-local-file',
+        kind: 'action',
+        run: ctrl.clearLocalFile,
+      });
+    }
     if (ctrl.detectedXtreamInM3u) {
       items.push({
         id: 'toggle-keep-m3u',
@@ -68,6 +141,12 @@ function buildSourcesFocusItems(
       { id: 'input-guide-url', kind: 'input' },
       { id: 'input-user-agent', kind: 'input' },
       { id: 'input-referer', kind: 'input' },
+      { id: 'input-xmltv-timezone', kind: 'input' },
+      {
+        id: 'toggle-legacy-tls',
+        kind: 'action',
+        run: () => ctrl.updateField('allowLegacyTls', !(ctrl.form.allowLegacyTls === true)),
+      },
     );
     if (ctrl.form.mode === 'xtream') {
       items.push(
@@ -92,8 +171,38 @@ function buildSourcesFocusItems(
       );
     }
   }
-  items.push({ id: 'submit', kind: 'action', run: () => void ctrl.submit() });
+  items.push({
+    id: 'submit',
+    kind: 'action',
+    rowGroup: 'submit-actions',
+    run: () => void ctrl.submit(),
+  });
+  if (ctrl.canChooseCategories) {
+    items.push({
+      id: 'submit-choose-categories',
+      kind: 'action',
+      rowGroup: 'submit-actions',
+      run: () => void ctrl.submit({ chooseCategories: true }),
+    });
+  }
   for (const source of ctrl.sources) {
+    if (countPendingCategories(source.categorySelection) > 0) {
+      const pendingGroup = `source-pending-${source.id}`;
+      items.push(
+        {
+          id: `source-include-pending-${source.id}`,
+          kind: 'action',
+          rowGroup: pendingGroup,
+          run: () => void ctrl.includePendingCategories(source),
+        },
+        {
+          id: `source-dismiss-pending-${source.id}`,
+          kind: 'action',
+          rowGroup: pendingGroup,
+          run: () => void ctrl.dismissPendingCategories(source),
+        },
+      );
+    }
     const status = ctrl.statusById[source.id];
     const rowGroup = `source-actions-${source.id}`;
     if (status?.kind === 'importing') {
@@ -118,6 +227,14 @@ function buildSourcesFocusItems(
           run: () => void ctrl.runGuideRefresh(source.id),
         });
       }
+      if (ctrl.canChooseCategories) {
+        items.push({
+          id: `source-categories-${source.id}`,
+          kind: 'action',
+          rowGroup,
+          run: () => void ctrl.openCategoryPicker(source),
+        });
+      }
     }
     items.push({
       id: `source-remove-${source.id}`,
@@ -135,12 +252,14 @@ export function TvRemoteBridge({
   onSelectIndex,
   onBackIntent,
   onFocusTopNav,
+  suppressTopNav = false,
 }: {
   store: FocusStore;
   controls: readonly FocusItem[];
   onSelectIndex: (index: number) => void;
   onBackIntent: () => void;
   onFocusTopNav?: () => void;
+  suppressTopNav?: boolean;
 }): null {
   const controlsRef = useRef(controls);
   controlsRef.current = controls;
@@ -150,6 +269,8 @@ export function TvRemoteBridge({
   backRef.current = onBackIntent;
   const topNavRef = useRef(onFocusTopNav);
   topNavRef.current = onFocusTopNav;
+  const suppressTopNavRef = useRef(suppressTopNav);
+  suppressTopNavRef.current = suppressTopNav;
 
   useKeyInterpreter((event) => {
     const items = controlsRef.current;
@@ -161,7 +282,7 @@ export function TvRemoteBridge({
         intent.side === 'start' &&
         (event.key === 'up' || event.key === 'channelUp')
       ) {
-        topNavRef.current?.();
+        if (!suppressTopNavRef.current) topNavRef.current?.();
       } else if (intent.kind === 'select' && intent.listId === CONTROLS_LIST_ID) {
         selectRef.current(intent.index);
       } else if (intent.kind === 'back') {
@@ -255,9 +376,16 @@ export function useTvSourcesNavigation({
     [],
   );
 
-  useLayoutEffect(() => {
-    focusStore.setCount(CONTROLS_LIST_ID, controls.length);
-  }, [controls.length, focusStore]);
+  const pickerOpen = ctrl.categoryPicker !== null;
+  const pickerLoading = ctrl.categoryPicker?.loading ?? false;
+  const pickerOpenRef = useRef(pickerOpen);
+  pickerOpenRef.current = pickerOpen;
+  const closeCategoryPickerRef = useRef(ctrl.closeCategoryPicker);
+  closeCategoryPickerRef.current = ctrl.closeCategoryPicker;
+  const prevPickerOpenRef = useRef(pickerOpen);
+  const prevPickerLoadingRef = useRef(pickerLoading);
+  const savedFocusIdBeforePickerRef = useRef<string | null>(null);
+  const lastFocusedIdRef = useRef<string | undefined>(undefined);
 
   const rawFocusedIndex = useSyncExternalStore(
     focusStore.subscribe,
@@ -267,6 +395,29 @@ export function useTvSourcesNavigation({
   const focusedIndex =
     controls.length === 0 ? 0 : Math.min(rawFocusedIndex, Math.max(0, controls.length - 1));
   const tvFocusId = isTv ? controls[focusedIndex]?.id : undefined;
+
+  useLayoutEffect(() => {
+    focusStore.setCount(CONTROLS_LIST_ID, controls.length);
+    if (!prevPickerOpenRef.current && pickerOpen) {
+      savedFocusIdBeforePickerRef.current = lastFocusedIdRef.current ?? null;
+      focusStore.focus(CONTROLS_LIST_ID, 0);
+    } else if (pickerOpen && prevPickerLoadingRef.current && !pickerLoading) {
+      focusStore.focus(CONTROLS_LIST_ID, 0);
+    } else if (prevPickerOpenRef.current && !pickerOpen) {
+      const savedId = savedFocusIdBeforePickerRef.current;
+      savedFocusIdBeforePickerRef.current = null;
+      if (savedId !== null) {
+        const restoredIdx = controls.findIndex((c) => c.id === savedId);
+        if (restoredIdx >= 0) focusStore.focus(CONTROLS_LIST_ID, restoredIdx);
+      }
+    }
+    prevPickerOpenRef.current = pickerOpen;
+    prevPickerLoadingRef.current = pickerLoading;
+  }, [controls, focusStore, pickerLoading, pickerOpen]);
+
+  if (!pickerOpen) {
+    lastFocusedIdRef.current = controls[focusedIndex]?.id;
+  }
 
   useLayoutEffect(() => {
     if (!isTv || activeEditingInputId === null) return;
@@ -340,6 +491,10 @@ export function useTvSourcesNavigation({
     if (activeInput !== null) {
       inputRefs.current.get(activeInput)?.blur();
       setEditingInputId(null);
+      return;
+    }
+    if (pickerOpenRef.current) {
+      closeCategoryPickerRef.current();
       return;
     }
     (onBack ?? onOpenMenu)?.();

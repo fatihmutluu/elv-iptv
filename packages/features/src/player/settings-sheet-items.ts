@@ -1,3 +1,4 @@
+import type { LiveVariantOption } from '@elv/data';
 import { ANDROID_DECODER_MODES, type AndroidDecoderMode, type SleepTimerAction } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { ChapterInfo, MediaTracks, TrackInfo } from '@elv/playback';
@@ -80,6 +81,8 @@ export function buildSettingsNavRows(
     readonly chapters?: readonly ChapterInfo[] | undefined;
     readonly showSleepTimer?: boolean | undefined;
     readonly sleepTimer?: SleepTimerSnapshot | undefined;
+    readonly qualityVariants?: readonly LiveVariantOption[] | undefined;
+    readonly activeQualityKey?: string | undefined;
   },
 ): readonly SettingsNavRow[] {
   const subSummary = activeTrackSummary(
@@ -119,6 +122,21 @@ export function buildSettingsNavRows(
       i18n.t('player.audioDevice'),
       activeAudioDeviceSummary(audioDevice.devices, audioDevice.activeDevice, i18n),
       'audioDevice',
+      false,
+    ]);
+  }
+  const qualityVariants = extras?.qualityVariants;
+  if (qualityVariants !== undefined && qualityVariants.length > 1) {
+    const activeVariant = qualityVariants.find((v) => v.key === extras?.activeQualityKey);
+    const qualitySummary =
+      activeVariant?.qualityLabel ||
+      i18n.t('player.qualityVariantCount', { count: qualityVariants.length });
+    rows.push([
+      'player-settings-row-quality',
+      'layers',
+      i18n.t('player.qualityVariant'),
+      qualitySummary,
+      'quality',
       false,
     ]);
   }
@@ -178,11 +196,14 @@ export function buildSettingsRadioItems(params: {
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
   androidDecoderMode?: AndroidDecoderMode | undefined;
+  qualityVariants?: readonly LiveVariantOption[] | undefined;
+  activeQualityKey?: string | undefined;
   chapters?: readonly ChapterInfo[] | undefined;
   sleepTimer?: SleepTimerSnapshot | undefined;
   i18n: AppI18n;
   onSelectAudio: (id: string) => void;
   onSelectAudioDevice?: ((name: string) => void) | undefined;
+  onSelectQualityVariant?: ((itemKey: string) => void) | undefined;
   onSelectSubtitle: (id: string | null) => void;
   onSelectSpeed?: ((rate: number) => void) | undefined;
   onSelectChapter?: ((startMs: number) => void) | undefined;
@@ -197,11 +218,14 @@ export function buildSettingsRadioItems(params: {
     audioDevices,
     activeAudioDevice = 'auto',
     androidDecoderMode = 'auto',
+    qualityVariants = [],
+    activeQualityKey,
     chapters = [],
     sleepTimer,
     i18n,
     onSelectAudio,
     onSelectAudioDevice,
+    onSelectQualityVariant,
     onSelectSubtitle,
     onSelectSpeed,
     onSelectChapter,
@@ -210,6 +234,15 @@ export function buildSettingsRadioItems(params: {
     onSelectAndroidDecoderMode,
   } = params;
 
+  if (view === 'quality') {
+    return qualityVariants.map((variant) => ({
+      key: variant.key,
+      testID: `player-settings-quality-${variant.key}`,
+      label: variant.qualityLabel || variant.title,
+      selected: variant.key === activeQualityKey,
+      onPress: () => onSelectQualityVariant?.(variant.key),
+    }));
+  }
   if (view === 'chapters') {
     return chapters.map((ch, idx) => ({
       key: ch.id,

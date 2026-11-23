@@ -32,6 +32,8 @@ function programmeRow(
       isPremiere: p.isPremiere,
       previouslyShown: p.previouslyShown,
     }),
+    p.ratingSystem ?? null,
+    p.ratingValue ?? null,
   ];
 }
 

@@ -341,6 +341,35 @@ export function createObservedCatalog(
       if (res.ok) await syncSourcesAndBump();
       return res;
     },
+    ...(c.addLocalM3uSource
+      ? {
+          addLocalM3uSource: async (
+            input: Parameters<NonNullable<CatalogService['addLocalM3uSource']>>[0],
+          ) => {
+            const fn = c.addLocalM3uSource;
+            if (fn === undefined) throw new Error('addLocalM3uSource unavailable');
+            const res = await fn.call(c, input);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.discoverSourceCategories
+      ? { discoverSourceCategories: c.discoverSourceCategories.bind(c) }
+      : {}),
+    ...(c.updateSourceSettings
+      ? {
+          updateSourceSettings: async (
+            sourceId: Parameters<NonNullable<CatalogService['updateSourceSettings']>>[0],
+            patch: Parameters<NonNullable<CatalogService['updateSourceSettings']>>[1],
+          ) => {
+            const fn = c.updateSourceSettings;
+            if (fn === undefined) return;
+            await fn.call(c, sourceId, patch);
+            await syncSourcesAndBump();
+          },
+        }
+      : {}),
     removeSource: async (id) => {
       await playbackGuard.stopIfUsingSource(id);
       const res = await c.removeSource(id);
@@ -353,8 +382,11 @@ export function createObservedCatalog(
       return res;
     },
     listSources: () => c.listSources(),
-    categories: (sourceId, kind) => c.categories(sourceId, kind),
-    items: (categoryId, offset, limit) => c.items(categoryId, offset, limit),
+    categories: (sourceId, kind, opts) => c.categories(sourceId, kind, opts),
+    items: (categoryId, offset, limit, opts) => c.items(categoryId, offset, limit, opts),
+    ...(c.liveVariants ? { liveVariants: c.liveVariants.bind(c) } : {}),
+    ...(c.itemVersions ? { itemVersions: c.itemVersions.bind(c) } : {}),
+    ...(c.allSourcesItems ? { allSourcesItems: c.allSourcesItems.bind(c) } : {}),
     seasons: (seriesId) => c.seasons(seriesId),
     episodes: (seriesId, season) => c.episodes(seriesId, season),
     resolveStream: (itemKey) => c.resolveStream(itemKey),

@@ -1,5 +1,5 @@
 import { elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
-import { resolveSafeStorageLogo } from './queries';
+import { resolveSafeStorageLogo, sourceOfKey } from './queries';
 import {
   clampLimit,
   clampMs,
@@ -63,28 +63,54 @@ export interface ToggleFavoriteInput {
 }
 
 const PROGRESS_COLS =
-  'profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at';
+  'profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at, version_group_key, preferred_item_key';
 const PROGRESS_SELECT = `SELECT ${PROGRESS_COLS} FROM watch_progress`;
 const FAVORITE_SELECT =
   'SELECT profile_id, source_id, item_key, kind, title, logo, year, rating, added_at FROM favorites';
 
 const UPSERT_PROGRESS = `INSERT INTO watch_progress (
   profile_id, source_id, item_key, kind, title, subtitle, logo,
-  series_key, season, episode, position_ms, duration_ms, watched, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  series_key, season, episode, position_ms, duration_ms, watched, updated_at,
+  version_group_key, preferred_item_key
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(profile_id, item_key) DO UPDATE SET
   source_id = excluded.source_id, kind = excluded.kind, title = excluded.title,
   subtitle = excluded.subtitle, logo = excluded.logo, series_key = excluded.series_key,
   season = excluded.season, episode = excluded.episode, position_ms = excluded.position_ms,
   duration_ms = excluded.duration_ms, watched = MAX(watch_progress.watched, excluded.watched),
-  updated_at = excluded.updated_at`;
+  updated_at = excluded.updated_at,
+  version_group_key = COALESCE(excluded.version_group_key, watch_progress.version_group_key),
+  preferred_item_key = COALESCE(excluded.preferred_item_key, watch_progress.preferred_item_key)`;
 
 const INSERT_WATCHED_SEED = `INSERT INTO watch_progress (
   profile_id, source_id, item_key, kind, title, subtitle, logo,
-  series_key, season, episode, position_ms, duration_ms, watched, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 1, ?)
+  series_key, season, episode, position_ms, duration_ms, watched, updated_at,
+  version_group_key, preferred_item_key
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 1, ?, ?, ?)
 ON CONFLICT(profile_id, item_key) DO UPDATE SET
-  watched = 1, updated_at = excluded.updated_at`;
+  watched = 1, updated_at = excluded.updated_at,
+  version_group_key = COALESCE(excluded.version_group_key, watch_progress.version_group_key),
+  preferred_item_key = COALESCE(excluded.preferred_item_key, watch_progress.preferred_item_key)`;
+
+async function lookupMovieVersionGroupKey(
+  db: SqlDriver,
+  itemKey: string,
+  sourceId?: string,
+): Promise<string | null> {
+  const sid = sourceId ?? sourceOfKey(itemKey);
+  const rows =
+    sid !== undefined
+      ? await db.all<{ version_group_key: string }>(
+          'SELECT version_group_key FROM movies WHERE source_id = ? AND key = ? LIMIT 1',
+          [sid, itemKey],
+        )
+      : await db.all<{ version_group_key: string }>(
+          'SELECT version_group_key FROM movies WHERE key = ? LIMIT 1',
+          [itemKey],
+        );
+  const key = rows[0]?.version_group_key;
+  return key !== undefined && key !== '' ? key : null;
+}
 
 /** Returns `true` when playback has reached or passed {@link WATCHED_THRESHOLD_RATIO}. */
 export function isCompletedProgress(positionMs: number, durationMs: number): boolean {
@@ -118,6 +144,11 @@ export async function saveWatchProgress(
   if (!hasValidMeta(input)) return err(elvError('source-format', 'invalid-progress'));
   const positionMs = clampMs(input.positionMs);
   const durationMs = clampMs(input.durationMs);
+  const versionGroupKey =
+    input.kind === 'movie'
+      ? await lookupMovieVersionGroupKey(db, input.itemKey, input.sourceId)
+      : null;
+  const preferredItemKey = versionGroupKey !== null ? input.itemKey : null;
   const row: WatchProgressRow = {
     profileId: normalizeProfileId(input.profileId),
     sourceId: input.sourceId,
@@ -133,6 +164,7 @@ export async function saveWatchProgress(
     durationMs,
     watched: input.watched ?? isCompletedProgress(positionMs, durationMs),
     updatedAt: Math.round(clock()),
+    ...(versionGroupKey !== null ? { versionGroupKey, preferredItemKey: input.itemKey } : {}),
   };
   await db.run(UPSERT_PROGRESS, [
     row.profileId,
@@ -149,8 +181,35 @@ export async function saveWatchProgress(
     row.durationMs,
     row.watched ? 1 : 0,
     row.updatedAt,
+    versionGroupKey,
+    preferredItemKey,
   ]);
-  if (!row.watched) {
+  if (versionGroupKey !== null) {
+    if (!row.watched) {
+      const siblingWatched = await db.all<{ watched: number }>(
+        'SELECT MAX(watched) AS watched FROM watch_progress WHERE profile_id = ? AND version_group_key = ?',
+        [row.profileId, versionGroupKey],
+      );
+      if ((siblingWatched[0]?.watched ?? 0) !== 0) {
+        row.watched = true;
+      }
+    }
+    await db.run(
+      `UPDATE watch_progress
+          SET position_ms = ?, duration_ms = ?, watched = MAX(watched, ?),
+              updated_at = ?, preferred_item_key = ?
+        WHERE profile_id = ? AND version_group_key = ?`,
+      [
+        row.positionMs,
+        row.durationMs,
+        row.watched ? 1 : 0,
+        row.updatedAt,
+        input.itemKey,
+        row.profileId,
+        versionGroupKey,
+      ],
+    );
+  } else if (!row.watched) {
     const persisted = await db.all<{ watched: number }>(
       'SELECT watched FROM watch_progress WHERE profile_id = ? AND item_key = ? LIMIT 1',
       [row.profileId, row.itemKey],
@@ -177,10 +236,21 @@ export async function setItemWatched(
 ): Promise<Result<void>> {
   const normalizedProfile = normalizeProfileId(profileId);
   const updatedAt = Math.round(clock());
+  const versionGroupKey = await lookupMovieVersionGroupKey(db, itemKey);
   const sql = watched
     ? 'UPDATE watch_progress SET watched = 1, updated_at = ? WHERE profile_id = ? AND item_key = ?'
     : 'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND item_key = ?';
   const result = await db.run(sql, [updatedAt, normalizedProfile, itemKey]);
+  if (versionGroupKey !== null) {
+    await db.run(
+      watched
+        ? 'UPDATE watch_progress SET watched = 1, updated_at = ?, preferred_item_key = COALESCE(preferred_item_key, ?) WHERE profile_id = ? AND version_group_key = ?'
+        : 'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND version_group_key = ?',
+      watched
+        ? [updatedAt, itemKey, normalizedProfile, versionGroupKey]
+        : [updatedAt, normalizedProfile, versionGroupKey],
+    );
+  }
   if (!watched) {
     await db.run(
       'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND series_key = ?',
@@ -201,29 +271,44 @@ export async function setItemWatched(
         seed.season,
         seed.episode,
         updatedAt,
+        versionGroupKey,
+        versionGroupKey !== null ? itemKey : null,
       ]);
     }
   }
   return ok(undefined);
 }
 
-/** Reads a single watch progress row by `(profileId, itemKey)`, or `null` when absent. */
+/** Reads a single watch progress row by `(profileId, itemKey)`, falling back to any synced version in the same `version_group_key` (`#404`). */
 export async function getWatchProgress(
   db: SqlDriver,
   itemKey: string,
   profileId: string = DEFAULT_PROFILE_ID,
 ): Promise<WatchProgressRow | null> {
   if (itemKey === '') return null;
+  const normalizedProfile = normalizeProfileId(profileId);
   const rows = await db.all<RawProgressRow>(
     `${PROGRESS_SELECT} WHERE profile_id = ? AND item_key = ? LIMIT 1`,
-    [normalizeProfileId(profileId), itemKey],
+    [normalizedProfile, itemKey],
   );
-  return rows[0] === undefined ? null : mapProgressRow(rows[0]);
+  const direct = rows[0];
+  const groupKey = direct?.version_group_key ?? (await lookupMovieVersionGroupKey(db, itemKey));
+  if (groupKey !== null && groupKey !== '') {
+    const groupRows = await db.all<RawProgressRow>(
+      `${PROGRESS_SELECT} WHERE profile_id = ? AND version_group_key = ? ORDER BY updated_at DESC, item_key ASC LIMIT 1`,
+      [normalizedProfile, groupKey],
+    );
+    const latest = groupRows[0];
+    if (latest !== undefined && (direct === undefined || latest.updated_at >= direct.updated_at)) {
+      return mapProgressRow(latest);
+    }
+  }
+  return direct === undefined ? null : mapProgressRow(direct);
 }
 
 /**
  * Lists in-progress, unwatched items with known positive duration (`duration_ms > 0`) at or above
- * {@link MIN_RESUME_POSITION_MS}, deduplicated per series, most recent first.
+ * {@link MIN_RESUME_POSITION_MS}, deduplicated per series and per movie `version_group_key` (`#404`), most recent first.
  */
 export async function listContinueWatching(
   db: SqlDriver,
@@ -234,7 +319,7 @@ export async function listContinueWatching(
   if (clamped === 0) return [];
   const rows = await db.all<RawProgressRow>(
     `SELECT ${PROGRESS_COLS} FROM (
-       SELECT ${PROGRESS_COLS}, ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(series_key, ''), item_key) ORDER BY updated_at DESC, item_key ASC) AS rn
+       SELECT ${PROGRESS_COLS}, ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(series_key, ''), NULLIF(version_group_key, ''), item_key) ORDER BY updated_at DESC, item_key ASC) AS rn
          FROM watch_progress WHERE profile_id = ? AND watched = 0 AND position_ms >= ? AND duration_ms > 0
      ) WHERE rn = 1 ORDER BY updated_at DESC, item_key ASC LIMIT ?`,
     [normalizeProfileId(profileId), MIN_RESUME_POSITION_MS, clamped],
@@ -242,7 +327,7 @@ export async function listContinueWatching(
   return rows.map(mapProgressRow);
 }
 
-/** Fetches watch progress rows for up to 200 distinct item keys in one indexed lookup. */
+/** Fetches watch progress rows for up to 200 distinct item keys in one indexed lookup, including cross-version movie progress (`#404`). */
 export async function listProgressByKeys(
   db: SqlDriver,
   itemKeys: readonly string[],
@@ -257,24 +342,64 @@ export async function listProgressByKeys(
     if (unique.length >= MAX_PROGRESS_KEYS) break;
   }
   if (unique.length === 0) return [];
+  const normalizedProfile = normalizeProfileId(profileId);
   const placeholders = unique.map(() => '?').join(', ');
-  const rows = await db.all<RawProgressRow>(
+  const directRows = await db.all<RawProgressRow>(
     `${PROGRESS_SELECT} WHERE profile_id = ? AND item_key IN (${placeholders})`,
-    [normalizeProfileId(profileId), ...unique],
+    [normalizedProfile, ...unique],
   );
-  return rows.map(mapProgressRow);
+  const byKey = new Map<string, WatchProgressRow>();
+  for (const r of directRows) byKey.set(r.item_key, mapProgressRow(r));
+
+  const missing = unique.filter((k) => !byKey.has(k));
+  if (missing.length > 0) {
+    const mPlaceholders = missing.map(() => '?').join(', ');
+    const movieGroups = await db.all<{ key: string; version_group_key: string }>(
+      `SELECT key, version_group_key FROM movies WHERE key IN (${mPlaceholders}) AND version_group_key != ''`,
+      missing,
+    );
+    const groupIds = [...new Set(movieGroups.map((m) => m.version_group_key))];
+    if (groupIds.length > 0) {
+      const gPlaceholders = groupIds.map(() => '?').join(', ');
+      const groupRows = await db.all<RawProgressRow>(
+        `${PROGRESS_SELECT} WHERE profile_id = ? AND version_group_key IN (${gPlaceholders}) ORDER BY updated_at DESC`,
+        [normalizedProfile, ...groupIds],
+      );
+      const latestByGroup = new Map<string, WatchProgressRow>();
+      for (const r of groupRows) {
+        if (r.version_group_key && !latestByGroup.has(r.version_group_key)) {
+          latestByGroup.set(r.version_group_key, mapProgressRow(r));
+        }
+      }
+      for (const m of movieGroups) {
+        const synced = latestByGroup.get(m.version_group_key);
+        if (synced !== undefined && !byKey.has(m.key)) {
+          byKey.set(m.key, { ...synced, itemKey: m.key });
+        }
+      }
+    }
+  }
+  return [...byKey.values()];
 }
 
-/** Deletes a watch progress row for `(profileId, itemKey)`. */
+/** Deletes a watch progress row for `(profileId, itemKey)` and any synced sibling versions in its `version_group_key` (`#404`). */
 export async function clearWatchProgress(
   db: SqlDriver,
   itemKey: string,
   profileId: string = DEFAULT_PROFILE_ID,
 ): Promise<Result<void>> {
+  const normalizedProfile = normalizeProfileId(profileId);
+  const versionGroupKey = await lookupMovieVersionGroupKey(db, itemKey);
   await db.run('DELETE FROM watch_progress WHERE profile_id = ? AND item_key = ?', [
-    normalizeProfileId(profileId),
+    normalizedProfile,
     itemKey,
   ]);
+  if (versionGroupKey !== null) {
+    await db.run('DELETE FROM watch_progress WHERE profile_id = ? AND version_group_key = ?', [
+      normalizedProfile,
+      versionGroupKey,
+    ]);
+  }
   return ok(undefined);
 }
 

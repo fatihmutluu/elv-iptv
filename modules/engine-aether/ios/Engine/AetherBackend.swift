@@ -25,6 +25,7 @@ final class AetherBackend: PlayerBackend {
 
   let gate: ConnectionGate
   let httpSession: EngineHttpSession
+  var legacyHttpSession: EngineHttpSession?
 
   var engine: AetherEngine?
   var cancellables = Set<AnyCancellable>()
@@ -279,6 +280,8 @@ final class AetherBackend: PlayerBackend {
     avPlayerBufferCancellables.removeAll()
     audioSessionObserver?.dispose()
     audioSessionObserver = nil
+    legacyHttpSession?.dispose()
+    legacyHttpSession = nil
 
     if let previous = engine {
       previous.stop(resetDisplayCriteria: true, finalTeardown: true)

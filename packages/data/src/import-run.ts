@@ -7,7 +7,14 @@ import {
   type ImportProgress,
   type ImportSummary,
 } from './import-types';
-import { emptiedKinds, finishRun, removeStale, sourceExists, startRun } from './runs';
+import {
+  type CatalogKind,
+  emptiedKinds,
+  finishRun,
+  removeStale,
+  sourceExists,
+  startRun,
+} from './runs';
 import { purgeSourceRows, type SourceRecord } from './sources';
 
 const SOURCE_REMOVED = elvError('storage', 'source-removed');
@@ -50,6 +57,8 @@ export interface RunCtx {
   warningCodes: string[];
   /** Tables whose stale rows a guide run keeps; `beforeCleanup` adds to it when it keeps the previous guide. */
   keepTables: Set<string>;
+  /** Kinds where the user intentionally selected 0 categories, skipping `emptiedKinds` preservation (`#39`). */
+  intentionallyEmptyKinds: Set<CatalogKind>;
   /** Set by `execute` when HTTP 304 Not Modified kept all previously stored rows without rewriting. */
   unchanged: boolean;
 }
@@ -129,6 +138,7 @@ export async function performRun(
     warnings: 0,
     warningCodes: [],
     keepTables: new Set(),
+    intentionallyEmptyKinds: new Set(),
     unchanged: false,
   };
   let removed: number;
@@ -165,7 +175,7 @@ export async function performRun(
       if (c.unchanged) {
         stale = {};
       } else if ((steps.kind ?? 'catalog') === 'catalog') {
-        const keep = await emptiedKinds(tx, source.id, runId, counts);
+        const keep = await emptiedKinds(tx, source.id, runId, counts, c.intentionallyEmptyKinds);
         for (const kind of keep) warn(c, `catalog/kind-empty-${kind}`);
         stale = await commitStagedCatalog(tx, source.id, runId, keep);
         await tx.run(DROP_STALE_MAPPINGS, [source.id, source.id]);

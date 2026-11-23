@@ -9,14 +9,19 @@ import {
   type ItemRow,
   isCompletedProgress,
   type LinkSourceInput,
+  type LiveVariantOption,
+  type LocalM3uSourceInput,
   MAX_SEARCH_LIMIT,
   MAX_SEARCH_TOKENS,
   MIN_RESUME_POSITION_MS,
+  parseLiveVariant,
+  parseVodVersion,
   type SaveProgressInput,
   type SearchOptions,
   type SearchResults,
   type SourceRow,
   type ToggleFavoriteInput,
+  type VodVersionOption,
   type WatchProgressRow,
 } from '@elv/data';
 import { elvError, err, ok } from '@elv/domain';
@@ -132,6 +137,12 @@ export function createWorkbenchCatalog(): CatalogService {
         needsImport: true,
         lastCatalogSyncAt: null,
         lastGuideSyncAt: null,
+        ...(typeof input.xmltvTimezone === 'string' && input.xmltvTimezone.trim() !== ''
+          ? { xmltvTimezone: input.xmltvTimezone.trim() }
+          : {}),
+        ...(typeof input.transport?.allowLegacyTls === 'boolean'
+          ? { allowLegacyTls: input.transport.allowLegacyTls }
+          : {}),
       };
       sources.push(row);
       return ok(row);
@@ -148,6 +159,58 @@ export function createWorkbenchCatalog(): CatalogService {
       };
       sources.push(row);
       return ok(row);
+    },
+    async addLocalM3uSource(input: LocalM3uSourceInput) {
+      const row: SourceRow = {
+        id: `wb-src-${nextId++}`,
+        kind: 'm3u',
+        name: input.name?.trim() || 'Local Playlist',
+        createdAt: Date.now(),
+        needsImport: true,
+        lastCatalogSyncAt: null,
+        lastGuideSyncAt: null,
+        isLocalPlaylist: true,
+        ...(typeof input.xmltvTimezone === 'string' && input.xmltvTimezone.trim() !== ''
+          ? { xmltvTimezone: input.xmltvTimezone.trim() }
+          : {}),
+        ...(typeof input.transport?.allowLegacyTls === 'boolean'
+          ? { allowLegacyTls: input.transport.allowLegacyTls }
+          : {}),
+      };
+      sources.push(row);
+      return ok(row);
+    },
+    async discoverSourceCategories(sourceId: string) {
+      if (!sources.some((s) => s.id === sourceId)) {
+        return err(elvError('storage', 'not-found', `Unknown source ${sourceId}`));
+      }
+      return ok(
+        WORKBENCH_CATEGORIES.map((c) => ({
+          id: c.id.split('|').slice(2).join('|') || c.id,
+          name: c.name,
+          kind: c.kind,
+          itemCount: c.itemCount,
+        })),
+      );
+    },
+    async updateSourceSettings(sourceId, patch) {
+      const idx = sources.findIndex((s) => s.id === sourceId);
+      if (idx < 0) return;
+      const prev = sources[idx];
+      if (!prev) return;
+      const next: SourceRow = {
+        ...prev,
+        ...('categorySelection' in patch ? { categorySelection: patch.categorySelection } : {}),
+        ...('xmltvTimezone' in patch
+          ? typeof patch.xmltvTimezone === 'string' && patch.xmltvTimezone.trim() !== ''
+            ? { xmltvTimezone: patch.xmltvTimezone.trim() }
+            : { xmltvTimezone: undefined }
+          : {}),
+        ...(patch.transport !== undefined && 'allowLegacyTls' in patch.transport
+          ? { allowLegacyTls: patch.transport.allowLegacyTls }
+          : {}),
+      };
+      sources[idx] = next;
     },
     async removeSource(id: string) {
       const idx = sources.findIndex((s) => s.id === id);
@@ -202,6 +265,33 @@ export function createWorkbenchCatalog(): CatalogService {
       const all = WORKBENCH_ITEMS_BY_CATEGORY[`${DEMO_SOURCE_ID}|${rest.join('|')}`] ?? [];
       const start = Math.max(0, offset);
       return all.slice(start, start + Math.max(0, limit)).map((i) => ({ ...i, sourceId }));
+    },
+    async liveVariants(itemKey: string): Promise<readonly LiveVariantOption[]> {
+      const found = WORKBENCH_ITEMS_BY_KEY.get(itemKey);
+      if (found?.kind !== 'live') return [];
+      const parsed = parseLiveVariant(found.name);
+      return [
+        {
+          key: found.key,
+          title: found.name,
+          qualityLabel: parsed.qualityLabel,
+          qualityRank: parsed.qualityRank,
+        },
+      ];
+    },
+    async itemVersions(itemKey: string): Promise<readonly VodVersionOption[]> {
+      const found = WORKBENCH_ITEMS_BY_KEY.get(itemKey);
+      if (found?.kind !== 'movie') return [];
+      const parsed = parseVodVersion(found.name, found.year);
+      return [
+        {
+          key: found.key,
+          title: found.name,
+          versionLabel: parsed.versionLabel,
+          year: found.year,
+          qualityRank: parsed.qualityRank,
+        },
+      ];
     },
     async itemDetail(itemKey: string): Promise<ItemDetailRow | null> {
       const found = WORKBENCH_ITEMS_BY_KEY.get(itemKey);

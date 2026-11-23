@@ -1,4 +1,4 @@
-import type { ItemRow } from '@elv/data';
+import type { ItemRow, LiveVariantOption } from '@elv/data';
 import type { AndroidDecoderMode, DefaultResizeModePref } from '@elv/domain';
 import { type AppI18n, resolveLanguageLabel } from '@elv/i18n';
 import {
@@ -153,6 +153,7 @@ export interface PlayerOverlayStateParams {
   hasAudioDevice?: boolean | undefined;
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
+  qualityVariants?: readonly LiveVariantOption[] | undefined;
   hasVideoDecoder?: boolean | undefined;
   androidDecoderMode?: AndroidDecoderMode | undefined;
   chapters?: readonly ChapterInfo[] | undefined;

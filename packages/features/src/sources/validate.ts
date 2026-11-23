@@ -1,6 +1,12 @@
-import { type AddSourceInput, type LinkSourceInput, parseXtreamLink } from '@elv/data';
+import {
+  type AddSourceInput,
+  type LinkSourceInput,
+  type LocalM3uSourceInput,
+  parseXtreamLink,
+} from '@elv/data';
 import { err, ok, type Result, type TransportSettings } from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
+import type { PickedPlaylistFile } from '../ports/source-import-host';
 
 /** Controlled state of the add-source form across Xtream and M3U modes. */
 export interface SourceFormState {
@@ -15,6 +21,12 @@ export interface SourceFormState {
   guideUrl: string;
   userAgent: string;
   referer: string;
+  /** Optional local playlist file selected via platform picker (`#51`). */
+  localFile?: PickedPlaylistFile | null;
+  /** Optional IANA timezone for offset-less XMLTV timestamps (`#182`). */
+  xmltvTimezone?: string;
+  /** Opt-in legacy TLS (TLS 1.0/1.1) compatibility for older endpoints (`#182`). */
+  allowLegacyTls?: boolean;
 }
 
 /** Pre-import validation failure codes. */
@@ -26,6 +38,7 @@ export type SourceValidationCode =
   | 'unsupported-scheme'
   | 'invalid-address'
   | 'invalid-guide-url'
+  | 'invalid-timezone'
   | 'invalid-characters'
   | 'm3u-in-xtream';
 
@@ -36,10 +49,16 @@ export interface SourceValidationError {
   readonly hintId: MessageId;
 }
 
-/** Normalized submission payload ready for `CatalogService.addSource` or `addSourceFromLink`. */
+/** Normalized submission payload ready for `CatalogService.addSource`, `addSourceFromLink`, or `addLocalM3uSource`. */
 export type ValidatedSourceSubmission =
   | { readonly kind: 'xtream'; readonly input: AddSourceInput & { kind: 'xtream' } }
-  | { readonly kind: 'link'; readonly input: LinkSourceInput; readonly detectedXtream: boolean };
+  | {
+      readonly kind: 'link';
+      readonly input: LinkSourceInput;
+      readonly detectedXtream: boolean;
+      readonly xmltvTimezone?: string;
+    }
+  | { readonly kind: 'local-m3u'; readonly input: LocalM3uSourceInput };
 
 const VALIDATION_MESSAGES: Readonly<
   Record<SourceValidationCode, { messageId: MessageId; hintId: MessageId }>
@@ -71,6 +90,10 @@ const VALIDATION_MESSAGES: Readonly<
   'invalid-guide-url': {
     messageId: 'source.validation.invalidGuideUrl',
     hintId: 'source.hint.invalidGuideUrl',
+  },
+  'invalid-timezone': {
+    messageId: 'sources.xmltvTimezoneLabel',
+    hintId: 'sources.xmltvTimezoneHint',
   },
   'invalid-characters': {
     messageId: 'source.validation.invalidCharacters',
@@ -155,12 +178,27 @@ function buildTransport(
   userAgent: string,
   referer: string,
   xtreamFormat: 'ts' | 'm3u8' | undefined,
+  allowLegacyTls: boolean,
 ): TransportSettings | undefined {
-  const transport: TransportSettings = {};
-  if (userAgent !== '') transport.userAgent = userAgent;
-  if (referer !== '') transport.referer = referer;
-  if (xtreamFormat !== undefined) transport.xtreamFormat = xtreamFormat;
+  const transport: TransportSettings = {
+    ...(userAgent !== '' ? { userAgent } : {}),
+    ...(referer !== '' ? { referer } : {}),
+    ...(xtreamFormat !== undefined ? { xtreamFormat } : {}),
+    ...(allowLegacyTls ? { allowLegacyTls: true } : {}),
+  };
   return Object.keys(transport).length > 0 ? transport : undefined;
+}
+
+/** Validates whether `tz` is a recognized IANA timezone identifier via `Intl.DateTimeFormat` (`#182`). */
+export function isValidIanaTimeZone(tz: string): boolean {
+  const trimmed = tz.trim();
+  if (trimmed === '') return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: trimmed });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Creates a blank initial form state defaulting to Xtream mode. */
@@ -177,6 +215,9 @@ export function createInitialSourceForm(): SourceFormState {
     guideUrl: '',
     userAgent: '',
     referer: '',
+    localFile: null,
+    xmltvTimezone: '',
+    allowLegacyTls: false,
   };
 }
 
@@ -189,7 +230,11 @@ export function detectPastedXtreamLink(url: string): boolean {
 /** Validates user-entered source form fields before touching the network or secret store. */
 export function validateSourceForm(
   form: SourceFormState,
+  opts?: { readonly defaultLocalPlaylistName?: string },
 ): Result<ValidatedSourceSubmission, SourceValidationError> {
+  const xmltvTimezoneRaw = (form.xmltvTimezone ?? '').trim();
+  const allowLegacyTls = form.allowLegacyTls === true;
+  const localFile = form.localFile ?? null;
   const fields = [
     form.name,
     form.server,
@@ -199,9 +244,14 @@ export function validateSourceForm(
     form.guideUrl,
     form.userAgent,
     form.referer,
+    form.xmltvTimezone ?? '',
   ];
   if (fields.some(hasControlChars)) {
     return fail('invalid-characters');
+  }
+
+  if (xmltvTimezoneRaw !== '' && !isValidIanaTimeZone(xmltvTimezoneRaw)) {
+    return fail('invalid-timezone');
   }
 
   const guideRaw = form.guideUrl.trim();
@@ -230,7 +280,7 @@ export function validateSourceForm(
       const username = form.username.trim() || pasted.username;
       const password = form.password.trim() || pasted.password;
       const format = explicitFormat ?? pasted.output;
-      const transport = buildTransport(userAgent, refererRaw, format);
+      const transport = buildTransport(userAgent, refererRaw, format, allowLegacyTls);
       const name = form.name.trim() || new URL(pasted.server).host;
       return ok({
         kind: 'xtream',
@@ -242,6 +292,7 @@ export function validateSourceForm(
           password,
           ...(guideRaw !== '' ? { guideUrl: guideRaw } : {}),
           ...(transport !== undefined ? { transport } : {}),
+          ...(xmltvTimezoneRaw !== '' ? { xmltvTimezone: xmltvTimezoneRaw } : {}),
         },
       });
     }
@@ -258,7 +309,7 @@ export function validateSourceForm(
 
     const normalizedServer = normalizeServerBase(serverRaw);
     const name = form.name.trim() || new URL(normalizedServer).host;
-    const transport = buildTransport(userAgent, refererRaw, explicitFormat);
+    const transport = buildTransport(userAgent, refererRaw, explicitFormat, allowLegacyTls);
     return ok({
       kind: 'xtream',
       input: {
@@ -269,6 +320,24 @@ export function validateSourceForm(
         password,
         ...(guideRaw !== '' ? { guideUrl: guideRaw } : {}),
         ...(transport !== undefined ? { transport } : {}),
+        ...(xmltvTimezoneRaw !== '' ? { xmltvTimezone: xmltvTimezoneRaw } : {}),
+      },
+    });
+  }
+
+  if (localFile !== null && localFile.bytes.byteLength > 0) {
+    const strippedFileName = localFile.name.replace(/\.(?:m3u8?|gz)$/i, '').trim();
+    const fallbackName = opts?.defaultLocalPlaylistName?.trim() || 'M3U';
+    const name = form.name.trim() || strippedFileName || fallbackName;
+    const transport = buildTransport(userAgent, refererRaw, explicitFormat, allowLegacyTls);
+    return ok({
+      kind: 'local-m3u',
+      input: {
+        name,
+        bytes: localFile.bytes,
+        ...(guideRaw !== '' ? { guideUrl: guideRaw } : {}),
+        ...(transport !== undefined ? { transport } : {}),
+        ...(xmltvTimezoneRaw !== '' ? { xmltvTimezone: xmltvTimezoneRaw } : {}),
       },
     });
   }
@@ -280,10 +349,11 @@ export function validateSourceForm(
 
   const detectedXtream = !form.keepAsM3u && parseXtreamLink(urlRaw) !== undefined;
   const name = form.name.trim() || parsedPlaylist.value.host;
-  const transport = buildTransport(userAgent, refererRaw, explicitFormat);
+  const transport = buildTransport(userAgent, refererRaw, explicitFormat, allowLegacyTls);
   return ok({
     kind: 'link',
     detectedXtream,
+    ...(xmltvTimezoneRaw !== '' ? { xmltvTimezone: xmltvTimezoneRaw } : {}),
     input: {
       name,
       url: urlRaw,

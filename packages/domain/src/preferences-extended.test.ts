@@ -237,6 +237,8 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       confirmExitOnBack: false,
       preferredAudioDevice: 'wasapi/{0.0.0.00000000}.{11111111-2222-3333-4444-555555555555}',
       androidDecoderMode: 'hardware',
+      collapseLiveVariants: true,
+      groupVodVersions: false,
     };
 
     const encoded = serializePreferences(full);

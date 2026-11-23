@@ -1,5 +1,5 @@
 import { createMemoryPreferencesStore } from '@elv/domain';
-import { AppProviders, AppShell } from '@elv/features';
+import { AppProviders, AppShell, type AppShellProps, type SourceImportHost } from '@elv/features';
 import { type AppLocale, createAppI18n, resolveLocale } from '@elv/i18n';
 import {
   ErrorBoundary,
@@ -162,26 +162,81 @@ export function WorkbenchShell(): ReactElement {
         paddingY: 44,
       });
 
+  const workbenchSourceImportHost = useMemo<SourceImportHost>(
+    () => ({
+      async readClipboardText() {
+        try {
+          const text = await navigator.clipboard?.readText?.();
+          return typeof text === 'string' && text.length > 0 ? text : null;
+        } catch {
+          return null;
+        }
+      },
+      pickPlaylistFile() {
+        if (typeof document === 'undefined') return Promise.resolve(null);
+        return new Promise((resolve) => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = '.m3u,.m3u8,.gz,.txt';
+          let settled = false;
+          const finish = (value: { name: string; bytes: Uint8Array } | null) => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+          };
+          input.addEventListener(
+            'change',
+            () => {
+              const file = input.files?.[0];
+              if (!file) {
+                finish(null);
+                return;
+              }
+              void file
+                .arrayBuffer()
+                .then((buf) => finish({ name: file.name, bytes: new Uint8Array(buf) }))
+                .catch(() => finish(null));
+            },
+            { once: true },
+          );
+          input.addEventListener('cancel', () => finish(null), { once: true });
+          input.click();
+        });
+      },
+    }),
+    [],
+  );
+
   const renderAppStage = (): ReactElement => {
     if (dataMode === 'demo') {
+      const demoShellProps: AppShellProps & { sourceImportHost?: SourceImportHost } = {
+        catalog: demoCatalog,
+        videoHost,
+        sourceImportHost: workbenchSourceImportHost,
+      };
       return (
         <AppProviders
           preferencesStore={preferencesStore}
           systemLocale="en"
           viewport={device.viewport}
         >
-          <AppShell key="demo" catalog={demoCatalog} videoHost={videoHost} />
+          <AppShell key="demo" {...demoShellProps} />
         </AppProviders>
       );
     }
     if (bridgeStatus === 'ready' && liveCatalog !== null) {
+      const liveShellProps: AppShellProps & { sourceImportHost?: SourceImportHost } = {
+        catalog: liveCatalog,
+        videoHost,
+        sourceImportHost: workbenchSourceImportHost,
+      };
       return (
         <AppProviders
           preferencesStore={preferencesStore}
           systemLocale="en"
           viewport={device.viewport}
         >
-          <AppShell key="live" catalog={liveCatalog} videoHost={videoHost} />
+          <AppShell key="live" {...liveShellProps} />
         </AppProviders>
       );
     }

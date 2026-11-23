@@ -10,6 +10,7 @@ import java.net.ServerSocket
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit.SECONDS
 import kotlin.concurrent.thread
+import okhttp3.ConnectionSpec
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import org.junit.After
@@ -527,5 +528,19 @@ class StreamHttpTest {
       jar,
     )
     assertNull("Secure cookie leaked on https->http downgrade", downgradeHop.header("Cookie"))
+  }
+
+  @Test
+  fun `default engineHttpClient enforces MODERN_TLS while opt-in legacyTlsClient uses COMPATIBLE_TLS without mutating base (#182)`() {
+    val defaultClient = engineHttpClient()
+    val legacyDerived = legacyTlsClient(defaultClient)
+    val legacyDirect = engineHttpClient(allowLegacyTls = true)
+
+    assertEquals(listOf(ConnectionSpec.MODERN_TLS, ConnectionSpec.CLEARTEXT), defaultClient.connectionSpecs)
+    assertEquals(listOf(ConnectionSpec.COMPATIBLE_TLS, ConnectionSpec.CLEARTEXT), legacyDerived.connectionSpecs)
+    assertEquals(listOf(ConnectionSpec.COMPATIBLE_TLS, ConnectionSpec.CLEARTEXT), legacyDirect.connectionSpecs)
+    assertSame(defaultClient.dispatcher, legacyDerived.dispatcher)
+    assertSame(defaultClient.hostnameVerifier, legacyDerived.hostnameVerifier)
+    assertSame(defaultClient.sslSocketFactory, legacyDerived.sslSocketFactory)
   }
 }

@@ -1,7 +1,9 @@
 import type {
   AddSourceInput,
   BrowseKind,
+  CategoryQueryOptions,
   CategoryRow,
+  DiscoveredCategory,
   EpisodeRow,
   FavoriteRow,
   ImportProgress,
@@ -10,6 +12,8 @@ import type {
   ItemRow,
   LinkSourceInput,
   ListItemsOptions,
+  LiveVariantOption,
+  LocalM3uSourceInput,
   NextEpisodeRow,
   NowNextEntry,
   PersistedTrackPreference,
@@ -21,14 +25,17 @@ import type {
   SeasonRow,
   SeriesUnplayedSummary,
   SourceRow,
+  SourceSettings,
   StreamRequest,
   ToggleFavoriteInput,
+  VodVersionOption,
   WatchProgressRow,
 } from '@elv/data';
 import type { ElvError, Result } from '@elv/domain';
 import {
   isAddSourceInput,
   isBoundedString,
+  isCategoryQueryOptions,
   isCleanKey,
   isElvError,
   isEpgWindowKeyList,
@@ -37,6 +44,7 @@ import {
   isItemKeyList,
   isLinkSourceInput,
   isListItemsOptions,
+  isLocalM3uSourceInput,
   isNonNegativeFinite,
   isNowNextKeyList,
   isOptionalProfileId,
@@ -52,6 +60,7 @@ import {
   isSearchQuery,
   isSeriesKeyList,
   isSourceIdList,
+  isSourceSettingsPatch,
   isToggleFavoriteInput,
   MAX_ID_CHARS,
   MAX_ITEM_KEY_CHARS,
@@ -85,6 +94,9 @@ export type CatalogRpcMethodCall =
   | { method: 'ping' }
   | { method: 'addSource'; input: AddSourceInput }
   | { method: 'addSourceFromLink'; input: LinkSourceInput }
+  | { method: 'addLocalM3uSource'; input: LocalM3uSourceInput }
+  | { method: 'discoverSourceCategories'; sourceId: string }
+  | { method: 'updateSourceSettings'; sourceId: string; patch: Partial<SourceSettings> }
   | { method: 'removeSource'; id: string }
   | {
       method: 'importSource';
@@ -95,7 +107,7 @@ export type CatalogRpcMethodCall =
     }
   | { method: 'importGuide'; id: string }
   | { method: 'listSources' }
-  | { method: 'categories'; sourceId: string; kind: BrowseKind }
+  | { method: 'categories'; sourceId: string; kind: BrowseKind; opts?: CategoryQueryOptions }
   | {
       method: 'items';
       categoryId: string;
@@ -103,6 +115,8 @@ export type CatalogRpcMethodCall =
       limit: number;
       opts?: ListItemsOptions;
     }
+  | { method: 'liveVariants'; itemKey: string; categoryId?: string }
+  | { method: 'itemVersions'; itemKey: string }
   | {
       method: 'allSourcesItems';
       kind: BrowseKind;
@@ -166,18 +180,27 @@ export interface CatalogBridge {
   open(): Promise<Result<void>>;
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
+  addLocalM3uSource?(input: LocalM3uSourceInput): Promise<Result<SourceRow>>;
+  discoverSourceCategories?(sourceId: string): Promise<Result<readonly DiscoveredCategory[]>>;
+  updateSourceSettings?(sourceId: string, patch: Partial<SourceSettings>): Promise<void>;
   removeSource(id: string): Promise<Result<void>>;
   startImport(id: string, opts?: CatalogBridgeImportOptions): CatalogImportHandle;
   cancelImport(reqId: number): void;
   importGuide(id: string): Promise<Result<ImportSummary>>;
   listSources(): Promise<SourceRow[]>;
-  categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
+  categories(
+    sourceId: string,
+    kind: BrowseKind,
+    opts?: CategoryQueryOptions,
+  ): Promise<CategoryRow[]>;
   items(
     categoryId: string,
     offset: number,
     limit: number,
     opts?: ListItemsOptions,
   ): Promise<ItemRow[]>;
+  liveVariants?(itemKey: string, categoryId?: string): Promise<readonly LiveVariantOption[]>;
+  itemVersions?(itemKey: string): Promise<readonly VodVersionOption[]>;
   allSourcesItems?(
     kind: BrowseKind,
     offset: number,
@@ -240,6 +263,12 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isAddSourceInput(x['input']);
     case 'addSourceFromLink':
       return isLinkSourceInput(x['input']);
+    case 'addLocalM3uSource':
+      return isLocalM3uSourceInput(x['input']);
+    case 'discoverSourceCategories':
+      return isCleanKey(x['sourceId'], MAX_ID_CHARS);
+    case 'updateSourceSettings':
+      return isCleanKey(x['sourceId'], MAX_ID_CHARS) && isSourceSettingsPatch(x['patch']);
     case 'removeSource':
       return isBoundedString(x['id'], 0, MAX_ID_CHARS);
     case 'importSource':
@@ -254,7 +283,8 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
     case 'categories':
       return (
         isBoundedString(x['sourceId'], 0, MAX_ID_CHARS) &&
-        (x['kind'] === 'live' || x['kind'] === 'movie' || x['kind'] === 'series')
+        (x['kind'] === 'live' || x['kind'] === 'movie' || x['kind'] === 'series') &&
+        (x['opts'] === undefined || isCategoryQueryOptions(x['opts']))
       );
     case 'items':
       return (
@@ -263,6 +293,13 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isFiniteNumber(x['limit']) &&
         (x['opts'] === undefined || isListItemsOptions(x['opts']))
       );
+    case 'liveVariants':
+      return (
+        isCleanKey(x['itemKey']) &&
+        (x['categoryId'] === undefined || isCleanKey(x['categoryId'], 512))
+      );
+    case 'itemVersions':
+      return isCleanKey(x['itemKey']);
     case 'allSourcesItems':
       return (
         (x['kind'] === 'live' || x['kind'] === 'movie' || x['kind'] === 'series') &&

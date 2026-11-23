@@ -1,3 +1,4 @@
+import type { LiveVariantOption } from '@elv/data';
 import type { AndroidDecoderMode, OsdTimeDisplayMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { ChapterInfo, MediaTracks } from '@elv/playback';
@@ -41,6 +42,8 @@ export interface PlayerSettingsSheetProps {
   readonly sleepTimer?: SleepTimerSnapshot | undefined;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
+  readonly qualityVariants?: readonly LiveVariantOption[];
+  readonly activeQualityKey?: string;
   readonly androidDecoderMode?: AndroidDecoderMode;
   readonly isTv: boolean;
   readonly formFactor: FormFactor;
@@ -48,6 +51,7 @@ export interface PlayerSettingsSheetProps {
   readonly onOpenView: (view: SettingsMenuView) => void;
   readonly onSelectAudio: (id: string) => void;
   readonly onSelectAudioDevice?: (name: string) => void;
+  readonly onSelectQualityVariant?: (itemKey: string) => void;
   readonly onSelectSubtitle: (id: string | null) => void;
   readonly onSelectSpeed?: (rate: number) => void;
   readonly onSelectChapter?: (startMs: number) => void;
@@ -84,6 +88,8 @@ function resolveViewTitle(view: SettingsMenuView, i18n: AppI18n): string {
       return i18n.t('player.subtitleTracks');
     case 'audioDevice':
       return i18n.t('player.audioDevice');
+    case 'quality':
+      return i18n.t('player.qualityVariant');
     case 'speed':
       return i18n.t('player.speed');
     case 'chapters':
@@ -150,7 +156,13 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
           activeDevice: activeAudioDevice,
         },
         { show: showVideoDecoder, mode: androidDecoderMode },
-        { chapters: props.chapters, showSleepTimer, sleepTimer: props.sleepTimer },
+        {
+          chapters: props.chapters,
+          showSleepTimer,
+          sleepTimer: props.sleepTimer,
+          qualityVariants: props.qualityVariants,
+          activeQualityKey: props.activeQualityKey,
+        },
       )
     : [];
 
@@ -280,12 +292,15 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         playbackSpeed,
         audioDevices: props.audioDevices,
         activeAudioDevice,
+        qualityVariants: props.qualityVariants,
+        activeQualityKey: props.activeQualityKey,
         androidDecoderMode,
         chapters: props.chapters,
         sleepTimer: props.sleepTimer,
         i18n,
         onSelectAudio: props.onSelectAudio,
         onSelectAudioDevice: props.onSelectAudioDevice,
+        onSelectQualityVariant: props.onSelectQualityVariant,
         onSelectSubtitle: props.onSelectSubtitle,
         onSelectSpeed: props.onSelectSpeed,
         onSelectChapter: props.onSelectChapter,

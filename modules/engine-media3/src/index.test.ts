@@ -55,6 +55,11 @@ function fakeNative() {
   const applyShortEdgesCutoutMode = vi.fn();
   const getSafeAreaInsets = vi.fn(() => ({ top: 32, right: 0, bottom: 16, left: 0 }));
   const enterPictureInPicture = vi.fn(() => true);
+  const readClipboardText = vi.fn(async () => 'https://example.test/list.m3u');
+  const pickPlaylistFile = vi.fn(async () => ({
+    name: 'channels.m3u',
+    base64: 'I0VYVE0zVQ==',
+  }));
   const addListener = vi.fn((eventName: string, listener: (payload: unknown) => void) => {
     let set = moduleListeners.get(eventName);
     if (set === undefined) {
@@ -77,6 +82,8 @@ function fakeNative() {
     applyShortEdgesCutoutMode,
     getSafeAreaInsets,
     enterPictureInPicture,
+    readClipboardText,
+    pickPlaylistFile,
     addListener,
   });
   const emit = (event: EngineEvent) => {
@@ -95,6 +102,8 @@ function fakeNative() {
     applyShortEdgesCutoutMode,
     getSafeAreaInsets,
     enterPictureInPicture,
+    readClipboardText,
+    pickPlaylistFile,
     addListener,
     remove,
     moduleRemove,
@@ -318,5 +327,41 @@ describe('Media3Surface', () => {
     expect(Media3Surface({ engine: foreign })).toBeNull();
     engine.release();
     expect(Media3Surface({ engine })).toBeNull();
+  });
+
+  it('forwards allowLegacyTls through load and exposes clipboard + SAF playlist file helpers (#51, #182)', async () => {
+    const native = fakeNative();
+    const mod = await load();
+    const engine = mod.createMedia3Engine();
+    engine?.load({
+      attempt: 1,
+      url: 'https://legacy.example/live.ts',
+      headers: {},
+      kind: 'live',
+      options: { allowLegacyTls: true },
+    });
+    expect(native.engine.load).toHaveBeenCalledWith({
+      attempt: 1,
+      url: 'https://legacy.example/live.ts',
+      headers: {},
+      kind: 'live',
+      allowLegacyTls: true,
+    });
+
+    expect(await mod.readAndroidClipboardText()).toBe('https://example.test/list.m3u');
+    const picked = await mod.pickAndroidPlaylistFile();
+    expect(picked?.name).toBe('channels.m3u');
+    expect(Array.from(picked?.bytes ?? [])).toEqual([35, 69, 88, 84, 77, 51, 85]);
+
+    native.pickPlaylistFile.mockResolvedValueOnce(null as never);
+    expect(await mod.pickAndroidPlaylistFile()).toBeNull();
+
+    native.readClipboardText.mockResolvedValueOnce('' as never);
+    expect(await mod.readAndroidClipboardText()).toBeNull();
+
+    requireOptionalNativeModule.mockReturnValue(null);
+    const absent = await load();
+    expect(await absent.readAndroidClipboardText()).toBeNull();
+    expect(await absent.pickAndroidPlaylistFile()).toBeNull();
   });
 });

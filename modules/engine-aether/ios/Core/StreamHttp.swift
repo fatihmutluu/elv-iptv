@@ -448,3 +448,23 @@ public func sanitizeRedirectRequest(
   var state = RedirectScopeState(initialOrigin: origin, callerCookie: request.value(forHTTPHeaderField: "Cookie"))
   return scopeRedirectRequest(request, state: &state, response: response, cookieJar: cookieJar)
 }
+
+/// Builds an ephemeral `URLSessionConfiguration` for stream connections. Keeps Apple's standard modern TLS minimum
+/// protocol version by default, lowering `tlsMinimumSupportedProtocolVersion` to `.TLSv10` ONLY when `allowLegacyTls`
+/// is explicitly opted in for a source (`#182`). Certificate verification is never disabled.
+public func makeStreamSessionConfiguration(allowLegacyTls: Bool = false) -> URLSessionConfiguration {
+  let config = URLSessionConfiguration.ephemeral
+  config.httpMaximumConnectionsPerHost = 1
+  config.urlCache = nil
+  config.requestCachePolicy = .reloadIgnoringLocalCacheData
+  config.httpShouldSetCookies = false
+  config.httpCookieStorage = nil
+  config.timeoutIntervalForRequest = 10
+  config.waitsForConnectivity = false
+  if allowLegacyTls {
+    #if canImport(Darwin)
+    config.tlsMinimumSupportedProtocolVersion = .TLSv10
+    #endif
+  }
+  return config
+}

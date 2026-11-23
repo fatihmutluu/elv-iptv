@@ -22,6 +22,8 @@ export interface HttpRequestOptions {
   idleTimeoutMs?: number;
   /** Redirect handling: default `'follow'` traverses hops manually with cross-origin credential stripping; `'manual'` stops at the first 3xx. */
   redirect?: 'follow' | 'manual';
+  /** Opt-in support for legacy TLS (TLS 1.0/1.1 or older ciphers) scoped strictly to this request (`#182`). */
+  readonly allowLegacyTls?: boolean;
 }
 
 /**

@@ -18,6 +18,7 @@ import {
   createSettingsStore,
   databaseLocation,
 } from '../storage';
+import { createMobileLocalPlaylistStore } from './local-playlist-store';
 
 /**
  * File name of the catalog database: in `Library/Caches` on Apple platforms (tvOS hardware gives apps only purgeable
@@ -90,12 +91,16 @@ async function open(): Promise<CatalogService> {
     const userData = isApple ? createAppleUserDataStore(USER_DATA_KEY) : undefined;
     if (manifest !== undefined) await reconcile(db, manifest);
     if (userData !== undefined) await reconcileAppleUserData(db, userData);
+    const localPlaylistStore = createMobileLocalPlaylistStore(() =>
+      createOpSqliteDriver('local-playlists.db', databaseLocation(Platform.OS)),
+    );
     return createCatalogService({
       db,
       secrets: createSecureSecretStore(),
       scheduler: createMacrotaskScheduler(),
       http: createDeviceHttpClient(),
       clock: Date.now,
+      localPlaylistStore,
       ...(manifest === undefined ? {} : { manifest }),
       ...(userData === undefined ? {} : { userData }),
     });

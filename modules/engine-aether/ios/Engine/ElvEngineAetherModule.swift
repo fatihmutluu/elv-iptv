@@ -31,6 +31,7 @@ struct LoadArgs: Record {
   @Field var softwareAudio: Bool = false
   @Field var preferHevcOverDolbyVision: Bool = false
   @Field var filterSdhSubtitles: Bool = false
+  @Field var allowLegacyTls: Bool = false
   @Field var audioTrackId: String? = nil
   @Field var subtitleTrackId: ValueOrUndefined<String?> = .undefined
 
@@ -58,6 +59,7 @@ struct LoadArgs: Record {
       softwareAudio: softwareAudio,
       preferHevcOverDolbyVision: preferHevcOverDolbyVision,
       filterSdhSubtitles: filterSdhSubtitles,
+      allowLegacyTls: allowLegacyTls,
       audioTrackId: (trimmedAudio?.isEmpty == false) ? trimmedAudio : nil,
       subtitlePreference: subtitlePref
     )
@@ -129,6 +131,25 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
     Function("getSafeAreaInsets") { () -> [String: Double] in
       AppleModuleEventHub.shared.currentSafeAreaInsetsDictionary()
     }
+
+    AsyncFunction("readClipboardText") { () -> String? in
+      MainActor.assumeIsolated {
+        AppleSourceImport.readClipboardText()
+      }
+    }.runOnQueue(.main)
+
+    AsyncFunction("pickPlaylistFile") { (promise: Promise) in
+      MainActor.assumeIsolated {
+        AppleSourceImport.pickPlaylistFile { result in
+          switch result {
+          case let .success(payload):
+            promise.resolve(payload)
+          case let .failure(error):
+            promise.reject("E_PLAYLIST_PICK_FAILED", error.localizedDescription)
+          }
+        }
+      }
+    }.runOnQueue(.main)
 
     OnDestroy {
       AppleModuleEventHub.shared.detach(module: self)

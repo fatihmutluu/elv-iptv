@@ -1676,3 +1676,93 @@ msgstr "Program detayları"
 
 msgid "live.context.hideChannel"
 msgstr "Kanalı gizle"
+
+msgid "sources.pasteClipboard"
+msgstr "Yapıştır"
+
+msgid "sources.chooseLocalFile"
+msgstr "M3U dosyası seç"
+
+msgid "sources.localFileSelected"
+msgstr "Dosya: {name}"
+
+msgid "sources.clearLocalFile"
+msgstr "Dosyayı temizle"
+
+msgid "sources.clipboardEmpty"
+msgstr "Panoda yapıştırılacak metin yok."
+
+msgid "sources.localFileBadge"
+msgstr "Yerel dosya"
+
+msgid "sources.chooseCategories"
+msgstr "Kategorileri seç"
+
+msgid "sources.discoveringCategories"
+msgstr "Kategoriler yükleniyor…"
+
+msgid "sources.categoriesStepTitle"
+msgstr "İçe aktarılacak kategorileri seç"
+
+msgid "sources.categoriesSelectedCount"
+msgstr "{total} kategoriden {selected} seçili"
+
+msgid "sources.selectAllCategories"
+msgstr "Tümünü seç"
+
+msgid "sources.clearCategories"
+msgstr "Hiçbirini seçme"
+
+msgid "sources.importSelected"
+msgstr "Seçilenleri içe aktar"
+
+msgid "sources.pendingCategoriesBanner"
+msgstr "{count} yeni kategori bulundu"
+
+msgid "sources.reviewNewCategories"
+msgstr "İncele"
+
+msgid "sources.dismissNewCategories"
+msgstr "Yoksay"
+
+msgid "sources.includeNewCategories"
+msgstr "Yenileri ekle"
+
+msgid "sources.xmltvTimezoneLabel"
+msgstr "XMLTV saat dilimi (IANA)"
+
+msgid "sources.xmltvTimezonePlaceholder"
+msgstr "Otomatik (ör. Europe/Istanbul)"
+
+msgid "sources.xmltvTimezoneHint"
+msgstr "Yalnızca rehber zaman damgalarında saat dilimi yoksa kullanılır."
+
+msgid "sources.allowLegacyTls"
+msgstr "Eski TLS desteğine izin ver"
+
+msgid "sources.allowLegacyTlsDesc"
+msgstr "Eski yerel alıcılar veya TLS 1.0/1.1 sunucuları için isteğe bağlı uyumluluk."
+
+msgid "settings.liveTv.collapseVariants"
+msgstr "Canlı kalite sürümlerini grupla"
+
+msgid "settings.liveTv.collapseVariantsDesc"
+msgstr "Aynı kategorideki 4K/FHD/HD/SD kanallarını tek satırda topla ve oynatıcıdan değiştir"
+
+msgid "player.qualityVariant"
+msgstr "Yayın kalitesi"
+
+msgid "player.qualityVariantCount"
+msgstr "{count} kalite"
+
+msgid "settings.playback.groupVodVersions"
+msgstr "Çoklu film sürümlerini grupla"
+
+msgid "settings.playback.groupVodVersionsDesc"
+msgstr "Farklı kalite veya dil sürümlerini tek kartta birleştir"
+
+msgid "detail.versionLabel"
+msgstr "Sürüm"
+
+msgid "detail.versionCount"
+msgstr "{count} sürüm"

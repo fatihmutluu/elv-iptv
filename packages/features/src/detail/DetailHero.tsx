@@ -30,6 +30,7 @@ export type DetailHeroFocusSlot =
   | 'mylist'
   | 'watched'
   | 'play'
+  | 'preplay-version'
   | 'preplay-audio'
   | 'preplay-subtitles'
   | 'synopsis';
@@ -50,6 +51,8 @@ export interface DetailHeroProps {
   readonly primaryAction: PrimaryPlayAction;
   readonly audioLang?: string;
   readonly subtitleLang?: string;
+  readonly versionLabel?: string;
+  readonly onCycleVersion?: () => void;
   readonly onCycleAudio?: () => void;
   readonly onCycleSubtitles?: () => void;
   readonly synopsisExpanded?: boolean;
@@ -91,6 +94,8 @@ function DetailHeroInner({
   primaryAction,
   audioLang = '',
   subtitleLang = '',
+  versionLabel,
+  onCycleVersion,
   onCycleAudio,
   onCycleSubtitles,
   synopsisExpanded = false,
@@ -122,7 +127,11 @@ function DetailHeroInner({
   const backFocused = isTv && focusedSlot === 'back';
   const synopsisFocused = isTv && focusedSlot === 'synopsis';
   const prePlayFocused =
-    focusedSlot === 'preplay-audio' || focusedSlot === 'preplay-subtitles' ? focusedSlot : null;
+    focusedSlot === 'preplay-version' ||
+    focusedSlot === 'preplay-audio' ||
+    focusedSlot === 'preplay-subtitles'
+      ? focusedSlot
+      : null;
   const backLabel = i18n.t('detail.back');
   const glassBlur = webBackdropBlur(12);
   const transition = webTransition(theme, 'transform, background-color, border-color, opacity');
@@ -382,6 +391,9 @@ function DetailHeroInner({
               <DetailPrePlayControls
                 audioLang={audioLang}
                 subtitleLang={subtitleLang}
+                {...(versionLabel !== undefined && onCycleVersion !== undefined
+                  ? { versionLabel, onCycleVersion }
+                  : {})}
                 onCycleAudio={onCycleAudio}
                 onCycleSubtitles={onCycleSubtitles}
                 isTv={isTv}

@@ -81,6 +81,7 @@ function mergeChannels(st: GuideState, channels: readonly XmltvChannel[]): void 
         id: ch.id,
         names,
         ...(ch.icon !== undefined && ch.icon !== '' ? { icon: ch.icon } : {}),
+        ...(ch.lcn !== undefined && ch.lcn !== '' ? { lcn: ch.lcn } : {}),
       });
     } else {
       for (const n of ch.names) {
@@ -92,6 +93,13 @@ function mergeChannels(st: GuideState, channels: readonly XmltvChannel[]): void 
         ch.icon !== ''
       ) {
         existing.icon = ch.icon;
+      }
+      if (
+        (existing.lcn === undefined || existing.lcn === '') &&
+        ch.lcn !== undefined &&
+        ch.lcn !== ''
+      ) {
+        existing.lcn = ch.lcn;
       }
     }
   }
@@ -128,7 +136,15 @@ function finalizeChannels(c: RunCtx, st: GuideState): void {
       for (const key of match.keys) bucket.push([key, ch.id]);
     }
     const name = ch.names[0] ?? ch.id;
-    st.channelRows.push([c.sourceId, ch.id, name, foldText(name), ch.icon ?? null, c.runId]);
+    st.channelRows.push([
+      c.sourceId,
+      ch.id,
+      name,
+      foldText(name),
+      ch.icon ?? null,
+      c.runId,
+      ch.lcn ?? null,
+    ]);
   }
   st.channelNameFolds = st.index.nameFoldByKey;
 }
@@ -213,6 +229,7 @@ async function execute(
     from: now - window.daysBack * DAY_MS,
     to: now + window.daysForward * DAY_MS,
     ...(c.deps.decompressor === undefined ? {} : { decompressor: c.deps.decompressor }),
+    ...(source.settings.xmltvTimezone ? { defaultTimeZone: source.settings.xmltvTimezone } : {}),
   });
   try {
     for (;;) {

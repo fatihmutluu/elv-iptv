@@ -2,6 +2,7 @@ import type {
   CatalogService,
   EpisodeRow,
   SeriesUnplayedSummary,
+  VodVersionOption,
   WatchProgressRow,
 } from '@elv/data';
 import { elvError } from '@elv/domain';
@@ -35,6 +36,7 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly rating: number | null;
   readonly plot: string | null;
   readonly relatedUnplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
+  readonly versions: readonly VodVersionOption[];
   readonly selectSeason: (season: number) => void;
   readonly retrySeasons: () => void;
   readonly toggleMyList: () => Promise<void>;
@@ -63,6 +65,7 @@ export function useDetailData({
       : emptyDetailSnapshot(target.kind, target.categoryId),
   );
   const [seasonsRetryToken, setSeasonsRetryToken] = useState(0);
+  const [versions, setVersions] = useState<readonly VodVersionOption[]>([]);
 
   const mountedRef = useRef(true);
   const snapRef = useRef(snap);
@@ -140,6 +143,7 @@ export function useDetailData({
     activeItemKeyRef.current = target.itemKey;
 
     if (itemChanged) {
+      setVersions([]);
       myListGenRef.current += 1;
       myListInFlightRef.current = 0;
       watchedGenRef.current += 1;
@@ -172,15 +176,21 @@ export function useDetailData({
         target.kind === 'series' && target.catalogId !== undefined
           ? catalog.seasons(target.catalogId).catch(() => null)
           : null;
-      const [hydratedDetail, favKeys, fetchedMovieProg, relatedResult] = await Promise.all([
-        catalog.itemDetail ? catalog.itemDetail(target.itemKey).catch(() => null) : null,
-        catalog.listFavoriteKeys ? catalog.listFavoriteKeys().catch(() => [] as string[]) : [],
-        target.kind === 'movie' && catalog.getProgress
-          ? catalog.getProgress(target.itemKey).catch(() => null)
-          : null,
-        fetchRelatedDetailItems(catalog, target),
-      ]);
+      const [hydratedDetail, favKeys, fetchedMovieProg, fetchedVersions, relatedResult] =
+        await Promise.all([
+          catalog.itemDetail ? catalog.itemDetail(target.itemKey).catch(() => null) : null,
+          catalog.listFavoriteKeys ? catalog.listFavoriteKeys().catch(() => [] as string[]) : [],
+          target.kind === 'movie' && catalog.getProgress
+            ? catalog.getProgress(target.itemKey).catch(() => null)
+            : null,
+          target.kind === 'movie' && catalog.itemVersions
+            ? catalog.itemVersions(target.itemKey).catch(() => [] as readonly VodVersionOption[])
+            : ([] as readonly VodVersionOption[]),
+          fetchRelatedDetailItems(catalog, target),
+        ]);
       if (isStale()) return;
+
+      setVersions(fetchedVersions.length > 1 ? fetchedVersions : []);
 
       const isFav = new Set(favKeys).has(target.itemKey);
       if (myListInFlightRef.current === 0) committedMyListRef.current = isFav;
@@ -382,6 +392,7 @@ export function useDetailData({
       rating,
       plot,
       relatedUnplayedBySeriesKey,
+      versions,
       selectSeason,
       retrySeasons,
       toggleMyList,
@@ -399,6 +410,7 @@ export function useDetailData({
     title,
     toggleMyList,
     toggleWatched,
+    versions,
     year,
   ]);
 }

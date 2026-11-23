@@ -35,6 +35,7 @@ export interface UseCatalogDiscoveryOptions {
   readonly selectedCategoryId: string | null;
   readonly visibleCategoryCount: number;
   readonly sortBy?: ItemSortOrder;
+  readonly groupVersions?: boolean;
   readonly onVisibleCategoryCountChange: (nextCount: number) => void;
   readonly onClearStaleCategory?: () => void;
 }
@@ -73,11 +74,16 @@ export function useCatalogDiscovery({
   selectedCategoryId,
   visibleCategoryCount,
   sortBy = 'default',
+  groupVersions = false,
   onVisibleCategoryCountChange,
   onClearStaleCategory,
 }: UseCatalogDiscoveryOptions): CatalogDiscoveryState {
+  const effectiveGroupVersions = kind === 'movie' && groupVersions;
   const uiCache = useCatalogUiCache();
-  const initialCached = sources.length > 0 ? (uiCache?.getCatalog(kind) ?? null) : null;
+  const initialCached =
+    sources.length > 0
+      ? (uiCache?.getCatalog(kind, { groupVersions: effectiveGroupVersions }) ?? null)
+      : null;
 
   const [categories, setCategories] = useState<readonly DisplayCategory[]>(
     () => initialCached?.categories ?? [],
@@ -104,6 +110,7 @@ export function useCatalogDiscovery({
   const hasLoadedRef = useRef(initialCached !== null);
   const lastRefreshTokenRef = useRef(refreshToken);
   const lastSortByRef = useRef<ItemSortOrder>(sortBy);
+  const lastGroupVersionsRef = useRef<boolean>(effectiveGroupVersions);
   const uiCacheRef = useRef(uiCache);
   uiCacheRef.current = uiCache;
 
@@ -136,9 +143,10 @@ export function useCatalogDiscovery({
         continueItems: nextCw,
         railItemsByCategoryId: nextRails,
         progressByKey: nextProg,
+        ...(effectiveGroupVersions ? { groupVersions: true } : {}),
       });
     },
-    [kind],
+    [effectiveGroupVersions, kind],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion trigger fresh continue-watching reads
@@ -193,8 +201,11 @@ export function useCatalogDiscovery({
       };
     }
 
-    const tokenBumped = lastRefreshTokenRef.current !== refreshToken;
+    const tokenBumped =
+      lastRefreshTokenRef.current !== refreshToken ||
+      lastGroupVersionsRef.current !== effectiveGroupVersions;
     lastRefreshTokenRef.current = refreshToken;
+    lastGroupVersionsRef.current = effectiveGroupVersions;
 
     // Only show skeleton on cold start; keep previous categories & rails visible during refresh.
     if (!hasLoadedRef.current) {
@@ -206,9 +217,12 @@ export function useCatalogDiscovery({
 
     const loadCategories = async () => {
       try {
+        const catOpts = effectiveGroupVersions ? { groupVersions: true } : undefined;
         const perSource = await Promise.all(
           activeSources.map(async (source) => {
-            const rows = await catalog.categories(source.id, kind).catch(() => [] as CategoryRow[]);
+            const rows = await catalog
+              .categories(source.id, kind, catOpts)
+              .catch(() => [] as CategoryRow[]);
             return [source.id, rows] as const;
           }),
         );
@@ -250,7 +264,7 @@ export function useCatalogDiscovery({
     return () => {
       catGenRef.current += 1;
     };
-  }, [catalog, kind, refreshToken, sources, syncCache]);
+  }, [catalog, effectiveGroupVersions, kind, refreshToken, sources, syncCache]);
 
   const visibleCategories = useMemo(
     () => categories.slice(0, Math.max(0, visibleCategoryCount)),
@@ -298,13 +312,15 @@ export function useCatalogDiscovery({
             const idx = cursor++;
             const target = missing[idx];
             if (!target || railGenRef.current !== gen) return;
+            const itemOpts =
+              sortBy === 'alpha' || effectiveGroupVersions
+                ? {
+                    ...(sortBy === 'alpha' ? { sortBy: 'alpha' as const } : {}),
+                    ...(effectiveGroupVersions ? { groupVersions: true } : {}),
+                  }
+                : undefined;
             const rows = await catalog
-              .items(
-                target.row.id,
-                0,
-                RAIL_ITEM_LIMIT,
-                sortBy === 'alpha' ? { sortBy: 'alpha' } : undefined,
-              )
+              .items(target.row.id, 0, RAIL_ITEM_LIMIT, itemOpts)
               .catch(() => [] as ItemRow[]);
             if (railGenRef.current !== gen) return;
             fetched.set(target.row.id, rows);
@@ -356,6 +372,7 @@ export function useCatalogDiscovery({
     };
   }, [
     catalog,
+    effectiveGroupVersions,
     railRefreshTick,
     refreshToken,
     selectedCategoryExists,

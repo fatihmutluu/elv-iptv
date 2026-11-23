@@ -345,4 +345,49 @@ describe('createCatalogUiCache', () => {
     const metrics = cache.getMetrics?.();
     expect(metrics).toEqual({ hits: 2, misses: 1, hitRatePct: 67 });
   });
+
+  it('isolates movie catalog and grid caches by groupVersions flag (#404)', () => {
+    const cache = createCatalogUiCache({ locale: 'en' });
+    const cat = makeCategory('src-1', 'movie', 1);
+    const ungrouped = [makeItem('src-1', 'movie', 1), makeItem('src-1', 'movie', 2)];
+    const grouped = [makeItem('src-1', 'movie', 1)];
+
+    cache.setCatalog('movie', {
+      categories: [cat],
+      continueItems: [],
+      railItemsByCategoryId: new Map([[cat.row.id, ungrouped]]),
+      progressByKey: new Map(),
+      groupVersions: false,
+    });
+    cache.setGridFirstPage('movie', cat.row.id, ungrouped, { groupVersions: false });
+
+    expect(cache.getCatalog('movie', { groupVersions: false })).not.toBeNull();
+    expect(cache.getCatalog('movie', { groupVersions: true })).toBeNull();
+    expect(cache.getGridFirstPage('movie', cat.row.id, { groupVersions: false })).toEqual(
+      ungrouped,
+    );
+    expect(cache.getGridFirstPage('movie', cat.row.id, { groupVersions: true })).toBeUndefined();
+
+    cache.setCatalog('movie', {
+      categories: [cat],
+      continueItems: [],
+      railItemsByCategoryId: new Map([[cat.row.id, grouped]]),
+      progressByKey: new Map(),
+      groupVersions: true,
+    });
+    cache.setGridFirstPage('movie', cat.row.id, grouped, { groupVersions: true });
+
+    expect(
+      cache.getCatalog('movie', { groupVersions: true })?.railItemsByCategoryId.get(cat.row.id),
+    ).toEqual(grouped);
+    expect(cache.getCatalog('movie', { groupVersions: false })).toBeNull();
+    expect(cache.getGridFirstPage('movie', cat.row.id, { groupVersions: true })).toEqual(grouped);
+    expect(cache.getGridFirstPage('movie', cat.row.id, { groupVersions: false })).toEqual(
+      ungrouped,
+    );
+
+    cache.invalidateSource('src-1');
+    expect(cache.getGridFirstPage('movie', cat.row.id, { groupVersions: true })).toBeUndefined();
+    expect(cache.getGridFirstPage('movie', cat.row.id, { groupVersions: false })).toBeUndefined();
+  });
 });

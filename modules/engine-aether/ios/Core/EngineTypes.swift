@@ -16,6 +16,7 @@ public struct LoadRequest: Equatable, Sendable {
   public var softwareAudio: Bool
   public var preferHevcOverDolbyVision: Bool
   public var filterSdhSubtitles: Bool
+  public var allowLegacyTls: Bool
   public var audioTrackId: String?
   public var subtitlePreference: SubtitlePreference
   public var liveEdgeCushionSeconds: Double?
@@ -28,6 +29,7 @@ public struct LoadRequest: Equatable, Sendable {
     softwareAudio: Bool = false,
     preferHevcOverDolbyVision: Bool = false,
     filterSdhSubtitles: Bool = false,
+    allowLegacyTls: Bool = false,
     audioTrackId: String? = nil,
     subtitlePreference: SubtitlePreference = .default,
     liveEdgeCushionSeconds: Double? = nil
@@ -39,6 +41,7 @@ public struct LoadRequest: Equatable, Sendable {
     self.softwareAudio = softwareAudio
     self.preferHevcOverDolbyVision = preferHevcOverDolbyVision
     self.filterSdhSubtitles = filterSdhSubtitles
+    self.allowLegacyTls = allowLegacyTls
     self.audioTrackId = audioTrackId
     self.subtitlePreference = subtitlePreference
     self.liveEdgeCushionSeconds = liveEdgeCushionSeconds
@@ -78,6 +81,7 @@ public struct EngineLoadOptions: Equatable, Sendable {
   public var preferredSubtitleLanguages: [String]
   public var subtitlesDisabled: Bool
   public var filterSdhSubtitles: Bool
+  public var allowLegacyTls: Bool
 
   public init(
     isLive: Bool,
@@ -98,7 +102,8 @@ public struct EngineLoadOptions: Equatable, Sendable {
     initialSubtitleTrackId: Int? = nil,
     preferredSubtitleLanguages: [String] = [],
     subtitlesDisabled: Bool = false,
-    filterSdhSubtitles: Bool = false
+    filterSdhSubtitles: Bool = false,
+    allowLegacyTls: Bool = false
   ) {
     self.isLive = isLive
     self.httpHeaders = httpHeaders
@@ -119,6 +124,7 @@ public struct EngineLoadOptions: Equatable, Sendable {
     self.preferredSubtitleLanguages = preferredSubtitleLanguages
     self.subtitlesDisabled = subtitlesDisabled
     self.filterSdhSubtitles = filterSdhSubtitles
+    self.allowLegacyTls = allowLegacyTls
   }
 }
 

@@ -11,6 +11,7 @@ import {
 import type { ReactElement } from 'react';
 import { Text, View } from 'react-native';
 import { resolveSourceAccountWarning } from './account-warning';
+import { countPendingCategories } from './category-selection-model';
 import { ActionButton, SourceAccountWarningPill } from './SourcesScreenParts';
 import { sourcesStyles } from './sources-styles';
 import {
@@ -187,6 +188,13 @@ export function SavedSourcesPanel({
                   {source.name}
                 </Text>
                 <MicroPill label={kindLabel} tone="neutral" />
+                {source.isLocalPlaylist === true ? (
+                  <MicroPill
+                    testID={`source-local-badge-${source.id}`}
+                    label={i18n.t('sources.localFileBadge')}
+                    tone="neutral"
+                  />
+                ) : null}
               </View>
               <View style={sourcesStyles.statusRow}>
                 <MicroPill label={statusPill.label} tone={statusPill.tone} dot={statusPill.dot} />
@@ -280,6 +288,43 @@ export function SavedSourcesPanel({
                   </Text>
                 </View>
               ) : null}
+              {countPendingCategories(source.categorySelection) > 0 ? (
+                <View
+                  testID={`source-pending-categories-${source.id}`}
+                  style={[
+                    sourcesStyles.noticeBox,
+                    {
+                      backgroundColor: theme.colors.accentTint,
+                      borderColor: theme.colors.accent,
+                      borderRadius: theme.radius.card,
+                    },
+                  ]}
+                >
+                  <Text style={[theme.typography.caption, { color: theme.colors.textPrimary }]}>
+                    {i18n.t('sources.pendingCategoriesBanner', {
+                      count: countPendingCategories(source.categorySelection),
+                    })}
+                  </Text>
+                  <View style={sourcesStyles.row}>
+                    <ActionButton
+                      focusId={`source-include-pending-${source.id}`}
+                      testID={`source-include-pending-${source.id}`}
+                      label={i18n.t('sources.includeNewCategories')}
+                      tvFocused={tvFocusId === `source-include-pending-${source.id}`}
+                      onPress={() => void ctrl.includePendingCategories(source)}
+                      recordLayout={recordLayout}
+                    />
+                    <ActionButton
+                      focusId={`source-dismiss-pending-${source.id}`}
+                      testID={`source-dismiss-pending-${source.id}`}
+                      label={i18n.t('sources.dismissNewCategories')}
+                      tvFocused={tvFocusId === `source-dismiss-pending-${source.id}`}
+                      onPress={() => void ctrl.dismissPendingCategories(source)}
+                      recordLayout={recordLayout}
+                    />
+                  </View>
+                </View>
+              ) : null}
               <View style={sourcesStyles.row}>
                 {isImporting ? (
                   <ActionButton
@@ -307,6 +352,16 @@ export function SavedSourcesPanel({
                         label={i18n.t('sources.refreshGuide')}
                         tvFocused={tvFocusId === `source-guide-${source.id}`}
                         onPress={() => void ctrl.runGuideRefresh(source.id)}
+                        recordLayout={recordLayout}
+                      />
+                    ) : null}
+                    {ctrl.canChooseCategories ? (
+                      <ActionButton
+                        focusId={`source-categories-${source.id}`}
+                        testID={`source-categories-${source.id}`}
+                        label={i18n.t('sources.chooseCategories')}
+                        tvFocused={tvFocusId === `source-categories-${source.id}`}
+                        onPress={() => void ctrl.openCategoryPicker(source)}
                         recordLayout={recordLayout}
                       />
                     ) : null}

@@ -2,6 +2,7 @@ import { elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
 import { reapOrphanedRuns } from './runs';
 import { EXPECTED_FTS_TABLES, EXPECTED_TABLE_COLUMNS, MIGRATIONS, OPEN_PRAGMAS } from './schema';
 import { backfillSortTitles, type SortTitleTable } from './schema-v8';
+import { backfillWaveC3Metadata } from './schema-v11';
 
 /** Schema version this build writes and understands (`PRAGMA user_version`). */
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -11,6 +12,7 @@ const SORT_TITLE_SET = new Set<string>(['live', 'movies', 'series']);
 async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
   const repairs: string[] = [];
   const repairedSortTables: SortTitleTable[] = [];
+  let needsWaveC3Backfill = false;
   for (const [table, expected] of Object.entries(EXPECTED_TABLE_COLUMNS)) {
     const cols = await db.all<{ name: string }>(`PRAGMA table_info(${table})`);
     if (cols.length === 0) {
@@ -22,6 +24,13 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
         repairs.push(`ALTER TABLE ${table} ADD COLUMN ${column.name} ${column.alterDefinition}`);
         if (column.name === 'sort_title' && SORT_TITLE_SET.has(table)) {
           repairedSortTables.push(table as SortTitleTable);
+        }
+        if (
+          (table === 'live' && column.name === 'variant_base_fold') ||
+          (table === 'movies' && column.name === 'version_group_key') ||
+          (table === 'watch_progress' && column.name === 'version_group_key')
+        ) {
+          needsWaveC3Backfill = true;
         }
       }
     }
@@ -45,6 +54,18 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
           );
         }
         await backfillSortTitles(tx, repairedSortTables);
+      }
+      if (needsWaveC3Backfill) {
+        await tx.exec(
+          'CREATE INDEX IF NOT EXISTS idx_live_variant ON live (source_id, is_hidden, variant_base_fold, quality_rank DESC)',
+        );
+        await tx.exec(
+          'CREATE INDEX IF NOT EXISTS idx_movies_version_group ON movies (source_id, is_hidden, version_group_key)',
+        );
+        await tx.exec(
+          'CREATE INDEX IF NOT EXISTS idx_watch_progress_vgroup ON watch_progress (profile_id, version_group_key)',
+        );
+        await backfillWaveC3Metadata(tx);
       }
     });
   }
@@ -76,6 +97,7 @@ export async function openCatalog(
         for (let v = current; v < SCHEMA_VERSION; v++) {
           await tx.exec(MIGRATIONS[v] ?? '');
           if (v === 7) await backfillSortTitles(tx);
+          if (v === 10) await backfillWaveC3Metadata(tx);
           await tx.exec(`PRAGMA user_version = ${v + 1}`);
         }
       });

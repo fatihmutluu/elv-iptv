@@ -275,4 +275,19 @@ struct StreamHttpTests {
     let secOut2 = scopeRedirectRequest(secReq2, state: &secState, cookieJar: secJar)
     #expect(secOut2.value(forHTTPHeaderField: "Cookie") == nil)
   }
+
+  @Test("makeStreamSessionConfiguration keeps modern TLS by default and enables TLS 1.0 only on explicit opt-in (#182)")
+  func legacyTlsSessionConfigurationIsOptIn() {
+    let modern = makeStreamSessionConfiguration()
+    let legacy = makeStreamSessionConfiguration(allowLegacyTls: true)
+
+    #expect(modern.httpMaximumConnectionsPerHost == 1)
+    #expect(legacy.httpMaximumConnectionsPerHost == 1)
+    #expect(modern.urlCache == nil)
+    #expect(legacy.urlCache == nil)
+    #if canImport(Darwin)
+    #expect(modern.tlsMinimumSupportedProtocolVersion != .TLSv10)
+    #expect(legacy.tlsMinimumSupportedProtocolVersion == .TLSv10)
+    #endif
+  }
 }

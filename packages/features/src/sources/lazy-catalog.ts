@@ -49,6 +49,23 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
   return {
     addSource: (input) => wrapResult(async () => (await open()).addSource(input)),
     addSourceFromLink: (input) => wrapResult(async () => (await open()).addSourceFromLink(input)),
+    addLocalM3uSource: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.addLocalM3uSource
+          ? cat.addLocalM3uSource(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    discoverSourceCategories: (sourceId, opts) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.discoverSourceCategories
+          ? cat.discoverSourceCategories(sourceId, opts)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    updateSourceSettings: async (sourceId, patch) => {
+      await (await open()).updateSourceSettings?.(sourceId, patch);
+    },
     removeSource: (id) => wrapResult(async () => (await open()).removeSource(id)),
     importSource: (id, opts) => wrapResult(async () => (await open()).importSource(id, opts)),
     importGuide: (id, opts) =>
@@ -59,9 +76,12 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
           : err(elvError('storage', 'unsupported'));
       }),
     listSources: async () => (await open()).listSources(),
-    categories: async (sourceId, kind) => (await open()).categories(sourceId, kind),
+    categories: async (sourceId, kind, opts) => (await open()).categories(sourceId, kind, opts),
     items: async (categoryId, offset, limit, opts) =>
       (await open()).items(categoryId, offset, limit, opts),
+    liveVariants: async (itemKey, categoryId) =>
+      (await open()).liveVariants?.(itemKey, categoryId) ?? [],
+    itemVersions: async (itemKey) => (await open()).itemVersions?.(itemKey) ?? [],
     allSourcesItems: async (kind, offset, limit, sourceIds, opts) =>
       (await open()).allSourcesItems?.(kind, offset, limit, sourceIds, opts) ?? [],
     itemDetail: async (itemKey) => {

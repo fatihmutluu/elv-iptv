@@ -55,9 +55,9 @@ async function plan(db: SqlDriver, sql: string, params: (string | number)[]) {
 describe('openCatalog', () => {
   it('creates schema v9 with FTS5 tables, staging tables, backup_urls_json, epg_shift_ms, content_hash, sort_title, track_preferences, and browse indexes on a fresh database', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(10);
+    expect(SCHEMA_VERSION).toBe(11);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 10 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 11 }]);
     expect(await regularTableNames(db)).toEqual([...TABLES].sort());
     expect(await names(db, 'table')).toEqual(expect.arrayContaining([...EXPECTED_FTS_TABLES]));
     expect(await names(db, 'index')).toEqual(
@@ -91,7 +91,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 10 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 11 }]);
     expect(await db.all('SELECT id, name, deleting FROM sources')).toEqual([
       { id: 's1', name: 'Main', deleting: 0 },
     ]);
@@ -127,7 +127,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 10 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 11 }]);
     expect(await names(db, 'index')).toContain('idx_programmes_source_start_stop');
     expect(
       await db.all<{ key: string }>(
@@ -162,7 +162,7 @@ describe('openCatalog', () => {
     expect(await names(db, 'index')).not.toContain('idx_programmes_source_start_stop');
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 10 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 11 }]);
     expect(await names(db, 'index')).toContain('idx_programmes_source_start_stop');
     expect(await db.all('SELECT guide_id, title FROM programmes')).toEqual([
       { guide_id: 'g1', title: 'Morning Brief' },
@@ -196,7 +196,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 10 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 11 }]);
     expect(await db.all('SELECT id, deleting FROM sources')).toEqual([{ id: 's1', deleting: 0 }]);
     expect(await db.all('SELECT provider_id, is_hidden FROM categories')).toEqual([
       { provider_id: 'c1', is_hidden: 0 },
@@ -244,7 +244,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 10 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 11 }]);
     expect(await db.all('SELECT key, backup_urls_json, epg_shift_ms FROM live')).toEqual([
       { key: 'm:s1:live:1', backup_urls_json: null, epg_shift_ms: null },
     ]);
@@ -291,7 +291,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 10 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 11 }]);
     expect(await db.all('SELECT provider_id, content_hash FROM categories')).toEqual([
       { provider_id: 'c1', content_hash: null },
     ]);
@@ -329,7 +329,7 @@ describe('openCatalog', () => {
     );
     expect((await openCatalog(db)).ok).toBe(true);
     expect(await db.all('SELECT count(*) AS n FROM sources')).toEqual([{ n: 1 }]);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 10 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 11 }]);
   });
 
   it('applies pragmas, with WAL on file databases', async () => {
@@ -495,6 +495,7 @@ describe('openCatalog', () => {
     await db.exec('ALTER TABLE movies DROP COLUMN headers_json');
     await db.exec('DROP INDEX idx_movies_visible_key');
     await db.exec('DROP INDEX idx_movies_sort_title');
+    await db.exec('DROP INDEX idx_movies_version_group');
     await db.exec('ALTER TABLE movies DROP COLUMN is_hidden');
     await db.exec('ALTER TABLE movies DROP COLUMN backup_urls_json');
     await db.exec('ALTER TABLE episodes DROP COLUMN duration_sec');

@@ -158,7 +158,7 @@ function matchUniqueName(
  */
 export function matchGuideChannel(
   index: ChannelIndex,
-  guide: { id: string; names: readonly string[] },
+  guide: { id: string; names: readonly string[]; lcn?: string },
 ): GuideMatch {
   const byId = index.byGuideId.get(guide.id);
   if (byId !== undefined) return { keys: [...byId], byId: true, tier: 'id' };
@@ -181,6 +181,14 @@ export function matchGuideChannel(
     return { keys: [...foundGuideFold], byId: false, tier: 'normalized-name' };
   }
   if (foundGuideFold.size > 1) return { keys: [], byId: false, tier: 'none' };
+
+  if (guide.lcn !== undefined && guide.lcn.trim() !== '') {
+    const lcnNum = extractChannelNumber(guide.lcn);
+    if (lcnNum !== undefined) {
+      const keys = index.byNum.get(lcnNum);
+      if (keys?.length === 1) return { keys: [keys[0] as string], byId: false, tier: 'num' };
+    }
+  }
 
   const extractedNums = new Set<number>();
   for (const name of guide.names) {

@@ -338,6 +338,9 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       if (released) return;
       tracks.onLoad(cmd.options);
       const { url, headers, kind, options } = cmd;
+      // Desktop mpv inherits OS TLS with `--tls-verify=yes` (never disabled; mpv/FFmpeg has no
+      // safe per-file legacy-TLS-min-version flag), while Node `legacy-tls-http.ts` handles
+      // opt-in legacy TLS for catalog and XMLTV fetches (`#182`).
       const req: MediaRequest = {
         url,
         headers,

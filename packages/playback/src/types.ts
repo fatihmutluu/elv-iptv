@@ -38,6 +38,8 @@ export interface TuneRequest {
   preferHevcOverDolbyVision?: boolean;
   /** Strip SDH annotations from rendered text subtitles (`#310`). */
   filterSdhSubtitles?: boolean;
+  /** Opt-in legacy TLS (TLS 1.0/1.1) compatibility forwarded on load and recovery reloads (`#182`). */
+  readonly allowLegacyTls?: boolean;
 }
 
 /** What the service is doing now. */

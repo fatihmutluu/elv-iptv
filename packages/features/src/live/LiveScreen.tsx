@@ -57,6 +57,7 @@ export interface LiveScreenProps {
   readonly showSourceBadges?: boolean;
   readonly liveOkTwoStepPreview?: boolean;
   readonly cleanChannelTitles?: boolean;
+  readonly collapseVariants?: boolean;
   /** Called when embedded live preview playback (Favorites stage or two-step preview) starts or stops (`#160`). */
   readonly onEmbeddedPlaybackActiveChange?: (active: boolean) => void;
 }
@@ -77,6 +78,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     showSourceBadges = true,
     liveOkTwoStepPreview = false,
     cleanChannelTitles = false,
+    collapseVariants = false,
     onEmbeddedPlaybackActiveChange,
   } = props;
   const theme = useTheme();
@@ -131,6 +133,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     previousChannelKey: activeMemory.previousChannelKey,
     onSelectCategoryId: handleSelectCategory,
     onChannelHistoryChange: handleChannelHistoryChange,
+    collapseVariants,
     ...(clockFn !== undefined ? { now: clockFn } : {}),
   });
 
