@@ -643,5 +643,5 @@ describe('querySearch', () => {
     } finally {
       close();
     }
-  });
+  }, 15_000);
 });

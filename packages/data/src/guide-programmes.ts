@@ -27,12 +27,14 @@ function programmeRow(
     p.icon ?? null,
     runId,
     normalizeEpgGenre(p.categories),
-    encodeProgrammeFlags({
-      isLive: p.isLive,
-      isNew: p.isNew,
-      isPremiere: p.isPremiere,
-      previouslyShown: p.previouslyShown,
-    }),
+    p.isLive || p.isNew || p.isPremiere || p.previouslyShown
+      ? encodeProgrammeFlags({
+          isLive: p.isLive,
+          isNew: p.isNew,
+          isPremiere: p.isPremiere,
+          previouslyShown: p.previouslyShown,
+        })
+      : 0,
     p.ratingSystem ?? null,
     p.ratingValue ?? null,
     foldText(p.title),

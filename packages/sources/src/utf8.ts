@@ -1,5 +1,7 @@
 const REPLACEMENT = 0xfffd;
 const SLICE = 4096;
+/** Reusable code-unit buffer for synchronous leaf `decodeUtf8` calls (eliminates millions of GC arrays on Hermes). */
+const UTF8_SCRATCH: number[] = [];
 
 /**
  * Decodes bytes[start, end) as UTF-8 with U+FFFD for invalid sequences, without `TextDecoder`.
@@ -7,27 +9,41 @@ const SLICE = 4096;
  */
 export function decodeUtf8(bytes: Uint8Array, start = 0, end: number = bytes.length): string {
   const limit = Math.min(end, bytes.length);
-  let out = '';
-  const units: number[] = [];
-  const flush = (): void => {
-    out += String.fromCharCode(...units);
-    units.length = 0;
-  };
-  const push = (cp: number): void => {
-    if (cp >= 0x10000) {
-      const v = cp - 0x10000;
-      units.push(0xd800 + (v >> 10), 0xdc00 + (v & 0x3ff));
-    } else {
-      units.push(cp);
-    }
-    if (units.length >= SLICE) flush();
-  };
-
   let i = Math.max(start, 0);
+  if (i >= limit) return '';
+
+  // Pure-ASCII fast path: zero closures, zero per-call arrays, zero per-byte function calls.
+  let scan = i;
+  while (scan < limit && (bytes[scan] as number) < 0x80) scan++;
+  if (scan === limit) {
+    const len = limit - i;
+    if (len <= SLICE) {
+      UTF8_SCRATCH.length = len;
+      for (let k = 0; k < len; k++) UTF8_SCRATCH[k] = bytes[i + k] as number;
+      return String.fromCharCode.apply(null, UTF8_SCRATCH);
+    }
+    let fast = '';
+    while (i < limit) {
+      const chunk = Math.min(limit - i, SLICE);
+      UTF8_SCRATCH.length = chunk;
+      for (let k = 0; k < chunk; k++) UTF8_SCRATCH[k] = bytes[i + k] as number;
+      fast += String.fromCharCode.apply(null, UTF8_SCRATCH);
+      i += chunk;
+    }
+    return fast;
+  }
+
+  let out = '';
+  let count = 0;
   while (i < limit) {
     const b = bytes[i] as number;
     if (b < 0x80) {
-      push(b);
+      UTF8_SCRATCH[count++] = b;
+      if (count >= SLICE) {
+        UTF8_SCRATCH.length = count;
+        out += String.fromCharCode.apply(null, UTF8_SCRATCH);
+        count = 0;
+      }
       i++;
       continue;
     }
@@ -49,7 +65,12 @@ export function decodeUtf8(bytes: Uint8Array, start = 0, end: number = bytes.len
       if (b === 0xf0) lower = 0x90;
       if (b === 0xf4) upper = 0x8f;
     } else {
-      push(REPLACEMENT);
+      UTF8_SCRATCH[count++] = REPLACEMENT;
+      if (count >= SLICE) {
+        UTF8_SCRATCH.length = count;
+        out += String.fromCharCode.apply(null, UTF8_SCRATCH);
+        count = 0;
+      }
       i++;
       continue;
     }
@@ -66,9 +87,24 @@ export function decodeUtf8(bytes: Uint8Array, start = 0, end: number = bytes.len
       cp = (cp << 6) | (c & 0x3f);
       i++;
     }
-    push(ok ? cp : REPLACEMENT);
+    const resolved = ok ? cp : REPLACEMENT;
+    if (resolved >= 0x10000) {
+      const v = resolved - 0x10000;
+      UTF8_SCRATCH[count++] = 0xd800 + (v >> 10);
+      UTF8_SCRATCH[count++] = 0xdc00 + (v & 0x3ff);
+    } else {
+      UTF8_SCRATCH[count++] = resolved;
+    }
+    if (count >= SLICE) {
+      UTF8_SCRATCH.length = count;
+      out += String.fromCharCode.apply(null, UTF8_SCRATCH);
+      count = 0;
+    }
   }
-  flush();
+  if (count > 0) {
+    UTF8_SCRATCH.length = count;
+    out += String.fromCharCode.apply(null, UTF8_SCRATCH);
+  }
   return out;
 }
 

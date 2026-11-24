@@ -172,6 +172,13 @@ function isBadgeBoundary(ch: string): boolean {
   return ch === '' || BADGE_BOUNDARY_RE.test(ch);
 }
 
+function hasNonAscii(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) > 0x7f) return true;
+  }
+  return false;
+}
+
 /**
  * Cleans inline HTML formatting tags and standalone Unicode superscript badge runs from a programme
  * `<title>`, promoting recognized superscript `LIVE` / `NEW` markers into boolean flags while leaving
@@ -183,6 +190,9 @@ export function cleanTitleAndFlags(raw: string): {
   isNew: boolean;
 } {
   const withoutHtml = stripInlineHtml(raw);
+  if (!hasNonAscii(withoutHtml)) {
+    return { title: withoutHtml, isLive: false, isNew: false };
+  }
   let isLive = false;
   let isNew = false;
   let strippedSuper = false;
@@ -230,6 +240,16 @@ function formatNormalizedSeasonEpisode(season: string, episode: string): string 
  * false-matching aspect ratios like `1x1` or `2x4`).
  */
 export function extractDescEpisodeNum(desc: string): string | undefined {
+  let i = 0;
+  const len = desc.length;
+  while (i < len) {
+    const c = desc.charCodeAt(i);
+    if (c !== 32 && c !== 9 && c !== 10 && c !== 13) break;
+    i++;
+  }
+  if (i >= len) return undefined;
+  const first = desc.charCodeAt(i);
+  if (first !== 83 && first !== 115 && (first < 48 || first > 57)) return undefined;
   const sxe = DESC_EPISODE_RE.exec(desc);
   if (sxe !== null) return (sxe[1] as string).toUpperCase();
   const spelled = DESC_SEASON_EPISODE_RE.exec(desc);

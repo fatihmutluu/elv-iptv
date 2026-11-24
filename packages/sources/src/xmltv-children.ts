@@ -1,6 +1,5 @@
 import { sanitizeArtworkUrl } from './artwork-url';
 import type { XmlEncoding } from './codepages';
-import { decodeUtf8 } from './utf8';
 import {
   BANG,
   findClose,
@@ -36,6 +35,29 @@ const is = (body: Uint8Array, at: number, len: number, name: string): boolean =>
   len === name.length && startsWith(body, at, name);
 
 const ONE_ATTR: (string | undefined)[] = [undefined];
+const SHARED_RES: Resume = { at: 0 };
+const SHARED_RATING_RES: Resume = { at: 0 };
+const MAX_OPEN = 64;
+const LOOKBACK = 8;
+
+/** Names of unknown elements that are open at the current position (bounded; matched by byte offsets). */
+class OpenStack {
+  starts: number[] = [];
+  lens: number[] = [];
+
+  push(start: number, len: number): void {
+    if (this.starts.length >= MAX_OPEN) return;
+    this.starts.push(start);
+    this.lens.push(len);
+  }
+
+  reset(): void {
+    this.starts.length = 0;
+    this.lens.length = 0;
+  }
+}
+
+const SHARED_OPEN = new OpenStack();
 
 /**
  * Reads the children of one `<programme>` (`target` is a programme) or `<channel>` body. Only the elements
@@ -54,8 +76,10 @@ export function parseChildren(
   encoding: XmlEncoding = 'utf-8',
   scoreLang?: LanguageScorer,
 ): boolean {
-  const res: Resume = { at: 0 };
-  const open = new OpenStack();
+  const res = SHARED_RES;
+  res.at = 0;
+  const open = SHARED_OPEN;
+  open.reset();
   const prog = isProgramme ? (target as XmltvProgramme) : undefined;
   const chan = isProgramme ? undefined : (target as XmltvChannel);
   let titleScore = 0;
@@ -152,7 +176,8 @@ export function parseChildren(
       i = tagEnd;
       continue;
     }
-    if (!isWanted(body, ns, len, isProgramme)) {
+    const tagName = wantedTagName(body, ns, len, isProgramme);
+    if (tagName === undefined) {
       if (!selfClosing) open.push(ns, len);
       i = tagEnd;
       continue;
@@ -161,7 +186,7 @@ export function parseChildren(
     let close = tagEnd;
     let next = tagEnd;
     if (!selfClosing) {
-      close = findClose(body, tagEnd, decodeUtf8(body, ns, ns + len), false, res);
+      close = findClose(body, tagEnd, tagName, false, res);
       if (close === INCOMPLETE) return false;
       const gt = body.indexOf(GT, close);
       if (gt < 0) return false;
@@ -171,15 +196,15 @@ export function parseChildren(
     if (selfClosing) continue;
 
     if (chan) {
-      if (is(body, ns, len, 'display-name')) {
+      if (tagName === 'display-name') {
         const t = readText(body, tagEnd, close, encoding);
         if (t) chan.names.push(t);
-      } else if (open.starts.length === 0 && is(body, ns, len, 'lcn') && chan.lcn === undefined) {
+      } else if (open.starts.length === 0 && tagName === 'lcn' && chan.lcn === undefined) {
         const t = readText(body, tagEnd, close, encoding);
         if (t) chan.lcn = t;
       }
     } else if (prog) {
-      if (is(body, ns, len, 'title')) {
+      if (tagName === 'title') {
         const candidateScore = readLangScore(body, ns + len, tagEnd - 1, encoding, scoreLang);
         if (titleScore === 0 || candidateScore > titleScore) {
           const cleaned = cleanTitleAndFlags(readText(body, tagEnd, close, encoding));
@@ -191,10 +216,10 @@ export function parseChildren(
             if (scoreLang === undefined) titleScore = 1;
           }
         }
-      } else if (is(body, ns, len, 'category')) {
+      } else if (tagName === 'category') {
         const t = readText(body, tagEnd, close, encoding);
         if (t) prog.categories.push(t);
-      } else if (is(body, ns, len, 'desc')) {
+      } else if (tagName === 'desc') {
         const candidateScore = readLangScore(body, ns + len, tagEnd - 1, encoding, scoreLang);
         if (candidateScore > descScore) {
           const t = readText(body, tagEnd, close, encoding);
@@ -203,7 +228,7 @@ export function parseChildren(
             descScore = candidateScore;
           }
         }
-      } else if (is(body, ns, len, 'sub-title')) {
+      } else if (tagName === 'sub-title') {
         const candidateScore = readLangScore(body, ns + len, tagEnd - 1, encoding, scoreLang);
         if (candidateScore > subTitleScore) {
           const t = stripInlineHtml(readText(body, tagEnd, close, encoding));
@@ -212,7 +237,7 @@ export function parseChildren(
             subTitleScore = candidateScore;
           }
         }
-      } else if (is(body, ns, len, 'episode-num')) {
+      } else if (tagName === 'episode-num') {
         readAttrs(body, ns + len, tagEnd - 1, SYSTEM, ONE_ATTR, encoding);
         const rank = episodeNumRank(ONE_ATTR[0]);
         if (rank > episodeRank) {
@@ -224,7 +249,7 @@ export function parseChildren(
         }
       } else if (
         open.starts.length === 0 &&
-        is(body, ns, len, 'rating') &&
+        tagName === 'rating' &&
         prog.ratingValue === undefined
       ) {
         readAttrs(body, ns + len, tagEnd - 1, SYSTEM, ONE_ATTR, encoding);
@@ -257,7 +282,8 @@ function extractRatingValue(
   to: number,
   encoding: XmlEncoding,
 ): string | undefined {
-  const res: Resume = { at: 0 };
+  const res = SHARED_RATING_RES;
+  res.at = 0;
   let pos = from;
   while (pos < to) {
     const lt = body.indexOf(LT, pos);
@@ -299,31 +325,24 @@ function extractRatingValue(
   return undefined;
 }
 
-function isWanted(body: Uint8Array, at: number, len: number, isProgramme: boolean): boolean {
-  if (!isProgramme) return is(body, at, len, 'display-name') || is(body, at, len, 'lcn');
-  return (
-    is(body, at, len, 'title') ||
-    is(body, at, len, 'sub-title') ||
-    is(body, at, len, 'desc') ||
-    is(body, at, len, 'category') ||
-    is(body, at, len, 'episode-num') ||
-    is(body, at, len, 'rating')
-  );
-}
-
-const MAX_OPEN = 64;
-const LOOKBACK = 8;
-
-/** Names of unknown elements that are open at the current position (bounded; matched by byte offsets). */
-class OpenStack {
-  starts: number[] = [];
-  lens: number[] = [];
-
-  push(start: number, len: number): void {
-    if (this.starts.length >= MAX_OPEN) return;
-    this.starts.push(start);
-    this.lens.push(len);
+function wantedTagName(
+  body: Uint8Array,
+  at: number,
+  len: number,
+  isProgramme: boolean,
+): string | undefined {
+  if (!isProgramme) {
+    if (is(body, at, len, 'display-name')) return 'display-name';
+    if (is(body, at, len, 'lcn')) return 'lcn';
+    return undefined;
   }
+  if (len === 5 && startsWith(body, at, 'title')) return 'title';
+  if (len === 4 && startsWith(body, at, 'desc')) return 'desc';
+  if (len === 8 && startsWith(body, at, 'category')) return 'category';
+  if (len === 11 && startsWith(body, at, 'episode-num')) return 'episode-num';
+  if (len === 9 && startsWith(body, at, 'sub-title')) return 'sub-title';
+  if (len === 6 && startsWith(body, at, 'rating')) return 'rating';
+  return undefined;
 }
 
 /** Pops the innermost of the last few open names that equals the closing tag name at `at`. */
