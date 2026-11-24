@@ -1,5 +1,5 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
-import { sourceOfKey } from './queries';
+import { sourceOfKey } from './queries-shared';
 
 /** Default profile identifier used before multi-profile selection is configured. */
 export const DEFAULT_PROFILE_ID = 'default';

@@ -215,4 +215,47 @@ describe('createDevicePreferencesStore', () => {
       expect(mocks.setItemAsync).not.toHaveBeenCalled();
     });
   });
+
+  describe('per-profile preferences isolation (#15)', () => {
+    it('isolates profile snapshots and persists active profile ID on iOS Settings', async () => {
+      mocks.os = 'ios';
+      const manager = createDevicePreferencesStore();
+      await manager.update({ locale: 'en', themePreset: 'obsidianCrimson' });
+
+      await manager.switchProfile('p_kids');
+      await manager.update({ locale: 'tr', themePreset: 'theaterAmber' });
+      await manager.saveActiveProfileId('p_kids');
+
+      expect(mocks.settingsValues['elv.active-profile.v1']).toBe('p_kids');
+      expect(typeof mocks.settingsValues['elv.preferences.v1.p_kids']).toBe('string');
+
+      const reloaded = createDevicePreferencesStore();
+      expect(await reloaded.loadActiveProfileId()).toBe('p_kids');
+      const kidsSnap = await reloaded.switchProfile('p_kids');
+      expect(kidsSnap.locale).toBe('tr');
+      expect(kidsSnap.themePreset).toBe('theaterAmber');
+
+      const defaultSnap = await reloaded.switchProfile('default');
+      expect(defaultSnap.locale).toBe('en');
+
+      await reloaded.deleteProfilePreferences('p_kids');
+      expect(mocks.settingsValues['elv.preferences.v1.p_kids']).toBeNull();
+    });
+
+    it('isolates profile snapshots and deletes profile entries on Android SecureStore', async () => {
+      mocks.os = 'android';
+      const manager = createDevicePreferencesStore();
+      await manager.switchProfile('p_guest');
+      await manager.update({ locale: 'tr' });
+      await manager.saveActiveProfileId('p_guest');
+
+      expect(mocks.secureData.get('elv.active-profile.v1')).toBe('p_guest');
+      expect(mocks.secureData.has('elv.preferences.v1.p_guest')).toBe(true);
+
+      await manager.switchProfile('default');
+      await manager.deleteProfilePreferences('p_guest');
+      expect(mocks.deleteItemAsync).toHaveBeenCalledWith('elv.preferences.v1.p_guest');
+      expect(mocks.secureData.has('elv.preferences.v1.p_guest')).toBe(false);
+    });
+  });
 });

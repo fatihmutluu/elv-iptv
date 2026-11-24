@@ -5,6 +5,8 @@ import type {
   BrowseKind,
   CategoryQueryOptions,
   CategoryRow,
+  CreateProfileInput,
+  CrossChannelProgrammeRow,
   DiscoveredCategory,
   EpisodeRow,
   FavoriteRow,
@@ -18,7 +20,13 @@ import type {
   LocalM3uSourceInput,
   NextEpisodeRow,
   NowNextEntry,
+  ParentalLockFilter,
+  ParentalLockRecord,
+  ParentalQueryOptions,
+  ParentalSettings,
   PersistedTrackPreference,
+  PinVerifyResult,
+  ProfileRecord,
   ProgrammeRow,
   SaveProgressInput,
   SaveTrackPreferenceInput,
@@ -28,10 +36,13 @@ import type {
   SearchSuggestionsOptions,
   SeasonRow,
   SeriesUnplayedSummary,
+  SetParentalLockInput,
   SourceRow,
   SourceSettings,
   StreamRequest,
   ToggleFavoriteInput,
+  UpdateParentalSettingsPatch,
+  UpdateProfilePatch,
   VodVersionOption,
   WatchProgressRow,
 } from '@elv/data';
@@ -42,6 +53,7 @@ import {
   isBoundedString,
   isCategoryQueryOptions,
   isCleanKey,
+  isCreateProfileInput,
   isElvError,
   isEpgWindowKeyList,
   isFiniteNumber,
@@ -54,7 +66,12 @@ import {
   isNowNextKeyList,
   isOptionalProfileId,
   isOptionalSourceId,
+  isOptionalStrictProfileId,
   isOptionalUserLimit,
+  isParentalLockFilter,
+  isParentalQueryOptions,
+  isParentalUnlockedOption,
+  isPinString,
   isPositiveId,
   isRecord,
   isSafeInt,
@@ -65,9 +82,13 @@ import {
   isSearchQuery,
   isSearchSuggestionsOptions,
   isSeriesKeyList,
+  isSetParentalLockInput,
   isSourceIdList,
   isSourceSettingsPatch,
+  isStrictProfileId,
   isToggleFavoriteInput,
+  isUpdateParentalSettingsPatch,
+  isUpdateProfilePatch,
   MAX_ID_CHARS,
   MAX_ITEM_KEY_CHARS,
 } from './catalog-ipc-guards.ts';
@@ -131,33 +152,80 @@ export type CatalogRpcMethodCall =
       sourceIds?: readonly string[];
       opts?: ListItemsOptions;
     }
-  | { method: 'itemDetail'; itemKey: string }
+  | { method: 'itemDetail'; itemKey: string; opts?: ParentalQueryOptions }
   | { method: 'search'; query: string; opts?: SearchOptions }
   | { method: 'searchSuggestions'; options?: SearchSuggestionsOptions }
   | { method: 'alphabetIndex'; input: AlphabetIndexInput }
-  | { method: 'nowNext'; channelKeys: readonly string[]; nowMs: number }
-  | { method: 'epgWindow'; channelKeys: readonly string[]; fromMs: number; toMs: number }
-  | { method: 'channelByNumber'; num: number; sourceId?: string }
+  | {
+      method: 'nowNext';
+      channelKeys: readonly string[];
+      nowMs: number;
+      opts?: ParentalQueryOptions;
+    }
+  | {
+      method: 'epgWindow';
+      channelKeys: readonly string[];
+      fromMs: number;
+      toMs: number;
+      opts?: ParentalQueryOptions;
+    }
+  | {
+      method: 'epgSlice';
+      sourceId: string;
+      fromMs: number;
+      toMs: number;
+      limit?: number;
+      opts?: ParentalQueryOptions;
+    }
+  | { method: 'channelByNumber'; num: number; sourceId?: string; opts?: ParentalQueryOptions }
   | { method: 'seasons'; seriesId: number }
   | { method: 'episodes'; seriesId: number; season: number }
   | { method: 'queryNextEpisode'; seriesKey: string; currentItemKey: string; profileId?: string }
-  | { method: 'resolveStream'; itemKey: string }
+  | { method: 'resolveStream'; itemKey: string; opts?: ParentalQueryOptions }
   | { method: 'saveProgress'; input: SaveProgressInput }
   | { method: 'setWatched'; itemKey: string; watched: boolean; profileId?: string }
   | { method: 'getProgress'; itemKey: string; profileId?: string }
-  | { method: 'listContinueWatching'; limit?: number; profileId?: string }
+  | {
+      method: 'listContinueWatching';
+      limit?: number;
+      profileId?: string;
+      opts?: { readonly parentalUnlocked?: boolean };
+    }
   | { method: 'listProgressByKeys'; itemKeys: readonly string[]; profileId?: string }
   | { method: 'listSeriesUnplayedCounts'; seriesKeys: readonly string[]; profileId?: string }
   | { method: 'clearProgress'; itemKey: string; profileId?: string }
   | { method: 'toggleFavorite'; input: ToggleFavoriteInput }
   | { method: 'setFavorite'; input: ToggleFavoriteInput; active: boolean }
-  | { method: 'listFavorites'; limit?: number; profileId?: string }
+  | {
+      method: 'listFavorites';
+      limit?: number;
+      profileId?: string;
+      opts?: { readonly parentalUnlocked?: boolean };
+    }
   | { method: 'listFavoriteKeys'; profileId?: string }
   | { method: 'getTrackPreference'; scopeKey: string; profileId?: string }
   | { method: 'saveTrackPreference'; input: SaveTrackPreferenceInput }
   | { method: 'clearTrackPreference'; scopeKey: string; profileId?: string }
   | { method: 'recordRecentChannel'; itemKey: string; sourceId: string; profileId?: string }
-  | { method: 'listRecentChannels'; limit?: number; profileId?: string };
+  | {
+      method: 'listRecentChannels';
+      limit?: number;
+      profileId?: string;
+      opts?: { readonly parentalUnlocked?: boolean };
+    }
+  | { method: 'listProfiles' }
+  | { method: 'createProfile'; input: CreateProfileInput }
+  | { method: 'updateProfile'; id: string; patch: UpdateProfilePatch }
+  | { method: 'deleteProfile'; id: string }
+  | { method: 'getParentalSettings'; profileId?: string }
+  | { method: 'updateParentalSettings'; patch: UpdateParentalSettingsPatch; profileId?: string }
+  | { method: 'listParentalLocks'; profileId?: string; filter?: ParentalLockFilter }
+  | { method: 'setParentalLock'; input: SetParentalLockInput; locked: boolean }
+  | { method: 'hasParentalPin'; profileId?: string }
+  | { method: 'setParentalPin'; pin: string; profileId?: string; currentPin?: string }
+  | { method: 'verifyParentalPin'; pin: string; profileId?: string }
+  | { method: 'clearParentalPin'; currentPin: string; profileId?: string }
+  | { method: 'flushPendingWrites' };
 
 /** Preload to utility process over `MessagePort`. */
 export type CatalogClientMessage =
@@ -216,17 +284,33 @@ export interface CatalogBridge {
     sourceIds?: readonly string[],
     opts?: ListItemsOptions,
   ): Promise<ItemRow[]>;
-  itemDetail(itemKey: string): Promise<ItemDetailRow | null>;
+  itemDetail(itemKey: string, opts?: ParentalQueryOptions): Promise<ItemDetailRow | null>;
   search(query: string, opts?: SearchOptions): Promise<SearchResults>;
   searchSuggestions?(options?: SearchSuggestionsOptions): Promise<readonly SearchSuggestion[]>;
   alphabetIndex?(input: AlphabetIndexInput): Promise<readonly AlphabetBucket[]>;
-  nowNext(channelKeys: readonly string[], nowMs: number): Promise<NowNextEntry[]>;
+  nowNext(
+    channelKeys: readonly string[],
+    nowMs: number,
+    opts?: ParentalQueryOptions,
+  ): Promise<NowNextEntry[]>;
   epgWindow(
     channelKeys: readonly string[],
     fromMs: number,
     toMs: number,
+    opts?: ParentalQueryOptions,
   ): Promise<Record<string, ProgrammeRow[]>>;
-  channelByNumber(num: number, sourceId?: string): Promise<ItemRow | null>;
+  epgSlice?(
+    sourceId: string,
+    fromMs: number,
+    toMs: number,
+    limit?: number,
+    opts?: ParentalQueryOptions,
+  ): Promise<CrossChannelProgrammeRow[]>;
+  channelByNumber(
+    num: number,
+    sourceId?: string,
+    opts?: ParentalQueryOptions,
+  ): Promise<ItemRow | null>;
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   queryNextEpisode(
@@ -234,11 +318,15 @@ export interface CatalogBridge {
     currentItemKey: string,
     profileId?: string,
   ): Promise<NextEpisodeRow | null>;
-  resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
+  resolveStream(itemKey: string, opts?: ParentalQueryOptions): Promise<Result<StreamRequest>>;
   saveProgress(input: SaveProgressInput): Promise<Result<WatchProgressRow>>;
   setWatched(itemKey: string, watched: boolean, profileId?: string): Promise<Result<void>>;
   getProgress(itemKey: string, profileId?: string): Promise<WatchProgressRow | null>;
-  listContinueWatching(limit?: number, profileId?: string): Promise<WatchProgressRow[]>;
+  listContinueWatching(
+    limit?: number,
+    profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
+  ): Promise<WatchProgressRow[]>;
   listProgressByKeys(itemKeys: readonly string[], profileId?: string): Promise<WatchProgressRow[]>;
   listSeriesUnplayedCounts?(
     seriesKeys: readonly string[],
@@ -247,7 +335,11 @@ export interface CatalogBridge {
   clearProgress(itemKey: string, profileId?: string): Promise<Result<void>>;
   toggleFavorite(input: ToggleFavoriteInput): Promise<Result<boolean>>;
   setFavorite(input: ToggleFavoriteInput, active: boolean): Promise<Result<boolean>>;
-  listFavorites(limit?: number, profileId?: string): Promise<FavoriteRow[]>;
+  listFavorites(
+    limit?: number,
+    profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
+  ): Promise<FavoriteRow[]>;
   listFavoriteKeys(profileId?: string): Promise<string[]>;
   getTrackPreference?(
     scopeKey: string,
@@ -256,7 +348,30 @@ export interface CatalogBridge {
   saveTrackPreference?(input: SaveTrackPreferenceInput): Promise<void>;
   clearTrackPreference?(scopeKey: string, profileId?: string): Promise<void>;
   recordRecentChannel?(itemKey: string, sourceId: string, profileId?: string): Promise<void>;
-  listRecentChannels?(limit?: number, profileId?: string): Promise<ItemRow[]>;
+  listRecentChannels?(
+    limit?: number,
+    profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
+  ): Promise<ItemRow[]>;
+  listProfiles?(): Promise<ProfileRecord[]>;
+  createProfile?(input: CreateProfileInput): Promise<Result<ProfileRecord>>;
+  updateProfile?(id: string, patch: UpdateProfilePatch): Promise<Result<ProfileRecord>>;
+  deleteProfile?(id: string): Promise<Result<void>>;
+  getParentalSettings?(profileId?: string): Promise<ParentalSettings>;
+  updateParentalSettings?(
+    patch: UpdateParentalSettingsPatch,
+    profileId?: string,
+  ): Promise<Result<ParentalSettings>>;
+  listParentalLocks?(
+    profileId?: string,
+    filter?: ParentalLockFilter,
+  ): Promise<ParentalLockRecord[]>;
+  setParentalLock?(input: SetParentalLockInput, locked: boolean): Promise<Result<void>>;
+  hasParentalPin?(profileId?: string): Promise<boolean>;
+  setParentalPin?(pin: string, profileId?: string, currentPin?: string): Promise<Result<void>>;
+  verifyParentalPin?(pin: string, profileId?: string): Promise<PinVerifyResult>;
+  clearParentalPin?(currentPin: string, profileId?: string): Promise<Result<void>>;
+  flushPendingWrites?(): Promise<void>;
   onChanged(listener: () => void): () => void;
   /** Subscribes to unexpected `catalog-worker` disconnect notifications (`#435`). */
   onDisconnected(listener: (message: CatalogDisconnectedMessage) => void): () => void;
@@ -268,6 +383,8 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
   switch (x['method']) {
     case 'ping':
     case 'listSources':
+    case 'listProfiles':
+    case 'flushPendingWrites':
       return true;
     case 'addSource':
       return isAddSourceInput(x['input']);
@@ -319,7 +436,9 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         (x['opts'] === undefined || isListItemsOptions(x['opts']))
       );
     case 'itemDetail':
-      return isCleanKey(x['itemKey']);
+      return (
+        isCleanKey(x['itemKey']) && (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
+      );
     case 'search':
       return isSearchQuery(x['query']) && (x['opts'] === undefined || isSearchOptions(x['opts']));
     case 'searchSuggestions':
@@ -327,15 +446,33 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
     case 'alphabetIndex':
       return isAlphabetIndexInput(x['input']);
     case 'nowNext':
-      return isNowNextKeyList(x['channelKeys']) && isNonNegativeFinite(x['nowMs']);
+      return (
+        isNowNextKeyList(x['channelKeys']) &&
+        isNonNegativeFinite(x['nowMs']) &&
+        (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
+      );
     case 'epgWindow':
       return (
         isEpgWindowKeyList(x['channelKeys']) &&
         isNonNegativeFinite(x['fromMs']) &&
-        isNonNegativeFinite(x['toMs'])
+        isNonNegativeFinite(x['toMs']) &&
+        (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
+      );
+    case 'epgSlice':
+      return (
+        isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
+        isNonNegativeFinite(x['fromMs']) &&
+        isNonNegativeFinite(x['toMs']) &&
+        (x['limit'] === undefined ||
+          (isSafeInt(x['limit']) && x['limit'] >= 0 && x['limit'] <= 500)) &&
+        (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
       );
     case 'channelByNumber':
-      return isNonNegativeFinite(x['num']) && isOptionalSourceId(x['sourceId']);
+      return (
+        isNonNegativeFinite(x['num']) &&
+        isOptionalSourceId(x['sourceId']) &&
+        (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
+      );
     case 'seasons':
       return isSafeInt(x['seriesId']);
     case 'episodes':
@@ -347,7 +484,10 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isOptionalProfileId(x['profileId'])
       );
     case 'resolveStream':
-      return isBoundedString(x['itemKey'], 0, MAX_ITEM_KEY_CHARS);
+      return (
+        isBoundedString(x['itemKey'], 0, MAX_ITEM_KEY_CHARS) &&
+        (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
+      );
     case 'saveProgress':
       return isSaveProgressInput(x['input']);
     case 'setWatched':
@@ -361,7 +501,11 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isCleanKey(x['itemKey']) && isOptionalProfileId(x['profileId']);
     case 'listContinueWatching':
     case 'listFavorites':
-      return isOptionalUserLimit(x['limit']) && isOptionalProfileId(x['profileId']);
+      return (
+        isOptionalUserLimit(x['limit']) &&
+        isOptionalProfileId(x['profileId']) &&
+        (x['opts'] === undefined || isParentalUnlockedOption(x['opts']))
+      );
     case 'listProgressByKeys':
       return isItemKeyList(x['itemKeys']) && isOptionalProfileId(x['profileId']);
     case 'listSeriesUnplayedCounts':
@@ -384,7 +528,39 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isOptionalProfileId(x['profileId'])
       );
     case 'listRecentChannels':
-      return isOptionalUserLimit(x['limit']) && isOptionalProfileId(x['profileId']);
+      return (
+        isOptionalUserLimit(x['limit']) &&
+        isOptionalProfileId(x['profileId']) &&
+        (x['opts'] === undefined || isParentalUnlockedOption(x['opts']))
+      );
+    case 'createProfile':
+      return isCreateProfileInput(x['input']);
+    case 'updateProfile':
+      return isStrictProfileId(x['id']) && isUpdateProfilePatch(x['patch']);
+    case 'deleteProfile':
+      return isStrictProfileId(x['id']);
+    case 'getParentalSettings':
+    case 'hasParentalPin':
+      return isOptionalStrictProfileId(x['profileId']);
+    case 'updateParentalSettings':
+      return isUpdateParentalSettingsPatch(x['patch']) && isOptionalStrictProfileId(x['profileId']);
+    case 'listParentalLocks':
+      return (
+        isOptionalStrictProfileId(x['profileId']) &&
+        (x['filter'] === undefined || isParentalLockFilter(x['filter']))
+      );
+    case 'setParentalLock':
+      return isSetParentalLockInput(x['input']) && typeof x['locked'] === 'boolean';
+    case 'setParentalPin':
+      return (
+        isPinString(x['pin'], 1) &&
+        isOptionalStrictProfileId(x['profileId']) &&
+        (x['currentPin'] === undefined || isPinString(x['currentPin'], 0))
+      );
+    case 'verifyParentalPin':
+      return isPinString(x['pin'], 0) && isOptionalStrictProfileId(x['profileId']);
+    case 'clearParentalPin':
+      return isPinString(x['currentPin'], 0) && isOptionalStrictProfileId(x['profileId']);
     default:
       return false;
   }

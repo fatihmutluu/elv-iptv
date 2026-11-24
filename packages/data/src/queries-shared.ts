@@ -4,14 +4,16 @@ export type BrowseKind = 'live' | 'movie' | 'series';
 /** Sort order for catalog browse queries (`#125`). */
 export type ItemSortOrder = 'default' | 'alpha';
 
-/** Optional sorting, watched-state filtering, and variant/version deduplication for browse queries (`#125`, `#218`, `#404`). */
+/** Optional sorting, watched-state filtering, parental unlock, and variant/version deduplication for browse queries (`#125`, `#218`, `#404`, `#31`). */
 export interface ListItemsOptions {
   /** `'default'` preserves provider/category order; `'alpha'` orders by `sort_title ASC, key ASC`. */
   readonly sortBy?: ItemSortOrder;
   /** When `true`, excludes items marked `watched = 1` in `watch_progress` for `profileId`. */
   readonly excludeWatched?: boolean;
-  /** Profile identifier for `excludeWatched` filtering (defaults to `'default'`). */
+  /** Profile identifier for `excludeWatched` and parental filtering (defaults to `'default'`). */
   readonly profileId?: string;
+  /** When `true`, bypasses query-layer parental restrictions for an unlocked session (`#31`). */
+  readonly parentalUnlocked?: boolean;
   /** When `true` on `live` queries, collapses quality variants within `(source_id, category_id)` (`#218`). */
   readonly collapseVariants?: boolean;
   /** When `true` on `movie` queries, groups multi-version titles within `(source_id, category_id)` (`#404`). */
@@ -95,6 +97,31 @@ export function clampPage(offset: number, limit: number): { offset: number; limi
     offset: Math.max(0, whole(offset)),
     limit: Math.min(MAX_PAGE, Math.max(0, whole(limit))),
   };
+}
+
+const CATEGORY_SEP = '|';
+
+/** Encodes a category reference; source ids and kinds never contain the separator. */
+export function categoryId(sourceId: string, kind: BrowseKind, providerId: string): string {
+  return [sourceId, kind, providerId].join(CATEGORY_SEP);
+}
+
+/** Decodes {@link categoryId}; `undefined` for anything else. */
+export function parseCategoryId(
+  id: string,
+): { sourceId: string; kind: BrowseKind; providerId: string } | undefined {
+  const first = id.indexOf(CATEGORY_SEP);
+  const second = id.indexOf(CATEGORY_SEP, first + 1);
+  if (first < 0 || second < 0) return undefined;
+  const kind = id.slice(first + 1, second);
+  if (kind !== 'live' && kind !== 'movie' && kind !== 'series') return undefined;
+  return { sourceId: id.slice(0, first), kind, providerId: id.slice(second + 1) };
+}
+
+/** The source id inside a content key (`x:<source>:...` or `m:<source>:...`), so lookups use the unique index. */
+export function sourceOfKey(key: string): string | undefined {
+  const parts = key.split(':');
+  return (parts[0] === 'x' || parts[0] === 'm') && parts[1] ? parts[1] : undefined;
 }
 
 /** @internal Maps a raw SQLite item row to {@link ItemRow}. */

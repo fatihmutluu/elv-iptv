@@ -204,6 +204,8 @@ describe('removeSource', () => {
       track_preferences:
         "(profile_id, scope_key, source_id, audio_lang, updated_at) VALUES ('default', ?, ?, 'tr', 1)",
       recent_channels: "(profile_id, source_id, item_key, watched_at) VALUES ('default', ?, ?, 1)",
+      parental_locks:
+        "(profile_id, source_id, target_kind, item_kind, target_key, created_at) VALUES ('default', ?, 'category', 'live', 'c', 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -275,6 +277,8 @@ describe('removeSource', () => {
       track_preferences:
         "(profile_id, scope_key, source_id, audio_lang, updated_at) VALUES ('default', ?, ?, 'tr', 1)",
       recent_channels: "(profile_id, source_id, item_key, watched_at) VALUES ('default', ?, ?, 1)",
+      parental_locks:
+        "(profile_id, source_id, target_kind, item_kind, target_key, created_at) VALUES ('default', ?, 'category', 'live', 'c', 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {

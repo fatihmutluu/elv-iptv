@@ -39,9 +39,21 @@ export {
 } from './catalog-ui-cache';
 export { type DetailCastMember, type DetailTarget, detailTargetFromItem } from './detail-target';
 export {
+  DEFAULT_PROFILE_RECORD,
+  defaultParentalSettings,
+  type PinDialogMode,
+  type PinDialogRequest,
+  type ProfileContextValue,
+  ProfileProvider,
+  type ProfileProviderProps,
+  useParental,
+  useProfile,
+} from './ProfileContext';
+export {
   createPagedListSource,
   type PagedListSource,
 } from './paged-list-source';
+export { createProfileScopedCatalog } from './profile-scoped-catalog';
 export { useCardQuickActionsState } from './useCardQuickActionsState';
 export {
   RouteActiveProvider,

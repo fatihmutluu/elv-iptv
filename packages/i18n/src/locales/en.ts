@@ -1,3 +1,5 @@
+import { enProfilesMessages } from './en-profiles';
+
 /** English (source) message catalog. Every other locale must define the exact same keys. */
 export const enMessages = {
   'app.title': 'ELV IPTV',
@@ -686,6 +688,7 @@ export const enMessages = {
   'player.videoQuality': 'Video quality',
   'player.videoQualityAuto': 'Auto',
   'player.delayReset': 'Reset (0 ms)',
+  ...enProfilesMessages,
 } as const;
 
 /** Valid message identifier across all supported locales. */

@@ -4,7 +4,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 /** Navigable category sections inside {@link SettingsScreen}. */
-export type SettingsSection = 'appearance' | 'playback' | 'liveTv' | 'sources' | 'licenses';
+export type SettingsSection =
+  | 'appearance'
+  | 'playback'
+  | 'liveTv'
+  | 'profiles'
+  | 'sources'
+  | 'licenses';
 
 /** Preference sections navigated row-by-row directly via {@link useTvSettingsNavigation}. */
 export type PreferenceSettingsSection = 'appearance' | 'playback' | 'liveTv';
@@ -14,6 +20,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'appearance',
   'playback',
   'liveTv',
+  'profiles',
   'sources',
   'licenses',
 ];

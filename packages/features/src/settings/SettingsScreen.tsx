@@ -71,6 +71,8 @@ export interface SettingsScreenProps {
   readonly onSectionChange?: (section: SettingsSection) => void;
   /** Reactive preferences controller wired by `AppShell` from `usePreferences()`. */
   readonly preferences?: SettingsPreferencesController;
+  /** Slot rendering the embedded `ProfilesAndParentalPanel` inside the Profiles & Parental section (`#15`, `#31`). */
+  readonly renderProfiles?: (slot: SettingsPaneSlotProps) => ReactElement;
   /** Slot rendering the embedded `SourcesScreen` inside the Sources section. */
   readonly renderSources?: (slot: SettingsPaneSlotProps) => ReactElement;
   /** Slot rendering the embedded `ThirdPartyNoticesScreen` inside the About & Licenses section. */
@@ -110,6 +112,12 @@ const SECTION_META: readonly NavSectionMeta[] = [
     testID: 'settings-tab-liveTv',
   },
   {
+    id: 'profiles',
+    icon: 'profile',
+    labelKey: 'settings.section.profiles',
+    testID: 'settings-tab-profiles',
+  },
+  {
     id: 'sources',
     icon: 'sources',
     labelKey: 'settings.section.sources',
@@ -140,6 +148,7 @@ export function SettingsScreen({
   initialSection = 'appearance',
   onSectionChange,
   preferences,
+  renderProfiles,
   renderSources,
   renderLicenses,
   onFocusTopNav,
@@ -298,6 +307,10 @@ export function SettingsScreen({
           activeSection === 'liveTv' ? (tv.focusedControlId as LiveTvFocusId | null) : null
         }
       />
+    ) : activeSection === 'profiles' ? (
+      renderProfiles ? (
+        renderProfiles(embeddedSlot)
+      ) : null
     ) : activeSection === 'sources' ? (
       renderSources ? (
         renderSources(embeddedSlot)

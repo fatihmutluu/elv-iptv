@@ -1,8 +1,13 @@
 import type { ContentKind, SqlDriver, SqlValue } from '@elv/domain';
-import { parseCategoryId } from './queries';
-import { ITEM_TABLE, watchedFilterClause } from './queries-shared';
+import { isAdultKeywordMatch } from './parental-policy';
+import {
+  buildSqlItemRestrictionClause,
+  isCategoryRestricted,
+  loadActiveParentalFilter,
+} from './parental-repo';
+import { ITEM_TABLE, parseCategoryId, watchedFilterClause } from './queries-shared';
 
-/** Input parameters for {@link queryAlphabetIndex} and `CatalogService.alphabetIndex` (`#407`). */
+/** Input parameters for {@link queryAlphabetIndex} and `CatalogService.alphabetIndex` (`#407`, `#31`). */
 export interface AlphabetIndexInput {
   readonly sourceId?: string;
   readonly kind: ContentKind;
@@ -11,6 +16,7 @@ export interface AlphabetIndexInput {
   readonly groupVersions?: boolean;
   readonly excludeWatched?: boolean;
   readonly profileId?: string;
+  readonly parentalUnlocked?: boolean;
 }
 
 /** One non-empty `#` (`< 'a'`), `A..Z`, or trailing non-Latin (`…`, `> 'z'`) prefix bucket with its exact 0-based offset in `'alpha'` sort order (`#407`). */
@@ -110,11 +116,38 @@ function toSortedBuckets(rows: readonly { letter: string; count: number }[]): Al
   return out;
 }
 
+function letterForSortTitle(sortTitle: string): string {
+  const ch = sortTitle.slice(0, 1);
+  if (ch < 'a') return '#';
+  if (ch <= 'z') return ch.toUpperCase();
+  return '…';
+}
+
+function toSortedBucketsFromRows(
+  rows: readonly { name: string; sort_title: string }[],
+): AlphabetBucket[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (isAdultKeywordMatch(row.name)) continue;
+    const letter = letterForSortTitle(row.sort_title ?? '');
+    counts.set(letter, (counts.get(letter) ?? 0) + 1);
+  }
+  const out: AlphabetBucket[] = [];
+  let offset = 0;
+  for (const letter of BUCKET_ORDER) {
+    const count = counts.get(letter) ?? 0;
+    if (count <= 0) continue;
+    out.push({ letter, offset, count });
+    offset += count;
+  }
+  return out;
+}
+
 /**
  * Computes the non-empty `#`, `A..Z` prefix buckets and cumulative 0-based row offsets for
  * alphabetical (`sortBy: 'alpha'`) catalog browsing in a single SQL `GROUP BY` query (`#407`).
  * Applies the exact same `is_hidden = 0`, category `placements`, `excludeWatched`,
- * `collapseVariants`, and `groupVersions` predicates as `items()` and `allSourcesItems()`.
+ * parental controls (`#31`), `collapseVariants`, and `groupVersions` predicates as `items()` and `allSourcesItems()`.
  */
 export async function queryAlphabetIndex(
   db: SqlDriver,
@@ -141,13 +174,49 @@ export async function queryAlphabetIndex(
     }
   }
 
+  const filter = await loadActiveParentalFilter(db, input.profileId, input.parentalUnlocked);
+  if (
+    filter !== null &&
+    providerCategoryId !== undefined &&
+    resolvedSourceId !== undefined &&
+    isCategoryRestricted(filter, resolvedSourceId, kind, providerCategoryId)
+  ) {
+    return [];
+  }
+
   const table = ITEM_TABLE[kind];
   const watched = watchedFilterClause('t.key', input);
+  const restrict =
+    filter === null
+      ? { clause: '', params: [] as readonly SqlValue[] }
+      : buildSqlItemRestrictionClause(filter, kind, 't.source_id', 't.key', resolvedSourceId);
+  const filterKeywords = filter?.blockAdultKeywords === true;
 
   if (providerCategoryId !== undefined && resolvedSourceId !== undefined) {
     const dedup = categoryDedupSpec(kind, input);
-    const params: SqlValue[] = [resolvedSourceId, kind, providerCategoryId, ...watched.params];
+    const params: SqlValue[] = [
+      resolvedSourceId,
+      kind,
+      providerCategoryId,
+      ...watched.params,
+      ...restrict.params,
+    ];
     if (dedup !== undefined) {
+      if (filterKeywords) {
+        const rows = await db.all<{ name: string; sort_title: string }>(
+          `WITH ranked AS (
+             SELECT t.name, t.sort_title,
+                    ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
+               FROM placements p
+               JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
+              WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
+                AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}
+           )
+           SELECT name, sort_title FROM ranked WHERE rn = 1`,
+          params,
+        );
+        return toSortedBucketsFromRows(rows);
+      }
       const rows = await db.all<{ letter: string; count: number }>(
         `WITH ranked AS (
            SELECT t.sort_title,
@@ -155,7 +224,7 @@ export async function queryAlphabetIndex(
              FROM placements p
              JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
             WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
-              AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}
+              AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}
          )
          SELECT ${LETTER_CASE_EXPR('sort_title')} AS letter, COUNT(*) AS count
            FROM ranked
@@ -166,12 +235,24 @@ export async function queryAlphabetIndex(
       return toSortedBuckets(rows);
     }
 
+    if (filterKeywords) {
+      const rows = await db.all<{ name: string; sort_title: string }>(
+        `SELECT t.name, t.sort_title
+           FROM placements p
+           JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
+          WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}`,
+        params,
+      );
+      return toSortedBucketsFromRows(rows);
+    }
+
     const rows = await db.all<{ letter: string; count: number }>(
       `SELECT ${LETTER_CASE_EXPR('t.sort_title')} AS letter, COUNT(*) AS count
          FROM placements p
          JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
         WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
-          AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}
+          AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}
         GROUP BY letter`,
       params,
     );
@@ -182,16 +263,31 @@ export async function queryAlphabetIndex(
   const params: SqlValue[] = [
     ...(resolvedSourceId === undefined ? [] : [resolvedSourceId]),
     ...watched.params,
+    ...restrict.params,
   ];
   const dedup = tableDedupSpec(kind, input);
   if (dedup !== undefined) {
+    if (filterKeywords) {
+      const rows = await db.all<{ name: string; sort_title: string }>(
+        `WITH ranked AS (
+           SELECT t.name, t.sort_title,
+                  ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
+             FROM ${table} t
+             JOIN sources s ON s.id = t.source_id AND s.deleting = 0
+            WHERE ${sourceClause}t.is_hidden = 0${watched.clause}${restrict.clause}
+         )
+         SELECT name, sort_title FROM ranked WHERE rn = 1`,
+        params,
+      );
+      return toSortedBucketsFromRows(rows);
+    }
     const rows = await db.all<{ letter: string; count: number }>(
       `WITH ranked AS (
          SELECT t.sort_title,
                 ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
            FROM ${table} t
            JOIN sources s ON s.id = t.source_id AND s.deleting = 0
-          WHERE ${sourceClause}t.is_hidden = 0${watched.clause}
+          WHERE ${sourceClause}t.is_hidden = 0${watched.clause}${restrict.clause}
        )
        SELECT ${LETTER_CASE_EXPR('sort_title')} AS letter, COUNT(*) AS count
          FROM ranked
@@ -202,11 +298,22 @@ export async function queryAlphabetIndex(
     return toSortedBuckets(rows);
   }
 
+  if (filterKeywords) {
+    const rows = await db.all<{ name: string; sort_title: string }>(
+      `SELECT t.name, t.sort_title
+         FROM ${table} t
+         JOIN sources s ON s.id = t.source_id AND s.deleting = 0
+        WHERE ${sourceClause}t.is_hidden = 0${watched.clause}${restrict.clause}`,
+      params,
+    );
+    return toSortedBucketsFromRows(rows);
+  }
+
   const rows = await db.all<{ letter: string; count: number }>(
     `SELECT ${LETTER_CASE_EXPR('t.sort_title')} AS letter, COUNT(*) AS count
        FROM ${table} t
        JOIN sources s ON s.id = t.source_id AND s.deleting = 0
-      WHERE ${sourceClause}t.is_hidden = 0${watched.clause}
+      WHERE ${sourceClause}t.is_hidden = 0${watched.clause}${restrict.clause}
       GROUP BY letter`,
     params,
   );

@@ -76,6 +76,7 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
           : err(elvError('storage', 'unsupported'));
       }),
     listSources: async () => (await open()).listSources(),
+    latestImportHealth: async (sourceId) => (await open()).latestImportHealth?.(sourceId) ?? [],
     categories: async (sourceId, kind, opts) => (await open()).categories(sourceId, kind, opts),
     items: async (categoryId, offset, limit, opts) =>
       (await open()).items(categoryId, offset, limit, opts),
@@ -84,9 +85,9 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     itemVersions: async (itemKey) => (await open()).itemVersions?.(itemKey) ?? [],
     allSourcesItems: async (kind, offset, limit, sourceIds, opts) =>
       (await open()).allSourcesItems?.(kind, offset, limit, sourceIds, opts) ?? [],
-    itemDetail: async (itemKey) => {
+    itemDetail: async (itemKey, opts) => {
       const svc = await open();
-      return svc.itemDetail ? svc.itemDetail(itemKey) : null;
+      return svc.itemDetail ? svc.itemDetail(itemKey, opts) : null;
     },
     search: async (query, opts) =>
       (await open()).search?.(query, opts) ?? {
@@ -98,16 +99,20 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
       },
     searchSuggestions: async (options) => (await open()).searchSuggestions?.(options) ?? [],
     alphabetIndex: async (input) => (await open()).alphabetIndex?.(input) ?? [],
-    nowNext: async (channelKeys, nowMs) => (await open()).nowNext?.(channelKeys, nowMs) ?? [],
-    epgWindow: async (channelKeys, fromMs, toMs) =>
-      (await open()).epgWindow?.(channelKeys, fromMs, toMs) ?? {},
-    channelByNumber: async (num, sourceId) =>
-      (await open()).channelByNumber?.(num, sourceId) ?? null,
+    nowNext: async (channelKeys, nowMs, opts) =>
+      (await open()).nowNext?.(channelKeys, nowMs, opts) ?? [],
+    epgWindow: async (channelKeys, fromMs, toMs, opts) =>
+      (await open()).epgWindow?.(channelKeys, fromMs, toMs, opts) ?? {},
+    epgSlice: async (sourceId, fromMs, toMs, limit, opts) =>
+      (await open()).epgSlice?.(sourceId, fromMs, toMs, limit, opts) ?? [],
+    channelByNumber: async (num, sourceId, opts) =>
+      (await open()).channelByNumber?.(num, sourceId, opts) ?? null,
     seasons: (seriesId) => wrapResult(async () => (await open()).seasons(seriesId)),
     episodes: async (seriesId, season) => (await open()).episodes(seriesId, season),
     queryNextEpisode: async (seriesKey, currentItemKey, profileId) =>
       (await open()).queryNextEpisode?.(seriesKey, currentItemKey, profileId) ?? null,
-    resolveStream: (itemKey) => wrapResult(async () => (await open()).resolveStream(itemKey)),
+    resolveStream: (itemKey, opts) =>
+      wrapResult(async () => (await open()).resolveStream(itemKey, opts)),
     saveProgress: (input) =>
       wrapResult(async () => {
         const cat = await open();
@@ -122,8 +127,8 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
       }),
     getProgress: async (itemKey, profileId) =>
       (await open()).getProgress?.(itemKey, profileId) ?? null,
-    listContinueWatching: async (limit, profileId) =>
-      (await open()).listContinueWatching?.(limit, profileId) ?? [],
+    listContinueWatching: async (limit, profileId, opts) =>
+      (await open()).listContinueWatching?.(limit, profileId, opts) ?? [],
     listProgressByKeys: async (itemKeys, profileId) =>
       (await open()).listProgressByKeys?.(itemKeys, profileId) ?? [],
     listSeriesUnplayedCounts: async (seriesKeys, profileId) =>
@@ -149,8 +154,8 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
           ? cat.setFavorite(input, active)
           : err(elvError('storage', 'unsupported'));
       }),
-    listFavorites: async (limit, profileId) =>
-      (await open()).listFavorites?.(limit, profileId) ?? [],
+    listFavorites: async (limit, profileId, opts) =>
+      (await open()).listFavorites?.(limit, profileId, opts) ?? [],
     listFavoriteKeys: async (profileId) => (await open()).listFavoriteKeys?.(profileId) ?? [],
     getTrackPreference: async (scopeKey, profileId) =>
       (await open()).getTrackPreference?.(scopeKey, profileId) ?? null,
@@ -163,8 +168,76 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     recordRecentChannel: async (itemKey, sourceId, profileId) => {
       await (await open()).recordRecentChannel?.(itemKey, sourceId, profileId);
     },
-    listRecentChannels: async (limit, profileId) =>
-      (await open()).listRecentChannels?.(limit, profileId) ?? [],
+    listRecentChannels: async (limit, profileId, opts) =>
+      (await open()).listRecentChannels?.(limit, profileId, opts) ?? [],
+    listProfiles: async () => (await open()).listProfiles?.() ?? [],
+    createProfile: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.createProfile
+          ? cat.createProfile(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    updateProfile: (id, patch) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.updateProfile
+          ? cat.updateProfile(id, patch)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    deleteProfile: (id) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.deleteProfile ? cat.deleteProfile(id) : err(elvError('storage', 'unsupported'));
+      }),
+    getParentalSettings: async (profileId) => {
+      const cat = await open();
+      if (cat.getParentalSettings) return cat.getParentalSettings(profileId);
+      return {
+        profileId: profileId ?? 'default',
+        enabled: false,
+        blockAdultKeywords: true,
+        maxRatingAge: null,
+        unlockTimeoutMin: 30,
+        updatedAt: 0,
+      };
+    },
+    updateParentalSettings: (patch, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.updateParentalSettings
+          ? cat.updateParentalSettings(patch, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    listParentalLocks: async (profileId, filter) =>
+      (await open()).listParentalLocks?.(profileId, filter) ?? [],
+    setParentalLock: (input, locked) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.setParentalLock
+          ? cat.setParentalLock(input, locked)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    hasParentalPin: async (profileId) => (await open()).hasParentalPin?.(profileId) ?? false,
+    setParentalPin: (pin, profileId, currentPin) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.setParentalPin
+          ? cat.setParentalPin(pin, profileId, currentPin)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    verifyParentalPin: async (pin, profileId) =>
+      (await open()).verifyParentalPin?.(pin, profileId) ?? {
+        ok: false,
+        remainingAttempts: 0,
+      },
+    clearParentalPin: (currentPin, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.clearParentalPin
+          ? cat.clearParentalPin(currentPin, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
     flushPendingWrites: async () => {
       if (cached === undefined) return;
       const cat = await cached.catch(() => undefined);

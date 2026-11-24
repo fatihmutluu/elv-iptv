@@ -360,13 +360,17 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_LEFT);
     await pressKey(KEYCODE_DPAD_LEFT);
 
-    // Down x3 selects 'sources', Down again selects 'licenses' -> Right hands focus to embedded licenses slot
+    // Down x4 selects 'sources', Down again selects 'licenses' -> Right hands focus to embedded licenses slot
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(screen.getByTestId('settings-tab-playback').props.accessibilityState.selected).toBe(
       true,
     );
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(screen.getByTestId('settings-tab-liveTv').props.accessibilityState.selected).toBe(true);
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(screen.getByTestId('settings-tab-profiles').props.accessibilityState.selected).toBe(
+      true,
+    );
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(screen.getByTestId('settings-tab-sources').props.accessibilityState.selected).toBe(true);
     await pressKey(KEYCODE_DPAD_DOWN);

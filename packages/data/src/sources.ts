@@ -242,6 +242,7 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'favorites',
   'track_preferences',
   'recent_channels',
+  'parental_locks',
 ];
 const NON_URLVARS_PARTS = ['xtream', 'playlist'] as const;
 
@@ -506,6 +507,7 @@ export async function finishDeletingSource(
     await tx.run('DELETE FROM favorites WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM track_preferences WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM recent_channels WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM parental_locks WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });
   await opts?.localPlaylistStore?.remove(id).catch(() => undefined);

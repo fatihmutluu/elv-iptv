@@ -10,7 +10,13 @@ import {
   type SqlDriver,
 } from '@elv/domain';
 import { type AlphabetBucket, type AlphabetIndexInput, queryAlphabetIndex } from './alphabet-index';
-import { isCredentialFingerprint } from './credential-fingerprint';
+import { createCatalogProfileMethods } from './catalog-profiles';
+import {
+  mapNewSourceRow,
+  mergeSourceSettings,
+  parseSourceMeta,
+  type SourceRow,
+} from './catalog-source-meta';
 import { type DiscoveredCategory, discoverSourceCategories } from './discover-categories';
 import {
   type CrossChannelProgrammeRow,
@@ -27,6 +33,17 @@ import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import { importCatalog, loadSeriesEpisodes } from './import-xtream';
 import { type ManifestStore, saveManifest } from './manifest';
 import { type NextEpisodeRow, queryNextEpisode } from './next-episode';
+import type {
+  ParentalLockFilter,
+  ParentalLockRecord,
+  ParentalQueryOptions,
+  ParentalSettings,
+  PinVerifyResult,
+  SetParentalLockInput,
+  UpdateParentalSettingsPatch,
+} from './parental-policy';
+import { isItemRestricted, loadActiveParentalFilter } from './parental-repo';
+import type { CreateProfileInput, ProfileRecord, UpdateProfilePatch } from './profiles-repo';
 import {
   type BrowseKind,
   type CategoryQueryOptions,
@@ -70,12 +87,8 @@ import {
   type LocalM3uSourceInput,
   type LocalPlaylistStore,
   type M3uSourceInput,
-  normalizeActiveConnections,
-  normalizeMaxConnections,
   updateSourceSettings as persistSourceSettings,
   removeSource,
-  type SourceAccountMeta,
-  type SourceCategorySelection,
   type SourceKind,
   type SourceRecord,
   type SourceSettings,
@@ -109,7 +122,7 @@ import {
 } from './user-state';
 import { saveUserDataSnapshot, type UserDataStore } from './user-state-backup';
 
-export type { StreamRequest };
+export type { SourceRow, StreamRequest };
 
 /** Default largest Xtream response body (4 MiB): bigger lists load per category. */
 export const DEVICE_MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -146,23 +159,6 @@ export interface CatalogDeps {
   decompressor?: Decompressor;
   /** Optional sandboxed local M3U byte store for local file imports (`#51`). */
   localPlaylistStore?: LocalPlaylistStore;
-}
-
-/** A source as the menu shows it. */
-export interface SourceRow {
-  id: string;
-  kind: SourceKind;
-  name: string;
-  createdAt: number;
-  needsImport: boolean;
-  lastCatalogSyncAt?: number | null;
-  lastGuideSyncAt?: number | null;
-  accountMeta?: SourceAccountMeta;
-  credentialFingerprint?: string;
-  readonly isLocalPlaylist?: boolean;
-  readonly categorySelection?: SourceCategorySelection;
-  readonly xmltvTimezone?: string;
-  readonly allowLegacyTls?: boolean;
 }
 
 /** Input of {@link CatalogService.addSource}. */
@@ -211,25 +207,35 @@ export interface CatalogService {
     sourceIds?: readonly string[],
     opts?: ListItemsOptions,
   ): Promise<ItemRow[]>;
-  itemDetail?(itemKey: string): Promise<ItemDetailRow | null>;
+  itemDetail?(itemKey: string, opts?: ParentalQueryOptions): Promise<ItemDetailRow | null>;
   search?(query: string, opts?: SearchOptions): Promise<SearchResults>;
   /** Queries bounded on-device idle search suggestions (`#397`). */
   searchSuggestions?(options?: SearchSuggestionsOptions): Promise<readonly SearchSuggestion[]>;
   /** Computes `#`, `A..Z` prefix buckets and cumulative 0-based offsets for `'alpha'` browsing (`#407`). */
   alphabetIndex?(input: AlphabetIndexInput): Promise<readonly AlphabetBucket[]>;
-  nowNext?(channelKeys: readonly string[], nowMs: number): Promise<NowNextEntry[]>;
+  nowNext?(
+    channelKeys: readonly string[],
+    nowMs: number,
+    opts?: ParentalQueryOptions,
+  ): Promise<NowNextEntry[]>;
   epgWindow?(
     channelKeys: readonly string[],
     fromMs: number,
     toMs: number,
+    opts?: ParentalQueryOptions,
   ): Promise<Record<string, ProgrammeRow[]>>;
   epgSlice?(
     sourceId: string,
     fromMs: number,
     toMs: number,
     limit?: number,
+    opts?: ParentalQueryOptions,
   ): Promise<CrossChannelProgrammeRow[]>;
-  channelByNumber?(num: number, sourceId?: string): Promise<ItemRow | null>;
+  channelByNumber?(
+    num: number,
+    sourceId?: string,
+    opts?: ParentalQueryOptions,
+  ): Promise<ItemRow | null>;
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   queryNextEpisode?(
@@ -237,11 +243,15 @@ export interface CatalogService {
     currentItemKey: string,
     profileId?: string,
   ): Promise<NextEpisodeRow | null>;
-  resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
+  resolveStream(itemKey: string, opts?: ParentalQueryOptions): Promise<Result<StreamRequest>>;
   saveProgress?(input: SaveProgressInput): Promise<Result<WatchProgressRow>>;
   setWatched?(itemKey: string, watched: boolean, profileId?: string): Promise<Result<void>>;
   getProgress?(itemKey: string, profileId?: string): Promise<WatchProgressRow | null>;
-  listContinueWatching?(limit?: number, profileId?: string): Promise<WatchProgressRow[]>;
+  listContinueWatching?(
+    limit?: number,
+    profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
+  ): Promise<WatchProgressRow[]>;
   listProgressByKeys?(itemKeys: readonly string[], profileId?: string): Promise<WatchProgressRow[]>;
   listSeriesUnplayedCounts?(
     seriesKeys: readonly string[],
@@ -250,7 +260,11 @@ export interface CatalogService {
   clearProgress?(itemKey: string, profileId?: string): Promise<Result<void>>;
   toggleFavorite?(input: ToggleFavoriteInput): Promise<Result<boolean>>;
   setFavorite?(input: ToggleFavoriteInput, active: boolean): Promise<Result<boolean>>;
-  listFavorites?(limit?: number, profileId?: string): Promise<FavoriteRow[]>;
+  listFavorites?(
+    limit?: number,
+    profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
+  ): Promise<FavoriteRow[]>;
   listFavoriteKeys?(profileId?: string): Promise<string[]>;
   getTrackPreference?(
     scopeKey: string,
@@ -259,212 +273,32 @@ export interface CatalogService {
   saveTrackPreference?(input: SaveTrackPreferenceInput): Promise<void>;
   clearTrackPreference?(scopeKey: string, profileId?: string): Promise<void>;
   recordRecentChannel?(itemKey: string, sourceId: string, profileId?: string): Promise<void>;
-  listRecentChannels?(limit?: number, profileId?: string): Promise<ItemRow[]>;
+  listRecentChannels?(
+    limit?: number,
+    profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
+  ): Promise<ItemRow[]>;
+  listProfiles?(): Promise<ProfileRecord[]>;
+  createProfile?(input: CreateProfileInput): Promise<Result<ProfileRecord>>;
+  updateProfile?(id: string, patch: UpdateProfilePatch): Promise<Result<ProfileRecord>>;
+  deleteProfile?(id: string): Promise<Result<void>>;
+  getParentalSettings?(profileId?: string): Promise<ParentalSettings>;
+  updateParentalSettings?(
+    patch: UpdateParentalSettingsPatch,
+    profileId?: string,
+  ): Promise<Result<ParentalSettings>>;
+  listParentalLocks?(
+    profileId?: string,
+    filter?: ParentalLockFilter,
+  ): Promise<ParentalLockRecord[]>;
+  setParentalLock?(input: SetParentalLockInput, locked: boolean): Promise<Result<void>>;
+  hasParentalPin?(profileId?: string): Promise<boolean>;
+  setParentalPin?(pin: string, profileId?: string, currentPin?: string): Promise<Result<void>>;
+  verifyParentalPin?(pin: string, profileId?: string): Promise<PinVerifyResult>;
+  clearParentalPin?(currentPin: string, profileId?: string): Promise<Result<void>>;
   flushPendingWrites?(): Promise<void>;
   close(): Promise<void>;
 }
-
-const CATEGORY_SELECTION_KEYS = [
-  'live',
-  'movie',
-  'series',
-  'knownLive',
-  'knownMovie',
-  'knownSeries',
-  'pendingLive',
-  'pendingMovie',
-  'pendingSeries',
-] as const;
-
-function sanitizeCategorySelection(raw: unknown): SourceCategorySelection | undefined {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const src = raw as Record<string, unknown>;
-  const out: Partial<Record<(typeof CATEGORY_SELECTION_KEYS)[number], readonly string[]>> = {};
-  let hasAny = false;
-  for (const key of CATEGORY_SELECTION_KEYS) {
-    const value = src[key];
-    if (value === undefined) continue;
-    if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) {
-      return undefined;
-    }
-    out[key] = [...value];
-    hasAny = true;
-  }
-  return hasAny ? (out as SourceCategorySelection) : {};
-}
-
-function mergeSourceSettings(
-  existing: SourceSettings,
-  patch: Partial<SourceSettings>,
-): SourceSettings {
-  const next: SourceSettings = { ...existing };
-  let invalidatePlaylistCache = false;
-  for (const [key, value] of Object.entries(patch)) {
-    if (key === 'isLocalPlaylist') {
-      continue;
-    }
-    if (key === 'xmltvTimezone') {
-      if (value === undefined || (typeof value === 'string' && value.trim() === '')) {
-        delete next.xmltvTimezone;
-      } else if (typeof value === 'string') {
-        next.xmltvTimezone = value.trim();
-      }
-      continue;
-    }
-    if (key === 'categorySelection') {
-      const prevJson = JSON.stringify(existing.categorySelection ?? null);
-      if (value === undefined) {
-        delete next.categorySelection;
-      } else {
-        const sanitized = sanitizeCategorySelection(value);
-        if (sanitized !== undefined) next.categorySelection = sanitized;
-      }
-      if (JSON.stringify(next.categorySelection ?? null) !== prevJson) {
-        invalidatePlaylistCache = true;
-      }
-      continue;
-    }
-    if (key === 'transport') {
-      if (value === undefined) {
-        delete next.transport;
-      } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        const mergedTransport = {
-          ...existing.transport,
-          ...(value as SourceSettings['transport']),
-        };
-        if (
-          'allowLegacyTls' in mergedTransport &&
-          mergedTransport.allowLegacyTls !== undefined &&
-          typeof mergedTransport.allowLegacyTls !== 'boolean'
-        ) {
-          delete mergedTransport.allowLegacyTls;
-        }
-        next.transport = mergedTransport;
-      }
-      continue;
-    }
-    if (key === 'vodPlaylist' || key === 'includePlaceholderChannels') {
-      const prevVal = (existing as Record<string, unknown>)[key];
-      if (value === undefined) {
-        delete (next as Record<string, unknown>)[key];
-      } else {
-        (next as Record<string, unknown>)[key] = value;
-      }
-      if ((next as Record<string, unknown>)[key] !== prevVal) {
-        invalidatePlaylistCache = true;
-      }
-      continue;
-    }
-    if (value === undefined) {
-      delete (next as Record<string, unknown>)[key];
-    } else {
-      (next as Record<string, unknown>)[key] = value;
-    }
-  }
-  if (invalidatePlaylistCache && next.httpCache?.playlist !== undefined) {
-    const nextCache = { ...next.httpCache };
-    delete nextCache.playlist;
-    if (Object.keys(nextCache).length === 0) {
-      delete next.httpCache;
-    } else {
-      next.httpCache = nextCache;
-    }
-  }
-  return next;
-}
-
-type ParsedSourceMeta = Pick<
-  SourceRow,
-  | 'accountMeta'
-  | 'credentialFingerprint'
-  | 'isLocalPlaylist'
-  | 'categorySelection'
-  | 'xmltvTimezone'
-  | 'allowLegacyTls'
->;
-
-function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
-  try {
-    const parsed = JSON.parse(settingsJson) as Partial<SourceSettings> | null;
-    if (parsed === null || typeof parsed !== 'object') return {};
-    const out: {
-      accountMeta?: SourceAccountMeta;
-      credentialFingerprint?: string;
-      isLocalPlaylist?: boolean;
-      categorySelection?: SourceCategorySelection;
-      xmltvTimezone?: string;
-      allowLegacyTls?: boolean;
-    } = {};
-    if (isCredentialFingerprint(parsed.credentialFingerprint)) {
-      out.credentialFingerprint = parsed.credentialFingerprint;
-    }
-    if (typeof parsed.isLocalPlaylist === 'boolean') {
-      out.isLocalPlaylist = parsed.isLocalPlaylist;
-    }
-    if (typeof parsed.xmltvTimezone === 'string' && parsed.xmltvTimezone.trim() !== '') {
-      out.xmltvTimezone = parsed.xmltvTimezone.trim();
-    }
-    if (typeof parsed.transport?.allowLegacyTls === 'boolean') {
-      out.allowLegacyTls = parsed.transport.allowLegacyTls;
-    }
-    if (parsed.categorySelection !== undefined) {
-      const sanitized = sanitizeCategorySelection(parsed.categorySelection);
-      if (sanitized !== undefined) out.categorySelection = sanitized;
-    }
-    const meta = parsed.accountMeta;
-    if (meta !== null && typeof meta === 'object') {
-      const accountMeta: SourceAccountMeta = {};
-      if (typeof meta.isTrial === 'boolean') accountMeta.isTrial = meta.isTrial;
-      if (typeof meta.expiresAt === 'number' && Number.isFinite(meta.expiresAt)) {
-        accountMeta.expiresAt = meta.expiresAt;
-      }
-      if ('maxConnections' in meta && meta.maxConnections !== undefined) {
-        accountMeta.maxConnections = normalizeMaxConnections(meta.maxConnections);
-      }
-      if ('activeConnections' in meta && meta.activeConnections !== undefined) {
-        const active = normalizeActiveConnections(meta.activeConnections);
-        if (active !== undefined) accountMeta.activeConnections = active;
-      }
-      if (
-        accountMeta.isTrial !== undefined ||
-        accountMeta.expiresAt !== undefined ||
-        accountMeta.maxConnections !== undefined ||
-        accountMeta.activeConnections !== undefined
-      ) {
-        out.accountMeta = accountMeta;
-      }
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-const row = (r: SourceRecord): SourceRow => ({
-  id: r.id,
-  kind: r.kind,
-  name: r.name,
-  createdAt: r.createdAt,
-  needsImport: true,
-  lastCatalogSyncAt: null,
-  lastGuideSyncAt: null,
-  ...(r.settings.accountMeta === undefined ? {} : { accountMeta: r.settings.accountMeta }),
-  ...(isCredentialFingerprint(r.settings.credentialFingerprint)
-    ? { credentialFingerprint: r.settings.credentialFingerprint }
-    : {}),
-  ...(typeof r.settings.isLocalPlaylist === 'boolean'
-    ? { isLocalPlaylist: r.settings.isLocalPlaylist }
-    : {}),
-  ...(r.settings.categorySelection === undefined
-    ? {}
-    : { categorySelection: r.settings.categorySelection }),
-  ...(typeof r.settings.xmltvTimezone === 'string' && r.settings.xmltvTimezone.trim() !== ''
-    ? { xmltvTimezone: r.settings.xmltvTimezone.trim() }
-    : {}),
-  ...(typeof r.settings.transport?.allowLegacyTls === 'boolean'
-    ? { allowLegacyTls: r.settings.transport.allowLegacyTls }
-    : {}),
-});
 
 const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at, s.settings_json,
   EXISTS (SELECT 1 FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok') AS imported,
@@ -515,13 +349,14 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     userDataTail = next.catch(() => undefined);
     return next;
   };
+  const profileMethods = createCatalogProfileMethods({ db, secrets, clock, syncUserData });
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
     if (!r.ok) return r;
     playtime.evict(r.value.id);
     await syncManifest();
-    return ok(row(r.value));
+    return ok(mapNewSourceRow(r.value));
   };
 
   return {
@@ -648,8 +483,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         await queryAllSourcesItems(db, kind, offset, limit, sourceIds, opts),
       ),
 
-    async itemDetail(itemKey) {
-      const found = await queryItemDetail(db, itemKey);
+    async itemDetail(itemKey, opts) {
+      const found = await queryItemDetail(db, itemKey, opts);
       if (found === undefined) return null;
       const [resolved] = await playtime.resolveLogos([found], found.sourceId);
       return resolved ?? null;
@@ -682,12 +517,13 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     searchSuggestions: (options) => querySearchSuggestions(db, options),
     alphabetIndex: (input) => queryAlphabetIndex(db, input),
 
-    nowNext: (channelKeys, nowMs) => queryNowNext(db, channelKeys, nowMs),
-    epgWindow: (channelKeys, fromMs, toMs) => queryEpgWindow(db, channelKeys, fromMs, toMs),
-    epgSlice: (sourceId, fromMs, toMs, limit) =>
-      queryCrossChannelEpgSlice(db, sourceId, fromMs, toMs, limit),
-    async channelByNumber(num, sourceId) {
-      const found = await queryChannelByNumber(db, num, sourceId);
+    nowNext: (channelKeys, nowMs, opts) => queryNowNext(db, channelKeys, nowMs, opts),
+    epgWindow: (channelKeys, fromMs, toMs, opts) =>
+      queryEpgWindow(db, channelKeys, fromMs, toMs, opts),
+    epgSlice: (sourceId, fromMs, toMs, limit, opts) =>
+      queryCrossChannelEpgSlice(db, sourceId, fromMs, toMs, limit, opts),
+    async channelByNumber(num, sourceId, opts) {
+      const found = await queryChannelByNumber(db, num, sourceId, opts);
       if (found === undefined) return null;
       const [resolved] = await playtime.resolveLogos([found], found.sourceId);
       return resolved ?? null;
@@ -725,7 +561,13 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       const [resolved] = await playtime.resolveRowLogos([found]);
       return resolved ?? found;
     },
-    resolveStream: (itemKey) => playtime.resolveStream(itemKey),
+    async resolveStream(itemKey, opts) {
+      const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
+      if (filter !== null && (await isItemRestricted(db, filter, itemKey))) {
+        return err(elvError('auth', 'parental-locked'));
+      }
+      return playtime.resolveStream(itemKey);
+    },
 
     async saveProgress(input) {
       const saved = await saveWatchProgress(db, input, clock);
@@ -745,8 +587,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       const [resolved] = await playtime.resolveRowLogos([found]);
       return resolved ?? found;
     },
-    listContinueWatching: async (limit, profileId) =>
-      playtime.resolveRowLogos(await listContinueWatching(db, limit, profileId)),
+    listContinueWatching: async (limit, profileId, opts) =>
+      playtime.resolveRowLogos(await listContinueWatching(db, limit, profileId, opts)),
     listProgressByKeys: async (itemKeys, profileId) =>
       playtime.resolveRowLogos(await listProgressByKeys(db, itemKeys, profileId)),
     listSeriesUnplayedCounts: (seriesKeys, profileId) =>
@@ -766,8 +608,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       if (updated.ok) await syncUserData();
       return updated;
     },
-    listFavorites: async (limit, profileId) =>
-      playtime.resolveRowLogos(await listFavorites(db, limit, profileId)),
+    listFavorites: async (limit, profileId, opts) =>
+      playtime.resolveRowLogos(await listFavorites(db, limit, profileId, opts)),
     listFavoriteKeys: (profileId) => listFavoriteKeys(db, profileId),
     getTrackPreference: (scopeKey, profileId) => getTrackPreference(db, scopeKey, profileId),
     async saveTrackPreference(input) {
@@ -782,8 +624,10 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       await recordRecentChannel(db, itemKey, sourceId, profileId, clock());
       await syncUserData();
     },
-    listRecentChannels: async (limit, profileId) =>
-      playtime.resolveRowLogos(await listRecentChannels(db, limit, profileId)),
+    listRecentChannels: async (limit, profileId, opts) =>
+      playtime.resolveRowLogos(await listRecentChannels(db, limit, profileId, opts)),
+
+    ...profileMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

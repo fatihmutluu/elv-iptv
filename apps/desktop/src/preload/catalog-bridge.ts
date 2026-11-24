@@ -318,7 +318,8 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         ...(sourceIds === undefined ? {} : { sourceIds }),
         ...(opts === undefined ? {} : { opts }),
       }),
-    itemDetail: (itemKey) => callValue({ method: 'itemDetail', itemKey }),
+    itemDetail: (itemKey, opts) =>
+      callValue({ method: 'itemDetail', itemKey, ...(opts === undefined ? {} : { opts }) }),
     search: (query, opts) =>
       callValue({ method: 'search', query, ...(opts === undefined ? {} : { opts }) }),
     searchSuggestions: (options) =>
@@ -327,14 +328,36 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         ...(options === undefined ? {} : { options }),
       }),
     alphabetIndex: (input) => callValue({ method: 'alphabetIndex', input }),
-    nowNext: (channelKeys, nowMs) => callValue({ method: 'nowNext', channelKeys, nowMs }),
-    epgWindow: (channelKeys, fromMs, toMs) =>
-      callValue({ method: 'epgWindow', channelKeys, fromMs, toMs }),
-    channelByNumber: (num, sourceId) =>
+    nowNext: (channelKeys, nowMs, opts) =>
+      callValue({
+        method: 'nowNext',
+        channelKeys,
+        nowMs,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    epgWindow: (channelKeys, fromMs, toMs, opts) =>
+      callValue({
+        method: 'epgWindow',
+        channelKeys,
+        fromMs,
+        toMs,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    epgSlice: (sourceId, fromMs, toMs, limit, opts) =>
+      callValue({
+        method: 'epgSlice',
+        sourceId,
+        fromMs,
+        toMs,
+        ...(limit === undefined ? {} : { limit }),
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    channelByNumber: (num, sourceId, opts) =>
       callValue({
         method: 'channelByNumber',
         num,
         ...(sourceId === undefined ? {} : { sourceId }),
+        ...(opts === undefined ? {} : { opts }),
       }),
     seasons: (seriesId) => callResult({ method: 'seasons', seriesId }),
     episodes: (seriesId, season) => callValue({ method: 'episodes', seriesId, season }),
@@ -345,7 +368,8 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         currentItemKey,
         ...(profileId === undefined ? {} : { profileId }),
       }),
-    resolveStream: (itemKey) => callResult({ method: 'resolveStream', itemKey }),
+    resolveStream: (itemKey, opts) =>
+      callResult({ method: 'resolveStream', itemKey, ...(opts === undefined ? {} : { opts }) }),
     saveProgress: (input) => callResult({ method: 'saveProgress', input }),
     setWatched: (itemKey, watched, profileId) =>
       callResult({
@@ -360,11 +384,12 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         itemKey,
         ...(profileId === undefined ? {} : { profileId }),
       }),
-    listContinueWatching: (limit, profileId) =>
+    listContinueWatching: (limit, profileId, opts) =>
       callValue({
         method: 'listContinueWatching',
         ...(limit === undefined ? {} : { limit }),
         ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
       }),
     listProgressByKeys: (itemKeys, profileId) =>
       callValue({
@@ -386,11 +411,12 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       }),
     toggleFavorite: (input) => callResult({ method: 'toggleFavorite', input }),
     setFavorite: (input, active) => callResult({ method: 'setFavorite', input, active }),
-    listFavorites: (limit, profileId) =>
+    listFavorites: (limit, profileId, opts) =>
       callValue({
         method: 'listFavorites',
         ...(limit === undefined ? {} : { limit }),
         ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
       }),
     listFavoriteKeys: (profileId) =>
       callValue({
@@ -417,12 +443,60 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         sourceId,
         ...(profileId === undefined ? {} : { profileId }),
       }),
-    listRecentChannels: (limit, profileId) =>
+    listRecentChannels: (limit, profileId, opts) =>
       callValue({
         method: 'listRecentChannels',
         ...(limit === undefined ? {} : { limit }),
         ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
       }),
+    listProfiles: () => callValue({ method: 'listProfiles' }),
+    createProfile: (input) => callResult({ method: 'createProfile', input }),
+    updateProfile: (id, patch) => callResult({ method: 'updateProfile', id, patch }),
+    deleteProfile: (id) => callResult({ method: 'deleteProfile', id }),
+    getParentalSettings: (profileId) =>
+      callValue({
+        method: 'getParentalSettings',
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    updateParentalSettings: (patch, profileId) =>
+      callResult({
+        method: 'updateParentalSettings',
+        patch,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    listParentalLocks: (profileId, filter) =>
+      callValue({
+        method: 'listParentalLocks',
+        ...(profileId === undefined ? {} : { profileId }),
+        ...(filter === undefined ? {} : { filter }),
+      }),
+    setParentalLock: (input, locked) => callResult({ method: 'setParentalLock', input, locked }),
+    hasParentalPin: (profileId) =>
+      callValue({
+        method: 'hasParentalPin',
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    setParentalPin: (pin, profileId, currentPin) =>
+      callResult({
+        method: 'setParentalPin',
+        pin,
+        ...(profileId === undefined ? {} : { profileId }),
+        ...(currentPin === undefined ? {} : { currentPin }),
+      }),
+    verifyParentalPin: (pin, profileId) =>
+      callValue({
+        method: 'verifyParentalPin',
+        pin,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    clearParentalPin: (currentPin, profileId) =>
+      callResult({
+        method: 'clearParentalPin',
+        currentPin,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    flushPendingWrites: () => callValue({ method: 'flushPendingWrites' }),
     onChanged(listener: () => void): () => void {
       changedListeners.add(listener);
       return () => {

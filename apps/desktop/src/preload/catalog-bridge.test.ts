@@ -514,4 +514,74 @@ describe('createCatalogBridge', () => {
     port.deliver({ type: 'result', reqId: 4, value: summary });
     expect(await unplayedP).toEqual(summary);
   });
+
+  it('forwards Wave F1 profile, parental, epgSlice, flushPendingWrites, and opts payloads (#15, #31)', async () => {
+    const h = createFakeIpcRenderer();
+    const bridge = createCatalogBridge(h.ipc);
+
+    const openP = bridge.open();
+    const port = new FakeRendererPort();
+    h.deliverPort(1, port);
+    await Promise.resolve();
+    port.deliver({ type: 'result', reqId: 1, value: ok(undefined) });
+    await openP;
+
+    const pOpts = { profileId: 'p_kids', parentalUnlocked: false };
+    const calls: Promise<unknown>[] = [
+      bridge.listProfiles?.() ?? Promise.resolve([]),
+      bridge.createProfile?.({ name: 'Kids', avatarToken: 'emerald', isKids: true }) ??
+        Promise.resolve(ok(undefined)),
+      bridge.updateProfile?.('p_kids', { name: 'Kids 2' }) ?? Promise.resolve(ok(undefined)),
+      bridge.deleteProfile?.('p_kids') ?? Promise.resolve(ok(undefined)),
+      bridge.getParentalSettings?.('p_kids') ?? Promise.resolve(undefined),
+      bridge.updateParentalSettings?.({ enabled: true, maxRatingAge: 12 }, 'p_kids') ??
+        Promise.resolve(ok(undefined)),
+      bridge.listParentalLocks?.('p_kids', { sourceId: 's1' }) ?? Promise.resolve([]),
+      bridge.setParentalLock?.(
+        {
+          profileId: 'p_kids',
+          sourceId: 's1',
+          targetKind: 'category',
+          itemKind: 'live',
+          targetKey: 's1|live|18',
+        },
+        true,
+      ) ?? Promise.resolve(ok(undefined)),
+      bridge.hasParentalPin?.('p_kids') ?? Promise.resolve(false),
+      bridge.setParentalPin?.('1234', 'p_kids', '0000') ?? Promise.resolve(ok(undefined)),
+      bridge.verifyParentalPin?.('1234', 'p_kids') ??
+        Promise.resolve({ ok: false, remainingAttempts: 0 }),
+      bridge.clearParentalPin?.('1234', 'p_kids') ?? Promise.resolve(ok(undefined)),
+      bridge.resolveStream('s1:live:1', pOpts),
+      bridge.epgSlice?.('s1', 1000, 2000, 50, pOpts) ?? Promise.resolve([]),
+      bridge.listFavorites(10, 'p_kids', { parentalUnlocked: true }),
+      bridge.flushPendingWrites?.() ?? Promise.resolve(),
+    ];
+    await Promise.resolve();
+
+    const sentMethods = port.sent.slice(1).map((m) => (m.type === 'call' ? m.call.method : ''));
+    expect(sentMethods).toEqual([
+      'listProfiles',
+      'createProfile',
+      'updateProfile',
+      'deleteProfile',
+      'getParentalSettings',
+      'updateParentalSettings',
+      'listParentalLocks',
+      'setParentalLock',
+      'hasParentalPin',
+      'setParentalPin',
+      'verifyParentalPin',
+      'clearParentalPin',
+      'resolveStream',
+      'epgSlice',
+      'listFavorites',
+      'flushPendingWrites',
+    ]);
+
+    for (let i = 2; i < 2 + calls.length; i += 1) {
+      port.deliver({ type: 'result', reqId: i, value: ok(undefined) });
+    }
+    await Promise.all(calls);
+  });
 });

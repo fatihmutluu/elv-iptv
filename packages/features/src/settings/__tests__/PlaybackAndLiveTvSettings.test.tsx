@@ -128,14 +128,22 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     defaultLoadedArtworkUris.clear();
   });
 
-  it('exposes all 5 Settings sections in canonical order', async () => {
-    expect(SETTINGS_SECTIONS).toEqual(['appearance', 'playback', 'liveTv', 'sources', 'licenses']);
+  it('exposes all 6 Settings sections in canonical order', async () => {
+    expect(SETTINGS_SECTIONS).toEqual([
+      'appearance',
+      'playback',
+      'liveTv',
+      'profiles',
+      'sources',
+      'licenses',
+    ]);
 
     await render(<Harness />);
 
     expect(screen.getByTestId('settings-tab-appearance')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-playback')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-liveTv')).toBeTruthy();
+    expect(screen.getByTestId('settings-tab-profiles')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-sources')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-licenses')).toBeTruthy();
   });

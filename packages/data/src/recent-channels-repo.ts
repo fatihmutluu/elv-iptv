@@ -1,4 +1,5 @@
 import type { SqlDriver } from '@elv/domain';
+import { findRestrictedItemKeys, loadActiveParentalFilter } from './parental-repo';
 import { type ItemRow, mapItemRow, type RawItemRow } from './queries-shared';
 import { SOURCE_ID } from './sources';
 import { normalizeProfileId } from './user-state-helpers';
@@ -125,14 +126,29 @@ export async function listRecentChannels(
   db: SqlDriver,
   limit: number = DEFAULT_RECENT_CHANNELS_LIMIT,
   profileId?: string,
+  opts?: { readonly parentalUnlocked?: boolean },
 ): Promise<ItemRow[]> {
   const n = Number.isFinite(limit) ? Math.floor(limit) : DEFAULT_RECENT_CHANNELS_LIMIT;
   const clamped = Math.min(MAX_RECENT_CHANNELS_PER_PROFILE, Math.max(0, n));
   if (clamped === 0) return [];
   const profile = normalizeProfileId(profileId);
+  const filter = await loadActiveParentalFilter(db, profile, opts?.parentalUnlocked);
+  const fetchLimit = filter === null ? clamped : MAX_RECENT_CHANNELS_PER_PROFILE;
   const rows = await db.all<RawItemRow & { source_id: string }>(LIST_RECENT_SQL, [
     profile,
-    clamped,
+    fetchLimit,
   ]);
-  return rows.map((r) => mapItemRow('live', r.source_id, r));
+  const mapped = rows.map((r) => mapItemRow('live', r.source_id, r));
+  if (filter === null) return mapped;
+  const restricted = await findRestrictedItemKeys(
+    db,
+    filter,
+    mapped.map((r) => ({
+      itemKey: r.key,
+      sourceId: r.sourceId,
+      kind: 'live' as const,
+      title: r.name,
+    })),
+  );
+  return mapped.filter((r) => !restricted.has(r.key)).slice(0, clamped);
 }

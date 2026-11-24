@@ -26,10 +26,13 @@ export * from './live-variants';
 export * from './manifest';
 export * from './migrate';
 export * from './next-episode';
+export * from './parental-policy';
+export * from './parental-repo';
 export {
   isPlaceholderLiveChannel,
   type PlaceholderLiveChannelInput,
 } from './placeholder-filter';
+export * from './profiles-repo';
 export * from './queries';
 export * from './queries-variants';
 export {

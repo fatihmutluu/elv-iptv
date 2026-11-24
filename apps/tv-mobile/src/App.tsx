@@ -287,6 +287,7 @@ function AppRoot() {
     <UiAdaptersProvider adapters={uiAdapters}>
       <AppProviders
         preferencesStore={preferencesStore}
+        profilePreferences={preferencesStore}
         systemLocale={systemLocale}
         {...(viewportOverride !== undefined ? { viewport: viewportOverride } : {})}
       >
@@ -294,6 +295,7 @@ function AppRoot() {
           catalog={catalog}
           videoHost={videoHost}
           appLifecycle={appLifecycle}
+          profilePreferences={preferencesStore}
           {...(sourceImportHost !== undefined ? { sourceImportHost } : {})}
           externalRefreshToken={refreshToken}
         />

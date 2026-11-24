@@ -43,6 +43,7 @@ export interface UseCatalogPrewarmOptions {
   readonly sources: readonly SourceRow[];
   readonly catalogRevision: number;
   readonly locale?: string;
+  readonly profileKey?: string;
   readonly uiCache: CatalogUiCache;
   readonly activeTab?: string;
   readonly enabled?: boolean;
@@ -100,10 +101,12 @@ export async function runCatalogPrewarm({
 
   const targetRevision = uiCache.getRevision();
   const targetLocale = uiCache.getLocale();
+  const targetProfileKey = uiCache.getProfileKey?.() ?? 'default:0';
   const stillValid = (): boolean =>
     !isCancelled() &&
     uiCache.getRevision() === targetRevision &&
-    uiCache.getLocale() === targetLocale;
+    uiCache.getLocale() === targetLocale &&
+    (uiCache.getProfileKey?.() ?? 'default:0') === targetProfileKey;
 
   const readySources = sources.filter((s) => !s.needsImport);
   if (readySources.length === 0) return;
@@ -324,6 +327,7 @@ export function useCatalogPrewarm({
   sources,
   catalogRevision,
   locale,
+  profileKey,
   uiCache,
   activeTab,
   enabled = true,
@@ -332,7 +336,7 @@ export function useCatalogPrewarm({
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: catalogRevision and locale trigger fresh prewarm after invalidation
+  // biome-ignore lint/correctness/useExhaustiveDependencies: catalogRevision, locale, and profileKey trigger fresh prewarm after invalidation
   useEffect(() => {
     if (!enabled || sources.length === 0) return undefined;
     let cancelled = false;
@@ -351,5 +355,5 @@ export function useCatalogPrewarm({
     return () => {
       cancelled = true;
     };
-  }, [catalog, catalogRevision, enabled, groupVodVersions, locale, sources, uiCache]);
+  }, [catalog, catalogRevision, enabled, groupVodVersions, locale, profileKey, sources, uiCache]);
 }

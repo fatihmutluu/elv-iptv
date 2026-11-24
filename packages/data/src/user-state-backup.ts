@@ -1,4 +1,5 @@
 import { CREDENTIAL_PARAMS, type SqlDriver } from '@elv/domain';
+import { isProfileAvatarToken, isValidProfileId } from './profiles-repo';
 import {
   isSafeRecentChannelKey,
   mapRecentChannelRow,
@@ -100,6 +101,7 @@ export interface DecodedUserDataSnapshot {
 export interface ReconcileUserDataResult {
   favoritesRestored: number;
   progressRestored: number;
+  profilesRestored?: number;
   trackPreferencesRestored?: number;
   recentChannelsRestored?: number;
 }
@@ -533,27 +535,47 @@ function readSnapshot(store: UserDataStore): DecodedUserDataSnapshot {
   }
 }
 
-/** Reads `favorites`, `watch_progress`, `track_preferences`, and `recent_channels` from `db` and persists a budget-safe snapshot to `store`. */
+/** Reads `profiles`, `favorites`, `watch_progress`, `track_preferences`, and `recent_channels` from `db` and persists a budget-safe snapshot to `store`. */
 export async function saveUserDataSnapshot(db: SqlDriver, store: UserDataStore): Promise<void> {
   try {
-    const [rawFavorites, rawProgress, rawTrackPrefs, rawRecentChannels] = await Promise.all([
-      db.all<RawFavoriteRow>(
-        'SELECT profile_id, source_id, item_key, kind, title, logo, year, rating, added_at FROM favorites ORDER BY added_at DESC, profile_id ASC, item_key ASC',
-      ),
-      db.all<RawProgressRow>(
-        'SELECT profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at FROM watch_progress ORDER BY watched ASC, updated_at DESC, profile_id ASC, item_key ASC',
-      ),
-      db.all<RawTrackPreferenceRow>(
-        'SELECT profile_id, scope_key, source_id, audio_lang, audio_label, sub_lang, sub_label, sub_disabled, audio_delay_ms, sub_delay_ms, resize_mode, updated_at FROM track_preferences ORDER BY updated_at DESC, profile_id ASC, scope_key ASC',
-      ),
-      db.all<RawRecentChannelRow>(
-        'SELECT profile_id, source_id, item_key, watched_at FROM recent_channels ORDER BY watched_at DESC, profile_id ASC, item_key ASC',
-      ),
-    ]);
+    const [rawFavorites, rawProgress, rawProfiles, rawTrackPrefs, rawRecentChannels] =
+      await Promise.all([
+        db.all<RawFavoriteRow>(
+          'SELECT profile_id, source_id, item_key, kind, title, logo, year, rating, added_at FROM favorites ORDER BY added_at DESC, profile_id ASC, item_key ASC',
+        ),
+        db.all<RawProgressRow>(
+          'SELECT profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at FROM watch_progress ORDER BY watched ASC, updated_at DESC, profile_id ASC, item_key ASC',
+        ),
+        db.all<{
+          id: string;
+          name: string;
+          avatar_token: string;
+          is_kids: number;
+          created_at: number;
+        }>(
+          'SELECT id, name, avatar_token, is_kids, created_at FROM profiles ORDER BY is_default DESC, created_at ASC, id ASC',
+        ),
+        db.all<RawTrackPreferenceRow>(
+          'SELECT profile_id, scope_key, source_id, audio_lang, audio_label, sub_lang, sub_label, sub_disabled, audio_delay_ms, sub_delay_ms, resize_mode, updated_at FROM track_preferences ORDER BY updated_at DESC, profile_id ASC, scope_key ASC',
+        ),
+        db.all<RawRecentChannelRow>(
+          'SELECT profile_id, source_id, item_key, watched_at FROM recent_channels ORDER BY watched_at DESC, profile_id ASC, item_key ASC',
+        ),
+      ]);
+    const profiles: UserDataProfileEntry[] =
+      rawProfiles.length > 0
+        ? rawProfiles.map((p) => ({
+            id: p.id,
+            name: p.name,
+            avatar: p.avatar_token,
+            isKids: p.is_kids !== 0,
+            createdAt: p.created_at,
+          }))
+        : readSnapshot(store).profiles;
     const snapshot = {
       favorites: rawFavorites.map(mapFavoriteRow),
       progress: rawProgress.map(mapProgressRow),
-      profiles: readSnapshot(store).profiles,
+      profiles,
       trackPreferences: rawTrackPrefs.map(mapTrackPreferenceRow),
       recentChannels: rawRecentChannels.map(mapRecentChannelRow),
     };
@@ -597,9 +619,18 @@ const RESTORE_RECENT_CHANNEL_SQL = `INSERT OR IGNORE INTO recent_channels (
   profile_id, source_id, item_key, watched_at
 ) VALUES (?, ?, ?, ?)`;
 
+const RESTORE_PROFILE_SQL = `INSERT OR IGNORE INTO profiles (
+  id, name, avatar_token, is_kids, is_default, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+
+const RESTORE_DEFAULT_PROFILE_SQL = `UPDATE profiles
+  SET name = ?, avatar_token = ?, is_kids = ?, updated_at = ?
+ WHERE id = 'default' AND updated_at = 0 AND name = 'Default'`;
+
 /**
  * Reconciles SQLite user tables with persistent KV storage on startup (`#79`, ADR 0014).
- * When SQLite already holds favorites, watch progress, track preferences, or recent channels, refreshes the backup snapshot.
+ * When SQLite already holds favorites, watch progress, track preferences, recent channels, or
+ * non-default profiles, refreshes the backup snapshot.
  * When all tables are empty (e.g. after a tvOS `Library/Caches` purge), restores valid rows
  * atomically in a single transaction.
  */
@@ -607,17 +638,20 @@ export async function reconcileUserData(
   db: SqlDriver,
   store: UserDataStore,
 ): Promise<ReconcileUserDataResult> {
-  const [favPresent, progPresent, trackPresent, recentPresent] = await Promise.all([
-    db.all<{ found: number }>('SELECT 1 AS found FROM favorites LIMIT 1'),
-    db.all<{ found: number }>('SELECT 1 AS found FROM watch_progress LIMIT 1'),
-    db.all<{ found: number }>('SELECT 1 AS found FROM track_preferences LIMIT 1'),
-    db.all<{ found: number }>('SELECT 1 AS found FROM recent_channels LIMIT 1'),
-  ]);
+  const [favPresent, progPresent, trackPresent, recentPresent, customProfilePresent] =
+    await Promise.all([
+      db.all<{ found: number }>('SELECT 1 AS found FROM favorites LIMIT 1'),
+      db.all<{ found: number }>('SELECT 1 AS found FROM watch_progress LIMIT 1'),
+      db.all<{ found: number }>('SELECT 1 AS found FROM track_preferences LIMIT 1'),
+      db.all<{ found: number }>('SELECT 1 AS found FROM recent_channels LIMIT 1'),
+      db.all<{ found: number }>("SELECT 1 AS found FROM profiles WHERE id != 'default' LIMIT 1"),
+    ]);
   if (
     favPresent.length > 0 ||
     progPresent.length > 0 ||
     trackPresent.length > 0 ||
-    recentPresent.length > 0
+    recentPresent.length > 0 ||
+    customProfilePresent.length > 0
   ) {
     await saveUserDataSnapshot(db, store);
     return { favoritesRestored: 0, progressRestored: 0 };
@@ -628,6 +662,7 @@ export async function reconcileUserData(
   if (
     snapshot.favorites.length === 0 &&
     snapshot.progress.length === 0 &&
+    snapshot.profiles.length === 0 &&
     trackPrefs.length === 0 &&
     recentChannels.length === 0
   ) {
@@ -635,9 +670,42 @@ export async function reconcileUserData(
   }
   let favoritesRestored = 0;
   let progressRestored = 0;
+  let profilesRestored = 0;
   let trackPreferencesRestored = 0;
   let recentChannelsRestored = 0;
   await db.transaction(async (tx) => {
+    for (const profile of snapshot.profiles) {
+      if (!isValidProfileId(profile.id)) continue;
+      const avatarToken = isProfileAvatarToken(profile.avatar) ? profile.avatar : 'crimson';
+      const isKids = profile.isKids === true ? 1 : 0;
+      const isDefault = profile.id === 'default' ? 1 : 0;
+      const res = await tx.run(RESTORE_PROFILE_SQL, [
+        profile.id,
+        profile.name,
+        avatarToken,
+        isKids,
+        isDefault,
+        profile.createdAt,
+        profile.createdAt,
+      ]);
+      profilesRestored += res.changes;
+      if (
+        profile.id === 'default' &&
+        res.changes === 0 &&
+        (profile.name !== 'Default' ||
+          avatarToken !== 'crimson' ||
+          isKids !== 0 ||
+          profile.createdAt !== 0)
+      ) {
+        const upd = await tx.run(RESTORE_DEFAULT_PROFILE_SQL, [
+          profile.name,
+          avatarToken,
+          isKids,
+          profile.createdAt,
+        ]);
+        profilesRestored += upd.changes;
+      }
+    }
     for (const fav of snapshot.favorites) {
       const res = await tx.run(RESTORE_FAVORITE_SQL, [
         fav.profileId,
@@ -701,6 +769,7 @@ export async function reconcileUserData(
   return {
     favoritesRestored,
     progressRestored,
+    ...(profilesRestored > 0 ? { profilesRestored } : {}),
     ...(trackPreferencesRestored > 0 ? { trackPreferencesRestored } : {}),
     ...(recentChannelsRestored > 0 ? { recentChannelsRestored } : {}),
   };

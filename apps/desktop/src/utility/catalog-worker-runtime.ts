@@ -413,7 +413,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
           ? service.allSourcesItems(call.kind, call.offset, call.limit, call.sourceIds, call.opts)
           : [];
       case 'itemDetail':
-        return service.itemDetail ? service.itemDetail(call.itemKey) : null;
+        return service.itemDetail ? service.itemDetail(call.itemKey, call.opts) : null;
       case 'search':
         return service.search
           ? service.search(call.query, call.opts)
@@ -423,11 +423,19 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'alphabetIndex':
         return service.alphabetIndex ? service.alphabetIndex(call.input) : [];
       case 'nowNext':
-        return service.nowNext ? service.nowNext(call.channelKeys, call.nowMs) : [];
+        return service.nowNext ? service.nowNext(call.channelKeys, call.nowMs, call.opts) : [];
       case 'epgWindow':
-        return service.epgWindow ? service.epgWindow(call.channelKeys, call.fromMs, call.toMs) : {};
+        return service.epgWindow
+          ? service.epgWindow(call.channelKeys, call.fromMs, call.toMs, call.opts)
+          : {};
+      case 'epgSlice':
+        return service.epgSlice
+          ? service.epgSlice(call.sourceId, call.fromMs, call.toMs, call.limit, call.opts)
+          : [];
       case 'channelByNumber':
-        return service.channelByNumber ? service.channelByNumber(call.num, call.sourceId) : null;
+        return service.channelByNumber
+          ? service.channelByNumber(call.num, call.sourceId, call.opts)
+          : null;
       case 'seasons':
         return service.seasons(call.seriesId);
       case 'episodes':
@@ -437,7 +445,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
           ? service.queryNextEpisode(call.seriesKey, call.currentItemKey, call.profileId)
           : null;
       case 'resolveStream':
-        return service.resolveStream(call.itemKey);
+        return service.resolveStream(call.itemKey, call.opts);
       case 'saveProgress':
         return service.saveProgress
           ? service.saveProgress({
@@ -456,7 +464,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return service.getProgress ? service.getProgress(call.itemKey, call.profileId) : null;
       case 'listContinueWatching':
         return service.listContinueWatching
-          ? service.listContinueWatching(call.limit, call.profileId)
+          ? service.listContinueWatching(call.limit, call.profileId, call.opts)
           : [];
       case 'listProgressByKeys':
         return service.listProgressByKeys
@@ -488,7 +496,9 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
             )
           : err(elvError('storage', 'unsupported'));
       case 'listFavorites':
-        return service.listFavorites ? service.listFavorites(call.limit, call.profileId) : [];
+        return service.listFavorites
+          ? service.listFavorites(call.limit, call.profileId, call.opts)
+          : [];
       case 'listFavoriteKeys':
         return service.listFavoriteKeys ? service.listFavoriteKeys(call.profileId) : [];
       case 'getTrackPreference':
@@ -510,8 +520,72 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return undefined;
       case 'listRecentChannels':
         return service.listRecentChannels
-          ? service.listRecentChannels(call.limit, call.profileId)
+          ? service.listRecentChannels(call.limit, call.profileId, call.opts)
           : [];
+      case 'listProfiles':
+        return service.listProfiles ? service.listProfiles() : [];
+      case 'createProfile':
+        return service.createProfile
+          ? service.createProfile({
+              ...call.input,
+              name: sanitizeDisplayText(call.input.name),
+            })
+          : err(elvError('storage', 'unsupported'));
+      case 'updateProfile':
+        return service.updateProfile
+          ? service.updateProfile(call.id, {
+              ...call.patch,
+              ...(call.patch.name === undefined
+                ? {}
+                : { name: sanitizeDisplayText(call.patch.name) }),
+            })
+          : err(elvError('storage', 'unsupported'));
+      case 'deleteProfile': {
+        if (!service.deleteProfile) return err(elvError('storage', 'unsupported'));
+        const res = await service.deleteProfile(call.id);
+        await checkpointWal(db);
+        return res;
+      }
+      case 'getParentalSettings':
+        return service.getParentalSettings
+          ? service.getParentalSettings(call.profileId)
+          : {
+              profileId: call.profileId ?? 'default',
+              enabled: false,
+              blockAdultKeywords: true,
+              maxRatingAge: null,
+              unlockTimeoutMin: 30,
+              updatedAt: 0,
+            };
+      case 'updateParentalSettings':
+        return service.updateParentalSettings
+          ? service.updateParentalSettings(call.patch, call.profileId)
+          : err(elvError('storage', 'unsupported'));
+      case 'listParentalLocks':
+        return service.listParentalLocks
+          ? service.listParentalLocks(call.profileId, call.filter)
+          : [];
+      case 'setParentalLock':
+        return service.setParentalLock
+          ? service.setParentalLock(call.input, call.locked)
+          : err(elvError('storage', 'unsupported'));
+      case 'hasParentalPin':
+        return service.hasParentalPin ? service.hasParentalPin(call.profileId) : false;
+      case 'setParentalPin':
+        return service.setParentalPin
+          ? service.setParentalPin(call.pin, call.profileId, call.currentPin)
+          : err(elvError('storage', 'unsupported'));
+      case 'verifyParentalPin':
+        return service.verifyParentalPin
+          ? service.verifyParentalPin(call.pin, call.profileId)
+          : { ok: false, remainingAttempts: 0 };
+      case 'clearParentalPin':
+        return service.clearParentalPin
+          ? service.clearParentalPin(call.currentPin, call.profileId)
+          : err(elvError('storage', 'unsupported'));
+      case 'flushPendingWrites':
+        if (service.flushPendingWrites) await service.flushPendingWrites();
+        return undefined;
     }
   };
 

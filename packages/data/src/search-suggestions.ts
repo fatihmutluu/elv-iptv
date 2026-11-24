@@ -1,5 +1,10 @@
 import type { ContentKind, SqlDriver } from '@elv/domain';
 import { foldText } from './fold';
+import {
+  findRestrictedItemKeys,
+  isCategoryRestricted,
+  loadActiveParentalFilter,
+} from './parental-repo';
 
 /** Default idle search suggestion count (`#397`). */
 export const DEFAULT_SEARCH_SUGGESTIONS_LIMIT = 8;
@@ -21,11 +26,12 @@ export interface SearchSuggestion {
   readonly categoryId?: string;
 }
 
-/** Options for {@link querySearchSuggestions} and `CatalogService.searchSuggestions` (`#397`). */
+/** Options for {@link querySearchSuggestions} and `CatalogService.searchSuggestions` (`#397`, `#31`). */
 export interface SearchSuggestionsOptions {
   readonly limit?: number;
   readonly sourceId?: string;
   readonly profileId?: string;
+  readonly parentalUnlocked?: boolean;
 }
 
 function clampSuggestionsLimit(limit: number | undefined): number {
@@ -48,6 +54,8 @@ export async function querySearchSuggestions(
   if (limit === 0) return [];
   const profileId = options?.profileId?.trim() || 'default';
   const sourceId = options?.sourceId?.trim() || undefined;
+  const filter = await loadActiveParentalFilter(db, profileId, options?.parentalUnlocked);
+  const fetchLimit = filter === null ? limit : Math.min(64, limit * 4);
   const srcFilter = sourceId === undefined ? '' : ' AND f.source_id = ?';
   const wpSrcFilter = sourceId === undefined ? '' : ' AND wp.source_id = ?';
   const rcSrcFilter = sourceId === undefined ? '' : ' AND rc.source_id = ?';
@@ -69,7 +77,7 @@ export async function querySearchSuggestions(
           AND NOT EXISTS (SELECT 1 FROM series ser WHERE ser.source_id = f.source_id AND ser.key = f.item_key AND ser.is_hidden = 1)
         ORDER BY f.added_at DESC
         LIMIT ?`,
-      [profileId, ...(sourceId === undefined ? [] : [sourceId]), limit],
+      [profileId, ...(sourceId === undefined ? [] : [sourceId]), fetchLimit],
     ),
     db.all<{
       source_id: string;
@@ -88,7 +96,7 @@ export async function querySearchSuggestions(
           AND NOT EXISTS (SELECT 1 FROM series ser WHERE ser.source_id = wp.source_id AND ser.key = COALESCE(NULLIF(wp.series_key, ''), wp.item_key) AND ser.is_hidden = 1)
         ORDER BY wp.updated_at DESC
         LIMIT ?`,
-      [profileId, ...(sourceId === undefined ? [] : [sourceId]), limit],
+      [profileId, ...(sourceId === undefined ? [] : [sourceId]), fetchLimit],
     ),
     db.all<{
       source_id: string;
@@ -103,7 +111,7 @@ export async function querySearchSuggestions(
         WHERE rc.profile_id = ?${rcSrcFilter}
         ORDER BY rc.watched_at DESC
         LIMIT ?`,
-      [profileId, ...(sourceId === undefined ? [] : [sourceId]), limit],
+      [profileId, ...(sourceId === undefined ? [] : [sourceId]), fetchLimit],
     ),
     db.all<{
       source_id: string;
@@ -124,9 +132,23 @@ export async function querySearchSuggestions(
         GROUP BY c.source_id, c.kind, c.provider_id
         ORDER BY item_count DESC, c.position ASC, c.provider_id ASC
         LIMIT ?`,
-      [...(sourceId === undefined ? [] : [sourceId]), limit],
+      [...(sourceId === undefined ? [] : [sourceId]), fetchLimit],
     ),
   ]);
+
+  const restrictedKeys =
+    filter === null
+      ? null
+      : await findRestrictedItemKeys(db, filter, [
+          ...favRows.map((f) => ({ itemKey: f.item_key, sourceId: f.source_id, title: f.title })),
+          ...wpRows.map((w) => ({
+            itemKey: w.item_key,
+            sourceId: w.source_id,
+            title: w.title,
+            seriesKey: w.series_key,
+          })),
+          ...rcRows.map((r) => ({ itemKey: r.item_key, sourceId: r.source_id, title: r.name })),
+        ]);
 
   const out: SearchSuggestion[] = [];
   const seenFolds = new Set<string>();
@@ -145,6 +167,7 @@ export async function querySearchSuggestions(
   };
 
   for (const fav of favRows) {
+    if (restrictedKeys?.has(fav.item_key)) continue;
     pushUnique({
       kind: 'favorite',
       label: fav.title,
@@ -157,6 +180,7 @@ export async function querySearchSuggestions(
 
   const recentCandidates: Array<{ ts: number; suggestion: SearchSuggestion }> = [];
   for (const wp of wpRows) {
+    if (restrictedKeys?.has(wp.item_key)) continue;
     const itemKind: ContentKind =
       wp.kind === 'live' ? 'live' : wp.kind === 'movie' ? 'movie' : 'series';
     const itemKey = wp.kind === 'episode' && wp.series_key ? wp.series_key : wp.item_key;
@@ -173,6 +197,7 @@ export async function querySearchSuggestions(
     });
   }
   for (const rc of rcRows) {
+    if (restrictedKeys?.has(rc.item_key)) continue;
     recentCandidates.push({
       ts: rc.watched_at,
       suggestion: {
@@ -191,6 +216,13 @@ export async function querySearchSuggestions(
   }
 
   for (const cat of catRows) {
+    if (
+      filter !== null &&
+      cat.kind !== 'episode' &&
+      isCategoryRestricted(filter, cat.source_id, cat.kind, cat.provider_id, cat.name)
+    ) {
+      continue;
+    }
     pushUnique({
       kind: 'category',
       label: cat.name,

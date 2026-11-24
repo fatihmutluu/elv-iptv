@@ -1,4 +1,10 @@
-import type { SqlDriver } from '@elv/domain';
+import type { SqlDriver, SqlValue } from '@elv/domain';
+import { isAdultKeywordMatch } from './parental-policy';
+import {
+  type ActiveParentalFilter,
+  buildSqlItemRestrictionClause,
+  loadActiveParentalFilter,
+} from './parental-repo';
 import {
   type BrowseKind,
   clampPage,
@@ -91,47 +97,86 @@ function allSourcesDedupSpec(
   return undefined;
 }
 
-async function fetchSourceSlice(
+async function fetchRawSourceSlice(
   db: SqlDriver,
   kind: BrowseKind,
   sourceId: string,
   offset: number,
   limit: number,
-  opts?: ListItemsOptions,
-): Promise<ItemRow[]> {
+  opts: ListItemsOptions | undefined,
+  filter: ActiveParentalFilter | null,
+): Promise<RawItemRow[]> {
   if (limit <= 0) return [];
   const watched = watchedFilterClause('t.key', opts);
+  const restrict =
+    filter === null
+      ? { clause: '', params: [] as readonly SqlValue[] }
+      : buildSqlItemRestrictionClause(filter, kind, 't.source_id', 't.key', sourceId);
   const dedup = allSourcesDedupSpec(kind, opts);
   if (dedup !== undefined) {
     const orderBy = opts?.sortBy === 'alpha' ? 'sort_title ASC, key ASC' : 'name_fold ASC, id ASC';
-    const rows = await db.all<RawItemRow>(
+    return db.all<RawItemRow>(
       `WITH ranked AS (
          SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, t.sort_title, ${ITEM_COLS[kind]},
                 COUNT(*) OVER (PARTITION BY ${dedup.groupExpr}) AS ${dedup.countCol},
                 ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
            FROM ${ITEM_TABLE[kind]} t
-          WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}
+          WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause}
        )
        SELECT id, key, source_id, provider_id, name, logo, rating, year, num, ${dedup.countCol}
          FROM ranked
         WHERE rn = 1
         ORDER BY ${orderBy}
         LIMIT ? OFFSET ?`,
-      [sourceId, ...watched.params, limit, offset],
+      [sourceId, ...watched.params, ...restrict.params, limit, offset],
     );
-    return rows.map((r) => mapItemRow(kind, sourceId, r));
   }
   const orderBy =
     opts?.sortBy === 'alpha' ? 't.sort_title ASC, t.key ASC' : 't.name_fold ASC, t.id ASC';
-  const rows = await db.all<RawItemRow>(
+  return db.all<RawItemRow>(
     `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${ITEM_COLS[kind]}
        FROM ${ITEM_TABLE[kind]} t
-      WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}
+      WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause}
       ORDER BY ${orderBy}
       LIMIT ? OFFSET ?`,
-    [sourceId, ...watched.params, limit, offset],
+    [sourceId, ...watched.params, ...restrict.params, limit, offset],
   );
-  return rows.map((r) => mapItemRow(kind, sourceId, r));
+}
+
+async function fetchSourceSlice(
+  db: SqlDriver,
+  kind: BrowseKind,
+  sourceId: string,
+  offset: number,
+  limit: number,
+  opts: ListItemsOptions | undefined,
+  filter: ActiveParentalFilter | null,
+): Promise<ItemRow[]> {
+  if (limit <= 0) return [];
+  if (filter === null || !filter.blockAdultKeywords) {
+    const rows = await fetchRawSourceSlice(db, kind, sourceId, offset, limit, opts, filter);
+    return rows.map((r) => mapItemRow(kind, sourceId, r));
+  }
+  const chunkSize = Math.max(limit * 2, 64);
+  const out: ItemRow[] = [];
+  let rawOffset = 0;
+  let skipped = 0;
+  for (;;) {
+    const batch = await fetchRawSourceSlice(db, kind, sourceId, rawOffset, chunkSize, opts, filter);
+    if (batch.length === 0) break;
+    rawOffset += batch.length;
+    for (const r of batch) {
+      if (isAdultKeywordMatch(r.name)) continue;
+      if (skipped < offset) {
+        skipped += 1;
+        continue;
+      }
+      out.push(mapItemRow(kind, sourceId, r));
+      if (out.length >= limit) return out;
+    }
+    if (batch.length < chunkSize) break;
+  }
+  return out;
 }
 
 function interleaveSlices(
@@ -209,40 +254,94 @@ interface CursorRawItemRow extends RawItemRow {
   name_fold: string;
 }
 
+async function fetchRawSourceCursorSlice(
+  db: SqlDriver,
+  kind: BrowseKind,
+  sourceId: string,
+  cursor: SourceNameCursor | undefined,
+  limit: number,
+  opts: Pick<ListItemsOptions, 'excludeWatched' | 'profileId' | 'parentalUnlocked'> | undefined,
+  filter: ActiveParentalFilter | null,
+): Promise<CursorRawItemRow[]> {
+  if (limit <= 0) return [];
+  const table = ITEM_TABLE[kind];
+  const watched = watchedFilterClause('t.key', opts);
+  const restrict =
+    filter === null
+      ? { clause: '', params: [] as readonly SqlValue[] }
+      : buildSqlItemRestrictionClause(filter, kind, 't.source_id', 't.key', sourceId);
+  return cursor === undefined
+    ? db.all<CursorRawItemRow>(
+        `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, ${ITEM_COLS[kind]}
+           FROM ${table} t
+          WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause}
+          ORDER BY t.name_fold ASC, t.id ASC
+          LIMIT ?`,
+        [sourceId, ...watched.params, ...restrict.params, limit],
+      )
+    : db.all<CursorRawItemRow>(
+        `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, ${ITEM_COLS[kind]}
+           FROM ${table} t
+          WHERE t.source_id = ? AND t.is_hidden = 0
+            AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))${watched.clause}${restrict.clause}
+          ORDER BY t.name_fold ASC, t.id ASC
+          LIMIT ?`,
+        [
+          sourceId,
+          cursor.nameFold,
+          cursor.nameFold,
+          cursor.id,
+          ...watched.params,
+          ...restrict.params,
+          limit,
+        ],
+      );
+}
+
 async function fetchSourceCursorSlice(
   db: SqlDriver,
   kind: BrowseKind,
   sourceId: string,
   cursor: SourceNameCursor | undefined,
   limit: number,
-  opts?: Pick<ListItemsOptions, 'excludeWatched' | 'profileId'>,
+  opts: Pick<ListItemsOptions, 'excludeWatched' | 'profileId' | 'parentalUnlocked'> | undefined,
+  filter: ActiveParentalFilter | null,
 ): Promise<{ rows: ItemRow[]; cursors: SourceNameCursor[] }> {
   if (limit <= 0) return { rows: [], cursors: [] };
-  const table = ITEM_TABLE[kind];
-  const watched = watchedFilterClause('t.key', opts);
-  const raw =
-    cursor === undefined
-      ? await db.all<CursorRawItemRow>(
-          `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, ${ITEM_COLS[kind]}
-             FROM ${table} t
-            WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}
-            ORDER BY t.name_fold ASC, t.id ASC
-            LIMIT ?`,
-          [sourceId, ...watched.params, limit],
-        )
-      : await db.all<CursorRawItemRow>(
-          `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, ${ITEM_COLS[kind]}
-             FROM ${table} t
-            WHERE t.source_id = ? AND t.is_hidden = 0
-              AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))${watched.clause}
-            ORDER BY t.name_fold ASC, t.id ASC
-            LIMIT ?`,
-          [sourceId, cursor.nameFold, cursor.nameFold, cursor.id, ...watched.params, limit],
-        );
-  return {
-    rows: raw.map((r) => mapItemRow(kind, sourceId, r)),
-    cursors: raw.map((r) => ({ nameFold: r.name_fold, id: r.id })),
-  };
+  if (filter === null || !filter.blockAdultKeywords) {
+    const raw = await fetchRawSourceCursorSlice(db, kind, sourceId, cursor, limit, opts, filter);
+    return {
+      rows: raw.map((r) => mapItemRow(kind, sourceId, r)),
+      cursors: raw.map((r) => ({ nameFold: r.name_fold, id: r.id })),
+    };
+  }
+  const rows: ItemRow[] = [];
+  const cursors: SourceNameCursor[] = [];
+  const batchSize = Math.max(limit * 2, 64);
+  let scanCursor = cursor;
+  for (;;) {
+    const raw = await fetchRawSourceCursorSlice(
+      db,
+      kind,
+      sourceId,
+      scanCursor,
+      batchSize,
+      opts,
+      filter,
+    );
+    if (raw.length === 0) break;
+    for (const r of raw) {
+      if (isAdultKeywordMatch(r.name)) continue;
+      rows.push(mapItemRow(kind, sourceId, r));
+      cursors.push({ nameFold: r.name_fold, id: r.id });
+      if (rows.length >= limit) return { rows, cursors };
+    }
+    if (raw.length < batchSize) break;
+    const tail = raw[raw.length - 1];
+    if (tail === undefined) break;
+    scanCursor = { nameFold: tail.name_fold, id: tail.id };
+  }
+  return { rows, cursors };
 }
 
 /**
@@ -255,17 +354,26 @@ export async function queryAllSourcesItemsByCursor(
   cursors: Readonly<Record<string, SourceNameCursor>>,
   limit: number,
   sourceIds?: readonly string[],
-  opts?: Pick<ListItemsOptions, 'excludeWatched' | 'profileId'>,
+  opts?: Pick<ListItemsOptions, 'excludeWatched' | 'profileId' | 'parentalUnlocked'>,
 ): Promise<AllSourcesCursorPage> {
   const page = clampPage(0, limit);
   const nextCursors: Record<string, SourceNameCursor> = { ...cursors };
   if (page.limit === 0) return { items: [], nextCursors, hasMore: false };
   const activeIds = await resolveActiveSources(db, sourceIds);
   if (activeIds.length === 0) return { items: [], nextCursors, hasMore: false };
+  const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
 
   if (activeIds.length === 1) {
     const id = activeIds[0] ?? '';
-    const slice = await fetchSourceCursorSlice(db, kind, id, cursors[id], page.limit + 1, opts);
+    const slice = await fetchSourceCursorSlice(
+      db,
+      kind,
+      id,
+      cursors[id],
+      page.limit + 1,
+      opts,
+      filter,
+    );
     const hasMore = slice.rows.length > page.limit;
     const items = hasMore ? slice.rows.slice(0, page.limit) : slice.rows;
     const lastCursor = slice.cursors[items.length - 1];
@@ -278,23 +386,31 @@ export async function queryAllSourcesItemsByCursor(
   const watched = watchedFilterClause('t.key', opts);
   const counts = await Promise.all(
     activeIds.map(async (id) => {
+      if (filter?.blockAdultKeywords) {
+        const probe = await fetchSourceCursorSlice(db, kind, id, cursors[id], cap, opts, filter);
+        return probe.rows.length;
+      }
+      const restrict =
+        filter === null
+          ? { clause: '', params: [] as readonly SqlValue[] }
+          : buildSqlItemRestrictionClause(filter, kind, 't.source_id', 't.key', id);
       const c = cursors[id];
       const rows =
         c === undefined
           ? await db.all<{ n: number }>(
               `SELECT COUNT(*) AS n FROM (
-                 SELECT 1 FROM ${table} t WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause} LIMIT ?
+                 SELECT 1 FROM ${table} t WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause} LIMIT ?
                )`,
-              [id, ...watched.params, cap],
+              [id, ...watched.params, ...restrict.params, cap],
             )
           : await db.all<{ n: number }>(
               `SELECT COUNT(*) AS n FROM (
                  SELECT 1 FROM ${table} t
                   WHERE t.source_id = ? AND t.is_hidden = 0
-                    AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))${watched.clause}
+                    AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))${watched.clause}${restrict.clause}
                   LIMIT ?
                )`,
-              [id, c.nameFold, c.nameFold, c.id, ...watched.params, cap],
+              [id, c.nameFold, c.nameFold, c.id, ...watched.params, ...restrict.params, cap],
             );
       return rows[0]?.n ?? 0;
     }),
@@ -303,7 +419,7 @@ export async function queryAllSourcesItemsByCursor(
   const quotas = allocateFairQuotas(counts, page.limit);
   const slices = await Promise.all(
     activeIds.map((id, i) =>
-      fetchSourceCursorSlice(db, kind, id, cursors[id], quotas[i] ?? 0, opts),
+      fetchSourceCursorSlice(db, kind, id, cursors[id], quotas[i] ?? 0, opts, filter),
     ),
   );
   for (let i = 0; i < activeIds.length; i += 1) {
@@ -323,46 +439,93 @@ export async function queryAllSourcesItemsByCursor(
   return { items, nextCursors, hasMore };
 }
 
-async function fetchGlobalAlphaSlice(
+async function fetchRawGlobalAlphaSlice(
   db: SqlDriver,
   kind: BrowseKind,
   activeIds: readonly string[],
   offset: number,
   limit: number,
-  opts?: ListItemsOptions,
-): Promise<ItemRow[]> {
+  opts: ListItemsOptions | undefined,
+  filter: ActiveParentalFilter | null,
+): Promise<RawItemRow[]> {
   if (limit <= 0 || activeIds.length === 0) return [];
   const table = ITEM_TABLE[kind];
   const placeholders = activeIds.map(() => '?').join(', ');
   const watched = watchedFilterClause('t.key', opts);
+  const restrict =
+    filter === null
+      ? { clause: '', params: [] as readonly SqlValue[] }
+      : buildSqlItemRestrictionClause(filter, kind, 't.source_id', 't.key');
   const dedup = allSourcesDedupSpec(kind, opts);
   if (dedup !== undefined) {
-    const rows = await db.all<RawItemRow>(
+    return db.all<RawItemRow>(
       `WITH ranked AS (
          SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, t.sort_title, ${ITEM_COLS[kind]},
                 COUNT(*) OVER (PARTITION BY t.source_id, ${dedup.groupExpr}) AS ${dedup.countCol},
                 ROW_NUMBER() OVER (PARTITION BY t.source_id, ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
            FROM ${table} t
-          WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${watched.clause}
+          WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${watched.clause}${restrict.clause}
        )
        SELECT id, key, source_id, provider_id, name, logo, rating, year, num, ${dedup.countCol}
          FROM ranked
         WHERE rn = 1
         ORDER BY sort_title ASC, key ASC
         LIMIT ? OFFSET ?`,
-      [...activeIds, ...watched.params, limit, offset],
+      [...activeIds, ...watched.params, ...restrict.params, limit, offset],
     );
-    return rows.map((r) => mapItemRow(kind, r.source_id ?? '', r));
   }
-  const rows = await db.all<RawItemRow>(
+  return db.all<RawItemRow>(
     `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${ITEM_COLS[kind]}
        FROM ${table} t
-      WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${watched.clause}
+      WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${watched.clause}${restrict.clause}
       ORDER BY t.sort_title ASC, t.key ASC
       LIMIT ? OFFSET ?`,
-    [...activeIds, ...watched.params, limit, offset],
+    [...activeIds, ...watched.params, ...restrict.params, limit, offset],
   );
-  return rows.map((r) => mapItemRow(kind, r.source_id ?? '', r));
+}
+
+async function fetchGlobalAlphaSlice(
+  db: SqlDriver,
+  kind: BrowseKind,
+  activeIds: readonly string[],
+  offset: number,
+  limit: number,
+  opts: ListItemsOptions | undefined,
+  filter: ActiveParentalFilter | null,
+): Promise<ItemRow[]> {
+  if (limit <= 0 || activeIds.length === 0) return [];
+  if (filter === null || !filter.blockAdultKeywords) {
+    const rows = await fetchRawGlobalAlphaSlice(db, kind, activeIds, offset, limit, opts, filter);
+    return rows.map((r) => mapItemRow(kind, r.source_id ?? '', r));
+  }
+  const chunkSize = Math.max(limit * 2, 64);
+  const out: ItemRow[] = [];
+  let rawOffset = 0;
+  let skipped = 0;
+  for (;;) {
+    const batch = await fetchRawGlobalAlphaSlice(
+      db,
+      kind,
+      activeIds,
+      rawOffset,
+      chunkSize,
+      opts,
+      filter,
+    );
+    if (batch.length === 0) break;
+    rawOffset += batch.length;
+    for (const r of batch) {
+      if (isAdultKeywordMatch(r.name)) continue;
+      if (skipped < offset) {
+        skipped += 1;
+        continue;
+      }
+      out.push(mapItemRow(kind, r.source_id ?? '', r));
+      if (out.length >= limit) return out;
+    }
+    if (batch.length < chunkSize) break;
+  }
+  return out;
 }
 
 /**
@@ -383,11 +546,12 @@ export async function queryAllSourcesItems(
   if (page.limit === 0) return [];
   const activeIds = await resolveActiveSources(db, sourceIds);
   if (activeIds.length === 0) return [];
+  const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
   if (activeIds.length === 1) {
-    return fetchSourceSlice(db, kind, activeIds[0] ?? '', page.offset, page.limit, opts);
+    return fetchSourceSlice(db, kind, activeIds[0] ?? '', page.offset, page.limit, opts, filter);
   }
   if (opts?.sortBy === 'alpha') {
-    return fetchGlobalAlphaSlice(db, kind, activeIds, page.offset, page.limit, opts);
+    return fetchGlobalAlphaSlice(db, kind, activeIds, page.offset, page.limit, opts, filter);
   }
 
   const endTarget = page.offset + page.limit;
@@ -396,23 +560,31 @@ export async function queryAllSourcesItems(
   const dedup = allSourcesDedupSpec(kind, opts);
   const counts = await Promise.all(
     activeIds.map(async (id) => {
+      if (filter?.blockAdultKeywords) {
+        const probe = await fetchSourceSlice(db, kind, id, 0, endTarget, opts, filter);
+        return probe.length;
+      }
+      const restrict =
+        filter === null
+          ? { clause: '', params: [] as readonly SqlValue[] }
+          : buildSqlItemRestrictionClause(filter, kind, 't.source_id', 't.key', id);
       const rows =
         dedup === undefined
           ? await db.all<{ n: number }>(
               `SELECT COUNT(*) AS n FROM (
-                 SELECT 1 FROM ${table} t WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause} LIMIT ?
+                 SELECT 1 FROM ${table} t WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause} LIMIT ?
                )`,
-              [id, ...watched.params, endTarget],
+              [id, ...watched.params, ...restrict.params, endTarget],
             )
           : await db.all<{ n: number }>(
               `SELECT COUNT(*) AS n FROM (
                  SELECT 1 FROM (
                    SELECT ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
                      FROM ${table} t
-                    WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}
+                    WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause}
                  ) WHERE rn = 1 LIMIT ?
                )`,
-              [id, ...watched.params, endTarget],
+              [id, ...watched.params, ...restrict.params, endTarget],
             );
       return rows[0]?.n ?? 0;
     }),
@@ -425,7 +597,7 @@ export async function queryAllSourcesItems(
     activeIds.map((id, i) => {
       const start = startAlloc[i] ?? 0;
       const count = (endAlloc[i] ?? 0) - start;
-      return fetchSourceSlice(db, kind, id, start, count, opts);
+      return fetchSourceSlice(db, kind, id, start, count, opts, filter);
     }),
   );
 

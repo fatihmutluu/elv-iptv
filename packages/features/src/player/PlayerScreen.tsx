@@ -30,6 +30,7 @@ import { useNextEpisodeResolver } from './useNextEpisodeResolver';
 import { usePlayerCinemaExtras } from './usePlayerCinemaExtras';
 import { usePlayerControls } from './usePlayerControls';
 import { usePlayerNowNext } from './usePlayerNowNext';
+import { usePlayerParentalUnlock } from './usePlayerParentalUnlock';
 import { usePlayerSession } from './usePlayerSession';
 import { usePlayerSyncAndQuality } from './usePlayerSyncAndQuality';
 import { usePlayerTargetHandoff } from './usePlayerTargetHandoff';
@@ -75,17 +76,9 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const { stillWatchingTimeoutMin = 0, onPlaybackActiveChange, onFineScrubHaptic } = props;
   const { preferredAudioDevice, onPersistAudioDevice, androidDecoderMode } = props;
   const { onSelectAndroidDecoderMode, liveChannelSwitchMode = 'instant' } = props;
-  const {
-    deinterlaceMode,
-    onPersistDeinterlaceMode,
-    pitchLock,
-    onPersistPitchLock,
-    audioNormalization,
-    onPersistAudioNormalization,
-    windowAspectRatioLock,
-    onWindowAspectRatioLockChange,
-    backgroundAudioPlayback = false,
-  } = props;
+  const { deinterlaceMode, onPersistDeinterlaceMode, pitchLock, onPersistPitchLock } = props;
+  const { audioNormalization, onPersistAudioNormalization, windowAspectRatioLock } = props;
+  const { onWindowAspectRatioLockChange, backgroundAudioPlayback = false } = props;
   const formFactor = useFormFactor();
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
@@ -367,6 +360,13 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   });
   hostKeyRef.current = controls.handleHostKey;
   cancelScrubRef.current = controls.cancelScrub;
+
+  const handleRetryWithParental = usePlayerParentalUnlock({
+    itemKey: activeTarget.itemKey,
+    status,
+    reloadActiveTarget: handoff.reloadActiveTarget,
+    fallbackRetry: controls.retry,
+  });
 
   const setResizeModeRef = useRef(controls.setResizeMode);
   setResizeModeRef.current = controls.setResizeMode;
@@ -733,7 +733,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       extras.stillWatching.recordUserActivity();
       zapBy(1);
     },
-    onRetry: controls.retry,
+    onRetry: handleRetryWithParental,
   };
 
   return (

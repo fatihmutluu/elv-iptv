@@ -1940,3 +1940,180 @@ msgstr "Otomatik"
 
 msgid "player.delayReset"
 msgstr "Sıfırla (0 ms)"
+
+msgid "settings.section.profiles"
+msgstr "Profiller ve Ebeveyn"
+
+msgid "profiles.title"
+msgstr "Profiller"
+
+msgid "profiles.subtitle"
+msgstr "İzleyici değiştirin veya bu cihazdaki yerel profilleri yönetin."
+
+msgid "profiles.switchTitle"
+msgstr "Profil değiştir"
+
+msgid "profiles.switchButton"
+msgstr "Geç"
+
+msgid "profiles.activeBadge"
+msgstr "Aktif"
+
+msgid "profiles.kidsBadge"
+msgstr "Çocuk"
+
+msgid "profiles.addProfile"
+msgstr "Profil ekle"
+
+msgid "profiles.editProfile"
+msgstr "Profili düzenle"
+
+msgid "profiles.deleteProfile"
+msgstr "Profili sil"
+
+msgid "profiles.deleteConfirmTitle"
+msgstr "Bu profil silinsin mi?"
+
+msgid "profiles.deleteConfirmBody"
+msgstr "Bu profile ait izleme geçmişi, favoriler, tercihler ve ebeveyn kilitleri kalıcı olarak silinecektir."
+
+msgid "profiles.cannotDeleteLast"
+msgstr "Bu cihazda en az bir profil bulunmalıdır."
+
+msgid "profiles.nameLabel"
+msgstr "Profil adı"
+
+msgid "profiles.namePlaceholder"
+msgstr "Profil adını girin"
+
+msgid "profiles.avatarLabel"
+msgstr "Avatar rengi"
+
+msgid "profiles.kidsToggle"
+msgstr "Çocuk profili"
+
+msgid "profiles.kidsHint"
+msgstr "Varsayılan olarak ebeveyn denetimlerini ve yaş filtrelemesini etkinleştirir."
+
+msgid "profiles.save"
+msgstr "Kaydet"
+
+msgid "profiles.cancel"
+msgstr "İptal"
+
+msgid "profiles.defaultName"
+msgstr "Varsayılan"
+
+msgid "profiles.manageInSettings"
+msgstr "Profilleri Ayarlar'dan yönet"
+
+msgid "parental.title"
+msgstr "Ebeveyn Denetimleri"
+
+msgid "parental.subtitle"
+msgstr "Kategorileri, yetişkin anahtar kelimelerini ve yaş sınırlı programları PIN ile kısıtlayın."
+
+msgid "parental.enabledToggle"
+msgstr "Ebeveyn denetimlerini etkinleştir"
+
+msgid "parental.enabledHint"
+msgstr "Kilitliyken kısıtlı kanalları, yapımları ve kategorileri gizler."
+
+msgid "parental.pinTitle"
+msgstr "Ebeveyn PIN'i"
+
+msgid "parental.pinNotSet"
+msgstr "PIN ayarlanmadı"
+
+msgid "parental.pinSet"
+msgstr "PIN ile korunuyor"
+
+msgid "parental.setPin"
+msgstr "PIN belirle"
+
+msgid "parental.changePin"
+msgstr "PIN değiştir"
+
+msgid "parental.removePin"
+msgstr "PIN'i kaldır"
+
+msgid "parental.enterPin"
+msgstr "PIN girin"
+
+msgid "parental.createPin"
+msgstr "4–8 haneli bir PIN oluşturun"
+
+msgid "parental.confirmPin"
+msgstr "PIN'i onaylayın"
+
+msgid "parental.pinMismatch"
+msgstr "PIN'ler eşleşmiyor. Tekrar deneyin."
+
+msgid "parental.pinInvalid"
+msgstr "PIN 4 ile 8 rakam arasında olmalıdır."
+
+msgid "parental.pinWrong"
+msgstr "Hatalı PIN."
+
+msgid "parental.pinLockedOut"
+msgstr "Çok fazla deneme. {seconds} sn sonra tekrar deneyin."
+
+msgid "parental.unlockTitle"
+msgstr "Ebeveyn kilidini aç"
+
+msgid "parental.unlockButton"
+msgstr "Kilidi aç"
+
+msgid "parental.lockNow"
+msgstr "Şimdi kilitle"
+
+msgid "parental.unlockedBadge"
+msgstr "Kilit açık"
+
+msgid "parental.lockedBadge"
+msgstr "Kilitli"
+
+msgid "parental.lockedMessage"
+msgstr "Bu içerik ebeveyn denetimleriyle kısıtlanmıştır."
+
+msgid "parental.adultKeywordsToggle"
+msgstr "Yetişkin anahtar kelimelerini engelle"
+
+msgid "parental.adultKeywordsHint"
+msgstr "Yetişkin anahtar kelimeleri içeren kategori ve yapımları otomatik olarak gizler."
+
+msgid "parental.maxAgeLabel"
+msgstr "En yüksek yaş sınırı"
+
+msgid "parental.maxAgeOff"
+msgstr "Kapalı"
+
+msgid "parental.maxAgeOption"
+msgstr "{age}+"
+
+msgid "parental.unlockTimeoutLabel"
+msgstr "Kilit açık kalma süresi"
+
+msgid "parental.timeoutMinutes"
+msgstr "{minutes} dk"
+
+msgid "parental.timeoutSession"
+msgstr "Yeniden başlatana kadar"
+
+msgid "parental.lockedCategoriesTitle"
+msgstr "Kilitli kategoriler"
+
+msgid "parental.lockedCategoriesEmpty"
+msgstr "Henüz kilitlenebilecek kategori yok."
+
+msgid "parental.categoryLocked"
+msgstr "Kilitli"
+
+msgid "parental.categoryUnlocked"
+msgstr "Açık"
+
+msgid "parental.backspace"
+msgstr "Sil"
+
+msgid "parental.clear"
+msgstr "Temizle"

@@ -1,8 +1,7 @@
 import {
-  createKvPreferencesStore,
-  createMemoryPreferencesStore,
+  createProfilePreferencesManager,
   type PreferencesKvBackend,
-  type PreferencesStore,
+  type ProfilePreferencesManager,
 } from '@elv/domain';
 
 type WebStorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -41,17 +40,30 @@ function createWebStorageBackend(storage: WebStorageLike): PreferencesKvBackend 
   };
 }
 
+function createMemoryKvBackend(): PreferencesKvBackend {
+  const data = new Map<string, string>();
+  return {
+    get: (key) => data.get(key),
+    set: (key, value) => {
+      data.set(key, value);
+    },
+    delete: (key) => {
+      data.delete(key);
+    },
+  };
+}
+
 /**
- * Creates the desktop renderer {@link PreferencesStore}, backed by `window.localStorage`
+ * Creates the desktop renderer {@link ProfilePreferencesManager}, backed by `window.localStorage`
  * (or an injected Web Storage implementation) with an automatic in-memory fallback when
  * browser storage is unavailable or blocked by privacy settings.
  */
-export function createDesktopPreferencesStore(storage?: WebStorageLike): PreferencesStore {
+export function createDesktopPreferencesStore(storage?: WebStorageLike): ProfilePreferencesManager {
   const resolved = storage ?? safeWindowLocalStorage();
   if (resolved === undefined) {
-    return createMemoryPreferencesStore();
+    return createProfilePreferencesManager(createMemoryKvBackend());
   }
-  return createKvPreferencesStore(createWebStorageBackend(resolved), undefined, {
+  return createProfilePreferencesManager(createWebStorageBackend(resolved), {
     coalesceMs: 500,
   });
 }

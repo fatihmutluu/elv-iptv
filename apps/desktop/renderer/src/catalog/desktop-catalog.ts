@@ -104,20 +104,23 @@ export function createDesktopCatalogFromBridge(
       bridge.allSourcesItems
         ? bridge.allSourcesItems(kind, offset, limit, sourceIds, opts)
         : Promise.resolve([]),
-    itemDetail: (itemKey) => bridge.itemDetail(itemKey),
+    itemDetail: (itemKey, opts) => bridge.itemDetail(itemKey, opts),
     search: (query, opts) => bridge.search(sanitizeDisplayText(query).slice(0, 256), opts),
     searchSuggestions: (options) =>
       bridge.searchSuggestions ? bridge.searchSuggestions(options) : Promise.resolve([]),
     alphabetIndex: (input) =>
       bridge.alphabetIndex ? bridge.alphabetIndex(input) : Promise.resolve([]),
-    nowNext: (channelKeys, nowMs) => bridge.nowNext(channelKeys, nowMs),
-    epgWindow: (channelKeys, fromMs, toMs) => bridge.epgWindow(channelKeys, fromMs, toMs),
-    channelByNumber: (num, sourceId) => bridge.channelByNumber(num, sourceId),
+    nowNext: (channelKeys, nowMs, opts) => bridge.nowNext(channelKeys, nowMs, opts),
+    epgWindow: (channelKeys, fromMs, toMs, opts) =>
+      bridge.epgWindow(channelKeys, fromMs, toMs, opts),
+    epgSlice: (sourceId, fromMs, toMs, limit, opts) =>
+      bridge.epgSlice ? bridge.epgSlice(sourceId, fromMs, toMs, limit, opts) : Promise.resolve([]),
+    channelByNumber: (num, sourceId, opts) => bridge.channelByNumber(num, sourceId, opts),
     seasons: (seriesId) => bridge.seasons(seriesId),
     episodes: (seriesId, season) => bridge.episodes(seriesId, season),
     queryNextEpisode: (seriesKey, currentItemKey, profileId) =>
       bridge.queryNextEpisode(seriesKey, currentItemKey, profileId),
-    resolveStream: (itemKey) => bridge.resolveStream(itemKey),
+    resolveStream: (itemKey, opts) => bridge.resolveStream(itemKey, opts),
     saveProgress: (input) =>
       bridge.saveProgress({
         ...input,
@@ -128,7 +131,8 @@ export function createDesktopCatalogFromBridge(
       }),
     setWatched: (itemKey, watched, profileId) => bridge.setWatched(itemKey, watched, profileId),
     getProgress: (itemKey, profileId) => bridge.getProgress(itemKey, profileId),
-    listContinueWatching: (limit, profileId) => bridge.listContinueWatching(limit, profileId),
+    listContinueWatching: (limit, profileId, opts) =>
+      bridge.listContinueWatching(limit, profileId, opts),
     listProgressByKeys: (itemKeys, profileId) => bridge.listProgressByKeys(itemKeys, profileId),
     listSeriesUnplayedCounts: (seriesKeys, profileId) =>
       bridge.listSeriesUnplayedCounts
@@ -139,7 +143,7 @@ export function createDesktopCatalogFromBridge(
       bridge.toggleFavorite({ ...input, title: sanitizeDisplayText(input.title) }),
     setFavorite: (input, active) =>
       bridge.setFavorite({ ...input, title: sanitizeDisplayText(input.title) }, active),
-    listFavorites: (limit, profileId) => bridge.listFavorites(limit, profileId),
+    listFavorites: (limit, profileId, opts) => bridge.listFavorites(limit, profileId, opts),
     listFavoriteKeys: (profileId) => bridge.listFavoriteKeys(profileId),
     getTrackPreference: (scopeKey, profileId) =>
       bridge.getTrackPreference
@@ -155,8 +159,63 @@ export function createDesktopCatalogFromBridge(
       bridge.recordRecentChannel
         ? bridge.recordRecentChannel(itemKey, sourceId, profileId)
         : Promise.resolve(),
-    listRecentChannels: (limit, profileId) =>
-      bridge.listRecentChannels ? bridge.listRecentChannels(limit, profileId) : Promise.resolve([]),
+    listRecentChannels: (limit, profileId, opts) =>
+      bridge.listRecentChannels
+        ? bridge.listRecentChannels(limit, profileId, opts)
+        : Promise.resolve([]),
+    listProfiles: () => (bridge.listProfiles ? bridge.listProfiles() : Promise.resolve([])),
+    createProfile: (input) =>
+      bridge.createProfile
+        ? bridge.createProfile({ ...input, name: sanitizeDisplayText(input.name) })
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    updateProfile: (id, patch) =>
+      bridge.updateProfile
+        ? bridge.updateProfile(id, {
+            ...patch,
+            ...(patch.name === undefined ? {} : { name: sanitizeDisplayText(patch.name) }),
+          })
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    deleteProfile: (id) =>
+      bridge.deleteProfile
+        ? bridge.deleteProfile(id)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    getParentalSettings: (profileId) =>
+      bridge.getParentalSettings
+        ? bridge.getParentalSettings(profileId)
+        : Promise.resolve({
+            profileId: profileId ?? 'default',
+            enabled: false,
+            blockAdultKeywords: true,
+            maxRatingAge: null,
+            unlockTimeoutMin: 30,
+            updatedAt: 0,
+          }),
+    updateParentalSettings: (patch, profileId) =>
+      bridge.updateParentalSettings
+        ? bridge.updateParentalSettings(patch, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    listParentalLocks: (profileId, filter) =>
+      bridge.listParentalLocks ? bridge.listParentalLocks(profileId, filter) : Promise.resolve([]),
+    setParentalLock: (input, locked) =>
+      bridge.setParentalLock
+        ? bridge.setParentalLock(input, locked)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    hasParentalPin: (profileId) =>
+      bridge.hasParentalPin ? bridge.hasParentalPin(profileId) : Promise.resolve(false),
+    setParentalPin: (pin, profileId, currentPin) =>
+      bridge.setParentalPin
+        ? bridge.setParentalPin(pin, profileId, currentPin)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    verifyParentalPin: (pin, profileId) =>
+      bridge.verifyParentalPin
+        ? bridge.verifyParentalPin(pin, profileId)
+        : Promise.resolve({ ok: false, remainingAttempts: 0 }),
+    clearParentalPin: (currentPin, profileId) =>
+      bridge.clearParentalPin
+        ? bridge.clearParentalPin(currentPin, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    flushPendingWrites: () =>
+      bridge.flushPendingWrites ? bridge.flushPendingWrites() : Promise.resolve(),
     async close() {
       onClose?.();
       await bridge.close();

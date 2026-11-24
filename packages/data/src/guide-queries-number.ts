@@ -1,6 +1,12 @@
 import type { SqlDriver } from '@elv/domain';
-import type { ItemRow } from './queries';
-import { DEFAULT_PROFILE_ID } from './user-state-helpers';
+import type { ParentalQueryOptions } from './parental-policy';
+import {
+  type ActiveParentalFilter,
+  findRestrictedItemKeys,
+  loadActiveParentalFilter,
+} from './parental-repo';
+import type { ItemRow } from './queries-shared';
+import { normalizeProfileId } from './user-state-helpers';
 
 interface RawLiveNumberRow {
   id: number;
@@ -26,6 +32,7 @@ async function pickWinningNumberRow(
   db: SqlDriver,
   sourceId: string,
   rows: readonly RawLiveNumberRow[],
+  profileId: string,
 ): Promise<RawLiveNumberRow> {
   if (rows.length === 1) return rows[0] as RawLiveNumberRow;
   const keys = rows.map((r) => r.key);
@@ -33,7 +40,7 @@ async function pickWinningNumberRow(
   const [favRows, posRows] = await Promise.all([
     db.all<{ item_key: string }>(
       `SELECT item_key FROM favorites WHERE profile_id = ? AND item_key IN (${ph})`,
-      [DEFAULT_PROFILE_ID, ...keys],
+      [profileId, ...keys],
     ),
     db.all<{ item_key: string; min_pos: number }>(
       `SELECT p.item_key, MIN(p.position) AS min_pos
@@ -62,10 +69,26 @@ async function queryChannelByNumberInSource(
   db: SqlDriver,
   sourceId: string,
   num: number,
+  profileId: string,
+  filter: ActiveParentalFilter | null,
 ): Promise<ItemRow | undefined> {
-  const rows = await db.all<RawLiveNumberRow>(LIVE_BY_NUM_SQL, [sourceId, num]);
+  let rows = await db.all<RawLiveNumberRow>(LIVE_BY_NUM_SQL, [sourceId, num]);
   if (rows.length === 0) return undefined;
-  const r = await pickWinningNumberRow(db, sourceId, rows);
+  if (filter !== null) {
+    const restricted = await findRestrictedItemKeys(
+      db,
+      filter,
+      rows.map((r) => ({
+        itemKey: r.key,
+        sourceId: r.source_id,
+        kind: 'live' as const,
+        title: r.name,
+      })),
+    );
+    rows = rows.filter((r) => !restricted.has(r.key));
+    if (rows.length === 0) return undefined;
+  }
+  const r = await pickWinningNumberRow(db, sourceId, rows, profileId);
   return {
     id: r.id,
     key: r.key,
@@ -83,23 +106,26 @@ async function queryChannelByNumberInSource(
 /**
  * Looks up a live channel by finite non-negative channel number (including decimal sub-channels
  * such as `4.1`) using `idx_live_num (source_id, num)` with zero full-table scans. Ties within a
- * source break deterministically: favorites first, then lowest visible category placement position,
- * then `live.id`. When `sourceId` is omitted, probes sources in creation order.
+ * source break deterministically: profile favorites first, then lowest visible category placement
+ * position, then `live.id`. When `sourceId` is omitted, probes sources in creation order.
  */
 export async function queryChannelByNumber(
   db: SqlDriver,
   num: number,
   sourceId?: string,
+  opts?: ParentalQueryOptions,
 ): Promise<ItemRow | undefined> {
   if (!Number.isFinite(num) || num < 0) return undefined;
+  const profileId = normalizeProfileId(opts?.profileId);
+  const filter = await loadActiveParentalFilter(db, profileId, opts?.parentalUnlocked);
   if (sourceId !== undefined) {
-    return queryChannelByNumberInSource(db, sourceId, num);
+    return queryChannelByNumberInSource(db, sourceId, num, profileId, filter);
   }
   const sources = await db.all<{ id: string }>(
     'SELECT id FROM sources WHERE deleting = 0 ORDER BY created_at, id',
   );
   for (const src of sources) {
-    const match = await queryChannelByNumberInSource(db, src.id, num);
+    const match = await queryChannelByNumberInSource(db, src.id, num, profileId, filter);
     if (match !== undefined) return match;
   }
   return undefined;

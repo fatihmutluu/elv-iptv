@@ -8,7 +8,13 @@ import {
   MAX_EPG_SLICE_LIMIT,
   queryCrossChannelEpgSlice,
 } from './guide-queries-slice';
-import { sourceOfKey } from './queries';
+import type { ParentalQueryOptions } from './parental-policy';
+import {
+  findRestrictedItemKeys,
+  isProgrammeRestricted,
+  loadActiveParentalFilter,
+} from './parental-repo';
+import { sourceOfKey } from './queries-shared';
 import type { SourceSettings } from './sources';
 
 export {
@@ -200,14 +206,27 @@ export async function queryNowNext(
   db: SqlDriver,
   channelKeys: readonly string[],
   nowMs: number,
+  opts?: ParentalQueryOptions,
 ): Promise<NowNextEntry[]> {
   if (!Number.isFinite(nowMs) || nowMs < 0) return [];
   const { ordered, bySource } = groupChannelKeys(channelKeys, MAX_NOW_NEXT_KEYS);
   if (ordered.length === 0) return [];
+  const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
+  const restrictedKeys =
+    filter === null
+      ? null
+      : await findRestrictedItemKeys(
+          db,
+          filter,
+          ordered.map((itemKey) => ({ itemKey })),
+        );
 
   const entryByChannel = new Map<string, NowNextEntry>();
 
-  for (const [sourceId, keys] of bySource) {
+  for (const [sourceId, rawKeys] of bySource) {
+    const keys =
+      restrictedKeys === null ? rawKeys : rawKeys.filter((key) => !restrictedKeys.has(key));
+    if (keys.length === 0) continue;
     const { mapRows, shiftByChannel, minShift, maxShift } = await loadChannelGuideAndShifts(
       db,
       sourceId,
@@ -236,6 +255,12 @@ export async function queryNowNext(
 
     const progsByGuide = new Map<string, RawProgrammeRow[]>();
     for (const prog of progRows) {
+      if (
+        filter !== null &&
+        isProgrammeRestricted(filter, prog.title, prog.description, prog.rating_value)
+      ) {
+        continue;
+      }
       const list = progsByGuide.get(prog.guide_id);
       if (list === undefined) progsByGuide.set(prog.guide_id, [prog]);
       else list.push(prog);
@@ -291,6 +316,7 @@ export async function queryEpgWindow(
   channelKeys: readonly string[],
   fromMs: number,
   toMs: number,
+  opts?: ParentalQueryOptions,
 ): Promise<Record<string, ProgrammeRow[]>> {
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs < 0 || toMs <= fromMs) {
     return {};
@@ -298,10 +324,22 @@ export async function queryEpgWindow(
   const clampedToMs = Math.min(toMs, fromMs + MAX_EPG_WINDOW_SPAN_MS);
   const { ordered, bySource } = groupChannelKeys(channelKeys, MAX_EPG_WINDOW_KEYS);
   if (ordered.length === 0) return {};
+  const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
+  const restrictedKeys =
+    filter === null
+      ? null
+      : await findRestrictedItemKeys(
+          db,
+          filter,
+          ordered.map((itemKey) => ({ itemKey })),
+        );
 
   const out: Record<string, ProgrammeRow[]> = {};
 
-  for (const [sourceId, keys] of bySource) {
+  for (const [sourceId, rawKeys] of bySource) {
+    const keys =
+      restrictedKeys === null ? rawKeys : rawKeys.filter((key) => !restrictedKeys.has(key));
+    if (keys.length === 0) continue;
     const { mapRows, shiftByChannel, minShift, maxShift } = await loadChannelGuideAndShifts(
       db,
       sourceId,
@@ -330,6 +368,12 @@ export async function queryEpgWindow(
     );
 
     for (const prog of progRows) {
+      if (
+        filter !== null &&
+        isProgrammeRestricted(filter, prog.title, prog.description, prog.rating_value)
+      ) {
+        continue;
+      }
       const targetChannels = channelsByGuide.get(prog.guide_id);
       if (targetChannels === undefined) continue;
       for (const chKey of targetChannels) {
