@@ -20,7 +20,7 @@
     "@elv/config": "workspace:*",
     "@types/better-sqlite3": "7.6.13",
     "@vitest/coverage-v8": "catalog:",
-    "better-sqlite3": "13.0.3",
+    "better-sqlite3": "13.2.0",
     "fast-check": "catalog:",
     "vitest": "5.1.0"
   }

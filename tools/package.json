@@ -17,8 +17,8 @@
     "@elv/sources": "workspace:*",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "24.19.2",
-    "better-sqlite3": "13.0.3",
-    "dependency-cruiser": "18.7.2",
+    "better-sqlite3": "13.2.0",
+    "dependency-cruiser": "18.8.0",
     "vitest": "5.1.0"
   }
 }
