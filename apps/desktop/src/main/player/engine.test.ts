@@ -478,6 +478,9 @@ describe('MpvEngine', () => {
       recreate: true,
       audioTrackSelection: true,
       subtitleTrackSelection: true,
+      audioDelay: true,
+      subtitleDelay: true,
+      videoQualitySelection: true,
     });
     expect(engine.presenterKind).toBe('child-window');
   });

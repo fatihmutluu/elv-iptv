@@ -101,8 +101,12 @@ extension AetherBackend {
     softwareSize: CGSize?
   ) {
     let filterSdh = currentLoadOptions?.filterSdhSubtitles ?? false
+    let effectiveTime = SyncDelayPolicy.effectiveSubtitleTime(
+      sourceTimeSeconds: sourceTime,
+      subtitleDelaySeconds: requestedSubtitleDelaySeconds
+    )
     let activeCues = cues.filter { cue in
-      guard cue.startTime <= sourceTime && sourceTime < cue.endTime else { return false }
+      guard cue.startTime <= effectiveTime && effectiveTime < cue.endTime else { return false }
       guard filterSdh else { return true }
       switch cue.body {
       case let .text(raw):
@@ -228,6 +232,60 @@ extension AetherBackend {
     engine.selectSubtitleTrack(index: streamId)
   }
 
+  func setAudioDelay(_ seconds: Double) {
+    let clamped = SyncDelayPolicy.clampDelaySeconds(seconds)
+    requestedAudioDelaySeconds = clamped
+    engine?.setAudioDelay(clamped)
+  }
+
+  func setSubtitleDelay(_ seconds: Double) {
+    let clamped = SyncDelayPolicy.clampDelaySeconds(seconds)
+    requestedSubtitleDelaySeconds = clamped
+    engine?.setSoftwareSubtitleDelay(clamped)
+    if let target = engine,
+       engineLoadSerial > 0,
+       target.isSubtitleActive,
+       target.clock.sourceTimeFollowsPicture,
+       !target.subtitleCues.isEmpty
+    {
+      renderSubtitles(
+        from: target,
+        cues: target.subtitleCues,
+        sourceTime: target.clock.sourceTime,
+        softwareSize: target.softwareDisplaySize
+      )
+    }
+  }
+
+  func selectVideoQuality(_ cap: VideoQualityCap?) {
+    requestedVideoQualityCap = cap
+    if let item = engine?.currentAVPlayer?.currentItem ?? engine?.currentAVPlayerItem {
+      applyVideoQualityCap(to: item)
+    }
+  }
+
+  func applyVideoQualityCap(to item: AVPlayerItem) {
+    if let cap = requestedVideoQualityCap {
+      item.preferredMaximumResolution = CGSize(width: cap.maxWidth, height: cap.maxHeight)
+      item.preferredPeakBitRate = cap.peakBitrateBps
+    } else {
+      item.preferredMaximumResolution = .zero
+      item.preferredPeakBitRate = 0
+    }
+  }
+
+  func applyRequestedSyncAndQuality(to target: AetherEngine) {
+    if requestedAudioDelaySeconds != 0 {
+      target.setAudioDelay(requestedAudioDelaySeconds)
+    }
+    if requestedSubtitleDelaySeconds != 0 {
+      target.setSoftwareSubtitleDelay(requestedSubtitleDelaySeconds)
+    }
+    if let item = target.currentAVPlayer?.currentItem ?? target.currentAVPlayerItem {
+      applyVideoQualityCap(to: item)
+    }
+  }
+
   func publishSubtitlePresentation(_ next: SubtitlePresentation) {
     guard next != lastSubtitlePresentation else { return }
     lastSubtitlePresentation = next
@@ -262,13 +320,18 @@ extension AetherBackend {
     let subtitles = subtitleTracks.map { Self.mapTrackInfo($0, isAudio: false) }
     let selectedAudioId = activeAudioIndex.map(formatAudioTrackId)
     let selectedSubtitleId = isSubtitleActive ? activeSubtitleIndex.map(formatSubtitleTrackId) : nil
+    let isAdaptive = VideoQualityPolicy.isAdaptiveStream(plan: currentPlan)
+    let videoQualities = isAdaptive ? VideoQualityPolicy.adaptivePresets : []
+    let selectedVideoQualityId = isAdaptive ? requestedVideoQualityCap?.id : nil
     onObservation?(
       .tracks(
         MediaTracksOut(
           audio: audio,
           subtitles: subtitles,
           selectedAudioId: selectedAudioId,
-          selectedSubtitleId: selectedSubtitleId
+          selectedSubtitleId: selectedSubtitleId,
+          videoQualities: videoQualities,
+          selectedVideoQualityId: selectedVideoQualityId
         )
       ),
       serial

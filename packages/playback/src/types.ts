@@ -76,6 +76,12 @@ export interface PlaybackState {
   readonly surfaceRecreationToken: number;
   /** Whether playback is currently routed to an external receiver such as AirPlay (`#234`). */
   readonly externalPlaybackActive?: boolean;
+  /** Live audio sync delay offset in milliseconds (`[-30_000, 30_000]`, `#59`). */
+  readonly audioDelayMs?: number;
+  /** Live subtitle sync delay offset in milliseconds (`[-30_000, 30_000]`, `#59`). */
+  readonly subtitleDelayMs?: number;
+  /** Selected adaptive video rendition ID, or `null` for automatic ABR (`#59`). */
+  readonly selectedVideoQualityId?: string | null;
 }
 
 /** Playback controller; the UI talks to this, never to the engine. */
@@ -113,6 +119,14 @@ export interface PlaybackService {
   selectAudioTrack(id: string): void;
   /** Selects a subtitle track in place (`null` turns subtitles off) and remembers the choice across reloads. */
   selectSubtitleTrack(id: string | null): void;
+  /** Selects a secondary subtitle track in place (`null` disables secondary subtitles, `#239`). */
+  selectSecondarySubtitleTrack(id: string | null): void;
+  /** Sets live audio sync delay offset in milliseconds, clamped to `[-30_000, 30_000]` (`#59`). */
+  setAudioDelay(delayMs: number): void;
+  /** Sets live subtitle timing delay offset in milliseconds, clamped to `[-30_000, 30_000]` (`#59`). */
+  setSubtitleDelay(delayMs: number): void;
+  /** Selects an adaptive video rendition ID, or `null` for automatic ABR (`#59`). */
+  selectVideoQuality(id: string | null): void;
   getState(): PlaybackState;
   /** Returns the unsubscribe function. */
   subscribe(listener: (state: PlaybackState) => void): () => void;

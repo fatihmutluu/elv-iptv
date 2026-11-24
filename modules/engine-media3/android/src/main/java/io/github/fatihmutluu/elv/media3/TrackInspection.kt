@@ -155,19 +155,25 @@ internal data class TrackInfoSnapshot(
   }
 }
 
-/** Snapshot of all supported audio and text tracks and active selections. */
+/** Snapshot of all supported audio, text, and adaptive video tracks and active selections. */
 internal data class MediaTracksSnapshot(
   val audio: List<TrackInfoSnapshot>,
   val subtitles: List<TrackInfoSnapshot>,
   val selectedAudioId: String?,
   val selectedSubtitleId: String?,
+  val videoQualities: List<VideoQualitySnapshot> = emptyList(),
+  val selectedVideoQualityId: String? = null,
 ) {
-  fun toMap(): Map<String, Any?> = mapOf(
-    "audio" to audio.map { it.toMap() },
-    "subtitles" to subtitles.map { it.toMap() },
-    "selectedAudioId" to selectedAudioId,
-    "selectedSubtitleId" to selectedSubtitleId,
-  )
+  fun toMap(): Map<String, Any?> = buildMap {
+    put("audio", audio.map { it.toMap() })
+    put("subtitles", subtitles.map { it.toMap() })
+    put("selectedAudioId", selectedAudioId)
+    put("selectedSubtitleId", selectedSubtitleId)
+    if (videoQualities.isNotEmpty()) {
+      put("videoQualities", videoQualities.map { it.toMap() })
+      put("selectedVideoQualityId", selectedVideoQualityId)
+    }
+  }
 }
 
 internal data class TrackChoice(
@@ -299,6 +305,7 @@ private fun snapshotOf(group: Tracks.Group, groupIndex: Int, trackIndex: Int): T
 internal fun inspectMediaTracks(
   tracks: Tracks,
   textDisabled: Boolean,
+  selectedVideoQualityId: String? = null,
   ffmpegSupportsAudio: (String?) -> Boolean = ::defaultFfmpegSupportsAudio,
 ): MediaTracksSnapshot {
   val audio = mutableListOf<TrackInfoSnapshot>()
@@ -323,11 +330,18 @@ internal fun inspectMediaTracks(
     }
   }
 
+  val videoQualities = videoQualityCandidatesOf(tracks).map { it.option }
+  val confirmedVideoQualityId = selectedVideoQualityId?.takeIf { wanted ->
+    videoQualities.any { it.id == wanted }
+  }
+
   return MediaTracksSnapshot(
     audio = audio,
     subtitles = subtitles,
     selectedAudioId = selectedAudioId,
     selectedSubtitleId = if (textDisabled) null else selectedSubtitleId,
+    videoQualities = videoQualities,
+    selectedVideoQualityId = if (videoQualities.isEmpty()) null else confirmedVideoQualityId,
   )
 }
 

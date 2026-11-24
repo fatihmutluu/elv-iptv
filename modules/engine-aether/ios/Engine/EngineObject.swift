@@ -146,6 +146,30 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     }
   }
 
+  func setAudioDelay(_ attempt: Int, delayMs: Double) {
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
+    enqueueMain { [weak self] in
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.ensureDriver() else { return }
+      driver.core.setAudioDelay(attempt, delayMs: delayMs)
+    }
+  }
+
+  func setSubtitleDelay(_ attempt: Int, delayMs: Double) {
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
+    enqueueMain { [weak self] in
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.ensureDriver() else { return }
+      driver.core.setSubtitleDelay(attempt, delayMs: delayMs)
+    }
+  }
+
+  func selectVideoQuality(_ attempt: Int, id: String?) {
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
+    enqueueMain { [weak self] in
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.ensureDriver() else { return }
+      driver.core.selectVideoQuality(attempt, id: id)
+    }
+  }
+
   func stop(_ attempt: Int) {
     guard let epoch = fence.recordStop(attempt: attempt) else { return }
     enqueueMain { [weak self] in

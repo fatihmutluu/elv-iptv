@@ -389,6 +389,9 @@ public protocol PlayerBackend: AnyObject {
   func setOsdVisible(_ visible: Bool)
   func selectAudioTrack(_ streamId: Int)
   func selectSubtitleTrack(_ streamId: Int?)
+  func setAudioDelay(_ seconds: Double)
+  func setSubtitleDelay(_ seconds: Double)
+  func selectVideoQuality(_ cap: VideoQualityCap?)
   func rebuild() throws
   func dispose()
 }

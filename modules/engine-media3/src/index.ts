@@ -55,6 +55,9 @@ interface RawInsets {
 
 interface Media3NativeEngineHandle extends NativeEngineHandle {
   setPitchLock?(locked: boolean): void;
+  setAudioDelay?(attempt: number, delayMs: number): void;
+  setSubtitleDelay?(attempt: number, delayMs: number): void;
+  selectVideoQuality?(attempt: number, id: string | null): void;
   setMediaMetadata?(metadata: AndroidMediaMetadata | null): void;
   setBackgroundAudioEnabled?(enabled: boolean): void;
   addListener: {
@@ -178,6 +181,9 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   recreate: true,
   audioTrackSelection: true,
   subtitleTrackSelection: true,
+  audioDelay: true,
+  subtitleDelay: true,
+  videoQualitySelection: true,
 });
 
 /** The native shared object behind each live engine this module created; `Media3Surface` binds its view to it. */
@@ -200,6 +206,27 @@ function wrap(module: NativeEngineModule): PlayerEngine {
             if (!released) native.setPitchLock?.(Boolean(locked));
           },
         }),
+    ...(bridged.setAudioDelay === undefined && native.setAudioDelay !== undefined
+      ? {
+          setAudioDelay(attempt, delayMs) {
+            if (!released) native.setAudioDelay?.(attempt, delayMs);
+          },
+        }
+      : {}),
+    ...(bridged.setSubtitleDelay === undefined && native.setSubtitleDelay !== undefined
+      ? {
+          setSubtitleDelay(attempt, delayMs) {
+            if (!released) native.setSubtitleDelay?.(attempt, delayMs);
+          },
+        }
+      : {}),
+    ...(bridged.selectVideoQuality === undefined && native.selectVideoQuality !== undefined
+      ? {
+          selectVideoQuality(attempt, id) {
+            if (!released) native.selectVideoQuality?.(attempt, id);
+          },
+        }
+      : {}),
     release() {
       released = true;
       handles.delete(engine);

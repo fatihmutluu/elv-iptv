@@ -29,6 +29,8 @@ public final class EngineCore {
   var latchedReaderFailure: ReaderFailure?
   var forceNextClock = false
   var playbackRate: Double = 1.0
+  var audioDelaySeconds: Double = 0
+  var subtitleDelaySeconds: Double = 0
   var dolbyVisionFallbackLatched = false
 
   var lastClockUptimeMs: Double?
@@ -63,6 +65,8 @@ public final class EngineCore {
     backend.stopMedia()
 
     resetSerialState(startMs: request.startMs)
+    audioDelaySeconds = 0
+    subtitleDelaySeconds = 0
     if currentRequest?.url != request.url && !request.preferHevcOverDolbyVision {
       dolbyVisionFallbackLatched = false
     }
@@ -87,6 +91,7 @@ public final class EngineCore {
     active = true
     emit(.state(attempt: token, state: .opening))
     backend.start(plan, options: configuredLoadOptions(for: plan, request: request), serial: serial)
+    reapplySessionSyncAndQuality()
   }
 
   public func retry(_ attempt: Int) {
@@ -113,6 +118,7 @@ public final class EngineCore {
     active = true
     emit(.state(attempt: token, state: .opening))
     backend.start(plan, options: configuredLoadOptions(for: plan, request: request), serial: serial)
+    reapplySessionSyncAndQuality()
   }
 
   public func play(_ attempt: Int) {
@@ -180,6 +186,8 @@ public final class EngineCore {
     externalPlaybackActive = false
     isSurfaceDetached = false
     playbackRate = 1.0
+    audioDelaySeconds = 0
+    subtitleDelaySeconds = 0
     currentRequest = nil
     currentPlan = nil
     dolbyVisionFallbackLatched = false
@@ -223,6 +231,8 @@ public final class EngineCore {
     externalPlaybackActive = false
     isSurfaceDetached = false
     playbackRate = 1.0
+    audioDelaySeconds = 0
+    subtitleDelaySeconds = 0
     currentRequest = nil
     currentPlan = nil
     dolbyVisionFallbackLatched = false

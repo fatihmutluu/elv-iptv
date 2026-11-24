@@ -47,6 +47,7 @@ export {
   type StreamRequest,
   type StreamVideoInfo,
   type TrackInfo,
+  type VideoQualityOption,
 } from './engine';
 export { classifyError, type ErrorClass, toPlaybackError } from './errors';
 export {
@@ -66,6 +67,11 @@ export {
   type SpeedCoalescer,
   type SpeedCoalescerOptions,
 } from './speed-coalescer';
+export {
+  clampSyncDelayMs,
+  MAX_SYNC_DELAY_MS,
+  MIN_SYNC_DELAY_MS,
+} from './sync-delay';
 export {
   type InitialTrackSelection,
   type PersistedTrackSelectionPref,

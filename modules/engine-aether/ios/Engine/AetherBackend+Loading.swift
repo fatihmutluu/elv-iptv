@@ -122,6 +122,9 @@ extension AetherBackend {
             taskReader = nil
           }
         }
+        if !Task.isCancelled, self.engine === currentEngine, self.engineLoadSerial == serial {
+          self.applyRequestedSyncAndQuality(to: currentEngine)
+        }
       } catch is CancellationError {
         if let taskReader {
           self.closeReader(taskReader)

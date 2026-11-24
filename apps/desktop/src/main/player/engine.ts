@@ -57,7 +57,9 @@ export interface MpvEngine extends PlayerEngine {
   toggleFullscreen(): void;
   toggleMute(): void;
   setVolume(volume: number): void;
+  setAudioDelay(attempt: AttemptToken, delayMs: number): void;
   setAudioDelay(delaySec: number): void;
+  setSubtitleDelay(attempt: AttemptToken, delayMs: number): void;
   setSubtitleDelay(delaySec: number): void;
   setAudioDevice(device: string): void;
   setDeinterlace(enabled: boolean): void;
@@ -106,6 +108,15 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   let spawning: Promise<LiveSession | undefined> | undefined;
   let spawnAbort: AbortController | undefined;
   let tickHandle: unknown;
+  let desiredAudioDelayMs = 0;
+  let desiredSubtitleDelayMs = 0;
+  let desiredVideoQualityId: string | null = null;
+
+  const resetPerMediaOverrides = (): void => {
+    desiredAudioDelayMs = 0;
+    desiredSubtitleDelayMs = 0;
+    desiredVideoQualityId = null;
+  };
 
   const emit = (events: readonly EngineEvent[]): void => {
     for (const event of events) {
@@ -179,6 +190,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       queuedSlot = next;
     },
     promoteQueued: (slot) => {
+      resetPerMediaOverrides();
       media = slot;
       queuedSlot = undefined;
     },
@@ -194,6 +206,9 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     getDesiredDeinterlaceMode: () => controls.getDesiredDeinterlaceMode(),
     getDesiredPitchLock: () => controls.getDesiredPitchLock(),
     getDesiredAudioNormalization: () => controls.getDesiredAudioNormalization(),
+    getDesiredAudioDelayMs: () => desiredAudioDelayMs,
+    getDesiredSubtitleDelayMs: () => desiredSubtitleDelayMs,
+    getDesiredVideoQualityId: () => desiredVideoQualityId,
     isSpdifPassthroughActive: () => controls.isSpdifPassthroughActive(),
     ...(deps.readaheadStore === undefined ? {} : { readaheadStore: deps.readaheadStore }),
   });
@@ -446,8 +461,32 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     toggleFullscreen: () => !released && presenter.toggleFullscreen(),
     toggleMute: () => controls.toggleMute(),
     setVolume: (volume) => controls.setVolume(volume),
-    setAudioDelay: (delaySec) => controls.setAudioDelay(delaySec),
-    setSubtitleDelay: (delaySec) => controls.setSubtitleDelay(delaySec),
+    setAudioDelay(attemptOrDelaySec: AttemptToken | number, maybeDelayMs?: number) {
+      if (maybeDelayMs !== undefined) {
+        if (Number.isFinite(maybeDelayMs)) {
+          desiredAudioDelayMs = Math.max(-30_000, Math.min(30_000, maybeDelayMs));
+        }
+        controls.setAudioDelay(attemptOrDelaySec, maybeDelayMs);
+      } else {
+        if (Number.isFinite(attemptOrDelaySec)) {
+          desiredAudioDelayMs = Math.max(-30, Math.min(30, attemptOrDelaySec)) * 1000;
+        }
+        controls.setAudioDelay(attemptOrDelaySec);
+      }
+    },
+    setSubtitleDelay(attemptOrDelaySec: AttemptToken | number, maybeDelayMs?: number) {
+      if (maybeDelayMs !== undefined) {
+        if (Number.isFinite(maybeDelayMs)) {
+          desiredSubtitleDelayMs = Math.max(-30_000, Math.min(30_000, maybeDelayMs));
+        }
+        controls.setSubtitleDelay(attemptOrDelaySec, maybeDelayMs);
+      } else {
+        if (Number.isFinite(attemptOrDelaySec)) {
+          desiredSubtitleDelayMs = Math.max(-30, Math.min(30, attemptOrDelaySec)) * 1000;
+        }
+        controls.setSubtitleDelay(attemptOrDelaySec);
+      }
+    },
     setAudioDevice: (device) => controls.setAudioDevice(device),
     setDeinterlace: (enabled) => controls.setDeinterlace(enabled),
     setDeinterlaceMode: (mode) => controls.setDeinterlaceMode(mode),
@@ -508,6 +547,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     },
     load(cmd) {
       if (released) return;
+      resetPerMediaOverrides();
       tracks.onLoad(cmd.options);
       const { url, headers, kind, options } = cmd;
       // Desktop mpv inherits OS TLS with `--tls-verify=yes` (never disabled; mpv/FFmpeg has no
@@ -549,9 +589,23 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       const cmd = released ? undefined : tracks.selectSubtitle(id);
       if (cmd) command(attempt, cmd);
     },
+    selectSecondarySubtitleTrack(attempt, id) {
+      const cmd = released ? undefined : tracks.selectSecondarySubtitle(id);
+      if (cmd) command(attempt, cmd);
+    },
+    selectVideoQuality(attempt, id) {
+      if (released) return;
+      const cmd = tracks.selectVideoQuality(id);
+      if (!cmd) return;
+      desiredVideoQualityId = id;
+      command(attempt, cmd);
+      const events = tracks.sync();
+      if (events.length > 0) emit(events);
+    },
     stop(attempt) {
       if (released) return;
       adopt(attempt);
+      resetPerMediaOverrides();
       controls.reset();
       tracks.onStop();
       live?.repeatGate.reset();
@@ -574,6 +628,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       if (released) return;
       controls.cancelRamp(true, true);
       released = true;
+      resetPerMediaOverrides();
       controls.reset();
       tracks.onStop();
       queuedSlot = undefined;

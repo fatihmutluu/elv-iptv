@@ -155,6 +155,12 @@ export interface PlayerOverlayStateParams {
   hasAudioDevice?: boolean | undefined;
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
+  hasAudioDelay?: boolean | undefined;
+  audioDelayMs?: number | undefined;
+  hasSubtitleDelay?: boolean | undefined;
+  subtitleDelayMs?: number | undefined;
+  hasVideoQuality?: boolean | undefined;
+  selectedVideoQualityId?: string | null | undefined;
   qualityVariants?: readonly LiveVariantOption[] | undefined;
   hasVideoDecoder?: boolean | undefined;
   androidDecoderMode?: AndroidDecoderMode | undefined;

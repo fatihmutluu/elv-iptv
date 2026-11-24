@@ -517,4 +517,33 @@ describe('createDesktopEngine', () => {
     expect(f.remoteListeners.size).toBe(0);
     expect(engine.onRemoteMediaAction(() => undefined)).toBeTypeOf('function');
   });
+
+  it('bridges PlayerEngine ms delays, secondary subtitle, and video quality over IPC (#59, #239)', async () => {
+    const f = fakeBridge();
+    const engine = await createDesktopEngine(f.bridge, () => 0);
+
+    expect(engine.capabilities.audioDelay).toBe(true);
+    expect(engine.capabilities.subtitleDelay).toBe(true);
+    expect(engine.capabilities.videoQualitySelection).toBe(true);
+
+    engine.setAudioDelay(4, 250);
+    engine.setAudioDelay(5, 99_000);
+    engine.setSubtitleDelay(6, -500);
+    engine.setSubtitleDelay(7, Number.NaN);
+    engine.selectSecondarySubtitleTrack?.(8, 's:2');
+    engine.selectSecondarySubtitleTrack?.(9, null);
+    engine.selectVideoQuality?.(10, '2');
+    engine.selectVideoQuality?.(11, null);
+
+    expect(f.sent).toEqual([
+      { engineId: 'e1', command: { name: 'setAudioDelay', attempt: 4, delaySec: 0.25 } },
+      { engineId: 'e1', command: { name: 'setAudioDelay', attempt: 5, delaySec: 30 } },
+      { engineId: 'e1', command: { name: 'setSubtitleDelay', attempt: 6, delaySec: -0.5 } },
+      { engineId: 'e1', command: { name: 'selectSecondarySubtitleTrack', attempt: 8, id: 's:2' } },
+      { engineId: 'e1', command: { name: 'selectSecondarySubtitleTrack', attempt: 9, id: null } },
+      { engineId: 'e1', command: { name: 'selectVideoQuality', attempt: 10, id: '2' } },
+      { engineId: 'e1', command: { name: 'selectVideoQuality', attempt: 11, id: null } },
+    ]);
+    for (const msg of f.sent) expect(isPlayerCommandMessage(msg)).toBe(true);
+  });
 });

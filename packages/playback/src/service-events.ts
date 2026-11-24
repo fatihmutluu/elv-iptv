@@ -177,7 +177,12 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
         return;
       }
       case 'tracks': {
-        store.update({ tracks: event.tracks });
+        store.update({
+          tracks: event.tracks,
+          ...(event.tracks.selectedVideoQualityId === undefined
+            ? {}
+            : { selectedVideoQualityId: event.tracks.selectedVideoQualityId }),
+        });
         const next = deps.reconcileTracks(event.tracks);
         const attempt = store.getState().attempt;
         if (next.audioTrackId !== undefined) engine.selectAudioTrack?.(attempt, next.audioTrackId);
@@ -375,6 +380,9 @@ export function nextTuneState(
     status: held ? prev.status : { kind: 'tuning' },
     attempt: token,
     tracks: EMPTY_TRACKS,
+    audioDelayMs: 0,
+    subtitleDelayMs: 0,
+    selectedVideoQualityId: null,
     item: request.item,
     accountKey: request.accountKey,
     tuneAt: now,

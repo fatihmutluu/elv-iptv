@@ -36,6 +36,9 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   recreate: true,
   audioTrackSelection: true,
   subtitleTrackSelection: true,
+  audioDelay: true,
+  subtitleDelay: true,
+  videoQualitySelection: true,
 });
 
 /** The renderer's `PlayerEngine` for the desktop app, plus the presenter's controls. */
@@ -53,9 +56,11 @@ export interface DesktopEngine extends PlayerEngine {
   toggleMute(): void;
   /** Sets mpv output volume (`0`–`100`, `#434`). */
   setVolume(volume: number): void;
-  /** Sets mpv audio delay in seconds (`-30`–`30`, `#434`). */
+  /** Sets mpv audio delay (`(attempt, delayMs)` in ms per `PlayerEngine`, or `(delaySec)` in seconds, `#59`, `#239`, `#434`). */
+  setAudioDelay(attempt: AttemptToken, delayMs: number): void;
   setAudioDelay(delaySec: number): void;
-  /** Sets mpv subtitle delay in seconds (`-30`–`30`, `#434`). */
+  /** Sets mpv subtitle delay (`(attempt, delayMs)` in ms per `PlayerEngine`, or `(delaySec)` in seconds, `#59`, `#239`, `#434`). */
+  setSubtitleDelay(attempt: AttemptToken, delayMs: number): void;
   setSubtitleDelay(delaySec: number): void;
   /** Selects an mpv audio output device (`#434`, `#408`). */
   setAudioDevice(device: string): void;
@@ -265,14 +270,36 @@ export async function createDesktopEngine(
       send({ name: 'selectAudioTrack', attempt, id: trackId }),
     selectSubtitleTrack: (attempt, trackId) =>
       send({ name: 'selectSubtitleTrack', attempt, id: trackId }),
+    selectSecondarySubtitleTrack: (attempt, trackId) =>
+      send({ name: 'selectSecondarySubtitleTrack', attempt, id: trackId }),
+    selectVideoQuality: (attempt, qualityId) =>
+      send({ name: 'selectVideoQuality', attempt, id: qualityId }),
     stop: (attempt) => send({ name: 'stop', attempt }),
     recreate: (attempt) => send({ name: 'recreate', attempt }),
     toggleFullscreen: () => send({ name: 'fullscreen' }),
     isFullscreen: () => fullscreen,
     toggleMute: () => send({ name: 'mute' }),
     setVolume: (volume) => send({ name: 'setVolume', volume }),
-    setAudioDelay: (delaySec) => send({ name: 'setAudioDelay', delaySec }),
-    setSubtitleDelay: (delaySec) => send({ name: 'setSubtitleDelay', delaySec }),
+    setAudioDelay(attemptOrDelaySec: AttemptToken | number, maybeDelayMs?: number) {
+      if (maybeDelayMs !== undefined) {
+        if (!Number.isFinite(maybeDelayMs)) return;
+        const clampedSec = Math.max(-30_000, Math.min(30_000, maybeDelayMs)) / 1000;
+        send({ name: 'setAudioDelay', attempt: attemptOrDelaySec, delaySec: clampedSec });
+        return;
+      }
+      if (!Number.isFinite(attemptOrDelaySec)) return;
+      send({ name: 'setAudioDelay', delaySec: Math.max(-30, Math.min(30, attemptOrDelaySec)) });
+    },
+    setSubtitleDelay(attemptOrDelaySec: AttemptToken | number, maybeDelayMs?: number) {
+      if (maybeDelayMs !== undefined) {
+        if (!Number.isFinite(maybeDelayMs)) return;
+        const clampedSec = Math.max(-30_000, Math.min(30_000, maybeDelayMs)) / 1000;
+        send({ name: 'setSubtitleDelay', attempt: attemptOrDelaySec, delaySec: clampedSec });
+        return;
+      }
+      if (!Number.isFinite(attemptOrDelaySec)) return;
+      send({ name: 'setSubtitleDelay', delaySec: Math.max(-30, Math.min(30, attemptOrDelaySec)) });
+    },
     setAudioDevice: (device) => send({ name: 'setAudioDevice', device }),
     getAudioDevices: () => audioDevices,
     getActiveAudioDevice: () => activeAudioDevice,

@@ -1925,3 +1925,18 @@ msgstr "Sinematik"
 
 msgid "epg.noInfoGap"
 msgstr "Bilgi yok"
+
+msgid "player.audioDelay"
+msgstr "Ses gecikmesi"
+
+msgid "player.subtitleDelay"
+msgstr "Altyazı gecikmesi"
+
+msgid "player.videoQuality"
+msgstr "Video kalitesi"
+
+msgid "player.videoQualityAuto"
+msgstr "Otomatik"
+
+msgid "player.delayReset"
+msgstr "Sıfırla (0 ms)"

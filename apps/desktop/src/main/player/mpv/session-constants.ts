@@ -23,6 +23,9 @@ export const OBSERVED_PROPERTIES = [
   'track-list',
   'aid',
   'sid',
+  'secondary-sid',
+  'audio-delay',
+  'sub-delay',
   'audio-device',
   'audio-device-list',
   'audio-spdif',
@@ -35,7 +38,12 @@ export const OBSERVED_PROPERTIES = [
 ] as const;
 
 /** Properties routed to `TrackTracker`. */
-export const TRACK_PROPERTIES: ReadonlySet<string> = new Set(['track-list', 'aid', 'sid']);
+export const TRACK_PROPERTIES: ReadonlySet<string> = new Set([
+  'track-list',
+  'aid',
+  'sid',
+  'secondary-sid',
+]);
 
 /** Fast membership check for all observed mpv properties. */
 export const OBSERVED_PROPERTY_NAMES: ReadonlySet<string> = new Set(OBSERVED_PROPERTIES);

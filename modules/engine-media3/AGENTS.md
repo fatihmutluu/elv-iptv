@@ -9,6 +9,7 @@ monitor, and mobile window helpers (player core spec 6.1).
   `setMedia3BackgroundAudioEnabled`, `subscribeMedia3RemoteMediaAction`. `Media3Surface` renders `Media3SurfaceView`.
 - Native (`ElvEngineMedia3Module`, `LoadRequest`): `load(flattened LoadCommand + bufferPreset? + decoderMode? +
   allowLegacyTls?)`, `retry`, `play`, `pause`, `seek`, `setScrubbing`/`setSpeed`/`setPitchLock` (VOD, `[0.25, 4.0]`),
+  `setAudioDelay`/`setSubtitleDelay` (`[-30_000, 30_000]` ms, `#203`, `#59`), `selectVideoQuality` (adaptive ABR, `#59`),
   `setAudioBoostDb`, `setMediaMetadata`, `setBackgroundAudioEnabled`, `supportsHardwareHevc4k`, `selectAudioTrack`,
   `selectSubtitleTrack`, `stop`, `recreate`, `onEngineEvent`, `onRemoteMediaAction`, `uptimeMs()`, plus zero-permission
   `readClipboardText()` / `pickPlaylistFile()` (`AndroidSourceImport.kt`, SAF `ACTION_OPEN_DOCUMENT`, 64 MiB cap, `#51`).
@@ -37,7 +38,9 @@ monitor, and mobile window helpers (player core spec 6.1).
 ## Playback, tracks, requests and errors
 - `EventReporter` gates callbacks behind `PrepareFence` + `MediaItem.mediaId`, reports `playbackParameters.speed`,
   ignores `SupersededMediaException`, holds on transient audio focus loss, escalates audio failures, stops session on error.
-- `SubtitleSanitizer` repairs mojibake and strips `U+FFFD`; `TrackInspection` + `TrackSelectorBridge` expose tracks.
+- `SubtitleSanitizer` repairs mojibake and strips `U+FFFD`; `TimedSubtitleCueBuffer` buffers cues (<= 128) for live
+  non-flushing subtitle delay; `OffsetForwardingAudioSink` offsets audio clock without reallocating; `TrackInspection` +
+  `VideoQualityInspection` + `TrackSelectorBridge` expose audio/subtitle tracks and adaptive video renditions.
 - `SourceType` + `MediaSources` + `HlsInitSynthesis`: VOD HLS-TS `EXT-X-MAP` synthesis; `TsOnlyExtractorsFactory`;
   `ConnectionGate` (4-thread daemon `closer`), `GatedDataSource`, `StreamHttp`, `SniffingDataSource`, `ErrorMapping`.
 

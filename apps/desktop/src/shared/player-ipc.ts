@@ -50,6 +50,9 @@ export const DESKTOP_CAPABILITIES: EngineCapabilities = Object.freeze({
   recreate: true,
   audioTrackSelection: true,
   subtitleTrackSelection: true,
+  audioDelay: true,
+  subtitleDelay: true,
+  videoQualitySelection: true,
 });
 
 /** One desktop `libmpv` audio output device reported via `audio-device-list` (`#408`). */
@@ -130,9 +133,11 @@ export type BridgeCommand =
   | { name: 'setSpeed'; attempt: AttemptToken; rate: number }
   | { name: 'selectAudioTrack'; attempt: AttemptToken; id: string }
   | { name: 'selectSubtitleTrack'; attempt: AttemptToken; id: string | null }
+  | { name: 'selectSecondarySubtitleTrack'; attempt: AttemptToken; id: string | null }
+  | { name: 'selectVideoQuality'; attempt: AttemptToken; id: string | null }
   | { name: 'setVolume'; volume: number }
-  | { name: 'setAudioDelay'; delaySec: number }
-  | { name: 'setSubtitleDelay'; delaySec: number }
+  | { name: 'setAudioDelay'; attempt?: AttemptToken; delaySec: number }
+  | { name: 'setSubtitleDelay'; attempt?: AttemptToken; delaySec: number }
   | { name: 'setAudioDevice'; device: string }
   | { name: 'setDeinterlace'; enabled: boolean }
   | { name: 'setDeinterlaceMode'; mode: DeinterlaceMode }
@@ -208,6 +213,7 @@ const MAX_MPV_TRACK_ID = 0x7fffffff;
 
 const AUDIO_TRACK_ID = /^a:([1-9]\d{0,5})$/;
 const SUBTITLE_TRACK_ID = /^s:([1-9]\d{0,5})$/;
+const VIDEO_QUALITY_ID = /^([1-9]\d{0,5})$/;
 const HEADER_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
@@ -281,6 +287,12 @@ const isAudioTrackId = (x: unknown): x is string => {
 const isSubtitleTrackId = (x: unknown): x is string => {
   if (typeof x !== 'string') return false;
   const match = SUBTITLE_TRACK_ID.exec(x);
+  return match !== null && Number(match[1]) <= MAX_MPV_TRACK_ID;
+};
+
+const isVideoQualityId = (x: unknown): x is string => {
+  if (typeof x !== 'string') return false;
+  const match = VIDEO_QUALITY_ID.exec(x);
   return match !== null && Number(match[1]) <= MAX_MPV_TRACK_ID;
 };
 
@@ -448,12 +460,15 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
     case 'selectAudioTrack':
       return isAttempt(x['attempt']) && isAudioTrackId(x['id']);
     case 'selectSubtitleTrack':
+    case 'selectSecondarySubtitleTrack':
       return isAttempt(x['attempt']) && (x['id'] === null || isSubtitleTrackId(x['id']));
+    case 'selectVideoQuality':
+      return isAttempt(x['attempt']) && (x['id'] === null || isVideoQualityId(x['id']));
     case 'setVolume':
       return isVolume(x['volume']);
     case 'setAudioDelay':
     case 'setSubtitleDelay':
-      return isDelaySec(x['delaySec']);
+      return (x['attempt'] === undefined || isAttempt(x['attempt'])) && isDelaySec(x['delaySec']);
     case 'setAudioDevice':
       return isAudioDevice(x['device']);
     case 'setDeinterlace':

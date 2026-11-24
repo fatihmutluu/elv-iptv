@@ -327,6 +327,7 @@ export function createFakeMpv(opts: {
         ['vid', 'auto'],
         ['aid', 'auto'],
         ['sid', 'auto'],
+        ['secondary-sid', 'no'],
         ['audio-spdif', audioSpdif],
         ['volume', 100],
         ['mute', false],

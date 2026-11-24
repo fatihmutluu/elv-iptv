@@ -40,6 +40,8 @@ export interface FakeCommand {
   positionMs?: number;
   scrubbing?: boolean;
   trackId?: string | null;
+  delayMs?: number;
+  qualityId?: string | null;
 }
 
 /** Scriptable engine for service and screen tests. */
@@ -204,6 +206,22 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     },
     selectSubtitleTrack(attempt, id) {
       commands.push({ name: 'selectSubtitleTrack', attempt, trackId: id });
+      adopt(attempt);
+    },
+    selectSecondarySubtitleTrack(attempt, id) {
+      commands.push({ name: 'selectSecondarySubtitleTrack', attempt, trackId: id });
+      adopt(attempt);
+    },
+    setAudioDelay(attempt, delayMs) {
+      commands.push({ name: 'setAudioDelay', attempt, delayMs });
+      adopt(attempt);
+    },
+    setSubtitleDelay(attempt, delayMs) {
+      commands.push({ name: 'setSubtitleDelay', attempt, delayMs });
+      adopt(attempt);
+    },
+    selectVideoQuality(attempt, id) {
+      commands.push({ name: 'selectVideoQuality', attempt, qualityId: id });
       adopt(attempt);
     },
     stop(attempt) {

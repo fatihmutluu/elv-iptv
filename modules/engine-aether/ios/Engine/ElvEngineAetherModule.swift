@@ -249,6 +249,18 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
         engine.selectSubtitleTrack(attempt, id: id)
       }
 
+      Function("setAudioDelay") { (engine: EngineObject, attempt: Int, delayMs: Double) in
+        engine.setAudioDelay(attempt, delayMs: delayMs)
+      }
+
+      Function("setSubtitleDelay") { (engine: EngineObject, attempt: Int, delayMs: Double) in
+        engine.setSubtitleDelay(attempt, delayMs: delayMs)
+      }
+
+      Function("selectVideoQuality") { (engine: EngineObject, attempt: Int, id: String?) in
+        engine.selectVideoQuality(attempt, id: id)
+      }
+
       Function("stop") { (engine: EngineObject, attempt: Int) in
         engine.stop(attempt)
       }

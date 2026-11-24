@@ -14,6 +14,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "ElvMedia3"
 internal const val PLAYER_RELEASE_TIMEOUT_MS = 500L
@@ -93,6 +94,7 @@ internal class PlayerFactory(
   private val captioningEnabled: () -> Boolean = { isSystemCaptioningEnabled(context) },
   private val deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
   private val sdkInt: Int = Build.VERSION.SDK_INT,
+  private val audioDelayUs: AtomicLong = AtomicLong(0L),
 ) {
   constructor(
     context: Context,
@@ -103,6 +105,7 @@ internal class PlayerFactory(
     captioningEnabled: () -> Boolean = { isSystemCaptioningEnabled(context) },
     deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
     sdkInt: Int = Build.VERSION.SDK_INT,
+    audioDelayUs: AtomicLong = AtomicLong(0L),
   ) : this(
     context = context,
     looper = looper,
@@ -112,6 +115,7 @@ internal class PlayerFactory(
     captioningEnabled = captioningEnabled,
     deviceQuirks = deviceQuirks,
     sdkInt = sdkInt,
+    audioDelayUs = audioDelayUs,
   )
 
   @Volatile
@@ -173,6 +177,7 @@ internal class PlayerFactory(
       preferHevcOverDolbyVision = preferHevcOverDolbyVision,
       deviceQuirks = deviceQuirks,
       decoderMode = decoderMode,
+      audioDelayUs = audioDelayUs,
     )
     val loadControl = DefaultLoadControl.Builder()
       .setBufferDurationsMs(

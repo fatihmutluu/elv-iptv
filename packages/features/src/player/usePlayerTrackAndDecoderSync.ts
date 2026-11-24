@@ -3,6 +3,7 @@ import type { AndroidDecoderMode, SubtitleModePref } from '@elv/domain';
 import {
   type MediaTracks,
   type PlaybackService,
+  type PlaybackStatus,
   resolveInitialTrackSelection,
 } from '@elv/playback';
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
@@ -30,6 +31,7 @@ export function useInitialTrackSelection(params: {
   readonly preferredSubtitleLanguages?: readonly string[] | undefined;
   readonly preferDefaultAudioTrack?: boolean | undefined;
   readonly subtitleMode: SubtitleModePref;
+  readonly statusKind?: PlaybackStatus['kind'] | undefined;
   readonly onHydratedResizeMode?: ((mode: VideoResizeMode) => void) | undefined;
 }): void {
   const {
@@ -43,10 +45,12 @@ export function useInitialTrackSelection(params: {
     preferredSubtitleLanguages,
     preferDefaultAudioTrack = true,
     subtitleMode,
+    statusKind,
     onHydratedResizeMode,
   } = params;
   const appliedAudioItemRef = useRef<string | null>(null);
   const appliedSubtitleItemRef = useRef<string | null>(null);
+  const appliedDelayItemRef = useRef<string | null>(null);
   const onHydratedResizeModeRef = useRef(onHydratedResizeMode);
   onHydratedResizeModeRef.current = onHydratedResizeMode;
 
@@ -67,6 +71,7 @@ export function useInitialTrackSelection(params: {
   useEffect(() => {
     appliedAudioItemRef.current = null;
     appliedSubtitleItemRef.current = null;
+    appliedDelayItemRef.current = null;
   }, [activeTarget.itemKey]);
 
   useEffect(() => {
@@ -175,6 +180,24 @@ export function useInitialTrackSelection(params: {
         activeService.selectSubtitleTrack(resolved.subtitleId);
       }
     }
+
+    const mediaReadyForDelay =
+      activeService.getState?.().item === activeTarget.itemKey &&
+      (tracks.audio.length > 0 ||
+        tracks.subtitles.length > 0 ||
+        statusKind === 'playing' ||
+        statusKind === 'paused');
+    if (appliedDelayItemRef.current !== activeTarget.itemKey && mediaReadyForDelay) {
+      appliedDelayItemRef.current = activeTarget.itemKey;
+      if (persistedPref !== null) {
+        if (persistedPref.audioDelayMs !== 0) {
+          activeService.setAudioDelay(persistedPref.audioDelayMs);
+        }
+        if (persistedPref.subDelayMs !== 0) {
+          activeService.setSubtitleDelay(persistedPref.subDelayMs);
+        }
+      }
+    }
   }, [
     activeService,
     activeTarget.itemKey,
@@ -183,6 +206,7 @@ export function useInitialTrackSelection(params: {
     persistedPref,
     prefReady,
     preferDefaultAudioTrack,
+    statusKind,
     subtitleMode,
     targetAudioLang,
     targetSubLang,

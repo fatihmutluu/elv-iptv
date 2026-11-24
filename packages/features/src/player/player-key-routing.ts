@@ -59,6 +59,12 @@ export interface PlayerControlsParams {
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
   onSelectAudioDevice?: ((name: string) => void) | undefined;
+  audioDelayMs?: number | undefined;
+  onAdjustAudioDelay?: ((deltaMs: number, reset?: boolean) => void) | undefined;
+  subtitleDelayMs?: number | undefined;
+  onAdjustSubtitleDelay?: ((deltaMs: number, reset?: boolean) => void) | undefined;
+  selectedVideoQualityId?: string | null | undefined;
+  onSelectVideoQuality?: ((id: string | null) => void) | undefined;
   qualityVariants?: readonly LiveVariantOption[] | undefined;
   onSelectQualityVariant?: ((itemKey: string) => void) | undefined;
   androidDecoderMode?: AndroidDecoderMode | undefined;
@@ -109,6 +115,15 @@ export function readSettingsMenuOptionsFromControls(p: PlayerControlsParams, can
     hasAudioDevice: (p.audioDevices?.length ?? 0) > 0 && p.onSelectAudioDevice !== undefined,
     ...(p.audioDevices !== undefined ? { audioDevices: p.audioDevices } : {}),
     ...(p.activeAudioDevice !== undefined ? { activeAudioDevice: p.activeAudioDevice } : {}),
+    hasAudioDelay: p.onAdjustAudioDelay !== undefined,
+    ...(p.audioDelayMs !== undefined ? { audioDelayMs: p.audioDelayMs } : {}),
+    hasSubtitleDelay: p.onAdjustSubtitleDelay !== undefined,
+    ...(p.subtitleDelayMs !== undefined ? { subtitleDelayMs: p.subtitleDelayMs } : {}),
+    hasVideoQuality:
+      (p.tracks.videoQualities?.length ?? 0) > 0 && p.onSelectVideoQuality !== undefined,
+    ...(p.selectedVideoQualityId !== undefined
+      ? { selectedVideoQualityId: p.selectedVideoQualityId }
+      : {}),
     hasQuality:
       !isVod && (p.qualityVariants?.length ?? 0) > 1 && p.onSelectQualityVariant !== undefined,
     ...(p.qualityVariants !== undefined
@@ -140,6 +155,12 @@ export interface OverlayKeyRouteDeps {
   readonly hasAudioDevice?: boolean;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
+  readonly hasAudioDelay?: boolean;
+  readonly audioDelayMs?: number;
+  readonly hasSubtitleDelay?: boolean;
+  readonly subtitleDelayMs?: number;
+  readonly hasVideoQuality?: boolean;
+  readonly selectedVideoQualityId?: string | null;
   readonly hasQuality?: boolean;
   readonly qualityVariants?: readonly LiveVariantOption[];
   readonly activeQualityKey?: string;
@@ -190,6 +211,9 @@ export interface OverlayKeyRouteDeps {
   readonly selectSleepTimer?: ((minutes: number) => void) | undefined;
   readonly toggleSleepTimerAction?: (() => void) | undefined;
   readonly selectAudioDevice?: ((name: string) => void) | undefined;
+  readonly adjustAudioDelay?: ((deltaMs: number, reset?: boolean) => void) | undefined;
+  readonly adjustSubtitleDelay?: ((deltaMs: number, reset?: boolean) => void) | undefined;
+  readonly selectVideoQuality?: ((id: string | null) => void) | undefined;
   readonly selectQualityVariant?: ((itemKey: string) => void) | undefined;
   readonly selectAndroidDecoderMode?: ((mode: AndroidDecoderMode) => void) | undefined;
   readonly onExit: () => void;
@@ -283,6 +307,14 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       hasAudioDevice: d.hasAudioDevice === true,
       ...(d.audioDevices !== undefined ? { audioDevices: d.audioDevices } : {}),
       ...(d.activeAudioDevice !== undefined ? { activeAudioDevice: d.activeAudioDevice } : {}),
+      hasAudioDelay: d.hasAudioDelay === true,
+      ...(d.audioDelayMs !== undefined ? { audioDelayMs: d.audioDelayMs } : {}),
+      hasSubtitleDelay: d.hasSubtitleDelay === true,
+      ...(d.subtitleDelayMs !== undefined ? { subtitleDelayMs: d.subtitleDelayMs } : {}),
+      hasVideoQuality: d.hasVideoQuality === true,
+      ...(d.selectedVideoQualityId !== undefined
+        ? { selectedVideoQualityId: d.selectedVideoQualityId }
+        : {}),
       hasQuality: d.hasQuality === true,
       ...(d.qualityVariants !== undefined ? { qualityVariants: d.qualityVariants } : {}),
       ...(d.activeQualityKey !== undefined ? { activeQualityKey: d.activeQualityKey } : {}),
@@ -312,7 +344,11 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     else if (intent?.kind === 'audio') {
       if (d.selectAudio !== undefined) d.selectAudio(intent.id);
       else d.service?.selectAudioTrack(intent.id);
-    } else if (intent?.kind === 'audioDevice') d.selectAudioDevice?.(intent.name);
+    } else if (intent?.kind === 'audioDelay') d.adjustAudioDelay?.(intent.deltaMs, intent.reset);
+    else if (intent?.kind === 'subtitleDelay')
+      d.adjustSubtitleDelay?.(intent.deltaMs, intent.reset);
+    else if (intent?.kind === 'audioDevice') d.selectAudioDevice?.(intent.name);
+    else if (intent?.kind === 'videoQuality') d.selectVideoQuality?.(intent.id);
     else if (intent?.kind === 'quality') d.selectQualityVariant?.(intent.itemKey);
     else if (intent?.kind === 'videoDecoder') d.selectAndroidDecoderMode?.(intent.mode);
     else if (intent?.kind === 'chapter') d.selectChapter?.(intent.startMs);

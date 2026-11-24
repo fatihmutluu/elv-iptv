@@ -39,6 +39,9 @@ function fakeNative() {
     setBackgroundAudioEnabled: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
+    setAudioDelay: vi.fn(),
+    setSubtitleDelay: vi.fn(),
+    selectVideoQuality: vi.fn(),
     stop: vi.fn(),
     recreate: vi.fn(),
     release: vi.fn(),
@@ -159,6 +162,9 @@ describe('createMedia3Engine', () => {
       recreate: true,
       audioTrackSelection: true,
       subtitleTrackSelection: true,
+      audioDelay: true,
+      subtitleDelay: true,
+      videoQualitySelection: true,
     });
     const events: EngineEvent[] = [];
     engine?.subscribe((event) => events.push(event));
@@ -276,6 +282,30 @@ describe('createMedia3Engine', () => {
     expect(native.engine.setPitchLock).toHaveBeenCalledTimes(2);
     expect(native.engine.setMediaMetadata).toHaveBeenCalledTimes(2);
     expect(native.engine.setBackgroundAudioEnabled).toHaveBeenCalledTimes(2);
+  });
+
+  it('forwards setAudioDelay, setSubtitleDelay, and selectVideoQuality until released (#59, #203)', async () => {
+    const native = fakeNative();
+    const engine = await create();
+    if (engine === null) throw new Error('engine expected');
+
+    engine.setAudioDelay?.(7, 250);
+    engine.setSubtitleDelay?.(7, -500);
+    engine.selectVideoQuality?.(8, '0:1');
+    engine.selectVideoQuality?.(9, null);
+
+    expect(native.engine.setAudioDelay).toHaveBeenCalledWith(7, 250);
+    expect(native.engine.setSubtitleDelay).toHaveBeenCalledWith(7, -500);
+    expect(native.engine.selectVideoQuality).toHaveBeenNthCalledWith(1, 8, '0:1');
+    expect(native.engine.selectVideoQuality).toHaveBeenNthCalledWith(2, 9, null);
+
+    engine.release();
+    engine.setAudioDelay?.(10, 100);
+    engine.setSubtitleDelay?.(10, 100);
+    engine.selectVideoQuality?.(10, '0:0');
+    expect(native.engine.setAudioDelay).toHaveBeenCalledTimes(1);
+    expect(native.engine.setSubtitleDelay).toHaveBeenCalledTimes(1);
+    expect(native.engine.selectVideoQuality).toHaveBeenCalledTimes(2);
   });
 });
 

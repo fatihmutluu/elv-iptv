@@ -26,6 +26,10 @@ function fakeHandle() {
     setSpeed: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
+    selectSecondarySubtitleTrack: vi.fn(),
+    setAudioDelay: vi.fn(),
+    setSubtitleDelay: vi.fn(),
+    selectVideoQuality: vi.fn(),
     stop: vi.fn(),
     recreate: vi.fn(),
     release: vi.fn(),
@@ -117,6 +121,10 @@ describe('bridgeNativeEngine', () => {
       setSpeed: _sp,
       selectAudioTrack: _a,
       selectSubtitleTrack: _s,
+      selectSecondarySubtitleTrack: _ss,
+      setAudioDelay: _ad,
+      setSubtitleDelay: _sd,
+      selectVideoQuality: _vq,
       setScrubbing: _sc,
       ...minimal
     } = fakeHandle().handle;
@@ -128,6 +136,10 @@ describe('bridgeNativeEngine', () => {
     expect(engine.setSpeed).toBeUndefined();
     expect(engine.selectAudioTrack).toBeUndefined();
     expect(engine.selectSubtitleTrack).toBeUndefined();
+    expect(engine.selectSecondarySubtitleTrack).toBeUndefined();
+    expect(engine.setAudioDelay).toBeUndefined();
+    expect(engine.setSubtitleDelay).toBeUndefined();
+    expect(engine.selectVideoQuality).toBeUndefined();
     expect(engine.setScrubbing).toBeUndefined();
   });
 
@@ -311,6 +323,78 @@ describe('bridgeNativeEngine', () => {
       { attempt: 3, type: 'state', state: 'paused' },
       { attempt: 4, type: 'surface', change: 'destroyed' },
       { attempt: 5, type: 'state', state: 'opening' },
+    ]);
+  });
+
+  it('forwards delay, video quality, and secondary subtitle commands and normalizes tracks payloads (#59, #239)', () => {
+    const { handle, emit, engine } = fakeHandle();
+    const received: EngineEvent[] = [];
+    engine.subscribe((event) => received.push(event));
+
+    engine.load({ attempt: 1, url: 'http://sim/live/a/a/1.m3u8', headers: {}, kind: 'live' });
+    engine.setAudioDelay?.(1, 250);
+    engine.setSubtitleDelay?.(1, -150);
+    engine.selectVideoQuality?.(1, 'v:1080');
+    engine.selectVideoQuality?.(1, null);
+    engine.selectSecondarySubtitleTrack?.(1, 's:2');
+    engine.selectSecondarySubtitleTrack?.(1, null);
+
+    expect(handle.setAudioDelay).toHaveBeenCalledWith(1, 250);
+    expect(handle.setSubtitleDelay).toHaveBeenCalledWith(1, -150);
+    expect(handle.selectVideoQuality).toHaveBeenNthCalledWith(1, 1, 'v:1080');
+    expect(handle.selectVideoQuality).toHaveBeenNthCalledWith(2, 1, null);
+    expect(handle.selectSecondarySubtitleTrack).toHaveBeenNthCalledWith(1, 1, 's:2');
+    expect(handle.selectSecondarySubtitleTrack).toHaveBeenNthCalledWith(2, 1, null);
+
+    emit({
+      attempt: 1,
+      type: 'tracks',
+      tracks: {
+        audio: [{ id: 'a:1', language: 'en' }],
+        subtitles: [{ id: 's:1', language: 'en' }],
+        selectedAudioId: 'a:1',
+        selectedSubtitleId: 's:1',
+        selectedSecondarySubtitleId: '   ',
+        selectedVideoQualityId: '',
+        videoQualities: [
+          {
+            id: 'v:1080',
+            label: '1080p',
+            width: 1920,
+            height: 1080,
+            bitrateBps: 5_000_000,
+            fps: 50,
+          },
+          { id: '', label: 'invalid' },
+          { id: 'v:720', label: '720p', width: -1, height: Number.NaN, bitrateBps: 0, fps: 30 },
+        ],
+      },
+    });
+
+    expect(received).toEqual([
+      {
+        attempt: 1,
+        type: 'tracks',
+        tracks: {
+          audio: [{ id: 'a:1', language: 'en' }],
+          subtitles: [{ id: 's:1', language: 'en' }],
+          selectedAudioId: 'a:1',
+          selectedSubtitleId: 's:1',
+          selectedSecondarySubtitleId: null,
+          selectedVideoQualityId: null,
+          videoQualities: [
+            {
+              id: 'v:1080',
+              label: '1080p',
+              width: 1920,
+              height: 1080,
+              bitrateBps: 5_000_000,
+              fps: 50,
+            },
+            { id: 'v:720', label: '720p', fps: 30 },
+          ],
+        },
+      },
     ]);
   });
 });

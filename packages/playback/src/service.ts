@@ -22,6 +22,7 @@ import {
 } from './service-events';
 import { createSpeedCoalescer, type SpeedCoalescer } from './speed-coalescer';
 import { createPlaybackStateStore } from './state-store';
+import { clampSyncDelayMs } from './sync-delay';
 import { createTrackPreferences } from './track-preferences';
 import type {
   PlaybackClock,
@@ -178,14 +179,37 @@ export function createPlaybackServiceWith(
     loaded = true;
     mediaOpen = true;
     loadSeq += 1;
+    const attempt = state().attempt;
     engine.load({
-      attempt: state().attempt,
+      attempt,
       url: stream.url,
       headers: stream.headers,
       kind: current.kind,
       ...(startMs === undefined ? {} : { startMs }),
       ...(Object.keys(options).length > 0 ? { options } : {}),
     });
+    const postLoad = state();
+    if (
+      postLoad.audioDelayMs !== undefined &&
+      postLoad.audioDelayMs !== 0 &&
+      engine.capabilities.audioDelay
+    ) {
+      engine.setAudioDelay?.(attempt, postLoad.audioDelayMs);
+    }
+    if (
+      postLoad.subtitleDelayMs !== undefined &&
+      postLoad.subtitleDelayMs !== 0 &&
+      engine.capabilities.subtitleDelay
+    ) {
+      engine.setSubtitleDelay?.(attempt, postLoad.subtitleDelayMs);
+    }
+    if (
+      postLoad.selectedVideoQualityId !== undefined &&
+      postLoad.selectedVideoQualityId !== null &&
+      engine.capabilities.videoQualitySelection
+    ) {
+      engine.selectVideoQuality?.(attempt, postLoad.selectedVideoQualityId);
+    }
     return true;
   };
 
@@ -385,6 +409,9 @@ export function createPlaybackServiceWith(
       store.replace({
         ...rest,
         tracks: EMPTY_TRACKS,
+        audioDelayMs: 0,
+        subtitleDelayMs: 0,
+        selectedVideoQualityId: null,
         item: request.item,
         accountKey: request.accountKey,
         tuneAt: clock.now(),
@@ -437,7 +464,14 @@ export function createPlaybackServiceWith(
         externalPlaybackActive: _ep,
         ...rest
       } = state();
-      store.replace({ ...rest, status: { kind: 'idle' }, tracks: EMPTY_TRACKS });
+      store.replace({
+        ...rest,
+        status: { kind: 'idle' },
+        tracks: EMPTY_TRACKS,
+        audioDelayMs: 0,
+        subtitleDelayMs: 0,
+        selectedVideoQualityId: null,
+      });
     },
     play() {
       if (disposed || current === undefined) return;
@@ -531,6 +565,43 @@ export function createPlaybackServiceWith(
       if (disposed || current === undefined || state().status.kind === 'idle') return;
       trackPrefs.selectSubtitle(id, state().tracks, loaded);
       if (loaded) engine.selectSubtitleTrack?.(state().attempt, id);
+    },
+    selectSecondarySubtitleTrack(id) {
+      if (disposed || current === undefined || state().status.kind === 'idle') return;
+      const normalized = typeof id === 'string' && id.trim().length > 0 ? id : null;
+      if (loaded) engine.selectSecondarySubtitleTrack?.(state().attempt, normalized);
+    },
+    setAudioDelay(delayMs) {
+      if (
+        disposed ||
+        current === undefined ||
+        state().status.kind === 'idle' ||
+        !Number.isFinite(delayMs)
+      ) {
+        return;
+      }
+      const clamped = clampSyncDelayMs(delayMs);
+      store.update({ audioDelayMs: clamped });
+      if (loaded) engine.setAudioDelay?.(state().attempt, clamped);
+    },
+    setSubtitleDelay(delayMs) {
+      if (
+        disposed ||
+        current === undefined ||
+        state().status.kind === 'idle' ||
+        !Number.isFinite(delayMs)
+      ) {
+        return;
+      }
+      const clamped = clampSyncDelayMs(delayMs);
+      store.update({ subtitleDelayMs: clamped });
+      if (loaded) engine.setSubtitleDelay?.(state().attempt, clamped);
+    },
+    selectVideoQuality(id) {
+      if (disposed || current === undefined || state().status.kind === 'idle') return;
+      const normalized = typeof id === 'string' && id.trim().length > 0 ? id : null;
+      store.update({ selectedVideoQualityId: normalized });
+      if (loaded) engine.selectVideoQuality?.(state().attempt, normalized);
     },
     getState: state,
     subscribe: (listener) => store.subscribe(listener),

@@ -10,7 +10,10 @@ export type SettingsMenuView =
   | 'root'
   | 'subtitles'
   | 'audio'
+  | 'audioDelay'
+  | 'subtitleDelay'
   | 'audioDevice'
+  | 'videoQuality'
   | 'quality'
   | 'speed'
   | 'chapters'
@@ -27,7 +30,10 @@ export interface SettingsMenuState {
 export type SettingsRootItem =
   | 'subtitles'
   | 'audio'
+  | 'audioDelay'
+  | 'subtitleDelay'
   | 'audioDevice'
+  | 'videoQuality'
   | 'quality'
   | 'speed'
   | 'chapters'
@@ -43,6 +49,19 @@ export type SettingsRootItem =
   | 'autoSubtitlesOnSkipBack'
   | 'autoPlayNextEpisode'
   | 'stats';
+
+/** Stepper actions shown inside Audio/Subtitle delay sub-views (`0` = Reset, `#59`). */
+export const SYNC_DELAY_STEP_ACTIONS = [-250, -50, 0, 50, 250] as const;
+
+/** Index of the `Reset (0 ms)` row in {@link SYNC_DELAY_STEP_ACTIONS}. */
+export const SYNC_DELAY_RESET_INDEX = 2;
+
+/** Formats a sync delay offset in milliseconds (`0 ms`, `+150 ms`, `-50 ms`, `#59`). */
+export function formatSyncDelayMs(delayMs: number): string {
+  const safe = Number.isFinite(delayMs) ? Math.round(delayMs) : 0;
+  if (safe === 0) return '0 ms';
+  return safe > 0 ? `+${safe} ms` : `${safe} ms`;
+}
 
 /** Supported VOD playback speed multipliers (`0.5×` through `2×`). */
 export const PLAYBACK_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
@@ -89,6 +108,12 @@ export interface SettingsMenuOptions {
   readonly hasAudioDevice?: boolean;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
+  readonly hasAudioDelay?: boolean;
+  readonly audioDelayMs?: number;
+  readonly hasSubtitleDelay?: boolean;
+  readonly subtitleDelayMs?: number;
+  readonly hasVideoQuality?: boolean;
+  readonly selectedVideoQualityId?: string | null;
   readonly hasQuality?: boolean;
   readonly qualityVariants?: readonly LiveVariantOption[];
   readonly activeQualityKey?: string;
@@ -107,7 +132,10 @@ export interface SettingsMenuOptions {
 /** Builds ordered root Player Settings rows from a {@link SettingsMenuOptions} bag. */
 function settingsRootItemsFromOptions(options?: SettingsMenuOptions): readonly SettingsRootItem[] {
   const items: SettingsRootItem[] = ['subtitles', 'audio'];
+  if (options?.hasAudioDelay === true) items.push('audioDelay');
+  if (options?.hasSubtitleDelay === true) items.push('subtitleDelay');
   if (options?.hasAudioDevice === true) items.push('audioDevice');
+  if (options?.hasVideoQuality === true) items.push('videoQuality');
   if (options?.hasQuality === true && (options.qualityVariants?.length ?? 0) > 1) {
     items.push('quality');
   }
@@ -164,7 +192,10 @@ export type SettingsMenuIntent =
   | { readonly kind: 'toggleAutoPlayNextEpisode' }
   | { readonly kind: 'toggleStats' }
   | { readonly kind: 'audio'; readonly id: string }
+  | { readonly kind: 'audioDelay'; readonly deltaMs: number; readonly reset?: boolean }
+  | { readonly kind: 'subtitleDelay'; readonly deltaMs: number; readonly reset?: boolean }
   | { readonly kind: 'audioDevice'; readonly name: string }
+  | { readonly kind: 'videoQuality'; readonly id: string | null }
   | { readonly kind: 'quality'; readonly itemKey: string }
   | { readonly kind: 'subtitle'; readonly id: string | null }
   | { readonly kind: 'speed'; readonly rate: number }
@@ -222,11 +253,25 @@ function selectedQualityIndex(
   );
 }
 
+function selectedVideoQualityIndex(
+  tracks: MediaTracks,
+  selectedId: string | null | undefined,
+): number {
+  const effectiveId =
+    selectedId !== undefined ? selectedId : (tracks.selectedVideoQualityId ?? null);
+  if (effectiveId === null) return 0;
+  const idx = (tracks.videoQualities ?? []).findIndex((q) => q.id === effectiveId);
+  return idx >= 0 ? idx + 1 : 0;
+}
+
 /** Creates the initial focused state for the given Settings menu view (`root` by default). */
 export function initialSettingsMenu(
   view: SettingsMenuView = 'root',
   options?: SettingsMenuOptions,
 ): SettingsMenuState {
+  if (view === 'audioDelay' || view === 'subtitleDelay') {
+    return { view, index: SYNC_DELAY_RESET_INDEX };
+  }
   if (view === 'speed' && options?.playbackSpeed !== undefined) {
     return { view, index: selectedSpeedIndex(options.playbackSpeed) };
   }
@@ -259,9 +304,20 @@ export function settingsRowCount(
 ): number {
   if (view === 'root') return settingsRootItemsFromOptions(options).length;
   if (view === 'subtitles') return tracks.subtitles.length + 1;
+  if (view === 'audioDelay') {
+    return options?.hasAudioDelay === true ? SYNC_DELAY_STEP_ACTIONS.length : 0;
+  }
+  if (view === 'subtitleDelay') {
+    return options?.hasSubtitleDelay === true ? SYNC_DELAY_STEP_ACTIONS.length : 0;
+  }
   if (view === 'audioDevice') {
     return options?.hasAudioDevice === true
       ? normalizeAudioDeviceChoices(options?.audioDevices).length + 1
+      : 0;
+  }
+  if (view === 'videoQuality') {
+    return options?.hasVideoQuality === true && (tracks.videoQualities?.length ?? 0) > 0
+      ? (tracks.videoQualities?.length ?? 0) + 1
       : 0;
   }
   if (view === 'quality') {
@@ -286,7 +342,19 @@ export function clampSettingsMenu(
   options?: SettingsMenuOptions,
 ): SettingsMenuState {
   if (state.view === 'speed' && options?.isVod !== true) return { view: 'root', index: 0 };
+  if (state.view === 'audioDelay' && options?.hasAudioDelay !== true) {
+    return { view: 'root', index: 0 };
+  }
+  if (state.view === 'subtitleDelay' && options?.hasSubtitleDelay !== true) {
+    return { view: 'root', index: 0 };
+  }
   if (state.view === 'audioDevice' && options?.hasAudioDevice !== true) {
+    return { view: 'root', index: 0 };
+  }
+  if (
+    state.view === 'videoQuality' &&
+    (options?.hasVideoQuality !== true || (tracks.videoQualities?.length ?? 0) === 0)
+  ) {
     return { view: 'root', index: 0 };
   }
   if (
@@ -353,12 +421,31 @@ function openSubView(
   if (item === 'audio') {
     return { kind: 'state', state: { view: 'audio', index: selectedAudioIndex(tracks) } };
   }
+  if (item === 'audioDelay' && options?.hasAudioDelay === true) {
+    return { kind: 'state', state: { view: 'audioDelay', index: SYNC_DELAY_RESET_INDEX } };
+  }
+  if (item === 'subtitleDelay' && options?.hasSubtitleDelay === true) {
+    return { kind: 'state', state: { view: 'subtitleDelay', index: SYNC_DELAY_RESET_INDEX } };
+  }
   if (item === 'audioDevice' && options?.hasAudioDevice === true) {
     return {
       kind: 'state',
       state: {
         view: 'audioDevice',
         index: selectedAudioDeviceIndex(options.audioDevices, options.activeAudioDevice),
+      },
+    };
+  }
+  if (
+    item === 'videoQuality' &&
+    options?.hasVideoQuality === true &&
+    (tracks.videoQualities?.length ?? 0) > 0
+  ) {
+    return {
+      kind: 'state',
+      state: {
+        view: 'videoQuality',
+        index: selectedVideoQualityIndex(tracks, options.selectedVideoQualityId),
       },
     };
   }
@@ -464,10 +551,29 @@ export function routeSettingsMenuKey(
       const track = tracks.subtitles[cur.index - 1];
       return track !== undefined ? { kind: 'subtitle', id: track.id } : null;
     }
+    if (cur.view === 'audioDelay') {
+      const step = SYNC_DELAY_STEP_ACTIONS[cur.index];
+      if (step === undefined) return null;
+      return step === 0
+        ? { kind: 'audioDelay', deltaMs: 0, reset: true }
+        : { kind: 'audioDelay', deltaMs: step };
+    }
+    if (cur.view === 'subtitleDelay') {
+      const step = SYNC_DELAY_STEP_ACTIONS[cur.index];
+      if (step === undefined) return null;
+      return step === 0
+        ? { kind: 'subtitleDelay', deltaMs: 0, reset: true }
+        : { kind: 'subtitleDelay', deltaMs: step };
+    }
     if (cur.view === 'audioDevice') {
       if (cur.index === 0) return { kind: 'audioDevice', name: 'auto' };
       const device = normalizeAudioDeviceChoices(options?.audioDevices)[cur.index - 1];
       return device !== undefined ? { kind: 'audioDevice', name: device.name } : null;
+    }
+    if (cur.view === 'videoQuality') {
+      if (cur.index === 0) return { kind: 'videoQuality', id: null };
+      const quality = tracks.videoQualities?.[cur.index - 1];
+      return quality !== undefined ? { kind: 'videoQuality', id: quality.id } : null;
     }
     if (cur.view === 'quality') {
       const variant = options?.qualityVariants?.[cur.index];

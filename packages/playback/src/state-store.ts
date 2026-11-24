@@ -62,6 +62,9 @@ function samePlaybackState(a: PlaybackState, b: PlaybackState): boolean {
     a.atLiveEdge === b.atLiveEdge &&
     a.surfaceRecreationToken === b.surfaceRecreationToken &&
     a.externalPlaybackActive === b.externalPlaybackActive &&
+    a.audioDelayMs === b.audioDelayMs &&
+    a.subtitleDelayMs === b.subtitleDelayMs &&
+    a.selectedVideoQualityId === b.selectedVideoQualityId &&
     sameStatus(a.status, b.status) &&
     sameAnchor(a.anchor, b.anchor) &&
     sameVideoInfo(a.videoInfo, b.videoInfo)
@@ -86,6 +89,9 @@ export function createPlaybackStateStore(): PlaybackStateStore {
     tracks: EMPTY_TRACKS,
     staleEventsDropped: 0,
     surfaceRecreationToken: 0,
+    audioDelayMs: 0,
+    subtitleDelayMs: 0,
+    selectedVideoQualityId: null,
   };
   let lastNotified: PlaybackState = state;
   let depth = 0;
