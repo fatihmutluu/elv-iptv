@@ -11,6 +11,7 @@ import {
   type PlayerEngine,
   type StreamVideoInfo,
 } from './engine';
+import type { HealthTelemetryRecorder } from './health-telemetry';
 import type { RecoveryHooks } from './seam';
 import type { SeekCoalescer } from './seek-coalescer';
 import type { PlaybackStateStore } from './state-store';
@@ -100,6 +101,7 @@ export interface EventRouterDeps {
   readonly store: PlaybackStateStore;
   readonly seekCoalescer: SeekCoalescer;
   readonly hooks: RecoveryHooks;
+  readonly healthTelemetry?: HealthTelemetryRecorder;
   readonly liveEdgeToleranceMs: number;
   readonly reconcileTracks: (tracks: MediaTracks) => {
     readonly audioTrackId?: string;
@@ -142,6 +144,7 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
         const floor = cur.tuneAt ?? now;
         const at = event.atMs >= floor && event.atMs <= now ? event.atMs : now;
         store.update({ firstFrameAt: cur.firstFrameAt ?? at });
+        deps.healthTelemetry?.onFirstFrame(event.atMs);
         return;
       }
       case 'clock': {
@@ -183,6 +186,7 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
             deps.setLastVodPosition(positionAt(event.anchor, now));
           }
           store.update({ anchor: event.anchor, ...liveEdgePatch(event.anchor, now) });
+          deps.healthTelemetry?.onClock(event.anchor, now);
           hooks.onClock?.(event.anchor);
         });
         deps.onSeekSettled?.();
@@ -249,6 +253,7 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
         return;
       }
       case 'stall':
+        deps.healthTelemetry?.onStall(event.phase);
         hooks.onStall?.(event.phase);
         return;
       case 'externalPlayback':
@@ -263,6 +268,7 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
         return;
       case 'error':
         store.batch(() => {
+          deps.healthTelemetry?.onEngineError(event.error);
           hooks.onError?.(event.error);
         });
         return;

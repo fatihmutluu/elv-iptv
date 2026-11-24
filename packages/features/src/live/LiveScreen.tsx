@@ -11,7 +11,13 @@ import { StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { VideoHost } from '../ports/video-host';
-import { computeCatalogLayout, useCatalogUiCache, useKeymap, useProfile } from '../shared';
+import {
+  computeCatalogLayout,
+  useCatalogUiCache,
+  useKeymap,
+  useProfile,
+  useStreamHealth,
+} from '../shared';
 import { ChannelManagementOverlay } from './ChannelManagementOverlay';
 import { buildCatchupPlayTarget } from './catchup-reminder-model';
 import { EpgGridView } from './EpgGridView';
@@ -115,6 +121,8 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   const uiCache = useCatalogUiCache();
   const keymap = useKeymap();
   const profile = useProfile();
+  const { idleProbeController } = useStreamHealth();
+  useEffect(() => () => idleProbeController.abortAll('navigation'), [idleProbeController]);
   const layout = useMemo(() => computeCatalogLayout(viewport, theme), [theme, viewport]);
   const tabMem = useLiveTabMemory(memory, onMemoryChange, defaultLiveMode);
   const { memory: activeMemory, memoryRef, updateMemory } = tabMem;
@@ -148,10 +156,11 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   }, [memoryRef, updateMemory]);
   const handleSelectCategory = useCallback(
     (categoryId: string | null) => {
+      idleProbeController.abortAll('navigation');
       clearPreviewRef.current();
       updateMemory({ categoryId });
     },
-    [updateMemory],
+    [idleProbeController, updateMemory],
   );
   const handleChannelHistoryChange = useCallback(
     (next: Pick<LiveTabMemory, 'activeChannelKey' | 'previousChannelKey'>) => {
@@ -233,13 +242,14 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
 
   const handleSelectMode = useCallback(
     (nextMode: LiveMode) => {
+      idleProbeController.abortAll('navigation');
       numpad.close();
       clearTwoStepPreview();
       setContextMenu(null);
       setDetailModal(null);
       updateMemory({ mode: nextMode });
     },
-    [clearTwoStepPreview, numpad.close, updateMemory],
+    [clearTwoStepPreview, idleProbeController, numpad.close, updateMemory],
   );
   const handleOpenContextMenu = useCallback(
     (channel: ItemRow, index: number, programme: ProgrammeRow | null) => {

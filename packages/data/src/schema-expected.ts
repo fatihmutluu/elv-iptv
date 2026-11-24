@@ -430,4 +430,18 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'fired', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'created_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
+  failover_groups: [
+    { name: 'id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'auto_matched', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'created_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'updated_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  failover_group_members: [
+    { name: 'group_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'channel_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'position', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
 };

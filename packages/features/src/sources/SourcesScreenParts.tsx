@@ -160,6 +160,7 @@ export function FieldInput({
   onEndEditing,
   onSubmit,
   secureTextEntry = false,
+  multiline = false,
   registerRef,
   recordLayout,
 }: {
@@ -174,6 +175,7 @@ export function FieldInput({
   onEndEditing: (focusId: string) => void;
   onSubmit?: () => void;
   secureTextEntry?: boolean;
+  multiline?: boolean;
   registerRef: (id: string, node: TvTextInputInstance | null) => void;
   recordLayout?: ControlLayoutRecorder;
 }): ReactElement {
@@ -240,9 +242,16 @@ export function FieldInput({
           onKeyPress={handleKeyPress}
           onSubmitEditing={handleSubmitEditing}
           secureTextEntry={secureTextEntry}
+          multiline={multiline}
+          textAlignVertical={multiline ? 'top' : undefined}
           autoCapitalize="none"
           autoCorrect={false}
-          style={[sourcesStyles.input, theme.typography.body, { color: theme.colors.textPrimary }]}
+          style={[
+            sourcesStyles.input,
+            multiline ? sourcesStyles.multilineInput : null,
+            theme.typography.body,
+            { color: theme.colors.textPrimary },
+          ]}
         />
       </View>
     </View>

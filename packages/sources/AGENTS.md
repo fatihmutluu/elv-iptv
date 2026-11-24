@@ -39,9 +39,10 @@ M3U and XMLTV scanners and the Xtream client.
   `xmltv-children.ts`, `xmltv-meta.ts`, `xmltv-time.ts`, `xmltv-types.ts`.
 - `createXtreamClient({ http, server, username, password, transport?, maxBodyBytes?, backupServers?, primaryCooldownMs?, cooldown429Ms?, serverTimezone? })`
   wraps `player_api.php` (`account`, `categories`, `liveStreams`/`vodStreams`/`series`, streaming `streamLiveStreams`/`streamVodStreams`/`streamSeries`,
-  `seriesInfo`, `vodInfo`, `shortEpg`, `simpleEpg`), `playlistUrl`, `guideUrl`, `streamUrl`; `streamXtreamRecords` (`xtream-stream.ts`) parses `[...]` and numeric-keyed
+  `seriesInfo`, `vodInfo`, `shortEpg`, `simpleEpg`), `playlistUrl`, `guideUrl`, `streamUrl`, `streamUrls`, `activeApiServer`, `activeStreamServer`,
+  `reportStreamFailure`, `reportStreamSuccess`, `resetMirrors`; `streamXtreamRecords` (`xtream-stream.ts`) parses `[...]` and numeric-keyed
   `{ "0": ... }` incrementally in `O(batchSize)` memory; `probeXtreamLiveFormat` (`xtream-probe.ts`) auto-detects `ts` vs `m3u8` in <=512 B.
-  Per-`HttpClient` account-scoped `429` cooldowns (`Retry-After`, no failover on `429`) and ordered mirror failover (`xtream-mirrors.ts`).
+  Per-`HttpClient` account-scoped `429` cooldowns (`Retry-After`, no failover on `429`), independent API/stream mirror failover with primary cooldown (`xtream-mirrors.ts`, `#317`), and per-source `dnsFamily`/`hostOverride`/`allowLegacyTls` forwarding (`#172`).
   Empty `{}` -> `[]`, `[]` -> `{}`; array `episodes` keep Season `0` and deduplicate; extracts optional bounded `cast` (`<=512` chars, from `cast` or `actors`) and `director` (`<=256` chars) on VOD/Series rows and info; `toEpg` preserves optional `hasArchive` / `nowPlaying`. Credentials only in URL builders; errors omit URLs.
   Files: `xtream.ts`, `xtream-stream.ts`, `xtream-probe.ts`, `xtream-json.ts`, `xtream-mirrors.ts`, `xtream-records.ts`, `xtream-normalize.ts`, `xtream-types.ts`.
 - Unified catch-up URL resolver (`catchup-url.ts`, `#220`): play-time builder (`buildCatchupUrl`, `expandCatchupTemplate`, `formatXtreamTimeshiftStart`, `isProgrammeWithinCatchupWindow`, `normalizeCatchupMode`) for `xc`/`stalker`/`shift`/`flussonic`/`append`/`default` with IANA timezone & `http(s)://` validation.

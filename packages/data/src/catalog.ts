@@ -12,6 +12,10 @@ import {
 import { type AlphabetBucket, type AlphabetIndexInput, queryAlphabetIndex } from './alphabet-index';
 import { createCatalogChannelOpsMethods } from './catalog-channel-ops';
 import { type CatalogEpgOpsMethods, createCatalogEpgOpsMethods } from './catalog-epg-ops';
+import {
+  type CatalogFailoverOpsMethods,
+  createCatalogFailoverOpsMethods,
+} from './catalog-failover-ops';
 import { createCatalogProfileMethods } from './catalog-profiles';
 import {
   mapNewSourceRow,
@@ -177,7 +181,9 @@ export type AddSourceInput =
   | ({ kind: 'm3u' } & M3uSourceInput);
 
 /** Local catalog of the user's sources: add, import, browse in pages, resolve a stream, close. */
-export interface CatalogService extends Partial<CatalogEpgOpsMethods> {
+export interface CatalogService
+  extends Partial<CatalogEpgOpsMethods>,
+    Partial<CatalogFailoverOpsMethods> {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
@@ -187,8 +193,11 @@ export interface CatalogService extends Partial<CatalogEpgOpsMethods> {
     sourceId: string,
     opts?: { signal?: AbortSignal },
   ): Promise<Result<readonly DiscoveredCategory[]>>;
-  /** Merges a partial settings patch into a source's stored `settings_json`. */
-  updateSourceSettings?(sourceId: string, patch: Partial<SourceSettings>): Promise<void>;
+  /** Merges a partial settings patch into a source's stored `settings_json`, validating transport settings (`#172`). */
+  updateSourceSettings?(
+    sourceId: string,
+    patch: Partial<SourceSettings>,
+  ): Promise<void | Result<void>>;
   /** Stops active playback via `beforeRemoveSource`, aborts imports of `id`, and removes rows + secrets. */
   removeSource(id: string): Promise<Result<void>>;
   importSource(id: string, opts?: DeviceImportOptions): Promise<Result<ImportSummary>>;
@@ -381,7 +390,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       : { localPlaylistStore: deps.localPlaylistStore }),
   };
   const queue = createSerializedImportQueue(db);
-  const playtime = createPlaytimeResolverCache({ db, secrets, http: deps.http });
+  const playtime = createPlaytimeResolverCache({ db, secrets, http: deps.http, clock });
   let closePromise: Promise<void> | undefined;
   const { manifest, userData } = deps;
   const syncManifest = () => (manifest === undefined ? undefined : saveManifest(db, manifest));
@@ -401,6 +410,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     importDeps,
     playtime,
   });
+  const failoverOpsMethods = createCatalogFailoverOpsMethods({ db, clock, playtime });
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
@@ -421,11 +431,13 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       discoverSourceCategories(sourceId, importDeps, opts),
     async updateSourceSettings(sourceId, patch) {
       const existing = await getSource(db, sourceId);
-      if (existing === undefined) return;
+      if (existing === undefined) return ok(undefined);
       const merged = mergeSourceSettings(existing.settings, patch);
-      await persistSourceSettings(db, sourceId, merged);
+      const saved = await persistSourceSettings(db, sourceId, merged);
+      if (!saved.ok) return saved;
       playtime.evict(sourceId);
       await syncManifest();
+      return ok(undefined);
     },
 
     async removeSource(id) {
@@ -624,7 +636,12 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       if (filter !== null && (await isItemRestricted(db, filter, itemKey))) {
         return err(elvError('auth', 'parental-locked'));
       }
-      return playtime.resolveStream(itemKey);
+      return playtime.resolveStream(
+        itemKey,
+        filter === null
+          ? undefined
+          : { isAlternateRestricted: (channelKey) => isItemRestricted(db, filter, channelKey) },
+      );
     },
 
     async saveProgress(input) {
@@ -688,6 +705,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...profileMethods,
     ...channelOpsMethods,
     ...epgOpsMethods,
+    ...failoverOpsMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

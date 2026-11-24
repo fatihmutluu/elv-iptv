@@ -205,4 +205,83 @@ describe('validateSourceForm and detectPastedXtreamLink', () => {
       expect(res.value.input.name).toBe('Yerel dosya');
     }
   });
+
+  it('attaches dnsFamily and validated hostOverride to transport and rejects invalid hostOverride (#172)', () => {
+    const systemOnly = validateSourceForm(xtreamForm({ dnsFamily: 'system', hostOverride: '  ' }));
+    expect(systemOnly.ok).toBe(true);
+    if (systemOnly.ok && systemOnly.value.kind === 'xtream') {
+      expect(systemOnly.value.input.transport).toBeUndefined();
+    }
+
+    const ipv4Res = validateSourceForm(
+      xtreamForm({ dnsFamily: 'ipv4', hostOverride: ' 203.0.113.10 ' }),
+    );
+    expect(ipv4Res.ok).toBe(true);
+    if (ipv4Res.ok && ipv4Res.value.kind === 'xtream') {
+      expect(ipv4Res.value.input.transport).toEqual({
+        dnsFamily: 'ipv4',
+        hostOverride: '203.0.113.10',
+      });
+    }
+
+    const ipv6Res = validateSourceForm(
+      m3uForm({ dnsFamily: 'ipv6', hostOverride: '[2001:DB8::1]' }),
+    );
+    expect(ipv6Res.ok).toBe(true);
+    if (ipv6Res.ok && ipv6Res.value.kind === 'link') {
+      expect(ipv6Res.value.input.transport).toEqual({
+        dnsFamily: 'ipv6',
+        hostOverride: '2001:db8::1',
+      });
+    }
+
+    for (const bad of [
+      'panel.example.test',
+      '203.0.113.10:8080',
+      'http://203.0.113.10',
+      '999.1.1.1',
+    ]) {
+      const invalid = validateSourceForm(xtreamForm({ hostOverride: bad }));
+      expect(invalid, `expected ${bad} to fail`).toEqual({
+        ok: false,
+        error: {
+          code: 'invalid-host-override',
+          messageId: 'sources.network.invalidHostOverride',
+          hintId: 'sources.network.hostOverrideHint',
+        },
+      });
+    }
+  });
+
+  it('parses newline-separated Xtream backupServers and rejects invalid backup URLs (#317)', () => {
+    const okRes = validateSourceForm(
+      xtreamForm({
+        backupServers: [
+          '  http://mirror1.example.test:8080/player_api.php  ',
+          '',
+          'https://mirror2.example.test:8443/',
+          'http://mirror1.example.test:8080',
+        ].join('\n'),
+      }),
+    );
+    expect(okRes.ok).toBe(true);
+    if (okRes.ok && okRes.value.kind === 'xtream') {
+      expect(okRes.value.input.backupServers).toEqual([
+        'http://mirror1.example.test:8080',
+        'https://mirror2.example.test:8443',
+      ]);
+    }
+
+    const badScheme = validateSourceForm(
+      xtreamForm({ backupServers: 'ftp://mirror.example.test' }),
+    );
+    expect(badScheme.ok).toBe(false);
+    if (!badScheme.ok) expect(badScheme.error.code).toBe('unsupported-scheme');
+
+    const badCtrl = validateSourceForm(
+      xtreamForm({ backupServers: 'http://mirror.example.test\u0000' }),
+    );
+    expect(badCtrl.ok).toBe(false);
+    if (!badCtrl.ok) expect(badCtrl.error.code).toBe('invalid-characters');
+  });
 });

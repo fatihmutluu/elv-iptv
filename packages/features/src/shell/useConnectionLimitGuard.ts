@@ -6,6 +6,7 @@ import {
 } from '@elv/playback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PlayTarget } from '../ports/play-target';
+import { useStreamHealth } from '../shared';
 
 /** Pending pre-flight connection limit prompt held until the user confirms or cancels (`#87`). */
 export interface PendingConnectionPrompt {
@@ -74,11 +75,14 @@ export function useConnectionLimitGuard({
 }: UseConnectionLimitGuardOptions): ConnectionLimitGuard {
   const defaultTracker = useMemo(() => createConnectionTracker(), []);
   const tracker = connectionTracker ?? defaultTracker;
+  const streamHealth = useStreamHealth();
   const activeStreamIdRef = useRef<string | null>(null);
   const seqRef = useRef(0);
   const [pending, setPending] = useState<PendingConnectionPrompt | null>(null);
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
+
+  useEffect(() => streamHealth.registerConnectionTracker(tracker), [streamHealth, tracker]);
 
   const releaseActive = useCallback(() => {
     const currentId = activeStreamIdRef.current;

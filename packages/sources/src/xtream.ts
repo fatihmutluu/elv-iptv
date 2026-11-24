@@ -1,6 +1,8 @@
 import {
+  type ContentKind,
   elvError,
   err,
+  hostnameOf,
   httpStatusError,
   ok,
   openAsyncIterator,
@@ -17,8 +19,9 @@ import {
 } from './xtream-json';
 import {
   accountCooldownKey,
-  buildAttemptOrder,
   buildServerEntries,
+  createMirrorSlotState,
+  findServerIndex,
   isAccountCoolingDown,
   isFailoverEligible,
   parseRetryAfterMs,
@@ -82,8 +85,8 @@ export function normalizeXtreamServer(server: string): string {
 
 /**
  * Creates an Xtream client. Credentials live only in the returned object: records and error
- * details never contain them or the request URL; only `playlistUrl`, `guideUrl` and `streamUrl`
- * return URLs that include them.
+ * details never contain them or the request URL; only `playlistUrl`, `guideUrl`, `streamUrl`,
+ * and `streamUrls` return URLs that include them.
  */
 export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const { http, transport } = options;
@@ -96,27 +99,35 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const pass = encodeURIComponent(options.password);
   const credentials = `username=${user}&password=${pass}`;
   const liveFormat = transport?.xtreamFormat ?? 'ts';
-  const headers = transportHeaders(transport);
+  const hostOverride = transport?.hostOverride || undefined;
+  const baseReqOpts = {
+    headers: transportHeaders(transport),
+    ...(transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
+    ...(transport?.dnsFamily !== undefined ? { dnsFamily: transport.dnsFamily } : {}),
+  };
 
-  let activeIndex = 0;
-  let failedOverAtMs: number | undefined;
+  const apiSlot = createMirrorSlotState(servers.length, primaryCooldownMs, nowFn);
+  const streamSlot = createMirrorSlotState(servers.length, primaryCooldownMs, nowFn);
   let activeTimezone = options.serverTimezone?.trim() || undefined;
 
   const resolveEntryBase = (entry: XtreamServerEntry): string =>
     entry.explicitScheme ? entry.raw : resolveXtreamBaseUrl(entry.raw, http);
+  const primaryHost = hostnameOf(resolveEntryBase(servers[0] as XtreamServerEntry));
+  const baseAt = (idx: number) => resolveEntryBase(servers[idx] as XtreamServerEntry);
+  const activeApiBase = () => baseAt(apiSlot.activeIndex());
+  const activeStreamBase = () => baseAt(streamSlot.activeIndex());
 
-  const currentBase = () => resolveEntryBase(servers[activeIndex] as XtreamServerEntry);
+  const record429 = (respHeaders?: Readonly<Record<string, string>>) => {
+    const ms = parseRetryAfterMs(respHeaders, options.cooldown429Ms);
+    recordAccountCooldown(http, accountKey, nowFn(), ms);
+    return err(httpStatusError(429));
+  };
 
-  const promoteServer = (idx: number): void => {
-    if (idx === 0) {
-      activeIndex = 0;
-      failedOverAtMs = undefined;
-    } else {
-      if (activeIndex === 0 || failedOverAtMs === undefined) {
-        failedOverAtMs = nowFn();
-      }
-      activeIndex = idx;
-    }
+  const beginApiCall = (call?: XtreamCallOptions) => {
+    if (call?.signal?.aborted) return err(elvError('network', 'aborted'));
+    const startNow = nowFn();
+    if (isAccountCoolingDown(http, accountKey, startNow)) return err(httpStatusError(429));
+    return ok(apiSlot.attemptOrder(startNow));
   };
 
   async function requestServerBody(
@@ -126,11 +137,15 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     call?: XtreamCallOptions,
   ): Promise<Result<AsyncIterable<Uint8Array>>> {
     let response: Awaited<ReturnType<typeof http.get>>;
+    const useHostOverride =
+      hostOverride !== undefined &&
+      primaryHost !== undefined &&
+      hostnameOf(serverBase) === primaryHost;
     try {
       response = await http.get(`${serverBase}/player_api.php?${credentials}${query}`, {
-        headers,
+        ...baseReqOpts,
+        ...(useHostOverride ? { hostOverride } : {}),
         timeoutMs,
-        ...(transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
         ...(call?.signal ? { signal: call.signal } : {}),
       });
     } catch {
@@ -139,26 +154,14 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     }
     if (!response.ok) {
       if (response.error.category === 'network' && response.error.code === 'http-429') {
-        recordAccountCooldown(
-          http,
-          accountKey,
-          nowFn(),
-          parseRetryAfterMs(undefined, options.cooldown429Ms),
-        );
-        return err(httpStatusError(429));
+        return record429();
       }
       return err(elvError(response.error.category, response.error.code));
     }
     const { status, body } = response.value;
     if (status === 429) {
       await discard(body);
-      recordAccountCooldown(
-        http,
-        accountKey,
-        nowFn(),
-        parseRetryAfterMs(response.value.headers, options.cooldown429Ms),
-      );
-      return err(httpStatusError(429));
+      return record429(response.value.headers);
     }
     if (status < 200 || status >= 300) {
       await discard(body);
@@ -176,18 +179,21 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     query: string,
     call?: XtreamCallOptions,
   ): Promise<Result<AsyncIterable<Uint8Array>>> {
-    const initialBase = resolveEntryBase(entry);
-    const token = await acquireXtreamToken(http, initialBase, options.rateLimit, call?.signal);
+    const token = await acquireXtreamToken(
+      http,
+      resolveEntryBase(entry),
+      options.rateLimit,
+      call?.signal,
+    );
     if (!token.ok) return token;
-    if (isAccountCoolingDown(http, accountKey, nowFn())) {
-      return err(httpStatusError(429));
-    }
+    if (isAccountCoolingDown(http, accountKey, nowFn())) return err(httpStatusError(429));
     if (entry.explicitScheme || getCachedXtreamScheme(http, entry.hostKey) !== undefined) {
       return requestServerBody(resolveEntryBase(entry), query, TIMEOUT_MS, call);
     }
 
-    const httpsBase = buildXtreamBaseUrlWithScheme(entry.raw, 'https');
-    const probe = await requestServerBody(httpsBase, query, HTTPS_PROBE_TIMEOUT_MS, call);
+    const probeScheme = (scheme: 'https' | 'http', ms: number) =>
+      requestServerBody(buildXtreamBaseUrlWithScheme(entry.raw, scheme), query, ms, call);
+    const probe = await probeScheme('https', HTTPS_PROBE_TIMEOUT_MS);
     if (probe.ok || isHttpResponseError(probe.error)) {
       setCachedXtreamScheme(http, entry.hostKey, 'https');
       return probe;
@@ -196,8 +202,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     if (call?.signal?.aborted) return err(elvError('network', 'aborted'));
     if (isAccountCoolingDown(http, accountKey, nowFn())) return err(httpStatusError(429));
 
-    const httpBase = buildXtreamBaseUrlWithScheme(entry.raw, 'http');
-    const fallback = await requestServerBody(httpBase, query, TIMEOUT_MS, call);
+    const fallback = await probeScheme('http', TIMEOUT_MS);
     if (fallback.ok || isHttpResponseError(fallback.error)) {
       setCachedXtreamScheme(http, entry.hostKey, 'http');
     }
@@ -217,25 +222,18 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   }
 
   async function getJson(query: string, call?: XtreamCallOptions): Promise<Result<unknown>> {
-    if (call?.signal?.aborted) return err(elvError('network', 'aborted'));
-    const startNow = nowFn();
-    if (isAccountCoolingDown(http, accountKey, startNow)) {
-      return err(httpStatusError(429));
-    }
-    const probePrimary =
-      activeIndex > 0 &&
-      failedOverAtMs !== undefined &&
-      startNow - failedOverAtMs >= primaryCooldownMs;
-    const order = buildAttemptOrder(servers.length, activeIndex, probePrimary);
+    const start = beginApiCall(call);
+    if (!start.ok) return start;
+    const { order, probePrimary } = start.value;
     let lastFailure: Result<unknown> = err(elvError('network', 'request-failed'));
 
     for (const idx of order) {
       const result = await fetchServerJson(servers[idx] as XtreamServerEntry, query, call);
       if (result.ok) {
-        promoteServer(idx);
+        apiSlot.markSuccess(idx, nowFn());
         return result;
       }
-      if (probePrimary && idx === 0) failedOverAtMs = nowFn();
+      if (probePrimary && idx === 0) apiSlot.markPrimaryProbeFailed(nowFn());
       if (!isFailoverEligible(result.error)) return result;
       lastFailure = result;
     }
@@ -247,22 +245,15 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     map: (rows: Raw[]) => T[],
     call?: XtreamStreamOptions,
   ): AsyncGenerator<T[], Result<void>> {
-    if (call?.signal?.aborted) return err(elvError('network', 'aborted'));
-    const startNow = nowFn();
-    if (isAccountCoolingDown(http, accountKey, startNow)) {
-      return err(httpStatusError(429));
-    }
-    const probePrimary =
-      activeIndex > 0 &&
-      failedOverAtMs !== undefined &&
-      startNow - failedOverAtMs >= primaryCooldownMs;
-    const order = buildAttemptOrder(servers.length, activeIndex, probePrimary);
+    const start = beginApiCall(call);
+    if (!start.ok) return start;
+    const { order, probePrimary } = start.value;
     let lastFailure: Result<void> = err(elvError('network', 'request-failed'));
 
     for (const idx of order) {
       const opened = await openServerBody(servers[idx] as XtreamServerEntry, query, call);
       if (!opened.ok) {
-        if (probePrimary && idx === 0) failedOverAtMs = nowFn();
+        if (probePrimary && idx === 0) apiSlot.markPrimaryProbeFailed(nowFn());
         if (!isFailoverEligible(opened.error)) return opened;
         lastFailure = opened;
         continue;
@@ -273,30 +264,24 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
         ...(call?.signal === undefined ? {} : { signal: call.signal }),
       });
       let yieldedAny = false;
-      let promoted = false;
-      let failover = false;
       try {
         for (;;) {
           const step = await gen.next();
           if (step.done) {
             if (step.value.ok) {
-              if (!promoted) promoteServer(idx);
+              if (!yieldedAny) apiSlot.markSuccess(idx, nowFn());
               return ok(undefined);
             }
-            if (probePrimary && idx === 0) failedOverAtMs = nowFn();
+            if (probePrimary && idx === 0) apiSlot.markPrimaryProbeFailed(nowFn());
             if (!yieldedAny && isFailoverEligible(step.value.error)) {
               lastFailure = step.value;
-              failover = true;
               break;
             }
             return step.value;
           }
           const mapped = map(step.value);
           if (mapped.length > 0) {
-            if (!promoted) {
-              promoteServer(idx);
-              promoted = true;
-            }
+            if (!yieldedAny) apiSlot.markSuccess(idx, nowFn());
             yieldedAny = true;
             yield mapped;
           }
@@ -304,7 +289,6 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       } finally {
         await gen.return(ok(undefined));
       }
-      if (!failover) return lastFailure;
     }
     return lastFailure;
   }
@@ -343,10 +327,18 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     return err(shape());
   }
 
-  const withCategory = (categoryId?: string) =>
-    categoryId === undefined ? '' : `&category_id=${encodeURIComponent(categoryId)}`;
-  const withRoot = (path: string, id: number, ext: string) =>
-    `${currentBase()}/${path}/${user}/${pass}/${id}.${ext}`;
+  const listQ = (action: string, cat?: string) =>
+    `&action=${action}${cat === undefined ? '' : `&category_id=${encodeURIComponent(cat)}`}`;
+  const buildStreamUrls = (kind: ContentKind, id: number, ext?: string): readonly string[] => {
+    const path = kind === 'live' ? 'live' : kind === 'movie' ? 'movie' : 'series';
+    const tail = `${path}/${user}/${pass}/${id}.${ext ?? (kind === 'live' ? liveFormat : 'mp4')}`;
+    return streamSlot.attemptOrder(nowFn()).order.map((idx) => `${baseAt(idx)}/${tail}`);
+  };
+
+  const mapObj = async <T>(query: string, fn: (raw: Raw) => T, call?: XtreamCallOptions) => {
+    const r = await object(query, call);
+    return r.ok ? ok(fn(r.value)) : r;
+  };
 
   return {
     async account(call) {
@@ -362,45 +354,52 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       if (acc.serverTimezone !== undefined) activeTimezone = acc.serverTimezone;
       return ok(acc);
     },
-    categories(kind, call) {
-      const action = kind === 'movie' ? 'vod' : kind;
-      return rows(`&action=get_${action}_categories`, toCategories, call);
+    categories: (kind, call) =>
+      rows(`&action=get_${kind === 'movie' ? 'vod' : kind}_categories`, toCategories, call),
+    liveStreams: (cat, call) => rows(listQ('get_live_streams', cat), toLive, call),
+    vodStreams: (cat, call) => rows(listQ('get_vod_streams', cat), toMovies, call),
+    series: (cat, call) => rows(listQ('get_series', cat), toSeries, call),
+    streamLiveStreams: (cat, call) => streamRows(listQ('get_live_streams', cat), toLive, call),
+    streamVodStreams: (cat, call) => streamRows(listQ('get_vod_streams', cat), toMovies, call),
+    streamSeries: (cat, call) => streamRows(listQ('get_series', cat), toSeries, call),
+    seriesInfo: (id, call) => mapObj(`&action=get_series_info&series_id=${id}`, toSeriesInfo, call),
+    vodInfo: (id, call) => mapObj(`&action=get_vod_info&vod_id=${id}`, toVodInfo, call),
+    shortEpg: (id, limit, call) =>
+      mapObj(
+        `&action=get_short_epg&stream_id=${id}${limit === undefined ? '' : `&limit=${limit}`}`,
+        (v) => toEpg(v, activeTimezone),
+        call,
+      ),
+    simpleEpg: (id, call) =>
+      mapObj(
+        `&action=get_simple_data_table&stream_id=${id}`,
+        (v) => toEpg(v, activeTimezone),
+        call,
+      ),
+    playlistUrl: () =>
+      `${activeApiBase()}/get.php?${credentials}&type=m3u_plus&output=${liveFormat}`,
+    guideUrl: () => `${activeApiBase()}/xmltv.php?${credentials}`,
+    streamUrl: (kind, id, ext) => buildStreamUrls(kind, id, ext)[0] as string,
+    streamUrls: buildStreamUrls,
+    activeApiServer: activeApiBase,
+    activeStreamServer: activeStreamBase,
+    reportStreamFailure(urlOrBase) {
+      const now = nowFn();
+      const idx =
+        urlOrBase === undefined ? undefined : findServerIndex(servers, urlOrBase, resolveEntryBase);
+      if (idx !== -1) streamSlot.reportFailure(idx, now);
     },
-    liveStreams: (categoryId, call) =>
-      rows(`&action=get_live_streams${withCategory(categoryId)}`, toLive, call),
-    vodStreams: (categoryId, call) =>
-      rows(`&action=get_vod_streams${withCategory(categoryId)}`, toMovies, call),
-    series: (categoryId, call) =>
-      rows(`&action=get_series${withCategory(categoryId)}`, toSeries, call),
-    streamLiveStreams: (categoryId, call) =>
-      streamRows(`&action=get_live_streams${withCategory(categoryId)}`, toLive, call),
-    streamVodStreams: (categoryId, call) =>
-      streamRows(`&action=get_vod_streams${withCategory(categoryId)}`, toMovies, call),
-    streamSeries: (categoryId, call) =>
-      streamRows(`&action=get_series${withCategory(categoryId)}`, toSeries, call),
-    async seriesInfo(seriesId, call) {
-      const r = await object(`&action=get_series_info&series_id=${seriesId}`, call);
-      return r.ok ? ok(toSeriesInfo(r.value)) : r;
+    reportStreamSuccess(urlOrBase) {
+      const now = nowFn();
+      const idx =
+        urlOrBase === undefined
+          ? (streamSlot.attemptOrder(now).order[0] ?? 0)
+          : findServerIndex(servers, urlOrBase, resolveEntryBase);
+      if (idx !== -1) streamSlot.markSuccess(idx, now);
     },
-    async vodInfo(vodId, call) {
-      const r = await object(`&action=get_vod_info&vod_id=${vodId}`, call);
-      return r.ok ? ok(toVodInfo(r.value)) : r;
-    },
-    async shortEpg(streamId, limit, call) {
-      const tail = limit === undefined ? '' : `&limit=${limit}`;
-      const r = await object(`&action=get_short_epg&stream_id=${streamId}${tail}`, call);
-      return r.ok ? ok(toEpg(r.value, activeTimezone)) : r;
-    },
-    async simpleEpg(streamId, call) {
-      const r = await object(`&action=get_simple_data_table&stream_id=${streamId}`, call);
-      return r.ok ? ok(toEpg(r.value, activeTimezone)) : r;
-    },
-    playlistUrl: () => `${currentBase()}/get.php?${credentials}&type=m3u_plus&output=${liveFormat}`,
-    guideUrl: () => `${currentBase()}/xmltv.php?${credentials}`,
-    streamUrl(kind, id, extension) {
-      if (kind === 'live') return withRoot('live', id, extension ?? liveFormat);
-      if (kind === 'movie') return withRoot('movie', id, extension ?? 'mp4');
-      return withRoot('series', id, extension ?? 'mp4');
+    resetMirrors() {
+      apiSlot.reset();
+      streamSlot.reset();
     },
   };
 }

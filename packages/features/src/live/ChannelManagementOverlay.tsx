@@ -27,6 +27,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 import { useProfile } from '../shared';
 import { ChannelGroupsManagerTab } from './ChannelGroupsManagerTab';
 import { ChannelManagementRow } from './ChannelManagementRow';
+import { channelManagementOverlayStyles as styles } from './ChannelManagementStyles';
 import {
   buildChannelRowActions,
   buildOverlayHeaderControls,
@@ -34,6 +35,7 @@ import {
   canMoveChannelInSource,
   computeSameSourceReorder,
 } from './channel-management-model';
+import { FailoverGroupsTab } from './FailoverGroupsTab';
 
 const MAX_MANAGED_CHANNELS = 200;
 const NOOP_TV_SUBSCRIBER = (): boolean => false;
@@ -146,6 +148,7 @@ function ChannelManagementOverlayBody({
   const rowYRef = useRef<Record<number, number>>({});
   const renameInputRef = useRef<TvTextInputInstance | null>(null);
   const groupsTvHandlerRef = useRef<((key: KeyInput['key']) => boolean) | null>(null);
+  const failoverTvHandlerRef = useRef<((key: KeyInput['key']) => boolean) | null>(null);
 
   useEffect(() => {
     if (visible && parentalLocked) {
@@ -173,7 +176,7 @@ function ChannelManagementOverlayBody({
     setGroupPickerKey(null);
     setGroupPickerIdx(0);
     setTvZone('header');
-    setHeaderCol(initialTab === 'groups' ? 1 : 0);
+    setHeaderCol(initialTab === 'failover' ? 2 : initialTab === 'groups' ? 1 : 0);
     setFocusedRowIdx(0);
     setFocusedActionCol(0);
     rowYRef.current = {};
@@ -197,12 +200,14 @@ function ChannelManagementOverlayBody({
         e.preventDefault?.();
         if (renamingKey !== null) setRenamingKey(null);
         else if (groupPickerKey !== null) setGroupPickerKey(null);
+        else if (tab === 'groups' && groupsTvHandlerRef.current?.('back')) return;
+        else if (tab === 'failover' && failoverTvHandlerRef.current?.('back')) return;
         else onClose();
       }
     };
     win.addEventListener?.('keydown', onKeyDown);
     return () => win.removeEventListener?.('keydown', onKeyDown);
-  }, [groupPickerKey, onClose, renamingKey, visible]);
+  }, [groupPickerKey, onClose, renamingKey, tab, visible]);
 
   const visibleChannels = useMemo(
     () => (showHidden ? channels : channels.filter((ch) => ch.isHidden !== true)),
@@ -412,6 +417,9 @@ function ChannelManagementOverlayBody({
     if (tab === 'groups' && tvZone === 'body' && groupsTvHandlerRef.current?.('back')) {
       return;
     }
+    if (tab === 'failover' && tvZone === 'body' && failoverTvHandlerRef.current?.('back')) {
+      return;
+    }
     onClose();
   }, [groupPickerKey, onClose, renamingKey, tab, tvZone]);
 
@@ -427,13 +435,16 @@ function ChannelManagementOverlayBody({
           return;
         }
         if (key === 'down') {
-          if (tab === 'groups' || visibleChannels.length > 0) setTvZone('body');
+          if (tab === 'groups' || tab === 'failover' || visibleChannels.length > 0) {
+            setTvZone('body');
+          }
           return;
         }
         if (key === 'select') {
           const ctrl = headerControls[headerCol];
           if (ctrl === 'tab-channels') setTab('channels');
           else if (ctrl === 'tab-groups') setTab('groups');
+          else if (ctrl === 'tab-failover') setTab('failover');
           else if (ctrl === 'show-hidden') setShowHidden((prev) => !prev);
           else if (ctrl === 'close') onClose();
         }
@@ -442,6 +453,10 @@ function ChannelManagementOverlayBody({
 
       if (tab === 'groups') {
         groupsTvHandlerRef.current?.(key);
+        return;
+      }
+      if (tab === 'failover') {
+        failoverTvHandlerRef.current?.(key);
         return;
       }
 
@@ -620,6 +635,14 @@ function ChannelManagementOverlayBody({
             focused={focusedHeaderCtrl === 'tab-groups'}
             onPress={() => setTab('groups')}
           />
+          <FilterChip
+            testID="channel-manage-tab-failover"
+            label={i18n.t('channels.manage.tab.failover')}
+            selected={tab === 'failover'}
+            focusable={!isTv}
+            focused={focusedHeaderCtrl === 'tab-failover'}
+            onPress={() => setTab('failover')}
+          />
           {tab === 'channels' ? (
             <FilterChip
               testID="channel-manage-show-hidden"
@@ -707,7 +730,7 @@ function ChannelManagementOverlayBody({
                 })}
               </View>
             )
-          ) : (
+          ) : tab === 'groups' ? (
             <ChannelGroupsManagerTab
               catalog={catalog}
               groups={groups}
@@ -719,6 +742,18 @@ function ChannelManagementOverlayBody({
               onRefresh={loadAll}
               {...(onMutated !== undefined ? { onMutated } : {})}
             />
+          ) : (
+            <FailoverGroupsTab
+              catalog={catalog}
+              channels={channels}
+              sources={sources}
+              isTv={isTv}
+              tvActive={tvZone === 'body'}
+              tvKeyHandlerRef={failoverTvHandlerRef}
+              onEdgeTop={() => setTvZone('header')}
+              onScrollToY={scrollToY}
+              {...(onMutated !== undefined ? { onMutated } : {})}
+            />
           )}
         </ScrollView>
       </View>
@@ -727,7 +762,7 @@ function ChannelManagementOverlayBody({
 }
 
 /**
- * Cinema Quietude v2 in-tree Channel Management & Custom Groups overlay (`#60`).
+ * Cinema Quietude v2 in-tree Channel Management, Custom Groups & Multi-Source Failover overlay (`#60`, `#157`).
  * Never uses React Native `<Modal>`; integrates `TextEntryBoundary`, 2D TV D-pad traversal,
  * and parental PIN enforcement.
  */
@@ -741,38 +776,3 @@ export function ChannelManagementOverlay(
     </TextEntryBoundary>
   );
 }
-
-const styles = StyleSheet.create({
-  root: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    zIndex: 55,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  sheet: {
-    width: '100%',
-    maxWidth: 820,
-    maxHeight: '88%',
-    borderWidth: 1,
-    padding: 20,
-    gap: 14,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  headerTitles: { flex: 1, gap: 2 },
-  tabsRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
-  scroll: { flexGrow: 0, flexShrink: 1 },
-  scrollContent: { paddingBottom: 8 },
-  channelList: { gap: 10 },
-});

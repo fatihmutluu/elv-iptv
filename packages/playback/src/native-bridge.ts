@@ -1,4 +1,11 @@
-import type { AndroidDecoderMode, BufferPreset, SubtitleStyleConfig } from '@elv/domain';
+import {
+  type AndroidDecoderMode,
+  type BufferPreset,
+  type DnsFamilyPreference,
+  normalizeDnsFamily,
+  type SubtitleStyleConfig,
+  validateHostOverride,
+} from '@elv/domain';
 import type {
   AttemptToken,
   ClockAnchor,
@@ -30,6 +37,8 @@ export interface NativeLoadCommand {
   readonly secondarySubtitleTrackId?: string | null;
   readonly externalSubtitles?: readonly ExternalSubtitleTrack[];
   readonly subtitleStyle?: SubtitleStyleConfig;
+  readonly dnsFamily?: DnsFamilyPreference;
+  readonly hostOverride?: string;
 }
 
 /** Handle to a native engine shared object (`ElvEngineMedia3.Engine` or `ElvEngineAether.Engine`). */
@@ -61,6 +70,10 @@ export interface NativeEngineHandle {
 
 function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
   const { attempt, url, headers, kind, startMs, options } = cmd;
+  const dnsFamily = normalizeDnsFamily(options?.dnsFamily);
+  const validatedHost =
+    options?.hostOverride === undefined ? undefined : validateHostOverride(options.hostOverride);
+  const hostOverride = validatedHost?.ok ? validatedHost.value : undefined;
   return {
     attempt,
     url,
@@ -86,6 +99,8 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
       ? {}
       : { externalSubtitles: options.externalSubtitles }),
     ...(options?.subtitleStyle === undefined ? {} : { subtitleStyle: options.subtitleStyle }),
+    ...(dnsFamily === undefined ? {} : { dnsFamily }),
+    ...(hostOverride === undefined ? {} : { hostOverride }),
   };
 }
 

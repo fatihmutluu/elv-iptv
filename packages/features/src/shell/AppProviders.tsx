@@ -33,6 +33,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { StreamHealthProvider } from '../shared';
 
 /** Props of {@link AppProviders}. */
 export interface AppProvidersProps {
@@ -235,9 +236,11 @@ export function AppProviders({
             onChange={handleThemeChange}
           >
             <PreferencesContext.Provider value={contextValue}>
-              <ErrorBoundary {...(onError !== undefined ? { onError } : {})}>
-                {children}
-              </ErrorBoundary>
+              <StreamHealthProvider>
+                <ErrorBoundary {...(onError !== undefined ? { onError } : {})}>
+                  {children}
+                </ErrorBoundary>
+              </StreamHealthProvider>
             </PreferencesContext.Provider>
           </ThemeProvider>
         </I18nProvider>

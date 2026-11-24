@@ -2,6 +2,8 @@ import {
   elvError,
   err,
   type HttpClient,
+  hostnameOf,
+  normalizeDnsFamily,
   ok,
   type Result,
   type SecretStore,
@@ -11,17 +13,13 @@ import {
   setSafeHeader,
   type TransportSettings,
   transportHeaders,
+  validateHostOverride,
 } from '@elv/domain';
-import {
-  buildCatchupUrl,
-  createXtreamClient,
-  normalizeCatchupMode,
-  resolveXtreamBaseUrl,
-} from '@elv/sources';
+import { createXtreamClient, resolveXtreamBaseUrl, type XtreamClient } from '@elv/sources';
 import { isCredentialFingerprint, resolveAccountPoolKey } from './credential-fingerprint';
+import { getFailoverGroupByChannel } from './failover-groups-repo';
 import { placeholderNames } from './m3u-templating';
-import { type ItemRow, queryPlayable } from './queries';
-import { sourceOfKey } from './queries-shared';
+import { queryPlayable } from './queries';
 import {
   getSource,
   normalizeActiveConnections,
@@ -29,47 +27,28 @@ import {
   type SourceRecord,
   secretKey,
 } from './sources';
+import { resolveCatchupStreamInternal } from './stream-resolver-catchup';
+import type {
+  PlaytimeResolverCache,
+  ResolveStreamInternalOptions,
+  SourceStreamMeta,
+  StreamAlternate,
+  StreamRequest,
+  StreamResolver,
+  XtreamSecret,
+} from './stream-resolver-types';
 import { resolveTemplate } from './templates';
 import { readUrlVars } from './urlvars-store';
 
+export type {
+  CatchupProgrammeInput,
+  PlaytimeResolverCache,
+  ResolvedStream,
+  StreamAlternate,
+  StreamRequest,
+  StreamResolver,
+} from './stream-resolver-types';
 export { readUrlVars };
-
-/** Resolved alternate/backup stream endpoint with its own cloned headers map (`#430`). */
-export interface StreamAlternate {
-  url: string;
-  headers: Record<string, string>;
-}
-
-/** What a player needs to open an item. Never log or store it. */
-export interface StreamRequest {
-  url: string;
-  /** Lower-case header names. */
-  headers: Record<string, string>;
-  /** Opaque account pool key (`credentialFingerprint` when known, else `sourceId`) for connection pooling (`#265`). */
-  accountKey?: string;
-  /** Normalized per-source concurrent connection limit (`>= 1`, default `1`, `#87`). */
-  maxConnections?: number;
-  /** Optional provider-reported active connection count when known (`#87`). */
-  providerActiveConnections?: number;
-  /** Optional resolved backup stream endpoints persisted from M3U `#backup` delimiters (`#430`). */
-  alternates?: readonly StreamAlternate[];
-  /** Opt-in legacy TLS flag forwarded from the source's transport settings (`#182`). */
-  readonly allowLegacyTls?: boolean;
-}
-
-/** Alias for {@link StreamRequest}. */
-export type ResolvedStream = StreamRequest;
-
-/** Rebuilds the stored templates of one source in memory. */
-export interface StreamResolver {
-  resolve(template: string): string | undefined;
-}
-
-interface XtreamSecret {
-  readonly server: string;
-  readonly username: string;
-  readonly password: string;
-}
 
 const MULTICAST_AT_RE = /^(udp|rtp):\/\/@(?=[^:/?#\s])/i;
 const ALLOWED_PLAYBACK_SCHEMES: ReadonlySet<string> = new Set([
@@ -83,6 +62,7 @@ const ALLOWED_PLAYBACK_SCHEMES: ReadonlySet<string> = new Set([
   'rtp',
 ]);
 const PROTO_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+const notFound = () => err(elvError('storage', 'item-not-found'));
 
 function hasControlChar(s: string): boolean {
   for (let i = 0; i < s.length; i += 1) {
@@ -92,12 +72,6 @@ function hasControlChar(s: string): boolean {
   return false;
 }
 
-/**
- * Validates that a play-time stream URL uses an allowlisted streaming transport scheme
- * (`http`, `https`, `rtsp`, `rtsps`, `rtmp`, `rtmps`, `udp`, `rtp`), has a non-empty host, and
- * contains no ASCII control characters. Blocks `file:`, `javascript:`, `data:`, `blob:`,
- * `content:`, `about:`, and malformed URLs.
- */
 function isAllowedPlaybackUrl(raw: string): boolean {
   if (hasControlChar(raw)) return false;
   const url = raw.trim();
@@ -123,28 +97,44 @@ export function normalizeMulticastUrl(url: string): string {
   return url.replace(MULTICAST_AT_RE, '$1://');
 }
 
-function resolveAlternates(
+function resolveInlineAlternates(
   backupUrlsJson: string | null,
   resolver: StreamResolver,
   headers: Record<string, string>,
-): StreamAlternate[] | undefined {
-  if (backupUrlsJson === null) return undefined;
+  transportMeta: Pick<
+    SourceStreamMeta['connectionMeta'],
+    'allowLegacyTls' | 'dnsFamily' | 'hostOverride'
+  >,
+  primaryHost: string | undefined,
+): StreamAlternate[] {
+  if (backupUrlsJson === null) return [];
   let parsed: unknown;
   try {
     parsed = JSON.parse(backupUrlsJson);
   } catch {
-    return undefined;
+    return [];
   }
-  if (!Array.isArray(parsed)) return undefined;
+  if (!Array.isArray(parsed)) return [];
   const alternates: StreamAlternate[] = [];
   for (const item of parsed) {
     if (typeof item !== 'string' || item === '') continue;
     const resolved = resolver.resolve(item);
     if (resolved === undefined || resolved === '') continue;
     if (!isAllowedPlaybackUrl(resolved)) continue;
-    alternates.push({ url: normalizeMulticastUrl(resolved.trim()), headers: { ...headers } });
+    const normalizedUrl = normalizeMulticastUrl(resolved.trim());
+    const useHostOverride =
+      transportMeta.hostOverride !== undefined &&
+      primaryHost !== undefined &&
+      hostnameOf(normalizedUrl) === primaryHost;
+    alternates.push({
+      url: normalizedUrl,
+      headers: { ...headers },
+      ...(transportMeta.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
+      ...(transportMeta.dnsFamily !== undefined ? { dnsFamily: transportMeta.dnsFamily } : {}),
+      ...(useHostOverride ? { hostOverride: transportMeta.hostOverride } : {}),
+    });
   }
-  return alternates.length > 0 ? alternates : undefined;
+  return alternates;
 }
 
 /**
@@ -183,53 +173,31 @@ async function loadXtreamSecret(
   const raw = await secrets.get(secretKey(sourceId, 'xtream')).catch(() => undefined);
   if (raw === undefined) return undefined;
   try {
-    const parsed = JSON.parse(raw) as { server?: unknown; username?: unknown; password?: unknown };
+    const parsed = JSON.parse(raw) as {
+      server?: unknown;
+      username?: unknown;
+      password?: unknown;
+      backupServers?: unknown;
+    };
     if (
       typeof parsed.server === 'string' &&
       typeof parsed.username === 'string' &&
       typeof parsed.password === 'string'
     ) {
-      return { server: parsed.server, username: parsed.username, password: parsed.password };
+      const backupServers = Array.isArray(parsed.backupServers)
+        ? parsed.backupServers.filter((s): s is string => typeof s === 'string' && s.trim() !== '')
+        : undefined;
+      return {
+        server: parsed.server,
+        username: parsed.username,
+        password: parsed.password,
+        ...(backupServers !== undefined && backupServers.length > 0 ? { backupServers } : {}),
+      };
     }
   } catch {
     // Malformed secret JSON falls through to undefined
   }
   return undefined;
-}
-
-/** Programme time window and optional archive availability flag for {@link PlaytimeResolverCache.resolveCatchupStream}. */
-export interface CatchupProgrammeInput {
-  readonly startMs: number;
-  readonly stopMs: number;
-  readonly hasArchive?: boolean;
-  /** Optional programme title checked against active parental-control filters (`#31`). */
-  readonly title?: string;
-}
-
-/** @internal Session cache for M3U `urlvars` resolvers and Xtream secrets, evicted on source mutations. */
-export interface PlaytimeResolverCache {
-  evict(sourceId: string): void;
-  clear(): void;
-  resolveLogos<T extends ItemRow>(items: T[], sourceId: string): Promise<T[]>;
-  resolveRowLogos<T extends { sourceId: string; logo: string | null }>(rows: T[]): Promise<T[]>;
-  resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
-  resolveCatchupStream(
-    itemKey: string,
-    programme: CatchupProgrammeInput,
-    nowMs?: number,
-  ): Promise<Result<StreamRequest>>;
-}
-
-const notFound = () => err(elvError('storage', 'item-not-found'));
-const XTREAM_LIVE_URL_RE =
-  /^(https?:\/\/[^/?#]+)(?:\/live)?\/([^/?#]+)\/([^/?#]+)\/(\d+)(?:\.([a-z0-9]+))?(?:[?#].*)?$/i;
-
-function decodeSafe(raw: string): string {
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return raw;
-  }
 }
 
 function applyStoredHeadersJson(
@@ -282,16 +250,9 @@ function applyStoredHeadersJson(
   return true;
 }
 
-function buildSourceStreamMeta(source: SourceRecord): {
-  headers: Record<string, string>;
-  accountKey: string;
-  connectionMeta: {
-    maxConnections: number;
-    providerActiveConnections?: number;
-    allowLegacyTls?: boolean;
-  };
-} {
-  const headers = transportHeaders(source.settings.transport);
+function buildSourceStreamMeta(source: SourceRecord): SourceStreamMeta {
+  const transport = source.settings.transport;
+  const headers = transportHeaders(transport);
   const fp = source.settings.credentialFingerprint;
   const accountKey = resolveAccountPoolKey({
     id: source.id,
@@ -301,21 +262,62 @@ function buildSourceStreamMeta(source: SourceRecord): {
   const providerActiveConnections = normalizeActiveConnections(
     source.settings.accountMeta?.activeConnections,
   );
-  const connectionMeta = {
-    maxConnections,
-    ...(providerActiveConnections !== undefined ? { providerActiveConnections } : {}),
-    ...(source.settings.transport?.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
+  const dnsFamily = normalizeDnsFamily(transport?.dnsFamily);
+  const hostRes = validateHostOverride(transport?.hostOverride);
+  const hostOverride = hostRes.ok ? hostRes.value : undefined;
+  return {
+    headers,
+    accountKey,
+    connectionMeta: {
+      maxConnections,
+      ...(providerActiveConnections !== undefined ? { providerActiveConnections } : {}),
+      ...(transport?.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
+      ...(dnsFamily !== undefined ? { dnsFamily } : {}),
+      ...(hostOverride !== undefined ? { hostOverride } : {}),
+    },
   };
-  return { headers, accountKey, connectionMeta };
+}
+
+function toAlternateFromRequest(req: StreamRequest): StreamAlternate {
+  return {
+    url: req.url,
+    headers: { ...req.headers },
+    ...(req.accountKey !== undefined ? { accountKey: req.accountKey } : {}),
+    ...(req.maxConnections !== undefined ? { maxConnections: req.maxConnections } : {}),
+    ...(req.sourceId !== undefined ? { sourceId: req.sourceId } : {}),
+    ...(req.channelKey !== undefined ? { channelKey: req.channelKey } : {}),
+    ...(req.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
+    ...(req.dnsFamily !== undefined ? { dnsFamily: req.dnsFamily } : {}),
+    ...(req.hostOverride !== undefined ? { hostOverride: req.hostOverride } : {}),
+  };
+}
+
+function deduplicateAlternates(
+  primaryUrl: string,
+  candidates: readonly StreamAlternate[],
+): StreamAlternate[] | undefined {
+  if (candidates.length === 0) return undefined;
+  const seenUrls = new Set<string>([primaryUrl.trim()]);
+  const out: StreamAlternate[] = [];
+  for (const alt of candidates) {
+    const normalizedUrl = alt.url.trim();
+    if (normalizedUrl === '' || seenUrls.has(normalizedUrl)) continue;
+    seenUrls.add(normalizedUrl);
+    out.push(alt);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 export function createPlaytimeResolverCache(deps: {
   db: SqlDriver;
   secrets: SecretStore;
   http: HttpClient;
+  clock?: () => number;
+  primaryCooldownMs?: number;
 }): PlaytimeResolverCache {
   const resolvers = new Map<string, Promise<StreamResolver>>();
   const xtreamSecrets = new Map<string, Promise<XtreamSecret | undefined>>();
+  const xtreamClients = new Map<string, XtreamClient>();
 
   const resolverFor = (sourceId: string): Promise<StreamResolver> => {
     let cached = resolvers.get(sourceId);
@@ -338,15 +340,174 @@ export function createPlaytimeResolverCache(deps: {
     return cached;
   };
 
+  const xtreamClientFor = async (source: SourceRecord): Promise<XtreamClient | undefined> => {
+    const existing = xtreamClients.get(source.id);
+    if (existing !== undefined) return existing;
+    const creds = await xtreamSecretFor(source.id);
+    if (creds === undefined) return undefined;
+    const transport = effectiveXtreamTransport(source);
+    const client = createXtreamClient({
+      http: deps.http,
+      server: creds.server,
+      ...(creds.backupServers !== undefined && creds.backupServers.length > 0
+        ? { backupServers: creds.backupServers }
+        : {}),
+      username: creds.username,
+      password: creds.password,
+      ...(transport === undefined ? {} : { transport }),
+      ...(deps.primaryCooldownMs !== undefined
+        ? { primaryCooldownMs: deps.primaryCooldownMs }
+        : {}),
+      ...(deps.clock !== undefined ? { rateLimit: { now: deps.clock } } : {}),
+    });
+    xtreamClients.set(source.id, client);
+    return client;
+  };
+
+  async function resolveSingleStream(
+    itemKey: string,
+    includeGroupAlternates: boolean,
+    isAlternateRestricted?: ResolveStreamInternalOptions['isAlternateRestricted'],
+  ): Promise<Result<StreamRequest>> {
+    const play = await queryPlayable(deps.db, itemKey);
+    if (play === undefined) return notFound();
+    const source = await getSource(deps.db, play.sourceId);
+    if (source === undefined) return notFound();
+    const { headers, accountKey, connectionMeta } = buildSourceStreamMeta(source);
+
+    let primaryUrl: string;
+    let primaryHostOverride = connectionMeta.hostOverride;
+    const collectedAlternates: StreamAlternate[] = [];
+
+    if (play.urlTemplate === null) {
+      const client = await xtreamClientFor(source);
+      if (client === undefined) return err(elvError('storage', 'secret-missing'));
+      const creds = await xtreamSecretFor(source.id);
+      const xtreamPrimaryHost =
+        creds !== undefined ? hostnameOf(resolveXtreamBaseUrl(creds.server, deps.http)) : undefined;
+      const scopedHostOverride = (url: string): string | undefined =>
+        connectionMeta.hostOverride !== undefined &&
+        xtreamPrimaryHost !== undefined &&
+        hostnameOf(url) === xtreamPrimaryHost
+          ? connectionMeta.hostOverride
+          : undefined;
+      const id = Number(play.providerId);
+      if (play.providerId === null || !Number.isFinite(id)) return notFound();
+      const rawUrls = client.streamUrls(play.streamKind, id, play.extension ?? undefined);
+      const firstRaw = rawUrls[0];
+      if (firstRaw === undefined || !isAllowedPlaybackUrl(firstRaw)) {
+        return err(elvError('playback', 'unsupported-scheme'));
+      }
+      primaryUrl = normalizeMulticastUrl(firstRaw.trim());
+      primaryHostOverride = scopedHostOverride(primaryUrl);
+      for (let i = 1; i < rawUrls.length; i += 1) {
+        const candidate = rawUrls[i];
+        if (candidate === undefined || !isAllowedPlaybackUrl(candidate)) continue;
+        const normalizedCandidate = normalizeMulticastUrl(candidate.trim());
+        const altHostOverride = scopedHostOverride(normalizedCandidate);
+        collectedAlternates.push({
+          url: normalizedCandidate,
+          headers: { ...headers },
+          accountKey,
+          maxConnections: connectionMeta.maxConnections,
+          sourceId: play.sourceId,
+          channelKey: itemKey,
+          ...(connectionMeta.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
+          ...(connectionMeta.dnsFamily !== undefined
+            ? { dnsFamily: connectionMeta.dnsFamily }
+            : {}),
+          ...(altHostOverride !== undefined ? { hostOverride: altHostOverride } : {}),
+        });
+      }
+    } else {
+      const resolver = await resolverFor(play.sourceId);
+      const url = resolver.resolve(play.urlTemplate);
+      if (url === undefined) {
+        resolvers.delete(play.sourceId);
+        return err(elvError('storage', 'secret-missing'));
+      }
+      if (!isAllowedPlaybackUrl(url)) {
+        return err(elvError('playback', 'unsupported-scheme'));
+      }
+      primaryUrl = normalizeMulticastUrl(url.trim());
+      if (!applyStoredHeadersJson(play.headersJson, resolver, headers)) {
+        resolvers.delete(play.sourceId);
+        return err(elvError('storage', 'secret-missing'));
+      }
+      collectedAlternates.push(
+        ...resolveInlineAlternates(
+          play.backupUrlsJson,
+          resolver,
+          headers,
+          connectionMeta,
+          hostnameOf(primaryUrl),
+        ),
+      );
+    }
+
+    if (includeGroupAlternates && play.streamKind === 'live') {
+      const group = await getFailoverGroupByChannel(deps.db, itemKey);
+      if (group !== undefined) {
+        for (const member of group.members) {
+          if (member.channelKey === itemKey) continue;
+          if (
+            isAlternateRestricted !== undefined &&
+            (await isAlternateRestricted(member.channelKey))
+          ) {
+            continue;
+          }
+          const sibling = await resolveSingleStream(member.channelKey, false);
+          if (!sibling.ok) continue;
+          collectedAlternates.push(toAlternateFromRequest(sibling.value));
+          if (sibling.value.alternates !== undefined) {
+            for (const sub of sibling.value.alternates) {
+              collectedAlternates.push({
+                ...sub,
+                headers: { ...sub.headers },
+                ...(sub.accountKey === undefined && sibling.value.accountKey !== undefined
+                  ? { accountKey: sibling.value.accountKey }
+                  : {}),
+                ...(sub.maxConnections === undefined && sibling.value.maxConnections !== undefined
+                  ? { maxConnections: sibling.value.maxConnections }
+                  : {}),
+                ...(sub.sourceId === undefined && sibling.value.sourceId !== undefined
+                  ? { sourceId: sibling.value.sourceId }
+                  : {}),
+                ...(sub.channelKey === undefined && sibling.value.channelKey !== undefined
+                  ? { channelKey: sibling.value.channelKey }
+                  : {}),
+              });
+            }
+          }
+        }
+      }
+    }
+
+    const alternates = deduplicateAlternates(primaryUrl, collectedAlternates);
+    const { hostOverride: _ignoredHostOverride, ...restConnectionMeta } = connectionMeta;
+    return ok({
+      url: primaryUrl,
+      headers,
+      accountKey,
+      sourceId: play.sourceId,
+      channelKey: itemKey,
+      ...restConnectionMeta,
+      ...(primaryHostOverride !== undefined ? { hostOverride: primaryHostOverride } : {}),
+      ...(alternates === undefined ? {} : { alternates }),
+    });
+  }
+
   return {
     evict(sourceId) {
       resolvers.delete(sourceId);
       xtreamSecrets.delete(sourceId);
+      xtreamClients.delete(sourceId);
     },
 
     clear() {
       resolvers.clear();
       xtreamSecrets.clear();
+      xtreamClients.clear();
     },
 
     async resolveLogos(items, sourceId) {
@@ -374,192 +535,33 @@ export function createPlaytimeResolverCache(deps: {
       });
     },
 
-    async resolveStream(itemKey) {
-      const play = await queryPlayable(deps.db, itemKey);
-      if (play === undefined) return notFound();
-      const source = await getSource(deps.db, play.sourceId);
-      if (source === undefined) return notFound();
-      const { headers, accountKey, connectionMeta } = buildSourceStreamMeta(source);
+    resolveStream: (itemKey, opts) =>
+      resolveSingleStream(itemKey, true, opts?.isAlternateRestricted),
 
-      if (play.urlTemplate === null) {
-        const creds = await xtreamSecretFor(play.sourceId);
-        if (creds === undefined) return err(elvError('storage', 'secret-missing'));
-        const id = Number(play.providerId);
-        if (play.providerId === null || !Number.isFinite(id)) return notFound();
-        const transport = effectiveXtreamTransport(source);
-        const server = creds.server.includes('://')
-          ? creds.server
-          : resolveXtreamBaseUrl(creds.server, deps.http);
-        const client = createXtreamClient({
-          http: deps.http,
-          server,
-          username: creds.username,
-          password: creds.password,
-          ...(transport === undefined ? {} : { transport }),
-        });
-        const rawXtreamUrl = client.streamUrl(play.streamKind, id, play.extension ?? undefined);
-        if (!isAllowedPlaybackUrl(rawXtreamUrl)) {
-          return err(elvError('playback', 'unsupported-scheme'));
-        }
-        return ok({
-          url: normalizeMulticastUrl(rawXtreamUrl.trim()),
-          headers,
-          accountKey,
-          ...connectionMeta,
-        });
-      }
+    resolveCatchupStream: (itemKey, programme, nowMs) =>
+      resolveCatchupStreamInternal(itemKey, programme, nowMs, {
+        db: deps.db,
+        http: deps.http,
+        resolverFor,
+        evictResolver: (sid) => {
+          resolvers.delete(sid);
+        },
+        xtreamSecretFor,
+        buildSourceStreamMeta,
+        effectiveXtreamTransport,
+        isAllowedPlaybackUrl,
+        normalizeMulticastUrl,
+        applyStoredHeadersJson,
+      }),
 
-      const resolver = await resolverFor(play.sourceId);
-      const url = resolver.resolve(play.urlTemplate);
-      if (url === undefined) {
-        resolvers.delete(play.sourceId);
-        return err(elvError('storage', 'secret-missing'));
-      }
-      if (!isAllowedPlaybackUrl(url)) {
-        return err(elvError('playback', 'unsupported-scheme'));
-      }
-      const finalUrl = normalizeMulticastUrl(url.trim());
-      if (!applyStoredHeadersJson(play.headersJson, resolver, headers)) {
-        resolvers.delete(play.sourceId);
-        return err(elvError('storage', 'secret-missing'));
-      }
-      const alternates = resolveAlternates(play.backupUrlsJson, resolver, headers);
-      return ok({
-        url: finalUrl,
-        headers,
-        accountKey,
-        ...connectionMeta,
-        ...(alternates === undefined ? {} : { alternates }),
-      });
-    },
-
-    async resolveCatchupStream(itemKey, programme, nowMs) {
-      const sourceId = sourceOfKey(itemKey);
-      if (sourceId === undefined) return notFound();
-      const rows = await deps.db.all<{
-        source_id: string;
-        provider_id: string | null;
-        catchup_days: number | null;
-        catchup_mode: string | null;
-        catchup_source_template: string | null;
-        url_template: string | null;
-        headers_json: string | null;
-      }>(
-        `SELECT source_id, provider_id, catchup_days, catchup_mode, catchup_source_template, url_template, headers_json
-           FROM live
-          WHERE source_id = ? AND key = ?
-          LIMIT 1`,
-        [sourceId, itemKey],
-      );
-      const row = rows[0];
-      if (row === undefined) return notFound();
-      const source = await getSource(deps.db, row.source_id);
-      if (source === undefined) return notFound();
-      const { headers, accountKey, connectionMeta } = buildSourceStreamMeta(source);
-      const effectiveNow = nowMs !== undefined && Number.isFinite(nowMs) ? nowMs : Date.now();
-      const tzOpt = source.settings.serverTimezone
-        ? { serverTimezone: source.settings.serverTimezone }
-        : {};
-
-      if (row.url_template === null) {
-        const creds = await xtreamSecretFor(row.source_id);
-        if (creds === undefined) return err(elvError('storage', 'secret-missing'));
-        const streamId = Number(row.provider_id);
-        if (row.provider_id === null || !Number.isFinite(streamId)) return notFound();
-        const ext = effectiveXtreamTransport(source)?.xtreamFormat ?? 'ts';
-        const server = resolveXtreamBaseUrl(creds.server, deps.http);
-        const built = buildCatchupUrl({
-          mode: 'xc',
-          server,
-          username: creds.username,
-          password: creds.password,
-          streamId,
-          ext,
-          ...tzOpt,
-          programme,
-          catchupDays: row.catchup_days,
-          nowMs: effectiveNow,
-        });
-        if (!built.ok) return built;
-        if (!isAllowedPlaybackUrl(built.value)) {
-          return err(elvError('playback', 'unsupported-scheme'));
-        }
-        return ok({
-          url: normalizeMulticastUrl(built.value.trim()),
-          headers,
-          accountKey,
-          ...connectionMeta,
-        });
-      }
-
-      const resolver = await resolverFor(row.source_id);
-      const liveUrl = resolver.resolve(row.url_template);
-      if (liveUrl === undefined) {
-        resolvers.delete(row.source_id);
-        return err(elvError('storage', 'secret-missing'));
-      }
-      let catchupSource: string | undefined;
-      if (row.catchup_source_template !== null) {
-        const resolvedSource = resolver.resolve(row.catchup_source_template);
-        if (resolvedSource === undefined) {
-          resolvers.delete(row.source_id);
-          return err(elvError('storage', 'secret-missing'));
-        }
-        catchupSource = resolvedSource;
-      }
-      if (!applyStoredHeadersJson(row.headers_json, resolver, headers)) {
-        resolvers.delete(row.source_id);
-        return err(elvError('storage', 'secret-missing'));
-      }
-      const mode = normalizeCatchupMode(row.catchup_mode) ?? 'default';
-      let built: Result<string>;
-      if (mode === 'xc') {
-        const match = XTREAM_LIVE_URL_RE.exec(liveUrl.trim());
-        if (match !== null) {
-          built = buildCatchupUrl({
-            mode: 'xc',
-            server: match[1] as string,
-            username: decodeSafe(match[2] as string),
-            password: decodeSafe(match[3] as string),
-            streamId: match[4] as string,
-            ...(match[5] !== undefined ? { ext: match[5] } : {}),
-            ...tzOpt,
-            programme,
-            catchupDays: row.catchup_days,
-            nowMs: effectiveNow,
-          });
-        } else {
-          built = buildCatchupUrl({
-            mode: 'default',
-            liveUrl,
-            ...(catchupSource !== undefined ? { catchupSource } : {}),
-            ...tzOpt,
-            programme,
-            catchupDays: row.catchup_days,
-            nowMs: effectiveNow,
-          });
-        }
+    reportStreamOutcome(sourceId, serverUrl, succeeded) {
+      const client = xtreamClients.get(sourceId);
+      if (client === undefined) return;
+      if (succeeded) {
+        client.reportStreamSuccess(serverUrl);
       } else {
-        built = buildCatchupUrl({
-          mode,
-          liveUrl,
-          ...(catchupSource !== undefined ? { catchupSource } : {}),
-          ...tzOpt,
-          programme,
-          catchupDays: row.catchup_days,
-          nowMs: effectiveNow,
-        });
+        client.reportStreamFailure(serverUrl);
       }
-      if (!built.ok) return built;
-      if (!isAllowedPlaybackUrl(built.value)) {
-        return err(elvError('playback', 'unsupported-scheme'));
-      }
-      return ok({
-        url: normalizeMulticastUrl(built.value.trim()),
-        headers,
-        accountKey,
-        ...connectionMeta,
-      });
     },
   };
 }

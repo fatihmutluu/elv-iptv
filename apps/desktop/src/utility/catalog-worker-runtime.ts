@@ -34,6 +34,7 @@ import {
 } from '../shared/catalog-ipc.ts';
 import { executeChannelOpsRpcCall } from './catalog-worker-channel-ops.ts';
 import { executeEpgOpsRpcCall } from './catalog-worker-epg-ops.ts';
+import { executeFailoverOpsRpcCall } from './catalog-worker-failover-ops.ts';
 import { createDesktopHttpClient } from './legacy-tls-http.ts';
 import { createLocalPlaylistStore } from './local-playlist-store.ts';
 import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.ts';
@@ -167,10 +168,22 @@ function sanitizeAddSourceInput(input: AddSourceInput): Result<AddSourceInput> {
   }
   const server = input.server.trim();
   if (!isValidXtreamServer(server)) return err(elvError('source-format', 'invalid-source'));
-  const { guideUrl: _prevGuide, ...rest } = input;
+  let backupServers: string[] | undefined;
+  if (input.backupServers !== undefined) {
+    backupServers = [];
+    for (const rawBackup of input.backupServers) {
+      const trimmedBackup = rawBackup.trim();
+      if (!isValidXtreamServer(trimmedBackup)) {
+        return err(elvError('source-format', 'invalid-source'));
+      }
+      backupServers.push(trimmedBackup);
+    }
+  }
+  const { guideUrl: _prevGuide, backupServers: _prevBackups, ...rest } = input;
   return ok({
     ...rest,
     server,
+    ...(backupServers === undefined ? {} : { backupServers }),
     ...(guide.value === undefined ? {} : { guideUrl: guide.value }),
   });
 }
@@ -602,6 +615,18 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'flushPendingWrites':
         if (service.flushPendingWrites) await service.flushPendingWrites();
         return undefined;
+      case 'listFailoverGroups':
+      case 'getFailoverGroupByChannel':
+      case 'createFailoverGroup':
+      case 'renameFailoverGroup':
+      case 'deleteFailoverGroup':
+      case 'addFailoverGroupMember':
+      case 'removeFailoverGroupMember':
+      case 'reorderFailoverGroupMembers':
+      case 'suggestFailoverGroups':
+      case 'applySuggestedFailoverGroups':
+      case 'reportStreamOutcome':
+        return executeFailoverOpsRpcCall(service, call);
       default:
         return executeEpgOpsRpcCall(service, call);
     }

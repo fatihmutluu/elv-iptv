@@ -278,7 +278,19 @@ describe('error classes', () => {
     expect(last(r)).toEqual({ name: 'stop', attempt: t + 1 });
   });
 
-  it('http-404 followed by a silent rung 2 fails when the rung times out, without rungs 3 and 4', async () => {
+  it('http-404 followed by a silent rung 2 fails when the rung times out without alternates, or jumps to rung 4 alternates skipping rung 3', async () => {
+    // Without alternates: fails immediately on rung 2 timeout without rungs 3 or 4
+    const rNoAlt = rig({ gone: [] });
+    const t0 = rNoAlt.service.tune(live('gone'));
+    await tick(0);
+    error(rNoAlt, 'http-404');
+    await tick(1000);
+    expect(rNoAlt.loads.map((l) => l.attempt)).toEqual([t0, t0 + 1]);
+    await tick(2000);
+    expect(status(rNoAlt)).toEqual(failed('http-404'));
+    expect(rNoAlt.engine.commands.map((c) => c.name)).toEqual(['load', 'load', 'stop']);
+
+    // With alternates: skips rung 3, tries rung 4 alternate, then fails with http-404 on alternate timeout
     const r = rig({ gone: [], alt: [] });
     const t = r.service.tune(live('gone', { alternates: [resolved('alt')] }));
     await tick(0);
@@ -286,8 +298,11 @@ describe('error classes', () => {
     await tick(1000);
     expect(r.loads.map((l) => l.attempt)).toEqual([t, t + 1]);
     await tick(2000);
+    expect(status(r)).toMatchObject({ kind: 'recovering', rung: 4 });
+    expect(r.loads.map((l) => l.url)).toEqual(['gone', 'gone', 'alt']);
+    await tick(2000);
     expect(status(r)).toEqual(failed('http-404'));
-    expect(r.engine.commands.map((c) => c.name)).toEqual(['load', 'load', 'stop']);
+    expect(r.engine.commands.map((c) => c.name)).toEqual(['load', 'load', 'stop', 'load', 'stop']);
   });
 
   it('http-404 after the ladder reached rung 2 fails at once', async () => {

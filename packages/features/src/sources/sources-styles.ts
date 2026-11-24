@@ -37,6 +37,8 @@ export const sourcesStyles = StyleSheet.create({
   fieldGroup: { gap: 6 },
   inputFrame: { minHeight: 42, justifyContent: 'center' },
   input: { minHeight: 42, paddingHorizontal: 12, paddingVertical: 10 },
+  multilineInput: { minHeight: 76, paddingTop: 10 },
+  networkEditorBox: { borderWidth: 1, padding: 12, gap: 10 },
   button: {
     paddingHorizontal: 14,
     paddingVertical: 10,

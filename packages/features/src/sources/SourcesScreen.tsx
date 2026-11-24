@@ -20,8 +20,10 @@ import { CategoryPickerPanel } from './CategoryPickerPanel';
 import { GuideManagementOverlay } from './GuideManagementOverlay';
 import { QrPairingOverlay } from './QrPairingOverlay';
 import { SavedSourcesPanel } from './SavedSourcesPanel';
+import { AddSourceNetworkFields } from './SourceNetworkEditor';
 import { ActionButton, FieldInput } from './SourcesScreenParts';
 import { sourcesStyles as styles } from './sources-styles';
+import { useSourceNetworkEditor } from './useSourceNetworkEditor';
 import { useSourcesController } from './useSourcesController';
 import { TvRemoteBridge, useTvSourcesNavigation } from './useTvSourcesNavigation';
 
@@ -82,6 +84,10 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
     ...props,
     defaultLocalPlaylistName: i18n.t('sources.localFileBadge'),
   });
+  const networkEditor = useSourceNetworkEditor({
+    catalog: props.catalog,
+    refreshSources: ctrl.refreshSources,
+  });
   const handleQrSourceAdded = useCallback(
     (source: SourceRow) => {
       void ctrl.runImport(source.id);
@@ -92,6 +98,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const tv = useTvSourcesNavigation({
     isTv: isTv && isActiveScope && !hasOverlayOpen,
     ctrl,
+    networkEditor,
     ...(canQrPair ? { onOpenQrPairing: openQrPairing } : {}),
     ...(canManageGuides ? { onOpenGuides: openGuides } : {}),
     ...(props.onOpenMenu !== undefined ? { onOpenMenu: props.onOpenMenu } : {}),
@@ -479,6 +486,18 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                         {i18n.t('sources.allowLegacyTlsDesc')}
                       </Text>
                     </View>
+                    <AddSourceNetworkFields
+                      mode={ctrl.form.mode}
+                      dnsFamily={ctrl.form.dnsFamily ?? 'system'}
+                      hostOverride={ctrl.form.hostOverride ?? ''}
+                      backupServers={ctrl.form.backupServers ?? ''}
+                      onChangeDnsFamily={(v) => ctrl.updateField('dnsFamily', v)}
+                      onChangeHostOverride={(v) => ctrl.updateField('hostOverride', v)}
+                      onChangeBackupServers={(v) => ctrl.updateField('backupServers', v)}
+                      tvFocusId={tv.tvFocusId}
+                      fieldShared={fieldShared}
+                      i18n={i18n}
+                    />
                     {ctrl.form.mode === 'xtream' ? (
                       <View style={styles.fieldGroup}>
                         <Text
@@ -574,6 +593,8 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                 tvFocusId={tv.tvFocusId}
                 recordLayout={tv.recordLayout}
                 nowMs={(props.now ?? Date.now)()}
+                networkEditor={networkEditor}
+                fieldShared={fieldShared}
                 {...(canManageGuides ? { onOpenGuides: openGuides } : {})}
               />
             </View>

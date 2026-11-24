@@ -1,6 +1,7 @@
 import type {
   AndroidDecoderMode,
   BufferPreset,
+  DnsFamilyPreference,
   ElvError,
   Result,
   SubtitleStyleConfig,
@@ -51,6 +52,10 @@ export interface TuneRequest {
   readonly externalSubtitles?: readonly ExternalSubtitleTrack[];
   /** Live subtitle appearance styling forwarded on load and reloads (`#32`). */
   readonly subtitleStyle?: SubtitleStyleConfig;
+  /** Optional default per-source DNS address-family preference (`#172`). */
+  readonly dnsFamily?: DnsFamilyPreference;
+  /** Optional default per-source validated literal IP host override (`#172`). */
+  readonly hostOverride?: string;
 }
 
 /** What the service is doing now. */

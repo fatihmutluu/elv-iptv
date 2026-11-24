@@ -2577,3 +2577,105 @@ msgstr "Üst"
 
 msgid "player.subtitleStyle.reset"
 msgstr "Stili sıfırla"
+
+msgid "channels.manage.tab.failover"
+msgstr "Yedekleme"
+
+msgid "channels.failover.title"
+msgstr "Yedekleme Grupları"
+
+msgid "channels.failover.subtitle"
+msgstr "Otomatik yedek geçiş için birden fazla kaynaktaki aynı kanalları öncelik sırasıyla gruplayın."
+
+msgid "channels.failover.autoMatch"
+msgstr "Kanalları otomatik eşleştir"
+
+msgid "channels.failover.applySuggestions"
+msgstr "{count} önerilen grubu uygula"
+
+msgid "channels.failover.noSuggestions"
+msgstr "Kaynaklar arası yeni eşleşme bulunamadı."
+
+msgid "channels.failover.createPlaceholder"
+msgstr "Yeni yedekleme grubu adı"
+
+msgid "channels.failover.create"
+msgstr "Grup oluştur"
+
+msgid "channels.failover.empty"
+msgstr "Henüz yedekleme grubu yok. Birden fazla kaynak ekleyin veya elle grup oluşturun."
+
+msgid "channels.failover.memberCount"
+msgstr "{count} kaynak"
+
+msgid "channels.failover.priorityBadge"
+msgstr "#{rank}"
+
+msgid "channels.failover.primaryBadge"
+msgstr "Birincil"
+
+msgid "channels.failover.moveUp"
+msgstr "Yukarı taşı"
+
+msgid "channels.failover.moveDown"
+msgstr "Aşağı taşı"
+
+msgid "channels.failover.addChannel"
+msgstr "Kanal ekle"
+
+msgid "channels.failover.removeMember"
+msgstr "Kaldır"
+
+msgid "channels.failover.deleteGroup"
+msgstr "Grubu sil"
+
+msgid "channels.failover.selectChannelHint"
+msgstr "Bu yedekleme grubuna eklenecek canlı kanalı seçin."
+
+msgid "live.health.flaky"
+msgstr "Kararsız"
+
+msgid "live.health.dead"
+msgstr "Çevrimdışı"
+
+msgid "live.health.healthy"
+msgstr "Sağlıklı"
+
+msgid "sources.network.title"
+msgstr "Ağ"
+
+msgid "sources.network.dnsFamilyLabel"
+msgstr "DNS IP tercihi"
+
+msgid "sources.network.dnsFamily.system"
+msgstr "Sistem"
+
+msgid "sources.network.dnsFamily.ipv4"
+msgstr "Yalnızca IPv4"
+
+msgid "sources.network.dnsFamily.ipv6"
+msgstr "Yalnızca IPv6"
+
+msgid "sources.network.hostOverrideLabel"
+msgstr "Sunucu IP geçersiz kılma (isteğe bağlı)"
+
+msgid "sources.network.hostOverridePlaceholder"
+msgstr "örn. 203.0.113.10 veya 2001:db8::1"
+
+msgid "sources.network.hostOverrideHint"
+msgstr "Orijinal TLS sertifika doğrulamasını koruyarak doğrudan bu IP adresine bağlanır."
+
+msgid "sources.network.invalidHostOverride"
+msgstr "Port veya protokol olmadan geçerli bir IPv4 veya IPv6 adresi girin."
+
+msgid "sources.network.backupServersLabel"
+msgstr "Yedek sunucu URL'leri (isteğe bağlı)"
+
+msgid "sources.network.backupServersPlaceholder"
+msgstr "Her satıra bir URL"
+
+msgid "sources.network.save"
+msgstr "Ağ ayarlarını kaydet"
+
+msgid "sources.network.saved"
+msgstr "Ağ ayarları kaydedildi"

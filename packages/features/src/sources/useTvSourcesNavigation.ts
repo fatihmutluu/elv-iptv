@@ -12,6 +12,7 @@ import {
 } from 'react';
 import type { LayoutChangeEvent, ScrollView, View } from 'react-native';
 import { countPendingCategories, discoveredCategoryKey } from './category-selection-model';
+import type { SourceNetworkEditorState } from './useSourceNetworkEditor';
 import type { SourcesController } from './useSourcesController';
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
@@ -41,6 +42,7 @@ function buildSourcesFocusItems(
   onOpenMenu: (() => void) | undefined,
   onOpenQrPairing?: () => void,
   onOpenGuides?: (source: SourceRow) => void,
+  networkEditor?: SourceNetworkEditorState,
 ): readonly FocusItem[] {
   const picker = ctrl.categoryPicker;
   if (picker !== null) {
@@ -162,9 +164,29 @@ function buildSourcesFocusItems(
         kind: 'action',
         run: () => ctrl.updateField('allowLegacyTls', !(ctrl.form.allowLegacyTls === true)),
       },
+      {
+        id: 'dns-family-system',
+        kind: 'action',
+        rowGroup: 'dns-family',
+        run: () => ctrl.updateField('dnsFamily', 'system'),
+      },
+      {
+        id: 'dns-family-ipv4',
+        kind: 'action',
+        rowGroup: 'dns-family',
+        run: () => ctrl.updateField('dnsFamily', 'ipv4'),
+      },
+      {
+        id: 'dns-family-ipv6',
+        kind: 'action',
+        rowGroup: 'dns-family',
+        run: () => ctrl.updateField('dnsFamily', 'ipv6'),
+      },
+      { id: 'input-host-override', kind: 'input' },
     );
     if (ctrl.form.mode === 'xtream') {
       items.push(
+        { id: 'input-backup-servers', kind: 'input' },
         {
           id: 'format-default',
           kind: 'action',
@@ -258,6 +280,14 @@ function buildSourcesFocusItems(
           run: () => void ctrl.openCategoryPicker(source),
         });
       }
+      if (ctrl.canEditNetwork && networkEditor !== undefined) {
+        items.push({
+          id: `source-network-${source.id}`,
+          kind: 'action',
+          rowGroup,
+          run: () => networkEditor.toggleSource(source),
+        });
+      }
     }
     items.push({
       id: `source-remove-${source.id}`,
@@ -265,6 +295,35 @@ function buildSourcesFocusItems(
       rowGroup,
       run: () => void ctrl.remove(source.id),
     });
+    if (networkEditor !== undefined && networkEditor.openSourceId === source.id) {
+      const dnsGroup = `source-network-dns-${source.id}`;
+      items.push(
+        {
+          id: `source-network-dns-system-${source.id}`,
+          kind: 'action',
+          rowGroup: dnsGroup,
+          run: () => networkEditor.setDnsFamily('system'),
+        },
+        {
+          id: `source-network-dns-ipv4-${source.id}`,
+          kind: 'action',
+          rowGroup: dnsGroup,
+          run: () => networkEditor.setDnsFamily('ipv4'),
+        },
+        {
+          id: `source-network-dns-ipv6-${source.id}`,
+          kind: 'action',
+          rowGroup: dnsGroup,
+          run: () => networkEditor.setDnsFamily('ipv6'),
+        },
+        { id: `source-network-host-${source.id}`, kind: 'input' },
+        {
+          id: `source-network-save-${source.id}`,
+          kind: 'action',
+          run: () => void networkEditor.save(source),
+        },
+      );
+    }
   }
   return items;
 }
@@ -331,6 +390,7 @@ export function TvRemoteBridge({
 export function useTvSourcesNavigation({
   isTv,
   ctrl,
+  networkEditor,
   onOpenMenu,
   onOpenQrPairing,
   onOpenGuides,
@@ -339,6 +399,7 @@ export function useTvSourcesNavigation({
 }: {
   isTv: boolean;
   ctrl: SourcesController;
+  networkEditor?: SourceNetworkEditorState;
   onOpenMenu?: () => void;
   onOpenQrPairing?: () => void;
   onOpenGuides?: (source: SourceRow) => void;
@@ -373,8 +434,8 @@ export function useTvSourcesNavigation({
   );
 
   const controls = useMemo(
-    () => buildSourcesFocusItems(ctrl, onOpenMenu, onOpenQrPairing, onOpenGuides),
-    [ctrl, onOpenGuides, onOpenMenu, onOpenQrPairing],
+    () => buildSourcesFocusItems(ctrl, onOpenMenu, onOpenQrPairing, onOpenGuides, networkEditor),
+    [ctrl, networkEditor, onOpenGuides, onOpenMenu, onOpenQrPairing],
   );
   const activeEditingInputId =
     editingInputId !== null && controls.some((c) => c.kind === 'input' && c.id === editingInputId)
@@ -516,6 +577,14 @@ export function useTvSourcesNavigation({
     [controls],
   );
 
+  const networkEditorOpenRef = useRef(
+    networkEditor?.openSourceId !== null && networkEditor?.openSourceId !== undefined,
+  );
+  networkEditorOpenRef.current =
+    networkEditor?.openSourceId !== null && networkEditor?.openSourceId !== undefined;
+  const closeNetworkEditorRef = useRef(networkEditor?.close);
+  closeNetworkEditorRef.current = networkEditor?.close;
+
   const handleBackIntent = useCallback(() => {
     const activeInput = editingInputIdRef.current;
     if (activeInput !== null) {
@@ -525,6 +594,10 @@ export function useTvSourcesNavigation({
     }
     if (pickerOpenRef.current) {
       closeCategoryPickerRef.current();
+      return;
+    }
+    if (networkEditorOpenRef.current) {
+      closeNetworkEditorRef.current?.();
       return;
     }
     (onBack ?? onOpenMenu)?.();

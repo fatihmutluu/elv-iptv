@@ -37,7 +37,7 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
   let budget: Budget = freshBudget();
   let limit: Limit = freshLimit();
   let alternate = 0;
-  let inlineAlternate = 0;
+  const usedInlineIndices = new Set<number>();
   let inlineAlternates: readonly StreamRequest[] | undefined;
   let primaryCaptured = false;
   let softwareAudio = false;
@@ -83,9 +83,43 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     );
   };
 
+  const canUseAlternate = (candidate: StreamRequest): boolean => {
+    if (isFailedCanonical(candidate)) return false;
+    const candidateAcc = candidate.accountKey;
+    const activeAcc = ctl.stream?.()?.accountKey ?? ctl.request()?.accountKey;
+    if (
+      candidateAcc !== undefined &&
+      candidateAcc !== activeAcc &&
+      ctl.canAcquireAlternate !== undefined
+    ) {
+      return ctl.canAcquireAlternate(candidateAcc, candidate.maxConnections ?? 1);
+    }
+    return true;
+  };
+
+  const eligibleInlineAlternates = (): {
+    readonly index: number;
+    readonly stream: StreamRequest;
+  }[] => {
+    if (inlineAlternates === undefined) return [];
+    const remaining: { readonly index: number; readonly stream: StreamRequest }[] = [];
+    for (let i = 0; i < inlineAlternates.length; i += 1) {
+      if (usedInlineIndices.has(i)) continue;
+      const candidate = inlineAlternates[i];
+      if (candidate !== undefined && canUseAlternate(candidate)) {
+        remaining.push({ index: i, stream: candidate });
+      }
+    }
+    if (remaining.length <= 1 || ctl.healthScorer === undefined) return remaining;
+    return ctl.healthScorer.rankAlternates(
+      remaining,
+      (entry) => entry.stream.finalUrl ?? entry.stream.url,
+      ctl.now(),
+    );
+  };
+
   const hasMoreAlternates = (): boolean =>
-    alternate < (ctl.request()?.alternates?.length ?? 0) ||
-    inlineAlternate < (inlineAlternates?.length ?? 0);
+    alternate < (ctl.request()?.alternates?.length ?? 0) || eligibleInlineAlternates().length > 0;
 
   const failWith = (error: ElvError): void => {
     deps.onResetAll();
@@ -128,7 +162,8 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     if (currentStream === undefined) return undefined;
     const swapped = swapLiveContainerUrl(currentStream.url);
     if (swapped === undefined) return undefined;
-    const candidate: StreamRequest = { url: swapped.url, headers: currentStream.headers };
+    const { alternates: _alts, finalUrl: _final, ...rest } = currentStream;
+    const candidate: StreamRequest = { ...rest, url: swapped.url };
     if (isFailedCanonical(candidate)) return undefined;
     return { stream: candidate, format: swapped.format };
   };
@@ -152,7 +187,7 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
       const settle = (result: Result<StreamRequest> | undefined): void => {
         if (at !== epoch) return;
         alternate += 1;
-        if (result?.ok && !isFailedCanonical(result.value)) {
+        if (result?.ok && canUseAlternate(result.value)) {
           if (!resetTransientRetries) budget.rung = 4;
           reload(result.value);
         } else {
@@ -164,28 +199,19 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
       );
       return;
     }
-    while (inlineAlternates !== undefined && inlineAlternate < inlineAlternates.length) {
-      const candidate = inlineAlternates[inlineAlternate] as StreamRequest;
-      inlineAlternate += 1;
-      if (!isFailedCanonical(candidate)) {
-        if (!resetTransientRetries) budget.rung = 4;
-        reload(candidate);
-        return;
-      }
+    const nextInline = eligibleInlineAlternates()[0];
+    if (nextInline !== undefined) {
+      usedInlineIndices.add(nextInline.index);
+      if (!resetTransientRetries) budget.rung = 4;
+      reload(nextInline.stream);
+      return;
     }
     budget.rung = 4;
     if (!tryContainerFallbackNow()) giveUp();
   };
 
-  const hasEligibleRollingAlternate = (): boolean => {
-    if (alternate < (ctl.request()?.alternates?.length ?? 0)) return true;
-    if (inlineAlternates === undefined) return false;
-    for (let i = inlineAlternate; i < inlineAlternates.length; i += 1) {
-      const candidate = inlineAlternates[i];
-      if (candidate !== undefined && !isFailedCanonical(candidate)) return true;
-    }
-    return false;
-  };
+  const hasEligibleRollingAlternate = (): boolean =>
+    alternate < (ctl.request()?.alternates?.length ?? 0) || eligibleInlineAlternates().length > 0;
 
   const buildAction = (rung: Rung): RungAction | undefined => {
     if (rung === 1) {
@@ -293,10 +319,10 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     budget.lastError = error;
     recordCurrentFailure(error);
     if (budget.notFound || budget.rung >= 2) {
-      if (nextContainerFallback() !== undefined) {
+      if (hasMoreAlternates() || nextContainerFallback() !== undefined) {
         deps.cancelAll();
         freeze();
-        goTo(4, giveUp, true);
+        goTo(4, onSilentTimeout, true);
         return;
       }
       failWith(toPlaybackError(error));
@@ -406,7 +432,7 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     resetItem() {
       budget = freshBudget();
       alternate = 0;
-      inlineAlternate = 0;
+      usedInlineIndices.clear();
       inlineAlternates = undefined;
       primaryCaptured = false;
       softwareAudio = false;

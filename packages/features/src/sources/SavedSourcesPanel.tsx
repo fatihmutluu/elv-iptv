@@ -12,8 +12,14 @@ import type { ReactElement } from 'react';
 import { Text, View } from 'react-native';
 import { resolveSourceAccountWarning } from './account-warning';
 import { countPendingCategories } from './category-selection-model';
+import {
+  type NetworkFieldSharedProps,
+  SourceNetworkBadge,
+  SourceNetworkEditor,
+} from './SourceNetworkEditor';
 import { ActionButton, SourceAccountWarningPill } from './SourcesScreenParts';
 import { sourcesStyles } from './sources-styles';
+import type { SourceNetworkEditorState } from './useSourceNetworkEditor';
 import {
   phaseMessageId,
   type SourceRuntimeStatus,
@@ -119,6 +125,8 @@ export function SavedSourcesPanel({
   recordLayout,
   nowMs,
   onOpenGuides,
+  networkEditor,
+  fieldShared,
 }: {
   ctrl: SourcesController;
   i18n: AppI18n;
@@ -127,6 +135,8 @@ export function SavedSourcesPanel({
   recordLayout?: ControlLayoutRecorder;
   nowMs: number;
   onOpenGuides?: (source: SourceRow) => void;
+  networkEditor?: SourceNetworkEditorState;
+  fieldShared?: NetworkFieldSharedProps;
 }): ReactElement {
   const theme = useTheme();
   return (
@@ -200,6 +210,7 @@ export function SavedSourcesPanel({
               </View>
               <View style={sourcesStyles.statusRow}>
                 <MicroPill label={statusPill.label} tone={statusPill.tone} dot={statusPill.dot} />
+                <SourceNetworkBadge source={source} i18n={i18n} />
                 <SourceAccountWarningPill
                   sourceId={source.id}
                   warning={accountWarning}
@@ -377,6 +388,17 @@ export function SavedSourcesPanel({
                         recordLayout={recordLayout}
                       />
                     ) : null}
+                    {ctrl.canEditNetwork && networkEditor !== undefined ? (
+                      <ActionButton
+                        focusId={`source-network-${source.id}`}
+                        testID={`source-network-${source.id}`}
+                        label={i18n.t('sources.network.title')}
+                        active={networkEditor.openSourceId === source.id}
+                        tvFocused={tvFocusId === `source-network-${source.id}`}
+                        onPress={() => networkEditor.toggleSource(source)}
+                        recordLayout={recordLayout}
+                      />
+                    ) : null}
                   </>
                 )}
                 <ActionButton
@@ -389,6 +411,17 @@ export function SavedSourcesPanel({
                   recordLayout={recordLayout}
                 />
               </View>
+              {networkEditor !== undefined &&
+              fieldShared !== undefined &&
+              networkEditor.openSourceId === source.id ? (
+                <SourceNetworkEditor
+                  source={source}
+                  editor={networkEditor}
+                  tvFocusId={tvFocusId}
+                  fieldShared={fieldShared}
+                  i18n={i18n}
+                />
+              ) : null}
             </Surface>
           );
         })

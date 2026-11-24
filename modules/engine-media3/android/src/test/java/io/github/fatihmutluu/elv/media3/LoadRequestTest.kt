@@ -66,6 +66,16 @@ class LoadRequestTest {
       assertFalse(withLegacyTls, withLegacyTls.contains(leak))
     }
     assertTrue(withLegacyTls.contains(", allowLegacyTls=true"))
+
+    val withNetwork = secret.copy(
+      dnsFamily = DnsFamilyPreference.IPV4,
+      hostOverride = "203.0.113.10",
+    ).toString()
+    for (leak in listOf("user", "pass", "tk9", "s3cret", "Bearer", "http", "/live", "Referer", "203.0.113.10")) {
+      assertFalse(withNetwork, withNetwork.contains(leak))
+    }
+    assertTrue(withNetwork.contains(", dnsFamily=ipv4"))
+    assertTrue(withNetwork.contains(", hostOverride=set"))
   }
 
   @Test
@@ -193,5 +203,111 @@ class LoadRequestTest {
     )) {
       assertFalse("expected rejected: $disallowed", isAllowedPlaybackUrl(disallowed))
     }
+  }
+
+  @Test
+  fun `parseDnsFamilyPreference and parseHostOverride validate IPv4 and IPv6 literals strictly (#172)`() {
+    val previousLocale = Locale.getDefault()
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(DnsFamilyPreference.SYSTEM, parseDnsFamilyPreference(null))
+      assertEquals(DnsFamilyPreference.SYSTEM, parseDnsFamilyPreference(""))
+      assertEquals(DnsFamilyPreference.SYSTEM, parseDnsFamilyPreference("system"))
+      assertEquals(DnsFamilyPreference.SYSTEM, parseDnsFamilyPreference("SYSTEM"))
+      assertEquals(DnsFamilyPreference.SYSTEM, parseDnsFamilyPreference("dual"))
+      assertEquals(DnsFamilyPreference.IPV4, parseDnsFamilyPreference("ipv4"))
+      assertEquals(DnsFamilyPreference.IPV4, parseDnsFamilyPreference("  IPV4  "))
+      assertEquals(DnsFamilyPreference.IPV6, parseDnsFamilyPreference("ipv6"))
+      assertEquals(DnsFamilyPreference.IPV6, parseDnsFamilyPreference("\tIPv6\n"))
+    } finally {
+      Locale.setDefault(previousLocale)
+    }
+
+    assertEquals("203.0.113.10", parseHostOverride("203.0.113.10"))
+    assertEquals("203.0.113.10", parseHostOverride("  203.0.113.10  "))
+    assertEquals("0.0.0.0", parseHostOverride("0.0.0.0"))
+    assertEquals("255.255.255.255", parseHostOverride("255.255.255.255"))
+    assertEquals("2001:db8::1", parseHostOverride("2001:db8::1"))
+    assertEquals("2001:db8::1", parseHostOverride("[2001:DB8::1]"))
+    assertEquals("2001:db8::cafe", parseHostOverride("  [2001:DB8::CAFE]  "))
+    assertEquals("::1", parseHostOverride("::1"))
+    assertEquals("::", parseHostOverride("::"))
+    assertEquals("::ffff:203.0.113.10", parseHostOverride("::ffff:203.0.113.10"))
+    assertEquals(
+      "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+      parseHostOverride("2001:0DB8:85A3:0000:0000:8A2E:0370:7334"),
+    )
+
+    for (invalid in listOf<Any?>(
+      null,
+      "",
+      "   ",
+      1234,
+      "stream.provider.test",
+      "203.0.113.10:8080",
+      "[2001:db8::1]:8443",
+      "[203.0.113.10]",
+      "http://203.0.113.10",
+      "https://203.0.113.10/live/1.ts",
+      "203.0.113.10/live",
+      "203.0.113.10\r\nHost: evil.test",
+      "203.0.113.10\n",
+      "203.0.113.10\t",
+      "203.0.113.10\u0000",
+      "fe80::1%eth0",
+      "2001:db8::1/64",
+      "2001:db8:::1",
+      "2001:db8::1::2",
+      "1:2:3:4:5:6:7::8",
+      "1:2:3:4:5:6:7",
+      "1:2:3:4:5:6:7:8:9",
+      "01.2.3.4",
+      "256.0.0.1",
+      "203.0.113",
+    )) {
+      assertNull("expected rejected hostOverride: $invalid", parseHostOverride(invalid))
+    }
+
+    val (_, defaultReq) = parseLoadArgs(
+      mapOf("attempt" to 1, "url" to "https://stream.provider.test/live/1.ts", "kind" to "live")
+    )
+    assertEquals(DnsFamilyPreference.SYSTEM, defaultReq.dnsFamily)
+    assertNull(defaultReq.hostOverride)
+
+    val (_, ipv4Req) = parseLoadArgs(
+      mapOf(
+        "attempt" to 2,
+        "url" to "https://stream.provider.test/live/1.ts",
+        "kind" to "live",
+        "dnsFamily" to "ipv4",
+        "hostOverride" to " 203.0.113.10 ",
+      )
+    )
+    assertEquals(DnsFamilyPreference.IPV4, ipv4Req.dnsFamily)
+    assertEquals("203.0.113.10", ipv4Req.hostOverride)
+
+    val (_, ipv6Req) = parseLoadArgs(
+      mapOf(
+        "attempt" to 3,
+        "url" to "https://stream.provider.test/live/1.ts",
+        "kind" to "live",
+        "dnsFamily" to "IPV6",
+        "hostOverride" to "[2001:DB8::1]",
+      )
+    )
+    assertEquals(DnsFamilyPreference.IPV6, ipv6Req.dnsFamily)
+    assertEquals("2001:db8::1", ipv6Req.hostOverride)
+
+    val (_, badReq) = parseLoadArgs(
+      mapOf(
+        "attempt" to 4,
+        "url" to "https://stream.provider.test/live/1.ts",
+        "kind" to "live",
+        "dnsFamily" to 99,
+        "hostOverride" to "evil.test:8080",
+      )
+    )
+    assertEquals(DnsFamilyPreference.SYSTEM, badReq.dnsFamily)
+    assertNull(badReq.hostOverride)
   }
 }

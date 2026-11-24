@@ -67,10 +67,22 @@ describe('channel-management-model (#60)', () => {
     expect(buildOverlayHeaderControls('channels')).toEqual([
       'tab-channels',
       'tab-groups',
+      'tab-failover',
       'show-hidden',
       'close',
     ]);
-    expect(buildOverlayHeaderControls('groups')).toEqual(['tab-channels', 'tab-groups', 'close']);
+    expect(buildOverlayHeaderControls('groups')).toEqual([
+      'tab-channels',
+      'tab-groups',
+      'tab-failover',
+      'close',
+    ]);
+    expect(buildOverlayHeaderControls('failover')).toEqual([
+      'tab-channels',
+      'tab-groups',
+      'tab-failover',
+      'close',
+    ]);
 
     expect(buildChannelRowActions(ch('s1', 1), false)).toEqual([
       'rename',

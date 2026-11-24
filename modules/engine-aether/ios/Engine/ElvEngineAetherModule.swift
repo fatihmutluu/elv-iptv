@@ -82,6 +82,8 @@ struct LoadArgs: Record {
   @Field var preferHevcOverDolbyVision: Bool = false
   @Field var filterSdhSubtitles: Bool = false
   @Field var allowLegacyTls: Bool = false
+  @Field var dnsFamily: String? = nil
+  @Field var hostOverride: String? = nil
   @Field var audioTrackId: String? = nil
   @Field var subtitleTrackId: ValueOrUndefined<String?> = .undefined
   @Field var secondarySubtitleTrackId: String? = nil
@@ -119,7 +121,9 @@ struct LoadArgs: Record {
       subtitlePreference: subtitlePref,
       secondarySubtitleTrackId: (trimmedSecondary?.isEmpty == false) ? trimmedSecondary : nil,
       externalSubtitles: parsedExternal,
-      subtitleStyle: subtitleStyle?.toOverride()
+      subtitleStyle: subtitleStyle?.toOverride(),
+      dnsFamily: DnsFamilyPreference.parse(dnsFamily),
+      hostOverride: validateHostOverride(hostOverride)
     )
   }
 }

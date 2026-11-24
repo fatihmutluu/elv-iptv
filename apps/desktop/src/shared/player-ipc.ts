@@ -1,4 +1,12 @@
-import type { AccessibilityFontFamily, DeinterlaceMode, SubtitleStyleConfig } from '@elv/domain';
+import {
+  type AccessibilityFontFamily,
+  type DeinterlaceMode,
+  type DnsFamilyPreference,
+  MAX_HOST_OVERRIDE_CHARS,
+  normalizeDnsFamily,
+  type SubtitleStyleConfig,
+  validateHostOverride,
+} from '@elv/domain';
 import type {
   AttemptToken,
   EngineCapabilities,
@@ -420,6 +428,13 @@ const isResizeMode = (x: unknown): x is ResizeMode =>
   x === 'fit' || x === 'fill' || x === 'stretch';
 const isSubtitleFontFamily = (x: unknown): x is AccessibilityFontFamily =>
   x === 'system' || x === 'atkinson' || x === 'opendyslexic';
+const isDnsFamilyPreference = (x: unknown): x is DnsFamilyPreference =>
+  typeof x === 'string' && normalizeDnsFamily(x) === x;
+const isHostOverrideLiteral = (x: unknown): x is string => {
+  if (typeof x !== 'string' || x.length > MAX_HOST_OVERRIDE_CHARS) return false;
+  const validated = validateHostOverride(x);
+  return validated.ok && validated.value !== undefined;
+};
 
 function isQueueNextRequest(x: unknown): x is QueueNextRequest {
   if (!isRecord(x)) return false;
@@ -438,6 +453,12 @@ function isQueueNextRequest(x: unknown): x is QueueNextRequest {
     return false;
   }
   if (stream['kind'] !== undefined && stream['kind'] !== 'vod') return false;
+  if (stream['dnsFamily'] !== undefined && !isDnsFamilyPreference(stream['dnsFamily'])) {
+    return false;
+  }
+  if (stream['hostOverride'] !== undefined && !isHostOverrideLiteral(stream['hostOverride'])) {
+    return false;
+  }
   return (
     (x['preferHevcOverDolbyVision'] === undefined ||
       typeof x['preferHevcOverDolbyVision'] === 'boolean') &&
@@ -460,6 +481,8 @@ function isLoadCommand(x: unknown): x is LoadCommand {
     (options['filterSdhSubtitles'] === undefined ||
       typeof options['filterSdhSubtitles'] === 'boolean') &&
     (options['allowLegacyTls'] === undefined || typeof options['allowLegacyTls'] === 'boolean') &&
+    (options['dnsFamily'] === undefined || isDnsFamilyPreference(options['dnsFamily'])) &&
+    (options['hostOverride'] === undefined || isHostOverrideLiteral(options['hostOverride'])) &&
     (options['audioTrackId'] === undefined || isAudioTrackId(options['audioTrackId'])) &&
     (options['subtitleTrackId'] === undefined ||
       options['subtitleTrackId'] === null ||

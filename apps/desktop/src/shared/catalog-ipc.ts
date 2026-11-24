@@ -63,6 +63,11 @@ import {
   isEpgOpsRpcCall,
 } from './catalog-ipc-epg-guards.ts';
 import {
+  type CatalogBridgeFailoverOps,
+  type CatalogFailoverOpsRpcCall,
+  isFailoverOpsRpcCall,
+} from './catalog-ipc-failover-guards.ts';
+import {
   isAddSourceInput,
   isAlphabetIndexInput,
   isBoundedString,
@@ -271,7 +276,8 @@ export type CatalogRpcMethodCall =
   | { method: 'addChannelToCustomGroup'; groupId: string; itemKey: string; sourceId: string }
   | { method: 'removeChannelFromCustomGroup'; groupId: string; itemKey: string }
   | { method: 'flushPendingWrites' }
-  | CatalogEpgOpsRpcCall;
+  | CatalogEpgOpsRpcCall
+  | CatalogFailoverOpsRpcCall;
 
 /** Preload to utility process over `MessagePort`. */
 export type CatalogClientMessage =
@@ -298,7 +304,7 @@ export interface CatalogImportHandle {
 }
 
 /** Frozen `window.elv.catalog` surface exposed by the preload; raw `MessagePort` never crosses `contextBridge`. */
-export interface CatalogBridge extends CatalogBridgeEpgOps {
+export interface CatalogBridge extends CatalogBridgeEpgOps, CatalogBridgeFailoverOps {
   open(): Promise<Result<void>>;
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
@@ -656,7 +662,7 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
     case 'clearParentalPin':
       return isPinString(x['currentPin'], 0) && isOptionalStrictProfileId(x['profileId']);
     default:
-      return isChannelOpsRpcCall(x) || isEpgOpsRpcCall(x);
+      return isChannelOpsRpcCall(x) || isEpgOpsRpcCall(x) || isFailoverOpsRpcCall(x);
   }
 }
 

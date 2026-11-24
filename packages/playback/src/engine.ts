@@ -1,4 +1,9 @@
-import type { AndroidDecoderMode, BufferPreset, SubtitleStyleConfig } from '@elv/domain';
+import type {
+  AndroidDecoderMode,
+  BufferPreset,
+  DnsFamilyPreference,
+  SubtitleStyleConfig,
+} from '@elv/domain';
 
 /** Monotonic tune token; the service increments it per tune, retry rung and zap. */
 export type AttemptToken = number;
@@ -16,6 +21,18 @@ export interface StreamRequest {
   alternates?: readonly StreamRequest[];
   /** Opt-in legacy TLS (TLS 1.0/1.1) compatibility carried by the resolved stream (`#182`). */
   readonly allowLegacyTls?: boolean;
+  /** Provider account key for connection-limit tracking and safe multi-source failover (`#157`). */
+  readonly accountKey?: string;
+  /** Maximum concurrent connections allowed by the stream's provider (`#157`, `#167`). */
+  readonly maxConnections?: number;
+  /** Catalog source identifier associated with this stream (`#157`, `#317`). */
+  readonly sourceId?: string;
+  /** Catalog channel key associated with this stream (`#157`, `#167`). */
+  readonly channelKey?: string;
+  /** Per-source DNS address-family preference (`#172`). */
+  readonly dnsFamily?: DnsFamilyPreference;
+  /** Per-source validated literal IP host override (`#172`). */
+  readonly hostOverride?: string;
 }
 
 /** An external sidecar subtitle track attached at tune time or live during playback (`#32`, `#308`). */
@@ -53,6 +70,10 @@ export interface LoadOptions {
   readonly externalSubtitles?: readonly ExternalSubtitleTrack[];
   /** Live subtitle appearance configuration forwarded on load and recovery reloads (`#32`). */
   readonly subtitleStyle?: SubtitleStyleConfig;
+  /** Per-source DNS address-family preference forwarded to the engine (`#172`). */
+  readonly dnsFamily?: DnsFamilyPreference;
+  /** Per-source validated literal IP host override forwarded to the engine (`#172`). */
+  readonly hostOverride?: string;
 }
 
 /** One selectable audio or embedded/external subtitle track reported by the engine. */

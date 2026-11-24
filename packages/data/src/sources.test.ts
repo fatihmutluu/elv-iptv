@@ -216,6 +216,8 @@ describe('removeSource', () => {
         "(source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at) VALUES (?, 'k', 'gs1', 'g', 0, 1, 1)",
       programme_reminders:
         "(profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at) VALUES ('default', ?, ?, 'Ch', 'Show', 1000, 2000, 300000, 0, 1)",
+      failover_group_members:
+        "(group_id, source_id, channel_key, position) VALUES ('fg1', ?, ?, 0)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -227,7 +229,8 @@ describe('removeSource', () => {
           table === 'watch_progress' ||
           table === 'favorites' ||
           table === 'recent_channels' ||
-          table === 'programme_reminders'
+          table === 'programme_reminders' ||
+          table === 'failover_group_members'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
         } else if (
@@ -305,6 +308,8 @@ describe('removeSource', () => {
         "(source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at) VALUES (?, 'k', 'gs1', 'g', 0, 1, 1)",
       programme_reminders:
         "(profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at) VALUES ('default', ?, ?, 'Ch', 'Show', 1000, 2000, 300000, 0, 1)",
+      failover_group_members:
+        "(group_id, source_id, channel_key, position) VALUES ('fg1', ?, ?, 0)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -316,7 +321,8 @@ describe('removeSource', () => {
           table === 'watch_progress' ||
           table === 'favorites' ||
           table === 'recent_channels' ||
-          table === 'programme_reminders'
+          table === 'programme_reminders' ||
+          table === 'failover_group_members'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
         } else if (

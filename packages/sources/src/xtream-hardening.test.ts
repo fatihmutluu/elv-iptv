@@ -349,7 +349,8 @@ describe('Xtream account-scoped 429 cooldown and mirror failover (#173)', () => 
     expect(hosts).toEqual(['primary.example', 'backup1.example', 'backup2.example']);
     expect(c.playlistUrl()).toContain('http://backup2.example/get.php?');
     expect(c.guideUrl()).toContain('http://backup2.example/xmltv.php?');
-    expect(c.streamUrl('live', 42)).toContain('http://backup2.example/live/');
+    // Stream failover is independent of API failover (#317)
+    expect(c.streamUrl('live', 42)).toContain('http://primary.example/live/');
 
     // Before primaryCooldownMs elapses, subsequent calls stick to backup2 directly
     monoNow += 120_000;

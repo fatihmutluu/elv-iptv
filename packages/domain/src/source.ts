@@ -1,4 +1,5 @@
 import { sanitizeHeaderValue } from './headers';
+import type { DnsFamilyPreference } from './network-transport';
 
 /** Kinds of playlist source a user can add. */
 export type SourceKind = 'm3u' | 'xtream';
@@ -13,6 +14,10 @@ export interface TransportSettings {
   xtreamFormat?: 'ts' | 'm3u8';
   /** Opt-in support for legacy TLS (TLS 1.0/1.1 or older ciphers) for this source only (`#182`). */
   readonly allowLegacyTls?: boolean;
+  /** Optional per-source DNS IP family preference (`#172`). */
+  readonly dnsFamily?: DnsFamilyPreference;
+  /** Optional validated literal IPv4/IPv6 host override scoped strictly to the source origin while keeping TLS SNI (`#172`). */
+  readonly hostOverride?: string;
 }
 
 /** Request headers (lower-case names) for a source's transport settings. */

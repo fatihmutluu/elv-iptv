@@ -286,8 +286,12 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
       });
       expect(screen.getByTestId('sources-toggle-legacy-tls-focus-ring')).toBeTruthy();
 
-      // Down -> submit -> Right -> submit-choose-categories
+      // Down past DNS preference (system/ipv4/ipv6) + host override -> submit -> Right -> submit-choose-categories
       await act(async () => {
+        remote.tap(KEYCODE_DPAD_DOWN);
+        remote.tap(KEYCODE_DPAD_DOWN);
+        remote.tap(KEYCODE_DPAD_DOWN);
+        remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
       });
       expect(screen.getByTestId('sources-submit-focus-ring')).toBeTruthy();

@@ -1,10 +1,15 @@
 import type { CustomGroupRecord, ItemRow } from '@elv/data';
 
 /** Active tab inside {@link ChannelManagementOverlay}. */
-export type ChannelManageTab = 'channels' | 'groups';
+export type ChannelManageTab = 'channels' | 'groups' | 'failover';
 
 /** Focusable controls in the top header / tabs bar of {@link ChannelManagementOverlay}. */
-export type OverlayHeaderControl = 'tab-channels' | 'tab-groups' | 'show-hidden' | 'close';
+export type OverlayHeaderControl =
+  | 'tab-channels'
+  | 'tab-groups'
+  | 'tab-failover'
+  | 'show-hidden'
+  | 'close';
 
 /** Focusable row action buttons for one live channel row. */
 export type ChannelRowAction =
@@ -46,8 +51,8 @@ export interface SameSourceReorderPlan {
 /** Returns ordered focusable header controls for the active tab. */
 export function buildOverlayHeaderControls(tab: ChannelManageTab): readonly OverlayHeaderControl[] {
   return tab === 'channels'
-    ? ['tab-channels', 'tab-groups', 'show-hidden', 'close']
-    : ['tab-channels', 'tab-groups', 'close'];
+    ? ['tab-channels', 'tab-groups', 'tab-failover', 'show-hidden', 'close']
+    : ['tab-channels', 'tab-groups', 'tab-failover', 'close'];
 }
 
 /** Returns ordered focusable action buttons rendered on a channel row. */

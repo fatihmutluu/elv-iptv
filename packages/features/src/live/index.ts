@@ -35,6 +35,7 @@ export {
   type EpgDateTab,
   localDayKey,
 } from './epg-date-tabs';
+export { FailoverGroupsTab, type FailoverGroupsTabProps } from './FailoverGroupsTab';
 export {
   computeLiveGridColumns,
   LiveChannelsGrid,
@@ -50,6 +51,7 @@ export {
   type LiveNumberPadProps,
 } from './LiveChrome';
 export { LiveContextMenu, type LiveContextMenuProps } from './LiveContextMenu';
+export { LiveHealthBadge } from './LiveHealthBadge';
 export { LivePreviewBanner, type LivePreviewBannerProps } from './LivePreviewBanner';
 export { LiveScreen, type LiveScreenProps } from './LiveScreen';
 export {

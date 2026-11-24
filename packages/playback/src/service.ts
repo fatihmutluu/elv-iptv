@@ -1,6 +1,7 @@
 import {
   type ElvError,
   elvError,
+  hostnameOf,
   normalizeSubtitleStyle,
   type Result,
   type SubtitleStyleConfig,
@@ -20,6 +21,7 @@ import {
   normalizeExternalSubtitleList,
   normalizeExternalSubtitleTrack,
 } from './external-subtitles';
+import { createHealthTelemetryRecorder } from './health-telemetry';
 import { createRecovery } from './recovery';
 import type { LoadOverrides, RecoveryHooks, ServiceControl } from './seam';
 import { createSeekCoalescer } from './seek-coalescer';
@@ -33,6 +35,8 @@ import {
 } from './service-events';
 import { createSpeedCoalescer, type SpeedCoalescer } from './speed-coalescer';
 import { createPlaybackStateStore } from './state-store';
+import type { IdleProbeController, StreamHealthCache } from './stream-health-cache';
+import { createStreamHealthScorer, type StreamHealthScorer } from './stream-health-scorer';
 import { clampSyncDelayMs } from './sync-delay';
 import { clampLiveSeekPosition, isBehindLiveEdge, resolveLiveTimeShiftWindow } from './timeshift';
 import { createTrackPreferences } from './track-preferences';
@@ -55,6 +59,11 @@ export interface PlaybackServiceDeps {
   clock: PlaybackClock;
   timers: PlaybackTimers;
   config?: Partial<PlaybackConfig>;
+  healthCache?: StreamHealthCache;
+  healthScorer?: StreamHealthScorer;
+  idleProbeController?: IdleProbeController;
+  canAcquireAlternate?: (accountKey: string, maxConnections: number) => boolean;
+  onStreamOutcome?: (stream: StreamRequest, outcome: 'success' | 'failure') => void;
 }
 
 /** Creates the playback service over one engine (player core spec sections 5.4 and 5.5). */
@@ -76,9 +85,13 @@ export function createPlaybackServiceWith(
   );
   const formatCache = createWorkingFormatCache();
   const trackPrefs = createTrackPreferences();
+  const healthScorer = deps.healthScorer ?? createStreamHealthScorer({ clock });
 
   let current: TuneRequest | undefined;
   let stream: StreamRequest | undefined;
+  let primarySourceId: string | undefined;
+  let primaryAccountKey: string | undefined;
+  let primaryHost: string | undefined;
   let lastVodPositionMs: number | undefined;
   let loaded = false;
   let mediaOpen = false;
@@ -92,6 +105,15 @@ export function createPlaybackServiceWith(
   let subtitleStyle: SubtitleStyleConfig | undefined;
 
   const state = (): PlaybackState => store.getState();
+  const healthTelemetry = createHealthTelemetryRecorder({
+    clock,
+    healthScorer,
+    ...(deps.healthCache === undefined ? {} : { healthCache: deps.healthCache }),
+    ...(deps.onStreamOutcome === undefined ? {} : { onStreamOutcome: deps.onStreamOutcome }),
+    currentRequest: () => current,
+    currentStream: () => stream,
+    tuneAt: () => state().tuneAt,
+  });
   const startTimeoutMs = (): number =>
     current?.kind === 'live' ? config.liveStartTimeoutMs : config.startTimeoutMs;
   const startTimeout = createStartTimeoutController({
@@ -100,7 +122,10 @@ export function createPlaybackServiceWith(
     config,
     currentRequest: () => current,
     getState: state,
-    onTimeout: () => hooks.onStartTimeout?.(),
+    onTimeout: () => {
+      healthTelemetry.onStartTimeout();
+      hooks.onStartTimeout?.();
+    },
   });
   const clearStartTimeout = (): void => startTimeout.clear();
   const clearResolveTimeout = (): void => {
@@ -160,7 +185,19 @@ export function createPlaybackServiceWith(
     const startMs = overrides.startMs ?? current.startMs;
     if (current.kind === 'vod' && startMs !== undefined) lastVodPositionMs = startMs;
     trackPrefs.beginReload();
-    const allowLegacyTls = current.allowLegacyTls ?? stream.allowLegacyTls;
+    healthTelemetry.resetStreamSampling();
+    const crossSource =
+      (stream.sourceId !== undefined && stream.sourceId !== primarySourceId) ||
+      (stream.accountKey !== undefined && stream.accountKey !== primaryAccountKey);
+    const sameHostAsPrimary = primaryHost === undefined || hostnameOf(stream.url) === primaryHost;
+    const allowLegacyTls = crossSource
+      ? stream.allowLegacyTls
+      : (stream.allowLegacyTls ?? current.allowLegacyTls);
+    const dnsFamily = crossSource ? stream.dnsFamily : (stream.dnsFamily ?? current.dnsFamily);
+    const hostOverride =
+      crossSource || !sameHostAsPrimary
+        ? stream.hostOverride
+        : (stream.hostOverride ?? current.hostOverride);
     const baseOptions: LoadOptions = {
       ...(current.bufferPreset === undefined ? {} : { bufferPreset: current.bufferPreset }),
       ...(current.decoderMode === undefined ? {} : { decoderMode: current.decoderMode }),
@@ -171,6 +208,8 @@ export function createPlaybackServiceWith(
         ? {}
         : { filterSdhSubtitles: current.filterSdhSubtitles }),
       ...(allowLegacyTls === undefined ? {} : { allowLegacyTls }),
+      ...(dnsFamily === undefined ? {} : { dnsFamily }),
+      ...(hostOverride === undefined ? {} : { hostOverride }),
       ...(externalSubtitles.length > 0 ? { externalSubtitles } : {}),
       ...(subtitleStyle === undefined ? {} : { subtitleStyle }),
       ...overrides.options,
@@ -247,6 +286,10 @@ export function createPlaybackServiceWith(
     engine,
     config,
     formatCache,
+    healthScorer,
+    ...(deps.canAcquireAlternate === undefined
+      ? {}
+      : { canAcquireAlternate: deps.canAcquireAlternate }),
     now: () => clock.now(),
     getState: state,
     request: () => current,
@@ -298,6 +341,7 @@ export function createPlaybackServiceWith(
       store,
       seekCoalescer,
       hooks,
+      healthTelemetry,
       liveEdgeToleranceMs: config.liveEdgeToleranceMs,
       reconcileTracks: (t) => trackPrefs.reconcile(t),
       currentRequest: () => current,
@@ -317,11 +361,15 @@ export function createPlaybackServiceWith(
     const { kind } = state().status;
     if (disposed || token !== state().attempt || (kind !== 'tuning' && kind !== 'limited')) return;
     if (!result.ok) {
+      healthTelemetry.onResolveFailure(result.error);
       fail(result.error);
       return;
     }
     stream =
       current?.kind === 'live' ? formatCache.apply(current.accountKey, result.value) : result.value;
+    primarySourceId = stream.sourceId;
+    primaryAccountKey = stream.accountKey ?? current?.accountKey;
+    primaryHost = hostnameOf(stream.url);
     if (held) return;
     armStartTimeout(startTimeoutMs());
     sendLoad();
@@ -334,6 +382,9 @@ export function createPlaybackServiceWith(
     held = hooks.onTune?.(request) ?? false;
     current = request;
     stream = undefined;
+    primarySourceId = undefined;
+    primaryAccountKey = request.accountKey;
+    primaryHost = undefined;
     loaded = false;
     const prev = state();
     const token = prev.attempt + 1;
@@ -399,6 +450,8 @@ export function createPlaybackServiceWith(
   return {
     tune(request) {
       if (disposed) return state().attempt;
+      deps.idleProbeController?.abortAll('tune');
+      healthTelemetry.resetStreamSampling();
       trackPrefs.reset();
       externalSubtitles = normalizeExternalSubtitleList(request.externalSubtitles);
       if (request.subtitleStyle !== undefined) {
@@ -411,6 +464,7 @@ export function createPlaybackServiceWith(
       if (disposed) return;
       clearStartTimeout();
       clearResolveTimeout();
+      healthTelemetry.resetStreamSampling();
       resetCoalescers();
       clearScrubbing(false);
       hooks.onReset?.();
@@ -421,6 +475,9 @@ export function createPlaybackServiceWith(
       }
       current = request;
       stream = nextStream;
+      primarySourceId = nextStream?.sourceId;
+      primaryAccountKey = nextStream?.accountKey ?? request.accountKey;
+      primaryHost = nextStream === undefined ? undefined : hostnameOf(nextStream.url);
       lastVodPositionMs = request.kind === 'vod' ? (request.startMs ?? 0) : undefined;
       const {
         anchor: _a,
@@ -460,6 +517,7 @@ export function createPlaybackServiceWith(
       }
       resetCoalescers();
       clearScrubbing(false);
+      healthTelemetry.resetStreamSampling();
       const token = store.batch(() => {
         freezeAnchor();
         hooks.onReset?.();
@@ -482,6 +540,7 @@ export function createPlaybackServiceWith(
       hooks.onReset?.();
       clearResolveTimeout();
       stopEngine();
+      healthTelemetry.resetStreamSampling();
       trackPrefs.reset();
       externalSubtitles = Object.freeze([]);
       lastVodPositionMs = undefined;
@@ -722,6 +781,7 @@ export function createPlaybackServiceWith(
       disposed = true;
       clearStartTimeout();
       clearResolveTimeout();
+      healthTelemetry.resetStreamSampling();
       resetCoalescers();
       unsubscribeEngine();
       if (mediaOpen) stopEngine();

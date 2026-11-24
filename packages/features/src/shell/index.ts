@@ -6,10 +6,15 @@ export {
   createCatalogUiCache,
   RouteActiveProvider,
   type RouteActiveProviderProps,
+  type StreamHealthContextValue,
+  StreamHealthProvider,
+  type StreamHealthProviderProps,
   useActiveEffect,
   useCatalogUiCache,
+  useChannelHealthStatus,
   useDocumentVisible,
   useRouteActive,
+  useStreamHealth,
 } from '../shared';
 export { AdaptiveNavShell } from './AdaptiveNavShell';
 export {

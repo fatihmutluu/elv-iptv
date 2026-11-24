@@ -132,10 +132,13 @@ async function openPlaylist(
     : undefined;
   let response: Awaited<ReturnType<ImportDeps['http']['get']>>;
   try {
+    const transport = source.settings.transport;
     response = await deps.http.get(url, {
-      headers: conditionalHeaders(transportHeaders(source.settings.transport), sent),
+      headers: conditionalHeaders(transportHeaders(transport), sent),
       timeoutMs: REQUEST_TIMEOUT_MS,
-      ...(source.settings.transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
+      ...(transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
+      ...(transport?.dnsFamily !== undefined ? { dnsFamily: transport.dnsFamily } : {}),
+      ...(transport?.hostOverride !== undefined ? { hostOverride: transport.hostOverride } : {}),
       ...(signal === undefined ? {} : { signal }),
     });
   } catch {

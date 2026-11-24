@@ -179,4 +179,16 @@ export interface XtreamClient {
   guideUrl(): string;
   /** Playback URL built at play time; contains the credentials and is never stored. */
   streamUrl(kind: ContentKind, id: number, extension?: string): string;
+  /** Ordered playback candidate URLs following the stream mirror failover order; contains credentials and is never stored. */
+  streamUrls(kind: ContentKind, id: number, extension?: string): readonly string[];
+  /** Currently active resolved base URL for `player_api.php`, `playlistUrl` and `guideUrl` (no credentials). */
+  activeApiServer(): string;
+  /** Currently active resolved base URL for playback stream URLs (no credentials). */
+  activeStreamServer(): string;
+  /** Records a playback failure on a stream server (or the active stream candidate if omitted) without affecting API mirrors. */
+  reportStreamFailure(failedUrlOrBase?: string): void;
+  /** Records playback success on a stream server (or the active stream candidate if omitted), promoting it without affecting API mirrors. */
+  reportStreamSuccess(succeededUrlOrBase?: string): void;
+  /** Resets both API and stream mirror slots back to the primary server (`index 0`). */
+  resetMirrors(): void;
 }

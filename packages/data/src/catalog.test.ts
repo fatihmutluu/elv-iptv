@@ -118,6 +118,8 @@ describe('CatalogService in @elv/data', () => {
       value: {
         url: `http://cdn.example/${tok}/live/1.ts`,
         accountKey: id,
+        sourceId: id,
+        channelKey: liveItem?.key,
         maxConnections: 1,
         headers: {
           'user-agent': 'CustomUA/2.0',
@@ -136,6 +138,8 @@ describe('CatalogService in @elv/data', () => {
       value: {
         url: `http://cdn.example/${tok}/vod/10.mkv`,
         accountKey: id,
+        sourceId: id,
+        channelKey: movieItem?.key,
         maxConnections: 1,
         headers: {
           'user-agent': 'MovieUA/1.0',
@@ -156,6 +160,8 @@ describe('CatalogService in @elv/data', () => {
       value: {
         url: `http://cdn.example/${tok}/series/20.mp4`,
         accountKey: id,
+        sourceId: id,
+        channelKey: eps[0]?.key,
         maxConnections: 1,
         headers: {
           'user-agent': 'SeriesUA/3.0',
@@ -223,6 +229,8 @@ describe('CatalogService in @elv/data', () => {
         url: `http://cdn.example/${segB}/live/1.ts`,
         headers: {},
         accountKey: 's1',
+        sourceId: 's1',
+        channelKey: listed[0]?.key,
         maxConnections: 1,
       },
     });

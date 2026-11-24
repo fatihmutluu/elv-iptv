@@ -140,6 +140,22 @@ export function sameOrigin(a: string, b: string): boolean {
 }
 
 /**
+ * Extracts the normalized lowercase hostname (without port or IPv6 brackets) from an HTTP(S) URL,
+ * or `undefined` when `url` is not a valid HTTP(S) URL.
+ */
+export function hostnameOf(url: string): string | undefined {
+  const origin = originOf(url);
+  if (origin === undefined) return undefined;
+  const hostPort = origin.slice(origin.indexOf('://') + 3);
+  if (hostPort.startsWith('[')) {
+    const closeIdx = hostPort.indexOf(']');
+    return closeIdx > 1 ? hostPort.slice(1, closeIdx) : undefined;
+  }
+  const colonIdx = hostPort.indexOf(':');
+  return colonIdx === -1 ? hostPort : hostPort.slice(0, colonIdx);
+}
+
+/**
  * Returns `true` when `headers` contains a non-empty `Authorization`, `Proxy-Authorization`,
  * `Cookie`, `X-Api-Key`, or `X-Auth-Token` header.
  */

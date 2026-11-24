@@ -76,6 +76,27 @@ export {
   type SpeedCoalescerOptions,
 } from './speed-coalescer';
 export {
+  canonicalizeHealthKey,
+  createIdleProbeController,
+  createStreamHealthCache,
+  DEFAULT_STREAM_HEALTH_MAX_ENTRIES,
+  DEFAULT_STREAM_HEALTH_TTL_MS,
+  type IdleProbeController,
+  type IdleProbeOptions,
+  type StreamHealthCache,
+  type StreamHealthCacheOptions,
+  type StreamHealthEntry,
+  type StreamHealthStatus,
+} from './stream-health-cache';
+export {
+  createStreamHealthScorer,
+  DEFAULT_HEALTH_SCORER_HALF_LIFE_MS,
+  DEFAULT_HEALTH_SCORER_MAX_ENTRIES,
+  HEALTH_SCORE_TIE_TOLERANCE,
+  type StreamHealthScorer,
+  type StreamHealthScorerOptions,
+} from './stream-health-scorer';
+export {
   clampSyncDelayMs,
   MAX_SYNC_DELAY_MS,
   MIN_SYNC_DELAY_MS,

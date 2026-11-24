@@ -399,6 +399,96 @@ describe('createMedia3Engine', () => {
     expect(native.engine.selectSecondarySubtitleTrack).toHaveBeenCalledTimes(2);
     expect(native.engine.setSubtitleStyle).toHaveBeenCalledTimes(1);
   });
+
+  it('validates and forwards dnsFamily and literal IPv4/IPv6 hostOverride on load (#172)', async () => {
+    const native = fakeNative();
+    const engine = await create();
+    if (engine === null) throw new Error('engine expected');
+
+    // Valid IPv4 + dnsFamily
+    engine.load({
+      attempt: 1,
+      url: 'https://stream.provider.test/live/1001.ts',
+      headers: {},
+      kind: 'live',
+      options: {
+        allowLegacyTls: true,
+        dnsFamily: 'ipv4',
+        hostOverride: ' 203.0.113.10 ',
+      },
+    });
+    expect(native.engine.load).toHaveBeenNthCalledWith(1, {
+      attempt: 1,
+      url: 'https://stream.provider.test/live/1001.ts',
+      headers: {},
+      kind: 'live',
+      allowLegacyTls: true,
+      dnsFamily: 'ipv4',
+      hostOverride: '203.0.113.10',
+    });
+
+    // Valid bracketed uppercase IPv6 + IPv6 preference -> normalized unbracketed lowercase
+    engine.load({
+      attempt: 2,
+      url: 'https://stream.provider.test/live/1002.ts',
+      headers: {},
+      kind: 'live',
+      options: {
+        dnsFamily: ' IPV6 ' as never,
+        hostOverride: '[2001:DB8::1]',
+      },
+    });
+    expect(native.engine.load).toHaveBeenNthCalledWith(2, {
+      attempt: 2,
+      url: 'https://stream.provider.test/live/1002.ts',
+      headers: {},
+      kind: 'live',
+      dnsFamily: 'ipv6',
+      hostOverride: '2001:db8::1',
+    });
+
+    // Invalid dnsFamily & malformed hostOverride (hostnames, ports, schemes, CRLF, zone IDs) are dropped
+    for (const badHost of [
+      'panel.provider.test',
+      '203.0.113.10:8080',
+      'https://203.0.113.10',
+      '203.0.113.10/live',
+      '203.0.113.10\r\nHost: evil.test',
+      'fe80::1%eth0',
+      '[203.0.113.10]',
+      '01.2.3.4',
+    ]) {
+      native.engine.load.mockClear();
+      engine.load({
+        attempt: 3,
+        url: 'https://stream.provider.test/live/1003.ts',
+        headers: {},
+        kind: 'live',
+        options: {
+          dnsFamily: 'invalid-family',
+          hostOverride: badHost,
+        } as never,
+      });
+      expect(native.engine.load).toHaveBeenCalledWith({
+        attempt: 3,
+        url: 'https://stream.provider.test/live/1003.ts',
+        headers: {},
+        kind: 'live',
+      });
+    }
+
+    // Released engine ignores load with network options
+    native.engine.load.mockClear();
+    engine.release();
+    engine.load({
+      attempt: 4,
+      url: 'https://stream.provider.test/live/1004.ts',
+      headers: {},
+      kind: 'live',
+      options: { dnsFamily: 'ipv4', hostOverride: '203.0.113.10' },
+    });
+    expect(native.engine.load).not.toHaveBeenCalled();
+  });
 });
 
 function SurfaceView() {

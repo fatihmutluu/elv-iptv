@@ -1,5 +1,6 @@
 import { enCatchupEpgMessages } from './en-catchup-epg';
 import { enErgonomicsMessages } from './en-ergonomics';
+import { enFailoverNetworkMessages } from './en-failover-network';
 import { enProfilesMessages } from './en-profiles';
 import { enSubtitlesSuiteMessages } from './en-subtitles-suite';
 
@@ -695,6 +696,7 @@ export const enMessages = {
   ...enErgonomicsMessages,
   ...enCatchupEpgMessages,
   ...enSubtitlesSuiteMessages,
+  ...enFailoverNetworkMessages,
 } as const;
 
 /** Valid message identifier across all supported locales. */

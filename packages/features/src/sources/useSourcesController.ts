@@ -70,7 +70,9 @@ export interface SourcesController {
   canPasteClipboard: boolean;
   canPickLocalFile: boolean;
   canChooseCategories: boolean;
+  canEditNetwork: boolean;
   categoryPicker: CategoryPickerState | null;
+  refreshSources(): Promise<SourceRow[]>;
   setMode(mode: 'xtream' | 'm3u'): void;
   updateField<K extends keyof SourceFormState>(key: K, value: SourceFormState[K]): void;
   toggleAdvanced(): void;
@@ -681,6 +683,7 @@ export function useSourcesController({
   const canPickLocalFile = sourceImportHost?.pickPlaylistFile !== undefined;
   const canChooseCategories =
     catalog.discoverSourceCategories !== undefined && catalog.updateSourceSettings !== undefined;
+  const canEditNetwork = catalog.updateSourceSettings !== undefined;
 
   return {
     form,
@@ -695,7 +698,9 @@ export function useSourcesController({
     canPasteClipboard,
     canPickLocalFile,
     canChooseCategories,
+    canEditNetwork,
     categoryPicker,
+    refreshSources,
     setMode,
     updateField,
     toggleAdvanced,
