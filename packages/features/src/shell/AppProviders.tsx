@@ -6,6 +6,7 @@ import {
   type PreferencesPatch,
   type PreferencesSnapshot,
   type PreferencesStore,
+  type ProfilePreferencesManager,
   type Result,
 } from '@elv/domain';
 import { type AppI18n, type AppLocale, createAppI18n, resolveLocale } from '@elv/i18n';
@@ -35,6 +36,8 @@ import {
 /** Props of {@link AppProviders}. */
 export interface AppProvidersProps {
   preferencesStore?: PreferencesStore;
+  /** Optional multi-profile preferences manager (`#15`); used as `preferencesStore` when omitted. */
+  profilePreferences?: ProfilePreferencesManager;
   systemLocale?: AppLocale;
   i18n?: AppI18n;
   viewport?: ViewportOverride;
@@ -46,6 +49,7 @@ export interface AppProvidersProps {
 export interface PreferencesContextValue {
   readonly preferences: PreferencesSnapshot;
   readonly ready: boolean;
+  readonly profilePreferences?: ProfilePreferencesManager;
   updatePreferences(patch: PreferencesPatch): Promise<Result<PreferencesSnapshot>>;
   resetPreferences(): Promise<Result<PreferencesSnapshot>>;
   flushPreferences(): Promise<void>;
@@ -70,6 +74,7 @@ const PreferencesContext = createContext<PreferencesContextValue>(DEFAULT_PREFER
  */
 export function AppProviders({
   preferencesStore,
+  profilePreferences,
   systemLocale,
   i18n,
   viewport,
@@ -86,7 +91,7 @@ export function AppProviders({
   const effectiveSystemLocale: AppLocale = systemLocale ?? initialI18nRef.current.locale;
 
   const fallbackStore = useMemo(() => createMemoryPreferencesStore(), []);
-  const store = preferencesStore ?? fallbackStore;
+  const store = preferencesStore ?? profilePreferences ?? fallbackStore;
 
   const initialLocaleRef = useRef<AppLocale>(effectiveSystemLocale);
   const fallbackI18n = useMemo(() => createAppI18n(initialLocaleRef.current), []);
@@ -192,11 +197,12 @@ export function AppProviders({
     () => ({
       preferences,
       ready,
+      ...(profilePreferences !== undefined ? { profilePreferences } : {}),
       updatePreferences,
       resetPreferences,
       flushPreferences,
     }),
-    [preferences, ready, updatePreferences, resetPreferences, flushPreferences],
+    [preferences, ready, profilePreferences, updatePreferences, resetPreferences, flushPreferences],
   );
 
   return (

@@ -3,6 +3,7 @@ import { elvError } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import { describe, expect, it } from 'vitest';
 import type { DetailTarget } from '../shared';
+import { buildOptimisticWatchedRow } from './detail-data-helpers';
 import {
   buildDetailNavRows,
   buildEpisodePlayTarget,
@@ -645,6 +646,17 @@ describe('detail-model', () => {
       expect(epPlay.preferredSubtitleLang).toBe('off');
       expect(epPlay.nextEpisodes?.[0]?.preferredAudioLang).toBe('de');
       expect(epPlay.nextEpisodes?.[0]?.preferredSubtitleLang).toBe('off');
+    });
+
+    it('stamps explicit active profileId onto optimistic watched rows', () => {
+      const row = buildOptimisticWatchedRow(null, true, {
+        sourceId: 's1',
+        itemKey: 'x:s1:movie:101',
+        title: 'Silent Horizon',
+        logo: null,
+        profileId: 'kids-42',
+      });
+      expect(row.profileId).toBe('kids-42');
     });
   });
 });

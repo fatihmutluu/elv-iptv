@@ -78,6 +78,13 @@ export function describePlaybackFailure(
   error: ElvError,
   context?: PlaybackFailureContext,
 ): DescribedPlaybackFailure {
+  if (error.category === 'auth' && error.code === 'parental-locked') {
+    return {
+      messageId: 'parental.lockedMessage',
+      hintId: 'parental.unlockTitle',
+      verdict: 'auth-failed',
+    };
+  }
   const diagnosis = diagnosePlaybackFailure({ ...context, error });
   const verdict: PlaybackVerdict =
     diagnosis.verdict === 'unknown' && error.code === 'drm'

@@ -1,8 +1,13 @@
 import type { ContentKind, SqlDriver, SqlValue } from '@elv/domain';
-import { parseCategoryId } from './queries';
-import { ITEM_TABLE, watchedFilterClause } from './queries-shared';
+import {
+  buildSqlAdultKeywordExclusionClause,
+  buildSqlItemRestrictionClause,
+  isCategoryRestricted,
+  loadActiveParentalFilter,
+} from './parental-repo';
+import { ITEM_TABLE, parseCategoryId, watchedFilterClause } from './queries-shared';
 
-/** Input parameters for {@link queryAlphabetIndex} and `CatalogService.alphabetIndex` (`#407`). */
+/** Input parameters for {@link queryAlphabetIndex} and `CatalogService.alphabetIndex` (`#407`, `#31`). */
 export interface AlphabetIndexInput {
   readonly sourceId?: string;
   readonly kind: ContentKind;
@@ -11,6 +16,7 @@ export interface AlphabetIndexInput {
   readonly groupVersions?: boolean;
   readonly excludeWatched?: boolean;
   readonly profileId?: string;
+  readonly parentalUnlocked?: boolean;
 }
 
 /** One non-empty `#` (`< 'a'`), `A..Z`, or trailing non-Latin (`…`, `> 'z'`) prefix bucket with its exact 0-based offset in `'alpha'` sort order (`#407`). */
@@ -114,7 +120,7 @@ function toSortedBuckets(rows: readonly { letter: string; count: number }[]): Al
  * Computes the non-empty `#`, `A..Z` prefix buckets and cumulative 0-based row offsets for
  * alphabetical (`sortBy: 'alpha'`) catalog browsing in a single SQL `GROUP BY` query (`#407`).
  * Applies the exact same `is_hidden = 0`, category `placements`, `excludeWatched`,
- * `collapseVariants`, and `groupVersions` predicates as `items()` and `allSourcesItems()`.
+ * parental controls (`#31`), `collapseVariants`, and `groupVersions` predicates as `items()` and `allSourcesItems()`.
  */
 export async function queryAlphabetIndex(
   db: SqlDriver,
@@ -141,12 +147,33 @@ export async function queryAlphabetIndex(
     }
   }
 
+  const filter = await loadActiveParentalFilter(db, input.profileId, input.parentalUnlocked);
+  if (
+    filter !== null &&
+    providerCategoryId !== undefined &&
+    resolvedSourceId !== undefined &&
+    isCategoryRestricted(filter, resolvedSourceId, kind, providerCategoryId)
+  ) {
+    return [];
+  }
+
   const table = ITEM_TABLE[kind];
   const watched = watchedFilterClause('t.key', input);
+  const restrict =
+    filter === null
+      ? { clause: '', params: [] as readonly SqlValue[] }
+      : buildSqlItemRestrictionClause(filter, kind, 't.source_id', 't.key', resolvedSourceId);
+  const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 't.name', 't.name_fold');
 
   if (providerCategoryId !== undefined && resolvedSourceId !== undefined) {
     const dedup = categoryDedupSpec(kind, input);
-    const params: SqlValue[] = [resolvedSourceId, kind, providerCategoryId, ...watched.params];
+    const params: SqlValue[] = [
+      resolvedSourceId,
+      kind,
+      providerCategoryId,
+      ...watched.params,
+      ...restrict.params,
+    ];
     if (dedup !== undefined) {
       const rows = await db.all<{ letter: string; count: number }>(
         `WITH ranked AS (
@@ -155,7 +182,7 @@ export async function queryAlphabetIndex(
              FROM placements p
              JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
             WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
-              AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}
+              AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}${adultExcl}
          )
          SELECT ${LETTER_CASE_EXPR('sort_title')} AS letter, COUNT(*) AS count
            FROM ranked
@@ -171,7 +198,7 @@ export async function queryAlphabetIndex(
          FROM placements p
          JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
         WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
-          AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}
+          AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}${adultExcl}
         GROUP BY letter`,
       params,
     );
@@ -182,6 +209,7 @@ export async function queryAlphabetIndex(
   const params: SqlValue[] = [
     ...(resolvedSourceId === undefined ? [] : [resolvedSourceId]),
     ...watched.params,
+    ...restrict.params,
   ];
   const dedup = tableDedupSpec(kind, input);
   if (dedup !== undefined) {
@@ -191,7 +219,7 @@ export async function queryAlphabetIndex(
                 ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
            FROM ${table} t
            JOIN sources s ON s.id = t.source_id AND s.deleting = 0
-          WHERE ${sourceClause}t.is_hidden = 0${watched.clause}
+          WHERE ${sourceClause}t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl}
        )
        SELECT ${LETTER_CASE_EXPR('sort_title')} AS letter, COUNT(*) AS count
          FROM ranked
@@ -206,7 +234,7 @@ export async function queryAlphabetIndex(
     `SELECT ${LETTER_CASE_EXPR('t.sort_title')} AS letter, COUNT(*) AS count
        FROM ${table} t
        JOIN sources s ON s.id = t.source_id AND s.deleting = 0
-      WHERE ${sourceClause}t.is_hidden = 0${watched.clause}
+      WHERE ${sourceClause}t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl}
       GROUP BY letter`,
     params,
   );

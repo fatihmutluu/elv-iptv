@@ -567,4 +567,151 @@ describe('createCoalescedCatalog', () => {
     ]);
     expect(events).toEqual(['save:x:s1:ep:1', 'watched:x:s1:ep:2:true', 'unplayed:x:s1:series:1']);
   });
+
+  it('forwards opts on categories, items, resolveStream, listContinueWatching, listFavorites, and forwards all CatalogService methods including profiles and parental controls', async () => {
+    const timers = createFakeTimers();
+    const events: string[] = [];
+    const base = makeStubCatalog({
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      resolveStream: vi.fn(async () => err(elvError('auth', 'parental-locked'))),
+      addLocalM3uSource: vi.fn(async () => err(elvError('storage', 'unsupported'))),
+      discoverSourceCategories: vi.fn(async () => ok([])),
+      updateSourceSettings: vi.fn(async () => undefined),
+      liveVariants: vi.fn(async () => []),
+      itemVersions: vi.fn(async () => []),
+      searchSuggestions: vi.fn(async () => []),
+      alphabetIndex: vi.fn(async () => []),
+      getTrackPreference: vi.fn(async () => null),
+      saveTrackPreference: vi.fn(async () => undefined),
+      clearTrackPreference: vi.fn(async () => undefined),
+      recordRecentChannel: vi.fn(async () => undefined),
+      listRecentChannels: vi.fn(async () => []),
+      listContinueWatching: vi.fn(async () => []),
+      listFavorites: vi.fn(async () => []),
+      listProfiles: vi.fn(async () => []),
+      createProfile: vi.fn(async () => err(elvError('storage', 'unsupported'))),
+      updateProfile: vi.fn(async () => err(elvError('storage', 'unsupported'))),
+      deleteProfile: vi.fn(async (id) => {
+        events.push(`deleteProfile:${id}`);
+        return ok(undefined);
+      }),
+      setFavorite: vi.fn(async (_input, active) => {
+        events.push(`setFav:${active}`);
+        return ok(active);
+      }),
+      getParentalSettings: vi.fn(async () => ({
+        profileId: 'default',
+        enabled: false,
+        blockAdultKeywords: true,
+        maxRatingAge: null,
+        unlockTimeoutMin: 30,
+        updatedAt: 0,
+      })),
+      updateParentalSettings: vi.fn(async () =>
+        ok({
+          profileId: 'default',
+          enabled: true,
+          blockAdultKeywords: true,
+          maxRatingAge: 12,
+          unlockTimeoutMin: 30,
+          updatedAt: 1,
+        }),
+      ),
+      listParentalLocks: vi.fn(async () => []),
+      setParentalLock: vi.fn(async () => ok(undefined)),
+      hasParentalPin: vi.fn(async () => true),
+      setParentalPin: vi.fn(async () => ok(undefined)),
+      verifyParentalPin: vi.fn(async () => ({ ok: true as const })),
+      clearParentalPin: vi.fn(async () => ok(undefined)),
+    });
+
+    const catalog = createCoalescedCatalog(base, {
+      windowMs: 500,
+      setTimeoutFn: timers.setTimeoutFn,
+      clearTimeoutFn: timers.clearTimeoutFn,
+    });
+
+    await catalog.categories('s1', 'live', {
+      includeHidden: true,
+      profileId: 'kids',
+      parentalUnlocked: true,
+    });
+    expect(base.categories).toHaveBeenCalledWith('s1', 'live', {
+      includeHidden: true,
+      profileId: 'kids',
+      parentalUnlocked: true,
+    });
+
+    await catalog.items('s1|live|c1', 0, 20, {
+      sortBy: 'alpha',
+      profileId: 'kids',
+      parentalUnlocked: true,
+    });
+    expect(base.items).toHaveBeenCalledWith('s1|live|c1', 0, 20, {
+      sortBy: 'alpha',
+      profileId: 'kids',
+      parentalUnlocked: true,
+    });
+
+    await catalog.resolveStream('x:s1:live:1', { profileId: 'kids', parentalUnlocked: false });
+    expect(base.resolveStream).toHaveBeenCalledWith('x:s1:live:1', {
+      profileId: 'kids',
+      parentalUnlocked: false,
+    });
+
+    await catalog.listContinueWatching?.(12, 'kids', { parentalUnlocked: true });
+    expect(base.listContinueWatching).toHaveBeenCalledWith(12, 'kids', { parentalUnlocked: true });
+
+    await catalog.listFavorites?.(12, 'kids', { parentalUnlocked: true });
+    expect(base.listFavorites).toHaveBeenCalledWith(12, 'kids', { parentalUnlocked: true });
+
+    await catalog.listRecentChannels?.(10, 'kids', { parentalUnlocked: true });
+    expect(base.listRecentChannels).toHaveBeenCalledWith(10, 'kids', { parentalUnlocked: true });
+
+    await catalog.searchSuggestions?.({ profileId: 'kids', parentalUnlocked: true });
+    await catalog.alphabetIndex?.({ kind: 'movie', profileId: 'kids', parentalUnlocked: true });
+    await catalog.liveVariants?.('x:s1:live:1');
+    await catalog.itemVersions?.('x:s1:movie:1');
+    await catalog.getTrackPreference?.('x:s1:movie:1', 'kids');
+    await catalog.saveTrackPreference?.({
+      scopeKey: 'x:s1:movie:1',
+      sourceId: 's1',
+      profileId: 'kids',
+    });
+    await catalog.clearTrackPreference?.('x:s1:movie:1', 'kids');
+    await catalog.recordRecentChannel?.('x:s1:live:1', 's1', 'kids');
+    await catalog.discoverSourceCategories?.('s1');
+    await catalog.updateSourceSettings?.('s1', { vodPlaylist: true });
+    await catalog.addLocalM3uSource?.({ name: 'Local', bytes: new Uint8Array([1]) });
+    await catalog.listProfiles?.();
+    await catalog.createProfile?.({ name: 'Kids' });
+    await catalog.updateProfile?.('kids', { name: 'Kids 2' });
+    await catalog.getParentalSettings?.('kids');
+    await catalog.updateParentalSettings?.({ enabled: true }, 'kids');
+    await catalog.listParentalLocks?.('kids');
+    await catalog.setParentalLock?.(
+      {
+        sourceId: 's1',
+        targetKind: 'category',
+        itemKind: 'live',
+        targetKey: 'c1',
+        profileId: 'kids',
+      },
+      true,
+    );
+    expect(await catalog.hasParentalPin?.('kids')).toBe(true);
+    await catalog.setParentalPin?.('1234', 'kids');
+    expect(await catalog.verifyParentalPin?.('1234', 'kids')).toEqual({ ok: true });
+    await catalog.clearParentalPin?.('1234', 'kids');
+
+    // deleteProfile flushes pending coalesced writes for that profile first
+    const pendingFav = catalog.setFavorite?.(
+      { profileId: 'kids', sourceId: 's1', itemKey: 'm:s1:1', kind: 'movie', title: 'X' },
+      true,
+    );
+    await catalog.deleteProfile?.('kids');
+    await pendingFav;
+    expect(events).toEqual(['setFav:true', 'deleteProfile:kids']);
+  });
 });

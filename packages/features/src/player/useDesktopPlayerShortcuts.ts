@@ -16,6 +16,8 @@ import {
 
 /** Minimal state read by desktop keyboard shortcut handlers. */
 export interface DesktopShortcutGuard {
+  /** When `true`, suspends all desktop player shortcuts (e.g. while a root PIN/profile overlay is open). */
+  readonly isSuspended?: () => boolean;
   readonly canJumpPreviousChannel: () => boolean;
   readonly onJumpPreviousChannel: () => void;
   readonly canToggleTracks: () => boolean;
@@ -263,6 +265,7 @@ export function useDesktopPlayerShortcuts(params: {
     if (win?.addEventListener === undefined || win.removeEventListener === undefined) return;
     let handledSpaceDown = false;
     const onKeyDown = (e: WebKeyEventLike): void => {
+      if (guardRef.current.isSuspended?.()) return;
       if (isImeComposing(e)) return;
       if (isEditableWebTarget(e.target) || isEditableWebTarget(win.document?.activeElement)) return;
       if (dispatchVodShortcut(e, guardRef.current, throttle) && isSpaceKey(e)) {
@@ -271,6 +274,10 @@ export function useDesktopPlayerShortcuts(params: {
     };
     const onKeyUp = (e: WebKeyEventLike): void => {
       throttle.reset();
+      if (guardRef.current.isSuspended?.()) {
+        handledSpaceDown = false;
+        return;
+      }
       if (handledSpaceDown && isSpaceKey(e)) {
         handledSpaceDown = false;
         e.preventDefault?.();
@@ -298,6 +305,7 @@ export function useDesktopPlayerShortcuts(params: {
 
   return {
     onKeyDown: (e: WebKeyEventLike) => {
+      if (guardRef.current.isSuspended?.()) return;
       if (isImeComposing(e) || isEditableWebTarget(e.target) || hasControlModifier(e)) return;
       if (dispatchVodShortcut(e, guardRef.current, throttle)) return;
       const mapped = mapDesktopFallbackKey(e.key);

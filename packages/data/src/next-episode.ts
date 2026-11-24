@@ -1,4 +1,6 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
+import { isAdultKeywordMatch } from './parental-policy';
+import { isItemRestricted, loadActiveParentalFilter } from './parental-repo';
 import { type EpisodeRow, sourceOfKey } from './queries';
 import { DEFAULT_PROFILE_ID, normalizeProfileId } from './user-state-helpers';
 
@@ -45,7 +47,7 @@ SELECT id, source_id, key, COALESCE(season, 0) AS season, COALESCE(episode, 0) A
  WHERE series_key = ? AND key = ?
  LIMIT 1`;
 
-const NEXT_EPISODE_SQL = `
+const NEXT_EPISODE_BASE_SQL = `
 SELECT e.id, e.source_id, e.key, e.series_key,
        COALESCE(e.season, 0) AS season, e.episode, e.title, e.duration_sec,
        s.name AS series_title, s.cover AS logo
@@ -67,7 +69,9 @@ SELECT e.id, e.source_id, e.key, e.series_key,
    COALESCE(e.season, 0) ASC,
    COALESCE(e.episode, 0) ASC,
    e.id ASC,
-   e.key ASC
+   e.key ASC`;
+
+const NEXT_EPISODE_SQL = `${NEXT_EPISODE_BASE_SQL}
  LIMIT 1`;
 
 /**
@@ -75,15 +79,22 @@ SELECT e.id, e.source_id, e.key, e.series_key,
  * ordered by `(COALESCE(season, 0), COALESCE(episode, 0), id, key)` across season boundaries (`#392`).
  * Prefers the first unwatched subsequent episode for `profileId`; when all subsequent episodes are
  * already marked watched (rewatching), falls back to the immediate next sequential episode.
- * Returns `null` at the series finale or when `currentItemKey` is unknown.
+ * Returns `null` at the series finale, when `currentItemKey` is unknown, or when parental controls
+ * restrict the series or all remaining episodes (`#31`).
  */
 export async function queryNextEpisode(
   db: SqlDriver,
   seriesKey: string,
   currentItemKey: string,
   profileId: string = DEFAULT_PROFILE_ID,
+  opts?: { readonly parentalUnlocked?: boolean },
 ): Promise<NextEpisodeRow | null> {
   if (seriesKey.trim() === '' || currentItemKey.trim() === '') return null;
+
+  const filter = await loadActiveParentalFilter(db, profileId, opts?.parentalUnlocked);
+  if (filter !== null && (await isItemRestricted(db, filter, seriesKey))) {
+    return null;
+  }
 
   const hintedSource = sourceOfKey(currentItemKey) ?? sourceOfKey(seriesKey);
   const currentSql = hintedSource === undefined ? CURRENT_BY_KEY : CURRENT_BY_SOURCE_AND_KEY;
@@ -97,7 +108,7 @@ export async function queryNextEpisode(
   if (current === undefined) return null;
 
   const normalizedProfile = normalizeProfileId(profileId);
-  const nextRows = await db.all<RawNextEpisodeRow>(NEXT_EPISODE_SQL, [
+  const queryParams: SqlValue[] = [
     normalizedProfile,
     current.source_id,
     seriesKey,
@@ -111,8 +122,23 @@ export async function queryNextEpisode(
     current.episode,
     current.id,
     current.key,
-  ]);
-  const row = nextRows[0];
+  ];
+  const nextRows = await db.all<RawNextEpisodeRow>(
+    filter === null ? NEXT_EPISODE_SQL : NEXT_EPISODE_BASE_SQL,
+    queryParams,
+  );
+  const row =
+    filter === null
+      ? nextRows[0]
+      : nextRows.find(
+          (candidate) =>
+            !filter.lockedItemKeys.has(candidate.key) &&
+            !(
+              filter.blockAdultKeywords &&
+              candidate.title !== null &&
+              isAdultKeywordMatch(candidate.title)
+            ),
+        );
   if (row === undefined) return null;
 
   return {

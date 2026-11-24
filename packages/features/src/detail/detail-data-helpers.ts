@@ -109,7 +109,13 @@ export async function fetchRelatedDetailItems(catalog: CatalogService, target: D
 export function buildOptimisticWatchedRow(
   prevRow: WatchProgressRow | null,
   nextWatched: boolean,
-  meta: { sourceId: string; itemKey: string; title: string; logo: string | null },
+  meta: {
+    sourceId: string;
+    itemKey: string;
+    title: string;
+    logo: string | null;
+    profileId?: string;
+  },
 ): WatchProgressRow {
   if (prevRow) {
     return {
@@ -120,7 +126,7 @@ export function buildOptimisticWatchedRow(
     };
   }
   return {
-    profileId: DEFAULT_PROFILE_ID,
+    profileId: meta.profileId ?? DEFAULT_PROFILE_ID,
     sourceId: meta.sourceId,
     itemKey: meta.itemKey,
     kind: 'movie',

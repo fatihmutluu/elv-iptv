@@ -42,6 +42,8 @@ export interface UseLiveEmbeddedPreviewOptions {
   readonly catalog: Pick<CatalogService, 'resolveStream'>;
   readonly videoHost?: VideoHost;
   readonly playbackGuard?: PlaybackGuard;
+  /** Changing this key tears down any active preview session immediately (e.g. profile switch or parental re-lock). */
+  readonly sessionResetKey?: string | number;
 }
 
 /** Embedded live preview session state returned by {@link useLiveEmbeddedPreview}. */
@@ -68,7 +70,8 @@ interface ActivePreviewSession {
 export function useLiveEmbeddedPreview(
   opts: UseLiveEmbeddedPreviewOptions,
 ): LiveEmbeddedPreviewState {
-  const { enabled, activeChannel, sources, catalog, videoHost, playbackGuard } = opts;
+  const { enabled, activeChannel, sources, catalog, videoHost, playbackGuard, sessionResetKey } =
+    opts;
   const isRouteActive = useRouteActive();
 
   const [opened, setOpened] = useState<OpenVideoEngine | null>(null);
@@ -116,7 +119,7 @@ export function useLiveEmbeddedPreview(
   const stopAndRelease = useCallback(() => tearDownSession(true), [tearDownSession]);
   const shouldOpen = enabled && activeChannel !== null && videoHost !== undefined && isRouteActive;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reopenSeq deliberately re-opens preview when a surviving source replaces a guard-stopped source
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reopenSeq and sessionResetKey deliberately restart/teardown preview on guard recovery or profile/parental transitions
   useEffect(() => {
     if (!shouldOpen || videoHost === undefined) {
       handoffReleasedRef.current = false;
@@ -185,7 +188,15 @@ export function useLiveEmbeddedPreview(
     return () => {
       void tearDownSession(false);
     };
-  }, [playbackGuard, reopenSeq, shouldOpen, tearDownSession, tuneChannelOnService, videoHost]);
+  }, [
+    playbackGuard,
+    reopenSeq,
+    sessionResetKey,
+    shouldOpen,
+    tearDownSession,
+    tuneChannelOnService,
+    videoHost,
+  ]);
 
   useEffect(() => {
     if (!shouldOpen || activeChannel === null) return;

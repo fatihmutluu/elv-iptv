@@ -99,6 +99,8 @@ export interface PlayerControlsParams {
   previewChannelActive?: boolean | undefined;
   onConfirmPreviewChannel?: (() => void) | undefined;
   onCancelPreviewChannel?: (() => void) | undefined;
+  /** When `true`, suspends player remote/keyboard shortcuts while a root overlay is open. */
+  externalOverlayOpen?: boolean | undefined;
 }
 
 /** Builds shared {@link SettingsMenuOptions} from live {@link PlayerControlsParams}. */

@@ -1,4 +1,4 @@
-import { DEFAULT_PREFERENCES } from '@elv/domain';
+import { ACTIVE_PROFILE_PREF_KEY, DEFAULT_PREFERENCES, profilePreferencesKey } from '@elv/domain';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDesktopPreferencesStore } from './preferences.ts';
 
@@ -109,5 +109,53 @@ describe('createDesktopPreferencesStore', () => {
       expect(resetRes.error.category).toBe('storage');
       expect(resetRes.error.code).toBe('preferences-write-failed');
     }
+  });
+
+  it('switches per-profile preferences, persists ACTIVE_PROFILE_PREF_KEY, and deletes custom profile entries (#15)', async () => {
+    const storage = createFakeStorage();
+    const manager = createDesktopPreferencesStore(storage);
+
+    expect(manager.getActiveProfileId()).toBe('default');
+    expect(await manager.loadActiveProfileId()).toBe('default');
+
+    await manager.update({ locale: 'en', themePreset: 'abyssalSapphire' });
+    expect(storage.setItem).toHaveBeenCalledWith(
+      profilePreferencesKey('default'),
+      expect.any(String),
+    );
+
+    await manager.saveActiveProfileId('p_kids_1');
+    expect(storage.data.get(ACTIVE_PROFILE_PREF_KEY)).toBe('p_kids_1');
+    expect(await manager.loadActiveProfileId()).toBe('p_kids_1');
+
+    const kidsSnap = await manager.switchProfile('p_kids_1');
+    expect(manager.getActiveProfileId()).toBe('p_kids_1');
+    expect(kidsSnap.locale).toBe(DEFAULT_PREFERENCES.locale);
+
+    await manager.update({ locale: 'tr', fontScale: 1.2 });
+    expect(storage.setItem).toHaveBeenCalledWith(
+      profilePreferencesKey('p_kids_1'),
+      expect.any(String),
+    );
+
+    const backToDefault = await manager.switchProfile('default');
+    expect(backToDefault.locale).toBe('en');
+    expect(backToDefault.themePreset).toBe('abyssalSapphire');
+
+    await manager.deleteProfilePreferences('p_kids_1');
+    expect(storage.removeItem).toHaveBeenCalledWith(profilePreferencesKey('p_kids_1'));
+    expect(storage.data.has(profilePreferencesKey('p_kids_1'))).toBe(false);
+    expect(storage.data.has(profilePreferencesKey('default'))).toBe(true);
+  });
+
+  it('supports full ProfilePreferencesManager switching in memory fallback when window is undefined', async () => {
+    vi.stubGlobal('window', undefined);
+    const manager = createDesktopPreferencesStore();
+    await manager.update({ locale: 'tr' });
+    await manager.switchProfile('p_guest');
+    expect((await manager.load()).locale).toBe(DEFAULT_PREFERENCES.locale);
+    await manager.update({ reduceMotion: true });
+    expect((await manager.switchProfile('default')).locale).toBe('tr');
+    expect((await manager.switchProfile('p_guest')).reduceMotion).toBe(true);
   });
 });

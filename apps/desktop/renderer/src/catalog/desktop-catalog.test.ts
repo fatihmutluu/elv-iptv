@@ -435,4 +435,148 @@ describe('desktop CatalogService', () => {
     ).resolves.toBeUndefined();
     await expect(legacyService.clearTrackPreference?.('series:s1:10')).resolves.toBeUndefined();
   });
+
+  it('forwards Wave F1 profile/parental methods, opts, epgSlice, and flushPendingWrites with safe fallbacks (#15, #31)', async () => {
+    const profile = {
+      id: 'p_kids',
+      name: 'Kids',
+      avatarToken: 'emerald' as const,
+      isKids: true,
+      isDefault: false,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const settings = {
+      profileId: 'p_kids',
+      enabled: true,
+      blockAdultKeywords: true,
+      maxRatingAge: 12,
+      unlockTimeoutMin: 30,
+      updatedAt: 100,
+    };
+    const seen: Record<string, unknown[][]> = {};
+    const record =
+      <T>(name: string, value: T) =>
+      async (...args: unknown[]): Promise<T> => {
+        const list = seen[name] ?? [];
+        list.push(args);
+        seen[name] = list;
+        return value;
+      };
+
+    const { bridge } = makeFakeBridge({
+      liveVariants: record('liveVariants', []),
+      itemVersions: record('itemVersions', []),
+      seasons: record('seasons', ok([])),
+      episodes: record('episodes', []),
+      queryNextEpisode: record('queryNextEpisode', null),
+      itemDetail: record('itemDetail', null),
+      nowNext: record('nowNext', []),
+      epgWindow: record('epgWindow', {}),
+      epgSlice: record('epgSlice', []),
+      channelByNumber: record('channelByNumber', null),
+      resolveStream: record('resolveStream', err(elvError('auth', 'parental-locked'))),
+      listContinueWatching: record('listContinueWatching', []),
+      listFavorites: record('listFavorites', []),
+      listRecentChannels: record('listRecentChannels', []),
+      listProfiles: record('listProfiles', [profile]),
+      createProfile: record('createProfile', ok(profile)),
+      updateProfile: record('updateProfile', ok(profile)),
+      deleteProfile: record('deleteProfile', ok(undefined)),
+      getParentalSettings: record('getParentalSettings', settings),
+      updateParentalSettings: record('updateParentalSettings', ok(settings)),
+      listParentalLocks: record('listParentalLocks', []),
+      setParentalLock: record('setParentalLock', ok(undefined)),
+      hasParentalPin: record('hasParentalPin', true),
+      setParentalPin: record('setParentalPin', ok(undefined)),
+      verifyParentalPin: record('verifyParentalPin', { ok: true as const }),
+      clearParentalPin: record('clearParentalPin', ok(undefined)),
+      flushPendingWrites: record('flushPendingWrites', undefined),
+    });
+
+    const service = createDesktopCatalogFromBridge(bridge);
+    const pOpts = { profileId: 'p_kids', parentalUnlocked: false };
+
+    await service.liveVariants?.('s1:live:1', 's1|live|1', pOpts);
+    await service.itemVersions?.('s1:movie:1', pOpts);
+    await service.seasons(42, pOpts);
+    await service.episodes(42, 1, pOpts);
+    await service.queryNextEpisode?.('s1:series:42', 's1:episode:1', 'p_kids', {
+      parentalUnlocked: true,
+    });
+    await service.itemDetail?.('s1:movie:1', pOpts);
+    await service.nowNext?.(['s1:live:1'], 1_000, pOpts);
+    await service.epgWindow?.(['s1:live:1'], 1_000, 2_000, pOpts);
+    await service.epgSlice?.('s1', 1_000, 2_000, 50, pOpts);
+    await service.channelByNumber?.(10, 's1', pOpts);
+    expect(await service.resolveStream('s1:live:1', pOpts)).toEqual({
+      ok: false,
+      error: { category: 'auth', code: 'parental-locked' },
+    });
+    await service.listContinueWatching?.(10, 'p_kids', { parentalUnlocked: false });
+    await service.listFavorites?.(10, 'p_kids', { parentalUnlocked: true });
+    await service.listRecentChannels?.(10, 'p_kids', { parentalUnlocked: false });
+
+    expect(await service.listProfiles?.()).toEqual([profile]);
+    expect(await service.createProfile?.({ name: 'Kids\tOne', isKids: true })).toEqual(ok(profile));
+    expect(await service.updateProfile?.('p_kids', { name: 'Kids\nTwo' })).toEqual(ok(profile));
+    expect(await service.deleteProfile?.('p_kids')).toEqual(ok(undefined));
+    expect(await service.getParentalSettings?.('p_kids')).toEqual(settings);
+    expect(await service.updateParentalSettings?.({ enabled: false }, 'p_kids')).toEqual(
+      ok(settings),
+    );
+    expect(await service.listParentalLocks?.('p_kids', { sourceId: 's1' })).toEqual([]);
+    expect(
+      await service.setParentalLock?.(
+        {
+          profileId: 'p_kids',
+          sourceId: 's1',
+          targetKind: 'item',
+          itemKind: 'movie',
+          targetKey: 's1:movie:1',
+        },
+        true,
+      ),
+    ).toEqual(ok(undefined));
+    expect(await service.hasParentalPin?.('p_kids')).toBe(true);
+    expect(await service.setParentalPin?.('1234', 'p_kids', '0000')).toEqual(ok(undefined));
+    expect(await service.verifyParentalPin?.('1234', 'p_kids')).toEqual({ ok: true });
+    expect(await service.clearParentalPin?.('1234', 'p_kids')).toEqual(ok(undefined));
+    await service.flushPendingWrites?.();
+
+    expect(seen['liveVariants']).toEqual([['s1:live:1', 's1|live|1', pOpts]]);
+    expect(seen['itemVersions']).toEqual([['s1:movie:1', pOpts]]);
+    expect(seen['seasons']).toEqual([[42, pOpts]]);
+    expect(seen['episodes']).toEqual([[42, 1, pOpts]]);
+    expect(seen['queryNextEpisode']).toEqual([
+      ['s1:series:42', 's1:episode:1', 'p_kids', { parentalUnlocked: true }],
+    ]);
+    expect(seen['itemDetail']).toEqual([['s1:movie:1', pOpts]]);
+    expect(seen['nowNext']).toEqual([[['s1:live:1'], 1_000, pOpts]]);
+    expect(seen['epgWindow']).toEqual([[['s1:live:1'], 1_000, 2_000, pOpts]]);
+    expect(seen['epgSlice']).toEqual([['s1', 1_000, 2_000, 50, pOpts]]);
+    expect(seen['channelByNumber']).toEqual([[10, 's1', pOpts]]);
+    expect(seen['resolveStream']).toEqual([['s1:live:1', pOpts]]);
+    expect(seen['listContinueWatching']).toEqual([[10, 'p_kids', { parentalUnlocked: false }]]);
+    expect(seen['listFavorites']).toEqual([[10, 'p_kids', { parentalUnlocked: true }]]);
+    expect(seen['listRecentChannels']).toEqual([[10, 'p_kids', { parentalUnlocked: false }]]);
+    expect(seen['createProfile']).toEqual([[{ name: 'Kids One', isKids: true }]]);
+    expect(seen['updateProfile']).toEqual([['p_kids', { name: 'Kids Two' }]]);
+
+    // Legacy bridge without optional Wave F1 methods falls back safely
+    const { bridge: legacyBridge } = makeFakeBridge();
+    const legacy = createDesktopCatalogFromBridge(legacyBridge);
+    expect(await legacy.listProfiles?.()).toEqual([]);
+    expect((await legacy.createProfile?.({ name: 'X' }))?.ok).toBe(false);
+    expect((await legacy.deleteProfile?.('p_kids'))?.ok).toBe(false);
+    expect((await legacy.getParentalSettings?.('p_kids'))?.enabled).toBe(false);
+    expect(await legacy.listParentalLocks?.('p_kids')).toEqual([]);
+    expect(await legacy.hasParentalPin?.('p_kids')).toBe(false);
+    expect(await legacy.verifyParentalPin?.('1234', 'p_kids')).toEqual({
+      ok: false,
+      remainingAttempts: 0,
+    });
+    expect(await legacy.epgSlice?.('s1', 0, 1000)).toEqual([]);
+    await expect(legacy.flushPendingWrites?.()).resolves.toBeUndefined();
+  });
 });

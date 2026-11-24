@@ -1,4 +1,5 @@
 import { elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
+import { refreshParentalFastPath } from './parental-repo';
 import { reapOrphanedRuns } from './runs';
 import { EXPECTED_FTS_TABLES, EXPECTED_TABLE_COLUMNS, MIGRATIONS, OPEN_PRAGMAS } from './schema';
 import { backfillSortTitles, type SortTitleTable } from './schema-v8';
@@ -140,6 +141,7 @@ export async function openCatalog(
     const verified = await verifyAndHealSchema(db);
     if (!verified.ok) return verified;
     await reapOrphanedRuns(db, clock());
+    await refreshParentalFastPath(db);
     return ok(undefined);
   } catch (error) {
     return err(

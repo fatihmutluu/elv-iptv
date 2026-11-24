@@ -1,7 +1,7 @@
-import { createCatalogService, openCatalog } from '@elv/data';
+import { type CatalogService, createCatalogService, openCatalog } from '@elv/data';
 import { countingScheduler, memorySecrets, testDb } from '@elv/data/testing';
 import { elvError, ok } from '@elv/domain';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createLazyCatalog } from './lazy-catalog';
 
 describe('createLazyCatalog', () => {
@@ -395,5 +395,152 @@ describe('createLazyCatalog', () => {
 
     await lazy.close();
     handle.close();
+  });
+
+  it('forwards all 12 profile & parental methods and ParentalQueryOptions (#15, #31)', async () => {
+    const handle = testDb();
+    await openCatalog(handle.db);
+    const underlying = createCatalogService({
+      db: handle.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: {
+        async get() {
+          const bytes = new TextEncoder().encode(
+            '#EXTM3U\n#EXTINF:-1 group-title="18+ Adult",Late Channel\nhttp://127.0.0.1/1.ts\n',
+          );
+          return ok({
+            status: 200,
+            headers: {},
+            body: {
+              async *[Symbol.asyncIterator]() {
+                yield bytes;
+              },
+            },
+          });
+        },
+      },
+      clock: () => 1_000,
+    });
+
+    const lazy = createLazyCatalog(async () => underlying);
+    const initialProfiles = await lazy.listProfiles?.();
+    expect(initialProfiles?.map((p) => p.id)).toEqual(['default']);
+
+    const created = await lazy.createProfile?.({
+      name: 'Kids',
+      avatarToken: 'emerald',
+      isKids: true,
+    });
+    expect(created?.ok).toBe(true);
+    if (!created?.ok) return;
+    const kidsId = created.value.id;
+
+    const updated = await lazy.updateProfile?.(kidsId, { name: 'Juniors' });
+    expect(updated?.ok).toBe(true);
+
+    const settings = await lazy.getParentalSettings?.(kidsId);
+    expect(settings?.enabled).toBe(true);
+
+    const patched = await lazy.updateParentalSettings?.({ unlockTimeoutMin: 15 }, kidsId);
+    expect(patched?.ok).toBe(true);
+
+    expect(await lazy.hasParentalPin?.(kidsId)).toBe(false);
+    expect((await lazy.setParentalPin?.('1234', kidsId))?.ok).toBe(true);
+    expect(await lazy.hasParentalPin?.(kidsId)).toBe(true);
+    expect(await lazy.verifyParentalPin?.('1234', kidsId)).toEqual({ ok: true });
+
+    const lockRes = await lazy.setParentalLock?.(
+      {
+        profileId: kidsId,
+        sourceId: 's1',
+        targetKind: 'category',
+        itemKind: 'live',
+        targetKey: '18+ Adult',
+      },
+      true,
+    );
+    expect(lockRes?.ok).toBe(true);
+    expect((await lazy.listParentalLocks?.(kidsId))?.length).toBe(1);
+
+    const added = await lazy.addSourceFromLink({
+      name: 'AdultDemo',
+      url: 'http://127.0.0.1/demo.m3u',
+    });
+    expect(added.ok).toBe(true);
+    if (added.ok) {
+      await lazy.importSource(added.value.id);
+      const catsLocked = await lazy.categories(added.value.id, 'live', {
+        profileId: kidsId,
+        parentalUnlocked: false,
+      });
+      const catsUnlocked = await lazy.categories(added.value.id, 'live', {
+        profileId: kidsId,
+        parentalUnlocked: true,
+      });
+      expect(catsLocked.length).toBe(0);
+      expect(catsUnlocked.length).toBe(1);
+      const items = await lazy.items(catsUnlocked[0]?.id ?? '', 0, 10, {
+        profileId: kidsId,
+        parentalUnlocked: true,
+      });
+      const lockedStream = await lazy.resolveStream(items[0]?.key ?? '', {
+        profileId: kidsId,
+        parentalUnlocked: false,
+      });
+      expect(lockedStream.ok).toBe(false);
+      const unlockedStream = await lazy.resolveStream(items[0]?.key ?? '', {
+        profileId: kidsId,
+        parentalUnlocked: true,
+      });
+      expect(unlockedStream.ok).toBe(true);
+    }
+
+    expect((await lazy.clearParentalPin?.('1234', kidsId))?.ok).toBe(true);
+    expect(await lazy.hasParentalPin?.(kidsId)).toBe(false);
+    expect((await lazy.deleteProfile?.(kidsId))?.ok).toBe(true);
+
+    await lazy.close();
+    handle.close();
+  });
+
+  it('forwards parental query options for liveVariants, itemVersions, seasons, episodes, and queryNextEpisode', async () => {
+    const liveVariants = vi.fn(async () => []);
+    const itemVersions = vi.fn(async () => []);
+    const seasons = vi.fn(async () => ok([]));
+    const episodes = vi.fn(async () => []);
+    const queryNextEpisode = vi.fn(async () => null);
+    const base = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      liveVariants,
+      itemVersions,
+      seasons,
+      episodes,
+      queryNextEpisode,
+      resolveStream: vi.fn(),
+      close: vi.fn(async () => undefined),
+    } as unknown as CatalogService;
+
+    const lazy = createLazyCatalog(async () => base);
+    const opts = { profileId: 'kids-1', parentalUnlocked: false };
+    await lazy.liveVariants?.('ch:1', 'cat:1', opts);
+    await lazy.itemVersions?.('mov:1', opts);
+    await lazy.seasons(42, opts);
+    await lazy.episodes(42, 1, opts);
+    await lazy.queryNextEpisode?.('ser:42', 'ep:1', 'kids-1', { parentalUnlocked: false });
+
+    expect(liveVariants).toHaveBeenCalledWith('ch:1', 'cat:1', opts);
+    expect(itemVersions).toHaveBeenCalledWith('mov:1', opts);
+    expect(seasons).toHaveBeenCalledWith(42, opts);
+    expect(episodes).toHaveBeenCalledWith(42, 1, opts);
+    expect(queryNextEpisode).toHaveBeenCalledWith('ser:42', 'ep:1', 'kids-1', {
+      parentalUnlocked: false,
+    });
   });
 });

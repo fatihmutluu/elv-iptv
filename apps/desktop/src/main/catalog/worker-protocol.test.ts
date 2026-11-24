@@ -55,6 +55,15 @@ describe('isWorkerToMainMessage', () => {
         key: 'source.src_1.urlvars',
         value: 'a'.repeat(131_072),
       },
+      { type: 'secret-request', reqId: 5, op: 'get', key: 'profile.default.pin' },
+      {
+        type: 'secret-request',
+        reqId: 6,
+        op: 'set',
+        key: 'profile.p_kids_1.pin',
+        value: 'v1:0123456789abcdef0123456789abcdef:deadbeef',
+      },
+      { type: 'secret-request', reqId: 7, op: 'delete', key: 'profile.p_kids_1.pin' },
       { type: 'shutdown-complete' },
     ];
     for (const msg of valid) {

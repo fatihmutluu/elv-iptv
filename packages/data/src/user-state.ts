@@ -1,4 +1,5 @@
 import { elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
+import { findRestrictedItemKeys, loadActiveParentalFilter } from './parental-repo';
 import { resolveSafeStorageLogo, sourceOfKey } from './queries';
 import {
   clampLimit,
@@ -314,17 +315,34 @@ export async function listContinueWatching(
   db: SqlDriver,
   limit = 24,
   profileId: string = DEFAULT_PROFILE_ID,
+  opts?: { readonly parentalUnlocked?: boolean },
 ): Promise<WatchProgressRow[]> {
   const clamped = clampLimit(limit, 24);
   if (clamped === 0) return [];
+  const normalized = normalizeProfileId(profileId);
+  const filter = await loadActiveParentalFilter(db, normalized, opts?.parentalUnlocked);
+  const fetchLimit = filter === null ? clamped : Math.min(100, clamped * 4);
   const rows = await db.all<RawProgressRow>(
     `SELECT ${PROGRESS_COLS} FROM (
        SELECT ${PROGRESS_COLS}, ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(series_key, ''), NULLIF(version_group_key, ''), item_key) ORDER BY updated_at DESC, item_key ASC) AS rn
          FROM watch_progress WHERE profile_id = ? AND watched = 0 AND position_ms >= ? AND duration_ms > 0
      ) WHERE rn = 1 ORDER BY updated_at DESC, item_key ASC LIMIT ?`,
-    [normalizeProfileId(profileId), MIN_RESUME_POSITION_MS, clamped],
+    [normalized, MIN_RESUME_POSITION_MS, fetchLimit],
   );
-  return rows.map(mapProgressRow);
+  const mapped = rows.map(mapProgressRow);
+  if (filter === null) return mapped;
+  const restricted = await findRestrictedItemKeys(
+    db,
+    filter,
+    mapped.map((r) => ({
+      itemKey: r.itemKey,
+      sourceId: r.sourceId,
+      kind: r.kind,
+      title: r.title,
+      seriesKey: r.seriesKey,
+    })),
+  );
+  return mapped.filter((r) => !restricted.has(r.itemKey)).slice(0, clamped);
 }
 
 /** Fetches watch progress rows for up to 200 distinct item keys in one indexed lookup, including cross-version movie progress (`#404`). */
@@ -487,14 +505,30 @@ export async function listFavorites(
   db: SqlDriver,
   limit = 50,
   profileId: string = DEFAULT_PROFILE_ID,
+  opts?: { readonly parentalUnlocked?: boolean },
 ): Promise<FavoriteRow[]> {
   const clamped = clampLimit(limit, 50);
   if (clamped === 0) return [];
+  const normalized = normalizeProfileId(profileId);
+  const filter = await loadActiveParentalFilter(db, normalized, opts?.parentalUnlocked);
+  const fetchLimit = filter === null ? clamped : Math.min(100, clamped * 4);
   const rows = await db.all<RawFavoriteRow>(
     `${FAVORITE_SELECT} WHERE profile_id = ? ORDER BY added_at DESC LIMIT ?`,
-    [normalizeProfileId(profileId), clamped],
+    [normalized, fetchLimit],
   );
-  return rows.map(mapFavoriteRow);
+  const mapped = rows.map(mapFavoriteRow);
+  if (filter === null) return mapped;
+  const restricted = await findRestrictedItemKeys(
+    db,
+    filter,
+    mapped.map((r) => ({
+      itemKey: r.itemKey,
+      sourceId: r.sourceId,
+      kind: r.kind,
+      title: r.title,
+    })),
+  );
+  return mapped.filter((r) => !restricted.has(r.itemKey)).slice(0, clamped);
 }
 
 /** Lists favorited item keys for a profile (capped at 2,000), most recently added first. */

@@ -217,7 +217,7 @@ describe('catch-up retention & bad-timestamp guard (#268)', () => {
 describe('MIGRATION_V13 idx_programmes_source_stop (#6, #25, #268)', () => {
   it('creates idx_programmes_source_stop on fresh and v12-upgraded databases', async () => {
     const fresh = testDb();
-    expect(SCHEMA_VERSION).toBe(13);
+    expect(SCHEMA_VERSION).toBe(14);
     expect((await openCatalog(fresh.db)).ok).toBe(true);
     const freshIndexes = (
       await fresh.db.all<{ name: string }>(
@@ -241,7 +241,7 @@ describe('MIGRATION_V13 idx_programmes_source_stop (#6, #25, #268)', () => {
     expect(before).toEqual([]);
 
     expect((await openCatalog(upgraded.db)).ok).toBe(true);
-    expect(await upgraded.db.all('PRAGMA user_version')).toEqual([{ user_version: 13 }]);
+    expect(await upgraded.db.all('PRAGMA user_version')).toEqual([{ user_version: 14 }]);
     const after = (
       await upgraded.db.all<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_programmes_source_stop'",

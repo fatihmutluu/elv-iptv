@@ -1940,3 +1940,180 @@ msgstr "Auto"
 
 msgid "player.delayReset"
 msgstr "Reset (0 ms)"
+
+msgid "settings.section.profiles"
+msgstr "Profiles & Parental"
+
+msgid "profiles.title"
+msgstr "Profiles"
+
+msgid "profiles.subtitle"
+msgstr "Switch viewers or manage local profiles on this device."
+
+msgid "profiles.switchTitle"
+msgstr "Switch profile"
+
+msgid "profiles.switchButton"
+msgstr "Switch"
+
+msgid "profiles.activeBadge"
+msgstr "Active"
+
+msgid "profiles.kidsBadge"
+msgstr "Kids"
+
+msgid "profiles.addProfile"
+msgstr "Add profile"
+
+msgid "profiles.editProfile"
+msgstr "Edit profile"
+
+msgid "profiles.deleteProfile"
+msgstr "Delete profile"
+
+msgid "profiles.deleteConfirmTitle"
+msgstr "Delete this profile?"
+
+msgid "profiles.deleteConfirmBody"
+msgstr "Watch history, favorites, preferences, and parental locks for this profile will be permanently removed."
+
+msgid "profiles.cannotDeleteLast"
+msgstr "At least one profile must remain on this device."
+
+msgid "profiles.nameLabel"
+msgstr "Profile name"
+
+msgid "profiles.namePlaceholder"
+msgstr "Enter profile name"
+
+msgid "profiles.avatarLabel"
+msgstr "Avatar color"
+
+msgid "profiles.kidsToggle"
+msgstr "Kids profile"
+
+msgid "profiles.kidsHint"
+msgstr "Enables parental controls and age filtering by default."
+
+msgid "profiles.save"
+msgstr "Save"
+
+msgid "profiles.cancel"
+msgstr "Cancel"
+
+msgid "profiles.defaultName"
+msgstr "Default"
+
+msgid "profiles.manageInSettings"
+msgstr "Manage profiles in Settings"
+
+msgid "parental.title"
+msgstr "Parental Controls"
+
+msgid "parental.subtitle"
+msgstr "Restrict categories, adult keywords, and age-rated programs with a PIN."
+
+msgid "parental.enabledToggle"
+msgstr "Enable parental controls"
+
+msgid "parental.enabledHint"
+msgstr "Hides restricted channels, titles, and categories while locked."
+
+msgid "parental.pinTitle"
+msgstr "Parental PIN"
+
+msgid "parental.pinNotSet"
+msgstr "No PIN set"
+
+msgid "parental.pinSet"
+msgstr "PIN protected"
+
+msgid "parental.setPin"
+msgstr "Set PIN"
+
+msgid "parental.changePin"
+msgstr "Change PIN"
+
+msgid "parental.removePin"
+msgstr "Remove PIN"
+
+msgid "parental.enterPin"
+msgstr "Enter PIN"
+
+msgid "parental.createPin"
+msgstr "Create a 4–8 digit PIN"
+
+msgid "parental.confirmPin"
+msgstr "Confirm PIN"
+
+msgid "parental.pinMismatch"
+msgstr "PINs do not match. Try again."
+
+msgid "parental.pinInvalid"
+msgstr "PIN must be 4 to 8 digits."
+
+msgid "parental.pinWrong"
+msgstr "Incorrect PIN."
+
+msgid "parental.pinLockedOut"
+msgstr "Too many attempts. Try again in {seconds}s."
+
+msgid "parental.unlockTitle"
+msgstr "Unlock parental controls"
+
+msgid "parental.unlockButton"
+msgstr "Unlock"
+
+msgid "parental.lockNow"
+msgstr "Lock now"
+
+msgid "parental.unlockedBadge"
+msgstr "Unlocked"
+
+msgid "parental.lockedBadge"
+msgstr "Locked"
+
+msgid "parental.lockedMessage"
+msgstr "This content is restricted by parental controls."
+
+msgid "parental.adultKeywordsToggle"
+msgstr "Block adult keywords"
+
+msgid "parental.adultKeywordsHint"
+msgstr "Automatically hides categories and titles containing adult keywords."
+
+msgid "parental.maxAgeLabel"
+msgstr "Maximum age rating"
+
+msgid "parental.maxAgeOff"
+msgstr "Off"
+
+msgid "parental.maxAgeOption"
+msgstr "{age}+"
+
+msgid "parental.unlockTimeoutLabel"
+msgstr "Unlock duration"
+
+msgid "parental.timeoutMinutes"
+msgstr "{minutes} min"
+
+msgid "parental.timeoutSession"
+msgstr "Until restart"
+
+msgid "parental.lockedCategoriesTitle"
+msgstr "Locked categories"
+
+msgid "parental.lockedCategoriesEmpty"
+msgstr "No categories available to lock yet."
+
+msgid "parental.categoryLocked"
+msgstr "Locked"
+
+msgid "parental.categoryUnlocked"
+msgstr "Unlocked"
+
+msgid "parental.backspace"
+msgstr "Backspace"
+
+msgid "parental.clear"
+msgstr "Clear"

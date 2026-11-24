@@ -1,6 +1,6 @@
 import type { TvClockMode } from '@elv/domain';
 import type { IconName } from '@elv/ui-kit';
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 
 /** One primary navigation destination rendered in the top bar (Landscape) or bottom tab bar (Portrait). */
 export interface NavDestination<TId extends string = string> {
@@ -16,6 +16,11 @@ export interface NavUtility<TId extends string = string> {
   readonly id: TId;
   readonly label: string;
   readonly icon: IconName;
+  /** Optional custom icon element (e.g. a quiet profile monogram badge in the top utility cluster). */
+  readonly renderIcon?: (state: {
+    readonly focused: boolean;
+    readonly selected: boolean;
+  }) => ReactElement;
   readonly active?: boolean;
   readonly showLabel?: boolean;
   readonly testID?: string;

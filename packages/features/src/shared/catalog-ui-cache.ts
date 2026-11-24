@@ -148,6 +148,7 @@ function capCatalogRails(
 export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogUiCache {
   let revision = opts.revision ?? 0;
   let locale = opts.locale ?? 'en';
+  let profileKey = opts.profileKey ?? 'default:0';
   let hits = 0;
   let misses = 0;
   const recordLookup = (hit: boolean): void => {
@@ -198,6 +199,7 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
   return {
     getRevision: () => revision,
     getLocale: () => locale,
+    getProfileKey: () => profileKey,
     getMetrics(): CatalogUiCacheMetrics {
       const total = hits + misses;
       return {
@@ -207,10 +209,14 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
       };
     },
 
-    setRevision(nextRevision, nextLocale) {
-      if (nextRevision === revision && nextLocale === locale) return;
+    setRevision(nextRevision, nextLocale, nextProfileKey) {
+      const resolvedProfileKey = nextProfileKey ?? profileKey;
+      if (nextRevision === revision && nextLocale === locale && resolvedProfileKey === profileKey) {
+        return;
+      }
       revision = nextRevision;
       locale = nextLocale;
+      profileKey = resolvedProfileKey;
       clearAll();
     },
 

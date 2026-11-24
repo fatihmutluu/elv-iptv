@@ -1,5 +1,13 @@
-import type { SqlDriver } from '@elv/domain';
+import type { SqlDriver, SqlValue } from '@elv/domain';
 import { parseLiveVariant } from './live-variants';
+import { isAdultKeywordMatch, type ParentalQueryOptions } from './parental-policy';
+import {
+  buildSqlAdultKeywordExclusionClause,
+  buildSqlItemRestrictionClause,
+  isCategoryRestricted,
+  isItemRestricted,
+  loadActiveParentalFilter,
+} from './parental-repo';
 import { parseCategoryId, sourceOfKey } from './queries';
 import { parseVodVersion } from './vod-versions';
 
@@ -29,6 +37,7 @@ export async function queryLiveVariants(
   db: SqlDriver,
   itemKey: string,
   categoryId?: string,
+  opts?: ParentalQueryOptions,
 ): Promise<LiveVariantOption[]> {
   const sourceId = sourceOfKey(itemKey);
   if (sourceId === undefined) return [];
@@ -46,6 +55,25 @@ export async function queryLiveVariants(
     providerCategoryId = parsed !== undefined ? parsed.providerId : categoryId;
   }
 
+  const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
+  if (filter !== null) {
+    if (
+      providerCategoryId !== undefined &&
+      isCategoryRestricted(filter, sourceId, 'live', providerCategoryId)
+    ) {
+      return [];
+    }
+    if (await isItemRestricted(db, filter, itemKey)) {
+      return [];
+    }
+  }
+
+  const restrict =
+    filter === null
+      ? { clause: '', params: [] as readonly SqlValue[] }
+      : buildSqlItemRestrictionClause(filter, 'live', 'l.source_id', 'l.key', sourceId);
+  const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 'l.name', 'l.name_fold');
+
   const rows =
     providerCategoryId !== undefined
       ? await db.all<{ key: string; name: string; quality_rank: number }>(
@@ -55,20 +83,23 @@ export async function queryLiveVariants(
                ON p.source_id = l.source_id AND p.kind = 'live' AND p.item_key = l.key
             WHERE l.source_id = ? AND l.is_hidden = 0 AND l.variant_base_fold = ?
               AND p.category_id = ? AND p.is_hidden = 0
-              AND EXISTS (SELECT 1 FROM sources s WHERE s.id = l.source_id AND s.deleting = 0)
+              AND EXISTS (SELECT 1 FROM sources s WHERE s.id = l.source_id AND s.deleting = 0)${restrict.clause}${adultExcl}
             ORDER BY l.quality_rank DESC, p.position ASC, l.id ASC`,
-          [sourceId, seed.variant_base_fold, providerCategoryId],
+          [sourceId, seed.variant_base_fold, providerCategoryId, ...restrict.params],
         )
       : await db.all<{ key: string; name: string; quality_rank: number }>(
           `SELECT l.key, l.name, l.quality_rank
              FROM live l
             WHERE l.source_id = ? AND l.is_hidden = 0 AND l.variant_base_fold = ?
-              AND EXISTS (SELECT 1 FROM sources s WHERE s.id = l.source_id AND s.deleting = 0)
+              AND EXISTS (SELECT 1 FROM sources s WHERE s.id = l.source_id AND s.deleting = 0)${restrict.clause}${adultExcl}
             ORDER BY l.quality_rank DESC, l.id ASC`,
-          [sourceId, seed.variant_base_fold],
+          [sourceId, seed.variant_base_fold, ...restrict.params],
         );
 
-  return rows.map((r) => {
+  const allowed =
+    filter?.blockAdultKeywords === true ? rows.filter((r) => !isAdultKeywordMatch(r.name)) : rows;
+
+  return allowed.map((r) => {
     const parsed = parseLiveVariant(r.name);
     return {
       key: r.key,
@@ -86,6 +117,7 @@ export async function queryLiveVariants(
 export async function queryItemVersions(
   db: SqlDriver,
   itemKey: string,
+  opts?: ParentalQueryOptions,
 ): Promise<VodVersionOption[]> {
   const sourceId = sourceOfKey(itemKey);
   if (sourceId === undefined) return [];
@@ -97,6 +129,17 @@ export async function queryItemVersions(
   )[0];
   if (seed === undefined || seed.version_group_key === '') return [];
 
+  const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
+  if (filter !== null && (await isItemRestricted(db, filter, itemKey))) {
+    return [];
+  }
+
+  const restrict =
+    filter === null
+      ? { clause: '', params: [] as readonly SqlValue[] }
+      : buildSqlItemRestrictionClause(filter, 'movie', 'movies.source_id', 'movies.key', sourceId);
+  const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 'movies.name', 'movies.name_fold');
+
   const rows = await db.all<{
     id: number;
     key: string;
@@ -107,12 +150,15 @@ export async function queryItemVersions(
     `SELECT id, key, name, year, version_label
        FROM movies
       WHERE source_id = ? AND is_hidden = 0 AND version_group_key = ?
-        AND EXISTS (SELECT 1 FROM sources s WHERE s.id = movies.source_id AND s.deleting = 0)
+        AND EXISTS (SELECT 1 FROM sources s WHERE s.id = movies.source_id AND s.deleting = 0)${restrict.clause}${adultExcl}
       ORDER BY id ASC`,
-    [sourceId, seed.version_group_key],
+    [sourceId, seed.version_group_key, ...restrict.params],
   );
 
-  return rows
+  const allowed =
+    filter?.blockAdultKeywords === true ? rows.filter((r) => !isAdultKeywordMatch(r.name)) : rows;
+
+  return allowed
     .map((r) => {
       const parsed = parseVodVersion(r.name, r.year);
       return {

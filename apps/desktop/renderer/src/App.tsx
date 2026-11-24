@@ -1,5 +1,9 @@
 import { createCoalescedCatalog } from '@elv/data';
-import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
+import type {
+  AccessibilityFontFamily,
+  DeinterlaceMode,
+  ProfilePreferencesManager,
+} from '@elv/domain';
 import {
   AppProviders,
   AppShell,
@@ -318,9 +322,13 @@ function AppRoot() {
     };
   }, []);
 
-  const shellProps: AppShellProps & { sourceImportHost?: SourceImportHost } = {
+  const shellProps: AppShellProps & {
+    sourceImportHost?: SourceImportHost;
+    profilePreferences?: ProfilePreferencesManager;
+  } = {
     catalog,
     videoHost,
+    profilePreferences: preferencesStore,
     externalRefreshToken: refreshToken,
     ...(sourceImportHost === undefined ? {} : { sourceImportHost }),
   };
@@ -329,6 +337,7 @@ function AppRoot() {
     <UiAdaptersProvider adapters={uiAdapters}>
       <AppProviders
         preferencesStore={preferencesStore}
+        profilePreferences={preferencesStore}
         systemLocale={systemLocale}
         viewport={{ formFactor: 'desktop' }}
       >

@@ -4,7 +4,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 /** Navigable category sections inside {@link SettingsScreen}. */
-export type SettingsSection = 'appearance' | 'playback' | 'liveTv' | 'sources' | 'licenses';
+export type SettingsSection =
+  | 'appearance'
+  | 'playback'
+  | 'liveTv'
+  | 'profiles'
+  | 'sources'
+  | 'licenses';
 
 /** Preference sections navigated row-by-row directly via {@link useTvSettingsNavigation}. */
 export type PreferenceSettingsSection = 'appearance' | 'playback' | 'liveTv';
@@ -14,6 +20,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'appearance',
   'playback',
   'liveTv',
+  'profiles',
   'sources',
   'licenses',
 ];
@@ -332,6 +339,8 @@ export interface UseTvSettingsNavigationOptions {
   readonly onFocusTopNav?: () => void;
   /** Whether the Android-only Video decoder row is rendered in Playback settings (`#411`). */
   readonly showAndroidDecoder?: boolean;
+  /** When `true`, keeps the current Settings pane (`'nav'` | `'content'`) while `isActiveScope` temporarily blurs for a root overlay. */
+  readonly preservePaneOnBlur?: boolean;
 }
 
 /** Return value of {@link useTvSettingsNavigation}. */
@@ -360,6 +369,7 @@ export function useTvSettingsNavigation({
   onActivateAppearanceControl,
   onFocusTopNav,
   showAndroidDecoder = Platform.OS === 'android',
+  preservePaneOnBlur = false,
 }: UseTvSettingsNavigationOptions): TvSettingsNavigationState {
   const [pane, setPane] = useState<'nav' | 'content'>(() =>
     isActiveScope && section === 'sources' ? 'content' : 'nav',
@@ -400,8 +410,11 @@ export function useTvSettingsNavigation({
     }
   }, [section, store]);
 
+  const preservePaneOnBlurRef = useRef(preservePaneOnBlur);
+  preservePaneOnBlurRef.current = preservePaneOnBlur;
+
   useEffect(() => {
-    if (!isActiveScope) {
+    if (!isActiveScope && !preservePaneOnBlurRef.current) {
       setPane('nav');
       store.activate(NAV_LIST_ID);
     }

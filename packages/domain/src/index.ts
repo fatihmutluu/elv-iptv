@@ -15,6 +15,7 @@ export * from './http';
 export * from './languages';
 export * from './playback-guard';
 export * from './preferences';
+export * from './profile-preferences';
 export * from './redact';
 export * from './result';
 export * from './source';

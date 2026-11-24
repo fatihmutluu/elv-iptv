@@ -141,6 +141,25 @@ describe('createEncryptedFileSecretStore', () => {
     expect(await store2.get('source.src_1.urlvars')).toBe('{"tok":"bearer_tok_xyz987"}');
   });
 
+  it('supports profile.<id>.pin keys without writing raw PIN or hash in plaintext on disk (#31)', async () => {
+    const dir = makeTempDir();
+    const filePath = join(dir, 'secrets.json');
+    const cipher = createAesGcmTestCipher();
+    const store = createEncryptedFileSecretStore({ filePath, cipher });
+
+    const pinHash =
+      'v1:00112233445566778899aabbccddeeff:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
+    await store.set('profile.p_kids_1.pin', pinHash);
+    expect(await store.get('profile.p_kids_1.pin')).toBe(pinHash);
+
+    const rawBytes = readFileSync(filePath);
+    expect(rawBytes.includes(Buffer.from(pinHash, 'utf8'))).toBe(false);
+    expect(rawBytes.includes(Buffer.from('00112233445566778899aabbccddeeff', 'utf8'))).toBe(false);
+
+    await store.delete('profile.p_kids_1.pin');
+    expect(await store.get('profile.p_kids_1.pin')).toBeUndefined();
+  });
+
   it('serializes concurrent writes without losing entries or leaving temp files', async () => {
     const dir = makeTempDir();
     const filePath = join(dir, 'secrets.json');

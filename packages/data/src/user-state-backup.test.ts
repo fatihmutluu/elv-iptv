@@ -597,7 +597,9 @@ describe('saveUserDataSnapshot, reconcileUserData, and CatalogService mirroring 
     expect(decodeUserDataSnapshot(store.value)).toEqual({
       favorites: [],
       progress: [],
-      profiles: [],
+      profiles: [
+        { id: 'default', name: 'Default', avatar: 'crimson', isKids: false, createdAt: 0 },
+      ],
     });
   });
 });

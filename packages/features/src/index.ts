@@ -25,6 +25,7 @@ export type {
   VideoHost,
   VideoSurfaceProps,
 } from './ports/video-host';
+export * from './profiles';
 export * from './screensaver';
 export * from './search';
 export * from './settings';

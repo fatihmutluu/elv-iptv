@@ -36,8 +36,9 @@ function buildShellUtilities(input: {
   readonly hasActiveDetail: boolean;
   readonly onOpenSearch: () => void;
   readonly onOpenSettings: () => void;
-}): readonly NavUtility<'search' | 'settings'>[] {
-  return [
+  readonly profileUtility?: NavUtility;
+}): readonly NavUtility[] {
+  const list: NavUtility[] = [
     {
       id: 'search',
       label: input.searchLabel,
@@ -57,6 +58,10 @@ function buildShellUtilities(input: {
       onPress: input.onOpenSettings,
     },
   ];
+  if (input.profileUtility !== undefined) {
+    list.push(input.profileUtility);
+  }
+  return list;
 }
 
 /** Per-tab discovery memory for Movies and Series tabs. */
@@ -245,6 +250,7 @@ export function buildShellNavigation(input: {
   readonly hasActiveDetail: boolean;
   readonly onOpenSearch: () => void;
   readonly onOpenSettings: () => void;
+  readonly profileUtility?: NavUtility;
 }) {
   return {
     destinations: buildShellDestinations({
@@ -260,6 +266,7 @@ export function buildShellNavigation(input: {
       hasActiveDetail: input.hasActiveDetail,
       onOpenSearch: input.onOpenSearch,
       onOpenSettings: input.onOpenSettings,
+      ...(input.profileUtility !== undefined ? { profileUtility: input.profileUtility } : {}),
     }),
   };
 }
@@ -387,9 +394,9 @@ export function createObservedCatalog(
     ...(c.liveVariants ? { liveVariants: c.liveVariants.bind(c) } : {}),
     ...(c.itemVersions ? { itemVersions: c.itemVersions.bind(c) } : {}),
     ...(c.allSourcesItems ? { allSourcesItems: c.allSourcesItems.bind(c) } : {}),
-    seasons: (seriesId) => c.seasons(seriesId),
-    episodes: (seriesId, season) => c.episodes(seriesId, season),
-    resolveStream: (itemKey) => c.resolveStream(itemKey),
+    seasons: (seriesId, opts) => c.seasons(seriesId, opts),
+    episodes: (seriesId, season, opts) => c.episodes(seriesId, season, opts),
+    resolveStream: (itemKey, opts) => c.resolveStream(itemKey, opts),
     ...(c.itemDetail ? { itemDetail: c.itemDetail.bind(c) } : {}),
     ...(c.saveProgress ? { saveProgress: c.saveProgress.bind(c) } : {}),
     ...(c.setWatched ? { setWatched: c.setWatched.bind(c) } : {}),
@@ -433,6 +440,20 @@ export function createObservedCatalog(
     ...(c.clearTrackPreference ? { clearTrackPreference: c.clearTrackPreference.bind(c) } : {}),
     ...(c.recordRecentChannel ? { recordRecentChannel: c.recordRecentChannel.bind(c) } : {}),
     ...(c.listRecentChannels ? { listRecentChannels: c.listRecentChannels.bind(c) } : {}),
+    ...(c.listProfiles ? { listProfiles: c.listProfiles.bind(c) } : {}),
+    ...(c.createProfile ? { createProfile: c.createProfile.bind(c) } : {}),
+    ...(c.updateProfile ? { updateProfile: c.updateProfile.bind(c) } : {}),
+    ...(c.deleteProfile ? { deleteProfile: c.deleteProfile.bind(c) } : {}),
+    ...(c.getParentalSettings ? { getParentalSettings: c.getParentalSettings.bind(c) } : {}),
+    ...(c.updateParentalSettings
+      ? { updateParentalSettings: c.updateParentalSettings.bind(c) }
+      : {}),
+    ...(c.listParentalLocks ? { listParentalLocks: c.listParentalLocks.bind(c) } : {}),
+    ...(c.setParentalLock ? { setParentalLock: c.setParentalLock.bind(c) } : {}),
+    ...(c.hasParentalPin ? { hasParentalPin: c.hasParentalPin.bind(c) } : {}),
+    ...(c.setParentalPin ? { setParentalPin: c.setParentalPin.bind(c) } : {}),
+    ...(c.verifyParentalPin ? { verifyParentalPin: c.verifyParentalPin.bind(c) } : {}),
+    ...(c.clearParentalPin ? { clearParentalPin: c.clearParentalPin.bind(c) } : {}),
     close: () => c.close(),
   };
 }

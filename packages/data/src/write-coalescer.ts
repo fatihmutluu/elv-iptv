@@ -255,36 +255,76 @@ export function createCoalescedCatalog(
   const listFavoritesFn = c.listFavorites?.bind(c);
   const listFavoriteKeysFn = c.listFavoriteKeys?.bind(c);
 
+  const deleteProfileFn = c.deleteProfile?.bind(c);
+
   return {
     addSource: (input) => c.addSource(input),
     addSourceFromLink: (input) => c.addSourceFromLink(input),
+    ...(c.addLocalM3uSource ? { addLocalM3uSource: c.addLocalM3uSource.bind(c) } : {}),
+    ...(c.discoverSourceCategories
+      ? { discoverSourceCategories: c.discoverSourceCategories.bind(c) }
+      : {}),
+    ...(c.updateSourceSettings ? { updateSourceSettings: c.updateSourceSettings.bind(c) } : {}),
     async removeSource(id) {
       await flushPendingWrites();
       return c.removeSource(id);
     },
     importSource: (id, importOpts) => c.importSource(id, importOpts),
     listSources: () => c.listSources(),
-    categories: (sourceId, kind) => c.categories(sourceId, kind),
-    items: (categoryId, offset, limit) => c.items(categoryId, offset, limit),
-    seasons: (seriesId) => c.seasons(seriesId),
-    episodes: (seriesId, season) => c.episodes(seriesId, season),
-    resolveStream: (itemKey) => c.resolveStream(itemKey),
+    categories: (sourceId, kind, catOpts) => c.categories(sourceId, kind, catOpts),
+    items: (categoryId, offset, limit, itemOpts) => c.items(categoryId, offset, limit, itemOpts),
+    seasons: (seriesId, seasonOpts) => c.seasons(seriesId, seasonOpts),
+    episodes: (seriesId, season, epOpts) => c.episodes(seriesId, season, epOpts),
+    resolveStream: (itemKey, streamOpts) => c.resolveStream(itemKey, streamOpts),
     ...(c.importGuide ? { importGuide: c.importGuide.bind(c) } : {}),
     ...(c.latestImportHealth ? { latestImportHealth: c.latestImportHealth.bind(c) } : {}),
+    ...(c.liveVariants ? { liveVariants: c.liveVariants.bind(c) } : {}),
+    ...(c.itemVersions ? { itemVersions: c.itemVersions.bind(c) } : {}),
     ...(c.allSourcesItems ? { allSourcesItems: c.allSourcesItems.bind(c) } : {}),
     ...(c.itemDetail ? { itemDetail: c.itemDetail.bind(c) } : {}),
     ...(c.search ? { search: c.search.bind(c) } : {}),
+    ...(c.searchSuggestions ? { searchSuggestions: c.searchSuggestions.bind(c) } : {}),
+    ...(c.alphabetIndex ? { alphabetIndex: c.alphabetIndex.bind(c) } : {}),
     ...(c.nowNext ? { nowNext: c.nowNext.bind(c) } : {}),
     ...(c.epgWindow ? { epgWindow: c.epgWindow.bind(c) } : {}),
     ...(c.epgSlice ? { epgSlice: c.epgSlice.bind(c) } : {}),
     ...(c.channelByNumber ? { channelByNumber: c.channelByNumber.bind(c) } : {}),
+    ...(c.getTrackPreference ? { getTrackPreference: c.getTrackPreference.bind(c) } : {}),
+    ...(c.saveTrackPreference ? { saveTrackPreference: c.saveTrackPreference.bind(c) } : {}),
+    ...(c.clearTrackPreference ? { clearTrackPreference: c.clearTrackPreference.bind(c) } : {}),
+    ...(c.recordRecentChannel ? { recordRecentChannel: c.recordRecentChannel.bind(c) } : {}),
+    ...(c.listRecentChannels ? { listRecentChannels: c.listRecentChannels.bind(c) } : {}),
+    ...(c.listProfiles ? { listProfiles: c.listProfiles.bind(c) } : {}),
+    ...(c.createProfile ? { createProfile: c.createProfile.bind(c) } : {}),
+    ...(c.updateProfile ? { updateProfile: c.updateProfile.bind(c) } : {}),
+    ...(deleteProfileFn
+      ? {
+          deleteProfile: async (id) => {
+            const p = normalizeProfile(id);
+            await coalescer.flushPrefix(`fav:${p}:`);
+            await coalescer.flushPrefix(`progress:${p}:`);
+            await coalescer.flushPrefix(`watched:${p}:`);
+            return deleteProfileFn(id);
+          },
+        }
+      : {}),
+    ...(c.getParentalSettings ? { getParentalSettings: c.getParentalSettings.bind(c) } : {}),
+    ...(c.updateParentalSettings
+      ? { updateParentalSettings: c.updateParentalSettings.bind(c) }
+      : {}),
+    ...(c.listParentalLocks ? { listParentalLocks: c.listParentalLocks.bind(c) } : {}),
+    ...(c.setParentalLock ? { setParentalLock: c.setParentalLock.bind(c) } : {}),
+    ...(c.hasParentalPin ? { hasParentalPin: c.hasParentalPin.bind(c) } : {}),
+    ...(c.setParentalPin ? { setParentalPin: c.setParentalPin.bind(c) } : {}),
+    ...(c.verifyParentalPin ? { verifyParentalPin: c.verifyParentalPin.bind(c) } : {}),
+    ...(c.clearParentalPin ? { clearParentalPin: c.clearParentalPin.bind(c) } : {}),
     ...(queryNextEpisodeFn
       ? {
-          queryNextEpisode: async (seriesKey, currentItemKey, profileId) => {
+          queryNextEpisode: async (seriesKey, currentItemKey, profileId, nextOpts) => {
             const p = normalizeProfile(profileId);
             await coalescer.flushPrefix(`progress:${p}:`);
             await coalescer.flushPrefix(`watched:${p}:`);
-            return queryNextEpisodeFn(seriesKey, currentItemKey, profileId);
+            return queryNextEpisodeFn(seriesKey, currentItemKey, profileId, nextOpts);
           },
         }
       : {}),
@@ -299,11 +339,11 @@ export function createCoalescedCatalog(
       : {}),
     ...(listContinueWatchingFn
       ? {
-          listContinueWatching: async (limit, profileId) => {
+          listContinueWatching: async (limit, profileId, listOpts) => {
             const p = normalizeProfile(profileId);
             await coalescer.flushPrefix(`progress:${p}:`);
             await coalescer.flushPrefix(`watched:${p}:`);
-            return listContinueWatchingFn(limit, profileId);
+            return listContinueWatchingFn(limit, profileId, listOpts);
           },
         }
       : {}),
@@ -340,9 +380,9 @@ export function createCoalescedCatalog(
       : {}),
     ...(listFavoritesFn
       ? {
-          listFavorites: async (limit, profileId) => {
+          listFavorites: async (limit, profileId, listOpts) => {
             await coalescer.flushPrefix(`fav:${normalizeProfile(profileId)}:`);
-            return listFavoritesFn(limit, profileId);
+            return listFavoritesFn(limit, profileId, listOpts);
           },
         }
       : {}),

@@ -71,6 +71,8 @@ export interface SettingsScreenProps {
   readonly onSectionChange?: (section: SettingsSection) => void;
   /** Reactive preferences controller wired by `AppShell` from `usePreferences()`. */
   readonly preferences?: SettingsPreferencesController;
+  /** Slot rendering the embedded `ProfilesAndParentalPanel` inside the Profiles & Parental section (`#15`, `#31`). */
+  readonly renderProfiles?: (slot: SettingsPaneSlotProps) => ReactElement;
   /** Slot rendering the embedded `SourcesScreen` inside the Sources section. */
   readonly renderSources?: (slot: SettingsPaneSlotProps) => ReactElement;
   /** Slot rendering the embedded `ThirdPartyNoticesScreen` inside the About & Licenses section. */
@@ -79,6 +81,8 @@ export interface SettingsScreenProps {
   readonly onFocusTopNav?: () => void;
   /** Whether Settings currently owns TV remote focus (`false` while Top Nav owns focus). */
   readonly isActiveScope?: boolean;
+  /** Whether a transient root overlay (e.g. PIN entry or Profile picker) temporarily stole focus; preserves Settings pane. */
+  readonly hasTransientOverlay?: boolean;
   /** Overrides Android-only Video decoder row visibility in Playback settings (`#411`). */
   readonly showAndroidDecoder?: boolean;
 }
@@ -108,6 +112,12 @@ const SECTION_META: readonly NavSectionMeta[] = [
     icon: 'tv',
     labelKey: 'settings.section.liveTv',
     testID: 'settings-tab-liveTv',
+  },
+  {
+    id: 'profiles',
+    icon: 'profile',
+    labelKey: 'settings.section.profiles',
+    testID: 'settings-tab-profiles',
   },
   {
     id: 'sources',
@@ -140,10 +150,12 @@ export function SettingsScreen({
   initialSection = 'appearance',
   onSectionChange,
   preferences,
+  renderProfiles,
   renderSources,
   renderLicenses,
   onFocusTopNav,
   isActiveScope = true,
+  hasTransientOverlay = false,
   showAndroidDecoder = Platform.OS === 'android',
 }: SettingsScreenProps): ReactElement {
   const theme = useTheme();
@@ -254,6 +266,7 @@ export function SettingsScreen({
     onSectionChange: handleSelectSection,
     onActivateControl: handleActivateControl,
     showAndroidDecoder,
+    preservePaneOnBlur: hasTransientOverlay,
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
 
@@ -298,6 +311,10 @@ export function SettingsScreen({
           activeSection === 'liveTv' ? (tv.focusedControlId as LiveTvFocusId | null) : null
         }
       />
+    ) : activeSection === 'profiles' ? (
+      renderProfiles ? (
+        renderProfiles(embeddedSlot)
+      ) : null
     ) : activeSection === 'sources' ? (
       renderSources ? (
         renderSources(embeddedSlot)

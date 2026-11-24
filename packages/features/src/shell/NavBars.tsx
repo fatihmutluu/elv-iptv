@@ -85,7 +85,11 @@ export function UtilitiesRow({
             ]}
           >
             <View style={styles.utilityContent}>
-              <Icon name={util.icon} size={isTv ? 20 : 18} color={fgColor} />
+              {util.renderIcon ? (
+                util.renderIcon({ focused: tvFocused, selected })
+              ) : (
+                <Icon name={util.icon} size={isTv ? 20 : 18} color={fgColor} />
+              )}
               {showLabel ? (
                 <Text
                   numberOfLines={1}

@@ -3,6 +3,7 @@ import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { VideoHost } from '../ports/video-host';
+import { useProfile } from '../shared';
 import type { LiveMode, LiveTabMemory } from './live-model';
 import type { LiveCatalogState } from './useLiveCatalog';
 import { type LiveEmbeddedPreviewState, useLiveEmbeddedPreview } from './useLiveEmbeddedPreview';
@@ -53,11 +54,15 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
     playbackGuard,
   } = opts;
 
+  const { activeProfileId, parentalUnlocked } = useProfile();
   const [previewedChannel, setPreviewedChannel] = useState<TwoStepPreviewEntry | null>(null);
+  const [previewResetSeq, setPreviewResetSeq] = useState(0);
   const previewedRef = useRef<TwoStepPreviewEntry | null>(null);
   previewedRef.current = previewedChannel;
   const modeRef = useRef<LiveMode>(mode);
   modeRef.current = mode;
+  const prevProfileIdRef = useRef(activeProfileId);
+  const prevUnlockedRef = useRef(parentalUnlocked);
   const mountedRef = useRef(true);
   const handoffInFlightRef = useRef(false);
 
@@ -72,6 +77,18 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
     previewedRef.current = null;
     setPreviewedChannel(null);
   }, []);
+
+  // Stop & clear embedded preview immediately on profile switch or parental re-lock (#15, #31).
+  useEffect(() => {
+    const profileChanged = prevProfileIdRef.current !== activeProfileId;
+    const relocked = prevUnlockedRef.current && !parentalUnlocked;
+    prevProfileIdRef.current = activeProfileId;
+    prevUnlockedRef.current = parentalUnlocked;
+    if (profileChanged || relocked) {
+      clearTwoStepPreview();
+      setPreviewResetSeq((n) => n + 1);
+    }
+  }, [activeProfileId, clearTwoStepPreview, parentalUnlocked]);
 
   useEffect(() => {
     if (!liveOkTwoStepPreview || mode === 'favorites') {
@@ -93,6 +110,7 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
     activeChannel: previewChannel,
     sources: readySources,
     catalog,
+    sessionResetKey: previewResetSeq,
     ...(videoHost !== undefined ? { videoHost } : {}),
     ...(playbackGuard !== undefined ? { playbackGuard } : {}),
   });

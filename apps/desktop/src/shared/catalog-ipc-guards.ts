@@ -1,31 +1,43 @@
-import type {
-  AddSourceInput,
-  AlphabetIndexInput,
-  CategoryQueryOptions,
-  ImportProgress,
-  ItemSortOrder,
-  LinkSourceInput,
-  ListItemsOptions,
-  LocalM3uSourceInput,
-  SaveProgressInput,
-  SaveTrackPreferenceInput,
-  SearchOptions,
-  SearchScope,
-  SearchSuggestionsOptions,
-  SourceCategorySelection,
-  SourceSettings,
-  ToggleFavoriteInput,
-  TrackPreferenceResizeMode,
-  UserItemKind,
+import {
+  type AddSourceInput,
+  type AlphabetIndexInput,
+  type CategoryQueryOptions,
+  type CreateProfileInput,
+  type ImportProgress,
+  type ItemSortOrder,
+  isProfileAvatarToken,
+  type LinkSourceInput,
+  type ListItemsOptions,
+  type LocalM3uSourceInput,
+  type ParentalLockFilter,
+  type ParentalQueryOptions,
+  type SaveProgressInput,
+  type SaveTrackPreferenceInput,
+  type SearchOptions,
+  type SearchScope,
+  type SearchSuggestionsOptions,
+  type SetParentalLockInput,
+  type SourceCategorySelection,
+  type SourceSettings,
+  type ToggleFavoriteInput,
+  type TrackPreferenceResizeMode,
+  type UpdateParentalSettingsPatch,
+  type UpdateProfilePatch,
+  type UserItemKind,
 } from '@elv/data';
-import type { ContentKind, ElvError, ErrorCategory, TransportSettings } from '@elv/domain';
+import {
+  type ContentKind,
+  type ElvError,
+  type ErrorCategory,
+  PROFILE_ID_RE,
+  type TransportSettings,
+} from '@elv/domain';
 import { MAX_PICKED_PLAYLIST_BYTES } from './sources-ipc.ts';
 
 const MAX_STRING_CHARS = 8_192;
 export const MAX_ID_CHARS = 256;
 export const MAX_ITEM_KEY_CHARS = 1_024;
 const MAX_TITLE_CHARS = 512;
-const MAX_PROFILE_ID_CHARS = 128;
 const MAX_USER_LIST_LIMIT = 100;
 const MAX_PROGRESS_KEYS = 200;
 const MAX_NOW_NEXT_KEYS = 60;
@@ -99,8 +111,7 @@ export const isSafeRecentChannelKey = (x: unknown): x is string =>
   !x.includes('{{') &&
   !x.includes('@') &&
   !x.includes('?');
-export const isOptionalProfileId = (x: unknown): boolean =>
-  x === undefined || isCleanKey(x, MAX_PROFILE_ID_CHARS);
+export const isOptionalProfileId = (x: unknown): boolean => isOptionalStrictProfileId(x);
 export const isOptionalSourceId = (x: unknown): boolean =>
   x === undefined || isCleanKey(x, MAX_ID_CHARS);
 export const isOptionalUserLimit = (x: unknown): boolean =>
@@ -122,8 +133,81 @@ export function isSearchQuery(x: unknown): x is string {
   return isBoundedString(x, 0, MAX_SEARCH_QUERY_CHARS) && !hasControlChar(x);
 }
 
+const SEARCH_OPT_KEYS = new Set([
+  'scope',
+  'limit',
+  'sourceId',
+  'nowMs',
+  'profileId',
+  'parentalUnlocked',
+]);
+const SEARCH_SUGGESTIONS_OPT_KEYS = new Set(['limit', 'sourceId', 'profileId', 'parentalUnlocked']);
+const ALPHABET_INDEX_INPUT_KEYS = new Set([
+  'kind',
+  'sourceId',
+  'categoryId',
+  'collapseVariants',
+  'groupVersions',
+  'excludeWatched',
+  'profileId',
+  'parentalUnlocked',
+]);
+const SAVE_PROGRESS_INPUT_KEYS = new Set([
+  'profileId',
+  'sourceId',
+  'itemKey',
+  'kind',
+  'title',
+  'subtitle',
+  'logo',
+  'seriesKey',
+  'season',
+  'episode',
+  'positionMs',
+  'durationMs',
+  'watched',
+]);
+const TOGGLE_FAVORITE_INPUT_KEYS = new Set([
+  'profileId',
+  'sourceId',
+  'itemKey',
+  'kind',
+  'title',
+  'logo',
+  'year',
+  'rating',
+]);
+const SAVE_TRACK_PREFERENCE_INPUT_KEYS = new Set([
+  'scopeKey',
+  'sourceId',
+  'profileId',
+  'audioLang',
+  'audioLabel',
+  'subLang',
+  'subLabel',
+  'subDisabled',
+  'audioDelayMs',
+  'subDelayMs',
+  'resizeMode',
+]);
+const CATEGORY_QUERY_OPT_KEYS = new Set([
+  'collapseVariants',
+  'groupVersions',
+  'includeHidden',
+  'profileId',
+  'parentalUnlocked',
+]);
+const LIST_ITEMS_OPT_KEYS = new Set([
+  'sortBy',
+  'excludeWatched',
+  'collapseVariants',
+  'groupVersions',
+  'profileId',
+  'parentalUnlocked',
+]);
+
 export function isSearchOptions(x: unknown): x is SearchOptions {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, SEARCH_OPT_KEYS)) return false;
   const scope = x['scope'];
   if (
     scope !== undefined &&
@@ -140,11 +224,13 @@ export function isSearchOptions(x: unknown): x is SearchOptions {
     return false;
   }
   const nowMs = x['nowMs'];
-  return nowMs === undefined || isNonNegativeFinite(nowMs);
+  if (nowMs !== undefined && !isNonNegativeFinite(nowMs)) return false;
+  if (!isOptionalStrictProfileId(x['profileId'])) return false;
+  return x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean';
 }
 
 export function isSearchSuggestionsOptions(x: unknown): x is SearchSuggestionsOptions {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, SEARCH_SUGGESTIONS_OPT_KEYS)) return false;
   const limit = x['limit'];
   if (
     limit !== undefined &&
@@ -152,11 +238,15 @@ export function isSearchSuggestionsOptions(x: unknown): x is SearchSuggestionsOp
   ) {
     return false;
   }
-  return isOptionalSourceId(x['sourceId']) && isOptionalProfileId(x['profileId']);
+  return (
+    isOptionalSourceId(x['sourceId']) &&
+    isOptionalStrictProfileId(x['profileId']) &&
+    (x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean')
+  );
 }
 
 export function isAlphabetIndexInput(x: unknown): x is AlphabetIndexInput {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, ALPHABET_INDEX_INPUT_KEYS)) return false;
   const kind = x['kind'];
   if (typeof kind !== 'string' || !CONTENT_KINDS.has(kind as ContentKind)) {
     return false;
@@ -172,13 +262,17 @@ export function isAlphabetIndexInput(x: unknown): x is AlphabetIndexInput {
   if (x['excludeWatched'] !== undefined && typeof x['excludeWatched'] !== 'boolean') {
     return false;
   }
-  return isOptionalProfileId(x['profileId']);
+  if (x['parentalUnlocked'] !== undefined && typeof x['parentalUnlocked'] !== 'boolean') {
+    return false;
+  }
+  return isOptionalStrictProfileId(x['profileId']);
 }
 
 export function isSaveProgressInput(x: unknown): x is SaveProgressInput {
   return (
     isRecord(x) &&
-    isOptionalProfileId(x['profileId']) &&
+    hasOnlyKeys(x, SAVE_PROGRESS_INPUT_KEYS) &&
+    isOptionalStrictProfileId(x['profileId']) &&
     isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
     isCleanKey(x['itemKey']) &&
     isUserItemKind(x['kind']) &&
@@ -197,7 +291,8 @@ export function isSaveProgressInput(x: unknown): x is SaveProgressInput {
 export function isToggleFavoriteInput(x: unknown): x is ToggleFavoriteInput {
   return (
     isRecord(x) &&
-    isOptionalProfileId(x['profileId']) &&
+    hasOnlyKeys(x, TOGGLE_FAVORITE_INPUT_KEYS) &&
+    isOptionalStrictProfileId(x['profileId']) &&
     isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
     isCleanKey(x['itemKey']) &&
     isUserItemKind(x['kind']) &&
@@ -223,9 +318,10 @@ const isOptionalNullableResizeMode = (x: unknown): boolean =>
 export function isSaveTrackPreferenceInput(x: unknown): x is SaveTrackPreferenceInput {
   return (
     isRecord(x) &&
+    hasOnlyKeys(x, SAVE_TRACK_PREFERENCE_INPUT_KEYS) &&
     isCleanKey(x['scopeKey']) &&
     isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
-    isOptionalProfileId(x['profileId']) &&
+    isOptionalStrictProfileId(x['profileId']) &&
     isOptionalNullableCleanString(x['audioLang'], MAX_TRACK_LANG_CHARS) &&
     isOptionalNullableCleanString(x['audioLabel'], MAX_TRACK_LABEL_CHARS) &&
     isOptionalNullableCleanString(x['subLang'], MAX_TRACK_LANG_CHARS) &&
@@ -377,15 +473,22 @@ export function isElvError(x: unknown): x is ElvError {
 }
 
 export function isCategoryQueryOptions(x: unknown): x is CategoryQueryOptions {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, CATEGORY_QUERY_OPT_KEYS)) return false;
   if (x['collapseVariants'] !== undefined && typeof x['collapseVariants'] !== 'boolean') {
     return false;
   }
-  return x['groupVersions'] === undefined || typeof x['groupVersions'] === 'boolean';
+  if (x['groupVersions'] !== undefined && typeof x['groupVersions'] !== 'boolean') {
+    return false;
+  }
+  if (x['includeHidden'] !== undefined && typeof x['includeHidden'] !== 'boolean') {
+    return false;
+  }
+  if (!isOptionalStrictProfileId(x['profileId'])) return false;
+  return x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean';
 }
 
 export function isListItemsOptions(x: unknown): x is ListItemsOptions {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, LIST_ITEMS_OPT_KEYS)) return false;
   const sortBy = x['sortBy'];
   if (
     sortBy !== undefined &&
@@ -401,7 +504,116 @@ export function isListItemsOptions(x: unknown): x is ListItemsOptions {
   if (x['groupVersions'] !== undefined && typeof x['groupVersions'] !== 'boolean') {
     return false;
   }
-  return isOptionalProfileId(x['profileId']);
+  if (x['parentalUnlocked'] !== undefined && typeof x['parentalUnlocked'] !== 'boolean') {
+    return false;
+  }
+  return isOptionalStrictProfileId(x['profileId']);
+}
+
+const MAX_PROFILE_NAME_INPUT_CHARS = 128;
+const MAX_PIN_INPUT_CHARS = 32;
+const MAX_RATING_AGE = 21;
+const MAX_UNLOCK_TIMEOUT_MIN = 1_440;
+const CREATE_PROFILE_KEYS = new Set(['name', 'avatarToken', 'isKids']);
+const UPDATE_PARENTAL_SETTINGS_KEYS = new Set([
+  'enabled',
+  'blockAdultKeywords',
+  'maxRatingAge',
+  'unlockTimeoutMin',
+]);
+const PARENTAL_LOCK_FILTER_KEYS = new Set(['sourceId', 'targetKind', 'itemKind']);
+const SET_PARENTAL_LOCK_KEYS = new Set([
+  'profileId',
+  'sourceId',
+  'targetKind',
+  'itemKind',
+  'targetKey',
+]);
+const PARENTAL_QUERY_OPT_KEYS = new Set(['profileId', 'parentalUnlocked']);
+const PARENTAL_UNLOCKED_OPT_KEYS = new Set(['parentalUnlocked']);
+
+function hasOnlyKeys(record: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) return false;
+  }
+  return true;
+}
+
+export const isStrictProfileId = (x: unknown): x is string =>
+  typeof x === 'string' && PROFILE_ID_RE.test(x);
+
+export const isOptionalStrictProfileId = (x: unknown): boolean =>
+  x === undefined || isStrictProfileId(x);
+
+export const isPinString = (x: unknown, min = 0): x is string =>
+  isBoundedString(x, min, MAX_PIN_INPUT_CHARS) && !hasControlChar(x);
+
+export function isParentalQueryOptions(x: unknown): x is ParentalQueryOptions {
+  if (!isRecord(x) || !hasOnlyKeys(x, PARENTAL_QUERY_OPT_KEYS)) return false;
+  if (!isOptionalStrictProfileId(x['profileId'])) return false;
+  return x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean';
+}
+
+export function isParentalUnlockedOption(x: unknown): x is { readonly parentalUnlocked?: boolean } {
+  if (!isRecord(x) || !hasOnlyKeys(x, PARENTAL_UNLOCKED_OPT_KEYS)) return false;
+  return x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean';
+}
+
+export function isCreateProfileInput(x: unknown): x is CreateProfileInput {
+  if (!isRecord(x) || !hasOnlyKeys(x, CREATE_PROFILE_KEYS)) return false;
+  if (!isCleanKey(x['name'], MAX_PROFILE_NAME_INPUT_CHARS)) return false;
+  if (x['avatarToken'] !== undefined && !isProfileAvatarToken(x['avatarToken'])) return false;
+  return x['isKids'] === undefined || typeof x['isKids'] === 'boolean';
+}
+
+export function isUpdateProfilePatch(x: unknown): x is UpdateProfilePatch {
+  if (!isRecord(x) || !hasOnlyKeys(x, CREATE_PROFILE_KEYS)) return false;
+  if (x['name'] !== undefined && !isCleanKey(x['name'], MAX_PROFILE_NAME_INPUT_CHARS)) return false;
+  if (x['avatarToken'] !== undefined && !isProfileAvatarToken(x['avatarToken'])) return false;
+  return x['isKids'] === undefined || typeof x['isKids'] === 'boolean';
+}
+
+export function isUpdateParentalSettingsPatch(x: unknown): x is UpdateParentalSettingsPatch {
+  if (!isRecord(x) || !hasOnlyKeys(x, UPDATE_PARENTAL_SETTINGS_KEYS)) return false;
+  if (x['enabled'] !== undefined && typeof x['enabled'] !== 'boolean') return false;
+  if (x['blockAdultKeywords'] !== undefined && typeof x['blockAdultKeywords'] !== 'boolean') {
+    return false;
+  }
+  const maxAge = x['maxRatingAge'];
+  if (
+    maxAge !== undefined &&
+    maxAge !== null &&
+    (!isSafeInt(maxAge) || maxAge < 0 || maxAge > MAX_RATING_AGE)
+  ) {
+    return false;
+  }
+  const timeout = x['unlockTimeoutMin'];
+  return (
+    timeout === undefined ||
+    (isSafeInt(timeout) && timeout >= 0 && timeout <= MAX_UNLOCK_TIMEOUT_MIN)
+  );
+}
+
+export function isParentalLockFilter(x: unknown): x is ParentalLockFilter {
+  if (!isRecord(x) || !hasOnlyKeys(x, PARENTAL_LOCK_FILTER_KEYS)) return false;
+  if (!isOptionalSourceId(x['sourceId'])) return false;
+  const targetKind = x['targetKind'];
+  if (targetKind !== undefined && targetKind !== 'category' && targetKind !== 'item') return false;
+  const itemKind = x['itemKind'];
+  return (
+    itemKind === undefined ||
+    (typeof itemKind === 'string' && CONTENT_KINDS.has(itemKind as ContentKind))
+  );
+}
+
+export function isSetParentalLockInput(x: unknown): x is SetParentalLockInput {
+  if (!isRecord(x) || !hasOnlyKeys(x, SET_PARENTAL_LOCK_KEYS)) return false;
+  if (!isOptionalStrictProfileId(x['profileId'])) return false;
+  if (!isCleanKey(x['sourceId'], MAX_ID_CHARS)) return false;
+  if (x['targetKind'] !== 'category' && x['targetKind'] !== 'item') return false;
+  const itemKind = x['itemKind'];
+  if (typeof itemKind !== 'string' || !CONTENT_KINDS.has(itemKind as ContentKind)) return false;
+  return isCleanKey(x['targetKey'], MAX_ITEM_KEY_CHARS);
 }
 
 export function isSourceIdList(x: unknown): x is readonly string[] {
