@@ -90,35 +90,34 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - name: Install FFmpeg
+      - name: Restore FFmpeg cache
+        id: ffmpeg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/ffmpeg-b6.1.1
+          key: ffmpeg-linux-x64-b6.1.1
+      # Pinned static test-only FFmpeg binary for the stream simulator (never shipped in app builds).
+      - name: Install FFmpeg b6.1.1
+        env:
+          FFMPEG_TAG: b6.1.1
+          FFMPEG_GZ_SHA256: bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa
         run: |
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            export DEBIAN_FRONTEND=noninteractive
-            apt_opts=(
-              -o Acquire::ForceIPv4=true
-              -o Acquire::http::Timeout=15
-              -o Acquire::https::Timeout=15
-              -o Acquire::Retries=2
-            )
-            install_ffmpeg() {
-              if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-                sudo -E timeout 90 apt-get update -qq "${apt_opts[@]}" \
-                  -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" \
-                  -o Dir::Etc::sourceparts="-" \
-                  -o APT::Get::List-Cleanup="0" || return 1
-              else
-                sudo -E timeout 90 apt-get update -qq "${apt_opts[@]}" || return 1
-              fi
-              sudo -E timeout 180 apt-get install -y -qq --no-install-recommends "${apt_opts[@]}" ffmpeg || return 1
-            }
-            if ! install_ffmpeg; then
-              echo "::warning::Default Ubuntu mirror timed out or failed; falling back to archive.ubuntu.com"
-              if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-                sudo sed -i 's|http://azure\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
-              fi
-              install_ffmpeg
-            fi
+          install_dir="$HOME/.local/ffmpeg-${FFMPEG_TAG}"
+          if [ ! -x "$install_dir/ffmpeg" ]; then
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg-linux-x64.gz" \
+              "https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_TAG}/ffmpeg-linux-x64.gz"
+            echo "${FFMPEG_GZ_SHA256}  $RUNNER_TEMP/ffmpeg-linux-x64.gz" | sha256sum --check --quiet
+            mkdir -p "$install_dir"
+            gzip -dc "$RUNNER_TEMP/ffmpeg-linux-x64.gz" > "$install_dir/ffmpeg"
+            chmod +x "$install_dir/ffmpeg"
           fi
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Save FFmpeg cache
+        if: github.ref == 'refs/heads/main' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/ffmpeg-b6.1.1
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
       - name: Run Vitest unit & simulator suites
         env:
           ELV_BENCH: ${{ github.event_name == 'push' && '1' || '' }}
