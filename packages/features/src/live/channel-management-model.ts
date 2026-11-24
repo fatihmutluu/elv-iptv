@@ -15,9 +15,6 @@ export type ChannelRowAction =
   | 'moveDown'
   | 'addToGroup';
 
-/** Focusable controls inside an inline channel rename editor. */
-export type InlineRenameControl = 'input' | 'save' | 'cancel';
-
 /** Virtual 2D TV focus row descriptor inside {@link ChannelGroupsManagerTab}. */
 export type GroupTabFocusRow =
   | { readonly kind: 'create'; readonly cols: readonly ['input', 'add'] }
