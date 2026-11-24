@@ -15,6 +15,7 @@ type SubtitleChoice =
 interface ReconciledTracks {
   readonly audioTrackId?: string;
   readonly subtitleTrackId?: string | null;
+  readonly secondarySubtitleTrackId?: string | null;
 }
 
 interface TrackPreferences {
@@ -23,6 +24,9 @@ interface TrackPreferences {
   loadOptions(base?: LoadOptions): LoadOptions;
   selectAudio(id: string, tracks: MediaTracks, loaded: boolean): void;
   selectSubtitle(id: string | null, tracks: MediaTracks, loaded: boolean): void;
+  selectSecondarySubtitle(id: string | null, tracks: MediaTracks, loaded: boolean): void;
+  currentSubtitleId(): string | null | undefined;
+  currentSecondarySubtitleId(): string | null | undefined;
   reconcile(tracks: MediaTracks): ReconciledTracks;
 }
 
@@ -82,29 +86,42 @@ function resolveChoice(
 export function createTrackPreferences(): TrackPreferences {
   let audio: TrackChoice | undefined;
   let subtitle: SubtitleChoice = { kind: 'default' };
+  let secondarySubtitle: SubtitleChoice = { kind: 'default' };
   let audioReapplied = false;
   let subtitleReapplied = false;
+  let secondarySubtitleReapplied = false;
 
   return {
     reset() {
       audio = undefined;
       subtitle = { kind: 'default' };
+      secondarySubtitle = { kind: 'default' };
       audioReapplied = false;
       subtitleReapplied = false;
+      secondarySubtitleReapplied = false;
     },
 
     beginReload() {
       audioReapplied = false;
       subtitleReapplied = false;
+      secondarySubtitleReapplied = false;
     },
 
     loadOptions(base) {
+      const primarySubId = subtitle.kind === 'selected' ? subtitle.choice.id : null;
+      const secondaryOption =
+        secondarySubtitle.kind === 'default'
+          ? {}
+          : secondarySubtitle.kind === 'off' || secondarySubtitle.choice.id === primarySubId
+            ? { secondarySubtitleTrackId: null }
+            : { secondarySubtitleTrackId: secondarySubtitle.choice.id };
       return {
         ...base,
         ...(audio === undefined ? {} : { audioTrackId: audio.id }),
         ...(subtitle.kind === 'default'
           ? {}
           : { subtitleTrackId: subtitle.kind === 'off' ? null : subtitle.choice.id }),
+        ...secondaryOption,
       };
     },
 
@@ -125,9 +142,31 @@ export function createTrackPreferences(): TrackPreferences {
       if (loaded) subtitleReapplied = true;
     },
 
+    selectSecondarySubtitle(id, tracks, loaded) {
+      if (id === null) {
+        secondarySubtitle = { kind: 'off' };
+      } else {
+        const matched = tracks.subtitles.find((t) => t.id === id);
+        const prev = secondarySubtitle.kind === 'selected' ? secondarySubtitle.choice : undefined;
+        secondarySubtitle = { kind: 'selected', choice: toChoice(id, matched, prev) };
+      }
+      if (loaded) secondarySubtitleReapplied = true;
+    },
+
+    currentSubtitleId() {
+      if (subtitle.kind === 'default') return undefined;
+      return subtitle.kind === 'off' ? null : subtitle.choice.id;
+    },
+
+    currentSecondarySubtitleId() {
+      if (secondarySubtitle.kind === 'default') return undefined;
+      return secondarySubtitle.kind === 'off' ? null : secondarySubtitle.choice.id;
+    },
+
     reconcile(tracks) {
       let audioTrackId: string | undefined;
       let subtitleTrackId: string | null | undefined;
+      let secondarySubtitleTrackId: string | null | undefined;
 
       if (audio !== undefined) {
         if (audioReapplied) {
@@ -177,9 +216,71 @@ export function createTrackPreferences(): TrackPreferences {
         }
       }
 
+      const effectivePrimaryId =
+        subtitleTrackId !== undefined ? subtitleTrackId : tracks.selectedSubtitleId;
+
+      if (secondarySubtitle.kind === 'off') {
+        if (!secondarySubtitleReapplied) {
+          if (
+            tracks.selectedSecondarySubtitleId !== null &&
+            tracks.selectedSecondarySubtitleId !== undefined
+          ) {
+            secondarySubtitleReapplied = true;
+            secondarySubtitleTrackId = null;
+          } else if (tracks.subtitles.length > 0) {
+            secondarySubtitleReapplied = true;
+          }
+        }
+      } else if (secondarySubtitle.kind === 'selected') {
+        if (secondarySubtitleReapplied) {
+          if (
+            secondarySubtitle.choice.language === undefined &&
+            secondarySubtitle.choice.label === undefined
+          ) {
+            const currentId = secondarySubtitle.choice.id;
+            const exact = tracks.subtitles.find((t) => t.id === currentId);
+            if (exact) {
+              secondarySubtitle = {
+                kind: 'selected',
+                choice: toChoice(exact.id, exact, secondarySubtitle.choice),
+              };
+            }
+          }
+        } else {
+          const candidates =
+            effectivePrimaryId === null
+              ? tracks.subtitles
+              : tracks.subtitles.filter((t) => t.id !== effectivePrimaryId);
+          const resolved = resolveChoice(candidates, secondarySubtitle.choice);
+          if (resolved !== undefined) {
+            secondarySubtitle = {
+              kind: 'selected',
+              choice: toChoice(resolved.id, resolved, secondarySubtitle.choice),
+            };
+            secondarySubtitleReapplied = true;
+            if (tracks.selectedSecondarySubtitleId !== resolved.id) {
+              secondarySubtitleTrackId = resolved.id;
+            }
+          } else if (effectivePrimaryId !== null) {
+            const colliding = resolveChoice(tracks.subtitles, secondarySubtitle.choice);
+            if (colliding !== undefined && colliding.id === effectivePrimaryId) {
+              secondarySubtitle = { kind: 'off' };
+              secondarySubtitleReapplied = true;
+              if (
+                tracks.selectedSecondarySubtitleId !== null &&
+                tracks.selectedSecondarySubtitleId !== undefined
+              ) {
+                secondarySubtitleTrackId = null;
+              }
+            }
+          }
+        }
+      }
+
       return {
         ...(audioTrackId === undefined ? {} : { audioTrackId }),
         ...(subtitleTrackId === undefined ? {} : { subtitleTrackId }),
+        ...(secondarySubtitleTrackId === undefined ? {} : { secondarySubtitleTrackId }),
       };
     },
   };

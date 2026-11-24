@@ -161,6 +161,10 @@ export interface PlayerOverlayStateParams {
   audioDelayMs?: number | undefined;
   hasSubtitleDelay?: boolean | undefined;
   subtitleDelayMs?: number | undefined;
+  hasSubtitleStyle?: boolean | undefined;
+  hasDualSubtitles?: boolean | undefined;
+  canPickSubtitleFile?: boolean | undefined;
+  canLoadSubtitleUrl?: boolean | undefined;
   hasVideoQuality?: boolean | undefined;
   selectedVideoQualityId?: string | null | undefined;
   qualityVariants?: readonly LiveVariantOption[] | undefined;

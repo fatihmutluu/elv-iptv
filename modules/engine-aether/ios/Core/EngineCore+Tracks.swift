@@ -11,7 +11,7 @@ extension EngineCore {
     }
   }
 
-  /// Selects subtitle track `id` (`"s:<streamId>"`) in place, or disables subtitles and clears cues when `nil`.
+  /// Selects primary subtitle track `id` (`"s:<streamId>"` or external ID) in place, or disables primary subtitles when `nil`.
   public func selectSubtitleTrack(_ attempt: Int, id: String?) {
     guard !released else { return }
     adopt(attempt)
@@ -20,15 +20,57 @@ extension EngineCore {
       sink?.clearSubtitles()
     }
     if active {
+      if outcome.clearedSecondary {
+        backend.selectSecondarySubtitleTrack(nil)
+      }
       if outcome.clear {
         backend.selectSubtitleTrack(nil)
       } else if let streamId = outcome.streamId {
         backend.selectSubtitleTrack(streamId)
+      } else if let externalId = outcome.externalId {
+        backend.selectExternalSubtitleTrack(externalId)
       }
       if let immediate = outcome.immediateTracks {
         emit(.tracks(attempt: token, tracks: immediate))
       }
     }
+  }
+
+  /// Selects secondary subtitle track `id` (or disables secondary subtitles when `nil`), enforcing
+  /// `secondary != primary` and rejecting simultaneous embedded+embedded pairs because Apple `AetherEngine`
+  /// decodes one embedded subtitle stream at a time (embedded primary pairs with external secondary;
+  /// external or Off primary pairs with either embedded or external secondary, `#402`).
+  public func selectSecondarySubtitleTrack(_ attempt: Int, id: String?) {
+    guard !released else { return }
+    adopt(attempt)
+    let outcome = trackState.selectSecondarySubtitle(id)
+    guard outcome.valid else { return }
+    if active {
+      backend.selectSecondarySubtitleTrack(outcome.secondaryId)
+      if let immediate = outcome.immediateTracks {
+        emit(.tracks(attempt: token, tracks: immediate))
+      }
+    }
+  }
+
+  /// Attaches an external sidecar subtitle track to the active media and remembers it across recovery retries (`#32`, `#308`).
+  public func addExternalSubtitle(_ attempt: Int, track: ExternalSubtitleDescriptor) {
+    guard !released else { return }
+    adopt(attempt)
+    let cleanId = track.id.trimmingCharacters(in: .whitespacesAndNewlines)
+    let cleanUri = track.uri.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !cleanId.isEmpty, !cleanUri.isEmpty else { return }
+    var normalized = track
+    normalized.id = cleanId
+    normalized.uri = cleanUri
+    if var request = currentRequest {
+      if !request.externalSubtitles.contains(where: { $0.id == cleanId }) {
+        request.externalSubtitles.append(normalized)
+        currentRequest = request
+      }
+    }
+    guard active else { return }
+    backend.addExternalSubtitle(normalized)
   }
 
   /// Shifts audio timing relative to video in milliseconds (`[-30_000, 30_000]`, `#59`).
@@ -96,6 +138,13 @@ extension EngineCore {
       backend.selectSubtitleTrack(nil)
     } else if let subtitleStream = outcome.selectSubtitleStreamId {
       backend.selectSubtitleTrack(subtitleStream)
+    } else if let externalSubId = outcome.selectExternalSubtitleId {
+      backend.selectExternalSubtitleTrack(externalSubId)
+    }
+    if outcome.clearSecondarySubtitle {
+      backend.selectSecondarySubtitleTrack(nil)
+    } else if let secondaryId = outcome.selectSecondarySubtitleId {
+      backend.selectSecondarySubtitleTrack(secondaryId)
     }
     if let toEmit = outcome.toEmit {
       emit(.tracks(attempt: token, tracks: toEmit))

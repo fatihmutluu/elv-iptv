@@ -34,6 +34,9 @@ final class EngineObject: SharedObject, @unchecked Sendable {
       if rebuildFirst, !driver.recreatePlayback(attempt) {
         return
       }
+      if let style = request.subtitleStyle {
+        driver.setSubtitleStyle(style)
+      }
       driver.core.load(request, attempt: attempt)
     }
   }
@@ -143,6 +146,30 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     enqueueMain { [weak self] in
       guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.ensureDriver() else { return }
       driver.core.selectSubtitleTrack(attempt, id: id)
+    }
+  }
+
+  func selectSecondarySubtitleTrack(_ attempt: Int, id: String?) {
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
+    enqueueMain { [weak self] in
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.ensureDriver() else { return }
+      driver.core.selectSecondarySubtitleTrack(attempt, id: id)
+    }
+  }
+
+  func addExternalSubtitle(_ attempt: Int, track: ExternalSubtitleDescriptor) {
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
+    enqueueMain { [weak self] in
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.ensureDriver() else { return }
+      driver.core.addExternalSubtitle(attempt, track: track)
+    }
+  }
+
+  func setSubtitleStyle(_ style: UserSubtitleStyleOverride?) {
+    guard !fence.isDisposedNow else { return }
+    enqueueMain { [weak self] in
+      guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
+      driver.setSubtitleStyle(style)
     }
   }
 

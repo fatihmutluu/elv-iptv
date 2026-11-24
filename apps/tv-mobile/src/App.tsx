@@ -143,6 +143,7 @@ function AppRoot() {
             resizeMode,
             subtitleBottomInsetPx,
             subtitleFontFamily,
+            subtitleStyle,
             surfaceRecreationToken,
             useTextureView,
             osdVisible,
@@ -154,6 +155,7 @@ function AppRoot() {
               {...(resizeMode !== undefined ? { resizeMode } : {})}
               {...(subtitleBottomInsetPx !== undefined ? { subtitleBottomInsetPx } : {})}
               {...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {})}
+              {...(subtitleStyle !== undefined ? { subtitleStyle } : {})}
               {...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {})}
               {...(useTextureView !== undefined ? { useTextureView } : {})}
               {...(osdVisible !== undefined ? { osdVisible } : {})}

@@ -230,6 +230,18 @@ class ElvEngineMedia3Module : Module() {
         engine.selectSubtitleTrack(attempt, id)
       }
 
+      Function("selectSecondarySubtitleTrack") { engine: Media3Engine, attempt: Int, id: String? ->
+        engine.selectSecondarySubtitleTrack(attempt, id)
+      }
+
+      Function("addExternalSubtitle") { engine: Media3Engine, attempt: Int, raw: Map<String, Any?> ->
+        parseExternalSubtitleConfig(raw)?.let { engine.addExternalSubtitle(attempt, it) }
+      }
+
+      Function("setSubtitleStyle") { engine: Media3Engine, raw: Map<String, Any?>? ->
+        engine.setSubtitleStyle(SubtitleStyleMapper.parse(raw))
+      }
+
       Function("setAudioDelay") { engine: Media3Engine, attempt: Int, delayMs: Double ->
         if (delayMs.isFinite()) engine.setAudioDelay(attempt, delayMs.roundToLong())
       }
@@ -258,6 +270,10 @@ class ElvEngineMedia3Module : Module() {
 
       Prop("subtitleFontFamily") { view: Media3SurfaceView, family: String? ->
         view.setSubtitleFontFamily(family)
+      }
+
+      Prop("subtitleStyle") { view: Media3SurfaceView, style: Map<String, Any?>? ->
+        view.setSubtitleStyleMap(style)
       }
 
       Prop("surfaceRecreationToken") { view: Media3SurfaceView, token: Int? ->

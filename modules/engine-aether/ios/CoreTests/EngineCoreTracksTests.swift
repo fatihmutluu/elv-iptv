@@ -259,4 +259,211 @@ struct EngineCoreTracksTests {
     forcedOff.selectedSubtitleId = nil
     #expect(sink.events == [.tracks(attempt: 1, tracks: forcedOff)])
   }
+
+  @Test("selectSecondarySubtitleTrack enforces secondary != primary collision guard and emits selectedSecondarySubtitleId (#402)")
+  func dualSubtitlesCollisionGuardAndPersistence() {
+    let (core, backend, sink, _) = makeHarness()
+    let extTrack = ExternalSubtitleDescriptor(
+      id: "ext:fr",
+      uri: "https://subs.example/fr.vtt",
+      label: "French (External)",
+      language: "fr",
+      mimeType: "text/vtt"
+    )
+    core.load(
+      LoadRequest(
+        url: "http://h:7878/movie/demo/demo/200011.mkv",
+        live: false,
+        subtitlePreference: .selected("s:3"),
+        externalSubtitles: [extTrack]
+      ),
+      attempt: 1
+    )
+
+    let tracksWithExt = MediaTracksOut(
+      audio: sampleTracks.audio,
+      subtitles: sampleTracks.subtitles + [
+        TrackInfoOut(id: "ext:fr", language: "fr", label: "French (External)", codec: "vtt", external: true),
+      ],
+      selectedAudioId: "a:1",
+      selectedSubtitleId: "s:3",
+      selectedSecondarySubtitleId: nil
+    )
+    core.observe(.tracks(tracksWithExt), serial: 1)
+    backend.calls.removeAll()
+    sink.events.removeAll()
+
+    // Collision guard: selecting the active primary as secondary must be rejected!
+    core.selectSecondarySubtitleTrack(2, id: "s:3")
+    #expect(backend.calls.isEmpty)
+    #expect(sink.events.isEmpty)
+
+    // Selecting an external track as secondary succeeds and emits selectedSecondarySubtitleId.
+    core.selectSecondarySubtitleTrack(3, id: "ext:fr")
+    #expect(backend.calls == [.selectSecondarySubtitleTrack("ext:fr")])
+    var expectedDual = tracksWithExt
+    expectedDual.selectedSecondarySubtitleId = "ext:fr"
+    #expect(sink.events == [.tracks(attempt: 3, tracks: expectedDual)])
+
+    let payload = sink.events[0].payload
+    let tracksDict = payload["tracks"] as? [String: Any]
+    #expect(tracksDict?["selectedSecondarySubtitleId"] as? String == "ext:fr")
+    let subDicts = tracksDict?["subtitles"] as? [[String: Any]]
+    #expect(subDicts?.last?["external"] as? Bool == true)
+
+    // Switching primary to the current secondary automatically clears secondary (never colliding!).
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    core.selectSubtitleTrack(4, id: "ext:fr")
+    #expect(backend.calls == [.selectSecondarySubtitleTrack(nil), .selectExternalSubtitleTrack("ext:fr")])
+    var expectedSwapped = expectedDual
+    expectedSwapped.selectedSubtitleId = "ext:fr"
+    expectedSwapped.selectedSecondarySubtitleId = nil
+    #expect(sink.events == [.tracks(attempt: 4, tracks: expectedSwapped)])
+
+    // Now selecting embedded "s:4" as secondary while external "ext:fr" is primary succeeds!
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    core.selectSecondarySubtitleTrack(5, id: "s:4")
+    #expect(backend.calls == [.selectSecondarySubtitleTrack("s:4")])
+    var expectedReverseDual = expectedSwapped
+    expectedReverseDual.selectedSecondarySubtitleId = "s:4"
+    #expect(sink.events == [.tracks(attempt: 5, tracks: expectedReverseDual)])
+
+    // Turning secondary off clears it cleanly.
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    core.selectSecondarySubtitleTrack(6, id: nil)
+    #expect(backend.calls == [.selectSecondarySubtitleTrack(nil)])
+    #expect(sink.events == [.tracks(attempt: 6, tracks: expectedSwapped)])
+  }
+
+  @Test("dual subtitles allow Off+embedded and reject simultaneous embedded+embedded pairs on Apple AetherEngine (#402)")
+  func dualSubtitlesOffEmbeddedAndEmbeddedPairRejection() {
+    let (core, backend, sink, _) = makeHarness()
+    let extTrack = ExternalSubtitleDescriptor(
+      id: "ext:fr",
+      uri: "https://subs.example/fr.vtt",
+      label: "French (External)",
+      language: "fr",
+      mimeType: "text/vtt"
+    )
+    core.load(
+      LoadRequest(
+        url: "http://h:7878/movie/demo/demo/200011.mkv",
+        live: false,
+        subtitlePreference: .selected("s:3"),
+        secondarySubtitleTrackId: "s:4",
+        externalSubtitles: [extTrack]
+      ),
+      attempt: 1
+    )
+
+    // Embedded+embedded pair on initial load must NOT persist secondary embedded track.
+    guard case let .start(_, initialOpts, 1)? = backend.calls.last else {
+      Issue.record("expected start on load")
+      return
+    }
+    #expect(initialOpts.initialSubtitleTrackId == 3)
+    #expect(initialOpts.secondarySubtitleTrackId == nil)
+
+    let tracksWithExt = MediaTracksOut(
+      audio: sampleTracks.audio,
+      subtitles: sampleTracks.subtitles + [
+        TrackInfoOut(id: "ext:fr", language: "fr", label: "French (External)", codec: "vtt", external: true),
+      ],
+      selectedAudioId: "a:1",
+      selectedSubtitleId: "s:3",
+      selectedSecondarySubtitleId: nil
+    )
+    core.observe(.tracks(tracksWithExt), serial: 1)
+    backend.calls.removeAll()
+    sink.events.removeAll()
+
+    // Embedded primary ("s:3") + embedded secondary ("s:4") MUST be rejected (no false active state!).
+    core.selectSecondarySubtitleTrack(2, id: "s:4")
+    #expect(backend.calls.isEmpty)
+    #expect(sink.events.isEmpty)
+
+    // Embedded primary ("s:3") + external secondary ("ext:fr") succeeds.
+    core.selectSecondarySubtitleTrack(3, id: "ext:fr")
+    #expect(backend.calls == [.selectSecondarySubtitleTrack("ext:fr")])
+    #expect(sink.events.last == .tracks(attempt: 3, tracks: MediaTracksOut(
+      audio: tracksWithExt.audio,
+      subtitles: tracksWithExt.subtitles,
+      selectedAudioId: "a:1",
+      selectedSubtitleId: "s:3",
+      selectedSecondarySubtitleId: "ext:fr"
+    )))
+
+    // Turning primary Off and selecting embedded secondary ("s:4") succeeds!
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    core.selectSubtitleTrack(4, id: nil)
+    #expect(backend.calls == [.selectSubtitleTrack(nil)])
+
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    core.selectSecondarySubtitleTrack(5, id: "s:4")
+    #expect(backend.calls == [.selectSecondarySubtitleTrack("s:4")])
+    #expect(sink.events == [.tracks(attempt: 5, tracks: MediaTracksOut(
+      audio: tracksWithExt.audio,
+      subtitles: tracksWithExt.subtitles,
+      selectedAudioId: "a:1",
+      selectedSubtitleId: nil,
+      selectedSecondarySubtitleId: "s:4"
+    ))])
+
+    // Selecting embedded primary ("s:3") while embedded secondary ("s:4") is active clears "s:4" automatically.
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    core.selectSubtitleTrack(6, id: "s:3")
+    #expect(backend.calls == [.selectSecondarySubtitleTrack(nil), .selectSubtitleTrack(3)])
+    #expect(sink.events == [.tracks(attempt: 6, tracks: MediaTracksOut(
+      audio: tracksWithExt.audio,
+      subtitles: tracksWithExt.subtitles,
+      selectedAudioId: "a:1",
+      selectedSubtitleId: nil,
+      selectedSecondarySubtitleId: nil
+    ))])
+
+    // External primary ("ext:fr") + embedded secondary ("s:4") succeeds.
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    core.selectSubtitleTrack(7, id: "ext:fr")
+    core.selectSecondarySubtitleTrack(8, id: "s:4")
+    #expect(backend.calls == [.selectExternalSubtitleTrack("ext:fr"), .selectSecondarySubtitleTrack("s:4")])
+    #expect(sink.events.last == .tracks(attempt: 8, tracks: MediaTracksOut(
+      audio: tracksWithExt.audio,
+      subtitles: tracksWithExt.subtitles,
+      selectedAudioId: "a:1",
+      selectedSubtitleId: "ext:fr",
+      selectedSecondarySubtitleId: "s:4"
+    )))
+  }
+
+  @Test("addExternalSubtitle forwards to backend and persists across retry (#32, #308)")
+  func addExternalSubtitleForwardsAndPersistsAcrossRetry() {
+    let (core, backend, _, _) = makeHarness()
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/200011.mkv", live: false), attempt: 1)
+    backend.calls.removeAll()
+
+    let ext = ExternalSubtitleDescriptor(
+      id: "ext:es",
+      uri: "https://subs.example/es.srt",
+      label: "Spanish",
+      language: "es",
+      headers: ["X-Sub": "1"]
+    )
+    core.addExternalSubtitle(2, track: ext)
+    #expect(backend.calls == [.addExternalSubtitle(ext)])
+
+    backend.calls.removeAll()
+    core.retry(3)
+    guard case let .start(_, opts, 2)? = backend.calls.last else {
+      Issue.record("expected start on retry")
+      return
+    }
+    #expect(opts.externalSubtitles == [ext])
+  }
 }

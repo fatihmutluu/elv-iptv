@@ -1,13 +1,27 @@
-import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
+import type { AccessibilityFontFamily, DeinterlaceMode, SubtitleStyleConfig } from '@elv/domain';
 import type {
   AttemptToken,
   EngineCapabilities,
   EngineEvent,
+  ExternalSubtitleTrack,
   LoadCommand,
   StreamRequest,
 } from '@elv/playback';
+import {
+  ADD_EXTERNAL_SUBTITLE_CMD_KEYS,
+  hasOnlyKeys,
+  isExternalSubtitleTrack,
+  isSubtitleStyleConfig,
+  MAX_EXTERNAL_SUBTITLES_PER_LOAD,
+  SET_SUBTITLE_STYLE_CMD_KEYS,
+} from './player-ipc-subtitles.ts';
 
-export type { AccessibilityFontFamily, DeinterlaceMode };
+export type {
+  AccessibilityFontFamily,
+  DeinterlaceMode,
+  ExternalSubtitleTrack,
+  SubtitleStyleConfig,
+};
 
 /** Request payload for queueing the next VOD episode via mpv `append-play` (`#205`). */
 export interface QueueNextRequest {
@@ -53,6 +67,9 @@ export const DESKTOP_CAPABILITIES: EngineCapabilities = Object.freeze({
   audioDelay: true,
   subtitleDelay: true,
   videoQualitySelection: true,
+  externalSubtitles: true,
+  subtitleStyling: true,
+  dualSubtitles: true,
 });
 
 /** One desktop `libmpv` audio output device reported via `audio-device-list` (`#408`). */
@@ -98,6 +115,7 @@ export const PLAYER_CHANNELS = Object.freeze({
   area: 'player:area',
   ui: 'player:ui',
   remoteMediaAction: 'player:remote-media-action',
+  pickSubtitleFile: 'player:pick-subtitle-file',
   gateReport: 'gate:report',
 } as const);
 
@@ -137,6 +155,8 @@ export type BridgeCommand =
   | { name: 'selectAudioTrack'; attempt: AttemptToken; id: string }
   | { name: 'selectSubtitleTrack'; attempt: AttemptToken; id: string | null }
   | { name: 'selectSecondarySubtitleTrack'; attempt: AttemptToken; id: string | null }
+  | { name: 'addExternalSubtitle'; attempt: AttemptToken; track: ExternalSubtitleTrack }
+  | { name: 'setSubtitleStyle'; style: SubtitleStyleConfig }
   | { name: 'selectVideoQuality'; attempt: AttemptToken; id: string | null }
   | { name: 'setVolume'; volume: number }
   | { name: 'setAudioDelay'; attempt?: AttemptToken; delaySec: number }
@@ -201,6 +221,8 @@ export interface PlayerBridge {
   onRemoteMediaAction?(listener: (message: PlayerRemoteMediaActionMessage) => void): () => void;
   /** Subscribes to decoded GPU `VideoFrame` deliveries for `engineId` in `'canvas'` mode (`#95`); returns unsubscribe. */
   onFrame?(engineId: string, listener: (frame: VideoFrameLike) => void): () => void;
+  /** Opens a sandboxed OS subtitle file picker and returns a validated track, or `null` when canceled (`#32`). */
+  pickSubtitleFile?(): Promise<ExternalSubtitleTrack | null>;
   /** Dev gate only: one `ELV_GATE_PLAYER {...}` line for main to print. */
   reportGate(line: string): void;
 }
@@ -441,7 +463,15 @@ function isLoadCommand(x: unknown): x is LoadCommand {
     (options['audioTrackId'] === undefined || isAudioTrackId(options['audioTrackId'])) &&
     (options['subtitleTrackId'] === undefined ||
       options['subtitleTrackId'] === null ||
-      isSubtitleTrackId(options['subtitleTrackId']))
+      isSubtitleTrackId(options['subtitleTrackId'])) &&
+    (options['secondarySubtitleTrackId'] === undefined ||
+      options['secondarySubtitleTrackId'] === null ||
+      isSubtitleTrackId(options['secondarySubtitleTrackId'])) &&
+    (options['externalSubtitles'] === undefined ||
+      (Array.isArray(options['externalSubtitles']) &&
+        options['externalSubtitles'].length <= MAX_EXTERNAL_SUBTITLES_PER_LOAD &&
+        options['externalSubtitles'].every((t) => isExternalSubtitleTrack(t, isHeaders)))) &&
+    (options['subtitleStyle'] === undefined || isSubtitleStyleConfig(options['subtitleStyle']))
   );
 }
 
@@ -466,6 +496,14 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
     case 'selectSubtitleTrack':
     case 'selectSecondarySubtitleTrack':
       return isAttempt(x['attempt']) && (x['id'] === null || isSubtitleTrackId(x['id']));
+    case 'addExternalSubtitle':
+      return (
+        hasOnlyKeys(x, ADD_EXTERNAL_SUBTITLE_CMD_KEYS) &&
+        isAttempt(x['attempt']) &&
+        isExternalSubtitleTrack(x['track'], isHeaders)
+      );
+    case 'setSubtitleStyle':
+      return hasOnlyKeys(x, SET_SUBTITLE_STYLE_CMD_KEYS) && isSubtitleStyleConfig(x['style']);
     case 'selectVideoQuality':
       return isAttempt(x['attempt']) && (x['id'] === null || isVideoQualityId(x['id']));
     case 'setVolume':
@@ -502,6 +540,11 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
     default:
       return false;
   }
+}
+
+/** Preload/main validation for a picked external subtitle track payload (`#32`). */
+export function isPickedSubtitleTrack(x: unknown): x is ExternalSubtitleTrack {
+  return isExternalSubtitleTrack(x, isHeaders);
 }
 
 /** Main-side check of a `player:command` payload: shape, `http(s)` URL, header names and values without control characters. */

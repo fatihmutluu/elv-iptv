@@ -1,3 +1,4 @@
+import type { SubtitleStyleConfig } from '@elv/domain';
 import type {
   AttemptToken,
   ClockAnchor,
@@ -5,6 +6,7 @@ import type {
   EngineError,
   EngineEvent,
   EngineState,
+  ExternalSubtitleTrack,
   LoadCommand,
   MediaTracks,
   PlayerEngine,
@@ -51,6 +53,8 @@ export interface FakeCommand {
   trackId?: string | null;
   delayMs?: number;
   qualityId?: string | null;
+  externalSubtitle?: ExternalSubtitleTrack;
+  subtitleStyle?: SubtitleStyleConfig;
 }
 
 /** Scriptable engine for service and screen tests. */
@@ -233,6 +237,13 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     selectSecondarySubtitleTrack(attempt, id) {
       commands.push({ name: 'selectSecondarySubtitleTrack', attempt, trackId: id });
       adopt(attempt);
+    },
+    addExternalSubtitle(attempt, track) {
+      commands.push({ name: 'addExternalSubtitle', attempt, externalSubtitle: track });
+      adopt(attempt);
+    },
+    setSubtitleStyle(style) {
+      commands.push({ name: 'setSubtitleStyle', subtitleStyle: style });
     },
     setAudioDelay(attempt, delayMs) {
       commands.push({ name: 'setAudioDelay', attempt, delayMs });

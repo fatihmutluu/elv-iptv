@@ -2,6 +2,8 @@ import {
   bridgeNativeEngine,
   type EngineCapabilities,
   type EngineEvent,
+  type ExternalSubtitleTrack,
+  type LoadOptions,
   type NativeEngineHandle,
   type PlayerEngine,
 } from '@elv/playback';
@@ -79,12 +81,18 @@ interface RawInsets {
   left?: unknown;
 }
 
+/** Live subtitle appearance configuration forwarded to `AetherSurface` and `setSubtitleStyle` (`#32`). */
+export type AetherSubtitleStyle = NonNullable<LoadOptions['subtitleStyle']>;
+
 interface AetherNativeEngineHandle extends NativeEngineHandle {
   setMuted?(muted: boolean): void;
   setVolume?(volume: number): void;
   setAudioDelay?(attempt: number, delayMs: number): void;
   setSubtitleDelay?(attempt: number, delayMs: number): void;
   selectVideoQuality?(attempt: number, id: string | null): void;
+  selectSecondarySubtitleTrack?(attempt: number, id: string | null): void;
+  addExternalSubtitle?(attempt: number, track: ExternalSubtitleTrack): void;
+  setSubtitleStyle?(style: AetherSubtitleStyle): void;
   setBackgroundAudioEnabled?(enabled: boolean): void;
   setAllowDetachedSurface?(enabled: boolean): void;
   setMediaMetadata?(metadata: AetherMediaMetadata | null): void;
@@ -223,6 +231,9 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   audioDelay: true,
   subtitleDelay: true,
   videoQualitySelection: true,
+  externalSubtitles: true,
+  subtitleStyling: true,
+  dualSubtitles: true,
 });
 
 /** The native shared object behind each live engine this module created; `AetherSurface` binds its view to it. */
@@ -445,6 +456,28 @@ function wrap(module: NativeEngineModule): PlayerEngine {
           },
         }
       : {}),
+    ...(bridged.selectSecondarySubtitleTrack === undefined &&
+    native.selectSecondarySubtitleTrack !== undefined
+      ? {
+          selectSecondarySubtitleTrack(attempt, id) {
+            if (!released) native.selectSecondarySubtitleTrack?.(attempt, id);
+          },
+        }
+      : {}),
+    ...(bridged.addExternalSubtitle === undefined && native.addExternalSubtitle !== undefined
+      ? {
+          addExternalSubtitle(attempt, track) {
+            if (!released) native.addExternalSubtitle?.(attempt, track);
+          },
+        }
+      : {}),
+    ...(bridged.setSubtitleStyle === undefined && native.setSubtitleStyle !== undefined
+      ? {
+          setSubtitleStyle(style) {
+            if (!released) native.setSubtitleStyle?.(style);
+          },
+        }
+      : {}),
     release() {
       released = true;
       handles.delete(engine);
@@ -478,6 +511,8 @@ export interface AetherSurfaceProps {
   subtitleBottomInsetPx?: number;
   /** High-legibility subtitle font override (`'system'`, `'atkinson'`, or `'opendyslexic'`, `#163`). */
   subtitleFontFamily?: 'system' | 'atkinson' | 'opendyslexic';
+  /** Live user subtitle appearance override applied without restarting playback (`#32`). */
+  subtitleStyle?: AetherSubtitleStyle;
   /** Whether the player OSD is currently visible so native can throttle hidden-OSD clock ticks (`#442`). */
   osdVisible?: boolean;
   testID?: string;
@@ -489,6 +524,7 @@ interface NativeSurfaceProps {
   resizeMode?: 'fit' | 'fill' | 'stretch';
   subtitleBottomInsetPx?: number;
   subtitleFontFamily?: 'system' | 'atkinson' | 'opendyslexic';
+  subtitleStyle?: AetherSubtitleStyle;
   osdVisible?: boolean;
   testID?: string;
 }
@@ -511,6 +547,7 @@ export function AetherSurface({
   resizeMode,
   subtitleBottomInsetPx,
   subtitleFontFamily,
+  subtitleStyle,
   osdVisible,
   testID,
 }: AetherSurfaceProps): ReactElement | null {
@@ -522,6 +559,7 @@ export function AetherSurface({
     resizeMode,
     subtitleBottomInsetPx,
     ...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {}),
+    ...(subtitleStyle !== undefined ? { subtitleStyle } : {}),
     ...(osdVisible !== undefined ? { osdVisible } : {}),
     testID,
   });

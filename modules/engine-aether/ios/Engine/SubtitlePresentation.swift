@@ -2,9 +2,17 @@ import AetherEngine
 import AVFoundation
 import UIKit
 
-/// Snapshot of active subtitle cues and picture geometry rendered above `AetherPlayerView` and below `shutterView`.
+/// Snapshot of active primary, secondary, and external subtitle cues rendered above `AetherPlayerView` and below `shutterView`.
 struct SubtitlePresentation: Equatable {
-  static let empty = SubtitlePresentation(cues: [], videoSize: .zero, gravity: .resizeAspect, filterSdhSubtitles: false)
+  static let empty = SubtitlePresentation(
+    cues: [],
+    secondaryCues: [],
+    externalPrimaryCues: [],
+    externalSecondaryCues: [],
+    videoSize: .zero,
+    gravity: .resizeAspect,
+    filterSdhSubtitles: false
+  )
 
   /// Strips SDH / Hearing-Impaired annotations from plain or joined rich subtitle text (`#310`).
   static func stripSdhAnnotations(_ text: String) -> String {
@@ -12,19 +20,34 @@ struct SubtitlePresentation: Equatable {
   }
 
   var cues: [SubtitleCue]
+  var secondaryCues: [SubtitleCue] = []
+  var externalPrimaryCues: [ExternalSubtitleCue] = []
+  var externalSecondaryCues: [ExternalSubtitleCue] = []
   var videoSize: CGSize
   var gravity: AVLayerVideoGravity
   var filterSdhSubtitles: Bool = false
+
+  var hasAnyCues: Bool {
+    !cues.isEmpty || !secondaryCues.isEmpty || !externalPrimaryCues.isEmpty || !externalSecondaryCues.isEmpty
+  }
 
   static func == (lhs: SubtitlePresentation, rhs: SubtitlePresentation) -> Bool {
     guard lhs.videoSize == rhs.videoSize,
           lhs.gravity == rhs.gravity,
           lhs.filterSdhSubtitles == rhs.filterSdhSubtitles,
-          lhs.cues.count == rhs.cues.count
+          lhs.externalPrimaryCues == rhs.externalPrimaryCues,
+          lhs.externalSecondaryCues == rhs.externalSecondaryCues,
+          sameCueList(lhs.cues, rhs.cues),
+          sameCueList(lhs.secondaryCues, rhs.secondaryCues)
     else {
       return false
     }
-    for (a, b) in zip(lhs.cues, rhs.cues) {
+    return true
+  }
+
+  private static func sameCueList(_ lhs: [SubtitleCue], _ rhs: [SubtitleCue]) -> Bool {
+    guard lhs.count == rhs.count else { return false }
+    for (a, b) in zip(lhs, rhs) {
       guard a.id == b.id,
             a.startTime == b.startTime,
             a.endTime == b.endTime,
@@ -60,13 +83,21 @@ extension CaptionAppearanceColor {
   }
 }
 
-/// Attributed-string builders for plain and ASS/teletext rich-text subtitle cues.
+/// Attributed-string builders for plain, external, and ASS/teletext rich-text subtitle cues (`#285`, `#32`).
 enum SubtitleTextStyling {
   static func textAlignment(for slot: SubtitleSlot) -> NSTextAlignment {
     switch slot.horizontal {
     case .left: return .left
     case .center: return .center
     case .right: return .right
+    }
+  }
+
+  static func writingDirection(for text: String) -> NSWritingDirection {
+    switch SubtitleBidi.baseWritingDirection(for: text) {
+    case .rightToLeft: return .rightToLeft
+    case .leftToRight: return .leftToRight
+    case .natural: return .natural
     }
   }
 
@@ -97,18 +128,21 @@ enum SubtitleTextStyling {
     slot: SubtitleSlot,
     style: CaptionAppearanceStyle = .default
   ) -> NSAttributedString {
+    let isolated = SubtitleBidi.isolateLines(text)
     let paragraph = NSMutableParagraphStyle()
     paragraph.alignment = textAlignment(for: slot)
     paragraph.lineBreakMode = .byWordWrapping
+    paragraph.baseWritingDirection = writingDirection(for: isolated)
     var attrs: [NSAttributedString.Key: Any] = [
       .font: makeFont(size: fontSize, weight: .semibold, style: style),
       .foregroundColor: style.foreground.uiColor,
       .paragraphStyle: paragraph,
     ]
+    applyEdgeAttributes(style.edgeStyle, to: &attrs)
     if style.window != nil && style.background.alpha > 0.01 {
       attrs[.backgroundColor] = style.background.uiColor
     }
-    return NSAttributedString(string: text, attributes: attrs)
+    return NSAttributedString(string: isolated, attributes: attrs)
   }
 
   static func makeRichString(
@@ -120,11 +154,18 @@ enum SubtitleTextStyling {
     let combinedText = runs.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
     guard !combinedText.isEmpty else { return nil }
 
+    let direction = writingDirection(for: combinedText)
     let paragraph = NSMutableParagraphStyle()
     paragraph.alignment = textAlignment(for: slot)
     paragraph.lineBreakMode = .byWordWrapping
+    paragraph.baseWritingDirection = direction
 
     let out = NSMutableAttributedString()
+    let shouldWrapRtl = direction == .rightToLeft && !combinedText.hasPrefix("\u{2067}")
+    if shouldWrapRtl {
+      out.append(NSAttributedString(string: "\u{2067}", attributes: [.paragraphStyle: paragraph]))
+    }
+
     for run in runs where !run.text.isEmpty {
       let font = makeFont(
         size: fontSize,
@@ -140,6 +181,7 @@ enum SubtitleTextStyling {
         .foregroundColor: color,
         .paragraphStyle: paragraph,
       ]
+      applyEdgeAttributes(style.edgeStyle, to: &attrs)
       if style.window != nil && style.background.alpha > 0.01 {
         attrs[.backgroundColor] = style.background.uiColor
       }
@@ -147,6 +189,29 @@ enum SubtitleTextStyling {
       if run.isStruckThrough { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
       out.append(NSAttributedString(string: run.text, attributes: attrs))
     }
+
+    if shouldWrapRtl {
+      out.append(NSAttributedString(string: "\u{2069}", attributes: [.paragraphStyle: paragraph]))
+    }
     return out.length > 0 ? out : nil
+  }
+
+  private static func applyEdgeAttributes(
+    _ edgeStyle: UserSubtitleEdgeStyle,
+    to attrs: inout [NSAttributedString.Key: Any]
+  ) {
+    switch edgeStyle {
+    case .none:
+      break
+    case .outline:
+      attrs[.strokeColor] = UIColor.black.withAlphaComponent(0.92)
+      attrs[.strokeWidth] = -3.0
+    case .dropShadow:
+      let shadow = NSShadow()
+      shadow.shadowColor = UIColor.black.withAlphaComponent(0.85)
+      shadow.shadowOffset = CGSize(width: 0, height: 2)
+      shadow.shadowBlurRadius = 3.0
+      attrs[.shadow] = shadow
+    }
   }
 }

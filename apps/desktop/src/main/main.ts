@@ -68,6 +68,7 @@ import { createPowerBlocker } from './player/power-blocker.ts';
 import { parsePresenterOverride } from './player/presenter/choose.ts';
 import { sampleArea } from './player/presenter/visible.ts';
 import { mpvRuntimePaths, resolveMacMediaAddonPath } from './player/runtime-path.ts';
+import { createSubtitleFilePicker } from './player/subtitle-fetch.ts';
 import {
   createPendingPlaylistQueue,
   extractPlaylistPathsFromArgv,
@@ -309,6 +310,25 @@ async function startPlayer(): Promise<void> {
     log: logger.log,
     powerBlocker,
     ...(mediaBridge ? { mediaBridge } : {}),
+    pickSubtitleFile: createSubtitleFilePicker<BrowserWindow>({
+      getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      showOpenDialog: (win, options) =>
+        win && !win.isDestroyed()
+          ? dialog.showOpenDialog(win, {
+              properties: [...options.properties],
+              filters: options.filters.map((f) => ({
+                name: f.name,
+                extensions: [...f.extensions],
+              })),
+            })
+          : dialog.showOpenDialog({
+              properties: [...options.properties],
+              filters: options.filters.map((f) => ({
+                name: f.name,
+                extensions: [...f.extensions],
+              })),
+            }),
+    }),
     createTaskbarController: (owner, onAction) => {
       if (process.platform !== 'win32') return undefined;
       const window = BrowserWindow.fromWebContents(owner as WebContents);

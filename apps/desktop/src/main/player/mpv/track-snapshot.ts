@@ -140,6 +140,7 @@ export function inspectMpvTracks(
         : undefined;
     const forced = raw['forced'] === true;
     const isDefault = raw['default'] === true;
+    const external = type === 'sub' && raw['external'] === true;
 
     const info: TrackInfo = {
       id,
@@ -149,6 +150,7 @@ export function inspectMpvTracks(
       ...(channels === undefined ? {} : { channels }),
       ...(forced ? { forced: true } : {}),
       ...(isDefault ? { isDefault: true } : {}),
+      ...(external ? { external: true } : {}),
     };
 
     if (type === 'audio') {
@@ -288,7 +290,8 @@ function trackListsEqual(a: readonly TrackInfo[], b: readonly TrackInfo[]): bool
       x.codec !== y.codec ||
       x.channels !== y.channels ||
       Boolean(x.forced) !== Boolean(y.forced) ||
-      Boolean(x.isDefault) !== Boolean(y.isDefault)
+      Boolean(x.isDefault) !== Boolean(y.isDefault) ||
+      Boolean(x.external) !== Boolean(y.external)
     ) {
       return false;
     }

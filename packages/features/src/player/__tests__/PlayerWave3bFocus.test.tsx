@@ -474,8 +474,8 @@ describe('Wave 3B Player TV focus, hidden-OSD passthrough, live controls, atomic
     expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
     expect(getAnchor().props.hasTVPreferredFocus).toBe(false);
 
-    // Navigate to Stats row (index 9 on VOD TV: subtitles, audio, audioDelay, subtitleDelay, speed, sleepTimer, aspect, timeDisplay, info, stats)
-    for (let i = 0; i < 9; i += 1) await act(async () => tv.keys.tap(KEY_DOWN));
+    // Navigate to Stats row (index 10 on VOD TV: subtitles, audio, audioDelay, subtitleDelay, subtitleStyle, speed, sleepTimer, aspect, timeDisplay, info, stats)
+    for (let i = 0; i < 10; i += 1) await act(async () => tv.keys.tap(KEY_DOWN));
     // First Select toggles Stats ON; duplicate Select < 220ms later is SUPPRESSED (stays ON!)
     await act(async () => tv.keys.tap(KEY_SELECT));
     expect(screen.getByTestId('player-stats-hud', { includeHiddenElements: true })).toBeTruthy();

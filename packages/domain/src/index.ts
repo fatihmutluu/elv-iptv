@@ -21,3 +21,4 @@ export * from './redact';
 export * from './result';
 export * from './source';
 export * from './sql';
+export * from './subtitle-style';

@@ -193,6 +193,9 @@ describe('createAetherEngine', () => {
       audioDelay: true,
       subtitleDelay: true,
       videoQualitySelection: true,
+      externalSubtitles: true,
+      subtitleStyling: true,
+      dualSubtitles: true,
     });
     const events: EngineEvent[] = [];
     first?.subscribe((e) => events.push(e));

@@ -28,7 +28,11 @@ export interface TrackTracker {
   property(name: string, value: unknown): EngineEvent[];
   selectAudio(id: string): MpvCommand | undefined;
   selectSubtitle(id: string | null): MpvCommand | undefined;
+  /** Returns `['set_property', 'secondary-sid', 'no']` when `primaryId` collides with the active secondary track (`#402`). */
+  clearSecondaryIfCollides(primaryId: string | null): MpvCommand | undefined;
   selectSecondarySubtitle(id: string | null): MpvCommand | undefined;
+  /** Returns `true` while a secondary subtitle track is selected or requested (`#402`). */
+  hasActiveSecondarySubtitle(): boolean;
   selectVideoQuality(id: string | null): MpvCommand | undefined;
   /** Emits an updated `tracks` snapshot if local selection state changed (e.g. manual video quality). */
   sync(): EngineEvent[];
@@ -49,8 +53,10 @@ export function createTrackTracker(): TrackTracker {
   let sentSidNo = false;
   let audioReconciled = false;
   let subReconciled = false;
+  let secondarySubReconciled = false;
   let audioPref: TrackPreference | undefined;
   let subPref: SubtitlePreference = { kind: 'default' };
+  let secondarySubPref: SubtitlePreference = { kind: 'default' };
 
   const resetFileState = (): void => {
     token = undefined;
@@ -64,6 +70,7 @@ export function createTrackTracker(): TrackTracker {
     sentSidNo = false;
     audioReconciled = false;
     subReconciled = false;
+    secondarySubReconciled = false;
   };
 
   const currentTracks = (): MediaTracks | undefined =>
@@ -122,6 +129,20 @@ export function createTrackTracker(): TrackTracker {
       } else if (subPref.kind !== 'selected' || subPref.choice.id !== options.subtitleTrackId) {
         subPref = { kind: 'selected', choice: { id: options.subtitleTrackId } };
       }
+
+      if (options === undefined || options.secondarySubtitleTrackId === undefined) {
+        secondarySubPref = { kind: 'default' };
+      } else if (options.secondarySubtitleTrackId === null) {
+        secondarySubPref = { kind: 'off' };
+      } else if (
+        secondarySubPref.kind !== 'selected' ||
+        secondarySubPref.choice.id !== options.secondarySubtitleTrackId
+      ) {
+        secondarySubPref = {
+          kind: 'selected',
+          choice: { id: options.secondarySubtitleTrackId },
+        };
+      }
     },
 
     onRetryOrRecreate() {
@@ -132,6 +153,7 @@ export function createTrackTracker(): TrackTracker {
       resetFileState();
       audioPref = undefined;
       subPref = { kind: 'default' };
+      secondarySubPref = { kind: 'default' };
     },
 
     beginMedia(nextToken) {
@@ -186,14 +208,47 @@ export function createTrackTracker(): TrackTracker {
       return cmd;
     },
 
+    clearSecondaryIfCollides(primaryId) {
+      if (primaryId === null) return undefined;
+      const activeSecondary =
+        currentTracks()?.selectedSecondarySubtitleId ??
+        (typeof secondarySid === 'number' && Number.isInteger(secondarySid) && secondarySid > 0
+          ? `s:${secondarySid}`
+          : secondarySubPref.kind === 'selected'
+            ? secondarySubPref.choice.id
+            : null);
+      if (activeSecondary !== primaryId) return undefined;
+      secondarySubPref = { kind: 'off' };
+      if (token !== undefined) secondarySubReconciled = true;
+      return ['set_property', 'secondary-sid', 'no'];
+    },
+
     selectSecondarySubtitle(id) {
       const cmd = parseSecondarySubtitleTrackCommand(id);
       if (!cmd) return undefined;
       const activePrimary =
         currentTracks()?.selectedSubtitleId ??
-        (typeof sid === 'number' && Number.isInteger(sid) && sid > 0 ? `s:${sid}` : null);
+        (typeof sid === 'number' && Number.isInteger(sid) && sid > 0
+          ? `s:${sid}`
+          : subPref.kind === 'selected'
+            ? subPref.choice.id
+            : null);
       if (id !== null && activePrimary !== null && id === activePrimary) return undefined;
+      if (id === null) {
+        secondarySubPref = { kind: 'off' };
+      } else {
+        const matched = currentTracks()?.subtitles.find((t) => t.id === id);
+        const prev = secondarySubPref.kind === 'selected' ? secondarySubPref.choice : undefined;
+        secondarySubPref = { kind: 'selected', choice: toPreference(id, matched, prev) };
+      }
+      if (token !== undefined) secondarySubReconciled = true;
       return cmd;
+    },
+
+    hasActiveSecondarySubtitle() {
+      if (secondarySubPref.kind === 'selected') return true;
+      if (secondarySubPref.kind === 'off') return false;
+      return typeof secondarySid === 'number' && Number.isInteger(secondarySid) && secondarySid > 0;
     },
 
     selectVideoQuality(id) {
@@ -208,9 +263,10 @@ export function createTrackTracker(): TrackTracker {
     },
 
     reconcileCommands() {
-      if (audioReconciled && subReconciled) return [];
+      if (audioReconciled && subReconciled && secondarySubReconciled) return [];
       const snapshot = currentTracks();
       const commands: MpvCommand[] = [];
+      let effectivePrimaryId: string | null = snapshot?.selectedSubtitleId ?? null;
 
       if (!audioReconciled) {
         if (audioPref === undefined) {
@@ -232,6 +288,7 @@ export function createTrackTracker(): TrackTracker {
         if (subPref.kind === 'default') {
           if (snapshot) subReconciled = true;
         } else if (subPref.kind === 'off') {
+          effectivePrimaryId = null;
           if (sid === 'no' || sentSidNo) {
             subReconciled = true;
           } else if (fileLoaded || (snapshot !== undefined && snapshot.subtitles.length > 0)) {
@@ -242,6 +299,7 @@ export function createTrackTracker(): TrackTracker {
         } else if (snapshot) {
           const resolved = resolveChoice(snapshot.subtitles, subPref.choice);
           if (resolved) {
+            effectivePrimaryId = resolved.id;
             subReconciled = true;
             subPref = {
               kind: 'selected',
@@ -250,6 +308,39 @@ export function createTrackTracker(): TrackTracker {
             if (snapshot.selectedSubtitleId !== resolved.id) {
               const cmd = parseSubtitleTrackCommand(resolved.id);
               if (cmd) commands.push(cmd);
+            }
+          }
+        }
+      }
+
+      if (!secondarySubReconciled) {
+        if (secondarySubPref.kind === 'default') {
+          if (snapshot) secondarySubReconciled = true;
+        } else if (secondarySubPref.kind === 'off') {
+          if (secondarySid === 'no' || secondarySid === false) {
+            secondarySubReconciled = true;
+          } else if (fileLoaded || (snapshot !== undefined && snapshot.subtitles.length > 0)) {
+            secondarySubReconciled = true;
+            commands.push(['set_property', 'secondary-sid', 'no']);
+          }
+        } else if (snapshot) {
+          const resolved = resolveChoice(snapshot.subtitles, secondarySubPref.choice);
+          if (resolved) {
+            secondarySubReconciled = true;
+            if (resolved.id === effectivePrimaryId) {
+              secondarySubPref = { kind: 'off' };
+              if (snapshot.selectedSecondarySubtitleId !== undefined) {
+                commands.push(['set_property', 'secondary-sid', 'no']);
+              }
+            } else {
+              secondarySubPref = {
+                kind: 'selected',
+                choice: toPreference(resolved.id, resolved, secondarySubPref.choice),
+              };
+              if (snapshot.selectedSecondarySubtitleId !== resolved.id) {
+                const cmd = parseSecondarySubtitleTrackCommand(resolved.id);
+                if (cmd) commands.push(cmd);
+              }
             }
           }
         }

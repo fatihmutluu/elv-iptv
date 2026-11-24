@@ -2469,3 +2469,111 @@ msgstr "Şimdi aç"
 
 msgid "epg.reminderDismiss"
 msgstr "Kapat"
+
+msgid "player.secondarySubtitleTracks"
+msgstr "İkincil altyazı"
+
+msgid "player.secondarySameAsPrimary"
+msgstr "Birincil olarak seçili"
+
+msgid "player.externalSubtitle.load"
+msgstr "Harici altyazı yükle"
+
+msgid "player.externalSubtitle.pickFile"
+msgstr "Altyazı dosyası seç"
+
+msgid "player.externalSubtitle.fromUrl"
+msgstr "URL'den yükle"
+
+msgid "player.externalSubtitle.urlTitle"
+msgstr "Harici altyazı adresi"
+
+msgid "player.externalSubtitle.urlPlaceholder"
+msgstr "https://example.invalid/altyazi.srt"
+
+msgid "player.externalSubtitle.labelPlaceholder"
+msgstr "Etiket (isteğe bağlı)"
+
+msgid "player.externalSubtitle.invalidUrl"
+msgstr "Geçerli bir http(s) altyazı adresi girin."
+
+msgid "player.externalSubtitle.loaded"
+msgstr "Harici altyazı yüklendi"
+
+msgid "player.externalSubtitle.failed"
+msgstr "Harici altyazı yüklenemedi."
+
+msgid "player.externalSubtitle.badge"
+msgstr "Harici"
+
+msgid "player.subtitleStyle.section"
+msgstr "Altyazı stili"
+
+msgid "player.subtitleStyle.size"
+msgstr "Boyut"
+
+msgid "player.subtitleStyle.sizeSmall"
+msgstr "Küçük"
+
+msgid "player.subtitleStyle.sizeMedium"
+msgstr "Orta"
+
+msgid "player.subtitleStyle.sizeLarge"
+msgstr "Büyük"
+
+msgid "player.subtitleStyle.sizeExtraLarge"
+msgstr "Çok büyük"
+
+msgid "player.subtitleStyle.color"
+msgstr "Metin rengi"
+
+msgid "player.subtitleStyle.colorWhite"
+msgstr "Beyaz"
+
+msgid "player.subtitleStyle.colorYellow"
+msgstr "Sarı"
+
+msgid "player.subtitleStyle.colorCyan"
+msgstr "Camgöbeği"
+
+msgid "player.subtitleStyle.colorGreen"
+msgstr "Yeşil"
+
+msgid "player.subtitleStyle.background"
+msgstr "Arka plan"
+
+msgid "player.subtitleStyle.bgNone"
+msgstr "Yok"
+
+msgid "player.subtitleStyle.bgTranslucent"
+msgstr "Yarı saydam"
+
+msgid "player.subtitleStyle.bgOpaque"
+msgstr "Opak"
+
+msgid "player.subtitleStyle.edge"
+msgstr "Kenarlık"
+
+msgid "player.subtitleStyle.edgeNone"
+msgstr "Yok"
+
+msgid "player.subtitleStyle.edgeOutline"
+msgstr "Dış çizgi"
+
+msgid "player.subtitleStyle.edgeDropShadow"
+msgstr "Gölge"
+
+msgid "player.subtitleStyle.position"
+msgstr "Konum"
+
+msgid "player.subtitleStyle.posBottom"
+msgstr "Alt"
+
+msgid "player.subtitleStyle.posRaised"
+msgstr "Yükseltilmiş"
+
+msgid "player.subtitleStyle.posTop"
+msgstr "Üst"
+
+msgid "player.subtitleStyle.reset"
+msgstr "Stili sıfırla"

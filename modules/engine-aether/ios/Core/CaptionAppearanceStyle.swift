@@ -1,5 +1,108 @@
 import Foundation
 
+/// User-selectable subtitle text size preset (`#32`).
+public enum UserSubtitleFontSize: String, Equatable, Sendable {
+  case small
+  case medium
+  case large
+  case extraLarge
+
+  public var relativeScale: Double {
+    switch self {
+    case .small: return 0.78
+    case .medium: return 1.0
+    case .large: return 1.3
+    case .extraLarge: return 1.65
+    }
+  }
+}
+
+/// User-selectable subtitle foreground color preset (`#32`).
+public enum UserSubtitleTextColor: String, Equatable, Sendable {
+  case white
+  case yellow
+  case cyan
+  case green
+
+  public var captionColor: CaptionAppearanceColor {
+    switch self {
+    case .white: return CaptionAppearanceColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0)
+    case .yellow: return CaptionAppearanceColor(red: 1.0, green: 0.92, blue: 0.23, alpha: 1.0)
+    case .cyan: return CaptionAppearanceColor(red: 0.2, green: 0.92, blue: 1.0, alpha: 1.0)
+    case .green: return CaptionAppearanceColor(red: 0.35, green: 0.95, blue: 0.45, alpha: 1.0)
+    }
+  }
+}
+
+/// User-selectable subtitle backdrop opacity preset (`#32`).
+public enum UserSubtitleBackgroundColor: String, Equatable, Sendable {
+  case none
+  case translucent
+  case opaque
+
+  public var captionColor: CaptionAppearanceColor {
+    switch self {
+    case .none: return CaptionAppearanceColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
+    case .translucent: return CaptionAppearanceColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.72)
+    case .opaque: return CaptionAppearanceColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.96)
+    }
+  }
+}
+
+/// User-selectable subtitle text edge treatment (`#32`).
+public enum UserSubtitleEdgeStyle: String, Equatable, Sendable {
+  case none
+  case outline
+  case dropShadow
+}
+
+/// User-selectable subtitle vertical placement preset (`#32`).
+public enum UserSubtitleVerticalPosition: String, Equatable, Sendable {
+  case bottom
+  case raised
+  case top
+}
+
+/// Cross-platform user subtitle style override layered over system caption appearance (`#32`).
+public struct UserSubtitleStyleOverride: Equatable, Sendable {
+  public var fontSize: UserSubtitleFontSize
+  public var textColor: UserSubtitleTextColor
+  public var backgroundColor: UserSubtitleBackgroundColor
+  public var edgeStyle: UserSubtitleEdgeStyle
+  public var verticalPosition: UserSubtitleVerticalPosition
+
+  public init(
+    fontSize: UserSubtitleFontSize = .medium,
+    textColor: UserSubtitleTextColor = .white,
+    backgroundColor: UserSubtitleBackgroundColor = .translucent,
+    edgeStyle: UserSubtitleEdgeStyle = .outline,
+    verticalPosition: UserSubtitleVerticalPosition = .bottom
+  ) {
+    self.fontSize = fontSize
+    self.textColor = textColor
+    self.backgroundColor = backgroundColor
+    self.edgeStyle = edgeStyle
+    self.verticalPosition = verticalPosition
+  }
+
+  /// Parses raw string fields from JS safely, falling back to Cinema Quietude defaults on missing/invalid tokens.
+  public static func fromRaw(
+    fontSize: String?,
+    textColor: String?,
+    backgroundColor: String?,
+    edgeStyle: String?,
+    verticalPosition: String?
+  ) -> UserSubtitleStyleOverride {
+    UserSubtitleStyleOverride(
+      fontSize: fontSize.flatMap { UserSubtitleFontSize(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? .medium,
+      textColor: textColor.flatMap { UserSubtitleTextColor(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? .white,
+      backgroundColor: backgroundColor.flatMap { UserSubtitleBackgroundColor(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? .translucent,
+      edgeStyle: edgeStyle.flatMap { UserSubtitleEdgeStyle(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? .outline,
+      verticalPosition: verticalPosition.flatMap { UserSubtitleVerticalPosition(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? .bottom
+    )
+  }
+}
+
 /// Platform-neutral RGBA color in `[0.0, 1.0]` used for system caption styling.
 public struct CaptionAppearanceColor: Equatable, Sendable {
   public let red: Double
@@ -22,19 +125,25 @@ public struct CaptionAppearanceStyle: Equatable, Sendable {
   public let window: CaptionAppearanceColor?
   public let relativeCharacterSize: Double
   public let fontName: String?
+  public let edgeStyle: UserSubtitleEdgeStyle
+  public let verticalPosition: UserSubtitleVerticalPosition
 
   public init(
     foreground: CaptionAppearanceColor = CaptionAppearanceColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0),
     background: CaptionAppearanceColor = CaptionAppearanceColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.74),
     window: CaptionAppearanceColor? = nil,
     relativeCharacterSize: Double = 1.0,
-    fontName: String? = nil
+    fontName: String? = nil,
+    edgeStyle: UserSubtitleEdgeStyle = .none,
+    verticalPosition: UserSubtitleVerticalPosition = .bottom
   ) {
     self.foreground = foreground
     self.background = background
     self.window = window
     self.relativeCharacterSize = clampCharacterSize(relativeCharacterSize)
     self.fontName = fontName
+    self.edgeStyle = edgeStyle
+    self.verticalPosition = verticalPosition
   }
 
   public static let `default` = CaptionAppearanceStyle()
@@ -57,7 +166,9 @@ public func resolveCaptionAppearance(source: (any CaptionAppearanceSource)?) -> 
     background: clampColor(raw.background, fallback: fallback.background),
     window: raw.window.map { clampColor($0, fallback: CaptionAppearanceColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)) },
     relativeCharacterSize: clampCharacterSize(raw.relativeCharacterSize),
-    fontName: (normalizedFont?.isEmpty == false) ? normalizedFont : nil
+    fontName: (normalizedFont?.isEmpty == false) ? normalizedFont : nil,
+    edgeStyle: raw.edgeStyle,
+    verticalPosition: raw.verticalPosition
   )
 }
 
@@ -78,7 +189,7 @@ public func resolveSubtitleFontName(_ family: String?) -> String? {
 }
 
 /// Applies an explicit subtitle font override to a resolved `CaptionAppearanceStyle` while leaving system
-/// foreground, background, window, and relative character size intact (`#163`).
+/// foreground, background, window, edge, vertical position, and relative character size intact (`#163`).
 public func applyingSubtitleFontOverride(
   _ style: CaptionAppearanceStyle,
   family: String?
@@ -91,7 +202,26 @@ public func applyingSubtitleFontOverride(
     background: style.background,
     window: style.window,
     relativeCharacterSize: style.relativeCharacterSize,
-    fontName: overrideFont
+    fontName: overrideFont,
+    edgeStyle: style.edgeStyle,
+    verticalPosition: style.verticalPosition
+  )
+}
+
+/// Layers a user `UserSubtitleStyleOverride` on top of a resolved `CaptionAppearanceStyle` while preserving `fontName` (`#32`).
+public func applyingUserSubtitleStyle(
+  _ base: CaptionAppearanceStyle,
+  override: UserSubtitleStyleOverride?
+) -> CaptionAppearanceStyle {
+  guard let override else { return base }
+  return CaptionAppearanceStyle(
+    foreground: override.textColor.captionColor,
+    background: override.backgroundColor.captionColor,
+    window: nil,
+    relativeCharacterSize: override.fontSize.relativeScale,
+    fontName: base.fontName,
+    edgeStyle: override.edgeStyle,
+    verticalPosition: override.verticalPosition
   )
 }
 

@@ -13,6 +13,7 @@ import {
   utf8ByteLength,
 } from './preferences-validators';
 import { elvError, err, ok, type Result } from './result';
+import { DEFAULT_SUBTITLE_STYLE, type SubtitleStyleConfig } from './subtitle-style';
 
 export {
   ACCESSIBILITY_FONT_FAMILIES,
@@ -130,10 +131,13 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   audioNormalization: false,
   windowAspectRatioLock: false,
   backgroundAudioPlayback: false,
+  subtitleStyle: DEFAULT_SUBTITLE_STYLE,
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */
-export type PreferencesPatch = Partial<Omit<PreferencesSnapshot, 'version'>>;
+export type PreferencesPatch = Partial<Omit<PreferencesSnapshot, 'version' | 'subtitleStyle'>> & {
+  readonly subtitleStyle?: Partial<SubtitleStyleConfig>;
+};
 
 /** Minimal key-value storage backend for persisting serialized preferences. */
 export interface PreferencesKvBackend {

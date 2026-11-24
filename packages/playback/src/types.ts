@@ -1,8 +1,15 @@
-import type { AndroidDecoderMode, BufferPreset, ElvError, Result } from '@elv/domain';
+import type {
+  AndroidDecoderMode,
+  BufferPreset,
+  ElvError,
+  Result,
+  SubtitleStyleConfig,
+} from '@elv/domain';
 import type {
   AttemptToken,
   ChapterInfo,
   ClockAnchor,
+  ExternalSubtitleTrack,
   MediaKind,
   MediaTracks,
   StreamRequest,
@@ -40,6 +47,10 @@ export interface TuneRequest {
   filterSdhSubtitles?: boolean;
   /** Opt-in legacy TLS (TLS 1.0/1.1) compatibility forwarded on load and recovery reloads (`#182`). */
   readonly allowLegacyTls?: boolean;
+  /** External sidecar subtitle tracks attached at tune time (`#32`, `#308`). */
+  readonly externalSubtitles?: readonly ExternalSubtitleTrack[];
+  /** Live subtitle appearance styling forwarded on load and reloads (`#32`). */
+  readonly subtitleStyle?: SubtitleStyleConfig;
 }
 
 /** What the service is doing now. */
@@ -82,6 +93,10 @@ export interface PlaybackState {
   readonly subtitleDelayMs?: number;
   /** Selected adaptive video rendition ID, or `null` for automatic ABR (`#59`). */
   readonly selectedVideoQualityId?: string | null;
+  /** External sidecar subtitle tracks attached to the active item (`#32`, `#308`). */
+  readonly externalSubtitles?: readonly ExternalSubtitleTrack[];
+  /** Active live subtitle appearance configuration (`#32`). */
+  readonly subtitleStyle?: SubtitleStyleConfig;
 }
 
 /** Playback controller; the UI talks to this, never to the engine. */
@@ -123,8 +138,15 @@ export interface PlaybackService {
   selectAudioTrack(id: string): void;
   /** Selects a subtitle track in place (`null` turns subtitles off) and remembers the choice across reloads. */
   selectSubtitleTrack(id: string | null): void;
-  /** Selects a secondary subtitle track in place (`null` disables secondary subtitles, `#239`). */
+  /** Selects a secondary subtitle track in place (`null` disables secondary subtitles, `#239`, `#402`). */
   selectSecondarySubtitleTrack(id: string | null): void;
+  /**
+   * Validates, deduplicates, and attaches an external sidecar subtitle track to the active item (`#32`, `#308`).
+   * Returns `true` when accepted, or `false` when idle/disposed, invalid, or duplicate by `id`/`uri`.
+   */
+  addExternalSubtitle(track: ExternalSubtitleTrack): boolean;
+  /** Updates live subtitle appearance styling without restarting playback and persists across reloads (`#32`). */
+  setSubtitleStyle(style: SubtitleStyleConfig): void;
   /** Sets live audio sync delay offset in milliseconds, clamped to `[-30_000, 30_000]` (`#59`). */
   setAudioDelay(delayMs: number): void;
   /** Sets live subtitle timing delay offset in milliseconds, clamped to `[-30_000, 30_000]` (`#59`). */

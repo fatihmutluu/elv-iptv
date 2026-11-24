@@ -468,3 +468,143 @@ public func makeStreamSessionConfiguration(allowLegacyTls: Bool = false) -> URLS
   }
   return config
 }
+
+/// Isolated `URLSessionTaskDelegate` for external sidecar subtitle fetches (`#308`).
+/// Never reads or stores cookies, blocks non-HTTP(S) redirect targets, and strips sensitive
+/// headers (`Authorization`, `Cookie`, `Proxy-Authorization`, `X-Api-Key`, `X-Auth-Token`)
+/// whenever a redirect leaves the subtitle track's initial origin.
+public final class IsolatedSubtitleRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+  private let lock = NSLock()
+  private var leftOriginByTask: [Int: Bool] = [:]
+  private var initialOriginByTask: [Int: StreamOrigin] = [:]
+
+  public override init() {
+    super.init()
+  }
+
+  /// Pure redirect-scoping helper exposed for unit testing cross-origin credential stripping (`#308`).
+  public static func scopeSubtitleRedirect(
+    _ request: URLRequest,
+    initialOrigin: StreamOrigin?,
+    leftOrigin: inout Bool
+  ) -> URLRequest? {
+    guard let targetUrl = request.url,
+          let scheme = targetUrl.scheme?.lowercased(),
+          scheme == "http" || scheme == "https"
+    else {
+      return nil
+    }
+    let sameOrigin: Bool
+    if !leftOrigin, let initialOrigin, let targetOrigin = StreamOrigin(url: targetUrl) {
+      sameOrigin = (initialOrigin == targetOrigin)
+    } else {
+      sameOrigin = false
+    }
+    if !sameOrigin {
+      leftOrigin = true
+    }
+    var copy = request
+    copy.httpShouldHandleCookies = false
+    if leftOrigin {
+      if let existing = copy.allHTTPHeaderFields {
+        for key in existing.keys where sensitiveHeaders.contains(key.lowercased()) {
+          copy.setValue(nil, forHTTPHeaderField: key)
+        }
+      }
+      copy.setValue(nil, forHTTPHeaderField: "Authorization")
+      copy.setValue(nil, forHTTPHeaderField: "Cookie")
+      copy.setValue(nil, forHTTPHeaderField: "Proxy-Authorization")
+      copy.setValue(nil, forHTTPHeaderField: "X-Api-Key")
+      copy.setValue(nil, forHTTPHeaderField: "X-Auth-Token")
+    }
+    return copy
+  }
+
+  public func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest,
+    completionHandler: @escaping (URLRequest?) -> Void
+  ) {
+    let taskId = task.taskIdentifier
+    let (origin, initialLeft): (StreamOrigin?, Bool) = lock.withLock {
+      if let saved = initialOriginByTask[taskId] {
+        return (saved, leftOriginByTask[taskId] ?? false)
+      }
+      let derived = (task.originalRequest?.url ?? response.url).flatMap(StreamOrigin.init(url:))
+      if let derived {
+        initialOriginByTask[taskId] = derived
+      }
+      return (derived, leftOriginByTask[taskId] ?? false)
+    }
+    var left = initialLeft
+    let scoped = Self.scopeSubtitleRedirect(request, initialOrigin: origin, leftOrigin: &left)
+    lock.withLock {
+      leftOriginByTask[taskId] = left
+    }
+    completionHandler(scoped)
+  }
+
+  public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    lock.withLock {
+      leftOriginByTask.removeValue(forKey: task.taskIdentifier)
+      initialOriginByTask.removeValue(forKey: task.taskIdentifier)
+    }
+  }
+}
+
+/// Namespace for isolated external subtitle HTTP transport (`#308`).
+public enum StreamHttp {
+  /// Builds an isolated ephemeral `URLSessionConfiguration` strictly for external sidecar subtitle fetches (`#308`).
+  /// Never inherits primary stream headers, cookies, or cache (`httpShouldSetCookies = false`,
+  /// `httpCookieStorage = nil`, `urlCache = nil`, `httpAdditionalHeaders = nil`).
+  public static func subtitleSessionConfiguration(
+    headers: [String: String] = [:],
+    allowLegacyTls: Bool = false
+  ) -> URLSessionConfiguration {
+    _ = headers
+    let config = URLSessionConfiguration.ephemeral
+    config.httpShouldSetCookies = false
+    config.httpCookieStorage = nil
+    config.urlCache = nil
+    config.requestCachePolicy = .reloadIgnoringLocalCacheData
+    config.httpAdditionalHeaders = nil
+    config.httpMaximumConnectionsPerHost = 2
+    config.timeoutIntervalForRequest = 15
+    config.timeoutIntervalForResource = 30
+    config.waitsForConnectivity = false
+    if allowLegacyTls {
+      #if canImport(Darwin)
+      config.tlsMinimumSupportedProtocolVersion = .TLSv10
+      #endif
+    }
+    return config
+  }
+
+  /// Builds an isolated `URLRequest` carrying ONLY sanitized headers explicitly scoped to this subtitle track (`#308`).
+  public static func makeSubtitleRequest(url: URL, headers: [String: String] = [:]) -> URLRequest {
+    var request = URLRequest(
+      url: url,
+      cachePolicy: .reloadIgnoringLocalCacheData,
+      timeoutInterval: 15
+    )
+    request.httpShouldHandleCookies = false
+    let clean = sanitizeRequestHeaders(headers)
+    for (key, value) in clean {
+      request.setValue(value, forHTTPHeaderField: key)
+    }
+    return request
+  }
+
+  /// Creates an isolated ephemeral `URLSession` with cross-origin redirect credential stripping for external subtitles (`#308`).
+  /// Callers should call `finishTasksAndInvalidate()` or `invalidateAndCancel()` when done.
+  public static func makeSubtitleSession(
+    headers: [String: String] = [:],
+    allowLegacyTls: Bool = false
+  ) -> URLSession {
+    let config = subtitleSessionConfiguration(headers: headers, allowLegacyTls: allowLegacyTls)
+    let delegate = IsolatedSubtitleRedirectDelegate()
+    return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+  }
+}

@@ -1,4 +1,10 @@
-import type { AttemptToken, EngineEvent, PlayerEngine } from '@elv/playback';
+import {
+  type AttemptToken,
+  type EngineEvent,
+  type ExternalSubtitleTrack,
+  normalizeExternalSubtitleTrack,
+  type PlayerEngine,
+} from '@elv/playback';
 import {
   type AccessibilityFontFamily,
   DESKTOP_CAPABILITIES,
@@ -26,6 +32,7 @@ import type { MpvProcess } from './mpv/process.ts';
 import type { ReadaheadTierStore } from './mpv/readahead.ts';
 import { createTrackTracker } from './mpv/tracks.ts';
 import type { VideoPresenter } from './presenter/types.ts';
+import { createSubtitleFetchSession } from './subtitle-fetch.ts';
 
 /** How `load` replaces the media: mpv's `loadfile replace`, or `stop`, the old entry's `end-file`, then `loadfile`. */
 export type LoadMode = 'replace' | 'stop-then-load';
@@ -91,6 +98,18 @@ const withStart = (request: MediaRequest, startMs: number | undefined): MediaReq
   return startMs === undefined ? rest : { ...rest, startMs };
 };
 
+const buildSubAddCommand = (
+  localPath: string,
+  track: ExternalSubtitleTrack,
+  flags: 'select' | 'auto',
+): MpvCommand => {
+  const label = track.label ?? '';
+  const lang = track.language ?? '';
+  if (lang.length > 0) return ['sub-add', localPath, flags, label, lang];
+  if (label.length > 0) return ['sub-add', localPath, flags, label];
+  return ['sub-add', localPath, flags];
+};
+
 /** Drives one mpv process as a `PlayerEngine` with zap coalescing, entry-id binding and serialized IPC. */
 export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   const { presenter, timers } = deps;
@@ -98,6 +117,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   const queueAdvancedListeners = new Set<(itemKey: string) => void>();
   const tracks = createTrackTracker();
   const opening = createOpeningGate<MediaSlot>({ now: deps.now, timers });
+  const subtitleFetcher = createSubtitleFetchSession();
   let released = false;
   let spawns = 0;
   let lastArea: PlayerArea | undefined;
@@ -203,6 +223,14 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     onAudioSpdifProperty: (value) => controls.onAudioSpdifProperty(value),
     getDesiredAudioDevice: () => controls.getDesiredAudioDevice(),
     getDesiredSubtitleFont: () => controls.getDesiredSubtitleFont(),
+    getDesiredSubtitleStyle: () => controls.getDesiredSubtitleStyle(),
+    isSecondarySubtitleActive: () => tracks.hasActiveSecondarySubtitle(),
+    onSecondarySubtitlePositionSync: (active) => controls.syncSubtitlePosition(active),
+    onFileLoadedExternalSubtitles: (slot) => {
+      const list = slot.request.externalSubtitles;
+      if (!list || list.length === 0) return;
+      for (const track of list) attachExternalSubtitle(slot, track, 'auto');
+    },
     getDesiredDeinterlaceMode: () => controls.getDesiredDeinterlaceMode(),
     getDesiredPitchLock: () => controls.getDesiredPitchLock(),
     getDesiredAudioNormalization: () => controls.getDesiredAudioNormalization(),
@@ -407,6 +435,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         isSpdifPassthroughValue(arg.slice('--audio-spdif='.length)),
     ),
     ...(deps.audioRampMs === undefined ? {} : { audioRampMs: deps.audioRampMs }),
+    isSecondarySubtitleActive: () => tracks.hasActiveSecondarySubtitle(),
   });
 
   const clearQueue = (): void => {
@@ -432,6 +461,20 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     if (released) return;
     adopt(token);
     queue.enqueueCommand(cmd, media);
+  };
+
+  const attachExternalSubtitle = (
+    slot: MediaSlot,
+    track: ExternalSubtitleTrack,
+    flags: 'select' | 'auto',
+  ): void => {
+    void subtitleFetcher
+      .resolveTrack(track)
+      .then((localPath) => {
+        if (released || media !== slot) return;
+        queue.enqueueCommand(buildSubAddCommand(localPath, track, flags), slot);
+      })
+      .catch(() => undefined);
   };
 
   const offSurface = presenter.onEvent((e) =>
@@ -536,6 +579,17 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     setResizeMode: (mode) => controls.setResizeMode(mode),
     setFilterSdh: (enabled) => controls.setFilterSdh(enabled),
     setSubtitleFontFamily: (family) => controls.setSubtitleFontFamily(family),
+    setSubtitleStyle: (style) => controls.setSubtitleStyle(style),
+    addExternalSubtitle(attempt, track) {
+      if (released || !media || attempt < media.token) return;
+      const clean = normalizeExternalSubtitleTrack(track);
+      if (clean === null) return;
+      adopt(attempt);
+      const existing = media.request.externalSubtitles ?? [];
+      const deduped = existing.filter((item) => item.id !== clean.id && item.uri !== clean.uri);
+      media.request = { ...media.request, externalSubtitles: [...deduped, clean] };
+      attachExternalSubtitle(media, clean, 'select');
+    },
     get spawns() {
       return spawns;
     },
@@ -547,9 +601,20 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     },
     load(cmd) {
       if (released) return;
+      subtitleFetcher.cleanup();
       resetPerMediaOverrides();
       tracks.onLoad(cmd.options);
       const { url, headers, kind, options } = cmd;
+      const effectiveStyle =
+        options?.subtitleStyle !== undefined
+          ? controls.rememberSubtitleStyle(options.subtitleStyle)
+          : controls.getDesiredSubtitleStyle();
+      const externalSubtitles =
+        options?.externalSubtitles === undefined
+          ? undefined
+          : options.externalSubtitles
+              .map((t) => normalizeExternalSubtitleTrack(t))
+              .filter((t): t is ExternalSubtitleTrack => t !== null);
       // Desktop mpv inherits OS TLS with `--tls-verify=yes` (never disabled; mpv/FFmpeg has no
       // safe per-file legacy-TLS-min-version flag), while Node `legacy-tls-http.ts` handles
       // opt-in legacy TLS for catalog and XMLTV fetches (`#182`).
@@ -563,6 +628,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         ...(options?.filterSdhSubtitles === undefined
           ? {}
           : { filterSdhSubtitles: options.filterSdhSubtitles }),
+        ...(effectiveStyle === undefined ? {} : { subtitleStyle: effectiveStyle }),
+        ...(externalSubtitles === undefined || externalSubtitles.length === 0
+          ? {}
+          : { externalSubtitles }),
       };
       startMedia(cmd.attempt, withStart(req, cmd.startMs));
     },
@@ -604,12 +673,19 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       if (cmd) command(attempt, cmd);
     },
     selectSubtitleTrack(attempt, id) {
-      const cmd = released ? undefined : tracks.selectSubtitle(id);
-      if (cmd) command(attempt, cmd);
+      if (released) return;
+      const cmd = tracks.selectSubtitle(id);
+      if (!cmd) return;
+      const clearSecondary = tracks.clearSecondaryIfCollides(id);
+      if (clearSecondary) command(attempt, clearSecondary);
+      command(attempt, cmd);
+      if (clearSecondary) controls.syncSubtitlePosition(false);
     },
     selectSecondarySubtitleTrack(attempt, id) {
       const cmd = released ? undefined : tracks.selectSecondarySubtitle(id);
-      if (cmd) command(attempt, cmd);
+      if (!cmd) return;
+      command(attempt, cmd);
+      controls.syncSubtitlePosition(tracks.hasActiveSecondarySubtitle());
     },
     selectVideoQuality(attempt, id) {
       if (released) return;
@@ -623,6 +699,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     stop(attempt) {
       if (released) return;
       adopt(attempt);
+      subtitleFetcher.cleanup();
       resetPerMediaOverrides();
       controls.reset();
       tracks.onStop();
@@ -646,6 +723,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       if (released) return;
       controls.cancelRamp(true, true);
       released = true;
+      subtitleFetcher.cleanup();
       resetPerMediaOverrides();
       controls.reset();
       tracks.onStop();

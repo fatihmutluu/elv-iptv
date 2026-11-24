@@ -10,6 +10,7 @@ import type {
   SeekStepSecPref,
   SleepTimerAction,
   SubtitleModePref,
+  SubtitleStyleConfig,
   TvClockMode,
 } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
@@ -23,6 +24,10 @@ import type { PlaybackGuard } from '../ports/playback-guard';
 import type { VideoHost, VideoResizeMode } from '../ports/video-host';
 import { useProfile } from '../shared';
 import type { PlayerOsdProps } from './DesktopCinemaBar';
+import {
+  ExternalSubtitleUrlOverlay,
+  type ExternalSubtitleUrlOverlayProps,
+} from './ExternalSubtitleUrlOverlay';
 import {
   DesktopDockedTopBar,
   HIDE_CURSOR_WEB_STYLE,
@@ -84,6 +89,8 @@ export interface PlayerScreenProps {
   filterSdhSubtitles?: boolean;
   subtitleMode?: SubtitleModePref;
   subtitleFontFamily?: AccessibilityFontFamily;
+  subtitleStyle?: SubtitleStyleConfig;
+  onPersistSubtitleStyle?: (style: SubtitleStyleConfig) => void;
   tvClockMode?: TvClockMode;
   osdTimeDisplayMode?: OsdTimeDisplayMode;
   onPersistOsdTimeDisplayMode?: (mode: OsdTimeDisplayMode) => void;
@@ -144,6 +151,11 @@ export interface PlayerScreenStageProps {
   readonly infoSheetNode: ReactElement;
   readonly channelDrawerNode: ReactElement;
   readonly settingsSheetNode: ReactElement;
+  readonly externalSubtitleOverlay?: Pick<
+    ExternalSubtitleUrlOverlayProps,
+    'visible' | 'onSubmit' | 'onClose'
+  >;
+  readonly externalSubtitleFeedback?: 'loaded' | 'failed' | null;
   readonly stillWatchingVisible: boolean;
   readonly stillWatchingRemainingSec: number;
   readonly stillWatchingFocusedAction?: 'continue' | 'stop';
@@ -314,6 +326,36 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
           {p.settingsSheetNode}
         </>
       )}
+
+      {p.externalSubtitleFeedback !== undefined && p.externalSubtitleFeedback !== null ? (
+        <View
+          pointerEvents="none"
+          style={[
+            playerStyles.holdSpeedWrap,
+            { top: 20 + viewport.safeArea.top + viewport.overscan.y },
+          ]}
+        >
+          <MicroPill
+            testID="player-external-subtitle-feedback"
+            label={p.i18n.t(
+              p.externalSubtitleFeedback === 'loaded'
+                ? 'player.externalSubtitle.loaded'
+                : 'player.externalSubtitle.failed',
+            )}
+            tone="accent"
+          />
+        </View>
+      ) : null}
+
+      {p.externalSubtitleOverlay !== undefined ? (
+        <ExternalSubtitleUrlOverlay
+          visible={p.externalSubtitleOverlay.visible}
+          isTv={p.isTv}
+          i18n={p.i18n}
+          onSubmit={p.externalSubtitleOverlay.onSubmit}
+          onClose={p.externalSubtitleOverlay.onClose}
+        />
+      ) : null}
 
       <StillWatchingPrompt
         visible={!p.inPip && p.stillWatchingVisible}

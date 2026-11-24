@@ -1,6 +1,7 @@
 import { enCatchupEpgMessages } from './en-catchup-epg';
 import { enErgonomicsMessages } from './en-ergonomics';
 import { enProfilesMessages } from './en-profiles';
+import { enSubtitlesSuiteMessages } from './en-subtitles-suite';
 
 /** English (source) message catalog. Every other locale must define the exact same keys. */
 export const enMessages = {
@@ -693,6 +694,7 @@ export const enMessages = {
   ...enProfilesMessages,
   ...enErgonomicsMessages,
   ...enCatchupEpgMessages,
+  ...enSubtitlesSuiteMessages,
 } as const;
 
 /** Valid message identifier across all supported locales. */

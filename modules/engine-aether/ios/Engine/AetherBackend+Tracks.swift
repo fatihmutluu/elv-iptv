@@ -52,6 +52,16 @@ extension AetherBackend {
     .store(in: &cancellables)
   }
 
+  func refreshAllSubtitles(from target: AetherEngine) {
+    updateSubtitleClockSubscription(
+      target: target,
+      cues: target.subtitleCues,
+      followsPicture: target.clock.sourceTimeFollowsPicture,
+      isSubActive: target.isSubtitleActive,
+      softwareSize: target.softwareDisplaySize
+    )
+  }
+
   func updateSubtitleClockSubscription(
     target: AetherEngine,
     cues: [SubtitleCue],
@@ -59,38 +69,77 @@ extension AetherBackend {
     isSubActive: Bool,
     softwareSize: CGSize?
   ) {
-    guard self.engine === target, engineLoadSerial > 0, isSubActive, followsPicture, !cues.isEmpty else {
+    let hasEmbedded = isSubActive && followsPicture && !cues.isEmpty
+    let hasExternal = hasActiveExternalOrSecondarySubtitles
+    guard self.engine === target, engineLoadSerial > 0, (hasEmbedded || hasExternal) else {
       subtitleClockCancellable?.cancel()
       subtitleClockCancellable = nil
+      externalSubtitleClockCancellable?.cancel()
+      externalSubtitleClockCancellable = nil
       publishSubtitlePresentation(.empty)
       return
     }
+    let activeTime = followsPicture ? target.clock.sourceTime : target.clock.currentTime
     renderSubtitles(
       from: target,
-      cues: cues,
-      sourceTime: target.clock.sourceTime,
+      cues: hasEmbedded ? cues : [],
+      sourceTime: activeTime,
       softwareSize: softwareSize
     )
-    if subtitleClockCancellable == nil {
-      subtitleClockCancellable = target.clock.$sourceTime
-        .dropFirst()
-        .sink { [weak self, weak target] sourceTime in
-          Self.onMainActor {
-            guard let self, let target, self.engine === target, self.engineLoadSerial > 0 else { return }
-            guard target.isSubtitleActive, target.clock.sourceTimeFollowsPicture, !target.subtitleCues.isEmpty else {
-              self.subtitleClockCancellable?.cancel()
-              self.subtitleClockCancellable = nil
-              self.publishSubtitlePresentation(.empty)
-              return
+    if hasEmbedded {
+      if subtitleClockCancellable == nil {
+        subtitleClockCancellable = target.clock.$sourceTime
+          .dropFirst()
+          .sink { [weak self, weak target] sourceTime in
+            Self.onMainActor {
+              guard let self, let target, self.engine === target, self.engineLoadSerial > 0 else { return }
+              let embeddedOk = target.isSubtitleActive && target.clock.sourceTimeFollowsPicture && !target.subtitleCues.isEmpty
+              guard embeddedOk || self.hasActiveExternalOrSecondarySubtitles else {
+                self.subtitleClockCancellable?.cancel()
+                self.subtitleClockCancellable = nil
+                self.publishSubtitlePresentation(.empty)
+                return
+              }
+              self.renderSubtitles(
+                from: target,
+                cues: embeddedOk ? target.subtitleCues : [],
+                sourceTime: sourceTime,
+                softwareSize: target.softwareDisplaySize
+              )
             }
-            self.renderSubtitles(
-              from: target,
-              cues: target.subtitleCues,
-              sourceTime: sourceTime,
-              softwareSize: target.softwareDisplaySize
-            )
           }
-        }
+      }
+    } else {
+      subtitleClockCancellable?.cancel()
+      subtitleClockCancellable = nil
+    }
+
+    if hasExternal {
+      if externalSubtitleClockCancellable == nil {
+        externalSubtitleClockCancellable = target.clock.$currentTime
+          .dropFirst()
+          .sink { [weak self, weak target] currentTime in
+            Self.onMainActor {
+              guard let self, let target, self.engine === target, self.engineLoadSerial > 0 else { return }
+              guard self.hasActiveExternalOrSecondarySubtitles else {
+                self.externalSubtitleClockCancellable?.cancel()
+                self.externalSubtitleClockCancellable = nil
+                return
+              }
+              let embeddedOk = target.isSubtitleActive && target.clock.sourceTimeFollowsPicture && !target.subtitleCues.isEmpty
+              let effectiveClock = target.clock.sourceTimeFollowsPicture ? target.clock.sourceTime : currentTime
+              self.renderSubtitles(
+                from: target,
+                cues: embeddedOk ? target.subtitleCues : [],
+                sourceTime: effectiveClock,
+                softwareSize: target.softwareDisplaySize
+              )
+            }
+          }
+      }
+    } else {
+      externalSubtitleClockCancellable?.cancel()
+      externalSubtitleClockCancellable = nil
     }
   }
 
@@ -105,7 +154,7 @@ extension AetherBackend {
       sourceTimeSeconds: sourceTime,
       subtitleDelaySeconds: requestedSubtitleDelaySeconds
     )
-    let activeCues = cues.filter { cue in
+    let activeEmbedded = cues.filter { cue in
       guard cue.startTime <= effectiveTime && effectiveTime < cue.endTime else { return false }
       guard filterSdh else { return true }
       switch cue.body {
@@ -117,15 +166,61 @@ extension AetherBackend {
         return true
       }
     }
+    let maxSec = Double(ExternalSubtitleParser.maxSubtitleTimeMs) / 1_000.0
+    let effectiveMs: Int = (effectiveTime.isFinite && effectiveTime >= 0 && effectiveTime <= maxSec)
+      ? Int((effectiveTime * 1_000.0).rounded())
+      : 0
+    let primaryEmbedded: [SubtitleCue]
+    let secondaryEmbedded: [SubtitleCue]
+    if embeddedDecoderServingSecondary {
+      primaryEmbedded = []
+      secondaryEmbedded = activeEmbedded
+    } else if activeExternalPrimaryId == nil {
+      primaryEmbedded = activeEmbedded
+      secondaryEmbedded = []
+    } else {
+      primaryEmbedded = []
+      secondaryEmbedded = []
+    }
+
+    let externalPrimary: [ExternalSubtitleCue]
+    if let extPrimaryId = activeExternalPrimaryId, let loaded = externalSubtitles[extPrimaryId] {
+      externalPrimary = filterExternalCues(
+        ExternalSubtitleParser.activeCues(in: loaded.cues, atMs: effectiveMs),
+        filterSdh: filterSdh
+      )
+    } else {
+      externalPrimary = []
+    }
+
+    let externalSecondary: [ExternalSubtitleCue]
+    let currentPrimary = currentPrimarySubtitleId()
+    if let secId = activeSecondarySubtitleId, secId != currentPrimary, let loaded = externalSubtitles[secId] {
+      externalSecondary = filterExternalCues(
+        ExternalSubtitleParser.activeCues(in: loaded.cues, atMs: effectiveMs),
+        filterSdh: filterSdh
+      )
+    } else {
+      externalSecondary = []
+    }
+
     let resolvedSize = Self.resolveVideoSize(from: target, softwareSize: softwareSize)
     publishSubtitlePresentation(
       SubtitlePresentation(
-        cues: activeCues,
+        cues: primaryEmbedded,
+        secondaryCues: secondaryEmbedded,
+        externalPrimaryCues: externalPrimary,
+        externalSecondaryCues: externalSecondary,
         videoSize: resolvedSize,
         gravity: gravity,
         filterSdhSubtitles: filterSdh
       )
     )
+  }
+
+  private func filterExternalCues(_ cues: [ExternalSubtitleCue], filterSdh: Bool) -> [ExternalSubtitleCue] {
+    guard filterSdh else { return cues }
+    return cues.filter { !SubtitlePresentation.stripSdhAnnotations($0.text).isEmpty }
   }
 
   /// Coalesces `@Published` `willSet` track signals onto the next `@MainActor` turn so `target`'s properties
@@ -213,23 +308,43 @@ extension AetherBackend {
 
   func selectSubtitleTrack(_ streamId: Int?) {
     let previousDesired = desiredSubtitleStreamId
+    let wasExternalPrimary = activeExternalPrimaryId != nil
+    activeExternalPrimaryId = nil
     desiredSubtitleStreamId = streamId
     currentLoadOptions?.initialSubtitleTrackId = streamId
     currentLoadOptions?.subtitlesDisabled = (streamId == nil)
     guard let streamId else {
-      publishSubtitlePresentation(.empty)
-      engine?.clearSubtitle()
+      if !embeddedDecoderServingSecondary {
+        engine?.clearSubtitle()
+      }
+      emitCurrentTracksSnapshot()
+      if let target = engine, hasActiveExternalOrSecondarySubtitles {
+        refreshAllSubtitles(from: target)
+      } else {
+        publishSubtitlePresentation(.empty)
+      }
       return
     }
+    let wasEmbeddedSecondary = embeddedDecoderServingSecondary
+    embeddedDecoderServingSecondary = false
+    if activeSecondarySubtitleId.flatMap(parseSubtitleTrackStreamId) != nil {
+      activeSecondarySubtitleId = nil
+    }
     guard let engine, engineLoadSerial > 0 else { return }
-    if engine.isSubtitleActive,
+    if !wasExternalPrimary,
+       !wasEmbeddedSecondary,
+       engine.isSubtitleActive,
        engine.activeSubtitleTrackIndex == streamId,
        (previousDesired == nil || previousDesired == streamId)
     {
       return
     }
-    publishSubtitlePresentation(.empty)
+    if !hasActiveExternalOrSecondarySubtitles {
+      publishSubtitlePresentation(.empty)
+    }
     engine.selectSubtitleTrack(index: streamId)
+    emitCurrentTracksSnapshot()
+    refreshAllSubtitles(from: engine)
   }
 
   func setAudioDelay(_ seconds: Double) {
@@ -242,18 +357,17 @@ extension AetherBackend {
     let clamped = SyncDelayPolicy.clampDelaySeconds(seconds)
     requestedSubtitleDelaySeconds = clamped
     engine?.setSoftwareSubtitleDelay(clamped)
-    if let target = engine,
-       engineLoadSerial > 0,
-       target.isSubtitleActive,
-       target.clock.sourceTimeFollowsPicture,
-       !target.subtitleCues.isEmpty
-    {
-      renderSubtitles(
-        from: target,
-        cues: target.subtitleCues,
-        sourceTime: target.clock.sourceTime,
-        softwareSize: target.softwareDisplaySize
-      )
+    if let target = engine, engineLoadSerial > 0 {
+      let hasEmbedded = target.isSubtitleActive && target.clock.sourceTimeFollowsPicture && !target.subtitleCues.isEmpty
+      if hasEmbedded || hasActiveExternalOrSecondarySubtitles {
+        let activeTime = target.clock.sourceTimeFollowsPicture ? target.clock.sourceTime : target.clock.currentTime
+        renderSubtitles(
+          from: target,
+          cues: hasEmbedded ? target.subtitleCues : [],
+          sourceTime: activeTime,
+          softwareSize: target.softwareDisplaySize
+        )
+      }
     }
   }
 
@@ -284,6 +398,14 @@ extension AetherBackend {
     if let item = target.currentAVPlayer?.currentItem ?? target.currentAVPlayerItem {
       applyVideoQualityCap(to: item)
     }
+    if desiredSubtitleStreamId == nil,
+       (activeExternalPrimaryId != nil || currentLoadOptions?.subtitlesDisabled == true),
+       let secId = activeSecondarySubtitleId,
+       let secStreamId = parseSubtitleTrackStreamId(secId)
+    {
+      embeddedDecoderServingSecondary = true
+      target.selectSubtitleTrack(index: secStreamId)
+    }
   }
 
   func publishSubtitlePresentation(_ next: SubtitlePresentation) {
@@ -293,14 +415,14 @@ extension AetherBackend {
   }
 
   func refreshSubtitleGravity() {
-    guard !lastSubtitlePresentation.cues.isEmpty else { return }
+    guard lastSubtitlePresentation.hasAnyCues else { return }
     var updated = lastSubtitlePresentation
     updated.gravity = gravity
     publishSubtitlePresentation(updated)
   }
 
   func refreshSubtitleGeometry(from target: AetherEngine?) {
-    guard let target, !lastSubtitlePresentation.cues.isEmpty else { return }
+    guard let target, lastSubtitlePresentation.hasAnyCues else { return }
     let resolved = Self.resolveVideoSize(from: target, softwareSize: target.softwareDisplaySize)
     guard resolved != .zero, resolved != lastSubtitlePresentation.videoSize else { return }
     var updated = lastSubtitlePresentation
@@ -308,7 +430,7 @@ extension AetherBackend {
     publishSubtitlePresentation(updated)
   }
 
-  private func emitTracksObservation(
+  func emitTracksObservation(
     audioTracks: [TrackInfo],
     subtitleTracks: [TrackInfo],
     activeAudioIndex: Int?,
@@ -317,9 +439,22 @@ extension AetherBackend {
     serial: Int
   ) {
     let audio = audioTracks.map { Self.mapTrackInfo($0, isAudio: true) }
-    let subtitles = subtitleTracks.map { Self.mapTrackInfo($0, isAudio: false) }
+    let subtitles = subtitleTracks.map { Self.mapTrackInfo($0, isAudio: false) } + externalSubtitleTrackInfos
     let selectedAudioId = activeAudioIndex.map(formatAudioTrackId)
-    let selectedSubtitleId = isSubtitleActive ? activeSubtitleIndex.map(formatSubtitleTrackId) : nil
+    let selectedSubtitleId: String? =
+      activeExternalPrimaryId
+      ?? (embeddedDecoderServingSecondary ? nil : (isSubtitleActive ? activeSubtitleIndex.map(formatSubtitleTrackId) : nil))
+    let selectedSecondarySubtitleId: String? = {
+      guard let secId = activeSecondarySubtitleId, secId != selectedSubtitleId else { return nil }
+      if parseSubtitleTrackStreamId(secId) != nil {
+        guard embeddedDecoderServingSecondary,
+              selectedSubtitleId.flatMap(parseSubtitleTrackStreamId) == nil
+        else {
+          return nil
+        }
+      }
+      return secId
+    }()
     let isAdaptive = VideoQualityPolicy.isAdaptiveStream(plan: currentPlan)
     let videoQualities = isAdaptive ? VideoQualityPolicy.adaptivePresets : []
     let selectedVideoQualityId = isAdaptive ? requestedVideoQualityCap?.id : nil
@@ -330,6 +465,7 @@ extension AetherBackend {
           subtitles: subtitles,
           selectedAudioId: selectedAudioId,
           selectedSubtitleId: selectedSubtitleId,
+          selectedSecondarySubtitleId: selectedSecondarySubtitleId,
           videoQualities: videoQualities,
           selectedVideoQualityId: selectedVideoQualityId
         )

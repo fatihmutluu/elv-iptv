@@ -1,4 +1,5 @@
 import {
+  isPickedSubtitleTrack,
   PLAYER_CHANNELS,
   type PlayerBridge,
   type PlayerEventMessage,
@@ -107,6 +108,14 @@ export function createPlayerBridge(
           frameListeners.delete(engineId);
         }
       };
+    },
+    async pickSubtitleFile() {
+      const reply = await ipc.invoke(PLAYER_CHANNELS.pickSubtitleFile);
+      if (reply === null || reply === undefined) return null;
+      if (!isPickedSubtitleTrack(reply)) {
+        throw new Error('player:pick-subtitle-file returned an unexpected reply');
+      }
+      return reply;
     },
     reportGate(line) {
       ipc.send(PLAYER_CHANNELS.gateReport, line);

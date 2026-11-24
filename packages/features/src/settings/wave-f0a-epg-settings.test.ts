@@ -1,4 +1,4 @@
-import { DEFAULT_PREFERENCES, ok, type PreferencesPatch } from '@elv/domain';
+import { DEFAULT_PREFERENCES, mergeSubtitleStyle, ok, type PreferencesPatch } from '@elv/domain';
 import { describe, expect, it, vi } from 'vitest';
 import type { SettingsPreferencesController } from './appearance-controls';
 import { activateLiveTvControl, EPG_ROW_DENSITY_OPTIONS } from './live-tv-controls';
@@ -9,7 +9,11 @@ function makeController() {
     preferences: DEFAULT_PREFERENCES,
     updatePreferences: vi.fn(async (patch: PreferencesPatch) => {
       patches.push(patch);
-      return ok({ ...DEFAULT_PREFERENCES, ...patch });
+      return ok({
+        ...DEFAULT_PREFERENCES,
+        ...patch,
+        subtitleStyle: mergeSubtitleStyle(DEFAULT_PREFERENCES.subtitleStyle, patch.subtitleStyle),
+      });
     }),
     resetPreferences: vi.fn(async () => ok(DEFAULT_PREFERENCES)),
   };

@@ -1,4 +1,4 @@
-import type { AttemptToken } from '@elv/playback';
+import type { AttemptToken, ExternalSubtitleTrack } from '@elv/playback';
 import {
   type DesktopMediaMetadata,
   isGateReport,
@@ -78,6 +78,8 @@ export interface PlayerIpcDeps {
   onVideoAspectRatioChange?(owner: WebContentsLike, aspectRatio: number | undefined): void;
   /** Optional OS media bridge (Linux MPRIS2 `#238` or macOS MediaPlayer `#301`). */
   mediaBridge?: DesktopMediaBridge;
+  /** Optional sandboxed subtitle file picker (`#32`). */
+  pickSubtitleFile?(owner: WebContentsLike): Promise<ExternalSubtitleTrack | null>;
   /**
    * Dev gate only: receives each valid `gate:report` line and the sender's engine (`undefined` when it has none). The
    * channel is not registered without it.
@@ -409,6 +411,16 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     if (typeof engineId === 'string' && ownedEntry(sender, engineId)) release(engineId);
   };
 
+  const onPickSubtitleFile: IpcListener = async ({ sender }) => {
+    if (disposed || sender.isDestroyed() || !deps.pickSubtitleFile) return null;
+    try {
+      return await deps.pickSubtitleFile(sender);
+    } catch {
+      log(`player ipc: a ${PLAYER_CHANNELS.pickSubtitleFile} request failed`);
+      return null;
+    }
+  };
+
   const onCommand: IpcListener = ({ sender }, message) =>
     guarded(PLAYER_CHANNELS.command, () => dispatchCommand(sender, message));
 
@@ -499,6 +511,12 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         break;
       case 'selectSecondarySubtitleTrack':
         engine.selectSecondarySubtitleTrack?.(command.attempt, command.id);
+        break;
+      case 'addExternalSubtitle':
+        engine.addExternalSubtitle?.(command.attempt, command.track);
+        break;
+      case 'setSubtitleStyle':
+        engine.setSubtitleStyle?.(command.style);
         break;
       case 'selectVideoQuality':
         engine.selectVideoQuality?.(command.attempt, command.id);
@@ -700,6 +718,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
 
   ipcMain.handle(PLAYER_CHANNELS.open, onOpen);
   ipcMain.handle(PLAYER_CHANNELS.close, onClose);
+  ipcMain.handle(PLAYER_CHANNELS.pickSubtitleFile, onPickSubtitleFile);
   ipcMain.on(PLAYER_CHANNELS.command, onCommand);
   ipcMain.on(PLAYER_CHANNELS.area, onArea);
   if (deps.gateReport) ipcMain.on(PLAYER_CHANNELS.gateReport, onGate);
@@ -709,6 +728,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     offMediaCommand?.();
     ipcMain.removeHandler(PLAYER_CHANNELS.open);
     ipcMain.removeHandler(PLAYER_CHANNELS.close);
+    ipcMain.removeHandler(PLAYER_CHANNELS.pickSubtitleFile);
     ipcMain.removeListener(PLAYER_CHANNELS.command, onCommand);
     ipcMain.removeListener(PLAYER_CHANNELS.area, onArea);
     ipcMain.removeListener(PLAYER_CHANNELS.gateReport, onGate);

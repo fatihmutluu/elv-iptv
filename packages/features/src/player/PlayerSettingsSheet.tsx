@@ -1,5 +1,11 @@
 import type { LiveVariantOption } from '@elv/data';
-import type { AndroidDecoderMode, DeinterlaceMode, OsdTimeDisplayMode } from '@elv/domain';
+import {
+  type AndroidDecoderMode,
+  DEFAULT_SUBTITLE_STYLE,
+  type DeinterlaceMode,
+  type OsdTimeDisplayMode,
+  type SubtitleStyleConfig,
+} from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { ChapterInfo, MediaTracks } from '@elv/playback';
 import {
@@ -8,15 +14,17 @@ import {
   Icon,
   IconButton,
   type IconName,
+  MicroPill,
   TABULAR_NUMS_STYLE,
   useTheme,
   webBackdropBlur,
 } from '@elv/ui-kit';
-import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
+import { type ComponentRef, Fragment, type ReactElement, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { AudioDeviceInfo, VideoResizeMode } from '../ports/video-host';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
 import { blurWebTarget, SettingsToggleRow, settingsRowStyle } from './PlayerSettingsRows';
+import { SubtitleStyleSection } from './SubtitleStyleSection';
 import {
   formatSyncDelayMs,
   type SettingsMenuState,
@@ -51,6 +59,8 @@ export interface PlayerSettingsSheetProps {
   readonly activeAudioDevice?: string;
   readonly audioDelayMs?: number;
   readonly subtitleDelayMs?: number;
+  readonly subtitleStyle?: SubtitleStyleConfig;
+  readonly dualSubtitles?: boolean;
   readonly selectedVideoQualityId?: string | null;
   readonly qualityVariants?: readonly LiveVariantOption[];
   readonly activeQualityKey?: string;
@@ -66,6 +76,10 @@ export interface PlayerSettingsSheetProps {
   readonly onSelectVideoQuality?: (id: string | null) => void;
   readonly onSelectQualityVariant?: (itemKey: string) => void;
   readonly onSelectSubtitle: (id: string | null) => void;
+  readonly onSelectSecondarySubtitle?: (id: string | null) => void;
+  readonly onPickSubtitleFile?: () => void;
+  readonly onLoadSubtitleUrl?: () => void;
+  readonly onChangeSubtitleStyle?: (next: SubtitleStyleConfig) => void;
   readonly onSelectSpeed?: (rate: number) => void;
   readonly onSelectChapter?: (startMs: number) => void;
   readonly onSelectSleepTimer?: (minutes: number) => void;
@@ -111,6 +125,8 @@ function resolveViewTitle(
       return `${i18n.t('player.audioDelay')} · ${formatSyncDelayMs(audioDelayMs)}`;
     case 'subtitleDelay':
       return `${i18n.t('player.subtitleDelay')} · ${formatSyncDelayMs(subtitleDelayMs)}`;
+    case 'subtitleStyle':
+      return i18n.t('player.subtitleStyle.section');
     case 'audioDevice':
       return i18n.t('player.audioDevice');
     case 'videoQuality':
@@ -170,6 +186,8 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   const subtitleDelayMs = props.subtitleDelayMs ?? 0;
   const showAudioDelay = props.onAdjustAudioDelay !== undefined;
   const showSubtitleDelay = props.onAdjustSubtitleDelay !== undefined;
+  const showSubtitleStyle = props.onChangeSubtitleStyle !== undefined;
+  const activeSubtitleStyle = props.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
   const showVideoQuality =
     (tracks.videoQualities?.length ?? 0) > 0 && props.onSelectVideoQuality !== undefined;
   const showVideoDecoder =
@@ -201,6 +219,8 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
           audioDelayMs,
           showSubtitleDelay,
           subtitleDelayMs,
+          showSubtitleStyle,
+          subtitleStyle: activeSubtitleStyle,
           showVideoQuality,
           selectedVideoQualityId: props.selectedVideoQualityId,
         },
@@ -394,6 +414,10 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         onSelectVideoQuality: props.onSelectVideoQuality,
         onSelectQualityVariant: props.onSelectQualityVariant,
         onSelectSubtitle: props.onSelectSubtitle,
+        dualSubtitles: props.dualSubtitles,
+        onSelectSecondarySubtitle: props.onSelectSecondarySubtitle,
+        onPickSubtitleFile: props.onPickSubtitleFile,
+        onLoadSubtitleUrl: props.onLoadSubtitleUrl,
         onSelectSpeed: props.onSelectSpeed,
         onSelectChapter: props.onSelectChapter,
         onSelectSleepTimer: props.onSelectSleepTimer,
@@ -480,6 +504,22 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
             />
           ))}
         </ScrollView>
+      ) : menuState.view === 'subtitleStyle' ? (
+        <ScrollView
+          ref={listScrollRef}
+          focusable={!isTv}
+          style={styles.subList}
+          contentContainerStyle={styles.listGap}
+        >
+          <SubtitleStyleSection
+            style={activeSubtitleStyle}
+            focusedIndex={menuState.index}
+            showCursor={showCursor}
+            isTv={isTv}
+            i18n={i18n}
+            onChange={(next) => props.onChangeSubtitleStyle?.(next)}
+          />
+        </ScrollView>
       ) : (
         <ScrollView
           ref={listScrollRef}
@@ -489,41 +529,83 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         >
           {radioItems.length > 0 ? (
             radioItems.map((item, idx) => (
-              <Pressable
-                key={item.key}
-                testID={item.testID}
-                focusable={!isTv}
-                accessibilityRole="radio"
-                accessibilityLabel={item.label}
-                accessibilityState={{ selected: item.selected, checked: item.selected }}
-                aria-checked={item.selected}
-                onPress={(e) => {
-                  blurWebTarget(e.currentTarget);
-                  item.onPress();
-                }}
-                style={settingsRowStyle(
-                  theme,
-                  showCursor && menuState.index === idx,
-                  item.selected,
-                  isTv,
-                )}
-              >
-                <Text
-                  numberOfLines={1}
+              <Fragment key={item.key}>
+                {item.sectionHeader !== undefined ? (
+                  <Text
+                    style={[
+                      theme.typography.caption,
+                      styles.sectionHeader,
+                      { color: theme.colors.textSecondary },
+                    ]}
+                  >
+                    {item.sectionHeader}
+                  </Text>
+                ) : null}
+                <Pressable
+                  testID={item.testID}
+                  disabled={item.disabled === true}
+                  focusable={!isTv && item.disabled !== true}
+                  accessibilityRole={item.role ?? 'radio'}
+                  accessibilityLabel={
+                    item.disabledHint !== undefined
+                      ? `${item.label} (${item.disabledHint})`
+                      : item.label
+                  }
+                  accessibilityState={
+                    (item.role ?? 'radio') === 'radio'
+                      ? {
+                          selected: item.selected,
+                          checked: item.selected,
+                          ...(item.disabled === true ? { disabled: true } : {}),
+                        }
+                      : { ...(item.disabled === true ? { disabled: true } : {}) }
+                  }
+                  {...((item.role ?? 'radio') === 'radio' ? { 'aria-checked': item.selected } : {})}
+                  onPress={(e) => {
+                    if (item.disabled === true) return;
+                    blurWebTarget(e.currentTarget);
+                    item.onPress();
+                  }}
                   style={[
-                    theme.typography.title,
-                    item.tabular === true ? TABULAR_NUMS_STYLE : undefined,
-                    styles.flex1,
-                    {
-                      color: item.selected ? theme.colors.textPrimary : theme.colors.textSecondary,
-                      fontWeight: item.selected ? '700' : '500',
-                    },
+                    settingsRowStyle(
+                      theme,
+                      showCursor && menuState.index === idx,
+                      item.selected,
+                      isTv,
+                    ),
+                    item.disabled === true ? styles.disabledRow : undefined,
                   ]}
                 >
-                  {item.label}
-                </Text>
-                {item.selected ? <Icon name="check" size={16} color={theme.colors.accent} /> : null}
-              </Pressable>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      theme.typography.title,
+                      item.tabular === true ? TABULAR_NUMS_STYLE : undefined,
+                      styles.flex1,
+                      {
+                        color:
+                          item.disabled === true
+                            ? theme.colors.textMuted
+                            : item.selected
+                              ? theme.colors.textPrimary
+                              : theme.colors.textSecondary,
+                        fontWeight: item.selected ? '700' : '500',
+                      },
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                  {item.badgeLabel !== undefined ? (
+                    <MicroPill label={item.badgeLabel} tone="accent" />
+                  ) : null}
+                  {item.disabledHint !== undefined ? (
+                    <MicroPill label={item.disabledHint} tone="neutral" />
+                  ) : null}
+                  {item.selected ? (
+                    <Icon name="check" size={16} color={theme.colors.accent} />
+                  ) : null}
+                </Pressable>
+              </Fragment>
             ))
           ) : (
             <Text
@@ -600,5 +682,7 @@ const styles = StyleSheet.create({
   rootList: { maxHeight: 440 },
   subList: { maxHeight: 280 },
   summary: { maxWidth: 120, textAlign: 'right' },
+  sectionHeader: { paddingTop: 8, paddingBottom: 2, paddingHorizontal: 10 },
+  disabledRow: { opacity: 0.55 },
   empty: { paddingVertical: 12, paddingHorizontal: 4 },
 });

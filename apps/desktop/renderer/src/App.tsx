@@ -195,6 +195,11 @@ function AppRoot() {
           setFilterSdh: (enabled: boolean) => rawEngine.setFilterSdh(enabled),
           setSubtitleFontFamily: (family: AccessibilityFontFamily) =>
             rawEngine.setSubtitleFontFamily(family),
+          ...(playerBridge.pickSubtitleFile
+            ? {
+                pickSubtitleFile: () => playerBridge.pickSubtitleFile?.() ?? Promise.resolve(null),
+              }
+            : {}),
           setMediaMetadata: (metadata: Parameters<typeof engine.setMediaMetadata>[0]) =>
             engine.setMediaMetadata(metadata),
           getAudioDevices: () => rawEngine.getAudioDevices(),

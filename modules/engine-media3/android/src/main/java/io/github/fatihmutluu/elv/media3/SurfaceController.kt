@@ -23,11 +23,26 @@ internal interface ViewSink {
 
   /** Active text/bitmap subtitle cues to render inside `SubtitleView` (empty clears visible subtitles). */
   fun onCues(cues: List<Cue>) = Unit
+
+  /** Active secondary subtitle cues to render inside top-aligned `secondarySubtitleView` (`#402`). */
+  fun onSecondaryCues(cues: List<Cue>) = Unit
+
+  /** Live subtitle appearance style pushed from engine `setSubtitleStyle` or `load` options (`#32`). */
+  fun onSubtitleStyle(style: SubtitleStyleConfig?) = Unit
+
+  /** Active native ASS/SSA OpenGL overlay session handle, or `null` to detach (`#223`). */
+  fun onAssOverlayHandle(handle: AssOverlayHandle?) = Unit
+
+  /** Detaches any mounted ASS/SSA overlay view synchronously on the main thread (bounded by [timeoutMs]) (`#223`). */
+  fun onAssOverlayDetachSync(timeoutMs: Long) {
+    onAssOverlayHandle(null)
+  }
 }
 
 /**
  * Playback-thread coordinator for the video [Surface], [ViewSink] binding, zap shutter serials, per-media
- * `awaitingVideoSize` gating (#331), subtitle cues and `keepScreenOn` state (#84, #279).
+ * `awaitingVideoSize` gating (#331), primary/secondary subtitle cues, live subtitle style, ASS overlay handle, and
+ * `keepScreenOn` state (#84, #279, #32, #402, #223).
  */
 @OptIn(UnstableApi::class)
 internal class SurfaceController {
@@ -43,6 +58,10 @@ internal class SurfaceController {
   private var awaitingVideoSize = true
   private var lastVideoSize: VideoSize = VideoSize.UNKNOWN
   private var currentCues: List<Cue> = emptyList()
+  private var currentSecondaryCues: List<Cue> = emptyList()
+  private var currentSubtitleStyle: SubtitleStyleConfig? = null
+  private var currentAssOverlayHandle: AssOverlayHandle? = null
+  private var assOverlayNeedsDetach = false
 
   /** Records [next] from the UI thread before posting [attachPendingSurface] to the playback thread. */
   fun offerSurface(next: Surface) {
@@ -103,16 +122,24 @@ internal class SurfaceController {
       sink.onVideoSize(lastVideoSize.width, lastVideoSize.height, lastVideoSize.pixelWidthHeightRatio)
     }
     sink.onScreenOn(screenOn)
+    currentSubtitleStyle?.let { sink.onSubtitleStyle(it) }
+    assOverlayNeedsDetach = currentAssOverlayHandle != null
+    sink.onAssOverlayHandle(currentAssOverlayHandle)
     sink.onCues(currentCues)
+    sink.onSecondaryCues(currentSecondaryCues)
   }
 
   fun unbindView(sink: ViewSink) {
-    if (view === sink) view = null
+    if (view === sink) {
+      view = null
+      assOverlayNeedsDetach = false
+    }
   }
 
   /** Begins a new media zap: advances the shutter serial, clears cues and gates stale video size until decoded. */
   fun onLoad() {
     clearCues()
+    clearSecondaryCues()
     media += 1
     framed = false
     awaitingVideoSize = true
@@ -123,6 +150,8 @@ internal class SurfaceController {
   /** Resets video size gating and clears cues on `stop` / `dispose`. */
   fun onStop() {
     clearCues()
+    clearSecondaryCues()
+    onAssOverlayHandle(null)
     awaitingVideoSize = true
     lastVideoSize = VideoSize.UNKNOWN
     onCue(ScreenCue.STOP, played = false)
@@ -152,6 +181,42 @@ internal class SurfaceController {
   fun clearCues() {
     currentCues = emptyList()
     view?.onCues(emptyList())
+  }
+
+  fun onSecondaryCues(cues: List<Cue>) {
+    currentSecondaryCues = cues
+    view?.onSecondaryCues(cues)
+  }
+
+  fun clearSecondaryCues() {
+    currentSecondaryCues = emptyList()
+    view?.onSecondaryCues(emptyList())
+  }
+
+  fun onSubtitleStyle(style: SubtitleStyleConfig?) {
+    if (currentSubtitleStyle == style) return
+    currentSubtitleStyle = style
+    view?.onSubtitleStyle(style)
+  }
+
+  fun onAssOverlayHandle(handle: AssOverlayHandle?) {
+    if (currentAssOverlayHandle === handle) return
+    currentAssOverlayHandle = handle
+    if (handle != null && view != null) assOverlayNeedsDetach = true
+    view?.onAssOverlayHandle(handle)
+  }
+
+  /**
+   * Synchronously detaches any mounted native ASS/SSA overlay view on the main thread (bounded by [timeoutMs])
+   * before releasing native `libass` resources (`#223`).
+   */
+  fun detachAssOverlaySync(timeoutMs: Long = DETACH_TIMEOUT_MS) {
+    val hadHandle = currentAssOverlayHandle != null
+    currentAssOverlayHandle = null
+    if (hadHandle || assOverlayNeedsDetach) {
+      assOverlayNeedsDetach = false
+      view?.onAssOverlayDetachSync(timeoutMs)
+    }
   }
 
   fun onCue(cue: ScreenCue, played: Boolean) {

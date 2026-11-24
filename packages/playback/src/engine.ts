@@ -1,4 +1,4 @@
-import type { AndroidDecoderMode, BufferPreset } from '@elv/domain';
+import type { AndroidDecoderMode, BufferPreset, SubtitleStyleConfig } from '@elv/domain';
 
 /** Monotonic tune token; the service increments it per tune, retry rung and zap. */
 export type AttemptToken = number;
@@ -16,6 +16,17 @@ export interface StreamRequest {
   alternates?: readonly StreamRequest[];
   /** Opt-in legacy TLS (TLS 1.0/1.1) compatibility carried by the resolved stream (`#182`). */
   readonly allowLegacyTls?: boolean;
+}
+
+/** An external sidecar subtitle track attached at tune time or live during playback (`#32`, `#308`). */
+export interface ExternalSubtitleTrack {
+  readonly id: string;
+  readonly uri: string;
+  readonly label?: string;
+  readonly language?: string;
+  readonly mimeType?: string;
+  /** Optional headers scoped strictly to this subtitle request — NEVER inherits primary stream credentials (`#308`). */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /** Engine choices for one load. */
@@ -36,9 +47,15 @@ export interface LoadOptions {
   audioTrackId?: string;
   /** Preferred subtitle track ID to select, or `null` to disable subtitles explicitly. */
   subtitleTrackId?: string | null;
+  /** Preferred secondary subtitle track ID to select, or `null` to disable secondary subtitles (`#402`). */
+  readonly secondarySubtitleTrackId?: string | null;
+  /** External sidecar subtitle tracks attached to this item, with strictly isolated headers (`#32`, `#308`). */
+  readonly externalSubtitles?: readonly ExternalSubtitleTrack[];
+  /** Live subtitle appearance configuration forwarded on load and recovery reloads (`#32`). */
+  readonly subtitleStyle?: SubtitleStyleConfig;
 }
 
-/** One selectable audio or embedded subtitle track reported by the engine. */
+/** One selectable audio or embedded/external subtitle track reported by the engine. */
 export interface TrackInfo {
   id: string;
   language?: string;
@@ -47,6 +64,8 @@ export interface TrackInfo {
   channels?: number;
   forced?: boolean;
   isDefault?: boolean;
+  /** Whether this track originated from a user-attached external sidecar file or URL (`#32`). */
+  readonly external?: boolean;
 }
 
 /** One selectable adaptive video rendition reported by the engine (`#59`). */
@@ -191,6 +210,12 @@ export interface EngineCapabilities {
   subtitleDelay?: boolean;
   /** Engine supports adaptive video resolution/rendition selection (`#59`). */
   videoQualitySelection?: boolean;
+  /** Engine supports attaching isolated external sidecar subtitle tracks (`#32`, `#308`). */
+  readonly externalSubtitles?: boolean;
+  /** Engine supports live subtitle appearance styling without restarting playback (`#32`). */
+  readonly subtitleStyling?: boolean;
+  /** Engine supports simultaneous dual subtitle rendering (`#402`). */
+  readonly dualSubtitles?: boolean;
 }
 
 /**
@@ -222,6 +247,10 @@ export interface PlayerEngine {
   selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;
   /** Selects a secondary subtitle track, or `null` to disable (`#239`, `#402`). */
   selectSecondarySubtitleTrack?(attempt: AttemptToken, id: string | null): void;
+  /** Attaches an external sidecar subtitle track to the active media without inheriting stream headers (`#32`, `#308`). */
+  addExternalSubtitle?(attempt: AttemptToken, track: ExternalSubtitleTrack): void;
+  /** Applies live subtitle appearance styling without restarting playback (`#32`). */
+  setSubtitleStyle?(style: SubtitleStyleConfig): void;
   /** Shifts audio timing relative to video in milliseconds (`[-30_000, 30_000]`, `#59`, `#203`, `#239`). */
   setAudioDelay?(attempt: AttemptToken, delayMs: number): void;
   /** Shifts subtitle cue timing in milliseconds (`[-30_000, 30_000]`, `#59`, `#203`, `#239`). */

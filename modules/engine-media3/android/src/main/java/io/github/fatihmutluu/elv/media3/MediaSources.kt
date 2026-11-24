@@ -1,5 +1,6 @@
 package io.github.fatihmutluu.elv.media3
 
+import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
 import androidx.annotation.OptIn
@@ -16,7 +17,9 @@ import androidx.media3.exoplayer.hls.HlsDataSourceFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.hls.playlist.DefaultHlsPlaylistTracker
 import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.source.SingleSampleMediaSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.extractor.DefaultExtractorsFactory
@@ -218,10 +221,10 @@ internal fun requestSources(
 }
 
 /**
- * Builds the media source of one generation, tagged with [prepareSerial] as `MediaItem.mediaId`. Every request passes
- * the connection gate and the response sniffing; HLS requests route `data:` init segments via [SchemeRoutingDataSource],
- * wire [TS_FLAGS], bounded timestamp-adjuster initialization, an `8.0` live playlist-stuck coefficient (#236, #247),
- * and VOD `EXT-X-MAP` SPS/PPS synthesis (#183).
+ * Builds the media source of one generation, tagged with [prepareSerial] as `MediaItem.mediaId`. Every primary
+ * request passes the connection gate and response sniffing; external sidecar subtitles (#308) are attached via
+ * [MergingMediaSource] + [SingleSampleMediaSource] backed strictly by [StreamHttp.subtitleDataSourceFactory] so
+ * primary stream credentials never leak onto subtitle requests.
  */
 @OptIn(UnstableApi::class)
 internal fun createMediaSource(
@@ -234,6 +237,15 @@ internal fun createMediaSource(
   transferListener: TransferListener? = null,
   timeShiftRingBuffer: TimeShiftRingBuffer? = null,
   timeShiftTracker: TimeShiftWindowTracker? = null,
+  context: Context? = null,
+  extractorsDecorator: (ExtractorsFactory) -> ExtractorsFactory = { it },
+  subtitleDataSourceFactoryProvider: (ExternalSubtitleConfig, Boolean) -> DataSource.Factory = { sub, legacyTls ->
+    StreamHttp.subtitleDataSourceFactory(
+      subtitleHeaders = sub.headers,
+      allowLegacyTls = legacyTls,
+      context = context,
+    )
+  },
 ): MediaSource {
   val manifestLoaded = AtomicBoolean(false)
   val type = request.sourceType()
@@ -288,13 +300,32 @@ internal fun createMediaSource(
           }
         }
     SourceType.TS -> ProgressiveMediaSource.Factory(progressive, TsOnlyExtractorsFactory(lowRam, request.live))
-    SourceType.PROGRESSIVE -> ProgressiveMediaSource.Factory(progressive, tsCapableFactory(lowRam, request.live))
+    SourceType.PROGRESSIVE ->
+      ProgressiveMediaSource.Factory(progressive, extractorsDecorator(tsCapableFactory(lowRam, request.live)))
   }
   val mediaItem = MediaItem.Builder()
     .setUri(request.url)
     .setMediaId(prepareSerial.toString())
     .build()
-  return factory
+  val primarySource = factory
     .setLoadErrorHandlingPolicy(ServiceOwnedRetryPolicy(type == SourceType.HLS, manifestLoaded))
     .createMediaSource(mediaItem)
+
+  val validExternals = request.externalSubtitles.filter { isAllowedExternalSubtitleUri(it.uri) }
+  if (validExternals.isEmpty()) return primarySource
+
+  val subtitleSources = validExternals.map { sub ->
+    val subConfig = MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.uri))
+      .setId(sub.trackId)
+      .setMimeType(sub.mimeType)
+      .setLanguage(sub.language)
+      .setLabel(sub.label)
+      .setRoleFlags(C.ROLE_FLAG_SUBTITLE)
+      .build()
+    SingleSampleMediaSource.Factory(subtitleDataSourceFactoryProvider(sub, request.allowLegacyTls))
+      .setTrackId(sub.trackId)
+      .setTreatLoadErrorsAsEndOfStream(true)
+      .createMediaSource(subConfig, C.TIME_UNSET)
+  }
+  return MergingMediaSource(primarySource, *subtitleSources.toTypedArray())
 }

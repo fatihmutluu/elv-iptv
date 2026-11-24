@@ -481,6 +481,9 @@ describe('MpvEngine', () => {
       audioDelay: true,
       subtitleDelay: true,
       videoQualitySelection: true,
+      externalSubtitles: true,
+      subtitleStyling: true,
+      dualSubtitles: true,
     });
     expect(engine.presenterKind).toBe('child-window');
   });

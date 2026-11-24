@@ -2469,3 +2469,111 @@ msgstr "Tune now"
 
 msgid "epg.reminderDismiss"
 msgstr "Dismiss"
+
+msgid "player.secondarySubtitleTracks"
+msgstr "Secondary subtitle"
+
+msgid "player.secondarySameAsPrimary"
+msgstr "Active as primary"
+
+msgid "player.externalSubtitle.load"
+msgstr "Load external subtitle"
+
+msgid "player.externalSubtitle.pickFile"
+msgstr "Choose subtitle file"
+
+msgid "player.externalSubtitle.fromUrl"
+msgstr "Load from URL"
+
+msgid "player.externalSubtitle.urlTitle"
+msgstr "External subtitle URL"
+
+msgid "player.externalSubtitle.urlPlaceholder"
+msgstr "https://example.invalid/subtitles.srt"
+
+msgid "player.externalSubtitle.labelPlaceholder"
+msgstr "Label (optional)"
+
+msgid "player.externalSubtitle.invalidUrl"
+msgstr "Enter a valid http(s) subtitle URL."
+
+msgid "player.externalSubtitle.loaded"
+msgstr "External subtitle loaded"
+
+msgid "player.externalSubtitle.failed"
+msgstr "Could not load external subtitle."
+
+msgid "player.externalSubtitle.badge"
+msgstr "External"
+
+msgid "player.subtitleStyle.section"
+msgstr "Subtitle style"
+
+msgid "player.subtitleStyle.size"
+msgstr "Size"
+
+msgid "player.subtitleStyle.sizeSmall"
+msgstr "Small"
+
+msgid "player.subtitleStyle.sizeMedium"
+msgstr "Medium"
+
+msgid "player.subtitleStyle.sizeLarge"
+msgstr "Large"
+
+msgid "player.subtitleStyle.sizeExtraLarge"
+msgstr "Extra large"
+
+msgid "player.subtitleStyle.color"
+msgstr "Text color"
+
+msgid "player.subtitleStyle.colorWhite"
+msgstr "White"
+
+msgid "player.subtitleStyle.colorYellow"
+msgstr "Yellow"
+
+msgid "player.subtitleStyle.colorCyan"
+msgstr "Cyan"
+
+msgid "player.subtitleStyle.colorGreen"
+msgstr "Green"
+
+msgid "player.subtitleStyle.background"
+msgstr "Background"
+
+msgid "player.subtitleStyle.bgNone"
+msgstr "None"
+
+msgid "player.subtitleStyle.bgTranslucent"
+msgstr "Translucent"
+
+msgid "player.subtitleStyle.bgOpaque"
+msgstr "Solid"
+
+msgid "player.subtitleStyle.edge"
+msgstr "Edge"
+
+msgid "player.subtitleStyle.edgeNone"
+msgstr "None"
+
+msgid "player.subtitleStyle.edgeOutline"
+msgstr "Outline"
+
+msgid "player.subtitleStyle.edgeDropShadow"
+msgstr "Shadow"
+
+msgid "player.subtitleStyle.position"
+msgstr "Position"
+
+msgid "player.subtitleStyle.posBottom"
+msgstr "Bottom"
+
+msgid "player.subtitleStyle.posRaised"
+msgstr "Raised"
+
+msgid "player.subtitleStyle.posTop"
+msgstr "Top"
+
+msgid "player.subtitleStyle.reset"
+msgstr "Reset style"

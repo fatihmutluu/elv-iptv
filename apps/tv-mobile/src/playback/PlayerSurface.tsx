@@ -1,4 +1,4 @@
-import type { AccessibilityFontFamily } from '@elv/domain';
+import type { AccessibilityFontFamily, SubtitleStyleConfig } from '@elv/domain';
 import { AetherSurface } from '@elv/engine-aether';
 import { Media3Surface } from '@elv/engine-media3';
 import type { PlayerEngine } from '@elv/playback';
@@ -12,10 +12,25 @@ export interface PlayerSurfaceProps {
   resizeMode?: 'fit' | 'fill' | 'stretch';
   subtitleBottomInsetPx?: number;
   subtitleFontFamily?: AccessibilityFontFamily;
+  /** User-selected subtitle visual appearance configuration (`#32`). */
+  subtitleStyle?: SubtitleStyleConfig;
   surfaceRecreationToken?: number;
   useTextureView?: boolean;
   osdVisible?: boolean;
   testID?: string;
+}
+
+function normalizeSubtitleStyleProp(
+  style: SubtitleStyleConfig | undefined,
+): SubtitleStyleConfig | undefined {
+  if (style === undefined) return undefined;
+  return {
+    fontSize: style.fontSize,
+    textColor: style.textColor,
+    backgroundColor: style.backgroundColor,
+    edgeStyle: style.edgeStyle,
+    verticalPosition: style.verticalPosition,
+  };
 }
 
 /**
@@ -28,11 +43,13 @@ export function PlayerSurface({
   resizeMode,
   subtitleBottomInsetPx,
   subtitleFontFamily,
+  subtitleStyle,
   surfaceRecreationToken,
   useTextureView,
   osdVisible,
   testID,
 }: PlayerSurfaceProps): ReactElement | null {
+  const cleanSubtitleStyle = normalizeSubtitleStyleProp(subtitleStyle);
   if (Platform.OS === 'ios') {
     return (
       <AetherSurface
@@ -41,6 +58,7 @@ export function PlayerSurface({
         resizeMode={resizeMode}
         subtitleBottomInsetPx={subtitleBottomInsetPx}
         {...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {})}
+        {...(cleanSubtitleStyle !== undefined ? { subtitleStyle: cleanSubtitleStyle } : {})}
         {...(osdVisible !== undefined ? { osdVisible } : {})}
         testID={testID}
       />
@@ -53,6 +71,7 @@ export function PlayerSurface({
       resizeMode={resizeMode}
       subtitleBottomInsetPx={subtitleBottomInsetPx}
       {...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {})}
+      {...(cleanSubtitleStyle !== undefined ? { subtitleStyle: cleanSubtitleStyle } : {})}
       {...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {})}
       {...(useTextureView !== undefined ? { useTextureView } : {})}
       testID={testID}

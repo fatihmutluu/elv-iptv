@@ -111,4 +111,62 @@ struct CaptionAppearanceTests {
     #expect(applyingSubtitleFontOverride(systemStyle, family: nil) == systemStyle)
     #expect(applyingSubtitleFontOverride(systemStyle, family: "other") == systemStyle)
   }
+
+  @Test("applyingUserSubtitleStyle layers user size, color, backdrop, edge, and vertical position while preserving fontName (#32)")
+  func applyingUserSubtitleStyleOverride() {
+    let base = CaptionAppearanceStyle(
+      foreground: CaptionAppearanceColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0),
+      background: CaptionAppearanceColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.74),
+      window: CaptionAppearanceColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.5),
+      relativeCharacterSize: 1.0,
+      fontName: "AtkinsonHyperlegibleNext-Regular"
+    )
+
+    #expect(applyingUserSubtitleStyle(base, override: nil) == base)
+
+    let override = UserSubtitleStyleOverride(
+      fontSize: .extraLarge,
+      textColor: .yellow,
+      backgroundColor: .none,
+      edgeStyle: .dropShadow,
+      verticalPosition: .raised
+    )
+    let styled = applyingUserSubtitleStyle(base, override: override)
+    #expect(styled.relativeCharacterSize == 1.65)
+    #expect(styled.foreground == UserSubtitleTextColor.yellow.captionColor)
+    #expect(styled.background == CaptionAppearanceColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0))
+    #expect(styled.window == nil)
+    #expect(styled.edgeStyle == .dropShadow)
+    #expect(styled.verticalPosition == .raised)
+    #expect(styled.fontName == "AtkinsonHyperlegibleNext-Regular")
+
+    // Font override preserves edgeStyle and verticalPosition.
+    let withDyslexic = applyingSubtitleFontOverride(styled, family: "opendyslexic")
+    #expect(withDyslexic.fontName == "OpenDyslexic-Regular")
+    #expect(withDyslexic.edgeStyle == .dropShadow)
+    #expect(withDyslexic.verticalPosition == .raised)
+
+    // Raw parser handles valid values and falls back cleanly on invalid/nil inputs.
+    let parsed = UserSubtitleStyleOverride.fromRaw(
+      fontSize: "small",
+      textColor: "cyan",
+      backgroundColor: "opaque",
+      edgeStyle: "outline",
+      verticalPosition: "top"
+    )
+    #expect(parsed.fontSize == .small)
+    #expect(parsed.textColor == .cyan)
+    #expect(parsed.backgroundColor == .opaque)
+    #expect(parsed.edgeStyle == .outline)
+    #expect(parsed.verticalPosition == .top)
+
+    let fallback = UserSubtitleStyleOverride.fromRaw(
+      fontSize: "huge",
+      textColor: nil,
+      backgroundColor: "invalid",
+      edgeStyle: "",
+      verticalPosition: "middle"
+    )
+    #expect(fallback == UserSubtitleStyleOverride())
+  }
 }

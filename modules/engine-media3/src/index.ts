@@ -2,12 +2,17 @@ import {
   bridgeNativeEngine,
   type EngineCapabilities,
   type EngineEvent,
+  type ExternalSubtitleTrack,
+  type LoadOptions,
   type NativeEngineHandle,
   type PlayerEngine,
 } from '@elv/playback';
 import { requireNativeViewManager, requireOptionalNativeModule } from 'expo-modules-core';
 import { type ComponentType, createElement, type ReactElement } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
+
+/** Live subtitle appearance style forwarded to Media3 (`#32`). */
+export type Media3SubtitleStyle = NonNullable<LoadOptions['subtitleStyle']>;
 
 /** The JS clock of React Native and Node; declared here because the package compiles without DOM types. */
 declare const performance: { now(): number };
@@ -58,6 +63,9 @@ interface Media3NativeEngineHandle extends NativeEngineHandle {
   setAudioDelay?(attempt: number, delayMs: number): void;
   setSubtitleDelay?(attempt: number, delayMs: number): void;
   selectVideoQuality?(attempt: number, id: string | null): void;
+  selectSecondarySubtitleTrack?(attempt: number, id: string | null): void;
+  addExternalSubtitle?(attempt: number, track: ExternalSubtitleTrack): void;
+  setSubtitleStyle?(style: Media3SubtitleStyle): void;
   setMediaMetadata?(metadata: AndroidMediaMetadata | null): void;
   setBackgroundAudioEnabled?(enabled: boolean): void;
   addListener: {
@@ -184,6 +192,9 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   audioDelay: true,
   subtitleDelay: true,
   videoQualitySelection: true,
+  externalSubtitles: true,
+  subtitleStyling: true,
+  dualSubtitles: true,
 });
 
 /** The native shared object behind each live engine this module created; `Media3Surface` binds its view to it. */
@@ -379,6 +390,8 @@ export interface Media3SurfaceProps {
   subtitleBottomInsetPx?: number;
   /** High-legibility subtitle font override (`'system'`, `'atkinson'`, or `'opendyslexic'`, `#163`). */
   subtitleFontFamily?: 'system' | 'atkinson' | 'opendyslexic';
+  /** Live subtitle appearance styling applied without restarting playback (`#32`). */
+  subtitleStyle?: Media3SubtitleStyle;
   /** Monotonic token incremented on Rung 3 decoder reset to swap in a fresh `SurfaceView` (`#144`). */
   surfaceRecreationToken?: number;
   /** Opt-in `TextureView` rendering fallback for devices with broken `SurfaceView` compositing (`#262`). */
@@ -393,6 +406,7 @@ interface NativeSurfaceProps {
   resizeMode?: 'fit' | 'fill' | 'stretch';
   subtitleBottomInsetPx?: number;
   subtitleFontFamily?: 'system' | 'atkinson' | 'opendyslexic';
+  subtitleStyle?: Media3SubtitleStyle;
   surfaceRecreationToken?: number;
   useTextureView?: boolean;
   testID?: string;
@@ -417,6 +431,7 @@ export function Media3Surface({
   resizeMode,
   subtitleBottomInsetPx,
   subtitleFontFamily,
+  subtitleStyle,
   surfaceRecreationToken,
   useTextureView,
   testID,
@@ -429,6 +444,7 @@ export function Media3Surface({
     ...(resizeMode !== undefined ? { resizeMode } : {}),
     ...(subtitleBottomInsetPx !== undefined ? { subtitleBottomInsetPx } : {}),
     ...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {}),
+    ...(subtitleStyle !== undefined ? { subtitleStyle } : {}),
     ...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {}),
     ...(useTextureView !== undefined ? { useTextureView } : {}),
     ...(testID !== undefined ? { testID } : {}),

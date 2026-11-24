@@ -55,6 +55,15 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const audioDelayMs = params.audioDelayMs;
   const hasSubtitleDelay = params.hasSubtitleDelay === true;
   const subtitleDelayMs = params.subtitleDelayMs;
+  const hasSubtitleStyle = params.hasSubtitleStyle === true;
+  const hasDualSubtitles = params.hasDualSubtitles === true;
+  const canPickSubtitleFile = params.canPickSubtitleFile === true;
+  const canLoadSubtitleUrl = params.canLoadSubtitleUrl === true;
+  const pickerOpts = {
+    dualSubtitles: hasDualSubtitles,
+    canPickSubtitleFile,
+    canLoadSubtitleUrl,
+  };
   const hasVideoQuality =
     params.hasVideoQuality === true && (tracks.videoQualities?.length ?? 0) > 0;
   const selectedVideoQualityId = params.selectedVideoQualityId;
@@ -119,7 +128,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     !locked &&
     !anySheetOpen &&
     osdTier === 'controls';
-  const pickerCursor = clampPickerCursor(rawPickerCursor, tracks);
+  const pickerCursor = clampPickerCursor(rawPickerCursor, tracks, pickerOpts);
   const settingsMenu = clampSettingsMenu(rawSettingsMenu, tracks, {
     isVod,
     hasAspect,
@@ -135,6 +144,10 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     ...(audioDelayMs !== undefined ? { audioDelayMs } : {}),
     hasSubtitleDelay,
     ...(subtitleDelayMs !== undefined ? { subtitleDelayMs } : {}),
+    hasSubtitleStyle,
+    hasDualSubtitles,
+    canPickSubtitleFile,
+    canLoadSubtitleUrl,
     hasVideoQuality,
     ...(selectedVideoQualityId !== undefined ? { selectedVideoQualityId } : {}),
     hasQuality,
@@ -422,6 +435,10 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     ...(audioDelayMs !== undefined ? { audioDelayMs } : {}),
     hasSubtitleDelay,
     ...(subtitleDelayMs !== undefined ? { subtitleDelayMs } : {}),
+    hasSubtitleStyle,
+    hasDualSubtitles,
+    canPickSubtitleFile,
+    canLoadSubtitleUrl,
     hasVideoQuality,
     ...(selectedVideoQualityId !== undefined ? { selectedVideoQualityId } : {}),
     hasQuality,

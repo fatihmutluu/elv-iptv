@@ -2,6 +2,7 @@ import type {
   AttemptToken,
   EngineCapabilities,
   EngineEvent,
+  ExternalSubtitleTrack,
   LoadCommand,
   PlayerEngine,
 } from '@elv/playback';
@@ -21,6 +22,7 @@ import type {
   QueueNextRequest,
   RemoteMediaAction,
   ResizeMode,
+  SubtitleStyleConfig,
   VideoFrameLike,
 } from '../../../src/shared/player-ipc.ts';
 
@@ -39,6 +41,9 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   audioDelay: true,
   subtitleDelay: true,
   videoQualitySelection: true,
+  externalSubtitles: true,
+  subtitleStyling: true,
+  dualSubtitles: true,
 });
 
 /** The renderer's `PlayerEngine` for the desktop app, plus the presenter's controls. */
@@ -273,6 +278,9 @@ export async function createDesktopEngine(
       send({ name: 'selectSubtitleTrack', attempt, id: trackId }),
     selectSecondarySubtitleTrack: (attempt, trackId) =>
       send({ name: 'selectSecondarySubtitleTrack', attempt, id: trackId }),
+    addExternalSubtitle: (attempt: AttemptToken, track: ExternalSubtitleTrack) =>
+      send({ name: 'addExternalSubtitle', attempt, track }),
+    setSubtitleStyle: (style: SubtitleStyleConfig) => send({ name: 'setSubtitleStyle', style }),
     selectVideoQuality: (attempt, qualityId) =>
       send({ name: 'selectVideoQuality', attempt, id: qualityId }),
     stop: (attempt) => send({ name: 'stop', attempt }),

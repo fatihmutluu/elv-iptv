@@ -3,6 +3,7 @@ package io.github.fatihmutluu.elv.media3
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
+import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.accessibility.CaptioningManager
@@ -12,8 +13,13 @@ import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.SeekParameters
-import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
+import androidx.media3.exoplayer.metadata.MetadataOutput
+import androidx.media3.exoplayer.text.TextOutput
+import androidx.media3.exoplayer.video.VideoRendererEventListener
 import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "ElvMedia3"
@@ -95,6 +101,8 @@ internal class PlayerFactory(
   private val deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
   private val sdkInt: Int = Build.VERSION.SDK_INT,
   private val audioDelayUs: AtomicLong = AtomicLong(0L),
+  private val secondaryTextOutput: TextOutput? = null,
+  private val assOverlayBridge: AssOverlayBridge? = null,
 ) {
   constructor(
     context: Context,
@@ -106,6 +114,8 @@ internal class PlayerFactory(
     deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
     sdkInt: Int = Build.VERSION.SDK_INT,
     audioDelayUs: AtomicLong = AtomicLong(0L),
+    secondaryTextOutput: TextOutput? = null,
+    assOverlayBridge: AssOverlayBridge? = null,
   ) : this(
     context = context,
     looper = looper,
@@ -116,10 +126,16 @@ internal class PlayerFactory(
     deviceQuirks = deviceQuirks,
     sdkInt = sdkInt,
     audioDelayUs = audioDelayUs,
+    secondaryTextOutput = secondaryTextOutput,
+    assOverlayBridge = assOverlayBridge,
   )
 
   @Volatile
   var audioFocusAllowed: Boolean = true
+    private set
+
+  @Volatile
+  var lastTrackSelector: DualSubtitleTrackSelector? = null
     private set
 
   fun disableAudioFocus() {
@@ -170,7 +186,8 @@ internal class PlayerFactory(
     handleAudioFocus: Boolean,
   ): ExoPlayer {
     val buffers = loadControlForStream(streamKind, bufferPreset)
-    val renderers = createRenderersFactory(
+    assOverlayBridge?.beginPlayerSession()
+    val baseRenderers = createRenderersFactory(
       context = context,
       codecPolicy = codecPolicy,
       softwareAudio = softwareAudio,
@@ -178,7 +195,9 @@ internal class PlayerFactory(
       deviceQuirks = deviceQuirks,
       decoderMode = decoderMode,
       audioDelayUs = audioDelayUs,
+      secondaryTextOutput = secondaryTextOutput,
     )
+    val renderers = assOverlayBridge?.wrapRenderersFactory(baseRenderers) ?: baseRenderers
     val loadControl = DefaultLoadControl.Builder()
       .setBufferDurationsMs(
         buffers.minBufferMs,
@@ -193,7 +212,7 @@ internal class PlayerFactory(
     val audioOffload = AudioOffloadPreferences.Builder()
       .setAudioOffloadMode(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED)
       .build()
-    val trackSelector = DefaultTrackSelector(context).apply {
+    val trackSelector = DualSubtitleTrackSelector(context).apply {
       val params = buildUponParameters()
         .setAllowAudioMixedMimeTypeAdaptiveness(true)
         .setAllowAudioMixedSampleRateAdaptiveness(true)
@@ -208,7 +227,12 @@ internal class PlayerFactory(
       }
       setParameters(params)
     }
-    return ExoPlayer.Builder(context, renderers)
+    lastTrackSelector = trackSelector
+    val trackingRenderers = TrackingRenderersFactory(renderers) { built ->
+      val secIdx = built.indexOfFirst { it is SecondaryTextRenderer }
+      trackSelector.setSecondaryRendererIndex(secIdx.takeIf { it >= 0 })
+    }
+    return ExoPlayer.Builder(context, trackingRenderers)
       .setLooper(looper)
       .setTrackSelector(trackSelector)
       .setLoadControl(loadControl)
@@ -221,5 +245,46 @@ internal class PlayerFactory(
       .setVideoChangeFrameRateStrategy(videoChangeFrameRateStrategyForApi(sdkInt))
       .enablePerStreamMediaProgression(true)
       .build()
+      .also { built ->
+        assOverlayBridge?.attachPlayer(built)
+      }
   }
+}
+
+@OptIn(UnstableApi::class)
+private class TrackingRenderersFactory(
+  private val delegate: RenderersFactory,
+  private val onRenderersCreated: (Array<Renderer>) -> Unit,
+) : RenderersFactory {
+  override fun createRenderers(
+    eventHandler: Handler,
+    videoRendererEventListener: VideoRendererEventListener,
+    audioRendererEventListener: AudioRendererEventListener,
+    textRendererOutput: TextOutput,
+    metadataRendererOutput: MetadataOutput,
+  ): Array<Renderer> =
+    delegate.createRenderers(
+      eventHandler,
+      videoRendererEventListener,
+      audioRendererEventListener,
+      textRendererOutput,
+      metadataRendererOutput,
+    ).also(onRenderersCreated)
+
+  override fun createSecondaryRenderer(
+    renderer: Renderer,
+    eventHandler: Handler,
+    videoRendererEventListener: VideoRendererEventListener,
+    audioRendererEventListener: AudioRendererEventListener,
+    textRendererOutput: TextOutput,
+    metadataRendererOutput: MetadataOutput,
+  ): Renderer? =
+    delegate.createSecondaryRenderer(
+      renderer,
+      eventHandler,
+      videoRendererEventListener,
+      audioRendererEventListener,
+      textRendererOutput,
+      metadataRendererOutput,
+    )
 }

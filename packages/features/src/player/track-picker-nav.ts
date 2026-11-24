@@ -13,10 +13,63 @@ export interface TrackPickerCursor {
 /** Direction key moving a {@link TrackPickerCursor}. */
 export type PickerMove = 'up' | 'down' | 'left' | 'right';
 
-/** Track selection requested by activating a {@link TrackPickerCursor}. */
+/** Optional capability flags extending the subtitles column of `TrackPickerModal` (`#32`, `#402`). */
+export interface TrackPickerOptions {
+  readonly dualSubtitles?: boolean;
+  readonly canPickSubtitleFile?: boolean;
+  readonly canLoadSubtitleUrl?: boolean;
+}
+
+/** Ordered focusable row descriptor inside the subtitles column of `TrackPickerModal`. */
+export type SubtitleColumnEntry =
+  | { readonly kind: 'primaryOff' }
+  | { readonly kind: 'primaryTrack'; readonly track: TrackInfo; readonly trackIndex: number }
+  | { readonly kind: 'secondaryOff' }
+  | {
+      readonly kind: 'secondaryTrack';
+      readonly track: TrackInfo;
+      readonly trackIndex: number;
+      readonly disabled: boolean;
+    }
+  | { readonly kind: 'pickSubtitleFile' }
+  | { readonly kind: 'loadSubtitleUrl' };
+
+/** Track selection or external subtitle action requested by activating a {@link TrackPickerCursor}. */
 export type PickerActivation =
   | { readonly kind: 'audio'; readonly id: string }
-  | { readonly kind: 'subtitle'; readonly id: string | null };
+  | { readonly kind: 'subtitle'; readonly id: string | null }
+  | { readonly kind: 'secondarySubtitle'; readonly id: string | null }
+  | { readonly kind: 'pickSubtitleFile' }
+  | { readonly kind: 'loadSubtitleUrl' };
+
+/** Builds the ordered focusable rows of the subtitles column (primary, optional secondary, external actions). */
+export function buildSubtitleColumnEntries(
+  tracks: MediaTracks,
+  options?: TrackPickerOptions,
+): readonly SubtitleColumnEntry[] {
+  const entries: SubtitleColumnEntry[] = [{ kind: 'primaryOff' }];
+  tracks.subtitles.forEach((track, trackIndex) => {
+    entries.push({ kind: 'primaryTrack', track, trackIndex });
+  });
+  if (options?.dualSubtitles === true && tracks.subtitles.length >= 1) {
+    entries.push({ kind: 'secondaryOff' });
+    tracks.subtitles.forEach((track, trackIndex) => {
+      entries.push({
+        kind: 'secondaryTrack',
+        track,
+        trackIndex,
+        disabled: tracks.selectedSubtitleId !== null && track.id === tracks.selectedSubtitleId,
+      });
+    });
+  }
+  if (options?.canPickSubtitleFile === true) {
+    entries.push({ kind: 'pickSubtitleFile' });
+  }
+  if (options?.canLoadSubtitleUrl === true) {
+    entries.push({ kind: 'loadSubtitleUrl' });
+  }
+  return entries;
+}
 
 function selectedAudioCursor(tracks: MediaTracks): TrackPickerCursor {
   const idx = tracks.audio.findIndex((t) => t.id === tracks.selectedAudioId);
@@ -28,8 +81,14 @@ function selectedSubtitleCursor(tracks: MediaTracks): TrackPickerCursor {
   return { column: 'subtitles', index: idx + 1 };
 }
 
-function rowCount(column: TrackPickerColumn, tracks: MediaTracks): number {
-  return column === 'audio' ? tracks.audio.length : tracks.subtitles.length + 1;
+function rowCount(
+  column: TrackPickerColumn,
+  tracks: MediaTracks,
+  options?: TrackPickerOptions,
+): number {
+  return column === 'audio'
+    ? tracks.audio.length
+    : buildSubtitleColumnEntries(tracks, options).length;
 }
 
 /** Cursor when the picker opens: honors `preferredColumn` when available, else audio then subtitles. */
@@ -49,9 +108,10 @@ export function initialPickerCursor(
 export function clampPickerCursor(
   cursor: TrackPickerCursor,
   tracks: MediaTracks,
+  options?: TrackPickerOptions,
 ): TrackPickerCursor {
   if (cursor.column === 'audio' && tracks.audio.length === 0) return selectedSubtitleCursor(tracks);
-  const max = rowCount(cursor.column, tracks) - 1;
+  const max = Math.max(0, rowCount(cursor.column, tracks, options) - 1);
   const index = Math.max(0, Math.min(max, cursor.index));
   return index === cursor.index ? cursor : { column: cursor.column, index };
 }
@@ -61,27 +121,38 @@ export function movePickerCursor(
   cursor: TrackPickerCursor,
   tracks: MediaTracks,
   move: PickerMove,
+  options?: TrackPickerOptions,
 ): TrackPickerCursor {
-  const cur = clampPickerCursor(cursor, tracks);
+  const cur = clampPickerCursor(cursor, tracks, options);
   if (move === 'left') {
     return cur.column === 'audio' || tracks.audio.length === 0 ? cur : selectedAudioCursor(tracks);
   }
   if (move === 'right') return cur.column === 'subtitles' ? cur : selectedSubtitleCursor(tracks);
   const delta = move === 'down' ? 1 : -1;
-  return clampPickerCursor({ column: cur.column, index: cur.index + delta }, tracks);
+  return clampPickerCursor({ column: cur.column, index: cur.index + delta }, tracks, options);
 }
 
-/** Selection for the row under the (clamped) cursor. */
+/** Selection or action for the row under the (clamped) cursor, or `null` when the row is disabled. */
 export function activatePickerCursor(
   cursor: TrackPickerCursor,
   tracks: MediaTracks,
-): PickerActivation {
-  const cur = clampPickerCursor(cursor, tracks);
+  options?: TrackPickerOptions,
+): PickerActivation | null {
+  const cur = clampPickerCursor(cursor, tracks, options);
   if (cur.column === 'audio') {
-    return { kind: 'audio', id: (tracks.audio[cur.index] as TrackInfo).id };
+    const audio = tracks.audio[cur.index];
+    return audio !== undefined ? { kind: 'audio', id: audio.id } : null;
   }
-  if (cur.index === 0) return { kind: 'subtitle', id: null };
-  return { kind: 'subtitle', id: (tracks.subtitles[cur.index - 1] as TrackInfo).id };
+  const entry = buildSubtitleColumnEntries(tracks, options)[cur.index];
+  if (entry === undefined) return null;
+  if (entry.kind === 'primaryOff') return { kind: 'subtitle', id: null };
+  if (entry.kind === 'primaryTrack') return { kind: 'subtitle', id: entry.track.id };
+  if (entry.kind === 'secondaryOff') return { kind: 'secondarySubtitle', id: null };
+  if (entry.kind === 'secondaryTrack') {
+    return entry.disabled ? null : { kind: 'secondarySubtitle', id: entry.track.id };
+  }
+  if (entry.kind === 'pickSubtitleFile') return { kind: 'pickSubtitleFile' };
+  return { kind: 'loadSubtitleUrl' };
 }
 
 /** Result of routing a {@link KeyEvent} while `TrackPickerModal` is open. */
@@ -94,16 +165,17 @@ export function routePickerKey(
   event: KeyEvent,
   cursor: TrackPickerCursor,
   tracks: MediaTracks,
+  options?: TrackPickerOptions,
 ): PickerKeyIntent | null {
   if (
     (event.kind === 'press' && (event.key === 'left' || event.key === 'right')) ||
     ((event.kind === 'press' || event.kind === 'repeat') &&
       (event.key === 'up' || event.key === 'down'))
   ) {
-    return { kind: 'move', cursor: movePickerCursor(cursor, tracks, event.key) };
+    return { kind: 'move', cursor: movePickerCursor(cursor, tracks, event.key, options) };
   }
   if (event.kind === 'press' && event.key === 'select') {
-    return activatePickerCursor(cursor, tracks);
+    return activatePickerCursor(cursor, tracks, options);
   }
   return null;
 }

@@ -290,4 +290,99 @@ struct StreamHttpTests {
     #expect(legacy.tlsMinimumSupportedProtocolVersion == .TLSv10)
     #endif
   }
+
+  @Test("StreamHttp.subtitleSessionConfiguration isolates cookies, cache, and additional headers (#308)")
+  func subtitleSessionConfigurationIsIsolated() {
+    let config = StreamHttp.subtitleSessionConfiguration(
+      headers: ["Authorization": "Bearer sub-token"],
+      allowLegacyTls: false
+    )
+    #expect(config.httpShouldSetCookies == false)
+    #expect(config.httpCookieStorage == nil)
+    #expect(config.urlCache == nil)
+    #expect(config.httpAdditionalHeaders == nil)
+    #expect(config.requestCachePolicy == .reloadIgnoringLocalCacheData)
+    #if canImport(Darwin)
+    #expect(config.tlsMinimumSupportedProtocolVersion != .TLSv10)
+    #endif
+
+    let legacyConfig = StreamHttp.subtitleSessionConfiguration(allowLegacyTls: true)
+    #expect(legacyConfig.httpAdditionalHeaders == nil)
+    #expect(legacyConfig.httpCookieStorage == nil)
+    #if canImport(Darwin)
+    #expect(legacyConfig.tlsMinimumSupportedProtocolVersion == .TLSv10)
+    #endif
+
+    let session = StreamHttp.makeSubtitleSession(headers: ["X-Custom": "1"])
+    defer { session.invalidateAndCancel() }
+    #expect(session.configuration.httpShouldSetCookies == false)
+    #expect(session.configuration.httpCookieStorage == nil)
+    #expect(session.configuration.urlCache == nil)
+    #expect(session.configuration.httpAdditionalHeaders == nil)
+  }
+
+  @Test("StreamHttp.makeSubtitleRequest scopes only explicit subtitle headers and strips credentials on cross-origin redirect (#308)")
+  func subtitleRequestAndRedirectIsolation() throws {
+    let subUrl = try #require(URL(string: "https://subs.example/en.srt"))
+    let sameOriginRedirect = try #require(URL(string: "https://subs.example/cdn/en.srt"))
+    let crossOriginRedirect = try #require(URL(string: "https://other-cdn.example/en.srt"))
+    let fileRedirect = try #require(URL(string: "file:///etc/passwd"))
+
+    // Empty subtitle headers must never inject any default Authorization/Cookie header.
+    let plainReq = StreamHttp.makeSubtitleRequest(url: subUrl, headers: [:])
+    #expect(plainReq.httpShouldHandleCookies == false)
+    #expect(plainReq.value(forHTTPHeaderField: "Authorization") == nil)
+    #expect(plainReq.value(forHTTPHeaderField: "Cookie") == nil)
+    #expect((plainReq.allHTTPHeaderFields ?? [:]).isEmpty)
+
+    // Scoped headers stay on same-origin redirects and are stripped on cross-origin redirects.
+    let scopedReq = StreamHttp.makeSubtitleRequest(
+      url: subUrl,
+      headers: [
+        "Authorization": "Bearer sub-only",
+        "Cookie": "sub_sid=1",
+        "X-Sub-Header": "ok\r\nEvil: 1",
+      ]
+    )
+    #expect(scopedReq.value(forHTTPHeaderField: "Authorization") == "Bearer sub-only")
+    #expect(scopedReq.value(forHTTPHeaderField: "Cookie") == "sub_sid=1")
+    #expect(scopedReq.value(forHTTPHeaderField: "X-Sub-Header") == "okEvil: 1")
+
+    let initialOrigin = try #require(StreamOrigin(url: subUrl))
+    var leftOrigin = false
+
+    var sameReq = scopedReq
+    sameReq.url = sameOriginRedirect
+    let sameScoped = try #require(
+      IsolatedSubtitleRedirectDelegate.scopeSubtitleRedirect(sameReq, initialOrigin: initialOrigin, leftOrigin: &leftOrigin)
+    )
+    #expect(leftOrigin == false)
+    #expect(sameScoped.value(forHTTPHeaderField: "Authorization") == "Bearer sub-only")
+    #expect(sameScoped.value(forHTTPHeaderField: "Cookie") == "sub_sid=1")
+
+    var crossReq = sameScoped
+    crossReq.url = crossOriginRedirect
+    let crossScoped = try #require(
+      IsolatedSubtitleRedirectDelegate.scopeSubtitleRedirect(crossReq, initialOrigin: initialOrigin, leftOrigin: &leftOrigin)
+    )
+    #expect(leftOrigin == true)
+    #expect(crossScoped.value(forHTTPHeaderField: "Authorization") == nil)
+    #expect(crossScoped.value(forHTTPHeaderField: "Cookie") == nil)
+    #expect(crossScoped.value(forHTTPHeaderField: "X-Sub-Header") == "okEvil: 1")
+
+    // Bounce back to initial origin after leaving must remain stripped.
+    var bounceReq = sameScoped
+    bounceReq.url = subUrl
+    let bounceScoped = try #require(
+      IsolatedSubtitleRedirectDelegate.scopeSubtitleRedirect(bounceReq, initialOrigin: initialOrigin, leftOrigin: &leftOrigin)
+    )
+    #expect(bounceScoped.value(forHTTPHeaderField: "Authorization") == nil)
+    #expect(bounceScoped.value(forHTTPHeaderField: "Cookie") == nil)
+
+    // Non-HTTP(S) redirect targets are rejected outright.
+    let badSchemeReq = URLRequest(url: fileRedirect)
+    #expect(
+      IsolatedSubtitleRedirectDelegate.scopeSubtitleRedirect(badSchemeReq, initialOrigin: initialOrigin, leftOrigin: &leftOrigin) == nil
+    )
+  }
 }

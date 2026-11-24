@@ -21,6 +21,9 @@ internal class TrackSelectorBridge(
   private val onClearCues: () -> Unit,
   private val captioningEnabled: () -> Boolean = { false },
   private val ffmpegSupportsAudio: (String?) -> Boolean = ::defaultFfmpegSupportsAudio,
+  private val onClearSecondaryCues: () -> Unit = {},
+  private val extraExternalSubtitles: () -> List<TrackInfoSnapshot> = { emptyList() },
+  private val onSecondaryTargetChanged: (TrackChoice?, Boolean) -> Unit = { _, _ -> },
 ) {
   private sealed interface SubChoice {
     data object Default : SubChoice
@@ -30,6 +33,8 @@ internal class TrackSelectorBridge(
 
   private var audioChoice: TrackChoice? = null
   private var subtitleChoice: SubChoice = SubChoice.Default
+  private var secondarySubtitleChoice: TrackChoice? = null
+  private var externalPrimarySubtitleId: String? = null
   private var videoQualityChoice: VideoQualityChoice? = null
   private var latestTracks: Tracks = Tracks.EMPTY
   private var lastEmitted: MediaTracksSnapshot? = null
@@ -38,9 +43,17 @@ internal class TrackSelectorBridge(
   internal val currentPrepareEpoch: Long
     get() = prepareEpoch
 
-  /** Whether `C.TRACK_TYPE_TEXT` is currently disabled by user choice (`subtitleTrackId === null`). */
+  /** Whether primary `C.TRACK_TYPE_TEXT` is disabled by user choice (`subtitleTrackId === null`) or dynamic external override. */
   val isTextDisabled: Boolean
-    get() = subtitleChoice is SubChoice.Off
+    get() = subtitleChoice is SubChoice.Off || externalPrimarySubtitleId != null
+
+  /** Currently selected secondary subtitle track ID, or `null` when off (`#402`). */
+  val selectedSecondarySubtitleId: String?
+    get() = secondarySubtitleChoice?.id
+
+  /** Currently selected dynamic external primary subtitle track ID, or `null` when using Media3's text renderer. */
+  val selectedExternalPrimaryId: String?
+    get() = externalPrimarySubtitleId
 
   /** Updates desired track preferences from a new [LoadRequest], preserving cached language/label when reloading. */
   fun onLoad(request: LoadRequest) {
@@ -48,6 +61,7 @@ internal class TrackSelectorBridge(
     latestTracks = Tracks.EMPTY
     lastEmitted = null
     videoQualityChoice = null
+    externalPrimarySubtitleId = null
     audioChoice = request.audioTrackId?.let { wantedId ->
       audioChoice?.takeIf { it.id == wantedId } ?: TrackChoice(id = wantedId, language = null, label = null)
     }
@@ -61,6 +75,14 @@ internal class TrackSelectorBridge(
         )
       }
     }
+    val primaryId = (subtitleChoice as? SubChoice.Selected)?.choice?.id
+    secondarySubtitleChoice = request.secondarySubtitleTrackId
+      ?.takeIf { it.isNotEmpty() && it != primaryId }
+      ?.let { wantedSec ->
+        secondarySubtitleChoice?.takeIf { it.id == wantedSec }
+          ?: TrackChoice(id = wantedSec, language = null, label = null)
+      }
+    onSecondaryTargetChanged(secondarySubtitleChoice, subtitleChoice is SubChoice.Off)
   }
 
   /** Resets per-prepare track cache while preserving active track choices across `retry`, `recreate` or HLS re-prepare. */
@@ -75,13 +97,18 @@ internal class TrackSelectorBridge(
     prepareEpoch += 1
     audioChoice = null
     subtitleChoice = SubChoice.Default
+    secondarySubtitleChoice = null
+    externalPrimarySubtitleId = null
     videoQualityChoice = null
     latestTracks = Tracks.EMPTY
     lastEmitted = null
+    onSecondaryTargetChanged(null, false)
   }
 
   /** Resets stale overrides from any prior media and applies initial track parameters before `player.prepare()`. */
   fun applyInitialParameters(player: ExoPlayer) {
+    val disableAllText = (subtitleChoice is SubChoice.Off || externalPrimarySubtitleId != null) &&
+      secondarySubtitleChoice == null
     val builder = player.trackSelectionParameters.buildUpon()
       .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
       .clearOverridesOfType(C.TRACK_TYPE_TEXT)
@@ -89,7 +116,7 @@ internal class TrackSelectorBridge(
       .clearVideoSizeConstraints()
       .setMaxVideoBitrate(Int.MAX_VALUE)
       .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-      .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitleChoice is SubChoice.Off)
+      .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, disableAllText)
       .setPreferredAudioLanguage(audioChoice?.language)
     when (val sub = subtitleChoice) {
       SubChoice.Default ->
@@ -107,6 +134,7 @@ internal class TrackSelectorBridge(
         }
     }
     player.trackSelectionParameters = builder.build()
+    onSecondaryTargetChanged(secondarySubtitleChoice, subtitleChoice is SubChoice.Off || externalPrimarySubtitleId != null)
   }
 
   /** Selects audio track [id] in place without restarting playback; ignores unmatched IDs once tracks are loaded. */
@@ -138,35 +166,56 @@ internal class TrackSelectorBridge(
     if (id == null) {
       onClearCues()
       subtitleChoice = SubChoice.Off
+      externalPrimarySubtitleId = null
+      val disableAllText = secondarySubtitleChoice == null
       if (player != null) {
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
           .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-          .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+          .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, disableAllText)
           .setPreferredTextLanguage(null)
           .build()
       }
-      if (!latestTracks.isEmpty) {
-        emitIfChanged(
-          inspectMediaTracks(
-            latestTracks,
-            textDisabled = true,
-            selectedVideoQualityId = videoQualityChoice?.id,
-            ffmpegSupportsAudio = ffmpegSupportsAudio,
-          )
-        )
-      }
+      onSecondaryTargetChanged(secondarySubtitleChoice, true)
+      emitSnapshotIfTracksAvailable(player, textDisabled = true)
       return
     }
 
     val tracks = activeTracks(player)
     val matched = findCandidateById(tracks, C.TRACK_TYPE_TEXT, id, ffmpegSupportsAudio)
-    if (!tracks.isEmpty && matched == null) return
+    val dynamicExternal = extraExternalSubtitles().firstOrNull { it.id == id }
+    if (!tracks.isEmpty && matched == null && dynamicExternal == null) return
+
+    // Enforce secondary != primary: selecting a primary equal to secondary clears secondary immediately (#402).
+    val wasSecondary = secondarySubtitleChoice?.id == id
+    if (wasSecondary) {
+      secondarySubtitleChoice = null
+      onClearSecondaryCues()
+    }
+
+    if (matched == null && dynamicExternal != null) {
+      if (externalPrimarySubtitleId != id) onClearCues()
+      externalPrimarySubtitleId = id
+      subtitleChoice = SubChoice.Selected(choiceOf(dynamicExternal))
+      val disableAllText = secondarySubtitleChoice == null
+      if (player != null) {
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+          .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+          .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, disableAllText)
+          .setPreferredTextLanguage(null)
+          .build()
+      }
+      onSecondaryTargetChanged(secondarySubtitleChoice, true)
+      emitSnapshotIfTracksAvailable(player, textDisabled = true)
+      return
+    }
 
     val currentlyDisabled =
       isTextDisabled || (player?.trackSelectionParameters?.disabledTrackTypes?.contains(C.TRACK_TYPE_TEXT) == true)
-    val alreadyActive = !currentlyDisabled && matched != null && matched.group.isTrackSelected(matched.trackIndex)
+    val alreadyActive =
+      !currentlyDisabled && !wasSecondary && matched != null && matched.group.isTrackSelected(matched.trackIndex)
     if (!alreadyActive) onClearCues()
 
+    externalPrimarySubtitleId = null
     val prev = (subtitleChoice as? SubChoice.Selected)?.choice?.takeIf { it.id == id }
     subtitleChoice = SubChoice.Selected(
       TrackChoice(
@@ -185,6 +234,68 @@ internal class TrackSelectorBridge(
         .addOverride(TrackSelectionOverride(matched.group.mediaTrackGroup, listOf(matched.trackIndex)))
       if (matched.info.language != null) builder.setPreferredTextLanguage(matched.info.language)
       player.trackSelectionParameters = builder.build()
+    }
+    onSecondaryTargetChanged(secondarySubtitleChoice, false)
+    emitSnapshotIfTracksAvailable(player, textDisabled = false, forcedPrimaryId = id)
+  }
+
+  /**
+   * Selects a simultaneous secondary subtitle track [id] in place, or disables secondary subtitles when [id] is `null`
+   * (`#402`). Enforces `secondary != primary` by clearing/rejecting any selection equal to the active primary track.
+   */
+  fun selectSecondarySubtitleTrack(player: ExoPlayer?, id: String?) {
+    val cleanId = id?.trim()?.takeIf { it.isNotEmpty() }
+    val activePrimaryId = currentPrimarySubtitleId(player)
+    if (cleanId == null || cleanId == activePrimaryId) {
+      secondarySubtitleChoice = null
+      onClearSecondaryCues()
+      val disableAllText = isTextDisabled
+      if (player != null && disableAllText) {
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+          .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+          .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+          .build()
+      }
+      onSecondaryTargetChanged(null, isTextDisabled)
+      emitSnapshotIfTracksAvailable(player)
+      return
+    }
+
+    val tracks = activeTracks(player)
+    val matched = findCandidateById(tracks, C.TRACK_TYPE_TEXT, cleanId, ffmpegSupportsAudio)
+    val dynamicExternal = extraExternalSubtitles().firstOrNull { it.id == cleanId }
+    if (!tracks.isEmpty && matched == null && dynamicExternal == null) return
+
+    if (secondarySubtitleChoice?.id != cleanId) {
+      onClearSecondaryCues()
+    }
+
+    val prev = secondarySubtitleChoice?.takeIf { it.id == cleanId }
+    val choice = TrackChoice(
+      id = cleanId,
+      language = matched?.info?.language ?: dynamicExternal?.language ?: prev?.language,
+      label = matched?.info?.label ?: dynamicExternal?.label ?: prev?.label,
+      formatId = matched?.info?.formatId ?: dynamicExternal?.formatId ?: prev?.formatId,
+      codec = matched?.info?.codec ?: dynamicExternal?.codec ?: prev?.codec,
+      channels = matched?.info?.channels ?: prev?.channels,
+    )
+    secondarySubtitleChoice = choice
+
+    if (player != null && matched != null && player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
+      player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+        .build()
+    }
+    onSecondaryTargetChanged(choice, isTextDisabled)
+    emitSnapshotIfTracksAvailable(player)
+  }
+
+  /** Re-emits the current track snapshot after a dynamic external subtitle track is attached mid-playback (`#32`). */
+  fun onDynamicExternalSubtitlesChanged(player: ExoPlayer?) {
+    val tracks = activeTracks(player)
+    if (!tracks.isEmpty || extraExternalSubtitles().isNotEmpty()) {
+      val textDisabled = if (player != null) isTextEffectivelyDisabled(player) else isTextDisabled
+      emitIfChanged(buildSnapshot(tracks, textDisabled = textDisabled))
     }
   }
 
@@ -205,14 +316,7 @@ internal class TrackSelectorBridge(
       val tracks = activeTracks(player)
       if (!tracks.isEmpty) {
         val textDisabled = if (player != null) isTextEffectivelyDisabled(player) else isTextDisabled
-        emitIfChanged(
-          inspectMediaTracks(
-            tracks,
-            textDisabled = textDisabled,
-            selectedVideoQualityId = null,
-            ffmpegSupportsAudio = ffmpegSupportsAudio,
-          )
-        )
+        emitIfChanged(buildSnapshot(tracks, textDisabled = textDisabled, selectedVideoQualityId = null))
       }
       return
     }
@@ -245,14 +349,7 @@ internal class TrackSelectorBridge(
     }
     if (!tracks.isEmpty && matched != null) {
       val textDisabled = if (player != null) isTextEffectivelyDisabled(player) else isTextDisabled
-      emitIfChanged(
-        inspectMediaTracks(
-          tracks,
-          textDisabled = textDisabled,
-          selectedVideoQualityId = matched.option.id,
-          ffmpegSupportsAudio = ffmpegSupportsAudio,
-        )
-      )
+      emitIfChanged(buildSnapshot(tracks, textDisabled = textDisabled, selectedVideoQualityId = matched.option.id))
     }
   }
 
@@ -284,7 +381,8 @@ internal class TrackSelectorBridge(
 
     when (val wantedSub = subtitleChoice) {
       SubChoice.Off -> {
-        if (!params.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
+        val shouldDisableAllText = secondarySubtitleChoice == null
+        if (shouldDisableAllText && !params.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
           builder.clearOverridesOfType(C.TRACK_TYPE_TEXT)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             .setPreferredTextLanguage(null)
@@ -294,6 +392,7 @@ internal class TrackSelectorBridge(
       is SubChoice.Selected -> {
         val target = resolveCandidate(tracks, C.TRACK_TYPE_TEXT, wantedSub.choice, ffmpegSupportsAudio)
         if (target != null) {
+          externalPrimarySubtitleId = null
           subtitleChoice = SubChoice.Selected(choiceOf(target.info))
           targetSubtitleId = target.info.id
           val currentOverride = params.overrides[target.group.mediaTrackGroup]?.trackIndices
@@ -306,6 +405,26 @@ internal class TrackSelectorBridge(
         }
       }
       SubChoice.Default -> Unit
+    }
+
+    secondarySubtitleChoice?.let { wantedSec ->
+      val resolved = resolveCandidate(tracks, C.TRACK_TYPE_TEXT, wantedSec, ffmpegSupportsAudio)
+      val activePrimary = targetSubtitleId
+        ?: externalPrimarySubtitleId
+        ?: currentSelectedTextIdFromTracks(tracks, excludeId = resolved?.info?.id ?: wantedSec.id)
+      if (resolved != null) {
+        if (resolved.info.id == activePrimary) {
+          secondarySubtitleChoice = null
+          onClearSecondaryCues()
+          onSecondaryTargetChanged(null, isTextDisabled)
+        } else {
+          val updated = choiceOf(resolved.info)
+          if (updated != secondarySubtitleChoice) {
+            secondarySubtitleChoice = updated
+            onSecondaryTargetChanged(updated, isTextDisabled)
+          }
+        }
+      }
     }
 
     videoQualityChoice?.let { wantedQuality ->
@@ -354,16 +473,18 @@ internal class TrackSelectorBridge(
     }
 
     val textDisabled = isTextEffectivelyDisabled(player)
-    val inspected = inspectMediaTracks(
+    val inspected = buildSnapshot(
       tracks,
       textDisabled = textDisabled,
       selectedVideoQualityId = targetVideoQualityId ?: videoQualityChoice?.id,
-      ffmpegSupportsAudio = ffmpegSupportsAudio,
     )
     val snapshot = if (changedParams) {
+      val resolvedPrimary = if (textDisabled) externalPrimarySubtitleId else (targetSubtitleId ?: inspected.selectedSubtitleId)
+      val resolvedSecondary = inspected.selectedSecondarySubtitleId?.takeIf { it != resolvedPrimary }
       inspected.copy(
         selectedAudioId = targetAudioId ?: inspected.selectedAudioId,
-        selectedSubtitleId = if (textDisabled) null else (targetSubtitleId ?: inspected.selectedSubtitleId),
+        selectedSubtitleId = resolvedPrimary,
+        selectedSecondarySubtitleId = resolvedSecondary,
       )
     } else {
       inspected
@@ -376,14 +497,59 @@ internal class TrackSelectorBridge(
     val current = player.currentTracks
     if (current.isEmpty) return
     latestTracks = current
-    emitIfChanged(
-      inspectMediaTracks(
-        current,
-        textDisabled = isTextEffectivelyDisabled(player),
-        selectedVideoQualityId = videoQualityChoice?.id,
-        ffmpegSupportsAudio = ffmpegSupportsAudio,
-      )
+    emitIfChanged(buildSnapshot(current, textDisabled = isTextEffectivelyDisabled(player)))
+  }
+
+  private fun buildSnapshot(
+    tracks: Tracks,
+    textDisabled: Boolean,
+    selectedVideoQualityId: String? = videoQualityChoice?.id,
+  ): MediaTracksSnapshot =
+    inspectMediaTracks(
+      tracks,
+      textDisabled = textDisabled,
+      selectedVideoQualityId = selectedVideoQualityId,
+      ffmpegSupportsAudio = ffmpegSupportsAudio,
+      selectedSecondarySubtitleId = secondarySubtitleChoice?.id,
+      extraExternalSubtitles = extraExternalSubtitles(),
+      selectedExternalPrimaryId = externalPrimarySubtitleId,
+      preferredPrimarySubtitleId = (subtitleChoice as? SubChoice.Selected)?.choice?.id,
     )
+
+  private fun emitSnapshotIfTracksAvailable(
+    player: ExoPlayer?,
+    textDisabled: Boolean? = null,
+    forcedPrimaryId: String? = null,
+  ) {
+    val tracks = activeTracks(player)
+    if (tracks.isEmpty && extraExternalSubtitles().isEmpty()) return
+    val disabled = textDisabled ?: if (player != null) isTextEffectivelyDisabled(player) else isTextDisabled
+    val built = buildSnapshot(tracks, textDisabled = disabled)
+    val adjusted = if (forcedPrimaryId != null && !disabled) {
+      built.copy(
+        selectedSubtitleId = forcedPrimaryId,
+        selectedSecondarySubtitleId = built.selectedSecondarySubtitleId?.takeIf { it != forcedPrimaryId },
+      )
+    } else {
+      built
+    }
+    emitIfChanged(adjusted)
+  }
+
+  private fun currentPrimarySubtitleId(player: ExoPlayer?): String? {
+    if (externalPrimarySubtitleId != null) return externalPrimarySubtitleId
+    if (subtitleChoice is SubChoice.Off) return null
+    (subtitleChoice as? SubChoice.Selected)?.choice?.id?.let { return it }
+    val tracks = activeTracks(player)
+    return currentSelectedTextIdFromTracks(tracks, excludeId = secondarySubtitleChoice?.id)
+  }
+
+  private fun currentSelectedTextIdFromTracks(tracks: Tracks, excludeId: String? = null): String? {
+    if (tracks.isEmpty) return null
+    val candidates = candidatesOf(tracks, C.TRACK_TYPE_TEXT, ffmpegSupportsAudio)
+    return candidates.firstOrNull { candidate ->
+      candidate.group.isTrackSelected(candidate.trackIndex) && candidate.info.id != excludeId
+    }?.info?.id
   }
 
   private fun choiceOf(info: TrackInfoSnapshot): TrackChoice =
@@ -398,7 +564,8 @@ internal class TrackSelectorBridge(
 
   private fun isTextEffectivelyDisabled(player: ExoPlayer): Boolean =
     subtitleChoice is SubChoice.Off ||
-      player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+      externalPrimarySubtitleId != null ||
+      (secondarySubtitleChoice == null && player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
 
   private fun emitIfChanged(snapshot: MediaTracksSnapshot) {
     if (snapshot == lastEmitted) return

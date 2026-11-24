@@ -10,9 +10,9 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - Source-first (`src/index.ts`, `./testing` -> `src/testing/index.ts`); allowed workspace dep: `domain`; tests `*.test.ts`.
 
 ## Public surface
-- `PlayerEngine` port (`LoadCommand`, `LoadOptions.bufferPreset?`, `LoadOptions.allowLegacyTls?`, `setScrubbing?`, `setSpeed?`, `selectAudioTrack?`, `selectSubtitleTrack?`, `MediaTracks`,
+- `PlayerEngine` port (`LoadCommand`, `LoadOptions.{bufferPreset,allowLegacyTls,secondarySubtitleTrackId,externalSubtitles,subtitleStyle}?`, `setScrubbing?`, `setSpeed?`, `selectAudioTrack?`, `selectSubtitleTrack?`, `selectSecondarySubtitleTrack?`, `addExternalSubtitle?`, `setSubtitleStyle?`, `ExternalSubtitleTrack`, `MediaTracks`,
   `TrackInfo`, `EMPTY_TRACKS`, `EngineEvent`, `EngineState`, `EngineCapabilities`, `AttemptToken`) and
-  `bridgeNativeEngine`. `createMonotonicClock(nowFn?)` (`#159`) guards against backwards wall-clock jumps;
+  `bridgeNativeEngine`. `external-subtitles.ts` (`#308`, `#32`): `isAllowedExternalSubtitleUri`, `sanitizeExternalSubtitleHeaders` (strictly isolated from stream headers), `normalizeExternalSubtitleTrack`, `inferSubtitleMimeType`. `createMonotonicClock(nowFn?)` (`#159`);
   `positionAt(anchor, nowMs)` clamps to `[0, durationMs]`; `isAtLiveEdge(anchor, nowMs, toleranceMs)` applies the 5 s window (`#284`).
 - `EngineError` / `toPlaybackError` / `classifyError(code, httpStatus?)`; `diagnosePlaybackFailure`, `extractRedactedHost`,
   and `createPlaybackDiagnoser({ clock, checkAccountHealth?, ttlMs? })` (`diagnoser.ts`, `#316`) classify failures with 60 s monotonic TTL caching and host-only redacted evidence.
@@ -22,7 +22,7 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
   `seekBy` (relative seek clamped to VOD duration or bounded live time-shift window; `#28`),
   `jumpToLiveEdge` (seeks directly to `liveEdgeMs` or `engine.jumpToLiveEdge` when `timeShiftSupported === true` and behind > 2 s, `#28`; or live MPEG-TS `liveEdgeMs - 3_000` when lagging > 4 s, `#141`),
   `setSpeed` (clamped `[0.25, 4.0]`, coalesced across active seeks and in-flight transitions; `#302`), `selectAudioTrack`,
-  `selectSubtitleTrack` (`track-preferences.ts`, inferring language from labels on missing/`und` tags; `#151`), `getState`, `subscribe`, `dispose`. `DEFAULT_PLAYBACK_CONFIG` holds spec timings; `timeshift.ts` exports `resolveLiveTimeShiftWindow`, `clampLiveSeekPosition`, `isBehindLiveEdge`, and `formatLiveOffset`.
+  `selectSubtitleTrack` / `selectSecondarySubtitleTrack` (`track-preferences.ts`, `#151`, `#402`: enforces `primary !== secondary`, reconciles shifted IDs across reloads), `addExternalSubtitle` (`#308`, `#32`), `setSubtitleStyle` (live without restart, `#32`), `getState`, `subscribe`, `dispose`. `DEFAULT_PLAYBACK_CONFIG` holds spec timings; `timeshift.ts` exports `resolveLiveTimeShiftWindow`, `clampLiveSeekPosition`, `isBehindLiveEdge`, and `formatLiveOffset`.
 - `createConnectionTracker()` (`connection-tracker.ts`, `#87`): pure per-`accountKey` connection tracker (`acquire`, `release`, `activeCount`, `activeStreamIds`, `checkLimit`) with non-double-counting `replacingStreamId` support for channel zaps.
 - `createAbrHysteresisController({ rungs, clock, initialIndex?, config? })` (`abr-hysteresis.ts`, `#176`): pure clock-injected anti-oscillation ABR selector (`downgradeSafetyFactor=0.85`, `stepDownCooldownMs=5s` bypassed on severe rebuffer, single-step ascent with `upgradeSafetyFactor=1.35`, `stepUpCooldownMs=20s` restarted on rebuffers, `3` samples over `15s`, rejects `<= 0` bps samples, and full window/cooldown reset on `onPause`/`onBackground`/`onTune`/`reset`).
 

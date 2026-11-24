@@ -1,4 +1,5 @@
-import type { AttemptToken, EngineEvent, MediaKind } from '@elv/playback';
+import type { SubtitleStyleConfig } from '@elv/domain';
+import type { AttemptToken, EngineEvent, ExternalSubtitleTrack, MediaKind } from '@elv/playback';
 import type { DeinterlaceMode, PlayerUiEvent } from '../../../shared/player-ipc.ts';
 import type { VideoPresenter } from '../presenter/types.ts';
 import { type AudioDeviceTracker, createAudioDeviceTracker } from './audio-devices.ts';
@@ -31,6 +32,7 @@ import {
   replyEntryId,
   TRACK_PROPERTIES,
 } from './session-constants.ts';
+import { subtitleStyleCommands } from './subtitle-style.ts';
 import { parseMpvDelayMs } from './track-snapshot.ts';
 import type { TrackTracker } from './tracks.ts';
 
@@ -42,6 +44,8 @@ export interface MediaRequest {
   startMs?: number;
   preferHevcOverDolbyVision?: boolean;
   filterSdhSubtitles?: boolean;
+  subtitleStyle?: SubtitleStyleConfig;
+  externalSubtitles?: readonly ExternalSubtitleTrack[];
 }
 
 /** Active media attempt and its bound mpv playlist entry id. */
@@ -112,6 +116,10 @@ export interface LiveSessionHooks {
   onAudioSpdifProperty?(value: unknown): void;
   getDesiredAudioDevice?(): string | undefined;
   getDesiredSubtitleFont?(): string | undefined;
+  getDesiredSubtitleStyle?(): SubtitleStyleConfig | undefined;
+  isSecondarySubtitleActive?(): boolean;
+  onSecondarySubtitlePositionSync?(secondaryActive: boolean): void;
+  onFileLoadedExternalSubtitles?(slot: MediaSlot): void;
   getDesiredDeinterlaceMode?(): DeinterlaceMode | undefined;
   getDesiredPitchLock?(): boolean | undefined;
   getDesiredAudioNormalization?(): boolean | undefined;
@@ -167,7 +175,15 @@ export function createSessionController(hooks: LiveSessionHooks) {
   const queueReconcile = (L: LiveSession): void => {
     if (!isActive(L, L.entries.current()?.entryId)) return;
     const media = hooks.getMedia();
-    for (const cmd of tracks.reconcileCommands()) hooks.enqueueCommand(cmd, media);
+    const commands = tracks.reconcileCommands();
+    let changedSecondary = false;
+    for (const cmd of commands) {
+      if (cmd[0] === 'set_property' && cmd[1] === 'secondary-sid') changedSecondary = true;
+      hooks.enqueueCommand(cmd, media);
+    }
+    if (changedSecondary) {
+      hooks.onSecondarySubtitlePositionSync?.(tracks.hasActiveSecondarySubtitle());
+    }
   };
 
   const onStartFile = (L: LiveSession, entryId: number): void => {
@@ -284,6 +300,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
               fromCurrent(L, tracks.sync());
             }
           }
+          if (media) hooks.onFileLoadedExternalSubtitles?.(media);
         }
         return;
       case 'playback-restart':
@@ -469,6 +486,15 @@ export function createSessionController(hooks: LiveSessionHooks) {
         L.appliedSubtitleFont = desiredSubFont;
         void send(L, ['set_property', 'sub-font', desiredSubFont]);
       }
+      const desiredSubStyle = hooks.getDesiredSubtitleStyle?.();
+      if (desiredSubStyle !== undefined) {
+        for (const cmd of subtitleStyleCommands(
+          desiredSubStyle,
+          hooks.isSecondarySubtitleActive?.() === true,
+        )) {
+          void send(L, cmd);
+        }
+      }
       const desiredDeinterlace = hooks.getDesiredDeinterlaceMode?.();
       if (desiredDeinterlace !== undefined) {
         L.appliedDeinterlaceMode = desiredDeinterlace;
@@ -619,7 +645,15 @@ export function createSessionController(hooks: LiveSessionHooks) {
       }
       L.inFlight = slot;
       opening.begin(slot);
-      const reply = await send(L, loadfileCommand(slot.request));
+      const effectiveStyle = hooks.getDesiredSubtitleStyle?.() ?? slot.request.subtitleStyle;
+      const reply = await send(
+        L,
+        loadfileCommand({
+          ...slot.request,
+          ...(effectiveStyle === undefined ? {} : { subtitleStyle: effectiveStyle }),
+          secondarySubtitleActive: hooks.isSecondarySubtitleActive?.() === true,
+        }),
+      );
       if (!reply || hooks.getLive() !== L) return;
       if (reply.error !== 'success') {
         L.inFlight = undefined;

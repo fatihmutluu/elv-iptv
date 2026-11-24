@@ -72,6 +72,18 @@ export const THIRD_PARTY_NOTICES: readonly ThirdPartyNotice[] = [
       'This software uses libraries from the FFmpeg project (9.0.2) under the GNU Lesser General Public License v2.1 or later (LGPL-2.1-or-later), linked dynamically on Android.\n\nEnabled audio decoders: aac, ac3, alac, dca, eac3, flac, mlp, mp2, mp3, opus, pcm_alaw, pcm_mulaw, truehd, vorbis.\n\nFFmpeg source archive: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz | Reproducible build script and CI workflow: https://github.com/fatihmutluu/elv-iptv/blob/main/.github/workflows/ffmpeg-media3.yml.',
   },
   {
+    id: 'libass-android',
+    name: 'libass-android (ass-media, libass, FriBidi, HarfBuzz, FreeType)',
+    version: '0.6.0-beta01',
+    license: 'MIT AND ISC AND LGPL-2.1-or-later AND FTL',
+    platforms: ['Android', 'Android TV', 'Fire OS'],
+    sourceUrl: 'https://github.com/peerless2012/libass-android',
+    modificationNote:
+      'Unmodified Maven Central artifacts (io.github.peerless2012:ass-media:0.6.0-beta01, ass-kt:0.6.0-beta01, ass:0.6.0-beta01) providing dynamically loaded libass.so for native ASS/SSA OpenGL subtitle overlay on Android Media3 without GPL components.',
+    noticeText:
+      'libass-android / ass-media 0.6.0-beta01 (https://github.com/peerless2012/libass-android) — Licensed under the MIT License.\n\nDynamically loaded native subtitle renderer packaging libass (ISC), FriBidi (LGPL-2.1-or-later), HarfBuzz (Old-MIT), FreeType (FreeType License / FTL), libunibreak (Zlib), and libpng (libpng License).\n\nUpstream source code and build recipes: https://github.com/peerless2012/libass-android and https://github.com/libass/libass.',
+  },
+  {
     id: 'desktop-libmpv',
     name: 'libmpv & FFmpeg (Desktop Player Runtime)',
     version: '0.42.0',

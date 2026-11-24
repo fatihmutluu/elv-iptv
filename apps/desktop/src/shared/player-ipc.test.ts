@@ -27,6 +27,7 @@ describe('PLAYER_CHANNELS', () => {
       area: 'player:area',
       ui: 'player:ui',
       remoteMediaAction: 'player:remote-media-action',
+      pickSubtitleFile: 'player:pick-subtitle-file',
       gateReport: 'gate:report',
     });
   });

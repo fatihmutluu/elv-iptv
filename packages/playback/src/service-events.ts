@@ -1,3 +1,4 @@
+import type { SubtitleStyleConfig } from '@elv/domain';
 import { isAtLiveEdge, positionAt } from './clock';
 import { DEFAULT_PLAYBACK_CONFIG, type PlaybackConfig } from './config';
 import {
@@ -5,6 +6,7 @@ import {
   type ClockAnchor,
   EMPTY_TRACKS,
   type EngineEvent,
+  type ExternalSubtitleTrack,
   type MediaTracks,
   type PlayerEngine,
   type StreamVideoInfo,
@@ -102,6 +104,7 @@ export interface EventRouterDeps {
   readonly reconcileTracks: (tracks: MediaTracks) => {
     readonly audioTrackId?: string;
     readonly subtitleTrackId?: string | null;
+    readonly secondarySubtitleTrackId?: string | null;
   };
   currentRequest(): TuneRequest | undefined;
   setLastVodPosition(ms: number): void;
@@ -186,17 +189,32 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
         return;
       }
       case 'tracks': {
+        const tracks = sanitizeMediaTracks(event.tracks);
         store.update({
-          tracks: event.tracks,
-          ...(event.tracks.selectedVideoQualityId === undefined
+          tracks,
+          ...(tracks.selectedVideoQualityId === undefined
             ? {}
-            : { selectedVideoQualityId: event.tracks.selectedVideoQualityId }),
+            : { selectedVideoQualityId: tracks.selectedVideoQualityId }),
         });
-        const next = deps.reconcileTracks(event.tracks);
+        const next = deps.reconcileTracks(tracks);
         const attempt = store.getState().attempt;
         if (next.audioTrackId !== undefined) engine.selectAudioTrack?.(attempt, next.audioTrackId);
+        if (
+          next.subtitleTrackId !== undefined &&
+          next.subtitleTrackId !== null &&
+          next.subtitleTrackId === tracks.selectedSecondarySubtitleId &&
+          next.secondarySubtitleTrackId === undefined
+        ) {
+          engine.selectSecondarySubtitleTrack?.(attempt, null);
+          store.update({
+            tracks: { ...store.getState().tracks, selectedSecondarySubtitleId: null },
+          });
+        }
         if (next.subtitleTrackId !== undefined) {
           engine.selectSubtitleTrack?.(attempt, next.subtitleTrackId);
+        }
+        if (next.secondarySubtitleTrackId !== undefined) {
+          engine.selectSecondarySubtitleTrack?.(attempt, next.secondarySubtitleTrackId);
         }
         return;
       }
@@ -383,12 +401,24 @@ function mergeVideoInfo(
   };
 }
 
+function sanitizeMediaTracks(tracks: MediaTracks): MediaTracks {
+  const rawSecondary = tracks.selectedSecondarySubtitleId;
+  if (rawSecondary === undefined) return tracks;
+  const trimmed =
+    typeof rawSecondary === 'string' && rawSecondary.trim().length > 0 ? rawSecondary : null;
+  const safeSecondary = trimmed !== null && trimmed === tracks.selectedSubtitleId ? null : trimmed;
+  if (safeSecondary === rawSecondary) return tracks;
+  return { ...tracks, selectedSecondarySubtitleId: safeSecondary };
+}
+
 export function nextTuneState(
   prev: PlaybackState,
   token: AttemptToken,
   request: TuneRequest,
   held: boolean,
   now: number,
+  externalSubtitles?: readonly ExternalSubtitleTrack[],
+  subtitleStyle?: SubtitleStyleConfig,
 ): PlaybackState {
   const {
     anchor: _a,
@@ -398,6 +428,8 @@ export function nextTuneState(
     chapters: _c,
     droppedFrames: _df,
     externalPlaybackActive: _ep,
+    externalSubtitles: _es,
+    subtitleStyle: _ss,
     ...kept
   } = prev;
   return {
@@ -411,5 +443,9 @@ export function nextTuneState(
     item: request.item,
     accountKey: request.accountKey,
     tuneAt: now,
+    ...(externalSubtitles !== undefined && externalSubtitles.length > 0
+      ? { externalSubtitles }
+      : {}),
+    ...(subtitleStyle === undefined ? {} : { subtitleStyle }),
   };
 }
