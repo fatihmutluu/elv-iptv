@@ -3,6 +3,7 @@ import { enErgonomicsMessages } from './en-ergonomics';
 import { enFailoverNetworkMessages } from './en-failover-network';
 import { enProfilesMessages } from './en-profiles';
 import { enSubtitlesSuiteMessages } from './en-subtitles-suite';
+import { enWaveF5bMessages } from './en-wave-f5b';
 
 /** English (source) message catalog. Every other locale must define the exact same keys. */
 export const enMessages = {
@@ -697,6 +698,7 @@ export const enMessages = {
   ...enCatchupEpgMessages,
   ...enSubtitlesSuiteMessages,
   ...enFailoverNetworkMessages,
+  ...enWaveF5bMessages,
 } as const;
 
 /** Valid message identifier across all supported locales. */

@@ -680,4 +680,104 @@ describe('desktop CatalogService', () => {
       legacy.reportStreamOutcome?.('s1', 'https://stream.example.test', true),
     ).not.toThrow();
   });
+
+  it('forwards Wave F5B VOD enrichment & custom collections, strips remoteFetcher, and falls back safely (#215, #403)', async () => {
+    const enrichment = {
+      itemKey: 'x:s1:movie:1',
+      sourceId: 's1',
+      cleanTitle: 'Metropolis',
+      releaseYear: 1927,
+      rating: 8.3,
+      ratingSource: 'local-index',
+      genres: ['Sci-Fi', 'Drama'],
+      synopsis: 'Classic.',
+      certification: 'Not Rated',
+      fetchedAt: 100,
+      expiresAt: 200,
+    };
+    const collection = {
+      id: 'vc_1',
+      profileId: 'p_main',
+      name: 'Classics',
+      sortOrder: 0,
+      itemCount: 1,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const seen: Record<string, unknown[][]> = {};
+    const record =
+      <T>(name: string, value: T) =>
+      async (...args: unknown[]): Promise<T> => {
+        const list = seen[name] ?? [];
+        list.push(args);
+        seen[name] = list;
+        return value;
+      };
+
+    const { bridge } = makeFakeBridge({
+      getVodEnrichment: record('getVodEnrichment', enrichment),
+      enrichVodItem: record('enrichVodItem', enrichment),
+      listCollections: record('listCollections', [collection]),
+      createCollection: record('createCollection', ok(collection)),
+      renameCollection: record('renameCollection', ok(collection)),
+      reorderCollections: record('reorderCollections', ok([collection])),
+      deleteCollection: record('deleteCollection', ok(undefined)),
+      listCollectionItems: record('listCollectionItems', []),
+      listCollectionsForItem: record('listCollectionsForItem', ['vc_1']),
+      addItemToCollection: record('addItemToCollection', ok(undefined)),
+      removeItemFromCollection: record('removeItemFromCollection', ok(undefined)),
+      reorderCollectionItems: record('reorderCollectionItems', ok(undefined)),
+    });
+
+    const service = createDesktopCatalogFromBridge(bridge);
+    expect(await service.getVodEnrichment?.('x:s1:movie:1')).toEqual(enrichment);
+    expect(
+      await service.enrichVodItem?.('x:s1:movie:1', {
+        enabled: true,
+        ttlMs: 86_400_000,
+        nowMs: 1_700_000_000_000,
+        remoteFetcher: async () => null,
+      }),
+    ).toEqual(enrichment);
+    expect(await service.listCollections?.('p_main')).toEqual([collection]);
+    expect(
+      await service.createCollection?.({ name: 'Sci-Fi\tClassics', profileId: 'p_main' }),
+    ).toEqual(ok(collection));
+    expect(await service.renameCollection?.('vc_1', 'New\nName', 'p_main')).toEqual(ok(collection));
+    expect(await service.reorderCollections?.(['vc_1'], 'p_main')).toEqual(ok([collection]));
+    expect(await service.deleteCollection?.('vc_1', 'p_main')).toEqual(ok(undefined));
+    expect(
+      await service.listCollectionItems?.('vc_1', { profileId: 'p_main', parentalUnlocked: false }),
+    ).toEqual([]);
+    expect(await service.listCollectionsForItem?.('x:s1:movie:1', 'p_main')).toEqual(['vc_1']);
+    expect(await service.addItemToCollection?.('vc_1', 'x:s1:movie:1', 'movie', 'p_main')).toEqual(
+      ok(undefined),
+    );
+    expect(await service.removeItemFromCollection?.('vc_1', 'x:s1:movie:1', 'p_main')).toEqual(
+      ok(undefined),
+    );
+    expect(await service.reorderCollectionItems?.('vc_1', ['x:s1:movie:1'], 'p_main')).toEqual(
+      ok(undefined),
+    );
+
+    expect(seen['enrichVodItem']).toEqual([['x:s1:movie:1', { enabled: true, ttlMs: 86_400_000 }]]);
+    expect(seen['createCollection']).toEqual([[{ name: 'Sci-Fi Classics', profileId: 'p_main' }]]);
+    expect(seen['renameCollection']).toEqual([['vc_1', 'New Name', 'p_main']]);
+
+    // Legacy bridge without optional Wave F5B methods falls back safely
+    const { bridge: legacyBridge } = makeFakeBridge();
+    const legacy = createDesktopCatalogFromBridge(legacyBridge);
+    expect(await legacy.getVodEnrichment?.('x:s1:movie:1')).toBeNull();
+    expect(await legacy.enrichVodItem?.('x:s1:movie:1', { enabled: true })).toBeNull();
+    expect(await legacy.listCollections?.()).toEqual([]);
+    expect((await legacy.createCollection?.({ name: 'X' }))?.ok).toBe(false);
+    expect((await legacy.renameCollection?.('vc_1', 'Y'))?.ok).toBe(false);
+    expect((await legacy.reorderCollections?.(['vc_1']))?.ok).toBe(false);
+    expect((await legacy.deleteCollection?.('vc_1'))?.ok).toBe(false);
+    expect(await legacy.listCollectionItems?.('vc_1')).toEqual([]);
+    expect(await legacy.listCollectionsForItem?.('x:s1:movie:1')).toEqual([]);
+    expect((await legacy.addItemToCollection?.('vc_1', 'x:s1:movie:1', 'movie'))?.ok).toBe(false);
+    expect((await legacy.removeItemFromCollection?.('vc_1', 'x:s1:movie:1'))?.ok).toBe(false);
+    expect((await legacy.reorderCollectionItems?.('vc_1', []))?.ok).toBe(false);
+  });
 });

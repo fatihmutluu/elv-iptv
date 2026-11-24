@@ -9,7 +9,7 @@ import {
   type WatchProgressRow,
 } from '@elv/data';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
-import type { DetailTarget } from '../shared';
+import type { DetailTarget, HydratedVodCollection } from '../shared';
 
 /**
  * `PlayTarget` enriched with optional Watch Progress resume position and metadata fields consumed
@@ -65,6 +65,17 @@ export interface HomeRailEntry {
 
 /** Semantic identifier of each Home horizontal rail. */
 export type HomeRailKind = 'continue' | 'recentChannels' | 'live' | 'mylist' | 'movies' | 'series';
+
+/** Dynamic Home horizontal rail identifier for a custom VOD collection (`#403`). */
+export type HomeCollectionRailId = `collection:${string}`;
+
+/** Hydrated custom VOD collection mapped into a Cinema Quietude Home poster rail (`#403`). */
+export interface HomeCollectionRail {
+  readonly id: HomeCollectionRailId;
+  readonly collectionId: string;
+  readonly title: string;
+  readonly items: readonly HomeRailEntry[];
+}
 
 const MIN_CARD_WIDTH = 88;
 const LIVE_PLAYLIST_PAGE_SIZE = 60;
@@ -421,4 +432,43 @@ export function buildHomeDetailTarget(
     rating,
     ...(catalogItem ? { catalogId: catalogItem.id } : {}),
   };
+}
+
+/** Maps non-empty hydrated VOD collections into Cinema Quietude Home poster rails (`#403`). */
+export function buildHomeCollectionRails(
+  collections: readonly HydratedVodCollection[],
+  progressByKey: ReadonlyMap<string, WatchProgressRow>,
+): HomeCollectionRail[] {
+  const rails: HomeCollectionRail[] = [];
+  for (const entry of collections) {
+    const mapped: HomeRailEntry[] = [];
+    for (const item of entry.items) {
+      if (item.kind !== 'movie' && item.kind !== 'series') continue;
+      const prog = progressByKey.get(item.key);
+      mapped.push({
+        itemKey: item.key,
+        sourceId: item.sourceId,
+        kind: item.kind,
+        title: item.name,
+        subtitle: prog?.subtitle ?? null,
+        backdropUri: item.logo,
+        posterUri: item.logo,
+        year: item.year,
+        rating: item.rating,
+        durationMs: prog?.durationMs ?? 0,
+        positionMs: prog?.positionMs ?? 0,
+        watched: prog?.watched ?? false,
+        catalogItem: item,
+      });
+    }
+    if (mapped.length > 0) {
+      rails.push({
+        id: `collection:${entry.collection.id}`,
+        collectionId: entry.collection.id,
+        title: entry.collection.name,
+        items: mapped,
+      });
+    }
+  }
+  return rails;
 }

@@ -399,6 +399,56 @@ export function createDesktopCatalogFromBridge(
       if (origin === undefined) return;
       void bridge.reportStreamOutcome?.(sourceId, origin, succeeded)?.catch(() => undefined);
     },
+    getVodEnrichment: (itemKey) =>
+      bridge.getVodEnrichment ? bridge.getVodEnrichment(itemKey) : Promise.resolve(null),
+    enrichVodItem: (itemKey, opts) => {
+      if (!bridge.enrichVodItem) return Promise.resolve(null);
+      const cleanOpts: { enabled?: boolean; ttlMs?: number } = {};
+      if (opts?.enabled !== undefined) cleanOpts.enabled = opts.enabled;
+      if (opts?.ttlMs !== undefined) cleanOpts.ttlMs = opts.ttlMs;
+      return bridge.enrichVodItem(
+        itemKey,
+        Object.keys(cleanOpts).length > 0 ? cleanOpts : undefined,
+      );
+    },
+    listCollections: (profileId, opts) =>
+      bridge.listCollections ? bridge.listCollections(profileId, opts) : Promise.resolve([]),
+    createCollection: (input) =>
+      bridge.createCollection
+        ? bridge.createCollection({ ...input, name: sanitizeDisplayText(input.name) })
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    renameCollection: (id, name, profileId) =>
+      bridge.renameCollection
+        ? bridge.renameCollection(id, sanitizeDisplayText(name), profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    reorderCollections: (orderedIds, profileId) =>
+      bridge.reorderCollections
+        ? bridge.reorderCollections(orderedIds, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    deleteCollection: (id, profileId) =>
+      bridge.deleteCollection
+        ? bridge.deleteCollection(id, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    listCollectionItems: (collectionId, opts) =>
+      bridge.listCollectionItems
+        ? bridge.listCollectionItems(collectionId, opts)
+        : Promise.resolve([]),
+    listCollectionsForItem: (itemKey, profileId) =>
+      bridge.listCollectionsForItem
+        ? bridge.listCollectionsForItem(itemKey, profileId)
+        : Promise.resolve([]),
+    addItemToCollection: (collectionId, itemKey, kind, profileId) =>
+      bridge.addItemToCollection
+        ? bridge.addItemToCollection(collectionId, itemKey, kind, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    removeItemFromCollection: (collectionId, itemKey, profileId) =>
+      bridge.removeItemFromCollection
+        ? bridge.removeItemFromCollection(collectionId, itemKey, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    reorderCollectionItems: (collectionId, orderedItemKeys, profileId) =>
+      bridge.reorderCollectionItems
+        ? bridge.reorderCollectionItems(collectionId, orderedItemKeys, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
     flushPendingWrites: () =>
       bridge.flushPendingWrites ? bridge.flushPendingWrites() : Promise.resolve(),
     async close() {

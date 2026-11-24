@@ -106,6 +106,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         userStateVersion={p.effectiveUserStateVersion}
         preferredAudioLang={p.preferences.preferences.preferredAudioLang}
         preferredSubtitleLang={p.preferences.preferences.preferredSubtitleLang}
+        vodEnrichmentEnabled={p.preferences.preferences.vodEnrichmentEnabled}
         onSearchPerson={p.onSearchPerson}
         onBack={p.onPopDetail}
         onPlay={p.onPlay}

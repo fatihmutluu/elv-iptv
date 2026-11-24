@@ -121,8 +121,9 @@ describe('SourcesScreen native TV focus & controller concurrency (#71)', () => {
         nativeEvent: { layout: { x: 0, y: 720, width: 200, height: 48 } },
       });
 
-      // Move down to input-server (0: mode-xtream -> 1: mode-m3u -> 2: input-name -> 3: input-server)
+      // Move down to input-server (0: mode-xtream -> 1: mode-m3u -> 2: mode-stalker -> 3: input-name -> 4: input-server)
       await act(async () => {
+        remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);

@@ -1,6 +1,6 @@
 # sources (`@elv/sources`)
 
-M3U and XMLTV scanners and the Xtream client.
+M3U/XMLTV scanners, Xtream client, and Stalker/Ministra MAC portal client.
 
 ## Commands
 - `pnpm --filter @elv/sources typecheck` type-checks this package.
@@ -8,12 +8,9 @@ M3U and XMLTV scanners and the Xtream client.
 - `pnpm -w check` runs every repository check.
 
 ## Rules
-- Pure TypeScript: no `react`, `react-native`, `expo*`, `electron` or `node:*` imports.
-  Platform access goes through ports defined in `@elv/domain`.
-- Source-first: `exports` points at `src/index.ts`; there is no build step.
-- Allowed workspace dependencies: domain.
-- Tests live beside the code as `*.test.ts`. Integration and performance tests (real HTTP against the
-  simulator, 100k entries in CI, 500k with `SIM_HUGE=1`) live in `tools/test/sources-*.test.ts`.
+- Pure TypeScript: no `react`, `react-native`, `expo*`, `electron` or `node:*` imports; platform access goes through `@elv/domain` ports.
+- Source-first: `exports` points at `src/index.ts`; there is no build step. Allowed workspace deps: `domain`.
+- Tests live beside code as `*.test.ts`. Integration/perf tests (real HTTP against simulator, 100k CI / 500k `SIM_HUGE=1`) live in `tools/test/sources-*.test.ts`.
 
 ## API
 - `scanM3u(chunks, { batchSize?, baseUrl?, decompressor?, maxDecompressedBytes? })` streams M3U/M3U8 (plain or gzip `1f 8b`
@@ -48,3 +45,4 @@ M3U and XMLTV scanners and the Xtream client.
 - Unified catch-up URL resolver (`catchup-url.ts`, `#220`): play-time builder (`buildCatchupUrl`, `expandCatchupTemplate`, `formatXtreamTimeshiftStart`, `isProgrammeWithinCatchupWindow`, `normalizeCatchupMode`) for `xc`/`stalker`/`shift`/`flussonic`/`append`/`default` with IANA timezone & `http(s)://` validation.
 - LAN pairing (`lan-pairing-protocol.ts`, `lan-pairing-html.ts`, `#50`): validators (`isPrivateLanAddress`, `isValidPairingHostHeader`/`Origin`/`Token`/`Path`, `constantTimeEqual`, `buildLanPairingUrl`), `parseLanPairingPayload`, `renderLanPairingHtml`.
 - Subtitles (`subtitles.ts`, `subtitles-formats.ts`, `subtitles-bidi.ts`, `#285`): `detectSubtitleFormat`, tolerant `parseSubtitles` (SRT/WebVTT/ASS/TTML, 4 MiB default cap, optional SDH strip & RLI/PDI bidi isolation), `findActiveCues`, `containsRtlText`, `isolateBidiLines`, `stripSdhSubtitleLine`.
+- Stalker/Ministra MAC portal client (`stalker.ts`, `stalker-records.ts`, `stalker-url.ts`, `stalker-types.ts`, `#29`): `normalizeStalkerPortalUrl`, `stripStalkerCommandPrefix`, `createStalkerClient` (MAC-validated via `normalizeMacAddress`, lazy `handshake` with `/portal.php` -> `/stalker_portal/server/load.php` 404 fallback, single auto re-handshake on 401/403/`Authorization failed`, `profile`, `genres`/`vodCategories`/`seriesCategories`, paginated `liveChannels`/`vodItems`/`seriesItems`/`seriesSeasons`/`seasonEpisodes`, `allLiveChannels`, `shortEpg`/`epgInfo`, play-time `createLink` stripping `ffmpeg`/`ffrt`/`auto` prefixes with `http(s)://` allowlist; artwork validated; zero credential leakage; primary-host-scoped `hostOverride`, `dnsFamily`, `allowLegacyTls`).

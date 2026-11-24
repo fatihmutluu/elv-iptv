@@ -250,6 +250,7 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       audioNormalization: true,
       windowAspectRatioLock: true,
       backgroundAudioPlayback: true,
+      vodEnrichmentEnabled: true,
       subtitleStyle: {
         fontSize: 'medium',
         textColor: 'white',

@@ -1,5 +1,12 @@
 import type { BrowseKind, CatalogService, ItemRow, SourceRow } from '@elv/data';
-import { TvFocusAnchor, useI18n, useKeyInterpreter, useTheme, useViewport } from '@elv/ui-kit';
+import {
+  CtaButton,
+  TvFocusAnchor,
+  useI18n,
+  useKeyInterpreter,
+  useTheme,
+  useViewport,
+} from '@elv/ui-kit';
 import {
   type ComponentRef,
   type ReactElement,
@@ -14,17 +21,20 @@ import {
   type NativeSyntheticEvent,
   ScrollView,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import { type DetailTarget, useCatalogUiCache, useRouteActive } from '../shared';
 import { AmbientBackdrop } from '../shared/AmbientBackdrop';
+import { CollectionManagerOverlay } from '../shared/CollectionManagerOverlay';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
 import { HOME_HERO_AUTO_ROTATE_MS, useHomeHeroAutoRotate } from './HomeHeroBackdrop';
-import { buildHomeRailSpecs, HomeRail } from './HomeRail';
+import { buildHomeRailSpecs, HomeRail, type HomeRailId } from './HomeRail';
 import { computeHomeLayout, HomeEmptyState, HomeSkeleton } from './HomeSkeleton';
 import {
   buildHeroSlides,
+  buildHomeCollectionRails,
   buildHomeDetailTarget,
   buildHomeLivePlayTarget,
   buildHomeRailSets,
@@ -105,6 +115,7 @@ export function HomeScreen({
   const [heroIndex, setHeroIndexState] = useState(() => uiCache?.getHome()?.heroIndex ?? 0);
   const [heroHovered, setHeroHovered] = useState(false);
   const [heroKeyboardFocused, setHeroKeyboardFocused] = useState(false);
+  const [collectionManagerOpen, setCollectionManagerOpen] = useState(false);
   const setHeroIndex = useCallback(
     (idx: number) => {
       setHeroIndexState(idx);
@@ -146,6 +157,16 @@ export function HomeScreen({
     [data],
   );
 
+  const collectionRails = useMemo(
+    () => buildHomeCollectionRails(data.collections, data.progressByKey),
+    [data.collections, data.progressByKey],
+  );
+  const hasCollectionsSupport = typeof catalog.listCollections === 'function';
+  const collectionRailById = useMemo(
+    () => new Map(collectionRails.map((rail) => [rail.id, rail])),
+    [collectionRails],
+  );
+
   const activeSlide = heroSlides[Math.min(heroIndex, Math.max(0, heroSlides.length - 1))];
   const heroActionIds = useMemo(
     () => buildHeroActionIds(activeSlide, heroSlides.length, onOpenDetail !== undefined),
@@ -153,8 +174,11 @@ export function HomeScreen({
   );
 
   const hasContent =
-    heroSlides.length > 0 || RAIL_ORDER.some((railId) => railSets[railId].length > 0);
+    heroSlides.length > 0 ||
+    RAIL_ORDER.some((railId) => railSets[railId].length > 0) ||
+    collectionRails.length > 0;
   const isLoadingInitial = data.loading && !data.hasLoaded;
+  const showCollectionsSection = hasContent && hasCollectionsSupport;
 
   const navRows = useMemo(
     () =>
@@ -171,8 +195,17 @@ export function HomeScreen({
           movies: railSets.movies.length,
           series: railSets.series.length,
         },
+        showCollectionsManage: showCollectionsSection,
+        collectionRails: collectionRails.map((r) => ({ id: r.id, count: r.items.length })),
       }),
-    [hasContent, heroActionIds.length, isLoadingInitial, railSets],
+    [
+      collectionRails,
+      hasContent,
+      heroActionIds.length,
+      isLoadingInitial,
+      railSets,
+      showCollectionsSection,
+    ],
   );
 
   const openVodOrSeries = useCallback(
@@ -282,6 +315,10 @@ export function HomeScreen({
         onOpenSources();
         return;
       }
+      if (rowId === 'collections-manage') {
+        setCollectionManagerOpen(true);
+        return;
+      }
       if (rowId === 'hero' && activeSlide) {
         const action = heroActionIds[colIndex];
         if (action === 'play') openVodOrSeries(activeSlide);
@@ -292,6 +329,12 @@ export function HomeScreen({
           const idx = Number(action.slice(4));
           if (Number.isInteger(idx) && idx >= 0 && idx < heroSlides.length) setHeroIndex(idx);
         }
+        return;
+      }
+      if (rowId.startsWith('collection:')) {
+        const colRail = collectionRailById.get(rowId as `collection:${string}`);
+        const entry = colRail?.items[colIndex];
+        if (entry) activatePosterEntry(entry, colIndex);
         return;
       }
       const railId = rowId as HomeRailKind;
@@ -307,6 +350,7 @@ export function HomeScreen({
       activateEntry,
       activatePosterEntry,
       activeSlide,
+      collectionRailById,
       handleOpenHeroDetails,
       handleToggleMyList,
       handleToggleWatched,
@@ -386,18 +430,36 @@ export function HomeScreen({
     onScrollTopChange?.(false);
   }, [onScrollTopChange]);
 
-  const recordRailY = useCallback((id: HomeRailKind, y: number) => {
+  const recordRailY = useCallback((id: HomeRailId, y: number) => {
     railYRef.current.set(id, y);
   }, []);
+  const handleOpenCollectionManager = useCallback(() => setCollectionManagerOpen(true), []);
+  const handleCloseCollectionManager = useCallback(() => setCollectionManagerOpen(false), []);
+  const handleCollectionsMutated = useCallback(
+    () => void data.refreshCollections(),
+    [data.refreshCollections],
+  );
   const railSpecs = useMemo(() => buildHomeRailSpecs(i18n.t), [i18n]);
-  const focusedAmbientEntry =
-    isTv &&
-    tvNav.focusedRowId !== null &&
-    tvNav.focusedRowId !== 'hero' &&
-    tvNav.focusedRowId !== 'empty' &&
-    tvNav.focusedCol !== null
-      ? (railSets[tvNav.focusedRowId]?.[tvNav.focusedCol] ?? null)
-      : null;
+  const focusedAmbientEntry = useMemo(() => {
+    if (
+      !isTv ||
+      tvNav.focusedRowId === null ||
+      tvNav.focusedRowId === 'hero' ||
+      tvNav.focusedRowId === 'empty' ||
+      tvNav.focusedRowId === 'collections-manage' ||
+      tvNav.focusedCol === null
+    ) {
+      return null;
+    }
+    if (tvNav.focusedRowId.startsWith('collection:')) {
+      return (
+        collectionRailById.get(tvNav.focusedRowId as `collection:${string}`)?.items[
+          tvNav.focusedCol
+        ] ?? null
+      );
+    }
+    return railSets[tvNav.focusedRowId as HomeRailKind]?.[tvNav.focusedCol] ?? null;
+  }, [collectionRailById, isTv, railSets, tvNav.focusedCol, tvNav.focusedRowId]);
 
   return (
     <View testID="home-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
@@ -409,7 +471,9 @@ export function HomeScreen({
           title={focusedAmbientEntry?.title ?? ''}
         />
       ) : null}
-      {isTv && isActiveScope ? <HomeTvKeyBridge onEvent={tvNav.handleTvKey} /> : null}
+      {isTv && isActiveScope && !collectionManagerOpen ? (
+        <HomeTvKeyBridge onEvent={tvNav.handleTvKey} />
+      ) : null}
 
       {isLoadingInitial ? (
         <HomeSkeleton
@@ -489,10 +553,81 @@ export function HomeScreen({
               onLayoutY={recordRailY}
             />
           ))}
+          {showCollectionsSection ? (
+            <View
+              testID="home-collections-header"
+              onLayout={(e) => {
+                railYRef.current.set('collections-manage', e.nativeEvent.layout.y);
+              }}
+              style={[styles.collectionsHeader, { paddingHorizontal: padX }]}
+            >
+              <View style={styles.collectionsTitleWrap}>
+                <Text style={[theme.typography.h2, { color: theme.colors.textPrimary }]}>
+                  {i18n.t('collections.title')}
+                </Text>
+                {collectionRails.length === 0 ? (
+                  <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+                    {i18n.t('collections.subtitle')}
+                  </Text>
+                ) : null}
+              </View>
+              <CtaButton
+                testID="home-collections-manage-btn"
+                variant="secondary"
+                label={i18n.t('collections.manageTitle')}
+                focusable={!isTv}
+                focused={isTv && tvNav.focusedRowId === 'collections-manage'}
+                onPress={handleOpenCollectionManager}
+              />
+            </View>
+          ) : null}
+          {collectionRails.map((colRail) => (
+            <HomeRail
+              key={colRail.id}
+              id={colRail.id}
+              testID={`home-rail-collection-${colRail.collectionId}`}
+              itemTestIdPrefix={`home-collection-${colRail.collectionId}-item`}
+              title={colRail.title}
+              variant="poster"
+              items={colRail.items}
+              cardWidth={layout.posterCardWidth}
+              gap={railGap}
+              padX={padX}
+              isTv={isTv}
+              isTouch={isTouch}
+              focusedIndex={tvNav.focusedRowId === colRail.id ? tvNav.focusedCol : null}
+              onPressItem={activatePosterEntry}
+              favoriteKeys={data.favoriteKeys}
+              watchedOverrides={data.watchedOverrides}
+              unplayedBySeriesKey={data.unplayedBySeriesKey}
+              onQuickPlay={activateEntry}
+              onQuickToggleFavorite={handleQuickToggleFavorite}
+              onQuickToggleWatched={handleQuickToggleWatched}
+              onLayoutY={recordRailY}
+            />
+          ))}
         </ScrollView>
       )}
+      <CollectionManagerOverlay
+        visible={collectionManagerOpen}
+        catalog={catalog}
+        onMutated={handleCollectionsMutated}
+        {...(onOpenDetail !== undefined ? { onOpenDetail } : {})}
+        onClose={handleCloseCollectionManager}
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create({ root: { flex: 1 } });
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  collectionsHeader: {
+    marginTop: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  collectionsTitleWrap: { flexShrink: 1, gap: 2 },
+});

@@ -218,6 +218,10 @@ describe('removeSource', () => {
         "(profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at) VALUES ('default', ?, ?, 'Ch', 'Show', 1000, 2000, 300000, 0, 1)",
       failover_group_members:
         "(group_id, source_id, channel_key, position) VALUES ('fg1', ?, ?, 0)",
+      vod_enrichment:
+        "(item_key, source_id, clean_title, fetched_at, expires_at) VALUES (?, ?, 'Title', 1, 9999)",
+      vod_collection_items:
+        "(collection_id, item_key, source_id, kind, position, added_at) VALUES ('vc1', ?, ?, 'movie', 0, 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -237,7 +241,9 @@ describe('removeSource', () => {
           table === 'track_preferences' ||
           table === 'channel_overrides' ||
           table === 'custom_group_items' ||
-          table === 'guide_sources'
+          table === 'guide_sources' ||
+          table === 'vod_enrichment' ||
+          table === 'vod_collection_items'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
         } else {
@@ -310,6 +316,10 @@ describe('removeSource', () => {
         "(profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at) VALUES ('default', ?, ?, 'Ch', 'Show', 1000, 2000, 300000, 0, 1)",
       failover_group_members:
         "(group_id, source_id, channel_key, position) VALUES ('fg1', ?, ?, 0)",
+      vod_enrichment:
+        "(item_key, source_id, clean_title, fetched_at, expires_at) VALUES (?, ?, 'Title', 1, 9999)",
+      vod_collection_items:
+        "(collection_id, item_key, source_id, kind, position, added_at) VALUES ('vc1', ?, ?, 'movie', 0, 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -329,7 +339,9 @@ describe('removeSource', () => {
           table === 'track_preferences' ||
           table === 'channel_overrides' ||
           table === 'custom_group_items' ||
-          table === 'guide_sources'
+          table === 'guide_sources' ||
+          table === 'vod_enrichment' ||
+          table === 'vod_collection_items'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
         } else {

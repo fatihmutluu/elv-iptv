@@ -18,6 +18,8 @@ import { dataRoute, sendText } from './routes-data.ts';
 import { hlsRoute } from './routes-hls.ts';
 import { liveRoute } from './routes-live.ts';
 import { mediaRoute } from './routes-media.ts';
+import { stalkerRoute } from './routes-stalker.ts';
+import { StalkerSessionStore } from './stalker.ts';
 
 /** Options of `startSim`; every field is optional. */
 export interface SimOptions {
@@ -64,7 +66,7 @@ export function defaultCacheDir(): string {
 }
 
 const DEFAULT_MEDIA_SECONDS = 600;
-const routes: RouteHandler[] = [dataRoute, mediaRoute, hlsRoute, liveRoute];
+const routes: RouteHandler[] = [dataRoute, stalkerRoute, mediaRoute, hlsRoute, liveRoute];
 
 function headersOf(req: IncomingMessage): Record<string, string> {
   const out: Record<string, string> = {};
@@ -183,6 +185,7 @@ async function simRoute(
   } else if (path === '/_sim/requests' && req.method === 'DELETE') {
     ctx.log.clear();
     ctx.faultRules.clear();
+    ctx.stalker?.clear();
     events.length = 0;
     sendText(res, 204, 'text/plain');
   } else if (path === '/_sim/faults' && req.method === 'GET') {
@@ -271,6 +274,7 @@ export async function startSim(options: SimOptions = {}): Promise<SimHandle> {
     baseUrl: '',
     log,
     faultRules: new FaultRules(),
+    stalker: new StalkerSessionStore(),
     liveProcesses: new Set(),
     children: instanceChildren,
     connections: createConnections(),
@@ -309,6 +313,7 @@ export async function startSim(options: SimOptions = {}): Promise<SimHandle> {
     clear: () => {
       log.clear();
       ctx.faultRules.clear();
+      ctx.stalker?.clear();
       events.length = 0;
     },
     close: async () => {

@@ -2679,3 +2679,108 @@ msgstr "Ağ ayarlarını kaydet"
 
 msgid "sources.network.saved"
 msgstr "Ağ ayarları kaydedildi"
+
+msgid "sources.mode.stalker"
+msgstr "Stalker / MAC"
+
+msgid "sources.stalker.portalUrlLabel"
+msgstr "Portal adresi"
+
+msgid "sources.stalker.portalUrlPlaceholder"
+msgstr "http://portal.example.test/c/"
+
+msgid "sources.stalker.macLabel"
+msgstr "MAC adresi"
+
+msgid "sources.stalker.macPlaceholder"
+msgstr "00:1A:79:00:00:01"
+
+msgid "sources.stalker.serialLabel"
+msgstr "Seri numarası (isteğe bağlı)"
+
+msgid "sources.stalker.serialPlaceholder"
+msgstr "İsteğe bağlı cihaz seri numarası"
+
+msgid "sources.stalker.invalidMac"
+msgstr "Geçerli bir MAC adresi girin."
+
+msgid "sources.stalker.invalidMacHint"
+msgstr "İki nokta ile ayrılmış 6 onaltılık çift kullanın, örn. 00:1A:79:00:00:01."
+
+msgid "sources.stalker.kindBadge"
+msgstr "Stalker"
+
+msgid "settings.appearance.vodEnrichmentTitle"
+msgstr "Film ve dizi bilgilerini zenginleştir"
+
+msgid "settings.appearance.vodEnrichmentDescription"
+msgstr "Eksik puanları, yapım yıllarını ve türleri API anahtarı olmadan yerel olarak tamamlar."
+
+msgid "detail.enrichment.badge"
+msgstr "Zenginleştirildi"
+
+msgid "detail.enrichment.ratingLabel"
+msgstr "Puan"
+
+msgid "detail.enrichment.genresLabel"
+msgstr "Türler"
+
+msgid "collections.title"
+msgstr "Koleksiyonlar"
+
+msgid "collections.subtitle"
+msgstr "Film ve dizileri kişisel listelerde düzenleyin."
+
+msgid "collections.empty"
+msgstr "Henüz koleksiyon yok. Favori film ve dizilerinizi gruplamak için bir koleksiyon oluşturun."
+
+msgid "collections.addToCollection"
+msgstr "Koleksiyona ekle"
+
+msgid "collections.inCollections"
+msgstr "Koleksiyonlarda"
+
+msgid "collections.manageTitle"
+msgstr "Koleksiyonları yönet"
+
+msgid "collections.createPlaceholder"
+msgstr "Yeni koleksiyon adı"
+
+msgid "collections.createAction"
+msgstr "Oluştur"
+
+msgid "collections.rename"
+msgstr "Yeniden adlandır"
+
+msgid "collections.save"
+msgstr "Kaydet"
+
+msgid "collections.cancel"
+msgstr "İptal"
+
+msgid "collections.delete"
+msgstr "Sil"
+
+msgid "collections.moveUp"
+msgstr "Yukarı taşı"
+
+msgid "collections.moveDown"
+msgstr "Aşağı taşı"
+
+msgid "collections.removeItem"
+msgstr "Koleksiyondan çıkar"
+
+msgid "collections.itemCount"
+msgstr "{count} yapım"
+
+msgid "collections.saved"
+msgstr "Koleksiyon güncellendi"
+
+msgid "collections.close"
+msgstr "Kapat"
+
+msgid "collections.emptyCollection"
+msgstr "Bu koleksiyonda henüz yapım yok."
+
+msgid "collections.viewAll"
+msgstr "Tümünü gör"

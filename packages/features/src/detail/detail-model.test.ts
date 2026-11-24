@@ -1,4 +1,4 @@
-import type { EpisodeRow, WatchProgressRow } from '@elv/data';
+import type { EpisodeRow, VodEnrichmentRecord, WatchProgressRow } from '@elv/data';
 import { elvError } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import { describe, expect, it } from 'vitest';
@@ -14,6 +14,7 @@ import {
   describeDetailSeasonsError,
   detailProgressRatio,
   formatEpisodeDuration,
+  mergeVodEnrichment,
   PREPLAY_AUDIO_OPTIONS,
   PREPLAY_SUBTITLE_OPTIONS,
   resolveSeriesPrimaryEpisode,
@@ -657,6 +658,86 @@ describe('detail-model', () => {
         profileId: 'kids-42',
       });
       expect(row.profileId).toBe('kids-42');
+    });
+
+    it('merges key-free VOD enrichment non-destructively without overwriting provider fields (#215)', () => {
+      const enrichment: VodEnrichmentRecord = {
+        itemKey: 'x:s1:movie:101',
+        sourceId: 's1',
+        cleanTitle: 'Inception',
+        releaseYear: 2010,
+        rating: 8.8,
+        ratingSource: 'local-index',
+        genres: ['Sci-Fi', 'Thriller'],
+        synopsis: 'A thief steals corporate secrets through dream-sharing technology.',
+        certification: 'PG-13',
+        fetchedAt: 1000,
+        expiresAt: 2000,
+      };
+
+      // Returns provider fields unchanged when enrichment is null
+      expect(
+        mergeVodEnrichment({ year: null, rating: null, genres: [], plot: null }, null),
+      ).toEqual({
+        year: null,
+        rating: null,
+        genres: [],
+        plot: null,
+        enriched: false,
+        ratingSource: null,
+      });
+
+      // Fills all missing fields from enrichment and sets enriched: true
+      expect(
+        mergeVodEnrichment({ year: null, rating: null, genres: [], plot: '   ' }, enrichment),
+      ).toEqual({
+        year: 2010,
+        rating: 8.8,
+        genres: ['Sci-Fi', 'Thriller'],
+        plot: 'A thief steals corporate secrets through dream-sharing technology.',
+        enriched: true,
+        ratingSource: 'local-index',
+      });
+
+      // Never overwrites existing provider fields; enriched stays false when provider had everything
+      expect(
+        mergeVodEnrichment(
+          {
+            year: 2026,
+            rating: 9.1,
+            genres: ['Drama'],
+            plot: 'Provider synopsis.',
+          },
+          enrichment,
+        ),
+      ).toEqual({
+        year: 2026,
+        rating: 9.1,
+        genres: ['Drama'],
+        plot: 'Provider synopsis.',
+        enriched: false,
+        ratingSource: null,
+      });
+
+      // Partial fill: keeps provider year/plot, fills missing rating & genres
+      expect(
+        mergeVodEnrichment(
+          {
+            year: 2010,
+            rating: null,
+            genres: [],
+            plot: 'Provider synopsis.',
+          },
+          enrichment,
+        ),
+      ).toEqual({
+        year: 2010,
+        rating: 8.8,
+        genres: ['Sci-Fi', 'Thriller'],
+        plot: 'Provider synopsis.',
+        enriched: true,
+        ratingSource: 'local-index',
+      });
     });
   });
 });

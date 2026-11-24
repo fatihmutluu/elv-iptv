@@ -43,6 +43,7 @@ import {
   wrapCleanupProgress,
 } from './import-progress';
 import { checkAbort, notify, performRun, type RunCtx, Stop } from './import-run';
+import { importStalkerGuide } from './import-stalker-guide';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import {
   getSource,
@@ -338,10 +339,17 @@ export async function importGuide(
 ): Promise<Result<ImportSummary>> {
   const source = await getSource(deps.db, sourceId);
   if (source === undefined) return err(elvError('storage', 'source-not-found'));
-  if (source.kind !== 'xtream' && source.kind !== 'm3u') {
+  if (source.kind !== 'xtream' && source.kind !== 'm3u' && source.kind !== 'stalker') {
     return err(elvError('source-format', 'unsupported-source'));
   }
   const enabledGuidesRaw = await listEnabledGuideSourcesRaw(deps.db, source.id);
+  if (
+    source.kind === 'stalker' &&
+    enabledGuidesRaw.length === 0 &&
+    (source.settings.guideUrl === undefined || source.settings.guideUrl === '')
+  ) {
+    return importStalkerGuide(source, deps, opts);
+  }
   const resolvedGuides =
     enabledGuidesRaw.length > 0
       ? await resolveEnabledGuideSources(source.id, enabledGuidesRaw, deps)

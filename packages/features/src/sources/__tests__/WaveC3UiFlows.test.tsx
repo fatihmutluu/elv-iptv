@@ -240,8 +240,9 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
       });
 
       // Navigate down through M3U Wave C3 controls:
-      // 1: mode-m3u -> 2: input-name -> 3: input-playlist-url -> 4: paste-clipboard
+      // 1: mode-m3u -> 2: mode-stalker -> 3: input-name -> 4: input-playlist-url -> 5: paste-clipboard
       await act(async () => {
+        remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);

@@ -67,6 +67,16 @@ export function createProfileScopedCatalog(
   const upsertReminder = c.upsertReminder?.bind(c);
   const removeReminder = c.removeReminder?.bind(c);
   const markReminderFired = c.markReminderFired?.bind(c);
+  const listCollections = c.listCollections?.bind(c);
+  const createCollection = c.createCollection?.bind(c);
+  const renameCollection = c.renameCollection?.bind(c);
+  const reorderCollections = c.reorderCollections?.bind(c);
+  const deleteCollection = c.deleteCollection?.bind(c);
+  const listCollectionItems = c.listCollectionItems?.bind(c);
+  const listCollectionsForItem = c.listCollectionsForItem?.bind(c);
+  const addItemToCollection = c.addItemToCollection?.bind(c);
+  const removeItemFromCollection = c.removeItemFromCollection?.bind(c);
+  const reorderCollectionItems = c.reorderCollectionItems?.bind(c);
 
   return {
     addSource: (input) => c.addSource(input),
@@ -419,6 +429,80 @@ export function createProfileScopedCatalog(
       : {}),
     ...(c.removeChannelFromCustomGroup
       ? { removeChannelFromCustomGroup: c.removeChannelFromCustomGroup.bind(c) }
+      : {}),
+    ...(c.getVodEnrichment ? { getVodEnrichment: c.getVodEnrichment.bind(c) } : {}),
+    ...(c.enrichVodItem ? { enrichVodItem: c.enrichVodItem.bind(c) } : {}),
+    ...(listCollections
+      ? {
+          listCollections: (profileId, opts) => {
+            const scope = getScope();
+            return listCollections(profileId ?? scope.profileId, {
+              ...opts,
+              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
+        }
+      : {}),
+    ...(createCollection
+      ? {
+          createCollection: (input) =>
+            createCollection({
+              ...input,
+              profileId: input.profileId ?? getScope().profileId,
+            }),
+        }
+      : {}),
+    ...(renameCollection
+      ? {
+          renameCollection: (id, name, profileId) =>
+            renameCollection(id, name, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(reorderCollections
+      ? {
+          reorderCollections: (orderedIds, profileId) =>
+            reorderCollections(orderedIds, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(deleteCollection
+      ? {
+          deleteCollection: (id, profileId) =>
+            deleteCollection(id, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(listCollectionItems
+      ? {
+          listCollectionItems: (collectionId, opts) =>
+            listCollectionItems(collectionId, mergeParentalOpts(opts, getScope())),
+        }
+      : {}),
+    ...(listCollectionsForItem
+      ? {
+          listCollectionsForItem: (itemKey, profileId) =>
+            listCollectionsForItem(itemKey, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(addItemToCollection
+      ? {
+          addItemToCollection: (collectionId, itemKey, kind, profileId) =>
+            addItemToCollection(collectionId, itemKey, kind, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(removeItemFromCollection
+      ? {
+          removeItemFromCollection: (collectionId, itemKey, profileId) =>
+            removeItemFromCollection(collectionId, itemKey, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(reorderCollectionItems
+      ? {
+          reorderCollectionItems: (collectionId, orderedItemKeys, profileId) =>
+            reorderCollectionItems(
+              collectionId,
+              orderedItemKeys,
+              profileId ?? getScope().profileId,
+            ),
+        }
       : {}),
     ...(c.flushPendingWrites ? { flushPendingWrites: c.flushPendingWrites.bind(c) } : {}),
     close: () => c.close(),

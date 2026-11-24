@@ -174,10 +174,12 @@ export function parseCategoryId(
   return { sourceId: id.slice(0, first), kind, providerId: id.slice(second + 1) };
 }
 
-/** The source id inside a content key (`x:<source>:...` or `m:<source>:...`), so lookups use the unique index. */
+/** The source id inside a content key (`x:<source>:...`, `m:<source>:...`, or `s:<source>:...`), so lookups use the unique index. */
 export function sourceOfKey(key: string): string | undefined {
   const parts = key.split(':');
-  return (parts[0] === 'x' || parts[0] === 'm') && parts[1] ? parts[1] : undefined;
+  return (parts[0] === 'x' || parts[0] === 'm' || parts[0] === 's') && parts[1]
+    ? parts[1]
+    : undefined;
 }
 
 /** @internal Maps a raw SQLite item row to {@link ItemRow}. */

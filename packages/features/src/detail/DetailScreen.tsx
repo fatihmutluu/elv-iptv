@@ -25,6 +25,7 @@ import {
   useCardQuickActionsState,
   useRouteActive,
 } from '../shared';
+import { CollectionPickerOverlay } from '../shared/CollectionPickerOverlay';
 import { DetailCastStrip } from './DetailCastStrip';
 import { DetailEpisodes } from './DetailEpisodes';
 import { DetailHero, type DetailHeroFocusSlot } from './DetailHero';
@@ -49,6 +50,7 @@ export interface DetailScreenProps {
   readonly userStateVersion?: number;
   readonly preferredAudioLang?: string;
   readonly preferredSubtitleLang?: string;
+  readonly vodEnrichmentEnabled?: boolean;
   readonly onBack: () => void;
   readonly onPlay: (target: PlayTarget) => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
@@ -82,6 +84,7 @@ export function DetailScreen({
   userStateVersion = 0,
   preferredAudioLang,
   preferredSubtitleLang,
+  vodEnrichmentEnabled = false,
   onBack,
   onPlay,
   onOpenDetail,
@@ -97,11 +100,19 @@ export function DetailScreen({
   const { isTv, isPortrait, padX, railGap, heroTopClearance, posterRailWidth } =
     computeCatalogLayout(viewport, theme);
 
-  const data = useDetailData({ target, catalog, refreshToken, userStateVersion });
+  const data = useDetailData({
+    target,
+    catalog,
+    refreshToken,
+    userStateVersion,
+    vodEnrichmentEnabled,
+  });
   const [selectedVersionKey, setSelectedVersionKey] = useState<string | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset user version override on title change
+  const [collectionPickerOpen, setCollectionPickerOpen] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset user version override and collection picker on title change
   useEffect(() => {
     setSelectedVersionKey(null);
+    setCollectionPickerOpen(false);
   }, [target.itemKey]);
   const activeVersion = useMemo(() => {
     if (data.versions.length <= 1) return undefined;
@@ -264,7 +275,18 @@ export function DetailScreen({
   );
 
   const seasons = data.seasonsState.kind === 'ready' ? data.seasonsState.seasons : [];
-  const heroActionCount = target.kind === 'movie' ? 2 : 1;
+  const hasCollections = typeof catalog.listCollections === 'function';
+  const heroActionSlots = useMemo<readonly ('mylist' | 'watched' | 'collections')[]>(
+    () => [
+      'mylist',
+      ...(target.kind === 'movie' ? (['watched'] as const) : []),
+      ...(hasCollections ? (['collections'] as const) : []),
+    ],
+    [hasCollections, target.kind],
+  );
+  const heroActionCount = heroActionSlots.length;
+  const handleOpenCollections = useCallback(() => setCollectionPickerOpen(true), []);
+  const handleCloseCollections = useCallback(() => setCollectionPickerOpen(false), []);
 
   const {
     chunks: episodeChunks,
@@ -311,8 +333,10 @@ export function DetailScreen({
     (rowId: DetailNavRowId, colIndex: number) => {
       if (rowId === 'back') return onBack();
       if (rowId === 'hero-actions') {
-        if (colIndex === 0) void data.toggleMyList();
-        else if (colIndex === 1 && target.kind === 'movie') void data.toggleWatched();
+        const slot = heroActionSlots[colIndex];
+        if (slot === 'mylist') void data.toggleMyList();
+        else if (slot === 'watched') void data.toggleWatched();
+        else if (slot === 'collections') setCollectionPickerOpen(true);
         return;
       }
       if (rowId === 'hero-play') {
@@ -363,10 +387,10 @@ export function DetailScreen({
       handlePressEpisode,
       handlePressRelated,
       handleSelectChunk,
+      heroActionSlots,
       onBack,
       onSearchPerson,
       seasons,
-      target.kind,
       visibleEpisodes,
     ],
   );
@@ -448,14 +472,14 @@ export function DetailScreen({
       : tvNav.focusedRowId === 'hero-play'
         ? (extras.heroPlaySlots[tvNav.focusedCol ?? 0] ?? 'play')
         : tvNav.focusedRowId === 'hero-actions'
-          ? tvNav.focusedCol === 1 && target.kind === 'movie'
-            ? 'watched'
-            : 'mylist'
+          ? (heroActionSlots[tvNav.focusedCol ?? 0] ?? 'mylist')
           : null;
 
   return (
     <View testID="detail-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
-      {isTv && isActiveScope ? <DetailTvKeyBridge onEvent={handleTvKeyWithSheet} /> : null}
+      {isTv && isActiveScope && !collectionPickerOpen ? (
+        <DetailTvKeyBridge onEvent={handleTvKeyWithSheet} />
+      ) : null}
 
       <ScrollView
         ref={scrollViewRef}
@@ -475,7 +499,10 @@ export function DetailScreen({
           year={data.year}
           rating={data.rating}
           plot={data.plot}
-          {...(target.genres !== undefined ? { genres: target.genres } : {})}
+          genres={data.genres}
+          isEnriched={data.isEnriched}
+          collectionCount={data.collectionIds.length}
+          {...(hasCollections ? { onOpenCollections: handleOpenCollections } : {})}
           {...(target.technicalMeta !== undefined ? { technicalMeta: target.technicalMeta } : {})}
           seasonsCount={seasons.length}
           inMyList={data.inMyList}
@@ -568,6 +595,16 @@ export function DetailScreen({
         synopsis={extras.trimmedPlot}
         isTv={isTv}
         onDismiss={extras.dismissSynopsis}
+      />
+
+      <CollectionPickerOverlay
+        visible={collectionPickerOpen}
+        catalog={catalog}
+        itemKey={target.itemKey}
+        itemKind={target.kind}
+        itemTitle={data.title}
+        onMutated={data.setCollectionIds}
+        onClose={handleCloseCollections}
       />
     </View>
   );

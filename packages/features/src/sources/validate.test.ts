@@ -27,6 +27,16 @@ function m3uForm(overrides: Partial<SourceFormState> = {}): SourceFormState {
   };
 }
 
+function stalkerForm(overrides: Partial<SourceFormState> = {}): SourceFormState {
+  return {
+    ...createInitialSourceForm(),
+    mode: 'stalker',
+    portalUrl: 'http://portal.example.test:8080/c/',
+    macAddress: '00:1a:79:00:00:01',
+    ...overrides,
+  };
+}
+
 describe('validateSourceForm and detectPastedXtreamLink', () => {
   it('exposes a no-op default PlaybackGuard', () => {
     expect(noopPlaybackGuard.stopIfUsingSource('s1')).toBeUndefined();
@@ -283,5 +293,115 @@ describe('validateSourceForm and detectPastedXtreamLink', () => {
     );
     expect(badCtrl.ok).toBe(false);
     if (!badCtrl.ok) expect(badCtrl.error.code).toBe('invalid-characters');
+  });
+
+  it('validates Stalker portalUrl, MAC addresses (: and -), serialNumber, and transport (#29)', () => {
+    const colonRes = validateSourceForm(
+      stalkerForm({
+        name: 'Living Room Portal',
+        portalUrl: '  http://portal.example.test:8080/c/  ',
+        macAddress: ' 00:1a:79:00:00:01 ',
+        serialNumber: ' SN-00123 ',
+        guideUrl: ' https://portal.example.test/epg.xml ',
+        xmltvTimezone: 'Europe/Istanbul',
+        userAgent: ' CustomSTB/1.0 ',
+        referer: ' https://portal.example.test/ ',
+        allowLegacyTls: true,
+        dnsFamily: 'ipv4',
+        hostOverride: '203.0.113.20',
+      }),
+    );
+    expect(colonRes).toEqual({
+      ok: true,
+      value: {
+        kind: 'stalker',
+        input: {
+          kind: 'stalker',
+          name: 'Living Room Portal',
+          portalUrl: 'http://portal.example.test:8080/c/',
+          mac: '00:1A:79:00:00:01',
+          serialNumber: 'SN-00123',
+          guideUrl: 'https://portal.example.test/epg.xml',
+          xmltvTimezone: 'Europe/Istanbul',
+          transport: {
+            userAgent: 'CustomSTB/1.0',
+            referer: 'https://portal.example.test/',
+            allowLegacyTls: true,
+            dnsFamily: 'ipv4',
+            hostOverride: '203.0.113.20',
+          },
+        },
+      },
+    });
+
+    const dashHostPortRes = validateSourceForm(
+      stalkerForm({
+        name: '   ',
+        portalUrl: 'portal.example.test:8080/c/',
+        macAddress: '00-1a-79-aa-bb-cc',
+        serialNumber: '   ',
+      }),
+    );
+    expect(dashHostPortRes).toEqual({
+      ok: true,
+      value: {
+        kind: 'stalker',
+        input: {
+          kind: 'stalker',
+          name: 'portal.example.test:8080',
+          portalUrl: 'http://portal.example.test:8080/c/',
+          mac: '00:1A:79:AA:BB:CC',
+        },
+      },
+    });
+  });
+
+  it('rejects invalid Stalker portal URLs, invalid MACs, and control characters (#29)', () => {
+    const emptyPortal = validateSourceForm(stalkerForm({ portalUrl: '   ' }));
+    expect(emptyPortal.ok).toBe(false);
+    if (!emptyPortal.ok) expect(emptyPortal.error.code).toBe('missing-server');
+
+    const badScheme = validateSourceForm(
+      stalkerForm({ portalUrl: 'ftp://portal.example.test/c/' }),
+    );
+    expect(badScheme.ok).toBe(false);
+    if (!badScheme.ok) expect(badScheme.error.code).toBe('unsupported-scheme');
+
+    const badInlineScheme = validateSourceForm(stalkerForm({ portalUrl: 'javascript:alert(1)' }));
+    expect(badInlineScheme.ok).toBe(false);
+    if (!badInlineScheme.ok) expect(badInlineScheme.error.code).toBe('unsupported-scheme');
+
+    for (const badMac of ['', '00:1A:79:00:00', 'ZZ:1A:79:00:00:01', '00:1A-79:00:00:01']) {
+      const res = validateSourceForm(stalkerForm({ macAddress: badMac }));
+      expect(res, `expected ${badMac} to fail`).toEqual({
+        ok: false,
+        error: {
+          code: 'invalid-mac',
+          messageId: 'sources.stalker.invalidMac',
+          hintId: 'sources.stalker.invalidMacHint',
+        },
+      });
+    }
+
+    const badSerial = validateSourceForm(stalkerForm({ serialNumber: 'SN\n123' }));
+    expect(badSerial.ok).toBe(false);
+    if (!badSerial.ok) expect(badSerial.error.code).toBe('invalid-characters');
+
+    for (const credsPortal of [
+      'https://user:pass@portal.example.test/c/',
+      'http://user@portal.example.test:8080/c/',
+      'user@portal.example.test/c/',
+    ]) {
+      const res = validateSourceForm(stalkerForm({ portalUrl: credsPortal }));
+      expect(res.ok, `expected ${credsPortal} to fail`).toBe(false);
+      if (!res.ok) expect(res.error.code).toBe('invalid-address');
+    }
+
+    const oversizedSerial = validateSourceForm(stalkerForm({ serialNumber: 'S'.repeat(129) }));
+    expect(oversizedSerial.ok).toBe(false);
+    if (!oversizedSerial.ok) expect(oversizedSerial.error.code).toBe('invalid-characters');
+
+    const maxSerial = validateSourceForm(stalkerForm({ serialNumber: 'S'.repeat(128) }));
+    expect(maxSerial.ok).toBe(true);
   });
 });

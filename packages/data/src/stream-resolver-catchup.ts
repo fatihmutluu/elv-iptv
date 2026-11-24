@@ -2,6 +2,7 @@ import { elvError, err, type HttpClient, ok, type Result, type SqlDriver } from 
 import { buildCatchupUrl, normalizeCatchupMode, resolveXtreamBaseUrl } from '@elv/sources';
 import { sourceOfKey } from './queries-shared';
 import { getSource, type SourceRecord } from './sources';
+import type { StalkerResolverState } from './stream-resolver-stalker';
 import type {
   CatchupProgrammeInput,
   SourceStreamMeta,
@@ -33,6 +34,7 @@ export async function resolveCatchupStreamInternal(
     resolverFor: (sourceId: string) => Promise<StreamResolver>;
     evictResolver: (sourceId: string) => void;
     xtreamSecretFor: (sourceId: string) => Promise<XtreamSecret | undefined>;
+    stalkerState: StalkerResolverState;
     buildSourceStreamMeta: (source: SourceRecord) => SourceStreamMeta;
     effectiveXtreamTransport: (source: SourceRecord) => SourceRecord['settings']['transport'];
     isAllowedPlaybackUrl: (raw: string) => boolean;
@@ -65,11 +67,26 @@ export async function resolveCatchupStreamInternal(
   if (row === undefined) return notFound();
   const source = await getSource(deps.db, row.source_id);
   if (source === undefined) return notFound();
-  const { headers, accountKey, connectionMeta } = deps.buildSourceStreamMeta(source);
+  const meta = deps.buildSourceStreamMeta(source);
+  const { headers, accountKey, connectionMeta } = meta;
   const effectiveNow = nowMs !== undefined && Number.isFinite(nowMs) ? nowMs : Date.now();
   const tzOpt = source.settings.serverTimezone
     ? { serverTimezone: source.settings.serverTimezone }
     : {};
+
+  if (source.kind === 'stalker') {
+    return deps.stalkerState.resolveCatchup(
+      source,
+      itemKey,
+      row.provider_id,
+      row.catchup_days,
+      programme,
+      effectiveNow,
+      meta,
+      deps.isAllowedPlaybackUrl,
+      deps.normalizeMulticastUrl,
+    );
+  }
 
   if (row.url_template === null) {
     const creds = await deps.xtreamSecretFor(row.source_id);

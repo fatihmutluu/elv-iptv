@@ -378,6 +378,24 @@ export function createCoalescedCatalog(
       ? { applySuggestedFailoverGroups: c.applySuggestedFailoverGroups.bind(c) }
       : {}),
     ...(c.reportStreamOutcome ? { reportStreamOutcome: c.reportStreamOutcome.bind(c) } : {}),
+    ...(c.getVodEnrichment ? { getVodEnrichment: c.getVodEnrichment.bind(c) } : {}),
+    ...(c.enrichVodItem ? { enrichVodItem: c.enrichVodItem.bind(c) } : {}),
+    ...(c.listCollections ? { listCollections: c.listCollections.bind(c) } : {}),
+    ...(c.createCollection ? { createCollection: c.createCollection.bind(c) } : {}),
+    ...(c.renameCollection ? { renameCollection: c.renameCollection.bind(c) } : {}),
+    ...(c.reorderCollections ? { reorderCollections: c.reorderCollections.bind(c) } : {}),
+    ...(c.deleteCollection ? { deleteCollection: c.deleteCollection.bind(c) } : {}),
+    ...(c.listCollectionItems ? { listCollectionItems: c.listCollectionItems.bind(c) } : {}),
+    ...(c.listCollectionsForItem
+      ? { listCollectionsForItem: c.listCollectionsForItem.bind(c) }
+      : {}),
+    ...(c.addItemToCollection ? { addItemToCollection: c.addItemToCollection.bind(c) } : {}),
+    ...(c.removeItemFromCollection
+      ? { removeItemFromCollection: c.removeItemFromCollection.bind(c) }
+      : {}),
+    ...(c.reorderCollectionItems
+      ? { reorderCollectionItems: c.reorderCollectionItems.bind(c) }
+      : {}),
     ...(queryNextEpisodeFn
       ? {
           queryNextEpisode: async (seriesKey, currentItemKey, profileId, nextOpts) => {

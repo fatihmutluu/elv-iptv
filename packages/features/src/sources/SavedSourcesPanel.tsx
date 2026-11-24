@@ -174,7 +174,11 @@ export function SavedSourcesPanel({
             ? i18n.t('sources.action.import')
             : i18n.t('sources.action.refresh');
           const kindLabel =
-            source.kind === 'xtream' ? i18n.t('sources.kind.xtream') : i18n.t('sources.kind.m3u');
+            source.kind === 'xtream'
+              ? i18n.t('sources.kind.xtream')
+              : source.kind === 'stalker'
+                ? i18n.t('sources.stalker.kindBadge')
+                : i18n.t('sources.kind.m3u');
           const statusPill = resolveStatusPill(source, runtime, i18n);
           const accountWarning = resolveSourceAccountWarning(source.accountMeta, nowMs);
           const progressPct = importProgressPercent(runtime);

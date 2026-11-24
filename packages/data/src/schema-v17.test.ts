@@ -12,9 +12,9 @@ async function plan(db: SqlDriver, sql: string, params: (string | number)[]) {
 describe('schema v17 (failover_groups & failover_group_members)', () => {
   it('sets SCHEMA_VERSION to 17 and creates failover tables and indexes on a fresh database', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(17);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(17);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
 
     expect(Object.keys(EXPECTED_TABLE_COLUMNS)).toEqual(
       expect.arrayContaining(['failover_groups', 'failover_group_members']),
@@ -72,7 +72,7 @@ describe('schema v17 (failover_groups & failover_group_members)', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
     expect(await db.all('SELECT key, name FROM live')).toEqual([
       { key: 'm:s1:live:1', name: 'News One' },
     ]);

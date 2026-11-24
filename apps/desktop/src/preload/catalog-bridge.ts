@@ -1,4 +1,4 @@
-import type { ImportProgress, ImportSummary } from '@elv/data';
+import type { ImportProgress, ImportSummary, VodEnrichmentRecord } from '@elv/data';
 import { type ElvError, elvError, err, type Result } from '@elv/domain';
 import {
   CATALOG_CHANNELS,
@@ -70,7 +70,7 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
   const changedListeners = new Set<() => void>();
   const disconnectedListeners = new Set<(message: CatalogDisconnectedMessage) => void>();
 
-  ipc.on(CATALOG_CHANNELS.changed, () => {
+  const emitChanged = (): void => {
     for (const listener of [...changedListeners]) {
       try {
         listener();
@@ -78,7 +78,9 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         // isolate renderer change callbacks
       }
     }
-  });
+  };
+
+  ipc.on(CATALOG_CHANNELS.changed, emitChanged);
 
   const settlePendingWithError = (error: ElvError): void => {
     for (const call of pendingCalls.values()) {
@@ -221,6 +223,12 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       );
     });
   };
+
+  const notifyOnOk = <T>(promise: Promise<Result<T>>): Promise<Result<T>> =>
+    promise.then((res) => {
+      if (res.ok) emitChanged();
+      return res;
+    });
 
   const bridge: CatalogBridge = {
     open: () => callResult<void>({ method: 'ping' }),
@@ -611,6 +619,85 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       callResult({ method: 'applySuggestedFailoverGroups', clusters }),
     reportStreamOutcome: (sourceId, serverUrl, succeeded) =>
       callValue({ method: 'reportStreamOutcome', sourceId, serverUrl, succeeded }),
+    getVodEnrichment: (itemKey) => callValue({ method: 'getVodEnrichment', itemKey }),
+    enrichVodItem: (itemKey, opts) =>
+      callValue<VodEnrichmentRecord | null>({
+        method: 'enrichVodItem',
+        itemKey,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    listCollections: (profileId, opts) =>
+      callValue({
+        method: 'listCollections',
+        ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    createCollection: (input) => notifyOnOk(callResult({ method: 'createCollection', input })),
+    renameCollection: (id, name, profileId) =>
+      notifyOnOk(
+        callResult({
+          method: 'renameCollection',
+          id,
+          name,
+          ...(profileId === undefined ? {} : { profileId }),
+        }),
+      ),
+    reorderCollections: (orderedIds, profileId) =>
+      notifyOnOk(
+        callResult({
+          method: 'reorderCollections',
+          orderedIds,
+          ...(profileId === undefined ? {} : { profileId }),
+        }),
+      ),
+    deleteCollection: (id, profileId) =>
+      notifyOnOk(
+        callResult({
+          method: 'deleteCollection',
+          id,
+          ...(profileId === undefined ? {} : { profileId }),
+        }),
+      ),
+    listCollectionItems: (collectionId, opts) =>
+      callValue({
+        method: 'listCollectionItems',
+        collectionId,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    listCollectionsForItem: (itemKey, profileId) =>
+      callValue({
+        method: 'listCollectionsForItem',
+        itemKey,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    addItemToCollection: (collectionId, itemKey, kind, profileId) =>
+      notifyOnOk(
+        callResult({
+          method: 'addItemToCollection',
+          collectionId,
+          itemKey,
+          kind,
+          ...(profileId === undefined ? {} : { profileId }),
+        }),
+      ),
+    removeItemFromCollection: (collectionId, itemKey, profileId) =>
+      notifyOnOk(
+        callResult({
+          method: 'removeItemFromCollection',
+          collectionId,
+          itemKey,
+          ...(profileId === undefined ? {} : { profileId }),
+        }),
+      ),
+    reorderCollectionItems: (collectionId, orderedItemKeys, profileId) =>
+      notifyOnOk(
+        callResult({
+          method: 'reorderCollectionItems',
+          collectionId,
+          orderedItemKeys,
+          ...(profileId === undefined ? {} : { profileId }),
+        }),
+      ),
     flushPendingWrites: () => callValue({ method: 'flushPendingWrites' }),
     onChanged(listener: () => void): () => void {
       changedListeners.add(listener);
