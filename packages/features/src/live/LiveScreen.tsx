@@ -11,7 +11,8 @@ import { Platform, StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { VideoHost } from '../ports/video-host';
-import { computeCatalogLayout } from '../shared';
+import { computeCatalogLayout, useCatalogUiCache } from '../shared';
+import { ChannelManagementOverlay } from './ChannelManagementOverlay';
 import { EpgGridView } from './EpgGridView';
 import { EpgProgrammeDetailModal } from './EpgProgrammeDetailModal';
 import { LiveChannelsGrid } from './LiveChannelsGrid';
@@ -48,6 +49,9 @@ export interface LiveScreenProps {
   readonly onMemoryChange?: (next: LiveTabMemory) => void;
   readonly onPlay: (target: PlayTarget) => void;
   readonly onOpenSources: () => void;
+  readonly onOpenSearch?: () => void;
+  readonly onOpenHome?: () => void;
+  readonly onChannelsMutated?: () => void;
   readonly onFocusTopNav?: () => void;
   readonly isActiveScope?: boolean;
   readonly videoHost?: VideoHost;
@@ -75,7 +79,16 @@ export interface LiveScreenProps {
  */
 export function LiveScreen(props: LiveScreenProps): ReactElement {
   const { catalog, sources, refreshToken, userStateVersion = 0, memory, onMemoryChange } = props;
-  const { onPlay, onOpenSources, onFocusTopNav, isActiveScope = true, videoHost } = props;
+  const {
+    onPlay,
+    onOpenSources,
+    onOpenSearch,
+    onOpenHome,
+    onChannelsMutated,
+    onFocusTopNav,
+    isActiveScope = true,
+    videoHost,
+  } = props;
   const { playbackGuard, nowMs, defaultLiveMode, epgTimeSpanHours, epgRowDensity } = props;
   const {
     epgGenreTints = true,
@@ -90,10 +103,12 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
+  const uiCache = useCatalogUiCache();
   const layout = useMemo(() => computeCatalogLayout(viewport, theme), [theme, viewport]);
   const tabMem = useLiveTabMemory(memory, onMemoryChange, defaultLiveMode);
   const { memory: activeMemory, memoryRef, updateMemory } = tabMem;
   const [guideRefreshTick, setGuideRefreshTick] = useState(0);
+  const [channelManagerOpen, setChannelManagerOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     readonly channel: ItemRow;
     readonly index: number;
@@ -283,6 +298,36 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     (ch: ItemRow) => void live.toggleFavorite(ch),
     [live.toggleFavorite],
   );
+  const handleChannelsMutated = useCallback(() => {
+    setGuideRefreshTick((n) => n + 1);
+    onChannelsMutated?.();
+  }, [onChannelsMutated]);
+  const handleHideChannel = useCallback(
+    (channel: ItemRow) => {
+      if (!catalog.setChannelOverride) return;
+      void catalog
+        .setChannelOverride({
+          itemKey: channel.key,
+          sourceId: channel.sourceId,
+          isHidden: true,
+        })
+        .then((res) => {
+          if (!res.ok) return;
+          uiCache?.invalidateSource(channel.sourceId);
+          handleChannelsMutated();
+        });
+    },
+    [catalog, handleChannelsMutated, uiCache],
+  );
+  const handleOpenChannelManager = useCallback(() => {
+    setContextMenu(null);
+    setDetailModal(null);
+    setChannelManagerOpen(true);
+  }, []);
+  const handleToggleActiveFavorite = useCallback(() => {
+    const ch = live.activeChannel ?? activeFavoriteChannel;
+    if (ch !== null) handleToggleFavorite(ch);
+  }, [activeFavoriteChannel, handleToggleFavorite, live.activeChannel]);
   const handleGuideRefreshed = useCallback(() => setGuideRefreshTick((n) => n + 1), []);
   const handleSelectCategoryIndex = useCallback(
     (idx: number) => {
@@ -356,11 +401,14 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     onSelectZapIndex: handleSelectZapIndex,
     onOpenZapContextMenu: handleOpenZapContextMenu,
     onJumpPreviousChannel: handleJumpPreviousChannel,
+    onToggleActiveFavorite: handleToggleActiveFavorite,
+    ...(onOpenSearch !== undefined ? { onOpenSearch } : {}),
+    ...(onOpenHome !== undefined ? { onOpenHome } : {}),
     onOpenSources,
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
 
-  const anyOverlayOpen = contextMenu !== null || detailModal !== null;
+  const anyOverlayOpen = contextMenu !== null || detailModal !== null || channelManagerOpen;
   const childOwnsTvKeys =
     !numpad.open &&
     !anyOverlayOpen &&
@@ -536,6 +584,12 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                   onWatchChannel={handleWatchAndPlay}
                   onToggleFavorite={handleToggleFavorite}
                   onJumpPreviousChannel={handleJumpPreviousChannel}
+                  {...(catalog.setChannelOverride !== undefined
+                    ? {
+                        onHideChannel: handleHideChannel,
+                        onManageChannels: handleOpenChannelManager,
+                      }
+                    : {})}
                   onGuideRefreshed={handleGuideRefreshed}
                   onEdgeTop={tvNav.handleChildEdgeTop}
                   isActiveScope={bodyActiveScope}
@@ -588,7 +642,21 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
         onPlay={mode === 'favorites' ? handleWatchFromFavorites : handleWatchAndPlay}
         onToggleFavorite={handleToggleFavorite}
         onShowProgrammeDetails={handleShowProgrammeDetails}
+        {...(catalog.setChannelOverride !== undefined
+          ? {
+              onHideChannel: handleHideChannel,
+              onManageChannels: handleOpenChannelManager,
+            }
+          : {})}
         onClose={() => setContextMenu(null)}
+      />
+
+      <ChannelManagementOverlay
+        visible={channelManagerOpen}
+        catalog={catalog}
+        sources={readySources}
+        onMutated={handleChannelsMutated}
+        onClose={() => setChannelManagerOpen(false)}
       />
 
       <EpgProgrammeDetailModal

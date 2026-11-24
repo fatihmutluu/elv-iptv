@@ -1,4 +1,4 @@
-import type { CatalogService } from '@elv/data';
+import type { CatalogService, SourceRow } from '@elv/data';
 import {
   hexToRgba,
   Surface,
@@ -10,12 +10,14 @@ import {
   useTheme,
   useViewport,
 } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
+import { type ReactElement, useCallback, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
+import type { LanPairingPort } from '../ports/lan-pairing-host';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { PickedPlaylistFile, SourceImportHost } from '../ports/source-import-host';
 import { useRouteActive } from '../shared';
 import { CategoryPickerPanel } from './CategoryPickerPanel';
+import { QrPairingOverlay } from './QrPairingOverlay';
 import { SavedSourcesPanel } from './SavedSourcesPanel';
 import { ActionButton, FieldInput } from './SourcesScreenParts';
 import { sourcesStyles as styles } from './sources-styles';
@@ -27,6 +29,8 @@ export interface SourcesScreenProps {
   catalog: CatalogService;
   playbackGuard?: PlaybackGuard;
   sourceImportHost?: SourceImportHost;
+  /** Optional platform local LAN QR pairing port (`#50`). */
+  lanPairing?: LanPairingPort;
   externalRefreshToken?: number;
   onOpenMenu?: () => void;
   onBack?: () => void;
@@ -52,13 +56,24 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const isActiveScope = props.isActiveScope ?? true;
   const embedded = props.embedded ?? false;
   const twoColumn = formFactor !== 'phone';
+  const [qrPairingOpen, setQrPairingOpen] = useState(false);
+  const canQrPair = props.lanPairing?.isSupported() === true;
+  const openQrPairing = useCallback(() => setQrPairingOpen(true), []);
+  const closeQrPairing = useCallback(() => setQrPairingOpen(false), []);
   const ctrl = useSourcesController({
     ...props,
     defaultLocalPlaylistName: i18n.t('sources.localFileBadge'),
   });
+  const handleQrSourceAdded = useCallback(
+    (source: SourceRow) => {
+      void ctrl.runImport(source.id);
+    },
+    [ctrl.runImport],
+  );
   const tv = useTvSourcesNavigation({
-    isTv: isTv && isActiveScope,
+    isTv: isTv && isActiveScope && !qrPairingOpen,
     ctrl,
+    ...(canQrPair ? { onOpenQrPairing: openQrPairing } : {}),
     ...(props.onOpenMenu !== undefined ? { onOpenMenu: props.onOpenMenu } : {}),
     ...(props.onBack !== undefined ? { onBack: props.onBack } : {}),
     ...(props.onFocusTopNav !== undefined ? { onFocusTopNav: props.onFocusTopNav } : {}),
@@ -93,7 +108,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
 
   return (
     <View style={[styles.root, { backgroundColor: rootBackground }]}>
-      {isTv && isActiveScope ? (
+      {isTv && isActiveScope && !qrPairingOpen ? (
         <>
           <TvFocusAnchor
             testID="sources-tv-focus-anchor"
@@ -148,16 +163,28 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                 {i18n.t('sources.subtitle')}
               </Text>
             </View>
-            {props.onOpenMenu !== undefined ? (
-              <ActionButton
-                focusId="open-menu"
-                testID="sources-open-menu"
-                label={i18n.t('sources.openMenu')}
-                onPress={props.onOpenMenu}
-                tvFocused={tv.tvFocusId === 'open-menu'}
-                recordLayout={tv.recordLayout}
-              />
-            ) : null}
+            <View style={styles.row}>
+              {canQrPair ? (
+                <ActionButton
+                  focusId="open-qr-pairing"
+                  testID="sources-qr-button"
+                  label={i18n.t('sources.qr.button')}
+                  onPress={openQrPairing}
+                  tvFocused={tv.tvFocusId === 'open-qr-pairing'}
+                  recordLayout={tv.recordLayout}
+                />
+              ) : null}
+              {props.onOpenMenu !== undefined ? (
+                <ActionButton
+                  focusId="open-menu"
+                  testID="sources-open-menu"
+                  label={i18n.t('sources.openMenu')}
+                  onPress={props.onOpenMenu}
+                  tvFocused={tv.tvFocusId === 'open-menu'}
+                  recordLayout={tv.recordLayout}
+                />
+              ) : null}
+            </View>
           </View>
 
           {ctrl.categoryPicker !== null ? (
@@ -532,6 +559,16 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
           )}
         </View>
       </ScrollView>
+      {canQrPair && props.lanPairing !== undefined ? (
+        <QrPairingOverlay
+          visible={qrPairingOpen}
+          catalog={props.catalog}
+          lanPairing={props.lanPairing}
+          onSourceAdded={handleQrSourceAdded}
+          onClose={closeQrPairing}
+          {...(props.now !== undefined ? { now: props.now } : {})}
+        />
+      ) : null}
     </View>
   );
 }

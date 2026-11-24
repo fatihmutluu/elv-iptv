@@ -142,11 +142,16 @@ export const LOGO_BACKDROP_OPTIONS: ReadonlyArray<{
   },
 ];
 
-/** Applies a TV D-pad activation on a Live TV & Guide settings control (`#68`, `#251`, `#401`, `#126`, `#145`). */
+/** Applies a TV D-pad activation on a Live TV & Guide settings control (`#68`, `#251`, `#401`, `#126`, `#145`, `#60`). */
 export function activateLiveTvControl(
   controlId: LiveTvFocusId,
   preferences?: SettingsPreferencesController,
+  onOpenChannelManagement?: () => void,
 ): void {
+  if (controlId === 'open-channel-management') {
+    onOpenChannelManagement?.();
+    return;
+  }
   if (!preferences) return;
   const modeOpt = DEFAULT_LIVE_MODE_OPTIONS.find((o) => o.focusId === controlId);
   if (modeOpt) {

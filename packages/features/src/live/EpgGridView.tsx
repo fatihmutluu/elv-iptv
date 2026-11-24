@@ -20,6 +20,7 @@ import {
   type DisplayCategory,
   type PagedListSource,
   useActiveEffect,
+  useKeymap,
   useRouteActive,
 } from '../shared';
 import { EpgChannelRow } from './EpgChannelRow';
@@ -45,7 +46,8 @@ function EpgTvKeyBridge({
   readonly onEvent: Parameters<typeof useKeyInterpreter>[0];
 }): ReactElement {
   const routeActive = useRouteActive();
-  useKeyInterpreter(onEvent);
+  const { longPressKeys } = useKeymap();
+  useKeyInterpreter(onEvent, { longKeys: longPressKeys });
   return <TvFocusAnchor testID="epg-tv-focus-anchor" hasTVPreferredFocus={routeActive} />;
 }
 
@@ -62,6 +64,7 @@ export interface EpgGridViewProps {
   readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onJumpPreviousChannel?: () => void;
   readonly onHideChannel?: (channel: ItemRow) => void;
+  readonly onManageChannels?: () => void;
   readonly onGuideRefreshed?: () => void;
   readonly onEdgeTop?: () => void;
   readonly onFocusSidebar?: () => void;
@@ -96,6 +99,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
     onToggleFavorite,
     onJumpPreviousChannel,
     onHideChannel,
+    onManageChannels,
     onGuideRefreshed,
     onEdgeTop,
     onFocusSidebar,
@@ -590,6 +594,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
         {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
         onShowProgrammeDetails={handleOpenProgrammeDetail}
         {...(onHideChannel !== undefined ? { onHideChannel } : {})}
+        {...(onManageChannels !== undefined ? { onManageChannels } : {})}
         onClose={() => setContextMenu(null)}
       />
     </View>

@@ -1,3 +1,4 @@
+import { enErgonomicsMessages } from './en-ergonomics';
 import { enProfilesMessages } from './en-profiles';
 
 /** English (source) message catalog. Every other locale must define the exact same keys. */
@@ -689,6 +690,7 @@ export const enMessages = {
   'player.videoQualityAuto': 'Auto',
   'player.delayReset': 'Reset (0 ms)',
   ...enProfilesMessages,
+  ...enErgonomicsMessages,
 } as const;
 
 /** Valid message identifier across all supported locales. */

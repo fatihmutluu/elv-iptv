@@ -2,6 +2,7 @@ import {
   type AccessibilityFontFamily,
   createMemoryPreferencesStore,
   DEFAULT_PREFERENCES,
+  type KeymapStore,
   ok,
   type PreferencesPatch,
   type PreferencesSnapshot,
@@ -38,6 +39,8 @@ export interface AppProvidersProps {
   preferencesStore?: PreferencesStore;
   /** Optional multi-profile preferences manager (`#15`); used as `preferencesStore` when omitted. */
   profilePreferences?: ProfilePreferencesManager;
+  /** Optional dedicated sparse remote keymap store (`#33`). */
+  keymapStore?: KeymapStore;
   systemLocale?: AppLocale;
   i18n?: AppI18n;
   viewport?: ViewportOverride;
@@ -50,6 +53,7 @@ export interface PreferencesContextValue {
   readonly preferences: PreferencesSnapshot;
   readonly ready: boolean;
   readonly profilePreferences?: ProfilePreferencesManager;
+  readonly keymapStore?: KeymapStore;
   updatePreferences(patch: PreferencesPatch): Promise<Result<PreferencesSnapshot>>;
   resetPreferences(): Promise<Result<PreferencesSnapshot>>;
   flushPreferences(): Promise<void>;
@@ -75,6 +79,7 @@ const PreferencesContext = createContext<PreferencesContextValue>(DEFAULT_PREFER
 export function AppProviders({
   preferencesStore,
   profilePreferences,
+  keymapStore,
   systemLocale,
   i18n,
   viewport,
@@ -198,11 +203,20 @@ export function AppProviders({
       preferences,
       ready,
       ...(profilePreferences !== undefined ? { profilePreferences } : {}),
+      ...(keymapStore !== undefined ? { keymapStore } : {}),
       updatePreferences,
       resetPreferences,
       flushPreferences,
     }),
-    [preferences, ready, profilePreferences, updatePreferences, resetPreferences, flushPreferences],
+    [
+      preferences,
+      ready,
+      profilePreferences,
+      keymapStore,
+      updatePreferences,
+      resetPreferences,
+      flushPreferences,
+    ],
   );
 
   return (

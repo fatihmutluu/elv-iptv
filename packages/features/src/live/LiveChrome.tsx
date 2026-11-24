@@ -17,7 +17,12 @@ import {
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { type CatalogLayoutMetrics, type DisplayCategory, useRouteActive } from '../shared';
+import {
+  type CatalogLayoutMetrics,
+  type DisplayCategory,
+  useKeymap,
+  useRouteActive,
+} from '../shared';
 import type { LiveMode } from './live-model';
 
 export { LiveNumberPad, type LiveNumberPadProps } from './LiveNumberPad';
@@ -224,7 +229,8 @@ export function LiveTvKeyBridge({
   readonly preferredFocus?: boolean;
 }): ReactElement {
   const routeActive = useRouteActive();
-  useKeyInterpreter(onEvent);
+  const { longPressKeys } = useKeymap();
+  useKeyInterpreter(onEvent, { longKeys: longPressKeys });
   return (
     <TvFocusAnchor
       testID="live-tv-focus-anchor"

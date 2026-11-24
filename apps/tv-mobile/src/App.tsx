@@ -55,9 +55,16 @@ import { GateListScreen } from './gate/GateListScreen';
 import { ImportGateScreen } from './gate/import/ImportGateScreen';
 import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
 import { useGateRoute } from './gate/useGateParams';
+import { createMobileLanPairingPort } from './lan-pairing/adapter';
 import { PlayerSurface } from './playback/PlayerSurface';
 import { createPlatformEngine } from './playback/platform-engine';
-import { createDevicePreferencesStore, createSecureSecretStore } from './storage';
+import {
+  createDeviceKeymapStore,
+  createDevicePreferencesStore,
+  createSecureSecretStore,
+} from './storage';
+import { createTvHomeChannelsPort } from './tv-home-channels/adapter';
+import { usePlayDeepLink } from './tv-home-channels/use-play-deep-link';
 import { attachAppStateDeadHostReset, createMobileTvUiAdapters } from './ui/platform-adapters';
 
 function AppRoot() {
@@ -80,6 +87,10 @@ function AppRoot() {
   );
 
   const preferencesStore = useMemo(() => createDevicePreferencesStore(), []);
+  const keymapStore = useMemo(() => createDeviceKeymapStore(), []);
+  const lanPairingPort = useMemo(() => createMobileLanPairingPort(), []);
+  const tvHomeChannelsPort = useMemo(() => createTvHomeChannelsPort(), []);
+  const { pendingDeepLink, clearPendingDeepLink } = usePlayDeepLink();
   const uiAdapters = useMemo(() => createMobileTvUiAdapters(), []);
 
   useEffect(() => {
@@ -288,6 +299,7 @@ function AppRoot() {
       <AppProviders
         preferencesStore={preferencesStore}
         profilePreferences={preferencesStore}
+        keymapStore={keymapStore}
         systemLocale={systemLocale}
         {...(viewportOverride !== undefined ? { viewport: viewportOverride } : {})}
       >
@@ -296,6 +308,11 @@ function AppRoot() {
           videoHost={videoHost}
           appLifecycle={appLifecycle}
           profilePreferences={preferencesStore}
+          keymapStore={keymapStore}
+          lanPairing={lanPairingPort}
+          tvHomeChannels={tvHomeChannelsPort}
+          pendingDeepLink={pendingDeepLink}
+          onDeepLinkHandled={clearPendingDeepLink}
           {...(sourceImportHost !== undefined ? { sourceImportHost } : {})}
           externalRefreshToken={refreshToken}
         />

@@ -219,6 +219,46 @@ export function createDesktopCatalogFromBridge(
       bridge.clearParentalPin
         ? bridge.clearParentalPin(currentPin, profileId)
         : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    listChannelOverrides: (profileId) =>
+      bridge.listChannelOverrides ? bridge.listChannelOverrides(profileId) : Promise.resolve([]),
+    setChannelOverride: (input) =>
+      bridge.setChannelOverride
+        ? bridge.setChannelOverride(input)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    clearChannelOverride: (itemKey, profileId) =>
+      bridge.clearChannelOverride
+        ? bridge.clearChannelOverride(itemKey, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    reorderChannels: (itemKeys, sourceId, profileId) =>
+      bridge.reorderChannels
+        ? bridge.reorderChannels(itemKeys, sourceId, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    listCustomGroups: (profileId, opts) =>
+      bridge.listCustomGroups ? bridge.listCustomGroups(profileId, opts) : Promise.resolve([]),
+    createCustomGroup: (input) =>
+      bridge.createCustomGroup
+        ? bridge.createCustomGroup(input)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    updateCustomGroup: (groupId, patch) =>
+      bridge.updateCustomGroup
+        ? bridge.updateCustomGroup(groupId, patch)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    deleteCustomGroup: (groupId) =>
+      bridge.deleteCustomGroup
+        ? bridge.deleteCustomGroup(groupId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    setCustomGroupItems: (groupId, items) =>
+      bridge.setCustomGroupItems
+        ? bridge.setCustomGroupItems(groupId, items)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    addChannelToCustomGroup: (groupId, itemKey, sourceId) =>
+      bridge.addChannelToCustomGroup
+        ? bridge.addChannelToCustomGroup(groupId, itemKey, sourceId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    removeChannelFromCustomGroup: (groupId, itemKey) =>
+      bridge.removeChannelFromCustomGroup
+        ? bridge.removeChannelFromCustomGroup(groupId, itemKey)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
     flushPendingWrites: () =>
       bridge.flushPendingWrites ? bridge.flushPendingWrites() : Promise.resolve(),
     async close() {

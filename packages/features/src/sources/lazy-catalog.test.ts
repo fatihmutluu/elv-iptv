@@ -543,4 +543,99 @@ describe('createLazyCatalog', () => {
       parentalUnlocked: false,
     });
   });
+
+  it('delegates all 11 channel override and custom group methods (#60) and returns unsupported when omitted', async () => {
+    const handle = testDb();
+    await openCatalog(handle.db);
+    const underlying = createCatalogService({
+      db: handle.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: {
+        async get() {
+          const bytes = new TextEncoder().encode(
+            '#EXTM3U\n#EXTINF:-1,Ch 1\nhttp://127.0.0.1/1.ts\n',
+          );
+          return ok({
+            status: 200,
+            headers: {},
+            body: {
+              async *[Symbol.asyncIterator]() {
+                yield bytes;
+              },
+            },
+          });
+        },
+      },
+      clock: () => 500,
+    });
+    const lazy = createLazyCatalog(async () => underlying);
+    const added = await lazy.addSourceFromLink({ name: 'Demo', url: 'http://127.0.0.1/demo.m3u' });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    await lazy.importSource(added.value.id);
+    const cats = await lazy.categories(added.value.id, 'live');
+    const items = await lazy.items(cats[0]?.id ?? '', 0, 10);
+    const chKey = items[0]?.key ?? '';
+
+    const setRes = await lazy.setChannelOverride?.({
+      itemKey: chKey,
+      sourceId: added.value.id,
+      customName: 'Custom Ch 1',
+    });
+    expect(setRes?.ok).toBe(true);
+    expect((await lazy.listChannelOverrides?.())?.length).toBe(1);
+    expect((await lazy.reorderChannels?.([chKey], added.value.id))?.ok).toBe(true);
+    expect((await lazy.clearChannelOverride?.(chKey))?.ok).toBe(true);
+
+    const created = await lazy.createCustomGroup?.({ name: 'Sports' });
+    expect(created?.ok).toBe(true);
+    if (created?.ok) {
+      expect((await lazy.listCustomGroups?.())?.length).toBe(1);
+      expect((await lazy.updateCustomGroup?.(created.value.id, { name: 'Top Sports' }))?.ok).toBe(
+        true,
+      );
+      expect(
+        (await lazy.addChannelToCustomGroup?.(created.value.id, chKey, added.value.id))?.ok,
+      ).toBe(true);
+      expect(
+        (
+          await lazy.setCustomGroupItems?.(created.value.id, [
+            { itemKey: chKey, sourceId: added.value.id },
+          ])
+        )?.ok,
+      ).toBe(true);
+      expect((await lazy.removeChannelFromCustomGroup?.(created.value.id, chKey))?.ok).toBe(true);
+      expect((await lazy.deleteCustomGroup?.(created.value.id))?.ok).toBe(true);
+    }
+
+    await lazy.close();
+    handle.close();
+
+    const minimal = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      seasons: vi.fn(async () => ok([])),
+      episodes: vi.fn(async () => []),
+      resolveStream: vi.fn(),
+      close: vi.fn(async () => undefined),
+    } as unknown as CatalogService;
+    const lazyMin = createLazyCatalog(async () => minimal);
+    expect(await lazyMin.listChannelOverrides?.()).toEqual([]);
+    expect((await lazyMin.setChannelOverride?.({ itemKey: 'k', sourceId: 's1' }))?.ok).toBe(false);
+    expect((await lazyMin.clearChannelOverride?.('k'))?.ok).toBe(false);
+    expect((await lazyMin.reorderChannels?.(['k'], 's1'))?.ok).toBe(false);
+    expect(await lazyMin.listCustomGroups?.()).toEqual([]);
+    expect((await lazyMin.createCustomGroup?.({ name: 'G' }))?.ok).toBe(false);
+    expect((await lazyMin.updateCustomGroup?.('g1', { name: 'G2' }))?.ok).toBe(false);
+    expect((await lazyMin.deleteCustomGroup?.('g1'))?.ok).toBe(false);
+    expect((await lazyMin.setCustomGroupItems?.('g1', []))?.ok).toBe(false);
+    expect((await lazyMin.addChannelToCustomGroup?.('g1', 'k', 's1'))?.ok).toBe(false);
+    expect((await lazyMin.removeChannelFromCustomGroup?.('g1', 'k'))?.ok).toBe(false);
+  });
 });

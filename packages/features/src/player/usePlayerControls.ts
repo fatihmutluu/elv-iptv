@@ -8,7 +8,7 @@ import { type UseKeyInterpreterOptions, useKeyInterpreter, useTvKeySource } from
 import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import type { HostKey } from '../ports/video-host';
-import { useProfile } from '../shared';
+import { useKeymap, useProfile } from '../shared';
 import {
   type ChannelDigitBuffer,
   createChannelDigitBuffer,
@@ -50,6 +50,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
 
   const cbRef = useRef(params);
   cbRef.current = params;
+  const keymap = useKeymap();
+  const keymapOverridesRef = useRef(keymap.overrides);
+  keymapOverridesRef.current = keymap.overrides;
   const { pinDialog, profilePickerOpen } = useProfile();
   const externalOverlayOpenRef = useRef(false);
   externalOverlayOpenRef.current =
@@ -526,6 +529,12 @@ export function usePlayerControls(params: PlayerControlsParams) {
         selectAndroidDecoderMode: cbRef.current.onSelectAndroidDecoderMode,
         onExit: () => onExitRef.current(),
         onJumpPreviousChannel: cbRef.current.onJumpPreviousChannel,
+        keymapOverrides: keymapOverridesRef.current,
+        openSettings: overlay.openSettings,
+        seekBy,
+        stepSeekMs: getStepSeekMs(),
+        zapBy: (delta) => zapByRef.current(delta, false),
+        toggleMute: cbRef.current.onToggleMute !== undefined ? toggleMute : undefined,
       })
     ) {
       return true;
@@ -598,6 +607,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     return consumed;
   });
   useKeyInterpreter(handleKeyEvent, {
+    longKeys: keymap.longPressKeys,
     keySource: (onInput) => {
       interpreterInputRef.current = onInput;
     },

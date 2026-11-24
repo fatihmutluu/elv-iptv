@@ -153,4 +153,119 @@ describe('createProfileScopedCatalog', () => {
       parentalUnlocked: false,
     });
   });
+
+  it('injects profileId and parentalUnlocked across all 11 channel override and custom group methods (#60)', async () => {
+    const listChannelOverrides = vi.fn(async () => []);
+    const setChannelOverride = vi.fn(async () =>
+      ok({
+        profileId: 'kids-1',
+        itemKey: 'x:s1:live:1',
+        sourceId: 's1',
+        customName: 'News',
+        isHidden: false,
+        sortOrder: null,
+        updatedAt: 1,
+      }),
+    );
+    const clearChannelOverride = vi.fn(async () => ok(undefined));
+    const reorderChannels = vi.fn(async () => ok(undefined));
+    const listCustomGroups = vi.fn(async () => []);
+    const createCustomGroup = vi.fn(async () =>
+      ok({
+        id: 'g1',
+        profileId: 'kids-1',
+        name: 'Kids Favs',
+        sortOrder: 0,
+        isHidden: false,
+        itemCount: 0,
+        updatedAt: 1,
+      }),
+    );
+    const updateCustomGroup = vi.fn(async () =>
+      ok({
+        id: 'g1',
+        profileId: 'kids-1',
+        name: 'Kids Top',
+        sortOrder: 0,
+        isHidden: false,
+        itemCount: 0,
+        updatedAt: 2,
+      }),
+    );
+    const deleteCustomGroup = vi.fn(async () => ok(undefined));
+    const setCustomGroupItems = vi.fn(async () => ok(undefined));
+    const addChannelToCustomGroup = vi.fn(async () => ok(undefined));
+    const removeChannelFromCustomGroup = vi.fn(async () => ok(undefined));
+
+    const base = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      seasons: vi.fn(async () => ok([])),
+      episodes: vi.fn(async () => []),
+      resolveStream: vi.fn(),
+      close: vi.fn(async () => undefined),
+      listChannelOverrides,
+      setChannelOverride,
+      clearChannelOverride,
+      reorderChannels,
+      listCustomGroups,
+      createCustomGroup,
+      updateCustomGroup,
+      deleteCustomGroup,
+      setCustomGroupItems,
+      addChannelToCustomGroup,
+      removeChannelFromCustomGroup,
+    } as unknown as CatalogService;
+
+    const scoped = createProfileScopedCatalog(base, () => ({
+      profileId: 'kids-1',
+      parentalUnlocked: false,
+    }));
+
+    await scoped.listChannelOverrides?.();
+    await scoped.setChannelOverride?.({
+      itemKey: 'x:s1:live:1',
+      sourceId: 's1',
+      customName: 'News',
+    });
+    await scoped.clearChannelOverride?.('x:s1:live:1');
+    await scoped.reorderChannels?.(['x:s1:live:1'], 's1');
+    await scoped.listCustomGroups?.(undefined, { includeHidden: true });
+    await scoped.createCustomGroup?.({ name: 'Kids Favs' });
+    await scoped.updateCustomGroup?.('g1', { name: 'Kids Top' });
+    await scoped.setCustomGroupItems?.('g1', [{ itemKey: 'x:s1:live:1', sourceId: 's1' }]);
+    await scoped.addChannelToCustomGroup?.('g1', 'x:s1:live:1', 's1');
+    await scoped.removeChannelFromCustomGroup?.('g1', 'x:s1:live:1');
+    await scoped.deleteCustomGroup?.('g1');
+
+    expect(listChannelOverrides).toHaveBeenCalledWith('kids-1');
+    expect(setChannelOverride).toHaveBeenCalledWith({
+      itemKey: 'x:s1:live:1',
+      sourceId: 's1',
+      customName: 'News',
+      profileId: 'kids-1',
+    });
+    expect(clearChannelOverride).toHaveBeenCalledWith('x:s1:live:1', 'kids-1');
+    expect(reorderChannels).toHaveBeenCalledWith(['x:s1:live:1'], 's1', 'kids-1');
+    expect(listCustomGroups).toHaveBeenCalledWith('kids-1', {
+      includeHidden: true,
+      parentalUnlocked: false,
+    });
+    expect(createCustomGroup).toHaveBeenCalledWith({
+      name: 'Kids Favs',
+      profileId: 'kids-1',
+    });
+    expect(updateCustomGroup).toHaveBeenCalledWith('g1', { name: 'Kids Top' });
+    expect(setCustomGroupItems).toHaveBeenCalledWith('g1', [
+      { itemKey: 'x:s1:live:1', sourceId: 's1' },
+    ]);
+    expect(addChannelToCustomGroup).toHaveBeenCalledWith('g1', 'x:s1:live:1', 's1');
+    expect(removeChannelFromCustomGroup).toHaveBeenCalledWith('g1', 'x:s1:live:1');
+    expect(deleteCustomGroup).toHaveBeenCalledWith('g1');
+  });
 });

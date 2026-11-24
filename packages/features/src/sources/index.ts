@@ -13,6 +13,11 @@ export {
   isEmptyImport,
 } from './errors';
 export { createLazyCatalog } from './lazy-catalog';
+export {
+  formatPairingCountdown,
+  QrPairingOverlay,
+  type QrPairingOverlayProps,
+} from './QrPairingOverlay';
 export { SourcesScreen, type SourcesScreenProps } from './SourcesScreen';
 export {
   type CategoryPickerState,

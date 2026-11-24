@@ -2117,3 +2117,223 @@ msgstr "Backspace"
 
 msgid "parental.clear"
 msgstr "Clear"
+
+
+msgid "channels.manage.title"
+msgstr "Manage channels"
+
+msgid "channels.manage.subtitle"
+msgstr "Rename, hide, reorder channels, or organize custom groups."
+
+msgid "channels.manage.openButton"
+msgstr "Manage channels"
+
+msgid "channels.manage.rename"
+msgstr "Rename"
+
+msgid "channels.manage.renamePlaceholder"
+msgstr "Enter custom channel name"
+
+msgid "channels.manage.resetName"
+msgstr "Reset name"
+
+msgid "channels.manage.hide"
+msgstr "Hide channel"
+
+msgid "channels.manage.unhide"
+msgstr "Show channel"
+
+msgid "channels.manage.hiddenBadge"
+msgstr "Hidden"
+
+msgid "channels.manage.showHidden"
+msgstr "Show hidden channels"
+
+msgid "channels.manage.moveUp"
+msgstr "Move up"
+
+msgid "channels.manage.moveDown"
+msgstr "Move down"
+
+msgid "channels.manage.resetOrder"
+msgstr "Reset order"
+
+msgid "channels.manage.empty"
+msgstr "No channels available to manage."
+
+msgid "channels.manage.groupsTab"
+msgstr "Custom groups"
+
+msgid "channels.manage.channelsTab"
+msgstr "Channels"
+
+msgid "channels.manage.addGroup"
+msgstr "New group"
+
+msgid "channels.manage.groupNamePlaceholder"
+msgstr "Enter group name"
+
+msgid "channels.manage.editGroup"
+msgstr "Edit group"
+
+msgid "channels.manage.deleteGroup"
+msgstr "Delete group"
+
+msgid "channels.manage.addToGroup"
+msgstr "Add to group"
+
+msgid "channels.manage.removeFromGroup"
+msgstr "Remove from group"
+
+msgid "channels.manage.groupEmpty"
+msgstr "No channels in this group yet."
+
+msgid "channels.manage.save"
+msgstr "Save"
+
+msgid "channels.manage.cancel"
+msgstr "Cancel"
+
+msgid "sources.qr.button"
+msgstr "Scan QR from phone"
+
+msgid "sources.qr.title"
+msgstr "Add source from phone"
+
+msgid "sources.qr.subtitle"
+msgstr "Scan the QR code with your phone on the same Wi-Fi network."
+
+msgid "sources.qr.scanHint"
+msgstr "Point your phone camera at the code to open the local setup form."
+
+msgid "sources.qr.orVisit"
+msgstr "Or open this address on your phone:"
+
+msgid "sources.qr.expiresIn"
+msgstr "Expires in {time}"
+
+msgid "sources.qr.expired"
+msgstr "Code expired"
+
+msgid "sources.qr.regenerate"
+msgstr "New code"
+
+msgid "sources.qr.waiting"
+msgstr "Waiting for details from your phone…"
+
+msgid "sources.qr.received"
+msgstr "Source details received. Importing…"
+
+msgid "sources.qr.unavailable"
+msgstr "Local pairing is unavailable on this network."
+
+msgid "sources.qr.close"
+msgstr "Close"
+
+msgid "sources.qr.lanOnlyNote"
+msgstr "Transfers stay strictly on your local network and close automatically after one use."
+
+msgid "settings.section.remote"
+msgstr "Remote keys"
+
+msgid "remote.title"
+msgstr "Remote key remapping"
+
+msgid "remote.subtitle"
+msgstr "Customize remote buttons for playback, live TV, and quick shortcuts."
+
+msgid "remote.contextPlayer"
+msgstr "Player"
+
+msgid "remote.contextLive"
+msgstr "Live TV"
+
+msgid "remote.contextGlobal"
+msgstr "Global"
+
+msgid "remote.capturePrompt"
+msgstr "Press any remote button…"
+
+msgid "remote.captureCancel"
+msgstr "Press Back to cancel"
+
+msgid "remote.immutableWarning"
+msgstr "Directional, Select, and Back short presses cannot be rebound."
+
+msgid "remote.unbound"
+msgstr "Unbound"
+
+msgid "remote.longPressBadge"
+msgstr "Long press"
+
+msgid "remote.rebind"
+msgstr "Rebind"
+
+msgid "remote.clear"
+msgstr "Unbind"
+
+msgid "remote.resetAction"
+msgstr "Reset"
+
+msgid "remote.resetAll"
+msgstr "Reset all defaults"
+
+msgid "remote.action.togglePlayPause"
+msgstr "Play / Pause"
+
+msgid "remote.action.seekBack"
+msgstr "Seek back"
+
+msgid "remote.action.seekForward"
+msgstr "Seek forward"
+
+msgid "remote.action.channelUp"
+msgstr "Channel up"
+
+msgid "remote.action.channelDown"
+msgstr "Channel down"
+
+msgid "remote.action.lastChannel"
+msgstr "Previous channel"
+
+msgid "remote.action.openChannelDrawer"
+msgstr "Open channel drawer"
+
+msgid "remote.action.openSettings"
+msgstr "Open player settings"
+
+msgid "remote.action.cycleAudioTrack"
+msgstr "Switch audio track"
+
+msgid "remote.action.cycleSubtitleTrack"
+msgstr "Switch subtitle track"
+
+msgid "remote.action.toggleMute"
+msgstr "Mute / Unmute"
+
+msgid "remote.action.openInfo"
+msgstr "Show program info"
+
+msgid "remote.action.toggleGuide"
+msgstr "Toggle TV Guide"
+
+msgid "remote.action.openSearch"
+msgstr "Open Search"
+
+msgid "remote.action.toggleFavorite"
+msgstr "Toggle favorite"
+
+msgid "remote.action.openHome"
+msgstr "Go to Home"
+
+msgid "tvHomeChannels.continueWatching"
+msgstr "Continue watching"
+
+msgid "tvHomeChannels.favorites"
+msgstr "Favorite channels"
+
+msgid "tvHomeChannels.syncToggle"
+msgstr "Android TV home channels"
+
+msgid "tvHomeChannels.syncHint"
+msgstr "Show Continue watching and Favorite channels rows on the Android TV home screen."

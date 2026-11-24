@@ -42,14 +42,19 @@ export function useKeyInterpreter(
   nowRef.current = options?.now;
   const textEntry = useContext(TextEntryContext);
 
+  const longKeysSig = options?.longKeys ? options.longKeys.join(',') : '__default__';
+  const repeatKeysSig = options?.repeatKeys ? options.repeatKeys.join(',') : '__default__';
+  const interpreterSig = `${longKeysSig}|${repeatKeysSig}`;
+  const interpreterSigRef = useRef<string | null>(null);
   const interpreterRef = useRef<ReturnType<typeof createKeyInterpreter> | null>(null);
-  if (interpreterRef.current === null) {
+  if (interpreterRef.current === null || interpreterSigRef.current !== interpreterSig) {
+    interpreterRef.current?.reset();
     interpreterRef.current = createKeyInterpreter({
       longKeys: options?.longKeys,
       repeatKeys: options?.repeatKeys,
     });
+    interpreterSigRef.current = interpreterSig;
   }
-  const interpreter = interpreterRef.current;
 
   const heldKeys = useRef(new Set<Key>());
   const pendingKeys = useRef(new Set<Key>());
@@ -64,10 +69,13 @@ export function useKeyInterpreter(
     if (ackFrame.current !== undefined || pendingKeys.current.size === 0) return;
     ackFrame.current = requestAnimationFrame(() => {
       ackFrame.current = undefined;
-      for (const key of pendingKeys.current) interpreter.acknowledge(key);
+      const current = interpreterRef.current;
+      if (current !== null) {
+        for (const key of pendingKeys.current) current.acknowledge(key);
+      }
       pendingKeys.current.clear();
     });
-  }, [interpreter]);
+  }, []);
 
   const deliver = useCallback(
     (event: KeyEvent): boolean => {
@@ -96,19 +104,23 @@ export function useKeyInterpreter(
 
   const onInput = useCallback(
     (k: KeyInput): boolean => {
+      const current = interpreterRef.current;
+      if (current === null) return false;
       if (k.action === 'down') {
         if (k.key === 'back') longConsumedBack.current = false;
         heldKeys.current.add(k.key);
         if (ticker.current === undefined) {
           lastTickAt.current = readNow();
           ticker.current = setInterval(() => {
+            const active = interpreterRef.current;
+            if (active === null) return;
             const t = readNow();
             if (t - lastTickAt.current > STALL_GUARD_MS) {
               lastTickAt.current = t;
               return;
             }
             lastTickAt.current = t;
-            for (const e of interpreter.tick(t)) {
+            for (const e of active.tick(t)) {
               const handled = deliver(e);
               if (handled && e.key === 'back' && e.kind === 'long') {
                 longConsumedBack.current = true;
@@ -122,7 +134,7 @@ export function useKeyInterpreter(
         pendingKeys.current.delete(k.key);
         if (heldKeys.current.size === 0) stopTicker();
       }
-      const events = interpreter.input(k);
+      const events = current.input(k);
       let consumed = false;
       for (let i = 0; i < events.length; i += 1) {
         if (deliver(events[i] as KeyEvent)) consumed = true;
@@ -133,8 +145,20 @@ export function useKeyInterpreter(
       }
       return consumed;
     },
-    [interpreter, deliver, readNow, stopTicker],
+    [deliver, readNow, stopTicker],
   );
+
+  useEffect(() => {
+    void interpreterSig;
+    stopTicker();
+    if (ackFrame.current !== undefined) {
+      cancelAnimationFrame(ackFrame.current);
+      ackFrame.current = undefined;
+    }
+    heldKeys.current.clear();
+    pendingKeys.current.clear();
+    longConsumedBack.current = false;
+  }, [interpreterSig, stopTicker]);
 
   useEffect(
     () => () => {
@@ -146,9 +170,9 @@ export function useKeyInterpreter(
       heldKeys.current.clear();
       pendingKeys.current.clear();
       longConsumedBack.current = false;
-      interpreter.reset();
+      interpreterRef.current?.reset();
     },
-    [interpreter, stopTicker],
+    [stopTicker],
   );
 
   const useSource = options?.keySource ?? useTvKeySource;

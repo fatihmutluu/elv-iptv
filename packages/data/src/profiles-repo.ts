@@ -285,6 +285,12 @@ export async function deleteProfile(
     await tx.run('DELETE FROM recent_channels WHERE profile_id = ?', [id]);
     await tx.run('DELETE FROM parental_settings WHERE profile_id = ?', [id]);
     await tx.run('DELETE FROM parental_locks WHERE profile_id = ?', [id]);
+    await tx.run('DELETE FROM channel_overrides WHERE profile_id = ?', [id]);
+    await tx.run(
+      'DELETE FROM custom_group_items WHERE group_id IN (SELECT id FROM custom_groups WHERE profile_id = ?)',
+      [id],
+    );
+    await tx.run('DELETE FROM custom_groups WHERE profile_id = ?', [id]);
 
     if (target.is_default !== 0) {
       const nextDefault = allProfiles.find((p) => p.id !== id);

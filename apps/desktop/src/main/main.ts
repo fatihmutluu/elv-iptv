@@ -51,6 +51,7 @@ import {
   sampleRect,
   type VideoSampler,
 } from './gate.ts';
+import { type LanPairingIpcHandle, registerLanPairingIpc } from './lan-pairing-ipc.ts';
 import { createDesktopLogger } from './log.ts';
 import {
   createMacOsMediaBridge,
@@ -431,6 +432,7 @@ hasLock = startSingleInstance(app, {
 
 let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
 let artworkCache: DesktopArtworkCache | undefined;
+let lanPairingIpc: LanPairingIpcHandle | undefined;
 
 registerCatalogQuitHandler({
   app,
@@ -488,6 +490,7 @@ if (hasLock) {
               })),
             }),
     });
+    lanPairingIpc = registerLanPairingIpc({ ipcMain });
     serveRenderer();
     catalogCoordinator = startCatalog();
     await startPlayer();
@@ -499,7 +502,13 @@ if (hasLock) {
   });
 }
 
+app.on('before-quit', () => {
+  void lanPairingIpc?.stop();
+});
+
 app.on('will-quit', () => {
+  void lanPairingIpc?.dispose();
+  lanPairingIpc = undefined;
   mediaBridge?.dispose();
   mediaBridge = undefined;
   for (const ctl of [...windowBoundsControllers]) ctl.dispose();

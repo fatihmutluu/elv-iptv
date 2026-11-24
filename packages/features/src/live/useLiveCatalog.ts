@@ -1,11 +1,13 @@
-import type {
-  AlphabetBucket,
-  CatalogService,
-  CategoryRow,
-  ItemRow,
-  ItemSortOrder,
-  NowNextEntry,
-  SourceRow,
+import {
+  type AlphabetBucket,
+  type CatalogService,
+  type CategoryRow,
+  type CustomGroupRecord,
+  customGroupCategoryId,
+  type ItemRow,
+  type ItemSortOrder,
+  type NowNextEntry,
+  type SourceRow,
 } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PlayTarget } from '../ports/play-target';
@@ -282,7 +284,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
 
     void catalog
       .alphabetIndex({
-        ...(sourceId !== undefined ? { sourceId } : {}),
+        ...(sourceId !== undefined && sourceId !== '' ? { sourceId } : {}),
         kind: 'live',
         categoryId: catId,
         ...(collapseVariants ? { collapseVariants: true } : {}),
@@ -324,18 +326,39 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
       return undefined;
     }
     if (!hasCatsRef.current) setLoadingCategories(true);
-    void Promise.all(
-      sources.map(
-        async (s) =>
-          [
-            s.id,
-            await catalog.categories(s.id, 'live', variantCatOpts).catch(() => [] as CategoryRow[]),
-          ] as const,
+    void Promise.all([
+      Promise.all(
+        sources.map(
+          async (s) =>
+            [
+              s.id,
+              await catalog
+                .categories(s.id, 'live', variantCatOpts)
+                .catch(() => [] as CategoryRow[]),
+            ] as const,
+        ),
       ),
-    )
-      .then((entries) => {
+      catalog.listCustomGroups
+        ? catalog.listCustomGroups().catch(() => [] as CustomGroupRecord[])
+        : Promise.resolve([] as CustomGroupRecord[]),
+    ])
+      .then(([entries, customGroups]) => {
         if (!alive) return;
-        const nextCats = buildSharedDisplayCategories(sources, new Map(entries));
+        const providerCats = buildSharedDisplayCategories(sources, new Map(entries));
+        const customCats: DisplayCategory[] = customGroups
+          .filter((g) => !g.isHidden)
+          .map((g) => ({
+            row: {
+              id: customGroupCategoryId(g.id),
+              sourceId: '',
+              kind: 'live' as const,
+              name: g.name,
+              position: g.sortOrder,
+              itemCount: g.itemCount,
+            },
+            label: g.name,
+          }));
+        const nextCats = [...customCats, ...providerCats];
         hasCatsRef.current = true;
         if (!collapseVariants) uiCacheRef.current?.setLiveCategories(nextCats);
         setCategories(nextCats);

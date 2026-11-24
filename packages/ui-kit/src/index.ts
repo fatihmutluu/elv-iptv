@@ -5,6 +5,8 @@ export {
   AlphabetJumpRail,
   type AlphabetJumpRailProps,
 } from './components/AlphabetJumpRail';
+export { QrCodeView, type QrCodeViewProps } from './components/QrCodeView';
+export { encodeQrMatrix, MAX_QR_PAYLOAD_BYTES, type QrMatrix } from './components/qr-matrix';
 export {
   detectFormFactor,
   type FormFactor,

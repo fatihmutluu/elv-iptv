@@ -9,6 +9,7 @@ import {
   loadActiveParentalFilter,
 } from './parental-repo';
 import { parseCategoryId, sourceOfKey } from './queries';
+import { resolveQueryProfileId } from './queries-shared';
 import { parseVodVersion } from './vod-versions';
 
 /** One selectable quality variant of a live channel (`#218`). */
@@ -55,7 +56,8 @@ export async function queryLiveVariants(
     providerCategoryId = parsed !== undefined ? parsed.providerId : categoryId;
   }
 
-  const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
+  const profileId = resolveQueryProfileId(opts?.profileId);
+  const filter = await loadActiveParentalFilter(db, profileId, opts?.parentalUnlocked);
   if (filter !== null) {
     if (
       providerCategoryId !== undefined &&
@@ -76,34 +78,38 @@ export async function queryLiveVariants(
 
   const rows =
     providerCategoryId !== undefined
-      ? await db.all<{ key: string; name: string; quality_rank: number }>(
-          `SELECT l.key, l.name, l.quality_rank
+      ? await db.all<{ key: string; display_name: string; raw_name: string; quality_rank: number }>(
+          `SELECT l.key, COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name, l.name AS raw_name, l.quality_rank
              FROM live l
              JOIN placements p
                ON p.source_id = l.source_id AND p.kind = 'live' AND p.item_key = l.key
-            WHERE l.source_id = ? AND l.is_hidden = 0 AND l.variant_base_fold = ?
+             LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
+            WHERE l.source_id = ? AND l.is_hidden = 0 AND COALESCE(co.is_hidden, 0) = 0 AND l.variant_base_fold = ?
               AND p.category_id = ? AND p.is_hidden = 0
               AND EXISTS (SELECT 1 FROM sources s WHERE s.id = l.source_id AND s.deleting = 0)${restrict.clause}${adultExcl}
             ORDER BY l.quality_rank DESC, p.position ASC, l.id ASC`,
-          [sourceId, seed.variant_base_fold, providerCategoryId, ...restrict.params],
+          [profileId, sourceId, seed.variant_base_fold, providerCategoryId, ...restrict.params],
         )
-      : await db.all<{ key: string; name: string; quality_rank: number }>(
-          `SELECT l.key, l.name, l.quality_rank
+      : await db.all<{ key: string; display_name: string; raw_name: string; quality_rank: number }>(
+          `SELECT l.key, COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name, l.name AS raw_name, l.quality_rank
              FROM live l
-            WHERE l.source_id = ? AND l.is_hidden = 0 AND l.variant_base_fold = ?
+             LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
+            WHERE l.source_id = ? AND l.is_hidden = 0 AND COALESCE(co.is_hidden, 0) = 0 AND l.variant_base_fold = ?
               AND EXISTS (SELECT 1 FROM sources s WHERE s.id = l.source_id AND s.deleting = 0)${restrict.clause}${adultExcl}
             ORDER BY l.quality_rank DESC, l.id ASC`,
-          [sourceId, seed.variant_base_fold, ...restrict.params],
+          [profileId, sourceId, seed.variant_base_fold, ...restrict.params],
         );
 
   const allowed =
-    filter?.blockAdultKeywords === true ? rows.filter((r) => !isAdultKeywordMatch(r.name)) : rows;
+    filter?.blockAdultKeywords === true
+      ? rows.filter((r) => !isAdultKeywordMatch(r.raw_name) && !isAdultKeywordMatch(r.display_name))
+      : rows;
 
   return allowed.map((r) => {
-    const parsed = parseLiveVariant(r.name);
+    const parsed = parseLiveVariant(r.raw_name);
     return {
       key: r.key,
-      title: r.name,
+      title: r.display_name,
       qualityLabel: parsed.qualityLabel,
       qualityRank: r.quality_rank,
     };

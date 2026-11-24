@@ -29,6 +29,7 @@ import { LiveTvSettingsPanel } from './LiveTvSettingsPanel';
 import { activateLiveTvControl } from './live-tv-controls';
 import { PlaybackSettingsPanel } from './PlaybackSettingsPanel';
 import { activatePlaybackControl } from './playback-controls';
+import { RemoteKeysSettingsPanel } from './RemoteKeysSettingsPanel';
 import {
   type AppearanceFocusId,
   type LiveTvFocusId,
@@ -85,6 +86,8 @@ export interface SettingsScreenProps {
   readonly hasTransientOverlay?: boolean;
   /** Overrides Android-only Video decoder row visibility in Playback settings (`#411`). */
   readonly showAndroidDecoder?: boolean;
+  /** Opens the Channel Management & Custom Groups overlay from Live TV settings (`#60`). */
+  readonly onOpenChannelManagement?: () => void;
 }
 
 interface NavSectionMeta {
@@ -112,6 +115,12 @@ const SECTION_META: readonly NavSectionMeta[] = [
     icon: 'tv',
     labelKey: 'settings.section.liveTv',
     testID: 'settings-tab-liveTv',
+  },
+  {
+    id: 'remote',
+    icon: 'keypad',
+    labelKey: 'settings.section.remote',
+    testID: 'settings-tab-remote',
   },
   {
     id: 'profiles',
@@ -157,6 +166,7 @@ export function SettingsScreen({
   isActiveScope = true,
   hasTransientOverlay = false,
   showAndroidDecoder = Platform.OS === 'android',
+  onOpenChannelManagement,
 }: SettingsScreenProps): ReactElement {
   const theme = useTheme();
   const themeCtrl = useThemeController();
@@ -247,12 +257,13 @@ export function SettingsScreen({
         activatePlaybackControl(controlId as PlaybackFocusId, preferences);
         return;
       }
-      activateLiveTvControl(controlId as LiveTvFocusId, preferences);
+      activateLiveTvControl(controlId as LiveTvFocusId, preferences, onOpenChannelManagement);
     },
     [
       handleClearArtworkCache,
       handleSetArtworkCacheLimitMb,
       i18n,
+      onOpenChannelManagement,
       preferences,
       theme.reduceMotion,
       themeCtrl,
@@ -310,7 +321,10 @@ export function SettingsScreen({
         focusedControlId={
           activeSection === 'liveTv' ? (tv.focusedControlId as LiveTvFocusId | null) : null
         }
+        {...(onOpenChannelManagement !== undefined ? { onOpenChannelManagement } : {})}
       />
+    ) : activeSection === 'remote' ? (
+      <RemoteKeysSettingsPanel {...embeddedSlot} />
     ) : activeSection === 'profiles' ? (
       renderProfiles ? (
         renderProfiles(embeddedSlot)

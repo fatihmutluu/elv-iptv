@@ -55,6 +55,12 @@ export function createProfileScopedCatalog(
   const clearTrackPreference = c.clearTrackPreference?.bind(c);
   const recordRecentChannel = c.recordRecentChannel?.bind(c);
   const listRecentChannels = c.listRecentChannels?.bind(c);
+  const listChannelOverrides = c.listChannelOverrides?.bind(c);
+  const setChannelOverride = c.setChannelOverride?.bind(c);
+  const clearChannelOverride = c.clearChannelOverride?.bind(c);
+  const reorderChannels = c.reorderChannels?.bind(c);
+  const listCustomGroups = c.listCustomGroups?.bind(c);
+  const createCustomGroup = c.createCustomGroup?.bind(c);
 
   return {
     addSource: (input) => c.addSource(input),
@@ -285,6 +291,62 @@ export function createProfileScopedCatalog(
     ...(c.setParentalPin ? { setParentalPin: c.setParentalPin.bind(c) } : {}),
     ...(c.verifyParentalPin ? { verifyParentalPin: c.verifyParentalPin.bind(c) } : {}),
     ...(c.clearParentalPin ? { clearParentalPin: c.clearParentalPin.bind(c) } : {}),
+    ...(listChannelOverrides
+      ? {
+          listChannelOverrides: (profileId) =>
+            listChannelOverrides(profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(setChannelOverride
+      ? {
+          setChannelOverride: (input) =>
+            setChannelOverride({
+              ...input,
+              profileId: input.profileId ?? getScope().profileId,
+            }),
+        }
+      : {}),
+    ...(clearChannelOverride
+      ? {
+          clearChannelOverride: (itemKey, profileId) =>
+            clearChannelOverride(itemKey, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(reorderChannels
+      ? {
+          reorderChannels: (itemKeys, sourceId, profileId) =>
+            reorderChannels(itemKeys, sourceId, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(listCustomGroups
+      ? {
+          listCustomGroups: (profileId, opts) => {
+            const scope = getScope();
+            return listCustomGroups(profileId ?? scope.profileId, {
+              ...opts,
+              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
+        }
+      : {}),
+    ...(createCustomGroup
+      ? {
+          createCustomGroup: (input) =>
+            createCustomGroup({
+              ...input,
+              profileId: input.profileId ?? getScope().profileId,
+            }),
+        }
+      : {}),
+    ...(c.updateCustomGroup ? { updateCustomGroup: c.updateCustomGroup.bind(c) } : {}),
+    ...(c.deleteCustomGroup ? { deleteCustomGroup: c.deleteCustomGroup.bind(c) } : {}),
+    ...(c.setCustomGroupItems ? { setCustomGroupItems: c.setCustomGroupItems.bind(c) } : {}),
+    ...(c.addChannelToCustomGroup
+      ? { addChannelToCustomGroup: c.addChannelToCustomGroup.bind(c) }
+      : {}),
+    ...(c.removeChannelFromCustomGroup
+      ? { removeChannelFromCustomGroup: c.removeChannelFromCustomGroup.bind(c) }
+      : {}),
     ...(c.flushPendingWrites ? { flushPendingWrites: c.flushPendingWrites.bind(c) } : {}),
     close: () => c.close(),
   };

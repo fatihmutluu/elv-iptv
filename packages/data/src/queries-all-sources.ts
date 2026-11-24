@@ -11,9 +11,16 @@ import {
   ITEM_COLS,
   ITEM_TABLE,
   type ItemRow,
+  LIVE_EFFECTIVE_NAME_EXPR,
+  LIVE_EFFECTIVE_SORT_TITLE_EXPR,
+  LIVE_MANUAL_ORDER_PREFIX,
+  LIVE_OVERRIDE_JOIN,
+  LIVE_OVERRIDE_META_COLS,
   type ListItemsOptions,
+  liveOverrideHiddenClause,
   mapItemRow,
   type RawItemRow,
+  resolveQueryProfileId,
   watchedFilterClause,
 } from './queries-shared';
 
@@ -107,6 +114,16 @@ async function fetchRawSourceSlice(
   filter: ActiveParentalFilter | null,
 ): Promise<RawItemRow[]> {
   if (limit <= 0) return [];
+  const isLive = kind === 'live';
+  const profileId = resolveQueryProfileId(opts?.profileId);
+  const liveJoin = isLive ? `\n           ${LIVE_OVERRIDE_JOIN}` : '';
+  const liveJoinParams: SqlValue[] = isLive ? [profileId] : [];
+  const liveHidden = isLive ? liveOverrideHiddenClause(opts?.includeHidden) : '';
+  const nameExpr = isLive
+    ? `${LIVE_EFFECTIVE_NAME_EXPR} AS name, ${LIVE_OVERRIDE_META_COLS}`
+    : 't.name';
+  const sortExpr = isLive ? `${LIVE_EFFECTIVE_SORT_TITLE_EXPR} AS sort_title` : 't.sort_title';
+  const metaSelect = isLive ? ', original_name, co_is_hidden, co_sort_order' : '';
   const watched = watchedFilterClause('t.key', opts);
   const restrict =
     filter === null
@@ -115,32 +132,43 @@ async function fetchRawSourceSlice(
   const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 't.name', 't.name_fold');
   const dedup = allSourcesDedupSpec(kind, opts);
   if (dedup !== undefined) {
-    const orderBy = opts?.sortBy === 'alpha' ? 'sort_title ASC, key ASC' : 'name_fold ASC, id ASC';
+    const orderBy =
+      opts?.sortBy === 'alpha'
+        ? 'sort_title ASC, key ASC'
+        : isLive
+          ? 'CASE WHEN co_sort_order IS NULL THEN 1 ELSE 0 END ASC, co_sort_order ASC, name_fold ASC, id ASC'
+          : 'name_fold ASC, id ASC';
     return db.all<RawItemRow>(
       `WITH ranked AS (
-         SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, t.sort_title, ${ITEM_COLS[kind]},
+         SELECT t.id, t.key, t.source_id, t.provider_id, ${nameExpr}, t.name_fold, ${sortExpr}, ${ITEM_COLS[kind]},
                 COUNT(*) OVER (PARTITION BY ${dedup.groupExpr}) AS ${dedup.countCol},
                 ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
-           FROM ${ITEM_TABLE[kind]} t
-          WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl}
+           FROM ${ITEM_TABLE[kind]} t${liveJoin}
+          WHERE t.source_id = ? AND t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl}
        )
-       SELECT id, key, source_id, provider_id, name, logo, rating, year, num, ${dedup.countCol}
+       SELECT id, key, source_id, provider_id, name${metaSelect}, logo, rating, year, num, ${dedup.countCol}
          FROM ranked
         WHERE rn = 1
         ORDER BY ${orderBy}
         LIMIT ? OFFSET ?`,
-      [sourceId, ...watched.params, ...restrict.params, limit, offset],
+      [...liveJoinParams, sourceId, ...watched.params, ...restrict.params, limit, offset],
     );
   }
   const orderBy =
-    opts?.sortBy === 'alpha' ? 't.sort_title ASC, t.key ASC' : 't.name_fold ASC, t.id ASC';
+    opts?.sortBy === 'alpha'
+      ? isLive
+        ? `${LIVE_EFFECTIVE_SORT_TITLE_EXPR} ASC, t.key ASC`
+        : 't.sort_title ASC, t.key ASC'
+      : isLive
+        ? `${LIVE_MANUAL_ORDER_PREFIX}, t.name_fold ASC, t.id ASC`
+        : 't.name_fold ASC, t.id ASC';
   return db.all<RawItemRow>(
-    `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${ITEM_COLS[kind]}
-       FROM ${ITEM_TABLE[kind]} t
-      WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl}
+    `SELECT t.id, t.key, t.source_id, t.provider_id, ${nameExpr}, ${ITEM_COLS[kind]}
+       FROM ${ITEM_TABLE[kind]} t${liveJoin}
+      WHERE t.source_id = ? AND t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl}
       ORDER BY ${orderBy}
       LIMIT ? OFFSET ?`,
-    [sourceId, ...watched.params, ...restrict.params, limit, offset],
+    [...liveJoinParams, sourceId, ...watched.params, ...restrict.params, limit, offset],
   );
 }
 
@@ -239,11 +267,21 @@ async function fetchRawSourceCursorSlice(
   sourceId: string,
   cursor: SourceNameCursor | undefined,
   limit: number,
-  opts: Pick<ListItemsOptions, 'excludeWatched' | 'profileId' | 'parentalUnlocked'> | undefined,
+  opts:
+    | Pick<ListItemsOptions, 'excludeWatched' | 'profileId' | 'parentalUnlocked' | 'includeHidden'>
+    | undefined,
   filter: ActiveParentalFilter | null,
 ): Promise<CursorRawItemRow[]> {
   if (limit <= 0) return [];
   const table = ITEM_TABLE[kind];
+  const isLive = kind === 'live';
+  const profileId = resolveQueryProfileId(opts?.profileId);
+  const liveJoin = isLive ? `\n           ${LIVE_OVERRIDE_JOIN}` : '';
+  const liveJoinParams: SqlValue[] = isLive ? [profileId] : [];
+  const liveHidden = isLive ? liveOverrideHiddenClause(opts?.includeHidden) : '';
+  const nameExpr = isLive
+    ? `${LIVE_EFFECTIVE_NAME_EXPR} AS name, ${LIVE_OVERRIDE_META_COLS}`
+    : 't.name';
   const watched = watchedFilterClause('t.key', opts);
   const restrict =
     filter === null
@@ -252,21 +290,22 @@ async function fetchRawSourceCursorSlice(
   const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 't.name', 't.name_fold');
   return cursor === undefined
     ? db.all<CursorRawItemRow>(
-        `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, ${ITEM_COLS[kind]}
-           FROM ${table} t
-          WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl}
+        `SELECT t.id, t.key, t.source_id, t.provider_id, ${nameExpr}, t.name_fold, ${ITEM_COLS[kind]}
+           FROM ${table} t${liveJoin}
+          WHERE t.source_id = ? AND t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl}
           ORDER BY t.name_fold ASC, t.id ASC
           LIMIT ?`,
-        [sourceId, ...watched.params, ...restrict.params, limit],
+        [...liveJoinParams, sourceId, ...watched.params, ...restrict.params, limit],
       )
     : db.all<CursorRawItemRow>(
-        `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, ${ITEM_COLS[kind]}
-           FROM ${table} t
-          WHERE t.source_id = ? AND t.is_hidden = 0
+        `SELECT t.id, t.key, t.source_id, t.provider_id, ${nameExpr}, t.name_fold, ${ITEM_COLS[kind]}
+           FROM ${table} t${liveJoin}
+          WHERE t.source_id = ? AND t.is_hidden = 0${liveHidden}
             AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))${watched.clause}${restrict.clause}${adultExcl}
           ORDER BY t.name_fold ASC, t.id ASC
           LIMIT ?`,
         [
+          ...liveJoinParams,
           sourceId,
           cursor.nameFold,
           cursor.nameFold,
@@ -284,7 +323,9 @@ async function fetchSourceCursorSlice(
   sourceId: string,
   cursor: SourceNameCursor | undefined,
   limit: number,
-  opts: Pick<ListItemsOptions, 'excludeWatched' | 'profileId' | 'parentalUnlocked'> | undefined,
+  opts:
+    | Pick<ListItemsOptions, 'excludeWatched' | 'profileId' | 'parentalUnlocked' | 'includeHidden'>
+    | undefined,
   filter: ActiveParentalFilter | null,
 ): Promise<{ rows: ItemRow[]; cursors: SourceNameCursor[] }> {
   if (limit <= 0) return { rows: [], cursors: [] };
@@ -305,7 +346,10 @@ export async function queryAllSourcesItemsByCursor(
   cursors: Readonly<Record<string, SourceNameCursor>>,
   limit: number,
   sourceIds?: readonly string[],
-  opts?: Pick<ListItemsOptions, 'excludeWatched' | 'profileId' | 'parentalUnlocked'>,
+  opts?: Pick<
+    ListItemsOptions,
+    'excludeWatched' | 'profileId' | 'parentalUnlocked' | 'includeHidden'
+  >,
 ): Promise<AllSourcesCursorPage> {
   const page = clampPage(0, limit);
   const nextCursors: Record<string, SourceNameCursor> = { ...cursors };
@@ -334,6 +378,11 @@ export async function queryAllSourcesItemsByCursor(
 
   const cap = page.limit + 1;
   const table = ITEM_TABLE[kind];
+  const isLive = kind === 'live';
+  const profileId = resolveQueryProfileId(opts?.profileId);
+  const liveJoin = isLive ? ` ${LIVE_OVERRIDE_JOIN}` : '';
+  const liveJoinParams: SqlValue[] = isLive ? [profileId] : [];
+  const liveHidden = isLive ? liveOverrideHiddenClause(opts?.includeHidden) : '';
   const watched = watchedFilterClause('t.key', opts);
   const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 't.name', 't.name_fold');
   const counts = await Promise.all(
@@ -347,18 +396,27 @@ export async function queryAllSourcesItemsByCursor(
         c === undefined
           ? await db.all<{ n: number }>(
               `SELECT COUNT(*) AS n FROM (
-                 SELECT 1 FROM ${table} t WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl} LIMIT ?
+                 SELECT 1 FROM ${table} t${liveJoin} WHERE t.source_id = ? AND t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl} LIMIT ?
                )`,
-              [id, ...watched.params, ...restrict.params, cap],
+              [...liveJoinParams, id, ...watched.params, ...restrict.params, cap],
             )
           : await db.all<{ n: number }>(
               `SELECT COUNT(*) AS n FROM (
-                 SELECT 1 FROM ${table} t
-                  WHERE t.source_id = ? AND t.is_hidden = 0
+                 SELECT 1 FROM ${table} t${liveJoin}
+                  WHERE t.source_id = ? AND t.is_hidden = 0${liveHidden}
                     AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))${watched.clause}${restrict.clause}${adultExcl}
                   LIMIT ?
                )`,
-              [id, c.nameFold, c.nameFold, c.id, ...watched.params, ...restrict.params, cap],
+              [
+                ...liveJoinParams,
+                id,
+                c.nameFold,
+                c.nameFold,
+                c.id,
+                ...watched.params,
+                ...restrict.params,
+                cap,
+              ],
             );
       return rows[0]?.n ?? 0;
     }),
@@ -398,6 +456,16 @@ async function fetchRawGlobalAlphaSlice(
 ): Promise<RawItemRow[]> {
   if (limit <= 0 || activeIds.length === 0) return [];
   const table = ITEM_TABLE[kind];
+  const isLive = kind === 'live';
+  const profileId = resolveQueryProfileId(opts?.profileId);
+  const liveJoin = isLive ? `\n           ${LIVE_OVERRIDE_JOIN}` : '';
+  const liveJoinParams: SqlValue[] = isLive ? [profileId] : [];
+  const liveHidden = isLive ? liveOverrideHiddenClause(opts?.includeHidden) : '';
+  const nameExpr = isLive
+    ? `${LIVE_EFFECTIVE_NAME_EXPR} AS name, ${LIVE_OVERRIDE_META_COLS}`
+    : 't.name';
+  const sortExpr = isLive ? `${LIVE_EFFECTIVE_SORT_TITLE_EXPR} AS sort_title` : 't.sort_title';
+  const metaSelect = isLive ? ', original_name, co_is_hidden, co_sort_order' : '';
   const placeholders = activeIds.map(() => '?').join(', ');
   const watched = watchedFilterClause('t.key', opts);
   const restrict =
@@ -409,27 +477,30 @@ async function fetchRawGlobalAlphaSlice(
   if (dedup !== undefined) {
     return db.all<RawItemRow>(
       `WITH ranked AS (
-         SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, t.sort_title, ${ITEM_COLS[kind]},
+         SELECT t.id, t.key, t.source_id, t.provider_id, ${nameExpr}, t.name_fold, ${sortExpr}, ${ITEM_COLS[kind]},
                 COUNT(*) OVER (PARTITION BY t.source_id, ${dedup.groupExpr}) AS ${dedup.countCol},
                 ROW_NUMBER() OVER (PARTITION BY t.source_id, ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
-           FROM ${table} t
-          WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl}
+           FROM ${table} t${liveJoin}
+          WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl}
        )
-       SELECT id, key, source_id, provider_id, name, logo, rating, year, num, ${dedup.countCol}
+       SELECT id, key, source_id, provider_id, name${metaSelect}, logo, rating, year, num, ${dedup.countCol}
          FROM ranked
         WHERE rn = 1
         ORDER BY sort_title ASC, key ASC
         LIMIT ? OFFSET ?`,
-      [...activeIds, ...watched.params, ...restrict.params, limit, offset],
+      [...liveJoinParams, ...activeIds, ...watched.params, ...restrict.params, limit, offset],
     );
   }
+  const orderBy = isLive
+    ? `${LIVE_EFFECTIVE_SORT_TITLE_EXPR} ASC, t.key ASC`
+    : 't.sort_title ASC, t.key ASC';
   return db.all<RawItemRow>(
-    `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${ITEM_COLS[kind]}
-       FROM ${table} t
-      WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl}
-      ORDER BY t.sort_title ASC, t.key ASC
+    `SELECT t.id, t.key, t.source_id, t.provider_id, ${nameExpr}, ${ITEM_COLS[kind]}
+       FROM ${table} t${liveJoin}
+      WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl}
+      ORDER BY ${orderBy}
       LIMIT ? OFFSET ?`,
-    [...activeIds, ...watched.params, ...restrict.params, limit, offset],
+    [...liveJoinParams, ...activeIds, ...watched.params, ...restrict.params, limit, offset],
   );
 }
 
@@ -475,6 +546,11 @@ export async function queryAllSourcesItems(
 
   const endTarget = page.offset + page.limit;
   const table = ITEM_TABLE[kind];
+  const isLive = kind === 'live';
+  const profileId = resolveQueryProfileId(opts?.profileId);
+  const liveJoin = isLive ? ` ${LIVE_OVERRIDE_JOIN}` : '';
+  const liveJoinParams: SqlValue[] = isLive ? [profileId] : [];
+  const liveHidden = isLive ? liveOverrideHiddenClause(opts?.includeHidden) : '';
   const watched = watchedFilterClause('t.key', opts);
   const dedup = allSourcesDedupSpec(kind, opts);
   const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 't.name', 't.name_fold');
@@ -488,19 +564,19 @@ export async function queryAllSourcesItems(
         dedup === undefined
           ? await db.all<{ n: number }>(
               `SELECT COUNT(*) AS n FROM (
-                 SELECT 1 FROM ${table} t WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl} LIMIT ?
+                 SELECT 1 FROM ${table} t${liveJoin} WHERE t.source_id = ? AND t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl} LIMIT ?
                )`,
-              [id, ...watched.params, ...restrict.params, endTarget],
+              [...liveJoinParams, id, ...watched.params, ...restrict.params, endTarget],
             )
           : await db.all<{ n: number }>(
               `SELECT COUNT(*) AS n FROM (
                  SELECT 1 FROM (
                    SELECT ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
-                     FROM ${table} t
-                    WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl}
+                     FROM ${table} t${liveJoin}
+                    WHERE t.source_id = ? AND t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl}
                  ) WHERE rn = 1 LIMIT ?
                )`,
-              [id, ...watched.params, ...restrict.params, endTarget],
+              [...liveJoinParams, id, ...watched.params, ...restrict.params, endTarget],
             );
       return rows[0]?.n ?? 0;
     }),

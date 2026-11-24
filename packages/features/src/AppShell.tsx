@@ -1,16 +1,10 @@
 import type { CatalogService, SearchScope } from '@elv/data';
-import type { ProfilePreferencesManager } from '@elv/domain';
+import type { KeymapStore, ProfilePreferencesManager } from '@elv/domain';
 import type { ConnectionTracker } from '@elv/playback';
-import {
-  TvFocusAnchor,
-  useI18n,
-  useTheme,
-  useUiAdapters,
-  useViewport,
-  webBackdropBlur,
-} from '@elv/ui-kit';
+import { useI18n, useViewport } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { usePlayDeepLinkHandler } from './app-shell-deep-link';
 import {
   AppShellProfileOverlays,
   buildShellProfileUtility,
@@ -18,6 +12,13 @@ import {
 } from './app-shell-overlays';
 import { AppShellPlayerView } from './app-shell-player';
 import {
+  AppShellExitToast,
+  AppShellStage,
+  useShellArtworkCacheLimit,
+  useShellIncomingLocalPlaylist,
+} from './app-shell-sections';
+import {
+  type AppTab,
   buildShellCrashProps,
   buildShellNavigation,
   clearSourceFromCatalogMemory,
@@ -32,24 +33,29 @@ import {
   type PrimaryNavTab,
   pushDetailStack,
 } from './app-shell-state';
-import { CatalogDiscoveryScreen, type CatalogTabMemory } from './catalog';
-import { DetailScreen } from './detail';
-import { HomeScreen } from './home';
-import { EMPTY_LIVE_MEMORY, LiveScreen, type LiveTabMemory, recordChannelTune } from './live';
-import { ThirdPartyNoticesScreen } from './notices';
+import { useTvHomeChannelsSync } from './app-shell-tv-channels';
+import type { CatalogTabMemory } from './catalog';
+import {
+  ChannelManagementOverlay,
+  EMPTY_LIVE_MEMORY,
+  type LiveTabMemory,
+  recordChannelTune,
+} from './live';
 import { ConnectionLimitDialog } from './player/ConnectionLimitDialog';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
+import type { LanPairingPort } from './ports/lan-pairing-host';
+import type { PlayDeepLinkTarget } from './ports/play-deep-link';
 import type { PlayTarget } from './ports/play-target';
 import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
-import type { PickedPlaylistFile, SourceImportHost } from './ports/source-import-host';
+import type { SourceImportHost } from './ports/source-import-host';
+import type { TvHomeChannelsPort } from './ports/tv-home-channels';
 import type { VideoHost } from './ports/video-host';
-import { ProfilesAndParentalPanel } from './profiles';
 import { OledScreensaverOverlay, useOledScreensaver } from './screensaver';
-import { SearchScreen } from './search';
-import { SettingsScreen, type SettingsSection } from './settings';
+import type { SettingsSection } from './settings';
 import {
   createProfileScopedCatalog,
   type DetailTarget,
+  KeymapProvider,
   ProfileProvider,
   useProfile,
 } from './shared';
@@ -70,11 +76,9 @@ import {
   useShellFlush,
   useShellSources,
 } from './shell';
-import { SourcesScreen } from './sources';
 import { CachedCatalogStrip } from './sources/CachedCatalogStrip';
 
-/** Top-level shell tab identifier. */
-export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'search' | 'settings';
+export type { AppTab };
 
 /** Props of {@link AppShell}. */
 export interface AppShellProps {
@@ -88,6 +92,16 @@ export interface AppShellProps {
   connectionTracker?: ConnectionTracker;
   /** Optional platform clipboard & sandboxed local playlist picker port (`#51`). */
   sourceImportHost?: SourceImportHost;
+  /** Optional platform local LAN QR pairing port (`#50`). */
+  lanPairing?: LanPairingPort;
+  /** Optional dedicated sparse remote keymap store (`#33`). */
+  keymapStore?: KeymapStore;
+  /** Optional Android TV Home Screen preview channels port (`#273`). */
+  tvHomeChannels?: TvHomeChannelsPort;
+  /** Optional incoming `elviptv://play?key=...` deep-link target (`#273`). */
+  pendingDeepLink?: PlayDeepLinkTarget | null;
+  /** Invoked once `pendingDeepLink` has been consumed by `AppShell` (`#273`). */
+  onDeepLinkHandled?: () => void;
   /** Optional test/host hook notified with the active {@link PlaybackGuard}. */
   onPlaybackGuardReady?: (guard: PlaybackGuard) => void;
 }
@@ -103,8 +117,22 @@ export function AppShell(props: AppShellProps): ReactElement {
         ? { profilePreferences: effectiveProfilePreferences }
         : {})}
     >
-      <AppShellContent {...props} />
+      <AppShellWithKeymap {...props} />
     </ProfileProvider>
+  );
+}
+
+function AppShellWithKeymap(props: AppShellProps): ReactElement {
+  const preferences = usePreferences();
+  const profile = useProfile();
+  const effectiveKeymapStore = props.keymapStore ?? preferences.keymapStore;
+  return (
+    <KeymapProvider
+      activeProfileId={profile.activeProfileId}
+      {...(effectiveKeymapStore !== undefined ? { keymapStore: effectiveKeymapStore } : {})}
+    >
+      <AppShellContent {...props} />
+    </KeymapProvider>
   );
 }
 
@@ -112,7 +140,6 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const { catalog, videoHost, appLifecycle, onPlaybackGuardReady } = props;
   const externalRefreshToken = props.externalRefreshToken ?? 0;
   const i18n = useI18n();
-  const theme = useTheme();
   const viewport = useViewport();
   const isTv = viewport.formFactor === 'tv';
   const preferences = usePreferences();
@@ -125,7 +152,9 @@ function AppShellContent(props: AppShellProps): ReactElement {
     profileId: profile.activeProfileId,
     parentalUnlocked: profile.parentalUnlocked,
   };
+  const [settingsChannelManagerOpen, setSettingsChannelManagerOpen] = useState(false);
   const hasProfileOverlay = profile.profilePickerOpen || profile.pinDialog !== null;
+  const hasRootOverlay = hasProfileOverlay || settingsChannelManagerOpen;
   const confirmExitOnBack = preferences.preferences.confirmExitOnBack;
   const confirmExitOnBackRef = useRef(confirmExitOnBack);
   confirmExitOnBackRef.current = confirmExitOnBack;
@@ -135,13 +164,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     onVisibleChange: setExitToastVisible,
   });
   useEffect(() => () => exitBackGuardRef.current?.dispose(), []);
-  const uiAdapters = useUiAdapters();
-  const artworkCacheLimitMb = preferences.preferences.artworkCacheLimitMb;
-  useEffect(() => {
-    const setLimitBytes = uiAdapters.artworkCache?.setLimitBytes;
-    if (setLimitBytes === undefined) return;
-    void Promise.resolve(setLimitBytes(artworkCacheLimitMb * 1024 * 1024)).catch(() => undefined);
-  }, [artworkCacheLimitMb, uiAdapters.artworkCache]);
+  useShellArtworkCacheLimit(preferences.preferences.artworkCacheLimitMb);
   const [activeTab, setActiveTab] = useState<AppTab>('settings');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('sources');
   const [topNavFocused, setTopNavFocused] = useState(false);
@@ -361,45 +384,18 @@ function AppShellContent(props: AppShellProps): ReactElement {
     setSettingsSection('profiles');
     selectTab('settings', true);
   }, [selectTab]);
-  const [incomingLocalPlaylist, setIncomingLocalPlaylist] = useState<PickedPlaylistFile | null>(
-    null,
-  );
-  const consumeIncomingLocalPlaylist = useCallback(() => {
-    setIncomingLocalPlaylist(null);
-  }, []);
-  const handleIncomingLocalPlaylist = useCallback(
-    (file: PickedPlaylistFile) => {
-      if (playTargetRef.current !== null) {
-        connectionGuard.releaseActive();
-        playTargetRef.current = null;
-        setPlayTarget(null);
-      }
-      setIncomingLocalPlaylist(file);
-      openSources();
-    },
-    [connectionGuard.releaseActive, openSources],
-  );
-  const sourceImportHost = props.sourceImportHost;
-  useEffect(() => {
-    let active = true;
-    const unsubscribe = sourceImportHost?.onOpenPlaylistFile?.((file) => {
-      if (active) handleIncomingLocalPlaylist(file);
-    });
-    const consumePending = sourceImportHost?.consumePendingPlaylistFiles;
-    if (consumePending !== undefined) {
-      void Promise.resolve(consumePending())
-        .then((pending) => {
-          if (!active || pending.length === 0) return;
-          const latest = pending[pending.length - 1];
-          if (latest !== undefined) handleIncomingLocalPlaylist(latest);
-        })
-        .catch(() => undefined);
+  const handlePrepareIncomingLocalPlaylist = useCallback(() => {
+    if (playTargetRef.current !== null) {
+      connectionGuard.releaseActive();
+      playTargetRef.current = null;
+      setPlayTarget(null);
     }
-    return () => {
-      active = false;
-      unsubscribe?.();
-    };
-  }, [handleIncomingLocalPlaylist, sourceImportHost]);
+    openSources();
+  }, [connectionGuard.releaseActive, openSources]);
+  const { incomingLocalPlaylist, consumeIncomingLocalPlaylist } = useShellIncomingLocalPlaylist({
+    ...(props.sourceImportHost !== undefined ? { sourceImportHost: props.sourceImportHost } : {}),
+    onIncomingFile: handlePrepareIncomingLocalPlaylist,
+  });
   const openDetail = useCallback((target: DetailTarget) => {
     exitBackGuardRef.current?.reset();
     setDetailStack((prev) => pushDetailStack(prev, target));
@@ -470,9 +466,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   );
   const handleLiveMemoryChange = useCallback((next: LiveTabMemory) => {
     setLiveMemory((prev) => {
-      if (next.mode !== prev.mode) {
-        userPickedLiveModeRef.current = true;
-      }
+      if (next.mode !== prev.mode) userPickedLiveModeRef.current = true;
       return next;
     });
   }, []);
@@ -484,6 +478,11 @@ function AppShellContent(props: AppShellProps): ReactElement {
     (series: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, series })),
     [],
   );
+  const handleChannelsMutated = useCallback(() => {
+    uiCache.clear();
+    shell.bumpCatalogRevision();
+    setUserStateVersion((v) => v + 1);
+  }, [shell.bumpCatalogRevision, uiCache]);
   const crashProps = useMemo(
     () =>
       buildShellCrashProps({
@@ -516,12 +515,27 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const contentIsolationKey = `${profile.activeProfileId}:${profile.parentalUnlocked ? 'u' : 'l'}`;
   const effectiveRefreshToken = refreshToken + profile.profileRevision;
   const effectiveUserStateVersion = userStateVersion + profile.profileRevision;
-  const stageProps = {
+
+  useTvHomeChannelsSync({
     catalog: observedCatalog,
-    refreshToken: effectiveRefreshToken,
-    onFocusTopNav: handleFocusTopNav,
-    isActiveScope: !topNavFocused && !hasProfileOverlay,
-  };
+    ...(props.tvHomeChannels !== undefined ? { tvHomeChannels: props.tvHomeChannels } : {}),
+    profilesReady: profile.profilesReady,
+    syncKey: `${catalogRevision}:${effectiveUserStateVersion}:${profileScopeKey}:${locale}`,
+    continueWatchingLabel: i18n.t('tvHomeChannels.continueWatching'),
+    favoritesLabel: i18n.t('tvHomeChannels.favorites'),
+  });
+
+  usePlayDeepLinkHandler({
+    catalog: observedCatalog,
+    profile,
+    pendingDeepLink: props.pendingDeepLink ?? null,
+    onPlay: handlePlay,
+    onOpenDetail: openDetail,
+    ...(props.onDeepLinkHandled !== undefined
+      ? { onDeepLinkHandled: props.onDeepLinkHandled }
+      : {}),
+  });
+
   const onPlayerTargetChange = connectionGuard.replaceActiveTarget;
   const onPlayerExit = () => {
     const exiting = playTargetRef.current;
@@ -545,6 +559,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     activeDetail === null &&
     activeTab !== 'settings' &&
     importHealth.health.length > 0;
+
   return (
     <RouteActiveProvider active={documentVisible && appForeground}>
       <CatalogUiCacheProvider cache={uiCache}>
@@ -559,7 +574,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                   playbackGuard={playbackGuard}
                   preferences={preferences}
                   {...(appLifecycle !== undefined ? { appLifecycle } : {})}
-                  externalOverlayOpen={hasProfileOverlay}
+                  externalOverlayOpen={hasRootOverlay}
                   onPlaybackActiveChange={setPlayerPlaybackActive}
                   onTargetChange={onPlayerTargetChange}
                   onExit={onPlayerExit}
@@ -573,7 +588,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                 utilities={utilities}
                 activeId={activeTab}
                 onSelectDestination={handleSelectDestination}
-                navFocused={topNavFocused && !hasProfileOverlay}
+                navFocused={topNavFocused && !hasRootOverlay}
                 onExitNavFocus={handleExitNavFocus}
                 onBack={handleNavBack}
                 overlay={hasHeroOverlay}
@@ -594,167 +609,60 @@ function AppShellContent(props: AppShellProps): ReactElement {
                       />
                     </View>
                   ) : null}
-                  {isResolvingInitialSources ? (
-                    <View testID="app-shell-boot" style={styles.bootCanvas}>
-                      {isTv && !topNavFocused ? (
-                        <TvFocusAnchor testID="app-shell-boot-focus-anchor" />
-                      ) : null}
-                    </View>
-                  ) : activeDetail !== null ? (
-                    <DetailScreen
-                      key={`${activeDetail.itemKey}:${contentIsolationKey}`}
-                      target={activeDetail}
-                      userStateVersion={effectiveUserStateVersion}
-                      preferredAudioLang={preferences.preferences.preferredAudioLang}
-                      preferredSubtitleLang={preferences.preferences.preferredSubtitleLang}
-                      onSearchPerson={handleSearchPerson}
-                      onBack={popDetail}
-                      onPlay={handlePlay}
-                      onOpenDetail={openDetail}
-                      onScrollTopChange={setHeroScrolled}
-                      {...stageProps}
-                    />
-                  ) : activeTab === 'settings' ? (
-                    <SettingsScreen
-                      section={settingsSection}
-                      onSectionChange={handleSettingsSectionChange}
-                      preferences={preferences}
-                      onFocusTopNav={handleFocusTopNav}
-                      isActiveScope={!topNavFocused && !hasProfileOverlay}
-                      hasTransientOverlay={hasProfileOverlay}
-                      renderProfiles={(slot) => (
-                        <ProfilesAndParentalPanel
-                          catalog={observedCatalog}
-                          sources={sources}
-                          {...slot}
-                        />
-                      )}
-                      renderSources={(slot) => (
-                        <SourcesScreen
-                          catalog={observedCatalog}
-                          embedded
-                          playbackGuard={playbackGuard}
-                          {...(props.sourceImportHost !== undefined
-                            ? { sourceImportHost: props.sourceImportHost }
-                            : {})}
-                          {...(incomingLocalPlaylist !== null
-                            ? {
-                                incomingLocalPlaylist,
-                                onConsumeIncomingLocalPlaylist: consumeIncomingLocalPlaylist,
-                              }
-                            : {})}
-                          externalRefreshToken={externalRefreshToken + refreshToken}
-                          {...(readySourcesCount > 0
-                            ? { onOpenMenu: () => selectTab('home') }
-                            : {})}
-                          {...slot}
-                        />
-                      )}
-                      renderLicenses={(slot) => <ThirdPartyNoticesScreen embedded {...slot} />}
-                    />
-                  ) : activeTab === 'search' ? (
-                    <SearchScreen
-                      key={contentIsolationKey}
-                      userStateVersion={effectiveUserStateVersion}
-                      initialQuery={searchQuery}
-                      onQueryChange={setSearchQuery}
-                      initialScope={searchScope}
-                      onScopeChange={setSearchScope}
-                      recentSearches={recentSearches}
-                      onRecentSearchesChange={setRecentSearches}
-                      onPlay={handlePlay}
-                      onOpenDetail={openDetail}
-                      {...stageProps}
-                    />
-                  ) : activeTab === 'home' ? (
-                    <HomeScreen
-                      key={contentIsolationKey}
-                      sources={sources}
-                      userStateVersion={effectiveUserStateVersion}
-                      onPlay={handlePlay}
-                      onOpenTab={selectTab}
-                      onOpenDetail={openDetail}
-                      onOpenSources={openSources}
-                      onScrollTopChange={setHeroScrolled}
-                      {...stageProps}
-                    />
-                  ) : activeTab === 'movie' || activeTab === 'series' ? (
-                    <CatalogDiscoveryScreen
-                      key={`${activeTab}:${contentIsolationKey}`}
-                      kind={activeTab}
-                      sources={sources}
-                      userStateVersion={effectiveUserStateVersion}
-                      groupVersions={
-                        activeTab === 'movie' ? preferences.preferences.groupVodVersions : false
-                      }
-                      memory={catalogMemoryByTab[activeTab]}
-                      onMemoryChange={
-                        activeTab === 'movie' ? handleMovieMemoryChange : handleSeriesMemoryChange
-                      }
-                      onPlay={handlePlay}
-                      onOpenDetail={openDetail}
-                      onOpenSources={openSources}
-                      {...stageProps}
-                    />
-                  ) : (
-                    <LiveScreen
-                      key={contentIsolationKey}
-                      sources={sources}
-                      userStateVersion={effectiveUserStateVersion}
-                      memory={liveMemory}
-                      onMemoryChange={handleLiveMemoryChange}
-                      videoHost={videoHost}
-                      playbackGuard={playbackGuard}
-                      defaultLiveMode={preferences.preferences.defaultLiveMode}
-                      epgTimeSpanHours={preferences.preferences.epgTimeSpanHours}
-                      epgRowDensity={preferences.preferences.epgRowDensity}
-                      epgGenreTints={preferences.preferences.epgGenreTints}
-                      epgShowClock={preferences.preferences.epgShowClock}
-                      logoBackdropMode={preferences.preferences.logoBackdropMode}
-                      showSourceBadges={preferences.preferences.showSourceBadges}
-                      liveOkTwoStepPreview={preferences.preferences.liveOkTwoStepPreview}
-                      cleanChannelTitles={preferences.preferences.cleanChannelTitles}
-                      collapseVariants={preferences.preferences.collapseLiveVariants}
-                      onEmbeddedPlaybackActiveChange={setLiveEmbeddedPlaybackActive}
-                      onPlay={handlePlay}
-                      onOpenSources={openSources}
-                      {...stageProps}
-                    />
-                  )}
+                  <AppShellStage
+                    isTv={isTv}
+                    topNavFocused={topNavFocused}
+                    isResolvingInitialSources={isResolvingInitialSources}
+                    activeTab={activeTab}
+                    activeDetail={activeDetail}
+                    contentIsolationKey={contentIsolationKey}
+                    catalog={observedCatalog}
+                    sources={sources}
+                    readySourcesCount={readySourcesCount}
+                    refreshToken={refreshToken}
+                    externalRefreshToken={externalRefreshToken}
+                    effectiveRefreshToken={effectiveRefreshToken}
+                    effectiveUserStateVersion={effectiveUserStateVersion}
+                    hasTransientOverlay={hasRootOverlay}
+                    isActiveScope={!topNavFocused && !hasRootOverlay}
+                    preferences={preferences}
+                    settingsSection={settingsSection}
+                    onSettingsSectionChange={handleSettingsSectionChange}
+                    playbackGuard={playbackGuard}
+                    videoHost={videoHost}
+                    {...(props.sourceImportHost !== undefined
+                      ? { sourceImportHost: props.sourceImportHost }
+                      : {})}
+                    {...(props.lanPairing !== undefined ? { lanPairing: props.lanPairing } : {})}
+                    incomingLocalPlaylist={incomingLocalPlaylist}
+                    onConsumeIncomingLocalPlaylist={consumeIncomingLocalPlaylist}
+                    searchQuery={searchQuery}
+                    onSearchQueryChange={setSearchQuery}
+                    searchScope={searchScope}
+                    onSearchScopeChange={setSearchScope}
+                    recentSearches={recentSearches}
+                    onRecentSearchesChange={setRecentSearches}
+                    catalogMemoryByTab={catalogMemoryByTab}
+                    onMovieMemoryChange={handleMovieMemoryChange}
+                    onSeriesMemoryChange={handleSeriesMemoryChange}
+                    liveMemory={liveMemory}
+                    onLiveMemoryChange={handleLiveMemoryChange}
+                    onEmbeddedPlaybackActiveChange={setLiveEmbeddedPlaybackActive}
+                    onSearchPerson={handleSearchPerson}
+                    onPopDetail={popDetail}
+                    onOpenDetail={openDetail}
+                    onPlay={handlePlay}
+                    onSelectTab={selectTab}
+                    onOpenSources={openSources}
+                    onOpenChannelManagement={() => setSettingsChannelManagerOpen(true)}
+                    onChannelsMutated={handleChannelsMutated}
+                    onScrollTopChange={setHeroScrolled}
+                    onFocusTopNav={handleFocusTopNav}
+                  />
                 </CrashRecoveryBoundary>
               </AdaptiveNavShell>
             )}
-            {exitToastVisible && playTarget === null ? (
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.exitToastWrap,
-                  {
-                    bottom: 28 + viewport.safeArea.bottom + viewport.overscan.y,
-                    left: viewport.overscan.x,
-                    right: viewport.overscan.x,
-                  },
-                ]}
-              >
-                <View
-                  testID="shell-exit-confirm-toast"
-                  accessibilityLiveRegion="polite"
-                  style={[
-                    styles.exitToastPill,
-                    {
-                      backgroundColor: theme.colors.glassBg,
-                      borderColor: theme.colors.glassBorder,
-                      borderRadius: theme.radius.pill,
-                    },
-                    webBackdropBlur(16),
-                  ]}
-                >
-                  <Text style={[theme.typography.caption, { color: theme.colors.textPrimary }]}>
-                    {i18n.t('shell.backToExitToast')}
-                  </Text>
-                </View>
-              </View>
-            ) : null}
+            <AppShellExitToast visible={exitToastVisible && playTarget === null} />
             {connectionGuard.pending !== null ? (
               <ConnectionLimitDialog
                 check={connectionGuard.pending.check}
@@ -763,6 +671,13 @@ function AppShellContent(props: AppShellProps): ReactElement {
                 onContinueAnyway={connectionGuard.handleContinueAnyway}
               />
             ) : null}
+            <ChannelManagementOverlay
+              visible={settingsChannelManagerOpen}
+              catalog={observedCatalog}
+              sources={sources}
+              onMutated={handleChannelsMutated}
+              onClose={() => setSettingsChannelManagerOpen(false)}
+            />
             <AppShellProfileOverlays onOpenProfilesSettings={openProfilesSettings} />
             <OledScreensaverOverlay state={oledScreensaver.state} onWake={oledScreensaver.wake} />
           </View>
@@ -774,19 +689,5 @@ function AppShellContent(props: AppShellProps): ReactElement {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  bootCanvas: { flex: 1 },
   cachedStripWrap: { paddingHorizontal: 16, paddingTop: 8 },
-  exitToastWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  exitToastPill: {
-    borderWidth: 1,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-  },
 });

@@ -206,6 +206,10 @@ describe('removeSource', () => {
       recent_channels: "(profile_id, source_id, item_key, watched_at) VALUES ('default', ?, ?, 1)",
       parental_locks:
         "(profile_id, source_id, target_kind, item_kind, target_key, created_at) VALUES ('default', ?, 'category', 'live', 'c', 1)",
+      channel_overrides:
+        "(profile_id, item_key, source_id, custom_name, is_hidden, sort_order, updated_at) VALUES ('default', ?, ?, 'Custom', 0, 1, 1)",
+      custom_group_items:
+        "(group_id, item_key, source_id, position, added_at) VALUES ('grp1', ?, ?, 0, 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -219,7 +223,11 @@ describe('removeSource', () => {
           table === 'recent_channels'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
-        } else if (table === 'track_preferences') {
+        } else if (
+          table === 'track_preferences' ||
+          table === 'channel_overrides' ||
+          table === 'custom_group_items'
+        ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
         } else {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id]);
@@ -279,6 +287,10 @@ describe('removeSource', () => {
       recent_channels: "(profile_id, source_id, item_key, watched_at) VALUES ('default', ?, ?, 1)",
       parental_locks:
         "(profile_id, source_id, target_kind, item_kind, target_key, created_at) VALUES ('default', ?, 'category', 'live', 'c', 1)",
+      channel_overrides:
+        "(profile_id, item_key, source_id, custom_name, is_hidden, sort_order, updated_at) VALUES ('default', ?, ?, 'Custom', 0, 1, 1)",
+      custom_group_items:
+        "(group_id, item_key, source_id, position, added_at) VALUES ('grp1', ?, ?, 0, 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -292,7 +304,11 @@ describe('removeSource', () => {
           table === 'recent_channels'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
-        } else if (table === 'track_preferences') {
+        } else if (
+          table === 'track_preferences' ||
+          table === 'channel_overrides' ||
+          table === 'custom_group_items'
+        ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
         } else {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id]);

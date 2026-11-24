@@ -1,5 +1,5 @@
 import { DEFAULT_PREFERENCES, type PreferencesPatch, type PreferencesSnapshot } from '@elv/domain';
-import { Surface, useI18n, useTheme, useViewport } from '@elv/ui-kit';
+import { CtaButton, Surface, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
   type ReactElement,
@@ -28,6 +28,8 @@ export interface LiveTvSettingsPanelProps {
   readonly preferences?: SettingsPreferencesController;
   /** Currently focused Live TV & Guide control on 10-foot TV D-pad navigation. */
   readonly focusedControlId?: LiveTvFocusId | null;
+  /** Opens the Channel Management & Custom Groups overlay (`#60`). */
+  readonly onOpenChannelManagement?: () => void;
 }
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
@@ -40,6 +42,7 @@ type ScrollViewHandle = ComponentRef<typeof ScrollView>;
 export function LiveTvSettingsPanel({
   preferences: suppliedPrefs,
   focusedControlId = null,
+  onOpenChannelManagement,
 }: LiveTvSettingsPanelProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -346,6 +349,30 @@ export function LiveTvSettingsPanel({
           isTv={isTv}
           onToggle={() => applyPatch({ collapseLiveVariants: !activePrefs.collapseLiveVariants })}
         />
+
+        {onOpenChannelManagement !== undefined ? (
+          <>
+            <SettingsDivider />
+            <View style={styles.manageChannelsRow}>
+              <View style={styles.manageChannelsText}>
+                <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
+                  {i18n.t('channels.manage.title')}
+                </Text>
+                <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+                  {i18n.t('channels.manage.subtitle')}
+                </Text>
+              </View>
+              <CtaButton
+                testID="settings-livetv-manage-channels"
+                label={i18n.t('channels.manage.openButton')}
+                variant="secondary"
+                focusable={!isTv}
+                focused={focusedControlId === 'open-channel-management'}
+                onPress={onOpenChannelManagement}
+              />
+            </View>
+          </>
+        ) : null}
       </Surface>
     </ScrollView>
   );
@@ -356,4 +383,12 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 24 },
   headerBlock: { gap: 4 },
   sectionCard: { padding: 18, gap: 14 },
+  manageChannelsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  manageChannelsText: { flex: 1, minWidth: 180, gap: 2 },
 });

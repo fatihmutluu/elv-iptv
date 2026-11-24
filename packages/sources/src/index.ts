@@ -13,6 +13,24 @@ export {
   type ProgrammeFlagInput,
 } from './epg-metadata';
 export {
+  buildLanPairingUrl,
+  constantTimeEqual,
+  isPrivateLanAddress,
+  isValidPairingHostHeader,
+  isValidPairingOrigin,
+  isValidPairingPath,
+  isValidPairingToken,
+  LAN_PAIRING_MAX_BODY_BYTES,
+  LAN_PAIRING_MAX_FAILED_ATTEMPTS,
+  LAN_PAIRING_TTL_MS,
+  type LanPairingLocale,
+  type LanPairingPayload,
+  type LanPairingSessionInfo,
+  parseLanPairingPayload,
+  type RenderLanPairingHtmlOptions,
+  renderLanPairingHtml,
+} from './lan-pairing-protocol';
+export {
   type KindHint,
   type M3uBatch,
   type M3uCatchup,

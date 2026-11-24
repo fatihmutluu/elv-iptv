@@ -29,13 +29,15 @@ export interface LiveContextMenuProps {
     index: number,
     programme: ProgrammeRow,
   ) => void;
-  /** Optional extension slot for hiding a channel from the list (`#400`). */
+  /** Optional extension slot for hiding a channel from the list (`#400`, `#60`). */
   readonly onHideChannel?: (channel: ItemRow) => void;
+  /** Optional extension slot for opening Channel Management & Custom Groups (`#60`). */
+  readonly onManageChannels?: () => void;
   readonly onClose: () => void;
 }
 
 interface ContextActionItem {
-  readonly id: 'play' | 'favorite' | 'details' | 'hide';
+  readonly id: 'play' | 'favorite' | 'details' | 'hide' | 'manage';
   readonly testID: string;
   readonly icon: IconName;
   readonly label: string;
@@ -68,6 +70,7 @@ export function LiveContextMenu({
   onToggleFavorite,
   onShowProgrammeDetails,
   onHideChannel,
+  onManageChannels,
   onClose,
 }: LiveContextMenuProps): ReactElement | null {
   const theme = useTheme();
@@ -126,6 +129,18 @@ export function LiveContextMenu({
         },
       });
     }
+    if (onManageChannels !== undefined) {
+      list.push({
+        id: 'manage',
+        testID: 'live-context-manage',
+        icon: 'layers',
+        label: i18n.t('channels.manage.openButton'),
+        run: () => {
+          onClose();
+          onManageChannels();
+        },
+      });
+    }
     return list;
   }, [
     channel,
@@ -134,6 +149,7 @@ export function LiveContextMenu({
     isFavorite,
     onClose,
     onHideChannel,
+    onManageChannels,
     onPlay,
     onShowProgrammeDetails,
     onToggleFavorite,

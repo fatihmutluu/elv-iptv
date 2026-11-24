@@ -501,6 +501,41 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         currentPin,
         ...(profileId === undefined ? {} : { profileId }),
       }),
+    listChannelOverrides: (profileId) =>
+      callValue({
+        method: 'listChannelOverrides',
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    setChannelOverride: (input) => callResult({ method: 'setChannelOverride', input }),
+    clearChannelOverride: (itemKey, profileId) =>
+      callResult({
+        method: 'clearChannelOverride',
+        itemKey,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    reorderChannels: (itemKeys, sourceId, profileId) =>
+      callResult({
+        method: 'reorderChannels',
+        itemKeys,
+        sourceId,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    listCustomGroups: (profileId, opts) =>
+      callValue({
+        method: 'listCustomGroups',
+        ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    createCustomGroup: (input) => callResult({ method: 'createCustomGroup', input }),
+    updateCustomGroup: (groupId, patch) =>
+      callResult({ method: 'updateCustomGroup', groupId, patch }),
+    deleteCustomGroup: (groupId) => callResult({ method: 'deleteCustomGroup', groupId }),
+    setCustomGroupItems: (groupId, items) =>
+      callResult({ method: 'setCustomGroupItems', groupId, items }),
+    addChannelToCustomGroup: (groupId, itemKey, sourceId) =>
+      callResult({ method: 'addChannelToCustomGroup', groupId, itemKey, sourceId }),
+    removeChannelFromCustomGroup: (groupId, itemKey) =>
+      callResult({ method: 'removeChannelFromCustomGroup', groupId, itemKey }),
     flushPendingWrites: () => callValue({ method: 'flushPendingWrites' }),
     onChanged(listener: () => void): () => void {
       changedListeners.add(listener);

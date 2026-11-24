@@ -1,4 +1,5 @@
 export { createDeviceHttpClient } from './http';
+export { createDeviceKeymapStore } from './keymap';
 export { createDevicePreferencesStore } from './preferences';
 export { createMacrotaskScheduler } from './scheduler';
 export { createSecureSecretStore } from './secret-store';

@@ -81,13 +81,20 @@ WHERE profile_id = ?
     LIMIT ?
   )`;
 
-const LIST_RECENT_SQL = `SELECT t.id, t.key, t.source_id, t.provider_id, t.name,
+const LIST_RECENT_SQL = `SELECT t.id, t.key, t.source_id, t.provider_id,
+  COALESCE(NULLIF(co.custom_name, ''), t.name) AS name,
+  t.name AS raw_name,
+  CASE WHEN NULLIF(co.custom_name, '') IS NOT NULL THEN t.name ELSE NULL END AS original_name,
+  co.sort_order AS co_sort_order,
   t.logo AS logo, NULL AS rating, NULL AS year, t.num AS num
 FROM recent_channels r
 INNER JOIN live t
   ON t.source_id = r.source_id AND t.key = r.item_key
+LEFT JOIN channel_overrides co
+  ON co.profile_id = r.profile_id AND co.item_key = t.key
 WHERE r.profile_id = ?
   AND t.is_hidden = 0
+  AND COALESCE(co.is_hidden, 0) = 0
   AND EXISTS (SELECT 1 FROM sources s WHERE s.id = t.source_id AND s.deleting = 0)
 ORDER BY r.watched_at DESC, r.item_key ASC
 LIMIT ?`;
@@ -134,7 +141,7 @@ export async function listRecentChannels(
   const profile = normalizeProfileId(profileId);
   const filter = await loadActiveParentalFilter(db, profile, opts?.parentalUnlocked);
   const fetchLimit = filter === null ? clamped : MAX_RECENT_CHANNELS_PER_PROFILE;
-  const rows = await db.all<RawItemRow & { source_id: string }>(LIST_RECENT_SQL, [
+  const rows = await db.all<RawItemRow & { source_id: string; raw_name: string }>(LIST_RECENT_SQL, [
     profile,
     fetchLimit,
   ]);
@@ -143,11 +150,11 @@ export async function listRecentChannels(
   const restricted = await findRestrictedItemKeys(
     db,
     filter,
-    mapped.map((r) => ({
+    rows.map((r) => ({
       itemKey: r.key,
-      sourceId: r.sourceId,
+      sourceId: r.source_id,
       kind: 'live' as const,
-      title: r.name,
+      title: r.raw_name,
     })),
   );
   return mapped.filter((r) => !restricted.has(r.key)).slice(0, clamped);

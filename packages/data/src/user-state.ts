@@ -66,8 +66,6 @@ export interface ToggleFavoriteInput {
 const PROGRESS_COLS =
   'profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at, version_group_key, preferred_item_key';
 const PROGRESS_SELECT = `SELECT ${PROGRESS_COLS} FROM watch_progress`;
-const FAVORITE_SELECT =
-  'SELECT profile_id, source_id, item_key, kind, title, logo, year, rating, added_at FROM favorites';
 
 const UPSERT_PROGRESS = `INSERT INTO watch_progress (
   profile_id, source_id, item_key, kind, title, subtitle, logo,
@@ -500,20 +498,31 @@ export async function toggleFavorite(
   return ok(added);
 }
 
-/** Lists My List favorites for a profile, most recently added first. */
+/** Lists My List favorites for a profile, most recently added first (applying live `channel_overrides` `#60`). */
 export async function listFavorites(
   db: SqlDriver,
   limit = 50,
   profileId: string = DEFAULT_PROFILE_ID,
-  opts?: { readonly parentalUnlocked?: boolean },
+  opts?: { readonly parentalUnlocked?: boolean; readonly includeHidden?: boolean },
 ): Promise<FavoriteRow[]> {
   const clamped = clampLimit(limit, 50);
   if (clamped === 0) return [];
   const normalized = normalizeProfileId(profileId);
   const filter = await loadActiveParentalFilter(db, normalized, opts?.parentalUnlocked);
   const fetchLimit = filter === null ? clamped : Math.min(100, clamped * 4);
-  const rows = await db.all<RawFavoriteRow>(
-    `${FAVORITE_SELECT} WHERE profile_id = ? ORDER BY added_at DESC LIMIT ?`,
+  const hiddenClause =
+    opts?.includeHidden === true ? '' : " AND (f.kind != 'live' OR COALESCE(co.is_hidden, 0) = 0)";
+  const rows = await db.all<RawFavoriteRow & { raw_title: string }>(
+    `SELECT f.profile_id, f.source_id, f.item_key, f.kind,
+            CASE WHEN f.kind = 'live' THEN COALESCE(NULLIF(co.custom_name, ''), f.title) ELSE f.title END AS title,
+            f.title AS raw_title,
+            f.logo, f.year, f.rating, f.added_at
+       FROM favorites f
+       LEFT JOIN channel_overrides co
+         ON co.profile_id = f.profile_id AND co.item_key = f.item_key
+      WHERE f.profile_id = ?${hiddenClause}
+      ORDER BY f.added_at DESC
+      LIMIT ?`,
     [normalized, fetchLimit],
   );
   const mapped = rows.map(mapFavoriteRow);
@@ -521,11 +530,11 @@ export async function listFavorites(
   const restricted = await findRestrictedItemKeys(
     db,
     filter,
-    mapped.map((r) => ({
-      itemKey: r.itemKey,
-      sourceId: r.sourceId,
+    rows.map((r) => ({
+      itemKey: r.item_key,
+      sourceId: r.source_id,
       kind: r.kind,
-      title: r.title,
+      title: r.raw_title,
     })),
   );
   return mapped.filter((r) => !restricted.has(r.itemKey)).slice(0, clamped);
