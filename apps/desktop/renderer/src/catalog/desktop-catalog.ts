@@ -411,8 +411,8 @@ export function createDesktopCatalogFromBridge(
         Object.keys(cleanOpts).length > 0 ? cleanOpts : undefined,
       );
     },
-    listCollections: (profileId) =>
-      bridge.listCollections ? bridge.listCollections(profileId) : Promise.resolve([]),
+    listCollections: (profileId, opts) =>
+      bridge.listCollections ? bridge.listCollections(profileId, opts) : Promise.resolve([]),
     createCollection: (input) =>
       bridge.createCollection
         ? bridge.createCollection({ ...input, name: sanitizeDisplayText(input.name) })
