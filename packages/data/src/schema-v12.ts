@@ -142,53 +142,6 @@ CREATE INDEX IF NOT EXISTS idx_channel_guide_guide ON channel_guide (source_id, 
 CREATE INDEX IF NOT EXISTS idx_live_guide_id ON live (source_id, guide_id);
 `;
 
-/**
- * Repopulates standalone `programmes_fts` for a single `sourceId` from `programmes` inside an open
- * transaction using JS {@link foldText} (never `VALUES('rebuild')`, since `programmes` is `WITHOUT ROWID`).
- */
-export async function populateProgrammesFtsForSource(
-  tx: SqlDriver,
-  sourceId: string,
-  batchSize = BACKFILL_BATCH_SIZE,
-): Promise<void> {
-  const step = Math.max(1, batchSize);
-  let lastGuideId = '';
-  let lastStart = Number.MIN_SAFE_INTEGER;
-  for (;;) {
-    const rows = await tx.all<{
-      guide_id: string;
-      start: number;
-      stop: number;
-      title: string;
-      description: string | null;
-    }>(
-      `SELECT guide_id, start, stop, title, description
-         FROM programmes
-        WHERE source_id = ?
-          AND (guide_id > ? OR (guide_id = ? AND start > ?))
-        ORDER BY guide_id ASC, start ASC
-        LIMIT ?`,
-      [sourceId, lastGuideId, lastGuideId, lastStart, step],
-    );
-    if (rows.length === 0) break;
-    await tx.batch(
-      'INSERT INTO programmes_fts (source_id, guide_id, start, stop, title_fold, description_fold) VALUES (?, ?, ?, ?, ?, ?)',
-      rows.map((r) => [
-        sourceId,
-        r.guide_id,
-        r.start,
-        r.stop,
-        foldText(r.title),
-        foldText(r.description ?? ''),
-      ]),
-    );
-    const last = rows[rows.length - 1];
-    if (last === undefined || rows.length < step) break;
-    lastGuideId = last.guide_id;
-    lastStart = last.start;
-  }
-}
-
 async function runBackfillProgrammesFts(tx: SqlDriver): Promise<boolean> {
   const hasProgrammes = await tx.all<{ one: number }>('SELECT 1 AS one FROM programmes LIMIT 1');
   if (hasProgrammes.length === 0) return false;

@@ -231,6 +231,10 @@ describe('MIGRATION_V13 idx_programmes_source_stop (#6, #25, #268)', () => {
       await upgraded.db.exec(MIGRATIONS[i] ?? '');
     }
     await upgraded.db.exec('PRAGMA user_version = 12');
+    await upgraded.db.run(
+      'INSERT INTO programmes (source_id, guide_id, start, stop, title, description, run_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['s1', 'ch-a.tr', 1000, 2000, 'İstanbul Gecesi', 'Çağrı Özeti', 1],
+    );
     const before = await upgraded.db.all<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_programmes_source_stop'",
     );
@@ -244,5 +248,10 @@ describe('MIGRATION_V13 idx_programmes_source_stop (#6, #25, #268)', () => {
       )
     ).map((r) => r.name);
     expect(after).toEqual(['idx_programmes_source_stop']);
+    const folded = await upgraded.db.all<{ title_fold: string; description_fold: string }>(
+      'SELECT title_fold, description_fold FROM programmes WHERE source_id = ?',
+      ['s1'],
+    );
+    expect(folded).toEqual([{ title_fold: 'istanbul gecesi', description_fold: 'cagri ozeti' }]);
   });
 });

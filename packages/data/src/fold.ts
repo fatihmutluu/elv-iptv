@@ -17,12 +17,24 @@ const ENGLISH_NUMBER_WORDS: Readonly<Record<string, string>> = {
   nine: '9',
 };
 
+const ASCII_NON_ALNUM_RE = /[^a-z0-9]+/g;
+
+function isAscii(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.charCodeAt(i) > 0x7f) return false;
+  }
+  return true;
+}
+
 /**
  * Folds text for case-, accent- and punctuation-insensitive matching: explicit Turkish lower-casing
  * (`İ` to `i`, `I` to `ı`, then `ı` to `i`), combining marks removed after NFD, `ß` to `ss`, and every run of
  * non-letters and non-digits collapsed to one space. Pure and locale-independent.
  */
 export function foldText(text: string): string {
+  if (isAscii(text)) {
+    return text.toLowerCase().replace(ASCII_NON_ALNUM_RE, ' ').trim();
+  }
   return text
     .replace(/İ/g, 'i')
     .replace(/I/g, 'ı')

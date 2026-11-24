@@ -4,6 +4,7 @@ import { EXPECTED_FTS_TABLES, EXPECTED_TABLE_COLUMNS, MIGRATIONS, OPEN_PRAGMAS }
 import { backfillSortTitles, type SortTitleTable } from './schema-v8';
 import { backfillWaveC3Metadata } from './schema-v11';
 import { backfillProgrammesFtsIfEmpty, backfillWaveC4aMetadata } from './schema-v12';
+import { backfillProgrammesFoldColumns } from './schema-v13';
 
 /** Schema version this build writes and understands (`PRAGMA user_version`). */
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -15,6 +16,7 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
   const repairedSortTables: SortTitleTable[] = [];
   let needsWaveC3Backfill = false;
   let needsWaveC4aBackfill = false;
+  let needsProgrammesFoldBackfill = false;
   for (const [table, expected] of Object.entries(EXPECTED_TABLE_COLUMNS)) {
     const cols = await db.all<{ name: string }>(`PRAGMA table_info(${table})`);
     if (cols.length === 0) {
@@ -40,6 +42,12 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
             (column.name === 'cast_fold' || column.name === 'director_fold'))
         ) {
           needsWaveC4aBackfill = true;
+        }
+        if (
+          table === 'programmes' &&
+          (column.name === 'title_fold' || column.name === 'description_fold')
+        ) {
+          needsProgrammesFoldBackfill = true;
         }
       }
     }
@@ -84,6 +92,9 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
         );
         await backfillWaveC3Metadata(tx);
       }
+      if (needsProgrammesFoldBackfill) {
+        await backfillProgrammesFoldColumns(tx);
+      }
       if (needsWaveC4aBackfill) {
         await backfillWaveC4aMetadata(tx);
       } else if (needsProgrammesFtsRepopulate) {
@@ -121,6 +132,7 @@ export async function openCatalog(
           if (v === 7) await backfillSortTitles(tx);
           if (v === 10) await backfillWaveC3Metadata(tx);
           if (v === 11) await backfillWaveC4aMetadata(tx);
+          if (v === 12) await backfillProgrammesFoldColumns(tx);
           await tx.exec(`PRAGMA user_version = ${v + 1}`);
         }
       });

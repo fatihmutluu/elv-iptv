@@ -20,6 +20,25 @@ describe('foldText', () => {
       fc.property(fc.string({ unit: 'binary' }), (s) => foldText(foldText(s)) === foldText(s)),
     );
   });
+
+  it('ASCII fast-path matches full Unicode folding across all 0x00..0x7F characters', () => {
+    const reference = (text: string) =>
+      text
+        .replace(/İ/g, 'i')
+        .replace(/I/g, 'ı')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/\p{M}+/gu, '')
+        .replace(/ß/g, 'ss')
+        .replace(/ı/g, 'i')
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim();
+    const allAscii = Array.from({ length: 128 }, (_, i) => String.fromCharCode(i)).join('');
+    expect(foldText(allAscii)).toBe(reference(allAscii));
+    expect(foldText('INFO: Live Match - I/O 2026 [HD]!')).toBe(
+      reference('INFO: Live Match - I/O 2026 [HD]!'),
+    );
+  });
 });
 
 describe('sortTitleKey', () => {

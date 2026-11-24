@@ -49,6 +49,8 @@ export { closeOpenProgrammes };
 const DAY_MS = 86_400_000;
 const DEFAULT_WINDOW = { daysBack: 1, daysForward: 7 };
 const MAX_CATCHUP_RETENTION_DAYS = 30;
+/** Upper bound on XMLTV elements parsed/written per event-loop turn so large `batchSize` runs stay responsive (`#25`). */
+const MAX_GUIDE_SLICE_SIZE = 400;
 
 type GuideOutcome =
   | { kind: 'imported'; slot: string; state: GuideState; validator: HttpCacheValidator | undefined }
@@ -152,9 +154,10 @@ function finalizeChannels(c: RunCtx, st: GuideState): void {
 
 async function writeProgrammes(c: RunCtx, st: GuideState, batch: ClampedBatch): Promise<void> {
   const { rows, reupserts } = batch;
-  for (let i = 0; i < rows.length; i += c.batchSize) {
+  const sliceSize = Math.min(c.batchSize, MAX_GUIDE_SLICE_SIZE);
+  for (let i = 0; i < rows.length; i += sliceSize) {
     checkAbort(c);
-    await c.db.batch(STAGE_PROGRAMME_SQL, rows.slice(i, i + c.batchSize));
+    await c.db.batch(STAGE_PROGRAMME_SQL, rows.slice(i, i + sliceSize));
     await c.deps.scheduler.yieldNow();
   }
   for (const row of rows) {
@@ -245,7 +248,7 @@ async function execute(
           bytesRead = n;
         });
   const scan = scanXmltv(body, {
-    batchSize: c.batchSize,
+    batchSize: Math.min(c.batchSize, MAX_GUIDE_SLICE_SIZE),
     from: retentionFloorMs,
     to: now + window.daysForward * DAY_MS,
     ...(c.deps.decompressor === undefined ? {} : { decompressor: c.deps.decompressor }),
