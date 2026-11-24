@@ -243,6 +243,7 @@ export async function executeMultiGuide(
   const retentionFloorMs = now - effectiveDaysBack * DAY_MS;
 
   const mergedMappings = new Map<string, string>();
+  const fallbackMappings = new Map<string, { guideId: string; guideSourceId: string }>();
   const claimedChannels = new Set<string>();
   const claimedGuideIds = new Set<string>();
   const winningGuideSourceByChannel = new Map<string, string>();
@@ -397,16 +398,20 @@ export async function executeMultiGuide(
     const newlyMatched = matchGuideChannelsToLive(gsChannelsById, unclaimedLive);
     for (const [channelKey, guideId] of newlyMatched) {
       if (claimedChannels.has(channelKey)) continue;
-      mergedMappings.set(channelKey, guideId);
-      claimedChannels.add(channelKey);
-      claimedGuideIds.add(guideId);
-      winningGuideSourceByChannel.set(channelKey, gs.id);
+      if ((gsStaged.get(guideId) ?? 0) > 0) {
+        mergedMappings.set(channelKey, guideId);
+        claimedChannels.add(channelKey);
+        claimedGuideIds.add(guideId);
+        winningGuideSourceByChannel.set(channelKey, gs.id);
+      } else if (!fallbackMappings.has(channelKey)) {
+        fallbackMappings.set(channelKey, { guideId, guideSourceId: gs.id });
+      }
     }
 
     for (const m of manualRows) {
       if (claimedGuideIds.has(m.guide_id)) continue;
       if (m.guide_source_id !== null && m.guide_source_id !== gs.id) continue;
-      if (gsStaged.has(m.guide_id) || gsChannelsById.has(m.guide_id)) {
+      if ((gsStaged.get(m.guide_id) ?? 0) > 0) {
         claimedGuideIds.add(m.guide_id);
       }
     }
@@ -442,6 +447,13 @@ export async function executeMultiGuide(
   }
   if (mergedChannelsById.size === 0 && totalSeenProgrammes === 0) {
     throw new Stop(elvError('source-format', 'not-a-guide'));
+  }
+
+  for (const [channelKey, fallback] of fallbackMappings) {
+    if (!mergedMappings.has(channelKey)) {
+      mergedMappings.set(channelKey, fallback.guideId);
+      winningGuideSourceByChannel.set(channelKey, fallback.guideSourceId);
+    }
   }
 
   const channelRows: SqlValue[][] = [];

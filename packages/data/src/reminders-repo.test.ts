@@ -310,4 +310,173 @@ describe('programme reminders repository, guide reconciliation, profile/source c
       { channel_key: 'm:s1:live:stable-ch', programme_title: 'Top Story' },
     ]);
   });
+
+  it('enforces channel and programme-level parental controls on upsertReminder and listReminders (#31)', async () => {
+    const { db } = testDb();
+    await openCatalog(db);
+    const secrets = memorySecrets();
+    const playlist = [
+      '#EXTM3U',
+      '#EXTINF:-1 tvg-id="ch1" group-title="General",Open Channel',
+      'https://cdn.example/ch1.ts',
+      '#EXTINF:-1 tvg-id="ch2" group-title="General",Locked Channel',
+      'https://cdn.example/ch2.ts',
+    ].join('\n');
+    const http: HttpClient = {
+      async get(url) {
+        return ok({ status: 200, headers: {}, body: utf8(playlist), finalUrl: url });
+      },
+    };
+    const svc = createCoalescedCatalog(
+      createCatalogService({
+        db,
+        secrets,
+        scheduler: immediateScheduler,
+        http,
+        clock: () => NOW,
+        newId: () => 'srcp',
+      }),
+    );
+    await svc.addSource({
+      kind: 'm3u',
+      name: 'Parental M3U',
+      playlistUrl: 'https://cdn.example/p.m3u',
+    });
+    expect((await svc.importSource('srcp')).ok).toBe(true);
+    const cats = await svc.categories('srcp', 'live');
+    const items = await svc.items(cats[0]?.id ?? '', 0, 10);
+    const openKey = items.find((i) => i.name === 'Open Channel')?.key ?? '';
+    const lockedKey = items.find((i) => i.name === 'Locked Channel')?.key ?? '';
+
+    await svc.updateParentalSettings?.({ enabled: true, blockAdultKeywords: true });
+    await svc.setParentalLock?.(
+      { sourceId: 'srcp', targetKind: 'item', itemKind: 'live', targetKey: lockedKey },
+      true,
+    );
+
+    // Locked channel blocked when locked
+    expect(
+      await svc.upsertReminder?.({
+        sourceId: 'srcp',
+        channelKey: lockedKey,
+        channelName: 'Locked Channel',
+        programmeTitle: 'Safe News',
+        programmeStart: NOW + 600_000,
+        programmeStop: NOW + 3_600_000,
+      }),
+    ).toMatchObject({ ok: false, error: { category: 'auth', code: 'parental-locked' } });
+
+    // Adult programme title on open channel blocked when locked
+    expect(
+      await svc.upsertReminder?.({
+        sourceId: 'srcp',
+        channelKey: openKey,
+        channelName: 'Open Channel',
+        programmeTitle: 'XXX Midnight Show',
+        programmeStart: NOW + 600_000,
+        programmeStop: NOW + 3_600_000,
+      }),
+    ).toMatchObject({ ok: false, error: { category: 'auth', code: 'parental-locked' } });
+
+    // Safe programme on open channel allowed while locked
+    expect(
+      (
+        await svc.upsertReminder?.({
+          sourceId: 'srcp',
+          channelKey: openKey,
+          channelName: 'Open Channel',
+          programmeTitle: 'Family Quiz',
+          programmeStart: NOW + 900_000,
+          programmeStop: NOW + 3_900_000,
+        })
+      )?.ok,
+    ).toBe(true);
+
+    // Unlocked writes succeed for both locked channel and adult programme
+    expect(
+      (
+        await svc.upsertReminder?.({
+          sourceId: 'srcp',
+          channelKey: lockedKey,
+          channelName: 'Locked Channel',
+          programmeTitle: 'Safe News',
+          programmeStart: NOW + 600_000,
+          programmeStop: NOW + 3_600_000,
+          parentalUnlocked: true,
+        })
+      )?.ok,
+    ).toBe(true);
+    expect(
+      (
+        await svc.upsertReminder?.({
+          sourceId: 'srcp',
+          channelKey: openKey,
+          channelName: 'Open Channel',
+          programmeTitle: 'XXX Midnight Show',
+          programmeStart: NOW + 1_200_000,
+          programmeStop: NOW + 4_200_000,
+          parentalUnlocked: true,
+        })
+      )?.ok,
+    ).toBe(true);
+
+    // Locked listReminders hides both restricted channel and restricted programme title
+    const lockedList = await svc.listReminders?.('default');
+    expect(lockedList?.map((r) => r.programmeTitle)).toEqual(['Family Quiz']);
+
+    // Unlocked listReminders returns all three
+    const unlockedList = await svc.listReminders?.('default', { parentalUnlocked: true });
+    expect(unlockedList?.map((r) => r.programmeTitle)).toEqual([
+      'Safe News',
+      'Family Quiz',
+      'XXX Midnight Show',
+    ]);
+
+    await svc.close();
+  });
+
+  it('does not overwrite an existing fired = 1 reminder when reconciling a shifted duplicate', async () => {
+    const { db } = testDb();
+    await openCatalog(db);
+    await db.run(
+      "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1', 'm3u', 'Src', 1, '{}')",
+    );
+    await db.run(
+      "INSERT INTO live (source_id, key, name, name_fold, run_id) VALUES ('s1', 'x:s1:live:1', 'Sports 1', 'sports 1', 1)",
+    );
+    await db.run(
+      "INSERT INTO channel_guide (source_id, channel_key, guide_id) VALUES ('s1', 'x:s1:live:1', 'ch1')",
+    );
+
+    const oldStart = Date.UTC(2026, 10, 24, 14, 0, 0);
+    const oldStop = Date.UTC(2026, 10, 24, 15, 0, 0);
+    const shiftedStart = Date.UTC(2026, 10, 24, 14, 10, 0);
+    const shiftedStop = Date.UTC(2026, 10, 24, 15, 10, 0);
+
+    // Programme in refreshed guide now starts at shiftedStart
+    await db.run(
+      `INSERT INTO programmes (source_id, guide_id, start, stop, title, run_id, title_fold, description_fold)
+       VALUES ('s1', 'ch1', ?, ?, 'Big Match', 1, 'big match', '')`,
+      [shiftedStart, shiftedStop],
+    );
+    // An existing reminder at shiftedStart is ALREADY fired = 1
+    await db.run(
+      `INSERT INTO programme_reminders (profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at)
+       VALUES ('default', 's1', 'x:s1:live:1', 'Sports 1', 'Big Match', ?, ?, 300000, 1, 100)`,
+      [shiftedStart, shiftedStop],
+    );
+    // An older unfired reminder at oldStart shifts onto shiftedStart
+    await db.run(
+      `INSERT INTO programme_reminders (profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at)
+       VALUES ('default', 's1', 'x:s1:live:1', 'Sports 1', 'Big Match', ?, ?, 300000, 0, 90)`,
+      [oldStart, oldStop],
+    );
+
+    await reconcileRemindersAfterGuideImport(db, 's1');
+
+    const rows = await listReminders(db, 'default', { includeFired: true });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.programmeStart).toBe(shiftedStart);
+    expect(rows[0]?.fired).toBe(true);
+  });
 });

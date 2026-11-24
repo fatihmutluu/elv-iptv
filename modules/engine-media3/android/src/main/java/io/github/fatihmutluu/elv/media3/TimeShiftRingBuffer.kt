@@ -5,6 +5,7 @@ import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val TIMESHIFT_CACHE_SUBDIR = "timeshift"
 internal const val TIMESHIFT_LOW_RAM_MAX_BYTES: Long = 64L * 1024L * 1024L
@@ -181,8 +182,24 @@ internal class TimeShiftRingBuffer(
   }
 
   companion object {
+    private val startupPurgeDone = AtomicBoolean(false)
+
     /** Creates a ring buffer sized strictly for the device's memory tier (`64 MiB` low-RAM / `256 MiB` standard). */
     fun create(cacheDir: File, lowRam: Boolean): TimeShiftRingBuffer =
       TimeShiftRingBuffer(cacheDir, maxTimeShiftBytesFor(lowRam))
+
+    /**
+     * Removes stale crash-orphan files under `cacheDir/timeshift/` at most once per process startup so overlapping
+     * engine instances never wipe one another's active session files (#28).
+     */
+    fun purgeOrphansOnStartup(cacheDir: File): Boolean {
+      if (!startupPurgeDone.compareAndSet(false, true)) return false
+      purgeTimeShiftCacheDir(cacheDir)
+      return true
+    }
+
+    internal fun resetStartupPurgeForTest() {
+      startupPurgeDone.set(false)
+    }
   }
 }

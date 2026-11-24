@@ -50,7 +50,10 @@ export function readLiveTimeShiftSnapshot(
 ): LiveTimeShiftSnapshot {
   const win = resolveLiveTimeShiftWindow(anchor, nowMs);
   if (win === null) {
-    return isPaused ? { ...UNSUPPORTED_SNAPSHOT, isPaused: true } : UNSUPPORTED_SNAPSHOT;
+    const showJump = shouldShowLiveJumpToLive(anchor, nowMs, isPaused);
+    return isPaused || showJump
+      ? { ...UNSUPPORTED_SNAPSHOT, isPaused, showJumpToLive: showJump }
+      : UNSUPPORTED_SNAPSHOT;
   }
   const rawRatio = win.spanMs > 0 ? (win.positionMs - win.startMs) / win.spanMs : 1;
   const fillPercent = Math.round(Math.max(0, Math.min(1, rawRatio)) * 1000) / 10;

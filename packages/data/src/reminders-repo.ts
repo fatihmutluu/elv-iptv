@@ -43,6 +43,8 @@ export interface UpsertReminderInput {
   readonly programmeStart: number;
   readonly programmeStop: number;
   readonly leadTimeMs?: number;
+  /** Optional active parental-unlock state forwarded by scoped callers (`#31`). */
+  readonly parentalUnlocked?: boolean;
 }
 
 /** Optional query filters for {@link listReminders}. */
@@ -53,6 +55,8 @@ export interface ListRemindersOptions {
   readonly fromMs?: number;
   /** Maximum rows returned (clamped to `1..500`, default `500`). */
   readonly limit?: number;
+  /** Optional active parental-unlock state; when omitted or `false`, restricted items/programmes are filtered out for locked profiles (`#31`). */
+  readonly parentalUnlocked?: boolean;
 }
 
 interface RawReminderRow {
@@ -331,7 +335,7 @@ export async function reconcileRemindersAfterGuideImport(
       );
     } else {
       await db.run(
-        `INSERT OR REPLACE INTO programme_reminders (
+        `INSERT OR IGNORE INTO programme_reminders (
            profile_id, source_id, channel_key, channel_name, programme_title,
            programme_start, programme_stop, lead_time_ms, fired, created_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

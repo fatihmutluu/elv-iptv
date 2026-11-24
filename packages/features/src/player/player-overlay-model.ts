@@ -138,6 +138,8 @@ export interface PlayerOverlayLive {
 export interface PlayerOverlayStateParams {
   formFactor: FormFactor;
   itemKey: string;
+  /** Target identity key distinguishing catch-up archive from live playback on the same channel (`#27`). */
+  resetKey?: string;
   isVod: boolean;
   playbackSpeed?: number;
   statusKind: PlaybackStatus['kind'];

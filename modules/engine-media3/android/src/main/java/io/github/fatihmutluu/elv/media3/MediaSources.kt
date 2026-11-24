@@ -232,6 +232,8 @@ internal fun createMediaSource(
   lowRam: Boolean,
   client: Call.Factory,
   transferListener: TransferListener? = null,
+  timeShiftRingBuffer: TimeShiftRingBuffer? = null,
+  timeShiftTracker: TimeShiftWindowTracker? = null,
 ): MediaSource {
   val manifestLoaded = AtomicBoolean(false)
   val type = request.sourceType()
@@ -242,7 +244,18 @@ internal fun createMediaSource(
     client = client,
     transferListener = transferListener,
   ) { manifestLoaded.set(true) }
-  val progressive = DataSource.Factory { gated(RequestKind.PROGRESSIVE) }
+  val progressive = DataSource.Factory {
+    val upstream = gated(RequestKind.PROGRESSIVE)
+    if (request.live && type == SourceType.TS && timeShiftRingBuffer != null) {
+      TimeShiftDataSource(
+        upstream = upstream,
+        ringBuffer = timeShiftRingBuffer,
+        tracker = timeShiftTracker,
+      )
+    } else {
+      upstream
+    }
+  }
   val factory: MediaSource.Factory = when (type) {
     SourceType.HLS ->
       HlsMediaSource.Factory(

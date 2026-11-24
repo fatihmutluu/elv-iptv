@@ -249,6 +249,37 @@ describe('timeshift pure helpers (#28)', () => {
       timeShiftSupported: false,
     };
     expect(resolveSeekTarget(80_000, false, 'playing', undefined, nonSeekable)).toBeUndefined();
+
+    // Missing, zero, or inverted liveEdgeMs must return undefined (never allow unbounded forward seeks)
+    expect(
+      resolveSeekTarget(999_999, false, 'playing', undefined, {
+        positionMs: 10_000,
+        atMs: 10_000,
+        rate: 1,
+        liveSeekableStartMs: 0,
+        timeShiftSupported: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveSeekTarget(999_999, false, 'playing', undefined, {
+        positionMs: 60_000,
+        atMs: 10_000,
+        rate: 1,
+        liveSeekableStartMs: 60_000,
+        liveEdgeMs: 60_000,
+        timeShiftSupported: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveSeekTarget(999_999, false, 'playing', undefined, {
+        positionMs: 60_000,
+        atMs: 10_000,
+        rate: 1,
+        liveSeekableStartMs: 70_000,
+        liveEdgeMs: 60_000,
+        timeShiftSupported: true,
+      }),
+    ).toBeUndefined();
   });
 });
 

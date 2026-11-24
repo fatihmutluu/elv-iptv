@@ -101,10 +101,11 @@ export function usePlayerTargetHandoff({
   const tuneGenRef = useRef(0);
   const pendingResumeRef = useRef(false);
 
+  const activeIdentity = targetIdentityKey(activeTarget);
   // biome-ignore lint/correctness/useExhaustiveDependencies: clear double-tap transition lock once React commits the target
   useEffect(() => {
     transitioningToRef.current = null;
-  }, [activeTarget.itemKey]);
+  }, [activeIdentity]);
 
   const cancelPendingResume = useCallback((): void => {
     tuneGenRef.current += 1;
@@ -151,6 +152,7 @@ export function usePlayerTargetHandoff({
                     startMs: catchup.startMs,
                     stopMs: catchup.stopMs,
                     ...(catchup.hasArchive !== undefined ? { hasArchive: catchup.hasArchive } : {}),
+                    title: catchup.programmeTitle,
                   })
                 : err(elvError('storage', 'unsupported'))
               : await catalogRef.current.resolveStream(entry.itemKey);
@@ -444,9 +446,10 @@ export function usePlayerTargetHandoff({
   const handleBackToLive = useCallback((): void => {
     const current = activeTargetRef.current;
     if (current.catchup === undefined) return;
+    serviceRef.current?.setSpeed(1);
     const nextLive: PlayTarget = { ...current.catchup.liveTarget };
     commitLiveTarget(nextLive);
-  }, [commitLiveTarget]);
+  }, [commitLiveTarget, serviceRef]);
 
   const selectChannel = useCallback(
     (entry: PlayableEntry, index?: number): void => {
@@ -562,7 +565,10 @@ export function usePlayerTargetHandoff({
     setActiveTarget(target);
     const svc = serviceRef.current;
     if (backgroundedRef.current) resumeOnActiveRef.current = true;
-    else if (svc !== null) tuneWithResume(svc, target);
+    else if (svc !== null) {
+      svc.stop();
+      tuneWithResume(svc, target);
+    }
   }, [
     cancelPendingResume,
     cancelPreviewChannel,

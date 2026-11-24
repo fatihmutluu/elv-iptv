@@ -8,6 +8,7 @@ import type { PlayableEntry } from '../ports/play-target';
 import type { HostKey } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import { useLiveTimeShiftState } from './LiveTimeShiftBar';
+import { targetIdentityKey } from './live-timeshift-model';
 import { NextEpisodeBanner } from './NextEpisodeBanner';
 import { type ChannelDrawerNavHandle, PlayerChannelDrawer } from './PlayerChannelDrawer';
 import { PlayerInfoSheet } from './PlayerInfoSheet';
@@ -24,6 +25,7 @@ import {
 } from './PlayerScreenParts';
 import { type PlayerScreenProps, PlayerScreenStage } from './PlayerScreenStage';
 import { PlayerSettingsSheet } from './PlayerSettingsSheet';
+import { buildPlayerOsdProps } from './player-osd-props';
 import { TrackPickerModal } from './TrackPickerModal';
 import { buildTouchHoverProps } from './touch-hover-guard';
 import { useGaplessEpisodeQueue } from './useGaplessEpisodeQueue';
@@ -193,11 +195,12 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const [nextEpisodeDismissed, setNextEpisodeDismissed] = useState(false);
   const [nextEpisodeVisible, setNextEpisodeVisible] = useState(false);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset per-item transient UI on item change
+  const activeTargetKey = targetIdentityKey(activeTarget);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset per-item transient UI on item or catch-up/live transition
   useEffect(() => {
     setNextEpisodeDismissed(false);
     setNextEpisodeVisible(false);
-  }, [activeTarget.itemKey]);
+  }, [activeTargetKey]);
 
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
   const syncAndQuality = usePlayerSyncAndQuality({
@@ -636,91 +639,52 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     />
   );
 
-  const osdProps = {
-    title: previewTarget?.title ?? activeTarget.title,
-    subtitle: previewTarget !== null ? previewTarget.subtitle : activeTarget.subtitle,
-    isChannelPreview: previewTarget !== null,
-    channelDigits: controls.channelDigits,
+  const osdProps = buildPlayerOsdProps({
+    activeTarget,
+    previewTarget,
     statusLine,
-    statusKind: sessionState.kind === 'unavailable' ? ('idle' as const) : status.kind,
-    osdTier: controls.osdTier,
-    overlayMode: isDesktop ? overlayMode : ('floating' as const),
-    isBuffering: status.kind === 'tuning' || status.kind === 'recovering',
+    sessionUnavailable: sessionState.kind === 'unavailable',
+    status,
+    overlayMode,
     failure,
-    isVod: activeTarget.kind === 'vod',
     isCatchup,
     liveTimeShiftSupported: activeTarget.kind === 'live' && liveTimeShift.supported,
-    timeShiftUnavailableVisible: controls.timeShiftUnavailableVisible,
-    isPausedOrEnded: controls.isPausedOrEnded,
     canZap,
     hasTracks,
     hasPreviousChannel,
-    hasNextEpisodeAction: activeTarget.kind === 'vod' && !isCatchup && nextEpisode !== undefined,
-    nextEpisodeBannerVisible: nextEpisodeVisible,
-    canLock: controls.canLock,
+    nextEpisode,
+    nextEpisodeVisible,
     showRetry,
     isTv,
     isDesktop,
-    muted: controls.muted,
-    volume: controls.volume,
     isFullscreen,
     alwaysOnTop,
-    playbackSpeed: controls.playbackSpeed,
     chapters,
     timeDisplayMode: extras.timeDisplayMode,
     videoInfo,
     tracks,
     nowNext,
-    nowMs: wallClock(),
     wallClock,
     tvClockMode,
-    tvOsdFocused: controls.tvOsdFocused,
-    tvScrubberFocused: controls.tvScrubberFocused,
-    tvOsdAction: controls.tvOsdAction,
-    tracksOpen: controls.tracksOpen,
-    settingsOpen: controls.settingsOpen,
-    settingsView: controls.settingsMenu.view,
-    infoOpen: controls.infoOpen,
-    channelListOpen: controls.channelListOpen,
-    previewPositionMs: touch.effectivePreviewMs,
+    effectivePreviewMs: touch.effectivePreviewMs,
     i18n,
-    service: activeService,
+    activeService,
     clock,
+    controls,
+    hostToggleMute,
+    hostToggleFullscreen,
+    hostToggleAlwaysOnTop,
     onExit,
-    onTogglePlayPause: controls.togglePlayPause,
-    onSeekBack: controls.seekStepBack,
-    onSeekForward: controls.seekStepForward,
-    onSeekRatio: controls.seekToRatio,
-    onScrubbingChange: controls.setBarScrubbing,
     onCycleTimeDisplayMode: extras.handleCycleTimeDisplayMode,
-    ...(onFineScrubHaptic !== undefined ? { onFineScrubHaptic } : {}),
-    onOpenTracks: controls.openTracks,
-    onOpenSettings: () =>
-      controls.settingsOpen ? controls.closeSettings() : controls.openSettings(),
-    onOpenSpeed: () =>
-      controls.settingsOpen && controls.settingsMenu.view === 'speed'
-        ? controls.closeSettings()
-        : controls.openSettings('speed'),
-    onToggleResizeMode: controls.toggleResizeMode,
-    onToggleInfo: controls.toggleInfo,
-    ...(canZap ? { onToggleChannelList: controls.toggleChannelList } : {}),
+    onFineScrubHaptic,
     onPlayNextEpisode: () => {
       extras.stillWatching.recordUserActivity();
       handoff.handlePlayNextEpisode(undefined, nextEpisode);
     },
-    ...((chapters?.length ?? 0) > 0
-      ? { onPrevChapter: extras.handlePrevChapter, onNextChapter: extras.handleNextChapter }
-      : {}),
-    ...(hostToggleMute !== undefined ? { onToggleMute: controls.toggleMute } : {}),
-    onSetVolume: controls.setVolume,
-    ...(hostToggleFullscreen !== undefined
-      ? { onToggleFullscreen: controls.toggleFullscreen }
-      : {}),
-    ...(hostToggleAlwaysOnTop !== undefined ? { onToggleAlwaysOnTop: hostToggleAlwaysOnTop } : {}),
-    onLock: controls.lockControls,
+    onPrevChapter: extras.handlePrevChapter,
+    onNextChapter: extras.handleNextChapter,
     onJumpPreviousChannel: handoff.handleJumpPreviousChannel,
-    onJumpToLiveEdge: controls.jumpToLiveEdge,
-    ...(isCatchup ? { onBackToLive: handoff.handleBackToLive } : {}),
+    onBackToLive: handoff.handleBackToLive,
     onPrev: () => {
       extras.stillWatching.recordUserActivity();
       zapBy(-1);
@@ -730,7 +694,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       zapBy(1);
     },
     onRetry: handleRetryWithParental,
-  };
+  });
 
   return (
     <PlayerScreenStage

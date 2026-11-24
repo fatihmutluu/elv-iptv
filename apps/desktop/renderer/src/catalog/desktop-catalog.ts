@@ -11,6 +11,8 @@ export class CatalogOpenError extends Error {
 
 let instance: Promise<CatalogService> | undefined;
 
+const MAX_IPC_TEXT_CHARS = 256;
+
 function sanitizeDisplayText(text: string): string {
   let out = '';
   let lastSpace = false;
@@ -27,6 +29,15 @@ function sanitizeDisplayText(text: string): string {
     }
   }
   return out.trim();
+}
+
+function truncateDisplayText(text: string, maxChars: number): string {
+  const clean = sanitizeDisplayText(text);
+  if (clean.length <= maxChars) return clean;
+  let end = maxChars;
+  const last = clean.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return clean.slice(0, end).trimEnd();
 }
 
 /**
@@ -261,7 +272,16 @@ export function createDesktopCatalogFromBridge(
         : Promise.resolve(err(elvError('storage', 'unsupported'))),
     resolveCatchupStream: (itemKey, programme, opts) =>
       bridge.resolveCatchupStream
-        ? bridge.resolveCatchupStream(itemKey, programme, opts)
+        ? bridge.resolveCatchupStream(
+            itemKey,
+            programme.title === undefined
+              ? programme
+              : {
+                  ...programme,
+                  title: truncateDisplayText(programme.title, MAX_IPC_TEXT_CHARS),
+                },
+            opts,
+          )
         : Promise.resolve(err(elvError('storage', 'unsupported'))),
     fetchChannelArchiveEpg: (itemKey, opts) =>
       bridge.fetchChannelArchiveEpg
@@ -314,8 +334,8 @@ export function createDesktopCatalogFromBridge(
       bridge.upsertReminder
         ? bridge.upsertReminder({
             ...input,
-            channelName: sanitizeDisplayText(input.channelName),
-            programmeTitle: sanitizeDisplayText(input.programmeTitle),
+            channelName: truncateDisplayText(input.channelName, MAX_IPC_TEXT_CHARS),
+            programmeTitle: truncateDisplayText(input.programmeTitle, MAX_IPC_TEXT_CHARS),
           })
         : Promise.resolve(err(elvError('storage', 'unsupported'))),
     removeReminder: (channelKey, programmeStart, profileId) =>

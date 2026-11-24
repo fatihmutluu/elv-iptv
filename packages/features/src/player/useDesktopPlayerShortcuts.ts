@@ -35,6 +35,7 @@ export interface DesktopShortcutGuard {
   readonly canToggleAlwaysOnTop?: () => boolean;
   readonly onToggleAlwaysOnTop?: () => void;
   readonly isVod: () => boolean;
+  readonly liveTimeShiftSupported?: () => boolean;
   readonly canUseShortcuts: () => boolean;
   readonly stepSeekMs?: () => number;
   readonly onSeekBy: (deltaMs: number) => void;
@@ -151,7 +152,9 @@ function dispatchVodShortcut(
     return true;
   }
 
-  if (!guard.isVod() || !guard.canUseShortcuts()) return false;
+  const isVod = guard.isVod();
+  const canLiveTimeShift = !isVod && guard.liveTimeShiftSupported?.() === true;
+  if ((!isVod && !canLiveTimeShift) || !guard.canUseShortcuts()) return false;
   const repeat = e.repeat === true;
 
   if (isSpaceKey(e) && e.shiftKey !== true) {
@@ -172,6 +175,18 @@ function dispatchVodShortcut(
   }
 
   const stepMs = guard.stepSeekMs?.() ?? STEP_SEEK_MS;
+  if (
+    canLiveTimeShift &&
+    e.shiftKey !== true &&
+    (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+  ) {
+    e.preventDefault?.();
+    const token = e.key;
+    if (throttle.allow(token, repeat)) {
+      guard.onSeekBy(e.key === 'ArrowLeft' ? -stepMs : stepMs);
+    }
+    return true;
+  }
   if (e.key === 'j' || e.key === 'J') {
     e.preventDefault?.();
     if (throttle.allow('j', repeat)) guard.onSeekBy(-stepMs);
@@ -188,7 +203,7 @@ function dispatchVodShortcut(
     return true;
   }
 
-  if (e.shiftKey === true) return false;
+  if (!isVod || e.shiftKey === true) return false;
 
   if (e.key === 'Home') {
     e.preventDefault?.();

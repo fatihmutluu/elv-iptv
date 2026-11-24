@@ -43,6 +43,8 @@ export interface SourcesScreenProps {
   incomingLocalPlaylist?: PickedPlaylistFile | null;
   /** Called after {@link incomingLocalPlaylist} has been staged into the form (`#259`). */
   onConsumeIncomingLocalPlaylist?: () => void;
+  /** Optional callback to open `GuideManagementOverlay` lifted at `AppShell` root (`#30`). */
+  onOpenGuideManagement?: (sourceId: string) => void;
   /** Clock returning epoch milliseconds for deterministic expiry badges (defaults to `Date.now`). */
   now?: () => number;
 }
@@ -60,10 +62,21 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const [qrPairingOpen, setQrPairingOpen] = useState(false);
   const [guideOverlaySource, setGuideOverlaySource] = useState<SourceRow | null>(null);
   const canQrPair = props.lanPairing?.isSupported() === true;
-  const canManageGuides = props.catalog.listGuideSources !== undefined;
+  const canManageGuides =
+    props.onOpenGuideManagement !== undefined || props.catalog.listGuideSources !== undefined;
+  const onOpenGuideManagement = props.onOpenGuideManagement;
   const openQrPairing = useCallback(() => setQrPairingOpen(true), []);
   const closeQrPairing = useCallback(() => setQrPairingOpen(false), []);
-  const openGuides = useCallback((source: SourceRow) => setGuideOverlaySource(source), []);
+  const openGuides = useCallback(
+    (source: SourceRow) => {
+      if (onOpenGuideManagement !== undefined) {
+        onOpenGuideManagement(source.id);
+        return;
+      }
+      setGuideOverlaySource(source);
+    },
+    [onOpenGuideManagement],
+  );
   const closeGuides = useCallback(() => setGuideOverlaySource(null), []);
   const ctrl = useSourcesController({
     ...props,
@@ -567,7 +580,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
           )}
         </View>
       </ScrollView>
-      {canManageGuides ? (
+      {canManageGuides && onOpenGuideManagement === undefined ? (
         <GuideManagementOverlay
           visible={guideOverlaySource !== null}
           source={guideOverlaySource}

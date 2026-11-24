@@ -115,7 +115,7 @@ export interface CatalogBridgeEpgOps {
   pruneExpiredReminders?(nowMs?: number): Promise<number>;
 }
 
-const CATCHUP_PROGRAMME_KEYS = new Set(['startMs', 'stopMs', 'hasArchive']);
+const CATCHUP_PROGRAMME_KEYS = new Set(['startMs', 'stopMs', 'hasArchive', 'title']);
 const ADD_GUIDE_SOURCE_KEYS = new Set([
   'sourceId',
   'name',
@@ -132,7 +132,7 @@ const SET_CHANNEL_GUIDE_OVERRIDE_KEYS = new Set([
   'guideId',
   'epgShiftMs',
 ]);
-const LIST_REMINDERS_OPT_KEYS = new Set(['includeFired', 'fromMs', 'limit']);
+const LIST_REMINDERS_OPT_KEYS = new Set(['includeFired', 'fromMs', 'limit', 'parentalUnlocked']);
 const UPSERT_REMINDER_KEYS = new Set([
   'profileId',
   'sourceId',
@@ -142,6 +142,7 @@ const UPSERT_REMINDER_KEYS = new Set([
   'programmeStart',
   'programmeStop',
   'leadTimeMs',
+  'parentalUnlocked',
 ]);
 
 const RESOLVE_CATCHUP_CALL_KEYS = new Set(['method', 'itemKey', 'programme', 'opts']);
@@ -195,7 +196,12 @@ function isCatchupProgrammeInput(x: unknown): x is CatchupProgrammeInput {
   const stopMs = x['stopMs'];
   if (!isFiniteNumber(startMs) || startMs <= 0) return false;
   if (!isFiniteNumber(stopMs) || stopMs <= startMs) return false;
-  return x['hasArchive'] === undefined || typeof x['hasArchive'] === 'boolean';
+  if (x['hasArchive'] !== undefined && typeof x['hasArchive'] !== 'boolean') return false;
+  const title = x['title'];
+  return (
+    title === undefined ||
+    (isBoundedString(title, 0, MAX_REMINDER_TEXT_CHARS) && !hasControlChar(title))
+  );
 }
 
 function isAddGuideSourceInput(x: unknown): x is AddGuideSourceInput {
@@ -249,6 +255,9 @@ function isListRemindersOptions(x: unknown): x is ListRemindersOptions {
   if (!isRecord(x) || !hasOnlyKeys(x, LIST_REMINDERS_OPT_KEYS)) return false;
   if (x['includeFired'] !== undefined && typeof x['includeFired'] !== 'boolean') return false;
   if (x['fromMs'] !== undefined && !isNonNegativeFinite(x['fromMs'])) return false;
+  if (x['parentalUnlocked'] !== undefined && typeof x['parentalUnlocked'] !== 'boolean') {
+    return false;
+  }
   const limit = x['limit'];
   return limit === undefined || (isSafeInt(limit) && limit >= 0 && limit <= MAX_REMINDERS_LIMIT);
 }
@@ -266,6 +275,9 @@ function isUpsertReminderInput(x: unknown): x is UpsertReminderInput {
   const start = x['programmeStart'];
   const stop = x['programmeStop'];
   if (!isNonNegativeFinite(start) || !isNonNegativeFinite(stop) || stop <= start) return false;
+  if (x['parentalUnlocked'] !== undefined && typeof x['parentalUnlocked'] !== 'boolean') {
+    return false;
+  }
   const lead = x['leadTimeMs'];
   return (
     lead === undefined || (isFiniteNumber(lead) && lead >= 0 && lead <= MAX_REMINDER_LEAD_TIME_MS)

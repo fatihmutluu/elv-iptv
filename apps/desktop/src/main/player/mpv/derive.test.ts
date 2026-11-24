@@ -626,4 +626,91 @@ describe('deriver', () => {
     expect(vodAnchor?.timeShiftSupported).toBeUndefined();
     expect(vod.d.liveWindow()).toBeUndefined();
   });
+
+  it('emits advancing live time-shift anchors on tick and throttled demuxer-cache-state while paused (#28)', () => {
+    const s = setup('live');
+    s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 10, end: 40 }] });
+    play(s);
+    s.d.property('time-pos', 35);
+
+    // Pause the live stream at t=1000
+    const pausedClocks = clocks(s.d.property('pause', true));
+    expect(pausedClocks).toHaveLength(1);
+    expect(pausedClocks[0]).toMatchObject({
+      positionMs: 35_000,
+      rate: 0,
+      liveSeekableStartMs: 10_000,
+      liveEdgeMs: 40_000,
+      timeShiftSupported: true,
+    });
+
+    // Sub-500ms edge growth does not emit immediately
+    s.clock.t = 1600;
+    expect(
+      clocks(
+        s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 10, end: 40.4 }] }),
+      ),
+    ).toEqual([]);
+
+    // >=500ms edge growth after throttle interval emits an updated paused anchor
+    s.clock.t = 1650;
+    const edgeShift = clocks(
+      s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 10, end: 40.6 }] }),
+    );
+    expect(edgeShift).toHaveLength(1);
+    expect(edgeShift[0]).toMatchObject({
+      positionMs: 35_000,
+      rate: 0,
+      liveSeekableStartMs: 10_000,
+      liveEdgeMs: 40_600,
+      timeShiftSupported: true,
+    });
+
+    // Burst update within throttle window (< 500ms since t=1650) does not spam
+    s.clock.t = 1800;
+    expect(
+      clocks(
+        s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 11, end: 42.0 }] }),
+      ),
+    ).toEqual([]);
+
+    // Periodic tick() emits the latest live window while paused once clockIntervalMs elapses
+    s.clock.t = 2650;
+    const tickClocks = clocks(s.d.tick());
+    expect(tickClocks).toHaveLength(1);
+    expect(tickClocks[0]).toMatchObject({
+      positionMs: 35_000,
+      rate: 0,
+      liveSeekableStartMs: 11_000,
+      liveEdgeMs: 42_000,
+      timeShiftSupported: true,
+    });
+
+    // Start-bound eviction (>=500ms) while paused also emits after throttle interval
+    s.clock.t = 3200;
+    const startShift = clocks(
+      s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 11.6, end: 42.1 }] }),
+    );
+    expect(startShift).toHaveLength(1);
+    expect(startShift[0]).toMatchObject({
+      liveSeekableStartMs: 11_600,
+      liveEdgeMs: 42_100,
+      rate: 0,
+      timeShiftSupported: true,
+    });
+
+    // Paused live stream without timeShiftSupported does NOT tick
+    const noTs = setup('live');
+    play(noTs);
+    noTs.d.property('pause', true);
+    noTs.clock.t = 5000;
+    expect(noTs.d.tick()).toEqual([]);
+
+    // Paused VOD does NOT tick
+    const vod = setup('vod');
+    play(vod);
+    vod.d.property('pause', true);
+    vod.clock.t = 5000;
+    expect(vod.d.tick()).toEqual([]);
+  });
 });

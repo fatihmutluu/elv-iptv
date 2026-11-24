@@ -202,6 +202,8 @@ export interface CatchupProgrammeInput {
   readonly startMs: number;
   readonly stopMs: number;
   readonly hasArchive?: boolean;
+  /** Optional programme title checked against active parental-control filters (`#31`). */
+  readonly title?: string;
 }
 
 /** @internal Session cache for M3U `urlvars` resolvers and Xtream secrets, evicted on source mutations. */
@@ -465,9 +467,7 @@ export function createPlaytimeResolverCache(deps: {
         const streamId = Number(row.provider_id);
         if (row.provider_id === null || !Number.isFinite(streamId)) return notFound();
         const ext = effectiveXtreamTransport(source)?.xtreamFormat ?? 'ts';
-        const server = creds.server.includes('://')
-          ? creds.server
-          : resolveXtreamBaseUrl(creds.server, deps.http);
+        const server = resolveXtreamBaseUrl(creds.server, deps.http);
         const built = buildCatchupUrl({
           mode: 'xc',
           server,

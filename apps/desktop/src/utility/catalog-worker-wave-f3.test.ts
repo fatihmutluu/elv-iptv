@@ -244,11 +244,12 @@ describe('catalog-worker + preload Wave F3 EPG ops (#220, #306, #30, #35)', () =
       const channel = items[0];
       if (!channel) return;
 
-      // 1. resolveCatchupStream
+      // 1. resolveCatchupStream (including optional programme.title for parental filtering)
       const catchup: Result<StreamRequest> =
         (await h.bridge.resolveCatchupStream?.(channel.key, {
           startMs: 1_699_990_000_000,
           stopMs: 1_699_993_600_000,
+          title: 'Evening Report',
         })) ?? ({ ok: false } as never);
       expect(catchup.ok).toBe(true);
       if (catchup.ok) {
@@ -337,6 +338,7 @@ describe('catalog-worker + preload Wave F3 EPG ops (#220, #306, #30, #35)', () =
         programmeStart: 1_700_003_600_000,
         programmeStop: 1_700_007_200_000,
         leadTimeMs: 300_000,
+        parentalUnlocked: false,
       });
       const r2 = await h.bridge.upsertReminder?.({
         profileId: 'default',
@@ -346,12 +348,13 @@ describe('catalog-worker + preload Wave F3 EPG ops (#220, #306, #30, #35)', () =
         programmeTitle: 'Past Show',
         programmeStart: 1_699_990_000_000,
         programmeStop: 1_699_993_600_000,
+        parentalUnlocked: true,
       });
       expect(r1?.ok).toBe(true);
       expect(r2?.ok).toBe(true);
 
       const activeReminders: ProgrammeReminderRecord[] =
-        (await h.bridge.listReminders?.('default')) ?? [];
+        (await h.bridge.listReminders?.('default', { parentalUnlocked: false })) ?? [];
       expect(activeReminders).toHaveLength(2);
 
       const firedRes = await h.bridge.markReminderFired?.(
@@ -409,6 +412,37 @@ describe('catalog-worker + preload Wave F3 EPG ops (#220, #306, #30, #35)', () =
       expect(fault).toMatchObject({
         type: 'fault',
         reqId: 999,
+        error: { category: 'source-format', code: 'invalid-request' },
+      });
+
+      // Worker rejects tampered catchup title with control characters and non-boolean parentalUnlocked
+      const badCatchupTitle = await h.sendRawToWorker({
+        type: 'call',
+        reqId: 1000,
+        call: {
+          method: 'resolveCatchupStream',
+          itemKey: 'm:s1:ch1',
+          programme: { startMs: 1_000, stopMs: 2_000, title: 'Bad\nTitle' },
+        },
+      });
+      expect(badCatchupTitle).toMatchObject({
+        type: 'fault',
+        reqId: 1000,
+        error: { category: 'source-format', code: 'invalid-request' },
+      });
+
+      const badReminderUnlocked = await h.sendRawToWorker({
+        type: 'call',
+        reqId: 1001,
+        call: {
+          method: 'listReminders',
+          profileId: 'default',
+          opts: { parentalUnlocked: 'yes' },
+        },
+      });
+      expect(badReminderUnlocked).toMatchObject({
+        type: 'fault',
+        reqId: 1001,
         error: { category: 'source-format', code: 'invalid-request' },
       });
     } finally {

@@ -191,17 +191,25 @@ export function createProfileScopedCatalog(
       : {}),
     ...(listReminders
       ? {
-          listReminders: (profileId, opts) =>
-            listReminders(profileId ?? getScope().profileId, opts),
+          listReminders: (profileId, opts) => {
+            const scope = getScope();
+            return listReminders(profileId ?? scope.profileId, {
+              ...opts,
+              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
         }
       : {}),
     ...(upsertReminder
       ? {
-          upsertReminder: (input) =>
-            upsertReminder({
+          upsertReminder: (input) => {
+            const scope = getScope();
+            return upsertReminder({
               ...input,
-              profileId: input.profileId ?? getScope().profileId,
-            }),
+              profileId: input.profileId ?? scope.profileId,
+              parentalUnlocked: input.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
         }
       : {}),
     ...(removeReminder

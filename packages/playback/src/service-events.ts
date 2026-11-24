@@ -12,6 +12,7 @@ import {
 import type { RecoveryHooks } from './seam';
 import type { SeekCoalescer } from './seek-coalescer';
 import type { PlaybackStateStore } from './state-store';
+import { clampLiveSeekPosition } from './timeshift';
 import type {
   PlaybackClock,
   PlaybackState,
@@ -285,25 +286,11 @@ export function resolveSeekTarget(
   statusKind: PlaybackStatus['kind'],
   rawDuration: number | undefined,
   anchor?: ClockAnchor,
+  nowMs?: number,
 ): number | undefined {
   if (!isVod && anchor !== undefined) {
-    if (anchor.timeShiftSupported === false) return undefined;
-    const hasStart =
-      anchor.liveSeekableStartMs !== undefined &&
-      Number.isFinite(anchor.liveSeekableStartMs) &&
-      anchor.liveSeekableStartMs >= 0;
-    const hasEdge =
-      anchor.liveEdgeMs !== undefined &&
-      Number.isFinite(anchor.liveEdgeMs) &&
-      anchor.liveEdgeMs > 0;
-    if (anchor.timeShiftSupported === true || (hasStart && hasEdge)) {
-      const startMs = hasStart ? (anchor.liveSeekableStartMs as number) : 0;
-      if (hasEdge && (anchor.liveEdgeMs as number) > startMs) {
-        return Math.min(anchor.liveEdgeMs as number, Math.max(startMs, positionMs));
-      }
-      if (anchor.timeShiftSupported === true) {
-        return Math.max(startMs, positionMs);
-      }
+    if (anchor.timeShiftSupported !== undefined || anchor.liveSeekableStartMs !== undefined) {
+      return clampLiveSeekPosition(anchor, positionMs, nowMs);
     }
   }
   const validDuration =

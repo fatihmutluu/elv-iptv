@@ -10,7 +10,12 @@ describe('Wave F3 catalog IPC guards (#220, #306, #30, #35)', () => {
         call({
           method: 'resolveCatchupStream',
           itemKey: 'm:s1:ch1',
-          programme: { startMs: 1_700_000_000_000, stopMs: 1_700_003_600_000, hasArchive: true },
+          programme: {
+            startMs: 1_700_000_000_000,
+            stopMs: 1_700_003_600_000,
+            hasArchive: true,
+            title: 'Evening News Special',
+          },
           opts: { profileId: 'p_living', parentalUnlocked: false },
         }),
       ),
@@ -57,6 +62,21 @@ describe('Wave F3 catalog IPC guards (#220, #306, #30, #35)', () => {
         method: 'resolveCatchupStream',
         itemKey: 'm:s1:ch1',
         programme: { startMs: 1000, stopMs: 2000, hasArchive: 'yes' },
+      },
+      {
+        method: 'resolveCatchupStream',
+        itemKey: 'm:s1:ch1',
+        programme: { startMs: 1000, stopMs: 2000, title: 42 },
+      },
+      {
+        method: 'resolveCatchupStream',
+        itemKey: 'm:s1:ch1',
+        programme: { startMs: 1000, stopMs: 2000, title: 'a'.repeat(257) },
+      },
+      {
+        method: 'resolveCatchupStream',
+        itemKey: 'm:s1:ch1',
+        programme: { startMs: 1000, stopMs: 2000, title: 'Late\nShow' },
       },
       {
         method: 'resolveCatchupStream',
@@ -323,7 +343,12 @@ describe('Wave F3 catalog IPC guards (#220, #306, #30, #35)', () => {
         call({
           method: 'listReminders',
           profileId: 'p_living',
-          opts: { includeFired: true, fromMs: 1_700_000_000_000, limit: 50 },
+          opts: {
+            includeFired: true,
+            fromMs: 1_700_000_000_000,
+            limit: 50,
+            parentalUnlocked: false,
+          },
         }),
       ),
     ).toBe(true);
@@ -332,6 +357,7 @@ describe('Wave F3 catalog IPC guards (#220, #306, #30, #35)', () => {
       { method: 'listReminders', opts: { includeFired: 'yes' } },
       { method: 'listReminders', opts: { fromMs: -1 } },
       { method: 'listReminders', opts: { limit: 501 } },
+      { method: 'listReminders', opts: { parentalUnlocked: 'true' } },
       { method: 'listReminders', opts: { extra: 1 } },
     ]) {
       expect(isCatalogClientMessage(call(bad))).toBe(false);
@@ -350,6 +376,7 @@ describe('Wave F3 catalog IPC guards (#220, #306, #30, #35)', () => {
             programmeStart: 1_700_003_600_000,
             programmeStop: 1_700_007_200_000,
             leadTimeMs: 300_000,
+            parentalUnlocked: true,
           },
         }),
       ),
@@ -405,6 +432,15 @@ describe('Wave F3 catalog IPC guards (#220, #306, #30, #35)', () => {
         programmeStart: 1000,
         programmeStop: 2000,
         leadTimeMs: -1,
+      },
+      {
+        sourceId: 's1',
+        channelKey: 'm:s1:ch1',
+        channelName: 'News',
+        programmeTitle: 'Show',
+        programmeStart: 1000,
+        programmeStop: 2000,
+        parentalUnlocked: 'yes',
       },
       {
         sourceId: 's1',

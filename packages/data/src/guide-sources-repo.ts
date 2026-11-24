@@ -21,7 +21,7 @@ export const MAX_GUIDE_CHANNELS_LIMIT = 500;
 
 const GUIDE_SOURCE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const RESERVED_GUIDE_VAR_RE = /^(?:url|d\d+)$/;
-const HTTP_GUIDE_URL_RE = /^https?:\/\/[^/\s]+/i;
+const MAX_GUIDE_URL_LENGTH = 4_096;
 
 /** A configured priority-ordered XMLTV guide source row (`#30`). */
 export interface GuideSourceRecord {
@@ -61,6 +61,8 @@ export interface GuideChannelOption {
   readonly name: string;
   readonly icon: string | null;
   readonly lcn: string | null;
+  /** Originating `guide_sources.id` when known, preserving per-guide `epg_shift_ms` on manual overrides (`#30`). */
+  readonly guideSourceId?: string | null;
 }
 
 /** A Tier-0 manual channel-to-guide override row from `channel_guide_overrides` (`#30`). */
@@ -117,7 +119,23 @@ function hasControlChar(value: string): boolean {
 function validateGuideUrl(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
-  if (trimmed.length === 0 || hasControlChar(trimmed) || !HTTP_GUIDE_URL_RE.test(trimmed)) {
+  if (
+    trimmed.length === 0 ||
+    trimmed.length > MAX_GUIDE_URL_LENGTH ||
+    hasControlChar(trimmed) ||
+    /\s/.test(trimmed)
+  ) {
+    return null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      parsed.hostname.length === 0
+    ) {
+      return null;
+    }
+  } catch {
     return null;
   }
   return trimmed;
@@ -437,6 +455,19 @@ export async function reorderGuideSources(
   return ok(undefined);
 }
 
+const GUIDE_CHANNEL_SOURCE_EXPR = `COALESCE(
+  (SELECT cgo.guide_source_id
+     FROM channel_guide_overrides cgo
+    WHERE cgo.source_id = gc.source_id
+      AND cgo.guide_id = gc.guide_id
+      AND cgo.guide_source_id IS NOT NULL
+    ORDER BY cgo.is_manual ASC, cgo.updated_at DESC
+    LIMIT 1),
+  (SELECT CASE WHEN COUNT(*) = 1 THEN MIN(gs.id) ELSE NULL END
+     FROM guide_sources gs
+    WHERE gs.source_id = gc.source_id AND gs.enabled = 1)
+)`;
+
 /** Lists searchable XMLTV guide channels stored for `sourceId` for the Manual Channel Mapper (`#30`). */
 export async function listGuideChannels(
   db: SqlDriver,
@@ -457,22 +488,30 @@ export async function listGuideChannels(
       name: string;
       icon: string | null;
       lcn: string | null;
+      guide_source_id: string | null;
     }>(
-      `SELECT guide_id, name, icon, lcn
-         FROM guide_channels
-        WHERE source_id = ?
-        ORDER BY name_fold ASC, guide_id ASC
+      `SELECT gc.guide_id, gc.name, gc.icon, gc.lcn,
+              ${GUIDE_CHANNEL_SOURCE_EXPR} AS guide_source_id
+         FROM guide_channels gc
+        WHERE gc.source_id = ?
+        ORDER BY gc.name_fold ASC, gc.guide_id ASC
         LIMIT ?`,
       [sourceId, clamped],
     );
-    return rows.map((r) => ({ guideId: r.guide_id, name: r.name, icon: r.icon, lcn: r.lcn }));
+    return rows.map((r) => ({
+      guideId: r.guide_id,
+      name: r.name,
+      icon: r.icon,
+      lcn: r.lcn,
+      guideSourceId: r.guide_source_id,
+    }));
   }
 
   const folded = foldText(trimmed);
   const rawLower = trimmed.toLowerCase();
   const tokens = folded.length > 0 ? folded.split(/\s+/).filter(Boolean).slice(0, 6) : [rawLower];
   const clauses = tokens
-    .map(() => "(name_fold LIKE ? ESCAPE '\\' OR LOWER(guide_id) LIKE ? ESCAPE '\\')")
+    .map(() => "(gc.name_fold LIKE ? ESCAPE '\\' OR LOWER(gc.guide_id) LIKE ? ESCAPE '\\')")
     .join(' AND ');
   const params: (string | number)[] = [sourceId];
   for (const tok of tokens) {
@@ -486,15 +525,23 @@ export async function listGuideChannels(
     name: string;
     icon: string | null;
     lcn: string | null;
+    guide_source_id: string | null;
   }>(
-    `SELECT guide_id, name, icon, lcn
-       FROM guide_channels
-      WHERE source_id = ? AND ${clauses}
-      ORDER BY name_fold ASC, guide_id ASC
+    `SELECT gc.guide_id, gc.name, gc.icon, gc.lcn,
+            ${GUIDE_CHANNEL_SOURCE_EXPR} AS guide_source_id
+       FROM guide_channels gc
+      WHERE gc.source_id = ? AND ${clauses}
+      ORDER BY gc.name_fold ASC, gc.guide_id ASC
       LIMIT ?`,
     params,
   );
-  return rows.map((r) => ({ guideId: r.guide_id, name: r.name, icon: r.icon, lcn: r.lcn }));
+  return rows.map((r) => ({
+    guideId: r.guide_id,
+    name: r.name,
+    icon: r.icon,
+    lcn: r.lcn,
+    guideSourceId: r.guide_source_id,
+  }));
 }
 
 /** Lists all manual (`is_manual = 1`) channel-to-guide overrides for `sourceId` (`#30`). */
@@ -536,6 +583,7 @@ export async function setChannelGuideOverride(
   if (guideId !== null && (hasControlChar(guideId) || guideId.length > 256)) {
     return err(elvError('source-format', 'invalid-guide-id'));
   }
+  const preserveGuideSourceId = input.guideSourceId === undefined;
   const guideSourceId =
     input.guideSourceId === undefined ||
     input.guideSourceId === null ||
@@ -548,13 +596,16 @@ export async function setChannelGuideOverride(
   const epgShiftMs = normalizeEpgShiftMs(input.epgShiftMs);
   const now = Math.max(0, Math.round(clock()));
 
-  const found = await db.transaction(async (tx) => {
-    if (!(await sourceExists(tx, input.sourceId))) return false;
+  const savedRow = await db.transaction(async (tx) => {
+    if (!(await sourceExists(tx, input.sourceId))) return undefined;
+    const guideSourceUpdateExpr = preserveGuideSourceId
+      ? 'COALESCE(excluded.guide_source_id, channel_guide_overrides.guide_source_id)'
+      : 'excluded.guide_source_id';
     await tx.run(
       `INSERT INTO channel_guide_overrides (source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at)
        VALUES (?, ?, ?, ?, ?, 1, ?)
        ON CONFLICT(source_id, channel_key) DO UPDATE SET
-         guide_source_id = excluded.guide_source_id,
+         guide_source_id = ${guideSourceUpdateExpr},
          guide_id = excluded.guide_id,
          epg_shift_ms = excluded.epg_shift_ms,
          is_manual = 1,
@@ -569,22 +620,21 @@ export async function setChannelGuideOverride(
         [input.sourceId, channelKey, guideId],
       );
     }
-    return true;
+    const rows = await tx.all<RawChannelGuideOverrideRow>(
+      `SELECT source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at
+         FROM channel_guide_overrides
+        WHERE source_id = ? AND channel_key = ?
+        LIMIT 1`,
+      [input.sourceId, channelKey],
+    );
+    return rows[0];
   });
 
-  if (!found) return err(elvError('storage', 'source-not-found'));
-  return ok({
-    sourceId: input.sourceId,
-    channelKey,
-    guideSourceId,
-    guideId,
-    epgShiftMs,
-    isManual: true,
-    updatedAt: now,
-  });
+  if (savedRow === undefined) return err(elvError('storage', 'source-not-found'));
+  return ok(mapChannelGuideOverrideRow(savedRow));
 }
 
-/** Removes any manual channel-to-guide override for `(sourceId, channelKey)`. */
+/** Removes any manual channel-to-guide override for `(sourceId, channelKey)`, clears stale `channel_guide` state, and restores automatic `live.guide_id` mapping if present. */
 export async function clearChannelGuideOverride(
   db: SqlDriver,
   sourceId: string,
@@ -593,9 +643,33 @@ export async function clearChannelGuideOverride(
   if (!SOURCE_ID.test(sourceId) || !isSafeRecentChannelKey(channelKey)) {
     return ok(undefined);
   }
-  await db.run('DELETE FROM channel_guide_overrides WHERE source_id = ? AND channel_key = ?', [
-    sourceId,
-    channelKey.trim(),
-  ]);
+  const trimmedKey = channelKey.trim();
+  await db.transaction(async (tx) => {
+    await tx.run('DELETE FROM channel_guide_overrides WHERE source_id = ? AND channel_key = ?', [
+      sourceId,
+      trimmedKey,
+    ]);
+    await tx.run('DELETE FROM channel_guide WHERE source_id = ? AND channel_key = ?', [
+      sourceId,
+      trimmedKey,
+    ]);
+    const liveRows = await tx.all<{ guide_id: string | null }>(
+      `SELECT l.guide_id
+         FROM live l
+         JOIN guide_channels gc
+           ON gc.source_id = l.source_id AND gc.guide_id = l.guide_id
+        WHERE l.source_id = ? AND l.key = ? AND l.guide_id IS NOT NULL AND l.guide_id != ''
+        LIMIT 1`,
+      [sourceId, trimmedKey],
+    );
+    const autoGuideId = liveRows[0]?.guide_id;
+    if (autoGuideId !== undefined && autoGuideId !== null && autoGuideId !== '') {
+      await tx.run(
+        `INSERT OR IGNORE INTO channel_guide (source_id, channel_key, guide_id)
+         VALUES (?, ?, ?)`,
+        [sourceId, trimmedKey, autoGuideId],
+      );
+    }
+  });
   return ok(undefined);
 }

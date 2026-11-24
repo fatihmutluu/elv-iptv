@@ -97,6 +97,27 @@ describe('multi-guide sources, priority-ordered ingestion, Tier-0 manual overrid
     expect(
       await svc.addGuideSource?.({
         sourceId: 'src1',
+        name: 'Whitespace URL',
+        url: 'https://epg.example/my guide.xml',
+      }),
+    ).toMatchObject({ ok: false, error: { category: 'source-format', code: 'invalid-guide-url' } });
+    expect(
+      await svc.addGuideSource?.({
+        sourceId: 'src1',
+        name: 'Oversized URL',
+        url: `https://epg.example/${'a'.repeat(4100)}.xml`,
+      }),
+    ).toMatchObject({ ok: false, error: { category: 'source-format', code: 'invalid-guide-url' } });
+    expect(
+      await svc.addGuideSource?.({
+        sourceId: 'src1',
+        name: 'Malformed URL',
+        url: 'https://[invalid-host/guide.xml',
+      }),
+    ).toMatchObject({ ok: false, error: { category: 'source-format', code: 'invalid-guide-url' } });
+    expect(
+      await svc.addGuideSource?.({
+        sourceId: 'src1',
         name: '   ',
         url: 'https://epg.example/g1.xml',
       }),
@@ -403,6 +424,295 @@ describe('multi-guide sources, priority-ordered ingestion, Tier-0 manual overrid
       expect(second.value.unchanged).toBe(true);
     }
     expect(guideRequests).toBe(2);
+
+    await svc.close();
+  });
+
+  it('preserves concurrently added/edited guide_sources secrets during importM3u (#30)', async () => {
+    const { db } = testDb();
+    await openCatalog(db);
+    const secrets = memorySecrets();
+
+    let releaseDownload!: () => void;
+    const downloadStarted = new Promise<void>((resolve) => {
+      // resolved when HTTP get starts
+      void resolve;
+    });
+    let markDownloadStarted!: () => void;
+    const startedP = new Promise<void>((resolve) => {
+      markDownloadStarted = resolve;
+    });
+    const gateP = new Promise<void>((resolve) => {
+      releaseDownload = resolve;
+    });
+    void downloadStarted;
+
+    let version = 1;
+    const http: HttpClient = {
+      async get(url) {
+        if (version === 2) {
+          markDownloadStarted();
+          await gateP;
+        }
+        const playlist = [
+          '#EXTM3U',
+          '#EXTINF:-1 tvg-id="ch1" group-title="Main",Channel 1',
+          `https://cdn.example/v${version}/token${version}/ch1.ts`,
+        ].join('\n');
+        return ok({ status: 200, headers: {}, body: utf8(playlist), finalUrl: url });
+      },
+    };
+
+    const svc = createCatalogService({
+      db,
+      secrets,
+      scheduler: immediateScheduler,
+      http,
+      clock: () => NOW,
+      newId: () => 'src1',
+    });
+
+    await svc.addSource({
+      kind: 'm3u',
+      name: 'Main',
+      playlistUrl: 'https://cdn.example/list.m3u',
+    });
+    // First import establishes oldVars
+    expect((await svc.importSource('src1')).ok).toBe(true);
+    const gExisting = await svc.addGuideSource?.({
+      sourceId: 'src1',
+      name: 'Existing Guide',
+      url: 'https://epg.example/old.xml',
+    });
+    expect(gExisting?.ok).toBe(true);
+    if (!gExisting?.ok) return;
+
+    // Start second M3U import with new URL token so afterCommit prunes stale playlist vars
+    version = 2;
+    const importPromise = svc.importSource('src1');
+    await startedP;
+
+    // Concurrently add a new guide source and update the existing guide URL while M3U download is in flight
+    const gConcurrent = await svc.addGuideSource?.({
+      sourceId: 'src1',
+      name: 'Concurrent Guide',
+      url: 'https://epg.example/concurrent.xml?key=liveKey99',
+    });
+    expect(gConcurrent?.ok).toBe(true);
+    if (!gConcurrent?.ok) return;
+    expect(
+      (
+        await svc.updateGuideSource?.(gExisting.value.id, {
+          url: 'https://epg.example/updated.xml?key=updatedKey88',
+        })
+      )?.ok,
+    ).toBe(true);
+
+    releaseDownload();
+    expect((await importPromise).ok).toBe(true);
+
+    const vars = JSON.parse(secrets.dump()[secretKey('src1', 'urlvars')] ?? '{}');
+    expect(vars[`g:${gConcurrent.value.id}`]).toBe(
+      'https://epg.example/concurrent.xml?key=liveKey99',
+    );
+    expect(vars[`g:${gExisting.value.id}`]).toBe(
+      'https://epg.example/updated.xml?key=updatedKey88',
+    );
+    await svc.close();
+  });
+
+  it('populates guideSourceId on listGuideChannels, preserves it on setChannelGuideOverride, and clears manual channel_guide immediately', async () => {
+    const { db } = testDb();
+    await openCatalog(db);
+    const secrets = memorySecrets();
+
+    const playlist = [
+      '#EXTM3U',
+      '#EXTINF:-1 tvg-id="ch.alpha" group-title="Main",Alpha TV',
+      'https://cdn.example/alpha.ts',
+      '#EXTINF:-1 tvg-id="ch.beta" group-title="Main",Beta TV',
+      'https://cdn.example/beta.ts',
+      '#EXTINF:-1 tvg-id="ch.unmatched" group-title="Main",Gamma TV',
+      'https://cdn.example/gamma.ts',
+    ].join('\n');
+
+    const guidePrimary = xmltv(
+      [
+        '<channel id="ch.alpha"><display-name>Alpha TV</display-name></channel>',
+        '<channel id="manual.feed"><display-name>Manual Feed</display-name></channel>',
+      ].join(''),
+      [
+        '<programme start="20261124120000 +0000" stop="20261124130000 +0000" channel="ch.alpha"><title>Alpha Show</title></programme>',
+        '<programme start="20261124120000 +0000" stop="20261124130000 +0000" channel="manual.feed"><title>Manual Feed Show</title></programme>',
+      ].join(''),
+    );
+    const guideSecondary = xmltv(
+      '<channel id="ch.beta"><display-name>Beta TV</display-name></channel>',
+      '<programme start="20261124120000 +0000" stop="20261124130000 +0000" channel="ch.beta"><title>Beta Show</title></programme>',
+    );
+
+    const svc = createCatalogService({
+      db,
+      secrets,
+      scheduler: immediateScheduler,
+      http: makeHttp({
+        'list.m3u': { body: playlist },
+        'primary.xml': { body: guidePrimary },
+        'secondary.xml': { body: guideSecondary },
+      }),
+      clock: () => NOW,
+      newId: () => 'src1',
+    });
+
+    await svc.addSource({
+      kind: 'm3u',
+      name: 'Main',
+      playlistUrl: 'https://cdn.example/list.m3u',
+    });
+    await svc.importSource('src1');
+    const cats = await svc.categories('src1', 'live');
+    const channels = await svc.items(cats[0]?.id ?? '', 0, 10);
+    const alphaKey = channels.find((c) => c.name === 'Alpha TV')?.key ?? '';
+    const betaKey = channels.find((c) => c.name === 'Beta TV')?.key ?? '';
+    const gammaKey = channels.find((c) => c.name === 'Gamma TV')?.key ?? '';
+
+    const gs1 = await svc.addGuideSource?.({
+      sourceId: 'src1',
+      name: 'Primary',
+      url: 'https://epg.example/primary.xml',
+      priority: 0,
+    });
+    const gs2 = await svc.addGuideSource?.({
+      sourceId: 'src1',
+      name: 'Secondary',
+      url: 'https://epg.example/secondary.xml',
+      priority: 1,
+      epgShiftMs: 1_800_000,
+    });
+    if (!gs1?.ok || !gs2?.ok) throw new Error('expected guides');
+    expect((await svc.importGuide?.('src1'))?.ok).toBe(true);
+
+    // listGuideChannels returns populated guideSourceId
+    const guideOpts = await svc.listGuideChannels?.('src1');
+    expect(guideOpts?.find((c) => c.guideId === 'ch.alpha')?.guideSourceId).toBe(gs1.value.id);
+    expect(guideOpts?.find((c) => c.guideId === 'ch.beta')?.guideSourceId).toBe(gs2.value.id);
+
+    // Updating only epgShiftMs (guideSourceId omitted) preserves Beta TV's existing guideSourceId!
+    const betaOffset = await svc.setChannelGuideOverride?.({
+      sourceId: 'src1',
+      channelKey: betaKey,
+      guideId: 'ch.beta',
+      epgShiftMs: 600_000,
+    });
+    expect(betaOffset?.ok).toBe(true);
+    if (betaOffset?.ok) {
+      expect(betaOffset.value.guideSourceId).toBe(gs2.value.id);
+    }
+
+    // Explicitly passing guideSourceId: null clears it to null
+    const clearedSource = await svc.setChannelGuideOverride?.({
+      sourceId: 'src1',
+      channelKey: betaKey,
+      guideSourceId: null,
+      guideId: 'ch.beta',
+      epgShiftMs: 600_000,
+    });
+    expect(clearedSource?.ok && clearedSource.value.guideSourceId).toBeNull();
+
+    // Map Gamma TV manually -> ch.alpha shows Alpha Show immediately
+    await svc.setChannelGuideOverride?.({
+      sourceId: 'src1',
+      channelKey: gammaKey,
+      guideSourceId: gs1.value.id,
+      guideId: 'ch.alpha',
+    });
+    expect((await svc.epgWindow?.([gammaKey], NOW, NOW + 3_600_000))?.[gammaKey]?.[0]?.title).toBe(
+      'Alpha Show',
+    );
+    // Clearing Gamma TV's override immediately removes stale manual programmes
+    await svc.clearChannelGuideOverride?.('src1', gammaKey);
+    expect((await svc.epgWindow?.([gammaKey], NOW, NOW + 3_600_000))?.[gammaKey]).toBeUndefined();
+
+    // Override Alpha TV -> ch.beta, then clear -> restores automatic ch.alpha mapping immediately
+    await svc.setChannelGuideOverride?.({
+      sourceId: 'src1',
+      channelKey: alphaKey,
+      guideSourceId: gs2.value.id,
+      guideId: 'ch.beta',
+    });
+    expect((await svc.epgWindow?.([alphaKey], NOW, NOW + 7_200_000))?.[alphaKey]?.[0]?.title).toBe(
+      'Beta Show',
+    );
+    await svc.clearChannelGuideOverride?.('src1', alphaKey);
+    expect((await svc.epgWindow?.([alphaKey], NOW, NOW + 3_600_000))?.[alphaKey]?.[0]?.title).toBe(
+      'Alpha Show',
+    );
+
+    await svc.close();
+  });
+
+  it('does not let an empty <channel id> in a higher-priority guide block a lower-priority guide with programmes', async () => {
+    const { db } = testDb();
+    await openCatalog(db);
+    const secrets = memorySecrets();
+
+    const playlist = [
+      '#EXTM3U',
+      '#EXTINF:-1 tvg-id="ch.alpha" group-title="Main",Alpha TV',
+      'https://cdn.example/alpha.ts',
+    ].join('\n');
+
+    // Priority-0 declares <channel id="ch.alpha"> with ZERO programmes
+    const emptyPrimary = xmltv(
+      '<channel id="ch.alpha"><display-name>Alpha TV</display-name></channel>',
+      '',
+    );
+    // Priority-1 actually provides programmes for ch.alpha
+    const populatedSecondary = xmltv(
+      '<channel id="ch.alpha"><display-name>Alpha TV</display-name></channel>',
+      '<programme start="20261124120000 +0000" stop="20261124130000 +0000" channel="ch.alpha"><title>Secondary Schedule Show</title></programme>',
+    );
+
+    const svc = createCatalogService({
+      db,
+      secrets,
+      scheduler: immediateScheduler,
+      http: makeHttp({
+        'list.m3u': { body: playlist },
+        'empty-primary.xml': { body: emptyPrimary },
+        'populated-secondary.xml': { body: populatedSecondary },
+      }),
+      clock: () => NOW,
+      newId: () => 'src1',
+    });
+
+    await svc.addSource({
+      kind: 'm3u',
+      name: 'Main',
+      playlistUrl: 'https://cdn.example/list.m3u',
+    });
+    await svc.importSource('src1');
+    const cats = await svc.categories('src1', 'live');
+    const alphaKey = (await svc.items(cats[0]?.id ?? '', 0, 5))[0]?.key ?? '';
+
+    const gs1 = await svc.addGuideSource?.({
+      sourceId: 'src1',
+      name: 'Empty Primary',
+      url: 'https://epg.example/empty-primary.xml',
+      priority: 0,
+    });
+    const gs2 = await svc.addGuideSource?.({
+      sourceId: 'src1',
+      name: 'Populated Secondary',
+      url: 'https://epg.example/populated-secondary.xml',
+      priority: 1,
+    });
+    expect(gs1?.ok && gs2?.ok).toBe(true);
+
+    const imported = await svc.importGuide?.('src1');
+    expect(imported?.ok).toBe(true);
+    const win = await svc.epgWindow?.([alphaKey], NOW - 60_000, NOW + 3_600_000);
+    expect(win?.[alphaKey]?.map((p) => p.title)).toEqual(['Secondary Schedule Show']);
 
     await svc.close();
   });

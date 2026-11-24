@@ -70,6 +70,20 @@ import {
 const REQUEST_TIMEOUT_MS = 180_000;
 const UNGROUPED = 'Ungrouped';
 
+const isCustomGuideVar = (name: string): boolean =>
+  name.startsWith('g:') && name !== 'g:url' && !/^g:d\d+$/.test(name);
+
+function mergeLiveCustomGuideVars(baseVars: UrlVars, liveVars: UrlVars): UrlVars {
+  const out: UrlVars = {};
+  for (const [k, v] of Object.entries(baseVars)) {
+    if (!isCustomGuideVar(k)) out[k] = v;
+  }
+  for (const [k, v] of Object.entries(liveVars)) {
+    if (isCustomGuideVar(k)) out[k] = v;
+  }
+  return out;
+}
+
 type PlaylistOpen =
   | {
       kind: 'body';
@@ -430,8 +444,13 @@ export async function importM3u(
     },
     beforeCommit: async () => {
       if (outcome?.kind !== 'imported') return;
-      const merged: UrlVars = { ...oldVars, ...outcome.staged.vars };
-      const toStage = partitionUrlVars(merged) !== undefined ? merged : outcome.staged.vars;
+      const liveVars = await readUrlVars(deps, source.id);
+      const freshStaged = mergeLiveCustomGuideVars(outcome.staged.vars, liveVars);
+      const merged: UrlVars = mergeLiveCustomGuideVars(
+        { ...oldVars, ...outcome.staged.vars },
+        liveVars,
+      );
+      const toStage = partitionUrlVars(merged) !== undefined ? merged : freshStaged;
       stagedMerged = toStage === merged;
       secretsStaged = true;
       const written = await writeUrlVars(deps.secrets, source.id, toStage);
@@ -483,9 +502,14 @@ export async function importM3u(
     },
     afterCommit: async () => {
       if (outcome?.kind !== 'imported') return;
-      const vars = outcome.staged.vars;
-      if (stagedMerged && Object.keys(oldVars).some((k) => !Object.hasOwn(vars, k))) {
-        await writeUrlVars(deps.secrets, source.id, vars).catch(() => undefined);
+      const liveVars = await readUrlVars(deps, source.id);
+      const finalVars = mergeLiveCustomGuideVars(outcome.staged.vars, liveVars);
+      if (
+        stagedMerged &&
+        Object.keys(oldVars).some((k) => !isCustomGuideVar(k) && !Object.hasOwn(finalVars, k)) &&
+        partitionUrlVars(finalVars) !== undefined
+      ) {
+        await writeUrlVars(deps.secrets, source.id, finalVars).catch(() => undefined);
       }
     },
     onAbortOrFail: async (_c, outcomeKind) => {
@@ -493,7 +517,13 @@ export async function importM3u(
       if (outcomeKind === 'source-removed') {
         await deleteUrlVars(deps.secrets, source.id).catch(() => undefined);
       } else {
-        await writeUrlVars(deps.secrets, source.id, oldVars).catch(() => undefined);
+        const liveVars = await readUrlVars(deps, source.id);
+        const restored = mergeLiveCustomGuideVars(oldVars, liveVars);
+        await writeUrlVars(
+          deps.secrets,
+          source.id,
+          partitionUrlVars(restored) !== undefined ? restored : oldVars,
+        ).catch(() => undefined);
       }
     },
   });

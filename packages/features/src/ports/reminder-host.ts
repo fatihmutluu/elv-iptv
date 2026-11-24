@@ -5,6 +5,8 @@ export interface ReminderNotificationPayload {
   readonly programmeTitle: string;
   readonly programmeStart: number;
   readonly startsInMinutes: number;
+  /** Pre-localized timing/status line (e.g. from `@elv/i18n` `epg.reminderStartsIn` / `epg.reminderStartingNow`). */
+  readonly timingText?: string;
 }
 
 /**

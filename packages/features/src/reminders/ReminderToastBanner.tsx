@@ -2,14 +2,19 @@ import {
   CtaButton,
   Icon,
   TABULAR_NUMS_STYLE,
+  TvFocusAnchor,
   useI18n,
   useTheme,
+  useTvKeyInterceptor,
+  useTvKeySource,
   useViewport,
   webBackdropBlur,
 } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
+import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { ReminderBannerState } from '../app-shell-reminders';
+
+const NOOP_TV_SUBSCRIBER = (): boolean => false;
 
 /** Props of {@link ReminderToastBanner}. */
 export interface ReminderToastBannerProps {
@@ -18,10 +23,63 @@ export interface ReminderToastBannerProps {
   readonly onDismiss: () => void;
 }
 
+type ReminderBannerAction = 'tune' | 'dismiss';
+
+function ReminderBannerTvKeyTrap({
+  onLeft,
+  onRight,
+  onSelect,
+  onBack,
+}: {
+  readonly onLeft: () => void;
+  readonly onRight: () => void;
+  readonly onSelect: () => void;
+  readonly onBack: () => void;
+}): ReactElement {
+  const cbRef = useRef({ onLeft, onRight, onSelect, onBack });
+  cbRef.current = { onLeft, onRight, onSelect, onBack };
+
+  useTvKeySource(NOOP_TV_SUBSCRIBER);
+  useTvKeyInterceptor((input) => {
+    if (input.action !== 'down' && input.action !== 'press') {
+      return (
+        input.key === 'left' ||
+        input.key === 'right' ||
+        input.key === 'up' ||
+        input.key === 'down' ||
+        input.key === 'select' ||
+        input.key === 'back'
+      );
+    }
+    if (input.key === 'left') {
+      cbRef.current.onLeft();
+      return true;
+    }
+    if (input.key === 'right') {
+      cbRef.current.onRight();
+      return true;
+    }
+    if (input.key === 'select') {
+      cbRef.current.onSelect();
+      return true;
+    }
+    if (input.key === 'back') {
+      cbRef.current.onBack();
+      return true;
+    }
+    if (input.key === 'up' || input.key === 'down') {
+      return true;
+    }
+    return false;
+  });
+
+  return <TvFocusAnchor testID="reminder-banner-tv-focus-anchor" hasTVPreferredFocus />;
+}
+
 /**
  * Non-blocking Cinema Quietude floating programme reminder banner (`#35`).
  * Anchors top-right inside safe/overscan margins with focusable `"Tune now"` and `"Dismiss"` CTAs,
- * zero `<Modal>`, and zero hardcoded colors — never steals active playback.
+ * TV D-pad remote interception, zero `<Modal>`, and zero hardcoded colors — never steals active playback.
  */
 export function ReminderToastBanner({
   banner,
@@ -31,6 +89,18 @@ export function ReminderToastBanner({
   const theme = useTheme();
   const i18n = useI18n();
   const viewport = useViewport();
+  const isTv = viewport.formFactor === 'tv';
+  const [focusedAction, setFocusedAction] = useState<ReminderBannerAction>('tune');
+  const focusedActionRef = useRef<ReminderBannerAction>('tune');
+  focusedActionRef.current = focusedAction;
+
+  const bannerKey =
+    banner !== null ? `${banner.reminder.channelKey}|${banner.reminder.programmeStart}` : '';
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset default TV focus to Tune now whenever a new reminder banner appears
+  useEffect(() => {
+    setFocusedAction('tune');
+    focusedActionRef.current = 'tune';
+  }, [bannerKey]);
 
   if (banner === null) return null;
 
@@ -53,6 +123,23 @@ export function ReminderToastBanner({
         },
       ]}
     >
+      {isTv ? (
+        <ReminderBannerTvKeyTrap
+          onLeft={() => {
+            focusedActionRef.current = 'tune';
+            setFocusedAction('tune');
+          }}
+          onRight={() => {
+            focusedActionRef.current = 'dismiss';
+            setFocusedAction('dismiss');
+          }}
+          onSelect={() => {
+            if (focusedActionRef.current === 'tune') onTune();
+            else onDismiss();
+          }}
+          onBack={onDismiss}
+        />
+      ) : null}
       <View
         testID="reminder-toast-banner"
         accessibilityLiveRegion="polite"
@@ -113,12 +200,16 @@ export function ReminderToastBanner({
             variant="primary"
             icon="play"
             label={i18n.t('epg.reminderTuneNow')}
+            focusable={!isTv}
+            focused={isTv && focusedAction === 'tune'}
             onPress={onTune}
           />
           <CtaButton
             testID="reminder-banner-dismiss"
             variant="secondary"
             label={i18n.t('epg.reminderDismiss')}
+            focusable={!isTv}
+            focused={isTv && focusedAction === 'dismiss'}
             onPress={onDismiss}
           />
         </View>

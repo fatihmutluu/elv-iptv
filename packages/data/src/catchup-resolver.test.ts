@@ -414,6 +414,133 @@ describe('catch-up persistence, ItemRow.catchupDays, resolveCatchupStream, and f
       expect(fullEpg.value[1]?.hasArchive).toBe(false);
     }
 
+    // Programme-level parental lock via supplied title on an unrestricted channel
+    expect(
+      await svc.resolveCatchupStream?.(sportsKey, {
+        startMs: START,
+        stopMs: STOP,
+        title: 'XXX Late Night Special',
+      }),
+    ).toMatchObject({ ok: false, error: { category: 'auth', code: 'parental-locked' } });
+
+    // Unlocked bypasses programme title restriction
+    expect(
+      (
+        await svc.resolveCatchupStream?.(
+          sportsKey,
+          { startMs: START, stopMs: STOP, title: 'XXX Late Night Special' },
+          { parentalUnlocked: true },
+        )
+      )?.ok,
+    ).toBe(true);
+
+    // Programme-level parental lock via stored `programmes` DB row (rating or description) even when title is omitted
+    await db.run(
+      "INSERT OR REPLACE INTO channel_guide (source_id, channel_key, guide_id) VALUES ('xt1', ?, 'sports.one')",
+      [sportsKey],
+    );
+    await db.run(
+      `INSERT INTO programmes (source_id, guide_id, start, stop, title, description, rating_value, run_id, title_fold, description_fold)
+       VALUES ('xt1', 'sports.one', ?, ?, 'Late Broadcast', 'Explicit adult content', '18+', 1, 'late broadcast', 'explicit adult content')`,
+      [START, STOP],
+    );
+    await svc.updateParentalSettings?.({
+      enabled: true,
+      blockAdultKeywords: true,
+      maxRatingAge: 13,
+    });
+    expect(
+      await svc.resolveCatchupStream?.(sportsKey, { startMs: START, stopMs: STOP }),
+    ).toMatchObject({ ok: false, error: { category: 'auth', code: 'parental-locked' } });
+    expect(
+      (
+        await svc.resolveCatchupStream?.(
+          sportsKey,
+          { startMs: START, stopMs: STOP },
+          { parentalUnlocked: true },
+        )
+      )?.ok,
+    ).toBe(true);
+
+    await svc.close();
+  });
+
+  it('normalizes Xtream creds.server with /player_api.php and ?query tails during catch-up resolution', async () => {
+    const { db } = testDb();
+    await openCatalog(db);
+    const secrets = memorySecrets();
+    const xtUser = 'u2';
+    const xtPass = 'p2';
+    const http = mockHttp({
+      'action=get_live_categories': JSON.stringify([{ category_id: '1', category_name: 'Live' }]),
+      'action=get_vod_categories': '[]',
+      'action=get_series_categories': '[]',
+      'action=get_live_streams': JSON.stringify([
+        {
+          stream_id: 901,
+          num: 1,
+          name: 'News 1',
+          category_id: '1',
+          tv_archive: 1,
+          tv_archive_duration: 7,
+        },
+      ]),
+      'action=get_vod_streams': '[]',
+      'action=get_series': '[]',
+      'player_api.php': JSON.stringify({
+        user_info: { status: 'Active', is_trial: '0', max_connections: '1' },
+        server_info: { timezone: 'UTC' },
+      }),
+    });
+
+    const svc = createCoalescedCatalog(
+      createCatalogService({
+        db,
+        secrets,
+        scheduler: immediateScheduler,
+        http,
+        clock: () => NOW,
+        newId: () => 'xt2',
+      }),
+    );
+
+    await svc.addSource({
+      kind: 'xtream',
+      name: 'Panel With Tail',
+      server: 'https://panel.example:8443/portal/player_api.php?foo=bar#frag',
+      username: xtUser,
+      password: xtPass,
+    });
+    expect((await svc.importSource('xt2')).ok).toBe(true);
+    // Simulate legacy stored secret containing raw /player_api.php?query#frag
+    await secrets.set(
+      'source.xt2.xtream',
+      JSON.stringify({
+        server: 'https://panel.example:8443/portal/player_api.php?foo=bar#frag',
+        username: xtUser,
+        password: xtPass,
+      }),
+    );
+
+    const resolved = await svc.resolveCatchupStream?.('x:xt2:live:901', {
+      startMs: START,
+      stopMs: STOP,
+    });
+    expect(resolved?.ok).toBe(true);
+    if (resolved?.ok) {
+      expect(resolved.value.url).toBe(
+        [
+          'https://panel.example:8443/portal',
+          'timeshift',
+          xtUser,
+          xtPass,
+          '60',
+          '2026-11-24:10-00',
+          '901.ts',
+        ].join('/'),
+      );
+    }
+
     await svc.close();
   });
 });

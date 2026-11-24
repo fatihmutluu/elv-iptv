@@ -8,6 +8,8 @@ import {
   shouldShowLiveJumpToLive,
   targetIdentityKey,
 } from './live-timeshift-model';
+import { routeHostKey, routeOverlayAndMediaKey } from './player-key-routing';
+import type { PlayerOverlayLive } from './player-overlay-model';
 import { availableTvOsdActions } from './tv-osd-nav';
 import { resolveVodStartPositionMs } from './useWatchProgressSync';
 
@@ -158,5 +160,118 @@ describe('live-timeshift-model & catch-up player helpers', () => {
     expect(liveTsActions).toContain('playPause');
     expect(liveTsActions).toContain('seekForward');
     expect(liveTsActions).toContain('jumpToLive');
+  });
+
+  it('surfaces raw MPEG-TS lag > 4s in readLiveTimeShiftSnapshot and routes live time-shift keys (#8, #19)', () => {
+    const rawTsLag = readLiveTimeShiftSnapshot(
+      { positionMs: 10_000, atMs: 1_000, rate: 1, liveEdgeMs: 20_000, isLiveTs: true },
+      1_000,
+      false,
+    );
+    expect(rawTsLag.supported).toBe(false);
+    expect(rawTsLag.showJumpToLive).toBe(true);
+
+    // routeHostKey allows seek-back/seek-forward/coarse seek on live when liveTimeShiftSupported is true
+    const seekBy = vi.fn();
+    const baseState = {
+      locked: false,
+      tracksOpen: false,
+      settingsOpen: false,
+      infoOpen: false,
+      channelListOpen: false,
+    };
+    const hostDeps = {
+      isVod: false,
+      liveTimeShiftSupported: true,
+      state: baseState,
+      handleBack: vi.fn(),
+      toggleFullscreen: vi.fn(),
+      togglePlayPause: vi.fn(),
+      seekBy,
+      stepSeekMs: 10_000,
+      openTracks: vi.fn(),
+      closeTracks: vi.fn(),
+      zapBy: vi.fn(),
+    };
+    routeHostKey('seek-back', hostDeps);
+    routeHostKey('seek-forward', hostDeps);
+    routeHostKey('seek-coarse-back', hostDeps);
+    routeHostKey('seek-coarse-forward', hostDeps);
+    expect(seekBy).toHaveBeenNthCalledWith(1, -10_000);
+    expect(seekBy).toHaveBeenNthCalledWith(2, 10_000);
+    expect(seekBy).toHaveBeenNthCalledWith(3, -30_000);
+    expect(seekBy).toHaveBeenNthCalledWith(4, 30_000);
+
+    // routeOverlayAndMediaKey focuses TV scrubber on Up from OSD and seeks live window on Left/Right
+    const focusTvScrubber = vi.fn();
+    const liveSeek = vi.fn();
+    const overlayState: PlayerOverlayLive = {
+      tracksOpen: false,
+      pickerCursor: { column: 'audio', index: 0 },
+      settingsOpen: false,
+      settingsMenu: { view: 'root', index: 0 },
+      infoOpen: false,
+      channelListOpen: false,
+      canOpenInfo: false,
+      canOpenChannelList: false,
+      locked: false,
+      osdTier: 'controls',
+      osdHidden: false,
+      tvOsdFocused: true,
+      tvScrubberFocused: false,
+      tvOsdAction: 'playPause',
+      availableOsd: ['back', 'seekBack', 'playPause', 'seekForward'],
+      tracks: { audio: [], subtitles: [], selectedAudioId: null, selectedSubtitleId: null },
+      hasTracks: false,
+      hasService: true,
+      isVod: false,
+      playbackSpeed: 1,
+    };
+    const commonDeps = {
+      isTv: true,
+      isVod: false,
+      liveTimeShiftSupported: true,
+      hasAspect: true,
+      playbackSpeed: 1,
+      state: overlayState,
+      service: null,
+      scrub: {
+        previewPositionMs: undefined,
+        step: vi.fn(),
+        commit: vi.fn(),
+        cancel: vi.fn(),
+      },
+      digitBuf: { push: vi.fn(), cancel: vi.fn(), commit: vi.fn() } as never,
+      allowTvSelect: () => true,
+      showOsd: vi.fn(),
+      toggleStats: vi.fn(),
+      toggleResizeMode: vi.fn(),
+      togglePlayPause: vi.fn(),
+      openTracks: vi.fn(),
+      closeTracks: vi.fn(),
+      closeSettings: vi.fn(),
+      updateSettingsMenu: vi.fn(),
+      updatePickerCursor: vi.fn(),
+      focusTvOsd: vi.fn(),
+      blurTvOsd: vi.fn(),
+      focusTvScrubber,
+      blurTvScrubber: vi.fn(),
+      activateTvOsd: vi.fn(),
+      selectSpeed: vi.fn(),
+      onExit: vi.fn(),
+      seekBy: liveSeek,
+      stepSeekMs: 10_000,
+    };
+    routeOverlayAndMediaKey({ key: 'up', kind: 'press', time: 1 }, commonDeps);
+    expect(focusTvScrubber).toHaveBeenCalledTimes(1);
+
+    routeOverlayAndMediaKey(
+      { key: 'left', kind: 'press', time: 2 },
+      {
+        ...commonDeps,
+        state: { ...overlayState, tvOsdFocused: false, tvScrubberFocused: true },
+      },
+    );
+    expect(liveSeek).toHaveBeenCalledWith(-10_000);
   });
 });

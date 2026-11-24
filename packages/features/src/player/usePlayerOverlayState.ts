@@ -102,6 +102,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   statusKindRef.current = statusKind;
   const sheetOpenerRef = useRef<SheetOpener>(null);
 
+  const effectiveResetKey = params.resetKey ?? itemKey;
+  const canFocusScrubber = isVod || params.liveTimeShiftSupported === true;
   const tracksOpen = rawTracksOpen && hasTracks;
   const settingsOpen = rawSettingsOpen && hasService;
   const infoOpen = rawInfoOpen && canOpenInfo;
@@ -111,7 +113,12 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const osdTier: OsdTier = locked ? 'hidden' : anySheetOpen ? 'controls' : rawOsdTier;
   const osdHidden = osdTier === 'hidden';
   const tvScrubberFocused =
-    isTv && isVod && rawTvScrubberFocused && !locked && !anySheetOpen && osdTier === 'controls';
+    isTv &&
+    canFocusScrubber &&
+    rawTvScrubberFocused &&
+    !locked &&
+    !anySheetOpen &&
+    osdTier === 'controls';
   const pickerCursor = clampPickerCursor(rawPickerCursor, tracks);
   const settingsMenu = clampSettingsMenu(rawSettingsMenu, tracks, {
     isVod,
@@ -182,7 +189,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   };
   const liveRef = useRef<PlayerOverlayLive>(liveSnapshot);
   liveRef.current = liveSnapshot;
-  const prevItemKeyRef = useRef(itemKey);
+  const prevResetKeyRef = useRef(effectiveResetKey);
   const hoverGuardRef = useRef<TouchHoverGuard | null>(null);
   hoverGuardRef.current ??= createTouchHoverGuard({ now: () => clockRef.current.now() });
 
@@ -197,7 +204,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     autoHideOsdMs,
     osdTier,
     active: canAutoHideOsd(statusKind, liveSnapshot, isScrubbing),
-    itemKey,
+    itemKey: effectiveResetKey,
     timersRef,
     onAutoHide: () => {
       liveRef.current.osdTier = 'hidden';
@@ -224,15 +231,15 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
       sheetOpenerRef.current = null;
       setChannelListOpen(false);
     }
-    if (rawTvScrubberFocused && (!isTv || !isVod)) setTvScrubberFocused(false);
+    if (rawTvScrubberFocused && (!isTv || !canFocusScrubber)) setTvScrubberFocused(false);
     if (tvOsdAction !== rawTvOsdAction) setTvOsdAction(tvOsdAction);
   }, [
+    canFocusScrubber,
     canOpenChannelList,
     canOpenInfo,
     hasService,
     hasTracks,
     isTv,
-    isVod,
     pickerCursor,
     rawChannelListOpen,
     rawInfoOpen,
@@ -263,15 +270,15 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     setInfoOpen(false);
     setChannelListOpen(false);
     setLocked(false);
-    if (prevItemKeyRef.current !== itemKey) {
-      prevItemKeyRef.current = itemKey;
+    if (prevResetKeyRef.current !== effectiveResetKey) {
+      prevResetKeyRef.current = effectiveResetKey;
       liveRef.current.osdTier = 'controls';
       liveRef.current.osdHidden = false;
       notifyOsdActivity();
       setOsdTier('controls');
     }
     return () => cancelScrub();
-  }, [itemKey, cancelScrub, clearTvFocus, notifyOsdActivity, releaseOrientationLock]);
+  }, [effectiveResetKey, cancelScrub, clearTvFocus, notifyOsdActivity, releaseOrientationLock]);
 
   useEffect(() => {
     if (statusKind === 'failed' || statusKind === 'paused' || statusKind === 'ended') {

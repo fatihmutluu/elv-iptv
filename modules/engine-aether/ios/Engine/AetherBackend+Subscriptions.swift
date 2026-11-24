@@ -105,10 +105,12 @@ extension AetherBackend {
           let serial = self.engineLoadSerial
           switch phase {
           case .idle, .error:
-            break
+            self.cancelPausedLiveClockTask()
           case .loading:
+            self.cancelPausedLiveClockTask()
             self.onObservation?(.phase(.loading), serial)
           case .playing:
+            self.cancelPausedLiveClockTask()
             self.readySerial = serial
             self.inReloadFromState = false
             self.lastAVBufferReportedBuffering = false
@@ -131,20 +133,26 @@ extension AetherBackend {
             }
           case .paused:
             if target.state == .loading {
+              self.cancelPausedLiveClockTask()
               self.inReloadFromState = true
               self.onObservation?(.phase(.loading), serial)
             } else {
               self.inReloadFromState = false
               let bySystem = self.audioSessionPolicy.shouldTreatPauseAsSystem
               self.onObservation?(.phase(bySystem ? .systemPaused : .paused), serial)
+              self.syncPausedLiveClockTask(for: target)
             }
           case .seeking:
+            self.cancelPausedLiveClockTask()
             self.onObservation?(.phase(.seeking), serial)
           case .rebuffering:
+            self.cancelPausedLiveClockTask()
             self.onObservation?(.phase(.rebuffering), serial)
           case .stalled:
+            self.cancelPausedLiveClockTask()
             self.onObservation?(.phase(.stalled), serial)
           case .ended:
+            self.cancelPausedLiveClockTask()
             self.playbackActiveIntent = false
             self.forwardVodDurationBeforeEnd(from: target, serial: serial)
             self.forwardReaderFaultIfPresent(serial: serial)
@@ -159,6 +167,7 @@ extension AetherBackend {
         Self.onMainActor {
           guard let self, let target, self.engine === target else { return }
           if case .error = state {
+            self.cancelPausedLiveClockTask()
             let errorSerial = self.engineLoadSerial > 0 ? self.engineLoadSerial : self.activeLoadSerial
             guard errorSerial > 0, self.errorReportedSerial != errorSerial else { return }
             self.playbackActiveIntent = false
@@ -205,11 +214,13 @@ extension AetherBackend {
           case .error:
             break
           case .loading:
+            self.cancelPausedLiveClockTask()
             if self.readySerial == serial {
               self.inReloadFromState = true
               self.onObservation?(.phase(.loading), serial)
             }
           case .playing:
+            self.cancelPausedLiveClockTask()
             if self.inReloadFromState && target.playbackPhase == .playing {
               self.inReloadFromState = false
               self.playbackActiveIntent = true
@@ -225,11 +236,13 @@ extension AetherBackend {
               let bySystem = self.audioSessionPolicy.shouldTreatPauseAsSystem
               self.onObservation?(.phase(bySystem ? .systemPaused : .paused), serial)
             }
+            self.syncPausedLiveClockTask(for: target)
             if self.tracksDeferredForReload {
               self.tracksDeferredForReload = false
               self.scheduleTracksSnapshot(from: target, serial: serial)
             }
           case .ended:
+            self.cancelPausedLiveClockTask()
             self.playbackActiveIntent = false
             self.forwardVodDurationBeforeEnd(from: target, serial: serial)
             self.forwardReaderFaultIfPresent(serial: serial)

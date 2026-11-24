@@ -1,5 +1,5 @@
 import { elvError, err, ok, type Result, type SecretStore, type SqlDriver } from '@elv/domain';
-import type { ProgrammeRow } from './guide-queries';
+import { loadChannelGuideAndShifts, type ProgrammeRow } from './guide-queries';
 import {
   type AddGuideSourceInput,
   addGuideSource,
@@ -20,11 +20,17 @@ import {
 import type { ImportDeps } from './import-types';
 import { openClient } from './import-xtream';
 import type { ParentalQueryOptions } from './parental-policy';
-import { isItemRestricted, isProgrammeRestricted, loadActiveParentalFilter } from './parental-repo';
+import {
+  findRestrictedItemKeys,
+  isItemRestricted,
+  isProgrammeRestricted,
+  loadActiveParentalFilter,
+} from './parental-repo';
 import { sourceOfKey } from './queries-shared';
 import {
   type ListRemindersOptions,
   listReminders,
+  MAX_REMINDERS_LIMIT,
   markReminderFired,
   type ProgrammeReminderRecord,
   pruneExpiredReminders,
@@ -96,8 +102,59 @@ export function createCatalogEpgOpsMethods(deps: {
   return {
     async resolveCatchupStream(itemKey, programme, opts) {
       const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
-      if (filter !== null && (await isItemRestricted(db, filter, itemKey))) {
-        return err(elvError('auth', 'parental-locked'));
+      if (filter !== null) {
+        if (await isItemRestricted(db, filter, itemKey)) {
+          return err(elvError('auth', 'parental-locked'));
+        }
+        if (
+          programme.title !== undefined &&
+          isProgrammeRestricted(filter, programme.title, null, null)
+        ) {
+          return err(elvError('auth', 'parental-locked'));
+        }
+        const sourceId = sourceOfKey(itemKey);
+        if (sourceId !== undefined && Number.isFinite(programme.startMs)) {
+          const { mapRows, shiftByChannel } = await loadChannelGuideAndShifts(db, sourceId, [
+            itemKey,
+          ]);
+          const guideId = mapRows[0]?.guide_id;
+          if (guideId !== undefined && guideId !== '') {
+            const shiftMs = shiftByChannel.get(itemKey) ?? 0;
+            const rawStart = Math.round(programme.startMs - shiftMs);
+            const hasRange =
+              Number.isFinite(programme.stopMs) && programme.stopMs > programme.startMs;
+            const rawStop = hasRange ? Math.round(programme.stopMs - shiftMs) : rawStart;
+            const progRows = hasRange
+              ? await db.all<{
+                  title: string;
+                  description: string | null;
+                  rating_value: string | null;
+                }>(
+                  `SELECT title, description, rating_value
+                     FROM programmes
+                    WHERE source_id = ? AND guide_id = ?
+                      AND (start = ? OR (start < ? AND stop > ?))
+                    LIMIT 10`,
+                  [sourceId, guideId, rawStart, rawStop, rawStart],
+                )
+              : await db.all<{
+                  title: string;
+                  description: string | null;
+                  rating_value: string | null;
+                }>(
+                  `SELECT title, description, rating_value
+                     FROM programmes
+                    WHERE source_id = ? AND guide_id = ? AND start = ?
+                    LIMIT 10`,
+                  [sourceId, guideId, rawStart],
+                );
+            for (const row of progRows) {
+              if (isProgrammeRestricted(filter, row.title, row.description, row.rating_value)) {
+                return err(elvError('auth', 'parental-locked'));
+              }
+            }
+          }
+        }
       }
       return playtime.resolveCatchupStream(itemKey, programme, clock());
     },
@@ -185,8 +242,44 @@ export function createCatalogEpgOpsMethods(deps: {
     clearChannelGuideOverride: (sourceId, channelKey) =>
       clearChannelGuideOverride(db, sourceId, channelKey),
 
-    listReminders: (profileId, opts) => listReminders(db, profileId, opts),
-    upsertReminder: (input) => upsertReminder(db, input, clock),
+    async listReminders(profileId, opts) {
+      const filter = await loadActiveParentalFilter(db, profileId, opts?.parentalUnlocked);
+      if (filter === null) {
+        return listReminders(db, profileId, opts);
+      }
+      const rows = await listReminders(
+        db,
+        profileId,
+        opts?.limit !== undefined ? { ...opts, limit: MAX_REMINDERS_LIMIT } : opts,
+      );
+      if (rows.length === 0) return [];
+      const restrictedKeys = await findRestrictedItemKeys(
+        db,
+        filter,
+        rows.map((r) => ({ itemKey: r.channelKey })),
+      );
+      const filtered = rows.filter(
+        (row) =>
+          !restrictedKeys.has(row.channelKey) &&
+          !isProgrammeRestricted(filter, row.programmeTitle, null, null),
+      );
+      if (opts?.limit !== undefined && Number.isFinite(opts.limit)) {
+        const clamped = Math.min(MAX_REMINDERS_LIMIT, Math.max(0, Math.floor(opts.limit)));
+        return filtered.slice(0, clamped);
+      }
+      return filtered;
+    },
+    async upsertReminder(input) {
+      const filter = await loadActiveParentalFilter(db, input.profileId, input.parentalUnlocked);
+      if (
+        filter !== null &&
+        ((await isItemRestricted(db, filter, input.channelKey)) ||
+          isProgrammeRestricted(filter, input.programmeTitle, null, null))
+      ) {
+        return err(elvError('auth', 'parental-locked'));
+      }
+      return upsertReminder(db, input, clock);
+    },
     removeReminder: (channelKey, programmeStart, profileId) =>
       removeReminder(db, channelKey, programmeStart, profileId),
     markReminderFired: (channelKey, programmeStart, profileId) =>

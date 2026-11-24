@@ -72,6 +72,8 @@ export interface AppShellStageProps {
   readonly onSelectTab: (tab: AppTab, focusContent?: boolean) => void;
   readonly onOpenSources: () => void;
   readonly onOpenChannelManagement: () => void;
+  readonly onOpenGuideManagement: (sourceId: string) => void;
+  readonly onRegisterStopPreview?: (stop: (() => Promise<void>) | null) => void;
   readonly onChannelsMutated: () => void;
   readonly reminderVersion?: number;
   readonly onReminderChanged?: () => void;
@@ -124,6 +126,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         isActiveScope={p.isActiveScope}
         hasTransientOverlay={p.hasTransientOverlay}
         onOpenChannelManagement={p.onOpenChannelManagement}
+        onOpenGuideManagement={p.onOpenGuideManagement}
         renderProfiles={(slot) => (
           <ProfilesAndParentalPanel catalog={p.catalog} sources={p.sources} {...slot} />
         )}
@@ -132,6 +135,9 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
             catalog={p.catalog}
             embedded
             playbackGuard={p.playbackGuard}
+            {...(p.catalog.listGuideSources !== undefined
+              ? { onOpenGuideManagement: p.onOpenGuideManagement }
+              : {})}
             {...(p.sourceImportHost !== undefined ? { sourceImportHost: p.sourceImportHost } : {})}
             {...(p.lanPairing !== undefined ? { lanPairing: p.lanPairing } : {})}
             {...(p.incomingLocalPlaylist !== null
@@ -222,6 +228,9 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
       cleanChannelTitles={p.preferences.preferences.cleanChannelTitles}
       collapseVariants={p.preferences.preferences.collapseLiveVariants}
       onEmbeddedPlaybackActiveChange={p.onEmbeddedPlaybackActiveChange}
+      {...(p.onRegisterStopPreview !== undefined
+        ? { onRegisterStopPreview: p.onRegisterStopPreview }
+        : {})}
       onPlay={p.onPlay}
       onOpenSources={p.onOpenSources}
       onOpenSearch={() => p.onSelectTab('search', true)}

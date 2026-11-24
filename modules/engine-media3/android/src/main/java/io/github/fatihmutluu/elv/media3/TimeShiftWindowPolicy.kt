@@ -31,6 +31,7 @@ internal fun evaluateLiveTimeShiftWindow(
   windowDurationMs: Long,
   fallbackDurationMs: Long,
   minWindowMs: Long = MIN_LIVE_TIMESHIFT_WINDOW_MS,
+  ringWindow: RingBufferTimeShiftWindow? = null,
 ): LiveTimeShiftWindowState {
   if (!isLive) {
     return LiveTimeShiftWindowState(
@@ -52,16 +53,28 @@ internal fun evaluateLiveTimeShiftWindow(
     )
   }
 
+  if (
+    ringWindow != null &&
+    ringWindow.bufferedWindowMs >= minWindowMs &&
+    ringWindow.liveEdgeMs > ringWindow.liveSeekableStartMs
+  ) {
+    return LiveTimeShiftWindowState(
+      liveSeekableStartMs = ringWindow.liveSeekableStartMs,
+      liveEdgeMs = ringWindow.liveEdgeMs,
+      timeShiftSupported = true,
+    )
+  }
+
   return LiveTimeShiftWindowState(
     liveSeekableStartMs = null,
-    liveEdgeMs = validWindowDuration ?: validFallbackDuration,
+    liveEdgeMs = validWindowDuration ?: validFallbackDuration ?: ringWindow?.liveEdgeMs?.takeIf { it > 0L },
     timeShiftSupported = false,
   )
 }
 
 /**
  * Resolves a live seek request in `Media3Engine`: ignores non-seekable live streams, clamps targets to
- * `[0, durationMs]`, and snaps seeks within [snapToLiveThresholdMs] (default `1_500 ms`) of the live edge to
+ * `[minStartMs, durationMs]`, and snaps seeks within [snapToLiveThresholdMs] (default `1_500 ms`) of the live edge to
  * `seekToDefaultPosition()` (#28).
  */
 internal fun resolveMedia3LiveSeek(
@@ -69,13 +82,15 @@ internal fun resolveMedia3LiveSeek(
   isSeekable: Boolean,
   durationMs: Long,
   snapToLiveThresholdMs: Long = LIVE_EDGE_SNAP_THRESHOLD_MS,
+  minStartMs: Long = 0L,
 ): LiveSeekResolution {
   if (!isSeekable) return LiveSeekResolution.Ignore
-  val hasFiniteDuration = durationMs != C.TIME_UNSET && durationMs > 0L
+  val safeStart = minStartMs.coerceAtLeast(0L)
+  val hasFiniteDuration = durationMs != C.TIME_UNSET && durationMs > safeStart
   val clamped = if (hasFiniteDuration) {
-    requestedPositionMs.coerceIn(0L, durationMs)
+    requestedPositionMs.coerceIn(safeStart, durationMs)
   } else {
-    requestedPositionMs.coerceAtLeast(0L)
+    requestedPositionMs.coerceAtLeast(safeStart)
   }
   if (hasFiniteDuration && durationMs - clamped <= snapToLiveThresholdMs) {
     return LiveSeekResolution.JumpToDefaultLiveEdge

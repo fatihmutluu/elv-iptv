@@ -225,6 +225,34 @@ describe('createAetherEngine', () => {
         },
       },
     ]);
+
+    // Paused live time-shift ticks (rate: 0) advance liveSeekableStartMs & liveEdgeMs cleanly
+    native.clock.uptime = 6_000;
+    vi.spyOn(performance, 'now').mockReturnValue(21_000);
+    native.emit({
+      attempt: 1,
+      type: 'clock',
+      anchor: {
+        positionMs: 120_000,
+        atMs: 5_950,
+        rate: 0,
+        liveSeekableStartMs: 61_000,
+        liveEdgeMs: 181_000,
+        timeShiftSupported: true,
+      },
+    });
+    expect(events.at(-1)).toEqual({
+      attempt: 1,
+      type: 'clock',
+      anchor: {
+        positionMs: 120_000,
+        atMs: 20_950,
+        rate: 0,
+        liveSeekableStartMs: 61_000,
+        liveEdgeMs: 181_000,
+        timeShiftSupported: true,
+      },
+    });
   });
 
   it('forwards track load options, track selection commands, and tracks events', async () => {
@@ -724,18 +752,13 @@ describe('Apple mute/volume, safe-area insets, and hardware keys (#415)', () => 
     native.emitRemoteAction({ action: 'invalid' });
     native.emitRemoteAction(null);
     expect(actions).toEqual(['next', 'previous', 'stop', 'next']);
-
     unsub();
     native.emitRemoteAction({ action: 'stop' });
     expect(actions).toHaveLength(4);
-
-    // Foreign and released engines are ignored safely.
     const foreign = { release() {} } as unknown as PlayerEngine;
     mod.setAetherBackgroundAudioEnabled(foreign, true);
     mod.setAetherMediaMetadata(foreign, metadata);
-    const noopUnsub = mod.subscribeAetherRemoteMediaAction(foreign, vi.fn());
-    expect(() => noopUnsub()).not.toThrow();
-
+    expect(() => mod.subscribeAetherRemoteMediaAction(foreign, vi.fn())()).not.toThrow();
     engine.release();
     mod.setAetherBackgroundAudioEnabled(engine, true);
     mod.setAetherMediaMetadata(engine, metadata);
@@ -748,20 +771,15 @@ describe('Apple mute/volume, safe-area insets, and hardware keys (#415)', () => 
     const mod = await load();
     const engine = mod.createAetherEngine();
     if (engine === null) throw new Error('engine expected');
-
     mod.setAetherDetachedSurfaceAllowed(engine, true);
     mod.setAetherDetachedSurfaceAllowed(engine, false);
     expect(native.engine.setAllowDetachedSurface).toHaveBeenNthCalledWith(1, true);
     expect(native.engine.setAllowDetachedSurface).toHaveBeenNthCalledWith(2, false);
-
-    // Foreign and released engines are ignored safely.
     const foreign = { release() {} } as unknown as PlayerEngine;
     mod.setAetherDetachedSurfaceAllowed(foreign, true);
     engine.release();
     mod.setAetherDetachedSurfaceAllowed(engine, true);
     expect(native.engine.setAllowDetachedSurface).toHaveBeenCalledTimes(2);
-
-    // Native handles without setAllowDetachedSurface degrade cleanly.
     const { setAllowDetachedSurface: _omitted, ...legacyNative } = native.engine;
     native.Engine.mockImplementationOnce(function constructLegacy() {
       return legacyNative as typeof native.engine;

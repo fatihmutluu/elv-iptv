@@ -21,10 +21,12 @@ function cleanText(raw: string): string {
   return out.trim();
 }
 
-function formatReminderBody(channelName: string, startsInMinutes: number): string {
-  const mins = Number.isFinite(startsInMinutes) ? Math.max(0, Math.round(startsInMinutes)) : 0;
-  const timing = mins > 0 ? `Starts in ${mins} min` : 'Starting now';
-  return channelName.length > 0 ? `${channelName} — ${timing}` : timing;
+function formatReminderBody(channelName: string, timingText?: string): string {
+  const timing = timingText === undefined ? '' : cleanText(timingText);
+  if (timing.length > 0) {
+    return channelName.length > 0 ? `${channelName} — ${timing}` : timing;
+  }
+  return channelName;
 }
 
 /**
@@ -54,7 +56,7 @@ export function createDesktopReminderHost(env?: DesktopReminderHostEnv): Reminde
       const programmeTitle = cleanText(payload.programmeTitle);
       const channelName = cleanText(payload.channelName);
       const title = programmeTitle || channelName || 'ELV IPTV';
-      const body = formatReminderBody(channelName, payload.startsInMinutes);
+      const body = formatReminderBody(channelName, payload.timingText);
       try {
         // Construct native OS notification only while hidden; errors on headless Linux/CI are isolated.
         void new NotificationCtor(title, { body, silent: false });

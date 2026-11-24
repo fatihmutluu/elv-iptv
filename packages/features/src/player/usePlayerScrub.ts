@@ -8,7 +8,7 @@ import {
 } from '@elv/playback';
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { PlayTarget } from '../ports/play-target';
-import { computeLiveTimeShiftTargetMs } from './live-timeshift-model';
+import { computeLiveTimeShiftTargetMs, targetIdentityKey } from './live-timeshift-model';
 import {
   canPauseStatus,
   clampSeekPosition,
@@ -57,11 +57,12 @@ export function usePlayerScrub(params: {
     cbRef.current.onTimeShiftUnavailable?.();
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: clear live time-shift hint on item change
+  const activeTargetKey = targetIdentityKey(params.activeTarget);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clear live time-shift hint on item or catch-up/live transition
   useEffect(() => {
     clearTimeShiftHint();
     return clearTimeShiftHint;
-  }, [params.activeTarget.itemKey, clearTimeShiftHint]);
+  }, [activeTargetKey, clearTimeShiftHint]);
 
   const scrubRef = useRef<ScrubController | null>(null);
   if (scrubRef.current === null) {

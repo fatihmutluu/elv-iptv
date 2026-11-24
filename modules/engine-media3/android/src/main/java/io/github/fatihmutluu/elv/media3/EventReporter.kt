@@ -48,6 +48,8 @@ internal class EventReporter(
   private var active = false
   private var live = false
   private var isLiveTs = false
+  private var ringWindowProvider: (() -> RingBufferTimeShiftWindow?)? = null
+  private var lastTimeShiftSupported = false
   private var lastState: String? = null
   private var played = false
   private var stalled = false
@@ -69,11 +71,19 @@ internal class EventReporter(
    * Starts reporting a new prepare [prepareSerial] of [player], sends the post-`stop` fence message through Media3's
    * playback thread and reports `opening`.
    */
-  fun begin(player: ExoPlayer, live: Boolean, prepareSerial: Long, reused: Boolean, isLiveTs: Boolean = false) {
+  fun begin(
+    player: ExoPlayer,
+    live: Boolean,
+    prepareSerial: Long,
+    reused: Boolean,
+    isLiveTs: Boolean = false,
+    ringWindowProvider: (() -> RingBufferTimeShiftWindow?)? = null,
+  ) {
     end()
     this.player = player
     this.live = live
     this.isLiveTs = live && isLiveTs
+    this.ringWindowProvider = if (live) ringWindowProvider else null
     fence.begin(prepareSerial, reused = reused)
     player.createMessage { _, _ -> fence.passed(prepareSerial) }.setLooper(handler.looper).send()
     active = true
@@ -86,6 +96,8 @@ internal class EventReporter(
     if (active && stalled) sendStall("end")
     active = false
     isLiveTs = false
+    ringWindowProvider = null
+    lastTimeShiftSupported = false
     isWaitingForMedia = false
     fence.reset()
     lastState = null
@@ -282,6 +294,10 @@ internal class EventReporter(
       sendStall(if (nowStalled) "start" else "end")
     }
     isWaitingForMedia = !played || stalled || lastState == "opening" || lastState == "buffering"
+    if (player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED || player.playerError != null) {
+      handler.removeCallbacks(tick)
+      lastTimeShiftSupported = false
+    }
     if (effectiveRate(player) != anchoredRate) anchor(player)
   }
 
@@ -309,7 +325,9 @@ internal class EventReporter(
         isWindowLive = hasWindow && timelineWindow.isLive,
         windowDurationMs = if (hasWindow) timelineWindow.durationMs else C.TIME_UNSET,
         fallbackDurationMs = duration,
+        ringWindow = ringWindowProvider?.invoke(),
       )
+      lastTimeShiftSupported = windowState.timeShiftSupported
       anchor["timeShiftSupported"] = windowState.timeShiftSupported
       if (windowState.liveSeekableStartMs != null) {
         anchor["liveSeekableStartMs"] = windowState.liveSeekableStartMs.toDouble()
@@ -318,8 +336,11 @@ internal class EventReporter(
         anchor["liveEdgeMs"] = windowState.liveEdgeMs.toDouble()
       }
       if (isLiveTs) anchor["isLiveTs"] = true
-    } else if (duration != C.TIME_UNSET) {
-      anchor["durationMs"] = duration.toDouble()
+    } else {
+      lastTimeShiftSupported = false
+      if (duration != C.TIME_UNSET) {
+        anchor["durationMs"] = duration.toDouble()
+      }
     }
     val tracks = player.currentTracks
     val hasVideo = if (tracks.isEmpty) null else hasSelectedVideoTrack(tracks)
@@ -333,7 +354,13 @@ internal class EventReporter(
       anchor["decodedVideoFrames"] = 0.0
     }
     send(mapOf("type" to "clock", "anchor" to anchor))
-    if (rate > 0f) handler.postDelayed(tick, TICK_MS)
+    val keepPausedLiveTick =
+      live &&
+        lastTimeShiftSupported &&
+        player.playbackState != Player.STATE_IDLE &&
+        player.playbackState != Player.STATE_ENDED &&
+        player.playerError == null
+    if (rate > 0f || keepPausedLiveTick) handler.postDelayed(tick, TICK_MS)
   }
 
   private fun maybeEmitDroppedFrames(total: Int) {
@@ -351,6 +378,8 @@ internal class EventReporter(
     send(mapOf("type" to "stall", "phase" to phase, "atMs" to SystemClock.uptimeMillis().toDouble()))
 
   private fun sendError(code: String, httpStatus: Int?, detail: String) {
+    handler.removeCallbacks(tick)
+    lastTimeShiftSupported = false
     val error = mutableMapOf<String, Any?>("code" to code, "detail" to detail)
     if (httpStatus != null) error["httpStatus"] = httpStatus
     send(mapOf("type" to "error", "error" to error))

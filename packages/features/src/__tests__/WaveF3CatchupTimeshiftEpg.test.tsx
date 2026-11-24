@@ -609,6 +609,7 @@ describe('Wave F3 UI — Catch-Up, Live Time-Shift, Multi-Guide & Reminders', ()
       expect(setChannelGuideOverride).toHaveBeenCalledWith({
         sourceId: 's1',
         channelKey: CATCHUP_CHANNEL.key,
+        guideSourceId: null,
         guideId: 'news24.eu',
         epgShiftMs: HOUR_MS,
       }),

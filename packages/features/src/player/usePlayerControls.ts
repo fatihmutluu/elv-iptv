@@ -15,6 +15,8 @@ import {
   digitKeyToChar,
   isHiddenOsdPassthroughKey,
 } from './channel-digit-entry';
+import { targetIdentityKey } from './live-timeshift-model';
+import { buildDesktopShortcutGuard } from './player-desktop-guard';
 import {
   type PlayerControlsParams,
   readSettingsMenuOptionsFromControls,
@@ -109,11 +111,11 @@ export function usePlayerControls(params: PlayerControlsParams) {
     }
   }, [params.initialVolume]);
 
-  const latestItemKeyRef = useRef(activeTarget.itemKey);
-  latestItemKeyRef.current = activeTarget.itemKey;
+  const activeTargetKey = targetIdentityKey(activeTarget);
+  const latestTargetKeyRef = useRef(activeTargetKey);
+  latestTargetKeyRef.current = activeTargetKey;
 
   useEffect(() => {
-    const itemKey = activeTarget.itemKey;
     const hadNonDefaultSpeed = priorSpeedRef.current !== null || playbackSpeedRef.current !== 1;
     priorSpeedRef.current = null;
     playbackSpeedRef.current = 1;
@@ -126,7 +128,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     selectGuardRef.current?.reset();
     return () => {
       if (
-        latestItemKeyRef.current !== itemKey &&
+        latestTargetKeyRef.current !== activeTargetKey &&
         (priorSpeedRef.current !== null || playbackSpeedRef.current !== 1)
       ) {
         priorSpeedRef.current = null;
@@ -136,7 +138,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
       digitBuf.cancel();
       skipBackSubsRef.current?.dispose();
     };
-  }, [activeTarget.itemKey, digitBuf, serviceRef]);
+  }, [activeTargetKey, digitBuf, serviceRef]);
 
   useEffect(() => {
     return () => {
@@ -150,6 +152,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
 
   const getStepSeekMs = (): number =>
     cbRef.current.seekStepSec !== undefined ? cbRef.current.seekStepSec * 1_000 : STEP_SEEK_MS;
+
+  const revealLiveControlsOsdRef = useRef<() => void>(() => undefined);
 
   const {
     scrub,
@@ -167,6 +171,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     clockRef,
     timersRef,
     stepSeekMs: params.seekStepSec !== undefined ? params.seekStepSec * 1_000 : STEP_SEEK_MS,
+    onTimeShiftUnavailable: () => revealLiveControlsOsdRef.current(),
     onSeekCommit: (positionMs, priorPositionMs) => {
       cbRef.current.onSeekCommit?.(positionMs);
       if (
@@ -200,18 +205,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
     };
   }, [serviceRef]);
 
-  const hasAutoSubtitlesToggle =
-    activeTarget.kind === 'vod' && params.onToggleAutoSubtitlesOnSkipBack !== undefined;
-  const hasAutoPlayNextToggle =
-    activeTarget.kind === 'vod' && params.onToggleAutoPlayNextEpisode !== undefined;
-  const hasAudioDevicePicker =
-    (params.audioDevices?.length ?? 0) > 0 && params.onSelectAudioDevice !== undefined;
-  const hasVideoDecoder =
-    params.androidDecoderMode !== undefined && params.onSelectAndroidDecoderMode !== undefined;
-
   const overlay = usePlayerOverlayState({
     formFactor,
     itemKey: activeTarget.itemKey,
+    resetKey: activeTargetKey,
     isVod: activeTarget.kind === 'vod',
     playbackSpeed,
     statusKind: status.kind,
@@ -224,9 +221,12 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasChannelList: params.hasChannelList,
     hasPitchLock: params.onTogglePitchLock !== undefined,
     hasAudioNormalization: params.onToggleAudioNormalization !== undefined,
-    hasAutoSubtitlesOnSkipBack: hasAutoSubtitlesToggle,
-    hasAutoPlayNextEpisode: hasAutoPlayNextToggle,
-    hasAudioDevice: hasAudioDevicePicker,
+    hasAutoSubtitlesOnSkipBack:
+      activeTarget.kind === 'vod' && params.onToggleAutoSubtitlesOnSkipBack !== undefined,
+    hasAutoPlayNextEpisode:
+      activeTarget.kind === 'vod' && params.onToggleAutoPlayNextEpisode !== undefined,
+    hasAudioDevice:
+      (params.audioDevices?.length ?? 0) > 0 && params.onSelectAudioDevice !== undefined,
     audioDevices: params.audioDevices,
     activeAudioDevice: params.activeAudioDevice,
     hasAudioDelay: params.onAdjustAudioDelay !== undefined,
@@ -237,7 +237,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
       (tracks.videoQualities?.length ?? 0) > 0 && params.onSelectVideoQuality !== undefined,
     selectedVideoQualityId: params.selectedVideoQualityId,
     qualityVariants: params.qualityVariants,
-    hasVideoDecoder,
+    hasVideoDecoder:
+      params.androidDecoderMode !== undefined && params.onSelectAndroidDecoderMode !== undefined,
     androidDecoderMode: params.androidDecoderMode,
     chapters: params.chapters,
     hasSleepTimer: params.onSelectSleepTimer !== undefined,
@@ -320,14 +321,23 @@ export function usePlayerControls(params: PlayerControlsParams) {
     cbRef.current.onSubtitleTrackSelected?.(id);
   };
 
+  revealLiveControlsOsdRef.current = () => {
+    if (overlay.liveRef.current.osdTier !== 'controls') overlay.showControlsOsd();
+    else overlay.notifyOsdActivity();
+  };
+
   const seekBy = (deltaMs: number): void => {
     const hasVodAnchor =
       cbRef.current.activeTarget.kind === 'vod' &&
       serviceRef.current?.getState().anchor !== undefined;
+    const isLiveTimeShift =
+      cbRef.current.activeTarget.kind === 'live' && cbRef.current.liveTimeShiftSupported === true;
     rawSeekBy(deltaMs);
     if (hasVodAnchor) {
       if (overlay.liveRef.current.osdTier === 'hidden') overlay.showProgressOsd();
       else overlay.notifyOsdActivity();
+    } else if (isLiveTimeShift) {
+      revealLiveControlsOsdRef.current();
     }
   };
 
@@ -497,6 +507,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     if (
       routeOverlayAndMediaKey(event, {
         isTv,
+        liveTimeShiftSupported: cbRef.current.liveTimeShiftSupported === true,
         ...readSettingsMenuOptionsFromControls(cbRef.current, s.canOpenInfo),
         playbackSpeed: playbackSpeedRef.current,
         state: s,
@@ -591,9 +602,14 @@ export function usePlayerControls(params: PlayerControlsParams) {
       applyPlayOrPause(event.key, statusKind);
     } else if (
       (event.kind === 'press' || event.kind === 'repeat') &&
-      (event.key === 'rewind' || event.key === 'fastForward')
+      (event.key === 'rewind' ||
+        event.key === 'fastForward' ||
+        (!isTv &&
+          cbRef.current.liveTimeShiftSupported === true &&
+          (event.key === 'left' || event.key === 'right')))
     ) {
-      seekBy((event.key === 'rewind' ? -1 : 1) * getStepSeekMs());
+      const dir = event.key === 'rewind' || event.key === 'left' ? -1 : 1;
+      seekBy(dir * getStepSeekMs());
     } else if (event.kind === 'press' && event.key === 'next') zapByRef.current(1, false);
     else if (event.kind === 'press' && event.key === 'previous') zapByRef.current(-1, false);
     else if (isTv && event.kind === 'press' && event.key === 'left') {
@@ -633,11 +649,6 @@ export function usePlayerControls(params: PlayerControlsParams) {
     },
   });
 
-  const canUseDesktopShortcuts = (): boolean => {
-    if (cbRef.current.stillWatchingVisible) return false;
-    const s = overlay.liveRef.current;
-    return !s.locked && !s.tracksOpen && !s.settingsOpen && !s.infoOpen && !s.channelListOpen;
-  };
   const toggleFullscreen = (): void => {
     if (overlay.liveRef.current.tracksOpen) overlay.closeTracks();
     if (overlay.liveRef.current.settingsOpen) overlay.closeSettings();
@@ -670,6 +681,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     overlay.notifyOsdActivity();
     routeHostKey(key, {
       isVod: cbRef.current.activeTarget.kind === 'vod',
+      liveTimeShiftSupported: cbRef.current.liveTimeShiftSupported === true,
       state: overlay.liveRef.current,
       handleBack,
       onStop: handleStop,
@@ -693,72 +705,24 @@ export function usePlayerControls(params: PlayerControlsParams) {
     formFactor,
     clockRef,
     scrub,
-    guard: {
-      isSuspended: () => externalOverlayOpenRef.current,
-      canJumpPreviousChannel: () =>
-        cbRef.current.activeTarget.kind === 'live' &&
-        cbRef.current.hasPreviousChannel === true &&
-        canUseDesktopShortcuts(),
-      onJumpPreviousChannel: () => cbRef.current.onJumpPreviousChannel?.(),
-      canToggleTracks: () => {
-        const s = overlay.liveRef.current;
-        return (
-          !s.locked &&
-          !s.settingsOpen &&
-          !s.infoOpen &&
-          !s.channelListOpen &&
-          (s.tracksOpen || s.hasTracks)
-        );
-      },
-      onToggleTracks: () =>
-        overlay.liveRef.current.tracksOpen ? overlay.closeTracks() : overlay.openTracks(),
-      canToggleInfo: () => {
-        const s = overlay.liveRef.current;
-        return (
-          !s.locked &&
-          !s.tracksOpen &&
-          !s.settingsOpen &&
-          !s.channelListOpen &&
-          (s.infoOpen || s.canOpenInfo)
-        );
-      },
-      onToggleInfo: overlay.toggleInfo,
-      canToggleStats: () => !overlay.liveRef.current.locked,
-      onToggleStats: overlay.toggleStats,
-      canToggleChannelList: () => {
-        const s = overlay.liveRef.current;
-        return (
-          !s.locked &&
-          !s.tracksOpen &&
-          !s.settingsOpen &&
-          !s.infoOpen &&
-          (s.channelListOpen || s.canOpenChannelList)
-        );
-      },
-      onToggleChannelList: overlay.toggleChannelList,
-      canToggleMute: () => canUseDesktopShortcuts() && cbRef.current.onToggleMute !== undefined,
-      onToggleMute: toggleMute,
-      canToggleFullscreen: () =>
-        !overlay.liveRef.current.locked && cbRef.current.onToggleFullscreen !== undefined,
-      onToggleFullscreen: toggleFullscreen,
-      canToggleAlwaysOnTop: () =>
-        canUseDesktopShortcuts() && cbRef.current.onToggleAlwaysOnTop !== undefined,
-      onToggleAlwaysOnTop: () => cbRef.current.onToggleAlwaysOnTop?.(),
-      isVod: () => cbRef.current.activeTarget.kind === 'vod',
-      canUseShortcuts: canUseDesktopShortcuts,
-      stepSeekMs: getStepSeekMs,
-      onSeekBy: seekBy,
-      onSeekToRatio: seekToRatio,
-      onSeekToEnd: seekToEnd,
-      ...(cbRef.current.onPrevChapter !== undefined
-        ? { onPrevChapter: () => cbRef.current.onPrevChapter?.() }
-        : {}),
-      ...(cbRef.current.onNextChapter !== undefined
-        ? { onNextChapter: () => cbRef.current.onNextChapter?.() }
-        : {}),
-      onTogglePlayPause: togglePlayPause,
-      onKeyEvent: handleKeyEvent,
-    },
+    guard: buildDesktopShortcutGuard({
+      cbRef,
+      externalOverlayOpenRef,
+      overlayLiveRef: overlay.liveRef,
+      openTracks: overlay.openTracks,
+      closeTracks: overlay.closeTracks,
+      toggleInfo: overlay.toggleInfo,
+      toggleStats: overlay.toggleStats,
+      toggleChannelList: overlay.toggleChannelList,
+      toggleMute,
+      toggleFullscreen,
+      getStepSeekMs,
+      seekBy,
+      seekToRatio,
+      seekToEnd,
+      togglePlayPause,
+      handleKeyEvent,
+    }),
   });
 
   return {

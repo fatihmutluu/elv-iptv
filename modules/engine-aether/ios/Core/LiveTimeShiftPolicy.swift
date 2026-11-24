@@ -80,3 +80,14 @@ public func clampLiveSeek(targetSec: Double, window: LiveSeekableWindow) -> Doub
   guard targetSec.isFinite else { return nil }
   return min(window.endSec, max(window.startSec, targetSec))
 }
+
+/// Returns `true` when a paused live stream should run the 1-second seekable-window refresh tick
+/// so `liveSeekableStartMs`, `liveEdgeMs`, and behind-live offset continue advancing while paused (`#28`).
+public func shouldTickLiveWindowWhilePaused(
+  isLive: Bool,
+  isLiveTs: Bool,
+  isPaused: Bool,
+  hasSeekableWindow: Bool
+) -> Bool {
+  isLive && !isLiveTs && isPaused && hasSeekableWindow
+}

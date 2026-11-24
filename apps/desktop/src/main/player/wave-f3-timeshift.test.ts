@@ -221,4 +221,110 @@ describe('Desktop libmpv bounded live time-shift (#28)', () => {
       interval: 5,
     });
   });
+
+  it('keeps advancing liveEdgeMs and liveSeekableStartMs anchors while a live stream is paused', async () => {
+    let nowMs = 10_000;
+    const scheduledTicks: Array<{ fn: () => void; ms: number; cleared: boolean }> = [];
+    const LIVE_PAUSED_GROWING: FakeMpvScript = [
+      { afterMs: 0, event: 'start-file' },
+      { afterMs: 2, event: 'file-loaded' },
+      { afterMs: 3, property: 'video-params', value: { w: 1920, h: 1080 } },
+      {
+        afterMs: 4,
+        property: 'demuxer-cache-state',
+        value: { 'seekable-ranges': [{ start: 10, end: 40 }] },
+      },
+      { afterMs: 5, property: 'time-pos', value: 35 },
+      { afterMs: 6, event: 'playback-restart' },
+      {
+        afterMs: 180,
+        property: 'demuxer-cache-state',
+        value: { 'seekable-ranges': [{ start: 10, end: 42 }] },
+      },
+      {
+        afterMs: 280,
+        property: 'demuxer-cache-state',
+        value: { 'seekable-ranges': [{ start: 12, end: 45 }] },
+      },
+    ];
+
+    const s = await setupEngineTest(cleanups, {
+      scripts: { [URL_A]: LIVE_PAUSED_GROWING },
+      now: () => nowMs,
+      audioRampMs: 0,
+      timers: {
+        setTimeout: (fn, ms) => {
+          if (ms === 1000) {
+            const entry = { fn, ms, cleared: false };
+            scheduledTicks.push(entry);
+            return entry;
+          }
+          return setTimeout(fn, ms);
+        },
+        clearTimeout: (handle) => {
+          if (handle && typeof handle === 'object' && 'cleared' in handle) {
+            (handle as { cleared: boolean }).cleared = true;
+            return;
+          }
+          clearTimeout(handle as ReturnType<typeof setTimeout>);
+        },
+      },
+    });
+
+    s.engine.load(live(1, URL_A));
+    await playing(s.events, 1);
+
+    // Pause immediately at t=10_000
+    s.engine.pause(1);
+    await vi.waitFor(
+      () =>
+        expect(
+          s.events.some(
+            (e) =>
+              e.type === 'clock' &&
+              e.anchor.rate === 0 &&
+              e.anchor.liveEdgeMs === 40_000 &&
+              e.anchor.timeShiftSupported === true,
+          ),
+        ).toBe(true),
+      { interval: 5 },
+    );
+
+    // Advance clock past throttle so the 40ms demuxer-cache-state update (end=42) emits while paused
+    nowMs = 10_600;
+    await vi.waitFor(
+      () =>
+        expect(
+          s.events.some(
+            (e) =>
+              e.type === 'clock' &&
+              e.anchor.rate === 0 &&
+              e.anchor.positionMs === 35_000 &&
+              e.anchor.liveEdgeMs === 42_000,
+          ),
+        ).toBe(true),
+      { interval: 5 },
+    );
+
+    // Keep nowMs within throttle when the 280ms update (start=12, end=45) arrives, then fire tick() at +1000ms
+    await new Promise((r) => setTimeout(r, 150));
+    nowMs = 11_700;
+    const latestTick = [...scheduledTicks].reverse().find((t) => !t.cleared);
+    expect(latestTick).toBeDefined();
+    latestTick?.fn();
+
+    const pausedEndClock = [...s.events]
+      .reverse()
+      .find(
+        (e): e is Extract<EngineEvent, { type: 'clock' }> =>
+          e.type === 'clock' && e.anchor.rate === 0 && e.anchor.liveEdgeMs === 45_000,
+      );
+    expect(pausedEndClock?.anchor).toMatchObject({
+      positionMs: 35_000,
+      rate: 0,
+      liveSeekableStartMs: 12_000,
+      liveEdgeMs: 45_000,
+      timeShiftSupported: true,
+    });
+  });
 });

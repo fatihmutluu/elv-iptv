@@ -352,6 +352,7 @@ export function createPlaybackServiceWith(
       statusKind,
       currentAnchor?.durationMs,
       currentAnchor,
+      clock.now(),
     );
     if (clamped === undefined) return;
     store.batch(() => {

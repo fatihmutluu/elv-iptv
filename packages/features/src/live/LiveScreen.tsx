@@ -7,18 +7,11 @@ import type {
 } from '@elv/domain';
 import { IconButton, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { VideoHost } from '../ports/video-host';
-import {
-  computeCatalogLayout,
-  evaluateRemappedEvent,
-  mapWebKeyToRemoteKey,
-  useCatalogUiCache,
-  useKeymap,
-  useProfile,
-} from '../shared';
+import { computeCatalogLayout, useCatalogUiCache, useKeymap, useProfile } from '../shared';
 import { ChannelManagementOverlay } from './ChannelManagementOverlay';
 import { buildCatchupPlayTarget } from './catchup-reminder-model';
 import { EpgGridView } from './EpgGridView';
@@ -39,6 +32,7 @@ import { LiveWatchStage } from './LiveWatchStage';
 import type { LiveMode, LiveTabMemory } from './live-model';
 import { buildSourceBadgeMap } from './source-badge';
 import { useLiveCatalog } from './useLiveCatalog';
+import { useLiveLastChannelKey } from './useLiveLastChannelKey';
 import { useLiveNumpadOverlay } from './useLiveNumberJump';
 import { useLiveTwoStepPreview } from './useLiveTwoStepPreview';
 import {
@@ -80,6 +74,8 @@ export interface LiveScreenProps {
   readonly onReminderChanged?: () => void;
   /** Called when embedded live preview playback (Favorites stage or two-step preview) starts or stops (`#160`). */
   readonly onEmbeddedPlaybackActiveChange?: (active: boolean) => void;
+  /** Registers an async teardown hook allowing `AppShell` to release embedded previews before tuning another target (`#35`). */
+  readonly onRegisterStopPreview?: (stop: (() => Promise<void>) | null) => void;
 }
 
 /**
@@ -111,6 +107,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     reminderVersion = 0,
     onReminderChanged,
     onEmbeddedPlaybackActiveChange,
+    onRegisterStopPreview,
   } = props;
   const theme = useTheme();
   const viewport = useViewport();
@@ -225,6 +222,15 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     };
   }, []);
 
+  useEffect(() => {
+    if (onRegisterStopPreview === undefined) return;
+    onRegisterStopPreview(async () => {
+      clearTwoStepPreview();
+      await preview.stopAndRelease();
+    });
+    return () => onRegisterStopPreview(null);
+  }, [clearTwoStepPreview, onRegisterStopPreview, preview.stopAndRelease]);
+
   const handleSelectMode = useCallback(
     (nextMode: LiveMode) => {
       numpad.close();
@@ -262,7 +268,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
         liveTarget,
         ...(hasArchive !== undefined ? { hasArchive } : {}),
       });
-      if (twoStepPreviewActive && videoHost !== undefined) {
+      if ((mode === 'favorites' || twoStepPreviewActive) && videoHost !== undefined) {
         clearTwoStepPreview();
         void preview
           .stopAndRelease()
@@ -291,72 +297,17 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     handleWatchAndPlay(previousChannel, idx);
   }, [handleWatchAndPlay, live.channelSource, mode, previousChannel]);
 
-  useEffect(() => {
-    if ((Platform.OS as string) !== 'web' || mode === 'favorites') return;
-    const win = globalThis as {
-      addEventListener?: (
-        type: string,
-        fn: (e: {
-          key?: string;
-          shiftKey?: boolean;
-          ctrlKey?: boolean;
-          altKey?: boolean;
-          metaKey?: boolean;
-          target?: { tagName?: string };
-          preventDefault?: () => void;
-        }) => void,
-      ) => void;
-      removeEventListener?: (
-        type: string,
-        fn: (e: {
-          key?: string;
-          shiftKey?: boolean;
-          ctrlKey?: boolean;
-          altKey?: boolean;
-          metaKey?: boolean;
-          target?: { tagName?: string };
-          preventDefault?: () => void;
-        }) => void,
-      ) => void;
-    };
-    const onKeyDown = (e: {
-      key?: string;
-      shiftKey?: boolean;
-      ctrlKey?: boolean;
-      altKey?: boolean;
-      metaKey?: boolean;
-      target?: { tagName?: string };
-      preventDefault?: () => void;
-    }) => {
-      if (e.ctrlKey || e.altKey || e.metaKey) return;
-      const tag = e.target?.tagName?.toUpperCase();
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (contextMenu !== null || detailModal !== null || channelManagerOpen || numpad.open) return;
-      if (!e.key) return;
-      const mappedKey = mapWebKeyToRemoteKey(e.key);
-      if (mappedKey === null) return;
-      const evalResult = evaluateRemappedEvent(keymap.overrides, 'live', {
-        key: mappedKey,
-        kind: e.shiftKey ? 'long' : 'press',
-      });
-      if (evalResult.status === 'suppressed') return;
-      if (evalResult.actionId === 'live.lastChannel' && previousChannel !== null) {
-        e.preventDefault?.();
-        handleJumpPreviousChannel();
-      }
-    };
-    win.addEventListener?.('keydown', onKeyDown);
-    return () => win.removeEventListener?.('keydown', onKeyDown);
-  }, [
-    channelManagerOpen,
-    contextMenu,
-    detailModal,
-    handleJumpPreviousChannel,
-    keymap.overrides,
-    mode,
-    numpad.open,
-    previousChannel,
-  ]);
+  useLiveLastChannelKey({
+    enabled:
+      mode !== 'favorites' &&
+      previousChannel !== null &&
+      contextMenu === null &&
+      detailModal === null &&
+      !channelManagerOpen &&
+      !numpad.open,
+    keymapOverrides: keymap.overrides,
+    onJumpPreviousChannel: handleJumpPreviousChannel,
+  });
   const handleBrowseChannels = useCallback(() => handleSelectMode('channels'), [handleSelectMode]);
   const handleToggleZapDrawer = useCallback(
     () => updateMemory({ zapDrawerOpen: !memoryRef.current.zapDrawerOpen }),

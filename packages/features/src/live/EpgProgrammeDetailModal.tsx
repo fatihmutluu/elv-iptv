@@ -83,6 +83,20 @@ function formatEpisodeTag(programme: ProgrammeRow): string | null {
   return raw && raw.length > 0 ? raw : null;
 }
 
+const MAX_REMINDER_LABEL_LENGTH = 256;
+
+function sanitizeReminderLabel(raw: string): string {
+  let out = '';
+  for (let i = 0; i < raw.length; i += 1) {
+    const code = raw.charCodeAt(i);
+    if (code > 0x1f && code !== 0x7f) out += raw[i];
+  }
+  const trimmed = out.trim();
+  return trimmed.length > MAX_REMINDER_LABEL_LENGTH
+    ? trimmed.slice(0, MAX_REMINDER_LABEL_LENGTH).trimEnd()
+    : trimmed;
+}
+
 function leadMsToMinutes(leadMs: number | undefined): number {
   if (leadMs === undefined || !Number.isFinite(leadMs) || leadMs < 0) {
     return DEFAULT_REMINDER_LEAD_MIN;
@@ -132,6 +146,10 @@ export function EpgProgrammeDetailModal({
   focusedIdxRef.current = focusedIdx;
 
   const archiveCacheRef = useRef<Map<string, readonly ProgrammeRow[]>>(new Map());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset cached archive rows whenever the catalog instance changes
+  useEffect(() => {
+    archiveCacheRef.current.clear();
+  }, [catalog]);
   const [archiveHasArchive, setArchiveHasArchive] = useState<boolean | undefined>(undefined);
   const [localReminderActive, setLocalReminderActive] = useState(hasReminder ?? false);
   const [leadMinutes, setLeadMinutes] = useState<number>(() => leadMsToMinutes(reminderLeadTimeMs));
@@ -245,8 +263,8 @@ export function EpgProgrammeDetailModal({
           const res = await catalog.upsertReminder({
             sourceId: channel.sourceId,
             channelKey: channel.key,
-            channelName: channel.name,
-            programmeTitle: programme.title,
+            channelName: sanitizeReminderLabel(channel.name),
+            programmeTitle: sanitizeReminderLabel(programme.title),
             programmeStart: programme.start,
             programmeStop: programme.stop,
             leadTimeMs: nextLeadMin * 60_000,

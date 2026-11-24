@@ -200,7 +200,61 @@ describe('buildCatchupUrl (#220)', () => {
     });
     expect(shortRes).toEqual({
       ok: true,
-      value: 'http://panel.example:8080/timeshift/u/p/1/2026-06-01:14-00/202.m3u8',
+      value: [
+        'http://panel.example:8080',
+        'timeshift',
+        'u',
+        'p',
+        '1',
+        '2026-06-01:14-00',
+        '202.m3u8',
+      ].join('/'),
+    });
+
+    const withApiTail = buildCatchupUrl({
+      mode: 'xc',
+      server: 'https://panel.example:8443/sub/player_api.php?foo=1&bar=2#frag',
+      username: 'u1',
+      password: 'p1',
+      streamId: 303,
+      programme: { startMs, stopMs },
+      catchupDays: 7,
+      nowMs,
+    });
+    expect(withApiTail).toEqual({
+      ok: true,
+      value: [
+        'https://panel.example:8443/sub',
+        'timeshift',
+        'u1',
+        'p1',
+        '90',
+        '2026-06-01:18-00',
+        '303.ts',
+      ].join('/'),
+    });
+
+    const withGetPhp = buildCatchupUrl({
+      mode: 'xc',
+      server: 'http://panel.example/get.php?type=m3u_plus',
+      username: 'u2',
+      password: 'p2',
+      streamId: 404,
+      programme: { startMs, stopMs },
+      catchupDays: 7,
+      nowMs,
+    });
+    expect(withGetPhp).toEqual({
+      ok: true,
+      value: [
+        'http://panel.example',
+        'timeshift',
+        'u2',
+        'p2',
+        '90',
+        '2026-06-01:18-00',
+        '404.ts',
+      ].join('/'),
     });
   });
 
@@ -513,6 +567,48 @@ describe('buildCatchupUrl (#220)', () => {
       {
         mode: 'shift' as const,
         liveUrl: 'http://tv.example/1.ts\x7f',
+        programme: { startMs, stopMs },
+        catchupDays: 7,
+        nowMs,
+      },
+      {
+        mode: 'xc' as const,
+        server: 'https://panel.example/path with spaces',
+        username: 'u',
+        password: 'p',
+        streamId: 10,
+        programme: { startMs, stopMs },
+        catchupDays: 7,
+        nowMs,
+      },
+      {
+        mode: 'xc' as const,
+        server: `https://panel.example/${'a'.repeat(4100)}`,
+        username: 'u',
+        password: 'p',
+        streamId: 10,
+        programme: { startMs, stopMs },
+        catchupDays: 7,
+        nowMs,
+      },
+      {
+        mode: 'shift' as const,
+        liveUrl: 'https://tv.example/live stream.ts',
+        programme: { startMs, stopMs },
+        catchupDays: 7,
+        nowMs,
+      },
+      {
+        mode: 'shift' as const,
+        liveUrl: `https://tv.example/${'x'.repeat(4100)}.ts`,
+        programme: { startMs, stopMs },
+        catchupDays: 7,
+        nowMs,
+      },
+      {
+        mode: 'default' as const,
+        liveUrl: 'https://tv.example/1.ts',
+        catchupSource: 'https://[invalid-host/archive.m3u8',
         programme: { startMs, stopMs },
         catchupDays: 7,
         nowMs,

@@ -408,7 +408,11 @@ describe('createProfileScopedCatalog', () => {
       parentalUnlocked: false,
     }));
 
-    await scoped.resolveCatchupStream?.('m:s1:live:1', { startMs: 1_000, stopMs: 2_000 });
+    await scoped.resolveCatchupStream?.('m:s1:live:1', {
+      startMs: 1_000,
+      stopMs: 2_000,
+      title: 'Late Night Show',
+    });
     await scoped.fetchChannelArchiveEpg?.('m:s1:live:1');
     await scoped.listGuideSources?.('s1');
     await scoped.addGuideSource?.({
@@ -442,7 +446,7 @@ describe('createProfileScopedCatalog', () => {
 
     expect(resolveCatchupStream).toHaveBeenCalledWith(
       'm:s1:live:1',
-      { startMs: 1_000, stopMs: 2_000 },
+      { startMs: 1_000, stopMs: 2_000, title: 'Late Night Show' },
       { profileId: 'kids-1', parentalUnlocked: false },
     );
     expect(fetchChannelArchiveEpg).toHaveBeenCalledWith('m:s1:live:1', {
@@ -462,7 +466,10 @@ describe('createProfileScopedCatalog', () => {
       guideId: 'bbc.uk',
     });
     expect(clearChannelGuideOverride).toHaveBeenCalledWith('s1', 'm:s1:live:1');
-    expect(listReminders).toHaveBeenCalledWith('kids-1', { includeFired: false });
+    expect(listReminders).toHaveBeenCalledWith('kids-1', {
+      includeFired: false,
+      parentalUnlocked: false,
+    });
     expect(upsertReminder).toHaveBeenCalledWith({
       sourceId: 's1',
       channelKey: 'm:s1:live:1',
@@ -471,6 +478,7 @@ describe('createProfileScopedCatalog', () => {
       programmeStart: 10_000,
       programmeStop: 20_000,
       profileId: 'kids-1',
+      parentalUnlocked: false,
     });
     expect(removeReminder).toHaveBeenCalledWith('m:s1:live:1', 10_000, 'kids-1');
     expect(markReminderFired).toHaveBeenCalledWith('m:s1:live:1', 10_000, 'kids-1');

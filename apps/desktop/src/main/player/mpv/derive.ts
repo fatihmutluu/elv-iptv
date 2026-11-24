@@ -7,6 +7,10 @@ import { createMpvVideoInfoTracker, type MpvVideoInfoTracker } from './video-inf
 const MAX_LOG_LINES = 50;
 /** Minimum seekable live cache span (ms) before live time-shift is advertised (`#28`). */
 const MIN_LIVE_TIMESHIFT_SPAN_MS = 2_000;
+/** Minimum live window shift (ms) that triggers a throttled paused clock anchor update (`#28`). */
+const PAUSED_LIVE_WINDOW_DELTA_MS = 500;
+/** Minimum interval (ms) between paused `demuxer-cache-state` clock anchors (`#28`). */
+const PAUSED_LIVE_WINDOW_THROTTLE_MS = 500;
 
 /** Latest seekable live cache bounds extracted from mpv `demuxer-cache-state` (`#28`). */
 interface LiveCacheWindow {
@@ -70,6 +74,8 @@ interface Media {
   cacheStart: number | undefined;
   cacheEnd: number | undefined;
   lastTimeShiftSupported: boolean;
+  lastAnchorLiveStartMs: number | undefined;
+  lastAnchorLiveEdgeMs: number | undefined;
   lastAnchorAt: number;
   telemetry: MpvTelemetry;
   videoInfo: MpvVideoInfoTracker;
@@ -156,6 +162,8 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
     media.lastAnchorAt = atMs;
     const currentRate = rate(media);
     const liveBounds = media.kind === 'live' ? resolveLiveWindowMs(media) : undefined;
+    media.lastAnchorLiveStartMs = liveBounds?.liveSeekableStartMs;
+    media.lastAnchorLiveEdgeMs = liveBounds?.liveEdgeMs;
     const a: ClockAnchor = {
       positionMs: Math.max(0, Math.round(media.timePos * 1000)) + 0,
       atMs,
@@ -347,10 +355,33 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         const progress = media.telemetry.onCacheState(value, opts.now(), isWaiting(media));
         if (progress) out.push(ev(media, progress));
         if (media.kind === 'live') {
-          const supported = resolveLiveWindowMs(media).timeShiftSupported;
-          if (supported !== media.lastTimeShiftSupported) {
+          const liveBounds = resolveLiveWindowMs(media);
+          const supported = liveBounds.timeShiftSupported;
+          const flipped = supported !== media.lastTimeShiftSupported;
+          if (flipped) {
             media.lastTimeShiftSupported = supported;
-            if (media.restarted) out.push(...anchor(media));
+          }
+          if (media.restarted) {
+            if (flipped) {
+              out.push(...anchor(media));
+            } else if (supported && rate(media) === 0) {
+              const startChanged =
+                liveBounds.liveSeekableStartMs !== media.lastAnchorLiveStartMs &&
+                (liveBounds.liveSeekableStartMs === undefined ||
+                  media.lastAnchorLiveStartMs === undefined ||
+                  Math.abs(liveBounds.liveSeekableStartMs - media.lastAnchorLiveStartMs) >=
+                    PAUSED_LIVE_WINDOW_DELTA_MS);
+              const edgeChanged =
+                liveBounds.liveEdgeMs !== media.lastAnchorLiveEdgeMs &&
+                (liveBounds.liveEdgeMs === undefined ||
+                  media.lastAnchorLiveEdgeMs === undefined ||
+                  Math.abs(liveBounds.liveEdgeMs - media.lastAnchorLiveEdgeMs) >=
+                    PAUSED_LIVE_WINDOW_DELTA_MS);
+              const throttleMs = Math.min(PAUSED_LIVE_WINDOW_THROTTLE_MS, opts.clockIntervalMs);
+              if ((startChanged || edgeChanged) && opts.now() - media.lastAnchorAt >= throttleMs) {
+                out.push(...anchor(media));
+              }
+            }
           }
         }
         return out;
@@ -398,6 +429,8 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         cacheStart: undefined,
         cacheEnd: undefined,
         lastTimeShiftSupported: false,
+        lastAnchorLiveStartMs: undefined,
+        lastAnchorLiveEdgeMs: undefined,
         lastAnchorAt: Number.NEGATIVE_INFINITY,
         telemetry: createMpvTelemetry(),
         videoInfo: createMpvVideoInfoTracker(),
@@ -428,7 +461,9 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
       if (m.logs.length > MAX_LOG_LINES) m.logs.shift();
     },
     tick() {
-      if (!m?.restarted || rate(m) === 0) return [];
+      if (!m?.restarted) return [];
+      const liveTimeShift = m.kind === 'live' && resolveLiveWindowMs(m).timeShiftSupported;
+      if (rate(m) === 0 && !liveTimeShift) return [];
       return opts.now() - m.lastAnchorAt >= opts.clockIntervalMs ? anchor(m) : [];
     },
     liveWindow() {

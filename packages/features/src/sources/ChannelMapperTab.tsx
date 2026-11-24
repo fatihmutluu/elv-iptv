@@ -4,25 +4,35 @@ import type {
   GuideChannelOption,
   ItemRow,
 } from '@elv/data';
+import type { KeyInput } from '@elv/focus-core';
 import {
   CtaButton,
   FilterChip,
   MicroPill,
   Surface,
-  TABULAR_NUMS_STYLE,
   TvTextInput,
+  type TvTextInputInstance,
   useI18n,
   useTheme,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
 import {
+  type MutableRefObject,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { ChannelMapperEditor } from './ChannelMapperEditor';
+import {
+  buildChannelMapperFocusRows,
   type ChannelMapperFilter,
   clampOffsetHours,
   filterMapperChannels,
   formatSignedOffsetHours,
-  MAX_EPG_OFFSET_HOURS,
-  MIN_EPG_OFFSET_HOURS,
+  mapperRowSlotCount,
   offsetHoursToMs,
   offsetMsToHours,
   resolveChannelMappingStatus,
@@ -30,6 +40,8 @@ import {
 
 const SEARCH_DEBOUNCE_MS = 180;
 const GUIDE_PICKER_LIMIT = 40;
+const CATALOG_SEARCH_LIMIT = 200;
+const NOW_NEXT_CHUNK = 50;
 
 /** Props of {@link ChannelMapperTab}. */
 export interface ChannelMapperTabProps {
@@ -38,7 +50,14 @@ export interface ChannelMapperTabProps {
   readonly channels: readonly ItemRow[];
   readonly overrides: readonly ChannelGuideOverrideRecord[];
   readonly matchedKeys: ReadonlySet<string>;
+  readonly hasMoreChannels?: boolean;
+  readonly loadingMore?: boolean;
+  readonly onLoadMore?: () => Promise<void>;
   readonly isTv: boolean;
+  readonly tvActive?: boolean;
+  readonly tvKeyHandlerRef?: MutableRefObject<((key: KeyInput['key']) => boolean) | null>;
+  readonly onEdgeTop?: () => void;
+  readonly onScrollToY?: (y: number) => void;
   readonly busy: boolean;
   readonly onBusyChange: (busy: boolean) => void;
   readonly onRefresh: () => Promise<void>;
@@ -46,9 +65,9 @@ export interface ChannelMapperTabProps {
 }
 
 /**
- * Manual Channel Mapper tab (`#30`): filter All / Unmatched live channels, search channels or
- * guide IDs, assign a specific XMLTV `guide_id`, set per-channel `-12h..+12h` offset, or reset to
- * automatic matching.
+ * Manual Channel Mapper tab (`#30`): filter All / Unmatched live channels, search across the full
+ * source catalog (uncapped past 200 channels), assign a specific XMLTV `guide_id` (preserving
+ * `guideSourceId`), set per-channel `-12h..+12h` offset, reset to automatic, and navigate via TV D-pad.
  */
 export function ChannelMapperTab({
   sourceId,
@@ -56,7 +75,14 @@ export function ChannelMapperTab({
   channels,
   overrides,
   matchedKeys,
+  hasMoreChannels = false,
+  loadingMore = false,
+  onLoadMore,
   isTv,
+  tvActive = false,
+  tvKeyHandlerRef,
+  onEdgeTop,
+  onScrollToY,
   busy,
   onBusyChange,
   onRefresh,
@@ -68,28 +94,94 @@ export function ChannelMapperTab({
   const [filter, setFilter] = useState<ChannelMapperFilter>('all');
   const [searchDraft, setSearchDraft] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [remoteChannels, setRemoteChannels] = useState<readonly ItemRow[] | null>(null);
+  const [remoteMatchedKeys, setRemoteMatchedKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [editingChannelKey, setEditingChannelKey] = useState<string | null>(null);
   const [guideQuery, setGuideQuery] = useState('');
   const [guideOptions, setGuideOptions] = useState<readonly GuideChannelOption[]>([]);
   const [selectedGuideId, setSelectedGuideId] = useState<string | null>(null);
+  const [selectedGuideSourceId, setSelectedGuideSourceId] = useState<string | null>(null);
   const [offsetHours, setOffsetHours] = useState(0);
+
+  const [focusedRow, setFocusedRow] = useState(0);
+  const [focusedCol, setFocusedCol] = useState(0);
+  const searchInputRef = useRef<TvTextInputInstance | null>(null);
+  const guideSearchInputRef = useRef<TvTextInputInstance | null>(null);
+  const listYRef = useRef(0);
+  const rowYRef = useRef<Record<string, number>>({});
+  const loadMoreYRef = useRef(0);
+  const guideReqSeqRef = useRef(0);
+  const searchSeqRef = useRef(0);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(searchDraft), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [searchDraft]);
 
+  // Catalog-side channel search so sources with >200 live channels can find & map any channel (#14).
+  useEffect(() => {
+    const trimmed = debouncedQuery.trim();
+    const seq = ++searchSeqRef.current;
+    if (trimmed.length === 0 || catalog.search === undefined) {
+      setRemoteChannels(null);
+      setRemoteMatchedKeys(new Set());
+      return;
+    }
+    let cancelled = false;
+    void catalog
+      .search(trimmed, { scope: 'live', sourceId, limit: CATALOG_SEARCH_LIMIT })
+      .then(async (res) => {
+        if (cancelled || seq !== searchSeqRef.current) return;
+        const hits = res.live.filter((item) => item.sourceId === sourceId);
+        const foundMatched = new Set<string>();
+        if (catalog.nowNext && hits.length > 0) {
+          const now = Date.now();
+          for (let i = 0; i < hits.length; i += NOW_NEXT_CHUNK) {
+            const chunk = hits.slice(i, i + NOW_NEXT_CHUNK).map((c) => c.key);
+            const entries = await catalog.nowNext(chunk, now).catch(() => []);
+            if (cancelled || seq !== searchSeqRef.current) return;
+            for (const entry of entries) {
+              if (entry.now !== null || entry.next !== null) foundMatched.add(entry.channelKey);
+            }
+          }
+        }
+        if (cancelled || seq !== searchSeqRef.current) return;
+        setRemoteChannels(hits);
+        setRemoteMatchedKeys(foundMatched);
+      })
+      .catch(() => {
+        if (!cancelled && seq === searchSeqRef.current) {
+          setRemoteChannels(null);
+          setRemoteMatchedKeys(new Set());
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, debouncedQuery, sourceId]);
+
+  // Single guarded guide-channel options fetch (eliminates duplicate openEditor fetch, #14).
   useEffect(() => {
     if (editingChannelKey === null || !catalog.listGuideChannels) return;
     let cancelled = false;
-    const timer = setTimeout(() => {
+    const reqSeq = ++guideReqSeqRef.current;
+    const run = () => {
       void catalog
         .listGuideChannels?.(sourceId, guideQuery, GUIDE_PICKER_LIMIT)
         .then((opts) => {
-          if (!cancelled) setGuideOptions(opts);
+          if (!cancelled && reqSeq === guideReqSeqRef.current) {
+            setGuideOptions(opts);
+          }
         })
         .catch(() => undefined);
-    }, SEARCH_DEBOUNCE_MS);
+    };
+    if (guideQuery.length === 0) {
+      run();
+      return () => {
+        cancelled = true;
+      };
+    }
+    const timer = setTimeout(run, SEARCH_DEBOUNCE_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -102,42 +194,113 @@ export function ChannelMapperTab({
     return map;
   }, [overrides]);
 
+  const effectiveMatchedKeys = useMemo(() => {
+    if (remoteMatchedKeys.size === 0) return matchedKeys;
+    const merged = new Set(matchedKeys);
+    for (const key of remoteMatchedKeys) merged.add(key);
+    return merged;
+  }, [matchedKeys, remoteMatchedKeys]);
+
+  const combinedChannels = useMemo(() => {
+    if (remoteChannels === null) return channels;
+    const seen = new Set<string>();
+    const out: ItemRow[] = [];
+    for (const ch of remoteChannels) {
+      if (seen.has(ch.key)) continue;
+      seen.add(ch.key);
+      out.push(ch);
+    }
+    for (const ch of channels) {
+      if (seen.has(ch.key)) continue;
+      seen.add(ch.key);
+      out.push(ch);
+    }
+    return out;
+  }, [channels, remoteChannels]);
+
   const filteredChannels = useMemo(
-    () => filterMapperChannels(channels, overridesByKey, matchedKeys, filter, debouncedQuery),
-    [channels, debouncedQuery, filter, matchedKeys, overridesByKey],
+    () =>
+      filterMapperChannels(
+        combinedChannels,
+        overridesByKey,
+        effectiveMatchedKeys,
+        filter,
+        debouncedQuery,
+      ),
+    [combinedChannels, debouncedQuery, effectiveMatchedKeys, filter, overridesByKey],
   );
+
+  const showLoadMore =
+    hasMoreChannels && onLoadMore !== undefined && debouncedQuery.trim().length === 0;
+
+  const focusRows = useMemo(
+    () =>
+      buildChannelMapperFocusRows({
+        channels: filteredChannels,
+        overridesByKey,
+        editingChannelKey,
+        guideOptions,
+        hasMore: showLoadMore,
+      }),
+    [editingChannelKey, filteredChannels, guideOptions, overridesByKey, showLoadMore],
+  );
+
+  useEffect(() => {
+    setFocusedRow((prevRow) => {
+      const clampedRow = Math.min(prevRow, Math.max(0, focusRows.length - 1));
+      const maxCol = Math.max(0, mapperRowSlotCount(focusRows[clampedRow]) - 1);
+      setFocusedCol((prevCol) => Math.min(prevCol, maxCol));
+      return clampedRow;
+    });
+  }, [focusRows]);
+
+  useEffect(() => {
+    if (!isTv || !tvActive || onScrollToY === undefined) return;
+    const row = focusRows[focusedRow];
+    if (!row || row.kind === 'filters' || row.kind === 'search') {
+      onScrollToY(0);
+      return;
+    }
+    if (row.kind === 'load-more') {
+      onScrollToY(loadMoreYRef.current > 0 ? loadMoreYRef.current : focusedRow * 88);
+      return;
+    }
+    const cardY = rowYRef.current[row.channelKey];
+    onScrollToY(cardY !== undefined ? listYRef.current + cardY : focusedRow * 88);
+  }, [focusRows, focusedRow, isTv, onScrollToY, tvActive]);
 
   const openEditor = useCallback(
     (ch: ItemRow) => {
       const existing = overridesByKey.get(ch.key);
       setEditingChannelKey(ch.key);
       setSelectedGuideId(existing?.guideId ?? null);
+      setSelectedGuideSourceId(existing?.guideSourceId ?? null);
       setOffsetHours(offsetMsToHours(existing?.epgShiftMs));
       setGuideQuery('');
-      if (catalog.listGuideChannels) {
-        void catalog
-          .listGuideChannels(sourceId, '', GUIDE_PICKER_LIMIT)
-          .then((opts) => setGuideOptions(opts))
-          .catch(() => undefined);
-      }
     },
-    [catalog, overridesByKey, sourceId],
+    [overridesByKey],
   );
 
   const closeEditor = useCallback(() => {
+    guideReqSeqRef.current += 1;
     setEditingChannelKey(null);
     setSelectedGuideId(null);
+    setSelectedGuideSourceId(null);
     setGuideQuery('');
   }, []);
 
   const handleSaveOverride = useCallback(
     async (channelKey: string) => {
       if (!catalog.setChannelGuideOverride || busy) return;
+      const matchedOpt = guideOptions.find((opt) => opt.guideId === selectedGuideId);
+      const resolvedGuideSourceId =
+        matchedOpt !== undefined ? (matchedOpt.guideSourceId ?? null) : selectedGuideSourceId;
       onBusyChange(true);
       try {
         const res = await catalog.setChannelGuideOverride({
           sourceId,
           channelKey,
+          guideSourceId: resolvedGuideSourceId,
           guideId: selectedGuideId,
           epgShiftMs: offsetHoursToMs(offsetHours),
         });
@@ -154,11 +317,13 @@ export function ChannelMapperTab({
       busy,
       catalog,
       closeEditor,
+      guideOptions,
       offsetHours,
       onBusyChange,
       onMutated,
       onRefresh,
       selectedGuideId,
+      selectedGuideSourceId,
       sourceId,
     ],
   );
@@ -181,6 +346,124 @@ export function ChannelMapperTab({
     [busy, catalog, closeEditor, editingChannelKey, onBusyChange, onMutated, onRefresh, sourceId],
   );
 
+  const handleTvKey = useCallback(
+    (key: KeyInput['key']): boolean => {
+      if (key === 'back') {
+        if (editingChannelKey !== null) {
+          closeEditor();
+          return true;
+        }
+        return false;
+      }
+      if (key === 'up') {
+        if (focusedRow === 0) {
+          onEdgeTop?.();
+          return true;
+        }
+        const nextRow = focusedRow - 1;
+        const maxCol = Math.max(0, mapperRowSlotCount(focusRows[nextRow]) - 1);
+        setFocusedRow(nextRow);
+        setFocusedCol((c) => Math.min(c, maxCol));
+        return true;
+      }
+      if (key === 'down') {
+        const nextRow = Math.min(Math.max(0, focusRows.length - 1), focusedRow + 1);
+        const maxCol = Math.max(0, mapperRowSlotCount(focusRows[nextRow]) - 1);
+        setFocusedRow(nextRow);
+        setFocusedCol((c) => Math.min(c, maxCol));
+        return true;
+      }
+      if (key === 'left') {
+        setFocusedCol((c) => Math.max(0, c - 1));
+        return true;
+      }
+      if (key === 'right') {
+        const maxCol = Math.max(0, mapperRowSlotCount(focusRows[focusedRow]) - 1);
+        setFocusedCol((c) => Math.min(maxCol, c + 1));
+        return true;
+      }
+      if (key === 'select') {
+        const row = focusRows[focusedRow];
+        if (!row) return true;
+        if (row.kind === 'filters') {
+          const slot = row.slots[focusedCol];
+          if (slot === 'filter-all') setFilter('all');
+          else if (slot === 'filter-unmatched') setFilter('unmatched');
+          return true;
+        }
+        if (row.kind === 'search') {
+          searchInputRef.current?.focus();
+          return true;
+        }
+        if (row.kind === 'load-more') {
+          if (!loadingMore && onLoadMore !== undefined) void onLoadMore();
+          return true;
+        }
+        if (row.kind === 'channel') {
+          const slot = row.slots[focusedCol];
+          const ch = filteredChannels.find((c) => c.key === row.channelKey);
+          if (slot === 'assign' && ch !== undefined) openEditor(ch);
+          else if (slot === 'clear') void handleClearOverride(row.channelKey);
+          return true;
+        }
+        if (row.kind === 'editor-search') {
+          guideSearchInputRef.current?.focus();
+          return true;
+        }
+        if (row.kind === 'editor-options') {
+          const opt = row.options[focusedCol];
+          if (opt !== undefined) {
+            setSelectedGuideId(opt.guideId);
+            setSelectedGuideSourceId(opt.guideSourceId ?? null);
+          }
+          return true;
+        }
+        if (row.kind === 'editor-offset') {
+          const slot = row.slots[focusedCol];
+          if (slot === 'editor-offset-dec') setOffsetHours((h) => clampOffsetHours(h - 1));
+          else if (slot === 'editor-offset-inc') setOffsetHours((h) => clampOffsetHours(h + 1));
+          return true;
+        }
+        if (row.kind === 'editor-actions') {
+          const slot = row.slots[focusedCol];
+          if (slot === 'editor-save') void handleSaveOverride(row.channelKey);
+          else if (slot === 'editor-clear') void handleClearOverride(row.channelKey);
+          else if (slot === 'editor-cancel') closeEditor();
+          return true;
+        }
+      }
+      return false;
+    },
+    [
+      closeEditor,
+      editingChannelKey,
+      filteredChannels,
+      focusRows,
+      focusedCol,
+      focusedRow,
+      handleClearOverride,
+      handleSaveOverride,
+      loadingMore,
+      onEdgeTop,
+      onLoadMore,
+      openEditor,
+    ],
+  );
+
+  useEffect(() => {
+    if (!tvKeyHandlerRef) return;
+    tvKeyHandlerRef.current = handleTvKey;
+    return () => {
+      if (tvKeyHandlerRef.current === handleTvKey) tvKeyHandlerRef.current = null;
+    };
+  }, [handleTvKey, tvKeyHandlerRef]);
+
+  const activeFocusRow = isTv && tvActive ? focusRows[focusedRow] : undefined;
+  const focusedGuideOptionId =
+    activeFocusRow?.kind === 'editor-options'
+      ? (activeFocusRow.options[focusedCol]?.guideId ?? null)
+      : null;
+
   return (
     <View testID="channel-mapper-tab" style={styles.container}>
       <View style={styles.controlsRow}>
@@ -189,6 +472,9 @@ export function ChannelMapperTab({
           label={i18n.t('sources.guides.filterAll')}
           selected={filter === 'all'}
           focusable={!isTv}
+          focused={
+            activeFocusRow?.kind === 'filters' && activeFocusRow.slots[focusedCol] === 'filter-all'
+          }
           onPress={() => setFilter('all')}
         />
         <FilterChip
@@ -196,11 +482,16 @@ export function ChannelMapperTab({
           label={i18n.t('sources.guides.filterUnmatched')}
           selected={filter === 'unmatched'}
           focusable={!isTv}
+          focused={
+            activeFocusRow?.kind === 'filters' &&
+            activeFocusRow.slots[focusedCol] === 'filter-unmatched'
+          }
           onPress={() => setFilter('unmatched')}
         />
       </View>
 
       <TvTextInput
+        ref={searchInputRef}
         testID="mapper-search-input"
         value={searchDraft}
         onChangeText={setSearchDraft}
@@ -213,18 +504,31 @@ export function ChannelMapperTab({
           {
             color: theme.colors.textPrimary,
             backgroundColor: theme.colors.bgSurface,
-            borderColor: theme.colors.surfaceBorder,
+            borderColor:
+              activeFocusRow?.kind === 'search'
+                ? theme.colors.focusRingColor
+                : theme.colors.surfaceBorder,
+            borderWidth: activeFocusRow?.kind === 'search' ? theme.focus.ringWidth : 1,
             borderRadius: theme.radius.button,
           },
         ]}
       />
 
-      <View style={styles.list}>
+      <View
+        style={styles.list}
+        onLayout={(e) => {
+          listYRef.current = e.nativeEvent.layout.y;
+        }}
+      >
         {filteredChannels.map((ch) => {
           const override = overridesByKey.get(ch.key);
-          const status = resolveChannelMappingStatus(ch.key, overridesByKey, matchedKeys);
+          const status = resolveChannelMappingStatus(ch.key, overridesByKey, effectiveMatchedKeys);
           const isEditing = editingChannelKey === ch.key;
           const chOffsetHours = offsetMsToHours(override?.epgShiftMs);
+          const isChannelRowFocused =
+            activeFocusRow !== undefined &&
+            'channelKey' in activeFocusRow &&
+            activeFocusRow.channelKey === ch.key;
 
           return (
             <Surface
@@ -234,6 +538,9 @@ export function ChannelMapperTab({
               bordered
               rounded="card"
               style={styles.channelRow}
+              onLayout={(e) => {
+                rowYRef.current[ch.key] = e.nativeEvent.layout.y;
+              }}
             >
               <View style={styles.channelHeader}>
                 <Text
@@ -278,104 +585,30 @@ export function ChannelMapperTab({
               </View>
 
               {isEditing ? (
-                <View testID={`mapper-editor-${ch.key}`} style={styles.editor}>
-                  <TvTextInput
-                    testID={`mapper-guide-search-${ch.key}`}
-                    value={guideQuery}
-                    onChangeText={setGuideQuery}
-                    placeholder={i18n.t('sources.guides.searchPlaceholder')}
-                    placeholderTextColor={theme.colors.textMuted}
-                    accessibilityLabel={i18n.t('sources.guides.assignGuide')}
-                    style={[
-                      styles.input,
-                      theme.typography.body,
-                      {
-                        color: theme.colors.textPrimary,
-                        backgroundColor: theme.colors.bgSurface,
-                        borderColor: theme.colors.surfaceBorder,
-                        borderRadius: theme.radius.button,
-                      },
-                    ]}
-                  />
-
-                  {guideOptions.length === 0 ? (
-                    <Text
-                      testID="mapper-no-guide-channels"
-                      style={[theme.typography.caption, { color: theme.colors.textMuted }]}
-                    >
-                      {i18n.t('sources.guides.noGuideChannels')}
-                    </Text>
-                  ) : (
-                    <View style={styles.guideOptionsWrap}>
-                      {guideOptions.slice(0, 12).map((opt) => (
-                        <FilterChip
-                          key={opt.guideId}
-                          testID={`mapper-guide-option-${opt.guideId}`}
-                          label={`${opt.name} (${opt.guideId})`}
-                          selected={selectedGuideId === opt.guideId}
-                          focusable={!isTv}
-                          onPress={() => setSelectedGuideId(opt.guideId)}
-                        />
-                      ))}
-                    </View>
-                  )}
-
-                  <View style={styles.offsetRow}>
-                    <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-                      {i18n.t('sources.guides.channelOffsetLabel')}
-                    </Text>
-                    <View style={styles.stepperGroup}>
-                      <CtaButton
-                        testID={`mapper-offset-dec-${ch.key}`}
-                        variant="secondary"
-                        label="-1h"
-                        disabled={offsetHours <= MIN_EPG_OFFSET_HOURS}
-                        focusable={!isTv}
-                        onPress={() => setOffsetHours((h) => clampOffsetHours(h - 1))}
-                      />
-                      <Text
-                        testID={`mapper-offset-value-${ch.key}`}
-                        style={[
-                          theme.typography.caption,
-                          TABULAR_NUMS_STYLE,
-                          styles.offsetValue,
-                          { color: theme.colors.textPrimary },
-                        ]}
-                      >
-                        {i18n.t('sources.guides.offsetHours', {
-                          hours: formatSignedOffsetHours(offsetHours),
-                        })}
-                      </Text>
-                      <CtaButton
-                        testID={`mapper-offset-inc-${ch.key}`}
-                        variant="secondary"
-                        label="+1h"
-                        disabled={offsetHours >= MAX_EPG_OFFSET_HOURS}
-                        focusable={!isTv}
-                        onPress={() => setOffsetHours((h) => clampOffsetHours(h + 1))}
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.rowActions}>
-                    <CtaButton
-                      testID={`mapper-save-${ch.key}`}
-                      variant="primary"
-                      label={i18n.t('sources.guides.save')}
-                      disabled={busy}
-                      focusable={!isTv}
-                      onPress={() => void handleSaveOverride(ch.key)}
-                    />
-                    <CtaButton
-                      testID={`mapper-cancel-${ch.key}`}
-                      variant="secondary"
-                      label={i18n.t('sources.guides.cancel')}
-                      disabled={busy}
-                      focusable={!isTv}
-                      onPress={closeEditor}
-                    />
-                  </View>
-                </View>
+                <ChannelMapperEditor
+                  channelKey={ch.key}
+                  hasExistingOverride={override !== undefined}
+                  guideQuery={guideQuery}
+                  onChangeGuideQuery={setGuideQuery}
+                  guideOptions={guideOptions}
+                  selectedGuideId={selectedGuideId}
+                  onSelectGuideOption={(opt) => {
+                    setSelectedGuideId(opt.guideId);
+                    setSelectedGuideSourceId(opt.guideSourceId ?? null);
+                  }}
+                  offsetHours={offsetHours}
+                  onChangeOffsetHours={setOffsetHours}
+                  guideSearchInputRef={guideSearchInputRef}
+                  isTv={isTv}
+                  isChannelRowFocused={isChannelRowFocused}
+                  activeFocusRow={activeFocusRow}
+                  focusedCol={focusedCol}
+                  focusedGuideOptionId={focusedGuideOptionId}
+                  busy={busy}
+                  onSave={() => void handleSaveOverride(ch.key)}
+                  onClear={() => void handleClearOverride(ch.key)}
+                  onCancel={closeEditor}
+                />
               ) : (
                 <View style={styles.rowActions}>
                   <CtaButton
@@ -384,6 +617,11 @@ export function ChannelMapperTab({
                     label={i18n.t('sources.guides.assignGuide')}
                     disabled={busy}
                     focusable={!isTv}
+                    focused={
+                      isChannelRowFocused &&
+                      activeFocusRow.kind === 'channel' &&
+                      activeFocusRow.slots[focusedCol] === 'assign'
+                    }
                     onPress={() => openEditor(ch)}
                   />
                   {override !== undefined ? (
@@ -393,6 +631,11 @@ export function ChannelMapperTab({
                       label={i18n.t('sources.guides.clearOverride')}
                       disabled={busy}
                       focusable={!isTv}
+                      focused={
+                        isChannelRowFocused &&
+                        activeFocusRow.kind === 'channel' &&
+                        activeFocusRow.slots[focusedCol] === 'clear'
+                      }
                       onPress={() => void handleClearOverride(ch.key)}
                     />
                   ) : null}
@@ -402,6 +645,25 @@ export function ChannelMapperTab({
           );
         })}
       </View>
+
+      {showLoadMore ? (
+        <View
+          style={styles.rowActions}
+          onLayout={(e) => {
+            loadMoreYRef.current = e.nativeEvent.layout.y;
+          }}
+        >
+          <CtaButton
+            testID="mapper-load-more"
+            variant="secondary"
+            label={i18n.t(loadingMore ? 'browse.loading' : 'catalog.seeAll')}
+            disabled={busy || loadingMore}
+            focusable={!isTv}
+            focused={activeFocusRow?.kind === 'load-more'}
+            onPress={() => void onLoadMore()}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -419,16 +681,5 @@ const styles = StyleSheet.create({
   channelRow: { padding: 12, gap: 10 },
   channelHeader: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   flex1: { flex: 1, minWidth: 120 },
-  editor: { gap: 10, paddingTop: 4 },
-  guideOptionsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  offsetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  stepperGroup: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  offsetValue: { minWidth: 44, textAlign: 'center', fontWeight: '700' },
   rowActions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
 });

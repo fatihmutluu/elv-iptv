@@ -1,19 +1,31 @@
 import type { CatalogService, GuideSourceRecord } from '@elv/data';
+import type { KeyInput } from '@elv/focus-core';
 import {
   CtaButton,
   MicroPill,
   Surface,
   TABULAR_NUMS_STYLE,
   TvTextInput,
+  type TvTextInputInstance,
   useI18n,
   useTheme,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useState } from 'react';
+import {
+  type MutableRefObject,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { describeSourceFailure } from './errors';
 import {
+  buildGuideSourcesFocusRows,
   clampOffsetHours,
   formatSignedOffsetHours,
+  type GuideRowActionSlot,
   MAX_EPG_OFFSET_HOURS,
   MIN_EPG_OFFSET_HOURS,
   offsetHoursToMs,
@@ -28,6 +40,10 @@ export interface GuideSourcesTabProps {
   readonly catalog: CatalogService;
   readonly guides: readonly GuideSourceRecord[];
   readonly isTv: boolean;
+  readonly tvActive?: boolean;
+  readonly tvKeyHandlerRef?: MutableRefObject<((key: KeyInput['key']) => boolean) | null>;
+  readonly onEdgeTop?: () => void;
+  readonly onScrollToY?: (y: number) => void;
   readonly busy: boolean;
   readonly onBusyChange: (busy: boolean) => void;
   readonly onRefresh: () => Promise<void>;
@@ -36,14 +52,18 @@ export interface GuideSourcesTabProps {
 
 /**
  * Priority-ordered XMLTV guide sources management tab (`#30`):
- * add/remove/reorder multiple XMLTV URLs per source, toggle enabled state, and adjust per-guide
- * `-12h..+12h` EPG time offsets with zero hardcoded colors.
+ * add/remove/reorder multiple XMLTV URLs per source, toggle enabled state, adjust per-guide
+ * `-12h..+12h` EPG time offsets, and navigate every control via 10-ft TV D-pad.
  */
 export function GuideSourcesTab({
   sourceId,
   catalog,
   guides,
   isTv,
+  tvActive = false,
+  tvKeyHandlerRef,
+  onEdgeTop,
+  onScrollToY,
   busy,
   onBusyChange,
   onRefresh,
@@ -58,12 +78,43 @@ export function GuideSourcesTab({
   const [offsetHoursDraft, setOffsetHoursDraft] = useState(0);
   const [errorText, setErrorText] = useState<string | null>(null);
 
+  const [focusedRow, setFocusedRow] = useState(0);
+  const [focusedCol, setFocusedCol] = useState(0);
+  const nameInputRef = useRef<TvTextInputInstance | null>(null);
+  const urlInputRef = useRef<TvTextInputInstance | null>(null);
+  const listYRef = useRef(0);
+  const rowYRef = useRef<Record<string, number>>({});
+
+  const focusRows = useMemo(() => buildGuideSourcesFocusRows(guides, adding), [adding, guides]);
+
+  useEffect(() => {
+    setFocusedRow((prevRow) => {
+      const clampedRow = Math.min(prevRow, Math.max(0, focusRows.length - 1));
+      const maxCol = Math.max(0, (focusRows[clampedRow]?.slots.length ?? 1) - 1);
+      setFocusedCol((prevCol) => Math.min(prevCol, maxCol));
+      return clampedRow;
+    });
+  }, [focusRows]);
+
+  useEffect(() => {
+    if (!isTv || !tvActive || onScrollToY === undefined) return;
+    const row = focusRows[focusedRow];
+    if (row?.kind !== 'guide') {
+      onScrollToY(0);
+      return;
+    }
+    const cardY = rowYRef.current[row.guideId];
+    onScrollToY(cardY !== undefined ? listYRef.current + cardY : focusedRow * 96);
+  }, [focusRows, focusedRow, isTv, onScrollToY, tvActive]);
+
   const resetAddForm = useCallback(() => {
     setAdding(false);
     setNameDraft('');
     setUrlDraft('');
     setOffsetHoursDraft(0);
     setErrorText(null);
+    setFocusedRow(0);
+    setFocusedCol(0);
   }, []);
 
   const handleSaveNewGuide = useCallback(async () => {
@@ -187,6 +238,124 @@ export function GuideSourcesTab({
     [busy, catalog, onBusyChange, onMutated, onRefresh],
   );
 
+  const handleTvKey = useCallback(
+    (key: KeyInput['key']): boolean => {
+      if (key === 'back') {
+        if (adding) {
+          resetAddForm();
+          return true;
+        }
+        return false;
+      }
+      if (key === 'up') {
+        if (focusedRow === 0) {
+          onEdgeTop?.();
+          return true;
+        }
+        const nextRow = focusedRow - 1;
+        const maxCol = Math.max(0, (focusRows[nextRow]?.slots.length ?? 1) - 1);
+        setFocusedRow(nextRow);
+        setFocusedCol((c) => Math.min(c, maxCol));
+        return true;
+      }
+      if (key === 'down') {
+        const nextRow = Math.min(Math.max(0, focusRows.length - 1), focusedRow + 1);
+        const maxCol = Math.max(0, (focusRows[nextRow]?.slots.length ?? 1) - 1);
+        setFocusedRow(nextRow);
+        setFocusedCol((c) => Math.min(c, maxCol));
+        return true;
+      }
+      if (key === 'left') {
+        setFocusedCol((c) => Math.max(0, c - 1));
+        return true;
+      }
+      if (key === 'right') {
+        const maxCol = Math.max(0, (focusRows[focusedRow]?.slots.length ?? 1) - 1);
+        setFocusedCol((c) => Math.min(maxCol, c + 1));
+        return true;
+      }
+      if (key === 'select') {
+        const row = focusRows[focusedRow];
+        const slot = row?.slots[focusedCol];
+        if (!row || slot === undefined) return true;
+        if (slot === 'add-open') {
+          if (!busy && catalog.addGuideSource !== undefined) {
+            setErrorText(null);
+            setAdding(true);
+            setFocusedRow(0);
+            setFocusedCol(0);
+          }
+          return true;
+        }
+        if (slot === 'form-name') {
+          nameInputRef.current?.focus();
+          return true;
+        }
+        if (slot === 'form-url') {
+          urlInputRef.current?.focus();
+          return true;
+        }
+        if (slot === 'form-offset-dec') {
+          setOffsetHoursDraft((h) => clampOffsetHours(h - 1));
+          return true;
+        }
+        if (slot === 'form-offset-inc') {
+          setOffsetHoursDraft((h) => clampOffsetHours(h + 1));
+          return true;
+        }
+        if (slot === 'form-save') {
+          void handleSaveNewGuide();
+          return true;
+        }
+        if (slot === 'form-cancel') {
+          resetAddForm();
+          return true;
+        }
+        if (row.kind === 'guide') {
+          const guide = guides[row.guideIndex];
+          if (guide === undefined) return true;
+          if (slot === 'row-up') void handleReorder(row.guideIndex, -1);
+          else if (slot === 'row-down') void handleReorder(row.guideIndex, 1);
+          else if (slot === 'row-offset-dec') void handleStepOffset(guide, -1);
+          else if (slot === 'row-offset-inc') void handleStepOffset(guide, 1);
+          else if (slot === 'row-toggle') void handleToggleEnabled(guide);
+          else if (slot === 'row-remove') void handleRemove(guide.id);
+        }
+        return true;
+      }
+      return false;
+    },
+    [
+      adding,
+      busy,
+      catalog.addGuideSource,
+      focusRows,
+      focusedCol,
+      focusedRow,
+      guides,
+      handleRemove,
+      handleReorder,
+      handleSaveNewGuide,
+      handleStepOffset,
+      handleToggleEnabled,
+      onEdgeTop,
+      resetAddForm,
+    ],
+  );
+
+  useEffect(() => {
+    if (!tvKeyHandlerRef) return;
+    tvKeyHandlerRef.current = handleTvKey;
+    return () => {
+      if (tvKeyHandlerRef.current === handleTvKey) tvKeyHandlerRef.current = null;
+    };
+  }, [handleTvKey, tvKeyHandlerRef]);
+
+  const activeFocusRow = isTv && tvActive ? focusRows[focusedRow] : undefined;
+  const activeSlot = activeFocusRow?.slots[focusedCol];
+  const isGuideSlotFocused = (guideId: string, slot: GuideRowActionSlot): boolean =>
+    activeFocusRow?.kind === 'guide' && activeFocusRow.guideId === guideId && activeSlot === slot;
+
   return (
     <View testID="guide-sources-tab" style={styles.container}>
       {!adding ? (
@@ -198,6 +367,7 @@ export function GuideSourcesTab({
             label={i18n.t('sources.guides.addGuide')}
             disabled={busy || catalog.addGuideSource === undefined}
             focusable={!isTv}
+            focused={activeFocusRow?.kind === 'add-cta' && activeSlot === 'add-open'}
             onPress={() => {
               setErrorText(null);
               setAdding(true);
@@ -210,6 +380,7 @@ export function GuideSourcesTab({
             {i18n.t('sources.guides.addGuide')}
           </Text>
           <TvTextInput
+            ref={nameInputRef}
             testID="guide-source-input-name"
             value={nameDraft}
             onChangeText={setNameDraft}
@@ -222,12 +393,17 @@ export function GuideSourcesTab({
               {
                 color: theme.colors.textPrimary,
                 backgroundColor: theme.colors.bgSurface,
-                borderColor: theme.colors.surfaceBorder,
+                borderColor:
+                  activeSlot === 'form-name'
+                    ? theme.colors.focusRingColor
+                    : theme.colors.surfaceBorder,
+                borderWidth: activeSlot === 'form-name' ? theme.focus.ringWidth : 1,
                 borderRadius: theme.radius.button,
               },
             ]}
           />
           <TvTextInput
+            ref={urlInputRef}
             testID="guide-source-input-url"
             value={urlDraft}
             onChangeText={setUrlDraft}
@@ -242,7 +418,11 @@ export function GuideSourcesTab({
               {
                 color: theme.colors.textPrimary,
                 backgroundColor: theme.colors.bgSurface,
-                borderColor: theme.colors.surfaceBorder,
+                borderColor:
+                  activeSlot === 'form-url'
+                    ? theme.colors.focusRingColor
+                    : theme.colors.surfaceBorder,
+                borderWidth: activeSlot === 'form-url' ? theme.focus.ringWidth : 1,
                 borderRadius: theme.radius.button,
               },
             ]}
@@ -258,6 +438,7 @@ export function GuideSourcesTab({
                 label="-1h"
                 disabled={offsetHoursDraft <= MIN_EPG_OFFSET_HOURS}
                 focusable={!isTv}
+                focused={activeSlot === 'form-offset-dec'}
                 onPress={() => setOffsetHoursDraft((h) => clampOffsetHours(h - 1))}
               />
               <Text
@@ -279,6 +460,7 @@ export function GuideSourcesTab({
                 label="+1h"
                 disabled={offsetHoursDraft >= MAX_EPG_OFFSET_HOURS}
                 focusable={!isTv}
+                focused={activeSlot === 'form-offset-inc'}
                 onPress={() => setOffsetHoursDraft((h) => clampOffsetHours(h + 1))}
               />
             </View>
@@ -298,6 +480,7 @@ export function GuideSourcesTab({
               label={i18n.t('sources.guides.save')}
               disabled={busy}
               focusable={!isTv}
+              focused={activeSlot === 'form-save'}
               onPress={() => void handleSaveNewGuide()}
             />
             <CtaButton
@@ -306,6 +489,7 @@ export function GuideSourcesTab({
               label={i18n.t('sources.guides.cancel')}
               disabled={busy}
               focusable={!isTv}
+              focused={activeSlot === 'form-cancel'}
               onPress={resetAddForm}
             />
           </View>
@@ -320,7 +504,12 @@ export function GuideSourcesTab({
           {i18n.t('sources.guides.empty')}
         </Text>
       ) : (
-        <View style={styles.list}>
+        <View
+          style={styles.list}
+          onLayout={(e) => {
+            listYRef.current = e.nativeEvent.layout.y;
+          }}
+        >
           {guides.map((guide, idx) => {
             const offsetHours = offsetMsToHours(guide.epgShiftMs);
             return (
@@ -331,6 +520,9 @@ export function GuideSourcesTab({
                 bordered
                 rounded="card"
                 style={styles.guideRow}
+                onLayout={(e) => {
+                  rowYRef.current[guide.id] = e.nativeEvent.layout.y;
+                }}
               >
                 <View style={styles.guideHeader}>
                   <Text
@@ -373,6 +565,7 @@ export function GuideSourcesTab({
                     label={i18n.t('sources.guides.priorityUp')}
                     disabled={busy || idx === 0}
                     focusable={!isTv}
+                    focused={isGuideSlotFocused(guide.id, 'row-up')}
                     onPress={() => void handleReorder(idx, -1)}
                   />
                   <CtaButton
@@ -381,6 +574,7 @@ export function GuideSourcesTab({
                     label={i18n.t('sources.guides.priorityDown')}
                     disabled={busy || idx === guides.length - 1}
                     focusable={!isTv}
+                    focused={isGuideSlotFocused(guide.id, 'row-down')}
                     onPress={() => void handleReorder(idx, 1)}
                   />
                   <CtaButton
@@ -389,6 +583,7 @@ export function GuideSourcesTab({
                     label="-1h"
                     disabled={busy || offsetHours <= MIN_EPG_OFFSET_HOURS}
                     focusable={!isTv}
+                    focused={isGuideSlotFocused(guide.id, 'row-offset-dec')}
                     onPress={() => void handleStepOffset(guide, -1)}
                   />
                   <CtaButton
@@ -397,6 +592,7 @@ export function GuideSourcesTab({
                     label="+1h"
                     disabled={busy || offsetHours >= MAX_EPG_OFFSET_HOURS}
                     focusable={!isTv}
+                    focused={isGuideSlotFocused(guide.id, 'row-offset-inc')}
                     onPress={() => void handleStepOffset(guide, 1)}
                   />
                   <CtaButton
@@ -405,6 +601,7 @@ export function GuideSourcesTab({
                     label={i18n.t(guide.enabled ? 'player.stats.off' : 'player.stats.on')}
                     disabled={busy}
                     focusable={!isTv}
+                    focused={isGuideSlotFocused(guide.id, 'row-toggle')}
                     onPress={() => void handleToggleEnabled(guide)}
                   />
                   <CtaButton
@@ -414,6 +611,7 @@ export function GuideSourcesTab({
                     label={i18n.t('sources.guides.remove')}
                     disabled={busy}
                     focusable={!isTv}
+                    focused={isGuideSlotFocused(guide.id, 'row-remove')}
                     onPress={() => void handleRemove(guide.id)}
                   />
                 </View>

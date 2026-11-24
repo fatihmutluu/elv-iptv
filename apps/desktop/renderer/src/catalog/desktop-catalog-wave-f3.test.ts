@@ -187,6 +187,56 @@ describe('createDesktopCatalogFromBridge Wave F3 EPG ops (#220, #306, #30, #35)'
     expect(pruneExpiredReminders).toHaveBeenCalledWith(3000);
   });
 
+  it('truncates >256-char reminder and catch-up titles safely before sending over IPC', async () => {
+    const resolveCatchupStream = vi.fn<NonNullable<CatalogBridge['resolveCatchupStream']>>(
+      async () => ok({ url: 'http://sim.test/catchup.m3u8', headers: {} }),
+    );
+    const upsertReminder = vi.fn<NonNullable<CatalogBridge['upsertReminder']>>(async () =>
+      ok({
+        profileId: 'default',
+        sourceId: 's1',
+        channelKey: 'm:s1:ch1',
+        channelName: 'A'.repeat(256),
+        programmeTitle: 'B'.repeat(256),
+        programmeStart: 1000,
+        programmeStop: 2000,
+        leadTimeMs: 300_000,
+        fired: false,
+        createdAt: 500,
+      }),
+    );
+
+    const catalog = createDesktopCatalogFromBridge(
+      minimalBridge({ resolveCatchupStream, upsertReminder }),
+    );
+
+    const longChannel = `  ${'C'.repeat(300)}\nHD  `;
+    const longTitle = `${'P'.repeat(255)}🎬Extra`;
+    await catalog.upsertReminder?.({
+      sourceId: 's1',
+      channelKey: 'm:s1:ch1',
+      channelName: longChannel,
+      programmeTitle: longTitle,
+      programmeStart: 1000,
+      programmeStop: 2000,
+      parentalUnlocked: false,
+    });
+
+    const sentReminder = upsertReminder.mock.calls[0]?.[0];
+    expect(sentReminder?.channelName).toBe('C'.repeat(256));
+    expect(sentReminder?.programmeTitle).toBe('P'.repeat(255));
+    expect(sentReminder?.programmeTitle.length).toBeLessThanOrEqual(256);
+    expect(sentReminder?.parentalUnlocked).toBe(false);
+
+    await catalog.resolveCatchupStream?.(
+      'm:s1:ch1',
+      { startMs: 1000, stopMs: 2000, title: `  ${'T'.repeat(300)}\r\nLive  ` },
+      { profileId: 'default', parentalUnlocked: false },
+    );
+    const sentCatchup = resolveCatchupStream.mock.calls[0]?.[1];
+    expect(sentCatchup?.title).toBe('T'.repeat(256));
+  });
+
   it('degrades cleanly when optional Wave F3 bridge methods are absent', async () => {
     const catalog = createDesktopCatalogFromBridge(minimalBridge());
     expect((await catalog.resolveCatchupStream?.('k', { startMs: 1, stopMs: 2 }))?.ok).toBe(false);

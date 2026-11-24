@@ -2,10 +2,10 @@ import { elvError, err, ok, type Result } from '@elv/domain';
 
 const DAY_MS = 86_400_000;
 const MAX_TZ_CACHE = 64;
+const MAX_CATCHUP_URL_LENGTH = 4_096;
 const TZ_FORMATTERS = new Map<string, Intl.DateTimeFormat | null>();
 const TEMPLATE_TOKEN_RE =
   /\$\{(start|timestamp|end|duration|offset)\}|\{(utc|start|end|utcend|duration|offset|lutc|Y|m|d|H|M|S)\}/g;
-const HTTP_URL_PREFIX_RE = /^https?:\/\/[^/\s]+/i;
 
 /** Supported catch-up URL resolution modes across Xtream, Stalker, and M3U providers. */
 export type CatchupMode = 'default' | 'append' | 'shift' | 'flussonic' | 'xc' | 'stalker';
@@ -127,16 +127,54 @@ function extractCalendarParts(epochMs: number, serverTimezone?: string): Calenda
   };
 }
 
-function hasAsciiControlChar(value: string): boolean {
+function hasWhitespaceOrControlChar(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return true;
+    if (code <= 0x20 || code === 0x7f) return true;
   }
-  return false;
+  return /\s/.test(value);
 }
 
 function isValidHttpCatchupUrl(url: string): boolean {
-  return HTTP_URL_PREFIX_RE.test(url) && !hasAsciiControlChar(url);
+  if (url.length === 0 || url.length > MAX_CATCHUP_URL_LENGTH) return false;
+  if (hasWhitespaceOrControlChar(url)) return false;
+  try {
+    const parsed = new URL(url);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function normalizeXcCatchupServer(rawServer: string): string | null {
+  const trimmed = rawServer.trim();
+  if (
+    trimmed.length === 0 ||
+    trimmed.length > MAX_CATCHUP_URL_LENGTH ||
+    hasWhitespaceOrControlChar(trimmed)
+  ) {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    parsed.hostname.length === 0
+  ) {
+    return null;
+  }
+  const cleanPath = parsed.pathname
+    .replace(/\/+$/, '')
+    .replace(/\/(?:player_api|get|xmltv)\.php$/i, '')
+    .replace(/\/+$/, '');
+  const base = `${parsed.origin}${cleanPath}`;
+  return base.length <= MAX_CATCHUP_URL_LENGTH ? base : null;
 }
 
 function splitFragment(url: string): readonly [string, string] {
@@ -326,15 +364,15 @@ export function buildCatchupUrl(input: BuildCatchupUrlInput): Result<string> {
   let url: string | null = null;
 
   if (input.mode === 'xc') {
-    const cleanServer = input.server.trim().replace(/\/+$/, '');
+    const cleanServer = normalizeXcCatchupServer(input.server);
     const streamIdStr = String(input.streamId).trim();
     const ext = input.ext?.trim().replace(/^\.+/, '') || 'ts';
     if (
+      cleanServer === null ||
       streamIdStr === '' ||
       ext.includes('/') ||
       ext.includes('?') ||
-      ext.includes('#') ||
-      hasAsciiControlChar(cleanServer)
+      ext.includes('#')
     ) {
       return invalid();
     }

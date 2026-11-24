@@ -1,9 +1,17 @@
-import type { ChannelGuideOverrideRecord, ItemRow } from '@elv/data';
+import type {
+  ChannelGuideOverrideRecord,
+  GuideChannelOption,
+  GuideSourceRecord,
+  ItemRow,
+} from '@elv/data';
 import { describe, expect, it } from 'vitest';
 import {
+  buildChannelMapperFocusRows,
+  buildGuideSourcesFocusRows,
   clampOffsetHours,
   filterMapperChannels,
   formatSignedOffsetHours,
+  mapperRowSlotCount,
   offsetHoursToMs,
   offsetMsToHours,
   reorderGuideSourceIds,
@@ -83,5 +91,72 @@ describe('guide-management-model', () => {
       ch2,
     ]);
     expect(filterMapperChannels([ch1, ch2, ch3], overrides, matched, 'all', 'news')).toEqual([ch1]);
+  });
+
+  it('builds 2D TV focus rows for GuideSourcesTab and ChannelMapperTab', () => {
+    const guides: GuideSourceRecord[] = [
+      {
+        id: 'g1',
+        sourceId: 's1',
+        priority: 0,
+        name: 'Primary',
+        urlTemplate: '{{g:g1}}',
+        epgShiftMs: 0,
+        enabled: true,
+        lastSyncAt: null,
+      },
+    ];
+    const collapsed = buildGuideSourcesFocusRows(guides, false);
+    expect(collapsed.map((r) => r.kind)).toEqual(['add-cta', 'guide']);
+    expect(collapsed[1]?.slots).toHaveLength(6);
+
+    const expanded = buildGuideSourcesFocusRows(guides, true);
+    expect(expanded.map((r) => r.kind)).toEqual(['form', 'form', 'form', 'form', 'guide']);
+    expect(expanded[3]?.slots).toEqual(['form-save', 'form-cancel']);
+
+    const ch1 = makeChannel('m:s1:live:1', 'News One');
+    const ch2 = makeChannel('m:s1:live:2', 'Sports Arena');
+    const overrides = new Map<string, ChannelGuideOverrideRecord>([
+      [
+        ch1.key,
+        {
+          sourceId: 's1',
+          channelKey: ch1.key,
+          guideSourceId: 'g1',
+          guideId: 'news.eu',
+          epgShiftMs: 0,
+          isManual: true,
+          updatedAt: 1,
+        },
+      ],
+    ]);
+    const options: GuideChannelOption[] = [
+      { guideId: 'news.eu', name: 'News EU', icon: null, lcn: null, guideSourceId: 'g1' },
+      { guideId: 'news.uk', name: 'News UK', icon: null, lcn: null, guideSourceId: 'g1' },
+      { guideId: 'news.us', name: 'News US', icon: null, lcn: null, guideSourceId: 'g1' },
+      { guideId: 'news.de', name: 'News DE', icon: null, lcn: null, guideSourceId: 'g2' },
+    ];
+    const mapperRows = buildChannelMapperFocusRows({
+      channels: [ch1, ch2],
+      overridesByKey: overrides,
+      editingChannelKey: ch1.key,
+      guideOptions: options,
+      hasMore: true,
+    });
+    expect(mapperRows.map((r) => r.kind)).toEqual([
+      'filters',
+      'search',
+      'editor-search',
+      'editor-options',
+      'editor-options',
+      'editor-offset',
+      'editor-actions',
+      'channel',
+      'load-more',
+    ]);
+    expect(mapperRowSlotCount(mapperRows[3])).toBe(3);
+    expect(mapperRowSlotCount(mapperRows[4])).toBe(1);
+    expect(mapperRowSlotCount(mapperRows[6])).toBe(3);
+    expect(mapperRowSlotCount(undefined)).toBe(0);
   });
 });

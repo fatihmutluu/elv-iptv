@@ -1,13 +1,15 @@
 import type { ProgrammeReminderRecord } from '@elv/data';
-import { ok } from '@elv/domain';
+import { elvError, err, ok } from '@elv/domain';
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildReminderTuneTarget,
   clampReminderTimerDelay,
   computeReminderStartsInMinutes,
   createReminderSchedulerEngine,
+  MAX_REMINDER_MARK_ATTEMPTS,
   MAX_REMINDER_TIMER_DELAY_MS,
   pickEarliestDueReminder,
+  REMINDER_MARK_RETRY_BACKOFF_MS,
   type ReminderBannerState,
   type ReminderTimers,
 } from './app-shell-reminders';
@@ -261,5 +263,162 @@ describe('app-shell-reminders', () => {
     expect([...manual.active.values()][0]?.delayMs).toBe(600_000);
 
     engine.dispose();
+  });
+
+  it('backs off without infinite recursion or notification spam when markReminderFired fails or throws (#6)', async () => {
+    let now = 700_000;
+    const manual = createManualTimers();
+    const banners: ReminderBannerState[] = [];
+    const notifyReminder = vi.fn();
+    let callCount = 0;
+
+    const markReminderFired = vi.fn(async () => {
+      callCount += 1;
+      if (callCount === 1) return err(elvError('storage', 'db-busy'));
+      throw new Error('disk busy');
+    });
+
+    const engine = createReminderSchedulerEngine({
+      catalog: {
+        itemDetail: vi.fn(async () => ({ key: 'x:s1:live:1' })) as never,
+        listReminders: vi.fn(async () => [
+          makeReminder({ programmeStart: 1_000_000, leadTimeMs: 300_000 }),
+        ]),
+        markReminderFired,
+        pruneExpiredReminders: vi.fn(async () => 0),
+      },
+      activeProfileId: 'default',
+      parentalUnlocked: false,
+      reminderHost: { notifyReminder },
+      clock: () => now,
+      timers: manual.timers,
+      onBanner: (b) => banners.push(b),
+    });
+
+    await engine.sync();
+    // Must attempt once, NOT recurse infinitely, NOT spam banner/notifications, and arm 60s backoff timer.
+    expect(markReminderFired).toHaveBeenCalledTimes(1);
+    expect(banners).toHaveLength(0);
+    expect(notifyReminder).not.toHaveBeenCalled();
+    expect(manual.active.size).toBe(1);
+    expect([...manual.active.values()][0]?.delayMs).toBe(REMINDER_MARK_RETRY_BACKOFF_MS);
+
+    // Exhaust remaining attempts up to MAX_REMINDER_MARK_ATTEMPTS, then stop scheduling retries.
+    for (let attempt = 2; attempt <= MAX_REMINDER_MARK_ATTEMPTS; attempt += 1) {
+      now += REMINDER_MARK_RETRY_BACKOFF_MS;
+      manual.fireNext();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(markReminderFired).toHaveBeenCalledTimes(attempt);
+    }
+    expect(banners).toHaveLength(0);
+    expect(notifyReminder).not.toHaveBeenCalled();
+    expect(manual.active.size).toBe(0);
+
+    engine.dispose();
+  });
+
+  it('passes parentalUnlocked to listReminders, suppresses programme-restricted reminders, and populates localized timingText (#4, #16)', async () => {
+    let now = 700_000;
+    const manual = createManualTimers();
+    const banners: ReminderBannerState[] = [];
+    const notifyReminder = vi.fn();
+    const listReminders = vi.fn(
+      async (_profileId?: string, opts?: { parentalUnlocked?: boolean }) =>
+        opts?.parentalUnlocked
+          ? [
+              makeReminder({
+                channelKey: 'x:s1:live:1',
+                programmeTitle: 'Late Night Show',
+                programmeStart: 1_000_000,
+                leadTimeMs: 300_000,
+              }),
+            ]
+          : [],
+    );
+    let fired = false;
+    const markReminderFired = vi.fn(async () => {
+      fired = true;
+      return ok(undefined);
+    });
+
+    // When locked, listReminders returns [] -> nothing fires or leaks.
+    const lockedEngine = createReminderSchedulerEngine({
+      catalog: {
+        itemDetail: vi.fn(async () => ({ key: 'x:s1:live:1' })) as never,
+        listReminders,
+        markReminderFired,
+        pruneExpiredReminders: vi.fn(async () => 0),
+      },
+      activeProfileId: 'kids-1',
+      parentalUnlocked: false,
+      reminderHost: { notifyReminder },
+      clock: () => now,
+      timers: manual.timers,
+      formatTimingText: (mins) => (mins <= 0 ? 'Şimdi başlıyor' : `${mins} dk içinde başlıyor`),
+      onBanner: (b) => banners.push(b),
+    });
+    await lockedEngine.sync();
+    expect(listReminders).toHaveBeenCalledWith('kids-1', {
+      includeFired: false,
+      parentalUnlocked: false,
+    });
+    expect(banners).toHaveLength(0);
+    expect(notifyReminder).not.toHaveBeenCalled();
+    lockedEngine.dispose();
+
+    // When unlocked, localized timingText is forwarded on ReminderNotificationPayload.
+    const unlockedEngine = createReminderSchedulerEngine({
+      catalog: {
+        itemDetail: vi.fn(async () => ({ key: 'x:s1:live:1' })) as never,
+        listReminders: vi.fn(async (pid, opts) => (fired ? [] : listReminders(pid, opts))),
+        markReminderFired,
+        pruneExpiredReminders: vi.fn(async () => 0),
+      },
+      activeProfileId: 'kids-1',
+      parentalUnlocked: true,
+      reminderHost: { notifyReminder },
+      clock: () => now,
+      timers: manual.timers,
+      formatTimingText: (mins) => (mins <= 0 ? 'Şimdi başlıyor' : `${mins} dk içinde başlıyor`),
+      onBanner: (b) => banners.push(b),
+    });
+    await unlockedEngine.sync();
+    expect(banners).toHaveLength(1);
+    expect(notifyReminder).toHaveBeenCalledWith({
+      channelKey: 'x:s1:live:1',
+      channelName: 'News HD',
+      programmeTitle: 'Late Night Show',
+      programmeStart: 1_000_000,
+      startsInMinutes: 5,
+      timingText: '5 dk içinde başlıyor',
+    });
+    unlockedEngine.dispose();
+
+    // Starting-now formatting when programmeStart <= now
+    now = 1_000_000;
+    fired = false;
+    const nowEngine = createReminderSchedulerEngine({
+      catalog: {
+        itemDetail: vi.fn(async () => ({ key: 'x:s1:live:1' })) as never,
+        listReminders: vi.fn(async (pid, opts) => (fired ? [] : listReminders(pid, opts))),
+        markReminderFired,
+        pruneExpiredReminders: vi.fn(async () => 0),
+      },
+      activeProfileId: 'kids-1',
+      parentalUnlocked: true,
+      reminderHost: { notifyReminder },
+      clock: () => now,
+      timers: manual.timers,
+      formatTimingText: (mins) => (mins <= 0 ? 'Şimdi başlıyor' : `${mins} dk içinde başlıyor`),
+      onBanner: (b) => banners.push(b),
+    });
+    await nowEngine.sync();
+    expect(notifyReminder).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        startsInMinutes: 0,
+        timingText: 'Şimdi başlıyor',
+      }),
+    );
+    nowEngine.dispose();
   });
 });

@@ -133,4 +133,73 @@ struct LiveTimeShiftPolicyTests {
     core.seek(6, positionMs: 10_000)
     #expect(backend.calls.isEmpty)
   }
+
+  @Test("shouldTickLiveWindowWhilePaused enables paused live ticks strictly for seekable non-TS live streams")
+  func evaluatesPausedLiveWindowTickPolicy() {
+    #expect(shouldTickLiveWindowWhilePaused(isLive: true, isLiveTs: false, isPaused: true, hasSeekableWindow: true))
+    #expect(!shouldTickLiveWindowWhilePaused(isLive: false, isLiveTs: false, isPaused: true, hasSeekableWindow: true))
+    #expect(!shouldTickLiveWindowWhilePaused(isLive: true, isLiveTs: true, isPaused: true, hasSeekableWindow: true))
+    #expect(!shouldTickLiveWindowWhilePaused(isLive: true, isLiveTs: false, isPaused: false, hasSeekableWindow: true))
+    #expect(!shouldTickLiveWindowWhilePaused(isLive: true, isLiveTs: false, isPaused: true, hasSeekableWindow: false))
+  }
+
+  @Test("EngineCore emits updated liveSeekableStartMs and liveEdgeMs anchors while live stream is paused (#28)")
+  @MainActor
+  func engineCoreEmitsPausedLiveWindowUpdates() {
+    let backend = FakeBackend()
+    let sink = RecordingSink()
+    let clock = FakeClock()
+    let core = EngineCore(backend: backend, sink: sink, uptimeMs: { clock.uptimeMs() })
+
+    core.load(LoadRequest(url: "http://h:7878/live/demo/demo/1001.m3u8", live: true), attempt: 1)
+    core.observe(.firstFrame, serial: 1)
+    core.observe(.phase(.playing), serial: 1)
+    clock.nowMs = 1_000
+    core.observe(
+      .clock(
+        positionSeconds: 120.0,
+        rate: 1.0,
+        durationSeconds: nil,
+        liveEdgeSeconds: 120.0,
+        liveSeekableStartSeconds: 60.0,
+        timeShiftSupported: true
+      ),
+      serial: 1
+    )
+
+    // User pauses live playback
+    core.pause(2)
+    core.observe(.phase(.paused), serial: 1)
+    sink.events.removeAll()
+
+    // 1 second later while paused: position stays 120s, live window advances to [61s, 121s]
+    clock.nowMs = 2_000
+    core.observe(
+      .clock(
+        positionSeconds: 120.0,
+        rate: 0.0,
+        durationSeconds: nil,
+        liveEdgeSeconds: 121.0,
+        liveSeekableStartSeconds: 61.0,
+        timeShiftSupported: true
+      ),
+      serial: 1
+    )
+    #expect(core.liveSeekableWindow == LiveSeekableWindow(startSec: 61.0, endSec: 121.0))
+    #expect(
+      sink.events == [
+        .clock(
+          attempt: 2,
+          anchor: ClockAnchorOut(
+            positionMs: 120_000,
+            atMs: 2_000,
+            rate: 0.0,
+            liveEdgeMs: 121_000,
+            liveSeekableStartMs: 61_000,
+            timeShiftSupported: true
+          )
+        ),
+      ]
+    )
+  }
 }
