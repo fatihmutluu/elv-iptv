@@ -19,8 +19,10 @@ import {
   indexNowNext,
   LIVE_ALPHABET_RAIL_MIN_ITEMS,
   layoutEpgSlots,
+  MIN_EPG_GAP_MS,
   parseNumberBuffer,
   recordChannelTune,
+  resolveEpgRowHeight,
   resolveLiveAlphabetLetter,
   stepLiveAlphabetLetter,
 } from './live-model';
@@ -76,7 +78,7 @@ describe('live-model pure helpers', () => {
     expect(computeNowLineRatio(BASE, 2 * HOUR, BASE + 3 * HOUR)).toBeNull();
   });
 
-  it('clips and lays out EPG slots across window boundaries', () => {
+  it('clips and lays out EPG slots across window boundaries and synthesizes >= 5 min gap cells', () => {
     const progs = [
       makeProg(-60, -10, 'Past'),
       makeProg(-15, 45, 'Live Show'),
@@ -85,14 +87,64 @@ describe('live-model pure helpers', () => {
       makeProg(240, 300, 'After Window'),
     ];
     const slots = layoutEpgSlots(progs, BASE, EPG_VISIBLE_SPAN_MS, BASE + 15 * 60_000);
-    expect(slots.map((s) => s.programme.title)).toEqual(['Live Show', 'Next Show', 'Late Show']);
+    // [0..45] Live Show, [45..120] Next Show, [120..150] 30m Gap, [150..180] Late Show
+    expect(slots.map((s) => (s.isGap ? 'GAP' : s.programme?.title))).toEqual([
+      'Live Show',
+      'Next Show',
+      'GAP',
+      'Late Show',
+    ]);
     expect(slots[0]?.clippedStart).toBe(true);
     expect(slots[0]?.isLive).toBe(true);
     expect(slots[0]?.leftRatio).toBe(0);
     expect(slots[0]?.widthRatio).toBeCloseTo(45 / 180);
-    expect(slots[2]?.clippedEnd).toBe(true);
+    expect(slots[2]?.isGap).toBe(true);
+    expect(slots[2]?.programme).toBeNull();
+    expect(slots[2]?.id).toBe(`__gap:${BASE + 120 * 60_000}:${BASE + 150 * 60_000}`);
+    expect(slots[2]?.leftRatio).toBeCloseTo(120 / 180);
     expect(slots[2]?.widthRatio).toBeCloseTo(30 / 180);
-    expect(layoutEpgSlots([], BASE, EPG_VISIBLE_SPAN_MS, BASE)).toEqual([]);
+    expect(slots[3]?.clippedEnd).toBe(true);
+    expect(slots[3]?.widthRatio).toBeCloseTo(30 / 180);
+
+    // Empty row produces one full-window gap cell
+    const emptySlots = layoutEpgSlots([], BASE, EPG_VISIBLE_SPAN_MS, BASE);
+    expect(emptySlots).toHaveLength(1);
+    expect(emptySlots[0]?.isGap).toBe(true);
+    expect(emptySlots[0]?.id).toBe(`__gap:${BASE}:${BASE + EPG_VISIBLE_SPAN_MS}`);
+    expect(emptySlots[0]?.leftRatio).toBe(0);
+    expect(emptySlots[0]?.widthRatio).toBe(1);
+  });
+
+  it('ignores gaps shorter than MIN_EPG_GAP_MS (5 min) and synthesizes leading/trailing >= 5 min gaps', () => {
+    expect(MIN_EPG_GAP_MS).toBe(300_000);
+    const progs = [
+      makeProg(10, 40, 'After Lead'), // 10m leading gap (>= 5m)
+      makeProg(44, 90, 'Short Gap Next'), // 4m gap (< 5m -> ignored)
+      makeProg(95, 160, 'Exact 5m Gap Next'), // 5m gap (>= 5m -> synthesized)
+      // 20m trailing gap [160..180] (>= 5m -> synthesized)
+    ];
+    const slots = layoutEpgSlots(progs, BASE, EPG_VISIBLE_SPAN_MS, BASE + 15 * 60_000);
+    expect(
+      slots.map((s) => (s.isGap ? `GAP:${(s.stopMs - s.startMs) / 60_000}m` : s.programme?.title)),
+    ).toEqual([
+      'GAP:10m',
+      'After Lead',
+      'Short Gap Next',
+      'GAP:5m',
+      'Exact 5m Gap Next',
+      'GAP:20m',
+    ]);
+  });
+
+  it('resolves EPG row heights for compact, comfortable, and cinematic presets across TV and standard viewports', () => {
+    expect(resolveEpgRowHeight('compact', true, 1)).toBe(52);
+    expect(resolveEpgRowHeight('compact', false, 1)).toBe(48);
+    expect(resolveEpgRowHeight('comfortable', true, 1)).toBe(68);
+    expect(resolveEpgRowHeight('comfortable', false, 1)).toBe(60);
+    expect(resolveEpgRowHeight('cinematic', true, 1)).toBe(84);
+    expect(resolveEpgRowHeight('cinematic', false, 1)).toBe(74);
+    expect(resolveEpgRowHeight(undefined, true, 1.2)).toBe(Math.round(68 * 1.2));
+    expect(resolveEpgRowHeight('compact', false, 0.5)).toBe(48); // safeFontScale clamps >= 1
   });
 
   it('preserves focus under the anchor time cursor across channels and gaps', () => {

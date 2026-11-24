@@ -61,6 +61,8 @@ const SUPERSCRIPT_TO_ASCII: Readonly<Record<string, string>> = {
 
 const XMLTV_NS_RE = /^\s*\d*(?:\/\d+)?\s*\.\s*\d*(?:\/\d+)?(?:\s*\.\s*\d*(?:\/\d+)?)?\s*$/;
 const DESC_EPISODE_RE = /^\s*(S\d{1,3}E\d{1,4})\b/i;
+const DESC_SEASON_EPISODE_RE = /^\s*Season\s+(\d{1,3})\s*(?:[,:-]\s*|\s+)Episode\s+(\d{1,4})\b/i;
+const DESC_X_EPISODE_RE = /^\s*(\d{1,3})x(\d{2,4})\b/i;
 
 /** Resolves an XML prolog `encoding` attribute to a supported {@link XmlEncoding}, defaulting to `'utf-8'`. */
 export function resolveXmlPrologEncoding(encoding: string | undefined): XmlEncoding {
@@ -170,6 +172,13 @@ function isBadgeBoundary(ch: string): boolean {
   return ch === '' || BADGE_BOUNDARY_RE.test(ch);
 }
 
+function hasNonAscii(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) > 0x7f) return true;
+  }
+  return false;
+}
+
 /**
  * Cleans inline HTML formatting tags and standalone Unicode superscript badge runs from a programme
  * `<title>`, promoting recognized superscript `LIVE` / `NEW` markers into boolean flags while leaving
@@ -181,6 +190,9 @@ export function cleanTitleAndFlags(raw: string): {
   isNew: boolean;
 } {
   const withoutHtml = stripInlineHtml(raw);
+  if (!hasNonAscii(withoutHtml)) {
+    return { title: withoutHtml, isLive: false, isNew: false };
+  }
   let isLive = false;
   let isNew = false;
   let strippedSuper = false;
@@ -218,8 +230,35 @@ export function isValidXmltvNs(value: string): boolean {
   return XMLTV_NS_RE.test(value) && /\d/.test(value);
 }
 
-/** Extracts a leading `S##E##` episode code from `<desc>` when no valid `<episode-num>` was provided. */
+function formatNormalizedSeasonEpisode(season: string, episode: string): string {
+  return `S${season.padStart(2, '0')}E${episode.padStart(2, '0')}`;
+}
+
+/**
+ * Extracts a leading episode code from `<desc>` when no valid `<episode-num>` was provided.
+ * Supports `S##E##`, `Season N Episode M`, and `SxEE` (requiring 2+ episode digits to avoid
+ * false-matching aspect ratios like `1x1` or `2x4`).
+ */
 export function extractDescEpisodeNum(desc: string): string | undefined {
-  const match = DESC_EPISODE_RE.exec(desc);
-  return match === null ? undefined : (match[1] as string).toUpperCase();
+  let i = 0;
+  const len = desc.length;
+  while (i < len) {
+    const c = desc.charCodeAt(i);
+    if (c !== 32 && c !== 9 && c !== 10 && c !== 13) break;
+    i++;
+  }
+  if (i >= len) return undefined;
+  const first = desc.charCodeAt(i);
+  if (first !== 83 && first !== 115 && (first < 48 || first > 57)) return undefined;
+  const sxe = DESC_EPISODE_RE.exec(desc);
+  if (sxe !== null) return (sxe[1] as string).toUpperCase();
+  const spelled = DESC_SEASON_EPISODE_RE.exec(desc);
+  if (spelled !== null) {
+    return formatNormalizedSeasonEpisode(spelled[1] as string, spelled[2] as string);
+  }
+  const xForm = DESC_X_EPISODE_RE.exec(desc);
+  if (xForm !== null) {
+    return formatNormalizedSeasonEpisode(xForm[1] as string, xForm[2] as string);
+  }
+  return undefined;
 }

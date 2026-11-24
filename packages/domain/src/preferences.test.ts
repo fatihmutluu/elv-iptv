@@ -52,6 +52,7 @@ describe('preferences codec', () => {
       stillWatchingTimeoutMin: 0,
       sleepTimerDefaultAction: 'stop',
       epgTimeSpanHours: 3,
+      epgRowDensity: 'comfortable',
       epgGenreTints: true,
       epgShowClock: true,
       defaultLiveMode: 'favorites',

@@ -87,6 +87,55 @@ const defaultSleep = (ms: number): Promise<void> =>
 
 const IDENT_START = /[A-Za-z_]/;
 const IDENT_CONT = /[A-Za-z0-9_]/;
+/** Stay below SQLite's legacy 999 bind-parameter ceiling while amortizing statement prep (`#25`). */
+const MAX_MULTI_INSERT_PARAMS = 900;
+const MAX_MULTI_INSERT_ROWS = 100;
+const SIMPLE_INSERT_VALUES_RE =
+  /^(\s*INSERT(?:\s+OR\s+(?:IGNORE|REPLACE|ABORT|FAIL|ROLLBACK))?\s+INTO\s+[\s\S]+?\bVALUES\s*)\((\s*\?(?:\s*,\s*\?)*\s*)\)([\s\S]*)$/i;
+
+/**
+ * Packs uniform single-row `INSERT ... VALUES (?, ...)` batches into multi-row `INSERT` statements
+ * (capped at {@link MAX_MULTI_INSERT_PARAMS} parameters and {@link MAX_MULTI_INSERT_ROWS} rows per
+ * statement) to slash `sqlite3_prepare_v2` and JSI marshalling overhead during bulk imports (`#25`).
+ * Returns `undefined` for non-INSERT statements, 1-row batches, or mismatched placeholder counts.
+ */
+export function packInsertBatch(
+  sql: string,
+  rows: readonly (readonly SqlValue[])[],
+): [string, SqlValue[]][] | undefined {
+  if (rows.length <= 1) return undefined;
+  const match = SIMPLE_INSERT_VALUES_RE.exec(sql);
+  if (match === null) return undefined;
+  const prefix = match[1] as string;
+  const tupleInner = match[2] as string;
+  const suffix = match[3] as string;
+  if (prefix.includes('?') || suffix.includes('?')) return undefined;
+  const cols = tupleInner.split(',').length;
+  if (cols <= 0 || cols > MAX_MULTI_INSERT_PARAMS) return undefined;
+  for (const row of rows) {
+    if (row.length !== cols) return undefined;
+  }
+  const perStmt = Math.max(
+    1,
+    Math.min(MAX_MULTI_INSERT_ROWS, Math.floor(MAX_MULTI_INSERT_PARAMS / cols)),
+  );
+  if (perStmt <= 1) return undefined;
+  const tuple = `(${tupleInner})`;
+  const commands: [string, SqlValue[]][] = [];
+  for (let i = 0; i < rows.length; i += perStmt) {
+    const end = Math.min(rows.length, i + perStmt);
+    const count = end - i;
+    const tuples: string[] = [];
+    const params: SqlValue[] = [];
+    for (let j = i; j < end; j += 1) {
+      tuples.push(tuple);
+      const row = rows[j] as readonly SqlValue[];
+      for (let k = 0; k < cols; k += 1) params.push(row[k] as SqlValue);
+    }
+    commands.push([count === 1 ? sql : `${prefix}${tuples.join(', ')}${suffix}`, params]);
+  }
+  return commands;
+}
 
 /**
  * Splits a script into statements at semicolons outside single- and double-quoted literals, `--` and
@@ -277,6 +326,13 @@ export async function createOpSqliteDriver(
     batch: (sql, rows) =>
       writeGuard(async () => {
         if (rows.length === 0) return;
+        const packed = packInsertBatch(sql, rows);
+        if (packed !== undefined) {
+          for (const [cmdSql, params] of packed) {
+            await tx.execute(cmdSql, params);
+          }
+          return;
+        }
         const statement = writer.prepareStatement(sql);
         for (const row of rows) {
           await statement.bind([...row]);
@@ -307,7 +363,8 @@ export async function createOpSqliteDriver(
       writes(() =>
         writeGuard(async () => {
           if (rows.length === 0) return;
-          await writer.executeBatch(rows.map((row) => [sql, [...row]]));
+          const packed = packInsertBatch(sql, rows);
+          await writer.executeBatch(packed ?? rows.map((row) => [sql, [...row]]));
         }),
       ),
     transaction: <T>(fn: (tx: SqlDriver) => Promise<T>) =>

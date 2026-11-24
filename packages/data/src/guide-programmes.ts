@@ -1,4 +1,5 @@
 import { encodeProgrammeFlags, normalizeEpgGenre, type XmltvProgramme } from '@elv/sources';
+import { foldText } from './fold';
 import { type RunCtx, warn } from './import-run';
 
 /** Length given to a programme with no `stop` when no later programme of its channel closes it. */
@@ -26,14 +27,18 @@ function programmeRow(
     p.icon ?? null,
     runId,
     normalizeEpgGenre(p.categories),
-    encodeProgrammeFlags({
-      isLive: p.isLive,
-      isNew: p.isNew,
-      isPremiere: p.isPremiere,
-      previouslyShown: p.previouslyShown,
-    }),
+    p.isLive || p.isNew || p.isPremiere || p.previouslyShown
+      ? encodeProgrammeFlags({
+          isLive: p.isLive,
+          isNew: p.isNew,
+          isPremiere: p.isPremiere,
+          previouslyShown: p.previouslyShown,
+        })
+      : 0,
     p.ratingSystem ?? null,
     p.ratingValue ?? null,
+    foldText(p.title),
+    p.desc !== undefined ? foldText(p.desc) : '',
   ];
 }
 

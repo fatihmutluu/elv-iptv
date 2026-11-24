@@ -25,6 +25,16 @@ function fakeCatalog(importResult: Awaited<ReturnType<CatalogService['importSour
     ok({ id: 's1', kind: 'xtream', name: 'gate', createdAt: 1, needsImport: true }),
   );
   const importSource = vi.fn(async () => importResult);
+  const importGuide = vi.fn(
+    async (): Promise<Result<import('@elv/data').ImportSummary>> =>
+      ok({
+        runId: 2,
+        counts: { programmes: 336_000, mapped: 5_000 },
+        warnings: 0,
+        warningCodes: [],
+        durationMs: 4_250.5,
+      }),
+  );
   const categories = vi.fn(async (_source: string, kind: string) =>
     kind === 'series'
       ? [
@@ -42,9 +52,17 @@ function fakeCatalog(importResult: Awaited<ReturnType<CatalogService['importSour
       ]),
   );
   return {
-    catalog: { addSource, importSource, categories, items, seasons } as unknown as CatalogService,
+    catalog: {
+      addSource,
+      importSource,
+      importGuide,
+      categories,
+      items,
+      seasons,
+    } as unknown as CatalogService,
     addSource,
     importSource,
+    importGuide,
     categories,
     items,
     seasons,
@@ -142,6 +160,30 @@ describe('runImport', () => {
     });
     expect(result).not.toHaveProperty('seasons');
     expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it('runs catalog.importGuide with guide=1 and records guideDurationMs, guideProgrammes, and guideMatchedChannels (#25)', async () => {
+    const { catalog, importGuide } = fakeCatalog(ok(summary));
+    const result = await runImport(catalog, { ...params, guide: true }, () => ({ stop: () => 12 }));
+    expect(importGuide).toHaveBeenCalledWith('s1', { batchSize: 1000 });
+    expect(result).toMatchObject({
+      rows: 17,
+      guideDurationMs: 4_250.5,
+      guideProgrammes: 336_000,
+      guideMatchedChannels: 5_000,
+      guideMaxStallMs: 12,
+    });
+  });
+
+  it('records guideError when guide=1 fails', async () => {
+    const { catalog, importGuide } = fakeCatalog(ok(summary));
+    importGuide.mockResolvedValueOnce(err(elvError('network', 'timeout')));
+    const result = await runImport(catalog, { ...params, guide: true }, () => ({ stop: () => 8 }));
+    expect(result).toMatchObject({
+      rows: 17,
+      guideError: 'network/timeout',
+      guideMaxStallMs: 8,
+    });
   });
 });
 

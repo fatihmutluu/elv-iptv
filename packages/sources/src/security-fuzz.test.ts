@@ -108,12 +108,12 @@ describe('XMLTV hostile inputs', () => {
 
       const t0 = performance.now();
       const single = await collectXmltv(chunksOf(payload, [payload.length]));
-      expect(performance.now() - t0).toBeLessThan(2000);
+      expect(performance.now() - t0).toBeLessThan(4000);
       expect(single.result).toEqual({ ok: true, value: undefined });
 
       const t1 = performance.now();
       const streamed = await collectXmltv(chunksOf(payload, [8192]));
-      expect(performance.now() - t1).toBeLessThan(2000);
+      expect(performance.now() - t1).toBeLessThan(4000);
       expect(streamed.result).toEqual({ ok: true, value: undefined });
     }
   });

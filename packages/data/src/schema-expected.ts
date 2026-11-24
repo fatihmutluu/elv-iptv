@@ -273,6 +273,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'flags', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'rating_system', alterDefinition: 'TEXT' },
     { name: 'rating_value', alterDefinition: 'TEXT' },
+    { name: 'title_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'description_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
   ],
   programmes_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -290,6 +292,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'flags', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'rating_system', alterDefinition: 'TEXT' },
     { name: 'rating_value', alterDefinition: 'TEXT' },
+    { name: 'title_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'description_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
   ],
   watch_progress: [
     { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },

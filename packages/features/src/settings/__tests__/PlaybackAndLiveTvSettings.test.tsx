@@ -325,8 +325,8 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
       expect((await store.load()).defaultLiveMode).toBe('channels');
     });
 
-    // Move down 9 rows to two-step preview toggle (row 9) -> Select
-    for (let i = 0; i < 9; i += 1) {
+    // Move down 10 rows to two-step preview toggle (row 10, after epgRowDensity row) -> Select
+    for (let i = 0; i < 10; i += 1) {
       await pressKey(KEYCODE_DPAD_DOWN);
     }
     await pressKey(KEYCODE_DPAD_CENTER);

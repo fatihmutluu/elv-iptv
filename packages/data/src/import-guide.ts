@@ -48,6 +48,11 @@ export { closeOpenProgrammes };
 
 const DAY_MS = 86_400_000;
 const DEFAULT_WINDOW = { daysBack: 1, daysForward: 7 };
+const MAX_CATCHUP_RETENTION_DAYS = 30;
+/** Upper bound on XMLTV elements parsed per event-loop turn so large `batchSize` runs stay responsive (`#25`). */
+const MAX_GUIDE_SCAN_SLICE = 500;
+/** Upper bound on staged programme rows written per SQLite WAL transaction (`#25`). */
+const MAX_GUIDE_WRITE_BATCH = 2_500;
 
 type GuideOutcome =
   | { kind: 'imported'; slot: string; state: GuideState; validator: HttpCacheValidator | undefined }
@@ -149,14 +154,26 @@ function finalizeChannels(c: RunCtx, st: GuideState): void {
   st.channelNameFolds = st.index.nameFoldByKey;
 }
 
-async function writeProgrammes(c: RunCtx, st: GuideState, batch: ClampedBatch): Promise<void> {
-  const { rows, reupserts } = batch;
-  for (let i = 0; i < rows.length; i += c.batchSize) {
+async function flushPendingProgrammes(c: RunCtx, pending: ProgrammeStageRow[]): Promise<void> {
+  if (pending.length === 0) return;
+  const writeLimit = Math.min(c.batchSize, MAX_GUIDE_WRITE_BATCH);
+  for (let i = 0; i < pending.length; i += writeLimit) {
     checkAbort(c);
-    await c.db.batch(STAGE_PROGRAMME_SQL, rows.slice(i, i + c.batchSize));
+    await c.db.batch(STAGE_PROGRAMME_SQL, pending.slice(i, i + writeLimit));
     await c.deps.scheduler.yieldNow();
   }
-  for (const row of rows) {
+  pending.length = 0;
+}
+
+function recordStagedProgrammes(
+  st: GuideState,
+  pending: ProgrammeStageRow[],
+  batch: ClampedBatch,
+): void {
+  const { rows, reupserts } = batch;
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i] as ProgrammeStageRow;
+    pending.push(row);
     const guideId = row[1] as string;
     st.staged.set(guideId, (st.staged.get(guideId) ?? 0) + 1);
   }
@@ -198,7 +215,27 @@ async function execute(
     name: string;
     name_fold: string;
     num: number | null;
-  }>('SELECT key, guide_id, name, name_fold, num FROM live WHERE source_id = ?', [c.sourceId]);
+    catchup_days: number | null;
+  }>('SELECT key, guide_id, name, name_fold, num, catchup_days FROM live WHERE source_id = ?', [
+    c.sourceId,
+  ]);
+  let rawMaxCatchup = 0;
+  for (const ch of live) {
+    if (
+      ch.catchup_days !== null &&
+      Number.isFinite(ch.catchup_days) &&
+      ch.catchup_days > rawMaxCatchup
+    ) {
+      rawMaxCatchup = ch.catchup_days;
+    }
+  }
+  const maxCatchupDays = Math.min(
+    MAX_CATCHUP_RETENTION_DAYS,
+    Math.max(0, Math.floor(rawMaxCatchup)),
+  );
+  const window = source.settings.guideWindow ?? DEFAULT_WINDOW;
+  const effectiveDaysBack = Math.max(window.daysBack, maxCatchupDays);
+  const retentionFloorMs = now - effectiveDaysBack * DAY_MS;
   const st: GuideState = {
     index: buildChannelIndex(live),
     channelsById: new Map(),
@@ -216,7 +253,6 @@ async function execute(
     programmes: 0,
     seenProgrammes: 0,
   };
-  const window = source.settings.guideWindow ?? DEFAULT_WINDOW;
   let bytesRead = 0;
   const body =
     opened.contentLength === undefined
@@ -225,12 +261,14 @@ async function execute(
           bytesRead = n;
         });
   const scan = scanXmltv(body, {
-    batchSize: c.batchSize,
-    from: now - window.daysBack * DAY_MS,
+    batchSize: Math.min(c.batchSize, MAX_GUIDE_SCAN_SLICE),
+    from: retentionFloorMs,
     to: now + window.daysForward * DAY_MS,
     ...(c.deps.decompressor === undefined ? {} : { decompressor: c.deps.decompressor }),
     ...(source.settings.xmltvTimezone ? { defaultTimeZone: source.settings.xmltvTimezone } : {}),
   });
+  const writeLimit = Math.min(c.batchSize, MAX_GUIDE_WRITE_BATCH);
+  const pendingRows: ProgrammeStageRow[] = [];
   try {
     for (;;) {
       checkAbort(c);
@@ -244,11 +282,14 @@ async function execute(
       const batch = step.value;
       mergeChannels(st, batch.channels);
       st.seenProgrammes += batch.programmes.length;
-      await writeProgrammes(
-        c,
+      recordStagedProgrammes(
         st,
+        pendingRows,
         closeOpenProgrammesBatch(c, st.open, batch.programmes, st.lastByChannel),
       );
+      if (pendingRows.length >= writeLimit) {
+        await flushPendingProgrammes(c, pendingRows);
+      }
       const streamDone =
         opened.contentLength !== undefined ? bytesRead : st.channels + st.seenProgrammes;
       c.progress(
@@ -260,7 +301,12 @@ async function execute(
   } finally {
     await scan.return(ok(undefined));
   }
-  await writeProgrammes(c, st, flushOpenProgrammes(c, st.open, st.lastByChannel));
+  recordStagedProgrammes(st, pendingRows, flushOpenProgrammes(c, st.open, st.lastByChannel));
+  await flushPendingProgrammes(c, pendingRows);
+  if (maxCatchupDays > 0) {
+    st.retentionFloorMs = retentionFloorMs;
+    st.preserveBeforeMs = now;
+  }
   finalizeChannels(c, st);
   if (st.channels === 0 && st.seenProgrammes === 0) {
     throw new Stop(elvError('source-format', 'not-a-guide'));

@@ -14,6 +14,7 @@ import {
 import { CONTRACT_USAGE, contractMain } from '../src/gates/contract-cli.ts';
 import { CORPUS_USAGE, corpusMain } from '../src/gates/corpus-cli.ts';
 import { DESKTOP_USAGE, desktopMain } from '../src/gates/desktop-cli.ts';
+import { EPG_USAGE, epgMain } from '../src/gates/epg-cli.ts';
 import { IMPORT_USAGE, importMain } from '../src/gates/import-cli.ts';
 import {
   deviceInfo,
@@ -61,6 +62,9 @@ function parseCli() {
       app: { type: 'string' },
       device: { type: 'string' },
       channels: { type: 'string' },
+      days: { type: 'string' },
+      moves: { type: 'string' },
+      guide: { type: 'boolean' },
       stream: { type: 'string' },
       rate: { type: 'string' },
       burst: { type: 'string' },
@@ -85,6 +89,7 @@ const { values, positionals } = parsed;
 if (
   positionals.length !== 1 ||
   (positionals[0] !== 'list' &&
+    positionals[0] !== 'epg' &&
     positionals[0] !== 'import' &&
     positionals[0] !== 'player' &&
     positionals[0] !== 'contract' &&
@@ -93,9 +98,12 @@ if (
     positionals[0] !== 'security')
 ) {
   fail(
-    `${USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}\n${CONTRACT_USAGE}\n${CORPUS_USAGE}\n${DESKTOP_USAGE}\n${SECURITY_USAGE}`,
+    `${USAGE}\n${EPG_USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}\n${CONTRACT_USAGE}\n${CORPUS_USAGE}\n${DESKTOP_USAGE}\n${SECURITY_USAGE}`,
     2,
   );
+}
+if (positionals[0] === 'epg') {
+  process.exit(await epgMain(values, findRepoRoot(process.cwd())));
 }
 if (positionals[0] === 'import') {
   process.exit(await importMain(values, findRepoRoot(process.cwd())));

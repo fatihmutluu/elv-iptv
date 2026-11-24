@@ -532,9 +532,11 @@ export function readText(
   end: number,
   encoding: XmlEncoding = 'utf-8',
 ): string {
+  const firstLt = bytes.indexOf(LT, start);
+  if (firstLt < 0 || firstLt >= end) {
+    return decodeEntities(decodeXmlBytes(bytes, start, end, encoding)).trim();
+  }
   const view = bytes.subarray(start, end);
-  if (view.indexOf(LT) < 0)
-    return decodeEntities(decodeXmlBytes(view, 0, view.length, encoding)).trim();
   let out = '';
   let i = 0;
   let cache: MarkupScanCache | undefined;

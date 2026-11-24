@@ -67,6 +67,12 @@ export type DefaultResizeModePref = 'fit' | 'fill' | 'stretch';
 /** User-selectable EPG TV guide time window in hours (`#401`). */
 export type EpgTimeSpanHoursPref = 2 | 3 | 6;
 
+/** Supported EPG guide row density presets (`#6`, `#25`). */
+export const EPG_ROW_DENSITIES = ['compact', 'comfortable', 'cinematic'] as const;
+
+/** User-selectable EPG guide row density preset (`#6`, `#25`). */
+export type EpgRowDensity = (typeof EPG_ROW_DENSITIES)[number];
+
 /** User-selectable default landing mode for Live TV (`#401`). */
 export type DefaultLiveModePref = 'favorites' | 'channels' | 'epg';
 
@@ -102,6 +108,7 @@ export interface ExtendedPreferencesFields {
   readonly stillWatchingTimeoutMin: number;
   readonly sleepTimerDefaultAction: SleepTimerAction;
   readonly epgTimeSpanHours: EpgTimeSpanHoursPref;
+  readonly epgRowDensity: EpgRowDensity;
   readonly epgGenreTints: boolean;
   readonly epgShowClock: boolean;
   readonly defaultLiveMode: DefaultLiveModePref;
@@ -201,6 +208,11 @@ export function isAccessibilityFontFamily(value: unknown): value is Accessibilit
 /** Returns true when `value` is a supported {@link TvClockMode}. */
 export function isTvClockMode(value: unknown): value is TvClockMode {
   return typeof value === 'string' && (TV_CLOCK_MODES as readonly string[]).includes(value);
+}
+
+/** Returns true when `value` is a supported {@link EpgRowDensity}. */
+export function isEpgRowDensity(value: unknown): value is EpgRowDensity {
+  return typeof value === 'string' && (EPG_ROW_DENSITIES as readonly string[]).includes(value);
 }
 
 /** Clamps an overscan inset ratio to `[MIN_PREF_OVERSCAN, MAX_PREF_OVERSCAN]` rounded to 2 decimal places. */
@@ -445,6 +457,9 @@ export function parseExtendedPreferences(
     epgTimeSpanHours: isEpgTimeSpanHoursPref(parsed.epgTimeSpanHours)
       ? parsed.epgTimeSpanHours
       : defaults.epgTimeSpanHours,
+    epgRowDensity: isEpgRowDensity(parsed.epgRowDensity)
+      ? parsed.epgRowDensity
+      : defaults.epgRowDensity,
     epgGenreTints:
       typeof parsed.epgGenreTints === 'boolean' ? parsed.epgGenreTints : defaults.epgGenreTints,
     epgShowClock:
@@ -569,6 +584,9 @@ export function serializeExtendedPreferences(
     epgTimeSpanHours: isEpgTimeSpanHoursPref(snapshot.epgTimeSpanHours)
       ? snapshot.epgTimeSpanHours
       : defaults.epgTimeSpanHours,
+    epgRowDensity: isEpgRowDensity(snapshot.epgRowDensity)
+      ? snapshot.epgRowDensity
+      : defaults.epgRowDensity,
     epgGenreTints: Boolean(snapshot.epgGenreTints),
     epgShowClock: Boolean(snapshot.epgShowClock),
     defaultLiveMode: isDefaultLiveModePref(snapshot.defaultLiveMode)
@@ -675,6 +693,7 @@ export function mergeExtendedPreferences(
     epgTimeSpanHours: isEpgTimeSpanHoursPref(patch.epgTimeSpanHours)
       ? patch.epgTimeSpanHours
       : base.epgTimeSpanHours,
+    epgRowDensity: isEpgRowDensity(patch.epgRowDensity) ? patch.epgRowDensity : base.epgRowDensity,
     epgGenreTints:
       typeof patch.epgGenreTints === 'boolean' ? patch.epgGenreTints : base.epgGenreTints,
     epgShowClock: typeof patch.epgShowClock === 'boolean' ? patch.epgShowClock : base.epgShowClock,

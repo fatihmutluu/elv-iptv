@@ -8,7 +8,12 @@ vi.mock('@op-engineering/op-sqlite', () => ({
   open: (o: { name: string }) => (fake.current as { open(o: unknown): unknown }).open(o),
 }));
 
-import { createOpSqliteDriver, databaseLocation, splitSqlStatements } from './sql-driver';
+import {
+  createOpSqliteDriver,
+  databaseLocation,
+  packInsertBatch,
+  splitSqlStatements,
+} from './sql-driver';
 
 async function setup() {
   const f = createFakeOpSqlite();
@@ -88,10 +93,34 @@ describe('createOpSqliteDriver', () => {
     expect(await db.run('UPDATE t SET a = ?', [1])).toEqual({ changes: 1 });
   });
 
-  it('batch outside a transaction uses one executeBatch', async () => {
+  it('batch outside a transaction packs uniform INSERTs into multi-row executeBatch commands and falls back for UPDATE', async () => {
     const { db, writer } = await setup();
     await db.batch('INSERT INTO t VALUES (?)', [[1], [2], [3]]);
-    expect(writer.log).toEqual(['executeBatch:3:INSERT INTO t VALUES (?)']);
+    expect(writer.log).toEqual(['executeBatch:1:INSERT INTO t VALUES (?), (?), (?)']);
+    writer.log.length = 0;
+    await db.batch('UPDATE t SET a = ? WHERE id = ?', [
+      [1, 10],
+      [2, 20],
+    ]);
+    expect(writer.log).toEqual(['executeBatch:2:UPDATE t SET a = ? WHERE id = ?']);
+  });
+
+  it('packInsertBatch preserves ON CONFLICT suffixes and chunks under SQLite bind-parameter limits (#25)', () => {
+    const sql =
+      'INSERT INTO programmes_next (a, b, c) VALUES (?, ?, ?) ON CONFLICT(a) DO UPDATE SET b = excluded.b';
+    const rows = Array.from({ length: 105 }, (_, i) => [i, `t${i}`, i + 1]);
+    const packed = packInsertBatch(sql, rows);
+    expect(packed).toHaveLength(2);
+    expect(packed?.[0]?.[1]).toHaveLength(300);
+    expect(packed?.[0]?.[0]).toContain('ON CONFLICT(a) DO UPDATE SET b = excluded.b');
+    expect(packed?.[1]?.[1]).toHaveLength(15);
+    expect(
+      packInsertBatch('UPDATE t SET a = ? WHERE id = ?', [
+        [1, 2],
+        [3, 4],
+      ]),
+    ).toBeUndefined();
+    expect(packInsertBatch('INSERT INTO t VALUES (?)', [[1]])).toBeUndefined();
   });
 
   it('an empty batch does nothing', async () => {
@@ -100,15 +129,20 @@ describe('createOpSqliteDriver', () => {
     expect(writer.log).toEqual([]);
   });
 
-  it('batch inside a transaction runs on the transaction connection', async () => {
+  it('batch inside a transaction packs multi-row INSERTs on tx.execute and uses prepared statements for UPDATE', async () => {
     const { db, writer } = await setup();
     await db.transaction(async (tx) => {
       await tx.batch('INSERT INTO t VALUES (?)', [[1], [2]]);
+      await tx.batch('UPDATE t SET a = ? WHERE id = ?', [
+        [9, 1],
+        [8, 2],
+      ]);
     });
     expect(writer.log).toEqual([
       'transaction:begin',
-      'stmt:INSERT INTO t VALUES (?)|[1]',
-      'stmt:INSERT INTO t VALUES (?)|[2]',
+      'tx.execute:INSERT INTO t VALUES (?), (?)|[1,2]',
+      'stmt:UPDATE t SET a = ? WHERE id = ?|[9,1]',
+      'stmt:UPDATE t SET a = ? WHERE id = ?|[8,2]',
       'transaction:end',
     ]);
   });
@@ -197,7 +231,7 @@ describe('createOpSqliteDriver', () => {
     expect(writer.log).toEqual([
       'transaction:begin',
       'tx.execute:INSERT INTO t VALUES (1)',
-      'stmt:INSERT INTO t VALUES (?)|[2]',
+      'tx.execute:INSERT INTO t VALUES (?), (?)|[2,3]',
       'interrupt',
       'transaction:rollback',
     ]);

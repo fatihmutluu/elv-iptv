@@ -426,9 +426,12 @@ describe('LiveScreen', () => {
     ).toBeNull();
     expect(screen.getByTestId('epg-tv-focus-anchor', { includeHiddenElements: true })).toBeTruthy();
 
-    // Up from EPG row 0 -> date tabs -> EPG toolbar -> LiveScreen header (#395)
+    // Active channel (row 1, tuned above) is auto-focused on EPG open (#6):
+    // Up -> row 0 -> date tabs -> EPG toolbar -> LiveScreen header (#395)
     await sendKey(KEYCODE_DPAD_UP);
     await sendKey(KEYCODE_DPAD_UP);
+    await sendKey(KEYCODE_DPAD_UP);
+    expect(screen.getByTestId('epg-tv-focus-anchor', { includeHiddenElements: true })).toBeTruthy();
     await sendKey(KEYCODE_DPAD_UP);
     expect(
       screen.getByTestId('live-tv-focus-anchor', { includeHiddenElements: true }),

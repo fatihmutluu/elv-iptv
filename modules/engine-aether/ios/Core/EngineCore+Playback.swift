@@ -7,7 +7,7 @@ extension EngineCore {
       if played && !stalled && !reloading {
         reloading = true
         let now = uptimeMs()
-        setScreenOn(!externalPlaybackActive)
+        setScreenOn(!externalPlaybackActive && !isSurfaceDetached)
         emit(.state(attempt: token, state: .buffering))
         emitAnchor(rate: 0, atMs: now)
       }
@@ -93,7 +93,7 @@ extension EngineCore {
     let wasStalled = stalled
     stalled = false
     played = true
-    setScreenOn(!externalPlaybackActive)
+    setScreenOn(!externalPlaybackActive && !isSurfaceDetached)
     if wasStalled {
       let now = uptimeMs()
       emit(.stall(attempt: token, phase: .end, atMs: now))
@@ -227,7 +227,7 @@ extension EngineCore {
         emit(.stall(attempt: token, phase: .end, atMs: uptimeMs()))
       }
     } else {
-      setScreenOn(played && !userPaused && !stalled)
+      setScreenOn(played && !userPaused && !stalled && !isSurfaceDetached)
     }
   }
 
@@ -285,7 +285,7 @@ extension EngineCore {
     stalled = true
     let now = uptimeMs()
     emit(.stall(attempt: token, phase: .start, atMs: now))
-    setScreenOn(true)
+    setScreenOn(!isSurfaceDetached)
     emit(.state(attempt: token, state: .buffering))
     emitAnchor(rate: 0, atMs: now)
   }

@@ -233,6 +233,10 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
         engine.setBackgroundAudioEnabled(enabled)
       }
 
+      Function("setAllowDetachedSurface") { (engine: EngineObject, enabled: Bool) in
+        engine.setAllowDetachedSurface(enabled)
+      }
+
       Function("setMediaMetadata") { (engine: EngineObject, args: MediaMetadataArgs?) in
         engine.setMediaMetadata(args?.toNowPlayingMetadata())
       }

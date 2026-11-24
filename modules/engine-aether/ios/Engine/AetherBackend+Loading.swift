@@ -12,12 +12,23 @@ extension AetherBackend {
     let generation = gateGeneration
     gate.advance(to: generation)
 
-    loadTask = Task { @MainActor [weak self] in
-      guard let self, self.activeLoadSerial == serial, !Task.isCancelled else { return }
+    loadTaskId &+= 1
+    let id = loadTaskId
+    loadTask = Task { @MainActor [weak self, weak currentEngine] in
+      var taskReader: LiveTsReader?
+      defer {
+        if let self, self.loadTaskId == id {
+          self.loadTask = nil
+        }
+      }
+      guard let self, let currentEngine, self.engine === currentEngine, self.activeLoadSerial == serial, !Task.isCancelled else {
+        return
+      }
       do {
         switch plan {
         case let .hls(url, _):
           guard await self.gate.waitForClosed(before: generation),
+                self.engine === currentEngine,
                 self.activeLoadSerial == serial,
                 !Task.isCancelled
           else { return }
@@ -31,6 +42,7 @@ extension AetherBackend {
 
         case let .vod(url, startSeconds):
           guard await self.gate.waitForClosed(before: generation),
+                self.engine === currentEngine,
                 self.activeLoadSerial == serial,
                 !Task.isCancelled
           else { return }
@@ -60,9 +72,10 @@ extension AetherBackend {
               }
             }
           )
+          taskReader = reader
           self.currentReader = reader
           let verdict = await reader.open()
-          guard self.activeLoadSerial == serial, !Task.isCancelled else {
+          guard self.engine === currentEngine, self.activeLoadSerial == serial, !Task.isCancelled else {
             self.closeReader(reader)
             return
           }
@@ -78,10 +91,12 @@ extension AetherBackend {
 
           case .playlist:
             self.closeReader(reader)
+            taskReader = nil
             self.gateGeneration += 1
             let playlistGen = self.gateGeneration
             self.gate.advance(to: playlistGen)
             guard await self.gate.waitForClosed(before: playlistGen),
+                  self.engine === currentEngine,
                   self.activeLoadSerial == serial,
                   !Task.isCancelled
             else { return }
@@ -97,21 +112,31 @@ extension AetherBackend {
 
           case let .failed(rf):
             self.closeReader(reader)
+            taskReader = nil
             guard self.errorReportedSerial != serial else { return }
             self.errorReportedSerial = serial
             self.onObservation?(.failure(.reader(rf)), serial)
 
           case .superseded:
             self.closeReader(reader)
+            taskReader = nil
           }
         }
       } catch is CancellationError {
-        self.closeCurrentReader()
+        if let taskReader {
+          self.closeReader(taskReader)
+        }
         return
       } catch {
-        let readerFault = self.currentReader?.lastFailure
-        self.closeCurrentReader()
-        guard self.activeLoadSerial == serial, self.errorReportedSerial != serial else { return }
+        let readerFault = taskReader?.lastFailure
+        if let taskReader {
+          self.closeReader(taskReader)
+        }
+        guard !Task.isCancelled,
+              self.engine === currentEngine,
+              self.activeLoadSerial == serial,
+              self.errorReportedSerial != serial
+        else { return }
         self.errorReportedSerial = serial
         if let readerFault {
           self.onObservation?(.readerFault(readerFault), serial)
@@ -142,18 +167,25 @@ extension AetherBackend {
       escalateLiveSourceReset(serial: serial)
     case let .retryAfter(delayMs):
       liveRecoveryTask?.cancel()
+      liveRecoveryTaskId &+= 1
+      let id = liveRecoveryTaskId
       liveRecoveryTask = Task { @MainActor [weak self, weak target] in
+        defer {
+          if let self, self.liveRecoveryTaskId == id {
+            self.liveRecoveryTask = nil
+          }
+        }
         do {
           try await Task.sleep(nanoseconds: UInt64(delayMs * 1_000_000.0))
         } catch {
           return
         }
         guard let self, let target, !Task.isCancelled,
+              self.engine === target,
               self.engineLoadSerial == serial, self.errorReportedSerial != serial
         else { return }
         let accepted = target.retryLiveSourceRecovery()
         self.liveRecoveryPolicy.noteRetryDispatched(accepted: accepted)
-        self.liveRecoveryTask = nil
         if !accepted {
           self.escalateLiveSourceReset(serial: serial)
         }

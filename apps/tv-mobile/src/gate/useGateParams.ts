@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Linking, Platform, Settings } from 'react-native';
 import { type ContractGateParams, parseContractGateUrl } from './contract/contract-routes';
 import { type CorpusGateParams, parseCorpusGateUrl } from './corpus/corpus-items';
+import { type EpgGateParams, parseEpgGateUrl } from './epg/epg-routes';
 import { type ImportParams, parseImportUrl } from './import/route';
 import { type PlayerGateParams, parsePlayerGateUrl } from './player/player-routes';
 import { type GateParams, parseGateUrl } from './routes';
@@ -10,6 +11,7 @@ import { type GateParams, parseGateUrl } from './routes';
 /** A gate screen and its parameters. */
 export type GateRoute =
   | { name: 'list'; params: GateParams }
+  | { name: 'epg'; params: EpgGateParams }
   | { name: 'import'; params: ImportParams }
   | { name: 'player'; params: PlayerGateParams }
   | { name: 'contract'; params: ContractGateParams }
@@ -18,6 +20,8 @@ export type GateRoute =
 function parseRoute(url: string | null): GateRoute | undefined {
   const list = parseGateUrl(url);
   if (list !== undefined) return { name: 'list', params: list };
+  const epg = parseEpgGateUrl(url);
+  if (epg !== undefined) return { name: 'epg', params: epg };
   const imported = parseImportUrl(url);
   if (imported !== undefined) return { name: 'import', params: imported };
   const player = parsePlayerGateUrl(url);

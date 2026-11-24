@@ -37,6 +37,9 @@ import type { XmltvBatch, XmltvChannel, XmltvOptions, XmltvProgramme } from './x
 export { parseXmltvTime } from './xmltv-time';
 export type { XmltvBatch, XmltvChannel, XmltvOptions, XmltvProgramme } from './xmltv-types';
 
+/** Minimum valid XMLTV programme timestamp (`1990-01-01T00:00:00Z`); earlier epoch placeholders (e.g. `19700101`) are rejected as `programme-bad-time` (`#268`). */
+export const MIN_VALID_XMLTV_EPOCH_MS = Date.UTC(1990, 0, 1);
+
 const MAX_ELEMENT = 1 << 20;
 const DEFAULT_BATCH = 500;
 const TAR_HEADER_BYTES = 512;
@@ -284,8 +287,9 @@ class XmltvScanner {
     const stop = stopText === undefined ? undefined : parseXmltvTime(stopText, this.timeOpts);
     if (
       start === undefined ||
+      start < MIN_VALID_XMLTV_EPOCH_MS ||
       (stopText !== undefined && stop === undefined) ||
-      (stop !== undefined && stop <= start)
+      (stop !== undefined && (stop < MIN_VALID_XMLTV_EPOCH_MS || stop <= start))
     ) {
       this.fail(bytes, lt, 'programme-bad-time');
       return;

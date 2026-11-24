@@ -118,6 +118,9 @@ export type LiveTvFocusId =
   | 'epg-span-2'
   | 'epg-span-3'
   | 'epg-span-6'
+  | 'epg-density-compact'
+  | 'epg-density-comfortable'
+  | 'epg-density-cinematic'
   | 'toggle-epg-genre-tints'
   | 'toggle-epg-show-clock'
   | 'catalog-refresh-0'
@@ -233,6 +236,7 @@ const PLAYBACK_ROWS_WITH_DECODER: readonly (readonly PlaybackFocusId[])[] = [
 const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
   ['live-mode-favorites', 'live-mode-channels', 'live-mode-epg'],
   ['epg-span-2', 'epg-span-3', 'epg-span-6'],
+  ['epg-density-compact', 'epg-density-comfortable', 'epg-density-cinematic'],
   ['toggle-epg-genre-tints'],
   ['toggle-epg-show-clock'],
   [

@@ -1,6 +1,7 @@
 import AetherEngine
 import AVFoundation
 import Foundation
+import UIKit
 
 /// Main-actor coordinator connecting `EngineCore`, `AetherBackend`, and the bound `AetherSurfaceView`.
 @MainActor
@@ -12,6 +13,8 @@ final class EngineMainDriver: EngineSink {
   private var nowPlayingBridge: AetherNowPlayingBridge!
   weak var boundSurface: AetherSurfaceView?
   var activeEpoch = 0
+  private var backgroundAudioEnabled = false
+  private var explicitDetachedSurfaceAllowed = false
 
   init(owner: EngineObject, gate: ConnectionGate, httpSession: EngineHttpSession) {
     self.owner = owner
@@ -108,7 +111,18 @@ final class EngineMainDriver: EngineSink {
   }
 
   func setBackgroundAudioEnabled(_ enabled: Bool) {
+    backgroundAudioEnabled = enabled
     backend.setBackgroundAudioEnabled(enabled)
+    syncDetachedSurfacePolicy()
+  }
+
+  func setAllowDetachedSurface(_ enabled: Bool) {
+    explicitDetachedSurfaceAllowed = enabled
+    syncDetachedSurfacePolicy()
+  }
+
+  private func syncDetachedSurfacePolicy() {
+    core.setAllowDetachedSurface(backgroundAudioEnabled || explicitDetachedSurfaceAllowed)
   }
 
   func stopPlayback(_ attempt: Int) {
@@ -146,7 +160,7 @@ final class EngineMainDriver: EngineSink {
 
   func bindSurface(_ view: AetherSurfaceView) {
     if let previous = boundSurface, previous !== view {
-      core.surfaceChanged(available: false)
+      core.surfaceChanged(available: false, isBackground: previous.isDetachingInBackground)
       previous.detachEngineReference(owner)
     }
     boundSurface = view
@@ -157,13 +171,14 @@ final class EngineMainDriver: EngineSink {
     view.applyShutter(covered: snapshot.shutterCovered, from: owner)
     view.applySubtitles(backend.lastSubtitlePresentation, from: owner)
     view.applyScreenOn(snapshot.screenOn, from: owner)
-    core.surfaceChanged(available: view.isSurfaceAvailable, isBackground: view.isAppInBackground)
+    let available = view.isSurfaceAvailable
+    core.surfaceChanged(available: available, isBackground: available ? false : view.isDetachingInBackground)
   }
 
   func unbindSurface(_ view: AetherSurfaceView) {
     guard boundSurface === view else { return }
     view.applySubtitles(.empty, from: owner)
-    core.surfaceChanged(available: false, isBackground: view.isAppInBackground)
+    core.surfaceChanged(available: false, isBackground: view.isDetachingInBackground)
     core.setOsdVisible(true)
     boundSurface = nil
     backend.bindPlayerView(nil)
@@ -172,7 +187,8 @@ final class EngineMainDriver: EngineSink {
 
   func detachDestroyedPlayerView(viewId: ObjectIdentifier) {
     if boundSurface == nil {
-      core.surfaceChanged(available: false)
+      let inBackground = UIApplication.shared.applicationState != .active
+      core.surfaceChanged(available: false, isBackground: inBackground)
       backend.unbindIfMatching(viewId: viewId)
       IdleTimer.setHeld(false, ownerId: ownerId)
     }

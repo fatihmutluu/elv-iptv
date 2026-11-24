@@ -31,6 +31,8 @@ final class AetherBackend: PlayerBackend {
   var cancellables = Set<AnyCancellable>()
   var avPlayerBufferCancellables = Set<AnyCancellable>()
   var avPlayerItemBufferCancellables = Set<AnyCancellable>()
+  var observedAVPlayerId: ObjectIdentifier?
+  var observedAVPlayerItemId: ObjectIdentifier?
   var itemProgressCancellable: AnyCancellable?
   var subtitleClockCancellable: AnyCancellable?
   let audioSessionController = AetherAudioSessionController()
@@ -49,7 +51,11 @@ final class AetherBackend: PlayerBackend {
   var errorReportedSerial = 0
   var loggedRouteSerial = 0
   var gateGeneration = 0
+  var loadTaskId = 0
   private var seekTaskId = 0
+  var audioSwitchTaskId = 0
+  var liveRecoveryTaskId = 0
+  var mediaInfoTaskId = 0
 
   var loadStartUptimeMs: Double = 0
   var openedMsForSerial: Double?
@@ -239,7 +245,7 @@ final class AetherBackend: PlayerBackend {
           self.seekTask = nil
         }
       }
-      guard let self, let engine, !Task.isCancelled, self.engineLoadSerial == serial else { return }
+      guard let self, let engine, !Task.isCancelled, self.engine === engine, self.engineLoadSerial == serial else { return }
       await engine.seek(to: max(0, toSeconds))
     }
   }
@@ -256,8 +262,7 @@ final class AetherBackend: PlayerBackend {
     gate.advance(to: gateGeneration)
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
-    cancellables.removeAll()
-    avPlayerBufferCancellables.removeAll()
+    clearEngineSubscriptions()
 
     if let previous = engine {
       previous.stop(resetDisplayCriteria: false, finalTeardown: true)
@@ -283,8 +288,7 @@ final class AetherBackend: PlayerBackend {
     gate.advance(to: gateGeneration)
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
-    cancellables.removeAll()
-    avPlayerBufferCancellables.removeAll()
+    clearEngineSubscriptions()
     audioSessionObserver?.dispose()
     audioSessionObserver = nil
     legacyHttpSession?.dispose()
@@ -303,23 +307,36 @@ final class AetherBackend: PlayerBackend {
   }
 
   func cancelTasksAndReader() {
-    itemProgressCancellable?.cancel()
-    itemProgressCancellable = nil
-    avPlayerItemBufferCancellables.removeAll()
-    subtitleClockCancellable?.cancel()
-    subtitleClockCancellable = nil
-    lastAVBufferReportedBuffering = false
+    clearPlayerItemObservers()
+    loadTaskId &+= 1
     loadTask?.cancel()
     loadTask = nil
+    seekTaskId &+= 1
     seekTask?.cancel()
     seekTask = nil
+    audioSwitchTaskId &+= 1
     audioSwitchTask?.cancel()
     audioSwitchTask = nil
+    liveRecoveryTaskId &+= 1
     liveRecoveryTask?.cancel()
     liveRecoveryTask = nil
+    mediaInfoTaskId &+= 1
     mediaInfoTask?.cancel()
     mediaInfoTask = nil
     closeCurrentReader()
+  }
+
+  private func clearEngineSubscriptions() {
+    clearPlayerItemObservers()
+    observedAVPlayerId = nil
+    for cancellable in avPlayerBufferCancellables {
+      cancellable.cancel()
+    }
+    avPlayerBufferCancellables.removeAll()
+    for cancellable in cancellables {
+      cancellable.cancel()
+    }
+    cancellables.removeAll()
   }
 
   private func resetSerialBookkeeping() {
@@ -396,6 +413,7 @@ final class AetherBackend: PlayerBackend {
   @discardableResult
   private func installFreshEngine() throws -> AetherEngine {
     let fresh = try AetherEngine()
+    engine = fresh
     fresh.backgroundPlaybackEnabled = backgroundAudioEnabled
     fresh.videoGravity = gravity
     fresh.currentAVPlayer?.preventsDisplaySleepDuringVideoPlayback = true
@@ -405,7 +423,6 @@ final class AetherBackend: PlayerBackend {
     if let view = boundPlayerView {
       fresh.bind(view: view)
     }
-    engine = fresh
     return fresh
   }
 }

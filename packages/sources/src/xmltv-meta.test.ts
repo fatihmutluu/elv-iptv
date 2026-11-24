@@ -199,6 +199,69 @@ describe('XMLTV episode-num precedence, xmltv_ns validation & desc fallback (#17
     const r = await expectSameEverywhere(text);
     expect(r.programmes.map((p) => p.episodeNum)).toEqual(['S02E14', 'S1E9', 'S03E01', undefined]);
   });
+
+  it('extracts leading Season N Episode M and SxEE formats with 2-digit padding and rejects ambiguous/mid-sentence matches (#268)', async () => {
+    const text = guide(
+      `<programme start="20260101000000" channel="c1"><title>Spelled1</title>` +
+        `<desc>  Season 1 Episode 5 - Pilot</desc></programme>` +
+        `<programme start="20260101010000" channel="c1"><title>Spelled2</title>` +
+        `<desc>season 12, episode 103: Big Event</desc></programme>` +
+        `<programme start="20260101020000" channel="c1"><title>SpelledColon</title>` +
+        `<desc>Season 3: Episode 7</desc></programme>` +
+        `<programme start="20260101030000" channel="c1"><title>SpelledDash</title>` +
+        `<desc>Season 4 - Episode 09</desc></programme>` +
+        `<programme start="20260101040000" channel="c1"><title>XForm1</title>` +
+        `<desc>  1x05 - The Reveal</desc></programme>` +
+        `<programme start="20260101050000" channel="c1"><title>XForm2</title>` +
+        `<desc>12X104 Special</desc></programme>` +
+        `<programme start="20260101060000" channel="c1"><title>RejectAspect1</title>` +
+        `<desc>1x1 square format documentary</desc></programme>` +
+        `<programme start="20260101070000" channel="c1"><title>RejectAspect2</title>` +
+        `<desc>2x4 lumber building guide</desc></programme>` +
+        `<programme start="20260101080000" channel="c1"><title>RejectMidSentence1</title>` +
+        `<desc>In Season 1 Episode 5 the hero returns</desc></programme>` +
+        `<programme start="20260101090000" channel="c1"><title>RejectMidSentence2</title>` +
+        `<desc>Watch 1x05 tonight</desc></programme>` +
+        `<programme start="20260101100000" channel="c1"><title>RejectNoSeparator</title>` +
+        `<desc>Season 1Episode 5</desc></programme>` +
+        `<programme start="20260101110000" channel="c1"><title>ExplicitPrecedence</title>` +
+        `<episode-num system="xmltv_ns">2.3.</episode-num>` +
+        `<desc>Season 9 Episode 99 ignored</desc></programme>`,
+    );
+    const r = await expectSameEverywhere(text);
+    expect(r.programmes.map((p) => p.episodeNum)).toEqual([
+      'S01E05',
+      'S12E103',
+      'S03E07',
+      'S04E09',
+      'S01E05',
+      'S12E104',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      '2.3.',
+    ]);
+  });
+});
+
+describe('XMLTV bad-timestamp epoch guard (#268)', () => {
+  it('drops programmes with pre-1990 epoch placeholder timestamps and emits programme-bad-time', async () => {
+    const text = guide(
+      `<programme start="19700101000000 +0000" stop="19700101010000 +0000" channel="c1"><title>Epoch Placeholder</title></programme>` +
+        `<programme start="19891231235959 +0000" stop="19900101003000 +0000" channel="c1"><title>Just Before 1990</title></programme>` +
+        `<programme start="19900101000000 +0000" stop="19900101010000 +0000" channel="c1"><title>Valid 1990 Boundary</title></programme>` +
+        `<programme start="20260101000000 +0000" stop="20260101010000 +0000" channel="c1"><title>Valid Current</title></programme>`,
+    );
+    const r = await expectSameEverywhere(text);
+    expect(r.programmes.map((p) => p.title)).toEqual(['Valid 1990 Boundary', 'Valid Current']);
+    expect(r.stats?.skipped).toBe(2);
+    expect(r.stats?.warnings.map((w) => w.code)).toEqual([
+      'programme-bad-time',
+      'programme-bad-time',
+    ]);
+  });
 });
 
 describe('XMLTV Latin-1 / Windows-1252 XML prolog decoding (#181)', () => {

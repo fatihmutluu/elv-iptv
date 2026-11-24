@@ -15,6 +15,16 @@ interface ProbeResult {
   seriesMs?: number;
   /** `series=1` and the series could not be opened: a `category/code`. */
   seriesError?: string;
+  /** `guide=1`: XMLTV guide import duration in ms (`#25`, budget `< 60_000 ms`). */
+  guideDurationMs?: number;
+  /** `guide=1`: total programmes written to SQLite. */
+  guideProgrammes?: number;
+  /** `guide=1`: number of live channels matched to XMLTV guide channels. */
+  guideMatchedChannels?: number;
+  /** `guide=1`: longest JS stall during XMLTV guide import. */
+  guideMaxStallMs?: number;
+  /** `guide=1` and the guide import failed: a `category/code`. */
+  guideError?: string;
 }
 
 /** What one import run prints; `error` is a `category/code` and replaces the numbers when the run failed. */
@@ -53,11 +63,34 @@ async function openFirstSeries(catalog: CatalogService, sourceId: string): Promi
   };
 }
 
+async function importGuideProbe(
+  catalog: CatalogService,
+  sourceId: string,
+  batchSize: number,
+  startMeter: () => StallMeter,
+): Promise<ProbeResult> {
+  if (catalog.importGuide === undefined) {
+    return { guideError: 'source-format/unsupported-source' };
+  }
+  const meter = startMeter();
+  const guide = await catalog.importGuide(sourceId, { batchSize });
+  const guideMaxStallMs = meter.stop();
+  if (!guide.ok) {
+    return { guideError: code(guide.error), guideMaxStallMs };
+  }
+  return {
+    guideDurationMs: guide.value.durationMs,
+    guideProgrammes: guide.value.counts.programmes ?? 0,
+    guideMatchedChannels: guide.value.counts.mapped ?? 0,
+    guideMaxStallMs,
+  };
+}
+
 /**
  * Adds the simulator account to a fresh `catalog`, imports it with `params.batch` rows per write and measures the longest
  * JS stall during the import only (`startMeter` starts right before it). Rows are live, movie and series items. With
  * `probeReads` a reader query (the live categories) is timed every 50 ms during the import; with `series` the first
- * series is opened after it.
+ * series is opened after it; with `guide` XMLTV guide programmes are streamed into SQLite afterwards (`#25`).
  */
 export async function runImport(
   catalog: CatalogService,
@@ -91,5 +124,6 @@ export async function runImport(
   const { counts, durationMs } = imported.value;
   const rows = (counts.live ?? 0) + (counts.movies ?? 0) + (counts.series ?? 0);
   const series = params.series ? await openFirstSeries(catalog, sourceId) : {};
-  return { account, batch, maxBody, rows, durationMs, maxStallMs, ...reads, ...series };
+  const guide = params.guide ? await importGuideProbe(catalog, sourceId, batch, startMeter) : {};
+  return { account, batch, maxBody, rows, durationMs, maxStallMs, ...reads, ...series, ...guide };
 }

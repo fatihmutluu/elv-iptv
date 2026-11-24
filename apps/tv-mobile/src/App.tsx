@@ -50,6 +50,7 @@ import { createDeviceCatalog } from './catalog';
 import { waitForCatalogForeground } from './catalog/ios-prewarm-gate';
 import { ContractGateScreen } from './gate/contract/ContractGateScreen';
 import { CorpusGateScreen } from './gate/corpus/CorpusGateScreen';
+import { EpgGateScreen } from './gate/epg/EpgGateScreen';
 import { GateListScreen } from './gate/GateListScreen';
 import { ImportGateScreen } from './gate/import/ImportGateScreen';
 import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
@@ -328,6 +329,7 @@ export function App() {
     return (
       <RemoteKeysProvider android={rawRemoteKeys}>
         {gate.name === 'list' && <GateListScreen key={JSON.stringify(gate)} params={gate.params} />}
+        {gate.name === 'epg' && <EpgGateScreen key={JSON.stringify(gate)} params={gate.params} />}
         {gate.name === 'import' && (
           <ImportGateScreen key={JSON.stringify(gate)} params={gate.params} />
         )}

@@ -1,24 +1,55 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
 import { resolveMappings } from './guide-match';
 import { type RunCtx, warn } from './import-run';
-import { populateProgrammesFtsForSource } from './schema-v12';
 
 const PROGRAMME_COLUMNS =
-  'source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value';
+  'source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold';
 
 /** Upserts one staged programme into `programmes_next`. */
 export const STAGE_PROGRAMME_SQL = `INSERT INTO programmes_next (${PROGRAMME_COLUMNS})
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, guide_id, start) DO UPDATE SET stop = excluded.stop, title = excluded.title,
     sub_title = excluded.sub_title, description = excluded.description, categories_json = excluded.categories_json,
     episode_num = excluded.episode_num, icon = excluded.icon, run_id = excluded.run_id,
     genre = excluded.genre, flags = excluded.flags, rating_system = excluded.rating_system,
-    rating_value = excluded.rating_value`;
+    rating_value = excluded.rating_value, title_fold = excluded.title_fold,
+    description_fold = excluded.description_fold`;
 
 const GUIDE_CHANNEL_SQL = `INSERT INTO guide_channels (source_id, guide_id, name, name_fold, icon, run_id, lcn)
   VALUES (?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, guide_id) DO UPDATE SET name = excluded.name, name_fold = excluded.name_fold,
     icon = excluded.icon, run_id = excluded.run_id, lcn = excluded.lcn`;
+
+const PRESERVE_RETAINED_PROGRAMMES = `INSERT OR IGNORE INTO programmes_next (${PROGRAMME_COLUMNS})
+  SELECT
+    source_id,
+    guide_id,
+    start,
+    stop,
+    title,
+    sub_title,
+    description,
+    categories_json,
+    episode_num,
+    icon,
+    ?,
+    genre,
+    flags,
+    rating_system,
+    rating_value,
+    title_fold,
+    description_fold
+  FROM programmes
+  WHERE source_id = ?
+    AND stop > ?
+    AND start < COALESCE(
+      (SELECT MIN(pn.start) FROM programmes_next pn
+        WHERE pn.source_id = programmes.source_id
+          AND pn.guide_id = programmes.guide_id
+          AND pn.run_id = ?
+          AND pn.start >= ?),
+      ?
+    )`;
 
 const SWAP_PROGRAMMES = `INSERT INTO programmes (${PROGRAMME_COLUMNS})
   SELECT
@@ -36,7 +67,9 @@ const SWAP_PROGRAMMES = `INSERT INTO programmes (${PROGRAMME_COLUMNS})
     genre,
     flags,
     rating_system,
-    rating_value
+    rating_value,
+    title_fold,
+    description_fold
   FROM (
     SELECT ${PROGRAMME_COLUMNS},
       LEAD(start) OVER (PARTITION BY guide_id ORDER BY start) AS next_start
@@ -44,6 +77,11 @@ const SWAP_PROGRAMMES = `INSERT INTO programmes (${PROGRAMME_COLUMNS})
     WHERE source_id = ? AND run_id = ? AND guide_id IN (SELECT guide_id FROM channel_guide WHERE source_id = ?)
   )
   WHERE CASE WHEN next_start IS NOT NULL AND stop > next_start THEN next_start ELSE stop END > start`;
+
+const POPULATE_PROGRAMMES_FTS = `INSERT INTO programmes_fts (source_id, guide_id, start, stop, title_fold, description_fold)
+  SELECT source_id, guide_id, start, stop, title_fold, description_fold
+  FROM programmes
+  WHERE source_id = ?`;
 
 /** What a guide run collected for its cleanup transaction. */
 export interface GuideResult {
@@ -65,6 +103,10 @@ export interface GuideResult {
   byNum: [string, string][];
   /** Programmes staged per guide id. */
   staged: Map<string, number>;
+  /** Oldest catch-up retention boundary (`now - effectiveDaysBack * DAY_MS`); past rows with `stop > retentionFloorMs` are preserved. */
+  retentionFloorMs?: number;
+  /** Fallback upper start boundary (`now`) for preserving previously retained past programmes when a `guide_id` has no fresh rows at or after `retentionFloorMs`. */
+  preserveBeforeMs?: number;
 }
 
 /**
@@ -104,11 +146,21 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
   for (let i = 0; i < g.channelRows.length; i += c.batchSize) {
     await tx.batch(GUIDE_CHANNEL_SQL, g.channelRows.slice(i, i + c.batchSize));
   }
+  if (g.retentionFloorMs !== undefined && g.preserveBeforeMs !== undefined) {
+    await tx.run(PRESERVE_RETAINED_PROGRAMMES, [
+      c.runId,
+      c.sourceId,
+      g.retentionFloorMs,
+      c.runId,
+      g.retentionFloorMs,
+      g.preserveBeforeMs,
+    ]);
+  }
   await tx.run('DELETE FROM programmes WHERE source_id = ?', [c.sourceId]);
   const swapped = await tx.run(SWAP_PROGRAMMES, [c.sourceId, c.runId, c.sourceId]);
   await tx.run('DELETE FROM programmes_fts WHERE source_id = ?', [c.sourceId]);
   if (swapped.changes > 0) {
-    await populateProgrammesFtsForSource(tx, c.sourceId, c.batchSize);
+    await tx.run(POPULATE_PROGRAMMES_FTS, [c.sourceId]);
   }
   await tx.run('DELETE FROM programmes_next WHERE source_id = ? AND run_id = ?', [
     c.sourceId,

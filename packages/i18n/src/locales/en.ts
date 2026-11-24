@@ -676,6 +676,11 @@ export const enMessages = {
   'settings.backgroundAudio': 'Background audio playback',
   'settings.backgroundAudioHint':
     'Keep audio playing when the app moves to the background on mobile',
+  'settings.epgRowDensity': 'Guide row density',
+  'settings.epgRowDensityCompact': 'Compact',
+  'settings.epgRowDensityComfortable': 'Comfortable',
+  'settings.epgRowDensityCinematic': 'Cinematic',
+  'epg.noInfoGap': 'No info',
 } as const;
 
 /** Valid message identifier across all supported locales. */

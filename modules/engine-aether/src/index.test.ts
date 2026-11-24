@@ -35,6 +35,7 @@ function fakeNative(version = '7.66.1', model?: string) {
     setMuted: vi.fn(),
     setVolume: vi.fn(),
     setBackgroundAudioEnabled: vi.fn(),
+    setAllowDetachedSurface: vi.fn(),
     setMediaMetadata: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
@@ -683,5 +684,34 @@ describe('Apple mute/volume, safe-area insets, and hardware keys (#415)', () => 
     mod.setAetherMediaMetadata(engine, metadata);
     expect(native.engine.setBackgroundAudioEnabled).toHaveBeenCalledTimes(2);
     expect(native.engine.setMediaMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it('forwards setAetherDetachedSurfaceAllowed only for live owned engines (#117)', async () => {
+    const native = fakeNative();
+    const mod = await load();
+    const engine = mod.createAetherEngine();
+    if (engine === null) throw new Error('engine expected');
+
+    mod.setAetherDetachedSurfaceAllowed(engine, true);
+    mod.setAetherDetachedSurfaceAllowed(engine, false);
+    expect(native.engine.setAllowDetachedSurface).toHaveBeenNthCalledWith(1, true);
+    expect(native.engine.setAllowDetachedSurface).toHaveBeenNthCalledWith(2, false);
+
+    // Foreign and released engines are ignored safely.
+    const foreign = { release() {} } as unknown as PlayerEngine;
+    mod.setAetherDetachedSurfaceAllowed(foreign, true);
+    engine.release();
+    mod.setAetherDetachedSurfaceAllowed(engine, true);
+    expect(native.engine.setAllowDetachedSurface).toHaveBeenCalledTimes(2);
+
+    // Native handles without setAllowDetachedSurface degrade cleanly.
+    const { setAllowDetachedSurface: _omitted, ...legacyNative } = native.engine;
+    native.Engine.mockImplementationOnce(function constructLegacy() {
+      return legacyNative as typeof native.engine;
+    });
+    const legacyEngine = mod.createAetherEngine();
+    if (legacyEngine === null) throw new Error('legacy engine expected');
+    expect(() => mod.setAetherDetachedSurfaceAllowed(legacyEngine, true)).not.toThrow();
+    legacyEngine.release();
   });
 });

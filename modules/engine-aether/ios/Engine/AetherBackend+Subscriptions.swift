@@ -9,7 +9,7 @@ extension AetherBackend {
     target.$startupProgress
       .sink { [weak self, weak target] progress in
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0, let progress else { return }
+          guard let self, let target, self.engine === target, self.engineLoadSerial > 0, let progress else { return }
           let serial = self.engineLoadSerial
           if progress.checkpoint >= .sourceOpened {
             if self.openedMsForSerial == nil {
@@ -34,7 +34,7 @@ extension AetherBackend {
     target.$videoRoute
       .sink { [weak self, weak target] route in
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0 else { return }
+          guard let self, let target, self.engine === target, self.engineLoadSerial > 0 else { return }
           let serial = self.engineLoadSerial
           if route == .audio {
             self.onObservation?(.audioOnly, serial)
@@ -47,7 +47,7 @@ extension AetherBackend {
     target.$audioDelivery
       .sink { [weak self, weak target] delivery in
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0 else { return }
+          guard let self, let target, self.engine === target, self.engineLoadSerial > 0 else { return }
           self.maybeLogRouteDiagnostics(from: target, serial: self.engineLoadSerial, audioOverride: delivery)
         }
       }
@@ -56,7 +56,7 @@ extension AetherBackend {
     target.$hasFirstFrameReadyForDisplay
       .sink { [weak self, weak target] ready in
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0, ready else { return }
+          guard let self, let target, self.engine === target, self.engineLoadSerial > 0, ready else { return }
           let serial = self.engineLoadSerial
           self.maybeLogRouteDiagnostics(from: target, serial: serial, firstFrameOverride: true)
           self.onObservation?(.firstFrame, serial)
@@ -70,12 +70,12 @@ extension AetherBackend {
       .sink { [weak self, weak target] player in
         if Thread.isMainThread {
           MainActor.assumeIsolated {
-            guard let self, let target else { return }
+            guard let self, let target, self.engine === target else { return }
             self.observeAVPlayer(player, target: target)
           }
         } else {
           Self.onMainActor {
-            guard let self, let target else { return }
+            guard let self, let target, self.engine === target else { return }
             self.observeAVPlayer(target.currentAVPlayer, target: target)
           }
         }
@@ -86,12 +86,12 @@ extension AetherBackend {
       .sink { [weak self, weak target] item in
         if Thread.isMainThread {
           MainActor.assumeIsolated {
-            guard let self, let target else { return }
+            guard let self, let target, self.engine === target else { return }
             self.observeAVPlayerItem(item, target: target)
           }
         } else {
           Self.onMainActor {
-            guard let self, let target else { return }
+            guard let self, let target, self.engine === target else { return }
             self.observeAVPlayerItem(target.currentAVPlayerItem, target: target)
           }
         }
@@ -101,7 +101,7 @@ extension AetherBackend {
     target.$playbackPhase
       .sink { [weak self, weak target] phase in
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0 else { return }
+          guard let self, let target, self.engine === target, self.engineLoadSerial > 0 else { return }
           let serial = self.engineLoadSerial
           switch phase {
           case .idle, .error:
@@ -157,7 +157,7 @@ extension AetherBackend {
     target.$state
       .sink { [weak self, weak target] state in
         Self.onMainActor {
-          guard let self, let target else { return }
+          guard let self, let target, self.engine === target else { return }
           if case .error = state {
             let errorSerial = self.engineLoadSerial > 0 ? self.engineLoadSerial : self.activeLoadSerial
             guard errorSerial > 0, self.errorReportedSerial != errorSerial else { return }
@@ -179,6 +179,7 @@ extension AetherBackend {
               DispatchQueue.main.async { [weak self, weak target] in
                 MainActor.assumeIsolated {
                   guard let self, let target,
+                        self.engine === target,
                         (self.engineLoadSerial == errorSerial || self.activeLoadSerial == errorSerial),
                         self.errorReportedSerial != errorSerial
                   else { return }
@@ -243,16 +244,16 @@ extension AetherBackend {
     target.liveSourceReplayExhausted
       .sink { [weak self, weak target] in
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0 else { return }
+          guard let self, let target, self.engine === target, self.engineLoadSerial > 0 else { return }
           self.handleLiveReplayExhausted(from: target, serial: self.engineLoadSerial)
         }
       }
       .store(in: &cancellables)
 
     target.liveSourceReset
-      .sink { [weak self] in
+      .sink { [weak self, weak target] in
         Self.onMainActor {
-          guard let self, self.engineLoadSerial > 0 else { return }
+          guard let self, let target, self.engine === target, self.engineLoadSerial > 0 else { return }
           self.escalateLiveSourceReset(serial: self.engineLoadSerial)
         }
       }
@@ -261,7 +262,7 @@ extension AetherBackend {
     target.clock.$currentTime
       .sink { [weak self, weak target] currentTime in
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0, target.videoRoute != .none else { return }
+          guard let self, let target, self.engine === target, self.engineLoadSerial > 0, target.videoRoute != .none else { return }
           guard target.hasFirstFrameReadyForDisplay || target.videoRoute == .audio else { return }
           let phase = target.playbackPhase
           guard phase != .idle, phase != .loading, phase != .seeking,
@@ -290,7 +291,7 @@ extension AetherBackend {
     target.$duration
       .sink { [weak self, weak target] newDuration in
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0, newDuration.isFinite, newDuration > 0, !target.isLive else {
+          guard let self, let target, self.engine === target, self.engineLoadSerial > 0, newDuration.isFinite, newDuration > 0, !target.isLive else {
             return
           }
           self.onObservation?(.duration(newDuration), self.engineLoadSerial)
@@ -301,24 +302,51 @@ extension AetherBackend {
     subscribeTracksAndSubtitles(to: target)
   }
 
+  /// Explicitly cancels and clears `AVPlayerItem` KVO/Combine and subtitle-clock observers before item replacement, stop, rebuild, or dispose (`#117`).
+  func clearPlayerItemObservers() {
+    observedAVPlayerItemId = nil
+    itemProgressCancellable?.cancel()
+    itemProgressCancellable = nil
+    for cancellable in avPlayerItemBufferCancellables {
+      cancellable.cancel()
+    }
+    avPlayerItemBufferCancellables.removeAll()
+    subtitleClockCancellable?.cancel()
+    subtitleClockCancellable = nil
+    lastAVBufferReportedBuffering = false
+  }
+
   private func observeAVPlayer(_ player: AVPlayer?, target: AetherEngine) {
+    observedAVPlayerId = nil
+    for cancellable in avPlayerBufferCancellables {
+      cancellable.cancel()
+    }
     avPlayerBufferCancellables.removeAll()
     lastAVBufferReportedBuffering = false
     guard let player else { return }
     player.preventsDisplaySleepDuringVideoPlayback = true
     player.allowsExternalPlayback = true
     applyOutputAudioPreferences(to: player)
+    let playerId = ObjectIdentifier(player)
+    observedAVPlayerId = playerId
     player.publisher(for: \.isExternalPlaybackActive, options: [.initial, .new])
-      .sink { [weak self] active in
+      .sink { [weak self, weak target] active in
         Self.onMainActor {
-          self?.handleExternalPlaybackChange(active)
+          guard let self, let target,
+                self.engine === target,
+                self.observedAVPlayerId == playerId
+          else { return }
+          self.handleExternalPlaybackChange(active)
         }
       }
       .store(in: &avPlayerBufferCancellables)
     player.publisher(for: \.timeControlStatus, options: [.new])
       .sink { [weak self, weak target] _ in
         Self.onMainActor {
-          guard let self, let target else { return }
+          guard let self, let target,
+                self.engine === target,
+                self.observedAVPlayerId == playerId
+          else { return }
           self.evaluateAVPlayerBufferingState(from: target)
         }
       }
@@ -326,7 +354,10 @@ extension AetherBackend {
     player.publisher(for: \.reasonForWaitingToPlay, options: [.new])
       .sink { [weak self, weak target] _ in
         Self.onMainActor {
-          guard let self, let target else { return }
+          guard let self, let target,
+                self.engine === target,
+                self.observedAVPlayerId == playerId
+          else { return }
           self.evaluateAVPlayerBufferingState(from: target)
         }
       }
@@ -334,13 +365,20 @@ extension AetherBackend {
   }
 
   private func observeAVPlayerItem(_ item: AVPlayerItem?, target: AetherEngine) {
-    itemProgressCancellable?.cancel()
-    itemProgressCancellable = nil
-    avPlayerItemBufferCancellables.removeAll()
-    lastAVBufferReportedBuffering = false
-    guard engineLoadSerial > 0 else { return }
+    clearPlayerItemObservers()
+    guard self.engine === target, engineLoadSerial > 0 else { return }
     refreshSubtitleGeometry(from: target)
     guard let item else { return }
+    updateSubtitleClockSubscription(
+      target: target,
+      cues: target.subtitleCues,
+      followsPicture: target.clock.sourceTimeFollowsPicture,
+      isSubActive: target.isSubtitleActive,
+      softwareSize: target.softwareDisplaySize
+    )
+    let observedSerial = engineLoadSerial
+    let itemId = ObjectIdentifier(item)
+    observedAVPlayerItemId = itemId
     itemProgressCancellable = item.publisher(for: \.loadedTimeRanges)
       .sink { [weak self, weak target] ranges in
         let bufferedEnd = ranges.reduce(0.0) { acc, value in
@@ -348,19 +386,23 @@ extension AetherBackend {
           return (end.isFinite && end > acc) ? end : acc
         }
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0 else { return }
+          guard let self, let target,
+                self.engine === target,
+                self.engineLoadSerial == observedSerial,
+                self.observedAVPlayerItemId == itemId
+          else { return }
           let accessEvents = target.currentAVPlayerItem?.accessLog()?.events ?? []
           let bytes = accessEvents.reduce(Int64(0)) { acc, ev in
             acc + max(0, ev.numberOfBytesTransferred)
           }
-          self.pollDroppedVideoFrames(from: target, serial: self.engineLoadSerial, accessEvents: accessEvents)
+          self.pollDroppedVideoFrames(from: target, serial: observedSerial, accessEvents: accessEvents)
           if bytes > 0 || bufferedEnd > 0 {
             self.onObservation?(
               .progress(
                 bytesReceived: bytes > 0 ? bytes : nil,
                 bufferedSeconds: bufferedEnd > 0 ? bufferedEnd : nil
               ),
-              self.engineLoadSerial
+              observedSerial
             )
           }
         }
@@ -369,7 +411,11 @@ extension AetherBackend {
     item.publisher(for: \.isPlaybackBufferEmpty, options: [.new])
       .sink { [weak self, weak target] _ in
         Self.onMainActor {
-          guard let self, let target else { return }
+          guard let self, let target,
+                self.engine === target,
+                self.engineLoadSerial == observedSerial,
+                self.observedAVPlayerItemId == itemId
+          else { return }
           self.evaluateAVPlayerBufferingState(from: target)
         }
       }
@@ -377,7 +423,11 @@ extension AetherBackend {
     item.publisher(for: \.isPlaybackBufferFull, options: [.new])
       .sink { [weak self, weak target] _ in
         Self.onMainActor {
-          guard let self, let target else { return }
+          guard let self, let target,
+                self.engine === target,
+                self.engineLoadSerial == observedSerial,
+                self.observedAVPlayerItemId == itemId
+          else { return }
           self.evaluateAVPlayerBufferingState(from: target)
         }
       }
@@ -385,7 +435,11 @@ extension AetherBackend {
     item.publisher(for: \.isPlaybackLikelyToKeepUp, options: [.new])
       .sink { [weak self, weak target] _ in
         Self.onMainActor {
-          guard let self, let target else { return }
+          guard let self, let target,
+                self.engine === target,
+                self.engineLoadSerial == observedSerial,
+                self.observedAVPlayerItemId == itemId
+          else { return }
           self.evaluateAVPlayerBufferingState(from: target)
         }
       }
