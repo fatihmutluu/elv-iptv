@@ -35,6 +35,7 @@ final class AetherBackend: PlayerBackend {
   var observedAVPlayerItemId: ObjectIdentifier?
   var itemProgressCancellable: AnyCancellable?
   var subtitleClockCancellable: AnyCancellable?
+  var externalSubtitleClockCancellable: AnyCancellable?
   let audioSessionController = AetherAudioSessionController()
   private var audioSessionObserver: AetherAudioSessionObserver?
   weak var boundPlayerView: AetherPlayerView?
@@ -66,6 +67,11 @@ final class AetherBackend: PlayerBackend {
   var currentReader: LiveTsReader?
   var desiredAudioStreamId: Int?
   var desiredSubtitleStreamId: Int?
+  var externalSubtitles: [String: LoadedExternalSubtitle] = [:]
+  var externalSubtitleOrder: [String] = []
+  var externalSubtitleTasks: [String: Task<Void, Never>] = [:]
+  var activeExternalPrimaryId: String?
+  var activeSecondarySubtitleId: String?
 
   var loadTask: Task<Void, Never>?
   var seekTask: Task<Void, Never>?
@@ -141,6 +147,7 @@ final class AetherBackend: PlayerBackend {
 
   func start(_ plan: MediaPlan, options: EngineLoadOptions, serial: Int) {
     resetSerialBookkeeping()
+    resetExternalSubtitles()
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
 
@@ -162,6 +169,10 @@ final class AetherBackend: PlayerBackend {
     currentLoadOptions = options
     desiredAudioStreamId = options.audioStreamIndex.map(Int.init)
     desiredSubtitleStreamId = options.subtitlesDisabled ? nil : options.initialSubtitleTrackId
+    activeSecondarySubtitleId = options.secondarySubtitleTrackId
+    for extTrack in options.externalSubtitles {
+      addExternalSubtitle(extTrack)
+    }
     let isExternal = currentEngine.currentAVPlayer?.isExternalPlaybackActive ?? false
     airPlayTracker.updateRoute(airPlayPortName: AetherAudioSessionObserver.currentAirPlayPortName())
     airPlayTracker.updateExternalPlayback(active: isExternal)
@@ -177,6 +188,7 @@ final class AetherBackend: PlayerBackend {
 
   func stopMedia() {
     resetSerialBookkeeping()
+    resetExternalSubtitles()
     audioSessionPolicy.reset()
     resetAirPlayState()
     currentPlan = nil
@@ -275,6 +287,7 @@ final class AetherBackend: PlayerBackend {
 
   func rebuild() throws {
     resetSerialBookkeeping()
+    resetExternalSubtitles()
     audioSessionPolicy.reset()
     resetAirPlayState()
     currentPlan = nil
@@ -300,6 +313,7 @@ final class AetherBackend: PlayerBackend {
 
   func dispose() {
     resetSerialBookkeeping()
+    resetExternalSubtitles()
     audioSessionPolicy.reset()
     resetAirPlayState()
     airPlayMonitor = nil

@@ -52,6 +52,19 @@ export {
 } from './m3u';
 export { toElvError } from './scan-error';
 export { createStats, type ScanStats, type ScanWarning, warn } from './stats';
+export {
+  containsRtlText,
+  DEFAULT_MAX_SUBTITLE_BYTES,
+  detectSubtitleFormat,
+  findActiveCues,
+  isolateBidiLines,
+  type ParsedSubtitleCue,
+  type ParsedSubtitleTrack,
+  type ParseSubtitlesOptions,
+  parseSubtitles,
+  type SubtitleFormat,
+  stripSdhSubtitleLine,
+} from './subtitles';
 export { ByteBuffer, decodeUtf8 } from './utf8';
 export {
   MIN_VALID_XMLTV_EPOCH_MS,

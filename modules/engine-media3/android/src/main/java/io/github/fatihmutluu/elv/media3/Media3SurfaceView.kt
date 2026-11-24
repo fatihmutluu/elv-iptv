@@ -47,9 +47,10 @@ private fun exactly(size: Int) = View.MeasureSpec.makeMeasureSpec(size.coerceAtL
 
 /**
  * The `Media3Surface` view (player core spec 6.1): a `SurfaceView` by default (never put on top, or an opt-in
- * `TextureView` fallback when `useTextureView = true`, #262) at child index 0, covered by a black zap shutter `View`
- * at index 1, with `SubtitleView` at index 2 over the fitted video rectangle. `surfaceRecreationToken` (#144) swaps
- * only child 0 for a fresh video surface on Rung 3 decoder reset while ignoring retired surface callbacks.
+ * `TextureView` fallback when `useTextureView = true`, #262) at child index 0, optional native ASS/SSA OpenGL
+ * overlay below the black zap shutter `View` (#223), primary `SubtitleView`, and top-aligned `secondarySubtitleView`
+ * (#402) over the fitted video rectangle. `surfaceRecreationToken` (#144) swaps only child 0 for a fresh video
+ * surface on Rung 3 decoder reset while ignoring retired surface callbacks.
  */
 @OptIn(UnstableApi::class)
 class Media3SurfaceView(context: Context, appContext: AppContext) :
@@ -58,7 +59,10 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   private var activeSurfaceView: SurfaceView? = null
   private var activeTextureView: TextureView? = null
   private var activeVideoView: View
+  private var assOverlayView: View? = null
+  private var boundAssHandle: AssOverlayHandle? = null
   internal val subtitleView = SubtitleView(context)
+  internal val secondarySubtitleView = SubtitleView(context)
   private val shutterView = View(context)
   private val main = Handler(Looper.getMainLooper())
   private val shutter = ZapShutter()
@@ -74,9 +78,15 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   private var screenWanted = false
   private var subtitleBottomInsetDp = 0f
   private var subtitleFontFamily = SUBTITLE_FONT_SYSTEM
+  private var subtitleStyle: SubtitleStyleConfig? = null
+  private var rawPrimaryCues: List<Cue> = emptyList()
+  private var rawSecondaryCues: List<Cue> = emptyList()
 
   internal val activeTextureSurfaceForTest: Surface?
     get() = textureSurface
+
+  internal val assOverlayViewForTest: View?
+    get() = assOverlayView
 
   init {
     val initialSurfaceView = SurfaceView(context).apply {
@@ -87,18 +97,20 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     activeVideoView = initialSurfaceView
     shutterView.isFocusable = false
     subtitleView.isFocusable = false
+    secondarySubtitleView.isFocusable = false
     shutterView.setBackgroundColor(Color.BLACK)
     addView(initialSurfaceView)
     addView(shutterView)
     addView(subtitleView)
+    addView(secondarySubtitleView)
     showShutter(shutter.covers)
-    applySubtitleBottomPadding()
+    applySubtitleAppearance()
   }
 
   /**
    * Binds the view to [next] (null unbinds): the surface moves from the previous engine, which must let go of it
-   * first; subtitle cues clear, the shutter covers, the surface fills the view and the screen may sleep until [next]
-   * reports its state.
+   * first; subtitle cues and any mounted ASS overlay clear, the shutter covers, the surface fills the view and the
+   * screen may sleep until [next] reports its state.
    */
   fun bind(next: Media3Engine?) {
     if (next === engine) return
@@ -107,7 +119,11 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
       surface?.let { detach(old, it) }
     }
     engine = next
+    rawPrimaryCues = emptyList()
+    rawSecondaryCues = emptyList()
     subtitleView.setCues(emptyList())
+    secondarySubtitleView.setCues(emptyList())
+    detachAssOverlayView()
     shutter.reset()
     showShutter(shutter.covers)
     fit.reset()
@@ -148,7 +164,42 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     val next = SubtitleFontResolver.normalizeFamily(family)
     if (next == subtitleFontFamily) return
     subtitleFontFamily = next
-    applySubtitleFontFamily()
+    applySubtitleAppearance()
+  }
+
+  /** Live subtitle appearance update from JS prop or engine without restarting playback (`#32`). */
+  internal fun setSubtitleStyle(style: SubtitleStyleConfig?) {
+    if (style == subtitleStyle) return
+    subtitleStyle = style
+    applySubtitleAppearance()
+    renderPrimaryCues()
+    renderSecondaryCues()
+  }
+
+  /** The `subtitleStyle` view prop parsed from JS (`#32`). */
+  fun setSubtitleStyleMap(raw: Map<String, Any?>?) {
+    setSubtitleStyle(SubtitleStyleMapper.parse(raw))
+  }
+
+  /** Mounts or detaches the native ASS/SSA OpenGL overlay view strictly below `shutterView` (`#223`). */
+  internal fun setAssOverlayHandle(handle: AssOverlayHandle?) {
+    if (handle === boundAssHandle) return
+    detachAssOverlayView()
+    if (handle == null) return
+    val created = runCatching { handle.createOverlayView(context) }.getOrNull() ?: return
+    created.isFocusable = false
+    val insertIndex = indexOfChild(shutterView).coerceAtLeast(1)
+    addView(created, insertIndex)
+    assOverlayView = created
+    boundAssHandle = handle
+    placeSurface()
+  }
+
+  private fun detachAssOverlayView() {
+    boundAssHandle = null
+    val current = assOverlayView ?: return
+    assOverlayView = null
+    removeView(current)
   }
 
   /**
@@ -190,7 +241,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     engine?.let { detach(it, destroyed) }
   }
 
-  /** React Native lays out this view only: the shutter fills it, the surface and subtitles take its fitted rectangle. */
+  /** React Native lays out this view only: the shutter fills it, the surface, ASS overlay, and subtitles take its fitted rectangle. */
   override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
     val width = MeasureSpec.getSize(widthMeasureSpec)
     val height = MeasureSpec.getSize(heightMeasureSpec)
@@ -198,7 +249,9 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     shutterView.measure(exactly(width), exactly(height))
     val rect = fit.rect(width, height)
     activeVideoView.measure(exactly(rect.width), exactly(rect.height))
+    assOverlayView?.measure(exactly(rect.width), exactly(rect.height))
     subtitleView.measure(exactly(rect.width), exactly(rect.height))
+    secondarySubtitleView.measure(exactly(rect.width), exactly(rect.height))
   }
 
   override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
@@ -316,22 +369,26 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     }
 
   /**
-   * Sizes and centres the surface and subtitle layer in a [width] x [height] view; called from layout and when the
-   * shape or the mode changes, which needs no layout pass (React Native would not run one for this view).
+   * Sizes and centres the surface, optional ASS overlay, and subtitle layers in a [width] x [height] view; called
+   * from layout and when the shape or the mode changes, which needs no layout pass (React Native would not run one
+   * for this view).
    */
   private fun placeSurface(width: Int = this.width, height: Int = this.height) {
     val rect = fit.rect(width, height)
-    if (activeVideoView.measuredWidth != rect.width || activeVideoView.measuredHeight != rect.height) {
-      activeVideoView.measure(exactly(rect.width), exactly(rect.height))
-    }
-    if (subtitleView.measuredWidth != rect.width || subtitleView.measuredHeight != rect.height) {
-      subtitleView.measure(exactly(rect.width), exactly(rect.height))
-    }
-    activeVideoView.layout(rect.left, rect.top, rect.right, rect.bottom)
-    subtitleView.layout(rect.left, rect.top, rect.right, rect.bottom)
+    measureAndLayoutToRect(activeVideoView, rect)
+    assOverlayView?.let { measureAndLayoutToRect(it, rect) }
+    measureAndLayoutToRect(subtitleView, rect)
+    measureAndLayoutToRect(secondarySubtitleView, rect)
     if (rect == placed) return
     placed = rect
     invalidate()
+  }
+
+  private fun measureAndLayoutToRect(child: View, rect: VideoRect) {
+    if (child.measuredWidth != rect.width || child.measuredHeight != rect.height) {
+      child.measure(exactly(rect.width), exactly(rect.height))
+    }
+    child.layout(rect.left, rect.top, rect.right, rect.bottom)
   }
 
   /** The screen stays on only while the bound engine plays and this view is in a window. */
@@ -341,22 +398,56 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   }
 
   private fun applySubtitleBottomPadding(viewHeight: Int = height) {
+    val verticalPos = subtitleStyle?.verticalPosition ?: SUBTITLE_POS_BOTTOM
     subtitleView.setBottomPaddingFraction(
-      subtitleBottomPaddingFraction(
+      SubtitleStyleMapper.bottomPaddingFraction(
+        verticalPosition = verticalPos,
         insetDp = subtitleBottomInsetDp,
         density = resources.displayMetrics.density,
         viewHeightPx = viewHeight,
       )
     )
+    secondarySubtitleView.setBottomPaddingFraction(DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION)
   }
 
-  private fun applySubtitleFontFamily() {
+  private fun applySubtitleAppearance(viewHeight: Int = height) {
     val typeface = SubtitleFontResolver.loadTypeface(context, subtitleFontFamily)
-    if (typeface == null) {
-      subtitleView.setUserDefaultStyle()
-    } else {
-      subtitleView.setStyle(SubtitleFontResolver.buildCaptionStyle(context, typeface))
-    }
+    val density = resources.displayMetrics.density
+    SubtitleStyleMapper.applyToSubtitleView(
+      view = subtitleView,
+      config = subtitleStyle,
+      typeface = typeface,
+      context = context,
+      insetDp = subtitleBottomInsetDp,
+      density = density,
+      viewHeightPx = viewHeight,
+      isSecondary = false,
+    )
+    SubtitleStyleMapper.applyToSubtitleView(
+      view = secondarySubtitleView,
+      config = subtitleStyle,
+      typeface = typeface,
+      context = context,
+      insetDp = 0f,
+      density = density,
+      viewHeightPx = viewHeight,
+      isSecondary = true,
+    )
+  }
+
+  private fun renderPrimaryCues() {
+    val verticalPos = subtitleStyle?.verticalPosition ?: SUBTITLE_POS_BOTTOM
+    val positioned = SubtitleStyleMapper.repositionPrimaryCues(
+      cues = rawPrimaryCues,
+      verticalPosition = verticalPos,
+      hasSecondaryCues = rawSecondaryCues.isNotEmpty(),
+    )
+    subtitleView.setCues(positioned)
+  }
+
+  private fun renderSecondaryCues() {
+    val positioned = SubtitleStyleMapper.repositionSecondaryCues(rawSecondaryCues)
+    secondarySubtitleView.setCues(positioned)
   }
 
   private fun detach(from: Media3Engine, old: Surface) {
@@ -377,7 +468,28 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
 
     override fun onScreenOn(on: Boolean) = onMain { keepScreen(on) }
 
-    override fun onCues(cues: List<Cue>) = onMain { subtitleView.setCues(cues) }
+    override fun onCues(cues: List<Cue>) = onMain {
+      rawPrimaryCues = cues
+      renderPrimaryCues()
+    }
+
+    override fun onSecondaryCues(cues: List<Cue>) = onMain {
+      val hadSecondary = rawSecondaryCues.isNotEmpty()
+      val hasSecondary = cues.isNotEmpty()
+      rawSecondaryCues = cues
+      renderSecondaryCues()
+      if (hadSecondary != hasSecondary && subtitleStyle?.verticalPosition == SUBTITLE_POS_TOP) {
+        renderPrimaryCues()
+      }
+    }
+
+    override fun onSubtitleStyle(style: SubtitleStyleConfig?) = onMain {
+      setSubtitleStyle(style)
+    }
+
+    override fun onAssOverlayHandle(handle: AssOverlayHandle?) = onMain {
+      setAssOverlayHandle(handle)
+    }
 
     private fun onMain(apply: () -> Unit) {
       main.post { if (binding === this) apply() }

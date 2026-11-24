@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ThirdPartyNotice } from './render.ts';
 
@@ -139,6 +139,11 @@ function collectMedia3Notices(repoRoot: string): ThirdPartyNotice[] {
   const workflowUrl = `https://github.com/${lock.repository}/blob/main/.github/workflows/${lock.workflow}`;
   const runProvenance = lock.runId !== null ? `, run ${lock.runId}` : '';
 
+  const media3GradlePath = join(repoRoot, 'modules', 'engine-media3', 'android', 'build.gradle');
+  const media3Gradle = existsSync(media3GradlePath) ? readFileSync(media3GradlePath, 'utf8') : '';
+  const assMatch = /io\.github\.peerless2012:ass-media:([^'"]+)/.exec(media3Gradle);
+  const assVersion = assMatch?.[1] ?? '0.6.0-beta01';
+
   return [
     {
       id: 'androidx-media3',
@@ -166,6 +171,20 @@ function collectMedia3Notices(repoRoot: string): ThirdPartyNotice[] {
         `This software uses libraries from the FFmpeg project (${lock.ffmpegVersion}) under the GNU Lesser General Public License v2.1 or later (LGPL-2.1-or-later), linked dynamically on Android.`,
         `Enabled audio decoders: ${versions.decoders.join(', ')}.`,
         `FFmpeg source archive: https://ffmpeg.org/releases/ffmpeg-${lock.ffmpegVersion}.tar.xz | Reproducible build script and CI workflow: ${workflowUrl}.`,
+      ].join('\n\n'),
+    },
+    {
+      id: 'libass-android',
+      name: 'libass-android (ass-media, libass, FriBidi, HarfBuzz, FreeType)',
+      version: assVersion,
+      license: 'MIT AND ISC AND LGPL-2.1-or-later AND FTL',
+      platforms: androidPlatforms,
+      sourceUrl: 'https://github.com/peerless2012/libass-android',
+      modificationNote: `Unmodified Maven Central artifacts (io.github.peerless2012:ass-media:${assVersion}, ass-kt:${assVersion}, ass:${assVersion}) providing dynamically loaded libass.so for native ASS/SSA OpenGL subtitle overlay on Android Media3 without GPL components.`,
+      noticeText: [
+        `libass-android / ass-media ${assVersion} (https://github.com/peerless2012/libass-android) — Licensed under the MIT License.`,
+        'Dynamically loaded native subtitle renderer packaging libass (ISC), FriBidi (LGPL-2.1-or-later), HarfBuzz (Old-MIT), FreeType (FreeType License / FTL), libunibreak (Zlib), and libpng (libpng License).',
+        'Upstream source code and build recipes: https://github.com/peerless2012/libass-android and https://github.com/libass/libass.',
       ].join('\n\n'),
     },
   ];

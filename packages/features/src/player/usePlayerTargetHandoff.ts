@@ -5,6 +5,7 @@ import {
   elvError,
   err,
   type LiveChannelSwitchModePref,
+  type SubtitleStyleConfig,
 } from '@elv/domain';
 import {
   type PlaybackClock,
@@ -53,6 +54,7 @@ export interface PlayerTargetHandoffParams {
   decoderModeRef?: MutableRefObject<AndroidDecoderMode | undefined>;
   preferHevcOverDolbyVisionRef?: MutableRefObject<boolean>;
   filterSdhSubtitlesRef?: MutableRefObject<boolean>;
+  subtitleStyleRef?: MutableRefObject<SubtitleStyleConfig>;
   liveChannelSwitchModeRef?: MutableRefObject<LiveChannelSwitchModePref>;
   resolvedNextEpisodeRef?: MutableRefObject<PlayableEntry | undefined>;
   backgroundAudioPlaybackRef?: MutableRefObject<boolean>;
@@ -79,6 +81,7 @@ export function usePlayerTargetHandoff({
   decoderModeRef,
   preferHevcOverDolbyVisionRef,
   filterSdhSubtitlesRef,
+  subtitleStyleRef,
   liveChannelSwitchModeRef,
   resolvedNextEpisodeRef,
   backgroundAudioPlaybackRef,
@@ -139,6 +142,7 @@ export function usePlayerTargetHandoff({
       const decoderMode = decoderModeRef?.current;
       const preferHevcOverDolbyVision = preferHevcOverDolbyVisionRef?.current;
       const filterSdhSubtitles = filterSdhSubtitlesRef?.current;
+      const subtitleStyle = subtitleStyleRef?.current;
       return {
         item: entry.itemKey,
         accountKey: entry.accountKey ?? entry.sourceId,
@@ -166,6 +170,7 @@ export function usePlayerTargetHandoff({
         ...(decoderMode !== undefined ? { decoderMode } : {}),
         ...(preferHevcOverDolbyVision !== undefined ? { preferHevcOverDolbyVision } : {}),
         ...(filterSdhSubtitles !== undefined ? { filterSdhSubtitles } : {}),
+        ...(subtitleStyle !== undefined ? { subtitleStyle } : {}),
       };
     },
     [
@@ -174,6 +179,7 @@ export function usePlayerTargetHandoff({
       decoderModeRef,
       filterSdhSubtitlesRef,
       preferHevcOverDolbyVisionRef,
+      subtitleStyleRef,
     ],
   );
 

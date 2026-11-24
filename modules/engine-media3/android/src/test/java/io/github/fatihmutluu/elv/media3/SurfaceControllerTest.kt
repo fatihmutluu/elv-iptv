@@ -103,10 +103,12 @@ class SurfaceControllerTest {
     engine.eventObserverForTest = { events += it }
     try {
       val view = Media3SurfaceView(context, appContext)
-      assertEquals(3, view.childCount)
+      assertEquals(4, view.childCount)
       assertTrue("child 0 must be SurfaceView", view.getChildAt(0) is SurfaceView)
       assertTrue("child 1 must be shutter View (below SubtitleView!)", view.getChildAt(1) !is SubtitleView && view.getChildAt(1) is View)
-      assertTrue("child 2 must be SubtitleView (topmost so audio-only subtitles are visible)", view.getChildAt(2) is SubtitleView)
+      assertTrue("child 2 must be primary SubtitleView", view.getChildAt(2) is SubtitleView)
+      assertTrue("child 3 must be secondary SubtitleView", view.getChildAt(3) is SubtitleView)
+      assertFalse("secondary SubtitleView must not be focusable", view.secondarySubtitleView.isFocusable)
 
       view.bind(engine)
       val tex = SurfaceTexture(0)

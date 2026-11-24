@@ -71,6 +71,10 @@ export function AppShellPlayerView({
       filterSdhSubtitles={prefs.filterSdhSubtitles}
       subtitleMode={prefs.subtitleMode}
       subtitleFontFamily={prefs.subtitleFontFamily}
+      subtitleStyle={prefs.subtitleStyle}
+      onPersistSubtitleStyle={(subtitleStyle) => {
+        void preferences.updatePreferences({ subtitleStyle });
+      }}
       tvClockMode={prefs.tvClockMode}
       osdTimeDisplayMode={prefs.osdTimeDisplayMode}
       onPersistOsdTimeDisplayMode={(osdTimeDisplayMode) => {

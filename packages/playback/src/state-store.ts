@@ -1,3 +1,4 @@
+import { type SubtitleStyleConfig, subtitleStyleEquals } from '@elv/domain';
 import { type ClockAnchor, EMPTY_TRACKS, type StreamVideoInfo } from './engine';
 import type { PlaybackState, PlaybackStatus } from './types';
 
@@ -53,6 +54,15 @@ function sameVideoInfo(a: StreamVideoInfo | undefined, b: StreamVideoInfo | unde
   );
 }
 
+function sameSubtitleStyle(
+  a: SubtitleStyleConfig | undefined,
+  b: SubtitleStyleConfig | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return subtitleStyleEquals(a, b);
+}
+
 function samePlaybackState(a: PlaybackState, b: PlaybackState): boolean {
   if (a === b) return true;
   return (
@@ -68,6 +78,8 @@ function samePlaybackState(a: PlaybackState, b: PlaybackState): boolean {
     a.audioDelayMs === b.audioDelayMs &&
     a.subtitleDelayMs === b.subtitleDelayMs &&
     a.selectedVideoQualityId === b.selectedVideoQualityId &&
+    a.externalSubtitles === b.externalSubtitles &&
+    sameSubtitleStyle(a.subtitleStyle, b.subtitleStyle) &&
     sameStatus(a.status, b.status) &&
     sameAnchor(a.anchor, b.anchor) &&
     sameVideoInfo(a.videoInfo, b.videoInfo)

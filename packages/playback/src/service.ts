@@ -1,14 +1,25 @@
-import { type ElvError, elvError, type Result } from '@elv/domain';
+import {
+  type ElvError,
+  elvError,
+  normalizeSubtitleStyle,
+  type Result,
+  type SubtitleStyleConfig,
+} from '@elv/domain';
 import { createWorkingFormatCache } from './backoff';
 import { isAtLiveEdge, positionAt } from './clock';
 import type { PlaybackConfig } from './config';
 import {
   type AttemptToken,
   EMPTY_TRACKS,
+  type ExternalSubtitleTrack,
   type LoadOptions,
   type PlayerEngine,
   type StreamRequest,
 } from './engine';
+import {
+  normalizeExternalSubtitleList,
+  normalizeExternalSubtitleTrack,
+} from './external-subtitles';
 import { createRecovery } from './recovery';
 import type { LoadOverrides, RecoveryHooks, ServiceControl } from './seam';
 import { createSeekCoalescer } from './seek-coalescer';
@@ -77,6 +88,8 @@ export function createPlaybackServiceWith(
   let speedAttempt: AttemptToken = 0;
   let scrubbingActive = false;
   let resolveTimer: unknown;
+  let externalSubtitles: readonly ExternalSubtitleTrack[] = Object.freeze([]);
+  let subtitleStyle: SubtitleStyleConfig | undefined;
 
   const state = (): PlaybackState => store.getState();
   const startTimeoutMs = (): number =>
@@ -158,6 +171,8 @@ export function createPlaybackServiceWith(
         ? {}
         : { filterSdhSubtitles: current.filterSdhSubtitles }),
       ...(allowLegacyTls === undefined ? {} : { allowLegacyTls }),
+      ...(externalSubtitles.length > 0 ? { externalSubtitles } : {}),
+      ...(subtitleStyle === undefined ? {} : { subtitleStyle }),
       ...overrides.options,
     };
     const options = trackPrefs.loadOptions(
@@ -322,7 +337,9 @@ export function createPlaybackServiceWith(
     loaded = false;
     const prev = state();
     const token = prev.attempt + 1;
-    store.replace(nextTuneState(prev, token, request, held, clock.now()));
+    store.replace(
+      nextTuneState(prev, token, request, held, clock.now(), externalSubtitles, subtitleStyle),
+    );
     clearResolveTimeout();
     resolveTimer = timers.setTimeout(() => {
       resolveTimer = undefined;
@@ -383,6 +400,10 @@ export function createPlaybackServiceWith(
     tune(request) {
       if (disposed) return state().attempt;
       trackPrefs.reset();
+      externalSubtitles = normalizeExternalSubtitleList(request.externalSubtitles);
+      if (request.subtitleStyle !== undefined) {
+        subtitleStyle = normalizeSubtitleStyle(request.subtitleStyle);
+      }
       lastVodPositionMs = request.kind === 'vod' ? request.startMs : undefined;
       return startTune(request);
     },
@@ -394,6 +415,10 @@ export function createPlaybackServiceWith(
       clearScrubbing(false);
       hooks.onReset?.();
       trackPrefs.reset();
+      externalSubtitles = normalizeExternalSubtitleList(request.externalSubtitles);
+      if (request.subtitleStyle !== undefined) {
+        subtitleStyle = normalizeSubtitleStyle(request.subtitleStyle);
+      }
       current = request;
       stream = nextStream;
       lastVodPositionMs = request.kind === 'vod' ? (request.startMs ?? 0) : undefined;
@@ -404,6 +429,8 @@ export function createPlaybackServiceWith(
         videoInfo: _v,
         chapters: _c,
         droppedFrames: _df,
+        externalSubtitles: _es,
+        subtitleStyle: _ss,
         ...rest
       } = state();
       store.replace({
@@ -415,6 +442,8 @@ export function createPlaybackServiceWith(
         item: request.item,
         accountKey: request.accountKey,
         tuneAt: clock.now(),
+        ...(externalSubtitles.length > 0 ? { externalSubtitles } : {}),
+        ...(subtitleStyle === undefined ? {} : { subtitleStyle }),
       });
     },
     retry() {
@@ -454,6 +483,7 @@ export function createPlaybackServiceWith(
       clearResolveTimeout();
       stopEngine();
       trackPrefs.reset();
+      externalSubtitles = Object.freeze([]);
       lastVodPositionMs = undefined;
       const {
         anchor: _a,
@@ -462,6 +492,7 @@ export function createPlaybackServiceWith(
         chapters: _c,
         droppedFrames: _df,
         externalPlaybackActive: _ep,
+        externalSubtitles: _es,
         ...rest
       } = state();
       store.replace({
@@ -602,13 +633,55 @@ export function createPlaybackServiceWith(
     },
     selectSubtitleTrack(id) {
       if (disposed || current === undefined || state().status.kind === 'idle') return;
-      trackPrefs.selectSubtitle(id, state().tracks, loaded);
+      const curTracks = state().tracks;
+      const collidesWithSecondary =
+        id !== null &&
+        (curTracks.selectedSecondarySubtitleId === id ||
+          trackPrefs.currentSecondarySubtitleId() === id);
+      trackPrefs.selectSubtitle(id, curTracks, loaded);
+      if (collidesWithSecondary) {
+        trackPrefs.selectSecondarySubtitle(null, curTracks, loaded);
+        if (curTracks.selectedSecondarySubtitleId !== null) {
+          store.update({ tracks: { ...curTracks, selectedSecondarySubtitleId: null } });
+        }
+        if (loaded) engine.selectSecondarySubtitleTrack?.(state().attempt, null);
+      }
       if (loaded) engine.selectSubtitleTrack?.(state().attempt, id);
     },
     selectSecondarySubtitleTrack(id) {
       if (disposed || current === undefined || state().status.kind === 'idle') return;
       const normalized = typeof id === 'string' && id.trim().length > 0 ? id : null;
+      const curTracks = state().tracks;
+      const prefPrimary = trackPrefs.currentSubtitleId();
+      const activePrimary = prefPrimary !== undefined ? prefPrimary : curTracks.selectedSubtitleId;
+      if (normalized !== null && normalized === activePrimary) return;
+      trackPrefs.selectSecondarySubtitle(normalized, curTracks, loaded);
+      if (curTracks.selectedSecondarySubtitleId !== normalized) {
+        store.update({ tracks: { ...curTracks, selectedSecondarySubtitleId: normalized } });
+      }
       if (loaded) engine.selectSecondarySubtitleTrack?.(state().attempt, normalized);
+    },
+    addExternalSubtitle(track) {
+      if (disposed || current === undefined || state().status.kind === 'idle') return false;
+      const clean = normalizeExternalSubtitleTrack(track);
+      if (clean === null) return false;
+      if (
+        externalSubtitles.some((existing) => existing.id === clean.id || existing.uri === clean.uri)
+      ) {
+        return false;
+      }
+      const next = Object.freeze([...externalSubtitles, clean]);
+      externalSubtitles = next;
+      store.update({ externalSubtitles: next });
+      if (loaded) engine.addExternalSubtitle?.(state().attempt, clean);
+      return true;
+    },
+    setSubtitleStyle(style) {
+      if (disposed) return;
+      const clean = normalizeSubtitleStyle(style);
+      subtitleStyle = clean;
+      store.update({ subtitleStyle: clean });
+      engine.setSubtitleStyle?.(clean);
     },
     setAudioDelay(delayMs) {
       if (

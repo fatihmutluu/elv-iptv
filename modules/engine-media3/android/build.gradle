@@ -69,6 +69,8 @@ dependencies {
   implementation "androidx.media3:media3-decoder:$media3"
   implementation "androidx.media3:media3-ui:$media3"
   implementation "androidx.media3:media3-session:$media3"
+  implementation 'io.github.peerless2012:ass-media:0.6.0-beta01'
+  implementation 'io.github.peerless2012:ass-kt:0.6.0-beta01'
   compileOnly 'org.checkerframework:checker-qual:3.49.0'
   // OkHttp is React Native's own at run time (4.9.2 in react-native-tvos 0.88): the extension's 4.12.0 is excluded so
   // it does not replace that copy app-wide, and the module compiles against the same version. Every OkHttp member

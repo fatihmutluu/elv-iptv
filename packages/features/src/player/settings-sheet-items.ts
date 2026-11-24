@@ -1,5 +1,11 @@
 import type { LiveVariantOption } from '@elv/data';
-import { ANDROID_DECODER_MODES, type AndroidDecoderMode, type SleepTimerAction } from '@elv/domain';
+import {
+  ANDROID_DECODER_MODES,
+  type AndroidDecoderMode,
+  DEFAULT_SUBTITLE_STYLE,
+  type SleepTimerAction,
+  type SubtitleStyleConfig,
+} from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { ChapterInfo, MediaTracks, TrackInfo, VideoQualityOption } from '@elv/playback';
 import type { IconName } from '@elv/ui-kit';
@@ -13,7 +19,9 @@ import {
   SYNC_DELAY_STEP_ACTIONS,
 } from './settings-menu-nav';
 import { SLEEP_TIMER_PRESETS_MIN, type SleepTimerSnapshot } from './sleep-timer';
+import { formatSubtitleStyleSummary } from './subtitle-style-helpers';
 import { formatTrackLabel } from './track-labels';
+import { buildSubtitleColumnEntries } from './track-picker-nav';
 import { formatPlaybackPosition } from './vod-progress-math';
 
 export interface SettingsRadioItem {
@@ -21,6 +29,11 @@ export interface SettingsRadioItem {
   readonly testID: string;
   readonly label: string;
   readonly selected: boolean;
+  readonly disabled?: boolean;
+  readonly badgeLabel?: string;
+  readonly disabledHint?: string;
+  readonly sectionHeader?: string;
+  readonly role?: 'radio' | 'button';
   readonly tabular?: boolean;
   readonly onPress: () => void;
 }
@@ -113,6 +126,8 @@ export function buildSettingsNavRows(
     readonly audioDelayMs?: number | undefined;
     readonly showSubtitleDelay?: boolean | undefined;
     readonly subtitleDelayMs?: number | undefined;
+    readonly showSubtitleStyle?: boolean | undefined;
+    readonly subtitleStyle?: SubtitleStyleConfig | undefined;
     readonly showVideoQuality?: boolean | undefined;
     readonly selectedVideoQualityId?: string | null | undefined;
   },
@@ -165,6 +180,16 @@ export function buildSettingsNavRows(
       formatSyncDelayMs(extras.subtitleDelayMs ?? 0),
       'subtitleDelay',
       true,
+    ]);
+  }
+  if (extras?.showSubtitleStyle === true) {
+    rows.push([
+      'player-settings-row-subtitle-style',
+      'subtitles',
+      i18n.t('player.subtitleStyle.section'),
+      formatSubtitleStyleSummary(extras.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE, i18n),
+      'subtitleStyle',
+      false,
     ]);
   }
   if (audioDevice?.show === true) {
@@ -284,6 +309,10 @@ export function buildSettingsRadioItems(params: {
   onSelectVideoQuality?: ((id: string | null) => void) | undefined;
   onSelectQualityVariant?: ((itemKey: string) => void) | undefined;
   onSelectSubtitle: (id: string | null) => void;
+  dualSubtitles?: boolean | undefined;
+  onSelectSecondarySubtitle?: ((id: string | null) => void) | undefined;
+  onPickSubtitleFile?: (() => void) | undefined;
+  onLoadSubtitleUrl?: (() => void) | undefined;
   onSelectSpeed?: ((rate: number) => void) | undefined;
   onSelectChapter?: ((startMs: number) => void) | undefined;
   onSelectSleepTimer?: ((minutes: number) => void) | undefined;
@@ -312,6 +341,10 @@ export function buildSettingsRadioItems(params: {
     onSelectVideoQuality,
     onSelectQualityVariant,
     onSelectSubtitle,
+    dualSubtitles = false,
+    onSelectSecondarySubtitle,
+    onPickSubtitleFile,
+    onLoadSubtitleUrl,
     onSelectSpeed,
     onSelectChapter,
     onSelectSleepTimer,
@@ -442,23 +475,80 @@ export function buildSettingsRadioItems(params: {
       onPress: () => onSelectSpeed?.(rate),
     }));
   }
+  if (view === 'subtitleStyle') return [];
   if (view === 'subtitles') {
-    return [
-      {
-        key: 'off',
-        testID: 'player-settings-sub-off',
-        label: i18n.t('player.subtitlesOff'),
-        selected: tracks.selectedSubtitleId === null,
-        onPress: () => onSelectSubtitle(null),
-      },
-      ...tracks.subtitles.map((track, idx) => ({
-        key: track.id,
-        testID: `player-settings-sub-${track.id}`,
-        label: formatTrackLabel(track, idx, tracks.subtitles, i18n),
-        selected: tracks.selectedSubtitleId === track.id,
-        onPress: () => onSelectSubtitle(track.id),
-      })),
-    ];
+    const entries = buildSubtitleColumnEntries(tracks, {
+      dualSubtitles: dualSubtitles && onSelectSecondarySubtitle !== undefined,
+      canPickSubtitleFile: onPickSubtitleFile !== undefined,
+      canLoadSubtitleUrl: onLoadSubtitleUrl !== undefined,
+    });
+    const externalBadge = i18n.t('player.externalSubtitle.badge');
+    const sameAsPrimaryHint = i18n.t('player.secondarySameAsPrimary');
+    const firstExternalIdx = entries.findIndex(
+      (entry) => entry.kind === 'pickSubtitleFile' || entry.kind === 'loadSubtitleUrl',
+    );
+    return entries.map((entry, idx): SettingsRadioItem => {
+      if (entry.kind === 'primaryOff') {
+        return {
+          key: 'off',
+          testID: 'player-settings-sub-off',
+          label: i18n.t('player.subtitlesOff'),
+          selected: tracks.selectedSubtitleId === null,
+          onPress: () => onSelectSubtitle(null),
+        };
+      }
+      if (entry.kind === 'primaryTrack') {
+        return {
+          key: entry.track.id,
+          testID: `player-settings-sub-${entry.track.id}`,
+          label: formatTrackLabel(entry.track, entry.trackIndex, tracks.subtitles, i18n),
+          selected: tracks.selectedSubtitleId === entry.track.id,
+          ...(entry.track.external === true ? { badgeLabel: externalBadge } : {}),
+          onPress: () => onSelectSubtitle(entry.track.id),
+        };
+      }
+      if (entry.kind === 'secondaryOff') {
+        return {
+          key: 'secondary-off',
+          testID: 'player-settings-secondary-sub-off',
+          label: i18n.t('player.subtitlesOff'),
+          selected: (tracks.selectedSecondarySubtitleId ?? null) === null,
+          sectionHeader: i18n.t('player.secondarySubtitleTracks'),
+          onPress: () => onSelectSecondarySubtitle?.(null),
+        };
+      }
+      if (entry.kind === 'secondaryTrack') {
+        return {
+          key: `secondary-${entry.track.id}`,
+          testID: `player-settings-secondary-sub-${entry.track.id}`,
+          label: formatTrackLabel(entry.track, entry.trackIndex, tracks.subtitles, i18n),
+          selected: !entry.disabled && tracks.selectedSecondarySubtitleId === entry.track.id,
+          disabled: entry.disabled,
+          ...(entry.track.external === true ? { badgeLabel: externalBadge } : {}),
+          ...(entry.disabled ? { disabledHint: sameAsPrimaryHint } : {}),
+          onPress: () => {
+            if (!entry.disabled) onSelectSecondarySubtitle?.(entry.track.id);
+          },
+        };
+      }
+      const isPick = entry.kind === 'pickSubtitleFile';
+      return {
+        key: entry.kind,
+        testID: isPick ? 'player-settings-external-sub-pick' : 'player-settings-external-sub-url',
+        label: i18n.t(
+          isPick ? 'player.externalSubtitle.pickFile' : 'player.externalSubtitle.fromUrl',
+        ),
+        selected: false,
+        role: 'button',
+        ...(idx === firstExternalIdx
+          ? { sectionHeader: i18n.t('player.externalSubtitle.load') }
+          : {}),
+        onPress: () => {
+          if (isPick) onPickSubtitleFile?.();
+          else onLoadSubtitleUrl?.();
+        },
+      };
+    });
   }
   return tracks.audio.map((track, idx) => ({
     key: track.id,

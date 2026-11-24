@@ -143,6 +143,7 @@ internal data class TrackInfoSnapshot(
   val forced: Boolean = false,
   val isDefault: Boolean = false,
   val formatId: String? = null,
+  val external: Boolean = false,
 ) {
   fun toMap(): Map<String, Any> = buildMap {
     put("id", id)
@@ -152,6 +153,7 @@ internal data class TrackInfoSnapshot(
     if (channels != null) put("channels", channels)
     if (forced) put("forced", true)
     if (isDefault) put("isDefault", true)
+    if (external) put("external", true)
   }
 }
 
@@ -161,6 +163,7 @@ internal data class MediaTracksSnapshot(
   val subtitles: List<TrackInfoSnapshot>,
   val selectedAudioId: String?,
   val selectedSubtitleId: String?,
+  val selectedSecondarySubtitleId: String? = null,
   val videoQualities: List<VideoQualitySnapshot> = emptyList(),
   val selectedVideoQualityId: String? = null,
 ) {
@@ -169,6 +172,7 @@ internal data class MediaTracksSnapshot(
     put("subtitles", subtitles.map { it.toMap() })
     put("selectedAudioId", selectedAudioId)
     put("selectedSubtitleId", selectedSubtitleId)
+    put("selectedSecondarySubtitleId", selectedSecondarySubtitleId)
     if (videoQualities.isNotEmpty()) {
       put("videoQualities", videoQualities.map { it.toMap() })
       put("selectedVideoQualityId", selectedVideoQualityId)
@@ -285,21 +289,26 @@ private fun snapshotOf(group: Tracks.Group, groupIndex: Int, trackIndex: Int): T
     } else {
       null
     }
+  val cleanFormatId = format.id?.trim()?.takeIf { it.isNotEmpty() }
+  val isExternalText = group.type == C.TRACK_TYPE_TEXT && cleanFormatId?.startsWith(EXTERNAL_SUBTITLE_ID_PREFIX) == true
+  val stableId = if (isExternalText) cleanFormatId!! else "$groupIndex:$trackIndex"
   return TrackInfoSnapshot(
-    id = "$groupIndex:$trackIndex",
+    id = stableId,
     language = language,
     label = label,
     codec = codec,
     channels = channels,
     forced = (format.selectionFlags and C.SELECTION_FLAG_FORCED) != 0,
     isDefault = (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0,
-    formatId = format.id?.trim()?.takeIf { it.isNotEmpty() },
+    formatId = cleanFormatId,
+    external = isExternalText,
   )
 }
 
 /**
  * Inspects [tracks] and maps selectable `C.TRACK_TYPE_AUDIO` and `C.TRACK_TYPE_TEXT` entries to stable
- * `"$groupIndex:$trackIndex"` IDs. When [textDisabled] is true, `selectedSubtitleId` is always `null`.
+ * `"$groupIndex:$trackIndex"` IDs (or `"ext:<id>"` for external sidecars). When [textDisabled] is true,
+ * `selectedSubtitleId` is always `null` unless [selectedExternalPrimaryId] is active.
  */
 @OptIn(UnstableApi::class)
 internal fun inspectMediaTracks(
@@ -307,9 +316,13 @@ internal fun inspectMediaTracks(
   textDisabled: Boolean,
   selectedVideoQualityId: String? = null,
   ffmpegSupportsAudio: (String?) -> Boolean = ::defaultFfmpegSupportsAudio,
+  selectedSecondarySubtitleId: String? = null,
+  extraExternalSubtitles: List<TrackInfoSnapshot> = emptyList(),
+  selectedExternalPrimaryId: String? = null,
 ): MediaTracksSnapshot {
   val audio = mutableListOf<TrackInfoSnapshot>()
   val subtitles = mutableListOf<TrackInfoSnapshot>()
+  val seenSubtitleIds = HashSet<String>()
   var selectedAudioId: String? = null
   var selectedSubtitleId: String? = null
 
@@ -322,13 +335,28 @@ internal fun inspectMediaTracks(
         audio += info
         if (selectedAudioId == null && group.isTrackSelected(trackIndex)) selectedAudioId = info.id
       } else {
-        subtitles += info
+        if (seenSubtitleIds.add(info.id)) subtitles += info
         if (!textDisabled && selectedSubtitleId == null && group.isTrackSelected(trackIndex)) {
           selectedSubtitleId = info.id
         }
       }
     }
   }
+
+  for (ext in extraExternalSubtitles) {
+    if (seenSubtitleIds.add(ext.id)) {
+      subtitles += ext
+    }
+  }
+
+  val resolvedPrimaryId = when {
+    selectedExternalPrimaryId != null && seenSubtitleIds.contains(selectedExternalPrimaryId) -> selectedExternalPrimaryId
+    textDisabled -> null
+    else -> selectedSubtitleId
+  }
+  val resolvedSecondaryId =
+    selectedSecondarySubtitleId
+      ?.takeIf { it.isNotEmpty() && it != resolvedPrimaryId && seenSubtitleIds.contains(it) }
 
   val videoQualities = videoQualityCandidatesOf(tracks).map { it.option }
   val confirmedVideoQualityId = selectedVideoQualityId?.takeIf { wanted ->
@@ -339,7 +367,8 @@ internal fun inspectMediaTracks(
     audio = audio,
     subtitles = subtitles,
     selectedAudioId = selectedAudioId,
-    selectedSubtitleId = if (textDisabled) null else selectedSubtitleId,
+    selectedSubtitleId = resolvedPrimaryId,
+    selectedSecondarySubtitleId = resolvedSecondaryId,
     videoQualities = videoQualities,
     selectedVideoQualityId = if (videoQualities.isEmpty()) null else confirmedVideoQualityId,
   )

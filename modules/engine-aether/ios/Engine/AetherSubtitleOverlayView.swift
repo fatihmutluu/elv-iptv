@@ -30,8 +30,9 @@ private final class SlotPillView: UIView {
   override var canBecomeFocused: Bool { false }
 }
 
-/// Unfocusable, non-interactive overlay rendering 9-slot ASS text (`SRT`, `ASS`/`SSA`, `mov_text`, `WebVTT`)
-/// and bitmap (`PGS`, `DVB`, `DVD`) `SubtitleCue`s inside the visible video stage on iOS, iPadOS, and tvOS.
+/// Unfocusable, non-interactive overlay rendering 9-slot ASS/external text (`SRT`, `ASS`/`SSA`, `TTML`,
+/// `mov_text`, `WebVTT`), simultaneous top-center secondary subtitles (`#402`), and bitmap (`PGS`, `DVB`, `DVD`)
+/// cues inside the visible video stage on iOS, iPadOS, and tvOS (`#285`, `#32`, `#402`).
 final class AetherSubtitleOverlayView: UIView {
   private let bitmapContainer = UIView(frame: .zero)
   private var bitmapViews: [UIImageView] = []
@@ -40,6 +41,7 @@ final class AetherSubtitleOverlayView: UIView {
   private var bottomInset: CGFloat = 0
   private let captionAppearanceSource = SystemCaptionAppearanceSource()
   private var systemCaptionStyle: CaptionAppearanceStyle
+  private var userSubtitleStyle: UserSubtitleStyleOverride?
   private var captionStyle: CaptionAppearanceStyle
   private var subtitleFontFamily: String?
   private var captionObserver: SystemCaptionAppearanceObserver?
@@ -81,7 +83,7 @@ final class AetherSubtitleOverlayView: UIView {
   func apply(_ next: SubtitlePresentation) {
     guard next != presentation else { return }
     presentation = next
-    announceVoiceOverIfNeeded(for: next.cues)
+    announceVoiceOverIfNeeded(for: next)
     rebuildBitmaps()
     setNeedsLayout()
   }
@@ -101,10 +103,14 @@ final class AetherSubtitleOverlayView: UIView {
 
   func updateSubtitleFontFamily(_ family: String?) {
     subtitleFontFamily = family
-    let updated = applyingSubtitleFontOverride(systemCaptionStyle, family: family)
-    guard updated != captionStyle else { return }
-    captionStyle = updated
-    setNeedsLayout()
+    applyResolvedCaptionStyle()
+  }
+
+  /// Updates user subtitle appearance live without restarting playback (`#32`).
+  func updateSubtitleStyle(_ style: UserSubtitleStyleOverride?) {
+    guard style != userSubtitleStyle else { return }
+    userSubtitleStyle = style
+    applyResolvedCaptionStyle()
   }
 
   func clear() {
@@ -113,9 +119,13 @@ final class AetherSubtitleOverlayView: UIView {
   }
 
   private func refreshCaptionStyle() {
-    let resolvedSystem = resolveCaptionAppearance(source: captionAppearanceSource)
-    systemCaptionStyle = resolvedSystem
-    let updated = applyingSubtitleFontOverride(resolvedSystem, family: subtitleFontFamily)
+    systemCaptionStyle = resolveCaptionAppearance(source: captionAppearanceSource)
+    applyResolvedCaptionStyle()
+  }
+
+  private func applyResolvedCaptionStyle() {
+    let withUser = applyingUserSubtitleStyle(systemCaptionStyle, override: userSubtitleStyle)
+    let updated = applyingSubtitleFontOverride(withUser, family: subtitleFontFamily)
     guard updated != captionStyle else { return }
     captionStyle = updated
     let pillBg = (updated.window ?? updated.background).uiColor
@@ -125,9 +135,28 @@ final class AetherSubtitleOverlayView: UIView {
     setNeedsLayout()
   }
 
-  private func announceVoiceOverIfNeeded(for cues: [SubtitleCue]) {
-    let filterSdh = presentation.filterSdhSubtitles
+  private func announceVoiceOverIfNeeded(for next: SubtitlePresentation) {
+    let filterSdh = next.filterSdhSubtitles
     var lines: [String] = []
+    collectPlainLines(from: next.cues, filterSdh: filterSdh, into: &lines)
+    for ext in next.externalPrimaryCues {
+      let text = filterSdh ? SubtitlePresentation.stripSdhAnnotations(ext.text) : ext.text
+      if !text.isEmpty { lines.append(text) }
+    }
+    if lines.isEmpty {
+      collectPlainLines(from: next.secondaryCues, filterSdh: filterSdh, into: &lines)
+      for ext in next.externalSecondaryCues {
+        let text = filterSdh ? SubtitlePresentation.stripSdhAnnotations(ext.text) : ext.text
+        if !text.isEmpty { lines.append(text) }
+      }
+    }
+    guard let announcement = voiceOverDeduper.nextAnnouncement(for: lines) else { return }
+    if UIAccessibility.isVoiceOverRunning {
+      UIAccessibility.post(notification: .announcement, argument: announcement)
+    }
+  }
+
+  private func collectPlainLines(from cues: [SubtitleCue], filterSdh: Bool, into lines: inout [String]) {
     for cue in cues {
       switch cue.body {
       case let .text(raw):
@@ -141,14 +170,10 @@ final class AetherSubtitleOverlayView: UIView {
         break
       }
     }
-    guard let announcement = voiceOverDeduper.nextAnnouncement(for: lines) else { return }
-    if UIAccessibility.isVoiceOverRunning {
-      UIAccessibility.post(notification: .announcement, argument: announcement)
-    }
   }
 
   private func rebuildBitmaps() {
-    if presentation.cues.isEmpty {
+    if !presentation.hasAnyCues {
       for view in bitmapViews {
         view.image = nil
         view.removeFromSuperview()
@@ -186,7 +211,7 @@ final class AetherSubtitleOverlayView: UIView {
   }
 
   private func layoutPresentation() {
-    guard bounds.width > 0, bounds.height > 0, !presentation.cues.isEmpty else {
+    guard bounds.width > 0, bounds.height > 0, presentation.hasAnyCues else {
       hideAllSlots()
       for view in bitmapViews { view.isHidden = true }
       return
@@ -212,8 +237,14 @@ final class AetherSubtitleOverlayView: UIView {
     let visibleStage = SubtitleLayout.visibleTextStage(videoRect: videoRect, bounds: boundsRect)
     let rawFontSize = SubtitleLayout.baseFontSize(for: visibleStage) * captionStyle.relativeCharacterSize
     let fontSize = CGFloat(min(max(8, rawFontSize), max(8, visibleStage.height * 0.45)))
+    let hasSecondary = !presentation.secondaryCues.isEmpty || !presentation.externalSecondaryCues.isEmpty
+    let defaultPrimarySlot: SubtitleSlot =
+      (captionStyle.verticalPosition == .top && !hasSecondary) ? .topCenter : .bottomCenter
+
     var bitmapIdx = 0
-    var bucketed: [SubtitleSlot: [NSAttributedString]] = [:]
+    var plainLinesBySlot: [SubtitleSlot: [String]] = [:]
+    var richBlocksBySlot: [SubtitleSlot: [NSAttributedString]] = [:]
+    var seenRichTextBySlot: [SubtitleSlot: Set<String>] = [:]
 
     for cue in presentation.cues {
       switch cue.body {
@@ -238,29 +269,59 @@ final class AetherSubtitleOverlayView: UIView {
           ? SubtitlePresentation.stripSdhAnnotations(raw)
           : raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { break }
-        let slot = SubtitleSlot.from(assAlignment: cue.placement?.alignment)
-        bucketed[slot, default: []].append(
-          SubtitleTextStyling.makeStyledString(text: cleaned, fontSize: fontSize, slot: slot, style: captionStyle)
-        )
+        let slot = resolvedPrimarySlot(for: cue.placement?.alignment, defaultSlot: defaultPrimarySlot, reserveTopCenter: hasSecondary)
+        plainLinesBySlot[slot, default: []].append(cleaned)
 
       case let .richText(runs):
-        let slot = SubtitleSlot.from(assAlignment: cue.placement?.alignment)
+        let slot = resolvedPrimarySlot(for: cue.placement?.alignment, defaultSlot: defaultPrimarySlot, reserveTopCenter: hasSecondary)
+        let combined = runs.map(\.text).joined()
         if presentation.filterSdhSubtitles {
-          let combined = runs.map(\.text).joined()
           let cleaned = SubtitlePresentation.stripSdhAnnotations(combined)
           guard !cleaned.isEmpty else { break }
           if cleaned == combined.trimmingCharacters(in: .whitespacesAndNewlines) {
-            if let styled = SubtitleTextStyling.makeRichString(runs: runs, fontSize: fontSize, slot: slot, style: captionStyle) {
-              bucketed[slot, default: []].append(styled)
+            if seenRichTextBySlot[slot, default: []].insert(cleaned).inserted,
+               let styled = SubtitleTextStyling.makeRichString(runs: runs, fontSize: fontSize, slot: slot, style: captionStyle)
+            {
+              richBlocksBySlot[slot, default: []].append(styled)
             }
           } else {
-            bucketed[slot, default: []].append(
-              SubtitleTextStyling.makeStyledString(text: cleaned, fontSize: fontSize, slot: slot, style: captionStyle)
-            )
+            plainLinesBySlot[slot, default: []].append(cleaned)
           }
-        } else if let styled = SubtitleTextStyling.makeRichString(runs: runs, fontSize: fontSize, slot: slot, style: captionStyle) {
-          bucketed[slot, default: []].append(styled)
+        } else {
+          let key = combined.trimmingCharacters(in: .whitespacesAndNewlines)
+          guard !key.isEmpty, seenRichTextBySlot[slot, default: []].insert(key).inserted else { break }
+          if let styled = SubtitleTextStyling.makeRichString(runs: runs, fontSize: fontSize, slot: slot, style: captionStyle) {
+            richBlocksBySlot[slot, default: []].append(styled)
+          }
         }
+      }
+    }
+
+    // External primary cues render in the primary default slot (never colliding with secondary `.topCenter`).
+    for ext in presentation.externalPrimaryCues {
+      let cleaned = presentation.filterSdhSubtitles
+        ? SubtitlePresentation.stripSdhAnnotations(ext.text)
+        : ext.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !cleaned.isEmpty {
+        plainLinesBySlot[defaultPrimarySlot, default: []].append(cleaned)
+      }
+    }
+
+    // Secondary cues (`#402`) are strictly pinned to `.topCenter`.
+    if hasSecondary {
+      var secondaryLines: [String] = []
+      collectPlainLines(from: presentation.secondaryCues, filterSdh: presentation.filterSdhSubtitles, into: &secondaryLines)
+      for ext in presentation.externalSecondaryCues {
+        let cleaned = presentation.filterSdhSubtitles
+          ? SubtitlePresentation.stripSdhAnnotations(ext.text)
+          : ext.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleaned.isEmpty {
+          secondaryLines.append(cleaned)
+        }
+      }
+      if !secondaryLines.isEmpty {
+        plainLinesBySlot[.topCenter] = secondaryLines
+        richBlocksBySlot[.topCenter] = nil
       }
     }
 
@@ -270,8 +331,23 @@ final class AetherSubtitleOverlayView: UIView {
     }
 
     let pillBackgroundColor = (captionStyle.window ?? captionStyle.background).uiColor
+    let raisedLift = captionStyle.verticalPosition == .raised ? visibleStage.height * 0.14 : 0
+    let effectiveBottomInset = Double(bottomInset) + raisedLift
+
     for slot in SubtitleSlot.allCases {
-      guard let blocks = bucketed[slot], !blocks.isEmpty else {
+      var blocks: [NSAttributedString] = []
+      if let rawLines = plainLinesBySlot[slot], !rawLines.isEmpty {
+        let merged = SubtitleBidi.mergeOverlappingLines(rawLines)
+        if !merged.isEmpty {
+          blocks.append(
+            SubtitleTextStyling.makeStyledString(text: merged, fontSize: fontSize, slot: slot, style: captionStyle)
+          )
+        }
+      }
+      if let rich = richBlocksBySlot[slot], !rich.isEmpty {
+        blocks.append(contentsOf: rich)
+      }
+      guard !blocks.isEmpty else {
         if let existing = slotViews[slot] {
           existing.isHidden = true
           existing.label.attributedText = nil
@@ -300,12 +376,24 @@ final class AetherSubtitleOverlayView: UIView {
         visibleStage: visibleStage,
         measuredTextSize: LayoutSize(width: Double(measured.width), height: Double(measured.height)),
         fontSize: Double(fontSize),
-        bottomInset: Double(bottomInset)
+        bottomInset: effectiveBottomInset
       )
       pill.frame = Self.toCGRect(placed.pillFrame)
       pill.label.frame = Self.toCGRect(placed.labelFrame)
       pill.isHidden = false
     }
+  }
+
+  private func resolvedPrimarySlot(
+    for assAlignment: Int?,
+    defaultSlot: SubtitleSlot,
+    reserveTopCenter: Bool
+  ) -> SubtitleSlot {
+    let slot = assAlignment.map { SubtitleSlot.from(assAlignment: $0) } ?? defaultSlot
+    if reserveTopCenter && slot == .topCenter {
+      return .bottomCenter
+    }
+    return slot
   }
 
   private func ensureSlotView(for slot: SubtitleSlot) -> SlotPillView {

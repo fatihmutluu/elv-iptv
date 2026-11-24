@@ -154,6 +154,10 @@ describe('ThirdPartyNoticesScreen', () => {
     await keys.press(KEYCODE_DPAD_DOWN);
     await keys.press(KEYCODE_DPAD_DOWN);
     await keys.press(KEYCODE_DPAD_DOWN);
+    expect(screen.getByTestId('notices-detail-name')).toHaveTextContent(/libass-android/);
+    expect(screen.getByTestId('notices-detail-text')).toHaveTextContent(/FriBidi/);
+
+    await keys.press(KEYCODE_DPAD_DOWN);
     expect(screen.getByTestId('notices-detail-name')).toHaveTextContent(/libmpv/);
 
     // Configure detail viewport (300dp) & content (500dp -> max scroll 200dp)
@@ -217,7 +221,7 @@ describe('ThirdPartyNoticesScreen', () => {
     expect(screen.getByTestId('notices-list-ring')).toBeTruthy();
     expect(screen.getByTestId('notices-detail-name')).toHaveTextContent(/libmpv/);
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       await keys.press(KEYCODE_DPAD_UP);
     }
     expect(screen.getByTestId('notices-detail-name')).toHaveTextContent('AetherEngine');

@@ -13,7 +13,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
-import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.text.TextOutput
 import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "ElvMedia3"
@@ -95,6 +95,8 @@ internal class PlayerFactory(
   private val deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
   private val sdkInt: Int = Build.VERSION.SDK_INT,
   private val audioDelayUs: AtomicLong = AtomicLong(0L),
+  private val secondaryTextOutput: TextOutput? = null,
+  private val assOverlayBridge: AssOverlayBridge? = null,
 ) {
   constructor(
     context: Context,
@@ -106,6 +108,8 @@ internal class PlayerFactory(
     deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
     sdkInt: Int = Build.VERSION.SDK_INT,
     audioDelayUs: AtomicLong = AtomicLong(0L),
+    secondaryTextOutput: TextOutput? = null,
+    assOverlayBridge: AssOverlayBridge? = null,
   ) : this(
     context = context,
     looper = looper,
@@ -116,10 +120,16 @@ internal class PlayerFactory(
     deviceQuirks = deviceQuirks,
     sdkInt = sdkInt,
     audioDelayUs = audioDelayUs,
+    secondaryTextOutput = secondaryTextOutput,
+    assOverlayBridge = assOverlayBridge,
   )
 
   @Volatile
   var audioFocusAllowed: Boolean = true
+    private set
+
+  @Volatile
+  var lastTrackSelector: DualSubtitleTrackSelector? = null
     private set
 
   fun disableAudioFocus() {
@@ -170,7 +180,8 @@ internal class PlayerFactory(
     handleAudioFocus: Boolean,
   ): ExoPlayer {
     val buffers = loadControlForStream(streamKind, bufferPreset)
-    val renderers = createRenderersFactory(
+    assOverlayBridge?.beginPlayerSession()
+    val baseRenderers = createRenderersFactory(
       context = context,
       codecPolicy = codecPolicy,
       softwareAudio = softwareAudio,
@@ -178,7 +189,9 @@ internal class PlayerFactory(
       deviceQuirks = deviceQuirks,
       decoderMode = decoderMode,
       audioDelayUs = audioDelayUs,
+      secondaryTextOutput = secondaryTextOutput,
     )
+    val renderers = assOverlayBridge?.wrapRenderersFactory(baseRenderers) ?: baseRenderers
     val loadControl = DefaultLoadControl.Builder()
       .setBufferDurationsMs(
         buffers.minBufferMs,
@@ -193,7 +206,7 @@ internal class PlayerFactory(
     val audioOffload = AudioOffloadPreferences.Builder()
       .setAudioOffloadMode(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED)
       .build()
-    val trackSelector = DefaultTrackSelector(context).apply {
+    val trackSelector = DualSubtitleTrackSelector(context).apply {
       val params = buildUponParameters()
         .setAllowAudioMixedMimeTypeAdaptiveness(true)
         .setAllowAudioMixedSampleRateAdaptiveness(true)
@@ -208,6 +221,7 @@ internal class PlayerFactory(
       }
       setParameters(params)
     }
+    lastTrackSelector = trackSelector
     return ExoPlayer.Builder(context, renderers)
       .setLooper(looper)
       .setTrackSelector(trackSelector)
@@ -221,5 +235,8 @@ internal class PlayerFactory(
       .setVideoChangeFrameRateStrategy(videoChangeFrameRateStrategyForApi(sdkInt))
       .enablePerStreamMediaProgression(true)
       .build()
+      .also { built ->
+        assOverlayBridge?.attachPlayer(built)
+      }
   }
 }

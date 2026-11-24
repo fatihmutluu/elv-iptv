@@ -1,4 +1,9 @@
-import type { BufferPreset, LiveChannelSwitchModePref } from '@elv/domain';
+import {
+  type BufferPreset,
+  DEFAULT_SUBTITLE_STYLE,
+  type LiveChannelSwitchModePref,
+  type SubtitleStyleConfig,
+} from '@elv/domain';
 import type { PlaybackService } from '@elv/playback';
 import { useFormFactor, useI18n } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
@@ -14,6 +19,7 @@ import { type ChannelDrawerNavHandle, PlayerChannelDrawer } from './PlayerChanne
 import { PlayerInfoSheet } from './PlayerInfoSheet';
 import {
   buildDesktopWebProps,
+  buildSettingsSheetOptionalProps,
   computeSubtitleBottomInsetPx,
   DEFAULT_PLAYER_CLOCK,
   DEFAULT_PLAYER_TIMERS,
@@ -36,6 +42,7 @@ import { usePlayerControls } from './usePlayerControls';
 import { usePlayerNowNext } from './usePlayerNowNext';
 import { usePlayerParentalUnlock } from './usePlayerParentalUnlock';
 import { usePlayerSession } from './usePlayerSession';
+import { usePlayerSubtitlesSuite } from './usePlayerSubtitlesSuite';
 import { usePlayerSyncAndQuality } from './usePlayerSyncAndQuality';
 import { usePlayerTargetHandoff } from './usePlayerTargetHandoff';
 import {
@@ -106,6 +113,9 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const bufferPresetRef = useLatestRef<BufferPreset>(bufferPreset);
   const preferHevcRef = useLatestRef<boolean>(preferHevcOverDolbyVision);
   const filterSdhRef = useLatestRef<boolean>(filterSdhSubtitles);
+  const subtitleStyleRef = useRef<SubtitleStyleConfig>(
+    props.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE,
+  );
   const switchModeRef = useLatestRef<LiveChannelSwitchModePref>(liveChannelSwitchMode);
   const backgroundAudioRef = useLatestRef<boolean>(effectiveBackgroundAudio);
   const reloadActiveTargetRef = useRef<() => void>(() => undefined);
@@ -132,6 +142,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     decoderModeRef,
     preferHevcOverDolbyVisionRef: preferHevcRef,
     filterSdhSubtitlesRef: filterSdhRef,
+    subtitleStyleRef,
     liveChannelSwitchModeRef: switchModeRef,
     resolvedNextEpisodeRef,
     backgroundAudioPlaybackRef: backgroundAudioRef,
@@ -203,6 +214,16 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   }, [activeTargetKey]);
 
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
+  const subtitlesSuite = usePlayerSubtitlesSuite({
+    activeItemKey: activeTarget.itemKey,
+    openedEngine,
+    activeService,
+    serviceRef,
+    timersRef,
+    subtitleStyleRef,
+    subtitleStyleProp: props.subtitleStyle,
+    onPersistSubtitleStyle: props.onPersistSubtitleStyle,
+  });
   const syncAndQuality = usePlayerSyncAndQuality({
     activeTarget,
     tracks,
@@ -255,7 +276,10 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     preferredAudioDevice,
   });
 
-  const hasTracks = tracks.audio.length > 0 || tracks.subtitles.length > 0;
+  const hasTracks =
+    tracks.audio.length > 0 ||
+    tracks.subtitles.length > 0 ||
+    subtitlesSuite.supportsExternalSubtitles;
   const showRetry = status.kind === 'failed' && activeService !== null;
   const statusLine =
     sessionState.kind === 'unavailable'
@@ -330,6 +354,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     qualityVariants: quality.variants,
     onSelectQualityVariant: quality.selectVariant,
     ...syncAndQuality.controlsProps,
+    ...subtitlesSuite.controlsProps,
     onJumpToChannel: jumpToChannel,
     onToggleFullscreen: hostToggleFullscreen,
     onToggleAlwaysOnTop: hostToggleAlwaysOnTop,
@@ -372,7 +397,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onCancelPreviewChannel: handoff.cancelPreviewChannel,
     stillWatchingVisible: !inPip && extras.stillWatching.promptVisible,
     onStillWatchingKey: extras.handleStillWatchingKey,
-    externalOverlayOpen: props.externalOverlayOpen,
+    externalOverlayOpen: props.externalOverlayOpen === true || subtitlesSuite.urlOverlayOpen,
   });
   hostKeyRef.current = controls.handleHostKey;
   cancelScrubRef.current = controls.cancelScrub;
@@ -430,7 +455,11 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   });
 
   const anySheetOpen =
-    controls.tracksOpen || controls.settingsOpen || controls.infoOpen || controls.channelListOpen;
+    controls.tracksOpen ||
+    controls.settingsOpen ||
+    controls.infoOpen ||
+    controls.channelListOpen ||
+    subtitlesSuite.urlOverlayOpen;
   const recordActivity = extras.stillWatching.recordUserActivity;
   usePlayerTvPan({
     openedEngine,
@@ -484,6 +513,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
         resizeMode={controls.resizeMode}
         subtitleBottomInsetPx={subtitleBottomInsetPx}
         subtitleFontFamily={subtitleFontFamily}
+        subtitleStyle={subtitlesSuite.subtitleStyle}
         surfaceRecreationToken={surfaceRecreationToken}
         useTextureView={useTextureView}
         osdVisible={osdVisible}
@@ -523,6 +553,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
         i18n={i18n}
         onSelectAudio={controls.selectAudio}
         onSelectSubtitle={controls.selectSubtitle}
+        {...subtitlesSuite.trackPickerProps}
         onClose={controls.closeTracks}
       />
     ) : null;
@@ -581,35 +612,30 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       timeDisplayMode={extras.timeDisplayMode}
       onCycleTimeDisplayMode={extras.handleCycleTimeDisplayMode}
       onToggleInfo={controls.toggleInfo}
-      {...(hostToggleAlwaysOnTop !== undefined
-        ? { alwaysOnTop, onToggleAlwaysOnTop: hostToggleAlwaysOnTop }
-        : {})}
-      {...(extras.cycleDeinterlaceMode !== undefined
-        ? {
-            deinterlaceMode: extras.activeDeinterlaceMode,
-            onCycleDeinterlaceMode: extras.cycleDeinterlaceMode,
-          }
-        : hostSetDeinterlace !== undefined
-          ? { deinterlace: controls.deinterlace, onToggleDeinterlace: controls.toggleDeinterlace }
-          : {})}
-      {...(extras.togglePitchLock !== undefined
-        ? { pitchLock: extras.activePitchLock, onTogglePitchLock: extras.togglePitchLock }
-        : {})}
-      {...(extras.toggleAudioNormalization !== undefined
-        ? {
-            audioNormalization: extras.activeAudioNorm,
-            onToggleAudioNormalization: extras.toggleAudioNormalization,
-          }
-        : {})}
-      {...(onToggleAutoSubtitlesOnSkipBack !== undefined
-        ? {
-            autoSubtitlesOnSkipBack: autoSubtitlesOnSkipBack === true,
-            onToggleAutoSubtitlesOnSkipBack,
-          }
-        : {})}
-      {...(onToggleAutoPlayNextEpisode !== undefined
-        ? { autoPlayNextEpisode: autoPlayNextEpisode !== false, onToggleAutoPlayNextEpisode }
-        : {})}
+      {...buildSettingsSheetOptionalProps({
+        alwaysOnTop,
+        hostToggleAlwaysOnTop,
+        activeDeinterlaceMode: extras.activeDeinterlaceMode,
+        cycleDeinterlaceMode: extras.cycleDeinterlaceMode,
+        hostSetDeinterlace,
+        deinterlace: controls.deinterlace,
+        toggleDeinterlace: controls.toggleDeinterlace,
+        activePitchLock: extras.activePitchLock,
+        togglePitchLock: extras.togglePitchLock,
+        activeAudioNorm: extras.activeAudioNorm,
+        toggleAudioNormalization: extras.toggleAudioNormalization,
+        autoSubtitlesOnSkipBack,
+        onToggleAutoSubtitlesOnSkipBack,
+        autoPlayNextEpisode,
+        onToggleAutoPlayNextEpisode,
+        hostSetAudioDevice,
+        audioDevices,
+        activeAudioDevice,
+        selectAudioDevice,
+        showAndroidDecoder,
+        activeDecoderMode,
+        handleSelectAndroidDecoderMode,
+      })}
       chapters={chapters}
       onSelectChapter={extras.handleSelectChapter}
       sleepTimer={extras.sleepTimer}
@@ -618,15 +644,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       statsVisible={controls.statsVisible}
       {...quality.sheetProps}
       {...syncAndQuality.sheetProps}
-      {...(hostSetAudioDevice !== undefined
-        ? { audioDevices, activeAudioDevice, onSelectAudioDevice: selectAudioDevice }
-        : {})}
-      {...(showAndroidDecoder
-        ? {
-            androidDecoderMode: activeDecoderMode,
-            onSelectAndroidDecoderMode: handleSelectAndroidDecoderMode,
-          }
-        : {})}
+      {...subtitlesSuite.settingsSheetProps}
       isTv={isTv}
       formFactor={formFactor}
       i18n={i18n}
@@ -728,6 +746,8 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       infoSheetNode={infoSheetNode}
       channelDrawerNode={channelDrawerNode}
       settingsSheetNode={settingsSheetNode}
+      externalSubtitleOverlay={subtitlesSuite.externalSubtitleOverlay}
+      externalSubtitleFeedback={subtitlesSuite.feedback?.kind ?? null}
       stillWatchingVisible={extras.stillWatching.promptVisible}
       stillWatchingRemainingSec={extras.stillWatching.remainingSeconds}
       stillWatchingFocusedAction={extras.stillWatchingAction}

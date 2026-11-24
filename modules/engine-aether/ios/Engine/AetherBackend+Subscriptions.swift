@@ -326,6 +326,8 @@ extension AetherBackend {
     avPlayerItemBufferCancellables.removeAll()
     subtitleClockCancellable?.cancel()
     subtitleClockCancellable = nil
+    externalSubtitleClockCancellable?.cancel()
+    externalSubtitleClockCancellable = nil
     lastAVBufferReportedBuffering = false
   }
 

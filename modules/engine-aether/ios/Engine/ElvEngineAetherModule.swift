@@ -21,6 +21,56 @@ private func resolveAppleDeviceModel() -> String {
   return machine
 }
 
+/// External sidecar subtitle record passed from JavaScript (`#32`, `#308`).
+struct ExternalSubtitleArgs: Record {
+  @Field var id: String = ""
+  @Field var uri: String = ""
+  @Field var label: String? = nil
+  @Field var language: String? = nil
+  @Field var mimeType: String? = nil
+  @Field var headers: [String: String]? = nil
+
+  init() {}
+
+  func toDescriptor() -> ExternalSubtitleDescriptor? {
+    let cleanId = id.trimmingCharacters(in: .whitespacesAndNewlines)
+    let cleanUri = uri.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !cleanId.isEmpty, !cleanUri.isEmpty else { return nil }
+    let cleanLabel = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let cleanLang = language?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let cleanMime = mimeType?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return ExternalSubtitleDescriptor(
+      id: cleanId,
+      uri: cleanUri,
+      label: (cleanLabel?.isEmpty == false) ? cleanLabel : nil,
+      language: (cleanLang?.isEmpty == false) ? cleanLang : nil,
+      mimeType: (cleanMime?.isEmpty == false) ? cleanMime : nil,
+      headers: headers ?? [:]
+    )
+  }
+}
+
+/// Live subtitle appearance record passed from JavaScript (`#32`).
+struct SubtitleStyleArgs: Record {
+  @Field var fontSize: String? = nil
+  @Field var textColor: String? = nil
+  @Field var backgroundColor: String? = nil
+  @Field var edgeStyle: String? = nil
+  @Field var verticalPosition: String? = nil
+
+  init() {}
+
+  func toOverride() -> UserSubtitleStyleOverride {
+    UserSubtitleStyleOverride.fromRaw(
+      fontSize: fontSize,
+      textColor: textColor,
+      backgroundColor: backgroundColor,
+      edgeStyle: edgeStyle,
+      verticalPosition: verticalPosition
+    )
+  }
+}
+
 /// Flattened `LoadCommand` record sent from JavaScript (`@elv/playback`'s `bridgeNativeEngine`).
 struct LoadArgs: Record {
   @Field var attempt: Int = 0
@@ -34,6 +84,9 @@ struct LoadArgs: Record {
   @Field var allowLegacyTls: Bool = false
   @Field var audioTrackId: String? = nil
   @Field var subtitleTrackId: ValueOrUndefined<String?> = .undefined
+  @Field var secondarySubtitleTrackId: String? = nil
+  @Field var externalSubtitles: [ExternalSubtitleArgs]? = nil
+  @Field var subtitleStyle: SubtitleStyleArgs? = nil
 
   init() {}
 
@@ -50,6 +103,8 @@ struct LoadArgs: Record {
         subtitlePref = .off
       }
     }
+    let trimmedSecondary = secondarySubtitleTrackId?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let parsedExternal = (externalSubtitles ?? []).compactMap { $0.toDescriptor() }
     let cleanStartMs = startMs.flatMap { $0.isFinite ? $0 : nil }
     return LoadRequest(
       url: url,
@@ -61,7 +116,10 @@ struct LoadArgs: Record {
       filterSdhSubtitles: filterSdhSubtitles,
       allowLegacyTls: allowLegacyTls,
       audioTrackId: (trimmedAudio?.isEmpty == false) ? trimmedAudio : nil,
-      subtitlePreference: subtitlePref
+      subtitlePreference: subtitlePref,
+      secondarySubtitleTrackId: (trimmedSecondary?.isEmpty == false) ? trimmedSecondary : nil,
+      externalSubtitles: parsedExternal,
+      subtitleStyle: subtitleStyle?.toOverride()
     )
   }
 }
@@ -249,6 +307,19 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
         engine.selectSubtitleTrack(attempt, id: id)
       }
 
+      Function("selectSecondarySubtitleTrack") { (engine: EngineObject, attempt: Int, id: String?) in
+        engine.selectSecondarySubtitleTrack(attempt, id: id)
+      }
+
+      Function("addExternalSubtitle") { (engine: EngineObject, attempt: Int, args: ExternalSubtitleArgs) in
+        guard let descriptor = args.toDescriptor() else { return }
+        engine.addExternalSubtitle(attempt, track: descriptor)
+      }
+
+      Function("setSubtitleStyle") { (engine: EngineObject, args: SubtitleStyleArgs?) in
+        engine.setSubtitleStyle(args?.toOverride())
+      }
+
       Function("setAudioDelay") { (engine: EngineObject, attempt: Int, delayMs: Double) in
         engine.setAudioDelay(attempt, delayMs: delayMs)
       }
@@ -285,6 +356,10 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
 
       Prop("subtitleFontFamily") { (view: AetherSurfaceView, family: String?) in
         view.setSubtitleFontFamily(family)
+      }
+
+      Prop("subtitleStyle") { (view: AetherSurfaceView, args: SubtitleStyleArgs?) in
+        view.setSubtitleStyle(args?.toOverride())
       }
 
       Prop("osdVisible") { (view: AetherSurfaceView, visible: Bool?) in

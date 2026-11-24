@@ -16,6 +16,7 @@ public struct TrackInfoOut: Equatable, Sendable {
   public var channels: Int?
   public var forced: Bool
   public var isDefault: Bool
+  public var external: Bool
 
   public init(
     id: String,
@@ -24,7 +25,8 @@ public struct TrackInfoOut: Equatable, Sendable {
     codec: String? = nil,
     channels: Int? = nil,
     forced: Bool = false,
-    isDefault: Bool = false
+    isDefault: Bool = false,
+    external: Bool = false
   ) {
     self.id = id
     self.language = language
@@ -33,6 +35,7 @@ public struct TrackInfoOut: Equatable, Sendable {
     self.channels = channels
     self.forced = forced
     self.isDefault = isDefault
+    self.external = external
   }
 
   public func toDictionary() -> [String: Any] {
@@ -43,6 +46,7 @@ public struct TrackInfoOut: Equatable, Sendable {
     if let channels { out["channels"] = channels }
     if forced { out["forced"] = true }
     if isDefault { out["isDefault"] = true }
+    if external { out["external"] = true }
     return out
   }
 }
@@ -55,6 +59,7 @@ public struct MediaTracksOut: Equatable, Sendable {
   public var subtitles: [TrackInfoOut]
   public var selectedAudioId: String?
   public var selectedSubtitleId: String?
+  public var selectedSecondarySubtitleId: String?
   public var videoQualities: [VideoQualityOptionOut]
   public var selectedVideoQualityId: String?
 
@@ -63,6 +68,7 @@ public struct MediaTracksOut: Equatable, Sendable {
     subtitles: [TrackInfoOut],
     selectedAudioId: String?,
     selectedSubtitleId: String?,
+    selectedSecondarySubtitleId: String? = nil,
     videoQualities: [VideoQualityOptionOut] = [],
     selectedVideoQualityId: String? = nil
   ) {
@@ -70,6 +76,7 @@ public struct MediaTracksOut: Equatable, Sendable {
     self.subtitles = subtitles
     self.selectedAudioId = selectedAudioId
     self.selectedSubtitleId = selectedSubtitleId
+    self.selectedSecondarySubtitleId = selectedSecondarySubtitleId
     self.videoQualities = videoQualities
     self.selectedVideoQualityId = selectedVideoQualityId
   }
@@ -80,6 +87,7 @@ public struct MediaTracksOut: Equatable, Sendable {
       "subtitles": subtitles.map { $0.toDictionary() },
       "selectedAudioId": selectedAudioId ?? NSNull(),
       "selectedSubtitleId": selectedSubtitleId ?? NSNull(),
+      "selectedSecondarySubtitleId": selectedSecondarySubtitleId ?? NSNull(),
     ]
     if !videoQualities.isEmpty {
       out["videoQualities"] = videoQualities.map { $0.toDictionary() }
@@ -87,6 +95,71 @@ public struct MediaTracksOut: Equatable, Sendable {
     }
     return out
   }
+}
+
+/// Parsed subtitle track identifier: either an embedded `"s:<streamId>"` or a user-attached external ID (`#32`, `#402`).
+public enum ParsedSubtitleId: Equatable, Sendable {
+  case embedded(canonicalId: String, streamId: Int)
+  case external(id: String)
+
+  public var canonicalId: String {
+    switch self {
+    case let .embedded(canonicalId, _): return canonicalId
+    case let .external(id): return id
+    }
+  }
+
+  public var streamId: Int? {
+    if case let .embedded(_, streamId) = self { return streamId }
+    return nil
+  }
+
+  public var externalId: String? {
+    if case let .external(id) = self { return id }
+    return nil
+  }
+}
+
+/// Parses an embedded (`"s:<nonNegativeInt32>"`) or external subtitle ID while rejecting `"a:*"`, malformed `"s:*"`, or control chars.
+public func parseAnySubtitleTrackId(_ raw: String) -> ParsedSubtitleId? {
+  let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !trimmed.isEmpty, trimmed.count <= 256 else { return nil }
+  for scalar in trimmed.unicodeScalars {
+    if scalar.value <= 0x1F || scalar.value == 0x7F { return nil }
+  }
+  if trimmed.hasPrefix("a:") { return nil }
+  if trimmed.hasPrefix("s:") {
+    guard let streamId = parseSubtitleTrackStreamId(trimmed) else { return nil }
+    return .embedded(canonicalId: formatSubtitleTrackId(streamId), streamId: streamId)
+  }
+  return .external(id: trimmed)
+}
+
+/// Outcome of a primary subtitle selection command.
+public struct SubtitleSelectionOutcome: Equatable, Sendable {
+  public let streamId: Int?
+  public let externalId: String?
+  public let clear: Bool
+  public let clearedSecondary: Bool
+  public let immediateTracks: MediaTracksOut?
+}
+
+/// Outcome of a secondary subtitle selection command (`#402`).
+public struct SecondarySubtitleSelectionOutcome: Equatable, Sendable {
+  public let valid: Bool
+  public let secondaryId: String?
+  public let immediateTracks: MediaTracksOut?
+}
+
+/// Outcome of reconciling an observed `MediaTracksOut` snapshot against persisted track preferences.
+public struct TrackReconcileOutcome: Equatable, Sendable {
+  public let toEmit: MediaTracksOut?
+  public let selectAudioStreamId: Int?
+  public let selectSubtitleStreamId: Int?
+  public let selectExternalSubtitleId: String?
+  public let clearSubtitle: Bool
+  public let selectSecondarySubtitleId: String?
+  public let clearSecondarySubtitle: Bool
 }
 
 /// Pure track-preference state machine reconciling IDs and `(language, label)` fallbacks at most once per load.
@@ -105,14 +178,23 @@ public struct TrackSelectionState: Equatable, Sendable {
 
   public private(set) var audioChoice: Choice?
   public private(set) var subtitleChoice: SubChoice = .default
+  public private(set) var secondarySubtitleChoice: Choice?
   public private(set) var videoQualityId: String?
   public private(set) var latestTracks: MediaTracksOut?
   public private(set) var lastEmitted: MediaTracksOut?
   private var audioReapplied = false
   private var subtitleReapplied = false
   private var subtitleOffApplied = false
+  private var secondarySubtitleReapplied = false
 
   public init() {}
+
+  private var primaryChoiceId: String? {
+    if case let .selected(choice) = subtitleChoice {
+      return choice.id
+    }
+    return nil
+  }
 
   public mutating func onLoad(_ request: LoadRequest) {
     latestTracks = nil
@@ -121,6 +203,7 @@ public struct TrackSelectionState: Equatable, Sendable {
     audioReapplied = false
     subtitleReapplied = false
     subtitleOffApplied = false
+    secondarySubtitleReapplied = false
 
     if let rawAudio = request.audioTrackId, let streamId = parseAudioTrackStreamId(rawAudio) {
       let wantedAudio = formatAudioTrackId(streamId)
@@ -139,8 +222,8 @@ public struct TrackSelectionState: Equatable, Sendable {
     case .off:
       subtitleChoice = .off
     case let .selected(rawSub):
-      if let streamId = parseSubtitleTrackStreamId(rawSub) {
-        let wantedSub = formatSubtitleTrackId(streamId)
+      if let parsed = parseAnySubtitleTrackId(rawSub) {
+        let wantedSub = parsed.canonicalId
         if case let .selected(current) = subtitleChoice, current.id == wantedSub {
           subtitleChoice = .selected(current)
         } else {
@@ -150,6 +233,20 @@ public struct TrackSelectionState: Equatable, Sendable {
         subtitleChoice = .default
       }
     }
+
+    if let rawSecondary = request.secondarySubtitleTrackId,
+       let parsed = parseAnySubtitleTrackId(rawSecondary),
+       parsed.canonicalId != primaryChoiceId
+    {
+      let wantedSec = parsed.canonicalId
+      if let current = secondarySubtitleChoice, current.id == wantedSec {
+        secondarySubtitleChoice = current
+      } else {
+        secondarySubtitleChoice = Choice(id: wantedSec, language: nil, label: nil)
+      }
+    } else {
+      secondarySubtitleChoice = nil
+    }
   }
 
   public mutating func onPrepareReuse() {
@@ -158,17 +255,20 @@ public struct TrackSelectionState: Equatable, Sendable {
     audioReapplied = false
     subtitleReapplied = false
     subtitleOffApplied = false
+    secondarySubtitleReapplied = false
   }
 
   public mutating func onStop() {
     audioChoice = nil
     subtitleChoice = .default
+    secondarySubtitleChoice = nil
     videoQualityId = nil
     latestTracks = nil
     lastEmitted = nil
     audioReapplied = false
     subtitleReapplied = false
     subtitleOffApplied = false
+    secondarySubtitleReapplied = false
   }
 
   public func apply(to options: inout EngineLoadOptions) {
@@ -186,10 +286,18 @@ public struct TrackSelectionState: Equatable, Sendable {
       options.preferredSubtitleLanguages = []
       options.subtitlesDisabled = true
     case let .selected(choice):
-      options.initialSubtitleTrackId = parseSubtitleTrackStreamId(choice.id)
-      options.preferredSubtitleLanguages = choice.language.map { [$0] } ?? []
-      options.subtitlesDisabled = false
+      if let streamId = parseSubtitleTrackStreamId(choice.id) {
+        options.initialSubtitleTrackId = streamId
+        options.preferredSubtitleLanguages = choice.language.map { [$0] } ?? []
+        options.subtitlesDisabled = false
+      } else {
+        // Primary is an external subtitle track: keep embedded auto-selection disabled.
+        options.initialSubtitleTrackId = nil
+        options.preferredSubtitleLanguages = []
+        options.subtitlesDisabled = true
+      }
     }
+    options.secondarySubtitleTrackId = secondarySubtitleChoice?.id
   }
 
   public mutating func selectAudio(_ id: String) -> Int? {
@@ -201,32 +309,104 @@ public struct TrackSelectionState: Equatable, Sendable {
     return streamId
   }
 
-  public mutating func selectSubtitle(_ id: String?) -> (streamId: Int?, clear: Bool, immediateTracks: MediaTracksOut?) {
+  public mutating func selectSubtitle(_ id: String?) -> SubtitleSelectionOutcome {
     guard let id else {
       subtitleChoice = .off
       subtitleReapplied = false
       subtitleOffApplied = true
       guard var updated = latestTracks else {
-        return (nil, true, nil)
+        return SubtitleSelectionOutcome(streamId: nil, externalId: nil, clear: true, clearedSecondary: false, immediateTracks: nil)
       }
       updated.selectedSubtitleId = nil
       latestTracks = updated
       if updated != lastEmitted {
         lastEmitted = updated
-        return (nil, true, updated)
+        return SubtitleSelectionOutcome(streamId: nil, externalId: nil, clear: true, clearedSecondary: false, immediateTracks: updated)
       }
-      return (nil, true, nil)
+      return SubtitleSelectionOutcome(streamId: nil, externalId: nil, clear: true, clearedSecondary: false, immediateTracks: nil)
     }
 
-    guard let streamId = parseSubtitleTrackStreamId(id) else {
-      return (nil, false, nil)
+    guard let parsed = parseAnySubtitleTrackId(id) else {
+      return SubtitleSelectionOutcome(streamId: nil, externalId: nil, clear: false, clearedSecondary: false, immediateTracks: nil)
     }
-    let canonicalId = formatSubtitleTrackId(streamId)
+    let canonicalId = parsed.canonicalId
     let matched = latestTracks?.subtitles.first { $0.id == canonicalId }
     subtitleChoice = .selected(Choice(id: canonicalId, language: matched?.language, label: matched?.label))
     subtitleReapplied = true
     subtitleOffApplied = false
-    return (streamId, false, nil)
+
+    // Enforce secondary != primary collision guard (`#402`).
+    var clearedSecondary = false
+    if secondarySubtitleChoice?.id == canonicalId || latestTracks?.selectedSecondarySubtitleId == canonicalId {
+      secondarySubtitleChoice = nil
+      secondarySubtitleReapplied = true
+      clearedSecondary = true
+    }
+
+    var immediate: MediaTracksOut?
+    if parsed.externalId != nil || clearedSecondary, var updated = latestTracks {
+      if parsed.externalId != nil {
+        updated.selectedSubtitleId = canonicalId
+      }
+      if clearedSecondary {
+        updated.selectedSecondarySubtitleId = nil
+      }
+      latestTracks = updated
+      if updated != lastEmitted {
+        lastEmitted = updated
+        immediate = updated
+      }
+    }
+
+    return SubtitleSelectionOutcome(
+      streamId: parsed.streamId,
+      externalId: parsed.externalId,
+      clear: false,
+      clearedSecondary: clearedSecondary,
+      immediateTracks: immediate
+    )
+  }
+
+  /// Selects a secondary subtitle track, or disables secondary subtitles when `nil`, enforcing `secondary != primary` (`#402`).
+  public mutating func selectSecondarySubtitle(_ id: String?) -> SecondarySubtitleSelectionOutcome {
+    guard let id else {
+      secondarySubtitleChoice = nil
+      secondarySubtitleReapplied = true
+      guard var updated = latestTracks else {
+        return SecondarySubtitleSelectionOutcome(valid: true, secondaryId: nil, immediateTracks: nil)
+      }
+      updated.selectedSecondarySubtitleId = nil
+      latestTracks = updated
+      if updated != lastEmitted {
+        lastEmitted = updated
+        return SecondarySubtitleSelectionOutcome(valid: true, secondaryId: nil, immediateTracks: updated)
+      }
+      return SecondarySubtitleSelectionOutcome(valid: true, secondaryId: nil, immediateTracks: nil)
+    }
+
+    guard let parsed = parseAnySubtitleTrackId(id) else {
+      return SecondarySubtitleSelectionOutcome(valid: false, secondaryId: nil, immediateTracks: nil)
+    }
+    let canonicalId = parsed.canonicalId
+    let activePrimaryId = latestTracks?.selectedSubtitleId ?? primaryChoiceId
+    guard canonicalId != activePrimaryId else {
+      return SecondarySubtitleSelectionOutcome(valid: false, secondaryId: nil, immediateTracks: nil)
+    }
+
+    let matched = latestTracks?.subtitles.first { $0.id == canonicalId }
+    secondarySubtitleChoice = Choice(id: canonicalId, language: matched?.language, label: matched?.label)
+    secondarySubtitleReapplied = true
+
+    guard var updated = latestTracks else {
+      return SecondarySubtitleSelectionOutcome(valid: true, secondaryId: canonicalId, immediateTracks: nil)
+    }
+    updated.selectedSecondarySubtitleId = canonicalId
+    latestTracks = updated
+    if updated != lastEmitted {
+      lastEmitted = updated
+      return SecondarySubtitleSelectionOutcome(valid: true, secondaryId: canonicalId, immediateTracks: updated)
+    }
+    return SecondarySubtitleSelectionOutcome(valid: true, secondaryId: canonicalId, immediateTracks: nil)
   }
 
   public mutating func selectVideoQuality(
@@ -262,13 +442,14 @@ public struct TrackSelectionState: Equatable, Sendable {
     return (true, cap, nil)
   }
 
-  public mutating func reconcile(
-    observed: MediaTracksOut
-  ) -> (toEmit: MediaTracksOut?, selectAudioStreamId: Int?, selectSubtitleStreamId: Int?, clearSubtitle: Bool) {
+  public mutating func reconcile(observed: MediaTracksOut) -> TrackReconcileOutcome {
     var effective = observed
     var selectAudioStreamId: Int?
     var selectSubtitleStreamId: Int?
+    var selectExternalSubtitleId: String?
     var clearSubtitle = false
+    var selectSecondarySubtitleId: String?
+    var clearSecondarySubtitle = false
 
     if let wantedAudio = audioChoice, let resolved = Self.resolve(in: observed.audio, wanted: wantedAudio) {
       audioChoice = Choice(id: resolved.id, language: resolved.language, label: resolved.label)
@@ -301,10 +482,37 @@ public struct TrackSelectionState: Equatable, Sendable {
           effective.selectedSubtitleId = resolved.id
         } else if !subtitleReapplied {
           subtitleReapplied = true
-          selectSubtitleStreamId = parseSubtitleTrackStreamId(resolved.id)
+          if let streamId = parseSubtitleTrackStreamId(resolved.id) {
+            selectSubtitleStreamId = streamId
+          } else {
+            selectExternalSubtitleId = resolved.id
+          }
           effective.selectedSubtitleId = resolved.id
         }
       }
+    }
+
+    // Reconcile secondary subtitle while strictly enforcing `secondary != primary` (`#402`).
+    if let wantedSecondary = secondarySubtitleChoice,
+       let resolvedSec = Self.resolve(in: observed.subtitles, wanted: wantedSecondary)
+    {
+      if resolvedSec.id == effective.selectedSubtitleId {
+        secondarySubtitleChoice = nil
+        effective.selectedSecondarySubtitleId = nil
+        clearSecondarySubtitle = true
+      } else {
+        secondarySubtitleChoice = Choice(id: resolvedSec.id, language: resolvedSec.language, label: resolvedSec.label)
+        effective.selectedSecondarySubtitleId = resolvedSec.id
+        if observed.selectedSecondarySubtitleId != resolvedSec.id && !secondarySubtitleReapplied {
+          secondarySubtitleReapplied = true
+          selectSecondarySubtitleId = resolvedSec.id
+        }
+      }
+    } else if effective.selectedSecondarySubtitleId != nil
+      && effective.selectedSecondarySubtitleId == effective.selectedSubtitleId
+    {
+      effective.selectedSecondarySubtitleId = nil
+      clearSecondarySubtitle = true
     }
 
     if effective.videoQualities.isEmpty {
@@ -314,11 +522,17 @@ public struct TrackSelectionState: Equatable, Sendable {
     }
 
     latestTracks = effective
-    guard effective != lastEmitted else {
-      return (nil, selectAudioStreamId, selectSubtitleStreamId, clearSubtitle)
-    }
-    lastEmitted = effective
-    return (effective, selectAudioStreamId, selectSubtitleStreamId, clearSubtitle)
+    let toEmit = (effective != lastEmitted) ? effective : nil
+    if let toEmit { lastEmitted = toEmit }
+    return TrackReconcileOutcome(
+      toEmit: toEmit,
+      selectAudioStreamId: selectAudioStreamId,
+      selectSubtitleStreamId: selectSubtitleStreamId,
+      selectExternalSubtitleId: selectExternalSubtitleId,
+      clearSubtitle: clearSubtitle,
+      selectSecondarySubtitleId: selectSecondarySubtitleId,
+      clearSecondarySubtitle: clearSecondarySubtitle
+    )
   }
 
   private static func resolve(in candidates: [TrackInfoOut], wanted: Choice) -> TrackInfoOut? {

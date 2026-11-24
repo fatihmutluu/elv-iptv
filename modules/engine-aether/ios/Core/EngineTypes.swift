@@ -7,6 +7,33 @@ public enum DisplayCriteriaOwnerOption: String, Equatable, Sendable {
   case host
 }
 
+/// External sidecar subtitle track descriptor passed on load or live via `addExternalSubtitle` (`#32`, `#308`).
+public struct ExternalSubtitleDescriptor: Equatable, Sendable {
+  public var id: String
+  public var uri: String
+  public var label: String?
+  public var language: String?
+  public var mimeType: String?
+  /// Track-scoped HTTP headers — never inherited from primary stream headers (`#308`).
+  public var headers: [String: String]
+
+  public init(
+    id: String,
+    uri: String,
+    label: String? = nil,
+    language: String? = nil,
+    mimeType: String? = nil,
+    headers: [String: String] = [:]
+  ) {
+    self.id = id
+    self.uri = uri
+    self.label = label
+    self.language = language
+    self.mimeType = mimeType
+    self.headers = headers
+  }
+}
+
 /// Stream open parameters passed from JavaScript to the Apple playback engine.
 public struct LoadRequest: Equatable, Sendable {
   public var url: String
@@ -19,6 +46,9 @@ public struct LoadRequest: Equatable, Sendable {
   public var allowLegacyTls: Bool
   public var audioTrackId: String?
   public var subtitlePreference: SubtitlePreference
+  public var secondarySubtitleTrackId: String?
+  public var externalSubtitles: [ExternalSubtitleDescriptor]
+  public var subtitleStyle: UserSubtitleStyleOverride?
   public var liveEdgeCushionSeconds: Double?
 
   public init(
@@ -32,6 +62,9 @@ public struct LoadRequest: Equatable, Sendable {
     allowLegacyTls: Bool = false,
     audioTrackId: String? = nil,
     subtitlePreference: SubtitlePreference = .default,
+    secondarySubtitleTrackId: String? = nil,
+    externalSubtitles: [ExternalSubtitleDescriptor] = [],
+    subtitleStyle: UserSubtitleStyleOverride? = nil,
     liveEdgeCushionSeconds: Double? = nil
   ) {
     self.url = url
@@ -44,6 +77,9 @@ public struct LoadRequest: Equatable, Sendable {
     self.allowLegacyTls = allowLegacyTls
     self.audioTrackId = audioTrackId
     self.subtitlePreference = subtitlePreference
+    self.secondarySubtitleTrackId = secondarySubtitleTrackId
+    self.externalSubtitles = externalSubtitles
+    self.subtitleStyle = subtitleStyle
     self.liveEdgeCushionSeconds = liveEdgeCushionSeconds
   }
 }
@@ -82,6 +118,8 @@ public struct EngineLoadOptions: Equatable, Sendable {
   public var subtitlesDisabled: Bool
   public var filterSdhSubtitles: Bool
   public var allowLegacyTls: Bool
+  public var secondarySubtitleTrackId: String?
+  public var externalSubtitles: [ExternalSubtitleDescriptor]
 
   public init(
     isLive: Bool,
@@ -103,7 +141,9 @@ public struct EngineLoadOptions: Equatable, Sendable {
     preferredSubtitleLanguages: [String] = [],
     subtitlesDisabled: Bool = false,
     filterSdhSubtitles: Bool = false,
-    allowLegacyTls: Bool = false
+    allowLegacyTls: Bool = false,
+    secondarySubtitleTrackId: String? = nil,
+    externalSubtitles: [ExternalSubtitleDescriptor] = []
   ) {
     self.isLive = isLive
     self.httpHeaders = httpHeaders
@@ -125,6 +165,8 @@ public struct EngineLoadOptions: Equatable, Sendable {
     self.subtitlesDisabled = subtitlesDisabled
     self.filterSdhSubtitles = filterSdhSubtitles
     self.allowLegacyTls = allowLegacyTls
+    self.secondarySubtitleTrackId = secondarySubtitleTrackId
+    self.externalSubtitles = externalSubtitles
   }
 }
 
@@ -408,6 +450,9 @@ public protocol PlayerBackend: AnyObject {
   func setOsdVisible(_ visible: Bool)
   func selectAudioTrack(_ streamId: Int)
   func selectSubtitleTrack(_ streamId: Int?)
+  func selectExternalSubtitleTrack(_ id: String?)
+  func selectSecondarySubtitleTrack(_ id: String?)
+  func addExternalSubtitle(_ track: ExternalSubtitleDescriptor)
   func setAudioDelay(_ seconds: Double)
   func setSubtitleDelay(_ seconds: Double)
   func selectVideoQuality(_ cap: VideoQualityCap?)

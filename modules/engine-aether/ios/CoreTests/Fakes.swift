@@ -15,6 +15,9 @@ final class FakeBackend: PlayerBackend {
     case setOsdVisible(Bool)
     case selectAudioTrack(Int)
     case selectSubtitleTrack(Int?)
+    case selectExternalSubtitleTrack(String?)
+    case selectSecondarySubtitleTrack(String?)
+    case addExternalSubtitle(ExternalSubtitleDescriptor)
     case setAudioDelay(Double)
     case setSubtitleDelay(Double)
     case selectVideoQuality(VideoQualityCap?)
@@ -59,6 +62,18 @@ final class FakeBackend: PlayerBackend {
 
   func selectSubtitleTrack(_ streamId: Int?) {
     calls.append(.selectSubtitleTrack(streamId))
+  }
+
+  func selectExternalSubtitleTrack(_ id: String?) {
+    calls.append(.selectExternalSubtitleTrack(id))
+  }
+
+  func selectSecondarySubtitleTrack(_ id: String?) {
+    calls.append(.selectSecondarySubtitleTrack(id))
+  }
+
+  func addExternalSubtitle(_ track: ExternalSubtitleDescriptor) {
+    calls.append(.addExternalSubtitle(track))
   }
 
   func setAudioDelay(_ seconds: Double) {

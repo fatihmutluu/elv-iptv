@@ -1,5 +1,10 @@
 import type { ItemRow } from '@elv/data';
-import type { AccessibilityFontFamily } from '@elv/domain';
+import type {
+  AccessibilityFontFamily,
+  AndroidDecoderMode,
+  DeinterlaceMode,
+  SubtitleStyleConfig,
+} from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import {
   type PlaybackClock,
@@ -12,7 +17,7 @@ import { Scrim, useTheme, useViewport } from '@elv/ui-kit';
 import { type ReactElement, type RefObject, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View, type ViewStyle } from 'react-native';
 import type { PlayableEntry } from '../ports/play-target';
-import type { OpenVideoEngine, VideoResizeMode } from '../ports/video-host';
+import type { AudioDeviceInfo, OpenVideoEngine, VideoResizeMode } from '../ports/video-host';
 import {
   DesktopCinemaBar,
   DesktopDockedTopBar,
@@ -27,6 +32,80 @@ import { MIN_BRIGHTNESS } from './PlayerTouchGestures';
 
 export { DesktopDockedTopBar, PlayerLockedOverlay, type PlayerOsdProps };
 
+/** Builds optional capability-gated props for `PlayerSettingsSheet` from `PlayerScreen` state. */
+export function buildSettingsSheetOptionalProps(opts: {
+  readonly alwaysOnTop: boolean;
+  readonly hostToggleAlwaysOnTop: (() => void) | undefined;
+  readonly activeDeinterlaceMode: DeinterlaceMode;
+  readonly cycleDeinterlaceMode: (() => void) | undefined;
+  readonly hostSetDeinterlace: ((enabled: boolean) => void) | undefined;
+  readonly deinterlace: boolean;
+  readonly toggleDeinterlace: () => void;
+  readonly activePitchLock: boolean;
+  readonly togglePitchLock: (() => void) | undefined;
+  readonly activeAudioNorm: boolean;
+  readonly toggleAudioNormalization: (() => void) | undefined;
+  readonly autoSubtitlesOnSkipBack: boolean | undefined;
+  readonly onToggleAutoSubtitlesOnSkipBack: (() => void) | undefined;
+  readonly autoPlayNextEpisode: boolean | undefined;
+  readonly onToggleAutoPlayNextEpisode: (() => void) | undefined;
+  readonly hostSetAudioDevice: ((name: string) => void) | undefined;
+  readonly audioDevices: readonly AudioDeviceInfo[];
+  readonly activeAudioDevice: string;
+  readonly selectAudioDevice: (name: string) => void;
+  readonly showAndroidDecoder: boolean;
+  readonly activeDecoderMode: AndroidDecoderMode | undefined;
+  readonly handleSelectAndroidDecoderMode: (mode: AndroidDecoderMode) => void;
+}) {
+  return {
+    ...(opts.hostToggleAlwaysOnTop
+      ? { alwaysOnTop: opts.alwaysOnTop, onToggleAlwaysOnTop: opts.hostToggleAlwaysOnTop }
+      : {}),
+    ...(opts.cycleDeinterlaceMode
+      ? {
+          deinterlaceMode: opts.activeDeinterlaceMode,
+          onCycleDeinterlaceMode: opts.cycleDeinterlaceMode,
+        }
+      : opts.hostSetDeinterlace
+        ? { deinterlace: opts.deinterlace, onToggleDeinterlace: opts.toggleDeinterlace }
+        : {}),
+    ...(opts.togglePitchLock
+      ? { pitchLock: opts.activePitchLock, onTogglePitchLock: opts.togglePitchLock }
+      : {}),
+    ...(opts.toggleAudioNormalization
+      ? {
+          audioNormalization: opts.activeAudioNorm,
+          onToggleAudioNormalization: opts.toggleAudioNormalization,
+        }
+      : {}),
+    ...(opts.onToggleAutoSubtitlesOnSkipBack
+      ? {
+          autoSubtitlesOnSkipBack: opts.autoSubtitlesOnSkipBack === true,
+          onToggleAutoSubtitlesOnSkipBack: opts.onToggleAutoSubtitlesOnSkipBack,
+        }
+      : {}),
+    ...(opts.onToggleAutoPlayNextEpisode
+      ? {
+          autoPlayNextEpisode: opts.autoPlayNextEpisode !== false,
+          onToggleAutoPlayNextEpisode: opts.onToggleAutoPlayNextEpisode,
+        }
+      : {}),
+    ...(opts.hostSetAudioDevice
+      ? {
+          audioDevices: opts.audioDevices,
+          activeAudioDevice: opts.activeAudioDevice,
+          onSelectAudioDevice: opts.selectAudioDevice,
+        }
+      : {}),
+    ...(opts.showAndroidDecoder && opts.activeDecoderMode !== undefined
+      ? {
+          androidDecoderMode: opts.activeDecoderMode,
+          onSelectAndroidDecoderMode: opts.handleSelectAndroidDecoderMode,
+        }
+      : {}),
+  };
+}
+
 /** Renders the active native video surface layer when a host engine session is ready. */
 export function PlayerSurfaceLayer(props: {
   readonly opened: OpenVideoEngine;
@@ -36,6 +115,7 @@ export function PlayerSurfaceLayer(props: {
   readonly resizeMode: VideoResizeMode;
   readonly subtitleBottomInsetPx: number;
   readonly subtitleFontFamily: AccessibilityFontFamily | undefined;
+  readonly subtitleStyle?: SubtitleStyleConfig | undefined;
   readonly surfaceRecreationToken: number;
   readonly useTextureView: boolean;
   readonly osdVisible: boolean;
@@ -55,6 +135,7 @@ export function PlayerSurfaceLayer(props: {
         ...(props.subtitleFontFamily !== undefined
           ? { subtitleFontFamily: props.subtitleFontFamily }
           : {}),
+        ...(props.subtitleStyle !== undefined ? { subtitleStyle: props.subtitleStyle } : {}),
         surfaceRecreationToken: props.surfaceRecreationToken,
         useTextureView: props.useTextureView,
         osdVisible: props.osdVisible,

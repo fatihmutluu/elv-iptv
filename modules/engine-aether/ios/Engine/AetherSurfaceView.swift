@@ -73,6 +73,8 @@ final class AetherSurfaceView: ExpoView {
   private(set) var currentVideoGravity: AVLayerVideoGravity = .resizeAspect
   private var currentResizeMode: SurfaceResizeMode = .fit
   private(set) var currentOsdVisible = true
+  private var propSubtitleStyle: UserSubtitleStyleOverride?
+  private var engineSubtitleStyle: UserSubtitleStyleOverride?
   #if os(iOS)
   var keyboardMapper = HardwareKeyboardMapper()
   private var playbackKeyCommands: [UIKeyCommand] = []
@@ -190,6 +192,7 @@ final class AetherSurfaceView: ExpoView {
       setResizeMode("fit")
       setSubtitleBottomInsetPx(0)
       setSubtitleFontFamily(nil)
+      setSubtitleStyle(nil)
       setOsdVisible(true)
     }
   }
@@ -237,6 +240,8 @@ final class AetherSurfaceView: ExpoView {
         driver.bindSurface(self)
       }
     } else {
+      engineSubtitleStyle = nil
+      subtitleOverlayView.updateSubtitleStyle(propSubtitleStyle)
       subtitleOverlayView.clear()
       shutterView.isHidden = false
       wantsScreenOn = false
@@ -284,6 +289,19 @@ final class AetherSurfaceView: ExpoView {
   }
 
   @MainActor
+  func setSubtitleStyle(_ style: UserSubtitleStyleOverride?) {
+    propSubtitleStyle = style
+    subtitleOverlayView.updateSubtitleStyle(propSubtitleStyle ?? engineSubtitleStyle)
+  }
+
+  @MainActor
+  func applySubtitleStyle(_ style: UserSubtitleStyleOverride?, from engine: EngineObject?) {
+    guard let engine, boundEngine === engine else { return }
+    engineSubtitleStyle = style
+    subtitleOverlayView.updateSubtitleStyle(propSubtitleStyle ?? engineSubtitleStyle)
+  }
+
+  @MainActor
   func setOsdVisible(_ visible: Bool?) {
     let next = visible ?? true
     guard next != currentOsdVisible else { return }
@@ -316,6 +334,8 @@ final class AetherSurfaceView: ExpoView {
   func detachEngineReference(_ engine: EngineObject?) {
     guard engine == nil || boundEngine === engine else { return }
     boundEngine = nil
+    engineSubtitleStyle = nil
+    subtitleOverlayView.updateSubtitleStyle(propSubtitleStyle)
     wantsScreenOn = false
     subtitleOverlayView.clear()
     shutterView.isHidden = false

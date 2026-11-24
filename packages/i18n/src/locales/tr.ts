@@ -2,6 +2,7 @@ import type { MessageId } from './en';
 import { trCatchupEpgMessages } from './tr-catchup-epg';
 import { trErgonomicsMessages } from './tr-ergonomics';
 import { trProfilesMessages } from './tr-profiles';
+import { trSubtitlesSuiteMessages } from './tr-subtitles-suite';
 
 /** Turkish (`tr`) message catalog. */
 export const trMessages: Readonly<Record<MessageId, string>> = {
@@ -708,4 +709,5 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trProfilesMessages,
   ...trErgonomicsMessages,
   ...trCatchupEpgMessages,
+  ...trSubtitlesSuiteMessages,
 };

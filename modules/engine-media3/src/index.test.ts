@@ -39,6 +39,9 @@ function fakeNative() {
     setBackgroundAudioEnabled: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
+    selectSecondarySubtitleTrack: vi.fn(),
+    addExternalSubtitle: vi.fn(),
+    setSubtitleStyle: vi.fn(),
     setAudioDelay: vi.fn(),
     setSubtitleDelay: vi.fn(),
     selectVideoQuality: vi.fn(),
@@ -165,6 +168,9 @@ describe('createMedia3Engine', () => {
       audioDelay: true,
       subtitleDelay: true,
       videoQualitySelection: true,
+      externalSubtitles: true,
+      subtitleStyling: true,
+      dualSubtitles: true,
     });
     const events: EngineEvent[] = [];
     engine?.subscribe((event) => events.push(event));
@@ -333,6 +339,66 @@ describe('createMedia3Engine', () => {
     expect(native.engine.setSubtitleDelay).toHaveBeenCalledTimes(1);
     expect(native.engine.selectVideoQuality).toHaveBeenCalledTimes(2);
   });
+
+  it('forwards externalSubtitles, subtitleStyle, addExternalSubtitle, and selectSecondarySubtitleTrack (#32, #308, #402)', async () => {
+    const native = fakeNative();
+    const engine = await create();
+    if (engine === null) throw new Error('engine expected');
+
+    const extTrack = {
+      id: 'sub-1',
+      uri: 'https://subs.example/en.srt',
+      label: 'English',
+      language: 'en',
+      mimeType: 'application/x-subrip',
+      headers: { 'X-Sub': '1' },
+    };
+    const subStyle = {
+      fontSize: 'large' as const,
+      textColor: 'yellow' as const,
+      backgroundColor: 'opaque' as const,
+      edgeStyle: 'dropShadow' as const,
+      verticalPosition: 'raised' as const,
+    };
+
+    engine.load({
+      attempt: 1,
+      url: 'https://cdn.example/movie.mp4',
+      headers: { Authorization: 'Bearer stream-secret' },
+      kind: 'vod',
+      options: {
+        externalSubtitles: [extTrack],
+        secondarySubtitleTrackId: 'ext:sub-1',
+        subtitleStyle: subStyle,
+      },
+    });
+    engine.addExternalSubtitle?.(2, extTrack);
+    engine.selectSecondarySubtitleTrack?.(3, '1:1');
+    engine.selectSecondarySubtitleTrack?.(4, null);
+    engine.setSubtitleStyle?.(subStyle);
+
+    expect(native.engine.load).toHaveBeenCalledWith({
+      attempt: 1,
+      url: 'https://cdn.example/movie.mp4',
+      headers: { Authorization: 'Bearer stream-secret' },
+      kind: 'vod',
+      externalSubtitles: [extTrack],
+      secondarySubtitleTrackId: 'ext:sub-1',
+      subtitleStyle: subStyle,
+    });
+    expect(native.engine.addExternalSubtitle).toHaveBeenCalledWith(2, extTrack);
+    expect(native.engine.selectSecondarySubtitleTrack).toHaveBeenNthCalledWith(1, 3, '1:1');
+    expect(native.engine.selectSecondarySubtitleTrack).toHaveBeenNthCalledWith(2, 4, null);
+    expect(native.engine.setSubtitleStyle).toHaveBeenCalledWith(subStyle);
+
+    engine.release();
+    engine.addExternalSubtitle?.(5, extTrack);
+    engine.selectSecondarySubtitleTrack?.(5, '1:0');
+    engine.setSubtitleStyle?.(subStyle);
+    expect(native.engine.addExternalSubtitle).toHaveBeenCalledTimes(1);
+    expect(native.engine.selectSecondarySubtitleTrack).toHaveBeenCalledTimes(2);
+    expect(native.engine.setSubtitleStyle).toHaveBeenCalledTimes(1);
+  });
 });
 
 function SurfaceView() {
@@ -370,6 +436,13 @@ describe('Media3Surface', () => {
         resizeMode: 'fill',
         subtitleBottomInsetPx: 96,
         subtitleFontFamily: 'atkinson',
+        subtitleStyle: {
+          fontSize: 'extraLarge',
+          textColor: 'cyan',
+          backgroundColor: 'none',
+          edgeStyle: 'outline',
+          verticalPosition: 'top',
+        },
         surfaceRecreationToken: 2,
         useTextureView: true,
       })?.props,
@@ -378,6 +451,13 @@ describe('Media3Surface', () => {
       resizeMode: 'fill',
       subtitleBottomInsetPx: 96,
       subtitleFontFamily: 'atkinson',
+      subtitleStyle: {
+        fontSize: 'extraLarge',
+        textColor: 'cyan',
+        backgroundColor: 'none',
+        edgeStyle: 'outline',
+        verticalPosition: 'top',
+      },
       surfaceRecreationToken: 2,
       useTextureView: true,
     });

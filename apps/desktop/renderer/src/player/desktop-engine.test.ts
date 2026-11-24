@@ -525,6 +525,9 @@ describe('createDesktopEngine', () => {
     expect(engine.capabilities.audioDelay).toBe(true);
     expect(engine.capabilities.subtitleDelay).toBe(true);
     expect(engine.capabilities.videoQualitySelection).toBe(true);
+    expect(engine.capabilities.externalSubtitles).toBe(true);
+    expect(engine.capabilities.subtitleStyling).toBe(true);
+    expect(engine.capabilities.dualSubtitles).toBe(true);
 
     engine.setAudioDelay(4, 250);
     engine.setAudioDelay(5, 99_000);
@@ -534,6 +537,21 @@ describe('createDesktopEngine', () => {
     engine.selectSecondarySubtitleTrack?.(9, null);
     engine.selectVideoQuality?.(10, '2');
     engine.selectVideoQuality?.(11, null);
+    const extTrack = {
+      id: 'ext-1',
+      uri: 'https://subs.example.test/en.srt',
+      label: 'English',
+      language: 'en',
+    };
+    const subStyle = {
+      fontSize: 'large' as const,
+      textColor: 'yellow' as const,
+      backgroundColor: 'opaque' as const,
+      edgeStyle: 'dropShadow' as const,
+      verticalPosition: 'raised' as const,
+    };
+    engine.addExternalSubtitle?.(12, extTrack);
+    engine.setSubtitleStyle?.(subStyle);
 
     expect(f.sent).toEqual([
       { engineId: 'e1', command: { name: 'setAudioDelay', attempt: 4, delaySec: 0.25 } },
@@ -543,6 +561,8 @@ describe('createDesktopEngine', () => {
       { engineId: 'e1', command: { name: 'selectSecondarySubtitleTrack', attempt: 9, id: null } },
       { engineId: 'e1', command: { name: 'selectVideoQuality', attempt: 10, id: '2' } },
       { engineId: 'e1', command: { name: 'selectVideoQuality', attempt: 11, id: null } },
+      { engineId: 'e1', command: { name: 'addExternalSubtitle', attempt: 12, track: extTrack } },
+      { engineId: 'e1', command: { name: 'setSubtitleStyle', style: subStyle } },
     ]);
     for (const msg of f.sent) expect(isPlayerCommandMessage(msg)).toBe(true);
   });

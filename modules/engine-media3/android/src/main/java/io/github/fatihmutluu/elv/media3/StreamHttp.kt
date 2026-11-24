@@ -1,11 +1,21 @@
 package io.github.fatihmutluu.elv.media3
 
+import android.content.Context
+import android.net.Uri
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.ContentDataSource
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.FileDataSource
+import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import java.io.IOException
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import okhttp3.Call
+import okhttp3.ConnectionPool
 import okhttp3.ConnectionSpec
 import okhttp3.Dispatcher
 import okhttp3.HttpUrl
@@ -482,4 +492,175 @@ internal fun streamDataSource(
     .setDefaultRequestProperties(cleanHeaders)
     .createDataSource()
   return source to calls
+}
+
+private const val SUBTITLE_MAX_REQUESTS = 16
+private const val SUBTITLE_MAX_REQUESTS_PER_HOST = 4
+
+/**
+ * Dedicated base OkHttpClient for external sidecar subtitle fetches (#308): completely separate connection pool and
+ * dispatcher from [streamClient], with zero inherited stream headers or cookies.
+ */
+private val isolatedSubtitleBaseClient: OkHttpClient by lazy {
+  val dispatcher = Dispatcher().apply {
+    maxRequests = SUBTITLE_MAX_REQUESTS
+    maxRequestsPerHost = SUBTITLE_MAX_REQUESTS_PER_HOST
+  }
+  OkHttpClient.Builder()
+    .connectionPool(ConnectionPool(4, 2, TimeUnit.MINUTES))
+    .connectionSpecs(MODERN_CONNECTION_SPECS)
+    .dispatcher(dispatcher)
+    .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+    .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+    .writeTimeout(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+    .build()
+}
+
+/**
+ * Builds an isolated per-subtitle [OkHttpClient] with its own empty [OriginCookieJar] and exact-origin redirect
+ * credential stripping so primary stream credentials never leak onto external subtitle requests (#308).
+ */
+internal fun subtitleHttpClient(allowLegacyTls: Boolean = false): OkHttpClient {
+  val cookieJar = OriginCookieJar()
+  return isolatedSubtitleBaseClient.newBuilder()
+    .connectionSpecs(if (allowLegacyTls) LEGACY_TLS_CONNECTION_SPECS else MODERN_CONNECTION_SPECS)
+    .addInterceptor { chain ->
+      val req = chain.request()
+      if (req.tag(CallRedirectState::class.java) != null) {
+        chain.proceed(req)
+      } else {
+        val origin = req.tag(StreamOrigin::class.java) ?: StreamOrigin(req.url)
+        val callerCookie = if (origin == StreamOrigin(req.url)) req.header("Cookie") else null
+        val state = CallRedirectState(origin, callerCookie)
+        chain.proceed(req.newBuilder().tag(CallRedirectState::class.java, state).build())
+      }
+    }
+    .addNetworkInterceptor { chain ->
+      val raw = chain.request()
+      val state = raw.tag(CallRedirectState::class.java)
+      val outbound = scopeHopRequest(raw, state, cookieJar)
+      val response = chain.proceed(outbound)
+      cookieJar.store(outbound.url, response.headers("Set-Cookie"))
+      response
+    }
+    .build()
+}
+
+/**
+ * Scheme-allowlisting [DataSource] for external sidecar subtitles (#308):
+ * - Routes `http://` and `https://` strictly through an isolated [subtitleHttpClient] with ONLY the headers explicitly
+ *   declared on that subtitle track (never primary stream `Authorization`, `Cookie`, `User-Agent`, or `Referer`).
+ * - Routes `file://` to [FileDataSource] and `content://` to [ContentDataSource].
+ * - Rejects every other URI scheme (`data:`, `ftp:`, `javascript:`, etc.).
+ */
+@OptIn(UnstableApi::class)
+internal class IsolatedSubtitleDataSource(
+  subtitleHeaders: Map<String, String>,
+  private val client: Call.Factory,
+  private val context: Context?,
+) : DataSource {
+  private val customAgent: String?
+  private val cleanHeaders: Map<String, String>
+  private val transferListeners = mutableListOf<TransferListener>()
+  private var activeSource: DataSource? = null
+  private var activeCalls: CancellableCalls? = null
+
+  init {
+    customAgent =
+      subtitleHeaders.entries
+        .firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }
+        ?.value
+        ?.let(::sanitizeHeaderValue)
+        ?.takeIf { it.isNotEmpty() }
+    val sanitized = LinkedHashMap<String, String>()
+    for ((rawName, rawValue) in subtitleHeaders) {
+      val name = rawName.trim()
+      if (name.equals("User-Agent", ignoreCase = true) || !isValidHeaderName(name)) continue
+      sanitized[name] = sanitizeHeaderValue(rawValue)
+    }
+    cleanHeaders = sanitized
+  }
+
+  override fun addTransferListener(transferListener: TransferListener) {
+    transferListeners += transferListener
+    activeSource?.addTransferListener(transferListener)
+  }
+
+  override fun open(dataSpec: DataSpec): Long {
+    val rawUri = dataSpec.uri.toString()
+    if (!isAllowedExternalSubtitleUri(rawUri)) {
+      throw IOException("Disallowed external subtitle URI")
+    }
+    val scheme = dataSpec.uri.normalizeScheme().scheme?.lowercase(Locale.ROOT)
+    val (delegate, calls) = when (scheme) {
+      "http", "https" -> {
+        val origin = rawUri.toHttpUrlOrNull()?.let(::StreamOrigin)
+        val cancellable = CancellableCalls(client, origin)
+        val httpSource = OkHttpDataSource.Factory(cancellable)
+          .setUserAgent(customAgent)
+          .setDefaultRequestProperties(cleanHeaders)
+          .createDataSource()
+        httpSource to cancellable
+      }
+      "file" -> FileDataSource() to null
+      "content" -> {
+        val appCtx = context?.applicationContext ?: context
+          ?: throw IOException("content:// external subtitle requires Android Context")
+        ContentDataSource(appCtx) to null
+      }
+      else -> throw IOException("Unsupported external subtitle URI scheme: $scheme")
+    }
+    for (listener in transferListeners) {
+      delegate.addTransferListener(listener)
+    }
+    activeSource = delegate
+    activeCalls = calls
+    return delegate.open(dataSpec)
+  }
+
+  override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+    activeSource?.read(buffer, offset, length) ?: C.RESULT_END_OF_INPUT
+
+  override fun getUri(): Uri? = activeSource?.uri
+
+  override fun getResponseHeaders(): Map<String, List<String>> =
+    activeSource?.responseHeaders ?: emptyMap()
+
+  fun cancel() {
+    activeCalls?.cancel()
+  }
+
+  override fun close() {
+    activeCalls?.cancel()
+    activeCalls = null
+    val current = activeSource ?: return
+    activeSource = null
+    current.close()
+  }
+}
+
+/** HTTP transport helpers for Media3 playback and isolated external subtitles (`#308`). */
+internal object StreamHttp {
+  /**
+   * Returns a [DataSource.Factory] strictly isolated from the primary stream's OkHttpClient, headers, and cookie jar
+   * (`#308`). Only [subtitleHeaders] explicitly declared on the subtitle track are sent over HTTP(S), and
+   * cross-origin redirects strip sensitive headers automatically.
+   */
+  @OptIn(UnstableApi::class)
+  fun subtitleDataSourceFactory(
+    subtitleHeaders: Map<String, String> = emptyMap(),
+    allowLegacyTls: Boolean = false,
+    context: Context? = null,
+  ): DataSource.Factory {
+    val isolatedClient = subtitleHttpClient(allowLegacyTls = allowLegacyTls)
+    val copiedHeaders = LinkedHashMap(subtitleHeaders)
+    val appCtx = context?.applicationContext ?: context
+    return DataSource.Factory {
+      IsolatedSubtitleDataSource(
+        subtitleHeaders = copiedHeaders,
+        client = isolatedClient,
+        context = appCtx,
+      )
+    }
+  }
 }

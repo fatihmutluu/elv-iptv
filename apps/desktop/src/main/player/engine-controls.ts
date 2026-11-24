@@ -1,3 +1,4 @@
+import { normalizeSubtitleStyle, type SubtitleStyleConfig } from '@elv/domain';
 import { type AttemptToken, clampPlaybackSpeed } from '@elv/playback';
 import type {
   AccessibilityFontFamily,
@@ -16,6 +17,7 @@ import {
   LOUDNORM_FILTER,
   pitchLockCommand,
 } from './mpv/options.ts';
+import { subtitleStyleCommands } from './mpv/subtitle-style.ts';
 
 export { DEINTERLACE_BWDIF_FILTER, isSpdifPassthroughValue, LOUDNORM_FILTER };
 
@@ -78,6 +80,9 @@ export interface EngineControls {
   setFilterSdh(enabled: boolean): void;
   setSubtitleFontFamily(family: AccessibilityFontFamily): void;
   getDesiredSubtitleFont(): string | undefined;
+  setSubtitleStyle(style: SubtitleStyleConfig): void;
+  rememberSubtitleStyle(style: SubtitleStyleConfig): SubtitleStyleConfig;
+  getDesiredSubtitleStyle(): SubtitleStyleConfig | undefined;
 }
 
 /** Creates speed coalescing, audio ramp, and runtime property-setter controllers for `createMpvEngine`. */
@@ -89,6 +94,7 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
   let spdifPassthroughActive = deps.initialSpdifPassthrough === true;
   let desiredAudioDevice: string | undefined;
   let desiredSubtitleFont: string | undefined;
+  let desiredSubtitleStyle: SubtitleStyleConfig | undefined;
   let desiredDeinterlaceMode: DeinterlaceMode | undefined;
   let desiredPitchLock: boolean | undefined;
   let desiredAudioNormalization: boolean | undefined;
@@ -346,6 +352,22 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
     },
     getDesiredSubtitleFont() {
       return desiredSubtitleFont;
+    },
+    setSubtitleStyle(style) {
+      if (deps.isReleased()) return;
+      const normalized = normalizeSubtitleStyle(style);
+      desiredSubtitleStyle = normalized;
+      if (deps.getLive() !== undefined) {
+        for (const cmd of subtitleStyleCommands(normalized)) deps.enqueueCommand(cmd);
+      }
+    },
+    rememberSubtitleStyle(style) {
+      const normalized = normalizeSubtitleStyle(style);
+      desiredSubtitleStyle = normalized;
+      return normalized;
+    },
+    getDesiredSubtitleStyle() {
+      return desiredSubtitleStyle;
     },
   };
 }

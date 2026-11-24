@@ -1,3 +1,11 @@
+import {
+  DEFAULT_SUBTITLE_STYLE,
+  mergeSubtitleStyle,
+  normalizeSubtitleStyle,
+  type SubtitleStyleConfig,
+  subtitleStyleEquals,
+} from './subtitle-style';
+
 /** Minimum supported UI font scale multiplier. */
 export const MIN_PREF_FONT_SCALE = 0.9;
 
@@ -135,6 +143,7 @@ export interface ExtendedPreferencesFields {
   readonly audioNormalization: boolean;
   readonly windowAspectRatioLock: boolean;
   readonly backgroundAudioPlayback: boolean;
+  readonly subtitleStyle: SubtitleStyleConfig;
 }
 
 const MAX_PREF_STRING_LENGTH = 64;
@@ -535,13 +544,16 @@ export function parseExtendedPreferences(
       typeof parsed.backgroundAudioPlayback === 'boolean'
         ? parsed.backgroundAudioPlayback
         : defaults.backgroundAudioPlayback,
+    subtitleStyle: normalizeSubtitleStyle(parsed.subtitleStyle),
   };
 }
 
 export function serializeExtendedPreferences(
   snapshot: ExtendedPreferencesFields,
   defaults: ExtendedPreferencesFields,
-): ExtendedPreferencesFields {
+): Omit<ExtendedPreferencesFields, 'subtitleStyle'> & {
+  readonly subtitleStyle?: SubtitleStyleConfig;
+} {
   const audio = resolveSerializedLangPair(
     snapshot.preferredAudioLanguages,
     snapshot.preferredAudioLang,
@@ -550,6 +562,7 @@ export function serializeExtendedPreferences(
     snapshot.preferredSubtitleLanguages,
     snapshot.preferredSubtitleLang,
   );
+  const subtitleStyle = normalizeSubtitleStyle(snapshot.subtitleStyle);
   return {
     preferredAudioLang: audio.first,
     preferredSubtitleLang: subtitle.first,
@@ -633,12 +646,15 @@ export function serializeExtendedPreferences(
     audioNormalization: Boolean(snapshot.audioNormalization),
     windowAspectRatioLock: Boolean(snapshot.windowAspectRatioLock),
     backgroundAudioPlayback: Boolean(snapshot.backgroundAudioPlayback),
+    ...(subtitleStyleEquals(subtitleStyle, DEFAULT_SUBTITLE_STYLE) ? {} : { subtitleStyle }),
   };
 }
 
 export function mergeExtendedPreferences(
   base: ExtendedPreferencesFields,
-  patch: Partial<ExtendedPreferencesFields>,
+  patch: Partial<Omit<ExtendedPreferencesFields, 'subtitleStyle'>> & {
+    readonly subtitleStyle?: Partial<SubtitleStyleConfig>;
+  },
 ): ExtendedPreferencesFields {
   const audio = mergeLangPair(
     base.preferredAudioLanguages,
@@ -767,5 +783,6 @@ export function mergeExtendedPreferences(
       typeof patch.backgroundAudioPlayback === 'boolean'
         ? patch.backgroundAudioPlayback
         : base.backgroundAudioPlayback,
+    subtitleStyle: mergeSubtitleStyle(base.subtitleStyle, patch.subtitleStyle),
   };
 }

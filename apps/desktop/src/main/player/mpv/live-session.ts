@@ -1,4 +1,5 @@
-import type { AttemptToken, EngineEvent, MediaKind } from '@elv/playback';
+import type { SubtitleStyleConfig } from '@elv/domain';
+import type { AttemptToken, EngineEvent, ExternalSubtitleTrack, MediaKind } from '@elv/playback';
 import type { DeinterlaceMode, PlayerUiEvent } from '../../../shared/player-ipc.ts';
 import type { VideoPresenter } from '../presenter/types.ts';
 import { type AudioDeviceTracker, createAudioDeviceTracker } from './audio-devices.ts';
@@ -31,6 +32,7 @@ import {
   replyEntryId,
   TRACK_PROPERTIES,
 } from './session-constants.ts';
+import { subtitleStyleCommands } from './subtitle-style.ts';
 import { parseMpvDelayMs } from './track-snapshot.ts';
 import type { TrackTracker } from './tracks.ts';
 
@@ -42,6 +44,8 @@ export interface MediaRequest {
   startMs?: number;
   preferHevcOverDolbyVision?: boolean;
   filterSdhSubtitles?: boolean;
+  subtitleStyle?: SubtitleStyleConfig;
+  externalSubtitles?: readonly ExternalSubtitleTrack[];
 }
 
 /** Active media attempt and its bound mpv playlist entry id. */
@@ -112,6 +116,8 @@ export interface LiveSessionHooks {
   onAudioSpdifProperty?(value: unknown): void;
   getDesiredAudioDevice?(): string | undefined;
   getDesiredSubtitleFont?(): string | undefined;
+  getDesiredSubtitleStyle?(): SubtitleStyleConfig | undefined;
+  onFileLoadedExternalSubtitles?(slot: MediaSlot): void;
   getDesiredDeinterlaceMode?(): DeinterlaceMode | undefined;
   getDesiredPitchLock?(): boolean | undefined;
   getDesiredAudioNormalization?(): boolean | undefined;
@@ -284,6 +290,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
               fromCurrent(L, tracks.sync());
             }
           }
+          if (media) hooks.onFileLoadedExternalSubtitles?.(media);
         }
         return;
       case 'playback-restart':
@@ -468,6 +475,10 @@ export function createSessionController(hooks: LiveSessionHooks) {
       if (desiredSubFont !== undefined) {
         L.appliedSubtitleFont = desiredSubFont;
         void send(L, ['set_property', 'sub-font', desiredSubFont]);
+      }
+      const desiredSubStyle = hooks.getDesiredSubtitleStyle?.();
+      if (desiredSubStyle !== undefined) {
+        for (const cmd of subtitleStyleCommands(desiredSubStyle)) void send(L, cmd);
       }
       const desiredDeinterlace = hooks.getDesiredDeinterlaceMode?.();
       if (desiredDeinterlace !== undefined) {

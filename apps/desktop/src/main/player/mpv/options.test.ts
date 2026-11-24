@@ -42,7 +42,7 @@ describe('launchArgs', () => {
       '--audio-pitch-correction=yes',
       '--tls-verify=yes',
       '--stream-lavf-o=icy=0,reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5',
-      '--reset-on-next-file=aid,sid,secondary-sid,vid,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
+      '--reset-on-next-file=aid,sid,secondary-sid,secondary-sub-pos,vid,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
       '--network-timeout=10',
       '--curl-enabled=no',
       '--osc=no',
@@ -224,12 +224,14 @@ describe('loadfileCommand', () => {
     expect(loadfileCommand({ ...base, kind: 'live' })[4]).toEqual({
       'demuxer-max-bytes': '32MiB',
       'demuxer-max-back-bytes': '128MiB',
+      'secondary-sub-pos': '10',
     });
     expect(loadfileCommand({ ...base, kind: 'vod', headers: { 'User-Agent': 'u' } })[4]).toEqual({
       'user-agent': 'u',
       'demuxer-max-bytes': '64MiB',
       'demuxer-max-back-bytes': '16MiB',
       'demuxer-hysteresis-secs': '10',
+      'secondary-sub-pos': '10',
     });
   });
 

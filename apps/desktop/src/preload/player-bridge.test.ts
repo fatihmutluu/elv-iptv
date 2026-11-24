@@ -72,6 +72,7 @@ describe('createPlayerBridge', () => {
         'onRemoteMediaAction',
         'onUi',
         'open',
+        'pickSubtitleFile',
         'reportGate',
         'send',
         'setArea',

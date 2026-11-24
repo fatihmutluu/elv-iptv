@@ -18,6 +18,7 @@ import type { ChannelDigitBuffer } from './channel-digit-entry';
 import type { PlayerOverlayLive } from './player-overlay-model';
 import { COARSE_SEEK_MS, type ScrubController, STEP_SEEK_MS } from './scrub-controller';
 import { routeSettingsMenuKey, type SettingsMenuState } from './settings-menu-nav';
+import type { SubtitleStyleField } from './subtitle-style-helpers';
 import { routePickerKey, type TrackPickerColumn, type TrackPickerCursor } from './track-picker-nav';
 import {
   clampTvOsdAction,
@@ -90,6 +91,15 @@ export interface PlayerControlsParams {
   onResizeModeChange?: ((mode: VideoResizeMode) => void) | undefined;
   onAudioTrackSelected?: ((id: string) => void) | undefined;
   onSubtitleTrackSelected?: ((id: string | null) => void) | undefined;
+  hasDualSubtitles?: boolean | undefined;
+  onSelectSecondarySubtitle?: ((id: string | null) => void) | undefined;
+  canPickSubtitleFile?: boolean | undefined;
+  onPickSubtitleFile?: (() => void) | undefined;
+  canLoadSubtitleUrl?: boolean | undefined;
+  onLoadSubtitleUrl?: (() => void) | undefined;
+  hasSubtitleStyle?: boolean | undefined;
+  onStepSubtitleStyle?: ((field: SubtitleStyleField, delta: -1 | 1) => void) | undefined;
+  onResetSubtitleStyle?: (() => void) | undefined;
   chapters?: readonly ChapterInfo[] | undefined;
   onSelectChapter?: ((startMs: number) => void) | undefined;
   onPrevChapter?: (() => void) | undefined;
@@ -126,6 +136,10 @@ export function readSettingsMenuOptionsFromControls(p: PlayerControlsParams, can
     ...(p.audioDelayMs !== undefined ? { audioDelayMs: p.audioDelayMs } : {}),
     hasSubtitleDelay: p.onAdjustSubtitleDelay !== undefined,
     ...(p.subtitleDelayMs !== undefined ? { subtitleDelayMs: p.subtitleDelayMs } : {}),
+    hasSubtitleStyle: p.hasSubtitleStyle === true,
+    hasDualSubtitles: p.hasDualSubtitles === true,
+    canPickSubtitleFile: p.canPickSubtitleFile === true,
+    canLoadSubtitleUrl: p.canLoadSubtitleUrl === true,
     hasVideoQuality:
       (p.tracks.videoQualities?.length ?? 0) > 0 && p.onSelectVideoQuality !== undefined,
     ...(p.selectedVideoQualityId !== undefined
@@ -167,6 +181,10 @@ export interface OverlayKeyRouteDeps {
   readonly audioDelayMs?: number;
   readonly hasSubtitleDelay?: boolean;
   readonly subtitleDelayMs?: number;
+  readonly hasSubtitleStyle?: boolean;
+  readonly hasDualSubtitles?: boolean;
+  readonly canPickSubtitleFile?: boolean;
+  readonly canLoadSubtitleUrl?: boolean;
   readonly hasVideoQuality?: boolean;
   readonly selectedVideoQualityId?: string | null;
   readonly hasQuality?: boolean;
@@ -215,6 +233,11 @@ export interface OverlayKeyRouteDeps {
   readonly selectSpeed: (rate: number) => void;
   readonly selectAudio?: (id: string) => void;
   readonly selectSubtitle?: (id: string | null) => void;
+  readonly selectSecondarySubtitle?: ((id: string | null) => void) | undefined;
+  readonly pickSubtitleFile?: (() => void) | undefined;
+  readonly loadSubtitleUrl?: (() => void) | undefined;
+  readonly stepSubtitleStyle?: ((field: SubtitleStyleField, delta: -1 | 1) => void) | undefined;
+  readonly resetSubtitleStyle?: (() => void) | undefined;
   readonly selectChapter?: ((startMs: number) => void) | undefined;
   readonly selectSleepTimer?: ((minutes: number) => void) | undefined;
   readonly toggleSleepTimerAction?: (() => void) | undefined;
@@ -440,6 +463,10 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       ...(d.audioDelayMs !== undefined ? { audioDelayMs: d.audioDelayMs } : {}),
       hasSubtitleDelay: d.hasSubtitleDelay === true,
       ...(d.subtitleDelayMs !== undefined ? { subtitleDelayMs: d.subtitleDelayMs } : {}),
+      hasSubtitleStyle: d.hasSubtitleStyle === true,
+      hasDualSubtitles: d.hasDualSubtitles === true,
+      canPickSubtitleFile: d.canPickSubtitleFile === true,
+      canLoadSubtitleUrl: d.canLoadSubtitleUrl === true,
       hasVideoQuality: d.hasVideoQuality === true,
       ...(d.selectedVideoQualityId !== undefined
         ? { selectedVideoQualityId: d.selectedVideoQualityId }
@@ -486,12 +513,24 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     else if (intent?.kind === 'subtitle') {
       if (d.selectSubtitle !== undefined) d.selectSubtitle(intent.id);
       else d.service?.selectSubtitleTrack(intent.id);
-    } else if (intent?.kind === 'speed') d.selectSpeed(intent.rate);
+    } else if (intent?.kind === 'secondarySubtitle') {
+      if (d.selectSecondarySubtitle !== undefined) d.selectSecondarySubtitle(intent.id);
+      else d.service?.selectSecondarySubtitleTrack(intent.id);
+    } else if (intent?.kind === 'pickSubtitleFile') d.pickSubtitleFile?.();
+    else if (intent?.kind === 'loadSubtitleUrl') d.loadSubtitleUrl?.();
+    else if (intent?.kind === 'stepSubtitleStyle')
+      d.stepSubtitleStyle?.(intent.field, intent.delta);
+    else if (intent?.kind === 'resetSubtitleStyle') d.resetSubtitleStyle?.();
+    else if (intent?.kind === 'speed') d.selectSpeed(intent.rate);
     return true;
   }
 
   if (s.tracksOpen) {
-    const intent = routePickerKey(event, s.pickerCursor, s.tracks);
+    const intent = routePickerKey(event, s.pickerCursor, s.tracks, {
+      dualSubtitles: d.hasDualSubtitles === true,
+      canPickSubtitleFile: d.canPickSubtitleFile === true,
+      canLoadSubtitleUrl: d.canLoadSubtitleUrl === true,
+    });
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'move') d.updatePickerCursor(intent.cursor);
     else if (intent?.kind === 'audio') {
@@ -500,7 +539,11 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     } else if (intent?.kind === 'subtitle') {
       if (d.selectSubtitle !== undefined) d.selectSubtitle(intent.id);
       else d.service?.selectSubtitleTrack(intent.id);
-    }
+    } else if (intent?.kind === 'secondarySubtitle') {
+      if (d.selectSecondarySubtitle !== undefined) d.selectSecondarySubtitle(intent.id);
+      else d.service?.selectSecondarySubtitleTrack(intent.id);
+    } else if (intent?.kind === 'pickSubtitleFile') d.pickSubtitleFile?.();
+    else if (intent?.kind === 'loadSubtitleUrl') d.loadSubtitleUrl?.();
     return true;
   }
 

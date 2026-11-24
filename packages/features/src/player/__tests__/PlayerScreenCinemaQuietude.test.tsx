@@ -613,8 +613,8 @@ describe('PlayerScreen Cinema Quietude OSD, 2-level Settings, Touch Lock, Next E
     expect(screen.getByTestId('player-settings-row-subtitles')).toBeTruthy();
     expect(onExit).not.toHaveBeenCalled();
 
-    // Down x6 (audio -> audioDelay -> subtitleDelay -> speed -> sleepTimer -> aspect) -> Select toggles Fit/Fill -> Down x3 to stats -> Select toggles Stats HUD on -> Up back
-    for (let i = 0; i < 6; i += 1) {
+    // Down x7 (audio -> audioDelay -> subtitleDelay -> subtitleStyle -> speed -> sleepTimer -> aspect) -> Select toggles Fit/Fill -> Down x3 to stats -> Select toggles Stats HUD on -> Up back
+    for (let i = 0; i < 7; i += 1) {
       await act(async () => {
         keys.tap(KEY_DOWN);
       });

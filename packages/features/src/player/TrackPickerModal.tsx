@@ -3,17 +3,22 @@ import type { MediaTracks } from '@elv/playback';
 import {
   type FormFactor,
   Icon,
+  MicroPill,
   useTheme,
   useViewport,
   webBackdropBlur,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
+import { type ComponentRef, Fragment, type ReactElement, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
 import { formatTrackLabel } from './track-labels';
-import type { TrackPickerCursor } from './track-picker-nav';
+import {
+  buildSubtitleColumnEntries,
+  type TrackPickerCursor,
+  type TrackPickerOptions,
+} from './track-picker-nav';
 
 export type { TrackPickerCursor } from './track-picker-nav';
 
@@ -29,6 +34,12 @@ function TrackRow({
   testID,
   label,
   selected,
+  disabled = false,
+  badgeLabel,
+  badgeTestID,
+  disabledHint,
+  disabledHintTestID,
+  role = 'radio',
   tvFocused,
   isTv,
   isTouch,
@@ -37,6 +48,12 @@ function TrackRow({
   testID: string;
   label: string;
   selected: boolean;
+  disabled?: boolean;
+  badgeLabel?: string;
+  badgeTestID?: string;
+  disabledHint?: string;
+  disabledHintTestID?: string;
+  role?: 'radio' | 'button';
   tvFocused: boolean;
   isTv: boolean;
   isTouch: boolean;
@@ -53,12 +70,18 @@ function TrackRow({
   return (
     <Pressable
       testID={testID}
-      focusable={!isTv}
-      accessibilityRole="radio"
-      accessibilityLabel={label}
-      accessibilityState={{ selected, checked: selected }}
-      aria-checked={selected}
+      disabled={disabled}
+      focusable={!isTv && !disabled}
+      accessibilityRole={role}
+      accessibilityLabel={disabledHint ? `${label} (${disabledHint})` : label}
+      accessibilityState={
+        role === 'radio'
+          ? { selected, checked: selected, ...(disabled ? { disabled: true } : {}) }
+          : { ...(disabled ? { disabled: true } : {}) }
+      }
+      {...(role === 'radio' ? { 'aria-checked': selected } : {})}
       onPress={(event) => {
+        if (disabled) return;
         blurWebTarget(event.currentTarget);
         onPress();
       }}
@@ -70,9 +93,10 @@ function TrackRow({
           backgroundColor: selected ? theme.colors.accentTint : theme.colors.bgSurface,
           borderColor,
           borderWidth,
+          opacity: disabled ? 0.55 : 1,
         },
         webTransition(theme, 'border-color, background-color'),
-        !isTv ? webCursorPointer() : undefined,
+        !isTv && !disabled ? webCursorPointer() : undefined,
       ]}
     >
       <Text
@@ -81,13 +105,31 @@ function TrackRow({
           theme.typography.title,
           styles.optionText,
           {
-            color: selected ? theme.colors.textPrimary : theme.colors.textSecondary,
+            color: disabled
+              ? theme.colors.textMuted
+              : selected
+                ? theme.colors.textPrimary
+                : theme.colors.textSecondary,
             fontWeight: selected ? '700' : '500',
           },
         ]}
       >
         {label}
       </Text>
+      {badgeLabel !== undefined ? (
+        <MicroPill
+          {...(badgeTestID !== undefined ? { testID: badgeTestID } : {})}
+          label={badgeLabel}
+          tone="accent"
+        />
+      ) : null}
+      {disabledHint !== undefined ? (
+        <MicroPill
+          {...(disabledHintTestID !== undefined ? { testID: disabledHintTestID } : {})}
+          label={disabledHint}
+          tone="neutral"
+        />
+      ) : null}
       {selected ? <Icon name="check" size={16} color={theme.colors.accent} /> : null}
     </Pressable>
   );
@@ -103,8 +145,12 @@ export function TrackPickerModal({
   isTv,
   formFactor,
   i18n,
+  dualSubtitles = false,
   onSelectAudio,
   onSelectSubtitle,
+  onSelectSecondarySubtitle,
+  onPickSubtitleFile,
+  onLoadSubtitleUrl,
   onClose,
 }: {
   tracks: MediaTracks;
@@ -112,8 +158,12 @@ export function TrackPickerModal({
   isTv: boolean;
   formFactor: FormFactor;
   i18n: AppI18n;
+  dualSubtitles?: boolean;
   onSelectAudio: (id: string) => void;
   onSelectSubtitle: (id: string | null) => void;
+  onSelectSecondarySubtitle?: (id: string | null) => void;
+  onPickSubtitleFile?: () => void;
+  onLoadSubtitleUrl?: () => void;
   onClose: () => void;
 }): ReactElement {
   const theme = useTheme();
@@ -122,6 +172,9 @@ export function TrackPickerModal({
   const rowPitch = Math.round(APPROX_ROW_PITCH * safeFontScale);
   const offLabel = i18n.t('player.subtitlesOff');
   const offSelected = tracks.selectedSubtitleId === null;
+  const secondaryOffSelected = (tracks.selectedSecondarySubtitleId ?? null) === null;
+  const externalBadge = i18n.t('player.externalSubtitle.badge');
+  const sameAsPrimaryHint = i18n.t('player.secondarySameAsPrimary');
   const closeLabel = i18n.t('player.closeTracks');
   const isPhone = formFactor === 'phone';
   const isTouch = formFactor === 'phone' || formFactor === 'tablet';
@@ -130,6 +183,16 @@ export function TrackPickerModal({
   const panelRef = useRef<ComponentRef<typeof View> | null>(null);
   const audioScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const subtitleScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
+
+  const pickerOptions: TrackPickerOptions = {
+    dualSubtitles: dualSubtitles && onSelectSecondarySubtitle !== undefined,
+    canPickSubtitleFile: onPickSubtitleFile !== undefined,
+    canLoadSubtitleUrl: onLoadSubtitleUrl !== undefined,
+  };
+  const subtitleEntries = buildSubtitleColumnEntries(tracks, pickerOptions);
+  const firstExternalIdx = subtitleEntries.findIndex(
+    (entry) => entry.kind === 'pickSubtitleFile' || entry.kind === 'loadSubtitleUrl',
+  );
 
   useDesktopDialogTrap(panelRef, isWebDesktop, onClose);
 
@@ -239,30 +302,146 @@ export function TrackPickerModal({
             {i18n.t('player.subtitleTracks')}
           </Text>
           <ScrollView ref={subtitleScrollRef} focusable={!isTv} style={listStyle}>
-            <TrackRow
-              testID="player-subtitle-off"
-              label={offLabel}
-              selected={offSelected}
-              tvFocused={showCursor && cursor.column === 'subtitles' && cursor.index === 0}
-              isTv={isTv}
-              isTouch={isTouch}
-              onPress={() => onSelectSubtitle(null)}
-            />
-            {tracks.subtitles.map((track, idx) => {
-              const label = formatTrackLabel(track, idx, tracks.subtitles, i18n);
+            {subtitleEntries.map((entry, idx) => {
+              const tvFocused = showCursor && cursor.column === 'subtitles' && cursor.index === idx;
+              if (entry.kind === 'primaryOff') {
+                return (
+                  <TrackRow
+                    key="primary-off"
+                    testID="player-subtitle-off"
+                    label={offLabel}
+                    selected={offSelected}
+                    tvFocused={tvFocused}
+                    isTv={isTv}
+                    isTouch={isTouch}
+                    onPress={() => onSelectSubtitle(null)}
+                  />
+                );
+              }
+              if (entry.kind === 'primaryTrack') {
+                const label = formatTrackLabel(
+                  entry.track,
+                  entry.trackIndex,
+                  tracks.subtitles,
+                  i18n,
+                );
+                return (
+                  <TrackRow
+                    key={`primary-${entry.track.id}`}
+                    testID={`player-subtitle-track-${entry.track.id}`}
+                    label={label}
+                    selected={tracks.selectedSubtitleId === entry.track.id}
+                    {...(entry.track.external === true
+                      ? {
+                          badgeLabel: externalBadge,
+                          badgeTestID: `player-subtitle-external-badge-${entry.track.id}`,
+                        }
+                      : {})}
+                    tvFocused={tvFocused}
+                    isTv={isTv}
+                    isTouch={isTouch}
+                    onPress={() => onSelectSubtitle(entry.track.id)}
+                  />
+                );
+              }
+              if (entry.kind === 'secondaryOff') {
+                return (
+                  <Fragment key="secondary-off">
+                    <Text
+                      testID="player-secondary-subtitle-header"
+                      style={[
+                        theme.typography.caption,
+                        styles.subSectionHeader,
+                        { color: theme.colors.textSecondary },
+                      ]}
+                    >
+                      {i18n.t('player.secondarySubtitleTracks')}
+                    </Text>
+                    <TrackRow
+                      testID="player-secondary-subtitle-off"
+                      label={offLabel}
+                      selected={secondaryOffSelected}
+                      tvFocused={tvFocused}
+                      isTv={isTv}
+                      isTouch={isTouch}
+                      onPress={() => onSelectSecondarySubtitle?.(null)}
+                    />
+                  </Fragment>
+                );
+              }
+              if (entry.kind === 'secondaryTrack') {
+                const label = formatTrackLabel(
+                  entry.track,
+                  entry.trackIndex,
+                  tracks.subtitles,
+                  i18n,
+                );
+                return (
+                  <TrackRow
+                    key={`secondary-${entry.track.id}`}
+                    testID={`player-secondary-subtitle-track-${entry.track.id}`}
+                    label={label}
+                    selected={
+                      !entry.disabled && tracks.selectedSecondarySubtitleId === entry.track.id
+                    }
+                    disabled={entry.disabled}
+                    {...(entry.track.external === true
+                      ? {
+                          badgeLabel: externalBadge,
+                          badgeTestID: `player-secondary-subtitle-external-badge-${entry.track.id}`,
+                        }
+                      : {})}
+                    {...(entry.disabled
+                      ? {
+                          disabledHint: sameAsPrimaryHint,
+                          disabledHintTestID: `player-secondary-subtitle-primary-hint-${entry.track.id}`,
+                        }
+                      : {})}
+                    tvFocused={tvFocused}
+                    isTv={isTv}
+                    isTouch={isTouch}
+                    onPress={() => onSelectSecondarySubtitle?.(entry.track.id)}
+                  />
+                );
+              }
+              const isFirstExternal = idx === firstExternalIdx;
+              const isPick = entry.kind === 'pickSubtitleFile';
               return (
-                <TrackRow
-                  key={track.id}
-                  testID={`player-subtitle-track-${track.id}`}
-                  label={label}
-                  selected={tracks.selectedSubtitleId === track.id}
-                  tvFocused={
-                    showCursor && cursor.column === 'subtitles' && cursor.index === idx + 1
-                  }
-                  isTv={isTv}
-                  isTouch={isTouch}
-                  onPress={() => onSelectSubtitle(track.id)}
-                />
+                <Fragment key={entry.kind}>
+                  {isFirstExternal ? (
+                    <Text
+                      testID="player-external-subtitle-header"
+                      style={[
+                        theme.typography.caption,
+                        styles.subSectionHeader,
+                        { color: theme.colors.textSecondary },
+                      ]}
+                    >
+                      {i18n.t('player.externalSubtitle.load')}
+                    </Text>
+                  ) : null}
+                  <TrackRow
+                    testID={
+                      isPick
+                        ? 'player-external-subtitle-pick-file'
+                        : 'player-external-subtitle-from-url'
+                    }
+                    label={i18n.t(
+                      isPick
+                        ? 'player.externalSubtitle.pickFile'
+                        : 'player.externalSubtitle.fromUrl',
+                    )}
+                    selected={false}
+                    role="button"
+                    tvFocused={tvFocused}
+                    isTv={isTv}
+                    isTouch={isTouch}
+                    onPress={() => {
+                      if (isPick) onPickSubtitleFile?.();
+                      else onLoadSubtitleUrl?.();
+                    }}
+                  />
+                </Fragment>
               );
             })}
           </ScrollView>
@@ -311,6 +490,10 @@ const styles = StyleSheet.create({
   column: {
     flex: 1,
     gap: 6,
+  },
+  subSectionHeader: {
+    marginTop: 6,
+    marginBottom: 4,
   },
   list: {
     maxHeight: 152,

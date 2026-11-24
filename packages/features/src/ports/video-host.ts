@@ -1,5 +1,5 @@
-import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
-import type { PlayerEngine, StreamRequest } from '@elv/playback';
+import type { AccessibilityFontFamily, DeinterlaceMode, SubtitleStyleConfig } from '@elv/domain';
+import type { ExternalSubtitleTrack, PlayerEngine, StreamRequest } from '@elv/playback';
 import type { ReactElement } from 'react';
 
 /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover, `stretch` fills bounds ignoring aspect). */
@@ -23,6 +23,8 @@ export interface VideoSurfaceProps {
   subtitleBottomInsetPx?: number;
   /** Preferred high-legibility subtitle typeface (`#163`). */
   subtitleFontFamily?: AccessibilityFontFamily;
+  /** User-selected subtitle visual appearance configuration (`#32`). */
+  subtitleStyle?: SubtitleStyleConfig;
   /** Monotonic token incremented on Rung 3 decoder reset to swap in a fresh native surface (`#144`). */
   surfaceRecreationToken?: number;
   /** Opt-in TextureView fallback on Android devices with broken SurfaceView compositing (`#262`). */
@@ -154,6 +156,8 @@ export interface OpenVideoEngine {
   readonly setTvPanGestureEnabled?: (enabled: boolean) => void;
   /** Optional tvOS Siri Remote axis-locked pan gesture subscription (`#225`). */
   readonly onTvPanGesture?: (listener: (event: TvPanGestureEvent) => void) => () => void;
+  /** Optional host file picker returning a validated local external subtitle track (`#32`). */
+  readonly pickSubtitleFile?: () => Promise<ExternalSubtitleTrack | null>;
 }
 
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */

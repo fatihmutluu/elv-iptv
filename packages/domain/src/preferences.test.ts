@@ -79,6 +79,13 @@ describe('preferences codec', () => {
       audioNormalization: false,
       windowAspectRatioLock: false,
       backgroundAudioPlayback: false,
+      subtitleStyle: {
+        fontSize: 'medium',
+        textColor: 'white',
+        backgroundColor: 'translucent',
+        edgeStyle: 'outline',
+        verticalPosition: 'bottom',
+      },
     });
   });
 

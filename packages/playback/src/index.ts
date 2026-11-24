@@ -38,6 +38,7 @@ export {
   type EngineErrorCode,
   type EngineEvent,
   type EngineState,
+  type ExternalSubtitleTrack,
   type LoadCommand,
   type LoadOptions,
   type MediaKind,
@@ -50,6 +51,13 @@ export {
   type VideoQualityOption,
 } from './engine';
 export { classifyError, type ErrorClass, toPlaybackError } from './errors';
+export {
+  inferSubtitleMimeType,
+  isAllowedExternalSubtitleUri,
+  MAX_EXTERNAL_SUBTITLE_URI_LENGTH,
+  normalizeExternalSubtitleTrack,
+  sanitizeExternalSubtitleHeaders,
+} from './external-subtitles';
 export {
   bridgeNativeEngine,
   type NativeEngineHandle,

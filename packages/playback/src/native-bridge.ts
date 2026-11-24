@@ -1,9 +1,10 @@
-import type { AndroidDecoderMode, BufferPreset } from '@elv/domain';
+import type { AndroidDecoderMode, BufferPreset, SubtitleStyleConfig } from '@elv/domain';
 import type {
   AttemptToken,
   ClockAnchor,
   EngineCapabilities,
   EngineEvent,
+  ExternalSubtitleTrack,
   LoadCommand,
   MediaKind,
   MediaTracks,
@@ -26,6 +27,9 @@ export interface NativeLoadCommand {
   decoderMode?: AndroidDecoderMode;
   audioTrackId?: string;
   subtitleTrackId?: string | null;
+  readonly secondarySubtitleTrackId?: string | null;
+  readonly externalSubtitles?: readonly ExternalSubtitleTrack[];
+  readonly subtitleStyle?: SubtitleStyleConfig;
 }
 
 /** Handle to a native engine shared object (`ElvEngineMedia3.Engine` or `ElvEngineAether.Engine`). */
@@ -41,6 +45,8 @@ export interface NativeEngineHandle {
   selectAudioTrack?(attempt: AttemptToken, id: string): void;
   selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;
   selectSecondarySubtitleTrack?(attempt: AttemptToken, id: string | null): void;
+  addExternalSubtitle?(attempt: AttemptToken, track: ExternalSubtitleTrack): void;
+  setSubtitleStyle?(style: SubtitleStyleConfig): void;
   setAudioDelay?(attempt: AttemptToken, delayMs: number): void;
   setSubtitleDelay?(attempt: AttemptToken, delayMs: number): void;
   selectVideoQuality?(attempt: AttemptToken, id: string | null): void;
@@ -73,6 +79,13 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
     ...(options?.decoderMode === undefined ? {} : { decoderMode: options.decoderMode }),
     ...(options?.audioTrackId === undefined ? {} : { audioTrackId: options.audioTrackId }),
     ...(options?.subtitleTrackId === undefined ? {} : { subtitleTrackId: options.subtitleTrackId }),
+    ...(options?.secondarySubtitleTrackId === undefined
+      ? {}
+      : { secondarySubtitleTrackId: options.secondarySubtitleTrackId }),
+    ...(options?.externalSubtitles === undefined
+      ? {}
+      : { externalSubtitles: options.externalSubtitles }),
+    ...(options?.subtitleStyle === undefined ? {} : { subtitleStyle: options.subtitleStyle }),
   };
 }
 
@@ -117,14 +130,22 @@ function normalizeTracksEvent(event: EngineEvent): EngineEvent {
   ) {
     return event;
   }
+  const normalizedSecondary =
+    raw.selectedSecondarySubtitleId === undefined
+      ? undefined
+      : nonEmptyStringOrNull(raw.selectedSecondarySubtitleId);
+  const safeSecondary =
+    normalizedSecondary !== undefined &&
+    normalizedSecondary !== null &&
+    normalizedSecondary === raw.selectedSubtitleId
+      ? null
+      : normalizedSecondary;
   const normalized: MediaTracks = {
     audio: raw.audio,
     subtitles: raw.subtitles,
     selectedAudioId: raw.selectedAudioId,
     selectedSubtitleId: raw.selectedSubtitleId,
-    ...(raw.selectedSecondarySubtitleId === undefined
-      ? {}
-      : { selectedSecondarySubtitleId: nonEmptyStringOrNull(raw.selectedSecondarySubtitleId) }),
+    ...(safeSecondary === undefined ? {} : { selectedSecondarySubtitleId: safeSecondary }),
     ...(raw.videoQualities === undefined
       ? {}
       : { videoQualities: normalizeVideoQualities(raw.videoQualities) }),
@@ -275,6 +296,21 @@ export function bridgeNativeEngine(
           selectSecondarySubtitleTrack: command((attempt: AttemptToken, id: string | null) => {
             adoptAttempt(attempt);
             native.selectSecondarySubtitleTrack?.(attempt, id);
+          }),
+        }),
+    ...(native.addExternalSubtitle === undefined
+      ? {}
+      : {
+          addExternalSubtitle: command((attempt: AttemptToken, track: ExternalSubtitleTrack) => {
+            adoptAttempt(attempt);
+            native.addExternalSubtitle?.(attempt, track);
+          }),
+        }),
+    ...(native.setSubtitleStyle === undefined
+      ? {}
+      : {
+          setSubtitleStyle: command((style: SubtitleStyleConfig) => {
+            native.setSubtitleStyle?.(style);
           }),
         }),
     ...(native.setAudioDelay === undefined
