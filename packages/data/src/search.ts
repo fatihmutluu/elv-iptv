@@ -4,11 +4,29 @@ import { isAdultKeywordMatch } from './parental-policy';
 import {
   type ActiveParentalFilter,
   buildSqlItemRestrictionClause,
-  isProgrammeRestricted,
   loadActiveParentalFilter,
 } from './parental-repo';
-import type { BrowseKind, ItemRow } from './queries';
-import { backfillProgrammesFtsIfEmpty } from './schema-v12';
+import type { BrowseKind } from './queries-shared';
+import {
+  LIVE_EFFECTIVE_NAME_EXPR,
+  LIVE_OVERRIDE_JOIN,
+  LIVE_OVERRIDE_META_COLS,
+  resolveQueryProfileId,
+} from './queries-shared';
+import {
+  escapeLikePattern,
+  MAX_SEARCH_LIMIT,
+  mergeLiveSearchHits,
+  type SearchItemHit,
+  type SearchMatchedBy,
+  searchLiveCustomNames,
+} from './search-channel-overrides';
+import {
+  type SearchEpisodeHit,
+  type SearchProgrammeHit,
+  searchEpg,
+  searchEpisodes,
+} from './search-epg-episodes';
 
 export {
   DEFAULT_SEARCH_SUGGESTIONS_LIMIT,
@@ -18,53 +36,23 @@ export {
   type SearchSuggestionKind,
   type SearchSuggestionsOptions,
 } from './search-suggestions';
+export {
+  escapeLikePattern,
+  MAX_SEARCH_LIMIT,
+  type SearchEpisodeHit,
+  type SearchItemHit,
+  type SearchMatchedBy,
+  type SearchProgrammeHit,
+};
 
 /** Default per-kind search result cap. */
 export const DEFAULT_SEARCH_LIMIT = 40;
-
-/** Hard upper bound on per-kind search results returned by one query. */
-export const MAX_SEARCH_LIMIT = 60;
 
 /** Maximum whitespace-separated folded tokens compiled into one FTS5 or fallback query. */
 export const MAX_SEARCH_TOKENS = 8;
 
 /** Filter scope accepted by {@link querySearch} and `CatalogService.search` (`#397`). */
 export type SearchScope = 'all' | 'live' | 'epg' | 'movie' | 'series' | 'episode';
-
-/** Field that matched a movie or series search hit (`#397`). */
-export type SearchMatchedBy = 'title' | 'cast' | 'director';
-
-/** A live channel, movie, or series search hit with optional match attribution (`#397`). */
-export interface SearchItemHit extends ItemRow {
-  readonly matchedBy?: SearchMatchedBy;
-}
-
-/** An EPG programme search hit joined to a visible live channel (`#397`). */
-export interface SearchProgrammeHit {
-  readonly sourceId: string;
-  readonly guideId: string;
-  readonly channelKey: string;
-  readonly channelName: string;
-  readonly channelLogoUrl: string | null;
-  readonly title: string;
-  readonly description: string | null;
-  readonly start: number;
-  readonly stop: number;
-  readonly category: string | null;
-  readonly isLiveNow: boolean;
-}
-
-/** A series episode search hit joined to a visible parent series (`#397`). */
-export interface SearchEpisodeHit {
-  readonly sourceId: string;
-  readonly itemKey: string;
-  readonly seriesKey: string;
-  readonly seriesName: string;
-  readonly season: number;
-  readonly episode: number;
-  readonly title: string;
-  readonly posterUrl: string | null;
-}
 
 /** Options controlling {@link querySearch} scope, source filtering, per-kind result cap, parental state, and reference clock. */
 export interface SearchOptions {
@@ -97,6 +85,9 @@ interface RawSearchRow {
   source_id: string;
   provider_id: string | null;
   name: string;
+  raw_name?: string;
+  original_name?: string | null;
+  co_sort_order?: number | null;
   name_fold: string;
   cast_fold: string | null;
   director_fold: string | null;
@@ -104,32 +95,6 @@ interface RawSearchRow {
   rating: number | null;
   year: number | null;
   num: number | null;
-}
-
-interface RawProgrammeSearchRow {
-  source_id: string;
-  guide_id: string;
-  channel_key: string;
-  channel_name: string;
-  channel_logo: string | null;
-  title: string;
-  description: string | null;
-  start: number;
-  stop: number;
-  categories_json: string | null;
-  genre: string | null;
-  rating_value: string | null;
-}
-
-interface RawEpisodeSearchRow {
-  source_id: string;
-  item_key: string;
-  series_key: string;
-  series_name: string;
-  season: number;
-  episode: number;
-  title: string;
-  poster_url: string | null;
 }
 
 const SEARCH_SPEC: Record<
@@ -183,11 +148,6 @@ function tokenizeFolded(folded: string): string[] {
     .split(/\s+/)
     .filter((t) => t.length > 0)
     .slice(0, MAX_SEARCH_TOKENS);
-}
-
-/** Escapes SQLite `LIKE` wildcards (`%`, `_`, `\`) using `\` as the `ESCAPE` character. */
-export function escapeLikePattern(token: string): string {
-  return token.replace(/[\\%_]/g, '\\$&');
 }
 
 /**
@@ -245,59 +205,15 @@ function mapSearchRow(
     sourceId: r.source_id,
     providerId: r.provider_id,
     name: r.name,
+    ...(typeof r.original_name === 'string' && r.original_name !== ''
+      ? { originalName: r.original_name }
+      : {}),
+    ...(typeof r.co_sort_order === 'number' ? { customSortOrder: r.co_sort_order } : {}),
     logo: r.logo,
     rating: r.rating,
     year: r.year,
     num: r.num,
     ...(matchedBy !== undefined ? { matchedBy } : {}),
-  };
-}
-
-function parseProgrammeCategory(
-  categoriesJson: string | null,
-  genre: string | null,
-): string | null {
-  if (categoriesJson !== null && categoriesJson !== '') {
-    try {
-      const parsed = JSON.parse(categoriesJson) as unknown;
-      if (Array.isArray(parsed)) {
-        for (const entry of parsed) {
-          if (typeof entry === 'string' && entry.trim() !== '') return entry.trim();
-        }
-      }
-    } catch {
-      // Fall through to genre
-    }
-  }
-  return genre !== null && genre !== '' ? genre : null;
-}
-
-function mapProgrammeSearchRow(r: RawProgrammeSearchRow, nowMs: number): SearchProgrammeHit {
-  return {
-    sourceId: r.source_id,
-    guideId: r.guide_id,
-    channelKey: r.channel_key,
-    channelName: r.channel_name,
-    channelLogoUrl: r.channel_logo,
-    title: r.title,
-    description: r.description,
-    start: r.start,
-    stop: r.stop,
-    category: parseProgrammeCategory(r.categories_json, r.genre),
-    isLiveNow: r.start <= nowMs && r.stop > nowMs,
-  };
-}
-
-function mapEpisodeSearchRow(r: RawEpisodeSearchRow): SearchEpisodeHit {
-  return {
-    sourceId: r.source_id,
-    itemKey: r.item_key,
-    seriesKey: r.series_key,
-    seriesName: r.series_name,
-    season: r.season,
-    episode: r.episode,
-    title: r.title,
-    posterUrl: r.poster_url,
   };
 }
 
@@ -313,7 +229,13 @@ function filterSearchRows(
   if (filter === null || !filter.blockAdultKeywords) return rows.slice(0, limit);
   const out: RawSearchRow[] = [];
   for (const r of rows) {
-    if (isAdultKeywordMatch(r.name) || isAdultKeywordMatch(r.name_fold)) continue;
+    if (
+      isAdultKeywordMatch(r.raw_name ?? r.name) ||
+      isAdultKeywordMatch(r.name) ||
+      isAdultKeywordMatch(r.name_fold)
+    ) {
+      continue;
+    }
     out.push(r);
     if (out.length >= limit) break;
   }
@@ -326,9 +248,11 @@ async function searchKindLikeFallback(
   tokens: readonly string[],
   limit: number,
   sourceId: string | undefined,
+  profileId: string,
   filter: ActiveParentalFilter | null,
 ): Promise<SearchItemHit[]> {
   const { table, cols, foldCols, hasCredits } = SEARCH_SPEC[kind];
+  const isLive = kind === 'live';
   const sourceClause = sourceId === undefined ? '' : ' AND t.source_id = ?';
   const restrict =
     filter === null
@@ -337,18 +261,24 @@ async function searchKindLikeFallback(
   const fetchLimit = searchFetchLimit(limit, filter);
   if (!hasCredits) {
     const likeClauses = tokens.map(() => "t.name_fold LIKE ? ESCAPE '\\'").join(' AND ');
+    const liveJoin = isLive ? `\n         ${LIVE_OVERRIDE_JOIN}` : '';
+    const liveHidden = isLive ? ' AND COALESCE(co.is_hidden, 0) = 0' : '';
+    const nameCols = isLive
+      ? `${LIVE_EFFECTIVE_NAME_EXPR} AS name, t.name AS raw_name, ${LIVE_OVERRIDE_META_COLS}`
+      : 't.name';
     const params: SqlValue[] = [
+      ...(isLive ? [profileId] : []),
       ...(sourceId === undefined ? [] : [sourceId]),
       ...restrict.params,
       ...tokens.map((tok) => `%${escapeLikePattern(tok)}%`),
       fetchLimit,
     ];
     const rows = await db.all<RawSearchRow>(
-      `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${foldCols}, ${cols}
+      `SELECT t.id, t.key, t.source_id, t.provider_id, ${nameCols}, ${foldCols}, ${cols}
          FROM ${table} t
-         JOIN sources s ON s.id = t.source_id AND s.deleting = 0
-        WHERE t.is_hidden = 0${sourceClause}${restrict.clause} AND ${likeClauses}
-        ORDER BY t.name COLLATE NOCASE ASC, t.id ASC
+         JOIN sources s ON s.id = t.source_id AND s.deleting = 0${liveJoin}
+        WHERE t.is_hidden = 0${liveHidden}${sourceClause}${restrict.clause} AND ${likeClauses}
+        ORDER BY name COLLATE NOCASE ASC, t.id ASC
         LIMIT ?`,
       params,
     );
@@ -396,9 +326,16 @@ async function searchKind(
   tokens: readonly string[],
   limit: number,
   sourceId: string | undefined,
+  profileId: string,
   filter: ActiveParentalFilter | null,
 ): Promise<SearchItemHit[]> {
   const { table, fts, cols, foldCols, bm25Expr, hasCredits } = SEARCH_SPEC[kind];
+  const isLive = kind === 'live';
+  const liveJoin = isLive ? `\n       ${LIVE_OVERRIDE_JOIN}` : '';
+  const liveHidden = isLive ? ' AND COALESCE(co.is_hidden, 0) = 0' : '';
+  const nameCols = isLive
+    ? `${LIVE_EFFECTIVE_NAME_EXPR} AS name, t.name AS raw_name, ${LIVE_OVERRIDE_META_COLS}`
+    : 't.name';
   const sourceClause = sourceId === undefined ? '' : ' AND t.source_id = ?';
   const restrict =
     filter === null
@@ -406,6 +343,7 @@ async function searchKind(
       : buildSqlItemRestrictionClause(filter, kind, 't.source_id', 't.key', sourceId);
   const fetchLimit = searchFetchLimit(limit, filter);
   const params: SqlValue[] = [
+    ...(isLive ? [profileId] : []),
     ftsQuery,
     ...(sourceId === undefined ? [] : [sourceId]),
     ...restrict.params,
@@ -414,307 +352,43 @@ async function searchKind(
     foldedQuery,
     fetchLimit,
   ];
-  const rows = await db.all<RawSearchRow>(
-    `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${foldCols}, ${cols}
-       FROM ${fts}
-       JOIN ${table} t ON t.id = ${fts}.rowid
-       JOIN sources s ON s.id = t.source_id AND s.deleting = 0
-      WHERE ${fts} MATCH ? AND t.is_hidden = 0${sourceClause}${restrict.clause}
-      ORDER BY CASE
-                 WHEN t.name_fold = ? THEN 0
-                 WHEN substr(t.name_fold, 1, length(?)) = ? THEN 1
-                 ELSE 2
-               END,
-               ${bm25Expr},
-               t.name
-      LIMIT ?`,
-    params,
-  );
+  const [rows, customHits] = await Promise.all([
+    db.all<RawSearchRow>(
+      `SELECT t.id, t.key, t.source_id, t.provider_id, ${nameCols}, ${foldCols}, ${cols}
+         FROM ${fts}
+         JOIN ${table} t ON t.id = ${fts}.rowid
+         JOIN sources s ON s.id = t.source_id AND s.deleting = 0${liveJoin}
+        WHERE ${fts} MATCH ? AND t.is_hidden = 0${liveHidden}${sourceClause}${restrict.clause}
+        ORDER BY CASE
+                   WHEN t.name_fold = ? THEN 0
+                   WHEN substr(t.name_fold, 1, length(?)) = ? THEN 1
+                   ELSE 2
+                 END,
+                 ${bm25Expr},
+                 t.name
+        LIMIT ?`,
+      params,
+    ),
+    isLive
+      ? searchLiveCustomNames(db, tokens, foldedQuery, limit, sourceId, profileId, filter)
+      : Promise.resolve([] as SearchItemHit[]),
+  ]);
   const filtered = filterSearchRows(rows, limit, filter);
-  if (filtered.length > 0) return filtered.map((r) => mapSearchRow(kind, r, tokens, hasCredits));
-  if (rows.length > 0) return [];
-  return searchKindLikeFallback(db, kind, tokens, limit, sourceId, filter);
-}
-
-const EPG_LIVE_JOIN = `JOIN live l
-  ON l.source_id = p.source_id
- AND l.is_hidden = 0
- AND (
-   l.key IN (
-     SELECT cg.channel_key FROM channel_guide cg
-      WHERE cg.source_id = p.source_id AND cg.guide_id = p.guide_id
-   )
-   OR (
-     l.guide_id = p.guide_id
-     AND NOT EXISTS (
-       SELECT 1 FROM channel_guide cg2
-        WHERE cg2.source_id = p.source_id AND cg2.guide_id = p.guide_id
-     )
-   )
- )`;
-
-function filterProgrammeRows(
-  rows: readonly RawProgrammeSearchRow[],
-  limit: number,
-  filter: ActiveParentalFilter | null,
-): RawProgrammeSearchRow[] {
-  if (filter === null) return rows.slice(0, limit);
-  const out: RawProgrammeSearchRow[] = [];
-  for (const r of rows) {
-    if (filter.blockAdultKeywords && isAdultKeywordMatch(r.channel_name)) continue;
-    if (isProgrammeRestricted(filter, r.title, r.description, r.rating_value)) continue;
-    out.push(r);
-    if (out.length >= limit) break;
+  if (filtered.length > 0) {
+    const hits = filtered.map((r) => mapSearchRow(kind, r, tokens, hasCredits));
+    return isLive ? mergeLiveSearchHits(customHits, hits, limit) : hits;
   }
-  return out;
-}
-
-async function queryEpgFts(
-  db: SqlDriver,
-  ftsQuery: string,
-  foldedQuery: string,
-  limit: number,
-  sourceId: string | undefined,
-  nowMs: number,
-  filter: ActiveParentalFilter | null,
-): Promise<RawProgrammeSearchRow[]> {
-  const sourceClause = sourceId === undefined ? '' : ' AND p.source_id = ?';
-  const restrict =
-    filter === null
-      ? { clause: '', params: [] as readonly SqlValue[] }
-      : buildSqlItemRestrictionClause(filter, 'live', 'l.source_id', 'l.key', sourceId);
-  const params: SqlValue[] = [
-    ftsQuery,
-    ...(sourceId === undefined ? [] : [sourceId]),
-    ...restrict.params,
-    nowMs,
-    nowMs,
-    nowMs,
-    foldedQuery,
-    foldedQuery,
-    foldedQuery,
-    searchFetchLimit(limit, filter),
-  ];
-  return db.all<RawProgrammeSearchRow>(
-    `SELECT p.source_id,
-            p.guide_id,
-            l.key AS channel_key,
-            l.name AS channel_name,
-            l.logo AS channel_logo,
-            p.title,
-            p.description,
-            p.start,
-            p.stop,
-            p.categories_json,
-            p.genre,
-            p.rating_value
-       FROM programmes_fts
-       JOIN programmes p
-         ON p.source_id = programmes_fts.source_id
-        AND p.guide_id = programmes_fts.guide_id
-        AND p.start = programmes_fts.start
-       JOIN sources s ON s.id = p.source_id AND s.deleting = 0
-       ${EPG_LIVE_JOIN}
-      WHERE programmes_fts MATCH ?${sourceClause}${restrict.clause}
-      ORDER BY CASE WHEN p.stop >= ? THEN 0 ELSE 1 END ASC,
-               CASE WHEN p.start <= ? AND p.stop > ? THEN 0 ELSE 1 END ASC,
-               CASE
-                 WHEN programmes_fts.title_fold = ? THEN 0
-                 WHEN substr(programmes_fts.title_fold, 1, length(?)) = ? THEN 1
-                 ELSE 2
-               END ASC,
-               bm25(programmes_fts, 0.0, 0.0, 0.0, 0.0, 4.0, 1.0) ASC,
-               p.start ASC,
-               l.name ASC
-      LIMIT ?`,
-    params,
+  if (rows.length > 0) return isLive ? customHits : [];
+  const fallback = await searchKindLikeFallback(
+    db,
+    kind,
+    tokens,
+    limit,
+    sourceId,
+    profileId,
+    filter,
   );
-}
-
-async function searchEpg(
-  db: SqlDriver,
-  ftsQuery: string,
-  foldedQuery: string,
-  tokens: readonly string[],
-  limit: number,
-  sourceId: string | undefined,
-  nowMs: number,
-  filter: ActiveParentalFilter | null,
-): Promise<SearchProgrammeHit[]> {
-  let rows = await queryEpgFts(db, ftsQuery, foldedQuery, limit, sourceId, nowMs, filter);
-  if (rows.length === 0) {
-    const backfilled = await backfillProgrammesFtsIfEmpty(db);
-    if (backfilled) {
-      rows = await queryEpgFts(db, ftsQuery, foldedQuery, limit, sourceId, nowMs, filter);
-    }
-  }
-  const filteredFts = filterProgrammeRows(rows, limit, filter);
-  if (filteredFts.length > 0) {
-    return filteredFts.map((r) => mapProgrammeSearchRow(r, nowMs));
-  }
-  if (rows.length > 0) return [];
-
-  const sourceClause = sourceId === undefined ? '' : ' AND p.source_id = ?';
-  const restrict =
-    filter === null
-      ? { clause: '', params: [] as readonly SqlValue[] }
-      : buildSqlItemRestrictionClause(filter, 'live', 'l.source_id', 'l.key', sourceId);
-  const likeClauses = tokens
-    .map(
-      () =>
-        "(programmes_fts.title_fold LIKE ? ESCAPE '\\' OR programmes_fts.description_fold LIKE ? ESCAPE '\\')",
-    )
-    .join(' AND ');
-  const tokenParams: SqlValue[] = [];
-  for (const tok of tokens) {
-    const pat = `%${escapeLikePattern(tok)}%`;
-    tokenParams.push(pat, pat);
-  }
-  const params: SqlValue[] = [
-    ...(sourceId === undefined ? [] : [sourceId]),
-    ...restrict.params,
-    ...tokenParams,
-    nowMs,
-    nowMs,
-    nowMs,
-    searchFetchLimit(limit, filter),
-  ];
-  const fallbackRows = await db.all<RawProgrammeSearchRow>(
-    `SELECT p.source_id,
-            p.guide_id,
-            l.key AS channel_key,
-            l.name AS channel_name,
-            l.logo AS channel_logo,
-            p.title,
-            p.description,
-            p.start,
-            p.stop,
-            p.categories_json,
-            p.genre,
-            p.rating_value
-       FROM programmes_fts
-       JOIN programmes p
-         ON p.source_id = programmes_fts.source_id
-        AND p.guide_id = programmes_fts.guide_id
-        AND p.start = programmes_fts.start
-       JOIN sources s ON s.id = p.source_id AND s.deleting = 0
-       ${EPG_LIVE_JOIN}
-      WHERE 1 = 1${sourceClause}${restrict.clause} AND ${likeClauses}
-      ORDER BY CASE WHEN p.stop >= ? THEN 0 ELSE 1 END ASC,
-               CASE WHEN p.start <= ? AND p.stop > ? THEN 0 ELSE 1 END ASC,
-               p.start ASC,
-               l.name ASC
-      LIMIT ?`,
-    params,
-  );
-  return filterProgrammeRows(fallbackRows, limit, filter).map((r) =>
-    mapProgrammeSearchRow(r, nowMs),
-  );
-}
-
-function filterEpisodeRows(
-  rows: readonly RawEpisodeSearchRow[],
-  limit: number,
-  filter: ActiveParentalFilter | null,
-): RawEpisodeSearchRow[] {
-  if (filter === null) return rows.slice(0, limit);
-  const out: RawEpisodeSearchRow[] = [];
-  for (const r of rows) {
-    if (filter.lockedItemKeys.has(r.item_key) || filter.lockedItemKeys.has(r.series_key)) continue;
-    if (
-      filter.blockAdultKeywords &&
-      (isAdultKeywordMatch(r.series_name) || isAdultKeywordMatch(r.title))
-    ) {
-      continue;
-    }
-    out.push(r);
-    if (out.length >= limit) break;
-  }
-  return out;
-}
-
-async function searchEpisodes(
-  db: SqlDriver,
-  ftsQuery: string,
-  foldedQuery: string,
-  tokens: readonly string[],
-  limit: number,
-  sourceId: string | undefined,
-  filter: ActiveParentalFilter | null,
-): Promise<SearchEpisodeHit[]> {
-  const sourceClause = sourceId === undefined ? '' : ' AND e.source_id = ?';
-  const restrict =
-    filter === null
-      ? { clause: '', params: [] as readonly SqlValue[] }
-      : buildSqlItemRestrictionClause(filter, 'series', 'ser.source_id', 'ser.key', sourceId);
-  const fetchLimit = searchFetchLimit(limit, filter);
-  const params: SqlValue[] = [
-    ftsQuery,
-    ...(sourceId === undefined ? [] : [sourceId]),
-    ...restrict.params,
-    foldedQuery,
-    foldedQuery,
-    foldedQuery,
-    fetchLimit,
-  ];
-  const rows = await db.all<RawEpisodeSearchRow>(
-    `SELECT e.source_id,
-            e.key AS item_key,
-            e.series_key,
-            ser.name AS series_name,
-            COALESCE(e.season, 0) AS season,
-            COALESCE(e.episode, 0) AS episode,
-            COALESCE(e.title, '') AS title,
-            ser.cover AS poster_url
-       FROM episodes_fts
-       JOIN episodes e ON e.id = episodes_fts.rowid
-       JOIN series ser ON ser.source_id = e.source_id AND ser.key = e.series_key AND ser.is_hidden = 0
-       JOIN sources s ON s.id = e.source_id AND s.deleting = 0
-      WHERE episodes_fts MATCH ?${sourceClause}${restrict.clause}
-      ORDER BY CASE
-                 WHEN e.title_fold = ? THEN 0
-                 WHEN substr(e.title_fold, 1, length(?)) = ? THEN 1
-                 ELSE 2
-               END,
-               bm25(episodes_fts),
-               ser.name ASC,
-               COALESCE(e.season, 0) ASC,
-               COALESCE(e.episode, 0) ASC
-      LIMIT ?`,
-    params,
-  );
-  const filteredFts = filterEpisodeRows(rows, limit, filter);
-  if (filteredFts.length > 0) return filteredFts.map(mapEpisodeSearchRow);
-  if (rows.length > 0) return [];
-
-  const likeClauses = tokens.map(() => "e.title_fold LIKE ? ESCAPE '\\'").join(' AND ');
-  const fallbackParams: SqlValue[] = [
-    ...(sourceId === undefined ? [] : [sourceId]),
-    ...restrict.params,
-    ...tokens.map((tok) => `%${escapeLikePattern(tok)}%`),
-    fetchLimit,
-  ];
-  const fallbackRows = await db.all<RawEpisodeSearchRow>(
-    `SELECT e.source_id,
-            e.key AS item_key,
-            e.series_key,
-            ser.name AS series_name,
-            COALESCE(e.season, 0) AS season,
-            COALESCE(e.episode, 0) AS episode,
-            COALESCE(e.title, '') AS title,
-            ser.cover AS poster_url
-       FROM episodes e
-       JOIN series ser ON ser.source_id = e.source_id AND ser.key = e.series_key AND ser.is_hidden = 0
-       JOIN sources s ON s.id = e.source_id AND s.deleting = 0
-      WHERE 1 = 1${sourceClause}${restrict.clause} AND ${likeClauses}
-      ORDER BY ser.name COLLATE NOCASE ASC,
-               COALESCE(e.season, 0) ASC,
-               COALESCE(e.episode, 0) ASC,
-               e.id ASC
-      LIMIT ?`,
-    fallbackParams,
-  );
-  return filterEpisodeRows(fallbackRows, limit, filter).map(mapEpisodeSearchRow);
+  return isLive ? mergeLiveSearchHits(customHits, fallback, limit) : fallback;
 }
 
 /**
@@ -739,20 +413,21 @@ export async function querySearch(
   const scope: SearchScope = opts?.scope ?? 'all';
   const sourceId = opts?.sourceId;
   const nowMs = opts?.nowMs !== undefined && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
-  const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
+  const profileId = resolveQueryProfileId(opts?.profileId);
+  const filter = await loadActiveParentalFilter(db, profileId, opts?.parentalUnlocked);
 
   const [live, epg, movies, series, episodes] = await Promise.all([
     scope === 'all' || scope === 'live'
-      ? searchKind(db, 'live', ftsQuery, foldedQuery, tokens, limit, sourceId, filter)
+      ? searchKind(db, 'live', ftsQuery, foldedQuery, tokens, limit, sourceId, profileId, filter)
       : [],
     scope === 'all' || scope === 'epg'
-      ? searchEpg(db, ftsQuery, foldedQuery, tokens, limit, sourceId, nowMs, filter)
+      ? searchEpg(db, ftsQuery, foldedQuery, tokens, limit, sourceId, nowMs, profileId, filter)
       : [],
     scope === 'all' || scope === 'movie'
-      ? searchKind(db, 'movie', ftsQuery, foldedQuery, tokens, limit, sourceId, filter)
+      ? searchKind(db, 'movie', ftsQuery, foldedQuery, tokens, limit, sourceId, profileId, filter)
       : [],
     scope === 'all' || scope === 'series'
-      ? searchKind(db, 'series', ftsQuery, foldedQuery, tokens, limit, sourceId, filter)
+      ? searchKind(db, 'series', ftsQuery, foldedQuery, tokens, limit, sourceId, profileId, filter)
       : [],
     scope === 'all' || scope === 'episode'
       ? searchEpisodes(db, ftsQuery, foldedQuery, tokens, limit, sourceId, filter)

@@ -5,8 +5,12 @@ import type {
   BrowseKind,
   CategoryQueryOptions,
   CategoryRow,
+  ChannelOverrideRecord,
+  CreateCustomGroupInput,
   CreateProfileInput,
   CrossChannelProgrammeRow,
+  CustomGroupItemInput,
+  CustomGroupRecord,
   DiscoveredCategory,
   EpisodeRow,
   FavoriteRow,
@@ -36,17 +40,23 @@ import type {
   SearchSuggestionsOptions,
   SeasonRow,
   SeriesUnplayedSummary,
+  SetChannelOverrideInput,
   SetParentalLockInput,
   SourceRow,
   SourceSettings,
   StreamRequest,
   ToggleFavoriteInput,
+  UpdateCustomGroupPatch,
   UpdateParentalSettingsPatch,
   UpdateProfilePatch,
   VodVersionOption,
   WatchProgressRow,
 } from '@elv/data';
 import type { ElvError, Result } from '@elv/domain';
+import {
+  isChannelOpsRpcCall,
+  isIncludeHiddenParentalOptions,
+} from './catalog-ipc-channel-guards.ts';
 import {
   isAddSourceInput,
   isAlphabetIndexInput,
@@ -206,7 +216,7 @@ export type CatalogRpcMethodCall =
       method: 'listFavorites';
       limit?: number;
       profileId?: string;
-      opts?: { readonly parentalUnlocked?: boolean };
+      opts?: { readonly parentalUnlocked?: boolean; readonly includeHidden?: boolean };
     }
   | { method: 'listFavoriteKeys'; profileId?: string }
   | { method: 'getTrackPreference'; scopeKey: string; profileId?: string }
@@ -231,6 +241,30 @@ export type CatalogRpcMethodCall =
   | { method: 'setParentalPin'; pin: string; profileId?: string; currentPin?: string }
   | { method: 'verifyParentalPin'; pin: string; profileId?: string }
   | { method: 'clearParentalPin'; currentPin: string; profileId?: string }
+  | { method: 'listChannelOverrides'; profileId?: string }
+  | { method: 'setChannelOverride'; input: SetChannelOverrideInput }
+  | { method: 'clearChannelOverride'; itemKey: string; profileId?: string }
+  | {
+      method: 'reorderChannels';
+      itemKeys: readonly string[];
+      sourceId: string;
+      profileId?: string;
+    }
+  | {
+      method: 'listCustomGroups';
+      profileId?: string;
+      opts?: { readonly includeHidden?: boolean; readonly parentalUnlocked?: boolean };
+    }
+  | { method: 'createCustomGroup'; input: CreateCustomGroupInput }
+  | { method: 'updateCustomGroup'; groupId: string; patch: UpdateCustomGroupPatch }
+  | { method: 'deleteCustomGroup'; groupId: string }
+  | {
+      method: 'setCustomGroupItems';
+      groupId: string;
+      items: readonly CustomGroupItemInput[];
+    }
+  | { method: 'addChannelToCustomGroup'; groupId: string; itemKey: string; sourceId: string }
+  | { method: 'removeChannelFromCustomGroup'; groupId: string; itemKey: string }
   | { method: 'flushPendingWrites' };
 
 /** Preload to utility process over `MessagePort`. */
@@ -349,7 +383,7 @@ export interface CatalogBridge {
   listFavorites(
     limit?: number,
     profileId?: string,
-    opts?: { readonly parentalUnlocked?: boolean },
+    opts?: { readonly parentalUnlocked?: boolean; readonly includeHidden?: boolean },
   ): Promise<FavoriteRow[]>;
   listFavoriteKeys(profileId?: string): Promise<string[]>;
   getTrackPreference?(
@@ -382,6 +416,34 @@ export interface CatalogBridge {
   setParentalPin?(pin: string, profileId?: string, currentPin?: string): Promise<Result<void>>;
   verifyParentalPin?(pin: string, profileId?: string): Promise<PinVerifyResult>;
   clearParentalPin?(currentPin: string, profileId?: string): Promise<Result<void>>;
+  listChannelOverrides?(profileId?: string): Promise<ChannelOverrideRecord[]>;
+  setChannelOverride?(input: SetChannelOverrideInput): Promise<Result<ChannelOverrideRecord>>;
+  clearChannelOverride?(itemKey: string, profileId?: string): Promise<Result<void>>;
+  reorderChannels?(
+    itemKeys: readonly string[],
+    sourceId: string,
+    profileId?: string,
+  ): Promise<Result<void>>;
+  listCustomGroups?(
+    profileId?: string,
+    opts?: { readonly includeHidden?: boolean; readonly parentalUnlocked?: boolean },
+  ): Promise<CustomGroupRecord[]>;
+  createCustomGroup?(input: CreateCustomGroupInput): Promise<Result<CustomGroupRecord>>;
+  updateCustomGroup?(
+    groupId: string,
+    patch: UpdateCustomGroupPatch,
+  ): Promise<Result<CustomGroupRecord>>;
+  deleteCustomGroup?(groupId: string): Promise<Result<void>>;
+  setCustomGroupItems?(
+    groupId: string,
+    items: readonly CustomGroupItemInput[],
+  ): Promise<Result<void>>;
+  addChannelToCustomGroup?(
+    groupId: string,
+    itemKey: string,
+    sourceId: string,
+  ): Promise<Result<void>>;
+  removeChannelFromCustomGroup?(groupId: string, itemKey: string): Promise<Result<void>>;
   flushPendingWrites?(): Promise<void>;
   onChanged(listener: () => void): () => void;
   /** Subscribes to unexpected `catalog-worker` disconnect notifications (`#435`). */
@@ -521,11 +583,16 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
     case 'clearProgress':
       return isCleanKey(x['itemKey']) && isOptionalProfileId(x['profileId']);
     case 'listContinueWatching':
-    case 'listFavorites':
       return (
         isOptionalUserLimit(x['limit']) &&
         isOptionalProfileId(x['profileId']) &&
         (x['opts'] === undefined || isParentalUnlockedOption(x['opts']))
+      );
+    case 'listFavorites':
+      return (
+        isOptionalUserLimit(x['limit']) &&
+        isOptionalProfileId(x['profileId']) &&
+        (x['opts'] === undefined || isIncludeHiddenParentalOptions(x['opts']))
       );
     case 'listProgressByKeys':
       return isItemKeyList(x['itemKeys']) && isOptionalProfileId(x['profileId']);
@@ -583,7 +650,7 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
     case 'clearParentalPin':
       return isPinString(x['currentPin'], 0) && isOptionalStrictProfileId(x['profileId']);
     default:
-      return false;
+      return isChannelOpsRpcCall(x);
   }
 }
 

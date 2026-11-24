@@ -15,6 +15,9 @@ import type { NavDestination, NavUtility } from './shell';
 /** Primary top-level destination tabs (`Home`, `Live`, `Movies`, `Series`). */
 export type PrimaryNavTab = 'home' | BrowseKind;
 
+/** Top-level shell tab identifier. */
+export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'search' | 'settings';
+
 function buildShellDestinations(labels: {
   readonly home: string;
   readonly live: string;
@@ -454,6 +457,133 @@ export function createObservedCatalog(
     ...(c.setParentalPin ? { setParentalPin: c.setParentalPin.bind(c) } : {}),
     ...(c.verifyParentalPin ? { verifyParentalPin: c.verifyParentalPin.bind(c) } : {}),
     ...(c.clearParentalPin ? { clearParentalPin: c.clearParentalPin.bind(c) } : {}),
+    ...(c.listChannelOverrides ? { listChannelOverrides: c.listChannelOverrides.bind(c) } : {}),
+    ...(c.setChannelOverride
+      ? {
+          setChannelOverride: async (
+            input: Parameters<NonNullable<CatalogService['setChannelOverride']>>[0],
+          ) => {
+            const fn = c.setChannelOverride;
+            if (fn === undefined) throw new Error('setChannelOverride unavailable');
+            const res = await fn.call(c, input);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.clearChannelOverride
+      ? {
+          clearChannelOverride: async (
+            itemKey: Parameters<NonNullable<CatalogService['clearChannelOverride']>>[0],
+            profileId?: Parameters<NonNullable<CatalogService['clearChannelOverride']>>[1],
+          ) => {
+            const fn = c.clearChannelOverride;
+            if (fn === undefined) throw new Error('clearChannelOverride unavailable');
+            const res = await fn.call(c, itemKey, profileId);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.reorderChannels
+      ? {
+          reorderChannels: async (
+            itemKeys: Parameters<NonNullable<CatalogService['reorderChannels']>>[0],
+            sourceId: Parameters<NonNullable<CatalogService['reorderChannels']>>[1],
+            profileId?: Parameters<NonNullable<CatalogService['reorderChannels']>>[2],
+          ) => {
+            const fn = c.reorderChannels;
+            if (fn === undefined) throw new Error('reorderChannels unavailable');
+            const res = await fn.call(c, itemKeys, sourceId, profileId);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.listCustomGroups ? { listCustomGroups: c.listCustomGroups.bind(c) } : {}),
+    ...(c.createCustomGroup
+      ? {
+          createCustomGroup: async (
+            input: Parameters<NonNullable<CatalogService['createCustomGroup']>>[0],
+          ) => {
+            const fn = c.createCustomGroup;
+            if (fn === undefined) throw new Error('createCustomGroup unavailable');
+            const res = await fn.call(c, input);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.updateCustomGroup
+      ? {
+          updateCustomGroup: async (
+            groupId: Parameters<NonNullable<CatalogService['updateCustomGroup']>>[0],
+            patch: Parameters<NonNullable<CatalogService['updateCustomGroup']>>[1],
+          ) => {
+            const fn = c.updateCustomGroup;
+            if (fn === undefined) throw new Error('updateCustomGroup unavailable');
+            const res = await fn.call(c, groupId, patch);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.deleteCustomGroup
+      ? {
+          deleteCustomGroup: async (
+            groupId: Parameters<NonNullable<CatalogService['deleteCustomGroup']>>[0],
+          ) => {
+            const fn = c.deleteCustomGroup;
+            if (fn === undefined) throw new Error('deleteCustomGroup unavailable');
+            const res = await fn.call(c, groupId);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.setCustomGroupItems
+      ? {
+          setCustomGroupItems: async (
+            groupId: Parameters<NonNullable<CatalogService['setCustomGroupItems']>>[0],
+            items: Parameters<NonNullable<CatalogService['setCustomGroupItems']>>[1],
+          ) => {
+            const fn = c.setCustomGroupItems;
+            if (fn === undefined) throw new Error('setCustomGroupItems unavailable');
+            const res = await fn.call(c, groupId, items);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.addChannelToCustomGroup
+      ? {
+          addChannelToCustomGroup: async (
+            groupId: Parameters<NonNullable<CatalogService['addChannelToCustomGroup']>>[0],
+            itemKey: Parameters<NonNullable<CatalogService['addChannelToCustomGroup']>>[1],
+            sourceId: Parameters<NonNullable<CatalogService['addChannelToCustomGroup']>>[2],
+          ) => {
+            const fn = c.addChannelToCustomGroup;
+            if (fn === undefined) throw new Error('addChannelToCustomGroup unavailable');
+            const res = await fn.call(c, groupId, itemKey, sourceId);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.removeChannelFromCustomGroup
+      ? {
+          removeChannelFromCustomGroup: async (
+            groupId: Parameters<NonNullable<CatalogService['removeChannelFromCustomGroup']>>[0],
+            itemKey: Parameters<NonNullable<CatalogService['removeChannelFromCustomGroup']>>[1],
+          ) => {
+            const fn = c.removeChannelFromCustomGroup;
+            if (fn === undefined) throw new Error('removeChannelFromCustomGroup unavailable');
+            const res = await fn.call(c, groupId, itemKey);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
     close: () => c.close(),
   };
 }

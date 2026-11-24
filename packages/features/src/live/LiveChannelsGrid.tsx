@@ -30,6 +30,7 @@ import {
   type CatalogLayoutMetrics,
   type PagedListSource,
   useBrowseFocusMemory,
+  useKeymap,
   useRouteActive,
 } from '../shared';
 import { ChannelGridRow, type LiveGridShared, LiveGridSortToolbar } from './LiveChannelTile';
@@ -99,7 +100,8 @@ function TvChannelsKeyBridge({
   readonly onEvent: Parameters<typeof useKeyInterpreter>[0];
 }): ReactElement {
   const routeActive = useRouteActive();
-  useKeyInterpreter(onEvent);
+  const { longPressKeys } = useKeymap();
+  useKeyInterpreter(onEvent, { longKeys: longPressKeys });
   return <TvFocusAnchor testID="live-channels-tv-focus-anchor" hasTVPreferredFocus={routeActive} />;
 }
 

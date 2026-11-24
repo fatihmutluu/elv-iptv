@@ -1,4 +1,5 @@
 import { elvError, err, ok, type Result, type SecretStore, type SqlDriver } from '@elv/domain';
+import { refreshChannelOverridesFastPath } from './channel-overrides-repo';
 import {
   createPinAttemptLimiter,
   hashParentalPin,
@@ -98,6 +99,7 @@ export function createCatalogProfileMethods(deps: {
       const deleted = await deleteProfile(db, secrets, id);
       if (deleted.ok) {
         pinLimiter.clear(id);
+        await refreshChannelOverridesFastPath(db);
         await syncUserData();
       }
       return deleted;

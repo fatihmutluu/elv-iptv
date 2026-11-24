@@ -214,6 +214,23 @@ const MERGE_PLACEMENTS_HIDDEN = `UPDATE placements
     AND old.source_id = placements.source_id AND old.kind = placements.kind
     AND old.category_id = placements.category_id AND old.item_key = ?`;
 
+const MERGE_CHANNEL_OVERRIDES = `UPDATE channel_overrides
+  SET custom_name = CASE WHEN old.updated_at > channel_overrides.updated_at THEN old.custom_name ELSE COALESCE(channel_overrides.custom_name, old.custom_name) END,
+      custom_name_fold = CASE WHEN old.updated_at > channel_overrides.updated_at THEN old.custom_name_fold ELSE COALESCE(channel_overrides.custom_name_fold, old.custom_name_fold) END,
+      is_hidden = CASE WHEN old.updated_at > channel_overrides.updated_at THEN old.is_hidden ELSE MAX(channel_overrides.is_hidden, old.is_hidden) END,
+      sort_order = CASE WHEN old.updated_at > channel_overrides.updated_at THEN old.sort_order ELSE COALESCE(channel_overrides.sort_order, old.sort_order) END,
+      updated_at = MAX(channel_overrides.updated_at, old.updated_at)
+  FROM channel_overrides AS old
+  WHERE channel_overrides.source_id = ? AND channel_overrides.item_key = ?
+    AND old.source_id = channel_overrides.source_id AND old.profile_id = channel_overrides.profile_id AND old.item_key = ?`;
+
+const MERGE_CUSTOM_GROUP_ITEMS = `UPDATE custom_group_items
+  SET position = MIN(custom_group_items.position, old.position),
+      added_at = MIN(custom_group_items.added_at, old.added_at)
+  FROM custom_group_items AS old
+  WHERE custom_group_items.source_id = ? AND custom_group_items.item_key = ?
+    AND old.source_id = custom_group_items.source_id AND old.group_id = custom_group_items.group_id AND old.item_key = ?`;
+
 interface LegacyPair {
   legacy_key: string;
   key: string;
@@ -293,6 +310,38 @@ async function migrateLegacyKeysForTable(
       [sourceId, runId],
     );
     await remapKeyColumn(tx, 'channel_guide', 'channel_key', sourceId, guidePairs);
+
+    const overridePairs = await tx.all<LegacyPair>(
+      `SELECT DISTINCT n.legacy_key, n.key FROM live_next n
+       WHERE n.source_id = ? AND n.run_id = ? AND n.legacy_key IS NOT NULL AND n.legacy_key != n.key
+         AND n.legacy_key IN (SELECT item_key FROM channel_overrides WHERE source_id = ?)`,
+      [sourceId, runId, sourceId],
+    );
+    await remapKeyColumn(
+      tx,
+      'channel_overrides',
+      'item_key',
+      sourceId,
+      overridePairs,
+      undefined,
+      MERGE_CHANNEL_OVERRIDES,
+    );
+
+    const customGroupItemPairs = await tx.all<LegacyPair>(
+      `SELECT DISTINCT n.legacy_key, n.key FROM live_next n
+       WHERE n.source_id = ? AND n.run_id = ? AND n.legacy_key IS NOT NULL AND n.legacy_key != n.key
+         AND n.legacy_key IN (SELECT item_key FROM custom_group_items WHERE source_id = ?)`,
+      [sourceId, runId, sourceId],
+    );
+    await remapKeyColumn(
+      tx,
+      'custom_group_items',
+      'item_key',
+      sourceId,
+      customGroupItemPairs,
+      undefined,
+      MERGE_CUSTOM_GROUP_ITEMS,
+    );
   }
 
   const livePairs = await tx.all<LegacyPair>(

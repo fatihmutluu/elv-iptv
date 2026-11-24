@@ -1,4 +1,5 @@
 export * from './interpreter';
+export * from './keymap';
 export * from './keys';
 export * from './list';
 export * from './scope';

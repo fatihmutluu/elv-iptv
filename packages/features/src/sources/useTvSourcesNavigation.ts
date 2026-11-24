@@ -39,6 +39,7 @@ export type ControlLayoutRecorder = (
 function buildSourcesFocusItems(
   ctrl: SourcesController,
   onOpenMenu: (() => void) | undefined,
+  onOpenQrPairing?: () => void,
 ): readonly FocusItem[] {
   const picker = ctrl.categoryPicker;
   if (picker !== null) {
@@ -88,8 +89,21 @@ function buildSourcesFocusItems(
   }
 
   const items: FocusItem[] = [];
+  if (onOpenQrPairing !== undefined) {
+    items.push({
+      id: 'open-qr-pairing',
+      kind: 'action',
+      rowGroup: 'header-actions',
+      run: onOpenQrPairing,
+    });
+  }
   if (onOpenMenu !== undefined) {
-    items.push({ id: 'open-menu', kind: 'action', run: onOpenMenu });
+    items.push({
+      id: 'open-menu',
+      kind: 'action',
+      rowGroup: 'header-actions',
+      run: onOpenMenu,
+    });
   }
   items.push(
     { id: 'mode-xtream', kind: 'action', rowGroup: 'mode', run: () => ctrl.setMode('xtream') },
@@ -309,12 +323,14 @@ export function useTvSourcesNavigation({
   isTv,
   ctrl,
   onOpenMenu,
+  onOpenQrPairing,
   onBack,
   onFocusTopNav,
 }: {
   isTv: boolean;
   ctrl: SourcesController;
   onOpenMenu?: () => void;
+  onOpenQrPairing?: () => void;
   onBack?: () => void;
   onFocusTopNav?: () => void;
 }) {
@@ -345,7 +361,10 @@ export function useTvSourcesNavigation({
     [],
   );
 
-  const controls = useMemo(() => buildSourcesFocusItems(ctrl, onOpenMenu), [ctrl, onOpenMenu]);
+  const controls = useMemo(
+    () => buildSourcesFocusItems(ctrl, onOpenMenu, onOpenQrPairing),
+    [ctrl, onOpenMenu, onOpenQrPairing],
+  );
   const activeEditingInputId =
     editingInputId !== null && controls.some((c) => c.kind === 'input' && c.id === editingInputId)
       ? editingInputId

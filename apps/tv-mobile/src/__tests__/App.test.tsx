@@ -1,4 +1,5 @@
 import type { CatalogService } from '@elv/data';
+import type { AppProvidersProps, AppShellProps } from '@elv/features';
 import type { PlayerEngine } from '@elv/playback';
 import * as opSqlite from '@op-engineering/op-sqlite';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
@@ -48,6 +49,26 @@ const mockGetAppleSafeAreaInsets = jest.fn(() => ({ top: 47, right: 0, bottom: 3
 const mockSetAppleEngineMuted = jest.fn();
 const mockSetAppleEngineVolume = jest.fn();
 let lastAetherSurfaceProps: { osdVisible?: boolean; resizeMode?: string } | undefined;
+let mockLastAppProvidersProps: AppProvidersProps | undefined;
+let mockLastAppShellProps: AppShellProps | undefined;
+const mockObservedDeepLinks: Array<AppShellProps['pendingDeepLink']> = [];
+jest.mock('@elv/features', () => {
+  const actual = jest.requireActual<typeof import('@elv/features')>('@elv/features');
+  return {
+    ...actual,
+    AppProviders: (props: AppProvidersProps) => {
+      mockLastAppProvidersProps = props;
+      return actual.AppProviders(props);
+    },
+    AppShell: (props: AppShellProps) => {
+      mockLastAppShellProps = props;
+      if (props.pendingDeepLink !== null && props.pendingDeepLink !== undefined) {
+        mockObservedDeepLinks.push(props.pendingDeepLink);
+      }
+      return actual.AppShell(props);
+    },
+  };
+});
 jest.mock('../catalog', () => {
   const actual = jest.requireActual<typeof import('../catalog')>('../catalog');
   return {
@@ -322,6 +343,9 @@ afterEach(() => {
   mockCatalogOverride = undefined;
   lastMedia3SurfaceProps = undefined;
   lastAetherSurfaceProps = undefined;
+  mockLastAppProvidersProps = undefined;
+  mockLastAppShellProps = undefined;
+  mockObservedDeepLinks.length = 0;
   mockSetOrientationLocked.mockReset();
   mockSetMedia3PitchLock.mockReset();
   mockSetMedia3MediaMetadata.mockReset();
@@ -711,5 +735,32 @@ describe('App', () => {
     expect(screen.queryByTestId('player-surface')).toBeNull();
     expect(mockAetherRemoteActionListeners.size).toBe(0);
     await view.unmount();
+  });
+
+  it('wires keymapStore, lanPairing, tvHomeChannels, and production play deep links into AppShell (#33, #50, #273)', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+    const { add, remove } = openedWith('elviptv://play?key=ck-1&kind=live');
+
+    const view = await render(<App />);
+    expect(mockLastAppProvidersProps?.keymapStore).toBeDefined();
+    expect(mockLastAppShellProps?.keymapStore).toBe(mockLastAppProvidersProps?.keymapStore);
+    expect(mockLastAppShellProps?.lanPairing).toBeDefined();
+    expect(mockLastAppShellProps?.tvHomeChannels).toBeDefined();
+    expect(mockObservedDeepLinks).toContainEqual({ itemKey: 'ck-1', kind: 'live' });
+    expect(mockLastAppShellProps?.pendingDeepLink).toBeNull();
+
+    const handler = add.mock.calls[0]?.[1] as (event: { url: string }) => void;
+    await act(async () => handler({ url: 'elviptv://play?key=movie%3A7&kind=movie' }));
+    expect(mockObservedDeepLinks).toContainEqual({ itemKey: 'movie:7', kind: 'movie' });
+    expect(mockLastAppShellProps?.pendingDeepLink).toBeNull();
+
+    await mockLastAppShellProps?.keymapStore?.setOverrides({
+      'player.openInfo': { key: 'info', kind: 'press' },
+    });
+    expect(expoSecureStore.setItemAsync).toHaveBeenCalledWith('elv.keymap.v1', expect.any(String));
+
+    await view.unmount();
+    expect(remove).toHaveBeenCalled();
   });
 });

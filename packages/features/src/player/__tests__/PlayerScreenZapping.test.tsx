@@ -12,7 +12,7 @@ const KEYCODE_DPAD_UP = 19;
 const KEYCODE_DPAD_DOWN = 20;
 const KEYCODE_DPAD_CENTER = 23;
 const KEYCODE_BACK = 4;
-const KEYCODE_MENU = 82;
+const KEYCODE_AUDIO_TRACK = 222;
 const KEYCODE_CHANNEL_UP = 166;
 const KEYCODE_CHANNEL_DOWN = 167;
 
@@ -311,7 +311,7 @@ describe('PlayerScreen zapping and failure handling', () => {
     expect(screen.getByTestId('player-play-pause')).toBeTruthy();
 
     await act(async () => {
-      keys.tap(KEYCODE_MENU);
+      keys.tap(KEYCODE_AUDIO_TRACK);
     });
     expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
 

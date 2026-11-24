@@ -8,6 +8,7 @@ export type SettingsSection =
   | 'appearance'
   | 'playback'
   | 'liveTv'
+  | 'remote'
   | 'profiles'
   | 'sources'
   | 'licenses';
@@ -20,6 +21,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'appearance',
   'playback',
   'liveTv',
+  'remote',
   'profiles',
   'sources',
   'licenses',
@@ -147,7 +149,8 @@ export type LiveTvFocusId =
   | 'toggle-source-badges'
   | 'toggle-two-step-preview'
   | 'toggle-clean-titles'
-  | 'toggle-collapse-variants';
+  | 'toggle-collapse-variants'
+  | 'open-channel-management';
 
 const NAV_LIST_ID = 'settings-nav';
 
@@ -260,6 +263,7 @@ const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
   ['toggle-two-step-preview'],
   ['toggle-clean-titles'],
   ['toggle-collapse-variants'],
+  ['open-channel-management'],
 ];
 
 const PREFERENCE_SECTIONS: readonly PreferenceSettingsSection[] = [

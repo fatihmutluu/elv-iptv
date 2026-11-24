@@ -2117,3 +2117,223 @@ msgstr "Sil"
 
 msgid "parental.clear"
 msgstr "Temizle"
+
+
+msgid "channels.manage.title"
+msgstr "Kanalları yönet"
+
+msgid "channels.manage.subtitle"
+msgstr "Kanalları yeniden adlandırın, gizleyin, sıralayın veya özel gruplar oluşturun."
+
+msgid "channels.manage.openButton"
+msgstr "Kanalları yönet"
+
+msgid "channels.manage.rename"
+msgstr "Yeniden adlandır"
+
+msgid "channels.manage.renamePlaceholder"
+msgstr "Özel kanal adını girin"
+
+msgid "channels.manage.resetName"
+msgstr "Adı sıfırla"
+
+msgid "channels.manage.hide"
+msgstr "Kanalı gizle"
+
+msgid "channels.manage.unhide"
+msgstr "Kanalı göster"
+
+msgid "channels.manage.hiddenBadge"
+msgstr "Gizli"
+
+msgid "channels.manage.showHidden"
+msgstr "Gizli kanalları göster"
+
+msgid "channels.manage.moveUp"
+msgstr "Yukarı taşı"
+
+msgid "channels.manage.moveDown"
+msgstr "Aşağı taşı"
+
+msgid "channels.manage.resetOrder"
+msgstr "Sıralamayı sıfırla"
+
+msgid "channels.manage.empty"
+msgstr "Yönetilebilecek kanal yok."
+
+msgid "channels.manage.groupsTab"
+msgstr "Özel gruplar"
+
+msgid "channels.manage.channelsTab"
+msgstr "Kanallar"
+
+msgid "channels.manage.addGroup"
+msgstr "Yeni grup"
+
+msgid "channels.manage.groupNamePlaceholder"
+msgstr "Grup adını girin"
+
+msgid "channels.manage.editGroup"
+msgstr "Grubu düzenle"
+
+msgid "channels.manage.deleteGroup"
+msgstr "Grubu sil"
+
+msgid "channels.manage.addToGroup"
+msgstr "Gruba ekle"
+
+msgid "channels.manage.removeFromGroup"
+msgstr "Gruptan çıkar"
+
+msgid "channels.manage.groupEmpty"
+msgstr "Bu grupta henüz kanal yok."
+
+msgid "channels.manage.save"
+msgstr "Kaydet"
+
+msgid "channels.manage.cancel"
+msgstr "İptal"
+
+msgid "sources.qr.button"
+msgstr "Telefondan QR ile ekle"
+
+msgid "sources.qr.title"
+msgstr "Telefondan kaynak ekle"
+
+msgid "sources.qr.subtitle"
+msgstr "Aynı Wi-Fi ağındaki telefonunuzla QR kodunu okutun."
+
+msgid "sources.qr.scanHint"
+msgstr "Yerel kurulum formunu açmak için telefon kameranızı koda doğrultun."
+
+msgid "sources.qr.orVisit"
+msgstr "Veya telefonunuzda bu adresi açın:"
+
+msgid "sources.qr.expiresIn"
+msgstr "{time} içinde süresi dolar"
+
+msgid "sources.qr.expired"
+msgstr "Kodun süresi doldu"
+
+msgid "sources.qr.regenerate"
+msgstr "Yeni kod"
+
+msgid "sources.qr.waiting"
+msgstr "Telefonunuzdan bilgiler bekleniyor…"
+
+msgid "sources.qr.received"
+msgstr "Kaynak bilgileri alındı. İçe aktarılıyor…"
+
+msgid "sources.qr.unavailable"
+msgstr "Bu ağda yerel eşleştirme kullanılamıyor."
+
+msgid "sources.qr.close"
+msgstr "Kapat"
+
+msgid "sources.qr.lanOnlyNote"
+msgstr "Aktarım yalnızca yerel ağınızda gerçekleşir ve tek kullanım sonrasında otomatik kapanır."
+
+msgid "settings.section.remote"
+msgstr "Kumanda tuşları"
+
+msgid "remote.title"
+msgstr "Kumanda tuş atama"
+
+msgid "remote.subtitle"
+msgstr "Oynatma, canlı TV ve hızlı kısayollar için kumanda tuşlarını özelleştirin."
+
+msgid "remote.contextPlayer"
+msgstr "Oynatıcı"
+
+msgid "remote.contextLive"
+msgstr "Canlı TV"
+
+msgid "remote.contextGlobal"
+msgstr "Genel"
+
+msgid "remote.capturePrompt"
+msgstr "Bir kumanda tuşuna basın…"
+
+msgid "remote.captureCancel"
+msgstr "İptal etmek için Geri tuşuna basın"
+
+msgid "remote.immutableWarning"
+msgstr "Yön, Seç ve Geri kısa basışları yeniden atanamaz."
+
+msgid "remote.unbound"
+msgstr "Atanmamış"
+
+msgid "remote.longPressBadge"
+msgstr "Uzun basış"
+
+msgid "remote.rebind"
+msgstr "Yeniden ata"
+
+msgid "remote.clear"
+msgstr "Atamayı kaldır"
+
+msgid "remote.resetAction"
+msgstr "Sıfırla"
+
+msgid "remote.resetAll"
+msgstr "Tüm varsayılanları sıfırla"
+
+msgid "remote.action.togglePlayPause"
+msgstr "Oynat / Duraklat"
+
+msgid "remote.action.seekBack"
+msgstr "Geri sar"
+
+msgid "remote.action.seekForward"
+msgstr "İleri sar"
+
+msgid "remote.action.channelUp"
+msgstr "Sonraki kanal"
+
+msgid "remote.action.channelDown"
+msgstr "Önceki kanal"
+
+msgid "remote.action.lastChannel"
+msgstr "Son izlenen kanal"
+
+msgid "remote.action.openChannelDrawer"
+msgstr "Kanal listesini aç"
+
+msgid "remote.action.openSettings"
+msgstr "Oynatıcı ayarlarını aç"
+
+msgid "remote.action.cycleAudioTrack"
+msgstr "Ses parçasını değiştir"
+
+msgid "remote.action.cycleSubtitleTrack"
+msgstr "Altyazı parçasını değiştir"
+
+msgid "remote.action.toggleMute"
+msgstr "Sesi kapat / aç"
+
+msgid "remote.action.openInfo"
+msgstr "Program bilgisini göster"
+
+msgid "remote.action.toggleGuide"
+msgstr "TV Rehberini aç / kapat"
+
+msgid "remote.action.openSearch"
+msgstr "Aramayı aç"
+
+msgid "remote.action.toggleFavorite"
+msgstr "Favori ekle / çıkar"
+
+msgid "remote.action.openHome"
+msgstr "Ana Sayfaya git"
+
+msgid "tvHomeChannels.continueWatching"
+msgstr "İzlemeye devam et"
+
+msgid "tvHomeChannels.favorites"
+msgstr "Favori kanallar"
+
+msgid "tvHomeChannels.syncToggle"
+msgstr "Android TV ana ekran kanalları"
+
+msgid "tvHomeChannels.syncHint"
+msgstr "Android TV ana ekranında İzlemeye devam et ve Favori kanallar satırlarını gösterir."

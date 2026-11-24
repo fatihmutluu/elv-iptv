@@ -9,6 +9,7 @@ import {
   AppShell,
   type AppShellProps,
   createLazyCatalog,
+  type LanPairingPort,
   type SourceImportHost,
   type VideoHost,
 } from '@elv/features';
@@ -27,6 +28,7 @@ import {
 import { createDesktopCatalog } from './catalog/index.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
+import { createDesktopLanPairingPort } from './lan-pairing/adapter.ts';
 import { bindDesktopMediaSession, createDesktopMediaSession } from './media-session.ts';
 import { createDesktopEngine } from './player/desktop-engine.ts';
 import {
@@ -36,6 +38,7 @@ import {
 } from './player/host-keys.ts';
 import { PlayerView } from './player/PlayerView.tsx';
 import { attachScrollBlurGuard } from './scroll-blur-guard.ts';
+import { createDesktopKeymapStore } from './storage/keymap.ts';
 import { createDesktopPreferencesStore } from './storage/preferences.ts';
 import { attachDeadHostOnlineReset, createDesktopUiAdapters } from './ui/desktop-adapters.tsx';
 import { shouldMountWorkbench } from './workbench/presets.ts';
@@ -73,6 +76,7 @@ function AppRoot() {
   }, []);
 
   const preferencesStore = useMemo(() => createDesktopPreferencesStore(), []);
+  const keymapStore = useMemo(() => createDesktopKeymapStore(), []);
   const uiAdapters = useMemo(() => createDesktopUiAdapters(), []);
 
   const catalog = useMemo(
@@ -322,6 +326,11 @@ function AppRoot() {
     };
   }, []);
 
+  const lanPairing = useMemo<LanPairingPort | undefined>(
+    () => createDesktopLanPairingPort(window.elv?.lanPairing),
+    [],
+  );
+
   const shellProps: AppShellProps & {
     sourceImportHost?: SourceImportHost;
     profilePreferences?: ProfilePreferencesManager;
@@ -329,8 +338,10 @@ function AppRoot() {
     catalog,
     videoHost,
     profilePreferences: preferencesStore,
+    keymapStore,
     externalRefreshToken: refreshToken,
     ...(sourceImportHost === undefined ? {} : { sourceImportHost }),
+    ...(lanPairing === undefined ? {} : { lanPairing }),
   };
 
   return (
@@ -338,6 +349,7 @@ function AppRoot() {
       <AppProviders
         preferencesStore={preferencesStore}
         profilePreferences={preferencesStore}
+        keymapStore={keymapStore}
         systemLocale={systemLocale}
         viewport={{ formFactor: 'desktop' }}
       >

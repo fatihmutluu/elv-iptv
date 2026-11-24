@@ -121,7 +121,7 @@ describe('Wave C3 Data Layer (#51, #39, #182, #218, #404)', () => {
 
     const res = await openCatalog(db);
     expect(res.ok).toBe(true);
-    expect(SCHEMA_VERSION).toBe(14);
+    expect(SCHEMA_VERSION).toBe(15);
 
     const liveRows = await db.all<{ variant_base_fold: string; quality_rank: number }>(
       'SELECT variant_base_fold, quality_rank FROM live WHERE key = ?',

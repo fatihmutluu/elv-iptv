@@ -9,7 +9,13 @@ import type {
   UpdateParentalSettingsPatch,
   UpdateProfilePatch,
 } from '@elv/data';
-import { elvError, err, type ProfilePreferencesManager, type Result } from '@elv/domain';
+import {
+  elvError,
+  err,
+  type KeymapStore,
+  type ProfilePreferencesManager,
+  type Result,
+} from '@elv/domain';
 import {
   createContext,
   type ReactElement,
@@ -145,6 +151,8 @@ const ProfileContext = createContext<ProfileContextValue>(DEFAULT_PROFILE_CONTEX
 export interface ProfileProviderProps {
   readonly catalog: CatalogService;
   readonly profilePreferences?: ProfilePreferencesManager;
+  readonly keymapStore?: KeymapStore;
+  readonly onProfileDeleted?: (profileId: string) => void | Promise<void>;
   readonly onProfileOrLockChange?: (next: {
     readonly activeProfileId: string;
     readonly parentalUnlocked: boolean;
@@ -190,6 +198,8 @@ function buildGuardPinCandidates(
 export function ProfileProvider({
   catalog,
   profilePreferences,
+  keymapStore,
+  onProfileDeleted,
   onProfileOrLockChange,
   children,
 }: ProfileProviderProps): ReactElement {
@@ -233,6 +243,8 @@ export function ProfileProvider({
   const relockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onProfileOrLockChange);
   onChangeRef.current = onProfileOrLockChange;
+  const onProfileDeletedRef = useRef(onProfileDeleted);
+  onProfileDeletedRef.current = onProfileDeleted;
 
   const clearRelockTimer = useCallback(() => {
     if (relockTimerRef.current !== null) {
@@ -450,7 +462,11 @@ export function ProfileProvider({
       const res = await catalog.deleteProfile(id);
       if (!res.ok) return res;
 
-      await profilePreferences?.deleteProfilePreferences(id).catch(() => undefined);
+      await Promise.all([
+        profilePreferences?.deleteProfilePreferences(id).catch(() => undefined),
+        keymapStore?.deleteProfileKeymap(id).catch(() => undefined),
+        Promise.resolve(onProfileDeletedRef.current?.(id)).catch(() => undefined),
+      ]);
       if (!mountedRef.current) return res;
 
       const loaded = catalog.listProfiles
@@ -468,7 +484,7 @@ export function ProfileProvider({
       }
       return res;
     },
-    [catalog, loadParentalStateFor, profilePreferences, switchProfileInternal],
+    [catalog, keymapStore, loadParentalStateFor, profilePreferences, switchProfileInternal],
   );
 
   const verifyParentalPin = useCallback(

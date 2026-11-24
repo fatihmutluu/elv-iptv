@@ -32,6 +32,7 @@ import {
   type CatalogWorkerMessage,
   isCatalogClientMessage,
 } from '../shared/catalog-ipc.ts';
+import { executeChannelOpsRpcCall } from './catalog-worker-channel-ops.ts';
 import { createDesktopHttpClient } from './legacy-tls-http.ts';
 import { createLocalPlaylistStore } from './local-playlist-store.ts';
 import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.ts';
@@ -585,6 +586,18 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return service.clearParentalPin
           ? service.clearParentalPin(call.currentPin, call.profileId)
           : err(elvError('storage', 'unsupported'));
+      case 'listChannelOverrides':
+      case 'setChannelOverride':
+      case 'clearChannelOverride':
+      case 'reorderChannels':
+      case 'listCustomGroups':
+      case 'createCustomGroup':
+      case 'updateCustomGroup':
+      case 'deleteCustomGroup':
+      case 'setCustomGroupItems':
+      case 'addChannelToCustomGroup':
+      case 'removeChannelFromCustomGroup':
+        return executeChannelOpsRpcCall(service, call);
       case 'flushPendingWrites':
         if (service.flushPendingWrites) await service.flushPendingWrites();
         return undefined;

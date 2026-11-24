@@ -14,14 +14,23 @@ interface RawLiveNumberRow {
   source_id: string;
   provider_id: string | null;
   name: string;
+  raw_name: string;
+  original_name: string | null;
+  co_sort_order: number | null;
   logo: string | null;
   num: number | null;
 }
 
-const LIVE_BY_NUM_SQL = `SELECT l.id, l.key, l.source_id, l.provider_id, l.name, l.logo, l.num
+const LIVE_BY_NUM_SQL = `SELECT l.id, l.key, l.source_id, l.provider_id,
+  COALESCE(NULLIF(co.custom_name, ''), l.name) AS name,
+  l.name AS raw_name,
+  CASE WHEN NULLIF(co.custom_name, '') IS NOT NULL THEN l.name ELSE NULL END AS original_name,
+  co.sort_order AS co_sort_order,
+  l.logo, l.num
   FROM live l
   JOIN sources s ON s.id = l.source_id AND s.deleting = 0
- WHERE l.source_id = ? AND l.num = ? AND l.is_hidden = 0
+  LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
+ WHERE l.source_id = ? AND l.num = ? AND l.is_hidden = 0 AND COALESCE(co.is_hidden, 0) = 0
  ORDER BY l.id`;
 
 function placeholders(count: number): string {
@@ -72,7 +81,7 @@ async function queryChannelByNumberInSource(
   profileId: string,
   filter: ActiveParentalFilter | null,
 ): Promise<ItemRow | undefined> {
-  let rows = await db.all<RawLiveNumberRow>(LIVE_BY_NUM_SQL, [sourceId, num]);
+  let rows = await db.all<RawLiveNumberRow>(LIVE_BY_NUM_SQL, [profileId, sourceId, num]);
   if (rows.length === 0) return undefined;
   if (filter !== null) {
     const restricted = await findRestrictedItemKeys(
@@ -82,7 +91,7 @@ async function queryChannelByNumberInSource(
         itemKey: r.key,
         sourceId: r.source_id,
         kind: 'live' as const,
-        title: r.name,
+        title: r.raw_name,
       })),
     );
     rows = rows.filter((r) => !restricted.has(r.key));
@@ -96,6 +105,10 @@ async function queryChannelByNumberInSource(
     sourceId: r.source_id,
     providerId: r.provider_id,
     name: r.name,
+    ...(r.original_name !== null && r.original_name !== ''
+      ? { originalName: r.original_name }
+      : {}),
+    ...(typeof r.co_sort_order === 'number' ? { customSortOrder: r.co_sort_order } : {}),
     logo: r.logo,
     rating: null,
     year: null,

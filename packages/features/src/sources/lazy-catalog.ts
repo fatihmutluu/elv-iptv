@@ -238,6 +238,73 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
           ? cat.clearParentalPin(currentPin, profileId)
           : err(elvError('storage', 'unsupported'));
       }),
+    listChannelOverrides: async (profileId) =>
+      (await open()).listChannelOverrides?.(profileId) ?? [],
+    setChannelOverride: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.setChannelOverride
+          ? cat.setChannelOverride(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    clearChannelOverride: (itemKey, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.clearChannelOverride
+          ? cat.clearChannelOverride(itemKey, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    reorderChannels: (itemKeys, sourceId, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.reorderChannels
+          ? cat.reorderChannels(itemKeys, sourceId, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    listCustomGroups: async (profileId, opts) =>
+      (await open()).listCustomGroups?.(profileId, opts) ?? [],
+    createCustomGroup: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.createCustomGroup
+          ? cat.createCustomGroup(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    updateCustomGroup: (groupId, patch) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.updateCustomGroup
+          ? cat.updateCustomGroup(groupId, patch)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    deleteCustomGroup: (groupId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.deleteCustomGroup
+          ? cat.deleteCustomGroup(groupId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    setCustomGroupItems: (groupId, items) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.setCustomGroupItems
+          ? cat.setCustomGroupItems(groupId, items)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    addChannelToCustomGroup: (groupId, itemKey, sourceId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.addChannelToCustomGroup
+          ? cat.addChannelToCustomGroup(groupId, itemKey, sourceId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    removeChannelFromCustomGroup: (groupId, itemKey) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.removeChannelFromCustomGroup
+          ? cat.removeChannelFromCustomGroup(groupId, itemKey)
+          : err(elvError('storage', 'unsupported'));
+      }),
     flushPendingWrites: async () => {
       if (cached === undefined) return;
       const cat = await cached.catch(() => undefined);

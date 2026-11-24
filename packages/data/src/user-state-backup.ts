@@ -1,4 +1,6 @@
 import type { SqlDriver } from '@elv/domain';
+import { type ChannelOverrideRecord, markChannelCustomNamesDirty } from './channel-overrides-repo';
+import type { CustomGroupItemRecord } from './custom-groups-repo';
 import type { ParentalLockRecord, ParentalSettings } from './parental-policy';
 import { markParentalStateDirty } from './parental-repo';
 import { isProfileAvatarToken, isValidProfileId } from './profiles-repo';
@@ -12,6 +14,17 @@ import {
   type PersistedTrackPreference,
   type RawTrackPreferenceRow,
 } from './track-preferences-repo';
+import {
+  compareChannelOverrides,
+  compareCustomGroupItems,
+  compareCustomGroups,
+  parseChannelOverrideEntry,
+  parseCustomGroupEntry,
+  parseCustomGroupItemEntry,
+  readChannelManagementBackupRows,
+  restoreChannelManagementBackupRows,
+  type UserDataCustomGroupEntry,
+} from './user-state-backup-channels';
 import {
   compareFavorites,
   compareProgress,
@@ -41,6 +54,7 @@ import {
   type WatchProgressRow,
 } from './user-state-helpers';
 
+export type { UserDataCustomGroupEntry } from './user-state-backup-channels';
 export { sanitizeBackupLogo, type UserDataProfileEntry } from './user-state-backup-entries';
 
 /** Local tvOS `NSUserDefaults` payload budget (`384 KiB`, leaving >100 KB headroom under tvOS's 500 KB cap). */
@@ -73,6 +87,9 @@ export interface UserDataSnapshot {
   readonly parentalLocks?: readonly ParentalLockRecord[];
   readonly trackPreferences?: readonly PersistedTrackPreference[];
   readonly recentChannels?: readonly RecentChannelRow[];
+  readonly channelOverrides?: readonly ChannelOverrideRecord[];
+  readonly customGroups?: readonly UserDataCustomGroupEntry[];
+  readonly customGroupItems?: readonly CustomGroupItemRecord[];
 }
 
 /** Sanitized decoded snapshot returned by {@link decodeUserDataSnapshot}. */
@@ -84,6 +101,9 @@ export interface DecodedUserDataSnapshot {
   parentalLocks?: ParentalLockRecord[];
   trackPreferences?: PersistedTrackPreference[];
   recentChannels?: RecentChannelRow[];
+  channelOverrides?: ChannelOverrideRecord[];
+  customGroups?: UserDataCustomGroupEntry[];
+  customGroupItems?: CustomGroupItemRecord[];
 }
 
 /** Row counts restored by {@link reconcileUserData}. */
@@ -95,6 +115,9 @@ export interface ReconcileUserDataResult {
   parentalLocksRestored?: number;
   trackPreferencesRestored?: number;
   recentChannelsRestored?: number;
+  channelOverridesRestored?: number;
+  customGroupsRestored?: number;
+  customGroupItemsRestored?: number;
 }
 
 function utf8ByteLength(text: string): number {
@@ -127,25 +150,34 @@ const PARENTAL_SETTINGS_ENVELOPE_OVERHEAD_BYTES = utf8ByteLength(',"parentalSett
 const PARENTAL_LOCKS_ENVELOPE_OVERHEAD_BYTES = utf8ByteLength(',"parentalLocks":[]');
 const TRACK_PREFS_ENVELOPE_OVERHEAD_BYTES = utf8ByteLength(',"trackPreferences":[]');
 const RECENT_CHANNELS_ENVELOPE_OVERHEAD_BYTES = utf8ByteLength(',"recentChannels":[]');
+const CHANNEL_OVERRIDES_ENVELOPE_OVERHEAD_BYTES = utf8ByteLength(',"channelOverrides":[]');
+const CUSTOM_GROUPS_ENVELOPE_OVERHEAD_BYTES = utf8ByteLength(',"customGroups":[]');
+const CUSTOM_GROUP_ITEMS_ENVELOPE_OVERHEAD_BYTES = utf8ByteLength(',"customGroupItems":[]');
 
-function stringifyPayload(
-  favorites: readonly FavoriteRow[],
-  progress: readonly WatchProgressRow[],
-  profiles: readonly UserDataProfileEntry[],
-  parentalSettings: readonly ParentalSettings[],
-  parentalLocks: readonly ParentalLockRecord[],
-  trackPreferences: readonly PersistedTrackPreference[],
-  recentChannels: readonly RecentChannelRow[],
-): string {
+function stringifyPayload(payload: {
+  favorites: readonly FavoriteRow[];
+  progress: readonly WatchProgressRow[];
+  profiles: readonly UserDataProfileEntry[];
+  parentalSettings: readonly ParentalSettings[];
+  parentalLocks: readonly ParentalLockRecord[];
+  trackPreferences: readonly PersistedTrackPreference[];
+  recentChannels: readonly RecentChannelRow[];
+  channelOverrides: readonly ChannelOverrideRecord[];
+  customGroups: readonly UserDataCustomGroupEntry[];
+  customGroupItems: readonly CustomGroupItemRecord[];
+}): string {
   return JSON.stringify({
     v: VERSION,
-    favorites,
-    progress,
-    ...(profiles.length > 0 ? { profiles } : {}),
-    ...(parentalSettings.length > 0 ? { parentalSettings } : {}),
-    ...(parentalLocks.length > 0 ? { parentalLocks } : {}),
-    ...(trackPreferences.length > 0 ? { trackPreferences } : {}),
-    ...(recentChannels.length > 0 ? { recentChannels } : {}),
+    favorites: payload.favorites,
+    progress: payload.progress,
+    ...(payload.profiles.length > 0 ? { profiles: payload.profiles } : {}),
+    ...(payload.parentalSettings.length > 0 ? { parentalSettings: payload.parentalSettings } : {}),
+    ...(payload.parentalLocks.length > 0 ? { parentalLocks: payload.parentalLocks } : {}),
+    ...(payload.trackPreferences.length > 0 ? { trackPreferences: payload.trackPreferences } : {}),
+    ...(payload.recentChannels.length > 0 ? { recentChannels: payload.recentChannels } : {}),
+    ...(payload.channelOverrides.length > 0 ? { channelOverrides: payload.channelOverrides } : {}),
+    ...(payload.customGroups.length > 0 ? { customGroups: payload.customGroups } : {}),
+    ...(payload.customGroupItems.length > 0 ? { customGroupItems: payload.customGroupItems } : {}),
   });
 }
 
@@ -183,6 +215,9 @@ export function encodeUserDataSnapshot(
     | 'parentalLocks'
     | 'trackPreferences'
     | 'recentChannels'
+    | 'channelOverrides'
+    | 'customGroups'
+    | 'customGroupItems'
   > & {
     readonly v?: typeof VERSION;
   },
@@ -220,8 +255,20 @@ export function encodeUserDataSnapshot(
     .map((entry) => parseRecentChannelEntry(entry))
     .filter((entry): entry is RecentChannelRow => entry !== null)
     .sort(compareRecentChannels);
+  const customGroups = (snapshot.customGroups ?? [])
+    .map((entry) => parseCustomGroupEntry(entry))
+    .filter((entry): entry is UserDataCustomGroupEntry => entry !== null)
+    .sort(compareCustomGroups);
+  const customGroupItems = (snapshot.customGroupItems ?? [])
+    .map((entry) => parseCustomGroupItemEntry(entry))
+    .filter((entry): entry is CustomGroupItemRecord => entry !== null)
+    .sort(compareCustomGroupItems);
+  const channelOverrides = (snapshot.channelOverrides ?? [])
+    .map((entry) => parseChannelOverrideEntry(entry))
+    .filter((entry): entry is ChannelOverrideRecord => entry !== null)
+    .sort(compareChannelOverrides);
 
-  const full = stringifyPayload(
+  const full = stringifyPayload({
     favorites,
     progress,
     profiles,
@@ -229,7 +276,10 @@ export function encodeUserDataSnapshot(
     parentalLocks,
     trackPreferences,
     recentChannels,
-  );
+    channelOverrides,
+    customGroups,
+    customGroupItems,
+  });
   if (utf8ByteLength(full) <= budget) return full;
 
   const packState = { usedBytes: EMPTY_ENVELOPE_BYTES, budget };
@@ -246,6 +296,22 @@ export function encodeUserDataSnapshot(
   );
   const keptFavorites = packWithinBudget(favorites, 0, packState);
   const keptProgress = packWithinBudget(progress, 0, packState);
+  const keptCustomGroups = packWithinBudget(
+    customGroups,
+    CUSTOM_GROUPS_ENVELOPE_OVERHEAD_BYTES,
+    packState,
+  );
+  const keptGroupIdSet = new Set(keptCustomGroups.map((g) => g.id));
+  const keptCustomGroupItems = packWithinBudget(
+    customGroupItems.filter((item) => keptGroupIdSet.has(item.groupId)),
+    CUSTOM_GROUP_ITEMS_ENVELOPE_OVERHEAD_BYTES,
+    packState,
+  );
+  const keptChannelOverrides = packWithinBudget(
+    channelOverrides,
+    CHANNEL_OVERRIDES_ENVELOPE_OVERHEAD_BYTES,
+    packState,
+  );
   const keptTrackPrefs = packWithinBudget(
     trackPreferences,
     TRACK_PREFS_ENVELOPE_OVERHEAD_BYTES,
@@ -257,15 +323,18 @@ export function encodeUserDataSnapshot(
     packState,
   );
 
-  return stringifyPayload(
-    keptFavorites,
-    keptProgress,
-    keptProfiles,
-    keptParentalSettings,
-    keptParentalLocks,
-    keptTrackPrefs,
-    keptRecentChannels,
-  );
+  return stringifyPayload({
+    favorites: keptFavorites,
+    progress: keptProgress,
+    profiles: keptProfiles,
+    parentalSettings: keptParentalSettings,
+    parentalLocks: keptParentalLocks,
+    trackPreferences: keptTrackPrefs,
+    recentChannels: keptRecentChannels,
+    channelOverrides: keptChannelOverrides,
+    customGroups: keptCustomGroups,
+    customGroupItems: keptCustomGroupItems,
+  });
 }
 
 /** Decodes and sanitizes a persisted snapshot; returns empty arrays on missing, corrupt, or foreign payloads. */
@@ -286,6 +355,9 @@ export function decodeUserDataSnapshot(raw: string | undefined): DecodedUserData
     parentalLocks?: unknown;
     trackPreferences?: unknown;
     recentChannels?: unknown;
+    channelOverrides?: unknown;
+    customGroups?: unknown;
+    customGroupItems?: unknown;
   } | null;
   if (obj === null || typeof obj !== 'object' || obj.v !== VERSION) {
     return { favorites: [], progress: [], profiles: [] };
@@ -325,6 +397,21 @@ export function decodeUserDataSnapshot(raw: string | undefined): DecodedUserData
         .map((entry) => parseRecentChannelEntry(entry))
         .filter((entry): entry is RecentChannelRow => entry !== null)
     : [];
+  const channelOverrides = Array.isArray(obj.channelOverrides)
+    ? obj.channelOverrides
+        .map((entry) => parseChannelOverrideEntry(entry))
+        .filter((entry): entry is ChannelOverrideRecord => entry !== null)
+    : [];
+  const customGroups = Array.isArray(obj.customGroups)
+    ? obj.customGroups
+        .map((entry) => parseCustomGroupEntry(entry))
+        .filter((entry): entry is UserDataCustomGroupEntry => entry !== null)
+    : [];
+  const customGroupItems = Array.isArray(obj.customGroupItems)
+    ? obj.customGroupItems
+        .map((entry) => parseCustomGroupItemEntry(entry))
+        .filter((entry): entry is CustomGroupItemRecord => entry !== null)
+    : [];
   return {
     favorites,
     progress,
@@ -333,6 +420,9 @@ export function decodeUserDataSnapshot(raw: string | undefined): DecodedUserData
     ...(parentalLocks.length > 0 ? { parentalLocks } : {}),
     ...(trackPreferences.length > 0 ? { trackPreferences } : {}),
     ...(recentChannels.length > 0 ? { recentChannels } : {}),
+    ...(channelOverrides.length > 0 ? { channelOverrides } : {}),
+    ...(customGroups.length > 0 ? { customGroups } : {}),
+    ...(customGroupItems.length > 0 ? { customGroupItems } : {}),
   };
 }
 
@@ -347,31 +437,39 @@ function readSnapshot(store: UserDataStore): DecodedUserDataSnapshot {
 /** Reads `profiles`, `parental_settings`, `parental_locks`, `favorites`, `watch_progress`, `track_preferences`, and `recent_channels` from `db` and persists a budget-safe snapshot to `store`. */
 export async function saveUserDataSnapshot(db: SqlDriver, store: UserDataStore): Promise<void> {
   try {
-    const [rawFavorites, rawProgress, rawProfiles, rawTrackPrefs, rawRecentChannels, parental] =
-      await Promise.all([
-        db.all<RawFavoriteRow>(
-          'SELECT profile_id, source_id, item_key, kind, title, logo, year, rating, added_at FROM favorites ORDER BY added_at DESC, profile_id ASC, item_key ASC',
-        ),
-        db.all<RawProgressRow>(
-          'SELECT profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at FROM watch_progress ORDER BY watched ASC, updated_at DESC, profile_id ASC, item_key ASC',
-        ),
-        db.all<{
-          id: string;
-          name: string;
-          avatar_token: string;
-          is_kids: number;
-          created_at: number;
-        }>(
-          'SELECT id, name, avatar_token, is_kids, created_at FROM profiles ORDER BY is_default DESC, created_at ASC, id ASC',
-        ),
-        db.all<RawTrackPreferenceRow>(
-          'SELECT profile_id, scope_key, source_id, audio_lang, audio_label, sub_lang, sub_label, sub_disabled, audio_delay_ms, sub_delay_ms, resize_mode, updated_at FROM track_preferences ORDER BY updated_at DESC, profile_id ASC, scope_key ASC',
-        ),
-        db.all<RawRecentChannelRow>(
-          'SELECT profile_id, source_id, item_key, watched_at FROM recent_channels ORDER BY watched_at DESC, profile_id ASC, item_key ASC',
-        ),
-        readParentalBackupRows(db),
-      ]);
+    const [
+      rawFavorites,
+      rawProgress,
+      rawProfiles,
+      rawTrackPrefs,
+      rawRecentChannels,
+      parental,
+      channelMgmt,
+    ] = await Promise.all([
+      db.all<RawFavoriteRow>(
+        'SELECT profile_id, source_id, item_key, kind, title, logo, year, rating, added_at FROM favorites ORDER BY added_at DESC, profile_id ASC, item_key ASC',
+      ),
+      db.all<RawProgressRow>(
+        'SELECT profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at FROM watch_progress ORDER BY watched ASC, updated_at DESC, profile_id ASC, item_key ASC',
+      ),
+      db.all<{
+        id: string;
+        name: string;
+        avatar_token: string;
+        is_kids: number;
+        created_at: number;
+      }>(
+        'SELECT id, name, avatar_token, is_kids, created_at FROM profiles ORDER BY is_default DESC, created_at ASC, id ASC',
+      ),
+      db.all<RawTrackPreferenceRow>(
+        'SELECT profile_id, scope_key, source_id, audio_lang, audio_label, sub_lang, sub_label, sub_disabled, audio_delay_ms, sub_delay_ms, resize_mode, updated_at FROM track_preferences ORDER BY updated_at DESC, profile_id ASC, scope_key ASC',
+      ),
+      db.all<RawRecentChannelRow>(
+        'SELECT profile_id, source_id, item_key, watched_at FROM recent_channels ORDER BY watched_at DESC, profile_id ASC, item_key ASC',
+      ),
+      readParentalBackupRows(db),
+      readChannelManagementBackupRows(db),
+    ]);
     const profiles: UserDataProfileEntry[] =
       rawProfiles.length > 0
         ? rawProfiles.map((p) => ({
@@ -390,6 +488,9 @@ export async function saveUserDataSnapshot(db: SqlDriver, store: UserDataStore):
       parentalLocks: parental.parentalLocks,
       trackPreferences: rawTrackPrefs.map(mapTrackPreferenceRow),
       recentChannels: rawRecentChannels.map(mapRecentChannelRow),
+      channelOverrides: channelMgmt.channelOverrides,
+      customGroups: channelMgmt.customGroups,
+      customGroupItems: channelMgmt.customGroupItems,
     };
     const encoded = encodeUserDataSnapshot(snapshot, store.maxBytes ?? DEFAULT_USER_DATA_MAX_BYTES);
     try {
@@ -458,6 +559,9 @@ export async function reconcileUserData(
     customProfilePresent,
     parentalSettingsPresent,
     parentalLocksPresent,
+    overridesPresent,
+    customGroupsPresent,
+    customGroupItemsPresent,
   ] = await Promise.all([
     db.all<{ found: number }>('SELECT 1 AS found FROM favorites LIMIT 1'),
     db.all<{ found: number }>('SELECT 1 AS found FROM watch_progress LIMIT 1'),
@@ -466,6 +570,9 @@ export async function reconcileUserData(
     db.all<{ found: number }>("SELECT 1 AS found FROM profiles WHERE id != 'default' LIMIT 1"),
     db.all<{ found: number }>('SELECT 1 AS found FROM parental_settings LIMIT 1'),
     db.all<{ found: number }>('SELECT 1 AS found FROM parental_locks LIMIT 1'),
+    db.all<{ found: number }>('SELECT 1 AS found FROM channel_overrides LIMIT 1'),
+    db.all<{ found: number }>('SELECT 1 AS found FROM custom_groups LIMIT 1'),
+    db.all<{ found: number }>('SELECT 1 AS found FROM custom_group_items LIMIT 1'),
   ]);
   if (
     favPresent.length > 0 ||
@@ -474,7 +581,10 @@ export async function reconcileUserData(
     recentPresent.length > 0 ||
     customProfilePresent.length > 0 ||
     parentalSettingsPresent.length > 0 ||
-    parentalLocksPresent.length > 0
+    parentalLocksPresent.length > 0 ||
+    overridesPresent.length > 0 ||
+    customGroupsPresent.length > 0 ||
+    customGroupItemsPresent.length > 0
   ) {
     await saveUserDataSnapshot(db, store);
     return { favoritesRestored: 0, progressRestored: 0 };
@@ -484,6 +594,9 @@ export async function reconcileUserData(
   const parentalLocks = snapshot.parentalLocks ?? [];
   const trackPrefs = snapshot.trackPreferences ?? [];
   const recentChannels = snapshot.recentChannels ?? [];
+  const channelOverrides = snapshot.channelOverrides ?? [];
+  const customGroups = snapshot.customGroups ?? [];
+  const customGroupItems = snapshot.customGroupItems ?? [];
   if (
     snapshot.favorites.length === 0 &&
     snapshot.progress.length === 0 &&
@@ -491,7 +604,10 @@ export async function reconcileUserData(
     parentalSettings.length === 0 &&
     parentalLocks.length === 0 &&
     trackPrefs.length === 0 &&
-    recentChannels.length === 0
+    recentChannels.length === 0 &&
+    channelOverrides.length === 0 &&
+    customGroups.length === 0 &&
+    customGroupItems.length === 0
   ) {
     return { favoritesRestored: 0, progressRestored: 0 };
   }
@@ -503,6 +619,10 @@ export async function reconcileUserData(
   let hasRestoredParentalState = false;
   let trackPreferencesRestored = 0;
   let recentChannelsRestored = 0;
+  let channelOverridesRestored = 0;
+  let customGroupsRestored = 0;
+  let customGroupItemsRestored = 0;
+  let hasRestoredCustomNames = false;
   await db.transaction(async (tx) => {
     for (const profile of snapshot.profiles) {
       if (!isValidProfileId(profile.id)) continue;
@@ -603,9 +723,21 @@ export async function reconcileUserData(
       ]);
       recentChannelsRestored += res.changes;
     }
+    const channelMgmtOutcome = await restoreChannelManagementBackupRows(tx, {
+      channelOverrides,
+      customGroups,
+      customGroupItems,
+    });
+    channelOverridesRestored = channelMgmtOutcome.channelOverridesRestored;
+    customGroupsRestored = channelMgmtOutcome.customGroupsRestored;
+    customGroupItemsRestored = channelMgmtOutcome.customGroupItemsRestored;
+    hasRestoredCustomNames = channelMgmtOutcome.hasCustomNames;
   });
   if (hasRestoredParentalState) {
     markParentalStateDirty(db);
+  }
+  if (hasRestoredCustomNames) {
+    markChannelCustomNamesDirty(db);
   }
   return {
     favoritesRestored,
@@ -615,5 +747,8 @@ export async function reconcileUserData(
     ...(parentalLocksRestored > 0 ? { parentalLocksRestored } : {}),
     ...(trackPreferencesRestored > 0 ? { trackPreferencesRestored } : {}),
     ...(recentChannelsRestored > 0 ? { recentChannelsRestored } : {}),
+    ...(channelOverridesRestored > 0 ? { channelOverridesRestored } : {}),
+    ...(customGroupsRestored > 0 ? { customGroupsRestored } : {}),
+    ...(customGroupItemsRestored > 0 ? { customGroupItemsRestored } : {}),
   };
 }

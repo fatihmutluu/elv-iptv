@@ -10,6 +10,7 @@ import {
   type SqlDriver,
 } from '@elv/domain';
 import { type AlphabetBucket, type AlphabetIndexInput, queryAlphabetIndex } from './alphabet-index';
+import { createCatalogChannelOpsMethods } from './catalog-channel-ops';
 import { createCatalogProfileMethods } from './catalog-profiles';
 import {
   mapNewSourceRow,
@@ -17,6 +18,14 @@ import {
   parseSourceMeta,
   type SourceRow,
 } from './catalog-source-meta';
+import type { ChannelOverrideRecord, SetChannelOverrideInput } from './channel-overrides-repo';
+import {
+  type CreateCustomGroupInput,
+  type CustomGroupItemInput,
+  type CustomGroupRecord,
+  parseCustomGroupCategoryId,
+  type UpdateCustomGroupPatch,
+} from './custom-groups-repo';
 import { type DiscoveredCategory, discoverSourceCategories } from './discover-categories';
 import {
   type CrossChannelProgrammeRow,
@@ -268,7 +277,7 @@ export interface CatalogService {
   listFavorites?(
     limit?: number,
     profileId?: string,
-    opts?: { readonly parentalUnlocked?: boolean },
+    opts?: { readonly parentalUnlocked?: boolean; readonly includeHidden?: boolean },
   ): Promise<FavoriteRow[]>;
   listFavoriteKeys?(profileId?: string): Promise<string[]>;
   getTrackPreference?(
@@ -301,6 +310,34 @@ export interface CatalogService {
   setParentalPin?(pin: string, profileId?: string, currentPin?: string): Promise<Result<void>>;
   verifyParentalPin?(pin: string, profileId?: string): Promise<PinVerifyResult>;
   clearParentalPin?(currentPin: string, profileId?: string): Promise<Result<void>>;
+  listChannelOverrides?(profileId?: string): Promise<ChannelOverrideRecord[]>;
+  setChannelOverride?(input: SetChannelOverrideInput): Promise<Result<ChannelOverrideRecord>>;
+  clearChannelOverride?(itemKey: string, profileId?: string): Promise<Result<void>>;
+  reorderChannels?(
+    itemKeys: readonly string[],
+    sourceId: string,
+    profileId?: string,
+  ): Promise<Result<void>>;
+  listCustomGroups?(
+    profileId?: string,
+    opts?: { readonly includeHidden?: boolean; readonly parentalUnlocked?: boolean },
+  ): Promise<CustomGroupRecord[]>;
+  createCustomGroup?(input: CreateCustomGroupInput): Promise<Result<CustomGroupRecord>>;
+  updateCustomGroup?(
+    groupId: string,
+    patch: UpdateCustomGroupPatch,
+  ): Promise<Result<CustomGroupRecord>>;
+  deleteCustomGroup?(groupId: string): Promise<Result<void>>;
+  setCustomGroupItems?(
+    groupId: string,
+    items: readonly CustomGroupItemInput[],
+  ): Promise<Result<void>>;
+  addChannelToCustomGroup?(
+    groupId: string,
+    itemKey: string,
+    sourceId: string,
+  ): Promise<Result<void>>;
+  removeChannelFromCustomGroup?(groupId: string, itemKey: string): Promise<Result<void>>;
   flushPendingWrites?(): Promise<void>;
   close(): Promise<void>;
 }
@@ -355,6 +392,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     return next;
   };
   const profileMethods = createCatalogProfileMethods({ db, secrets, clock, syncUserData });
+  const channelOpsMethods = createCatalogChannelOpsMethods({ db, clock, syncUserData });
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
@@ -475,6 +513,9 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     categories: (sourceId, kind, opts) => queryCategories(db, sourceId, kind, opts),
 
     async items(categoryId, offset, limit, opts) {
+      if (parseCustomGroupCategoryId(categoryId) !== undefined) {
+        return playtime.resolveRowLogos(await queryItems(db, categoryId, offset, limit, opts));
+      }
       const ref = parseCategoryId(categoryId);
       if (ref === undefined) return [];
       return playtime.resolveLogos(await queryItems(db, ref, offset, limit, opts), ref.sourceId);
@@ -637,6 +678,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       playtime.resolveRowLogos(await listRecentChannels(db, limit, profileId, opts)),
 
     ...profileMethods,
+    ...channelOpsMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

@@ -1,6 +1,6 @@
-import type { KeyEvent } from '@elv/focus-core';
+import type { KeyEvent, KeymapOverrides } from '@elv/focus-core';
 import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useBrowseFocusMemory } from '../shared';
+import { evaluateRemappedEvent, useBrowseFocusMemory, useKeymap } from '../shared';
 import { EMPTY_LIVE_MEMORY, type LiveMode, type LiveTabMemory } from './live-model';
 
 /** Controlled-or-uncontrolled Live tab memory helper preserving mode, category, and channel history. */
@@ -81,6 +81,11 @@ export interface UseTvLiveNavigationOptions {
   readonly onSelectZapIndex: (index: number) => void;
   readonly onOpenZapContextMenu?: (index: number) => void;
   readonly onJumpPreviousChannel?: () => void;
+  readonly onToggleGuideMode?: () => void;
+  readonly onOpenSearch?: () => void;
+  readonly onOpenHome?: () => void;
+  readonly onToggleActiveFavorite?: () => void;
+  readonly keymapOverrides?: KeymapOverrides;
   readonly onOpenSources: () => void;
   readonly onFocusTopNav?: () => void;
 }
@@ -149,6 +154,9 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
 
   const navRef = useRef(nav);
   navRef.current = nav;
+  const keymap = useKeymap();
+  const keymapOverridesRef = useRef<KeymapOverrides>(opts.keymapOverrides ?? keymap.overrides);
+  keymapOverridesRef.current = opts.keymapOverrides ?? keymap.overrides;
   const optsRef = useRef(opts);
   optsRef.current = opts;
   const updateNav = useCallback((updater: (prev: NavSnapshot) => NavSnapshot) => {
@@ -256,12 +264,79 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         return true;
       }
 
+      const remapEval = evaluateRemappedEvent(keymapOverridesRef.current, 'live', event);
+      if (remapEval.status === 'remapped') {
+        switch (remapEval.actionId) {
+          case 'live.lastChannel':
+            if (o.mode === 'channels' || o.mode === 'epg') {
+              o.onJumpPreviousChannel?.();
+              return true;
+            }
+            break;
+          case 'live.toggleGuide':
+          case 'global.openGuide':
+            if (o.onToggleGuideMode !== undefined) {
+              o.onToggleGuideMode();
+            } else {
+              o.onSelectMode(o.mode === 'epg' ? 'channels' : 'epg');
+            }
+            return true;
+          case 'live.openSearch':
+          case 'global.openSearch':
+            if (o.onOpenSearch !== undefined) {
+              o.onOpenSearch();
+              return true;
+            }
+            break;
+          case 'live.toggleFavorite':
+            if (o.onToggleActiveFavorite !== undefined) {
+              o.onToggleActiveFavorite();
+              return true;
+            }
+            break;
+          case 'global.openHome':
+            if (o.onOpenHome !== undefined) {
+              o.onOpenHome();
+              return true;
+            }
+            break;
+          default:
+            break;
+        }
+      } else if (remapEval.status === 'suppressed') {
+        return true;
+      }
+
       if (
         event.kind === 'press' &&
         event.key === 'lastChannel' &&
         (o.mode === 'channels' || o.mode === 'epg')
       ) {
         o.onJumpPreviousChannel?.();
+        return true;
+      }
+      if (event.kind === 'press' && event.key === 'guide') {
+        if (o.onToggleGuideMode !== undefined) {
+          o.onToggleGuideMode();
+        } else {
+          o.onSelectMode(o.mode === 'epg' ? 'channels' : 'epg');
+        }
+        return true;
+      }
+      if (event.kind === 'press' && event.key === 'search' && o.onOpenSearch !== undefined) {
+        o.onOpenSearch();
+        return true;
+      }
+      if (
+        event.kind === 'press' &&
+        event.key === 'colorRed' &&
+        o.onToggleActiveFavorite !== undefined
+      ) {
+        o.onToggleActiveFavorite();
+        return true;
+      }
+      if (event.kind === 'press' && event.key === 'colorGreen' && o.onOpenHome !== undefined) {
+        o.onOpenHome();
         return true;
       }
 

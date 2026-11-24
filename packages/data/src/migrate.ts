@@ -1,4 +1,5 @@
 import { elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
+import { refreshChannelOverridesFastPath } from './channel-overrides-repo';
 import { refreshParentalFastPath } from './parental-repo';
 import { reapOrphanedRuns } from './runs';
 import { EXPECTED_FTS_TABLES, EXPECTED_TABLE_COLUMNS, MIGRATIONS, OPEN_PRAGMAS } from './schema';
@@ -142,6 +143,7 @@ export async function openCatalog(
     if (!verified.ok) return verified;
     await reapOrphanedRuns(db, clock());
     await refreshParentalFastPath(db);
+    await refreshChannelOverridesFastPath(db);
     return ok(undefined);
   } catch (error) {
     return err(

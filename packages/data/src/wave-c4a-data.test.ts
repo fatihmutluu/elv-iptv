@@ -68,8 +68,8 @@ describe('Wave C4A Data Layer (#397 Expanded FTS5 Search + Suggestions, #407 A-Z
 
     const opened = await openCatalog(db);
     expect(opened.ok).toBe(true);
-    expect(SCHEMA_VERSION).toBe(14);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 14 }]);
+    expect(SCHEMA_VERSION).toBe(15);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 15 }]);
 
     // Verify episodes.title_fold backfilled with Turkish-accurate foldText()
     const epFold = await db.all<{ title_fold: string }>(

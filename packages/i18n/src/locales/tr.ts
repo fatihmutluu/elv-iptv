@@ -1,4 +1,5 @@
 import type { MessageId } from './en';
+import { trErgonomicsMessages } from './tr-ergonomics';
 import { trProfilesMessages } from './tr-profiles';
 
 /** Turkish (`tr`) message catalog. */
@@ -704,4 +705,5 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.videoQualityAuto': 'Otomatik',
   'player.delayReset': 'Sıfırla (0 ms)',
   ...trProfilesMessages,
+  ...trErgonomicsMessages,
 };

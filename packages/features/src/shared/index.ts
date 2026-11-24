@@ -39,6 +39,17 @@ export {
 } from './catalog-ui-cache';
 export { type DetailCastMember, type DetailTarget, detailTargetFromItem } from './detail-target';
 export {
+  type KeymapContextValue,
+  KeymapProvider,
+  type KeymapProviderProps,
+  useKeymap,
+} from './KeymapContext';
+export {
+  evaluateRemappedEvent,
+  formatRemoteKeyLabel,
+  mapWebKeyToRemoteKey,
+} from './keymap-routing';
+export {
   DEFAULT_PROFILE_RECORD,
   defaultParentalSettings,
   type PinDialogMode,

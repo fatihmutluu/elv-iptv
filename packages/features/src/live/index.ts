@@ -1,3 +1,7 @@
+export {
+  ChannelManagementOverlay,
+  type ChannelManagementOverlayProps,
+} from './ChannelManagementOverlay';
 export { EpgChannelRow, type EpgChannelRowProps } from './EpgChannelRow';
 export { EpgGridView, type EpgGridViewProps } from './EpgGridView';
 export {

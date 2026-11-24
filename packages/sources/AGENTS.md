@@ -44,3 +44,7 @@ M3U and XMLTV scanners and the Xtream client.
   Per-`HttpClient` account-scoped `429` cooldowns (`Retry-After`, no failover on `429`) and ordered mirror failover (`xtream-mirrors.ts`).
   Empty `{}` -> `[]`, `[]` -> `{}`; array `episodes` keep Season `0` and deduplicate; extracts optional bounded `cast` (`<=512` chars, from `cast` or `actors`) and `director` (`<=256` chars) on VOD/Series rows and info. Credentials only in URL builders; errors omit URLs.
   Files: `xtream.ts`, `xtream-stream.ts`, `xtream-probe.ts`, `xtream-json.ts`, `xtream-mirrors.ts`, `xtream-records.ts`, `xtream-normalize.ts`, `xtream-types.ts`.
+- LAN pairing protocol (`lan-pairing-protocol.ts`, `lan-pairing-html.ts`, `#50`): pure validators (`isPrivateLanAddress`,
+  `isValidPairingHostHeader`, `isValidPairingOrigin`, `isValidPairingToken`, `constantTimeEqual`, `isValidPairingPath`,
+  `buildLanPairingUrl`), `parseLanPairingPayload` (JSON / form-urlencoded, `http(s)://` + length caps, secret-free errors),
+  and `renderLanPairingHtml` (self-contained EN/TR dark-mode form, zero external requests / zero `crypto.subtle`).

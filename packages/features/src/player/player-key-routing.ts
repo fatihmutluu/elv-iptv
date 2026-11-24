@@ -1,6 +1,6 @@
 import type { LiveVariantOption } from '@elv/data';
 import type { AndroidDecoderMode, DefaultResizeModePref, SeekStepSecPref } from '@elv/domain';
-import type { KeyEvent } from '@elv/focus-core';
+import type { KeyEvent, KeymapOverrides, RemappableActionId } from '@elv/focus-core';
 import type {
   ChapterInfo,
   MediaTracks,
@@ -13,6 +13,7 @@ import type { FormFactor } from '@elv/ui-kit';
 import type { MutableRefObject } from 'react';
 import type { PlayTarget } from '../ports/play-target';
 import type { AudioDeviceInfo, HostKey, VideoResizeMode } from '../ports/video-host';
+import { evaluateRemappedEvent } from '../shared';
 import type { ChannelDigitBuffer } from './channel-digit-entry';
 import type { PlayerOverlayLive } from './player-overlay-model';
 import { COARSE_SEEK_MS, type ScrubController, STEP_SEEK_MS } from './scrub-controller';
@@ -220,14 +221,124 @@ export interface OverlayKeyRouteDeps {
   readonly selectAndroidDecoderMode?: ((mode: AndroidDecoderMode) => void) | undefined;
   readonly onExit: () => void;
   readonly onJumpPreviousChannel?: (() => void) | undefined;
+  readonly keymapOverrides?: KeymapOverrides | undefined;
+  readonly openSettings?: (() => void) | undefined;
+  readonly seekBy?: ((deltaMs: number) => void) | undefined;
+  readonly stepSeekMs?: number | undefined;
+  readonly zapBy?: ((delta: 1 | -1) => void) | undefined;
+  readonly toggleMute?: (() => void) | undefined;
+}
+
+function executeRemappedPlayerAction(
+  actionId: RemappableActionId,
+  d: OverlayKeyRouteDeps,
+): boolean {
+  const s = d.state;
+  switch (actionId) {
+    case 'player.togglePlayPause':
+      d.togglePlayPause();
+      return true;
+    case 'player.seekBack':
+      if (d.isVod) d.seekBy?.(-(d.stepSeekMs ?? STEP_SEEK_MS));
+      return true;
+    case 'player.seekForward':
+      if (d.isVod) d.seekBy?.(d.stepSeekMs ?? STEP_SEEK_MS);
+      return true;
+    case 'player.channelUp':
+      if (!d.isVod) d.zapBy?.(1);
+      return true;
+    case 'player.channelDown':
+      if (!d.isVod) d.zapBy?.(-1);
+      return true;
+    case 'player.lastChannel':
+      d.digitBuf.cancel();
+      d.onJumpPreviousChannel?.();
+      return true;
+    case 'player.openChannelDrawer':
+    case 'player.toggleGuide':
+      if (s.channelListOpen && d.toggleChannelList !== undefined) {
+        d.toggleChannelList();
+      } else if (!d.isVod && d.toggleChannelList !== undefined && s.canOpenChannelList) {
+        d.digitBuf.cancel();
+        d.toggleChannelList();
+      } else {
+        d.showOsd();
+      }
+      return true;
+    case 'player.openSettings':
+      d.digitBuf.cancel();
+      if (s.settingsOpen) d.closeSettings();
+      else if (d.openSettings !== undefined) d.openSettings();
+      else d.showOsd();
+      return true;
+    case 'player.cycleAudioTrack': {
+      const list = s.tracks.audio;
+      if (list.length > 0) {
+        const curIdx = list.findIndex((t) => t.id === s.tracks.selectedAudioId);
+        const nextTrack = list[(curIdx + 1) % list.length];
+        if (nextTrack) {
+          if (d.selectAudio !== undefined) d.selectAudio(nextTrack.id);
+          else d.service?.selectAudioTrack(nextTrack.id);
+        }
+      } else {
+        d.openTracks('audio');
+      }
+      return true;
+    }
+    case 'player.cycleSubtitleTrack': {
+      const list = s.tracks.subtitles;
+      if (list.length > 0) {
+        const curIdx = list.findIndex((t) => t.id === s.tracks.selectedSubtitleId);
+        if (curIdx === list.length - 1) {
+          if (d.selectSubtitle !== undefined) d.selectSubtitle(null);
+          else d.service?.selectSubtitleTrack(null);
+        } else {
+          const nextTrack = list[curIdx + 1];
+          if (nextTrack) {
+            if (d.selectSubtitle !== undefined) d.selectSubtitle(nextTrack.id);
+            else d.service?.selectSubtitleTrack(nextTrack.id);
+          }
+        }
+      } else {
+        d.openTracks('subtitles');
+      }
+      return true;
+    }
+    case 'player.toggleMute':
+      d.toggleMute?.();
+      return true;
+    case 'player.openInfo':
+      if (d.toggleInfo !== undefined && s.canOpenInfo) d.toggleInfo();
+      else {
+        d.showOsd();
+        d.toggleStats();
+      }
+      return true;
+    default:
+      return false;
+  }
 }
 
 /**
- * Handles extended media shortcuts (`stop`, `info`, `captions`, `audioTrack`, `lastChannel`, `menu`)
- * and open sheet / focused OSD / focused scrubber key routing. Returns `true` when handled.
+ * Handles extended media shortcuts (`stop`, `info`, `captions`, `audioTrack`, `lastChannel`, `menu`),
+ * user-remapped player shortcuts (`#33`), and open sheet / focused OSD / focused scrubber key routing.
+ * Returns `true` when handled.
  */
 export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps): boolean {
   const s = d.state;
+  const anySheetOpen = s.settingsOpen || s.tracksOpen || s.channelListOpen || s.infoOpen;
+  if (
+    !anySheetOpen &&
+    d.keymapOverrides !== undefined &&
+    Object.keys(d.keymapOverrides).length > 0
+  ) {
+    const evalResult = evaluateRemappedEvent(d.keymapOverrides, 'player', event);
+    if (evalResult.status === 'remapped') {
+      if (executeRemappedPlayerAction(evalResult.actionId, d)) return true;
+    } else if (evalResult.status === 'suppressed') {
+      return true;
+    }
+  }
   if (event.kind === 'press') {
     if (event.key === 'stop') {
       d.scrub.cancel();
@@ -268,19 +379,19 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       return true;
     }
     if (event.key === 'colorYellow') {
-      d.showOsd();
-      d.toggleStats();
+      if (d.toggleMute !== undefined) {
+        d.toggleMute();
+      } else {
+        d.showOsd();
+        d.toggleStats();
+      }
       return true;
     }
     if (event.key === 'colorBlue') {
-      if (!d.isVod && d.toggleChannelList !== undefined && s.canOpenChannelList) {
-        d.digitBuf.cancel();
-        d.toggleChannelList();
-      } else if (d.toggleInfo !== undefined && s.canOpenInfo) {
-        d.toggleInfo();
-      } else {
-        d.showOsd();
-      }
+      d.digitBuf.cancel();
+      if (s.settingsOpen) d.closeSettings();
+      else if (d.openSettings !== undefined) d.openSettings();
+      else d.showOsd();
       return true;
     }
     if (event.key === 'lastChannel') {
@@ -289,9 +400,20 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       return true;
     }
     if (event.key === 'menu') {
-      if (s.settingsOpen) d.closeSettings();
-      else if (s.tracksOpen) d.closeTracks();
-      else d.openTracks();
+      if (s.channelListOpen && d.toggleChannelList !== undefined) {
+        d.toggleChannelList();
+      } else if (!d.isVod && d.toggleChannelList !== undefined && s.canOpenChannelList) {
+        d.digitBuf.cancel();
+        d.toggleChannelList();
+      } else if (s.settingsOpen) {
+        d.closeSettings();
+      } else if (s.tracksOpen) {
+        d.closeTracks();
+      } else if (s.hasTracks) {
+        d.openTracks();
+      } else {
+        d.showOsd();
+      }
       return true;
     }
   }

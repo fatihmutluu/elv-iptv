@@ -68,10 +68,13 @@ export async function querySearchSuggestions(
       kind: ContentKind;
       title: string;
     }>(
-      `SELECT f.source_id, f.item_key, f.kind, f.title
+      `SELECT f.source_id, f.item_key, f.kind,
+              CASE WHEN f.kind = 'live' THEN COALESCE(NULLIF(co.custom_name, ''), f.title) ELSE f.title END AS title
          FROM favorites f
          JOIN sources s ON s.id = f.source_id AND s.deleting = 0
+         LEFT JOIN channel_overrides co ON co.profile_id = f.profile_id AND co.item_key = f.item_key
         WHERE f.profile_id = ?${srcFilter}
+          AND (f.kind != 'live' OR COALESCE(co.is_hidden, 0) = 0)
           AND NOT EXISTS (SELECT 1 FROM live l WHERE l.source_id = f.source_id AND l.key = f.item_key AND l.is_hidden = 1)
           AND NOT EXISTS (SELECT 1 FROM movies m WHERE m.source_id = f.source_id AND m.key = f.item_key AND m.is_hidden = 1)
           AND NOT EXISTS (SELECT 1 FROM series ser WHERE ser.source_id = f.source_id AND ser.key = f.item_key AND ser.is_hidden = 1)
@@ -87,10 +90,14 @@ export async function querySearchSuggestions(
       title: string;
       updated_at: number;
     }>(
-      `SELECT wp.source_id, wp.item_key, wp.series_key, wp.kind, wp.title, wp.updated_at
+      `SELECT wp.source_id, wp.item_key, wp.series_key, wp.kind,
+              CASE WHEN wp.kind = 'live' THEN COALESCE(NULLIF(co.custom_name, ''), wp.title) ELSE wp.title END AS title,
+              wp.updated_at
          FROM watch_progress wp
          JOIN sources s ON s.id = wp.source_id AND s.deleting = 0
+         LEFT JOIN channel_overrides co ON co.profile_id = wp.profile_id AND co.item_key = wp.item_key
         WHERE wp.profile_id = ?${wpSrcFilter}
+          AND (wp.kind != 'live' OR COALESCE(co.is_hidden, 0) = 0)
           AND NOT EXISTS (SELECT 1 FROM live l WHERE l.source_id = wp.source_id AND l.key = wp.item_key AND l.is_hidden = 1)
           AND NOT EXISTS (SELECT 1 FROM movies m WHERE m.source_id = wp.source_id AND m.key = wp.item_key AND m.is_hidden = 1)
           AND NOT EXISTS (SELECT 1 FROM series ser WHERE ser.source_id = wp.source_id AND ser.key = COALESCE(NULLIF(wp.series_key, ''), wp.item_key) AND ser.is_hidden = 1)
@@ -104,11 +111,15 @@ export async function querySearchSuggestions(
       name: string;
       watched_at: number;
     }>(
-      `SELECT rc.source_id, rc.item_key, l.name, rc.watched_at
+      `SELECT rc.source_id, rc.item_key,
+              COALESCE(NULLIF(co.custom_name, ''), l.name) AS name,
+              rc.watched_at
          FROM recent_channels rc
          JOIN sources s ON s.id = rc.source_id AND s.deleting = 0
          JOIN live l ON l.source_id = rc.source_id AND l.key = rc.item_key AND l.is_hidden = 0
+         LEFT JOIN channel_overrides co ON co.profile_id = rc.profile_id AND co.item_key = rc.item_key
         WHERE rc.profile_id = ?${rcSrcFilter}
+          AND COALESCE(co.is_hidden, 0) = 0
         ORDER BY rc.watched_at DESC
         LIMIT ?`,
       [profileId, ...(sourceId === undefined ? [] : [sourceId]), fetchLimit],

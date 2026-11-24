@@ -12,6 +12,7 @@ export {
   setSafeHeader,
 } from './headers';
 export * from './http';
+export * from './keymap-store';
 export * from './languages';
 export * from './playback-guard';
 export * from './preferences';

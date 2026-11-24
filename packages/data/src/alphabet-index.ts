@@ -1,13 +1,23 @@
 import type { ContentKind, SqlDriver, SqlValue } from '@elv/domain';
+import { parseCustomGroupCategoryId } from './custom-groups-repo';
 import {
   buildSqlAdultKeywordExclusionClause,
   buildSqlItemRestrictionClause,
   isCategoryRestricted,
   loadActiveParentalFilter,
 } from './parental-repo';
-import { ITEM_TABLE, parseCategoryId, watchedFilterClause } from './queries-shared';
+import { queryCustomGroupAlphabetRows } from './queries-custom-groups';
+import {
+  ITEM_TABLE,
+  LIVE_EFFECTIVE_SORT_TITLE_EXPR,
+  LIVE_OVERRIDE_JOIN,
+  liveOverrideHiddenClause,
+  parseCategoryId,
+  resolveQueryProfileId,
+  watchedFilterClause,
+} from './queries-shared';
 
-/** Input parameters for {@link queryAlphabetIndex} and `CatalogService.alphabetIndex` (`#407`, `#31`). */
+/** Input parameters for {@link queryAlphabetIndex} and `CatalogService.alphabetIndex` (`#407`, `#31`, `#60`). */
 export interface AlphabetIndexInput {
   readonly sourceId?: string;
   readonly kind: ContentKind;
@@ -15,6 +25,7 @@ export interface AlphabetIndexInput {
   readonly collapseVariants?: boolean;
   readonly groupVersions?: boolean;
   readonly excludeWatched?: boolean;
+  readonly includeHidden?: boolean;
   readonly profileId?: string;
   readonly parentalUnlocked?: boolean;
 }
@@ -129,11 +140,20 @@ export async function queryAlphabetIndex(
   const { kind } = input;
   if (kind !== 'live' && kind !== 'movie' && kind !== 'series') return [];
 
+  const profileId = resolveQueryProfileId(input.profileId);
+  const filter = await loadActiveParentalFilter(db, profileId, input.parentalUnlocked);
+
   let resolvedSourceId = input.sourceId?.trim() || undefined;
   let providerCategoryId: string | undefined;
 
   if (input.categoryId !== undefined && input.categoryId.trim() !== '') {
     const rawCat = input.categoryId.trim();
+    const customGroupId = parseCustomGroupCategoryId(rawCat);
+    if (customGroupId !== undefined) {
+      if (kind !== 'live') return [];
+      const rows = await queryCustomGroupAlphabetRows(db, customGroupId, input, filter);
+      return toSortedBuckets(rows);
+    }
     const parsed = parseCategoryId(rawCat);
     if (parsed !== undefined) {
       if (parsed.kind !== kind) return [];
@@ -147,7 +167,6 @@ export async function queryAlphabetIndex(
     }
   }
 
-  const filter = await loadActiveParentalFilter(db, input.profileId, input.parentalUnlocked);
   if (
     filter !== null &&
     providerCategoryId !== undefined &&
@@ -158,6 +177,11 @@ export async function queryAlphabetIndex(
   }
 
   const table = ITEM_TABLE[kind];
+  const isLive = kind === 'live';
+  const liveJoin = isLive ? `\n         ${LIVE_OVERRIDE_JOIN}` : '';
+  const liveJoinParams: SqlValue[] = isLive ? [profileId] : [];
+  const liveHidden = isLive ? liveOverrideHiddenClause(input.includeHidden) : '';
+  const sortExpr = isLive ? LIVE_EFFECTIVE_SORT_TITLE_EXPR : 't.sort_title';
   const watched = watchedFilterClause('t.key', input);
   const restrict =
     filter === null
@@ -168,6 +192,7 @@ export async function queryAlphabetIndex(
   if (providerCategoryId !== undefined && resolvedSourceId !== undefined) {
     const dedup = categoryDedupSpec(kind, input);
     const params: SqlValue[] = [
+      ...liveJoinParams,
       resolvedSourceId,
       kind,
       providerCategoryId,
@@ -177,14 +202,14 @@ export async function queryAlphabetIndex(
     if (dedup !== undefined) {
       const rows = await db.all<{ letter: string; count: number }>(
         `WITH ranked AS (
-           SELECT t.sort_title,
+           SELECT ${sortExpr} AS eff_sort_title,
                   ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
              FROM placements p
-             JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
-            WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
+             JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key${liveJoin}
+            WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0${liveHidden}
               AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}${adultExcl}
          )
-         SELECT ${LETTER_CASE_EXPR('sort_title')} AS letter, COUNT(*) AS count
+         SELECT ${LETTER_CASE_EXPR('eff_sort_title')} AS letter, COUNT(*) AS count
            FROM ranked
           WHERE rn = 1
           GROUP BY letter`,
@@ -194,10 +219,10 @@ export async function queryAlphabetIndex(
     }
 
     const rows = await db.all<{ letter: string; count: number }>(
-      `SELECT ${LETTER_CASE_EXPR('t.sort_title')} AS letter, COUNT(*) AS count
+      `SELECT ${LETTER_CASE_EXPR(sortExpr)} AS letter, COUNT(*) AS count
          FROM placements p
-         JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
-        WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
+         JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key${liveJoin}
+        WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0${liveHidden}
           AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}${adultExcl}
         GROUP BY letter`,
       params,
@@ -207,6 +232,7 @@ export async function queryAlphabetIndex(
 
   const sourceClause = resolvedSourceId === undefined ? '' : 't.source_id = ? AND ';
   const params: SqlValue[] = [
+    ...liveJoinParams,
     ...(resolvedSourceId === undefined ? [] : [resolvedSourceId]),
     ...watched.params,
     ...restrict.params,
@@ -215,13 +241,13 @@ export async function queryAlphabetIndex(
   if (dedup !== undefined) {
     const rows = await db.all<{ letter: string; count: number }>(
       `WITH ranked AS (
-         SELECT t.sort_title,
+         SELECT ${sortExpr} AS eff_sort_title,
                 ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
            FROM ${table} t
-           JOIN sources s ON s.id = t.source_id AND s.deleting = 0
-          WHERE ${sourceClause}t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl}
+           JOIN sources s ON s.id = t.source_id AND s.deleting = 0${liveJoin}
+          WHERE ${sourceClause}t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl}
        )
-       SELECT ${LETTER_CASE_EXPR('sort_title')} AS letter, COUNT(*) AS count
+       SELECT ${LETTER_CASE_EXPR('eff_sort_title')} AS letter, COUNT(*) AS count
          FROM ranked
         WHERE rn = 1
         GROUP BY letter`,
@@ -231,10 +257,10 @@ export async function queryAlphabetIndex(
   }
 
   const rows = await db.all<{ letter: string; count: number }>(
-    `SELECT ${LETTER_CASE_EXPR('t.sort_title')} AS letter, COUNT(*) AS count
+    `SELECT ${LETTER_CASE_EXPR(sortExpr)} AS letter, COUNT(*) AS count
        FROM ${table} t
-       JOIN sources s ON s.id = t.source_id AND s.deleting = 0
-      WHERE ${sourceClause}t.is_hidden = 0${watched.clause}${restrict.clause}${adultExcl}
+       JOIN sources s ON s.id = t.source_id AND s.deleting = 0${liveJoin}
+      WHERE ${sourceClause}t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl}
       GROUP BY letter`,
     params,
   );

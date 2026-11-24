@@ -318,6 +318,21 @@ export function createCoalescedCatalog(
     ...(c.setParentalPin ? { setParentalPin: c.setParentalPin.bind(c) } : {}),
     ...(c.verifyParentalPin ? { verifyParentalPin: c.verifyParentalPin.bind(c) } : {}),
     ...(c.clearParentalPin ? { clearParentalPin: c.clearParentalPin.bind(c) } : {}),
+    ...(c.listChannelOverrides ? { listChannelOverrides: c.listChannelOverrides.bind(c) } : {}),
+    ...(c.setChannelOverride ? { setChannelOverride: c.setChannelOverride.bind(c) } : {}),
+    ...(c.clearChannelOverride ? { clearChannelOverride: c.clearChannelOverride.bind(c) } : {}),
+    ...(c.reorderChannels ? { reorderChannels: c.reorderChannels.bind(c) } : {}),
+    ...(c.listCustomGroups ? { listCustomGroups: c.listCustomGroups.bind(c) } : {}),
+    ...(c.createCustomGroup ? { createCustomGroup: c.createCustomGroup.bind(c) } : {}),
+    ...(c.updateCustomGroup ? { updateCustomGroup: c.updateCustomGroup.bind(c) } : {}),
+    ...(c.deleteCustomGroup ? { deleteCustomGroup: c.deleteCustomGroup.bind(c) } : {}),
+    ...(c.setCustomGroupItems ? { setCustomGroupItems: c.setCustomGroupItems.bind(c) } : {}),
+    ...(c.addChannelToCustomGroup
+      ? { addChannelToCustomGroup: c.addChannelToCustomGroup.bind(c) }
+      : {}),
+    ...(c.removeChannelFromCustomGroup
+      ? { removeChannelFromCustomGroup: c.removeChannelFromCustomGroup.bind(c) }
+      : {}),
     ...(queryNextEpisodeFn
       ? {
           queryNextEpisode: async (seriesKey, currentItemKey, profileId, nextOpts) => {

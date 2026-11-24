@@ -11,9 +11,12 @@ export {
 } from '@elv/sources';
 export * from './alphabet-index';
 export * from './catalog';
+export type { CatalogChannelOpsMethods } from './catalog-channel-ops';
 export * from './category-selection';
+export * from './channel-overrides-repo';
 export * from './content-hash';
 export * from './credential-fingerprint';
+export * from './custom-groups-repo';
 export * from './discover-categories';
 export * from './driver';
 export * from './fold';

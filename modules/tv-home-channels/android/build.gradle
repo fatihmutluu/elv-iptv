@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'io.github.fatihmutluu.elv.tvhomechannels'
+version = '0.0.0'
+
+android {
+  namespace 'io.github.fatihmutluu.elv.tvhomechannels'
+  defaultConfig {
+    versionCode 1
+    versionName '0.0.0'
+  }
+}
+
+dependencies {
+  implementation 'androidx.tvprovider:tvprovider:1.0.0'
+  implementation 'androidx.core:core-ktx:1.13.1'
+  testImplementation 'junit:junit:4.13.2'
+}

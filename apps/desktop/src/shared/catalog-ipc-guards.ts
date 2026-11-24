@@ -86,7 +86,7 @@ export const isNonNegativeFinite = (x: unknown): x is number => isFiniteNumber(x
 export const isBoundedString = (x: unknown, min = 0, max = MAX_STRING_CHARS): x is string =>
   typeof x === 'string' && x.length >= min && x.length <= max;
 
-const hasControlChar = (text: string): boolean => {
+export const hasControlChar = (text: string): boolean => {
   for (let i = 0; i < text.length; i += 1) {
     const code = text.charCodeAt(i);
     if (code < 0x20 || code === 0x7f) return true;
@@ -149,6 +149,7 @@ const ALPHABET_INDEX_INPUT_KEYS = new Set([
   'collapseVariants',
   'groupVersions',
   'excludeWatched',
+  'includeHidden',
   'profileId',
   'parentalUnlocked',
 ]);
@@ -202,6 +203,7 @@ const LIST_ITEMS_OPT_KEYS = new Set([
   'excludeWatched',
   'collapseVariants',
   'groupVersions',
+  'includeHidden',
   'profileId',
   'parentalUnlocked',
 ]);
@@ -260,6 +262,9 @@ export function isAlphabetIndexInput(x: unknown): x is AlphabetIndexInput {
     return false;
   }
   if (x['excludeWatched'] !== undefined && typeof x['excludeWatched'] !== 'boolean') {
+    return false;
+  }
+  if (x['includeHidden'] !== undefined && typeof x['includeHidden'] !== 'boolean') {
     return false;
   }
   if (x['parentalUnlocked'] !== undefined && typeof x['parentalUnlocked'] !== 'boolean') {
@@ -504,6 +509,9 @@ export function isListItemsOptions(x: unknown): x is ListItemsOptions {
   if (x['groupVersions'] !== undefined && typeof x['groupVersions'] !== 'boolean') {
     return false;
   }
+  if (x['includeHidden'] !== undefined && typeof x['includeHidden'] !== 'boolean') {
+    return false;
+  }
   if (x['parentalUnlocked'] !== undefined && typeof x['parentalUnlocked'] !== 'boolean') {
     return false;
   }
@@ -532,7 +540,10 @@ const SET_PARENTAL_LOCK_KEYS = new Set([
 const PARENTAL_QUERY_OPT_KEYS = new Set(['profileId', 'parentalUnlocked']);
 const PARENTAL_UNLOCKED_OPT_KEYS = new Set(['parentalUnlocked']);
 
-function hasOnlyKeys(record: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+export function hasOnlyKeys(
+  record: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+): boolean {
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) return false;
   }
