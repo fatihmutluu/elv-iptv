@@ -73,6 +73,8 @@ export interface AppShellStageProps {
   readonly onOpenSources: () => void;
   readonly onOpenChannelManagement: () => void;
   readonly onChannelsMutated: () => void;
+  readonly reminderVersion?: number;
+  readonly onReminderChanged?: () => void;
   readonly onScrollTopChange: (scrolled: boolean) => void;
   readonly onFocusTopNav: () => void;
 }
@@ -225,6 +227,8 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
       onOpenSearch={() => p.onSelectTab('search', true)}
       onOpenHome={() => p.onSelectTab('home', true)}
       onChannelsMutated={p.onChannelsMutated}
+      {...(p.reminderVersion !== undefined ? { reminderVersion: p.reminderVersion } : {})}
+      {...(p.onReminderChanged !== undefined ? { onReminderChanged: p.onReminderChanged } : {})}
       {...stageProps}
     />
   );

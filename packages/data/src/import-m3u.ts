@@ -10,7 +10,7 @@ import {
   type Result,
   transportHeaders,
 } from '@elv/domain';
-import { type M3uEntry, scanM3u } from '@elv/sources';
+import { type M3uEntry, normalizeCatchupMode, scanM3u } from '@elv/sources';
 import { allowlistForKind, reconcileCategorySelection } from './category-selection';
 import { fingerprintM3uCredentials } from './credential-fingerprint';
 import { foldText } from './fold';
@@ -44,7 +44,7 @@ import {
   type StagedM3u,
   stableM3uKey,
 } from './m3u-gate';
-import { entryHeaders, templated } from './m3u-headers';
+import { entryHeaders, templated, templatedCatchupSource } from './m3u-headers';
 import { MAX_URLVARS_BYTES, SAMPLE_SIZE } from './m3u-templating';
 import { isPlaceholderLiveChannel } from './placeholder-filter';
 import {
@@ -228,11 +228,17 @@ async function processBatch(
         for (const g of freshGroups) st.placedSeries.add(`${seriesKey}\n${g}`);
       }
     } else {
+      const catchupSourceTemplate = templatedCatchupSource(st, entry.catchup?.source);
+      if (st.book.byteLength > MAX_URLVARS_BYTES) {
+        throw new Stop(elvError('source-format', 'urlvars-too-large'));
+      }
       live.push({
         ...row,
         num: entry.chno ?? null,
         guideId: entry.tvgId ?? null,
-        catchupDays: entry.catchup?.days ?? entry.timeshiftDays ?? null,
+        catchupDays: entry.catchup?.days ?? entry.timeshiftDays ?? entry.recordDays ?? null,
+        catchupMode: normalizeCatchupMode(entry.catchup?.type),
+        catchupSourceTemplate,
         epgShiftMs:
           entry.shiftHours !== undefined && Number.isFinite(entry.shiftHours)
             ? Math.round(entry.shiftHours * 3_600_000)

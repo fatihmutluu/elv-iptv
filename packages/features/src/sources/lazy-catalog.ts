@@ -113,6 +113,90 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
       (await open()).queryNextEpisode?.(seriesKey, currentItemKey, profileId, opts) ?? null,
     resolveStream: (itemKey, opts) =>
       wrapResult(async () => (await open()).resolveStream(itemKey, opts)),
+    resolveCatchupStream: (itemKey, programme, opts) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.resolveCatchupStream
+          ? cat.resolveCatchupStream(itemKey, programme, opts)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    fetchChannelArchiveEpg: (itemKey, opts) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.fetchChannelArchiveEpg
+          ? cat.fetchChannelArchiveEpg(itemKey, opts)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    listGuideSources: async (sourceId) => (await open()).listGuideSources?.(sourceId) ?? [],
+    addGuideSource: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.addGuideSource
+          ? cat.addGuideSource(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    updateGuideSource: (id, patch) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.updateGuideSource
+          ? cat.updateGuideSource(id, patch)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    removeGuideSource: (id) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.removeGuideSource
+          ? cat.removeGuideSource(id)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    reorderGuideSources: (sourceId, orderedIds) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.reorderGuideSources
+          ? cat.reorderGuideSources(sourceId, orderedIds)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    listGuideChannels: async (sourceId, query, limit) =>
+      (await open()).listGuideChannels?.(sourceId, query, limit) ?? [],
+    listChannelGuideOverrides: async (sourceId) =>
+      (await open()).listChannelGuideOverrides?.(sourceId) ?? [],
+    setChannelGuideOverride: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.setChannelGuideOverride
+          ? cat.setChannelGuideOverride(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    clearChannelGuideOverride: (sourceId, channelKey) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.clearChannelGuideOverride
+          ? cat.clearChannelGuideOverride(sourceId, channelKey)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    listReminders: async (profileId, opts) => (await open()).listReminders?.(profileId, opts) ?? [],
+    upsertReminder: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.upsertReminder
+          ? cat.upsertReminder(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    removeReminder: (channelKey, programmeStart, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.removeReminder
+          ? cat.removeReminder(channelKey, programmeStart, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    markReminderFired: (channelKey, programmeStart, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.markReminderFired
+          ? cat.markReminderFired(channelKey, programmeStart, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    pruneExpiredReminders: async (nowMs) => (await open()).pruneExpiredReminders?.(nowMs) ?? 0,
     saveProgress: (input) =>
       wrapResult(async () => {
         const cat = await open();

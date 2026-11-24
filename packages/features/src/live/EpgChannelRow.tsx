@@ -3,6 +3,7 @@ import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
   hexToRgba,
+  Icon,
   MicroPill,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
@@ -13,6 +14,7 @@ import {
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback, useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { buildReminderKey, isPastCatchupEligible } from './catchup-reminder-model';
 import {
   computeProgramProgress,
   type EpgPositionedSlot,
@@ -68,6 +70,7 @@ interface EpgSlotCellProps {
   readonly isSelected: boolean;
   readonly epgGenreTints: boolean;
   readonly focusBorderWidth: number;
+  readonly hasReminder: boolean;
   readonly onSelectCell: SelectCellHandler;
   readonly onOpenContextMenu?: ContextMenuCellHandler;
 }
@@ -83,6 +86,7 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
   isSelected,
   epgGenreTints,
   focusBorderWidth,
+  hasReminder,
   onSelectCell,
   onOpenContextMenu,
 }: EpgSlotCellProps): ReactElement {
@@ -116,6 +120,9 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
       : null;
   const badges =
     !isGap && slot.widthRatio >= MIN_BADGE_WIDTH_RATIO ? resolveProgrammeBadges(prog.flags) : [];
+  const hasCatchup = !isGap && isPastCatchupEligible(channel, prog, nowMs);
+  const showCatchupPill = hasCatchup && slot.widthRatio >= MIN_TIME_WIDTH_RATIO;
+  const showCatchupDot = hasCatchup && !showCatchupPill;
   const showTime = slot.widthRatio >= MIN_TIME_WIDTH_RATIO;
   const bgColor = isSelected
     ? theme.colors.focusFill
@@ -192,8 +199,38 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
           >
             {titleText}
           </Text>
-          {badges.length > 0 ? (
+          {badges.length > 0 || hasCatchup || hasReminder ? (
             <View style={styles.cellBadges}>
+              {showCatchupPill ? (
+                <MicroPill
+                  testID={`epg-cell-catchup-${rowIndex}-${slotIndex}`}
+                  label={i18n.t('epg.catchupBadge')}
+                  tone="accent"
+                  dot
+                />
+              ) : showCatchupDot ? (
+                <View
+                  testID={`epg-cell-catchup-${rowIndex}-${slotIndex}`}
+                  accessibilityLabel={i18n.t('epg.catchupBadge')}
+                  style={[styles.catchupDot, { backgroundColor: theme.colors.accent }]}
+                />
+              ) : null}
+              {hasReminder ? (
+                <View
+                  testID={`epg-cell-reminder-${rowIndex}-${slotIndex}`}
+                  accessibilityLabel={i18n.t('epg.reminderScheduled')}
+                  style={[
+                    styles.reminderBadge,
+                    {
+                      backgroundColor: theme.colors.accentTint,
+                      borderColor: theme.colors.accent,
+                      borderRadius: theme.radius.pill,
+                    },
+                  ]}
+                >
+                  <Icon name="bell" size={11} color={theme.colors.accent} />
+                </View>
+              ) : null}
               {badges.slice(0, 2).map((b) => (
                 <MicroPill
                   key={b}
@@ -256,6 +293,7 @@ export interface EpgChannelRowProps {
   readonly sourceBadge?: SourceBadgeInfo | null;
   readonly cleanChannelTitles?: boolean;
   readonly epgGenreTints?: boolean;
+  readonly scheduledReminderKeys?: ReadonlySet<string>;
   readonly onSelectCell: SelectCellHandler;
   readonly onOpenContextMenu?: ContextMenuCellHandler;
 }
@@ -281,6 +319,7 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
   sourceBadge = null,
   cleanChannelTitles = false,
   epgGenreTints = true,
+  scheduledReminderKeys,
   onSelectCell,
   onOpenContextMenu,
 }: EpgChannelRowProps): ReactElement {
@@ -450,23 +489,32 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
             </Text>
           </Pressable>
         ) : (
-          slots.map((slot, slotIdx) => (
-            <EpgSlotCell
-              key={slot.id}
-              rowIndex={rowIndex}
-              slotIndex={slotIdx}
-              channel={channel}
-              displayName={displayName}
-              slot={slot}
-              nowMs={nowMs}
-              isTv={isTv}
-              isSelected={isFocusedRow && focusedSlotIndex === slotIdx}
-              epgGenreTints={epgGenreTints}
-              focusBorderWidth={focusBorderWidth}
-              onSelectCell={onSelectCell}
-              {...(onOpenContextMenu !== undefined ? { onOpenContextMenu } : {})}
-            />
-          ))
+          slots.map((slot, slotIdx) => {
+            const hasReminder =
+              !slot.isGap &&
+              slot.programme !== null &&
+              slot.programme.start > nowMs &&
+              (scheduledReminderKeys?.has(buildReminderKey(channel.key, slot.programme.start)) ??
+                false);
+            return (
+              <EpgSlotCell
+                key={slot.id}
+                rowIndex={rowIndex}
+                slotIndex={slotIdx}
+                channel={channel}
+                displayName={displayName}
+                slot={slot}
+                nowMs={nowMs}
+                isTv={isTv}
+                isSelected={isFocusedRow && focusedSlotIndex === slotIdx}
+                epgGenreTints={epgGenreTints}
+                focusBorderWidth={focusBorderWidth}
+                hasReminder={hasReminder}
+                onSelectCell={onSelectCell}
+                {...(onOpenContextMenu !== undefined ? { onOpenContextMenu } : {})}
+              />
+            );
+          })
         )}
       </View>
     </View>
@@ -512,6 +560,14 @@ const styles = StyleSheet.create({
   clippedMarker: { fontWeight: '700', flexShrink: 0 },
   slotTitle: { flex: 1, fontWeight: '600', minWidth: 0 },
   cellBadges: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 },
+  catchupDot: { width: 7, height: 7, borderRadius: 999 },
+  reminderBadge: {
+    width: 20,
+    height: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   emptySlot: {
     position: 'absolute',
     top: 4,

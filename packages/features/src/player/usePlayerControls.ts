@@ -154,6 +154,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
   const {
     scrub,
     previewPositionMs,
+    timeShiftUnavailableVisible,
     cancelScrub,
     togglePlayPause,
     seekBy: rawSeekBy,
@@ -245,6 +246,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasAlwaysOnTop: params.onToggleAlwaysOnTop !== undefined,
     hasNextEpisode: params.hasNextEpisode ?? false,
     hasPreviousChannel,
+    ...(params.hasBackToLive === true ? { hasBackToLive: true } : {}),
+    ...(params.liveTimeShiftSupported === true ? { liveTimeShiftSupported: true } : {}),
+    ...(params.hasJumpToLive === true ? { hasJumpToLive: true } : {}),
     initialOsdHidden: params.initialOsdHidden,
     autoHideOsdMs: params.autoHideOsdMs,
     defaultResizeMode: params.defaultResizeMode,
@@ -398,13 +402,24 @@ export function usePlayerControls(params: PlayerControlsParams) {
     else onExitRef.current();
   };
 
+  const jumpToLiveEdge = (): void => {
+    const svc = serviceRef.current;
+    if (svc === null) return;
+    svc.jumpToLiveEdge();
+    if (svc.getState().status.kind === 'paused') svc.play();
+  };
+
   const activateTvOsd = (act: ReturnType<typeof clampTvOsdAction>): void => {
     if (!allowTvSelect()) return;
     if (act === 'back') onExitRef.current();
     else if (act === 'playPause') togglePlayPause();
     else if (act === 'seekBack') seekBy(-getStepSeekMs());
     else if (act === 'seekForward') seekBy(getStepSeekMs());
-    else if (act === 'tracks') overlay.openTracks();
+    else if (act === 'jumpToLive') jumpToLiveEdge();
+    else if (act === 'backToLive') {
+      overlay.blurTvOsd();
+      cbRef.current.onBackToLive?.();
+    } else if (act === 'tracks') overlay.openTracks();
     else if (act === 'settings') overlay.openSettings();
     else if (act === 'info') overlay.toggleInfo();
     else if (act === 'channelList') overlay.toggleChannelList();
@@ -574,6 +589,11 @@ export function usePlayerControls(params: PlayerControlsParams) {
     else if (event.kind === 'press' && event.key === 'playPause') togglePlayPause();
     else if (event.kind === 'press' && (event.key === 'play' || event.key === 'pause')) {
       applyPlayOrPause(event.key, statusKind);
+    } else if (
+      (event.kind === 'press' || event.kind === 'repeat') &&
+      (event.key === 'rewind' || event.key === 'fastForward')
+    ) {
+      seekBy((event.key === 'rewind' ? -1 : 1) * getStepSeekMs());
     } else if (event.kind === 'press' && event.key === 'next') zapByRef.current(1, false);
     else if (event.kind === 'press' && event.key === 'previous') zapByRef.current(-1, false);
     else if (isTv && event.kind === 'press' && event.key === 'left') {
@@ -761,9 +781,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
     seekStepForward: () => seekBy(getStepSeekMs()),
     seekToRatio,
     setBarScrubbing,
-    jumpToLiveEdge: () => {
-      serviceRef.current?.jumpToLiveEdge();
-    },
+    timeShiftUnavailableVisible,
+    jumpToLiveEdge,
     selectAudio,
     selectSubtitle,
     selectSpeed,

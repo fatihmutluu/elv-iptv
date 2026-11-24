@@ -11,6 +11,7 @@ import {
   useShellProfileEffects,
 } from './app-shell-overlays';
 import { AppShellPlayerView } from './app-shell-player';
+import { useProgrammeReminders } from './app-shell-reminders';
 import {
   AppShellExitToast,
   AppShellStage,
@@ -47,9 +48,11 @@ import type { LanPairingPort } from './ports/lan-pairing-host';
 import type { PlayDeepLinkTarget } from './ports/play-deep-link';
 import type { PlayTarget } from './ports/play-target';
 import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
+import type { ReminderHostPort } from './ports/reminder-host';
 import type { SourceImportHost } from './ports/source-import-host';
 import type { TvHomeChannelsPort } from './ports/tv-home-channels';
 import type { VideoHost } from './ports/video-host';
+import { ReminderToastBanner } from './reminders';
 import { OledScreensaverOverlay, useOledScreensaver } from './screensaver';
 import type { SettingsSection } from './settings';
 import {
@@ -98,6 +101,8 @@ export interface AppShellProps {
   keymapStore?: KeymapStore;
   /** Optional Android TV Home Screen preview channels port (`#273`). */
   tvHomeChannels?: TvHomeChannelsPort;
+  /** Optional OS notification host port for programme reminders (`#35`). */
+  reminderHost?: ReminderHostPort;
   /** Optional incoming `elviptv://play?key=...` deep-link target (`#273`). */
   pendingDeepLink?: PlayDeepLinkTarget | null;
   /** Invoked once `pendingDeepLink` has been consumed by `AppShell` (`#273`). */
@@ -185,6 +190,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const [heroScrolled, setHeroScrolled] = useState(false);
   const [userPickedTab, setUserPickedTab] = useState(false);
   const [userStateVersion, setUserStateVersion] = useState(0);
+  const [reminderVersion, setReminderVersion] = useState(0);
   const defaultLiveMode = preferences.preferences.defaultLiveMode;
   const userPickedLiveModeRef = useRef(false);
   const prevDefaultLiveModeRef = useRef(defaultLiveMode);
@@ -497,6 +503,16 @@ function AppShellContent(props: AppShellProps): ReactElement {
     shell.bumpCatalogRevision();
     setUserStateVersion((v) => v + 1);
   }, [shell.bumpCatalogRevision, uiCache]);
+  const handleReminderChanged = useCallback(() => setReminderVersion((v) => v + 1), []);
+  const reminders = useProgrammeReminders({
+    catalog: observedCatalog,
+    activeProfileId: profile.activeProfileId,
+    parentalUnlocked: profile.parentalUnlocked,
+    catalogRevision,
+    reminderVersion,
+    onTuneChannel: handlePlay,
+    ...(props.reminderHost !== undefined ? { reminderHost: props.reminderHost } : {}),
+  });
   const crashProps = useMemo(
     () =>
       buildShellCrashProps({
@@ -673,6 +689,8 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     onOpenSources={openSources}
                     onOpenChannelManagement={handleOpenSettingsChannelManager}
                     onChannelsMutated={handleChannelsMutated}
+                    reminderVersion={reminderVersion}
+                    onReminderChanged={handleReminderChanged}
                     onScrollTopChange={setHeroScrolled}
                     onFocusTopNav={handleFocusTopNav}
                   />
@@ -696,6 +714,11 @@ function AppShellContent(props: AppShellProps): ReactElement {
               onClose={() => setSettingsChannelManagerOpen(false)}
             />
             <AppShellProfileOverlays onOpenProfilesSettings={openProfilesSettings} />
+            <ReminderToastBanner
+              banner={reminders.activeBanner}
+              onTune={reminders.tuneActiveBanner}
+              onDismiss={reminders.dismissBanner}
+            />
             <OledScreensaverOverlay state={oledScreensaver.state} onWake={oledScreensaver.wake} />
           </View>
         </BrowseFocusMemoryProvider>

@@ -146,7 +146,7 @@ async function fetchRawSourceSlice(
            FROM ${ITEM_TABLE[kind]} t${liveJoin}
           WHERE t.source_id = ? AND t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl}
        )
-       SELECT id, key, source_id, provider_id, name${metaSelect}, logo, rating, year, num, ${dedup.countCol}
+       SELECT id, key, source_id, provider_id, name${metaSelect}, logo, rating, year, num, catchup_days, ${dedup.countCol}
          FROM ranked
         WHERE rn = 1
         ORDER BY ${orderBy}
@@ -483,7 +483,7 @@ async function fetchRawGlobalAlphaSlice(
            FROM ${table} t${liveJoin}
           WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${liveHidden}${watched.clause}${restrict.clause}${adultExcl}
        )
-       SELECT id, key, source_id, provider_id, name${metaSelect}, logo, rating, year, num, ${dedup.countCol}
+       SELECT id, key, source_id, provider_id, name${metaSelect}, logo, rating, year, num, catchup_days, ${dedup.countCol}
          FROM ranked
         WHERE rn = 1
         ORDER BY sort_title ASC, key ASC

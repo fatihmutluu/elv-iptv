@@ -57,6 +57,7 @@ describe('queryItemDetail & CatalogService.itemDetail', () => {
       rating: null,
       year: null,
       num: 1,
+      catchupDays: 3,
       plot: null,
     });
 

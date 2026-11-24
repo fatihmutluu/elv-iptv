@@ -481,6 +481,10 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         engine.seek(command.attempt, command.positionMs);
         break;
       }
+      case 'jumpToLiveEdge':
+        entry.attempt = command.attempt;
+        engine.jumpToLiveEdge?.(command.attempt);
+        break;
       case 'setSpeed':
         entry.attempt = command.attempt;
         entry.mediaState.rate = command.rate;

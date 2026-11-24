@@ -259,6 +259,75 @@ export function createDesktopCatalogFromBridge(
       bridge.removeChannelFromCustomGroup
         ? bridge.removeChannelFromCustomGroup(groupId, itemKey)
         : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    resolveCatchupStream: (itemKey, programme, opts) =>
+      bridge.resolveCatchupStream
+        ? bridge.resolveCatchupStream(itemKey, programme, opts)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    fetchChannelArchiveEpg: (itemKey, opts) =>
+      bridge.fetchChannelArchiveEpg
+        ? bridge.fetchChannelArchiveEpg(itemKey, opts)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    listGuideSources: (sourceId) =>
+      bridge.listGuideSources ? bridge.listGuideSources(sourceId) : Promise.resolve([]),
+    addGuideSource: (input) =>
+      bridge.addGuideSource
+        ? bridge.addGuideSource({ ...input, name: sanitizeDisplayText(input.name) })
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    updateGuideSource: (id, patch) =>
+      bridge.updateGuideSource
+        ? bridge.updateGuideSource(id, {
+            ...patch,
+            ...(patch.name === undefined ? {} : { name: sanitizeDisplayText(patch.name) }),
+          })
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    removeGuideSource: (id) =>
+      bridge.removeGuideSource
+        ? bridge.removeGuideSource(id)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    reorderGuideSources: (sourceId, orderedIds) =>
+      bridge.reorderGuideSources
+        ? bridge.reorderGuideSources(sourceId, orderedIds)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    listGuideChannels: (sourceId, query, limit) =>
+      bridge.listGuideChannels
+        ? bridge.listGuideChannels(
+            sourceId,
+            query === undefined ? undefined : sanitizeDisplayText(query).slice(0, 256),
+            limit,
+          )
+        : Promise.resolve([]),
+    listChannelGuideOverrides: (sourceId) =>
+      bridge.listChannelGuideOverrides
+        ? bridge.listChannelGuideOverrides(sourceId)
+        : Promise.resolve([]),
+    setChannelGuideOverride: (input) =>
+      bridge.setChannelGuideOverride
+        ? bridge.setChannelGuideOverride(input)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    clearChannelGuideOverride: (sourceId, channelKey) =>
+      bridge.clearChannelGuideOverride
+        ? bridge.clearChannelGuideOverride(sourceId, channelKey)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    listReminders: (profileId, opts) =>
+      bridge.listReminders ? bridge.listReminders(profileId, opts) : Promise.resolve([]),
+    upsertReminder: (input) =>
+      bridge.upsertReminder
+        ? bridge.upsertReminder({
+            ...input,
+            channelName: sanitizeDisplayText(input.channelName),
+            programmeTitle: sanitizeDisplayText(input.programmeTitle),
+          })
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    removeReminder: (channelKey, programmeStart, profileId) =>
+      bridge.removeReminder
+        ? bridge.removeReminder(channelKey, programmeStart, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    markReminderFired: (channelKey, programmeStart, profileId) =>
+      bridge.markReminderFired
+        ? bridge.markReminderFired(channelKey, programmeStart, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    pruneExpiredReminders: (nowMs) =>
+      bridge.pruneExpiredReminders ? bridge.pruneExpiredReminders(nowMs) : Promise.resolve(0),
     flushPendingWrites: () =>
       bridge.flushPendingWrites ? bridge.flushPendingWrites() : Promise.resolve(),
     async close() {

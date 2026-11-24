@@ -396,8 +396,9 @@ export function useEpgTimeCursor({
   const handleSelectCell = useCallback(
     (rowIdx: number, slotIdx: number, channel: ItemRow, programme: ProgrammeRow | null) => {
       hasUserNavigatedRef.current = true;
-      const isUpcoming = programme !== null && programme.start > activeNowMs;
-      if (isUpcoming && callbacksRef.current.onOpenProgrammeDetail !== undefined) {
+      const isNonLiveProgramme =
+        programme !== null && (programme.start > activeNowMs || programme.stop <= activeNowMs);
+      if (isNonLiveProgramme && callbacksRef.current.onOpenProgrammeDetail !== undefined) {
         cursorRef.current.area = 'grid';
         cursorRef.current.row = rowIdx;
         cursorRef.current.originWindow = null;
@@ -589,7 +590,7 @@ export function useEpgTimeCursor({
           const prog = focusedSlots[cursorRef.current.slot]?.programme ?? null;
           if (
             prog !== null &&
-            prog.start > activeNowMs &&
+            (prog.start > activeNowMs || prog.stop <= activeNowMs) &&
             callbacksRef.current.onOpenProgrammeDetail !== undefined
           ) {
             callbacksRef.current.onOpenProgrammeDetail(current, cursorRef.current.row, prog);

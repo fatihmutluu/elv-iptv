@@ -5,6 +5,14 @@ import { createMpvTelemetry, type MpvTelemetry } from './telemetry.ts';
 import { createMpvVideoInfoTracker, type MpvVideoInfoTracker } from './video-info.ts';
 
 const MAX_LOG_LINES = 50;
+/** Minimum seekable live cache span (ms) before live time-shift is advertised (`#28`). */
+const MIN_LIVE_TIMESHIFT_SPAN_MS = 2_000;
+
+/** Latest seekable live cache bounds extracted from mpv `demuxer-cache-state` (`#28`). */
+interface LiveCacheWindow {
+  readonly startMs?: number;
+  readonly endMs?: number;
+}
 
 /** Returns whether a live stream URL is raw MPEG-TS rather than an HLS/DASH manifest (`#141`). */
 export function isLiveMpegTsUrl(url: string): boolean {
@@ -35,6 +43,8 @@ export interface Deriver {
   log(line: MpvLogLine): void;
   /** Periodic clock anchor while playing; call about once a second. */
   tick(): EngineEvent[];
+  /** Latest seekable live cache window (ms) observed on the active live media (`#28`). */
+  liveWindow(): LiveCacheWindow | undefined;
 }
 
 interface Media {
@@ -57,7 +67,9 @@ interface Media {
   speed: number;
   timePos: number | undefined;
   duration: number | undefined;
+  cacheStart: number | undefined;
   cacheEnd: number | undefined;
+  lastTimeShiftSupported: boolean;
   lastAnchorAt: number;
   telemetry: MpvTelemetry;
   videoInfo: MpvVideoInfoTracker;
@@ -71,6 +83,60 @@ type EventBody = EngineEvent extends infer E
 
 const num = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+
+const nonNegSec = (v: unknown): number | undefined => {
+  const n = num(v);
+  return n !== undefined && n >= 0 ? n : undefined;
+};
+
+function parseLiveCacheWindow(value: unknown): { startSec?: number; endSec?: number } {
+  if (typeof value !== 'object' || value === null) return {};
+  const record = value as Record<string, unknown>;
+  let rangeStart: number | undefined;
+  let rangeEnd: number | undefined;
+  const rawRanges = record['seekable-ranges'];
+  if (Array.isArray(rawRanges)) {
+    for (const item of rawRanges) {
+      if (typeof item !== 'object' || item === null) continue;
+      const range = item as Record<string, unknown>;
+      const start = nonNegSec(range['start']);
+      const end = nonNegSec(range['end']);
+      if (start === undefined || end === undefined || end < start) continue;
+      if (rangeStart === undefined || start < rangeStart) rangeStart = start;
+      if (rangeEnd === undefined || end > rangeEnd) rangeEnd = end;
+    }
+  }
+  const cacheBegin = nonNegSec(record['cache-begin']);
+  const cacheEnd = nonNegSec(record['cache-end']);
+  const startSec = rangeStart ?? cacheBegin;
+  const endSec = rangeEnd ?? cacheEnd;
+  return {
+    ...(startSec === undefined ? {} : { startSec }),
+    ...(endSec === undefined ? {} : { endSec }),
+  };
+}
+
+function resolveLiveWindowMs(media: Media): {
+  liveSeekableStartMs?: number;
+  liveEdgeMs?: number;
+  timeShiftSupported: boolean;
+} {
+  const startMs =
+    media.cacheStart !== undefined
+      ? Math.max(0, Math.round(media.cacheStart * 1000)) + 0
+      : undefined;
+  const rawEndMs =
+    media.cacheEnd !== undefined ? Math.max(0, Math.round(media.cacheEnd * 1000)) + 0 : undefined;
+  const endMs =
+    rawEndMs !== undefined && (startMs === undefined || rawEndMs > startMs) ? rawEndMs : undefined;
+  const timeShiftSupported =
+    startMs !== undefined && endMs !== undefined && endMs - startMs >= MIN_LIVE_TIMESHIFT_SPAN_MS;
+  return {
+    ...(startMs === undefined ? {} : { liveSeekableStartMs: startMs }),
+    ...(endMs === undefined ? {} : { liveEdgeMs: endMs }),
+    timeShiftSupported,
+  };
+}
 
 /** Creates a deriver; `now` is the clock for event times, `clockIntervalMs` the anchor throttle. */
 export function createDeriver(opts: { now(): number; clockIntervalMs: number }): Deriver {
@@ -89,21 +155,26 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
     const atMs = opts.now();
     media.lastAnchorAt = atMs;
     const currentRate = rate(media);
+    const liveBounds = media.kind === 'live' ? resolveLiveWindowMs(media) : undefined;
     const a: ClockAnchor = {
       positionMs: Math.max(0, Math.round(media.timePos * 1000)) + 0,
       atMs,
       rate: currentRate,
       ...media.telemetry.clockFields(atMs, currentRate),
+      ...(media.kind === 'vod' && media.duration !== undefined
+        ? { durationMs: Math.max(0, Math.round(media.duration * 1000)) + 0 }
+        : {}),
+      ...(liveBounds === undefined
+        ? {}
+        : {
+            ...(liveBounds.liveSeekableStartMs === undefined
+              ? {}
+              : { liveSeekableStartMs: liveBounds.liveSeekableStartMs }),
+            ...(liveBounds.liveEdgeMs === undefined ? {} : { liveEdgeMs: liveBounds.liveEdgeMs }),
+            timeShiftSupported: liveBounds.timeShiftSupported,
+          }),
+      ...(media.kind === 'live' && media.isLiveTs ? { isLiveTs: true } : {}),
     };
-    if (media.kind === 'vod' && media.duration !== undefined) {
-      a.durationMs = Math.max(0, Math.round(media.duration * 1000)) + 0;
-    }
-    if (media.kind === 'live' && media.cacheEnd !== undefined) {
-      a.liveEdgeMs = Math.max(0, Math.round(media.cacheEnd * 1000)) + 0;
-    }
-    if (media.kind === 'live' && media.isLiveTs) {
-      a.isLiveTs = true;
-    }
     return [ev(media, { type: 'clock', anchor: a })];
   };
 
@@ -269,12 +340,20 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         return dropped ? [ev(media, dropped)] : [];
       }
       case 'demuxer-cache-state': {
-        media.cacheEnd =
-          typeof value === 'object' && value !== null
-            ? num((value as Record<string, unknown>)['cache-end'])
-            : undefined;
+        const parsed = parseLiveCacheWindow(value);
+        media.cacheStart = parsed.startSec;
+        media.cacheEnd = parsed.endSec;
+        const out: EngineEvent[] = [];
         const progress = media.telemetry.onCacheState(value, opts.now(), isWaiting(media));
-        return progress ? [ev(media, progress)] : [];
+        if (progress) out.push(ev(media, progress));
+        if (media.kind === 'live') {
+          const supported = resolveLiveWindowMs(media).timeShiftSupported;
+          if (supported !== media.lastTimeShiftSupported) {
+            media.lastTimeShiftSupported = supported;
+            if (media.restarted) out.push(...anchor(media));
+          }
+        }
+        return out;
       }
       case 'demuxer-cache-duration': {
         const progress = media.telemetry.onCacheDuration(value, opts.now(), isWaiting(media));
@@ -316,7 +395,9 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         speed: 1,
         timePos: undefined,
         duration: undefined,
+        cacheStart: undefined,
         cacheEnd: undefined,
+        lastTimeShiftSupported: false,
         lastAnchorAt: Number.NEGATIVE_INFINITY,
         telemetry: createMpvTelemetry(),
         videoInfo: createMpvVideoInfoTracker(),
@@ -349,6 +430,19 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
     tick() {
       if (!m?.restarted || rate(m) === 0) return [];
       return opts.now() - m.lastAnchorAt >= opts.clockIntervalMs ? anchor(m) : [];
+    },
+    liveWindow() {
+      if (m?.kind !== 'live') return undefined;
+      const bounds = resolveLiveWindowMs(m);
+      if (bounds.liveSeekableStartMs === undefined && bounds.liveEdgeMs === undefined) {
+        return undefined;
+      }
+      return {
+        ...(bounds.liveSeekableStartMs === undefined
+          ? {}
+          : { startMs: bounds.liveSeekableStartMs }),
+        ...(bounds.liveEdgeMs === undefined ? {} : { endMs: bounds.liveEdgeMs }),
+      };
     },
   };
 }

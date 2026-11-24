@@ -1,4 +1,5 @@
 import type { MessageId } from './en';
+import { trCatchupEpgMessages } from './tr-catchup-epg';
 import { trErgonomicsMessages } from './tr-ergonomics';
 import { trProfilesMessages } from './tr-profiles';
 
@@ -706,4 +707,5 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.delayReset': 'Sıfırla (0 ms)',
   ...trProfilesMessages,
   ...trErgonomicsMessages,
+  ...trCatchupEpgMessages,
 };

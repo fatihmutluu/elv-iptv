@@ -106,9 +106,13 @@ export interface PlaybackService {
   pause(): void;
   /** Seeks; disarms the stall watchdog and any active VOD reconnect backoff, and updates `anchor` immediately. */
   seek(positionMs: number): void;
+  /** Seeks relative to the current extrapolated position (clamped to VOD duration or live time-shift window, `#28`). */
+  seekBy?(deltaMs: number): void;
   /**
-   * Seeks a lagging live MPEG-TS stream to `Math.max(0, liveEdgeMs - 3_000)` (`#141`).
-   * Strictly a no-op returning `false` for HLS, VOD, missing `liveEdgeMs`, or streams already within 4 s of live edge.
+   * Jumps a lagging live stream back to the live edge (`#141`, `#28`):
+   * - When `timeShiftSupported === true` and behind by `> 2 s`, seeks directly to `liveEdgeMs` (or calls `engine.jumpToLiveEdge`).
+   * - When `isLiveTs === true` (without bounded time-shift) and behind by `> 4 s`, seeks to `Math.max(0, liveEdgeMs - 3_000)`.
+   * Strictly a no-op returning `false` for VOD, missing `liveEdgeMs`, or streams already at the live edge.
    */
   jumpToLiveEdge(): boolean;
   /** Toggles VOD scrubbing mode on the underlying engine when supported (`#222`). */

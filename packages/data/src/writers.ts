@@ -27,18 +27,19 @@ const n = (v: number | undefined): SqlValue => v ?? null;
 const s = (v: string | undefined): SqlValue => v ?? null;
 
 export const liveWriter: ItemWriter<XtreamLive> = {
-  sql: `INSERT INTO live_next (source_id, key, provider_id, num, name, name_fold, sort_title, variant_base_fold, quality_rank, logo, guide_id, catchup_days, run_id, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO live_next (source_id, key, provider_id, num, name, name_fold, sort_title, variant_base_fold, quality_rank, logo, guide_id, catchup_days, catchup_mode, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, num = excluded.num,
           name = excluded.name, name_fold = excluded.name_fold, sort_title = excluded.sort_title,
           variant_base_fold = excluded.variant_base_fold, quality_rank = excluded.quality_rank, logo = excluded.logo,
-          guide_id = excluded.guide_id, catchup_days = excluded.catchup_days, run_id = excluded.run_id,
-          content_hash = excluded.content_hash`,
+          guide_id = excluded.guide_id, catchup_days = excluded.catchup_days, catchup_mode = excluded.catchup_mode,
+          run_id = excluded.run_id, content_hash = excluded.content_hash`,
   row: (sourceId, key, runId, i) => {
     const providerId = String(i.id);
     const nameFold = foldText(i.name);
     const sortTitle = sortTitleKey(i.name);
     const variant = parseLiveVariant(i.name);
+    const catchupMode = i.catchupDays > 0 ? 'xc' : null;
     const contentHash = hashLiveRow({
       providerId,
       num: i.num,
@@ -47,6 +48,7 @@ export const liveWriter: ItemWriter<XtreamLive> = {
       logo: i.icon,
       guideId: i.epgId,
       catchupDays: i.catchupDays,
+      catchupMode,
     });
     return [
       sourceId,
@@ -61,6 +63,7 @@ export const liveWriter: ItemWriter<XtreamLive> = {
       s(i.icon),
       s(i.epgId),
       i.catchupDays,
+      catchupMode,
       runId,
       contentHash,
     ];

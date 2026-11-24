@@ -33,6 +33,9 @@ export interface PlayerOsdProps {
   isBuffering?: boolean;
   failure: DescribedPlaybackFailure | null;
   isVod: boolean;
+  isCatchup?: boolean;
+  liveTimeShiftSupported?: boolean;
+  timeShiftUnavailableVisible?: boolean;
   isPausedOrEnded: boolean;
   canZap: boolean;
   hasTracks: boolean;
@@ -96,6 +99,7 @@ export interface PlayerOsdProps {
   onLock?: () => void;
   onJumpPreviousChannel?: () => void;
   onJumpToLiveEdge?: () => void;
+  onBackToLive?: () => void;
   onPrev: () => void;
   onNext: () => void;
   onRetry: () => void;
@@ -198,7 +202,13 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
           >
             {displayTitle}
           </Text>
-          {!isVod && p.isChannelPreview === true ? (
+          {p.isCatchup === true ? (
+            <MicroPill
+              testID="player-catchup-badge"
+              label={i18n.t('player.catchupBadge')}
+              tone="accent"
+            />
+          ) : !isVod && p.isChannelPreview === true ? (
             <MicroPill
               testID="player-preview-badge"
               label={i18n.t('player.previewBadge')}

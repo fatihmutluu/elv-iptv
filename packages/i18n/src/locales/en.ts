@@ -1,3 +1,4 @@
+import { enCatchupEpgMessages } from './en-catchup-epg';
 import { enErgonomicsMessages } from './en-ergonomics';
 import { enProfilesMessages } from './en-profiles';
 
@@ -691,6 +692,7 @@ export const enMessages = {
   'player.delayReset': 'Reset (0 ms)',
   ...enProfilesMessages,
   ...enErgonomicsMessages,
+  ...enCatchupEpgMessages,
 } as const;
 
 /** Valid message identifier across all supported locales. */

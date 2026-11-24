@@ -48,6 +48,7 @@ export interface PlayerScreenProps {
         | 'recordRecentChannel'
         | 'listRecentChannels'
         | 'liveVariants'
+        | 'resolveCatchupStream'
       >
     > & {
       readonly epgNowNext?: CatalogService['nowNext'];

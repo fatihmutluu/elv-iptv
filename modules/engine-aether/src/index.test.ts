@@ -185,7 +185,7 @@ describe('createAetherEngine', () => {
     expect(first?.capabilities).toEqual({
       mpegTsOverHttp: true,
       hls: true,
-      liveSeek: false,
+      liveSeek: true,
       softwareAudioFallback: true,
       recreate: true,
       audioTrackSelection: true,
@@ -198,7 +198,33 @@ describe('createAetherEngine', () => {
     first?.subscribe((e) => events.push(e));
     native.clock.uptime = 5_000;
     native.emit({ attempt: 1, type: 'firstFrame', atMs: 4_900 });
-    expect(events).toEqual([{ attempt: 1, type: 'firstFrame', atMs: 19_900 }]);
+    native.emit({
+      attempt: 1,
+      type: 'clock',
+      anchor: {
+        positionMs: 120_000,
+        atMs: 4_950,
+        rate: 1,
+        liveSeekableStartMs: 60_000,
+        liveEdgeMs: 180_000,
+        timeShiftSupported: true,
+      },
+    });
+    expect(events).toEqual([
+      { attempt: 1, type: 'firstFrame', atMs: 19_900 },
+      {
+        attempt: 1,
+        type: 'clock',
+        anchor: {
+          positionMs: 120_000,
+          atMs: 19_950,
+          rate: 1,
+          liveSeekableStartMs: 60_000,
+          liveEdgeMs: 180_000,
+          timeShiftSupported: true,
+        },
+      },
+    ]);
   });
 
   it('forwards track load options, track selection commands, and tracks events', async () => {

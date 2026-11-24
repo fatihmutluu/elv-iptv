@@ -7,6 +7,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
@@ -56,6 +57,7 @@ internal class EventReporter(
   private var lastVideoInfo: VideoInfoSnapshot? = null
   private var analyticsDroppedFrames = 0
   private var reportedDroppedFrames = 0
+  private val timelineWindow = Timeline.Window()
   private val tick = Runnable { player?.let { anchor(it) } }
 
   /** True while this prepare is opening, buffering, or stalled and transfer progress should be reported. */
@@ -294,8 +296,31 @@ internal class EventReporter(
       "rate" to rate.toDouble(),
     )
     val duration = player.duration
-    if (duration != C.TIME_UNSET) anchor[if (live) "liveEdgeMs" else "durationMs"] = duration.toDouble()
-    if (live && isLiveTs) anchor["isLiveTs"] = true
+    if (live) {
+      val timeline = player.currentTimeline
+      val windowIndex = player.currentMediaItemIndex
+      val hasWindow = !timeline.isEmpty && windowIndex in 0 until timeline.windowCount
+      if (hasWindow) {
+        timeline.getWindow(windowIndex, timelineWindow)
+      }
+      val windowState = evaluateLiveTimeShiftWindow(
+        isLive = true,
+        isCurrentMediaItemSeekable = player.isCurrentMediaItemSeekable,
+        isWindowLive = hasWindow && timelineWindow.isLive,
+        windowDurationMs = if (hasWindow) timelineWindow.durationMs else C.TIME_UNSET,
+        fallbackDurationMs = duration,
+      )
+      anchor["timeShiftSupported"] = windowState.timeShiftSupported
+      if (windowState.liveSeekableStartMs != null) {
+        anchor["liveSeekableStartMs"] = windowState.liveSeekableStartMs.toDouble()
+      }
+      if (windowState.liveEdgeMs != null) {
+        anchor["liveEdgeMs"] = windowState.liveEdgeMs.toDouble()
+      }
+      if (isLiveTs) anchor["isLiveTs"] = true
+    } else if (duration != C.TIME_UNSET) {
+      anchor["durationMs"] = duration.toDouble()
+    }
     val tracks = player.currentTracks
     val hasVideo = if (tracks.isEmpty) null else hasSelectedVideoTrack(tracks)
     if (hasVideo != null) anchor["hasVideoTrack"] = hasVideo

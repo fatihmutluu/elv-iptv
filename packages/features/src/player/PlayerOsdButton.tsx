@@ -15,8 +15,9 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useState } from 'react';
+import { type ReactElement, useCallback, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { shouldShowLiveJumpToLive } from './live-timeshift-model';
 import { usePlaybackTicker } from './usePlaybackTicker';
 import { formatPlaybackPosition } from './vod-progress-math';
 
@@ -39,38 +40,34 @@ const readClockText = (anchor: ClockAnchor | undefined, nowMs: number): string =
 
 const sameText = (a: string, b: string): boolean => a === b;
 const sameBool = (a: boolean, b: boolean): boolean => a === b;
-const LIVE_TS_JUMP_MIN_EDGE_MS = 3_000;
-const LIVE_TS_JUMP_LAG_MS = 4_000;
-
-const isLaggingLiveTs = (anchor: ClockAnchor | undefined, nowMs: number): boolean => {
-  if (anchor === undefined || anchor.isLiveTs !== true) return false;
-  const edge = anchor.liveEdgeMs;
-  if (edge === undefined || !Number.isFinite(edge) || edge <= LIVE_TS_JUMP_MIN_EDGE_MS) {
-    return false;
-  }
-  const pos = positionAt(anchor, nowMs);
-  return Number.isFinite(pos) && edge - pos > LIVE_TS_JUMP_LAG_MS;
-};
 
 /**
- * Compact Cinema Quietude `"Jump to live"` button rendered strictly when a live MPEG-TS stream
- * lags > 4 s behind `liveEdgeMs` (`#141`). Never renders for HLS or VOD.
+ * Compact Cinema Quietude `"Jump to live"` button rendered when a live stream is behind the live
+ * edge or paused with bounded time-shift (`#28`) or lagging > 4 s on raw MPEG-TS (`#141`).
  */
 export function JumpToLiveButton(p: {
   isVod: boolean;
+  isPaused?: boolean;
   service: PlaybackService | null;
   clock: PlaybackClock;
   i18n: AppI18n;
   isTv: boolean;
+  tvFocused?: boolean;
   compact?: boolean;
   onPress?: () => void;
 }): ReactElement | null {
+  const isPaused = p.isPaused === true;
+  const derive = useCallback(
+    (anchor: ClockAnchor | undefined, nowMs: number) =>
+      shouldShowLiveJumpToLive(anchor, nowMs, isPaused),
+    [isPaused],
+  );
   const show = usePlaybackTicker({
     service: p.isVod ? null : p.service,
     clock: p.clock,
     mode: 'second',
     active: !p.isVod && p.onPress !== undefined,
-    derive: isLaggingLiveTs,
+    derive,
     isEqual: sameBool,
   });
   if (p.isVod || p.service === null || p.onPress === undefined || !show) return null;
@@ -85,6 +82,7 @@ export function JumpToLiveButton(p: {
       compact={p.compact === true}
       onPress={p.onPress}
       isTv={p.isTv}
+      {...(p.tvFocused !== undefined ? { tvFocused: p.tvFocused } : {})}
     />
   );
 }

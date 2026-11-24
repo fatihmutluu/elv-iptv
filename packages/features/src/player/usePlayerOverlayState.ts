@@ -152,6 +152,9 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasChannelList: params.hasChannelList === true,
     hasNextEpisode,
     hasPreviousChannel,
+    ...(params.hasBackToLive === true ? { hasBackToLive: true } : {}),
+    ...(params.liveTimeShiftSupported === true ? { liveTimeShiftSupported: true } : {}),
+    ...(params.hasJumpToLive === true ? { hasJumpToLive: true } : {}),
   });
   const tvOsdAction = clampTvOsdAction(rawTvOsdAction, availableOsd);
 

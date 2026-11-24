@@ -33,6 +33,7 @@ import {
   isCatalogClientMessage,
 } from '../shared/catalog-ipc.ts';
 import { executeChannelOpsRpcCall } from './catalog-worker-channel-ops.ts';
+import { executeEpgOpsRpcCall } from './catalog-worker-epg-ops.ts';
 import { createDesktopHttpClient } from './legacy-tls-http.ts';
 import { createLocalPlaylistStore } from './local-playlist-store.ts';
 import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.ts';
@@ -601,6 +602,8 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'flushPendingWrites':
         if (service.flushPendingWrites) await service.flushPendingWrites();
         return undefined;
+      default:
+        return executeEpgOpsRpcCall(service, call);
     }
   };
 

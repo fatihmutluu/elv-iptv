@@ -4,9 +4,11 @@ import {
   type PlaybackStatus,
   type PlaybackTimers,
   positionAt,
+  resolveLiveTimeShiftWindow,
 } from '@elv/playback';
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { PlayTarget } from '../ports/play-target';
+import { computeLiveTimeShiftTargetMs } from './live-timeshift-model';
 import {
   canPauseStatus,
   clampSeekPosition,
@@ -16,7 +18,7 @@ import {
   shouldCancelScrubOnStatus,
 } from './scrub-controller';
 
-/** Owns VOD scrub preview state, step/ratio/end seeking, and play/pause toggling. */
+/** Owns VOD & bounded live time-shift scrub state, step/ratio/end seeking, and play/pause toggling. */
 export function usePlayerScrub(params: {
   activeTarget: PlayTarget;
   statusKind: PlaybackStatus['kind'];
@@ -25,12 +27,41 @@ export function usePlayerScrub(params: {
   timersRef: MutableRefObject<PlaybackTimers>;
   stepSeekMs?: number | undefined;
   onSeekCommit?: ((positionMs: number, priorPositionMs?: number) => void) | undefined;
+  onTimeShiftUnavailable?: (() => void) | undefined;
 }) {
   const { statusKind, serviceRef, clockRef, timersRef } = params;
   const cbRef = useRef(params);
   cbRef.current = params;
 
   const [previewPositionMs, setPreviewPositionMs] = useState<number | undefined>(undefined);
+  const [timeShiftUnavailableVisible, setTimeShiftUnavailableVisible] = useState(false);
+  const hintTimerRef = useRef<unknown>(undefined);
+
+  const clearTimeShiftHint = useCallback((): void => {
+    if (hintTimerRef.current !== undefined) {
+      timersRef.current.clearTimeout(hintTimerRef.current);
+      hintTimerRef.current = undefined;
+    }
+    setTimeShiftUnavailableVisible(false);
+  }, [timersRef]);
+
+  const notifyTimeShiftUnavailable = (): void => {
+    setTimeShiftUnavailableVisible(true);
+    if (hintTimerRef.current !== undefined) {
+      timersRef.current.clearTimeout(hintTimerRef.current);
+    }
+    hintTimerRef.current = timersRef.current.setTimeout(() => {
+      hintTimerRef.current = undefined;
+      setTimeShiftUnavailableVisible(false);
+    }, 3_000);
+    cbRef.current.onTimeShiftUnavailable?.();
+  };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clear live time-shift hint on item change
+  useEffect(() => {
+    clearTimeShiftHint();
+    return clearTimeShiftHint;
+  }, [params.activeTarget.itemKey, clearTimeShiftHint]);
 
   const scrubRef = useRef<ScrubController | null>(null);
   if (scrubRef.current === null) {
@@ -89,9 +120,24 @@ export function usePlayerScrub(params: {
 
   const seekBy = (deltaMs: number): void => {
     const svc = serviceRef.current;
-    const anchor = cbRef.current.activeTarget.kind === 'vod' ? svc?.getState().anchor : undefined;
     scrub.cancel();
-    if (svc === null || anchor === undefined) return;
+    if (svc === null) return;
+    if (cbRef.current.activeTarget.kind === 'live') {
+      const anchor = svc.getState().anchor;
+      const win = resolveLiveTimeShiftWindow(anchor, clockRef.current.now());
+      if (win === null) {
+        notifyTimeShiftUnavailable();
+        return;
+      }
+      if (svc.seekBy !== undefined) {
+        svc.seekBy(deltaMs);
+      } else {
+        svc.seek(Math.min(win.endMs, Math.max(win.startMs, win.positionMs + deltaMs)));
+      }
+      return;
+    }
+    const anchor = svc.getState().anchor;
+    if (anchor === undefined) return;
     const priorMs = positionAt(anchor, clockRef.current.now());
     commitVodSeek(clampSeekPosition(priorMs + deltaMs, anchor.durationMs), priorMs);
   };
@@ -109,6 +155,22 @@ export function usePlayerScrub(params: {
 
   const seekToRatio = (ratio: number): void => {
     if (!Number.isFinite(ratio)) return;
+    if (cbRef.current.activeTarget.kind === 'live') {
+      const svc = serviceRef.current;
+      if (svc === null) return;
+      scrub.cancel();
+      const targetMs = computeLiveTimeShiftTargetMs(
+        svc.getState().anchor,
+        clockRef.current.now(),
+        ratio,
+      );
+      if (targetMs === undefined) {
+        notifyTimeShiftUnavailable();
+        return;
+      }
+      svc.seek(targetMs);
+      return;
+    }
     seekWithDuration((dur) => Math.round(Math.max(0, Math.min(1, ratio)) * dur));
   };
 
@@ -118,6 +180,7 @@ export function usePlayerScrub(params: {
   return {
     scrub,
     previewPositionMs,
+    timeShiftUnavailableVisible,
     cancelScrub,
     togglePlayPause,
     seekBy,

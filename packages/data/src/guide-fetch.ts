@@ -65,6 +65,8 @@ async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
 export interface GuideCandidate {
   slot: string;
   url: string;
+  /** Optional pre-loaded conditional HTTP validator (used by `guide_sources` rows). */
+  validator?: HttpCacheValidator | undefined;
 }
 
 export type GuideOpen =
@@ -125,9 +127,9 @@ export async function openGuide(
     first ??= failed[0];
   };
   const baseHeaders = transportHeaders(source.settings.transport);
-  for (const { slot, url } of candidates) {
+  for (const { slot, url, validator: candidateValidator } of candidates) {
     const sent = allowConditional
-      ? sanitizeValidator(source.settings.httpCache?.guide?.[slot])
+      ? sanitizeValidator(candidateValidator ?? source.settings.httpCache?.guide?.[slot])
       : undefined;
     let lastError: ElvError | undefined;
     for (let attempt = 0; attempt <= GUIDE_MAX_RETRIES; attempt += 1) {

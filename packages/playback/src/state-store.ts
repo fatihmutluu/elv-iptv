@@ -33,7 +33,10 @@ function sameAnchor(a: ClockAnchor | undefined, b: ClockAnchor | undefined): boo
     a.atMs === b.atMs &&
     a.rate === b.rate &&
     a.durationMs === b.durationMs &&
-    a.liveEdgeMs === b.liveEdgeMs
+    a.liveEdgeMs === b.liveEdgeMs &&
+    a.liveSeekableStartMs === b.liveSeekableStartMs &&
+    a.timeShiftSupported === b.timeShiftSupported &&
+    a.isLiveTs === b.isLiveTs
   );
 }
 

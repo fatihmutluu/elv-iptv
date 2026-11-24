@@ -17,6 +17,7 @@ import type { PlaybackGuard } from '../ports/playback-guard';
 import type { PickedPlaylistFile, SourceImportHost } from '../ports/source-import-host';
 import { useRouteActive } from '../shared';
 import { CategoryPickerPanel } from './CategoryPickerPanel';
+import { GuideManagementOverlay } from './GuideManagementOverlay';
 import { QrPairingOverlay } from './QrPairingOverlay';
 import { SavedSourcesPanel } from './SavedSourcesPanel';
 import { ActionButton, FieldInput } from './SourcesScreenParts';
@@ -57,9 +58,13 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const embedded = props.embedded ?? false;
   const twoColumn = formFactor !== 'phone';
   const [qrPairingOpen, setQrPairingOpen] = useState(false);
+  const [guideOverlaySource, setGuideOverlaySource] = useState<SourceRow | null>(null);
   const canQrPair = props.lanPairing?.isSupported() === true;
+  const canManageGuides = props.catalog.listGuideSources !== undefined;
   const openQrPairing = useCallback(() => setQrPairingOpen(true), []);
   const closeQrPairing = useCallback(() => setQrPairingOpen(false), []);
+  const openGuides = useCallback((source: SourceRow) => setGuideOverlaySource(source), []);
+  const closeGuides = useCallback(() => setGuideOverlaySource(null), []);
   const ctrl = useSourcesController({
     ...props,
     defaultLocalPlaylistName: i18n.t('sources.localFileBadge'),
@@ -70,10 +75,12 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
     },
     [ctrl.runImport],
   );
+  const hasOverlayOpen = qrPairingOpen || guideOverlaySource !== null;
   const tv = useTvSourcesNavigation({
-    isTv: isTv && isActiveScope && !qrPairingOpen,
+    isTv: isTv && isActiveScope && !hasOverlayOpen,
     ctrl,
     ...(canQrPair ? { onOpenQrPairing: openQrPairing } : {}),
+    ...(canManageGuides ? { onOpenGuides: openGuides } : {}),
     ...(props.onOpenMenu !== undefined ? { onOpenMenu: props.onOpenMenu } : {}),
     ...(props.onBack !== undefined ? { onBack: props.onBack } : {}),
     ...(props.onFocusTopNav !== undefined ? { onFocusTopNav: props.onFocusTopNav } : {}),
@@ -108,7 +115,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
 
   return (
     <View style={[styles.root, { backgroundColor: rootBackground }]}>
-      {isTv && isActiveScope && !qrPairingOpen ? (
+      {isTv && isActiveScope && !hasOverlayOpen ? (
         <>
           <TvFocusAnchor
             testID="sources-tv-focus-anchor"
@@ -554,11 +561,20 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                 tvFocusId={tv.tvFocusId}
                 recordLayout={tv.recordLayout}
                 nowMs={(props.now ?? Date.now)()}
+                {...(canManageGuides ? { onOpenGuides: openGuides } : {})}
               />
             </View>
           )}
         </View>
       </ScrollView>
+      {canManageGuides ? (
+        <GuideManagementOverlay
+          visible={guideOverlaySource !== null}
+          source={guideOverlaySource}
+          catalog={props.catalog}
+          onClose={closeGuides}
+        />
+      ) : null}
       {canQrPair && props.lanPairing !== undefined ? (
         <QrPairingOverlay
           visible={qrPairingOpen}

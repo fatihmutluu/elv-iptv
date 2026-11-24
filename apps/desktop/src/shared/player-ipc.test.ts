@@ -33,8 +33,9 @@ describe('PLAYER_CHANNELS', () => {
 });
 
 describe('DESKTOP_CAPABILITIES', () => {
-  it('is frozen', () => {
+  it('is frozen and enables bounded liveSeek (#28)', () => {
     expect(Object.isFrozen(DESKTOP_CAPABILITIES)).toBe(true);
+    expect(DESKTOP_CAPABILITIES.liveSeek).toBe(true);
   });
 });
 
@@ -67,6 +68,7 @@ describe('isPlayerCommandMessage', () => {
       { name: 'pause', attempt: 4 },
       { name: 'stop', attempt: 4 },
       { name: 'recreate', attempt: 4 },
+      { name: 'jumpToLiveEdge', attempt: 4 },
       { name: 'seek', attempt: 4, positionMs: 12000 },
       { name: 'setSpeed', attempt: 4, rate: 0.25 },
       { name: 'setSpeed', attempt: 4, rate: 1.5 },
@@ -205,6 +207,9 @@ describe('isPlayerCommandMessage', () => {
       msg({ name: 'play', attempt: 'x' }),
       msg({ name: 'play', attempt: -1 }),
       msg({ name: 'play', attempt: 1.5 }),
+      msg({ name: 'jumpToLiveEdge' }),
+      msg({ name: 'jumpToLiveEdge', attempt: -1 }),
+      msg({ name: 'jumpToLiveEdge', attempt: 'bad' }),
       msg({ name: 'seek', attempt: 1 }),
       msg({ name: 'seek', attempt: 1, positionMs: Number.NaN }),
       msg({ name: 'seek', attempt: 1, positionMs: -5 }),

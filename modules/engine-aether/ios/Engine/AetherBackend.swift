@@ -87,6 +87,7 @@ final class AetherBackend: PlayerBackend {
   var lastAVBufferReportedBuffering = false
   var playbackActiveIntent = false
   var lastDroppedVideoFrames = 0
+  var lastLiveSeekableWindow: LiveSeekableWindow?
 
   init(gate: ConnectionGate, httpSession: EngineHttpSession) {
     self.gate = gate
@@ -237,7 +238,19 @@ final class AetherBackend: PlayerBackend {
   }
 
   func seek(toSeconds: Double) {
-    guard toSeconds.isFinite, let engine, !engine.isLive else { return }
+    guard toSeconds.isFinite, let engine else { return }
+    let targetSeconds: Double
+    if engine.isLive {
+      guard currentPlan?.isLiveTs != true,
+            let window = lastLiveSeekableWindow ?? readLiveSeekableWindow(from: engine),
+            let clamped = clampLiveSeek(targetSec: toSeconds, window: window)
+      else {
+        return
+      }
+      targetSeconds = clamped
+    } else {
+      targetSeconds = max(0, toSeconds)
+    }
     let serial = engineLoadSerial
     guard serial > 0 else { return }
     seekTask?.cancel()
@@ -250,7 +263,7 @@ final class AetherBackend: PlayerBackend {
         }
       }
       guard let self, let engine, !Task.isCancelled, self.engine === engine, self.engineLoadSerial == serial else { return }
-      await engine.seek(to: max(0, toSeconds))
+      await engine.seek(to: targetSeconds)
     }
   }
 
@@ -361,6 +374,7 @@ final class AetherBackend: PlayerBackend {
     lastAVBufferReportedBuffering = false
     playbackActiveIntent = false
     lastDroppedVideoFrames = 0
+    lastLiveSeekableWindow = nil
     liveRecoveryPolicy.reset()
     osdClockThrottle.reset()
   }

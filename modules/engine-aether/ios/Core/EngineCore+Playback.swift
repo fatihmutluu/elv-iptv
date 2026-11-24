@@ -111,10 +111,36 @@ extension EngineCore {
     positionSeconds: Double,
     rate: Double,
     durationSeconds: Double?,
-    liveEdgeSeconds: Double?
+    liveEdgeSeconds: Double?,
+    liveSeekableStartSeconds: Double? = nil,
+    timeShiftSupported: Bool? = nil
   ) {
     if let d = durationSeconds, d.isFinite, d > 0 { lastDurationSeconds = d }
     if let e = liveEdgeSeconds, e.isFinite, e >= 0 { lastLiveEdgeSeconds = e }
+    if currentPlan?.isLiveTs == true {
+      lastLiveSeekableStartSeconds = nil
+      if timeShiftSupported != nil || liveSeekableStartSeconds != nil {
+        lastTimeShiftSupported = false
+      }
+    } else if currentRequest?.live == true {
+      if timeShiftSupported == false {
+        lastLiveSeekableStartSeconds = nil
+        lastTimeShiftSupported = false
+      } else if let window = evaluateLiveSeekWindow(
+        startSec: liveSeekableStartSeconds,
+        endSec: liveEdgeSeconds ?? lastLiveEdgeSeconds
+      ) {
+        lastLiveSeekableStartSeconds = window.startSec
+        lastLiveEdgeSeconds = window.endSec
+        lastTimeShiftSupported = true
+      } else if timeShiftSupported != nil || liveSeekableStartSeconds != nil {
+        lastLiveSeekableStartSeconds = nil
+        lastTimeShiftSupported = false
+      }
+    } else {
+      lastLiveSeekableStartSeconds = nil
+      lastTimeShiftSupported = nil
+    }
     guard framed, !seeking, !reloading else { return }
     if positionSeconds.isFinite { lastPositionSeconds = max(0, positionSeconds) }
     guard played, !stalled else { return }
@@ -211,6 +237,8 @@ extension EngineCore {
       rate: rate,
       durationMs: lastDurationSeconds.map { $0 * 1_000.0 },
       liveEdgeMs: lastLiveEdgeSeconds.map { $0 * 1_000.0 },
+      liveSeekableStartMs: lastLiveSeekableStartSeconds.map { $0 * 1_000.0 },
+      timeShiftSupported: lastTimeShiftSupported,
       isLiveTs: (currentPlan?.isLiveTs == true) ? true : nil
     )
     emit(.clock(attempt: token, anchor: anchor))

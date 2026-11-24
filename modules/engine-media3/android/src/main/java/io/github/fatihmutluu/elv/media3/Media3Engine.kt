@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.sharedobjects.SharedObject
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -41,6 +42,8 @@ class Media3Engine : SharedObject {
   private val hasAppContext: Boolean
   private val onDisposed: (Media3Engine) -> Unit
   private var lowRamDevice = false
+  private var appCacheDir: File? = null
+  private var activeTimeShiftBuffer: TimeShiftRingBuffer? = null
   private lateinit var playerFactory: PlayerFactory
   private lateinit var tracksBridge: TrackSelectorBridge
   private lateinit var mediaSessionController: MediaSessionController
@@ -153,6 +156,7 @@ class Media3Engine : SharedObject {
       if (action !is CommandFence.MediaAction.Run) return@post
       activeEpoch = action.epoch
       reporter.end()
+      tearDownTimeShiftCache()
       if (!isAllowedPlaybackUrl(next.url)) {
         rejectDisallowedUrl(attempt, rebuildFirst = action.rebuildFirst)
         return@post
@@ -202,9 +206,23 @@ class Media3Engine : SharedObject {
   fun pause(attempt: Int) = postInEpoch(attempt) { player?.pause() }
 
   fun seek(attempt: Int, positionMs: Long) = postInEpoch(attempt) {
-    val clamped = positionMs.coerceAtLeast(0L)
     val current = player ?: return@postInEpoch
     if (!current.isCurrentMediaItemSeekable) return@postInEpoch
+    if (request?.live == true) {
+      when (val resolution = resolveMedia3LiveSeek(positionMs, current.isCurrentMediaItemSeekable, current.duration)) {
+        LiveSeekResolution.Ignore -> return@postInEpoch
+        LiveSeekResolution.JumpToDefaultLiveEdge -> {
+          clearSubtitles(resetDelay = false)
+          current.seekToDefaultPosition()
+        }
+        is LiveSeekResolution.SeekTo -> {
+          clearSubtitles(resetDelay = false)
+          current.seekTo(resolution.positionMs)
+        }
+      }
+      return@postInEpoch
+    }
+    val clamped = positionMs.coerceAtLeast(0L)
     if (request?.live == false) {
       lastVodPositionMs = clamped
       current.setSeekParameters(vodSeekParametersFor(clamped, current.currentPosition))
@@ -288,6 +306,7 @@ class Media3Engine : SharedObject {
       player?.isScrubbingModeEnabled = false
       tracksBridge.onPrepareReuse()
       clearSubtitles(resetDelay = false)
+      tearDownTimeShiftCache()
       reporter.end()
       beginGeneration()
       pendingRebuildDeferred = false
@@ -386,6 +405,7 @@ class Media3Engine : SharedObject {
 
   private fun clearSessionState() {
     reporter.end()
+    tearDownTimeShiftCache()
     player?.isScrubbingModeEnabled = false
     currentSpeed = PlaybackSpeedPolicy.DEFAULT_SPEED
     player?.playbackParameters = PlaybackParameters.DEFAULT
@@ -474,9 +494,18 @@ class Media3Engine : SharedObject {
     gate.beginMedia(generation)
   }
 
+  private fun tearDownTimeShiftCache() {
+    activeTimeShiftBuffer?.close()
+    activeTimeShiftBuffer = null
+    appCacheDir?.let { purgeTimeShiftCacheDir(it) }
+  }
+
   private fun initEngine(context: Context) {
     val profile = readDeviceMemoryProfile(context)
     lowRamDevice = profile.lowRam
+    val cacheDir: File? = context.cacheDir
+    appCacheDir = cacheDir
+    cacheDir?.let { purgeTimeShiftCacheDir(it) }
     playerFactory = PlayerFactory(
       context = context,
       looper = thread.looper,

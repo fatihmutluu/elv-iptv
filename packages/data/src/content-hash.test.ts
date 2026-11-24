@@ -54,6 +54,8 @@ describe('content-hash', () => {
       logo: 'http://img.example/1.png',
       guideId: 'ch1.tr',
       catchupDays: 3,
+      catchupMode: 'append',
+      catchupSourceTemplate: '{{c:src}}',
       urlTemplate: 'http://cdn.example/{{0}}/1.ts',
       headersJson: '{"userAgent":"ELV"}',
       backupUrlsJson: '["http://b.example/1.ts"]',
@@ -68,6 +70,8 @@ describe('content-hash', () => {
     expect(hashLiveRow({ ...input, logo: null })).not.toBe(base);
     expect(hashLiveRow({ ...input, guideId: 'ch2.tr' })).not.toBe(base);
     expect(hashLiveRow({ ...input, catchupDays: 7 })).not.toBe(base);
+    expect(hashLiveRow({ ...input, catchupMode: 'flussonic' })).not.toBe(base);
+    expect(hashLiveRow({ ...input, catchupSourceTemplate: null })).not.toBe(base);
     expect(hashLiveRow({ ...input, urlTemplate: 'http://cdn.example/{{0}}/2.ts' })).not.toBe(base);
     expect(hashLiveRow({ ...input, headersJson: null })).not.toBe(base);
     expect(hashLiveRow({ ...input, backupUrlsJson: null })).not.toBe(base);

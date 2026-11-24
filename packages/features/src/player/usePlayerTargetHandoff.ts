@@ -1,5 +1,11 @@
 import type { CatalogService } from '@elv/data';
-import type { AndroidDecoderMode, BufferPreset, LiveChannelSwitchModePref } from '@elv/domain';
+import {
+  type AndroidDecoderMode,
+  type BufferPreset,
+  elvError,
+  err,
+  type LiveChannelSwitchModePref,
+} from '@elv/domain';
 import {
   type PlaybackClock,
   type PlaybackService,
@@ -13,6 +19,7 @@ import type { AppLifecyclePort } from '../ports/app-lifecycle';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import { resolveChannelJump } from './channel-digit-entry';
+import { targetIdentityKey } from './live-timeshift-model';
 import {
   buildChannelJumpTarget,
   buildNextEpisodeTarget,
@@ -31,7 +38,9 @@ export interface PlayerTargetHandoffParams {
   appLifecycle: AppLifecyclePort;
   catalogRef: MutableRefObject<
     Pick<CatalogService, 'resolveStream' | 'getProgress' | 'saveProgress'> &
-      Partial<Pick<CatalogService, 'channelByNumber' | 'recordRecentChannel'>>
+      Partial<
+        Pick<CatalogService, 'channelByNumber' | 'recordRecentChannel' | 'resolveCatchupStream'>
+      >
   >;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
@@ -84,7 +93,7 @@ export function usePlayerTargetHandoff({
   const previewSeqRef = useRef(0);
   const burstOriginRef = useRef<PlayTarget | null>(null);
   const lastRecordedRecentKeyRef = useRef<string | null>(null);
-  const prevPropKeyRef = useRef(target.itemKey);
+  const prevPropKeyRef = useRef(targetIdentityKey(target));
   const transitioningToRef = useRef<string | null>(null);
   const backgroundedRef = useRef(false);
   const resumeOnActiveRef = useRef(false);
@@ -134,7 +143,17 @@ export function usePlayerTargetHandoff({
         accountKey: entry.accountKey ?? entry.sourceId,
         kind: entry.kind,
         resolve: async () => {
-          const res = await catalogRef.current.resolveStream(entry.itemKey);
+          const catchup = entry.catchup;
+          const res =
+            catchup !== undefined
+              ? catalogRef.current.resolveCatchupStream !== undefined
+                ? await catalogRef.current.resolveCatchupStream(entry.itemKey, {
+                    startMs: catchup.startMs,
+                    stopMs: catchup.stopMs,
+                    ...(catchup.hasArchive !== undefined ? { hasArchive: catchup.hasArchive } : {}),
+                  })
+                : err(elvError('storage', 'unsupported'))
+              : await catalogRef.current.resolveStream(entry.itemKey);
           if (res.ok && res.value.allowLegacyTls === true) {
             return { ok: true, value: { ...res.value, allowLegacyTls: true } };
           }
@@ -249,7 +268,7 @@ export function usePlayerTargetHandoff({
                   : {}),
               };
         vodResumeMsRef.current = undefined;
-        prevPropKeyRef.current = enriched.itemKey;
+        prevPropKeyRef.current = targetIdentityKey(enriched);
         activeTargetRef.current = enriched;
         setActiveTarget(enriched);
         onTargetChangeRef.current?.(enriched);
@@ -315,7 +334,7 @@ export function usePlayerTargetHandoff({
       flushProgressRef.current();
       cancelPendingResume();
       vodResumeMsRef.current = undefined;
-      prevPropKeyRef.current = next.itemKey;
+      prevPropKeyRef.current = targetIdentityKey(next);
       activeTargetRef.current = next;
       setActiveTarget(next);
       onTargetChangeRef.current?.(next);
@@ -359,7 +378,7 @@ export function usePlayerTargetHandoff({
       }
       cancelPendingResume();
       vodResumeMsRef.current = undefined;
-      prevPropKeyRef.current = next.itemKey;
+      prevPropKeyRef.current = targetIdentityKey(next);
       activeTargetRef.current = next;
       serviceRef.current?.adoptQueuedTarget(buildTuneRequest(next, 0), queuedStream);
       setActiveTarget(next);
@@ -386,7 +405,7 @@ export function usePlayerTargetHandoff({
       vodResumeMsRef.current = undefined;
       zapController.reset(next.playlist?.currentIndex ?? 0);
       if (syncPlaylistIndex !== undefined) next.playlist?.onChangeIndex(syncPlaylistIndex);
-      prevPropKeyRef.current = next.itemKey;
+      prevPropKeyRef.current = targetIdentityKey(next);
       activeTargetRef.current = next;
       setActiveTarget(next);
       onTargetChangeRef.current?.(next);
@@ -420,6 +439,13 @@ export function usePlayerTargetHandoff({
         ? nextIndex
         : undefined;
     commitLiveTarget(next, syncIdx);
+  }, [commitLiveTarget]);
+
+  const handleBackToLive = useCallback((): void => {
+    const current = activeTargetRef.current;
+    if (current.catchup === undefined) return;
+    const nextLive: PlayTarget = { ...current.catchup.liveTarget };
+    commitLiveTarget(nextLive);
   }, [commitLiveTarget]);
 
   const selectChannel = useCallback(
@@ -516,7 +542,8 @@ export function usePlayerTargetHandoff({
   }, [cancelPendingResume, playbackGuard, serviceRef, zapController]);
 
   useEffect(() => {
-    if (prevPropKeyRef.current === target.itemKey) {
+    const nextIdentity = targetIdentityKey(target);
+    if (prevPropKeyRef.current === nextIdentity) {
       if (hasTargetMetaChanged(activeTargetRef.current, target)) {
         zapController.sync(target.playlist?.currentIndex ?? 0);
         activeTargetRef.current = target;
@@ -528,7 +555,7 @@ export function usePlayerTargetHandoff({
     cancelPendingResume();
     burstOriginRef.current = null;
     cancelPreviewChannel();
-    prevPropKeyRef.current = target.itemKey;
+    prevPropKeyRef.current = nextIdentity;
     vodResumeMsRef.current = undefined;
     zapController.reset(target.playlist?.currentIndex ?? 0);
     activeTargetRef.current = target;
@@ -611,5 +638,6 @@ export function usePlayerTargetHandoff({
     handlePlayNextEpisode,
     handleQueueAdvanced,
     handleJumpPreviousChannel,
+    handleBackToLive,
   };
 }

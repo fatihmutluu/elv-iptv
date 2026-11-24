@@ -73,6 +73,14 @@ export {
   MIN_SYNC_DELAY_MS,
 } from './sync-delay';
 export {
+  clampLiveSeekPosition,
+  DEFAULT_LIVE_BEHIND_THRESHOLD_MS,
+  formatLiveOffset,
+  isBehindLiveEdge,
+  type LiveTimeShiftWindow,
+  resolveLiveTimeShiftWindow,
+} from './timeshift';
+export {
   type InitialTrackSelection,
   type PersistedTrackSelectionPref,
   type ProfileTrackRules,

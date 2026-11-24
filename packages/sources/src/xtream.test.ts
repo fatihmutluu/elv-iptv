@@ -392,3 +392,100 @@ describe('empty objects as empty lists', () => {
     );
   });
 });
+
+describe('simpleEpg (#306)', () => {
+  const b64 = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+
+  it('calls get_simple_data_table, decodes base64, preserves has_archive/now_playing, and applies activeTimezone', async () => {
+    const { c, requests } = client((url) => {
+      if (!url.includes('action=')) {
+        return {
+          json: {
+            user_info: { auth: 1, status: 'Active' },
+            server_info: { timezone: 'Europe/Istanbul' },
+          },
+        };
+      }
+      return {
+        json: {
+          epg_listings: [
+            {
+              title: b64('Haber Bülteni'),
+              description: b64('Canlı yayın'),
+              start: '2026-06-01 20:00:00',
+              end: '2026-06-01 21:00:00',
+              has_archive: 1,
+              now_playing: 0,
+            },
+            {
+              title: b64('Gece Spor'),
+              start_timestamp: '1780336800',
+              stop_timestamp: '1780340400',
+              has_archive: '0',
+              now_playing: '1',
+            },
+          ],
+        },
+      };
+    });
+
+    await c.account();
+    const list = value(await c.simpleEpg(42));
+    expect(requests[1]?.url).toContain('action=get_simple_data_table&stream_id=42');
+    expect(list).toEqual([
+      {
+        start: Date.UTC(2026, 5, 1, 17, 0, 0),
+        stop: Date.UTC(2026, 5, 1, 18, 0, 0),
+        title: 'Haber Bülteni',
+        desc: 'Canlı yayın',
+        hasArchive: true,
+        nowPlaying: false,
+      },
+      {
+        start: 1780336800000,
+        stop: 1780340400000,
+        title: 'Gece Spor',
+        hasArchive: false,
+        nowPlaying: true,
+      },
+    ]);
+  });
+
+  it('handles empty payloads, aborts, and mirror failover through the shared pipeline', async () => {
+    expect(value(await client(() => ({ json: {} })).c.simpleEpg(1))).toEqual([]);
+    expect(value(await client(() => ({ json: [] })).c.simpleEpg(1))).toEqual([]);
+
+    const ac = new AbortController();
+    ac.abort();
+    expectErr(
+      await client(() => ({ json: {} })).c.simpleEpg(1, { signal: ac.signal }),
+      'network',
+      'aborted',
+    );
+
+    const { c: failoverClient, requests } = client(
+      (url) => {
+        if (url.startsWith('http://h.example:8080/')) return { text: '', status: 503 };
+        return {
+          json: {
+            epg_listings: [
+              {
+                title: b64('Mirror EPG'),
+                start_timestamp: 100,
+                stop_timestamp: 200,
+                has_archive: 1,
+              },
+            ],
+          },
+        };
+      },
+      { backupServers: ['http://backup.example:8080'] },
+    );
+    const entries = value(await failoverClient.simpleEpg(9));
+    expect(entries).toEqual([
+      { start: 100_000, stop: 200_000, title: 'Mirror EPG', hasArchive: true },
+    ]);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.url).toContain('http://backup.example:8080/player_api.php');
+  });
+});

@@ -1,6 +1,7 @@
-import type { ItemRow, ProgrammeRow } from '@elv/data';
+import type { CatalogService, ItemRow, ProgrammeRow } from '@elv/data';
 import {
   CtaButton,
+  FilterChip,
   MicroPill,
   TABULAR_NUMS_STYLE,
   useI18n,
@@ -10,6 +11,12 @@ import {
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  DEFAULT_REMINDER_LEAD_MIN,
+  findArchiveProgrammeMatch,
+  REMINDER_LEAD_OPTIONS_MIN,
+  resolveCatchupAvailability,
+} from './catchup-reminder-model';
 import { formatClockTime } from './live-model';
 import {
   formatChannelDisplayName,
@@ -27,12 +34,22 @@ export interface EpgProgrammeDetailModalProps {
   readonly isFavorite: boolean;
   readonly isTv: boolean;
   readonly cleanChannelTitles?: boolean;
+  readonly catalog?: CatalogService;
+  readonly hasReminder?: boolean;
+  readonly reminderLeadTimeMs?: number;
   readonly onTuneChannel: (channel: ItemRow, index: number) => void;
+  readonly onWatchCatchup?: (
+    channel: ItemRow,
+    index: number,
+    programme: ProgrammeRow,
+    hasArchive?: boolean,
+  ) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
+  readonly onReminderChanged?: () => void;
   readonly onClose: () => void;
 }
 
-type ModalActionId = 'tune' | 'favorite' | 'close';
+type ModalActionId = 'catchup' | 'reminder' | `lead:${number}` | 'tune' | 'favorite' | 'close';
 
 function badgeMessageKey(kind: ProgrammeBadgeKind) {
   if (kind === 'live') return 'epg.badge.live' as const;
@@ -66,6 +83,16 @@ function formatEpisodeTag(programme: ProgrammeRow): string | null {
   return raw && raw.length > 0 ? raw : null;
 }
 
+function leadMsToMinutes(leadMs: number | undefined): number {
+  if (leadMs === undefined || !Number.isFinite(leadMs) || leadMs < 0) {
+    return DEFAULT_REMINDER_LEAD_MIN;
+  }
+  const mins = Math.round(leadMs / 60_000);
+  return (REMINDER_LEAD_OPTIONS_MIN as readonly number[]).includes(mins)
+    ? mins
+    : DEFAULT_REMINDER_LEAD_MIN;
+}
+
 function EpgDetailTvKeyTrap({
   onInput,
 }: {
@@ -76,9 +103,9 @@ function EpgDetailTvKeyTrap({
 }
 
 /**
- * In-tree Cinema Quietude Programme Detail modal (`#395`, `#396`) — never uses RN `<Modal>`.
- * Displays full programme metadata, badges, episode info, description, and Tune / Favorite / Close
- * actions while trapping 10-ft TV remote keys (`useTvKeyInterceptor`) and desktop `Escape`.
+ * In-tree Cinema Quietude Programme Detail modal (`#395`, `#396`, `#27`, `#35`) — never uses RN `<Modal>`.
+ * Displays full programme metadata, catch-up CTA / retention hint for past shows, reminder toggle
+ * & lead-time picker for upcoming shows, and Tune / Favorite / Close actions with TV key trapping.
  */
 export function EpgProgrammeDetailModal({
   visible,
@@ -89,8 +116,13 @@ export function EpgProgrammeDetailModal({
   isFavorite,
   isTv,
   cleanChannelTitles = false,
+  catalog,
+  hasReminder,
+  reminderLeadTimeMs,
   onTuneChannel,
+  onWatchCatchup,
   onToggleFavorite,
+  onReminderChanged,
   onClose,
 }: EpgProgrammeDetailModalProps): ReactElement | null {
   const theme = useTheme();
@@ -99,13 +131,170 @@ export function EpgProgrammeDetailModal({
   const focusedIdxRef = useRef(0);
   focusedIdxRef.current = focusedIdx;
 
+  const archiveCacheRef = useRef<Map<string, readonly ProgrammeRow[]>>(new Map());
+  const [archiveHasArchive, setArchiveHasArchive] = useState<boolean | undefined>(undefined);
+  const [localReminderActive, setLocalReminderActive] = useState(hasReminder ?? false);
+  const [leadMinutes, setLeadMinutes] = useState<number>(() => leadMsToMinutes(reminderLeadTimeMs));
+  const [reminderBusy, setReminderBusy] = useState(false);
+
+  const isPast = programme !== null && programme.stop <= nowMs;
+  const isUpcoming = programme !== null && programme.start > nowMs;
+
+  const programmeIdentity =
+    visible && channel !== null && programme !== null ? `${channel.key}|${programme.start}` : '';
+  useEffect(() => {
+    if (programmeIdentity.length === 0) return;
+    setLocalReminderActive(hasReminder ?? false);
+    setLeadMinutes(leadMsToMinutes(reminderLeadTimeMs));
+  }, [hasReminder, reminderLeadTimeMs, programmeIdentity]);
+
+  // Hydrate standalone reminder state if parent did not pass `hasReminder` explicitly.
+  useEffect(() => {
+    if (!visible || !isUpcoming || channel === null || programme === null) return;
+    if (hasReminder !== undefined || catalog?.listReminders === undefined) return;
+    let cancelled = false;
+    void catalog
+      .listReminders(undefined, { includeFired: false })
+      .then((rows) => {
+        if (cancelled) return;
+        const match = rows.find(
+          (r) => r.channelKey === channel.key && r.programmeStart === programme.start,
+        );
+        setLocalReminderActive(match !== undefined);
+        if (match !== undefined) setLeadMinutes(leadMsToMinutes(match.leadTimeMs));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, channel, hasReminder, isUpcoming, programme, visible]);
+
+  // On-demand Xtream `get_simple_data_table` archive check for past programmes within catchupDays.
+  useEffect(() => {
+    setArchiveHasArchive(undefined);
+    if (!visible || !isPast || channel === null || programme === null) return;
+    const days = channel.catchupDays ?? 0;
+    if (days <= 0 || catalog?.fetchChannelArchiveEpg === undefined) return;
+    if (resolveCatchupAvailability(channel, programme, nowMs) !== 'available') return;
+
+    const cached = archiveCacheRef.current.get(channel.key);
+    if (cached !== undefined) {
+      const matched = findArchiveProgrammeMatch(cached, programme);
+      setArchiveHasArchive(matched?.hasArchive);
+      return;
+    }
+
+    let cancelled = false;
+    void catalog
+      .fetchChannelArchiveEpg(channel.key)
+      .then((res) => {
+        if (cancelled || !res.ok) return;
+        archiveCacheRef.current.set(channel.key, res.value);
+        const matched = findArchiveProgrammeMatch(res.value, programme);
+        setArchiveHasArchive(matched?.hasArchive);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, channel, isPast, nowMs, programme, visible]);
+
+  const catchupAvailability = useMemo(
+    () =>
+      isPast
+        ? resolveCatchupAvailability(channel, programme, nowMs, archiveHasArchive)
+        : ('unavailable' as const),
+    [archiveHasArchive, channel, isPast, nowMs, programme],
+  );
+  const canWatchCatchup =
+    isPast &&
+    channel !== null &&
+    programme !== null &&
+    onWatchCatchup !== undefined &&
+    catchupAvailability === 'available';
+  const effectiveHasArchive = archiveHasArchive ?? programme?.hasArchive;
+  const canToggleReminder =
+    isUpcoming &&
+    channel !== null &&
+    programme !== null &&
+    catalog?.upsertReminder !== undefined &&
+    catalog?.removeReminder !== undefined;
+
+  const handleToggleReminder = useCallback(
+    async (overrideLeadMin?: number) => {
+      if (
+        !canToggleReminder ||
+        channel === null ||
+        programme === null ||
+        catalog?.upsertReminder === undefined ||
+        catalog?.removeReminder === undefined ||
+        reminderBusy
+      ) {
+        return;
+      }
+      setReminderBusy(true);
+      try {
+        if (localReminderActive && overrideLeadMin === undefined) {
+          const res = await catalog.removeReminder(channel.key, programme.start);
+          if (res.ok) {
+            setLocalReminderActive(false);
+            onReminderChanged?.();
+          }
+        } else {
+          const nextLeadMin = overrideLeadMin ?? leadMinutes;
+          const res = await catalog.upsertReminder({
+            sourceId: channel.sourceId,
+            channelKey: channel.key,
+            channelName: channel.name,
+            programmeTitle: programme.title,
+            programmeStart: programme.start,
+            programmeStop: programme.stop,
+            leadTimeMs: nextLeadMin * 60_000,
+          });
+          if (res.ok) {
+            setLocalReminderActive(true);
+            setLeadMinutes(nextLeadMin);
+            onReminderChanged?.();
+          }
+        }
+      } finally {
+        setReminderBusy(false);
+      }
+    },
+    [
+      canToggleReminder,
+      catalog,
+      channel,
+      leadMinutes,
+      localReminderActive,
+      onReminderChanged,
+      programme,
+      reminderBusy,
+    ],
+  );
+
+  const handleSelectLeadMinutes = useCallback(
+    (minutes: number) => {
+      setLeadMinutes(minutes);
+      if (localReminderActive) {
+        void handleToggleReminder(minutes);
+      }
+    },
+    [handleToggleReminder, localReminderActive],
+  );
+
   const actions = useMemo<readonly ModalActionId[]>(() => {
     const out: ModalActionId[] = [];
+    if (canWatchCatchup) out.push('catchup');
+    if (canToggleReminder) {
+      for (const mins of REMINDER_LEAD_OPTIONS_MIN) out.push(`lead:${mins}`);
+      out.push('reminder');
+    }
     if (channel !== null) out.push('tune');
     if (channel !== null && onToggleFavorite !== undefined) out.push('favorite');
     out.push('close');
     return out;
-  }, [channel, onToggleFavorite]);
+  }, [canToggleReminder, canWatchCatchup, channel, onToggleFavorite]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset focused action whenever opened for a programme
   useEffect(() => {
@@ -115,10 +304,26 @@ export function EpgProgrammeDetailModal({
     }
   }, [visible, programme?.start, programme?.title]);
 
+  useEffect(() => {
+    if (focusedIdxRef.current >= actions.length) {
+      const clamped = Math.max(0, actions.length - 1);
+      focusedIdxRef.current = clamped;
+      setFocusedIdx(clamped);
+    }
+  }, [actions.length]);
+
   const activateIndex = useCallback(
     (idx: number) => {
       const action = actions[idx];
-      if (action === 'tune' && channel !== null) {
+      if (action === 'catchup' && channel !== null && programme !== null && onWatchCatchup) {
+        onClose();
+        onWatchCatchup(channel, channelIndex, programme, effectiveHasArchive);
+      } else if (action === 'reminder') {
+        void handleToggleReminder();
+      } else if (action?.startsWith('lead:')) {
+        const mins = Number(action.slice(5));
+        if (Number.isFinite(mins)) handleSelectLeadMinutes(mins);
+      } else if (action === 'tune' && channel !== null) {
         onClose();
         onTuneChannel(channel, channelIndex);
       } else if (action === 'favorite' && channel !== null) {
@@ -127,7 +332,19 @@ export function EpgProgrammeDetailModal({
         onClose();
       }
     },
-    [actions, channel, channelIndex, onClose, onToggleFavorite, onTuneChannel],
+    [
+      actions,
+      channel,
+      channelIndex,
+      effectiveHasArchive,
+      handleSelectLeadMinutes,
+      handleToggleReminder,
+      onClose,
+      onToggleFavorite,
+      onTuneChannel,
+      onWatchCatchup,
+      programme,
+    ],
   );
 
   const handleTvTrap = useCallback(
@@ -182,7 +399,6 @@ export function EpgProgrammeDetailModal({
 
   if (!visible || programme === null) return null;
 
-  const isUpcoming = programme.start > nowMs;
   const durationMin = formatDurationMinutes(programme.start, programme.stop);
   const episodeTag = formatEpisodeTag(programme);
   const badges = resolveProgrammeBadges(programme.flags);
@@ -190,6 +406,12 @@ export function EpgProgrammeDetailModal({
   const channelName = channel ? formatChannelDisplayName(channel.name, cleanChannelTitles) : null;
   const description = programme.description?.trim() || i18n.t('epg.noDescription');
   const focusedAction = isTv ? (actions[focusedIdx] ?? null) : null;
+  const pastHintKey =
+    isPast && channel !== null && !canWatchCatchup
+      ? catchupAvailability === 'expired'
+        ? ('epg.catchupExpired' as const)
+        : ('epg.catchupUnavailable' as const)
+      : null;
 
   return (
     <View testID="epg-programme-detail-modal" style={styles.root}>
@@ -253,8 +475,24 @@ export function EpgProgrammeDetailModal({
               tone="neutral"
             />
           ) : null}
+          {canWatchCatchup ? (
+            <MicroPill
+              testID="epg-detail-catchup-pill"
+              label={i18n.t('epg.catchupBadge')}
+              tone="accent"
+              dot
+            />
+          ) : null}
           {isUpcoming ? (
             <MicroPill testID="epg-detail-upcoming" label={i18n.t('epg.upcoming')} tone="accent" />
+          ) : null}
+          {isUpcoming && localReminderActive ? (
+            <MicroPill
+              testID="epg-detail-reminder-scheduled"
+              label={i18n.t('epg.reminderScheduled')}
+              tone="accent"
+              dot
+            />
           ) : null}
           {episodeTag !== null ? (
             <MicroPill testID="epg-detail-episode" label={episodeTag} tone="neutral" />
@@ -285,11 +523,71 @@ export function EpgProgrammeDetailModal({
           </Text>
         </ScrollView>
 
+        {pastHintKey !== null ? (
+          <Text
+            testID="epg-detail-catchup-hint"
+            style={[theme.typography.caption, { color: theme.colors.textMuted }]}
+          >
+            {i18n.t(pastHintKey)}
+          </Text>
+        ) : null}
+
+        {canToggleReminder ? (
+          <View testID="epg-detail-reminder-lead-section" style={styles.leadSection}>
+            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+              {i18n.t('epg.reminderLeadLabel')}
+            </Text>
+            <View style={styles.leadRow}>
+              {REMINDER_LEAD_OPTIONS_MIN.map((mins) => (
+                <FilterChip
+                  key={mins}
+                  testID={`epg-detail-reminder-lead-${mins}`}
+                  label={i18n.t('epg.durationMinutes', { minutes: mins })}
+                  selected={leadMinutes === mins}
+                  focusable={!isTv}
+                  focused={focusedAction === `lead:${mins}`}
+                  onPress={() => handleSelectLeadMinutes(mins)}
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.actionsRow}>
+          {canWatchCatchup && channel !== null && onWatchCatchup !== undefined ? (
+            <CtaButton
+              testID="epg-detail-catchup"
+              variant="primary"
+              icon="play"
+              label={i18n.t('epg.watchCatchup')}
+              focusable={!isTv}
+              focused={focusedAction === 'catchup'}
+              onPress={() => {
+                onClose();
+                onWatchCatchup(channel, channelIndex, programme, effectiveHasArchive);
+              }}
+            />
+          ) : null}
+          {canToggleReminder ? (
+            <CtaButton
+              testID="epg-detail-reminder"
+              variant={localReminderActive ? 'secondary' : 'primary'}
+              icon="bell"
+              disabled={reminderBusy}
+              label={i18n.t(localReminderActive ? 'epg.cancelReminder' : 'epg.remindMe')}
+              focusable={!isTv}
+              focused={focusedAction === 'reminder'}
+              onPress={() => void handleToggleReminder()}
+            />
+          ) : null}
           {channel !== null ? (
             <CtaButton
               testID="epg-detail-tune"
-              variant="primary"
+              variant={
+                canWatchCatchup || (canToggleReminder && !localReminderActive)
+                  ? 'secondary'
+                  : 'primary'
+              }
               icon="play"
               label={i18n.t('epg.tuneChannel')}
               focusable={!isTv}
@@ -342,14 +640,16 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 560,
-    maxHeight: '82%',
+    maxHeight: '84%',
     borderWidth: 1,
     padding: 20,
     gap: 14,
   },
   header: { gap: 4 },
   pillsRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
-  descScroll: { maxHeight: 220 },
+  descScroll: { maxHeight: 200 },
+  leadSection: { gap: 6 },
+  leadRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   actionsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

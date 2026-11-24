@@ -576,9 +576,27 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     play: (attempt) => controls.play(attempt),
     pause: (attempt) => controls.pause(attempt),
     seek(attempt, positionMs) {
-      if (released) return;
+      if (released || !Number.isFinite(positionMs)) return;
+      let targetMs = Math.max(0, positionMs);
+      if (media?.request.kind === 'live') {
+        const win = live?.deriver.liveWindow();
+        if (win?.startMs !== undefined && win.endMs !== undefined && win.endMs > win.startMs) {
+          targetMs = Math.min(win.endMs, Math.max(win.startMs, targetMs));
+        }
+      }
       controls.onSeekQueued();
-      command(attempt, ['seek', positionMs / 1000, 'absolute']);
+      command(attempt, ['seek', targetMs / 1000, 'absolute']);
+    },
+    jumpToLiveEdge(attempt) {
+      if (released || !media || media.request.kind !== 'live') return;
+      if (attempt < media.token) return;
+      const win = live?.deriver.liveWindow();
+      controls.onSeekQueued();
+      if (win?.endMs !== undefined && Number.isFinite(win.endMs) && win.endMs > 0) {
+        command(attempt, ['seek', win.endMs / 1000, 'absolute']);
+      } else {
+        command(attempt, ['seek', 100, 'absolute-percent']);
+      }
     },
     setSpeed: (attempt, rate) => controls.setSpeed(attempt, rate),
     selectAudioTrack(attempt, id) {

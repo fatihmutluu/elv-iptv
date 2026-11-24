@@ -274,7 +274,7 @@ async function fetchRawCategoryPage(
           WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0${liveHidden}
             AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}${adultExcl}
        )
-       SELECT id, key, provider_id, name${metaSelect}, logo, rating, year, num, ${dedup.countCol}
+       SELECT id, key, provider_id, name${metaSelect}, logo, rating, year, num, catchup_days, ${dedup.countCol}
          FROM ranked
         WHERE rn = 1
         ORDER BY ${orderBy}
@@ -535,15 +535,15 @@ export async function queryItemDetail(
             CASE WHEN NULLIF(co.custom_name, '') IS NOT NULL THEN live.name ELSE NULL END AS original_name,
             COALESCE(co.is_hidden, 0) AS co_is_hidden,
             co.sort_order AS co_sort_order,
-            live.logo, NULL AS rating, NULL AS year, live.num, NULL AS plot, NULL AS cast_text, NULL AS director_text
+            live.logo, NULL AS rating, NULL AS year, live.num, live.catchup_days, NULL AS plot, NULL AS cast_text, NULL AS director_text
        FROM live
        LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = live.key
       WHERE live.source_id = ? AND live.key = ?
      UNION ALL
-     SELECT id, key, 'movie', source_id, provider_id, name, NULL, 0, NULL, logo, rating, year, NULL, NULL, cast_text, director_text
+     SELECT id, key, 'movie', source_id, provider_id, name, NULL, 0, NULL, logo, rating, year, NULL, NULL, NULL, cast_text, director_text
        FROM movies WHERE source_id = ? AND key = ?
      UNION ALL
-     SELECT id, key, 'series', source_id, provider_id, name, NULL, 0, NULL, cover, rating, year, NULL, plot, cast_text, director_text
+     SELECT id, key, 'series', source_id, provider_id, name, NULL, 0, NULL, cover, rating, year, NULL, NULL, plot, cast_text, director_text
        FROM series WHERE source_id = ? AND key = ?
      LIMIT 1`,
     [profileId, sourceId, itemKey, sourceId, itemKey, sourceId, itemKey],

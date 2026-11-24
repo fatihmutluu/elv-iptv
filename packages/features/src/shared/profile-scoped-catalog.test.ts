@@ -307,4 +307,173 @@ describe('createProfileScopedCatalog', () => {
       parentalUnlocked: false,
     });
   });
+
+  it('injects profileId and parentalUnlocked across Wave F3 catch-up, archive EPG, guide ops, and reminders (#220, #306, #30, #35)', async () => {
+    const resolveCatchupStream = vi.fn(async () =>
+      ok({ url: 'http://127.0.0.1/c.ts', headers: {} }),
+    );
+    const fetchChannelArchiveEpg = vi.fn(async () => ok([]));
+    const listGuideSources = vi.fn(async () => []);
+    const addGuideSource = vi.fn(async () =>
+      ok({
+        id: 'g1',
+        sourceId: 's1',
+        priority: 0,
+        name: 'Primary',
+        urlTemplate: '{{g:g1}}',
+        epgShiftMs: 0,
+        enabled: true,
+        lastSyncAt: null,
+      }),
+    );
+    const updateGuideSource = vi.fn(async () =>
+      ok({
+        id: 'g1',
+        sourceId: 's1',
+        priority: 0,
+        name: 'Primary',
+        urlTemplate: '{{g:g1}}',
+        epgShiftMs: 3_600_000,
+        enabled: true,
+        lastSyncAt: null,
+      }),
+    );
+    const removeGuideSource = vi.fn(async () => ok(undefined));
+    const reorderGuideSources = vi.fn(async () => ok(undefined));
+    const listGuideChannels = vi.fn(async () => []);
+    const listChannelGuideOverrides = vi.fn(async () => []);
+    const setChannelGuideOverride = vi.fn(async () =>
+      ok({
+        sourceId: 's1',
+        channelKey: 'm:s1:live:1',
+        guideSourceId: null,
+        guideId: 'bbc.uk',
+        epgShiftMs: 0,
+        isManual: true,
+        updatedAt: 1,
+      }),
+    );
+    const clearChannelGuideOverride = vi.fn(async () => ok(undefined));
+    const listReminders = vi.fn(async () => []);
+    const upsertReminder = vi.fn(async () =>
+      ok({
+        profileId: 'kids-1',
+        sourceId: 's1',
+        channelKey: 'm:s1:live:1',
+        channelName: 'News',
+        programmeTitle: 'Evening News',
+        programmeStart: 10_000,
+        programmeStop: 20_000,
+        leadTimeMs: 300_000,
+        fired: false,
+        createdAt: 1,
+      }),
+    );
+    const removeReminder = vi.fn(async () => ok(undefined));
+    const markReminderFired = vi.fn(async () => ok(undefined));
+    const pruneExpiredReminders = vi.fn(async () => 2);
+
+    const base = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      seasons: vi.fn(async () => ok([])),
+      episodes: vi.fn(async () => []),
+      resolveStream: vi.fn(),
+      resolveCatchupStream,
+      fetchChannelArchiveEpg,
+      listGuideSources,
+      addGuideSource,
+      updateGuideSource,
+      removeGuideSource,
+      reorderGuideSources,
+      listGuideChannels,
+      listChannelGuideOverrides,
+      setChannelGuideOverride,
+      clearChannelGuideOverride,
+      listReminders,
+      upsertReminder,
+      removeReminder,
+      markReminderFired,
+      pruneExpiredReminders,
+      close: vi.fn(async () => undefined),
+    } as unknown as CatalogService;
+
+    const scoped = createProfileScopedCatalog(base, () => ({
+      profileId: 'kids-1',
+      parentalUnlocked: false,
+    }));
+
+    await scoped.resolveCatchupStream?.('m:s1:live:1', { startMs: 1_000, stopMs: 2_000 });
+    await scoped.fetchChannelArchiveEpg?.('m:s1:live:1');
+    await scoped.listGuideSources?.('s1');
+    await scoped.addGuideSource?.({
+      sourceId: 's1',
+      name: 'Primary',
+      url: 'http://example.invalid/epg.xml',
+    });
+    await scoped.updateGuideSource?.('g1', { epgShiftMs: 3_600_000 });
+    await scoped.reorderGuideSources?.('s1', ['g1']);
+    await scoped.removeGuideSource?.('g1');
+    await scoped.listGuideChannels?.('s1', 'bbc', 20);
+    await scoped.listChannelGuideOverrides?.('s1');
+    await scoped.setChannelGuideOverride?.({
+      sourceId: 's1',
+      channelKey: 'm:s1:live:1',
+      guideId: 'bbc.uk',
+    });
+    await scoped.clearChannelGuideOverride?.('s1', 'm:s1:live:1');
+    await scoped.listReminders?.(undefined, { includeFired: false });
+    await scoped.upsertReminder?.({
+      sourceId: 's1',
+      channelKey: 'm:s1:live:1',
+      channelName: 'News',
+      programmeTitle: 'Evening News',
+      programmeStart: 10_000,
+      programmeStop: 20_000,
+    });
+    await scoped.removeReminder?.('m:s1:live:1', 10_000);
+    await scoped.markReminderFired?.('m:s1:live:1', 10_000);
+    expect(await scoped.pruneExpiredReminders?.(99_000)).toBe(2);
+
+    expect(resolveCatchupStream).toHaveBeenCalledWith(
+      'm:s1:live:1',
+      { startMs: 1_000, stopMs: 2_000 },
+      { profileId: 'kids-1', parentalUnlocked: false },
+    );
+    expect(fetchChannelArchiveEpg).toHaveBeenCalledWith('m:s1:live:1', {
+      profileId: 'kids-1',
+      parentalUnlocked: false,
+    });
+    expect(listGuideSources).toHaveBeenCalledWith('s1');
+    expect(addGuideSource).toHaveBeenCalled();
+    expect(updateGuideSource).toHaveBeenCalledWith('g1', { epgShiftMs: 3_600_000 });
+    expect(reorderGuideSources).toHaveBeenCalledWith('s1', ['g1']);
+    expect(removeGuideSource).toHaveBeenCalledWith('g1');
+    expect(listGuideChannels).toHaveBeenCalledWith('s1', 'bbc', 20);
+    expect(listChannelGuideOverrides).toHaveBeenCalledWith('s1');
+    expect(setChannelGuideOverride).toHaveBeenCalledWith({
+      sourceId: 's1',
+      channelKey: 'm:s1:live:1',
+      guideId: 'bbc.uk',
+    });
+    expect(clearChannelGuideOverride).toHaveBeenCalledWith('s1', 'm:s1:live:1');
+    expect(listReminders).toHaveBeenCalledWith('kids-1', { includeFired: false });
+    expect(upsertReminder).toHaveBeenCalledWith({
+      sourceId: 's1',
+      channelKey: 'm:s1:live:1',
+      channelName: 'News',
+      programmeTitle: 'Evening News',
+      programmeStart: 10_000,
+      programmeStop: 20_000,
+      profileId: 'kids-1',
+    });
+    expect(removeReminder).toHaveBeenCalledWith('m:s1:live:1', 10_000, 'kids-1');
+    expect(markReminderFired).toHaveBeenCalledWith('m:s1:live:1', 10_000, 'kids-1');
+    expect(pruneExpiredReminders).toHaveBeenCalledWith(99_000);
+  });
 });

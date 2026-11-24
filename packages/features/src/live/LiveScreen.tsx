@@ -20,6 +20,7 @@ import {
   useProfile,
 } from '../shared';
 import { ChannelManagementOverlay } from './ChannelManagementOverlay';
+import { buildCatchupPlayTarget } from './catchup-reminder-model';
 import { EpgGridView } from './EpgGridView';
 import { EpgProgrammeDetailModal } from './EpgProgrammeDetailModal';
 import { LiveChannelsGrid } from './LiveChannelsGrid';
@@ -75,6 +76,8 @@ export interface LiveScreenProps {
   readonly liveOkTwoStepPreview?: boolean;
   readonly cleanChannelTitles?: boolean;
   readonly collapseVariants?: boolean;
+  readonly reminderVersion?: number;
+  readonly onReminderChanged?: () => void;
   /** Called when embedded live preview playback (Favorites stage or two-step preview) starts or stops (`#160`). */
   readonly onEmbeddedPlaybackActiveChange?: (active: boolean) => void;
 }
@@ -105,6 +108,8 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     liveOkTwoStepPreview = false,
     cleanChannelTitles = false,
     collapseVariants = false,
+    reminderVersion = 0,
+    onReminderChanged,
     onEmbeddedPlaybackActiveChange,
   } = props;
   const theme = useTheme();
@@ -243,6 +248,31 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
       setDetailModal({ channel, index, programme });
     },
     [],
+  );
+  const handleWatchCatchup = useCallback(
+    (channel: ItemRow, index: number, programme: ProgrammeRow, hasArchive?: boolean) => {
+      const liveTarget = live.buildPlayTarget(
+        channel,
+        index,
+        mode === 'favorites' ? 'favorites' : 'category',
+      );
+      const target = buildCatchupPlayTarget({
+        channel,
+        programme,
+        liveTarget,
+        ...(hasArchive !== undefined ? { hasArchive } : {}),
+      });
+      if (twoStepPreviewActive && videoHost !== undefined) {
+        clearTwoStepPreview();
+        void preview
+          .stopAndRelease()
+          .catch(() => undefined)
+          .finally(() => onPlay(target));
+        return;
+      }
+      onPlay(target);
+    },
+    [clearTwoStepPreview, live, mode, onPlay, preview, twoStepPreviewActive, videoHost],
   );
   const previousChannel = live.previousChannel;
   const handleJumpPreviousChannel = useCallback(() => {
@@ -641,6 +671,9 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                   sourceBadges={sourceBadges}
                   cleanChannelTitles={cleanChannelTitles}
                   onWatchChannel={handleWatchAndPlay}
+                  onWatchCatchup={handleWatchCatchup}
+                  reminderVersion={reminderVersion}
+                  {...(onReminderChanged !== undefined ? { onReminderChanged } : {})}
                   onToggleFavorite={handleToggleFavorite}
                   onJumpPreviousChannel={handleJumpPreviousChannel}
                   {...(catalog.setChannelOverride !== undefined
@@ -727,8 +760,11 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
         isFavorite={detailModal !== null && live.favoriteKeys.has(detailModal.channel.key)}
         isTv={layout.isTv}
         cleanChannelTitles={cleanChannelTitles}
+        catalog={catalog}
         onTuneChannel={mode === 'favorites' ? handleWatchFromFavorites : handleWatchAndPlay}
+        onWatchCatchup={handleWatchCatchup}
         onToggleFavorite={handleToggleFavorite}
+        {...(onReminderChanged !== undefined ? { onReminderChanged } : {})}
         onClose={() => setDetailModal(null)}
       />
     </View>

@@ -555,4 +555,75 @@ describe('deriver', () => {
       ),
     ).toEqual([{ width: 720, height: 576, aspectRatio: 2.39, hdr: 'sdr' }]);
   });
+
+  it('derives liveSeekableStartMs, liveEdgeMs, and timeShiftSupported from demuxer-cache-state (#28)', () => {
+    const s = setup('live');
+    play(s);
+
+    // Window < 2s reports bounds but timeShiftSupported: false
+    s.d.property('demuxer-cache-state', { 'cache-begin': 10, 'cache-end': 11.5 });
+    s.clock.t = 2500;
+    const shortWin = clocks(s.d.property('time-pos', 11))[0];
+    expect(shortWin).toMatchObject({
+      liveSeekableStartMs: 10_000,
+      liveEdgeMs: 11_500,
+      timeShiftSupported: false,
+    });
+    expect(s.d.liveWindow()).toEqual({ startMs: 10_000, endMs: 11_500 });
+
+    // Window >= 2s from seekable-ranges flips timeShiftSupported to true and emits anchor immediately
+    s.clock.t = 3000;
+    const expanded = clocks(
+      s.d.property('demuxer-cache-state', {
+        'seekable-ranges': [
+          { start: 5.5, end: 25.5 },
+          { start: 26, end: 40.25 },
+        ],
+      }),
+    );
+    expect(expanded).toHaveLength(1);
+    expect(expanded[0]).toMatchObject({
+      liveSeekableStartMs: 5_500,
+      liveEdgeMs: 40_250,
+      timeShiftSupported: true,
+    });
+    expect(s.d.liveWindow()).toEqual({ startMs: 5_500, endMs: 40_250 });
+
+    // Missing / non-finite / negative / inverted fields degrade cleanly to timeShiftSupported: false
+    s.clock.t = 3500;
+    const invalid = clocks(
+      s.d.property('demuxer-cache-state', {
+        'seekable-ranges': [
+          { start: -1, end: 10 },
+          { start: Number.NaN, end: 20 },
+          { start: 30, end: 10 },
+        ],
+        'cache-begin': -2,
+        'cache-end': Number.POSITIVE_INFINITY,
+      }),
+    );
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0]?.liveSeekableStartMs).toBeUndefined();
+    expect(invalid[0]?.liveEdgeMs).toBeUndefined();
+    expect(invalid[0]?.timeShiftSupported).toBe(false);
+    expect(s.d.liveWindow()).toBeUndefined();
+
+    // Inverted cache-begin >= cache-end suppresses liveEdgeMs
+    s.d.property('demuxer-cache-state', { 'cache-begin': 20, 'cache-end': 15 });
+    s.clock.t = 5000;
+    const inverted = clocks(s.d.property('time-pos', 20))[0];
+    expect(inverted?.liveSeekableStartMs).toBe(20_000);
+    expect(inverted?.liveEdgeMs).toBeUndefined();
+    expect(inverted?.timeShiftSupported).toBe(false);
+
+    // VOD streams never emit live time-shift window metadata
+    const vod = setup('vod');
+    vod.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 0, end: 60 }] });
+    play(vod);
+    const vodAnchor = clocks(vod.d.property('pause', true))[0];
+    expect(vodAnchor?.liveSeekableStartMs).toBeUndefined();
+    expect(vodAnchor?.liveEdgeMs).toBeUndefined();
+    expect(vodAnchor?.timeShiftSupported).toBeUndefined();
+    expect(vod.d.liveWindow()).toBeUndefined();
+  });
 });

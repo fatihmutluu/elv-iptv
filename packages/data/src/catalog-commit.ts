@@ -20,8 +20,8 @@ const UPSERT_CATEGORIES = `INSERT INTO categories (source_id, kind, provider_id,
      OR excluded.content_hash IS NULL
      OR categories.content_hash != excluded.content_hash`;
 
-const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, name_fold, sort_title, variant_base_fold, quality_rank, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash)
-  SELECT source_id, key, provider_id, num, name, name_fold, sort_title, variant_base_fold, quality_rank, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash
+const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, name_fold, sort_title, variant_base_fold, quality_rank, logo, guide_id, catchup_days, catchup_mode, catchup_source_template, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash)
+  SELECT source_id, key, provider_id, num, name, name_fold, sort_title, variant_base_fold, quality_rank, logo, guide_id, catchup_days, catchup_mode, catchup_source_template, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash
   FROM live_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
@@ -35,6 +35,8 @@ const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, n
     logo = excluded.logo,
     guide_id = excluded.guide_id,
     catchup_days = excluded.catchup_days,
+    catchup_mode = excluded.catchup_mode,
+    catchup_source_template = excluded.catchup_source_template,
     url_template = excluded.url_template,
     headers_json = excluded.headers_json,
     backup_urls_json = excluded.backup_urls_json,
@@ -46,7 +48,9 @@ const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, n
      OR live.content_hash != excluded.content_hash
      OR live.sort_title != excluded.sort_title
      OR live.variant_base_fold != excluded.variant_base_fold
-     OR live.quality_rank != excluded.quality_rank`;
+     OR live.quality_rank != excluded.quality_rank
+     OR live.catchup_mode IS NOT excluded.catchup_mode
+     OR live.catchup_source_template IS NOT excluded.catchup_source_template`;
 
 const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, cast_text, director_text, cast_fold, director_fold, run_id, content_hash)
   SELECT source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, cast_text, director_text, cast_fold, director_fold, run_id, content_hash
@@ -231,6 +235,16 @@ const MERGE_CUSTOM_GROUP_ITEMS = `UPDATE custom_group_items
   WHERE custom_group_items.source_id = ? AND custom_group_items.item_key = ?
     AND old.source_id = custom_group_items.source_id AND old.group_id = custom_group_items.group_id AND old.item_key = ?`;
 
+const MERGE_CHANNEL_GUIDE_OVERRIDES = `UPDATE channel_guide_overrides
+  SET guide_source_id = CASE WHEN old.is_manual > channel_guide_overrides.is_manual OR (old.is_manual = channel_guide_overrides.is_manual AND old.updated_at > channel_guide_overrides.updated_at) THEN old.guide_source_id ELSE COALESCE(channel_guide_overrides.guide_source_id, old.guide_source_id) END,
+      guide_id = CASE WHEN old.is_manual > channel_guide_overrides.is_manual OR (old.is_manual = channel_guide_overrides.is_manual AND old.updated_at > channel_guide_overrides.updated_at) THEN old.guide_id ELSE COALESCE(channel_guide_overrides.guide_id, old.guide_id) END,
+      epg_shift_ms = CASE WHEN old.is_manual > channel_guide_overrides.is_manual OR (old.is_manual = channel_guide_overrides.is_manual AND old.updated_at > channel_guide_overrides.updated_at) THEN old.epg_shift_ms ELSE channel_guide_overrides.epg_shift_ms END,
+      is_manual = MAX(channel_guide_overrides.is_manual, old.is_manual),
+      updated_at = MAX(channel_guide_overrides.updated_at, old.updated_at)
+  FROM channel_guide_overrides AS old
+  WHERE channel_guide_overrides.source_id = ? AND channel_guide_overrides.channel_key = ?
+    AND old.source_id = channel_guide_overrides.source_id AND old.channel_key = ?`;
+
 interface LegacyPair {
   legacy_key: string;
   key: string;
@@ -342,6 +356,30 @@ async function migrateLegacyKeysForTable(
       undefined,
       MERGE_CUSTOM_GROUP_ITEMS,
     );
+
+    const guideOverridePairs = await tx.all<LegacyPair>(
+      `SELECT DISTINCT n.legacy_key, n.key FROM live_next n
+       WHERE n.source_id = ? AND n.run_id = ? AND n.legacy_key IS NOT NULL AND n.legacy_key != n.key
+         AND EXISTS (SELECT 1 FROM channel_guide_overrides o WHERE o.source_id = n.source_id AND o.channel_key = n.legacy_key)`,
+      [sourceId, runId],
+    );
+    await remapKeyColumn(
+      tx,
+      'channel_guide_overrides',
+      'channel_key',
+      sourceId,
+      guideOverridePairs,
+      undefined,
+      MERGE_CHANNEL_GUIDE_OVERRIDES,
+    );
+
+    const reminderPairs = await tx.all<LegacyPair>(
+      `SELECT DISTINCT n.legacy_key, n.key FROM live_next n
+       WHERE n.source_id = ? AND n.run_id = ? AND n.legacy_key IS NOT NULL AND n.legacy_key != n.key
+         AND n.legacy_key IN (SELECT channel_key FROM programme_reminders WHERE source_id = ?)`,
+      [sourceId, runId, sourceId],
+    );
+    await remapKeyColumn(tx, 'programme_reminders', 'channel_key', sourceId, reminderPairs);
   }
 
   const livePairs = await tx.all<LegacyPair>(

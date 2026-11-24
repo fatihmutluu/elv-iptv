@@ -39,13 +39,13 @@ export interface VideoFrameLike {
 }
 
 /**
- * What the desktop mpv engine can do in 0.1: no live seek, no software-audio rung (FFmpeg already decodes audio in
- * software), with full audio and embedded subtitle track selection over JSON IPC.
+ * What the desktop mpv engine supports: HTTP MPEG-TS and HLS playback, bounded live time-shift seek (`#28`),
+ * full audio/subtitle track selection, A/V delay controls, and adaptive video rendition selection over JSON IPC.
  */
 export const DESKTOP_CAPABILITIES: EngineCapabilities = Object.freeze({
   mpegTsOverHttp: true,
   hls: true,
-  liveSeek: false,
+  liveSeek: true,
   softwareAudioFallback: false,
   recreate: true,
   audioTrackSelection: true,
@@ -128,7 +128,10 @@ export type ResizeMode = 'fit' | 'fill' | 'stretch';
 /** A port command or a presenter command as it crosses the bridge (`fullscreen` is the presenter's, not the port's). */
 export type BridgeCommand =
   | { name: 'load'; cmd: LoadCommand }
-  | { name: 'retry' | 'play' | 'pause' | 'stop' | 'recreate'; attempt: AttemptToken }
+  | {
+      name: 'retry' | 'play' | 'pause' | 'stop' | 'recreate' | 'jumpToLiveEdge';
+      attempt: AttemptToken;
+    }
   | { name: 'seek'; attempt: AttemptToken; positionMs: number }
   | { name: 'setSpeed'; attempt: AttemptToken; rate: number }
   | { name: 'selectAudioTrack'; attempt: AttemptToken; id: string }
@@ -452,6 +455,7 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
     case 'pause':
     case 'stop':
     case 'recreate':
+    case 'jumpToLiveEdge':
       return isAttempt(x['attempt']);
     case 'seek':
       return isAttempt(x['attempt']) && isMs(x['positionMs']);

@@ -101,6 +101,8 @@ export interface LiveHashInput {
   readonly logo?: string | null | undefined;
   readonly guideId?: string | null | undefined;
   readonly catchupDays?: number | null | undefined;
+  readonly catchupMode?: string | null | undefined;
+  readonly catchupSourceTemplate?: string | null | undefined;
   readonly urlTemplate?: string | null | undefined;
   readonly headersJson?: string | null | undefined;
   readonly backupUrlsJson?: string | null | undefined;
@@ -153,6 +155,8 @@ export function hashLiveRow(row: LiveHashInput): string {
     row.logo,
     row.guideId,
     row.catchupDays,
+    row.catchupMode,
+    row.catchupSourceTemplate,
     row.urlTemplate,
     row.headersJson,
     row.backupUrlsJson,

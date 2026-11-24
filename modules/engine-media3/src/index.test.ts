@@ -157,7 +157,7 @@ describe('createMedia3Engine', () => {
     expect(engine?.capabilities).toEqual({
       mpegTsOverHttp: true,
       hls: true,
-      liveSeek: false,
+      liveSeek: true,
       softwareAudioFallback: true,
       recreate: true,
       audioTrackSelection: true,
@@ -170,7 +170,33 @@ describe('createMedia3Engine', () => {
     engine?.subscribe((event) => events.push(event));
     native.clock.uptime = 9_000;
     native.emit({ attempt: 2, type: 'firstFrame', atMs: 8_960 });
-    expect(events).toEqual([{ attempt: 2, type: 'firstFrame', atMs: 49_960 }]);
+    native.emit({
+      attempt: 2,
+      type: 'clock',
+      anchor: {
+        positionMs: 45_000,
+        atMs: 8_980,
+        rate: 1,
+        liveSeekableStartMs: 0,
+        liveEdgeMs: 60_000,
+        timeShiftSupported: true,
+      },
+    });
+    expect(events).toEqual([
+      { attempt: 2, type: 'firstFrame', atMs: 49_960 },
+      {
+        attempt: 2,
+        type: 'clock',
+        anchor: {
+          positionMs: 45_000,
+          atMs: 49_980,
+          rate: 1,
+          liveSeekableStartMs: 0,
+          liveEdgeMs: 60_000,
+          timeShiftSupported: true,
+        },
+      },
+    ]);
   });
 
   it('forwards track options, bufferPreset, scrubbing, and track selection commands through bridgeNativeEngine', async () => {

@@ -14,7 +14,16 @@ import type {
 export type FakeStep = { afterMs: number } & (
   | { emit: 'state'; state: EngineState }
   | { emit: 'firstFrame' }
-  | { emit: 'clock'; positionMs: number; rate?: number }
+  | {
+      emit: 'clock';
+      positionMs: number;
+      rate?: number;
+      durationMs?: number;
+      liveEdgeMs?: number;
+      liveSeekableStartMs?: number;
+      timeShiftSupported?: boolean;
+      isLiveTs?: boolean;
+    }
   | { emit: 'tracks'; tracks: MediaTracks }
   | { emit: 'stall'; phase: 'start' | 'end' }
   | { emit: 'error'; error: EngineError }
@@ -117,7 +126,20 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
         return {
           attempt,
           type: 'clock',
-          anchor: { positionMs: step.positionMs, atMs, rate: step.rate ?? 1 },
+          anchor: {
+            positionMs: step.positionMs,
+            atMs,
+            rate: step.rate ?? 1,
+            ...(step.durationMs === undefined ? {} : { durationMs: step.durationMs }),
+            ...(step.liveEdgeMs === undefined ? {} : { liveEdgeMs: step.liveEdgeMs }),
+            ...(step.liveSeekableStartMs === undefined
+              ? {}
+              : { liveSeekableStartMs: step.liveSeekableStartMs }),
+            ...(step.timeShiftSupported === undefined
+              ? {}
+              : { timeShiftSupported: step.timeShiftSupported }),
+            ...(step.isLiveTs === undefined ? {} : { isLiveTs: step.isLiveTs }),
+          },
         };
       case 'tracks':
         return { attempt, type: 'tracks', tracks: step.tracks };
@@ -142,7 +164,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     if (url === undefined || failed || !opts.anchorOnPlayPause) return;
     const atMs = opts.now();
     const positionMs = last.positionMs + Math.max(0, atMs - last.atMs) * last.rate;
-    last = { positionMs, atMs, rate };
+    last = { ...last, positionMs, atMs, rate };
     const anchor = last;
     handles.push(opts.schedule(() => deliver({ attempt: token, type: 'clock', anchor }), 0));
   };

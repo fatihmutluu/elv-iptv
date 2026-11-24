@@ -1,5 +1,5 @@
 import type { BufferPreset, LiveChannelSwitchModePref } from '@elv/domain';
-import { type PlaybackService, positionAt } from '@elv/playback';
+import type { PlaybackService } from '@elv/playback';
 import { useFormFactor, useI18n } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
@@ -7,6 +7,7 @@ import { noopAppLifecycle } from '../ports/app-lifecycle';
 import type { PlayableEntry } from '../ports/play-target';
 import type { HostKey } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
+import { useLiveTimeShiftState } from './LiveTimeShiftBar';
 import { NextEpisodeBanner } from './NextEpisodeBanner';
 import { type ChannelDrawerNavHandle, PlayerChannelDrawer } from './PlayerChannelDrawer';
 import { PlayerInfoSheet } from './PlayerInfoSheet';
@@ -18,10 +19,11 @@ import {
   formatStatusLine,
   PlayerSurfaceLayer,
   useLatestRef,
+  usePlayerTouchScrubAndBrightness,
+  usePreviewOsdAndResizeSync,
 } from './PlayerScreenParts';
 import { type PlayerScreenProps, PlayerScreenStage } from './PlayerScreenStage';
 import { PlayerSettingsSheet } from './PlayerSettingsSheet';
-import { MIN_BRIGHTNESS } from './PlayerTouchGestures';
 import { TrackPickerModal } from './TrackPickerModal';
 import { buildTouchHoverProps } from './touch-hover-guard';
 import { useGaplessEpisodeQueue } from './useGaplessEpisodeQueue';
@@ -190,14 +192,11 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
 
   const [nextEpisodeDismissed, setNextEpisodeDismissed] = useState(false);
   const [nextEpisodeVisible, setNextEpisodeVisible] = useState(false);
-  const [brightness, setBrightness] = useState(1);
-  const [touchScrubDeltaMs, setTouchScrubDeltaMs] = useState<number | undefined>(undefined);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset per-item transient UI on item change
   useEffect(() => {
     setNextEpisodeDismissed(false);
     setNextEpisodeVisible(false);
-    setTouchScrubDeltaMs(undefined);
   }, [activeTarget.itemKey]);
 
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
@@ -285,6 +284,15 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     [hostSetAudioDevice, onPersistAudioDevice],
   );
 
+  const isCatchup = activeTarget.catchup !== undefined;
+  const isPausedOrEndedStatus = status.kind === 'paused' || status.kind === 'ended';
+  const liveTimeShift = useLiveTimeShiftState(
+    activeService,
+    clock,
+    activeTarget.kind === 'live',
+    isPausedOrEndedStatus,
+  );
+
   const controls = usePlayerControls({
     formFactor,
     activeTarget,
@@ -296,8 +304,11 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     hasSettings: activeService !== null,
     hasInfo: activeService !== null,
     hasChannelList: canZap,
-    hasNextEpisode: nextEpisodeVisible || nextEpisode !== undefined,
+    hasNextEpisode: !isCatchup && (nextEpisodeVisible || nextEpisode !== undefined),
     hasPreviousChannel,
+    hasBackToLive: isCatchup,
+    liveTimeShiftSupported: activeTarget.kind === 'live' && liveTimeShift.supported,
+    hasJumpToLive: activeTarget.kind === 'live' && liveTimeShift.showJumpToLive,
     initialOsdHidden,
     autoHideOsdMs,
     initialVolume: initialVolume ?? openedEngine?.initialVolume,
@@ -311,6 +322,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     zapByRef,
     onSeekCommit: flushProgress,
     onPlayNextEpisode: () => handoff.handlePlayNextEpisode(undefined, nextEpisode),
+    onBackToLive: handoff.handleBackToLive,
     onJumpPreviousChannel: handoff.handleJumpPreviousChannel,
     qualityVariants: quality.variants,
     onSelectQualityVariant: quality.selectVariant,
@@ -390,50 +402,29 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     },
   });
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-send resizeMode when activeTarget.itemKey changes so mpv --reset-on-next-file never reverts to fit
-  useEffect(() => {
-    if (openedEngine === undefined) return;
-    if (status.kind === 'playing' || status.kind === 'paused') {
-      openedEngine.setResizeMode?.(controls.resizeMode);
-    }
-  }, [openedEngine, activeTarget.itemKey, status.kind, controls.resizeMode]);
+  usePreviewOsdAndResizeSync({
+    openedEngine,
+    activeItemKey: activeTarget.itemKey,
+    statusKind: status.kind,
+    resizeMode: controls.resizeMode,
+    previewActive: previewTarget !== null,
+    osdHidden: controls.osdHidden,
+    showOsd: controls.showOsd,
+    cancelPreview: handoff.cancelPreviewChannel,
+  });
 
-  const showOsdRef = useRef(controls.showOsd);
-  showOsdRef.current = controls.showOsd;
-  const prevOsdHiddenRef = useRef(controls.osdHidden);
-  const cancelPreview = handoff.cancelPreviewChannel;
-  useEffect(() => {
-    if (previewTarget !== null) showOsdRef.current();
-  }, [previewTarget]);
-  useEffect(() => {
-    const wasHidden = prevOsdHiddenRef.current;
-    prevOsdHiddenRef.current = controls.osdHidden;
-    if (!wasHidden && controls.osdHidden && previewTarget !== null) cancelPreview();
-  }, [cancelPreview, controls.osdHidden, previewTarget]);
-
-  const anchor = activeService?.getState().anchor;
-  const currentPosMs = anchor !== undefined ? positionAt(anchor, clock.now()) : undefined;
-  const durationMs = anchor?.durationMs;
-  const effectivePreviewMs =
-    touchScrubDeltaMs !== undefined && currentPosMs !== undefined && durationMs !== undefined
-      ? Math.max(0, Math.min(durationMs, currentPosMs + touchScrubDeltaMs))
-      : controls.previewPositionMs;
-
-  const handleBrightnessChange = (next: number): void => {
-    const clamped = Math.max(MIN_BRIGHTNESS, Math.min(1, next));
-    setBrightness(clamped);
-    hostSetBrightness?.(clamped);
-  };
-  const handleTouchScrubCommit = (deltaMs: number): void => {
-    extras.stillWatching.recordUserActivity();
-    const latestAnchor = serviceRef.current?.getState().anchor;
-    const dur = latestAnchor?.durationMs;
-    if (latestAnchor !== undefined && dur !== undefined && dur > 0) {
-      const targetMs = Math.max(0, Math.min(dur, positionAt(latestAnchor, clock.now()) + deltaMs));
-      controls.seekToRatio(targetMs / dur);
-      if (controls.osdHidden) controls.showProgressOsd();
-    }
-  };
+  const touch = usePlayerTouchScrubAndBrightness({
+    activeItemKey: activeTarget.itemKey,
+    activeService,
+    serviceRef,
+    clock,
+    hostSetBrightness,
+    previewPositionMs: controls.previewPositionMs,
+    osdHidden: controls.osdHidden,
+    seekToRatio: controls.seekToRatio,
+    showProgressOsd: controls.showProgressOsd,
+    recordUserActivity: extras.stillWatching.recordUserActivity,
+  });
 
   const anySheetOpen =
     controls.tracksOpen || controls.settingsOpen || controls.infoOpen || controls.channelListOpen;
@@ -446,11 +437,11 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     hasChannelList: canZap,
     anySheetOpen,
     stillWatchingVisible: !inPip && extras.stillWatching.promptVisible,
-    durationMs,
+    durationMs: touch.durationMs,
     controls,
     recordActivity,
-    setScrubDeltaMs: setTouchScrubDeltaMs,
-    commitScrub: handleTouchScrubCommit,
+    setScrubDeltaMs: touch.setTouchScrubDeltaMs,
+    commitScrub: touch.handleTouchScrubCommit,
   });
   const isWebDesktop = isDesktop && (Platform.OS as string) === 'web';
   const useDockedDesktopLayout = isDesktop && overlayMode === 'docked';
@@ -657,11 +648,14 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     isBuffering: status.kind === 'tuning' || status.kind === 'recovering',
     failure,
     isVod: activeTarget.kind === 'vod',
+    isCatchup,
+    liveTimeShiftSupported: activeTarget.kind === 'live' && liveTimeShift.supported,
+    timeShiftUnavailableVisible: controls.timeShiftUnavailableVisible,
     isPausedOrEnded: controls.isPausedOrEnded,
     canZap,
     hasTracks,
     hasPreviousChannel,
-    hasNextEpisodeAction: activeTarget.kind === 'vod' && nextEpisode !== undefined,
+    hasNextEpisodeAction: activeTarget.kind === 'vod' && !isCatchup && nextEpisode !== undefined,
     nextEpisodeBannerVisible: nextEpisodeVisible,
     canLock: controls.canLock,
     showRetry,
@@ -688,7 +682,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     settingsView: controls.settingsMenu.view,
     infoOpen: controls.infoOpen,
     channelListOpen: controls.channelListOpen,
-    previewPositionMs: effectivePreviewMs,
+    previewPositionMs: touch.effectivePreviewMs,
     i18n,
     service: activeService,
     clock,
@@ -726,6 +720,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onLock: controls.lockControls,
     onJumpPreviousChannel: handoff.handleJumpPreviousChannel,
     onJumpToLiveEdge: controls.jumpToLiveEdge,
+    ...(isCatchup ? { onBackToLive: handoff.handleBackToLive } : {}),
     onPrev: () => {
       extras.stillWatching.recordUserActivity();
       zapBy(-1);
@@ -752,10 +747,10 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       holdSpeedActive={controls.holdSpeedActive}
       statsVisible={controls.statsVisible}
       nextEpisodeVisible={nextEpisodeVisible}
-      brightness={brightness}
+      brightness={touch.brightness}
       volume={controls.volume}
-      durationMs={durationMs}
-      currentPosMs={currentPosMs}
+      durationMs={touch.durationMs}
+      currentPosMs={touch.currentPosMs}
       activeService={activeService}
       clock={clock}
       i18n={i18n}
@@ -787,12 +782,12 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
         if (deltaMs < 0) controls.seekStepBack();
         else controls.seekStepForward();
       }}
-      onScrubPreview={setTouchScrubDeltaMs}
-      onScrubCommit={handleTouchScrubCommit}
+      onScrubPreview={touch.setTouchScrubDeltaMs}
+      onScrubCommit={touch.handleTouchScrubCommit}
       onHoldSpeedStart={controls.startHoldSpeed}
       onHoldSpeedEnd={controls.endHoldSpeed}
       onVolumeChange={controls.setVolume}
-      onBrightnessChange={handleBrightnessChange}
+      onBrightnessChange={touch.handleBrightnessChange}
       onUnlock={controls.unlockControls}
     />
   );

@@ -26,6 +26,9 @@ export function collectSampleUrls(sample: readonly M3uEntry[]): { url: string; r
       for (const backup of e.backupUrls) out.push({ url: backup, role: 'stream' });
     }
     if (e.tvgLogo !== undefined) out.push({ url: e.tvgLogo, role: 'logo' });
+    if (e.catchup?.source !== undefined && hostOf(e.catchup.source) !== undefined) {
+      out.push({ url: e.catchup.source, role: 'catchup' });
+    }
     if (e.headers.referer !== undefined) out.push({ url: e.headers.referer, role: 'referer' });
     for (const v of Object.values(e.headers.other)) {
       if (hostOf(v) !== undefined) out.push({ url: v, role: 'other' });
@@ -43,6 +46,13 @@ export function holdEntry(rules: RuleBook, entry: M3uEntry): boolean {
     }
   }
   if (entry.tvgLogo !== undefined && rules.hold(entry.tvgLogo, 'logo')) wait = true;
+  if (
+    entry.catchup?.source !== undefined &&
+    hostOf(entry.catchup.source) !== undefined &&
+    rules.hold(entry.catchup.source, 'catchup')
+  ) {
+    wait = true;
+  }
   if (entry.headers.referer !== undefined && rules.hold(entry.headers.referer, 'referer')) {
     wait = true;
   }
@@ -55,6 +65,22 @@ export function holdEntry(rules: RuleBook, entry: M3uEntry): boolean {
 /** Converts a URL to its credential-free template and absorbs extracted secret vars into `st.book`. */
 export function templated(st: TemplatingScope, url: string): string {
   return st.book.absorb(toTemplate(url, st.rules.rules, st.known));
+}
+
+/**
+ * Converts an M3U `catchup-source` value into a credential-free template backed by `st.book`.
+ * Full URLs are templated via {@link templated}; relative/query suffixes are stored whole as
+ * `{{c:src}}` placeholders in `urlvars` so tokens or credentials never enter SQLite.
+ */
+export function templatedCatchupSource(
+  st: TemplatingScope,
+  raw: string | undefined,
+): string | null {
+  if (raw === undefined) return null;
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  if (hostOf(trimmed) !== undefined) return templated(st, trimmed);
+  return st.book.absorb({ template: '{{c:src}}', vars: { 'c:src': trimmed } });
 }
 
 /** Serializes an entry's custom headers into credential-free `headers_json` (templating UA/auth/URL headers). */

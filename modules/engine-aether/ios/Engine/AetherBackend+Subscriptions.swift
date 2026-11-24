@@ -539,6 +539,21 @@ extension AetherBackend {
     onObservation?(.telemetry(droppedFrames: dropped), serial)
   }
 
+  func readLiveSeekableWindow(from target: AetherEngine) -> LiveSeekableWindow? {
+    guard target.isLive, currentPlan?.isLiveTs != true else { return nil }
+    guard let item = target.currentAVPlayerItem ?? target.currentAVPlayer?.currentItem else {
+      return nil
+    }
+    let ranges: [(startSec: Double, endSec: Double)] = item.seekableTimeRanges.compactMap { value in
+      let range = value.timeRangeValue
+      let start = CMTimeGetSeconds(range.start)
+      let end = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+      guard start.isFinite, end.isFinite else { return nil }
+      return (startSec: start, endSec: end)
+    }
+    return evaluateLiveSeekRanges(ranges)
+  }
+
   func emitClockSnapshot(
     from target: AetherEngine,
     positionSeconds: Double,
@@ -554,13 +569,19 @@ extension AetherBackend {
     }
     let rawDuration = durationOverride ?? target.duration
     let durationSeconds: Double? = (!target.isLive && rawDuration.isFinite && rawDuration > 0) ? rawDuration : nil
-    let liveEdgeSeconds: Double? = (target.isLive && target.liveEdgeTime.isFinite && target.liveEdgeTime > 0) ? target.liveEdgeTime : nil
+    let liveWindow = readLiveSeekableWindow(from: target)
+    lastLiveSeekableWindow = liveWindow
+    let fallbackLiveEdge: Double? =
+      (target.isLive && target.liveEdgeTime.isFinite && target.liveEdgeTime > 0) ? target.liveEdgeTime : nil
+    let liveEdgeSeconds: Double? = liveWindow?.endSec ?? fallbackLiveEdge
     onObservation?(
       .clock(
         positionSeconds: positionSeconds,
         rate: rate,
         durationSeconds: durationSeconds,
-        liveEdgeSeconds: liveEdgeSeconds
+        liveEdgeSeconds: liveEdgeSeconds,
+        liveSeekableStartSeconds: liveWindow?.startSec,
+        timeShiftSupported: target.isLive ? (liveWindow != nil) : nil
       ),
       serial
     )

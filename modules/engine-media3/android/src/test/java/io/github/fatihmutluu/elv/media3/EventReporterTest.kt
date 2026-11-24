@@ -11,6 +11,7 @@ import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
@@ -43,6 +44,8 @@ class EventReporterTest {
     var scriptedPosition = 0L
     var scriptedTracks: Tracks = Tracks.EMPTY
     var scriptedVideoCounters: DecoderCounters? = null
+    var scriptedSeekable: Boolean? = null
+    var scriptedTimeline: Timeline? = null
 
     override fun getPlaybackState(): Int = state
     override fun isPlaying(): Boolean = playing
@@ -52,6 +55,9 @@ class EventReporterTest {
     override fun getCurrentPosition(): Long = scriptedPosition
     override fun getCurrentTracks(): Tracks = scriptedTracks
     override fun getVideoDecoderCounters(): DecoderCounters? = scriptedVideoCounters
+    override fun isCurrentMediaItemSeekable(): Boolean = scriptedSeekable ?: real.isCurrentMediaItemSeekable
+    override fun getCurrentTimeline(): Timeline = scriptedTimeline ?: real.currentTimeline
+    override fun getCurrentMediaItemIndex(): Int = if (scriptedTimeline != null) 0 else real.currentMediaItemIndex
   }
 
   private fun eventsFlag(vararg flags: Int): Player.Events =
@@ -674,6 +680,76 @@ class EventReporterTest {
         listOf(mapOf("type" to "telemetry", "droppedFrames" to 2)),
         events.filter { it["type"] == "telemetry" },
       )
+      reporter.end()
+    } finally {
+      real.release()
+    }
+  }
+
+  @Test
+  fun `emits liveSeekableStartMs, liveEdgeMs, and timeShiftSupported from Timeline Window (#28)`() {
+    val events = mutableListOf<Map<String, Any?>>()
+    val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
+    try {
+      val liveTimeline = object : Timeline() {
+        override fun getWindowCount(): Int = 1
+        override fun getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Long): Window =
+          window.set(
+            "live",
+            androidx.media3.common.MediaItem.EMPTY,
+            null,
+            C.TIME_UNSET,
+            C.TIME_UNSET,
+            C.TIME_UNSET,
+            true,
+            true,
+            androidx.media3.common.MediaItem.LiveConfiguration.UNSET,
+            0L,
+            60_000_000L,
+            0,
+            0,
+            0L,
+          )
+        override fun getPeriodCount(): Int = 1
+        override fun getPeriod(periodIndex: Int, period: Period, setIds: Boolean): Period =
+          period.set("p", "p", 0, 60_000_000L, 0L)
+        override fun getIndexOfPeriod(uid: Any): Int = 0
+        override fun getUidOfPeriod(periodIndex: Int): Any = "p"
+      }
+      val player = ScriptedPlayer(real).apply {
+        state = Player.STATE_READY
+        playing = true
+        scriptedPosition = 45_000L
+        scriptedDuration = 60_000L
+        scriptedSeekable = true
+        scriptedTimeline = liveTimeline
+      }
+      val reporter = EventReporter(
+        handler = Handler(Looper.getMainLooper()),
+        fence = PrepareFence(),
+        send = { events += it },
+        onHlsDetected = {},
+        onBehindLiveWindow = {},
+        onAudioFocusDenied = { false },
+        onVideoCodecFailed = {},
+        onFirstFrame = {},
+        onCue = { _, _ -> },
+      )
+      reporter.begin(player, live = true, prepareSerial = 1L, reused = false)
+      events.clear()
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
+      val seekableClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
+      assertEquals(0.0, seekableClock["liveSeekableStartMs"])
+      assertEquals(60_000.0, seekableClock["liveEdgeMs"])
+      assertEquals(true, seekableClock["timeShiftSupported"])
+
+      player.scriptedSeekable = false
+      reporter.begin(player, live = true, prepareSerial = 2L, reused = false)
+      events.clear()
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
+      val nonSeekableClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
+      assertFalse(nonSeekableClock.containsKey("liveSeekableStartMs"))
+      assertEquals(false, nonSeekableClock["timeShiftSupported"])
       reporter.end()
     } finally {
       real.release()

@@ -37,7 +37,9 @@ monitor, and mobile window helpers (player core spec 6.1).
 
 ## Playback, tracks, requests and errors
 - `EventReporter` gates callbacks behind `PrepareFence` + `MediaItem.mediaId`, reports `playbackParameters.speed`,
+  emits live time-shift window bounds (`liveSeekableStartMs`, `liveEdgeMs`, `timeShiftSupported`) via `TimeShiftWindowPolicy` from `Timeline.Window` (`#28`),
   ignores `SupersededMediaException`, holds on transient audio focus loss, escalates audio failures, stops session on error.
+- `TimeShiftRingBuffer` (`cacheDir/timeshift/`, strictly capped at `64 MiB` low-RAM / `256 MiB` standard, synchronous deletion on `reset()`/`close()` and `load`/`stop`/`recreate`/`dispose`) keeps bounded live time-shift off ExoPlayer's `16 MiB` low-RAM heap cap (`#28`).
 - `SubtitleSanitizer` repairs mojibake and strips `U+FFFD`; `TimedSubtitleCueBuffer` buffers cues (<= 128) for live
   non-flushing subtitle delay; `OffsetForwardingAudioSink` offsets audio clock without reallocating; `TrackInspection` +
   `VideoQualityInspection` + `TrackSelectorBridge` expose audio/subtitle tracks and adaptive video renditions.

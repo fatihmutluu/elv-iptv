@@ -10,6 +10,7 @@ import {
   type AppShellProps,
   createLazyCatalog,
   type LanPairingPort,
+  type ReminderHostPort,
   type SourceImportHost,
   type VideoHost,
 } from '@elv/features';
@@ -37,6 +38,7 @@ import {
   routeDesktopUiEvent,
 } from './player/host-keys.ts';
 import { PlayerView } from './player/PlayerView.tsx';
+import { createDesktopReminderHost } from './reminders/adapter.ts';
 import { attachScrollBlurGuard } from './scroll-blur-guard.ts';
 import { createDesktopKeymapStore } from './storage/keymap.ts';
 import { createDesktopPreferencesStore } from './storage/preferences.ts';
@@ -331,6 +333,8 @@ function AppRoot() {
     [],
   );
 
+  const reminderHost = useMemo<ReminderHostPort>(() => createDesktopReminderHost(), []);
+
   const shellProps: AppShellProps & {
     sourceImportHost?: SourceImportHost;
     profilePreferences?: ProfilePreferencesManager;
@@ -339,6 +343,7 @@ function AppRoot() {
     videoHost,
     profilePreferences: preferencesStore,
     keymapStore,
+    reminderHost,
     externalRefreshToken: refreshToken,
     ...(sourceImportHost === undefined ? {} : { sourceImportHost }),
     ...(lanPairing === undefined ? {} : { lanPairing }),

@@ -147,7 +147,9 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
           if (
             prevAnchor !== undefined &&
             (event.anchor.durationMs !== prevAnchor.durationMs ||
-              event.anchor.liveEdgeMs !== prevAnchor.liveEdgeMs)
+              event.anchor.liveEdgeMs !== prevAnchor.liveEdgeMs ||
+              event.anchor.liveSeekableStartMs !== prevAnchor.liveSeekableStartMs ||
+              event.anchor.timeShiftSupported !== prevAnchor.timeShiftSupported)
           ) {
             const mergedAnchor: ClockAnchor = {
               ...prevAnchor,
@@ -157,6 +159,12 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
               ...(event.anchor.liveEdgeMs === undefined
                 ? {}
                 : { liveEdgeMs: event.anchor.liveEdgeMs }),
+              ...(event.anchor.liveSeekableStartMs === undefined
+                ? {}
+                : { liveSeekableStartMs: event.anchor.liveSeekableStartMs }),
+              ...(event.anchor.timeShiftSupported === undefined
+                ? {}
+                : { timeShiftSupported: event.anchor.timeShiftSupported }),
             };
             store.update({ anchor: mergedAnchor, ...liveEdgePatch(mergedAnchor, now) });
           }
@@ -266,15 +274,38 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
 }
 
 /**
- * Computes a clamped seek position against a valid positive `durationMs` and returns `undefined`
- * when seeking at or past EOF on an already-`ended` VOD (`#224` / seek EOF guard).
+ * Computes a clamped seek position against a valid positive `durationMs` (for VOD) or a bounded
+ * live time-shift window `[liveSeekableStartMs, liveEdgeMs]` (for live, `#28`), returning
+ * `undefined` when seeking at or past EOF on an already-`ended` VOD (`#224`) or when live
+ * time-shift is explicitly unsupported (`timeShiftSupported === false`).
  */
 export function resolveSeekTarget(
   positionMs: number,
   isVod: boolean,
   statusKind: PlaybackStatus['kind'],
   rawDuration: number | undefined,
+  anchor?: ClockAnchor,
 ): number | undefined {
+  if (!isVod && anchor !== undefined) {
+    if (anchor.timeShiftSupported === false) return undefined;
+    const hasStart =
+      anchor.liveSeekableStartMs !== undefined &&
+      Number.isFinite(anchor.liveSeekableStartMs) &&
+      anchor.liveSeekableStartMs >= 0;
+    const hasEdge =
+      anchor.liveEdgeMs !== undefined &&
+      Number.isFinite(anchor.liveEdgeMs) &&
+      anchor.liveEdgeMs > 0;
+    if (anchor.timeShiftSupported === true || (hasStart && hasEdge)) {
+      const startMs = hasStart ? (anchor.liveSeekableStartMs as number) : 0;
+      if (hasEdge && (anchor.liveEdgeMs as number) > startMs) {
+        return Math.min(anchor.liveEdgeMs as number, Math.max(startMs, positionMs));
+      }
+      if (anchor.timeShiftSupported === true) {
+        return Math.max(startMs, positionMs);
+      }
+    }
+  }
   const validDuration =
     rawDuration !== undefined && Number.isFinite(rawDuration) && rawDuration > 0
       ? rawDuration
@@ -311,6 +342,13 @@ export function buildOptimisticSeekAnchor(
     rate: statusKind === 'playing' ? 1 : 0,
     ...(prev?.durationMs === undefined ? {} : { durationMs: prev.durationMs }),
     ...(prev?.liveEdgeMs === undefined ? {} : { liveEdgeMs: prev.liveEdgeMs }),
+    ...(prev?.liveSeekableStartMs === undefined
+      ? {}
+      : { liveSeekableStartMs: prev.liveSeekableStartMs }),
+    ...(prev?.timeShiftSupported === undefined
+      ? {}
+      : { timeShiftSupported: prev.timeShiftSupported }),
+    ...(prev?.isLiveTs === undefined ? {} : { isLiveTs: prev.isLiveTs }),
   };
 }
 

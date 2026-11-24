@@ -23,6 +23,7 @@ import {
 import { createSpeedCoalescer, type SpeedCoalescer } from './speed-coalescer';
 import { createPlaybackStateStore } from './state-store';
 import { clampSyncDelayMs } from './sync-delay';
+import { clampLiveSeekPosition, isBehindLiveEdge, resolveLiveTimeShiftWindow } from './timeshift';
 import { createTrackPreferences } from './track-preferences';
 import type {
   PlaybackClock,
@@ -344,21 +345,19 @@ export function createPlaybackServiceWith(
     const reloadableVod =
       current?.kind === 'vod' && (statusKind === 'recovering' || statusKind === 'ended');
     if (disposed || !Number.isFinite(positionMs) || (!loaded && !reloadableVod)) return;
+    const currentAnchor = state().anchor;
     const clamped = resolveSeekTarget(
       positionMs,
       current?.kind === 'vod',
       statusKind,
-      state().anchor?.durationMs,
+      currentAnchor?.durationMs,
+      currentAnchor,
     );
     if (clamped === undefined) return;
     store.batch(() => {
       const now = clock.now();
       const prevAnchor = state().anchor;
-      const optimisticBase = buildOptimisticSeekAnchor(clamped, now, statusKind, prevAnchor);
-      const optimistic =
-        prevAnchor?.isLiveTs === undefined
-          ? optimisticBase
-          : { ...optimisticBase, isLiveTs: prevAnchor.isLiveTs };
+      const optimistic = buildOptimisticSeekAnchor(clamped, now, statusKind, prevAnchor);
       store.update({
         anchor: optimistic,
         ...(current?.kind === 'live'
@@ -507,6 +506,26 @@ export function createPlaybackServiceWith(
       });
     },
     seek: performSeek,
+    seekBy(deltaMs) {
+      if (disposed || !Number.isFinite(deltaMs) || current === undefined) return;
+      const st = state();
+      const now = clock.now();
+      if (current.kind === 'live') {
+        const window = resolveLiveTimeShiftWindow(st.anchor, now);
+        if (window === null) return;
+        const targetMs = clampLiveSeekPosition(st.anchor, window.positionMs + deltaMs, now);
+        if (targetMs !== undefined) performSeek(targetMs);
+        return;
+      }
+      const statusKind = st.status.kind;
+      const reloadableVod = statusKind === 'recovering' || statusKind === 'ended';
+      if (!loaded && !reloadableVod) return;
+      const basePos =
+        st.anchor !== undefined
+          ? positionAt(st.anchor, now)
+          : (lastVodPositionMs ?? current.startMs ?? 0);
+      performSeek(basePos + deltaMs);
+    },
     jumpToLiveEdge() {
       const st = state();
       const statusKind = st.status.kind;
@@ -520,19 +539,38 @@ export function createPlaybackServiceWith(
         statusKind === 'failed' ||
         statusKind === 'limited' ||
         statusKind === 'recovering' ||
-        anchor?.isLiveTs !== true
+        anchor === undefined
       ) {
         return false;
       }
       const liveEdgeMs = anchor.liveEdgeMs;
-      if (
-        liveEdgeMs === undefined ||
-        !Number.isFinite(liveEdgeMs) ||
-        liveEdgeMs <= LIVE_TS_EDGE_MARGIN_MS
-      ) {
+      if (liveEdgeMs === undefined || !Number.isFinite(liveEdgeMs)) {
         return false;
       }
       const now = clock.now();
+      if (anchor.timeShiftSupported === true) {
+        if (!isBehindLiveEdge(anchor, now)) {
+          return false;
+        }
+        if (engine.jumpToLiveEdge !== undefined) {
+          store.batch(() => {
+            const optimistic = buildOptimisticSeekAnchor(liveEdgeMs, now, statusKind, anchor);
+            store.update({ anchor: optimistic, atLiveEdge: true });
+            const attemptBefore = state().attempt;
+            hooks.onSeek?.(liveEdgeMs);
+            if (state().attempt === attemptBefore && loaded) {
+              seekCoalescer.reset();
+              engine.jumpToLiveEdge?.(state().attempt);
+            }
+          });
+          return true;
+        }
+        performSeek(liveEdgeMs);
+        return true;
+      }
+      if (anchor.isLiveTs !== true || liveEdgeMs <= LIVE_TS_EDGE_MARGIN_MS) {
+        return false;
+      }
       const currentPos = positionAt(anchor, now);
       if (!Number.isFinite(currentPos) || liveEdgeMs - currentPos <= LIVE_TS_AT_EDGE_WINDOW_MS) {
         return false;

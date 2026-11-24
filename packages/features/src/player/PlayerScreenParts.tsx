@@ -1,9 +1,15 @@
 import type { ItemRow } from '@elv/data';
 import type { AccessibilityFontFamily } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
-import type { PlaybackClock, PlaybackStatus, PlaybackTimers } from '@elv/playback';
+import {
+  type PlaybackClock,
+  type PlaybackService,
+  type PlaybackStatus,
+  type PlaybackTimers,
+  positionAt,
+} from '@elv/playback';
 import { Scrim, useTheme, useViewport } from '@elv/ui-kit';
-import { type ReactElement, useRef } from 'react';
+import { type ReactElement, type RefObject, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View, type ViewStyle } from 'react-native';
 import type { PlayableEntry } from '../ports/play-target';
 import type { OpenVideoEngine, VideoResizeMode } from '../ports/video-host';
@@ -17,6 +23,7 @@ import {
 import { describePlaybackFailure } from './errors';
 import { PlayerLockedOverlay } from './PlayerOsdButton';
 import { FloatingPeekOsd } from './PlayerOsdChrome';
+import { MIN_BRIGHTNESS } from './PlayerTouchGestures';
 
 export { DesktopDockedTopBar, PlayerLockedOverlay, type PlayerOsdProps };
 
@@ -243,6 +250,100 @@ export function useLatestRef<T>(value: T) {
   const ref = useRef(value);
   ref.current = value;
   return ref;
+}
+
+/** Syncs native resizeMode on target/status transitions and keeps preview OSD visible (`#432`). */
+export function usePreviewOsdAndResizeSync(opts: {
+  readonly openedEngine: OpenVideoEngine | undefined;
+  readonly activeItemKey: string;
+  readonly statusKind: PlaybackStatus['kind'];
+  readonly resizeMode: VideoResizeMode;
+  readonly previewActive: boolean;
+  readonly osdHidden: boolean;
+  readonly showOsd: () => void;
+  readonly cancelPreview: () => void;
+}): void {
+  const { openedEngine, activeItemKey, statusKind, resizeMode, previewActive, osdHidden } = opts;
+  const showOsdRef = useLatestRef(opts.showOsd);
+  const prevOsdHiddenRef = useRef(osdHidden);
+  const cancelPreview = opts.cancelPreview;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-send resizeMode when activeItemKey changes so mpv --reset-on-next-file never reverts to fit
+  useEffect(() => {
+    if (openedEngine === undefined) return;
+    if (statusKind === 'playing' || statusKind === 'paused') {
+      openedEngine.setResizeMode?.(resizeMode);
+    }
+  }, [openedEngine, activeItemKey, statusKind, resizeMode]);
+
+  useEffect(() => {
+    if (previewActive) showOsdRef.current();
+  }, [previewActive, showOsdRef]);
+
+  useEffect(() => {
+    const wasHidden = prevOsdHiddenRef.current;
+    prevOsdHiddenRef.current = osdHidden;
+    if (!wasHidden && osdHidden && previewActive) cancelPreview();
+  }, [cancelPreview, osdHidden, previewActive]);
+}
+
+/** Manages touch-brightness clamping and relative touch-scrub preview/commit for {@link PlayerScreen}. */
+export function usePlayerTouchScrubAndBrightness(opts: {
+  readonly activeItemKey: string;
+  readonly activeService: PlaybackService | null;
+  readonly serviceRef: RefObject<PlaybackService | null>;
+  readonly clock: PlaybackClock;
+  readonly hostSetBrightness: ((value: number) => void) | undefined;
+  readonly previewPositionMs: number | undefined;
+  readonly osdHidden: boolean;
+  readonly seekToRatio: (ratio: number) => void;
+  readonly showProgressOsd: () => void;
+  readonly recordUserActivity: () => void;
+}) {
+  const [brightness, setBrightness] = useState(1);
+  const [touchScrubDeltaMs, setTouchScrubDeltaMs] = useState<number | undefined>(undefined);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset transient scrub delta on item change
+  useEffect(() => {
+    setTouchScrubDeltaMs(undefined);
+  }, [opts.activeItemKey]);
+
+  const anchor = opts.activeService?.getState().anchor;
+  const currentPosMs = anchor !== undefined ? positionAt(anchor, opts.clock.now()) : undefined;
+  const durationMs = anchor?.durationMs;
+  const effectivePreviewMs =
+    touchScrubDeltaMs !== undefined && currentPosMs !== undefined && durationMs !== undefined
+      ? Math.max(0, Math.min(durationMs, currentPosMs + touchScrubDeltaMs))
+      : opts.previewPositionMs;
+
+  const handleBrightnessChange = (next: number): void => {
+    const clamped = Math.max(MIN_BRIGHTNESS, Math.min(1, next));
+    setBrightness(clamped);
+    opts.hostSetBrightness?.(clamped);
+  };
+  const handleTouchScrubCommit = (deltaMs: number): void => {
+    opts.recordUserActivity();
+    const latestAnchor = opts.serviceRef.current?.getState().anchor;
+    const dur = latestAnchor?.durationMs;
+    if (latestAnchor !== undefined && dur !== undefined && dur > 0) {
+      const targetMs = Math.max(
+        0,
+        Math.min(dur, positionAt(latestAnchor, opts.clock.now()) + deltaMs),
+      );
+      opts.seekToRatio(targetMs / dur);
+      if (opts.osdHidden) opts.showProgressOsd();
+    }
+  };
+
+  return {
+    brightness,
+    currentPosMs,
+    durationMs,
+    effectivePreviewMs,
+    setTouchScrubDeltaMs,
+    handleBrightnessChange,
+    handleTouchScrubCommit,
+  };
 }
 
 export const playerStyles = StyleSheet.create({

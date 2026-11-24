@@ -391,6 +391,10 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       const r = await object(`&action=get_short_epg&stream_id=${streamId}${tail}`, call);
       return r.ok ? ok(toEpg(r.value, activeTimezone)) : r;
     },
+    async simpleEpg(streamId, call) {
+      const r = await object(`&action=get_simple_data_table&stream_id=${streamId}`, call);
+      return r.ok ? ok(toEpg(r.value, activeTimezone)) : r;
+    },
     playlistUrl: () => `${currentBase()}/get.php?${credentials}&type=m3u_plus&output=${liveFormat}`,
     guideUrl: () => `${currentBase()}/xmltv.php?${credentials}`,
     streamUrl(kind, id, extension) {

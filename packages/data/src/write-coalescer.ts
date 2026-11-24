@@ -333,6 +333,30 @@ export function createCoalescedCatalog(
     ...(c.removeChannelFromCustomGroup
       ? { removeChannelFromCustomGroup: c.removeChannelFromCustomGroup.bind(c) }
       : {}),
+    ...(c.resolveCatchupStream ? { resolveCatchupStream: c.resolveCatchupStream.bind(c) } : {}),
+    ...(c.fetchChannelArchiveEpg
+      ? { fetchChannelArchiveEpg: c.fetchChannelArchiveEpg.bind(c) }
+      : {}),
+    ...(c.listGuideSources ? { listGuideSources: c.listGuideSources.bind(c) } : {}),
+    ...(c.addGuideSource ? { addGuideSource: c.addGuideSource.bind(c) } : {}),
+    ...(c.updateGuideSource ? { updateGuideSource: c.updateGuideSource.bind(c) } : {}),
+    ...(c.removeGuideSource ? { removeGuideSource: c.removeGuideSource.bind(c) } : {}),
+    ...(c.reorderGuideSources ? { reorderGuideSources: c.reorderGuideSources.bind(c) } : {}),
+    ...(c.listGuideChannels ? { listGuideChannels: c.listGuideChannels.bind(c) } : {}),
+    ...(c.listChannelGuideOverrides
+      ? { listChannelGuideOverrides: c.listChannelGuideOverrides.bind(c) }
+      : {}),
+    ...(c.setChannelGuideOverride
+      ? { setChannelGuideOverride: c.setChannelGuideOverride.bind(c) }
+      : {}),
+    ...(c.clearChannelGuideOverride
+      ? { clearChannelGuideOverride: c.clearChannelGuideOverride.bind(c) }
+      : {}),
+    ...(c.listReminders ? { listReminders: c.listReminders.bind(c) } : {}),
+    ...(c.upsertReminder ? { upsertReminder: c.upsertReminder.bind(c) } : {}),
+    ...(c.removeReminder ? { removeReminder: c.removeReminder.bind(c) } : {}),
+    ...(c.markReminderFired ? { markReminderFired: c.markReminderFired.bind(c) } : {}),
+    ...(c.pruneExpiredReminders ? { pruneExpiredReminders: c.pruneExpiredReminders.bind(c) } : {}),
     ...(queryNextEpisodeFn
       ? {
           queryNextEpisode: async (seriesKey, currentItemKey, profileId, nextOpts) => {

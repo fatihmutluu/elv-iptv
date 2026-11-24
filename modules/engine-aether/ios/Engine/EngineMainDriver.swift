@@ -56,16 +56,30 @@ final class EngineMainDriver: EngineSink {
         onSkipBy: { [weak self] deltaSeconds in
           guard let self else { return }
           let state = self.core.nowPlayingPlaybackState
-          guard state.isActive, !state.isLive else { return }
-          let targetMs = max(0.0, (state.positionSeconds + deltaSeconds) * 1_000.0)
-          self.core.seek(self.core.currentToken, positionMs: targetMs)
+          guard state.isActive else { return }
+          if state.isLive {
+            guard let window = self.core.liveSeekableWindow,
+                  let clampedSec = clampLiveSeek(targetSec: state.positionSeconds + deltaSeconds, window: window)
+            else { return }
+            self.core.seek(self.core.currentToken, positionMs: clampedSec * 1_000.0)
+          } else {
+            let targetMs = max(0.0, (state.positionSeconds + deltaSeconds) * 1_000.0)
+            self.core.seek(self.core.currentToken, positionMs: targetMs)
+          }
           self.syncNowPlaying(force: true)
         },
         onSeekTo: { [weak self] positionSeconds in
           guard let self else { return }
           let state = self.core.nowPlayingPlaybackState
-          guard state.isActive, !state.isLive else { return }
-          self.core.seek(self.core.currentToken, positionMs: max(0.0, positionSeconds) * 1_000.0)
+          guard state.isActive else { return }
+          if state.isLive {
+            guard let window = self.core.liveSeekableWindow,
+                  let clampedSec = clampLiveSeek(targetSec: positionSeconds, window: window)
+            else { return }
+            self.core.seek(self.core.currentToken, positionMs: clampedSec * 1_000.0)
+          } else {
+            self.core.seek(self.core.currentToken, positionMs: max(0.0, positionSeconds) * 1_000.0)
+          }
           self.syncNowPlaying(force: true)
         },
         onChangeRate: { [weak self] rate in

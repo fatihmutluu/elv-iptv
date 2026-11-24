@@ -40,6 +40,9 @@ export interface PlayerControlsParams {
   hasChannelList?: boolean;
   hasNextEpisode?: boolean;
   hasPreviousChannel?: boolean;
+  hasBackToLive?: boolean;
+  liveTimeShiftSupported?: boolean;
+  hasJumpToLive?: boolean;
   initialOsdHidden?: boolean | undefined;
   autoHideOsdMs?: number | undefined;
   initialVolume?: number | undefined;
@@ -53,6 +56,7 @@ export interface PlayerControlsParams {
   zapByRef: MutableRefObject<(delta: 1 | -1, repeat?: boolean) => void>;
   onSeekCommit?: (positionMs: number) => void;
   onPlayNextEpisode?: () => void;
+  onBackToLive?: () => void;
   onJumpPreviousChannel?: () => void;
   onJumpToChannel?: (channelNumber: number) => void;
   onToggleFullscreen?: (() => void) | undefined;

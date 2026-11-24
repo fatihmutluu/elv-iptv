@@ -70,7 +70,7 @@ export async function queryCustomGroupItemsPage(
             AND t.is_hidden = 0${overrideHidden}${watched.clause}${restrict.clause}${adultExcl}
        )
        SELECT id, key, source_id, provider_id, name, original_name, co_is_hidden, co_sort_order,
-              logo, rating, year, num, variant_count
+              logo, rating, year, num, catchup_days, variant_count
          FROM ranked
         WHERE rn = 1
         ORDER BY ${orderBy}
@@ -159,7 +159,7 @@ export async function queryCustomGroupItemsByCursor(
             AND t.is_hidden = 0${overrideHidden}${watched.clause}${restrict.clause}${adultExcl}
        )
        SELECT id, key, source_id, provider_id, name, original_name, co_is_hidden, co_sort_order,
-              logo, rating, year, num, variant_count, group_pos AS _pos
+              logo, rating, year, num, catchup_days, variant_count, group_pos AS _pos
          FROM ranked
         WHERE rn = 1${cursorClause}
         ORDER BY group_pos ASC, key ASC

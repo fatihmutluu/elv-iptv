@@ -31,7 +31,7 @@ import type {
 const CAPABILITIES: EngineCapabilities = Object.freeze({
   mpegTsOverHttp: true,
   hls: true,
-  liveSeek: false,
+  liveSeek: true,
   softwareAudioFallback: false,
   recreate: true,
   audioTrackSelection: true,
@@ -265,6 +265,7 @@ export async function createDesktopEngine(
     play: (attempt) => send({ name: 'play', attempt }),
     pause: (attempt) => send({ name: 'pause', attempt }),
     seek: (attempt, positionMs) => send({ name: 'seek', attempt, positionMs }),
+    jumpToLiveEdge: (attempt) => send({ name: 'jumpToLiveEdge', attempt }),
     setSpeed: (attempt, rate) => send({ name: 'setSpeed', attempt, rate }),
     selectAudioTrack: (attempt, trackId) =>
       send({ name: 'selectAudioTrack', attempt, id: trackId }),
