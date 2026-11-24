@@ -303,8 +303,9 @@ export function PinEntryOverlay({
   );
 
   // Desktop/web physical keyboard digit, Backspace, Enter, and Escape support.
+  // Skipped on Web-TV (`isTv === true`) where `Enter` is D-pad `select` handled by TvRemoteProvider.
   useEffect(() => {
-    if (!isWeb) return undefined;
+    if (!isWeb || isTv) return undefined;
     type WebKeyEvent = {
       key?: string;
       preventDefault?: () => void;
@@ -352,13 +353,20 @@ export function PinEntryOverlay({
     };
     host.addEventListener('keydown', onKeyDown, true);
     return () => host.removeEventListener?.('keydown', onKeyDown, true);
-  }, [appendDigit, backspace, handleSubmit, isWeb, onCancel]);
+  }, [appendDigit, backspace, handleSubmit, isTv, isWeb, onCancel]);
 
   const handleTvKey = useCallback(
     (event: KeyEvent): boolean => {
       if (event.kind === 'press' && event.key === 'back') {
         onCancel();
         return true;
+      }
+      if (event.kind === 'press' && event.key.startsWith('digit') && event.key.length === 6) {
+        const d = event.key[5];
+        if (d !== undefined && d >= '0' && d <= '9') {
+          appendDigit(d);
+          return true;
+        }
       }
       if (event.kind !== 'press' && event.kind !== 'repeat') return false;
       const cur = focusCoordRef.current;
@@ -395,7 +403,7 @@ export function PinEntryOverlay({
       }
       return false;
     },
-    [handleKeyPress, handleSubmit, onCancel],
+    [appendDigit, handleKeyPress, handleSubmit, onCancel],
   );
 
   const heading = useMemo(() => {

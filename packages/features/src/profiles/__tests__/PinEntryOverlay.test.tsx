@@ -426,4 +426,51 @@ describe('PinEntryOverlay', () => {
       (globalThis as Record<string, unknown>).removeEventListener = origRemove;
     }
   });
+
+  it('skips desktop capture keydown on Web-TV so Enter stays D-pad select', async () => {
+    jest.replaceProperty(Platform, 'OS', 'web');
+    const listeners = new Map<string, Set<(e: unknown) => void>>();
+    const origAdd = (globalThis as Record<string, unknown>).addEventListener;
+    const origRemove = (globalThis as Record<string, unknown>).removeEventListener;
+    (globalThis as Record<string, unknown>).addEventListener = (
+      type: string,
+      fn: (e: unknown) => void,
+    ) => {
+      const set = listeners.get(type) ?? new Set();
+      set.add(fn);
+      listeners.set(type, set);
+    };
+    (globalThis as Record<string, unknown>).removeEventListener = (
+      type: string,
+      fn: (e: unknown) => void,
+    ) => {
+      listeners.get(type)?.delete(fn);
+    };
+    try {
+      const onVerify = jest.fn(async () => ({ ok: true as const }));
+      const view = await renderPinOverlay(
+        { mode: 'verify', onVerify, onSuccess: jest.fn(), onCancel: jest.fn() },
+        { tv: true },
+      );
+
+      // PinEntryOverlay must NOT attach its capture desktop keydown handler when isTv === true
+      const stopImm = jest.fn();
+      await act(async () => {
+        for (const fn of listeners.get('keydown') ?? []) {
+          fn({
+            key: 'Enter',
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn(),
+            stopImmediatePropagation: stopImm,
+          });
+        }
+      });
+      expect(stopImm).not.toHaveBeenCalled();
+      expect(onVerify).not.toHaveBeenCalled();
+      await view.unmount();
+    } finally {
+      (globalThis as Record<string, unknown>).addEventListener = origAdd;
+      (globalThis as Record<string, unknown>).removeEventListener = origRemove;
+    }
+  });
 });

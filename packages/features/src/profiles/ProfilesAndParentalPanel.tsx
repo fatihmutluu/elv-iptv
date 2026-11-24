@@ -12,7 +12,7 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useState } from 'react';
+import { type ReactElement, useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useProfile } from '../shared';
 import { ParentalControlsCard } from './ParentalControlsCard';
@@ -81,6 +81,16 @@ export function ProfilesAndParentalPanel({
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Immediately dismiss open profile edit/create/delete UI if parental controls re-lock
+  // (timeout expiry, background/hide re-lock, or tapping Lock now below).
+  useEffect(() => {
+    if (hasGuardPin && !parentalUnlocked) {
+      setFormMode('closed');
+      setEditingProfile(null);
+      setConfirmDeleteId(null);
+    }
+  }, [hasGuardPin, parentalUnlocked]);
+
   const runProtected = useCallback(
     (action: () => void) => {
       if (hasGuardPin && !parentalUnlocked) {
@@ -124,40 +134,66 @@ export function ProfilesAndParentalPanel({
 
   const handleSubmitForm = useCallback(
     async (values: ProfileFormValues) => {
-      setBusy(true);
-      try {
-        if (formMode === 'create') {
-          const res = await createProfile(values);
-          if (res.ok) {
-            setFormMode('closed');
+      const execute = async () => {
+        setBusy(true);
+        try {
+          if (formMode === 'create') {
+            const res = await createProfile(values);
+            if (res.ok) {
+              setFormMode('closed');
+            }
+          } else if (formMode === 'edit' && editingProfile !== null) {
+            const res = await updateProfile(editingProfile.id, values);
+            if (res.ok) {
+              setFormMode('closed');
+              setEditingProfile(null);
+            }
           }
-        } else if (formMode === 'edit' && editingProfile !== null) {
-          const res = await updateProfile(editingProfile.id, values);
-          if (res.ok) {
-            setFormMode('closed');
-            setEditingProfile(null);
-          }
+        } finally {
+          setBusy(false);
         }
-      } finally {
-        setBusy(false);
+      };
+      if (hasGuardPin && !parentalUnlocked) {
+        runProtected(() => {
+          void execute();
+        });
+        return;
       }
+      await execute();
     },
-    [createProfile, editingProfile, formMode, updateProfile],
+    [
+      createProfile,
+      editingProfile,
+      formMode,
+      hasGuardPin,
+      parentalUnlocked,
+      runProtected,
+      updateProfile,
+    ],
   );
 
   const handleConfirmDelete = useCallback(
     async (profileId: string) => {
-      setBusy(true);
-      try {
-        const res = await deleteProfile(profileId);
-        if (res.ok) {
-          setConfirmDeleteId(null);
+      const execute = async () => {
+        setBusy(true);
+        try {
+          const res = await deleteProfile(profileId);
+          if (res.ok) {
+            setConfirmDeleteId(null);
+          }
+        } finally {
+          setBusy(false);
         }
-      } finally {
-        setBusy(false);
+      };
+      if (hasGuardPin && !parentalUnlocked) {
+        runProtected(() => {
+          void execute();
+        });
+        return;
       }
+      await execute();
     },
-    [deleteProfile],
+    [deleteProfile, hasGuardPin, parentalUnlocked, runProtected],
   );
 
   const isOnlyProfile = profiles.length <= 1;

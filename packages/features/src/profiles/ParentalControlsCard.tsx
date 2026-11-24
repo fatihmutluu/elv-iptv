@@ -7,8 +7,6 @@ import {
 } from '@elv/data';
 import {
   CtaButton,
-  EditorialCategoryBar,
-  type EditorialCategoryItem,
   FilterChip,
   Icon,
   MicroPill,
@@ -16,7 +14,6 @@ import {
   TABULAR_NUMS_STYLE,
   useI18n,
   useTheme,
-  useViewport,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
@@ -51,8 +48,6 @@ export function ParentalControlsCard({
 }: ParentalControlsCardProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
-  const viewport = useViewport();
-  const isTv = viewport.formFactor === 'tv';
   const parental = useParental();
   const {
     activeProfileId,
@@ -134,7 +129,9 @@ export function ParentalControlsCard({
     [hasGuardPin, parentalUnlocked, requestParentalUnlock],
   );
 
-  const kindTabs = useMemo<readonly EditorialCategoryItem[]>(
+  const kindTabs = useMemo<
+    readonly { readonly id: BrowseKind; readonly label: string; readonly testID: string }[]
+  >(
     () => [
       { id: 'live', label: i18n.t('nav.live'), testID: 'parental-cat-kind-live' },
       { id: 'movie', label: i18n.t('nav.movies'), testID: 'parental-cat-kind-movie' },
@@ -493,14 +490,20 @@ export function ParentalControlsCard({
           </View>
         ) : (
           <>
-            <EditorialCategoryBar
+            <View
               testID="parental-cat-kind-bar"
-              items={kindTabs}
-              activeId={categoryKind}
-              onSelect={(id) => setCategoryKind(id as BrowseKind)}
-              isTv={isTv}
-              padX={0}
-            />
+              style={[styles.chipRow, { gap: theme.spacing.xs }]}
+            >
+              {kindTabs.map((tab) => (
+                <FilterChip
+                  key={tab.id}
+                  testID={tab.testID}
+                  label={tab.label}
+                  selected={categoryKind === tab.id}
+                  onPress={() => setCategoryKind(tab.id)}
+                />
+              ))}
+            </View>
 
             {categories.length === 0 ? (
               <Text

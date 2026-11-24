@@ -425,4 +425,71 @@ describe('ProfilesAndParentalPanel', () => {
       await env.cleanup();
     }
   });
+
+  it('keeps category-kind chips TV-focusable and closes open profile form/delete UI on parental re-lock', async () => {
+    const env = await createPanelEnv();
+    try {
+      await env.catalog.createProfile?.({ name: 'Kids', avatarToken: 'emerald', isKids: true });
+      await env.catalog.setParentalPin?.('1234', 'default');
+
+      const view = await render(
+        <AppProviders
+          profilePreferences={env.profilePreferences}
+          i18n={createAppI18n('en')}
+          viewport={{
+            formFactor: 'tv',
+            orientation: 'landscape',
+            inputModality: 'tv',
+            width: 1280,
+            height: 720,
+          }}
+        >
+          <ProfileProvider catalog={env.catalog} profilePreferences={env.profilePreferences}>
+            <ProfilesAndParentalPanel catalog={env.catalog} sources={env.sources} />
+            <AppShellProfileOverlays onOpenProfilesSettings={jest.fn()} />
+          </ProfileProvider>
+        </AppProviders>,
+      );
+
+      // Unlock parental controls via Settings unlock button
+      await waitFor(() => {
+        expect(screen.getByTestId('parental-categories-unlock')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('parental-categories-unlock'));
+      await tapPin('1234');
+
+      // On 10-foot TV, Live/Movies/Series FilterChips must remain focusable (never focusable={false})
+      await waitFor(() => {
+        expect(screen.getByTestId('parental-cat-kind-live')).toBeTruthy();
+        expect(screen.getByTestId('parental-cat-kind-movie').props.focusable).not.toBe(false);
+        expect(screen.getByTestId('parental-cat-kind-series').props.focusable).not.toBe(false);
+      });
+
+      // Open Add Profile form while unlocked, then re-lock via Lock Now -> form must close immediately
+      await fireEvent.press(screen.getByTestId('profiles-add-button'));
+      expect(screen.getByTestId('profile-form-card')).toBeTruthy();
+      await fireEvent.press(screen.getByTestId('parental-lock-now'));
+      await waitFor(() => {
+        expect(screen.queryByTestId('profile-form-card')).toBeNull();
+      });
+
+      // Unlock again, open Delete confirmation on Kids profile, then re-lock -> confirm closes immediately
+      await fireEvent.press(screen.getByTestId('parental-categories-unlock'));
+      await tapPin('1234');
+      await waitFor(() => {
+        expect(screen.getByTestId('parental-lock-now')).toBeTruthy();
+      });
+      const kidsId = (await env.catalog.listProfiles?.())?.find((p) => p.isKids)?.id ?? '';
+      await fireEvent.press(screen.getByTestId(`profile-delete-${kidsId}`));
+      expect(screen.getByTestId(`profile-delete-confirm-${kidsId}`)).toBeTruthy();
+      await fireEvent.press(screen.getByTestId('parental-lock-now'));
+      await waitFor(() => {
+        expect(screen.queryByTestId(`profile-delete-confirm-${kidsId}`)).toBeNull();
+      });
+
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
 });
