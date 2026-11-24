@@ -215,13 +215,35 @@ export async function updateProfile(
     nextAvatar = patch.avatarToken;
   }
 
-  const nextIsKids = patch.isKids !== undefined ? patch.isKids : existing.is_kids !== 0;
+  const wasKids = existing.is_kids !== 0;
+  const nextIsKids = patch.isKids !== undefined ? patch.isKids : wasKids;
   const now = Math.max(0, Math.round(clock()));
 
-  await db.run(
-    'UPDATE profiles SET name = ?, avatar_token = ?, is_kids = ?, updated_at = ? WHERE id = ?',
-    [nextName, nextAvatar, nextIsKids ? 1 : 0, now, id],
-  );
+  if (!wasKids && nextIsKids) {
+    await db.transaction(async (tx) => {
+      await tx.run(
+        'UPDATE profiles SET name = ?, avatar_token = ?, is_kids = ?, updated_at = ? WHERE id = ?',
+        [nextName, nextAvatar, 1, now, id],
+      );
+      await tx.run(
+        `INSERT INTO parental_settings (
+           profile_id, enabled, block_adult_keywords, max_rating_age, unlock_timeout_min, updated_at
+         ) VALUES (?, 1, 1, 12, ?, ?)
+         ON CONFLICT(profile_id) DO UPDATE SET
+           enabled = 1,
+           block_adult_keywords = CASE WHEN parental_settings.enabled = 0 THEN 1 ELSE parental_settings.block_adult_keywords END,
+           max_rating_age = CASE WHEN parental_settings.enabled = 0 AND parental_settings.max_rating_age IS NULL THEN 12 ELSE parental_settings.max_rating_age END,
+           updated_at = CASE WHEN parental_settings.enabled = 0 THEN excluded.updated_at ELSE parental_settings.updated_at END`,
+        [id, DEFAULT_PARENTAL_UNLOCK_TIMEOUT_MIN, now],
+      );
+    });
+    markParentalStateDirty(db);
+  } else {
+    await db.run(
+      'UPDATE profiles SET name = ?, avatar_token = ?, is_kids = ?, updated_at = ? WHERE id = ?',
+      [nextName, nextAvatar, nextIsKids ? 1 : 0, now, id],
+    );
+  }
 
   return ok({
     id: existing.id,

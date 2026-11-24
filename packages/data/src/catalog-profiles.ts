@@ -23,6 +23,7 @@ import {
   type CreateProfileInput,
   createProfile,
   deleteProfile,
+  isValidProfileId,
   listProfiles,
   type ProfileRecord,
   type UpdateProfilePatch,
@@ -61,6 +62,9 @@ export function createCatalogProfileMethods(deps: {
 
   const verifyPinInternal = async (pin: string, profileId?: string): Promise<PinVerifyResult> => {
     const normalized = normalizeProfileId(profileId);
+    if (!isValidProfileId(normalized)) {
+      return { ok: false, remainingAttempts: MAX_PIN_ATTEMPTS };
+    }
     const now = clock();
     const locked = pinLimiter.checkLocked(normalized, now);
     if (locked !== null) return locked;
@@ -101,15 +105,24 @@ export function createCatalogProfileMethods(deps: {
 
     getParentalSettings: (profileId) => getParentalSettings(db, profileId),
 
-    updateParentalSettings: (patch, profileId) =>
-      updateParentalSettings(db, profileId, patch, clock),
+    async updateParentalSettings(patch, profileId) {
+      const updated = await updateParentalSettings(db, profileId, patch, clock);
+      if (updated.ok) await syncUserData();
+      return updated;
+    },
 
     listParentalLocks: (profileId, filter) => listParentalLocks(db, profileId, filter),
 
-    setParentalLock: (input, locked) => setParentalLock(db, input, locked, clock),
+    async setParentalLock(input, locked) {
+      const updated = await setParentalLock(db, input, locked, clock);
+      if (updated.ok) await syncUserData();
+      return updated;
+    },
 
     async hasParentalPin(profileId) {
-      const stored = await secrets.get(pinSecretKey(profileId));
+      const normalized = normalizeProfileId(profileId);
+      if (!isValidProfileId(normalized)) return false;
+      const stored = await secrets.get(pinSecretKey(normalized));
       return typeof stored === 'string' && stored.trim() !== '';
     },
 
@@ -118,6 +131,9 @@ export function createCatalogProfileMethods(deps: {
         return err(elvError('source-format', 'invalid-pin'));
       }
       const normalized = normalizeProfileId(profileId);
+      if (!isValidProfileId(normalized)) {
+        return err(elvError('source-format', 'invalid-profile-id'));
+      }
       const existing = await secrets.get(pinSecretKey(normalized));
       if (typeof existing === 'string' && existing.trim() !== '') {
         const verified = await verifyPinInternal(currentPin ?? '', normalized);
@@ -141,6 +157,9 @@ export function createCatalogProfileMethods(deps: {
 
     async clearParentalPin(currentPin, profileId) {
       const normalized = normalizeProfileId(profileId);
+      if (!isValidProfileId(normalized)) {
+        return err(elvError('source-format', 'invalid-profile-id'));
+      }
       const existing = await secrets.get(pinSecretKey(normalized));
       if (existing === undefined || existing.trim() === '') {
         pinLimiter.clear(normalized);

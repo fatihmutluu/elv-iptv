@@ -465,6 +465,11 @@ describe('desktop CatalogService', () => {
       };
 
     const { bridge } = makeFakeBridge({
+      liveVariants: record('liveVariants', []),
+      itemVersions: record('itemVersions', []),
+      seasons: record('seasons', ok([])),
+      episodes: record('episodes', []),
+      queryNextEpisode: record('queryNextEpisode', null),
       itemDetail: record('itemDetail', null),
       nowNext: record('nowNext', []),
       epgWindow: record('epgWindow', {}),
@@ -492,6 +497,13 @@ describe('desktop CatalogService', () => {
     const service = createDesktopCatalogFromBridge(bridge);
     const pOpts = { profileId: 'p_kids', parentalUnlocked: false };
 
+    await service.liveVariants?.('s1:live:1', 's1|live|1', pOpts);
+    await service.itemVersions?.('s1:movie:1', pOpts);
+    await service.seasons(42, pOpts);
+    await service.episodes(42, 1, pOpts);
+    await service.queryNextEpisode?.('s1:series:42', 's1:episode:1', 'p_kids', {
+      parentalUnlocked: true,
+    });
     await service.itemDetail?.('s1:movie:1', pOpts);
     await service.nowNext?.(['s1:live:1'], 1_000, pOpts);
     await service.epgWindow?.(['s1:live:1'], 1_000, 2_000, pOpts);
@@ -532,6 +544,13 @@ describe('desktop CatalogService', () => {
     expect(await service.clearParentalPin?.('1234', 'p_kids')).toEqual(ok(undefined));
     await service.flushPendingWrites?.();
 
+    expect(seen['liveVariants']).toEqual([['s1:live:1', 's1|live|1', pOpts]]);
+    expect(seen['itemVersions']).toEqual([['s1:movie:1', pOpts]]);
+    expect(seen['seasons']).toEqual([[42, pOpts]]);
+    expect(seen['episodes']).toEqual([[42, 1, pOpts]]);
+    expect(seen['queryNextEpisode']).toEqual([
+      ['s1:series:42', 's1:episode:1', 'p_kids', { parentalUnlocked: true }],
+    ]);
     expect(seen['itemDetail']).toEqual([['s1:movie:1', pOpts]]);
     expect(seen['nowNext']).toEqual([[['s1:live:1'], 1_000, pOpts]]);
     expect(seen['epgWindow']).toEqual([[['s1:live:1'], 1_000, 2_000, pOpts]]);

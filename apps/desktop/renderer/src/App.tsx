@@ -337,6 +337,7 @@ function AppRoot() {
     <UiAdaptersProvider adapters={uiAdapters}>
       <AppProviders
         preferencesStore={preferencesStore}
+        profilePreferences={preferencesStore}
         systemLocale={systemLocale}
         viewport={{ formFactor: 'desktop' }}
       >

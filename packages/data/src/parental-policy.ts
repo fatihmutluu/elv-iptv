@@ -85,7 +85,7 @@ const STORED_PIN_RE = /^v1:([0-9a-f]{32}):([0-9a-f]{64})$/;
 const ADULT_PLUS_18_RE = /(?:^|[^\p{L}\p{N}])(?:\+18|18\+)(?:$|[^\p{L}\p{N}])/u;
 
 /** Folded single-token adult keywords (exact token match, zero substring false positives). */
-const ADULT_TOKENS = new Set<string>([
+export const ADULT_KEYWORD_TOKENS = [
   'xxx',
   'adult',
   'adults',
@@ -95,7 +95,9 @@ const ADULT_TOKENS = new Set<string>([
   'porno',
   'nsfw',
   'yetiskin',
-]);
+] as const;
+
+const ADULT_TOKENS = new Set<string>(ADULT_KEYWORD_TOKENS);
 
 const RATING_AGE_MAP: Readonly<Record<string, number>> = {
   'TV-MA': 18,

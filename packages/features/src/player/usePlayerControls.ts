@@ -8,6 +8,7 @@ import { type UseKeyInterpreterOptions, useKeyInterpreter, useTvKeySource } from
 import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import type { HostKey } from '../ports/video-host';
+import { useProfile } from '../shared';
 import {
   type ChannelDigitBuffer,
   createChannelDigitBuffer,
@@ -49,6 +50,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
 
   const cbRef = useRef(params);
   cbRef.current = params;
+  const { pinDialog, profilePickerOpen } = useProfile();
+  const externalOverlayOpenRef = useRef(false);
+  externalOverlayOpenRef.current =
+    params.externalOverlayOpen === true || pinDialog !== null || profilePickerOpen;
 
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(muted);
@@ -411,6 +416,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
   };
 
   const handleKeyEvent = (event: KeyEvent): boolean => {
+    if (externalOverlayOpenRef.current) return false;
     if (cbRef.current.stillWatchingVisible) {
       if (event.kind === 'press') {
         cbRef.current.onStillWatchingKey?.(event.key);
@@ -624,6 +630,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     onExitRef.current();
   };
   const handleHostKey = (key: HostKey): void => {
+    if (externalOverlayOpenRef.current) return;
     if (key === 'stop') {
       handleStop();
       return;
@@ -657,6 +664,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     clockRef,
     scrub,
     guard: {
+      isSuspended: () => externalOverlayOpenRef.current,
       canJumpPreviousChannel: () =>
         cbRef.current.activeTarget.kind === 'live' &&
         cbRef.current.hasPreviousChannel === true &&

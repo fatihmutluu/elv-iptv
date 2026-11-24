@@ -16,6 +16,7 @@ export interface AppShellPlayerViewProps {
   readonly playbackGuard: PlaybackGuard;
   readonly preferences: PreferencesContextValue;
   readonly appLifecycle?: AppLifecyclePort;
+  readonly externalOverlayOpen?: boolean;
   readonly onPlaybackActiveChange: (active: boolean) => void;
   readonly onTargetChange: (next: PlayTarget) => void;
   readonly onExit: () => void;
@@ -29,6 +30,7 @@ export function AppShellPlayerView({
   playbackGuard,
   preferences,
   appLifecycle,
+  externalOverlayOpen,
   onPlaybackActiveChange,
   onTargetChange,
   onExit,
@@ -107,6 +109,7 @@ export function AppShellPlayerView({
           }
         : {})}
       {...(appLifecycle !== undefined ? { appLifecycle } : {})}
+      {...(externalOverlayOpen !== undefined ? { externalOverlayOpen } : {})}
       liveChannelSwitchMode={prefs.liveChannelSwitchMode}
       onTargetChange={onTargetChange}
       onExit={onExit}

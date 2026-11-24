@@ -38,7 +38,6 @@ const MAX_STRING_CHARS = 8_192;
 export const MAX_ID_CHARS = 256;
 export const MAX_ITEM_KEY_CHARS = 1_024;
 const MAX_TITLE_CHARS = 512;
-const MAX_PROFILE_ID_CHARS = 128;
 const MAX_USER_LIST_LIMIT = 100;
 const MAX_PROGRESS_KEYS = 200;
 const MAX_NOW_NEXT_KEYS = 60;
@@ -112,8 +111,7 @@ export const isSafeRecentChannelKey = (x: unknown): x is string =>
   !x.includes('{{') &&
   !x.includes('@') &&
   !x.includes('?');
-export const isOptionalProfileId = (x: unknown): boolean =>
-  x === undefined || isCleanKey(x, MAX_PROFILE_ID_CHARS);
+export const isOptionalProfileId = (x: unknown): boolean => isOptionalStrictProfileId(x);
 export const isOptionalSourceId = (x: unknown): boolean =>
   x === undefined || isCleanKey(x, MAX_ID_CHARS);
 export const isOptionalUserLimit = (x: unknown): boolean =>
@@ -135,8 +133,81 @@ export function isSearchQuery(x: unknown): x is string {
   return isBoundedString(x, 0, MAX_SEARCH_QUERY_CHARS) && !hasControlChar(x);
 }
 
+const SEARCH_OPT_KEYS = new Set([
+  'scope',
+  'limit',
+  'sourceId',
+  'nowMs',
+  'profileId',
+  'parentalUnlocked',
+]);
+const SEARCH_SUGGESTIONS_OPT_KEYS = new Set(['limit', 'sourceId', 'profileId', 'parentalUnlocked']);
+const ALPHABET_INDEX_INPUT_KEYS = new Set([
+  'kind',
+  'sourceId',
+  'categoryId',
+  'collapseVariants',
+  'groupVersions',
+  'excludeWatched',
+  'profileId',
+  'parentalUnlocked',
+]);
+const SAVE_PROGRESS_INPUT_KEYS = new Set([
+  'profileId',
+  'sourceId',
+  'itemKey',
+  'kind',
+  'title',
+  'subtitle',
+  'logo',
+  'seriesKey',
+  'season',
+  'episode',
+  'positionMs',
+  'durationMs',
+  'watched',
+]);
+const TOGGLE_FAVORITE_INPUT_KEYS = new Set([
+  'profileId',
+  'sourceId',
+  'itemKey',
+  'kind',
+  'title',
+  'logo',
+  'year',
+  'rating',
+]);
+const SAVE_TRACK_PREFERENCE_INPUT_KEYS = new Set([
+  'scopeKey',
+  'sourceId',
+  'profileId',
+  'audioLang',
+  'audioLabel',
+  'subLang',
+  'subLabel',
+  'subDisabled',
+  'audioDelayMs',
+  'subDelayMs',
+  'resizeMode',
+]);
+const CATEGORY_QUERY_OPT_KEYS = new Set([
+  'collapseVariants',
+  'groupVersions',
+  'includeHidden',
+  'profileId',
+  'parentalUnlocked',
+]);
+const LIST_ITEMS_OPT_KEYS = new Set([
+  'sortBy',
+  'excludeWatched',
+  'collapseVariants',
+  'groupVersions',
+  'profileId',
+  'parentalUnlocked',
+]);
+
 export function isSearchOptions(x: unknown): x is SearchOptions {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, SEARCH_OPT_KEYS)) return false;
   const scope = x['scope'];
   if (
     scope !== undefined &&
@@ -154,12 +225,12 @@ export function isSearchOptions(x: unknown): x is SearchOptions {
   }
   const nowMs = x['nowMs'];
   if (nowMs !== undefined && !isNonNegativeFinite(nowMs)) return false;
-  if (!isOptionalProfileId(x['profileId'])) return false;
+  if (!isOptionalStrictProfileId(x['profileId'])) return false;
   return x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean';
 }
 
 export function isSearchSuggestionsOptions(x: unknown): x is SearchSuggestionsOptions {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, SEARCH_SUGGESTIONS_OPT_KEYS)) return false;
   const limit = x['limit'];
   if (
     limit !== undefined &&
@@ -169,13 +240,13 @@ export function isSearchSuggestionsOptions(x: unknown): x is SearchSuggestionsOp
   }
   return (
     isOptionalSourceId(x['sourceId']) &&
-    isOptionalProfileId(x['profileId']) &&
+    isOptionalStrictProfileId(x['profileId']) &&
     (x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean')
   );
 }
 
 export function isAlphabetIndexInput(x: unknown): x is AlphabetIndexInput {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, ALPHABET_INDEX_INPUT_KEYS)) return false;
   const kind = x['kind'];
   if (typeof kind !== 'string' || !CONTENT_KINDS.has(kind as ContentKind)) {
     return false;
@@ -194,13 +265,14 @@ export function isAlphabetIndexInput(x: unknown): x is AlphabetIndexInput {
   if (x['parentalUnlocked'] !== undefined && typeof x['parentalUnlocked'] !== 'boolean') {
     return false;
   }
-  return isOptionalProfileId(x['profileId']);
+  return isOptionalStrictProfileId(x['profileId']);
 }
 
 export function isSaveProgressInput(x: unknown): x is SaveProgressInput {
   return (
     isRecord(x) &&
-    isOptionalProfileId(x['profileId']) &&
+    hasOnlyKeys(x, SAVE_PROGRESS_INPUT_KEYS) &&
+    isOptionalStrictProfileId(x['profileId']) &&
     isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
     isCleanKey(x['itemKey']) &&
     isUserItemKind(x['kind']) &&
@@ -219,7 +291,8 @@ export function isSaveProgressInput(x: unknown): x is SaveProgressInput {
 export function isToggleFavoriteInput(x: unknown): x is ToggleFavoriteInput {
   return (
     isRecord(x) &&
-    isOptionalProfileId(x['profileId']) &&
+    hasOnlyKeys(x, TOGGLE_FAVORITE_INPUT_KEYS) &&
+    isOptionalStrictProfileId(x['profileId']) &&
     isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
     isCleanKey(x['itemKey']) &&
     isUserItemKind(x['kind']) &&
@@ -245,9 +318,10 @@ const isOptionalNullableResizeMode = (x: unknown): boolean =>
 export function isSaveTrackPreferenceInput(x: unknown): x is SaveTrackPreferenceInput {
   return (
     isRecord(x) &&
+    hasOnlyKeys(x, SAVE_TRACK_PREFERENCE_INPUT_KEYS) &&
     isCleanKey(x['scopeKey']) &&
     isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
-    isOptionalProfileId(x['profileId']) &&
+    isOptionalStrictProfileId(x['profileId']) &&
     isOptionalNullableCleanString(x['audioLang'], MAX_TRACK_LANG_CHARS) &&
     isOptionalNullableCleanString(x['audioLabel'], MAX_TRACK_LABEL_CHARS) &&
     isOptionalNullableCleanString(x['subLang'], MAX_TRACK_LANG_CHARS) &&
@@ -399,7 +473,7 @@ export function isElvError(x: unknown): x is ElvError {
 }
 
 export function isCategoryQueryOptions(x: unknown): x is CategoryQueryOptions {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, CATEGORY_QUERY_OPT_KEYS)) return false;
   if (x['collapseVariants'] !== undefined && typeof x['collapseVariants'] !== 'boolean') {
     return false;
   }
@@ -409,12 +483,12 @@ export function isCategoryQueryOptions(x: unknown): x is CategoryQueryOptions {
   if (x['includeHidden'] !== undefined && typeof x['includeHidden'] !== 'boolean') {
     return false;
   }
-  if (!isOptionalProfileId(x['profileId'])) return false;
+  if (!isOptionalStrictProfileId(x['profileId'])) return false;
   return x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean';
 }
 
 export function isListItemsOptions(x: unknown): x is ListItemsOptions {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, LIST_ITEMS_OPT_KEYS)) return false;
   const sortBy = x['sortBy'];
   if (
     sortBy !== undefined &&
@@ -433,7 +507,7 @@ export function isListItemsOptions(x: unknown): x is ListItemsOptions {
   if (x['parentalUnlocked'] !== undefined && typeof x['parentalUnlocked'] !== 'boolean') {
     return false;
   }
-  return isOptionalProfileId(x['profileId']);
+  return isOptionalStrictProfileId(x['profileId']);
 }
 
 const MAX_PROFILE_NAME_INPUT_CHARS = 128;

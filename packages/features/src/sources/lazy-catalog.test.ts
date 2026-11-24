@@ -1,7 +1,7 @@
-import { createCatalogService, openCatalog } from '@elv/data';
+import { type CatalogService, createCatalogService, openCatalog } from '@elv/data';
 import { countingScheduler, memorySecrets, testDb } from '@elv/data/testing';
 import { elvError, ok } from '@elv/domain';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createLazyCatalog } from './lazy-catalog';
 
 describe('createLazyCatalog', () => {
@@ -502,5 +502,45 @@ describe('createLazyCatalog', () => {
 
     await lazy.close();
     handle.close();
+  });
+
+  it('forwards parental query options for liveVariants, itemVersions, seasons, episodes, and queryNextEpisode', async () => {
+    const liveVariants = vi.fn(async () => []);
+    const itemVersions = vi.fn(async () => []);
+    const seasons = vi.fn(async () => ok([]));
+    const episodes = vi.fn(async () => []);
+    const queryNextEpisode = vi.fn(async () => null);
+    const base = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      liveVariants,
+      itemVersions,
+      seasons,
+      episodes,
+      queryNextEpisode,
+      resolveStream: vi.fn(),
+      close: vi.fn(async () => undefined),
+    } as unknown as CatalogService;
+
+    const lazy = createLazyCatalog(async () => base);
+    const opts = { profileId: 'kids-1', parentalUnlocked: false };
+    await lazy.liveVariants?.('ch:1', 'cat:1', opts);
+    await lazy.itemVersions?.('mov:1', opts);
+    await lazy.seasons(42, opts);
+    await lazy.episodes(42, 1, opts);
+    await lazy.queryNextEpisode?.('ser:42', 'ep:1', 'kids-1', { parentalUnlocked: false });
+
+    expect(liveVariants).toHaveBeenCalledWith('ch:1', 'cat:1', opts);
+    expect(itemVersions).toHaveBeenCalledWith('mov:1', opts);
+    expect(seasons).toHaveBeenCalledWith(42, opts);
+    expect(episodes).toHaveBeenCalledWith(42, 1, opts);
+    expect(queryNextEpisode).toHaveBeenCalledWith('ser:42', 'ep:1', 'kids-1', {
+      parentalUnlocked: false,
+    });
   });
 });

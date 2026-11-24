@@ -300,6 +300,62 @@ describe('catalog-worker Wave F1 profiles and parental controls (#15, #31)', () 
       });
       expect(unlockedStream.ok).toBe(true);
 
+      // Verify newly-threaded parental opts round-trip through worker RPC without invalid-request
+      expect(
+        Array.isArray(
+          await rt.call<unknown[]>({
+            method: 'liveVariants',
+            itemKey: adultKey,
+            opts: { profileId: kidsId, parentalUnlocked: false },
+          }),
+        ),
+      ).toBe(true);
+      expect(
+        await rt.call<unknown[]>({
+          method: 'itemVersions',
+          itemKey: adultKey,
+          opts: { profileId: kidsId, parentalUnlocked: false },
+        }),
+      ).toEqual([]);
+      const lockedSeasons = await rt.call<Result<unknown[]>>({
+        method: 'seasons',
+        seriesId: 999_999,
+        opts: { profileId: kidsId, parentalUnlocked: false },
+      });
+      expect(lockedSeasons.ok).toBe(false);
+      expect(
+        await rt.call<unknown[]>({
+          method: 'episodes',
+          seriesId: 999_999,
+          season: 1,
+          opts: { profileId: kidsId, parentalUnlocked: false },
+        }),
+      ).toEqual([]);
+      expect(
+        await rt.call<unknown>({
+          method: 'queryNextEpisode',
+          seriesKey: `${sourceId}:series:999`,
+          currentItemKey: `${sourceId}:episode:1`,
+          profileId: kidsId,
+          opts: { parentalUnlocked: false },
+        }),
+      ).toBeNull();
+      for (const badRpc of [
+        { method: 'liveVariants', itemKey: adultKey, opts: { profileId: '../bad' } },
+        { method: 'itemVersions', itemKey: adultKey, opts: { extra: 1 } },
+        { method: 'seasons', seriesId: 999_999, opts: { parentalUnlocked: 'yes' } },
+        { method: 'episodes', seriesId: 999_999, season: 1, opts: { extra: 1 } },
+        {
+          method: 'queryNextEpisode',
+          seriesKey: `${sourceId}:series:999`,
+          currentItemKey: `${sourceId}:episode:1`,
+          profileId: kidsId,
+          opts: { extra: 1 },
+        },
+      ]) {
+        await expect(rt.call(badRpc)).rejects.toThrow('source-format/invalid-request');
+      }
+
       // Parental locks CRUD + settings update
       const lockRes = await rt.call<Result<void>>({
         method: 'setParentalLock',

@@ -27,6 +27,8 @@ export function createProfileScopedCatalog(
   getScope: () => ProfileCatalogScope,
 ): CatalogService {
   const c = catalog;
+  const liveVariants = c.liveVariants?.bind(c);
+  const itemVersions = c.itemVersions?.bind(c);
   const allSourcesItems = c.allSourcesItems?.bind(c);
   const itemDetail = c.itemDetail?.bind(c);
   const search = c.search?.bind(c);
@@ -71,8 +73,18 @@ export function createProfileScopedCatalog(
       c.categories(sourceId, kind, mergeParentalOpts(opts, getScope())),
     items: (categoryId, offset, limit, opts) =>
       c.items(categoryId, offset, limit, mergeParentalOpts(opts, getScope())),
-    ...(c.liveVariants ? { liveVariants: c.liveVariants.bind(c) } : {}),
-    ...(c.itemVersions ? { itemVersions: c.itemVersions.bind(c) } : {}),
+    ...(liveVariants
+      ? {
+          liveVariants: (itemKey, categoryId, opts) =>
+            liveVariants(itemKey, categoryId, mergeParentalOpts(opts, getScope())),
+        }
+      : {}),
+    ...(itemVersions
+      ? {
+          itemVersions: (itemKey, opts) =>
+            itemVersions(itemKey, mergeParentalOpts(opts, getScope())),
+        }
+      : {}),
     ...(allSourcesItems
       ? {
           allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
@@ -123,12 +135,17 @@ export function createProfileScopedCatalog(
             channelByNumber(num, sourceId, mergeParentalOpts(opts, getScope())),
         }
       : {}),
-    seasons: (seriesId) => c.seasons(seriesId),
-    episodes: (seriesId, season) => c.episodes(seriesId, season),
+    seasons: (seriesId, opts) => c.seasons(seriesId, mergeParentalOpts(opts, getScope())),
+    episodes: (seriesId, season, opts) =>
+      c.episodes(seriesId, season, mergeParentalOpts(opts, getScope())),
     ...(queryNextEpisode
       ? {
-          queryNextEpisode: (seriesKey, currentItemKey, profileId) =>
-            queryNextEpisode(seriesKey, currentItemKey, profileId ?? getScope().profileId),
+          queryNextEpisode: (seriesKey, currentItemKey, profileId, opts) => {
+            const scope = getScope();
+            return queryNextEpisode(seriesKey, currentItemKey, profileId ?? scope.profileId, {
+              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
         }
       : {}),
     resolveStream: (itemKey, opts) => c.resolveStream(itemKey, mergeParentalOpts(opts, getScope())),

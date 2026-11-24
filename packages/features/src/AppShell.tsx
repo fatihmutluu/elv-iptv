@@ -290,7 +290,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   useShellProfileEffects({
     profile,
     catalog: observedCatalog,
-    appForeground,
+    appForeground: appForeground && documentVisible,
     playTargetRef,
     onResetTransientMemory: resetTransientMemory,
     onStopPlayback: stopActivePlayback,
@@ -314,6 +314,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     profileKey: profileScopeKey,
     uiCache,
     activeTab,
+    enabled: profile.profilesReady,
     groupVodVersions: preferences.preferences.groupVodVersions,
   });
   const handleGuideRefreshed = useCallback(() => {
@@ -508,8 +509,11 @@ function AppShellContent(props: AppShellProps): ReactElement {
     [stageKey, shell.bumpCatalogRevision, clearSearchSession, openSources, uiCache, focusMemory],
   );
   const readySourcesCount = sources.filter((s) => !s.needsImport).length;
-  const isResolvingInitialSources = !sourcesResolved && !userPickedTab && activeDetail === null;
-  const hasHeroOverlay = activeDetail !== null || (sourcesResolved && activeTab === 'home');
+  const isResolvingInitialSources =
+    !profile.profilesReady || (!sourcesResolved && !userPickedTab && activeDetail === null);
+  const hasHeroOverlay =
+    activeDetail !== null || (sourcesResolved && profile.profilesReady && activeTab === 'home');
+  const contentIsolationKey = `${profile.activeProfileId}:${profile.parentalUnlocked ? 'u' : 'l'}`;
   const effectiveRefreshToken = refreshToken + profile.profileRevision;
   const effectiveUserStateVersion = userStateVersion + profile.profileRevision;
   const stageProps = {
@@ -555,6 +559,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                   playbackGuard={playbackGuard}
                   preferences={preferences}
                   {...(appLifecycle !== undefined ? { appLifecycle } : {})}
+                  externalOverlayOpen={hasProfileOverlay}
                   onPlaybackActiveChange={setPlayerPlaybackActive}
                   onTargetChange={onPlayerTargetChange}
                   onExit={onPlayerExit}
@@ -577,7 +582,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                 testID="app-shell"
               >
                 <CrashRecoveryBoundary
-                  resetKey={`${activeTab}:${activeDetail?.itemKey ?? ''}`}
+                  resetKey={`${activeTab}:${activeDetail?.itemKey ?? ''}:${contentIsolationKey}`}
                   {...crashProps}
                 >
                   {showCachedStrip ? (
@@ -597,7 +602,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     </View>
                   ) : activeDetail !== null ? (
                     <DetailScreen
-                      key={activeDetail.itemKey}
+                      key={`${activeDetail.itemKey}:${contentIsolationKey}`}
                       target={activeDetail}
                       userStateVersion={effectiveUserStateVersion}
                       preferredAudioLang={preferences.preferences.preferredAudioLang}
@@ -616,6 +621,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                       preferences={preferences}
                       onFocusTopNav={handleFocusTopNav}
                       isActiveScope={!topNavFocused && !hasProfileOverlay}
+                      hasTransientOverlay={hasProfileOverlay}
                       renderProfiles={(slot) => (
                         <ProfilesAndParentalPanel
                           catalog={observedCatalog}
@@ -648,6 +654,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     />
                   ) : activeTab === 'search' ? (
                     <SearchScreen
+                      key={contentIsolationKey}
                       userStateVersion={effectiveUserStateVersion}
                       initialQuery={searchQuery}
                       onQueryChange={setSearchQuery}
@@ -661,6 +668,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     />
                   ) : activeTab === 'home' ? (
                     <HomeScreen
+                      key={contentIsolationKey}
                       sources={sources}
                       userStateVersion={effectiveUserStateVersion}
                       onPlay={handlePlay}
@@ -672,7 +680,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     />
                   ) : activeTab === 'movie' || activeTab === 'series' ? (
                     <CatalogDiscoveryScreen
-                      key={activeTab}
+                      key={`${activeTab}:${contentIsolationKey}`}
                       kind={activeTab}
                       sources={sources}
                       userStateVersion={effectiveUserStateVersion}
@@ -690,6 +698,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     />
                   ) : (
                     <LiveScreen
+                      key={contentIsolationKey}
                       sources={sources}
                       userStateVersion={effectiveUserStateVersion}
                       memory={liveMemory}

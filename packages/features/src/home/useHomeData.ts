@@ -1,15 +1,19 @@
-import {
-  type CatalogService,
-  DEFAULT_PROFILE_ID,
-  type FavoriteRow,
-  type ItemRow,
-  type SeriesUnplayedSummary,
-  type SourceRow,
-  type UserItemKind,
-  type WatchProgressRow,
+import type {
+  CatalogService,
+  FavoriteRow,
+  ItemRow,
+  SeriesUnplayedSummary,
+  SourceRow,
+  UserItemKind,
+  WatchProgressRow,
 } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CachedHomeSnapshot, useCatalogUiCache, useSeriesUnplayedCounts } from '../shared';
+import {
+  type CachedHomeSnapshot,
+  useCatalogUiCache,
+  useProfile,
+  useSeriesUnplayedCounts,
+} from '../shared';
 import {
   applyHomeFavUpdate,
   applyHomeWatchedUpdate,
@@ -78,6 +82,9 @@ export function useHomeData({
   userStateVersion = 0,
 }: UseHomeDataOptions): HomeDataState {
   const uiCache = useCatalogUiCache();
+  const { activeProfileId } = useProfile();
+  const activeProfileIdRef = useRef(activeProfileId);
+  activeProfileIdRef.current = activeProfileId;
   const initialCached = sources.length > 0 ? (uiCache?.getHome()?.snapshot ?? null) : null;
 
   const [loading, setLoading] = useState(() => sources.length > 0 && initialCached === null);
@@ -263,7 +270,7 @@ export function useHomeData({
 
       const nextFav = !snapRef.current.favoriteKeys.has(key);
       const addedRow: FavoriteRow = {
-        profileId: DEFAULT_PROFILE_ID,
+        profileId: activeProfileIdRef.current,
         sourceId: target.sourceId,
         itemKey: key,
         kind: target.kind,
@@ -370,7 +377,7 @@ export function useHomeData({
             updatedAt: Date.now(),
           }
         : {
-            profileId: DEFAULT_PROFILE_ID,
+            profileId: activeProfileIdRef.current,
             sourceId: target.sourceId,
             itemKey: key,
             kind: target.kind,

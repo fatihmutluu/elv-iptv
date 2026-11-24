@@ -273,8 +273,8 @@ export function createCoalescedCatalog(
     listSources: () => c.listSources(),
     categories: (sourceId, kind, catOpts) => c.categories(sourceId, kind, catOpts),
     items: (categoryId, offset, limit, itemOpts) => c.items(categoryId, offset, limit, itemOpts),
-    seasons: (seriesId) => c.seasons(seriesId),
-    episodes: (seriesId, season) => c.episodes(seriesId, season),
+    seasons: (seriesId, seasonOpts) => c.seasons(seriesId, seasonOpts),
+    episodes: (seriesId, season, epOpts) => c.episodes(seriesId, season, epOpts),
     resolveStream: (itemKey, streamOpts) => c.resolveStream(itemKey, streamOpts),
     ...(c.importGuide ? { importGuide: c.importGuide.bind(c) } : {}),
     ...(c.latestImportHealth ? { latestImportHealth: c.latestImportHealth.bind(c) } : {}),
@@ -320,11 +320,11 @@ export function createCoalescedCatalog(
     ...(c.clearParentalPin ? { clearParentalPin: c.clearParentalPin.bind(c) } : {}),
     ...(queryNextEpisodeFn
       ? {
-          queryNextEpisode: async (seriesKey, currentItemKey, profileId) => {
+          queryNextEpisode: async (seriesKey, currentItemKey, profileId, nextOpts) => {
             const p = normalizeProfile(profileId);
             await coalescer.flushPrefix(`progress:${p}:`);
             await coalescer.flushPrefix(`watched:${p}:`);
-            return queryNextEpisodeFn(seriesKey, currentItemKey, profileId);
+            return queryNextEpisodeFn(seriesKey, currentItemKey, profileId, nextOpts);
           },
         }
       : {}),

@@ -405,9 +405,11 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'items':
         return service.items(call.categoryId, call.offset, call.limit, call.opts);
       case 'liveVariants':
-        return service.liveVariants ? service.liveVariants(call.itemKey, call.categoryId) : [];
+        return service.liveVariants
+          ? service.liveVariants(call.itemKey, call.categoryId, call.opts)
+          : [];
       case 'itemVersions':
-        return service.itemVersions ? service.itemVersions(call.itemKey) : [];
+        return service.itemVersions ? service.itemVersions(call.itemKey, call.opts) : [];
       case 'allSourcesItems':
         return service.allSourcesItems
           ? service.allSourcesItems(call.kind, call.offset, call.limit, call.sourceIds, call.opts)
@@ -437,12 +439,12 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
           ? service.channelByNumber(call.num, call.sourceId, call.opts)
           : null;
       case 'seasons':
-        return service.seasons(call.seriesId);
+        return service.seasons(call.seriesId, call.opts);
       case 'episodes':
-        return service.episodes(call.seriesId, call.season);
+        return service.episodes(call.seriesId, call.season, call.opts);
       case 'queryNextEpisode':
         return service.queryNextEpisode
-          ? service.queryNextEpisode(call.seriesKey, call.currentItemKey, call.profileId)
+          ? service.queryNextEpisode(call.seriesKey, call.currentItemKey, call.profileId, call.opts)
           : null;
       case 'resolveStream':
         return service.resolveStream(call.itemKey, call.opts);

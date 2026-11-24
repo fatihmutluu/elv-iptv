@@ -197,9 +197,13 @@ export interface CatalogService {
     opts?: ListItemsOptions,
   ): Promise<ItemRow[]>;
   /** Lists selectable quality variants of a live channel (`#218`). */
-  liveVariants?(itemKey: string, categoryId?: string): Promise<readonly LiveVariantOption[]>;
+  liveVariants?(
+    itemKey: string,
+    categoryId?: string,
+    opts?: ParentalQueryOptions,
+  ): Promise<readonly LiveVariantOption[]>;
   /** Lists selectable versions of a multi-version VOD movie (`#404`). */
-  itemVersions?(itemKey: string): Promise<readonly VodVersionOption[]>;
+  itemVersions?(itemKey: string, opts?: ParentalQueryOptions): Promise<readonly VodVersionOption[]>;
   allSourcesItems?(
     kind: BrowseKind,
     offset: number,
@@ -236,12 +240,13 @@ export interface CatalogService {
     sourceId?: string,
     opts?: ParentalQueryOptions,
   ): Promise<ItemRow | null>;
-  seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
-  episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
+  seasons(seriesId: number, opts?: ParentalQueryOptions): Promise<Result<SeasonRow[]>>;
+  episodes(seriesId: number, season: number, opts?: ParentalQueryOptions): Promise<EpisodeRow[]>;
   queryNextEpisode?(
     seriesKey: string,
     currentItemKey: string,
     profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
   ): Promise<NextEpisodeRow | null>;
   resolveStream(itemKey: string, opts?: ParentalQueryOptions): Promise<Result<StreamRequest>>;
   saveProgress?(input: SaveProgressInput): Promise<Result<WatchProgressRow>>;
@@ -475,8 +480,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       return playtime.resolveLogos(await queryItems(db, ref, offset, limit, opts), ref.sourceId);
     },
 
-    liveVariants: (itemKey, categoryId) => queryLiveVariants(db, itemKey, categoryId),
-    itemVersions: (itemKey) => queryItemVersions(db, itemKey),
+    liveVariants: (itemKey, categoryId, opts) => queryLiveVariants(db, itemKey, categoryId, opts),
+    itemVersions: (itemKey, opts) => queryItemVersions(db, itemKey, opts),
 
     allSourcesItems: async (kind, offset, limit, sourceIds, opts) =>
       playtime.resolveRowLogos(
@@ -529,10 +534,14 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       return resolved ?? null;
     },
 
-    async seasons(seriesId) {
+    async seasons(seriesId, opts) {
       const series = await querySeries(db, seriesId);
       if (series === undefined) return notFound();
-      let seasons = await querySeasons(db, series);
+      const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
+      if (filter !== null && (await isItemRestricted(db, filter, series.key))) {
+        return err(elvError('auth', 'parental-locked'));
+      }
+      let seasons = await querySeasons(db, series, opts);
       if (seasons.length === 0) {
         const source = await getSource(db, series.sourceId);
         if (source?.kind === 'xtream') {
@@ -545,18 +554,18 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
             { taskKey: series.key },
           );
           if (!loaded.ok) return loaded;
-          seasons = await querySeasons(db, series);
+          seasons = await querySeasons(db, series, opts);
         }
       }
       return ok(seasons);
     },
 
-    async episodes(seriesId, season) {
+    async episodes(seriesId, season, opts) {
       const series = await querySeries(db, seriesId);
-      return series === undefined ? [] : queryEpisodes(db, series, season);
+      return series === undefined ? [] : queryEpisodes(db, series, season, opts);
     },
-    async queryNextEpisode(seriesKey, currentItemKey, profileId) {
-      const found = await queryNextEpisode(db, seriesKey, currentItemKey, profileId);
+    async queryNextEpisode(seriesKey, currentItemKey, profileId, opts) {
+      const found = await queryNextEpisode(db, seriesKey, currentItemKey, profileId, opts);
       if (found === null) return null;
       const [resolved] = await playtime.resolveRowLogos([found]);
       return resolved ?? found;

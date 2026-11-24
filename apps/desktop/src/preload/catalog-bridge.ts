@@ -302,13 +302,15 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         limit,
         ...(opts === undefined ? {} : { opts }),
       }),
-    liveVariants: (itemKey, categoryId) =>
+    liveVariants: (itemKey, categoryId, opts) =>
       callValue({
         method: 'liveVariants',
         itemKey,
         ...(categoryId === undefined ? {} : { categoryId }),
+        ...(opts === undefined ? {} : { opts }),
       }),
-    itemVersions: (itemKey) => callValue({ method: 'itemVersions', itemKey }),
+    itemVersions: (itemKey, opts) =>
+      callValue({ method: 'itemVersions', itemKey, ...(opts === undefined ? {} : { opts }) }),
     allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
       callValue({
         method: 'allSourcesItems',
@@ -359,14 +361,17 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         ...(sourceId === undefined ? {} : { sourceId }),
         ...(opts === undefined ? {} : { opts }),
       }),
-    seasons: (seriesId) => callResult({ method: 'seasons', seriesId }),
-    episodes: (seriesId, season) => callValue({ method: 'episodes', seriesId, season }),
-    queryNextEpisode: (seriesKey, currentItemKey, profileId) =>
+    seasons: (seriesId, opts) =>
+      callResult({ method: 'seasons', seriesId, ...(opts === undefined ? {} : { opts }) }),
+    episodes: (seriesId, season, opts) =>
+      callValue({ method: 'episodes', seriesId, season, ...(opts === undefined ? {} : { opts }) }),
+    queryNextEpisode: (seriesKey, currentItemKey, profileId, opts) =>
       callValue({
         method: 'queryNextEpisode',
         seriesKey,
         currentItemKey,
         ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
       }),
     resolveStream: (itemKey, opts) =>
       callResult({ method: 'resolveStream', itemKey, ...(opts === undefined ? {} : { opts }) }),

@@ -81,6 +81,8 @@ export interface SettingsScreenProps {
   readonly onFocusTopNav?: () => void;
   /** Whether Settings currently owns TV remote focus (`false` while Top Nav owns focus). */
   readonly isActiveScope?: boolean;
+  /** Whether a transient root overlay (e.g. PIN entry or Profile picker) temporarily stole focus; preserves Settings pane. */
+  readonly hasTransientOverlay?: boolean;
   /** Overrides Android-only Video decoder row visibility in Playback settings (`#411`). */
   readonly showAndroidDecoder?: boolean;
 }
@@ -153,6 +155,7 @@ export function SettingsScreen({
   renderLicenses,
   onFocusTopNav,
   isActiveScope = true,
+  hasTransientOverlay = false,
   showAndroidDecoder = Platform.OS === 'android',
 }: SettingsScreenProps): ReactElement {
   const theme = useTheme();
@@ -263,6 +266,7 @@ export function SettingsScreen({
     onSectionChange: handleSelectSection,
     onActivateControl: handleActivateControl,
     showAndroidDecoder,
+    preservePaneOnBlur: hasTransientOverlay,
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
 

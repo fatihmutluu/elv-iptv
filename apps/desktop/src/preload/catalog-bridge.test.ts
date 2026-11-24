@@ -555,6 +555,13 @@ describe('createCatalogBridge', () => {
       bridge.resolveStream('s1:live:1', pOpts),
       bridge.epgSlice?.('s1', 1000, 2000, 50, pOpts) ?? Promise.resolve([]),
       bridge.listFavorites(10, 'p_kids', { parentalUnlocked: true }),
+      bridge.liveVariants?.('s1:live:1', 's1|live|1', pOpts) ?? Promise.resolve([]),
+      bridge.itemVersions?.('s1:movie:1', pOpts) ?? Promise.resolve([]),
+      bridge.seasons(42, pOpts),
+      bridge.episodes(42, 1, pOpts),
+      bridge.queryNextEpisode('s1:series:42', 's1:episode:1', 'p_kids', {
+        parentalUnlocked: true,
+      }),
       bridge.flushPendingWrites?.() ?? Promise.resolve(),
     ];
     await Promise.resolve();
@@ -576,7 +583,50 @@ describe('createCatalogBridge', () => {
       'resolveStream',
       'epgSlice',
       'listFavorites',
+      'liveVariants',
+      'itemVersions',
+      'seasons',
+      'episodes',
+      'queryNextEpisode',
       'flushPendingWrites',
+    ]);
+    expect(port.sent.slice(16, 21)).toEqual([
+      {
+        type: 'call',
+        reqId: 17,
+        call: {
+          method: 'liveVariants',
+          itemKey: 's1:live:1',
+          categoryId: 's1|live|1',
+          opts: pOpts,
+        },
+      },
+      {
+        type: 'call',
+        reqId: 18,
+        call: { method: 'itemVersions', itemKey: 's1:movie:1', opts: pOpts },
+      },
+      {
+        type: 'call',
+        reqId: 19,
+        call: { method: 'seasons', seriesId: 42, opts: pOpts },
+      },
+      {
+        type: 'call',
+        reqId: 20,
+        call: { method: 'episodes', seriesId: 42, season: 1, opts: pOpts },
+      },
+      {
+        type: 'call',
+        reqId: 21,
+        call: {
+          method: 'queryNextEpisode',
+          seriesKey: 's1:series:42',
+          currentItemKey: 's1:episode:1',
+          profileId: 'p_kids',
+          opts: { parentalUnlocked: true },
+        },
+      },
     ]);
 
     for (let i = 2; i < 2 + calls.length; i += 1) {

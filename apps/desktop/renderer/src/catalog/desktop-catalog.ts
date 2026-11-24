@@ -1,4 +1,4 @@
-import type { CatalogService, DeviceImportOptions } from '@elv/data';
+import type { CatalogService, DeviceImportOptions, ParentalQueryOptions } from '@elv/data';
 import { type ElvError, elvError, err } from '@elv/domain';
 import type { CatalogBridge } from '../../../src/shared/catalog-ipc.ts';
 
@@ -96,10 +96,10 @@ export function createDesktopCatalogFromBridge(
         : bridge.importGuide(id),
     categories: (sourceId, kind, opts) => bridge.categories(sourceId, kind, opts),
     items: (categoryId, offset, limit, opts) => bridge.items(categoryId, offset, limit, opts),
-    liveVariants: (itemKey, categoryId) =>
-      bridge.liveVariants ? bridge.liveVariants(itemKey, categoryId) : Promise.resolve([]),
-    itemVersions: (itemKey) =>
-      bridge.itemVersions ? bridge.itemVersions(itemKey) : Promise.resolve([]),
+    liveVariants: (itemKey, categoryId, opts?: ParentalQueryOptions) =>
+      bridge.liveVariants ? bridge.liveVariants(itemKey, categoryId, opts) : Promise.resolve([]),
+    itemVersions: (itemKey, opts?: ParentalQueryOptions) =>
+      bridge.itemVersions ? bridge.itemVersions(itemKey, opts) : Promise.resolve([]),
     allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
       bridge.allSourcesItems
         ? bridge.allSourcesItems(kind, offset, limit, sourceIds, opts)
@@ -116,10 +116,15 @@ export function createDesktopCatalogFromBridge(
     epgSlice: (sourceId, fromMs, toMs, limit, opts) =>
       bridge.epgSlice ? bridge.epgSlice(sourceId, fromMs, toMs, limit, opts) : Promise.resolve([]),
     channelByNumber: (num, sourceId, opts) => bridge.channelByNumber(num, sourceId, opts),
-    seasons: (seriesId) => bridge.seasons(seriesId),
-    episodes: (seriesId, season) => bridge.episodes(seriesId, season),
-    queryNextEpisode: (seriesKey, currentItemKey, profileId) =>
-      bridge.queryNextEpisode(seriesKey, currentItemKey, profileId),
+    seasons: (seriesId, opts?: ParentalQueryOptions) => bridge.seasons(seriesId, opts),
+    episodes: (seriesId, season, opts?: ParentalQueryOptions) =>
+      bridge.episodes(seriesId, season, opts),
+    queryNextEpisode: (
+      seriesKey,
+      currentItemKey,
+      profileId,
+      opts?: { readonly parentalUnlocked?: boolean },
+    ) => bridge.queryNextEpisode(seriesKey, currentItemKey, profileId, opts),
     resolveStream: (itemKey, opts) => bridge.resolveStream(itemKey, opts),
     saveProgress: (input) =>
       bridge.saveProgress({

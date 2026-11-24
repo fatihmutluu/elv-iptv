@@ -1,5 +1,5 @@
 import type { ProfileRecord } from '@elv/data';
-import type { KeyEvent } from '@elv/focus-core';
+import type { KeyEvent, KeyInput } from '@elv/focus-core';
 import {
   CtaButton,
   MicroPill,
@@ -8,13 +8,15 @@ import {
   useI18n,
   useKeyInterpreter,
   useTheme,
+  useTvKeyInterceptor,
+  useTvKeySource,
   useViewport,
   webBackdropBlur,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ProfileAvatarBadge } from './ProfileAvatarBadge';
 
 /** Props of {@link ProfilePickerOverlay}. */
@@ -27,12 +29,25 @@ export interface ProfilePickerOverlayProps {
   readonly testID?: string;
 }
 
+const NOOP_TV_SUBSCRIBER = (): boolean => false;
+
+function useExclusiveTvKeySource(
+  onInput: ((input: KeyInput) => boolean | undefined) | ((input: KeyInput) => void),
+): void {
+  // Keep TvRemoteProvider's lazy platform listener attached even if no screen underneath subscribes.
+  useTvKeySource(NOOP_TV_SUBSCRIBER);
+  useTvKeyInterceptor((input) => {
+    onInput(input);
+    return true;
+  });
+}
+
 function PickerTvKeyBridge({
   onEvent,
 }: {
   readonly onEvent: (event: KeyEvent) => boolean;
 }): ReactElement {
-  useKeyInterpreter(onEvent);
+  useKeyInterpreter(onEvent, { keySource: useExclusiveTvKeySource });
   return <TvFocusAnchor testID="profile-picker-tv-focus-anchor" hasTVPreferredFocus />;
 }
 
@@ -66,6 +81,44 @@ export function ProfilePickerOverlay({
 
   const stateRef = useRef({ zone, profileIdx, footerIdx, count: profiles.length });
   stateRef.current = { zone, profileIdx, footerIdx, count: profiles.length };
+
+  useEffect(() => {
+    if ((Platform.OS as string) !== 'web') return undefined;
+    type WebKeyEvent = {
+      key?: string;
+      preventDefault?: () => void;
+      stopPropagation?: () => void;
+      stopImmediatePropagation?: () => void;
+    };
+    const host = globalThis as unknown as {
+      addEventListener?: (
+        type: string,
+        listener: (e: WebKeyEvent) => void,
+        capture?: boolean,
+      ) => void;
+      removeEventListener?: (
+        type: string,
+        listener: (e: WebKeyEvent) => void,
+        capture?: boolean,
+      ) => void;
+    };
+    if (
+      typeof host.addEventListener !== 'function' ||
+      typeof host.removeEventListener !== 'function'
+    ) {
+      return undefined;
+    }
+    const onKeyDown = (event: WebKeyEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        event.stopImmediatePropagation?.();
+        onClose();
+      }
+    };
+    host.addEventListener('keydown', onKeyDown, true);
+    return () => host.removeEventListener?.('keydown', onKeyDown, true);
+  }, [onClose]);
 
   const handleTvKey = useCallback(
     (event: KeyEvent): boolean => {

@@ -357,6 +357,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onCancelPreviewChannel: handoff.cancelPreviewChannel,
     stillWatchingVisible: !inPip && extras.stillWatching.promptVisible,
     onStillWatchingKey: extras.handleStillWatchingKey,
+    externalOverlayOpen: props.externalOverlayOpen,
   });
   hostKeyRef.current = controls.handleHostKey;
   cancelScrubRef.current = controls.cancelScrub;

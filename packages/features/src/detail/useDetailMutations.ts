@@ -1,6 +1,6 @@
 import type { CatalogService, WatchProgressRow } from '@elv/data';
 import { type MutableRefObject, useCallback } from 'react';
-import type { DetailTarget } from '../shared';
+import { type DetailTarget, useProfile } from '../shared';
 import { buildOptimisticWatchedRow, type DetailSnapshot } from './detail-data-helpers';
 
 /** Shared mutable refs coordinating optimistic Detail mutations with background hydration. */
@@ -39,6 +39,7 @@ export function useDetailMutations(opts: {
   readonly toggleWatched: () => Promise<void>;
 } {
   const { catalog, target, title, posterUri, backdropUri, year, rating, refs, updateSnap } = opts;
+  const { activeProfileId } = useProfile();
 
   const toggleMyList = useCallback(async (): Promise<void> => {
     const reqKey = target.itemKey;
@@ -118,6 +119,7 @@ export function useDetailMutations(opts: {
       itemKey: reqKey,
       title,
       logo: posterUri ?? backdropUri,
+      profileId: activeProfileId,
     });
     updateSnap((prev) => ({ ...prev, movieProgress: optimistic }));
 
@@ -160,6 +162,7 @@ export function useDetailMutations(opts: {
       refs.watchedInFlightRef.current = Math.max(0, refs.watchedInFlightRef.current - 1);
     }
   }, [
+    activeProfileId,
     backdropUri,
     catalog,
     posterUri,

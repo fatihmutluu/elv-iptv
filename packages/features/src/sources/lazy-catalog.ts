@@ -80,9 +80,9 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     categories: async (sourceId, kind, opts) => (await open()).categories(sourceId, kind, opts),
     items: async (categoryId, offset, limit, opts) =>
       (await open()).items(categoryId, offset, limit, opts),
-    liveVariants: async (itemKey, categoryId) =>
-      (await open()).liveVariants?.(itemKey, categoryId) ?? [],
-    itemVersions: async (itemKey) => (await open()).itemVersions?.(itemKey) ?? [],
+    liveVariants: async (itemKey, categoryId, opts) =>
+      (await open()).liveVariants?.(itemKey, categoryId, opts) ?? [],
+    itemVersions: async (itemKey, opts) => (await open()).itemVersions?.(itemKey, opts) ?? [],
     allSourcesItems: async (kind, offset, limit, sourceIds, opts) =>
       (await open()).allSourcesItems?.(kind, offset, limit, sourceIds, opts) ?? [],
     itemDetail: async (itemKey, opts) => {
@@ -107,10 +107,10 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
       (await open()).epgSlice?.(sourceId, fromMs, toMs, limit, opts) ?? [],
     channelByNumber: async (num, sourceId, opts) =>
       (await open()).channelByNumber?.(num, sourceId, opts) ?? null,
-    seasons: (seriesId) => wrapResult(async () => (await open()).seasons(seriesId)),
-    episodes: async (seriesId, season) => (await open()).episodes(seriesId, season),
-    queryNextEpisode: async (seriesKey, currentItemKey, profileId) =>
-      (await open()).queryNextEpisode?.(seriesKey, currentItemKey, profileId) ?? null,
+    seasons: (seriesId, opts) => wrapResult(async () => (await open()).seasons(seriesId, opts)),
+    episodes: async (seriesId, season, opts) => (await open()).episodes(seriesId, season, opts),
+    queryNextEpisode: async (seriesKey, currentItemKey, profileId, opts) =>
+      (await open()).queryNextEpisode?.(seriesKey, currentItemKey, profileId, opts) ?? null,
     resolveStream: (itemKey, opts) =>
       wrapResult(async () => (await open()).resolveStream(itemKey, opts)),
     saveProgress: (input) =>

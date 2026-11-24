@@ -21,6 +21,7 @@ import type { AppLifecyclePort } from '../ports/app-lifecycle';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { VideoHost, VideoResizeMode } from '../ports/video-host';
+import { useProfile } from '../shared';
 import type { PlayerOsdProps } from './DesktopCinemaBar';
 import {
   DesktopDockedTopBar,
@@ -104,6 +105,8 @@ export interface PlayerScreenProps {
   onWindowAspectRatioLockChange?: (enabled: boolean) => void;
   backgroundAudioPlayback?: boolean;
   liveChannelSwitchMode?: LiveChannelSwitchModePref;
+  /** When `true`, suspends player remote/keyboard shortcuts while a root overlay is open. */
+  externalOverlayOpen?: boolean;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
 }
@@ -164,6 +167,8 @@ export interface PlayerScreenStageProps {
 export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
+  const { pinDialog, profilePickerOpen } = useProfile();
+  const hasExternalOverlay = pinDialog !== null || profilePickerOpen;
   const osdNode = <PlayerOsd {...p.osdProps} />;
 
   return (
@@ -181,7 +186,9 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
       {p.isTv ? (
         <TvFocusAnchor
           testID="player-tv-focus-anchor"
-          hasTVPreferredFocus={!p.anySheetOpen && !p.locked && !p.stillWatchingVisible}
+          hasTVPreferredFocus={
+            !p.anySheetOpen && !p.locked && !p.stillWatchingVisible && !hasExternalOverlay
+          }
         />
       ) : null}
 

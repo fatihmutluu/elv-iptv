@@ -1,8 +1,8 @@
 import type { SqlDriver } from '@elv/domain';
 import type { EpgGenre } from '@elv/sources';
-import type { ParentalQueryOptions } from './parental-policy';
+import { isAdultKeywordMatch, type ParentalQueryOptions } from './parental-policy';
 import {
-  findRestrictedItemKeys,
+  buildSqlItemRestrictionClause,
   isProgrammeRestricted,
   loadActiveParentalFilter,
 } from './parental-repo';
@@ -99,23 +99,32 @@ export async function queryCrossChannelEpgSlice(
     }));
   }
 
-  const mappedChannels = await db.all<{ guide_id: string; key: string; name: string }>(
-    `SELECT cg.guide_id, l.key, l.name
+  const sqlRestrict = buildSqlItemRestrictionClause(
+    filter,
+    'live',
+    'l.source_id',
+    'l.key',
+    sourceId,
+  );
+  const mappedChannels = await db.all<{
+    guide_id: string;
+    name: string;
+    sql_allowed: number;
+  }>(
+    `SELECT cg.guide_id, l.name,
+            CASE WHEN 1 = 1${sqlRestrict.clause} THEN 1 ELSE 0 END AS sql_allowed
        FROM channel_guide cg
        JOIN live l ON l.source_id = cg.source_id AND l.key = cg.channel_key
       WHERE cg.source_id = ?`,
-    [sourceId],
-  );
-  const restrictedChannelKeys = await findRestrictedItemKeys(
-    db,
-    filter,
-    mappedChannels.map((c) => ({ itemKey: c.key, sourceId, kind: 'live' as const, title: c.name })),
+    [...sqlRestrict.params, sourceId],
   );
   const hasAllowedByGuide = new Set<string>();
   const hasRestrictedByGuide = new Set<string>();
   for (const ch of mappedChannels) {
-    if (restrictedChannelKeys.has(ch.key)) hasRestrictedByGuide.add(ch.guide_id);
-    else hasAllowedByGuide.add(ch.guide_id);
+    const allowed =
+      ch.sql_allowed !== 0 && !(filter.blockAdultKeywords && isAdultKeywordMatch(ch.name));
+    if (allowed) hasAllowedByGuide.add(ch.guide_id);
+    else hasRestrictedByGuide.add(ch.guide_id);
   }
   const restrictedGuideIds = new Set<string>();
   for (const gid of hasRestrictedByGuide) {

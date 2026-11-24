@@ -1,6 +1,6 @@
-import type { PinVerifyResult } from '@elv/data';
+import { PIN_LOCKOUT_MS, type PinVerifyResult } from '@elv/data';
 import type { Result } from '@elv/domain';
-import type { KeyEvent } from '@elv/focus-core';
+import type { KeyEvent, KeyInput } from '@elv/focus-core';
 import {
   CtaButton,
   Icon,
@@ -10,6 +10,8 @@ import {
   useI18n,
   useKeyInterpreter,
   useTheme,
+  useTvKeyInterceptor,
+  useTvKeySource,
   useViewport,
   webBackdropBlur,
   webCursorPointer,
@@ -48,6 +50,8 @@ export interface PinEntryOverlayProps {
   readonly mode: PinDialogMode;
   readonly title?: string;
   readonly onVerify?: (pin: string) => Promise<PinVerifyResult>;
+  /** Pure PIN verifier used in `change` mode's current-PIN step without unlocking parental state. */
+  readonly onVerifyCurrentPin?: (pin: string) => Promise<PinVerifyResult>;
   readonly onSetPin?: (pin: string, currentPin?: string) => Promise<Result<void>>;
   readonly onClearPin?: (currentPin: string) => Promise<Result<void>>;
   readonly onSuccess: () => void;
@@ -62,12 +66,25 @@ function initialStepForMode(mode: PinDialogMode): FlowStep {
   return 'verify';
 }
 
+const NOOP_TV_SUBSCRIBER = (): boolean => false;
+
+function useExclusiveTvKeySource(
+  onInput: ((input: KeyInput) => boolean | undefined) | ((input: KeyInput) => void),
+): void {
+  // Keep TvRemoteProvider's lazy platform listener attached even if no screen underneath subscribes.
+  useTvKeySource(NOOP_TV_SUBSCRIBER);
+  useTvKeyInterceptor((input) => {
+    onInput(input);
+    return true;
+  });
+}
+
 function PinTvKeyBridge({
   onEvent,
 }: {
   readonly onEvent: (event: KeyEvent) => boolean;
 }): ReactElement {
-  useKeyInterpreter(onEvent);
+  useKeyInterpreter(onEvent, { keySource: useExclusiveTvKeySource });
   return <TvFocusAnchor testID="pin-overlay-tv-focus-anchor" hasTVPreferredFocus />;
 }
 
@@ -80,6 +97,7 @@ export function PinEntryOverlay({
   mode,
   title,
   onVerify,
+  onVerifyCurrentPin,
   onSetPin,
   onClearPin,
   onSuccess,
@@ -183,7 +201,10 @@ export function PinEntryOverlay({
       }
 
       if (step === 'verify-old') {
-        const res = (await onVerify?.(digits)) ?? { ok: false, remainingAttempts: 0 };
+        const res = (await (onVerifyCurrentPin ?? onVerify)?.(digits)) ?? {
+          ok: false,
+          remainingAttempts: 0,
+        };
         if (res.ok) {
           setPendingOldPin(digits);
           setDigits('');
@@ -224,7 +245,13 @@ export function PinEntryOverlay({
           return;
         }
         setDigits('');
-        setErrorMsg(i18n.t('parental.pinWrong'));
+        if (res !== undefined && !res.ok && res.error.code === 'pin-locked') {
+          const now = Date.now();
+          setNowMs(now);
+          setLockedUntilMs(now + PIN_LOCKOUT_MS);
+        } else {
+          setErrorMsg(i18n.t('parental.pinWrong'));
+        }
         return;
       }
 
@@ -236,7 +263,13 @@ export function PinEntryOverlay({
           return;
         }
         setDigits('');
-        setErrorMsg(i18n.t('parental.pinWrong'));
+        if (res !== undefined && !res.ok && res.error.code === 'pin-locked') {
+          const now = Date.now();
+          setNowMs(now);
+          setLockedUntilMs(now + PIN_LOCKOUT_MS);
+        } else {
+          setErrorMsg(i18n.t('parental.pinWrong'));
+        }
       }
     } finally {
       setSubmitting(false);
@@ -249,6 +282,7 @@ export function PinEntryOverlay({
     onSetPin,
     onSuccess,
     onVerify,
+    onVerifyCurrentPin,
     pendingNewPin,
     pendingOldPin,
     step,
@@ -271,14 +305,22 @@ export function PinEntryOverlay({
   // Desktop/web physical keyboard digit, Backspace, Enter, and Escape support.
   useEffect(() => {
     if (!isWeb) return undefined;
+    type WebKeyEvent = {
+      key?: string;
+      preventDefault?: () => void;
+      stopPropagation?: () => void;
+      stopImmediatePropagation?: () => void;
+    };
     const host = globalThis as unknown as {
       addEventListener?: (
         type: string,
-        listener: (e: { key?: string; preventDefault?: () => void }) => void,
+        listener: (e: WebKeyEvent) => void,
+        capture?: boolean,
       ) => void;
       removeEventListener?: (
         type: string,
-        listener: (e: { key?: string; preventDefault?: () => void }) => void,
+        listener: (e: WebKeyEvent) => void,
+        capture?: boolean,
       ) => void;
     };
     if (
@@ -287,24 +329,29 @@ export function PinEntryOverlay({
     ) {
       return undefined;
     }
-    const onKeyDown = (event: { key?: string; preventDefault?: () => void }) => {
+    const consume = (event: WebKeyEvent) => {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      event.stopImmediatePropagation?.();
+    };
+    const onKeyDown = (event: WebKeyEvent) => {
       const key = event.key;
       if (typeof key === 'string' && key.length === 1 && key >= '0' && key <= '9') {
-        event.preventDefault?.();
+        consume(event);
         appendDigit(key);
       } else if (key === 'Backspace') {
-        event.preventDefault?.();
+        consume(event);
         backspace();
       } else if (key === 'Enter') {
-        event.preventDefault?.();
+        consume(event);
         void handleSubmit();
       } else if (key === 'Escape') {
-        event.preventDefault?.();
+        consume(event);
         onCancel();
       }
     };
-    host.addEventListener('keydown', onKeyDown);
-    return () => host.removeEventListener?.('keydown', onKeyDown);
+    host.addEventListener('keydown', onKeyDown, true);
+    return () => host.removeEventListener?.('keydown', onKeyDown, true);
   }, [appendDigit, backspace, handleSubmit, isWeb, onCancel]);
 
   const handleTvKey = useCallback(

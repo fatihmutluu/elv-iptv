@@ -2,13 +2,14 @@ import { MAX_PROFILE_NAME_LENGTH, PROFILE_AVATAR_TOKENS, type ProfileAvatarToken
 import {
   CtaButton,
   Surface,
+  TvTextInput,
   useI18n,
   useTheme,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
 import { type ReactElement, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ProfileAvatarBadge } from './ProfileAvatarBadge';
 
 /** Submitted form payload for creating or updating a local profile. */
@@ -42,6 +43,9 @@ export function ProfileFormCard({
     initialValues?.avatarToken ?? 'crimson',
   );
   const [isKids, setIsKids] = useState(initialValues?.isKids ?? false);
+  const [nameFocused, setNameFocused] = useState(false);
+  const [focusedAvatar, setFocusedAvatar] = useState<ProfileAvatarToken | null>(null);
+  const [kidsToggleFocused, setKidsToggleFocused] = useState(false);
 
   const trimmed = name.trim();
   const canSave = trimmed.length > 0 && trimmed.length <= MAX_PROFILE_NAME_LENGTH && !submitting;
@@ -58,25 +62,32 @@ export function ProfileFormCard({
         <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
           {i18n.t('profiles.nameLabel')}
         </Text>
-        <TextInput
-          testID="profile-form-name-input"
-          value={name}
-          onChangeText={setName}
-          maxLength={MAX_PROFILE_NAME_LENGTH}
-          placeholder={i18n.t('profiles.namePlaceholder')}
-          placeholderTextColor={theme.colors.textMuted}
-          accessibilityLabel={i18n.t('profiles.nameLabel')}
+        <View
+          testID="profile-form-name-frame"
           style={[
-            theme.typography.body,
-            styles.input,
+            styles.inputFrame,
+            transition,
             {
-              color: theme.colors.textPrimary,
-              backgroundColor: theme.colors.bgSurface,
-              borderColor: theme.colors.chipBorder,
+              backgroundColor: nameFocused ? theme.colors.focusFill : theme.colors.bgSurface,
+              borderColor: nameFocused ? theme.colors.focusRingColor : theme.colors.chipBorder,
+              borderWidth: nameFocused ? theme.focus.ringWidth : 1,
               borderRadius: theme.radius.button,
             },
           ]}
-        />
+        >
+          <TvTextInput
+            testID="profile-form-name-input"
+            value={name}
+            onChangeText={setName}
+            maxLength={MAX_PROFILE_NAME_LENGTH}
+            placeholder={i18n.t('profiles.namePlaceholder')}
+            placeholderTextColor={theme.colors.textMuted}
+            accessibilityLabel={i18n.t('profiles.nameLabel')}
+            onFocus={() => setNameFocused(true)}
+            onBlur={() => setNameFocused(false)}
+            style={[theme.typography.body, styles.input, { color: theme.colors.textPrimary }]}
+          />
+        </View>
       </View>
 
       <View style={styles.field}>
@@ -93,17 +104,32 @@ export function ProfileFormCard({
                 accessibilityRole="radio"
                 accessibilityLabel={token}
                 accessibilityState={{ selected }}
+                focusable
+                onFocus={() => setFocusedAvatar(token)}
+                onBlur={() => setFocusedAvatar((prev) => (prev === token ? null : prev))}
                 onPress={() => setAvatarToken(token)}
-                style={[
-                  styles.avatarChoice,
-                  cursorPointer,
-                  transition,
-                  {
-                    borderRadius: theme.radius.pill,
-                    borderColor: selected ? theme.colors.focusRingColor : 'transparent',
-                    backgroundColor: selected ? theme.colors.focusFill : 'transparent',
-                  },
-                ]}
+                style={(state) => {
+                  const focused = focusedAvatar === token || Boolean(state.focused);
+                  return [
+                    styles.avatarChoice,
+                    cursorPointer,
+                    transition,
+                    {
+                      borderRadius: theme.radius.pill,
+                      borderWidth: focused ? theme.focus.ringWidth : 2,
+                      borderColor: focused
+                        ? theme.colors.focusRingColor
+                        : selected
+                          ? theme.colors.accent
+                          : 'transparent',
+                      backgroundColor: focused
+                        ? theme.colors.focusFill
+                        : selected
+                          ? theme.colors.subtleHighlight
+                          : 'transparent',
+                    },
+                  ];
+                }}
               >
                 <ProfileAvatarBadge
                   name={trimmed || 'P'}
@@ -123,17 +149,24 @@ export function ProfileFormCard({
         accessibilityLabel={i18n.t('profiles.kidsToggle')}
         accessibilityState={{ checked: isKids }}
         aria-checked={isKids}
+        focusable
+        onFocus={() => setKidsToggleFocused(true)}
+        onBlur={() => setKidsToggleFocused(false)}
         onPress={() => setIsKids((prev) => !prev)}
-        style={[
-          styles.toggleRow,
-          cursorPointer,
-          transition,
-          {
-            borderRadius: theme.radius.card,
-            backgroundColor: theme.colors.bgSurface,
-            borderColor: theme.colors.surfaceBorder,
-          },
-        ]}
+        style={(state) => {
+          const focused = kidsToggleFocused || Boolean(state.focused);
+          return [
+            styles.toggleRow,
+            cursorPointer,
+            transition,
+            {
+              borderRadius: theme.radius.card,
+              backgroundColor: focused ? theme.colors.focusFill : theme.colors.bgSurface,
+              borderWidth: focused ? theme.focus.ringWidth : 1,
+              borderColor: focused ? theme.colors.focusRingColor : theme.colors.surfaceBorder,
+            },
+          ];
+        }}
       >
         <View style={styles.toggleText}>
           <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
@@ -195,9 +228,13 @@ const styles = StyleSheet.create({
   field: {
     gap: 6,
   },
-  input: {
+  inputFrame: {
     minHeight: 42,
     borderWidth: 1,
+    justifyContent: 'center',
+  },
+  input: {
+    minHeight: 40,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },

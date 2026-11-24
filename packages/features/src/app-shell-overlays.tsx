@@ -112,15 +112,17 @@ export function AppShellProfileOverlays({
     activeProfile,
     activeProfileId,
     parentalSettings,
-    hasParentalPin,
+    hasGuardPin,
+    guardPinProfileId,
     parentalUnlocked,
     profilePickerOpen,
     pinDialog,
     switchProfile,
+    verifyParentalPin,
     unlockParental,
     setParentalPin,
     clearParentalPin,
-    requestParentalUnlock,
+    openPinDialog,
     closePinDialog,
     closeProfilePicker,
   } = useProfile();
@@ -131,11 +133,16 @@ export function AppShellProfileOverlays({
       return;
     }
     const needsPinGate =
-      (activeProfile.isKids || parentalSettings.enabled) && hasParentalPin && !parentalUnlocked;
+      (activeProfile.isKids || parentalSettings.enabled) && hasGuardPin && !parentalUnlocked;
     if (needsPinGate) {
       closeProfilePicker();
-      requestParentalUnlock(() => {
-        void switchProfile(targetId);
+      openPinDialog({
+        mode: 'verify',
+        profileId: guardPinProfileId ?? activeProfileId,
+        verifyOnly: true,
+        onSuccess: () => {
+          void switchProfile(targetId);
+        },
       });
       return;
     }
@@ -163,7 +170,12 @@ export function AppShellProfileOverlays({
         <PinEntryOverlay
           mode={pinDialog.mode}
           {...(pinDialog.title !== undefined ? { title: pinDialog.title } : {})}
-          onVerify={(pin) => unlockParental(pin, pinDialog.profileId)}
+          onVerify={(pin) =>
+            pinDialog.verifyOnly
+              ? verifyParentalPin(pin, pinDialog.profileId)
+              : unlockParental(pin, pinDialog.profileId)
+          }
+          onVerifyCurrentPin={(pin) => verifyParentalPin(pin, pinDialog.profileId)}
           onSetPin={(pin, currentPin) => setParentalPin(pin, currentPin, pinDialog.profileId)}
           onClearPin={(currentPin) => clearParentalPin(currentPin, pinDialog.profileId)}
           onSuccess={() => {

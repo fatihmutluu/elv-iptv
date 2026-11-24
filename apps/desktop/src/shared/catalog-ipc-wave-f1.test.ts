@@ -383,4 +383,262 @@ describe('Wave F1 catalog IPC guards (#15, #31)', () => {
       ),
     ).toBe(false);
   });
+
+  it('validates parental/profile opts on liveVariants, itemVersions, seasons, episodes, and queryNextEpisode', () => {
+    const parentalOpts = { profileId: 'p_kids', parentalUnlocked: false };
+
+    expect(
+      isCatalogClientMessage(
+        call({
+          method: 'liveVariants',
+          itemKey: 's1:live:1',
+          categoryId: 's1|live|1',
+          opts: parentalOpts,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isCatalogClientMessage(
+        call({
+          method: 'liveVariants',
+          itemKey: 's1:live:1',
+          opts: parentalOpts,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isCatalogClientMessage(
+        call({
+          method: 'itemVersions',
+          itemKey: 's1:movie:1',
+          opts: parentalOpts,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isCatalogClientMessage(
+        call({
+          method: 'seasons',
+          seriesId: 42,
+          opts: parentalOpts,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isCatalogClientMessage(
+        call({
+          method: 'episodes',
+          seriesId: 42,
+          season: 1,
+          opts: parentalOpts,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isCatalogClientMessage(
+        call({
+          method: 'queryNextEpisode',
+          seriesKey: 's1:series:42',
+          currentItemKey: 's1:episode:1',
+          profileId: 'p_kids',
+          opts: { parentalUnlocked: true },
+        }),
+      ),
+    ).toBe(true);
+
+    for (const badOpts of [
+      { profileId: '../bad' },
+      { parentalUnlocked: 'yes' },
+      { profileId: 'p_kids', extra: true },
+    ]) {
+      expect(
+        isCatalogClientMessage(
+          call({ method: 'liveVariants', itemKey: 's1:live:1', opts: badOpts }),
+        ),
+      ).toBe(false);
+      expect(
+        isCatalogClientMessage(
+          call({ method: 'itemVersions', itemKey: 's1:movie:1', opts: badOpts }),
+        ),
+      ).toBe(false);
+      expect(isCatalogClientMessage(call({ method: 'seasons', seriesId: 42, opts: badOpts }))).toBe(
+        false,
+      );
+      expect(
+        isCatalogClientMessage(
+          call({ method: 'episodes', seriesId: 42, season: 1, opts: badOpts }),
+        ),
+      ).toBe(false);
+    }
+
+    for (const badNextEp of [
+      {
+        method: 'queryNextEpisode',
+        seriesKey: 's1:series:42',
+        currentItemKey: 's1:episode:1',
+        profileId: '../bad',
+      },
+      {
+        method: 'queryNextEpisode',
+        seriesKey: 's1:series:42',
+        currentItemKey: 's1:episode:1',
+        opts: { parentalUnlocked: 'yes' },
+      },
+      {
+        method: 'queryNextEpisode',
+        seriesKey: 's1:series:42',
+        currentItemKey: 's1:episode:1',
+        opts: { parentalUnlocked: true, extra: 1 },
+      },
+    ]) {
+      expect(isCatalogClientMessage(call(badNextEp))).toBe(false);
+    }
+  });
+
+  it('rejects unknown keys and malformed profileId across all catalog and user-state option guards', () => {
+    const badProfileIds = ['../bad', 'has space', 'bad/id', 'a'.repeat(65)];
+
+    for (const profileId of badProfileIds) {
+      expect(
+        isCatalogClientMessage(
+          call({ method: 'categories', sourceId: 's1', kind: 'live', opts: { profileId } }),
+        ),
+      ).toBe(false);
+      expect(
+        isCatalogClientMessage(
+          call({
+            method: 'items',
+            categoryId: 's1|live|1',
+            offset: 0,
+            limit: 10,
+            opts: { profileId },
+          }),
+        ),
+      ).toBe(false);
+      expect(
+        isCatalogClientMessage(
+          call({
+            method: 'allSourcesItems',
+            kind: 'movie',
+            offset: 0,
+            limit: 10,
+            opts: { profileId },
+          }),
+        ),
+      ).toBe(false);
+      expect(
+        isCatalogClientMessage(call({ method: 'search', query: 'abc', opts: { profileId } })),
+      ).toBe(false);
+      expect(
+        isCatalogClientMessage(call({ method: 'searchSuggestions', options: { profileId } })),
+      ).toBe(false);
+      expect(
+        isCatalogClientMessage(
+          call({ method: 'alphabetIndex', input: { kind: 'movie', profileId } }),
+        ),
+      ).toBe(false);
+      expect(
+        isCatalogClientMessage(
+          call({ method: 'itemDetail', itemKey: 's1:movie:1', opts: { profileId } }),
+        ),
+      ).toBe(false);
+      expect(isCatalogClientMessage(call({ method: 'listContinueWatching', profileId }))).toBe(
+        false,
+      );
+      expect(isCatalogClientMessage(call({ method: 'listFavorites', profileId }))).toBe(false);
+      expect(isCatalogClientMessage(call({ method: 'listRecentChannels', profileId }))).toBe(false);
+      expect(
+        isCatalogClientMessage(
+          call({
+            method: 'saveProgress',
+            input: {
+              profileId,
+              sourceId: 's1',
+              itemKey: 's1:movie:1',
+              kind: 'movie',
+              title: 'Film',
+              positionMs: 10,
+              durationMs: 100,
+            },
+          }),
+        ),
+      ).toBe(false);
+      expect(
+        isCatalogClientMessage(
+          call({
+            method: 'toggleFavorite',
+            input: {
+              profileId,
+              sourceId: 's1',
+              itemKey: 's1:movie:1',
+              kind: 'movie',
+              title: 'Film',
+            },
+          }),
+        ),
+      ).toBe(false);
+      expect(
+        isCatalogClientMessage(
+          call({
+            method: 'saveTrackPreference',
+            input: { profileId, scopeKey: 's1:movie:1', sourceId: 's1' },
+          }),
+        ),
+      ).toBe(false);
+    }
+
+    const unknownKeyCalls: unknown[] = [
+      { method: 'categories', sourceId: 's1', kind: 'live', opts: { extra: true } },
+      {
+        method: 'items',
+        categoryId: 's1|live|1',
+        offset: 0,
+        limit: 10,
+        opts: { sortBy: 'alpha', extra: true },
+      },
+      {
+        method: 'allSourcesItems',
+        kind: 'movie',
+        offset: 0,
+        limit: 10,
+        opts: { extra: 1 },
+      },
+      { method: 'search', query: 'abc', opts: { scope: 'movie', extra: 1 } },
+      { method: 'searchSuggestions', options: { limit: 5, extra: 1 } },
+      { method: 'alphabetIndex', input: { kind: 'movie', extra: 1 } },
+      { method: 'itemDetail', itemKey: 's1:movie:1', opts: { parentalUnlocked: true, extra: 1 } },
+      { method: 'listContinueWatching', opts: { parentalUnlocked: false, extra: 1 } },
+      { method: 'listFavorites', opts: { parentalUnlocked: false, extra: 1 } },
+      { method: 'listRecentChannels', opts: { parentalUnlocked: false, extra: 1 } },
+      {
+        method: 'saveProgress',
+        input: {
+          sourceId: 's1',
+          itemKey: 's1:movie:1',
+          kind: 'movie',
+          title: 'Film',
+          positionMs: 10,
+          durationMs: 100,
+          extra: 1,
+        },
+      },
+      {
+        method: 'toggleFavorite',
+        input: {
+          sourceId: 's1',
+          itemKey: 's1:movie:1',
+          kind: 'movie',
+          title: 'Film',
+          extra: 1,
+        },
+      },
+      {
+        method: 'saveTrackPreference',
+        input: { scopeKey: 's1:movie:1', sourceId: 's1', extra: 1 },
+      },
+    ];
+    for (const c of unknownKeyCalls) {
+      expect(isCatalogClientMessage(call(c))).toBe(false);
+    }
+  });
 });

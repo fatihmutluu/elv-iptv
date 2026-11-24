@@ -16,6 +16,7 @@ import {
   TABULAR_NUMS_STYLE,
   useI18n,
   useTheme,
+  useViewport,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
@@ -50,12 +51,17 @@ export function ParentalControlsCard({
 }: ParentalControlsCardProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
+  const viewport = useViewport();
+  const isTv = viewport.formFactor === 'tv';
   const parental = useParental();
   const {
     activeProfileId,
+    profilesReady,
     parentalSettings,
     parentalLocks,
     hasParentalPin,
+    hasGuardPin,
+    guardPinProfileId,
     parentalUnlocked,
     lockParentalNow,
     updateParentalSettings,
@@ -64,14 +70,19 @@ export function ParentalControlsCard({
     openPinDialog,
   } = parental;
 
+  const needsPinGate = hasGuardPin && !parentalUnlocked;
+  const effectiveGuardPinProfileId = guardPinProfileId ?? activeProfileId;
+
   const [categoryKind, setCategoryKind] = useState<BrowseKind>('live');
   const [categories, setCategories] = useState<readonly LockableCategoryEntry[]>([]);
+  const [focusedToggle, setFocusedToggle] = useState<'enabled' | 'adult' | null>(null);
+  const [focusedCatId, setFocusedCatId] = useState<string | null>(null);
 
   const readySources = useMemo(() => sources.filter((s) => !s.needsImport), [sources]);
 
   useEffect(() => {
     let cancelled = false;
-    if (readySources.length === 0) {
+    if (readySources.length === 0 || !profilesReady || needsPinGate) {
       setCategories([]);
       return undefined;
     }
@@ -99,7 +110,7 @@ export function ParentalControlsCard({
     return () => {
       cancelled = true;
     };
-  }, [activeProfileId, catalog, categoryKind, readySources]);
+  }, [activeProfileId, catalog, categoryKind, needsPinGate, profilesReady, readySources]);
 
   const lockedCategoryKeys = useMemo(() => {
     const set = new Set<string>();
@@ -111,16 +122,16 @@ export function ParentalControlsCard({
     return set;
   }, [parentalLocks]);
 
-  /** Gates restricted mutations behind PIN verification whenever a PIN is set and currently locked. */
+  /** Gates restricted mutations behind PIN verification whenever a guard PIN is set and currently locked. */
   const runProtected = useCallback(
     (action: () => void) => {
-      if (hasParentalPin && !parentalUnlocked) {
+      if (hasGuardPin && !parentalUnlocked) {
         requestParentalUnlock(action);
         return;
       }
       action();
     },
-    [hasParentalPin, parentalUnlocked, requestParentalUnlock],
+    [hasGuardPin, parentalUnlocked, requestParentalUnlock],
   );
 
   const kindTabs = useMemo<readonly EditorialCategoryItem[]>(
@@ -152,7 +163,7 @@ export function ParentalControlsCard({
             {i18n.t('parental.subtitle')}
           </Text>
         </View>
-        {parentalSettings.enabled || hasParentalPin ? (
+        {parentalSettings.enabled || hasGuardPin ? (
           <MicroPill
             testID="parental-status-badge"
             label={
@@ -175,34 +186,40 @@ export function ParentalControlsCard({
             testID="parental-pin-status"
             style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
           >
-            {hasParentalPin ? i18n.t('parental.pinSet') : i18n.t('parental.pinNotSet')}
+            {hasGuardPin ? i18n.t('parental.pinSet') : i18n.t('parental.pinNotSet')}
           </Text>
         </View>
         <View style={styles.buttonRow}>
+          {hasGuardPin ? (
+            parentalUnlocked ? (
+              <CtaButton
+                testID="parental-lock-now"
+                variant="secondary"
+                label={i18n.t('parental.lockNow')}
+                onPress={lockParentalNow}
+              />
+            ) : (
+              <CtaButton
+                testID="parental-unlock-button"
+                variant="primary"
+                label={i18n.t('parental.unlockButton')}
+                onPress={() =>
+                  openPinDialog({ mode: 'verify', profileId: effectiveGuardPinProfileId })
+                }
+              />
+            )
+          ) : null}
           {!hasParentalPin ? (
             <CtaButton
               testID="parental-set-pin"
-              variant="primary"
+              variant={hasGuardPin ? 'secondary' : 'primary'}
               label={i18n.t('parental.setPin')}
-              onPress={() => openPinDialog({ mode: 'create', profileId: activeProfileId })}
+              onPress={() =>
+                runProtected(() => openPinDialog({ mode: 'create', profileId: activeProfileId }))
+              }
             />
           ) : (
             <>
-              {parentalUnlocked ? (
-                <CtaButton
-                  testID="parental-lock-now"
-                  variant="secondary"
-                  label={i18n.t('parental.lockNow')}
-                  onPress={lockParentalNow}
-                />
-              ) : (
-                <CtaButton
-                  testID="parental-unlock-button"
-                  variant="primary"
-                  label={i18n.t('parental.unlockButton')}
-                  onPress={() => openPinDialog({ mode: 'verify', profileId: activeProfileId })}
-                />
-              )}
               <CtaButton
                 testID="parental-change-pin"
                 variant="secondary"
@@ -229,12 +246,28 @@ export function ParentalControlsCard({
         accessibilityLabel={i18n.t('parental.enabledToggle')}
         accessibilityState={{ checked: parentalSettings.enabled }}
         aria-checked={parentalSettings.enabled}
+        focusable
+        onFocus={() => setFocusedToggle('enabled')}
+        onBlur={() => setFocusedToggle((prev) => (prev === 'enabled' ? null : prev))}
         onPress={() =>
           runProtected(() => {
             void updateParentalSettings({ enabled: !parentalSettings.enabled });
           })
         }
-        style={[styles.toggleRow, cursorPointer, transition]}
+        style={(state) => {
+          const focused = focusedToggle === 'enabled' || Boolean(state.focused);
+          return [
+            styles.toggleRow,
+            cursorPointer,
+            transition,
+            {
+              borderRadius: theme.radius.card,
+              borderWidth: focused ? theme.focus.ringWidth : 1,
+              borderColor: focused ? theme.colors.focusRingColor : 'transparent',
+              backgroundColor: focused ? theme.colors.focusFill : 'transparent',
+            },
+          ];
+        }}
       >
         <View style={styles.rowText}>
           <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
@@ -278,6 +311,9 @@ export function ParentalControlsCard({
         accessibilityLabel={i18n.t('parental.adultKeywordsToggle')}
         accessibilityState={{ checked: parentalSettings.blockAdultKeywords }}
         aria-checked={parentalSettings.blockAdultKeywords}
+        focusable
+        onFocus={() => setFocusedToggle('adult')}
+        onBlur={() => setFocusedToggle((prev) => (prev === 'adult' ? null : prev))}
         onPress={() =>
           runProtected(() => {
             void updateParentalSettings({
@@ -285,7 +321,20 @@ export function ParentalControlsCard({
             });
           })
         }
-        style={[styles.toggleRow, cursorPointer, transition]}
+        style={(state) => {
+          const focused = focusedToggle === 'adult' || Boolean(state.focused);
+          return [
+            styles.toggleRow,
+            cursorPointer,
+            transition,
+            {
+              borderRadius: theme.radius.card,
+              borderWidth: focused ? theme.focus.ringWidth : 1,
+              borderColor: focused ? theme.colors.focusRingColor : 'transparent',
+              backgroundColor: focused ? theme.colors.focusFill : 'transparent',
+            },
+          ];
+        }}
       >
         <View style={styles.rowText}>
           <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
@@ -409,100 +458,148 @@ export function ParentalControlsCard({
           {i18n.t('parental.lockedCategoriesTitle')}
         </Text>
 
-        <EditorialCategoryBar
-          testID="parental-cat-kind-bar"
-          items={kindTabs}
-          activeId={categoryKind}
-          onSelect={(id) => setCategoryKind(id as BrowseKind)}
-          isTv={false}
-          padX={0}
-        />
-
-        {categories.length === 0 ? (
-          <Text
-            testID="parental-categories-empty"
-            style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+        {needsPinGate ? (
+          <View
+            testID="parental-categories-locked"
+            style={[
+              styles.lockedCategoriesBox,
+              {
+                borderRadius: theme.radius.card,
+                backgroundColor: theme.colors.bgCard,
+                borderColor: theme.colors.surfaceBorder,
+              },
+            ]}
           >
-            {i18n.t('parental.lockedCategoriesEmpty')}
-          </Text>
-        ) : (
-          <View style={styles.catList}>
-            {categories.map((entry) => {
-              const targetKey = parseCategoryId(entry.row.id)?.providerId ?? entry.row.id;
-              const lockCompositeKey = `${entry.sourceId}|${entry.kind}|${targetKey}`;
-              const isLocked = lockedCategoryKeys.has(lockCompositeKey);
-              return (
-                <Pressable
-                  key={`${entry.sourceId}-${entry.row.id}`}
-                  testID={`parental-cat-lock-${entry.row.id}`}
-                  accessibilityRole="switch"
-                  accessibilityLabel={entry.row.name}
-                  accessibilityState={{ checked: isLocked }}
-                  aria-checked={isLocked}
-                  onPress={() => {
-                    const toggle = () => {
-                      void setParentalLock(
-                        {
-                          sourceId: entry.sourceId,
-                          targetKind: 'category',
-                          itemKind: entry.kind,
-                          targetKey,
-                        },
-                        !isLocked,
-                      );
-                    };
-                    if (isLocked) {
-                      runProtected(toggle);
-                    } else {
-                      toggle();
-                    }
-                  }}
-                  style={[
-                    styles.catRow,
-                    cursorPointer,
-                    transition,
-                    {
-                      borderRadius: theme.radius.card,
-                      backgroundColor: isLocked
-                        ? theme.colors.subtleHighlight
-                        : theme.colors.bgCard,
-                      borderColor: isLocked ? theme.colors.accent : theme.colors.surfaceBorder,
-                    },
-                  ]}
-                >
-                  <View style={styles.catInfo}>
-                    <Text
-                      numberOfLines={1}
-                      style={[theme.typography.body, { color: theme.colors.textPrimary }]}
-                    >
-                      {entry.row.name}
-                    </Text>
-                    {readySources.length > 1 ? (
-                      <Text
-                        numberOfLines={1}
-                        style={[theme.typography.micro, { color: theme.colors.textMuted }]}
-                      >
-                        {entry.sourceName}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <View style={styles.catStatus}>
-                    {isLocked ? <Icon name="lock" size={14} color={theme.colors.accent} /> : null}
-                    <Text
-                      style={[
-                        theme.typography.caption,
-                        { color: isLocked ? theme.colors.accent : theme.colors.textSecondary },
-                      ]}
-                    >
-                      {isLocked
-                        ? i18n.t('parental.categoryLocked')
-                        : i18n.t('parental.categoryUnlocked')}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
+            <View style={styles.lockedCategoriesInfo}>
+              <Icon name="lock" size={16} color={theme.colors.accent} />
+              <Text
+                style={[
+                  theme.typography.caption,
+                  styles.lockedCategoriesText,
+                  { color: theme.colors.textSecondary },
+                ]}
+              >
+                {i18n.t('parental.lockedMessage')}
+              </Text>
+            </View>
+            <CtaButton
+              testID="parental-categories-unlock"
+              variant="primary"
+              label={i18n.t('parental.unlockButton')}
+              onPress={() =>
+                openPinDialog({ mode: 'verify', profileId: effectiveGuardPinProfileId })
+              }
+            />
           </View>
+        ) : (
+          <>
+            <EditorialCategoryBar
+              testID="parental-cat-kind-bar"
+              items={kindTabs}
+              activeId={categoryKind}
+              onSelect={(id) => setCategoryKind(id as BrowseKind)}
+              isTv={isTv}
+              padX={0}
+            />
+
+            {categories.length === 0 ? (
+              <Text
+                testID="parental-categories-empty"
+                style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+              >
+                {i18n.t('parental.lockedCategoriesEmpty')}
+              </Text>
+            ) : (
+              <View style={styles.catList}>
+                {categories.map((entry) => {
+                  const targetKey = parseCategoryId(entry.row.id)?.providerId ?? entry.row.id;
+                  const lockCompositeKey = `${entry.sourceId}|${entry.kind}|${targetKey}`;
+                  const isLocked = lockedCategoryKeys.has(lockCompositeKey);
+                  const rowKey = `${entry.sourceId}-${entry.row.id}`;
+                  return (
+                    <Pressable
+                      key={rowKey}
+                      testID={`parental-cat-lock-${entry.row.id}`}
+                      accessibilityRole="switch"
+                      accessibilityLabel={entry.row.name}
+                      accessibilityState={{ checked: isLocked }}
+                      aria-checked={isLocked}
+                      focusable
+                      onFocus={() => setFocusedCatId(rowKey)}
+                      onBlur={() => setFocusedCatId((prev) => (prev === rowKey ? null : prev))}
+                      onPress={() => {
+                        runProtected(() => {
+                          void setParentalLock(
+                            {
+                              sourceId: entry.sourceId,
+                              targetKind: 'category',
+                              itemKind: entry.kind,
+                              targetKey,
+                            },
+                            !isLocked,
+                          );
+                        });
+                      }}
+                      style={(state) => {
+                        const focused = focusedCatId === rowKey || Boolean(state.focused);
+                        return [
+                          styles.catRow,
+                          cursorPointer,
+                          transition,
+                          {
+                            borderRadius: theme.radius.card,
+                            borderWidth: focused ? theme.focus.ringWidth : 1,
+                            backgroundColor: focused
+                              ? theme.colors.focusFill
+                              : isLocked
+                                ? theme.colors.subtleHighlight
+                                : theme.colors.bgCard,
+                            borderColor: focused
+                              ? theme.colors.focusRingColor
+                              : isLocked
+                                ? theme.colors.accent
+                                : theme.colors.surfaceBorder,
+                          },
+                        ];
+                      }}
+                    >
+                      <View style={styles.catInfo}>
+                        <Text
+                          numberOfLines={1}
+                          style={[theme.typography.body, { color: theme.colors.textPrimary }]}
+                        >
+                          {entry.row.name}
+                        </Text>
+                        {readySources.length > 1 ? (
+                          <Text
+                            numberOfLines={1}
+                            style={[theme.typography.micro, { color: theme.colors.textMuted }]}
+                          >
+                            {entry.sourceName}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <View style={styles.catStatus}>
+                        {isLocked ? (
+                          <Icon name="lock" size={14} color={theme.colors.accent} />
+                        ) : null}
+                        <Text
+                          style={[
+                            theme.typography.caption,
+                            { color: isLocked ? theme.colors.accent : theme.colors.textSecondary },
+                          ]}
+                        >
+                          {isLocked
+                            ? i18n.t('parental.categoryLocked')
+                            : i18n.t('parental.categoryUnlocked')}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+          </>
         )}
       </View>
     </Surface>
@@ -531,6 +628,8 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
   toggleRow: {
     minHeight: 46,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -539,6 +638,23 @@ const styles = StyleSheet.create({
   switchTrack: { width: 38, height: 22, borderWidth: 1, padding: 2, justifyContent: 'center' },
   switchThumb: { width: 16, height: 16 },
   catSection: { gap: 10 },
+  lockedCategoriesBox: {
+    padding: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  lockedCategoriesInfo: {
+    flex: 1,
+    minWidth: 200,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  lockedCategoriesText: { flex: 1 },
   catList: { gap: 6 },
   catRow: {
     minHeight: 42,

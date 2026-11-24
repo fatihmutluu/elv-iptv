@@ -142,8 +142,8 @@ export type CatalogRpcMethodCall =
       limit: number;
       opts?: ListItemsOptions;
     }
-  | { method: 'liveVariants'; itemKey: string; categoryId?: string }
-  | { method: 'itemVersions'; itemKey: string }
+  | { method: 'liveVariants'; itemKey: string; categoryId?: string; opts?: ParentalQueryOptions }
+  | { method: 'itemVersions'; itemKey: string; opts?: ParentalQueryOptions }
   | {
       method: 'allSourcesItems';
       kind: BrowseKind;
@@ -178,9 +178,15 @@ export type CatalogRpcMethodCall =
       opts?: ParentalQueryOptions;
     }
   | { method: 'channelByNumber'; num: number; sourceId?: string; opts?: ParentalQueryOptions }
-  | { method: 'seasons'; seriesId: number }
-  | { method: 'episodes'; seriesId: number; season: number }
-  | { method: 'queryNextEpisode'; seriesKey: string; currentItemKey: string; profileId?: string }
+  | { method: 'seasons'; seriesId: number; opts?: ParentalQueryOptions }
+  | { method: 'episodes'; seriesId: number; season: number; opts?: ParentalQueryOptions }
+  | {
+      method: 'queryNextEpisode';
+      seriesKey: string;
+      currentItemKey: string;
+      profileId?: string;
+      opts?: { readonly parentalUnlocked?: boolean };
+    }
   | { method: 'resolveStream'; itemKey: string; opts?: ParentalQueryOptions }
   | { method: 'saveProgress'; input: SaveProgressInput }
   | { method: 'setWatched'; itemKey: string; watched: boolean; profileId?: string }
@@ -275,8 +281,12 @@ export interface CatalogBridge {
     limit: number,
     opts?: ListItemsOptions,
   ): Promise<ItemRow[]>;
-  liveVariants?(itemKey: string, categoryId?: string): Promise<readonly LiveVariantOption[]>;
-  itemVersions?(itemKey: string): Promise<readonly VodVersionOption[]>;
+  liveVariants?(
+    itemKey: string,
+    categoryId?: string,
+    opts?: ParentalQueryOptions,
+  ): Promise<readonly LiveVariantOption[]>;
+  itemVersions?(itemKey: string, opts?: ParentalQueryOptions): Promise<readonly VodVersionOption[]>;
   allSourcesItems?(
     kind: BrowseKind,
     offset: number,
@@ -311,12 +321,13 @@ export interface CatalogBridge {
     sourceId?: string,
     opts?: ParentalQueryOptions,
   ): Promise<ItemRow | null>;
-  seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
-  episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
+  seasons(seriesId: number, opts?: ParentalQueryOptions): Promise<Result<SeasonRow[]>>;
+  episodes(seriesId: number, season: number, opts?: ParentalQueryOptions): Promise<EpisodeRow[]>;
   queryNextEpisode(
     seriesKey: string,
     currentItemKey: string,
     profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
   ): Promise<NextEpisodeRow | null>;
   resolveStream(itemKey: string, opts?: ParentalQueryOptions): Promise<Result<StreamRequest>>;
   saveProgress(input: SaveProgressInput): Promise<Result<WatchProgressRow>>;
@@ -423,10 +434,13 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
     case 'liveVariants':
       return (
         isCleanKey(x['itemKey']) &&
-        (x['categoryId'] === undefined || isCleanKey(x['categoryId'], 512))
+        (x['categoryId'] === undefined || isCleanKey(x['categoryId'], 512)) &&
+        (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
       );
     case 'itemVersions':
-      return isCleanKey(x['itemKey']);
+      return (
+        isCleanKey(x['itemKey']) && (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
+      );
     case 'allSourcesItems':
       return (
         (x['kind'] === 'live' || x['kind'] === 'movie' || x['kind'] === 'series') &&
@@ -474,14 +488,21 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
       );
     case 'seasons':
-      return isSafeInt(x['seriesId']);
+      return (
+        isSafeInt(x['seriesId']) && (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
+      );
     case 'episodes':
-      return isSafeInt(x['seriesId']) && isSafeInt(x['season']);
+      return (
+        isSafeInt(x['seriesId']) &&
+        isSafeInt(x['season']) &&
+        (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
+      );
     case 'queryNextEpisode':
       return (
         isCleanKey(x['seriesKey']) &&
         isCleanKey(x['currentItemKey']) &&
-        isOptionalProfileId(x['profileId'])
+        isOptionalStrictProfileId(x['profileId']) &&
+        (x['opts'] === undefined || isParentalUnlockedOption(x['opts']))
       );
     case 'resolveStream':
       return (

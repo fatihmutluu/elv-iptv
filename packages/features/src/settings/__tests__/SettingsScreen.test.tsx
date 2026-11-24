@@ -30,6 +30,7 @@ import {
   SettingsScreen,
   type SettingsSection,
 } from '../index';
+import { useTvSettingsNavigation } from '../useTvSettingsNavigation';
 
 const KEYCODE_DPAD_UP = 19;
 const KEYCODE_DPAD_DOWN = 20;
@@ -584,4 +585,61 @@ describe('SettingsScreen', () => {
     }
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 0, animated: true });
   });
+
+  it('preserves Settings content pane across transient PIN overlay blur when preservePaneOnBlur is true', async () => {
+    const stateRef: { current: ReturnType<typeof useTvSettingsNavigation> | undefined } = {
+      current: undefined,
+    };
+    const view = await render(
+      <SettingsNavPreserveHarness isActiveScope preservePaneOnBlur={false} stateRef={stateRef} />,
+    );
+    expect(stateRef.current?.pane).toBe('nav');
+
+    await act(async () => {
+      stateRef.current?.enterContentPane();
+    });
+    expect(stateRef.current?.pane).toBe('content');
+
+    // Transient overlay opens: isActiveScope=false, preservePaneOnBlur=true -> stays in 'content'!
+    await view.rerender(
+      <SettingsNavPreserveHarness isActiveScope={false} preservePaneOnBlur stateRef={stateRef} />,
+    );
+    expect(stateRef.current?.pane).toBe('content');
+
+    // Overlay closes: still in 'content'
+    await view.rerender(
+      <SettingsNavPreserveHarness isActiveScope preservePaneOnBlur={false} stateRef={stateRef} />,
+    );
+    expect(stateRef.current?.pane).toBe('content');
+
+    // Normal Top Nav focus blur (preservePaneOnBlur=false) resets pane to 'nav'
+    await view.rerender(
+      <SettingsNavPreserveHarness
+        isActiveScope={false}
+        preservePaneOnBlur={false}
+        stateRef={stateRef}
+      />,
+    );
+    expect(stateRef.current?.pane).toBe('nav');
+    await view.unmount();
+  });
 });
+
+function SettingsNavPreserveHarness({
+  isActiveScope,
+  preservePaneOnBlur,
+  stateRef,
+}: {
+  readonly isActiveScope: boolean;
+  readonly preservePaneOnBlur: boolean;
+  readonly stateRef: { current: ReturnType<typeof useTvSettingsNavigation> | undefined };
+}): null {
+  stateRef.current = useTvSettingsNavigation({
+    isTv: true,
+    isActiveScope,
+    section: 'profiles',
+    onSectionChange: jest.fn(),
+    preservePaneOnBlur,
+  });
+  return null;
+}

@@ -2,6 +2,7 @@ import type { SqlDriver, SqlValue } from '@elv/domain';
 import { isAdultKeywordMatch, type ParentalQueryOptions } from './parental-policy';
 import {
   type ActiveParentalFilter,
+  buildSqlAdultKeywordExclusionClause,
   buildSqlItemRestrictionClause,
   isCategoryRestricted,
   isItemRestricted,
@@ -161,101 +162,42 @@ export async function queryCategories(
     't.key',
     sourceId,
   );
-  if (!filter.blockAdultKeywords) {
-    const rows = await db.all<{
-      provider_id: string;
-      name: string;
-      name_fold: string;
-      position: number;
-      n: number;
-    }>(
-      `SELECT c.provider_id, c.name, c.name_fold, c.position, COALESCE(p.n, 0) AS n
-         FROM categories c
-         LEFT JOIN (
-           SELECT pl.category_id, ${countExpr} AS n
-             FROM placements pl
-             JOIN ${ITEM_TABLE[kind]} t
-               ON t.source_id = pl.source_id AND t.key = pl.item_key
-            WHERE pl.source_id = ? AND pl.kind = ?
-              AND pl.is_hidden = 0 AND t.is_hidden = 0${sqlRestrict.clause}
-            GROUP BY pl.category_id
-         ) p ON p.category_id = c.provider_id
-        WHERE c.source_id = ? AND c.kind = ?${hiddenClause}
-          AND EXISTS (SELECT 1 FROM sources s WHERE s.id = c.source_id AND s.deleting = 0)
-        ORDER BY c.position, c.provider_id`,
-      [sourceId, kind, ...sqlRestrict.params, sourceId, kind],
-    );
-    return rows
-      .filter(
-        (r) => !isCategoryRestricted(filter, sourceId, kind, r.provider_id, r.name, r.name_fold),
-      )
-      .map((r) => ({
-        id: categoryId(sourceId, kind, r.provider_id),
-        sourceId,
-        kind,
-        name: r.name,
-        position: r.position,
-        itemCount: r.n,
-      }));
-  }
-
-  const rawCats = await db.all<{
+  const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 't.name', 't.name_fold');
+  const rows = await db.all<{
     provider_id: string;
     name: string;
     name_fold: string;
     position: number;
+    n: number;
   }>(
-    `SELECT c.provider_id, c.name, c.name_fold, c.position
+    `SELECT c.provider_id, c.name, c.name_fold, c.position, COALESCE(p.n, 0) AS n
        FROM categories c
+       LEFT JOIN (
+         SELECT pl.category_id, ${countExpr} AS n
+           FROM placements pl
+           JOIN ${ITEM_TABLE[kind]} t
+             ON t.source_id = pl.source_id AND t.key = pl.item_key
+          WHERE pl.source_id = ? AND pl.kind = ?
+            AND pl.is_hidden = 0 AND t.is_hidden = 0${sqlRestrict.clause}${adultExcl}
+          GROUP BY pl.category_id
+       ) p ON p.category_id = c.provider_id
       WHERE c.source_id = ? AND c.kind = ?${hiddenClause}
         AND EXISTS (SELECT 1 FROM sources s WHERE s.id = c.source_id AND s.deleting = 0)
       ORDER BY c.position, c.provider_id`,
-    [sourceId, kind],
+    [sourceId, kind, ...sqlRestrict.params, sourceId, kind],
   );
-  const allowedCats = rawCats.filter(
-    (r) => !isCategoryRestricted(filter, sourceId, kind, r.provider_id, r.name, r.name_fold),
-  );
-  if (allowedCats.length === 0) return [];
-
-  const groupCol =
-    kind === 'live' && opts?.collapseVariants === true
-      ? "COALESCE(NULLIF(t.variant_base_fold, ''), t.key)"
-      : kind === 'movie' && opts?.groupVersions === true
-        ? "COALESCE(NULLIF(t.version_group_key, ''), t.key)"
-        : 't.key';
-  const catIds = allowedCats.map((c) => c.provider_id);
-  const catPh = catIds.map(() => '?').join(', ');
-  const itemRows = await db.all<{
-    category_id: string;
-    name: string;
-    group_key: string;
-  }>(
-    `SELECT pl.category_id, t.name, ${groupCol} AS group_key
-       FROM placements pl
-       JOIN ${ITEM_TABLE[kind]} t
-         ON t.source_id = pl.source_id AND t.key = pl.item_key
-      WHERE pl.source_id = ? AND pl.kind = ? AND pl.category_id IN (${catPh})
-        AND pl.is_hidden = 0 AND t.is_hidden = 0${sqlRestrict.clause}`,
-    [sourceId, kind, ...catIds, ...sqlRestrict.params],
-  );
-  const groupsByCat = new Map<string, Set<string>>();
-  for (const row of itemRows) {
-    if (isAdultKeywordMatch(row.name)) continue;
-    let set = groupsByCat.get(row.category_id);
-    if (set === undefined) {
-      set = new Set<string>();
-      groupsByCat.set(row.category_id, set);
-    }
-    set.add(row.group_key);
-  }
-  return allowedCats.map((r) => ({
-    id: categoryId(sourceId, kind, r.provider_id),
-    sourceId,
-    kind,
-    name: r.name,
-    position: r.position,
-    itemCount: groupsByCat.get(r.provider_id)?.size ?? 0,
-  }));
+  return rows
+    .filter(
+      (r) => !isCategoryRestricted(filter, sourceId, kind, r.provider_id, r.name, r.name_fold),
+    )
+    .map((r) => ({
+      id: categoryId(sourceId, kind, r.provider_id),
+      sourceId,
+      kind,
+      name: r.name,
+      position: r.position,
+      itemCount: r.n,
+    }));
 }
 
 function dedupGroupSpec(
@@ -301,6 +243,7 @@ async function fetchRawCategoryPage(
       filter === null
         ? { clause: '', params: [] as readonly SqlValue[] }
         : buildSqlItemRestrictionClause(filter, ref.kind, 'p.source_id', 't.key', ref.sourceId);
+    const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 't.name', 't.name_fold');
     const orderBy = opts?.sortBy === 'alpha' ? 'sort_title ASC, key ASC' : 'group_pos ASC, key ASC';
     return db.all<RawItemRow>(
       `WITH ranked AS (
@@ -311,7 +254,7 @@ async function fetchRawCategoryPage(
            FROM placements p
            JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
           WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
-            AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}${adultExcl}
        )
        SELECT id, key, provider_id, name, logo, rating, year, num, ${dedup.countCol}
          FROM ranked
@@ -335,12 +278,13 @@ async function fetchRawCategoryPage(
       filter === null
         ? { clause: '', params: [] as readonly SqlValue[] }
         : buildSqlItemRestrictionClause(filter, ref.kind, 'p.source_id', 't.key', ref.sourceId);
+    const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 't.name', 't.name_fold');
     return db.all<RawItemRow>(
       `SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_COLS[ref.kind]}
          FROM placements p
          JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
         WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
-          AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}
+          AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}${adultExcl}
         ORDER BY t.sort_title ASC, t.key ASC LIMIT ? OFFSET ?`,
       [
         ref.sourceId,
@@ -364,13 +308,14 @@ async function fetchRawCategoryPage(
           'placements.item_key',
           ref.sourceId,
         );
+  const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 'jt.name', 'jt.name_fold');
   return db.all<RawItemRow>(
     `SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_COLS[ref.kind]}
        FROM (
          SELECT source_id, item_key, position FROM placements
           WHERE source_id = ? AND kind = ? AND category_id = ? AND is_hidden = 0
             AND EXISTS (SELECT 1 FROM sources s WHERE s.id = placements.source_id AND s.deleting = 0)
-            AND EXISTS (SELECT 1 FROM ${table} jt WHERE jt.source_id = placements.source_id AND jt.key = placements.item_key AND jt.is_hidden = 0)${watched.clause}${restrict.clause}
+            AND EXISTS (SELECT 1 FROM ${table} jt WHERE jt.source_id = placements.source_id AND jt.key = placements.item_key AND jt.is_hidden = 0${adultExcl})${watched.clause}${restrict.clause}
           ORDER BY position, item_key LIMIT ? OFFSET ?
        ) p
        JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
@@ -393,31 +338,8 @@ export async function queryItems(
   if (filter !== null && isCategoryRestricted(filter, ref.sourceId, ref.kind, ref.providerId)) {
     return [];
   }
-  if (filter === null || !filter.blockAdultKeywords) {
-    const rows = await fetchRawCategoryPage(db, ref, page.offset, page.limit, opts, filter);
-    return rows.map((r) => mapItemRow(ref.kind, ref.sourceId, r));
-  }
-
-  const chunkSize = Math.max(page.limit * 2, 64);
-  const out: ItemRow[] = [];
-  let rawOffset = 0;
-  let skipped = 0;
-  for (;;) {
-    const batch = await fetchRawCategoryPage(db, ref, rawOffset, chunkSize, opts, filter);
-    if (batch.length === 0) break;
-    rawOffset += batch.length;
-    for (const r of batch) {
-      if (isAdultKeywordMatch(r.name)) continue;
-      if (skipped < page.offset) {
-        skipped += 1;
-        continue;
-      }
-      out.push(mapItemRow(ref.kind, ref.sourceId, r));
-      if (out.length >= page.limit) return out;
-    }
-    if (batch.length < chunkSize) break;
-  }
-  return out;
+  const rows = await fetchRawCategoryPage(db, ref, page.offset, page.limit, opts, filter);
+  return rows.map((r) => mapItemRow(ref.kind, ref.sourceId, r));
 }
 
 async function fetchRawCursorBatch(
@@ -441,6 +363,7 @@ async function fetchRawCursorBatch(
       filter === null
         ? { clause: '', params: [] as readonly SqlValue[] }
         : buildSqlItemRestrictionClause(filter, ref.kind, 'p.source_id', 't.key', ref.sourceId);
+    const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 't.name', 't.name_fold');
     const cursorClause = cursor ? ' AND (group_pos > ? OR (group_pos = ? AND key > ?))' : '';
     const cursorParams = cursor ? [cursor.position, cursor.position, cursor.itemKey] : [];
     return db.all<RawItemRow & { _pos: number }>(
@@ -452,7 +375,7 @@ async function fetchRawCursorBatch(
            FROM placements p
            JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
           WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
-            AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}${adultExcl}
        )
        SELECT id, key, provider_id, name, logo, rating, year, num, ${dedup.countCol}, group_pos AS _pos
          FROM ranked
@@ -487,6 +410,7 @@ async function fetchRawCursorBatch(
           'placements.item_key',
           ref.sourceId,
         );
+  const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 'jt.name', 'jt.name_fold');
   const params: SqlValue[] = [
     ref.sourceId,
     ref.kind,
@@ -502,7 +426,7 @@ async function fetchRawCursorBatch(
          SELECT source_id, item_key, position FROM placements
           WHERE source_id = ? AND kind = ? AND category_id = ? AND is_hidden = 0${cursorClause}
             AND EXISTS (SELECT 1 FROM sources s WHERE s.id = placements.source_id AND s.deleting = 0)
-            AND EXISTS (SELECT 1 FROM ${table} jt WHERE jt.source_id = placements.source_id AND jt.key = placements.item_key AND jt.is_hidden = 0)${watched.clause}${restrict.clause}
+            AND EXISTS (SELECT 1 FROM ${table} jt WHERE jt.source_id = placements.source_id AND jt.key = placements.item_key AND jt.is_hidden = 0${adultExcl})${watched.clause}${restrict.clause}
           ORDER BY position ASC, item_key ASC LIMIT ?
        ) p
        JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
@@ -534,36 +458,9 @@ export async function queryItemsByCursor(
     return { items: [], nextCursor: null, hasMore: false };
   }
 
-  if (filter === null || !filter.blockAdultKeywords) {
-    const rows = await fetchRawCursorBatch(db, ref, cursor, page.limit + 1, opts, filter);
-    const hasMore = rows.length > page.limit;
-    const slice = hasMore ? rows.slice(0, page.limit) : rows;
-    const last = slice[slice.length - 1];
-    return {
-      items: slice.map((r) => mapItemRow(ref.kind, ref.sourceId, r)),
-      nextCursor: hasMore && last !== undefined ? { position: last._pos, itemKey: last.key } : null,
-      hasMore,
-    };
-  }
-
-  const collected: Array<RawItemRow & { _pos: number }> = [];
-  const batchSize = Math.max((page.limit + 1) * 2, 64);
-  let scanCursor = cursor;
-  for (;;) {
-    const batch = await fetchRawCursorBatch(db, ref, scanCursor, batchSize, opts, filter);
-    if (batch.length === 0) break;
-    for (const r of batch) {
-      if (isAdultKeywordMatch(r.name)) continue;
-      collected.push(r);
-      if (collected.length > page.limit) break;
-    }
-    if (collected.length > page.limit || batch.length < batchSize) break;
-    const tail = batch[batch.length - 1];
-    if (tail === undefined) break;
-    scanCursor = { position: tail._pos, itemKey: tail.key };
-  }
-  const hasMore = collected.length > page.limit;
-  const slice = hasMore ? collected.slice(0, page.limit) : collected;
+  const rows = await fetchRawCursorBatch(db, ref, cursor, page.limit + 1, opts, filter);
+  const hasMore = rows.length > page.limit;
+  const slice = hasMore ? rows.slice(0, page.limit) : rows;
   const last = slice[slice.length - 1];
   return {
     items: slice.map((r) => mapItemRow(ref.kind, ref.sourceId, r)),
@@ -590,13 +487,35 @@ export async function querySeries(
 export async function querySeasons(
   db: SqlDriver,
   series: { sourceId: string; key: string },
+  opts?: ParentalQueryOptions,
 ): Promise<SeasonRow[]> {
-  const rows = await db.all<{ season: number; n: number }>(
-    `SELECT COALESCE(season, 0) AS season, COUNT(*) AS n FROM episodes
-      WHERE source_id = ? AND series_key = ? GROUP BY COALESCE(season, 0) ORDER BY season`,
+  const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
+  if (filter === null) {
+    const rows = await db.all<{ season: number; n: number }>(
+      `SELECT COALESCE(season, 0) AS season, COUNT(*) AS n FROM episodes
+        WHERE source_id = ? AND series_key = ? GROUP BY COALESCE(season, 0) ORDER BY season`,
+      [series.sourceId, series.key],
+    );
+    return rows.map((r) => ({ season: r.season, episodeCount: r.n }));
+  }
+  if (await isItemRestricted(db, filter, series.key)) {
+    return [];
+  }
+  const rows = await db.all<{ season: number; key: string; title: string | null }>(
+    `SELECT COALESCE(season, 0) AS season, key, title FROM episodes
+      WHERE source_id = ? AND series_key = ?
+      ORDER BY season`,
     [series.sourceId, series.key],
   );
-  return rows.map((r) => ({ season: r.season, episodeCount: r.n }));
+  const counts = new Map<number, number>();
+  for (const r of rows) {
+    if (filter.lockedItemKeys.has(r.key)) continue;
+    if (filter.blockAdultKeywords && r.title !== null && isAdultKeywordMatch(r.title)) continue;
+    counts.set(r.season, (counts.get(r.season) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([season, episodeCount]) => ({ season, episodeCount }));
 }
 
 /** Episodes of one season in episode order. */
@@ -604,7 +523,12 @@ export async function queryEpisodes(
   db: SqlDriver,
   series: { sourceId: string; key: string },
   season: number,
+  opts?: ParentalQueryOptions,
 ): Promise<EpisodeRow[]> {
+  const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
+  if (filter !== null && (await isItemRestricted(db, filter, series.key))) {
+    return [];
+  }
   const rows = await db.all<{
     id: number;
     key: string;
@@ -618,7 +542,15 @@ export async function queryEpisodes(
       ORDER BY episode, id`,
     [series.sourceId, series.key, season],
   );
-  return rows.map((r) => ({
+  const filtered =
+    filter === null
+      ? rows
+      : rows.filter(
+          (r) =>
+            !filter.lockedItemKeys.has(r.key) &&
+            !(filter.blockAdultKeywords && r.title !== null && isAdultKeywordMatch(r.title)),
+        );
+  return filtered.map((r) => ({
     id: r.id,
     key: r.key,
     season: r.season,
