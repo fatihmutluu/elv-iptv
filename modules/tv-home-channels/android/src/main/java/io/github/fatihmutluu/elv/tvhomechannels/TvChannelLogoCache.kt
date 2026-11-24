@@ -6,11 +6,22 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.Inet6Address
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.Socket
 import java.net.URI
 import java.net.URL
 import java.security.MessageDigest
+import java.util.Locale
+import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 /**
  * Bounded, SSRF-safe SHA-256 logo disk cache stored under `cacheDir/tv_channel_logos/`
@@ -63,16 +74,21 @@ class TvChannelLogoCache(
     for (hop in 0..TvChannelSecurity.MAX_REDIRECT_HOPS) {
       if (!TvChannelSecurity.isSafeLogoUrl(currentUrl)) return null
       val parsedUri = runCatching { URI(currentUrl) }.getOrNull() ?: return null
+      val scheme = parsedUri.scheme?.lowercase(Locale.ROOT) ?: return null
       val host = parsedUri.host?.removePrefix("[")?.removeSuffix("]") ?: return null
 
-      // DNS rebinding guard: reject if any resolved address is private/loopback/link-local/ULA.
+      // DNS rebinding guard: resolve once, reject if ANY returned IP is blocked, and pin the connection
+      // directly to the validated InetAddress so HttpURLConnection never performs a second DNS lookup.
       val addresses = runCatching { InetAddress.getAllByName(host) }.getOrNull() ?: return null
       if (addresses.isEmpty() || addresses.any { TvChannelSecurity.isBlockedInetAddress(it) }) {
         return null
       }
+      val pinnedAddress = addresses[0]
+      val pinnedUrl = buildPinnedUrl(parsedUri, scheme, pinnedAddress) ?: return null
+      val hostHeader = formatHostHeader(host, scheme, parsedUri.port)
 
       val conn = runCatching {
-        URL(currentUrl).openConnection() as? HttpURLConnection
+        pinnedUrl.openConnection(Proxy.NO_PROXY) as? HttpURLConnection
       }.getOrNull() ?: return null
 
       try {
@@ -80,7 +96,20 @@ class TvChannelLogoCache(
         conn.connectTimeout = CONNECT_TIMEOUT_MS
         conn.readTimeout = READ_TIMEOUT_MS
         conn.requestMethod = "GET"
+        conn.setRequestProperty("Host", hostHeader)
         conn.setRequestProperty("Accept", "image/png, image/jpeg, image/webp, image/gif;q=0.8")
+
+        if (conn is HttpsURLConnection) {
+          conn.sslSocketFactory = PinnedHostSslSocketFactory(
+            delegate = HttpsURLConnection.getDefaultSSLSocketFactory(),
+            expectedHost = host,
+            pinnedAddress = pinnedAddress,
+            connectTimeoutMs = CONNECT_TIMEOUT_MS,
+          )
+          conn.hostnameVerifier = HostnameVerifier { _, session ->
+            HttpsURLConnection.getDefaultHostnameVerifier().verify(host, session)
+          }
+        }
 
         val status = conn.responseCode
         if (status in REDIRECT_STATUS_CODES) {
@@ -99,9 +128,12 @@ class TvChannelLogoCache(
         if (declaredLength > TvChannelSecurity.MAX_LOGO_BYTES) return null
 
         val bytes = readBoundedStream(conn) ?: return null
+        if (!TvChannelSecurity.isValidRasterImageHeader(bytes)) return null
+        val extension = TvChannelSecurity.extensionForRasterImageHeader(bytes)
+          ?: TvChannelSecurity.extensionForImageContentType(contentType)
         return FetchedImage(
           bytes = bytes,
-          extension = TvChannelSecurity.extensionForImageContentType(contentType),
+          extension = extension,
         )
       } catch (_: Exception) {
         return null
@@ -110,6 +142,122 @@ class TvChannelLogoCache(
       }
     }
     return null
+  }
+
+  private fun buildPinnedUrl(parsedUri: URI, scheme: String, pinnedAddress: InetAddress): URL? {
+    val rawIp = pinnedAddress.hostAddress?.substringBefore('%') ?: return null
+    val pinnedAuthorityHost = if (pinnedAddress is Inet6Address || rawIp.contains(':')) {
+      "[$rawIp]"
+    } else {
+      rawIp
+    }
+    val defaultPort = if (scheme == "https") 443 else 80
+    val effectivePort = if (parsedUri.port != -1) parsedUri.port else defaultPort
+    val rawPath = parsedUri.rawPath?.takeIf { it.isNotEmpty() } ?: "/"
+    val rawQuery = parsedUri.rawQuery?.let { "?$it" } ?: ""
+    return runCatching {
+      URL("$scheme://$pinnedAuthorityHost:$effectivePort$rawPath$rawQuery")
+    }.getOrNull()
+  }
+
+  private fun formatHostHeader(host: String, scheme: String, port: Int): String {
+    val formattedHost = if (host.contains(':')) "[$host]" else host
+    val defaultPort = if (scheme == "https") 443 else 80
+    return if (port != -1 && port != defaultPort) "$formattedHost:$port" else formattedHost
+  }
+
+  /**
+   * SSLSocketFactory that pins connections to the pre-validated [pinnedAddress], re-verifies peer
+   * socket addresses against [TvChannelSecurity.isBlockedInetAddress] before TLS handshake, and
+   * preserves TLS SNI for [expectedHost] so certificate verification validates the original hostname.
+   */
+  private class PinnedHostSslSocketFactory(
+    private val delegate: SSLSocketFactory,
+    private val expectedHost: String,
+    private val pinnedAddress: InetAddress,
+    private val connectTimeoutMs: Int,
+  ) : SSLSocketFactory() {
+    override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
+
+    override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
+
+    override fun createSocket(): Socket {
+      val socket = delegate.createSocket()
+      applySniIfDomain(socket)
+      return socket
+    }
+
+    override fun createSocket(s: Socket, host: String, port: Int, autoClose: Boolean): Socket {
+      val peer = s.inetAddress
+      if (peer == null || TvChannelSecurity.isBlockedInetAddress(peer)) {
+        runCatching { s.close() }
+        throw IOException("Blocked peer IP address")
+      }
+      val wrapped = delegate.createSocket(s, expectedHost, port, autoClose)
+      applySniIfDomain(wrapped)
+      return wrapped
+    }
+
+    override fun createSocket(host: String, port: Int): Socket {
+      return connectPinnedSocket(port, null, 0)
+    }
+
+    override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket {
+      return connectPinnedSocket(port, localHost, localPort)
+    }
+
+    override fun createSocket(host: InetAddress, port: Int): Socket {
+      if (TvChannelSecurity.isBlockedInetAddress(host)) {
+        throw IOException("Blocked peer IP address")
+      }
+      return connectPinnedSocket(port, null, 0)
+    }
+
+    override fun createSocket(
+      address: InetAddress,
+      port: Int,
+      localAddress: InetAddress,
+      localPort: Int,
+    ): Socket {
+      if (TvChannelSecurity.isBlockedInetAddress(address)) {
+        throw IOException("Blocked peer IP address")
+      }
+      return connectPinnedSocket(port, localAddress, localPort)
+    }
+
+    private fun connectPinnedSocket(port: Int, localAddr: InetAddress?, localPort: Int): Socket {
+      if (TvChannelSecurity.isBlockedInetAddress(pinnedAddress)) {
+        throw IOException("Blocked peer IP address")
+      }
+      val raw = Socket()
+      try {
+        if (localAddr != null) {
+          raw.bind(InetSocketAddress(localAddr, localPort))
+        }
+        raw.connect(InetSocketAddress(pinnedAddress, port), connectTimeoutMs)
+        val wrapped = delegate.createSocket(raw, expectedHost, port, true)
+        applySniIfDomain(wrapped)
+        return wrapped
+      } catch (e: IOException) {
+        runCatching { raw.close() }
+        throw e
+      }
+    }
+
+    private fun applySniIfDomain(socket: Socket) {
+      if (socket !is SSLSocket) return
+      // SNIHostName requires a DNS hostname (not an IPv4/IPv6 literal).
+      if (expectedHost.contains(':') || IPV4_LITERAL.matches(expectedHost)) return
+      runCatching {
+        val params = socket.sslParameters
+        params.serverNames = listOf(SNIHostName(expectedHost))
+        socket.sslParameters = params
+      }
+    }
+
+    companion object {
+      private val IPV4_LITERAL = Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$")
+    }
   }
 
   private fun readBoundedStream(conn: HttpURLConnection): ByteArray? {
@@ -183,7 +331,7 @@ class TvChannelLogoCache(
 
   private fun grantLauncherReadPermission(uri: Uri) {
     val packages = LinkedHashSet<String>(KNOWN_LAUNCHER_PACKAGES)
-    val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+    val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
     runCatching {
       @Suppress("DEPRECATION")
       context.packageManager.queryIntentActivities(launcherIntent, 0)

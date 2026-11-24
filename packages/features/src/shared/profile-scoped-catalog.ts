@@ -149,6 +149,7 @@ export function createProfileScopedCatalog(
           queryNextEpisode: (seriesKey, currentItemKey, profileId, opts) => {
             const scope = getScope();
             return queryNextEpisode(seriesKey, currentItemKey, profileId ?? scope.profileId, {
+              ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
             });
           },
@@ -181,6 +182,7 @@ export function createProfileScopedCatalog(
           listContinueWatching: (limit, profileId, opts) => {
             const scope = getScope();
             return listContinueWatching(limit, profileId ?? scope.profileId, {
+              ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
             });
           },
@@ -230,6 +232,7 @@ export function createProfileScopedCatalog(
           listFavorites: (limit, profileId, opts) => {
             const scope = getScope();
             return listFavorites(limit, profileId ?? scope.profileId, {
+              ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
             });
           },
@@ -272,6 +275,7 @@ export function createProfileScopedCatalog(
           listRecentChannels: (limit, profileId, opts) => {
             const scope = getScope();
             return listRecentChannels(limit, profileId ?? scope.profileId, {
+              ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
             });
           },

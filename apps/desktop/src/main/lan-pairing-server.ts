@@ -60,11 +60,12 @@ function isNonLoopbackPrivateIpv4(info: NetworkInterfaceInfo): boolean {
 
 /**
  * Selects the best non-loopback RFC1918 IPv4 address from local OS network interfaces,
- * preferring physical Wi-Fi/Ethernet adapters over virtual bridges and falling back to `127.0.0.1`.
+ * preferring physical Wi-Fi/Ethernet adapters over virtual bridges. Returns `null` when no
+ * non-loopback private IPv4 interface is available.
  */
 export function discoverLanIpv4(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
-): string {
+): string | null {
   const candidates: { readonly address: string; readonly rank: number }[] = [];
   for (const [ifaceName, entries] of Object.entries(interfaces)) {
     if (!entries) continue;
@@ -77,7 +78,7 @@ export function discoverLanIpv4(
     }
   }
   candidates.sort((a, b) => a.rank - b.rank);
-  return candidates[0]?.address ?? '127.0.0.1';
+  return candidates[0]?.address ?? null;
 }
 
 function setSecurityHeaders(res: ServerResponse, extra?: Readonly<Record<string, string>>): void {
@@ -363,6 +364,11 @@ export function createLanPairingServer(deps?: LanPairingServerDeps): LanPairingS
         await closeSession(active, 'stopped');
       }
 
+      const host = deps?.advertiseHost ?? discoverLanIpv4(getInterfaces());
+      if (host === null) {
+        throw new Error('lan-unavailable');
+      }
+
       const token = generateToken();
       const locale: LanPairingLocale = opts?.locale === 'tr' ? 'tr' : 'en';
       const sockets = new Set<Socket>();
@@ -413,9 +419,6 @@ export function createLanPairingServer(deps?: LanPairingServerDeps): LanPairingS
       }
 
       const port = addr.port;
-      const host =
-        deps?.advertiseHost ??
-        (bindHost === '127.0.0.1' ? '127.0.0.1' : discoverLanIpv4(getInterfaces()));
       const expiresAtMs = now() + ttlMs;
       const timer = setTimeout(() => {
         if (sessionRef) void closeSession(sessionRef, 'expired');

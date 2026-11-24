@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   nativeAvailable: true,
+  generateToken: vi.fn<() => string | null>(),
   startServer: vi.fn(),
   stopServer: vi.fn(),
   submissionListeners: new Set<(event: { body: string; contentType?: string }) => void>(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@elv/lan-pairing', () => ({
   isLanPairingNativeAvailable: () => mocks.nativeAvailable,
+  generateLanPairingToken: () => mocks.generateToken(),
   startLanPairingServer: (...args: unknown[]) => mocks.startServer(...args),
   stopLanPairingServer: (...args: unknown[]) => mocks.stopServer(...args),
   addLanPairingSubmissionListener: (
@@ -25,8 +27,11 @@ vi.mock('@elv/lan-pairing', () => ({
 
 import { createMobileLanPairingPort } from './adapter';
 
+const NATIVE_TOKEN = 'b'.repeat(48);
+
 beforeEach(() => {
   mocks.nativeAvailable = true;
+  mocks.generateToken.mockReset().mockReturnValue(NATIVE_TOKEN);
   mocks.submissionListeners.clear();
   mocks.startServer
     .mockReset()
@@ -71,7 +76,34 @@ describe('createMobileLanPairingPort', () => {
     expect(mocks.addSubmissionListener).not.toHaveBeenCalled();
   });
 
-  it('starts the native server with a 192-bit CSPRNG token, rendered HTML, and protocol limits', async () => {
+  it('prefers the native CSPRNG token generator even when globalThis.crypto is absent', async () => {
+    vi.stubGlobal('crypto', undefined);
+
+    const port = createMobileLanPairingPort();
+    const session = await port.startSession({ locale: 'en' });
+
+    expect(mocks.generateToken).toHaveBeenCalledTimes(1);
+    expect(session.token).toBe(NATIVE_TOKEN);
+    expect(session.token).toHaveLength(48);
+    expect(isValidPairingToken(session.token)).toBe(true);
+    expect(session.host).toBe('192.168.1.42');
+    expect(session.port).toBe(49152);
+    expect(session.url).toBe(`http://192.168.1.42:49152/pair/${NATIVE_TOKEN}`);
+    expect(session.expiresAtMs).toBe(1_700_000_000_000 + LAN_PAIRING_TTL_MS);
+
+    expect(mocks.startServer).toHaveBeenCalledWith({
+      token: NATIVE_TOKEN,
+      html: expect.stringContaining(`/pair/${NATIVE_TOKEN}`),
+      ttlMs: LAN_PAIRING_TTL_MS,
+      maxBodyBytes: LAN_PAIRING_MAX_BODY_BYTES,
+      maxFailedAttempts: LAN_PAIRING_MAX_FAILED_ATTEMPTS,
+    });
+    const firstCallArg = mocks.startServer.mock.calls[0]?.[0] as { html?: string } | undefined;
+    expect(firstCallArg?.html).toContain('Send Source to TV');
+  });
+
+  it('uses globalThis.crypto.getRandomValues when native generateToken returns null', async () => {
+    mocks.generateToken.mockReturnValue(null);
     const getRandomValues = vi.fn((arr: Uint8Array) => {
       for (let i = 0; i < arr.length; i += 1) {
         arr[i] = i + 1;
@@ -88,20 +120,6 @@ describe('createMobileLanPairingPort', () => {
     expect(session.token).toBe(expectedToken);
     expect(session.token).toHaveLength(48);
     expect(isValidPairingToken(session.token)).toBe(true);
-    expect(session.host).toBe('192.168.1.42');
-    expect(session.port).toBe(49152);
-    expect(session.url).toBe(`http://192.168.1.42:49152/pair/${expectedToken}`);
-    expect(session.expiresAtMs).toBe(1_700_000_000_000 + LAN_PAIRING_TTL_MS);
-
-    expect(mocks.startServer).toHaveBeenCalledWith({
-      token: expectedToken,
-      html: expect.stringContaining(`/pair/${expectedToken}`),
-      ttlMs: LAN_PAIRING_TTL_MS,
-      maxBodyBytes: LAN_PAIRING_MAX_BODY_BYTES,
-      maxFailedAttempts: LAN_PAIRING_MAX_FAILED_ATTEMPTS,
-    });
-    const firstCallArg = mocks.startServer.mock.calls[0]?.[0] as { html?: string } | undefined;
-    expect(firstCallArg?.html).toContain('Send Source to TV');
   });
 
   it('renders localized Turkish HTML when locale is tr', async () => {
@@ -111,12 +129,13 @@ describe('createMobileLanPairingPort', () => {
     expect(firstCallArg?.html).toContain('TV’ye Kaynak Gönder');
   });
 
-  it('falls back cleanly when globalThis.crypto is unavailable and still produces a 48-hex-char token', async () => {
+  it('fails closed when neither native CSPRNG nor globalThis.crypto is available', async () => {
+    mocks.generateToken.mockReturnValue(null);
     vi.stubGlobal('crypto', undefined);
     const port = createMobileLanPairingPort();
-    const session = await port.startSession();
-    expect(session.token).toHaveLength(48);
-    expect(isValidPairingToken(session.token)).toBe(true);
+    await expect(port.startSession()).rejects.toThrow(/secure random/i);
+    expect(mocks.startServer).not.toHaveBeenCalled();
+    expect(mocks.addSubmissionListener).not.toHaveBeenCalled();
   });
 
   it('parses valid M3U submissions, delivers to listeners, and enforces single-use teardown', async () => {

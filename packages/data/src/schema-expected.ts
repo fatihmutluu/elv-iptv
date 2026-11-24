@@ -374,6 +374,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'custom_name', alterDefinition: 'TEXT' },
+    { name: 'custom_name_fold', alterDefinition: 'TEXT' },
     { name: 'is_hidden', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'sort_order', alterDefinition: 'INTEGER' },
     { name: 'updated_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },

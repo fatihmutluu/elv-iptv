@@ -175,6 +175,47 @@ class TvChannelSecurityTest {
   }
 
   @Test
+  fun `isValidRasterImageHeader accepts PNG, JPEG, WebP, and GIF magic bytes and rejects non-raster payloads`() {
+    val png = byteArrayOf(
+      0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00,
+    )
+    val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte())
+    val webp = "RIFF\u0024\u0000\u0000\u0000WEBPVP8 ".toByteArray(Charsets.ISO_8859_1)
+    val gif87a = "GIF87a\u0001\u0000".toByteArray(Charsets.ISO_8859_1)
+    val gif89a = "GIF89a\u0001\u0000".toByteArray(Charsets.ISO_8859_1)
+
+    assertTrue(TvChannelSecurity.isValidRasterImageHeader(png))
+    assertEquals(".png", TvChannelSecurity.extensionForRasterImageHeader(png))
+    assertTrue(TvChannelSecurity.isValidRasterImageHeader(jpeg))
+    assertEquals(".jpg", TvChannelSecurity.extensionForRasterImageHeader(jpeg))
+    assertTrue(TvChannelSecurity.isValidRasterImageHeader(webp))
+    assertEquals(".webp", TvChannelSecurity.extensionForRasterImageHeader(webp))
+    assertTrue(TvChannelSecurity.isValidRasterImageHeader(gif87a))
+    assertEquals(".gif", TvChannelSecurity.extensionForRasterImageHeader(gif87a))
+    assertTrue(TvChannelSecurity.isValidRasterImageHeader(gif89a))
+    assertEquals(".gif", TvChannelSecurity.extensionForRasterImageHeader(gif89a))
+
+    val invalidPayloads = listOf(
+      ByteArray(0),
+      byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47), // truncated PNG
+      byteArrayOf(0xFF.toByte(), 0xD8.toByte()), // truncated JPEG
+      "RIFF\u0024\u0000\u0000\u0000WAVEfmt ".toByteArray(Charsets.ISO_8859_1), // RIFF WAV, not WEBP
+      "GIF88a".toByteArray(Charsets.ISO_8859_1),
+      "<!DOCTYPE html><html><body>not an image</body></html>".toByteArray(Charsets.UTF_8),
+      "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>".toByteArray(Charsets.UTF_8),
+      "<?xml version=\"1.0\"?><svg></svg>".toByteArray(Charsets.UTF_8),
+      "plain text pretending to be image/png".toByteArray(Charsets.UTF_8),
+    )
+    for (payload in invalidPayloads) {
+      assertFalse(
+        "Expected non-raster payload to be rejected",
+        TvChannelSecurity.isValidRasterImageHeader(payload),
+      )
+      assertNull(TvChannelSecurity.extensionForRasterImageHeader(payload))
+    }
+  }
+
+  @Test
   fun `sanitizeChannels enforces MAX_CHANNELS, MAX_PROGRAMS_PER_CHANNEL, and strips unsafe fields`() {
     val excessPrograms = (1..25).map { idx ->
       TvProgramSpec(

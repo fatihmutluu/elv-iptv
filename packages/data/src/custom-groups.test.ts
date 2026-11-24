@@ -18,6 +18,7 @@ import { openCatalog } from './migrate';
 import { setParentalLock, updateParentalSettings } from './parental-repo';
 import { createProfile, deleteProfile } from './profiles-repo';
 import { queryItems, queryItemsByCursor } from './queries';
+import { queryLiveVariants } from './queries-variants';
 import { querySearch } from './search';
 import { memorySecrets, testDb } from './test-db';
 import {
@@ -325,6 +326,93 @@ describe('custom-groups-repo (#60)', () => {
 
       // Profile isolation: another profile cannot read default's custom group
       expect(await queryItems(db, catId, 0, 10, { profileId: 'other' })).toEqual([]);
+    } finally {
+      close();
+    }
+  });
+
+  it('resolves quality variants inside __custom:<groupId> honoring channel_overrides, source scope, and parental controls', async () => {
+    const { db, close } = await setup();
+    try {
+      await db.run(
+        "INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, run_id) VALUES ('s1', 'live', 'locked-cat', 'Locked', 'locked', 0, 1)",
+      );
+      await db.run(
+        `INSERT INTO live (source_id, key, name, name_fold, sort_title, variant_base_fold, quality_rank, is_hidden, run_id) VALUES
+           ('s1', 'x:s1:live:v4k', 'Match TV 4K', 'match tv 4k', 'match tv 4k', 'match tv', 4, 0, 1),
+           ('s1', 'x:s1:live:vhd', 'Match TV HD', 'match tv hd', 'match tv hd', 'match tv', 3, 0, 1),
+           ('s1', 'x:s1:live:vsd', 'Match TV SD', 'match tv sd', 'match tv sd', 'match tv', 1, 0, 1),
+           ('s1', 'x:s1:live:vhid', 'Match TV FHD', 'match tv fhd', 'match tv fhd', 'match tv', 3, 0, 1),
+           ('s1', 'x:s1:live:vlock', 'Match TV UHD', 'match tv uhd', 'match tv uhd', 'match tv', 4, 0, 1),
+           ('s2', 'm:s2:live:vother', 'Match TV HD', 'match tv hd', 'match tv hd', 'match tv', 3, 0, 1)`,
+      );
+      await db.run(
+        "INSERT INTO placements (source_id, kind, item_key, category_id, position, run_id) VALUES ('s1', 'live', 'x:s1:live:vlock', 'locked-cat', 0, 1)",
+      );
+
+      await createCustomGroup(
+        db,
+        { name: 'Match Group' },
+        () => 1_000,
+        () => 'vg1',
+      );
+      // Include HD, SD, FHD (will hide), UHD (parental locked), and s2's HD; omit 4K from group.
+      await setCustomGroupItems(
+        db,
+        'vg1',
+        [
+          { itemKey: 'x:s1:live:vsd', sourceId: 's1' },
+          { itemKey: 'x:s1:live:vhd', sourceId: 's1' },
+          { itemKey: 'x:s1:live:vhid', sourceId: 's1' },
+          { itemKey: 'x:s1:live:vlock', sourceId: 's1' },
+          { itemKey: 'm:s2:live:vother', sourceId: 's2' },
+        ],
+        () => 1_000,
+      );
+
+      await setChannelOverride(
+        db,
+        { itemKey: 'x:s1:live:vhd', sourceId: 's1', customName: 'Match Main HD' },
+        () => 1_100,
+      );
+      await setChannelOverride(
+        db,
+        { itemKey: 'x:s1:live:vhid', sourceId: 's1', isHidden: true },
+        () => 1_100,
+      );
+      await updateParentalSettings(db, 'default', { enabled: true, blockAdultKeywords: true });
+      await setParentalLock(
+        db,
+        { sourceId: 's1', targetKind: 'category', itemKind: 'live', targetKey: 'locked-cat' },
+        true,
+      );
+
+      const catId = customGroupCategoryId('vg1');
+      const variants = await queryLiveVariants(db, 'x:s1:live:vhd', catId);
+      expect(variants).toEqual([
+        { key: 'x:s1:live:vhd', title: 'Match Main HD', qualityLabel: 'HD', qualityRank: 3 },
+        { key: 'x:s1:live:vsd', title: 'Match TV SD', qualityLabel: 'SD', qualityRank: 1 },
+      ]);
+
+      // Parental unlock reveals locked variant inside the custom group while still excluding hidden & non-members.
+      const unlocked = await queryLiveVariants(db, 'x:s1:live:vhd', catId, {
+        parentalUnlocked: true,
+      });
+      expect(unlocked.map((v) => v.key)).toEqual([
+        'x:s1:live:vlock',
+        'x:s1:live:vhd',
+        'x:s1:live:vsd',
+      ]);
+
+      // Profile isolation & malformed custom group IDs return empty cleanly.
+      expect(await queryLiveVariants(db, 'x:s1:live:vhd', catId, { profileId: 'other' })).toEqual(
+        [],
+      );
+      expect(await queryLiveVariants(db, 'x:s1:live:vhd', '__custom:bad/id')).toEqual([]);
+
+      // Hidden custom group returns empty.
+      await updateCustomGroup(db, 'vg1', { isHidden: true }, () => 1_200);
+      expect(await queryLiveVariants(db, 'x:s1:live:vhd', catId)).toEqual([]);
     } finally {
       close();
     }

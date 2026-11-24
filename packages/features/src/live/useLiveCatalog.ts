@@ -248,8 +248,10 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
   const { history, historyRef, resetHistory, tuneChannel, tunePreviousChannel } = chHistory;
 
   const activeSourceIdRef = useRef<string | undefined>(undefined);
+  const catSourceId = activeCategory?.row.sourceId;
+  const fallbackSourceId = history.active?.sourceId ?? sources[0]?.id;
   activeSourceIdRef.current =
-    activeCategory?.row.sourceId ?? history.active?.sourceId ?? sources[0]?.id;
+    catSourceId !== undefined && catSourceId.length > 0 ? catSourceId : fallbackSourceId;
 
   useEffect(() => {
     if (mode !== 'favorites' || favoriteChannels.length === 0) return;

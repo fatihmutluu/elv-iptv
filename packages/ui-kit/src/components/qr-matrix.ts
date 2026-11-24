@@ -507,13 +507,16 @@ export function encodeQrMatrix(value: string): QrMatrix | null {
     setFn(i, 6, i % 2 === 0);
   }
 
-  // Alignment patterns.
+  // Alignment patterns (skip only centers overlapping the 3 finder+separator corners,
+  // never centers on the row/col 6 timing patterns in V7–V10).
   const centers = spec.alignmentCenters;
   for (let i = 0; i < centers.length; i += 1) {
     for (let j = 0; j < centers.length; j += 1) {
       const cr = centers[i] as number;
       const cc = centers[j] as number;
-      if (isFn[cr]?.[cc]) continue;
+      const overlapsFinder =
+        (cr <= 8 && cc <= 8) || (cr <= 8 && cc >= size - 8) || (cr >= size - 8 && cc <= 8);
+      if (overlapsFinder) continue;
       for (let dr = -2; dr <= 2; dr += 1) {
         for (let dc = -2; dc <= 2; dc += 1) {
           const dist = Math.max(Math.abs(dr), Math.abs(dc));

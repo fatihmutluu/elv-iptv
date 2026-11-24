@@ -314,14 +314,40 @@ export function setKeyBinding(
   return next as KeymapOverrides;
 }
 
-/** Removes any user override for `actionId`, restoring its default binding. */
+/**
+ * Removes any user override for `actionId`, restoring its default binding and displacing any
+ * other action in the same or conflicting (`global` vs local) context rebound onto that trigger.
+ */
 export function resetKeyBinding(
   overrides: KeymapOverrides,
   actionId: RemappableActionId,
 ): KeymapOverrides {
   if (!Object.hasOwn(overrides, actionId)) return overrides;
+  const targetMeta = ACTION_META_BY_ID.get(actionId);
   const next: Record<string, KeyTrigger | null> = { ...overrides };
   delete next[actionId];
+
+  if (targetMeta !== undefined && targetMeta.defaultTrigger !== null) {
+    const defaultTrigger = targetMeta.defaultTrigger;
+    for (const other of REMAPPABLE_ACTIONS) {
+      if (other.id === actionId) continue;
+      const sameContext = other.context === targetMeta.context;
+      const crossGlobal =
+        (targetMeta.context === 'global' && other.context !== 'global') ||
+        (targetMeta.context !== 'global' && other.context === 'global');
+      if (!sameContext && !crossGlobal) continue;
+      if (crossGlobal && triggersEqual(other.defaultTrigger, defaultTrigger)) continue;
+      const current = resolveKeyTrigger(overrides, other.id);
+      if (triggersEqual(current, defaultTrigger)) {
+        if (DEFAULT_KEY_BINDINGS[other.id] === null) {
+          delete next[other.id];
+        } else {
+          next[other.id] = null;
+        }
+      }
+    }
+  }
+
   return next as KeymapOverrides;
 }
 

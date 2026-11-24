@@ -12,6 +12,7 @@ import {
   isValidCustomGroupId,
   MAX_CUSTOM_GROUP_NAME_LENGTH,
 } from './custom-groups-repo';
+import { foldText } from './fold';
 import { isValidProfileId } from './profiles-repo';
 import { SOURCE_ID } from './sources';
 
@@ -249,8 +250,8 @@ export async function readChannelManagementBackupRows(db: SqlDriver): Promise<{
 }
 
 const RESTORE_OVERRIDE_SQL = `INSERT OR IGNORE INTO channel_overrides (
-  profile_id, item_key, source_id, custom_name, is_hidden, sort_order, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+  profile_id, item_key, source_id, custom_name, custom_name_fold, is_hidden, sort_order, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const RESTORE_CUSTOM_GROUP_SQL = `INSERT OR IGNORE INTO custom_groups (
   id, profile_id, name, sort_order, is_hidden, updated_at
@@ -306,11 +307,13 @@ export async function restoreChannelManagementBackupRows(
   }
 
   for (const ov of input.channelOverrides) {
+    const customNameFold = ov.customName !== null ? foldText(ov.customName) : null;
     const res = await tx.run(RESTORE_OVERRIDE_SQL, [
       ov.profileId,
       ov.itemKey,
       ov.sourceId,
       ov.customName,
+      customNameFold,
       ov.isHidden ? 1 : 0,
       ov.sortOrder,
       ov.updatedAt,

@@ -1,4 +1,5 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
+import { CUSTOM_GROUP_CATEGORY_PREFIX, parseCustomGroupCategoryId } from './custom-groups-repo';
 import { parseLiveVariant } from './live-variants';
 import { isAdultKeywordMatch, type ParentalQueryOptions } from './parental-policy';
 import {
@@ -31,8 +32,9 @@ export interface VodVersionOption {
 
 /**
  * Lists all visible quality variants of a live channel sharing its `variant_base_fold` (`#218`).
- * When `categoryId` is provided (either encoded `sourceId|live|providerId` or raw category provider id),
- * restricts matches strictly to `(source_id, category_id)`. Ordered highest `quality_rank` first.
+ * When `categoryId` is a custom group (`__custom:<groupId>`), restricts matches to visible members of
+ * that profile's custom group; when `categoryId` is an encoded `sourceId|live|providerId` or raw category
+ * provider id, restricts matches strictly to `(source_id, category_id)`. Ordered highest `quality_rank` first.
  */
 export async function queryLiveVariants(
   db: SqlDriver,
@@ -50,10 +52,16 @@ export async function queryLiveVariants(
   )[0];
   if (seed === undefined || seed.variant_base_fold === '') return [];
 
+  let customGroupId: string | undefined;
   let providerCategoryId: string | undefined;
   if (categoryId !== undefined && categoryId !== '') {
-    const parsed = parseCategoryId(categoryId);
-    providerCategoryId = parsed !== undefined ? parsed.providerId : categoryId;
+    if (categoryId.startsWith(CUSTOM_GROUP_CATEGORY_PREFIX)) {
+      customGroupId = parseCustomGroupCategoryId(categoryId);
+      if (customGroupId === undefined) return [];
+    } else {
+      const parsed = parseCategoryId(categoryId);
+      providerCategoryId = parsed !== undefined ? parsed.providerId : categoryId;
+    }
   }
 
   const profileId = resolveQueryProfileId(opts?.profileId);
@@ -77,28 +85,52 @@ export async function queryLiveVariants(
   const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 'l.name', 'l.name_fold');
 
   const rows =
-    providerCategoryId !== undefined
+    customGroupId !== undefined
       ? await db.all<{ key: string; display_name: string; raw_name: string; quality_rank: number }>(
           `SELECT l.key, COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name, l.name AS raw_name, l.quality_rank
-             FROM live l
-             JOIN placements p
-               ON p.source_id = l.source_id AND p.kind = 'live' AND p.item_key = l.key
-             LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
-            WHERE l.source_id = ? AND l.is_hidden = 0 AND COALESCE(co.is_hidden, 0) = 0 AND l.variant_base_fold = ?
-              AND p.category_id = ? AND p.is_hidden = 0
+             FROM custom_group_items cgi
+             JOIN custom_groups g ON g.id = cgi.group_id
+             JOIN live l
+               ON l.source_id = cgi.source_id AND l.key = cgi.item_key
+             LEFT JOIN channel_overrides co ON co.profile_id = g.profile_id AND co.item_key = l.key
+            WHERE cgi.group_id = ? AND g.profile_id = ? AND g.is_hidden = 0
+              AND l.source_id = ? AND l.is_hidden = 0 AND COALESCE(co.is_hidden, 0) = 0 AND l.variant_base_fold = ?
               AND EXISTS (SELECT 1 FROM sources s WHERE s.id = l.source_id AND s.deleting = 0)${restrict.clause}${adultExcl}
-            ORDER BY l.quality_rank DESC, p.position ASC, l.id ASC`,
-          [profileId, sourceId, seed.variant_base_fold, providerCategoryId, ...restrict.params],
+            ORDER BY l.quality_rank DESC, cgi.position ASC, l.id ASC`,
+          [customGroupId, profileId, sourceId, seed.variant_base_fold, ...restrict.params],
         )
-      : await db.all<{ key: string; display_name: string; raw_name: string; quality_rank: number }>(
-          `SELECT l.key, COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name, l.name AS raw_name, l.quality_rank
-             FROM live l
-             LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
-            WHERE l.source_id = ? AND l.is_hidden = 0 AND COALESCE(co.is_hidden, 0) = 0 AND l.variant_base_fold = ?
-              AND EXISTS (SELECT 1 FROM sources s WHERE s.id = l.source_id AND s.deleting = 0)${restrict.clause}${adultExcl}
-            ORDER BY l.quality_rank DESC, l.id ASC`,
-          [profileId, sourceId, seed.variant_base_fold, ...restrict.params],
-        );
+      : providerCategoryId !== undefined
+        ? await db.all<{
+            key: string;
+            display_name: string;
+            raw_name: string;
+            quality_rank: number;
+          }>(
+            `SELECT l.key, COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name, l.name AS raw_name, l.quality_rank
+               FROM live l
+               JOIN placements p
+                 ON p.source_id = l.source_id AND p.kind = 'live' AND p.item_key = l.key
+               LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
+              WHERE l.source_id = ? AND l.is_hidden = 0 AND COALESCE(co.is_hidden, 0) = 0 AND l.variant_base_fold = ?
+                AND p.category_id = ? AND p.is_hidden = 0
+                AND EXISTS (SELECT 1 FROM sources s WHERE s.id = l.source_id AND s.deleting = 0)${restrict.clause}${adultExcl}
+              ORDER BY l.quality_rank DESC, p.position ASC, l.id ASC`,
+            [profileId, sourceId, seed.variant_base_fold, providerCategoryId, ...restrict.params],
+          )
+        : await db.all<{
+            key: string;
+            display_name: string;
+            raw_name: string;
+            quality_rank: number;
+          }>(
+            `SELECT l.key, COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name, l.name AS raw_name, l.quality_rank
+               FROM live l
+               LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
+              WHERE l.source_id = ? AND l.is_hidden = 0 AND COALESCE(co.is_hidden, 0) = 0 AND l.variant_base_fold = ?
+                AND EXISTS (SELECT 1 FROM sources s WHERE s.id = l.source_id AND s.deleting = 0)${restrict.clause}${adultExcl}
+              ORDER BY l.quality_rank DESC, l.id ASC`,
+            [profileId, sourceId, seed.variant_base_fold, ...restrict.params],
+          );
 
   const allowed =
     filter?.blockAdultKeywords === true

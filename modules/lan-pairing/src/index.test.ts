@@ -16,7 +16,7 @@ async function loadModule() {
   return import('./index');
 }
 
-const SAMPLE_TOKEN = 'a'.repeat(32);
+const SAMPLE_TOKEN = 'a'.repeat(48);
 
 function fakeNative() {
   const listeners = new Map<string, (event: unknown) => void>();
@@ -25,6 +25,7 @@ function fakeNative() {
     listeners.set(name, listener);
     return { remove };
   });
+  const generateToken = vi.fn(() => SAMPLE_TOKEN);
   const startServer = vi.fn(async () => ({
     host: '192.168.1.42',
     port: 49152,
@@ -35,12 +36,14 @@ function fakeNative() {
 
   requireOptionalNativeModule.mockReturnValue({
     addListener,
+    generateToken,
     startServer,
     stopServer,
   });
 
   return {
     addListener,
+    generateToken,
     remove,
     startServer,
     stopServer,
@@ -60,6 +63,7 @@ describe('@elv/lan-pairing JS bridge', () => {
     const mod = await loadModule();
 
     expect(mod.isLanPairingNativeAvailable()).toBe(false);
+    expect(mod.generateLanPairingToken()).toBeNull();
     await expect(mod.stopLanPairingServer()).resolves.toBeUndefined();
     const sub = mod.addLanPairingSubmissionListener(() => {});
     expect(() => sub.remove()).not.toThrow();
@@ -78,6 +82,7 @@ describe('@elv/lan-pairing JS bridge', () => {
     const mod = await loadModule();
 
     expect(mod.isLanPairingNativeAvailable()).toBe(false);
+    expect(mod.generateLanPairingToken()).toBeNull();
     expect(requireOptionalNativeModule).toHaveBeenCalledWith('ElvLanPairing');
     await expect(mod.stopLanPairingServer()).resolves.toBeUndefined();
     const sub = mod.addLanPairingSubmissionListener(() => {});
@@ -96,6 +101,8 @@ describe('@elv/lan-pairing JS bridge', () => {
     const mod = await loadModule();
 
     expect(mod.isLanPairingNativeAvailable()).toBe(true);
+    expect(mod.generateLanPairingToken()).toBe(SAMPLE_TOKEN);
+    expect(native.generateToken).toHaveBeenCalledTimes(1);
     const info = await mod.startLanPairingServer({
       token: SAMPLE_TOKEN,
       html: '<!DOCTYPE html>',

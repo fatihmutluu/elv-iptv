@@ -7,7 +7,6 @@ import {
   REMAPPABLE_ACTIONS,
   type RemapContext,
   type RemappableActionId,
-  resolveRemappedAction,
 } from '@elv/focus-core';
 
 /** Outcome of evaluating a key event against sparse user {@link KeymapOverrides}. */
@@ -24,14 +23,15 @@ function triggerMatchesEvent(
 }
 
 /**
- * Evaluates an interpreted {@link KeyEvent} within `context` against sparse {@link KeymapOverrides}.
+ * Evaluates an interpreted {@link KeyEvent} within `context` against sparse {@link KeymapOverrides},
+ * matching `resolveRemappedAction` precedence strictly:
  *
- * - Returns `{ status: 'remapped', actionId }` when the event matches an explicit user override in
- *   `context` (or `'global'`).
- * - Returns `{ status: 'suppressed' }` when the event matches the *default* trigger of an action
- *   that the user explicitly unbound (`null`) or moved to a different key, preventing the old
- *   default binding from firing.
- * - Returns `{ status: 'default', actionId }` otherwise, preserving built-in defaults seamlessly.
+ * 1. Checks context-local (`player` / `live`) active bindings FIRST (both overridden and default).
+ * 2. Only falls back to `'global'` active bindings if no local action claims that event.
+ * 3. Returns `{ status: 'suppressed' }` when no active binding matched, yet the event matches the
+ *    *default* trigger of an action in `context` or `'global'` that the user explicitly unbound
+ *    (`null`) or moved to a different key.
+ * 4. Returns `{ status: 'default', actionId: null }` otherwise.
  */
 export function evaluateRemappedEvent(
   overrides: KeymapOverrides,
@@ -44,23 +44,26 @@ export function evaluateRemappedEvent(
 
   for (const meta of REMAPPABLE_ACTIONS) {
     if (meta.context !== context) continue;
-    if (Object.hasOwn(overrides, meta.id) && triggerMatchesEvent(overrides[meta.id], event)) {
-      return { status: 'remapped', actionId: meta.id };
+    const hasOverride = Object.hasOwn(overrides, meta.id);
+    const effective = hasOverride ? overrides[meta.id] : DEFAULT_KEY_BINDINGS[meta.id];
+    if (triggerMatchesEvent(effective, event)) {
+      return hasOverride
+        ? { status: 'remapped', actionId: meta.id }
+        : { status: 'default', actionId: meta.id };
     }
   }
 
   if (context !== 'global') {
     for (const meta of REMAPPABLE_ACTIONS) {
       if (meta.context !== 'global') continue;
-      if (Object.hasOwn(overrides, meta.id) && triggerMatchesEvent(overrides[meta.id], event)) {
-        return { status: 'remapped', actionId: meta.id };
+      const hasOverride = Object.hasOwn(overrides, meta.id);
+      const effective = hasOverride ? overrides[meta.id] : DEFAULT_KEY_BINDINGS[meta.id];
+      if (triggerMatchesEvent(effective, event)) {
+        return hasOverride
+          ? { status: 'remapped', actionId: meta.id }
+          : { status: 'default', actionId: meta.id };
       }
     }
-  }
-
-  const resolvedDefault = resolveRemappedAction(overrides, context, event);
-  if (resolvedDefault !== null) {
-    return { status: 'default', actionId: resolvedDefault };
   }
 
   for (const meta of REMAPPABLE_ACTIONS) {
@@ -72,6 +75,63 @@ export function evaluateRemappedEvent(
   }
 
   return { status: 'default', actionId: null };
+}
+
+/** Maps a DOM `KeyboardEvent.key` string to its logical remote {@link Key}, or `null` if unmapped. */
+export function mapWebKeyToRemoteKey(webKey: string): Key | null {
+  switch (webKey) {
+    case 'Escape':
+    case 'Backspace':
+      return 'back';
+    case 'Enter':
+      return 'select';
+    case 'ArrowUp':
+      return 'up';
+    case 'ArrowDown':
+      return 'down';
+    case 'ArrowLeft':
+      return 'left';
+    case 'ArrowRight':
+      return 'right';
+    case ' ':
+      return 'playPause';
+    case 'm':
+    case 'M':
+      return 'menu';
+    case 'g':
+    case 'G':
+      return 'guide';
+    case 'i':
+    case 'I':
+      return 'info';
+    case 'p':
+    case 'P':
+      return 'lastChannel';
+    case 's':
+    case 'S':
+      return 'search';
+    case 'c':
+    case 'C':
+      return 'captions';
+    case 'a':
+    case 'A':
+      return 'audioTrack';
+    case 'r':
+    case 'R':
+      return 'colorRed';
+    case 'y':
+    case 'Y':
+      return 'colorYellow';
+    case 'b':
+    case 'B':
+      return 'colorBlue';
+    case 'PageUp':
+      return 'channelUp';
+    case 'PageDown':
+      return 'channelDown';
+    default:
+      return null;
+  }
 }
 
 const KEY_DISPLAY_LABELS: Readonly<Partial<Record<Key, string>>> = {

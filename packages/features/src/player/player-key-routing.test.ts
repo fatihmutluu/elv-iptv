@@ -167,7 +167,7 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
     expect(selectAndroidDecoderMode).toHaveBeenCalledWith('software');
   });
 
-  it('cancels pending digit buffer before toggling channel list on colorBlue (#133)', () => {
+  it('aligns default menu (channel drawer), colorBlue (settings), and colorYellow (mute) with DEFAULT_KEY_BINDINGS (#33, #133)', () => {
     const order: string[] = [];
     const cancel = vi.fn(() => {
       order.push('cancel');
@@ -175,6 +175,8 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
     const toggleChannelList = vi.fn(() => {
       order.push('toggleChannelList');
     });
+    const openSettings = vi.fn();
+    const toggleMute = vi.fn();
     const state: PlayerOverlayLive = {
       tracksOpen: false,
       pickerCursor: { column: 'audio', index: 0 },
@@ -218,8 +220,10 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
       togglePlayPause: vi.fn(),
       openTracks: vi.fn(),
       closeTracks: vi.fn(),
+      openSettings,
       closeSettings: vi.fn(),
       toggleChannelList,
+      toggleMute,
       updateSettingsMenu: vi.fn(),
       updatePickerCursor: vi.fn(),
       focusTvOsd: vi.fn(),
@@ -231,8 +235,20 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
       onExit: vi.fn(),
     };
 
-    const event: KeyEvent = { key: 'colorBlue', kind: 'press', time: 200 };
-    expect(routeOverlayAndMediaKey(event, deps)).toBe(true);
+    // Menu cancels pending digit buffer before opening channel drawer (player.openChannelDrawer)
+    expect(routeOverlayAndMediaKey({ key: 'menu', kind: 'press', time: 200 }, deps)).toBe(true);
     expect(order).toEqual(['cancel', 'toggleChannelList']);
+
+    // Color Blue opens player settings (player.openSettings)
+    expect(routeOverlayAndMediaKey({ key: 'colorBlue', kind: 'press', time: 210 }, deps)).toBe(
+      true,
+    );
+    expect(openSettings).toHaveBeenCalledTimes(1);
+
+    // Color Yellow toggles mute (player.toggleMute)
+    expect(routeOverlayAndMediaKey({ key: 'colorYellow', kind: 'press', time: 220 }, deps)).toBe(
+      true,
+    );
+    expect(toggleMute).toHaveBeenCalledTimes(1);
   });
 });

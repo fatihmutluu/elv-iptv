@@ -11,7 +11,14 @@ import { Platform, StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { VideoHost } from '../ports/video-host';
-import { computeCatalogLayout, useCatalogUiCache } from '../shared';
+import {
+  computeCatalogLayout,
+  evaluateRemappedEvent,
+  mapWebKeyToRemoteKey,
+  useCatalogUiCache,
+  useKeymap,
+  useProfile,
+} from '../shared';
 import { ChannelManagementOverlay } from './ChannelManagementOverlay';
 import { EpgGridView } from './EpgGridView';
 import { EpgProgrammeDetailModal } from './EpgProgrammeDetailModal';
@@ -104,6 +111,8 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   const viewport = useViewport();
   const i18n = useI18n();
   const uiCache = useCatalogUiCache();
+  const keymap = useKeymap();
+  const profile = useProfile();
   const layout = useMemo(() => computeCatalogLayout(viewport, theme), [theme, viewport]);
   const tabMem = useLiveTabMemory(memory, onMemoryChange, defaultLiveMode);
   const { memory: activeMemory, memoryRef, updateMemory } = tabMem;
@@ -259,6 +268,10 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
         type: string,
         fn: (e: {
           key?: string;
+          shiftKey?: boolean;
+          ctrlKey?: boolean;
+          altKey?: boolean;
+          metaKey?: boolean;
           target?: { tagName?: string };
           preventDefault?: () => void;
         }) => void,
@@ -267,6 +280,10 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
         type: string,
         fn: (e: {
           key?: string;
+          shiftKey?: boolean;
+          ctrlKey?: boolean;
+          altKey?: boolean;
+          metaKey?: boolean;
           target?: { tagName?: string };
           preventDefault?: () => void;
         }) => void,
@@ -274,21 +291,42 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     };
     const onKeyDown = (e: {
       key?: string;
+      shiftKey?: boolean;
+      ctrlKey?: boolean;
+      altKey?: boolean;
+      metaKey?: boolean;
       target?: { tagName?: string };
       preventDefault?: () => void;
     }) => {
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
       const tag = e.target?.tagName?.toUpperCase();
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if ((e.key === 'p' || e.key === 'P') && contextMenu === null && detailModal === null) {
-        if (previousChannel !== null) {
-          e.preventDefault?.();
-          handleJumpPreviousChannel();
-        }
+      if (contextMenu !== null || detailModal !== null || channelManagerOpen || numpad.open) return;
+      if (!e.key) return;
+      const mappedKey = mapWebKeyToRemoteKey(e.key);
+      if (mappedKey === null) return;
+      const evalResult = evaluateRemappedEvent(keymap.overrides, 'live', {
+        key: mappedKey,
+        kind: e.shiftKey ? 'long' : 'press',
+      });
+      if (evalResult.status === 'suppressed') return;
+      if (evalResult.actionId === 'live.lastChannel' && previousChannel !== null) {
+        e.preventDefault?.();
+        handleJumpPreviousChannel();
       }
     };
     win.addEventListener?.('keydown', onKeyDown);
     return () => win.removeEventListener?.('keydown', onKeyDown);
-  }, [contextMenu, detailModal, handleJumpPreviousChannel, mode, previousChannel]);
+  }, [
+    channelManagerOpen,
+    contextMenu,
+    detailModal,
+    handleJumpPreviousChannel,
+    keymap.overrides,
+    mode,
+    numpad.open,
+    previousChannel,
+  ]);
   const handleBrowseChannels = useCallback(() => handleSelectMode('channels'), [handleSelectMode]);
   const handleToggleZapDrawer = useCallback(
     () => updateMemory({ zapDrawerOpen: !memoryRef.current.zapDrawerOpen }),
@@ -302,7 +340,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     setGuideRefreshTick((n) => n + 1);
     onChannelsMutated?.();
   }, [onChannelsMutated]);
-  const handleHideChannel = useCallback(
+  const performHideChannel = useCallback(
     (channel: ItemRow) => {
       if (!catalog.setChannelOverride) return;
       void catalog
@@ -319,11 +357,30 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     },
     [catalog, handleChannelsMutated, uiCache],
   );
+  const handleHideChannel = useCallback(
+    (channel: ItemRow) => {
+      if (profile.hasGuardPin && !profile.parentalUnlocked) {
+        profile.requestParentalUnlock(() => performHideChannel(channel));
+        return;
+      }
+      performHideChannel(channel);
+    },
+    [performHideChannel, profile],
+  );
   const handleOpenChannelManager = useCallback(() => {
     setContextMenu(null);
     setDetailModal(null);
+    if (profile.hasGuardPin && !profile.parentalUnlocked) {
+      profile.requestParentalUnlock(() => setChannelManagerOpen(true));
+      return;
+    }
     setChannelManagerOpen(true);
-  }, []);
+  }, [profile]);
+  useEffect(() => {
+    if (channelManagerOpen && profile.hasGuardPin && !profile.parentalUnlocked) {
+      setChannelManagerOpen(false);
+    }
+  }, [channelManagerOpen, profile.hasGuardPin, profile.parentalUnlocked]);
   const handleToggleActiveFavorite = useCallback(() => {
     const ch = live.activeChannel ?? activeFavoriteChannel;
     if (ch !== null) handleToggleFavorite(ch);
@@ -545,7 +602,9 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                   {...(live.activeCategory !== null
                     ? {
                         categoryId: live.activeCategory.row.id,
-                        sourceId: live.activeCategory.row.sourceId,
+                        ...(live.activeCategory.row.sourceId.length > 0
+                          ? { sourceId: live.activeCategory.row.sourceId }
+                          : {}),
                       }
                     : {})}
                   collapseVariants={collapseVariants}

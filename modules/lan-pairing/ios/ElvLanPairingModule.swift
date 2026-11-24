@@ -1,5 +1,9 @@
-import ExpoModulesCore
+@preconcurrency import ExpoModulesCore
 import Foundation
+
+private struct SendablePromiseBox: @unchecked Sendable {
+  let promise: Promise
+}
 
 /// Expo native module hosting an ephemeral local-network HTTP server for phone-to-TV QR source pairing
 /// (`#50`) on iOS and tvOS. Closes automatically on first valid submission, TTL expiry, `stopServer`,
@@ -12,6 +16,17 @@ public final class ElvLanPairingModule: Module, @unchecked Sendable {
     Name("ElvLanPairing")
 
     Events("onSubmission")
+
+    Function("generateToken") { () throws -> String in
+      guard let token = LanPairingValidation.generateToken() else {
+        throw NSError(
+          domain: "ElvLanPairing",
+          code: -1,
+          userInfo: [NSLocalizedDescriptionKey: "SecRandomCopyBytes failed"]
+        )
+      }
+      return token
+    }
 
     AsyncFunction("startServer") { (options: [String: Any], promise: Promise) in
       guard let token = options["token"] as? String else {
@@ -50,10 +65,11 @@ public final class ElvLanPairingModule: Module, @unchecked Sendable {
       let previous = self.replaceActiveServer(with: server)
       previous?.stop()
 
+      let promiseBox = SendablePromiseBox(promise: promise)
       server.start { [weak self] result in
         switch result {
         case let .success(info):
-          promise.resolve([
+          promiseBox.promise.resolve([
             "host": info.host,
             "port": info.port,
             "url": info.url,
@@ -61,7 +77,7 @@ public final class ElvLanPairingModule: Module, @unchecked Sendable {
           ])
         case let .failure(error):
           self?.clearActiveServer(ifSameAs: server)
-          promise.reject("E_LAN_PAIRING_START_FAILED", error.localizedDescription)
+          promiseBox.promise.reject("E_LAN_PAIRING_START_FAILED", error.localizedDescription)
         }
       }
     }

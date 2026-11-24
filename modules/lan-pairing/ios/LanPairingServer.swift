@@ -53,6 +53,7 @@ public final class LanPairingServer: @unchecked Sendable {
   private var ttlWorkItem: DispatchWorkItem?
   private var startCompletion: (@Sendable (Result<LanPairingServerInfo, Error>) -> Void)?
   private var activeConnections: [ObjectIdentifier: NWConnection] = [:]
+  private var connectionTimeouts: [ObjectIdentifier: DispatchWorkItem] = [:]
   private var isRunning = false
   private var hasSubmitted = false
   private var failedAttempts = 0
@@ -78,6 +79,9 @@ public final class LanPairingServer: @unchecked Sendable {
   deinit {
     listener?.cancel()
     ttlWorkItem?.cancel()
+    for timeout in connectionTimeouts.values {
+      timeout.cancel()
+    }
     for connection in activeConnections.values {
       connection.cancel()
     }
@@ -197,6 +201,11 @@ public final class LanPairingServer: @unchecked Sendable {
     listener?.newConnectionHandler = nil
     listener?.cancel()
     listener = nil
+    let timeouts = Array(connectionTimeouts.values)
+    connectionTimeouts.removeAll()
+    for timeout in timeouts {
+      timeout.cancel()
+    }
     let connections = Array(activeConnections.values)
     activeConnections.removeAll()
     for conn in connections {
@@ -217,6 +226,7 @@ public final class LanPairingServer: @unchecked Sendable {
       guard let self, let connection else { return }
       self.closeConnectionOnQueue(connection)
     }
+    connectionTimeouts[connId] = timeoutItem
     queue.asyncAfter(deadline: .now() + Self.connectionTimeoutSeconds, execute: timeoutItem)
 
     connection.stateUpdateHandler = { [weak self, weak connection] state in
@@ -226,7 +236,6 @@ public final class LanPairingServer: @unchecked Sendable {
         if !LanPairingValidation.isPrivateLanEndpoint(connection.endpoint) {
           self.sendResponseAndCloseOnQueue(
             connection,
-            timeoutItem: timeoutItem,
             status: 403,
             reason: "Forbidden",
             contentType: "text/plain; charset=utf-8",
@@ -235,9 +244,9 @@ public final class LanPairingServer: @unchecked Sendable {
           )
           return
         }
-        self.receiveHeadersOnQueue(connection, buffer: Data(), timeoutItem: timeoutItem)
+        self.receiveHeadersOnQueue(connection, buffer: Data())
       case .failed, .cancelled:
-        timeoutItem.cancel()
+        self.connectionTimeouts.removeValue(forKey: connId)?.cancel()
         self.activeConnections.removeValue(forKey: connId)
       default:
         break
@@ -249,13 +258,11 @@ public final class LanPairingServer: @unchecked Sendable {
 
   private func receiveHeadersOnQueue(
     _ connection: NWConnection,
-    buffer: Data,
-    timeoutItem: DispatchWorkItem
+    buffer: Data
   ) {
     connection.receive(minimumIncompleteLength: 1, maximumLength: 4_096) { [weak self] data, _, isComplete, error in
       guard let self else { return }
       if error != nil {
-        timeoutItem.cancel()
         self.closeConnectionOnQueue(connection)
         return
       }
@@ -268,7 +275,6 @@ public final class LanPairingServer: @unchecked Sendable {
         if range.lowerBound > Self.maxHeaderBytes {
           self.sendResponseAndCloseOnQueue(
             connection,
-            timeoutItem: timeoutItem,
             status: 431,
             reason: "Request Header Fields Too Large",
             contentType: "text/plain; charset=utf-8",
@@ -282,8 +288,7 @@ public final class LanPairingServer: @unchecked Sendable {
         self.processRequestHeadersOnQueue(
           connection,
           headerData: headerData,
-          initialBody: initialBody,
-          timeoutItem: timeoutItem
+          initialBody: initialBody
         )
         return
       }
@@ -291,7 +296,6 @@ public final class LanPairingServer: @unchecked Sendable {
       if nextBuffer.count > Self.maxHeaderBytes {
         self.sendResponseAndCloseOnQueue(
           connection,
-          timeoutItem: timeoutItem,
           status: 431,
           reason: "Request Header Fields Too Large",
           contentType: "text/plain; charset=utf-8",
@@ -304,7 +308,6 @@ public final class LanPairingServer: @unchecked Sendable {
       if isComplete {
         self.sendResponseAndCloseOnQueue(
           connection,
-          timeoutItem: timeoutItem,
           status: 400,
           reason: "Bad Request",
           contentType: "text/plain; charset=utf-8",
@@ -314,7 +317,7 @@ public final class LanPairingServer: @unchecked Sendable {
         return
       }
 
-      self.receiveHeadersOnQueue(connection, buffer: nextBuffer, timeoutItem: timeoutItem)
+      self.receiveHeadersOnQueue(connection, buffer: nextBuffer)
     }
   }
 
@@ -354,13 +357,11 @@ public final class LanPairingServer: @unchecked Sendable {
   private func processRequestHeadersOnQueue(
     _ connection: NWConnection,
     headerData: Data,
-    initialBody: Data,
-    timeoutItem: DispatchWorkItem
+    initialBody: Data
   ) {
     guard let parsed = parseHeaders(headerData) else {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 400,
         reason: "Bad Request",
         contentType: "text/plain; charset=utf-8",
@@ -377,7 +378,6 @@ public final class LanPairingServer: @unchecked Sendable {
     ) else {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 403,
         reason: "Forbidden",
         contentType: "text/plain; charset=utf-8",
@@ -390,7 +390,6 @@ public final class LanPairingServer: @unchecked Sendable {
     guard LanPairingValidation.isValidPairingPath(parsed.path, expectedToken: token) else {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 404,
         reason: "Not Found",
         contentType: "text/plain; charset=utf-8",
@@ -403,7 +402,6 @@ public final class LanPairingServer: @unchecked Sendable {
     if parsed.method == "GET" {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 200,
         reason: "OK",
         contentType: "text/html; charset=utf-8",
@@ -417,7 +415,6 @@ public final class LanPairingServer: @unchecked Sendable {
     guard parsed.method == "POST" else {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 405,
         reason: "Method Not Allowed",
         contentType: "text/plain; charset=utf-8",
@@ -434,7 +431,6 @@ public final class LanPairingServer: @unchecked Sendable {
     ) else {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 403,
         reason: "Forbidden",
         contentType: "text/plain; charset=utf-8",
@@ -447,7 +443,6 @@ public final class LanPairingServer: @unchecked Sendable {
     if parsed.headers["transfer-encoding"] != nil {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 411,
         reason: "Length Required",
         contentType: "text/plain; charset=utf-8",
@@ -463,7 +458,6 @@ public final class LanPairingServer: @unchecked Sendable {
     else {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 411,
         reason: "Length Required",
         contentType: "text/plain; charset=utf-8",
@@ -476,11 +470,10 @@ public final class LanPairingServer: @unchecked Sendable {
     if contentLength == 0 {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 400,
         reason: "Bad Request",
-        contentType: "text/plain; charset=utf-8",
-        body: Data("Empty Body".utf8),
+        contentType: "application/json; charset=utf-8",
+        body: Data("{\"error\":\"invalid-payload\"}".utf8),
         recordFailure: true
       )
       return
@@ -489,7 +482,6 @@ public final class LanPairingServer: @unchecked Sendable {
     if contentLength > maxBodyBytes {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 413,
         reason: "Payload Too Large",
         contentType: "text/plain; charset=utf-8",
@@ -503,8 +495,7 @@ public final class LanPairingServer: @unchecked Sendable {
       connection,
       buffer: initialBody,
       expectedLength: contentLength,
-      contentType: parsed.headers["content-type"],
-      timeoutItem: timeoutItem
+      contentType: parsed.headers["content-type"]
     )
   }
 
@@ -512,15 +503,13 @@ public final class LanPairingServer: @unchecked Sendable {
     _ connection: NWConnection,
     buffer: Data,
     expectedLength: Int,
-    contentType: String?,
-    timeoutItem: DispatchWorkItem
+    contentType: String?
   ) {
     if buffer.count >= expectedLength {
       completePostOnQueue(
         connection,
         bodyData: Data(buffer.prefix(expectedLength)),
-        contentType: contentType,
-        timeoutItem: timeoutItem
+        contentType: contentType
       )
       return
     }
@@ -530,7 +519,6 @@ public final class LanPairingServer: @unchecked Sendable {
       [weak self] data, _, isComplete, error in
       guard let self else { return }
       if error != nil {
-        timeoutItem.cancel()
         self.closeConnectionOnQueue(connection)
         return
       }
@@ -542,15 +530,13 @@ public final class LanPairingServer: @unchecked Sendable {
         self.completePostOnQueue(
           connection,
           bodyData: Data(nextBuffer.prefix(expectedLength)),
-          contentType: contentType,
-          timeoutItem: timeoutItem
+          contentType: contentType
         )
         return
       }
       if isComplete {
         self.sendResponseAndCloseOnQueue(
           connection,
-          timeoutItem: timeoutItem,
           status: 400,
           reason: "Bad Request",
           contentType: "text/plain; charset=utf-8",
@@ -563,8 +549,7 @@ public final class LanPairingServer: @unchecked Sendable {
         connection,
         buffer: nextBuffer,
         expectedLength: expectedLength,
-        contentType: contentType,
-        timeoutItem: timeoutItem
+        contentType: contentType
       )
     }
   }
@@ -572,13 +557,11 @@ public final class LanPairingServer: @unchecked Sendable {
   private func completePostOnQueue(
     _ connection: NWConnection,
     bodyData: Data,
-    contentType: String?,
-    timeoutItem: DispatchWorkItem
+    contentType: String?
   ) {
     if hasSubmitted {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 410,
         reason: "Gone",
         contentType: "text/plain; charset=utf-8",
@@ -589,14 +572,15 @@ public final class LanPairingServer: @unchecked Sendable {
       return
     }
 
-    guard let bodyText = String(data: bodyData, encoding: .utf8) else {
+    guard let bodyText = String(data: bodyData, encoding: .utf8),
+          LanPairingValidation.isValidSubmissionPayload(bodyData, contentType: contentType)
+    else {
       sendResponseAndCloseOnQueue(
         connection,
-        timeoutItem: timeoutItem,
         status: 400,
         reason: "Bad Request",
-        contentType: "text/plain; charset=utf-8",
-        body: Data("Invalid Encoding".utf8),
+        contentType: "application/json; charset=utf-8",
+        body: Data("{\"error\":\"invalid-payload\"}".utf8),
         recordFailure: true
       )
       return
@@ -612,7 +596,7 @@ public final class LanPairingServer: @unchecked Sendable {
       includeHtmlCsp: false
     )
 
-    timeoutItem.cancel()
+    connectionTimeouts.removeValue(forKey: ObjectIdentifier(connection))?.cancel()
     connection.send(content: responseData, completion: .contentProcessed { [weak self] _ in
       guard let self else { return }
       self.closeConnectionOnQueue(connection)
@@ -625,7 +609,6 @@ public final class LanPairingServer: @unchecked Sendable {
 
   private func sendResponseAndCloseOnQueue(
     _ connection: NWConnection,
-    timeoutItem: DispatchWorkItem,
     status: Int,
     reason: String,
     contentType: String,
@@ -634,7 +617,7 @@ public final class LanPairingServer: @unchecked Sendable {
     recordFailure: Bool,
     stopServerAfter: Bool = false
   ) {
-    timeoutItem.cancel()
+    connectionTimeouts.removeValue(forKey: ObjectIdentifier(connection))?.cancel()
     var shouldStop = stopServerAfter
     if recordFailure {
       failedAttempts += 1
@@ -642,6 +625,7 @@ public final class LanPairingServer: @unchecked Sendable {
         shouldStop = true
       }
     }
+    let stopAfter = shouldStop
 
     let responseData = Self.buildHttpResponse(
       status: status,
@@ -653,14 +637,16 @@ public final class LanPairingServer: @unchecked Sendable {
     connection.send(content: responseData, completion: .contentProcessed { [weak self] _ in
       guard let self else { return }
       self.closeConnectionOnQueue(connection)
-      if shouldStop {
+      if stopAfter {
         self.stopOnQueue()
       }
     })
   }
 
   private func closeConnectionOnQueue(_ connection: NWConnection) {
-    activeConnections.removeValue(forKey: ObjectIdentifier(connection))
+    let connId = ObjectIdentifier(connection)
+    connectionTimeouts.removeValue(forKey: connId)?.cancel()
+    activeConnections.removeValue(forKey: connId)
     connection.cancel()
   }
 

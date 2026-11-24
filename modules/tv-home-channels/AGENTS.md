@@ -10,8 +10,8 @@ Android TV Expo module publishing bounded Home Screen Preview Channels (`Continu
 
 ## Android native (`android/`)
 - `ElvTvHomeChannelsModule.kt`: Expo Module (`ElvTvHomeChannels`) running sync/clear sequentially on a background `ExecutorService` (never blocks main thread).
-- `TvChannelSecurity.kt`: pure JVM-testable deep-link builder, SSRF URL/IP guard (blocks private/loopback/link-local/CGNAT/ULA/multicast/SVG/userinfo), `image/*` MIME guard, and channel/program capping.
-- `TvChannelLogoCache.kt`: bounded (`2 MiB`, `48` files) SHA-256 disk cache in `cacheDir/tv_channel_logos/` with manual redirect checks (`<= 2` hops), DNS rebinding IP validation, `FileProvider` URIs, and `FLAG_GRANT_READ_URI_PERMISSION` for Android TV launchers.
+- `TvChannelSecurity.kt`: pure JVM-testable deep-link builder, SSRF URL/IP guard (blocks private/loopback/link-local/CGNAT/ULA/multicast/SVG/userinfo), `image/` MIME + PNG/JPEG/WebP/GIF magic-byte guard, and channel/program capping.
+- `TvChannelLogoCache.kt`: bounded (`2 MiB`, `48` files) SHA-256 disk cache in `cacheDir/tv_channel_logos/` with manual redirect checks (`<= 2` hops), IP-pinned HTTP/HTTPS connections eliminating DNS rebinding TOCTOU, raster magic-byte verification, `FileProvider` URIs, and `FLAG_GRANT_READ_URI_PERMISSION` restricted to `CATEGORY_HOME` + known Android TV launcher packages.
 - `TvChannelsSyncManager.kt`: `TvContractCompat` sync respecting `COLUMN_BROWSABLE == 0` and SharedPreferences removal tombstones; calls `requestChannelBrowsable` once on initial default channel creation.
 
 ## Commands & Rules

@@ -50,7 +50,7 @@ export const LIVE_OVERRIDE_JOIN =
 export const LIVE_EFFECTIVE_NAME_EXPR = "COALESCE(NULLIF(co.custom_name, ''), t.name)";
 
 export const LIVE_EFFECTIVE_SORT_TITLE_EXPR =
-  "CASE WHEN NULLIF(co.custom_name, '') IS NOT NULL THEN LOWER(co.custom_name) ELSE t.sort_title END";
+  "COALESCE(NULLIF(co.custom_name_fold, ''), t.sort_title)";
 
 export const LIVE_OVERRIDE_META_COLS =
   "CASE WHEN NULLIF(co.custom_name, '') IS NOT NULL THEN t.name ELSE NULL END AS original_name, COALESCE(co.is_hidden, 0) AS co_is_hidden, co.sort_order AS co_sort_order";

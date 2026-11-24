@@ -40,6 +40,7 @@ interface NativeStartOptions {
 }
 
 interface NativeLanPairingModule {
+  generateToken?(): string;
   startServer(options: NativeStartOptions): Promise<LanPairingServerInfo>;
   stopServer(): Promise<void>;
   addListener(
@@ -66,6 +67,19 @@ function parseSubmissionEvent(raw: unknown): LanPairingSubmissionEvent | null {
 /** Returns `true` when the native `ElvLanPairing` Expo module is linked on this platform. */
 export function isLanPairingNativeAvailable(): boolean {
   return native !== null;
+}
+
+/**
+ * Generates a 192-bit (24-byte) CSPRNG pairing token as 48 lowercase hex characters via native
+ * `SecureRandom` (Android) or `SecRandomCopyBytes` (Apple). Returns `null` on web or when the
+ * native module is unavailable.
+ */
+export function generateLanPairingToken(): string | null {
+  if (native === null || typeof native.generateToken !== 'function') {
+    return null;
+  }
+  const token = native.generateToken();
+  return typeof token === 'string' && token.length > 0 ? token : null;
 }
 
 /**

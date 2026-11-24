@@ -256,7 +256,9 @@ function executeRemappedPlayerAction(
       return true;
     case 'player.openChannelDrawer':
     case 'player.toggleGuide':
-      if (d.toggleChannelList !== undefined && s.canOpenChannelList) {
+      if (s.channelListOpen && d.toggleChannelList !== undefined) {
+        d.toggleChannelList();
+      } else if (!d.isVod && d.toggleChannelList !== undefined && s.canOpenChannelList) {
         d.digitBuf.cancel();
         d.toggleChannelList();
       } else {
@@ -264,8 +266,10 @@ function executeRemappedPlayerAction(
       }
       return true;
     case 'player.openSettings':
+      d.digitBuf.cancel();
       if (s.settingsOpen) d.closeSettings();
-      else d.openSettings?.();
+      else if (d.openSettings !== undefined) d.openSettings();
+      else d.showOsd();
       return true;
     case 'player.cycleAudioTrack': {
       const list = s.tracks.audio;
@@ -375,19 +379,19 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       return true;
     }
     if (event.key === 'colorYellow') {
-      d.showOsd();
-      d.toggleStats();
+      if (d.toggleMute !== undefined) {
+        d.toggleMute();
+      } else {
+        d.showOsd();
+        d.toggleStats();
+      }
       return true;
     }
     if (event.key === 'colorBlue') {
-      if (!d.isVod && d.toggleChannelList !== undefined && s.canOpenChannelList) {
-        d.digitBuf.cancel();
-        d.toggleChannelList();
-      } else if (d.toggleInfo !== undefined && s.canOpenInfo) {
-        d.toggleInfo();
-      } else {
-        d.showOsd();
-      }
+      d.digitBuf.cancel();
+      if (s.settingsOpen) d.closeSettings();
+      else if (d.openSettings !== undefined) d.openSettings();
+      else d.showOsd();
       return true;
     }
     if (event.key === 'lastChannel') {
@@ -396,9 +400,20 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       return true;
     }
     if (event.key === 'menu') {
-      if (s.settingsOpen) d.closeSettings();
-      else if (s.tracksOpen) d.closeTracks();
-      else d.openTracks();
+      if (s.channelListOpen && d.toggleChannelList !== undefined) {
+        d.toggleChannelList();
+      } else if (!d.isVod && d.toggleChannelList !== undefined && s.canOpenChannelList) {
+        d.digitBuf.cancel();
+        d.toggleChannelList();
+      } else if (s.settingsOpen) {
+        d.closeSettings();
+      } else if (s.tracksOpen) {
+        d.closeTracks();
+      } else if (s.hasTracks) {
+        d.openTracks();
+      } else {
+        d.showOsd();
+      }
       return true;
     }
   }

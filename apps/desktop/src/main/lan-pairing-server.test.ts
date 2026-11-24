@@ -90,13 +90,38 @@ describe('discoverLanIpv4', () => {
         lo: [makeInfo('127.0.0.1', true)],
         eth0: [makeInfo('203.0.113.10')],
       }),
-    ).toBe('127.0.0.1');
+    ).toBeNull();
   });
 });
 
 describe('createLanPairingServer (#50)', () => {
+  it('rejects start() with lan-unavailable when no private LAN interface exists and advertiseHost is not injected', async () => {
+    const makeInfo = (address: string, internal = false): NetworkInterfaceInfo => ({
+      address,
+      netmask: '255.255.255.0',
+      family: 'IPv4',
+      mac: '00:11:22:33:44:55',
+      internal,
+      cidr: `${address}/24`,
+    });
+    const server = trackServer(
+      createLanPairingServer({
+        bindHost: '127.0.0.1',
+        getNetworkInterfaces: () => ({
+          lo: [makeInfo('127.0.0.1', true)],
+          eth0: [makeInfo('203.0.113.10')],
+        }),
+      }),
+    );
+
+    await expect(server.start()).rejects.toThrow('lan-unavailable');
+    expect(server.isActive()).toBe(false);
+  });
+
   it('serves self-contained HTML with no-store and nosniff headers on GET /pair/<token>', async () => {
-    const server = trackServer(createLanPairingServer({ bindHost: '127.0.0.1' }));
+    const server = trackServer(
+      createLanPairingServer({ bindHost: '127.0.0.1', advertiseHost: '127.0.0.1' }),
+    );
     const session = await server.start({ locale: 'tr' });
 
     expect(session.host).toBe('127.0.0.1');
@@ -125,6 +150,7 @@ describe('createLanPairingServer (#50)', () => {
     const server = trackServer(
       createLanPairingServer({
         bindHost: '127.0.0.1',
+        advertiseHost: '127.0.0.1',
         onClosed: (reason) => closedReasons.push(reason),
       }),
     );
@@ -152,6 +178,7 @@ describe('createLanPairingServer (#50)', () => {
     const server = trackServer(
       createLanPairingServer({
         bindHost: '127.0.0.1',
+        advertiseHost: '127.0.0.1',
         onPayload: (p) => payloads.push(p),
       }),
     );
@@ -184,6 +211,7 @@ describe('createLanPairingServer (#50)', () => {
     const server = trackServer(
       createLanPairingServer({
         bindHost: '127.0.0.1',
+        advertiseHost: '127.0.0.1',
         resolvePeerIp: () => '8.8.8.8',
       }),
     );
@@ -203,6 +231,7 @@ describe('createLanPairingServer (#50)', () => {
     const server = trackServer(
       createLanPairingServer({
         bindHost: '127.0.0.1',
+        advertiseHost: '127.0.0.1',
         onPayload: (p) => payloads.push(p),
       }),
     );
@@ -236,6 +265,7 @@ describe('createLanPairingServer (#50)', () => {
     const server = trackServer(
       createLanPairingServer({
         bindHost: '127.0.0.1',
+        advertiseHost: '127.0.0.1',
         onPayload: (p) => payloads.push(p),
         onClosed: (reason) => closedReasons.push(reason),
       }),
@@ -295,6 +325,7 @@ describe('createLanPairingServer (#50)', () => {
     const server = trackServer(
       createLanPairingServer({
         bindHost: '127.0.0.1',
+        advertiseHost: '127.0.0.1',
         ttlMs: 40,
         onClosed: (reason) => closedReasons.push(reason),
       }),
@@ -326,7 +357,9 @@ describe('LAN pairing IPC and preload bridge (#50)', () => {
       removeListener: vi.fn(),
     };
 
-    const server = trackServer(createLanPairingServer({ bindHost: '127.0.0.1' }));
+    const server = trackServer(
+      createLanPairingServer({ bindHost: '127.0.0.1', advertiseHost: '127.0.0.1' }),
+    );
     const ipcHandle = registerLanPairingIpc({
       ipcMain: {
         handle: (channel, listener) => {

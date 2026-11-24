@@ -268,4 +268,43 @@ describe('createProfileScopedCatalog', () => {
     expect(removeChannelFromCustomGroup).toHaveBeenCalledWith('g1', 'x:s1:live:1');
     expect(deleteCustomGroup).toHaveBeenCalledWith('g1');
   });
+
+  it('preserves opts.includeHidden and explicit parentalUnlocked: false in listFavorites and listContinueWatching', async () => {
+    const listFavorites = vi.fn(async () => []);
+    const listContinueWatching = vi.fn(async () => []);
+    const base = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      seasons: vi.fn(async () => ok([])),
+      episodes: vi.fn(async () => []),
+      resolveStream: vi.fn(),
+      listFavorites,
+      listContinueWatching,
+      close: vi.fn(async () => undefined),
+    } as unknown as CatalogService;
+
+    const scoped = createProfileScopedCatalog(base, () => ({
+      profileId: 'adult-1',
+      parentalUnlocked: true,
+    }));
+
+    await scoped.listFavorites?.(20, undefined, {
+      includeHidden: true,
+      parentalUnlocked: false,
+    });
+    expect(listFavorites).toHaveBeenLastCalledWith(20, 'adult-1', {
+      includeHidden: true,
+      parentalUnlocked: false,
+    });
+
+    await scoped.listContinueWatching?.(20, undefined, { parentalUnlocked: false });
+    expect(listContinueWatching).toHaveBeenLastCalledWith(20, 'adult-1', {
+      parentalUnlocked: false,
+    });
+  });
 });

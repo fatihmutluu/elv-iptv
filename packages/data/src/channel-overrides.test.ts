@@ -32,6 +32,7 @@ import { listRecentChannels, recordRecentChannel } from './recent-channels-repo'
 import { querySearch, querySearchSuggestions } from './search';
 import { countingScheduler, memorySecrets, testDb } from './test-db';
 import { listFavorites, saveWatchProgress, setFavorite } from './user-state';
+import { reconcileUserData, saveUserDataSnapshot, type UserDataStore } from './user-state-backup';
 import { createCoalescedCatalog } from './write-coalescer';
 
 async function setup() {
@@ -576,6 +577,135 @@ describe('channel-overrides-repo (#60)', () => {
 
       // Suppress unused import lint if setParentalLock used in custom-groups test
       expect(typeof setParentalLock).toBe('function');
+    } finally {
+      close();
+    }
+  });
+
+  it('buckets and sorts Turkish-renamed channels under folded ASCII letters across category, all-sources, custom groups, and backup restore', async () => {
+    const { db, close } = await setup();
+    try {
+      await db.run(
+        "INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, run_id) VALUES ('s1', 'live', 'tr', 'Turkish', 'turkish', 0, 1)",
+      );
+      await db.run(
+        `INSERT INTO live (source_id, key, name, name_fold, sort_title, is_hidden, run_id) VALUES
+           ('s1', 'x:s1:live:1', 'Channel 1', 'channel 1', 'channel 1', 0, 1),
+           ('s1', 'x:s1:live:2', 'Channel 2', 'channel 2', 'channel 2', 0, 1),
+           ('s1', 'x:s1:live:3', 'Channel 3', 'channel 3', 'channel 3', 0, 1),
+           ('s1', 'x:s1:live:4', 'Channel 4', 'channel 4', 'channel 4', 0, 1),
+           ('s1', 'x:s1:live:5', 'Channel 5', 'channel 5', 'channel 5', 0, 1)`,
+      );
+      await db.run(
+        `INSERT INTO placements (source_id, kind, item_key, category_id, position, run_id) VALUES
+           ('s1', 'live', 'x:s1:live:1', 'tr', 0, 1),
+           ('s1', 'live', 'x:s1:live:2', 'tr', 1, 1),
+           ('s1', 'live', 'x:s1:live:3', 'tr', 2, 1),
+           ('s1', 'live', 'x:s1:live:4', 'tr', 3, 1),
+           ('s1', 'live', 'x:s1:live:5', 'tr', 4, 1)`,
+      );
+
+      await setChannelOverride(db, {
+        itemKey: 'x:s1:live:1',
+        sourceId: 's1',
+        customName: 'İstanbul TV',
+      });
+      await setChannelOverride(db, {
+        itemKey: 'x:s1:live:2',
+        sourceId: 's1',
+        customName: 'Özgür Haber',
+      });
+      await setChannelOverride(db, {
+        itemKey: 'x:s1:live:3',
+        sourceId: 's1',
+        customName: 'Çocuk Kanalı',
+      });
+      await setChannelOverride(db, {
+        itemKey: 'x:s1:live:4',
+        sourceId: 's1',
+        customName: 'Şehir Spor',
+      });
+      await setChannelOverride(db, {
+        itemKey: 'x:s1:live:5',
+        sourceId: 's1',
+        customName: 'Ülke Belgesel',
+      });
+
+      await createCustomGroup(
+        db,
+        { name: 'TR Mix' },
+        () => 1_000,
+        () => 'g-tr',
+      );
+      for (const k of ['x:s1:live:1', 'x:s1:live:2', 'x:s1:live:3', 'x:s1:live:4', 'x:s1:live:5']) {
+        await addChannelToCustomGroup(db, 'g-tr', k, 's1', () => 1_000);
+      }
+
+      const expectedLetters = ['C', 'I', 'O', 'S', 'U'];
+      const expectedNames = [
+        'Çocuk Kanalı',
+        'İstanbul TV',
+        'Özgür Haber',
+        'Şehir Spor',
+        'Ülke Belgesel',
+      ];
+
+      expect(
+        (await queryAlphabetIndex(db, { kind: 'live', categoryId: 's1|live|tr' })).map(
+          (b) => b.letter,
+        ),
+      ).toEqual(expectedLetters);
+      expect((await queryAlphabetIndex(db, { kind: 'live' })).map((b) => b.letter)).toEqual(
+        expectedLetters,
+      );
+      expect(
+        (
+          await queryAlphabetIndex(db, { kind: 'live', categoryId: customGroupCategoryId('g-tr') })
+        ).map((b) => b.letter),
+      ).toEqual(expectedLetters);
+
+      expect(
+        (await queryItems(db, 's1|live|tr', 0, 10, { sortBy: 'alpha' })).map((i) => i.name),
+      ).toEqual(expectedNames);
+      expect(
+        (await queryAllSourcesItems(db, 'live', 0, 10, undefined, { sortBy: 'alpha' })).map(
+          (i) => i.name,
+        ),
+      ).toEqual(expectedNames);
+      expect(
+        (await queryItems(db, customGroupCategoryId('g-tr'), 0, 10, { sortBy: 'alpha' })).map(
+          (i) => i.name,
+        ),
+      ).toEqual(expectedNames);
+
+      // Verify user-state backup restore computes custom_name_fold cleanly as well.
+      let snapshot: string | undefined;
+      const store: UserDataStore = {
+        read: () => snapshot,
+        write: (next) => {
+          snapshot = next;
+        },
+      };
+      await saveUserDataSnapshot(db, store);
+
+      const fresh = testDb();
+      try {
+        await openCatalog(fresh.db);
+        await fresh.db.run(
+          "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1', 'xtream', 'Main', 100, '{}')",
+        );
+        await fresh.db.run(
+          `INSERT INTO live (source_id, key, name, name_fold, sort_title, is_hidden, run_id) VALUES
+             ('s1', 'x:s1:live:1', 'Channel 1', 'channel 1', 'channel 1', 0, 1),
+             ('s1', 'x:s1:live:2', 'Channel 2', 'channel 2', 'channel 2', 0, 1)`,
+        );
+        await reconcileUserData(fresh.db, store);
+        expect((await queryAlphabetIndex(fresh.db, { kind: 'live' })).map((b) => b.letter)).toEqual(
+          ['I', 'O'],
+        );
+      } finally {
+        fresh.close();
+      }
     } finally {
       close();
     }

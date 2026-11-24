@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS channel_overrides (
   item_key TEXT NOT NULL,
   source_id TEXT NOT NULL,
   custom_name TEXT,
+  custom_name_fold TEXT,
   is_hidden INTEGER NOT NULL DEFAULT 0,
   sort_order INTEGER,
   updated_at INTEGER NOT NULL,

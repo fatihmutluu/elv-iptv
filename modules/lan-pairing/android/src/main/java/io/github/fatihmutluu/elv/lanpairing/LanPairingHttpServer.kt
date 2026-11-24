@@ -10,10 +10,18 @@ import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.util.Collections
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -40,18 +48,23 @@ class LanPairingHttpServer(
   private val maxFailedAttempts: Int = DEFAULT_MAX_FAILED_ATTEMPTS,
   private val bindAddress: InetAddress? = null,
   private val advertisedHost: String? = null,
+  private val clientTimeoutMs: Int = DEFAULT_CLIENT_TIMEOUT_MS,
   private val onSubmission: (body: String, contentType: String?) -> Unit,
 ) {
   private val htmlBytes: ByteArray = html.toByteArray(StandardCharsets.UTF_8)
   private val running = AtomicBoolean(false)
   private val submitted = AtomicBoolean(false)
   private val failedAttempts = AtomicInteger(0)
+  private val activeClientSockets = Collections.newSetFromMap(ConcurrentHashMap<Socket, Boolean>())
 
   @Volatile
   private var serverSocket: ServerSocket? = null
 
   @Volatile
   private var acceptExecutor = createAcceptExecutor()
+
+  @Volatile
+  private var workerExecutor = createWorkerExecutor()
 
   @Volatile
   private var timerExecutor: ScheduledExecutorService? = null
@@ -132,6 +145,11 @@ class LanPairingHttpServer(
     timerExecutor?.shutdownNow()
     timerExecutor = null
     acceptExecutor.shutdownNow()
+    workerExecutor.shutdownNow()
+    for (client in activeClientSockets) {
+      runCatching { client.close() }
+    }
+    activeClientSockets.clear()
   }
 
   private fun acceptLoop(socket: ServerSocket) {
@@ -144,76 +162,96 @@ class LanPairingHttpServer(
         if (!running.get() || socket.isClosed) break
         continue
       }
-      handleClient(client)
-    }
-  }
-
-  private fun handleClient(client: Socket) {
-    client.use { socket ->
+      if (!running.get()) {
+        runCatching { client.close() }
+        break
+      }
       try {
-        socket.soTimeout = CLIENT_TIMEOUT_MS
-        val output = socket.getOutputStream()
-
-        if (!isPrivateLanAddress(socket.inetAddress)) {
-          writeResponse(output, 403, "Forbidden", "text/plain; charset=utf-8", "Forbidden".toByteArray())
-          recordFailure()
-          return
-        }
-
-        val input = socket.getInputStream()
-        val parsed = readRequestHeaders(input)
-        if (parsed == null) {
-          writeResponse(output, 400, "Bad Request", "text/plain; charset=utf-8", "Bad Request".toByteArray())
-          recordFailure()
-          return
-        }
-        if (parsed.headersTooLarge) {
-          writeResponse(
-            output,
-            431,
-            "Request Header Fields Too Large",
-            "text/plain; charset=utf-8",
-            "Headers Too Large".toByteArray(),
-          )
-          recordFailure()
-          return
-        }
-
-        if (!isValidHostHeader(parsed.headers["host"], boundHost, boundPort)) {
-          writeResponse(output, 403, "Forbidden", "text/plain; charset=utf-8", "Forbidden".toByteArray())
-          recordFailure()
-          return
-        }
-
-        if (!isValidPairingPath(parsed.path, token)) {
-          writeResponse(output, 404, "Not Found", "text/plain; charset=utf-8", "Not Found".toByteArray())
-          recordFailure()
-          return
-        }
-
-        when (parsed.method) {
-          "GET" -> {
-            writeResponse(output, 200, "OK", "text/html; charset=utf-8", htmlBytes, includeHtmlCsp = true)
-          }
-          "POST" -> handlePost(parsed, input, output)
-          else -> {
-            writeResponse(
-              output,
-              405,
-              "Method Not Allowed",
-              "text/plain; charset=utf-8",
-              "Method Not Allowed".toByteArray(),
-            )
-            recordFailure()
-          }
-        }
-      } catch (_: Throwable) {
-        // Never log request contents or socket errors that could contain peer data.
+        workerExecutor.execute { handleClient(client) }
+      } catch (_: RejectedExecutionException) {
+        runCatching { client.close() }
       }
     }
   }
 
-  private fun handlePost(parsed: ParsedRequest, input: InputStream, output: OutputStream) {
+  private fun handleClient(client: Socket) {
+    activeClientSockets.add(client)
+    try {
+      client.use { socket ->
+        try {
+          val deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(clientTimeoutMs.toLong())
+          applyRemainingTimeout(socket, deadlineNanos)
+          val output = socket.getOutputStream()
+
+          if (!isPrivateLanAddress(socket.inetAddress)) {
+            writeResponse(output, 403, "Forbidden", "text/plain; charset=utf-8", "Forbidden".toByteArray())
+            recordFailure()
+            return
+          }
+
+          val input = socket.getInputStream()
+          val parsed = readRequestHeaders(socket, input, deadlineNanos)
+          if (parsed == null) {
+            writeResponse(output, 400, "Bad Request", "text/plain; charset=utf-8", "Bad Request".toByteArray())
+            recordFailure()
+            return
+          }
+          if (parsed.headersTooLarge) {
+            writeResponse(
+              output,
+              431,
+              "Request Header Fields Too Large",
+              "text/plain; charset=utf-8",
+              "Headers Too Large".toByteArray(),
+            )
+            recordFailure()
+            return
+          }
+
+          if (!isValidHostHeader(parsed.headers["host"], boundHost, boundPort)) {
+            writeResponse(output, 403, "Forbidden", "text/plain; charset=utf-8", "Forbidden".toByteArray())
+            recordFailure()
+            return
+          }
+
+          if (!isValidPairingPath(parsed.path, token)) {
+            writeResponse(output, 404, "Not Found", "text/plain; charset=utf-8", "Not Found".toByteArray())
+            recordFailure()
+            return
+          }
+
+          when (parsed.method) {
+            "GET" -> {
+              writeResponse(output, 200, "OK", "text/html; charset=utf-8", htmlBytes, includeHtmlCsp = true)
+            }
+            "POST" -> handlePost(parsed, socket, input, output, deadlineNanos)
+            else -> {
+              writeResponse(
+                output,
+                405,
+                "Method Not Allowed",
+                "text/plain; charset=utf-8",
+                "Method Not Allowed".toByteArray(),
+              )
+              recordFailure()
+            }
+          }
+        } catch (_: Throwable) {
+          // Never log request contents or socket errors that could contain peer data.
+        }
+      }
+    } finally {
+      activeClientSockets.remove(client)
+    }
+  }
+
+  private fun handlePost(
+    parsed: ParsedRequest,
+    socket: Socket,
+    input: InputStream,
+    output: OutputStream,
+    deadlineNanos: Long,
+  ) {
     if (!isValidOriginHeader(parsed.headers["origin"], boundHost, boundPort)) {
       writeResponse(output, 403, "Forbidden", "text/plain; charset=utf-8", "Forbidden".toByteArray())
       recordFailure()
@@ -234,7 +272,13 @@ class LanPairingHttpServer(
       return
     }
     if (contentLength == 0) {
-      writeResponse(output, 400, "Bad Request", "text/plain; charset=utf-8", "Empty Body".toByteArray())
+      writeResponse(
+        output,
+        400,
+        "Bad Request",
+        "application/json; charset=utf-8",
+        INVALID_PAYLOAD_JSON,
+      )
       recordFailure()
       return
     }
@@ -250,9 +294,23 @@ class LanPairingHttpServer(
       return
     }
 
-    val bodyBytes = readExactBody(input, parsed.initialBodyBytes, contentLength)
+    val bodyBytes = readExactBody(socket, input, parsed.initialBodyBytes, contentLength, deadlineNanos)
     if (bodyBytes == null) {
       writeResponse(output, 400, "Bad Request", "text/plain; charset=utf-8", "Incomplete Body".toByteArray())
+      recordFailure()
+      return
+    }
+
+    val bodyText = decodeUtf8Strict(bodyBytes)
+    val contentType = parsed.headers["content-type"]
+    if (bodyText == null || !LanPairingPayloadValidator.isValidSubmissionPayload(bodyText, contentType)) {
+      writeResponse(
+        output,
+        400,
+        "Bad Request",
+        "application/json; charset=utf-8",
+        INVALID_PAYLOAD_JSON,
+      )
       recordFailure()
       return
     }
@@ -266,8 +324,6 @@ class LanPairingHttpServer(
     val okPayload = """{"ok":true}""".toByteArray(StandardCharsets.UTF_8)
     writeResponse(output, 200, "OK", "application/json; charset=utf-8", okPayload)
 
-    val bodyText = String(bodyBytes, StandardCharsets.UTF_8)
-    val contentType = parsed.headers["content-type"]
     try {
       onSubmission(bodyText, contentType)
     } finally {
@@ -289,14 +345,41 @@ class LanPairingHttpServer(
     val headersTooLarge: Boolean = false,
   )
 
-  private fun readRequestHeaders(input: InputStream): ParsedRequest? {
+  private fun applyRemainingTimeout(socket: Socket, deadlineNanos: Long) {
+    val remainingNanos = deadlineNanos - System.nanoTime()
+    if (remainingNanos <= 0L) {
+      throw SocketTimeoutException("Request deadline exceeded")
+    }
+    val remainingMs = TimeUnit.NANOSECONDS.toMillis(remainingNanos).coerceAtLeast(1L)
+    socket.soTimeout = remainingMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+  }
+
+  private fun decodeUtf8Strict(bytes: ByteArray): String? {
+    return runCatching {
+      StandardCharsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .decode(ByteBuffer.wrap(bytes))
+        .toString()
+    }.getOrNull()
+  }
+
+  private fun readRequestHeaders(
+    socket: Socket,
+    input: InputStream,
+    deadlineNanos: Long,
+  ): ParsedRequest? {
     val buffer = ByteArrayOutputStream()
     val chunk = ByteArray(1024)
     var headerEndIndex = -1
 
     while (headerEndIndex == -1) {
+      applyRemainingTimeout(socket, deadlineNanos)
       val read = input.read(chunk)
       if (read <= 0) return null
+      if (System.nanoTime() > deadlineNanos) {
+        throw SocketTimeoutException("Request header deadline exceeded")
+      }
       buffer.write(chunk, 0, read)
       val current = buffer.toByteArray()
       headerEndIndex = findHeaderDelimiter(current)
@@ -344,7 +427,13 @@ class LanPairingHttpServer(
     return ParsedRequest(method, target, headers, initialBody)
   }
 
-  private fun readExactBody(input: InputStream, initial: ByteArray, contentLength: Int): ByteArray? {
+  private fun readExactBody(
+    socket: Socket,
+    input: InputStream,
+    initial: ByteArray,
+    contentLength: Int,
+    deadlineNanos: Long,
+  ): ByteArray? {
     if (initial.size >= contentLength) {
       return initial.copyOfRange(0, contentLength)
     }
@@ -352,8 +441,12 @@ class LanPairingHttpServer(
     System.arraycopy(initial, 0, out, 0, initial.size)
     var offset = initial.size
     while (offset < contentLength) {
+      applyRemainingTimeout(socket, deadlineNanos)
       val read = input.read(out, offset, contentLength - offset)
       if (read <= 0) return null
+      if (System.nanoTime() > deadlineNanos) {
+        throw SocketTimeoutException("Request body deadline exceeded")
+      }
       offset += read
     }
     return out
@@ -391,15 +484,30 @@ class LanPairingHttpServer(
   companion object {
     const val DEFAULT_MAX_BODY_BYTES = 16_384
     const val DEFAULT_MAX_FAILED_ATTEMPTS = 5
+    const val DEFAULT_CLIENT_TIMEOUT_MS = 5_000
+    const val MAX_CONCURRENT_CLIENTS = 4
     private const val HARD_MAX_BODY_BYTES = 65_536
     private const val MAX_HEADER_BYTES = 8_192
-    private const val CLIENT_TIMEOUT_MS = 5_000
     private const val MIN_TTL_MS = 1_000L
     private const val MAX_TTL_MS = 600_000L
     private val TOKEN_REGEX = Regex("^[0-9a-fA-F]{32,128}$")
+    private val INVALID_PAYLOAD_JSON = """{"error":"invalid-payload"}""".toByteArray(StandardCharsets.UTF_8)
 
     private fun createAcceptExecutor() = Executors.newSingleThreadExecutor { r ->
       Thread(r, "elv-lan-pairing-accept").apply { isDaemon = true }
+    }
+
+    private fun createWorkerExecutor(): ThreadPoolExecutor {
+      val seq = AtomicInteger(1)
+      return ThreadPoolExecutor(
+        0,
+        MAX_CONCURRENT_CLIENTS,
+        10L,
+        TimeUnit.SECONDS,
+        SynchronousQueue(),
+      ) { r ->
+        Thread(r, "elv-lan-pairing-worker-${seq.getAndIncrement()}").apply { isDaemon = true }
+      }
     }
 
     private fun findHeaderDelimiter(bytes: ByteArray): Int {

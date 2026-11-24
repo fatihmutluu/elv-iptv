@@ -1,5 +1,5 @@
 import type { CatalogService, SourceRow } from '@elv/data';
-import { ok } from '@elv/domain';
+import { elvError, err, ok } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import { I18nProvider, ThemeProvider, TvRemoteProvider, ViewportProvider } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -253,6 +253,72 @@ describe('QrPairingOverlay & SourcesScreen QR pairing (#50)', () => {
     await fireEvent.press(screen.getByTestId('sources-qr-button'));
     await waitFor(() => {
       expect(screen.getByTestId('qr-pairing-overlay')).toBeTruthy();
+      expect(screen.getByTestId('qr-pairing-code')).toBeTruthy();
+    });
+  });
+
+  it('keeps overlay open with inline error and regenerate option when addSource fails (#50)', async () => {
+    let payloadListener: ((p: LanPairingSourcePayload) => void) | undefined;
+    const startSession = jest.fn(async () => ({
+      url: 'http://192.168.1.50:49152/pair/err1',
+      token: 'err1',
+      host: '192.168.1.50',
+      port: 49152,
+      expiresAtMs: Date.now() + 300_000,
+    }));
+    const lanPairing: LanPairingPort = {
+      isSupported: () => true,
+      startSession,
+      stopSession: jest.fn(async () => undefined),
+      onPayloadReceived: (listener) => {
+        payloadListener = listener;
+        return () => {
+          payloadListener = undefined;
+        };
+      },
+    };
+    const failingCatalog = {
+      ...createFakeCatalog(),
+      addSource: jest.fn(async () => err(elvError('auth', 'invalid-credentials'))),
+    } as unknown as CatalogService;
+    const onSourceAdded = jest.fn();
+    const onClose = jest.fn();
+
+    await render(
+      wrapProviders(
+        <QrPairingOverlay
+          visible
+          catalog={failingCatalog}
+          lanPairing={lanPairing}
+          onSourceAdded={onSourceAdded}
+          onClose={onClose}
+        />,
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId('qr-pairing-code')).toBeTruthy());
+
+    await act(async () => {
+      payloadListener?.({
+        kind: 'xtream',
+        name: 'Bad Creds',
+        server: 'http://provider.test:8080',
+        username: 'wrong',
+        password: 'wrong',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('qr-pairing-error')).toBeTruthy();
+      expect(screen.getByTestId('qr-pairing-error-hint')).toBeTruthy();
+      expect(screen.getByTestId('qr-pairing-regenerate-btn')).toBeTruthy();
+    });
+    expect(onSourceAdded).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Pressing New code restarts a fresh QR session
+    await fireEvent.press(screen.getByTestId('qr-pairing-regenerate-btn'));
+    await waitFor(() => {
+      expect(startSession).toHaveBeenCalledTimes(2);
       expect(screen.getByTestId('qr-pairing-code')).toBeTruthy();
     });
   });

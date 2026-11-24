@@ -216,6 +216,7 @@ const MERGE_PLACEMENTS_HIDDEN = `UPDATE placements
 
 const MERGE_CHANNEL_OVERRIDES = `UPDATE channel_overrides
   SET custom_name = CASE WHEN old.updated_at > channel_overrides.updated_at THEN old.custom_name ELSE COALESCE(channel_overrides.custom_name, old.custom_name) END,
+      custom_name_fold = CASE WHEN old.updated_at > channel_overrides.updated_at THEN old.custom_name_fold ELSE COALESCE(channel_overrides.custom_name_fold, old.custom_name_fold) END,
       is_hidden = CASE WHEN old.updated_at > channel_overrides.updated_at THEN old.is_hidden ELSE MAX(channel_overrides.is_hidden, old.is_hidden) END,
       sort_order = CASE WHEN old.updated_at > channel_overrides.updated_at THEN old.sort_order ELSE COALESCE(channel_overrides.sort_order, old.sort_order) END,
       updated_at = MAX(channel_overrides.updated_at, old.updated_at)

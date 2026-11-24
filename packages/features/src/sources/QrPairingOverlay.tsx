@@ -1,5 +1,6 @@
 import type { CatalogService, SourceRow } from '@elv/data';
 import type { KeyInput } from '@elv/focus-core';
+import type { MessageId } from '@elv/i18n';
 import {
   CtaButton,
   QrCodeView,
@@ -19,6 +20,7 @@ import type {
   LanPairingSession,
   LanPairingSourcePayload,
 } from '../ports/lan-pairing-host';
+import { describeSourceFailure } from './errors';
 
 const NOOP_TV_SUBSCRIBER = (): boolean => false;
 const COUNTDOWN_TICK_MS = 1_000;
@@ -47,6 +49,7 @@ type OverlayPhase =
   | { readonly kind: 'starting' }
   | { readonly kind: 'ready'; readonly session: LanPairingSession }
   | { readonly kind: 'received' }
+  | { readonly kind: 'error'; readonly messageId: MessageId; readonly hintId: MessageId }
   | { readonly kind: 'unavailable' };
 
 function QrTvKeyTrap({
@@ -171,12 +174,25 @@ export function QrPairingOverlay({
           if (!alive) return;
           if (res.ok) {
             callbacksRef.current.onSourceAdded?.(res.value);
+            callbacksRef.current.onClose();
+            return;
           }
-          callbacksRef.current.onClose();
+          const described = describeSourceFailure(res.error);
+          setPhase({
+            kind: 'error',
+            messageId: described.messageId,
+            hintId: described.hintId,
+          });
         })
         .catch(() => {
           stopSessionSafely();
-          if (alive) setPhase({ kind: 'unavailable' });
+          if (alive) {
+            setPhase({
+              kind: 'error',
+              messageId: 'source.error.storage',
+              hintId: 'source.hint.storage',
+            });
+          }
         });
     });
 
@@ -235,7 +251,7 @@ export function QrPairingOverlay({
     return () => win.removeEventListener?.('keydown', onKeyDown);
   }, [handleClose, visible]);
 
-  const showRegenerate = isExpired || phase.kind === 'unavailable';
+  const showRegenerate = isExpired || phase.kind === 'unavailable' || phase.kind === 'error';
   useEffect(() => {
     setFocusedBtn(showRegenerate ? 'regenerate' : 'close');
   }, [showRegenerate]);
@@ -317,6 +333,25 @@ export function QrPairingOverlay({
           >
             {i18n.t('sources.qr.received')}
           </Text>
+        ) : phase.kind === 'error' ? (
+          <View style={styles.errorBlock}>
+            <Text
+              testID="qr-pairing-error"
+              style={[theme.typography.title, styles.centerText, { color: theme.colors.liveColor }]}
+            >
+              {i18n.t(phase.messageId)}
+            </Text>
+            <Text
+              testID="qr-pairing-error-hint"
+              style={[
+                theme.typography.caption,
+                styles.centerText,
+                { color: theme.colors.textSecondary },
+              ]}
+            >
+              {i18n.t(phase.hintId)}
+            </Text>
+          </View>
         ) : phase.kind === 'unavailable' ? (
           <Text
             testID="qr-pairing-unavailable"
@@ -454,6 +489,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerBlock: { gap: 4, alignItems: 'center' },
+  errorBlock: { gap: 6, alignItems: 'center' },
   qrBody: { alignItems: 'center', gap: 10, width: '100%' },
   urlText: {
     paddingHorizontal: 12,

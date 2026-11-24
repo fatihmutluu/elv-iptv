@@ -18,6 +18,10 @@ class ElvLanPairingModule : Module() {
 
     Events("onSubmission")
 
+    Function("generateToken") {
+      LanPairingPayloadValidator.generateToken()
+    }
+
     AsyncFunction("startServer") { options: Map<String, Any?> ->
       val token = options["token"] as? String
         ?: throw IllegalArgumentException("Missing pairing token")

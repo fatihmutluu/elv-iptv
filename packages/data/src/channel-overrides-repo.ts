@@ -1,4 +1,5 @@
 import { elvError, err, ok, type Result, type SqlDriver, type SqlValue } from '@elv/domain';
+import { foldText } from './fold';
 import { isValidProfileId } from './profiles-repo';
 import { SOURCE_ID } from './sources';
 import { normalizeProfileId } from './user-state-helpers';
@@ -172,11 +173,12 @@ export async function listChannelOverrides(
 }
 
 const UPSERT_OVERRIDE_SQL = `INSERT INTO channel_overrides (
-  profile_id, item_key, source_id, custom_name, is_hidden, sort_order, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?)
+  profile_id, item_key, source_id, custom_name, custom_name_fold, is_hidden, sort_order, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(profile_id, item_key) DO UPDATE SET
   source_id = excluded.source_id,
   custom_name = excluded.custom_name,
+  custom_name_fold = excluded.custom_name_fold,
   is_hidden = excluded.is_hidden,
   sort_order = excluded.sort_order,
   updated_at = excluded.updated_at`;
@@ -242,11 +244,13 @@ export async function setChannelOverride(
         ]);
       }
     } else {
+      const nextCustomNameFold = nextCustomName !== null ? foldText(nextCustomName) : null;
       await tx.run(UPSERT_OVERRIDE_SQL, [
         profile.value,
         itemKey,
         input.sourceId,
         nextCustomName,
+        nextCustomNameFold,
         nextIsHidden ? 1 : 0,
         nextSortOrder,
         now,
@@ -292,8 +296,8 @@ export async function clearChannelOverride(
 }
 
 const REORDER_UPSERT_SQL = `INSERT INTO channel_overrides (
-  profile_id, item_key, source_id, custom_name, is_hidden, sort_order, updated_at
-) VALUES (?, ?, ?, NULL, 0, ?, ?)
+  profile_id, item_key, source_id, custom_name, custom_name_fold, is_hidden, sort_order, updated_at
+) VALUES (?, ?, ?, NULL, NULL, 0, ?, ?)
 ON CONFLICT(profile_id, item_key) DO UPDATE SET
   source_id = excluded.source_id,
   sort_order = excluded.sort_order,

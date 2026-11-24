@@ -178,6 +178,66 @@ describe('@elv/focus-core keymap', () => {
     expect(resetAllKeyBindings()).toEqual({});
   });
 
+  it('displaces conflicting same-context and global/local bindings when resetKeyBinding restores a default trigger', () => {
+    // 1. Same-context conflict: player.openSettings moved off colorBlue, player.toggleMute moved onto colorBlue.
+    const movedSettings = setKeyBinding({}, 'player.openSettings', {
+      key: 'colorRed',
+      kind: 'press',
+    });
+    const muteOnBlue = setKeyBinding(movedSettings, 'player.toggleMute', {
+      key: 'colorBlue',
+      kind: 'press',
+    });
+    // Also bind an unrelated live action to colorBlue to confirm cross-local contexts stay intact.
+    const withLiveBlue = setKeyBinding(muteOnBlue, 'live.toggleFavorite', {
+      key: 'colorBlue',
+      kind: 'press',
+    });
+    const resetSettings = resetKeyBinding(withLiveBlue, 'player.openSettings');
+    expect('player.openSettings' in resetSettings).toBe(false);
+    expect(resetSettings['player.toggleMute']).toBeNull();
+    expect(resolveKeyTrigger(resetSettings, 'player.openSettings')).toEqual({
+      key: 'colorBlue',
+      kind: 'press',
+    });
+    expect(resolveKeyTrigger(resetSettings, 'player.toggleMute')).toBeNull();
+    expect(
+      resolveRemappedAction(resetSettings, 'player', { key: 'colorBlue', kind: 'press' }),
+    ).toBe('player.openSettings');
+    expect(resolveKeyTrigger(resetSettings, 'live.toggleFavorite')).toEqual({
+      key: 'colorBlue',
+      kind: 'press',
+    });
+
+    // 2. Local -> global conflict: player.openSettings rebound to colorGreen (displaces global.openHome),
+    // then resetting global.openHome displaces player.openSettings.
+    const settingsOnGreen = setKeyBinding({}, 'player.openSettings', {
+      key: 'colorGreen',
+      kind: 'press',
+    });
+    expect(settingsOnGreen['global.openHome']).toBeNull();
+    const resetGlobalHome = resetKeyBinding(settingsOnGreen, 'global.openHome');
+    expect('global.openHome' in resetGlobalHome).toBe(false);
+    expect(resetGlobalHome['player.openSettings']).toBeNull();
+    expect(
+      resolveRemappedAction(resetGlobalHome, 'player', { key: 'colorGreen', kind: 'press' }),
+    ).toBe('global.openHome');
+
+    // 3. Global -> local conflict: global.openHome rebound to colorBlue while player.openSettings is on colorRed,
+    // then resetting player.openSettings displaces global.openHome.
+    const globalOnBlue = setKeyBinding(movedSettings, 'global.openHome', {
+      key: 'colorBlue',
+      kind: 'press',
+    });
+    const resetLocalSettings = resetKeyBinding(globalOnBlue, 'player.openSettings');
+    expect('player.openSettings' in resetLocalSettings).toBe(false);
+    expect(resetLocalSettings['global.openHome']).toBeNull();
+
+    // 4. Shared defaults (e.g. guide on player.toggleGuide & global.openGuide) stay intact when resetting.
+    const guideMoved = setKeyBinding({}, 'player.toggleGuide', { key: 'colorRed', kind: 'press' });
+    expect(resetKeyBinding(guideMoved, 'player.toggleGuide')).toEqual({});
+  });
+
   it('collects default long-press keys plus any keys bound with kind long', () => {
     const defaults = collectLongPressKeys({});
     expect(defaults).toEqual(expect.arrayContaining(['select', 'back', ...ARROW_KEYS]));

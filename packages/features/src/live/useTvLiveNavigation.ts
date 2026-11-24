@@ -335,6 +335,10 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         o.onToggleActiveFavorite();
         return true;
       }
+      if (event.kind === 'press' && event.key === 'colorGreen' && o.onOpenHome !== undefined) {
+        o.onOpenHome();
+        return true;
+      }
 
       if (event.kind !== 'press' && event.kind !== 'repeat' && event.kind !== 'long') return false;
       if (o.isEmpty) {

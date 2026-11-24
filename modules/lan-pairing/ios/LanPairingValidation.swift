@@ -1,9 +1,214 @@
 import Darwin
 import Foundation
 import Network
+import Security
 
 /// Pure protocol and network validation helpers shared by `LanPairingServer` (`#50`).
 public enum LanPairingValidation {
+  private static let tokenByteLength = 24
+  private static let maxNameLength = 120
+  private static let maxUrlLength = 2_048
+  private static let maxCredentialLength = 256
+
+  /// Generates a 192-bit (24-byte) CSPRNG pairing token as 48 lowercase hex characters via `SecRandomCopyBytes`.
+  public static func generateToken() -> String? {
+    var bytes = [UInt8](repeating: 0, count: tokenByteLength)
+    let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    guard status == errSecSuccess else { return nil }
+    let hexTable: [UInt8] = Array("0123456789abcdef".utf8)
+    var out = [UInt8]()
+    out.reserveCapacity(bytes.count * 2)
+    for byte in bytes {
+      out.append(hexTable[Int(byte >> 4)])
+      out.append(hexTable[Int(byte & 0x0f)])
+    }
+    return String(decoding: out, as: UTF8.self)
+  }
+
+  /// Validates POST `Content-Type` (`application/json` or `application/x-www-form-urlencoded`)
+  /// and required M3U/Xtream fields before consuming the one-shot pairing session.
+  public static func isValidSubmissionPayload(_ bodyData: Data, contentType: String?) -> Bool {
+    guard !bodyData.isEmpty, let contentType else { return false }
+    let mime = contentType
+      .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+      .first?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased() ?? ""
+
+    let fields: [String: Any]
+    switch mime {
+    case "application/json":
+      guard let parsed = try? JSONSerialization.jsonObject(with: bodyData, options: []),
+            let dict = parsed as? [String: Any]
+      else {
+        return false
+      }
+      fields = dict
+    case "application/x-www-form-urlencoded":
+      guard let bodyText = String(data: bodyData, encoding: .utf8),
+            let parsed = parseFormEncoded(bodyText)
+      else {
+        return false
+      }
+      fields = parsed
+    default:
+      return false
+    }
+
+    guard let rawKind = readStringField(fields, key: "kind", required: true) else {
+      return false
+    }
+    let kind = rawKind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard kind == "m3u" || kind == "xtream" else { return false }
+
+    if let nameCheck = readOptionalStringField(fields, key: "name") {
+      guard nameCheck.valid else { return false }
+      if let name = nameCheck.value {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count > maxNameLength { return false }
+      }
+    }
+
+    if let guideCheck = readOptionalStringField(fields, key: "guideUrl") {
+      guard guideCheck.valid else { return false }
+      if let guide = guideCheck.value {
+        let trimmed = guide.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty && !isValidHttpUrl(trimmed) { return false }
+      }
+    }
+
+    if kind == "m3u" {
+      guard let rawUrl = readStringField(fields, key: "url", required: true) else {
+        return false
+      }
+      let url = rawUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+      return isValidHttpUrl(url)
+    }
+
+    guard let rawServer = readStringField(fields, key: "server", required: true) else {
+      return false
+    }
+    let server = rawServer.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard isValidHttpUrl(server) else { return false }
+
+    guard let rawUser = readStringField(fields, key: "username", required: true) else {
+      return false
+    }
+    let username = rawUser.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !username.isEmpty && username.count <= maxCredentialLength else { return false }
+
+    guard let rawPass = readStringField(fields, key: "password", required: true) else {
+      return false
+    }
+    let password = rawPass.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !password.isEmpty && password.count <= maxCredentialLength else { return false }
+
+    return true
+  }
+
+  private static func containsControlChars(_ value: String) -> Bool {
+    for scalar in value.unicodeScalars {
+      let v = scalar.value
+      if v <= 0x1f || v == 0x7f { return true }
+    }
+    return false
+  }
+
+  private static func readStringField(_ fields: [String: Any], key: String, required: Bool) -> String? {
+    guard let raw = fields[key] else { return nil }
+    guard let str = raw as? String else { return nil }
+    if containsControlChars(str) { return nil }
+    if required && str.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
+    return str
+  }
+
+  private static func readOptionalStringField(
+    _ fields: [String: Any],
+    key: String
+  ) -> (valid: Bool, value: String?)? {
+    guard let raw = fields[key] else { return nil }
+    if raw is NSNull { return (true, nil) }
+    guard let str = raw as? String else { return (false, nil) }
+    if containsControlChars(str) { return (false, nil) }
+    return (true, str)
+  }
+
+  private static func isValidHttpUrl(_ raw: String) -> Bool {
+    guard !raw.isEmpty && raw.count <= maxUrlLength else { return false }
+    for scalar in raw.unicodeScalars {
+      let v = scalar.value
+      if v <= 0x20 || v == 0x7f || CharacterSet.whitespacesAndNewlines.contains(scalar) {
+        return false
+      }
+    }
+    guard let components = URLComponents(string: raw),
+          let scheme = components.scheme?.lowercased(),
+          scheme == "http" || scheme == "https",
+          let host = components.host,
+          !host.isEmpty
+    else {
+      return false
+    }
+    return true
+  }
+
+  private static func parseFormEncoded(_ body: String) -> [String: String]? {
+    var result: [String: String] = [:]
+    for pair in body.split(separator: "&", omittingEmptySubsequences: true) {
+      let rawKey: Substring
+      let rawVal: Substring
+      if let eq = pair.firstIndex(of: "=") {
+        rawKey = pair[..<eq]
+        rawVal = pair[pair.index(after: eq)...]
+      } else {
+        rawKey = pair
+        rawVal = ""
+      }
+      guard let key = decodeFormComponent(rawKey),
+            let value = decodeFormComponent(rawVal)
+      else {
+        return nil
+      }
+      result[key] = value
+    }
+    return result
+  }
+
+  private static func decodeFormComponent(_ input: Substring) -> String? {
+    let utf8Bytes = Array(input.utf8)
+    var out = [UInt8]()
+    out.reserveCapacity(utf8Bytes.count)
+    var i = 0
+    while i < utf8Bytes.count {
+      let byte = utf8Bytes[i]
+      if byte == 0x2b { // '+'
+        out.append(0x20)
+        i += 1
+      } else if byte == 0x25 { // '%'
+        guard i + 2 < utf8Bytes.count,
+              let hi = hexNibble(utf8Bytes[i + 1]),
+              let lo = hexNibble(utf8Bytes[i + 2])
+        else {
+          return nil
+        }
+        out.append((hi << 4) | lo)
+        i += 3
+      } else {
+        out.append(byte)
+        i += 1
+      }
+    }
+    return String(bytes: out, encoding: .utf8)
+  }
+
+  private static func hexNibble(_ ascii: UInt8) -> UInt8? {
+    switch ascii {
+    case 0x30...0x39: return ascii - 0x30
+    case 0x61...0x66: return ascii - 0x61 + 10
+    case 0x41...0x46: return ascii - 0x41 + 10
+    default: return nil
+    }
+  }
   public static func isValidToken(_ token: String) -> Bool {
     guard token.count >= 32 && token.count <= 128 else { return false }
     for scalar in token.unicodeScalars {
@@ -180,13 +385,14 @@ public enum LanPairingValidation {
       )
       guard res == 0 else { continue }
 
-      let ip = String(cString: hostBuffer)
+      let ip = String(decoding: hostBuffer.prefix { $0 != 0 }.map(UInt8.init(bitPattern:)), as: UTF8.self)
       var parsed = in_addr()
       guard inet_pton(AF_INET, ip, &parsed) == 1 else { continue }
       let bytes = withUnsafeBytes(of: &parsed) { Array($0) }
       guard bytes.count == 4 && isRfc1918Ipv4Bytes(bytes[0], bytes[1]) else { continue }
 
-      let ifaceName = String(cString: current.pointee.ifa_name).lowercased()
+      guard let ifaNamePtr = current.pointee.ifa_name else { continue }
+      let ifaceName = String(cString: ifaNamePtr).lowercased()
       let priority: Int
       if ifaceName == "en0" {
         priority = 0

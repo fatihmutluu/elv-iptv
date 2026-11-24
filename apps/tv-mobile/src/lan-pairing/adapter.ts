@@ -1,6 +1,7 @@
 import type { LanPairingPort, LanPairingSession, LanPairingSourcePayload } from '@elv/features';
 import {
   addLanPairingSubmissionListener,
+  generateLanPairingToken,
   isLanPairingNativeAvailable,
   type LanPairingSubmissionEvent,
   type LanPairingSubscription,
@@ -8,6 +9,7 @@ import {
   stopLanPairingServer,
 } from '@elv/lan-pairing';
 import {
+  isValidPairingToken,
   LAN_PAIRING_MAX_BODY_BYTES,
   LAN_PAIRING_MAX_FAILED_ATTEMPTS,
   LAN_PAIRING_TTL_MS,
@@ -18,22 +20,23 @@ import {
 const TOKEN_BYTE_LENGTH = 24;
 
 function generateSessionToken(): string {
-  const bytes = new Uint8Array(TOKEN_BYTE_LENGTH);
+  const nativeToken = generateLanPairingToken();
+  if (nativeToken !== null && isValidPairingToken(nativeToken)) {
+    return nativeToken;
+  }
+
   const cryptoObj = globalThis.crypto;
   if (cryptoObj !== undefined && typeof cryptoObj.getRandomValues === 'function') {
+    const bytes = new Uint8Array(TOKEN_BYTE_LENGTH);
     cryptoObj.getRandomValues(bytes);
-  } else {
-    let seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    let hex = '';
     for (let i = 0; i < bytes.length; i += 1) {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      bytes[i] = ((seed >>> 16) ^ Math.floor(Math.random() * 256)) & 0xff;
+      hex += (bytes[i] ?? 0).toString(16).padStart(2, '0');
     }
+    return hex;
   }
-  let hex = '';
-  for (let i = 0; i < bytes.length; i += 1) {
-    hex += (bytes[i] ?? 0).toString(16).padStart(2, '0');
-  }
-  return hex;
+
+  throw new Error('Cryptographically secure random generator is unavailable for LAN pairing');
 }
 
 /**

@@ -44,7 +44,11 @@ export {
   type KeymapProviderProps,
   useKeymap,
 } from './KeymapContext';
-export { evaluateRemappedEvent, formatRemoteKeyLabel } from './keymap-routing';
+export {
+  evaluateRemappedEvent,
+  formatRemoteKeyLabel,
+  mapWebKeyToRemoteKey,
+} from './keymap-routing';
 export {
   DEFAULT_PROFILE_RECORD,
   defaultParentalSettings,

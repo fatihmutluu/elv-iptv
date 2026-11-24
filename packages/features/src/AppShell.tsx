@@ -110,12 +110,14 @@ export interface AppShellProps {
 export function AppShell(props: AppShellProps): ReactElement {
   const preferences = usePreferences();
   const effectiveProfilePreferences = props.profilePreferences ?? preferences.profilePreferences;
+  const effectiveKeymapStore = props.keymapStore ?? preferences.keymapStore;
   return (
     <ProfileProvider
       catalog={props.catalog}
       {...(effectiveProfilePreferences !== undefined
         ? { profilePreferences: effectiveProfilePreferences }
         : {})}
+      {...(effectiveKeymapStore !== undefined ? { keymapStore: effectiveKeymapStore } : {})}
     >
       <AppShellWithKeymap {...props} />
     </ProfileProvider>
@@ -153,6 +155,18 @@ function AppShellContent(props: AppShellProps): ReactElement {
     parentalUnlocked: profile.parentalUnlocked,
   };
   const [settingsChannelManagerOpen, setSettingsChannelManagerOpen] = useState(false);
+  const handleOpenSettingsChannelManager = useCallback(() => {
+    if (profile.hasGuardPin && !profile.parentalUnlocked) {
+      profile.requestParentalUnlock(() => setSettingsChannelManagerOpen(true));
+      return;
+    }
+    setSettingsChannelManagerOpen(true);
+  }, [profile]);
+  useEffect(() => {
+    if (settingsChannelManagerOpen && profile.hasGuardPin && !profile.parentalUnlocked) {
+      setSettingsChannelManagerOpen(false);
+    }
+  }, [profile.hasGuardPin, profile.parentalUnlocked, settingsChannelManagerOpen]);
   const hasProfileOverlay = profile.profilePickerOpen || profile.pinDialog !== null;
   const hasRootOverlay = hasProfileOverlay || settingsChannelManagerOpen;
   const confirmExitOnBack = preferences.preferences.confirmExitOnBack;
@@ -516,11 +530,14 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const effectiveRefreshToken = refreshToken + profile.profileRevision;
   const effectiveUserStateVersion = userStateVersion + profile.profileRevision;
 
+  const tvHomeChannelsSourceKey = useMemo(() => sources.map((s) => s.id).join(','), [sources]);
+  const tvHomeChannelsSyncKey = `${profile.activeProfileId}:${profile.profileRevision}:${catalogRevision}:${userStateVersion}:${locale}:${tvHomeChannelsSourceKey}`;
+
   useTvHomeChannelsSync({
     catalog: observedCatalog,
     ...(props.tvHomeChannels !== undefined ? { tvHomeChannels: props.tvHomeChannels } : {}),
     profilesReady: profile.profilesReady,
-    syncKey: `${catalogRevision}:${effectiveUserStateVersion}:${profileScopeKey}:${locale}`,
+    syncKey: tvHomeChannelsSyncKey,
     continueWatchingLabel: i18n.t('tvHomeChannels.continueWatching'),
     favoritesLabel: i18n.t('tvHomeChannels.favorites'),
   });
@@ -654,7 +671,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     onPlay={handlePlay}
                     onSelectTab={selectTab}
                     onOpenSources={openSources}
-                    onOpenChannelManagement={() => setSettingsChannelManagerOpen(true)}
+                    onOpenChannelManagement={handleOpenSettingsChannelManager}
                     onChannelsMutated={handleChannelsMutated}
                     onScrollTopChange={setHeroScrolled}
                     onFocusTopNav={handleFocusTopNav}

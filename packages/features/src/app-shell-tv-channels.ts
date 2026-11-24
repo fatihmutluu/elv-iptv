@@ -156,10 +156,18 @@ export function useTvHomeChannelsSync({
       try {
         const [continueWatching, favorites] = await Promise.all([
           catalog.listContinueWatching
-            ? catalog.listContinueWatching(TV_HOME_CHANNELS_MAX_PROGRAMS).catch(() => [])
+            ? catalog
+                .listContinueWatching(TV_HOME_CHANNELS_MAX_PROGRAMS, undefined, {
+                  parentalUnlocked: false,
+                })
+                .catch(() => [])
             : Promise.resolve([]),
           catalog.listFavorites
-            ? catalog.listFavorites(TV_HOME_CHANNELS_MAX_PROGRAMS).catch(() => [])
+            ? catalog
+                .listFavorites(TV_HOME_CHANNELS_MAX_PROGRAMS, undefined, {
+                  parentalUnlocked: false,
+                })
+                .catch(() => [])
             : Promise.resolve([]),
         ]);
         if (cancelled || seqRef.current !== seq) return;

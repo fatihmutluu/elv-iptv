@@ -101,7 +101,12 @@ export function registerLanPairingIpc(deps: LanPairingIpcDeps): LanPairingIpcHan
         throw new Error('lan-pairing:start received invalid options');
       }
       attachSender(sender);
-      return server.start(rawOpts);
+      try {
+        return await server.start(rawOpts);
+      } catch (error) {
+        clearActiveSender();
+        throw error;
+      }
     },
   );
 

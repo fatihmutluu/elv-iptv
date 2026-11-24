@@ -27,9 +27,17 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ComponentRef,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { formatRemoteKeyLabel, useKeymap, useRouteActive } from '../shared';
+import { formatRemoteKeyLabel, mapWebKeyToRemoteKey, useKeymap, useRouteActive } from '../shared';
 
 const CONTEXTS: readonly RemapContext[] = ['player', 'live', 'global'];
 const CAPTURE_LONG_PRESS_MS = 500;
@@ -63,62 +71,6 @@ const ACTION_LABEL_KEYS: Readonly<Record<RemappableActionId, MessageId>> = {
   'global.openGuide': 'remote.action.toggleGuide',
   'global.openHome': 'remote.action.openHome',
 };
-
-function mapWebKeyToHardwareKey(webKey: string): Key | null {
-  switch (webKey) {
-    case 'Escape':
-    case 'Backspace':
-      return 'back';
-    case 'Enter':
-      return 'select';
-    case 'ArrowUp':
-      return 'up';
-    case 'ArrowDown':
-      return 'down';
-    case 'ArrowLeft':
-      return 'left';
-    case 'ArrowRight':
-      return 'right';
-    case ' ':
-      return 'playPause';
-    case 'm':
-    case 'M':
-      return 'menu';
-    case 'g':
-    case 'G':
-      return 'guide';
-    case 'i':
-    case 'I':
-      return 'info';
-    case 'p':
-    case 'P':
-      return 'lastChannel';
-    case 's':
-    case 'S':
-      return 'search';
-    case 'c':
-    case 'C':
-      return 'captions';
-    case 'a':
-    case 'A':
-      return 'audioTrack';
-    case 'r':
-    case 'R':
-      return 'colorRed';
-    case 'y':
-    case 'Y':
-      return 'colorYellow';
-    case 'b':
-    case 'B':
-      return 'colorBlue';
-    case 'PageUp':
-      return 'channelUp';
-    case 'PageDown':
-      return 'channelDown';
-    default:
-      return null;
-  }
-}
 
 function RemotePanelTvKeyBridge({
   onEvent,
@@ -159,6 +111,11 @@ function CaptureTvKeyInterceptor({
       onTriggerRef.current({ key: input.key, kind: 'press' });
       return true;
     }
+    if (input.action === 'long') {
+      clearPending();
+      onTriggerRef.current({ key: input.key, kind: 'long' });
+      return true;
+    }
     if (input.action === 'down') {
       if (activeKeyRef.current === input.key) return true;
       clearPending();
@@ -175,8 +132,9 @@ function CaptureTvKeyInterceptor({
       return true;
     }
     if (input.action === 'up') {
+      if (activeKeyRef.current !== input.key) return true;
       const firedLong = longFiredRef.current;
-      const key = activeKeyRef.current ?? input.key;
+      const key = activeKeyRef.current;
       clearPending();
       if (!firedLong) {
         onTriggerRef.current({ key, kind: 'press' });
@@ -236,14 +194,39 @@ export function RemoteKeysSettingsPanel({
   const [focusCol, setFocusCol] = useState(0);
   const focusRef = useRef({ row: 0, col: 0 });
   focusRef.current = { row: focusRow, col: focusCol };
+  const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
+  const listCardYRef = useRef(0);
+  const rowYRef = useRef<Record<number, number>>({});
+  const footerYRef = useRef<number | null>(null);
 
   useEffect(() => {
+    rowYRef.current = {};
+    footerYRef.current = null;
     const maxRow = actions.length + 1;
     if (focusRef.current.row > maxRow) {
       setFocusRow(0);
       setFocusCol(CONTEXTS.indexOf(context));
     }
   }, [actions.length, context]);
+
+  useEffect(() => {
+    if (!isTv || !isActiveScope) return;
+    const animated = !theme.reduceMotion;
+    if (focusRow === 0) {
+      scrollViewRef.current?.scrollTo({ y: 0, animated });
+      return;
+    }
+    const resetRow = actions.length + 1;
+    if (focusRow === resetRow) {
+      const targetY = footerYRef.current ?? actions.length * 68 + 80;
+      scrollViewRef.current?.scrollTo({ y: Math.max(0, targetY - 48), animated });
+      return;
+    }
+    const measuredRowY = rowYRef.current[focusRow];
+    const targetY =
+      measuredRowY !== undefined ? listCardYRef.current + measuredRowY : (focusRow - 1) * 68 + 64;
+    scrollViewRef.current?.scrollTo({ y: Math.max(0, targetY - 48), animated });
+  }, [actions.length, focusRow, isActiveScope, isTv, theme.reduceMotion]);
 
   const startCapture = useCallback((meta: RemapActionMeta) => {
     setCaptureWarning(null);
@@ -277,25 +260,50 @@ export function RemoteKeysSettingsPanel({
 
   useEffect(() => {
     if (capturingAction === null || (Platform.OS as string) !== 'web') return;
+    interface WebCaptureKeyEvent {
+      readonly key?: string;
+      readonly repeat?: boolean;
+      readonly shiftKey?: boolean;
+      readonly preventDefault?: () => void;
+      readonly stopImmediatePropagation?: () => void;
+    }
     const win = globalThis as {
       addEventListener?: (
         type: string,
-        fn: (e: { key?: string; shiftKey?: boolean; preventDefault?: () => void }) => void,
+        fn: (e: WebCaptureKeyEvent) => void,
+        capture?: boolean,
       ) => void;
       removeEventListener?: (
         type: string,
-        fn: (e: { key?: string; shiftKey?: boolean; preventDefault?: () => void }) => void,
+        fn: (e: WebCaptureKeyEvent) => void,
+        capture?: boolean,
       ) => void;
     };
-    const onKeyDown = (e: { key?: string; shiftKey?: boolean; preventDefault?: () => void }) => {
+    const onKeyDown = (e: WebCaptureKeyEvent) => {
       if (!e.key) return;
-      const mapped = mapWebKeyToHardwareKey(e.key);
+      if (e.repeat) {
+        e.preventDefault?.();
+        e.stopImmediatePropagation?.();
+        return;
+      }
+      const mapped = mapWebKeyToRemoteKey(e.key);
       if (mapped === null) return;
       e.preventDefault?.();
+      e.stopImmediatePropagation?.();
       handleCapturedTrigger({ key: mapped, kind: e.shiftKey ? 'long' : 'press' });
     };
-    win.addEventListener?.('keydown', onKeyDown);
-    return () => win.removeEventListener?.('keydown', onKeyDown);
+    const onKeyUp = (e: WebCaptureKeyEvent) => {
+      if (!e.key) return;
+      if (mapWebKeyToRemoteKey(e.key) === null) return;
+      e.preventDefault?.();
+      e.stopImmediatePropagation?.();
+    };
+    win.addEventListener?.('keydown', onKeyDown, true);
+    win.addEventListener?.('keyup', onKeyUp, true);
+    return () => {
+      win.removeEventListener?.('keydown', onKeyDown, true);
+      win.removeEventListener?.('keyup', onKeyUp, true);
+    };
   }, [capturingAction, handleCapturedTrigger]);
 
   const handleTvKey = useCallback(
@@ -371,6 +379,8 @@ export function RemoteKeysSettingsPanel({
       {activeTv ? <RemotePanelTvKeyBridge onEvent={handleTvKey} /> : null}
 
       <ScrollView
+        ref={scrollViewRef}
+        testID="remote-keys-scroll"
         {...(isTv ? { focusable: false } : {})}
         style={styles.scroll}
         contentContainerStyle={[styles.content, { gap: theme.spacing.md }]}
@@ -398,7 +408,15 @@ export function RemoteKeysSettingsPanel({
           ))}
         </View>
 
-        <Surface tone="surface" bordered rounded="modal" style={styles.listCard}>
+        <Surface
+          tone="surface"
+          bordered
+          rounded="modal"
+          style={styles.listCard}
+          onLayout={(e) => {
+            listCardYRef.current = e.nativeEvent.layout.y;
+          }}
+        >
           {actions.map((meta, idx) => {
             const trigger = resolveKeyTrigger(keymap.overrides, meta.id);
             const hasOverride = Object.hasOwn(keymap.overrides, meta.id);
@@ -409,6 +427,9 @@ export function RemoteKeysSettingsPanel({
               <View
                 key={meta.id}
                 testID={`remote-action-row-${meta.id}`}
+                onLayout={(e) => {
+                  rowYRef.current[rowIdx] = e.nativeEvent.layout.y;
+                }}
                 style={[
                   styles.actionRow,
                   idx > 0
@@ -474,7 +495,12 @@ export function RemoteKeysSettingsPanel({
           })}
         </Surface>
 
-        <View style={styles.footerRow}>
+        <View
+          style={styles.footerRow}
+          onLayout={(e) => {
+            footerYRef.current = e.nativeEvent.layout.y;
+          }}
+        >
           <CtaButton
             testID="remote-reset-all"
             label={i18n.t('remote.resetAll')}
@@ -488,7 +514,9 @@ export function RemoteKeysSettingsPanel({
 
       {capturingAction !== null ? (
         <View testID="remote-capture-overlay" style={styles.captureRoot}>
-          <CaptureTvKeyInterceptor onTrigger={handleCapturedTrigger} />
+          {(Platform.OS as string) !== 'web' ? (
+            <CaptureTvKeyInterceptor onTrigger={handleCapturedTrigger} />
+          ) : null}
           <Pressable
             testID="remote-capture-backdrop"
             focusable={false}

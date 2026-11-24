@@ -17,6 +17,7 @@ import { TrackPickerModal } from '../TrackPickerModal';
 import { VodProgressBar } from '../VodProgressBar';
 import { createFakeAndroidKeys, createManualClock } from './player-test-harness';
 
+const KEYCODE_MENU = 82;
 const KEYCODE_PROG_RED = 183;
 const KEYCODE_PROG_GREEN = 184;
 const KEYCODE_PROG_YELLOW = 185;
@@ -131,12 +132,14 @@ describe('Player Wave C4B (#62, #163, #133, #416)', () => {
     });
     const keys = createFakeAndroidKeys();
     const setSubtitleFontFamily = jest.fn();
+    const toggleMute = jest.fn();
     let latestSurfaceProps: VideoSurfaceProps | undefined;
 
     const videoHost: VideoHost = {
       open: () => ({
         engine,
         setSubtitleFontFamily,
+        toggleMute,
         renderSurface: (props) => {
           latestSurfaceProps = props;
           return <View testID={props.testID ?? 'surface'} />;
@@ -217,17 +220,20 @@ describe('Player Wave C4B (#62, #163, #133, #416)', () => {
     await act(async () => keys.tap(KEYCODE_PROG_GREEN));
     expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
 
-    // Color Yellow toggles performance Stats HUD
-    expect(screen.queryByTestId('player-stats-hud')).toBeNull();
+    // Color Yellow toggles mute (matching DEFAULT_KEY_BINDINGS['player.toggleMute'])
     await act(async () => keys.tap(KEYCODE_PROG_YELLOW));
-    expect(screen.getByTestId('player-stats-hud')).toBeTruthy();
-    await act(async () => keys.tap(KEYCODE_PROG_YELLOW));
-    expect(screen.queryByTestId('player-stats-hud')).toBeNull();
+    expect(toggleMute).toHaveBeenCalledTimes(1);
 
-    // Color Blue toggles live Channel Drawer
+    // Color Blue toggles Player Settings (matching DEFAULT_KEY_BINDINGS['player.openSettings'])
     await act(async () => keys.tap(KEYCODE_PROG_BLUE));
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    await act(async () => keys.tap(KEYCODE_PROG_BLUE));
+    expect(screen.queryByTestId('player-settings-panel')).toBeNull();
+
+    // Menu toggles live Channel Drawer (matching DEFAULT_KEY_BINDINGS['player.openChannelDrawer'])
+    await act(async () => keys.tap(KEYCODE_MENU));
     expect(screen.getByTestId('player-channel-drawer-panel')).toBeTruthy();
-    await act(async () => keys.tap(KEYCODE_PROG_BLUE));
+    await act(async () => keys.tap(KEYCODE_MENU));
     expect(screen.queryByTestId('player-channel-drawer-panel')).toBeNull();
 
     expect(screen.getByTestId('player-ambient-clock')).toBeTruthy();
