@@ -1,5 +1,5 @@
 import type { CatalogService, ItemRow, ProgrammeRow } from '@elv/data';
-import type { EpgTimeSpanHoursPref, LogoBackdropModePref } from '@elv/domain';
+import type { EpgRowDensity, EpgTimeSpanHoursPref, LogoBackdropModePref } from '@elv/domain';
 import {
   TvFocusAnchor,
   TvScrollEdgeFade,
@@ -27,7 +27,12 @@ import { EpgDateTabStrip, EpgPreviewHeader, EpgTimeRuler } from './EpgPreviewHea
 import { EpgProgrammeDetailModal } from './EpgProgrammeDetailModal';
 import { buildEpgDateTabs, type EpgDateTab, localDayKey } from './epg-date-tabs';
 import { LiveContextMenu } from './LiveContextMenu';
-import { buildEpgRulerTicks, computeNowLineRatio, EPG_VISIBLE_SPAN_MS } from './live-model';
+import {
+  buildEpgRulerTicks,
+  computeNowLineRatio,
+  EPG_VISIBLE_SPAN_MS,
+  resolveEpgRowHeight,
+} from './live-model';
 import type { SourceBadgeInfo } from './source-badge';
 import { EMPTY_PROGRAMMES, useEpgTimeCursor, useEpgWindowData } from './useEpgWindowData';
 
@@ -59,13 +64,23 @@ export interface EpgGridViewProps {
   readonly onHideChannel?: (channel: ItemRow) => void;
   readonly onGuideRefreshed?: () => void;
   readonly onEdgeTop?: () => void;
+  readonly onFocusSidebar?: () => void;
   readonly isActiveScope?: boolean;
+  readonly activeChannelKey?: string | null;
   readonly epgTimeSpanHours?: EpgTimeSpanHoursPref;
+  readonly epgRowDensity?: EpgRowDensity;
   readonly epgGenreTints?: boolean;
   readonly epgShowClock?: boolean;
   readonly logoBackdropMode?: LogoBackdropModePref;
   readonly sourceBadges?: ReadonlyMap<string, SourceBadgeInfo>;
   readonly cleanChannelTitles?: boolean;
+  /** Optional observer called when focused cursor position commits (used by EPG proof gate `#6`). */
+  readonly onCursorCommit?: (cursor: {
+    readonly focusedRow: number;
+    readonly focusedSlotIndex: number;
+    readonly windowStartMs: number;
+    readonly focusedChannelKey: string | null;
+  }) => void;
 }
 
 /**
@@ -83,10 +98,14 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
     onHideChannel,
     onGuideRefreshed,
     onEdgeTop,
+    onFocusSidebar,
     isActiveScope = true,
+    activeChannelKey = null,
+    onCursorCommit,
   } = p;
   const {
     epgTimeSpanHours,
+    epgRowDensity = 'comfortable',
     epgGenreTints = true,
     epgShowClock = true,
     logoBackdropMode = 'plate',
@@ -101,8 +120,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
 
   const isTv = viewport.inputModality === 'tv';
   const isPortrait = viewport.orientation === 'portrait';
-  const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
-  const rowHeight = Math.round((isTv ? 68 : 60) * safeFontScale);
+  const rowHeight = resolveEpgRowHeight(epgRowDensity, isTv, theme.fontScale);
   const channelColWidth = isPortrait ? 116 : isTv ? 200 : 176;
   const visibleRows = Math.max(
     4,
@@ -182,6 +200,8 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
     channelCount,
     maxMountedRows,
     activeNowMs,
+    activeChannelKey,
+    sourceVersion: effectiveSourceVersion,
     spanMs: visibleSpanMs,
     epgData,
     dateTabCount: dateTabs.length,
@@ -193,6 +213,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
     ...(onToggleFavorite !== undefined ? { onToggleFavorite } : {}),
     onRefreshGuide: handleRefreshGuide,
     onEdgeTop,
+    ...(onFocusSidebar !== undefined ? { onFocusSidebar } : {}),
   });
   handleJumpToDayRef.current = cursor.handleJumpToDay;
   refreshSourceIdRef.current = cursor.focusedChannel?.sourceId ?? category.row.sourceId;
@@ -208,6 +229,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
   const lastScrollBucketRef = useRef(-1);
   const visibleRangeRef = useRef({ start: 0, end: maxMountedRows - 1 });
   const prevCategoryIdRef = useRef(category.row.id);
+  const lastAutoScrolledRowRef = useRef<number | null>(null);
 
   useEffect(() => {
     const categoryChanged = prevCategoryIdRef.current !== category.row.id;
@@ -215,16 +237,10 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
     lastScrollBucketRef.current = -1;
     visibleRangeRef.current = { start: 0, end: maxMountedRows - 1 };
     if (categoryChanged) {
+      lastAutoScrolledRowRef.current = null;
       listRef.current?.scrollToOffset({ offset: 0, animated: false });
     }
   }, [category.row.id, maxMountedRows]);
-
-  const tvWindowStart =
-    channelCount <= maxMountedRows
-      ? 0
-      : Math.max(0, Math.min(channelCount - maxMountedRows, cursor.focusedRow - 1));
-  const tvWindowEnd =
-    channelCount <= 0 ? -1 : Math.min(channelCount - 1, tvWindowStart + maxMountedRows - 1);
 
   const hydrateRange = useCallback(
     (startRow: number, endRow: number) => {
@@ -242,6 +258,49 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
     },
     [channelCount, channelSource, epgData.hydrateChannels],
   );
+
+  useEffect(() => {
+    const targetRow = cursor.autoFocusedRow;
+    if (targetRow === null || lastAutoScrolledRowRef.current === targetRow) return;
+    lastAutoScrolledRowRef.current = targetRow;
+    if (!isTv) {
+      const topRow = Math.max(0, targetRow - Math.floor(visibleRows / 2));
+      const endRow = Math.min(Math.max(0, channelCount - 1), topRow + maxMountedRows - 1);
+      visibleRangeRef.current = { start: topRow, end: endRow };
+      listRef.current?.scrollToOffset({ offset: topRow * rowHeight, animated: false });
+      hydrateRange(topRow, endRow);
+    }
+  }, [
+    channelCount,
+    cursor.autoFocusedRow,
+    hydrateRange,
+    isTv,
+    maxMountedRows,
+    rowHeight,
+    visibleRows,
+  ]);
+
+  useEffect(() => {
+    onCursorCommit?.({
+      focusedRow: cursor.focusedRow,
+      focusedSlotIndex: cursor.focusedSlotIndex,
+      windowStartMs: epgData.windowStartMs,
+      focusedChannelKey: cursor.focusedChannel?.key ?? null,
+    });
+  }, [
+    cursor.focusedChannel?.key,
+    cursor.focusedRow,
+    cursor.focusedSlotIndex,
+    epgData.windowStartMs,
+    onCursorCommit,
+  ]);
+
+  const tvWindowStart =
+    channelCount <= maxMountedRows
+      ? 0
+      : Math.max(0, Math.min(channelCount - maxMountedRows, cursor.focusedRow - 1));
+  const tvWindowEnd =
+    channelCount <= 0 ? -1 : Math.min(channelCount - 1, tvWindowStart + maxMountedRows - 1);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: activeNowMs triggers background stale-while-revalidate refresh on 30s ticks; effectiveSourceVersion and epgData.version re-hydrate as pages land or guide refreshes
   useEffect(() => {

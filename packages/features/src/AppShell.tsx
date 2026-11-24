@@ -682,6 +682,7 @@ export function AppShell(props: AppShellProps): ReactElement {
                       playbackGuard={playbackGuard}
                       defaultLiveMode={preferences.preferences.defaultLiveMode}
                       epgTimeSpanHours={preferences.preferences.epgTimeSpanHours}
+                      epgRowDensity={preferences.preferences.epgRowDensity}
                       epgGenreTints={preferences.preferences.epgGenreTints}
                       epgShowClock={preferences.preferences.epgShowClock}
                       logoBackdropMode={preferences.preferences.logoBackdropMode}

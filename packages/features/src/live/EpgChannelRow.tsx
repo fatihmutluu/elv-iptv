@@ -106,28 +106,32 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
         } as Record<string, unknown>)
       : undefined;
 
-  const progressRatio = slot.isLive
-    ? computeProgramProgress(slot.programme.start, slot.programme.stop, nowMs)
-    : 0;
+  const prog = slot.programme;
+  const isGap = slot.isGap || prog === null;
+  const progressRatio =
+    !isGap && slot.isLive ? computeProgramProgress(prog.start, prog.stop, nowMs) : 0;
   const genreTint =
-    epgGenreTints && !isSelected && !slot.isLive
-      ? resolveEpgGenreTint(slot.programme, theme)
+    !isGap && epgGenreTints && !isSelected && !slot.isLive
+      ? resolveEpgGenreTint(prog, theme)
       : null;
   const badges =
-    slot.widthRatio >= MIN_BADGE_WIDTH_RATIO ? resolveProgrammeBadges(slot.programme.flags) : [];
+    !isGap && slot.widthRatio >= MIN_BADGE_WIDTH_RATIO ? resolveProgrammeBadges(prog.flags) : [];
   const showTime = slot.widthRatio >= MIN_TIME_WIDTH_RATIO;
   const bgColor = isSelected
     ? theme.colors.focusFill
-    : slot.isLive
-      ? theme.colors.accentTint
-      : genreTint !== null
-        ? hexToRgba(genreTint.accentColor, 0.12)
-        : theme.colors.bgCard;
+    : isGap
+      ? theme.colors.bgSurface
+      : slot.isLive
+        ? theme.colors.accentTint
+        : genreTint !== null
+          ? hexToRgba(genreTint.accentColor, 0.12)
+          : theme.colors.bgCard;
   const borderColor = isSelected
     ? theme.colors.focusRingColor
-    : slot.isLive
+    : !isGap && slot.isLive
       ? theme.colors.accent
       : theme.colors.surfaceBorder;
+  const titleText = isGap ? i18n.t('epg.noInfoGap') : prog.title;
 
   return (
     <View
@@ -140,7 +144,7 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
         testID={`epg-cell-${rowIndex}-${slotIndex}`}
         focusable={!isTv}
         accessibilityRole="button"
-        accessibilityLabel={`${displayName}, ${slot.programme.title}`}
+        accessibilityLabel={`${displayName}, ${titleText}`}
         accessibilityState={{ selected: isSelected }}
         onPress={handlePress}
         {...(onOpenContextMenu !== undefined
@@ -180,10 +184,13 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
             style={[
               theme.typography.caption,
               styles.slotTitle,
-              { color: theme.colors.textPrimary },
+              {
+                color: isGap ? theme.colors.textMuted : theme.colors.textPrimary,
+                fontWeight: isGap ? '400' : '600',
+              },
             ]}
           >
-            {slot.programme.title}
+            {titleText}
           </Text>
           {badges.length > 0 ? (
             <View style={styles.cellBadges}>
@@ -198,7 +205,7 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
             </View>
           ) : null}
         </View>
-        {showTime ? (
+        {showTime && !isGap ? (
           <Text
             numberOfLines={1}
             style={[
@@ -207,10 +214,10 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
               { color: theme.colors.textSecondary },
             ]}
           >
-            {`${formatClockTime(slot.programme.start)} – ${formatClockTime(slot.programme.stop)}`}
+            {`${formatClockTime(prog.start)} – ${formatClockTime(prog.stop)}`}
           </Text>
         ) : null}
-        {slot.isLive ? (
+        {!isGap && slot.isLive ? (
           <View
             testID={`epg-cell-progress-track-${rowIndex}-${slotIndex}`}
             style={[styles.progressTrack, { backgroundColor: theme.colors.subtleHighlight }]}
@@ -445,7 +452,7 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
         ) : (
           slots.map((slot, slotIdx) => (
             <EpgSlotCell
-              key={`${slot.programme.guideId}-${slot.programme.start}-${slot.programme.stop}`}
+              key={slot.id}
               rowIndex={rowIndex}
               slotIndex={slotIdx}
               channel={channel}

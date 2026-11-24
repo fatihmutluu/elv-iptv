@@ -1,7 +1,11 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Exec } from '../src/gates/adb.ts';
-import { IMPORT_USAGE } from '../src/gates/import-cli.ts';
+import type { GateDevice } from '../src/gates/gate-device.ts';
+import { IMPORT_USAGE, importMain } from '../src/gates/import-cli.ts';
 import {
   compareImport,
   type ImportResult,
@@ -153,7 +157,7 @@ describe('runImportGate', () => {
   it('starts the simulator, sends the route and stops the simulator', async () => {
     const device = fakeAdb([importLine(18834, 45.5)]);
     const { sim, events } = fakeSim();
-    const result = await runImportGate({ exec: device.exec, sim, sleep: noSleep, runs: 1 });
+    const { result } = await runImportGate({ exec: device.exec, sim, sleep: noSleep, runs: 1 });
     expect(events).toEqual(['start', 'stop']);
     expect(device.calls).toEqual([
       'devices',
@@ -164,6 +168,9 @@ describe('runImportGate', () => {
       `${S} shell am start -a android.intent.action.VIEW -d '${URL_LARGE}' ${PKG}`,
       `${S} shell dumpsys activity activities`,
       `${S} logcat -d -s ReactNativeJS:V`,
+      `${S} shell getprop ro.product.name`,
+      `${S} shell getprop ro.build.version.release`,
+      `${S} shell getprop ro.build.version.sdk`,
     ]);
     expect(result).toEqual({
       account: 'large',
@@ -191,7 +198,7 @@ describe('runImportGate', () => {
   it('takes the median of several runs', async () => {
     const device = fakeAdb([importLine(30000, 50), importLine(10000, 90), importLine(20000, 70)]);
     const seen: number[] = [];
-    const result = await runImportGate({
+    const { result } = await runImportGate({
       exec: device.exec,
       sim: fakeSim().sim,
       sleep: noSleep,
@@ -207,7 +214,7 @@ describe('runImportGate', () => {
   it('runs three times by default and returns the median, like the list gate', async () => {
     const device = fakeAdb([importLine(27000, 80), importLine(17600, 40), importLine(17800, 42)]);
     const seen: number[] = [];
-    const result = await runImportGate({
+    const { result } = await runImportGate({
       exec: device.exec,
       sim: fakeSim().sim,
       sleep: noSleep,
@@ -323,6 +330,70 @@ describe('runImportGate', () => {
     };
     await runImportGate({ exec: device.exec, sim, sleep: noSleep, runs: 1 });
     expect(events).toEqual(['ensure', 'reset', 'stop']);
+  });
+});
+
+describe('importMain --target tvos', () => {
+  it('writes and compares against import-tvos.json without ever calling adb', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'elv-import-tvos-'));
+    try {
+      const commands: string[] = [];
+      const exec: Exec = async (command, args) => {
+        commands.push(command);
+        if (command === 'git' && args[0] === 'rev-parse') return { ok: true, output: 'abc1234\n' };
+        if (command === 'git' && args[0] === 'status') return { ok: true, output: '' };
+        throw new Error(`unexpected command: ${command} ${args.join(' ')}`);
+      };
+      const tvosDevice: GateDevice = {
+        simHost: '127.0.0.1:7878',
+        describe: async () => ({ platform: 'tvos', model: 'Apple TV 4K (3rd generation)' }),
+        install: async () => {},
+        start: async () => {},
+        stop: async () => {},
+        readLog: async () => importLine(16000, 32),
+        crashesSince: async () => [],
+        memoryMb: async () => 140,
+        close: async () => {},
+      };
+
+      const writeCode = await importMain(
+        { target: 'tvos', runs: '1', 'write-baseline': true },
+        root,
+        { exec, sim: fakeSim().sim, device: tvosDevice, sleep: noSleep },
+      );
+      expect(writeCode).toBe(0);
+      expect(commands.some((c) => c.toLowerCase().includes('adb'))).toBe(false);
+
+      const baseline = JSON.parse(
+        readFileSync(join(root, 'docs/learned/gates/import-tvos.json'), 'utf8'),
+      ) as { device: Record<string, string>; build: string; result: ImportResult };
+      expect(baseline.device).toEqual({
+        platform: 'tvos',
+        model: 'Apple TV 4K (3rd generation)',
+      });
+      expect(baseline.build).toContain('tvOS simulator .app');
+      expect(baseline.result.durationMs).toBe(16000);
+
+      const outPath = join(root, 'out-tvos.json');
+      const runCode = await importMain({ target: 'tvos', runs: '1', out: outPath }, root, {
+        exec,
+        sim: fakeSim().sim,
+        device: tvosDevice,
+        sleep: noSleep,
+      });
+      expect(runCode).toBe(0);
+      expect(commands.some((c) => c.toLowerCase().includes('adb'))).toBe(false);
+      const out = JSON.parse(readFileSync(outPath, 'utf8')) as {
+        baseline: string;
+        device: Record<string, string>;
+        outcome: { ok: boolean };
+      };
+      expect(out.baseline).toBe('docs/learned/gates/import-tvos.json');
+      expect(out.device.platform).toBe('tvos');
+      expect(out.outcome.ok).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

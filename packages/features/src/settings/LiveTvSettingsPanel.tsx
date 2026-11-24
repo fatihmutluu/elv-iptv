@@ -14,6 +14,7 @@ import {
   CATALOG_REFRESH_OPTIONS,
   CHANNEL_SWITCH_MODE_OPTIONS,
   DEFAULT_LIVE_MODE_OPTIONS,
+  EPG_ROW_DENSITY_OPTIONS,
   EPG_SPAN_OPTIONS,
   GUIDE_REFRESH_OPTIONS,
   LOGO_BACKDROP_OPTIONS,
@@ -63,6 +64,7 @@ export function LiveTvSettingsPanel({
     if (
       focusedControlId.startsWith('live-mode-') ||
       focusedControlId.startsWith('epg-span-') ||
+      focusedControlId.startsWith('epg-density-') ||
       focusedControlId === 'toggle-epg-genre-tints' ||
       focusedControlId === 'toggle-epg-show-clock' ||
       focusedControlId.startsWith('catalog-refresh-') ||
@@ -97,6 +99,17 @@ export function LiveTvSettingsPanel({
       EPG_SPAN_OPTIONS.map((opt) => ({
         value: opt.hours,
         label: i18n.t('settings.liveTv.epgSpanHours', { hours: opt.hours }),
+        focusId: opt.focusId,
+        testID: opt.testID,
+      })),
+    [i18n],
+  );
+
+  const epgRowDensityOptions = useMemo(
+    () =>
+      EPG_ROW_DENSITY_OPTIONS.map((opt) => ({
+        value: opt.value,
+        label: i18n.t(opt.labelKey),
         focusId: opt.focusId,
         testID: opt.testID,
       })),
@@ -198,6 +211,17 @@ export function LiveTvSettingsPanel({
           isTv={isTv}
           tabularNums
           onSelect={(epgTimeSpanHours) => applyPatch({ epgTimeSpanHours })}
+        />
+
+        <SettingsDivider />
+
+        <SettingsOptionRow
+          title={i18n.t('settings.epgRowDensity')}
+          options={epgRowDensityOptions}
+          selectedValue={activePrefs.epgRowDensity}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          onSelect={(epgRowDensity) => applyPatch({ epgRowDensity })}
         />
 
         <SettingsDivider />

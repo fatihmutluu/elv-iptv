@@ -47,6 +47,8 @@ public final class EngineCore {
   private var shutterCovered = true
   private var screenOn = false
   private var surfaceAvailable = false
+  public private(set) var allowDetachedSurface = false
+  public private(set) var isSurfaceDetached = false
 
   public init(backend: PlayerBackend, sink: EngineSink, uptimeMs: @escaping () -> Double) {
     self.backend = backend
@@ -163,6 +165,12 @@ public final class EngineCore {
     backend.setOsdVisible(visible)
   }
 
+  /// Allows local surface detachment (background audio, PiP, AirPlay) without terminating active playback (`#117`).
+  public func setAllowDetachedSurface(_ enabled: Bool) {
+    guard !released else { return }
+    allowDetachedSurface = enabled
+  }
+
   public func stop(_ attempt: Int) {
     guard !released else { return }
     adopt(attempt)
@@ -170,6 +178,7 @@ public final class EngineCore {
     active = false
     userPaused = false
     externalPlaybackActive = false
+    isSurfaceDetached = false
     playbackRate = 1.0
     currentRequest = nil
     currentPlan = nil
@@ -188,6 +197,7 @@ public final class EngineCore {
     active = false
     userPaused = false
     externalPlaybackActive = false
+    isSurfaceDetached = false
     playbackRate = 1.0
     trackState.onPrepareReuse()
     sink?.clearSubtitles()
@@ -211,6 +221,7 @@ public final class EngineCore {
     active = false
     userPaused = false
     externalPlaybackActive = false
+    isSurfaceDetached = false
     playbackRate = 1.0
     currentRequest = nil
     currentPlan = nil
@@ -296,19 +307,25 @@ public final class EngineCore {
     }
   }
 
-  /// Reports native surface availability transitions, decoupling background detach from fatal foreground surface loss.
+  /// Reports native surface availability transitions, decoupling background/allowed/AirPlay detach from fatal foreground surface loss (`#117`).
   public func surfaceChanged(available: Bool, isBackground: Bool = false) {
     guard !released, available != surfaceAvailable else { return }
     surfaceAvailable = available
     if available {
+      isSurfaceDetached = false
       emit(.surface(attempt: token, change: .created))
+      if active && played && !userPaused && !stalled && !externalPlaybackActive {
+        setScreenOn(true)
+      }
     } else {
       sink?.clearSubtitles()
-      if isBackground {
+      if isBackground || allowDetachedSurface || externalPlaybackActive {
+        isSurfaceDetached = true
         setScreenOn(false)
         emit(.surface(attempt: token, change: .destroyed))
         return
       }
+      isSurfaceDetached = false
       emit(.surface(attempt: token, change: .destroyed))
       if active && !errorReported {
         serial += 1

@@ -109,6 +109,14 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     }
   }
 
+  func setAllowDetachedSurface(_ enabled: Bool) {
+    guard !fence.isDisposedNow else { return }
+    enqueueMain { [weak self] in
+      guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
+      driver.setAllowDetachedSurface(enabled)
+    }
+  }
+
   func setMediaMetadata(_ metadata: NowPlayingMetadata?) {
     guard !fence.isDisposedNow else { return }
     enqueueMain { [weak self] in

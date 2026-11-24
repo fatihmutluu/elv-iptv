@@ -19,7 +19,7 @@ extension AetherBackend {
     )
     .sink { [weak self, weak target] _, _, _ in
       Self.onMainActor {
-        guard let self, let target, self.engineLoadSerial > 0 else { return }
+        guard let self, let target, self.engine === target, self.engineLoadSerial > 0 else { return }
         let serial = self.engineLoadSerial
         guard self.readySerial == serial || target.playbackPhase == .playing else { return }
         if self.tracksEmittedSerial == serial && (target.state == .loading || target.playbackPhase == .loading) {
@@ -39,7 +39,7 @@ extension AetherBackend {
     )
     .sink { [weak self, weak target] cues, followsPicture, isSubActive, softwareSize in
       Self.onMainActor {
-        guard let self, let target else { return }
+        guard let self, let target, self.engine === target else { return }
         self.updateSubtitleClockSubscription(
           target: target,
           cues: cues,
@@ -52,14 +52,14 @@ extension AetherBackend {
     .store(in: &cancellables)
   }
 
-  private func updateSubtitleClockSubscription(
+  func updateSubtitleClockSubscription(
     target: AetherEngine,
     cues: [SubtitleCue],
     followsPicture: Bool,
     isSubActive: Bool,
     softwareSize: CGSize?
   ) {
-    guard engineLoadSerial > 0, isSubActive, followsPicture, !cues.isEmpty else {
+    guard self.engine === target, engineLoadSerial > 0, isSubActive, followsPicture, !cues.isEmpty else {
       subtitleClockCancellable?.cancel()
       subtitleClockCancellable = nil
       publishSubtitlePresentation(.empty)
@@ -76,7 +76,7 @@ extension AetherBackend {
         .dropFirst()
         .sink { [weak self, weak target] sourceTime in
           Self.onMainActor {
-            guard let self, let target, self.engineLoadSerial > 0 else { return }
+            guard let self, let target, self.engine === target, self.engineLoadSerial > 0 else { return }
             guard target.isSubtitleActive, target.clock.sourceTimeFollowsPicture, !target.subtitleCues.isEmpty else {
               self.subtitleClockCancellable?.cancel()
               self.subtitleClockCancellable = nil
@@ -131,7 +131,7 @@ extension AetherBackend {
     pendingTracksSerial = serial
     DispatchQueue.main.async { [weak self, weak target] in
       MainActor.assumeIsolated {
-        guard let self, let target, self.engineLoadSerial == serial else { return }
+        guard let self, let target, self.engine === target, self.engineLoadSerial == serial else { return }
         self.pendingTracksSerial = 0
         if self.tracksEmittedSerial == serial && (target.state == .loading || target.playbackPhase == .loading) {
           self.tracksDeferredForReload = true
@@ -179,7 +179,14 @@ extension AetherBackend {
     guard serial > 0 else { return }
     audioSwitchTask?.cancel()
     if seekTask != nil {
+      audioSwitchTaskId &+= 1
+      let id = audioSwitchTaskId
       audioSwitchTask = Task { @MainActor [weak self] in
+        defer {
+          if let self, self.audioSwitchTaskId == id {
+            self.audioSwitchTask = nil
+          }
+        }
         while let self, let pendingSeek = self.seekTask {
           await pendingSeek.value
           guard !Task.isCancelled, self.engineLoadSerial == serial else {
@@ -191,10 +198,10 @@ extension AetherBackend {
         else {
           return
         }
-        self.audioSwitchTask = nil
         currentEngine.selectAudioTrack(index: targetStream)
       }
     } else {
+      audioSwitchTaskId &+= 1
       audioSwitchTask = nil
       engine.selectAudioTrack(index: streamId)
     }
@@ -347,13 +354,20 @@ extension AetherBackend {
     let asset = item.asset
     let isVod = !target.isLive
     mediaInfoTask?.cancel()
-    mediaInfoTask = Task { @MainActor [weak self] in
+    mediaInfoTaskId &+= 1
+    let id = mediaInfoTaskId
+    mediaInfoTask = Task { @MainActor [weak self, weak target] in
+      defer {
+        if let self, self.mediaInfoTaskId == id {
+          self.mediaInfoTask = nil
+        }
+      }
       if let videoTracks = try? await asset.loadTracks(withMediaType: .video),
          let track = videoTracks.first,
          !Task.isCancelled,
          let loaded = try? await track.load(.naturalSize, .nominalFrameRate, .formatDescriptions)
       {
-        guard let self, !Task.isCancelled, self.engineLoadSerial == serial else { return }
+        guard let self, let target, !Task.isCancelled, self.engine === target, self.engineLoadSerial == serial else { return }
         let (naturalSize, nominalRate, descriptions) = loaded
         let width = naturalSize.width > 0 ? Int(naturalSize.width.rounded()) : nil
         let height = naturalSize.height > 0 ? Int(naturalSize.height.rounded()) : nil
@@ -366,25 +380,29 @@ extension AetherBackend {
           self.onObservation?(.mediaInfo(info), serial)
         }
       }
-      guard isVod, !Task.isCancelled else { return }
+      guard isVod, !Task.isCancelled, let self, let target, self.engine === target, self.engineLoadSerial == serial else { return }
       let chapters = await Self.loadAssetChapters(asset)
-      guard let self, !Task.isCancelled, self.engineLoadSerial == serial, !chapters.isEmpty else { return }
+      guard !Task.isCancelled, self.engine === target, self.engineLoadSerial == serial, !chapters.isEmpty else { return }
       self.onObservation?(.chapters(chapters), serial)
     }
   }
 
   private static func loadAssetChapters(_ asset: AVAsset) async -> [ChapterInfoOut] {
-    guard let locales = try? await asset.load(.availableChapterLocales),
+    guard !Task.isCancelled,
+          let locales = try? await asset.load(.availableChapterLocales),
+          !Task.isCancelled,
           let locale = locales.first,
           let groups = try? await asset.loadChapterMetadataGroups(
             withTitleLocale: locale,
             containingItemsWithCommonKeys: [.commonKeyTitle]
           ),
+          !Task.isCancelled,
           !groups.isEmpty
     else { return [] }
     var out: [ChapterInfoOut] = []
     out.reserveCapacity(groups.count)
     for (idx, group) in groups.enumerated() {
+      guard !Task.isCancelled else { return [] }
       let startSec = CMTimeGetSeconds(group.timeRange.start)
       guard startSec.isFinite, startSec >= 0 else { continue }
       let durSec = CMTimeGetSeconds(group.timeRange.duration)

@@ -12,8 +12,11 @@ export interface GateDevice {
   describe(): Promise<Record<string, string>>;
   /** Installs the built development app onto the device. */
   install(): Promise<void>;
-  /** Stops the app, runs `afterStop`, and launches it with `url`. */
-  start(url: string, opts?: { afterStop?: () => Promise<void> }): Promise<void>;
+  /** Stops the app, optionally resets Android frame stats, runs `afterStop`, and launches it with `url`. */
+  start(
+    url: string,
+    opts?: { resetFrames?: boolean; afterStop?: () => Promise<void> },
+  ): Promise<void>;
   /** Stops the app process if it is running. */
   stop(): Promise<void>;
   /** Reads the app's log output since the last {@link start}. */

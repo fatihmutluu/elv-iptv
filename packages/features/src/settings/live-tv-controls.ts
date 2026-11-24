@@ -1,6 +1,7 @@
 import type {
   CatalogRefreshHoursPref,
   DefaultLiveModePref,
+  EpgRowDensity,
   EpgTimeSpanHoursPref,
   GuideRefreshHoursPref,
   LiveChannelSwitchModePref,
@@ -44,6 +45,32 @@ export const EPG_SPAN_OPTIONS: ReadonlyArray<{
   { hours: 2, focusId: 'epg-span-2', testID: 'settings-livetv-epg-span-2' },
   { hours: 3, focusId: 'epg-span-3', testID: 'settings-livetv-epg-span-3' },
   { hours: 6, focusId: 'epg-span-6', testID: 'settings-livetv-epg-span-6' },
+];
+
+export const EPG_ROW_DENSITY_OPTIONS: ReadonlyArray<{
+  readonly value: EpgRowDensity;
+  readonly focusId: LiveTvFocusId;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    value: 'compact',
+    focusId: 'epg-density-compact',
+    testID: 'settings-livetv-epg-density-compact',
+    labelKey: 'settings.epgRowDensityCompact',
+  },
+  {
+    value: 'comfortable',
+    focusId: 'epg-density-comfortable',
+    testID: 'settings-livetv-epg-density-comfortable',
+    labelKey: 'settings.epgRowDensityComfortable',
+  },
+  {
+    value: 'cinematic',
+    focusId: 'epg-density-cinematic',
+    testID: 'settings-livetv-epg-density-cinematic',
+    labelKey: 'settings.epgRowDensityCinematic',
+  },
 ];
 
 export const CATALOG_REFRESH_OPTIONS: ReadonlyArray<{
@@ -129,6 +156,11 @@ export function activateLiveTvControl(
   const spanOpt = EPG_SPAN_OPTIONS.find((o) => o.focusId === controlId);
   if (spanOpt) {
     void preferences.updatePreferences({ epgTimeSpanHours: spanOpt.hours });
+    return;
+  }
+  const densityOpt = EPG_ROW_DENSITY_OPTIONS.find((o) => o.focusId === controlId);
+  if (densityOpt) {
+    void preferences.updatePreferences({ epgRowDensity: densityOpt.value });
     return;
   }
   if (controlId === 'toggle-epg-genre-tints') {

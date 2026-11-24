@@ -692,4 +692,9 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'settings.backgroundAudio': 'Arka planda ses oynatma',
   'settings.backgroundAudioHint':
     'Uygulama mobilde arka plana alındığında sesi oynatmaya devam eder',
+  'settings.epgRowDensity': 'Rehber satır yoğunluğu',
+  'settings.epgRowDensityCompact': 'Kompakt',
+  'settings.epgRowDensityComfortable': 'Rahat',
+  'settings.epgRowDensityCinematic': 'Sinematik',
+  'epg.noInfoGap': 'Bilgi yok',
 };

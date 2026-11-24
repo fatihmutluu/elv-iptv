@@ -190,8 +190,8 @@ describe('Wave C2 Live & EPG Polish (#52, #395, #396, #400)', () => {
     expect(screen.getByTestId('epg-preview-badge-live')).toBeTruthy();
     expect(screen.getByTestId('epg-preview-badge-new')).toBeTruthy();
 
-    // Genre tint on upcoming movie cell (slot 2) uses O(1) genre -> accent color
-    const movieStyle = StyleSheet.flatten(screen.getByTestId('epg-cell-0-2').props.style);
+    // Genre tint on upcoming movie cell (slot 3, after the synthesized >= 5 min gap cell at slot 2)
+    const movieStyle = StyleSheet.flatten(screen.getByTestId('epg-cell-0-3').props.style);
     expect(movieStyle.borderLeftColor).toBe(theme.colors.accent);
 
     // Multi-day date tabs render Today, Tomorrow, and +6d
@@ -200,7 +200,7 @@ describe('Wave C2 Live & EPG Polish (#52, #395, #396, #400)', () => {
     expect(screen.getByTestId('epg-date-tab-6')).toBeTruthy();
 
     // Pressing upcoming programme cell opens in-tree EpgProgrammeDetailModal (not immediate tune)
-    await fireEvent.press(screen.getByTestId('epg-cell-0-2'));
+    await fireEvent.press(screen.getByTestId('epg-cell-0-3'));
     expect(onWatchChannel).not.toHaveBeenCalled();
     expect(screen.getByTestId('epg-programme-detail-modal')).toBeTruthy();
     expect(screen.getByTestId('epg-detail-title').props.children).toBe('Night Premiere');

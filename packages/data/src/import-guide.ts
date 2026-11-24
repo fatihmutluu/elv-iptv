@@ -48,6 +48,7 @@ export { closeOpenProgrammes };
 
 const DAY_MS = 86_400_000;
 const DEFAULT_WINDOW = { daysBack: 1, daysForward: 7 };
+const MAX_CATCHUP_RETENTION_DAYS = 30;
 
 type GuideOutcome =
   | { kind: 'imported'; slot: string; state: GuideState; validator: HttpCacheValidator | undefined }
@@ -198,7 +199,27 @@ async function execute(
     name: string;
     name_fold: string;
     num: number | null;
-  }>('SELECT key, guide_id, name, name_fold, num FROM live WHERE source_id = ?', [c.sourceId]);
+    catchup_days: number | null;
+  }>('SELECT key, guide_id, name, name_fold, num, catchup_days FROM live WHERE source_id = ?', [
+    c.sourceId,
+  ]);
+  let rawMaxCatchup = 0;
+  for (const ch of live) {
+    if (
+      ch.catchup_days !== null &&
+      Number.isFinite(ch.catchup_days) &&
+      ch.catchup_days > rawMaxCatchup
+    ) {
+      rawMaxCatchup = ch.catchup_days;
+    }
+  }
+  const maxCatchupDays = Math.min(
+    MAX_CATCHUP_RETENTION_DAYS,
+    Math.max(0, Math.floor(rawMaxCatchup)),
+  );
+  const window = source.settings.guideWindow ?? DEFAULT_WINDOW;
+  const effectiveDaysBack = Math.max(window.daysBack, maxCatchupDays);
+  const retentionFloorMs = now - effectiveDaysBack * DAY_MS;
   const st: GuideState = {
     index: buildChannelIndex(live),
     channelsById: new Map(),
@@ -216,7 +237,6 @@ async function execute(
     programmes: 0,
     seenProgrammes: 0,
   };
-  const window = source.settings.guideWindow ?? DEFAULT_WINDOW;
   let bytesRead = 0;
   const body =
     opened.contentLength === undefined
@@ -226,7 +246,7 @@ async function execute(
         });
   const scan = scanXmltv(body, {
     batchSize: c.batchSize,
-    from: now - window.daysBack * DAY_MS,
+    from: retentionFloorMs,
     to: now + window.daysForward * DAY_MS,
     ...(c.deps.decompressor === undefined ? {} : { decompressor: c.deps.decompressor }),
     ...(source.settings.xmltvTimezone ? { defaultTimeZone: source.settings.xmltvTimezone } : {}),
@@ -261,6 +281,10 @@ async function execute(
     await scan.return(ok(undefined));
   }
   await writeProgrammes(c, st, flushOpenProgrammes(c, st.open, st.lastByChannel));
+  if (maxCatchupDays > 0) {
+    st.retentionFloorMs = retentionFloorMs;
+    st.preserveBeforeMs = now;
+  }
   finalizeChannels(c, st);
   if (st.channels === 0 && st.seenProgrammes === 0) {
     throw new Stop(elvError('source-format', 'not-a-guide'));

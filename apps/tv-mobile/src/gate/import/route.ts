@@ -12,6 +12,8 @@ export interface ImportParams {
   series: boolean;
   /** `probeReads=1`: during the import, time a reader query every 50 ms. */
   probeReads: boolean;
+  /** `guide=1`: after the catalog import, stream-import XMLTV guide programmes from the simulator (`#25`). */
+  guide?: boolean;
 }
 
 const GATE_URL = /^elviptv:\/\/gate\/import\/?(?:\?([^#]*))?(?:#.*)?$/;
@@ -20,10 +22,11 @@ const DEFAULT_HOST = '10.0.2.2:7878';
 
 function readHost(value: string | undefined): string {
   if (value === undefined) return DEFAULT_HOST;
-  const match = HOST.exec(value);
+  const cleaned = value.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const match = HOST.exec(cleaned);
   if (match === null) return DEFAULT_HOST;
   const port = match[1];
-  return port === undefined || Number.parseInt(port, 10) <= 65_535 ? value : DEFAULT_HOST;
+  return port === undefined || Number.parseInt(port, 10) <= 65_535 ? cleaned : DEFAULT_HOST;
 }
 
 function readInt(value: string | undefined, fallback: number, min: number, max: number): number {
@@ -45,12 +48,15 @@ export function parseImportUrl(url: string | null): ImportParams | undefined {
     const eq = pair.indexOf('=');
     if (eq > 0) query.set(pair.slice(0, eq), pair.slice(eq + 1));
   }
+  const rawAccount = query.get('account') ?? query.get('profile');
+  const guide = query.get('guide') === '1';
   return {
-    host: readHost(query.get('host')),
-    account: query.get('account') === 'huge' ? 'huge' : 'large',
+    host: readHost(query.get('host') ?? query.get('sim')),
+    account: rawAccount === 'huge' ? 'huge' : 'large',
     batch: readInt(query.get('batch'), 1000, 500, 20_000),
     maxBody: readInt(query.get('maxBody'), 4096, 256, 131_072),
     series: query.get('series') === '1',
     probeReads: query.get('probeReads') === '1',
+    ...(guide ? { guide: true } : {}),
   };
 }

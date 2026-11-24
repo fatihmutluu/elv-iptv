@@ -71,9 +71,11 @@ export {
   type LiveTabMemory,
   layoutEpgSlots,
   MAX_NUMBER_BUFFER_DIGITS,
+  MIN_EPG_GAP_MS,
   NUMBER_JUMP_TIMEOUT_MS,
   parseNumberBuffer,
   recordChannelTune,
+  resolveEpgRowHeight,
 } from './live-model';
 export { SourceBadgePill } from './SourceBadgePill';
 export {

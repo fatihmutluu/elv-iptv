@@ -9,8 +9,11 @@ import {
   EPG_VISIBLE_SPAN_MS,
   findOverlappingProgramIndex,
   findProgramIndexAtTime,
+  LIVE_PAGE_SIZE,
   layoutEpgSlots,
 } from './live-model';
+
+const MAX_ACTIVE_SCAN_PAGES = 24;
 
 /** Subset of `EpgWindowData` consumed by {@link useEpgTimeCursor}. */
 interface EpgWindowCursorPort {
@@ -50,11 +53,11 @@ function matchSlotIndex(
   anchorMs: number,
   originWindow: { readonly start: number; readonly stop: number } | null = null,
 ): number {
-  const progs = slots.map((s) => s.programme);
+  const spans = slots.map((s) => ({ start: s.startMs, stop: s.stopMs }));
   const idx =
     originWindow !== null
-      ? findOverlappingProgramIndex(progs, originWindow.start, originWindow.stop, anchorMs)
-      : findProgramIndexAtTime(progs, anchorMs);
+      ? findOverlappingProgramIndex(spans, originWindow.start, originWindow.stop, anchorMs)
+      : findProgramIndexAtTime(spans, anchorMs);
   return Math.max(0, idx);
 }
 
@@ -65,6 +68,10 @@ export interface UseEpgTimeCursorOptions {
   readonly channelCount: number;
   readonly maxMountedRows: number;
   readonly activeNowMs: number;
+  /** Currently playing channel key to auto-focus on initial EPG open (`#6`). */
+  readonly activeChannelKey?: string | null;
+  /** Monotonic channel source version used to re-attempt active channel lookup as pages load. */
+  readonly sourceVersion?: number;
   readonly spanMs?: number;
   readonly epgData: EpgWindowCursorPort;
   readonly dateTabCount?: number;
@@ -84,6 +91,8 @@ export interface UseEpgTimeCursorOptions {
   readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onRefreshGuide?: () => void;
   readonly onEdgeTop?: () => void;
+  /** Focuses the category sidebar on Hold-Left (`long` `'left'`) or left-edge escape (`#6`, `#25`). */
+  readonly onFocusSidebar?: () => void;
 }
 
 /** Memoized 2D EPG cursor and TV toolbar navigation state returned by {@link useEpgTimeCursor}. */
@@ -94,6 +103,8 @@ export interface EpgTimeCursorState {
   readonly focusedDateTabIndex: number;
   readonly focusedRow: number;
   readonly focusedSlotIndex: number;
+  /** Row index auto-focused from `activeChannelKey` on initial EPG open, or `null`. */
+  readonly autoFocusedRow: number | null;
   readonly focusedChannel: ItemRow | undefined;
   readonly focusedProgramme: ProgrammeRow | null;
   readonly handlePanEarlier: () => void;
@@ -120,6 +131,8 @@ export function useEpgTimeCursor({
   channelCount,
   maxMountedRows,
   activeNowMs,
+  activeChannelKey = null,
+  sourceVersion = 0,
   spanMs = EPG_VISIBLE_SPAN_MS,
   epgData,
   dateTabCount = 0,
@@ -131,15 +144,40 @@ export function useEpgTimeCursor({
   onToggleFavorite,
   onRefreshGuide,
   onEdgeTop,
+  onFocusSidebar,
 }: UseEpgTimeCursorOptions): EpgTimeCursorState {
   const { windowStartMs, panEarlier, panLater, jumpToLive, jumpToDay, getProgrammes } = epgData;
   const toolbarActions = onToggleFavorite ? FAV_TOOLBAR_ACTIONS : BASE_TOOLBAR_ACTIONS;
 
+  const findActiveRow = useCallback(
+    (key: string | null): number => {
+      if (!key || channelCount <= 0) return -1;
+      for (let i = 0; i < channelCount; i++) {
+        if (channelSource.get(i)?.key === key) return i;
+      }
+      return -1;
+    },
+    [channelCount, channelSource],
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: computed once on mount; late page loads are handled by the effect below
+  const initialRow = useMemo(() => {
+    const idx = findActiveRow(activeChannelKey);
+    return Math.max(0, idx);
+  }, []);
+
   const [focusedArea, setFocusedArea] = useState<EpgFocusArea>('grid');
   const [focusedToolbarIndex, setFocusedToolbarIndex] = useState(0);
   const [focusedDateTabIndex, setFocusedDateTabIndex] = useState(0);
-  const [focusedRow, setFocusedRow] = useState(0);
+  const [focusedRow, setFocusedRow] = useState(initialRow);
   const [focusedSlotIndex, setFocusedSlotIndex] = useState(0);
+  const [autoFocusedRow, setAutoFocusedRow] = useState<number | null>(() =>
+    activeChannelKey && findActiveRow(activeChannelKey) >= 0 ? initialRow : null,
+  );
+  const hasUserNavigatedRef = useRef(false);
+  const appliedActiveKeyRef = useRef<string | null>(
+    activeChannelKey && findActiveRow(activeChannelKey) >= 0 ? activeChannelKey : null,
+  );
 
   const cursorRef = useRef<{
     area: EpgFocusArea;
@@ -153,7 +191,7 @@ export function useEpgTimeCursor({
     area: 'grid',
     toolbarIdx: 0,
     dateTabIdx: 0,
-    row: 0,
+    row: initialRow,
     slot: 0,
     anchorMs: activeNowMs,
     originWindow: null,
@@ -173,6 +211,7 @@ export function useEpgTimeCursor({
     onToggleFavorite,
     onRefreshGuide,
     onEdgeTop,
+    onFocusSidebar,
   });
   callbacksRef.current = {
     onWatchChannel,
@@ -183,6 +222,7 @@ export function useEpgTimeCursor({
     onToggleFavorite,
     onRefreshGuide,
     onEdgeTop,
+    onFocusSidebar,
   };
 
   const commitSlot = useCallback((slotIdx: number) => {
@@ -196,8 +236,13 @@ export function useEpgTimeCursor({
     [activeNowMs, getProgrammes, spanMs, windowStartMs],
   );
 
+  const prevCategoryIdRef = useRef(categoryId);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset cursor state when category switches
   useEffect(() => {
+    if (prevCategoryIdRef.current === categoryId) return;
+    prevCategoryIdRef.current = categoryId;
+    hasUserNavigatedRef.current = false;
+    appliedActiveKeyRef.current = null;
     cursorRef.current = {
       area: 'grid',
       toolbarIdx: 0,
@@ -212,7 +257,87 @@ export function useEpgTimeCursor({
     setFocusedDateTabIndex(0);
     setFocusedRow(0);
     setFocusedSlotIndex(0);
+    setAutoFocusedRow(null);
   }, [categoryId]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sourceVersion re-checks as paged channel chunks land
+  useEffect(() => {
+    if (!activeChannelKey || hasUserNavigatedRef.current) return;
+    if (appliedActiveKeyRef.current === activeChannelKey) return;
+    const foundIdx = findActiveRow(activeChannelKey);
+    if (foundIdx < 0) return;
+    appliedActiveKeyRef.current = activeChannelKey;
+    cursorRef.current.row = foundIdx;
+    cursorRef.current.originWindow = null;
+    setFocusedRow(foundIdx);
+    setAutoFocusedRow(foundIdx);
+    const matchedSlots = slotsFor(channelSource.get(foundIdx));
+    commitSlot(matchSlotIndex(matchedSlots, cursorRef.current.anchorMs, null));
+    channelSource.prefetch(Math.max(0, foundIdx - 2), foundIdx + maxMountedRows + 2);
+  }, [
+    activeChannelKey,
+    categoryId,
+    channelCount,
+    channelSource,
+    commitSlot,
+    findActiveRow,
+    maxMountedRows,
+    slotsFor,
+    sourceVersion,
+  ]);
+
+  // Bounded async page scan when activeChannelKey lives on an unloaded page (>= LIVE_PAGE_SIZE).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally excludes sourceVersion so loading pages does not restart the scan
+  useEffect(() => {
+    if (!activeChannelKey || channelCount <= 0 || hasUserNavigatedRef.current) return;
+    if (appliedActiveKeyRef.current === activeChannelKey) return;
+    if (findActiveRow(activeChannelKey) >= 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      let pagesLoaded = 0;
+      for (
+        let offset = 0;
+        offset < channelCount && pagesLoaded < MAX_ACTIVE_SCAN_PAGES;
+        offset += LIVE_PAGE_SIZE
+      ) {
+        if (
+          cancelled ||
+          hasUserNavigatedRef.current ||
+          appliedActiveKeyRef.current === activeChannelKey
+        ) {
+          return;
+        }
+        if (channelSource.get(offset) === undefined) {
+          pagesLoaded++;
+          await channelSource.loadItem(offset);
+          if (
+            cancelled ||
+            hasUserNavigatedRef.current ||
+            appliedActiveKeyRef.current === activeChannelKey
+          ) {
+            return;
+          }
+        }
+        const end = Math.min(channelCount, offset + LIVE_PAGE_SIZE);
+        for (let i = offset; i < end; i++) {
+          if (channelSource.get(i)?.key === activeChannelKey) {
+            appliedActiveKeyRef.current = activeChannelKey;
+            cursorRef.current.row = i;
+            cursorRef.current.originWindow = null;
+            setFocusedRow(i);
+            setAutoFocusedRow(i);
+            channelSource.prefetch(Math.max(0, i - 2), i + maxMountedRows + 2);
+            return;
+          }
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChannelKey, categoryId, channelCount, channelSource, maxMountedRows]);
 
   useEffect(() => {
     if (channelCount > 0 && cursorRef.current.row >= channelCount) {
@@ -270,6 +395,7 @@ export function useEpgTimeCursor({
 
   const handleSelectCell = useCallback(
     (rowIdx: number, slotIdx: number, channel: ItemRow, programme: ProgrammeRow | null) => {
+      hasUserNavigatedRef.current = true;
       const isUpcoming = programme !== null && programme.start > activeNowMs;
       if (isUpcoming && callbacksRef.current.onOpenProgrammeDetail !== undefined) {
         cursorRef.current.area = 'grid';
@@ -301,9 +427,10 @@ export function useEpgTimeCursor({
 
   const moveRow = useCallback(
     (nextRow: number) => {
-      const originProg =
-        slotsFor(channelSource.get(cursorRef.current.row))[cursorRef.current.slot]?.programme ??
-        null;
+      hasUserNavigatedRef.current = true;
+      const originSlot =
+        slotsFor(channelSource.get(cursorRef.current.row))[cursorRef.current.slot] ?? null;
+      const originProg = originSlot && !originSlot.isGap ? originSlot.programme : null;
       const originWindow =
         originProg !== null ? { start: originProg.start, stop: originProg.stop } : null;
       cursorRef.current.row = nextRow;
@@ -323,12 +450,13 @@ export function useEpgTimeCursor({
 
   const stepHorizontal = useCallback(
     (delta: -1 | 1) => {
+      hasUserNavigatedRef.current = true;
       cursorRef.current.originWindow = null;
       const target = cursorRef.current.slot + delta;
       if (target >= 0 && target < focusedSlots.length) {
         commitSlot(target);
-        const prog = focusedSlots[target]?.programme;
-        if (prog) cursorRef.current.anchorMs = Math.floor((prog.start + prog.stop) / 2);
+        const slot = focusedSlots[target];
+        if (slot) cursorRef.current.anchorMs = Math.floor((slot.startMs + slot.stopMs) / 2);
         return;
       }
       cursorRef.current.anchorMs =
@@ -373,6 +501,14 @@ export function useEpgTimeCursor({
         callbacksRef.current.onEdgeTop?.();
         return true;
       }
+      if (event.kind === 'long' && event.key === 'left') {
+        const focusSidebar = callbacksRef.current.onFocusSidebar ?? callbacksRef.current.onEdgeTop;
+        if (focusSidebar !== undefined) {
+          focusSidebar();
+          return true;
+        }
+        return false;
+      }
 
       if (cursorRef.current.area === 'toolbar') {
         if (event.kind === 'press' && event.key === 'select') {
@@ -387,9 +523,13 @@ export function useEpgTimeCursor({
           cursorRef.current.area = nextArea;
           setFocusedArea(nextArea);
         } else if (event.key === 'left') {
-          const next = Math.max(0, cursorRef.current.toolbarIdx - 1);
-          cursorRef.current.toolbarIdx = next;
-          setFocusedToolbarIndex(next);
+          if (cursorRef.current.toolbarIdx === 0 && callbacksRef.current.onFocusSidebar) {
+            callbacksRef.current.onFocusSidebar();
+          } else {
+            const next = Math.max(0, cursorRef.current.toolbarIdx - 1);
+            cursorRef.current.toolbarIdx = next;
+            setFocusedToolbarIndex(next);
+          }
         } else if (event.key === 'right') {
           const next = Math.min(toolbarActions.length - 1, cursorRef.current.toolbarIdx + 1);
           cursorRef.current.toolbarIdx = next;
@@ -413,9 +553,13 @@ export function useEpgTimeCursor({
           cursorRef.current.area = 'grid';
           setFocusedArea('grid');
         } else if (event.key === 'left') {
-          const next = Math.max(0, cursorRef.current.dateTabIdx - 1);
-          cursorRef.current.dateTabIdx = next;
-          setFocusedDateTabIndex(next);
+          if (cursorRef.current.dateTabIdx === 0 && callbacksRef.current.onFocusSidebar) {
+            callbacksRef.current.onFocusSidebar();
+          } else {
+            const next = Math.max(0, cursorRef.current.dateTabIdx - 1);
+            cursorRef.current.dateTabIdx = next;
+            setFocusedDateTabIndex(next);
+          }
         } else if (event.key === 'right') {
           const next = Math.min(Math.max(0, dateTabCount - 1), cursorRef.current.dateTabIdx + 1);
           cursorRef.current.dateTabIdx = next;
@@ -505,6 +649,7 @@ export function useEpgTimeCursor({
       focusedDateTabIndex,
       focusedRow,
       focusedSlotIndex,
+      autoFocusedRow,
       focusedChannel,
       focusedProgramme,
       handlePanEarlier,
@@ -515,6 +660,7 @@ export function useEpgTimeCursor({
       handleTvKey,
     }),
     [
+      autoFocusedRow,
       focusedArea,
       focusedChannel,
       focusedDateTabIndex,

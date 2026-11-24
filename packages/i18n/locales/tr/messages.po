@@ -1910,3 +1910,18 @@ msgstr "Arka planda ses oynatma"
 
 msgid "settings.backgroundAudioHint"
 msgstr "Uygulama mobilde arka plana alındığında sesi oynatmaya devam eder"
+
+msgid "settings.epgRowDensity"
+msgstr "Rehber satır yoğunluğu"
+
+msgid "settings.epgRowDensityCompact"
+msgstr "Kompakt"
+
+msgid "settings.epgRowDensityComfortable"
+msgstr "Rahat"
+
+msgid "settings.epgRowDensityCinematic"
+msgstr "Sinematik"
+
+msgid "epg.noInfoGap"
+msgstr "Bilgi yok"

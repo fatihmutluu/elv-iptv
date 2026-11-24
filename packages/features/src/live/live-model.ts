@@ -1,4 +1,5 @@
 import type { AlphabetBucket, ItemRow, ItemSortOrder, NowNextEntry, ProgrammeRow } from '@elv/data';
+import type { EpgRowDensity } from '@elv/domain';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import { createPagedListSource, type PagedListSource } from '../shared/paged-list-source';
 
@@ -48,6 +49,27 @@ export const LIVE_MAX_PAGES = 8;
 export const EPG_CACHE_TTL_MS = 90_000;
 /** Maximum channel entries kept in the in-memory EPG cache (`#250`). */
 export const EPG_CACHE_MAX_ENTRIES = 240;
+/** Minimum uncovered EPG span (5 minutes) synthesized into a focusable "No info" gap cell (`#6`, `#25`). */
+export const MIN_EPG_GAP_MS = 5 * 60_000;
+
+const EPG_ROW_HEIGHT_TABLE: Readonly<
+  Record<EpgRowDensity, { readonly tv: number; readonly standard: number }>
+> = {
+  compact: { tv: 52, standard: 48 },
+  comfortable: { tv: 68, standard: 60 },
+  cinematic: { tv: 84, standard: 74 },
+};
+
+/** Resolves scaled EPG channel row height in logical pixels for the active {@link EpgRowDensity}. */
+export function resolveEpgRowHeight(
+  density: EpgRowDensity | undefined,
+  isTv: boolean,
+  fontScale: number,
+): number {
+  const safeScale = Number.isFinite(fontScale) ? Math.max(1, fontScale) : 1;
+  const preset = EPG_ROW_HEIGHT_TABLE[density ?? 'comfortable'] ?? EPG_ROW_HEIGHT_TABLE.comfortable;
+  return Math.round((isTv ? preset.tv : preset.standard) * safeScale);
+}
 
 /**
  * Resolves the active `#` or `A..Z` bucket letter owning `currentOffset` in Live Channels (`#407`).
@@ -138,19 +160,27 @@ export function computeProgramProgress(startMs: number, stopMs: number, nowMs: n
   return (nowMs - startMs) / span;
 }
 
-/** Positioned programme block clipped cleanly to the visible EPG horizontal window. */
+/** Positioned programme or synthesized gap block clipped cleanly to the visible EPG horizontal window. */
 export interface EpgPositionedSlot {
-  readonly programme: ProgrammeRow;
+  /** Stable slot identifier (`__gap:<startMs>:<stopMs>` for synthesized gaps). */
+  readonly id: string;
+  /** Underlying programme row, or `null` when {@link isGap} is `true`. */
+  readonly programme: ProgrammeRow | null;
+  readonly startMs: number;
+  readonly stopMs: number;
   readonly leftRatio: number;
   readonly widthRatio: number;
   readonly isLive: boolean;
+  /** True when this slot is a synthesized `>= MIN_EPG_GAP_MS` "No info" gap cell. */
+  readonly isGap: boolean;
   readonly clippedStart: boolean;
   readonly clippedEnd: boolean;
 }
 
 /**
  * Clips and maps a channel's programmes onto normalized `[0, 1]` horizontal coordinates within
- * `[windowStartMs, windowStartMs + spanMs]` so rendering scales smoothly to any viewport width.
+ * `[windowStartMs, windowStartMs + spanMs]`, synthesizing focusable gap slots (`>= MIN_EPG_GAP_MS`)
+ * before, between, and after programmes (and for empty rows) so D-pad navigation never traps focus.
  */
 export function layoutEpgSlots(
   programmes: readonly ProgrammeRow[],
@@ -158,22 +188,66 @@ export function layoutEpgSlots(
   spanMs: number,
   nowMs: number,
 ): EpgPositionedSlot[] {
-  if (spanMs <= 0 || programmes.length === 0) return [];
+  if (spanMs <= 0) return [];
   const windowEndMs = windowStartMs + spanMs;
   const out: EpgPositionedSlot[] = [];
+
+  const pushGap = (gapStart: number, gapStop: number): void => {
+    if (gapStop - gapStart < MIN_EPG_GAP_MS) return;
+    out.push({
+      id: `__gap:${gapStart}:${gapStop}`,
+      programme: null,
+      startMs: gapStart,
+      stopMs: gapStop,
+      leftRatio: (gapStart - windowStartMs) / spanMs,
+      widthRatio: (gapStop - gapStart) / spanMs,
+      isLive: gapStart <= nowMs && gapStop > nowMs,
+      isGap: true,
+      clippedStart: false,
+      clippedEnd: false,
+    });
+  };
+
+  const visible: Array<{
+    readonly programme: ProgrammeRow;
+    readonly visStart: number;
+    readonly visEnd: number;
+  }> = [];
   for (const programme of programmes) {
     if (programme.stop <= windowStartMs || programme.start >= windowEndMs) continue;
     const visStart = Math.max(windowStartMs, programme.start);
     const visEnd = Math.min(windowEndMs, programme.stop);
     if (visEnd <= visStart) continue;
+    visible.push({ programme, visStart, visEnd });
+  }
+  visible.sort((a, b) => a.visStart - b.visStart || a.visEnd - b.visEnd);
+
+  if (visible.length === 0) {
+    pushGap(windowStartMs, windowEndMs);
+    return out;
+  }
+
+  let cursorMs = windowStartMs;
+  for (const { programme, visStart, visEnd } of visible) {
+    if (visStart > cursorMs) {
+      pushGap(cursorMs, visStart);
+    }
     out.push({
+      id: `${programme.guideId}-${programme.start}-${programme.stop}`,
       programme,
+      startMs: programme.start,
+      stopMs: programme.stop,
       leftRatio: (visStart - windowStartMs) / spanMs,
       widthRatio: (visEnd - visStart) / spanMs,
       isLive: programme.start <= nowMs && programme.stop > nowMs,
+      isGap: false,
       clippedStart: programme.start < windowStartMs,
       clippedEnd: programme.stop > windowEndMs,
     });
+    cursorMs = Math.max(cursorMs, visEnd);
+  }
+  if (windowEndMs > cursorMs) {
+    pushGap(cursorMs, windowEndMs);
   }
   return out;
 }
@@ -197,7 +271,7 @@ export function computeNowLineRatio(
  * nearest programme when a schedule gap exists, or `-1` if the channel has no programmes.
  */
 export function findProgramIndexAtTime(
-  programmes: readonly ProgrammeRow[],
+  programmes: ReadonlyArray<{ readonly start: number; readonly stop: number }>,
   anchorTimeMs: number,
 ): number {
   if (programmes.length === 0) return -1;
@@ -227,7 +301,7 @@ export function findProgramIndexAtTime(
  * programme overlaps the window (`#112`).
  */
 export function findOverlappingProgramIndex(
-  programmes: readonly ProgrammeRow[],
+  programmes: ReadonlyArray<{ readonly start: number; readonly stop: number }>,
   windowStartMs: number,
   windowStopMs: number,
   fallbackAnchorMs: number,

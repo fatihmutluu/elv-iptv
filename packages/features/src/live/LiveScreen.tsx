@@ -1,5 +1,10 @@
 import type { CatalogService, ItemRow, ProgrammeRow, SourceRow } from '@elv/data';
-import type { DefaultLiveModePref, EpgTimeSpanHoursPref, LogoBackdropModePref } from '@elv/domain';
+import type {
+  DefaultLiveModePref,
+  EpgRowDensity,
+  EpgTimeSpanHoursPref,
+  LogoBackdropModePref,
+} from '@elv/domain';
 import { IconButton, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
@@ -51,6 +56,7 @@ export interface LiveScreenProps {
   readonly nowMs?: number;
   readonly defaultLiveMode?: DefaultLiveModePref;
   readonly epgTimeSpanHours?: EpgTimeSpanHoursPref;
+  readonly epgRowDensity?: EpgRowDensity;
   readonly epgGenreTints?: boolean;
   readonly epgShowClock?: boolean;
   readonly logoBackdropMode?: LogoBackdropModePref;
@@ -70,7 +76,7 @@ export interface LiveScreenProps {
 export function LiveScreen(props: LiveScreenProps): ReactElement {
   const { catalog, sources, refreshToken, userStateVersion = 0, memory, onMemoryChange } = props;
   const { onPlay, onOpenSources, onFocusTopNav, isActiveScope = true, videoHost } = props;
-  const { playbackGuard, nowMs, defaultLiveMode, epgTimeSpanHours } = props;
+  const { playbackGuard, nowMs, defaultLiveMode, epgTimeSpanHours, epgRowDensity } = props;
   const {
     epgGenreTints = true,
     epgShowClock = true,
@@ -516,8 +522,12 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                   sourceVersion={live.sourceVersion}
                   refreshToken={refreshToken + guideRefreshTick}
                   favoriteKeys={live.favoriteKeys}
+                  activeChannelKey={
+                    live.activeChannel?.key ?? activeMemory.activeChannelKey ?? null
+                  }
                   {...(nowMs !== undefined ? { nowMs } : {})}
                   {...(epgTimeSpanHours !== undefined ? { epgTimeSpanHours } : {})}
+                  {...(epgRowDensity !== undefined ? { epgRowDensity } : {})}
                   epgGenreTints={epgGenreTints}
                   epgShowClock={epgShowClock}
                   logoBackdropMode={logoBackdropMode}

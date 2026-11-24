@@ -1910,3 +1910,18 @@ msgstr "Background audio playback"
 
 msgid "settings.backgroundAudioHint"
 msgstr "Keep audio playing when the app moves to the background on mobile"
+
+msgid "settings.epgRowDensity"
+msgstr "Guide row density"
+
+msgid "settings.epgRowDensityCompact"
+msgstr "Compact"
+
+msgid "settings.epgRowDensityComfortable"
+msgstr "Comfortable"
+
+msgid "settings.epgRowDensityCinematic"
+msgstr "Cinematic"
+
+msgid "epg.noInfoGap"
+msgstr "No info"

@@ -1,23 +1,38 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { exec as run } from '../exec.ts';
-import { deviceInfo, type Exec, findDevice, resolveAdb } from './adb.ts';
+import { type Exec, resolveAdb } from './adb.ts';
 import { type BudgetMode, baselineTargetRefusal } from './compare.ts';
-import { compareImport, type ImportResult, runImportGate } from './import-gate.ts';
+import type { GateDevice, GateTarget } from './gate-device.ts';
+import {
+  compareImport,
+  type ImportGateOutput,
+  type ImportResult,
+  runImportGate,
+  type SimControl,
+} from './import-gate.ts';
 import { localSim } from './sim-control.ts';
 
 /** The usage line of `pnpm gate import`. */
 export const IMPORT_USAGE =
-  'usage: pnpm gate import [--avd elv_tv] [--build] [--account large|huge] [--batch 5000] [--max-body 4096] [--runs 3 (default)] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]';
-const DEFAULT_BASELINE = 'docs/learned/gates/import-android-tv.json';
+  'usage: pnpm gate import [--target android-tv|tvos] [--avd elv_tv] [--build] [--app <.app>] [--device <name>] [--account large|huge] [--batch 5000] [--max-body 4096] [--guide] [--runs 3 (default)] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]';
+
+const defaultBaselineFor = (target: GateTarget): string =>
+  target === 'tvos'
+    ? 'docs/learned/gates/import-tvos.json'
+    : 'docs/learned/gates/import-android-tv.json';
 
 /** Parsed command line values of `pnpm gate import`. */
 export interface ImportCli {
+  target?: string;
   avd?: string;
   build?: boolean;
+  app?: string;
+  device?: string;
   account?: string;
   batch?: string;
   'max-body'?: string;
+  guide?: boolean;
   runs?: string;
   baseline?: string;
   budgets?: string;
@@ -33,11 +48,27 @@ interface Baseline {
   result: ImportResult;
 }
 
-const summary = (r: ImportResult): string =>
-  `gate import: ${r.account}, batch ${r.batch}, body cap ${r.maxBody} KiB, ${r.rows} rows, ${r.durationMs} ms, max stall ${r.maxStallMs} ms`;
+const summary = (r: ImportResult): string => {
+  const guidePart =
+    r.guideDurationMs !== undefined
+      ? `, guide ${r.guideProgrammes ?? 0} progs (${r.guideMatchedChannels ?? 0} ch) in ${r.guideDurationMs} ms`
+      : r.guideError !== undefined
+        ? `, guide FAILED (${r.guideError})`
+        : '';
+  return `gate import: ${r.account}, batch ${r.batch}, body cap ${r.maxBody} KiB, ${r.rows} rows, ${r.durationMs} ms, max stall ${r.maxStallMs} ms${guidePart}`;
+};
 
 /** Runs `pnpm gate import` and returns the process exit code; usage errors are returned as code 2. */
-export async function importMain(values: ImportCli, root: string): Promise<number> {
+export async function importMain(
+  values: ImportCli,
+  root: string,
+  deps?: {
+    exec?: Exec;
+    sim?: SimControl;
+    device?: GateDevice;
+    sleep?: (ms: number) => Promise<void>;
+  },
+): Promise<number> {
   const bad = (message: string): number => {
     process.stderr.write(`gate: ${message}. ${IMPORT_USAGE}\n`);
     return 2;
@@ -57,27 +88,38 @@ export async function importMain(values: ImportCli, root: string): Promise<numbe
   if (budgets !== 'fail' && budgets !== 'warn') return bad('--budgets is fail or warn');
   const account = values.account ?? 'large';
   if (account !== 'large' && account !== 'huge') return bad('--account is large or huge');
+  const target = (values.target ?? 'android-tv') as GateTarget;
+  if (target !== 'android-tv' && target !== 'tvos') return bad('--target is android-tv or tvos');
 
-  const baselineName = values.baseline ?? DEFAULT_BASELINE;
+  const defaultBaseline = defaultBaselineFor(target);
+  const baselineName = values.baseline ?? defaultBaseline;
   const baselinePath = resolve(root, baselineName);
   if (values['write-baseline'] === true) {
     if (account !== 'large') return bad('only the large account may become a baseline');
-    const refusal = baselineTargetRefusal(budgets, baselinePath, resolve(root, DEFAULT_BASELINE));
+    const refusal = baselineTargetRefusal(budgets, baselinePath, resolve(root, defaultBaseline));
     if (refusal !== undefined) return bad(refusal);
   }
 
   const adb = resolveAdb(process.env, process.platform);
-  const exec: Exec = (command, args, opts) => run(command, args, { cwd: root, ...opts });
-  let result: ImportResult;
+  const exec: Exec =
+    deps?.exec ?? ((command, args, opts) => run(command, args, { cwd: root, ...opts }));
+  const sim = deps?.sim ?? localSim;
+  let gateOut: ImportGateOutput;
   try {
-    result = await runImportGate({
+    gateOut = await runImportGate({
       exec,
-      sim: localSim,
+      sim,
+      target,
       adb,
       root,
       account,
+      ...(deps?.device === undefined ? {} : { device: deps.device }),
+      ...(deps?.sleep === undefined ? {} : { sleep: deps.sleep }),
       ...(values.avd === undefined ? {} : { avd: values.avd }),
       ...(values.build === true ? { build: true } : {}),
+      ...(values.app === undefined ? {} : { app: values.app }),
+      ...(values.device === undefined ? {} : { deviceName: values.device }),
+      ...(values.guide === true ? { guide: true } : {}),
       ...(batch === undefined ? {} : { batch }),
       ...(maxBody === undefined ? {} : { maxBody }),
       ...(runs === undefined ? {} : { runs }),
@@ -93,7 +135,7 @@ export async function importMain(values: ImportCli, root: string): Promise<numbe
     return 1;
   }
 
-  const device = await deviceInfo(exec, adb, await findDevice(exec, adb, values.avd));
+  const { result, device } = gateOut;
   const commit = (await exec('git', ['rev-parse', '--short', 'HEAD'])).output.trim();
 
   if (values['write-baseline'] === true) {
@@ -109,7 +151,10 @@ export async function importMain(values: ImportCli, root: string): Promise<numbe
     }
     const baseline: Baseline = {
       device,
-      build: 'development variant, release APK (JS bundled, debug-signed)',
+      build:
+        target === 'tvos'
+          ? 'development variant, tvOS simulator .app (JS bundled)'
+          : 'development variant, release APK (JS bundled, debug-signed)',
       commit,
       date: new Date().toISOString().slice(0, 10),
       result,

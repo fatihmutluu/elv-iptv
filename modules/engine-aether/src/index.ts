@@ -83,6 +83,7 @@ interface AetherNativeEngineHandle extends NativeEngineHandle {
   setMuted?(muted: boolean): void;
   setVolume?(volume: number): void;
   setBackgroundAudioEnabled?(enabled: boolean): void;
+  setAllowDetachedSurface?(enabled: boolean): void;
   setMediaMetadata?(metadata: AetherMediaMetadata | null): void;
   addListener: {
     (eventName: 'onEngineEvent', listener: (event: EngineEvent) => void): { remove(): void };
@@ -349,6 +350,14 @@ export function setAppleEngineVolume(engine: PlayerEngine, volume: number): void
 /** Enables or disables opt-in background audio playback on a live AetherEngine (`#413`). */
 export function setAetherBackgroundAudioEnabled(engine: PlayerEngine, enabled: boolean): void {
   handles.get(engine)?.setBackgroundAudioEnabled?.(Boolean(enabled));
+}
+
+/**
+ * Allows or disallows non-terminal local video surface detachment (e.g. PiP or AirPlay handoff)
+ * on a live AetherEngine (`#117`).
+ */
+export function setAetherDetachedSurfaceAllowed(engine: PlayerEngine, enabled: boolean): void {
+  handles.get(engine)?.setAllowDetachedSurface?.(Boolean(enabled));
 }
 
 /** Publishes or clears Apple `MPNowPlayingInfoCenter` metadata on a live AetherEngine (`#413`). */

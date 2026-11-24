@@ -173,7 +173,7 @@ final class AetherSurfaceView: ExpoView {
     super.didMoveToWindow()
     MainActor.assumeIsolated {
       refreshIdleTimer()
-      notifySurfaceAvailability(isBackground: isAppInBackground)
+      notifySurfaceAvailability(isBackground: isDetachingInBackground)
       #if os(iOS)
       if window != nil {
         reportCurrentSafeAreaInsets()
@@ -197,6 +197,12 @@ final class AetherSurfaceView: ExpoView {
   @MainActor
   var isAppInBackground: Bool {
     appInBackground || UIApplication.shared.applicationState == .background
+  }
+
+  /// Treats window teardown while UIKit is inactive/backgrounding as background detach so it never races `didEnterBackgroundNotification` (`#117`).
+  @MainActor
+  var isDetachingInBackground: Bool {
+    isAppInBackground || (window == nil && UIApplication.shared.applicationState != .active)
   }
 
   @MainActor
