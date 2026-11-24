@@ -681,6 +681,11 @@ export const enMessages = {
   'settings.epgRowDensityComfortable': 'Comfortable',
   'settings.epgRowDensityCinematic': 'Cinematic',
   'epg.noInfoGap': 'No info',
+  'player.audioDelay': 'Audio delay',
+  'player.subtitleDelay': 'Subtitle delay',
+  'player.videoQuality': 'Video quality',
+  'player.videoQualityAuto': 'Auto',
+  'player.delayReset': 'Reset (0 ms)',
 } as const;
 
 /** Valid message identifier across all supported locales. */

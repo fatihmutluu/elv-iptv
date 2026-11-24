@@ -81,6 +81,7 @@ export const RESETTABLE_PROPS: ReadonlyArray<[string, unknown]> = [
   ['vid', 'auto'],
   ['aid', 'auto'],
   ['sid', 'auto'],
+  ['secondary-sid', 'no'],
   ['speed', 1],
   ['deinterlace', 'no'],
   ['video-aspect-override', '-1'],

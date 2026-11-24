@@ -47,7 +47,7 @@ public struct TrackInfoOut: Equatable, Sendable {
   }
 }
 
-/// Available audio and subtitle tracks and active selection IDs emitted on `onEngineEvent`.
+/// Available audio, subtitle, and adaptive video tracks and active selection IDs emitted on `onEngineEvent`.
 public struct MediaTracksOut: Equatable, Sendable {
   public static let empty = MediaTracksOut(audio: [], subtitles: [], selectedAudioId: nil, selectedSubtitleId: nil)
 
@@ -55,21 +55,37 @@ public struct MediaTracksOut: Equatable, Sendable {
   public var subtitles: [TrackInfoOut]
   public var selectedAudioId: String?
   public var selectedSubtitleId: String?
+  public var videoQualities: [VideoQualityOptionOut]
+  public var selectedVideoQualityId: String?
 
-  public init(audio: [TrackInfoOut], subtitles: [TrackInfoOut], selectedAudioId: String?, selectedSubtitleId: String?) {
+  public init(
+    audio: [TrackInfoOut],
+    subtitles: [TrackInfoOut],
+    selectedAudioId: String?,
+    selectedSubtitleId: String?,
+    videoQualities: [VideoQualityOptionOut] = [],
+    selectedVideoQualityId: String? = nil
+  ) {
     self.audio = audio
     self.subtitles = subtitles
     self.selectedAudioId = selectedAudioId
     self.selectedSubtitleId = selectedSubtitleId
+    self.videoQualities = videoQualities
+    self.selectedVideoQualityId = selectedVideoQualityId
   }
 
   public func toDictionary() -> [String: Any] {
-    [
+    var out: [String: Any] = [
       "audio": audio.map { $0.toDictionary() },
       "subtitles": subtitles.map { $0.toDictionary() },
       "selectedAudioId": selectedAudioId ?? NSNull(),
       "selectedSubtitleId": selectedSubtitleId ?? NSNull(),
     ]
+    if !videoQualities.isEmpty {
+      out["videoQualities"] = videoQualities.map { $0.toDictionary() }
+      out["selectedVideoQualityId"] = selectedVideoQualityId ?? NSNull()
+    }
+    return out
   }
 }
 
@@ -89,6 +105,7 @@ public struct TrackSelectionState: Equatable, Sendable {
 
   public private(set) var audioChoice: Choice?
   public private(set) var subtitleChoice: SubChoice = .default
+  public private(set) var videoQualityId: String?
   public private(set) var latestTracks: MediaTracksOut?
   public private(set) var lastEmitted: MediaTracksOut?
   private var audioReapplied = false
@@ -100,6 +117,7 @@ public struct TrackSelectionState: Equatable, Sendable {
   public mutating func onLoad(_ request: LoadRequest) {
     latestTracks = nil
     lastEmitted = nil
+    videoQualityId = nil
     audioReapplied = false
     subtitleReapplied = false
     subtitleOffApplied = false
@@ -145,6 +163,7 @@ public struct TrackSelectionState: Equatable, Sendable {
   public mutating func onStop() {
     audioChoice = nil
     subtitleChoice = .default
+    videoQualityId = nil
     latestTracks = nil
     lastEmitted = nil
     audioReapplied = false
@@ -210,6 +229,39 @@ public struct TrackSelectionState: Equatable, Sendable {
     return (streamId, false, nil)
   }
 
+  public mutating func selectVideoQuality(
+    _ id: String?
+  ) -> (valid: Bool, cap: VideoQualityCap?, immediateTracks: MediaTracksOut?) {
+    guard let id else {
+      videoQualityId = nil
+      guard var updated = latestTracks, !updated.videoQualities.isEmpty else {
+        return (true, nil, nil)
+      }
+      updated.selectedVideoQualityId = nil
+      latestTracks = updated
+      if updated != lastEmitted {
+        lastEmitted = updated
+        return (true, nil, updated)
+      }
+      return (true, nil, nil)
+    }
+
+    guard let cap = VideoQualityPolicy.resolveCap(for: id) else {
+      return (false, nil, nil)
+    }
+    videoQualityId = cap.id
+    guard var updated = latestTracks, !updated.videoQualities.isEmpty else {
+      return (true, cap, nil)
+    }
+    updated.selectedVideoQualityId = cap.id
+    latestTracks = updated
+    if updated != lastEmitted {
+      lastEmitted = updated
+      return (true, cap, updated)
+    }
+    return (true, cap, nil)
+  }
+
   public mutating func reconcile(
     observed: MediaTracksOut
   ) -> (toEmit: MediaTracksOut?, selectAudioStreamId: Int?, selectSubtitleStreamId: Int?, clearSubtitle: Bool) {
@@ -253,6 +305,12 @@ public struct TrackSelectionState: Equatable, Sendable {
           effective.selectedSubtitleId = resolved.id
         }
       }
+    }
+
+    if effective.videoQualities.isEmpty {
+      effective.selectedVideoQualityId = nil
+    } else if let chosenQuality = videoQualityId {
+      effective.selectedVideoQualityId = chosenQuality
     }
 
     latestTracks = effective

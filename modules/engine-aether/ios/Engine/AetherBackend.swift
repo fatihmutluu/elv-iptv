@@ -78,6 +78,9 @@ final class AetherBackend: PlayerBackend {
   var airPlayMonitor: AetherAirPlayMonitor?
   var osdClockThrottle = OsdClockThrottle(hiddenIntervalSeconds: 5.0, osdVisible: true)
   var requestedRate: Double = 1.0
+  var requestedAudioDelaySeconds: Double = 0
+  var requestedSubtitleDelaySeconds: Double = 0
+  var requestedVideoQualityCap: VideoQualityCap?
   var backgroundAudioEnabled = false
   var desiredMuted = false
   var desiredVolume: Float = 1.0
@@ -181,6 +184,7 @@ final class AetherBackend: PlayerBackend {
     gate.advance(to: gateGeneration)
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
+    resetSyncDelaysAndQualityOnEngine()
     engine?.stop(resetDisplayCriteria: false, finalTeardown: false)
     audioSessionController.deactivateIfOwned()
   }
@@ -351,6 +355,9 @@ final class AetherBackend: PlayerBackend {
     loggedRouteSerial = 0
     openedMsForSerial = nil
     requestedRate = 1.0
+    requestedAudioDelaySeconds = 0
+    requestedSubtitleDelaySeconds = 0
+    requestedVideoQualityCap = nil
     lastAVBufferReportedBuffering = false
     playbackActiveIntent = false
     lastDroppedVideoFrames = 0
@@ -402,6 +409,15 @@ final class AetherBackend: PlayerBackend {
       playbackActiveIntent = true
       audioSessionController.activateForPlayback()
       engine?.play()
+    }
+  }
+
+  private func resetSyncDelaysAndQualityOnEngine() {
+    engine?.setAudioDelay(0)
+    engine?.setSoftwareSubtitleDelay(0)
+    if let item = engine?.currentAVPlayer?.currentItem ?? engine?.currentAVPlayerItem {
+      item.preferredMaximumResolution = .zero
+      item.preferredPeakBitRate = 0
     }
   }
 

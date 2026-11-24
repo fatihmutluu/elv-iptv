@@ -17,7 +17,11 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 import type { AudioDeviceInfo, VideoResizeMode } from '../ports/video-host';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
 import { blurWebTarget, SettingsToggleRow, settingsRowStyle } from './PlayerSettingsRows';
-import type { SettingsMenuState, SettingsMenuView } from './settings-menu-nav';
+import {
+  formatSyncDelayMs,
+  type SettingsMenuState,
+  type SettingsMenuView,
+} from './settings-menu-nav';
 import { buildSettingsNavRows, buildSettingsRadioItems } from './settings-sheet-items';
 import type { SleepTimerSnapshot } from './sleep-timer';
 
@@ -45,6 +49,9 @@ export interface PlayerSettingsSheetProps {
   readonly sleepTimer?: SleepTimerSnapshot | undefined;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
+  readonly audioDelayMs?: number;
+  readonly subtitleDelayMs?: number;
+  readonly selectedVideoQualityId?: string | null;
   readonly qualityVariants?: readonly LiveVariantOption[];
   readonly activeQualityKey?: string;
   readonly androidDecoderMode?: AndroidDecoderMode;
@@ -54,6 +61,9 @@ export interface PlayerSettingsSheetProps {
   readonly onOpenView: (view: SettingsMenuView) => void;
   readonly onSelectAudio: (id: string) => void;
   readonly onSelectAudioDevice?: (name: string) => void;
+  readonly onAdjustAudioDelay?: (deltaMs: number, reset?: boolean) => void;
+  readonly onAdjustSubtitleDelay?: (deltaMs: number, reset?: boolean) => void;
+  readonly onSelectVideoQuality?: (id: string | null) => void;
   readonly onSelectQualityVariant?: (itemKey: string) => void;
   readonly onSelectSubtitle: (id: string | null) => void;
   readonly onSelectSpeed?: (rate: number) => void;
@@ -86,14 +96,25 @@ interface ToggleDescriptor {
   readonly onPress: () => void;
 }
 
-function resolveViewTitle(view: SettingsMenuView, i18n: AppI18n): string {
+function resolveViewTitle(
+  view: SettingsMenuView,
+  i18n: AppI18n,
+  audioDelayMs: number,
+  subtitleDelayMs: number,
+): string {
   switch (view) {
     case 'root':
       return i18n.t('player.settings');
     case 'subtitles':
       return i18n.t('player.subtitleTracks');
+    case 'audioDelay':
+      return `${i18n.t('player.audioDelay')} · ${formatSyncDelayMs(audioDelayMs)}`;
+    case 'subtitleDelay':
+      return `${i18n.t('player.subtitleDelay')} · ${formatSyncDelayMs(subtitleDelayMs)}`;
     case 'audioDevice':
       return i18n.t('player.audioDevice');
+    case 'videoQuality':
+      return i18n.t('player.videoQuality');
     case 'quality':
       return i18n.t('player.qualityVariant');
     case 'speed':
@@ -145,12 +166,18 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   const showAudioDevice =
     (props.audioDevices?.length ?? 0) > 0 && props.onSelectAudioDevice !== undefined;
   const activeAudioDevice = props.activeAudioDevice ?? 'auto';
+  const audioDelayMs = props.audioDelayMs ?? 0;
+  const subtitleDelayMs = props.subtitleDelayMs ?? 0;
+  const showAudioDelay = props.onAdjustAudioDelay !== undefined;
+  const showSubtitleDelay = props.onAdjustSubtitleDelay !== undefined;
+  const showVideoQuality =
+    (tracks.videoQualities?.length ?? 0) > 0 && props.onSelectVideoQuality !== undefined;
   const showVideoDecoder =
     props.androidDecoderMode !== undefined && props.onSelectAndroidDecoderMode !== undefined;
   const androidDecoderMode = props.androidDecoderMode ?? 'auto';
   const showSleepTimer = props.onSelectSleepTimer !== undefined;
   const isRoot = menuState.view === 'root';
-  const title = resolveViewTitle(menuState.view, i18n);
+  const title = resolveViewTitle(menuState.view, i18n, audioDelayMs, subtitleDelayMs);
 
   const navRows = isRoot
     ? buildSettingsNavRows(
@@ -170,6 +197,12 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
           sleepTimer: props.sleepTimer,
           qualityVariants: props.qualityVariants,
           activeQualityKey: props.activeQualityKey,
+          showAudioDelay,
+          audioDelayMs,
+          showSubtitleDelay,
+          subtitleDelayMs,
+          showVideoQuality,
+          selectedVideoQualityId: props.selectedVideoQualityId,
         },
       )
     : [];
@@ -345,6 +378,9 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         playbackSpeed,
         audioDevices: props.audioDevices,
         activeAudioDevice,
+        audioDelayMs,
+        subtitleDelayMs,
+        selectedVideoQualityId: props.selectedVideoQualityId,
         qualityVariants: props.qualityVariants,
         activeQualityKey: props.activeQualityKey,
         androidDecoderMode,
@@ -353,6 +389,9 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         i18n,
         onSelectAudio: props.onSelectAudio,
         onSelectAudioDevice: props.onSelectAudioDevice,
+        onAdjustAudioDelay: props.onAdjustAudioDelay,
+        onAdjustSubtitleDelay: props.onAdjustSubtitleDelay,
+        onSelectVideoQuality: props.onSelectVideoQuality,
         onSelectQualityVariant: props.onSelectQualityVariant,
         onSelectSubtitle: props.onSelectSubtitle,
         onSelectSpeed: props.onSelectSpeed,

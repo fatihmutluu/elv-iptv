@@ -4,7 +4,9 @@ import {
   inspectMpvTracks,
   mediaTracksEqual,
   parseAudioTrackCommand,
+  parseSecondarySubtitleTrackCommand,
   parseSubtitleTrackCommand,
+  parseVideoQualityCommand,
   resolveChoice,
   type TrackPreference,
   toPreference,
@@ -26,6 +28,10 @@ export interface TrackTracker {
   property(name: string, value: unknown): EngineEvent[];
   selectAudio(id: string): MpvCommand | undefined;
   selectSubtitle(id: string | null): MpvCommand | undefined;
+  selectSecondarySubtitle(id: string | null): MpvCommand | undefined;
+  selectVideoQuality(id: string | null): MpvCommand | undefined;
+  /** Emits an updated `tracks` snapshot if local selection state changed (e.g. manual video quality). */
+  sync(): EngineEvent[];
   /** Commands to re-apply saved audio/subtitle preferences once a reloaded file's tracks are ready. */
   reconcileCommands(): MpvCommand[];
 }
@@ -36,6 +42,8 @@ export function createTrackTracker(): TrackTracker {
   let rawTrackList: unknown;
   let aid: unknown = 'auto';
   let sid: unknown = 'auto';
+  let secondarySid: unknown = 'no';
+  let manualVideoQualityId: string | null = null;
   let lastEmitted: MediaTracks | undefined;
   let fileLoaded = false;
   let sentSidNo = false;
@@ -49,6 +57,8 @@ export function createTrackTracker(): TrackTracker {
     rawTrackList = undefined;
     aid = 'auto';
     sid = 'auto';
+    secondarySid = 'no';
+    manualVideoQualityId = null;
     lastEmitted = undefined;
     fileLoaded = false;
     sentSidNo = false;
@@ -57,7 +67,9 @@ export function createTrackTracker(): TrackTracker {
   };
 
   const currentTracks = (): MediaTracks | undefined =>
-    Array.isArray(rawTrackList) ? inspectMpvTracks(rawTrackList, aid, sid) : undefined;
+    Array.isArray(rawTrackList)
+      ? inspectMpvTracks(rawTrackList, aid, sid, secondarySid, manualVideoQualityId)
+      : undefined;
 
   const backfillMetadata = (snapshot: MediaTracks): void => {
     if (
@@ -139,7 +151,10 @@ export function createTrackTracker(): TrackTracker {
       if (name === 'track-list') rawTrackList = value;
       else if (name === 'aid') aid = value;
       else if (name === 'sid') sid = value;
-      else return [];
+      else if (name === 'secondary-sid') secondarySid = value;
+      else if (name === 'vid') {
+        if (value === 'auto' || value === false || value === 'no') manualVideoQualityId = null;
+      } else return [];
       return emitIfChanged();
     },
 
@@ -169,6 +184,27 @@ export function createTrackTracker(): TrackTracker {
         if (token !== undefined) subReconciled = true;
       }
       return cmd;
+    },
+
+    selectSecondarySubtitle(id) {
+      const cmd = parseSecondarySubtitleTrackCommand(id);
+      if (!cmd) return undefined;
+      const activePrimary =
+        currentTracks()?.selectedSubtitleId ??
+        (typeof sid === 'number' && Number.isInteger(sid) && sid > 0 ? `s:${sid}` : null);
+      if (id !== null && activePrimary !== null && id === activePrimary) return undefined;
+      return cmd;
+    },
+
+    selectVideoQuality(id) {
+      const cmd = parseVideoQualityCommand(id);
+      if (!cmd) return undefined;
+      manualVideoQualityId = id;
+      return cmd;
+    },
+
+    sync() {
+      return emitIfChanged();
     },
 
     reconcileCommands() {

@@ -39,6 +39,9 @@ function fakeNative(version = '7.66.1', model?: string) {
     setMediaMetadata: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
+    setAudioDelay: vi.fn(),
+    setSubtitleDelay: vi.fn(),
+    selectVideoQuality: vi.fn(),
     stop: vi.fn(),
     recreate: vi.fn(),
     release: vi.fn(),
@@ -187,6 +190,9 @@ describe('createAetherEngine', () => {
       recreate: true,
       audioTrackSelection: true,
       subtitleTrackSelection: true,
+      audioDelay: true,
+      subtitleDelay: true,
+      videoQualitySelection: true,
     });
     const events: EngineEvent[] = [];
     first?.subscribe((e) => events.push(e));
@@ -278,6 +284,31 @@ describe('createAetherEngine', () => {
     const { createAetherEngine } = await load();
     const engine = createAetherEngine();
     expect(engine?.setSpeed).toBeUndefined();
+  });
+
+  it('forwards setAudioDelay, setSubtitleDelay, and selectVideoQuality until released (#59)', async () => {
+    const native = fakeNative();
+    const { createAetherEngine } = await load();
+    const engine = createAetherEngine();
+    if (engine === null) throw new Error('engine expected');
+
+    engine.setAudioDelay?.(6, -150);
+    engine.setSubtitleDelay?.(6, 400);
+    engine.selectVideoQuality?.(7, '1080p');
+    engine.selectVideoQuality?.(8, null);
+
+    expect(native.engine.setAudioDelay).toHaveBeenCalledWith(6, -150);
+    expect(native.engine.setSubtitleDelay).toHaveBeenCalledWith(6, 400);
+    expect(native.engine.selectVideoQuality).toHaveBeenNthCalledWith(1, 7, '1080p');
+    expect(native.engine.selectVideoQuality).toHaveBeenNthCalledWith(2, 8, null);
+
+    engine.release();
+    engine.setAudioDelay?.(9, 100);
+    engine.setSubtitleDelay?.(9, 100);
+    engine.selectVideoQuality?.(9, '720p');
+    expect(native.engine.setAudioDelay).toHaveBeenCalledTimes(1);
+    expect(native.engine.setSubtitleDelay).toHaveBeenCalledTimes(1);
+    expect(native.engine.selectVideoQuality).toHaveBeenCalledTimes(2);
   });
 });
 

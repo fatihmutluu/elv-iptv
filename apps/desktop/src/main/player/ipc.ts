@@ -493,16 +493,30 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       case 'selectSubtitleTrack':
         engine.selectSubtitleTrack?.(command.attempt, command.id);
         break;
+      case 'selectSecondarySubtitleTrack':
+        engine.selectSecondarySubtitleTrack?.(command.attempt, command.id);
+        break;
+      case 'selectVideoQuality':
+        engine.selectVideoQuality?.(command.attempt, command.id);
+        break;
       case 'setVolume':
         entry.mediaState.volume = Math.max(0, Math.min(1, command.volume / 100));
         pushMediaState(engineId);
         engine.setVolume(command.volume);
         break;
       case 'setAudioDelay':
-        engine.setAudioDelay(command.delaySec);
+        if (command.attempt !== undefined) {
+          engine.setAudioDelay(command.attempt, command.delaySec * 1000);
+        } else {
+          engine.setAudioDelay(command.delaySec);
+        }
         break;
       case 'setSubtitleDelay':
-        engine.setSubtitleDelay(command.delaySec);
+        if (command.attempt !== undefined) {
+          engine.setSubtitleDelay(command.attempt, command.delaySec * 1000);
+        } else {
+          engine.setSubtitleDelay(command.delaySec);
+        }
         break;
       case 'setAudioDevice':
         engine.setAudioDevice(command.device);

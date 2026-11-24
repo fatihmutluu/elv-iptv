@@ -49,12 +49,28 @@ export interface TrackInfo {
   isDefault?: boolean;
 }
 
-/** Available audio and subtitle tracks for the open media, plus active selections (`null` = none / Off). */
+/** One selectable adaptive video rendition reported by the engine (`#59`). */
+export interface VideoQualityOption {
+  readonly id: string;
+  readonly label: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly bitrateBps?: number;
+  readonly fps?: number;
+}
+
+/** Available audio, subtitle, and adaptive video tracks for the open media (`null` = none / Off / Auto). */
 export interface MediaTracks {
   readonly audio: readonly TrackInfo[];
   readonly subtitles: readonly TrackInfo[];
   readonly selectedAudioId: string | null;
   readonly selectedSubtitleId: string | null;
+  /** Optional secondary subtitle track selection (`#239`, `#402`). */
+  readonly selectedSecondarySubtitleId?: string | null;
+  /** Selectable adaptive video renditions when the active stream offers multiple resolutions (`#59`). */
+  readonly videoQualities?: readonly VideoQualityOption[];
+  /** Selected video rendition ID, or `null` / `undefined` for automatic ABR (`#59`). */
+  readonly selectedVideoQualityId?: string | null;
 }
 
 /** Canonical empty track snapshot before tracks arrive or after `tune`/`stop`. */
@@ -165,6 +181,12 @@ export interface EngineCapabilities {
   recreate: boolean;
   audioTrackSelection: boolean;
   subtitleTrackSelection: boolean;
+  /** Engine supports live audio A/V sync delay offset (`#59`, `#203`, `#239`). */
+  audioDelay?: boolean;
+  /** Engine supports live subtitle timing delay offset (`#59`, `#203`, `#239`). */
+  subtitleDelay?: boolean;
+  /** Engine supports adaptive video resolution/rendition selection (`#59`). */
+  videoQualitySelection?: boolean;
 }
 
 /**
@@ -192,6 +214,14 @@ export interface PlayerEngine {
   setPitchLock?(attempt: AttemptToken, locked: boolean): void;
   selectAudioTrack?(attempt: AttemptToken, id: string): void;
   selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;
+  /** Selects a secondary subtitle track, or `null` to disable (`#239`, `#402`). */
+  selectSecondarySubtitleTrack?(attempt: AttemptToken, id: string | null): void;
+  /** Shifts audio timing relative to video in milliseconds (`[-30_000, 30_000]`, `#59`, `#203`, `#239`). */
+  setAudioDelay?(attempt: AttemptToken, delayMs: number): void;
+  /** Shifts subtitle cue timing in milliseconds (`[-30_000, 30_000]`, `#59`, `#203`, `#239`). */
+  setSubtitleDelay?(attempt: AttemptToken, delayMs: number): void;
+  /** Constrains or selects an adaptive video rendition ID, or `null` for automatic ABR (`#59`). */
+  selectVideoQuality?(attempt: AttemptToken, id: string | null): void;
   stop(attempt: AttemptToken): void;
   /**
    * Releases and rebuilds the native player instance, keeping the view and the surface. The new

@@ -30,6 +30,7 @@ internal class TrackSelectorBridge(
 
   private var audioChoice: TrackChoice? = null
   private var subtitleChoice: SubChoice = SubChoice.Default
+  private var videoQualityChoice: VideoQualityChoice? = null
   private var latestTracks: Tracks = Tracks.EMPTY
   private var lastEmitted: MediaTracksSnapshot? = null
   private var prepareEpoch = 0L
@@ -46,6 +47,7 @@ internal class TrackSelectorBridge(
     prepareEpoch += 1
     latestTracks = Tracks.EMPTY
     lastEmitted = null
+    videoQualityChoice = null
     audioChoice = request.audioTrackId?.let { wantedId ->
       audioChoice?.takeIf { it.id == wantedId } ?: TrackChoice(id = wantedId, language = null, label = null)
     }
@@ -73,6 +75,7 @@ internal class TrackSelectorBridge(
     prepareEpoch += 1
     audioChoice = null
     subtitleChoice = SubChoice.Default
+    videoQualityChoice = null
     latestTracks = Tracks.EMPTY
     lastEmitted = null
   }
@@ -82,6 +85,9 @@ internal class TrackSelectorBridge(
     val builder = player.trackSelectionParameters.buildUpon()
       .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
       .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+      .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+      .clearVideoSizeConstraints()
+      .setMaxVideoBitrate(Int.MAX_VALUE)
       .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
       .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitleChoice is SubChoice.Off)
       .setPreferredAudioLanguage(audioChoice?.language)
@@ -140,7 +146,14 @@ internal class TrackSelectorBridge(
           .build()
       }
       if (!latestTracks.isEmpty) {
-        emitIfChanged(inspectMediaTracks(latestTracks, textDisabled = true, ffmpegSupportsAudio = ffmpegSupportsAudio))
+        emitIfChanged(
+          inspectMediaTracks(
+            latestTracks,
+            textDisabled = true,
+            selectedVideoQualityId = videoQualityChoice?.id,
+            ffmpegSupportsAudio = ffmpegSupportsAudio,
+          )
+        )
       }
       return
     }
@@ -175,6 +188,74 @@ internal class TrackSelectorBridge(
     }
   }
 
+  /**
+   * Constrains adaptive video selection to rendition [id] in place without restarting playback, or clears
+   * video overrides and resolution/bitrate caps to restore automatic ABR when [id] is `null` (`#59`).
+   */
+  fun selectVideoQuality(player: ExoPlayer?, id: String?) {
+    if (id == null) {
+      videoQualityChoice = null
+      if (player != null) {
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+          .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+          .clearVideoSizeConstraints()
+          .setMaxVideoBitrate(Int.MAX_VALUE)
+          .build()
+      }
+      val tracks = activeTracks(player)
+      if (!tracks.isEmpty) {
+        val textDisabled = if (player != null) isTextEffectivelyDisabled(player) else isTextDisabled
+        emitIfChanged(
+          inspectMediaTracks(
+            tracks,
+            textDisabled = textDisabled,
+            selectedVideoQualityId = null,
+            ffmpegSupportsAudio = ffmpegSupportsAudio,
+          )
+        )
+      }
+      return
+    }
+
+    val tracks = activeTracks(player)
+    val candidates = videoQualityCandidatesOf(tracks)
+    val matched = candidates.firstOrNull { it.option.id == id }
+    if (!tracks.isEmpty && matched == null) return
+
+    val prev = videoQualityChoice?.takeIf { it.id == id }
+    videoQualityChoice = VideoQualityChoice(
+      id = id,
+      width = matched?.option?.width ?: prev?.width,
+      height = matched?.option?.height ?: prev?.height,
+      bitrateBps = matched?.option?.bitrateBps ?: prev?.bitrateBps,
+    )
+    if (player != null && matched != null) {
+      val builder = player.trackSelectionParameters.buildUpon()
+        .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+        .clearVideoSizeConstraints()
+        .setMaxVideoBitrate(Int.MAX_VALUE)
+        .addOverride(TrackSelectionOverride(matched.group.mediaTrackGroup, listOf(matched.trackIndex)))
+      val maxW = matched.option.width
+      val maxH = matched.option.height
+      if (maxW != null && maxH != null) {
+        builder.setMaxVideoSize(maxW, maxH)
+      }
+      matched.option.bitrateBps?.let { builder.setMaxVideoBitrate(it) }
+      player.trackSelectionParameters = builder.build()
+    }
+    if (!tracks.isEmpty && matched != null) {
+      val textDisabled = if (player != null) isTextEffectivelyDisabled(player) else isTextDisabled
+      emitIfChanged(
+        inspectMediaTracks(
+          tracks,
+          textDisabled = textDisabled,
+          selectedVideoQualityId = matched.option.id,
+          ffmpegSupportsAudio = ffmpegSupportsAudio,
+        )
+      )
+    }
+  }
+
   /** Handles Media3 `onTracksChanged`: ignores `Tracks.EMPTY`, reconciles saved choices and emits confirmed tracks. */
   fun onTracksChanged(player: ExoPlayer, tracks: Tracks) {
     if (tracks.isEmpty) return
@@ -184,6 +265,7 @@ internal class TrackSelectorBridge(
     var changedParams = false
     var targetAudioId: String? = null
     var targetSubtitleId: String? = null
+    var targetVideoQualityId: String? = null
 
     audioChoice?.let { wanted ->
       val target = resolveCandidate(tracks, C.TRACK_TYPE_AUDIO, wanted, ffmpegSupportsAudio)
@@ -226,6 +308,40 @@ internal class TrackSelectorBridge(
       SubChoice.Default -> Unit
     }
 
+    videoQualityChoice?.let { wantedQuality ->
+      val candidates = videoQualityCandidatesOf(tracks)
+      val target = resolveVideoQualityCandidate(candidates, wantedQuality)
+      if (target != null) {
+        videoQualityChoice = VideoQualityChoice(
+          id = target.option.id,
+          width = target.option.width,
+          height = target.option.height,
+          bitrateBps = target.option.bitrateBps,
+        )
+        targetVideoQualityId = target.option.id
+        val currentOverride = params.overrides[target.group.mediaTrackGroup]?.trackIndices
+        val expectedMaxWidth = target.option.width ?: Int.MAX_VALUE
+        val expectedMaxHeight = target.option.height ?: Int.MAX_VALUE
+        val expectedMaxBitrate = target.option.bitrateBps ?: Int.MAX_VALUE
+        if (
+          currentOverride != listOf(target.trackIndex) ||
+          params.maxVideoWidth != expectedMaxWidth ||
+          params.maxVideoHeight != expectedMaxHeight ||
+          params.maxVideoBitrate != expectedMaxBitrate
+        ) {
+          builder.clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+            .clearVideoSizeConstraints()
+            .setMaxVideoBitrate(Int.MAX_VALUE)
+            .addOverride(TrackSelectionOverride(target.group.mediaTrackGroup, listOf(target.trackIndex)))
+          if (target.option.width != null && target.option.height != null) {
+            builder.setMaxVideoSize(target.option.width, target.option.height)
+          }
+          target.option.bitrateBps?.let { builder.setMaxVideoBitrate(it) }
+          changedParams = true
+        }
+      }
+    }
+
     if (changedParams) {
       player.trackSelectionParameters = builder.build()
       if (player.mediaItemCount > 0 && player.playbackState != Player.STATE_IDLE) {
@@ -238,7 +354,12 @@ internal class TrackSelectorBridge(
     }
 
     val textDisabled = isTextEffectivelyDisabled(player)
-    val inspected = inspectMediaTracks(tracks, textDisabled = textDisabled, ffmpegSupportsAudio = ffmpegSupportsAudio)
+    val inspected = inspectMediaTracks(
+      tracks,
+      textDisabled = textDisabled,
+      selectedVideoQualityId = targetVideoQualityId ?: videoQualityChoice?.id,
+      ffmpegSupportsAudio = ffmpegSupportsAudio,
+    )
     val snapshot = if (changedParams) {
       inspected.copy(
         selectedAudioId = targetAudioId ?: inspected.selectedAudioId,
@@ -256,7 +377,12 @@ internal class TrackSelectorBridge(
     if (current.isEmpty) return
     latestTracks = current
     emitIfChanged(
-      inspectMediaTracks(current, textDisabled = isTextEffectivelyDisabled(player), ffmpegSupportsAudio = ffmpegSupportsAudio)
+      inspectMediaTracks(
+        current,
+        textDisabled = isTextEffectivelyDisabled(player),
+        selectedVideoQualityId = videoQualityChoice?.id,
+        ffmpegSupportsAudio = ffmpegSupportsAudio,
+      )
     )
   }
 

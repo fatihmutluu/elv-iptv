@@ -60,7 +60,9 @@ export interface EngineControls {
   toggleMute(): void;
   setSpeed(attempt: AttemptToken, rate: number): void;
   setVolume(volume: number): void;
+  setAudioDelay(attempt: AttemptToken, delayMs: number): void;
   setAudioDelay(delaySec: number): void;
+  setSubtitleDelay(attempt: AttemptToken, delayMs: number): void;
   setSubtitleDelay(delaySec: number): void;
   setAudioDevice(device: string): void;
   getDesiredAudioDevice(): string | undefined;
@@ -223,11 +225,31 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
       audioRamp.onUserVolume(volume);
       setProp('volume', volume);
     },
-    setAudioDelay(delaySec) {
-      if (Number.isFinite(delaySec)) setProp('audio-delay', delaySec);
+    setAudioDelay(attemptOrDelaySec: AttemptToken | number, maybeDelayMs?: number) {
+      if (deps.isReleased()) return;
+      if (maybeDelayMs !== undefined) {
+        if (!Number.isFinite(maybeDelayMs)) return;
+        deps.adopt(attemptOrDelaySec);
+        const clampedMs = Math.max(-30_000, Math.min(30_000, maybeDelayMs));
+        setProp('audio-delay', clampedMs / 1000);
+        return;
+      }
+      if (Number.isFinite(attemptOrDelaySec)) {
+        setProp('audio-delay', Math.max(-30, Math.min(30, attemptOrDelaySec)));
+      }
     },
-    setSubtitleDelay(delaySec) {
-      if (Number.isFinite(delaySec)) setProp('sub-delay', delaySec);
+    setSubtitleDelay(attemptOrDelaySec: AttemptToken | number, maybeDelayMs?: number) {
+      if (deps.isReleased()) return;
+      if (maybeDelayMs !== undefined) {
+        if (!Number.isFinite(maybeDelayMs)) return;
+        deps.adopt(attemptOrDelaySec);
+        const clampedMs = Math.max(-30_000, Math.min(30_000, maybeDelayMs));
+        setProp('sub-delay', clampedMs / 1000);
+        return;
+      }
+      if (Number.isFinite(attemptOrDelaySec)) {
+        setProp('sub-delay', Math.max(-30, Math.min(30, attemptOrDelaySec)));
+      }
     },
     setAudioDevice(device) {
       if (deps.isReleased() || device.length === 0) return;

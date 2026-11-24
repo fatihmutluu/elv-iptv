@@ -11,6 +11,7 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import java.lang.ref.WeakReference
 import java.util.Collections
 import kotlin.concurrent.thread
+import kotlin.math.roundToLong
 
 /**
  * Exposes the Media3 engine as the shared object class `Engine` with the player core spec 5.1 commands and
@@ -227,6 +228,18 @@ class ElvEngineMedia3Module : Module() {
 
       Function("selectSubtitleTrack") { engine: Media3Engine, attempt: Int, id: String? ->
         engine.selectSubtitleTrack(attempt, id)
+      }
+
+      Function("setAudioDelay") { engine: Media3Engine, attempt: Int, delayMs: Double ->
+        if (delayMs.isFinite()) engine.setAudioDelay(attempt, delayMs.roundToLong())
+      }
+
+      Function("setSubtitleDelay") { engine: Media3Engine, attempt: Int, delayMs: Double ->
+        if (delayMs.isFinite()) engine.setSubtitleDelay(attempt, delayMs.roundToLong())
+      }
+
+      Function("selectVideoQuality") { engine: Media3Engine, attempt: Int, id: String? ->
+        engine.selectVideoQuality(attempt, id)
       }
 
       Function("stop") { engine: Media3Engine, attempt: Int -> engine.stop(attempt) }

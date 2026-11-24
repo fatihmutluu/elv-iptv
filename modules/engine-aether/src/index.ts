@@ -82,6 +82,9 @@ interface RawInsets {
 interface AetherNativeEngineHandle extends NativeEngineHandle {
   setMuted?(muted: boolean): void;
   setVolume?(volume: number): void;
+  setAudioDelay?(attempt: number, delayMs: number): void;
+  setSubtitleDelay?(attempt: number, delayMs: number): void;
+  selectVideoQuality?(attempt: number, id: string | null): void;
   setBackgroundAudioEnabled?(enabled: boolean): void;
   setAllowDetachedSurface?(enabled: boolean): void;
   setMediaMetadata?(metadata: AetherMediaMetadata | null): void;
@@ -217,6 +220,9 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   recreate: true,
   audioTrackSelection: true,
   subtitleTrackSelection: true,
+  audioDelay: true,
+  subtitleDelay: true,
+  videoQualitySelection: true,
 });
 
 /** The native shared object behind each live engine this module created; `AetherSurface` binds its view to it. */
@@ -415,9 +421,32 @@ function wrap(module: NativeEngineModule): PlayerEngine {
     uptimeMs: () => module.uptimeMs(),
     now: () => performance.now(),
   });
+  let released = false;
   const engine: PlayerEngine = {
     ...bridged,
+    ...(bridged.setAudioDelay === undefined && native.setAudioDelay !== undefined
+      ? {
+          setAudioDelay(attempt, delayMs) {
+            if (!released) native.setAudioDelay?.(attempt, delayMs);
+          },
+        }
+      : {}),
+    ...(bridged.setSubtitleDelay === undefined && native.setSubtitleDelay !== undefined
+      ? {
+          setSubtitleDelay(attempt, delayMs) {
+            if (!released) native.setSubtitleDelay?.(attempt, delayMs);
+          },
+        }
+      : {}),
+    ...(bridged.selectVideoQuality === undefined && native.selectVideoQuality !== undefined
+      ? {
+          selectVideoQuality(attempt, id) {
+            if (!released) native.selectVideoQuality?.(attempt, id);
+          },
+        }
+      : {}),
     release() {
+      released = true;
       handles.delete(engine);
       bridged.release();
     },

@@ -31,6 +31,7 @@ import { usePlayerCinemaExtras } from './usePlayerCinemaExtras';
 import { usePlayerControls } from './usePlayerControls';
 import { usePlayerNowNext } from './usePlayerNowNext';
 import { usePlayerSession } from './usePlayerSession';
+import { usePlayerSyncAndQuality } from './usePlayerSyncAndQuality';
 import { usePlayerTargetHandoff } from './usePlayerTargetHandoff';
 import {
   useAndroidDecoderModeSync,
@@ -149,21 +150,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const nextEpisode = useNextEpisodeResolver({ catalog, activeTarget });
   resolvedNextEpisodeRef.current = nextEpisode;
 
-  const {
-    sessionState,
-    activeService,
-    status,
-    tracks,
-    videoInfo,
-    chapters,
-    surfaceRecreationToken,
-    inPip,
-    isFullscreen,
-    alwaysOnTop,
-    overlayMode,
-    audioDevices,
-    activeAudioDevice,
-  } = usePlayerSession({
+  const session = usePlayerSession({
     videoHost,
     activeTarget,
     isDesktop,
@@ -181,6 +168,9 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onExitRef,
     onServiceReady: handoff.onServiceReady,
   });
+  const { sessionState, activeService, status, tracks, videoInfo, chapters } = session;
+  const { surfaceRecreationToken, inPip, isFullscreen, alwaysOnTop, overlayMode } = session;
+  const { audioDevices, activeAudioDevice, audioDelayMs, subtitleDelayMs } = session;
 
   const { flushProgress, flushEndedProgress } = useWatchProgressSync({
     activeTarget,
@@ -218,6 +208,16 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   }, [activeTarget.itemKey]);
 
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
+  const syncAndQuality = usePlayerSyncAndQuality({
+    activeTarget,
+    tracks,
+    openedEngine,
+    audioDelayMs,
+    subtitleDelayMs,
+    selectedVideoQualityId: session.selectedVideoQualityId,
+    serviceRef,
+    catalogRef,
+  });
   const { isGaplessArmed } = useGaplessEpisodeQueue({
     activeTarget,
     nextEpisode,
@@ -321,6 +321,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onJumpPreviousChannel: handoff.handleJumpPreviousChannel,
     qualityVariants: quality.variants,
     onSelectQualityVariant: quality.selectVariant,
+    ...syncAndQuality.controlsProps,
     onJumpToChannel: jumpToChannel,
     onToggleFullscreen: hostToggleFullscreen,
     onToggleAlwaysOnTop: hostToggleAlwaysOnTop,
@@ -381,6 +382,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     preferredSubtitleLanguages,
     preferDefaultAudioTrack,
     subtitleMode,
+    statusKind: status.kind,
     onHydratedResizeMode: (mode) => {
       setResizeModeRef.current(mode, false);
       openedEngine?.setResizeMode?.(mode);
@@ -620,6 +622,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       onToggleSleepTimerAction={extras.toggleSleepTimerAction}
       statsVisible={controls.statsVisible}
       {...quality.sheetProps}
+      {...syncAndQuality.sheetProps}
       {...(hostSetAudioDevice !== undefined
         ? { audioDevices, activeAudioDevice, onSelectAudioDevice: selectAudioDevice }
         : {})}

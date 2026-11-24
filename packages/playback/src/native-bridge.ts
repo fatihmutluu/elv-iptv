@@ -6,7 +6,9 @@ import type {
   EngineEvent,
   LoadCommand,
   MediaKind,
+  MediaTracks,
   PlayerEngine,
+  VideoQualityOption,
 } from './engine';
 
 /** The `load` argument of a native engine shared object: a flattened {@link LoadCommand}. */
@@ -37,6 +39,10 @@ export interface NativeEngineHandle {
   setSpeed?(attempt: AttemptToken, rate: number): void;
   selectAudioTrack?(attempt: AttemptToken, id: string): void;
   selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;
+  selectSecondarySubtitleTrack?(attempt: AttemptToken, id: string | null): void;
+  setAudioDelay?(attempt: AttemptToken, delayMs: number): void;
+  setSubtitleDelay?(attempt: AttemptToken, delayMs: number): void;
+  selectVideoQuality?(attempt: AttemptToken, id: string | null): void;
   stop(attempt: AttemptToken): void;
   recreate(attempt: AttemptToken): void;
   release(): void;
@@ -67,6 +73,65 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
     ...(options?.audioTrackId === undefined ? {} : { audioTrackId: options.audioTrackId }),
     ...(options?.subtitleTrackId === undefined ? {} : { subtitleTrackId: options.subtitleTrackId }),
   };
+}
+
+const positiveFinite = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+
+const nonEmptyStringOrNull = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim().length > 0 ? value : null;
+
+function normalizeVideoQualities(raw: unknown): readonly VideoQualityOption[] {
+  if (!Array.isArray(raw)) return [];
+  const out: VideoQualityOption[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const candidate = item as Record<string, unknown>;
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+    const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
+    if (id.length === 0 || label.length === 0) continue;
+    const width = positiveFinite(candidate.width);
+    const height = positiveFinite(candidate.height);
+    const bitrateBps = positiveFinite(candidate.bitrateBps);
+    const fps = positiveFinite(candidate.fps);
+    out.push({
+      id,
+      label,
+      ...(width === undefined ? {} : { width }),
+      ...(height === undefined ? {} : { height }),
+      ...(bitrateBps === undefined ? {} : { bitrateBps }),
+      ...(fps === undefined ? {} : { fps }),
+    });
+  }
+  return out;
+}
+
+function normalizeTracksEvent(event: EngineEvent): EngineEvent {
+  if (event.type !== 'tracks') return event;
+  const raw = event.tracks;
+  if (
+    raw.videoQualities === undefined &&
+    raw.selectedVideoQualityId === undefined &&
+    raw.selectedSecondarySubtitleId === undefined
+  ) {
+    return event;
+  }
+  const normalized: MediaTracks = {
+    audio: raw.audio,
+    subtitles: raw.subtitles,
+    selectedAudioId: raw.selectedAudioId,
+    selectedSubtitleId: raw.selectedSubtitleId,
+    ...(raw.selectedSecondarySubtitleId === undefined
+      ? {}
+      : { selectedSecondarySubtitleId: nonEmptyStringOrNull(raw.selectedSecondarySubtitleId) }),
+    ...(raw.videoQualities === undefined
+      ? {}
+      : { videoQualities: normalizeVideoQualities(raw.videoQualities) }),
+    ...(raw.selectedVideoQualityId === undefined
+      ? {}
+      : { selectedVideoQualityId: nonEmptyStringOrNull(raw.selectedVideoQualityId) }),
+  };
+  return { ...event, tracks: normalized };
 }
 
 function mapEventClock(event: EngineEvent, uptimeMs: () => number, now: () => number): EngineEvent {
@@ -108,7 +173,7 @@ export function bridgeNativeEngine(
       if (silenced) return;
       if (hasCommand && event.attempt !== activeAttempt) return;
     }
-    const mapped = mapEventClock(event, opts.uptimeMs, opts.now);
+    const mapped = normalizeTracksEvent(mapEventClock(event, opts.uptimeMs, opts.now));
     for (const listener of [...listeners]) {
       try {
         listener(mapped);
@@ -181,6 +246,38 @@ export function bridgeNativeEngine(
           selectSubtitleTrack: command((attempt: AttemptToken, id: string | null) => {
             adoptAttempt(attempt);
             native.selectSubtitleTrack?.(attempt, id);
+          }),
+        }),
+    ...(native.selectSecondarySubtitleTrack === undefined
+      ? {}
+      : {
+          selectSecondarySubtitleTrack: command((attempt: AttemptToken, id: string | null) => {
+            adoptAttempt(attempt);
+            native.selectSecondarySubtitleTrack?.(attempt, id);
+          }),
+        }),
+    ...(native.setAudioDelay === undefined
+      ? {}
+      : {
+          setAudioDelay: command((attempt: AttemptToken, delayMs: number) => {
+            adoptAttempt(attempt);
+            native.setAudioDelay?.(attempt, delayMs);
+          }),
+        }),
+    ...(native.setSubtitleDelay === undefined
+      ? {}
+      : {
+          setSubtitleDelay: command((attempt: AttemptToken, delayMs: number) => {
+            adoptAttempt(attempt);
+            native.setSubtitleDelay?.(attempt, delayMs);
+          }),
+        }),
+    ...(native.selectVideoQuality === undefined
+      ? {}
+      : {
+          selectVideoQuality: command((attempt: AttemptToken, id: string | null) => {
+            adoptAttempt(attempt);
+            native.selectVideoQuality?.(attempt, id);
           }),
         }),
     stop: command((attempt: AttemptToken) => {

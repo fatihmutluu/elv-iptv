@@ -31,6 +31,7 @@ import {
   replyEntryId,
   TRACK_PROPERTIES,
 } from './session-constants.ts';
+import { parseMpvDelayMs } from './track-snapshot.ts';
 import type { TrackTracker } from './tracks.ts';
 
 /** Media request bound to an attempt slot. */
@@ -75,6 +76,8 @@ export interface LiveSession {
   appliedDeinterlaceMode?: DeinterlaceMode;
   appliedPitchLock?: boolean;
   appliedAudioNormalization?: boolean;
+  audioDelayMs?: number;
+  subtitleDelayMs?: number;
   inFlight?: MediaSlot;
   inFlightQueued?: QueuedMediaSlot;
   readonly endWaiters: Set<{ id: number; done(ended: boolean): void }>;
@@ -112,6 +115,9 @@ export interface LiveSessionHooks {
   getDesiredDeinterlaceMode?(): DeinterlaceMode | undefined;
   getDesiredPitchLock?(): boolean | undefined;
   getDesiredAudioNormalization?(): boolean | undefined;
+  getDesiredAudioDelayMs?(): number;
+  getDesiredSubtitleDelayMs?(): number;
+  getDesiredVideoQualityId?(): string | null;
   isSpdifPassthroughActive?(): boolean;
   readaheadStore?: ReadaheadTierStore;
 }
@@ -255,6 +261,29 @@ export function createSessionController(hooks: LiveSessionHooks) {
         if (isActive(L, L.entries.current()?.entryId)) {
           tracks.onFileLoaded();
           queueReconcile(L);
+          const media = hooks.getMedia();
+          const desiredAudioDelayMs = hooks.getDesiredAudioDelayMs?.() ?? 0;
+          if (desiredAudioDelayMs !== 0) {
+            hooks.enqueueCommand(
+              ['set_property', 'audio-delay', desiredAudioDelayMs / 1000],
+              media,
+            );
+          }
+          const desiredSubtitleDelayMs = hooks.getDesiredSubtitleDelayMs?.() ?? 0;
+          if (desiredSubtitleDelayMs !== 0) {
+            hooks.enqueueCommand(
+              ['set_property', 'sub-delay', desiredSubtitleDelayMs / 1000],
+              media,
+            );
+          }
+          const desiredVideoQualityId = hooks.getDesiredVideoQualityId?.() ?? null;
+          if (desiredVideoQualityId !== null) {
+            const qualityCmd = tracks.selectVideoQuality(desiredVideoQualityId);
+            if (qualityCmd) {
+              hooks.enqueueCommand(qualityCmd, media);
+              fromCurrent(L, tracks.sync());
+            }
+          }
         }
         return;
       case 'playback-restart':
@@ -282,11 +311,22 @@ export function createSessionController(hooks: LiveSessionHooks) {
           L.audioDevices.onDeviceList(e['data']);
           return;
         }
+        if (name === 'audio-delay') {
+          L.audioDelayMs = parseMpvDelayMs(e['data']);
+          return;
+        }
+        if (name === 'sub-delay') {
+          L.subtitleDelayMs = parseMpvDelayMs(e['data']);
+          return;
+        }
         if (TRACK_PROPERTIES.has(name)) {
           fromCurrent(L, tracks.property(name, e['data']));
           if (name === 'track-list') fromCurrent(L, L.deriver.property(name, e['data']));
           if (!opening.isOpening()) queueReconcile(L);
           return;
+        }
+        if (name === 'vid') {
+          fromCurrent(L, tracks.property(name, e['data']));
         }
         if (OBSERVED_PROPERTY_NAMES.has(name)) {
           fromCurrent(L, L.deriver.property(name, e['data']));

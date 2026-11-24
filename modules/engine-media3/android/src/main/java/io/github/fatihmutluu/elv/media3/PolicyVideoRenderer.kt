@@ -8,11 +8,13 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
 import androidx.media3.exoplayer.video.VideoRendererEventListener
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 
 private const val AMLOGIC_MIN_MAX_WIDTH = 1920
 private const val AMLOGIC_MIN_MAX_HEIGHT = 1089
@@ -229,10 +231,20 @@ internal fun createRenderersFactory(
   preferHevcOverDolbyVision: Boolean = false,
   deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
   decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
+  audioDelayUs: AtomicLong = AtomicLong(0L),
 ): DefaultRenderersFactory {
   FfmpegAudio.ensureConfigured()
   val appContext = context.applicationContext ?: context
   return object : DefaultRenderersFactory(context) {
+    override fun buildAudioSink(
+      context: Context,
+      enableFloatOutput: Boolean,
+      enableAudioTrackPlaybackParams: Boolean,
+    ): AudioSink? {
+      val base = super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams) ?: return null
+      return OffsetForwardingAudioSink(base, audioDelayUs)
+    }
+
     override fun buildVideoRenderers(
       context: Context,
       extensionRendererMode: Int,

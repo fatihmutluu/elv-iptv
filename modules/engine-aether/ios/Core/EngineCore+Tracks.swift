@@ -31,6 +31,52 @@ extension EngineCore {
     }
   }
 
+  /// Shifts audio timing relative to video in milliseconds (`[-30_000, 30_000]`, `#59`).
+  public func setAudioDelay(_ attempt: Int, delayMs: Double) {
+    guard !released else { return }
+    adopt(attempt)
+    let seconds = SyncDelayPolicy.delaySeconds(fromMs: delayMs)
+    audioDelaySeconds = seconds
+    guard active else { return }
+    backend.setAudioDelay(seconds)
+  }
+
+  /// Shifts subtitle cue timing in milliseconds (`[-30_000, 30_000]`, `#59`).
+  public func setSubtitleDelay(_ attempt: Int, delayMs: Double) {
+    guard !released else { return }
+    adopt(attempt)
+    let seconds = SyncDelayPolicy.delaySeconds(fromMs: delayMs)
+    subtitleDelaySeconds = seconds
+    guard active else { return }
+    backend.setSubtitleDelay(seconds)
+  }
+
+  /// Constrains adaptive HLS resolution ceiling, or restores automatic ABR when `id` is `nil` (`#59`).
+  public func selectVideoQuality(_ attempt: Int, id: String?) {
+    guard !released else { return }
+    adopt(attempt)
+    let outcome = trackState.selectVideoQuality(id)
+    guard outcome.valid else { return }
+    if active {
+      backend.selectVideoQuality(outcome.cap)
+      if let immediate = outcome.immediateTracks {
+        emit(.tracks(attempt: token, tracks: immediate))
+      }
+    }
+  }
+
+  func reapplySessionSyncAndQuality() {
+    if audioDelaySeconds != 0 {
+      backend.setAudioDelay(audioDelaySeconds)
+    }
+    if subtitleDelaySeconds != 0 {
+      backend.setSubtitleDelay(subtitleDelaySeconds)
+    }
+    if let cap = VideoQualityPolicy.resolveCap(for: trackState.videoQualityId) {
+      backend.selectVideoQuality(cap)
+    }
+  }
+
   func configuredLoadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoadOptions {
     var options = loadOptions(for: plan, request: request)
     if dolbyVisionFallbackLatched {

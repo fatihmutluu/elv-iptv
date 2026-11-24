@@ -1925,3 +1925,18 @@ msgstr "Cinematic"
 
 msgid "epg.noInfoGap"
 msgstr "No info"
+
+msgid "player.audioDelay"
+msgstr "Audio delay"
+
+msgid "player.subtitleDelay"
+msgstr "Subtitle delay"
+
+msgid "player.videoQuality"
+msgstr "Video quality"
+
+msgid "player.videoQualityAuto"
+msgstr "Auto"
+
+msgid "player.delayReset"
+msgstr "Reset (0 ms)"

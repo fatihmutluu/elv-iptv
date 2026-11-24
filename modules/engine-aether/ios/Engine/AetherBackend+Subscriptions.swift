@@ -369,6 +369,7 @@ extension AetherBackend {
     guard self.engine === target, engineLoadSerial > 0 else { return }
     refreshSubtitleGeometry(from: target)
     guard let item else { return }
+    applyVideoQualityCap(to: item)
     updateSubtitleClockSubscription(
       target: target,
       cues: target.subtitleCues,

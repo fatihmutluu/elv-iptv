@@ -697,4 +697,9 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'settings.epgRowDensityComfortable': 'Rahat',
   'settings.epgRowDensityCinematic': 'Sinematik',
   'epg.noInfoGap': 'Bilgi yok',
+  'player.audioDelay': 'Ses gecikmesi',
+  'player.subtitleDelay': 'Altyazı gecikmesi',
+  'player.videoQuality': 'Video kalitesi',
+  'player.videoQualityAuto': 'Otomatik',
+  'player.delayReset': 'Sıfırla (0 ms)',
 };

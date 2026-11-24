@@ -33,6 +33,9 @@ interface PlaybackUiSlice {
   readonly chapters: readonly ChapterInfo[] | undefined;
   readonly droppedFrames: number | undefined;
   readonly surfaceRecreationToken: number;
+  readonly audioDelayMs: number;
+  readonly subtitleDelayMs: number;
+  readonly selectedVideoQualityId: string | null;
 }
 
 const OPENING_STATUS: PlaybackStatus = { kind: 'tuning' };
@@ -43,6 +46,9 @@ const OPENING_PLAYBACK_SLICE: PlaybackUiSlice = {
   chapters: undefined,
   droppedFrames: undefined,
   surfaceRecreationToken: 0,
+  audioDelayMs: 0,
+  subtitleDelayMs: 0,
+  selectedVideoQualityId: null,
 };
 
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
@@ -300,7 +306,13 @@ export function usePlayerSession(params: {
       chapters: ch,
       droppedFrames: df,
       surfaceRecreationToken: token,
+      audioDelayMs: rawAudioDelay,
+      subtitleDelayMs: rawSubDelay,
+      selectedVideoQualityId: rawQualityId,
     } = activeService.getState();
+    const audioDelayMs = rawAudioDelay ?? 0;
+    const subtitleDelayMs = rawSubDelay ?? 0;
+    const selectedVideoQualityId = rawQualityId ?? tr.selectedVideoQualityId ?? null;
     const prev = sliceRef.current;
     if (
       prev.status === st &&
@@ -308,7 +320,10 @@ export function usePlayerSession(params: {
       prev.videoInfo === vi &&
       prev.chapters === ch &&
       prev.droppedFrames === df &&
-      prev.surfaceRecreationToken === token
+      prev.surfaceRecreationToken === token &&
+      prev.audioDelayMs === audioDelayMs &&
+      prev.subtitleDelayMs === subtitleDelayMs &&
+      prev.selectedVideoQualityId === selectedVideoQualityId
     ) {
       return prev;
     }
@@ -319,11 +334,23 @@ export function usePlayerSession(params: {
       chapters: ch,
       droppedFrames: df,
       surfaceRecreationToken: token,
+      audioDelayMs,
+      subtitleDelayMs,
+      selectedVideoQualityId,
     };
     return sliceRef.current;
   }, [activeService]);
-  const { status, tracks, videoInfo, chapters, droppedFrames, surfaceRecreationToken } =
-    useSyncExternalStore(subscribePlayback, getPlaybackSnapshot, getPlaybackSnapshot);
+  const {
+    status,
+    tracks,
+    videoInfo,
+    chapters,
+    droppedFrames,
+    surfaceRecreationToken,
+    audioDelayMs,
+    subtitleDelayMs,
+    selectedVideoQualityId,
+  } = useSyncExternalStore(subscribePlayback, getPlaybackSnapshot, getPlaybackSnapshot);
 
   return {
     sessionState,
@@ -334,6 +361,9 @@ export function usePlayerSession(params: {
     chapters,
     droppedFrames,
     surfaceRecreationToken,
+    audioDelayMs,
+    subtitleDelayMs,
+    selectedVideoQualityId,
     inPip,
     isFullscreen,
     alwaysOnTop,

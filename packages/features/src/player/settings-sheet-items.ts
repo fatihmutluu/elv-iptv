@@ -1,14 +1,16 @@
 import type { LiveVariantOption } from '@elv/data';
 import { ANDROID_DECODER_MODES, type AndroidDecoderMode, type SleepTimerAction } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
-import type { ChapterInfo, MediaTracks, TrackInfo } from '@elv/playback';
+import type { ChapterInfo, MediaTracks, TrackInfo, VideoQualityOption } from '@elv/playback';
 import type { IconName } from '@elv/ui-kit';
 import type { AudioDeviceInfo } from '../ports/video-host';
 import {
   formatPlaybackSpeed,
+  formatSyncDelayMs,
   normalizeAudioDeviceChoices,
   PLAYBACK_SPEED_OPTIONS,
   type SettingsMenuView,
+  SYNC_DELAY_STEP_ACTIONS,
 } from './settings-menu-nav';
 import { SLEEP_TIMER_PRESETS_MIN, type SleepTimerSnapshot } from './sleep-timer';
 import { formatTrackLabel } from './track-labels';
@@ -62,6 +64,30 @@ function formatVideoDecoderLabel(mode: AndroidDecoderMode, i18n: AppI18n): strin
   return i18n.t('settings.playback.videoDecoder.auto');
 }
 
+function formatVideoQualityLabel(option: VideoQualityOption): string {
+  const parts: string[] = [option.label];
+  if (option.fps !== undefined && Number.isFinite(option.fps) && option.fps > 0) {
+    parts.push(`${Math.round(option.fps)} fps`);
+  }
+  if (
+    option.bitrateBps !== undefined &&
+    Number.isFinite(option.bitrateBps) &&
+    option.bitrateBps > 0
+  ) {
+    parts.push(
+      option.bitrateBps >= 1_000_000
+        ? `${(option.bitrateBps / 1_000_000).toFixed(1)} Mbps`
+        : `${Math.round(option.bitrateBps / 1_000)} kbps`,
+    );
+  }
+  return parts.join(' · ');
+}
+
+function syncDelayStepTestId(prefix: string, step: number): string {
+  if (step === 0) return `${prefix}-reset`;
+  return step > 0 ? `${prefix}-plus-${step}` : `${prefix}-minus-${Math.abs(step)}`;
+}
+
 /** Builds ordered root navigation rows for `PlayerSettingsSheet`. */
 export function buildSettingsNavRows(
   tracks: MediaTracks,
@@ -83,6 +109,12 @@ export function buildSettingsNavRows(
     readonly sleepTimer?: SleepTimerSnapshot | undefined;
     readonly qualityVariants?: readonly LiveVariantOption[] | undefined;
     readonly activeQualityKey?: string | undefined;
+    readonly showAudioDelay?: boolean | undefined;
+    readonly audioDelayMs?: number | undefined;
+    readonly showSubtitleDelay?: boolean | undefined;
+    readonly subtitleDelayMs?: number | undefined;
+    readonly showVideoQuality?: boolean | undefined;
+    readonly selectedVideoQualityId?: string | null | undefined;
   },
 ): readonly SettingsNavRow[] {
   const subSummary = activeTrackSummary(
@@ -115,6 +147,26 @@ export function buildSettingsNavRows(
       false,
     ],
   ];
+  if (extras?.showAudioDelay === true) {
+    rows.push([
+      'player-settings-row-audio-delay',
+      'audio',
+      i18n.t('player.audioDelay'),
+      formatSyncDelayMs(extras.audioDelayMs ?? 0),
+      'audioDelay',
+      true,
+    ]);
+  }
+  if (extras?.showSubtitleDelay === true) {
+    rows.push([
+      'player-settings-row-subtitle-delay',
+      'subtitles',
+      i18n.t('player.subtitleDelay'),
+      formatSyncDelayMs(extras.subtitleDelayMs ?? 0),
+      'subtitleDelay',
+      true,
+    ]);
+  }
   if (audioDevice?.show === true) {
     rows.push([
       'player-settings-row-audio-device',
@@ -123,6 +175,27 @@ export function buildSettingsNavRows(
       activeAudioDeviceSummary(audioDevice.devices, audioDevice.activeDevice, i18n),
       'audioDevice',
       false,
+    ]);
+  }
+  const videoQualities = tracks.videoQualities;
+  if (
+    extras?.showVideoQuality === true &&
+    videoQualities !== undefined &&
+    videoQualities.length > 0
+  ) {
+    const activeQualityId =
+      extras.selectedVideoQualityId !== undefined
+        ? extras.selectedVideoQualityId
+        : (tracks.selectedVideoQualityId ?? null);
+    const activeOption =
+      activeQualityId !== null ? videoQualities.find((q) => q.id === activeQualityId) : undefined;
+    rows.push([
+      'player-settings-row-video-quality',
+      'layers',
+      i18n.t('player.videoQuality'),
+      activeOption?.label ?? i18n.t('player.videoQualityAuto'),
+      'videoQuality',
+      true,
     ]);
   }
   const qualityVariants = extras?.qualityVariants;
@@ -198,11 +271,17 @@ export function buildSettingsRadioItems(params: {
   androidDecoderMode?: AndroidDecoderMode | undefined;
   qualityVariants?: readonly LiveVariantOption[] | undefined;
   activeQualityKey?: string | undefined;
+  audioDelayMs?: number | undefined;
+  subtitleDelayMs?: number | undefined;
+  selectedVideoQualityId?: string | null | undefined;
   chapters?: readonly ChapterInfo[] | undefined;
   sleepTimer?: SleepTimerSnapshot | undefined;
   i18n: AppI18n;
   onSelectAudio: (id: string) => void;
   onSelectAudioDevice?: ((name: string) => void) | undefined;
+  onAdjustAudioDelay?: ((deltaMs: number, reset?: boolean) => void) | undefined;
+  onAdjustSubtitleDelay?: ((deltaMs: number, reset?: boolean) => void) | undefined;
+  onSelectVideoQuality?: ((id: string | null) => void) | undefined;
   onSelectQualityVariant?: ((itemKey: string) => void) | undefined;
   onSelectSubtitle: (id: string | null) => void;
   onSelectSpeed?: ((rate: number) => void) | undefined;
@@ -220,11 +299,17 @@ export function buildSettingsRadioItems(params: {
     androidDecoderMode = 'auto',
     qualityVariants = [],
     activeQualityKey,
+    audioDelayMs = 0,
+    subtitleDelayMs = 0,
+    selectedVideoQualityId,
     chapters = [],
     sleepTimer,
     i18n,
     onSelectAudio,
     onSelectAudioDevice,
+    onAdjustAudioDelay,
+    onAdjustSubtitleDelay,
+    onSelectVideoQuality,
     onSelectQualityVariant,
     onSelectSubtitle,
     onSelectSpeed,
@@ -234,6 +319,43 @@ export function buildSettingsRadioItems(params: {
     onSelectAndroidDecoderMode,
   } = params;
 
+  if (view === 'audioDelay' || view === 'subtitleDelay') {
+    const isAudio = view === 'audioDelay';
+    const currentDelay = isAudio ? audioDelayMs : subtitleDelayMs;
+    const prefix = isAudio ? 'player-settings-audio-delay' : 'player-settings-subtitle-delay';
+    const onAdjust = isAudio ? onAdjustAudioDelay : onAdjustSubtitleDelay;
+    return SYNC_DELAY_STEP_ACTIONS.map((step) => ({
+      key: `${view}-${step}`,
+      testID: syncDelayStepTestId(prefix, step),
+      label: step === 0 ? i18n.t('player.delayReset') : formatSyncDelayMs(step),
+      selected: step === 0 && currentDelay === 0,
+      tabular: true,
+      onPress: () => onAdjust?.(step, step === 0),
+    }));
+  }
+  if (view === 'videoQuality') {
+    const activeId =
+      selectedVideoQualityId !== undefined
+        ? selectedVideoQualityId
+        : (tracks.selectedVideoQualityId ?? null);
+    return [
+      {
+        key: 'auto',
+        testID: 'player-settings-video-quality-auto',
+        label: i18n.t('player.videoQualityAuto'),
+        selected: activeId === null,
+        onPress: () => onSelectVideoQuality?.(null),
+      },
+      ...(tracks.videoQualities ?? []).map((option) => ({
+        key: option.id,
+        testID: `player-settings-video-quality-${option.id}`,
+        label: formatVideoQualityLabel(option),
+        selected: activeId === option.id,
+        tabular: true,
+        onPress: () => onSelectVideoQuality?.(option.id),
+      })),
+    ];
+  }
   if (view === 'quality') {
     return qualityVariants.map((variant) => ({
       key: variant.key,

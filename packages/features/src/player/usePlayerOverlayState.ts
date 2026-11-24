@@ -51,6 +51,13 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const hasAudioDevice = params.hasAudioDevice === true;
   const audioDevices = params.audioDevices;
   const activeAudioDevice = params.activeAudioDevice;
+  const hasAudioDelay = params.hasAudioDelay === true;
+  const audioDelayMs = params.audioDelayMs;
+  const hasSubtitleDelay = params.hasSubtitleDelay === true;
+  const subtitleDelayMs = params.subtitleDelayMs;
+  const hasVideoQuality =
+    params.hasVideoQuality === true && (tracks.videoQualities?.length ?? 0) > 0;
+  const selectedVideoQualityId = params.selectedVideoQualityId;
   const qualityVariants = params.qualityVariants;
   const hasQuality = !isVod && (qualityVariants?.length ?? 0) > 1;
   const hasVideoDecoder = params.hasVideoDecoder === true;
@@ -117,6 +124,12 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasAudioDevice,
     ...(audioDevices !== undefined ? { audioDevices } : {}),
     ...(activeAudioDevice !== undefined ? { activeAudioDevice } : {}),
+    hasAudioDelay,
+    ...(audioDelayMs !== undefined ? { audioDelayMs } : {}),
+    hasSubtitleDelay,
+    ...(subtitleDelayMs !== undefined ? { subtitleDelayMs } : {}),
+    hasVideoQuality,
+    ...(selectedVideoQualityId !== undefined ? { selectedVideoQualityId } : {}),
     hasQuality,
     ...(qualityVariants !== undefined ? { qualityVariants, activeQualityKey: itemKey } : {}),
     hasVideoDecoder,
@@ -395,6 +408,12 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasAudioDevice,
     ...(audioDevices !== undefined ? { audioDevices } : {}),
     ...(activeAudioDevice !== undefined ? { activeAudioDevice } : {}),
+    hasAudioDelay,
+    ...(audioDelayMs !== undefined ? { audioDelayMs } : {}),
+    hasSubtitleDelay,
+    ...(subtitleDelayMs !== undefined ? { subtitleDelayMs } : {}),
+    hasVideoQuality,
+    ...(selectedVideoQualityId !== undefined ? { selectedVideoQualityId } : {}),
     hasQuality,
     ...(qualityVariants !== undefined ? { qualityVariants, activeQualityKey: itemKey } : {}),
     hasVideoDecoder,

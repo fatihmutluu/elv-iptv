@@ -537,4 +537,72 @@ class TrackSelectorBridgeTest {
       player.release()
     }
   }
+
+  @Test
+  fun `extracts deduplicated adaptive video qualities sorted descending and toggles override vs Auto ABR (#59)`() {
+    val adaptiveVideoGroup = group(
+      "v-abr",
+      listOf(
+        Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H264).setWidth(1280).setHeight(720).setPeakBitrate(3_000_000).setFrameRate(29.97f).build(),
+        Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H264).setWidth(1920).setHeight(1080).setPeakBitrate(6_500_000).setFrameRate(59.94f).build(),
+        // Duplicate of 1080p @ 6.5 Mbps must be deduplicated
+        Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H264).setWidth(1920).setHeight(1080).setPeakBitrate(6_500_000).build(),
+        Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H265).setWidth(3840).setHeight(2160).setPeakBitrate(18_000_000).setFrameRate(60f).build(),
+        // Unsupported rendition must be omitted
+        Format.Builder().setSampleMimeType(MimeTypes.VIDEO_AV1).setWidth(7680).setHeight(4320).setPeakBitrate(40_000_000).build(),
+      ),
+      selectedIndex = 1,
+      supported = intArrayOf(
+        C.FORMAT_HANDLED,
+        C.FORMAT_HANDLED,
+        C.FORMAT_HANDLED,
+        C.FORMAT_HANDLED,
+        C.FORMAT_UNSUPPORTED_SUBTYPE,
+      ),
+    )
+
+    // Single-rendition streams omit videoQualities
+    val singleSnap = inspectMediaTracks(Tracks(listOf(videoGroup, audioGroup)), textDisabled = false)
+    assertTrue(singleSnap.videoQualities.isEmpty())
+    assertFalse(singleSnap.toMap().containsKey("videoQualities"))
+
+    // Multi-rendition streams sort descending by height/bitrate and default to Auto (null)
+    val adaptiveTracks = Tracks(listOf(adaptiveVideoGroup, audioGroup))
+    val adaptiveSnap = inspectMediaTracks(adaptiveTracks, textDisabled = false)
+    assertEquals(listOf("0:3", "0:1", "0:0"), adaptiveSnap.videoQualities.map { it.id })
+    assertEquals(listOf("2160p", "1080p", "720p"), adaptiveSnap.videoQualities.map { it.label })
+    assertNull(adaptiveSnap.selectedVideoQualityId)
+
+    val emitted = mutableListOf<Map<String, Any?>>()
+    val bridge = TrackSelectorBridge(onTracks = { emitted += it }, onClearCues = {})
+    val player = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+    try {
+      bridge.onTracksChanged(player, adaptiveTracks)
+      assertEquals(1, emitted.size)
+      assertNull(emitted.last()["selectedVideoQualityId"])
+
+      // Pin 720p ("0:0")
+      bridge.selectVideoQuality(player, "0:0")
+      assertEquals(listOf(0), player.trackSelectionParameters.overrides[adaptiveVideoGroup.mediaTrackGroup]?.trackIndices)
+      assertEquals(1280, player.trackSelectionParameters.maxVideoWidth)
+      assertEquals(720, player.trackSelectionParameters.maxVideoHeight)
+      assertEquals(3_000_000, player.trackSelectionParameters.maxVideoBitrate)
+      assertEquals("0:0", emitted.last()["selectedVideoQualityId"])
+
+      // Unmatched ID is ignored without disturbing active constraint
+      bridge.selectVideoQuality(player, "9:9")
+      assertEquals(listOf(0), player.trackSelectionParameters.overrides[adaptiveVideoGroup.mediaTrackGroup]?.trackIndices)
+      assertEquals("0:0", emitted.last()["selectedVideoQualityId"])
+
+      // Return to Auto ABR (null) clears overrides and caps
+      bridge.selectVideoQuality(player, null)
+      assertTrue(player.trackSelectionParameters.overrides.isEmpty())
+      assertEquals(Int.MAX_VALUE, player.trackSelectionParameters.maxVideoWidth)
+      assertEquals(Int.MAX_VALUE, player.trackSelectionParameters.maxVideoHeight)
+      assertEquals(Int.MAX_VALUE, player.trackSelectionParameters.maxVideoBitrate)
+      assertNull(emitted.last()["selectedVideoQualityId"])
+    } finally {
+      player.release()
+    }
+  }
 }
