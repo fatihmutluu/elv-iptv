@@ -144,6 +144,16 @@ function createFailoverCatalogHarness(opts?: {
     groups = [...groups, rec];
     return ok(rec);
   });
+  const renameFailoverGroup = jest.fn(async (groupId: string, name: string) => {
+    let updated: FailoverGroupRecord | undefined;
+    groups = groups.map((g) => {
+      if (g.id !== groupId) return g;
+      const next: FailoverGroupRecord = { ...g, name, updatedAt: g.updatedAt + 1 };
+      updated = next;
+      return next;
+    });
+    return ok(updated as FailoverGroupRecord);
+  });
   const deleteFailoverGroup = jest.fn(async (groupId: string) => {
     groups = groups.filter((g) => g.id !== groupId);
     return ok(undefined);
@@ -217,6 +227,7 @@ function createFailoverCatalogHarness(opts?: {
     suggestFailoverGroups,
     applySuggestedFailoverGroups,
     createFailoverGroup,
+    renameFailoverGroup,
     deleteFailoverGroup,
     addFailoverGroupMember,
     removeFailoverGroupMember,
@@ -238,6 +249,7 @@ function createFailoverCatalogHarness(opts?: {
     suggestFailoverGroups,
     applySuggestedFailoverGroups,
     createFailoverGroup,
+    renameFailoverGroup,
     deleteFailoverGroup,
     addFailoverGroupMember,
     removeFailoverGroupMember,
@@ -464,5 +476,204 @@ describe('FailoverGroupsTab & ChannelManagementOverlay failover tab (#157)', () 
     // Back now closes the overlay
     await tap(KEYCODE_BACK);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports inline Rename Group via pointer and TV D-pad (#157)', async () => {
+    const existingGroup: FailoverGroupRecord = {
+      id: 'fg_ren',
+      name: 'Sports 1',
+      autoMatched: false,
+      createdAt: 100,
+      updatedAt: 100,
+      members: [],
+    };
+    const harness = createFailoverCatalogHarness({ initialGroups: [existingGroup] });
+    const onMutated = jest.fn();
+
+    // Pointer flow
+    const pointerView = await render(
+      wrapProviders(
+        <ChannelManagementOverlay
+          visible
+          initialTab="failover"
+          catalog={harness.catalog}
+          sources={[SOURCE_A, SOURCE_B]}
+          onMutated={onMutated}
+          onClose={jest.fn()}
+        />,
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('failover-rename-group-btn-fg_ren')).toBeTruthy();
+    });
+    await fireEvent.press(screen.getByTestId('failover-rename-group-btn-fg_ren'));
+    expect(screen.getByTestId('failover-rename-input-fg_ren').props.value).toBe('Sports 1');
+
+    await fireEvent.changeText(
+      screen.getByTestId('failover-rename-input-fg_ren'),
+      '  Premier Sports  ',
+    );
+    await fireEvent.press(screen.getByTestId('failover-rename-save-btn-fg_ren'));
+
+    await waitFor(() => {
+      expect(harness.renameFailoverGroup).toHaveBeenCalledWith('fg_ren', 'Premier Sports');
+      expect(screen.queryByTestId('failover-rename-input-fg_ren')).toBeNull();
+    });
+    expect(onMutated).toHaveBeenCalled();
+    await pointerView.unmount();
+
+    // TV D-pad flow
+    jest.replaceProperty(Platform, 'OS', 'android');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+    jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => {});
+
+    let keyListener: ((e: AndroidKeyEvent) => void) | undefined;
+    const androidSource: AndroidKeySource = {
+      addListener: (l) => {
+        keyListener = l;
+        return { remove: () => undefined };
+      },
+    };
+    const tap = async (keyCode: number) => {
+      await act(async () => {
+        keyListener?.({ action: 'down', keyCode, canceled: false, ageMs: 0 });
+        keyListener?.({ action: 'up', keyCode, canceled: false, ageMs: 12 });
+      });
+    };
+    const onClose = jest.fn();
+
+    const tvView = await render(
+      wrapProviders(
+        <ChannelManagementOverlay
+          visible
+          initialTab="failover"
+          catalog={harness.catalog}
+          sources={[SOURCE_A, SOURCE_B]}
+          onClose={onClose}
+        />,
+        { isTv: true, androidSource },
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('failover-group-card-fg_ren')).toBeTruthy();
+    });
+
+    // Header -> Down (auto-match) -> Down (create) -> Down (group-header col 0=addChannel)
+    await tap(KEYCODE_DPAD_DOWN);
+    await tap(KEYCODE_DPAD_DOWN);
+    await tap(KEYCODE_DPAD_DOWN);
+    // Right -> col 1 (rename) -> Select opens inline rename row
+    await tap(KEYCODE_DPAD_RIGHT);
+    await tap(KEYCODE_DPAD_CENTER);
+    expect(screen.getByTestId('failover-rename-input-fg_ren')).toBeTruthy();
+
+    // Back cancels inline rename without closing overlay
+    await tap(KEYCODE_BACK);
+    expect(screen.queryByTestId('failover-rename-input-fg_ren')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Re-enter inline rename, edit text, Right to Save (col 1), Select persists
+    await tap(KEYCODE_DPAD_RIGHT);
+    await tap(KEYCODE_DPAD_CENTER);
+    await fireEvent.changeText(screen.getByTestId('failover-rename-input-fg_ren'), 'Sports TV');
+    await tap(KEYCODE_DPAD_RIGHT);
+    await tap(KEYCODE_DPAD_CENTER);
+    await waitFor(() => {
+      expect(harness.renameFailoverGroup).toHaveBeenCalledWith('fg_ren', 'Sports TV');
+      expect(screen.queryByTestId('failover-rename-input-fg_ren')).toBeNull();
+    });
+    await tvView.unmount();
+  });
+
+  it('web Escape closes open failover channel picker or inline rename before dismissing overlay (#157)', async () => {
+    jest.replaceProperty(Platform, 'OS', 'web');
+    const listeners = new Map<
+      string,
+      Set<(e: { key?: string; preventDefault?: () => void }) => void>
+    >();
+    const win = globalThis as unknown as {
+      addEventListener?: (
+        type: string,
+        fn: (e: { key?: string; preventDefault?: () => void }) => void,
+      ) => void;
+      removeEventListener?: (
+        type: string,
+        fn: (e: { key?: string; preventDefault?: () => void }) => void,
+      ) => void;
+    };
+    const origAdd = win.addEventListener;
+    const origRemove = win.removeEventListener;
+    win.addEventListener = (type, fn) => {
+      const set = listeners.get(type) ?? new Set();
+      set.add(fn);
+      listeners.set(type, set);
+    };
+    win.removeEventListener = (type, fn) => {
+      listeners.get(type)?.delete(fn);
+    };
+    const dispatchEscape = async () => {
+      const preventDefault = jest.fn();
+      await act(async () => {
+        for (const fn of [...(listeners.get('keydown') ?? [])]) {
+          fn({ key: 'Escape', preventDefault });
+        }
+      });
+      return preventDefault;
+    };
+
+    try {
+      const existingGroup: FailoverGroupRecord = {
+        id: 'fg_web',
+        name: 'News Hub',
+        autoMatched: false,
+        createdAt: 100,
+        updatedAt: 100,
+        members: [],
+      };
+      const harness = createFailoverCatalogHarness({ initialGroups: [existingGroup] });
+      const onClose = jest.fn();
+
+      const view = await render(
+        wrapProviders(
+          <ChannelManagementOverlay
+            visible
+            initialTab="failover"
+            catalog={harness.catalog}
+            sources={[SOURCE_A, SOURCE_B]}
+            onClose={onClose}
+          />,
+        ),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('failover-add-channel-btn-fg_web')).toBeTruthy();
+      });
+
+      // Open channel picker -> Escape closes picker WITHOUT closing overlay
+      await fireEvent.press(screen.getByTestId('failover-add-channel-btn-fg_web'));
+      expect(screen.getByTestId('failover-channel-picker-fg_web')).toBeTruthy();
+
+      await dispatchEscape();
+      expect(screen.queryByTestId('failover-channel-picker-fg_web')).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+
+      // Open inline rename -> Escape cancels rename WITHOUT closing overlay
+      await fireEvent.press(screen.getByTestId('failover-rename-group-btn-fg_web'));
+      expect(screen.getByTestId('failover-rename-input-fg_web')).toBeTruthy();
+
+      await dispatchEscape();
+      expect(screen.queryByTestId('failover-rename-input-fg_web')).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+
+      // Escape with no open sub-state closes the overlay
+      await dispatchEscape();
+      expect(onClose).toHaveBeenCalledTimes(1);
+      await view.unmount();
+    } finally {
+      win.addEventListener = origAdd;
+      win.removeEventListener = origRemove;
+    }
   });
 });

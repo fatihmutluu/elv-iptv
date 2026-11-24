@@ -3,6 +3,7 @@ export * from './content-key';
 export { type CookieJar, type CookieJarOptions, createCookieJar } from './cookie-jar';
 export {
   hasCredentialHeaders,
+  hostnameOf,
   originOf,
   sameOrigin,
   sanitizeHeaderName,

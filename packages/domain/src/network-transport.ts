@@ -3,6 +3,9 @@ import { elvError, err, ok, type Result } from './result';
 /** Per-source DNS address-family preference (`#172`). */
 export type DnsFamilyPreference = 'system' | 'ipv4' | 'ipv6';
 
+/** Maximum accepted raw input length for a literal IP host override (`#172`). */
+export const MAX_HOST_OVERRIDE_CHARS = 64;
+
 const DNS_FAMILIES: ReadonlySet<string> = new Set(['system', 'ipv4', 'ipv6']);
 const IPV4_PART_RE = /^(?:0|[1-9]\d{0,2})$/;
 const HEX_GROUP_RE = /^[0-9a-fA-F]{1,4}$/;
@@ -74,7 +77,7 @@ export function isValidIpv6Literal(raw: string): boolean {
  */
 export function validateHostOverride(raw: unknown): Result<string | undefined> {
   if (raw === undefined || raw === null) return ok(undefined);
-  if (typeof raw !== 'string') {
+  if (typeof raw !== 'string' || raw.length > MAX_HOST_OVERRIDE_CHARS) {
     return err(elvError('source-format', 'invalid-host-override'));
   }
   for (let i = 0; i < raw.length; i += 1) {

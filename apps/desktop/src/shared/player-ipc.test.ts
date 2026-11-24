@@ -369,6 +369,11 @@ describe('isPlayerCommandMessage', () => {
       msg({ name: 'load', cmd: { ...load, options: { hostOverride: 'fe80::1%eth0' } } }),
       msg({ name: 'load', cmd: { ...load, options: { hostOverride: 123 } } }),
       msg({ name: 'load', cmd: { ...load, options: { hostOverride: null } } }),
+      msg({ name: 'load', cmd: { ...load, options: { hostOverride: '1'.repeat(100) } } }),
+      msg({
+        name: 'load',
+        cmd: { ...load, options: { hostOverride: `${' '.repeat(80)}203.0.113.1` } },
+      }),
       msg({
         name: 'queueNext',
         request: {

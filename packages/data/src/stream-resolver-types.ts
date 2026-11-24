@@ -77,13 +77,22 @@ export interface SourceStreamMeta {
   };
 }
 
+/** @internal Optional controls for {@link PlaytimeResolverCache.resolveStream}. */
+export interface ResolveStreamInternalOptions {
+  /** Predicate returning `true` when a failover sibling channel is restricted (e.g. parental-locked). */
+  readonly isAlternateRestricted?: (channelKey: string) => Promise<boolean>;
+}
+
 /** @internal Session cache for M3U `urlvars` resolvers, Xtream secrets, and split-failover Xtream clients. */
 export interface PlaytimeResolverCache {
   evict(sourceId: string): void;
   clear(): void;
   resolveLogos<T extends ItemRow>(items: T[], sourceId: string): Promise<T[]>;
   resolveRowLogos<T extends { sourceId: string; logo: string | null }>(rows: T[]): Promise<T[]>;
-  resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
+  resolveStream(
+    itemKey: string,
+    opts?: ResolveStreamInternalOptions,
+  ): Promise<Result<StreamRequest>>;
   resolveCatchupStream(
     itemKey: string,
     programme: CatchupProgrammeInput,

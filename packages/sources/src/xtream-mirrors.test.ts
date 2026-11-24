@@ -386,4 +386,43 @@ describe('Xtream transport dnsFamily and hostOverride propagation (#172)', () =>
     expect(seenOptions[1]?.dnsFamily).toBe('ipv6');
     expect(seenOptions[1]?.hostOverride).toBe('2001:db8::1');
   });
+
+  it('scopes hostOverride strictly to the primary server host and omits it on backup mirror failovers (#172, #317)', async () => {
+    const calls: Array<{ host: string; options: HttpRequestOptions | undefined }> = [];
+    const http: HttpClient = {
+      async get(url, options) {
+        const host = new URL(url).hostname;
+        calls.push({ host, options });
+        if (host === 'primary.example') {
+          return ok({ status: 503, headers: {}, body: (async function* () {})() });
+        }
+        return okJson('[{"stream_id":1,"name":"Ch 1"}]');
+      },
+    };
+
+    const c = createXtreamClient({
+      http,
+      server: 'https://primary.example:8443',
+      backupServers: ['https://backup1.example:8443', 'https://primary.example:9443'],
+      username: USER,
+      password: PASS,
+      transport: {
+        dnsFamily: 'ipv4',
+        hostOverride: '203.0.113.10',
+        allowLegacyTls: true,
+      },
+    });
+
+    expect(value(await c.liveStreams())).toHaveLength(1);
+    expect(calls).toHaveLength(2);
+    // Primary host receives hostOverride + dnsFamily + allowLegacyTls
+    expect(calls[0]?.host).toBe('primary.example');
+    expect(calls[0]?.options?.hostOverride).toBe('203.0.113.10');
+    expect(calls[0]?.options?.dnsFamily).toBe('ipv4');
+    expect(calls[0]?.options?.allowLegacyTls).toBe(true);
+    // Backup mirror on distinct domain MUST NOT receive primary's hostOverride IP (keeps dnsFamily)
+    expect(calls[1]?.host).toBe('backup1.example');
+    expect(calls[1]?.options?.hostOverride).toBeUndefined();
+    expect(calls[1]?.options?.dnsFamily).toBe('ipv4');
+  });
 });

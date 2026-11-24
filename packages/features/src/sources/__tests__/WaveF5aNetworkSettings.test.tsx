@@ -1,3 +1,4 @@
+import { elvError, err } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import {
   type AndroidKeyEvent,
@@ -7,6 +8,7 @@ import {
   RemoteKeysProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { StrictMode } from 'react';
 import { BackHandler, Platform } from 'react-native';
 import { SourcesScreen } from '../SourcesScreen';
 import { openTestCatalog } from './sources-test-harness';
@@ -287,6 +289,158 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
       await view.unmount();
     } finally {
       Platform.OS = originalOs;
+      await env.cleanup();
+    }
+  });
+
+  it('clearing an existing hostOverride sends hostOverride: "" so JSON serialization preserves the clear signal (#172)', async () => {
+    const env = await openTestCatalog();
+    try {
+      await env.catalog.addSource({
+        kind: 'xtream',
+        name: 'Override Source',
+        server: 'http://sim.example.test:7878',
+        username: 'demo',
+        password: 'demo',
+        transport: { dnsFamily: 'ipv4', hostOverride: '203.0.113.10' },
+      });
+
+      const rawUpdate = env.catalog.updateSourceSettings?.bind(env.catalog);
+      const updateSpy = jest
+        .spyOn(env.catalog, 'updateSourceSettings')
+        .mockImplementation(async (sourceId, patch) => {
+          // Simulate JSON IPC boundary (workbench-rpc / remote-catalog) dropping undefined keys
+          const serializedPatch = JSON.parse(JSON.stringify(patch)) as typeof patch;
+          return rawUpdate?.(sourceId, serializedPatch);
+        });
+
+      const view = await render(
+        <FormFactorProvider value="desktop">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <SourcesScreen catalog={env.catalog} />
+          </I18nProvider>
+        </FormFactorProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('source-network-src-1')).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByTestId('source-network-src-1'));
+      expect(screen.getByTestId('source-network-host-src-1').props.value).toBe('203.0.113.10');
+
+      await fireEvent.changeText(screen.getByTestId('source-network-host-src-1'), '');
+      await fireEvent.press(screen.getByTestId('source-network-save-src-1'));
+
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith('src-1', {
+          transport: {
+            dnsFamily: 'ipv4',
+            hostOverride: '',
+          },
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('source-network-saved-src-1')).toBeTruthy();
+      });
+
+      const updated = await env.catalog.listSources();
+      expect(updated[0]?.hostOverride).toBeUndefined();
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it('surfaces error and omits saved notice when catalog.updateSourceSettings returns err(...) (#172)', async () => {
+    const env = await openTestCatalog();
+    try {
+      await env.catalog.addSource({
+        kind: 'xtream',
+        name: 'Failing Save Source',
+        server: 'http://sim.example.test:7878',
+        username: 'demo',
+        password: 'demo',
+      });
+
+      jest
+        .spyOn(env.catalog, 'updateSourceSettings')
+        .mockResolvedValue(
+          err(elvError('source-format', 'INVALID_HOST_OVERRIDE', 'Host override rejected')),
+        );
+
+      const view = await render(
+        <FormFactorProvider value="desktop">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <SourcesScreen catalog={env.catalog} />
+          </I18nProvider>
+        </FormFactorProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('source-network-src-1')).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByTestId('source-network-src-1'));
+      await fireEvent.changeText(screen.getByTestId('source-network-host-src-1'), '203.0.113.20');
+      await fireEvent.press(screen.getByTestId('source-network-save-src-1'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('source-network-error-src-1')).toHaveTextContent(
+          'Enter a valid IPv4 or IPv6 address without ports or schemes.',
+        );
+      });
+      expect(screen.queryByTestId('source-network-saved-src-1')).toBeNull();
+      expect(screen.getByTestId('source-network-editor-src-1')).toBeTruthy();
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it('toggles source network editor under React.StrictMode without nested setState warnings (#172)', async () => {
+    const env = await openTestCatalog();
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await env.catalog.addSource({
+        kind: 'xtream',
+        name: 'StrictMode Source',
+        server: 'http://sim.example.test:7878',
+        username: 'demo',
+        password: 'demo',
+        transport: { dnsFamily: 'ipv6', hostOverride: '2001:db8::9' },
+      });
+
+      const view = await render(
+        <StrictMode>
+          <FormFactorProvider value="desktop">
+            <I18nProvider i18n={createAppI18n('en')}>
+              <SourcesScreen catalog={env.catalog} />
+            </I18nProvider>
+          </FormFactorProvider>
+        </StrictMode>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('source-network-src-1')).toBeTruthy();
+      });
+
+      errorSpy.mockClear();
+      await fireEvent.press(screen.getByTestId('source-network-src-1'));
+      expect(screen.getByTestId('source-network-editor-src-1')).toBeTruthy();
+      expect(screen.getByTestId('source-network-host-src-1').props.value).toBe('2001:db8::9');
+
+      await fireEvent.press(screen.getByTestId('source-network-src-1'));
+      expect(screen.queryByTestId('source-network-editor-src-1')).toBeNull();
+
+      const reactStateWarnings = errorSpy.mock.calls.filter((args) =>
+        args.some((arg) => typeof arg === 'string' && arg.includes('Cannot update a component')),
+      );
+      expect(reactStateWarnings).toHaveLength(0);
+      await view.unmount();
+    } finally {
+      errorSpy.mockRestore();
       await env.cleanup();
     }
   });

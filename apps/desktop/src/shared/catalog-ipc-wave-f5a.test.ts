@@ -103,6 +103,16 @@ describe('Wave F5A catalog IPC guards (#157, #317, #172)', () => {
         patch: { transport: { hostOverride: null } },
       },
       {
+        method: 'updateSourceSettings',
+        sourceId: 's1',
+        patch: { transport: { hostOverride: '1'.repeat(100) } },
+      },
+      {
+        method: 'updateSourceSettings',
+        sourceId: 's1',
+        patch: { transport: { hostOverride: `${' '.repeat(80)}198.51.100.42` } },
+      },
+      {
         method: 'addSource',
         input: {
           kind: 'm3u',
@@ -246,13 +256,19 @@ describe('Wave F5A catalog IPC guards (#157, #317, #172)', () => {
       {
         method: 'reportStreamOutcome',
         sourceId: 's1',
-        serverUrl: 'https://stream1.example.test:8443/live/u/p/1.ts',
+        serverUrl: 'https://stream1.example.test:8443',
         succeeded: false,
       },
       {
         method: 'reportStreamOutcome',
         sourceId: 's1',
-        serverUrl: 'http://stream2.example.test',
+        serverUrl: 'http://stream2.example.test/',
+        succeeded: true,
+      },
+      {
+        method: 'reportStreamOutcome',
+        sourceId: 's1',
+        serverUrl: 'http://[::1]:8080',
         succeeded: true,
       },
     ];
@@ -351,6 +367,42 @@ describe('Wave F5A catalog IPC guards (#157, #317, #172)', () => {
         sourceId: 's1',
         serverUrl: 'file:///etc/passwd',
         succeeded: true,
+      },
+      {
+        method: 'reportStreamOutcome',
+        sourceId: 's1',
+        serverUrl: 'rtsp://stream.example.test:554',
+        succeeded: false,
+      },
+      {
+        method: 'reportStreamOutcome',
+        sourceId: 's1',
+        serverUrl: 'https://stream1.example.test:8443/live/u/p/1.ts',
+        succeeded: false,
+      },
+      {
+        method: 'reportStreamOutcome',
+        sourceId: 's1',
+        serverUrl: 'https://user:pass@stream1.example.test',
+        succeeded: false,
+      },
+      {
+        method: 'reportStreamOutcome',
+        sourceId: 's1',
+        serverUrl: 'https://@stream1.example.test',
+        succeeded: false,
+      },
+      {
+        method: 'reportStreamOutcome',
+        sourceId: 's1',
+        serverUrl: 'https://stream1.example.test?token=abc',
+        succeeded: false,
+      },
+      {
+        method: 'reportStreamOutcome',
+        sourceId: 's1',
+        serverUrl: 'https://stream1.example.test#frag',
+        succeeded: false,
       },
       {
         method: 'reportStreamOutcome',

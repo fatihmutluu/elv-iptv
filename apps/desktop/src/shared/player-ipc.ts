@@ -2,6 +2,7 @@ import {
   type AccessibilityFontFamily,
   type DeinterlaceMode,
   type DnsFamilyPreference,
+  MAX_HOST_OVERRIDE_CHARS,
   normalizeDnsFamily,
   type SubtitleStyleConfig,
   validateHostOverride,
@@ -430,7 +431,7 @@ const isSubtitleFontFamily = (x: unknown): x is AccessibilityFontFamily =>
 const isDnsFamilyPreference = (x: unknown): x is DnsFamilyPreference =>
   typeof x === 'string' && normalizeDnsFamily(x) === x;
 const isHostOverrideLiteral = (x: unknown): x is string => {
-  if (typeof x !== 'string') return false;
+  if (typeof x !== 'string' || x.length > MAX_HOST_OVERRIDE_CHARS) return false;
   const validated = validateHostOverride(x);
   return validated.ok && validated.value !== undefined;
 };

@@ -391,4 +391,200 @@ describe('Wave F5A playback wiring (#157, #167, #195, #172)', () => {
 
     service.dispose();
   });
+
+  it('cascades http-404 onNotFound through Rung-4 multi-source alternates including consecutive 404s and alternate timeout (#157, #317)', async () => {
+    // Scenario 1: primary 404 -> Rung-2 retry 404 -> Rung-4 alt1 404 -> Rung-4 alt2 succeeds
+    {
+      const { engine, service, loads } = makeService(
+        {},
+        {
+          'http://primary.test/stream/1': [],
+          'http://alt1.test/stream/1': [],
+          'http://alt2.test/stream/1': [],
+        },
+      );
+      const primary: StreamRequest = {
+        url: 'http://primary.test/stream/1',
+        headers: {},
+        sourceId: 'src-a',
+        accountKey: 'src-a',
+        alternates: [
+          {
+            url: 'http://alt1.test/stream/1',
+            headers: {},
+            sourceId: 'src-b',
+            accountKey: 'src-b',
+          },
+          {
+            url: 'http://alt2.test/stream/1',
+            headers: {},
+            sourceId: 'src-c',
+            accountKey: 'src-c',
+          },
+        ],
+      };
+
+      service.tune({
+        item: 'x:src-a:live:1',
+        accountKey: 'src-a',
+        kind: 'live',
+        resolve: () => Promise.resolve(ok(primary)),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loads.at(-1)?.url).toBe('http://primary.test/stream/1');
+
+      // Primary 404 -> Rung 2 reload after 1s gap
+      engine.emit({
+        attempt: service.getState().attempt,
+        type: 'error',
+        error: { code: 'http-404', httpStatus: 404 },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(loads.at(-1)?.url).toBe('http://primary.test/stream/1');
+
+      // Rung 2 404 -> Rung 4 alt1 immediately (silent gap 0)
+      engine.emit({
+        attempt: service.getState().attempt,
+        type: 'error',
+        error: { code: 'http-404', httpStatus: 404 },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loads.at(-1)?.url).toBe('http://alt1.test/stream/1');
+
+      // alt1 ALSO returns 404 -> Rung 4 advances to alt2 instead of giving up
+      engine.emit({
+        attempt: service.getState().attempt,
+        type: 'error',
+        error: { code: 'http-404', httpStatus: 404 },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loads.at(-1)?.url).toBe('http://alt2.test/stream/1');
+
+      // alt2 succeeds
+      engine.emit({ attempt: service.getState().attempt, type: 'firstFrame', atMs: Date.now() });
+      engine.emit({ attempt: service.getState().attempt, type: 'state', state: 'playing' });
+      expect(service.getState().status.kind).toBe('playing');
+      service.dispose();
+    }
+
+    // Scenario 2: primary 404 -> Rung-2 retry 404 -> Rung-4 alt1 times out silently -> advances to alt2
+    {
+      const { engine, service, loads } = makeService(
+        {},
+        {
+          'http://primary.test/stream/2': [],
+          'http://alt1.test/stream/2': [],
+          'http://alt2.test/stream/2': [],
+        },
+      );
+      const primary: StreamRequest = {
+        url: 'http://primary.test/stream/2',
+        headers: {},
+        sourceId: 'src-a',
+        accountKey: 'src-a',
+        alternates: [
+          {
+            url: 'http://alt1.test/stream/2',
+            headers: {},
+            sourceId: 'src-b',
+            accountKey: 'src-b',
+          },
+          {
+            url: 'http://alt2.test/stream/2',
+            headers: {},
+            sourceId: 'src-c',
+            accountKey: 'src-c',
+          },
+        ],
+      };
+
+      service.tune({
+        item: 'x:src-a:live:2',
+        accountKey: 'src-a',
+        kind: 'live',
+        resolve: () => Promise.resolve(ok(primary)),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Primary 404 -> Rung 2
+      engine.emit({
+        attempt: service.getState().attempt,
+        type: 'error',
+        error: { code: 'http-404', httpStatus: 404 },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      // Rung 2 404 -> Rung 4 alt1
+      engine.emit({
+        attempt: service.getState().attempt,
+        type: 'error',
+        error: { code: 'http-404', httpStatus: 404 },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loads.at(-1)?.url).toBe('http://alt1.test/stream/2');
+
+      // alt1 hangs and hits rungTimeoutMs (2s default) -> MUST advance to alt2 instead of giving up
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(loads.at(-1)?.url).toBe('http://alt2.test/stream/2');
+
+      engine.emit({ attempt: service.getState().attempt, type: 'firstFrame', atMs: Date.now() });
+      engine.emit({ attempt: service.getState().attempt, type: 'state', state: 'playing' });
+      expect(service.getState().status.kind).toBe('playing');
+      service.dispose();
+    }
+  });
+
+  it('does not leak primary TuneRequest allowLegacyTls, dnsFamily, or hostOverride onto cross-source alternates (#157, #172)', async () => {
+    const { engine, service, loads } = makeService(
+      {},
+      {
+        'https://src-a.test/live/1.ts': [],
+        'https://src-b.test/live/1.ts': [],
+      },
+    );
+
+    const primary: StreamRequest = {
+      url: 'https://src-a.test/live/1.ts',
+      headers: {},
+      sourceId: 'src-a',
+      accountKey: 'src-a',
+      alternates: [
+        {
+          url: 'https://src-b.test/live/1.ts',
+          headers: {},
+          sourceId: 'src-b',
+          accountKey: 'src-b',
+        },
+      ],
+    };
+
+    service.tune({
+      item: 'x:src-a:live:1',
+      accountKey: 'src-a',
+      kind: 'live',
+      allowLegacyTls: true,
+      dnsFamily: 'ipv4',
+      hostOverride: '203.0.113.10',
+      resolve: () => Promise.resolve(ok(primary)),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Primary inherits TuneRequest overrides
+    expect(loads[0]?.url).toBe('https://src-a.test/live/1.ts');
+    expect(loads[0]?.options).toMatchObject({
+      allowLegacyTls: true,
+      dnsFamily: 'ipv4',
+      hostOverride: '203.0.113.10',
+    });
+
+    // Fail primary to Rung 4 -> Source B alternate must NOT inherit Source A's transport overrides
+    await climbToRung4(engine, service);
+    const altLoad = loads.at(-1);
+    expect(altLoad?.url).toBe('https://src-b.test/live/1.ts');
+    expect(altLoad?.options?.allowLegacyTls).toBeUndefined();
+    expect(altLoad?.options?.dnsFamily).toBeUndefined();
+    expect(altLoad?.options?.hostOverride).toBeUndefined();
+
+    service.dispose();
+  });
 });

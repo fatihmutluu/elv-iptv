@@ -1,14 +1,22 @@
 import type { CatalogService, ItemRow, SourceRow } from '@elv/data';
+import { ok } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
-import { createIdleProbeController, createStreamHealthCache } from '@elv/playback';
+import {
+  createIdleProbeController,
+  createStreamHealthCache,
+  type StreamRequest,
+} from '@elv/playback';
+import { createFakePlayerEngine } from '@elv/playback/testing';
 import { I18nProvider, ThemeProvider, TvRemoteProvider, ViewportProvider } from '@elv/ui-kit';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
 import { View } from 'react-native';
+import type { VideoHost } from '../../ports/video-host';
 import { StreamHealthProvider } from '../../shared';
 import { ChannelGridTile, type LiveGridShared } from '../LiveChannelTile';
 import { LiveScreen } from '../LiveScreen';
 import { ZapChannelRow } from '../LiveZapRow';
+import { useLiveEmbeddedPreview } from '../useLiveEmbeddedPreview';
 
 const DEMO_SOURCE: SourceRow = {
   id: 's1',
@@ -265,5 +273,95 @@ describe('Live passive stream health badges & idle-probe abort on navigation (#1
     await fireEvent.press(screen.getByTestId('live-cat-chip-1'));
     expect(probeSignal?.aborted).toBe(true);
     expect(idleProbeController.activeCount()).toBe(0);
+  });
+
+  it('useLiveEmbeddedPreview reports strictly HTTP(S) origin with zero credentials and skips rtsp/udp (#317)', async () => {
+    const channel = makeChannel(1);
+    const engineOpts = {
+      now: () => 1_000,
+      schedule: (fn: () => void, ms: number) => setTimeout(fn, ms),
+      cancel: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
+    };
+
+    // 1. Xtream URL with userinfo + path credentials reports origin only
+    {
+      const engine = createFakePlayerEngine(engineOpts);
+      const videoHost: VideoHost = {
+        open: () => ({ engine, renderSurface: () => <View /> }),
+      };
+      const reportStreamOutcome = jest.fn();
+      const catalog = {
+        resolveStream: jest.fn(async () =>
+          ok<StreamRequest>({
+            url: ['http://u:p@preview.example.test:8080', 'live', 'demo', 'cred', '7.ts'].join('/'),
+            headers: {},
+            sourceId: 's1',
+            accountKey: 's1',
+          }),
+        ),
+        reportStreamOutcome,
+      };
+      const hook = await renderHook(() =>
+        useLiveEmbeddedPreview({
+          enabled: true,
+          activeChannel: channel,
+          sources: [DEMO_SOURCE],
+          catalog,
+          videoHost,
+        }),
+      );
+      await waitFor(() => {
+        expect(engine.commands.some((c) => c.name === 'load')).toBe(true);
+      });
+      const loadCmd = engine.commands.find((c) => c.name === 'load');
+      await act(async () => {
+        engine.emit({ type: 'firstFrame', attempt: loadCmd?.attempt ?? 1, atMs: 120 });
+      });
+      expect(reportStreamOutcome).toHaveBeenCalledTimes(1);
+      expect(reportStreamOutcome).toHaveBeenCalledWith(
+        's1',
+        'http://preview.example.test:8080',
+        true,
+      );
+      await hook.unmount();
+    }
+
+    // 2. Non-HTTP(S) URLs (rtsp:// and udp://) skip reportStreamOutcome
+    for (const nonHttpUrl of ['rtsp://preview.example.test:554/live/1', 'udp://239.0.0.1:1234']) {
+      const engine = createFakePlayerEngine(engineOpts);
+      const videoHost: VideoHost = {
+        open: () => ({ engine, renderSurface: () => <View /> }),
+      };
+      const reportStreamOutcome = jest.fn();
+      const catalog = {
+        resolveStream: jest.fn(async () =>
+          ok<StreamRequest>({
+            url: nonHttpUrl,
+            headers: {},
+            sourceId: 's1',
+            accountKey: 's1',
+          }),
+        ),
+        reportStreamOutcome,
+      };
+      const hook = await renderHook(() =>
+        useLiveEmbeddedPreview({
+          enabled: true,
+          activeChannel: channel,
+          sources: [DEMO_SOURCE],
+          catalog,
+          videoHost,
+        }),
+      );
+      await waitFor(() => {
+        expect(engine.commands.some((c) => c.name === 'load')).toBe(true);
+      });
+      const loadCmd = engine.commands.find((c) => c.name === 'load');
+      await act(async () => {
+        engine.emit({ type: 'firstFrame', attempt: loadCmd?.attempt ?? 1, atMs: 120 });
+      });
+      expect(reportStreamOutcome).not.toHaveBeenCalled();
+      await hook.unmount();
+    }
   });
 });

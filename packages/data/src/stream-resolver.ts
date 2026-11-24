@@ -2,6 +2,7 @@ import {
   elvError,
   err,
   type HttpClient,
+  hostnameOf,
   normalizeDnsFamily,
   ok,
   type Result,
@@ -14,7 +15,7 @@ import {
   transportHeaders,
   validateHostOverride,
 } from '@elv/domain';
-import { createXtreamClient, type XtreamClient } from '@elv/sources';
+import { createXtreamClient, resolveXtreamBaseUrl, type XtreamClient } from '@elv/sources';
 import { isCredentialFingerprint, resolveAccountPoolKey } from './credential-fingerprint';
 import { getFailoverGroupByChannel } from './failover-groups-repo';
 import { placeholderNames } from './m3u-templating';
@@ -29,6 +30,7 @@ import {
 import { resolveCatchupStreamInternal } from './stream-resolver-catchup';
 import type {
   PlaytimeResolverCache,
+  ResolveStreamInternalOptions,
   SourceStreamMeta,
   StreamAlternate,
   StreamRequest,
@@ -103,6 +105,7 @@ function resolveInlineAlternates(
     SourceStreamMeta['connectionMeta'],
     'allowLegacyTls' | 'dnsFamily' | 'hostOverride'
   >,
+  primaryHost: string | undefined,
 ): StreamAlternate[] {
   if (backupUrlsJson === null) return [];
   let parsed: unknown;
@@ -118,14 +121,17 @@ function resolveInlineAlternates(
     const resolved = resolver.resolve(item);
     if (resolved === undefined || resolved === '') continue;
     if (!isAllowedPlaybackUrl(resolved)) continue;
+    const normalizedUrl = normalizeMulticastUrl(resolved.trim());
+    const useHostOverride =
+      transportMeta.hostOverride !== undefined &&
+      primaryHost !== undefined &&
+      hostnameOf(normalizedUrl) === primaryHost;
     alternates.push({
-      url: normalizeMulticastUrl(resolved.trim()),
+      url: normalizedUrl,
       headers: { ...headers },
       ...(transportMeta.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
       ...(transportMeta.dnsFamily !== undefined ? { dnsFamily: transportMeta.dnsFamily } : {}),
-      ...(transportMeta.hostOverride !== undefined
-        ? { hostOverride: transportMeta.hostOverride }
-        : {}),
+      ...(useHostOverride ? { hostOverride: transportMeta.hostOverride } : {}),
     });
   }
   return alternates;
@@ -361,6 +367,7 @@ export function createPlaytimeResolverCache(deps: {
   async function resolveSingleStream(
     itemKey: string,
     includeGroupAlternates: boolean,
+    isAlternateRestricted?: ResolveStreamInternalOptions['isAlternateRestricted'],
   ): Promise<Result<StreamRequest>> {
     const play = await queryPlayable(deps.db, itemKey);
     if (play === undefined) return notFound();
@@ -369,11 +376,21 @@ export function createPlaytimeResolverCache(deps: {
     const { headers, accountKey, connectionMeta } = buildSourceStreamMeta(source);
 
     let primaryUrl: string;
+    let primaryHostOverride = connectionMeta.hostOverride;
     const collectedAlternates: StreamAlternate[] = [];
 
     if (play.urlTemplate === null) {
       const client = await xtreamClientFor(source);
       if (client === undefined) return err(elvError('storage', 'secret-missing'));
+      const creds = await xtreamSecretFor(source.id);
+      const xtreamPrimaryHost =
+        creds !== undefined ? hostnameOf(resolveXtreamBaseUrl(creds.server, deps.http)) : undefined;
+      const scopedHostOverride = (url: string): string | undefined =>
+        connectionMeta.hostOverride !== undefined &&
+        xtreamPrimaryHost !== undefined &&
+        hostnameOf(url) === xtreamPrimaryHost
+          ? connectionMeta.hostOverride
+          : undefined;
       const id = Number(play.providerId);
       if (play.providerId === null || !Number.isFinite(id)) return notFound();
       const rawUrls = client.streamUrls(play.streamKind, id, play.extension ?? undefined);
@@ -382,11 +399,14 @@ export function createPlaytimeResolverCache(deps: {
         return err(elvError('playback', 'unsupported-scheme'));
       }
       primaryUrl = normalizeMulticastUrl(firstRaw.trim());
+      primaryHostOverride = scopedHostOverride(primaryUrl);
       for (let i = 1; i < rawUrls.length; i += 1) {
         const candidate = rawUrls[i];
         if (candidate === undefined || !isAllowedPlaybackUrl(candidate)) continue;
+        const normalizedCandidate = normalizeMulticastUrl(candidate.trim());
+        const altHostOverride = scopedHostOverride(normalizedCandidate);
         collectedAlternates.push({
-          url: normalizeMulticastUrl(candidate.trim()),
+          url: normalizedCandidate,
           headers: { ...headers },
           accountKey,
           maxConnections: connectionMeta.maxConnections,
@@ -396,9 +416,7 @@ export function createPlaytimeResolverCache(deps: {
           ...(connectionMeta.dnsFamily !== undefined
             ? { dnsFamily: connectionMeta.dnsFamily }
             : {}),
-          ...(connectionMeta.hostOverride !== undefined
-            ? { hostOverride: connectionMeta.hostOverride }
-            : {}),
+          ...(altHostOverride !== undefined ? { hostOverride: altHostOverride } : {}),
         });
       }
     } else {
@@ -417,7 +435,13 @@ export function createPlaytimeResolverCache(deps: {
         return err(elvError('storage', 'secret-missing'));
       }
       collectedAlternates.push(
-        ...resolveInlineAlternates(play.backupUrlsJson, resolver, headers, connectionMeta),
+        ...resolveInlineAlternates(
+          play.backupUrlsJson,
+          resolver,
+          headers,
+          connectionMeta,
+          hostnameOf(primaryUrl),
+        ),
       );
     }
 
@@ -426,6 +450,12 @@ export function createPlaytimeResolverCache(deps: {
       if (group !== undefined) {
         for (const member of group.members) {
           if (member.channelKey === itemKey) continue;
+          if (
+            isAlternateRestricted !== undefined &&
+            (await isAlternateRestricted(member.channelKey))
+          ) {
+            continue;
+          }
           const sibling = await resolveSingleStream(member.channelKey, false);
           if (!sibling.ok) continue;
           collectedAlternates.push(toAlternateFromRequest(sibling.value));
@@ -454,13 +484,15 @@ export function createPlaytimeResolverCache(deps: {
     }
 
     const alternates = deduplicateAlternates(primaryUrl, collectedAlternates);
+    const { hostOverride: _ignoredHostOverride, ...restConnectionMeta } = connectionMeta;
     return ok({
       url: primaryUrl,
       headers,
       accountKey,
       sourceId: play.sourceId,
       channelKey: itemKey,
-      ...connectionMeta,
+      ...restConnectionMeta,
+      ...(primaryHostOverride !== undefined ? { hostOverride: primaryHostOverride } : {}),
       ...(alternates === undefined ? {} : { alternates }),
     });
   }
@@ -503,7 +535,8 @@ export function createPlaytimeResolverCache(deps: {
       });
     },
 
-    resolveStream: (itemKey) => resolveSingleStream(itemKey, true),
+    resolveStream: (itemKey, opts) =>
+      resolveSingleStream(itemKey, true, opts?.isAlternateRestricted),
 
     resolveCatchupStream: (itemKey, programme, nowMs) =>
       resolveCatchupStreamInternal(itemKey, programme, nowMs, {

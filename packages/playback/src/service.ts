@@ -1,6 +1,7 @@
 import {
   type ElvError,
   elvError,
+  hostnameOf,
   normalizeSubtitleStyle,
   type Result,
   type SubtitleStyleConfig,
@@ -88,6 +89,9 @@ export function createPlaybackServiceWith(
 
   let current: TuneRequest | undefined;
   let stream: StreamRequest | undefined;
+  let primarySourceId: string | undefined;
+  let primaryAccountKey: string | undefined;
+  let primaryHost: string | undefined;
   let lastVodPositionMs: number | undefined;
   let loaded = false;
   let mediaOpen = false;
@@ -182,9 +186,18 @@ export function createPlaybackServiceWith(
     if (current.kind === 'vod' && startMs !== undefined) lastVodPositionMs = startMs;
     trackPrefs.beginReload();
     healthTelemetry.resetStreamSampling();
-    const allowLegacyTls = stream.allowLegacyTls ?? current.allowLegacyTls;
-    const dnsFamily = stream.dnsFamily ?? current.dnsFamily;
-    const hostOverride = stream.hostOverride ?? current.hostOverride;
+    const crossSource =
+      (stream.sourceId !== undefined && stream.sourceId !== primarySourceId) ||
+      (stream.accountKey !== undefined && stream.accountKey !== primaryAccountKey);
+    const sameHostAsPrimary = primaryHost === undefined || hostnameOf(stream.url) === primaryHost;
+    const allowLegacyTls = crossSource
+      ? stream.allowLegacyTls
+      : (stream.allowLegacyTls ?? current.allowLegacyTls);
+    const dnsFamily = crossSource ? stream.dnsFamily : (stream.dnsFamily ?? current.dnsFamily);
+    const hostOverride =
+      crossSource || !sameHostAsPrimary
+        ? stream.hostOverride
+        : (stream.hostOverride ?? current.hostOverride);
     const baseOptions: LoadOptions = {
       ...(current.bufferPreset === undefined ? {} : { bufferPreset: current.bufferPreset }),
       ...(current.decoderMode === undefined ? {} : { decoderMode: current.decoderMode }),
@@ -354,6 +367,9 @@ export function createPlaybackServiceWith(
     }
     stream =
       current?.kind === 'live' ? formatCache.apply(current.accountKey, result.value) : result.value;
+    primarySourceId = stream.sourceId;
+    primaryAccountKey = stream.accountKey ?? current?.accountKey;
+    primaryHost = hostnameOf(stream.url);
     if (held) return;
     armStartTimeout(startTimeoutMs());
     sendLoad();
@@ -366,6 +382,9 @@ export function createPlaybackServiceWith(
     held = hooks.onTune?.(request) ?? false;
     current = request;
     stream = undefined;
+    primarySourceId = undefined;
+    primaryAccountKey = request.accountKey;
+    primaryHost = undefined;
     loaded = false;
     const prev = state();
     const token = prev.attempt + 1;
@@ -456,6 +475,9 @@ export function createPlaybackServiceWith(
       }
       current = request;
       stream = nextStream;
+      primarySourceId = nextStream?.sourceId;
+      primaryAccountKey = nextStream?.accountKey ?? request.accountKey;
+      primaryHost = nextStream === undefined ? undefined : hostnameOf(nextStream.url);
       lastVodPositionMs = request.kind === 'vod' ? (request.startMs ?? 0) : undefined;
       const {
         anchor: _a,

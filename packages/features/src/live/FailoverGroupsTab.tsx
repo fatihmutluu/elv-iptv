@@ -80,11 +80,14 @@ export function FailoverGroupsTab({
   const [noSuggestionsNotice, setNoSuggestionsNotice] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [pickingGroupId, setPickingGroupId] = useState<string | null>(null);
+  const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const [busy, setBusy] = useState(false);
 
   const [focusedRow, setFocusedRow] = useState(0);
   const [focusedCol, setFocusedCol] = useState(0);
   const newGroupInputRef = useRef<TvTextInputInstance | null>(null);
+  const renameGroupInputRef = useRef<TvTextInputInstance | null>(null);
   const groupCardYRef = useRef<Record<string, number>>({});
   const groupListYRef = useRef(0);
 
@@ -137,19 +140,23 @@ export function FailoverGroupsTab({
         groups,
         hasSuggestions: suggestions.length > 0,
         pickingGroupId,
+        renamingGroupId,
         availableChannelsByGroupId,
       }),
-    [availableChannelsByGroupId, groups, pickingGroupId, suggestions.length],
+    [availableChannelsByGroupId, groups, pickingGroupId, renamingGroupId, suggestions.length],
   );
 
   useEffect(() => {
-    setFocusedRow((prevRow) => {
-      const clampedRow = Math.min(prevRow, Math.max(0, focusRows.length - 1));
-      const maxCol = Math.max(0, (focusRows[clampedRow]?.cols.length ?? 1) - 1);
-      setFocusedCol((prevCol) => Math.min(prevCol, maxCol));
-      return clampedRow;
-    });
-  }, [focusRows]);
+    const maxRow = Math.max(0, focusRows.length - 1);
+    const clampedRow = Math.min(focusedRow, maxRow);
+    const maxCol = Math.max(0, (focusRows[clampedRow]?.cols.length ?? 1) - 1);
+    if (clampedRow !== focusedRow) {
+      setFocusedRow(clampedRow);
+    }
+    if (focusedCol > maxCol) {
+      setFocusedCol(maxCol);
+    }
+  }, [focusRows, focusedCol, focusedRow]);
 
   useEffect(() => {
     if (!isTv || !tvActive || onScrollToY === undefined) return;
@@ -216,6 +223,38 @@ export function FailoverGroupsTab({
     }
   }, [busy, catalog, loadGroups, newGroupName, onMutated, parentalLocked]);
 
+  const handleStartRename = useCallback((group: FailoverGroupRecord) => {
+    setPickingGroupId(null);
+    setRenamingGroupId(group.id);
+    setRenameDraft(group.name);
+    setFocusedCol(0);
+  }, []);
+
+  const handleCancelRename = useCallback(() => {
+    setRenamingGroupId(null);
+    setRenameDraft('');
+  }, []);
+
+  const handleSaveRename = useCallback(
+    async (groupId: string) => {
+      const trimmed = renameDraft.trim();
+      if (parentalLocked || trimmed.length === 0 || !catalog.renameFailoverGroup || busy) return;
+      setBusy(true);
+      try {
+        const res = await catalog.renameFailoverGroup(groupId, trimmed);
+        if (res.ok) {
+          setRenamingGroupId(null);
+          setRenameDraft('');
+          await loadGroups();
+          onMutated?.();
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, catalog, loadGroups, onMutated, parentalLocked, renameDraft],
+  );
+
   const handleDeleteGroup = useCallback(
     async (groupId: string) => {
       if (parentalLocked || !catalog.deleteFailoverGroup || busy) return;
@@ -224,6 +263,10 @@ export function FailoverGroupsTab({
         const res = await catalog.deleteFailoverGroup(groupId);
         if (res.ok) {
           if (pickingGroupId === groupId) setPickingGroupId(null);
+          if (renamingGroupId === groupId) {
+            setRenamingGroupId(null);
+            setRenameDraft('');
+          }
           await loadGroups();
           onMutated?.();
         }
@@ -231,7 +274,7 @@ export function FailoverGroupsTab({
         setBusy(false);
       }
     },
-    [busy, catalog, loadGroups, onMutated, parentalLocked, pickingGroupId],
+    [busy, catalog, loadGroups, onMutated, parentalLocked, pickingGroupId, renamingGroupId],
   );
 
   const handleAddMember = useCallback(
@@ -291,28 +334,38 @@ export function FailoverGroupsTab({
   );
 
   const stateRef = useRef({
+    groups,
     focusRows,
     focusedRow,
     focusedCol,
     pickingGroupId,
+    renamingGroupId,
     onEdgeTop,
     handleAutoMatch,
     handleApplySuggestions,
     handleCreateGroup,
+    handleStartRename,
+    handleCancelRename,
+    handleSaveRename,
     handleDeleteGroup,
     handleAddMember,
     handleRemoveMember,
     handleMoveMember,
   });
   stateRef.current = {
+    groups,
     focusRows,
     focusedRow,
     focusedCol,
     pickingGroupId,
+    renamingGroupId,
     onEdgeTop,
     handleAutoMatch,
     handleApplySuggestions,
     handleCreateGroup,
+    handleStartRename,
+    handleCancelRename,
+    handleSaveRename,
     handleDeleteGroup,
     handleAddMember,
     handleRemoveMember,
@@ -324,6 +377,10 @@ export function FailoverGroupsTab({
     tvKeyHandlerRef.current = (key: KeyInput['key']): boolean => {
       const s = stateRef.current;
       if (key === 'back') {
+        if (s.renamingGroupId !== null) {
+          s.handleCancelRename();
+          return true;
+        }
         if (s.pickingGroupId !== null) {
           setPickingGroupId(null);
           return true;
@@ -343,6 +400,7 @@ export function FailoverGroupsTab({
         return true;
       }
       if (key === 'up') {
+        if (s.renamingGroupId !== null) return true;
         if (s.focusedRow === 0) {
           s.onEdgeTop?.();
           return true;
@@ -354,6 +412,7 @@ export function FailoverGroupsTab({
         return true;
       }
       if (key === 'down') {
+        if (s.renamingGroupId !== null) return true;
         const nextRow = Math.min(s.focusRows.length - 1, s.focusedRow + 1);
         const nextMaxCol = Math.max(0, (s.focusRows[nextRow]?.cols.length ?? 1) - 1);
         setFocusedRow(nextRow);
@@ -371,9 +430,19 @@ export function FailoverGroupsTab({
           else void s.handleCreateGroup();
           return true;
         }
+        if (curRow.kind === 'group-edit') {
+          if (s.focusedCol === 0) renameGroupInputRef.current?.focus();
+          else if (s.focusedCol === 1) void s.handleSaveRename(curRow.groupId);
+          else s.handleCancelRename();
+          return true;
+        }
         if (curRow.kind === 'group-header') {
           if (s.focusedCol === 0) {
+            setRenamingGroupId(null);
             setPickingGroupId(s.pickingGroupId === curRow.groupId ? null : curRow.groupId);
+          } else if (s.focusedCol === 1) {
+            const target = s.groups.find((g) => g.id === curRow.groupId);
+            if (target) s.handleStartRename(target);
           } else {
             void s.handleDeleteGroup(curRow.groupId);
           }
@@ -526,30 +595,42 @@ export function FailoverGroupsTab({
             groupListYRef.current = e.nativeEvent.layout.y;
           }}
         >
-          {groups.map((group) => (
-            <FailoverGroupCard
-              key={group.id}
-              group={group}
-              channelsByKey={channelsByKey}
-              availableChannels={availableChannelsByGroupId[group.id] ?? []}
-              resolveBadge={resolveBadge}
-              isPickingChannel={pickingGroupId === group.id}
-              isTv={isTv}
-              activeFocusRow={activeFocusRow}
-              focusedCol={focusedCol}
-              busy={busy}
-              onLayoutY={(y) => {
-                groupCardYRef.current[group.id] = y;
-              }}
-              onTogglePicker={() =>
-                setPickingGroupId(pickingGroupId === group.id ? null : group.id)
-              }
-              onDeleteGroup={() => void handleDeleteGroup(group.id)}
-              onPickChannel={(chKey) => void handleAddMember(group.id, chKey)}
-              onMoveMember={(idx, delta) => void handleMoveMember(group.id, idx, delta)}
-              onRemoveMember={(chKey) => void handleRemoveMember(group.id, chKey)}
-            />
-          ))}
+          {groups.map((group) => {
+            const isRenaming = renamingGroupId === group.id;
+            return (
+              <FailoverGroupCard
+                key={group.id}
+                group={group}
+                channelsByKey={channelsByKey}
+                availableChannels={availableChannelsByGroupId[group.id] ?? []}
+                resolveBadge={resolveBadge}
+                isPickingChannel={pickingGroupId === group.id}
+                isRenaming={isRenaming}
+                renameDraft={isRenaming ? renameDraft : ''}
+                {...(isRenaming ? { renameInputRef: renameGroupInputRef } : {})}
+                canRename={catalog.renameFailoverGroup !== undefined}
+                isTv={isTv}
+                activeFocusRow={activeFocusRow}
+                focusedCol={focusedCol}
+                busy={busy}
+                onLayoutY={(y) => {
+                  groupCardYRef.current[group.id] = y;
+                }}
+                onTogglePicker={() => {
+                  setRenamingGroupId(null);
+                  setPickingGroupId(pickingGroupId === group.id ? null : group.id);
+                }}
+                onStartRename={() => handleStartRename(group)}
+                onChangeRenameDraft={setRenameDraft}
+                onSaveRename={() => void handleSaveRename(group.id)}
+                onCancelRename={handleCancelRename}
+                onDeleteGroup={() => void handleDeleteGroup(group.id)}
+                onPickChannel={(chKey) => void handleAddMember(group.id, chKey)}
+                onMoveMember={(idx, delta) => void handleMoveMember(group.id, idx, delta)}
+                onRemoveMember={(chKey) => void handleRemoveMember(group.id, chKey)}
+              />
+            );
+          })}
         </View>
       )}
     </View>

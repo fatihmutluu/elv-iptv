@@ -4,6 +4,7 @@ import {
   resolveAccountPoolKey,
   type SourceRow,
 } from '@elv/data';
+import { originOf } from '@elv/domain';
 import {
   createMonotonicClock,
   createPlaybackService,
@@ -155,11 +156,17 @@ export function useLiveEmbeddedPreview(
           streamHealthRef.current.canAcquireAlternate(accountKey, maxConnections),
         onStreamOutcome: (stream, outcome) => {
           if (stream.sourceId !== undefined && stream.sourceId.length > 0) {
-            refs.current.catalog.reportStreamOutcome?.(
-              stream.sourceId,
-              stream.url,
-              outcome === 'success',
-            );
+            const origin = originOf(stream.url);
+            if (
+              origin !== undefined &&
+              (origin.startsWith('http://') || origin.startsWith('https://'))
+            ) {
+              refs.current.catalog.reportStreamOutcome?.(
+                stream.sourceId,
+                origin,
+                outcome === 'success',
+              );
+            }
           }
         },
       });

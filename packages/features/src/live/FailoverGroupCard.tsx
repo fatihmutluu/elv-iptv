@@ -1,13 +1,16 @@
 import type { FailoverGroupRecord, ItemRow } from '@elv/data';
 import {
+  CtaButton,
   MicroPill,
   Surface,
+  TvTextInput,
+  type TvTextInputInstance,
   useI18n,
   useTheme,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
+import type { MutableRefObject, ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { type FailoverTabFocusRow, formatFailoverMemberLabel } from './failover-groups-model';
 import { SourceBadgePill } from './SourceBadgePill';
@@ -20,12 +23,20 @@ export interface FailoverGroupCardProps {
   readonly availableChannels: readonly ItemRow[];
   readonly resolveBadge: (sourceId: string, fallbackName?: string) => SourceBadgeInfo | null;
   readonly isPickingChannel: boolean;
+  readonly isRenaming: boolean;
+  readonly renameDraft: string;
+  readonly renameInputRef?: MutableRefObject<TvTextInputInstance | null>;
+  readonly canRename: boolean;
   readonly isTv: boolean;
   readonly activeFocusRow: FailoverTabFocusRow | null;
   readonly focusedCol: number;
   readonly busy: boolean;
   readonly onLayoutY: (y: number) => void;
   readonly onTogglePicker: () => void;
+  readonly onStartRename: () => void;
+  readonly onChangeRenameDraft: (text: string) => void;
+  readonly onSaveRename: () => void;
+  readonly onCancelRename: () => void;
   readonly onDeleteGroup: () => void;
   readonly onPickChannel: (channelKey: string) => void;
   readonly onMoveMember: (index: number, delta: -1 | 1) => void;
@@ -34,8 +45,9 @@ export interface FailoverGroupCardProps {
 
 /**
  * Cinema Quietude v2 hairline card for one multi-source failover group (`#157`).
- * Displays ordered backup priority rows (`#1 Primary`, `#2`, `#3`), source badges, inline channel
- * picker, and Move Up / Move Down / Remove actions with 10-ft TV D-pad focus rings.
+ * Displays ordered backup priority rows (`#1 Primary`, `#2`, `#3`), source badges, inline rename
+ * controls, inline channel picker, and Move Up / Move Down / Remove actions with 10-ft TV D-pad
+ * focus rings.
  */
 export function FailoverGroupCard({
   group,
@@ -43,12 +55,20 @@ export function FailoverGroupCard({
   availableChannels,
   resolveBadge,
   isPickingChannel,
+  isRenaming,
+  renameDraft,
+  renameInputRef,
+  canRename,
   isTv,
   activeFocusRow,
   focusedCol,
   busy,
   onLayoutY,
   onTogglePicker,
+  onStartRename,
+  onChangeRenameDraft,
+  onSaveRename,
+  onCancelRename,
   onDeleteGroup,
   onPickChannel,
   onMoveMember,
@@ -59,10 +79,17 @@ export function FailoverGroupCard({
   const cursor = webCursorPointer();
   const transition = webTransition(theme, 'background-color, border-color, opacity');
 
+  const isEditFocused =
+    activeFocusRow?.kind === 'group-edit' && activeFocusRow.groupId === group.id;
   const isHeaderFocused =
     activeFocusRow?.kind === 'group-header' && activeFocusRow.groupId === group.id;
+  const isCardFocused = isEditFocused || isHeaderFocused;
   const addBtnFocused = isHeaderFocused && focusedCol === 0;
-  const deleteBtnFocused = isHeaderFocused && focusedCol === 1;
+  const renameBtnFocused = isHeaderFocused && focusedCol === 1;
+  const deleteBtnFocused = isHeaderFocused && focusedCol === 2;
+  const renameInputFocused = isEditFocused && focusedCol === 0;
+  const renameSaveFocused = isEditFocused && focusedCol === 1;
+  const renameCancelFocused = isEditFocused && focusedCol === 2;
 
   const btnStyle = (focused: boolean, danger = false, disabled = false) => [
     styles.btn,
@@ -90,70 +117,135 @@ export function FailoverGroupCard({
       onLayout={(e) => onLayoutY(e.nativeEvent.layout.y)}
       style={[
         styles.card,
-        isHeaderFocused
+        isCardFocused
           ? { borderColor: theme.colors.focusRingColor, backgroundColor: theme.colors.focusFill }
           : null,
       ]}
     >
-      <View style={styles.headerRow}>
-        <View style={styles.titleArea}>
-          <Text
-            numberOfLines={1}
-            style={[theme.typography.title, { color: theme.colors.textPrimary }]}
-          >
-            {group.name}
-          </Text>
-          <MicroPill
-            testID={`failover-group-count-${group.id}`}
-            label={i18n.t('channels.failover.memberCount', { count: group.members.length })}
-            tone="neutral"
+      {isRenaming ? (
+        <View style={styles.renameRow}>
+          <TvTextInput
+            ref={renameInputRef}
+            testID={`failover-rename-input-${group.id}`}
+            value={renameDraft}
+            onChangeText={onChangeRenameDraft}
+            placeholder={i18n.t('channels.failover.createPlaceholder')}
+            placeholderTextColor={theme.colors.textMuted}
+            accessibilityLabel={i18n.t('channels.manage.rename')}
+            onSubmitEditing={onSaveRename}
+            style={[
+              styles.renameInput,
+              theme.typography.body,
+              {
+                color: theme.colors.textPrimary,
+                backgroundColor: renameInputFocused ? theme.colors.focusFill : theme.colors.bgCard,
+                borderWidth: renameInputFocused ? theme.focus.ringWidth : 1,
+                borderColor: renameInputFocused ? theme.colors.focusRingColor : theme.colors.accent,
+                borderRadius: theme.radius.button,
+              },
+            ]}
+          />
+          <CtaButton
+            testID={`failover-rename-save-btn-${group.id}`}
+            label={i18n.t('channels.manage.save')}
+            variant="primary"
+            disabled={busy || !canRename || renameDraft.trim().length === 0}
+            focusable={!isTv}
+            focused={renameSaveFocused}
+            onPress={onSaveRename}
+          />
+          <CtaButton
+            testID={`failover-rename-cancel-btn-${group.id}`}
+            label={i18n.t('channels.manage.cancel')}
+            variant="secondary"
+            disabled={busy}
+            focusable={!isTv}
+            focused={renameCancelFocused}
+            onPress={onCancelRename}
           />
         </View>
-        <View style={styles.actionsRow}>
-          <Pressable
-            testID={`failover-add-channel-btn-${group.id}`}
-            focusable={!isTv}
-            disabled={busy}
-            accessibilityRole="button"
-            accessibilityLabel={i18n.t('channels.failover.addChannel')}
-            onPress={onTogglePicker}
-            style={btnStyle(addBtnFocused)}
-          >
+      ) : (
+        <View style={styles.headerRow}>
+          <View style={styles.titleArea}>
             <Text
-              style={[
-                theme.typography.caption,
-                {
-                  color: theme.colors.textPrimary,
-                  fontWeight: addBtnFocused ? '700' : '500',
-                },
-              ]}
+              numberOfLines={1}
+              style={[theme.typography.title, { color: theme.colors.textPrimary }]}
             >
-              {i18n.t('channels.failover.addChannel')}
+              {group.name}
             </Text>
-          </Pressable>
-          <Pressable
-            testID={`failover-delete-group-btn-${group.id}`}
-            focusable={!isTv}
-            disabled={busy}
-            accessibilityRole="button"
-            accessibilityLabel={i18n.t('channels.failover.deleteGroup')}
-            onPress={onDeleteGroup}
-            style={btnStyle(deleteBtnFocused, true)}
-          >
-            <Text
-              style={[
-                theme.typography.caption,
-                {
-                  color: theme.colors.liveColor,
-                  fontWeight: deleteBtnFocused ? '700' : '500',
-                },
-              ]}
+            <MicroPill
+              testID={`failover-group-count-${group.id}`}
+              label={i18n.t('channels.failover.memberCount', { count: group.members.length })}
+              tone="neutral"
+            />
+          </View>
+          <View style={styles.actionsRow}>
+            <Pressable
+              testID={`failover-add-channel-btn-${group.id}`}
+              focusable={!isTv}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={i18n.t('channels.failover.addChannel')}
+              onPress={onTogglePicker}
+              style={btnStyle(addBtnFocused)}
             >
-              {i18n.t('channels.failover.deleteGroup')}
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  theme.typography.caption,
+                  {
+                    color: theme.colors.textPrimary,
+                    fontWeight: addBtnFocused ? '700' : '500',
+                  },
+                ]}
+              >
+                {i18n.t('channels.failover.addChannel')}
+              </Text>
+            </Pressable>
+            <Pressable
+              testID={`failover-rename-group-btn-${group.id}`}
+              focusable={!isTv}
+              disabled={busy || !canRename}
+              accessibilityRole="button"
+              accessibilityLabel={i18n.t('channels.manage.rename')}
+              onPress={onStartRename}
+              style={btnStyle(renameBtnFocused, false, !canRename)}
+            >
+              <Text
+                style={[
+                  theme.typography.caption,
+                  {
+                    color: theme.colors.textPrimary,
+                    fontWeight: renameBtnFocused ? '700' : '500',
+                  },
+                ]}
+              >
+                {i18n.t('channels.manage.rename')}
+              </Text>
+            </Pressable>
+            <Pressable
+              testID={`failover-delete-group-btn-${group.id}`}
+              focusable={!isTv}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={i18n.t('channels.failover.deleteGroup')}
+              onPress={onDeleteGroup}
+              style={btnStyle(deleteBtnFocused, true)}
+            >
+              <Text
+                style={[
+                  theme.typography.caption,
+                  {
+                    color: theme.colors.liveColor,
+                    fontWeight: deleteBtnFocused ? '700' : '500',
+                  },
+                ]}
+              >
+                {i18n.t('channels.failover.deleteGroup')}
+              </Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
+      )}
 
       {isPickingChannel ? (
         <View
@@ -334,6 +426,15 @@ export function FailoverGroupCard({
 
 const styles = StyleSheet.create({
   card: { padding: 12, gap: 10 },
+  renameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  renameInput: {
+    flex: 1,
+    minWidth: 160,
+    minHeight: 40,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',

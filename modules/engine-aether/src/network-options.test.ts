@@ -102,8 +102,34 @@ describe('AetherEngine network load options (#172)', () => {
       kind: 'live',
     });
 
+    loadWithNetwork(6, { dnsFamily: 'ipv4', hostOverride: 'bad.example.test' });
+    expect(native.load).toHaveBeenLastCalledWith({
+      attempt: 6,
+      url: 'https://edge.example/live/101.ts',
+      headers: {},
+      kind: 'live',
+      dnsFamily: 'ipv4',
+    });
+
+    loadWithNetwork(7, { hostOverride: '192.0.2.10:8080' });
+    expect(native.load).toHaveBeenLastCalledWith({
+      attempt: 7,
+      url: 'https://edge.example/live/101.ts',
+      headers: {},
+      kind: 'live',
+    });
+
+    loadWithNetwork(8, { hostOverride: '[2001:DB8::1]' });
+    expect(native.load).toHaveBeenLastCalledWith({
+      attempt: 8,
+      url: 'https://edge.example/live/101.ts',
+      headers: {},
+      kind: 'live',
+      hostOverride: '2001:db8::1',
+    });
+
     engine.release();
-    loadWithNetwork(6, { dnsFamily: 'ipv4', hostOverride: '192.0.2.10' });
-    expect(native.load).toHaveBeenCalledTimes(5);
+    loadWithNetwork(9, { dnsFamily: 'ipv4', hostOverride: '192.0.2.10' });
+    expect(native.load).toHaveBeenCalledTimes(8);
   });
 });

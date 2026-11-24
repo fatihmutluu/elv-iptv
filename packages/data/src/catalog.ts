@@ -636,7 +636,12 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       if (filter !== null && (await isItemRestricted(db, filter, itemKey))) {
         return err(elvError('auth', 'parental-locked'));
       }
-      return playtime.resolveStream(itemKey);
+      return playtime.resolveStream(
+        itemKey,
+        filter === null
+          ? undefined
+          : { isAlternateRestricted: (channelKey) => isItemRestricted(db, filter, channelKey) },
+      );
     },
 
     async saveProgress(input) {

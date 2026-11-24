@@ -245,14 +245,19 @@ describe('multi-source failover, split Xtream mirrors & network transport (#157,
       'http://backup2.xt.example/live/u1/p1/42.ts',
     ]);
     expect(r1.value.alternates?.[0]?.dnsFamily).toBe('ipv4');
-    expect(r1.value.alternates?.[0]?.hostOverride).toBe('203.0.113.5');
+    expect(r1.value.alternates?.[0]?.hostOverride).toBeUndefined();
+    expect(r1.value.alternates?.[1]?.hostOverride).toBeUndefined();
 
     // Report stream failure on primary -> stream switches to backup1 while API stays on primary
-    svc.reportStreamOutcome?.('xt1', 'http://primary.xt.example/live/u1/p1/42.ts', false);
+    svc.reportStreamOutcome?.('xt1', 'http://primary.xt.example', false);
     const r2 = await svc.resolveStream('x:xt1:live:42');
     expect(r2.ok).toBe(true);
     if (!r2.ok) return;
     expect(r2.value.url).toBe('http://backup1.xt.example/live/u1/p1/42.ts');
+    expect(r2.value.hostOverride).toBeUndefined();
+    expect(r2.value.dnsFamily).toBe('ipv4');
+    const primaryAlt = r2.value.alternates?.find((a) => a.url.includes('primary.xt.example'));
+    expect(primaryAlt?.hostOverride).toBe('203.0.113.5');
 
     // API client opened from secret still targets primary API server (independent slots!)
     const sourceRecord = await getSource(db, 'xt1');
@@ -457,5 +462,152 @@ describe('multi-source failover, split Xtream mirrors & network transport (#157,
     // Missing secret returns storage/secret-missing
     const missing = await updateXtreamBackupServers('nope', ['http://m2.xt.example'], { secrets });
     expect(missing.ok).toBe(false);
+  });
+
+  it('omits parental-locked failover siblings until parentalUnlocked is true (#157)', async () => {
+    const { db } = testDb();
+    expect((await openCatalog(db)).ok).toBe(true);
+    const secrets = memorySecrets();
+    let seq = 0;
+    const addDeps = { db, secrets, clock: () => 1_000, newId: () => `par${++seq}` };
+
+    const sA = await addM3uSource(
+      { name: 'Source A', playlistUrl: 'http://sa.example/list.m3u' },
+      addDeps,
+    );
+    const sB = await addM3uSource(
+      { name: 'Source B', playlistUrl: 'http://sb.example/list.m3u' },
+      addDeps,
+    );
+    expect(sA.ok && sB.ok).toBe(true);
+    if (!sA.ok || !sB.ok) return;
+
+    const http: HttpClient = {
+      async get(url) {
+        if (url.includes('sa.example')) {
+          return ok({
+            status: 200,
+            headers: {},
+            body: encode(`#EXTM3U\n${extinf('News Main', 'http://sa.example/live/news.ts')}`),
+          });
+        }
+        return ok({
+          status: 200,
+          headers: {},
+          body: encode(`#EXTM3U\n${extinf('News Backup', 'http://sb.example/live/news.ts')}`),
+        });
+      },
+    };
+    const importDeps = { db, secrets, http, scheduler: noopScheduler, clock: () => 2_000 };
+    expect((await importCatalog(sA.value.id, importDeps)).ok).toBe(true);
+    expect((await importCatalog(sB.value.id, importDeps)).ok).toBe(true);
+
+    const kA = (
+      await db.all<{ key: string }>('SELECT key FROM live WHERE source_id = ?', [sA.value.id])
+    )[0]?.key;
+    const kB = (
+      await db.all<{ key: string }>('SELECT key FROM live WHERE source_id = ?', [sB.value.id])
+    )[0]?.key;
+    expect(kA && kB).toBeTruthy();
+    if (!kA || !kB) return;
+
+    expect(
+      (
+        await createFailoverGroup(db, {
+          id: 'fg-parental',
+          name: 'News Group',
+          channelKeys: [kA, kB],
+          nowMs: 3_000,
+        })
+      ).ok,
+    ).toBe(true);
+
+    const svc = createCatalogService({
+      db,
+      secrets,
+      scheduler: noopScheduler,
+      http,
+      clock: () => 4_000,
+    });
+    expect((await svc.updateParentalSettings?.({ enabled: true }, 'default'))?.ok).toBe(true);
+    expect(
+      (
+        await svc.setParentalLock?.(
+          {
+            profileId: 'default',
+            sourceId: sB.value.id,
+            targetKind: 'item',
+            itemKind: 'live',
+            targetKey: kB,
+          },
+          true,
+        )
+      )?.ok,
+    ).toBe(true);
+
+    // Locked: Source A resolves, Source B sibling is omitted from alternates
+    const lockedRes = await svc.resolveStream(kA, { profileId: 'default' });
+    expect(lockedRes.ok).toBe(true);
+    if (lockedRes.ok) {
+      expect(lockedRes.value.url).toBe('http://sa.example/live/news.ts');
+      expect(lockedRes.value.alternates ?? []).toEqual([]);
+    }
+
+    // Unlocked: Source B sibling IS included in alternates
+    const unlockedRes = await svc.resolveStream(kA, {
+      profileId: 'default',
+      parentalUnlocked: true,
+    });
+    expect(unlockedRes.ok).toBe(true);
+    if (unlockedRes.ok) {
+      expect(unlockedRes.value.alternates?.map((a) => a.channelKey)).toEqual([kB]);
+    }
+    await svc.close();
+  });
+
+  it('omits hostOverride on external third-party guide URLs while keeping dnsFamily (#172)', async () => {
+    const { db } = testDb();
+    expect((await openCatalog(db)).ok).toBe(true);
+    const secrets = memorySecrets();
+    const added = await addM3uSource(
+      {
+        name: 'External Guide Source',
+        playlistUrl: 'http://provider.example/list.m3u',
+        guideUrl: 'https://epg.thirdparty.example/guide.xml',
+        transport: { dnsFamily: 'ipv4', hostOverride: '198.51.100.77' },
+      },
+      { db, secrets, clock: () => 1_000, newId: () => 'extg1' },
+    );
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+
+    const captured: Array<{ url: string; options: HttpRequestOptions | undefined }> = [];
+    const http: HttpClient = {
+      async get(url, options) {
+        captured.push({ url, options });
+        if (url.includes('guide.xml')) {
+          return ok({
+            status: 200,
+            headers: {},
+            body: encode('<tv><channel id="c1"><display-name>Ch 1</display-name></channel></tv>'),
+          });
+        }
+        return ok({
+          status: 200,
+          headers: {},
+          body: encode(`#EXTM3U\n${extinf('Ch 1', 'http://provider.example/1.ts', 'tvg-id="c1"')}`),
+        });
+      },
+    };
+    const importDeps = { db, secrets, http, scheduler: noopScheduler, clock: () => 2_000 };
+    expect((await importCatalog(added.value.id, importDeps)).ok).toBe(true);
+    expect((await importGuide(added.value.id, importDeps)).ok).toBe(true);
+
+    const playlistCall = captured.find((c) => c.url.includes('provider.example'));
+    const guideCall = captured.find((c) => c.url.includes('epg.thirdparty.example'));
+    expect(playlistCall?.options?.hostOverride).toBe('198.51.100.77');
+    expect(playlistCall?.options?.dnsFamily).toBe('ipv4');
+    expect(guideCall?.options?.hostOverride).toBeUndefined();
+    expect(guideCall?.options?.dnsFamily).toBe('ipv4');
   });
 });

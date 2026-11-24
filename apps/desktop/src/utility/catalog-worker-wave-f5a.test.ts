@@ -348,11 +348,7 @@ describe('catalog-worker + preload Wave F5A failover & network ops (#157, #317, 
         const storedSecret = h.secrets.get(`source.${addedXtream.value.id}.xtream`);
         expect(storedSecret).toContain('mirror1.xtream.test');
         await expect(
-          h.bridge.reportStreamOutcome?.(
-            addedXtream.value.id,
-            'http://primary.xtream.test/live/demo/demo/1.ts',
-            false,
-          ),
+          h.bridge.reportStreamOutcome?.(addedXtream.value.id, 'http://primary.xtream.test', false),
         ).resolves.toBeUndefined();
       }
     } finally {
@@ -384,6 +380,23 @@ describe('catalog-worker + preload Wave F5A failover & network ops (#157, #317, 
       expect(fault1).toMatchObject({
         type: 'fault',
         reqId: 901,
+        error: { category: 'source-format', code: 'invalid-request' },
+      });
+
+      // Worker directly rejects credentialed path URL in reportStreamOutcome (must be origin-only)
+      const fault1b = await h.sendRawToWorker({
+        type: 'call',
+        reqId: 9011,
+        call: {
+          method: 'reportStreamOutcome',
+          sourceId: 's1',
+          serverUrl: ['http://primary.xtream.test', 'live', 'demo', 'cred', '1.ts'].join('/'),
+          succeeded: false,
+        },
+      });
+      expect(fault1b).toMatchObject({
+        type: 'fault',
+        reqId: 9011,
         error: { category: 'source-format', code: 'invalid-request' },
       });
 

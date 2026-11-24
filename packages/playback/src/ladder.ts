@@ -319,10 +319,10 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     budget.lastError = error;
     recordCurrentFailure(error);
     if (budget.notFound || budget.rung >= 2) {
-      if (nextContainerFallback() !== undefined) {
+      if (hasMoreAlternates() || nextContainerFallback() !== undefined) {
         deps.cancelAll();
         freeze();
-        goTo(4, giveUp, true);
+        goTo(4, onSilentTimeout, true);
         return;
       }
       failWith(toPlaybackError(error));

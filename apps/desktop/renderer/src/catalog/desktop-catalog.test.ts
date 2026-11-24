@@ -632,7 +632,13 @@ describe('desktop CatalogService', () => {
     expect(await service.reorderFailoverGroupMembers?.('fg_1', ['m:s1:ch1'])).toEqual(ok(group));
     expect(await service.suggestFailoverGroups?.()).toEqual([cluster]);
     expect(await service.applySuggestedFailoverGroups?.([cluster])).toEqual(ok([group]));
-    service.reportStreamOutcome?.('s1', 'https://stream.example.test/1.ts', false);
+    service.reportStreamOutcome?.(
+      's1',
+      'https://user:pass@stream.example.test:8443/live/u/p/1.ts?token=abc',
+      false,
+    );
+    service.reportStreamOutcome?.('s1', 'rtsp://stream.example.test:554/live/1', false);
+    service.reportStreamOutcome?.('s1', 'udp://239.0.0.1:1234', false);
 
     expect(seen['createFailoverGroup']).toEqual([[{ name: 'News One' }]]);
     expect(seen['renameFailoverGroup']).toEqual([['fg_1', 'News Two']]);
@@ -654,7 +660,7 @@ describe('desktop CatalogService', () => {
       ],
     ]);
     expect(seen['reportStreamOutcome']).toEqual([
-      ['s1', 'https://stream.example.test/1.ts', false],
+      ['s1', 'https://stream.example.test:8443', false],
     ]);
 
     // Legacy bridge without optional Wave F5A methods falls back safely

@@ -1,5 +1,5 @@
 import type { CatalogService, DeviceImportOptions, ParentalQueryOptions } from '@elv/data';
-import { type ElvError, elvError, err } from '@elv/domain';
+import { type ElvError, elvError, err, originOf } from '@elv/domain';
 import type { CatalogBridge } from '../../../src/shared/catalog-ipc.ts';
 
 /** The catalog utility process could not open or migrate SQLite; `error` carries the typed cause (no secrets). */
@@ -395,7 +395,9 @@ export function createDesktopCatalogFromBridge(
           )
         : Promise.resolve(err(elvError('storage', 'unsupported'))),
     reportStreamOutcome: (sourceId, serverUrl, succeeded) => {
-      void bridge.reportStreamOutcome?.(sourceId, serverUrl, succeeded)?.catch(() => undefined);
+      const origin = originOf(serverUrl);
+      if (origin === undefined) return;
+      void bridge.reportStreamOutcome?.(sourceId, origin, succeeded)?.catch(() => undefined);
     },
     flushPendingWrites: () =>
       bridge.flushPendingWrites ? bridge.flushPendingWrites() : Promise.resolve(),

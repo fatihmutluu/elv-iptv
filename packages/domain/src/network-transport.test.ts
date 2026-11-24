@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { hostnameOf } from './headers';
 import {
   ipLiteralFamily,
   isValidIpv4Literal,
   isValidIpv6Literal,
+  MAX_HOST_OVERRIDE_CHARS,
   normalizeDnsFamily,
   validateHostOverride,
 } from './network-transport';
@@ -58,6 +60,8 @@ describe('network-transport (#172)', () => {
       '198.51.100.42/live',
       '198.51.100.42\r\nHost: evil',
       'fe80::1%lo0',
+      ' '.repeat(90) + '198.51.100.42',
+      '1'.repeat(100),
       123,
     ]) {
       const r = validateHostOverride(bad);
@@ -73,5 +77,10 @@ describe('network-transport (#172)', () => {
     expect(ipLiteralFamily('198.51.100.1')).toBe(4);
     expect(ipLiteralFamily('2001:db8::1')).toBe(6);
     expect(ipLiteralFamily('example.test')).toBeUndefined();
+    expect(MAX_HOST_OVERRIDE_CHARS).toBe(64);
+    expect(hostnameOf('https://Primary.Example:8443/live/1.ts')).toBe('primary.example');
+    expect(hostnameOf('http://user:pass@panel.example/epg.xml')).toBe('panel.example');
+    expect(hostnameOf('https://[2001:DB8::1]:8443/live/1.ts')).toBe('2001:db8::1');
+    expect(hostnameOf('rtsp://panel.example/1')).toBeUndefined();
   });
 });

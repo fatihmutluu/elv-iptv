@@ -200,12 +200,14 @@ function ChannelManagementOverlayBody({
         e.preventDefault?.();
         if (renamingKey !== null) setRenamingKey(null);
         else if (groupPickerKey !== null) setGroupPickerKey(null);
+        else if (tab === 'groups' && groupsTvHandlerRef.current?.('back')) return;
+        else if (tab === 'failover' && failoverTvHandlerRef.current?.('back')) return;
         else onClose();
       }
     };
     win.addEventListener?.('keydown', onKeyDown);
     return () => win.removeEventListener?.('keydown', onKeyDown);
-  }, [groupPickerKey, onClose, renamingKey, visible]);
+  }, [groupPickerKey, onClose, renamingKey, tab, visible]);
 
   const visibleChannels = useMemo(
     () => (showHidden ? channels : channels.filter((ch) => ch.isHidden !== true)),

@@ -11,9 +11,14 @@ export type FailoverTabFocusRow =
     }
   | { readonly kind: 'create'; readonly cols: readonly ['input', 'create'] }
   | {
+      readonly kind: 'group-edit';
+      readonly groupId: string;
+      readonly cols: readonly ['input', 'save', 'cancel'];
+    }
+  | {
       readonly kind: 'group-header';
       readonly groupId: string;
-      readonly cols: readonly ['addChannel', 'delete'];
+      readonly cols: readonly ['addChannel', 'rename', 'delete'];
     }
   | {
       readonly kind: 'picker-channel';
@@ -73,16 +78,31 @@ export function buildFailoverTabFocusRows(params: {
   readonly groups: readonly FailoverGroupRecord[];
   readonly hasSuggestions: boolean;
   readonly pickingGroupId: string | null;
+  readonly renamingGroupId?: string | null;
   readonly availableChannelsByGroupId: Readonly<Record<string, readonly ItemRow[]>>;
 }): readonly FailoverTabFocusRow[] {
-  const { groups, hasSuggestions, pickingGroupId, availableChannelsByGroupId } = params;
+  const {
+    groups,
+    hasSuggestions,
+    pickingGroupId,
+    renamingGroupId = null,
+    availableChannelsByGroupId,
+  } = params;
   const rows: FailoverTabFocusRow[] = [
     { kind: 'auto-match', cols: hasSuggestions ? ['autoMatch', 'apply'] : ['autoMatch'] },
     { kind: 'create', cols: ['input', 'create'] },
   ];
 
   for (const group of groups) {
-    rows.push({ kind: 'group-header', groupId: group.id, cols: ['addChannel', 'delete'] });
+    if (renamingGroupId === group.id) {
+      rows.push({ kind: 'group-edit', groupId: group.id, cols: ['input', 'save', 'cancel'] });
+    } else {
+      rows.push({
+        kind: 'group-header',
+        groupId: group.id,
+        cols: ['addChannel', 'rename', 'delete'],
+      });
+    }
     if (pickingGroupId === group.id) {
       const candidates = availableChannelsByGroupId[group.id] ?? [];
       for (const ch of candidates) {

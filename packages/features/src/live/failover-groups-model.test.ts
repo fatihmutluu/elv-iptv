@@ -110,7 +110,7 @@ describe('failover-groups-model (#157)', () => {
     expect(withoutSuggestions).toEqual([
       { kind: 'auto-match', cols: ['autoMatch'] },
       { kind: 'create', cols: ['input', 'create'] },
-      { kind: 'group-header', groupId: 'fg_1', cols: ['addChannel', 'delete'] },
+      { kind: 'group-header', groupId: 'fg_1', cols: ['addChannel', 'rename', 'delete'] },
       {
         kind: 'member',
         groupId: 'fg_1',
@@ -126,6 +126,19 @@ describe('failover-groups-model (#157)', () => {
         cols: ['moveUp', 'moveDown', 'remove'],
       },
     ]);
+
+    const withRename = buildFailoverTabFocusRows({
+      groups: [group],
+      hasSuggestions: false,
+      pickingGroupId: null,
+      renamingGroupId: 'fg_1',
+      availableChannelsByGroupId: {},
+    });
+    expect(withRename[2]).toEqual({
+      kind: 'group-edit',
+      groupId: 'fg_1',
+      cols: ['input', 'save', 'cancel'],
+    });
 
     const withPicker = buildFailoverTabFocusRows({
       groups: [group],

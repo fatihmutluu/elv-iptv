@@ -2,18 +2,20 @@ import {
   type ElvError,
   elvError,
   type HttpResponse,
+  hostnameOf,
   httpStatusError,
   ok,
   openAsyncIterator,
   type Result,
   transportHeaders,
 } from '@elv/domain';
+import { resolveXtreamBaseUrl } from '@elv/sources';
 import { conditionalHeaders, extractValidators, sanitizeValidator } from './http-cache';
 import { parseContentLength } from './import-progress';
 import { checkAbort, Stop } from './import-run';
 import type { ImportDeps } from './import-types';
 import { openClient } from './import-xtream';
-import type { HttpCacheValidator, SourceRecord } from './sources';
+import { type HttpCacheValidator, type SourceRecord, secretKey } from './sources';
 import { resolveTemplate } from './templates';
 import { readUrlVars } from './urlvars-store';
 
@@ -111,6 +113,32 @@ export async function candidateGuideUrls(
   return ok(candidates.filter((c) => c.url !== '' && !c.url.includes('{{')));
 }
 
+async function resolveSourcePrimaryHost(
+  source: SourceRecord,
+  deps: ImportDeps,
+): Promise<string | undefined> {
+  if (source.kind === 'xtream') {
+    const raw = await deps.secrets.get(secretKey(source.id, 'xtream')).catch(() => undefined);
+    if (raw === undefined) return undefined;
+    try {
+      const parsed = JSON.parse(raw) as { server?: unknown };
+      if (typeof parsed.server === 'string' && parsed.server.trim() !== '') {
+        return hostnameOf(resolveXtreamBaseUrl(parsed.server, deps.http));
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+  if (source.kind === 'm3u' && source.settings.isLocalPlaylist !== true) {
+    const playlistUrl = await deps.secrets
+      .get(secretKey(source.id, 'playlist'))
+      .catch(() => undefined);
+    return playlistUrl === undefined ? undefined : hostnameOf(playlistUrl);
+  }
+  return undefined;
+}
+
 /** Opens the first candidate URL that answers 2xx or conditional 304, with up to 2 transient retries per URL. */
 export async function openGuide(
   candidates: readonly GuideCandidate[],
@@ -127,10 +155,17 @@ export async function openGuide(
     first ??= failed[0];
   };
   const baseHeaders = transportHeaders(source.settings.transport);
+  const configuredHostOverride = source.settings.transport?.hostOverride;
+  const primaryHost =
+    configuredHostOverride !== undefined ? await resolveSourcePrimaryHost(source, deps) : undefined;
   for (const { slot, url, validator: candidateValidator } of candidates) {
     const sent = allowConditional
       ? sanitizeValidator(candidateValidator ?? source.settings.httpCache?.guide?.[slot])
       : undefined;
+    const useHostOverride =
+      configuredHostOverride !== undefined &&
+      primaryHost !== undefined &&
+      hostnameOf(url) === primaryHost;
     let lastError: ElvError | undefined;
     for (let attempt = 0; attempt <= GUIDE_MAX_RETRIES; attempt += 1) {
       checkAbort({ signal });
@@ -143,9 +178,7 @@ export async function openGuide(
           timeoutMs: REQUEST_TIMEOUT_MS,
           ...(transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
           ...(transport?.dnsFamily !== undefined ? { dnsFamily: transport.dnsFamily } : {}),
-          ...(transport?.hostOverride !== undefined
-            ? { hostOverride: transport.hostOverride }
-            : {}),
+          ...(useHostOverride ? { hostOverride: configuredHostOverride } : {}),
           ...(signal === undefined ? {} : { signal }),
         });
       } catch {

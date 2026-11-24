@@ -1,5 +1,5 @@
 import type { CatalogService } from '@elv/data';
-import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
+import { type AccessibilityFontFamily, type DeinterlaceMode, originOf } from '@elv/domain';
 import {
   type ChapterInfo,
   createPlaybackService,
@@ -155,11 +155,17 @@ export function usePlayerSession(params: {
         },
         onStreamOutcome: (stream, outcome) => {
           if (stream.sourceId !== undefined && stream.sourceId.length > 0) {
-            catalogRef?.current.reportStreamOutcome?.(
-              stream.sourceId,
-              stream.url,
-              outcome === 'success',
-            );
+            const origin = originOf(stream.url);
+            if (
+              origin !== undefined &&
+              (origin.startsWith('http://') || origin.startsWith('https://'))
+            ) {
+              catalogRef?.current.reportStreamOutcome?.(
+                stream.sourceId,
+                origin,
+                outcome === 'success',
+              );
+            }
           }
         },
       });

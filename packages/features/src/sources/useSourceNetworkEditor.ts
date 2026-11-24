@@ -40,6 +40,8 @@ export function useSourceNetworkEditor({
   const [savedSourceId, setSavedSourceId] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
+  const openSourceIdRef = useRef<string | null>(openSourceId);
+  openSourceIdRef.current = openSourceId;
   const dnsFamilyRef = useRef<DnsFamilyPreference>(dnsFamily);
   dnsFamilyRef.current = dnsFamily;
   const hostOverrideRef = useRef(hostOverride);
@@ -67,6 +69,7 @@ export function useSourceNetworkEditor({
   }, []);
 
   const close = useCallback(() => {
+    openSourceIdRef.current = null;
     setOpenSourceId(null);
     setValidationError(null);
     clearSavedNotice();
@@ -75,20 +78,21 @@ export function useSourceNetworkEditor({
   const toggleSource = useCallback(
     (source: SourceRow) => {
       clearSavedNotice();
-      setOpenSourceId((prev) => {
-        if (prev === source.id) {
-          setValidationError(null);
-          return null;
-        }
-        const initialDns = source.dnsFamily ?? 'system';
-        const initialHost = source.hostOverride ?? '';
-        dnsFamilyRef.current = initialDns;
-        hostOverrideRef.current = initialHost;
-        setDnsFamilyState(initialDns);
-        setHostOverrideState(initialHost);
+      if (openSourceIdRef.current === source.id) {
+        openSourceIdRef.current = null;
+        setOpenSourceId(null);
         setValidationError(null);
-        return source.id;
-      });
+        return;
+      }
+      const initialDns = source.dnsFamily ?? 'system';
+      const initialHost = source.hostOverride ?? '';
+      openSourceIdRef.current = source.id;
+      dnsFamilyRef.current = initialDns;
+      hostOverrideRef.current = initialHost;
+      setOpenSourceId(source.id);
+      setDnsFamilyState(initialDns);
+      setHostOverrideState(initialHost);
+      setValidationError(null);
     },
     [clearSavedNotice],
   );
@@ -130,10 +134,14 @@ export function useSourceNetworkEditor({
         const transport: TransportSettings = {
           ...(source.allowLegacyTls !== undefined ? { allowLegacyTls: source.allowLegacyTls } : {}),
           dnsFamily: dnsFamilyRef.current,
-          hostOverride: checked.value,
+          hostOverride: checked.value ?? '',
         };
-        await catalog.updateSourceSettings(source.id, { transport });
+        const result = await catalog.updateSourceSettings(source.id, { transport });
         if (!mountedRef.current) return;
+        if (result !== undefined && !result.ok) {
+          setValidationError('sources.network.invalidHostOverride');
+          return;
+        }
         const normalizedHost = checked.value ?? '';
         hostOverrideRef.current = normalizedHost;
         setHostOverrideState(normalizedHost);

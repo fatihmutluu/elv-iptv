@@ -2,6 +2,7 @@ import {
   type ContentKind,
   elvError,
   err,
+  hostnameOf,
   httpStatusError,
   ok,
   openAsyncIterator,
@@ -98,11 +99,11 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const pass = encodeURIComponent(options.password);
   const credentials = `username=${user}&password=${pass}`;
   const liveFormat = transport?.xtreamFormat ?? 'ts';
+  const hostOverride = transport?.hostOverride || undefined;
   const baseReqOpts = {
     headers: transportHeaders(transport),
     ...(transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
     ...(transport?.dnsFamily !== undefined ? { dnsFamily: transport.dnsFamily } : {}),
-    ...(transport?.hostOverride ? { hostOverride: transport.hostOverride } : {}),
   };
 
   const apiSlot = createMirrorSlotState(servers.length, primaryCooldownMs, nowFn);
@@ -111,6 +112,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
 
   const resolveEntryBase = (entry: XtreamServerEntry): string =>
     entry.explicitScheme ? entry.raw : resolveXtreamBaseUrl(entry.raw, http);
+  const primaryHost = hostnameOf(resolveEntryBase(servers[0] as XtreamServerEntry));
   const baseAt = (idx: number) => resolveEntryBase(servers[idx] as XtreamServerEntry);
   const activeApiBase = () => baseAt(apiSlot.activeIndex());
   const activeStreamBase = () => baseAt(streamSlot.activeIndex());
@@ -135,9 +137,14 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     call?: XtreamCallOptions,
   ): Promise<Result<AsyncIterable<Uint8Array>>> {
     let response: Awaited<ReturnType<typeof http.get>>;
+    const useHostOverride =
+      hostOverride !== undefined &&
+      primaryHost !== undefined &&
+      hostnameOf(serverBase) === primaryHost;
     try {
       response = await http.get(`${serverBase}/player_api.php?${credentials}${query}`, {
         ...baseReqOpts,
+        ...(useHostOverride ? { hostOverride } : {}),
         timeoutMs,
         ...(call?.signal ? { signal: call.signal } : {}),
       });

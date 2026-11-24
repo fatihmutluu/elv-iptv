@@ -196,11 +196,7 @@ describe('Wave F5A PlayerScreen health cache, idle-probe abort, outcome reportin
     });
 
     expect(healthCache.get(target.itemKey)?.status).toBe('healthy');
-    expect(reportStreamOutcome).toHaveBeenCalledWith(
-      's1',
-      'https://primary.example/live/10.ts',
-      true,
-    );
+    expect(reportStreamOutcome).toHaveBeenCalledWith('s1', 'https://primary.example', true);
 
     for (let step = 0; step < 8; step += 1) {
       if (loads.some((l) => l.url === 'https://backup.example/live/10.ts')) break;
@@ -214,13 +210,112 @@ describe('Wave F5A PlayerScreen health cache, idle-probe abort, outcome reportin
       });
     }
 
-    expect(reportStreamOutcome).toHaveBeenCalledWith(
-      's1',
-      'https://primary.example/live/10.ts',
-      false,
-    );
+    expect(reportStreamOutcome).toHaveBeenCalledWith('s1', 'https://primary.example', false);
     const loadedUrls = loads.map((l) => l.url);
     expect(loadedUrls).not.toContain('https://saturated.example/live/10.ts');
     expect(loadedUrls).toContain('https://backup.example/live/10.ts');
+  });
+
+  it('strips Xtream credentials/paths to HTTP(S) origin and skips non-HTTP streams in reportStreamOutcome (#317)', async () => {
+    const manual = createManualClock();
+    const { loads, emit, videoHost } = createFakeEngine();
+    const reportStreamOutcome = jest.fn();
+
+    const target: PlayTarget = {
+      itemKey: 'x:s1:live:42',
+      sourceId: 's1',
+      accountKey: 'account-A',
+      kind: 'live',
+      title: 'Channel 42',
+    };
+
+    const xtreamStream: StreamRequest = {
+      url: `${['http://u:p@mirror.example.test:8080', 'live', 'demo', 'cred', '42.ts'].join('/')}?token=xyz`,
+      headers: {},
+      sourceId: 's1',
+      accountKey: 'account-A',
+      maxConnections: 1,
+    };
+
+    const catalog = {
+      resolveStream: jest.fn(async () => ok(xtreamStream)),
+      getProgress: jest.fn(async () => null),
+      saveProgress: jest.fn(async () => ok({} as WatchProgressRow)),
+      reportStreamOutcome,
+    };
+
+    const view = await render(
+      wrapWithHealth(
+        <PlayerScreen
+          catalog={catalog}
+          videoHost={videoHost}
+          target={target}
+          clock={{ now: manual.now }}
+          timers={{ setTimeout: manual.schedule, clearTimeout: manual.cancel }}
+          onExit={jest.fn()}
+        />,
+      ),
+    );
+
+    await waitFor(() => {
+      expect(loads.length).toBeGreaterThanOrEqual(1);
+    });
+
+    await act(async () => {
+      emit({ type: 'firstFrame', attempt: loads[0]?.attempt ?? 1, atMs: manual.now() + 100 });
+    });
+
+    expect(reportStreamOutcome).toHaveBeenCalledTimes(1);
+    expect(reportStreamOutcome).toHaveBeenCalledWith('s1', 'http://mirror.example.test:8080', true);
+    const reportedUrl = reportStreamOutcome.mock.calls[0]?.[1] as string;
+    expect(reportedUrl).not.toContain('alice');
+    expect(reportedUrl).not.toContain('s3cr3t');
+    expect(reportedUrl).not.toContain('user:pass');
+    expect(reportedUrl).not.toContain('/live/');
+    await view.unmount();
+
+    // Non-HTTP(S) schemes (rtsp:// and udp://) must NEVER invoke reportStreamOutcome
+    for (const nonHttpUrl of ['rtsp://cam.example.test:554/stream1', 'udp://239.0.0.1:1234']) {
+      const nonHttpReport = jest.fn();
+      const nonHttpEngine = createFakeEngine();
+      const nonHttpCatalog = {
+        resolveStream: jest.fn(async () =>
+          ok<StreamRequest>({
+            url: nonHttpUrl,
+            headers: {},
+            sourceId: 's1',
+            accountKey: 'account-A',
+            maxConnections: 1,
+          }),
+        ),
+        getProgress: jest.fn(async () => null),
+        saveProgress: jest.fn(async () => ok({} as WatchProgressRow)),
+        reportStreamOutcome: nonHttpReport,
+      };
+      const nonHttpView = await render(
+        wrapWithHealth(
+          <PlayerScreen
+            catalog={nonHttpCatalog}
+            videoHost={nonHttpEngine.videoHost}
+            target={target}
+            clock={{ now: manual.now }}
+            timers={{ setTimeout: manual.schedule, clearTimeout: manual.cancel }}
+            onExit={jest.fn()}
+          />,
+        ),
+      );
+      await waitFor(() => {
+        expect(nonHttpEngine.loads.length).toBeGreaterThanOrEqual(1);
+      });
+      await act(async () => {
+        nonHttpEngine.emit({
+          type: 'firstFrame',
+          attempt: nonHttpEngine.loads[0]?.attempt ?? 1,
+          atMs: manual.now() + 100,
+        });
+      });
+      expect(nonHttpReport).not.toHaveBeenCalled();
+      await nonHttpView.unmount();
+    }
   });
 });

@@ -8,7 +8,7 @@ import {
   type SuggestedFailoverCluster,
   type SuggestedFailoverClusterMember,
 } from '@elv/data';
-import type { Result } from '@elv/domain';
+import { originOf, type Result } from '@elv/domain';
 import {
   hasControlChar,
   hasOnlyKeys,
@@ -118,10 +118,18 @@ function isHttpServerUrl(x: unknown): x is string {
   if (!isBoundedString(x, 1, MAX_SERVER_URL_CHARS) || hasControlChar(x)) return false;
   const trimmed = x.trim();
   if (trimmed.length === 0 || !/^https?:\/\//i.test(trimmed)) return false;
+  if (trimmed.includes('@') || trimmed.includes('?') || trimmed.includes('#')) return false;
+  if (originOf(trimmed) === undefined) return false;
   try {
     const parsed = new URL(trimmed);
     return (
-      (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      parsed.hostname.length > 0 &&
+      parsed.username === '' &&
+      parsed.password === '' &&
+      (parsed.pathname === '' || parsed.pathname === '/') &&
+      parsed.search === '' &&
+      parsed.hash === ''
     );
   } catch {
     return false;

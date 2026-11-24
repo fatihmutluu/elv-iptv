@@ -29,6 +29,7 @@ import {
   type ContentKind,
   type ElvError,
   type ErrorCategory,
+  MAX_HOST_OVERRIDE_CHARS,
   normalizeDnsFamily,
   PROFILE_ID_RE,
   type TransportSettings,
@@ -414,7 +415,8 @@ function isTransportSettings(x: unknown): x is TransportSettings {
   const hostOverride = x['hostOverride'];
   if (
     hostOverride !== undefined &&
-    (typeof hostOverride !== 'string' || !validateHostOverride(hostOverride).ok)
+    (!isBoundedString(hostOverride, 0, MAX_HOST_OVERRIDE_CHARS) ||
+      !validateHostOverride(hostOverride).ok)
   ) {
     return false;
   }
