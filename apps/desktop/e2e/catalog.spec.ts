@@ -307,9 +307,12 @@ test('imports the large simulator catalog in utilityProcess without stalling ren
         authorization: SYNTH_AUTH_VAL,
       },
       accountKey: expect.any(String),
+      sourceId: expect.any(String),
+      channelKey: expect.any(String),
       maxConnections: 1,
     });
     expect(runResult.resolvedM3u?.accountKey).not.toContain(SYNTH_M3U_VAL);
+    expect(runResult.resolvedM3u?.channelKey).not.toContain(SYNTH_M3U_VAL);
 
     const scanTargets = [
       join(userDataDir, 'catalog.db'),
