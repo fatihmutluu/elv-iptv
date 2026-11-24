@@ -230,7 +230,11 @@ describe('Custom User VOD Collections (#403)', () => {
     const kidsItemsLocked = await listCollectionItems(db, 'kids-col', { profileId: 'kids' });
     expect(kidsItemsLocked.map((i) => i.key)).toEqual(['x:s1:movie:1']);
 
-    // Unlocked session reveals all 3 items
+    // listCollections itemCount MUST match parental-filtered listCollectionItems count
+    const kidsColsLocked = await listCollections(db, 'kids');
+    expect(kidsColsLocked[0]?.itemCount).toBe(1);
+
+    // Unlocked session reveals all 3 items and count 3
     const kidsItemsUnlocked = await listCollectionItems(db, 'kids-col', {
       profileId: 'kids',
       parentalUnlocked: true,
@@ -240,6 +244,8 @@ describe('Custom User VOD Collections (#403)', () => {
       's:s2:movie:3',
       'x:s1:series:10',
     ]);
+    const kidsColsUnlocked = await listCollections(db, 'kids', { parentalUnlocked: true });
+    expect(kidsColsUnlocked[0]?.itemCount).toBe(3);
   });
 
   it('wires VOD enrichment and all 10 collection methods through CatalogService and createCoalescedCatalog', async () => {

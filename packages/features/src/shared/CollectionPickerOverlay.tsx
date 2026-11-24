@@ -195,17 +195,27 @@ function CollectionPickerOverlayBody({
     try {
       const created = await catalog.createCollection({ name: validName });
       if (!mountedRef.current || !created.ok) return;
+      let added = false;
       if (catalog.addItemToCollection) {
-        await catalog.addItemToCollection(created.value.id, itemKey, itemKind);
+        try {
+          const addRes = await catalog.addItemToCollection(created.value.id, itemKey, itemKind);
+          added = addRes.ok;
+        } catch {
+          added = false;
+        }
       }
       if (!mountedRef.current) return;
-      const nextSet = new Set(memberIds);
-      nextSet.add(created.value.id);
       setDraftName('');
-      setMemberIds(nextSet);
-      setCollections((prev) => [...prev, { ...created.value, itemCount: 1 }]);
-      setStatusMessage(i18n.t('collections.saved'));
-      onMutated?.(Array.from(nextSet));
+      if (added) {
+        const nextSet = new Set(memberIds);
+        nextSet.add(created.value.id);
+        setMemberIds(nextSet);
+        setCollections((prev) => [...prev, { ...created.value, itemCount: 1 }]);
+        setStatusMessage(i18n.t('collections.saved'));
+        onMutated?.(Array.from(nextSet));
+      } else {
+        setCollections((prev) => [...prev, { ...created.value, itemCount: 0 }]);
+      }
     } finally {
       if (mountedRef.current) setBusy(false);
     }

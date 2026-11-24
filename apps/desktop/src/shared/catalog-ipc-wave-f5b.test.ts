@@ -177,6 +177,7 @@ describe('Wave F5B catalog IPC guards (#29, #215, #403)', () => {
       },
       { method: 'listCollections' },
       { method: 'listCollections', profileId: 'p_main' },
+      { method: 'listCollections', profileId: 'p_main', opts: { parentalUnlocked: true } },
       { method: 'createCollection', input: { name: 'Sci-Fi Classics' } },
       {
         method: 'createCollection',
@@ -255,6 +256,8 @@ describe('Wave F5B catalog IPC guards (#29, #215, #403)', () => {
       { method: 'enrichVodItem', itemKey: 'x:s1:movie:1', opts: { ttlMs: 400 * 86_400_000 } },
       { method: 'enrichVodItem', itemKey: 'x:s1:movie:1', extra: true },
       { method: 'listCollections', profileId: '../bad' },
+      { method: 'listCollections', opts: { parentalUnlocked: 'yes' } },
+      { method: 'listCollections', opts: { extra: 1 } },
       { method: 'listCollections', extra: 1 },
       { method: 'createCollection', input: null },
       { method: 'createCollection', input: { name: '   ' } },

@@ -15,6 +15,7 @@ import {
   isFiniteNumber,
   isOptionalStrictProfileId,
   isParentalQueryOptions,
+  isParentalUnlockedOption,
   isRecord,
   MAX_ITEM_KEY_CHARS,
 } from './catalog-ipc-guards.ts';
@@ -33,7 +34,11 @@ interface EnrichVodItemIpcOptions {
 export type CatalogWaveF5bOpsRpcCall =
   | { method: 'getVodEnrichment'; itemKey: string }
   | { method: 'enrichVodItem'; itemKey: string; opts?: EnrichVodItemIpcOptions }
-  | { method: 'listCollections'; profileId?: string }
+  | {
+      method: 'listCollections';
+      profileId?: string;
+      opts?: { readonly parentalUnlocked?: boolean };
+    }
   | { method: 'createCollection'; input: CreateVodCollectionInput }
   | { method: 'renameCollection'; id: string; name: string; profileId?: string }
   | { method: 'reorderCollections'; orderedIds: readonly string[]; profileId?: string }
@@ -67,7 +72,10 @@ export interface CatalogBridgeWaveF5bOps {
     itemKey: string,
     opts?: EnrichVodItemIpcOptions,
   ): Promise<VodEnrichmentRecord | null>;
-  listCollections?(profileId?: string): Promise<VodCollectionRecord[]>;
+  listCollections?(
+    profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
+  ): Promise<VodCollectionRecord[]>;
   createCollection?(input: CreateVodCollectionInput): Promise<Result<VodCollectionRecord>>;
   renameCollection?(
     id: string,
@@ -122,7 +130,7 @@ const CREATE_COLLECTION_INPUT_KEYS = new Set(['id', 'profileId', 'name']);
 
 const GET_VOD_ENRICHMENT_KEYS = new Set(['method', 'itemKey']);
 const ENRICH_VOD_CALL_KEYS = new Set(['method', 'itemKey', 'opts']);
-const LIST_COLLECTIONS_KEYS = new Set(['method', 'profileId']);
+const LIST_COLLECTIONS_KEYS = new Set(['method', 'profileId', 'opts']);
 const CREATE_COLLECTION_CALL_KEYS = new Set(['method', 'input']);
 const RENAME_COLLECTION_KEYS = new Set(['method', 'id', 'name', 'profileId']);
 const REORDER_COLLECTIONS_KEYS = new Set(['method', 'orderedIds', 'profileId']);
@@ -211,7 +219,11 @@ export function isWaveF5bOpsRpcCall(x: Record<string, unknown>): boolean {
         (x['opts'] === undefined || isEnrichVodItemIpcOptions(x['opts']))
       );
     case 'listCollections':
-      return hasOnlyKeys(x, LIST_COLLECTIONS_KEYS) && isOptionalStrictProfileId(x['profileId']);
+      return (
+        hasOnlyKeys(x, LIST_COLLECTIONS_KEYS) &&
+        isOptionalStrictProfileId(x['profileId']) &&
+        (x['opts'] === undefined || isParentalUnlockedOption(x['opts']))
+      );
     case 'createCollection':
       return hasOnlyKeys(x, CREATE_COLLECTION_CALL_KEYS) && isCreateVodCollectionInput(x['input']);
     case 'renameCollection':

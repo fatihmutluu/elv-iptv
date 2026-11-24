@@ -431,11 +431,15 @@ export function validateSourceForm(
     }
     const parsedPortal = validateHttpUrl(candidatePortal);
     if (!parsedPortal.ok) return parsedPortal;
+    if (parsedPortal.value.username !== '' || parsedPortal.value.password !== '') {
+      return fail('invalid-address');
+    }
 
     const macRes = normalizeMacAddress(form.macAddress);
     if (!macRes.ok) return fail('invalid-mac');
 
     const serialNumber = form.serialNumber.trim();
+    if (serialNumber.length > 128) return fail('invalid-characters');
     const name = form.name.trim() || parsedPortal.value.host;
     const transport = buildTransport(
       userAgent,

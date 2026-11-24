@@ -712,4 +712,62 @@ describe('Stalker / Ministra MAC portal support (#29, ADR 0015)', () => {
       expect(blockedRes.error.code).toBe('account-disabled');
     }
   });
+
+  it('does not leave orphaned stalker_cmds keys when removeSource races with loadSeriesEpisodes', async () => {
+    const { db } = testDb();
+    const secrets = memorySecrets();
+    expect((await openCatalog(db)).ok).toBe(true);
+
+    const cfg: FakePortalConfig = { createLinkCalls: [], handshakeCalls: 0 };
+    const baseHttp = createFakeStalkerHttp(cfg);
+    const deps = {
+      db,
+      secrets,
+      scheduler: immediateScheduler,
+      http: baseHttp,
+      clock: () => 1_700_000_500_000,
+    };
+
+    const added = await addStalkerSource(
+      {
+        name: 'Race Portal',
+        portalUrl: 'http://portal.example.test/c/',
+        mac: '00:1A:79:00:00:01',
+      },
+      { db, secrets, clock: () => 1_700_000_500_000, newId: () => 'strace' },
+    );
+    expect(added.ok).toBe(true);
+    expect((await importCatalog('strace', deps)).ok).toBe(true);
+
+    // Simulate concurrent removeSource firing right after season episodes are fetched, before mergeStalkerCmdMap
+    const racingHttp: HttpClient = {
+      async get(url, options) {
+        const res = await baseHttp.get(url, options);
+        const parsed = new URL(url);
+        if (
+          parsed.searchParams.get('type') === 'series' &&
+          parsed.searchParams.get('action') === 'get_ordered_list' &&
+          parsed.searchParams.get('season_id')
+        ) {
+          await db.run('UPDATE sources SET deleting = 1 WHERE id = ?', ['strace']);
+          await secrets.delete(secretKey('strace', 'stalker_cmds'));
+        }
+        return res;
+      },
+    };
+
+    const epRes = await loadSeriesEpisodes('strace', 's:strace:series:301', {
+      ...deps,
+      http: racingHttp,
+    });
+    expect(epRes.ok).toBe(false);
+    if (!epRes.ok) {
+      expect(epRes.error.category).toBe('storage');
+      expect(epRes.error.code).toBe('source-not-found');
+    }
+    const leftoverCmdKeys = Array.from(secrets.data.keys()).filter((k) =>
+      k.startsWith('source.strace.stalker_cmds'),
+    );
+    expect(leftoverCmdKeys).toEqual([]);
+  });
 });

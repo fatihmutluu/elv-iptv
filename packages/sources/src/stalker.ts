@@ -181,10 +181,11 @@ export function createStalkerClient(options: StalkerClientOptions): StalkerClien
     const bytes = await readBoundedStalkerBody(body, maxBodyBytes);
     if (!bytes.ok) return { kind: 'error', error: bytes.error };
     const text = detectAndDecodeText(bytes.value);
-    if (AUTH_FAILED_RE.test(text)) return { kind: 'auth-failed' };
-
     const parsed = parseXtreamJson(text);
-    if (!parsed.ok) return { kind: 'error', error: parsed.error };
+    if (!parsed.ok) {
+      if (AUTH_FAILED_RE.test(text)) return { kind: 'auth-failed' };
+      return { kind: 'error', error: parsed.error };
+    }
     if (payloadIndicatesAuthFailure(parsed.value)) return { kind: 'auth-failed' };
     return { kind: 'ok', json: parsed.value };
   }
@@ -213,11 +214,12 @@ export function createStalkerClient(options: StalkerClientOptions): StalkerClien
     }
     if (!isRaw(js)) return err(shapeError());
     const rawToken = typeof js.token === 'string' ? js.token.trim() : '';
-    if (rawToken.length === 0) {
+    const cleanToken = sanitizeHeaderValue(rawToken);
+    if (rawToken.length === 0 || cleanToken !== rawToken) {
       bearerToken = undefined;
       return err(unauthorizedError());
     }
-    bearerToken = rawToken;
+    bearerToken = cleanToken;
     return ok(undefined);
   }
 

@@ -563,7 +563,7 @@ describe('createProfileScopedCatalog', () => {
 
     expect(getVodEnrichment).toHaveBeenCalledWith('x:s1:movie:1', 9_000);
     expect(enrichVodItem).toHaveBeenCalledWith('x:s1:movie:1', { enabled: true });
-    expect(listCollections).toHaveBeenCalledWith('kids-1');
+    expect(listCollections).toHaveBeenCalledWith('kids-1', { parentalUnlocked: false });
     expect(createCollection).toHaveBeenCalledWith({ name: 'Weekend', profileId: 'kids-1' });
     expect(renameCollection).toHaveBeenCalledWith('vc_1', 'Sci-Fi', 'kids-1');
     expect(reorderCollections).toHaveBeenCalledWith(['vc_1'], 'kids-1');
@@ -657,14 +657,16 @@ describe('createProfileScopedCatalog', () => {
     await scoped.addItemToCollection?.(created.value.id, safeMovie.key, 'movie');
     await scoped.addItemToCollection?.(created.value.id, adultMovie.key, 'movie');
 
-    // Locked Kids profile filters out restricted movie in listCollectionItems
+    // Locked Kids profile filters out restricted movie in both listCollectionItems and listCollections itemCount
     const lockedItems = await scoped.listCollectionItems?.(created.value.id);
     expect(lockedItems?.map((i) => i.key)).toEqual([safeMovie.key]);
+    expect((await scoped.listCollections?.())?.[0]?.itemCount).toBe(1);
 
-    // Unlocking reveals both items
+    // Unlocking reveals both items and count 2
     scope = { profileId: kidsId, parentalUnlocked: true };
     const unlockedItems = await scoped.listCollectionItems?.(created.value.id);
     expect(unlockedItems?.map((i) => i.key)).toEqual([safeMovie.key, adultMovie.key]);
+    expect((await scoped.listCollections?.())?.[0]?.itemCount).toBe(2);
 
     // Switching to default profile sees zero Kids collections
     scope = { profileId: 'default', parentalUnlocked: false };

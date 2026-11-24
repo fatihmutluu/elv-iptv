@@ -625,14 +625,12 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         method: 'enrichVodItem',
         itemKey,
         ...(opts === undefined ? {} : { opts }),
-      }).then((res) => {
-        if (res !== null) emitChanged();
-        return res;
       }),
-    listCollections: (profileId) =>
+    listCollections: (profileId, opts) =>
       callValue({
         method: 'listCollections',
         ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
       }),
     createCollection: (input) => notifyOnOk(callResult({ method: 'createCollection', input })),
     renameCollection: (id, name, profileId) =>

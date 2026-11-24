@@ -386,5 +386,22 @@ describe('validateSourceForm and detectPastedXtreamLink', () => {
     const badSerial = validateSourceForm(stalkerForm({ serialNumber: 'SN\n123' }));
     expect(badSerial.ok).toBe(false);
     if (!badSerial.ok) expect(badSerial.error.code).toBe('invalid-characters');
+
+    for (const credsPortal of [
+      'https://user:pass@portal.example.test/c/',
+      'http://user@portal.example.test:8080/c/',
+      'user@portal.example.test/c/',
+    ]) {
+      const res = validateSourceForm(stalkerForm({ portalUrl: credsPortal }));
+      expect(res.ok, `expected ${credsPortal} to fail`).toBe(false);
+      if (!res.ok) expect(res.error.code).toBe('invalid-address');
+    }
+
+    const oversizedSerial = validateSourceForm(stalkerForm({ serialNumber: 'S'.repeat(129) }));
+    expect(oversizedSerial.ok).toBe(false);
+    if (!oversizedSerial.ok) expect(oversizedSerial.error.code).toBe('invalid-characters');
+
+    const maxSerial = validateSourceForm(stalkerForm({ serialNumber: 'S'.repeat(128) }));
+    expect(maxSerial.ok).toBe(true);
   });
 });

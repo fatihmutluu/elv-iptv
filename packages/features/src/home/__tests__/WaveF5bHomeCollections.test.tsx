@@ -328,4 +328,60 @@ describe('Wave F5B HomeScreen Collections & CollectionManagerOverlay (#403)', ()
       await env.cleanup();
     }
   });
+
+  it('chunks listProgressByKeys calls to <= 200 keys when Home and collections exceed 200 items', async () => {
+    const env = await openCatalogWithMovies();
+    try {
+      const col = await env.catalog.createCollection?.({ name: 'Mega Watchlist' });
+      expect(col?.ok).toBe(true);
+      if (!col?.ok) return;
+
+      const syntheticItems = Array.from({ length: 230 }, (_, i) => ({
+        id: 1000 + i,
+        key: `x:src-1:movie:${1000 + i}`,
+        sourceId: 'src-1',
+        providerId: String(1000 + i),
+        kind: 'movie' as const,
+        name: `Movie ${i}`,
+        logo: null,
+        rating: null,
+        year: 2020,
+        num: null,
+      }));
+
+      const progressCalls: number[] = [];
+      const wrappedCatalog: CatalogService = {
+        ...env.catalog,
+        listCollectionItems: async (collectionId, opts) => {
+          if (collectionId === col.value.id) return syntheticItems;
+          return (await env.catalog.listCollectionItems?.(collectionId, opts)) ?? [];
+        },
+        listProgressByKeys: async (keys, profileId) => {
+          progressCalls.push(keys.length);
+          expect(keys.length).toBeLessThanOrEqual(200);
+          return (await env.catalog.listProgressByKeys?.(keys, profileId)) ?? [];
+        },
+      };
+
+      const view = await renderHome({
+        catalog: wrappedCatalog,
+        sources: env.sources,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId(`home-rail-collection-${col.value.id}`)).toBeTruthy();
+        expect(progressCalls.length).toBeGreaterThanOrEqual(2);
+      });
+
+      for (const batchSize of progressCalls) {
+        expect(batchSize).toBeLessThanOrEqual(200);
+      }
+      const totalRequested = progressCalls.reduce((sum, n) => sum + n, 0);
+      expect(totalRequested).toBeGreaterThanOrEqual(230);
+
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
 });

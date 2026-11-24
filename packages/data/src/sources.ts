@@ -16,6 +16,7 @@ import {
 import { normalizeStalkerPortalUrl } from '@elv/sources';
 import { fingerprintStalkerCredentials } from './credential-fingerprint';
 import { pruneSourceFailoverMembersInTx } from './failover-groups-repo';
+import { deleteStalkerCmdMap } from './stalker-cmds-store';
 import type { SegmentRule, UrlVars } from './templates';
 import { deleteUrlVars } from './urlvars-store';
 
@@ -276,7 +277,7 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'vod_enrichment',
   'vod_collection_items',
 ];
-const NON_URLVARS_PARTS = ['xtream', 'playlist', 'stalker', 'stalker_cmds'] as const;
+const NON_SHARDED_PARTS = ['xtream', 'playlist', 'stalker'] as const;
 
 /** Characters a source id may use: the set every platform secret store accepts in a key. */
 export const SOURCE_ID = /^[A-Za-z0-9._-]+$/;
@@ -627,13 +628,16 @@ export async function updateXtreamBackupServers(
   }
 }
 
-/** Deletes the secrets of a source (including all `urlvars` shards); reports `storage/secret-delete-failed` on failure. */
+/** Deletes the secrets of a source (including all `urlvars` and `stalker_cmds` shards); reports `storage/secret-delete-failed` on failure. */
 export async function removeSecrets(id: string, secrets: SecretStore): Promise<Result<void>> {
-  const [partResults, urlvarsResult] = await Promise.all([
-    Promise.allSettled(NON_URLVARS_PARTS.map((part) => secrets.delete(secretKey(id, part)))),
+  const [partResults, urlvarsResult, stalkerCmdsResult] = await Promise.all([
+    Promise.allSettled(NON_SHARDED_PARTS.map((part) => secrets.delete(secretKey(id, part)))),
     deleteUrlVars(secrets, id),
+    deleteStalkerCmdMap(secrets, id),
   ]);
-  return partResults.some((r) => r.status === 'rejected') || !urlvarsResult.ok
+  return partResults.some((r) => r.status === 'rejected') ||
+    !urlvarsResult.ok ||
+    !stalkerCmdsResult.ok
     ? err(elvError('storage', 'secret-delete-failed'))
     : ok(undefined);
 }

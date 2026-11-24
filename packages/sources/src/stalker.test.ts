@@ -393,4 +393,53 @@ describe('handshake, fallback, token renewal, transport, and credential isolatio
     expectErr(await client.createLink('live', 'false-out'), 'playback', 'stream-unavailable');
     expectErr(await client.createLink('live', 'bad-shape'), 'source-format', 'unexpected-shape');
   });
+
+  it('does not treat valid catalog JSON containing "Authorization failed" in a plot as auth failure, and still handles plain-text auth errors', async () => {
+    let handshakes = 0;
+    const { http } = mockPortal((url) => {
+      const action = paramOf(url, 'action');
+      if (action === 'handshake') {
+        handshakes += 1;
+        return { json: { js: { token: `TOK-${handshakes}` } } };
+      }
+      if (action === 'get_ordered_list') {
+        return {
+          json: {
+            js: {
+              total_items: 1,
+              max_page_items: 14,
+              data: [
+                {
+                  id: '900',
+                  name: 'The Intruder',
+                  description: 'After an Authorization failed alert locks the vault, they escape.',
+                  cmd: 'ffmpeg http://cdn.example.test/vod/900.mp4',
+                },
+              ],
+            },
+          },
+        };
+      }
+      return { text: 'Authorization failed.', status: 200 };
+    });
+
+    const client = createStalkerClient({ http, portalUrl: PORTAL, mac: MAC });
+    const page = unwrap(await client.vodItems({ categoryId: '*', page: 1 }));
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.plot).toContain('Authorization failed');
+    expect(handshakes).toBe(1);
+
+    // Plain-text HTTP 200 "Authorization failed." still triggers re-handshake and returns unauthorized
+    expectErr(await client.genres(), 'auth', 'unauthorized');
+    expect(handshakes).toBe(2);
+  });
+
+  it('rejects handshake tokens containing CR/LF or ASCII control characters', async () => {
+    for (const badToken of ['TOK\r\nX-Injected: 1', 'TOK\nEVIL', 'TOK\u0000NULL', 'TOK\u007fDEL']) {
+      const { http, requests } = mockPortal(() => ({ json: { js: { token: badToken } } }));
+      const client = createStalkerClient({ http, portalUrl: PORTAL, mac: MAC });
+      expectErr(await client.handshake(), 'auth', 'unauthorized');
+      expect(requests).toHaveLength(1);
+    }
+  });
 });

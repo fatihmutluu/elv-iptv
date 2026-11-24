@@ -433,7 +433,15 @@ export function createProfileScopedCatalog(
     ...(c.getVodEnrichment ? { getVodEnrichment: c.getVodEnrichment.bind(c) } : {}),
     ...(c.enrichVodItem ? { enrichVodItem: c.enrichVodItem.bind(c) } : {}),
     ...(listCollections
-      ? { listCollections: (profileId) => listCollections(profileId ?? getScope().profileId) }
+      ? {
+          listCollections: (profileId, opts) => {
+            const scope = getScope();
+            return listCollections(profileId ?? scope.profileId, {
+              ...opts,
+              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
+        }
       : {}),
     ...(createCollection
       ? {

@@ -9,6 +9,7 @@ import type {
 } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  batchLoadProgressByKeys,
   type CachedHomeSnapshot,
   type HydratedVodCollection,
   mergeHydratedCollections,
@@ -259,14 +260,13 @@ export function useHomeData({
           ...favRows.map((f) => f.itemKey),
           ...nextCollections.flatMap((c) => c.items.map((item) => item.key)),
         ]);
-        const extraProgress =
-          keySet.size > 0 && catalog.listProgressByKeys
-            ? await catalog.listProgressByKeys(Array.from(keySet)).catch(() => [])
-            : [];
+        const nextProgress =
+          keySet.size > 0
+            ? await batchLoadProgressByKeys(catalog, Array.from(keySet)).catch(
+                () => new Map<string, WatchProgressRow>(),
+              )
+            : new Map<string, WatchProgressRow>();
         if (cancelled) return;
-
-        const nextProgress = new Map<string, WatchProgressRow>();
-        for (const row of extraProgress) nextProgress.set(row.itemKey, row);
         for (const row of cwRows) nextProgress.set(row.itemKey, row);
 
         const nextFavKeys = new Set<string>(favKeys);

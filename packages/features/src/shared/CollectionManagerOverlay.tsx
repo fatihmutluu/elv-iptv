@@ -290,7 +290,7 @@ function CollectionManagerOverlayBody({
       const res = await catalog.reorderCollections(reordered.map((c) => c.id));
       if (!mountedRef.current) return;
       if (res.ok) {
-        setCollections(res.value);
+        await loadCollections();
         markSaved();
       } else await loadCollections();
     });
@@ -578,7 +578,9 @@ function CollectionManagerOverlayBody({
                           {col.name}
                         </Text>
                         <MicroPill
-                          label={i18n.t('collections.itemCount', { count: col.itemCount })}
+                          label={i18n.t('collections.itemCount', {
+                            count: itemsByCol[col.id]?.length ?? col.itemCount,
+                          })}
                           tone="neutral"
                         />
                       </Pressable>

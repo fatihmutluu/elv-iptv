@@ -19,15 +19,20 @@ import {
 import { sha256Hex } from './credential-fingerprint';
 import { type SourceRecord, secretKey } from './sources';
 
+export {
+  deleteStalkerCmdMap,
+  loadStalkerCmdMap,
+  mergeStalkerCmdMap,
+  type StalkerCmdMap,
+  saveStalkerCmdMap,
+} from './stalker-cmds-store';
+
 /** @internal Parsed Stalker portal credentials stored strictly in `SecretStore`. */
 export interface StalkerSecret {
   readonly portalUrl: string;
   readonly mac: string;
   readonly serialNumber?: string;
 }
-
-/** @internal Opaque per-item Stalker `cmd` strings stored strictly in `SecretStore`. */
-export type StalkerCmdMap = Record<string, string>;
 
 const UNSAFE_IMAGE_TOKEN_RE = /(?:^|[?&;])(?:mac|token|auth|password|pass|pwd)=/i;
 
@@ -127,49 +132,4 @@ export async function openStalkerClient(
     ...(deps.maxBodyBytes !== undefined ? { maxBodyBytes: deps.maxBodyBytes } : {}),
   };
   return ok({ client: createStalkerClient(options), secret });
-}
-
-/** Loads the per-source Stalker play-time command map from `SecretStore`. */
-export async function loadStalkerCmdMap(
-  secrets: SecretStore,
-  sourceId: string,
-): Promise<StalkerCmdMap> {
-  const raw = await secrets.get(secretKey(sourceId, 'stalker_cmds')).catch(() => undefined);
-  if (raw === undefined) return {};
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    const out: StalkerCmdMap = {};
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof v === 'string' && v !== '') out[k] = v;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-/** Persists the per-source Stalker play-time command map into `SecretStore`. */
-export async function saveStalkerCmdMap(
-  secrets: SecretStore,
-  sourceId: string,
-  map: StalkerCmdMap,
-): Promise<Result<void>> {
-  try {
-    await secrets.set(secretKey(sourceId, 'stalker_cmds'), JSON.stringify(map));
-    return ok(undefined);
-  } catch {
-    return err(elvError('storage', 'secret-store-failed'));
-  }
-}
-
-/** Merges additional Stalker command entries into `source.<id>.stalker_cmds` inside `SecretStore`. */
-export async function mergeStalkerCmdMap(
-  secrets: SecretStore,
-  sourceId: string,
-  additions: StalkerCmdMap,
-): Promise<Result<void>> {
-  if (Object.keys(additions).length === 0) return ok(undefined);
-  const existing = await loadStalkerCmdMap(secrets, sourceId);
-  return saveStalkerCmdMap(secrets, sourceId, { ...existing, ...additions });
 }

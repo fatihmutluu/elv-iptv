@@ -68,7 +68,7 @@ export function executeWaveF5bOpsRpcCall(
         : Promise.resolve(null);
     case 'listCollections':
       return service.listCollections
-        ? service.listCollections(call.profileId)
+        ? service.listCollections(call.profileId, call.opts)
         : Promise.resolve([]);
     case 'createCollection':
       return service.createCollection

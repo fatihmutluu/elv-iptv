@@ -27,7 +27,10 @@ import {
 export interface CatalogCollectionsOpsMethods {
   getVodEnrichment(itemKey: string, nowMs?: number): Promise<VodEnrichmentRecord | null>;
   enrichVodItem(itemKey: string, opts?: EnrichVodItemOptions): Promise<VodEnrichmentRecord | null>;
-  listCollections(profileId?: string): Promise<VodCollectionRecord[]>;
+  listCollections(
+    profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
+  ): Promise<VodCollectionRecord[]>;
   createCollection(input: CreateVodCollectionInput): Promise<Result<VodCollectionRecord>>;
   renameCollection(
     id: string,
@@ -74,7 +77,7 @@ export function createCatalogCollectionsOpsMethods(deps: {
         ...opts,
         ...(opts?.nowMs === undefined ? { nowMs: clock() } : {}),
       }),
-    listCollections: (profileId) => listCollections(db, profileId),
+    listCollections: (profileId, opts) => listCollections(db, profileId, opts),
     createCollection: (input) => createCollection(db, input, clock()),
     renameCollection: (id, name, profileId) => renameCollection(db, id, name, profileId, clock()),
     reorderCollections: (orderedIds, profileId) =>

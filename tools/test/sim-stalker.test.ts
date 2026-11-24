@@ -403,7 +403,13 @@ describe('log.ts Stalker redaction', () => {
       t: CLOCK.toISOString(),
       method: 'GET',
       path: '/portal.php',
-      query: { type: 'stb', action: 'handshake', mac: DEMO_MAC },
+      query: {
+        type: 'stb',
+        action: 'handshake',
+        mac: DEMO_MAC,
+        sn: 'SN-UNIT-SECRET-99',
+        cmd: 'ffmpeg http://secret.portal.test/ch/101?tok=abc',
+      },
       headers: {
         cookie: `mac=${encodeURIComponent(DEMO_MAC)}; stb_lang=en`,
         authorization: 'Bearer sim-stalker-secret-token-1234',
@@ -421,6 +427,8 @@ describe('log.ts Stalker redaction', () => {
     };
     const cleaned = redact(raw);
     expect(cleaned.query.mac).toBe('***');
+    expect(cleaned.query.sn).toBe('***');
+    expect(cleaned.query.cmd).toBe('***');
     expect(cleaned.headers.authorization).toBe('***');
     expect(cleaned.headers.cookie).toBe('mac=***; stb_lang=en');
     expect(cleaned.headers.cookie).not.toContain('00:1A:79');
@@ -431,16 +439,31 @@ describe('log.ts Stalker redaction', () => {
     // End-to-end check on simulator request log
     const handle = await sim();
     const { token } = await handshake(handle.url, '/portal.php', DEMO_MAC);
-    await fetch(`${handle.url}/portal.php?type=stb&action=get_profile`, {
+    await fetch(`${handle.url}/portal.php?type=stb&action=get_profile&sn=SN-LIVE-SECRET-42`, {
       headers: {
         cookie: macCookie(DEMO_MAC, false),
         authorization: `Bearer ${token}`,
       },
     });
+    await fetch(
+      `${handle.url}/portal.php?type=itv&action=create_link&cmd=${encodeURIComponent('ffmpeg http://secret-cmd.example.test/live/100001')}`,
+      {
+        headers: {
+          cookie: macCookie(DEMO_MAC, false),
+          authorization: `Bearer ${token}`,
+        },
+      },
+    );
     const entries = handle.requests();
     const serialized = JSON.stringify(entries);
     expect(serialized).not.toContain(DEMO_MAC);
     expect(serialized).not.toContain(encodeURIComponent(DEMO_MAC));
     expect(serialized).not.toContain(token);
+    expect(serialized).not.toContain('SN-LIVE-SECRET-42');
+    expect(serialized).not.toContain('secret-cmd.example.test');
+    const profileEntry = entries.find((e) => e.query.action === 'get_profile');
+    const linkEntry = entries.find((e) => e.query.action === 'create_link');
+    expect(profileEntry?.query.sn).toBe('***');
+    expect(linkEntry?.query.cmd).toBe('***');
   });
 });

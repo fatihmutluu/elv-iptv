@@ -37,10 +37,10 @@ function clean(text: string): string {
     .replace(SHORT_PATH, `$1${MASK}`);
 }
 
-const SECRET_QUERY_KEYS = new Set(['password', 'mac', 'token']);
+const SECRET_QUERY_KEYS = new Set(['password', 'mac', 'token', 'sn', 'cmd']);
 
 /**
- * Returns a copy with secrets masked: `password`/`mac`/`token` query values, `password=` and `mac=` values
+ * Returns a copy with secrets masked: `password`/`mac`/`token`/`sn`/`cmd` query values, `password=` and `mac=` values
  * in any string (including Stalker `Cookie: mac=...`), `Bearer` tokens, the password segment of Xtream stream
  * paths (`/live|movie|series|timeshift/<user>/<secret>/` and the short `/<user>/<secret>/<id>`, whatever the
  * username), `user:pass@` userinfo anywhere (referer included) and the whole `authorization` header.

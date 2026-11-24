@@ -380,11 +380,20 @@ describe('catalog-worker + preload Wave F5B Stalker, VOD enrichment & collection
       expect(enriched?.releaseYear).toBe(1927);
       expect(enriched?.rating).toBe(8.3);
       expect(enriched?.genres).toEqual(['Sci-Fi', 'Drama']);
-      expect(changedCount).toBe(beforeCount + 1);
+      // Read-through cache fill MUST NOT fire onChanged (avoids infinite DetailScreen refresh loop)
+      expect(changedCount).toBe(beforeCount);
+
+      // Repeated enrichVodItem cache hit MUST also NOT fire onChanged
+      const enrichedAgain = await h.bridge.enrichVodItem?.(metropolisKey, {
+        enabled: true,
+        ttlMs: 86_400_000,
+      });
+      expect(enrichedAgain).toEqual(enriched);
+      expect(changedCount).toBe(beforeCount);
 
       const cached = await h.bridge.getVodEnrichment?.(metropolisKey);
       expect(cached).toEqual(enriched);
-      expect(changedCount).toBe(beforeCount + 1);
+      expect(changedCount).toBe(beforeCount);
 
       // 3. Custom VOD Collections (#403): CRUD, reorder, parental filtering, onChanged bumps
       const c1 = await h.bridge.createCollection?.({ name: 'Classics' });
@@ -392,7 +401,7 @@ describe('catalog-worker + preload Wave F5B Stalker, VOD enrichment & collection
       expect(c1?.ok).toBe(true);
       expect(c2?.ok).toBe(true);
       if (!c1?.ok || !c2?.ok) return;
-      expect(changedCount).toBe(beforeCount + 3);
+      expect(changedCount).toBe(beforeCount + 2);
 
       const list1: VodCollectionRecord[] = (await h.bridge.listCollections?.()) ?? [];
       expect(list1.map((c) => c.name)).toEqual(['Classics', 'Watchlist']);

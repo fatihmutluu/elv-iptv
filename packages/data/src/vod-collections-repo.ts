@@ -106,11 +106,13 @@ const LIVE_ITEM_COUNT_SUBQUERY = `(
 
 /**
  * Lists all custom VOD collections for `profileId` ordered by `sort_order ASC, created_at ASC`,
- * with live hydrated `itemCount` counting only currently present visible movies/series.
+ * with live hydrated `itemCount` counting only currently present visible movies/series permitted
+ * by the profile's active parental-control filter.
  */
 export async function listCollections(
   db: SqlDriver,
   profileId?: string,
+  opts?: { readonly parentalUnlocked?: boolean },
 ): Promise<VodCollectionRecord[]> {
   const pid = resolveQueryProfileId(profileId);
   const rows = await db.all<RawCollectionRow>(
@@ -122,7 +124,38 @@ export async function listCollections(
       ORDER BY c.sort_order ASC, c.created_at ASC, c.id ASC`,
     [pid],
   );
-  return rows.map(mapCollectionRow);
+  if (rows.length === 0) return [];
+  const filter = await loadActiveParentalFilter(db, pid, opts?.parentalUnlocked);
+  if (filter === null) return rows.map(mapCollectionRow);
+
+  const visibleItems = await db.all<{ collection_id: string; item_key: string }>(
+    `SELECT ci.collection_id, ci.item_key
+       FROM vod_collection_items ci
+       JOIN vod_collections c ON c.id = ci.collection_id
+       JOIN sources s ON s.id = ci.source_id AND s.deleting = 0
+      WHERE c.profile_id = ?
+        AND (
+          (ci.kind = 'movie' AND EXISTS (
+             SELECT 1 FROM movies m
+              WHERE m.source_id = ci.source_id AND m.key = ci.item_key AND m.is_hidden = 0
+          ))
+          OR
+          (ci.kind = 'series' AND EXISTS (
+             SELECT 1 FROM series sr
+              WHERE sr.source_id = ci.source_id AND sr.key = ci.item_key AND sr.is_hidden = 0
+          ))
+        )`,
+    [pid],
+  );
+  const counts = new Map<string, number>();
+  for (const item of visibleItems) {
+    if (await isItemRestricted(db, filter, item.item_key)) continue;
+    counts.set(item.collection_id, (counts.get(item.collection_id) ?? 0) + 1);
+  }
+  return rows.map((row) => ({
+    ...mapCollectionRow(row),
+    itemCount: counts.get(row.id) ?? 0,
+  }));
 }
 
 /** Creates a new per-profile VOD collection appended at `MAX(sort_order) + 1`. */

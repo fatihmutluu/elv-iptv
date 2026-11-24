@@ -33,6 +33,7 @@ import {
   updateSourceSettings,
 } from './sources';
 import {
+  deleteStalkerCmdMap,
   loadStalkerCmdMap,
   mergeStalkerCmdMap,
   openStalkerClient,
@@ -166,7 +167,7 @@ export async function importStalker(
   const stagedCmds: StalkerCmdMap = {};
   let profile: StalkerProfile | undefined;
   let discoveredIds: Record<BrowseKind, string[]> = { live: [], movie: [], series: [] };
-  let previousCmdsRaw: string | undefined;
+  let previousCmds: StalkerCmdMap | undefined;
   let wroteCmds = false;
 
   const includePlaceholders = source.settings.includePlaceholderChannels === true;
@@ -551,13 +552,15 @@ export async function importStalker(
     },
 
     beforeCommit: async () => {
-      previousCmdsRaw = await deps.secrets
-        .get(secretKey(source.id, 'stalker_cmds'))
-        .catch(() => undefined);
-      const existing = await loadStalkerCmdMap(deps.secrets, source.id);
+      const hadPrevious =
+        (await deps.secrets.get(secretKey(source.id, 'stalker_cmds')).catch(() => undefined)) !==
+        undefined;
+      previousCmds = hadPrevious ? await loadStalkerCmdMap(deps.secrets, source.id) : undefined;
       const merged: StalkerCmdMap = {};
-      for (const [k, v] of Object.entries(existing)) {
-        if (k.startsWith('series:')) merged[k] = v;
+      if (previousCmds !== undefined) {
+        for (const [k, v] of Object.entries(previousCmds)) {
+          if (k.startsWith('series:')) merged[k] = v;
+        }
       }
       Object.assign(merged, stagedCmds);
       unwrap(await saveStalkerCmdMap(deps.secrets, source.id, merged));
@@ -583,12 +586,10 @@ export async function importStalker(
 
     onAbortOrFail: async () => {
       if (!wroteCmds) return;
-      if (previousCmdsRaw === undefined) {
-        await deps.secrets.delete(secretKey(source.id, 'stalker_cmds')).catch(() => undefined);
+      if (previousCmds === undefined) {
+        await deleteStalkerCmdMap(deps.secrets, source.id).catch(() => undefined);
       } else {
-        await deps.secrets
-          .set(secretKey(source.id, 'stalker_cmds'), previousCmdsRaw)
-          .catch(() => undefined);
+        await saveStalkerCmdMap(deps.secrets, source.id, previousCmds).catch(() => undefined);
       }
     },
   });
@@ -640,6 +641,9 @@ export async function loadStalkerSeriesEpisodes(
       await deps.scheduler.yieldNow();
     }
 
+    if (!(await sourceExists(deps.db, source.id))) {
+      return err(elvError('storage', 'source-not-found'));
+    }
     unwrap(await mergeStalkerCmdMap(deps.secrets, source.id, epCmds));
 
     const stored = await deps.db.transaction<'ok' | 'no-source' | 'no-series'>(async (tx) => {
@@ -682,7 +686,10 @@ export async function loadStalkerSeriesEpisodes(
       return 'ok';
     });
 
-    if (stored === 'no-source') return err(elvError('storage', 'source-not-found'));
+    if (stored === 'no-source') {
+      await deleteStalkerCmdMap(deps.secrets, source.id).catch(() => undefined);
+      return err(elvError('storage', 'source-not-found'));
+    }
     if (stored === 'no-series') return err(elvError('source-format', 'unknown-series'));
     notify(opts, {
       phase: 'episodes',

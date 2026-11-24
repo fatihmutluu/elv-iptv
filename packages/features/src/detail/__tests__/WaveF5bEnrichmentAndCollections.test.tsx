@@ -350,4 +350,61 @@ describe('Wave F5B DetailScreen: Key-Free VOD Enrichment (#215) & Collection Pic
       await env.cleanup();
     }
   });
+
+  it('does not mark a newly created collection as member when addItemToCollection fails in CollectionPickerOverlay', async () => {
+    const env = await openFixtureCatalog();
+    try {
+      const failingCatalog: CatalogService = {
+        ...env.catalog,
+        addItemToCollection: async () => err(elvError('storage', 'collection-write-failed')),
+      };
+
+      const view = await renderDetail({
+        target: {
+          itemKey: env.movie.key,
+          sourceId: env.sourceId,
+          kind: 'movie',
+          title: env.movie.name,
+          posterUri: null,
+          backdropUri: null,
+          year: 2010,
+          rating: 8.8,
+          catalogId: env.movie.id,
+        },
+        catalog: failingCatalog,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('detail-collections')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('detail-collections'));
+      await waitFor(() => {
+        expect(screen.getByTestId('collection-picker-overlay')).toBeTruthy();
+      });
+
+      await fireEvent.changeText(screen.getByTestId('collection-picker-new-input'), 'Empty List');
+      await fireEvent.press(screen.getByTestId('collection-picker-create-btn'));
+
+      const listed = await env.catalog.listCollections?.();
+      const createdId = listed?.find((c) => c.name === 'Empty List')?.id;
+      expect(createdId).toBeDefined();
+
+      await waitFor(() => {
+        expect(screen.getByText('Empty List')).toBeTruthy();
+        const row = screen.getByTestId(`collection-picker-row-${createdId}`);
+        expect(row.props.accessibilityState?.checked).toBe(false);
+        expect(row).toHaveTextContent(/0 titles/);
+      });
+
+      await fireEvent.press(screen.getByTestId('collection-picker-close'));
+      await waitFor(() => {
+        expect(screen.queryByTestId('collection-picker-overlay')).toBeNull();
+      });
+      expect(screen.queryByTestId('detail-collections-count')).toBeNull();
+
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
 });
