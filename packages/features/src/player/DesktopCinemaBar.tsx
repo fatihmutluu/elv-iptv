@@ -1,6 +1,7 @@
 import { useTheme, useViewport } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { LiveTimeShiftBar } from './LiveTimeShiftBar';
 import { JumpToLiveButton, OsdButton, OsdClock, PLAYER_KEY_SHORTCUTS } from './PlayerOsdButton';
 import { DesktopPeekStrip, LiveNowNextStrip, PlayerFailureBanner } from './PlayerOsdChrome';
 import { type PlayerOsdProps, PlayerOsdTopBar } from './PlayerOsdTopBar';
@@ -18,6 +19,7 @@ export { type PlayerOsdProps, PlayerOsdTopBar };
 export function PlayerOsdBottomBar(
   p: PlayerOsdProps & { readonly docked?: boolean },
 ): ReactElement {
+  const theme = useTheme();
   const viewport = useViewport();
   const {
     i18n,
@@ -44,14 +46,30 @@ export function PlayerOsdBottomBar(
   const hasChapters = isVod && (p.chapters?.length ?? 0) > 0;
   const showNextEpisodePill =
     isVod &&
+    p.isCatchup !== true &&
     service !== null &&
     p.hasNextEpisodeAction === true &&
     p.onPlayNextEpisode !== undefined;
+  const showBackToLivePill = p.isCatchup === true && p.onBackToLive !== undefined;
   const showChannelsPill = !isVod && p.canZap && p.onToggleChannelList !== undefined;
-  const showAnyActionPill = showNextEpisodePill || showChannelsPill;
+  const showAnyActionPill = showNextEpisodePill || showBackToLivePill || showChannelsPill;
+  const showLiveTimeShiftSeek = !isVod && p.liveTimeShiftSupported === true && service !== null;
 
   const actionPillsNode = (
     <>
+      {showBackToLivePill && p.onBackToLive !== undefined ? (
+        <OsdButton
+          testID="player-back-to-live"
+          variant="pill-cta"
+          icon="play"
+          iconSize={14}
+          label={i18n.t('player.backToLive')}
+          accessibilityLabel={i18n.t('player.backToLive')}
+          onPress={p.onBackToLive}
+          isTv={isTv}
+          tvFocused={isFocused('backToLive')}
+        />
+      ) : null}
       {showNextEpisodePill && p.onPlayNextEpisode !== undefined ? (
         <OsdButton
           testID="player-next-episode-pill"
@@ -112,12 +130,33 @@ export function PlayerOsdBottomBar(
           {...(p.onScrubbingChange !== undefined ? { onScrubbingChange: p.onScrubbingChange } : {})}
         />
       ) : (
-        <LiveNowNextStrip
-          nowNext={p.nowNext}
-          nowMs={p.nowMs ?? Date.now()}
-          i18n={i18n}
-          timeDisplayMode={p.timeDisplayMode}
-        />
+        <>
+          <LiveNowNextStrip
+            nowNext={p.nowNext}
+            nowMs={p.nowMs ?? Date.now()}
+            i18n={i18n}
+            timeDisplayMode={p.timeDisplayMode}
+          />
+          {p.liveTimeShiftSupported === true ? (
+            <LiveTimeShiftBar
+              service={service}
+              clock={p.clock}
+              isPaused={p.isPausedOrEnded}
+              isTv={isTv}
+              tvFocused={isTv && p.tvScrubberFocused === true}
+              i18n={i18n}
+              onSeekRatio={p.onSeekRatio}
+            />
+          ) : null}
+          {p.timeShiftUnavailableVisible === true ? (
+            <Text
+              testID="player-timeshift-unavailable"
+              style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+            >
+              {i18n.t('player.timeShiftUnavailable')}
+            </Text>
+          ) : null}
+        </>
       )}
 
       <View testID="player-bottom-transport" style={styles.transportRow}>
@@ -127,10 +166,12 @@ export function PlayerOsdBottomBar(
           ) : null}
           <JumpToLiveButton
             isVod={isVod}
+            isPaused={p.isPausedOrEnded}
             service={service}
             clock={p.clock}
             i18n={i18n}
             isTv={isTv}
+            tvFocused={isFocused('jumpToLive')}
             compact
             {...(p.onJumpToLiveEdge !== undefined ? { onPress: p.onJumpToLiveEdge } : {})}
           />
@@ -246,6 +287,20 @@ export function PlayerOsdBottomBar(
                   isTv={isTv}
                 />
               ) : null}
+              {showLiveTimeShiftSeek ? (
+                <OsdButton
+                  testID="player-seek-back"
+                  icon="skipBack10"
+                  variant="bare"
+                  size={44}
+                  iconSize={26}
+                  accessibilityLabel={i18n.t('player.seekBack')}
+                  {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.seekBack } : {})}
+                  onPress={p.onSeekBack}
+                  isTv={isTv}
+                  tvFocused={isFocused('seekBack')}
+                />
+              ) : null}
               {service !== null ? (
                 <OsdButton
                   testID="player-play-pause"
@@ -262,6 +317,20 @@ export function PlayerOsdBottomBar(
                   onPress={p.onTogglePlayPause}
                   isTv={isTv}
                   tvFocused={isFocused('playPause')}
+                />
+              ) : null}
+              {showLiveTimeShiftSeek ? (
+                <OsdButton
+                  testID="player-seek-forward"
+                  icon="skipForward10"
+                  variant="bare"
+                  size={44}
+                  iconSize={26}
+                  accessibilityLabel={i18n.t('player.seekForward')}
+                  {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.seekForward } : {})}
+                  onPress={p.onSeekForward}
+                  isTv={isTv}
+                  tvFocused={isFocused('seekForward')}
                 />
               ) : null}
               {p.canZap ? (

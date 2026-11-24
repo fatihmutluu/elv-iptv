@@ -555,4 +555,162 @@ describe('deriver', () => {
       ),
     ).toEqual([{ width: 720, height: 576, aspectRatio: 2.39, hdr: 'sdr' }]);
   });
+
+  it('derives liveSeekableStartMs, liveEdgeMs, and timeShiftSupported from demuxer-cache-state (#28)', () => {
+    const s = setup('live');
+    play(s);
+
+    // Window < 2s reports bounds but timeShiftSupported: false
+    s.d.property('demuxer-cache-state', { 'cache-begin': 10, 'cache-end': 11.5 });
+    s.clock.t = 2500;
+    const shortWin = clocks(s.d.property('time-pos', 11))[0];
+    expect(shortWin).toMatchObject({
+      liveSeekableStartMs: 10_000,
+      liveEdgeMs: 11_500,
+      timeShiftSupported: false,
+    });
+    expect(s.d.liveWindow()).toEqual({ startMs: 10_000, endMs: 11_500 });
+
+    // Window >= 2s from seekable-ranges flips timeShiftSupported to true and emits anchor immediately
+    s.clock.t = 3000;
+    const expanded = clocks(
+      s.d.property('demuxer-cache-state', {
+        'seekable-ranges': [
+          { start: 5.5, end: 25.5 },
+          { start: 26, end: 40.25 },
+        ],
+      }),
+    );
+    expect(expanded).toHaveLength(1);
+    expect(expanded[0]).toMatchObject({
+      liveSeekableStartMs: 5_500,
+      liveEdgeMs: 40_250,
+      timeShiftSupported: true,
+    });
+    expect(s.d.liveWindow()).toEqual({ startMs: 5_500, endMs: 40_250 });
+
+    // Missing / non-finite / negative / inverted fields degrade cleanly to timeShiftSupported: false
+    s.clock.t = 3500;
+    const invalid = clocks(
+      s.d.property('demuxer-cache-state', {
+        'seekable-ranges': [
+          { start: -1, end: 10 },
+          { start: Number.NaN, end: 20 },
+          { start: 30, end: 10 },
+        ],
+        'cache-begin': -2,
+        'cache-end': Number.POSITIVE_INFINITY,
+      }),
+    );
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0]?.liveSeekableStartMs).toBeUndefined();
+    expect(invalid[0]?.liveEdgeMs).toBeUndefined();
+    expect(invalid[0]?.timeShiftSupported).toBe(false);
+    expect(s.d.liveWindow()).toBeUndefined();
+
+    // Inverted cache-begin >= cache-end suppresses liveEdgeMs
+    s.d.property('demuxer-cache-state', { 'cache-begin': 20, 'cache-end': 15 });
+    s.clock.t = 5000;
+    const inverted = clocks(s.d.property('time-pos', 20))[0];
+    expect(inverted?.liveSeekableStartMs).toBe(20_000);
+    expect(inverted?.liveEdgeMs).toBeUndefined();
+    expect(inverted?.timeShiftSupported).toBe(false);
+
+    // VOD streams never emit live time-shift window metadata
+    const vod = setup('vod');
+    vod.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 0, end: 60 }] });
+    play(vod);
+    const vodAnchor = clocks(vod.d.property('pause', true))[0];
+    expect(vodAnchor?.liveSeekableStartMs).toBeUndefined();
+    expect(vodAnchor?.liveEdgeMs).toBeUndefined();
+    expect(vodAnchor?.timeShiftSupported).toBeUndefined();
+    expect(vod.d.liveWindow()).toBeUndefined();
+  });
+
+  it('emits advancing live time-shift anchors on tick and throttled demuxer-cache-state while paused (#28)', () => {
+    const s = setup('live');
+    s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 10, end: 40 }] });
+    play(s);
+    s.d.property('time-pos', 35);
+
+    // Pause the live stream at t=1000
+    const pausedClocks = clocks(s.d.property('pause', true));
+    expect(pausedClocks).toHaveLength(1);
+    expect(pausedClocks[0]).toMatchObject({
+      positionMs: 35_000,
+      rate: 0,
+      liveSeekableStartMs: 10_000,
+      liveEdgeMs: 40_000,
+      timeShiftSupported: true,
+    });
+
+    // Sub-500ms edge growth does not emit immediately
+    s.clock.t = 1600;
+    expect(
+      clocks(
+        s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 10, end: 40.4 }] }),
+      ),
+    ).toEqual([]);
+
+    // >=500ms edge growth after throttle interval emits an updated paused anchor
+    s.clock.t = 1650;
+    const edgeShift = clocks(
+      s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 10, end: 40.6 }] }),
+    );
+    expect(edgeShift).toHaveLength(1);
+    expect(edgeShift[0]).toMatchObject({
+      positionMs: 35_000,
+      rate: 0,
+      liveSeekableStartMs: 10_000,
+      liveEdgeMs: 40_600,
+      timeShiftSupported: true,
+    });
+
+    // Burst update within throttle window (< 500ms since t=1650) does not spam
+    s.clock.t = 1800;
+    expect(
+      clocks(
+        s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 11, end: 42.0 }] }),
+      ),
+    ).toEqual([]);
+
+    // Periodic tick() emits the latest live window while paused once clockIntervalMs elapses
+    s.clock.t = 2650;
+    const tickClocks = clocks(s.d.tick());
+    expect(tickClocks).toHaveLength(1);
+    expect(tickClocks[0]).toMatchObject({
+      positionMs: 35_000,
+      rate: 0,
+      liveSeekableStartMs: 11_000,
+      liveEdgeMs: 42_000,
+      timeShiftSupported: true,
+    });
+
+    // Start-bound eviction (>=500ms) while paused also emits after throttle interval
+    s.clock.t = 3200;
+    const startShift = clocks(
+      s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 11.6, end: 42.1 }] }),
+    );
+    expect(startShift).toHaveLength(1);
+    expect(startShift[0]).toMatchObject({
+      liveSeekableStartMs: 11_600,
+      liveEdgeMs: 42_100,
+      rate: 0,
+      timeShiftSupported: true,
+    });
+
+    // Paused live stream without timeShiftSupported does NOT tick
+    const noTs = setup('live');
+    play(noTs);
+    noTs.d.property('pause', true);
+    noTs.clock.t = 5000;
+    expect(noTs.d.tick()).toEqual([]);
+
+    // Paused VOD does NOT tick
+    const vod = setup('vod');
+    play(vod);
+    vod.d.property('pause', true);
+    vod.clock.t = 5000;
+    expect(vod.d.tick()).toEqual([]);
+  });
 });

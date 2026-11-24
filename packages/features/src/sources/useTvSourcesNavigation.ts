@@ -1,4 +1,4 @@
-import type { BrowseKind } from '@elv/data';
+import type { BrowseKind, SourceRow } from '@elv/data';
 import { createFocusStore, type FocusStore, findList } from '@elv/focus-core';
 import { type TvTextInputInstance, useKeyInterpreter } from '@elv/ui-kit';
 import {
@@ -40,6 +40,7 @@ function buildSourcesFocusItems(
   ctrl: SourcesController,
   onOpenMenu: (() => void) | undefined,
   onOpenQrPairing?: () => void,
+  onOpenGuides?: (source: SourceRow) => void,
 ): readonly FocusItem[] {
   const picker = ctrl.categoryPicker;
   if (picker !== null) {
@@ -241,6 +242,14 @@ function buildSourcesFocusItems(
           run: () => void ctrl.runGuideRefresh(source.id),
         });
       }
+      if (onOpenGuides !== undefined) {
+        items.push({
+          id: `source-guides-manage-${source.id}`,
+          kind: 'action',
+          rowGroup,
+          run: () => onOpenGuides(source),
+        });
+      }
       if (ctrl.canChooseCategories) {
         items.push({
           id: `source-categories-${source.id}`,
@@ -324,6 +333,7 @@ export function useTvSourcesNavigation({
   ctrl,
   onOpenMenu,
   onOpenQrPairing,
+  onOpenGuides,
   onBack,
   onFocusTopNav,
 }: {
@@ -331,6 +341,7 @@ export function useTvSourcesNavigation({
   ctrl: SourcesController;
   onOpenMenu?: () => void;
   onOpenQrPairing?: () => void;
+  onOpenGuides?: (source: SourceRow) => void;
   onBack?: () => void;
   onFocusTopNav?: () => void;
 }) {
@@ -362,8 +373,8 @@ export function useTvSourcesNavigation({
   );
 
   const controls = useMemo(
-    () => buildSourcesFocusItems(ctrl, onOpenMenu, onOpenQrPairing),
-    [ctrl, onOpenMenu, onOpenQrPairing],
+    () => buildSourcesFocusItems(ctrl, onOpenMenu, onOpenQrPairing, onOpenGuides),
+    [ctrl, onOpenGuides, onOpenMenu, onOpenQrPairing],
   );
   const activeEditingInputId =
     editingInputId !== null && controls.some((c) => c.kind === 'input' && c.id === editingInputId)

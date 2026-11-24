@@ -291,6 +291,7 @@ export async function deleteProfile(
       [id],
     );
     await tx.run('DELETE FROM custom_groups WHERE profile_id = ?', [id]);
+    await tx.run('DELETE FROM programme_reminders WHERE profile_id = ?', [id]);
 
     if (target.is_default !== 0) {
       const nextDefault = allProfiles.find((p) => p.id !== id);

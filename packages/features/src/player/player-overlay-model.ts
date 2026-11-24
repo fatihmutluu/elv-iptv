@@ -138,6 +138,8 @@ export interface PlayerOverlayLive {
 export interface PlayerOverlayStateParams {
   formFactor: FormFactor;
   itemKey: string;
+  /** Target identity key distinguishing catch-up archive from live playback on the same channel (`#27`). */
+  resetKey?: string;
   isVod: boolean;
   playbackSpeed?: number;
   statusKind: PlaybackStatus['kind'];
@@ -171,6 +173,9 @@ export interface PlayerOverlayStateParams {
   hasAlwaysOnTop?: boolean | undefined;
   hasNextEpisode: boolean;
   hasPreviousChannel: boolean;
+  hasBackToLive?: boolean;
+  liveTimeShiftSupported?: boolean;
+  hasJumpToLive?: boolean;
   initialOsdHidden?: boolean | undefined;
   autoHideOsdMs?: number | undefined;
   defaultResizeMode?: DefaultResizeModePref | undefined;
@@ -281,7 +286,8 @@ export function hasTargetMetaChanged(prev: PlayTarget, next: PlayTarget): boolea
     prev.itemKind !== next.itemKind ||
     prev.nextEpisodes !== next.nextEpisodes ||
     prev.previousChannel !== next.previousChannel ||
-    prev.previousChannelIndex !== next.previousChannelIndex
+    prev.previousChannelIndex !== next.previousChannelIndex ||
+    prev.catchup !== next.catchup
   );
 }
 

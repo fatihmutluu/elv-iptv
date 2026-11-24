@@ -7,6 +7,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
@@ -47,6 +48,8 @@ internal class EventReporter(
   private var active = false
   private var live = false
   private var isLiveTs = false
+  private var ringWindowProvider: (() -> RingBufferTimeShiftWindow?)? = null
+  private var lastTimeShiftSupported = false
   private var lastState: String? = null
   private var played = false
   private var stalled = false
@@ -56,6 +59,7 @@ internal class EventReporter(
   private var lastVideoInfo: VideoInfoSnapshot? = null
   private var analyticsDroppedFrames = 0
   private var reportedDroppedFrames = 0
+  private val timelineWindow = Timeline.Window()
   private val tick = Runnable { player?.let { anchor(it) } }
 
   /** True while this prepare is opening, buffering, or stalled and transfer progress should be reported. */
@@ -67,11 +71,19 @@ internal class EventReporter(
    * Starts reporting a new prepare [prepareSerial] of [player], sends the post-`stop` fence message through Media3's
    * playback thread and reports `opening`.
    */
-  fun begin(player: ExoPlayer, live: Boolean, prepareSerial: Long, reused: Boolean, isLiveTs: Boolean = false) {
+  fun begin(
+    player: ExoPlayer,
+    live: Boolean,
+    prepareSerial: Long,
+    reused: Boolean,
+    isLiveTs: Boolean = false,
+    ringWindowProvider: (() -> RingBufferTimeShiftWindow?)? = null,
+  ) {
     end()
     this.player = player
     this.live = live
     this.isLiveTs = live && isLiveTs
+    this.ringWindowProvider = if (live) ringWindowProvider else null
     fence.begin(prepareSerial, reused = reused)
     player.createMessage { _, _ -> fence.passed(prepareSerial) }.setLooper(handler.looper).send()
     active = true
@@ -84,6 +96,8 @@ internal class EventReporter(
     if (active && stalled) sendStall("end")
     active = false
     isLiveTs = false
+    ringWindowProvider = null
+    lastTimeShiftSupported = false
     isWaitingForMedia = false
     fence.reset()
     lastState = null
@@ -280,6 +294,10 @@ internal class EventReporter(
       sendStall(if (nowStalled) "start" else "end")
     }
     isWaitingForMedia = !played || stalled || lastState == "opening" || lastState == "buffering"
+    if (player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED || player.playerError != null) {
+      handler.removeCallbacks(tick)
+      lastTimeShiftSupported = false
+    }
     if (effectiveRate(player) != anchoredRate) anchor(player)
   }
 
@@ -294,8 +312,36 @@ internal class EventReporter(
       "rate" to rate.toDouble(),
     )
     val duration = player.duration
-    if (duration != C.TIME_UNSET) anchor[if (live) "liveEdgeMs" else "durationMs"] = duration.toDouble()
-    if (live && isLiveTs) anchor["isLiveTs"] = true
+    if (live) {
+      val timeline = player.currentTimeline
+      val windowIndex = player.currentMediaItemIndex
+      val hasWindow = !timeline.isEmpty && windowIndex in 0 until timeline.windowCount
+      if (hasWindow) {
+        timeline.getWindow(windowIndex, timelineWindow)
+      }
+      val windowState = evaluateLiveTimeShiftWindow(
+        isLive = true,
+        isCurrentMediaItemSeekable = player.isCurrentMediaItemSeekable,
+        isWindowLive = hasWindow && timelineWindow.isLive,
+        windowDurationMs = if (hasWindow) timelineWindow.durationMs else C.TIME_UNSET,
+        fallbackDurationMs = duration,
+        ringWindow = ringWindowProvider?.invoke(),
+      )
+      lastTimeShiftSupported = windowState.timeShiftSupported
+      anchor["timeShiftSupported"] = windowState.timeShiftSupported
+      if (windowState.liveSeekableStartMs != null) {
+        anchor["liveSeekableStartMs"] = windowState.liveSeekableStartMs.toDouble()
+      }
+      if (windowState.liveEdgeMs != null) {
+        anchor["liveEdgeMs"] = windowState.liveEdgeMs.toDouble()
+      }
+      if (isLiveTs) anchor["isLiveTs"] = true
+    } else {
+      lastTimeShiftSupported = false
+      if (duration != C.TIME_UNSET) {
+        anchor["durationMs"] = duration.toDouble()
+      }
+    }
     val tracks = player.currentTracks
     val hasVideo = if (tracks.isEmpty) null else hasSelectedVideoTrack(tracks)
     if (hasVideo != null) anchor["hasVideoTrack"] = hasVideo
@@ -308,7 +354,13 @@ internal class EventReporter(
       anchor["decodedVideoFrames"] = 0.0
     }
     send(mapOf("type" to "clock", "anchor" to anchor))
-    if (rate > 0f) handler.postDelayed(tick, TICK_MS)
+    val keepPausedLiveTick =
+      live &&
+        lastTimeShiftSupported &&
+        player.playbackState != Player.STATE_IDLE &&
+        player.playbackState != Player.STATE_ENDED &&
+        player.playerError == null
+    if (rate > 0f || keepPausedLiveTick) handler.postDelayed(tick, TICK_MS)
   }
 
   private fun maybeEmitDroppedFrames(total: Int) {
@@ -326,6 +378,8 @@ internal class EventReporter(
     send(mapOf("type" to "stall", "phase" to phase, "atMs" to SystemClock.uptimeMillis().toDouble()))
 
   private fun sendError(code: String, httpStatus: Int?, detail: String) {
+    handler.removeCallbacks(tick)
+    lastTimeShiftSupported = false
     val error = mutableMapOf<String, Any?>("code" to code, "detail" to detail)
     if (httpStatus != null) error["httpStatus"] = httpStatus
     send(mapOf("type" to "error", "error" to error))

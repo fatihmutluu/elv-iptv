@@ -86,12 +86,14 @@ export interface XtreamVodInfo {
   extension: string;
 }
 
-/** A short-EPG entry with epoch-millisecond times. */
+/** An EPG entry (from `get_short_epg` or `get_simple_data_table`) with epoch-millisecond times. */
 export interface XtreamEpgEntry {
   start: number;
   stop: number;
   title: string;
   desc?: string;
+  readonly hasArchive?: boolean;
+  readonly nowPlaying?: boolean;
 }
 
 /** Per-call options of every {@link XtreamClient} method. */
@@ -169,6 +171,8 @@ export interface XtreamClient {
     limit?: number,
     options?: XtreamCallOptions,
   ): Promise<Result<XtreamEpgEntry[]>>;
+  /** Fetches the full archive-aware programme table (`get_simple_data_table`) for one live stream. */
+  simpleEpg(streamId: number, options?: XtreamCallOptions): Promise<Result<XtreamEpgEntry[]>>;
   /** M3U playlist URL for the scanner; contains the credentials. */
   playlistUrl(): string;
   /** XMLTV guide URL for the scanner; contains the credentials. */

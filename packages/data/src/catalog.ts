@@ -11,6 +11,7 @@ import {
 } from '@elv/domain';
 import { type AlphabetBucket, type AlphabetIndexInput, queryAlphabetIndex } from './alphabet-index';
 import { createCatalogChannelOpsMethods } from './catalog-channel-ops';
+import { type CatalogEpgOpsMethods, createCatalogEpgOpsMethods } from './catalog-epg-ops';
 import { createCatalogProfileMethods } from './catalog-profiles';
 import {
   mapNewSourceRow,
@@ -176,7 +177,7 @@ export type AddSourceInput =
   | ({ kind: 'm3u' } & M3uSourceInput);
 
 /** Local catalog of the user's sources: add, import, browse in pages, resolve a stream, close. */
-export interface CatalogService {
+export interface CatalogService extends Partial<CatalogEpgOpsMethods> {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
@@ -393,6 +394,13 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
   };
   const profileMethods = createCatalogProfileMethods({ db, secrets, clock, syncUserData });
   const channelOpsMethods = createCatalogChannelOpsMethods({ db, clock, syncUserData });
+  const epgOpsMethods = createCatalogEpgOpsMethods({
+    db,
+    secrets,
+    clock,
+    importDeps,
+    playtime,
+  });
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
@@ -679,6 +687,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
 
     ...profileMethods,
     ...channelOpsMethods,
+    ...epgOpsMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

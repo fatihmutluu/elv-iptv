@@ -1,3 +1,15 @@
+export {
+  type BuildCatchupUrlInput,
+  buildCatchupUrl,
+  type CatchupMode,
+  type CatchupProgrammeWindow,
+  type CatchupTemplateParams,
+  type CatchupWindowCheck,
+  expandCatchupTemplate,
+  formatXtreamTimeshiftStart,
+  isProgrammeWithinCatchupWindow,
+  normalizeCatchupMode,
+} from './catchup-url';
 export { detectAndDecodeText } from './encoding';
 export { decodeEntities } from './entities';
 export {

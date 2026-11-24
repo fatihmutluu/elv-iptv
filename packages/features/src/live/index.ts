@@ -2,6 +2,18 @@ export {
   ChannelManagementOverlay,
   type ChannelManagementOverlayProps,
 } from './ChannelManagementOverlay';
+export {
+  buildCatchupPlayTarget,
+  buildReminderKey,
+  CATCHUP_DAY_MS,
+  type CatchupAvailability,
+  DEFAULT_REMINDER_LEAD_MIN,
+  findArchiveProgrammeMatch,
+  indexReminderKeys,
+  isPastCatchupEligible,
+  REMINDER_LEAD_OPTIONS_MIN,
+  resolveCatchupAvailability,
+} from './catchup-reminder-model';
 export { EpgChannelRow, type EpgChannelRowProps } from './EpgChannelRow';
 export { EpgGridView, type EpgGridViewProps } from './EpgGridView';
 export {

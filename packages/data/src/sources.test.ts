@@ -210,6 +210,12 @@ describe('removeSource', () => {
         "(profile_id, item_key, source_id, custom_name, is_hidden, sort_order, updated_at) VALUES ('default', ?, ?, 'Custom', 0, 1, 1)",
       custom_group_items:
         "(group_id, item_key, source_id, position, added_at) VALUES ('grp1', ?, ?, 0, 1)",
+      guide_sources:
+        "(id, source_id, priority, name, url_template, epg_shift_ms, enabled) VALUES (?, ?, 0, 'Primary', '{{g:gs1}}', 0, 1)",
+      channel_guide_overrides:
+        "(source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at) VALUES (?, 'k', 'gs1', 'g', 0, 1, 1)",
+      programme_reminders:
+        "(profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at) VALUES ('default', ?, ?, 'Ch', 'Show', 1000, 2000, 300000, 0, 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -220,13 +226,15 @@ describe('removeSource', () => {
         } else if (
           table === 'watch_progress' ||
           table === 'favorites' ||
-          table === 'recent_channels'
+          table === 'recent_channels' ||
+          table === 'programme_reminders'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
         } else if (
           table === 'track_preferences' ||
           table === 'channel_overrides' ||
-          table === 'custom_group_items'
+          table === 'custom_group_items' ||
+          table === 'guide_sources'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
         } else {
@@ -291,6 +299,12 @@ describe('removeSource', () => {
         "(profile_id, item_key, source_id, custom_name, is_hidden, sort_order, updated_at) VALUES ('default', ?, ?, 'Custom', 0, 1, 1)",
       custom_group_items:
         "(group_id, item_key, source_id, position, added_at) VALUES ('grp1', ?, ?, 0, 1)",
+      guide_sources:
+        "(id, source_id, priority, name, url_template, epg_shift_ms, enabled) VALUES (?, ?, 0, 'Primary', '{{g:gs1}}', 0, 1)",
+      channel_guide_overrides:
+        "(source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at) VALUES (?, 'k', 'gs1', 'g', 0, 1, 1)",
+      programme_reminders:
+        "(profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at) VALUES ('default', ?, ?, 'Ch', 'Show', 1000, 2000, 300000, 0, 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -301,13 +315,15 @@ describe('removeSource', () => {
         } else if (
           table === 'watch_progress' ||
           table === 'favorites' ||
-          table === 'recent_channels'
+          table === 'recent_channels' ||
+          table === 'programme_reminders'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
         } else if (
           table === 'track_preferences' ||
           table === 'channel_overrides' ||
-          table === 'custom_group_items'
+          table === 'custom_group_items' ||
+          table === 'guide_sources'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
         } else {

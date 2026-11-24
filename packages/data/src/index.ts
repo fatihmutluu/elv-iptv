@@ -12,6 +12,7 @@ export {
 export * from './alphabet-index';
 export * from './catalog';
 export type { CatalogChannelOpsMethods } from './catalog-channel-ops';
+export type { CatalogEpgOpsMethods } from './catalog-epg-ops';
 export * from './category-selection';
 export * from './channel-overrides-repo';
 export * from './content-hash';
@@ -22,6 +23,7 @@ export * from './driver';
 export * from './fold';
 export * from './guide-match';
 export * from './guide-queries';
+export * from './guide-sources-repo';
 export { importGuide } from './import-guide';
 export * from './import-types';
 export { importCatalog, loadSeriesEpisodes } from './import-xtream';
@@ -46,6 +48,7 @@ export {
   type RecentChannelRow,
   recordRecentChannel,
 } from './recent-channels-repo';
+export * from './reminders-repo';
 export {
   latestImportHealth,
   type ReapOrphanedRunsResult,

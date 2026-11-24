@@ -86,7 +86,7 @@ const LIST_RECENT_SQL = `SELECT t.id, t.key, t.source_id, t.provider_id,
   t.name AS raw_name,
   CASE WHEN NULLIF(co.custom_name, '') IS NOT NULL THEN t.name ELSE NULL END AS original_name,
   co.sort_order AS co_sort_order,
-  t.logo AS logo, NULL AS rating, NULL AS year, t.num AS num
+  t.logo AS logo, NULL AS rating, NULL AS year, t.num AS num, t.catchup_days AS catchup_days
 FROM recent_channels r
 INNER JOIN live t
   ON t.source_id = r.source_id AND t.key = r.item_key

@@ -400,9 +400,25 @@ function fromBase64(value: unknown, serverTimezone?: string): string | undefined
   }
 }
 
+function toOptionalBool(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return undefined;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed === '1' || trimmed === 'true') return true;
+    if (trimmed === '0' || trimmed === 'false') return false;
+  }
+  return undefined;
+}
+
 /**
- * Maps `get_short_epg` listings: decodes base64 text (UTF-8 with single-byte codepage fallback)
- * and converts numeric second timestamps or `start`/`end`/`stop` datetime strings to epoch ms.
+ * Maps `get_short_epg` and `get_simple_data_table` listings: decodes base64 text (UTF-8 with
+ * single-byte codepage fallback), converts numeric second timestamps or `start`/`end`/`stop`
+ * datetime strings to epoch ms, and preserves optional `has_archive` / `now_playing` flags.
  */
 export function toEpg(raw: Raw, serverTimezone?: string): XtreamEpgEntry[] {
   const out: XtreamEpgEntry[] = [];
@@ -427,6 +443,8 @@ export function toEpg(raw: Raw, serverTimezone?: string): XtreamEpgEntry[] {
       title: fromBase64(e.title, serverTimezone) ?? '',
     };
     put(entry, 'desc', fromBase64(e.description, serverTimezone));
+    put(entry, 'hasArchive', toOptionalBool(e.has_archive));
+    put(entry, 'nowPlaying', toOptionalBool(e.now_playing));
     out.push(entry);
   }
   return out;

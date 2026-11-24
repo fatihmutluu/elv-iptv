@@ -103,7 +103,13 @@ async function openClients(source: SourceRecord, deps: ImportDeps): Promise<Resu
     return err(elvError('storage', 'secret-missing'));
   }
   const credentialFingerprint = fingerprintXtreamCredentials(server, username, password);
-  const options: XtreamClientOptions = { http: deps.http, server, username, password };
+  const options: XtreamClientOptions = {
+    http: deps.http,
+    server,
+    username,
+    password,
+    ...(source.settings.serverTimezone ? { serverTimezone: source.settings.serverTimezone } : {}),
+  };
   if (source.settings.transport !== undefined) options.transport = source.settings.transport;
   const capped =
     deps.maxBodyBytes === undefined ? options : { ...options, maxBodyBytes: deps.maxBodyBytes };
@@ -389,6 +395,11 @@ async function importXtream(
         const { account, discoveredIds } = execResult;
         if (account.outputFormats.length > 0) settings.outputFormats = account.outputFormats;
         else delete settings.outputFormats;
+        if (typeof account.serverTimezone === 'string' && account.serverTimezone.trim() !== '') {
+          settings.serverTimezone = account.serverTimezone.trim();
+        } else {
+          delete settings.serverTimezone;
+        }
         const activeConnections = normalizeActiveConnections(account.activeConnections);
         settings.accountMeta = {
           isTrial: account.isTrial,

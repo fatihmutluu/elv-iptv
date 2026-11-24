@@ -20,17 +20,20 @@ export interface M3uLiveRow extends M3uRow {
   num: number | null;
   guideId: string | null;
   catchupDays: number | null;
+  catchupMode?: string | null;
+  catchupSourceTemplate?: string | null;
   epgShiftMs?: number | null;
 }
 
-const LIVE_SQL = `INSERT INTO live_next (source_id, key, legacy_key, num, name, name_fold, sort_title, variant_base_fold, quality_rank, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+const LIVE_SQL = `INSERT INTO live_next (source_id, key, legacy_key, num, name, name_fold, sort_title, variant_base_fold, quality_rank, logo, guide_id, catchup_days, catchup_mode, catchup_source_template, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, key) DO UPDATE SET legacy_key = excluded.legacy_key, num = excluded.num, name = excluded.name,
     name_fold = excluded.name_fold, sort_title = excluded.sort_title, variant_base_fold = excluded.variant_base_fold,
     quality_rank = excluded.quality_rank, logo = excluded.logo, guide_id = excluded.guide_id,
-    catchup_days = excluded.catchup_days, url_template = excluded.url_template, headers_json = excluded.headers_json,
-    backup_urls_json = excluded.backup_urls_json, epg_shift_ms = excluded.epg_shift_ms, run_id = excluded.run_id,
-    content_hash = excluded.content_hash`;
+    catchup_days = excluded.catchup_days, catchup_mode = excluded.catchup_mode,
+    catchup_source_template = excluded.catchup_source_template, url_template = excluded.url_template,
+    headers_json = excluded.headers_json, backup_urls_json = excluded.backup_urls_json,
+    epg_shift_ms = excluded.epg_shift_ms, run_id = excluded.run_id, content_hash = excluded.content_hash`;
 
 const MOVIE_SQL = `INSERT INTO movies_next (source_id, key, legacy_key, name, name_fold, sort_title, version_group_key, version_label, logo, url_template, headers_json, backup_urls_json, run_id, content_hash)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -72,6 +75,8 @@ export async function writeM3uLive(
         logo: r.logo,
         guideId: r.guideId,
         catchupDays: r.catchupDays,
+        catchupMode: r.catchupMode,
+        catchupSourceTemplate: r.catchupSourceTemplate,
         urlTemplate: r.template,
         headersJson: r.headersJson,
         backupUrlsJson: r.backupUrlsJson,
@@ -90,6 +95,8 @@ export async function writeM3uLive(
         orNull(r.logo),
         orNull(r.guideId),
         orNull(r.catchupDays),
+        orNull(r.catchupMode),
+        orNull(r.catchupSourceTemplate),
         r.template,
         orNull(r.headersJson),
         orNull(r.backupUrlsJson),

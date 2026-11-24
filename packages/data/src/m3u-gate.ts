@@ -154,6 +154,12 @@ export function finishM3uRun(
   for (const name of own === undefined ? [] : placeholderNames(own)) {
     if (Object.hasOwn(oldVars, name)) vars[name] = oldVars[name] as string;
   }
+  // Preserve multi-guide source secrets (`g:<guideId>`) across M3U refreshes while letting discovered `g:d<n>` slots regenerate.
+  for (const [name, value] of Object.entries(oldVars)) {
+    if (name.startsWith('g:') && name !== 'g:url' && !/^g:d\d+$/.test(name)) {
+      vars[name] = value;
+    }
+  }
   let discovered: string[] | undefined;
   if (own === undefined && guideUrls.length > 0) {
     discovered = guideUrls.map((url, i) => {

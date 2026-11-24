@@ -15,12 +15,19 @@ import {
   stripFeedId,
 } from './guide-match';
 import {
+  executeMultiGuide,
+  type MultiGuideOutcome,
+  resolveEnabledGuideSources,
+  serializeGuideValidator,
+} from './guide-multi';
+import {
   type ClampedBatch,
   closeOpenProgrammes,
   closeOpenProgrammesBatch,
   flushOpenProgrammes,
   type ProgrammeStageRow,
 } from './guide-programmes';
+import { listEnabledGuideSourcesRaw } from './guide-sources-repo';
 import {
   hasStoredProgrammes,
   merge304Validator,
@@ -56,7 +63,8 @@ const MAX_GUIDE_WRITE_BATCH = 2_500;
 
 type GuideOutcome =
   | { kind: 'imported'; slot: string; state: GuideState; validator: HttpCacheValidator | undefined }
-  | { kind: 'not-modified'; slot: string; validator: HttpCacheValidator | undefined };
+  | { kind: 'not-modified'; slot: string; validator: HttpCacheValidator | undefined }
+  | MultiGuideOutcome;
 
 interface GuideState extends GuideResult {
   index: ChannelIndex;
@@ -333,9 +341,20 @@ export async function importGuide(
   if (source.kind !== 'xtream' && source.kind !== 'm3u') {
     return err(elvError('source-format', 'unsupported-source'));
   }
-  const candidates = await candidateGuideUrls(source, deps);
-  if (!candidates.ok) return candidates;
-  if (candidates.value.length === 0) return err(elvError('source-format', 'no-guide-url'));
+  const enabledGuidesRaw = await listEnabledGuideSourcesRaw(deps.db, source.id);
+  const resolvedGuides =
+    enabledGuidesRaw.length > 0
+      ? await resolveEnabledGuideSources(source.id, enabledGuidesRaw, deps)
+      : [];
+  let candidates: GuideCandidate[] = [];
+  if (enabledGuidesRaw.length > 0) {
+    if (resolvedGuides.length === 0) return err(elvError('source-format', 'no-guide-url'));
+  } else {
+    const legacy = await candidateGuideUrls(source, deps);
+    if (!legacy.ok) return legacy;
+    if (legacy.value.length === 0) return err(elvError('source-format', 'no-guide-url'));
+    candidates = legacy.value;
+  }
   const now = opts.now ?? deps.clock();
   const retryDelayMs = opts.retryDelayMs ?? defaultGuideRetryDelayMs;
   const meter = createStreamProgressMeter();
@@ -347,10 +366,31 @@ export async function importGuide(
     requireItems: false,
     execute: async (c) => {
       runId = c.runId;
-      outcome = await execute(c, source, candidates.value, now, retryDelayMs, meter);
+      outcome =
+        resolvedGuides.length > 0
+          ? await executeMultiGuide(c, source, resolvedGuides, now, retryDelayMs, meter)
+          : await execute(c, source, candidates, now, retryDelayMs, meter);
     },
     beforeCleanup: async (tx, c) => {
       if (outcome === undefined) return;
+      if (outcome.kind === 'not-modified-multi') {
+        const notMod = outcome;
+        const prevRow = enabledGuidesRaw.find((r) => r.id === notMod.guideId);
+        let prevValidator: HttpCacheValidator | undefined;
+        if (prevRow?.http_cache_json) {
+          try {
+            prevValidator = JSON.parse(prevRow.http_cache_json) as HttpCacheValidator;
+          } catch {
+            prevValidator = undefined;
+          }
+        }
+        const merged = merge304Validator(prevValidator, notMod.validator);
+        await tx.run(
+          'UPDATE guide_sources SET last_sync_at = ?, http_cache_json = ? WHERE source_id = ? AND id = ?',
+          [notMod.syncedAt, serializeGuideValidator(merged), source.id, notMod.guideId],
+        );
+        return;
+      }
       if (outcome.kind === 'not-modified') {
         const current = (await getSource(tx, source.id))?.settings ?? source.settings;
         const prev = current.httpCache?.guide?.[outcome.slot];
@@ -365,6 +405,7 @@ export async function importGuide(
         return;
       }
       await commitGuide(tx, c, outcome.state);
+      if (outcome.kind === 'imported-multi') return;
       if (c.warningCodes.includes('guide/empty')) return;
       const current = (await getSource(tx, source.id))?.settings ?? source.settings;
       const next = replaceGuideValidator(current, outcome.slot, outcome.validator);

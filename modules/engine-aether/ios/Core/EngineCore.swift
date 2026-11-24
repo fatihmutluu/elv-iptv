@@ -38,6 +38,8 @@ public final class EngineCore {
   var lastPositionSeconds: Double = 0
   var lastDurationSeconds: Double?
   var lastLiveEdgeSeconds: Double?
+  var lastLiveSeekableStartSeconds: Double?
+  var lastTimeShiftSupported: Bool?
   var lastAnchoredPositionMs: Double?
   var lastProgressUptimeMs: Double?
   var lastProgressBytes: Int64 = 0
@@ -141,9 +143,20 @@ public final class EngineCore {
     guard !released else { return }
     adopt(attempt)
     guard active, positionMs.isFinite else { return }
-    var clampedMs = max(0, positionMs)
-    if let durationSeconds = lastDurationSeconds, durationSeconds.isFinite, durationSeconds > 0 {
-      clampedMs = min(clampedMs, durationSeconds * 1_000.0)
+    let clampedMs: Double
+    if currentRequest?.live == true {
+      guard let window = liveSeekableWindow,
+            let clampedSec = clampLiveSeek(targetSec: positionMs / 1_000.0, window: window)
+      else {
+        return
+      }
+      clampedMs = clampedSec * 1_000.0
+    } else {
+      var target = max(0, positionMs)
+      if let durationSeconds = lastDurationSeconds, durationSeconds.isFinite, durationSeconds > 0 {
+        target = min(target, durationSeconds * 1_000.0)
+      }
+      clampedMs = target
     }
     lastPositionSeconds = clampedMs / 1_000.0
     lastAnchoredPositionMs = clampedMs
@@ -280,12 +293,21 @@ public final class EngineCore {
     case let .phase(phase):
       handlePhase(phase)
 
-    case let .clock(positionSeconds, rate, durationSeconds, liveEdgeSeconds):
+    case let .clock(
+      positionSeconds,
+      rate,
+      durationSeconds,
+      liveEdgeSeconds,
+      liveSeekableStartSeconds,
+      timeShiftSupported
+    ):
       handleClock(
         positionSeconds: positionSeconds,
         rate: rate,
         durationSeconds: durationSeconds,
-        liveEdgeSeconds: liveEdgeSeconds
+        liveEdgeSeconds: liveEdgeSeconds,
+        liveSeekableStartSeconds: liveSeekableStartSeconds,
+        timeShiftSupported: timeShiftSupported
       )
 
     case let .duration(durationSeconds):
@@ -360,6 +382,24 @@ public final class EngineCore {
     currentRequest?.live ?? true
   }
 
+  /// Active bounded live seekable window (seconds), or `nil` when time-shift is unavailable (`#28`).
+  public var liveSeekableWindow: LiveSeekableWindow? {
+    guard active,
+          !released,
+          currentRequest?.live == true,
+          currentPlan?.isLiveTs != true,
+          lastTimeShiftSupported == true
+    else {
+      return nil
+    }
+    return evaluateLiveSeekWindow(startSec: lastLiveSeekableStartSeconds, endSec: lastLiveEdgeSeconds)
+  }
+
+  /// Whether bounded live time-shift seeking is currently available on the active live stream (`#28`).
+  public var isLiveTimeShiftSupported: Bool {
+    liveSeekableWindow != nil
+  }
+
   /// Current adopted attempt token for synchronizing native remote commands with `CommandFence`.
   public var currentToken: Int {
     token
@@ -415,6 +455,8 @@ public final class EngineCore {
     lastPositionSeconds = (validStartMs ?? 0) / 1_000.0
     lastDurationSeconds = nil
     lastLiveEdgeSeconds = nil
+    lastLiveSeekableStartSeconds = nil
+    lastTimeShiftSupported = nil
     lastAnchoredPositionMs = validStartMs
     lastProgressUptimeMs = nil
     lastProgressBytes = 0

@@ -10,7 +10,7 @@ import {
   type Result,
   transportHeaders,
 } from '@elv/domain';
-import { type M3uEntry, scanM3u } from '@elv/sources';
+import { type M3uEntry, normalizeCatchupMode, scanM3u } from '@elv/sources';
 import { allowlistForKind, reconcileCategorySelection } from './category-selection';
 import { fingerprintM3uCredentials } from './credential-fingerprint';
 import { foldText } from './fold';
@@ -44,7 +44,7 @@ import {
   type StagedM3u,
   stableM3uKey,
 } from './m3u-gate';
-import { entryHeaders, templated } from './m3u-headers';
+import { entryHeaders, templated, templatedCatchupSource } from './m3u-headers';
 import { MAX_URLVARS_BYTES, SAMPLE_SIZE } from './m3u-templating';
 import { isPlaceholderLiveChannel } from './placeholder-filter';
 import {
@@ -69,6 +69,20 @@ import {
 
 const REQUEST_TIMEOUT_MS = 180_000;
 const UNGROUPED = 'Ungrouped';
+
+const isCustomGuideVar = (name: string): boolean =>
+  name.startsWith('g:') && name !== 'g:url' && !/^g:d\d+$/.test(name);
+
+function mergeLiveCustomGuideVars(baseVars: UrlVars, liveVars: UrlVars): UrlVars {
+  const out: UrlVars = {};
+  for (const [k, v] of Object.entries(baseVars)) {
+    if (!isCustomGuideVar(k)) out[k] = v;
+  }
+  for (const [k, v] of Object.entries(liveVars)) {
+    if (isCustomGuideVar(k)) out[k] = v;
+  }
+  return out;
+}
 
 type PlaylistOpen =
   | {
@@ -228,11 +242,17 @@ async function processBatch(
         for (const g of freshGroups) st.placedSeries.add(`${seriesKey}\n${g}`);
       }
     } else {
+      const catchupSourceTemplate = templatedCatchupSource(st, entry.catchup?.source);
+      if (st.book.byteLength > MAX_URLVARS_BYTES) {
+        throw new Stop(elvError('source-format', 'urlvars-too-large'));
+      }
       live.push({
         ...row,
         num: entry.chno ?? null,
         guideId: entry.tvgId ?? null,
-        catchupDays: entry.catchup?.days ?? entry.timeshiftDays ?? null,
+        catchupDays: entry.catchup?.days ?? entry.timeshiftDays ?? entry.recordDays ?? null,
+        catchupMode: normalizeCatchupMode(entry.catchup?.type),
+        catchupSourceTemplate,
         epgShiftMs:
           entry.shiftHours !== undefined && Number.isFinite(entry.shiftHours)
             ? Math.round(entry.shiftHours * 3_600_000)
@@ -424,8 +444,13 @@ export async function importM3u(
     },
     beforeCommit: async () => {
       if (outcome?.kind !== 'imported') return;
-      const merged: UrlVars = { ...oldVars, ...outcome.staged.vars };
-      const toStage = partitionUrlVars(merged) !== undefined ? merged : outcome.staged.vars;
+      const liveVars = await readUrlVars(deps, source.id);
+      const freshStaged = mergeLiveCustomGuideVars(outcome.staged.vars, liveVars);
+      const merged: UrlVars = mergeLiveCustomGuideVars(
+        { ...oldVars, ...outcome.staged.vars },
+        liveVars,
+      );
+      const toStage = partitionUrlVars(merged) !== undefined ? merged : freshStaged;
       stagedMerged = toStage === merged;
       secretsStaged = true;
       const written = await writeUrlVars(deps.secrets, source.id, toStage);
@@ -477,9 +502,14 @@ export async function importM3u(
     },
     afterCommit: async () => {
       if (outcome?.kind !== 'imported') return;
-      const vars = outcome.staged.vars;
-      if (stagedMerged && Object.keys(oldVars).some((k) => !Object.hasOwn(vars, k))) {
-        await writeUrlVars(deps.secrets, source.id, vars).catch(() => undefined);
+      const liveVars = await readUrlVars(deps, source.id);
+      const finalVars = mergeLiveCustomGuideVars(outcome.staged.vars, liveVars);
+      if (
+        stagedMerged &&
+        Object.keys(oldVars).some((k) => !isCustomGuideVar(k) && !Object.hasOwn(finalVars, k)) &&
+        partitionUrlVars(finalVars) !== undefined
+      ) {
+        await writeUrlVars(deps.secrets, source.id, finalVars).catch(() => undefined);
       }
     },
     onAbortOrFail: async (_c, outcomeKind) => {
@@ -487,7 +517,13 @@ export async function importM3u(
       if (outcomeKind === 'source-removed') {
         await deleteUrlVars(deps.secrets, source.id).catch(() => undefined);
       } else {
-        await writeUrlVars(deps.secrets, source.id, oldVars).catch(() => undefined);
+        const liveVars = await readUrlVars(deps, source.id);
+        const restored = mergeLiveCustomGuideVars(oldVars, liveVars);
+        await writeUrlVars(
+          deps.secrets,
+          source.id,
+          partitionUrlVars(restored) !== undefined ? restored : oldVars,
+        ).catch(() => undefined);
       }
     },
   });

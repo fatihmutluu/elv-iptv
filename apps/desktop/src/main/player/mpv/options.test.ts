@@ -220,10 +220,10 @@ describe('loadfileCommand', () => {
   it('omits start when absent', () => {
     expect(loadfileCommand({ ...base, kind: 'vod' })[4]).not.toHaveProperty('start');
   });
-  it('live and vod get their cache limits and vod gets demuxer-hysteresis-secs (#244)', () => {
+  it('live and vod get their cache limits including bounded 128MiB live back-buffer (#244, #28)', () => {
     expect(loadfileCommand({ ...base, kind: 'live' })[4]).toEqual({
       'demuxer-max-bytes': '32MiB',
-      'demuxer-max-back-bytes': '0',
+      'demuxer-max-back-bytes': '128MiB',
     });
     expect(loadfileCommand({ ...base, kind: 'vod', headers: { 'User-Agent': 'u' } })[4]).toEqual({
       'user-agent': 'u',

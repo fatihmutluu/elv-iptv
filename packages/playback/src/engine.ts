@@ -125,6 +125,10 @@ export interface ClockAnchor {
   rate: number;
   durationMs?: number;
   liveEdgeMs?: number;
+  /** Earliest seekable timestamp (ms) in the active live time-shift window (`#28`). */
+  readonly liveSeekableStartMs?: number;
+  /** Whether bounded live time-shift seeking is currently available for this stream (`#28`). */
+  readonly timeShiftSupported?: boolean;
   /** Whether the active live stream is raw MPEG-TS (eligible for live-edge jump, `#141`; never HLS/VOD). */
   isLiveTs?: boolean;
   /** Cumulative rendered/decoded video frames reported by the engine for black-screen detection (`#321`). */
@@ -207,6 +211,8 @@ export interface PlayerEngine {
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
   seek(attempt: AttemptToken, positionMs: number): void;
+  /** Jumps a live stream directly back to its default live edge when natively supported (`#28`). */
+  jumpToLiveEdge?(attempt: AttemptToken): void;
   /** Toggles VOD scrubbing mode (e.g. Media3 `isScrubbingModeEnabled`, `#222`). */
   setScrubbing?(attempt: AttemptToken, scrubbing: boolean): void;
   setSpeed?(attempt: AttemptToken, rate: number): void;

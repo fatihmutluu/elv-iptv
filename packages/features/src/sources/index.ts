@@ -12,6 +12,25 @@ export {
   describeSourceFailure,
   isEmptyImport,
 } from './errors';
+export {
+  GuideManagementOverlay,
+  type GuideManagementOverlayProps,
+} from './GuideManagementOverlay';
+export {
+  type ChannelMapperFilter,
+  clampOffsetHours,
+  filterMapperChannels,
+  formatSignedOffsetHours,
+  type GuideManageTab,
+  HOUR_MS,
+  MAX_EPG_OFFSET_HOURS,
+  MIN_EPG_OFFSET_HOURS,
+  offsetHoursToMs,
+  offsetMsToHours,
+  reorderGuideSourceIds,
+  resolveChannelMappingStatus,
+  validateGuideSourceDraft,
+} from './guide-management-model';
 export { createLazyCatalog } from './lazy-catalog';
 export {
   formatPairingCountdown,

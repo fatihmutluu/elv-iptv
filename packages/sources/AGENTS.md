@@ -39,12 +39,10 @@ M3U and XMLTV scanners and the Xtream client.
   `xmltv-children.ts`, `xmltv-meta.ts`, `xmltv-time.ts`, `xmltv-types.ts`.
 - `createXtreamClient({ http, server, username, password, transport?, maxBodyBytes?, backupServers?, primaryCooldownMs?, cooldown429Ms?, serverTimezone? })`
   wraps `player_api.php` (`account`, `categories`, `liveStreams`/`vodStreams`/`series`, streaming `streamLiveStreams`/`streamVodStreams`/`streamSeries`,
-  `seriesInfo`, `vodInfo`, `shortEpg`), `playlistUrl`, `guideUrl`, `streamUrl`; `streamXtreamRecords` (`xtream-stream.ts`) parses `[...]` and numeric-keyed
+  `seriesInfo`, `vodInfo`, `shortEpg`, `simpleEpg`), `playlistUrl`, `guideUrl`, `streamUrl`; `streamXtreamRecords` (`xtream-stream.ts`) parses `[...]` and numeric-keyed
   `{ "0": ... }` incrementally in `O(batchSize)` memory; `probeXtreamLiveFormat` (`xtream-probe.ts`) auto-detects `ts` vs `m3u8` in <=512 B.
   Per-`HttpClient` account-scoped `429` cooldowns (`Retry-After`, no failover on `429`) and ordered mirror failover (`xtream-mirrors.ts`).
-  Empty `{}` -> `[]`, `[]` -> `{}`; array `episodes` keep Season `0` and deduplicate; extracts optional bounded `cast` (`<=512` chars, from `cast` or `actors`) and `director` (`<=256` chars) on VOD/Series rows and info. Credentials only in URL builders; errors omit URLs.
+  Empty `{}` -> `[]`, `[]` -> `{}`; array `episodes` keep Season `0` and deduplicate; extracts optional bounded `cast` (`<=512` chars, from `cast` or `actors`) and `director` (`<=256` chars) on VOD/Series rows and info; `toEpg` preserves optional `hasArchive` / `nowPlaying`. Credentials only in URL builders; errors omit URLs.
   Files: `xtream.ts`, `xtream-stream.ts`, `xtream-probe.ts`, `xtream-json.ts`, `xtream-mirrors.ts`, `xtream-records.ts`, `xtream-normalize.ts`, `xtream-types.ts`.
-- LAN pairing protocol (`lan-pairing-protocol.ts`, `lan-pairing-html.ts`, `#50`): pure validators (`isPrivateLanAddress`,
-  `isValidPairingHostHeader`, `isValidPairingOrigin`, `isValidPairingToken`, `constantTimeEqual`, `isValidPairingPath`,
-  `buildLanPairingUrl`), `parseLanPairingPayload` (JSON / form-urlencoded, `http(s)://` + length caps, secret-free errors),
-  and `renderLanPairingHtml` (self-contained EN/TR dark-mode form, zero external requests / zero `crypto.subtle`).
+- Unified catch-up URL resolver (`catchup-url.ts`, `#220`): play-time builder (`buildCatchupUrl`, `expandCatchupTemplate`, `formatXtreamTimeshiftStart`, `isProgrammeWithinCatchupWindow`, `normalizeCatchupMode`) for `xc`/`stalker`/`shift`/`flussonic`/`append`/`default` with IANA timezone & `http(s)://` validation.
+- LAN pairing (`lan-pairing-protocol.ts`, `lan-pairing-html.ts`, `#50`): validators (`isPrivateLanAddress`, `isValidPairingHostHeader`/`Origin`/`Token`/`Path`, `constantTimeEqual`, `buildLanPairingUrl`), `parseLanPairingPayload`, `renderLanPairingHtml`.

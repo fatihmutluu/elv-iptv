@@ -19,6 +19,7 @@ interface RawLiveNumberRow {
   co_sort_order: number | null;
   logo: string | null;
   num: number | null;
+  catchup_days: number | null;
 }
 
 const LIVE_BY_NUM_SQL = `SELECT l.id, l.key, l.source_id, l.provider_id,
@@ -26,7 +27,7 @@ const LIVE_BY_NUM_SQL = `SELECT l.id, l.key, l.source_id, l.provider_id,
   l.name AS raw_name,
   CASE WHEN NULLIF(co.custom_name, '') IS NOT NULL THEN l.name ELSE NULL END AS original_name,
   co.sort_order AS co_sort_order,
-  l.logo, l.num
+  l.logo, l.num, l.catchup_days
   FROM live l
   JOIN sources s ON s.id = l.source_id AND s.deleting = 0
   LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
@@ -113,6 +114,9 @@ async function queryChannelByNumberInSource(
     rating: null,
     year: null,
     num: r.num,
+    ...(typeof r.catchup_days === 'number' && Number.isFinite(r.catchup_days) && r.catchup_days > 0
+      ? { catchupDays: r.catchup_days }
+      : {}),
   };
 }
 

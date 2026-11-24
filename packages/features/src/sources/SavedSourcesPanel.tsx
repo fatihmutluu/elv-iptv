@@ -118,6 +118,7 @@ export function SavedSourcesPanel({
   tvFocusId,
   recordLayout,
   nowMs,
+  onOpenGuides,
 }: {
   ctrl: SourcesController;
   i18n: AppI18n;
@@ -125,6 +126,7 @@ export function SavedSourcesPanel({
   tvFocusId: string | undefined;
   recordLayout?: ControlLayoutRecorder;
   nowMs: number;
+  onOpenGuides?: (source: SourceRow) => void;
 }): ReactElement {
   const theme = useTheme();
   return (
@@ -352,6 +354,16 @@ export function SavedSourcesPanel({
                         label={i18n.t('sources.refreshGuide')}
                         tvFocused={tvFocusId === `source-guide-${source.id}`}
                         onPress={() => void ctrl.runGuideRefresh(source.id)}
+                        recordLayout={recordLayout}
+                      />
+                    ) : null}
+                    {onOpenGuides !== undefined ? (
+                      <ActionButton
+                        focusId={`source-guides-manage-${source.id}`}
+                        testID={`source-guides-${source.id}`}
+                        label={i18n.t('sources.guides.button')}
+                        tvFocused={tvFocusId === `source-guides-manage-${source.id}`}
+                        onPress={() => onOpenGuides(source)}
                         recordLayout={recordLayout}
                       />
                     ) : null}

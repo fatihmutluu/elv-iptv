@@ -1,6 +1,7 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
 import { resolveMappings } from './guide-match';
 import { type RunCtx, warn } from './import-run';
+import { reconcileRemindersAfterGuideImport } from './reminders-repo';
 
 const PROGRAMME_COLUMNS =
   'source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold';
@@ -107,22 +108,52 @@ export interface GuideResult {
   retentionFloorMs?: number;
   /** Fallback upper start boundary (`now`) for preserving previously retained past programmes when a `guide_id` has no fresh rows at or after `retentionFloorMs`. */
   preserveBeforeMs?: number;
+  /** Optional priority-ordered pre-resolved `[channelKey, guideId]` pairs produced by multi-guide ingestion (`#30`). */
+  preResolvedMappings?: readonly (readonly [string, string])[];
+  /** Optional winning `guide_sources.id` per channel key for `channel_guide_overrides` attribution (`#30`). */
+  winningGuideSourceByChannel?: ReadonlyMap<string, string>;
+  /** Optional sync metadata updates for synced `guide_sources` rows (`#30`). */
+  syncedGuideSources?: readonly {
+    readonly id: string;
+    readonly lastSyncAt: number;
+    readonly httpCacheJson: string | null;
+  }[];
+  /** Epoch-ms timestamp of this guide sync (used for auto attribution rows). */
+  syncedAt?: number;
 }
 
 /**
- * Replaces the guide of a source inside the cleanup transaction: the mappings (exact/CI/base id matches first,
- * then unambiguous exact/normalized name matches, then unambiguous channel-number matches), the guide channels,
- * and the staged programmes of mapped guide ids normalized into strictly non-overlapping `[start, stop)`
- * intervals. Sets `counts.mapped` and `counts.programmes` to what was stored. A guide that would store no
- * programme while the previous one has some is dropped instead: the previous guide stays (also its channels,
- * via `keepTables`) and the run gets the warning `guide/empty`.
+ * Replaces the guide of a source inside the cleanup transaction: Tier-0 manual overrides
+ * (`channel_guide_overrides WHERE is_manual = 1`) always win channel matching and are never
+ * overwritten; automatic mappings (multi-guide priority-ordered or 6-tier single-guide) fill
+ * remaining channels; guide channels and non-overlapping `[start, stop)` programmes swap
+ * atomically; and scheduled programme reminders reconcile against shifted programme times.
  */
 export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Promise<void> {
-  const mappings = resolveMappings(g.byId, g.byName, g.byNum, g.byNormalizedName, {
-    ...(g.byCiId === undefined ? {} : { byCiId: g.byCiId }),
-    ...(g.byBaseId === undefined ? {} : { byBaseId: g.byBaseId }),
-    ...(g.channelNameFolds === undefined ? {} : { channelNameFolds: g.channelNameFolds }),
-  });
+  const autoMappings =
+    g.preResolvedMappings !== undefined
+      ? g.preResolvedMappings
+      : resolveMappings(g.byId, g.byName, g.byNum, g.byNormalizedName, {
+          ...(g.byCiId === undefined ? {} : { byCiId: g.byCiId }),
+          ...(g.byBaseId === undefined ? {} : { byBaseId: g.byBaseId }),
+          ...(g.channelNameFolds === undefined ? {} : { channelNameFolds: g.channelNameFolds }),
+        });
+
+  const manualRows = await tx.all<{ channel_key: string; guide_id: string }>(
+    `SELECT channel_key, guide_id
+       FROM channel_guide_overrides
+      WHERE source_id = ? AND is_manual = 1 AND guide_id IS NOT NULL AND guide_id != ''`,
+    [c.sourceId],
+  );
+  const finalMap = new Map<string, string>();
+  for (const m of manualRows) {
+    finalMap.set(m.channel_key, m.guide_id);
+  }
+  for (const [key, guideId] of autoMappings) {
+    if (!finalMap.has(key)) finalMap.set(key, guideId);
+  }
+  const mappings = [...finalMap];
+
   const mapped = new Set(mappings.map(([, guideId]) => guideId));
   const empty = ![...mapped].some((guideId) => (g.staged.get(guideId) ?? 0) > 0);
   if (empty && (await hasProgrammes(tx, c.sourceId))) {
@@ -142,6 +173,34 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
       'INSERT OR IGNORE INTO channel_guide (source_id, channel_key, guide_id) VALUES (?, ?, ?)',
       mappings.slice(i, i + c.batchSize).map(([key, guideId]) => [c.sourceId, key, guideId]),
     );
+  }
+  if (g.winningGuideSourceByChannel !== undefined) {
+    await tx.run('DELETE FROM channel_guide_overrides WHERE source_id = ? AND is_manual = 0', [
+      c.sourceId,
+    ]);
+    const syncedAt = g.syncedAt ?? c.deps.clock();
+    const autoAttrRows: SqlValue[][] = [];
+    for (const [channelKey, guideSourceId] of g.winningGuideSourceByChannel) {
+      const guideId = finalMap.get(channelKey);
+      if (guideId === undefined) continue;
+      autoAttrRows.push([c.sourceId, channelKey, guideSourceId, guideId, syncedAt]);
+    }
+    for (let i = 0; i < autoAttrRows.length; i += c.batchSize) {
+      await tx.batch(
+        `INSERT OR IGNORE INTO channel_guide_overrides
+           (source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at)
+         VALUES (?, ?, ?, ?, 0, 0, ?)`,
+        autoAttrRows.slice(i, i + c.batchSize),
+      );
+    }
+  }
+  if (g.syncedGuideSources !== undefined) {
+    for (const gs of g.syncedGuideSources) {
+      await tx.run(
+        'UPDATE guide_sources SET last_sync_at = ?, http_cache_json = ? WHERE source_id = ? AND id = ?',
+        [gs.lastSyncAt, gs.httpCacheJson, c.sourceId, gs.id],
+      );
+    }
   }
   for (let i = 0; i < g.channelRows.length; i += c.batchSize) {
     await tx.batch(GUIDE_CHANNEL_SQL, g.channelRows.slice(i, i + c.batchSize));
@@ -166,6 +225,7 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
     c.sourceId,
     c.runId,
   ]);
+  await reconcileRemindersAfterGuideImport(tx, c.sourceId);
   c.counts.mapped = mapped.size;
   c.counts.programmes = swapped.changes;
 }

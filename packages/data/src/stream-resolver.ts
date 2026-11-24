@@ -12,10 +12,16 @@ import {
   type TransportSettings,
   transportHeaders,
 } from '@elv/domain';
-import { createXtreamClient, resolveXtreamBaseUrl } from '@elv/sources';
+import {
+  buildCatchupUrl,
+  createXtreamClient,
+  normalizeCatchupMode,
+  resolveXtreamBaseUrl,
+} from '@elv/sources';
 import { isCredentialFingerprint, resolveAccountPoolKey } from './credential-fingerprint';
 import { placeholderNames } from './m3u-templating';
 import { type ItemRow, queryPlayable } from './queries';
+import { sourceOfKey } from './queries-shared';
 import {
   getSource,
   normalizeActiveConnections,
@@ -191,6 +197,15 @@ async function loadXtreamSecret(
   return undefined;
 }
 
+/** Programme time window and optional archive availability flag for {@link PlaytimeResolverCache.resolveCatchupStream}. */
+export interface CatchupProgrammeInput {
+  readonly startMs: number;
+  readonly stopMs: number;
+  readonly hasArchive?: boolean;
+  /** Optional programme title checked against active parental-control filters (`#31`). */
+  readonly title?: string;
+}
+
 /** @internal Session cache for M3U `urlvars` resolvers and Xtream secrets, evicted on source mutations. */
 export interface PlaytimeResolverCache {
   evict(sourceId: string): void;
@@ -198,9 +213,101 @@ export interface PlaytimeResolverCache {
   resolveLogos<T extends ItemRow>(items: T[], sourceId: string): Promise<T[]>;
   resolveRowLogos<T extends { sourceId: string; logo: string | null }>(rows: T[]): Promise<T[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
+  resolveCatchupStream(
+    itemKey: string,
+    programme: CatchupProgrammeInput,
+    nowMs?: number,
+  ): Promise<Result<StreamRequest>>;
 }
 
 const notFound = () => err(elvError('storage', 'item-not-found'));
+const XTREAM_LIVE_URL_RE =
+  /^(https?:\/\/[^/?#]+)(?:\/live)?\/([^/?#]+)\/([^/?#]+)\/(\d+)(?:\.([a-z0-9]+))?(?:[?#].*)?$/i;
+
+function decodeSafe(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function applyStoredHeadersJson(
+  headersJson: string | null,
+  resolver: StreamResolver,
+  headers: Record<string, string>,
+): boolean {
+  if (headersJson === null) return true;
+  interface StoredHeadersJson {
+    userAgent?: unknown;
+    referer?: unknown;
+    other?: unknown;
+  }
+  let extra: StoredHeadersJson | null = null;
+  try {
+    const parsed: unknown = JSON.parse(headersJson);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      extra = parsed as StoredHeadersJson;
+    }
+  } catch {
+    extra = null;
+  }
+  if (extra === null) return true;
+  if (typeof extra.other === 'object' && extra.other !== null && !Array.isArray(extra.other)) {
+    for (const [k, v] of Object.entries(extra.other as Record<string, unknown>)) {
+      if (typeof v !== 'string') continue;
+      const lowerName = k.toLowerCase();
+      if (PROTO_KEYS.has(lowerName)) continue;
+      const resolved = resolver.resolve(v);
+      if (resolved === undefined) return false;
+      const cleanName = sanitizeHeaderName(lowerName);
+      const cleanValue = sanitizeHeaderValue(resolved);
+      if (cleanName !== undefined && !PROTO_KEYS.has(cleanName) && cleanValue.length > 0) {
+        setSafeHeader(headers, cleanName, cleanValue);
+      }
+    }
+  }
+  if (typeof extra.userAgent === 'string') {
+    const resolvedUa = resolver.resolve(extra.userAgent);
+    if (resolvedUa === undefined) return false;
+    const ua = sanitizeHeaderValue(resolvedUa);
+    if (ua.length > 0) headers['user-agent'] = ua;
+  }
+  if (typeof extra.referer === 'string') {
+    const referer = resolver.resolve(extra.referer);
+    if (referer === undefined) return false;
+    const cleanRef = sanitizeHeaderValue(referer);
+    if (cleanRef.length > 0) headers.referer = cleanRef;
+  }
+  return true;
+}
+
+function buildSourceStreamMeta(source: SourceRecord): {
+  headers: Record<string, string>;
+  accountKey: string;
+  connectionMeta: {
+    maxConnections: number;
+    providerActiveConnections?: number;
+    allowLegacyTls?: boolean;
+  };
+} {
+  const headers = transportHeaders(source.settings.transport);
+  const fp = source.settings.credentialFingerprint;
+  const accountKey = resolveAccountPoolKey({
+    id: source.id,
+    ...(isCredentialFingerprint(fp) ? { credentialFingerprint: fp } : {}),
+  });
+  const maxConnections = normalizeMaxConnections(source.settings.accountMeta?.maxConnections);
+  const providerActiveConnections = normalizeActiveConnections(
+    source.settings.accountMeta?.activeConnections,
+  );
+  const connectionMeta = {
+    maxConnections,
+    ...(providerActiveConnections !== undefined ? { providerActiveConnections } : {}),
+    ...(source.settings.transport?.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
+  };
+  return { headers, accountKey, connectionMeta };
+}
 
 export function createPlaytimeResolverCache(deps: {
   db: SqlDriver;
@@ -272,21 +379,7 @@ export function createPlaytimeResolverCache(deps: {
       if (play === undefined) return notFound();
       const source = await getSource(deps.db, play.sourceId);
       if (source === undefined) return notFound();
-      const headers = transportHeaders(source.settings.transport);
-      const fp = source.settings.credentialFingerprint;
-      const accountKey = resolveAccountPoolKey({
-        id: source.id,
-        ...(isCredentialFingerprint(fp) ? { credentialFingerprint: fp } : {}),
-      });
-      const maxConnections = normalizeMaxConnections(source.settings.accountMeta?.maxConnections);
-      const providerActiveConnections = normalizeActiveConnections(
-        source.settings.accountMeta?.activeConnections,
-      );
-      const connectionMeta = {
-        maxConnections,
-        ...(providerActiveConnections !== undefined ? { providerActiveConnections } : {}),
-        ...(source.settings.transport?.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
-      };
+      const { headers, accountKey, connectionMeta } = buildSourceStreamMeta(source);
 
       if (play.urlTemplate === null) {
         const creds = await xtreamSecretFor(play.sourceId);
@@ -326,62 +419,9 @@ export function createPlaytimeResolverCache(deps: {
         return err(elvError('playback', 'unsupported-scheme'));
       }
       const finalUrl = normalizeMulticastUrl(url.trim());
-      if (play.headersJson !== null) {
-        interface StoredHeadersJson {
-          userAgent?: unknown;
-          referer?: unknown;
-          other?: unknown;
-        }
-        let extra: StoredHeadersJson | null = null;
-        try {
-          const parsed: unknown = JSON.parse(play.headersJson);
-          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-            extra = parsed as StoredHeadersJson;
-          }
-        } catch {
-          extra = null;
-        }
-        if (extra !== null) {
-          if (
-            typeof extra.other === 'object' &&
-            extra.other !== null &&
-            !Array.isArray(extra.other)
-          ) {
-            for (const [k, v] of Object.entries(extra.other as Record<string, unknown>)) {
-              if (typeof v !== 'string') continue;
-              const lowerName = k.toLowerCase();
-              if (PROTO_KEYS.has(lowerName)) continue;
-              const resolved = resolver.resolve(v);
-              if (resolved === undefined) {
-                resolvers.delete(play.sourceId);
-                return err(elvError('storage', 'secret-missing'));
-              }
-              const cleanName = sanitizeHeaderName(lowerName);
-              const cleanValue = sanitizeHeaderValue(resolved);
-              if (cleanName !== undefined && !PROTO_KEYS.has(cleanName) && cleanValue.length > 0) {
-                setSafeHeader(headers, cleanName, cleanValue);
-              }
-            }
-          }
-          if (typeof extra.userAgent === 'string') {
-            const resolvedUa = resolver.resolve(extra.userAgent);
-            if (resolvedUa === undefined) {
-              resolvers.delete(play.sourceId);
-              return err(elvError('storage', 'secret-missing'));
-            }
-            const ua = sanitizeHeaderValue(resolvedUa);
-            if (ua.length > 0) headers['user-agent'] = ua;
-          }
-          if (typeof extra.referer === 'string') {
-            const referer = resolver.resolve(extra.referer);
-            if (referer === undefined) {
-              resolvers.delete(play.sourceId);
-              return err(elvError('storage', 'secret-missing'));
-            }
-            const cleanRef = sanitizeHeaderValue(referer);
-            if (cleanRef.length > 0) headers.referer = cleanRef;
-          }
-        }
+      if (!applyStoredHeadersJson(play.headersJson, resolver, headers)) {
+        resolvers.delete(play.sourceId);
+        return err(elvError('storage', 'secret-missing'));
       }
       const alternates = resolveAlternates(play.backupUrlsJson, resolver, headers);
       return ok({
@@ -390,6 +430,135 @@ export function createPlaytimeResolverCache(deps: {
         accountKey,
         ...connectionMeta,
         ...(alternates === undefined ? {} : { alternates }),
+      });
+    },
+
+    async resolveCatchupStream(itemKey, programme, nowMs) {
+      const sourceId = sourceOfKey(itemKey);
+      if (sourceId === undefined) return notFound();
+      const rows = await deps.db.all<{
+        source_id: string;
+        provider_id: string | null;
+        catchup_days: number | null;
+        catchup_mode: string | null;
+        catchup_source_template: string | null;
+        url_template: string | null;
+        headers_json: string | null;
+      }>(
+        `SELECT source_id, provider_id, catchup_days, catchup_mode, catchup_source_template, url_template, headers_json
+           FROM live
+          WHERE source_id = ? AND key = ?
+          LIMIT 1`,
+        [sourceId, itemKey],
+      );
+      const row = rows[0];
+      if (row === undefined) return notFound();
+      const source = await getSource(deps.db, row.source_id);
+      if (source === undefined) return notFound();
+      const { headers, accountKey, connectionMeta } = buildSourceStreamMeta(source);
+      const effectiveNow = nowMs !== undefined && Number.isFinite(nowMs) ? nowMs : Date.now();
+      const tzOpt = source.settings.serverTimezone
+        ? { serverTimezone: source.settings.serverTimezone }
+        : {};
+
+      if (row.url_template === null) {
+        const creds = await xtreamSecretFor(row.source_id);
+        if (creds === undefined) return err(elvError('storage', 'secret-missing'));
+        const streamId = Number(row.provider_id);
+        if (row.provider_id === null || !Number.isFinite(streamId)) return notFound();
+        const ext = effectiveXtreamTransport(source)?.xtreamFormat ?? 'ts';
+        const server = resolveXtreamBaseUrl(creds.server, deps.http);
+        const built = buildCatchupUrl({
+          mode: 'xc',
+          server,
+          username: creds.username,
+          password: creds.password,
+          streamId,
+          ext,
+          ...tzOpt,
+          programme,
+          catchupDays: row.catchup_days,
+          nowMs: effectiveNow,
+        });
+        if (!built.ok) return built;
+        if (!isAllowedPlaybackUrl(built.value)) {
+          return err(elvError('playback', 'unsupported-scheme'));
+        }
+        return ok({
+          url: normalizeMulticastUrl(built.value.trim()),
+          headers,
+          accountKey,
+          ...connectionMeta,
+        });
+      }
+
+      const resolver = await resolverFor(row.source_id);
+      const liveUrl = resolver.resolve(row.url_template);
+      if (liveUrl === undefined) {
+        resolvers.delete(row.source_id);
+        return err(elvError('storage', 'secret-missing'));
+      }
+      let catchupSource: string | undefined;
+      if (row.catchup_source_template !== null) {
+        const resolvedSource = resolver.resolve(row.catchup_source_template);
+        if (resolvedSource === undefined) {
+          resolvers.delete(row.source_id);
+          return err(elvError('storage', 'secret-missing'));
+        }
+        catchupSource = resolvedSource;
+      }
+      if (!applyStoredHeadersJson(row.headers_json, resolver, headers)) {
+        resolvers.delete(row.source_id);
+        return err(elvError('storage', 'secret-missing'));
+      }
+      const mode = normalizeCatchupMode(row.catchup_mode) ?? 'default';
+      let built: Result<string>;
+      if (mode === 'xc') {
+        const match = XTREAM_LIVE_URL_RE.exec(liveUrl.trim());
+        if (match !== null) {
+          built = buildCatchupUrl({
+            mode: 'xc',
+            server: match[1] as string,
+            username: decodeSafe(match[2] as string),
+            password: decodeSafe(match[3] as string),
+            streamId: match[4] as string,
+            ...(match[5] !== undefined ? { ext: match[5] } : {}),
+            ...tzOpt,
+            programme,
+            catchupDays: row.catchup_days,
+            nowMs: effectiveNow,
+          });
+        } else {
+          built = buildCatchupUrl({
+            mode: 'default',
+            liveUrl,
+            ...(catchupSource !== undefined ? { catchupSource } : {}),
+            ...tzOpt,
+            programme,
+            catchupDays: row.catchup_days,
+            nowMs: effectiveNow,
+          });
+        }
+      } else {
+        built = buildCatchupUrl({
+          mode,
+          liveUrl,
+          ...(catchupSource !== undefined ? { catchupSource } : {}),
+          ...tzOpt,
+          programme,
+          catchupDays: row.catchup_days,
+          nowMs: effectiveNow,
+        });
+      }
+      if (!built.ok) return built;
+      if (!isAllowedPlaybackUrl(built.value)) {
+        return err(elvError('playback', 'unsupported-scheme'));
+      }
+      return ok({
+        url: normalizeMulticastUrl(built.value.trim()),
+        headers,
+        accountKey,
+        ...connectionMeta,
       });
     },
   };

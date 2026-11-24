@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.sharedobjects.SharedObject
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -41,6 +42,9 @@ class Media3Engine : SharedObject {
   private val hasAppContext: Boolean
   private val onDisposed: (Media3Engine) -> Unit
   private var lowRamDevice = false
+  private var appCacheDir: File? = null
+  private var activeTimeShiftBuffer: TimeShiftRingBuffer? = null
+  private var activeTimeShiftTracker: TimeShiftWindowTracker? = null
   private lateinit var playerFactory: PlayerFactory
   private lateinit var tracksBridge: TrackSelectorBridge
   private lateinit var mediaSessionController: MediaSessionController
@@ -153,6 +157,7 @@ class Media3Engine : SharedObject {
       if (action !is CommandFence.MediaAction.Run) return@post
       activeEpoch = action.epoch
       reporter.end()
+      tearDownTimeShiftCache()
       if (!isAllowedPlaybackUrl(next.url)) {
         rejectDisallowedUrl(attempt, rebuildFirst = action.rebuildFirst)
         return@post
@@ -202,9 +207,37 @@ class Media3Engine : SharedObject {
   fun pause(attempt: Int) = postInEpoch(attempt) { player?.pause() }
 
   fun seek(attempt: Int, positionMs: Long) = postInEpoch(attempt) {
-    val clamped = positionMs.coerceAtLeast(0L)
     val current = player ?: return@postInEpoch
+    if (request?.live == true) {
+      val ringWindow = activeTimeShiftTracker?.currentWindow()
+      val ringSeekable = ringWindow != null && ringWindow.bufferedWindowMs >= MIN_LIVE_TIMESHIFT_WINDOW_MS
+      val isSeekable = current.isCurrentMediaItemSeekable || ringSeekable
+      if (!isSeekable) return@postInEpoch
+      val edgeMs = if (current.isCurrentMediaItemSeekable && current.duration != C.TIME_UNSET) {
+        current.duration
+      } else {
+        ringWindow?.liveEdgeMs ?: current.duration
+      }
+      val minStartMs = if (current.isCurrentMediaItemSeekable) 0L else (ringWindow?.liveSeekableStartMs ?: 0L)
+      when (val resolution = resolveMedia3LiveSeek(positionMs, isSeekable, edgeMs, minStartMs = minStartMs)) {
+        LiveSeekResolution.Ignore -> return@postInEpoch
+        LiveSeekResolution.JumpToDefaultLiveEdge -> {
+          clearSubtitles(resetDelay = false)
+          if (current.isCurrentMediaItemSeekable) {
+            current.seekToDefaultPosition()
+          } else if (edgeMs != C.TIME_UNSET && edgeMs >= 0L) {
+            current.seekTo(edgeMs)
+          }
+        }
+        is LiveSeekResolution.SeekTo -> {
+          clearSubtitles(resetDelay = false)
+          current.seekTo(resolution.positionMs)
+        }
+      }
+      return@postInEpoch
+    }
     if (!current.isCurrentMediaItemSeekable) return@postInEpoch
+    val clamped = positionMs.coerceAtLeast(0L)
     if (request?.live == false) {
       lastVodPositionMs = clamped
       current.setSeekParameters(vodSeekParametersFor(clamped, current.currentPosition))
@@ -288,6 +321,7 @@ class Media3Engine : SharedObject {
       player?.isScrubbingModeEnabled = false
       tracksBridge.onPrepareReuse()
       clearSubtitles(resetDelay = false)
+      tearDownTimeShiftCache()
       reporter.end()
       beginGeneration()
       pendingRebuildDeferred = false
@@ -386,6 +420,7 @@ class Media3Engine : SharedObject {
 
   private fun clearSessionState() {
     reporter.end()
+    tearDownTimeShiftCache()
     player?.isScrubbingModeEnabled = false
     currentSpeed = PlaybackSpeedPolicy.DEFAULT_SPEED
     player?.playbackParameters = PlaybackParameters.DEFAULT
@@ -474,9 +509,18 @@ class Media3Engine : SharedObject {
     gate.beginMedia(generation)
   }
 
+  private fun tearDownTimeShiftCache() {
+    activeTimeShiftBuffer?.close()
+    activeTimeShiftBuffer = null
+    activeTimeShiftTracker = null
+  }
+
   private fun initEngine(context: Context) {
     val profile = readDeviceMemoryProfile(context)
     lowRamDevice = profile.lowRam
+    val cacheDir: File? = context.cacheDir
+    appCacheDir = cacheDir
+    cacheDir?.let { TimeShiftRingBuffer.purgeOrphansOnStartup(it) }
     playerFactory = PlayerFactory(
       context = context,
       looper = thread.looper,
@@ -545,6 +589,7 @@ class Media3Engine : SharedObject {
 
   private fun prepare(next: LoadRequest, positionMs: Long?, newGeneration: Boolean = true, forceRebuild: Boolean = false) {
     reporter.end()
+    tearDownTimeShiftCache()
     tracksBridge.onPrepareReuse()
     clearSubtitles(resetDelay = false)
     if (newGeneration) beginGeneration()
@@ -571,18 +616,37 @@ class Media3Engine : SharedObject {
     tracksBridge.applyInitialParameters(current)
     val serial = ++prepares
     val prepareGen = generation
+    val isLiveTs = next.live && next.sourceType() == SourceType.TS
+    if (isLiveTs) {
+      appCacheDir?.let { cacheDir ->
+        val ring = TimeShiftRingBuffer.create(cacheDir, lowRam = lowRamDevice)
+        activeTimeShiftBuffer = ring
+        activeTimeShiftTracker = TimeShiftWindowTracker(ring)
+      }
+    }
     reporter.begin(
       current,
       next.live,
       prepareSerial = serial,
       reused = !rebuild,
-      isLiveTs = next.live && next.sourceType() == SourceType.TS,
+      isLiveTs = isLiveTs,
+      ringWindowProvider = activeTimeShiftTracker?.let { tracker -> tracker::currentWindow },
     )
     val transferListener = ProgressTransferListener(shouldReport = { reporter.isWaitingForMedia }) { bytes, atMs ->
       post { if (generation == prepareGen) reporter.onTransferProgress(bytes, atMs) }
     }
     val httpClient = if (next.allowLegacyTls) legacyHttp else http
-    val source = createMediaSource(next, gate, prepareGen, serial, lowRamDevice, httpClient, transferListener)
+    val source = createMediaSource(
+      next,
+      gate,
+      prepareGen,
+      serial,
+      lowRamDevice,
+      httpClient,
+      transferListener,
+      timeShiftRingBuffer = activeTimeShiftBuffer,
+      timeShiftTracker = activeTimeShiftTracker,
+    )
     if (positionMs == null) current.setMediaSource(source, true) else current.setMediaSource(source, positionMs)
     current.playWhenReady = true
     current.prepare()

@@ -7,6 +7,21 @@ export {
   usePlayDeepLinkHandler,
 } from './app-shell-deep-link';
 export {
+  buildReminderTuneTarget,
+  clampReminderTimerDelay,
+  computeReminderStartsInMinutes,
+  createReminderSchedulerEngine,
+  MAX_REMINDER_TIMER_DELAY_MS,
+  type ProgrammeRemindersHandle,
+  pickEarliestDueReminder,
+  type ReminderBannerState,
+  type ReminderSchedulerEngine,
+  type ReminderSchedulerEngineOptions,
+  type ReminderTimers,
+  type UseProgrammeRemindersOptions,
+  useProgrammeReminders,
+} from './app-shell-reminders';
+export {
   buildTvHomeChannelsPayload,
   computeTvHomeChannelsSignature,
   TV_HOME_CHANNELS_MAX_PROGRAMS,
@@ -37,8 +52,14 @@ export type {
   LanPairingSourcePayload,
 } from './ports/lan-pairing-host';
 export { type PlayDeepLinkTarget, parsePlayDeepLink } from './ports/play-deep-link';
-export type { LiveChannelPlaylist, PlayableEntry, PlayTarget } from './ports/play-target';
+export type {
+  LiveChannelPlaylist,
+  PlayableCatchupMeta,
+  PlayableEntry,
+  PlayTarget,
+} from './ports/play-target';
 export { noopPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
+export type { ReminderHostPort, ReminderNotificationPayload } from './ports/reminder-host';
 export type { PickedPlaylistFile, SourceImportHost } from './ports/source-import-host';
 export type {
   TvHomeChannelDescriptor,
@@ -54,6 +75,7 @@ export type {
   VideoSurfaceProps,
 } from './ports/video-host';
 export * from './profiles';
+export * from './reminders';
 export * from './screensaver';
 export * from './search';
 export * from './settings';

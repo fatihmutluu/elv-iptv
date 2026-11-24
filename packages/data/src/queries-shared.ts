@@ -99,6 +99,8 @@ export interface ItemRow {
   year: number | null;
   /** Channel number (live only). */
   num: number | null;
+  /** Catch-up archive retention window in days when supported (live only, `#220`). */
+  readonly catchupDays?: number | null;
   /** Number of collapsed live quality variants when `collapseVariants` is enabled and `> 1` (`#218`). */
   readonly variantCount?: number;
   /** Number of grouped movie versions when `groupVersions` is enabled and `> 1` (`#404`). */
@@ -122,6 +124,7 @@ export interface RawItemRow {
   rating: number | null;
   year: number | null;
   num: number | null;
+  catchup_days?: number | null;
   variant_count?: number;
   version_count?: number;
   original_name?: string | null;
@@ -131,9 +134,9 @@ export interface RawItemRow {
 
 /** @internal Columns per kind; fixed strings, never built from data. */
 export const ITEM_COLS: Record<BrowseKind, string> = {
-  live: 't.logo AS logo, NULL AS rating, NULL AS year, t.num AS num',
-  movie: 't.logo AS logo, t.rating AS rating, t.year AS year, NULL AS num',
-  series: 't.cover AS logo, t.rating AS rating, t.year AS year, NULL AS num',
+  live: 't.logo AS logo, NULL AS rating, NULL AS year, t.num AS num, t.catchup_days AS catchup_days',
+  movie: 't.logo AS logo, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
+  series: 't.cover AS logo, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
 };
 
 /** @internal Backing catalog table per kind; fixed strings, never built from data. */
@@ -190,6 +193,9 @@ export function mapItemRow(kind: BrowseKind, sourceId: string, r: RawItemRow): I
     rating: r.rating,
     year: r.year,
     num: r.num,
+    ...(typeof r.catchup_days === 'number' && Number.isFinite(r.catchup_days) && r.catchup_days > 0
+      ? { catchupDays: r.catchup_days }
+      : {}),
     ...(typeof r.variant_count === 'number' && r.variant_count > 1
       ? { variantCount: r.variant_count }
       : {}),

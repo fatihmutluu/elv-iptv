@@ -183,7 +183,7 @@ export function loadfileCommand(
   const options: Record<string, string> = {
     ...headerOptions(r.headers),
     ...(r.kind === 'live'
-      ? { 'demuxer-max-bytes': '32MiB', 'demuxer-max-back-bytes': '0' }
+      ? { 'demuxer-max-bytes': '32MiB', 'demuxer-max-back-bytes': '128MiB' }
       : {
           'demuxer-max-bytes': '64MiB',
           'demuxer-max-back-bytes': '16MiB',

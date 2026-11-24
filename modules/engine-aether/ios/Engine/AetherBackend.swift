@@ -56,6 +56,7 @@ final class AetherBackend: PlayerBackend {
   var audioSwitchTaskId = 0
   var liveRecoveryTaskId = 0
   var mediaInfoTaskId = 0
+  var pausedLiveClockTaskId = 0
 
   var loadStartUptimeMs: Double = 0
   var openedMsForSerial: Double?
@@ -71,6 +72,7 @@ final class AetherBackend: PlayerBackend {
   var audioSwitchTask: Task<Void, Never>?
   var liveRecoveryTask: Task<Void, Never>?
   var mediaInfoTask: Task<Void, Never>?
+  var pausedLiveClockTask: Task<Void, Never>?
   var liveRecoveryPolicy = LiveRecoveryPolicy()
 
   var audioSessionPolicy = AudioSessionPolicy()
@@ -87,6 +89,7 @@ final class AetherBackend: PlayerBackend {
   var lastAVBufferReportedBuffering = false
   var playbackActiveIntent = false
   var lastDroppedVideoFrames = 0
+  var lastLiveSeekableWindow: LiveSeekableWindow?
 
   init(gate: ConnectionGate, httpSession: EngineHttpSession) {
     self.gate = gate
@@ -190,6 +193,7 @@ final class AetherBackend: PlayerBackend {
   }
 
   func play() {
+    cancelPausedLiveClockTask()
     if activeLoadSerial > 0 {
       playbackActiveIntent = true
     }
@@ -201,6 +205,9 @@ final class AetherBackend: PlayerBackend {
   func pause() {
     playbackActiveIntent = false
     engine?.pause()
+    if let engine {
+      syncPausedLiveClockTask(for: engine)
+    }
   }
 
   func setRate(_ rate: Double) {
@@ -237,7 +244,19 @@ final class AetherBackend: PlayerBackend {
   }
 
   func seek(toSeconds: Double) {
-    guard toSeconds.isFinite, let engine, !engine.isLive else { return }
+    guard toSeconds.isFinite, let engine else { return }
+    let targetSeconds: Double
+    if engine.isLive {
+      guard currentPlan?.isLiveTs != true,
+            let window = lastLiveSeekableWindow ?? readLiveSeekableWindow(from: engine),
+            let clamped = clampLiveSeek(targetSec: toSeconds, window: window)
+      else {
+        return
+      }
+      targetSeconds = clamped
+    } else {
+      targetSeconds = max(0, toSeconds)
+    }
     let serial = engineLoadSerial
     guard serial > 0 else { return }
     seekTask?.cancel()
@@ -250,7 +269,7 @@ final class AetherBackend: PlayerBackend {
         }
       }
       guard let self, let engine, !Task.isCancelled, self.engine === engine, self.engineLoadSerial == serial else { return }
-      await engine.seek(to: max(0, toSeconds))
+      await engine.seek(to: targetSeconds)
     }
   }
 
@@ -327,7 +346,78 @@ final class AetherBackend: PlayerBackend {
     mediaInfoTaskId &+= 1
     mediaInfoTask?.cancel()
     mediaInfoTask = nil
+    cancelPausedLiveClockTask()
     closeCurrentReader()
+  }
+
+  func cancelPausedLiveClockTask() {
+    pausedLiveClockTaskId &+= 1
+    pausedLiveClockTask?.cancel()
+    pausedLiveClockTask = nil
+  }
+
+  func syncPausedLiveClockTask(for target: AetherEngine) {
+    let serial = engineLoadSerial
+    let isPaused =
+      (target.playbackPhase == .paused || target.state == .paused)
+      && target.playbackPhase != .playing
+      && target.state != .loading
+      && target.state != .ended
+    let hasWindow = lastLiveSeekableWindow != nil || readLiveSeekableWindow(from: target) != nil
+    guard serial > 0,
+          engine === target,
+          shouldTickLiveWindowWhilePaused(
+            isLive: target.isLive,
+            isLiveTs: currentPlan?.isLiveTs == true,
+            isPaused: isPaused,
+            hasSeekableWindow: hasWindow
+          )
+    else {
+      cancelPausedLiveClockTask()
+      return
+    }
+    guard pausedLiveClockTask == nil else { return }
+    pausedLiveClockTaskId &+= 1
+    let id = pausedLiveClockTaskId
+    pausedLiveClockTask = Task { @MainActor [weak self, weak target] in
+      defer {
+        if let self, self.pausedLiveClockTaskId == id {
+          self.pausedLiveClockTask = nil
+        }
+      }
+      while !Task.isCancelled {
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        guard !Task.isCancelled,
+              let self,
+              let target,
+              self.engine === target,
+              self.engineLoadSerial == serial
+        else {
+          return
+        }
+        let stillPaused =
+          (target.playbackPhase == .paused || target.state == .paused)
+          && target.playbackPhase != .playing
+          && target.state != .loading
+          && target.state != .ended
+        let window = self.readLiveSeekableWindow(from: target)
+        guard shouldTickLiveWindowWhilePaused(
+          isLive: target.isLive,
+          isLiveTs: self.currentPlan?.isLiveTs == true,
+          isPaused: stillPaused,
+          hasSeekableWindow: window != nil || self.lastLiveSeekableWindow != nil
+        ) else {
+          return
+        }
+        self.emitClockSnapshot(
+          from: target,
+          positionSeconds: target.currentTime,
+          rateOverride: 0.0,
+          durationOverride: nil,
+          serial: serial
+        )
+      }
+    }
   }
 
   private func clearEngineSubscriptions() {
@@ -361,6 +451,7 @@ final class AetherBackend: PlayerBackend {
     lastAVBufferReportedBuffering = false
     playbackActiveIntent = false
     lastDroppedVideoFrames = 0
+    lastLiveSeekableWindow = nil
     liveRecoveryPolicy.reset()
     osdClockThrottle.reset()
   }

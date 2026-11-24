@@ -176,7 +176,7 @@ function normalizePickedPlaylist(raw: unknown): AndroidPickedPlaylistFile | null
 const CAPABILITIES: EngineCapabilities = Object.freeze({
   mpegTsOverHttp: true,
   hls: true,
-  liveSeek: false,
+  liveSeek: true,
   softwareAudioFallback: true,
   recreate: true,
   audioTrackSelection: true,

@@ -2337,3 +2337,135 @@ msgstr "Android TV ana ekran kanalları"
 
 msgid "tvHomeChannels.syncHint"
 msgstr "Android TV ana ekranında İzlemeye devam et ve Favori kanallar satırlarını gösterir."
+
+msgid "epg.catchupBadge"
+msgstr "Arşiv"
+
+msgid "epg.watchCatchup"
+msgstr "Arşivden izle"
+
+msgid "epg.catchupUnavailable"
+msgstr "Bu program için arşiv yayını kullanılamıyor."
+
+msgid "epg.catchupExpired"
+msgstr "Bu programın arşiv izleme süresi doldu."
+
+msgid "player.catchupBadge"
+msgstr "ARŞİV"
+
+msgid "player.backToLive"
+msgstr "Canlı yayına dön"
+
+msgid "player.livePaused"
+msgstr "Canlı duraklatıldı"
+
+msgid "player.behindLive"
+msgstr "Canlıdan {offset} geride"
+
+msgid "player.timeShiftUnavailable"
+msgstr "Bu yayın için canlı geri sarma kullanılamıyor."
+
+msgid "player.liveEdge"
+msgstr "Canlı uçta"
+
+msgid "sources.guides.button"
+msgstr "Rehberler ve eşleştirme"
+
+msgid "sources.guides.title"
+msgstr "TV rehberleri ve kanal eşleştirme"
+
+msgid "sources.guides.subtitle"
+msgstr "XMLTV rehber önceliğini, saat farklarını ve manuel kanal eşleştirmelerini yönetin."
+
+msgid "sources.guides.guidesTab"
+msgstr "Rehber kaynakları"
+
+msgid "sources.guides.mapperTab"
+msgstr "Kanal eşleştirici"
+
+msgid "sources.guides.addGuide"
+msgstr "Rehber kaynağı ekle"
+
+msgid "sources.guides.namePlaceholder"
+msgstr "Rehber adı (ör. Yedek XMLTV)"
+
+msgid "sources.guides.urlPlaceholder"
+msgstr "http://example.invalid/epg.xml.gz"
+
+msgid "sources.guides.offsetLabel"
+msgstr "Saat farkı"
+
+msgid "sources.guides.offsetHours"
+msgstr "{hours} sa"
+
+msgid "sources.guides.priorityUp"
+msgstr "Yukarı taşı"
+
+msgid "sources.guides.priorityDown"
+msgstr "Aşağı taşı"
+
+msgid "sources.guides.remove"
+msgstr "Kaldır"
+
+msgid "sources.guides.empty"
+msgstr "Henüz ek rehber kaynağı tanımlanmadı."
+
+msgid "sources.guides.filterAll"
+msgstr "Tüm kanallar"
+
+msgid "sources.guides.filterUnmatched"
+msgstr "Eşleşmeyenler"
+
+msgid "sources.guides.searchPlaceholder"
+msgstr "Kanal veya rehber kimliği ara…"
+
+msgid "sources.guides.unmatchedBadge"
+msgstr "Eşleşmedi"
+
+msgid "sources.guides.manualBadge"
+msgstr "Manuel"
+
+msgid "sources.guides.assignGuide"
+msgstr "Rehber kanalı ata"
+
+msgid "sources.guides.clearOverride"
+msgstr "Otomatiğe sıfırla"
+
+msgid "sources.guides.channelOffsetLabel"
+msgstr "Kanal saat farkı"
+
+msgid "sources.guides.noGuideChannels"
+msgstr "Kullanılabilir rehber kanalı yok. Önce rehberi yenileyin."
+
+msgid "sources.guides.save"
+msgstr "Kaydet"
+
+msgid "sources.guides.cancel"
+msgstr "İptal"
+
+msgid "epg.remindMe"
+msgstr "Hatırlat"
+
+msgid "epg.cancelReminder"
+msgstr "Hatırlatıcıyı iptal et"
+
+msgid "epg.reminderScheduled"
+msgstr "Hatırlatıcı kuruldu"
+
+msgid "epg.reminderLeadLabel"
+msgstr "Başlamadan önce hatırlat"
+
+msgid "epg.reminderBannerTitle"
+msgstr "Birazdan başlıyor"
+
+msgid "epg.reminderStartsIn"
+msgstr "{minutes} dk içinde başlıyor"
+
+msgid "epg.reminderStartingNow"
+msgstr "Şimdi başlıyor"
+
+msgid "epg.reminderTuneNow"
+msgstr "Şimdi aç"
+
+msgid "epg.reminderDismiss"
+msgstr "Kapat"

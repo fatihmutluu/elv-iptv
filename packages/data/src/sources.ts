@@ -122,6 +122,8 @@ export interface SourceSettings {
   epgShiftMs?: number;
   /** Optional default IANA timezone (e.g. `Europe/Berlin`) for offset-less XMLTV timestamps (`#182`). */
   xmltvTimezone?: string;
+  /** Optional IANA timezone reported by Xtream `server_info.timezone` for play-time catch-up URL formatting (`#220`). */
+  serverTimezone?: string;
   /** Optional pre-import category selection & pending-category tracking (`#39`). */
   categorySelection?: SourceCategorySelection;
   /** Marks a local sandboxed M3U source whose bytes are stored in {@link LocalPlaylistStore} (`#51`). */
@@ -213,6 +215,7 @@ const WITHOUT_ROWID_DELETE_SPECS: readonly (readonly [string, string])[] = [
   ['placements_next', '(kind, category_id, item_key)'],
   ['guide_channels', 'guide_id'],
   ['channel_guide', 'channel_key'],
+  ['channel_guide_overrides', 'channel_key'],
   ['programmes', '(guide_id, start)'],
   ['programmes_next', '(guide_id, start)'],
 ];
@@ -245,6 +248,8 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'parental_locks',
   'channel_overrides',
   'custom_group_items',
+  'guide_sources',
+  'programme_reminders',
 ];
 const NON_URLVARS_PARTS = ['xtream', 'playlist'] as const;
 
@@ -512,6 +517,8 @@ export async function finishDeletingSource(
     await tx.run('DELETE FROM parental_locks WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM channel_overrides WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM custom_group_items WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM guide_sources WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM programme_reminders WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });
   await opts?.localPlaylistStore?.remove(id).catch(() => undefined);

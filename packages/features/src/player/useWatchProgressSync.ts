@@ -67,7 +67,7 @@ export function resolveVodStartPositionMs(
   target: PlayableEntry,
   catalog: Pick<CatalogService, 'getProgress'>,
 ): number | undefined | Promise<number | undefined> {
-  if (target.kind !== 'vod') return undefined;
+  if (target.kind !== 'vod' || target.catchup !== undefined) return undefined;
   if (target.startPositionMs !== undefined) {
     return Number.isFinite(target.startPositionMs)
       ? Math.max(0, Math.round(target.startPositionMs))
@@ -107,7 +107,7 @@ export function useWatchProgressSync({
 
   const persistSnapshot = useCallback(
     (entry: PlayableEntry, positionMs: number, durationMs: number, mode: FlushMode): void => {
-      if (entry.kind !== 'vod') return;
+      if (entry.kind !== 'vod' || entry.catchup !== undefined) return;
       const saveProgress = catalogRef.current.saveProgress;
       if (saveProgress === undefined) return;
 
@@ -167,7 +167,7 @@ export function useWatchProgressSync({
   const flush = useCallback(
     (mode: FlushMode, overridePosMs?: number, expectedItemKey?: string): void => {
       const entry = targetRef.current;
-      if (entry.kind !== 'vod') return;
+      if (entry.kind !== 'vod' || entry.catchup !== undefined) return;
       if (expectedItemKey !== undefined && entry.itemKey !== expectedItemKey) return;
       if (catalogRef.current.saveProgress === undefined) return;
       const svc = serviceRef.current;
@@ -212,7 +212,7 @@ export function useWatchProgressSync({
 
   const flushEndedProgress = useCallback((): void => {
     const entry = targetRef.current;
-    if (entry.kind !== 'vod') return;
+    if (entry.kind !== 'vod' || entry.catchup !== undefined) return;
     if (catalogRef.current.saveProgress === undefined) return;
     const svc = serviceRef.current;
     const anchor = svc?.getState().anchor;
@@ -236,7 +236,7 @@ export function useWatchProgressSync({
     prevStatusRef.current = status.kind;
     prevItemKeyRef.current = activeTarget.itemKey;
 
-    if (activeTarget.kind !== 'vod') return;
+    if (activeTarget.kind !== 'vod' || activeTarget.catchup !== undefined) return;
     if (prevStatus === status.kind && prevKey === activeTarget.itemKey) return;
 
     if (status.kind === 'paused') {
@@ -244,11 +244,12 @@ export function useWatchProgressSync({
     } else if (status.kind === 'ended') {
       flush('ended', undefined, activeTarget.itemKey);
     }
-  }, [activeTarget.itemKey, activeTarget.kind, flush, status.kind]);
+  }, [activeTarget.catchup, activeTarget.itemKey, activeTarget.kind, flush, status.kind]);
 
   useEffect(() => {
     if (
       activeTarget.kind !== 'vod' ||
+      activeTarget.catchup !== undefined ||
       status.kind !== 'playing' ||
       catalogRef.current.saveProgress === undefined
     ) {
@@ -278,7 +279,15 @@ export function useWatchProgressSync({
         timerHandle = undefined;
       }
     };
-  }, [activeTarget.itemKey, activeTarget.kind, catalogRef, flush, status.kind, timersRef]);
+  }, [
+    activeTarget.catchup,
+    activeTarget.itemKey,
+    activeTarget.kind,
+    catalogRef,
+    flush,
+    status.kind,
+    timersRef,
+  ]);
 
   useEffect(() => {
     return () => {

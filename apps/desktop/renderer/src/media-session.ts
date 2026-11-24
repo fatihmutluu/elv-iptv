@@ -385,6 +385,7 @@ export function bindDesktopMediaSession(
     play: track((a) => engine.play(a)),
     pause: track((a) => engine.pause(a)),
     seek: track((a, positionMs: number) => engine.seek(a, positionMs)),
+    jumpToLiveEdge: track((a) => engine.jumpToLiveEdge?.(a)),
     setSpeed: track((a, rate: number) => engine.setSpeed(a, rate)),
     recreate: track((a) => engine.recreate(a)),
     stop(attempt) {

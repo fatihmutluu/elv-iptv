@@ -40,6 +40,9 @@ export interface PlayerControlsParams {
   hasChannelList?: boolean;
   hasNextEpisode?: boolean;
   hasPreviousChannel?: boolean;
+  hasBackToLive?: boolean;
+  liveTimeShiftSupported?: boolean;
+  hasJumpToLive?: boolean;
   initialOsdHidden?: boolean | undefined;
   autoHideOsdMs?: number | undefined;
   initialVolume?: number | undefined;
@@ -53,6 +56,7 @@ export interface PlayerControlsParams {
   zapByRef: MutableRefObject<(delta: 1 | -1, repeat?: boolean) => void>;
   onSeekCommit?: (positionMs: number) => void;
   onPlayNextEpisode?: () => void;
+  onBackToLive?: () => void;
   onJumpPreviousChannel?: () => void;
   onJumpToChannel?: (channelNumber: number) => void;
   onToggleFullscreen?: (() => void) | undefined;
@@ -149,6 +153,7 @@ export function readSettingsMenuOptionsFromControls(p: PlayerControlsParams, can
 export interface OverlayKeyRouteDeps {
   readonly isTv: boolean;
   readonly isVod: boolean;
+  readonly liveTimeShiftSupported?: boolean;
   readonly hasAspect: boolean;
   readonly hasDeinterlace?: boolean;
   readonly hasPitchLock?: boolean;
@@ -239,10 +244,10 @@ function executeRemappedPlayerAction(
       d.togglePlayPause();
       return true;
     case 'player.seekBack':
-      if (d.isVod) d.seekBy?.(-(d.stepSeekMs ?? STEP_SEEK_MS));
+      if (d.isVod || d.liveTimeShiftSupported === true) d.seekBy?.(-(d.stepSeekMs ?? STEP_SEEK_MS));
       return true;
     case 'player.seekForward':
-      if (d.isVod) d.seekBy?.(d.stepSeekMs ?? STEP_SEEK_MS);
+      if (d.isVod || d.liveTimeShiftSupported === true) d.seekBy?.(d.stepSeekMs ?? STEP_SEEK_MS);
       return true;
     case 'player.channelUp':
       if (!d.isVod) d.zapBy?.(1);
@@ -519,8 +524,12 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
 
   if (d.isTv && s.tvScrubberFocused) {
     const intent = routeTvScrubberKey(event);
-    if (intent?.kind === 'step') d.scrub.step(intent.direction, intent.stepKind);
-    else if (intent?.kind === 'commitOrToggle') {
+    if (intent?.kind === 'step') {
+      if (d.isVod) d.scrub.step(intent.direction, intent.stepKind);
+      else if (d.liveTimeShiftSupported === true) {
+        d.seekBy?.(intent.direction * (d.stepSeekMs ?? STEP_SEEK_MS));
+      }
+    } else if (intent?.kind === 'commitOrToggle') {
       if (!d.allowTvSelect()) return true;
       if (d.scrub.previewPositionMs !== undefined) d.scrub.commit();
       else d.togglePlayPause();
@@ -538,7 +547,7 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
   if (d.isTv && s.tvOsdFocused) {
     const intent = routeTvOsdKey(event, s.tvOsdAction, s.availableOsd);
     if (intent?.kind === 'blur') {
-      if (d.isVod) d.focusTvScrubber();
+      if (d.isVod || d.liveTimeShiftSupported === true) d.focusTvScrubber();
       else d.blurTvOsd();
     } else if (intent?.kind === 'focus') d.focusTvOsd(intent.action);
     else if (intent?.kind === 'activate') d.activateTvOsd(intent.action);
@@ -551,6 +560,7 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
 /** Collaborators for {@link routeHostKey}. */
 export interface HostKeyRouteDeps {
   readonly isVod: boolean;
+  readonly liveTimeShiftSupported?: boolean;
   readonly state: Pick<
     PlayerOverlayLive,
     'locked' | 'tracksOpen' | 'settingsOpen' | 'infoOpen' | 'channelListOpen'
@@ -602,16 +612,24 @@ export function routeHostKey(key: HostKey, d: HostKeyRouteDeps): void {
       if (canUseShortcuts) d.togglePlayPause();
       return;
     case 'seek-back':
-      if (canUseShortcuts && d.isVod) d.seekBy(-(d.stepSeekMs ?? STEP_SEEK_MS));
+      if (canUseShortcuts && (d.isVod || d.liveTimeShiftSupported === true)) {
+        d.seekBy(-(d.stepSeekMs ?? STEP_SEEK_MS));
+      }
       return;
     case 'seek-forward':
-      if (canUseShortcuts && d.isVod) d.seekBy(d.stepSeekMs ?? STEP_SEEK_MS);
+      if (canUseShortcuts && (d.isVod || d.liveTimeShiftSupported === true)) {
+        d.seekBy(d.stepSeekMs ?? STEP_SEEK_MS);
+      }
       return;
     case 'seek-coarse-back':
-      if (canUseShortcuts && d.isVod) d.seekBy(-COARSE_SEEK_MS);
+      if (canUseShortcuts && (d.isVod || d.liveTimeShiftSupported === true)) {
+        d.seekBy(-COARSE_SEEK_MS);
+      }
       return;
     case 'seek-coarse-forward':
-      if (canUseShortcuts && d.isVod) d.seekBy(COARSE_SEEK_MS);
+      if (canUseShortcuts && (d.isVod || d.liveTimeShiftSupported === true)) {
+        d.seekBy(COARSE_SEEK_MS);
+      }
       return;
     case 'mute':
       if (canUseShortcuts) d.toggleMute?.();

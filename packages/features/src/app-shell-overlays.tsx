@@ -1,5 +1,14 @@
-import type { CatalogService } from '@elv/data';
-import { type MutableRefObject, type ReactElement, useEffect, useRef } from 'react';
+import type { CatalogService, SourceRow } from '@elv/data';
+import {
+  type MutableRefObject,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { targetIdentityKey } from './player/live-timeshift-model';
 import type { PlayTarget } from './ports/play-target';
 import { PinEntryOverlay, ProfileAvatarBadge, ProfilePickerOverlay } from './profiles';
 import { type ProfileContextValue, useProfile } from './shared';
@@ -75,14 +84,26 @@ export function useShellProfileEffects(params: {
     }
 
     if (prevUnlocked && !profile.parentalUnlocked && playTargetRef.current !== null) {
-      const playingKey = playTargetRef.current.itemKey;
-      void catalog
-        .resolveStream(playingKey)
+      const playing = playTargetRef.current;
+      const playingIdentity = targetIdentityKey(playing);
+      const checkPromise =
+        playing.catchup !== undefined && catalog.resolveCatchupStream !== undefined
+          ? catalog.resolveCatchupStream(playing.itemKey, {
+              startMs: playing.catchup.startMs,
+              stopMs: playing.catchup.stopMs,
+              ...(playing.catchup.hasArchive !== undefined
+                ? { hasArchive: playing.catchup.hasArchive }
+                : {}),
+              title: playing.catchup.programmeTitle,
+            })
+          : catalog.resolveStream(playing.itemKey);
+      void checkPromise
         .then((res) => {
           if (
             !res.ok &&
             res.error.code === 'parental-locked' &&
-            playTargetRef.current?.itemKey === playingKey
+            playTargetRef.current !== null &&
+            targetIdentityKey(playTargetRef.current) === playingIdentity
           ) {
             callbacksRef.current.onStopPlayback();
           }
@@ -98,6 +119,69 @@ export function useShellProfileEffects(params: {
       profile.lockParentalNow();
     }
   }, [appForeground, profile]);
+}
+
+/**
+ * Coordinates root-level `ChannelManagementOverlay` (`#60`) and `GuideManagementOverlay` (`#30`)
+ * visibility with parental PIN gating (`#31`) and automatic close on profile switch or relock.
+ */
+export function useShellManagementOverlays(
+  profile: ProfileContextValue,
+  sources: readonly SourceRow[],
+) {
+  const [channelManagerOpen, setChannelManagerOpen] = useState(false);
+  const [guideManagerSourceId, setGuideManagerSourceId] = useState<string | null>(null);
+  const prevProfileIdRef = useRef(profile.activeProfileId);
+
+  const openChannelManager = useCallback(() => {
+    if (profile.hasGuardPin && !profile.parentalUnlocked) {
+      profile.requestParentalUnlock(() => setChannelManagerOpen(true));
+      return;
+    }
+    setChannelManagerOpen(true);
+  }, [profile]);
+
+  const openGuideManager = useCallback(
+    (sourceId: string) => {
+      if (profile.hasGuardPin && !profile.parentalUnlocked) {
+        profile.requestParentalUnlock(() => setGuideManagerSourceId(sourceId));
+        return;
+      }
+      setGuideManagerSourceId(sourceId);
+    },
+    [profile],
+  );
+
+  const closeChannelManager = useCallback(() => setChannelManagerOpen(false), []);
+  const closeGuideManager = useCallback(() => setGuideManagerSourceId(null), []);
+
+  useEffect(() => {
+    const profileChanged = prevProfileIdRef.current !== profile.activeProfileId;
+    prevProfileIdRef.current = profile.activeProfileId;
+    const locked = profile.hasGuardPin && !profile.parentalUnlocked;
+    if (profileChanged || locked) {
+      setChannelManagerOpen(false);
+      setGuideManagerSourceId(null);
+    }
+  }, [profile.activeProfileId, profile.hasGuardPin, profile.parentalUnlocked]);
+
+  const guideSource = useMemo(
+    () =>
+      guideManagerSourceId !== null
+        ? (sources.find((s) => s.id === guideManagerSourceId) ?? null)
+        : null,
+    [guideManagerSourceId, sources],
+  );
+
+  return {
+    channelManagerOpen,
+    guideSource,
+    anyOpen: channelManagerOpen || guideSource !== null,
+    openChannelManager,
+    openGuideManager,
+    closeChannelManager,
+    closeGuideManager,
+  };
 }
 
 /**

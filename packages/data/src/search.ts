@@ -95,6 +95,7 @@ interface RawSearchRow {
   rating: number | null;
   year: number | null;
   num: number | null;
+  catchup_days?: number | null;
 }
 
 const SEARCH_SPEC: Record<
@@ -111,7 +112,7 @@ const SEARCH_SPEC: Record<
   live: {
     table: 'live',
     fts: 'live_fts',
-    cols: 't.logo AS logo, NULL AS rating, NULL AS year, t.num AS num',
+    cols: 't.logo AS logo, NULL AS rating, NULL AS year, t.num AS num, t.catchup_days AS catchup_days',
     foldCols: 't.name_fold AS name_fold, NULL AS cast_fold, NULL AS director_fold',
     bm25Expr: 'bm25(live_fts)',
     hasCredits: false,
@@ -119,7 +120,7 @@ const SEARCH_SPEC: Record<
   movie: {
     table: 'movies',
     fts: 'movies_fts',
-    cols: 't.logo AS logo, t.rating AS rating, t.year AS year, NULL AS num',
+    cols: 't.logo AS logo, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
     foldCols:
       't.name_fold AS name_fold, t.cast_fold AS cast_fold, t.director_fold AS director_fold',
     bm25Expr: 'bm25(movies_fts, 4.0, 1.5, 1.5)',
@@ -128,7 +129,7 @@ const SEARCH_SPEC: Record<
   series: {
     table: 'series',
     fts: 'series_fts',
-    cols: 't.cover AS logo, t.rating AS rating, t.year AS year, NULL AS num',
+    cols: 't.cover AS logo, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
     foldCols:
       't.name_fold AS name_fold, t.cast_fold AS cast_fold, t.director_fold AS director_fold',
     bm25Expr: 'bm25(series_fts, 4.0, 1.5, 1.5)',
@@ -213,6 +214,9 @@ function mapSearchRow(
     rating: r.rating,
     year: r.year,
     num: r.num,
+    ...(typeof r.catchup_days === 'number' && Number.isFinite(r.catchup_days) && r.catchup_days > 0
+      ? { catchupDays: r.catchup_days }
+      : {}),
     ...(matchedBy !== undefined ? { matchedBy } : {}),
   };
 }

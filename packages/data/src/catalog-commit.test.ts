@@ -584,6 +584,7 @@ describe('catalog-commit', () => {
       logo: 'http://img/1.png',
       guideId: 'ch1',
       catchupDays: 2,
+      catchupMode: 'xc',
     });
     expect(
       await db.all(

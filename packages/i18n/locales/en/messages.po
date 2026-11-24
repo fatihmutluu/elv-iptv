@@ -2337,3 +2337,135 @@ msgstr "Android TV home channels"
 
 msgid "tvHomeChannels.syncHint"
 msgstr "Show Continue watching and Favorite channels rows on the Android TV home screen."
+
+msgid "epg.catchupBadge"
+msgstr "Catch-up"
+
+msgid "epg.watchCatchup"
+msgstr "Watch catch-up"
+
+msgid "epg.catchupUnavailable"
+msgstr "Catch-up is not available for this programme."
+
+msgid "epg.catchupExpired"
+msgstr "Catch-up window has expired for this programme."
+
+msgid "player.catchupBadge"
+msgstr "CATCH-UP"
+
+msgid "player.backToLive"
+msgstr "Back to live"
+
+msgid "player.livePaused"
+msgstr "Live paused"
+
+msgid "player.behindLive"
+msgstr "{offset} behind live"
+
+msgid "player.timeShiftUnavailable"
+msgstr "Live rewind is not available for this stream."
+
+msgid "player.liveEdge"
+msgstr "At live edge"
+
+msgid "sources.guides.button"
+msgstr "Guides & mapping"
+
+msgid "sources.guides.title"
+msgstr "TV guides & channel mapping"
+
+msgid "sources.guides.subtitle"
+msgstr "Manage XMLTV guide priority, time offsets, and manual channel links."
+
+msgid "sources.guides.guidesTab"
+msgstr "Guide sources"
+
+msgid "sources.guides.mapperTab"
+msgstr "Channel mapper"
+
+msgid "sources.guides.addGuide"
+msgstr "Add guide source"
+
+msgid "sources.guides.namePlaceholder"
+msgstr "Guide name (e.g. Backup XMLTV)"
+
+msgid "sources.guides.urlPlaceholder"
+msgstr "http://example.invalid/epg.xml.gz"
+
+msgid "sources.guides.offsetLabel"
+msgstr "Time offset"
+
+msgid "sources.guides.offsetHours"
+msgstr "{hours}h"
+
+msgid "sources.guides.priorityUp"
+msgstr "Move up"
+
+msgid "sources.guides.priorityDown"
+msgstr "Move down"
+
+msgid "sources.guides.remove"
+msgstr "Remove"
+
+msgid "sources.guides.empty"
+msgstr "No additional guide sources configured."
+
+msgid "sources.guides.filterAll"
+msgstr "All channels"
+
+msgid "sources.guides.filterUnmatched"
+msgstr "Unmatched"
+
+msgid "sources.guides.searchPlaceholder"
+msgstr "Search channels or guide IDs…"
+
+msgid "sources.guides.unmatchedBadge"
+msgstr "Unmatched"
+
+msgid "sources.guides.manualBadge"
+msgstr "Manual"
+
+msgid "sources.guides.assignGuide"
+msgstr "Assign guide channel"
+
+msgid "sources.guides.clearOverride"
+msgstr "Reset to automatic"
+
+msgid "sources.guides.channelOffsetLabel"
+msgstr "Channel time offset"
+
+msgid "sources.guides.noGuideChannels"
+msgstr "No guide channels available. Refresh the guide first."
+
+msgid "sources.guides.save"
+msgstr "Save"
+
+msgid "sources.guides.cancel"
+msgstr "Cancel"
+
+msgid "epg.remindMe"
+msgstr "Remind me"
+
+msgid "epg.cancelReminder"
+msgstr "Cancel reminder"
+
+msgid "epg.reminderScheduled"
+msgstr "Reminder set"
+
+msgid "epg.reminderLeadLabel"
+msgstr "Remind before start"
+
+msgid "epg.reminderBannerTitle"
+msgstr "Starting soon"
+
+msgid "epg.reminderStartsIn"
+msgstr "Starts in {minutes} min"
+
+msgid "epg.reminderStartingNow"
+msgstr "Starting now"
+
+msgid "epg.reminderTuneNow"
+msgstr "Tune now"
+
+msgid "epg.reminderDismiss"
+msgstr "Dismiss"

@@ -473,7 +473,7 @@ describe('MpvEngine', () => {
     expect(DESKTOP_CAPABILITIES).toEqual({
       mpegTsOverHttp: true,
       hls: true,
-      liveSeek: false,
+      liveSeek: true,
       softwareAudioFallback: false,
       recreate: true,
       audioTrackSelection: true,

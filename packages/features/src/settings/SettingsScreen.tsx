@@ -88,6 +88,8 @@ export interface SettingsScreenProps {
   readonly showAndroidDecoder?: boolean;
   /** Opens the Channel Management & Custom Groups overlay from Live TV settings (`#60`). */
   readonly onOpenChannelManagement?: () => void;
+  /** Opens the Multi-Guide & Channel Mapper overlay lifted to `AppShell` root (`#30`). */
+  readonly onOpenGuideManagement?: (sourceId: string) => void;
 }
 
 interface NavSectionMeta {

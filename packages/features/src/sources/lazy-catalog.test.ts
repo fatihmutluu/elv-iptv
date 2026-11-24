@@ -638,4 +638,140 @@ describe('createLazyCatalog', () => {
     expect((await lazyMin.addChannelToCustomGroup?.('g1', 'k', 's1'))?.ok).toBe(false);
     expect((await lazyMin.removeChannelFromCustomGroup?.('g1', 'k'))?.ok).toBe(false);
   });
+
+  it('delegates all 16 Wave F3 catch-up, guide source, override, and reminder methods and falls back cleanly when omitted', async () => {
+    const handle = testDb();
+    await openCatalog(handle.db);
+    const underlying = createCatalogService({
+      db: handle.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: {
+        async get() {
+          const bytes = new TextEncoder().encode(
+            '#EXTM3U\n#EXTINF:-1 catchup="shift" catchup-days="3",News HD\nhttp://127.0.0.1/live/1.ts\n',
+          );
+          return ok({
+            status: 200,
+            headers: {},
+            body: {
+              async *[Symbol.asyncIterator]() {
+                yield bytes;
+              },
+            },
+          });
+        },
+      },
+      clock: () => 10_000_000,
+    });
+    const lazy = createLazyCatalog(async () => underlying);
+    const added = await lazy.addSourceFromLink({ name: 'Demo', url: 'http://127.0.0.1/demo.m3u' });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    await lazy.importSource(added.value.id);
+    const cats = await lazy.categories(added.value.id, 'live');
+    const items = await lazy.items(cats[0]?.id ?? '', 0, 10);
+    const chKey = items[0]?.key ?? '';
+
+    const catchupRes = await lazy.resolveCatchupStream?.(chKey, {
+      startMs: 9_000_000,
+      stopMs: 9_600_000,
+    });
+    expect(catchupRes?.ok).toBe(true);
+    const archiveRes = await lazy.fetchChannelArchiveEpg?.(chKey);
+    expect(archiveRes?.ok).toBe(true);
+
+    const g1 = await lazy.addGuideSource?.({
+      sourceId: added.value.id,
+      name: 'Backup XMLTV',
+      url: 'http://127.0.0.1/epg.xml',
+    });
+    expect(g1?.ok).toBe(true);
+    if (g1?.ok) {
+      expect((await lazy.listGuideSources?.(added.value.id))?.length).toBe(1);
+      expect((await lazy.updateGuideSource?.(g1.value.id, { epgShiftMs: 3_600_000 }))?.ok).toBe(
+        true,
+      );
+      expect((await lazy.reorderGuideSources?.(added.value.id, [g1.value.id]))?.ok).toBe(true);
+      expect((await lazy.removeGuideSource?.(g1.value.id))?.ok).toBe(true);
+    }
+
+    expect(await lazy.listGuideChannels?.(added.value.id)).toEqual([]);
+    expect(
+      (
+        await lazy.setChannelGuideOverride?.({
+          sourceId: added.value.id,
+          channelKey: chKey,
+          guideId: 'news.hd',
+        })
+      )?.ok,
+    ).toBe(true);
+    expect((await lazy.listChannelGuideOverrides?.(added.value.id))?.length).toBe(1);
+    expect((await lazy.clearChannelGuideOverride?.(added.value.id, chKey))?.ok).toBe(true);
+
+    const rem = await lazy.upsertReminder?.({
+      sourceId: added.value.id,
+      channelKey: chKey,
+      channelName: 'News HD',
+      programmeTitle: 'Late News',
+      programmeStart: 20_000_000,
+      programmeStop: 23_600_000,
+    });
+    expect(rem?.ok).toBe(true);
+    expect((await lazy.listReminders?.())?.length).toBe(1);
+    expect((await lazy.markReminderFired?.(chKey, 20_000_000))?.ok).toBe(true);
+    expect((await lazy.removeReminder?.(chKey, 20_000_000))?.ok).toBe(true);
+    expect(await lazy.pruneExpiredReminders?.(30_000_000)).toBe(0);
+
+    await lazy.close();
+    handle.close();
+
+    const minimal = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      seasons: vi.fn(async () => ok([])),
+      episodes: vi.fn(async () => []),
+      resolveStream: vi.fn(),
+      close: vi.fn(async () => undefined),
+    } as unknown as CatalogService;
+    const lazyMin = createLazyCatalog(async () => minimal);
+    expect((await lazyMin.resolveCatchupStream?.('k', { startMs: 1, stopMs: 2 }))?.ok).toBe(false);
+    expect((await lazyMin.fetchChannelArchiveEpg?.('k'))?.ok).toBe(false);
+    expect(await lazyMin.listGuideSources?.('s1')).toEqual([]);
+    expect(
+      (await lazyMin.addGuideSource?.({ sourceId: 's1', name: 'G', url: 'http://a.invalid/e.xml' }))
+        ?.ok,
+    ).toBe(false);
+    expect((await lazyMin.updateGuideSource?.('g1', { enabled: false }))?.ok).toBe(false);
+    expect((await lazyMin.removeGuideSource?.('g1'))?.ok).toBe(false);
+    expect((await lazyMin.reorderGuideSources?.('s1', ['g1']))?.ok).toBe(false);
+    expect(await lazyMin.listGuideChannels?.('s1')).toEqual([]);
+    expect(await lazyMin.listChannelGuideOverrides?.('s1')).toEqual([]);
+    expect(
+      (await lazyMin.setChannelGuideOverride?.({ sourceId: 's1', channelKey: 'k', guideId: 'g' }))
+        ?.ok,
+    ).toBe(false);
+    expect((await lazyMin.clearChannelGuideOverride?.('s1', 'k'))?.ok).toBe(false);
+    expect(await lazyMin.listReminders?.()).toEqual([]);
+    expect(
+      (
+        await lazyMin.upsertReminder?.({
+          sourceId: 's1',
+          channelKey: 'k',
+          channelName: 'Ch',
+          programmeTitle: 'Show',
+          programmeStart: 100,
+          programmeStop: 200,
+        })
+      )?.ok,
+    ).toBe(false);
+    expect((await lazyMin.removeReminder?.('k', 100))?.ok).toBe(false);
+    expect((await lazyMin.markReminderFired?.('k', 100))?.ok).toBe(false);
+    expect(await lazyMin.pruneExpiredReminders?.(999)).toBe(0);
+  });
 });

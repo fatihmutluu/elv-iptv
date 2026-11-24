@@ -1,5 +1,14 @@
 import type { UserItemKind } from '@elv/data';
 
+/** Optional catch-up archive playback metadata attached to a {@link PlayableEntry} (`#27`). */
+export interface PlayableCatchupMeta {
+  readonly startMs: number;
+  readonly stopMs: number;
+  readonly programmeTitle: string;
+  readonly hasArchive?: boolean;
+  readonly liveTarget: PlayableEntry;
+}
+
 /** Metadata needed to tune and title a playable live channel, movie, or episode. */
 export interface PlayableEntry {
   readonly itemKey: string;
@@ -21,6 +30,8 @@ export interface PlayableEntry {
   readonly preferredAudioLang?: string;
   /** Optional pre-play preferred subtitle language code (e.g. `'tr'`, `'en'`, `'off'`) (`#398`). */
   readonly preferredSubtitleLang?: string;
+  /** Present when playing a past programme via provider catch-up archive (`#27`). */
+  readonly catchup?: PlayableCatchupMeta;
 }
 
 /** Channel list context enabling Up/Down live zapping across paged categories without materializing all rows. */

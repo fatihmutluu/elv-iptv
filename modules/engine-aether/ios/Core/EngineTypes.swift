@@ -183,7 +183,14 @@ public enum BackendObservation: Equatable, Sendable {
   case phase(BackendPhase)
   case firstFrame
   case audioOnly
-  case clock(positionSeconds: Double, rate: Double, durationSeconds: Double?, liveEdgeSeconds: Double?)
+  case clock(
+    positionSeconds: Double,
+    rate: Double,
+    durationSeconds: Double?,
+    liveEdgeSeconds: Double?,
+    liveSeekableStartSeconds: Double? = nil,
+    timeShiftSupported: Bool? = nil
+  )
   case duration(Double)
   case tracks(MediaTracksOut)
   case mediaInfo(StreamVideoInfo)
@@ -224,6 +231,8 @@ public struct ClockAnchorOut: Equatable, Sendable {
   public let rate: Double
   public let durationMs: Double?
   public let liveEdgeMs: Double?
+  public let liveSeekableStartMs: Double?
+  public let timeShiftSupported: Bool?
   public let isLiveTs: Bool?
 
   public init(
@@ -232,6 +241,8 @@ public struct ClockAnchorOut: Equatable, Sendable {
     rate: Double,
     durationMs: Double? = nil,
     liveEdgeMs: Double? = nil,
+    liveSeekableStartMs: Double? = nil,
+    timeShiftSupported: Bool? = nil,
     isLiveTs: Bool? = nil
   ) {
     self.positionMs = positionMs
@@ -239,6 +250,8 @@ public struct ClockAnchorOut: Equatable, Sendable {
     self.rate = rate
     self.durationMs = durationMs
     self.liveEdgeMs = liveEdgeMs
+    self.liveSeekableStartMs = liveSeekableStartMs
+    self.timeShiftSupported = timeShiftSupported
     self.isLiveTs = isLiveTs
   }
 }
@@ -339,6 +352,12 @@ public enum EngineEventOut: Equatable, Sendable {
       }
       if let liveEdgeMs = anchor.liveEdgeMs {
         anchorDict["liveEdgeMs"] = liveEdgeMs
+      }
+      if let liveSeekableStartMs = anchor.liveSeekableStartMs {
+        anchorDict["liveSeekableStartMs"] = liveSeekableStartMs
+      }
+      if let timeShiftSupported = anchor.timeShiftSupported {
+        anchorDict["timeShiftSupported"] = timeShiftSupported
       }
       if let isLiveTs = anchor.isLiveTs {
         anchorDict["isLiveTs"] = isLiveTs

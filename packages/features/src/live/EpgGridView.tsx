@@ -1,4 +1,4 @@
-import type { CatalogService, ItemRow, ProgrammeRow } from '@elv/data';
+import type { CatalogService, ItemRow, ProgrammeReminderRecord, ProgrammeRow } from '@elv/data';
 import type { EpgRowDensity, EpgTimeSpanHoursPref, LogoBackdropModePref } from '@elv/domain';
 import {
   TvFocusAnchor,
@@ -23,6 +23,7 @@ import {
   useKeymap,
   useRouteActive,
 } from '../shared';
+import { buildReminderKey, indexReminderKeys } from './catchup-reminder-model';
 import { EpgChannelRow } from './EpgChannelRow';
 import { EpgDateTabStrip, EpgPreviewHeader, EpgTimeRuler } from './EpgPreviewHeader';
 import { EpgProgrammeDetailModal } from './EpgProgrammeDetailModal';
@@ -61,6 +62,14 @@ export interface EpgGridViewProps {
   readonly nowMs?: number;
   readonly favoriteKeys?: ReadonlySet<string>;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
+  readonly onWatchCatchup?: (
+    channel: ItemRow,
+    index: number,
+    programme: ProgrammeRow,
+    hasArchive?: boolean,
+  ) => void;
+  readonly reminderVersion?: number;
+  readonly onReminderChanged?: () => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onJumpPreviousChannel?: () => void;
   readonly onHideChannel?: (channel: ItemRow) => void;
@@ -96,6 +105,9 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
   const { catalog, category, channelSource, sourceVersion, refreshToken, nowMs, favoriteKeys } = p;
   const {
     onWatchChannel,
+    onWatchCatchup,
+    reminderVersion = 0,
+    onReminderChanged,
     onToggleFavorite,
     onJumpPreviousChannel,
     onHideChannel,
@@ -171,6 +183,35 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
     readonly index: number;
     readonly programme: ProgrammeRow | null;
   } | null>(null);
+  const [localReminderTick, setLocalReminderTick] = useState(0);
+  const [reminders, setReminders] = useState<readonly ProgrammeReminderRecord[]>([]);
+
+  // Stale-while-revalidate reminder hydration so EPG cells never flash blank badges.
+  const reminderSyncEpoch = localReminderTick + refreshToken + reminderVersion;
+  useEffect(() => {
+    const listReminders = catalog.listReminders;
+    if (listReminders === undefined || reminderSyncEpoch < 0) return;
+    let cancelled = false;
+    void listReminders(undefined, { includeFired: false })
+      .then((rows) => {
+        if (!cancelled) setReminders(rows);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, reminderSyncEpoch]);
+
+  const scheduledReminderKeys = useMemo(() => indexReminderKeys(reminders), [reminders]);
+  const reminderByKey = useMemo(() => {
+    const map = new Map<string, ProgrammeReminderRecord>();
+    for (const r of reminders) map.set(buildReminderKey(r.channelKey, r.programmeStart), r);
+    return map;
+  }, [reminders]);
+  const handleReminderChanged = useCallback(() => {
+    setLocalReminderTick((n) => n + 1);
+    onReminderChanged?.();
+  }, [onReminderChanged]);
 
   const dateTabs = useMemo(() => buildEpgDateTabs(activeNowMs, i18n), [activeNowMs, i18n]);
   const activeDayKey = useMemo(() => localDayKey(epgData.windowStartMs), [epgData.windowStartMs]);
@@ -383,6 +424,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
           sourceBadge={entry.channel ? (sourceBadges?.get(entry.channel.sourceId) ?? null) : null}
           cleanChannelTitles={cleanChannelTitles}
           epgGenreTints={epgGenreTints}
+          scheduledReminderKeys={scheduledReminderKeys}
           onSelectCell={cursor.handleSelectCell}
           onOpenContextMenu={handleOpenContextMenu}
         />
@@ -401,6 +443,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
       handleOpenContextMenu,
       logoBackdropMode,
       rowHeight,
+      scheduledReminderKeys,
       sourceBadges,
       visibleSpanMs,
     ],
@@ -417,6 +460,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
       logoBackdropMode,
       sourceBadges,
       cleanChannelTitles,
+      scheduledReminderKeys,
     }),
     [
       cleanChannelTitles,
@@ -427,6 +471,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
       epgData.windowStartMs,
       epgGenreTints,
       logoBackdropMode,
+      scheduledReminderKeys,
       sourceBadges,
       visibleSpanMs,
     ],
@@ -520,6 +565,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
                     sourceBadge={ch ? (sourceBadges?.get(ch.sourceId) ?? null) : null}
                     cleanChannelTitles={cleanChannelTitles}
                     epgGenreTints={epgGenreTints}
+                    scheduledReminderKeys={scheduledReminderKeys}
                     onSelectCell={cursor.handleSelectCell}
                     onOpenContextMenu={handleOpenContextMenu}
                   />
@@ -577,8 +623,25 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
         isFavorite={detailModal !== null && (favoriteKeys?.has(detailModal.channel.key) ?? false)}
         isTv={isTv}
         cleanChannelTitles={cleanChannelTitles}
+        catalog={catalog}
+        hasReminder={
+          detailModal !== null &&
+          scheduledReminderKeys.has(
+            buildReminderKey(detailModal.channel.key, detailModal.programme.start),
+          )
+        }
+        {...(detailModal !== null
+          ? (() => {
+              const rec = reminderByKey.get(
+                buildReminderKey(detailModal.channel.key, detailModal.programme.start),
+              );
+              return rec !== undefined ? { reminderLeadTimeMs: rec.leadTimeMs } : {};
+            })()
+          : {})}
         onTuneChannel={onWatchChannel}
+        {...(onWatchCatchup !== undefined ? { onWatchCatchup } : {})}
         {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
+        onReminderChanged={handleReminderChanged}
         onClose={() => setDetailModal(null)}
       />
 

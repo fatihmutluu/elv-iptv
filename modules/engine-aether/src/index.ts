@@ -215,7 +215,7 @@ const MID_POWER_APPLE_TV_PATTERN = /^AppleTV(?:5|6),/;
 const CAPABILITIES: EngineCapabilities = Object.freeze({
   mpegTsOverHttp: true,
   hls: true,
-  liveSeek: false,
+  liveSeek: true,
   softwareAudioFallback: true,
   recreate: true,
   audioTrackSelection: true,

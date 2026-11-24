@@ -8,9 +8,11 @@ import { usePlayDeepLinkHandler } from './app-shell-deep-link';
 import {
   AppShellProfileOverlays,
   buildShellProfileUtility,
+  useShellManagementOverlays,
   useShellProfileEffects,
 } from './app-shell-overlays';
 import { AppShellPlayerView } from './app-shell-player';
+import { useProgrammeReminders } from './app-shell-reminders';
 import {
   AppShellExitToast,
   AppShellStage,
@@ -47,9 +49,11 @@ import type { LanPairingPort } from './ports/lan-pairing-host';
 import type { PlayDeepLinkTarget } from './ports/play-deep-link';
 import type { PlayTarget } from './ports/play-target';
 import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
+import type { ReminderHostPort } from './ports/reminder-host';
 import type { SourceImportHost } from './ports/source-import-host';
 import type { TvHomeChannelsPort } from './ports/tv-home-channels';
 import type { VideoHost } from './ports/video-host';
+import { ReminderToastBanner } from './reminders';
 import { OledScreensaverOverlay, useOledScreensaver } from './screensaver';
 import type { SettingsSection } from './settings';
 import {
@@ -77,6 +81,7 @@ import {
   useShellSources,
 } from './shell';
 import { CachedCatalogStrip } from './sources/CachedCatalogStrip';
+import { GuideManagementOverlay } from './sources/GuideManagementOverlay';
 
 export type { AppTab };
 
@@ -98,6 +103,8 @@ export interface AppShellProps {
   keymapStore?: KeymapStore;
   /** Optional Android TV Home Screen preview channels port (`#273`). */
   tvHomeChannels?: TvHomeChannelsPort;
+  /** Optional OS notification host port for programme reminders (`#35`). */
+  reminderHost?: ReminderHostPort;
   /** Optional incoming `elviptv://play?key=...` deep-link target (`#273`). */
   pendingDeepLink?: PlayDeepLinkTarget | null;
   /** Invoked once `pendingDeepLink` has been consumed by `AppShell` (`#273`). */
@@ -154,21 +161,11 @@ function AppShellContent(props: AppShellProps): ReactElement {
     profileId: profile.activeProfileId,
     parentalUnlocked: profile.parentalUnlocked,
   };
-  const [settingsChannelManagerOpen, setSettingsChannelManagerOpen] = useState(false);
-  const handleOpenSettingsChannelManager = useCallback(() => {
-    if (profile.hasGuardPin && !profile.parentalUnlocked) {
-      profile.requestParentalUnlock(() => setSettingsChannelManagerOpen(true));
-      return;
-    }
-    setSettingsChannelManagerOpen(true);
-  }, [profile]);
-  useEffect(() => {
-    if (settingsChannelManagerOpen && profile.hasGuardPin && !profile.parentalUnlocked) {
-      setSettingsChannelManagerOpen(false);
-    }
-  }, [profile.hasGuardPin, profile.parentalUnlocked, settingsChannelManagerOpen]);
+  const stopEmbeddedPreviewRef = useRef<(() => Promise<void>) | null>(null);
+  const handleRegisterStopPreview = useCallback((stop: (() => Promise<void>) | null) => {
+    stopEmbeddedPreviewRef.current = stop;
+  }, []);
   const hasProfileOverlay = profile.profilePickerOpen || profile.pinDialog !== null;
-  const hasRootOverlay = hasProfileOverlay || settingsChannelManagerOpen;
   const confirmExitOnBack = preferences.preferences.confirmExitOnBack;
   const confirmExitOnBackRef = useRef(confirmExitOnBack);
   confirmExitOnBackRef.current = confirmExitOnBack;
@@ -185,6 +182,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const [heroScrolled, setHeroScrolled] = useState(false);
   const [userPickedTab, setUserPickedTab] = useState(false);
   const [userStateVersion, setUserStateVersion] = useState(0);
+  const [reminderVersion, setReminderVersion] = useState(0);
   const defaultLiveMode = preferences.preferences.defaultLiveMode;
   const userPickedLiveModeRef = useRef(false);
   const prevDefaultLiveModeRef = useRef(defaultLiveMode);
@@ -252,6 +250,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     onInitialSourcesReady: handleInitialSourcesReady,
   });
   const { sources, sourcesRef, sourcesResolved, refreshToken, catalogRevision } = shell;
+  const mgmtOverlays = useShellManagementOverlays(profile, sources);
   const profileScopeKey = `${profile.activeProfileId}:${profile.parentalUnlocked ? '1' : '0'}:${profile.profileRevision}`;
   uiCache.setRevision(catalogRevision, locale, profileScopeKey);
   const openPlayTarget = useCallback((enriched: PlayTarget) => {
@@ -497,6 +496,41 @@ function AppShellContent(props: AppShellProps): ReactElement {
     shell.bumpCatalogRevision();
     setUserStateVersion((v) => v + 1);
   }, [shell.bumpCatalogRevision, uiCache]);
+  const handleReminderChanged = useCallback(() => setReminderVersion((v) => v + 1), []);
+  const handleReminderTune = useCallback(
+    (target: PlayTarget) => {
+      const stopPreview = stopEmbeddedPreviewRef.current;
+      if (playTargetRef.current === null && stopPreview !== null) {
+        void stopPreview()
+          .catch(() => undefined)
+          .finally(() => handlePlay(target));
+        return;
+      }
+      handlePlay(target);
+    },
+    [handlePlay],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: locale updates translated reminder timing text on live language switch
+  const formatReminderTimingText = useCallback(
+    (startsInMinutes: number) =>
+      startsInMinutes <= 0
+        ? i18n.t('epg.reminderStartingNow')
+        : i18n.t('epg.reminderStartsIn', { minutes: startsInMinutes }),
+    [i18n, locale],
+  );
+  const reminders = useProgrammeReminders({
+    catalog: observedCatalog,
+    activeProfileId: profile.activeProfileId,
+    parentalUnlocked: profile.parentalUnlocked,
+    profileRevision: profile.profileRevision,
+    catalogRevision,
+    reminderVersion,
+    onTuneChannel: handleReminderTune,
+    formatTimingText: formatReminderTimingText,
+    ...(props.reminderHost !== undefined ? { reminderHost: props.reminderHost } : {}),
+  });
+  const hasRootOverlay =
+    hasProfileOverlay || mgmtOverlays.anyOpen || (isTv && reminders.activeBanner !== null);
   const crashProps = useMemo(
     () =>
       buildShellCrashProps({
@@ -671,8 +705,12 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     onPlay={handlePlay}
                     onSelectTab={selectTab}
                     onOpenSources={openSources}
-                    onOpenChannelManagement={handleOpenSettingsChannelManager}
+                    onOpenChannelManagement={mgmtOverlays.openChannelManager}
+                    onOpenGuideManagement={mgmtOverlays.openGuideManager}
+                    onRegisterStopPreview={handleRegisterStopPreview}
                     onChannelsMutated={handleChannelsMutated}
+                    reminderVersion={reminderVersion}
+                    onReminderChanged={handleReminderChanged}
                     onScrollTopChange={setHeroScrolled}
                     onFocusTopNav={handleFocusTopNav}
                   />
@@ -689,13 +727,25 @@ function AppShellContent(props: AppShellProps): ReactElement {
               />
             ) : null}
             <ChannelManagementOverlay
-              visible={settingsChannelManagerOpen}
+              visible={mgmtOverlays.channelManagerOpen}
               catalog={observedCatalog}
               sources={sources}
               onMutated={handleChannelsMutated}
-              onClose={() => setSettingsChannelManagerOpen(false)}
+              onClose={mgmtOverlays.closeChannelManager}
+            />
+            <GuideManagementOverlay
+              visible={mgmtOverlays.guideSource !== null}
+              source={mgmtOverlays.guideSource}
+              catalog={observedCatalog}
+              onMutated={handleChannelsMutated}
+              onClose={mgmtOverlays.closeGuideManager}
             />
             <AppShellProfileOverlays onOpenProfilesSettings={openProfilesSettings} />
+            <ReminderToastBanner
+              banner={reminders.activeBanner}
+              onTune={reminders.tuneActiveBanner}
+              onDismiss={reminders.dismissBanner}
+            />
             <OledScreensaverOverlay state={oledScreensaver.state} onWake={oledScreensaver.wake} />
           </View>
         </BrowseFocusMemoryProvider>

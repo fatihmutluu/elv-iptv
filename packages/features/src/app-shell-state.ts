@@ -300,6 +300,13 @@ export function enrichPlayTargetAccountKey(
   for (const s of sources) byId.set(s.id, s);
 
   const enrichedBase = enrichPlayableEntryAccountKey(target, byId);
+  const enrichedCatchup =
+    target.catchup !== undefined
+      ? {
+          ...target.catchup,
+          liveTarget: enrichPlayableEntryAccountKey(target.catchup.liveTarget, byId),
+        }
+      : undefined;
   const enrichedPrev =
     target.previousChannel !== undefined
       ? enrichPlayableEntryAccountKey(target.previousChannel, byId)
@@ -327,6 +334,7 @@ export function enrichPlayTargetAccountKey(
 
   return {
     ...enrichedBase,
+    ...(enrichedCatchup !== undefined ? { catchup: enrichedCatchup } : {}),
     ...(enrichedPlaylist !== undefined ? { playlist: enrichedPlaylist } : {}),
     ...(enrichedNext !== undefined ? { nextEpisodes: enrichedNext } : {}),
     ...(enrichedPrev !== undefined ? { previousChannel: enrichedPrev } : {}),
@@ -400,6 +408,101 @@ export function createObservedCatalog(
     seasons: (seriesId, opts) => c.seasons(seriesId, opts),
     episodes: (seriesId, season, opts) => c.episodes(seriesId, season, opts),
     resolveStream: (itemKey, opts) => c.resolveStream(itemKey, opts),
+    ...(c.resolveCatchupStream ? { resolveCatchupStream: c.resolveCatchupStream.bind(c) } : {}),
+    ...(c.fetchChannelArchiveEpg
+      ? { fetchChannelArchiveEpg: c.fetchChannelArchiveEpg.bind(c) }
+      : {}),
+    ...(c.listGuideSources ? { listGuideSources: c.listGuideSources.bind(c) } : {}),
+    ...(c.addGuideSource
+      ? {
+          addGuideSource: async (
+            input: Parameters<NonNullable<CatalogService['addGuideSource']>>[0],
+          ) => {
+            const fn = c.addGuideSource;
+            if (fn === undefined) throw new Error('addGuideSource unavailable');
+            const res = await fn.call(c, input);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.updateGuideSource
+      ? {
+          updateGuideSource: async (
+            id: Parameters<NonNullable<CatalogService['updateGuideSource']>>[0],
+            patch: Parameters<NonNullable<CatalogService['updateGuideSource']>>[1],
+          ) => {
+            const fn = c.updateGuideSource;
+            if (fn === undefined) throw new Error('updateGuideSource unavailable');
+            const res = await fn.call(c, id, patch);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.removeGuideSource
+      ? {
+          removeGuideSource: async (
+            id: Parameters<NonNullable<CatalogService['removeGuideSource']>>[0],
+          ) => {
+            const fn = c.removeGuideSource;
+            if (fn === undefined) throw new Error('removeGuideSource unavailable');
+            const res = await fn.call(c, id);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.reorderGuideSources
+      ? {
+          reorderGuideSources: async (
+            sourceId: Parameters<NonNullable<CatalogService['reorderGuideSources']>>[0],
+            orderedIds: Parameters<NonNullable<CatalogService['reorderGuideSources']>>[1],
+          ) => {
+            const fn = c.reorderGuideSources;
+            if (fn === undefined) throw new Error('reorderGuideSources unavailable');
+            const res = await fn.call(c, sourceId, orderedIds);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.listGuideChannels ? { listGuideChannels: c.listGuideChannels.bind(c) } : {}),
+    ...(c.listChannelGuideOverrides
+      ? { listChannelGuideOverrides: c.listChannelGuideOverrides.bind(c) }
+      : {}),
+    ...(c.setChannelGuideOverride
+      ? {
+          setChannelGuideOverride: async (
+            input: Parameters<NonNullable<CatalogService['setChannelGuideOverride']>>[0],
+          ) => {
+            const fn = c.setChannelGuideOverride;
+            if (fn === undefined) throw new Error('setChannelGuideOverride unavailable');
+            const res = await fn.call(c, input);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.clearChannelGuideOverride
+      ? {
+          clearChannelGuideOverride: async (
+            sourceId: Parameters<NonNullable<CatalogService['clearChannelGuideOverride']>>[0],
+            channelKey: Parameters<NonNullable<CatalogService['clearChannelGuideOverride']>>[1],
+          ) => {
+            const fn = c.clearChannelGuideOverride;
+            if (fn === undefined) throw new Error('clearChannelGuideOverride unavailable');
+            const res = await fn.call(c, sourceId, channelKey);
+            if (res.ok) await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
+    ...(c.listReminders ? { listReminders: c.listReminders.bind(c) } : {}),
+    ...(c.upsertReminder ? { upsertReminder: c.upsertReminder.bind(c) } : {}),
+    ...(c.removeReminder ? { removeReminder: c.removeReminder.bind(c) } : {}),
+    ...(c.markReminderFired ? { markReminderFired: c.markReminderFired.bind(c) } : {}),
+    ...(c.pruneExpiredReminders ? { pruneExpiredReminders: c.pruneExpiredReminders.bind(c) } : {}),
     ...(c.itemDetail ? { itemDetail: c.itemDetail.bind(c) } : {}),
     ...(c.saveProgress ? { saveProgress: c.saveProgress.bind(c) } : {}),
     ...(c.setWatched ? { setWatched: c.setWatched.bind(c) } : {}),

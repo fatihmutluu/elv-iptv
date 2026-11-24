@@ -35,6 +35,7 @@ export interface NativeEngineHandle {
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
   seek(attempt: AttemptToken, positionMs: number): void;
+  jumpToLiveEdge?(attempt: AttemptToken): void;
   setScrubbing?(attempt: AttemptToken, scrubbing: boolean): void;
   setSpeed?(attempt: AttemptToken, rate: number): void;
   selectAudioTrack?(attempt: AttemptToken, id: string): void;
@@ -147,7 +148,19 @@ function mapEventClock(event: EngineEvent, uptimeMs: () => number, now: () => nu
   const uptime = uptimeMs();
   const toJs = (atMs: number): number => jsNow - Math.max(0, uptime - atMs);
   if (event.type === 'clock') {
-    const anchor: ClockAnchor = { ...event.anchor, atMs: toJs(event.anchor.atMs) };
+    const raw = event.anchor;
+    const { liveSeekableStartMs: rawStart, timeShiftSupported: rawSupported, ...rest } = raw;
+    const liveSeekableStartMs =
+      typeof rawStart === 'number' && Number.isFinite(rawStart) && rawStart >= 0
+        ? rawStart
+        : undefined;
+    const timeShiftSupported = typeof rawSupported === 'boolean' ? rawSupported : undefined;
+    const anchor: ClockAnchor = {
+      ...rest,
+      atMs: toJs(raw.atMs),
+      ...(liveSeekableStartMs === undefined ? {} : { liveSeekableStartMs }),
+      ...(timeShiftSupported === undefined ? {} : { timeShiftSupported }),
+    };
     return { ...event, anchor };
   }
   return { ...event, atMs: toJs(event.atMs) };
@@ -217,6 +230,14 @@ export function bridgeNativeEngine(
       adoptAttempt(attempt);
       native.seek(attempt, positionMs);
     }),
+    ...(native.jumpToLiveEdge === undefined
+      ? {}
+      : {
+          jumpToLiveEdge: command((attempt: AttemptToken) => {
+            adoptAttempt(attempt);
+            native.jumpToLiveEdge?.(attempt);
+          }),
+        }),
     ...(native.setScrubbing === undefined
       ? {}
       : {

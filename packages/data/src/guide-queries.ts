@@ -55,6 +55,8 @@ export interface ProgrammeRow {
   readonly flags: number;
   readonly ratingSystem?: string | null;
   readonly ratingValue?: string | null;
+  /** Optional provider archive availability flag from Xtream `get_simple_data_table` (`#306`). */
+  readonly hasArchive?: boolean;
 }
 
 /** Current (`now`) and upcoming (`next`) programme pair for a single live channel. */
@@ -68,6 +70,8 @@ interface RawGuideMapRow {
   channel_key: string;
   guide_id: string;
   epg_shift_ms: number | null;
+  override_epg_shift_ms: number | null;
+  guide_source_epg_shift_ms: number | null;
 }
 
 interface RawProgrammeRow {
@@ -158,7 +162,8 @@ function groupChannelKeys(
   return { ordered, bySource };
 }
 
-async function loadChannelGuideAndShifts(
+/** @internal Loads `channel_guide` mappings and total effective EPG time shifts (`live` + `channel_guide_overrides` + `guide_sources` + `SourceSettings.epgShiftMs`). */
+export async function loadChannelGuideAndShifts(
   db: SqlDriver,
   sourceId: string,
   keys: readonly string[],
@@ -168,12 +173,23 @@ async function loadChannelGuideAndShifts(
   minShift: number;
   maxShift: number;
 }> {
+  if (keys.length === 0) {
+    return { mapRows: [], shiftByChannel: new Map(), minShift: 0, maxShift: 0 };
+  }
   const [sourceShiftMs, mapRows] = await Promise.all([
     readSourceEpgShiftMs(db, sourceId),
     db.all<RawGuideMapRow>(
-      `SELECT cg.channel_key, cg.guide_id, l.epg_shift_ms
+      `SELECT cg.channel_key, cg.guide_id,
+              l.epg_shift_ms,
+              cgo.epg_shift_ms AS override_epg_shift_ms,
+              gs.epg_shift_ms AS guide_source_epg_shift_ms
          FROM channel_guide cg
-         LEFT JOIN live l ON l.source_id = cg.source_id AND l.key = cg.channel_key
+         LEFT JOIN live l
+           ON l.source_id = cg.source_id AND l.key = cg.channel_key
+         LEFT JOIN channel_guide_overrides cgo
+           ON cgo.source_id = cg.source_id AND cgo.channel_key = cg.channel_key
+         LEFT JOIN guide_sources gs
+           ON gs.id = cgo.guide_source_id AND gs.source_id = cg.source_id
         WHERE cg.source_id = ? AND cg.channel_key IN (${placeholders(keys.length)})`,
       [sourceId, ...keys],
     ),
@@ -187,7 +203,16 @@ async function loadChannelGuideAndShifts(
       typeof row.epg_shift_ms === 'number' && Number.isFinite(row.epg_shift_ms)
         ? row.epg_shift_ms
         : 0;
-    const total = chShift + sourceShiftMs;
+    const overrideShift =
+      typeof row.override_epg_shift_ms === 'number' && Number.isFinite(row.override_epg_shift_ms)
+        ? row.override_epg_shift_ms
+        : 0;
+    const guideSourceShift =
+      typeof row.guide_source_epg_shift_ms === 'number' &&
+      Number.isFinite(row.guide_source_epg_shift_ms)
+        ? row.guide_source_epg_shift_ms
+        : 0;
+    const total = chShift + overrideShift + guideSourceShift + sourceShiftMs;
     shiftByChannel.set(row.channel_key, total);
     if (total < minShift) minShift = total;
     if (total > maxShift) maxShift = total;

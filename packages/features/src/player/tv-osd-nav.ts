@@ -7,6 +7,8 @@ export type TvOsdAction =
   | 'playPause'
   | 'seekBack'
   | 'seekForward'
+  | 'jumpToLive'
+  | 'backToLive'
   | 'prevChannel'
   | 'channelList'
   | 'info'
@@ -26,6 +28,9 @@ export interface TvOsdAvailability {
   readonly hasChannelList?: boolean;
   readonly hasNextEpisode?: boolean;
   readonly hasPreviousChannel?: boolean;
+  readonly hasBackToLive?: boolean;
+  readonly liveTimeShiftSupported?: boolean;
+  readonly hasJumpToLive?: boolean;
 }
 
 const ORDER: readonly TvOsdAction[] = [
@@ -33,6 +38,8 @@ const ORDER: readonly TvOsdAction[] = [
   'seekBack',
   'playPause',
   'seekForward',
+  'jumpToLive',
+  'backToLive',
   'prevChannel',
   'channelList',
   'info',
@@ -44,11 +51,15 @@ const ORDER: readonly TvOsdAction[] = [
 
 /** Mounted TV OSD buttons in on-screen order. */
 export function availableTvOsdActions(a: TvOsdAvailability): TvOsdAction[] {
-  const transport = a.isVod && a.hasService;
+  const transport = (a.isVod || a.liveTimeShiftSupported === true) && a.hasService;
   return ORDER.filter((action) => {
     switch (action) {
       case 'back':
         return true;
+      case 'jumpToLive':
+        return !a.isVod && a.hasService && a.hasJumpToLive === true;
+      case 'backToLive':
+        return a.isVod && a.hasService && a.hasBackToLive === true;
       case 'prevChannel':
         return !a.isVod && a.hasService && a.hasPreviousChannel === true;
       case 'channelList':

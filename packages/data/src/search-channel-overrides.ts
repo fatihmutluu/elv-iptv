@@ -36,6 +36,7 @@ interface RawCustomNameHitRow {
   co_sort_order: number | null;
   logo: string | null;
   num: number | null;
+  catchup_days: number | null;
 }
 
 /**
@@ -62,7 +63,7 @@ export async function searchLiveCustomNames(
   const rows = await db.all<RawCustomNameHitRow>(
     `SELECT t.id, t.key, t.source_id, t.provider_id,
             co.custom_name, t.name AS raw_name, t.name_fold, co.sort_order AS co_sort_order,
-            t.logo, t.num
+            t.logo, t.num, t.catchup_days
        FROM channel_overrides co
        JOIN live t ON t.source_id = co.source_id AND t.key = co.item_key
        JOIN sources s ON s.id = t.source_id AND s.deleting = 0
@@ -103,6 +104,11 @@ export async function searchLiveCustomNames(
         rating: null,
         year: null,
         num: r.num,
+        ...(typeof r.catchup_days === 'number' &&
+        Number.isFinite(r.catchup_days) &&
+        r.catchup_days > 0
+          ? { catchupDays: r.catchup_days }
+          : {}),
       },
     });
   }

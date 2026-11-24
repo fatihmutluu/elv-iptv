@@ -536,6 +536,63 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       callResult({ method: 'addChannelToCustomGroup', groupId, itemKey, sourceId }),
     removeChannelFromCustomGroup: (groupId, itemKey) =>
       callResult({ method: 'removeChannelFromCustomGroup', groupId, itemKey }),
+    resolveCatchupStream: (itemKey, programme, opts) =>
+      callResult({
+        method: 'resolveCatchupStream',
+        itemKey,
+        programme,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    fetchChannelArchiveEpg: (itemKey, opts) =>
+      callResult({
+        method: 'fetchChannelArchiveEpg',
+        itemKey,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    listGuideSources: (sourceId) => callValue({ method: 'listGuideSources', sourceId }),
+    addGuideSource: (input) => callResult({ method: 'addGuideSource', input }),
+    updateGuideSource: (id, patch) => callResult({ method: 'updateGuideSource', id, patch }),
+    removeGuideSource: (id) => callResult({ method: 'removeGuideSource', id }),
+    reorderGuideSources: (sourceId, orderedIds) =>
+      callResult({ method: 'reorderGuideSources', sourceId, orderedIds }),
+    listGuideChannels: (sourceId, query, limit) =>
+      callValue({
+        method: 'listGuideChannels',
+        sourceId,
+        ...(query === undefined ? {} : { query }),
+        ...(limit === undefined ? {} : { limit }),
+      }),
+    listChannelGuideOverrides: (sourceId) =>
+      callValue({ method: 'listChannelGuideOverrides', sourceId }),
+    setChannelGuideOverride: (input) => callResult({ method: 'setChannelGuideOverride', input }),
+    clearChannelGuideOverride: (sourceId, channelKey) =>
+      callResult({ method: 'clearChannelGuideOverride', sourceId, channelKey }),
+    listReminders: (profileId, opts) =>
+      callValue({
+        method: 'listReminders',
+        ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    upsertReminder: (input) => callResult({ method: 'upsertReminder', input }),
+    removeReminder: (channelKey, programmeStart, profileId) =>
+      callResult({
+        method: 'removeReminder',
+        channelKey,
+        programmeStart,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    markReminderFired: (channelKey, programmeStart, profileId) =>
+      callResult({
+        method: 'markReminderFired',
+        channelKey,
+        programmeStart,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    pruneExpiredReminders: (nowMs) =>
+      callValue({
+        method: 'pruneExpiredReminders',
+        ...(nowMs === undefined ? {} : { nowMs }),
+      }),
     flushPendingWrites: () => callValue({ method: 'flushPendingWrites' }),
     onChanged(listener: () => void): () => void {
       changedListeners.add(listener);

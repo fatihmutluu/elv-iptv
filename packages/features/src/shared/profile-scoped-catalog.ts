@@ -61,6 +61,12 @@ export function createProfileScopedCatalog(
   const reorderChannels = c.reorderChannels?.bind(c);
   const listCustomGroups = c.listCustomGroups?.bind(c);
   const createCustomGroup = c.createCustomGroup?.bind(c);
+  const resolveCatchupStream = c.resolveCatchupStream?.bind(c);
+  const fetchChannelArchiveEpg = c.fetchChannelArchiveEpg?.bind(c);
+  const listReminders = c.listReminders?.bind(c);
+  const upsertReminder = c.upsertReminder?.bind(c);
+  const removeReminder = c.removeReminder?.bind(c);
+  const markReminderFired = c.markReminderFired?.bind(c);
 
   return {
     addSource: (input) => c.addSource(input),
@@ -156,6 +162,69 @@ export function createProfileScopedCatalog(
         }
       : {}),
     resolveStream: (itemKey, opts) => c.resolveStream(itemKey, mergeParentalOpts(opts, getScope())),
+    ...(resolveCatchupStream
+      ? {
+          resolveCatchupStream: (itemKey, programme, opts) =>
+            resolveCatchupStream(itemKey, programme, mergeParentalOpts(opts, getScope())),
+        }
+      : {}),
+    ...(fetchChannelArchiveEpg
+      ? {
+          fetchChannelArchiveEpg: (itemKey, opts) =>
+            fetchChannelArchiveEpg(itemKey, mergeParentalOpts(opts, getScope())),
+        }
+      : {}),
+    ...(c.listGuideSources ? { listGuideSources: c.listGuideSources.bind(c) } : {}),
+    ...(c.addGuideSource ? { addGuideSource: c.addGuideSource.bind(c) } : {}),
+    ...(c.updateGuideSource ? { updateGuideSource: c.updateGuideSource.bind(c) } : {}),
+    ...(c.removeGuideSource ? { removeGuideSource: c.removeGuideSource.bind(c) } : {}),
+    ...(c.reorderGuideSources ? { reorderGuideSources: c.reorderGuideSources.bind(c) } : {}),
+    ...(c.listGuideChannels ? { listGuideChannels: c.listGuideChannels.bind(c) } : {}),
+    ...(c.listChannelGuideOverrides
+      ? { listChannelGuideOverrides: c.listChannelGuideOverrides.bind(c) }
+      : {}),
+    ...(c.setChannelGuideOverride
+      ? { setChannelGuideOverride: c.setChannelGuideOverride.bind(c) }
+      : {}),
+    ...(c.clearChannelGuideOverride
+      ? { clearChannelGuideOverride: c.clearChannelGuideOverride.bind(c) }
+      : {}),
+    ...(listReminders
+      ? {
+          listReminders: (profileId, opts) => {
+            const scope = getScope();
+            return listReminders(profileId ?? scope.profileId, {
+              ...opts,
+              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
+        }
+      : {}),
+    ...(upsertReminder
+      ? {
+          upsertReminder: (input) => {
+            const scope = getScope();
+            return upsertReminder({
+              ...input,
+              profileId: input.profileId ?? scope.profileId,
+              parentalUnlocked: input.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
+        }
+      : {}),
+    ...(removeReminder
+      ? {
+          removeReminder: (channelKey, programmeStart, profileId) =>
+            removeReminder(channelKey, programmeStart, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(markReminderFired
+      ? {
+          markReminderFired: (channelKey, programmeStart, profileId) =>
+            markReminderFired(channelKey, programmeStart, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(c.pruneExpiredReminders ? { pruneExpiredReminders: c.pruneExpiredReminders.bind(c) } : {}),
     ...(saveProgress
       ? {
           saveProgress: (input) =>
