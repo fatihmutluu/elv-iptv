@@ -93,15 +93,31 @@ jobs:
       - name: Install FFmpeg
         run: |
           if ! command -v ffmpeg >/dev/null 2>&1; then
-            if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-              sudo apt-get update -qq \
-                -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" \
-                -o Dir::Etc::sourceparts="-" \
-                -o APT::Get::List-Cleanup="0"
-            else
-              sudo apt-get update -qq
+            export DEBIAN_FRONTEND=noninteractive
+            apt_opts=(
+              -o Acquire::ForceIPv4=true
+              -o Acquire::http::Timeout=15
+              -o Acquire::https::Timeout=15
+              -o Acquire::Retries=2
+            )
+            install_ffmpeg() {
+              if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+                sudo -E timeout 90 apt-get update -qq "${apt_opts[@]}" \
+                  -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" \
+                  -o Dir::Etc::sourceparts="-" \
+                  -o APT::Get::List-Cleanup="0" || return 1
+              else
+                sudo -E timeout 90 apt-get update -qq "${apt_opts[@]}" || return 1
+              fi
+              sudo -E timeout 180 apt-get install -y -qq --no-install-recommends "${apt_opts[@]}" ffmpeg || return 1
+            }
+            if ! install_ffmpeg; then
+              echo "::warning::Default Ubuntu mirror timed out or failed; falling back to archive.ubuntu.com"
+              if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+                sudo sed -i 's|http://azure\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+              fi
+              install_ffmpeg
             fi
-            sudo apt-get install -y -qq --no-install-recommends ffmpeg
           fi
       - name: Run Vitest unit & simulator suites
         env:
