@@ -59,12 +59,14 @@ describe('subtitles-bidi', () => {
       expect(isolateBidiLines('2024!\n...')).toBe('2024!\n...');
     });
 
-    it('handles separate inner isolates, surrogate-pair RTL symbols, and RLM/LRM marks', () => {
+    it('handles separate inner isolates, surrogate-pair RTL symbols, and RLM/ALM/LRM marks', () => {
       const splitIsolates = `${RLI}مرحبا${PDI} و ${RLI}عالم${PDI}`;
       expect(isolateBidiLines(splitIsolates)).toBe(`${RLI}${splitIsolates}${PDI}`);
       expect(containsRtlText('😀 \u{1EE00}')).toBe(true);
       expect(containsRtlText('😀 123')).toBe(false);
       expect(isolateBidiLines('\u200F123')).toBe(`${RLI}\u200F123${PDI}`);
+      expect(isolateBidiLines('\u061C123')).toBe(`${RLI}\u061C123${PDI}`);
+      expect(containsRtlText('\u061C')).toBe(true);
       expect(isolateBidiLines('\u200Eمرحبا')).toBe('\u200Eمرحبا');
     });
   });
@@ -403,6 +405,26 @@ describe('parseSubtitles — limits & unknown format', () => {
     const unknown = parseSubtitles('completely unrecognized garbage text');
     expect(unknown.cues).toEqual([]);
     expect(unknown.warnings).toContain('unknown-format');
+  });
+
+  it('parses pathological 200 KiB unclosed-delimiter payloads in linear time (< 1000 ms)', () => {
+    const ttmlUnclosedP = `<tt><body>${'<p>'.repeat(40_000)}</body></tt>`;
+    const ttmlUnclosedRoot = `${'<tt '.repeat(40_000)}`;
+    const ttmlUnclosedBr = `<tt><body><p begin="1s" end="2s">${'<br '.repeat(40_000)}ok</p></body></tt>`;
+    const srtUnclosedBrace = `1\n00:00:01,000 --> 00:00:02,000\n${'{\\'.repeat(40_000)}ok`;
+    const sdhUnclosedBrackets = '['.repeat(40_000);
+    const sdhUnclosedParens = '('.repeat(40_000);
+
+    const start = performance.now();
+    expect(parseSubtitles(ttmlUnclosedP, { format: 'ttml' }).cues).toEqual([]);
+    expect(parseSubtitles(ttmlUnclosedRoot, { format: 'ttml' }).cues).toEqual([]);
+    expect(parseSubtitles(ttmlUnclosedBr, { format: 'ttml' }).cues).toHaveLength(1);
+    expect(parseSubtitles(srtUnclosedBrace, { format: 'srt' }).cues).toHaveLength(1);
+    expect(stripSdhSubtitleLine(sdhUnclosedBrackets)).toBe(sdhUnclosedBrackets);
+    expect(stripSdhSubtitleLine(sdhUnclosedParens)).toBe(sdhUnclosedParens);
+    const elapsedMs = performance.now() - start;
+
+    expect(elapsedMs).toBeLessThan(1_000);
   });
 });
 

@@ -196,6 +196,16 @@ public struct TrackSelectionState: Equatable, Sendable {
     return nil
   }
 
+  /// Returns `true` when `primaryId` and `secondaryId` cannot coexist on Apple `AetherEngine`:
+  /// either they refer to the same track, or both are embedded `"s:*"` tracks (since `AetherEngine`
+  /// natively decodes one embedded subtitle stream at a time; external sidecars pair freely with
+  /// any primary, and embedded secondary tracks pair freely when primary is external or Off, `#402`).
+  private static func isIncompatibleSubtitlePair(primaryId: String?, secondaryId: String) -> Bool {
+    guard let primaryId else { return false }
+    if primaryId == secondaryId { return true }
+    return parseSubtitleTrackStreamId(primaryId) != nil && parseSubtitleTrackStreamId(secondaryId) != nil
+  }
+
   public mutating func onLoad(_ request: LoadRequest) {
     latestTracks = nil
     lastEmitted = nil
@@ -236,7 +246,7 @@ public struct TrackSelectionState: Equatable, Sendable {
 
     if let rawSecondary = request.secondarySubtitleTrackId,
        let parsed = parseAnySubtitleTrackId(rawSecondary),
-       parsed.canonicalId != primaryChoiceId
+       !Self.isIncompatibleSubtitlePair(primaryId: primaryChoiceId, secondaryId: parsed.canonicalId)
     {
       let wantedSec = parsed.canonicalId
       if let current = secondarySubtitleChoice, current.id == wantedSec {
@@ -335,9 +345,12 @@ public struct TrackSelectionState: Equatable, Sendable {
     subtitleReapplied = true
     subtitleOffApplied = false
 
-    // Enforce secondary != primary collision guard (`#402`).
+    // Enforce secondary != primary and single embedded subtitle decoder (`#402`).
     var clearedSecondary = false
-    if secondarySubtitleChoice?.id == canonicalId || latestTracks?.selectedSecondarySubtitleId == canonicalId {
+    let currentSecondaryId = secondarySubtitleChoice?.id ?? latestTracks?.selectedSecondarySubtitleId
+    if let currentSecondaryId,
+       Self.isIncompatibleSubtitlePair(primaryId: canonicalId, secondaryId: currentSecondaryId)
+    {
       secondarySubtitleChoice = nil
       secondarySubtitleReapplied = true
       clearedSecondary = true
@@ -388,8 +401,9 @@ public struct TrackSelectionState: Equatable, Sendable {
       return SecondarySubtitleSelectionOutcome(valid: false, secondaryId: nil, immediateTracks: nil)
     }
     let canonicalId = parsed.canonicalId
-    let activePrimaryId = latestTracks?.selectedSubtitleId ?? primaryChoiceId
-    guard canonicalId != activePrimaryId else {
+    let activePrimaryId: String? =
+      (subtitleChoice == .off) ? nil : (latestTracks?.selectedSubtitleId ?? primaryChoiceId)
+    guard !Self.isIncompatibleSubtitlePair(primaryId: activePrimaryId, secondaryId: canonicalId) else {
       return SecondarySubtitleSelectionOutcome(valid: false, secondaryId: nil, immediateTracks: nil)
     }
 
@@ -492,11 +506,11 @@ public struct TrackSelectionState: Equatable, Sendable {
       }
     }
 
-    // Reconcile secondary subtitle while strictly enforcing `secondary != primary` (`#402`).
+    // Reconcile secondary subtitle while enforcing `secondary != primary` and single embedded decoder (`#402`).
     if let wantedSecondary = secondarySubtitleChoice,
        let resolvedSec = Self.resolve(in: observed.subtitles, wanted: wantedSecondary)
     {
-      if resolvedSec.id == effective.selectedSubtitleId {
+      if Self.isIncompatibleSubtitlePair(primaryId: effective.selectedSubtitleId, secondaryId: resolvedSec.id) {
         secondarySubtitleChoice = nil
         effective.selectedSecondarySubtitleId = nil
         clearSecondarySubtitle = true
@@ -508,8 +522,8 @@ public struct TrackSelectionState: Equatable, Sendable {
           selectSecondarySubtitleId = resolvedSec.id
         }
       }
-    } else if effective.selectedSecondarySubtitleId != nil
-      && effective.selectedSecondarySubtitleId == effective.selectedSubtitleId
+    } else if let observedSec = effective.selectedSecondarySubtitleId,
+              Self.isIncompatibleSubtitlePair(primaryId: effective.selectedSubtitleId, secondaryId: observedSec)
     {
       effective.selectedSecondarySubtitleId = nil
       clearSecondarySubtitle = true

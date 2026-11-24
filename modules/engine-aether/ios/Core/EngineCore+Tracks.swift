@@ -36,7 +36,10 @@ extension EngineCore {
     }
   }
 
-  /// Selects secondary subtitle track `id` (or disables secondary subtitles when `nil`), enforcing `secondary != primary` (`#402`).
+  /// Selects secondary subtitle track `id` (or disables secondary subtitles when `nil`), enforcing
+  /// `secondary != primary` and rejecting simultaneous embedded+embedded pairs because Apple `AetherEngine`
+  /// decodes one embedded subtitle stream at a time (embedded primary pairs with external secondary;
+  /// external or Off primary pairs with either embedded or external secondary, `#402`).
   public func selectSecondarySubtitleTrack(_ attempt: Int, id: String?) {
     guard !released else { return }
     adopt(attempt)

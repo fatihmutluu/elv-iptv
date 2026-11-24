@@ -2,7 +2,7 @@ import type { SubtitleStyleConfig } from '@elv/domain';
 import type { MediaKind } from '@elv/playback';
 import type { DeinterlaceMode, HwdecProfile } from '../../../shared/player-ipc.ts';
 import type { MpvCommand } from './codec.ts';
-import { subtitleStyleLoadOptions } from './subtitle-style.ts';
+import { DEFAULT_SECONDARY_SUB_POS, subtitleStyleLoadOptions } from './subtitle-style.ts';
 
 /** Labeled mpv video filter for broadcast-grade `bwdif` deinterlacing (`#243`). */
 export const DEINTERLACE_BWDIF_FILTER =
@@ -180,6 +180,7 @@ export function loadfileCommand(
     preferHevcOverDolbyVision?: boolean;
     filterSdhSubtitles?: boolean;
     subtitleStyle?: SubtitleStyleConfig;
+    secondarySubtitleActive?: boolean;
   },
   mode: 'replace' | 'append-play' = 'replace',
 ): MpvCommand {
@@ -192,8 +193,10 @@ export function loadfileCommand(
           'demuxer-max-back-bytes': '16MiB',
           'demuxer-hysteresis-secs': '10',
         }),
-    'secondary-sub-pos': '10',
-    ...(r.subtitleStyle === undefined ? {} : subtitleStyleLoadOptions(r.subtitleStyle)),
+    'secondary-sub-pos': String(DEFAULT_SECONDARY_SUB_POS),
+    ...(r.subtitleStyle === undefined
+      ? {}
+      : subtitleStyleLoadOptions(r.subtitleStyle, r.secondarySubtitleActive === true)),
   };
   if (r.startMs !== undefined) options['start'] = (r.startMs / 1000).toFixed(3);
   if (r.preferHevcOverDolbyVision === true) options['hwdec'] = 'no';

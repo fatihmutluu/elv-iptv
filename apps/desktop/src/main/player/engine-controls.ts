@@ -17,7 +17,7 @@ import {
   LOUDNORM_FILTER,
   pitchLockCommand,
 } from './mpv/options.ts';
-import { subtitleStyleCommands } from './mpv/subtitle-style.ts';
+import { subtitlePositionCommands, subtitleStyleCommands } from './mpv/subtitle-style.ts';
 
 export { DEINTERLACE_BWDIF_FILTER, isSpdifPassthroughValue, LOUDNORM_FILTER };
 
@@ -46,6 +46,7 @@ export interface EngineControlsDeps {
   audioRampMs?: number;
   initialDarwinCompat?: boolean;
   initialSpdifPassthrough?: boolean;
+  isSecondarySubtitleActive?(): boolean;
 }
 
 /** Speed/seek coalescing, audio ramp play/pause, and runtime property-setter helpers for `MpvEngine`. */
@@ -81,6 +82,7 @@ export interface EngineControls {
   setSubtitleFontFamily(family: AccessibilityFontFamily): void;
   getDesiredSubtitleFont(): string | undefined;
   setSubtitleStyle(style: SubtitleStyleConfig): void;
+  syncSubtitlePosition(secondaryActive: boolean): void;
   rememberSubtitleStyle(style: SubtitleStyleConfig): SubtitleStyleConfig;
   getDesiredSubtitleStyle(): SubtitleStyleConfig | undefined;
 }
@@ -358,7 +360,17 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
       const normalized = normalizeSubtitleStyle(style);
       desiredSubtitleStyle = normalized;
       if (deps.getLive() !== undefined) {
-        for (const cmd of subtitleStyleCommands(normalized)) deps.enqueueCommand(cmd);
+        const secondaryActive = deps.isSecondarySubtitleActive?.() === true;
+        for (const cmd of subtitleStyleCommands(normalized, secondaryActive)) {
+          deps.enqueueCommand(cmd);
+        }
+      }
+    },
+    syncSubtitlePosition(secondaryActive) {
+      if (deps.isReleased() || deps.getLive() === undefined) return;
+      if (desiredSubtitleStyle?.verticalPosition !== 'top') return;
+      for (const cmd of subtitlePositionCommands(desiredSubtitleStyle, secondaryActive)) {
+        deps.enqueueCommand(cmd);
       }
     },
     rememberSubtitleStyle(style) {

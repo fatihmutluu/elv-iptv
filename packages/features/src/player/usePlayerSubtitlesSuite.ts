@@ -1,10 +1,16 @@
 import { DEFAULT_SUBTITLE_STYLE, type SubtitleStyleConfig, subtitleStyleEquals } from '@elv/domain';
-import type { PlaybackService, PlaybackTimers } from '@elv/playback';
+import type { MediaTracks, PlaybackService, PlaybackTimers } from '@elv/playback';
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { OpenVideoEngine } from '../ports/video-host';
 import { type SubtitleStyleField, stepSubtitleStyleField } from './subtitle-style-helpers';
 
 const FEEDBACK_AUTO_HIDE_MS = 3_000;
+const PENDING_EXTERNAL_TIMEOUT_MS = 8_000;
+
+interface PendingExternalSubtitle {
+  readonly id: string;
+  readonly baselineExternalIds: ReadonlySet<string>;
+}
 
 /** Brief non-blocking feedback state after loading an external subtitle track (`#32`). */
 export interface ExternalSubtitleFeedback {
@@ -20,6 +26,7 @@ export interface ExternalSubtitleFeedback {
  */
 export function usePlayerSubtitlesSuite(params: {
   readonly activeItemKey: string;
+  readonly tracks: MediaTracks;
   readonly openedEngine: OpenVideoEngine | undefined;
   readonly activeService: PlaybackService | null;
   readonly serviceRef: MutableRefObject<PlaybackService | null>;
@@ -30,6 +37,7 @@ export function usePlayerSubtitlesSuite(params: {
 }) {
   const {
     activeItemKey,
+    tracks,
     openedEngine,
     activeService,
     serviceRef,
@@ -94,11 +102,23 @@ export function usePlayerSubtitlesSuite(params: {
   const extSeqRef = useRef(0);
   const feedbackSeqRef = useRef(0);
   const feedbackTimerRef = useRef<unknown>(undefined);
+  const pendingExternalRef = useRef<PendingExternalSubtitle | null>(null);
+  const pendingTimerRef = useRef<unknown>(undefined);
+  const tracksRef = useRef<MediaTracks>(tracks);
+  tracksRef.current = tracks;
 
   const clearFeedbackTimer = useCallback((): void => {
     if (feedbackTimerRef.current !== undefined) {
       timersRef.current.clearTimeout(feedbackTimerRef.current);
       feedbackTimerRef.current = undefined;
+    }
+  }, [timersRef]);
+
+  const clearPendingExternal = useCallback((): void => {
+    pendingExternalRef.current = null;
+    if (pendingTimerRef.current !== undefined) {
+      timersRef.current.clearTimeout(pendingTimerRef.current);
+      pendingTimerRef.current = undefined;
     }
   }, [timersRef]);
 
@@ -115,20 +135,58 @@ export function usePlayerSubtitlesSuite(params: {
     [clearFeedbackTimer, timersRef],
   );
 
+  const startPendingExternal = useCallback(
+    (id: string): void => {
+      clearPendingExternal();
+      clearFeedbackTimer();
+      setFeedback(null);
+      const baselineExternalIds = new Set(
+        tracksRef.current.subtitles.filter((t) => t.external === true).map((t) => t.id),
+      );
+      pendingExternalRef.current = { id, baselineExternalIds };
+      pendingTimerRef.current = timersRef.current.setTimeout(() => {
+        pendingTimerRef.current = undefined;
+        if (pendingExternalRef.current?.id === id) {
+          pendingExternalRef.current = null;
+          if (mountedRef.current) showFeedback('failed');
+        }
+      }, PENDING_EXTERNAL_TIMEOUT_MS);
+    },
+    [clearFeedbackTimer, clearPendingExternal, showFeedback, timersRef],
+  );
+
+  useEffect(() => {
+    const pending = pendingExternalRef.current;
+    if (pending === null) return;
+    const prefixedId = `ext:${pending.id}`;
+    const arrived = tracks.subtitles.some(
+      (t) =>
+        t.id === pending.id ||
+        t.id === prefixedId ||
+        (t.external === true && !pending.baselineExternalIds.has(t.id)),
+    );
+    if (arrived) {
+      clearPendingExternal();
+      showFeedback('loaded');
+    }
+  }, [tracks.subtitles, clearPendingExternal, showFeedback]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      clearPendingExternal();
       clearFeedbackTimer();
     };
-  }, [clearFeedbackTimer]);
+  }, [clearFeedbackTimer, clearPendingExternal]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: close URL overlay & transient feedback on item switch
   useEffect(() => {
     setUrlOverlayOpen(false);
+    clearPendingExternal();
     clearFeedbackTimer();
     setFeedback(null);
-  }, [activeItemKey, clearFeedbackTimer]);
+  }, [activeItemKey, clearFeedbackTimer, clearPendingExternal]);
 
   const caps = openedEngine?.engine.capabilities;
   const supportsDualSubtitles = caps?.dualSubtitles === true;
@@ -152,15 +210,23 @@ export function usePlayerSubtitlesSuite(params: {
       .then((track) => {
         if (!mountedRef.current || track === null) return;
         const accepted = serviceRef.current?.addExternalSubtitle(track) === true;
-        showFeedback(accepted ? 'loaded' : 'failed');
+        if (accepted) {
+          startPendingExternal(track.id);
+        } else {
+          clearPendingExternal();
+          showFeedback('failed');
+        }
       })
       .catch(() => {
-        if (mountedRef.current) showFeedback('failed');
+        if (mountedRef.current) {
+          clearPendingExternal();
+          showFeedback('failed');
+        }
       })
       .finally(() => {
         pickingRef.current = false;
       });
-  }, [pickSubtitleFileFn, serviceRef, showFeedback]);
+  }, [clearPendingExternal, pickSubtitleFileFn, serviceRef, showFeedback, startPendingExternal]);
 
   const openUrlOverlay = useCallback((): void => {
     setUrlOverlayOpen(true);
@@ -179,11 +245,16 @@ export function usePlayerSubtitlesSuite(params: {
           uri: input.uri,
           ...(input.label !== undefined ? { label: input.label } : {}),
         }) === true;
-      showFeedback(accepted ? 'loaded' : 'failed');
-      if (accepted) setUrlOverlayOpen(false);
+      if (accepted) {
+        startPendingExternal(id);
+        setUrlOverlayOpen(false);
+      } else {
+        clearPendingExternal();
+        showFeedback('failed');
+      }
       return accepted;
     },
-    [serviceRef, showFeedback],
+    [clearPendingExternal, serviceRef, showFeedback, startPendingExternal],
   );
 
   const trackPickerProps = {

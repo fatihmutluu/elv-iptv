@@ -15,6 +15,7 @@ final class EngineMainDriver: EngineSink {
   var activeEpoch = 0
   private var backgroundAudioEnabled = false
   private var explicitDetachedSurfaceAllowed = false
+  private var hasExplicitSubtitleStyle = false
   private var activeSubtitleStyle: UserSubtitleStyleOverride?
 
   init(owner: EngineObject, gate: ConnectionGate, httpSession: EngineHttpSession) {
@@ -138,6 +139,7 @@ final class EngineMainDriver: EngineSink {
 
   /// Applies live user subtitle appearance override to the bound surface without restarting playback (`#32`).
   func setSubtitleStyle(_ style: UserSubtitleStyleOverride?) {
+    hasExplicitSubtitleStyle = true
     activeSubtitleStyle = style
     boundSurface?.applySubtitleStyle(style, from: owner)
   }
@@ -190,7 +192,9 @@ final class EngineMainDriver: EngineSink {
     core.setOsdVisible(view.currentOsdVisible)
     let snapshot = core.viewSnapshot
     view.applyShutter(covered: snapshot.shutterCovered, from: owner)
-    view.applySubtitleStyle(activeSubtitleStyle, from: owner)
+    if hasExplicitSubtitleStyle {
+      view.applySubtitleStyle(activeSubtitleStyle, from: owner)
+    }
     view.applySubtitles(backend.lastSubtitlePresentation, from: owner)
     view.applyScreenOn(snapshot.screenOn, from: owner)
     let available = view.isSurfaceAvailable

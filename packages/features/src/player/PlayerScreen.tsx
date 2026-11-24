@@ -216,6 +216,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
   const subtitlesSuite = usePlayerSubtitlesSuite({
     activeItemKey: activeTarget.itemKey,
+    tracks,
     openedEngine,
     activeService,
     serviceRef,

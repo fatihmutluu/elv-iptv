@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
@@ -26,6 +26,8 @@ const CROSS_ORIGIN_STRIPPED_HEADERS: ReadonlySet<string> = new Set([
   'authorization',
   'proxy-authorization',
   'cookie',
+  'x-api-key',
+  'x-auth-token',
 ]);
 
 interface SubtitleHttpResponse {
@@ -185,13 +187,22 @@ async function readBoundedBody(
   return Buffer.concat(chunks, total);
 }
 
+interface LocalSubtitleFsOps {
+  realpath(path: string): Promise<string>;
+  lstat(path: string): Promise<{ isFile(): boolean; size: number }>;
+}
+
+const DEFAULT_LOCAL_FS_OPS: LocalSubtitleFsOps = { realpath, lstat };
+
 /**
  * Validates a local subtitle `file://` URI or absolute filesystem path against the extension
- * allowlist, regular-file `stat`, and size limit (`<= 16 MiB` by default, `#32`, `#308`).
+ * allowlist on both the input path and its `realpath` target, regular-file `lstat`, and size limit
+ * (`<= 16 MiB` by default, `#32`, `#308`).
  */
 export async function validateLocalSubtitlePath(
   uriOrPath: string,
   maxLocalBytes = DEFAULT_MAX_LOCAL_BYTES,
+  fsOps: LocalSubtitleFsOps = DEFAULT_LOCAL_FS_OPS,
 ): Promise<string> {
   if (
     typeof uriOrPath !== 'string' ||
@@ -220,14 +231,19 @@ export async function validateLocalSubtitlePath(
   if (!ALLOWED_EXTENSION_SET.has(ext)) {
     throw new Error(`Unsupported subtitle file extension: .${ext || '(none)'}`);
   }
-  const info = await stat(localPath);
+  const resolvedPath = await fsOps.realpath(localPath);
+  const resolvedExt = extname(resolvedPath).slice(1).toLowerCase();
+  if (!ALLOWED_EXTENSION_SET.has(resolvedExt)) {
+    throw new Error(`Unsupported subtitle target extension: .${resolvedExt || '(none)'}`);
+  }
+  const info = await fsOps.lstat(resolvedPath);
   if (!info.isFile()) {
     throw new Error('Selected subtitle path is not a regular file');
   }
   if (info.size > maxLocalBytes) {
     throw new Error(`Local subtitle exceeds ${maxLocalBytes} byte size limit`);
   }
-  return localPath;
+  return resolvedPath;
 }
 
 /**

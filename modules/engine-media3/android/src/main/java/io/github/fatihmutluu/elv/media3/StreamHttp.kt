@@ -11,9 +11,11 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import java.io.File
 import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.Call
 import okhttp3.ConnectionPool
 import okhttp3.ConnectionSpec
@@ -558,12 +560,17 @@ internal class IsolatedSubtitleDataSource(
   subtitleHeaders: Map<String, String>,
   private val client: Call.Factory,
   private val context: Context?,
+  private val maxBytes: Int = MAX_EXTERNAL_SUBTITLE_BYTES,
+  private val canonicalFileResolver: (File) -> File = { it.canonicalFile },
 ) : DataSource {
   private val customAgent: String?
   private val cleanHeaders: Map<String, String>
   private val transferListeners = mutableListOf<TransferListener>()
-  private var activeSource: DataSource? = null
-  private var activeCalls: CancellableCalls? = null
+  private val lifecycleLock = Any()
+  private val cancelled = AtomicBoolean(false)
+  @Volatile private var activeSource: DataSource? = null
+  @Volatile private var activeCalls: CancellableCalls? = null
+  private var bytesRead: Long = 0L
 
   init {
     customAgent =
@@ -587,11 +594,15 @@ internal class IsolatedSubtitleDataSource(
   }
 
   override fun open(dataSpec: DataSpec): Long {
+    if (cancelled.get()) {
+      throw IOException("External subtitle request cancelled")
+    }
     val rawUri = dataSpec.uri.toString()
     if (!isAllowedExternalSubtitleUri(rawUri)) {
       throw IOException("Disallowed external subtitle URI")
     }
     val scheme = dataSpec.uri.normalizeScheme().scheme?.lowercase(Locale.ROOT)
+    var effectiveSpec = dataSpec
     val (delegate, calls) = when (scheme) {
       "http", "https" -> {
         val origin = rawUri.toHttpUrlOrNull()?.let(::StreamOrigin)
@@ -602,7 +613,28 @@ internal class IsolatedSubtitleDataSource(
           .createDataSource()
         httpSource to cancellable
       }
-      "file" -> FileDataSource() to null
+      "file" -> {
+        val rawPath = dataSpec.uri.path
+        if (rawPath.isNullOrBlank()) {
+          throw IOException("Invalid local subtitle file URI")
+        }
+        val canonical = try {
+          canonicalFileResolver(File(rawPath))
+        } catch (e: IOException) {
+          throw IOException("Unable to resolve local subtitle file", e)
+        }
+        if (!canonical.exists() || !canonical.isFile) {
+          throw IOException("Local subtitle file does not exist or is not a regular file")
+        }
+        if (!hasAllowedLocalSubtitleExtension(canonical.path)) {
+          throw IOException("Local subtitle canonical path has disallowed extension")
+        }
+        if (canonical.length() > maxBytes.toLong()) {
+          throw IOException("Local subtitle file exceeds $maxBytes byte cap")
+        }
+        effectiveSpec = dataSpec.buildUpon().setUri(Uri.fromFile(canonical)).build()
+        FileDataSource() to null
+      }
       "content" -> {
         val appCtx = context?.applicationContext ?: context
           ?: throw IOException("content:// external subtitle requires Android Context")
@@ -613,13 +645,51 @@ internal class IsolatedSubtitleDataSource(
     for (listener in transferListeners) {
       delegate.addTransferListener(listener)
     }
-    activeSource = delegate
-    activeCalls = calls
-    return delegate.open(dataSpec)
+    synchronized(lifecycleLock) {
+      if (cancelled.get()) {
+        calls?.cancel()
+        throw IOException("External subtitle request cancelled")
+      }
+      activeSource = delegate
+      activeCalls = calls
+    }
+    bytesRead = 0L
+    val openedLength = delegate.open(effectiveSpec)
+    val limit = maxBytes.toLong()
+    val headerTooLarge = delegate.responseHeaders.entries.any { (name, values) ->
+      name.equals("Content-Length", ignoreCase = true) &&
+        values.any { (it.trim().toLongOrNull() ?: -1L) > limit }
+    }
+    if ((openedLength != C.LENGTH_UNSET.toLong() && openedLength > limit) || headerTooLarge) {
+      close()
+      throw IOException("External subtitle exceeds $maxBytes byte cap")
+    }
+    return openedLength
   }
 
-  override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
-    activeSource?.read(buffer, offset, length) ?: C.RESULT_END_OF_INPUT
+  override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+    if (length == 0) return 0
+    if (cancelled.get()) {
+      throw IOException("External subtitle request cancelled")
+    }
+    val source = activeSource ?: return C.RESULT_END_OF_INPUT
+    val limit = maxBytes.toLong()
+    val remaining = (limit - bytesRead).coerceAtLeast(0L)
+    val toRead = if (remaining < length.toLong()) {
+      (remaining + 1L).coerceAtMost(length.toLong()).toInt()
+    } else {
+      length
+    }
+    val read = source.read(buffer, offset, toRead)
+    if (read > 0) {
+      bytesRead += read.toLong()
+      if (bytesRead > limit) {
+        close()
+        throw IOException("External subtitle exceeds $maxBytes byte cap")
+      }
+    }
+    return read
+  }
 
   override fun getUri(): Uri? = activeSource?.uri
 
@@ -627,15 +697,28 @@ internal class IsolatedSubtitleDataSource(
     activeSource?.responseHeaders ?: emptyMap()
 
   fun cancel() {
-    activeCalls?.cancel()
+    cancelled.set(true)
+    val calls: CancellableCalls?
+    val source: DataSource?
+    synchronized(lifecycleLock) {
+      calls = activeCalls
+      source = activeSource
+    }
+    calls?.cancel()
+    runCatching { source?.close() }
   }
 
   override fun close() {
-    activeCalls?.cancel()
-    activeCalls = null
-    val current = activeSource ?: return
-    activeSource = null
-    current.close()
+    val calls: CancellableCalls?
+    val source: DataSource?
+    synchronized(lifecycleLock) {
+      calls = activeCalls
+      source = activeSource
+      activeCalls = null
+      activeSource = null
+    }
+    calls?.cancel()
+    source?.close()
   }
 }
 

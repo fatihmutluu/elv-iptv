@@ -154,8 +154,12 @@ extension ExternalSubtitleParser {
     var frameRate = 30.0
     var tickRate = 10_000_000.0
     if let rootAttrs = extractFirstTagAttributes(in: content, localName: "tt") {
-      if let fps = rootAttrs["framerate"].flatMap(Double.init), fps.isFinite, fps > 0 { frameRate = fps }
-      if let tick = rootAttrs["tickrate"].flatMap(Double.init), tick.isFinite, tick > 0 { tickRate = tick }
+      if let fps = rootAttrs["framerate"].flatMap(Double.init), fps.isFinite, fps > 0, fps <= 1_000_000 {
+        frameRate = fps
+      }
+      if let tick = rootAttrs["tickrate"].flatMap(Double.init), tick.isFinite, tick > 0, tick <= 1e15 {
+        tickRate = tick
+      }
     }
 
     var cues: [(Int, Int, String)] = []
@@ -173,7 +177,8 @@ extension ExternalSubtitleParser {
       if let endRaw = attrs["end"] {
         endMs = parseTtmlTimeMs(endRaw, frameRate: frameRate, tickRate: tickRate)
       } else if let durRaw = attrs["dur"], let startMs,
-                let durMs = parseTtmlTimeMs(durRaw, frameRate: frameRate, tickRate: tickRate)
+                let durMs = parseTtmlTimeMs(durRaw, frameRate: frameRate, tickRate: tickRate),
+                durMs <= maxSubtitleTimeMs - startMs
       {
         endMs = startMs + durMs
       } else {
@@ -217,19 +222,37 @@ extension ExternalSubtitleParser {
     while let lt = xml[cursor...].firstIndex(of: "<") {
       let nameStart = xml.index(after: lt)
       guard nameStart < xml.endIndex else { return nil }
-      if xml[nameStart] == "/" || xml[nameStart] == "?" || xml[nameStart] == "!" {
+      if xml[nameStart] == "/" || xml[nameStart] == "?" || xml[nameStart] == "!" || xml[nameStart] == "<" {
         cursor = nameStart
         continue
       }
       var nameEnd = nameStart
       while nameEnd < xml.endIndex {
         let ch = xml[nameEnd]
-        if ch == " " || ch == "\t" || ch == "\n" || ch == ">" || ch == "/" { break }
+        if ch == " " || ch == "\t" || ch == "\n" || ch == ">" || ch == "/" || ch == "<" { break }
         nameEnd = xml.index(after: nameEnd)
+      }
+      if nameEnd < xml.endIndex && xml[nameEnd] == "<" {
+        cursor = nameEnd
+        continue
       }
       let fullName = String(xml[nameStart..<nameEnd]).lowercased()
       let tagLocal = fullName.split(separator: ":").last.map(String.init) ?? fullName
-      guard let gt = xml[nameEnd...].firstIndex(of: ">") else { return nil }
+      var gtScan = nameEnd
+      var foundGt: String.Index?
+      while gtScan < xml.endIndex {
+        let ch = xml[gtScan]
+        if ch == ">" { foundGt = gtScan; break }
+        if ch == "<" { break }
+        gtScan = xml.index(after: gtScan)
+      }
+      guard let gt = foundGt else {
+        if gtScan < xml.endIndex && xml[gtScan] == "<" {
+          cursor = gtScan
+          continue
+        }
+        return nil
+      }
       if tagLocal == localName {
         let isSelfClosing = gt > nameEnd && xml[xml.index(before: gt)] == "/"
         if !isSelfClosing {
@@ -249,7 +272,21 @@ extension ExternalSubtitleParser {
     var cursor = start
     while let range = xml[cursor...].range(of: "</") {
       let nameStart = range.upperBound
-      guard let gt = xml[nameStart...].firstIndex(of: ">") else { return nil }
+      var j = nameStart
+      var foundGt: String.Index?
+      while j < xml.endIndex {
+        let ch = xml[j]
+        if ch == ">" { foundGt = j; break }
+        if ch == "<" { break }
+        j = xml.index(after: j)
+      }
+      guard let gt = foundGt else {
+        if j < xml.endIndex && xml[j] == "<" {
+          cursor = j
+          continue
+        }
+        return nil
+      }
       let fullName = xml[nameStart..<gt].trimmingCharacters(in: .whitespaces).lowercased()
       let tagLocal = fullName.split(separator: ":").last.map(String.init) ?? fullName
       if tagLocal == localName {
@@ -298,6 +335,7 @@ extension ExternalSubtitleParser {
   private static func parseTtmlTimeMs(_ raw: String, frameRate: Double, tickRate: Double) -> Int? {
     let trimmed = raw.trimmingCharacters(in: .whitespaces)
     guard !trimmed.isEmpty else { return nil }
+    let maxDouble = Double(maxSubtitleTimeMs)
     let units: [(String, Double)] = [
       ("ms", 1.0), ("h", 3_600_000.0), ("m", 60_000.0),
       ("s", 1_000.0), ("f", 1_000.0 / frameRate), ("t", 1_000.0 / tickRate),
@@ -305,10 +343,20 @@ extension ExternalSubtitleParser {
     for (suffix, multiplier) in units {
       if trimmed.hasSuffix(suffix) {
         let numStr = String(trimmed.dropLast(suffix.count))
-        if let val = Double(numStr), val.isFinite, val >= 0 {
-          return Int((val * multiplier).rounded())
+        guard let val = Double(numStr),
+              val.isFinite,
+              val >= 0,
+              multiplier.isFinite,
+              multiplier > 0,
+              val <= maxDouble / multiplier
+        else {
+          return nil
         }
-        return nil
+        let scaled = (val * multiplier).rounded()
+        guard scaled.isFinite, scaled >= 0, scaled <= maxDouble else {
+          return nil
+        }
+        return Int(scaled)
       }
     }
     let parts = trimmed.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
@@ -319,11 +367,20 @@ extension ExternalSubtitleParser {
        m < 60, s < 60
     {
       let frameStr = parts[3].split(separator: ".").first.map(String.init) ?? parts[3]
-      if let frames = Double(frameStr), frames.isFinite, frames >= 0 {
-        let frameMs = Int(((frames / frameRate) * 1_000.0).rounded())
-        return ((h * 60 + m) * 60 + s) * 1_000 + frameMs
+      guard let frames = Double(frameStr),
+            frames.isFinite,
+            frames >= 0,
+            frameRate.isFinite,
+            frameRate > 0,
+            frames <= (maxDouble / 1_000.0) * frameRate
+      else {
+        return nil
       }
-      return nil
+      let scaledFrameMs = ((frames / frameRate) * 1_000.0).rounded()
+      guard scaledFrameMs.isFinite, scaledFrameMs >= 0, scaledFrameMs <= maxDouble else {
+        return nil
+      }
+      return boundedClockTimeMs(hours: h, minutes: m, seconds: s, ms: Int(scaledFrameMs))
     }
     return parseClockTimeMs(trimmed)
   }
@@ -333,13 +390,24 @@ extension ExternalSubtitleParser {
     out.reserveCapacity(body.count)
     var i = body.startIndex
     while i < body.endIndex {
-      if body[i] == "<", let gt = body[body.index(after: i)...].firstIndex(of: ">") {
-        let inner = String(body[body.index(after: i)..<gt]).trimmingCharacters(in: .whitespaces).lowercased()
-        let firstToken = inner.split(whereSeparator: { $0 == " " || $0 == "/" }).first.map(String.init) ?? ""
-        let local = firstToken.split(separator: ":").last.map(String.init) ?? firstToken
-        if local == "br" { out.append("\n") }
-        i = body.index(after: gt)
-        continue
+      if body[i] == "<" {
+        let afterOpen = body.index(after: i)
+        var j = afterOpen
+        var foundGt: String.Index?
+        while j < body.endIndex {
+          let ch = body[j]
+          if ch == ">" { foundGt = j; break }
+          if ch == "<" { break }
+          j = body.index(after: j)
+        }
+        if let gt = foundGt {
+          let inner = String(body[afterOpen..<gt]).trimmingCharacters(in: .whitespaces).lowercased()
+          let firstToken = inner.split(whereSeparator: { $0 == " " || $0 == "/" }).first.map(String.init) ?? ""
+          let local = firstToken.split(separator: ":").last.map(String.init) ?? firstToken
+          if local == "br" { out.append("\n") }
+          i = body.index(after: gt)
+          continue
+        }
       }
       out.append(body[i])
       i = body.index(after: i)

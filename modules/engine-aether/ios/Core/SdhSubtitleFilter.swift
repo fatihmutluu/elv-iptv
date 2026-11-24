@@ -105,37 +105,34 @@ public enum SdhSubtitleFilter {
     scalar.value >= 0x30 && scalar.value <= 0x39
   }
 
-  private static func findMatchingClose(
-    in scalars: [Unicode.Scalar],
-    openIndex: Int,
-    openScalar: Unicode.Scalar,
-    closeScalar: Unicode.Scalar
-  ) -> Int? {
-    var depth = 0
-    var i = openIndex
-    while i < scalars.count {
-      let s = scalars[i]
-      if s == openScalar {
-        depth += 1
-      } else if s == closeScalar {
-        depth -= 1
-        if depth == 0 { return i }
-      }
-      i += 1
-    }
-    return nil
-  }
-
   private static func stripBalancedBrackets(_ input: String) -> String {
     let scalars = Array(input.unicodeScalars)
+    var matchingClose = Array(repeating: -1, count: scalars.count)
+    var squareStack: [Int] = []
+    var parenStack: [Int] = []
+    for idx in 0..<scalars.count {
+      switch scalars[idx] {
+      case "[":
+        squareStack.append(idx)
+      case "]":
+        if let open = squareStack.popLast() { matchingClose[open] = idx }
+      case "(":
+        parenStack.append(idx)
+      case ")":
+        if let open = parenStack.popLast() { matchingClose[open] = idx }
+      default:
+        break
+      }
+    }
+
     var out: [Unicode.Scalar] = []
     out.reserveCapacity(scalars.count)
     var i = 0
     while i < scalars.count {
       let s = scalars[i]
       if s == "[" || s == "(" {
-        let closeScalar: Unicode.Scalar = (s == "[") ? "]" : ")"
-        if let closeIdx = findMatchingClose(in: scalars, openIndex: i, openScalar: s, closeScalar: closeScalar) {
+        let closeIdx = matchingClose[i]
+        if closeIdx > i {
           let inner = String(String.UnicodeScalarView(scalars[(i + 1)..<closeIdx]))
           if s == "(" && isNumericParenContent(inner) {
             out.append(contentsOf: scalars[i...closeIdx])

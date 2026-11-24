@@ -13,11 +13,15 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val MAX_EXTERNAL_SUBTITLE_BYTES = 4 * 1024 * 1024
+private const val MAX_SUBTITLE_TIMESTAMP_MS = 86_400_000_000L
+private const val MAX_TIMECODE_LINE_LENGTH = 512
+private const val MAX_ENTITY_SCAN_LEN = 16
 
 /** One timed cue parsed from an external sidecar subtitle track (`#32`, `#308`, `#402`). */
 internal data class TimedSidecarCue(
@@ -30,12 +34,6 @@ private val SRT_VTT_TIMECODE_RE = Regex(
   "^\\s*(?:(\\d{1,3}):)?(\\d{1,2}):(\\d{1,2})(?:[.,:](\\d{1,3}))?\\s*(?:-->|->|\\u2014>)\\s*(?:(\\d{1,3}):)?(\\d{1,2}):(\\d{1,2})(?:[.,:](\\d{1,3}))?(?:\\s.*)?$"
 )
 private val ASS_TIME_RE = Regex("^\\s*(\\d{1,2}):(\\d{2}):(\\d{2})[.,](\\d{1,3})\\s*$")
-private val ASS_DRAWING_RE = Regex("\\{[^}]*\\\\p[1-9][^}]*\\}.*?(?:\\{[^}]*\\\\p0[^}]*\\}|$)", RegexOption.DOT_MATCHES_ALL)
-private val ASS_TAG_RE = Regex("\\{[^}]*\\}")
-private val HTML_TAG_RE = Regex("</?[a-zA-Z][^>]*>")
-private val TTML_P_RE = Regex("<p\\b([^>]*)>(.*?)</p>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-private val TTML_BR_RE = Regex("<br\\s*/?>", RegexOption.IGNORE_CASE)
-private val TTML_ATTR_RE = Regex("([a-zA-Z_:][-a-zA-Z0-9_:.]*)\\s*=\\s*[\"']([^\"']*)[\"']")
 private val TTML_OFFSET_RE = Regex("^(\\d+(?:\\.\\d+)?)(ms|s|m|h)$", RegexOption.IGNORE_CASE)
 private val TTML_CLOCK_RE = Regex("^(\\d{1,3}):(\\d{2}):(\\d{2})(?:[.,](\\d{1,3})|:(\\d{2}))?$")
 
@@ -78,22 +76,150 @@ private fun toMs(h: String, m: String, s: String, ms: String): Long {
   return ((hours * 3_600L + mins * 60L + secs) * 1_000L) + padMillis(ms)
 }
 
-private fun decodeBasicEntities(raw: String): String =
-  raw
-    .replace("&nbsp;", " ")
-    .replace("&amp;", "&")
-    .replace("&lt;", "<")
-    .replace("&gt;", ">")
-    .replace("&quot;", "\"")
-    .replace("&#39;", "'")
-    .replace("&apos;", "'")
+private fun decodeBasicEntities(raw: String): String {
+  val firstAmp = raw.indexOf('&')
+  if (firstAmp < 0) return raw
+  val out = StringBuilder(raw.length)
+  var i = 0
+  val len = raw.length
+  while (i < len) {
+    val amp = raw.indexOf('&', i)
+    if (amp < 0) {
+      out.append(raw, i, len)
+      break
+    }
+    out.append(raw, i, amp)
+    val maxEnd = minOf(len, amp + MAX_ENTITY_SCAN_LEN)
+    var semi = -1
+    for (j in (amp + 1) until maxEnd) {
+      val c = raw[j]
+      if (c == ';') {
+        semi = j
+        break
+      }
+      if (c == '&' || c.isWhitespace()) break
+    }
+    val decoded = if (semi > amp + 1) {
+      when (raw.substring(amp + 1, semi)) {
+        "nbsp" -> " "
+        "amp" -> "&"
+        "lt" -> "<"
+        "gt" -> ">"
+        "quot" -> "\""
+        "#39", "apos" -> "'"
+        else -> null
+      }
+    } else {
+      null
+    }
+    if (decoded != null) {
+      out.append(decoded)
+      i = semi + 1
+    } else {
+      out.append('&')
+      i = amp + 1
+    }
+  }
+  return out.toString()
+}
 
-private fun cleanCueText(raw: String): String =
-  decodeBasicEntities(HTML_TAG_RE.replace(ASS_TAG_RE.replace(raw, ""), ""))
+private fun stripAssTagsLinear(raw: String, stripDrawing: Boolean): String {
+  val firstBrace = raw.indexOf('{')
+  if (firstBrace < 0) return raw
+  val out = StringBuilder(raw.length)
+  var i = 0
+  val len = raw.length
+  var inDrawing = false
+  while (i < len) {
+    val open = raw.indexOf('{', i)
+    if (open < 0) {
+      if (!inDrawing) out.append(raw, i, len)
+      break
+    }
+    if (!inDrawing && open > i) {
+      out.append(raw, i, open)
+    }
+    val close = raw.indexOf('}', open + 1)
+    if (close < 0) {
+      if (!inDrawing) out.append(raw, open, len)
+      break
+    }
+    if (stripDrawing) {
+      var j = open + 1
+      while (j + 2 < close) {
+        if (raw[j] == '\\' && raw[j + 1] == 'p') {
+          val level = raw[j + 2]
+          if (level in '1'..'9') {
+            inDrawing = true
+          } else if (level == '0') {
+            inDrawing = false
+          }
+        }
+        j += 1
+      }
+    }
+    i = close + 1
+  }
+  return out.toString()
+}
+
+private fun isAsciiLetter(c: Char): Boolean = c in 'a'..'z' || c in 'A'..'Z'
+
+private fun isBrTagContent(raw: String, start: Int, end: Int): Boolean {
+  var s = start
+  var e = end
+  while (s < e && raw[s].isWhitespace()) s += 1
+  while (e > s && raw[e - 1].isWhitespace()) e -= 1
+  if (e > s && raw[e - 1] == '/') {
+    e -= 1
+    while (e > s && raw[e - 1].isWhitespace()) e -= 1
+  }
+  return e - s == 2 &&
+    (raw[s] == 'b' || raw[s] == 'B') &&
+    (raw[s + 1] == 'r' || raw[s + 1] == 'R')
+}
+
+private fun stripHtmlTagsLinear(raw: String, replaceBrWithNewline: Boolean = false): String {
+  val firstLt = raw.indexOf('<')
+  if (firstLt < 0) return raw
+  val out = StringBuilder(raw.length)
+  var i = 0
+  val len = raw.length
+  while (i < len) {
+    val lt = raw.indexOf('<', i)
+    if (lt < 0) {
+      out.append(raw, i, len)
+      break
+    }
+    out.append(raw, i, lt)
+    val nameStart = if (lt + 1 < len && raw[lt + 1] == '/') lt + 2 else lt + 1
+    if (nameStart >= len || !isAsciiLetter(raw[nameStart])) {
+      out.append('<')
+      i = lt + 1
+      continue
+    }
+    val gt = raw.indexOf('>', nameStart)
+    if (gt < 0) {
+      out.append(raw, lt, len)
+      break
+    }
+    if (replaceBrWithNewline && isBrTagContent(raw, lt + 1, gt)) {
+      out.append('\n')
+    }
+    i = gt + 1
+  }
+  return out.toString()
+}
+
+private fun cleanCueText(raw: String, replaceBrWithNewline: Boolean = false): String =
+  decodeBasicEntities(stripHtmlTagsLinear(stripAssTagsLinear(raw, stripDrawing = false), replaceBrWithNewline))
     .lines()
     .map { it.trim() }
     .filter { it.isNotEmpty() }
     .joinToString("\n")
+
+private fun looksLikeTimecodeLine(line: String): Boolean =
+  line.length <= MAX_TIMECODE_LINE_LENGTH && (line.contains("->") || line.contains("\u2014>"))
 
 private fun parseSrtOrVtt(normalized: String): List<TimedSidecarCue> {
   val lines = normalized.split('\n')
@@ -109,7 +235,7 @@ private fun parseSrtOrVtt(normalized: String): List<TimedSidecarCue> {
       while (i < lines.size && lines[i].isNotBlank()) i += 1
       continue
     }
-    val match = SRT_VTT_TIMECODE_RE.matchEntire(lines[i])
+    val match = if (looksLikeTimecodeLine(lines[i])) SRT_VTT_TIMECODE_RE.matchEntire(lines[i]) else null
     if (match == null) {
       i += 1
       continue
@@ -131,7 +257,7 @@ private fun parseSrtOrVtt(normalized: String): List<TimedSidecarCue> {
     while (i < lines.size) {
       val current = lines[i]
       if (current.isBlank()) break
-      if (SRT_VTT_TIMECODE_RE.matches(current)) break
+      if (looksLikeTimecodeLine(current) && SRT_VTT_TIMECODE_RE.matches(current)) break
       if (body.isNotEmpty()) body.append('\n')
       body.append(current)
       i += 1
@@ -179,8 +305,7 @@ private fun parseAss(normalized: String): List<TimedSidecarCue> {
     val startMs = parseAssTimeMs(fields[startIdx]) ?: continue
     val endMs = parseAssTimeMs(fields[endIdx]) ?: continue
     if (endMs <= startMs) continue
-    val withoutDrawing = ASS_DRAWING_RE.replace(fields[textIdx], "")
-    val withoutTags = ASS_TAG_RE.replace(withoutDrawing, "")
+    val withoutTags = stripAssTagsLinear(fields[textIdx], stripDrawing = true)
       .replace("\\N", "\n")
       .replace("\\n", "\n")
       .replace("\\h", " ")
@@ -193,9 +318,10 @@ private fun parseAss(normalized: String): List<TimedSidecarCue> {
 }
 
 private fun parseTtmlTimeMs(raw: String?): Long? {
-  val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+  val value = raw?.trim()?.takeIf { it.isNotEmpty() && it.length <= 64 } ?: return null
   TTML_OFFSET_RE.matchEntire(value)?.let { m ->
     val amount = m.groupValues[1].toDoubleOrNull() ?: return null
+    if (!amount.isFinite() || amount < 0.0) return null
     val mult = when (m.groupValues[2].lowercase(Locale.ROOT)) {
       "ms" -> 1.0
       "s" -> 1_000.0
@@ -203,7 +329,9 @@ private fun parseTtmlTimeMs(raw: String?): Long? {
       "h" -> 3_600_000.0
       else -> return null
     }
-    return (amount * mult).toLong()
+    val result = amount * mult
+    if (!result.isFinite() || result < 0.0 || result > MAX_SUBTITLE_TIMESTAMP_MS.toDouble()) return null
+    return result.toLong()
   }
   TTML_CLOCK_RE.matchEntire(value)?.let { m ->
     val h = m.groupValues[1].toLongOrNull() ?: return null
@@ -221,23 +349,88 @@ private fun parseTtmlTimeMs(raw: String?): Long? {
   return null
 }
 
+private fun isXmlAttrNameChar(c: Char): Boolean =
+  isAsciiLetter(c) || c in '0'..'9' || c == '_' || c == ':' || c == '-' || c == '.'
+
+private fun parseTtmlAttributes(raw: String, start: Int, end: Int): Map<String, String> {
+  val attrs = HashMap<String, String>(4)
+  var i = start
+  while (i < end) {
+    while (i < end && !isAsciiLetter(raw[i]) && raw[i] != '_' && raw[i] != ':') i += 1
+    if (i >= end) break
+    val nameStart = i
+    while (i < end && isXmlAttrNameChar(raw[i])) i += 1
+    val nameEnd = i
+    while (i < end && raw[i].isWhitespace()) i += 1
+    if (i >= end || raw[i] != '=') continue
+    i += 1
+    while (i < end && raw[i].isWhitespace()) i += 1
+    if (i >= end) break
+    val quote = raw[i]
+    if (quote != '"' && quote != '\'') continue
+    i += 1
+    val valStart = i
+    val closeQuote = raw.indexOf(quote, valStart)
+    if (closeQuote < 0 || closeQuote >= end) break
+    attrs[raw.substring(nameStart, nameEnd).lowercase(Locale.ROOT)] = raw.substring(valStart, closeQuote)
+    i = closeQuote + 1
+  }
+  return attrs
+}
+
+private fun findClosingPTag(text: String, fromIndex: Int): Pair<Int, Int>? {
+  val len = text.length
+  var pos = fromIndex
+  while (pos < len) {
+    val lt = text.indexOf('<', pos)
+    if (lt < 0 || lt + 3 >= len) return null
+    if (text[lt + 1] == '/' && (text[lt + 2] == 'p' || text[lt + 2] == 'P')) {
+      var j = lt + 3
+      while (j < len && text[j].isWhitespace()) j += 1
+      if (j < len && text[j] == '>') {
+        return lt to (j + 1)
+      }
+    }
+    pos = lt + 1
+  }
+  return null
+}
+
 private fun parseTtml(normalized: String): List<TimedSidecarCue> {
   val out = ArrayList<TimedSidecarCue>()
-  for (match in TTML_P_RE.findAll(normalized)) {
-    val attrs = HashMap<String, String>()
-    for (attr in TTML_ATTR_RE.findAll(match.groupValues[1])) {
-      attrs[attr.groupValues[1].lowercase(Locale.ROOT)] = attr.groupValues[2]
+  val len = normalized.length
+  var pos = 0
+  while (pos < len) {
+    val lt = normalized.indexOf('<', pos)
+    if (lt < 0 || lt + 2 >= len) break
+    val c1 = normalized[lt + 1]
+    val c2 = normalized[lt + 2]
+    if ((c1 != 'p' && c1 != 'P') || (c2 != '>' && c2 != '/' && !c2.isWhitespace())) {
+      pos = lt + 1
+      continue
     }
-    val startMs = parseTtmlTimeMs(attrs["begin"]) ?: continue
-    val endMs = parseTtmlTimeMs(attrs["end"])
-      ?: parseTtmlTimeMs(attrs["dur"])?.let { startMs + it }
-      ?: continue
-    if (endMs <= startMs) continue
-    val withBreaks = TTML_BR_RE.replace(match.groupValues[2], "\n")
-    val text = cleanCueText(withBreaks)
-    if (text.isNotEmpty()) {
-      out.add(TimedSidecarCue(startMs, endMs, text))
+    val openEnd = normalized.indexOf('>', lt + 2)
+    if (openEnd < 0) break
+    if (normalized[openEnd - 1] == '/') {
+      pos = openEnd + 1
+      continue
     }
+    val closing = findClosingPTag(normalized, openEnd + 1) ?: break
+    val (closeStart, closeEnd) = closing
+    val attrs = parseTtmlAttributes(normalized, lt + 2, openEnd)
+    val startMs = parseTtmlTimeMs(attrs["begin"])
+    val endMs = if (startMs != null) {
+      parseTtmlTimeMs(attrs["end"]) ?: parseTtmlTimeMs(attrs["dur"])?.let { startMs + it }
+    } else {
+      null
+    }
+    if (startMs != null && endMs != null && endMs > startMs) {
+      val text = cleanCueText(normalized.substring(openEnd + 1, closeStart), replaceBrWithNewline = true)
+      if (text.isNotEmpty()) {
+        out.add(TimedSidecarCue(startMs, endMs, text))
+      }
+    }
+    pos = closeEnd
   }
   return out
 }
@@ -306,6 +499,7 @@ internal class ExternalSubtitleLoader(
   private val ownsExecutor: Boolean = true,
 ) {
   private val disposed = AtomicBoolean(false)
+  private val activeSources = ConcurrentHashMap.newKeySet<DataSource>()
 
   /** Synchronously reads and parses [config] using the isolated subtitle transport, bounded to [maxBytes]. */
   fun loadSync(
@@ -313,16 +507,28 @@ internal class ExternalSubtitleLoader(
     allowLegacyTls: Boolean = false,
     maxBytes: Int = MAX_EXTERNAL_SUBTITLE_BYTES,
   ): List<TimedSidecarCue> {
+    if (disposed.get()) {
+      throw IOException("External subtitle loader disposed")
+    }
     if (!isAllowedExternalSubtitleUri(config.uri)) {
       throw IOException("Disallowed external subtitle URI")
     }
     val dataSource = dataSourceFactoryProvider(config, allowLegacyTls).createDataSource()
+    activeSources.add(dataSource)
+    if (disposed.get()) {
+      activeSources.remove(dataSource)
+      cancelDataSource(dataSource)
+      throw IOException("External subtitle loader disposed")
+    }
     val out = ByteArrayOutputStream()
     try {
       dataSource.open(DataSpec(Uri.parse(config.uri)))
       val buf = ByteArray(8_192)
       var total = 0
       while (true) {
+        if (disposed.get()) {
+          throw IOException("External subtitle loader disposed")
+        }
         val read = dataSource.read(buf, 0, buf.size)
         if (read == C.RESULT_END_OF_INPUT || read < 0) break
         if (read == 0) continue
@@ -333,6 +539,7 @@ internal class ExternalSubtitleLoader(
         out.write(buf, 0, read)
       }
     } finally {
+      activeSources.remove(dataSource)
       runCatching { dataSource.close() }
     }
     val decoded = decodeSubtitleBytes(out.toByteArray())
@@ -357,6 +564,21 @@ internal class ExternalSubtitleLoader(
 
   fun dispose() {
     if (!disposed.compareAndSet(false, true)) return
+    val snapshot = activeSources.toList()
+    activeSources.clear()
+    for (source in snapshot) {
+      cancelDataSource(source)
+    }
     if (ownsExecutor) executor.shutdownNow()
+  }
+
+  private fun cancelDataSource(source: DataSource) {
+    runCatching {
+      if (source is IsolatedSubtitleDataSource) {
+        source.cancel()
+      } else {
+        source.close()
+      }
+    }
   }
 }

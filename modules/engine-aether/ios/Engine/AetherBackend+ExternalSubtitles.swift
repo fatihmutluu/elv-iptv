@@ -1,6 +1,11 @@
 import AetherEngine
 import Foundation
 
+private enum SubtitleFetchError: Error {
+  case invalidResponse
+  case exceedsMaxBytes
+}
+
 /// Parsed sidecar subtitle track held in memory for the active media serial (`#32`, `#308`, `#402`).
 struct LoadedExternalSubtitle {
   let descriptor: ExternalSubtitleDescriptor
@@ -24,7 +29,7 @@ extension AetherBackend {
       if let loaded = externalSubtitles[secondaryId], !loaded.cues.isEmpty {
         return true
       }
-      if activeExternalPrimaryId != nil,
+      if embeddedDecoderServingSecondary,
          parseSubtitleTrackStreamId(secondaryId) != nil,
          let engine,
          engine.isSubtitleActive,
@@ -42,6 +47,7 @@ extension AetherBackend {
     externalSubtitleOrder.removeAll()
     activeExternalPrimaryId = nil
     activeSecondarySubtitleId = nil
+    embeddedDecoderServingSecondary = false
   }
 
   func cancelExternalSubtitleTasks() {
@@ -49,10 +55,12 @@ extension AetherBackend {
       task.cancel()
     }
     externalSubtitleTasks.removeAll()
+    externalSubtitleTaskTokens.removeAll()
   }
 
   /// Loads and parses an external sidecar subtitle track over an isolated HTTP(S) `URLSession`
-  /// (`StreamHttp.makeSubtitleSession`) or validated local `file://` URI (`<= 4 MiB`, `#308`, `#32`).
+  /// (`StreamHttp.makeSubtitleSession`, streamed with a 4 MiB ceiling) or validated local `file://` URI,
+  /// offloading parsing off `@MainActor` (`#308`, `#32`, `#285`).
   func addExternalSubtitle(_ descriptor: ExternalSubtitleDescriptor) {
     let serial = activeLoadSerial
     guard serial > 0 else { return }
@@ -70,10 +78,14 @@ extension AetherBackend {
     let allowLegacyTls = currentLoadOptions?.allowLegacyTls ?? false
 
     externalSubtitleTasks[cleanId]?.cancel()
+    externalSubtitleTaskSeq &+= 1
+    let taskToken = externalSubtitleTaskSeq
+    externalSubtitleTaskTokens[cleanId] = taskToken
     externalSubtitleTasks[cleanId] = Task { @MainActor [weak self] in
       defer {
-        if let self {
+        if let self, self.externalSubtitleTaskTokens[cleanId] == taskToken {
           self.externalSubtitleTasks.removeValue(forKey: cleanId)
+          self.externalSubtitleTaskTokens.removeValue(forKey: cleanId)
         }
       }
       let data: Data?
@@ -86,15 +98,32 @@ extension AetherBackend {
           allowLegacyTls: allowLegacyTls
         )
       }
-      guard let self, !Task.isCancelled, self.activeLoadSerial == serial, let data, !data.isEmpty else {
+      guard !Task.isCancelled,
+            let data,
+            !data.isEmpty,
+            let currentSerial = self?.activeLoadSerial,
+            currentSerial == serial,
+            let currentToken = self?.externalSubtitleTaskTokens[cleanId],
+            currentToken == taskToken
+      else {
         return
       }
-      let parsed = ExternalSubtitleParser.parse(
-        data: data,
-        hint: normalized.mimeType ?? normalized.uri,
-        maxBytes: ExternalSubtitleParser.maxBytes
-      )
-      guard !parsed.cues.isEmpty else { return }
+      let parseHint = normalized.mimeType ?? normalized.uri
+      let parsed = await Task.detached(priority: .utility) {
+        ExternalSubtitleParser.parse(
+          data: data,
+          hint: parseHint,
+          maxBytes: ExternalSubtitleParser.maxBytes
+        )
+      }.value
+      guard let self,
+            !Task.isCancelled,
+            self.activeLoadSerial == serial,
+            self.externalSubtitleTaskTokens[cleanId] == taskToken,
+            !parsed.cues.isEmpty
+      else {
+        return
+      }
 
       let label = Self.resolveExternalLabel(for: normalized, url: url)
       let rawLang = normalizeTrackLanguage(normalized.language)
@@ -126,6 +155,7 @@ extension AetherBackend {
     let clean = id?.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let clean, !clean.isEmpty else {
       activeExternalPrimaryId = nil
+      emitCurrentTracksSnapshot()
       if let target = engine {
         refreshAllSubtitles(from: target)
       }
@@ -140,8 +170,10 @@ extension AetherBackend {
     }
     // Keep embedded decoder active ONLY if an embedded track is currently serving as secondary.
     if let secId = activeSecondarySubtitleId, let secStreamId = parseSubtitleTrackStreamId(secId) {
+      embeddedDecoderServingSecondary = true
       engine?.selectSubtitleTrack(index: secStreamId)
     } else {
+      embeddedDecoderServingSecondary = false
       engine?.clearSubtitle()
     }
     emitCurrentTracksSnapshot()
@@ -150,12 +182,14 @@ extension AetherBackend {
     }
   }
 
-  /// Selects a secondary subtitle track (external or embedded) rendered in top-center, enforcing `secondary != primary` (`#402`).
+  /// Selects a secondary subtitle track (external or embedded) rendered in top-center (`#402`).
+  /// Enforces `secondary != primary` and rejects selecting a second embedded track while an embedded
+  /// primary track is active (since `AetherEngine` natively decodes one embedded subtitle stream at a time).
   func selectSecondarySubtitleTrack(_ id: String?) {
     guard let raw = id?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-      let wasEmbeddedSecondary = activeExternalPrimaryId != nil
-        && activeSecondarySubtitleId.flatMap(parseSubtitleTrackStreamId) != nil
+      let wasEmbeddedSecondary = embeddedDecoderServingSecondary
       activeSecondarySubtitleId = nil
+      embeddedDecoderServingSecondary = false
       if wasEmbeddedSecondary {
         engine?.clearSubtitle()
       }
@@ -169,14 +203,21 @@ extension AetherBackend {
     let currentPrimary = currentPrimarySubtitleId()
     guard raw != currentPrimary else { return }
 
-    let previousWasEmbeddedSecondary = activeExternalPrimaryId != nil
-      && activeSecondarySubtitleId.flatMap(parseSubtitleTrackStreamId) != nil
+    let secStreamId = parseSubtitleTrackStreamId(raw)
+    let hasEmbeddedPrimary = currentPrimary.flatMap(parseSubtitleTrackStreamId) != nil
+    if secStreamId != nil && hasEmbeddedPrimary {
+      return
+    }
+
+    let previousWasEmbeddedSecondary = embeddedDecoderServingSecondary
     activeSecondarySubtitleId = raw
 
-    if activeExternalPrimaryId != nil {
-      if let secStreamId = parseSubtitleTrackStreamId(raw) {
-        engine?.selectSubtitleTrack(index: secStreamId)
-      } else if previousWasEmbeddedSecondary {
+    if let secStreamId {
+      embeddedDecoderServingSecondary = true
+      engine?.selectSubtitleTrack(index: secStreamId)
+    } else {
+      embeddedDecoderServingSecondary = false
+      if previousWasEmbeddedSecondary {
         engine?.clearSubtitle()
       }
     }
@@ -190,6 +231,9 @@ extension AetherBackend {
   func currentPrimarySubtitleId() -> String? {
     if let externalPrimary = activeExternalPrimaryId {
       return externalPrimary
+    }
+    if embeddedDecoderServingSecondary {
+      return nil
     }
     guard let target = engine, target.isSubtitleActive else {
       return desiredSubtitleStreamId.map(formatSubtitleTrackId)
@@ -214,19 +258,46 @@ extension AetherBackend {
     headers: [String: String],
     allowLegacyTls: Bool
   ) async -> Data? {
+    let maxBytes = ExternalSubtitleParser.maxBytes
     let session = StreamHttp.makeSubtitleSession(headers: headers, allowLegacyTls: allowLegacyTls)
-    defer { session.finishTasksAndInvalidate() }
+    defer { session.invalidateAndCancel() }
     let request = StreamHttp.makeSubtitleRequest(url: url, headers: headers)
     do {
-      let (data, response) = try await session.data(for: request)
+      let (bytes, response) = try await session.bytes(for: request)
       guard !Task.isCancelled,
             let http = response as? HTTPURLResponse,
             (200...299).contains(http.statusCode)
       else {
-        return nil
+        bytes.task.cancel()
+        throw SubtitleFetchError.invalidResponse
       }
-      if data.count > ExternalSubtitleParser.maxBytes {
-        return Data(data.prefix(ExternalSubtitleParser.maxBytes))
+      if response.expectedContentLength > Int64(maxBytes) {
+        bytes.task.cancel()
+        throw SubtitleFetchError.exceedsMaxBytes
+      }
+      var data = Data()
+      if response.expectedContentLength > 0 {
+        data.reserveCapacity(min(Int(response.expectedContentLength), maxBytes))
+      }
+      var chunk: [UInt8] = []
+      chunk.reserveCapacity(16_384)
+      for try await byte in bytes {
+        if Task.isCancelled {
+          bytes.task.cancel()
+          return nil
+        }
+        chunk.append(byte)
+        if data.count + chunk.count > maxBytes {
+          bytes.task.cancel()
+          throw SubtitleFetchError.exceedsMaxBytes
+        }
+        if chunk.count >= 16_384 {
+          data.append(contentsOf: chunk)
+          chunk.removeAll(keepingCapacity: true)
+        }
+      }
+      if !chunk.isEmpty {
+        data.append(contentsOf: chunk)
       }
       return data
     } catch {
@@ -236,22 +307,7 @@ extension AetherBackend {
 
   private nonisolated static func readValidatedLocalSubtitle(url: URL) async -> Data? {
     await Task.detached(priority: .utility) {
-      let standardized = url.standardizedFileURL
-      guard standardized.isFileURL else { return nil }
-      do {
-        let values = try standardized.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-        guard values.isRegularFile == true else { return nil }
-        if let size = values.fileSize, size <= 0 || size > ExternalSubtitleParser.maxBytes {
-          return nil
-        }
-        let handle = try FileHandle(forReadingFrom: standardized)
-        defer { try? handle.close() }
-        let data = try handle.read(upToCount: ExternalSubtitleParser.maxBytes + 1) ?? Data()
-        guard !data.isEmpty, data.count <= ExternalSubtitleParser.maxBytes else { return nil }
-        return data
-      } catch {
-        return nil
-      }
+      ExternalSubtitleParser.readValidatedLocalSubtitle(url: url, maxBytes: ExternalSubtitleParser.maxBytes)
     }.value
   }
 

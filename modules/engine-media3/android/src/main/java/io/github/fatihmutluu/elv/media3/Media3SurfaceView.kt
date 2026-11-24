@@ -19,6 +19,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.SubtitleView
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.views.ExpoView
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 private const val TAG = "ElvMedia3"
 internal const val DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION = 0.08f
@@ -489,6 +491,24 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
 
     override fun onAssOverlayHandle(handle: AssOverlayHandle?) = onMain {
       setAssOverlayHandle(handle)
+    }
+
+    override fun onAssOverlayDetachSync(timeoutMs: Long) {
+      if (Looper.myLooper() === Looper.getMainLooper()) {
+        if (binding === this) setAssOverlayHandle(null)
+        return
+      }
+      val detached = CountDownLatch(1)
+      val posted = main.postAtFrontOfQueue {
+        try {
+          if (binding === this) setAssOverlayHandle(null)
+        } finally {
+          detached.countDown()
+        }
+      }
+      if (posted && !detached.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+        Log.w(TAG, "ASS overlay detach timed out")
+      }
     }
 
     private fun onMain(apply: () -> Unit) {

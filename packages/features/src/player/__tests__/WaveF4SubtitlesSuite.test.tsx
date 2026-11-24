@@ -257,6 +257,23 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
         ),
       ).toBe(true);
     });
+    // Must NOT flash optimistic "External subtitle loaded" before track arrives in tracks.subtitles
+    expect(view.queryByTestId('player-external-subtitle-feedback')).toBeNull();
+
+    // Once engine reports the newly attached external track, feedback fires 'loaded'
+    await act(async () => {
+      engine.emit({
+        attempt: 1,
+        type: 'tracks',
+        tracks: {
+          ...DUAL_TRACKS,
+          subtitles: [
+            ...DUAL_TRACKS.subtitles,
+            { id: 'ext:ext-file-1', label: 'movie.srt', external: true },
+          ],
+        },
+      });
+    });
     expect(view.getByTestId('player-external-subtitle-feedback')).toHaveTextContent(
       'External subtitle loaded',
     );
@@ -296,19 +313,66 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
     await waitFor(() => {
       expect(view.queryByTestId('external-subtitle-url-overlay')).toBeNull();
     });
-    expect(
-      engine.commands.find(
-        (c) =>
-          c.name === 'addExternalSubtitle' &&
-          c.externalSubtitle?.uri === 'https://example.invalid/captions/french.vtt',
-      )?.externalSubtitle,
-    ).toMatchObject({
+    const addedUrlTrack = engine.commands.find(
+      (c) =>
+        c.name === 'addExternalSubtitle' &&
+        c.externalSubtitle?.uri === 'https://example.invalid/captions/french.vtt',
+    )?.externalSubtitle;
+    expect(addedUrlTrack).toMatchObject({
       uri: 'https://example.invalid/captions/french.vtt',
       label: 'French WebVTT',
+    });
+
+    // Advance past the earlier feedback toast hide timer (3s) — still pending until track arrives
+    await act(async () => {
+      manual.advance(3_500);
+    });
+    expect(view.queryByTestId('player-external-subtitle-feedback')).toBeNull();
+
+    // Engine reports the URL track (matching pendingId directly) -> fires 'loaded'
+    await act(async () => {
+      engine.emit({
+        attempt: 1,
+        type: 'tracks',
+        tracks: {
+          ...DUAL_TRACKS,
+          subtitles: [
+            ...DUAL_TRACKS.subtitles,
+            { id: 'ext:ext-file-1', label: 'movie.srt', external: true },
+            { id: addedUrlTrack?.id ?? 'ext-url-1', label: 'French WebVTT', external: true },
+          ],
+        },
+      });
     });
     expect(view.getByTestId('player-external-subtitle-feedback')).toHaveTextContent(
       'External subtitle loaded',
     );
+
+    // Timeout failure: submit a URL whose async download/parse never produces a track (e.g. HTTP 404)
+    await fireEvent.press(view.getByTestId('player-external-subtitle-from-url'));
+    await fireEvent.changeText(
+      view.getByTestId('external-subtitle-url-input'),
+      'https://example.invalid/captions/missing-404.srt',
+    );
+    await fireEvent.press(view.getByTestId('external-subtitle-url-submit'));
+    await waitFor(() => {
+      expect(view.queryByTestId('external-subtitle-url-overlay')).toBeNull();
+    });
+    await act(async () => {
+      manual.advance(8_000);
+    });
+    expect(view.getByTestId('player-external-subtitle-feedback')).toHaveTextContent(
+      'Could not load external subtitle.',
+    );
+
+    // Immediate failure when picker rejects
+    pickSubtitleFile.mockRejectedValueOnce(new Error('invalid file'));
+    await fireEvent.press(view.getByTestId('player-external-subtitle-pick-file'));
+    await waitFor(() => {
+      expect(view.getByTestId('player-external-subtitle-feedback')).toHaveTextContent(
+        'Could not load external subtitle.',
+      );
+    });
 
     await view.unmount();
   });

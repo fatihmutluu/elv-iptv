@@ -224,6 +224,8 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     getDesiredAudioDevice: () => controls.getDesiredAudioDevice(),
     getDesiredSubtitleFont: () => controls.getDesiredSubtitleFont(),
     getDesiredSubtitleStyle: () => controls.getDesiredSubtitleStyle(),
+    isSecondarySubtitleActive: () => tracks.hasActiveSecondarySubtitle(),
+    onSecondarySubtitlePositionSync: (active) => controls.syncSubtitlePosition(active),
     onFileLoadedExternalSubtitles: (slot) => {
       const list = slot.request.externalSubtitles;
       if (!list || list.length === 0) return;
@@ -433,6 +435,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         isSpdifPassthroughValue(arg.slice('--audio-spdif='.length)),
     ),
     ...(deps.audioRampMs === undefined ? {} : { audioRampMs: deps.audioRampMs }),
+    isSecondarySubtitleActive: () => tracks.hasActiveSecondarySubtitle(),
   });
 
   const clearQueue = (): void => {
@@ -582,6 +585,9 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       const clean = normalizeExternalSubtitleTrack(track);
       if (clean === null) return;
       adopt(attempt);
+      const existing = media.request.externalSubtitles ?? [];
+      const deduped = existing.filter((item) => item.id !== clean.id && item.uri !== clean.uri);
+      media.request = { ...media.request, externalSubtitles: [...deduped, clean] };
       attachExternalSubtitle(media, clean, 'select');
     },
     get spawns() {
@@ -673,10 +679,13 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       const clearSecondary = tracks.clearSecondaryIfCollides(id);
       if (clearSecondary) command(attempt, clearSecondary);
       command(attempt, cmd);
+      if (clearSecondary) controls.syncSubtitlePosition(false);
     },
     selectSecondarySubtitleTrack(attempt, id) {
       const cmd = released ? undefined : tracks.selectSecondarySubtitle(id);
-      if (cmd) command(attempt, cmd);
+      if (!cmd) return;
+      command(attempt, cmd);
+      controls.syncSubtitlePosition(tracks.hasActiveSecondarySubtitle());
     },
     selectVideoQuality(attempt, id) {
       if (released) return;

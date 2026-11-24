@@ -44,7 +44,7 @@ internal interface AssOverlayHandle {
 }
 
 @OptIn(UnstableApi::class)
-private class RealAssOverlayHandle(
+internal class RealAssOverlayHandle(
   private val handler: AssHandler,
 ) : AssOverlayHandle {
   private val released = AtomicBoolean(false)
@@ -88,10 +88,8 @@ private class RealAssOverlayHandle(
 
   override fun clearForZap() {
     if (released.get()) return
-    runCatching {
-      handler.videoTimeCallback = null
-      handler.renderCallback = null
-    }
+    // Keep videoTimeCallback and renderCallback intact across zaps on a reused ExoPlayer;
+    // AssHandler.onMediaItemTransition clears transient track/render state on media change.
   }
 
   override fun release() {

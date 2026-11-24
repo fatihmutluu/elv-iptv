@@ -166,15 +166,18 @@ extension AetherBackend {
         return true
       }
     }
-    let effectiveMs = effectiveTime.isFinite ? Int((effectiveTime * 1_000.0).rounded()) : 0
+    let maxSec = Double(ExternalSubtitleParser.maxSubtitleTimeMs) / 1_000.0
+    let effectiveMs: Int = (effectiveTime.isFinite && effectiveTime >= 0 && effectiveTime <= maxSec)
+      ? Int((effectiveTime * 1_000.0).rounded())
+      : 0
     let primaryEmbedded: [SubtitleCue]
     let secondaryEmbedded: [SubtitleCue]
-    if activeExternalPrimaryId == nil {
-      primaryEmbedded = activeEmbedded
-      secondaryEmbedded = []
-    } else if activeSecondarySubtitleId.flatMap(parseSubtitleTrackStreamId) != nil {
+    if embeddedDecoderServingSecondary {
       primaryEmbedded = []
       secondaryEmbedded = activeEmbedded
+    } else if activeExternalPrimaryId == nil {
+      primaryEmbedded = activeEmbedded
+      secondaryEmbedded = []
     } else {
       primaryEmbedded = []
       secondaryEmbedded = []
@@ -311,7 +314,10 @@ extension AetherBackend {
     currentLoadOptions?.initialSubtitleTrackId = streamId
     currentLoadOptions?.subtitlesDisabled = (streamId == nil)
     guard let streamId else {
-      engine?.clearSubtitle()
+      if !embeddedDecoderServingSecondary {
+        engine?.clearSubtitle()
+      }
+      emitCurrentTracksSnapshot()
       if let target = engine, hasActiveExternalOrSecondarySubtitles {
         refreshAllSubtitles(from: target)
       } else {
@@ -319,11 +325,14 @@ extension AetherBackend {
       }
       return
     }
-    if activeSecondarySubtitleId == formatSubtitleTrackId(streamId) {
+    let wasEmbeddedSecondary = embeddedDecoderServingSecondary
+    embeddedDecoderServingSecondary = false
+    if activeSecondarySubtitleId.flatMap(parseSubtitleTrackStreamId) != nil {
       activeSecondarySubtitleId = nil
     }
     guard let engine, engineLoadSerial > 0 else { return }
     if !wasExternalPrimary,
+       !wasEmbeddedSecondary,
        engine.isSubtitleActive,
        engine.activeSubtitleTrackIndex == streamId,
        (previousDesired == nil || previousDesired == streamId)
@@ -334,6 +343,7 @@ extension AetherBackend {
       publishSubtitlePresentation(.empty)
     }
     engine.selectSubtitleTrack(index: streamId)
+    emitCurrentTracksSnapshot()
     refreshAllSubtitles(from: engine)
   }
 
@@ -388,6 +398,14 @@ extension AetherBackend {
     if let item = target.currentAVPlayer?.currentItem ?? target.currentAVPlayerItem {
       applyVideoQualityCap(to: item)
     }
+    if desiredSubtitleStreamId == nil,
+       (activeExternalPrimaryId != nil || currentLoadOptions?.subtitlesDisabled == true),
+       let secId = activeSecondarySubtitleId,
+       let secStreamId = parseSubtitleTrackStreamId(secId)
+    {
+      embeddedDecoderServingSecondary = true
+      target.selectSubtitleTrack(index: secStreamId)
+    }
   }
 
   func publishSubtitlePresentation(_ next: SubtitlePresentation) {
@@ -424,11 +442,19 @@ extension AetherBackend {
     let subtitles = subtitleTracks.map { Self.mapTrackInfo($0, isAudio: false) } + externalSubtitleTrackInfos
     let selectedAudioId = activeAudioIndex.map(formatAudioTrackId)
     let selectedSubtitleId: String? =
-      activeExternalPrimaryId ?? (isSubtitleActive ? activeSubtitleIndex.map(formatSubtitleTrackId) : nil)
-    let selectedSecondarySubtitleId: String? =
-      (activeSecondarySubtitleId != nil && activeSecondarySubtitleId != selectedSubtitleId)
-      ? activeSecondarySubtitleId
-      : nil
+      activeExternalPrimaryId
+      ?? (embeddedDecoderServingSecondary ? nil : (isSubtitleActive ? activeSubtitleIndex.map(formatSubtitleTrackId) : nil))
+    let selectedSecondarySubtitleId: String? = {
+      guard let secId = activeSecondarySubtitleId, secId != selectedSubtitleId else { return nil }
+      if parseSubtitleTrackStreamId(secId) != nil {
+        guard embeddedDecoderServingSecondary,
+              selectedSubtitleId.flatMap(parseSubtitleTrackStreamId) == nil
+        else {
+          return nil
+        }
+      }
+      return secId
+    }()
     let isAdaptive = VideoQualityPolicy.isAdaptiveStream(plan: currentPlan)
     let videoQualities = isAdaptive ? VideoQualityPolicy.adaptivePresets : []
     let selectedVideoQualityId = isAdaptive ? requestedVideoQualityCap?.id : nil

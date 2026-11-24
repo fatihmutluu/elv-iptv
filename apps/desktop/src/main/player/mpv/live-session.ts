@@ -117,6 +117,8 @@ export interface LiveSessionHooks {
   getDesiredAudioDevice?(): string | undefined;
   getDesiredSubtitleFont?(): string | undefined;
   getDesiredSubtitleStyle?(): SubtitleStyleConfig | undefined;
+  isSecondarySubtitleActive?(): boolean;
+  onSecondarySubtitlePositionSync?(secondaryActive: boolean): void;
   onFileLoadedExternalSubtitles?(slot: MediaSlot): void;
   getDesiredDeinterlaceMode?(): DeinterlaceMode | undefined;
   getDesiredPitchLock?(): boolean | undefined;
@@ -173,7 +175,15 @@ export function createSessionController(hooks: LiveSessionHooks) {
   const queueReconcile = (L: LiveSession): void => {
     if (!isActive(L, L.entries.current()?.entryId)) return;
     const media = hooks.getMedia();
-    for (const cmd of tracks.reconcileCommands()) hooks.enqueueCommand(cmd, media);
+    const commands = tracks.reconcileCommands();
+    let changedSecondary = false;
+    for (const cmd of commands) {
+      if (cmd[0] === 'set_property' && cmd[1] === 'secondary-sid') changedSecondary = true;
+      hooks.enqueueCommand(cmd, media);
+    }
+    if (changedSecondary) {
+      hooks.onSecondarySubtitlePositionSync?.(tracks.hasActiveSecondarySubtitle());
+    }
   };
 
   const onStartFile = (L: LiveSession, entryId: number): void => {
@@ -478,7 +488,12 @@ export function createSessionController(hooks: LiveSessionHooks) {
       }
       const desiredSubStyle = hooks.getDesiredSubtitleStyle?.();
       if (desiredSubStyle !== undefined) {
-        for (const cmd of subtitleStyleCommands(desiredSubStyle)) void send(L, cmd);
+        for (const cmd of subtitleStyleCommands(
+          desiredSubStyle,
+          hooks.isSecondarySubtitleActive?.() === true,
+        )) {
+          void send(L, cmd);
+        }
       }
       const desiredDeinterlace = hooks.getDesiredDeinterlaceMode?.();
       if (desiredDeinterlace !== undefined) {
@@ -630,7 +645,15 @@ export function createSessionController(hooks: LiveSessionHooks) {
       }
       L.inFlight = slot;
       opening.begin(slot);
-      const reply = await send(L, loadfileCommand(slot.request));
+      const effectiveStyle = hooks.getDesiredSubtitleStyle?.() ?? slot.request.subtitleStyle;
+      const reply = await send(
+        L,
+        loadfileCommand({
+          ...slot.request,
+          ...(effectiveStyle === undefined ? {} : { subtitleStyle: effectiveStyle }),
+          secondarySubtitleActive: hooks.isSecondarySubtitleActive?.() === true,
+        }),
+      );
       if (!reply || hooks.getLive() !== L) return;
       if (reply.error !== 'success') {
         L.inFlight = undefined;

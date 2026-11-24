@@ -122,4 +122,121 @@ struct ExternalSubtitleParserTests {
     #expect(track.activeCues(atMs: 5_500).map(\.text) == ["Overlapping cue", "Later cue"])
     #expect(track.activeCues(atMs: 8_000).isEmpty)
   }
+
+  @Test("safely skips overflowing and non-finite timestamps without crashing (#285)")
+  func guardsOverflowingAndNonFiniteTimestamps() {
+    let ttml = """
+    <tt xmlns="http://www.w3.org/ns/ttml" ttp:frameRate="30">
+      <body>
+        <div>
+          <p begin="1e25s" end="1e26s">Huge scientific</p>
+          <p begin="NaNs" end="10s">NaN begin</p>
+          <p begin="0s" end="Infinitys">Inf end</p>
+          <p begin="Infinity" end="10s">Bare inf</p>
+          <p begin="00:00:01:1e25" end="00:00:02:00">Huge frames</p>
+          <p begin="86400000s" dur="10s">Sum exceeds max</p>
+          <p begin="1s" end="3s">Valid TTML cue</p>
+        </div>
+      </body>
+    </tt>
+    """
+    let ttmlTrack = ExternalSubtitleParser.parse(ttml, hint: "overflow.ttml")
+    #expect(ttmlTrack.format == .ttml)
+    #expect(ttmlTrack.cues == [ExternalSubtitleCue(startMs: 1_000, endMs: 3_000, text: "Valid TTML cue", isRtl: false)])
+    #expect(ttmlTrack.warnings.contains("malformed-timecode"))
+
+    let srt = """
+    1
+    99999999999999999:00:00,000 --> 99999999999999999:00:05,000
+    Int64 multiply overflow
+
+    2
+    25000:00:00,000 --> 25000:00:05,000
+    Exceeds 1000-day cap
+
+    3
+    00:00:02,000 --> 00:00:04,000
+    Valid SRT cue
+    """
+    let srtTrack = ExternalSubtitleParser.parse(srt, hint: "overflow.srt")
+    #expect(srtTrack.format == .srt)
+    #expect(srtTrack.cues == [ExternalSubtitleCue(startMs: 2_000, endMs: 4_000, text: "Valid SRT cue", isRtl: false)])
+    #expect(srtTrack.warnings.contains("malformed-timecode"))
+
+    let ass = """
+    [Events]
+    Format: Start, End, Text
+    Dialogue: 99999999999999999:00:00.00,99999999999999999:00:05.00,Overflow
+    Dialogue: 0:00:01.00,0:00:02.00,Valid ASS cue
+    """
+    let assTrack = ExternalSubtitleParser.parse(ass, hint: "overflow.ass")
+    #expect(assTrack.format == .ass)
+    #expect(assTrack.cues == [ExternalSubtitleCue(startMs: 1_000, endMs: 2_000, text: "Valid ASS cue", isRtl: false)])
+  }
+
+  @Test("linear-time scanning handles 100 KiB pathological unclosed delimiters without O(N^2) stall (#285)")
+  func linearTimePathologicalUnclosedDelimiters() {
+    let repeatedTags = String(repeating: "<a", count: 50_000)
+    let repeatedAss = String(repeating: "{\\", count: 50_000)
+    let repeatedAmps = String(repeating: "&", count: 100_000)
+    let repeatedP = String(repeating: "<p>", count: 34_000)
+    let repeatedTtmlBody = "<tt><body><p begin=\"1s\" end=\"2s\">" + repeatedTags + "</p></body></tt>"
+    let repeatedBrackets = String(repeating: "[", count: 100_000)
+
+    let srtPayload = "1\n00:00:01,000 --> 00:00:02,000\n\(repeatedTags)\n\(repeatedAss)\n\(repeatedAmps)\n"
+    let ttmlUnclosed = "<tt><body>\(repeatedP)</body></tt>"
+
+    let clock = ContinuousClock()
+    let elapsed = clock.measure {
+      let srtTrack = ExternalSubtitleParser.parse(srtPayload, hint: "pathological.srt")
+      #expect(srtTrack.cues.count == 1)
+      let ttmlTrack1 = ExternalSubtitleParser.parse(ttmlUnclosed, hint: "pathological.ttml")
+      #expect(ttmlTrack1.cues.isEmpty)
+      let ttmlTrack2 = ExternalSubtitleParser.parse(repeatedTtmlBody, hint: "pathological2.ttml")
+      #expect(ttmlTrack2.cues.count == 1)
+      let sdh = SdhSubtitleFilter.stripSdhAnnotations(repeatedBrackets)
+      #expect(sdh.count == 100_000)
+    }
+    #expect(elapsed < .seconds(3))
+  }
+
+  @Test("readValidatedLocalSubtitle rejects traversal, disallowed extensions, symlink extension bypasses, and oversize files (#308)")
+  func validatesLocalSubtitleFileUris() throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent("elv-sub-test-\(UUID().uuidString)", isDirectory: true)
+    try fm.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: root) }
+
+    let validSrt = root.appendingPathComponent("movie.srt")
+    let validPayload = Data("1\n00:00:01,000 --> 00:00:02,000\nHello\n".utf8)
+    try validPayload.write(to: validSrt)
+    #expect(ExternalSubtitleParser.readValidatedLocalSubtitle(url: validSrt) == validPayload)
+
+    // Path traversal segment `..` is rejected even when targeting a valid `.srt`.
+    let subDir = root.appendingPathComponent("nested", isDirectory: true)
+    try fm.createDirectory(at: subDir, withIntermediateDirectories: true)
+    let traversalUrl = URL(fileURLWithPath: subDir.path + "/../movie.srt")
+    #expect(ExternalSubtitleParser.readValidatedLocalSubtitle(url: traversalUrl) == nil)
+
+    // Non-allowlisted extension is rejected.
+    let secretTxt = root.appendingPathComponent("secret.txt")
+    try Data("top-secret".utf8).write(to: secretTxt)
+    #expect(ExternalSubtitleParser.readValidatedLocalSubtitle(url: secretTxt) == nil)
+
+    // Symlink `.srt -> .txt` is rejected after resolving symlinks.
+    let evilSymlink = root.appendingPathComponent("evil.srt")
+    try fm.createSymbolicLink(at: evilSymlink, withDestinationURL: secretTxt)
+    #expect(ExternalSubtitleParser.readValidatedLocalSubtitle(url: evilSymlink) == nil)
+
+    // Symlink `.srt -> .vtt` is allowed because both extensions are allowlisted.
+    let targetVtt = root.appendingPathComponent("target.vtt")
+    let vttPayload = Data("WEBVTT\n\n00:00.000 --> 00:01.000\nHi\n".utf8)
+    try vttPayload.write(to: targetVtt)
+    let goodSymlink = root.appendingPathComponent("good.srt")
+    try fm.createSymbolicLink(at: goodSymlink, withDestinationURL: targetVtt)
+    #expect(ExternalSubtitleParser.readValidatedLocalSubtitle(url: goodSymlink) == vttPayload)
+
+    // Oversize file exceeding maxBytes is rejected.
+    #expect(ExternalSubtitleParser.readValidatedLocalSubtitle(url: validSrt, maxBytes: 8) == nil)
+  }
 }

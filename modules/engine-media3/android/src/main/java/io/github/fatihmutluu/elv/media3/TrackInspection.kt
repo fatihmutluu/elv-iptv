@@ -319,12 +319,13 @@ internal fun inspectMediaTracks(
   selectedSecondarySubtitleId: String? = null,
   extraExternalSubtitles: List<TrackInfoSnapshot> = emptyList(),
   selectedExternalPrimaryId: String? = null,
+  preferredPrimarySubtitleId: String? = null,
 ): MediaTracksSnapshot {
   val audio = mutableListOf<TrackInfoSnapshot>()
   val subtitles = mutableListOf<TrackInfoSnapshot>()
   val seenSubtitleIds = HashSet<String>()
+  val selectedTextIds = mutableListOf<String>()
   var selectedAudioId: String? = null
-  var selectedSubtitleId: String? = null
 
   tracks.groups.forEachIndexed { groupIndex, group ->
     if (group.type != C.TRACK_TYPE_AUDIO && group.type != C.TRACK_TYPE_TEXT) return@forEachIndexed
@@ -336,8 +337,8 @@ internal fun inspectMediaTracks(
         if (selectedAudioId == null && group.isTrackSelected(trackIndex)) selectedAudioId = info.id
       } else {
         if (seenSubtitleIds.add(info.id)) subtitles += info
-        if (!textDisabled && selectedSubtitleId == null && group.isTrackSelected(trackIndex)) {
-          selectedSubtitleId = info.id
+        if (!textDisabled && group.isTrackSelected(trackIndex)) {
+          selectedTextIds += info.id
         }
       }
     }
@@ -349,14 +350,23 @@ internal fun inspectMediaTracks(
     }
   }
 
+  val cleanSecondaryId = selectedSecondarySubtitleId?.takeIf { it.isNotEmpty() }
+  val selectedSubtitleId = when {
+    textDisabled -> null
+    preferredPrimarySubtitleId != null &&
+      preferredPrimarySubtitleId != cleanSecondaryId &&
+      preferredPrimarySubtitleId in selectedTextIds -> preferredPrimarySubtitleId
+    else -> selectedTextIds.firstOrNull { it != cleanSecondaryId }
+  }
+
   val resolvedPrimaryId = when {
     selectedExternalPrimaryId != null && seenSubtitleIds.contains(selectedExternalPrimaryId) -> selectedExternalPrimaryId
     textDisabled -> null
     else -> selectedSubtitleId
   }
   val resolvedSecondaryId =
-    selectedSecondarySubtitleId
-      ?.takeIf { it.isNotEmpty() && it != resolvedPrimaryId && seenSubtitleIds.contains(it) }
+    cleanSecondaryId
+      ?.takeIf { it != resolvedPrimaryId && seenSubtitleIds.contains(it) }
 
   val videoQualities = videoQualityCandidatesOf(tracks).map { it.option }
   val confirmedVideoQualityId = selectedVideoQualityId?.takeIf { wanted ->

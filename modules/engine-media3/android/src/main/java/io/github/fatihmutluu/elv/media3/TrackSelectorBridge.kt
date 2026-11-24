@@ -186,7 +186,8 @@ internal class TrackSelectorBridge(
     if (!tracks.isEmpty && matched == null && dynamicExternal == null) return
 
     // Enforce secondary != primary: selecting a primary equal to secondary clears secondary immediately (#402).
-    if (secondarySubtitleChoice?.id == id) {
+    val wasSecondary = secondarySubtitleChoice?.id == id
+    if (wasSecondary) {
       secondarySubtitleChoice = null
       onClearSecondaryCues()
     }
@@ -210,7 +211,8 @@ internal class TrackSelectorBridge(
 
     val currentlyDisabled =
       isTextDisabled || (player?.trackSelectionParameters?.disabledTrackTypes?.contains(C.TRACK_TYPE_TEXT) == true)
-    val alreadyActive = !currentlyDisabled && matched != null && matched.group.isTrackSelected(matched.trackIndex)
+    val alreadyActive =
+      !currentlyDisabled && !wasSecondary && matched != null && matched.group.isTrackSelected(matched.trackIndex)
     if (!alreadyActive) onClearCues()
 
     externalPrimarySubtitleId = null
@@ -406,8 +408,10 @@ internal class TrackSelectorBridge(
     }
 
     secondarySubtitleChoice?.let { wantedSec ->
-      val activePrimary = targetSubtitleId ?: externalPrimarySubtitleId ?: currentSelectedTextIdFromTracks(tracks)
       val resolved = resolveCandidate(tracks, C.TRACK_TYPE_TEXT, wantedSec, ffmpegSupportsAudio)
+      val activePrimary = targetSubtitleId
+        ?: externalPrimarySubtitleId
+        ?: currentSelectedTextIdFromTracks(tracks, excludeId = resolved?.info?.id ?: wantedSec.id)
       if (resolved != null) {
         if (resolved.info.id == activePrimary) {
           secondarySubtitleChoice = null
@@ -509,6 +513,7 @@ internal class TrackSelectorBridge(
       selectedSecondarySubtitleId = secondarySubtitleChoice?.id,
       extraExternalSubtitles = extraExternalSubtitles(),
       selectedExternalPrimaryId = externalPrimarySubtitleId,
+      preferredPrimarySubtitleId = (subtitleChoice as? SubChoice.Selected)?.choice?.id,
     )
 
   private fun emitSnapshotIfTracksAvailable(
@@ -536,13 +541,15 @@ internal class TrackSelectorBridge(
     if (subtitleChoice is SubChoice.Off) return null
     (subtitleChoice as? SubChoice.Selected)?.choice?.id?.let { return it }
     val tracks = activeTracks(player)
-    return currentSelectedTextIdFromTracks(tracks)
+    return currentSelectedTextIdFromTracks(tracks, excludeId = secondarySubtitleChoice?.id)
   }
 
-  private fun currentSelectedTextIdFromTracks(tracks: Tracks): String? {
+  private fun currentSelectedTextIdFromTracks(tracks: Tracks, excludeId: String? = null): String? {
     if (tracks.isEmpty) return null
     val candidates = candidatesOf(tracks, C.TRACK_TYPE_TEXT, ffmpegSupportsAudio)
-    return candidates.firstOrNull { it.group.isTrackSelected(it.trackIndex) }?.info?.id
+    return candidates.firstOrNull { candidate ->
+      candidate.group.isTrackSelected(candidate.trackIndex) && candidate.info.id != excludeId
+    }?.info?.id
   }
 
   private fun choiceOf(info: TrackInfoSnapshot): TrackChoice =

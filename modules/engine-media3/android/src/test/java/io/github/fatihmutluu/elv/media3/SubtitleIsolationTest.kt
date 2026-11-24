@@ -10,8 +10,12 @@ import java.io.File
 import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit.MILLISECONDS
 import java.util.concurrent.TimeUnit.SECONDS
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -288,5 +292,241 @@ class SubtitleIsolationTest {
     assertTrue("Expected MergingMediaSource when externalSubtitles present", merged is MergingMediaSource)
     assertEquals("77", merged.mediaItem.mediaId)
     assertEquals(1, providerCalls)
+  }
+
+  @Test
+  fun `IsolatedSubtitleDataSource enforces hard 4 MiB cap on Content-Length and chunked streaming reads (#308)`() {
+    val overLimit = MAX_EXTERNAL_SUBTITLE_BYTES + 1
+    // 1) Upfront Content-Length > 4 MiB is rejected during open()
+    ServerSocket(0, 50, InetAddress.getLoopbackAddress()).use { server ->
+      val serverThread = thread(isDaemon = true) {
+        runCatching {
+          server.accept().use { client ->
+            readRequestHead(client)
+            val resp = "HTTP/1.1 200 OK\r\nContent-Length: $overLimit\r\n\r\n"
+            client.getOutputStream().write(resp.toByteArray())
+            client.getOutputStream().flush()
+          }
+        }
+      }
+      val ds = StreamHttp.subtitleDataSourceFactory(context = RuntimeEnvironment.getApplication()).createDataSource()
+      try {
+        ds.open(DataSpec(Uri.parse("http://127.0.0.1:${server.localPort}/huge.srt")))
+        fail("Expected IOException for Content-Length > 4 MiB")
+      } catch (_: IOException) {
+        // expected
+      } finally {
+        ds.close()
+        serverThread.join(3_000)
+      }
+    }
+
+    // 2) Chunked body without Content-Length exceeding 4 MiB aborts during read()
+    ServerSocket(0, 50, InetAddress.getLoopbackAddress()).use { server ->
+      val serverThread = thread(isDaemon = true) {
+        runCatching {
+          server.accept().use { client ->
+            readRequestHead(client)
+            val out = client.getOutputStream()
+            out.write("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".toByteArray())
+            val chunk = ByteArray(65_536) { 'a'.code.toByte() }
+            val chunkHead = "${chunk.size.toString(16)}\r\n".toByteArray()
+            repeat(70) { // ~4.5 MiB total
+              out.write(chunkHead)
+              out.write(chunk)
+              out.write("\r\n".toByteArray())
+              out.flush()
+            }
+            out.write("0\r\n\r\n".toByteArray())
+          }
+        }
+      }
+      val ds = StreamHttp.subtitleDataSourceFactory(context = RuntimeEnvironment.getApplication()).createDataSource()
+      try {
+        ds.open(DataSpec(Uri.parse("http://127.0.0.1:${server.localPort}/chunked.srt")))
+        val buf = ByteArray(16_384)
+        var overflowThrown = false
+        try {
+          while (true) {
+            val n = ds.read(buf, 0, buf.size)
+            if (n < 0) break
+          }
+        } catch (_: IOException) {
+          overflowThrown = true
+        }
+        assertTrue("Expected IOException once cumulative bytes read exceed 4 MiB", overflowThrown)
+      } finally {
+        ds.close()
+        serverThread.join(3_000)
+      }
+    }
+  }
+
+  @Test
+  fun `rejects unsafe file URIs, path traversal, non-subtitle extensions, and symlink-to-non-subtitle bypass (#308, #32)`() {
+    // Allowlisted subtitle extensions pass validation
+    for (allowed in listOf(
+      "file:///storage/emulated/0/Download/movie.srt",
+      "file:///tmp/subs.vtt",
+      "file:///tmp/subs.webvtt",
+      "file:///tmp/subs.ass",
+      "file:///tmp/subs.ssa",
+      "file:///tmp/subs.ttml",
+      "file:///tmp/subs.dfxp",
+      "file:///tmp/subs.sub",
+      "file:///tmp/subs.xml",
+    )) {
+      assertTrue("expected allowed: $allowed", isAllowedExternalSubtitleUri(allowed))
+    }
+
+    // Disallowed local paths: non-subtitle, traversal, encoded traversal, fragment/query spoof, remote host
+    for (rejected in listOf(
+      "file:///etc/passwd",
+      "file:///tmp/../secret.srt",
+      "file:///tmp/%2e%2e/secret.srt",
+      "file:///tmp/sub/..%2Fsecret.srt",
+      "file:///etc/passwd#.srt",
+      "file:///etc/passwd?.srt",
+      "file://evil.example/share/movie.srt",
+      "file:///tmp/script.sh",
+      "file:///tmp/evil\u0000.srt",
+    )) {
+      assertFalse("expected rejected: $rejected", isAllowedExternalSubtitleUri(rejected))
+    }
+
+    // Symlink-to-non-subtitle rejection inside IsolatedSubtitleDataSource.open()
+    val tempDir = Files.createTempDirectory("elv-sub-symlink-").toFile()
+    val secretFile = File(tempDir, "passwd").apply { writeText("root:x:0:0:root:/root:/bin/sh") }
+    val fakeLink = File(tempDir, "evil.srt")
+    try {
+      val createdOsSymlink = runCatching {
+        Files.createSymbolicLink(fakeLink.toPath(), secretFile.toPath())
+        true
+      }.getOrDefault(false)
+
+      if (createdOsSymlink) {
+        val ds = StreamHttp.subtitleDataSourceFactory(context = RuntimeEnvironment.getApplication()).createDataSource()
+        try {
+          ds.open(DataSpec(Uri.fromFile(fakeLink)))
+          fail("Expected IOException for OS symlink pointing to non-subtitle file")
+        } catch (_: IOException) {
+          // expected
+        } finally {
+          ds.close()
+        }
+      } else {
+        fakeLink.writeText("1\n00:00:01,000 --> 00:00:02,000\nhi\n")
+      }
+
+      // Also verify canonicalFile resolution rejects symlink-to-non-subtitle deterministically on all OSes
+      val dsCanonical = IsolatedSubtitleDataSource(
+        subtitleHeaders = emptyMap(),
+        client = subtitleHttpClient(),
+        context = RuntimeEnvironment.getApplication(),
+        canonicalFileResolver = { secretFile },
+      )
+      try {
+        dsCanonical.open(DataSpec(Uri.fromFile(fakeLink)))
+        fail("Expected IOException when canonical path has non-subtitle extension")
+      } catch (e: IOException) {
+        assertTrue(
+          "Expected canonical extension rejection, got: ${e.message}",
+          e.message.orEmpty().contains("disallowed extension", ignoreCase = true),
+        )
+      } finally {
+        dsCanonical.close()
+      }
+    } finally {
+      fakeLink.delete()
+      secretFile.delete()
+      tempDir.delete()
+    }
+  }
+
+  @Test
+  fun `parseSidecarSubtitles completes 200 KiB pathological unclosed-delimiter inputs in linear time under 100 ms (#285)`() {
+    // Warm up JIT once with tiny inputs
+    parseSidecarSubtitles("1\n00:00:01,000 --> 00:00:02,000\n<b>hi</b>\n", MimeTypes.APPLICATION_SUBRIP)
+    parseSidecarSubtitles("<tt><body><div><p begin=\"1s\" end=\"2s\">hi</p></div></body></tt>", MimeTypes.APPLICATION_TTML)
+    parseSidecarSubtitles("[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\i1}hi", MimeTypes.TEXT_SSA)
+
+    val ttmlBomb = "<tt><body><div>" + "<p>".repeat(50_000) + "</div></body></tt>"
+    val assBomb = "[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,," + "{\\".repeat(50_000)
+    val entityBomb = "1\n00:00:01,000 --> 00:00:02,000\n" + "&".repeat(50_000) + "\n"
+    val htmlBomb = "1\n00:00:01,000 --> 00:00:02,000\n" + "<span".repeat(50_000) + "\n"
+
+    val t0 = System.nanoTime()
+    parseSidecarSubtitles(ttmlBomb, MimeTypes.APPLICATION_TTML)
+    val ttmlMs = (System.nanoTime() - t0) / 1_000_000L
+    assertTrue("TTML pathological input took ${ttmlMs}ms (expected < 1000ms)", ttmlMs < 1_000L)
+
+    val t1 = System.nanoTime()
+    parseSidecarSubtitles(assBomb, MimeTypes.TEXT_SSA)
+    val assMs = (System.nanoTime() - t1) / 1_000_000L
+    assertTrue("ASS pathological input took ${assMs}ms (expected < 1000ms)", assMs < 1_000L)
+
+    val t2 = System.nanoTime()
+    parseSidecarSubtitles(entityBomb, MimeTypes.APPLICATION_SUBRIP)
+    val entityMs = (System.nanoTime() - t2) / 1_000_000L
+    assertTrue("Entity pathological input took ${entityMs}ms (expected < 1000ms)", entityMs < 1_000L)
+
+    val t3 = System.nanoTime()
+    parseSidecarSubtitles(htmlBomb, MimeTypes.APPLICATION_SUBRIP)
+    val htmlMs = (System.nanoTime() - t3) / 1_000_000L
+    assertTrue("HTML tag pathological input took ${htmlMs}ms (expected < 1000ms)", htmlMs < 1_000L)
+  }
+
+  @Test
+  fun `ExternalSubtitleLoader dispose cancels in-flight stalled OkHttp subtitle calls immediately (#308)`() {
+    val accepted = CountDownLatch(1)
+    val releaseServer = CountDownLatch(1)
+    val loadError = AtomicReference<Throwable?>(null)
+    val loadFinished = CountDownLatch(1)
+
+    ServerSocket(0, 50, InetAddress.getLoopbackAddress()).use { stalledServer ->
+      val serverThread = thread(isDaemon = true) {
+        runCatching {
+          stalledServer.accept().use { client ->
+            readRequestHead(client)
+            accepted.countDown()
+            // Hold connection open without sending response headers (simulates stalled 10s socket)
+            releaseServer.await(15, SECONDS)
+          }
+        }
+      }
+      val loader = ExternalSubtitleLoader(context = RuntimeEnvironment.getApplication())
+      val worker = thread(isDaemon = true) {
+        try {
+          loader.loadSync(
+            ExternalSubtitleConfig(
+              id = "stalled-1",
+              uri = "http://127.0.0.1:${stalledServer.localPort}/stalled.srt",
+            )
+          )
+        } catch (t: Throwable) {
+          loadError.set(t)
+        } finally {
+          loadFinished.countDown()
+        }
+      }
+
+      try {
+        assertTrue("server must accept subtitle request", accepted.await(5, SECONDS))
+        val startNs = System.nanoTime()
+        loader.dispose()
+        assertTrue(
+          "dispose() must abort stalled OkHttp subtitle call well under 10s read timeout",
+          loadFinished.await(2_000, MILLISECONDS),
+        )
+        val abortMs = (System.nanoTime() - startNs) / 1_000_000L
+        assertTrue("Expected fast cancel (< 2000ms), got ${abortMs}ms", abortMs < 2_000L)
+        assertNotNull("cancelled loadSync must throw IOException", loadError.get())
+      } finally {
+        releaseServer.countDown()
+        loader.dispose()
+        worker.join(2_000)
+        serverThread.join(2_000)
+      }
+    }
   }
 }

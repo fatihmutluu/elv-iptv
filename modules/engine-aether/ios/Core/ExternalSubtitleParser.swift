@@ -46,6 +46,55 @@ public enum ExternalSubtitleParser {
   /// Hard byte cap (4 MiB) enforced on external sidecar subtitle payloads (`#308`).
   public static let maxBytes = 4 * 1024 * 1024
 
+  /// Upper bound for parsed subtitle cue timestamps (1,000 days in ms) preventing integer/float overflow traps (`#285`).
+  public static let maxSubtitleTimeMs = 86_400_000_000
+
+  /// Allowlisted local subtitle file extensions accepted for `file://` external sidecar URIs (`#308`).
+  public static let allowedLocalSubtitleExtensions: Set<String> = [
+    "srt", "vtt", "webvtt", "ass", "ssa", "ttml", "dfxp", "sub", "xml",
+  ]
+
+  /// Validates a local `file://` subtitle URI (rejecting `..` traversal, non-allowlisted extensions,
+  /// symlink extension bypasses, non-regular files, and payloads exceeding `maxBytes`) and reads its bytes (`#308`).
+  public static func readValidatedLocalSubtitle(
+    url: URL,
+    maxBytes: Int = ExternalSubtitleParser.maxBytes
+  ) -> Data? {
+    let cap = max(0, maxBytes)
+    guard cap > 0, url.isFileURL else { return nil }
+    if let host = url.host, !host.isEmpty, host.lowercased() != "localhost" {
+      return nil
+    }
+    let rawPath = url.path
+    guard !rawPath.isEmpty, !rawPath.contains("\0") else { return nil }
+    let rawSegments = rawPath.split(separator: "/", omittingEmptySubsequences: false)
+    if rawSegments.contains("..") || url.pathComponents.contains("..") {
+      return nil
+    }
+    let rawExt = url.pathExtension.lowercased()
+    guard allowedLocalSubtitleExtensions.contains(rawExt) else { return nil }
+
+    let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+    guard resolved.isFileURL else { return nil }
+    let resolvedExt = resolved.pathExtension.lowercased()
+    guard allowedLocalSubtitleExtensions.contains(resolvedExt) else { return nil }
+
+    do {
+      let values = try resolved.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+      guard values.isRegularFile == true else { return nil }
+      if let size = values.fileSize, size <= 0 || size > cap {
+        return nil
+      }
+      let handle = try FileHandle(forReadingFrom: resolved)
+      defer { try? handle.close() }
+      let data = try handle.read(upToCount: cap + 1) ?? Data()
+      guard !data.isEmpty, data.count <= cap else { return nil }
+      return data
+    } catch {
+      return nil
+    }
+  }
+
   /// Detects a subtitle format from content headers/markers with optional filename or MIME hint.
   public static func detectFormat(_ content: String, hint: String? = nil) -> ExternalSubtitleFormat? {
     let cleaned = stripLeadingBom(content)
@@ -391,6 +440,22 @@ public enum ExternalSubtitleParser {
 
   // MARK: - Shared Helpers
 
+  static func boundedClockTimeMs(hours: Int, minutes: Int, seconds: Int, ms: Int) -> Int? {
+    let maxHours = maxSubtitleTimeMs / 3_600_000
+    guard hours >= 0, hours <= maxHours,
+          minutes >= 0, minutes < 60,
+          seconds >= 0, seconds < 60,
+          ms >= 0, ms <= maxSubtitleTimeMs
+    else {
+      return nil
+    }
+    let baseMs = ((hours * 60 + minutes) * 60 + seconds) * 1_000
+    guard baseMs <= maxSubtitleTimeMs, ms <= maxSubtitleTimeMs - baseMs else {
+      return nil
+    }
+    return baseMs + ms
+  }
+
   static func parseClockTimeMs(_ raw: String) -> Int? {
     let trimmed = raw.trimmingCharacters(in: .whitespaces)
     guard !trimmed.isEmpty else { return nil }
@@ -433,7 +498,7 @@ public enum ExternalSubtitleParser {
     } else {
       ms = 0
     }
-    return ((hours * 60 + minutes) * 60 + seconds) * 1_000 + ms
+    return boundedClockTimeMs(hours: hours, minutes: minutes, seconds: seconds, ms: ms)
   }
 
   private static func stripSrtVttMarkup(_ text: String) -> String {
@@ -442,30 +507,53 @@ public enum ExternalSubtitleParser {
     var i = text.startIndex
     while i < text.endIndex {
       let ch = text[i]
-      if ch == "<", let close = text[text.index(after: i)...].firstIndex(of: ">") {
-        let inner = String(text[text.index(after: i)..<close])
-        let trimmedInner = inner.trimmingCharacters(in: .whitespaces).lowercased()
-        if trimmedInner == "br" || trimmedInner == "br/" || trimmedInner == "br /" {
-          out.append("\n")
+      if ch == "<" {
+        let afterOpen = text.index(after: i)
+        if let close = findDelimitedClose(in: text, from: afterOpen, openChar: "<", closeChar: ">") {
+          let inner = String(text[afterOpen..<close])
+          let trimmedInner = inner.trimmingCharacters(in: .whitespaces).lowercased()
+          if trimmedInner == "br" || trimmedInner == "br/" || trimmedInner == "br /" {
+            out.append("\n")
+            i = text.index(after: close)
+            continue
+          }
+          if isLikelyHtmlOrVttTag(inner) {
+            i = text.index(after: close)
+            continue
+          }
+        }
+      } else if ch == "{" {
+        let afterOpen = text.index(after: i)
+        if afterOpen < text.endIndex,
+           text[afterOpen] == "\\",
+           let close = findDelimitedClose(in: text, from: text.index(after: afterOpen), openChar: "{", closeChar: "}")
+        {
           i = text.index(after: close)
           continue
         }
-        if isLikelyHtmlOrVttTag(inner) {
-          i = text.index(after: close)
-          continue
-        }
-      } else if ch == "{",
-                text.index(after: i) < text.endIndex,
-                text[text.index(after: i)] == "\\",
-                let close = text[text.index(after: i)...].firstIndex(of: "}")
-      {
-        i = text.index(after: close)
-        continue
       }
       out.append(ch)
       i = text.index(after: i)
     }
     return decodeHtmlEntities(out)
+  }
+
+  /// Linear bounded delimiter search: scans forward until `closeChar`, aborting immediately if
+  /// another `openChar` appears first so unclosed delimiters (`<a><a>...`, `{\\{\\...`) stay strictly O(N).
+  private static func findDelimitedClose(
+    in text: String,
+    from start: String.Index,
+    openChar: Character,
+    closeChar: Character
+  ) -> String.Index? {
+    var j = start
+    while j < text.endIndex {
+      let ch = text[j]
+      if ch == closeChar { return j }
+      if ch == openChar { return nil }
+      j = text.index(after: j)
+    }
+    return nil
   }
 
   private static func isLikelyHtmlOrVttTag(_ inner: String) -> Bool {
@@ -500,12 +588,30 @@ public enum ExternalSubtitleParser {
     out.reserveCapacity(input.count)
     var i = input.startIndex
     while i < input.endIndex {
-      if input[i] == "&", let semi = input[input.index(after: i)...].firstIndex(of: ";") {
-        let entity = String(input[input.index(after: i)..<semi])
-        if let decoded = decodeSingleEntity(entity) {
-          out.append(decoded)
-          i = input.index(after: semi)
-          continue
+      if input[i] == "&" {
+        let afterAmp = input.index(after: i)
+        var j = afterAmp
+        var steps = 0
+        var semi: String.Index?
+        while j < input.endIndex && steps < 16 {
+          let ch = input[j]
+          if ch == ";" {
+            semi = j
+            break
+          }
+          if ch == "&" || ch.isWhitespace {
+            break
+          }
+          j = input.index(after: j)
+          steps += 1
+        }
+        if let semi {
+          let entity = String(input[afterAmp..<semi])
+          if let decoded = decodeSingleEntity(entity) {
+            out.append(decoded)
+            i = input.index(after: semi)
+            continue
+          }
         }
       }
       out.append(input[i])

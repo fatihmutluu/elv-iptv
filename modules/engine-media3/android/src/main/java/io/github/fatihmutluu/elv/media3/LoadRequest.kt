@@ -1,11 +1,25 @@
 package io.github.fatihmutluu.elv.media3
 
 import androidx.media3.common.MimeTypes
+import java.io.ByteArrayOutputStream
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 internal const val MAX_EXTERNAL_SUBTITLE_URI_LENGTH = 4_096
 internal const val EXTERNAL_SUBTITLE_ID_PREFIX = "ext:"
+
+internal val ALLOWED_LOCAL_SUBTITLE_EXTENSIONS = setOf(
+  "srt",
+  "vtt",
+  "webvtt",
+  "ass",
+  "ssa",
+  "ttml",
+  "dfxp",
+  "sub",
+  "xml",
+)
 
 private const val MAX_EXTERNAL_SUBTITLE_ID_LENGTH = 256
 private const val MAX_EXTERNAL_SUBTITLE_LABEL_LENGTH = 128
@@ -67,9 +81,76 @@ internal fun isAllowedPlaybackUrl(url: String): Boolean {
   return (parsed.scheme == "http" || parsed.scheme == "https") && parsed.host.isNotEmpty()
 }
 
+/** True only when [path] ends with an allowlisted subtitle file extension (case-insensitive). */
+internal fun hasAllowedLocalSubtitleExtension(path: String): Boolean {
+  if (path.isEmpty() || path.endsWith('/') || path.endsWith('\\')) return false
+  val lastSep = maxOf(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  val fileName = if (lastSep < 0) path else path.substring(lastSep + 1)
+  val dot = fileName.lastIndexOf('.')
+  if (dot <= 0 || dot + 1 >= fileName.length) return false
+  val ext = fileName.substring(dot + 1).lowercase(Locale.ROOT)
+  return ext in ALLOWED_LOCAL_SUBTITLE_EXTENSIONS
+}
+
+private fun hexDigit(c: Char): Int = when (c) {
+  in '0'..'9' -> c - '0'
+  in 'a'..'f' -> c - 'a' + 10
+  in 'A'..'F' -> c - 'A' + 10
+  else -> -1
+}
+
+private fun percentDecodeUtf8(raw: String): String? {
+  if ('%' !in raw) return raw
+  val bytes = ByteArrayOutputStream(raw.length)
+  var i = 0
+  while (i < raw.length) {
+    val c = raw[i]
+    if (c == '%') {
+      if (i + 2 >= raw.length) return null
+      val hi = hexDigit(raw[i + 1])
+      val lo = hexDigit(raw[i + 2])
+      if (hi < 0 || lo < 0) return null
+      bytes.write((hi shl 4) or lo)
+      i += 3
+    } else {
+      val chunk = c.toString().toByteArray(StandardCharsets.UTF_8)
+      bytes.write(chunk)
+      i += 1
+    }
+  }
+  return String(bytes.toByteArray(), StandardCharsets.UTF_8)
+}
+
+private fun isWindowsLocalDrivePath(s: String): Boolean {
+  if (s.length < 3 || !((s[0] in 'A'..'Z') || (s[0] in 'a'..'z'))) return false
+  if (s[1] == ':' && (s[2] == '/' || s[2] == '\\')) return true
+  return s.length >= 5 &&
+    s[1] == '%' &&
+    s[2] == '3' &&
+    (s[3] == 'a' || s[3] == 'A') &&
+    (s[4] == '/' || s[4] == '\\' || s.startsWith("%5C", startIndex = 4, ignoreCase = true) || s.startsWith("%2F", startIndex = 4, ignoreCase = true))
+}
+
+private fun isAllowedLocalSubtitleFileUri(trimmed: String): Boolean {
+  val afterScheme = trimmed.substring(7)
+  val rawPath = when {
+    afterScheme.startsWith('/') -> afterScheme
+    afterScheme.startsWith("localhost/", ignoreCase = true) -> afterScheme.substring("localhost".length)
+    isWindowsLocalDrivePath(afterScheme) -> afterScheme
+    else -> return false
+  }
+  if (rawPath.isEmpty() || '?' in rawPath || '#' in rawPath) return false
+  val decoded = percentDecodeUtf8(rawPath) ?: return false
+  if (decoded.isEmpty() || decoded.any { it.code <= 0x1f || it.code == 0x7f }) return false
+  if (decoded.split('/', '\\').any { it == ".." }) return false
+  return hasAllowedLocalSubtitleExtension(decoded)
+}
+
 /**
  * Returns `true` only when [uri] is a bounded (`<= 4096` chars), control-char-free external subtitle URI using
  * an allowlisted scheme (`http://`, `https://`, `file://`, or `content://`) (`#308`).
+ * Local `file://` URIs additionally reject `..` path traversal, query/fragment spoofing, remote authorities, and
+ * non-allowlisted file extensions.
  */
 internal fun isAllowedExternalSubtitleUri(uri: String): Boolean {
   if (uri.isEmpty() || uri.length > MAX_EXTERNAL_SUBTITLE_URI_LENGTH) return false
@@ -81,7 +162,8 @@ internal fun isAllowedExternalSubtitleUri(uri: String): Boolean {
   val scheme = trimmed.substring(0, schemeEnd).lowercase(Locale.ROOT)
   return when (scheme) {
     "http", "https" -> isAllowedPlaybackUrl(trimmed)
-    "file", "content" -> trimmed.substring(schemeEnd + 3).trim().isNotEmpty()
+    "file" -> isAllowedLocalSubtitleFileUri(trimmed)
+    "content" -> trimmed.substring(schemeEnd + 3).trim().isNotEmpty()
     else -> false
   }
 }

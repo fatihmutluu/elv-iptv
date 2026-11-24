@@ -5,17 +5,23 @@ import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.Format
+import androidx.media3.common.Timeline
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.RendererCapabilities
+import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.text.TextRenderer
+import androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.trackselection.ExoTrackSelection
 import androidx.media3.exoplayer.trackselection.MappingTrackSelector
+import androidx.media3.exoplayer.upstream.BandwidthMeter
 import java.util.LinkedHashMap
+
+internal const val SECONDARY_TEXT_RENDERER_NAME = "SecondaryTextRenderer"
 
 /**
  * Secondary `C.TRACK_TYPE_TEXT` renderer delegating decoding to a dedicated Media3 [TextRenderer] while advertising
@@ -29,6 +35,8 @@ internal class SecondaryTextRenderer(
   private val delegate: TextRenderer = TextRenderer(output, outputLooper),
 ) : Renderer by delegate {
   private val secondaryCapabilities = object : RendererCapabilities by delegate.capabilities {
+    override fun getName(): String = SECONDARY_TEXT_RENDERER_NAME
+
     override fun supportsFormat(format: Format): Int {
       val raw = delegate.capabilities.supportsFormat(format)
       return if (RendererCapabilities.getFormatSupport(raw) == C.FORMAT_HANDLED) {
@@ -39,28 +47,73 @@ internal class SecondaryTextRenderer(
     }
   }
 
-  override fun getName(): String = "SecondaryTextRenderer"
+  override fun getName(): String = SECONDARY_TEXT_RENDERER_NAME
 
   override fun getCapabilities(): RendererCapabilities = secondaryCapabilities
 }
 
+@OptIn(UnstableApi::class)
+private class DualTrackSelectionFactory(
+  private val delegate: ExoTrackSelection.Factory = AdaptiveTrackSelection.Factory(),
+) : ExoTrackSelection.Factory {
+  var pendingSecondaryIndex: Int = -1
+  var pendingSecondaryDefinition: ExoTrackSelection.Definition? = null
+  var pendingSuppressedPrimaryIndices: IntArray = IntArray(0)
+
+  fun clearPending() {
+    pendingSecondaryIndex = -1
+    pendingSecondaryDefinition = null
+    pendingSuppressedPrimaryIndices = IntArray(0)
+  }
+
+  override fun createTrackSelections(
+    definitions: Array<ExoTrackSelection.Definition?>,
+    bandwidthMeter: BandwidthMeter,
+    mediaPeriodId: MediaSource.MediaPeriodId,
+    timeline: Timeline,
+  ): Array<ExoTrackSelection?> {
+    for (idx in pendingSuppressedPrimaryIndices) {
+      if (idx in definitions.indices) definitions[idx] = null
+    }
+    val secIdx = pendingSecondaryIndex
+    val secDef = pendingSecondaryDefinition
+    if (secIdx in definitions.indices && secDef != null) {
+      definitions[secIdx] = secDef
+    }
+    clearPending()
+    return delegate.createTrackSelections(definitions, bandwidthMeter, mediaPeriodId, timeline)
+  }
+}
+
 /**
  * `DefaultTrackSelector` subclass enabling simultaneous dual subtitle rendering (`#402`):
- * - Standard primary subtitle selection continues uninterrupted on text renderer 0.
- * - When a [secondaryTarget] is set and distinct from the active primary track, explicitly binds text renderer 1
- *   ([SecondaryTextRenderer]) to the matching `(TrackGroup, trackIndex)` in `selectAllTracks`.
- * - When [primaryTextDisabled] is true while a secondary track is active, suppresses text renderer 0 so only the
- *   secondary track renders.
+ * - Standard primary subtitle selection continues uninterrupted on primary `C.TRACK_TYPE_TEXT` renderers.
+ * - Explicitly identifies [SecondaryTextRenderer] by renderer name or registered renderer index (never assuming
+ *   `textRenderers[1]`) and binds it to the matching `(TrackGroup, trackIndex)` in `selectAllTracks` and through
+ *   [DualTrackSelectionFactory] so primary `TrackSelectionOverride` passes never wipe secondary selection.
+ * - When [primaryTextDisabled] is true while a secondary track is active, suppresses all non-secondary text renderers
+ *   so only the secondary track renders.
  */
 @OptIn(UnstableApi::class)
-internal class DualSubtitleTrackSelector(
+internal class DualSubtitleTrackSelector private constructor(
   context: Context,
-) : DefaultTrackSelector(context) {
+  private val selectionFactory: DualTrackSelectionFactory,
+) : DefaultTrackSelector(context, selectionFactory) {
+  constructor(context: Context) : this(context, DualTrackSelectionFactory())
+
   @Volatile
   private var secondaryTarget: TrackChoice? = null
 
   @Volatile
   private var primaryTextDisabled: Boolean = false
+
+  @Volatile
+  private var configuredSecondaryRendererIndex: Int = -1
+
+  /** Records the exact renderer index of [SecondaryTextRenderer] from [PlayerFactory] as a fallback identifier. */
+  fun setSecondaryRendererIndex(index: Int?) {
+    configuredSecondaryRendererIndex = index ?: -1
+  }
 
   /** Updates the desired secondary embedded/merged subtitle target and invalidates selection. */
   fun setSecondarySelection(target: TrackChoice?, primaryDisabled: Boolean) {
@@ -77,6 +130,7 @@ internal class DualSubtitleTrackSelector(
     rendererMixedMimeTypeAdaptationSupport: IntArray,
     params: Parameters,
   ) {
+    selectionFactory.clearPending()
     super.selectAllTracks(
       definitions,
       mappedTrackInfo,
@@ -84,26 +138,54 @@ internal class DualSubtitleTrackSelector(
       rendererMixedMimeTypeAdaptationSupport,
       params,
     )
-    val textRenderers = ArrayList<Int>(2)
+    val textRenderers = ArrayList<Int>(3)
+    var namedSecondaryIdx = -1
     for (i in 0 until mappedTrackInfo.rendererCount) {
       if (mappedTrackInfo.getRendererType(i) == C.TRACK_TYPE_TEXT) {
         textRenderers.add(i)
+        if (namedSecondaryIdx < 0 && mappedTrackInfo.getRendererName(i) == SECONDARY_TEXT_RENDERER_NAME) {
+          namedSecondaryIdx = i
+        }
       }
     }
-    if (textRenderers.size < 2) return
-    val primaryIdx = textRenderers[0]
-    val secondaryIdx = textRenderers[1]
+    val secondaryIdx = when {
+      namedSecondaryIdx >= 0 -> namedSecondaryIdx
+      configuredSecondaryRendererIndex in 0 until mappedTrackInfo.rendererCount &&
+        mappedTrackInfo.getRendererType(configuredSecondaryRendererIndex) == C.TRACK_TYPE_TEXT ->
+        configuredSecondaryRendererIndex
+      else -> -1
+    }
+    if (secondaryIdx < 0) return
+
+    val primaryCandidates = textRenderers.filter { it != secondaryIdx }
+    if (primaryCandidates.isEmpty()) return
 
     if (primaryTextDisabled) {
-      definitions[primaryIdx] = null
+      selectionFactory.pendingSuppressedPrimaryIndices = primaryCandidates.toIntArray()
+      for (idx in primaryCandidates) {
+        definitions[idx] = null
+      }
     }
 
     val wanted = secondaryTarget ?: return
-    val primaryDef = definitions[primaryIdx]
-    val primaryGroups = mappedTrackInfo.getTrackGroups(primaryIdx)
-    val matched = findSecondaryDefinition(primaryGroups, wanted, primaryDef)
+    var groupOffset = 0
+    var matched: ExoTrackSelection.Definition? = null
+    for (r in 0 until mappedTrackInfo.rendererCount) {
+      val groups = mappedTrackInfo.getTrackGroups(r)
+      if (matched == null && r in primaryCandidates && groups.length > 0) {
+        matched = findSecondaryDefinition(
+          groups = groups,
+          wanted = wanted,
+          primaryDef = definitions[r],
+          groupIndexOffset = groupOffset,
+        )
+      }
+      groupOffset += groups.length
+    }
     if (matched != null) {
       definitions[secondaryIdx] = matched
+      selectionFactory.pendingSecondaryIndex = secondaryIdx
+      selectionFactory.pendingSecondaryDefinition = matched
     }
   }
 
@@ -111,7 +193,11 @@ internal class DualSubtitleTrackSelector(
     groups: androidx.media3.exoplayer.source.TrackGroupArray,
     wanted: TrackChoice,
     primaryDef: ExoTrackSelection.Definition?,
+    groupIndexOffset: Int = 0,
   ): ExoTrackSelection.Definition? {
+    var exactCompatibleIndexMatch: ExoTrackSelection.Definition? = null
+    var globalIndexMatch: ExoTrackSelection.Definition? = null
+    var localIndexMatch: ExoTrackSelection.Definition? = null
     var langLabelMatch: ExoTrackSelection.Definition? = null
     var langMatch: ExoTrackSelection.Definition? = null
     var labelMatch: ExoTrackSelection.Definition? = null
@@ -132,6 +218,19 @@ internal class DualSubtitleTrackSelector(
         val lang = normalizeLang(format.language) ?: extractLanguageFromLabel(label)
         val langMatches = wanted.language != null && sameLanguage(lang, wanted.language)
         val labelMatches = wanted.label != null && label == wanted.label
+        val globalId = "${groupIndexOffset + gIdx}:$tIdx"
+        val localId = "$gIdx:$tIdx"
+        if (globalId == wanted.id) {
+          val candidate = ExoTrackSelection.Definition(group, tIdx)
+          if (globalIndexMatch == null) globalIndexMatch = candidate
+          val langOk = wanted.language == null || langMatches
+          val labelOk = wanted.label == null || labelMatches
+          if (langOk && labelOk && exactCompatibleIndexMatch == null) {
+            exactCompatibleIndexMatch = candidate
+          }
+        } else if (localId == wanted.id && localIndexMatch == null) {
+          localIndexMatch = ExoTrackSelection.Definition(group, tIdx)
+        }
         if (langMatches && labelMatches && langLabelMatch == null) {
           langLabelMatch = ExoTrackSelection.Definition(group, tIdx)
         } else if (langMatches && langMatch == null) {
@@ -141,7 +240,7 @@ internal class DualSubtitleTrackSelector(
         }
       }
     }
-    return langLabelMatch ?: langMatch ?: labelMatch
+    return exactCompatibleIndexMatch ?: langLabelMatch ?: langMatch ?: labelMatch ?: globalIndexMatch ?: localIndexMatch
   }
 
   private fun isSameAsPrimary(

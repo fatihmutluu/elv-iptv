@@ -75,6 +75,7 @@ final class AetherSurfaceView: ExpoView {
   private(set) var currentOsdVisible = true
   private var propSubtitleStyle: UserSubtitleStyleOverride?
   private var engineSubtitleStyle: UserSubtitleStyleOverride?
+  private var preferEngineSubtitleStyle = false
   #if os(iOS)
   var keyboardMapper = HardwareKeyboardMapper()
   private var playbackKeyCommands: [UIKeyCommand] = []
@@ -222,6 +223,9 @@ final class AetherSurfaceView: ExpoView {
     }
     if let previous = boundEngine {
       wantsScreenOn = false
+      engineSubtitleStyle = nil
+      preferEngineSubtitleStyle = false
+      applyEffectiveSubtitleStyle()
       subtitleOverlayView.clear()
       previous.withDriver { driver in
         driver.unbindSurface(self)
@@ -241,7 +245,8 @@ final class AetherSurfaceView: ExpoView {
       }
     } else {
       engineSubtitleStyle = nil
-      subtitleOverlayView.updateSubtitleStyle(propSubtitleStyle)
+      preferEngineSubtitleStyle = false
+      applyEffectiveSubtitleStyle()
       subtitleOverlayView.clear()
       shutterView.isHidden = false
       wantsScreenOn = false
@@ -290,15 +295,26 @@ final class AetherSurfaceView: ExpoView {
 
   @MainActor
   func setSubtitleStyle(_ style: UserSubtitleStyleOverride?) {
+    if preferEngineSubtitleStyle && style == propSubtitleStyle {
+      return
+    }
     propSubtitleStyle = style
-    subtitleOverlayView.updateSubtitleStyle(propSubtitleStyle ?? engineSubtitleStyle)
+    preferEngineSubtitleStyle = false
+    applyEffectiveSubtitleStyle()
   }
 
   @MainActor
   func applySubtitleStyle(_ style: UserSubtitleStyleOverride?, from engine: EngineObject?) {
     guard let engine, boundEngine === engine else { return }
     engineSubtitleStyle = style
-    subtitleOverlayView.updateSubtitleStyle(propSubtitleStyle ?? engineSubtitleStyle)
+    preferEngineSubtitleStyle = true
+    applyEffectiveSubtitleStyle()
+  }
+
+  @MainActor
+  private func applyEffectiveSubtitleStyle() {
+    let resolved = preferEngineSubtitleStyle ? engineSubtitleStyle : (propSubtitleStyle ?? engineSubtitleStyle)
+    subtitleOverlayView.updateSubtitleStyle(resolved)
   }
 
   @MainActor
@@ -335,7 +351,8 @@ final class AetherSurfaceView: ExpoView {
     guard engine == nil || boundEngine === engine else { return }
     boundEngine = nil
     engineSubtitleStyle = nil
-    subtitleOverlayView.updateSubtitleStyle(propSubtitleStyle)
+    preferEngineSubtitleStyle = false
+    applyEffectiveSubtitleStyle()
     wantsScreenOn = false
     subtitleOverlayView.clear()
     shutterView.isHidden = false

@@ -52,15 +52,23 @@ class Media3Engine : SharedObject {
   private lateinit var tracksBridge: TrackSelectorBridge
   private lateinit var mediaSessionController: MediaSessionController
 
+  private val assOverlay: AssOverlayBridge
+
   constructor(context: Context, appContext: AppContext, onDisposed: (Media3Engine) -> Unit) : super(appContext) {
     this.hasAppContext = true
     this.onDisposed = onDisposed
+    this.assOverlay = AssOverlayBridge()
     initEngine(context)
   }
 
-  internal constructor(context: Context, onDisposed: (Media3Engine) -> Unit = {}) : super() {
+  internal constructor(
+    context: Context,
+    onDisposed: (Media3Engine) -> Unit = {},
+    assOverlay: AssOverlayBridge = AssOverlayBridge(),
+  ) : super() {
     this.hasAppContext = false
     this.onDisposed = onDisposed
+    this.assOverlay = assOverlay
     initEngine(context)
   }
 
@@ -79,7 +87,6 @@ class Media3Engine : SharedObject {
   private val subtitleTick = Runnable { refreshDelayedSubtitles() }
   private val fence = PrepareFence()
   private val surfaces = SurfaceController()
-  private val assOverlay = AssOverlayBridge()
   private val secondarySubs = SecondarySubtitleController(onSecondaryCues = surfaces::onSecondaryCues)
   private val secondaryTextOutput = TextOutput { cueGroup ->
     val current = player ?: return@TextOutput
@@ -370,7 +377,6 @@ class Media3Engine : SharedObject {
       tracksBridge.onPrepareReuse()
       clearSubtitles(resetDelay = false)
       assOverlay.clearForZap()
-      surfaces.onAssOverlayHandle(null)
       tearDownTimeShiftCache()
       reporter.end()
       beginGeneration()
@@ -489,12 +495,16 @@ class Media3Engine : SharedObject {
     beginGeneration()
   }
 
-  private fun clearSubtitles(resetDelay: Boolean) {
-    handler.removeCallbacks(subtitleTick)
+  private fun clearPrimarySubtitles(resetDelay: Boolean) {
     if (resetDelay) subtitleCueBuffer.reset() else subtitleCueBuffer.clearCues()
-    secondarySubs.clearSecondaryCues(resetDelay = resetDelay)
     lastDeliveredCues = null
     surfaces.clearCues()
+  }
+
+  private fun clearSubtitles(resetDelay: Boolean) {
+    handler.removeCallbacks(subtitleTick)
+    clearPrimarySubtitles(resetDelay = resetDelay)
+    secondarySubs.clearSecondaryCues(resetDelay = resetDelay)
   }
 
   private fun applyResolvedSubtitleCues(current: ExoPlayer) {
@@ -583,7 +593,7 @@ class Media3Engine : SharedObject {
     tracksBridge = TrackSelectorBridge(
       isActivePlayer = { candidate -> candidate === player && fence.acceptsPlayer(candidate) },
       onTracks = { snapshot -> if (request != null) sendEvent(mapOf("type" to "tracks", "tracks" to snapshot)) },
-      onClearCues = { clearSubtitles(resetDelay = false) },
+      onClearCues = { clearPrimarySubtitles(resetDelay = false) },
       captioningEnabled = { isSystemCaptioningEnabled(context) },
       onClearSecondaryCues = { secondarySubs.clearSecondaryCues(resetDelay = false) },
       extraExternalSubtitles = secondarySubs::dynamicExternalTrackSnapshots,
@@ -725,7 +735,7 @@ class Media3Engine : SharedObject {
     bufferPreset: BufferPreset = BufferPreset.AUTO, decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
   ): ExoPlayer {
     val old = player; player = null
-    surfaces.onAssOverlayHandle(null)
+    surfaces.detachAssOverlaySync(DETACH_TIMEOUT_MS)
     assOverlay.release()
     if (old != null) {
       old.isScrubbingModeEnabled = false
@@ -745,9 +755,13 @@ class Media3Engine : SharedObject {
   }
 
   private fun releasePlayer() {
-    val old = player ?: run { assOverlay.release(); return }
+    val old = player ?: run {
+      surfaces.detachAssOverlaySync(DETACH_TIMEOUT_MS)
+      assOverlay.release()
+      return
+    }
     player = null
-    surfaces.onAssOverlayHandle(null)
+    surfaces.detachAssOverlaySync(DETACH_TIMEOUT_MS)
     assOverlay.release()
     old.isScrubbingModeEnabled = false
     old.removeListener(reporter); old.removeAnalyticsListener(reporter); old.removeListener(pictures)

@@ -4,16 +4,16 @@ const LRI = '\u2066';
 const FSI = '\u2068';
 const LRM = 0x200e;
 const RLM = 0x200f;
+const ALM = 0x061c;
 
 const NUMERIC_PARENS_RE = /^[\d\s\-–—/.,:+]+$/;
-const BRACKET_SDH_RE = /\[[^\]]*\]/g;
-const PAREN_SDH_RE = /\(([^)]*)\)/g;
 const SPEAKER_PREFIX_RE =
   /^(?:([-–—])\s+)?([A-Z][A-Z0-9.'#-]{0,20}(?:\s+[A-Z0-9][A-Z0-9.'#-]{0,20}){0,2}):(?:\s+|$)/;
 const LONE_DASH_RE = /^[-–—]$/;
 const MULTI_SPACE_RE = /[ \t]{2,}/g;
 
 function isRtlScriptCodePoint(cp: number): boolean {
+  if (cp < 0x05be) return false;
   // Hebrew
   if (
     cp === 0x05be ||
@@ -74,8 +74,9 @@ function isRtlScriptCodePoint(cp: number): boolean {
 }
 
 function isStrongLtrCodePoint(cp: number): boolean {
-  if (cp === LRM) return true;
   if ((cp >= 0x0041 && cp <= 0x005a) || (cp >= 0x0061 && cp <= 0x007a)) return true;
+  if (cp < 0x00c0) return false;
+  if (cp === LRM) return true;
   if (
     (cp >= 0x00c0 && cp <= 0x00d6) ||
     (cp >= 0x00d8 && cp <= 0x00f6) ||
@@ -99,7 +100,7 @@ function firstStrongDirection(line: string): 'rtl' | 'ltr' | null {
     const cp = line.codePointAt(i);
     if (cp === undefined) break;
     i += cp > 0xffff ? 2 : 1;
-    if (cp === RLM || isRtlScriptCodePoint(cp)) return 'rtl';
+    if (cp === RLM || cp === ALM || isRtlScriptCodePoint(cp)) return 'rtl';
     if (isStrongLtrCodePoint(cp)) return 'ltr';
   }
   return null;
@@ -154,13 +155,47 @@ export function isolateBidiLines(text: string): string {
   return changed ? lines.join('\n') : text;
 }
 
+function stripBracketSdh(line: string): string {
+  let open = line.indexOf('[');
+  if (open === -1) return line;
+  const parts: string[] = [];
+  let pos = 0;
+  while (open !== -1) {
+    const close = line.indexOf(']', open + 1);
+    if (close === -1) break;
+    if (open > pos) parts.push(line.slice(pos, open));
+    pos = close + 1;
+    open = line.indexOf('[', pos);
+  }
+  if (pos === 0) return line;
+  if (pos < line.length) parts.push(line.slice(pos));
+  return parts.join('');
+}
+
+function stripParenSdh(line: string): string {
+  let open = line.indexOf('(');
+  if (open === -1) return line;
+  const parts: string[] = [];
+  let pos = 0;
+  while (open !== -1) {
+    const close = line.indexOf(')', open + 1);
+    if (close === -1) break;
+    const inner = line.slice(open + 1, close).trim();
+    if (inner.length > 0 && NUMERIC_PARENS_RE.test(inner)) {
+      parts.push(line.slice(pos, close + 1));
+    } else if (open > pos) {
+      parts.push(line.slice(pos, open));
+    }
+    pos = close + 1;
+    open = line.indexOf('(', pos);
+  }
+  if (pos === 0) return line;
+  if (pos < line.length) parts.push(line.slice(pos));
+  return parts.join('');
+}
+
 function stripSdhSingleLine(line: string): string {
-  let cleaned = line.replace(BRACKET_SDH_RE, '');
-  cleaned = cleaned.replace(PAREN_SDH_RE, (match, inner: string) => {
-    const trimmed = inner.trim();
-    if (trimmed.length > 0 && NUMERIC_PARENS_RE.test(trimmed)) return match;
-    return '';
-  });
+  let cleaned = stripParenSdh(stripBracketSdh(line));
   cleaned = cleaned.replace(MULTI_SPACE_RE, ' ').trim();
 
   const speakerMatch = SPEAKER_PREFIX_RE.exec(cleaned);

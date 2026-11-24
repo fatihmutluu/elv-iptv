@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -106,7 +106,10 @@ async function startHttpServer(
 }
 
 function makeTempDir(prefix: string): string {
-  const dir = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`);
+  const dir = join(
+    realpathSync(tmpdir()),
+    `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+  );
   mkdirSync(dir, { recursive: true });
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
@@ -192,21 +195,27 @@ describe('#308 Isolated external subtitle fetcher & local file validation', () =
     expect(originHeaders[0]?.authorization).toBeUndefined();
     expect(originHeaders[0]?.cookie).toBeUndefined();
 
-    // 2. Cross-origin redirect strips Authorization and Cookie while preserving non-auth headers
+    // 2. Cross-origin redirect strips Authorization, Cookie, X-Api-Key, X-Auth-Token while preserving non-auth headers
     const redirectedPath = await session.resolveTrack({
       id: 'sub-2',
       uri: `${origin.baseUrl}/redirect.srt`,
       headers: {
         Authorization: 'Bearer sub-secret',
         Cookie: 'sub_sid=abc',
+        'X-Api-Key': 'api-secret',
+        'X-Auth-Token': 'auth-secret',
         'X-Sub-Trace': 'keep-me',
       },
     });
     expect(existsSync(redirectedPath)).toBe(true);
     expect(originHeaders[1]?.authorization).toBe('Bearer sub-secret');
     expect(originHeaders[1]?.cookie).toBe('sub_sid=abc');
+    expect(originHeaders[1]?.['x-api-key']).toBe('api-secret');
+    expect(originHeaders[1]?.['x-auth-token']).toBe('auth-secret');
     expect(targetHeaders[0]?.authorization).toBeUndefined();
     expect(targetHeaders[0]?.cookie).toBeUndefined();
+    expect(targetHeaders[0]?.['x-api-key']).toBeUndefined();
+    expect(targetHeaders[0]?.['x-auth-token']).toBeUndefined();
     expect(targetHeaders[0]?.['x-sub-trace']).toBe('keep-me');
 
     // 3. Responses exceeding 4 MiB are rejected
@@ -247,6 +256,26 @@ describe('#308 Isolated external subtitle fetcher & local file validation', () =
     await expect(validateLocalSubtitlePath(pathToFileURL(validSrt).href, 8)).rejects.toThrow(
       /size|limit/i,
     );
+    // Reject symlinks whose realpath target violates the subtitle extension allowlist (#308)
+    await expect(
+      validateLocalSubtitlePath(pathToFileURL(validSrt).href, undefined, {
+        realpath: async () => badExt,
+        lstat: async () => ({ isFile: () => true, size: 16 }),
+      }),
+    ).rejects.toThrow(/extension/i);
+    const evilLink = join(dir, 'evil-link.srt');
+    let symlinkCreated = false;
+    try {
+      symlinkSync(badExt, evilLink, 'file');
+      symlinkCreated = true;
+    } catch {
+      // OS lacks unprivileged symlink permission (e.g. Windows without Developer Mode)
+    }
+    if (symlinkCreated) {
+      await expect(validateLocalSubtitlePath(pathToFileURL(evilLink).href)).rejects.toThrow(
+        /extension/i,
+      );
+    }
 
     // cleanup() MUST NEVER delete user's own local subtitle file
     session.cleanup();
@@ -445,71 +474,23 @@ describe('#32 Live subtitle styling & sandboxed native file picker', () => {
       mimeType: 'text/vtt',
       headers: { 'X-Sub': '1' },
     };
-    expect(
-      isPlayerCommandMessage({
-        engineId: 'e1',
-        command: { name: 'addExternalSubtitle', attempt: 1, track: validTrack },
-      }),
-    ).toBe(true);
-    expect(
-      isPlayerCommandMessage({
-        engineId: 'e1',
-        command: { name: 'setSubtitleStyle', style: DEFAULT_SUBTITLE_STYLE },
-      }),
-    ).toBe(true);
+    const msg = (command: unknown) => ({ engineId: 'e1', command });
+    const addExt = (track: unknown, extra?: object) =>
+      msg({ name: 'addExternalSubtitle', attempt: 1, track, ...extra });
+    const styleCmd = (style: unknown, extra?: object) =>
+      msg({ name: 'setSubtitleStyle', style, ...extra });
+    expect(isPlayerCommandMessage(addExt(validTrack))).toBe(true);
+    expect(isPlayerCommandMessage(styleCmd(DEFAULT_SUBTITLE_STYLE))).toBe(true);
 
     // Reject extra keys, bad schemes, control chars, invalid style values
     const invalidMessages: unknown[] = [
-      {
-        engineId: 'e1',
-        command: { name: 'addExternalSubtitle', attempt: 1, track: validTrack, extra: true },
-      },
-      {
-        engineId: 'e1',
-        command: {
-          name: 'addExternalSubtitle',
-          attempt: 1,
-          track: { ...validTrack, unexpected: 'x' },
-        },
-      },
-      {
-        engineId: 'e1',
-        command: {
-          name: 'addExternalSubtitle',
-          attempt: 1,
-          track: { ...validTrack, uri: 'javascript:alert(1)' },
-        },
-      },
-      {
-        engineId: 'e1',
-        command: {
-          name: 'addExternalSubtitle',
-          attempt: 1,
-          track: { ...validTrack, label: 'Bad\nLabel' },
-        },
-      },
-      {
-        engineId: 'e1',
-        command: {
-          name: 'setSubtitleStyle',
-          style: { ...DEFAULT_SUBTITLE_STYLE, extra: 1 },
-        },
-      },
-      {
-        engineId: 'e1',
-        command: {
-          name: 'setSubtitleStyle',
-          style: { ...DEFAULT_SUBTITLE_STYLE, fontSize: 'huge' },
-        },
-      },
-      {
-        engineId: 'e1',
-        command: {
-          name: 'setSubtitleStyle',
-          style: DEFAULT_SUBTITLE_STYLE,
-          extra: 'nope',
-        },
-      },
+      addExt(validTrack, { extra: true }),
+      addExt({ ...validTrack, unexpected: 'x' }),
+      addExt({ ...validTrack, uri: 'javascript:alert(1)' }),
+      addExt({ ...validTrack, label: 'Bad\nLabel' }),
+      styleCmd({ ...DEFAULT_SUBTITLE_STYLE, extra: 1 }),
+      styleCmd({ ...DEFAULT_SUBTITLE_STYLE, fontSize: 'huge' }),
+      styleCmd(DEFAULT_SUBTITLE_STYLE, { extra: 'nope' }),
     ];
     for (const bad of invalidMessages) expect(isPlayerCommandMessage(bad)).toBe(false);
 
@@ -745,5 +726,73 @@ describe('#402 Simultaneous dual subtitles polish', () => {
     };
     const bridge = createPlayerBridge(badIpc);
     await expect(bridge.pickSubtitleFile?.()).rejects.toThrow(/reply/i);
+  });
+
+  it('separates primary sub-pos from secondary-sub-pos when verticalPosition is top and retains mid-playback external tracks across retry()', async () => {
+    const topStyle: SubtitleStyleConfig = { ...DEFAULT_SUBTITLE_STYLE, verticalPosition: 'top' };
+    expect(subtitleStyleLoadOptions(topStyle, true)['sub-pos']).toBe('24');
+    expect(subtitleStyleCommands(topStyle, true)).toContainEqual(['set_property', 'sub-pos', 24]);
+    expect(subtitleStyleCommands(topStyle, true)).toContainEqual([
+      'set_property',
+      'secondary-sub-pos',
+      10,
+    ]);
+
+    const subServer = await startHttpServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/x-subrip' });
+      res.end('1\n00:00:01,000 --> 00:00:02,000\nRetry cue\n');
+    });
+    const { fake, engine, events } = await setupEngine();
+    engine.load({
+      attempt: 1,
+      url: URL_STREAM,
+      headers: {},
+      kind: 'vod',
+      options: { subtitleStyle: topStyle },
+    });
+    await vi.waitFor(() => expect(latestTracks(events)?.selectedSubtitleId).toBe('s:1'));
+    expect(fake.sent.find((c) => c[0] === 'loadfile')?.[4]).toMatchObject({ 'sub-pos': '12' });
+
+    // Enabling secondary subtitle while primary is 'top' separates sub-pos (24) from secondary-sub-pos (10)
+    const beforeDual = fake.sent.length;
+    engine.selectSecondarySubtitleTrack?.(2, 's:2');
+    await vi.waitFor(() => {
+      const after = fake.sent.slice(beforeDual);
+      expect(after).toContainEqual(['set_property', 'secondary-sid', 2]);
+      expect(after).toContainEqual(['set_property', 'secondary-sub-pos', 10]);
+      expect(after).toContainEqual(['set_property', 'sub-pos', 24]);
+    });
+
+    // Toggling setSubtitleStyle to 'top' while secondary is active preserves separation (24 vs 10)
+    engine.setSubtitleStyle?.({ ...DEFAULT_SUBTITLE_STYLE, verticalPosition: 'bottom' });
+    const beforeReTop = fake.sent.length;
+    engine.setSubtitleStyle?.(topStyle);
+    await vi.waitFor(() => {
+      const after = fake.sent.slice(beforeReTop);
+      expect(after).toContainEqual(['set_property', 'sub-pos', 24]);
+      expect(after).toContainEqual(['set_property', 'secondary-sub-pos', 10]);
+    });
+
+    // Clearing secondary subtitle restores primary sub-pos to 12
+    const beforeClear = fake.sent.length;
+    engine.selectSecondarySubtitleTrack?.(3, null);
+    await vi.waitFor(() => {
+      expect(fake.sent.slice(beforeClear)).toContainEqual(['set_property', 'sub-pos', 12]);
+    });
+
+    // Mid-playback addExternalSubtitle is re-attached after retry()
+    engine.addExternalSubtitle?.(3, {
+      id: 'ext-retry',
+      uri: `${subServer.baseUrl}/retry.srt`,
+      label: 'Retry Ext',
+      language: 'en',
+    });
+    await vi.waitFor(() => {
+      expect(fake.sent.filter((c) => c[0] === 'sub-add')).toHaveLength(1);
+    });
+    engine.retry(4);
+    await vi.waitFor(() => {
+      expect(fake.sent.filter((c) => c[0] === 'sub-add')).toHaveLength(2);
+    });
   });
 });

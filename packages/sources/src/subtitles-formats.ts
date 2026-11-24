@@ -8,12 +8,12 @@ export interface RawSubtitleCue {
 
 const TIMECODE_LINE_RE =
   /^\s*(\d{1,3}:\d{2}(?::\d{2})?(?:[.,:]\d+)?)\s*(?:-+>|—>|–>)\s*(\d{1,3}:\d{2}(?::\d{2})?(?:[.,:]\d+)?)(?:\s+.*)?$/;
-const LIKELY_TIMECODE_LINE_RE = /^\s*\d{1,3}:\d{2}[^\n]*(?:-+>|—>|–>)/;
+const LIKELY_TIMECODE_START_RE = /^\s*\d{1,3}:\d{2}/;
 const CLOCK_TOKEN_RE = /^(\d{1,3}):(\d{2})(?::(\d{2}))?(?:[.,:](\d+))?$/;
 const VTT_SKIP_BLOCK_RE = /^(?:NOTE|STYLE|REGION)(?:\s|$)/;
 const PURE_INDEX_RE = /^\d+$/;
-const SRT_VTT_TAG_RE =
-  /<br\s*\/?>|<\/[a-zA-Z][a-zA-Z0-9._:-]*\s*>|<[a-zA-Z][a-zA-Z0-9._:-]*(?:\s[^<>]*)?\/?>|<\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?>|\{\\[^}]*\}/gi;
+const SINGLE_SRT_VTT_TAG_RE =
+  /^<\/[a-zA-Z][a-zA-Z0-9._:-]*\s*>$|^<[a-zA-Z][a-zA-Z0-9._:-]*(?:\s[^<>]*)?\/?>$|^<\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?>$/;
 const NBSP_RE = /&nbsp;/gi;
 
 const ASS_SECTION_RE = /^\s*\[([^\]]+)\]\s*$/;
@@ -35,15 +35,18 @@ const DEFAULT_ASS_FIELDS = [
   'text',
 ];
 
-const TTML_ROOT_ATTRS_RE = /<(?:[a-zA-Z0-9_-]+:)?tt\b([^>]*)>/i;
-const TTML_P_RE = /<(?:[a-zA-Z0-9_-]+:)?p\b([^>]*?)>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?p>/gi;
-const XML_ATTR_RE = /([a-zA-Z0-9_:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
-const TTML_BR_RE = /<(?:[a-zA-Z0-9_-]+:)?br\b[^>]*\/?>/gi;
-const XML_TAG_RE = /<\/?[a-zA-Z][a-zA-Z0-9._:-]*(?:\s[^<>]*)?\/?>/g;
+const SINGLE_XML_TAG_RE = /^<\/?[a-zA-Z][a-zA-Z0-9._:-]*(?:\s[^<>]*)?\/?>$/;
 const TTML_CLOCK_RE = /^(\d{1,3}):(\d{2}):(\d{2})(?:(?:\.(\d+))|(?::(\d{1,3})(?:\.(\d+))?))?$/;
 const TTML_OFFSET_RE = /^(\d+(?:\.\d+)?)(ms|h|m|s|f|t)$/;
 const RAW_WS_RE = /[\t\n]+/g;
 const MULTI_SPACE_RE = / {2,}/g;
+
+function isLikelyTimecodeLine(line: string): boolean {
+  return (
+    LIKELY_TIMECODE_START_RE.test(line) &&
+    (line.includes('->') || line.includes('—>') || line.includes('–>'))
+  );
+}
 
 function parseFractionMs(frac: string | undefined): number {
   if (!frac) return 0;
@@ -70,10 +73,73 @@ function parseClockTimeMs(raw: string): number | null {
 
 const BR_TOKEN_RE = /^<br\s*\/?>$/i;
 
-/** Strips HTML, WebVTT, and inline ASS override tags in a single pass and decodes entities. */
+/** Strips HTML, WebVTT, and inline ASS override tags in O(N) linear time and decodes entities. */
 function stripSrtVttMarkup(text: string): string {
-  const stripped = text.replace(SRT_VTT_TAG_RE, (token) => (BR_TOKEN_RE.test(token) ? '\n' : ''));
-  return decodeEntities(stripped.replace(NBSP_RE, ' '));
+  let nextOpenAngle = text.indexOf('<');
+  let nextOpenBrace = text.indexOf('{\\');
+  if (nextOpenAngle === -1 && nextOpenBrace === -1) {
+    return decodeEntities(text.replace(NBSP_RE, ' '));
+  }
+  const parts: string[] = [];
+  let segStart = 0;
+  let nextAngleClose = -2;
+  let nextBraceClose = -2;
+
+  while (nextOpenAngle !== -1 || nextOpenBrace !== -1) {
+    if (nextOpenAngle !== -1 && (nextOpenBrace === -1 || nextOpenAngle < nextOpenBrace)) {
+      const i = nextOpenAngle;
+      if (nextAngleClose !== -1 && nextAngleClose <= i) {
+        nextAngleClose = text.indexOf('>', i + 1);
+      }
+      if (nextAngleClose === -1) {
+        nextOpenAngle = -1;
+        continue;
+      }
+      nextOpenAngle = text.indexOf('<', i + 1);
+      if (nextOpenAngle !== -1 && nextOpenAngle < nextAngleClose) {
+        continue;
+      }
+      const token = text.slice(i, nextAngleClose + 1);
+      if (BR_TOKEN_RE.test(token)) {
+        if (i > segStart) parts.push(text.slice(segStart, i));
+        parts.push('\n');
+        segStart = nextAngleClose + 1;
+        if (nextOpenBrace !== -1 && nextOpenBrace < segStart) {
+          nextOpenBrace = text.indexOf('{\\', segStart);
+        }
+        continue;
+      }
+      if (SINGLE_SRT_VTT_TAG_RE.test(token)) {
+        if (i > segStart) parts.push(text.slice(segStart, i));
+        segStart = nextAngleClose + 1;
+        if (nextOpenBrace !== -1 && nextOpenBrace < segStart) {
+          nextOpenBrace = text.indexOf('{\\', segStart);
+        }
+      }
+      continue;
+    }
+
+    const i = nextOpenBrace;
+    if (nextBraceClose !== -1 && nextBraceClose <= i + 1) {
+      nextBraceClose = text.indexOf('}', i + 2);
+    }
+    if (nextBraceClose === -1) {
+      nextOpenBrace = -1;
+      continue;
+    }
+    if (i > segStart) parts.push(text.slice(segStart, i));
+    segStart = nextBraceClose + 1;
+    nextOpenBrace = text.indexOf('{\\', segStart);
+    if (nextOpenAngle !== -1 && nextOpenAngle < segStart) {
+      nextOpenAngle = text.indexOf('<', segStart);
+    }
+  }
+
+  if (segStart === 0) {
+    return decodeEntities(text.replace(NBSP_RE, ' '));
+  }
+  if (segStart < text.length) parts.push(text.slice(segStart));
+  return decodeEntities(parts.join('').replace(NBSP_RE, ' '));
 }
 
 function finalizeSrtVttCue(
@@ -112,7 +178,7 @@ export function parseSrtOrVtt(
           i += 1;
           break;
         }
-        if (TIMECODE_LINE_RE.test(line) || LIKELY_TIMECODE_LINE_RE.test(line)) break;
+        if (TIMECODE_LINE_RE.test(line) || isLikelyTimecodeLine(line)) break;
         i += 1;
       }
     }
@@ -166,7 +232,7 @@ export function parseSrtOrVtt(
           i += 1;
           break;
         }
-        if (TIMECODE_LINE_RE.test(nextLine) || LIKELY_TIMECODE_LINE_RE.test(nextLine)) break;
+        if (TIMECODE_LINE_RE.test(nextLine) || isLikelyTimecodeLine(nextLine)) break;
         i += 1;
       }
       continue;
@@ -187,7 +253,7 @@ export function parseSrtOrVtt(
       continue;
     }
 
-    if (LIKELY_TIMECODE_LINE_RE.test(line)) {
+    if (isLikelyTimecodeLine(line)) {
       flushActive(true);
       warnings.push('malformed-timecode');
       i += 1;
@@ -339,22 +405,204 @@ export function parseAss(content: string, warnings: string[]): RawSubtitleCue[] 
   return cues;
 }
 
+function isAsciiWhitespace(code: number): boolean {
+  return code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d;
+}
+
+function isXmlPrefixChar(code: number): boolean {
+  return (
+    (code >= 0x61 && code <= 0x7a) ||
+    (code >= 0x41 && code <= 0x5a) ||
+    (code >= 0x30 && code <= 0x39) ||
+    code === 0x5f ||
+    code === 0x2d
+  );
+}
+
+function isXmlAttrNameChar(code: number): boolean {
+  return isXmlPrefixChar(code) || code === 0x3a;
+}
+
+function isXmlTagBoundary(code: number): boolean {
+  return Number.isNaN(code) || code === 0x3e || code === 0x2f || isAsciiWhitespace(code);
+}
+
+function matchesAsciiLower(content: string, start: number, targetLower: string): boolean {
+  if (start + targetLower.length > content.length) return false;
+  for (let k = 0; k < targetLower.length; k += 1) {
+    let ch = content.charCodeAt(start + k);
+    if (ch >= 0x41 && ch <= 0x5a) ch += 32;
+    if (ch !== targetLower.charCodeAt(k)) return false;
+  }
+  return true;
+}
+
+function matchPrefixedTagName(content: string, start: number, localNameLower: string): number {
+  if (
+    matchesAsciiLower(content, start, localNameLower) &&
+    isXmlTagBoundary(content.charCodeAt(start + localNameLower.length))
+  ) {
+    return start + localNameLower.length;
+  }
+  let j = start;
+  while (j < content.length && isXmlPrefixChar(content.charCodeAt(j))) {
+    j += 1;
+  }
+  if (j > start && content.charCodeAt(j) === 0x3a /* : */) {
+    const localStart = j + 1;
+    if (
+      matchesAsciiLower(content, localStart, localNameLower) &&
+      isXmlTagBoundary(content.charCodeAt(localStart + localNameLower.length))
+    ) {
+      return localStart + localNameLower.length;
+    }
+  }
+  return -1;
+}
+
 function parseXmlAttributes(attrSource: string): Record<string, string> {
   const attrs: Record<string, string> = Object.create(null) as Record<string, string>;
-  XML_ATTR_RE.lastIndex = 0;
-  let match = XML_ATTR_RE.exec(attrSource);
-  while (match !== null) {
-    const rawKey = (match[1] ?? '').toLowerCase();
-    const value = match[2] ?? match[3] ?? '';
+  let i = 0;
+  const len = attrSource.length;
+
+  while (i < len) {
+    while (i < len && !isXmlAttrNameChar(attrSource.charCodeAt(i))) {
+      i += 1;
+    }
+    const nameStart = i;
+    while (i < len && isXmlAttrNameChar(attrSource.charCodeAt(i))) {
+      i += 1;
+    }
+    if (i === nameStart) break;
+    const rawKey = attrSource.slice(nameStart, i).toLowerCase();
+
+    while (i < len && isAsciiWhitespace(attrSource.charCodeAt(i))) {
+      i += 1;
+    }
+    if (i >= len || attrSource.charCodeAt(i) !== 0x3d /* = */) continue;
+    i += 1;
+
+    while (i < len && isAsciiWhitespace(attrSource.charCodeAt(i))) {
+      i += 1;
+    }
+    if (i >= len) break;
+    const quoteCode = attrSource.charCodeAt(i);
+    if (quoteCode !== 0x22 /* " */ && quoteCode !== 0x27 /* ' */) continue;
+    const quote = quoteCode === 0x22 ? '"' : "'";
+    const valStart = i + 1;
+    const valEnd = attrSource.indexOf(quote, valStart);
+    if (valEnd === -1) break;
+
+    const value = attrSource.slice(valStart, valEnd);
     attrs[rawKey] = value;
     const colon = rawKey.indexOf(':');
     if (colon !== -1) {
       const localKey = rawKey.slice(colon + 1);
       if (!(localKey in attrs)) attrs[localKey] = value;
     }
-    match = XML_ATTR_RE.exec(attrSource);
+    i = valEnd + 1;
   }
+
   return attrs;
+}
+
+function findTtmlRootAttrs(content: string): string | null {
+  let pos = 0;
+  let nextClose = -2;
+  let nextOpen = -2;
+  while (pos < content.length) {
+    const open = content.indexOf('<', pos);
+    if (open === -1) return null;
+    const nameEnd = matchPrefixedTagName(content, open + 1, 'tt');
+    if (nameEnd === -1) {
+      pos = open + 1;
+      continue;
+    }
+    if (nextClose !== -1 && nextClose < nameEnd) {
+      nextClose = content.indexOf('>', nameEnd);
+    }
+    if (nextClose === -1) return null;
+    if (nextOpen !== -1 && nextOpen <= open) {
+      nextOpen = content.indexOf('<', open + 1);
+    }
+    if (nextOpen !== -1 && nextOpen < nextClose) {
+      pos = nextOpen;
+      continue;
+    }
+    return content.slice(nameEnd, nextClose);
+  }
+  return null;
+}
+
+function findNextClosingP(content: string, from: number): { start: number; end: number } | null {
+  let search = from;
+  while (search < content.length) {
+    const idx = content.indexOf('</', search);
+    if (idx === -1) return null;
+    const nameEnd = matchPrefixedTagName(content, idx + 2, 'p');
+    if (nameEnd !== -1) {
+      let gt = nameEnd;
+      while (gt < content.length && isAsciiWhitespace(content.charCodeAt(gt))) {
+        gt += 1;
+      }
+      if (content.charCodeAt(gt) === 0x3e /* > */) {
+        return { start: idx, end: gt + 1 };
+      }
+    }
+    search = idx + 2;
+  }
+  return null;
+}
+
+function stripTtmlBodyTags(body: string): string {
+  const normalized = body.replace(RAW_WS_RE, ' ');
+  if (!normalized.includes('<')) return normalized;
+
+  const parts: string[] = [];
+  let segStart = 0;
+  let i = 0;
+  let nextClose = -2;
+  let nextOpen = -2;
+
+  while (i < normalized.length) {
+    const open = normalized.indexOf('<', i);
+    if (open === -1) break;
+
+    if (nextClose !== -1 && nextClose <= open) {
+      nextClose = normalized.indexOf('>', open + 1);
+    }
+    if (nextClose === -1) break;
+
+    if (nextOpen !== -1 && nextOpen <= open) {
+      nextOpen = normalized.indexOf('<', open + 1);
+    }
+    if (nextOpen !== -1 && nextOpen < nextClose) {
+      i = nextOpen;
+      continue;
+    }
+
+    if (matchPrefixedTagName(normalized, open + 1, 'br') !== -1) {
+      if (open > segStart) parts.push(normalized.slice(segStart, open));
+      parts.push('\n');
+      i = nextClose + 1;
+      segStart = i;
+      continue;
+    }
+
+    const token = normalized.slice(open, nextClose + 1);
+    if (SINGLE_XML_TAG_RE.test(token)) {
+      if (open > segStart) parts.push(normalized.slice(segStart, open));
+      i = nextClose + 1;
+      segStart = i;
+      continue;
+    }
+
+    i = nextClose + 1;
+  }
+
+  if (segStart === 0) return normalized;
+  if (segStart < normalized.length) parts.push(normalized.slice(segStart));
+  return parts.join('');
 }
 
 function parseTtmlTimeMs(raw: string, frameRate: number, tickRate: number): number | null {
@@ -389,14 +637,14 @@ function parseTtmlTimeMs(raw: string, frameRate: number, tickRate: number): numb
   return ((hours * 60 + minutes) * 60 + seconds) * 1000 + ms;
 }
 
-/** Parses TTML `<p>` subtitle cues supporting clock, frame-rate, and offset times. */
+/** Parses TTML `<p>` subtitle cues supporting clock, frame-rate, and offset times in O(N) time. */
 export function parseTtml(content: string, warnings: string[]): RawSubtitleCue[] {
   let frameRate = 30;
   let tickRate = 10_000_000;
 
-  const rootMatch = TTML_ROOT_ATTRS_RE.exec(content);
-  if (rootMatch) {
-    const rootAttrs = parseXmlAttributes(rootMatch[1] ?? '');
+  const rootAttrSource = findTtmlRootAttrs(content);
+  if (rootAttrSource !== null) {
+    const rootAttrs = parseXmlAttributes(rootAttrSource);
     const parsedFps = Number.parseFloat(rootAttrs.framerate ?? '');
     if (Number.isFinite(parsedFps) && parsedFps > 0) frameRate = parsedFps;
     const parsedTick = Number.parseFloat(rootAttrs.tickrate ?? '');
@@ -404,13 +652,44 @@ export function parseTtml(content: string, warnings: string[]): RawSubtitleCue[]
   }
 
   const cues: RawSubtitleCue[] = [];
-  TTML_P_RE.lastIndex = 0;
-  let match = TTML_P_RE.exec(content);
+  let pos = 0;
+  let nextClose = -2;
+  let nextOpen = -2;
 
-  while (match !== null) {
-    const attrs = parseXmlAttributes(match[1] ?? '');
-    const body = match[2] ?? '';
-    match = TTML_P_RE.exec(content);
+  while (pos < content.length) {
+    const open = content.indexOf('<', pos);
+    if (open === -1) break;
+    const nameEnd = matchPrefixedTagName(content, open + 1, 'p');
+    if (nameEnd === -1) {
+      pos = open + 1;
+      continue;
+    }
+
+    if (nextClose !== -1 && nextClose < nameEnd) {
+      nextClose = content.indexOf('>', nameEnd);
+    }
+    if (nextClose === -1) break;
+
+    if (nextOpen !== -1 && nextOpen <= open) {
+      nextOpen = content.indexOf('<', open + 1);
+    }
+    if (nextOpen !== -1 && nextOpen < nextClose) {
+      pos = nextOpen;
+      continue;
+    }
+
+    const openTagEnd = nextClose;
+    if (openTagEnd > nameEnd && content.charCodeAt(openTagEnd - 1) === 0x2f /* / */) {
+      pos = openTagEnd + 1;
+      continue;
+    }
+
+    const closing = findNextClosingP(content, openTagEnd + 1);
+    if (closing === null) break;
+
+    const attrs = parseXmlAttributes(content.slice(nameEnd, openTagEnd));
+    const body = content.slice(openTagEnd + 1, closing.start);
+    pos = closing.end;
 
     if (attrs.begin === undefined) continue;
     const startMs = parseTtmlTimeMs(attrs.begin, frameRate, tickRate);
@@ -431,8 +710,7 @@ export function parseTtml(content: string, warnings: string[]): RawSubtitleCue[]
       continue;
     }
 
-    const withBreaks = body.replace(RAW_WS_RE, ' ').replace(TTML_BR_RE, '\n');
-    const stripped = withBreaks.replace(XML_TAG_RE, '');
+    const stripped = stripTtmlBodyTags(body);
     const decoded = decodeEntities(stripped.replace(NBSP_RE, ' '));
     const text = decoded
       .split('\n')

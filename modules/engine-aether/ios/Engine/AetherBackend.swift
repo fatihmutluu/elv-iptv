@@ -70,8 +70,11 @@ final class AetherBackend: PlayerBackend {
   var externalSubtitles: [String: LoadedExternalSubtitle] = [:]
   var externalSubtitleOrder: [String] = []
   var externalSubtitleTasks: [String: Task<Void, Never>] = [:]
+  var externalSubtitleTaskTokens: [String: Int] = [:]
+  var externalSubtitleTaskSeq = 0
   var activeExternalPrimaryId: String?
   var activeSecondarySubtitleId: String?
+  var embeddedDecoderServingSecondary = false
 
   var loadTask: Task<Void, Never>?
   var seekTask: Task<Void, Never>?
@@ -169,7 +172,13 @@ final class AetherBackend: PlayerBackend {
     currentLoadOptions = options
     desiredAudioStreamId = options.audioStreamIndex.map(Int.init)
     desiredSubtitleStreamId = options.subtitlesDisabled ? nil : options.initialSubtitleTrackId
-    activeSecondarySubtitleId = options.secondarySubtitleTrackId
+    if let secId = options.secondarySubtitleTrackId,
+       !(desiredSubtitleStreamId != nil && parseSubtitleTrackStreamId(secId) != nil)
+    {
+      activeSecondarySubtitleId = secId
+    } else {
+      activeSecondarySubtitleId = nil
+    }
     for extTrack in options.externalSubtitles {
       addExternalSubtitle(extTrack)
     }

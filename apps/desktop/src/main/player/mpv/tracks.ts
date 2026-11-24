@@ -31,6 +31,8 @@ export interface TrackTracker {
   /** Returns `['set_property', 'secondary-sid', 'no']` when `primaryId` collides with the active secondary track (`#402`). */
   clearSecondaryIfCollides(primaryId: string | null): MpvCommand | undefined;
   selectSecondarySubtitle(id: string | null): MpvCommand | undefined;
+  /** Returns `true` while a secondary subtitle track is selected or requested (`#402`). */
+  hasActiveSecondarySubtitle(): boolean;
   selectVideoQuality(id: string | null): MpvCommand | undefined;
   /** Emits an updated `tracks` snapshot if local selection state changed (e.g. manual video quality). */
   sync(): EngineEvent[];
@@ -241,6 +243,12 @@ export function createTrackTracker(): TrackTracker {
       }
       if (token !== undefined) secondarySubReconciled = true;
       return cmd;
+    },
+
+    hasActiveSecondarySubtitle() {
+      if (secondarySubPref.kind === 'selected') return true;
+      if (secondarySubPref.kind === 'off') return false;
+      return typeof secondarySid === 'number' && Number.isInteger(secondarySid) && secondarySid > 0;
     },
 
     selectVideoQuality(id) {
