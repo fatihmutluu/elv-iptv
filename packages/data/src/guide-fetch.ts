@@ -137,10 +137,15 @@ export async function openGuide(
       if (attempt > 0) await waitWithAbort(retryDelayMs(attempt - 1), signal);
       let response: Result<HttpResponse>;
       try {
+        const transport = source.settings.transport;
         response = await deps.http.get(url, {
           headers: conditionalHeaders(baseHeaders, sent),
           timeoutMs: REQUEST_TIMEOUT_MS,
-          ...(source.settings.transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
+          ...(transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
+          ...(transport?.dnsFamily !== undefined ? { dnsFamily: transport.dnsFamily } : {}),
+          ...(transport?.hostOverride !== undefined
+            ? { hostOverride: transport.hostOverride }
+            : {}),
           ...(signal === undefined ? {} : { signal }),
         });
       } catch {

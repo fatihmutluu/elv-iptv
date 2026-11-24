@@ -5,11 +5,18 @@ import {
   type ExternalSubtitleTrack,
   type LoadOptions,
   type NativeEngineHandle,
+  type NativeLoadCommand,
   type PlayerEngine,
 } from '@elv/playback';
 import { requireNativeViewManager, requireOptionalNativeModule } from 'expo-modules-core';
 import { type ComponentType, createElement, type ReactElement } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
+import {
+  extractMedia3NetworkLoadOptions,
+  type Media3NetworkLoadOptions,
+  normalizeMedia3DnsFamily,
+  normalizeMedia3HostOverride,
+} from './network-options';
 
 /** Live subtitle appearance style forwarded to Media3 (`#32`). */
 export type Media3SubtitleStyle = NonNullable<LoadOptions['subtitleStyle']>;
@@ -202,7 +209,31 @@ const handles = new WeakMap<PlayerEngine, Media3NativeEngineHandle>();
 
 function wrap(module: NativeEngineModule): PlayerEngine {
   const native = new module.Engine();
-  const bridged = bridgeNativeEngine(native, {
+  let pendingNetwork: Media3NetworkLoadOptions = {};
+  const nativeBridgeTarget = new Proxy(native, {
+    get(target, prop) {
+      if (prop === 'load') {
+        return (command: NativeLoadCommand): void => {
+          const merged = { ...command, ...pendingNetwork } as NativeLoadCommand & {
+            dnsFamily?: unknown;
+            hostOverride?: unknown;
+          };
+          pendingNetwork = {};
+          const { dnsFamily: rawDns, hostOverride: rawHost, ...rest } = merged;
+          const dnsFamily = normalizeMedia3DnsFamily(rawDns);
+          const hostOverride = normalizeMedia3HostOverride(rawHost);
+          target.load({
+            ...rest,
+            ...(dnsFamily === undefined ? {} : { dnsFamily }),
+            ...(hostOverride === undefined ? {} : { hostOverride }),
+          } as NativeLoadCommand);
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const bridged = bridgeNativeEngine(nativeBridgeTarget, {
     capabilities: CAPABILITIES,
     uptimeMs: () => module.uptimeMs(),
     now: () => performance.now(),
@@ -210,6 +241,14 @@ function wrap(module: NativeEngineModule): PlayerEngine {
   let released = false;
   const engine: PlayerEngine = {
     ...bridged,
+    load(cmd) {
+      pendingNetwork = extractMedia3NetworkLoadOptions(cmd);
+      try {
+        bridged.load(cmd);
+      } finally {
+        pendingNetwork = {};
+      }
+    },
     ...(native.setPitchLock === undefined
       ? {}
       : {

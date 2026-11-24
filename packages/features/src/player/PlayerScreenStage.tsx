@@ -54,6 +54,7 @@ export interface PlayerScreenProps {
         | 'listRecentChannels'
         | 'liveVariants'
         | 'resolveCatchupStream'
+        | 'reportStreamOutcome'
       >
     > & {
       readonly epgNowNext?: CatalogService['nowNext'];
@@ -61,6 +62,8 @@ export interface PlayerScreenProps {
   videoHost: VideoHost;
   target: PlayTarget;
   playbackGuard?: PlaybackGuard;
+  /** Optional connection-limit gate for cross-source Rung-4 failover alternates (`#157`, `#87`). */
+  canAcquireAlternate?: (accountKey: string, maxConnections: number) => boolean;
   appLifecycle?: AppLifecyclePort;
   clock?: PlaybackClock;
   /** Wall-clock Unix epoch timestamp provider in ms for EPG Now/Next & Ends At (`Date.now`). */

@@ -5,6 +5,7 @@ import {
   type ExternalSubtitleTrack,
   type LoadOptions,
   type NativeEngineHandle,
+  type NativeLoadCommand,
   type PlayerEngine,
 } from '@elv/playback';
 import { requireNativeViewManager, requireOptionalNativeModule } from 'expo-modules-core';
@@ -425,9 +426,54 @@ export async function pickApplePlaylistFile(): Promise<ApplePickedPlaylistFile |
   return normalizePickedPlaylist(raw);
 }
 
+interface NetworkLoadExtras {
+  readonly dnsFamily?: 'system' | 'ipv4' | 'ipv6';
+  readonly hostOverride?: string;
+}
+
+function extractNetworkLoadExtras(options: unknown): NetworkLoadExtras | null {
+  if (typeof options !== 'object' || options === null) return null;
+  const raw = options as { readonly dnsFamily?: unknown; readonly hostOverride?: unknown };
+  const dnsFamily =
+    raw.dnsFamily === 'system' || raw.dnsFamily === 'ipv4' || raw.dnsFamily === 'ipv6'
+      ? raw.dnsFamily
+      : undefined;
+  const hostOverride =
+    typeof raw.hostOverride === 'string' && raw.hostOverride.trim().length > 0
+      ? raw.hostOverride.trim()
+      : undefined;
+  if (dnsFamily === undefined && hostOverride === undefined) return null;
+  return {
+    ...(dnsFamily !== undefined ? { dnsFamily } : {}),
+    ...(hostOverride !== undefined ? { hostOverride } : {}),
+  };
+}
+
 function wrap(module: NativeEngineModule): PlayerEngine {
   const native = new module.Engine();
-  const bridged = bridgeNativeEngine(native, {
+  let pendingNetwork: NetworkLoadExtras | null = null;
+  const nativeProxy = new Proxy(native, {
+    get(target, prop) {
+      if (prop === 'load') {
+        return (nativeCmd: NativeLoadCommand) => {
+          const extra = pendingNetwork;
+          pendingNetwork = null;
+          if (extra === null) {
+            target.load(nativeCmd);
+            return;
+          }
+          target.load({
+            ...nativeCmd,
+            ...(extra.dnsFamily !== undefined ? { dnsFamily: extra.dnsFamily } : {}),
+            ...(extra.hostOverride !== undefined ? { hostOverride: extra.hostOverride } : {}),
+          } as NativeLoadCommand);
+        };
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const bridged = bridgeNativeEngine(nativeProxy, {
     capabilities: CAPABILITIES,
     uptimeMs: () => module.uptimeMs(),
     now: () => performance.now(),
@@ -435,6 +481,15 @@ function wrap(module: NativeEngineModule): PlayerEngine {
   let released = false;
   const engine: PlayerEngine = {
     ...bridged,
+    load(cmd) {
+      if (released) return;
+      pendingNetwork = extractNetworkLoadExtras(cmd.options);
+      try {
+        bridged.load(cmd);
+      } finally {
+        pendingNetwork = null;
+      }
+    },
     ...(bridged.setAudioDelay === undefined && native.setAudioDelay !== undefined
       ? {
           setAudioDelay(attempt, delayMs) {

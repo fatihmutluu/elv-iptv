@@ -13,7 +13,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { OpenVideoEngine, VideoHost } from '../ports/video-host';
-import { useRouteActive } from '../shared';
+import { useRouteActive, useStreamHealth } from '../shared';
 
 const PREVIEW_TIMERS: PlaybackTimers = {
   setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -39,7 +39,8 @@ export interface UseLiveEmbeddedPreviewOptions {
   readonly enabled: boolean;
   readonly activeChannel: ItemRow | null;
   readonly sources: readonly SourceRow[];
-  readonly catalog: Pick<CatalogService, 'resolveStream'>;
+  readonly catalog: Pick<CatalogService, 'resolveStream'> &
+    Partial<Pick<CatalogService, 'reportStreamOutcome'>>;
   readonly videoHost?: VideoHost;
   readonly playbackGuard?: PlaybackGuard;
   /** Changing this key tears down any active preview session immediately (e.g. profile switch or parental re-lock). */
@@ -73,6 +74,9 @@ export function useLiveEmbeddedPreview(
   const { enabled, activeChannel, sources, catalog, videoHost, playbackGuard, sessionResetKey } =
     opts;
   const isRouteActive = useRouteActive();
+  const streamHealth = useStreamHealth();
+  const streamHealthRef = useRef(streamHealth);
+  streamHealthRef.current = streamHealth;
 
   const [opened, setOpened] = useState<OpenVideoEngine | null>(null);
   const [statusUi, setStatusUi] = useState({ statusText: '', failed: false });
@@ -139,10 +143,25 @@ export function useLiveEmbeddedPreview(
         setOpened(null);
         return;
       }
+      const health = streamHealthRef.current;
       const service = createPlaybackService({
         engine: nextOpened.engine,
         clock: createMonotonicClock(),
         timers: PREVIEW_TIMERS,
+        healthCache: health.healthCache,
+        healthScorer: health.healthScorer,
+        idleProbeController: health.idleProbeController,
+        canAcquireAlternate: (accountKey, maxConnections) =>
+          streamHealthRef.current.canAcquireAlternate(accountKey, maxConnections),
+        onStreamOutcome: (stream, outcome) => {
+          if (stream.sourceId !== undefined && stream.sourceId.length > 0) {
+            refs.current.catalog.reportStreamOutcome?.(
+              stream.sourceId,
+              stream.url,
+              outcome === 'success',
+            );
+          }
+        },
       });
       const unsubService = service.subscribe(() => {
         if (sessionGenRef.current !== gen) return;

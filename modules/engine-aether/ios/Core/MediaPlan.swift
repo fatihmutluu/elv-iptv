@@ -76,6 +76,8 @@ public func loadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoad
     hostRetriesExhaustedLiveReplay: hostRetriesLiveReplay,
     filterSdhSubtitles: request.filterSdhSubtitles,
     allowLegacyTls: request.allowLegacyTls,
+    dnsFamily: request.dnsFamily,
+    hostOverride: validateHostOverride(request.hostOverride),
     secondarySubtitleTrackId: request.secondarySubtitleTrackId,
     externalSubtitles: request.externalSubtitles
   )

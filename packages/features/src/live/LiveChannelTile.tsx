@@ -14,6 +14,7 @@ import {
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { LiveHealthBadge } from './LiveHealthBadge';
 import { computeProgramProgress, formatLiveTitle } from './live-model';
 import { SourceBadgePill } from './SourceBadgePill';
 import { formatChannelDisplayName, type SourceBadgeInfo } from './source-badge';
@@ -169,6 +170,10 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
               <SourceBadgePill
                 badge={p.sourceBadge}
                 testID={`live-channel-source-badge-${p.itemIndex}`}
+              />
+              <LiveHealthBadge
+                channelKey={p.item.key}
+                testID={`live-channel-health-${p.itemIndex}`}
               />
               <MicroPill label={p.shared.liveBadge} tone="live" />
             </View>

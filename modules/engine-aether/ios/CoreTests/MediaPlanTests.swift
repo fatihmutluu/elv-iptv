@@ -122,4 +122,37 @@ struct MediaPlanTests {
     #expect(legacyOpts.allowLegacyTls)
     #expect(hlsHandoffOptions(from: legacyOpts).allowLegacyTls)
   }
+
+  @Test("dnsFamily and validated hostOverride default cleanly and propagate through loadOptions and hlsHandoffOptions (#172)")
+  func networkTransportOptionsPropagation() throws {
+    let defaultReq = LoadRequest(url: "https://edge.example/live/1.ts", live: true)
+    let defaultOpts = loadOptions(for: try #require(planMedia(defaultReq)), request: defaultReq)
+    #expect(defaultReq.dnsFamily == .system)
+    #expect(defaultReq.hostOverride == nil)
+    #expect(defaultOpts.dnsFamily == .system)
+    #expect(defaultOpts.hostOverride == nil)
+
+    let ipv6Req = LoadRequest(
+      url: "https://edge.example/live/1.ts",
+      live: true,
+      dnsFamily: .ipv6,
+      hostOverride: "[2001:DB8::1]"
+    )
+    let ipv6Opts = loadOptions(for: try #require(planMedia(ipv6Req)), request: ipv6Req)
+    #expect(ipv6Opts.dnsFamily == .ipv6)
+    #expect(ipv6Opts.hostOverride == "2001:db8::1")
+    let handoff = hlsHandoffOptions(from: ipv6Opts)
+    #expect(handoff.dnsFamily == .ipv6)
+    #expect(handoff.hostOverride == "2001:db8::1")
+
+    let invalidOverrideReq = LoadRequest(
+      url: "https://edge.example/live/1.ts",
+      live: true,
+      dnsFamily: .ipv4,
+      hostOverride: "192.0.2.1:8080"
+    )
+    let sanitizedOpts = loadOptions(for: try #require(planMedia(invalidOverrideReq)), request: invalidOverrideReq)
+    #expect(sanitizedOpts.dnsFamily == .ipv4)
+    #expect(sanitizedOpts.hostOverride == nil)
+  }
 }

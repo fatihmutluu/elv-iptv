@@ -579,4 +579,99 @@ describe('desktop CatalogService', () => {
     expect(await legacy.epgSlice?.('s1', 0, 1000)).toEqual([]);
     await expect(legacy.flushPendingWrites?.()).resolves.toBeUndefined();
   });
+
+  it('forwards Wave F5A failover group and stream outcome methods with safe fallbacks (#157, #317)', async () => {
+    const group = {
+      id: 'fg_1',
+      name: 'News One',
+      autoMatched: false,
+      createdAt: 100,
+      updatedAt: 100,
+      members: [{ groupId: 'fg_1', sourceId: 's1', channelKey: 'm:s1:ch1', position: 0 }],
+    };
+    const cluster = {
+      normalizedKey: 'guide:news.one',
+      suggestedName: 'News One',
+      matchReason: 'guide-id' as const,
+      members: [
+        { sourceId: 's1', channelKey: 'm:s1:ch1', channelName: 'News\tHD', sourceName: 'Src\nA' },
+      ],
+    };
+    const seen: Record<string, unknown[][]> = {};
+    const record =
+      <T>(name: string, value: T) =>
+      async (...args: unknown[]): Promise<T> => {
+        const list = seen[name] ?? [];
+        list.push(args);
+        seen[name] = list;
+        return value;
+      };
+
+    const { bridge } = makeFakeBridge({
+      listFailoverGroups: record('listFailoverGroups', [group]),
+      getFailoverGroupByChannel: record('getFailoverGroupByChannel', group),
+      createFailoverGroup: record('createFailoverGroup', ok(group)),
+      renameFailoverGroup: record('renameFailoverGroup', ok(group)),
+      deleteFailoverGroup: record('deleteFailoverGroup', ok(undefined)),
+      addFailoverGroupMember: record('addFailoverGroupMember', ok(group)),
+      removeFailoverGroupMember: record('removeFailoverGroupMember', ok(group)),
+      reorderFailoverGroupMembers: record('reorderFailoverGroupMembers', ok(group)),
+      suggestFailoverGroups: record('suggestFailoverGroups', [cluster]),
+      applySuggestedFailoverGroups: record('applySuggestedFailoverGroups', ok([group])),
+      reportStreamOutcome: record('reportStreamOutcome', undefined),
+    });
+
+    const service = createDesktopCatalogFromBridge(bridge);
+    expect(await service.listFailoverGroups?.()).toEqual([group]);
+    expect(await service.getFailoverGroupByChannel?.('m:s1:ch1')).toEqual(group);
+    expect(await service.createFailoverGroup?.({ name: 'News\tOne' })).toEqual(ok(group));
+    expect(await service.renameFailoverGroup?.('fg_1', 'News\nTwo')).toEqual(ok(group));
+    expect(await service.deleteFailoverGroup?.('fg_1')).toEqual(ok(undefined));
+    expect(await service.addFailoverGroupMember?.('fg_1', 'm:s2:ch1')).toEqual(ok(group));
+    expect(await service.removeFailoverGroupMember?.('fg_1', 'm:s2:ch1')).toEqual(ok(group));
+    expect(await service.reorderFailoverGroupMembers?.('fg_1', ['m:s1:ch1'])).toEqual(ok(group));
+    expect(await service.suggestFailoverGroups?.()).toEqual([cluster]);
+    expect(await service.applySuggestedFailoverGroups?.([cluster])).toEqual(ok([group]));
+    service.reportStreamOutcome?.('s1', 'https://stream.example.test/1.ts', false);
+
+    expect(seen['createFailoverGroup']).toEqual([[{ name: 'News One' }]]);
+    expect(seen['renameFailoverGroup']).toEqual([['fg_1', 'News Two']]);
+    expect(seen['applySuggestedFailoverGroups']).toEqual([
+      [
+        [
+          {
+            ...cluster,
+            members: [
+              {
+                sourceId: 's1',
+                channelKey: 'm:s1:ch1',
+                channelName: 'News HD',
+                sourceName: 'Src A',
+              },
+            ],
+          },
+        ],
+      ],
+    ]);
+    expect(seen['reportStreamOutcome']).toEqual([
+      ['s1', 'https://stream.example.test/1.ts', false],
+    ]);
+
+    // Legacy bridge without optional Wave F5A methods falls back safely
+    const { bridge: legacyBridge } = makeFakeBridge();
+    const legacy = createDesktopCatalogFromBridge(legacyBridge);
+    expect(await legacy.listFailoverGroups?.()).toEqual([]);
+    expect(await legacy.getFailoverGroupByChannel?.('m:s1:ch1')).toBeUndefined();
+    expect((await legacy.createFailoverGroup?.({ name: 'X' }))?.ok).toBe(false);
+    expect((await legacy.renameFailoverGroup?.('fg_1', 'Y'))?.ok).toBe(false);
+    expect((await legacy.deleteFailoverGroup?.('fg_1'))?.ok).toBe(false);
+    expect((await legacy.addFailoverGroupMember?.('fg_1', 'm:s1:ch1'))?.ok).toBe(false);
+    expect((await legacy.removeFailoverGroupMember?.('fg_1', 'm:s1:ch1'))?.ok).toBe(false);
+    expect((await legacy.reorderFailoverGroupMembers?.('fg_1', []))?.ok).toBe(false);
+    expect(await legacy.suggestFailoverGroups?.()).toEqual([]);
+    expect((await legacy.applySuggestedFailoverGroups?.([]))?.ok).toBe(false);
+    expect(() =>
+      legacy.reportStreamOutcome?.('s1', 'https://stream.example.test', true),
+    ).not.toThrow();
+  });
 });

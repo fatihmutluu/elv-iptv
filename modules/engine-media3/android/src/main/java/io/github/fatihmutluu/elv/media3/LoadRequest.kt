@@ -284,6 +284,86 @@ internal fun parseVideoDecoderMode(raw: String?): VideoDecoderMode =
     else -> VideoDecoderMode.AUTO
   }
 
+/** Parses a wire DNS IP family preference (case-insensitive, trimmed), falling back to [DnsFamilyPreference.SYSTEM] (#172). */
+internal fun parseDnsFamilyPreference(raw: String?): DnsFamilyPreference =
+  when (raw?.trim()?.lowercase(Locale.ROOT)) {
+    DnsFamilyPreference.IPV4.wireName -> DnsFamilyPreference.IPV4
+    DnsFamilyPreference.IPV6.wireName -> DnsFamilyPreference.IPV6
+    else -> DnsFamilyPreference.SYSTEM
+  }
+
+/** Strict syntactic IPv4 literal check (`0.0.0.0`–`255.255.255.255`, no leading zeros or ports) (#172). */
+internal fun isValidIpv4Literal(raw: String): Boolean {
+  if (raw.length !in 7..15) return false
+  val parts = raw.split('.')
+  if (parts.size != 4) return false
+  for (part in parts) {
+    if (part.isEmpty() || part.length > 3) return false
+    if (part.length > 1 && part[0] == '0') return false
+    var value = 0
+    for (c in part) {
+      if (c !in '0'..'9') return false
+      value = value * 10 + (c - '0')
+    }
+    if (value > 255) return false
+  }
+  return true
+}
+
+/**
+ * Strict syntactic IPv6 literal check supporting compressed `::` and IPv4-mapped tails;
+ * rejects zone IDs (`%eth0`), ports, schemes, spaces, and control characters (#172).
+ */
+internal fun isValidIpv6Literal(raw: String): Boolean {
+  if (raw.length !in 2..45) return false
+  if (':' !in raw) return false
+  if ('%' in raw || '/' in raw || ' ' in raw) return false
+  val dblIdx = raw.indexOf("::")
+  if (dblIdx >= 0 && raw.indexOf("::", dblIdx + 2) >= 0) return false
+
+  fun parseSide(segment: String, allowIpv4Tail: Boolean): Int? {
+    if (segment.isEmpty()) return 0
+    val parts = segment.split(':')
+    var groups = 0
+    for (i in parts.indices) {
+      val part = parts[i]
+      if (part.isEmpty()) return null
+      if (allowIpv4Tail && i == parts.lastIndex && '.' in part) {
+        if (!isValidIpv4Literal(part)) return null
+        groups += 2
+      } else if (part.length in 1..4 && part.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+        groups += 1
+      } else {
+        return null
+      }
+    }
+    return groups
+  }
+
+  if (dblIdx >= 0) {
+    val left = parseSide(raw.substring(0, dblIdx), allowIpv4Tail = false) ?: return false
+    val right = parseSide(raw.substring(dblIdx + 2), allowIpv4Tail = true) ?: return false
+    return left + right <= 7
+  }
+  return parseSide(raw, allowIpv4Tail = true) == 8
+}
+
+/**
+ * Validates and normalizes an optional per-source literal IP host override (#172).
+ * Accepts strict IPv4 or IPv6 literals (unbracketing optional IPv6 `[...]` and lowercasing hex digits),
+ * and rejects hostnames, ports, schemes, paths, zone IDs, and control characters.
+ */
+internal fun parseHostOverride(raw: Any?): String? {
+  val text = raw as? String ?: return null
+  if (text.any { it.code < 0x20 || it.code == 0x7f }) return null
+  val trimmed = text.trim()
+  if (trimmed.isEmpty()) return null
+  if (isValidIpv4Literal(trimmed)) return trimmed
+  val unbracketed =
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) trimmed.substring(1, trimmed.length - 1) else trimmed
+  return if (isValidIpv6Literal(unbracketed)) unbracketed.lowercase(Locale.ROOT) else null
+}
+
 /** One `load`: what to play and how. Built from the JavaScript `LoadCommand`; never persisted. */
 internal data class LoadRequest(
   val url: String,
@@ -304,6 +384,10 @@ internal data class LoadRequest(
   val filterSdhSubtitles: Boolean = false,
   /** Opt-in legacy TLS (TLS 1.0/1.1) compatibility for older servers (#182). */
   val allowLegacyTls: Boolean = false,
+  /** Per-source DNS address-family preference (#172). */
+  val dnsFamily: DnsFamilyPreference = DnsFamilyPreference.SYSTEM,
+  /** Optional validated literal IP host override scoped strictly to the initial request origin (#172). */
+  val hostOverride: String? = null,
   /** External sidecar subtitle tracks attached with strictly isolated headers (#32, #308). */
   val externalSubtitles: List<ExternalSubtitleConfig> = emptyList(),
   /** Optional secondary subtitle track ID for simultaneous dual subtitles (#402). */
@@ -311,16 +395,19 @@ internal data class LoadRequest(
   /** Optional live subtitle appearance style applied on load and reloads (#32). */
   val subtitleStyle: SubtitleStyleConfig? = null,
 ) {
-  /** Names no URL and no header value: both may carry credentials. */
+  /** Names no URL, no host override IP, and no header value: each may carry credentials or provider info. */
   override fun toString(): String {
     val dvSuffix = if (preferHevcOverDolbyVision) ", preferHevcOverDolbyVision=true" else ""
     val presetSuffix = if (bufferPreset != BufferPreset.AUTO) ", bufferPreset=${bufferPreset.wireName}" else ""
     val decoderSuffix = if (decoderMode != VideoDecoderMode.AUTO) ", decoderMode=${decoderMode.wireName}" else ""
     val sdhSuffix = if (filterSdhSubtitles) ", filterSdhSubtitles=true" else ""
     val tlsSuffix = if (allowLegacyTls) ", allowLegacyTls=true" else ""
+    val dnsSuffix = if (dnsFamily != DnsFamilyPreference.SYSTEM) ", dnsFamily=${dnsFamily.wireName}" else ""
+    val overrideSuffix = if (hostOverride != null) ", hostOverride=set" else ""
     val extSuffix = if (externalSubtitles.isNotEmpty()) ", externalSubtitles=${externalSubtitles.size}" else ""
     return "LoadRequest(live=$live, startMs=$startMs, softwareAudio=$softwareAudio, " +
-      "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix$decoderSuffix$sdhSuffix$tlsSuffix$extSuffix)"
+      "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix$decoderSuffix" +
+      "$sdhSuffix$tlsSuffix$dnsSuffix$overrideSuffix$extSuffix)"
   }
 }
 
@@ -345,6 +432,8 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
   val preferHevcOverDolbyVision = args["preferHevcOverDolbyVision"] as? Boolean ?: false
   val filterSdhSubtitles = args["filterSdhSubtitles"] as? Boolean ?: false
   val allowLegacyTls = args["allowLegacyTls"] as? Boolean ?: false
+  val dnsFamily = parseDnsFamilyPreference(args["dnsFamily"] as? String)
+  val hostOverride = parseHostOverride(args["hostOverride"])
   val audioTrackId = (args["audioTrackId"] as? String)?.takeIf { it.isNotEmpty() }
   val bufferPreset = parseBufferPreset(args["bufferPreset"] as? String)
   val decoderMode = parseVideoDecoderMode(args["decoderMode"] as? String)
@@ -374,6 +463,8 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
     decoderMode = decoderMode,
     filterSdhSubtitles = filterSdhSubtitles,
     allowLegacyTls = allowLegacyTls,
+    dnsFamily = dnsFamily,
+    hostOverride = hostOverride,
     externalSubtitles = externalSubtitles,
     secondarySubtitleTrackId = secondarySubtitleTrackId,
     subtitleStyle = subtitleStyle,

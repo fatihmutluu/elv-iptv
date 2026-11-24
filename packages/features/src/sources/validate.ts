@@ -4,7 +4,15 @@ import {
   type LocalM3uSourceInput,
   parseXtreamLink,
 } from '@elv/data';
-import { err, ok, type Result, type TransportSettings } from '@elv/domain';
+import {
+  type DnsFamilyPreference,
+  err,
+  normalizeDnsFamily,
+  ok,
+  type Result,
+  type TransportSettings,
+  validateHostOverride,
+} from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
 import type { PickedPlaylistFile } from '../ports/source-import-host';
 
@@ -27,6 +35,12 @@ export interface SourceFormState {
   xmltvTimezone?: string;
   /** Opt-in legacy TLS (TLS 1.0/1.1) compatibility for older endpoints (`#182`). */
   allowLegacyTls?: boolean;
+  /** Optional per-source DNS IP family preference (`#172`). */
+  dnsFamily?: DnsFamilyPreference;
+  /** Optional literal IPv4/IPv6 host override scoped to the source origin (`#172`). */
+  hostOverride?: string;
+  /** Optional newline-separated backup server URLs for Xtream mode (`#317`). */
+  backupServers?: string;
 }
 
 /** Pre-import validation failure codes. */
@@ -39,6 +53,7 @@ export type SourceValidationCode =
   | 'invalid-address'
   | 'invalid-guide-url'
   | 'invalid-timezone'
+  | 'invalid-host-override'
   | 'invalid-characters'
   | 'm3u-in-xtream';
 
@@ -94,6 +109,10 @@ const VALIDATION_MESSAGES: Readonly<
   'invalid-timezone': {
     messageId: 'sources.xmltvTimezoneLabel',
     hintId: 'sources.xmltvTimezoneHint',
+  },
+  'invalid-host-override': {
+    messageId: 'sources.network.invalidHostOverride',
+    hintId: 'sources.network.hostOverrideHint',
   },
   'invalid-characters': {
     messageId: 'source.validation.invalidCharacters',
@@ -179,14 +198,39 @@ function buildTransport(
   referer: string,
   xtreamFormat: 'ts' | 'm3u8' | undefined,
   allowLegacyTls: boolean,
+  dnsFamily: DnsFamilyPreference | undefined,
+  hostOverride: string | undefined,
 ): TransportSettings | undefined {
   const transport: TransportSettings = {
     ...(userAgent !== '' ? { userAgent } : {}),
     ...(referer !== '' ? { referer } : {}),
     ...(xtreamFormat !== undefined ? { xtreamFormat } : {}),
     ...(allowLegacyTls ? { allowLegacyTls: true } : {}),
+    ...(dnsFamily !== undefined ? { dnsFamily } : {}),
+    ...(hostOverride !== undefined ? { hostOverride } : {}),
   };
   return Object.keys(transport).length > 0 ? transport : undefined;
+}
+
+function parseBackupServers(
+  raw: string | undefined,
+): Result<readonly string[] | undefined, SourceValidationError> {
+  if (raw === undefined || raw.trim() === '') return ok(undefined);
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (hasControlChars(line)) return fail('invalid-characters');
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    const checked = validateHttpUrl(trimmed);
+    if (!checked.ok) return checked;
+    const base = normalizeServerBase(trimmed);
+    if (!seen.has(base)) {
+      seen.add(base);
+      normalized.push(base);
+    }
+  }
+  return ok(normalized.length > 0 ? normalized : undefined);
 }
 
 /** Validates whether `tz` is a recognized IANA timezone identifier via `Intl.DateTimeFormat` (`#182`). */
@@ -218,6 +262,9 @@ export function createInitialSourceForm(): SourceFormState {
     localFile: null,
     xmltvTimezone: '',
     allowLegacyTls: false,
+    dnsFamily: 'system',
+    hostOverride: '',
+    backupServers: '',
   };
 }
 
@@ -245,6 +292,7 @@ export function validateSourceForm(
     form.userAgent,
     form.referer,
     form.xmltvTimezone ?? '',
+    form.hostOverride ?? '',
   ];
   if (fields.some(hasControlChars)) {
     return fail('invalid-characters');
@@ -253,6 +301,15 @@ export function validateSourceForm(
   if (xmltvTimezoneRaw !== '' && !isValidIanaTimeZone(xmltvTimezoneRaw)) {
     return fail('invalid-timezone');
   }
+
+  const hostOverrideChecked = validateHostOverride(form.hostOverride);
+  if (!hostOverrideChecked.ok) {
+    return fail('invalid-host-override');
+  }
+  const hostOverride = hostOverrideChecked.value;
+  const normalizedDns = normalizeDnsFamily(form.dnsFamily);
+  const dnsFamily =
+    normalizedDns !== undefined && normalizedDns !== 'system' ? normalizedDns : undefined;
 
   const guideRaw = form.guideUrl.trim();
   if (guideRaw !== '') {
@@ -275,12 +332,23 @@ export function validateSourceForm(
     const parsedServer = validateHttpUrl(serverRaw);
     if (!parsedServer.ok) return parsedServer;
 
+    const backupChecked = parseBackupServers(form.backupServers);
+    if (!backupChecked.ok) return backupChecked;
+    const backupServers = backupChecked.value;
+
     const pasted = parseXtreamLink(serverRaw);
     if (pasted !== undefined) {
       const username = form.username.trim() || pasted.username;
       const password = form.password.trim() || pasted.password;
       const format = explicitFormat ?? pasted.output;
-      const transport = buildTransport(userAgent, refererRaw, format, allowLegacyTls);
+      const transport = buildTransport(
+        userAgent,
+        refererRaw,
+        format,
+        allowLegacyTls,
+        dnsFamily,
+        hostOverride,
+      );
       const name = form.name.trim() || new URL(pasted.server).host;
       return ok({
         kind: 'xtream',
@@ -290,6 +358,7 @@ export function validateSourceForm(
           server: pasted.server,
           username,
           password,
+          ...(backupServers !== undefined ? { backupServers } : {}),
           ...(guideRaw !== '' ? { guideUrl: guideRaw } : {}),
           ...(transport !== undefined ? { transport } : {}),
           ...(xmltvTimezoneRaw !== '' ? { xmltvTimezone: xmltvTimezoneRaw } : {}),
@@ -309,7 +378,14 @@ export function validateSourceForm(
 
     const normalizedServer = normalizeServerBase(serverRaw);
     const name = form.name.trim() || new URL(normalizedServer).host;
-    const transport = buildTransport(userAgent, refererRaw, explicitFormat, allowLegacyTls);
+    const transport = buildTransport(
+      userAgent,
+      refererRaw,
+      explicitFormat,
+      allowLegacyTls,
+      dnsFamily,
+      hostOverride,
+    );
     return ok({
       kind: 'xtream',
       input: {
@@ -318,6 +394,7 @@ export function validateSourceForm(
         server: normalizedServer,
         username,
         password,
+        ...(backupServers !== undefined ? { backupServers } : {}),
         ...(guideRaw !== '' ? { guideUrl: guideRaw } : {}),
         ...(transport !== undefined ? { transport } : {}),
         ...(xmltvTimezoneRaw !== '' ? { xmltvTimezone: xmltvTimezoneRaw } : {}),
@@ -329,7 +406,14 @@ export function validateSourceForm(
     const strippedFileName = localFile.name.replace(/\.(?:m3u8?|gz)$/i, '').trim();
     const fallbackName = opts?.defaultLocalPlaylistName?.trim() || 'M3U';
     const name = form.name.trim() || strippedFileName || fallbackName;
-    const transport = buildTransport(userAgent, refererRaw, explicitFormat, allowLegacyTls);
+    const transport = buildTransport(
+      userAgent,
+      refererRaw,
+      explicitFormat,
+      allowLegacyTls,
+      dnsFamily,
+      hostOverride,
+    );
     return ok({
       kind: 'local-m3u',
       input: {
@@ -349,7 +433,14 @@ export function validateSourceForm(
 
   const detectedXtream = !form.keepAsM3u && parseXtreamLink(urlRaw) !== undefined;
   const name = form.name.trim() || parsedPlaylist.value.host;
-  const transport = buildTransport(userAgent, refererRaw, explicitFormat, allowLegacyTls);
+  const transport = buildTransport(
+    userAgent,
+    refererRaw,
+    explicitFormat,
+    allowLegacyTls,
+    dnsFamily,
+    hostOverride,
+  );
   return ok({
     kind: 'link',
     detectedXtream,

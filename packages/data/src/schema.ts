@@ -10,6 +10,7 @@ import { MIGRATION_V13 } from './schema-v13';
 import { MIGRATION_V14 } from './schema-v14';
 import { MIGRATION_V15 } from './schema-v15';
 import { MIGRATION_V16 } from './schema-v16';
+import { MIGRATION_V17 } from './schema-v17';
 
 export {
   EXPECTED_FTS_TABLES,
@@ -299,4 +300,5 @@ CREATE INDEX IF NOT EXISTS idx_programmes_source_start_stop ON programmes (sourc
   MIGRATION_V14,
   MIGRATION_V15,
   MIGRATION_V16,
+  MIGRATION_V17,
 ];

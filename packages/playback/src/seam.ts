@@ -9,6 +9,7 @@ import type {
   PlayerEngine,
   StreamRequest,
 } from './engine';
+import type { StreamHealthScorer } from './stream-health-scorer';
 import type { PlaybackState, PlaybackStatus, TuneRequest } from './types';
 
 /** @internal Live stream container format eligible for pre-playback fallback. */
@@ -35,6 +36,8 @@ export interface ServiceControl {
   readonly engine: PlayerEngine;
   readonly config: PlaybackConfig;
   readonly formatCache?: WorkingFormatCache;
+  readonly healthScorer?: StreamHealthScorer;
+  readonly canAcquireAlternate?: (accountKey: string, maxConnections: number) => boolean;
   now(): number;
   getState(): PlaybackState;
   /** The current tune, loaded or held. */

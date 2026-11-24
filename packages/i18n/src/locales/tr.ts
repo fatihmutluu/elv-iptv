@@ -1,6 +1,7 @@
 import type { MessageId } from './en';
 import { trCatchupEpgMessages } from './tr-catchup-epg';
 import { trErgonomicsMessages } from './tr-ergonomics';
+import { trFailoverNetworkMessages } from './tr-failover-network';
 import { trProfilesMessages } from './tr-profiles';
 import { trSubtitlesSuiteMessages } from './tr-subtitles-suite';
 
@@ -710,4 +711,5 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trErgonomicsMessages,
   ...trCatchupEpgMessages,
   ...trSubtitlesSuiteMessages,
+  ...trFailoverNetworkMessages,
 };

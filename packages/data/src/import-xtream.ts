@@ -92,7 +92,12 @@ export async function openClient(
 
 async function openClients(source: SourceRecord, deps: ImportDeps): Promise<Result<Clients>> {
   const raw = await deps.secrets.get(secretKey(source.id, 'xtream')).catch(() => undefined);
-  let parsed: { server?: unknown; username?: unknown; password?: unknown } = {};
+  let parsed: {
+    server?: unknown;
+    username?: unknown;
+    password?: unknown;
+    backupServers?: unknown;
+  } = {};
   try {
     parsed = raw === undefined ? {} : (JSON.parse(raw) as typeof parsed);
   } catch {
@@ -102,10 +107,14 @@ async function openClients(source: SourceRecord, deps: ImportDeps): Promise<Resu
   if (typeof server !== 'string' || typeof username !== 'string' || typeof password !== 'string') {
     return err(elvError('storage', 'secret-missing'));
   }
+  const backupServers = Array.isArray(parsed.backupServers)
+    ? parsed.backupServers.filter((s): s is string => typeof s === 'string' && s.trim() !== '')
+    : [];
   const credentialFingerprint = fingerprintXtreamCredentials(server, username, password);
   const options: XtreamClientOptions = {
     http: deps.http,
     server,
+    ...(backupServers.length > 0 ? { backupServers } : {}),
     username,
     password,
     ...(source.settings.serverTimezone ? { serverTimezone: source.settings.serverTimezone } : {}),

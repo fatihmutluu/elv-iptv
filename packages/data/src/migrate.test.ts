@@ -36,6 +36,8 @@ const TABLES = [
   'guide_sources',
   'channel_guide_overrides',
   'programme_reminders',
+  'failover_groups',
+  'failover_group_members',
 ];
 
 const FTS_TABLE_PREFIXES = [
@@ -70,9 +72,9 @@ async function plan(db: SqlDriver, sql: string, params: (string | number)[]) {
 describe('openCatalog', () => {
   it('creates schema v9 with FTS5 tables, staging tables, backup_urls_json, epg_shift_ms, content_hash, sort_title, track_preferences, and browse indexes on a fresh database', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(16);
+    expect(SCHEMA_VERSION).toBe(17);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 16 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
     expect(await regularTableNames(db)).toEqual([...TABLES].sort());
     expect(await names(db, 'table')).toEqual(expect.arrayContaining([...EXPECTED_FTS_TABLES]));
     expect(await names(db, 'index')).toEqual(
@@ -100,6 +102,9 @@ describe('openCatalog', () => {
         'idx_guide_sources_source',
         'idx_programme_reminders_due',
         'idx_programme_reminders_source',
+        'idx_failover_members_group',
+        'idx_failover_members_channel',
+        'idx_failover_members_source',
       ]),
     );
   });
@@ -116,7 +121,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 16 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
     expect(await db.all('SELECT id, name, deleting FROM sources')).toEqual([
       { id: 's1', name: 'Main', deleting: 0 },
     ]);
@@ -152,7 +157,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 16 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
     expect(await names(db, 'index')).toContain('idx_programmes_source_start_stop');
     expect(
       await db.all<{ key: string }>(
@@ -187,7 +192,7 @@ describe('openCatalog', () => {
     expect(await names(db, 'index')).not.toContain('idx_programmes_source_start_stop');
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 16 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
     expect(await names(db, 'index')).toContain('idx_programmes_source_start_stop');
     expect(await db.all('SELECT guide_id, title FROM programmes')).toEqual([
       { guide_id: 'g1', title: 'Morning Brief' },
@@ -221,7 +226,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 16 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
     expect(await db.all('SELECT id, deleting FROM sources')).toEqual([{ id: 's1', deleting: 0 }]);
     expect(await db.all('SELECT provider_id, is_hidden FROM categories')).toEqual([
       { provider_id: 'c1', is_hidden: 0 },
@@ -269,7 +274,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 16 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
     expect(await db.all('SELECT key, backup_urls_json, epg_shift_ms FROM live')).toEqual([
       { key: 'm:s1:live:1', backup_urls_json: null, epg_shift_ms: null },
     ]);
@@ -316,7 +321,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 16 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
     expect(await db.all('SELECT provider_id, content_hash FROM categories')).toEqual([
       { provider_id: 'c1', content_hash: null },
     ]);
@@ -354,7 +359,7 @@ describe('openCatalog', () => {
     );
     expect((await openCatalog(db)).ok).toBe(true);
     expect(await db.all('SELECT count(*) AS n FROM sources')).toEqual([{ n: 1 }]);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 16 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
   });
 
   it('applies pragmas, with WAL on file databases', async () => {
@@ -655,7 +660,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 16 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
     expect(await regularTableNames(db)).toEqual([...TABLES].sort());
     expect(await names(db, 'index')).toEqual(
       expect.arrayContaining([
@@ -666,6 +671,9 @@ describe('openCatalog', () => {
         'idx_guide_sources_source',
         'idx_programme_reminders_due',
         'idx_programme_reminders_source',
+        'idx_failover_members_group',
+        'idx_failover_members_channel',
+        'idx_failover_members_source',
       ]),
     );
     expect(await db.all('SELECT key, name FROM live')).toEqual([
@@ -712,7 +720,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 16 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 17 }]);
     expect(await regularTableNames(db)).toEqual([...TABLES].sort());
     expect(
       await db.all('SELECT key, catchup_days, catchup_mode, catchup_source_template FROM live'),

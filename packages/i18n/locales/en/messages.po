@@ -2577,3 +2577,105 @@ msgstr "Top"
 
 msgid "player.subtitleStyle.reset"
 msgstr "Reset style"
+
+msgid "channels.manage.tab.failover"
+msgstr "Failover"
+
+msgid "channels.failover.title"
+msgstr "Failover Groups"
+
+msgid "channels.failover.subtitle"
+msgstr "Group matching channels across sources in priority order for automatic backup switching."
+
+msgid "channels.failover.autoMatch"
+msgstr "Auto-match channels"
+
+msgid "channels.failover.applySuggestions"
+msgstr "Apply {count} suggested groups"
+
+msgid "channels.failover.noSuggestions"
+msgstr "No new cross-source matches found."
+
+msgid "channels.failover.createPlaceholder"
+msgstr "New failover group name"
+
+msgid "channels.failover.create"
+msgstr "Create group"
+
+msgid "channels.failover.empty"
+msgstr "No failover groups yet. Add multiple sources or create a group manually."
+
+msgid "channels.failover.memberCount"
+msgstr "{count} sources"
+
+msgid "channels.failover.priorityBadge"
+msgstr "#{rank}"
+
+msgid "channels.failover.primaryBadge"
+msgstr "Primary"
+
+msgid "channels.failover.moveUp"
+msgstr "Move up"
+
+msgid "channels.failover.moveDown"
+msgstr "Move down"
+
+msgid "channels.failover.addChannel"
+msgstr "Add channel"
+
+msgid "channels.failover.removeMember"
+msgstr "Remove"
+
+msgid "channels.failover.deleteGroup"
+msgstr "Delete group"
+
+msgid "channels.failover.selectChannelHint"
+msgstr "Choose a live channel to add to this failover group."
+
+msgid "live.health.flaky"
+msgstr "Unstable"
+
+msgid "live.health.dead"
+msgstr "Offline"
+
+msgid "live.health.healthy"
+msgstr "Healthy"
+
+msgid "sources.network.title"
+msgstr "Network"
+
+msgid "sources.network.dnsFamilyLabel"
+msgstr "DNS IP preference"
+
+msgid "sources.network.dnsFamily.system"
+msgstr "System"
+
+msgid "sources.network.dnsFamily.ipv4"
+msgstr "IPv4 only"
+
+msgid "sources.network.dnsFamily.ipv6"
+msgstr "IPv6 only"
+
+msgid "sources.network.hostOverrideLabel"
+msgstr "Host IP override (optional)"
+
+msgid "sources.network.hostOverridePlaceholder"
+msgstr "e.g. 203.0.113.10 or 2001:db8::1"
+
+msgid "sources.network.hostOverrideHint"
+msgstr "Connects directly to this IP while keeping original TLS certificate verification."
+
+msgid "sources.network.invalidHostOverride"
+msgstr "Enter a valid IPv4 or IPv6 address without ports or schemes."
+
+msgid "sources.network.backupServersLabel"
+msgstr "Backup server URLs (optional)"
+
+msgid "sources.network.backupServersPlaceholder"
+msgstr "One URL per line"
+
+msgid "sources.network.save"
+msgstr "Save network settings"
+
+msgid "sources.network.saved"
+msgstr "Network settings saved"

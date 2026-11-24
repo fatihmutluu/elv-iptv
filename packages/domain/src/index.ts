@@ -14,6 +14,7 @@ export {
 export * from './http';
 export * from './keymap-store';
 export * from './languages';
+export * from './network-transport';
 export * from './playback-guard';
 export * from './preferences';
 export * from './profile-preferences';

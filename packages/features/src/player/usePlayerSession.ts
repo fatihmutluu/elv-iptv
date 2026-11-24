@@ -1,3 +1,4 @@
+import type { CatalogService } from '@elv/data';
 import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
 import {
   type ChapterInfo,
@@ -20,6 +21,7 @@ import {
 } from 'react';
 import type { PlayTarget } from '../ports/play-target';
 import type { AudioDeviceInfo, HostKey, OpenVideoEngine, VideoHost } from '../ports/video-host';
+import { useStreamHealth } from '../shared';
 
 type SessionState =
   | { readonly kind: 'opening' }
@@ -75,6 +77,8 @@ export function usePlayerSession(params: {
   backgroundAudioPlayback?: boolean;
   windowAspectRatioLock?: boolean;
   onWindowAspectRatioLockChange?: (enabled: boolean) => void;
+  catalogRef?: MutableRefObject<Partial<Pick<CatalogService, 'reportStreamOutcome'>>>;
+  canAcquireAlternate?: (accountKey: string, maxConnections: number) => boolean;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
@@ -93,12 +97,19 @@ export function usePlayerSession(params: {
     backgroundAudioPlayback,
     windowAspectRatioLock,
     onWindowAspectRatioLockChange,
+    catalogRef,
+    canAcquireAlternate,
     serviceRef,
     clockRef,
     timersRef,
     hostKeyRef,
     onExitRef,
   } = params;
+  const streamHealth = useStreamHealth();
+  const streamHealthRef = useRef(streamHealth);
+  streamHealthRef.current = streamHealth;
+  const canAcquireAlternateRef = useRef(canAcquireAlternate);
+  canAcquireAlternateRef.current = canAcquireAlternate;
   const onReadyRef = useRef(params.onServiceReady);
   onReadyRef.current = params.onServiceReady;
 
@@ -127,10 +138,30 @@ export function usePlayerSession(params: {
         markUnavailable();
         return;
       }
+      const health = streamHealthRef.current;
       const service = createPlaybackService({
         engine: opened.engine,
         clock: clockRef.current,
         timers: timersRef.current,
+        healthCache: health.healthCache,
+        healthScorer: health.healthScorer,
+        idleProbeController: health.idleProbeController,
+        canAcquireAlternate: (accountKey, maxConnections) => {
+          const explicit = canAcquireAlternateRef.current;
+          if (explicit !== undefined && !explicit(accountKey, maxConnections)) {
+            return false;
+          }
+          return streamHealthRef.current.canAcquireAlternate(accountKey, maxConnections);
+        },
+        onStreamOutcome: (stream, outcome) => {
+          if (stream.sourceId !== undefined && stream.sourceId.length > 0) {
+            catalogRef?.current.reportStreamOutcome?.(
+              stream.sourceId,
+              stream.url,
+              outcome === 'success',
+            );
+          }
+        },
       });
       const offHostKey = opened.onHostKey?.((key) => {
         if ((key as string) === 'close') onExitRef.current();
@@ -165,7 +196,7 @@ export function usePlayerSession(params: {
         activeSession = null;
       }
     };
-  }, [clockRef, hostKeyRef, onExitRef, serviceRef, timersRef, videoHost]);
+  }, [catalogRef, clockRef, hostKeyRef, onExitRef, serviceRef, timersRef, videoHost]);
 
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : null;
   const [inPip, setInPip] = useState(false);

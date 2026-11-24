@@ -357,6 +357,27 @@ export function createCoalescedCatalog(
     ...(c.removeReminder ? { removeReminder: c.removeReminder.bind(c) } : {}),
     ...(c.markReminderFired ? { markReminderFired: c.markReminderFired.bind(c) } : {}),
     ...(c.pruneExpiredReminders ? { pruneExpiredReminders: c.pruneExpiredReminders.bind(c) } : {}),
+    ...(c.listFailoverGroups ? { listFailoverGroups: c.listFailoverGroups.bind(c) } : {}),
+    ...(c.getFailoverGroupByChannel
+      ? { getFailoverGroupByChannel: c.getFailoverGroupByChannel.bind(c) }
+      : {}),
+    ...(c.createFailoverGroup ? { createFailoverGroup: c.createFailoverGroup.bind(c) } : {}),
+    ...(c.renameFailoverGroup ? { renameFailoverGroup: c.renameFailoverGroup.bind(c) } : {}),
+    ...(c.deleteFailoverGroup ? { deleteFailoverGroup: c.deleteFailoverGroup.bind(c) } : {}),
+    ...(c.addFailoverGroupMember
+      ? { addFailoverGroupMember: c.addFailoverGroupMember.bind(c) }
+      : {}),
+    ...(c.removeFailoverGroupMember
+      ? { removeFailoverGroupMember: c.removeFailoverGroupMember.bind(c) }
+      : {}),
+    ...(c.reorderFailoverGroupMembers
+      ? { reorderFailoverGroupMembers: c.reorderFailoverGroupMembers.bind(c) }
+      : {}),
+    ...(c.suggestFailoverGroups ? { suggestFailoverGroups: c.suggestFailoverGroups.bind(c) } : {}),
+    ...(c.applySuggestedFailoverGroups
+      ? { applySuggestedFailoverGroups: c.applySuggestedFailoverGroups.bind(c) }
+      : {}),
+    ...(c.reportStreamOutcome ? { reportStreamOutcome: c.reportStreamOutcome.bind(c) } : {}),
     ...(queryNextEpisodeFn
       ? {
           queryNextEpisode: async (seriesKey, currentItemKey, profileId, nextOpts) => {

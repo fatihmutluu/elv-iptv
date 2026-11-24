@@ -1,6 +1,7 @@
 import { isAsyncIterable, openAsyncIterator } from './async-iterable';
 import { createCookieJar, extractSetCookies, mergeCookieHeader } from './cookie-jar';
 import { originOf, resolveRedirectUrl, sanitizeHeaders, scopeCredentialHeaders } from './headers';
+import type { DnsFamilyPreference } from './network-transport';
 import { type ElvError, elvError, err, ok, type Result } from './result';
 
 /** A response whose body streams in chunks. */
@@ -24,6 +25,10 @@ export interface HttpRequestOptions {
   redirect?: 'follow' | 'manual';
   /** Opt-in support for legacy TLS (TLS 1.0/1.1 or older ciphers) scoped strictly to this request (`#182`). */
   readonly allowLegacyTls?: boolean;
+  /** Optional per-request DNS address-family preference (`#172`). */
+  readonly dnsFamily?: DnsFamilyPreference;
+  /** Optional validated literal IP override scoped strictly to the initial request host while keeping TLS SNI (`#172`). */
+  readonly hostOverride?: string;
 }
 
 /**

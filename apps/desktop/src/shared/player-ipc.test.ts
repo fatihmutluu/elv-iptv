@@ -64,6 +64,34 @@ describe('isPlayerCommandMessage', () => {
         name: 'load',
         cmd: { ...load, options: { subtitleTrackId: 's:1' } },
       },
+      {
+        name: 'load',
+        cmd: {
+          ...load,
+          options: { dnsFamily: 'system', hostOverride: '203.0.113.10' },
+        },
+      },
+      {
+        name: 'load',
+        cmd: {
+          ...load,
+          options: { dnsFamily: 'ipv4', hostOverride: '198.51.100.25' },
+        },
+      },
+      {
+        name: 'load',
+        cmd: {
+          ...load,
+          options: { dnsFamily: 'ipv6', hostOverride: '[2001:db8::1]' },
+        },
+      },
+      {
+        name: 'load',
+        cmd: {
+          ...load,
+          options: { dnsFamily: 'ipv6', hostOverride: '2001:db8::2' },
+        },
+      },
       { name: 'retry', attempt: 4 },
       { name: 'play', attempt: 4 },
       { name: 'pause', attempt: 4 },
@@ -328,6 +356,33 @@ describe('isPlayerCommandMessage', () => {
       }),
       msg({ name: 'load', cmd: { ...load, options: { filterSdhSubtitles: 'yes' } } }),
       msg({ name: 'load', cmd: { ...load, options: { allowLegacyTls: 'yes' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { dnsFamily: 'ipv5' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { dnsFamily: 'IPV4' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { dnsFamily: 4 } } }),
+      msg({ name: 'load', cmd: { ...load, options: { dnsFamily: '' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { hostOverride: '' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { hostOverride: '   ' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { hostOverride: 'evil.example' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { hostOverride: '203.0.113.1:8080' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { hostOverride: 'http://203.0.113.1' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { hostOverride: '203.0.113.1\n' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { hostOverride: 'fe80::1%eth0' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { hostOverride: 123 } } }),
+      msg({ name: 'load', cmd: { ...load, options: { hostOverride: null } } }),
+      msg({
+        name: 'queueNext',
+        request: {
+          itemKey: 'ep2',
+          stream: { url: 'http://sim.test/ep2.mkv', headers: {}, dnsFamily: 'ipv5' },
+        },
+      }),
+      msg({
+        name: 'queueNext',
+        request: {
+          itemKey: 'ep2',
+          stream: { url: 'http://sim.test/ep2.mkv', headers: {}, hostOverride: 'evil.example' },
+        },
+      }),
       msg({ name: 'load' }),
       msg({ name: 'load', cmd: null }),
       msg({ name: 'load', cmd: { ...load, kind: 'radio' } }),

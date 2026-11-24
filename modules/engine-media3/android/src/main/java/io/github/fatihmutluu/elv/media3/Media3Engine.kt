@@ -78,7 +78,6 @@ class Media3Engine : SharedObject {
   private val closer = createCloserExecutor()
   internal val gate = ConnectionGate(closer)
   private val http = engineHttpClient()
-  private val legacyHttp = legacyTlsClient(http)
   internal val codecPolicy = CodecPolicy()
   private val audioEffects = AudioEffectsController(handler)
   private val audioDelayUs = AtomicLong(0L)
@@ -697,7 +696,13 @@ class Media3Engine : SharedObject {
     val transferListener = ProgressTransferListener(shouldReport = { reporter.isWaitingForMedia }) { bytes, atMs ->
       post { if (generation == prepareGen) reporter.onTransferProgress(bytes, atMs) }
     }
-    val httpClient = if (next.allowLegacyTls) legacyHttp else http
+    val httpClient = networkScopedClient(
+      base = http,
+      allowLegacyTls = next.allowLegacyTls,
+      dnsFamily = next.dnsFamily,
+      hostOverride = next.hostOverride,
+      initialUrl = next.url,
+    )
     val source = createMediaSource(
       next, gate, prepareGen, serial, lowRamDevice, httpClient, transferListener,
       timeShiftRingBuffer = activeTimeShiftBuffer, timeShiftTracker = activeTimeShiftTracker,

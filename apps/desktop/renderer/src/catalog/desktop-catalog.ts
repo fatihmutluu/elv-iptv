@@ -348,6 +348,55 @@ export function createDesktopCatalogFromBridge(
         : Promise.resolve(err(elvError('storage', 'unsupported'))),
     pruneExpiredReminders: (nowMs) =>
       bridge.pruneExpiredReminders ? bridge.pruneExpiredReminders(nowMs) : Promise.resolve(0),
+    listFailoverGroups: () =>
+      bridge.listFailoverGroups ? bridge.listFailoverGroups() : Promise.resolve([]),
+    getFailoverGroupByChannel: (channelKey) =>
+      bridge.getFailoverGroupByChannel
+        ? bridge.getFailoverGroupByChannel(channelKey)
+        : Promise.resolve(undefined),
+    createFailoverGroup: (input) =>
+      bridge.createFailoverGroup
+        ? bridge.createFailoverGroup({ ...input, name: sanitizeDisplayText(input.name) })
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    renameFailoverGroup: (groupId, name) =>
+      bridge.renameFailoverGroup
+        ? bridge.renameFailoverGroup(groupId, sanitizeDisplayText(name))
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    deleteFailoverGroup: (groupId) =>
+      bridge.deleteFailoverGroup
+        ? bridge.deleteFailoverGroup(groupId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    addFailoverGroupMember: (groupId, channelKey) =>
+      bridge.addFailoverGroupMember
+        ? bridge.addFailoverGroupMember(groupId, channelKey)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    removeFailoverGroupMember: (groupId, channelKey) =>
+      bridge.removeFailoverGroupMember
+        ? bridge.removeFailoverGroupMember(groupId, channelKey)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    reorderFailoverGroupMembers: (groupId, orderedChannelKeys) =>
+      bridge.reorderFailoverGroupMembers
+        ? bridge.reorderFailoverGroupMembers(groupId, orderedChannelKeys)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    suggestFailoverGroups: () =>
+      bridge.suggestFailoverGroups ? bridge.suggestFailoverGroups() : Promise.resolve([]),
+    applySuggestedFailoverGroups: (clusters) =>
+      bridge.applySuggestedFailoverGroups
+        ? bridge.applySuggestedFailoverGroups(
+            clusters.map((cluster) => ({
+              ...cluster,
+              suggestedName: sanitizeDisplayText(cluster.suggestedName),
+              members: cluster.members.map((m) => ({
+                ...m,
+                channelName: sanitizeDisplayText(m.channelName),
+                sourceName: sanitizeDisplayText(m.sourceName),
+              })),
+            })),
+          )
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    reportStreamOutcome: (sourceId, serverUrl, succeeded) => {
+      void bridge.reportStreamOutcome?.(sourceId, serverUrl, succeeded)?.catch(() => undefined);
+    },
     flushPendingWrites: () =>
       bridge.flushPendingWrites ? bridge.flushPendingWrites() : Promise.resolve(),
     async close() {

@@ -1,4 +1,4 @@
-import type { ElvError, HttpClient } from '@elv/domain';
+import { type ElvError, type HttpClient, originOf } from '@elv/domain';
 import { hasExplicitScheme, normalizeXtreamHostKey, resolveXtreamBaseUrl } from './xtream-scheme';
 
 const DEFAULT_COOLDOWN_429_MS = 60_000;
@@ -179,4 +179,106 @@ export function isFailoverEligible(error: ElvError): boolean {
   if (HTTP_4XX_RE.test(error.code)) return false;
   if (HTTP_5XX_RE.test(error.code)) return true;
   return true;
+}
+
+/** Independent failover state for one Xtream server role (API or stream). */
+export interface MirrorSlotState {
+  activeIndex(): number;
+  attemptOrder(nowMs?: number): { order: number[]; probePrimary: boolean };
+  markSuccess(idx: number, nowMs?: number): void;
+  markPrimaryProbeFailed(nowMs?: number): void;
+  reportFailure(failedIdx?: number, nowMs?: number): void;
+  reset(): void;
+}
+
+/** Creates an isolated mirror-failover slot with independent primary cooldown probing and recovery. */
+export function createMirrorSlotState(
+  serverCount: number,
+  primaryCooldownMs: number,
+  nowFn: () => number,
+): MirrorSlotState {
+  const count = Math.max(1, Math.floor(serverCount));
+  const cooldownMs = Math.max(0, primaryCooldownMs);
+  let active = 0;
+  let failedOverAtMs: number | undefined;
+
+  const isPrimaryProbeDue = (now: number): boolean =>
+    active > 0 && failedOverAtMs !== undefined && now - failedOverAtMs >= cooldownMs;
+
+  return {
+    activeIndex: () => active,
+    attemptOrder(nowMs?: number) {
+      const now = nowMs ?? nowFn();
+      const probePrimary = isPrimaryProbeDue(now);
+      return { order: buildAttemptOrder(count, active, probePrimary), probePrimary };
+    },
+    markSuccess(idx: number, nowMs?: number) {
+      if (!Number.isInteger(idx) || idx < 0 || idx >= count) return;
+      if (idx === 0) {
+        active = 0;
+        failedOverAtMs = undefined;
+        return;
+      }
+      if (active === 0 || failedOverAtMs === undefined) {
+        failedOverAtMs = nowMs ?? nowFn();
+      }
+      active = idx;
+    },
+    markPrimaryProbeFailed(nowMs?: number) {
+      if (active > 0) failedOverAtMs = nowMs ?? nowFn();
+    },
+    reportFailure(failedIdx?: number, nowMs?: number) {
+      if (count <= 1) return;
+      const now = nowMs ?? nowFn();
+      const idx = failedIdx ?? (isPrimaryProbeDue(now) ? 0 : active);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= count) return;
+      if (idx === 0 && active > 0) {
+        failedOverAtMs = now;
+        return;
+      }
+      if (idx !== active) return;
+      const next = (active + 1) % count;
+      if (next === 0) {
+        active = 0;
+        failedOverAtMs = undefined;
+      } else {
+        if (active === 0 || failedOverAtMs === undefined) failedOverAtMs = now;
+        active = next;
+      }
+    },
+    reset() {
+      active = 0;
+      failedOverAtMs = undefined;
+    },
+  };
+}
+
+/**
+ * Matches a URL or host/base string against `servers` by normalized scheme+host+port (ignoring
+ * credentials, path, query, default ports, and case), or by host when scheme-less. Returns `-1` if unmatched.
+ */
+export function findServerIndex(
+  servers: readonly XtreamServerEntry[],
+  urlOrBase: string | undefined,
+  resolveEntryBase: (e: XtreamServerEntry) => string,
+): number {
+  if (urlOrBase === undefined) return -1;
+  const trimmed = urlOrBase.trim();
+  if (trimmed.length === 0) return -1;
+  const targetOrigin = originOf(trimmed);
+  if (targetOrigin !== undefined) {
+    for (let i = 0; i < servers.length; i++) {
+      if (originOf(resolveEntryBase(servers[i] as XtreamServerEntry)) === targetOrigin) return i;
+    }
+    return -1;
+  }
+  if (trimmed.includes('://')) return -1;
+  const hostPort = normalizeXtreamHostKey(trimmed);
+  const atIdx = hostPort.lastIndexOf('@');
+  const targetHost = atIdx === -1 ? hostPort : hostPort.slice(atIdx + 1);
+  if (targetHost.length === 0) return -1;
+  for (let i = 0; i < servers.length; i++) {
+    if ((servers[i] as XtreamServerEntry).hostKey === targetHost) return i;
+  }
+  return -1;
 }

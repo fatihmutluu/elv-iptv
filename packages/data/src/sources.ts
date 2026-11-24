@@ -2,13 +2,16 @@ import {
   type ElvError,
   elvError,
   err,
+  normalizeDnsFamily,
   ok,
   type Result,
   type Scheduler,
   type SecretStore,
   type SqlDriver,
   type TransportSettings,
+  validateHostOverride,
 } from '@elv/domain';
+import { pruneSourceFailoverMembersInTx } from './failover-groups-repo';
 import type { SegmentRule, UrlVars } from './templates';
 import { deleteUrlVars } from './urlvars-store';
 
@@ -143,6 +146,8 @@ export interface SourceRecord {
 export interface XtreamSourceInput {
   name: string;
   server: string;
+  /** Optional ordered failover mirror URLs stored strictly in SecretStore (`#317`). */
+  readonly backupServers?: readonly string[];
   username: string;
   password: string;
   transport?: TransportSettings;
@@ -250,6 +255,7 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'custom_group_items',
   'guide_sources',
   'programme_reminders',
+  'failover_group_members',
 ];
 const NON_URLVARS_PARTS = ['xtream', 'playlist'] as const;
 
@@ -265,6 +271,46 @@ export function secretKey(id: string, part: 'xtream' | 'playlist' | 'urlvars'): 
 }
 
 const invalid = (): Result<never> => err(elvError('source-format', 'invalid-source'));
+
+function sanitizeTransportSettings(
+  transport: TransportSettings | undefined,
+): Result<TransportSettings | undefined> {
+  if (transport === undefined) return ok(undefined);
+  const hostRes = validateHostOverride(transport.hostOverride);
+  if (!hostRes.ok) return hostRes;
+  const dnsFamily = normalizeDnsFamily(transport.dnsFamily);
+  const cleaned: {
+    userAgent?: string;
+    referer?: string;
+    xtreamFormat?: 'ts' | 'm3u8';
+    allowLegacyTls?: boolean;
+    dnsFamily?: ReturnType<typeof normalizeDnsFamily>;
+    hostOverride?: string;
+  } = {};
+  if (transport.userAgent !== undefined) cleaned.userAgent = transport.userAgent;
+  if (transport.referer !== undefined) cleaned.referer = transport.referer;
+  if (transport.xtreamFormat !== undefined) cleaned.xtreamFormat = transport.xtreamFormat;
+  if (typeof transport.allowLegacyTls === 'boolean') {
+    cleaned.allowLegacyTls = transport.allowLegacyTls;
+  }
+  if (dnsFamily !== undefined) cleaned.dnsFamily = dnsFamily;
+  if (hostRes.value !== undefined) cleaned.hostOverride = hostRes.value;
+  return ok(Object.keys(cleaned).length > 0 ? (cleaned as TransportSettings) : undefined);
+}
+
+function normalizeBackupServers(raw: readonly string[] | undefined): string[] {
+  if (raw === undefined) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (trimmed === '' || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
 
 async function persist(
   deps: AddSourceDeps,
@@ -307,9 +353,11 @@ export async function addXtreamSource(
   if ([input.name, input.server, input.username, input.password].some((v) => v.trim() === '')) {
     return invalid();
   }
+  const transportRes = sanitizeTransportSettings(input.transport);
+  if (!transportRes.ok) return transportRes;
   const id = deps.newId();
   const settings: SourceSettings =
-    input.transport === undefined ? {} : { transport: input.transport };
+    transportRes.value === undefined ? {} : { transport: transportRes.value };
   if (typeof input.xmltvTimezone === 'string' && input.xmltvTimezone.trim() !== '') {
     settings.xmltvTimezone = input.xmltvTimezone.trim();
   }
@@ -320,10 +368,12 @@ export async function addXtreamSource(
     createdAt: deps.clock(),
     settings,
   };
+  const backupServers = normalizeBackupServers(input.backupServers);
   const secret = JSON.stringify({
     server: input.server,
     username: input.username,
     password: input.password,
+    ...(backupServers.length > 0 ? { backupServers } : {}),
   });
   const secrets: [string, string][] = [[secretKey(id, 'xtream'), secret]];
   if (input.guideUrl !== undefined && input.guideUrl.trim() !== '') {
@@ -352,10 +402,12 @@ export async function addM3uSource(
   deps: AddSourceDeps,
 ): Promise<Result<SourceRecord>> {
   if (input.name.trim() === '' || input.playlistUrl.trim() === '') return invalid();
+  const transportRes = sanitizeTransportSettings(input.transport);
+  if (!transportRes.ok) return transportRes;
   const id = deps.newId();
   const settings: SourceSettings = {};
   const vars: UrlVars = {};
-  if (input.transport !== undefined) settings.transport = input.transport;
+  if (transportRes.value !== undefined) settings.transport = transportRes.value;
   if (input.vodPlaylist !== undefined) settings.vodPlaylist = input.vodPlaylist;
   if (typeof input.xmltvTimezone === 'string' && input.xmltvTimezone.trim() !== '') {
     settings.xmltvTimezone = input.xmltvTimezone.trim();
@@ -390,11 +442,13 @@ export async function addLocalM3uSource(
   if (deps.localPlaylistStore === undefined) {
     return err(elvError('storage', 'local-playlist-unsupported'));
   }
+  const transportRes = sanitizeTransportSettings(input.transport);
+  if (!transportRes.ok) return transportRes;
   const id = deps.newId();
   if (!SOURCE_ID.test(id)) return err(elvError('storage', 'invalid-source-id'));
   const settings: SourceSettings = { isLocalPlaylist: true };
   const vars: UrlVars = {};
-  if (input.transport !== undefined) settings.transport = input.transport;
+  if (transportRes.value !== undefined) settings.transport = transportRes.value;
   if (input.vodPlaylist !== undefined) settings.vodPlaylist = input.vodPlaylist;
   if (typeof input.xmltvTimezone === 'string' && input.xmltvTimezone.trim() !== '') {
     settings.xmltvTimezone = input.xmltvTimezone.trim();
@@ -446,13 +500,58 @@ export async function getSource(db: SqlDriver, id: string): Promise<SourceRecord
   };
 }
 
-/** Replaces the stored settings of a source. */
+/** Replaces the stored settings of a source, validating `transport.dnsFamily` and `transport.hostOverride` (`#172`). */
 export async function updateSourceSettings(
   db: SqlDriver,
   id: string,
   settings: SourceSettings,
-): Promise<void> {
-  await db.run('UPDATE sources SET settings_json = ? WHERE id = ?', [JSON.stringify(settings), id]);
+): Promise<Result<void>> {
+  const transportRes = sanitizeTransportSettings(settings.transport);
+  if (!transportRes.ok) return transportRes;
+  const sanitized: SourceSettings = { ...settings };
+  if (transportRes.value === undefined) delete sanitized.transport;
+  else sanitized.transport = transportRes.value;
+  await db.run('UPDATE sources SET settings_json = ? WHERE id = ?', [
+    JSON.stringify(sanitized),
+    id,
+  ]);
+  return ok(undefined);
+}
+
+/** Updates optional Xtream failover backup mirror URLs strictly inside `SecretStore` (never SQLite, `#317`). */
+export async function updateXtreamBackupServers(
+  id: string,
+  backupServers: readonly string[],
+  deps: { secrets: SecretStore },
+): Promise<Result<void>> {
+  const raw = await deps.secrets.get(secretKey(id, 'xtream')).catch(() => undefined);
+  if (raw === undefined) return err(elvError('storage', 'secret-missing'));
+  let parsed: { server?: unknown; username?: unknown; password?: unknown };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    return err(elvError('storage', 'secret-missing'));
+  }
+  if (
+    typeof parsed.server !== 'string' ||
+    typeof parsed.username !== 'string' ||
+    typeof parsed.password !== 'string'
+  ) {
+    return err(elvError('storage', 'secret-missing'));
+  }
+  const normalized = normalizeBackupServers(backupServers);
+  const next = JSON.stringify({
+    server: parsed.server,
+    username: parsed.username,
+    password: parsed.password,
+    ...(normalized.length > 0 ? { backupServers: normalized } : {}),
+  });
+  try {
+    await deps.secrets.set(secretKey(id, 'xtream'), next);
+    return ok(undefined);
+  } catch {
+    return err(elvError('storage', 'secret-store-failed'));
+  }
 }
 
 /** Deletes the secrets of a source (including all `urlvars` shards); reports `storage/secret-delete-failed` on failure. */
@@ -519,6 +618,7 @@ export async function finishDeletingSource(
     await tx.run('DELETE FROM custom_group_items WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM guide_sources WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM programme_reminders WHERE source_id = ?', [id]);
+    await pruneSourceFailoverMembersInTx(tx, id);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });
   await opts?.localPlaylistStore?.remove(id).catch(() => undefined);

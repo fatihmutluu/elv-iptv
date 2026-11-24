@@ -11,6 +11,7 @@ import {
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { LiveHealthBadge } from './LiveHealthBadge';
 import { formatLiveTitle } from './live-model';
 import { SourceBadgePill } from './SourceBadgePill';
 import { formatChannelDisplayName, type SourceBadgeInfo } from './source-badge';
@@ -147,6 +148,7 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
             {displayName}
           </Text>
           <SourceBadgePill badge={p.sourceBadge} testID={`live-zap-source-badge-${p.index}`} />
+          <LiveHealthBadge channelKey={p.item.key} testID={`live-zap-health-${p.index}`} />
         </View>
         <Text
           numberOfLines={1}

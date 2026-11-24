@@ -65,6 +65,13 @@ export {
   type PagedListSource,
 } from './paged-list-source';
 export { createProfileScopedCatalog } from './profile-scoped-catalog';
+export {
+  type StreamHealthContextValue,
+  StreamHealthProvider,
+  type StreamHealthProviderProps,
+  useChannelHealthStatus,
+  useStreamHealth,
+} from './stream-health-context';
 export { useCardQuickActionsState } from './useCardQuickActionsState';
 export {
   RouteActiveProvider,

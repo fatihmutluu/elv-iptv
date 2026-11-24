@@ -1,3 +1,9 @@
+import {
+  type DnsFamilyPreference,
+  normalizeDnsFamily,
+  type TransportSettings,
+  validateHostOverride,
+} from '@elv/domain';
 import { isCredentialFingerprint } from './credential-fingerprint';
 import {
   normalizeActiveConnections,
@@ -24,6 +30,8 @@ export interface SourceRow {
   readonly categorySelection?: SourceCategorySelection;
   readonly xmltvTimezone?: string;
   readonly allowLegacyTls?: boolean;
+  readonly dnsFamily?: DnsFamilyPreference;
+  readonly hostOverride?: string;
 }
 
 const CATEGORY_SELECTION_KEYS = [
@@ -91,9 +99,9 @@ export function mergeSourceSettings(
       if (value === undefined) {
         delete next.transport;
       } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        const mergedTransport = {
+        const mergedTransport: Record<string, unknown> = {
           ...existing.transport,
-          ...(value as SourceSettings['transport']),
+          ...(value as Record<string, unknown>),
         };
         if (
           'allowLegacyTls' in mergedTransport &&
@@ -102,7 +110,18 @@ export function mergeSourceSettings(
         ) {
           delete mergedTransport.allowLegacyTls;
         }
-        next.transport = mergedTransport;
+        if ('dnsFamily' in value) {
+          const normalized = normalizeDnsFamily((value as Record<string, unknown>).dnsFamily);
+          if (normalized === undefined) delete mergedTransport.dnsFamily;
+          else mergedTransport.dnsFamily = normalized;
+        }
+        if ('hostOverride' in value) {
+          const rawHost = (value as Record<string, unknown>).hostOverride;
+          if (rawHost === undefined || (typeof rawHost === 'string' && rawHost.trim() === '')) {
+            delete mergedTransport.hostOverride;
+          }
+        }
+        next.transport = mergedTransport as TransportSettings;
       }
       continue;
     }
@@ -144,6 +163,8 @@ type ParsedSourceMeta = Pick<
   | 'categorySelection'
   | 'xmltvTimezone'
   | 'allowLegacyTls'
+  | 'dnsFamily'
+  | 'hostOverride'
 >;
 
 /** @internal Extracts non-secret display metadata from `sources.settings_json`. */
@@ -158,6 +179,8 @@ export function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
       categorySelection?: SourceCategorySelection;
       xmltvTimezone?: string;
       allowLegacyTls?: boolean;
+      dnsFamily?: DnsFamilyPreference;
+      hostOverride?: string;
     } = {};
     if (isCredentialFingerprint(parsed.credentialFingerprint)) {
       out.credentialFingerprint = parsed.credentialFingerprint;
@@ -170,6 +193,14 @@ export function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
     }
     if (typeof parsed.transport?.allowLegacyTls === 'boolean') {
       out.allowLegacyTls = parsed.transport.allowLegacyTls;
+    }
+    const dnsFamily = normalizeDnsFamily(parsed.transport?.dnsFamily);
+    if (dnsFamily !== undefined) {
+      out.dnsFamily = dnsFamily;
+    }
+    const hostOverride = validateHostOverride(parsed.transport?.hostOverride);
+    if (hostOverride.ok && hostOverride.value !== undefined) {
+      out.hostOverride = hostOverride.value;
     }
     if (parsed.categorySelection !== undefined) {
       const sanitized = sanitizeCategorySelection(parsed.categorySelection);
@@ -229,4 +260,11 @@ export const mapNewSourceRow = (r: SourceRecord): SourceRow => ({
   ...(typeof r.settings.transport?.allowLegacyTls === 'boolean'
     ? { allowLegacyTls: r.settings.transport.allowLegacyTls }
     : {}),
+  ...(normalizeDnsFamily(r.settings.transport?.dnsFamily) !== undefined
+    ? { dnsFamily: normalizeDnsFamily(r.settings.transport?.dnsFamily) as DnsFamilyPreference }
+    : {}),
+  ...(() => {
+    const validated = validateHostOverride(r.settings.transport?.hostOverride);
+    return validated.ok && validated.value !== undefined ? { hostOverride: validated.value } : {};
+  })(),
 });

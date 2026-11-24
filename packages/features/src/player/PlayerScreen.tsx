@@ -169,6 +169,10 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     backgroundAudioPlayback: effectiveBackgroundAudio,
     ...(windowAspectRatioLock !== undefined ? { windowAspectRatioLock } : {}),
     ...(onWindowAspectRatioLockChange !== undefined ? { onWindowAspectRatioLockChange } : {}),
+    ...(props.canAcquireAlternate !== undefined
+      ? { canAcquireAlternate: props.canAcquireAlternate }
+      : {}),
+    catalogRef,
     serviceRef,
     clockRef,
     timersRef,

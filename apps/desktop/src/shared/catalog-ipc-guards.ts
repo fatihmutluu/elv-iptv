@@ -29,8 +29,10 @@ import {
   type ContentKind,
   type ElvError,
   type ErrorCategory,
+  normalizeDnsFamily,
   PROFILE_ID_RE,
   type TransportSettings,
+  validateHostOverride,
 } from '@elv/domain';
 import { MAX_PICKED_PLAYLIST_BYTES } from './sources-ipc.ts';
 
@@ -351,12 +353,72 @@ export const isNowNextKeyList = (x: unknown): x is readonly string[] =>
 export const isEpgWindowKeyList = (x: unknown): x is readonly string[] =>
   isBoundedKeyList(x, MAX_EPG_WINDOW_KEYS);
 
+const TRANSPORT_SETTINGS_KEYS = new Set<keyof TransportSettings>([
+  'userAgent',
+  'referer',
+  'xtreamFormat',
+  'allowLegacyTls',
+  'dnsFamily',
+  'hostOverride',
+]);
+const MAX_BACKUP_SERVERS = 16;
+const MAX_BACKUP_SERVER_CHARS = 2_048;
+const NON_HTTP_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:(?!\/\/)(?!\d+(?:[/?#]|$))/;
+
+function isBackupServerEntry(x: unknown): x is string {
+  if (!isBoundedString(x, 1, MAX_BACKUP_SERVER_CHARS) || hasControlChar(x)) return false;
+  const trimmed = x.trim();
+  if (trimmed.length === 0) return false;
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(trimmed)) {
+    if (!/^https?:\/\//i.test(trimmed)) return false;
+    try {
+      const parsed = new URL(trimmed);
+      return (
+        (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
+      );
+    } catch {
+      return false;
+    }
+  }
+  if (!trimmed.startsWith('[') && NON_HTTP_SCHEME_RE.test(trimmed)) return false;
+  try {
+    const parsed = new URL(`http://${trimmed}`);
+    return parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function isOptionalBackupServers(x: unknown): boolean {
+  return (
+    x === undefined ||
+    (Array.isArray(x) &&
+      x.length <= MAX_BACKUP_SERVERS &&
+      x.every((entry) => isBackupServerEntry(entry)))
+  );
+}
+
 function isTransportSettings(x: unknown): x is TransportSettings {
-  if (!isRecord(x)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, TRANSPORT_SETTINGS_KEYS)) return false;
   if (!isOptionalCleanString(x['userAgent']) || !isOptionalCleanString(x['referer'])) return false;
   if (x['allowLegacyTls'] !== undefined && typeof x['allowLegacyTls'] !== 'boolean') return false;
   const fmt = x['xtreamFormat'];
-  return fmt === undefined || fmt === 'ts' || fmt === 'm3u8';
+  if (fmt !== undefined && fmt !== 'ts' && fmt !== 'm3u8') return false;
+  const dnsFamily = x['dnsFamily'];
+  if (
+    dnsFamily !== undefined &&
+    (typeof dnsFamily !== 'string' || normalizeDnsFamily(dnsFamily) !== dnsFamily)
+  ) {
+    return false;
+  }
+  const hostOverride = x['hostOverride'];
+  if (
+    hostOverride !== undefined &&
+    (typeof hostOverride !== 'string' || !validateHostOverride(hostOverride).ok)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 const MAX_TIMEZONE_CHARS = 128;
@@ -439,6 +501,7 @@ export function isAddSourceInput(x: unknown): x is AddSourceInput {
   if (x['kind'] === 'xtream') {
     return (
       isTrimmedCleanString(x['server']) &&
+      isOptionalBackupServers(x['backupServers']) &&
       isBoundedString(x['username']) &&
       isBoundedString(x['password'])
     );

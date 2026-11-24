@@ -178,4 +178,22 @@ describe('MpvEngine custom header state races', () => {
     engine.load(live(3, URL_B, {}));
     await vi.waitFor(() => expect(fake.sent.filter((c) => c[0] === 'loadfile')).toHaveLength(1));
   });
+
+  it('accepts LoadCommand with dnsFamily and hostOverride without emitting invalid mpv loadfile options (#172)', async () => {
+    const { fake, engine } = await setup();
+    engine.load({
+      attempt: 1,
+      url: URL_A,
+      headers: { 'User-Agent': 'ELV/1' },
+      kind: 'live',
+      options: { dnsFamily: 'ipv4', hostOverride: '203.0.113.10' },
+    });
+    await vi.waitFor(() => expect(fake.sent.filter((c) => c[0] === 'loadfile')).toHaveLength(1));
+    const loadCmd = fake.sent.find((c) => c[0] === 'loadfile');
+    const opts = loadCmd?.[4] as Record<string, string> | undefined;
+    expect(opts).toBeDefined();
+    expect(opts?.['dnsFamily']).toBeUndefined();
+    expect(opts?.['hostOverride']).toBeUndefined();
+    expect(opts?.['user-agent']).toBe('ELV/1');
+  });
 });

@@ -593,6 +593,24 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         method: 'pruneExpiredReminders',
         ...(nowMs === undefined ? {} : { nowMs }),
       }),
+    listFailoverGroups: () => callValue({ method: 'listFailoverGroups' }),
+    getFailoverGroupByChannel: (channelKey) =>
+      callValue({ method: 'getFailoverGroupByChannel', channelKey }),
+    createFailoverGroup: (input) => callResult({ method: 'createFailoverGroup', input }),
+    renameFailoverGroup: (groupId, name) =>
+      callResult({ method: 'renameFailoverGroup', groupId, name }),
+    deleteFailoverGroup: (groupId) => callResult({ method: 'deleteFailoverGroup', groupId }),
+    addFailoverGroupMember: (groupId, channelKey) =>
+      callResult({ method: 'addFailoverGroupMember', groupId, channelKey }),
+    removeFailoverGroupMember: (groupId, channelKey) =>
+      callResult({ method: 'removeFailoverGroupMember', groupId, channelKey }),
+    reorderFailoverGroupMembers: (groupId, orderedChannelKeys) =>
+      callResult({ method: 'reorderFailoverGroupMembers', groupId, orderedChannelKeys }),
+    suggestFailoverGroups: () => callValue({ method: 'suggestFailoverGroups' }),
+    applySuggestedFailoverGroups: (clusters) =>
+      callResult({ method: 'applySuggestedFailoverGroups', clusters }),
+    reportStreamOutcome: (sourceId, serverUrl, succeeded) =>
+      callValue({ method: 'reportStreamOutcome', sourceId, serverUrl, succeeded }),
     flushPendingWrites: () => callValue({ method: 'flushPendingWrites' }),
     onChanged(listener: () => void): () => void {
       changedListeners.add(listener);

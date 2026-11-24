@@ -165,10 +165,13 @@ async function discoverM3u(
     if (playlistUrl === undefined) return err(elvError('storage', 'secret-missing'));
     let response: Awaited<ReturnType<ImportDeps['http']['get']>>;
     try {
+      const transport = source.settings.transport;
       response = await deps.http.get(playlistUrl, {
-        headers: transportHeaders(source.settings.transport),
+        headers: transportHeaders(transport),
         timeoutMs: REQUEST_TIMEOUT_MS,
-        ...(source.settings.transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
+        ...(transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
+        ...(transport?.dnsFamily !== undefined ? { dnsFamily: transport.dnsFamily } : {}),
+        ...(transport?.hostOverride !== undefined ? { hostOverride: transport.hostOverride } : {}),
         ...(signal === undefined ? {} : { signal }),
       });
     } catch {

@@ -50,6 +50,8 @@ public struct LoadRequest: Equatable, Sendable {
   public var externalSubtitles: [ExternalSubtitleDescriptor]
   public var subtitleStyle: UserSubtitleStyleOverride?
   public var liveEdgeCushionSeconds: Double?
+  public var dnsFamily: DnsFamilyPreference
+  public var hostOverride: String?
 
   public init(
     url: String,
@@ -65,7 +67,9 @@ public struct LoadRequest: Equatable, Sendable {
     secondarySubtitleTrackId: String? = nil,
     externalSubtitles: [ExternalSubtitleDescriptor] = [],
     subtitleStyle: UserSubtitleStyleOverride? = nil,
-    liveEdgeCushionSeconds: Double? = nil
+    liveEdgeCushionSeconds: Double? = nil,
+    dnsFamily: DnsFamilyPreference = .system,
+    hostOverride: String? = nil
   ) {
     self.url = url
     self.headers = headers
@@ -81,6 +85,8 @@ public struct LoadRequest: Equatable, Sendable {
     self.externalSubtitles = externalSubtitles
     self.subtitleStyle = subtitleStyle
     self.liveEdgeCushionSeconds = liveEdgeCushionSeconds
+    self.dnsFamily = dnsFamily
+    self.hostOverride = hostOverride
   }
 }
 
@@ -118,6 +124,8 @@ public struct EngineLoadOptions: Equatable, Sendable {
   public var subtitlesDisabled: Bool
   public var filterSdhSubtitles: Bool
   public var allowLegacyTls: Bool
+  public var dnsFamily: DnsFamilyPreference
+  public var hostOverride: String?
   public var secondarySubtitleTrackId: String?
   public var externalSubtitles: [ExternalSubtitleDescriptor]
 
@@ -142,6 +150,8 @@ public struct EngineLoadOptions: Equatable, Sendable {
     subtitlesDisabled: Bool = false,
     filterSdhSubtitles: Bool = false,
     allowLegacyTls: Bool = false,
+    dnsFamily: DnsFamilyPreference = .system,
+    hostOverride: String? = nil,
     secondarySubtitleTrackId: String? = nil,
     externalSubtitles: [ExternalSubtitleDescriptor] = []
   ) {
@@ -165,6 +175,8 @@ public struct EngineLoadOptions: Equatable, Sendable {
     self.subtitlesDisabled = subtitlesDisabled
     self.filterSdhSubtitles = filterSdhSubtitles
     self.allowLegacyTls = allowLegacyTls
+    self.dnsFamily = dnsFamily
+    self.hostOverride = hostOverride
     self.secondarySubtitleTrackId = secondarySubtitleTrackId
     self.externalSubtitles = externalSubtitles
   }

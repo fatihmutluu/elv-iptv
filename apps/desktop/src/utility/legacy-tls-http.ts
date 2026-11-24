@@ -1,10 +1,17 @@
+import * as dns from 'node:dns';
 import * as http from 'node:http';
 import * as https from 'node:https';
+import type { LookupFunction } from 'node:net';
 import {
   createFetchHttpClient,
+  type DnsFamilyPreference,
+  err,
   type FetchLike,
   type HttpClient,
   type HttpRequestOptions,
+  ipLiteralFamily,
+  normalizeDnsFamily,
+  validateHostOverride,
 } from '@elv/domain';
 
 /** Opt-in legacy TLS floor applied strictly to isolated legacy requests (`#182`). */
@@ -13,12 +20,24 @@ export const LEGACY_TLS_MIN_VERSION = 'TLSv1' as const;
 /** Opt-in OpenSSL cipher list allowing legacy servers while keeping full certificate validation (`#182`). */
 export const LEGACY_TLS_CIPHERS = 'DEFAULT:@SECLEVEL=0' as const;
 
+/** Optional transport overrides injected by tests for {@link createDesktopHttpClient}. */
+export interface DesktopHttpClientOptions {
+  readonly legacyFetchImpl?: FetchLike;
+  readonly dnsLookup?: typeof dns.lookup;
+  readonly httpRequest?: typeof http.request;
+  readonly httpsRequest?: typeof https.request;
+}
+
 function hasControlChar(text: string): boolean {
   for (let i = 0; i < text.length; i += 1) {
     const code = text.charCodeAt(i);
     if (code < 0x20 || code === 0x7f) return true;
   }
   return false;
+}
+
+function stripBrackets(hostname: string): string {
+  return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
 }
 
 function isHttpUrl(raw: string): boolean {
@@ -79,6 +98,13 @@ export function createLegacyTlsAgent(): https.Agent {
   });
 }
 
+function createModernHttpsAgent(): https.Agent {
+  return new https.Agent({
+    keepAlive: false,
+    rejectUnauthorized: true,
+  });
+}
+
 function createNodeHeaders(raw: http.IncomingHttpHeaders): {
   forEach(cb: (value: string, key: string) => void): void;
   get(name: string): string | null;
@@ -127,7 +153,51 @@ function streamIncomingMessage(res: http.IncomingMessage): AsyncIterable<Uint8Ar
   };
 }
 
-function createNodeLegacyTlsFetch(agent: https.Agent = createLegacyTlsAgent()): FetchLike {
+interface NodeTransportConfig {
+  readonly agent: https.Agent;
+  readonly dnsFamily: DnsFamilyPreference;
+  readonly hostOverride: string | undefined;
+  readonly overrideFamily: 4 | 6 | undefined;
+  readonly initialHost: string;
+  readonly dnsLookup: typeof dns.lookup;
+  readonly httpRequest: typeof http.request;
+  readonly httpsRequest: typeof https.request;
+}
+
+function createScopedLookup(cfg: NodeTransportConfig, allowOverrideOnHop: boolean): LookupFunction {
+  return (hostname, lookupOpts, cb) => {
+    const normalizedOpts: dns.LookupOptions =
+      typeof lookupOpts === 'number' ? { family: lookupOpts } : { ...lookupOpts };
+    const lookupHost = stripBrackets(hostname).toLowerCase();
+    if (
+      allowOverrideOnHop &&
+      lookupHost === cfg.initialHost &&
+      cfg.hostOverride !== undefined &&
+      cfg.overrideFamily !== undefined
+    ) {
+      if (normalizedOpts.all === true) {
+        (cb as (err: NodeJS.ErrnoException | null, addresses: dns.LookupAddress[]) => void)(null, [
+          { address: cfg.hostOverride, family: cfg.overrideFamily },
+        ]);
+      } else {
+        (cb as (err: NodeJS.ErrnoException | null, address: string, family: number) => void)(
+          null,
+          cfg.hostOverride,
+          cfg.overrideFamily,
+        );
+      }
+      return;
+    }
+    if (cfg.dnsFamily === 'ipv4' || cfg.dnsFamily === 'ipv6') {
+      const family = cfg.dnsFamily === 'ipv4' ? 4 : 6;
+      cfg.dnsLookup(hostname, { ...normalizedOpts, family }, cb as never);
+      return;
+    }
+    cfg.dnsLookup(hostname, normalizedOpts, cb as never);
+  };
+}
+
+function createNodeTransportFetch(cfg: NodeTransportConfig): FetchLike {
   return (url, init) =>
     new Promise((resolve, reject) => {
       let parsed: URL;
@@ -146,16 +216,28 @@ function createNodeLegacyTlsFetch(agent: https.Agent = createLegacyTlsAgent()): 
         return;
       }
 
+      const hopHost = stripBrackets(parsed.hostname).toLowerCase();
+      const allowOverrideOnHop =
+        cfg.hostOverride !== undefined &&
+        cfg.overrideFamily !== undefined &&
+        hopHost === cfg.initialHost;
+      const lookup = createScopedLookup(cfg, allowOverrideOnHop);
       const isHttps = parsed.protocol === 'https:';
+      const isIpHost = ipLiteralFamily(hopHost) !== undefined;
       const req = isHttps
-        ? https.request(parsed, {
+        ? cfg.httpsRequest(parsed, {
             method: 'GET',
             headers: init.headers,
-            agent,
+            agent: cfg.agent,
+            rejectUnauthorized: true,
+            lookup,
+            ...(isIpHost ? {} : { servername: parsed.hostname }),
           })
-        : http.request(parsed, {
+        : cfg.httpRequest(parsed, {
             method: 'GET',
             headers: init.headers,
+            agent: false,
+            lookup,
           });
 
       const onAbort = (): void => {
@@ -188,29 +270,68 @@ function createNodeLegacyTlsFetch(agent: https.Agent = createLegacyTlsAgent()): 
 
 /**
  * Desktop catalog {@link HttpClient}: routes default requests strictly through the standard
- * modern-TLS `fetchImpl`, and routes ONLY requests with `options.allowLegacyTls === true` through
- * a lazily-allocated isolated legacy TLS client (`#182`).
+ * modern-TLS `fetchImpl`, and routes requests specifying `allowLegacyTls`, `dnsFamily: 'ipv4' | 'ipv6'`,
+ * or a validated `hostOverride` through Node `http.request`/`https.request` with scoped DNS lookup,
+ * preserved TLS SNI, and strict certificate verification (`#182`, `#172`).
  */
 export function createDesktopHttpClient(
   fetchImpl: FetchLike,
-  opts?: { readonly legacyFetchImpl?: FetchLike },
+  opts?: DesktopHttpClientOptions,
 ): HttpClient {
   const modernClient = createFetchHttpClient(createHttpOnlyFetch(fetchImpl));
-  let legacyClient: HttpClient | undefined;
+  let legacyFetchClient: HttpClient | undefined;
+  let legacyAgent: https.Agent | undefined;
+  let modernAgent: https.Agent | undefined;
 
-  const getLegacyClient = (): HttpClient => {
-    legacyClient ??= createFetchHttpClient(
-      createHttpOnlyFetch(opts?.legacyFetchImpl ?? createNodeLegacyTlsFetch()),
+  const getLegacyAgent = (): https.Agent => {
+    legacyAgent ??= createLegacyTlsAgent();
+    return legacyAgent;
+  };
+  const getModernAgent = (): https.Agent => {
+    modernAgent ??= createModernHttpsAgent();
+    return modernAgent;
+  };
+  const getLegacyFetchClient = (): HttpClient => {
+    legacyFetchClient ??= createFetchHttpClient(
+      createHttpOnlyFetch(opts?.legacyFetchImpl as FetchLike),
     );
-    return legacyClient;
+    return legacyFetchClient;
   };
 
   return {
     get(url: string, options?: HttpRequestOptions) {
-      if (options?.allowLegacyTls === true) {
-        return getLegacyClient().get(url, options);
+      const hostRes = validateHostOverride(options?.hostOverride);
+      if (!hostRes.ok) {
+        return Promise.resolve(err(hostRes.error));
       }
-      return modernClient.get(url, options);
+      const hostOverride = hostRes.value;
+      const dnsFamily: DnsFamilyPreference = normalizeDnsFamily(options?.dnsFamily) ?? 'system';
+      const allowLegacyTls = options?.allowLegacyTls === true;
+      const hasCustomNetwork = dnsFamily !== 'system' || hostOverride !== undefined;
+
+      if (!allowLegacyTls && !hasCustomNetwork) {
+        return modernClient.get(url, options);
+      }
+      if (allowLegacyTls && !hasCustomNetwork && opts?.legacyFetchImpl !== undefined) {
+        return getLegacyFetchClient().get(url, options);
+      }
+
+      if (!isHttpUrl(url)) {
+        return modernClient.get(url, options);
+      }
+      const initialHost = stripBrackets(new URL(url).hostname).toLowerCase();
+      const overrideFamily = hostOverride !== undefined ? ipLiteralFamily(hostOverride) : undefined;
+      const transportFetch = createNodeTransportFetch({
+        agent: allowLegacyTls ? getLegacyAgent() : getModernAgent(),
+        dnsFamily,
+        hostOverride,
+        overrideFamily,
+        initialHost,
+        dnsLookup: opts?.dnsLookup ?? dns.lookup,
+        httpRequest: opts?.httpRequest ?? http.request,
+        httpsRequest: opts?.httpsRequest ?? https.request,
+      });
+      return createFetchHttpClient(createHttpOnlyFetch(transportFetch)).get(url, options);
     },
   };
 }
