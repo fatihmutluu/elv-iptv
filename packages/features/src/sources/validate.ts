@@ -8,6 +8,7 @@ import {
   type DnsFamilyPreference,
   err,
   normalizeDnsFamily,
+  normalizeMacAddress,
   ok,
   type Result,
   type TransportSettings,
@@ -16,9 +17,9 @@ import {
 import type { MessageId } from '@elv/i18n';
 import type { PickedPlaylistFile } from '../ports/source-import-host';
 
-/** Controlled state of the add-source form across Xtream and M3U modes. */
+/** Controlled state of the add-source form across Xtream, M3U, and Stalker modes. */
 export interface SourceFormState {
-  mode: 'xtream' | 'm3u';
+  mode: 'xtream' | 'm3u' | 'stalker';
   name: string;
   server: string;
   username: string;
@@ -26,6 +27,12 @@ export interface SourceFormState {
   xtreamFormat: 'default' | 'ts' | 'm3u8';
   playlistUrl: string;
   keepAsM3u: boolean;
+  /** Stalker / Ministra portal URL (`#29`). */
+  portalUrl: string;
+  /** Stalker / Ministra device MAC address (`#29`). */
+  macAddress: string;
+  /** Optional Stalker / Ministra device serial number (`#29`). */
+  serialNumber: string;
   guideUrl: string;
   userAgent: string;
   referer: string;
@@ -51,6 +58,7 @@ export type SourceValidationCode =
   | 'missing-scheme'
   | 'unsupported-scheme'
   | 'invalid-address'
+  | 'invalid-mac'
   | 'invalid-guide-url'
   | 'invalid-timezone'
   | 'invalid-host-override'
@@ -67,6 +75,7 @@ export interface SourceValidationError {
 /** Normalized submission payload ready for `CatalogService.addSource`, `addSourceFromLink`, or `addLocalM3uSource`. */
 export type ValidatedSourceSubmission =
   | { readonly kind: 'xtream'; readonly input: AddSourceInput & { kind: 'xtream' } }
+  | { readonly kind: 'stalker'; readonly input: AddSourceInput & { kind: 'stalker' } }
   | {
       readonly kind: 'link';
       readonly input: LinkSourceInput;
@@ -101,6 +110,10 @@ const VALIDATION_MESSAGES: Readonly<
   'invalid-address': {
     messageId: 'source.validation.invalidAddress',
     hintId: 'source.hint.invalidAddress',
+  },
+  'invalid-mac': {
+    messageId: 'sources.stalker.invalidMac',
+    hintId: 'sources.stalker.invalidMacHint',
   },
   'invalid-guide-url': {
     messageId: 'source.validation.invalidGuideUrl',
@@ -256,6 +269,9 @@ export function createInitialSourceForm(): SourceFormState {
     xtreamFormat: 'default',
     playlistUrl: '',
     keepAsM3u: false,
+    portalUrl: '',
+    macAddress: '',
+    serialNumber: '',
     guideUrl: '',
     userAgent: '',
     referer: '',
@@ -288,6 +304,9 @@ export function validateSourceForm(
     form.username,
     form.password,
     form.playlistUrl,
+    form.portalUrl,
+    form.macAddress,
+    form.serialNumber,
     form.guideUrl,
     form.userAgent,
     form.referer,
@@ -395,6 +414,45 @@ export function validateSourceForm(
         username,
         password,
         ...(backupServers !== undefined ? { backupServers } : {}),
+        ...(guideRaw !== '' ? { guideUrl: guideRaw } : {}),
+        ...(transport !== undefined ? { transport } : {}),
+        ...(xmltvTimezoneRaw !== '' ? { xmltvTimezone: xmltvTimezoneRaw } : {}),
+      },
+    });
+  }
+
+  if (form.mode === 'stalker') {
+    const portalRaw = form.portalUrl.trim();
+    if (portalRaw === '') return fail('missing-server');
+    let candidatePortal = portalRaw;
+    if (!portalRaw.includes('://')) {
+      if (OTHER_URI_SCHEME.test(portalRaw)) return fail('unsupported-scheme');
+      candidatePortal = `http://${portalRaw}`;
+    }
+    const parsedPortal = validateHttpUrl(candidatePortal);
+    if (!parsedPortal.ok) return parsedPortal;
+
+    const macRes = normalizeMacAddress(form.macAddress);
+    if (!macRes.ok) return fail('invalid-mac');
+
+    const serialNumber = form.serialNumber.trim();
+    const name = form.name.trim() || parsedPortal.value.host;
+    const transport = buildTransport(
+      userAgent,
+      refererRaw,
+      undefined,
+      allowLegacyTls,
+      dnsFamily,
+      hostOverride,
+    );
+    return ok({
+      kind: 'stalker',
+      input: {
+        kind: 'stalker',
+        name,
+        portalUrl: candidatePortal,
+        mac: macRes.value,
+        ...(serialNumber !== '' ? { serialNumber } : {}),
         ...(guideRaw !== '' ? { guideUrl: guideRaw } : {}),
         ...(transport !== undefined ? { transport } : {}),
         ...(xmltvTimezoneRaw !== '' ? { xmltvTimezone: xmltvTimezoneRaw } : {}),

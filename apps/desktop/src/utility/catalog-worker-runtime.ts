@@ -35,6 +35,11 @@ import {
 import { executeChannelOpsRpcCall } from './catalog-worker-channel-ops.ts';
 import { executeEpgOpsRpcCall } from './catalog-worker-epg-ops.ts';
 import { executeFailoverOpsRpcCall } from './catalog-worker-failover-ops.ts';
+import {
+  executeWaveF5bOpsRpcCall,
+  isWaveF5bRpcCall,
+  sanitizeStalkerSourceInput,
+} from './catalog-worker-wave-f5b-ops.ts';
 import { createDesktopHttpClient } from './legacy-tls-http.ts';
 import { createLocalPlaylistStore } from './local-playlist-store.ts';
 import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.ts';
@@ -166,6 +171,7 @@ function sanitizeAddSourceInput(input: AddSourceInput): Result<AddSourceInput> {
       ...(guide.value === undefined ? {} : { guideUrl: guide.value }),
     });
   }
+  if (input.kind === 'stalker') return sanitizeStalkerSourceInput(input, guide.value);
   const server = input.server.trim();
   if (!isValidXtreamServer(server)) return err(elvError('source-format', 'invalid-source'));
   let backupServers: string[] | undefined;
@@ -628,7 +634,9 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'reportStreamOutcome':
         return executeFailoverOpsRpcCall(service, call);
       default:
-        return executeEpgOpsRpcCall(service, call);
+        return isWaveF5bRpcCall(call)
+          ? executeWaveF5bOpsRpcCall(service, call)
+          : executeEpgOpsRpcCall(service, call);
     }
   };
 

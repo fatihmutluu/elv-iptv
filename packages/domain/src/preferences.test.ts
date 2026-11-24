@@ -79,6 +79,7 @@ describe('preferences codec', () => {
       audioNormalization: false,
       windowAspectRatioLock: false,
       backgroundAudioPlayback: false,
+      vodEnrichmentEnabled: false,
       subtitleStyle: {
         fontSize: 'medium',
         textColor: 'white',

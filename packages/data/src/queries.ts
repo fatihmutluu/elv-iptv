@@ -499,13 +499,15 @@ export async function queryEpisodes(
 /** Where a playable key lives. */
 export interface PlayableRow {
   sourceId: string;
-  /** Kind of the Xtream stream path. */
+  /** Kind of the Xtream/Stalker stream path. */
   streamKind: 'live' | 'movie' | 'series';
   providerId: string | null;
   extension: string | null;
   urlTemplate: string | null;
   headersJson: string | null;
   backupUrlsJson: string | null;
+  /** 1-based episode number when resolving a series episode (used by Stalker `create_link`). */
+  readonly episodeNumber?: number | null;
 }
 
 /** Finds a live channel, movie or series detail row by content key via the `UNIQUE (source_id, key)` index. */
@@ -571,14 +573,15 @@ export async function queryPlayable(db: SqlDriver, key: string): Promise<Playabl
     url_template: string | null;
     headers_json: string | null;
     backup_urls_json: string | null;
+    episode_number: number | null;
   }>(
-    `SELECT source_id, 'live' AS stream_kind, provider_id, NULL AS extension, url_template, headers_json, backup_urls_json
+    `SELECT source_id, 'live' AS stream_kind, provider_id, NULL AS extension, url_template, headers_json, backup_urls_json, NULL AS episode_number
        FROM live WHERE source_id = ? AND key = ?
      UNION ALL
-     SELECT source_id, 'movie', provider_id, extension, url_template, headers_json, backup_urls_json
+     SELECT source_id, 'movie', provider_id, extension, url_template, headers_json, backup_urls_json, NULL
        FROM movies WHERE source_id = ? AND key = ?
      UNION ALL
-     SELECT source_id, 'series', provider_id, extension, url_template, headers_json, backup_urls_json
+     SELECT source_id, 'series', provider_id, extension, url_template, headers_json, backup_urls_json, episode
        FROM episodes WHERE source_id = ? AND key = ?
      LIMIT 1`,
     [sourceId, key, sourceId, key, sourceId, key],
@@ -593,6 +596,7 @@ export async function queryPlayable(db: SqlDriver, key: string): Promise<Playabl
     urlTemplate: r.url_template,
     headersJson: r.headers_json,
     backupUrlsJson: r.backup_urls_json,
+    ...(r.episode_number !== null ? { episodeNumber: r.episode_number } : {}),
   };
 }
 

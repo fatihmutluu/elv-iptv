@@ -2,6 +2,7 @@ import type {
   CatalogService,
   EpisodeRow,
   SeriesUnplayedSummary,
+  VodEnrichmentRecord,
   VodVersionOption,
   WatchProgressRow,
 } from '@elv/data';
@@ -13,6 +14,7 @@ import {
   type DetailSnapshot,
   emptyDetailSnapshot,
   fetchRelatedDetailItems,
+  mergeVodEnrichment,
 } from './detail-data-helpers';
 import { useDetailMutations } from './useDetailMutations';
 import { useDetailSeasonLoader } from './useDetailSeasonLoader';
@@ -25,6 +27,7 @@ export interface UseDetailDataOptions {
   readonly catalog: CatalogService;
   readonly refreshToken: number;
   readonly userStateVersion?: number;
+  readonly vodEnrichmentEnabled?: boolean;
 }
 
 /** Hydrated Detail screen dataset, series season controls, and optimistic user-state mutations. */
@@ -35,6 +38,10 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly year: number | null;
   readonly rating: number | null;
   readonly plot: string | null;
+  readonly genres: readonly string[];
+  readonly isEnriched: boolean;
+  readonly collectionIds: readonly string[];
+  readonly setCollectionIds: (ids: readonly string[]) => void;
   readonly relatedUnplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly versions: readonly VodVersionOption[];
   readonly selectSeason: (season: number) => void;
@@ -53,6 +60,7 @@ export function useDetailData({
   catalog,
   refreshToken,
   userStateVersion = 0,
+  vodEnrichmentEnabled = false,
 }: UseDetailDataOptions): DetailDataState {
   const uiCache = useCatalogUiCache();
   const uiCacheRef = useRef(uiCache);
@@ -66,6 +74,8 @@ export function useDetailData({
   );
   const [seasonsRetryToken, setSeasonsRetryToken] = useState(0);
   const [versions, setVersions] = useState<readonly VodVersionOption[]>([]);
+  const [enrichment, setEnrichment] = useState<VodEnrichmentRecord | null>(null);
+  const [collectionIds, setCollectionIds] = useState<readonly string[]>([]);
 
   const mountedRef = useRef(true);
   const snapRef = useRef(snap);
@@ -144,6 +154,8 @@ export function useDetailData({
 
     if (itemChanged) {
       setVersions([]);
+      setEnrichment(null);
+      setCollectionIds([]);
       myListGenRef.current += 1;
       myListInFlightRef.current = 0;
       watchedGenRef.current += 1;
@@ -308,6 +320,44 @@ export function useDetailData({
     userStateVersion,
   ]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken triggers opt-in enrichment refresh on source sync
+  useEffect(() => {
+    if (vodEnrichmentEnabled !== true) {
+      setEnrichment(null);
+      return undefined;
+    }
+    if (target.kind !== 'movie' && target.kind !== 'series') return undefined;
+    if (typeof catalog.enrichVodItem !== 'function') return undefined;
+    let cancelled = false;
+    void catalog
+      .enrichVodItem(target.itemKey, { enabled: true })
+      .then((record) => {
+        if (!cancelled && mountedRef.current) setEnrichment(record);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, refreshToken, target.itemKey, target.kind, vodEnrichmentEnabled]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion refresh collection badges cleanly
+  useEffect(() => {
+    if (typeof catalog.listCollectionsForItem !== 'function') {
+      setCollectionIds([]);
+      return undefined;
+    }
+    let cancelled = false;
+    void catalog
+      .listCollectionsForItem(target.itemKey)
+      .then((ids) => {
+        if (!cancelled && mountedRef.current) setCollectionIds(ids);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, refreshToken, target.itemKey, userStateVersion]);
+
   const selectSeason = useCallback(
     (season: number) => {
       if (snapRef.current.selectedSeason === season) return;
@@ -341,9 +391,25 @@ export function useDetailData({
   const title = snap.detailRow?.name ?? target.title;
   const posterUri = target.posterUri ?? snap.detailRow?.logo ?? null;
   const backdropUri = target.backdropUri ?? snap.detailRow?.logo ?? target.posterUri ?? null;
-  const year = target.year ?? snap.detailRow?.year ?? null;
-  const rating = target.rating ?? snap.detailRow?.rating ?? null;
-  const plot = snap.detailRow?.plot ?? target.overview ?? null;
+  const providerYear = target.year ?? snap.detailRow?.year ?? null;
+  const providerRating = target.rating ?? snap.detailRow?.rating ?? null;
+  const providerPlot = snap.detailRow?.plot ?? target.overview ?? null;
+  const providerGenres = target.genres;
+
+  const mergedMeta = useMemo(
+    () =>
+      mergeVodEnrichment(
+        {
+          year: providerYear,
+          rating: providerRating,
+          genres: providerGenres ?? [],
+          plot: providerPlot,
+        },
+        vodEnrichmentEnabled === true ? enrichment : null,
+      ),
+    [enrichment, providerGenres, providerPlot, providerRating, providerYear, vodEnrichmentEnabled],
+  );
+  const { year, rating, plot, genres, enriched: isEnriched } = mergedMeta;
 
   const mutationRefs = useMemo(
     () => ({
@@ -391,6 +457,10 @@ export function useDetailData({
       year,
       rating,
       plot,
+      genres,
+      isEnriched,
+      collectionIds,
+      setCollectionIds,
       relatedUnplayedBySeriesKey,
       versions,
       selectSeason,
@@ -400,6 +470,9 @@ export function useDetailData({
     };
   }, [
     backdropUri,
+    collectionIds,
+    genres,
+    isEnriched,
     plot,
     posterUri,
     rating,

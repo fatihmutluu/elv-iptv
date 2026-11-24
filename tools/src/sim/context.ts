@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { FaultRules } from './fault-rules.ts';
 import type { RequestLog } from './log.ts';
 import type { LiveProcess } from './media.ts';
+import type { StalkerSessionStore } from './stalker.ts';
 
 /** Open media responses per account; the connection limit reads it. */
 export interface Connections {
@@ -28,6 +29,8 @@ export interface SimContext {
   connections: Connections;
   media: MediaConfig | null;
   faultRules: FaultRules;
+  /** Per-instance Stalker portal token sessions. */
+  stalker?: StalkerSessionStore;
   /** Live FFmpeg copies this server started and that have not exited yet. */
   liveProcesses: Set<LiveProcess>;
   /** Per-instance child process pool for `spawnLive` when isolating multiple simulator instances. */

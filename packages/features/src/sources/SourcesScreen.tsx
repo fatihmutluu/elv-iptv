@@ -22,6 +22,7 @@ import { QrPairingOverlay } from './QrPairingOverlay';
 import { SavedSourcesPanel } from './SavedSourcesPanel';
 import { AddSourceNetworkFields } from './SourceNetworkEditor';
 import { ActionButton, FieldInput } from './SourcesScreenParts';
+import { StalkerFormFields } from './StalkerFormFields';
 import { sourcesStyles as styles } from './sources-styles';
 import { useSourceNetworkEditor } from './useSourceNetworkEditor';
 import { useSourcesController } from './useSourcesController';
@@ -273,6 +274,16 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                       onPress={() => ctrl.setMode('m3u')}
                       recordLayout={tv.recordLayout}
                     />
+                    <ActionButton
+                      focusId="mode-stalker"
+                      testID="sources-mode-stalker"
+                      label={i18n.t('sources.mode.stalker')}
+                      segment
+                      active={ctrl.form.mode === 'stalker'}
+                      tvFocused={tv.tvFocusId === 'mode-stalker'}
+                      onPress={() => ctrl.setMode('stalker')}
+                      recordLayout={tv.recordLayout}
+                    />
                   </View>
                 </View>
 
@@ -321,6 +332,18 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                       secureTextEntry
                     />
                   </>
+                ) : ctrl.form.mode === 'stalker' ? (
+                  <StalkerFormFields
+                    portalUrl={ctrl.form.portalUrl}
+                    macAddress={ctrl.form.macAddress}
+                    serialNumber={ctrl.form.serialNumber}
+                    onChangePortalUrl={(v) => ctrl.updateField('portalUrl', v)}
+                    onChangeMacAddress={(v) => ctrl.updateField('macAddress', v)}
+                    onChangeSerialNumber={(v) => ctrl.updateField('serialNumber', v)}
+                    tvFocusId={tv.tvFocusId}
+                    fieldShared={fieldShared}
+                    i18n={i18n}
+                  />
                 ) : (
                   <>
                     <FieldInput

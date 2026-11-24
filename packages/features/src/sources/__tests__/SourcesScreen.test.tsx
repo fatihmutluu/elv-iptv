@@ -318,8 +318,9 @@ describe('SourcesScreen (#71)', () => {
       expect(modeRingStyle.top).toBe(-4);
       expect(modeRingStyle.borderColor).toBe(buildTheme().colors.focusRingColor);
 
-      // Move down to sources-mode-m3u (1) -> sources-input-name (2) -> sources-input-server (3)
+      // Move down to sources-mode-m3u (1) -> sources-mode-stalker (2) -> sources-input-name (3) -> sources-input-server (4)
       await act(async () => {
+        remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);

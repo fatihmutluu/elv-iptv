@@ -51,6 +51,12 @@ export {
   scanM3u,
 } from './m3u';
 export { toElvError } from './scan-error';
+export {
+  createStalkerClient,
+  normalizeStalkerPortalUrl,
+  stripStalkerCommandPrefix,
+} from './stalker';
+export type * from './stalker-types';
 export { createStats, type ScanStats, type ScanWarning, warn } from './stats';
 export {
   containsRtlText,

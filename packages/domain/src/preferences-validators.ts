@@ -143,6 +143,7 @@ export interface ExtendedPreferencesFields {
   readonly audioNormalization: boolean;
   readonly windowAspectRatioLock: boolean;
   readonly backgroundAudioPlayback: boolean;
+  readonly vodEnrichmentEnabled?: boolean;
   readonly subtitleStyle: SubtitleStyleConfig;
 }
 
@@ -544,6 +545,10 @@ export function parseExtendedPreferences(
       typeof parsed.backgroundAudioPlayback === 'boolean'
         ? parsed.backgroundAudioPlayback
         : defaults.backgroundAudioPlayback,
+    vodEnrichmentEnabled:
+      typeof parsed.vodEnrichmentEnabled === 'boolean'
+        ? parsed.vodEnrichmentEnabled
+        : (defaults.vodEnrichmentEnabled ?? false),
     subtitleStyle: normalizeSubtitleStyle(parsed.subtitleStyle),
   };
 }
@@ -646,6 +651,7 @@ export function serializeExtendedPreferences(
     audioNormalization: Boolean(snapshot.audioNormalization),
     windowAspectRatioLock: Boolean(snapshot.windowAspectRatioLock),
     backgroundAudioPlayback: Boolean(snapshot.backgroundAudioPlayback),
+    vodEnrichmentEnabled: Boolean(snapshot.vodEnrichmentEnabled),
     ...(subtitleStyleEquals(subtitleStyle, DEFAULT_SUBTITLE_STYLE) ? {} : { subtitleStyle }),
   };
 }
@@ -783,6 +789,10 @@ export function mergeExtendedPreferences(
       typeof patch.backgroundAudioPlayback === 'boolean'
         ? patch.backgroundAudioPlayback
         : base.backgroundAudioPlayback,
+    vodEnrichmentEnabled:
+      typeof patch.vodEnrichmentEnabled === 'boolean'
+        ? patch.vodEnrichmentEnabled
+        : (base.vodEnrichmentEnabled ?? false),
     subtitleStyle: mergeSubtitleStyle(base.subtitleStyle, patch.subtitleStyle),
   };
 }

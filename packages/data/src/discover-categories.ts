@@ -11,6 +11,7 @@ import {
 import { scanM3u, type XtreamCategory } from '@elv/sources';
 import { runParallelFailFast } from './import-progress';
 import { checkAbort, Stop, unwrap } from './import-run';
+import { discoverStalkerCategories } from './import-stalker';
 import { DEFAULT_BATCH_SIZE, type ImportDeps } from './import-types';
 import { openClient } from './import-xtream';
 import { isPlaceholderLiveChannel } from './placeholder-filter';
@@ -260,5 +261,6 @@ export async function discoverSourceCategories(
   if (source === undefined) return err(elvError('storage', 'source-not-found'));
   if (source.kind === 'xtream') return discoverXtream(source, deps, opts?.signal);
   if (source.kind === 'm3u') return discoverM3u(source, deps, opts?.signal);
+  if (source.kind === 'stalker') return discoverStalkerCategories(source, deps, opts?.signal);
   return err(elvError('source-format', 'unsupported-source'));
 }

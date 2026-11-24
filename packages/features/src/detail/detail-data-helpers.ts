@@ -4,6 +4,7 @@ import {
   DEFAULT_PROFILE_ID,
   type ItemRow,
   type SeasonRow,
+  type VodEnrichmentRecord,
   type WatchProgressRow,
 } from '@elv/data';
 import {
@@ -140,5 +141,74 @@ export function buildOptimisticWatchedRow(
     durationMs: 0,
     watched: nextWatched,
     updatedAt: Date.now(),
+  };
+}
+
+/** Provider-supplied VOD detail metadata inputs prior to optional enrichment fill (`#215`). */
+export interface DetailMetadataFields {
+  readonly year: number | null;
+  readonly rating: number | null;
+  readonly genres: readonly string[];
+  readonly plot: string | null;
+}
+
+/** Non-destructively merged Detail metadata with enrichment provenance flags (`#215`). */
+export interface MergedDetailMetadata extends DetailMetadataFields {
+  readonly enriched: boolean;
+  readonly ratingSource: string | null;
+}
+
+/**
+ * Non-destructively fills missing Detail metadata (`year`, `rating`, `genres`, `plot`) from a
+ * local key-free {@link VodEnrichmentRecord} without overwriting existing provider values (`#215`).
+ */
+export function mergeVodEnrichment(
+  provider: DetailMetadataFields,
+  enrichment: VodEnrichmentRecord | null,
+): MergedDetailMetadata {
+  const hasProviderYear = provider.year !== null && Number.isFinite(provider.year);
+  const hasProviderRating = provider.rating !== null && Number.isFinite(provider.rating);
+  const hasProviderGenres = provider.genres.length > 0;
+  const trimmedProviderPlot = provider.plot?.trim() ?? '';
+  const hasProviderPlot = trimmedProviderPlot.length > 0;
+
+  if (enrichment === null) {
+    return {
+      year: hasProviderYear ? provider.year : null,
+      rating: hasProviderRating ? provider.rating : null,
+      genres: provider.genres,
+      plot: hasProviderPlot ? provider.plot : null,
+      enriched: false,
+      ratingSource: null,
+    };
+  }
+
+  const enrichedYear =
+    !hasProviderYear && enrichment.releaseYear !== null && Number.isFinite(enrichment.releaseYear)
+      ? enrichment.releaseYear
+      : null;
+  const enrichedRating =
+    !hasProviderRating && enrichment.rating !== null && Number.isFinite(enrichment.rating)
+      ? enrichment.rating
+      : null;
+  const enrichedGenres =
+    !hasProviderGenres && enrichment.genres.length > 0 ? enrichment.genres : null;
+  const trimmedEnrichedPlot = enrichment.synopsis?.trim() ?? '';
+  const enrichedPlot =
+    !hasProviderPlot && trimmedEnrichedPlot.length > 0 ? trimmedEnrichedPlot : null;
+
+  const enriched =
+    enrichedYear !== null ||
+    enrichedRating !== null ||
+    enrichedGenres !== null ||
+    enrichedPlot !== null;
+
+  return {
+    year: hasProviderYear ? provider.year : enrichedYear,
+    rating: hasProviderRating ? provider.rating : enrichedRating,
+    genres: hasProviderGenres ? provider.genres : (enrichedGenres ?? provider.genres),
+    plot: hasProviderPlot ? provider.plot : enrichedPlot,
+    enriched,
+    ratingSource: enrichedRating !== null ? enrichment.ratingSource : null,
   };
 }

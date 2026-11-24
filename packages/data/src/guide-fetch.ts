@@ -16,6 +16,7 @@ import { checkAbort, Stop } from './import-run';
 import type { ImportDeps } from './import-types';
 import { openClient } from './import-xtream';
 import { type HttpCacheValidator, type SourceRecord, secretKey } from './sources';
+import { loadStalkerSecret, stalkerPortalHost } from './stalker-secret';
 import { resolveTemplate } from './templates';
 import { readUrlVars } from './urlvars-store';
 
@@ -135,6 +136,10 @@ async function resolveSourcePrimaryHost(
       .get(secretKey(source.id, 'playlist'))
       .catch(() => undefined);
     return playlistUrl === undefined ? undefined : hostnameOf(playlistUrl);
+  }
+  if (source.kind === 'stalker') {
+    const secret = await loadStalkerSecret(deps.secrets, source.id);
+    return secret === undefined ? undefined : stalkerPortalHost(secret.portalUrl);
   }
   return undefined;
 }

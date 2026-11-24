@@ -37,6 +37,10 @@ export {
   LIVE_CHANNEL_ROWS_CAP,
   MAX_CATALOG_RAIL_ITEMS,
 } from './catalog-ui-cache';
+export {
+  type HydratedVodCollection,
+  mergeHydratedCollections,
+} from './collections-model';
 export { type DetailCastMember, type DetailTarget, detailTargetFromItem } from './detail-target';
 export {
   type KeymapContextValue,

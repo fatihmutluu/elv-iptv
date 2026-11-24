@@ -32,6 +32,7 @@ import {
 import { resolveSeriesBadgeProps, useRouteActive } from '../shared';
 import {
   formatRemainingMinutes,
+  type HomeCollectionRailId,
   type HomeRailEntry,
   type HomeRailKind,
   progressRatio,
@@ -82,9 +83,12 @@ export function buildHomeRailSpecs(t: AppI18n['t']): readonly HomeRailSpec[] {
   ];
 }
 
+/** Identifier accepted by {@link HomeRail} (built-in rail or dynamic custom collection rail). */
+export type HomeRailId = HomeRailKind | HomeCollectionRailId;
+
 /** Props of {@link HomeRail}. */
 export interface HomeRailProps {
-  readonly id: HomeRailKind;
+  readonly id: HomeRailId;
   readonly title: string;
   readonly actionLabel?: string;
   readonly actionTab?: BrowseKind;
@@ -104,7 +108,7 @@ export interface HomeRailProps {
   readonly onQuickPlay?: (entry: HomeRailEntry, index: number) => void;
   readonly onQuickToggleFavorite?: (entry: HomeRailEntry) => void;
   readonly onQuickToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
-  readonly onLayoutY?: (id: HomeRailKind, y: number) => void;
+  readonly onLayoutY?: (id: HomeRailId, y: number) => void;
   readonly testID: string;
   readonly itemTestIdPrefix: string;
 }

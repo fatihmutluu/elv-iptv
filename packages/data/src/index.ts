@@ -12,6 +12,7 @@ export {
 export * from './alphabet-index';
 export * from './catalog';
 export type { CatalogChannelOpsMethods } from './catalog-channel-ops';
+export type { CatalogCollectionsOpsMethods } from './catalog-collections-ops';
 export type { CatalogEpgOpsMethods } from './catalog-epg-ops';
 export type { CatalogFailoverOpsMethods } from './catalog-failover-ops';
 export * from './category-selection';
@@ -67,6 +68,7 @@ export * from './search';
 export * from './short-epg-queue';
 export * from './source-link';
 export * from './sources';
+export { stalkerKey } from './stalker-secret';
 export * from './stream-resolver';
 export * from './templates';
 export * from './title-clean';
@@ -80,5 +82,9 @@ export {
 } from './track-preferences-repo';
 export * from './user-state';
 export * from './user-state-backup';
+export * from './vod-collections-repo';
+export * from './vod-enrichment-repo';
+export * from './vod-rating-index';
+export * from './vod-title-cleaner';
 export * from './vod-versions';
 export * from './write-coalescer';

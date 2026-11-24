@@ -20,6 +20,8 @@ export interface LogEntry {
 
 const MASK = '***';
 const PASSWORD_PARAM = /(password=)[^&#\s]*/gi;
+const MAC_PARAM = /(^|[;&?\s])(mac=)[^;&\s#]*/gi;
+const BEARER_TOKEN = /(Bearer\s+)\S+/gi;
 const USERINFO = /(\/\/[^/:@\s]+:)[^@/\s]+@/g;
 
 const STREAM_PATH = /(\/(?:live|movie|series|timeshift)\/[^/\s?#]+\/)[^/\s?#]+(?=\/)/g;
@@ -29,20 +31,25 @@ function clean(text: string): string {
   return text
     .replace(USERINFO, `$1${MASK}@`)
     .replace(PASSWORD_PARAM, `$1${MASK}`)
+    .replace(MAC_PARAM, `$1$2${MASK}`)
+    .replace(BEARER_TOKEN, `$1${MASK}`)
     .replace(STREAM_PATH, `$1${MASK}`)
     .replace(SHORT_PATH, `$1${MASK}`);
 }
 
+const SECRET_QUERY_KEYS = new Set(['password', 'mac', 'token']);
+
 /**
- * Returns a copy with secrets masked: `password` query values, `password=` values in any string, the password
- * segment of Xtream stream paths (`/live|movie|series|timeshift/<user>/<secret>/` and the short `/<user>/<secret>/<id>`,
- * whatever the username), `user:pass@` userinfo anywhere (referer included) and the whole `authorization`
- * header. Usernames stay visible.
+ * Returns a copy with secrets masked: `password`/`mac`/`token` query values, `password=` and `mac=` values
+ * in any string (including Stalker `Cookie: mac=...`), `Bearer` tokens, the password segment of Xtream stream
+ * paths (`/live|movie|series|timeshift/<user>/<secret>/` and the short `/<user>/<secret>/<id>`, whatever the
+ * username), `user:pass@` userinfo anywhere (referer included) and the whole `authorization` header.
+ * Usernames stay visible.
  */
 export function redact(entry: LogEntry): LogEntry {
   const query: Record<string, string> = {};
   for (const [k, v] of Object.entries(entry.query)) {
-    query[k] = k.toLowerCase() === 'password' ? MASK : clean(v);
+    query[k] = SECRET_QUERY_KEYS.has(k.toLowerCase()) ? MASK : clean(v);
   }
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(entry.headers)) {

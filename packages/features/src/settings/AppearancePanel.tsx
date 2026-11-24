@@ -351,6 +351,20 @@ export function AppearancePanel({
           isTv={isTv}
           onToggle={() => applyPatch({ confirmExitOnBack: !activePrefs.confirmExitOnBack })}
         />
+
+        <SettingsDivider />
+
+        <SettingsToggleRow
+          testID="settings-vod-enrichment-toggle"
+          title={i18n.t('settings.appearance.vodEnrichmentTitle')}
+          description={i18n.t('settings.appearance.vodEnrichmentDescription')}
+          checked={activePrefs.vodEnrichmentEnabled === true}
+          focused={focusedControlId === 'toggle-vod-enrichment'}
+          isTv={isTv}
+          onToggle={() =>
+            applyPatch({ vodEnrichmentEnabled: !(activePrefs.vodEnrichmentEnabled === true) })
+          }
+        />
       </Surface>
 
       {isTv ? (

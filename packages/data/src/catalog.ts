@@ -11,6 +11,10 @@ import {
 } from '@elv/domain';
 import { type AlphabetBucket, type AlphabetIndexInput, queryAlphabetIndex } from './alphabet-index';
 import { createCatalogChannelOpsMethods } from './catalog-channel-ops';
+import {
+  type CatalogCollectionsOpsMethods,
+  createCatalogCollectionsOpsMethods,
+} from './catalog-collections-ops';
 import { type CatalogEpgOpsMethods, createCatalogEpgOpsMethods } from './catalog-epg-ops';
 import {
   type CatalogFailoverOpsMethods,
@@ -96,6 +100,7 @@ import { addSourceFromLink, type LinkSourceInput } from './source-link';
 import {
   addLocalM3uSource,
   addM3uSource,
+  addStalkerSource,
   addXtreamSource,
   getSource,
   type LocalM3uSourceInput,
@@ -106,6 +111,7 @@ import {
   type SourceKind,
   type SourceRecord,
   type SourceSettings,
+  type StalkerSourceInput,
   type XtreamSourceInput,
 } from './sources';
 import { createPlaytimeResolverCache, type StreamRequest } from './stream-resolver';
@@ -178,12 +184,14 @@ export interface CatalogDeps {
 /** Input of {@link CatalogService.addSource}. */
 export type AddSourceInput =
   | ({ kind: 'xtream' } & XtreamSourceInput)
-  | ({ kind: 'm3u' } & M3uSourceInput);
+  | ({ kind: 'm3u' } & M3uSourceInput)
+  | ({ kind: 'stalker' } & StalkerSourceInput);
 
 /** Local catalog of the user's sources: add, import, browse in pages, resolve a stream, close. */
 export interface CatalogService
   extends Partial<CatalogEpgOpsMethods>,
-    Partial<CatalogFailoverOpsMethods> {
+    Partial<CatalogFailoverOpsMethods>,
+    Partial<CatalogCollectionsOpsMethods> {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
@@ -411,6 +419,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     playtime,
   });
   const failoverOpsMethods = createCatalogFailoverOpsMethods({ db, clock, playtime });
+  const collectionsOpsMethods = createCatalogCollectionsOpsMethods({ db, clock, playtime });
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
@@ -423,7 +432,11 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
   return {
     addSource: (input) =>
       mapped(
-        input.kind === 'xtream' ? addXtreamSource(input, addDeps) : addM3uSource(input, addDeps),
+        input.kind === 'xtream'
+          ? addXtreamSource(input, addDeps)
+          : input.kind === 'stalker'
+            ? addStalkerSource(input, addDeps)
+            : addM3uSource(input, addDeps),
       ),
     addSourceFromLink: (input) => mapped(addSourceFromLink(input, addDeps)),
     addLocalM3uSource: (input) => mapped(addLocalM3uSource(input, addDeps)),
@@ -605,7 +618,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       let seasons = await querySeasons(db, series, opts);
       if (seasons.length === 0) {
         const source = await getSource(db, series.sourceId);
-        if (source?.kind === 'xtream') {
+        if (source?.kind === 'xtream' || source?.kind === 'stalker') {
           const loaded = await queue.run(
             series.sourceId,
             'series-episodes',
@@ -706,6 +719,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...channelOpsMethods,
     ...epgOpsMethods,
     ...failoverOpsMethods,
+    ...collectionsOpsMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

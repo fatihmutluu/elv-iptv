@@ -19,6 +19,7 @@ import {
   wrapCleanupProgress,
 } from './import-progress';
 import { checkAbort, notify, performRun, type RunCtx, Stop, unwrap } from './import-run';
+import { importStalker, loadStalkerSeriesEpisodes } from './import-stalker';
 import {
   DEFAULT_BATCH_SIZE,
   type ImportDeps,
@@ -443,11 +444,12 @@ export async function importCatalog(
   if (source === undefined) return err(elvError('storage', 'source-not-found'));
   if (source.kind === 'xtream') return importXtream(source, deps, opts);
   if (source.kind === 'm3u') return importM3u(source, deps, opts);
+  if (source.kind === 'stalker') return importStalker(source, deps, opts);
   return err(elvError('source-format', 'unsupported-source'));
 }
 
 /**
- * Fetches and stores the episodes of one Xtream series (on demand, when the user opens it), replacing the ones
+ * Fetches and stores the episodes of one Xtream or Stalker series (on demand, when the user opens it), replacing the ones
  * stored before. An info body over `ImportDeps.maxBodyBytes` is fetched once more without the cap. Returns the
  * number of episodes. An unknown series yields `source-format/unknown-series`; a source that is gone (also one
  * removed while the episodes load) yields `storage/source-not-found` and writes nothing.
@@ -459,7 +461,9 @@ export async function loadSeriesEpisodes(
   opts: ImportOptions = {},
 ): Promise<Result<number>> {
   const source = await getSource(deps.db, sourceId);
-  if (source === undefined || source.kind !== 'xtream') {
+  if (source === undefined) return err(elvError('storage', 'source-not-found'));
+  if (source.kind === 'stalker') return loadStalkerSeriesEpisodes(source, seriesKey, deps, opts);
+  if (source.kind !== 'xtream') {
     return err(elvError('storage', 'source-not-found'));
   }
   const opened = await openClients(source, deps);

@@ -4,6 +4,7 @@ import { trErgonomicsMessages } from './tr-ergonomics';
 import { trFailoverNetworkMessages } from './tr-failover-network';
 import { trProfilesMessages } from './tr-profiles';
 import { trSubtitlesSuiteMessages } from './tr-subtitles-suite';
+import { trWaveF5bMessages } from './tr-wave-f5b';
 
 /** Turkish (`tr`) message catalog. */
 export const trMessages: Readonly<Record<MessageId, string>> = {
@@ -712,4 +713,5 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trCatchupEpgMessages,
   ...trSubtitlesSuiteMessages,
   ...trFailoverNetworkMessages,
+  ...trWaveF5bMessages,
 };

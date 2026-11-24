@@ -38,7 +38,7 @@ function isEntry(value: unknown): value is ManifestEntry {
   return (
     typeof e.id === 'string' &&
     SOURCE_ID.test(e.id) &&
-    (e.kind === 'xtream' || e.kind === 'm3u') &&
+    (e.kind === 'xtream' || e.kind === 'm3u' || e.kind === 'stalker') &&
     typeof e.name === 'string' &&
     typeof e.createdAt === 'number' &&
     Number.isFinite(e.createdAt) &&

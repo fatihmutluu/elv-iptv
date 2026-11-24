@@ -561,6 +561,10 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 458, animated: true });
 
+    // Down -> VOD Enrichment toggle row -> stays inside font/accessibility card
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 458, animated: true });
+
     // Down x3 -> TV Display card (overscanX, overscanY, tvClockMode) -> scrolls to tvDisplay section
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 488, animated: true });
@@ -581,8 +585,8 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 838, animated: true });
 
-    // Up x13 -> back to Language row -> resets scroll to y: 0
-    for (let i = 0; i < 13; i += 1) {
+    // Up x14 -> back to Language row -> resets scroll to y: 0
+    for (let i = 0; i < 14; i += 1) {
       await pressKey(KEYCODE_DPAD_UP);
     }
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 0, animated: true });

@@ -8,6 +8,7 @@ import type { AppI18n } from '@elv/i18n';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { DetailTarget } from '../shared';
 
+export { mergeVodEnrichment } from './detail-data-helpers';
 export {
   buildTechnicalBadges,
   cyclePrePlayOption,

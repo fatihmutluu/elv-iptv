@@ -3,20 +3,24 @@ import {
   elvError,
   err,
   normalizeDnsFamily,
+  normalizeMacAddress,
   ok,
   type Result,
   type Scheduler,
   type SecretStore,
+  type SourceKind,
   type SqlDriver,
   type TransportSettings,
   validateHostOverride,
 } from '@elv/domain';
+import { normalizeStalkerPortalUrl } from '@elv/sources';
+import { fingerprintStalkerCredentials } from './credential-fingerprint';
 import { pruneSourceFailoverMembersInTx } from './failover-groups-repo';
 import type { SegmentRule, UrlVars } from './templates';
 import { deleteUrlVars } from './urlvars-store';
 
 /** Kind of source a user can add. */
-export type SourceKind = 'xtream' | 'm3u';
+export type { SourceKind };
 
 /** Non-secret HTTP cache validators stored per opaque slot for conditional GET requests. */
 export interface HttpCacheValidator {
@@ -179,6 +183,19 @@ export interface LocalM3uSourceInput {
   readonly xmltvTimezone?: string;
 }
 
+/** Input for {@link addStalkerSource} (`#29`). */
+export interface StalkerSourceInput {
+  name: string;
+  portalUrl: string;
+  mac: string;
+  serialNumber?: string;
+  transport?: TransportSettings;
+  /** Optional custom XMLTV guide URL override stored strictly in `SecretStore`. */
+  guideUrl?: string;
+  /** Optional default IANA timezone for offset-less XMLTV timestamps (`#182`). */
+  readonly xmltvTimezone?: string;
+}
+
 /** Collaborators for adding a source; `newId` and `clock` are injected so tests stay deterministic. */
 export interface AddSourceDeps {
   db: SqlDriver;
@@ -256,17 +273,24 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'guide_sources',
   'programme_reminders',
   'failover_group_members',
+  'vod_enrichment',
+  'vod_collection_items',
 ];
-const NON_URLVARS_PARTS = ['xtream', 'playlist'] as const;
+const NON_URLVARS_PARTS = ['xtream', 'playlist', 'stalker', 'stalker_cmds'] as const;
 
 /** Characters a source id may use: the set every platform secret store accepts in a key. */
 export const SOURCE_ID = /^[A-Za-z0-9._-]+$/;
 
 /**
  * Secret keys: `source.<id>.xtream` (JSON server, username, password), `.playlist`, `.urlvars` (JSON
- * {@link UrlVars}). Only letters, digits, `.`, `-` and `_`, the set the strictest platform secret store allows.
+ * {@link UrlVars}), `.stalker` (JSON portalUrl, mac, optional serialNumber), `.stalker_cmds` (JSON
+ * opaque Stalker command map). Only letters, digits, `.`, `-` and `_`, the set the strictest platform
+ * secret store allows.
  */
-export function secretKey(id: string, part: 'xtream' | 'playlist' | 'urlvars'): string {
+export function secretKey(
+  id: string,
+  part: 'xtream' | 'playlist' | 'urlvars' | 'stalker' | 'stalker_cmds',
+): string {
   return `source.${id}.${part}`;
 }
 
@@ -477,6 +501,55 @@ export async function addLocalM3uSource(
   return persisted;
 }
 
+/**
+ * Adds a Stalker / Ministra MAC portal source (`#29`, ADR 0015): portal URL, normalized MAC address,
+ * and optional serial number go strictly to `SecretStore` (`source.<id>.stalker`), never to SQLite.
+ * Only a non-reversible SHA-256 `credentialFingerprint` and non-secret transport metadata enter `sources`.
+ */
+export async function addStalkerSource(
+  input: StalkerSourceInput,
+  deps: AddSourceDeps,
+): Promise<Result<SourceRecord>> {
+  if (input.name.trim() === '') return invalid();
+  const portalRes = normalizeStalkerPortalUrl(input.portalUrl);
+  if (!portalRes.ok) return portalRes;
+  const macRes = normalizeMacAddress(input.mac);
+  if (!macRes.ok) return macRes;
+  const transportRes = sanitizeTransportSettings(input.transport);
+  if (!transportRes.ok) return transportRes;
+
+  const id = deps.newId();
+  const fingerprint = fingerprintStalkerCredentials(portalRes.value.endpoint, macRes.value);
+  const settings: SourceSettings = {
+    ...(transportRes.value === undefined ? {} : { transport: transportRes.value }),
+    ...(fingerprint === undefined ? {} : { credentialFingerprint: fingerprint }),
+  };
+  if (typeof input.xmltvTimezone === 'string' && input.xmltvTimezone.trim() !== '') {
+    settings.xmltvTimezone = input.xmltvTimezone.trim();
+  }
+
+  const serialNumber = input.serialNumber?.trim();
+  const secret = JSON.stringify({
+    portalUrl: input.portalUrl.trim(),
+    mac: macRes.value,
+    ...(serialNumber !== undefined && serialNumber !== '' ? { serialNumber } : {}),
+  });
+  const secrets: [string, string][] = [[secretKey(id, 'stalker'), secret]];
+  if (input.guideUrl !== undefined && input.guideUrl.trim() !== '') {
+    const g = guideSecret(input.guideUrl);
+    settings.guideUrl = g.template;
+    secrets.push([secretKey(id, 'urlvars'), JSON.stringify(g.vars)]);
+  }
+  const record: SourceRecord = {
+    id,
+    kind: 'stalker',
+    name: input.name,
+    createdAt: deps.clock(),
+    settings,
+  };
+  return persist(deps, record, secrets);
+}
+
 /** Reads one active source; `undefined` when the id is unknown or marked `deleting = 1`. */
 export async function getSource(db: SqlDriver, id: string): Promise<SourceRecord | undefined> {
   const rows = await db.all<{
@@ -618,6 +691,8 @@ export async function finishDeletingSource(
     await tx.run('DELETE FROM custom_group_items WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM guide_sources WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM programme_reminders WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM vod_enrichment WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM vod_collection_items WHERE source_id = ?', [id]);
     await pruneSourceFailoverMembersInTx(tx, id);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });

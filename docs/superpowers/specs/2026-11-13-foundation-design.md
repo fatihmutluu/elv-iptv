@@ -216,7 +216,7 @@ Unchanged from the owner's goals: compliant README with the one-sentence descrip
 | Decision | Asked when |
 |---|---|
 | Watched threshold and progress-saving rules | Watch-progress spec (`#14`) |
-| Stalker/MAC portal support | When `#29` is picked |
+| Stalker/MAC portal support | Decided in [ADR 0015](../../adr/0015-stalker-portal-sources.md) (`#29`): credential-isolated `@elv/sources` client, play-time `create_link`, atomic catalog/guide import, simulator fixtures |
 | Parental controls and adult-content handling | When `#31` is picked |
 | Catch-up behavior and whether it stays free | When `#27` is picked |
 | Vault recovery code | Sync spec (`#26`) |

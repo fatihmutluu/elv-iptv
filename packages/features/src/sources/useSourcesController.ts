@@ -73,7 +73,7 @@ export interface SourcesController {
   canEditNetwork: boolean;
   categoryPicker: CategoryPickerState | null;
   refreshSources(): Promise<SourceRow[]>;
-  setMode(mode: 'xtream' | 'm3u'): void;
+  setMode(mode: 'xtream' | 'm3u' | 'stalker'): void;
   updateField<K extends keyof SourceFormState>(key: K, value: SourceFormState[K]): void;
   toggleAdvanced(): void;
   pasteFromClipboard(): Promise<void>;
@@ -209,7 +209,7 @@ export function useSourcesController({
     setStatusById((prev) => ({ ...prev, [id]: next }));
   }, []);
 
-  const setMode = useCallback((mode: 'xtream' | 'm3u') => {
+  const setMode = useCallback((mode: 'xtream' | 'm3u' | 'stalker') => {
     const next = { ...formRef.current, mode };
     formRef.current = next;
     setForm(next);
@@ -587,7 +587,7 @@ export function useSourcesController({
       setSubmitting(true);
       try {
         const added =
-          validated.value.kind === 'xtream'
+          validated.value.kind === 'xtream' || validated.value.kind === 'stalker'
             ? await catalog.addSource(validated.value.input)
             : validated.value.kind === 'local-m3u'
               ? catalog.addLocalM3uSource !== undefined

@@ -111,6 +111,7 @@ function buildSourcesFocusItems(
   items.push(
     { id: 'mode-xtream', kind: 'action', rowGroup: 'mode', run: () => ctrl.setMode('xtream') },
     { id: 'mode-m3u', kind: 'action', rowGroup: 'mode', run: () => ctrl.setMode('m3u') },
+    { id: 'mode-stalker', kind: 'action', rowGroup: 'mode', run: () => ctrl.setMode('stalker') },
     { id: 'input-name', kind: 'input' },
   );
   if (ctrl.form.mode === 'xtream') {
@@ -118,6 +119,12 @@ function buildSourcesFocusItems(
       { id: 'input-server', kind: 'input' },
       { id: 'input-username', kind: 'input' },
       { id: 'input-password', kind: 'input' },
+    );
+  } else if (ctrl.form.mode === 'stalker') {
+    items.push(
+      { id: 'input-portal-url', kind: 'input' },
+      { id: 'input-mac-address', kind: 'input' },
+      { id: 'input-serial-number', kind: 'input' },
     );
   } else {
     items.push({ id: 'input-playlist-url', kind: 'input' });

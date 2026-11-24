@@ -289,6 +289,14 @@ export function fingerprintM3uCredentials(
   return undefined;
 }
 
+/** Derives a non-reversible `fp:<64-hex>` credential fingerprint for a Stalker/MAC portal source (`#29`). */
+export function fingerprintStalkerCredentials(portalUrl: string, mac: string): string | undefined {
+  const trimmedPortal = portalUrl.trim();
+  const trimmedMac = mac.trim().toUpperCase();
+  if (trimmedPortal === '' || trimmedMac === '') return undefined;
+  return `fp:${sha256Hex(`${trimmedPortal}\0${trimmedMac}`)}`;
+}
+
 /** Resolves the connection-pool key for a source (`credentialFingerprint` when valid, else `source.id`). */
 export function resolveAccountPoolKey(source: {
   id: string;

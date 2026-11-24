@@ -28,6 +28,7 @@ import {
   secretKey,
 } from './sources';
 import { resolveCatchupStreamInternal } from './stream-resolver-catchup';
+import { createStalkerResolverState } from './stream-resolver-stalker';
 import type {
   PlaytimeResolverCache,
   ResolveStreamInternalOptions,
@@ -318,6 +319,7 @@ export function createPlaytimeResolverCache(deps: {
   const resolvers = new Map<string, Promise<StreamResolver>>();
   const xtreamSecrets = new Map<string, Promise<XtreamSecret | undefined>>();
   const xtreamClients = new Map<string, XtreamClient>();
+  const stalkerState = createStalkerResolverState({ secrets: deps.secrets, http: deps.http });
 
   const resolverFor = (sourceId: string): Promise<StreamResolver> => {
     let cached = resolvers.get(sourceId);
@@ -379,7 +381,18 @@ export function createPlaytimeResolverCache(deps: {
     let primaryHostOverride = connectionMeta.hostOverride;
     const collectedAlternates: StreamAlternate[] = [];
 
-    if (play.urlTemplate === null) {
+    if (source.kind === 'stalker') {
+      const stalkerRes = await stalkerState.resolvePrimaryUrl(
+        source,
+        play,
+        connectionMeta,
+        isAllowedPlaybackUrl,
+        normalizeMulticastUrl,
+      );
+      if (!stalkerRes.ok) return stalkerRes;
+      primaryUrl = stalkerRes.value.url;
+      primaryHostOverride = stalkerRes.value.hostOverride;
+    } else if (play.urlTemplate === null) {
       const client = await xtreamClientFor(source);
       if (client === undefined) return err(elvError('storage', 'secret-missing'));
       const creds = await xtreamSecretFor(source.id);
@@ -502,12 +515,14 @@ export function createPlaytimeResolverCache(deps: {
       resolvers.delete(sourceId);
       xtreamSecrets.delete(sourceId);
       xtreamClients.delete(sourceId);
+      stalkerState.evict(sourceId);
     },
 
     clear() {
       resolvers.clear();
       xtreamSecrets.clear();
       xtreamClients.clear();
+      stalkerState.clear();
     },
 
     async resolveLogos(items, sourceId) {
@@ -547,6 +562,7 @@ export function createPlaytimeResolverCache(deps: {
           resolvers.delete(sid);
         },
         xtreamSecretFor,
+        stalkerState,
         buildSourceStreamMeta,
         effectiveXtreamTransport,
         isAllowedPlaybackUrl,

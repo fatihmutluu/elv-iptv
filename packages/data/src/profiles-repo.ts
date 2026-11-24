@@ -291,6 +291,11 @@ export async function deleteProfile(
       [id],
     );
     await tx.run('DELETE FROM custom_groups WHERE profile_id = ?', [id]);
+    await tx.run(
+      'DELETE FROM vod_collection_items WHERE collection_id IN (SELECT id FROM vod_collections WHERE profile_id = ?)',
+      [id],
+    );
+    await tx.run('DELETE FROM vod_collections WHERE profile_id = ?', [id]);
     await tx.run('DELETE FROM programme_reminders WHERE profile_id = ?', [id]);
 
     if (target.is_default !== 0) {

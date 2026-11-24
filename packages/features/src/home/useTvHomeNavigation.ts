@@ -1,7 +1,7 @@
 import { createFocusStore, type FocusStore, findList, type KeyEvent } from '@elv/focus-core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useBrowseFocusMemory } from '../shared';
-import type { HomeRailKind } from './home-model';
+import type { HomeCollectionRailId, HomeRailKind } from './home-model';
 
 interface HomeFocusSnapshot {
   readonly rowId: HomeNavRowId;
@@ -10,7 +10,12 @@ interface HomeFocusSnapshot {
 }
 
 /** Navigable vertical row identifier inside {@link HomeScreen}. */
-export type HomeNavRowId = 'empty' | 'hero' | HomeRailKind;
+export type HomeNavRowId =
+  | 'empty'
+  | 'hero'
+  | HomeRailKind
+  | 'collections-manage'
+  | HomeCollectionRailId;
 
 /** Descriptor of one currently visible focusable row on Home. */
 export interface HomeNavRowDescriptor {
@@ -18,7 +23,7 @@ export interface HomeNavRowDescriptor {
   readonly count: number;
 }
 
-const ALL_HOME_ROW_IDS: readonly HomeNavRowId[] = [
+const STATIC_HOME_ROW_IDS: readonly HomeNavRowId[] = [
   'empty',
   'hero',
   'continue',
@@ -27,20 +32,40 @@ const ALL_HOME_ROW_IDS: readonly HomeNavRowId[] = [
   'mylist',
   'movies',
   'series',
+  'collections-manage',
 ];
 
-function createHomeFocusStore(): FocusStore {
-  return createFocusStore({
-    id: 'home-scope',
-    lists: ALL_HOME_ROW_IDS.map((id) => ({
+function collectRowIds(rows: readonly HomeNavRowDescriptor[]): HomeNavRowId[] {
+  const seen = new Set<HomeNavRowId>(STATIC_HOME_ROW_IDS);
+  const ids: HomeNavRowId[] = [...STATIC_HOME_ROW_IDS];
+  for (const r of rows) {
+    if (!seen.has(r.id)) {
+      seen.add(r.id);
+      ids.push(r.id);
+    }
+  }
+  return ids;
+}
+
+function createHomeFocusStore(
+  rowIds: readonly HomeNavRowId[],
+  previous?: FocusStore | null,
+  activeId?: HomeNavRowId | null,
+): FocusStore {
+  const prevScopes = previous?.getState().scopes;
+  const lists = rowIds.map((id) => {
+    const prevList = prevScopes ? findList(prevScopes, id)?.list : undefined;
+    return {
       id,
-      count: 0,
-      index: 0,
+      count: prevList?.count ?? 0,
+      index: prevList?.index ?? 0,
       orientation: 'horizontal' as const,
       pageSize: 6,
-    })),
-    active: 'hero',
+    };
   });
+  const active =
+    activeId !== undefined && activeId !== null && rowIds.includes(activeId) ? activeId : 'hero';
+  return createFocusStore({ id: 'home-scope', lists, active });
 }
 
 /** Builds the ordered list of currently visible focusable Home rows for TV navigation. */
@@ -50,6 +75,11 @@ export function buildHomeNavRows(input: {
   readonly heroActionCount: number;
   readonly railOrder: readonly HomeRailKind[];
   readonly railCounts: Readonly<Record<HomeRailKind, number>>;
+  readonly showCollectionsManage?: boolean;
+  readonly collectionRails?: readonly {
+    readonly id: HomeCollectionRailId;
+    readonly count: number;
+  }[];
 }): HomeNavRowDescriptor[] {
   if (input.isLoading) return [];
   if (!input.hasContent) return [{ id: 'empty', count: 1 }];
@@ -58,6 +88,12 @@ export function buildHomeNavRows(input: {
   for (const id of input.railOrder) {
     const count = input.railCounts[id];
     if (count > 0) rows.push({ id, count });
+  }
+  if (input.showCollectionsManage) {
+    rows.push({ id: 'collections-manage', count: 1 });
+  }
+  for (const col of input.collectionRails ?? []) {
+    if (col.count > 0) rows.push({ id: col.id, count: col.count });
   }
   return rows;
 }
@@ -102,8 +138,9 @@ export function useTvHomeNavigation({
   const pendingRestoreRef = useRef<HomeFocusSnapshot | null>(initialSaved.current);
 
   const storeRef = useRef<FocusStore | null>(null);
+  const knownRowIdsRef = useRef<HomeNavRowId[]>(collectRowIds(rows));
   if (storeRef.current === null) {
-    const created = createHomeFocusStore();
+    const created = createHomeFocusStore(knownRowIdsRef.current);
     if (rows.length > 0) {
       for (const r of rows) created.setCount(r.id, r.count);
       const saved = pendingRestoreRef.current;
@@ -122,7 +159,6 @@ export function useTvHomeNavigation({
     }
     storeRef.current = created;
   }
-  const store = storeRef.current;
 
   const [activeRowId, setActiveRowId] = useState<HomeNavRowId | null>(() => {
     const saved = initialSaved.current;
@@ -140,20 +176,18 @@ export function useTvHomeNavigation({
     return 0;
   });
 
-  const persistHomeFocus = useCallback(
-    (rowId: HomeNavRowId, col: number) => {
-      const mem = focusMemoryRef.current;
-      if (!mem) return;
-      const colByRow: Partial<Record<HomeNavRowId, number>> = {};
-      for (const id of ALL_HOME_ROW_IDS) {
-        const list = findList(store.getState().scopes, id)?.list;
-        if (list && list.count > 0) colByRow[id] = list.index;
-      }
-      colByRow[rowId] = col;
-      mem.set<HomeFocusSnapshot>('home', { rowId, col, colByRow });
-    },
-    [store],
-  );
+  const persistHomeFocus = useCallback((rowId: HomeNavRowId, col: number) => {
+    const mem = focusMemoryRef.current;
+    const store = storeRef.current;
+    if (!mem || !store) return;
+    const colByRow: Partial<Record<HomeNavRowId, number>> = {};
+    for (const id of knownRowIdsRef.current) {
+      const list = findList(store.getState().scopes, id)?.list;
+      if (list && list.count > 0) colByRow[id] = list.index;
+    }
+    colByRow[rowId] = col;
+    mem.set<HomeFocusSnapshot>('home', { rowId, col, colByRow });
+  }, []);
 
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
@@ -171,11 +205,18 @@ export function useTvHomeNavigation({
   // biome-ignore lint/correctness/useExhaustiveDependencies: rowSignature intentionally avoids re-running sync when rows identity changes without membership/count changes
   useEffect(() => {
     const currentRows = rowsRef.current;
+    const neededIds = collectRowIds(currentRows);
+    const hasNewId = neededIds.some((id) => !knownRowIdsRef.current.includes(id));
+    if (hasNewId || storeRef.current === null) {
+      knownRowIdsRef.current = neededIds;
+      storeRef.current = createHomeFocusStore(neededIds, storeRef.current, activeRowIdRef.current);
+    }
+    const store = storeRef.current;
     const countById = new Map<HomeNavRowId, number>();
     for (const row of currentRows) {
       countById.set(row.id, row.count);
     }
-    for (const id of ALL_HOME_ROW_IDS) {
+    for (const id of knownRowIdsRef.current) {
       store.setCount(id, countById.get(id) ?? 0);
     }
 
@@ -215,12 +256,13 @@ export function useTvHomeNavigation({
       setActiveRowId(targetRowId);
       setActiveCol(found?.index ?? 0);
     }
-  }, [rowSignature, store]);
+  }, [rowSignature]);
 
   const handleTvKey = useCallback(
     (event: KeyEvent): boolean => {
+      const store = storeRef.current;
       const currentRows = rowsRef.current;
-      if (currentRows.length === 0) {
+      if (!store || currentRows.length === 0) {
         if (event.kind === 'press' && (event.key === 'up' || event.key === 'back')) {
           onFocusTopNavRef.current?.();
           return true;
@@ -290,7 +332,7 @@ export function useTvHomeNavigation({
       }
       return event.key === 'left' || event.key === 'right';
     },
-    [persistHomeFocus, store],
+    [persistHomeFocus],
   );
 
   const visibleFocus = isTv && isActiveScope && activeRowId !== null;

@@ -2,6 +2,7 @@ import type { CatalogService, CategoryRow, ItemRow, WatchProgressRow } from '@el
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildHeroSlides,
+  buildHomeCollectionRails,
   buildHomeDetailTarget,
   buildHomeLivePlayTarget,
   buildVodPlayTarget,
@@ -254,5 +255,59 @@ describe('home-model', () => {
         watched: false,
       }),
     ).toBeUndefined();
+  });
+
+  it('builds non-empty Home collection rails preserving order and watch progress (#403)', () => {
+    const prog = makeProgress({
+      itemKey: 'x:src-1:movie:1',
+      positionMs: 240_000,
+      durationMs: 600_000,
+      watched: false,
+    });
+    const progressByKey = new Map<string, WatchProgressRow>([[prog.itemKey, prog]]);
+    const rails = buildHomeCollectionRails(
+      [
+        {
+          collection: {
+            id: 'c-empty',
+            profileId: 'default',
+            name: 'Empty',
+            sortOrder: 0,
+            itemCount: 0,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          items: [],
+        },
+        {
+          collection: {
+            id: 'c-sci',
+            profileId: 'default',
+            name: 'Sci-Fi Classics',
+            sortOrder: 1,
+            itemCount: 2,
+            createdAt: 2,
+            updatedAt: 2,
+          },
+          items: [
+            makeItem({ id: 1, key: 'x:src-1:movie:1', kind: 'movie', name: 'Neon Horizon' }),
+            makeItem({ id: 2, key: 'x:src-1:series:2', kind: 'series', name: 'Starlight Harbor' }),
+          ],
+        },
+      ],
+      progressByKey,
+    );
+
+    expect(rails).toHaveLength(1);
+    expect(rails[0]?.id).toBe('collection:c-sci');
+    expect(rails[0]?.collectionId).toBe('c-sci');
+    expect(rails[0]?.title).toBe('Sci-Fi Classics');
+    expect(rails[0]?.items.map((i) => i.itemKey)).toEqual(['x:src-1:movie:1', 'x:src-1:series:2']);
+    expect(rails[0]?.items[0]).toMatchObject({
+      positionMs: 240_000,
+      durationMs: 600_000,
+      watched: false,
+    });
+    expect(rails[0]?.items[1]?.kind).toBe('series');
   });
 });

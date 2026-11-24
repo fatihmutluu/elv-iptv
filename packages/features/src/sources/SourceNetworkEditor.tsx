@@ -92,7 +92,7 @@ export function AddSourceNetworkFields({
   fieldShared,
   i18n,
 }: {
-  mode: 'xtream' | 'm3u';
+  mode: 'xtream' | 'm3u' | 'stalker';
   dnsFamily: DnsFamilyPreference;
   hostOverride: string;
   backupServers: string;

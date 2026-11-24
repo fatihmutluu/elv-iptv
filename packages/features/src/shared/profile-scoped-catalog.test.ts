@@ -484,4 +484,193 @@ describe('createProfileScopedCatalog', () => {
     expect(markReminderFired).toHaveBeenCalledWith('m:s1:live:1', 10_000, 'kids-1');
     expect(pruneExpiredReminders).toHaveBeenCalledWith(99_000);
   });
+
+  it('forwards VOD enrichment and injects active profileId & parentalUnlocked across all 10 custom VOD collection methods (#215, #403)', async () => {
+    const getVodEnrichment = vi.fn(async () => null);
+    const enrichVodItem = vi.fn(async () => null);
+    const listCollections = vi.fn(async () => []);
+    const createCollection = vi.fn(async () =>
+      ok({
+        id: 'vc_1',
+        profileId: 'kids-1',
+        name: 'Weekend',
+        sortOrder: 0,
+        itemCount: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    );
+    const renameCollection = vi.fn(async () =>
+      ok({
+        id: 'vc_1',
+        profileId: 'kids-1',
+        name: 'Sci-Fi',
+        sortOrder: 0,
+        itemCount: 0,
+        createdAt: 1,
+        updatedAt: 2,
+      }),
+    );
+    const reorderCollections = vi.fn(async () => ok([]));
+    const deleteCollection = vi.fn(async () => ok(undefined));
+    const listCollectionItems = vi.fn(async () => []);
+    const listCollectionsForItem = vi.fn(async () => ['vc_1']);
+    const addItemToCollection = vi.fn(async () => ok(undefined));
+    const removeItemFromCollection = vi.fn(async () => ok(undefined));
+    const reorderCollectionItems = vi.fn(async () => ok(undefined));
+
+    const base = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      seasons: vi.fn(async () => ok([])),
+      episodes: vi.fn(async () => []),
+      resolveStream: vi.fn(),
+      getVodEnrichment,
+      enrichVodItem,
+      listCollections,
+      createCollection,
+      renameCollection,
+      reorderCollections,
+      deleteCollection,
+      listCollectionItems,
+      listCollectionsForItem,
+      addItemToCollection,
+      removeItemFromCollection,
+      reorderCollectionItems,
+      close: vi.fn(async () => undefined),
+    } as unknown as CatalogService;
+
+    let scope = { profileId: 'kids-1', parentalUnlocked: false };
+    const scoped = createProfileScopedCatalog(base, () => scope);
+
+    await scoped.getVodEnrichment?.('x:s1:movie:1', 9_000);
+    await scoped.enrichVodItem?.('x:s1:movie:1', { enabled: true });
+    await scoped.listCollections?.();
+    await scoped.createCollection?.({ name: 'Weekend' });
+    await scoped.renameCollection?.('vc_1', 'Sci-Fi');
+    await scoped.reorderCollections?.(['vc_1']);
+    await scoped.deleteCollection?.('vc_1');
+    await scoped.listCollectionItems?.('vc_1');
+    await scoped.listCollectionsForItem?.('x:s1:movie:1');
+    await scoped.addItemToCollection?.('vc_1', 'x:s1:movie:1', 'movie');
+    await scoped.removeItemFromCollection?.('vc_1', 'x:s1:movie:1');
+    await scoped.reorderCollectionItems?.('vc_1', ['x:s1:movie:1']);
+
+    expect(getVodEnrichment).toHaveBeenCalledWith('x:s1:movie:1', 9_000);
+    expect(enrichVodItem).toHaveBeenCalledWith('x:s1:movie:1', { enabled: true });
+    expect(listCollections).toHaveBeenCalledWith('kids-1');
+    expect(createCollection).toHaveBeenCalledWith({ name: 'Weekend', profileId: 'kids-1' });
+    expect(renameCollection).toHaveBeenCalledWith('vc_1', 'Sci-Fi', 'kids-1');
+    expect(reorderCollections).toHaveBeenCalledWith(['vc_1'], 'kids-1');
+    expect(deleteCollection).toHaveBeenCalledWith('vc_1', 'kids-1');
+    expect(listCollectionItems).toHaveBeenCalledWith('vc_1', {
+      profileId: 'kids-1',
+      parentalUnlocked: false,
+    });
+    expect(listCollectionsForItem).toHaveBeenCalledWith('x:s1:movie:1', 'kids-1');
+    expect(addItemToCollection).toHaveBeenCalledWith('vc_1', 'x:s1:movie:1', 'movie', 'kids-1');
+    expect(removeItemFromCollection).toHaveBeenCalledWith('vc_1', 'x:s1:movie:1', 'kids-1');
+    expect(reorderCollectionItems).toHaveBeenCalledWith('vc_1', ['x:s1:movie:1'], 'kids-1');
+
+    // Explicit overrides and updated active scope are respected
+    scope = { profileId: 'adult-2', parentalUnlocked: true };
+    await scoped.listCollectionItems?.('vc_1', { profileId: 'custom', parentalUnlocked: false });
+    expect(listCollectionItems).toHaveBeenLastCalledWith('vc_1', {
+      profileId: 'custom',
+      parentalUnlocked: false,
+    });
+    await scoped.createCollection?.({ name: 'Override', profileId: 'explicit-p' });
+    expect(createCollection).toHaveBeenLastCalledWith({
+      name: 'Override',
+      profileId: 'explicit-p',
+    });
+  });
+
+  it('isolates VOD collections per profile and enforces parental unlock on listCollectionItems in SQLite (#403)', async () => {
+    const handle = testDb();
+    await openCatalog(handle.db);
+    const base = createCatalogService({
+      db: handle.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: {
+        async get() {
+          const bytes = new TextEncoder().encode(
+            [
+              '#EXTM3U',
+              '#EXTINF:-1 group-title="Cinema",Safe Film (2024)',
+              'http://127.0.0.1/movie1.mp4',
+              '#EXTINF:-1 group-title="18+ Adult",Restricted Film (2024)',
+              'http://127.0.0.1/movie2.mp4',
+            ].join('\n'),
+          );
+          return ok({
+            status: 200,
+            headers: {},
+            body: {
+              async *[Symbol.asyncIterator]() {
+                yield bytes;
+              },
+            },
+          });
+        },
+      },
+      clock: () => 10_000,
+    });
+
+    const added = await base.addSourceFromLink({ name: 'VOD', url: 'http://127.0.0.1/vod.m3u' });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    await base.importSource(added.value.id);
+
+    const kids = await base.createProfile?.({ name: 'Kids', isKids: true, avatarToken: 'emerald' });
+    expect(kids?.ok).toBe(true);
+    if (!kids?.ok) return;
+    const kidsId = kids.value.id;
+
+    let scope = { profileId: kidsId, parentalUnlocked: false };
+    const scoped = createProfileScopedCatalog(base, () => scope);
+
+    const allCats = await scoped.categories(added.value.id, 'movie', {
+      includeHidden: true,
+      parentalUnlocked: true,
+    });
+    const safeCat = allCats.find((c) => c.name === 'Cinema');
+    const adultCat = allCats.find((c) => c.name === '18+ Adult');
+    const safeMovie = (await scoped.items(safeCat?.id ?? '', 0, 5, { parentalUnlocked: true }))[0];
+    const adultMovie = (
+      await scoped.items(adultCat?.id ?? '', 0, 5, { parentalUnlocked: true })
+    )[0];
+    expect(safeMovie).toBeDefined();
+    expect(adultMovie).toBeDefined();
+    if (!safeMovie || !adultMovie) return;
+
+    const created = await scoped.createCollection?.({ name: 'Kids List' });
+    expect(created?.ok).toBe(true);
+    if (!created?.ok) return;
+
+    await scoped.addItemToCollection?.(created.value.id, safeMovie.key, 'movie');
+    await scoped.addItemToCollection?.(created.value.id, adultMovie.key, 'movie');
+
+    // Locked Kids profile filters out restricted movie in listCollectionItems
+    const lockedItems = await scoped.listCollectionItems?.(created.value.id);
+    expect(lockedItems?.map((i) => i.key)).toEqual([safeMovie.key]);
+
+    // Unlocking reveals both items
+    scope = { profileId: kidsId, parentalUnlocked: true };
+    const unlockedItems = await scoped.listCollectionItems?.(created.value.id);
+    expect(unlockedItems?.map((i) => i.key)).toEqual([safeMovie.key, adultMovie.key]);
+
+    // Switching to default profile sees zero Kids collections
+    scope = { profileId: 'default', parentalUnlocked: false };
+    expect(await scoped.listCollections?.()).toEqual([]);
+
+    await scoped.close();
+    handle.close();
+  });
 });

@@ -29,6 +29,7 @@ import {
   type ContentKind,
   type ElvError,
   type ErrorCategory,
+  isValidMacAddress,
   MAX_HOST_OVERRIDE_CHARS,
   normalizeDnsFamily,
   PROFILE_ID_RE,
@@ -364,7 +365,44 @@ const TRANSPORT_SETTINGS_KEYS = new Set<keyof TransportSettings>([
 ]);
 const MAX_BACKUP_SERVERS = 16;
 const MAX_BACKUP_SERVER_CHARS = 2_048;
+const MAX_STALKER_PORTAL_URL_CHARS = 2_048;
+const MAX_STALKER_SERIAL_CHARS = 128;
+const STALKER_SOURCE_INPUT_KEYS = new Set([
+  'kind',
+  'name',
+  'portalUrl',
+  'mac',
+  'serialNumber',
+  'transport',
+  'guideUrl',
+  'xmltvTimezone',
+]);
 const NON_HTTP_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:(?!\/\/)(?!\d+(?:[/?#]|$))/;
+
+/** Validates a bounded Stalker/Ministra portal URL (`http(s)://` or `host[:port]/path`, no credentials or control chars). */
+export function isStalkerPortalUrl(x: unknown): x is string {
+  if (!isBoundedString(x, 1, MAX_STALKER_PORTAL_URL_CHARS) || hasControlChar(x)) return false;
+  const trimmed = x.trim();
+  if (trimmed.length === 0 || trimmed.startsWith('/') || /\s/.test(trimmed)) return false;
+  let candidate = trimmed;
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(trimmed)) {
+    if (!/^https?:\/\//i.test(trimmed)) return false;
+  } else {
+    if (!trimmed.startsWith('[') && NON_HTTP_SCHEME_RE.test(trimmed)) return false;
+    candidate = `http://${trimmed}`;
+  }
+  try {
+    const parsed = new URL(candidate);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      parsed.hostname.length > 0 &&
+      parsed.username === '' &&
+      parsed.password === ''
+    );
+  } catch {
+    return false;
+  }
+}
 
 function isBackupServerEntry(x: unknown): x is string {
   if (!isBoundedString(x, 1, MAX_BACKUP_SERVER_CHARS) || hasControlChar(x)) return false;
@@ -512,6 +550,16 @@ export function isAddSourceInput(x: unknown): x is AddSourceInput {
     return (
       isTrimmedCleanString(x['playlistUrl']) &&
       (x['vodPlaylist'] === undefined || typeof x['vodPlaylist'] === 'boolean')
+    );
+  }
+  if (x['kind'] === 'stalker') {
+    return (
+      hasOnlyKeys(x, STALKER_SOURCE_INPUT_KEYS) &&
+      isStalkerPortalUrl(x['portalUrl']) &&
+      isValidMacAddress(x['mac']) &&
+      (x['serialNumber'] === undefined ||
+        (isBoundedString(x['serialNumber'], 0, MAX_STALKER_SERIAL_CHARS) &&
+          !hasControlChar(x['serialNumber'])))
     );
   }
   return false;

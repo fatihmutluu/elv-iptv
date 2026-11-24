@@ -2679,3 +2679,108 @@ msgstr "Save network settings"
 
 msgid "sources.network.saved"
 msgstr "Network settings saved"
+
+msgid "sources.mode.stalker"
+msgstr "Stalker / MAC"
+
+msgid "sources.stalker.portalUrlLabel"
+msgstr "Portal URL"
+
+msgid "sources.stalker.portalUrlPlaceholder"
+msgstr "http://portal.example.test/c/"
+
+msgid "sources.stalker.macLabel"
+msgstr "MAC address"
+
+msgid "sources.stalker.macPlaceholder"
+msgstr "00:1A:79:00:00:01"
+
+msgid "sources.stalker.serialLabel"
+msgstr "Serial number (optional)"
+
+msgid "sources.stalker.serialPlaceholder"
+msgstr "Optional device serial"
+
+msgid "sources.stalker.invalidMac"
+msgstr "Enter a valid MAC address."
+
+msgid "sources.stalker.invalidMacHint"
+msgstr "Use 6 hex pairs separated by colons, e.g. 00:1A:79:00:00:01."
+
+msgid "sources.stalker.kindBadge"
+msgstr "Stalker"
+
+msgid "settings.appearance.vodEnrichmentTitle"
+msgstr "Enrich movie & series details"
+
+msgid "settings.appearance.vodEnrichmentDescription"
+msgstr "Fill missing ratings, release years, and genres locally without an API key."
+
+msgid "detail.enrichment.badge"
+msgstr "Enriched"
+
+msgid "detail.enrichment.ratingLabel"
+msgstr "Rating"
+
+msgid "detail.enrichment.genresLabel"
+msgstr "Genres"
+
+msgid "collections.title"
+msgstr "Collections"
+
+msgid "collections.subtitle"
+msgstr "Organize movies and series into personal playlists."
+
+msgid "collections.empty"
+msgstr "No collections yet. Create one to group your favorite movies and series."
+
+msgid "collections.addToCollection"
+msgstr "Add to collection"
+
+msgid "collections.inCollections"
+msgstr "In collections"
+
+msgid "collections.manageTitle"
+msgstr "Manage collections"
+
+msgid "collections.createPlaceholder"
+msgstr "New collection name"
+
+msgid "collections.createAction"
+msgstr "Create"
+
+msgid "collections.rename"
+msgstr "Rename"
+
+msgid "collections.save"
+msgstr "Save"
+
+msgid "collections.cancel"
+msgstr "Cancel"
+
+msgid "collections.delete"
+msgstr "Delete"
+
+msgid "collections.moveUp"
+msgstr "Move up"
+
+msgid "collections.moveDown"
+msgstr "Move down"
+
+msgid "collections.removeItem"
+msgstr "Remove from collection"
+
+msgid "collections.itemCount"
+msgstr "{count, plural, one {# title} other {# titles}}"
+
+msgid "collections.saved"
+msgstr "Collection updated"
+
+msgid "collections.close"
+msgstr "Close"
+
+msgid "collections.emptyCollection"
+msgstr "No titles in this collection yet."
+
+msgid "collections.viewAll"
+msgstr "View all"

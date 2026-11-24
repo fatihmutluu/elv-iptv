@@ -180,7 +180,11 @@ export function computeAppearanceScrollY(
   ) {
     return layouts.font ? Math.max(0, layouts.font.y - 12) : undefined;
   }
-  if (controlId === 'toggle-reduce-motion' || controlId === 'toggle-confirm-exit') {
+  if (
+    controlId === 'toggle-reduce-motion' ||
+    controlId === 'toggle-confirm-exit' ||
+    controlId === 'toggle-vod-enrichment'
+  ) {
     return layouts.font ? Math.max(0, layouts.font.y + motionOffsetY - 12) : undefined;
   }
   if (controlId.startsWith('overscan-') || controlId.startsWith('tv-clock-')) {
@@ -252,6 +256,14 @@ export function activateAppearanceControl(
     if (preferences) {
       void preferences.updatePreferences({
         confirmExitOnBack: !preferences.preferences.confirmExitOnBack,
+      });
+    }
+    return;
+  }
+  if (controlId === 'toggle-vod-enrichment') {
+    if (preferences) {
+      void preferences.updatePreferences({
+        vodEnrichmentEnabled: !(preferences.preferences.vodEnrichmentEnabled === true),
       });
     }
     return;

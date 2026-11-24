@@ -112,6 +112,11 @@ import {
   MAX_ID_CHARS,
   MAX_ITEM_KEY_CHARS,
 } from './catalog-ipc-guards.ts';
+import {
+  type CatalogBridgeWaveF5bOps,
+  type CatalogWaveF5bOpsRpcCall,
+  isWaveF5bOpsRpcCall,
+} from './catalog-ipc-wave-f5b-guards.ts';
 
 /** IPC channels used to establish and fence a renderer's catalog `MessagePort`. */
 export const CATALOG_CHANNELS = Object.freeze({
@@ -277,7 +282,8 @@ export type CatalogRpcMethodCall =
   | { method: 'removeChannelFromCustomGroup'; groupId: string; itemKey: string }
   | { method: 'flushPendingWrites' }
   | CatalogEpgOpsRpcCall
-  | CatalogFailoverOpsRpcCall;
+  | CatalogFailoverOpsRpcCall
+  | CatalogWaveF5bOpsRpcCall;
 
 /** Preload to utility process over `MessagePort`. */
 export type CatalogClientMessage =
@@ -304,7 +310,10 @@ export interface CatalogImportHandle {
 }
 
 /** Frozen `window.elv.catalog` surface exposed by the preload; raw `MessagePort` never crosses `contextBridge`. */
-export interface CatalogBridge extends CatalogBridgeEpgOps, CatalogBridgeFailoverOps {
+export interface CatalogBridge
+  extends CatalogBridgeEpgOps,
+    CatalogBridgeFailoverOps,
+    CatalogBridgeWaveF5bOps {
   open(): Promise<Result<void>>;
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
@@ -662,7 +671,12 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
     case 'clearParentalPin':
       return isPinString(x['currentPin'], 0) && isOptionalStrictProfileId(x['profileId']);
     default:
-      return isChannelOpsRpcCall(x) || isEpgOpsRpcCall(x) || isFailoverOpsRpcCall(x);
+      return (
+        isChannelOpsRpcCall(x) ||
+        isEpgOpsRpcCall(x) ||
+        isFailoverOpsRpcCall(x) ||
+        isWaveF5bOpsRpcCall(x)
+      );
   }
 }
 

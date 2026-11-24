@@ -45,6 +45,7 @@ export type AppearanceFocusId =
   | 'sub-font-opendyslexic'
   | 'toggle-reduce-motion'
   | 'toggle-confirm-exit'
+  | 'toggle-vod-enrichment'
   | 'overscan-x-dec'
   | 'overscan-x-inc'
   | 'overscan-y-dec'
@@ -163,6 +164,7 @@ const APPEARANCE_ROWS_HEAD: readonly (readonly AppearanceFocusId[])[] = [
   ['sub-font-system', 'sub-font-atkinson', 'sub-font-opendyslexic'],
   ['toggle-reduce-motion'],
   ['toggle-confirm-exit'],
+  ['toggle-vod-enrichment'],
 ];
 
 const APPEARANCE_TV_ROWS: readonly (readonly AppearanceFocusId[])[] = [

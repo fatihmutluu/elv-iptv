@@ -10,6 +10,8 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type CachedHomeSnapshot,
+  type HydratedVodCollection,
+  mergeHydratedCollections,
   useCatalogUiCache,
   useProfile,
   useSeriesUnplayedCounts,
@@ -29,6 +31,31 @@ const HOME_FAVORITES_LIMIT = 24;
 const HOME_LIVE_LIMIT = 12;
 const HOME_MOVIES_LIMIT = 18;
 const HOME_SERIES_LIMIT = 18;
+const HOME_COLLECTIONS_LIMIT = 20;
+
+async function fetchHydratedCollections(
+  catalog: CatalogService,
+): Promise<readonly HydratedVodCollection[] | null> {
+  if (
+    typeof catalog.listCollections !== 'function' ||
+    typeof catalog.listCollectionItems !== 'function'
+  ) {
+    return [];
+  }
+  try {
+    const cols = await catalog.listCollections();
+    const bounded = cols.slice(0, HOME_COLLECTIONS_LIMIT);
+    return await Promise.all(
+      bounded.map(async (collection) => ({
+        collection,
+        items:
+          (await catalog.listCollectionItems?.(collection.id).catch(() => [] as ItemRow[])) ?? [],
+      })),
+    );
+  } catch {
+    return null;
+  }
+}
 
 /** Options for {@link useHomeData}. */
 export interface UseHomeDataOptions {
@@ -64,8 +91,10 @@ type HomeSnapshot = CachedHomeSnapshot;
 export interface HomeDataState extends HomeSnapshot {
   readonly loading: boolean;
   readonly hasLoaded: boolean;
+  readonly collections: readonly HydratedVodCollection[];
   readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
+  readonly refreshCollections: () => Promise<void>;
   readonly toggleMyList: (target: ToggleMyListTarget) => Promise<void>;
   readonly toggleWatched: (target: ToggleWatchedTarget, nextWatched: boolean) => Promise<void>;
 }
@@ -90,6 +119,7 @@ export function useHomeData({
   const [loading, setLoading] = useState(() => sources.length > 0 && initialCached === null);
   const [hasLoaded, setHasLoaded] = useState(() => initialCached !== null);
   const [snap, setSnap] = useState<HomeSnapshot>(() => initialCached ?? EMPTY_HOME_SNAPSHOT);
+  const [collections, setCollections] = useState<readonly HydratedVodCollection[]>([]);
   const [watchedOverrides, setWatchedOverrides] = useState<ReadonlyMap<string, boolean>>(
     () => new Map(),
   );
@@ -98,6 +128,9 @@ export function useHomeData({
   const mountedRef = useRef(true);
   const hasLoadedRef = useRef(initialCached !== null);
   const snapRef = useRef(snap);
+  const collectionsRef = useRef(collections);
+  collectionsRef.current = collections;
+  const prevProfileIdRef = useRef(activeProfileId);
   const watchedOverridesRef = useRef(watchedOverrides);
   watchedOverridesRef.current = watchedOverrides;
   const uiCacheRef = useRef(uiCache);
@@ -127,7 +160,23 @@ export function useHomeData({
     };
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion intentionally trigger fresh bounded reads
+  useEffect(() => {
+    if (prevProfileIdRef.current !== activeProfileId) {
+      prevProfileIdRef.current = activeProfileId;
+      collectionsRef.current = [];
+      setCollections([]);
+    }
+  }, [activeProfileId]);
+
+  const refreshCollections = useCallback(async () => {
+    const fetched = await fetchHydratedCollections(catalog);
+    if (!mountedRef.current) return;
+    const next = mergeHydratedCollections(fetched, collectionsRef.current);
+    collectionsRef.current = next;
+    setCollections(next);
+  }, [catalog]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken, userStateVersion, and activeProfileId intentionally trigger fresh bounded reads
   useEffect(() => {
     setWatchedOverrides((prev) => {
       if (prev.size === 0) return prev;
@@ -141,6 +190,8 @@ export function useHomeData({
     if (sources.length === 0) {
       snapRef.current = EMPTY_HOME_SNAPSHOT;
       setSnap(EMPTY_HOME_SNAPSHOT);
+      collectionsRef.current = [];
+      setCollections([]);
       setLoading(false);
       hasLoadedRef.current = true;
       setHasLoaded(true);
@@ -154,20 +205,36 @@ export function useHomeData({
 
     const run = async () => {
       try {
-        const [cwRows, recentChannelRows, favRows, favKeys, firstLive, firstMovie, firstSeries] =
-          await Promise.all([
-            catalog.listContinueWatching?.(HOME_CONTINUE_LIMIT).catch(() => []) ??
-              Promise.resolve([] as WatchProgressRow[]),
-            catalog.listRecentChannels?.(HOME_RECENT_CHANNELS_LIMIT).catch(() => []) ??
-              Promise.resolve([] as ItemRow[]),
-            catalog.listFavorites?.(HOME_FAVORITES_LIMIT).catch(() => []) ??
-              Promise.resolve([] as FavoriteRow[]),
-            catalog.listFavoriteKeys?.().catch(() => []) ?? Promise.resolve([] as string[]),
-            fetchHomeKindCategory(catalog, activeSources, 'live'),
-            fetchHomeKindCategory(catalog, activeSources, 'movie'),
-            fetchHomeKindCategory(catalog, activeSources, 'series'),
-          ]);
+        const [
+          cwRows,
+          recentChannelRows,
+          favRows,
+          favKeys,
+          firstLive,
+          firstMovie,
+          firstSeries,
+          hydratedCollections,
+        ] = await Promise.all([
+          catalog.listContinueWatching?.(HOME_CONTINUE_LIMIT).catch(() => []) ??
+            Promise.resolve([] as WatchProgressRow[]),
+          catalog.listRecentChannels?.(HOME_RECENT_CHANNELS_LIMIT).catch(() => []) ??
+            Promise.resolve([] as ItemRow[]),
+          catalog.listFavorites?.(HOME_FAVORITES_LIMIT).catch(() => []) ??
+            Promise.resolve([] as FavoriteRow[]),
+          catalog.listFavoriteKeys?.().catch(() => []) ?? Promise.resolve([] as string[]),
+          fetchHomeKindCategory(catalog, activeSources, 'live'),
+          fetchHomeKindCategory(catalog, activeSources, 'movie'),
+          fetchHomeKindCategory(catalog, activeSources, 'series'),
+          fetchHydratedCollections(catalog),
+        ]);
         if (cancelled) return;
+
+        const nextCollections = mergeHydratedCollections(
+          hydratedCollections,
+          collectionsRef.current,
+        );
+        collectionsRef.current = nextCollections;
+        setCollections(nextCollections);
 
         const [liveRows, movieRows, seriesRows] = await Promise.all([
           firstLive
@@ -190,6 +257,7 @@ export function useHomeData({
           ...movieRows.map((m) => m.key),
           ...seriesRows.map((s) => s.key),
           ...favRows.map((f) => f.itemKey),
+          ...nextCollections.flatMap((c) => c.items.map((item) => item.key)),
         ]);
         const extraProgress =
           keySet.size > 0 && catalog.listProgressByKeys
@@ -237,7 +305,7 @@ export function useHomeData({
     return () => {
       cancelled = true;
     };
-  }, [catalog, sources, refreshToken, userStateVersion]);
+  }, [activeProfileId, catalog, sources, refreshToken, userStateVersion]);
 
   const applyFavState = useCallback(
     (itemKey: string, inList: boolean, row: FavoriteRow | undefined) => {
@@ -451,8 +519,13 @@ export function useHomeData({
     for (const fav of snap.favorites) {
       if (fav.kind === 'series') keys.push(fav.itemKey);
     }
+    for (const col of collections) {
+      for (const item of col.items) {
+        if (item.kind === 'series') keys.push(item.key);
+      }
+    }
     return keys;
-  }, [snap.favorites, snap.series]);
+  }, [collections, snap.favorites, snap.series]);
 
   const unplayedBySeriesKey = useSeriesUnplayedCounts(
     catalog,
@@ -465,11 +538,23 @@ export function useHomeData({
       loading,
       hasLoaded,
       ...snap,
+      collections,
       unplayedBySeriesKey,
       watchedOverrides,
+      refreshCollections,
       toggleMyList,
       toggleWatched,
     }),
-    [hasLoaded, loading, snap, toggleMyList, toggleWatched, unplayedBySeriesKey, watchedOverrides],
+    [
+      collections,
+      hasLoaded,
+      loading,
+      refreshCollections,
+      snap,
+      toggleMyList,
+      toggleWatched,
+      unplayedBySeriesKey,
+      watchedOverrides,
+    ],
   );
 }
