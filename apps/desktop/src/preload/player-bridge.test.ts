@@ -318,16 +318,21 @@ describe('createPlayerBridge', () => {
     expect(release2).toHaveBeenCalledTimes(1);
   });
 
-  it('defers importedSharedTexture.release until after requestAnimationFrame commit when rAF is present', async () => {
+  it('defers importedSharedTexture.release until after requestAnimationFrame commit with bound receiver and exception safety', async () => {
     vi.useFakeTimers();
     const rafQueue: Array<() => void> = [];
     const origRaf = globalThis.requestAnimationFrame;
     const origCancelRaf = globalThis.cancelAnimationFrame;
-    globalThis.requestAnimationFrame = vi.fn((cb: FrameRequestCallback) => {
+    const cancelSpy = vi.fn();
+    globalThis.requestAnimationFrame = function (this: unknown, cb: FrameRequestCallback) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
       rafQueue.push(() => cb(0));
       return rafQueue.length;
-    });
-    globalThis.cancelAnimationFrame = vi.fn();
+    };
+    globalThis.cancelAnimationFrame = function (this: unknown, id: number) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+      cancelSpy(id);
+    };
     try {
       const { ipc } = fakeIpcRenderer();
       const shared = fakeSharedTexture();
@@ -358,7 +363,31 @@ describe('createPlayerBridge', () => {
       await vi.advanceTimersByTimeAsync(34);
       await pending2;
       expect(release2).toHaveBeenCalledTimes(1);
-      expect(globalThis.cancelAnimationFrame).toHaveBeenCalled();
+      expect(cancelSpy).toHaveBeenCalled();
+
+      // Throwing cancelAnimationFrame on fallback must not hang or skip release()
+      globalThis.cancelAnimationFrame = function (this: unknown) {
+        if (this !== globalThis) throw new TypeError('Illegal invocation');
+        throw new Error('cancel failed');
+      };
+      const release3 = vi.fn();
+      const pending3 = shared.deliver(
+        { getVideoFrame: () => fakeFrame(), release: release3 },
+        'e1',
+      );
+      await vi.advanceTimersByTimeAsync(34);
+      await expect(pending3).resolves.toBeUndefined();
+      expect(release3).toHaveBeenCalledTimes(1);
+
+      // Throwing requestAnimationFrame synchronously must clean up timers and release() immediately
+      globalThis.requestAnimationFrame = () => {
+        throw new Error('raf failed');
+      };
+      const release4 = vi.fn();
+      await expect(
+        shared.deliver({ getVideoFrame: () => fakeFrame(), release: release4 }, 'e1'),
+      ).resolves.toBeUndefined();
+      expect(release4).toHaveBeenCalledTimes(1);
     } finally {
       globalThis.requestAnimationFrame = origRaf;
       globalThis.cancelAnimationFrame = origCancelRaf;

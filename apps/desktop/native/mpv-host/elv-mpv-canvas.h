@@ -219,7 +219,8 @@ static void canvas_wait_gpu_done(CanvasState *c)
     deadline = GetTickCount64() + CANVAS_GPU_WAIT_MS;
     while (!done) {
         HRESULT hr = ID3D11DeviceContext_GetData(
-            c->ctx, (ID3D11Asynchronous *)c->frame_query, &done, sizeof(done), 0);
+            c->ctx, (ID3D11Asynchronous *)c->frame_query, &done, sizeof(done),
+            D3D11_ASYNC_GETDATA_DONOTFLUSH);
         if ((hr == S_OK && done) || (hr != S_OK && hr != S_FALSE))
             break;
         if (WaitForSingleObject(c->ev[EV_RENDER_STOP], 0) == WAIT_OBJECT_0)

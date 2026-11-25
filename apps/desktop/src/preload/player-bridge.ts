@@ -59,15 +59,11 @@ const FRAME_COMMIT_FALLBACK_MS = 34;
  * Prevents cross-device D3D11/IOSurface slot recycling while Chromium's GPU is still sampling the frame.
  */
 function waitForFrameCommit(): Promise<void> {
-  const raf = (
-    globalThis as {
-      requestAnimationFrame?: (cb: () => void) => number;
-      cancelAnimationFrame?: (id: number) => void;
-    }
-  ).requestAnimationFrame;
-  if (typeof raf !== 'function') return Promise.resolve();
-  const cancelRaf = (globalThis as { cancelAnimationFrame?: (id: number) => void })
-    .cancelAnimationFrame;
+  const g = globalThis as {
+    requestAnimationFrame?: (cb: () => void) => number;
+    cancelAnimationFrame?: (id: number) => void;
+  };
+  if (typeof g.requestAnimationFrame !== 'function') return Promise.resolve();
   return new Promise<void>((resolve) => {
     let settled = false;
     let rafId: number | undefined;
@@ -77,14 +73,26 @@ function waitForFrameCommit(): Promise<void> {
       settled = true;
       clearTimeout(fallback);
       if (postTimer !== undefined) clearTimeout(postTimer);
-      if (rafId !== undefined) cancelRaf?.(rafId);
+      if (rafId !== undefined) {
+        const pendingRaf = rafId;
+        rafId = undefined;
+        try {
+          g.cancelAnimationFrame?.(pendingRaf);
+        } catch {
+          // ignore cancelAnimationFrame failures during teardown/fallback
+        }
+      }
       resolve();
     };
     const fallback = setTimeout(finish, FRAME_COMMIT_FALLBACK_MS);
-    rafId = raf(() => {
-      rafId = undefined;
-      postTimer = setTimeout(finish, 0);
-    });
+    try {
+      rafId = g.requestAnimationFrame(() => {
+        rafId = undefined;
+        postTimer = setTimeout(finish, 0);
+      });
+    } catch {
+      finish();
+    }
   });
 }
 
