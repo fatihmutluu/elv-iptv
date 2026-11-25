@@ -1,8 +1,8 @@
 # Contributing to ELV IPTV
 
-Thanks for helping build ELV IPTV. This guide covers every way to contribute — from feature ideas and bug reports to code pull requests (with or without AI coding agents) — plus setup and safety rules. The project is open source under `GPL-3.0-only` (see [LICENSE](LICENSE)); please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+ELV IPTV is proprietary software (`Copyright (c) 2026 Fatih Mutlu. All Rights Reserved.`; see [LICENSE](LICENSE) and [ADR 0016](docs/adr/0016-proprietary-store-only-distribution.md)). **External code contributions and pull requests are currently closed** while the project is proprietary; the repository remains public for CI and issue tracking. Bug reports and feature suggestions remain welcome, and please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Ways to contribute without writing code
+## Ways to help without writing code
 
 - **Feature requests:** Open a [feature request](https://github.com/fatihmutluu/elv-iptv/issues/new?template=feature_request.yml) describing a workflow, remote shortcut, playback detail or quality-of-life improvement you want to see. Describe the behavior and why it matters; do not include third-party brand names or real provider links.
 - **Bug reports and device testing:** Open a [bug report](https://github.com/fatihmutluu/elv-iptv/issues/new?template=bug_report.yml) with your platform, OS version and reproduction steps. Always remove real playlist URLs, server hosts and credentials before posting.
@@ -22,13 +22,9 @@ Thanks for helping build ELV IPTV. This guide covers every way to contribute —
 - Android targets: Android SDK and JDK 17.
 - Apple targets (iOS, iPadOS, tvOS, macOS): a Mac with Xcode.
 
-## Contributor License Agreement
+## Contributor License Agreement (Archival)
 
-On your first pull request, add a comment with exactly this text:
-
-> I have read the CLA Document and I hereby sign the CLA
-
-That single comment covers your present and future contributions. Full terms are in [CLA.md](CLA.md).
+External pull requests are currently closed under [ADR 0016](docs/adr/0016-proprietary-store-only-distribution.md). [CLA.md](CLA.md) is preserved as a historical record for prior contributions and for any future time when external contributions may reopen.
 
 ## Getting started
 

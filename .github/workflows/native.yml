@@ -315,7 +315,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO -quiet build
       - name: Check the built app bundle
         run: sh modules/engine-aether/scripts/check-build.sh app "$(find apps/tv-mobile/ios/build/Build/Products -maxdepth 2 -name '*.app' | head -n 1)"
-      - name: Verify iOS release hygiene (#12)
+      - name: Verify iOS release hygiene (#12, #486)
         env:
           APP_VARIANT: production
         run: |
@@ -324,8 +324,11 @@ jobs:
           pnpm --filter tv-mobile exec expo config --type public --json > "$RUNNER_TEMP/bundle-ios/app.config.json"
           plist=$(find apps/tv-mobile/ios -maxdepth 2 -name Info.plist | head -n 1)
           test -n "$plist" || { echo "no iOS Info.plist found"; exit 1; }
+          privacy=$(find apps/tv-mobile/ios -maxdepth 2 -name PrivacyInfo.xcprivacy | head -n 1)
+          test -n "$privacy" || { echo "no iOS PrivacyInfo.xcprivacy found"; exit 1; }
           node tools/bin/release-hygiene.ts \
             --apple-plist "$plist" \
+            --apple-privacy-manifest "$privacy" \
             --artifact "$RUNNER_TEMP/bundle-ios"
       - name: Save the pnpm store
         if: github.ref == 'refs/heads/main' && steps.setup.outputs.cache-hit != 'true'
@@ -360,8 +363,10 @@ jobs:
           persist-credentials: false
       - name: Select Xcode 26.4.1
         run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
-      - name: Run the Apple engine Swift unit tests
-        run: swift test --package-path modules/engine-aether/ios
+      - name: Run the Apple engine and XMLTV Swift unit tests
+        run: |
+          swift test --package-path modules/engine-aether/ios
+          swift test --package-path modules/xmltv-native/ios
       - uses: ./.github/actions/setup
         id: setup
       - name: Restore CocoaPods cache
@@ -394,7 +399,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO -quiet build
       - name: Check the built app bundle
         run: sh modules/engine-aether/scripts/check-build.sh app "$(find apps/tv-mobile/ios/build/Build/Products -maxdepth 2 -name '*.app' | head -n 1)"
-      - name: Verify tvOS release hygiene (#12)
+      - name: Verify tvOS release hygiene (#12, #486)
         env:
           APP_VARIANT: production
         run: |
@@ -403,8 +408,11 @@ jobs:
           pnpm --filter tv-mobile exec expo config --type public --json > "$RUNNER_TEMP/bundle-tvos/app.config.json"
           plist=$(find apps/tv-mobile/ios -maxdepth 2 -name Info.plist | head -n 1)
           test -n "$plist" || { echo "no tvOS Info.plist found"; exit 1; }
+          privacy=$(find apps/tv-mobile/ios -maxdepth 2 -name PrivacyInfo.xcprivacy | head -n 1)
+          test -n "$privacy" || { echo "no tvOS PrivacyInfo.xcprivacy found"; exit 1; }
           node tools/bin/release-hygiene.ts \
             --apple-plist "$plist" \
+            --apple-privacy-manifest "$privacy" \
             --artifact "$RUNNER_TEMP/bundle-tvos"
       - name: Save CocoaPods cache
         if: github.ref == 'refs/heads/main' && steps.pods-cache.outputs.cache-hit != 'true'
@@ -686,7 +694,7 @@ jobs:
         with:
           path: .cache/mpv
           key: mpv-${{ runner.os }}-${{ hashFiles('apps/desktop/mpv-runtime.lock.json') }}
-      - name: Build the desktop app and installers
+      - name: Build the desktop app bundle
         run: pnpm --filter @elv/desktop build
       - name: Verify desktop app.asar release hygiene
         shell: bash
@@ -712,13 +720,11 @@ jobs:
         env:
           ELV_E2E_PACKAGED: "1"
         run: pnpm --filter @elv/desktop test:e2e
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - if: runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-${{ matrix.os }}
-          path: |
-            apps/desktop/release/*.exe
-            apps/desktop/release/*.dmg
-            apps/desktop/release/*.AppImage
+          path: apps/desktop/release/*.AppImage
           if-no-files-found: error
           retention-days: 7
       - name: Save mpv runtime cache

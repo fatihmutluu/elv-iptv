@@ -44,19 +44,25 @@ win:
     - from: resources/fonts
       to: fonts
   target:
-    - nsis
-nsis:
-  oneClick: false
-  perMachine: false
-  allowToChangeInstallationDirectory: true
+    - dir
 
-# Microsoft Store package, built by a later Store job. Identity and publisher are placeholders:
-# Partner Center assigns the real values when the app name is reserved.
+# Microsoft Store MSIX package (`pnpm --filter @elv/desktop run package:msix`).
+# Identity and publisher are placeholders: Partner Center assigns the real values when the app name is reserved.
 appx:
   identityName: PLACEHOLDER.StoreAssignedIdentity
   publisher: CN=PLACEHOLDER-StoreAssignedPublisher
   publisherDisplayName: ELV IPTV
+  displayName: ELV IPTV
   applicationId: ELVIPTV
+  backgroundColor: "#0b0e14"
+  showNameOnTiles: true
+  capabilities:
+    - runFullTrust
+    - internetClient
+    - privateNetworkClientServer
+  languages:
+    - en-US
+    - tr-TR
 
 mac:
   category: public.app-category.entertainment
@@ -66,7 +72,12 @@ mac:
         - m3u8
       name: M3U Playlist
       role: Viewer
-  # Ad-hoc sign (`-`) without hardened runtime so Apple Silicon accepts the fused bundle + extraResources before #77.
+  extendInfo:
+    ITSAppUsesNonExemptEncryption: false
+    NSLocalNetworkUsageDescription: ELV IPTV uses your local network to discover AirPlay receivers and pair devices over QR code.
+    NSAppTransportSecurity:
+      NSAllowsArbitraryLoads: true
+  # Ad-hoc sign (`-`) without hardened runtime so Apple Silicon accepts the fused unpacked bundle in CI (`package:mas` signs for Mac App Store).
   identity: "-"
   hardenedRuntime: false
   extraResources:
@@ -77,13 +88,15 @@ mac:
     - from: resources/fonts
       to: fonts
   target:
-    - dmg
-dmg:
-  title: ELV IPTV
+    - dir
 mas:
+  # Clear inherited mac.identity ("-") so package:mas uses CSC_NAME / Apple Distribution keychain auto-discovery.
+  identity: ""
   entitlements: resources/entitlements.mas.plist
   entitlementsInherit: resources/entitlements.mas.inherit.plist
   hardenedRuntime: false
+  category: public.app-category.entertainment
+  type: distribution
 
 linux:
   # The default name comes from the scoped package name, which is not a valid file name.

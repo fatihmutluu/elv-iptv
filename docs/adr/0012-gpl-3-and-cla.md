@@ -1,6 +1,6 @@
 # 0012 GPL-3.0-only with the existing contributor license agreement
 
-- Status: Accepted (owner decision)
+- Status: Superseded by [0016](0016-proprietary-store-only-distribution.md)
 - Date: 2026-11-15
 - Supersedes: [0008](0008-polyform-shield-and-cla.md)
 

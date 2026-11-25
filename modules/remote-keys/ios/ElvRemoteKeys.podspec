@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.name           = 'ElvRemoteKeys'
   s.version        = package['version']
   s.summary        = 'ELV IPTV Apple tvOS raw remote key and directional pan gesture observer'
-  s.license        = { :type => package['license'] }
+  s.license        = { :type => 'Proprietary', :text => 'Copyright (c) ELV IPTV. All rights reserved.' }
   s.author         = 'ELV IPTV'
   s.homepage       = 'https://github.com/fatihmutluu/elv-iptv'
   s.platforms      = { :ios => '18.0', :tvos => '18.0' }

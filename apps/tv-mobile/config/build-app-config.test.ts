@@ -178,7 +178,7 @@ describe('buildAppConfig', () => {
       });
       expect(config.ios?.infoPlist?.NSBonjourServices).toEqual(['_airplay._tcp']);
       expect(config.ios?.infoPlist?.NSLocalNetworkUsageDescription).toBe(
-        'ELV IPTV discovers AirPlay receivers on your local network to match supported audio formats.',
+        'ELV IPTV uses your local network to discover AirPlay receivers and pair devices over QR code.',
       );
       expect(config.ios?.infoPlist?.NSAppTransportSecurity).not.toHaveProperty(
         'NSAllowsLocalNetworking',
@@ -209,6 +209,40 @@ describe('buildAppConfig', () => {
       withIosExternalDisplay,
       { isTv: true },
     ]);
+  });
+
+  it('declares Apple PrivacyInfo.xcprivacy manifest with zero tracking and all 4 Required Reason APIs on iOS and tvOS (#486)', () => {
+    for (const env of [
+      {},
+      { APP_VARIANT: 'development' },
+      { EXPO_TV: '1', STORE: 'appstore' },
+      { APP_VARIANT: 'production', EXPO_TV: 'true', STORE: 'appstore' },
+    ] satisfies Env[]) {
+      const config = build(env);
+      expect(config.ios?.privacyManifests).toEqual({
+        NSPrivacyTracking: false,
+        NSPrivacyTrackingDomains: [],
+        NSPrivacyCollectedDataTypes: [],
+        NSPrivacyAccessedAPITypes: [
+          {
+            NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults',
+            NSPrivacyAccessedAPITypeReasons: ['CA92.1'],
+          },
+          {
+            NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryFileTimestamp',
+            NSPrivacyAccessedAPITypeReasons: ['C617.1'],
+          },
+          {
+            NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategorySystemBootTime',
+            NSPrivacyAccessedAPITypeReasons: ['35F9.1'],
+          },
+          {
+            NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryDiskSpace',
+            NSPrivacyAccessedAPITypeReasons: ['E174.1'],
+          },
+        ],
+      });
+    }
   });
 
   it('includes generic external player LSApplicationQueriesSchemes only on iOS/iPadOS mobile builds (#406)', () => {

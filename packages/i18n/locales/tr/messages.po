@@ -649,7 +649,7 @@ msgid "settings.title"
 msgstr "Ayarlar"
 
 msgid "settings.subtitle"
-msgstr "Görünümü özelleştirin, kaynakları yönetin ve açık kaynak lisanslarını inceleyin."
+msgstr "Görünümü özelleştirin, kaynakları yönetin ve üçüncü taraf bildirimlerini inceleyin."
 
 msgid "settings.section.appearance"
 msgstr "Görünüm"
@@ -736,10 +736,10 @@ msgid "settings.about.title"
 msgstr "ELV IPTV Hakkında"
 
 msgid "settings.about.licenseBadge"
-msgstr "GPL-3.0-only · LGPL medya motorları"
+msgstr "Tescilli · LGPL medya motorları"
 
 msgid "settings.about.statement"
-msgstr "ELV IPTV açık kaynaklı bir oynatıcıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz."
+msgstr "ELV IPTV bağımsız bir IPTV oynatıcısıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz."
 
 msgid "home.title"
 msgstr "Ana Sayfa"

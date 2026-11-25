@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util';
 import { runReleaseHygiene } from '../src/release-hygiene.ts';
 
 const USAGE =
-  'usage: node tools/bin/release-hygiene.ts [--gradle-deps <file>] [--android-manifest <file>] [--apple-plist <file>] [--artifact <path>] [--tv]';
+  'usage: node tools/bin/release-hygiene.ts [--gradle-deps <file>] [--android-manifest <file>] [--apple-plist <file>] [--apple-privacy-manifest <file>] [--artifact <path>] [--tv]';
 
 let parsed: ReturnType<typeof parseCli>;
 function parseCli() {
@@ -12,6 +12,7 @@ function parseCli() {
       'gradle-deps': { type: 'string', multiple: true },
       'android-manifest': { type: 'string', multiple: true },
       'apple-plist': { type: 'string', multiple: true },
+      'apple-privacy-manifest': { type: 'string', multiple: true },
       artifact: { type: 'string', multiple: true },
       tv: { type: 'boolean' },
     },
@@ -29,12 +30,14 @@ const { values } = parsed;
 const gradleDeps = values['gradle-deps'] ?? [];
 const androidManifests = values['android-manifest'] ?? [];
 const applePlists = values['apple-plist'] ?? [];
+const applePrivacyManifests = values['apple-privacy-manifest'] ?? [];
 const artifacts = values.artifact ?? [];
 
 if (
   gradleDeps.length === 0 &&
   androidManifests.length === 0 &&
   applePlists.length === 0 &&
+  applePrivacyManifests.length === 0 &&
   artifacts.length === 0
 ) {
   process.stderr.write(`release-hygiene: specify at least one check target.\n${USAGE}\n`);
@@ -45,6 +48,7 @@ const result = runReleaseHygiene({
   gradleDeps,
   androidManifests,
   applePlists,
+  applePrivacyManifests,
   artifacts,
   tv: values.tv === true,
 });
@@ -57,5 +61,5 @@ if (!result.ok) {
 }
 
 process.stdout.write(
-  `release-hygiene: passed (${gradleDeps.length} deps, ${androidManifests.length} manifests, ${applePlists.length} plists, ${artifacts.length} artifact targets)\n`,
+  `release-hygiene: passed (${gradleDeps.length} deps, ${androidManifests.length} manifests, ${applePlists.length} plists, ${applePrivacyManifests.length} privacy manifests, ${artifacts.length} artifact targets)\n`,
 );

@@ -29,7 +29,7 @@ function manifest(kind: PackageKind, name: string): unknown {
     name: `@elv/${name}`,
     private: true,
     version: '0.0.0',
-    license: 'GPL-3.0-only',
+    license: 'UNLICENSED',
     type: 'module',
   };
   const exports = { '.': './src/index.ts' };

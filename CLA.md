@@ -1,5 +1,7 @@
 # ELV IPTV Individual Contributor License Agreement
 
+> **Archival Notice (2026-11-25):** External code contributions are currently closed while ELV IPTV is proprietary software under [ADR 0016](docs/adr/0016-proprietary-store-only-distribution.md) (see [LICENSE](LICENSE)). This document is preserved verbatim as a historical record for prior contributions and remains binding for commits submitted under it.
+
 Version 1.0 — 2026-11-13
 
 This agreement is adapted from the Apache Software Foundation Individual Contributor License Agreement, Version 2.2 (https://www.apache.org/licenses/icla.pdf). The licensee is Fatih Mutlu (GitHub: fatihmutluu), the owner of ELV IPTV (the "Owner").

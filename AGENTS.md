@@ -1,6 +1,6 @@
 # ELV IPTV
 
-Cross-platform IPTV player (open source, `GPL-3.0-only` + `CLA.md`): Expo + react-native-tvos for phone, tablet,
+Cross-platform IPTV player (proprietary, All Rights Reserved — ADR 0016): Expo + react-native-tvos for phone, tablet,
 Android TV, Fire OS, iOS, iPadOS and tvOS; Electron + react-native-web for Windows, macOS and Linux.
 Users bring their own M3U or Xtream Codes source; the project ships no content. Active continuous development; releases are cut whenever ready.
 
@@ -46,7 +46,7 @@ Users bring their own M3U or Xtream Codes source; the project ships no content. 
 - Pure packages (`domain`, `sources`, `data`, `playback`, `focus-core`) never import `react`, `react-native`,
   `expo*`, `electron` or `node:*`.
 - Implementers never read GPL or unlicensed reference sources; internal research notes stand in for them.
-- The license is `GPL-3.0-only`; contributions come under `CLA.md`. Third-party code keeps its own license and no GPL
+- The license is proprietary (`UNLICENSED`; ADR 0016). Third-party code keeps its own license and no GPL
   third-party component ships (spec section 3). No third-party brand names in public copy.
 
 ## Pointers

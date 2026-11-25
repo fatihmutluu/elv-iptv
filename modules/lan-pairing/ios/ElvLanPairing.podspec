@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.name           = 'ElvLanPairing'
   s.version        = package['version']
   s.summary        = 'ELV IPTV ephemeral local-network HTTP server for phone-to-TV QR pairing'
-  s.license        = { :type => package['license'] }
+  s.license        = { :type => 'Proprietary', :text => 'Copyright (c) ELV IPTV. All rights reserved.' }
   s.author         = 'ELV IPTV'
   s.homepage       = 'https://github.com/fatihmutluu/elv-iptv'
   s.platforms      = { :ios => '18.0', :tvos => '18.0' }

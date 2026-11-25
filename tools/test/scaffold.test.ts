@@ -126,7 +126,7 @@ describe('scaffoldFiles license', () => {
     ['module', 'modules/widgets/package.json'],
   ] as const)('declares the project license in a %s manifest', (kind, path) => {
     const files = scaffoldFiles({ kind, name: 'widgets' });
-    expect(json(files, path).license).toBe('GPL-3.0-only');
+    expect(json(files, path).license).toBe('UNLICENSED');
   });
 });
 

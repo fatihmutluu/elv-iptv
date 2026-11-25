@@ -2,7 +2,7 @@
   "name": "@elv/desktop-renderer",
   "private": true,
   "version": "0.0.0",
-  "license": "GPL-3.0-only",
+  "license": "UNLICENSED",
   "main": "index.ts",
   "scripts": {
     "dev:ui": "expo start --web --port 8081",

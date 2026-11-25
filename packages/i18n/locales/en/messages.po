@@ -649,7 +649,7 @@ msgid "settings.title"
 msgstr "Settings"
 
 msgid "settings.subtitle"
-msgstr "Customize appearance, manage sources, and view open-source licenses."
+msgstr "Customize appearance, manage sources, and view third-party notices."
 
 msgid "settings.section.appearance"
 msgstr "Appearance"
@@ -736,10 +736,10 @@ msgid "settings.about.title"
 msgstr "About ELV IPTV"
 
 msgid "settings.about.licenseBadge"
-msgstr "GPL-3.0-only · LGPL media engines"
+msgstr "Proprietary · LGPL media engines"
 
 msgid "settings.about.statement"
-msgstr "ELV IPTV is an open-source player and ships no media content. Native playback engines dynamically link LGPL libraries. Provider credentials remain encrypted on-device and never enter the catalog database."
+msgstr "ELV IPTV is an independent IPTV player and ships no media content. Native playback engines dynamically link LGPL libraries. Provider credentials remain encrypted on-device and never enter the catalog database."
 
 msgid "home.title"
 msgstr "Home"

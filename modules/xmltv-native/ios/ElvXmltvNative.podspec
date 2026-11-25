@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.name             = 'ElvXmltvNative'
   s.version          = package['version']
   s.summary          = 'ELV IPTV native streaming XMLTV parser and SQLite stager'
-  s.license          = { :type => package['license'] }
+  s.license          = { :type => 'Proprietary', :text => 'Copyright (c) ELV IPTV. All rights reserved.' }
   s.author           = 'ELV IPTV'
   s.homepage         = 'https://github.com/fatihmutluu/elv-iptv'
   s.platforms        = { :ios => '18.0', :tvos => '18.0' }

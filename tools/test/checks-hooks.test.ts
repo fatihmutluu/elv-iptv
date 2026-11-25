@@ -34,7 +34,7 @@ describe('hooks check discovery', () => {
 });
 
 describe('workspace manifest licenses', () => {
-  it('declares GPL-3.0-only in the root manifest and every workspace package.json', () => {
+  it('declares UNLICENSED in the root manifest and every workspace package.json', () => {
     const repoRoot = findRepoRoot(import.meta.dirname);
     const manifests: string[] = ['package.json', 'tools/package.json'];
     for (const group of ['apps', 'packages', 'modules']) {
@@ -60,7 +60,34 @@ describe('workspace manifest licenses', () => {
 
     for (const rel of manifests) {
       const parsed = JSON.parse(readFileSync(join(repoRoot, rel), 'utf8')) as { license?: string };
-      expect(parsed.license, `${rel} must declare GPL-3.0-only`).toBe('GPL-3.0-only');
+      expect(parsed.license, `${rel} must declare UNLICENSED`).toBe('UNLICENSED');
+    }
+  });
+
+  it('declares Proprietary in every CocoaPods .podspec file', () => {
+    const repoRoot = findRepoRoot(import.meta.dirname);
+    const modulesDir = join(repoRoot, 'modules');
+    const podspecs: string[] = [];
+    for (const entry of readdirSync(modulesDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const iosDir = join(modulesDir, entry.name, 'ios');
+      try {
+        for (const file of readdirSync(iosDir)) {
+          if (file.endsWith('.podspec')) {
+            podspecs.push(`modules/${entry.name}/ios/${file}`);
+          }
+        }
+      } catch {
+        // module has no ios/ folder
+      }
+    }
+
+    expect(podspecs.length).toBeGreaterThanOrEqual(4);
+    for (const rel of podspecs) {
+      const content = readFileSync(join(repoRoot, rel), 'utf8');
+      expect(content, `${rel} must declare Proprietary license`).toMatch(
+        /s\.license\s*=\s*\{\s*:type\s*=>\s*'Proprietary'/,
+      );
     }
   });
 });

@@ -153,4 +153,52 @@ describe('createCanvasEndpoint', () => {
     expect(() => ep.onListening?.()).not.toThrow();
     expect(() => ep.cleanup()).not.toThrow();
   });
+
+  it('uses compact prefix inside container tmpdir instead of /tmp when isMas is true and default path exceeds limit', () => {
+    // Length 80: + '/elv-c-XXXXXX/c.sock' (20) = 100 > 96, + '/e-XXXXXX/s' (11) = 91 <= 96
+    const sandboxTmp = `/var/folders/ab/${'c'.repeat(62)}/T`;
+    expect(Buffer.byteLength(join(sandboxTmp, 'elv-c-XXXXXX', 'c.sock'), 'utf8')).toBeGreaterThan(
+      96,
+    );
+    expect(Buffer.byteLength(join(sandboxTmp, 'e-XXXXXX', 's'), 'utf8')).toBeLessThanOrEqual(96);
+
+    const mkdtempSync = vi.fn((prefix: string) => `${prefix}abcdef`);
+    const chmodSync = vi.fn();
+    const rmSync = vi.fn();
+
+    const ep = createCanvasEndpoint('darwin', {
+      tmpdir: () => sandboxTmp,
+      mkdtempSync,
+      chmodSync,
+      rmSync,
+      isMas: true,
+    });
+
+    expect(mkdtempSync).toHaveBeenCalledWith(join(sandboxTmp, 'e-'));
+    expect(mkdtempSync).not.toHaveBeenCalledWith(expect.stringContaining('/tmp'));
+    const expectedDir = `${join(sandboxTmp, 'e-')}abcdef`;
+    expect(ep.path).toBe(join(expectedDir, 's'));
+    expect(Buffer.byteLength(ep.path, 'utf8')).toBeLessThanOrEqual(96);
+
+    ep.onListening?.();
+    expect(chmodSync).toHaveBeenCalledWith(ep.path, 0o600);
+    ep.cleanup();
+    expect(rmSync).toHaveBeenCalledWith(expectedDir, { recursive: true, force: true });
+  });
+
+  it('throws an App Sandbox error without touching /tmp when isMas is true and even compact path exceeds SUN_LEN', () => {
+    const hugeSandboxTmp = `/Users/alice/Library/Containers/io.github.fatihmutluu.elviptv/Data/tmp/${'x'.repeat(30)}`;
+    expect(Buffer.byteLength(join(hugeSandboxTmp, 'e-XXXXXX', 's'), 'utf8')).toBeGreaterThan(96);
+
+    const mkdtempSync = vi.fn((prefix: string) => `${prefix}abcdef`);
+
+    expect(() =>
+      createCanvasEndpoint('darwin', {
+        tmpdir: () => hugeSandboxTmp,
+        mkdtempSync,
+        isMas: true,
+      }),
+    ).toThrow(/App Sandbox/i);
+    expect(mkdtempSync).not.toHaveBeenCalled();
+  });
 });
