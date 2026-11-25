@@ -10,16 +10,30 @@ export interface PlayerCanvasProps {
   visible: boolean;
 }
 
-function clearCanvas(canvas: HTMLCanvasElement | null): void {
+function acquireOpaqueContext(
+  canvas: HTMLCanvasElement,
+  cached: CanvasRenderingContext2D | null,
+): CanvasRenderingContext2D | null {
+  if (cached !== null) return cached;
+  return canvas.getContext('2d', { alpha: false }) ?? canvas.getContext('2d');
+}
+
+function clearCanvas(canvas: HTMLCanvasElement | null, ctx: CanvasRenderingContext2D | null): void {
   if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const resolved = acquireOpaqueContext(canvas, ctx);
+  if (!resolved) return;
+  if (typeof resolved.fillRect === 'function') {
+    resolved.fillStyle = '#000000';
+    resolved.fillRect(0, 0, canvas.width, canvas.height);
+  } else {
+    resolved.clearRect(0, 0, canvas.width, canvas.height);
+  }
 }
 
 /**
  * In-DOM `<canvas>` compositor for Electron `'canvas'` video presentation (`#95`). Receives zero-copy GPU
- * `VideoFrame` instances from the sandboxed preload, draws them behind React Native Web overlays, and guarantees
- * `frame.close()` on every code path.
+ * `VideoFrame` instances from the sandboxed preload, draws them onto a cached opaque (`alpha: false`) 2D
+ * surface behind React Native Web overlays, and guarantees `frame.close()` on every code path.
  */
 export function PlayerCanvas({
   engine,
@@ -27,6 +41,7 @@ export function PlayerCanvas({
   visible,
 }: PlayerCanvasProps): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
 
@@ -36,8 +51,9 @@ export function PlayerCanvas({
         if (!visibleRef.current) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const ctx = canvas.getContext('2d');
+        const ctx = acquireOpaqueContext(canvas, ctxRef.current);
         if (!ctx) return;
+        ctxRef.current = ctx;
         const targetWidth =
           typeof frame.displayWidth === 'number' && frame.displayWidth > 0
             ? frame.displayWidth
@@ -62,12 +78,13 @@ export function PlayerCanvas({
     });
     return () => {
       off?.();
-      clearCanvas(canvasRef.current);
+      clearCanvas(canvasRef.current, ctxRef.current);
+      ctxRef.current = null;
     };
   }, [engine]);
 
   useEffect(() => {
-    if (!visible) clearCanvas(canvasRef.current);
+    if (!visible) clearCanvas(canvasRef.current, ctxRef.current);
   }, [visible]);
 
   return (

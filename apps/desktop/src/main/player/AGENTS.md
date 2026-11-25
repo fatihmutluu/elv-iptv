@@ -22,7 +22,7 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Zero `e
   `CFRelease` in `finally`) on `darwin`, sending `I`/`A` acks and cleaning up the socket dir on dispose.
 - `mpv/live-session.ts` & `mpv/session-constants.ts`: per-process mpv event wiring, entry binding, `Deriver` + `AudioHotplug` + `ReadaheadController`, and `stop-then-load` / clean-exit handling.
 - `mpv/audio-ramp.ts` & `mpv/readahead.ts`: cancellable 7-step / 175 ms play/pause volume ramp with echo suppression;
-  adaptive 3-tier (`fast` 2s / `normal` 8s / `aggressive` 20s) live `demuxer-readahead-secs` controller + URL-free SHA-256 host+path 500-entry LRU store.
+  adaptive 3-tier (`fast` 4s / `normal` 8s sticky floor / `aggressive` 20s) live `demuxer-readahead-secs` controller + URL-free SHA-256 host+path 500-entry LRU store.
 - `mpv/vod-cache.ts`: sandbox-safe ephemeral VOD disk cache (`<cache>/elv-vod-cache/s-<uuid>`, `0o700`, startup orphan purge, deferred retire + unconditional `end-file`/`dispose` sweep, Multi-View `>= 2` tile disablement, queued-episode tracking), `@elv/playback` `computeVodBufferBudget` -> per-file mpv options (live always `cache-on-disk=no`), and SHA-256-keyed `429`/`509` throttle backoff with 120 s healthy-playback decay (`#350`).
 - `mpv/codec.ts` & `mpv/client.ts`: control-char-sanitized, 4 MiB-bounded JSON-line decoder and 3 s `MpvWedgedError` IPC client.
 - `mpv/process.ts`, `mpv/process-darwin.ts`, `mpv/pid-sweep.ts`: Windows pipe / Linux socket / macOS `fd://3` launchers

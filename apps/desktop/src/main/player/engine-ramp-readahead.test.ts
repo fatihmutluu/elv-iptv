@@ -244,14 +244,14 @@ describe('MpvEngine adaptive readahead tiers (#196)', () => {
 
     engine.load(live(1, URL_A));
     await playing(events, 1);
-    await vi.waitFor(() => expect(readaheadCmds(fake.sent)).toEqual([2, 8]));
+    await vi.waitFor(() => expect(readaheadCmds(fake.sent)).toEqual([4, 8]));
 
     engine.load(live(2, URL_B));
     await playing(events, 2);
-    await vi.waitFor(() => expect(readaheadCmds(fake.sent)).toEqual([2, 8, 2]));
+    await vi.waitFor(() => expect(readaheadCmds(fake.sent)).toEqual([4, 8, 4]));
 
     engine.load(live(3, URL_A));
     await playing(events, 3);
-    await vi.waitFor(() => expect(readaheadCmds(fake.sent).slice(0, 4)).toEqual([2, 8, 2, 8]));
+    await vi.waitFor(() => expect(readaheadCmds(fake.sent).slice(0, 4)).toEqual([4, 8, 4, 8]));
   });
 });

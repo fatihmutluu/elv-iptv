@@ -51,6 +51,52 @@ function subscribe<T>(
   };
 }
 
+const FRAME_COMMIT_FALLBACK_MS = 34;
+
+/**
+ * Waits one compositor frame (`requestAnimationFrame` + post-paint turn, bounded by a 34 ms
+ * fallback for occluded/background windows) before releasing a shared texture back to `elv-mpv`.
+ * Prevents cross-device D3D11/IOSurface slot recycling while Chromium's GPU is still sampling the frame.
+ */
+function waitForFrameCommit(): Promise<void> {
+  const g = globalThis as {
+    requestAnimationFrame?: (cb: () => void) => number;
+    cancelAnimationFrame?: (id: number) => void;
+  };
+  const raf = g.requestAnimationFrame;
+  if (typeof raf !== 'function') return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    let rafId: number | undefined;
+    let postTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(fallback);
+      if (postTimer !== undefined) clearTimeout(postTimer);
+      if (rafId !== undefined) {
+        const pendingRaf = rafId;
+        rafId = undefined;
+        try {
+          g.cancelAnimationFrame?.(pendingRaf);
+        } catch {
+          // ignore cancelAnimationFrame failures during teardown/fallback
+        }
+      }
+      resolve();
+    };
+    const fallback = setTimeout(finish, FRAME_COMMIT_FALLBACK_MS);
+    try {
+      rafId = raf.call(g, () => {
+        rafId = undefined;
+        postTimer = setTimeout(finish, 0);
+      });
+    } catch {
+      finish();
+    }
+  });
+}
+
 /**
  * Builds `window.elv.player` over `ipcRenderer`: one function per channel and nothing else, so the renderer gets no
  * raw IPC, no event object and no way to name a channel of its own.
@@ -63,6 +109,7 @@ export function createPlayerBridge(
 
   if (sharedTex) {
     sharedTex.setSharedTextureReceiver(async ({ importedSharedTexture }, targetEngineId) => {
+      let delivered = false;
       try {
         const listener =
           typeof targetEngineId === 'string' ? frameListeners.get(targetEngineId) : undefined;
@@ -70,12 +117,16 @@ export function createPlayerBridge(
         const frame = importedSharedTexture.getVideoFrame();
         try {
           listener(frame);
+          delivered = true;
         } catch {
           try {
             frame.close();
           } catch {
             // ignore frame close failure after listener error
           }
+        }
+        if (delivered) {
+          await waitForFrameCommit();
         }
       } finally {
         importedSharedTexture.release();

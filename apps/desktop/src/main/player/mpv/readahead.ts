@@ -7,7 +7,7 @@ export type ReadaheadTier = 'fast' | 'normal' | 'aggressive';
 
 /** Readahead buffer duration in seconds for each adaptive tier. */
 export const READAHEAD_TIER_SECS: Readonly<Record<ReadaheadTier, number>> = Object.freeze({
-  fast: 2,
+  fast: 4,
   normal: 8,
   aggressive: 20,
 });
@@ -225,7 +225,9 @@ export function createReadaheadController(opts: ReadaheadControllerOptions): Rea
 
   const tryStepDown = (): void => {
     const idx = TIER_ORDER.indexOf(tier);
-    if (idx <= 0) {
+    // Keep 'normal' sticky once promoted so bursty live HLS/TS segments never re-enter
+    // a 2-minute step-down -> re-stall oscillation cycle; only 'aggressive' steps back down.
+    if (idx <= 1) {
       healthySinceMs = undefined;
       return;
     }

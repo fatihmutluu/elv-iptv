@@ -3,6 +3,7 @@ import {
   AppProviders,
   createLazyCatalog,
   type OpenVideoEngine,
+  usePreferences,
   type VideoHost,
 } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
@@ -90,6 +91,7 @@ export function PopoutPlayerStage({
 }: PopoutPlayerStageProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
+  const { preferences } = usePreferences();
   const [payload, setPayload] = useState<PopoutLaunchPayload | null>(null);
   const [opened, setOpened] = useState<OpenVideoEngine | null>(null);
   const [status, setStatus] = useState<PlaybackStatus>({ kind: 'idle' });
@@ -221,6 +223,13 @@ export function PopoutPlayerStage({
       cancelled = true;
     };
   }, [catalog, payload, videoHost]);
+
+  useEffect(() => {
+    if (!opened) return;
+    opened.setDeinterlaceMode?.(preferences.deinterlaceMode);
+    opened.setPitchLock?.(preferences.pitchLock);
+    opened.setAudioNormalization?.(preferences.audioNormalization);
+  }, [opened, preferences.audioNormalization, preferences.deinterlaceMode, preferences.pitchLock]);
 
   useEffect(() => {
     return () => {

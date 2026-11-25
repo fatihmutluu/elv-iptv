@@ -325,9 +325,9 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
       '--keep-open=yes',
     ]);
 
-    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 3);
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 5);
     const gen1 = h.surfaces.filter((s) => s.gen === 1);
-    expect(gen1.map((s) => s.slot).sort()).toEqual([0, 1, 2]);
+    expect(gen1.map((s) => s.slot).sort()).toEqual([0, 1, 2, 3, 4]);
     for (const s of gen1) {
       expect(s.handle).toBeGreaterThan(0n);
       expect(s.width).toBe(1280);
@@ -342,13 +342,13 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
     const firstFrame = h.frames.find((f) => f.gen === 1);
     expect(firstFrame?.width).toBe(1280);
     expect(firstFrame?.height).toBe(720);
-    expect([0, 1, 2]).toContain(firstFrame?.slot);
+    expect([0, 1, 2, 3, 4]).toContain(firstFrame?.slot);
 
     const sock = await h.connected;
     sock.write('R 320 180\n');
-    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 2).length === 3);
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 2).length === 5);
     const gen2 = h.surfaces.filter((s) => s.gen === 2);
-    expect(gen2.map((s) => s.slot).sort()).toEqual([0, 1, 2]);
+    expect(gen2.map((s) => s.slot).sort()).toEqual([0, 1, 2, 3, 4]);
     for (const s of gen2) {
       expect(s.handle).toBeGreaterThan(0n);
       expect(s.width).toBe(320);
@@ -364,7 +364,7 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
     const h = await openCanvasHarness({ ackSurface: false });
     const child = h.spawnHost();
     const sock = await h.connected;
-    await h.waitFor(() => h.surfaces.length >= 3);
+    await h.waitFor(() => h.surfaces.length >= 5);
     sock.destroy();
     expect(await exited(child)).toBe(0);
   }, 15000);
@@ -386,7 +386,7 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
     const h = await openCanvasHarness();
     const child = h.spawnHost();
     const sock = await h.connected;
-    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 3);
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 5);
 
     const before = handleCount();
     for (let i = 0; i < 20; i++) {
@@ -394,7 +394,7 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
       const height = 90 + (i % 2) * 18;
       sock.write(`R ${w} ${height}\n`);
       const targetGen = i + 2;
-      await h.waitFor(() => h.surfaces.filter((s) => s.gen === targetGen).length === 3);
+      await h.waitFor(() => h.surfaces.filter((s) => s.gen === targetGen).length === 5);
     }
     await ask(h.ipcPipe, ['quit']);
     expect(await exited(child)).toBe(0);
@@ -689,14 +689,14 @@ describe.skipIf(!darwinEnabled)('elv-mpv (darwin) and elv-iosurface.node', () =>
       },
     });
     const { child, ipc } = h.spawnHost(['--keep-open=yes']);
-    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 3);
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 5);
     expect(
       h.surfaces
         .filter((s) => s.gen === 1)
         .map((s) => s.slot)
         .sort(),
-    ).toEqual([0, 1, 2]);
-    expect(resolvedBuffers).toHaveLength(3);
+    ).toEqual([0, 1, 2, 3, 4]);
+    expect(resolvedBuffers).toHaveLength(5);
 
     const loadReply = await ipc.ask(['loadfile', 'av://lavfi:color=c=magenta:s=64x64:d=2']);
     expect(loadReply.error).toBe('success');
@@ -704,7 +704,7 @@ describe.skipIf(!darwinEnabled)('elv-mpv (darwin) and elv-iosurface.node', () =>
 
     const sock = await h.connected;
     sock.write('R 320 180\n');
-    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 2).length === 3);
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 2).length === 5);
     expect(
       h.surfaces.filter((s) => s.gen === 2).every((s) => s.width === 320 && s.height === 180),
     ).toBe(true);
@@ -718,7 +718,7 @@ describe.skipIf(!darwinEnabled)('elv-mpv (darwin) and elv-iosurface.node', () =>
     const h = await openMacCanvasHarness({ ackSurface: false });
     const { child } = h.spawnHost();
     const sock = await h.connected;
-    await h.waitFor(() => h.surfaces.length >= 3);
+    await h.waitFor(() => h.surfaces.length >= 5);
     sock.destroy();
     expect(await exited(child)).toBe(0);
   }, 15000);
@@ -738,7 +738,7 @@ describe.skipIf(!darwinEnabled)('elv-mpv (darwin) and elv-iosurface.node', () =>
     });
     const { child, ipc } = h.spawnHost();
     const sock = await h.connected;
-    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 3);
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 5);
     const gen1Ids = h.surfaces.filter((s) => s.gen === 1).map((s) => Number(s.handle));
 
     for (let i = 0; i < 20; i++) {
@@ -746,9 +746,9 @@ describe.skipIf(!darwinEnabled)('elv-mpv (darwin) and elv-iosurface.node', () =>
       const height = 90 + (i % 2) * 18;
       sock.write(`R ${w} ${height}\n`);
       const targetGen = i + 2;
-      await h.waitFor(() => h.surfaces.filter((s) => s.gen === targetGen).length === 3);
+      await h.waitFor(() => h.surfaces.filter((s) => s.gen === targetGen).length === 5);
     }
-    expect(lookedUp).toBe(63);
+    expect(lookedUp).toBe(105);
     await ipc.ask(['quit']);
     expect(await exited(child)).toBe(0);
     for (const id of gen1Ids) {

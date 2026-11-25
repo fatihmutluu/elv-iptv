@@ -127,7 +127,7 @@ function parseMeta(parts: readonly string[], wIdx: number, hIdx: number) {
 }
 
 /**
- * Out-of-process in-canvas presenter (`#95`): receives triple-buffered GPU shared textures from
+ * Out-of-process in-canvas presenter (`#95`): receives ring-buffered GPU shared textures from
  * `elv-mpv` over a private IPC endpoint (Windows named pipe or macOS Unix domain socket), imports
  * them into Electron `sharedTexture`, acks each imported handle (`I <gen> <slot>`) so the child
  * releases its temporary handle/IOSurface retention, and forwards frames without covering the DOM.

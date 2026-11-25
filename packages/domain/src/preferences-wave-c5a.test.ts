@@ -14,7 +14,7 @@ describe('Wave C5A preferences (#243, #332)', () => {
   it('exposes constants, type guards, and defaults', () => {
     expect(DEINTERLACE_MODES).toEqual(['off', 'auto', 'bwdif']);
 
-    expect(DEFAULT_PREFERENCES.deinterlaceMode).toBe('off');
+    expect(DEFAULT_PREFERENCES.deinterlaceMode).toBe('auto');
     expect(DEFAULT_PREFERENCES.pitchLock).toBe(true);
     expect(DEFAULT_PREFERENCES.audioNormalization).toBe(false);
     expect(DEFAULT_PREFERENCES.windowAspectRatioLock).toBe(false);
@@ -36,7 +36,7 @@ describe('Wave C5A preferences (#243, #332)', () => {
         fontScale: 1.1,
       }),
     );
-    expect(legacy.deinterlaceMode).toBe('off');
+    expect(legacy.deinterlaceMode).toBe('auto');
     expect(legacy.pitchLock).toBe(true);
     expect(legacy.audioNormalization).toBe(false);
     expect(legacy.windowAspectRatioLock).toBe(false);
@@ -67,7 +67,7 @@ describe('Wave C5A preferences (#243, #332)', () => {
         windowAspectRatioLock: 'yes',
       }),
     );
-    expect(invalid.deinterlaceMode).toBe('off');
+    expect(invalid.deinterlaceMode).toBe('auto');
     expect(invalid.pitchLock).toBe(true);
     expect(invalid.audioNormalization).toBe(false);
     expect(invalid.windowAspectRatioLock).toBe(false);
@@ -103,7 +103,7 @@ describe('Wave C5A preferences (#243, #332)', () => {
     expect(sanitized.ok).toBe(true);
     if (sanitized.ok) {
       const parsed = parsePreferences(sanitized.value);
-      expect(parsed.deinterlaceMode).toBe('off');
+      expect(parsed.deinterlaceMode).toBe('auto');
       expect(parsed.pitchLock).toBe(false);
       expect(parsed.audioNormalization).toBe(true);
       expect(parsed.windowAspectRatioLock).toBe(true);
@@ -144,7 +144,7 @@ describe('Wave C5A preferences (#243, #332)', () => {
     const reset = await store.reset();
     expect(reset.ok).toBe(true);
     if (reset.ok) {
-      expect(reset.value.deinterlaceMode).toBe('off');
+      expect(reset.value.deinterlaceMode).toBe('auto');
       expect(reset.value.pitchLock).toBe(true);
       expect(reset.value.audioNormalization).toBe(false);
       expect(reset.value.windowAspectRatioLock).toBe(false);

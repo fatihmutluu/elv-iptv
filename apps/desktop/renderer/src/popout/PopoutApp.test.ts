@@ -113,6 +113,13 @@ vi.mock('react-native', () => ({
 vi.mock('@elv/features', () => ({
   AppProviders: 'AppProviders',
   createLazyCatalog: (factory: () => unknown) => factory(),
+  usePreferences: () => ({
+    preferences: {
+      deinterlaceMode: 'auto',
+      pitchLock: true,
+      audioNormalization: false,
+    },
+  }),
 }));
 
 vi.mock('../ui/desktop-adapters.tsx', () => ({
@@ -194,6 +201,9 @@ describe('PopoutApp (#158)', () => {
     const order: string[] = [];
     const listeners = new Set<(event: EngineEvent) => void>();
     const setMuted = vi.fn();
+    const setDeinterlaceMode = vi.fn();
+    const setPitchLock = vi.fn();
+    const setAudioNormalization = vi.fn();
     const engine: PlayerEngine = {
       capabilities: {
         mpegTsOverHttp: true,
@@ -222,6 +232,9 @@ describe('PopoutApp (#158)', () => {
     const opened: OpenVideoEngine = {
       engine,
       setMuted,
+      setDeinterlaceMode,
+      setPitchLock,
+      setAudioNormalization,
       renderSurface: () => null,
     };
     const videoHost: VideoHost = {
@@ -283,6 +296,9 @@ describe('PopoutApp (#158)', () => {
     }
 
     expect(catalog.resolveStream).toHaveBeenCalledWith('movie:src1:m42');
+    expect(setDeinterlaceMode).toHaveBeenCalledWith('auto');
+    expect(setPitchLock).toHaveBeenCalledWith(true);
+    expect(setAudioNormalization).toHaveBeenCalledWith(false);
     expect(findByTestId(tree, 'popout-title')?.props.children).toBe('Night Screening');
 
     // Pin button uses player.popout.unpin when pinned=true and toggles via windowBridge

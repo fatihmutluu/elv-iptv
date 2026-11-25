@@ -317,4 +317,81 @@ describe('createPlayerBridge', () => {
     expect(getVideoFrame).not.toHaveBeenCalled();
     expect(release2).toHaveBeenCalledTimes(1);
   });
+
+  it('defers importedSharedTexture.release until after requestAnimationFrame commit with bound receiver and exception safety', async () => {
+    vi.useFakeTimers();
+    const rafQueue: Array<() => void> = [];
+    const origRaf = globalThis.requestAnimationFrame;
+    const origCancelRaf = globalThis.cancelAnimationFrame;
+    const cancelSpy = vi.fn();
+    globalThis.requestAnimationFrame = function (this: unknown, cb: FrameRequestCallback) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+      rafQueue.push(() => cb(0));
+      return rafQueue.length;
+    };
+    globalThis.cancelAnimationFrame = function (this: unknown, id: number) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+      cancelSpy(id);
+    };
+    try {
+      const { ipc } = fakeIpcRenderer();
+      const shared = fakeSharedTexture();
+      const bridge = createPlayerBridge(ipc, shared.api);
+      const seen: VideoFrameLike[] = [];
+      bridge.onFrame?.('e1', (frame) => seen.push(frame));
+
+      const frame = fakeFrame();
+      const release = vi.fn();
+      const pending = shared.deliver({ getVideoFrame: () => frame, release }, 'e1');
+      expect(seen).toEqual([frame]);
+      expect(release).not.toHaveBeenCalled();
+      expect(rafQueue).toHaveLength(1);
+
+      // Firing rAF schedules post-paint release on the next macrotask turn
+      rafQueue.shift()?.();
+      expect(release).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(0);
+      await pending;
+      expect(release).toHaveBeenCalledTimes(1);
+
+      // If rAF stalls (occluded window), bounded 34 ms fallback still releases the slot
+      const frame2 = fakeFrame();
+      const release2 = vi.fn();
+      const pending2 = shared.deliver({ getVideoFrame: () => frame2, release: release2 }, 'e1');
+      expect(release2).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(34);
+      await pending2;
+      expect(release2).toHaveBeenCalledTimes(1);
+      expect(cancelSpy).toHaveBeenCalled();
+
+      // Throwing cancelAnimationFrame on fallback must not hang or skip release()
+      globalThis.cancelAnimationFrame = function (this: unknown) {
+        if (this !== globalThis) throw new TypeError('Illegal invocation');
+        throw new Error('cancel failed');
+      };
+      const release3 = vi.fn();
+      const pending3 = shared.deliver(
+        { getVideoFrame: () => fakeFrame(), release: release3 },
+        'e1',
+      );
+      await vi.advanceTimersByTimeAsync(34);
+      await expect(pending3).resolves.toBeUndefined();
+      expect(release3).toHaveBeenCalledTimes(1);
+
+      // Throwing requestAnimationFrame synchronously must clean up timers and release() immediately
+      globalThis.requestAnimationFrame = () => {
+        throw new Error('raf failed');
+      };
+      const release4 = vi.fn();
+      await expect(
+        shared.deliver({ getVideoFrame: () => fakeFrame(), release: release4 }, 'e1'),
+      ).resolves.toBeUndefined();
+      expect(release4).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.requestAnimationFrame = origRaf;
+      globalThis.cancelAnimationFrame = origCancelRaf;
+      vi.useRealTimers();
+    }
+  });
 });

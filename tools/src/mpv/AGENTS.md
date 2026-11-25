@@ -36,7 +36,7 @@
   `_NSGetExecutablePath` (LGPL replaceable).
 - Launcher contract: `--name=value`, `--name` (`yes`), `--no-name` (`no`) map to libmpv options; `--elv-parent-pid`
   quits mpv on parent exit (optional on macOS, defaults to `getppid()` via `kqueue` `EVFILT_PROC`/`NOTE_EXIT`);
-  `--elv-canvas-pipe` drives `vo=libmpv` triple-buffered shared textures (Win: `\\.\pipe\*` + D3D11; macOS: `/abs/sock`
+  `--elv-canvas-pipe` drives `vo=libmpv` 5-slot ring-buffered shared textures (Win: `\\.\pipe\*` + D3D11 event query; macOS: `/abs/sock`
   + OpenGL/CGL 3.2 Core + `'BGRA'` `IOSurface` with `kCGLRendererGenericFloatID` fallback). Exit codes: 2 bad/rejected
   arg, 3 libmpv/symbol missing, 4 init failed, 5 parent pid unopenable.
 - Hardening: sets `config=no`, `load-scripts=no`, `ytdl=no`, `load-unsafe-playlists=no`, `input-default-bindings=no`,
