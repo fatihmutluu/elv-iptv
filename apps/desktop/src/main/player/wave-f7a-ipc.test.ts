@@ -268,4 +268,63 @@ describe('registerPlayerIpc Wave F7A commands, passthroughFallback, and fullscre
 
     dispose();
   });
+
+  it('persists lastDisplaySync from load options on secondary Multi-View tiles so promotion applies it (#214)', async () => {
+    const ipc = fakeIpcMain();
+    const { owner } = fakeOwner(33);
+    const engines: Array<ReturnType<typeof fakeEngine>> = [];
+    const uiEmitters: Array<(event: PlayerUiEvent) => void> = [];
+    const display = createDisplayAdapter();
+    const displayRefreshController = createDesktopDisplayRefreshController(display.adapter);
+
+    const dispose = registerPlayerIpc({
+      ipcMain: ipc.ipcMain,
+      now: () => 100,
+      log: vi.fn(),
+      displayRefreshController,
+      getDisplayId: () => 'disp-main',
+      createEngine: async (_owner, onUi) => {
+        const fe = fakeEngine();
+        engines.push(fe);
+        uiEmitters.push(onUi);
+        return fe.engine;
+      },
+    });
+
+    const primary = (await ipc.invoke(PLAYER_CHANNELS.open, owner)) as { engineId: string };
+    const secondary = (await ipc.invoke(PLAYER_CHANNELS.open, owner, { primary: false })) as {
+      engineId: string;
+    };
+
+    // Secondary tile receives displaySync strictly via load options while not primary
+    ipc.send(PLAYER_CHANNELS.command, owner, {
+      engineId: secondary.engineId,
+      command: {
+        name: 'load',
+        cmd: {
+          attempt: 1,
+          kind: 'live',
+          url: 'https://sim.example.test/live-2.ts',
+          headers: {},
+          options: { displaySync: { autoFrameRate: 'always', autoDynamicRange: true } },
+        },
+      },
+    });
+    uiEmitters[1]?.({ type: 'fullscreen-changed', fullscreen: true });
+    engines[1]?.emit({ attempt: 1, type: 'state', state: 'playing' });
+    engines[1]?.emit({
+      attempt: 1,
+      type: 'mediaInfo',
+      info: { width: 1920, height: 1080, fps: 23.976 },
+    });
+    // Still secondary -> display stays at 60 Hz
+    expect(display.currentId()).toBe('1080p-60');
+    expect(primary.engineId).not.toBe(secondary.engineId);
+
+    // Promoting secondary to primary applies its saved lastDisplaySync policy -> 23.976 Hz
+    await ipc.invoke(PLAYER_CHANNELS.setPrimary, owner, secondary.engineId);
+    expect(display.currentId()).toBe('1080p-23976');
+
+    dispose();
+  });
 });

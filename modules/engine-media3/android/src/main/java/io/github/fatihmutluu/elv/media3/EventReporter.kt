@@ -261,11 +261,13 @@ internal class EventReporter(
         onDolbyVisionFailed()
       }
     }
-    val status = causeOf<HttpDataSource.InvalidResponseCodeException>(error)?.responseCode
-    val contentType = causeOf<HttpDataSource.InvalidContentTypeException>(error)?.contentType
-    val notice = causeOf<ProviderNoticeException>(error)
-    val uri = causeOf<HttpDataSource.HttpDataSourceException>(error)?.dataSpec?.uri
+    val isDrmError = error.errorCode in 6000..6999
+    val status = if (isDrmError) null else causeOf<HttpDataSource.InvalidResponseCodeException>(error)?.responseCode
+    val contentType = if (isDrmError) null else causeOf<HttpDataSource.InvalidContentTypeException>(error)?.contentType
+    val notice = if (isDrmError) null else causeOf<ProviderNoticeException>(error)
+    val uri = if (isDrmError) null else causeOf<HttpDataSource.HttpDataSourceException>(error)?.dataSpec?.uri
     val detail = when {
+      isDrmError -> error.errorCodeName
       notice != null -> "${error.errorCodeName} provider notice ${notice.contentType.orEmpty()}".trimEnd()
       uri != null -> "${error.errorCodeName} ${redactUrl(uri.toString())}"
       else -> error.errorCodeName

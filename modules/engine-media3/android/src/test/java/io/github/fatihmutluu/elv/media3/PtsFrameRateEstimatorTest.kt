@@ -52,7 +52,7 @@ class PtsFrameRateEstimatorTest {
     )
     for ((intervalUs, expectedFps) in cases) {
       val callbacks = mutableListOf<Float>()
-      val estimator = PtsFrameRateEstimator(onStabilized = { callbacks += it })
+      val estimator = PtsFrameRateEstimator(onStabilized = { fps, _ -> callbacks += fps })
       // 24 frames produce only 23 deltas -> must not emit early
       assertEquals(emptyList<Float>(), feedConstantInterval(estimator, intervalUs, frames = 24))
       assertEquals(emptyList<Float>(), callbacks)
@@ -68,7 +68,7 @@ class PtsFrameRateEstimatorTest {
   }
 
   @Test
-  fun `ignores non-monotonic deltas, zero deltas, and large gaps >= 500_000 us (#199)`() {
+  fun `ignores non-monotonic deltas, zero deltas, and large gaps at or above 500_000 us (#199)`() {
     val estimator = PtsFrameRateEstimator()
     // Feed 20 valid 40_000us (25fps) deltas, interspersed with bad deltas
     var pts = 1_000_000L
@@ -98,7 +98,7 @@ class PtsFrameRateEstimatorTest {
   @Test
   fun `skips estimation when format already carries a valid positive frameRate (#199)`() {
     val callbacks = mutableListOf<Float>()
-    val estimator = PtsFrameRateEstimator(onStabilized = { callbacks += it })
+    val estimator = PtsFrameRateEstimator(onStabilized = { fps, _ -> callbacks += fps })
     val emitted = feedConstantInterval(estimator, intervalUs = 40_000L, frames = 65, formatFrameRate = 50f)
     assertEquals(emptyList<Float>(), emitted)
     assertEquals(emptyList<Float>(), callbacks)
@@ -108,7 +108,7 @@ class PtsFrameRateEstimatorTest {
   @Test
   fun `collects up to 60 deltas for non-standard frame rates before stabilizing and resets cleanly (#199)`() {
     val callbacks = mutableListOf<Float>()
-    val estimator = PtsFrameRateEstimator(onStabilized = { callbacks += it })
+    val estimator = PtsFrameRateEstimator(onStabilized = { fps, _ -> callbacks += fps })
     // 48 fps = 20_833 us -> does not snap to standard rate, waits until 60 deltas (61 frames)
     val before60 = feedConstantInterval(estimator, intervalUs = 20_833L, frames = 60)
     assertEquals(emptyList<Float>(), before60)
@@ -143,5 +143,29 @@ class PtsFrameRateEstimatorTest {
       if (res != null) stabilized = res
     }
     assertEquals(23.976f, stabilized!!, 0.001f)
+  }
+
+  @Test
+  fun `captures generation atomically inside lock so reset never tags stale FPS with a newer generation (#199)`() {
+    val observed = mutableListOf<Pair<Float, Long>>()
+    lateinit var estimator: PtsFrameRateEstimator
+    estimator = PtsFrameRateEstimator(
+      onStabilized = { fps, capturedGen ->
+        // Even if the next stream's reset(nextGen) already happened before this callback runs,
+        // capturedGen must remain the generation under which the FPS actually stabilized.
+        observed += fps to capturedGen
+        if (capturedGen == 1L) {
+          estimator.reset(2L)
+        }
+      },
+    )
+
+    estimator.reset(1L)
+    feedConstantInterval(estimator, intervalUs = 40_000L, frames = 25)
+    assertEquals(listOf(25f to 1L), observed)
+
+    // Next generation estimates cleanly with generation == 2L
+    feedConstantInterval(estimator, intervalUs = 20_000L, frames = 25)
+    assertEquals(listOf(25f to 1L, 50f to 2L), observed)
   }
 }

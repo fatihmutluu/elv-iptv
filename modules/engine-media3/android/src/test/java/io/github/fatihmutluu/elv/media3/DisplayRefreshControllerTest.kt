@@ -120,10 +120,13 @@ class DisplayRefreshControllerTest {
       onActiveRefreshRateChanged = { reportedRates += it },
     )
 
-    // SEAMLESS mode: 23.976 is NOT in alternativeRefreshRates -> does NOT force non-seamless window switch
+    // SEAMLESS mode: 23.976 is NOT in alternativeRefreshRates -> does NOT force non-seamless window switch,
+    // and reports actual current display refresh rate (60f), NOT contentFps (23.976f) (#116, #115)
     controller.setMode(AutoFrameRateMode.SEAMLESS)
     controller.onContentFrameRate(23.976f)
     assertTrue(applied.isEmpty())
+    assertEquals(60f, controller.activeRefreshRateHz!!, 0.01f)
+    assertEquals(listOf(60f), reportedRates)
 
     // SEAMLESS mode: 50Hz IS in alternativeRefreshRates -> applies seamlessly
     controller.onContentFrameRate(50f)
@@ -145,7 +148,7 @@ class DisplayRefreshControllerTest {
   }
 
   @Test
-  fun `resolves per-refresh-rate A/V delay offset with canonical snapping and +-1000ms clamp (#115)`() {
+  fun `resolves per-refresh-rate AV delay offset with canonical snapping and +-1000ms clamp (#115)`() {
     val offsets = mapOf("23.976" to 45L, "24" to 20L, "50" to -35L, "60" to 1_500L)
     assertEquals(45L, resolveAudioDelayOffsetForRefreshRate(offsets, 23.98f))
     assertEquals(20L, resolveAudioDelayOffsetForRefreshRate(offsets, 24.0f))

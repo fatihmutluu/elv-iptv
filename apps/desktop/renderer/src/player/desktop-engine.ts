@@ -289,7 +289,10 @@ export async function createDesktopEngine(
   return {
     capabilities: CAPABILITIES,
     engineId: id,
-    load: (cmd: LoadCommand) => send({ name: 'load', cmd }),
+    load: (cmd: LoadCommand) => {
+      const { drm: _drm, ...safeCmd } = cmd;
+      send({ name: 'load', cmd: safeCmd });
+    },
     retry: (attempt: AttemptToken) => send({ name: 'retry', attempt }),
     play: (attempt) => send({ name: 'play', attempt }),
     pause: (attempt) => send({ name: 'pause', attempt }),

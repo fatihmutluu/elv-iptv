@@ -51,12 +51,13 @@ internal fun snapStandardFrameRate(rawFps: Float, tolerance: Float = PTS_FPS_SNA
 internal class PtsFrameRateEstimator(
   minSamples: Int = PTS_FPS_MIN_SAMPLES,
   maxSamples: Int = PTS_FPS_MAX_SAMPLES,
-  private val onStabilized: (Float) -> Unit = {},
+  private val onStabilized: (Float, Long) -> Unit = { _, _ -> },
 ) : VideoFrameMetadataListener {
   private val minCount = minSamples.coerceAtLeast(1)
   private val maxCount = maxSamples.coerceAtLeast(minCount)
   private val lock = Any()
   private val deltasUs = LongArray(maxCount)
+  private var generation: Long = 0L
   private var sampleCount = 0
   private var lastPtsUs = Long.MIN_VALUE
 
@@ -64,9 +65,10 @@ internal class PtsFrameRateEstimator(
   var stabilizedFps: Float? = null
     private set
 
-  /** Clears accumulated PTS samples for a new `load`, `retry`, `stop`, or `recreate`. */
-  fun reset() {
+  /** Clears accumulated PTS samples and binds [nextGeneration] atomically under the estimator lock. */
+  fun reset(nextGeneration: Long = 0L) {
     synchronized(lock) {
+      generation = nextGeneration
       sampleCount = 0
       lastPtsUs = Long.MIN_VALUE
       stabilizedFps = null
@@ -90,7 +92,7 @@ internal class PtsFrameRateEstimator(
   fun onSample(presentationTimeUs: Long, formatFrameRate: Float): Float? {
     if (stabilizedFps != null) return null
     if (hasValidFormatFrameRate(formatFrameRate)) return null
-    val emitted: Float? = synchronized(lock) {
+    val emitted: Pair<Float, Long>? = synchronized(lock) {
       if (stabilizedFps != null) return@synchronized null
       val previous = lastPtsUs
       lastPtsUs = presentationTimeUs
@@ -114,13 +116,15 @@ internal class PtsFrameRateEstimator(
       }
       if (chosen != null) {
         stabilizedFps = chosen
+        chosen to generation
+      } else {
+        null
       }
-      chosen
     }
     if (emitted != null) {
-      onStabilized(emitted)
+      onStabilized(emitted.first, emitted.second)
     }
-    return emitted
+    return emitted?.first
   }
 
   private companion object {

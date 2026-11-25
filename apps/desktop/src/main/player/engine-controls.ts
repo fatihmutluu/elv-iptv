@@ -13,6 +13,7 @@ import type {
 } from '../../shared/player-ipc.ts';
 import {
   desktopAudioOutputCommands,
+  isAc3EncodeActive,
   isLoudnormSuppressedByOutput,
   isPassthroughAudioFailureLog,
   normalizeDesktopAudioOutputConfig,
@@ -213,6 +214,7 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
       if (deps.isReleased() || passthroughFallbackActive) return;
       const passthroughOrExclusiveActive =
         spdifPassthroughActive ||
+        isAc3EncodeActive(effectiveDesktopAudioOutput) ||
         (effectiveDesktopAudioOutput !== undefined &&
           (effectiveDesktopAudioOutput.passthrough || effectiveDesktopAudioOutput.exclusive));
       if (!passthroughOrExclusiveActive) return;

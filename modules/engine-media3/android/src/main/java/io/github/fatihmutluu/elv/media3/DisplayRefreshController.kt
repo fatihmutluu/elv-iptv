@@ -240,7 +240,7 @@ internal class DisplayRefreshController(
     } else if (canApplyWindowSwitch && targetModeId == appliedModeId) {
       updateActiveRefreshRate(targetMode.refreshRate)
     } else {
-      updateActiveRefreshRate(if (mode == AutoFrameRateMode.SEAMLESS) contentFps else currentMode?.refreshRate)
+      updateActiveRefreshRate(currentMode?.refreshRate)
     }
   }
 

@@ -508,6 +508,7 @@ function isLoadCommand(x: unknown): x is LoadCommand {
   if (!isRecord(x)) return false;
   if (!isAttempt(x['attempt']) || !isStreamUrl(x['url']) || !isHeaders(x['headers'])) return false;
   if (x['kind'] !== 'live' && x['kind'] !== 'vod') return false;
+  if (x['drm'] !== undefined) return false;
   if (x['startMs'] !== undefined && !isMs(x['startMs'])) return false;
   const options = x['options'];
   if (options === undefined) return true;

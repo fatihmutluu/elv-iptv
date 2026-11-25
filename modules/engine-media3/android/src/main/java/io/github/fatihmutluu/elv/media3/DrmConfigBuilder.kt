@@ -246,6 +246,7 @@ internal fun buildDrmSessionManagerProvider(
   val url = drm.licenseUrl ?: return null
   val callback = HttpMediaDrmCallback(url, httpDataSourceFactory)
   for ((name, value) in drm.licenseHeaders) {
+    if (name.equals("User-Agent", ignoreCase = true)) continue
     callback.setKeyRequestProperty(name, value)
   }
   val manager = DefaultDrmSessionManager.Builder()

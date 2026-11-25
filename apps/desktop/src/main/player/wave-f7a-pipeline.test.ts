@@ -195,6 +195,36 @@ describe('Wave F7A #213 & #214: mpv audio passthrough, AC3 encode, PCM fallback,
     expect(uiEvents.filter((e) => e.type === 'passthroughFallback')).toHaveLength(1);
   });
 
+  it('triggers passthrough fallback when standalone @ac3:lavcac3enc AO open fails (#213)', async () => {
+    const {
+      engine,
+      fake,
+      events,
+      ui: uiEvents,
+    } = await setupEngineTest(cleanups, {
+      scripts: { [URL_VOD]: PASSTHROUGH_FAIL_SCRIPT },
+    });
+
+    engine.setAudioNormalization(true);
+    engine.setDesktopAudioOutput?.({
+      passthrough: false,
+      codecs: [],
+      exclusive: false,
+      ac3Encode: true,
+      channelLayout: '5.1',
+    });
+    engine.load({ attempt: 1, url: URL_VOD, headers: {}, kind: 'vod' });
+    await playing(events, 1);
+
+    await vi.waitFor(() => {
+      expect(uiEvents.filter((e) => e.type === 'passthroughFallback')).toHaveLength(1);
+    });
+
+    expect(fake.sent).toContainEqual(['af', 'remove', AC3_ENCODE_LABEL]);
+    expect(fake.sent).toContainEqual(['ao-reload']);
+    await vi.waitFor(() => expect(fake.sent).toContainEqual(['af', 'add', LOUDNORM_FILTER]));
+  });
+
   it('applies video-sync=display-resample when AFR is active and video-sync=audio when off, persisting across load() and recreate()', async () => {
     const fake = createFakeMpv({
       scripts: { [URL_VOD]: HOLD_SCRIPT, [URL_LIVE]: HOLD_SCRIPT },

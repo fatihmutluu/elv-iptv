@@ -113,4 +113,40 @@ describe('Wave F7A DesktopEngine & DesktopVideoHost wiring (#213, #214)', () => 
     off?.();
     opened?.engine.release();
   });
+
+  it('strips drm from LoadCommand before crossing Electron IPC (#272)', async () => {
+    const fake = fakeBridge();
+    const engine = await createDesktopEngine(fake.bridge, () => 100);
+
+    engine.load({
+      attempt: 1,
+      url: 'https://cdn.example.test/live/ch1.mpd',
+      headers: { 'User-Agent': 'ElvTest/1.0' },
+      kind: 'live',
+      drm: {
+        scheme: 'clearkey',
+        clearKeys: [
+          {
+            kid: '00112233445566778899aabbccddeeff',
+            key: 'ffeeddccbbaa99887766554433221100',
+          },
+        ],
+      },
+    });
+
+    expect(fake.sent).toHaveLength(1);
+    const loadMsg = fake.sent[0];
+    expect(loadMsg?.command.name).toBe('load');
+    if (loadMsg?.command.name === 'load') {
+      expect('drm' in loadMsg.command.cmd).toBe(false);
+      expect(loadMsg.command.cmd).toEqual({
+        attempt: 1,
+        url: 'https://cdn.example.test/live/ch1.mpd',
+        headers: { 'User-Agent': 'ElvTest/1.0' },
+        kind: 'live',
+      });
+    }
+
+    engine.release();
+  });
 });

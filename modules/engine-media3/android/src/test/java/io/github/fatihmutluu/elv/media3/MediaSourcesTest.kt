@@ -242,4 +242,85 @@ class MediaSourcesTest {
       assertEquals((100L + idx).toString(), source.mediaItem.mediaId)
     }
   }
+
+  @Test
+  fun `createMediaSource forwards DRM licenseHeaders including custom User-Agent to StreamHttp factory (#272)`() {
+    val previousAgent = System.getProperty("http.agent")
+    System.setProperty("http.agent", "Dalvik/2.1.0 (Linux; U; Android 14)")
+    try {
+      val capturedRequests = mutableListOf<okhttp3.Request>()
+      val capturingClient = okhttp3.Call.Factory { request ->
+        capturedRequests += request
+        object : okhttp3.Call {
+          override fun request(): okhttp3.Request = request
+          override fun execute(): okhttp3.Response =
+            okhttp3.Response.Builder()
+              .request(request)
+              .protocol(okhttp3.Protocol.HTTP_1_1)
+              .code(200)
+              .message("OK")
+              .body(okhttp3.ResponseBody.create(null, byteArrayOf(1, 2, 3)))
+              .build()
+          override fun enqueue(responseCallback: okhttp3.Callback) {
+            responseCallback.onResponse(this, execute())
+          }
+          override fun cancel() = Unit
+          override fun isExecuted(): Boolean = false
+          override fun isCanceled(): Boolean = false
+          override fun timeout(): okio.Timeout = okio.Timeout.NONE
+          override fun clone(): okhttp3.Call = this
+        }
+      }
+      val customAgent = "ElvCustomDrmAgent/2.1"
+      val widevineDrm = ParsedDrmConfig(
+        scheme = DrmSchemeKind.WIDEVINE,
+        licenseUrl = "https://drm.example.test/wv",
+        licenseHeaders = mapOf(
+          "User-Agent" to customAgent,
+          "X-Drm-Tenant" to "tenant-42",
+        ),
+      )
+      val source = createMediaSource(
+        request = LoadRequest(
+          url = "https://cdn.example.test/live/ch1.mpd",
+          headers = mapOf("User-Agent" to "StreamAgent/1.0"),
+          live = true,
+          startMs = null,
+          softwareAudio = false,
+          drm = widevineDrm,
+        ),
+        gate = ConnectionGate { it.run() },
+        generation = 1L,
+        prepareSerial = 200L,
+        lowRam = false,
+        client = capturingClient,
+      )
+
+      // Extract the DRM callback wired onto the DashMediaSource and execute a synthetic license request
+      val drmManagerField = source.javaClass.getDeclaredField("drmSessionManager").apply {
+        isAccessible = true
+      }
+      val drmManager = drmManagerField.get(source)!!
+      val callbackField = drmManager.javaClass.getDeclaredField("callback").apply {
+        isAccessible = true
+      }
+      val callback = callbackField.get(drmManager) as androidx.media3.exoplayer.drm.HttpMediaDrmCallback
+      val keyReq = androidx.media3.exoplayer.drm.ExoMediaDrm.KeyRequest(
+        byteArrayOf(0x01, 0x02),
+        "https://drm.example.test/wv",
+      )
+      callback.executeKeyRequest(C.WIDEVINE_UUID, keyReq)
+
+      assertEquals(1, capturedRequests.size)
+      val req = capturedRequests.single()
+      assertEquals(listOf(customAgent), req.headers("User-Agent"))
+      assertEquals("tenant-42", req.header("X-Drm-Tenant"))
+    } finally {
+      if (previousAgent == null) {
+        System.clearProperty("http.agent")
+      } else {
+        System.setProperty("http.agent", previousAgent)
+      }
+    }
+  }
 }

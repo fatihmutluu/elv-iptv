@@ -32,6 +32,7 @@ interface HarnessProps {
   readonly viewport: ViewportOverride;
   readonly androidSource?: AndroidKeySource;
   readonly showAndroidDecoder?: boolean;
+  readonly showNightModeDrc?: boolean;
 }
 
 function Harness({
@@ -39,6 +40,7 @@ function Harness({
   viewport,
   androidSource,
   showAndroidDecoder = false,
+  showNightModeDrc,
 }: HarnessProps): ReactElement {
   const [store] = useState(() => suppliedStore ?? createMemoryPreferencesStore());
   const [i18n] = useState(() => createAppI18n('en'));
@@ -74,6 +76,7 @@ function Harness({
                 initialSection="playback"
                 preferences={controller}
                 showAndroidDecoder={showAndroidDecoder}
+                {...(showNightModeDrc !== undefined ? { showNightModeDrc } : {})}
                 renderSources={() => <View testID="mock-sources-pane" />}
                 renderLicenses={() => <View testID="mock-licenses-pane" />}
               />
@@ -184,9 +187,11 @@ describe('Wave F7A Playback Settings UI (#115, #116, #188, #213)', () => {
     await view.unmount();
   });
 
-  it('shows Night-Mode DRC and hides Desktop Audio Output strictly on non-desktop form factors', async () => {
-    const store = createMemoryPreferencesStore();
-    const view = await render(<Harness store={store} viewport={PHONE_VIEWPORT} />);
+  it('shows Night-Mode DRC strictly on Android and hides it on iOS, tvOS, and Desktop (#115)', async () => {
+    // Android phone: Night-Mode DRC visible & interactive, Desktop Audio hidden
+    jest.replaceProperty(Platform, 'OS', 'android');
+    const androidStore = createMemoryPreferencesStore();
+    const androidView = await render(<Harness store={androidStore} viewport={PHONE_VIEWPORT} />);
 
     expect(screen.queryByTestId('settings-section-desktop-audio')).toBeNull();
     expect(screen.getByTestId('settings-playback-night-drc-off')).toBeTruthy();
@@ -195,7 +200,89 @@ describe('Wave F7A Playback Settings UI (#115, #116, #188, #213)', () => {
 
     await fireEvent.press(screen.getByTestId('settings-playback-night-drc-night'));
     await waitFor(async () => {
-      expect((await store.load()).nightModeDrc).toBe('night');
+      expect((await androidStore.load()).nightModeDrc).toBe('night');
+    });
+    await androidView.unmount();
+
+    // iOS phone: Night-Mode DRC hidden, Desktop Audio hidden
+    jest.replaceProperty(Platform, 'OS', 'ios');
+    const iosView = await render(<Harness viewport={PHONE_VIEWPORT} />);
+    expect(screen.queryByTestId('settings-section-desktop-audio')).toBeNull();
+    expect(screen.queryByTestId('settings-playback-night-drc-off')).toBeNull();
+    expect(screen.queryByTestId('settings-playback-night-drc-night')).toBeNull();
+    await iosView.unmount();
+
+    // tvOS: Night-Mode DRC hidden, Desktop Audio hidden
+    jest.replaceProperty(Platform, 'OS', 'ios');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+    const tvosView = await render(<Harness viewport={TV_VIEWPORT} />);
+    expect(screen.queryByTestId('settings-section-desktop-audio')).toBeNull();
+    expect(screen.queryByTestId('settings-playback-night-drc-off')).toBeNull();
+    expect(screen.queryByTestId('settings-playback-night-drc-night')).toBeNull();
+    await tvosView.unmount();
+
+    // Desktop web: Night-Mode DRC hidden, Desktop Audio visible
+    jest.replaceProperty(Platform, 'OS', 'web');
+    const desktopView = await render(<Harness viewport={DESKTOP_VIEWPORT} />);
+    expect(screen.queryByTestId('settings-playback-night-drc-night')).toBeNull();
+    expect(screen.getByTestId('settings-section-desktop-audio')).toBeTruthy();
+    await desktopView.unmount();
+  });
+
+  it('excludes Night-Mode DRC from TV D-pad rows when showNightModeDrc is false (tvOS / non-Android, #115)', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+
+    let keyListener: ((e: AndroidKeyEvent) => void) | undefined;
+    const androidSource: AndroidKeySource = {
+      addListener: (l) => {
+        keyListener = l;
+        return {
+          remove: () => {
+            keyListener = undefined;
+          },
+        };
+      },
+    };
+    const pressKey = async (keyCode: number) => {
+      await act(async () => {
+        keyListener?.({ action: 'down', keyCode, canceled: false, ageMs: 0 });
+        keyListener?.({ action: 'up', keyCode, canceled: false, ageMs: 10 });
+      });
+    };
+
+    const store = createMemoryPreferencesStore();
+    const view = await render(
+      <Harness
+        store={store}
+        viewport={TV_VIEWPORT}
+        androidSource={androidSource}
+        showAndroidDecoder={false}
+        showNightModeDrc={false}
+      />,
+    );
+
+    expect(screen.queryByTestId('settings-playback-night-drc-off')).toBeNull();
+
+    // Enter Playback content pane (row 0), move down 16 rows to Auto HDR toggle
+    await pressKey(KEYCODE_DPAD_RIGHT);
+    for (let i = 0; i < 16; i += 1) {
+      await pressKey(KEYCODE_DPAD_DOWN);
+    }
+    await pressKey(KEYCODE_DPAD_CENTER);
+    await waitFor(async () => {
+      expect((await store.load()).autoDynamicRange).toBe(false);
+    });
+
+    // Next row MUST be delay-bucket-* (skipping Night-Mode DRC): Right -> '24', Down -> delay-stepper, Right -> +25 ms
+    await pressKey(KEYCODE_DPAD_DOWN);
+    await pressKey(KEYCODE_DPAD_RIGHT);
+    await pressKey(KEYCODE_DPAD_DOWN);
+    await pressKey(KEYCODE_DPAD_RIGHT);
+    await waitFor(async () => {
+      const loaded = await store.load();
+      expect(loaded.nightModeDrc).toBe('off');
+      expect(loaded.audioDelayByRefreshRateMs).toEqual({ '24': 25 });
     });
 
     await view.unmount();

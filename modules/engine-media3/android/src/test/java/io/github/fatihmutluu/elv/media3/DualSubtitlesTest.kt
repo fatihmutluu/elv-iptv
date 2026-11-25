@@ -433,7 +433,8 @@ class DualSubtitlesTest {
         }
       })
       val handler = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }.get(engine) as android.os.Handler
-      val secondarySubs = Media3Engine::class.java.getDeclaredField("secondarySubs").apply { isAccessible = true }.get(engine) as SecondarySubtitleController
+      val subtitles = Media3Engine::class.java.getDeclaredField("subtitles").apply { isAccessible = true }.get(engine) as EngineSubtitleDelivery
+      val secondarySubs = EngineSubtitleDelivery::class.java.getDeclaredField("secondarySubs").apply { isAccessible = true }.get(subtitles) as SecondarySubtitleController
       val tracksBridge = Media3Engine::class.java.getDeclaredField("tracksBridge").apply { isAccessible = true }.get(engine) as TrackSelectorBridge
       val fence = Media3Engine::class.java.getDeclaredField("fence").apply { isAccessible = true }.get(engine) as PrepareFence
       val secondaryTextOutput = Media3Engine::class.java.getDeclaredField("secondaryTextOutput").apply { isAccessible = true }.get(engine) as TextOutput

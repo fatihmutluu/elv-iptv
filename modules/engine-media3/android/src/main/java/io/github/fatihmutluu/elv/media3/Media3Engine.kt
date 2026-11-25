@@ -98,10 +98,7 @@ class Media3Engine : SharedObject {
       fence.isRendererOpen, tracksBridge.selectedExternalPrimaryId, tracksBridge.selectedSecondarySubtitleId,
     )
   }
-  @Volatile
-  private var activePtsGeneration = 0L
-  private val ptsEstimator = PtsFrameRateEstimator { fps ->
-    val gen = activePtsGeneration
+  private val ptsEstimator = PtsFrameRateEstimator { fps, gen ->
     post { if (gen == generation && request != null) reporter.onEstimatedFrameRate(fps) }
   }
   private val reporter = EventReporter(
@@ -564,8 +561,7 @@ class Media3Engine : SharedObject {
 
   private fun beginGeneration() {
     generation += 1
-    activePtsGeneration = generation
-    ptsEstimator.reset()
+    ptsEstimator.reset(generation)
     gate.beginMedia(generation)
   }
   private fun tearDownTimeShiftCache() { activeTimeShiftBuffer?.close(); activeTimeShiftBuffer = null; activeTimeShiftTracker = null }

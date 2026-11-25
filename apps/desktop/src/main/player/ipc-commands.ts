@@ -46,10 +46,12 @@ export function dispatchPlayerBridgeCommand<TOwner>(
       entry.lastAspectRatio = undefined;
       entry.lastFps = undefined;
       hooks.releasePowerBlocker(engineId);
+      if (command.cmd.options?.displaySync !== undefined) {
+        entry.lastDisplaySync = command.cmd.options.displaySync;
+      }
       if (entry.isPrimary) {
         hooks.onVideoAspectRatioChange?.(owner, undefined);
         if (command.cmd.options?.displaySync !== undefined) {
-          entry.lastDisplaySync = command.cmd.options.displaySync;
           hooks.displayRefreshController?.setPolicy(engineId, command.cmd.options.displaySync);
         }
       }

@@ -205,4 +205,45 @@ describe('Wave F7A player IPC guards (#213, #214, #116)', () => {
       ),
     ).toBe(false);
   });
+
+  it('rejects load commands carrying drm secrets over Desktop IPC (#272)', () => {
+    const withClearKey = {
+      name: 'load',
+      cmd: {
+        ...baseLoad,
+        drm: {
+          scheme: 'clearkey',
+          clearKeys: [
+            {
+              kid: '00112233445566778899aabbccddeeff',
+              key: 'ffeeddccbbaa99887766554433221100',
+            },
+          ],
+        },
+      },
+    };
+    const withWidevine = {
+      name: 'load',
+      cmd: {
+        ...baseLoad,
+        drm: {
+          scheme: 'widevine',
+          licenseUrl: 'https://drm.example.test/wv',
+          licenseHeaders: { Authorization: 'Bearer secret' },
+        },
+      },
+    };
+    const withNullDrm = {
+      name: 'load',
+      cmd: {
+        ...baseLoad,
+        drm: null,
+      },
+    };
+
+    expect(isPlayerCommandMessage(msg({ name: 'load', cmd: baseLoad }))).toBe(true);
+    expect(isPlayerCommandMessage(msg(withClearKey))).toBe(false);
+    expect(isPlayerCommandMessage(msg(withWidevine))).toBe(false);
+    expect(isPlayerCommandMessage(msg(withNullDrm))).toBe(false);
+  });
 });

@@ -35,6 +35,8 @@ export interface PlaybackSettingsPanelProps {
   readonly focusedControlId?: PlaybackFocusId | null;
   /** Shows the Android-only Media3 Video decoder row (defaults to `Platform.OS === 'android'`, `#411`). */
   readonly showAndroidDecoder?: boolean;
+  /** Shows the Android-only Night-Mode DRC row (defaults to `Platform.OS === 'android'`, `#115`). */
+  readonly showNightModeDrc?: boolean;
   /** Controlled active refresh-rate bucket for the per-refresh-rate A/V delay editor (`#115`). */
   readonly selectedDelayBucket?: RefreshRateBucket;
   /** Invoked when the user selects a refresh-rate bucket in the per-refresh-rate A/V delay editor (`#115`). */
@@ -52,6 +54,7 @@ export function PlaybackSettingsPanel({
   preferences: suppliedPrefs,
   focusedControlId = null,
   showAndroidDecoder = Platform.OS === 'android',
+  showNightModeDrc = Platform.OS === 'android',
   selectedDelayBucket: controlledDelayBucket,
   onSelectDelayBucket,
 }: PlaybackSettingsPanelProps): ReactElement {
@@ -453,7 +456,7 @@ export function PlaybackSettingsPanel({
           isTv={isTv}
           onToggle={() => applyPatch({ autoDynamicRange: !activePrefs.autoDynamicRange })}
         />
-        {!isDesktop ? (
+        {showNightModeDrc && !isDesktop ? (
           <>
             <SettingsDivider />
             <SettingsOptionRow

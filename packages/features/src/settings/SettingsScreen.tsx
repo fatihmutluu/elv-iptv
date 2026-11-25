@@ -90,6 +90,8 @@ export interface SettingsScreenProps {
   readonly hasTransientOverlay?: boolean;
   /** Overrides Android-only Video decoder row visibility in Playback settings (`#411`). */
   readonly showAndroidDecoder?: boolean;
+  /** Overrides Android-only Night-Mode DRC row visibility in Playback settings (`#115`). */
+  readonly showNightModeDrc?: boolean;
   /** Opens the Channel Management & Custom Groups overlay from Live TV settings (`#60`). */
   readonly onOpenChannelManagement?: () => void;
   /** Opens the Multi-Guide & Channel Mapper overlay lifted to `AppShell` root (`#30`). */
@@ -172,6 +174,7 @@ export function SettingsScreen({
   isActiveScope = true,
   hasTransientOverlay = false,
   showAndroidDecoder = Platform.OS === 'android',
+  showNightModeDrc = Platform.OS === 'android',
   onOpenChannelManagement,
 }: SettingsScreenProps): ReactElement {
   const theme = useTheme();
@@ -304,6 +307,7 @@ export function SettingsScreen({
     onActivateControl: handleActivateControl,
     onAdjustControl: handleAdjustControl,
     showAndroidDecoder,
+    showNightModeDrc,
     preservePaneOnBlur: hasTransientOverlay,
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
@@ -351,6 +355,7 @@ export function SettingsScreen({
           activeSection === 'playback' ? (tv.focusedControlId as PlaybackFocusId | null) : null
         }
         showAndroidDecoder={showAndroidDecoder}
+        showNightModeDrc={showNightModeDrc}
         selectedDelayBucket={selectedDelayBucket}
         onSelectDelayBucket={setSelectedDelayBucket}
       />

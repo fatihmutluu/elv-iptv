@@ -320,7 +320,7 @@ internal fun createMediaSource(
   val drmConfig = request.drm
   if (drmConfig != null) {
     val drmHttpFactory = DataSource.Factory {
-      streamDataSource(emptyMap(), client, drmConfig.licenseUrl).first
+      streamDataSource(drmConfig.licenseHeaders, client, drmConfig.licenseUrl).first
     }
     buildDrmSessionManagerProvider(drmConfig, drmHttpFactory)?.let { provider ->
       factory.setDrmSessionManagerProvider(provider)

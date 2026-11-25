@@ -36,6 +36,7 @@ fun mapError(
   played: Boolean = false,
   surfaceLost: Boolean = false,
 ): String {
+  if (playbackErrorCode in 6000..6999) return "drm"
   if (responseCode != null && responseCode !in 200..299) {
     return when (responseCode) {
       in NAMED_STATUSES -> "http-$responseCode"
@@ -62,7 +63,6 @@ fun mapError(
     in 2000..2999 -> "network"
     in 3000..3999 -> "unsupported-format"
     in 4000..5999, in 7000..7999 -> "decoder"
-    in 6000..6999 -> "drm"
     else -> "unknown"
   }
 }
