@@ -188,7 +188,9 @@ make -C "$work/build/ffmpeg" install
 
 unpack mpv
 backport mpv
-meson_build mpv "${mpv_flags[@]}"
+# mingw-w64 d3d11sdklayers.h already defines DXGI_DEBUG_D3D11, while mpv's meson.build only probes
+# HAVE_DXGI_DEBUG_D3D11 when -Dd3d11=enabled (not when only d3d-hwaccel / vf_d3d11vpp is active).
+CFLAGS="$CFLAGS -DHAVE_DXGI_DEBUG_D3D11=1" meson_build mpv "${mpv_flags[@]}"
 
 echo "==> bundle"
 rm -rf "$out"
@@ -223,7 +225,7 @@ is_windows_system_dll() {
   lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$lower" in
     api-ms-win-*.dll | ext-ms-win-*.dll) return 0 ;;
-    advapi32.dll | avrt.dll | bcrypt.dll | cfgmgr32.dll | combase.dll | comctl32.dll | \
+    advapi32.dll | avrt.dll | bcrypt.dll | bcryptprimitives.dll | cfgmgr32.dll | combase.dll | comctl32.dll | \
     comdlg32.dll | crypt32.dll | cryptbase.dll | d2d1.dll | d3d9.dll | d3d11.dll | \
     dbghelp.dll | dcomp.dll | dnsapi.dll | dwmapi.dll | dwrite.dll | dxgi.dll | dxva2.dll | \
     evr.dll | gdi32.dll | hid.dll | imm32.dll | iphlpapi.dll | kernel32.dll | kernelbase.dll | \
