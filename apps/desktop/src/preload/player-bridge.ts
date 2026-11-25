@@ -63,7 +63,8 @@ function waitForFrameCommit(): Promise<void> {
     requestAnimationFrame?: (cb: () => void) => number;
     cancelAnimationFrame?: (id: number) => void;
   };
-  if (typeof g.requestAnimationFrame !== 'function') return Promise.resolve();
+  const raf = g.requestAnimationFrame;
+  if (typeof raf !== 'function') return Promise.resolve();
   return new Promise<void>((resolve) => {
     let settled = false;
     let rafId: number | undefined;
@@ -86,7 +87,7 @@ function waitForFrameCommit(): Promise<void> {
     };
     const fallback = setTimeout(finish, FRAME_COMMIT_FALLBACK_MS);
     try {
-      rafId = g.requestAnimationFrame(() => {
+      rafId = raf.call(g, () => {
         rafId = undefined;
         postTimer = setTimeout(finish, 0);
       });
