@@ -188,9 +188,16 @@ make -C "$work/build/ffmpeg" install
 
 unpack mpv
 backport mpv
-# mingw-w64 d3d11sdklayers.h already defines DXGI_DEBUG_D3D11, while mpv's meson.build only probes
-# HAVE_DXGI_DEBUG_D3D11 when -Dd3d11=enabled (not when only d3d-hwaccel / vf_d3d11vpp is active).
-CFLAGS="$CFLAGS -DHAVE_DXGI_DEBUG_D3D11=1" meson_build mpv "${mpv_flags[@]}"
+# mpv 0.42.0 compiles vf_d3d11vpp.c under d3d-hwaccel (win32) even when -Dd3d11=disabled, but only
+# includes d3d11_helpers.c (and probes HAVE_DXGI_DEBUG_D3D11) when d3d11, ANGLE, or Vulkan is active.
+awk -v target="if features['d3d11'] or features['egl-angle-win32'] or (features['vulkan'] and win32)" \
+    -v suffix=" or (win32 and get_option('d3d-hwaccel').allowed())" '
+  $0 == target { print $0 suffix; patched = 1; next }
+  { print }
+  END { if (!patched) exit 1 }
+' "$work/src/mpv/meson.build" >"$work/src/mpv/meson.build.tmp"
+mv "$work/src/mpv/meson.build.tmp" "$work/src/mpv/meson.build"
+meson_build mpv "${mpv_flags[@]}"
 
 echo "==> bundle"
 rm -rf "$out"
@@ -231,7 +238,7 @@ is_windows_system_dll() {
     evr.dll | gdi32.dll | hid.dll | imm32.dll | iphlpapi.dll | kernel32.dll | kernelbase.dll | \
     ksuser.dll | mfplat.dll | mfuuid.dll | mmdevapi.dll | mpr.dll | msimg32.dll | msvcrt.dll | \
     mswsock.dll | ncrypt.dll | netapi32.dll | normaliz.dll | ntdll.dll | ole32.dll | \
-    oleacc.dll | oleaut32.dll | opengl32.dll | powrprof.dll | propsys.dll | psapi.dll | \
+    oleacc.dll | oleaut32.dll | opengl32.dll | pathcch.dll | powrprof.dll | propsys.dll | psapi.dll | \
     rpcrt4.dll | secur32.dll | setupapi.dll | shcore.dll | shell32.dll | shfolder.dll | \
     shlwapi.dll | sspicli.dll | strmiids.dll | ucrtbase.dll | user32.dll | userenv.dll | \
     usp10.dll | uxtheme.dll | version.dll | windowscodecs.dll | winhttp.dll | winmm.dll | \

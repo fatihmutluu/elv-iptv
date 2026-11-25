@@ -65,11 +65,11 @@ class ExternalPlayerLauncherTest {
       startPositionMs = -500L,
       headers = emptyMap(),
       chooserTitle = "Ignored when explicit package",
-      packageName = "org.videolan.vlc",
+      packageName = "com.example.externalplayer",
     )
     assertNotNull(direct)
     assertEquals(Intent.ACTION_VIEW, direct!!.action)
-    assertEquals("org.videolan.vlc", direct.`package`)
+    assertEquals("com.example.externalplayer", direct.`package`)
     assertEquals("video/*", direct.type)
     assertEquals(0, direct.getIntExtra("position", -1))
     assertNull(direct.getStringArrayExtra("headers"))
@@ -81,7 +81,7 @@ class ExternalPlayerLauncherTest {
       startPositionMs = Long.MAX_VALUE,
       headers = emptyMap(),
       chooserTitle = null,
-      packageName = "com.mxtech.videoplayer.ad",
+      packageName = "com.example.secondplayer",
     )
     assertNotNull(hugePos)
     assertEquals(Int.MAX_VALUE, hugePos!!.getIntExtra("position", -1))

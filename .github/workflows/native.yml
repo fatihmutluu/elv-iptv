@@ -237,7 +237,9 @@ jobs:
         run: pnpm --filter tv-mobile exec expo prebuild --platform android --no-install
       - name: Build the debug APK and run the native modules' JVM unit tests
         working-directory: apps/tv-mobile/android
-        run: ./gradlew assembleDebug :elv-remote-keys:testDebugUnitTest :elv-engine-media3:testDebugUnitTest --build-cache --quiet --no-daemon
+        run: |
+          ./gradlew assembleDebug --build-cache --quiet --no-daemon
+          ./gradlew :elv-remote-keys:testDebugUnitTest :elv-engine-media3:testDebugUnitTest :elv-xmltv-native:testDebugUnitTest --build-cache --no-daemon
       - name: Verify Android TV and Fire OS release hygiene (#11, #12, #19)
         env:
           APP_VARIANT: production
