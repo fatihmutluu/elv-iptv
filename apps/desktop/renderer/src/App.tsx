@@ -40,6 +40,12 @@ import { createDesktopReminderHost } from './reminders/adapter.ts';
 import { attachScrollBlurGuard } from './scroll-blur-guard.ts';
 import { createDesktopKeymapStore } from './storage/keymap.ts';
 import { createDesktopPreferencesStore } from './storage/preferences.ts';
+import {
+  createDesktopSyncPorts,
+  type DesktopFeedbackPort,
+  type DesktopSyncAccountPort,
+  type DesktopTelemetryPort,
+} from './sync/desktop-sync-ports.ts';
 import { attachDeadHostOnlineReset, createDesktopUiAdapters } from './ui/desktop-adapters.tsx';
 import { shouldMountWorkbench } from './workbench/presets.ts';
 
@@ -90,7 +96,12 @@ function AppRoot() {
     [],
   );
 
-  const videoHost = useMemo<VideoHost>(() => createDesktopVideoHost(), []);
+  const desktopSync = useMemo(() => createDesktopSyncPorts(window.elv), []);
+
+  const videoHost = useMemo<VideoHost>(
+    () => createDesktopVideoHost({ telemetry: desktopSync.telemetry }),
+    [desktopSync.telemetry],
+  );
 
   const desktopWindow = useMemo<DesktopWindowPort | undefined>(
     () => createDesktopWindowPort(window.elv?.window),
@@ -237,10 +248,40 @@ function AppRoot() {
     [],
   );
 
+  useEffect(() => {
+    let active = true;
+    let lastServerUrl: string | undefined;
+    let lastTelemetryOptIn: boolean | undefined;
+    const syncPrefs = (snap: { syncServerUrl: string; telemetryOptIn: boolean }): void => {
+      if (!active) return;
+      if (lastServerUrl !== snap.syncServerUrl) {
+        lastServerUrl = snap.syncServerUrl;
+        void desktopSync.setServerUrl(snap.syncServerUrl);
+      }
+      if (lastTelemetryOptIn !== snap.telemetryOptIn) {
+        lastTelemetryOptIn = snap.telemetryOptIn;
+        if (desktopSync.telemetry?.isOptedIn() !== snap.telemetryOptIn) {
+          desktopSync.telemetry?.setOptIn(snap.telemetryOptIn);
+        }
+      }
+    };
+    void desktopSync.hydrate();
+    void preferencesStore.load().then(syncPrefs);
+    const unsubPrefs = preferencesStore.subscribe(syncPrefs);
+    return () => {
+      active = false;
+      unsubPrefs();
+      desktopSync.dispose();
+    };
+  }, [desktopSync, preferencesStore]);
+
   const shellProps: AppShellProps & {
     sourceImportHost?: SourceImportHost;
     profilePreferences?: ProfilePreferencesManager;
     diagnostics?: DiagnosticsPort;
+    syncAccount?: DesktopSyncAccountPort;
+    telemetry?: DesktopTelemetryPort;
+    feedback?: DesktopFeedbackPort;
   } = {
     catalog,
     videoHost,
@@ -253,6 +294,9 @@ function AppRoot() {
     ...(desktopWindow === undefined ? {} : { desktopWindow }),
     ...(sourceImportHost === undefined ? {} : { sourceImportHost }),
     ...(lanPairing === undefined ? {} : { lanPairing }),
+    ...(desktopSync.syncAccount === undefined ? {} : { syncAccount: desktopSync.syncAccount }),
+    ...(desktopSync.telemetry === undefined ? {} : { telemetry: desktopSync.telemetry }),
+    ...(desktopSync.feedback === undefined ? {} : { feedback: desktopSync.feedback }),
   };
 
   return (

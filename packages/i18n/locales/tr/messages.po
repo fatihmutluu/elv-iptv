@@ -3072,3 +3072,216 @@ msgstr "Kapat"
 
 msgid "crash.report.emptyLogs"
 msgstr "Yakalanan son tanılama günlüğü yok."
+
+msgid "settings.section.account"
+msgstr "Hesap ve Eşitleme"
+
+msgid "settings.section.feedback"
+msgstr "Geri Bildirim ve Telemetri"
+
+msgid "welcome.title"
+msgstr "Tüm Ekranlarınızda Eşitleyin"
+
+msgid "welcome.subtitle"
+msgstr "Oynatma listelerinizi, favorilerinizi ve izleme ilerlemenizi TV, mobil ve masaüstünde uçtan uca şifreli olarak eşitlemek için giriş yapın."
+
+msgid "welcome.tabSignIn"
+msgstr "Giriş Yap"
+
+msgid "welcome.tabCreateAccount"
+msgstr "Hesap Oluştur"
+
+msgid "welcome.tabPairQr"
+msgstr "QR ile Eşleştir"
+
+msgid "welcome.continueWithoutAccount"
+msgstr "Hesapsız devam et"
+
+msgid "welcome.localOnlyNote"
+msgstr "Tüm oynatma ve liste özellikleri hesap olmadan tamamen yerel olarak çalışır."
+
+msgid "account.title"
+msgstr "Eşitleme Hesabı"
+
+msgid "account.subtitle"
+msgstr "Sıfır bilgili uçtan uca şifreli eşitleme. Sağlayıcı bilgileriniz cihazınızdan şifresiz çıkmaz."
+
+msgid "account.emailLabel"
+msgstr "E-posta"
+
+msgid "account.emailPlaceholder"
+msgstr "ornek@eposta.com"
+
+msgid "account.passwordLabel"
+msgstr "Şifre"
+
+msgid "account.passwordPlaceholder"
+msgstr "En az 10 karakter"
+
+msgid "account.confirmPasswordLabel"
+msgstr "Şifreyi onayla"
+
+msgid "account.confirmPasswordPlaceholder"
+msgstr "Şifreyi tekrar girin"
+
+msgid "account.signInAction"
+msgstr "Giriş Yap"
+
+msgid "account.createAccountAction"
+msgstr "Hesap Oluştur"
+
+msgid "account.signOutAction"
+msgstr "Çıkış Yap"
+
+msgid "account.syncNowAction"
+msgstr "Şimdi Eşitle"
+
+msgid "account.syncingStatus"
+msgstr "Şifreli kasa eşitleniyor..."
+
+msgid "account.syncedStatus"
+msgstr "Şifreli kasa güncel"
+
+msgid "account.signedInAs"
+msgstr "Giriş yapılan hesap"
+
+msgid "account.serverUrlLabel"
+msgstr "Eşitleme sunucusu adresi (isteğe bağlı)"
+
+msgid "account.oauthComingSoon"
+msgstr "E-posta ve şifrenizle giriş yapın veya bu cihazı QR kod ile eşleştirin."
+
+msgid "account.recoveryTitle"
+msgstr "Kurtarma Kodunuzu Kaydedin"
+
+msgid "account.recoveryBody"
+msgstr "Bu kurtarma kodunu çevrimdışı saklayın. Eşitleme uçtan uca şifreli olduğu için bu kod olmadan kasa anahtarınız sıfırlanamaz."
+
+msgid "account.recoverySavedAction"
+msgstr "Kurtarma Kodumu Kaydettim"
+
+msgid "account.qrTitle"
+msgstr "QR ile Başka Cihaz Eşleştir"
+
+msgid "account.qrBody"
+msgstr "Otomatik giriş yapmak için telefon, tablet veya masaüstündeki giriş yapılmış ELV IPTV uygulamasından bu QR kodu tarayın."
+
+msgid "account.qrGenerateAction"
+msgstr "Eşleştirme QR Göster"
+
+msgid "account.qrClaimTitle"
+msgstr "Cihaz Eşleştirmeyi Onayla"
+
+msgid "account.qrClaimInputLabel"
+msgstr "Eşleştirme kodu veya QR bağlantısı"
+
+msgid "account.qrClaimAction"
+msgstr "Eşleştirmeyi Onayla"
+
+msgid "account.qrClaimSignInFirst"
+msgstr "Bu cihazı eşleştirmeyi tamamlamak için önce giriş yapın veya hesap oluşturun."
+
+msgid "account.qrClaimSuccess"
+msgstr "Cihaz güvenle eşleştirildi."
+
+msgid "account.qrExpired"
+msgstr "Eşleştirme kodunun süresi doldu. Yeni kod oluşturun."
+
+msgid "account.deleteTitle"
+msgstr "Hesabı Kalıcı Olarak Sil"
+
+msgid "account.deleteBody"
+msgstr "Eşitleme hesabınızı, şifreli kasanızı ve aktif oturumlarınızı sunucudan kalıcı olarak siler. Bu cihazdaki yerel listeleriniz korunur."
+
+msgid "account.deleteAction"
+msgstr "Hesabı Kalıcı Olarak Sil"
+
+msgid "account.deleteConfirmAction"
+msgstr "Kalıcı Silmeyi Onayla"
+
+msgid "account.deleteCancelAction"
+msgstr "İptal"
+
+msgid "account.deleteSuccess"
+msgstr "Hesabınız kalıcı olarak silindi."
+
+msgid "account.errorInvalidEmail"
+msgstr "Geçerli bir e-posta adresi girin."
+
+msgid "account.errorWeakPassword"
+msgstr "Şifre en az 10 karakter olmalıdır."
+
+msgid "account.errorPasswordMismatch"
+msgstr "Şifreler eşleşmiyor."
+
+msgid "account.errorGeneric"
+msgstr "Eşitleme isteği başarısız oldu. Bağlantınızı kontrol edip tekrar deneyin."
+
+msgid "telemetry.title"
+msgstr "İsteğe Bağlı Çalışma Telemetrisi"
+
+msgid "telemetry.subtitle"
+msgstr "Açılış hızını, akıcılığı ve oynatma kodek uyumluluğunu iyileştirmemize yardımcı olun. Tamamen isteğe bağlıdır; asla adres, şifre veya izlenen içerik adlarını toplamaz."
+
+msgid "telemetry.optInLabel"
+msgstr "Anonim performans ve kodek tanılamalarını paylaş"
+
+msgid "telemetry.previewAction"
+msgstr "JSON Verisini Önizle"
+
+msgid "telemetry.hidePreviewAction"
+msgstr "Önizlemeyi Gizle"
+
+msgid "telemetry.queuedLabel"
+msgstr "Kuyruktaki olaylar"
+
+msgid "feedback.title"
+msgstr "Geri Bildirim ve Sorun Bildir"
+
+msgid "feedback.subtitle"
+msgstr "Oynatma hatası, EPG uyumsuzluğu veya geliştirme önerinizi doğrudan ELV IPTV ekibine iletin."
+
+msgid "feedback.categoryLabel"
+msgstr "Kategori"
+
+msgid "feedback.catPlayback"
+msgstr "Oynatma Sorunu"
+
+msgid "feedback.catChannelEpg"
+msgstr "Kanal / EPG"
+
+msgid "feedback.catUiRemote"
+msgstr "Arayüz ve Kumanda"
+
+msgid "feedback.catSyncAccount"
+msgstr "Eşitleme ve Hesap"
+
+msgid "feedback.catFeature"
+msgstr "Özellik İsteği"
+
+msgid "feedback.catOther"
+msgstr "Diğer"
+
+msgid "feedback.messageLabel"
+msgstr "Açıklama"
+
+msgid "feedback.messagePlaceholder"
+msgstr "Ne olduğunu veya neyi iyileştirebileceğimizi yazın..."
+
+msgid "feedback.attachDiagnosticsLabel"
+msgstr "Gizlenmiş cihaz ve kodek tanılamalarını ekle"
+
+msgid "feedback.submitAction"
+msgstr "Geri Bildirim Gönder"
+
+msgid "feedback.sendingStatus"
+msgstr "Geri bildirim gönderiliyor..."
+
+msgid "feedback.sentSuccess"
+msgstr "Teşekkürler! Geri bildiriminiz alındı."
+
+msgid "feedback.errorEmpty"
+msgstr "Göndermeden önce lütfen kısa bir açıklama yazın."
+
+msgid "feedback.errorFailed"
+msgstr "Geri bildirim şu an gönderilemedi. Lütfen daha sonra tekrar deneyin."

@@ -17,8 +17,9 @@ import type {
   VideoHostOpenOptions,
   VideoSurfaceProps,
 } from '@elv/features';
-import type { PlayerEngine } from '@elv/playback';
+import type { EngineEvent, PlayerEngine } from '@elv/playback';
 import type { ReactElement } from 'react';
+import type { TelemetryPort } from './sync/sync-runtime';
 
 /** Minimal tvOS Siri Remote pan-gesture source bridged from `@elv/remote-keys`. */
 interface MobileTvPanGestureSource {
@@ -80,6 +81,10 @@ export interface MobileVideoHostDeps {
   readonly setAetherAutoEnterPictureInPicture: (enabled: boolean, engine?: PlayerEngine) => boolean;
   readonly subscribeAetherPictureInPicture: (listener: (inPip: boolean) => void) => () => void;
   readonly panGestures: MobileTvPanGestureSource | null;
+  readonly telemetry?: Pick<
+    TelemetryPort,
+    'isOptedIn' | 'recordMediaDecodeFailure' | 'recordPlaybackError'
+  >;
 }
 
 function toMedia3EngineOptions(
@@ -107,6 +112,100 @@ function mapRemoteMediaAction(
   return action === 'next' ? 'channel-up' : action === 'previous' ? 'channel-down' : 'stop';
 }
 
+const SAFE_CODEC_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+const KNOWN_CONTAINERS = ['mpegts', 'hls', 'mkv', 'mp4', 'dash', 'webm', 'flv'] as const;
+
+function sanitizeCodecToken(raw: string | undefined): string {
+  if (typeof raw !== 'string') return 'unknown';
+  const stripped = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:video|audio)\//, '');
+  return SAFE_CODEC_RE.test(stripped) ? stripped : 'unknown';
+}
+
+function inferContainerFromDetail(detail: string | undefined, isLiveTs: boolean): string {
+  if (isLiveTs) return 'mpegts';
+  if (typeof detail === 'string') {
+    const lower = detail.toLowerCase();
+    for (const token of KNOWN_CONTAINERS) {
+      if (lower.includes(token)) return token;
+    }
+    if (lower.includes('m3u8')) return 'hls';
+    if (lower.includes('matroska')) return 'mkv';
+  }
+  return 'unknown';
+}
+
+function attachEngineTelemetryObserver(
+  engine: PlayerEngine,
+  engineName: string,
+  telemetry: Pick<TelemetryPort, 'isOptedIn' | 'recordMediaDecodeFailure' | 'recordPlaybackError'>,
+): void {
+  if (typeof engine.subscribe !== 'function') return;
+  let lastAttempt = -1;
+  let isLive = true;
+  let isLiveTs = false;
+  let videoCodec = 'unknown';
+  let audioCodec = 'unknown';
+  let hdrFormat: string | undefined;
+
+  engine.subscribe((event: EngineEvent) => {
+    if (event.attempt !== lastAttempt) {
+      lastAttempt = event.attempt;
+      isLive = true;
+      isLiveTs = false;
+      videoCodec = 'unknown';
+      audioCodec = 'unknown';
+      hdrFormat = undefined;
+    }
+    if (event.type === 'clock') {
+      if (event.anchor.isLiveTs === true) {
+        isLive = true;
+        isLiveTs = true;
+      } else if (event.anchor.liveEdgeMs !== undefined) {
+        isLive = true;
+      } else if (event.anchor.durationMs !== undefined && event.anchor.durationMs > 0) {
+        isLive = false;
+      }
+      return;
+    }
+    if (event.type === 'mediaInfo') {
+      if (event.info.codec !== undefined) videoCodec = sanitizeCodecToken(event.info.codec);
+      if (event.info.hdr !== undefined) hdrFormat = event.info.hdr;
+      return;
+    }
+    if (event.type === 'tracks') {
+      const selected =
+        event.tracks.audio.find((t) => t.id === event.tracks.selectedAudioId) ??
+        event.tracks.audio[0];
+      if (selected?.codec !== undefined) audioCodec = sanitizeCodecToken(selected.codec);
+      return;
+    }
+    if (event.type === 'error') {
+      if (!telemetry.isOptedIn()) return;
+      const code = event.error.code;
+      if (code === 'decoder' || code === 'unsupported-format') {
+        telemetry.recordMediaDecodeFailure({
+          engine: engineName,
+          container: inferContainerFromDetail(event.error.detail, isLiveTs),
+          videoCodec,
+          audioCodec,
+          errorCode: code,
+          ...(hdrFormat !== undefined ? { hdrFormat } : {}),
+          isLive,
+        });
+      } else {
+        telemetry.recordPlaybackError({
+          engine: engineName,
+          errorCode: code,
+          isLive,
+        });
+      }
+    }
+  });
+}
+
 /** Synchronous mobile/TV {@link VideoHost} returned by {@link createMobileVideoHost}. */
 export interface MobileVideoHost extends VideoHost {
   open(options?: VideoHostOpenOptions): OpenVideoEngine | null;
@@ -129,6 +228,14 @@ export function createMobileVideoHost(deps: MobileVideoHostDeps): MobileVideoHos
     open(options?: VideoHostOpenOptions): OpenVideoEngine | null {
       const engine = deps.createEngine(toMedia3EngineOptions(options));
       if (engine === null) return null;
+
+      if (deps.telemetry !== undefined) {
+        attachEngineTelemetryObserver(
+          engine,
+          isAndroid ? 'media3' : isApple ? 'aether' : deps.os,
+          deps.telemetry,
+        );
+      }
 
       let appleMuted = options?.handleAudioFocus === false;
       const tileCount = options?.multiViewTileCount ?? 1;

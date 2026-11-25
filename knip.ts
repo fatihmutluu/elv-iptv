@@ -44,6 +44,9 @@ const config: KnipConfig = {
       // Optional Expo packages inferred from app.json.
       ignoreDependencies: ['expo-updates'],
     },
+    'apps/sync-server': {
+      entry: ['src/worker.ts'],
+    },
     'packages/ui-kit': {
       // Babel config is read by jest-expo; the preset is a direct devDependency for pnpm's isolated layout.
       entry: ['babel.config.cjs'],

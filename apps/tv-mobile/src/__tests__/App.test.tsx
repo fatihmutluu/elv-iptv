@@ -553,6 +553,8 @@ describe('App', () => {
     openedWith(null);
 
     const view = await render(<App />);
+    const continueBtn = screen.queryByTestId('welcome-continue-without-account');
+    if (continueBtn) await fireEvent.press(continueBtn);
     await screen.findByTestId('home-live-item-0');
 
     await fireEvent.press(screen.getByTestId('nav-tab-live'));
@@ -759,6 +761,9 @@ describe('App', () => {
     expect(mockLastAppShellProps?.keymapStore).toBe(mockLastAppProvidersProps?.keymapStore);
     expect(mockLastAppShellProps?.lanPairing).toBeDefined();
     expect(mockLastAppShellProps?.tvHomeChannels).toBeDefined();
+    expect(mockLastAppShellProps?.syncAccount).toBeDefined();
+    expect(mockLastAppShellProps?.telemetry).toBeDefined();
+    expect(mockLastAppShellProps?.feedback).toBeDefined();
     expect(mockLastAppShellProps?.thermalDevice).toBeDefined();
     expect(mockLastAppShellProps?.thermalDevice?.getMultiViewCapabilities()).toEqual({
       platform: 'android',

@@ -128,7 +128,7 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     defaultLoadedArtworkUris.clear();
   });
 
-  it('exposes all 7 Settings sections in canonical order', async () => {
+  it('exposes all 9 Settings sections in canonical order', async () => {
     expect(SETTINGS_SECTIONS).toEqual([
       'appearance',
       'playback',
@@ -136,6 +136,8 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
       'remote',
       'profiles',
       'sources',
+      'account',
+      'feedback',
       'licenses',
     ]);
 
@@ -147,6 +149,8 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     expect(screen.getByTestId('settings-tab-remote')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-profiles')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-sources')).toBeTruthy();
+    expect(screen.getByTestId('settings-tab-account')).toBeTruthy();
+    expect(screen.getByTestId('settings-tab-feedback')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-licenses')).toBeTruthy();
   });
 

@@ -40,7 +40,8 @@
         "packages/sources/**",
         "packages/data/**",
         "packages/playback/**",
-        "packages/focus-core/**"
+        "packages/focus-core/**",
+        "packages/sync/**"
       ],
       "linter": {
         "rules": {
@@ -184,6 +185,7 @@
         "packages/playback/**/*.test.ts",
         "packages/focus-core/**/*.test.ts",
         "packages/i18n/**/*.test.ts",
+        "packages/sync/**/*.test.ts",
         "packages/*/src/**/*-test-helpers.ts",
         "packages/*/src/test-chunks.ts",
         "packages/*/src/test-db.ts"

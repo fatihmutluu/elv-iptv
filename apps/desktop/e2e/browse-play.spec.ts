@@ -51,6 +51,9 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
 
   try {
     const window = await app.firstWindow();
+    await expect(window.getByTestId('welcome-sync-overlay')).toBeVisible();
+    await window.getByTestId('welcome-continue-without-account').click();
+    await expect(window.getByTestId('welcome-sync-overlay')).toHaveCount(0);
     await expect(window.getByTestId('sources-screen')).toBeVisible();
 
     await window.getByTestId('sources-input-server').fill(env?.frontUrl ?? '');
@@ -245,6 +248,9 @@ test('plays corpus Two audio tracks and subtitles (MKV) movie, pauses, seeks +10
 
   try {
     const window = await app.firstWindow();
+    await expect(window.getByTestId('welcome-sync-overlay')).toBeVisible();
+    await window.getByTestId('welcome-continue-without-account').click();
+    await expect(window.getByTestId('welcome-sync-overlay')).toHaveCount(0);
     await expect(window.getByTestId('sources-screen')).toBeVisible();
 
     await window.getByTestId('sources-input-server').fill(env.frontUrl);

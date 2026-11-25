@@ -227,4 +227,76 @@ describe('createMobileVideoHost (#34, #221, #232)', () => {
     const host = createMobileVideoHost(deps);
     expect(host.open()).toBeNull();
   });
+
+  it('records redacted media_decode_failure and playback_error telemetry only when opted in (#458, #70)', () => {
+    let optedIn = false;
+    const listeners: Array<(event: unknown) => void> = [];
+    const engine = {
+      subscribe: (listener: (event: unknown) => void) => {
+        listeners.push(listener);
+        return () => {};
+      },
+    } as unknown as PlayerEngine;
+    const recordMediaDecodeFailure = vi.fn();
+    const recordPlaybackError = vi.fn();
+
+    const host = createMobileVideoHost(
+      makeDeps({
+        os: 'android',
+        isTV: true,
+        createEngine: vi.fn(() => engine),
+        telemetry: {
+          isOptedIn: () => optedIn,
+          recordMediaDecodeFailure,
+          recordPlaybackError,
+        },
+      }),
+    );
+    host.open();
+
+    // Opted out -> zero telemetry recorded
+    for (const l of listeners) {
+      l({ attempt: 1, type: 'error', error: { code: 'decoder', detail: 'https://secret.test/x' } });
+    }
+    expect(recordMediaDecodeFailure).not.toHaveBeenCalled();
+    expect(recordPlaybackError).not.toHaveBeenCalled();
+
+    // Opted in -> captures redacted codec/container/hdr without leaking raw detail
+    optedIn = true;
+    for (const l of listeners) {
+      l({ attempt: 2, type: 'clock', anchor: { positionMs: 0, atMs: 0, rate: 1, isLiveTs: true } });
+      l({ attempt: 2, type: 'mediaInfo', info: { codec: 'video/hevc', hdr: 'hdr10' } });
+      l({
+        attempt: 2,
+        type: 'tracks',
+        tracks: {
+          audio: [{ id: 'a1', codec: 'audio/ac3' }],
+          subtitles: [],
+          selectedAudioId: 'a1',
+          selectedSubtitleId: null,
+        },
+      });
+      l({
+        attempt: 2,
+        type: 'error',
+        error: { code: 'decoder', detail: 'MediaCodec fail https://u:p@host.test/1.ts' },
+      });
+      l({ attempt: 2, type: 'error', error: { code: 'http-509' } });
+    }
+
+    expect(recordMediaDecodeFailure).toHaveBeenCalledWith({
+      engine: 'media3',
+      container: 'mpegts',
+      videoCodec: 'hevc',
+      audioCodec: 'ac3',
+      errorCode: 'decoder',
+      hdrFormat: 'hdr10',
+      isLive: true,
+    });
+    expect(recordPlaybackError).toHaveBeenCalledWith({
+      engine: 'media3',
+      errorCode: 'http-509',
+      isLive: true,
+    });
+  });
 });

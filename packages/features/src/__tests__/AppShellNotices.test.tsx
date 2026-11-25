@@ -180,6 +180,8 @@ describe('AppShell Settings -> About & Licenses', () => {
       ).toBeTruthy();
 
       await pressKey(KEYCODE_DPAD_DOWN);
+      await pressKey(KEYCODE_DPAD_DOWN);
+      await pressKey(KEYCODE_DPAD_DOWN);
       expect(screen.getByTestId('settings-tab-licenses').props.accessibilityState.selected).toBe(
         true,
       );

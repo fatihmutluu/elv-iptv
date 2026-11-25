@@ -35,6 +35,7 @@ import {
 } from './app-shell-state';
 import { useTvHomeChannelsSync } from './app-shell-tv-channels';
 import { AppShellRootOverlays, useAppShellWaveF7b } from './app-shell-wave-f7b';
+import { useWaveF9Controller } from './app-shell-wave-f9';
 import type { CatalogTabMemory } from './catalog';
 import { EMPTY_LIVE_MEMORY, type LiveTabMemory, recordChannelTune } from './live';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
@@ -48,6 +49,7 @@ import type { SourceImportHost } from './ports/source-import-host';
 import type { TvHomeChannelsPort } from './ports/tv-home-channels';
 import type { ThermalDevicePort, VideoHost } from './ports/video-host';
 import type { DiagnosticsPort, ExternalPlayerPort } from './ports/wave-f7b-ports';
+import type { FeedbackPort, SyncAccountPort, TelemetryPort } from './ports/wave-f9-ports';
 import { useOledScreensaver } from './screensaver';
 import type { SettingsSection } from './settings';
 import {
@@ -112,6 +114,12 @@ export interface AppShellProps {
   externalPlayer?: ExternalPlayerPort;
   /** Optional platform opt-in redacted diagnostics port (`#226`). */
   diagnostics?: DiagnosticsPort;
+  /** Optional E2EE sync account & universal QR pairing port (`#26`). */
+  readonly syncAccount?: SyncAccountPort;
+  /** Optional opt-in runtime performance & codec telemetry port (`#458`). */
+  readonly telemetry?: TelemetryPort;
+  /** Optional Settings feedback & issue report submission port (`#458`). */
+  readonly feedback?: FeedbackPort;
 }
 
 /** Top-level Cinema Quietude shell (`Home`, `Live`, `Movies`, `Series` + `Search`, `Settings`, `DetailScreen`, `PlayerScreen`). */
@@ -580,11 +588,13 @@ function AppShellContent(props: AppShellProps): ReactElement {
     clearCaches: clearAllCaches,
     switchSource: switchSourceOnCrash,
   });
+  const waveF9 = useWaveF9Controller({ preferences, activeTab, ports: props });
   interceptOpenPlayTargetRef.current = waveF7b.externalHandoff.interceptPlayTarget;
   const hasRootOverlay =
     hasProfileOverlay ||
     mgmtOverlays.anyOpen ||
     waveF7b.anyOverlayOpen ||
+    waveF9.isWelcomeVisible ||
     (isTv && reminders.activeBanner !== null);
   const crashProps = waveF7b.crashProps;
   const readySourcesCount = sources.filter((s) => !s.needsImport).length;
@@ -735,6 +745,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     onReminderChanged={handleReminderChanged}
                     onScrollTopChange={setHeroScrolled}
                     onFocusTopNav={handleFocusTopNav}
+                    waveF9={waveF9}
                   />
                 </CrashRecoveryBoundary>
               </AdaptiveNavShell>
@@ -768,6 +779,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
               reminders={reminders}
               oledScreensaver={oledScreensaver}
               wave={waveF7b}
+              waveF9={waveF9}
               {...(props.diagnostics !== undefined ? { diagnostics: props.diagnostics } : {})}
               includeLogs={preferences.preferences.crashReportsIncludeLogs}
             />

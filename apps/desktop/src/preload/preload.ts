@@ -6,7 +6,10 @@ import { isGateMode, parsePresenterArg } from './gate-flag.ts';
 import { createLanPairingBridge } from './lan-pairing-bridge.ts';
 import { createPlayerBridge } from './player-bridge.ts';
 import { createSourcesBridge } from './sources-bridge.ts';
+import { createSyncBridges } from './sync-bridge.ts';
 import { createWindowBridge } from './window-bridge.ts';
+
+const syncBridges = createSyncBridges(ipcRenderer);
 
 contextBridge.exposeInMainWorld(
   'elv',
@@ -18,6 +21,9 @@ contextBridge.exposeInMainWorld(
     sources: createSourcesBridge(ipcRenderer),
     lanPairing: createLanPairingBridge(ipcRenderer),
     diagnostics: createDiagnosticsBridge(ipcRenderer),
+    sync: syncBridges.sync,
+    telemetry: syncBridges.telemetry,
+    feedback: syncBridges.feedback,
     gate: isGateMode(process.argv),
     presenter: parsePresenterArg(process.argv),
   }),

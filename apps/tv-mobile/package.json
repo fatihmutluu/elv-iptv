@@ -23,6 +23,7 @@
     "@elv/playback": "workspace:*",
     "@elv/remote-keys": "workspace:*",
     "@elv/sources": "workspace:*",
+    "@elv/sync": "workspace:*",
     "@elv/tv-home-channels": "workspace:*",
     "@elv/ui-kit": "workspace:*",
     "@elv/xmltv-native": "workspace:*",

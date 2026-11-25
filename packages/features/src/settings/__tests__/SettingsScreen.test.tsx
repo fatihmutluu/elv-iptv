@@ -377,6 +377,12 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(screen.getByTestId('settings-tab-sources').props.accessibilityState.selected).toBe(true);
     await pressKey(KEYCODE_DPAD_DOWN);
+    expect(screen.getByTestId('settings-tab-account').props.accessibilityState.selected).toBe(true);
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(screen.getByTestId('settings-tab-feedback').props.accessibilityState.selected).toBe(
+      true,
+    );
+    await pressKey(KEYCODE_DPAD_DOWN);
     expect(screen.getByTestId('settings-tab-licenses').props.accessibilityState.selected).toBe(
       true,
     );

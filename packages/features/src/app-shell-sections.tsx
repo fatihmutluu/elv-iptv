@@ -10,6 +10,7 @@ import {
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { AppTab, CatalogMemoryMap } from './app-shell-state';
+import type { WaveF9Controller } from './app-shell-wave-f9';
 import { CatalogDiscoveryScreen, type CatalogTabMemory } from './catalog';
 import { DetailScreen } from './detail';
 import { HomeScreen } from './home';
@@ -81,6 +82,7 @@ export interface AppShellStageProps {
   readonly onReminderChanged?: () => void;
   readonly onScrollTopChange: (scrolled: boolean) => void;
   readonly onFocusTopNav: () => void;
+  readonly waveF9?: WaveF9Controller;
 }
 
 /** Active content stage inside {@link AppShell} (boot, Detail, Settings, Search, Home, Movies/Series, Live). */
@@ -157,6 +159,9 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
             {...slot}
           />
         )}
+        {...(p.waveF9 !== undefined
+          ? { renderAccount: p.waveF9.renderAccount, renderFeedback: p.waveF9.renderFeedback }
+          : {})}
         renderLicenses={(slot) => <ThirdPartyNoticesScreen embedded {...slot} />}
       />
     );

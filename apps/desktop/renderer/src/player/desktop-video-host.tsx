@@ -1,6 +1,12 @@
 import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
 import type { VideoHost, VideoHostOpenOptions } from '@elv/features';
-import type { DesktopAudioOutputConfig, DisplaySyncPolicy, StreamRequest } from '@elv/playback';
+import type {
+  DesktopAudioOutputConfig,
+  DisplaySyncPolicy,
+  EngineEvent,
+  PlayerEngine,
+  StreamRequest,
+} from '@elv/playback';
 import type {
   PlayerBridge,
   PlayerOpenOptions,
@@ -8,6 +14,7 @@ import type {
 } from '../../../src/shared/player-ipc.ts';
 import type { WindowBridge } from '../../../src/shared/window-ipc.ts';
 import { bindDesktopMediaSession, createDesktopMediaSession } from '../media-session.ts';
+import type { DesktopTelemetryPort } from '../sync/desktop-sync-ports.ts';
 import { createDesktopEngine } from './desktop-engine.ts';
 import { type DesktopHostKey, dispatchDesktopClose, routeDesktopUiEvent } from './host-keys.ts';
 import { PlayerView } from './PlayerView.tsx';
@@ -17,6 +24,104 @@ export interface DesktopVideoHostDeps {
   readonly playerBridge?: PlayerBridge | undefined;
   readonly windowBridge?: WindowBridge | undefined;
   readonly presenterKind?: PresenterKind | undefined;
+  readonly telemetry?:
+    | Pick<DesktopTelemetryPort, 'isOptedIn' | 'recordMediaDecodeFailure' | 'recordPlaybackError'>
+    | undefined;
+}
+
+const SAFE_CODEC_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+const KNOWN_CONTAINERS = ['mpegts', 'hls', 'mkv', 'mp4', 'dash', 'webm', 'flv'] as const;
+
+function sanitizeCodecToken(raw: string | undefined): string {
+  if (typeof raw !== 'string') return 'unknown';
+  const stripped = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:video|audio)\//, '');
+  return SAFE_CODEC_RE.test(stripped) ? stripped : 'unknown';
+}
+
+function inferContainerFromDetail(detail: string | undefined, isLiveTs: boolean): string {
+  if (isLiveTs) return 'mpegts';
+  if (typeof detail === 'string') {
+    const lower = detail.toLowerCase();
+    for (const token of KNOWN_CONTAINERS) {
+      if (lower.includes(token)) return token;
+    }
+    if (lower.includes('m3u8')) return 'hls';
+    if (lower.includes('matroska')) return 'mkv';
+  }
+  return 'unknown';
+}
+
+function attachDesktopEngineTelemetryObserver(
+  engine: Pick<PlayerEngine, 'subscribe'>,
+  telemetry: Pick<
+    DesktopTelemetryPort,
+    'isOptedIn' | 'recordMediaDecodeFailure' | 'recordPlaybackError'
+  >,
+): () => void {
+  let lastAttempt = -1;
+  let isLive = true;
+  let isLiveTs = false;
+  let videoCodec = 'unknown';
+  let audioCodec = 'unknown';
+  let hdrFormat: string | undefined;
+
+  return engine.subscribe((event: EngineEvent) => {
+    if (event.attempt !== lastAttempt) {
+      lastAttempt = event.attempt;
+      isLive = true;
+      isLiveTs = false;
+      videoCodec = 'unknown';
+      audioCodec = 'unknown';
+      hdrFormat = undefined;
+    }
+    if (event.type === 'clock') {
+      if (event.anchor.isLiveTs === true) {
+        isLive = true;
+        isLiveTs = true;
+      } else if (event.anchor.liveEdgeMs !== undefined) {
+        isLive = true;
+      } else if (event.anchor.durationMs !== undefined && event.anchor.durationMs > 0) {
+        isLive = false;
+      }
+      return;
+    }
+    if (event.type === 'mediaInfo') {
+      if (event.info.codec !== undefined) videoCodec = sanitizeCodecToken(event.info.codec);
+      if (event.info.hdr !== undefined) hdrFormat = event.info.hdr;
+      return;
+    }
+    if (event.type === 'tracks') {
+      const selected =
+        event.tracks.audio.find((t) => t.id === event.tracks.selectedAudioId) ??
+        event.tracks.audio[0];
+      if (selected?.codec !== undefined) audioCodec = sanitizeCodecToken(selected.codec);
+      return;
+    }
+    if (event.type === 'error') {
+      if (telemetry.isOptedIn() !== true) return;
+      const code = event.error.code;
+      if (code === 'decoder' || code === 'unsupported-format') {
+        telemetry.recordMediaDecodeFailure({
+          engine: 'mpv',
+          container: inferContainerFromDetail(event.error.detail, isLiveTs),
+          videoCodec,
+          audioCodec,
+          errorCode: code,
+          ...(hdrFormat !== undefined ? { hdrFormat } : {}),
+          isLive,
+        });
+      } else {
+        telemetry.recordPlaybackError({
+          engine: 'mpv',
+          errorCode: code,
+          isLive,
+        });
+      }
+    }
+  });
 }
 
 /**
@@ -66,6 +171,10 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
         () => performance.now(),
         openOptions,
       );
+      const offTelemetry =
+        deps?.telemetry !== undefined
+          ? attachDesktopEngineTelemetryObserver(rawEngine, deps.telemetry)
+          : undefined;
       const mediaSession = createDesktopMediaSession();
       let activeHostKeyListener: ((key: DesktopHostKey) => void) | null = null;
       let overlayMode: 'floating' | 'docked' = 'floating';
@@ -128,6 +237,7 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
         setPrimary: promotePrimary,
         release() {
           mediaSessionOwners.delete(ownerHandle);
+          offTelemetry?.();
           offPresenterOverlay();
           overlayModeListeners.clear();
           offWindowAlwaysOnTop?.();

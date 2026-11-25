@@ -1,0 +1,23 @@
+{
+  "name": "@elv/sync",
+  "private": true,
+  "version": "0.0.0",
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --coverage --reporter=dot --passWithNoTests",
+    "typecheck": "tsc --noEmit -p . --pretty false"
+  },
+  "dependencies": {
+    "@elv/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@elv/config": "workspace:*",
+    "@vitest/coverage-v8": "catalog:",
+    "fast-check": "catalog:",
+    "vitest": "5.1.0"
+  }
+}

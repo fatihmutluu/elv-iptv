@@ -80,6 +80,10 @@ export interface SettingsScreenProps {
   readonly renderProfiles?: (slot: SettingsPaneSlotProps) => ReactElement;
   /** Slot rendering the embedded `SourcesScreen` inside the Sources section. */
   readonly renderSources?: (slot: SettingsPaneSlotProps) => ReactElement;
+  /** Slot rendering the embedded `AccountSettingsPanel` inside the Account & Sync section (`#26`). */
+  readonly renderAccount?: (slot: SettingsPaneSlotProps) => ReactElement;
+  /** Slot rendering the embedded `FeedbackSettingsPanel` inside the Feedback & Telemetry section (`#458`). */
+  readonly renderFeedback?: (slot: SettingsPaneSlotProps) => ReactElement;
   /** Slot rendering the embedded `ThirdPartyNoticesScreen` inside the About & Licenses section. */
   readonly renderLicenses?: (slot: SettingsPaneSlotProps) => ReactElement;
   /** Invoked when TV D-pad Up at top edge or Back from the sidebar returns focus to Top Nav. */
@@ -147,6 +151,18 @@ const SECTION_META: readonly NavSectionMeta[] = [
     testID: 'settings-tab-sources',
   },
   {
+    id: 'account',
+    icon: 'refresh',
+    labelKey: 'settings.section.account',
+    testID: 'settings-tab-account',
+  },
+  {
+    id: 'feedback',
+    icon: 'like',
+    labelKey: 'settings.section.feedback',
+    testID: 'settings-tab-feedback',
+  },
+  {
     id: 'licenses',
     icon: 'info',
     labelKey: 'settings.section.licenses',
@@ -173,6 +189,8 @@ export function SettingsScreen({
   preferences,
   renderProfiles,
   renderSources,
+  renderAccount,
+  renderFeedback,
   renderLicenses,
   onFocusTopNav,
   isActiveScope = true,
@@ -387,6 +405,14 @@ export function SettingsScreen({
     ) : activeSection === 'sources' ? (
       renderSources ? (
         renderSources(embeddedSlot)
+      ) : null
+    ) : activeSection === 'account' ? (
+      renderAccount ? (
+        renderAccount(embeddedSlot)
+      ) : null
+    ) : activeSection === 'feedback' ? (
+      renderFeedback ? (
+        renderFeedback(embeddedSlot)
       ) : null
     ) : (
       <AboutLicensesPanel>

@@ -4,6 +4,7 @@ import type { DiagnosticsBridge } from '../../src/shared/diagnostics-ipc.ts';
 import type { LanPairingBridge } from '../../src/shared/lan-pairing-ipc.ts';
 import type { PlayerBridge, PresenterKind } from '../../src/shared/player-ipc.ts';
 import type { SourcesBridge } from '../../src/shared/sources-ipc.ts';
+import type { FeedbackBridge, SyncBridge, TelemetryBridge } from '../../src/shared/sync-ipc.ts';
 import type { WindowBridge } from '../../src/shared/window-ipc.ts';
 
 declare global {
@@ -17,6 +18,9 @@ declare global {
       readonly sources?: SourcesBridge;
       readonly lanPairing?: LanPairingBridge;
       readonly diagnostics?: DiagnosticsBridge;
+      readonly sync?: SyncBridge;
+      readonly telemetry?: TelemetryBridge;
+      readonly feedback?: FeedbackBridge;
       readonly gate?: boolean;
       readonly presenter?: PresenterKind | undefined;
     };
