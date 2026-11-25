@@ -24,6 +24,7 @@ export const OBSERVED_PROPERTIES = [
   'aid',
   'sid',
   'secondary-sid',
+  'program',
   'audio-delay',
   'sub-delay',
   'audio-device',
@@ -43,6 +44,7 @@ export const TRACK_PROPERTIES: ReadonlySet<string> = new Set([
   'aid',
   'sid',
   'secondary-sid',
+  'program',
 ]);
 
 /** Fast membership check for all observed mpv properties. */

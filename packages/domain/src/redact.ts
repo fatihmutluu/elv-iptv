@@ -62,6 +62,28 @@ const SECRET_PARAMS = new RegExp(
   `\\b(${SECRET_PARAM_NAMES.join('|')})\\s*=\\s*[^&\\s'";,)]*`,
   'gi',
 );
+const WIN_HOME_PATH_RE = /\b[a-zA-Z]:[\\/]+Users[\\/]+[^\s'"<>)\]]+/gi;
+const UNIX_HOME_PATH_RE = /(^|[^\w:/\\])(\/(?:Users|home)\/[^\s'"<>)\]]+)/g;
+const ANDROID_USER_PATH_RE = /(^|[^\w:/\\])(\/data\/user\/\d+(?:\/[^\s'"<>)\]]*)?)/g;
+
+function maskHomePath(rawMatch: string): string {
+  const punctMatch = TRAILING_PUNCT.exec(rawMatch);
+  const trailing = punctMatch ? punctMatch[0] : '';
+  return `<redacted-path>${trailing}`;
+}
+
+function redactHomePaths(text: string): string {
+  return text
+    .replace(WIN_HOME_PATH_RE, maskHomePath)
+    .replace(
+      UNIX_HOME_PATH_RE,
+      (_m, prefix: string, path: string) => `${prefix}${maskHomePath(path)}`,
+    )
+    .replace(
+      ANDROID_USER_PATH_RE,
+      (_m, prefix: string, path: string) => `${prefix}${maskHomePath(path)}`,
+    );
+}
 
 function maskSegment(segment: string, isLastNonEmpty: boolean): string {
   if (segment === '') return '';
@@ -129,10 +151,11 @@ function redactSecretsOnly(text: string): string {
 
 /**
  * Redacts all URLs (`http(s)`, `rtsp(s)`, `rtmp(s)`, `tcp`, `tls`, `httpproxy`, `udp`, `rtp`,
- * `ftp`, `file`), sensitive HTTP header lines (`Authorization`, `Proxy-Authorization`, `Cookie`,
- * `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`), `Bearer`/`Basic` tokens, and sensitive query
- * parameter assignments (`CREDENTIAL_PARAMS` and common token keys) from arbitrary log/error text.
+ * `ftp`, `file`), OS home directory paths (`C:\Users\...`, `/Users/...`, `/home/...`,
+ * `/data/user/<n>/...`), sensitive HTTP header lines (`Authorization`, `Proxy-Authorization`,
+ * `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`), `Bearer`/`Basic` tokens, and sensitive
+ * query parameter assignments (`CREDENTIAL_PARAMS` and common token keys) from arbitrary log/error text.
  */
 export function redactText(text: string): string {
-  return redactSecretsOnly(text.replace(URL_PATTERN, redactOneUrl));
+  return redactSecretsOnly(redactHomePaths(text.replace(URL_PATTERN, redactOneUrl)));
 }

@@ -141,6 +141,8 @@ describe('usePlayDeepLink', () => {
         listener({ url: 'https://example.test/play?key=abc' });
         listener({ url: 'elviptv://play?key=' });
         listener({ url: 'elviptv://gate/player?zaps=2' });
+        listener({ url: 'elviptv://external-return' });
+        listener({ url: 'elviptv://external-return?status=ok' });
       }
     });
     expect(hook.current().pendingDeepLink).toBeNull();

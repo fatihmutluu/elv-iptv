@@ -41,7 +41,7 @@ private final class SurfaceCleanupState: @unchecked Sendable {
 }
 
 /// Unfocusable, non-interactive `UIView` painting the black zap shutter above `AetherPlayerView`.
-private final class ShutterOverlayView: UIView {
+final class ShutterOverlayView: UIView {
   override init(frame: CGRect) {
     super.init(frame: frame)
     backgroundColor = .black
@@ -62,14 +62,15 @@ private final class ShutterOverlayView: UIView {
 /// Native `ExpoView` hosting an `AetherPlayerView` under a native black zap shutter (player core spec 6.2).
 final class AetherSurfaceView: ExpoView {
   let playerView = AetherPlayerView(frame: .zero)
-  private let subtitleOverlayView = AetherSubtitleOverlayView(frame: .zero)
-  private let shutterView = ShutterOverlayView(frame: .zero)
+  let subtitleOverlayView = AetherSubtitleOverlayView(frame: .zero)
+  let shutterView = ShutterOverlayView(frame: .zero)
   private let cleanupState = SurfaceCleanupState()
 
   weak var boundEngine: EngineObject?
   private var boundOwnerId: ObjectIdentifier?
   private var appInBackground = false
   private var wantsScreenOn = false
+  private(set) var isExternallyHosted = false
   private(set) var currentVideoGravity: AVLayerVideoGravity = .resizeAspect
   private var currentResizeMode: SurfaceResizeMode = .fit
   private(set) var currentOsdVisible = true
@@ -107,6 +108,9 @@ final class AetherSurfaceView: ExpoView {
         IdleTimer.setHeld(false, ownerId: ownerId)
       }
       if let viewId {
+        #if os(iOS)
+        AetherExternalDisplayManager.shared.cleanupDestroyedSurface(playerViewId: viewId)
+        #endif
         engine?.detachDestroyedPlayerViewIfLoaded(viewId: viewId)
       }
     }
@@ -152,6 +156,7 @@ final class AetherSurfaceView: ExpoView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
+    guard !isExternallyHosted else { return }
     #if os(iOS)
     let applySafeAreaOnFit = true
     #else
@@ -179,6 +184,9 @@ final class AetherSurfaceView: ExpoView {
   override func didMoveToWindow() {
     super.didMoveToWindow()
     MainActor.assumeIsolated {
+      #if os(iOS)
+      AetherExternalDisplayManager.shared.surfaceWindowDidChange(self, attached: window != nil)
+      #endif
       refreshIdleTimer()
       notifySurfaceAvailability(isBackground: isDetachingInBackground)
       #if os(iOS)
@@ -215,7 +223,19 @@ final class AetherSurfaceView: ExpoView {
 
   @MainActor
   var isSurfaceAvailable: Bool {
-    window != nil && !isAppInBackground && boundEngine != nil
+    (window != nil || isExternallyHosted) && !isAppInBackground && boundEngine != nil
+  }
+
+  /// Marks whether `playerView`, `subtitleOverlayView`, and `shutterView` are currently hosted on an external `UIWindowScene` (`#258`).
+  @MainActor
+  func setExternallyHosted(_ hosted: Bool) {
+    guard isExternallyHosted != hosted else { return }
+    isExternallyHosted = hosted
+    if !hosted {
+      setNeedsLayout()
+    }
+    refreshIdleTimer()
+    notifySurfaceAvailability(isBackground: isDetachingInBackground)
   }
 
   @MainActor
@@ -226,6 +246,9 @@ final class AetherSurfaceView: ExpoView {
       boundOwnerId = nil
     }
     if let previous = boundEngine {
+      #if os(iOS)
+      AetherExternalDisplayManager.shared.unregisterSurface(self, engine: previous)
+      #endif
       cancelHdmiShutterSettle()
       wantsScreenOn = false
       engineSubtitleStyle = nil
@@ -248,6 +271,9 @@ final class AetherSurfaceView: ExpoView {
       engine.withDriver { driver in
         driver.bindSurface(self)
       }
+      #if os(iOS)
+      AetherExternalDisplayManager.shared.registerSurface(self, engine: engine)
+      #endif
     } else {
       cancelHdmiShutterSettle()
       engineSubtitleStyle = nil
@@ -389,6 +415,9 @@ final class AetherSurfaceView: ExpoView {
   @MainActor
   func detachEngineReference(_ engine: EngineObject?) {
     guard engine == nil || boundEngine === engine else { return }
+    #if os(iOS)
+    AetherExternalDisplayManager.shared.unregisterSurface(self, engine: boundEngine)
+    #endif
     cancelHdmiShutterSettle()
     boundEngine = nil
     engineSubtitleStyle = nil
@@ -443,6 +472,9 @@ final class AetherSurfaceView: ExpoView {
       AetherBackend.onMainActor {
         guard let self else { return }
         self.appInBackground = true
+        #if os(iOS)
+        AetherExternalDisplayManager.shared.handleAppBackgroundChanged(true)
+        #endif
         self.refreshIdleTimer()
         self.notifySurfaceAvailability(isBackground: true)
         #if os(iOS)
@@ -459,6 +491,9 @@ final class AetherSurfaceView: ExpoView {
       AetherBackend.onMainActor {
         guard let self else { return }
         self.appInBackground = false
+        #if os(iOS)
+        AetherExternalDisplayManager.shared.handleAppBackgroundChanged(false)
+        #endif
         self.refreshIdleTimer()
         self.notifySurfaceAvailability(isBackground: false)
         #if os(iOS)
@@ -476,6 +511,9 @@ final class AetherSurfaceView: ExpoView {
         guard let self else { return }
         if self.appInBackground {
           self.appInBackground = false
+          #if os(iOS)
+          AetherExternalDisplayManager.shared.handleAppBackgroundChanged(false)
+          #endif
           self.refreshIdleTimer()
           self.notifySurfaceAvailability(isBackground: false)
         }
@@ -513,7 +551,7 @@ final class AetherSurfaceView: ExpoView {
   @MainActor
   private func refreshIdleTimer() {
     guard let ownerId = boundOwnerId else { return }
-    let shouldHold = boundEngine != nil && wantsScreenOn && window != nil && !isAppInBackground
+    let shouldHold = boundEngine != nil && wantsScreenOn && (window != nil || isExternallyHosted) && !isAppInBackground
     IdleTimer.setHeld(shouldHold, ownerId: ownerId)
   }
 }

@@ -83,6 +83,12 @@ export type {
   VideoHostOpenOptions,
   VideoSurfaceProps,
 } from './ports/video-host';
+export type {
+  DiagnosticsPort,
+  ExternalPlayerPort,
+  ExternalPlayerRequest,
+  ExternalPlayerResult,
+} from './ports/wave-f7b-ports';
 export * from './profiles';
 export * from './reminders';
 export * from './screensaver';

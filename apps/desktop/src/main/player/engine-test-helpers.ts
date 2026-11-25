@@ -38,6 +38,7 @@ export const OBSERVED = [
   'aid',
   'sid',
   'secondary-sid',
+  'program',
   'audio-delay',
   'sub-delay',
   'audio-device',

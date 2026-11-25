@@ -42,7 +42,7 @@ describe('launchArgs', () => {
       '--audio-pitch-correction=yes',
       '--tls-verify=yes',
       '--stream-lavf-o=icy=0,reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5',
-      '--reset-on-next-file=aid,sid,secondary-sid,secondary-sub-pos,vid,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
+      '--reset-on-next-file=aid,sid,secondary-sid,secondary-sub-pos,vid,program,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
       '--network-timeout=10',
       '--curl-enabled=no',
       '--osc=no',

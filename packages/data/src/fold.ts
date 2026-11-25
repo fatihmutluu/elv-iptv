@@ -3,6 +3,10 @@ const CAMEL_LOWER_UPPER_RE = /(\p{Ll})(\p{Lu})/gu;
 const CAMEL_ACRONYM_WORD_RE = /(\p{Lu}+)(\p{Lu}\p{Ll})/gu;
 const LETTER_DIGIT_RE = /(\p{L})(\p{N})/gu;
 const DIGIT_LETTER_RE = /(\p{N})(\p{L})/gu;
+const ASCII_CAMEL_LOWER_UPPER_RE = /([a-z])([A-Z])/g;
+const ASCII_CAMEL_ACRONYM_WORD_RE = /([A-Z]+)([A-Z][a-z])/g;
+const ASCII_LETTER_DIGIT_RE = /([A-Za-z])([0-9])/g;
+const ASCII_DIGIT_LETTER_RE = /([0-9])([A-Za-z])/g;
 
 const ENGLISH_NUMBER_WORDS: Readonly<Record<string, string>> = {
   zero: '0',
@@ -54,12 +58,18 @@ export function foldText(text: string): string {
  * number words (`zero`..`nine`) to digits (`0`..`9`). Pure and idempotent.
  */
 export function foldGuideMatchText(input: string): string {
-  const segmented = input
-    .normalize('NFC')
-    .replace(CAMEL_LOWER_UPPER_RE, '$1 $2')
-    .replace(CAMEL_ACRONYM_WORD_RE, '$1 $2')
-    .replace(LETTER_DIGIT_RE, '$1 $2')
-    .replace(DIGIT_LETTER_RE, '$1 $2');
+  const segmented = isAscii(input)
+    ? input
+        .replace(ASCII_CAMEL_LOWER_UPPER_RE, '$1 $2')
+        .replace(ASCII_CAMEL_ACRONYM_WORD_RE, '$1 $2')
+        .replace(ASCII_LETTER_DIGIT_RE, '$1 $2')
+        .replace(ASCII_DIGIT_LETTER_RE, '$1 $2')
+    : input
+        .normalize('NFC')
+        .replace(CAMEL_LOWER_UPPER_RE, '$1 $2')
+        .replace(CAMEL_ACRONYM_WORD_RE, '$1 $2')
+        .replace(LETTER_DIGIT_RE, '$1 $2')
+        .replace(DIGIT_LETTER_RE, '$1 $2');
   const folded = foldText(segmented);
   if (folded === '') return '';
   return folded

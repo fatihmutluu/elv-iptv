@@ -71,6 +71,7 @@ import { ImportGateScreen } from './gate/import/ImportGateScreen';
 import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
 import { useGateRoute } from './gate/useGateParams';
 import { createMobileLanPairingPort } from './lan-pairing/adapter';
+import { createMobileExternalPlayerPort } from './playback/external-player';
 import { PlayerSurface } from './playback/PlayerSurface';
 import { createPlatformEngine } from './playback/platform-engine';
 import {
@@ -78,6 +79,7 @@ import {
   createDevicePreferencesStore,
   createSecureSecretStore,
 } from './storage';
+import { createMobileDiagnosticsPort } from './storage/diag-log';
 import { createMobileVideoHost } from './thermal-and-pip';
 import { createMobileThermalDevicePort } from './thermal-device-port';
 import { createTvHomeChannelsPort } from './tv-home-channels/adapter';
@@ -107,6 +109,8 @@ function AppRoot() {
   const keymapStore = useMemo(() => createDeviceKeymapStore(), []);
   const lanPairingPort = useMemo(() => createMobileLanPairingPort(), []);
   const tvHomeChannelsPort = useMemo(() => createTvHomeChannelsPort(), []);
+  const externalPlayerPort = useMemo(() => createMobileExternalPlayerPort(), []);
+  const diagnosticsPort = useMemo(() => createMobileDiagnosticsPort(), []);
   const { pendingDeepLink, clearPendingDeepLink } = usePlayDeepLink();
   const uiAdapters = useMemo(() => createMobileTvUiAdapters(), []);
 
@@ -307,6 +311,8 @@ function AppRoot() {
           tvHomeChannels={tvHomeChannelsPort}
           pendingDeepLink={pendingDeepLink}
           onDeepLinkHandled={clearPendingDeepLink}
+          externalPlayer={externalPlayerPort}
+          diagnostics={diagnosticsPort}
           {...(sourceImportHost !== undefined ? { sourceImportHost } : {})}
           externalRefreshToken={refreshToken}
         />

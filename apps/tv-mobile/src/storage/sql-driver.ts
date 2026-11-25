@@ -21,6 +21,7 @@ interface OpConnection {
     bind(params: SqlValue[]): Promise<void>;
     execute(): Promise<OpResult>;
   };
+  getDbPath(location?: string): string;
   interrupt(): void;
   close(): void;
 }
@@ -51,6 +52,14 @@ const CONNECTION_PRAGMAS = [
   'PRAGMA temp_store = MEMORY',
   'PRAGMA foreign_keys = ON',
 ];
+
+const COPY_STAGED_PROGRAMMES_SQL =
+  'INSERT OR REPLACE INTO programmes_next ' +
+  '(source_id, guide_id, start, stop, title, sub_title, description, categories_json, ' +
+  'episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold) ' +
+  'SELECT source_id, guide_id, start, stop, title, sub_title, description, categories_json, ' +
+  'episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold ' +
+  'FROM xmltv_stage.programmes_next';
 
 const OPEN_MAX_ATTEMPTS = 3;
 const OPEN_BACKOFF_MS: readonly number[] = [100, 250];
@@ -224,6 +233,15 @@ export interface OpSqliteDriver extends SqlDriver {
    * `AbortError`. Reader queries are never interrupted. Pass `undefined` to detach.
    */
   setAbortSignal(signal: AbortSignal | undefined): void;
+  /** Returns the resolved on-disk SQLite file path for native off-thread helpers (`#478`). */
+  getDbPath(): string;
+  /**
+   * Attaches a temporary XMLTV stage SQLite file on `op-sqlite`'s own writer connection, copies
+   * its `programmes_next` rows into the main catalog database, and always detaches it (`#478`).
+   * Runs directly on the serialized writer connection (outside a SQLite transaction, since SQLite
+   * forbids `ATTACH DATABASE` inside a transaction).
+   */
+  attachAndCopyProgrammes(stageDbPath: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -352,6 +370,29 @@ export async function createOpSqliteDriver(
       if (next.aborted) onAbort();
       else next.addEventListener('abort', onAbort, { once: true });
     },
+    getDbPath() {
+      return location === undefined ? writer.getDbPath() : writer.getDbPath(location);
+    },
+    attachAndCopyProgrammes: (stageDbPath: string) =>
+      writes(() =>
+        writeGuard(async () => {
+          await writer.execute('ATTACH DATABASE ? AS xmltv_stage', [stageDbPath]);
+          let copyError: unknown;
+          let failed = false;
+          try {
+            await writer.execute(COPY_STAGED_PROGRAMMES_SQL);
+          } catch (error) {
+            failed = true;
+            copyError = error;
+          }
+          try {
+            await writer.execute('DETACH DATABASE xmltv_stage');
+          } catch (detachError) {
+            if (!failed) throw detachError;
+          }
+          if (failed) throw copyError;
+        }),
+      ),
     exec: (sql) => writes(() => writeGuard(() => statements((s) => writer.execute(s), sql))),
     run: (sql, params) =>
       writes(() => writeGuard(async () => changes(await writer.execute(sql, [...(params ?? [])])))),
@@ -369,23 +410,22 @@ export async function createOpSqliteDriver(
       ),
     transaction: <T>(fn: (tx: SqlDriver) => Promise<T>) =>
       writes(async () => {
-        let value: T | undefined;
-        let callbackError: { error: unknown } | undefined;
+        // Use async BEGIN/COMMIT/ROLLBACK on op-sqlite's worker thread instead of `writer.transaction()`,
+        // which calls `executeSync("COMMIT;")` synchronously on the Hermes JS thread and stalls the UI
+        // during large WAL checkpoints (`#478`).
+        await writeGuard(() => writer.execute('BEGIN IMMEDIATE;'));
         try {
-          await writeGuard(() =>
-            writer.transaction(async (tx) => {
-              try {
-                value = await fn(inTransaction(tx));
-              } catch (error) {
-                callbackError = { error };
-                throw error;
-              }
-            }),
-          );
+          const value = await fn(inTransaction(writer));
+          await writeGuard(() => writer.execute('COMMIT;'));
+          return value;
         } catch (error) {
-          throw callbackError ? callbackError.error : error;
+          try {
+            await writer.execute('ROLLBACK;');
+          } catch {
+            // SQLite may already have rolled back automatically on interrupt or constraint failure.
+          }
+          throw error;
         }
-        return value as T;
       }),
     close() {
       if (closePromise !== undefined) return closePromise;

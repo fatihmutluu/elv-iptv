@@ -1,7 +1,8 @@
 name: mpv runtime
 
-# Builds the LGPL mpv runtime for macOS arm64 (no upstream LGPL macOS build exists). The run id and the
-# SHA-256 in the job summary go into apps/desktop/mpv-runtime.lock.json in a normal pull request.
+# Builds the reproducible LGPL mpv runtimes for macOS arm64 and Windows x64 from pinned sources in
+# tools/mpv-runtime/versions.json. The run id and SHA-256 in each job summary go into
+# apps/desktop/mpv-runtime.lock.json in a normal pull request.
 on:
   workflow_dispatch:
   push:
@@ -60,6 +61,82 @@ jobs:
         with:
           name: mpv-runtime-darwin-arm64
           path: ${{ runner.temp }}/mpv-runtime-darwin-arm64.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
+  win32-x64:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      # Build tools only; build-windows.sh keeps pkg-config isolated to its own prefix.
+      - uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-meson
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-nasm
+            mingw-w64-x86_64-python-jinja
+            jq
+            make
+            tar
+            xz
+            bzip2
+            git
+            curl
+            diffutils
+            patch
+            unzip
+      - name: Build FFmpeg, the libraries and mpv
+        shell: msys2 {0}
+        run: |
+          work="$(cygpath -u "$RUNNER_TEMP")/mpv-build"
+          out="$(cygpath -u "$RUNNER_TEMP")/out/win32-x64"
+          bash tools/mpv-runtime/build-windows.sh "$work" "$out"
+      - name: Licence gate
+        shell: bash
+        run: node tools/bin/mpv.ts verify --dir "$RUNNER_TEMP/out/win32-x64"
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rt="$(cygpath -u "$RUNNER_TEMP")"
+          ws="$(cygpath -u "$GITHUB_WORKSPACE")"
+          summary="$(cygpath -u "$GITHUB_STEP_SUMMARY")"
+          tarball="$rt/mpv-runtime-win32-x64.tar.gz"
+          cd "$rt/out/win32-x64"
+          tar -czf "$tarball" *.dll include licenses RUNTIME-BUILDINFO.json
+          tar -tvzf "$tarball" | grep -F 'libmpv-2.dll'
+          tar -tvzf "$tarball" | grep -F 'include/mpv/client.h'
+          tar -tvzf "$tarball" | grep -F 'RUNTIME-BUILDINFO.json'
+          sha="$(sha256sum "$tarball" | awk '{print $1}')"
+          version="$(jq -r .mpv.version "$ws/tools/mpv-runtime/versions.json" | tr -d '\r')"
+          {
+            echo "### win32-x64 lock entry"
+            echo
+            echo "Run ${GITHUB_RUN_ID}, artifact \`mpv-runtime-win32-x64\`, SHA-256 \`${sha}\`."
+            echo
+            echo '```json'
+            jq -n --arg mpv "$version" --arg repo "$GITHUB_REPOSITORY" --argjson run "$GITHUB_RUN_ID" --arg sha "$sha" \
+              '{"win32-x64": {kind: "workflow-artifact", mpv: $mpv, repo: $repo, runId: $run,
+                artifact: "mpv-runtime-win32-x64", file: "mpv-runtime-win32-x64.tar.gz", sha256: $sha}}' | tr -d '\r'
+            echo '```'
+          } >> "$summary"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mpv-runtime-win32-x64
+          path: ${{ runner.temp }}/mpv-runtime-win32-x64.tar.gz
           if-no-files-found: error
           compression-level: 0
           retention-days: 90

@@ -129,7 +129,7 @@ describe('createOpSqliteDriver', () => {
     expect(writer.log).toEqual([]);
   });
 
-  it('batch inside a transaction packs multi-row INSERTs on tx.execute and uses prepared statements for UPDATE', async () => {
+  it('batch inside a transaction packs multi-row INSERTs on async execute and uses prepared statements for UPDATE (#478)', async () => {
     const { db, writer } = await setup();
     await db.transaction(async (tx) => {
       await tx.batch('INSERT INTO t VALUES (?)', [[1], [2]]);
@@ -139,22 +139,22 @@ describe('createOpSqliteDriver', () => {
       ]);
     });
     expect(writer.log).toEqual([
-      'transaction:begin',
-      'tx.execute:INSERT INTO t VALUES (?), (?)|[1,2]',
+      'execute:BEGIN IMMEDIATE;',
+      'execute:INSERT INTO t VALUES (?), (?)|[1,2]',
       'stmt:UPDATE t SET a = ? WHERE id = ?|[9,1]',
       'stmt:UPDATE t SET a = ? WHERE id = ?|[8,2]',
-      'transaction:end',
+      'execute:COMMIT;',
     ]);
   });
 
-  it('transaction rolls back when the callback throws', async () => {
+  it('transaction rolls back asynchronously when the callback throws (#478)', async () => {
     const { db, writer } = await setup();
     await expect(
       db.transaction(async () => {
         throw new Error('stop');
       }),
     ).rejects.toThrow('stop');
-    expect(writer.log).toContain('transaction:rollback');
+    expect(writer.log).toEqual(['execute:BEGIN IMMEDIATE;', 'execute:ROLLBACK;']);
   });
 
   it('transaction rejects nesting', async () => {
@@ -229,11 +229,11 @@ describe('createOpSqliteDriver', () => {
       .catch((e: Error) => e);
     expect(await outcome).toMatchObject({ name: 'AbortError' });
     expect(writer.log).toEqual([
-      'transaction:begin',
-      'tx.execute:INSERT INTO t VALUES (1)',
-      'tx.execute:INSERT INTO t VALUES (?), (?)|[2,3]',
+      'execute:BEGIN IMMEDIATE;',
+      'execute:INSERT INTO t VALUES (1)',
+      'execute:INSERT INTO t VALUES (?), (?)|[2,3]',
       'interrupt',
-      'transaction:rollback',
+      'execute:ROLLBACK;',
     ]);
   });
 
@@ -415,5 +415,62 @@ describe('createOpSqliteDriver', () => {
     expect(exhaustSleeps).toEqual([100, 250]);
     expect(fExhaust.conns).toHaveLength(6);
     for (const c of fExhaust.conns) expect(c.log).toContain('close');
+  });
+
+  it('exposes getDbPath for default and custom locations without passing undefined (#478)', async () => {
+    const { db } = await setup();
+    expect(db.getDbPath()).toBe('/default/databases/catalog.db');
+
+    const f2 = createFakeOpSqlite();
+    fake.current = f2;
+    const appleDb = await createOpSqliteDriver('catalog.db', '/app/Library/Caches');
+    expect(appleDb.getDbPath()).toBe('/app/Library/Caches/catalog.db');
+  });
+
+  it('serializes attachAndCopyProgrammes through the writer queue and always detaches on failure (#478)', async () => {
+    const { db, writer } = await setup();
+    const stagePath = '/default/databases/catalog.db.xmltv-stage-job_1.db';
+    const gate = writer.hold();
+
+    const first = db.run('UPDATE a SET x = 1');
+    const copy = db.attachAndCopyProgrammes(stagePath);
+    const second = db.run('UPDATE b SET x = 1');
+
+    await Promise.resolve();
+    expect(writer.log).toEqual(['execute:UPDATE a SET x = 1']);
+    gate.release();
+
+    await Promise.all([first, copy, second]);
+    expect(writer.log).toEqual([
+      'execute:UPDATE a SET x = 1',
+      `execute:ATTACH DATABASE ? AS xmltv_stage|${JSON.stringify([stagePath])}`,
+      'execute:INSERT OR REPLACE INTO programmes_next (source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold) SELECT source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold FROM xmltv_stage.programmes_next',
+      'execute:DETACH DATABASE xmltv_stage',
+      'execute:UPDATE b SET x = 1',
+    ]);
+
+    // Failure during INSERT still executes DETACH and keeps the writer queue healthy
+    writer.log.length = 0;
+    const origExecute = writer.execute;
+    writer.execute = async (sql, params) => {
+      if (sql.startsWith('INSERT OR REPLACE INTO programmes_next')) {
+        writer.log.push(`execute:${sql}`);
+        throw new Error('disk full');
+      }
+      return origExecute(sql, params);
+    };
+    await expect(db.attachAndCopyProgrammes(stagePath)).rejects.toMatchObject({
+      category: 'storage',
+      code: 'sql-failed',
+      detail: 'disk full',
+    });
+    expect(writer.log).toEqual([
+      `execute:ATTACH DATABASE ? AS xmltv_stage|${JSON.stringify([stagePath])}`,
+      'execute:INSERT OR REPLACE INTO programmes_next (source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold) SELECT source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold FROM xmltv_stage.programmes_next',
+      'execute:DETACH DATABASE xmltv_stage',
+    ]);
+
+    writer.execute = origExecute;
+    expect(await db.run('UPDATE c SET x = 1')).toEqual({ changes: 1 });
   });
 });

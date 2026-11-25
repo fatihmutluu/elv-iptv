@@ -1,6 +1,7 @@
 import { createCatalogService, openCatalog } from '@elv/data';
 import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
+import { createDeviceNativeGuideStager } from '../../catalog/native-guide-stager';
 import {
   createDeviceHttpClient,
   createMacrotaskScheduler,
@@ -30,12 +31,14 @@ async function run(params: ImportParams): Promise<ImportResult> {
       maxStallMs: 0,
     };
   }
+  const nativeGuideStager = createDeviceNativeGuideStager(db);
   const catalog = createCatalogService({
     db,
     secrets: createSecureSecretStore(),
     scheduler: createMacrotaskScheduler(),
     http: createDeviceHttpClient(),
     clock: Date.now,
+    ...(nativeGuideStager === undefined ? {} : { nativeGuideStager }),
   });
   try {
     return await runImport(catalog, params, () => startStallMeter());

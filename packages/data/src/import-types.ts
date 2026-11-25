@@ -1,6 +1,60 @@
 import type { Decompressor, HttpClient, Scheduler, SecretStore, SqlDriver } from '@elv/domain';
 import type { LocalPlaylistStore } from './sources';
 
+/** Channel metadata returned by a native off-thread XMLTV stager (`#478`). */
+export interface NativeGuideChannel {
+  readonly id: string;
+  readonly names: readonly string[];
+  readonly icon?: string;
+  readonly lcn?: string;
+}
+
+/** Request forwarded to a platform {@link NativeGuideStager} (`#478`). */
+export interface NativeGuideStageRequest {
+  readonly jobId: string;
+  readonly url: string;
+  readonly sourceId: string;
+  readonly runId: number;
+  readonly fromMs: number;
+  readonly toMs: number;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly ifNoneMatch?: string;
+  readonly ifModifiedSince?: string;
+  readonly defaultTimeZone?: string;
+  readonly timeoutMs?: number;
+}
+
+/** Result returned by a platform {@link NativeGuideStager}; never contains URLs or response bodies. */
+export type NativeGuideStageResult =
+  | {
+      readonly kind: 'not-modified';
+      readonly etag?: string;
+      readonly lastModified?: string;
+    }
+  | {
+      readonly kind: 'http-error';
+      readonly status: number;
+      readonly retryable: boolean;
+      readonly code: string;
+    }
+  | {
+      readonly kind: 'staged';
+      readonly channels: readonly NativeGuideChannel[];
+      readonly stagedCounts: Readonly<Record<string, number>>;
+      readonly seenProgrammes: number;
+      readonly stagedProgrammes: number;
+      readonly warnings: number;
+      readonly warningCodes: readonly string[];
+      readonly etag?: string;
+      readonly lastModified?: string;
+    };
+
+/** Optional platform port that streams HTTP(S) XMLTV directly into `programmes_next` off the JS thread (`#478`). */
+export interface NativeGuideStager {
+  stage(request: NativeGuideStageRequest): Promise<NativeGuideStageResult>;
+  cancel?(jobId: string): void;
+}
+
 /** Collaborators of an import; every platform capability is injected so the engine stays pure. */
 export interface ImportDeps {
   db: SqlDriver;
@@ -10,6 +64,8 @@ export interface ImportDeps {
   /** Epoch milliseconds. */
   clock: () => number;
   decompressor?: Decompressor;
+  /** Optional native off-thread XMLTV stager used on mobile/TV for HTTP(S) guides (`#478`). */
+  nativeGuideStager?: NativeGuideStager;
   /** Optional sandboxed local M3U byte store for local file imports (`#51`). */
   localPlaylistStore?: LocalPlaylistStore;
   /**

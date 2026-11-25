@@ -53,6 +53,21 @@ extension AetherBackend {
     syncAirPlayState()
   }
 
+  /// True whenever playback is outputting to either AirPlay (`AVPlayer.isExternalPlaybackActive`) or a dedicated external `UIWindowScene` (`#258`).
+  var effectiveExternalPlaybackActive: Bool {
+    airPlayTracker.isExternalPlaybackActive || isExternalDisplaySceneActive
+  }
+
+  /// Updates dedicated iOS/iPadOS external `UIWindowScene` output status without disturbing AirPlay state (`#258`).
+  func setExternalDisplaySceneActive(_ active: Bool) {
+    guard isExternalDisplaySceneActive != active else { return }
+    isExternalDisplaySceneActive = active
+    let serial = engineLoadSerial > 0 ? engineLoadSerial : activeLoadSerial
+    if serial > 0 {
+      onObservation?(.externalPlayback(effectiveExternalPlaybackActive), serial)
+    }
+  }
+
   func handleExternalPlaybackChange(_ active: Bool) {
     airPlayTracker.updateExternalPlayback(active: active)
     if active {
@@ -64,7 +79,7 @@ extension AetherBackend {
     syncAirPlayState()
     let serial = engineLoadSerial > 0 ? engineLoadSerial : activeLoadSerial
     if serial > 0 {
-      onObservation?(.externalPlayback(active), serial)
+      onObservation?(.externalPlayback(effectiveExternalPlaybackActive), serial)
     }
   }
 }

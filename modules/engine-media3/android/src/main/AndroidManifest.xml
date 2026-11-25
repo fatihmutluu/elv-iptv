@@ -6,6 +6,13 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.VIEW" />
+      <data android:mimeType="video/*" />
+    </intent>
+  </queries>
+
   <application>
     <service
       android:name="io.github.fatihmutluu.elv.media3.ElvPlaybackSessionService"

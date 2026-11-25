@@ -1,9 +1,13 @@
 import * as nodeFs from 'node:fs';
+import { open as openFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { MAX_CRASH_LOG_LINES, redactText } from '@elv/domain';
 import { redactUrls } from './player/mpv/redact.ts';
 
 /** Default total on-disk cap across active (`elv-desktop.log`) and single backup (`elv-desktop.log.1`). */
 export const DEFAULT_MAX_TOTAL_BYTES = 10 * 1024 * 1024;
+
+const MAX_TAIL_READ_BYTES = 1024 * 1024;
 
 /** Minimal synchronous filesystem surface used by {@link createDesktopLogger}. */
 export interface DesktopLogFs {
@@ -13,6 +17,7 @@ export interface DesktopLogFs {
   writeFileSync(path: string, data: string, encoding: 'utf8'): void;
   renameSync(oldPath: string, newPath: string): void;
   rmSync(path: string, options?: { force?: boolean }): void;
+  readFileSync?(path: string, encoding: 'utf8'): string;
 }
 
 /** Configuration for {@link createDesktopLogger}. */
@@ -29,9 +34,11 @@ export interface DesktopLoggerOptions {
   writeStderr?: (chunk: string) => void;
 }
 
-/** Bounded, URL-redacting rolling diagnostic logger for the Electron main process (`#269`). */
+/** Bounded, URL-redacting rolling diagnostic logger for the Electron main process (`#269`, `#226`). */
 export interface DesktopLogger {
   log(line: string): void;
+  /** Reads up to `Math.min(maxLines, 250)` recent lines across active & `.1` backup, double-redacted via `redactText`. */
+  readRedactedTail(maxLines?: number): Promise<string[]>;
   readonly logPath: string;
   readonly backupPath: string;
 }
@@ -180,5 +187,54 @@ export function createDesktopLogger(options: DesktopLoggerOptions): DesktopLogge
     }
   };
 
-  return { log, logPath, backupPath };
+  const readTailLinesFromFile = async (filePath: string): Promise<string[]> => {
+    try {
+      let text: string;
+      if (options.fs !== undefined) {
+        if (typeof options.fs.readFileSync !== 'function') return [];
+        text = options.fs.readFileSync(filePath, 'utf8');
+      } else {
+        const handle = await openFile(filePath, 'r');
+        try {
+          const info = await handle.stat();
+          const size = Math.max(0, info.size);
+          if (size === 0) return [];
+          const readBytes = Math.min(size, MAX_TAIL_READ_BYTES);
+          const offset = size - readBytes;
+          const buf = Buffer.allocUnsafe(readBytes);
+          const { bytesRead } = await handle.read(buf, 0, readBytes, offset);
+          text = buf.subarray(0, bytesRead).toString('utf8');
+          if (offset > 0) {
+            const firstNewline = text.indexOf('\n');
+            text = firstNewline >= 0 ? text.slice(firstNewline + 1) : '';
+          }
+        } finally {
+          await handle.close();
+        }
+      }
+      return text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+    } catch {
+      return [];
+    }
+  };
+
+  const readRedactedTail = async (maxLines = MAX_CRASH_LOG_LINES): Promise<string[]> => {
+    if (!Number.isFinite(maxLines) || maxLines <= 0) return [];
+    const cap = Math.min(MAX_CRASH_LOG_LINES, Math.floor(maxLines));
+    const activeLines = await readTailLinesFromFile(logPath);
+    let combined = activeLines.slice(-cap);
+    if (combined.length < cap) {
+      const needed = cap - combined.length;
+      const backupLines = await readTailLinesFromFile(backupPath);
+      if (backupLines.length > 0) {
+        combined = [...backupLines.slice(-needed), ...combined];
+      }
+    }
+    return combined.slice(-cap).map((line) => redactText(redactText(line)));
+  };
+
+  return { log, readRedactedTail, logPath, backupPath };
 }

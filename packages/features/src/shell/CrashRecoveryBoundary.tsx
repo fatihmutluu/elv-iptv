@@ -21,7 +21,9 @@ import {
   useState,
 } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import type { DiagnosticsPort } from '../ports/wave-f7b-ports';
 import { useRouteActive } from '../shared';
+import { CrashReportPreviewModal } from './CrashReportPreviewModal';
 
 const FALLBACK_ERROR_CODE = 'ERR_UNEXPECTED';
 const SAFE_CODE_TOKEN = /^[A-Za-z0-9_.-]{1,48}$/;
@@ -75,11 +77,20 @@ export interface CrashRecoveryBoundaryProps {
   readonly remountKey?: string | number;
   /** Root container test identifier (defaults to `'crash-recovery-boundary'`). */
   readonly testID?: string;
+  /** Strict opt-in flag enabling the local redacted diagnostic report button (`#226`). */
+  readonly crashReportsOptIn?: boolean;
+  /** Whether recent redacted logs are included by default in the diagnostic preview (`#226`). */
+  readonly crashReportsIncludeLogs?: boolean;
+  /** Platform diagnostics port for reading redacted log tail and copying/exporting reports (`#226`). */
+  readonly diagnostics?: DiagnosticsPort;
+  /** Invoked when the user toggles log inclusion inside the diagnostic preview modal (`#226`). */
+  readonly onToggleIncludeLogs?: (next: boolean) => void;
   readonly children: ReactNode;
 }
 
 interface CrashRecoveryBoundaryState {
   readonly error: Error | null;
+  readonly componentStack: string | undefined;
   readonly prevResetKey: string | number | undefined;
 }
 
@@ -164,12 +175,28 @@ function RecoveryActionButton(props: {
 
 function CrashRecoveryFallback(props: {
   error: Error;
+  componentStack?: string;
   onReload: () => void;
   onClearUiCache: () => void;
   onSwitchSource: () => void;
+  crashReportsOptIn?: boolean;
+  crashReportsIncludeLogs?: boolean;
+  diagnostics?: DiagnosticsPort;
+  onToggleIncludeLogs?: (next: boolean) => void;
   testID: string;
 }): ReactElement {
-  const { error, onReload, onClearUiCache, onSwitchSource, testID } = props;
+  const {
+    error,
+    componentStack,
+    onReload,
+    onClearUiCache,
+    onSwitchSource,
+    crashReportsOptIn = false,
+    crashReportsIncludeLogs = false,
+    diagnostics,
+    onToggleIncludeLogs,
+    testID,
+  } = props;
   const theme = useTheme();
   const i18n = useI18n();
   const formFactor = useFormFactor();
@@ -179,22 +206,45 @@ function CrashRecoveryFallback(props: {
   const isPortrait = viewport.orientation === 'portrait' && !isTv;
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [keyboardActive, setKeyboardActive] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
 
+  const canShowDiagnostics = crashReportsOptIn === true && diagnostics !== undefined;
   const handlers = { reload: onReload, clearCache: onClearUiCache, switchSource: onSwitchSource };
-  const actions = ACTION_SPECS.map(([id, btnId, key, primary]) => ({
+  const actions: Array<{
+    readonly id: string;
+    readonly testID: string;
+    readonly label: string;
+    readonly primary: boolean;
+    readonly onActivate: () => void;
+  }> = ACTION_SPECS.map(([id, btnId, key, primary]) => ({
     id,
     testID: btnId,
     label: i18n.t(key),
     primary,
     onActivate: handlers[id],
   }));
+  if (canShowDiagnostics) {
+    actions.push({
+      id: 'diagnostics',
+      testID: 'crash-diagnostics',
+      label: i18n.t('crash.diagnosticsAction'),
+      primary: false,
+      onActivate: () => setReportModalOpen(true),
+    });
+  }
 
-  const navRef = useRef({ focusedIndex, actions, isTv });
-  navRef.current = { focusedIndex, actions, isTv };
+  const navRef = useRef({ focusedIndex, actions, isTv, reportModalOpen });
+  navRef.current = { focusedIndex, actions, isTv, reportModalOpen };
 
   const handleKeyEvent = useCallback((event: KeyEvent) => {
+    const {
+      actions: list,
+      focusedIndex: idx,
+      isTv: tv,
+      reportModalOpen: modalOpen,
+    } = navRef.current;
+    if (modalOpen) return;
     if (event.kind !== 'press' && event.kind !== 'repeat') return;
-    const { actions: list, focusedIndex: idx, isTv: tv } = navRef.current;
     if (
       event.key === 'right' ||
       event.key === 'down' ||
@@ -231,7 +281,10 @@ function CrashRecoveryFallback(props: {
       ]}
     >
       {isTv ? (
-        <TvFocusAnchor testID="crash-tv-focus-anchor" hasTVPreferredFocus={routeActive} />
+        <TvFocusAnchor
+          testID="crash-tv-focus-anchor"
+          hasTVPreferredFocus={routeActive && !reportModalOpen}
+        />
       ) : null}
       <View
         {...tvContainerProps}
@@ -311,6 +364,19 @@ function CrashRecoveryFallback(props: {
           ))}
         </View>
       </View>
+      {canShowDiagnostics && diagnostics !== undefined ? (
+        <CrashReportPreviewModal
+          visible={reportModalOpen}
+          diagnostics={diagnostics}
+          errorCode={redactedCode}
+          {...(error.message ? { errorMessage: error.message } : {})}
+          {...(error.stack ? { stack: error.stack } : {})}
+          {...(componentStack ? { componentStack } : {})}
+          includeLogs={crashReportsIncludeLogs}
+          {...(onToggleIncludeLogs !== undefined ? { onToggleIncludeLogs } : {})}
+          onClose={() => setReportModalOpen(false)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -326,7 +392,11 @@ export class CrashRecoveryBoundary extends Component<
   CrashRecoveryBoundaryProps,
   CrashRecoveryBoundaryState
 > {
-  override state: CrashRecoveryBoundaryState = { error: null, prevResetKey: this.props.resetKey };
+  override state: CrashRecoveryBoundaryState = {
+    error: null,
+    componentStack: undefined,
+    prevResetKey: this.props.resetKey,
+  };
 
   static getDerivedStateFromError(error: Error): Partial<CrashRecoveryBoundaryState> {
     return { error };
@@ -337,41 +407,57 @@ export class CrashRecoveryBoundary extends Component<
     state: CrashRecoveryBoundaryState,
   ): Partial<CrashRecoveryBoundaryState> | null {
     return props.resetKey !== state.prevResetKey
-      ? { error: null, prevResetKey: props.resetKey }
+      ? { error: null, componentStack: undefined, prevResetKey: props.resetKey }
       : null;
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
+    if (info.componentStack) {
+      this.setState({ componentStack: info.componentStack });
+    }
     this.props.onError?.(error, info);
   }
 
   private readonly handleReload = (): void => {
-    this.setState({ error: null });
+    this.setState({ error: null, componentStack: undefined });
     this.props.onReload?.();
   };
 
   private readonly handleClearUiCache = (): void => {
     this.props.onClearUiCache?.();
-    this.setState({ error: null });
+    this.setState({ error: null, componentStack: undefined });
   };
 
   private readonly handleSwitchSource = (): void => {
     this.props.onSwitchSource?.();
-    this.setState({ error: null });
+    this.setState({ error: null, componentStack: undefined });
   };
 
   override render(): ReactNode {
-    const { error } = this.state;
-    const { children, remountKey, testID } = this.props;
+    const { error, componentStack } = this.state;
+    const {
+      children,
+      remountKey,
+      testID,
+      crashReportsOptIn,
+      crashReportsIncludeLogs,
+      diagnostics,
+      onToggleIncludeLogs,
+    } = this.props;
     if (error === null) {
       return remountKey !== undefined ? <Fragment key={remountKey}>{children}</Fragment> : children;
     }
     return (
       <CrashRecoveryFallback
         error={error}
+        {...(componentStack !== undefined ? { componentStack } : {})}
         onReload={this.handleReload}
         onClearUiCache={this.handleClearUiCache}
         onSwitchSource={this.handleSwitchSource}
+        {...(crashReportsOptIn !== undefined ? { crashReportsOptIn } : {})}
+        {...(crashReportsIncludeLogs !== undefined ? { crashReportsIncludeLogs } : {})}
+        {...(diagnostics !== undefined ? { diagnostics } : {})}
+        {...(onToggleIncludeLogs !== undefined ? { onToggleIncludeLogs } : {})}
         testID={testID ?? 'crash-recovery-boundary'}
       />
     );

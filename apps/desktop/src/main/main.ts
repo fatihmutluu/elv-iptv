@@ -45,6 +45,7 @@ import {
   createSafeStorageCipher,
 } from './catalog/secret-store.ts';
 import { parseDevServerUrl } from './dev-server.ts';
+import { registerDiagnosticsIpc } from './diagnostics-ipc.ts';
 import {
   createVideoSampler,
   GATE_PLAYING_LINE,
@@ -522,6 +523,7 @@ hasLock = startSingleInstance(app, {
 let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
 let artworkCache: DesktopArtworkCache | undefined;
 let lanPairingIpc: LanPairingIpcHandle | undefined;
+let disposeDiagnosticsIpc: (() => void) | undefined;
 
 registerCatalogQuitHandler({
   app,
@@ -614,6 +616,29 @@ if (hasLock) {
             }),
     });
     lanPairingIpc = registerLanPairingIpc({ ipcMain });
+    disposeDiagnosticsIpc = registerDiagnosticsIpc<BrowserWindow>({
+      ipcMain,
+      getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      readLogTail: (maxLines) => logger.readRedactedTail(maxLines),
+      showSaveDialog: (win, options) =>
+        win && !win.isDestroyed()
+          ? dialog.showSaveDialog(win, {
+              defaultPath: options.defaultPath,
+              filters: options.filters.map((f) => ({
+                name: f.name,
+                extensions: [...f.extensions],
+              })),
+            })
+          : dialog.showSaveDialog({
+              defaultPath: options.defaultPath,
+              filters: options.filters.map((f) => ({
+                name: f.name,
+                extensions: [...f.extensions],
+              })),
+            }),
+      writeClipboardText: (text) => clipboard.writeText(text),
+      log: logger.log,
+    });
     serveRenderer();
     catalogCoordinator = startCatalog();
     await startPlayer();
@@ -643,6 +668,8 @@ app.on('will-quit', () => {
   popoutController = undefined;
   void lanPairingIpc?.dispose();
   lanPairingIpc = undefined;
+  disposeDiagnosticsIpc?.();
+  disposeDiagnosticsIpc = undefined;
   mediaBridge?.dispose();
   mediaBridge = undefined;
   for (const ctl of [...windowBoundsControllers]) ctl.dispose();

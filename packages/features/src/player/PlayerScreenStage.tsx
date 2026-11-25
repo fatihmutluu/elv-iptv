@@ -24,6 +24,7 @@ import type { PlaybackGuard } from '../ports/playback-guard';
 import type { VideoHost, VideoResizeMode } from '../ports/video-host';
 import { useProfile } from '../shared';
 import type { PlayerOsdProps } from './DesktopCinemaBar';
+import { ExternalDisplayCard } from './ExternalDisplayCard';
 import {
   ExternalSubtitleUrlOverlay,
   type ExternalSubtitleUrlOverlayProps,
@@ -150,6 +151,7 @@ export interface PlayerScreenStageProps {
   readonly isDesktop: boolean;
   readonly inPip: boolean;
   readonly isMini?: boolean;
+  readonly externalPlaybackActive?: boolean;
   readonly isVod: boolean;
   readonly useDockedDesktopLayout: boolean;
   readonly hideDesktopCursor: boolean;
@@ -304,6 +306,10 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
           />
         ) : null}
       </View>
+
+      {!suppressChrome && p.externalPlaybackActive === true ? (
+        <ExternalDisplayCard i18n={p.i18n} />
+      ) : null}
 
       {!suppressChrome && !p.isTv && !p.isDesktop && p.brightness < 1 ? (
         <View

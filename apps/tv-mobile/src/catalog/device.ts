@@ -19,6 +19,7 @@ import {
   databaseLocation,
 } from '../storage';
 import { createMobileLocalPlaylistStore } from './local-playlist-store';
+import { createDeviceNativeGuideStager } from './native-guide-stager';
 
 /**
  * File name of the catalog database: in `Library/Caches` on Apple platforms (tvOS hardware gives apps only purgeable
@@ -94,6 +95,7 @@ async function open(): Promise<CatalogService> {
     const localPlaylistStore = createMobileLocalPlaylistStore(() =>
       createOpSqliteDriver('local-playlists.db', databaseLocation(Platform.OS)),
     );
+    const nativeGuideStager = createDeviceNativeGuideStager(db);
     return createCatalogService({
       db,
       secrets: createSecureSecretStore(),
@@ -101,6 +103,7 @@ async function open(): Promise<CatalogService> {
       http: createDeviceHttpClient(),
       clock: Date.now,
       localPlaylistStore,
+      ...(nativeGuideStager === undefined ? {} : { nativeGuideStager }),
       ...(manifest === undefined ? {} : { manifest }),
       ...(userData === undefined ? {} : { userData }),
     });

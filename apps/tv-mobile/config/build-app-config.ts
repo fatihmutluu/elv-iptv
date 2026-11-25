@@ -2,6 +2,7 @@ import type { ExpoConfig } from 'expo/config';
 import { withAccessibilityFonts } from './with-accessibility-fonts.ts';
 import { withAetherFrameworks } from './with-aether-frameworks.ts';
 import { withAndroidDisplay } from './with-android-display.ts';
+import { withIosExternalDisplay } from './with-ios-external-display.ts';
 
 /** The build environment (`process.env` when Expo loads `app.config.ts`). */
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -40,6 +41,13 @@ const BLOCKED_ANDROID_PERMISSIONS = [
   'android.permission.WRITE_EXTERNAL_STORAGE',
 ];
 const FIRE_OS_VOICE_PERMISSION = 'com.amazon.permission.media.session.voicecommandcontrol';
+const IOS_EXTERNAL_PLAYER_QUERY_SCHEMES = [
+  'vlc-x-callback',
+  'outplayer',
+  'nplayer-http',
+  'nplayer-https',
+  'infuse',
+] as const;
 
 function parseStore(value: string | undefined): Store {
   if (value === undefined || value === '') return 'direct';
@@ -149,6 +157,9 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
   plugins.push([withAndroidDisplay, { isTv: tv }] as unknown as NonNullable<
     ExpoConfig['plugins']
   >[number]);
+  plugins.push([withIosExternalDisplay, { isTv: tv }] as unknown as NonNullable<
+    ExpoConfig['plugins']
+  >[number]);
 
   return {
     name: development ? 'ELV IPTV Dev' : 'ELV IPTV',
@@ -175,7 +186,12 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
         NSBonjourServices: ['_airplay._tcp'],
         NSLocalNetworkUsageDescription:
           'ELV IPTV discovers AirPlay receivers on your local network to match supported audio formats.',
-        ...(!tv ? { UIBackgroundModes: ['audio'] } : {}),
+        ...(!tv
+          ? {
+              UIBackgroundModes: ['audio'],
+              LSApplicationQueriesSchemes: [...IOS_EXTERNAL_PLAYER_QUERY_SCHEMES],
+            }
+          : {}),
         // Users bring plain-HTTP providers. Never add NSAllowsLocalNetworking here: when both keys are
         // present Apple ignores NSAllowsArbitraryLoads, so plain HTTP is blocked again.
         NSAppTransportSecurity: { NSAllowsArbitraryLoads: true },

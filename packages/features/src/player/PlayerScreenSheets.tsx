@@ -136,6 +136,7 @@ export function buildPlayerOverlayNodes(p: BuildPlayerOverlayNodesInput): {
         isTv={p.isTv}
         formFactor={p.formFactor}
         i18n={p.i18n}
+        onSelectProgram={controls.selectProgram}
         onSelectAudio={controls.selectAudio}
         onSelectSubtitle={controls.selectSubtitle}
         {...p.subtitlesTrackPickerProps}

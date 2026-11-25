@@ -25,6 +25,7 @@
     "@elv/sources": "workspace:*",
     "@elv/tv-home-channels": "workspace:*",
     "@elv/ui-kit": "workspace:*",
+    "@elv/xmltv-native": "workspace:*",
     "@op-engineering/op-sqlite": "19.0.5",
     "@react-native-tvos/config-tv": "0.1.7",
     "expo": "~58.0.25",

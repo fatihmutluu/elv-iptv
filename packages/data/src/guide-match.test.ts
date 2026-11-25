@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildChannelIndex,
+  buildChannelIndexAsync,
   matchGuideChannel,
   normalizeGuideName,
   resolveMappings,
@@ -568,5 +569,33 @@ describe('CamelCase and English number-word EPG matching (#194)', () => {
       byId: false,
       tier: 'none',
     });
+  });
+
+  it('buildChannelIndexAsync yields between chunks and matches sync buildChannelIndex (#478)', async () => {
+    const sample = [
+      { key: 'c1', guide_id: 'g1', name: 'NewsOne 1080p', name_fold: 'newsone 1080p', num: 1 },
+      {
+        key: 'c2',
+        guide_id: null,
+        name: 'SportsTV2 [HD] (24/7)',
+        name_fold: 'sportstv2 hd 24 7',
+        num: 2,
+      },
+      { key: 'c3', guide_id: 'g3@East', name: 'ÇağrıTV3', name_fold: 'cagritv3', num: 3 },
+      { key: 'c4', guide_id: 'g4', name: 'CinemaFour', name_fold: 'cinemafour', num: 4 },
+      { key: 'c5', guide_id: 'g5', name: 'DocFive', name_fold: 'docfive', num: 5 },
+    ];
+    let yields = 0;
+    const asyncIdx = await buildChannelIndexAsync(
+      sample,
+      {
+        yieldNow: async () => {
+          yields += 1;
+        },
+      },
+      2,
+    );
+    expect(yields).toBe(2);
+    expect(asyncIdx).toEqual(buildChannelIndex(sample));
   });
 });

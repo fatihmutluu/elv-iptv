@@ -59,7 +59,10 @@ export type AppearanceFocusId =
   | 'artwork-cache-128'
   | 'artwork-cache-256'
   | 'artwork-cache-clear'
-  | 'reset-preferences';
+  | 'reset-preferences'
+  | 'toggle-crash-reports-opt-in'
+  | 'toggle-crash-reports-include-logs'
+  | 'preview-diagnostic-report';
 
 /** Focusable control identifiers inside the Playback settings panel. */
 export type PlaybackFocusId =
@@ -130,7 +133,10 @@ export type PlaybackFocusId =
   | 'toggle-auto-play-next'
   | 'toggle-skip-back-subtitles'
   | 'toggle-group-vod-versions'
-  | 'audio-device-auto';
+  | 'audio-device-auto'
+  | 'external-player-off'
+  | 'external-player-ask'
+  | 'external-player-always';
 
 /** Focusable control identifiers inside the Live TV & Guide settings panel. */
 export type LiveTvFocusId =
@@ -189,6 +195,9 @@ const APPEARANCE_ROWS_TAIL: readonly (readonly AppearanceFocusId[])[] = [
   ['artwork-cache-64', 'artwork-cache-128', 'artwork-cache-256'],
   ['artwork-cache-clear'],
   ['reset-preferences'],
+  ['toggle-crash-reports-opt-in'],
+  ['toggle-crash-reports-include-logs'],
+  ['preview-diagnostic-report'],
 ];
 
 const APPEARANCE_ROWS_DEFAULT: readonly (readonly AppearanceFocusId[])[] = [
@@ -268,24 +277,36 @@ const PLAYBACK_ROWS_TAIL_AFTER_DRC: readonly (readonly PlaybackFocusId[])[] = [
   ['audio-device-auto'],
 ];
 
+const PLAYBACK_EXTERNAL_PLAYER_ROW: readonly PlaybackFocusId[] = [
+  'external-player-off',
+  'external-player-ask',
+  'external-player-always',
+];
+
 const buildPlaybackRows = (
   showAndroidDecoder: boolean,
   showNightModeDrc: boolean,
+  showExternalPlayer: boolean,
 ): readonly (readonly PlaybackFocusId[])[] => [
   ...PLAYBACK_ROWS_HEAD,
   ...(showAndroidDecoder ? [PLAYBACK_DECODER_ROW] : []),
   ...PLAYBACK_ROWS_TAIL_BEFORE_DRC,
   ...(showNightModeDrc ? [PLAYBACK_NIGHT_DRC_ROW] : []),
   ...PLAYBACK_ROWS_TAIL_AFTER_DRC,
+  ...(showExternalPlayer ? [PLAYBACK_EXTERNAL_PLAYER_ROW] : []),
 ];
 
-const PLAYBACK_ROWS_DEFAULT = buildPlaybackRows(false, false);
+const PLAYBACK_ROWS_DEFAULT = buildPlaybackRows(false, false, false);
 
 const PLAYBACK_ROWS_CACHE: Readonly<Record<string, readonly (readonly PlaybackFocusId[])[]>> = {
-  '0:0': PLAYBACK_ROWS_DEFAULT,
-  '0:1': buildPlaybackRows(false, true),
-  '1:0': buildPlaybackRows(true, false),
-  '1:1': buildPlaybackRows(true, true),
+  '0:0:0': PLAYBACK_ROWS_DEFAULT,
+  '0:0:1': buildPlaybackRows(false, false, true),
+  '0:1:0': buildPlaybackRows(false, true, false),
+  '0:1:1': buildPlaybackRows(false, true, true),
+  '1:0:0': buildPlaybackRows(true, false, false),
+  '1:0:1': buildPlaybackRows(true, false, true),
+  '1:1:0': buildPlaybackRows(true, true, false),
+  '1:1:1': buildPlaybackRows(true, true, true),
 };
 
 const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
@@ -320,9 +341,10 @@ const PREFERENCE_SECTIONS: readonly PreferenceSettingsSection[] = [
 function getSectionRows(
   showAndroidDecoder: boolean,
   showNightModeDrc: boolean,
+  showExternalPlayer: boolean,
   includeTvDisplayRows: boolean,
 ): Readonly<Record<PreferenceSettingsSection, readonly (readonly string[])[]>> {
-  const playbackKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}`;
+  const playbackKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}`;
   return {
     appearance: includeTvDisplayRows ? APPEARANCE_ROWS_TV : APPEARANCE_ROWS_DEFAULT,
     playback: PLAYBACK_ROWS_CACHE[playbackKey] ?? PLAYBACK_ROWS_DEFAULT,
@@ -342,10 +364,16 @@ function createSettingsFocusStore(
   initialSection: SettingsSection,
   showAndroidDecoder: boolean,
   showNightModeDrc: boolean,
+  showExternalPlayer: boolean,
   includeTvDisplayRows: boolean,
 ): FocusStore {
   const initialIdx = Math.max(0, SETTINGS_SECTIONS.indexOf(initialSection));
-  const sectionRows = getSectionRows(showAndroidDecoder, showNightModeDrc, includeTvDisplayRows);
+  const sectionRows = getSectionRows(
+    showAndroidDecoder,
+    showNightModeDrc,
+    showExternalPlayer,
+    includeTvDisplayRows,
+  );
   const sectionLists = PREFERENCE_SECTIONS.flatMap((sec) =>
     sectionRows[sec].map((row, i) => ({
       id: rowListId(sec, i),
@@ -399,6 +427,8 @@ export interface UseTvSettingsNavigationOptions {
   readonly showAndroidDecoder?: boolean;
   /** Whether the Android-only Night-Mode DRC row is rendered in Playback settings (`#115`). */
   readonly showNightModeDrc?: boolean;
+  /** Whether the mobile External Player row is rendered in Playback settings (`#406`). */
+  readonly showExternalPlayer?: boolean;
   /** When `true`, keeps the current Settings pane (`'nav'` | `'content'`) while `isActiveScope` temporarily blurs for a root overlay. */
   readonly preservePaneOnBlur?: boolean;
 }
@@ -431,6 +461,7 @@ export function useTvSettingsNavigation({
   onFocusTopNav,
   showAndroidDecoder = Platform.OS === 'android',
   showNightModeDrc = Platform.OS === 'android',
+  showExternalPlayer = Platform.OS === 'android' || (Platform.OS === 'ios' && !Platform.isTV),
   preservePaneOnBlur = false,
 }: UseTvSettingsNavigationOptions): TvSettingsNavigationState {
   const [pane, setPane] = useState<'nav' | 'content'>(() =>
@@ -438,11 +469,16 @@ export function useTvSettingsNavigation({
   );
   const [coords, setCoords] = useState<SectionCoords>(INITIAL_COORDS);
 
-  const sectionRows = getSectionRows(showAndroidDecoder, showNightModeDrc, isTv);
+  const sectionRows = getSectionRows(
+    showAndroidDecoder,
+    showNightModeDrc,
+    showExternalPlayer,
+    isTv,
+  );
   const sectionRowsRef = useRef(sectionRows);
   sectionRowsRef.current = sectionRows;
   const storeRef = useRef<FocusStore | null>(null);
-  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${isTv ? '1' : '0'}`;
+  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}:${isTv ? '1' : '0'}`;
   const storeConfigKeyRef = useRef(storeConfigKey);
   if (storeRef.current === null || storeConfigKeyRef.current !== storeConfigKey) {
     storeConfigKeyRef.current = storeConfigKey;
@@ -450,6 +486,7 @@ export function useTvSettingsNavigation({
       section,
       showAndroidDecoder,
       showNightModeDrc,
+      showExternalPlayer,
       isTv,
     );
   }

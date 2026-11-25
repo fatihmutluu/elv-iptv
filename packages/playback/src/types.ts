@@ -158,6 +158,8 @@ export interface PlaybackService {
   setSubtitleDelay(delayMs: number): void;
   /** Selects an adaptive video rendition ID, or `null` for automatic ABR (`#59`). */
   selectVideoQuality(id: string | null): void;
+  /** Selects a service/program inside a multi-program MPEG-TS stream (`#304`). */
+  selectProgram?(id: string): void;
   getState(): PlaybackState;
   /** Returns the unsubscribe function. */
   subscribe(listener: (state: PlaybackState) => void): () => void;

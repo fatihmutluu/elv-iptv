@@ -367,7 +367,7 @@ describe('guide yields', () => {
     expect(await titles(e)).toHaveLength(450);
   });
 
-  it('chunks guide_channels inside the cleanup transaction without yielding while a write transaction is open', async () => {
+  it('chunks guide_channels inside the cleanup transaction and yields between chunks to bound JS stalls (#478)', async () => {
     const parts = Array.from({ length: 25 }, (_, i) => channelXml(`ch-${i}`, `Channel ${i}`));
     parts.push(channelXml('haber1.tr', 'Haber Bir'));
     parts.push(programmeXml('haber1.tr', HOUR, 1, 'Show'));
@@ -405,7 +405,7 @@ describe('guide yields', () => {
     );
     expect(r.ok).toBe(true);
     expect(batches).toBe(3);
-    expect(yieldedInTx).toBe(0);
+    expect(yieldedInTx).toBe(2);
     expect(await rows(e, 'SELECT COUNT(*) AS n FROM guide_channels')).toEqual([{ n: 26 }]);
   });
 });

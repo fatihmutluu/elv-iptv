@@ -1,6 +1,7 @@
 export * from './async-iterable';
 export * from './content-key';
 export { type CookieJar, type CookieJarOptions, createCookieJar } from './cookie-jar';
+export * from './crash-report';
 export * from './drm';
 export {
   hasCredentialHeaders,

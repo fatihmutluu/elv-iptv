@@ -145,6 +145,9 @@ export function dispatchPlayerBridgeCommand<TOwner>(
     case 'selectVideoQuality':
       engine.selectVideoQuality?.(command.attempt, command.id);
       break;
+    case 'selectProgram':
+      engine.selectProgram?.(command.attempt, command.id);
+      break;
     case 'setVolume':
       entry.mediaState.volume = Math.max(0, Math.min(1, command.volume / 100));
       hooks.pushMediaState(engineId);

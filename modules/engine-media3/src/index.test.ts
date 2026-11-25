@@ -171,6 +171,7 @@ describe('createMedia3Engine', () => {
       externalSubtitles: true,
       subtitleStyling: true,
       dualSubtitles: true,
+      programSelection: true,
     });
     const events: EngineEvent[] = [];
     engine?.subscribe((event) => events.push(event));

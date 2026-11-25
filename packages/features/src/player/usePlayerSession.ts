@@ -42,6 +42,7 @@ interface PlaybackUiSlice {
   readonly audioDelayMs: number;
   readonly subtitleDelayMs: number;
   readonly selectedVideoQualityId: string | null;
+  readonly externalPlaybackActive: boolean;
 }
 
 const OPENING_STATUS: PlaybackStatus = { kind: 'tuning' };
@@ -55,6 +56,7 @@ const OPENING_PLAYBACK_SLICE: PlaybackUiSlice = {
   audioDelayMs: 0,
   subtitleDelayMs: 0,
   selectedVideoQualityId: null,
+  externalPlaybackActive: false,
 };
 
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
@@ -365,10 +367,12 @@ export function usePlayerSession(params: {
       audioDelayMs: rawAudioDelay,
       subtitleDelayMs: rawSubDelay,
       selectedVideoQualityId: rawQualityId,
+      externalPlaybackActive: rawExternalPlaybackActive,
     } = activeService.getState();
     const audioDelayMs = rawAudioDelay ?? 0;
     const subtitleDelayMs = rawSubDelay ?? 0;
     const selectedVideoQualityId = rawQualityId ?? tr.selectedVideoQualityId ?? null;
+    const externalPlaybackActive = rawExternalPlaybackActive === true;
     const prev = sliceRef.current;
     if (
       prev.status === st &&
@@ -379,7 +383,8 @@ export function usePlayerSession(params: {
       prev.surfaceRecreationToken === token &&
       prev.audioDelayMs === audioDelayMs &&
       prev.subtitleDelayMs === subtitleDelayMs &&
-      prev.selectedVideoQualityId === selectedVideoQualityId
+      prev.selectedVideoQualityId === selectedVideoQualityId &&
+      prev.externalPlaybackActive === externalPlaybackActive
     ) {
       return prev;
     }
@@ -393,6 +398,7 @@ export function usePlayerSession(params: {
       audioDelayMs,
       subtitleDelayMs,
       selectedVideoQualityId,
+      externalPlaybackActive,
     };
     return sliceRef.current;
   }, [activeService]);
@@ -406,6 +412,7 @@ export function usePlayerSession(params: {
     audioDelayMs,
     subtitleDelayMs,
     selectedVideoQualityId,
+    externalPlaybackActive,
   } = useSyncExternalStore(subscribePlayback, getPlaybackSnapshot, getPlaybackSnapshot);
 
   return {
@@ -420,6 +427,7 @@ export function usePlayerSession(params: {
     audioDelayMs,
     subtitleDelayMs,
     selectedVideoQualityId,
+    externalPlaybackActive,
     inPip,
     isFullscreen,
     alwaysOnTop,

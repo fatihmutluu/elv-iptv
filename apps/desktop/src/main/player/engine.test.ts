@@ -484,6 +484,7 @@ describe('MpvEngine', () => {
       externalSubtitles: true,
       subtitleStyling: true,
       dualSubtitles: true,
+      programSelection: true,
     });
     expect(engine.presenterKind).toBe('child-window');
   });

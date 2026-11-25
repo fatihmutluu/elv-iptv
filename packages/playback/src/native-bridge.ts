@@ -19,6 +19,8 @@ import type {
   MediaKind,
   MediaTracks,
   PlayerEngine,
+  ProgramInfo,
+  TrackInfo,
   VideoQualityOption,
 } from './engine';
 
@@ -46,6 +48,7 @@ export interface NativeLoadCommand {
   readonly displaySync?: DisplaySyncPolicy;
   readonly nightModeDrc?: NightModeDrcPreset;
   readonly desktopAudioOutput?: DesktopAudioOutputConfig;
+  readonly programId?: string;
 }
 
 /** Handle to a native engine shared object (`ElvEngineMedia3.Engine` or `ElvEngineAether.Engine`). */
@@ -69,6 +72,7 @@ export interface NativeEngineHandle {
   setAudioDelay?(attempt: AttemptToken, delayMs: number): void;
   setSubtitleDelay?(attempt: AttemptToken, delayMs: number): void;
   selectVideoQuality?(attempt: AttemptToken, id: string | null): void;
+  selectProgram?(attempt: AttemptToken, id: string): void;
   stop(attempt: AttemptToken): void;
   recreate(attempt: AttemptToken): void;
   release(): void;
@@ -117,6 +121,7 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
     ...(options?.desktopAudioOutput === undefined
       ? {}
       : { desktopAudioOutput: options.desktopAudioOutput }),
+    ...(options?.programId === undefined ? {} : { programId: options.programId }),
   };
 }
 
@@ -139,6 +144,10 @@ function normalizeVideoQualities(raw: unknown): readonly VideoQualityOption[] {
     const height = positiveFinite(candidate.height);
     const bitrateBps = positiveFinite(candidate.bitrateBps);
     const fps = positiveFinite(candidate.fps);
+    const programId =
+      typeof candidate.programId === 'string' && candidate.programId.trim().length > 0
+        ? candidate.programId.trim()
+        : undefined;
     out.push({
       id,
       label,
@@ -146,9 +155,52 @@ function normalizeVideoQualities(raw: unknown): readonly VideoQualityOption[] {
       ...(height === undefined ? {} : { height }),
       ...(bitrateBps === undefined ? {} : { bitrateBps }),
       ...(fps === undefined ? {} : { fps }),
+      ...(programId === undefined ? {} : { programId }),
     });
   }
   return out;
+}
+
+function normalizePrograms(raw: unknown): readonly ProgramInfo[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ProgramInfo[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const candidate = item as Record<string, unknown>;
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+    const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
+    if (id.length === 0 || label.length === 0) continue;
+    const serviceName =
+      typeof candidate.serviceName === 'string' && candidate.serviceName.trim().length > 0
+        ? candidate.serviceName.trim()
+        : undefined;
+    const programNumber =
+      typeof candidate.programNumber === 'number' &&
+      Number.isInteger(candidate.programNumber) &&
+      candidate.programNumber >= 0
+        ? candidate.programNumber
+        : undefined;
+    out.push({
+      id,
+      label,
+      ...(serviceName === undefined ? {} : { serviceName }),
+      ...(programNumber === undefined ? {} : { programNumber }),
+    });
+  }
+  return out;
+}
+
+function normalizeTrackProgramIds(tracks: readonly TrackInfo[]): readonly TrackInfo[] {
+  let changed = false;
+  const out = tracks.map((track) => {
+    if (track.programId === undefined) return track;
+    const trimmed = typeof track.programId === 'string' ? track.programId.trim() : '';
+    if (trimmed === track.programId && trimmed.length > 0) return track;
+    changed = true;
+    const { programId: _drop, ...rest } = track;
+    return trimmed.length > 0 ? { ...rest, programId: trimmed } : rest;
+  });
+  return changed ? out : tracks;
 }
 
 function normalizeTracksEvent(event: EngineEvent): EngineEvent {
@@ -157,7 +209,9 @@ function normalizeTracksEvent(event: EngineEvent): EngineEvent {
   if (
     raw.videoQualities === undefined &&
     raw.selectedVideoQualityId === undefined &&
-    raw.selectedSecondarySubtitleId === undefined
+    raw.selectedSecondarySubtitleId === undefined &&
+    raw.programs === undefined &&
+    raw.selectedProgramId === undefined
   ) {
     return event;
   }
@@ -172,8 +226,8 @@ function normalizeTracksEvent(event: EngineEvent): EngineEvent {
       ? null
       : normalizedSecondary;
   const normalized: MediaTracks = {
-    audio: raw.audio,
-    subtitles: raw.subtitles,
+    audio: normalizeTrackProgramIds(raw.audio),
+    subtitles: normalizeTrackProgramIds(raw.subtitles),
     selectedAudioId: raw.selectedAudioId,
     selectedSubtitleId: raw.selectedSubtitleId,
     ...(safeSecondary === undefined ? {} : { selectedSecondarySubtitleId: safeSecondary }),
@@ -183,6 +237,10 @@ function normalizeTracksEvent(event: EngineEvent): EngineEvent {
     ...(raw.selectedVideoQualityId === undefined
       ? {}
       : { selectedVideoQualityId: nonEmptyStringOrNull(raw.selectedVideoQualityId) }),
+    ...(raw.programs === undefined ? {} : { programs: normalizePrograms(raw.programs) }),
+    ...(raw.selectedProgramId === undefined
+      ? {}
+      : { selectedProgramId: nonEmptyStringOrNull(raw.selectedProgramId) }),
   };
   return { ...event, tracks: normalized };
 }
@@ -387,6 +445,14 @@ export function bridgeNativeEngine(
           selectVideoQuality: command((attempt: AttemptToken, id: string | null) => {
             adoptAttempt(attempt);
             native.selectVideoQuality?.(attempt, id);
+          }),
+        }),
+    ...(native.selectProgram === undefined
+      ? {}
+      : {
+          selectProgram: command((attempt: AttemptToken, id: string) => {
+            adoptAttempt(attempt);
+            native.selectProgram?.(attempt, id);
           }),
         }),
     stop: command((attempt: AttemptToken) => {

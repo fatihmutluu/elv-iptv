@@ -13,14 +13,18 @@ const POSIX_KNOWN_SPACED_PATH_RE =
   /(^|[\s'"(=,:])\/(?:Users|home|var|tmp|private|Volumes|Library|Applications)\/(?:[^'"<>|\r\n/:]+\/)*[^\s'"<>|,;)\r\n]+/g;
 const POSIX_ABS_PATH_RE = /(^|[\s'"(=,:])\/(?:[^\s'"<>|,;):/]+\/)+[^\s'"<>|,;)]*/g;
 
+const FILE_URL_RE = /\bfile:(?:\/\/|\/)[^\s'"<>]+/gi;
+
 function sanitizeSqliteErrorDetail(text: string): string {
-  return redactText(text)
+  const pathsRedacted = text
+    .replace(FILE_URL_RE, 'file://<redacted>')
     .replace(QUOTED_WIN_PATH_RE, '$1<path>$1')
     .replace(QUOTED_POSIX_PATH_RE, '$1<path>$1')
     .replace(WIN_UNC_PATH_RE, '<path>')
     .replace(WIN_DRIVE_PATH_RE, '<path>')
     .replace(POSIX_KNOWN_SPACED_PATH_RE, '$1<path>')
     .replace(POSIX_ABS_PATH_RE, '$1<path>');
+  return redactText(pathsRedacted);
 }
 
 /** Options for {@link openSqliteWithRetry}. */

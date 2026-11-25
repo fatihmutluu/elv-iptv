@@ -7,11 +7,20 @@ import type { ImportParams } from '../route';
 const mockCloseDriver = jest.fn(async () => undefined);
 const mockCloseCatalog = jest.fn(async () => undefined);
 const mockOpenCatalog = jest.fn();
+const mockCreateCatalogService = jest.fn();
 const mockRunImport = jest.fn();
+const mockCreateDeviceNativeGuideStager = jest.fn();
 
 jest.mock('@elv/data', () => ({
   openCatalog: (...args: unknown[]) => mockOpenCatalog(...args),
-  createCatalogService: () => ({ close: mockCloseCatalog }),
+  createCatalogService: (...args: unknown[]) => {
+    mockCreateCatalogService(...args);
+    return { close: mockCloseCatalog };
+  },
+}));
+
+jest.mock('../../../catalog/native-guide-stager', () => ({
+  createDeviceNativeGuideStager: (...args: unknown[]) => mockCreateDeviceNativeGuideStager(...args),
 }));
 
 jest.mock('../../../storage', () => ({
@@ -46,7 +55,9 @@ describe('ImportGateScreen', () => {
     mockCloseDriver.mockClear();
     mockCloseCatalog.mockClear();
     mockOpenCatalog.mockReset();
+    mockCreateCatalogService.mockReset();
     mockRunImport.mockReset();
+    mockCreateDeviceNativeGuideStager.mockReset().mockReturnValue(undefined);
   });
 
   afterEach(() => {
@@ -88,5 +99,31 @@ describe('ImportGateScreen', () => {
     );
     expect(mockCloseDriver).toHaveBeenCalledTimes(1);
     expect(mockCloseCatalog).not.toHaveBeenCalled();
+  });
+
+  it('wires nativeGuideStager into createCatalogService when available (#478)', async () => {
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    const fakeStager = { stage: jest.fn(), cancel: jest.fn() };
+    mockCreateDeviceNativeGuideStager.mockReturnValue(fakeStager);
+    mockOpenCatalog.mockResolvedValue(ok(undefined));
+    mockRunImport.mockResolvedValue({
+      account: 'large',
+      batch: 5000,
+      maxBody: 4096,
+      rows: 42,
+      durationMs: 100,
+      maxStallMs: 4,
+    });
+    await render(<ImportGateScreen params={params} />);
+    await waitFor(
+      () => {
+        expect(screen.getByText('import large x5000: done')).toBeOnTheScreen();
+      },
+      { timeout: 5_000 },
+    );
+    expect(mockCreateDeviceNativeGuideStager).toHaveBeenCalledTimes(1);
+    expect(mockCreateCatalogService).toHaveBeenCalledWith(
+      expect.objectContaining({ nativeGuideStager: fakeStager }),
+    );
   });
 });

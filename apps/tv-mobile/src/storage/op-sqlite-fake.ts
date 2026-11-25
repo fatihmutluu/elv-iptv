@@ -16,6 +16,7 @@ export interface FakeConn {
     bind(p: unknown[]): Promise<void>;
     execute(): Promise<FakeResult>;
   };
+  getDbPath(location?: string): string;
   interrupt(): void;
   close(): void;
 }
@@ -30,7 +31,7 @@ interface FakeTx {
 export function createFakeOpSqlite() {
   const conns: FakeConn[] = [];
   const opened: { name: string; location?: string }[] = [];
-  function make(): FakeConn {
+  function make(options: { name: string; location?: string }): FakeConn {
     let gate: { promise: Promise<void>; release(): void; fail(e: Error): void } | undefined;
     let pending: ((e: Error) => void) | undefined;
     const log: string[] = [];
@@ -98,6 +99,13 @@ export function createFakeOpSqlite() {
           execute: () => run('stmt', sql, bound),
         };
       },
+      getDbPath(...args: [string?]) {
+        if (args.length > 0 && typeof args[0] !== 'string') {
+          throw new Error('[op-sqlite][open] database location must be a string');
+        }
+        const dir = args[0] ?? '/default/databases';
+        return `${dir}/${options.name}`;
+      },
       interrupt() {
         log.push('interrupt');
         pending?.(new Error('interrupted'));
@@ -114,7 +122,7 @@ export function createFakeOpSqlite() {
     opened,
     open(options: { name: string; location?: string }): FakeConn {
       opened.push(options);
-      return make();
+      return make(options);
     },
   };
 }

@@ -2970,3 +2970,105 @@ msgstr "Audio passthrough unavailable on this device — switched to PCM."
 
 msgid "player.error.drmUnsupported"
 msgstr "Protected stream cannot be played on this device."
+
+msgid "player.externalDisplay.title"
+msgstr "Playing on external display"
+
+msgid "player.externalDisplay.subtitle"
+msgstr "Video is routed to your connected TV or monitor."
+
+msgid "player.externalDisplay.hint"
+msgstr "Use the controls below to pause, seek, or switch tracks."
+
+msgid "player.tracks.program"
+msgstr "Program"
+
+msgid "player.tracks.programNumber"
+msgstr "Program {number}"
+
+msgid "settings.playback.externalPlayerTitle"
+msgstr "External player"
+
+msgid "settings.playback.externalPlayerHint"
+msgstr "Hand off stream playback to another installed media player app."
+
+msgid "settings.playback.externalPlayerOff"
+msgstr "Off"
+
+msgid "settings.playback.externalPlayerAsk"
+msgstr "Ask every time"
+
+msgid "settings.playback.externalPlayerAlways"
+msgstr "Always"
+
+msgid "settings.playback.externalPlayerSchemeLabel"
+msgstr "Custom player URL scheme (optional)"
+
+msgid "settings.playback.externalPlayerSchemePlaceholder"
+msgstr "e.g. myplayer"
+
+msgid "player.externalPrompt.title"
+msgstr "Open stream with"
+
+msgid "player.externalPrompt.subtitle"
+msgstr "Choose whether to play inside ELV IPTV or hand off to an external player."
+
+msgid "player.externalPrompt.integrated"
+msgstr "Built-in player"
+
+msgid "player.externalPrompt.external"
+msgstr "External player"
+
+msgid "player.externalPrompt.cancel"
+msgstr "Cancel"
+
+msgid "player.externalHandoff.failed"
+msgstr "Could not open the external player on this device."
+
+msgid "settings.diagnostics.title"
+msgstr "Crash diagnostics"
+
+msgid "settings.diagnostics.optInLabel"
+msgstr "Enable diagnostic crash reports"
+
+msgid "settings.diagnostics.optInHint"
+msgstr "Generate redacted Markdown reports locally when an unexpected error occurs."
+
+msgid "settings.diagnostics.includeLogsLabel"
+msgstr "Include recent redacted logs"
+
+msgid "settings.diagnostics.includeLogsHint"
+msgstr "Attach up to 250 recent redacted log lines when preparing a report."
+
+msgid "settings.diagnostics.previewAction"
+msgstr "Preview diagnostic report"
+
+msgid "crash.diagnosticsAction"
+msgstr "View diagnostics"
+
+msgid "crash.report.title"
+msgstr "Diagnostic report"
+
+msgid "crash.report.subtitle"
+msgstr "Credentials, stream URLs, and home paths are redacted before display or export."
+
+msgid "crash.report.includeLogsToggle"
+msgstr "Include recent logs"
+
+msgid "crash.report.copy"
+msgstr "Copy report"
+
+msgid "crash.report.copied"
+msgstr "Copied to clipboard"
+
+msgid "crash.report.export"
+msgstr "Export Markdown"
+
+msgid "crash.report.exported"
+msgstr "Report exported"
+
+msgid "crash.report.close"
+msgstr "Close"
+
+msgid "crash.report.emptyLogs"
+msgstr "No recent diagnostic logs captured."

@@ -79,10 +79,15 @@ const SWAP_PROGRAMMES = `INSERT INTO programmes (${PROGRAMME_COLUMNS})
   )
   WHERE CASE WHEN next_start IS NOT NULL AND stop > next_start THEN next_start ELSE stop END > start`;
 
-const POPULATE_PROGRAMMES_FTS = `INSERT INTO programmes_fts (source_id, guide_id, start, stop, title_fold, description_fold)
+/** Cap per `tx.batch` chunk in guide commit so 5,000-channel JSI marshalling stays under 100 ms (`#478`). */
+const MAX_COMMIT_BATCH = 250;
+/** Mapped `guide_id`s indexed per `programmes_fts` chunk (`<= 251` bind params, well below 999 ceiling `#478`). */
+const FTS_GUIDE_ID_CHUNK = 250;
+
+const POPULATE_PROGRAMMES_FTS_PREFIX = `INSERT INTO programmes_fts (source_id, guide_id, start, stop, title_fold, description_fold)
   SELECT source_id, guide_id, start, stop, title_fold, description_fold
   FROM programmes
-  WHERE source_id = ?`;
+  WHERE source_id = ? AND guide_id IN (`;
 
 /** What a guide run collected for its cleanup transaction. */
 export interface GuideResult {
@@ -153,6 +158,7 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
     if (!finalMap.has(key)) finalMap.set(key, guideId);
   }
   const mappings = [...finalMap];
+  if (mappings.length >= MAX_COMMIT_BATCH) await c.deps.scheduler.yieldNow();
 
   const mapped = new Set(mappings.map(([, guideId]) => guideId));
   const empty = ![...mapped].some((guideId) => (g.staged.get(guideId) ?? 0) > 0);
@@ -167,12 +173,16 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
     c.counts.programmes = 0;
     return;
   }
+  const commitChunk = Math.min(c.batchSize, MAX_COMMIT_BATCH);
   await tx.run('DELETE FROM channel_guide WHERE source_id = ?', [c.sourceId]);
-  for (let i = 0; i < mappings.length; i += c.batchSize) {
+  for (let i = 0; i < mappings.length; i += commitChunk) {
     await tx.batch(
       'INSERT OR IGNORE INTO channel_guide (source_id, channel_key, guide_id) VALUES (?, ?, ?)',
-      mappings.slice(i, i + c.batchSize).map(([key, guideId]) => [c.sourceId, key, guideId]),
+      mappings.slice(i, i + commitChunk).map(([key, guideId]) => [c.sourceId, key, guideId]),
     );
+    if (i + commitChunk < mappings.length) {
+      await c.deps.scheduler.yieldNow();
+    }
   }
   if (g.winningGuideSourceByChannel !== undefined) {
     await tx.run('DELETE FROM channel_guide_overrides WHERE source_id = ? AND is_manual = 0', [
@@ -185,13 +195,16 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
       if (guideId === undefined) continue;
       autoAttrRows.push([c.sourceId, channelKey, guideSourceId, guideId, syncedAt]);
     }
-    for (let i = 0; i < autoAttrRows.length; i += c.batchSize) {
+    for (let i = 0; i < autoAttrRows.length; i += commitChunk) {
       await tx.batch(
         `INSERT OR IGNORE INTO channel_guide_overrides
            (source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at)
          VALUES (?, ?, ?, ?, 0, 0, ?)`,
-        autoAttrRows.slice(i, i + c.batchSize),
+        autoAttrRows.slice(i, i + commitChunk),
       );
+      if (i + commitChunk < autoAttrRows.length) {
+        await c.deps.scheduler.yieldNow();
+      }
     }
   }
   if (g.syncedGuideSources !== undefined) {
@@ -202,8 +215,11 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
       );
     }
   }
-  for (let i = 0; i < g.channelRows.length; i += c.batchSize) {
-    await tx.batch(GUIDE_CHANNEL_SQL, g.channelRows.slice(i, i + c.batchSize));
+  for (let i = 0; i < g.channelRows.length; i += commitChunk) {
+    await tx.batch(GUIDE_CHANNEL_SQL, g.channelRows.slice(i, i + commitChunk));
+    if (i + commitChunk < g.channelRows.length) {
+      await c.deps.scheduler.yieldNow();
+    }
   }
   if (g.retentionFloorMs !== undefined && g.preserveBeforeMs !== undefined) {
     await tx.run(PRESERVE_RETAINED_PROGRAMMES, [
@@ -219,7 +235,15 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
   const swapped = await tx.run(SWAP_PROGRAMMES, [c.sourceId, c.runId, c.sourceId]);
   await tx.run('DELETE FROM programmes_fts WHERE source_id = ?', [c.sourceId]);
   if (swapped.changes > 0) {
-    await tx.run(POPULATE_PROGRAMMES_FTS, [c.sourceId]);
+    const mappedIds = [...mapped];
+    for (let i = 0; i < mappedIds.length; i += FTS_GUIDE_ID_CHUNK) {
+      const chunk = mappedIds.slice(i, i + FTS_GUIDE_ID_CHUNK);
+      const placeholders = chunk.map(() => '?').join(', ');
+      await tx.run(`${POPULATE_PROGRAMMES_FTS_PREFIX}${placeholders})`, [c.sourceId, ...chunk]);
+      if (i + FTS_GUIDE_ID_CHUNK < mappedIds.length) {
+        await c.deps.scheduler.yieldNow();
+      }
+    }
   }
   await tx.run('DELETE FROM programmes_next WHERE source_id = ? AND run_id = ?', [
     c.sourceId,

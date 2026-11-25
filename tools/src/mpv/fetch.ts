@@ -39,7 +39,13 @@ export interface FetchOptions {
 
 /** Files that embed the FFmpeg configuration or the mpv build options; other dylibs carry neither. */
 const BINARY =
-  /(\.dll|(^|\/)(libav(codec|format|util)|libmpv)[^/]*\.dylib|\.so(\.\d+)*|(^|\/)mpv)$/;
+  /(\.[dD][lL][lL]|(^|\/)(libav(codec|format|util)|libmpv)[^/]*\.dylib|\.so(\.\d+)*|(^|\/)mpv)$/;
+
+/** Candidate relative paths for upstream runtime build metadata embedded in CI archives. */
+const RUNTIME_BUILDINFO_PATHS = [
+  'RUNTIME-BUILDINFO.json',
+  'ELV IPTV Player.app/Contents/Resources/BUILDINFO.json',
+] as const;
 
 function runtimeDir(root: string, key: string): string {
   return `${root}/apps/desktop/resources/mpv/${key}`;
@@ -105,6 +111,25 @@ async function readInstalled(
   } catch {
     return null;
   }
+}
+
+async function readRuntimeBuildInfo(
+  dir: string,
+  deps: FetchDeps,
+): Promise<Record<string, unknown> | undefined> {
+  for (const rel of RUNTIME_BUILDINFO_PATHS) {
+    const file = `${dir}/${rel}`;
+    if (!deps.exists(file)) continue;
+    try {
+      const parsed: unknown = JSON.parse(await deps.readText(file));
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Ignore malformed upstream build metadata; licence gate remains authoritative.
+    }
+  }
+  return undefined;
 }
 
 /** Builds the launcher and records the source hash it was built from in `elv-mpv.stamp`. */
@@ -205,6 +230,7 @@ export async function fetchRuntime(opts: FetchOptions, deps: FetchDeps): Promise
   await deps.removeDir(dir);
   await deps.installDir(staging, dir);
   await buildStamped(dir, await deps.launcherSourceHash(), deps);
+  const runtimeBuild = await readRuntimeBuildInfo(dir, deps);
   const { ffmpegConfig, mpvOptions, lua } = verdict;
   const info = {
     key,
@@ -212,6 +238,7 @@ export async function fetchRuntime(opts: FetchOptions, deps: FetchDeps): Promise
     sha256: entry.sha256,
     installedAt: new Date().toISOString(),
     licence: { ffmpegConfig, mpvOptions, lua },
+    ...(runtimeBuild !== undefined ? { runtimeBuild } : {}),
   };
   await deps.writeText(`${dir}/BUILDINFO.json`, `${JSON.stringify(info, null, 2)}\n`);
   deps.log(summary(key, 'installed', entry.mpv, verdict));

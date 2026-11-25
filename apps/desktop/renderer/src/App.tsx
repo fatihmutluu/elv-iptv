@@ -6,6 +6,7 @@ import {
   type AppShellProps,
   createLazyCatalog,
   type DesktopWindowPort,
+  type DiagnosticsPort,
   type LanPairingPort,
   type ReminderHostPort,
   type SourceImportHost,
@@ -24,6 +25,7 @@ import {
   subscribeCatalogDisconnected,
 } from './CatalogCrashBanner.tsx';
 import { createDesktopCatalog } from './catalog/index.ts';
+import { createDesktopDiagnosticsPort } from './diagnostics-port.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
 import { createDesktopLanPairingPort } from './lan-pairing/adapter.ts';
@@ -230,9 +232,15 @@ function AppRoot() {
 
   const reminderHost = useMemo<ReminderHostPort>(() => createDesktopReminderHost(), []);
 
+  const diagnostics = useMemo<DiagnosticsPort>(
+    () => createDesktopDiagnosticsPort(window.elv?.diagnostics),
+    [],
+  );
+
   const shellProps: AppShellProps & {
     sourceImportHost?: SourceImportHost;
     profilePreferences?: ProfilePreferencesManager;
+    diagnostics?: DiagnosticsPort;
   } = {
     catalog,
     videoHost,
@@ -240,6 +248,7 @@ function AppRoot() {
     profilePreferences: preferencesStore,
     keymapStore,
     reminderHost,
+    diagnostics,
     externalRefreshToken: refreshToken,
     ...(desktopWindow === undefined ? {} : { desktopWindow }),
     ...(sourceImportHost === undefined ? {} : { sourceImportHost }),

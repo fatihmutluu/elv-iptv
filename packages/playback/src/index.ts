@@ -55,6 +55,7 @@ export {
   type MediaKind,
   type MediaTracks,
   type PlayerEngine,
+  type ProgramInfo,
   type StreamHdrKind,
   type StreamRequest,
   type StreamVideoInfo,
@@ -86,6 +87,7 @@ export {
   type NativeEngineHandle,
   type NativeLoadCommand,
 } from './native-bridge';
+export { filterTracksByProgram, hasMultiplePrograms } from './programs';
 export { nextLimitDelay } from './recovery';
 export { stripSdhAnnotations } from './sdh-filter';
 export { createPlaybackService, type PlaybackServiceDeps } from './service';

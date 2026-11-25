@@ -96,6 +96,7 @@ final class AetherBackend: PlayerBackend {
   var audioSessionPolicy = AudioSessionPolicy()
   var airPlayTracker = AirPlayCapabilityTracker()
   var airPlayMonitor: AetherAirPlayMonitor?
+  var isExternalDisplaySceneActive = false
   var osdClockThrottle = OsdClockThrottle(hiddenIntervalSeconds: 5.0, osdVisible: true)
   var requestedRate: Double = 1.0
   var requestedAudioDelaySeconds: Double = 0
@@ -219,15 +220,15 @@ final class AetherBackend: PlayerBackend {
     for extTrack in options.externalSubtitles {
       addExternalSubtitle(extTrack)
     }
-    let isExternal = currentEngine.currentAVPlayer?.isExternalPlaybackActive ?? false
+    let isAirPlayExternal = currentEngine.currentAVPlayer?.isExternalPlaybackActive ?? false
     airPlayTracker.updateRoute(airPlayPortName: AetherAudioSessionObserver.currentAirPlayPortName())
-    airPlayTracker.updateExternalPlayback(active: isExternal)
+    airPlayTracker.updateExternalPlayback(active: isAirPlayExternal)
     syncAirPlayState()
     audioSessionPolicy.clearLatchesOnUserPlay()
     audioSessionController.activateForPlayback(handleAudioFocus: handleAudioFocus)
 
     runMediaLoad(plan: plan, fallbackOptions: options, serial: serial, currentEngine: currentEngine)
-    if isExternal {
+    if effectiveExternalPlaybackActive {
       onObservation?(.externalPlayback(true), serial)
     }
   }
@@ -372,6 +373,7 @@ final class AetherBackend: PlayerBackend {
     resetExternalSubtitles()
     audioSessionPolicy.reset()
     resetAirPlayState()
+    isExternalDisplaySceneActive = false
     airPlayMonitor = nil
     currentPlan = nil
     currentLoadOptions = nil

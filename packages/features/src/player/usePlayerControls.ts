@@ -318,6 +318,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
     serviceRef.current?.setSpeed(restore);
   };
 
+  const selectProgram = (id: string): void => {
+    serviceRef.current?.selectProgram?.(id);
+  };
+
   const selectAudio = (id: string): void => {
     serviceRef.current?.selectAudioTrack(id);
     cbRef.current.onAudioTrackSelected?.(id);
@@ -561,6 +565,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
         blurTvScrubber: overlay.blurTvScrubber,
         activateTvOsd,
         selectSpeed,
+        selectProgram,
         selectAudio,
         selectSubtitle,
         selectSecondarySubtitle: cbRef.current.onSelectSecondarySubtitle,
@@ -771,6 +776,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     setBarScrubbing,
     timeShiftUnavailableVisible,
     jumpToLiveEdge,
+    selectProgram,
     selectAudio,
     selectSubtitle,
     selectSpeed,

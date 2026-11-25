@@ -92,6 +92,10 @@ export interface SettingsScreenProps {
   readonly showAndroidDecoder?: boolean;
   /** Overrides Android-only Night-Mode DRC row visibility in Playback settings (`#115`). */
   readonly showNightModeDrc?: boolean;
+  /** Overrides mobile External Player row visibility in Playback settings (`#406`). */
+  readonly showExternalPlayer?: boolean;
+  /** Opens the opt-in redacted diagnostic report preview modal (`#226`). */
+  readonly onPreviewDiagnostics?: () => void;
   /** Opens the Channel Management & Custom Groups overlay from Live TV settings (`#60`). */
   readonly onOpenChannelManagement?: () => void;
   /** Opens the Multi-Guide & Channel Mapper overlay lifted to `AppShell` root (`#30`). */
@@ -175,6 +179,8 @@ export function SettingsScreen({
   hasTransientOverlay = false,
   showAndroidDecoder = Platform.OS === 'android',
   showNightModeDrc = Platform.OS === 'android',
+  showExternalPlayer = Platform.OS === 'android' || (Platform.OS === 'ios' && !Platform.isTV),
+  onPreviewDiagnostics,
   onOpenChannelManagement,
 }: SettingsScreenProps): ReactElement {
   const theme = useTheme();
@@ -262,6 +268,7 @@ export function SettingsScreen({
           setLocale: (loc) => i18n.setLocale(loc),
           onSetArtworkCacheLimitMb: handleSetArtworkCacheLimitMb,
           onClearArtworkCache: handleClearArtworkCache,
+          ...(onPreviewDiagnostics !== undefined ? { onPreviewDiagnostics } : {}),
         });
         return;
       }
@@ -279,6 +286,7 @@ export function SettingsScreen({
       handleSetArtworkCacheLimitMb,
       i18n,
       onOpenChannelManagement,
+      onPreviewDiagnostics,
       preferences,
       theme.reduceMotion,
       themeCtrl,
@@ -308,6 +316,7 @@ export function SettingsScreen({
     onAdjustControl: handleAdjustControl,
     showAndroidDecoder,
     showNightModeDrc,
+    showExternalPlayer,
     preservePaneOnBlur: hasTransientOverlay,
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
@@ -347,6 +356,7 @@ export function SettingsScreen({
         focusedControlId={tv.focusedAppearanceId}
         onClearArtworkCache={handleClearArtworkCache}
         artworkCacheCleared={artworkCacheCleared}
+        {...(onPreviewDiagnostics !== undefined ? { onPreviewDiagnostics } : {})}
       />
     ) : activeSection === 'playback' ? (
       <PlaybackSettingsPanel
@@ -356,6 +366,7 @@ export function SettingsScreen({
         }
         showAndroidDecoder={showAndroidDecoder}
         showNightModeDrc={showNightModeDrc}
+        showExternalPlayer={showExternalPlayer}
         selectedDelayBucket={selectedDelayBucket}
         onSelectDelayBucket={setSelectedDelayBucket}
       />

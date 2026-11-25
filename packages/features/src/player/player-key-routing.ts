@@ -248,6 +248,7 @@ export interface OverlayKeyRouteDeps {
   readonly blurTvScrubber: () => void;
   readonly activateTvOsd: (action: TvOsdAction) => void;
   readonly selectSpeed: (rate: number) => void;
+  readonly selectProgram?: (id: string) => void;
   readonly selectAudio?: (id: string) => void;
   readonly selectSubtitle?: (id: string | null) => void;
   readonly selectSecondarySubtitle?: ((id: string | null) => void) | undefined;
@@ -566,7 +567,10 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     });
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'move') d.updatePickerCursor(intent.cursor);
-    else if (intent?.kind === 'audio') {
+    else if (intent?.kind === 'program') {
+      if (d.selectProgram !== undefined) d.selectProgram(intent.id);
+      else d.service?.selectProgram?.(intent.id);
+    } else if (intent?.kind === 'audio') {
       if (d.selectAudio !== undefined) d.selectAudio(intent.id);
       else d.service?.selectAudioTrack(intent.id);
     } else if (intent?.kind === 'subtitle') {

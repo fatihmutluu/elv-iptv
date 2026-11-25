@@ -13,6 +13,7 @@ import {
   utf8ByteLength,
 } from './preferences-validators';
 import { DEFAULT_WAVE_F7A_PREFERENCES } from './preferences-wave-f7a';
+import { DEFAULT_WAVE_F7B_PREFERENCES } from './preferences-wave-f7b';
 import { elvError, err, ok, type Result } from './result';
 import { DEFAULT_SUBTITLE_STYLE, type SubtitleStyleConfig } from './subtitle-style';
 
@@ -77,6 +78,16 @@ export {
   REFRESH_RATE_BUCKETS,
   type RefreshRateBucket,
 } from './preferences-wave-f7a';
+export {
+  DEFAULT_WAVE_F7B_PREFERENCES,
+  EXTERNAL_PLAYER_MODES,
+  EXTERNAL_PLAYER_SCHEME_RE,
+  type ExternalPlayerMode,
+  isExternalPlayerMode,
+  isValidExternalPlayerScheme,
+  normalizeExternalPlayerScheme,
+  type WaveF7bPreferencesFields,
+} from './preferences-wave-f7b';
 
 /** Schema version stored inside serialized preferences payloads. */
 export const PREFERENCES_SCHEMA_VERSION = 1 as const;
@@ -158,6 +169,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   minimizeToTray: false,
   autoEnterPip: true,
   ...DEFAULT_WAVE_F7A_PREFERENCES,
+  ...DEFAULT_WAVE_F7B_PREFERENCES,
   subtitleStyle: DEFAULT_SUBTITLE_STYLE,
 });
 

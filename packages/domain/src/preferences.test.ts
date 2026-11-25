@@ -91,6 +91,10 @@ describe('preferences codec', () => {
       audioExclusive: false,
       audioAc3Encode: false,
       audioChannelLayout: 'auto',
+      crashReportsOptIn: false,
+      crashReportsIncludeLogs: false,
+      externalPlayerMode: 'off',
+      externalPlayerCustomScheme: '',
       subtitleStyle: {
         fontSize: 'medium',
         textColor: 'white',

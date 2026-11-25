@@ -203,3 +203,75 @@ describe('routePickerKey', () => {
     expect(routePickerKey({ key: 'play', kind: 'press', time: 0 }, cur, TRACKS)).toBeNull();
   });
 });
+
+describe('multi-program MPEG-TS picker navigation (#304)', () => {
+  const MULTI_PROGRAM: MediaTracks = {
+    programs: [
+      { id: 'p:101', label: 'News HD', serviceName: 'News HD', programNumber: 101 },
+      { id: 'p:102', label: 'Sports HD', serviceName: 'Sports HD', programNumber: 102 },
+    ],
+    selectedProgramId: 'p:102',
+    audio: [
+      { id: 'a:101-1', language: 'eng', programId: 'p:101' },
+      { id: 'a:102-1', language: 'tur', programId: 'p:102' },
+      { id: 'a:102-2', language: 'eng', programId: 'p:102' },
+    ],
+    subtitles: [
+      { id: 's:101-1', language: 'eng', programId: 'p:101' },
+      { id: 's:102-1', language: 'tur', programId: 'p:102' },
+    ],
+    selectedAudioId: 'a:102-2',
+    selectedSubtitleId: 's:102-1',
+  };
+
+  it('traverses [program, audio, subtitles] left/right and activates program selection', () => {
+    const start = initialPickerCursor(MULTI_PROGRAM);
+    expect(start).toEqual({ column: 'audio', index: 1 });
+
+    const toProgram = movePickerCursor(start, MULTI_PROGRAM, 'left');
+    expect(toProgram).toEqual({ column: 'program', index: 1 });
+    expect(movePickerCursor(toProgram, MULTI_PROGRAM, 'left')).toEqual(toProgram);
+
+    const upProgram = movePickerCursor(toProgram, MULTI_PROGRAM, 'up');
+    expect(upProgram).toEqual({ column: 'program', index: 0 });
+    expect(activatePickerCursor(upProgram, MULTI_PROGRAM)).toEqual({
+      kind: 'program',
+      id: 'p:101',
+    });
+
+    const backToAudio = movePickerCursor(upProgram, MULTI_PROGRAM, 'right');
+    expect(backToAudio).toEqual({ column: 'audio', index: 1 });
+    expect(activatePickerCursor(backToAudio, MULTI_PROGRAM)).toEqual({
+      kind: 'audio',
+      id: 'a:102-2',
+    });
+
+    const toSubs = movePickerCursor(backToAudio, MULTI_PROGRAM, 'right');
+    expect(toSubs).toEqual({ column: 'subtitles', index: 1 });
+    expect(activatePickerCursor(toSubs, MULTI_PROGRAM)).toEqual({
+      kind: 'subtitle',
+      id: 's:102-1',
+    });
+  });
+
+  it('clamps cleanly out of program column when programs disappear mid-stream', () => {
+    expect(clampPickerCursor({ column: 'program', index: 1 }, TRACKS)).toEqual({
+      column: 'audio',
+      index: 1,
+    });
+    expect(clampPickerCursor({ column: 'program', index: 1 }, NO_AUDIO)).toEqual({
+      column: 'subtitles',
+      index: 2,
+    });
+  });
+
+  it('routes D-pad select on program column via routePickerKey', () => {
+    expect(
+      routePickerKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { column: 'program', index: 0 },
+        MULTI_PROGRAM,
+      ),
+    ).toEqual({ kind: 'program', id: 'p:101' });
+  });
+});
