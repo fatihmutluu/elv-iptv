@@ -591,4 +591,58 @@ describe('createDesktopEngine', () => {
     engine.setPrimary();
     expect(setPrimary).toHaveBeenCalledTimes(1);
   });
+
+  it('forwards options.bufferPreset on load and preserves clock anchor bufferHealth (#350)', async () => {
+    const clock = steppedClock();
+    const f = fakeBridge(undefined, () => clock.advance(40));
+    const engine = await createDesktopEngine(f.bridge, clock.now);
+    const events: EngineEvent[] = [];
+    engine.subscribe((e) => events.push(e));
+
+    engine.load({
+      attempt: 1,
+      url: 'http://sim.test/movie/demo/demo/1.mp4',
+      headers: {},
+      kind: 'vod',
+      options: { bufferPreset: 'large' },
+    });
+    expect(f.sent).toHaveLength(1);
+    expect(f.sent[0]).toEqual({
+      engineId: 'e1',
+      command: {
+        name: 'load',
+        cmd: {
+          attempt: 1,
+          url: 'http://sim.test/movie/demo/demo/1.mp4',
+          headers: {},
+          kind: 'vod',
+          options: { bufferPreset: 'large' },
+        },
+      },
+    });
+    expect(isPlayerCommandMessage(f.sent[0])).toBe(true);
+
+    f.event('e1', {
+      attempt: 1,
+      type: 'clock',
+      anchor: {
+        positionMs: 15_000,
+        atMs: 52_000,
+        rate: 1,
+        durationMs: 600_000,
+        bufferHealth: { bufferedAheadMs: 45_000, bufferedBehindMs: 12_000 },
+      },
+    });
+    expect(events[0]).toEqual({
+      attempt: 1,
+      type: 'clock',
+      anchor: {
+        positionMs: 15_000,
+        atMs: 2020,
+        rate: 1,
+        durationMs: 600_000,
+        bufferHealth: { bufferedAheadMs: 45_000, bufferedBehindMs: 12_000 },
+      },
+    });
+  });
 });

@@ -84,7 +84,8 @@ public func loadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoad
     dnsFamily: request.dnsFamily,
     hostOverride: validateHostOverride(request.hostOverride),
     secondarySubtitleTrackId: request.secondarySubtitleTrackId,
-    externalSubtitles: request.externalSubtitles
+    externalSubtitles: request.externalSubtitles,
+    bufferPreset: request.bufferPreset
   )
 }
 

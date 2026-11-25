@@ -18,9 +18,9 @@ monitor, and mobile window helpers (player core spec 6.1).
   on the playback looper with a `ForwardingPlayer` routing next/prev/stop to `onRemoteMediaAction`, swaps players safely
   before releasing old instances, strips artwork credentials, restricts untrusted controllers to transport commands, and
   attaches/removes sessions on `ElvPlaybackSessionService` so Media3 manages foreground notifications atomically.
-- `PlayerFactory` + `LoadControlConfig`: splits `StreamKind` (`RAW_TS_LIVE`, `HLS_LIVE`, `VOD`) x `BufferPreset` with
+- `PlayerFactory` + `LoadControlConfig` + `VodBufferPolicy`: splits `StreamKind` (`RAW_TS_LIVE`, `HLS_LIVE`, `VOD`) x `BufferPreset` with
   RAM-proportional cap, low-RAM `16 MiB` hard cap, Multi-View tile scaling (`targetBufferBytes / tileCount` floored at
-  `8 MiB`, conservative durations, secondary tiles `handleAudioFocus = false`, `#34`); `DefaultTrackSelector`
+  `8 MiB`, conservative durations, secondary tiles `handleAudioFocus = false`, `#34`), and adaptive VOD read-ahead/back-buffer scaling with HTTP `429`/`509` throttle backoff (`#350`); `DefaultTrackSelector`
   (`AudioOffloadPreferences`, `CaptioningManager`).
 - `CodecPolicy` + `PolicyVideoRenderer` + `FfmpegAudio` + `AudioEffectsController` + `NightModeDrcPolicy`: LGPL-2.1+ FFmpeg 9.0.2; off-UI-thread
   4K HEVC probe; `VideoDecoderMode` (`auto`/`hardware`/`software`, `#411`); `DeviceQuirks`; stereo-only `LoudnessEnhancer` & API 28+ `DynamicsProcessing` Night-Mode DRC (`#115`).
@@ -31,9 +31,10 @@ monitor, and mobile window helpers (player core spec 6.1).
 
 ## Playback, tracks, requests and errors
 - `EventReporter` gates callbacks behind `PrepareFence` + `MediaItem.mediaId`, reports `playbackParameters.speed`,
-  emits live time-shift window bounds (`liveSeekableStartMs`, `liveEdgeMs`, `timeShiftSupported`) via `TimeShiftWindowPolicy` from `Timeline.Window` (`#28`),
+  emits live time-shift window bounds (`liveSeekableStartMs`, `liveEdgeMs`, `timeShiftSupported`) via `TimeShiftWindowPolicy` from `Timeline.Window` (`#28`) and VOD `bufferHealth` (contiguous `bufferedBehindMs` + throttled paused VOD ticks, `#350`),
   ignores `SupersededMediaException`, holds on transient audio focus loss, escalates audio failures, stops session on error.
 - `TimeShiftRingBuffer` (`cacheDir/timeshift/`, strictly capped at `64 MiB` low-RAM / `256 MiB` standard, synchronous deletion on `reset()`/`close()` and `load`/`stop`/`recreate`/`dispose`) keeps bounded live time-shift off ExoPlayer's `16 MiB` low-RAM heap cap (`#28`).
+- `VodEphemeralCache` + `VodCacheController` (`cacheDir/vod-cache/s-<uuid>`, per-session `index.db`, `RedactingVodCache` stripping `exo_redir`, refcounted `CacheDataSource` handles torn down strictly after `player` stop/release, off-main-thread delete, one-shot startup orphan sweep, `#350`).
 - `SubtitleSanitizer` repairs mojibake/SDH; `TimedSubtitleCueBuffer` + `SecondarySubtitleController` + `DualSubtitleTrackSelector`
   + `ExternalSubtitleLoader` power delayed/dual/dynamic sidecar subtitles; `StreamHttp.subtitleDataSourceFactory` isolates
   external subtitle headers/cookies (`#308`); `OffsetForwardingAudioSink`; `TrackInspection` + `VideoQualityInspection` + `ProgramInspection` (`#304`).

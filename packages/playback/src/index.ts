@@ -38,6 +38,7 @@ export {
 } from './display-sync';
 export {
   type AttemptToken,
+  type BufferHealth,
   type ChapterInfo,
   type ClockAnchor,
   type DrmClearKeyPair,
@@ -162,3 +163,16 @@ export type {
   PlaybackTimers,
   TuneRequest,
 } from './types';
+export {
+  computeVodBufferBudget,
+  decayThrottleBackoffLevel,
+  nextThrottleBackoffLevel,
+  VOD_LOW_RAM_MAX_MEMORY_BYTES,
+  VOD_LOW_RAM_THRESHOLD_BYTES,
+  VOD_MAX_DISK_BYTES,
+  VOD_MAX_FREE_DISK_RATIO,
+  VOD_MAX_THROTTLE_BACKOFF,
+  VOD_MIN_FREE_DISK_BYTES,
+  type VodBufferBudget,
+  type VodBufferBudgetInput,
+} from './vod-buffer-policy';

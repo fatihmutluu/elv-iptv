@@ -11,6 +11,7 @@ import {
 import type { DesktopAudioOutputConfig, DisplaySyncPolicy } from './display-sync';
 import type {
   AttemptToken,
+  BufferHealth,
   ClockAnchor,
   EngineCapabilities,
   EngineEvent,
@@ -127,6 +128,25 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
 
 const positiveFinite = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+
+const nonNegativeFinite = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+function sanitizeBufferHealth(raw: unknown): BufferHealth | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const candidate = raw as Record<string, unknown>;
+  const bufferedAheadMs = nonNegativeFinite(candidate.bufferedAheadMs);
+  const bufferedBehindMs = nonNegativeFinite(candidate.bufferedBehindMs);
+  if (bufferedAheadMs === undefined || bufferedBehindMs === undefined) return undefined;
+  const diskCacheBytes = nonNegativeFinite(candidate.diskCacheBytes);
+  const throttled = typeof candidate.throttled === 'boolean' ? candidate.throttled : undefined;
+  return {
+    bufferedAheadMs,
+    bufferedBehindMs,
+    ...(diskCacheBytes === undefined ? {} : { diskCacheBytes }),
+    ...(throttled === undefined ? {} : { throttled }),
+  };
+}
 
 const nonEmptyStringOrNull = (value: unknown): string | null =>
   typeof value === 'string' && value.trim().length > 0 ? value : null;
@@ -259,17 +279,21 @@ function mapEventClock(event: EngineEvent, uptimeMs: () => number, now: () => nu
   const toJs = (atMs: number): number => jsNow - Math.max(0, uptime - atMs);
   if (event.type === 'clock') {
     const raw = event.anchor;
-    const { liveSeekableStartMs: rawStart, timeShiftSupported: rawSupported, ...rest } = raw;
-    const liveSeekableStartMs =
-      typeof rawStart === 'number' && Number.isFinite(rawStart) && rawStart >= 0
-        ? rawStart
-        : undefined;
+    const {
+      liveSeekableStartMs: rawStart,
+      timeShiftSupported: rawSupported,
+      bufferHealth: rawBufferHealth,
+      ...rest
+    } = raw;
+    const liveSeekableStartMs = nonNegativeFinite(rawStart);
     const timeShiftSupported = typeof rawSupported === 'boolean' ? rawSupported : undefined;
+    const bufferHealth = sanitizeBufferHealth(rawBufferHealth);
     const anchor: ClockAnchor = {
       ...rest,
       atMs: toJs(raw.atMs),
       ...(liveSeekableStartMs === undefined ? {} : { liveSeekableStartMs }),
       ...(timeShiftSupported === undefined ? {} : { timeShiftSupported }),
+      ...(bufferHealth === undefined ? {} : { bufferHealth }),
     };
     return { ...event, anchor };
   }

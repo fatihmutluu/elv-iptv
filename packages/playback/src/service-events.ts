@@ -14,7 +14,7 @@ import {
 import type { HealthTelemetryRecorder } from './health-telemetry';
 import type { RecoveryHooks } from './seam';
 import type { SeekCoalescer } from './seek-coalescer';
-import type { PlaybackStateStore } from './state-store';
+import { type PlaybackStateStore, sameBufferHealth } from './state-store';
 import { clampLiveSeekPosition } from './timeshift';
 import type {
   PlaybackClock,
@@ -156,7 +156,9 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
             (event.anchor.durationMs !== prevAnchor.durationMs ||
               event.anchor.liveEdgeMs !== prevAnchor.liveEdgeMs ||
               event.anchor.liveSeekableStartMs !== prevAnchor.liveSeekableStartMs ||
-              event.anchor.timeShiftSupported !== prevAnchor.timeShiftSupported)
+              event.anchor.timeShiftSupported !== prevAnchor.timeShiftSupported ||
+              (event.anchor.bufferHealth !== undefined &&
+                !sameBufferHealth(event.anchor.bufferHealth, prevAnchor.bufferHealth)))
           ) {
             const mergedAnchor: ClockAnchor = {
               ...prevAnchor,
@@ -172,6 +174,9 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
               ...(event.anchor.timeShiftSupported === undefined
                 ? {}
                 : { timeShiftSupported: event.anchor.timeShiftSupported }),
+              ...(event.anchor.bufferHealth === undefined
+                ? {}
+                : { bufferHealth: event.anchor.bufferHealth }),
             };
             store.update({ anchor: mergedAnchor, ...liveEdgePatch(mergedAnchor, now) });
           }

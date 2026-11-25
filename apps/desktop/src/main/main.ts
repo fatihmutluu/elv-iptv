@@ -70,6 +70,7 @@ import type { MpvEngine } from './player/engine.ts';
 import { createEngineFor } from './player/factory.ts';
 import { registerPlayerIpc } from './player/ipc.ts';
 import { sweepLeftovers, systemSweepDeps } from './player/mpv/pid-sweep.ts';
+import { purgeOrphanedVodCacheDirs, resolveVodCacheRoot } from './player/mpv/vod-cache.ts';
 import { createPowerBlocker } from './player/power-blocker.ts';
 import { choosePresenter, parsePresenterOverride } from './player/presenter/choose.ts';
 import { sampleArea } from './player/presenter/visible.ts';
@@ -342,6 +343,8 @@ let mediaBridge: DesktopMediaBridge | undefined;
 async function startPlayer(): Promise<void> {
   const pidFile = join(app.getPath('userData'), 'mpv-pids.json');
   await sweepLeftovers(pidFile, systemSweepDeps).catch(() => 0);
+  const vodCacheRoot = resolveVodCacheRoot(app.getPath('temp'));
+  purgeOrphanedVodCacheDirs(vodCacheRoot);
   const macMediaAddon =
     process.platform === 'darwin'
       ? loadMacOsMediaAddon(
@@ -421,7 +424,7 @@ async function startPlayer(): Promise<void> {
       }
     },
     gateReport: app.isPackaged ? undefined : (line, engine) => void printGateLine(line, engine),
-    createEngine: async (owner, onUi, engineId) => {
+    createEngine: async (owner, onUi, engineId, getMultiViewTileCount) => {
       const window = BrowserWindow.fromWebContents(owner as WebContents);
       if (!window) throw new Error('the player needs an app window');
       const runtime = mpvRuntimePaths({
@@ -438,6 +441,8 @@ async function startPlayer(): Promise<void> {
         platform: process.platform,
         loadMode: 'replace',
         pidFile,
+        vodCacheRoot,
+        ...(getMultiViewTileCount === undefined ? {} : { getMultiViewTileCount }),
         engineId,
         screensHaveSeparateSpaces,
         ...(presenterOverride === undefined ? {} : { presenterOverride }),

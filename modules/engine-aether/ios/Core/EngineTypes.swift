@@ -54,6 +54,7 @@ public struct LoadRequest: Equatable, Sendable {
   public var hostOverride: String?
   public var autoFrameRate: AppleAutoFrameRateMode?
   public var autoDynamicRange: Bool?
+  public var bufferPreset: AppleBufferPreset
 
   public init(
     url: String,
@@ -73,7 +74,8 @@ public struct LoadRequest: Equatable, Sendable {
     dnsFamily: DnsFamilyPreference = .system,
     hostOverride: String? = nil,
     autoFrameRate: AppleAutoFrameRateMode? = nil,
-    autoDynamicRange: Bool? = nil
+    autoDynamicRange: Bool? = nil,
+    bufferPreset: AppleBufferPreset = .auto
   ) {
     self.url = url
     self.headers = headers
@@ -93,6 +95,7 @@ public struct LoadRequest: Equatable, Sendable {
     self.hostOverride = hostOverride
     self.autoFrameRate = autoFrameRate
     self.autoDynamicRange = autoDynamicRange
+    self.bufferPreset = bufferPreset
   }
 }
 
@@ -105,6 +108,13 @@ public enum MediaPlan: Equatable, Sendable {
   public var isLiveTs: Bool {
     if case .liveTs = self { return true }
     return false
+  }
+
+  public var mediaUrl: URL {
+    switch self {
+    case let .hls(url, _), let .vod(url, _), let .liveTs(url):
+      return url
+    }
   }
 }
 
@@ -135,6 +145,7 @@ public struct EngineLoadOptions: Equatable, Sendable {
   public var hostOverride: String?
   public var secondarySubtitleTrackId: String?
   public var externalSubtitles: [ExternalSubtitleDescriptor]
+  public var bufferPreset: AppleBufferPreset
 
   public init(
     isLive: Bool,
@@ -161,7 +172,8 @@ public struct EngineLoadOptions: Equatable, Sendable {
     dnsFamily: DnsFamilyPreference = .system,
     hostOverride: String? = nil,
     secondarySubtitleTrackId: String? = nil,
-    externalSubtitles: [ExternalSubtitleDescriptor] = []
+    externalSubtitles: [ExternalSubtitleDescriptor] = [],
+    bufferPreset: AppleBufferPreset = .auto
   ) {
     self.isLive = isLive
     self.httpHeaders = httpHeaders
@@ -188,6 +200,7 @@ public struct EngineLoadOptions: Equatable, Sendable {
     self.hostOverride = hostOverride
     self.secondarySubtitleTrackId = secondarySubtitleTrackId
     self.externalSubtitles = externalSubtitles
+    self.bufferPreset = bufferPreset
   }
 }
 
@@ -252,8 +265,10 @@ public enum BackendObservation: Equatable, Sendable {
     durationSeconds: Double?,
     liveEdgeSeconds: Double?,
     liveSeekableStartSeconds: Double? = nil,
-    timeShiftSupported: Bool? = nil
+    timeShiftSupported: Bool? = nil,
+    bufferHealth: AppleBufferHealth? = nil
   )
+  case bufferHealth(AppleBufferHealth?)
   case duration(Double)
   case tracks(MediaTracksOut)
   case mediaInfo(StreamVideoInfo)
@@ -297,6 +312,7 @@ public struct ClockAnchorOut: Equatable, Sendable {
   public let liveSeekableStartMs: Double?
   public let timeShiftSupported: Bool?
   public let isLiveTs: Bool?
+  public var bufferHealth: AppleBufferHealth?
 
   public init(
     positionMs: Double,
@@ -306,7 +322,8 @@ public struct ClockAnchorOut: Equatable, Sendable {
     liveEdgeMs: Double? = nil,
     liveSeekableStartMs: Double? = nil,
     timeShiftSupported: Bool? = nil,
-    isLiveTs: Bool? = nil
+    isLiveTs: Bool? = nil,
+    bufferHealth: AppleBufferHealth? = nil
   ) {
     self.positionMs = positionMs
     self.atMs = atMs
@@ -316,6 +333,7 @@ public struct ClockAnchorOut: Equatable, Sendable {
     self.liveSeekableStartMs = liveSeekableStartMs
     self.timeShiftSupported = timeShiftSupported
     self.isLiveTs = isLiveTs
+    self.bufferHealth = bufferHealth
   }
 }
 
@@ -424,6 +442,9 @@ public enum EngineEventOut: Equatable, Sendable {
       }
       if let isLiveTs = anchor.isLiveTs {
         anchorDict["isLiveTs"] = isLiveTs
+      }
+      if let bufferHealth = anchor.bufferHealth {
+        anchorDict["bufferHealth"] = bufferHealth.toDictionary()
       }
       return ["attempt": attempt, "type": "clock", "anchor": anchorDict]
     case let .stall(attempt, phase, atMs):

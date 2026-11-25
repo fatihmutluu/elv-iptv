@@ -557,6 +557,8 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.stats.droppedFrames': 'Atlanan kare',
   'player.stats.cacheHitRate': 'Önbellek isabeti',
   'player.stats.longTasks': 'Arayüz takılmaları',
+  'player.stats.buffer': 'Önbellek',
+  'player.stats.throttled': 'kısıtlı',
   'player.scrub.normal': '1×',
   'player.scrub.quarter': '0.25× · Hassas',
   'player.scrub.fine': '0.1× · Çok hassas',

@@ -145,12 +145,18 @@ extension AetherBackend {
           self.onObservation?(.readerFault(readerFault), serial)
         }
         if let info = currentEngine.errorInfo {
+          self.recordVodThrottleIfNeeded(
+            kind: info.kind.rawValue,
+            underlyingCode: info.underlyingCode,
+            serial: serial
+          )
           self.onObservation?(
             .failure(.engine(kind: info.kind.rawValue, underlyingDomain: info.underlyingDomain, underlyingCode: info.underlyingCode)),
             serial
           )
         } else {
           let nsError = error as NSError
+          self.recordVodThrottleIfNeeded(kind: nil, underlyingCode: nsError.code, serial: serial)
           self.onObservation?(
             .failure(.engine(kind: "sourceOpenFailed", underlyingDomain: nsError.domain, underlyingCode: nsError.code)),
             serial

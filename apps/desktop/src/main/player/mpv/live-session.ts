@@ -1,4 +1,4 @@
-import type { SubtitleStyleConfig } from '@elv/domain';
+import type { BufferPreset, SubtitleStyleConfig } from '@elv/domain';
 import type {
   AttemptToken,
   DesktopAudioOutputConfig,
@@ -45,6 +45,7 @@ import {
 import { subtitleStyleCommands } from './subtitle-style.ts';
 import { parseMpvDelayMs } from './track-snapshot.ts';
 import type { TrackTracker } from './tracks.ts';
+import type { VodCacheCoordinator } from './vod-cache.ts';
 
 /** Media request bound to an attempt slot. */
 export interface MediaRequest {
@@ -57,6 +58,7 @@ export interface MediaRequest {
   subtitleStyle?: SubtitleStyleConfig;
   externalSubtitles?: readonly ExternalSubtitleTrack[];
   programId?: string;
+  bufferPreset?: BufferPreset;
 }
 
 /** Active media attempt and its bound mpv playlist entry id. */
@@ -149,6 +151,7 @@ export interface LiveSessionHooks {
     readonly text: string;
   }): void;
   readaheadStore?: ReadaheadTierStore;
+  vodCache?: VodCacheCoordinator;
 }
 
 /** Creates per-process mpv session helpers (`connect`, `send`, `stopCurrent`, `loadSlot`). */
@@ -166,8 +169,11 @@ export function createSessionController(hooks: LiveSessionHooks) {
   };
 
   const fromCurrent = (L: LiveSession, events: EngineEvent[]): void => {
-    if (!isActive(L, L.entries.current()?.entryId)) return;
-    if (events.some((ev) => ev.type === 'firstFrame')) L.readahead.onFirstFrame();
+    const current = L.entries.current();
+    if (!isActive(L, current?.entryId)) return;
+    if (current?.kind === 'live' && events.some((ev) => ev.type === 'firstFrame')) {
+      L.readahead.onFirstFrame();
+    }
     hooks.emit(events);
   };
 
@@ -219,6 +225,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
       L.hasQueuedPlaylist = false;
       L.queuedEntryId = undefined;
       L.inFlightQueued = undefined;
+      hooks.vodCache?.promoteQueuedSession();
       hooks.promoteQueued?.(queued);
       opening.onStarted(entryId, OPEN_WAIT_MS);
       L.entries.started(entryId);
@@ -227,8 +234,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
       tracks.beginMedia(current.token);
       const events = L.deriver.begin(current.token, current.kind, false);
       if (L.paused) events.push(...L.deriver.property('pause', true));
-      L.readahead.beginMedia(queued.request.url);
-      if (L.paused) L.readahead.property('pause', true);
+      L.readahead.reset();
       if (hooks.getDesiredDeinterlaceMode?.() === 'auto') {
         hooks.enqueueCommand(['set_property', 'deinterlace', 'auto'], queued);
       }
@@ -254,8 +260,12 @@ export function createSessionController(hooks: LiveSessionHooks) {
     if (L.paused) events.push(...L.deriver.property('pause', true));
     if (isActive(L, entryId)) {
       const media = hooks.getMedia();
-      if (media) L.readahead.beginMedia(media.request.url);
-      if (L.paused) L.readahead.property('pause', true);
+      if (current.kind === 'live') {
+        if (media) L.readahead.beginMedia(media.request.url);
+        if (L.paused) L.readahead.property('pause', true);
+      } else {
+        L.readahead.reset();
+      }
       if (hooks.getDesiredDeinterlaceMode?.() === 'auto') {
         hooks.enqueueCommand(['set_property', 'deinterlace', 'auto'], media);
       }
@@ -279,6 +289,16 @@ export function createSessionController(hooks: LiveSessionHooks) {
       opening.onEnded(entryId);
     }
     for (const waiter of [...L.endWaiters]) if (waiter.id === entryId) waiter.done(true);
+    const endedSlot = active ? hooks.getMedia() : undefined;
+    if (endedSlot) {
+      hooks.vodCache?.onEndFile(
+        endedSlot.token,
+        endedSlot.request.url,
+        endedSlot.request.kind,
+        events,
+      );
+    }
+    hooks.vodCache?.sweepRetired();
     if (active && events.length > 0) hooks.emit(events);
   };
 
@@ -324,10 +344,14 @@ export function createSessionController(hooks: LiveSessionHooks) {
           if (media) hooks.onFileLoadedExternalSubtitles?.(media);
         }
         return;
-      case 'playback-restart':
-        if (isActive(L, L.entries.current()?.entryId)) L.readahead.onPlaybackRestart();
+      case 'playback-restart': {
+        const current = L.entries.current();
+        if (current?.kind === 'live' && isActive(L, current.entryId)) {
+          L.readahead.onPlaybackRestart();
+        }
         fromCurrent(L, L.deriver.fileEvent(e));
         return;
+      }
       case 'property-change': {
         const name = String(e['name']);
         if (name === 'pause') L.paused = e['data'] === true;
@@ -368,7 +392,10 @@ export function createSessionController(hooks: LiveSessionHooks) {
         }
         if (OBSERVED_PROPERTY_NAMES.has(name)) {
           fromCurrent(L, L.deriver.property(name, e['data']));
-          if (isActive(L, L.entries.current()?.entryId)) L.readahead.property(name, e['data']);
+          const current = L.entries.current();
+          if (current?.kind === 'live' && isActive(L, current.entryId)) {
+            L.readahead.property(name, e['data']);
+          }
         }
         return;
       }
@@ -558,6 +585,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
       }
       L.inFlightQueued = undefined;
       L.hasQueuedPlaylist = false;
+      hooks.vodCache?.discardQueuedSession();
       await send(L, ['playlist-clear']);
     },
     async queueSlot(L: LiveSession, ownerSlot: MediaSlot, queued: QueuedMediaSlot): Promise<void> {
@@ -585,11 +613,22 @@ export function createSessionController(hooks: LiveSessionHooks) {
       }
       L.inFlightQueued = queued;
       L.hasQueuedPlaylist = true;
-      const reply = await send(L, loadfileCommand(queued.request, 'append-play'));
+      const queuedVodOpts = hooks.vodCache?.prepareQueuedLoad(queued.request);
+      const reply = await send(
+        L,
+        loadfileCommand(
+          { ...queued.request, vodCacheOptions: queuedVodOpts ?? { 'cache-on-disk': 'no' } },
+          'append-play',
+        ),
+      );
       L.inFlightQueued = undefined;
-      if (!reply || hooks.getLive() !== L) return;
+      if (!reply || hooks.getLive() !== L) {
+        hooks.vodCache?.discardQueuedSession();
+        return;
+      }
       if (reply.error !== 'success') {
         L.hasQueuedPlaylist = false;
+        hooks.vodCache?.discardQueuedSession();
         if (hooks.getQueued?.() === queued) hooks.setQueued?.(undefined);
         return;
       }
@@ -614,11 +653,15 @@ export function createSessionController(hooks: LiveSessionHooks) {
           L.entries.unbind(L.queuedEntryId);
           L.queuedEntryId = undefined;
         }
+        hooks.vodCache?.discardQueuedSession();
         await send(L, ['playlist-clear']);
         L.hasQueuedPlaylist = false;
         if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
       }
-      if (stopFirst && !(await stopCurrent(L))) return;
+      if (stopFirst) {
+        hooks.vodCache?.retireActiveSession();
+        if (!(await stopCurrent(L))) return;
+      }
       if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
       const desiredAudio = hooks.getDesiredAudioDevice?.();
       if (desiredAudio !== undefined && L.appliedAudioDevice !== desiredAudio) {
@@ -703,18 +746,21 @@ export function createSessionController(hooks: LiveSessionHooks) {
       L.inFlight = slot;
       opening.begin(slot);
       const effectiveStyle = hooks.getDesiredSubtitleStyle?.() ?? slot.request.subtitleStyle;
+      const vodCacheOptions = hooks.vodCache?.prepareLoad(slot.request);
       const reply = await send(
         L,
         loadfileCommand({
           ...slot.request,
           ...(effectiveStyle === undefined ? {} : { subtitleStyle: effectiveStyle }),
           secondarySubtitleActive: hooks.isSecondarySubtitleActive?.() === true,
+          ...(vodCacheOptions === undefined ? {} : { vodCacheOptions }),
         }),
       );
       if (!reply || hooks.getLive() !== L) return;
       if (reply.error !== 'success') {
         L.inFlight = undefined;
         opening.finish();
+        hooks.vodCache?.retireActiveSession();
         if (slot === hooks.getMedia()) {
           hooks.emit([
             {

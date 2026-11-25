@@ -1,5 +1,6 @@
 import {
   type AccessibilityFontFamily,
+  type BufferPreset,
   type DeinterlaceMode,
   type DnsFamilyPreference,
   MAX_HOST_OVERRIDE_CHARS,
@@ -471,6 +472,8 @@ const isHwdecProfile = (x: unknown): x is HwdecProfile =>
   x === 'auto-safe' || x === 'auto-copy' || x === 'no' || x === 'darwin-compat';
 const isResizeMode = (x: unknown): x is ResizeMode =>
   x === 'fit' || x === 'fill' || x === 'stretch';
+const isBufferPreset = (x: unknown): x is BufferPreset =>
+  x === 'auto' || x === 'balanced' || x === 'large';
 const isSubtitleFontFamily = (x: unknown): x is AccessibilityFontFamily =>
   x === 'system' || x === 'atkinson' || x === 'opendyslexic';
 const isDnsFamilyPreference = (x: unknown): x is DnsFamilyPreference =>
@@ -527,6 +530,7 @@ function isLoadCommand(x: unknown): x is LoadCommand {
     (options['filterSdhSubtitles'] === undefined ||
       typeof options['filterSdhSubtitles'] === 'boolean') &&
     (options['allowLegacyTls'] === undefined || typeof options['allowLegacyTls'] === 'boolean') &&
+    (options['bufferPreset'] === undefined || isBufferPreset(options['bufferPreset'])) &&
     (options['dnsFamily'] === undefined || isDnsFamilyPreference(options['dnsFamily'])) &&
     (options['hostOverride'] === undefined || isHostOverrideLiteral(options['hostOverride'])) &&
     (options['audioTrackId'] === undefined || isAudioTrackId(options['audioTrackId'])) &&

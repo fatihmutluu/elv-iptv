@@ -52,6 +52,7 @@ class Media3Engine : SharedObject {
   private lateinit var tracksBridge: TrackSelectorBridge
   private lateinit var mediaSessionController: MediaSessionController
   private lateinit var displayRefresh: DisplayRefreshController
+  private lateinit var vodCache: VodCacheController
 
   private val assOverlay: AssOverlayBridge
 
@@ -109,6 +110,8 @@ class Media3Engine : SharedObject {
     onFirstFrame = surfaces::onFramed, onCue = surfaces::onCue,
     onTerminalError = { mediaSessionController.onPlaybackStopped() },
     onVideoFrameRateDetected = { fps -> displayRefresh.onContentFrameRate(fps) },
+    vodBufferHealthProvider = { vodCache.healthSnapshot() },
+    onHttpError = { isLive, status -> vodCache.onHttpError(isLive, status) },
   )
   private val pictures = object : Player.Listener {
     override fun onVideoSizeChanged(videoSize: VideoSize) { if (fence.isRendererOpen) surfaces.onVideoSizeChanged(videoSize) }
@@ -189,6 +192,7 @@ class Media3Engine : SharedObject {
       }
       val normalized = next.copy(url = next.url.trim())
       if (request?.url != normalized.url && !normalized.preferHevcOverDolbyVision) codecPolicy.clearDolbyVisionFallback()
+      vodCache.onLoadUrl(normalized.url)
       token = attempt
       request = normalized
       audioFallbackAttempted = false
@@ -371,9 +375,7 @@ class Media3Engine : SharedObject {
       if (!commandFence.canRunStop()) return@post
       if (epoch > activeEpoch) activeEpoch = epoch
       adopt(attempt)
-      clearSessionState()
-      player?.stop()
-      player?.clearMediaItems()
+      stopPlayerAndClearSession()
     }
   }
 
@@ -394,6 +396,7 @@ class Media3Engine : SharedObject {
       beginGeneration()
       pendingRebuildDeferred = false
       replacePlayer(playerSoftwareAudio, playerPreferHevc, playerStreamKind, playerBufferPreset, playerDecoderMode)
+      vodCache.tearDown()
     }
   }
 
@@ -434,7 +437,7 @@ class Media3Engine : SharedObject {
       externalSubLoader.dispose()
       http.dispatcher.cancelAll()
       codecPolicy.stopAudioCapabilities()
-      releasePlayer()
+      releasePlayer(); vodCache.tearDown(resetThrottle = true)
       audioEffects.release()
       http.dispatcher.executorService.shutdown()
       closer.shutdown()
@@ -474,17 +477,17 @@ class Media3Engine : SharedObject {
   private fun rejectDisallowedUrl(attempt: Int, rebuildFirst: Boolean) {
     if (rebuildFirst) pendingRebuildDeferred = true
     token = attempt
-    clearSessionState()
-    player?.stop()
-    player?.clearMediaItems()
+    stopPlayerAndClearSession()
     Log.w(TAG, "rejected playback URL with disallowed scheme")
-    sendEvent(
-      mapOf(
-        "type" to "error",
-        "error" to mapOf("code" to "unsupported-format", "detail" to "disallowed-url-scheme"),
-      ),
-    )
+    sendEvent(mapOf("type" to "error", "error" to mapOf("code" to "unsupported-format", "detail" to "disallowed-url-scheme")))
     surfaces.onCue(ScreenCue.ERROR, played = false)
+  }
+
+  private fun stopPlayerAndClearSession() {
+    reporter.end()
+    player?.stop(); player?.clearMediaItems()
+    clearSessionState()
+    vodCache.tearDown(resetThrottle = true)
   }
 
   private fun clearSessionState() {
@@ -529,14 +532,12 @@ class Media3Engine : SharedObject {
     audioDelayUs.set(syncDelayMsToUs(baseAudioDelayMs + offsetMs))
   }
 
-  private fun stopFromTaskRemoved() = post {
-    clearSessionState(); player?.stop(); player?.clearMediaItems()
-  }
+  private fun stopFromTaskRemoved() = post { stopPlayerAndClearSession() }
 
   private fun stopFromRemoteController() {
     val runStop = {
       if (!commandFence.isDisposedNow) {
-        clearSessionState(); player?.stop(); player?.clearMediaItems()
+        stopPlayerAndClearSession()
         sendRemoteMediaAction(SessionForwardingPlayer.ACTION_STOP)
       }
     }
@@ -581,15 +582,12 @@ class Media3Engine : SharedObject {
     multiViewTileCount = clampMultiViewTileCount(options.multiViewTileCount)
     appContextRef = context.applicationContext ?: context
     externalSubLoader = ExternalSubtitleLoader(context = appContextRef)
-    displayRefresh = DisplayRefreshController(
-      activityProvider = activityProvider,
-      onActiveRefreshRateChanged = { _ -> syncEffectiveAudioDelay() },
-    )
+    displayRefresh = DisplayRefreshController(activityProvider) { syncEffectiveAudioDelay() }
     val profile = readDeviceMemoryProfile(context)
     lowRamDevice = profile.lowRam
-    val cacheDir: File? = context.cacheDir
-    appCacheDir = cacheDir
-    cacheDir?.let { TimeShiftRingBuffer.purgeOrphansOnStartup(it) }
+    val cacheDir: File? = context.cacheDir; appCacheDir = cacheDir
+    vodCache = VodCacheController(appContextRef, cacheDir, profile)
+    cacheDir?.let { TimeShiftRingBuffer.purgeOrphansOnStartup(it) }; vodCache.purgeOrphansOnStartup()
     playerFactory = PlayerFactory(
       context = context, looper = thread.looper,
       loadControlForStream = { kind: StreamKind, preset: BufferPreset -> profile.loadControl(kind, preset) },
@@ -614,7 +612,8 @@ class Media3Engine : SharedObject {
     post {
       codecPolicy.startAudioCapabilities(context, handler)
       codecPolicy.startHardwareHevc4kProbe(handler)
-      player = buildPlayer(softwareAudio = false)
+      val initialVod = vodCache.computeBudget(StreamKind.VOD, BufferPreset.AUTO, multiViewTileCount, recordActive = false)
+      player = buildPlayer(softwareAudio = false, vodBudget = initialVod.takeIf { it.enabled })
     }
   }
 
@@ -668,20 +667,21 @@ class Media3Engine : SharedObject {
     val streamKind = next.streamKind()
     val bufferPreset = next.bufferPreset
     val decoderMode = next.decoderMode
+    val vodBudget = vodCache.computeBudget(streamKind, bufferPreset, multiViewTileCount)
     val terminal = existing != null && (existing.playbackState == Player.STATE_ENDED || existing.playerError != null)
     val rebuild = forceRebuild || existing == null || terminal || playerSoftwareAudio != next.softwareAudio ||
       playerPreferHevc != next.preferHevcOverDolbyVision || playerStreamKind != streamKind ||
       playerBufferPreset != bufferPreset || playerDecoderMode != decoderMode ||
       playerHandleAudioFocus != (handleAudioFocus && playerFactory.audioFocusAllowed) ||
-      playerMultiViewTileCount != multiViewTileCount
+      playerMultiViewTileCount != multiViewTileCount || vodCache.needsPlayerRebuild(streamKind, vodBudget)
     if (rebuild) {
       pendingRebuildDeferred = false
-      replacePlayer(next.softwareAudio, next.preferHevcOverDolbyVision, streamKind, bufferPreset, decoderMode)
+      replacePlayer(next.softwareAudio, next.preferHevcOverDolbyVision, streamKind, bufferPreset, decoderMode, vodBudget.takeIf { it.enabled })
     } else {
       existing.isScrubbingModeEnabled = false
-      existing.stop()
+      existing.stop(); existing.clearMediaItems()
     }
-    val current = player ?: return
+    val current = player ?: run { vodCache.tearDown(); return }
     current.isScrubbingModeEnabled = false
     current.playbackParameters =
       if (next.live) PlaybackParameters.DEFAULT else PlaybackSpeedPolicy.parameters(currentSpeed, pitchLock)
@@ -698,24 +698,20 @@ class Media3Engine : SharedObject {
         activeTimeShiftTracker = TimeShiftWindowTracker(ring)
       }
     }
+    val activeVodCache = vodCache.openForPrepare(streamKind, vodBudget)
     reporter.begin(
       current, next.live, prepareSerial = serial, reused = !rebuild, isLiveTs = isLiveTs,
       ringWindowProvider = activeTimeShiftTracker?.let { tracker -> tracker::currentWindow },
+      vodBackBufferMs = vodCache.activeBackBufferMs(), vodStartPositionMs = positionMs,
     )
     val transferListener = ProgressTransferListener(shouldReport = { reporter.isWaitingForMedia }) { bytes, atMs ->
       post { if (generation == prepareGen) reporter.onTransferProgress(bytes, atMs) }
     }
-    val httpClient = networkScopedClient(
-      base = http,
-      allowLegacyTls = next.allowLegacyTls,
-      dnsFamily = next.dnsFamily,
-      hostOverride = next.hostOverride,
-      initialUrl = next.url,
-    )
+    val httpClient = networkScopedClient(http, next.allowLegacyTls, next.dnsFamily, next.hostOverride, next.url)
     val source = createMediaSource(
       next, gate, prepareGen, serial, lowRamDevice, httpClient, transferListener,
       timeShiftRingBuffer = activeTimeShiftBuffer, timeShiftTracker = activeTimeShiftTracker,
-      context = appContextRef, extractorsDecorator = assOverlay::wrapExtractorsFactory,
+      context = appContextRef, extractorsDecorator = assOverlay::wrapExtractorsFactory, vodCache = activeVodCache,
     )
     if (positionMs == null) current.setMediaSource(source, true) else current.setMediaSource(source, positionMs)
     current.playWhenReady = true
@@ -726,16 +722,17 @@ class Media3Engine : SharedObject {
   private fun buildPlayer(
     softwareAudio: Boolean, preferHevc: Boolean = false, streamKind: StreamKind = StreamKind.VOD,
     bufferPreset: BufferPreset = BufferPreset.AUTO, decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
+    vodBudget: VodBufferBudget? = null,
   ): ExoPlayer {
     playerSoftwareAudio = softwareAudio; playerPreferHevc = preferHevc
     playerStreamKind = streamKind; playerBufferPreset = bufferPreset; playerDecoderMode = decoderMode
-    playerMultiViewTileCount = multiViewTileCount
+    playerMultiViewTileCount = multiViewTileCount; vodCache.recordPlayerBuilt(streamKind, vodBudget)
     return playerFactory.build(
       softwareAudio = softwareAudio, preferHevcOverDolbyVision = preferHevc,
       live = streamKind != StreamKind.VOD, streamKind = streamKind,
       bufferPreset = bufferPreset, decoderMode = decoderMode,
       handleAudioFocus = handleAudioFocus, multiViewTileCount = multiViewTileCount,
-      autoFrameRateMode = displayRefresh.mode,
+      autoFrameRateMode = displayRefresh.mode, vodBudget = vodBudget,
     ).also { built ->
       playerHandleAudioFocus = handleAudioFocus && playerFactory.audioFocusAllowed
       built.volume = if (handleAudioFocus) 1f else 0f
@@ -762,12 +759,13 @@ class Media3Engine : SharedObject {
   private fun replacePlayer(
     softwareAudio: Boolean, preferHevc: Boolean = false, streamKind: StreamKind = StreamKind.VOD,
     bufferPreset: BufferPreset = BufferPreset.AUTO, decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
+    vodBudget: VodBufferBudget? = null,
   ): ExoPlayer {
     val old = player; player = null
     surfaces.detachAssOverlaySync(DETACH_TIMEOUT_MS); assOverlay.release()
     if (old != null) detachPlayerInstance(old, clearSurface = true)
     try {
-      return buildPlayer(softwareAudio, preferHevc, streamKind, bufferPreset, decoderMode).also { player = it }
+      return buildPlayer(softwareAudio, preferHevc, streamKind, bufferPreset, decoderMode, vodBudget).also { player = it }
     } finally {
       if (old != null) {
         if (player == null) mediaSessionController.onPlaybackStopped()

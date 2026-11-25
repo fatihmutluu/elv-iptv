@@ -110,6 +110,12 @@ final class AetherBackend: PlayerBackend {
   var playbackActiveIntent = false
   var lastDroppedVideoFrames = 0
   var lastLiveSeekableWindow: LiveSeekableWindow?
+  var vodThrottleBackoffLevel = 0
+  var lastVodThrottleUrl: URL?
+  var vodThrottleRecordedSerial = 0
+  var lastObservedErrorLogCount = 0
+  var latestVodBufferHealth: AppleBufferHealth?
+  var vodMemoryWarningLatched = false
   var displaySyncSettings: AppleDisplaySyncSettings = .default
   var appliedDisplayRefreshRate: Float?
   var appliedDisplayDynamicRange: AppleHdrDynamicRange?
@@ -203,6 +209,16 @@ final class AetherBackend: PlayerBackend {
     loadStartUptimeMs = ProcessInfo.processInfo.systemUptime * 1_000.0
     currentPlan = plan
     currentLoadOptions = options
+    if options.isLive {
+      vodThrottleBackoffLevel = 0
+      lastVodThrottleUrl = nil
+    } else {
+      let url = plan.mediaUrl
+      if lastVodThrottleUrl != url {
+        vodThrottleBackoffLevel = 0
+        lastVodThrottleUrl = url
+      }
+    }
     displaySyncSettings = options.displaySync
     resetObservedDisplayVideoMetadata()
     if !displaySyncSettings.isEnabled {
@@ -375,6 +391,8 @@ final class AetherBackend: PlayerBackend {
     resetAirPlayState()
     isExternalDisplaySceneActive = false
     airPlayMonitor = nil
+    vodThrottleBackoffLevel = 0
+    lastVodThrottleUrl = nil
     currentPlan = nil
     currentLoadOptions = nil
     desiredAudioStreamId = nil
@@ -529,6 +547,10 @@ final class AetherBackend: PlayerBackend {
     playbackActiveIntent = false
     lastDroppedVideoFrames = 0
     lastLiveSeekableWindow = nil
+    vodThrottleRecordedSerial = 0
+    lastObservedErrorLogCount = 0
+    latestVodBufferHealth = nil
+    vodMemoryWarningLatched = false
     liveRecoveryPolicy.reset()
     osdClockThrottle.reset()
   }
@@ -586,6 +608,7 @@ final class AetherBackend: PlayerBackend {
     if let item = engine?.currentAVPlayer?.currentItem ?? engine?.currentAVPlayerItem {
       item.preferredMaximumResolution = .zero
       item.preferredPeakBitRate = 0
+      item.preferredForwardBufferDuration = 0
     }
   }
 

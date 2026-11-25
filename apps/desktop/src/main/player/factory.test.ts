@@ -357,4 +357,22 @@ describe('createEngineFor', () => {
     expect(listeners.get('enter-full-screen')?.size).toBe(0);
     expect(listeners.get('leave-full-screen')?.size).toBe(0);
   });
+
+  it('forwards sandbox-safe vodCacheRoot and getMultiViewTileCount to createMpvEngine (#350)', async () => {
+    const getMultiViewTileCount = () => 3;
+    await createEngineFor(fakeOwner, {
+      runtime,
+      platform: 'win32',
+      loadMode: 'replace',
+      pidFile: 'C:\\tmp\\mpv-pids.json',
+      vodCacheRoot: 'C:\\Users\\demo\\AppData\\Local\\Cache\\elv-vod-cache',
+      getMultiViewTileCount,
+      readaheadStore: stubReadaheadStore,
+      onUi: () => undefined,
+    });
+    expect(mocks.engineDeps[0]?.vodCacheRoot).toBe(
+      'C:\\Users\\demo\\AppData\\Local\\Cache\\elv-vod-cache',
+    );
+    expect(mocks.engineDeps[0]?.getMultiViewTileCount).toBe(getMultiViewTileCount);
+  });
 });

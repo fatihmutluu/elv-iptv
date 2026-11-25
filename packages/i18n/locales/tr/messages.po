@@ -3285,3 +3285,9 @@ msgstr "Göndermeden önce lütfen kısa bir açıklama yazın."
 
 msgid "feedback.errorFailed"
 msgstr "Geri bildirim şu an gönderilemedi. Lütfen daha sonra tekrar deneyin."
+
+msgid "player.stats.buffer"
+msgstr "Önbellek"
+
+msgid "player.stats.throttled"
+msgstr "kısıtlı"

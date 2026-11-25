@@ -63,6 +63,7 @@ export interface PlayerIpcDeps {
     owner: WebContentsLike,
     onUi: (event: PlayerUiEvent) => void,
     engineId: string,
+    getMultiViewTileCount?: () => number,
   ): Promise<MpvEngine>;
   /** The main monotonic clock the engine stamps its events with; sent as `mainNowMs` for the renderer's offset. */
   now(): number;
@@ -354,8 +355,10 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     };
 
     let engine: MpvEngine;
+    const getMultiViewTileCount = (): number =>
+      Math.max(1, countOwnedBy(sender.id) + (pendingOpens.get(sender.id)?.size ?? 0));
     try {
-      engine = await deps.createEngine(sender, emitUi, engineId);
+      engine = await deps.createEngine(sender, emitUi, engineId, getMultiViewTileCount);
     } finally {
       if (pendingOpens.get(sender.id) === pendingSet) {
         pendingSet.delete(engineId);
