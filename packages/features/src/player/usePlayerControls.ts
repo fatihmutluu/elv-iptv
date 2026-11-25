@@ -61,7 +61,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
   externalOverlayOpenRef.current =
     params.externalOverlayOpen === true || pinDialog !== null || profilePickerOpen;
 
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(params.initialMuted === true);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
   const [volume, setVolumeState] = useState<number>(() => clampVolume(params.initialVolume ?? 100));

@@ -19,6 +19,7 @@ import type {
   PlayerBridge,
   PlayerEventMessage,
   PlayerOpenOptions,
+  PlayerOpenReply,
   PlayerRemoteMediaActionMessage,
   PlayerUiEvent,
   PlayerUiMessage,
@@ -121,6 +122,8 @@ export interface DesktopEngine extends PlayerEngine {
   onUi(listener: (event: PlayerUiEvent) => void): () => void;
   /** Subscribes to decoded GPU `VideoFrame` deliveries in `'canvas'` mode (`#95`); returns unsubscribe. */
   onFrame?(listener: (frame: VideoFrameLike) => void): () => void;
+  /** Detaches all local renderer subscriptions without closing the live main-process engine (used after `park`). */
+  detach(): void;
 }
 
 const MAX_HELD_EVENTS = 100;
@@ -137,16 +140,11 @@ const shiftAnchor = (event: EngineEvent, offset: number): EngineEvent => {
   }
 };
 
-/**
- * Opens an engine in the main process over `bridge` and returns its proxy. Main stamps events with its own clock;
- * the open handshake measures the offset to `now` (the midpoint of the round trip) and every `atMs` is mapped to the
- * renderer's clock. Messages that beat the open reply are held and applied once the engine id is known.
- */
-export async function createDesktopEngine(
+async function bindDesktopEngine(
   bridge: PlayerBridge,
   now: () => number,
-  options?: PlayerOpenOptions,
-): Promise<DesktopEngine> {
+  acquire: () => Promise<PlayerOpenReply | null>,
+): Promise<DesktopEngine | null> {
   const listeners = new Set<(event: EngineEvent) => void>();
   const uiListeners = new Set<(event: PlayerUiEvent) => void>();
   const audioDeviceListeners = new Set<
@@ -266,14 +264,20 @@ export async function createDesktopEngine(
     }) ?? (() => undefined);
 
   const t0 = now();
-  let reply: Awaited<ReturnType<PlayerBridge['open']>>;
+  let reply: PlayerOpenReply | null;
   try {
-    reply = options === undefined ? await bridge.open() : await bridge.open(options);
+    reply = await acquire();
   } catch (error) {
     offEvent();
     offUi();
     offRemoteAction();
     throw error;
+  }
+  if (!reply) {
+    offEvent();
+    offUi();
+    offRemoteAction();
+    return null;
   }
   offset = (t0 + now()) / 2 - reply.mainNowMs;
   engineId = reply.engineId;
@@ -285,6 +289,21 @@ export async function createDesktopEngine(
 
   const send = (command: BridgeCommand): void => {
     if (!released) bridge.send({ engineId: id, command });
+  };
+
+  const detachLocal = (): void => {
+    released = true;
+    listeners.clear();
+    uiListeners.clear();
+    audioDeviceListeners.clear();
+    queueAdvancedListeners.clear();
+    passthroughFallbackListeners.clear();
+    remoteMediaActionListeners.clear();
+    for (const offFrame of [...frameUnsubs]) offFrame();
+    frameUnsubs.clear();
+    offEvent();
+    offUi();
+    offRemoteAction();
   };
 
   return {
@@ -399,21 +418,14 @@ export async function createDesktopEngine(
     setArea(area) {
       if (!released) bridge.setArea({ engineId: id, area });
     },
+    detach() {
+      if (released) return;
+      detachLocal();
+    },
     release() {
       if (released) return;
       send({ name: 'release' });
-      released = true;
-      listeners.clear();
-      uiListeners.clear();
-      audioDeviceListeners.clear();
-      queueAdvancedListeners.clear();
-      passthroughFallbackListeners.clear();
-      remoteMediaActionListeners.clear();
-      for (const offFrame of [...frameUnsubs]) offFrame();
-      frameUnsubs.clear();
-      offEvent();
-      offUi();
-      offRemoteAction();
+      detachLocal();
       bridge.close(id).catch(() => undefined);
     },
     subscribe(listener) {
@@ -475,4 +487,42 @@ export async function createDesktopEngine(
       return cleanup;
     },
   };
+}
+
+/**
+ * Opens an engine in the main process over `bridge` and returns its proxy. Main stamps events with its own clock;
+ * the open handshake measures the offset to `now` (the midpoint of the round trip) and every `atMs` is mapped to the
+ * renderer's clock. Messages that beat the open reply are held and applied once the engine id is known.
+ */
+export async function createDesktopEngine(
+  bridge: PlayerBridge,
+  now: () => number,
+  options?: PlayerOpenOptions,
+): Promise<DesktopEngine> {
+  const engine = await bindDesktopEngine(bridge, now, () =>
+    options === undefined ? bridge.open() : bridge.open(options),
+  );
+  if (!engine) throw new Error('player:open returned no engine');
+  return engine;
+}
+
+/**
+ * Adopts a previously parked live engine from main without restarting mpv or dropping early replayed events.
+ * Returns `null` if the bridge does not support adoption or the parked engine is no longer available.
+ */
+export async function adoptDesktopEngine(
+  bridge: PlayerBridge,
+  engineId: string,
+  now: () => number,
+): Promise<DesktopEngine | null> {
+  if (!bridge.adopt) return null;
+  try {
+    return await bindDesktopEngine(
+      bridge,
+      now,
+      () => bridge.adopt?.(engineId) ?? Promise.resolve(null),
+    );
+  } catch {
+    return null;
+  }
 }

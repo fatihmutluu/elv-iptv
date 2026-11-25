@@ -1,4 +1,5 @@
 import type { CatalogService, SourceRow } from '@elv/data';
+import type { DeinterlaceMode } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import type { ConnectionTracker, PlaybackClock, PlaybackTimers } from '@elv/playback';
 import {
@@ -8,6 +9,7 @@ import {
   TvFocusAnchor,
   useI18n,
   useKeyInterpreter,
+  useSafeHoverBridge,
   useTheme,
   useViewport,
   webBackdropBlur,
@@ -16,7 +18,7 @@ import {
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
-import type { ThermalDevicePort, VideoHost } from '../ports/video-host';
+import type { AdoptedPlaybackSession, ThermalDevicePort, VideoHost } from '../ports/video-host';
 import { MultiViewChannelPicker } from './MultiViewChannelPicker';
 import { MultiViewTileCard } from './MultiViewTileCard';
 import {
@@ -27,6 +29,8 @@ import {
   moveMultiViewGridFocus,
   moveMultiViewTileActionFocus,
 } from './multiview-model';
+import { OsdVolumeSlider } from './OsdVolumeSlider';
+import { OsdButton } from './PlayerOsdButton';
 import { useMultiViewSession } from './useMultiViewSession';
 
 /** Props of {@link MultiViewStage}. */
@@ -40,9 +44,20 @@ export interface MultiViewStageProps {
   readonly sources: readonly SourceRow[];
   readonly thermalDevice?: ThermalDevicePort | undefined;
   readonly initialSeed?: PlayableEntry | undefined;
+  readonly initialAdoptedSession?: AdoptedPlaybackSession | undefined;
+  readonly onConsumeAdoptedSession?: ((session: AdoptedPlaybackSession) => void) | undefined;
+  readonly playerVolume?: number | undefined;
+  readonly onPersistPlayerVolume?: ((volume: number) => void) | undefined;
+  readonly preferredAudioDevice?: string | undefined;
+  readonly audioNormalization?: boolean | undefined;
+  readonly pitchLock?: boolean | undefined;
+  readonly deinterlaceMode?: DeinterlaceMode | undefined;
   readonly clock?: PlaybackClock;
   readonly timers?: PlaybackTimers;
-  readonly onExit: (resumeTarget: PlayTarget | null) => void;
+  readonly onExit: (
+    resumeTarget: PlayTarget | null,
+    adoptedSession?: AdoptedPlaybackSession | null,
+  ) => void;
 }
 
 type PickerMode =
@@ -51,10 +66,11 @@ type PickerMode =
   | null;
 
 /**
- * Full-screen Cinema Quietude Multi-View Grid (`#34`, `#221`, `#232`):
- * pure `16:9` 2-tile / 4-tile grid (`gap: 6`), single active-audio tile highlight, inline channel
- * picker (zero RN `<Modal>`), inline `#221` connection-limit & `#232` thermal banners, and full
- * 2D TV D-pad + desktop Escape support.
+ * Full-screen Cinema Quietude Multi-View Grid (`#34`, `#221`, `#232`, `Wave P3`):
+ * pure `16:9` 2-tile / 4-tile grid (`gap: 6`), zero-reload entry & auto-solo exit handoff,
+ * interactive header Volume + Mute control (`OsdVolumeSlider` + `useSafeHoverBridge`),
+ * top-right tile Replace/Close controls, inline channel picker, and full 2D TV D-pad + desktop
+ * Escape support.
  */
 export function MultiViewStage({
   catalog,
@@ -63,6 +79,14 @@ export function MultiViewStage({
   sources,
   thermalDevice,
   initialSeed,
+  initialAdoptedSession,
+  onConsumeAdoptedSession,
+  playerVolume,
+  onPersistPlayerVolume,
+  preferredAudioDevice,
+  audioNormalization,
+  pitchLock,
+  deinterlaceMode,
   clock,
   timers,
   onExit,
@@ -71,6 +95,7 @@ export function MultiViewStage({
   const i18n = useI18n();
   const viewport = useViewport();
   const isTv = viewport.formFactor === 'tv';
+  const isDesktop = viewport.formFactor === 'desktop';
   const pointer = !isTv ? webCursorPointer() : undefined;
 
   const session = useMultiViewSession({
@@ -80,9 +105,25 @@ export function MultiViewStage({
     sources,
     thermalDevice,
     initialSeed,
+    initialAdoptedSession,
+    onConsumeAdoptedSession,
+    initialVolume: playerVolume,
+    onPersistVolume: onPersistPlayerVolume,
+    preferredAudioDevice,
+    audioNormalization,
+    pitchLock,
+    deinterlaceMode,
     ...(clock !== undefined ? { clock } : {}),
     ...(timers !== undefined ? { timers } : {}),
   });
+
+  const volumeBridge = useSafeHoverBridge({ disabled: !isDesktop });
+  const handleVolumeDragStateChange = useCallback(
+    (dragging: boolean) => {
+      volumeBridge.setLocked(dragging);
+    },
+    [volumeBridge.setLocked],
+  );
 
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [focusedSlot, setFocusedSlot] = useState(0);
@@ -95,10 +136,29 @@ export function MultiViewStage({
   const handleExit = useCallback(() => {
     if (exitingRef.current) return;
     exitingRef.current = true;
-    void session.exitMultiView().then((resumeTarget) => {
-      onExit(resumeTarget);
+    void session.exitMultiView().then(({ resumeTarget, adoptedSession }) => {
+      onExit(resumeTarget, adoptedSession);
     });
   }, [onExit, session]);
+
+  const handleRemoveTile = useCallback(
+    (tileId: string) => {
+      if (exitingRef.current) return;
+      void session.removeTile(tileId).then(({ removed, remainingCount }) => {
+        if (!removed || exitingRef.current) return;
+        if (remainingCount === 1) {
+          exitingRef.current = true;
+          void session.exitMultiView().then(({ resumeTarget, adoptedSession }) => {
+            onExit(resumeTarget, adoptedSession);
+          });
+        } else if (remainingCount === 0) {
+          exitingRef.current = true;
+          onExit(null, null);
+        }
+      });
+    },
+    [onExit, session],
+  );
 
   const { state, banner } = session;
   const grid = computeMultiViewGridLayout(
@@ -213,7 +273,7 @@ export function MultiViewStage({
           } else if (chosen === 'replace') {
             setPickerMode({ kind: 'replace', tileId: tile.tileId });
           } else if (chosen === 'remove') {
-            void session.removeTile(tile.tileId);
+            handleRemoveTile(tile.tileId);
           }
           return true;
         }
@@ -310,42 +370,108 @@ export function MultiViewStage({
           />
         ) : null}
         <View style={styles.flex1} />
-        <Pressable
-          testID="multiview-add-button"
-          disabled={!state.canAddTile}
-          focusable={!isTv && state.canAddTile}
-          accessibilityRole="button"
-          accessibilityLabel={i18n.t('player.multiView.addChannel')}
-          accessibilityState={{ disabled: !state.canAddTile }}
-          onPress={() => {
-            if (state.canAddTile) setPickerMode({ kind: 'add' });
-          }}
-          style={[
-            styles.addButton,
-            pointer,
-            {
-              borderRadius: theme.radius.button,
-              backgroundColor: state.canAddTile ? theme.colors.ctaBg : theme.colors.chipBg,
-              borderColor: theme.colors.glassBorder,
-              opacity: state.canAddTile ? 1 : 0.45,
-            },
-          ]}
-        >
-          <Icon
-            name="plus"
-            size={16}
-            color={state.canAddTile ? theme.colors.ctaFg : theme.colors.textMuted}
-          />
-          <Text
+
+        {!isTv ? (
+          <View testID="multiview-volume-control" style={styles.volumeWrap}>
+            <View
+              ref={volumeBridge.triggerRef as never}
+              {...(isDesktop ? (volumeBridge.triggerProps as Record<string, unknown>) : {})}
+            >
+              <OsdButton
+                testID="multiview-mute-button"
+                icon={session.muted ? 'volumeMute' : 'audio'}
+                variant="bare"
+                size={38}
+                accessibilityLabel={session.muted ? i18n.t('player.unmute') : i18n.t('player.mute')}
+                tooltipPlacement="bottom"
+                tooltipDisabled={volumeBridge.open}
+                active={session.muted}
+                onHoverIn={isDesktop ? () => volumeBridge.setOpen(true) : undefined}
+                onPress={session.toggleMute}
+                isTv={isTv}
+              />
+            </View>
+            {isDesktop && volumeBridge.open ? (
+              <View
+                ref={volumeBridge.panelRef as never}
+                testID="multiview-volume-popover-bridge"
+                {...(volumeBridge.panelProps as Record<string, unknown>)}
+                style={styles.volumePopoverBridge}
+              >
+                <View
+                  testID="multiview-volume-popover"
+                  style={[
+                    styles.volumePopover,
+                    {
+                      backgroundColor: theme.colors.glassBg,
+                      borderColor: theme.colors.glassBorder,
+                      borderRadius: theme.radius.card,
+                    },
+                    webBackdropBlur(16),
+                  ]}
+                >
+                  <OsdVolumeSlider
+                    testID="multiview-volume-slider"
+                    volume={session.volume}
+                    muted={session.muted}
+                    onChange={session.setVolume}
+                    onDragStateChange={handleVolumeDragStateChange}
+                    i18n={i18n}
+                  />
+                </View>
+              </View>
+            ) : !isDesktop ? (
+              <View style={styles.volumeInline}>
+                <OsdVolumeSlider
+                  testID="multiview-volume-slider"
+                  volume={session.volume}
+                  muted={session.muted}
+                  onChange={session.setVolume}
+                  i18n={i18n}
+                />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {!grid.showEmptySlot ? (
+          <Pressable
+            testID="multiview-add-button"
+            disabled={!state.canAddTile}
+            focusable={!isTv && state.canAddTile}
+            accessibilityRole="button"
+            accessibilityLabel={i18n.t('player.multiView.addChannel')}
+            accessibilityState={{ disabled: !state.canAddTile }}
+            onPress={() => {
+              if (state.canAddTile) setPickerMode({ kind: 'add' });
+            }}
             style={[
-              theme.typography.caption,
-              styles.addLabel,
-              { color: state.canAddTile ? theme.colors.ctaFg : theme.colors.textMuted },
+              styles.addButton,
+              pointer,
+              {
+                borderRadius: theme.radius.button,
+                backgroundColor: state.canAddTile ? theme.colors.ctaBg : theme.colors.chipBg,
+                borderColor: theme.colors.glassBorder,
+                opacity: state.canAddTile ? 1 : 0.45,
+              },
             ]}
           >
-            {i18n.t('player.multiView.addChannel')}
-          </Text>
-        </Pressable>
+            <Icon
+              name="plus"
+              size={16}
+              color={state.canAddTile ? theme.colors.ctaFg : theme.colors.textMuted}
+            />
+            <Text
+              style={[
+                theme.typography.caption,
+                styles.addLabel,
+                { color: state.canAddTile ? theme.colors.ctaFg : theme.colors.textMuted },
+              ]}
+            >
+              {i18n.t('player.multiView.addChannel')}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {bannerCopy !== null && banner !== null ? (
@@ -405,9 +531,7 @@ export function MultiViewStage({
               i18n={i18n}
               onSelectAudio={session.selectAudioTile}
               onRequestReplace={(id) => setPickerMode({ kind: 'replace', tileId: id })}
-              onRemove={(id) => {
-                void session.removeTile(id);
-              }}
+              onRemove={handleRemoveTile}
             />
           ))}
           {emptyInRow1 ? (
@@ -459,9 +583,7 @@ export function MultiViewStage({
                   i18n={i18n}
                   onSelectAudio={session.selectAudioTile}
                   onRequestReplace={(id) => setPickerMode({ kind: 'replace', tileId: id })}
-                  onRemove={(id) => {
-                    void session.removeTile(id);
-                  }}
+                  onRemove={handleRemoveTile}
                 />
               );
             })}
@@ -525,8 +647,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    zIndex: 20,
   },
   flex1: { flex: 1 },
+  volumeWrap: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  volumePopoverBridge: {
+    position: 'absolute',
+    top: 38,
+    right: 0,
+    paddingTop: 6,
+    zIndex: 40,
+  },
+  volumePopover: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+  },
+  volumeInline: {
+    paddingHorizontal: 4,
+  },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',

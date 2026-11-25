@@ -8,6 +8,7 @@ export interface PopoutLaunchPayload {
   readonly sourceId?: string;
   readonly resumePositionMs?: number;
   readonly pinned?: boolean;
+  readonly transferEngineId?: string;
 }
 
 /** Payload sent back to the main window when a standalone Desktop Popout player docks (`#158`). */
@@ -19,6 +20,7 @@ export interface PopoutDockPayload {
   readonly logo?: string;
   readonly sourceId?: string;
   readonly positionMs?: number;
+  readonly transferEngineId?: string;
 }
 
 /** Localized context menu labels for the desktop system tray (`#158`). */

@@ -227,7 +227,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const [liveEmbeddedPlaybackActive, setLiveEmbeddedPlaybackActive] = useState(false);
   const [stageKey, setStageKey] = useState(0);
   const [appForeground, setAppForeground] = useState(true);
-  const resetToFullModeRef = useRef<() => void>(() => undefined);
+  const resetToFullModeRef = useRef<(clearAdoption?: boolean) => void>(() => undefined);
   const userPickedTabRef = useRef(false);
   const userPickedSettingsSectionRef = useRef(false);
   const playTargetRef = useRef(playTarget);
@@ -294,6 +294,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     onOpenTarget: useCallback((enriched: PlayTarget) => {
       interceptOpenPlayTargetRef.current(enriched);
     }, []),
+    onAdoptTarget: openPlayTarget,
     onReplaceTarget: replacePlayTarget,
   });
   const stopForSource = useCallback(
@@ -301,7 +302,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
       if (playTargetRef.current?.sourceId === sourceId) {
         playTargetRef.current = null;
         setPlayTarget(null);
-        resetToFullModeRef.current();
+        resetToFullModeRef.current(true);
         connectionGuard.releaseActive();
       }
       uiCache.invalidateSource(sourceId);
@@ -326,7 +327,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     connectionGuard.releaseActive();
     playTargetRef.current = null;
     setPlayTarget(null);
-    resetToFullModeRef.current();
+    resetToFullModeRef.current(true);
   }, [connectionGuard.releaseActive]);
   const modes = useShellPlaybackModes({
     desktopWindow: props.desktopWindow,
@@ -338,6 +339,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     playTargetRef,
     onStopActivePlayback: stopActivePlayback,
     onRequestPlay: handlePlay,
+    onAdoptPlay: connectionGuard.adoptPlay,
   });
   resetToFullModeRef.current = modes.resetToFullMode;
   const isBrowsing =
@@ -644,7 +646,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     connectionGuard.releaseActive();
     playTargetRef.current = null;
     setPlayTarget(null);
-    modes.resetToFullMode();
+    modes.resetToFullMode(true);
     setHeroScrolled(false);
     setUserStateVersion((v) => v + 1);
   };

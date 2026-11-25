@@ -36,7 +36,7 @@ import type { MpvProcess } from './mpv/process.ts';
 import type { ReadaheadTierStore } from './mpv/readahead.ts';
 import { createTrackTracker } from './mpv/tracks.ts';
 import { createVodCacheCoordinator, resolveVodCacheRoot } from './mpv/vod-cache.ts';
-import type { VideoPresenter } from './presenter/types.ts';
+import type { AppWindowLike, VideoPresenter } from './presenter/types.ts';
 import { createSubtitleFetchSession } from './subtitle-fetch.ts';
 
 /** How `load` replaces the media: mpv's `loadfile replace`, or `stop`, the old entry's `end-file`, then `loadfile`. */
@@ -71,6 +71,8 @@ export interface MpvEngine extends PlayerEngine {
   setArea(area: PlayerArea): void;
   readonly lastArea: PlayerArea | undefined;
   toggleFullscreen(): void;
+  /** Optional zero-reload window handoff when backed by a retargetable presenter (`'canvas'`). */
+  retargetWindow?(nextWindow: AppWindowLike): boolean;
   toggleMute(): void;
   setMuted?(muted: boolean): void;
   setVolume(volume: number): void;
@@ -497,6 +499,15 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       presenter.setArea(area);
     },
     toggleFullscreen: () => !released && presenter.toggleFullscreen(),
+    ...(presenter.retargetWindow
+      ? {
+          retargetWindow: (nextWindow: AppWindowLike): boolean => {
+            if (released) return false;
+            presenter.retargetWindow?.(nextWindow);
+            return true;
+          },
+        }
+      : {}),
     toggleMute: () => controls.toggleMute(),
     setMuted: (muted) => controls.setMuted(muted),
     setVolume: (volume) => controls.setVolume(volume),

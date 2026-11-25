@@ -7,12 +7,13 @@ import type {
   PopoutLaunchPayload,
 } from './ports/desktop-window-host';
 import type { PlayTarget } from './ports/play-target';
-import type { ThermalDevicePort, VideoHost } from './ports/video-host';
+import type { AdoptedPlaybackSession, ThermalDevicePort, VideoHost } from './ports/video-host';
 
-/** Builds a sanitized {@link PopoutLaunchPayload} from an active {@link PlayTarget} (`#158`). */
+/** Builds a sanitized {@link PopoutLaunchPayload} from an active {@link PlayTarget} (`#158`, `Wave P3`). */
 export function buildPopoutLaunchPayload(
   target: PlayTarget,
   positionMs?: number,
+  transferEngineId?: string,
 ): PopoutLaunchPayload {
   const kind: PopoutLaunchPayload['kind'] =
     target.kind === 'live' ? 'live' : target.itemKind === 'episode' ? 'episode' : 'movie';
@@ -20,6 +21,7 @@ export function buildPopoutLaunchPayload(
     positionMs !== undefined && Number.isFinite(positionMs) && positionMs >= 0
       ? Math.round(positionMs)
       : target.startPositionMs;
+  const trimmedTransferId = transferEngineId?.trim();
   return {
     itemKey: target.itemKey,
     kind,
@@ -30,6 +32,9 @@ export function buildPopoutLaunchPayload(
     ...(target.logo !== undefined && target.logo !== null ? { logo: target.logo } : {}),
     sourceId: target.sourceId,
     ...(resumePositionMs !== undefined ? { resumePositionMs } : {}),
+    ...(trimmedTransferId !== undefined && trimmedTransferId.length > 0
+      ? { transferEngineId: trimmedTransferId }
+      : {}),
   };
 }
 
@@ -49,6 +54,15 @@ export function buildPlayTargetFromPopoutDock(payload: PopoutDockPayload): PlayT
   };
 }
 
+function disposeAdoptedSession(session: AdoptedPlaybackSession): void {
+  try {
+    session.service.stop();
+    session.service.dispose();
+  } finally {
+    session.opened.engine.release();
+  }
+}
+
 /** Options for {@link useShellPlaybackModes}. */
 export interface UseShellPlaybackModesOptions {
   readonly desktopWindow?: DesktopWindowPort | undefined;
@@ -60,13 +74,15 @@ export interface UseShellPlaybackModesOptions {
   readonly playTargetRef: MutableRefObject<PlayTarget | null>;
   readonly onStopActivePlayback: () => void;
   readonly onRequestPlay: (target: PlayTarget) => void;
+  /** Direct play setter for zero-reload handoffs (0 new connections), bypassing connection limit & external player interception (`Wave P3`). */
+  readonly onAdoptPlay?: ((target: PlayTarget) => void) | undefined;
 }
 
 /**
- * Coordinates Wave F6 shell playback modes (`#34`, `#158`, `#232`, `#233`):
- * floating corner mini-player state (`'full' | 'mini'`), Multi-View single-connection-safe handoff,
+ * Coordinates Wave F6 & Wave P3 shell playback modes (`#34`, `#158`, `#232`, `#233`):
+ * floating corner mini-player state (`'full' | 'mini'`), zero-reload Multi-View handoff,
  * desktop minimize-to-tray sync & hidden-tray stream teardown, cursor restore on tray unhide, and
- * standalone Popout detach/dock handoff.
+ * zero-reload standalone Popout detach/dock handoff via `transferEngineId`.
  */
 export function useShellPlaybackModes({
   desktopWindow,
@@ -78,10 +94,28 @@ export function useShellPlaybackModes({
   playTargetRef,
   onStopActivePlayback,
   onRequestPlay,
+  onAdoptPlay,
 }: UseShellPlaybackModesOptions) {
   const [playerViewMode, setPlayerViewMode] = useState<'full' | 'mini'>('full');
   const [multiViewSeed, setMultiViewSeed] = useState<PlayTarget | null>(null);
+  const [multiViewAdoptedSession, setMultiViewAdoptedSession] =
+    useState<AdoptedPlaybackSession | null>(null);
+  const [pendingAdoptedSession, setPendingAdoptedSession] = useState<AdoptedPlaybackSession | null>(
+    null,
+  );
+  const [pendingAdoptEngineId, setPendingAdoptEngineId] = useState<string | undefined>(undefined);
+  const [playerHandoffKey, setPlayerHandoffKey] = useState(0);
   const [restoreCursorToken, setRestoreCursorToken] = useState(0);
+
+  const consumedAdoptedRef = useRef(new WeakSet<AdoptedPlaybackSession>());
+  const markAdoptedSessionConsumed = useCallback((session: AdoptedPlaybackSession) => {
+    consumedAdoptedRef.current.add(session);
+  }, []);
+
+  const handoffActiveSessionRef = useRef<(() => AdoptedPlaybackSession | null) | null>(null);
+  const registerHandoffSession = useCallback((fn: (() => AdoptedPlaybackSession | null) | null) => {
+    handoffActiveSessionRef.current = fn;
+  }, []);
 
   const bgAudioRef = useRef(backgroundAudioPlayback);
   bgAudioRef.current = backgroundAudioPlayback;
@@ -91,6 +125,28 @@ export function useShellPlaybackModes({
   stopActiveRef.current = onStopActivePlayback;
   const requestPlayRef = useRef(onRequestPlay);
   requestPlayRef.current = onRequestPlay;
+  const adoptPlayRef = useRef(onAdoptPlay ?? onRequestPlay);
+  adoptPlayRef.current = onAdoptPlay ?? onRequestPlay;
+
+  // Defensive cleanup: if a pending adopted session is replaced or unmounted without being consumed,
+  // dispose its PlaybackService and release its engine so live streams never leak (`Wave P3`).
+  useEffect(() => {
+    if (pendingAdoptedSession === null) return;
+    return () => {
+      if (!consumedAdoptedRef.current.has(pendingAdoptedSession)) {
+        disposeAdoptedSession(pendingAdoptedSession);
+      }
+    };
+  }, [pendingAdoptedSession]);
+
+  useEffect(() => {
+    if (multiViewAdoptedSession === null) return;
+    return () => {
+      if (!consumedAdoptedRef.current.has(multiViewAdoptedSession)) {
+        disposeAdoptedSession(multiViewAdoptedSession);
+      }
+    };
+  }, [multiViewAdoptedSession]);
 
   const multiViewSupported = useMemo(
     () => resolveHardwareMultiViewCap(resolveMultiViewCapabilities(thermalDevice, videoHost)) > 1,
@@ -111,8 +167,11 @@ export function useShellPlaybackModes({
       if (playTargetRef.current !== null) {
         stopActiveRef.current();
         setPlayerViewMode('full');
+        setPendingAdoptedSession(null);
+        setPendingAdoptEngineId(undefined);
       }
       if (multiViewSeedRef.current !== null) {
+        setMultiViewAdoptedSession(null);
         setMultiViewSeed(null);
       }
     });
@@ -127,14 +186,25 @@ export function useShellPlaybackModes({
     });
   }, [desktopWindow]);
 
-  // Re-open playTarget in main window when standalone Popout player docks (#158).
+  // Re-open playTarget in main window when standalone Popout player docks (#158, Wave P3).
   useEffect(() => {
     const sub = desktopWindow?.onPopoutDocked;
     if (sub === undefined) return;
     return sub((payload) => {
+      setMultiViewAdoptedSession(null);
       setMultiViewSeed(null);
+      setPendingAdoptedSession(null);
+      const hasTransfer =
+        payload.transferEngineId !== undefined && payload.transferEngineId.length > 0;
+      setPendingAdoptEngineId(hasTransfer ? payload.transferEngineId : undefined);
+      setPlayerHandoffKey((k) => k + 1);
       setPlayerViewMode('full');
-      requestPlayRef.current(buildPlayTargetFromPopoutDock(payload));
+      const target = buildPlayTargetFromPopoutDock(payload);
+      if (hasTransfer) {
+        adoptPlayRef.current(target);
+      } else {
+        requestPlayRef.current(target);
+      }
     });
   }, [desktopWindow]);
 
@@ -146,19 +216,31 @@ export function useShellPlaybackModes({
     setPlayerViewMode('full');
   }, []);
 
-  const resetToFullMode = useCallback(() => {
+  const resetToFullMode = useCallback((clearAdoption = false) => {
     setPlayerViewMode('full');
+    if (clearAdoption) {
+      setPendingAdoptedSession(null);
+      setPendingAdoptEngineId(undefined);
+    }
   }, []);
 
   const enterMultiView = useCallback(
     (target: PlayTarget) => {
       if (!multiViewSupported) return;
       setPlayerViewMode('full');
+      const adopted = handoffActiveSessionRef.current?.() ?? null;
+      if (adopted !== null) {
+        stopActiveRef.current();
+        setMultiViewAdoptedSession(adopted);
+        setMultiViewSeed(target);
+        return;
+      }
       void Promise.resolve(stopActivePlayerRef.current?.())
         .catch(() => undefined)
         .finally(() => {
           stopActiveRef.current();
           void Promise.resolve().then(() => {
+            setMultiViewAdoptedSession(null);
             setMultiViewSeed(target);
           });
         });
@@ -166,20 +248,53 @@ export function useShellPlaybackModes({
     [multiViewSupported, stopActivePlayerRef],
   );
 
-  const exitMultiView = useCallback((resumeTarget: PlayTarget | null) => {
-    setMultiViewSeed(null);
-    setPlayerViewMode('full');
-    if (resumeTarget !== null) {
-      requestPlayRef.current(resumeTarget);
-    }
-  }, []);
+  const exitMultiView = useCallback(
+    (resumeTarget: PlayTarget | null, adoptedSession?: AdoptedPlaybackSession | null) => {
+      setMultiViewAdoptedSession(null);
+      setMultiViewSeed(null);
+      setPlayerViewMode('full');
+      setPendingAdoptEngineId(undefined);
+      if (resumeTarget !== null) {
+        if (adoptedSession !== undefined && adoptedSession !== null) {
+          setPendingAdoptedSession(adoptedSession);
+          setPlayerHandoffKey((k) => k + 1);
+          adoptPlayRef.current(resumeTarget);
+        } else {
+          setPendingAdoptedSession(null);
+          requestPlayRef.current(resumeTarget);
+        }
+      } else {
+        if (adoptedSession !== undefined && adoptedSession !== null) {
+          disposeAdoptedSession(adoptedSession);
+        }
+        setPendingAdoptedSession(null);
+      }
+    },
+    [],
+  );
 
   const openPopout = desktopWindow?.openPopout;
   const popoutPlayer = useMemo(() => {
     if (openPopout === undefined) return undefined;
-    return (target: PlayTarget, positionMs?: number) => {
-      const payload = buildPopoutLaunchPayload(target, positionMs);
+    return (target: PlayTarget, positionMs?: number, transferEngineId?: string) => {
+      const payload = buildPopoutLaunchPayload(target, positionMs, transferEngineId);
       setPlayerViewMode('full');
+      if (transferEngineId !== undefined && transferEngineId.length > 0) {
+        stopActiveRef.current();
+        const restoreParked = () => {
+          setPendingAdoptedSession(null);
+          setPendingAdoptEngineId(transferEngineId);
+          setPlayerHandoffKey((k) => k + 1);
+          adoptPlayRef.current(target);
+        };
+        void Promise.resolve()
+          .then(() => openPopout(payload))
+          .then((opened) => {
+            if (!opened) restoreParked();
+          })
+          .catch(restoreParked);
+        return;
+      }
       void Promise.resolve(stopActivePlayerRef.current?.())
         .catch(() => undefined)
         .then(() => {
@@ -201,8 +316,14 @@ export function useShellPlaybackModes({
   return {
     playerViewMode,
     multiViewSeed,
+    multiViewAdoptedSession,
+    pendingAdoptedSession,
+    pendingAdoptEngineId,
+    playerHandoffKey,
     multiViewSupported,
     restoreCursorToken,
+    markAdoptedSessionConsumed,
+    registerHandoffSession,
     minimizeToMiniPlayer,
     expandMiniPlayer,
     resetToFullMode,

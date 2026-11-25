@@ -1,4 +1,5 @@
 import type { CatalogService, SourceRow } from '@elv/data';
+import type { DeinterlaceMode } from '@elv/domain';
 import {
   type ConnectionTracker,
   createMultiViewController,
@@ -13,7 +14,12 @@ import {
 } from '@elv/playback';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
-import type { OpenVideoEngine, ThermalDevicePort, VideoHost } from '../ports/video-host';
+import type {
+  AdoptedPlaybackSession,
+  OpenVideoEngine,
+  ThermalDevicePort,
+  VideoHost,
+} from '../ports/video-host';
 import {
   buildMultiViewTileInput,
   type MultiViewBanner,
@@ -22,13 +28,25 @@ import {
   resolveMultiViewCapabilities,
 } from './multiview-model';
 import { DEFAULT_PLAYER_CLOCK, DEFAULT_PLAYER_TIMERS } from './PlayerScreenParts';
-import { isPromiseLike } from './player-overlay-model';
+import { clampVolume, isPromiseLike } from './player-overlay-model';
 
 interface MountedTileEngine {
   readonly streamId: string;
   readonly opened: OpenVideoEngine;
   readonly service: PlaybackService;
   readonly unsubscribe: () => void;
+}
+
+/** Result returned when exiting Multi-View or auto-soloing back to single-player (`Wave P3`). */
+interface MultiViewExitResult {
+  readonly resumeTarget: PlayTarget | null;
+  readonly adoptedSession: AdoptedPlaybackSession | null;
+}
+
+/** Result returned by {@link MultiViewSessionHandle.removeTile} with authoritative post-removal tile count. */
+interface MultiViewRemoveResult {
+  readonly removed: boolean;
+  readonly remainingCount: number;
 }
 
 /** Options for {@link useMultiViewSession}. */
@@ -39,6 +57,14 @@ export interface UseMultiViewSessionOptions {
   readonly sources: readonly SourceRow[];
   readonly thermalDevice?: ThermalDevicePort | undefined;
   readonly initialSeed?: PlayableEntry | undefined;
+  readonly initialAdoptedSession?: AdoptedPlaybackSession | undefined;
+  readonly onConsumeAdoptedSession?: ((session: AdoptedPlaybackSession) => void) | undefined;
+  readonly initialVolume?: number | undefined;
+  readonly onPersistVolume?: ((volume: number) => void) | undefined;
+  readonly preferredAudioDevice?: string | undefined;
+  readonly audioNormalization?: boolean | undefined;
+  readonly pitchLock?: boolean | undefined;
+  readonly deinterlaceMode?: DeinterlaceMode | undefined;
   readonly clock?: PlaybackClock;
   readonly timers?: PlaybackTimers;
 }
@@ -48,18 +74,23 @@ export interface MultiViewSessionHandle {
   readonly state: MultiViewState;
   readonly banner: MultiViewBanner | null;
   readonly engineRevision: number;
+  readonly volume: number;
+  readonly muted: boolean;
+  readonly setVolume: (volume: number) => void;
+  readonly toggleMute: () => void;
   readonly getTileEngine: (tileId: string) => OpenVideoEngine | undefined;
   readonly addChannel: (entry: PlayableEntry) => MultiViewAddResult;
   readonly replaceChannel: (tileId: string, entry: PlayableEntry) => Promise<MultiViewAddResult>;
-  readonly removeTile: (tileId: string) => Promise<boolean>;
+  readonly removeTile: (tileId: string) => Promise<MultiViewRemoveResult>;
   readonly selectAudioTile: (tileId: string) => boolean;
   readonly dismissBanner: () => void;
-  readonly exitMultiView: () => Promise<PlayTarget | null>;
+  readonly exitMultiView: () => Promise<MultiViewExitResult>;
 }
 
 /**
  * Coordinates `@elv/playback`'s `createMultiViewController` with live `VideoHost` tile engines,
- * shared `ConnectionTracker` admission (`#221`), and `ThermalDevicePort` shedding (`#232`).
+ * zero-reload `AdoptedPlaybackSession` entry/exit (`Wave P3`), shared audio/video preferences,
+ * `ConnectionTracker` admission (`#221`), and `ThermalDevicePort` shedding (`#232`).
  */
 export function useMultiViewSession({
   catalog,
@@ -68,6 +99,14 @@ export function useMultiViewSession({
   sources,
   thermalDevice,
   initialSeed,
+  initialAdoptedSession,
+  onConsumeAdoptedSession,
+  initialVolume,
+  onPersistVolume,
+  preferredAudioDevice,
+  audioNormalization,
+  pitchLock,
+  deinterlaceMode,
   clock = DEFAULT_PLAYER_CLOCK,
   timers = DEFAULT_PLAYER_TIMERS,
 }: UseMultiViewSessionOptions): MultiViewSessionHandle {
@@ -81,13 +120,36 @@ export function useMultiViewSession({
   clockRef.current = clock;
   const timersRef = useRef(timers);
   timersRef.current = timers;
+  const onPersistVolumeRef = useRef(onPersistVolume);
+  onPersistVolumeRef.current = onPersistVolume;
+  const preferredAudioDeviceRef = useRef(preferredAudioDevice);
+  preferredAudioDeviceRef.current = preferredAudioDevice;
+  const audioNormalizationRef = useRef(audioNormalization);
+  audioNormalizationRef.current = audioNormalization;
+  const pitchLockRef = useRef(pitchLock);
+  pitchLockRef.current = pitchLock;
+  const deinterlaceModeRef = useRef(deinterlaceMode);
+  deinterlaceModeRef.current = deinterlaceMode;
+  const initialAdoptedRef = useRef(initialAdoptedSession);
+  const onConsumeAdoptedRef = useRef(onConsumeAdoptedSession);
+  onConsumeAdoptedRef.current = onConsumeAdoptedSession;
+
   const mountedRef = useRef(true);
   const enginesRef = useRef<Map<string, MountedTileEngine>>(new Map());
+  const tileTargetsRef = useRef<Map<string, PlayTarget>>(new Map());
   const openingTokensRef = useRef<Map<string, number>>(new Map());
   const openSeqRef = useRef(0);
 
   const [banner, setBanner] = useState<MultiViewBanner | null>(null);
   const [engineRevision, setEngineRevision] = useState(0);
+  const [volume, setVolumeState] = useState<number>(() =>
+    clampVolume(initialAdoptedSession?.volume ?? initialVolume ?? 100),
+  );
+  const [muted, setMutedState] = useState<boolean>(() => initialAdoptedSession?.muted === true);
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
 
   const capabilities = useMemo(
     () => resolveMultiViewCapabilities(thermalDevice, videoHost),
@@ -131,19 +193,90 @@ export function useMultiViewSession({
     if (mountedRef.current) setEngineRevision((v) => v + 1);
   }, []);
 
+  const applyPreferencesToOpened = useCallback((opened: OpenVideoEngine, isPrimary: boolean) => {
+    opened.setVolume?.(volumeRef.current);
+    opened.setMuted?.(!isPrimary || mutedRef.current);
+    if (isPrimary) {
+      opened.setPrimary?.();
+    }
+    const savedDevice = preferredAudioDeviceRef.current?.trim();
+    if (savedDevice && savedDevice !== 'auto') {
+      opened.setAudioDevice?.(savedDevice);
+    }
+    if (audioNormalizationRef.current !== undefined) {
+      opened.setAudioNormalization?.(audioNormalizationRef.current);
+    }
+    if (pitchLockRef.current !== undefined) {
+      opened.setPitchLock?.(pitchLockRef.current);
+    }
+    if (deinterlaceModeRef.current !== undefined) {
+      opened.setDeinterlaceMode?.(deinterlaceModeRef.current);
+    }
+  }, []);
+
   const syncEngineAudioStates = useCallback((activeAudioTileId: string | null) => {
     for (const [id, entry] of enginesRef.current) {
       const isPrimary = id === activeAudioTileId;
-      entry.opened.setMuted?.(!isPrimary);
+      entry.opened.setMuted?.(!isPrimary || mutedRef.current);
       if (isPrimary) {
+        entry.opened.setVolume?.(volumeRef.current);
         entry.opened.setPrimary?.();
       }
     }
   }, []);
 
+  useEffect(() => {
+    const savedDevice = preferredAudioDevice?.trim();
+    for (const entry of enginesRef.current.values()) {
+      if (savedDevice && savedDevice !== 'auto') {
+        entry.opened.setAudioDevice?.(savedDevice);
+      }
+      if (audioNormalization !== undefined) {
+        entry.opened.setAudioNormalization?.(audioNormalization);
+      }
+      if (pitchLock !== undefined) {
+        entry.opened.setPitchLock?.(pitchLock);
+      }
+      if (deinterlaceMode !== undefined) {
+        entry.opened.setDeinterlaceMode?.(deinterlaceMode);
+      }
+    }
+  }, [audioNormalization, deinterlaceMode, pitchLock, preferredAudioDevice]);
+
+  const setVolume = useCallback(
+    (next: number) => {
+      const clamped = clampVolume(next);
+      volumeRef.current = clamped;
+      setVolumeState(clamped);
+      let unmuted = false;
+      if (clamped > 0 && mutedRef.current) {
+        mutedRef.current = false;
+        setMutedState(false);
+        unmuted = true;
+      }
+      const activeId = controller.getState().activeAudioTileId;
+      for (const [id, entry] of enginesRef.current) {
+        entry.opened.setVolume?.(clamped);
+        if (unmuted && id === activeId) {
+          entry.opened.setMuted?.(false);
+        }
+      }
+      onPersistVolumeRef.current?.(clamped);
+    },
+    [controller],
+  );
+
+  const toggleMute = useCallback(() => {
+    const nextMuted = !mutedRef.current;
+    mutedRef.current = nextMuted;
+    setMutedState(nextMuted);
+    syncEngineAudioStates(controller.getState().activeAudioTileId);
+  }, [controller, syncEngineAudioStates]);
+
   const closeTileEngine = useCallback(
     async (tile: MultiViewTile): Promise<void> => {
       openingTokensRef.current.delete(tile.tileId);
+      tileTargetsRef.current.delete(tile.tileId);
       const mounted = enginesRef.current.get(tile.tileId);
       if (mounted === undefined) return;
       enginesRef.current.delete(tile.tileId);
@@ -158,6 +291,28 @@ export function useMultiViewSession({
       bumpEngineRevision();
     },
     [bumpEngineRevision],
+  );
+
+  const attachAdoptedTileEngine = useCallback(
+    (tile: MultiViewTile, adopted: AdoptedPlaybackSession): void => {
+      const isPrimary = !tile.muted;
+      applyPreferencesToOpened(adopted.opened, isPrimary);
+      const initialKind = adopted.service.getState().status.kind;
+      controller.updateTileStatus(tile.tileId, mapPlaybackStatusToTileStatus(initialKind));
+      const unsubscribe = adopted.service.subscribe(() => {
+        const kind = adopted.service.getState().status.kind;
+        controller.updateTileStatus(tile.tileId, mapPlaybackStatusToTileStatus(kind));
+      });
+      enginesRef.current.set(tile.tileId, {
+        streamId: tile.streamId,
+        opened: adopted.opened,
+        service: adopted.service,
+        unsubscribe,
+      });
+      tileTargetsRef.current.set(tile.tileId, adopted.target);
+      bumpEngineRevision();
+    },
+    [applyPreferencesToOpened, bumpEngineRevision, controller],
   );
 
   const mountTileEngine = useCallback(
@@ -175,10 +330,7 @@ export function useMultiViewSession({
           controller.updateTileStatus(tile.tileId, 'error');
           return;
         }
-        opened.setMuted?.(tile.muted);
-        if (isPrimary) {
-          opened.setPrimary?.();
-        }
+        applyPreferencesToOpened(opened, isPrimary);
         const service = createPlaybackService({
           engine: opened.engine,
           clock: clockRef.current,
@@ -224,27 +376,49 @@ export function useMultiViewSession({
         controller.updateTileStatus(tile.tileId, 'error');
       }
     },
-    [bumpEngineRevision, controller],
+    [applyPreferencesToOpened, bumpEngineRevision, controller],
   );
 
-  // Seed Tile 1 on mount when launched from single-player.
+  // Seed Tile 1 on mount (adopting live session when launched from single-player, zero reload).
   const seededRef = useRef(false);
   useEffect(() => {
     mountedRef.current = true;
-    if (!seededRef.current && initialSeed !== undefined) {
-      seededRef.current = true;
-      const res = controller.addTile(buildMultiViewTileInput(initialSeed, sourcesRef.current));
-      if (res.ok) {
-        mountTileEngine(res.tile, controller.getState().tiles.length);
-      } else {
-        setBanner(mapAddFailureToBanner(res));
+    if (!seededRef.current) {
+      const adopted = initialAdoptedRef.current;
+      const seedEntry = initialSeed ?? adopted?.target;
+      if (seedEntry !== undefined) {
+        seededRef.current = true;
+        initialAdoptedRef.current = undefined;
+        const baseInput = buildMultiViewTileInput(seedEntry, sourcesRef.current);
+        const res = controller.addTile(
+          adopted !== undefined ? { ...baseInput, adoptedExistingStream: true } : baseInput,
+        );
+        if (res.ok) {
+          if (adopted !== undefined) {
+            onConsumeAdoptedRef.current?.(adopted);
+            attachAdoptedTileEngine(res.tile, adopted);
+          } else {
+            mountTileEngine(res.tile, controller.getState().tiles.length);
+          }
+        } else {
+          if (adopted !== undefined) {
+            onConsumeAdoptedRef.current?.(adopted);
+            try {
+              adopted.service.stop();
+              adopted.service.dispose();
+            } finally {
+              adopted.opened.engine.release();
+            }
+          }
+          setBanner(mapAddFailureToBanner(res));
+        }
       }
     }
     return () => {
       mountedRef.current = false;
       void controller.clearAll(closeTileEngine);
     };
-  }, [closeTileEngine, controller, initialSeed, mountTileEngine]);
+  }, [attachAdoptedTileEngine, closeTileEngine, controller, initialSeed, mountTileEngine]);
 
   // Subscribe to native thermal state transitions (#232).
   useEffect(() => {
@@ -307,12 +481,13 @@ export function useMultiViewSession({
   );
 
   const removeTile = useCallback(
-    async (tileId: string): Promise<boolean> => {
+    async (tileId: string): Promise<MultiViewRemoveResult> => {
       const removed = await controller.removeTile(tileId, closeTileEngine);
+      const snap = controller.getState();
       if (removed) {
-        syncEngineAudioStates(controller.getState().activeAudioTileId);
+        syncEngineAudioStates(snap.activeAudioTileId);
       }
-      return removed;
+      return { removed, remainingCount: snap.tiles.length };
     },
     [closeTileEngine, controller, syncEngineAudioStates],
   );
@@ -328,12 +503,15 @@ export function useMultiViewSession({
     [controller, syncEngineAudioStates],
   );
 
-  const exitMultiView = useCallback(async (): Promise<PlayTarget | null> => {
+  const exitMultiView = useCallback(async (): Promise<MultiViewExitResult> => {
     const snap = controller.getState();
     const activeTile = snap.tiles.find((t) => t.tileId === snap.activeAudioTileId) ?? snap.tiles[0];
-    await controller.clearAll(closeTileEngine);
-    if (activeTile === undefined) return null;
-    return {
+    if (activeTile === undefined) {
+      await controller.clearAll(closeTileEngine);
+      return { resumeTarget: null, adoptedSession: null };
+    }
+    const preservedTarget = tileTargetsRef.current.get(activeTile.tileId);
+    const resumeTarget: PlayTarget = preservedTarget ?? {
       itemKey: activeTile.itemKey,
       sourceId: activeTile.sourceId,
       accountKey: activeTile.accountKey,
@@ -342,6 +520,33 @@ export function useMultiViewSession({
       itemKind: 'live',
       ...(activeTile.logo !== undefined ? { logo: activeTile.logo } : {}),
     };
+    const mounted = enginesRef.current.get(activeTile.tileId);
+    let adoptedSession: AdoptedPlaybackSession | null = null;
+    if (mounted !== undefined) {
+      enginesRef.current.delete(activeTile.tileId);
+      openingTokensRef.current.delete(activeTile.tileId);
+      tileTargetsRef.current.delete(activeTile.tileId);
+      mounted.unsubscribe();
+      mounted.opened.setPrimary?.();
+      mounted.opened.setMuted?.(mutedRef.current);
+      mounted.opened.setVolume?.(volumeRef.current);
+      const svcState = mounted.service.getState();
+      adoptedSession = {
+        opened: mounted.opened,
+        service: mounted.service,
+        target: resumeTarget,
+        muted: mutedRef.current,
+        volume: volumeRef.current,
+        status: svcState.status,
+        tracks: svcState.tracks,
+        ...(svcState.videoInfo !== undefined ? { mediaInfo: svcState.videoInfo } : {}),
+      };
+    }
+    await controller.clearAll(async (tile) => {
+      if (tile.tileId === activeTile.tileId && adoptedSession !== null) return;
+      await closeTileEngine(tile);
+    });
+    return { resumeTarget, adoptedSession };
   }, [closeTileEngine, controller]);
 
   const dismissBanner = useCallback(() => setBanner(null), []);
@@ -354,6 +559,10 @@ export function useMultiViewSession({
     state,
     banner,
     engineRevision,
+    volume,
+    muted,
+    setVolume,
+    toggleMute,
     getTileEngine,
     addChannel,
     replaceChannel,

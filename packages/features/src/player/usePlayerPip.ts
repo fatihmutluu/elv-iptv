@@ -6,10 +6,120 @@ import {
   type StreamVideoInfo,
 } from '@elv/playback';
 import { type MutableRefObject, useCallback, useEffect, useRef } from 'react';
-import type { OpenVideoEngine } from '../ports/video-host';
+import type { PlayTarget } from '../ports/play-target';
+import type { AdoptedPlaybackSession, OpenVideoEngine } from '../ports/video-host';
+
+/** Handoff disposition recorded on `PlayerScreen` unmount (`Wave P3`). */
+export type PlayerHandoffMode = 'none' | 'session' | 'parked';
+
+/**
+ * Coordinates zero-reload session extraction (for `PlayerScreen -> MultiView`) and
+ * `parkForTransfer()` window transfer (for Desktop Popout Detach & Dock, `Wave P3`).
+ */
+export function usePlayerWindowHandoff(params: {
+  readonly openedEngine: OpenVideoEngine | undefined;
+  readonly activeService: PlaybackService | null;
+  readonly activeTarget: PlayTarget;
+  readonly mutedRef: MutableRefObject<boolean>;
+  readonly volumeRef: MutableRefObject<number>;
+  readonly handoffModeRef: MutableRefObject<PlayerHandoffMode>;
+  readonly serviceRef: MutableRefObject<PlaybackService | null>;
+  readonly clockRef: MutableRefObject<PlaybackClock>;
+  readonly flushProgress: (overridePosMs?: number) => void;
+  readonly onRegisterHandoffSession?:
+    | ((fn: (() => AdoptedPlaybackSession | null) | null) => void)
+    | undefined;
+  readonly onPopoutPlayer?:
+    | ((target: PlayTarget, positionMs?: number, transferEngineId?: string) => void)
+    | undefined;
+  readonly onDockPopout?:
+    | ((target: PlayTarget, positionMs?: number, transferEngineId?: string) => void)
+    | undefined;
+}) {
+  const latestRef = useRef(params);
+  latestRef.current = params;
+  const transferInFlightRef = useRef(false);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset re-entry guard whenever a new engine attaches
+  useEffect(() => {
+    transferInFlightRef.current = false;
+  }, [params.openedEngine]);
+
+  const extractSession = useCallback((): AdoptedPlaybackSession | null => {
+    const p = latestRef.current;
+    if (p.openedEngine === undefined || p.activeService === null) return null;
+    p.handoffModeRef.current = 'session';
+    const svcState = p.activeService.getState();
+    return {
+      opened: p.openedEngine,
+      service: p.activeService,
+      target: p.activeTarget,
+      muted: p.mutedRef.current,
+      volume: p.volumeRef.current,
+      status: svcState.status,
+      tracks: svcState.tracks,
+      ...(svcState.videoInfo !== undefined ? { mediaInfo: svcState.videoInfo } : {}),
+    };
+  }, []);
+
+  useEffect(() => {
+    const register = params.onRegisterHandoffSession;
+    if (register === undefined) return;
+    register(extractSession);
+    return () => register(null);
+  }, [extractSession, params.onRegisterHandoffSession]);
+
+  const triggerTransfer = useCallback(
+    (cb: (target: PlayTarget, positionMs?: number, transferEngineId?: string) => void): void => {
+      if (transferInFlightRef.current) return;
+      const p = latestRef.current;
+      const posMs = readServicePositionMs(p.serviceRef.current, p.clockRef.current);
+      p.flushProgress(posMs);
+      const park = p.openedEngine?.parkForTransfer;
+      if (park === undefined) {
+        cb(p.activeTarget, posMs);
+        return;
+      }
+      transferInFlightRef.current = true;
+      void Promise.resolve(park())
+        .then((engineId) => {
+          if (engineId !== null && engineId.length > 0) {
+            p.handoffModeRef.current = 'parked';
+            cb(p.activeTarget, posMs, engineId);
+          } else {
+            transferInFlightRef.current = false;
+            cb(p.activeTarget, posMs);
+          }
+        })
+        .catch(() => {
+          transferInFlightRef.current = false;
+          cb(p.activeTarget, posMs);
+        });
+    },
+    [],
+  );
+
+  const handlePopoutPlayer =
+    params.onPopoutPlayer !== undefined && params.onDockPopout === undefined
+      ? () => {
+          const cb = latestRef.current.onPopoutPlayer;
+          if (cb !== undefined) triggerTransfer(cb);
+        }
+      : undefined;
+
+  const handleDockPopout =
+    params.onDockPopout !== undefined
+      ? () => {
+          const cb = latestRef.current.onDockPopout;
+          if (cb !== undefined) triggerTransfer(cb);
+        }
+      : undefined;
+
+  return { handlePopoutPlayer, handleDockPopout };
+}
 
 /** Reads current playback position in milliseconds from an active service, if anchored. */
-export function readServicePositionMs(
+function readServicePositionMs(
   service: PlaybackService | null,
   clock: PlaybackClock,
 ): number | undefined {

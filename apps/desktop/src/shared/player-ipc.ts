@@ -135,6 +135,8 @@ export type PlayerUiEvent =
 export const PLAYER_CHANNELS = Object.freeze({
   open: 'player:open',
   close: 'player:close',
+  park: 'player:park',
+  adopt: 'player:adopt',
   setPrimary: 'player:set-primary',
   command: 'player:command',
   event: 'player:event',
@@ -250,6 +252,10 @@ export interface PlayerOpenReply {
 export interface PlayerBridge {
   open(options?: PlayerOpenOptions): Promise<PlayerOpenReply>;
   close(engineId: string): Promise<void>;
+  /** Parks a live retargetable engine for zero-reload cross-window handoff without stopping mpv. */
+  park?(engineId: string): Promise<boolean>;
+  /** Adopts a parked live engine into the calling window without reloading. */
+  adopt?(engineId: string): Promise<PlayerOpenReply | null>;
   /** Promotes an existing Multi-View engine to primary (OS media, taskbar, aspect lock, `#34`). */
   setPrimary?(engineId: string): Promise<void>;
   send(message: PlayerCommandMessage): void;

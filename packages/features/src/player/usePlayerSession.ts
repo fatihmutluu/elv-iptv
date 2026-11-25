@@ -1,6 +1,7 @@
 import type { CatalogService } from '@elv/data';
 import { type AccessibilityFontFamily, type DeinterlaceMode, originOf } from '@elv/domain';
 import {
+  type AttemptToken,
   type ChapterInfo,
   createPlaybackService,
   EMPTY_TRACKS,
@@ -9,6 +10,7 @@ import {
   type PlaybackService,
   type PlaybackStatus,
   type PlaybackTimers,
+  type PlayerEngine,
   type StreamVideoInfo,
 } from '@elv/playback';
 import {
@@ -20,12 +22,20 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { PlayTarget } from '../ports/play-target';
-import type { AudioDeviceInfo, HostKey, OpenVideoEngine, VideoHost } from '../ports/video-host';
+import type {
+  AdoptedPlaybackSession,
+  AudioDeviceInfo,
+  HostKey,
+  OpenVideoEngine,
+  VideoHost,
+} from '../ports/video-host';
 import { useStreamHealth } from '../shared';
+import { createAdoptedPlaybackService } from './adopted-playback-service';
 import {
   type WaveF7aLoadOptions,
   wrapEngineWithWaveF7aLoadOptions,
 } from './usePlayerDisplayAndAudioSync';
+import type { PlayerHandoffMode } from './usePlayerPip';
 
 type SessionState =
   | { readonly kind: 'opening' }
@@ -68,6 +78,25 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   );
 }
 
+function wrapEngineForParkSafeStop(
+  engine: PlayerEngine,
+  handoffModeRef?: MutableRefObject<PlayerHandoffMode>,
+): PlayerEngine {
+  if (handoffModeRef === undefined) return engine;
+  return new Proxy(engine, {
+    get(target, prop, receiver) {
+      if (prop === 'stop') {
+        return (attempt: AttemptToken): void => {
+          if (handoffModeRef.current === 'parked') return;
+          target.stop(attempt);
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 /**
  * Opens `videoHost` inside `useEffect`, creates the bound `PlaybackService`, routes out-of-DOM host
  * keys (including desktop `'close'`), and subscribes to `{ status, tracks }` snapshots.
@@ -75,16 +104,20 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
 export function usePlayerSession(params: {
   videoHost: VideoHost;
   activeTarget: PlayTarget;
-  isDesktop?: boolean;
-  subtitleFontFamily?: AccessibilityFontFamily;
-  deinterlaceMode?: DeinterlaceMode;
-  pitchLock?: boolean;
-  audioNormalization?: boolean;
-  backgroundAudioPlayback?: boolean;
-  windowAspectRatioLock?: boolean;
-  onWindowAspectRatioLockChange?: (enabled: boolean) => void;
+  isDesktop?: boolean | undefined;
+  subtitleFontFamily?: AccessibilityFontFamily | undefined;
+  deinterlaceMode?: DeinterlaceMode | undefined;
+  pitchLock?: boolean | undefined;
+  audioNormalization?: boolean | undefined;
+  backgroundAudioPlayback?: boolean | undefined;
+  windowAspectRatioLock?: boolean | undefined;
+  onWindowAspectRatioLockChange?: ((enabled: boolean) => void) | undefined;
   catalogRef?: MutableRefObject<Partial<Pick<CatalogService, 'reportStreamOutcome'>>>;
-  canAcquireAlternate?: (accountKey: string, maxConnections: number) => boolean;
+  canAcquireAlternate?: ((accountKey: string, maxConnections: number) => boolean) | undefined;
+  adoptedSession?: AdoptedPlaybackSession | undefined;
+  adoptEngineId?: string | undefined;
+  onConsumeAdoptedSession?: ((session: AdoptedPlaybackSession) => void) | undefined;
+  handoffModeRef?: MutableRefObject<PlayerHandoffMode>;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
@@ -106,6 +139,10 @@ export function usePlayerSession(params: {
     onWindowAspectRatioLockChange,
     catalogRef,
     canAcquireAlternate,
+    adoptedSession,
+    adoptEngineId,
+    onConsumeAdoptedSession,
+    handoffModeRef,
     serviceRef,
     clockRef,
     timersRef,
@@ -120,11 +157,43 @@ export function usePlayerSession(params: {
   canAcquireAlternateRef.current = canAcquireAlternate;
   const onReadyRef = useRef(params.onServiceReady);
   onReadyRef.current = params.onServiceReady;
+  const onConsumeAdoptedRef = useRef(onConsumeAdoptedSession);
+  onConsumeAdoptedRef.current = onConsumeAdoptedSession;
+  const activeTargetRef = useRef(activeTarget);
+  activeTargetRef.current = activeTarget;
 
-  const [sessionState, setSessionState] = useState<SessionState>({ kind: 'opening' });
+  const handoffVersionRef = useRef(0);
+  const lastAdoptedSessionRef = useRef(adoptedSession);
+  const lastAdoptEngineIdRef = useRef(adoptEngineId);
+  const pendingAdoptedSessionRef = useRef(adoptedSession);
+  const pendingAdoptEngineIdRef = useRef(adoptEngineId);
+  if (adoptedSession !== undefined && adoptedSession !== lastAdoptedSessionRef.current) {
+    lastAdoptedSessionRef.current = adoptedSession;
+    pendingAdoptedSessionRef.current = adoptedSession;
+    pendingAdoptEngineIdRef.current = undefined;
+    handoffVersionRef.current += 1;
+  } else if (
+    adoptEngineId !== undefined &&
+    adoptEngineId.length > 0 &&
+    adoptEngineId !== lastAdoptEngineIdRef.current
+  ) {
+    lastAdoptEngineIdRef.current = adoptEngineId;
+    pendingAdoptEngineIdRef.current = adoptEngineId;
+    pendingAdoptedSessionRef.current = undefined;
+    handoffVersionRef.current += 1;
+  }
+  const handoffVersion = handoffVersionRef.current;
 
+  const [sessionState, setSessionState] = useState<SessionState>(() =>
+    adoptedSession !== undefined
+      ? { kind: 'ready', opened: adoptedSession.opened, service: adoptedSession.service }
+      : { kind: 'opening' },
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handoffVersion triggers clean re-adoption when a new adoptEngineId or adoptedSession arrives
   useEffect(() => {
     let cancelled = false;
+    if (handoffModeRef !== undefined) handoffModeRef.current = 'none';
     let activeSession: {
       opened: OpenVideoEngine;
       service: PlaybackService;
@@ -137,21 +206,30 @@ export function usePlayerSession(params: {
       setSessionState({ kind: 'unavailable' });
     };
 
-    const attachOpened = (opened: OpenVideoEngine | null): void => {
-      if (cancelled) {
-        opened?.engine.release();
-        return;
-      }
-      if (opened === null) {
-        markUnavailable();
-        return;
-      }
-      const health = streamHealthRef.current;
-      const boundEngine =
+    const bindHostKeys = (
+      opened: OpenVideoEngine,
+      service: PlaybackService,
+    ): (() => void) | undefined =>
+      opened.onHostKey?.((key) => {
+        if ((key as string) === 'close') onExitRef.current();
+        else if (key === 'stop') {
+          service.stop();
+          onExitRef.current();
+        } else hostKeyRef.current(key);
+      });
+
+    const wrapEngineForService = (rawEngine: PlayerEngine): PlayerEngine => {
+      const waveWrapped =
         waveF7aLoadOptionsRef !== undefined
-          ? wrapEngineWithWaveF7aLoadOptions(opened.engine, () => waveF7aLoadOptionsRef.current)
-          : opened.engine;
-      const service = createPlaybackService({
+          ? wrapEngineWithWaveF7aLoadOptions(rawEngine, () => waveF7aLoadOptionsRef.current)
+          : rawEngine;
+      return wrapEngineForParkSafeStop(waveWrapped, handoffModeRef);
+    };
+
+    const createServiceForOpened = (opened: OpenVideoEngine): PlaybackService => {
+      const health = streamHealthRef.current;
+      const boundEngine = wrapEngineForService(opened.engine);
+      return createPlaybackService({
         engine: boundEngine,
         clock: clockRef.current,
         timers: timersRef.current,
@@ -181,32 +259,110 @@ export function usePlayerSession(params: {
           }
         },
       });
-      const offHostKey = opened.onHostKey?.((key) => {
-        if ((key as string) === 'close') onExitRef.current();
-        else if (key === 'stop') {
-          service.stop();
-          onExitRef.current();
-        } else hostKeyRef.current(key);
-      });
+    };
+
+    const attachOpened = (opened: OpenVideoEngine | null): void => {
+      if (cancelled) {
+        opened?.engine.release();
+        return;
+      }
+      if (opened === null) {
+        markUnavailable();
+        return;
+      }
+      const service = createServiceForOpened(opened);
+      const offHostKey = bindHostKeys(opened, service);
       activeSession = { opened, service, ...(offHostKey !== undefined ? { offHostKey } : {}) };
       serviceRef.current = service;
       setSessionState({ kind: 'ready', opened, service });
       onReadyRef.current(service);
     };
 
-    setSessionState({ kind: 'opening' });
-    try {
-      const openedOrPromise = videoHost.open();
-      if (isPromiseLike(openedOrPromise)) openedOrPromise.then(attachOpened, markUnavailable);
-      else attachOpened(openedOrPromise);
-    } catch {
-      markUnavailable();
+    const attachCrossWindowAdopted = (opened: OpenVideoEngine): void => {
+      if (cancelled) {
+        opened.engine.release();
+        return;
+      }
+      const boundEngine = wrapEngineForService(opened.engine);
+      const service = createAdoptedPlaybackService({
+        engine: boundEngine,
+        clock: clockRef.current,
+        timers: timersRef.current,
+        target: activeTargetRef.current,
+        createDelegateService: () => createServiceForOpened(opened),
+      });
+      const offHostKey = bindHostKeys(opened, service);
+      activeSession = { opened, service, ...(offHostKey !== undefined ? { offHostKey } : {}) };
+      serviceRef.current = service;
+      setSessionState({ kind: 'ready', opened, service });
+    };
+
+    const openFresh = (): void => {
+      try {
+        const openedOrPromise = videoHost.open();
+        if (isPromiseLike(openedOrPromise)) openedOrPromise.then(attachOpened, markUnavailable);
+        else attachOpened(openedOrPromise);
+      } catch {
+        markUnavailable();
+      }
+    };
+
+    const nextAdopted = pendingAdoptedSessionRef.current;
+    const nextEngineId = pendingAdoptEngineIdRef.current;
+    if (nextAdopted !== undefined) {
+      pendingAdoptedSessionRef.current = undefined;
+      onConsumeAdoptedRef.current?.(nextAdopted);
+      const { opened, service, muted } = nextAdopted;
+      opened.setPrimary?.();
+      opened.setMuted?.(muted);
+      const offHostKey = bindHostKeys(opened, service);
+      activeSession = { opened, service, ...(offHostKey !== undefined ? { offHostKey } : {}) };
+      serviceRef.current = service;
+      setSessionState({ kind: 'ready', opened, service });
+    } else if (
+      nextEngineId !== undefined &&
+      nextEngineId.length > 0 &&
+      videoHost.adoptEngine !== undefined
+    ) {
+      pendingAdoptEngineIdRef.current = undefined;
+      setSessionState({ kind: 'opening' });
+      void Promise.resolve(videoHost.adoptEngine(nextEngineId)).then(
+        (adoptedOpened) => {
+          if (cancelled) {
+            adoptedOpened?.engine.release();
+            return;
+          }
+          if (adoptedOpened !== null) {
+            attachCrossWindowAdopted(adoptedOpened);
+          } else {
+            openFresh();
+          }
+        },
+        () => {
+          if (!cancelled) openFresh();
+        },
+      );
+    } else {
+      setSessionState({ kind: 'opening' });
+      openFresh();
     }
 
     return () => {
       cancelled = true;
       serviceRef.current = null;
       if (activeSession !== null) {
+        const mode = handoffModeRef?.current ?? 'none';
+        if (mode === 'session') {
+          activeSession.offHostKey?.();
+          activeSession = null;
+          return;
+        }
+        if (mode === 'parked') {
+          activeSession.offHostKey?.();
+          activeSession.service.dispose();
+          activeSession = null;
+          return;
+        }
         activeSession.opened.setMediaMetadata?.(null);
         activeSession.offHostKey?.();
         activeSession.service.dispose();
@@ -217,6 +373,8 @@ export function usePlayerSession(params: {
   }, [
     catalogRef,
     clockRef,
+    handoffModeRef,
+    handoffVersion,
     hostKeyRef,
     onExitRef,
     serviceRef,

@@ -170,7 +170,9 @@ describe('Wave F6 Multi-View Grid, #221 Connection Clamp & #232 Thermal Watchdog
     expect(openCalls[0]?.setPrimary).toHaveBeenCalledTimes(1);
 
     // Try adding second channel from SAME maxConnections=1 source -> blocked with #221 banner
-    await fireEvent.press(screen.getByTestId('multiview-add-button'));
+    // (Redundant header Add button is hidden while empty '+' slot card is shown)
+    expect(screen.queryByTestId('multiview-add-button')).toBeNull();
+    await fireEvent.press(screen.getByTestId('multiview-empty-slot'));
     await waitFor(() => expect(screen.getByTestId('multiview-picker-item-0')).toBeTruthy());
     await fireEvent.press(screen.getByTestId('multiview-picker-item-0')); // Alpha Sports (src-1)
     await waitFor(() =>
@@ -179,7 +181,7 @@ describe('Wave F6 Multi-View Grid, #221 Connection Clamp & #232 Thermal Watchdog
     expect(openCalls).toHaveLength(1);
 
     // Add channel from Provider B (src-2) -> succeeds, opens secondary & muted immediately!
-    await fireEvent.press(screen.getByTestId('multiview-add-button'));
+    await fireEvent.press(screen.getByTestId('multiview-empty-slot'));
     await waitFor(() => expect(screen.getByTestId('multiview-picker-item-1')).toBeTruthy());
     await fireEvent.press(screen.getByTestId('multiview-picker-item-1')); // Beta Cinema (src-2)
 
@@ -222,14 +224,15 @@ describe('Wave F6 Multi-View Grid, #221 Connection Clamp & #232 Thermal Watchdog
     });
     expect(openCalls[0]?.releaseSpy).toHaveBeenCalledTimes(1);
 
-    // Exit Multi-View -> tears down remaining tile and passes active tile as resume target
+    // Exit Multi-View -> hands off remaining active tile without releasing its live engine (Wave P3)
     await fireEvent.press(screen.getByTestId('multiview-exit-button'));
     await waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
     expect(onExit.mock.calls[0]?.[0]).toMatchObject({
       itemKey: 'live:src-2:1',
       title: 'Beta Cinema',
     });
-    expect(openCalls[1]?.releaseSpy).toHaveBeenCalledTimes(1);
+    expect(onExit.mock.calls[0]?.[1]).toBeTruthy();
+    expect(openCalls[1]?.releaseSpy).toHaveBeenCalledTimes(0);
 
     await view.unmount();
   });
@@ -386,7 +389,7 @@ describe('Wave F6 Multi-View Grid, #221 Connection Clamp & #232 Thermal Watchdog
         ),
       );
 
-      // Press MENU -> RIGHT -> RIGHT to Remove -> SELECT removes Tile 1 strictly via TV D-pad!
+      // Press MENU -> RIGHT -> RIGHT to Remove -> SELECT removes Tile 1 and auto-solos remaining tile back to single player!
       await sendKey(KEYCODE_MENU);
       await sendKey(KEYCODE_DPAD_RIGHT);
       await sendKey(KEYCODE_DPAD_RIGHT);
@@ -394,8 +397,12 @@ describe('Wave F6 Multi-View Grid, #221 Connection Clamp & #232 Thermal Watchdog
         screen.getByTestId('multiview-tile-remove-btn-1').props.accessibilityState?.selected,
       ).toBe(true);
       await sendKey(KEYCODE_DPAD_CENTER);
-      await waitFor(() => expect(screen.queryByTestId('multiview-tile-1')).toBeNull());
-      expect(onExit).not.toHaveBeenCalled();
+      await waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit.mock.calls[0]?.[0]).toMatchObject({
+        itemKey: 'live:src-1:1',
+        title: 'Alpha News',
+      });
+      expect(onExit.mock.calls[0]?.[1]).toBeTruthy();
     } finally {
       await view?.unmount();
       Object.defineProperty(Platform, 'OS', { value: origOs, configurable: true });

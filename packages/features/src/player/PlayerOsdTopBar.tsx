@@ -100,6 +100,7 @@ export interface PlayerOsdProps {
   onEnterPip?: () => void;
   onEnterMultiView?: () => void;
   onPopoutPlayer?: () => void;
+  onDockPopout?: () => void;
   onLock?: () => void;
   onJumpPreviousChannel?: () => void;
   jumpingToLive?: boolean;
@@ -388,7 +389,17 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
           />
         ) : null}
 
-        {!isPortraitPhone && isDesktop && service !== null && p.onPopoutPlayer !== undefined ? (
+        {!isPortraitPhone && isDesktop && service !== null && p.onDockPopout !== undefined ? (
+          <OsdButton
+            testID="player-dock-popout-button"
+            icon="dock"
+            variant="bare"
+            size={38}
+            accessibilityLabel={i18n.t('player.popout.dock')}
+            onPress={p.onDockPopout}
+            isTv={isTv}
+          />
+        ) : !isPortraitPhone && isDesktop && service !== null && p.onPopoutPlayer !== undefined ? (
           <OsdButton
             testID="player-popout-button"
             icon="popout"

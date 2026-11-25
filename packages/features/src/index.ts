@@ -84,6 +84,7 @@ export type {
   TvHomeProgramKind,
 } from './ports/tv-home-channels';
 export type {
+  AdoptedPlaybackSession,
   OpenVideoEngine,
   PipSourceRect,
   QueuedEpisodeHostRequest,

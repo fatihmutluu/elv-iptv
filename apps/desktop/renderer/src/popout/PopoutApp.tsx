@@ -1,28 +1,34 @@
 import { type CatalogService, createCoalescedCatalog } from '@elv/data';
+import type { KeymapStore } from '@elv/domain';
 import {
   AppProviders,
   createLazyCatalog,
-  type OpenVideoEngine,
+  DEFAULT_AUTO_HIDE_OSD_MS,
+  KeymapProvider,
+  noopPlaybackGuard,
+  PlayerScreen,
+  type PlayTarget,
+  ProfileProvider,
   usePreferences,
+  useProfile,
   type VideoHost,
 } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
-import {
-  createPlaybackService,
-  type PlaybackService,
-  type PlaybackStatus,
-  positionAt,
-} from '@elv/playback';
-import { Icon, type IconName, UiAdaptersProvider, useI18n, useTheme } from '@elv/ui-kit';
+import { UiAdaptersProvider, useTheme } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import type { PopoutLaunchPayload, WindowBridge } from '../../../src/shared/window-ipc.ts';
+import { attachMouseBackGuard } from '../browser-back.ts';
 import { createDesktopCatalog } from '../catalog/index.ts';
 import { createDesktopVideoHost } from '../player/desktop-video-host.tsx';
+import { attachScrollBlurGuard } from '../scroll-blur-guard.ts';
 import { createDesktopKeymapStore } from '../storage/keymap.ts';
 import { createDesktopPreferencesStore } from '../storage/preferences.ts';
-import { createDesktopUiAdapters } from '../ui/desktop-adapters.tsx';
-import { buildPopoutDockPayload } from './popout-controller.ts';
+import { attachDeadHostOnlineReset, createDesktopUiAdapters } from '../ui/desktop-adapters.tsx';
+import {
+  buildPlayTargetFromPopoutLaunch,
+  buildPopoutDockPayloadFromTarget,
+} from './popout-controller.ts';
 
 /** Props of {@link PopoutPlayerStage}. */
 export interface PopoutPlayerStageProps {
@@ -31,58 +37,17 @@ export interface PopoutPlayerStageProps {
   readonly windowBridge: WindowBridge | undefined;
 }
 
-const HOVER_HIDE_MS = 2_400;
-
-const DRAG_REGION_STYLE = { WebkitAppRegion: 'drag' } as unknown as ViewStyle;
-const NO_DRAG_REGION_STYLE = { WebkitAppRegion: 'no-drag' } as unknown as ViewStyle;
-
-interface CinemaIconButtonProps {
-  readonly icon: IconName;
-  readonly label: string;
-  readonly active?: boolean;
-  readonly onPress: () => void;
-  readonly testID: string;
-}
-
-function CinemaIconButton({
-  icon,
-  label,
-  active = false,
-  onPress,
-  testID,
-}: CinemaIconButtonProps): ReactElement {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      onPress={onPress}
-      style={(state) => {
-        const isHovered = Boolean((state as { hovered?: boolean }).hovered);
-        return [
-          styles.iconButton,
-          NO_DRAG_REGION_STYLE,
-          {
-            borderRadius: theme.radius.pill,
-            backgroundColor:
-              state.pressed || isHovered
-                ? theme.colors.actionGlassHoverBg
-                : theme.colors.actionGlassBg,
-            borderColor: active ? theme.colors.accent : theme.colors.actionGlassBorder,
-          },
-        ];
-      }}
-      testID={testID}
-    >
-      <Icon color={active ? theme.colors.accent : theme.colors.textPrimary} name={icon} size={16} />
-    </Pressable>
-  );
+interface PopoutSessionState {
+  readonly key: number;
+  readonly target: PlayTarget;
+  readonly adoptEngineId?: string;
 }
 
 /**
- * Minimalist Cinema Quietude standalone popout player stage (`#158`):
- * unobstructed center video canvas with quiet hover-only top/bottom bars, `max_connections = 1`-safe
- * engine teardown before docking, and zero hardcoded hex colors.
+ * Full-featured standalone Desktop Popout player stage (`#158`, Wave P3):
+ * mounts the complete `<PlayerScreen>` with zero-reload live engine adoption (`adoptEngineId`),
+ * full user preferences, volume slider, timeshift/cache seek, tracks, subtitles, `⋮` overflow
+ * menu (including Always-on-Top), channel drawer, and zero-reload Dock-back handoff.
  */
 export function PopoutPlayerStage({
   catalog,
@@ -90,63 +55,18 @@ export function PopoutPlayerStage({
   windowBridge,
 }: PopoutPlayerStageProps): ReactElement {
   const theme = useTheme();
-  const i18n = useI18n();
-  const { preferences } = usePreferences();
-  const [payload, setPayload] = useState<PopoutLaunchPayload | null>(null);
-  const [opened, setOpened] = useState<OpenVideoEngine | null>(null);
-  const [status, setStatus] = useState<PlaybackStatus>({ kind: 'idle' });
-  const [muted, setMuted] = useState(false);
-  const [pinned, setPinned] = useState(true);
-  const [chromeVisible, setChromeVisible] = useState(true);
-
-  const serviceRef = useRef<PlaybackService | null>(null);
-  const openedRef = useRef<OpenVideoEngine | null>(null);
-  const payloadRef = useRef<PopoutLaunchPayload | null>(null);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const preferences = usePreferences();
+  const prefs = preferences.preferences;
+  const [session, setSession] = useState<PopoutSessionState | null>(null);
   const closingRef = useRef(false);
 
-  payloadRef.current = payload;
-
-  const scheduleHide = useCallback((): void => {
-    if (hideTimerRef.current !== undefined) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => {
-      setChromeVisible(false);
-    }, HOVER_HIDE_MS);
-  }, []);
-
-  const revealChrome = useCallback((): void => {
-    setChromeVisible(true);
-    scheduleHide();
-  }, [scheduleHide]);
-
-  const releasePlayback = useCallback((): void => {
-    const svc = serviceRef.current;
-    serviceRef.current = null;
-    if (svc) {
-      try {
-        svc.dispose();
-      } catch {
-        // ignore dispose errors during teardown
-      }
-    }
-    const eng = openedRef.current;
-    openedRef.current = null;
-    setOpened(null);
-    if (eng) {
-      try {
-        eng.engine.release();
-      } catch {
-        // ignore release errors during teardown
-      }
-    }
-  }, []);
-
-  const latestPositionMs = useCallback((): number | undefined => {
-    const svc = serviceRef.current;
-    if (!svc) return payloadRef.current?.resumePositionMs;
-    const snap = svc.getState();
-    if (!snap.anchor) return payloadRef.current?.resumePositionMs;
-    return positionAt(snap.anchor, performance.now());
+  const applyLaunchPayload = useCallback((next: PopoutLaunchPayload): void => {
+    closingRef.current = false;
+    setSession((prev) => ({
+      key: (prev?.key ?? 0) + 1,
+      target: buildPlayTargetFromPopoutLaunch(next),
+      ...(next.transferEngineId !== undefined ? { adoptEngineId: next.transferEngineId } : {}),
+    }));
   }, []);
 
   useEffect(() => {
@@ -155,262 +75,157 @@ export function PopoutPlayerStage({
     void windowBridge
       .getPopoutPayload()
       .then((initial) => {
-        if (active && initial) setPayload(initial);
-      })
-      .catch(() => undefined);
-    void windowBridge
-      .getAlwaysOnTop()
-      .then((flag) => {
-        if (active) setPinned(flag);
+        if (active && initial) applyLaunchPayload(initial);
       })
       .catch(() => undefined);
     const offPayload = windowBridge.onPopoutPayload((next) => {
-      if (active) setPayload(next);
-    });
-    const offPin = windowBridge.onAlwaysOnTopChanged((flag) => {
-      if (active) setPinned(flag);
+      if (active) applyLaunchPayload(next);
     });
     return () => {
       active = false;
       offPayload();
-      offPin();
     };
+  }, [applyLaunchPayload, windowBridge]);
+
+  const handleTargetChange = useCallback((nextTarget: PlayTarget): void => {
+    setSession((prev) => (prev ? { ...prev, target: nextTarget } : null));
+  }, []);
+
+  const handleDockPopout = useCallback(
+    (target: PlayTarget, positionMs?: number, transferEngineId?: string): void => {
+      if (closingRef.current) return;
+      closingRef.current = true;
+      const dockPayload = buildPopoutDockPayloadFromTarget(target, positionMs, transferEngineId);
+      if (windowBridge) {
+        void windowBridge.dockPopout(dockPayload).catch(() => undefined);
+      }
+    },
+    [windowBridge],
+  );
+
+  const handleExit = useCallback((): void => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    void windowBridge?.closePopout().catch(() => undefined);
   }, [windowBridge]);
 
-  useEffect(() => {
-    if (!payload) return;
-    let cancelled = false;
-
-    const start = async (): Promise<void> => {
-      let currentOpened = openedRef.current;
-      let currentService = serviceRef.current;
-      if (!currentOpened) {
-        currentOpened = await videoHost.open({ replaceExisting: true, primary: true });
-        if (cancelled) {
-          currentOpened?.engine.release();
-          return;
-        }
-        if (!currentOpened) return;
-        openedRef.current = currentOpened;
-        setOpened(currentOpened);
-        currentService = createPlaybackService({
-          engine: currentOpened.engine,
-          clock: { now: () => performance.now() },
-          timers: {
-            setTimeout: (fn, ms) => setTimeout(fn, ms),
-            clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
-          },
-        });
-        serviceRef.current = currentService;
-        currentService.subscribe((nextState) => {
-          if (!cancelled) setStatus(nextState.status);
-        });
-      }
-      if (!currentService || cancelled) return;
-      currentService.tune({
-        item: payload.itemKey,
-        accountKey: payload.sourceId ?? payload.itemKey,
-        kind: payload.kind === 'live' ? 'live' : 'vod',
-        resolve: () => catalog.resolveStream(payload.itemKey),
-        ...(payload.resumePositionMs !== undefined && payload.kind !== 'live'
-          ? { startMs: payload.resumePositionMs }
-          : {}),
-      });
-    };
-
-    void start();
-    return () => {
-      cancelled = true;
-    };
-  }, [catalog, payload, videoHost]);
-
-  useEffect(() => {
-    if (!opened) return;
-    opened.setDeinterlaceMode?.(preferences.deinterlaceMode);
-    opened.setPitchLock?.(preferences.pitchLock);
-    opened.setAudioNormalization?.(preferences.audioNormalization);
-  }, [opened, preferences.audioNormalization, preferences.deinterlaceMode, preferences.pitchLock]);
-
-  useEffect(() => {
-    return () => {
-      if (hideTimerRef.current !== undefined) clearTimeout(hideTimerRef.current);
-      releasePlayback();
-    };
-  }, [releasePlayback]);
-
-  const handleTogglePlayPause = useCallback((): void => {
-    revealChrome();
-    const svc = serviceRef.current;
-    if (!svc) return;
-    if (status.kind === 'paused') svc.play();
-    else svc.pause();
-  }, [revealChrome, status.kind]);
-
-  const handleToggleMute = useCallback((): void => {
-    revealChrome();
-    const nextMuted = !muted;
-    setMuted(nextMuted);
-    if (openedRef.current?.setMuted) openedRef.current.setMuted(nextMuted);
-    else openedRef.current?.toggleMute?.();
-  }, [muted, revealChrome]);
-
-  const handleTogglePin = useCallback((): void => {
-    revealChrome();
-    if (!windowBridge) return;
-    void windowBridge
-      .setAlwaysOnTop(!pinned)
-      .then((actual) => setPinned(actual))
-      .catch(() => undefined);
-  }, [pinned, revealChrome, windowBridge]);
-
-  const handleDock = useCallback((): void => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    const current = payloadRef.current;
-    const posMs = latestPositionMs();
-    // Release popout mpv connection BEFORE notifying main to protect max_connections = 1.
-    releasePlayback();
-    if (current && windowBridge) {
-      void windowBridge.dockPopout(buildPopoutDockPayload(current, posMs)).catch(() => undefined);
-    } else {
-      void windowBridge?.closePopout().catch(() => undefined);
-    }
-  }, [latestPositionMs, releasePlayback, windowBridge]);
-
-  const handleClose = useCallback((): void => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    releasePlayback();
-    void windowBridge?.closePopout().catch(() => undefined);
-  }, [releasePlayback, windowBridge]);
-
-  const isPaused = status.kind === 'paused';
-  const isFailed = status.kind === 'failed';
-  const showOverlay = chromeVisible || isPaused || isFailed || !payload;
-
-  const containerPointerProps = {
-    onPointerEnter: revealChrome,
-    onPointerMove: revealChrome,
-    onPointerLeave: () => {
-      if (hideTimerRef.current !== undefined) clearTimeout(hideTimerRef.current);
-      if (!isPaused) setChromeVisible(false);
-    },
-  } as Record<string, unknown>;
-
   return (
-    <View
-      {...containerPointerProps}
-      style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}
-      testID="popout-root"
-    >
-      <View style={styles.stage} testID="popout-stage">
-        {opened
-          ? opened.renderSurface({
-              statusText: '',
-              failed: isFailed,
-              resizeMode: 'fit',
-              osdVisible: showOverlay,
-              testID: 'popout-surface',
-            })
-          : null}
-      </View>
-
-      {showOverlay ? (
-        <>
-          <View
-            style={[
-              styles.topBar,
-              DRAG_REGION_STYLE,
-              {
-                backgroundColor: theme.colors.topBarScrimStart,
-                borderBottomColor: theme.colors.surfaceBorder,
-              },
-            ]}
-            testID="popout-top-bar"
-          >
-            <View style={styles.titleRow}>
-              {payload?.kind === 'live' ? (
-                <View style={[styles.liveDot, { backgroundColor: theme.colors.liveColor }]} />
-              ) : null}
-              <View style={styles.titleCopy}>
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.titleText,
-                    theme.typography.caption,
-                    { color: theme.colors.textPrimary },
-                  ]}
-                  testID="popout-title"
-                >
-                  {payload?.title ?? ''}
-                </Text>
-                {payload?.subtitle ? (
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.subtitleText,
-                      theme.typography.micro,
-                      { color: theme.colors.textSecondary },
-                    ]}
-                  >
-                    {payload.subtitle}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-            <View style={[styles.actionsRow, NO_DRAG_REGION_STYLE]}>
-              <CinemaIconButton
-                icon="dock"
-                label={i18n.t('player.popout.dock')}
-                onPress={handleDock}
-                testID="popout-dock-btn"
-              />
-              <CinemaIconButton
-                active={pinned}
-                icon="pin"
-                label={pinned ? i18n.t('player.popout.unpin') : i18n.t('player.popout.pin')}
-                onPress={handleTogglePin}
-                testID="popout-pin-btn"
-              />
-              <CinemaIconButton
-                icon="close"
-                label={i18n.t('player.popout.close')}
-                onPress={handleClose}
-                testID="popout-close-btn"
-              />
-            </View>
-          </View>
-
-          <View
-            style={[
-              styles.bottomBar,
-              {
-                backgroundColor: theme.colors.scrimMedium,
-              },
-            ]}
-            testID="popout-bottom-bar"
-          >
-            <CinemaIconButton
-              icon={isPaused ? 'play' : 'pause'}
-              label={isPaused ? i18n.t('player.play') : i18n.t('player.pause')}
-              onPress={handleTogglePlayPause}
-              testID="popout-play-pause-btn"
-            />
-            <CinemaIconButton
-              active={muted}
-              icon={muted ? 'volumeMute' : 'audio'}
-              label={muted ? i18n.t('player.unmute') : i18n.t('player.mute')}
-              onPress={handleToggleMute}
-              testID="popout-mute-btn"
-            />
-          </View>
-        </>
+    <View style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]} testID="popout-root">
+      {session ? (
+        <PlayerScreen
+          key={session.key}
+          catalog={catalog}
+          videoHost={videoHost}
+          target={session.target}
+          viewMode="full"
+          playbackGuard={noopPlaybackGuard}
+          autoHideOsdMs={DEFAULT_AUTO_HIDE_OSD_MS}
+          autoEnterPip={prefs.autoEnterPip}
+          multiViewSupported={false}
+          initialVolume={prefs.playerVolume}
+          onPersistVolume={(playerVolume) => {
+            void preferences.updatePreferences({ playerVolume });
+          }}
+          autoSubtitlesOnSkipBack={prefs.autoSubtitlesOnSkipBack}
+          onToggleAutoSubtitlesOnSkipBack={() => {
+            void preferences.updatePreferences({
+              autoSubtitlesOnSkipBack: !prefs.autoSubtitlesOnSkipBack,
+            });
+          }}
+          autoPlayNextEpisode={prefs.autoPlayNextEpisode}
+          onToggleAutoPlayNextEpisode={() => {
+            void preferences.updatePreferences({
+              autoPlayNextEpisode: !prefs.autoPlayNextEpisode,
+            });
+          }}
+          reduceMotion={prefs.reduceMotion}
+          bufferPreset={prefs.bufferPreset}
+          useTextureView={prefs.useTextureView}
+          seekStepSec={prefs.seekStepSec}
+          defaultResizeMode={prefs.defaultResizeMode}
+          preferredAudioLang={prefs.preferredAudioLang}
+          preferredSubtitleLang={prefs.preferredSubtitleLang}
+          preferredAudioLanguages={prefs.preferredAudioLanguages}
+          preferredSubtitleLanguages={prefs.preferredSubtitleLanguages}
+          preferDefaultAudioTrack={prefs.preferDefaultAudioTrack}
+          preferHevcOverDolbyVision={prefs.preferHevcOverDolbyVision}
+          filterSdhSubtitles={prefs.filterSdhSubtitles}
+          subtitleMode={prefs.subtitleMode}
+          subtitleFontFamily={prefs.subtitleFontFamily}
+          subtitleStyle={prefs.subtitleStyle}
+          onPersistSubtitleStyle={(subtitleStyle) => {
+            void preferences.updatePreferences({ subtitleStyle });
+          }}
+          tvClockMode={prefs.tvClockMode}
+          osdTimeDisplayMode={prefs.osdTimeDisplayMode}
+          onPersistOsdTimeDisplayMode={(osdTimeDisplayMode) => {
+            void preferences.updatePreferences({ osdTimeDisplayMode });
+          }}
+          sleepTimerDefaultAction={prefs.sleepTimerDefaultAction}
+          onPersistSleepTimerAction={(sleepTimerDefaultAction) => {
+            void preferences.updatePreferences({ sleepTimerDefaultAction });
+          }}
+          stillWatchingTimeoutMin={prefs.stillWatchingTimeoutMin}
+          preferredAudioDevice={prefs.preferredAudioDevice}
+          onPersistAudioDevice={(preferredAudioDevice) => {
+            void preferences.updatePreferences({ preferredAudioDevice });
+          }}
+          deinterlaceMode={prefs.deinterlaceMode}
+          onPersistDeinterlaceMode={(deinterlaceMode) => {
+            void preferences.updatePreferences({ deinterlaceMode });
+          }}
+          pitchLock={prefs.pitchLock}
+          onPersistPitchLock={(pitchLock) => {
+            void preferences.updatePreferences({ pitchLock });
+          }}
+          audioNormalization={prefs.audioNormalization}
+          onPersistAudioNormalization={(audioNormalization) => {
+            void preferences.updatePreferences({ audioNormalization });
+          }}
+          onPersistTrackLanguagePatch={(patch) => {
+            void preferences.updatePreferences(patch);
+          }}
+          windowAspectRatioLock={prefs.windowAspectRatioLock}
+          backgroundAudioPlayback={prefs.backgroundAudioPlayback}
+          autoFrameRate={prefs.autoFrameRate}
+          autoDynamicRange={prefs.autoDynamicRange}
+          nightModeDrc={prefs.nightModeDrc}
+          audioDelayByRefreshRateMs={prefs.audioDelayByRefreshRateMs}
+          audioPassthrough={prefs.audioPassthrough}
+          audioPassthroughCodecs={prefs.audioPassthroughCodecs}
+          audioExclusive={prefs.audioExclusive}
+          audioAc3Encode={prefs.audioAc3Encode}
+          audioChannelLayout={prefs.audioChannelLayout}
+          liveChannelSwitchMode={prefs.liveChannelSwitchMode}
+          {...(session.adoptEngineId !== undefined ? { adoptEngineId: session.adoptEngineId } : {})}
+          onDockPopout={handleDockPopout}
+          onTargetChange={handleTargetChange}
+          onExit={handleExit}
+        />
       ) : null}
     </View>
   );
 }
 
-/** Root mounted by the Electron desktop renderer when opened with `?popout=1` (`#158`). */
+interface PopoutWithKeymapProps extends PopoutPlayerStageProps {
+  readonly keymapStore: KeymapStore;
+}
+
+function PopoutWithKeymap({
+  catalog,
+  keymapStore,
+  videoHost,
+  windowBridge,
+}: PopoutWithKeymapProps): ReactElement {
+  const profile = useProfile();
+  return (
+    <KeymapProvider activeProfileId={profile.activeProfileId} keymapStore={keymapStore}>
+      <PopoutPlayerStage catalog={catalog} videoHost={videoHost} windowBridge={windowBridge} />
+    </KeymapProvider>
+  );
+}
+
+/** Root mounted by the Electron desktop renderer when opened with `?popout=1` (`#158`, Wave P3). */
 export function PopoutApp(): ReactElement {
   const systemLocale = useMemo(() => {
     const languages = typeof navigator === 'undefined' ? [] : navigator.languages;
@@ -430,6 +245,18 @@ export function PopoutApp(): ReactElement {
   const videoHost = useMemo(() => createDesktopVideoHost(), []);
   const windowBridge = typeof window === 'undefined' ? undefined : window.elv?.window;
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const offBack = attachMouseBackGuard(window);
+    const offScroll = attachScrollBlurGuard(window);
+    const offOnline = attachDeadHostOnlineReset(window);
+    return () => {
+      offBack();
+      offScroll();
+      offOnline();
+    };
+  }, []);
+
   return (
     <UiAdaptersProvider adapters={uiAdapters}>
       <AppProviders
@@ -439,7 +266,18 @@ export function PopoutApp(): ReactElement {
         systemLocale={systemLocale}
         viewport={{ formFactor: 'desktop' }}
       >
-        <PopoutPlayerStage catalog={catalog} videoHost={videoHost} windowBridge={windowBridge} />
+        <ProfileProvider
+          catalog={catalog}
+          keymapStore={keymapStore}
+          profilePreferences={preferencesStore}
+        >
+          <PopoutWithKeymap
+            catalog={catalog}
+            keymapStore={keymapStore}
+            videoHost={videoHost}
+            windowBridge={windowBridge}
+          />
+        </ProfileProvider>
       </AppProviders>
     </UiAdaptersProvider>
   );
@@ -450,66 +288,5 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
     overflow: 'hidden',
-  },
-  stage: {
-    flex: 1,
-  },
-  topBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  titleRow: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    minWidth: 0,
-  },
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 999,
-  },
-  titleCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  titleText: {
-    fontWeight: '600',
-  },
-  subtitleText: {
-    marginTop: 1,
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  bottomBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 10,
-  },
-  iconButton: {
-    width: 32,
-    height: 32,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

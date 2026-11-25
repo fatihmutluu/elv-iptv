@@ -8,12 +8,17 @@ import type {
   DesktopAudioOutputConfig,
   DisplaySyncPolicy,
   ExternalSubtitleTrack,
+  MediaTracks,
   MultiViewDeviceCapabilities,
+  PlaybackService,
+  PlaybackStatus,
   PlayerEngine,
   StreamRequest,
+  StreamVideoInfo,
   ThermalState,
 } from '@elv/playback';
 import type { ReactElement } from 'react';
+import type { PlayTarget } from './play-target';
 
 /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover, `stretch` fills bounds ignoring aspect). */
 export type VideoResizeMode = 'fit' | 'fill' | 'stretch';
@@ -196,6 +201,22 @@ export interface OpenVideoEngine {
   readonly setDesktopAudioOutput?: (config: DesktopAudioOutputConfig) => void;
   /** Optional notification fired when Desktop audio passthrough falls back to PCM (`#213`). */
   readonly onPassthroughFallback?: (listener: () => void) => () => void;
+  /** Optional host engine identifier for zero-reload cross-window transfer (`Wave P3`). */
+  readonly hostEngineId?: string;
+  /** Parks the live underlying engine for zero-reload transfer to another window, returning its transfer engine ID (`Wave P3`). */
+  readonly parkForTransfer?: () => Promise<string | null>;
+}
+
+/** Live playback session handed off in-process between `PlayerScreen` and `MultiViewStage` without reloading (`Wave P3`). */
+export interface AdoptedPlaybackSession {
+  readonly opened: OpenVideoEngine;
+  readonly service: PlaybackService;
+  readonly target: PlayTarget;
+  readonly muted: boolean;
+  readonly volume: number;
+  readonly status?: PlaybackStatus;
+  readonly tracks?: MediaTracks;
+  readonly mediaInfo?: StreamVideoInfo;
 }
 
 /** Optional screen-coordinate hint rectangle for OS Picture-in-Picture entry animations (`#34`). */
@@ -228,6 +249,8 @@ export interface ThermalDevicePort {
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */
 export interface VideoHost {
   open(options?: VideoHostOpenOptions): OpenVideoEngine | null | Promise<OpenVideoEngine | null>;
+  /** Adopts a parked live engine by ID for zero-reload cross-window handoff (`Wave P3`). */
+  adoptEngine?: (engineId: string) => Promise<OpenVideoEngine | null>;
   /** True when the active presenter supports concurrent Multi-View tiles (`#34`). */
   readonly supportsMultiView?: boolean;
 }

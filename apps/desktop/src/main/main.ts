@@ -375,7 +375,8 @@ async function startPlayer(): Promise<void> {
             })
           : undefined;
   }
-  registerPlayerIpc({
+  disposePlayerIpc?.();
+  disposePlayerIpc = registerPlayerIpc({
     ipcMain,
     now: () => performance.now(),
     log: logger.log,
@@ -422,6 +423,11 @@ async function startPlayer(): Promise<void> {
       if (window && !window.isDestroyed()) {
         aspectRatioLockControllers.get(window)?.setAspectRatio(aspectRatio);
       }
+    },
+    retargetOwner: (engine, nextOwner) => {
+      const window = BrowserWindow.fromWebContents(nextOwner as WebContents);
+      if (!window || window.isDestroyed()) return false;
+      return engine.retargetWindow?.(window) === true;
     },
     gateReport: app.isPackaged ? undefined : (line, engine) => void printGateLine(line, engine),
     createEngine: async (owner, onUi, engineId, getMultiViewTileCount) => {
@@ -536,6 +542,7 @@ hasLock = startSingleInstance(app, {
 let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
 let artworkCache: DesktopArtworkCache | undefined;
 let lanPairingIpc: LanPairingIpcHandle | undefined;
+let disposePlayerIpc: (() => void) | undefined;
 let disposeDiagnosticsIpc: (() => void) | undefined;
 let disposeSyncIpc: (() => void) | undefined;
 
@@ -701,12 +708,16 @@ if (hasLock) {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  disposePlayerIpc?.();
+  disposePlayerIpc = undefined;
   trayController?.destroy();
   popoutController?.dispose();
   void lanPairingIpc?.stop();
 });
 
 app.on('will-quit', () => {
+  disposePlayerIpc?.();
+  disposePlayerIpc = undefined;
   trayController?.destroy();
   trayController = undefined;
   popoutController?.dispose();

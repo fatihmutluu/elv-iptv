@@ -1,6 +1,5 @@
 import type { CatalogService } from '@elv/data';
-import type { OpenVideoEngine, VideoHost } from '@elv/features';
-import type { EngineEvent, PlayerEngine } from '@elv/playback';
+import type { PlayTarget, VideoHost } from '@elv/features';
 import type { ReactElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PopoutLaunchPayload, WindowBridge } from '../../../src/shared/window-ipc.ts';
@@ -104,22 +103,65 @@ vi.mock('react', async (importOriginal) => {
 
 vi.mock('react-native', () => ({
   View: 'View',
-  Text: 'Text',
-  Pressable: 'Pressable',
   Platform: { OS: 'web', select: (spec: Record<string, unknown>) => spec.web ?? spec.default },
   StyleSheet: { create: <T>(s: T): T => s },
 }));
 
+const updatePreferences = vi.fn(async () => ({ ok: true as const, value: {} }));
+
 vi.mock('@elv/features', () => ({
   AppProviders: 'AppProviders',
-  createLazyCatalog: (factory: () => unknown) => factory(),
+  DEFAULT_AUTO_HIDE_OSD_MS: 3_500,
+  KeymapProvider: 'KeymapProvider',
+  PlayerScreen: 'PlayerScreen',
+  ProfileProvider: 'ProfileProvider',
+  createLazyCatalog: () => ({}),
+  noopPlaybackGuard: { acquire: () => ({ ok: true }), release: () => undefined },
   usePreferences: () => ({
     preferences: {
+      playerVolume: 82,
+      autoEnterPip: true,
+      autoSubtitlesOnSkipBack: false,
+      autoPlayNextEpisode: true,
+      reduceMotion: false,
+      bufferPreset: 'auto',
+      useTextureView: false,
+      seekStepSec: 10,
+      defaultResizeMode: 'fit',
+      preferredAudioLang: 'en',
+      preferredSubtitleLang: 'en',
+      preferredAudioLanguages: ['en'],
+      preferredSubtitleLanguages: ['en'],
+      preferDefaultAudioTrack: true,
+      preferHevcOverDolbyVision: false,
+      filterSdhSubtitles: false,
+      subtitleMode: 'smart',
+      subtitleFontFamily: 'system',
+      subtitleStyle: { fontScale: 1 },
+      tvClockMode: 'always',
+      osdTimeDisplayMode: 'total',
+      sleepTimerDefaultAction: 'stop',
+      stillWatchingTimeoutMin: 0,
+      preferredAudioDevice: 'auto',
       deinterlaceMode: 'auto',
       pitchLock: true,
       audioNormalization: false,
+      windowAspectRatioLock: false,
+      backgroundAudioPlayback: false,
+      autoFrameRate: 'off',
+      autoDynamicRange: false,
+      nightModeDrc: 'off',
+      audioDelayByRefreshRateMs: {},
+      audioPassthrough: false,
+      audioPassthroughCodecs: [],
+      audioExclusive: false,
+      audioAc3Encode: false,
+      audioChannelLayout: 'auto',
+      liveChannelSwitchMode: 'instant',
     },
+    updatePreferences,
   }),
+  useProfile: () => ({ activeProfileId: 'default' }),
 }));
 
 vi.mock('../ui/desktop-adapters.tsx', () => ({
@@ -127,42 +169,28 @@ vi.mock('../ui/desktop-adapters.tsx', () => ({
 }));
 
 vi.mock('@elv/ui-kit', () => ({
-  Icon: 'Icon',
   UiAdaptersProvider: 'UiAdaptersProvider',
-  useI18n: () => ({ t: (key: string) => key }),
   useTheme: () => ({
     colors: {
       bgCanvas: 'token-bgCanvas',
-      topBarScrimStart: 'token-topBarScrimStart',
-      surfaceBorder: 'token-surfaceBorder',
-      scrimMedium: 'token-scrimMedium',
-      liveColor: 'token-liveColor',
-      textPrimary: 'token-textPrimary',
-      textSecondary: 'token-textSecondary',
-      actionGlassBg: 'token-actionGlassBg',
-      actionGlassHoverBg: 'token-actionGlassHoverBg',
-      actionGlassBorder: 'token-actionGlassBorder',
-      accent: 'token-accent',
     },
-    radius: { pill: 999 },
-    typography: { caption: {}, micro: {} },
   }),
 }));
 
-import { PopoutPlayerStage, type PopoutPlayerStageProps } from './PopoutApp.tsx';
+import { PopoutApp, PopoutPlayerStage, type PopoutPlayerStageProps } from './PopoutApp.tsx';
 
-function findByTestId(node: unknown, testID: string): ReactElement<Record<string, unknown>> | null {
+function findByType(node: unknown, typeName: string): ReactElement<Record<string, unknown>> | null {
   if (!node || typeof node !== 'object') return null;
   if (Array.isArray(node)) {
     for (const child of node) {
-      const hit = findByTestId(child, testID);
+      const hit = findByType(child, typeName);
       if (hit) return hit;
     }
     return null;
   }
   const el = node as ReactElement<Record<string, unknown>>;
-  if (el.props?.testID === testID) return el;
-  return findByTestId(el.props?.children, testID);
+  if (el.type === typeName) return el;
+  return findByType(el.props?.children, typeName);
 }
 
 function collectStyleColors(node: unknown, out: string[] = []): string[] {
@@ -192,85 +220,45 @@ function renderStage(props: PopoutPlayerStageProps): ReactElement<Record<string,
   return tree;
 }
 
-describe('PopoutApp (#158)', () => {
+describe('PopoutApp (Wave P3 full PlayerScreen + zero-reload handoff)', () => {
   beforeEach(() => {
     hookState.reset();
+    updatePreferences.mockClear();
   });
 
-  it('resolves stream, uses theme tokens exclusively, drives controls, and releases engine before docking', async () => {
-    const order: string[] = [];
-    const listeners = new Set<(event: EngineEvent) => void>();
-    const setMuted = vi.fn();
-    const setDeinterlaceMode = vi.fn();
-    const setPitchLock = vi.fn();
-    const setAudioNormalization = vi.fn();
-    const engine: PlayerEngine = {
-      capabilities: {
-        mpegTsOverHttp: true,
-        hls: true,
-        liveSeek: true,
-        softwareAudioFallback: false,
-        recreate: true,
-        audioTrackSelection: true,
-        subtitleTrackSelection: true,
-      },
-      load: vi.fn(),
-      retry: vi.fn(),
-      play: vi.fn(),
-      pause: vi.fn(),
-      seek: vi.fn(),
-      stop: vi.fn(),
-      recreate: vi.fn(),
-      release: vi.fn(() => {
-        order.push('engine.release');
-      }),
-      subscribe: (l) => {
-        listeners.add(l);
-        return () => listeners.delete(l);
-      },
-    };
-    const opened: OpenVideoEngine = {
-      engine,
-      setMuted,
-      setDeinterlaceMode,
-      setPitchLock,
-      setAudioNormalization,
-      renderSurface: () => null,
-    };
+  it('mounts full PlayerScreen with adoptEngineId, preferences, dock handoff with transferEngineId, and clean exit', async () => {
+    const catalog = {} as unknown as CatalogService;
     const videoHost: VideoHost = {
       supportsMultiView: true,
-      open: vi.fn(async () => opened),
+      open: vi.fn(async () => null),
+      adoptEngine: vi.fn(async () => null),
     };
-    const catalog = {
-      resolveStream: vi.fn(async () => ({
-        ok: true as const,
-        value: { url: 'http://sim.test/movie.mp4', headers: {} },
-      })),
-    } as unknown as CatalogService;
 
     const initialPayload: PopoutLaunchPayload = {
       itemKey: 'movie:src1:m42',
       kind: 'movie',
       title: 'Night Screening',
+      sourceId: 'src1',
       resumePositionMs: 10_000,
-      pinned: true,
+      transferEngineId: 'engine-9',
     };
 
-    const dockPopout = vi.fn(async () => {
-      order.push('window.dockPopout');
-    });
-    const setAlwaysOnTop = vi.fn(async (flag: boolean) => flag);
+    let pushPayload: ((next: PopoutLaunchPayload) => void) | undefined;
+    const dockPopout = vi.fn(async () => undefined);
     const closePopout = vi.fn(async () => undefined);
     const windowBridge: WindowBridge = {
-      setAlwaysOnTop,
-      getAlwaysOnTop: vi.fn(async () => true),
+      setAlwaysOnTop: vi.fn(async (flag: boolean) => flag),
+      getAlwaysOnTop: vi.fn(async () => false),
       onAlwaysOnTopChanged: () => () => undefined,
       setAspectRatioLock: vi.fn(async (f) => f),
       setMinimizeToTray: vi.fn(async (f) => f),
       openPopout: vi.fn(async () => true),
       closePopout,
       getPopoutPayload: vi.fn(async () => initialPayload),
-      onPopoutPayload: () => () => undefined,
+      onPopoutPayload: (listener) => {
+        pushPayload = listener;
+        return () => undefined;
+      },
       dockPopout,
       onPopoutDocked: () => () => undefined,
       onWindowRestored: () => () => undefined,
@@ -278,56 +266,124 @@ describe('PopoutApp (#158)', () => {
     };
 
     const props: PopoutPlayerStageProps = { catalog, videoHost, windowBridge };
-    renderStage(props);
+    const initialTree = renderStage(props);
+    expect(findByType(initialTree, 'PlayerScreen')).toBeNull();
+    expect(collectStyleColors(initialTree)).toEqual(['token-bgCanvas']);
     await Promise.resolve();
     await Promise.resolve();
 
-    // Second render picks up resolved initialPayload and opens videoHost + tunes catalog
+    const tree = renderStage(props);
+    const player = findByType(tree, 'PlayerScreen');
+    if (!player) throw new Error('expected full PlayerScreen to mount');
+
+    // Full player wiring + adoptEngineId + preferences
+    expect(player.props.adoptEngineId).toBe('engine-9');
+    expect(player.props.viewMode).toBe('full');
+    expect(player.props.multiViewSupported).toBe(false);
+    expect(player.props.initialVolume).toBe(82);
+    expect(player.props.deinterlaceMode).toBe('auto');
+    expect(player.props.pitchLock).toBe(true);
+    expect(player.props.target).toEqual({
+      itemKey: 'movie:src1:m42',
+      sourceId: 'src1',
+      title: 'Night Screening',
+      kind: 'vod',
+      itemKind: 'movie',
+      startPositionMs: 10_000,
+    });
+    expect(player.props.onPopoutPlayer).toBeUndefined();
+    expect(player.props.onEnterMultiView).toBeUndefined();
+
+    // Zapping inside Popout updates target in-place without changing session key
+    const firstKey = player.key;
+    const zappedTarget: PlayTarget = {
+      itemKey: 'live:src1:ch5',
+      sourceId: 'src1',
+      title: 'Channel Five',
+      kind: 'live',
+      itemKind: 'live',
+    };
+    (player.props.onTargetChange as (t: PlayTarget) => void)(zappedTarget);
+    const afterZap = renderStage(props);
+    const playerAfterZap = findByType(afterZap, 'PlayerScreen');
+    expect(playerAfterZap?.key).toBe(firstKey);
+    expect(playerAfterZap?.props.target).toEqual(zappedTarget);
+
+    // Pushing a new popout payload from main bumps session key and passes new transferEngineId
+    pushPayload?.({
+      itemKey: 'live:src1:ch9',
+      kind: 'live',
+      title: 'Channel Nine',
+      sourceId: 'src1',
+      transferEngineId: 'engine-12',
+    });
+    const afterPush = renderStage(props);
+    const playerAfterPush = findByType(afterPush, 'PlayerScreen');
+    expect(playerAfterPush?.key).not.toBe(firstKey);
+    expect(playerAfterPush?.props.adoptEngineId).toBe('engine-12');
+
+    // Docking back sends transferEngineId + current target to windowBridge.dockPopout
+    const onDockPopout = playerAfterPush?.props.onDockPopout as (
+      t: PlayTarget,
+      posMs?: number,
+      transferId?: string,
+    ) => void;
+    onDockPopout(zappedTarget, 42_000, 'engine-12');
+    onDockPopout(zappedTarget, 42_000, 'engine-12'); // guarded against double-click
+    expect(dockPopout).toHaveBeenCalledTimes(1);
+    expect(dockPopout).toHaveBeenCalledWith({
+      itemKey: 'live:src1:ch5',
+      kind: 'live',
+      title: 'Channel Five',
+      sourceId: 'src1',
+      transferEngineId: 'engine-12',
+    });
+
+    hookState.unmount();
+  });
+
+  it('closes popout window cleanly on PlayerScreen onExit and wraps PopoutApp in AppProviders + ProfileProvider', async () => {
+    const closePopout = vi.fn(async () => undefined);
+    const windowBridge: WindowBridge = {
+      setAlwaysOnTop: vi.fn(async (flag: boolean) => flag),
+      getAlwaysOnTop: vi.fn(async () => false),
+      onAlwaysOnTopChanged: () => () => undefined,
+      setAspectRatioLock: vi.fn(async (f) => f),
+      setMinimizeToTray: vi.fn(async (f) => f),
+      openPopout: vi.fn(async () => true),
+      closePopout,
+      getPopoutPayload: vi.fn(async () => ({
+        itemKey: 'live:src1:ch1',
+        kind: 'live' as const,
+        title: 'News',
+      })),
+      onPopoutPayload: () => () => undefined,
+      dockPopout: vi.fn(async () => undefined),
+      onPopoutDocked: () => () => undefined,
+      onWindowRestored: () => () => undefined,
+      onHiddenToTray: () => () => undefined,
+    };
+
+    const props: PopoutPlayerStageProps = {
+      catalog: {} as CatalogService,
+      videoHost: { open: vi.fn(async () => null) },
+      windowBridge,
+    };
     renderStage(props);
     await Promise.resolve();
     await Promise.resolve();
     const tree = renderStage(props);
-
-    // Every rendered color must originate from theme tokens (zero hardcoded hex)
-    const renderedColors = collectStyleColors(tree);
-    expect(renderedColors.length).toBeGreaterThan(0);
-    for (const c of renderedColors) {
-      expect(c.startsWith('token-')).toBe(true);
-    }
-
-    expect(catalog.resolveStream).toHaveBeenCalledWith('movie:src1:m42');
-    expect(setDeinterlaceMode).toHaveBeenCalledWith('auto');
-    expect(setPitchLock).toHaveBeenCalledWith(true);
-    expect(setAudioNormalization).toHaveBeenCalledWith(false);
-    expect(findByTestId(tree, 'popout-title')?.props.children).toBe('Night Screening');
-
-    // Pin button uses player.popout.unpin when pinned=true and toggles via windowBridge
-    const pinBtn = findByTestId(tree, 'popout-pin-btn');
-    if (!pinBtn) throw new Error('expected popout-pin-btn');
-    expect(pinBtn.props.label).toBe('player.popout.unpin');
-    (pinBtn.props.onPress as () => void)();
-    expect(setAlwaysOnTop).toHaveBeenCalledWith(false);
-
-    // Mute button calls opened.setMuted(true)
-    const muteBtn = findByTestId(tree, 'popout-mute-btn');
-    if (!muteBtn) throw new Error('expected popout-mute-btn');
-    expect(muteBtn.props.label).toBe('player.mute');
-    (muteBtn.props.onPress as () => void)();
-    expect(setMuted).toHaveBeenCalledWith(true);
-
-    // Dock button releases popout mpv engine BEFORE invoking windowBridge.dockPopout
-    const dockBtn = findByTestId(tree, 'popout-dock-btn');
-    if (!dockBtn) throw new Error('expected popout-dock-btn');
-    expect(dockBtn.props.label).toBe('player.popout.dock');
-    (dockBtn.props.onPress as () => void)();
-    expect(order).toEqual(['engine.release', 'window.dockPopout']);
-    expect(dockPopout).toHaveBeenCalledWith({
-      itemKey: 'movie:src1:m42',
-      kind: 'movie',
-      title: 'Night Screening',
-      positionMs: 10_000,
-    });
-
+    const player = findByType(tree, 'PlayerScreen');
+    if (!player) throw new Error('expected PlayerScreen');
+    (player.props.onExit as () => void)();
+    expect(closePopout).toHaveBeenCalledTimes(1);
     hookState.unmount();
+
+    // Verify PopoutApp root provider hierarchy includes UiAdaptersProvider -> AppProviders -> ProfileProvider
+    hookState.beginRender();
+    const rootTree = PopoutApp() as ReactElement<Record<string, unknown>>;
+    expect(findByType(rootTree, 'UiAdaptersProvider')).not.toBeNull();
+    expect(findByType(rootTree, 'AppProviders')).not.toBeNull();
+    expect(findByType(rootTree, 'ProfileProvider')).not.toBeNull();
   });
 });

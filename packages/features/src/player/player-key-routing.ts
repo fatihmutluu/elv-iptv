@@ -46,6 +46,7 @@ export interface PlayerControlsParams {
   hasJumpToLive?: boolean;
   initialOsdHidden?: boolean | undefined;
   autoHideOsdMs?: number | undefined;
+  initialMuted?: boolean | undefined;
   initialVolume?: number | undefined;
   autoSubtitlesOnSkipBack?: boolean | undefined;
   seekStepSec?: SeekStepSecPref | undefined;

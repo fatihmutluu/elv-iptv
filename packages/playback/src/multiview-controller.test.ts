@@ -529,4 +529,40 @@ describe('multiview-controller (#34, #221, #232)', () => {
     expect(state.activeAudioTileId).toBe(t2.tile.tileId);
     expect(observedInNotify).toEqual([{ tileIds: [t2.tile.tileId], acct1Count: 0 }]);
   });
+
+  it('admits an already-open adopted stream even when providerActiveCons >= maxConnections and registers its lease', () => {
+    const tracker = createConnectionTracker();
+    const ctrl = createMultiViewController({
+      capabilities: { platform: 'desktop' },
+      tracker,
+    });
+
+    const adopted = ctrl.addTile({
+      itemKey: 'ch-1',
+      title: 'Ch 1',
+      sourceId: 's1',
+      accountKey: 'acct-1',
+      maxConnections: 1,
+      providerActiveCons: 1,
+      adoptedExistingStream: true,
+    });
+    expect(adopted.ok).toBe(true);
+    expect(tracker.activeCount('acct-1')).toBe(1);
+
+    // Subsequent NEW tile on the same maxConnections = 1 account is still blocked
+    const second = ctrl.addTile({
+      itemKey: 'ch-2',
+      title: 'Ch 2',
+      sourceId: 's1',
+      accountKey: 'acct-1',
+      maxConnections: 1,
+      providerActiveCons: 1,
+    });
+    expect(second).toMatchObject({
+      ok: false,
+      reason: 'connection-limit',
+      activeCount: 1,
+      maxConnections: 1,
+    });
+  });
 });

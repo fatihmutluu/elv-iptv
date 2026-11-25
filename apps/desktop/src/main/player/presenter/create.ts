@@ -59,13 +59,13 @@ export function createPresenter(
       appWindow,
       engineId: opts?.engineId ?? '',
       sharedTexture,
-      getMainFrame: () =>
-        appWindow.isDestroyed() || appWindow.webContents.isDestroyed()
-          ? null
-          : appWindow.webContents.mainFrame,
-      getScaleFactor: () => {
-        if (appWindow.isDestroyed()) return 1;
-        const display = screen.getDisplayMatching(appWindow.getContentBounds());
+      getMainFrame: (win = appWindow) => {
+        const bw = win as BrowserWindow;
+        return bw.isDestroyed() || bw.webContents.isDestroyed() ? null : bw.webContents.mainFrame;
+      },
+      getScaleFactor: (win = appWindow) => {
+        if (win.isDestroyed()) return 1;
+        const display = screen.getDisplayMatching(win.getContentBounds());
         return display.scaleFactor > 0 ? display.scaleFactor : 1;
       },
       createPipeServer: () => createServer(),

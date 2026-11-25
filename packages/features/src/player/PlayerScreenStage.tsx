@@ -29,7 +29,7 @@ import { Animated, StyleSheet, Text, View } from 'react-native';
 import type { AppLifecyclePort } from '../ports/app-lifecycle';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
-import type { VideoHost, VideoResizeMode } from '../ports/video-host';
+import type { AdoptedPlaybackSession, VideoHost, VideoResizeMode } from '../ports/video-host';
 import { useProfile } from '../shared';
 import type { PlayerOsdProps } from './DesktopCinemaBar';
 import { ExternalDisplayCard } from './ExternalDisplayCard';
@@ -142,10 +142,24 @@ export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
   onMinimizeToMiniPlayer?: () => void;
   /** Restores the floating corner mini-player back to fullscreen (`#233`). */
   onExpandMiniPlayer?: () => void;
+  /** Optional live playback session adopted in-process (e.g. from Multi-View) without reopening or retuning (`Wave P3`). */
+  adoptedSession?: AdoptedPlaybackSession | undefined;
+  /** Optional parked host engine ID adopted across Desktop Popout/Main windows without reloading (`Wave P3`). */
+  adoptEngineId?: string | undefined;
+  /** Invoked once `adoptedSession` has been claimed by `usePlayerSession` so shell cleanup will not dispose it (`Wave P3`). */
+  onConsumeAdoptedSession?: ((session: AdoptedPlaybackSession) => void) | undefined;
+  /** Registers a synchronous extractor so `AppShell` can hand off the live engine & service directly into Multi-View (`Wave P3`). */
+  onRegisterHandoffSession?:
+    | ((fn: (() => AdoptedPlaybackSession | null) | null) => void)
+    | undefined;
+  /** Docks a detached Desktop Popout player back into the main window (optionally handing off a parked engine ID, `Wave P3`). */
+  onDockPopout?:
+    | ((target: PlayTarget, positionMs?: number, transferEngineId?: string) => void)
+    | undefined;
   /** Launches Multi-View seeded with the currently playing channel (`#34`). */
   onEnterMultiView?: (target: PlayTarget) => void;
-  /** Detaches active playback into the standalone Desktop Popout window (`#158`). */
-  onPopoutPlayer?: (target: PlayTarget, positionMs?: number) => void;
+  /** Detaches active playback into the standalone Desktop Popout window (`#158`, `Wave P3`). */
+  onPopoutPlayer?: (target: PlayTarget, positionMs?: number, transferEngineId?: string) => void;
   /** Registers an async stop callback so `AppShell` can stop active playback cleanly before Multi-View/Popout handoff without wiping catalog caches. */
   onRegisterStopActivePlayer?: (stop: (() => Promise<void>) | null) => void;
   /** When `true`, suspends player remote/keyboard shortcuts while a root overlay is open. */

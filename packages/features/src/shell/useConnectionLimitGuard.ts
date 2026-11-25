@@ -21,6 +21,8 @@ export interface UseConnectionLimitGuardOptions {
   readonly enrichTarget: (target: PlayTarget, sources: readonly SourceRow[]) => PlayTarget;
   readonly connectionTracker?: ConnectionTracker;
   readonly onOpenTarget: (target: PlayTarget) => void;
+  /** Direct target setter used for zero-reload adopted streams (0 new connections), bypassing external-player interception (`Wave P3`). */
+  readonly onAdoptTarget?: (target: PlayTarget) => void;
   readonly onReplaceTarget: (target: PlayTarget) => void;
   readonly onStopOtherStream?: (streamId: string) => void;
 }
@@ -31,6 +33,8 @@ export interface ConnectionLimitGuard {
   readonly tracker: ConnectionTracker;
   readonly pending: PendingConnectionPrompt | null;
   readonly requestPlay: (target: PlayTarget) => void;
+  /** Commits an already-open adopted stream (0 new connections), bypassing pre-flight limit checks & external handoff (`Wave P3`). */
+  readonly adoptPlay: (target: PlayTarget) => void;
   readonly replaceActiveTarget: (target: PlayTarget) => void;
   readonly releaseActive: () => void;
   readonly handleStopOther: () => void;
@@ -72,6 +76,7 @@ export function useConnectionLimitGuard({
   enrichTarget,
   connectionTracker,
   onOpenTarget,
+  onAdoptTarget,
   onReplaceTarget,
   onStopOtherStream,
 }: UseConnectionLimitGuardOptions): ConnectionLimitGuard {
@@ -99,7 +104,7 @@ export function useConnectionLimitGuard({
   useEffect(() => () => releaseActive(), [releaseActive]);
 
   const commitPlay = useCallback(
-    (target: PlayTarget, accountKey: string, replace = false) => {
+    (target: PlayTarget, accountKey: string, mode: 'open' | 'replace' | 'adopt' = 'open') => {
       const prevId = activeStreamIdRef.current;
       if (prevId !== null) {
         tracker.release(prevId);
@@ -108,10 +113,11 @@ export function useConnectionLimitGuard({
       const nextId = `shell:${seqRef.current}:${target.itemKey}`;
       tracker.acquire(accountKey, nextId);
       activeStreamIdRef.current = nextId;
-      if (replace) onReplaceTarget(target);
+      if (mode === 'replace') onReplaceTarget(target);
+      else if (mode === 'adopt') (onAdoptTarget ?? onOpenTarget)(target);
       else onOpenTarget(target);
     },
-    [onOpenTarget, onReplaceTarget, tracker],
+    [onAdoptTarget, onOpenTarget, onReplaceTarget, tracker],
   );
 
   const requestPlay = useCallback(
@@ -132,9 +138,19 @@ export function useConnectionLimitGuard({
         return;
       }
       setPending(null);
-      commitPlay(info.enriched, info.accountKey, false);
+      commitPlay(info.enriched, info.accountKey, 'open');
     },
     [commitPlay, enrichTarget, sourcesRef, tracker],
+  );
+
+  const adoptPlay = useCallback(
+    (target: PlayTarget) => {
+      const info = resolveConnectionInfo(target, sourcesRef.current, enrichTarget);
+      pendingRef.current = null;
+      setPending(null);
+      commitPlay(info.enriched, info.accountKey, 'adopt');
+    },
+    [commitPlay, enrichTarget, sourcesRef],
   );
 
   const replaceActiveTarget = useCallback(
@@ -150,7 +166,7 @@ export function useConnectionLimitGuard({
           ? { providerActiveCons: info.providerActiveCons }
           : {}),
       });
-      commitPlay(info.enriched, info.accountKey, true);
+      commitPlay(info.enriched, info.accountKey, 'replace');
     },
     [commitPlay, enrichTarget, sourcesRef, tracker],
   );
@@ -165,7 +181,7 @@ export function useConnectionLimitGuard({
       tracker.release(stopId);
       onStopOtherStream?.(stopId);
     }
-    commitPlay(current.target, current.accountKey, false);
+    commitPlay(current.target, current.accountKey, 'open');
   }, [commitPlay, onStopOtherStream, tracker]);
 
   const handleCancel = useCallback(() => {
@@ -178,13 +194,14 @@ export function useConnectionLimitGuard({
     if (current === null) return;
     pendingRef.current = null;
     setPending(null);
-    commitPlay(current.target, current.accountKey, false);
+    commitPlay(current.target, current.accountKey, 'open');
   }, [commitPlay]);
 
   return {
     tracker,
     pending,
     requestPlay,
+    adoptPlay,
     replaceActiveTarget,
     releaseActive,
     handleStopOther,

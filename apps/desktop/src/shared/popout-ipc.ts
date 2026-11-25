@@ -1,4 +1,4 @@
-import { sanitizeDesktopArtworkUrl } from './player-ipc.ts';
+import { isEngineId, sanitizeDesktopArtworkUrl } from './player-ipc.ts';
 import { hasOnlyKeys } from './player-ipc-subtitles.ts';
 
 /** Sanitized play target payload transferred from main window to standalone Desktop Popout window (`#158`). */
@@ -11,6 +11,7 @@ export interface PopoutLaunchPayload {
   readonly sourceId?: string;
   readonly resumePositionMs?: number;
   readonly pinned?: boolean;
+  readonly transferEngineId?: string;
 }
 
 /** Payload sent back to the main window when a standalone Desktop Popout player docks (`#158`). */
@@ -22,6 +23,7 @@ export interface PopoutDockPayload {
   readonly logo?: string;
   readonly sourceId?: string;
   readonly positionMs?: number;
+  readonly transferEngineId?: string;
 }
 
 const MAX_ITEM_KEY_CHARS = 512;
@@ -43,6 +45,7 @@ const POPOUT_LAUNCH_KEYS: ReadonlySet<string> = new Set([
   'sourceId',
   'resumePositionMs',
   'pinned',
+  'transferEngineId',
 ]);
 
 const POPOUT_DOCK_KEYS: ReadonlySet<string> = new Set([
@@ -53,6 +56,7 @@ const POPOUT_DOCK_KEYS: ReadonlySet<string> = new Set([
   'logo',
   'sourceId',
   'positionMs',
+  'transferEngineId',
 ]);
 
 const isSafeRecord = (x: unknown): x is Record<string, unknown> =>
@@ -99,6 +103,9 @@ const isOptionalPositionMs = (x: unknown): boolean =>
   x === undefined ||
   (typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= MAX_POSITION_MS);
 
+const isOptionalTransferEngineId = (x: unknown): boolean =>
+  x === undefined || (isEngineId(x) && !hasControlChar(x) && x.trim().length > 0);
+
 /** Strict runtime guard for `window:open-popout` / `window:popout-payload` (`#158`). */
 export function isPopoutLaunchPayload(x: unknown): x is PopoutLaunchPayload {
   if (!isSafeRecord(x) || !hasOnlyKeys(x, POPOUT_LAUNCH_KEYS)) return false;
@@ -110,7 +117,8 @@ export function isPopoutLaunchPayload(x: unknown): x is PopoutLaunchPayload {
     isOptionalLogo(x['logo']) &&
     isBoundedText(x['sourceId'], MAX_SOURCE_ID_CHARS, false) &&
     isOptionalPositionMs(x['resumePositionMs']) &&
-    (x['pinned'] === undefined || typeof x['pinned'] === 'boolean')
+    (x['pinned'] === undefined || typeof x['pinned'] === 'boolean') &&
+    isOptionalTransferEngineId(x['transferEngineId'])
   );
 }
 
@@ -124,7 +132,8 @@ export function isPopoutDockPayload(x: unknown): x is PopoutDockPayload {
     isBoundedText(x['subtitle'], MAX_SUBTITLE_CHARS, false) &&
     isOptionalLogo(x['logo']) &&
     isBoundedText(x['sourceId'], MAX_SOURCE_ID_CHARS, false) &&
-    isOptionalPositionMs(x['positionMs'])
+    isOptionalPositionMs(x['positionMs']) &&
+    isOptionalTransferEngineId(x['transferEngineId'])
   );
 }
 
@@ -133,6 +142,7 @@ export function sanitizePopoutLaunchPayload(payload: PopoutLaunchPayload): Popou
   const safeLogo = sanitizeDesktopArtworkUrl(payload.logo);
   const subtitle = payload.subtitle?.trim();
   const sourceId = payload.sourceId?.trim();
+  const transferEngineId = payload.transferEngineId?.trim();
   return {
     itemKey: payload.itemKey.trim(),
     kind: payload.kind,
@@ -144,6 +154,7 @@ export function sanitizePopoutLaunchPayload(payload: PopoutLaunchPayload): Popou
       ? { resumePositionMs: Math.round(payload.resumePositionMs) }
       : {}),
     ...(payload.pinned !== undefined ? { pinned: payload.pinned } : {}),
+    ...(transferEngineId && isEngineId(transferEngineId) ? { transferEngineId } : {}),
   };
 }
 
@@ -152,6 +163,7 @@ export function sanitizePopoutDockPayload(payload: PopoutDockPayload): PopoutDoc
   const safeLogo = sanitizeDesktopArtworkUrl(payload.logo);
   const subtitle = payload.subtitle?.trim();
   const sourceId = payload.sourceId?.trim();
+  const transferEngineId = payload.transferEngineId?.trim();
   return {
     itemKey: payload.itemKey.trim(),
     kind: payload.kind,
@@ -160,5 +172,6 @@ export function sanitizePopoutDockPayload(payload: PopoutDockPayload): PopoutDoc
     ...(safeLogo ? { logo: safeLogo } : {}),
     ...(sourceId ? { sourceId } : {}),
     ...(payload.positionMs !== undefined ? { positionMs: Math.round(payload.positionMs) } : {}),
+    ...(transferEngineId && isEngineId(transferEngineId) ? { transferEngineId } : {}),
   };
 }

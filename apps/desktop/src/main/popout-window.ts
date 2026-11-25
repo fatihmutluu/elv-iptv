@@ -32,10 +32,10 @@ export const POPOUT_STATE_FILENAME = 'popout-window-state.json';
 
 /** Default and minimum dimensions for the standalone popout player window (`#158`). */
 export const POPOUT_BOUNDS_DEFAULTS: WindowBoundsDefaults = Object.freeze({
-  width: 640,
-  height: 360,
-  minWidth: 320,
-  minHeight: 180,
+  width: 960,
+  height: 540,
+  minWidth: 480,
+  minHeight: 270,
 });
 
 /** Minimal Electron `BrowserWindow` surface used by {@link createPopoutWindowController}. */
@@ -111,13 +111,12 @@ export function buildPopoutWindowOptions(
     height: opts.bounds?.height ?? POPOUT_BOUNDS_DEFAULTS.height,
     minWidth: POPOUT_BOUNDS_DEFAULTS.minWidth,
     minHeight: POPOUT_BOUNDS_DEFAULTS.minHeight,
-    frame: false,
-    titleBarStyle: 'hidden',
+    frame: true,
     resizable: true,
-    maximizable: false,
+    maximizable: true,
     fullscreenable: true,
     autoHideMenuBar: true,
-    alwaysOnTop: opts.pinned ?? true,
+    alwaysOnTop: opts.pinned ?? false,
   };
 }
 
@@ -169,7 +168,7 @@ export function createPopoutWindowController(
         orderedDisplays(deps.screen),
         POPOUT_BOUNDS_DEFAULTS,
       );
-      const pinned = clean.pinned ?? true;
+      const pinned = clean.pinned ?? false;
       const options = buildPopoutWindowOptions(deps.preloadPath, {
         bounds: {
           x: saved.x,
