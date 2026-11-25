@@ -1,16 +1,77 @@
-import type {
-  AndroidDecoderMode,
-  BufferPreset,
-  DefaultResizeModePref,
-  DeinterlaceMode,
-  OsdTimeDisplayMode,
-  SeekStepSecPref,
-  SubtitleModePref,
+import {
+  type AndroidDecoderMode,
+  AUDIO_PASSTHROUGH_CODECS,
+  type AudioChannelLayout,
+  type AudioPassthroughCodec,
+  type AutoFrameRateMode,
+  type BufferPreset,
+  type DefaultResizeModePref,
+  type DeinterlaceMode,
+  isRefreshRateBucket,
+  MAX_REFRESH_RATE_AUDIO_DELAY_MS,
+  MIN_REFRESH_RATE_AUDIO_DELAY_MS,
+  type NightModeDrcPreset,
+  normalizeAudioDelayByRefreshRateMs,
+  normalizeAudioPassthroughCodecs,
+  type OsdTimeDisplayMode,
+  type RefreshRateBucket,
+  type SeekStepSecPref,
+  type SubtitleModePref,
 } from '@elv/domain';
 import type { AppI18n, MessageId } from '@elv/i18n';
 import type { SettingsPreferencesController } from './appearance-controls';
 import type { SettingsChipOption } from './SettingsRowParts';
 import type { PlaybackFocusId } from './useTvSettingsNavigation';
+
+/** Step increment in milliseconds for per-refresh-rate audio delay adjustments (`#115`). */
+export const REFRESH_RATE_DELAY_STEP_MS = 25;
+
+/** Formats a signed per-refresh-rate audio delay offset in milliseconds (`0 ms`, `+25 ms`, `-50 ms`). */
+export function formatRefreshRateDelayMs(delayMs: number): string {
+  const rounded = Number.isFinite(delayMs) ? Math.round(delayMs) : 0;
+  if (rounded === 0) return '0 ms';
+  return rounded > 0 ? `+${rounded} ms` : `${rounded} ms`;
+}
+
+/** Returns a normalized per-refresh-rate delay map stepped by `deltaSteps * 25 ms`, clamped `[-1000, 1000]`. */
+export function stepRefreshRateAudioDelay(
+  current: Readonly<Partial<Record<RefreshRateBucket, number>>>,
+  bucket: RefreshRateBucket,
+  deltaSteps: number,
+): Readonly<Partial<Record<RefreshRateBucket, number>>> {
+  const base = current[bucket] ?? 0;
+  const next = Math.min(
+    MAX_REFRESH_RATE_AUDIO_DELAY_MS,
+    Math.max(
+      MIN_REFRESH_RATE_AUDIO_DELAY_MS,
+      Math.round(base + deltaSteps * REFRESH_RATE_DELAY_STEP_MS),
+    ),
+  );
+  return normalizeAudioDelayByRefreshRateMs({ ...current, [bucket]: next });
+}
+
+/** Returns a normalized per-refresh-rate delay map with `bucket` reset to `0 ms` (omitted). */
+export function resetRefreshRateAudioDelay(
+  current: Readonly<Partial<Record<RefreshRateBucket, number>>>,
+  bucket: RefreshRateBucket,
+): Readonly<Partial<Record<RefreshRateBucket, number>>> {
+  return normalizeAudioDelayByRefreshRateMs({ ...current, [bucket]: 0 });
+}
+
+/** Toggles a single passthrough codec while preserving canonical {@link AUDIO_PASSTHROUGH_CODECS} order. */
+export function toggleAudioPassthroughCodec(
+  current: readonly AudioPassthroughCodec[],
+  codec: AudioPassthroughCodec,
+): readonly AudioPassthroughCodec[] {
+  const active = new Set(current);
+  if (active.has(codec)) {
+    active.delete(codec);
+  } else {
+    active.add(codec);
+  }
+  const ordered = AUDIO_PASSTHROUGH_CODECS.filter((entry) => active.has(entry));
+  return normalizeAudioPassthroughCodecs(ordered, []);
+}
 
 const TRACK_LANGUAGE_CODES: ReadonlyArray<{
   readonly code: '' | 'tr' | 'en' | 'de' | 'fr' | 'es';
@@ -178,6 +239,90 @@ const DEINTERLACE_MODE_OPTIONS: ReadonlyArray<{
   },
 ];
 
+const AUTO_FRAME_RATE_OPTIONS: ReadonlyArray<{
+  readonly value: AutoFrameRateMode;
+  readonly focusId: PlaybackFocusId;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    value: 'off',
+    focusId: 'afr-off',
+    testID: 'settings-playback-afr-off',
+    labelKey: 'settings.playback.autoFrameRateOff',
+  },
+  {
+    value: 'seamless',
+    focusId: 'afr-seamless',
+    testID: 'settings-playback-afr-seamless',
+    labelKey: 'settings.playback.autoFrameRateSeamless',
+  },
+  {
+    value: 'always',
+    focusId: 'afr-always',
+    testID: 'settings-playback-afr-always',
+    labelKey: 'settings.playback.autoFrameRateAlways',
+  },
+];
+
+const NIGHT_MODE_DRC_OPTIONS: ReadonlyArray<{
+  readonly value: NightModeDrcPreset;
+  readonly focusId: PlaybackFocusId;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    value: 'off',
+    focusId: 'night-drc-off',
+    testID: 'settings-playback-night-drc-off',
+    labelKey: 'settings.playback.nightModeDrcOff',
+  },
+  {
+    value: 'light',
+    focusId: 'night-drc-light',
+    testID: 'settings-playback-night-drc-light',
+    labelKey: 'settings.playback.nightModeDrcLight',
+  },
+  {
+    value: 'night',
+    focusId: 'night-drc-night',
+    testID: 'settings-playback-night-drc-night',
+    labelKey: 'settings.playback.nightModeDrcNight',
+  },
+];
+
+const AUDIO_CHANNEL_LAYOUT_OPTIONS: ReadonlyArray<{
+  readonly value: AudioChannelLayout;
+  readonly focusId: string;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    value: 'auto',
+    focusId: 'channel-layout-auto',
+    testID: 'settings-playback-channel-layout-auto',
+    labelKey: 'settings.desktop.audioChannelLayoutAuto',
+  },
+  {
+    value: 'stereo',
+    focusId: 'channel-layout-stereo',
+    testID: 'settings-playback-channel-layout-stereo',
+    labelKey: 'settings.desktop.audioChannelLayoutStereo',
+  },
+  {
+    value: '5.1',
+    focusId: 'channel-layout-5.1',
+    testID: 'settings-playback-channel-layout-5.1',
+    labelKey: 'settings.desktop.audioChannelLayout51',
+  },
+  {
+    value: '7.1',
+    focusId: 'channel-layout-7.1',
+    testID: 'settings-playback-channel-layout-7.1',
+    labelKey: 'settings.desktop.audioChannelLayout71',
+  },
+];
+
 const OSD_TIME_MODE_OPTIONS: ReadonlyArray<{
   readonly value: OsdTimeDisplayMode;
   readonly focusId: PlaybackFocusId;
@@ -281,6 +426,14 @@ export function buildPlaybackChipOptions(i18n: AppI18n) {
     bufferOptions: mapLabeled(BUFFER_PRESET_OPTIONS),
     videoDecoderOptions: mapLabeled(VIDEO_DECODER_OPTIONS),
     deinterlaceOptions: mapLabeled(DEINTERLACE_MODE_OPTIONS),
+    autoFrameRateOptions: mapLabeled(AUTO_FRAME_RATE_OPTIONS),
+    nightModeDrcOptions: mapLabeled(NIGHT_MODE_DRC_OPTIONS),
+    audioChannelLayoutOptions: AUDIO_CHANNEL_LAYOUT_OPTIONS.map((opt) => ({
+      value: opt.value,
+      label: i18n.t(opt.labelKey),
+      focusId: opt.focusId,
+      testID: opt.testID,
+    })),
     osdTimeOptions: OSD_TIME_MODE_OPTIONS.map((opt) => ({
       value: opt.value,
       label:
@@ -313,12 +466,52 @@ export function buildPlaybackChipOptions(i18n: AppI18n) {
   };
 }
 
-/** Applies a TV D-pad activation on a Playback settings control (`#401`, `#393`, `#310`, `#124`, `#160`, `#118`). */
+/** Optional Wave F7A context for TV D-pad activation on Playback settings controls (`#115`). */
+export interface PlaybackControlActivationContext {
+  readonly selectedDelayBucket?: RefreshRateBucket;
+  readonly onSelectDelayBucket?: (bucket: RefreshRateBucket) => void;
+}
+
+/** Applies a TV D-pad activation on a Playback settings control (`#401`, `#393`, `#310`, `#124`, `#160`, `#118`, `#115`, `#116`). */
 export function activatePlaybackControl(
   controlId: PlaybackFocusId,
   preferences?: SettingsPreferencesController,
+  context?: PlaybackControlActivationContext,
 ): void {
+  if (controlId.startsWith('delay-bucket-')) {
+    const bucket = controlId.slice('delay-bucket-'.length);
+    if (isRefreshRateBucket(bucket)) {
+      context?.onSelectDelayBucket?.(bucket);
+    }
+    return;
+  }
   if (!preferences) return;
+  if (controlId === 'delay-stepper') {
+    const bucket = context?.selectedDelayBucket ?? '23.976';
+    void preferences.updatePreferences({
+      audioDelayByRefreshRateMs: resetRefreshRateAudioDelay(
+        preferences.preferences.audioDelayByRefreshRateMs,
+        bucket,
+      ),
+    });
+    return;
+  }
+  const afrOpt = AUTO_FRAME_RATE_OPTIONS.find((o) => o.focusId === controlId);
+  if (afrOpt) {
+    void preferences.updatePreferences({ autoFrameRate: afrOpt.value });
+    return;
+  }
+  if (controlId === 'toggle-auto-dynamic-range') {
+    void preferences.updatePreferences({
+      autoDynamicRange: !preferences.preferences.autoDynamicRange,
+    });
+    return;
+  }
+  const drcOpt = NIGHT_MODE_DRC_OPTIONS.find((o) => o.focusId === controlId);
+  if (drcOpt) {
+    void preferences.updatePreferences({ nightModeDrc: drcOpt.value });
+    return;
+  }
   if (controlId.startsWith('audio-lang-')) {
     const suffix = controlId.slice('audio-lang-'.length);
     const match = TRACK_LANGUAGE_CODES.find((c) => c.suffix === suffix);
@@ -450,5 +643,24 @@ export function activatePlaybackControl(
   }
   if (controlId === 'audio-device-auto') {
     void preferences.updatePreferences({ preferredAudioDevice: 'auto' });
+  }
+}
+
+/** Applies a TV D-pad left/right adjustment (`-1 | 1`) on inline Playback steppers (`#115`). */
+export function adjustPlaybackControl(
+  controlId: PlaybackFocusId,
+  delta: -1 | 1,
+  preferences?: SettingsPreferencesController,
+  selectedDelayBucket: RefreshRateBucket = '23.976',
+): void {
+  if (!preferences) return;
+  if (controlId === 'delay-stepper') {
+    void preferences.updatePreferences({
+      audioDelayByRefreshRateMs: stepRefreshRateAudioDelay(
+        preferences.preferences.audioDelayByRefreshRateMs,
+        selectedDelayBucket,
+        delta,
+      ),
+    });
   }
 }

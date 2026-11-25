@@ -474,4 +474,9 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'position', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'added_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
+  item_drm_meta: [
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'scheme', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+  ],
 };

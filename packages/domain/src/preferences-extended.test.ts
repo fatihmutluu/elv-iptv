@@ -198,6 +198,7 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
 
   it('serializes a fully populated snapshot well under 1500 bytes (and MAX_PREFERENCES_BYTES) and round-trips cleanly', () => {
     const full: PreferencesSnapshot = {
+      ...DEFAULT_PREFERENCES,
       version: 1,
       themePreset: 'obsidianCrimson',
       locale: 'tr-TR',

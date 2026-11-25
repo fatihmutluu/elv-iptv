@@ -30,9 +30,9 @@ function memorySecrets(): SecretStore & { data: Map<string, string> } {
 describe('schema v18 (vod_enrichment, vod_collections & vod_collection_items)', () => {
   it('sets SCHEMA_VERSION to 18 and creates v18 tables and indexes on a fresh database', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(18);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(18);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 18 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
 
     expect(Object.keys(EXPECTED_TABLE_COLUMNS)).toEqual(
       expect.arrayContaining(['vod_enrichment', 'vod_collections', 'vod_collection_items']),
@@ -133,7 +133,7 @@ describe('schema v18 (vod_enrichment, vod_collections & vod_collection_items)', 
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 18 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
     expect(await db.all('SELECT key, name FROM movies')).toEqual([
       { key: 'm:s1:movie:1', name: 'Solaris' },
     ]);

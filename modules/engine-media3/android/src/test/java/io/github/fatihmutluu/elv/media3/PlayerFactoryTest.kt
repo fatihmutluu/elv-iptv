@@ -176,11 +176,20 @@ class PlayerFactoryTest {
   }
 
   @Test
-  fun `gates seamless video frame-rate switching strategy on API 30+ (#151)`() {
+  fun `gates seamless video frame-rate switching strategy on API 30+ and AutoFrameRateMode (#151, #116)`() {
     assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF, videoChangeFrameRateStrategyForApi(28))
     assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF, videoChangeFrameRateStrategyForApi(29))
     assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS, videoChangeFrameRateStrategyForApi(30))
     assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS, videoChangeFrameRateStrategyForApi(34))
+    assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF, videoChangeFrameRateStrategyForApi(34, AutoFrameRateMode.OFF))
+    assertEquals(
+      C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS,
+      videoChangeFrameRateStrategyForApi(34, AutoFrameRateMode.SEAMLESS),
+    )
+    assertEquals(
+      C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS,
+      videoChangeFrameRateStrategyForApi(34, AutoFrameRateMode.ALWAYS),
+    )
 
     val app = RuntimeEnvironment.getApplication()
     val api30Factory = PlayerFactory(

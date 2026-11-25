@@ -45,7 +45,8 @@ final class EngineObject: SharedObject, @unchecked Sendable {
       if let style = request.subtitleStyle {
         driver.setSubtitleStyle(style)
       }
-      driver.core.load(request, attempt: attempt)
+      let effectiveRequest = driver.resolveLoadRequest(request)
+      driver.core.load(effectiveRequest, attempt: attempt)
     }
   }
 
@@ -209,6 +210,20 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     enqueueMain { [weak self] in
       guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
       driver.setSubtitleStyle(style)
+    }
+  }
+
+  /// Updates live tvOS AFR/HDR display-sync settings on the engine (`#188`, `#116`).
+  func setDisplaySync(autoFrameRate: String?, autoDynamicRange: Bool?) {
+    guard !fence.isDisposedNow else { return }
+    let parsedMode = AppleAutoFrameRateMode.parse(autoFrameRate)
+    let settings = AppleDisplaySyncSettings(
+      autoFrameRate: parsedMode,
+      autoDynamicRange: autoDynamicRange ?? true
+    )
+    enqueueMain { [weak self] in
+      guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
+      driver.setDisplaySync(settings)
     }
   }
 

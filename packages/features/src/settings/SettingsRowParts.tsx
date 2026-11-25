@@ -86,6 +86,7 @@ export interface SettingsToggleRowProps {
   readonly title: string;
   readonly description?: string;
   readonly checked: boolean;
+  readonly disabled?: boolean;
   readonly focused: boolean;
   readonly isTv: boolean;
   readonly onToggle: () => void;
@@ -98,6 +99,7 @@ export function SettingsToggleRow({
   title,
   description,
   checked,
+  disabled = false,
   focused,
   isTv,
   onToggle,
@@ -106,29 +108,36 @@ export function SettingsToggleRow({
   const theme = useTheme();
   const [hovered, setHovered] = useState(false);
   const transition = webTransition(theme, 'transform, background-color, border-color');
-  const cursorPointer = webCursorPointer();
+  const cursorPointer = disabled ? undefined : webCursorPointer();
 
   return (
     <Pressable
       testID={testID}
       accessibilityRole="switch"
       accessibilityLabel={title}
-      accessibilityState={{ checked }}
+      accessibilityState={{ checked, disabled }}
       aria-checked={checked}
+      aria-disabled={disabled}
+      disabled={disabled}
       {...(isTv ? { focusable: false } : {})}
       onLayout={onLayoutY ? (e) => onLayoutY(e.nativeEvent.layout.y) : undefined}
-      onPress={onToggle}
-      onHoverIn={() => setHovered(true)}
+      onPress={() => {
+        if (!disabled) onToggle();
+      }}
+      onHoverIn={() => {
+        if (!disabled) setHovered(true);
+      }}
       onHoverOut={() => setHovered(false)}
       style={[
         styles.toggleRow,
         transition,
         cursorPointer,
+        disabled ? styles.disabledRow : undefined,
         {
           borderRadius: theme.radius.card,
           backgroundColor: focused
             ? theme.colors.focusFill
-            : hovered
+            : hovered && !disabled
               ? theme.colors.subtleHighlight
               : 'transparent',
           borderWidth: focused ? theme.focus.ringWidth : 1,
@@ -200,4 +209,5 @@ const styles = StyleSheet.create({
   },
   switchTrack: { width: 38, height: 22, borderWidth: 1, padding: 2, justifyContent: 'center' },
   switchThumb: { width: 16, height: 16 },
+  disabledRow: { opacity: 0.48 },
 });

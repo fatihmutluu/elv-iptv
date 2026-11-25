@@ -182,4 +182,121 @@ class AudioEffectsControllerTest {
     assertTrue(brokenEffects[0].released)
     throwingApply.release()
   }
+
+  private class FakeDrcEffect(
+    val sessionId: Int,
+    private val throwOnApply: Boolean = false,
+  ) : DrcEffect {
+    var enabled: Boolean = false
+      private set
+    val appliedConfigs = mutableListOf<NightModeDrcConfig>()
+    var released: Boolean = false
+
+    override fun applyConfig(config: NightModeDrcConfig) {
+      if (throwOnApply) throw RuntimeException("OEM DynamicsProcessing HAL error")
+      appliedConfigs += config
+    }
+
+    override fun setEnabled(enabled: Boolean) {
+      if (throwOnApply && enabled) throw RuntimeException("OEM DynamicsProcessing HAL error")
+      this.enabled = enabled
+    }
+
+    override fun release() {
+      released = true
+    }
+  }
+
+  @Test
+  fun `NightModeDrcPolicy maps presets cleanly and gates DynamicsProcessing below API 28 (#115)`() {
+    assertEquals(NightModeDrcPreset.OFF, parseNightModeDrcPreset(null))
+    assertEquals(NightModeDrcPreset.OFF, parseNightModeDrcPreset("unknown"))
+    assertEquals(NightModeDrcPreset.LIGHT, parseNightModeDrcPreset(" light "))
+    assertEquals(NightModeDrcPreset.NIGHT, parseNightModeDrcPreset("NIGHT"))
+    assertEquals(null, nightModeDrcConfigFor(NightModeDrcPreset.OFF))
+
+    val light = nightModeDrcConfigFor(NightModeDrcPreset.LIGHT)!!
+    val night = nightModeDrcConfigFor(NightModeDrcPreset.NIGHT)!!
+    assertTrue("NIGHT ratio must compress harder than LIGHT", night.ratio > light.ratio)
+    assertTrue("NIGHT threshold must be lower than LIGHT", night.thresholdDb < light.thresholdDb)
+    assertEquals(-1.5f, night.limiterThresholdDb, 0.01f)
+    assertTrue(light.limiterEnabled && night.limiterEnabled)
+
+    // Platform factory returns null safely on API < 28 or non-positive sessionId
+    assertEquals(null, createPlatformDynamicsProcessing(audioSessionId = 42, sdkInt = 27))
+    assertEquals(null, createPlatformDynamicsProcessing(audioSessionId = 0, sdkInt = 34))
+  }
+
+  @Test
+  fun `Night-Mode DRC attaches on valid stereo session, auto-disables on multichannel, handles session swap, stop, release, and HAL errors (#115)`() {
+    val drcEffects = mutableListOf<FakeDrcEffect>()
+    val controller = AudioEffectsController(
+      handler = Handler(Looper.getMainLooper()),
+      drcEffectFactory = { id -> FakeDrcEffect(id).also { drcEffects += it } },
+    )
+
+    // Unset session -> does not create
+    controller.setNightModeDrc(NightModeDrcPreset.LIGHT)
+    assertFalse(controller.isDrcEffectActive)
+    assertTrue(drcEffects.isEmpty())
+
+    // Valid session -> attaches LIGHT
+    controller.onAudioSessionIdChanged(55)
+    assertTrue(controller.isDrcEffectActive)
+    assertEquals(1, drcEffects.size)
+    assertEquals(NightModeDrcPreset.LIGHT, drcEffects[0].appliedConfigs.last().preset)
+    assertTrue(drcEffects[0].enabled)
+
+    // Switching LIGHT -> NIGHT updates in place on same session
+    controller.setNightModeDrc(NightModeDrcPreset.NIGHT)
+    assertEquals(1, drcEffects.size)
+    assertEquals(NightModeDrcPreset.NIGHT, drcEffects[0].appliedConfigs.last().preset)
+
+    // Multichannel (5.1) -> disables & releases DRC automatically
+    controller.onTracksChanged(audioTracks(channelCount = 6))
+    assertFalse(controller.isDrcEffectActive)
+    assertTrue(drcEffects[0].released)
+
+    // Back to stereo -> re-creates DRC
+    controller.onTracksChanged(audioTracks(channelCount = 2))
+    assertTrue(controller.isDrcEffectActive)
+    assertEquals(2, drcEffects.size)
+
+    // Session ID change -> releases old DRC and attaches new session
+    controller.onAudioSessionIdChanged(66)
+    assertTrue(drcEffects[1].released)
+    assertEquals(3, drcEffects.size)
+    assertEquals(66, drcEffects[2].sessionId)
+
+    // onStop releases DRC cleanly
+    controller.onStop()
+    assertTrue(drcEffects[2].released)
+    assertFalse(controller.isDrcEffectActive)
+
+    // OFF releases DRC and stays inactive
+    controller.onAudioSessionIdChanged(77)
+    assertTrue(controller.isDrcEffectActive)
+    controller.setNightModeDrc(NightModeDrcPreset.OFF)
+    assertFalse(controller.isDrcEffectActive)
+    assertTrue(drcEffects[3].released)
+
+    // Release locks out future activation
+    controller.release()
+    controller.setNightModeDrc(NightModeDrcPreset.NIGHT)
+    controller.onAudioSessionIdChanged(88)
+    assertEquals(4, drcEffects.size)
+
+    // OEM HAL exception on apply releases and does not crash
+    val broken = mutableListOf<FakeDrcEffect>()
+    val failing = AudioEffectsController(
+      handler = Handler(Looper.getMainLooper()),
+      drcEffectFactory = { id -> FakeDrcEffect(id, throwOnApply = true).also { broken += it } },
+    )
+    failing.onAudioSessionIdChanged(99)
+    failing.setNightModeDrc(NightModeDrcPreset.NIGHT)
+    assertFalse(failing.isDrcEffectActive)
+    assertEquals(1, broken.size)
+    assertTrue(broken[0].released)
+    failing.release()
+  }
 }

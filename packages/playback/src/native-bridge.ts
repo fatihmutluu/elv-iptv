@@ -2,10 +2,13 @@ import {
   type AndroidDecoderMode,
   type BufferPreset,
   type DnsFamilyPreference,
+  type DrmConfig,
+  type NightModeDrcPreset,
   normalizeDnsFamily,
   type SubtitleStyleConfig,
   validateHostOverride,
 } from '@elv/domain';
+import type { DesktopAudioOutputConfig, DisplaySyncPolicy } from './display-sync';
 import type {
   AttemptToken,
   ClockAnchor,
@@ -39,6 +42,10 @@ export interface NativeLoadCommand {
   readonly subtitleStyle?: SubtitleStyleConfig;
   readonly dnsFamily?: DnsFamilyPreference;
   readonly hostOverride?: string;
+  readonly drm?: DrmConfig;
+  readonly displaySync?: DisplaySyncPolicy;
+  readonly nightModeDrc?: NightModeDrcPreset;
+  readonly desktopAudioOutput?: DesktopAudioOutputConfig;
 }
 
 /** Handle to a native engine shared object (`ElvEngineMedia3.Engine` or `ElvEngineAether.Engine`). */
@@ -56,6 +63,9 @@ export interface NativeEngineHandle {
   selectSecondarySubtitleTrack?(attempt: AttemptToken, id: string | null): void;
   addExternalSubtitle?(attempt: AttemptToken, track: ExternalSubtitleTrack): void;
   setSubtitleStyle?(style: SubtitleStyleConfig): void;
+  setNightModeDrc?(preset: NightModeDrcPreset): void;
+  setDisplaySync?(policy: DisplaySyncPolicy): void;
+  setDesktopAudioOutput?(config: DesktopAudioOutputConfig): void;
   setAudioDelay?(attempt: AttemptToken, delayMs: number): void;
   setSubtitleDelay?(attempt: AttemptToken, delayMs: number): void;
   selectVideoQuality?(attempt: AttemptToken, id: string | null): void;
@@ -69,7 +79,7 @@ export interface NativeEngineHandle {
 }
 
 function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
-  const { attempt, url, headers, kind, startMs, options } = cmd;
+  const { attempt, url, headers, kind, startMs, drm, options } = cmd;
   const dnsFamily = normalizeDnsFamily(options?.dnsFamily);
   const validatedHost =
     options?.hostOverride === undefined ? undefined : validateHostOverride(options.hostOverride);
@@ -101,6 +111,12 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
     ...(options?.subtitleStyle === undefined ? {} : { subtitleStyle: options.subtitleStyle }),
     ...(dnsFamily === undefined ? {} : { dnsFamily }),
     ...(hostOverride === undefined ? {} : { hostOverride }),
+    ...(drm === undefined ? {} : { drm }),
+    ...(options?.displaySync === undefined ? {} : { displaySync: options.displaySync }),
+    ...(options?.nightModeDrc === undefined ? {} : { nightModeDrc: options.nightModeDrc }),
+    ...(options?.desktopAudioOutput === undefined
+      ? {}
+      : { desktopAudioOutput: options.desktopAudioOutput }),
   };
 }
 
@@ -326,6 +342,27 @@ export function bridgeNativeEngine(
       : {
           setSubtitleStyle: command((style: SubtitleStyleConfig) => {
             native.setSubtitleStyle?.(style);
+          }),
+        }),
+    ...(native.setNightModeDrc === undefined
+      ? {}
+      : {
+          setNightModeDrc: command((preset: NightModeDrcPreset) => {
+            native.setNightModeDrc?.(preset);
+          }),
+        }),
+    ...(native.setDisplaySync === undefined
+      ? {}
+      : {
+          setDisplaySync: command((policy: DisplaySyncPolicy) => {
+            native.setDisplaySync?.(policy);
+          }),
+        }),
+    ...(native.setDesktopAudioOutput === undefined
+      ? {}
+      : {
+          setDesktopAudioOutput: command((config: DesktopAudioOutputConfig) => {
+            native.setDesktopAudioOutput?.(config);
           }),
         }),
     ...(native.setAudioDelay === undefined

@@ -1,7 +1,7 @@
-import type { DnsFamilyPreference, Result } from '@elv/domain';
+import type { DnsFamilyPreference, DrmConfig, Result } from '@elv/domain';
 import type { ItemRow } from './queries';
 
-/** Resolved alternate/backup stream endpoint with its own cloned headers map (`#430`, `#157`, `#317`, `#172`). */
+/** Resolved alternate/backup stream endpoint with its own cloned headers map (`#430`, `#157`, `#317`, `#172`, `#272`). */
 export interface StreamAlternate {
   url: string;
   headers: Record<string, string>;
@@ -12,6 +12,8 @@ export interface StreamAlternate {
   readonly allowLegacyTls?: boolean;
   readonly dnsFamily?: DnsFamilyPreference;
   readonly hostOverride?: string;
+  /** Optional play-time DRM config resolved strictly from `SecretStore` (`#272`). */
+  readonly drm?: DrmConfig;
 }
 
 /** What a player needs to open an item. Never log or store it. */
@@ -37,6 +39,8 @@ export interface StreamRequest {
   readonly dnsFamily?: DnsFamilyPreference;
   /** Optional validated literal IP host override scoped strictly to the initial host (`#172`). */
   readonly hostOverride?: string;
+  /** Optional play-time DRM config resolved strictly from `SecretStore`; omitted when absent (`#272`). */
+  readonly drm?: DrmConfig;
 }
 
 /** Alias for {@link StreamRequest}. */

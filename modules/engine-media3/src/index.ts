@@ -1,5 +1,6 @@
 import {
   bridgeNativeEngine,
+  type DisplaySyncPolicy,
   type EngineCapabilities,
   type EngineEvent,
   type ExternalSubtitleTrack,
@@ -17,6 +18,38 @@ import {
   normalizeMedia3DnsFamily,
   normalizeMedia3HostOverride,
 } from './network-options';
+import {
+  extractMedia3WaveF7ALoadOptions,
+  type Media3AutoFrameRateMode,
+  type Media3DisplaySyncOptions,
+  type Media3DrmCapabilities,
+  type Media3DrmClearKeyPair,
+  type Media3DrmConfig,
+  type Media3DrmScheme,
+  type Media3NightModeDrcPreset,
+  type Media3WaveF7ALoadOptions,
+  type Media3WidevineSecurityLevel,
+  normalizeMedia3AudioDelayByRefreshRate,
+  normalizeMedia3DisplaySyncPolicy,
+  normalizeMedia3DrmCapabilities,
+  normalizeMedia3NightModeDrc,
+} from './wave-f7a-options';
+
+export type {
+  Media3AutoFrameRateMode,
+  Media3DisplaySyncOptions,
+  Media3DrmCapabilities,
+  Media3DrmClearKeyPair,
+  Media3DrmConfig,
+  Media3DrmScheme,
+  Media3NightModeDrcPreset,
+  Media3WidevineSecurityLevel,
+};
+
+/** Extended Media3 `PlayerEngine` exposing Android per-refresh-rate A/V delay updates (`#115`). */
+export interface Media3PlayerEngine extends PlayerEngine {
+  setAudioDelayByRefreshRate?(offsets: Readonly<Record<string, number>>): void;
+}
 
 /** Live subtitle appearance style forwarded to Media3 (`#32`). */
 export type Media3SubtitleStyle = NonNullable<LoadOptions['subtitleStyle']>;
@@ -111,6 +144,7 @@ interface Media3NativeEngineHandle extends NativeEngineHandle {
   setMediaMetadata?(metadata: AndroidMediaMetadata | null): void;
   setBackgroundAudioEnabled?(enabled: boolean): void;
   configureMultiView?(handleAudioFocus: boolean, tileCount: number): void;
+  setAudioDelayByRefreshRate?(offsets: Readonly<Record<string, number>>): void;
   addListener: {
     (eventName: 'onEngineEvent', listener: (event: EngineEvent) => void): { remove(): void };
     (eventName: 'onRemoteMediaAction', listener: (payload: unknown) => void): { remove(): void };
@@ -125,6 +159,7 @@ interface NativeEngineModule {
   uptimeMs(): number;
   getThermalState?(): unknown;
   getDeviceMemoryInfo?(): RawMemoryInfo | null | undefined;
+  getDrmCapabilities?(): unknown;
   setOrientationLocked?(locked: boolean): void;
   requestTemporaryOrientation?(landscape: boolean): void;
   applyShortEdgesCutoutMode?(): void;
@@ -328,29 +363,49 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
 /** The native shared object behind each live engine this module created; `Media3Surface` binds its view to it. */
 const handles = new WeakMap<PlayerEngine, Media3NativeEngineHandle>();
 
-function wrap(module: NativeEngineModule, options?: Media3EngineOptions): PlayerEngine {
+function wrap(module: NativeEngineModule, options?: Media3EngineOptions): Media3PlayerEngine {
   const native =
     options === undefined
       ? new module.Engine()
       : new module.Engine(normalizeEngineOptions(options));
   let pendingNetwork: Media3NetworkLoadOptions = {};
+  let pendingWaveF7A: Media3WaveF7ALoadOptions = {};
   const nativeBridgeTarget = new Proxy(native, {
     get(target, prop) {
       if (prop === 'load') {
         return (command: NativeLoadCommand): void => {
-          const merged = { ...command, ...pendingNetwork } as NativeLoadCommand & {
+          const {
+            dnsFamily: rawDns,
+            hostOverride: rawHost,
+            drm: _rawDrm,
+            displaySync: _rawDisplaySync,
+            nightModeDrc: _rawDrc,
+            ...rest
+          } = { ...command, ...pendingNetwork } as NativeLoadCommand & {
             dnsFamily?: unknown;
             hostOverride?: unknown;
           };
+          const f7a = pendingWaveF7A;
           pendingNetwork = {};
-          const { dnsFamily: rawDns, hostOverride: rawHost, ...rest } = merged;
+          pendingWaveF7A = {};
           const dnsFamily = normalizeMedia3DnsFamily(rawDns);
           const hostOverride = normalizeMedia3HostOverride(rawHost);
           target.load({
             ...rest,
             ...(dnsFamily === undefined ? {} : { dnsFamily }),
             ...(hostOverride === undefined ? {} : { hostOverride }),
+            ...f7a,
           } as NativeLoadCommand);
+        };
+      }
+      if (prop === 'setNightModeDrc' && typeof target.setNightModeDrc === 'function') {
+        return (preset: Media3NightModeDrcPreset): void => {
+          target.setNightModeDrc?.(normalizeMedia3NightModeDrc(preset) ?? 'off');
+        };
+      }
+      if (prop === 'setDisplaySync' && typeof target.setDisplaySync === 'function') {
+        return (policy: DisplaySyncPolicy): void => {
+          target.setDisplaySync?.(normalizeMedia3DisplaySyncPolicy(policy));
         };
       }
       const value: unknown = Reflect.get(target, prop, target);
@@ -363,14 +418,16 @@ function wrap(module: NativeEngineModule, options?: Media3EngineOptions): Player
     now: () => performance.now(),
   });
   let released = false;
-  const engine: PlayerEngine = {
+  const engine: Media3PlayerEngine = {
     ...bridged,
     load(cmd) {
       pendingNetwork = extractMedia3NetworkLoadOptions(cmd);
+      pendingWaveF7A = extractMedia3WaveF7ALoadOptions(cmd);
       try {
         bridged.load(cmd);
       } finally {
         pendingNetwork = {};
+        pendingWaveF7A = {};
       }
     },
     ...(native.setPitchLock === undefined
@@ -378,6 +435,17 @@ function wrap(module: NativeEngineModule, options?: Media3EngineOptions): Player
       : {
           setPitchLock(_attempt, locked) {
             if (!released) native.setPitchLock?.(Boolean(locked));
+          },
+        }),
+    ...(native.setAudioDelayByRefreshRate === undefined
+      ? {}
+      : {
+          setAudioDelayByRefreshRate(offsets) {
+            if (!released) {
+              native.setAudioDelayByRefreshRate?.(
+                normalizeMedia3AudioDelayByRefreshRate(offsets) ?? {},
+              );
+            }
           },
         }),
     ...(bridged.setAudioDelay === undefined && native.setAudioDelay !== undefined
@@ -419,7 +487,7 @@ const nativeModule = requireOptionalNativeModule<NativeEngineModule>('ElvEngineM
  * when the player screen goes away. Pass `options` for Multi-View secondary tiles (`handleAudioFocus: false`,
  * `multiViewTileCount: 2..4`).
  */
-export function createMedia3Engine(options?: Media3EngineOptions): PlayerEngine | null {
+export function createMedia3Engine(options?: Media3EngineOptions): Media3PlayerEngine | null {
   return nativeModule === null ? null : wrap(nativeModule, options);
 }
 
@@ -429,6 +497,37 @@ export function configureMedia3MultiView(engine: PlayerEngine, options: Media3En
   handles
     .get(engine)
     ?.configureMultiView?.(normalized.handleAudioFocus, normalized.multiViewTileCount);
+}
+
+/** Sets Android API 28+ Night-Mode DRC preset (`'off' | 'light' | 'night'`) on a live Media3 engine (`#115`). */
+export function setMedia3NightModeDrc(
+  engine: PlayerEngine,
+  preset: Media3NightModeDrcPreset,
+): void {
+  handles.get(engine)?.setNightModeDrc?.(normalizeMedia3NightModeDrc(preset) ?? 'off');
+}
+
+/** Configures Android Auto Frame-Rate display sync (`'off' | 'seamless' | 'always'`) on a live Media3 engine (`#116`). */
+export function setMedia3DisplaySync(
+  engine: PlayerEngine,
+  options: Media3DisplaySyncOptions,
+): void {
+  handles.get(engine)?.setDisplaySync?.(normalizeMedia3DisplaySyncPolicy(options));
+}
+
+/** Configures per-refresh-rate A/V delay offsets (`[-1000, 1000]` ms) on a live Media3 engine (`#115`). */
+export function setMedia3AudioDelayByRefreshRate(
+  engine: PlayerEngine,
+  offsets: Readonly<Record<string, number>>,
+): void {
+  handles
+    .get(engine)
+    ?.setAudioDelayByRefreshRate?.(normalizeMedia3AudioDelayByRefreshRate(offsets) ?? {});
+}
+
+/** Probes Android Widevine L1/L3 and ClearKey DRM capabilities safely (`#272`). */
+export function getDrmCapabilities(): Media3DrmCapabilities {
+  return normalizeMedia3DrmCapabilities(nativeModule?.getDrmCapabilities?.());
 }
 
 /** Toggles VOD audio pitch preservation on a live Media3 engine created by {@link createMedia3Engine} (`#264`). */

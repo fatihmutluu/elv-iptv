@@ -1,3 +1,4 @@
+import type { RefreshRateBucket } from '@elv/domain';
 import { createFocusStore, type FocusStore, findList, type KeyEvent } from '@elv/focus-core';
 import type { THEME_PRESET_IDS } from '@elv/ui-kit';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -100,6 +101,15 @@ export type PlaybackFocusId =
   | 'deinterlace-bwdif'
   | 'toggle-pitch-lock'
   | 'toggle-audio-normalization'
+  | 'afr-off'
+  | 'afr-seamless'
+  | 'afr-always'
+  | 'toggle-auto-dynamic-range'
+  | 'night-drc-off'
+  | 'night-drc-light'
+  | 'night-drc-night'
+  | `delay-bucket-${RefreshRateBucket}`
+  | 'delay-stepper'
   | 'toggle-window-aspect-ratio-lock'
   | 'toggle-minimize-to-tray'
   | 'toggle-auto-enter-pip'
@@ -230,6 +240,20 @@ const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
     'still-watching-180',
     'still-watching-240',
   ],
+  ['afr-off', 'afr-seamless', 'afr-always'],
+  ['toggle-auto-dynamic-range'],
+  ['night-drc-off', 'night-drc-light', 'night-drc-night'],
+  [
+    'delay-bucket-23.976',
+    'delay-bucket-24',
+    'delay-bucket-25',
+    'delay-bucket-29.97',
+    'delay-bucket-30',
+    'delay-bucket-50',
+    'delay-bucket-59.94',
+    'delay-bucket-60',
+  ],
+  ['delay-stepper'],
   ['toggle-auto-play-next'],
   ['toggle-skip-back-subtitles'],
   ['toggle-group-vod-versions'],
@@ -342,6 +366,12 @@ export interface UseTvSettingsNavigationOptions {
   readonly section: SettingsSection;
   readonly onSectionChange: (next: SettingsSection) => void;
   readonly onActivateControl?: (section: PreferenceSettingsSection, controlId: string) => void;
+  /** Optional left/right D-pad adjustment handler for inline steppers (e.g. per-refresh-rate delay `#115`). */
+  readonly onAdjustControl?: (
+    section: PreferenceSettingsSection,
+    controlId: string,
+    delta: -1 | 1,
+  ) => void;
   /** Backwards-compatible Appearance-only activation callback. */
   readonly onActivateAppearanceControl?: (id: AppearanceFocusId) => void;
   readonly onFocusTopNav?: () => void;
@@ -374,6 +404,7 @@ export function useTvSettingsNavigation({
   section,
   onSectionChange,
   onActivateControl,
+  onAdjustControl,
   onActivateAppearanceControl,
   onFocusTopNav,
   showAndroidDecoder = Platform.OS === 'android',
@@ -406,6 +437,8 @@ export function useTvSettingsNavigation({
   onSectionChangeRef.current = onSectionChange;
   const onActivateControlRef = useRef(onActivateControl);
   onActivateControlRef.current = onActivateControl;
+  const onAdjustControlRef = useRef(onAdjustControl);
+  onAdjustControlRef.current = onAdjustControl;
   const onActivateAppearanceRef = useRef(onActivateAppearanceControl);
   onActivateAppearanceRef.current = onActivateAppearanceControl;
   const onFocusTopNavRef = useRef(onFocusTopNav);
@@ -520,6 +553,25 @@ export function useTvSettingsNavigation({
         const nextListId = rowListId(activeSection, nextRow);
         store.focus(nextListId, nextCol);
         setCoords((prev) => ({ ...prev, [activeSection]: { row: nextRow, col: nextCol } }));
+        return true;
+      }
+
+      const currentRowItems = rows[currentRow] ?? [];
+      const currentCol = Math.min(
+        coordsRef.current[activeSection].col,
+        Math.max(0, currentRowItems.length - 1),
+      );
+      const activeControlId = currentRowItems[currentCol];
+      if (
+        activeControlId === 'delay-stepper' &&
+        (event.kind === 'press' || event.kind === 'repeat') &&
+        (event.key === 'left' || event.key === 'right')
+      ) {
+        onAdjustControlRef.current?.(
+          activeSection,
+          activeControlId,
+          event.key === 'right' ? 1 : -1,
+        );
         return true;
       }
 

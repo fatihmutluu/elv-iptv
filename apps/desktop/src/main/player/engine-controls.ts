@@ -1,11 +1,24 @@
 import { normalizeSubtitleStyle, type SubtitleStyleConfig } from '@elv/domain';
-import { type AttemptToken, clampPlaybackSpeed } from '@elv/playback';
+import {
+  type AttemptToken,
+  clampPlaybackSpeed,
+  type DesktopAudioOutputConfig,
+  type DisplaySyncPolicy,
+} from '@elv/playback';
 import type {
   AccessibilityFontFamily,
   DeinterlaceMode,
   HwdecProfile,
   ResizeMode,
 } from '../../shared/player-ipc.ts';
+import {
+  desktopAudioOutputCommands,
+  isLoudnormSuppressedByOutput,
+  isPassthroughAudioFailureLog,
+  normalizeDesktopAudioOutputConfig,
+  passthroughFallbackCommands,
+  sameDesktopAudioOutputConfig,
+} from './mpv/audio-output.ts';
 import { type AudioRampTimers, createAudioRamp } from './mpv/audio-ramp.ts';
 import type { MpvCommand } from './mpv/codec.ts';
 import type { LiveSession, MediaSlot } from './mpv/live-session.ts';
@@ -16,6 +29,8 @@ import {
   isSpdifPassthroughValue,
   LOUDNORM_FILTER,
   pitchLockCommand,
+  videoSyncCommand,
+  videoSyncModeFor,
 } from './mpv/options.ts';
 import { subtitlePositionCommands, subtitleStyleCommands } from './mpv/subtitle-style.ts';
 
@@ -47,6 +62,7 @@ export interface EngineControlsDeps {
   initialDarwinCompat?: boolean;
   initialSpdifPassthrough?: boolean;
   isSecondarySubtitleActive?(): boolean;
+  onPassthroughFallback?(): void;
 }
 
 /** Speed/seek coalescing, audio ramp play/pause, and runtime property-setter helpers for `MpvEngine`. */
@@ -56,7 +72,9 @@ export interface EngineControls {
   onCommandSettled(command: MpvCommand): void;
   onAudioProperty(name: 'volume' | 'mute', value: unknown): void;
   onAudioSpdifProperty(value: unknown): void;
+  onMpvLog(entry: { readonly prefix: string; readonly level: string; readonly text: string }): void;
   isSpdifPassthroughActive(): boolean;
+  isAudioNormalizationSuppressed(): boolean;
   cancelRamp(restoreVolume: boolean, direct?: boolean): void;
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
@@ -77,6 +95,12 @@ export interface EngineControls {
   getDesiredPitchLock(): boolean | undefined;
   setAudioNormalization(enabled: boolean): void;
   getDesiredAudioNormalization(): boolean | undefined;
+  setDisplaySync(policy: DisplaySyncPolicy): void;
+  rememberDisplaySync(policy: DisplaySyncPolicy): void;
+  getDesiredDisplaySync(): DisplaySyncPolicy | undefined;
+  setDesktopAudioOutput(config: DesktopAudioOutputConfig): void;
+  rememberDesktopAudioOutput(config: DesktopAudioOutputConfig): void;
+  getDesiredDesktopAudioOutput(): DesktopAudioOutputConfig | undefined;
   setHwdec(profile: HwdecProfile): void;
   setResizeMode(mode: ResizeMode): void;
   setFilterSdh(enabled: boolean): void;
@@ -101,6 +125,26 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
   let desiredDeinterlaceMode: DeinterlaceMode | undefined;
   let desiredPitchLock: boolean | undefined;
   let desiredAudioNormalization: boolean | undefined;
+  let desiredDisplaySync: DisplaySyncPolicy | undefined;
+  let requestedDesktopAudioOutput: DesktopAudioOutputConfig | undefined;
+  let effectiveDesktopAudioOutput: DesktopAudioOutputConfig | undefined;
+  let passthroughFallbackActive = false;
+
+  const isNormSuppressed = (): boolean =>
+    isLoudnormSuppressedByOutput(spdifPassthroughActive, effectiveDesktopAudioOutput);
+
+  const syncNormalization = (): void => {
+    const live = deps.getLive();
+    if (deps.isReleased() || live === undefined || desiredAudioNormalization !== true) return;
+    const suppressed = isNormSuppressed();
+    if (suppressed && live.appliedAudioNormalization !== false) {
+      live.appliedAudioNormalization = false;
+      deps.enqueueCommand(audioNormalizationCommand(false));
+    } else if (!suppressed && live.appliedAudioNormalization !== true) {
+      live.appliedAudioNormalization = true;
+      deps.enqueueCommand(audioNormalizationCommand(true));
+    }
+  };
 
   const restoreVolumeDirect = (volume: number): void => {
     const live = deps.getLive();
@@ -163,20 +207,39 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
       const next = isSpdifPassthroughValue(value);
       if (next === spdifPassthroughActive) return;
       spdifPassthroughActive = next;
-      const live = deps.getLive();
-      if (deps.isReleased() || live === undefined) return;
-      if (next) {
-        if (desiredAudioNormalization === true) {
-          live.appliedAudioNormalization = false;
-          deps.enqueueCommand(audioNormalizationCommand(false));
-        }
-      } else if (desiredAudioNormalization === true) {
-        live.appliedAudioNormalization = true;
-        deps.enqueueCommand(audioNormalizationCommand(true));
+      syncNormalization();
+    },
+    onMpvLog(entry) {
+      if (deps.isReleased() || passthroughFallbackActive) return;
+      const passthroughOrExclusiveActive =
+        spdifPassthroughActive ||
+        (effectiveDesktopAudioOutput !== undefined &&
+          (effectiveDesktopAudioOutput.passthrough || effectiveDesktopAudioOutput.exclusive));
+      if (!passthroughOrExclusiveActive) return;
+      if (!isPassthroughAudioFailureLog(entry)) return;
+      passthroughFallbackActive = true;
+      spdifPassthroughActive = false;
+      if (effectiveDesktopAudioOutput !== undefined) {
+        effectiveDesktopAudioOutput = {
+          ...effectiveDesktopAudioOutput,
+          passthrough: false,
+          exclusive: false,
+          ac3Encode: false,
+        };
       }
+      const live = deps.getLive();
+      if (live !== undefined) {
+        live.appliedDesktopAudioOutput = effectiveDesktopAudioOutput;
+        for (const cmd of passthroughFallbackCommands()) deps.enqueueCommand(cmd);
+        syncNormalization();
+      }
+      deps.onPassthroughFallback?.();
     },
     isSpdifPassthroughActive() {
       return spdifPassthroughActive;
+    },
+    isAudioNormalizationSuppressed() {
+      return isNormSuppressed();
     },
     cancelRamp(restoreVolume, direct = false) {
       audioRamp.cancel(restoreVolume, direct ? restoreVolumeDirect : undefined);
@@ -302,7 +365,7 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
       const live = deps.getLive();
       if (live === undefined) return;
       if (enabled) {
-        if (spdifPassthroughActive) {
+        if (isNormSuppressed()) {
           if (live.appliedAudioNormalization === true) {
             live.appliedAudioNormalization = false;
             deps.enqueueCommand(audioNormalizationCommand(false));
@@ -318,6 +381,57 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
     },
     getDesiredAudioNormalization() {
       return desiredAudioNormalization;
+    },
+    setDisplaySync(policy) {
+      if (deps.isReleased()) return;
+      desiredDisplaySync = policy;
+      const live = deps.getLive();
+      if (live !== undefined) {
+        const mode = videoSyncModeFor(policy);
+        live.appliedVideoSync = mode;
+        deps.enqueueCommand(videoSyncCommand(policy));
+      }
+    },
+    rememberDisplaySync(policy) {
+      desiredDisplaySync = policy;
+    },
+    getDesiredDisplaySync() {
+      return desiredDisplaySync;
+    },
+    setDesktopAudioOutput(rawConfig) {
+      if (deps.isReleased()) return;
+      const normalized = normalizeDesktopAudioOutputConfig(rawConfig);
+      if (!sameDesktopAudioOutputConfig(normalized, requestedDesktopAudioOutput)) {
+        requestedDesktopAudioOutput = normalized;
+        effectiveDesktopAudioOutput = normalized;
+        passthroughFallbackActive = false;
+      } else if (passthroughFallbackActive) {
+        return;
+      }
+      const effective = effectiveDesktopAudioOutput ?? normalized;
+      spdifPassthroughActive = effective.passthrough && effective.codecs.length > 0;
+      const live = deps.getLive();
+      if (live === undefined) return;
+      if (isNormSuppressed() && live.appliedAudioNormalization === true) {
+        live.appliedAudioNormalization = false;
+        deps.enqueueCommand(audioNormalizationCommand(false));
+      }
+      live.appliedDesktopAudioOutput = effective;
+      for (const cmd of desktopAudioOutputCommands(effective)) {
+        deps.enqueueCommand(cmd);
+      }
+      syncNormalization();
+    },
+    rememberDesktopAudioOutput(rawConfig) {
+      const normalized = normalizeDesktopAudioOutputConfig(rawConfig);
+      if (sameDesktopAudioOutputConfig(normalized, requestedDesktopAudioOutput)) return;
+      requestedDesktopAudioOutput = normalized;
+      effectiveDesktopAudioOutput = normalized;
+      passthroughFallbackActive = false;
+      spdifPassthroughActive = normalized.passthrough && normalized.codecs.length > 0;
+    },
+    getDesiredDesktopAudioOutput() {
+      return effectiveDesktopAudioOutput;
     },
     setHwdec(profile) {
       if (deps.isReleased()) return;
@@ -388,4 +502,66 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
       return desiredSubtitleStyle;
     },
   };
+}
+
+/** Updates per-session applied control markers after a queued mpv command finishes executing. */
+export function trackAppliedControlCommand(
+  target: LiveSession,
+  command: MpvCommand,
+  controls: EngineControls,
+): void {
+  if (
+    command[0] === 'set_property' &&
+    command[1] === 'audio-device' &&
+    typeof command[2] === 'string'
+  ) {
+    target.appliedAudioDevice = command[2];
+  } else if (
+    command[0] === 'set_property' &&
+    command[1] === 'sub-font' &&
+    typeof command[2] === 'string'
+  ) {
+    target.appliedSubtitleFont = command[2];
+  } else if (
+    command[0] === 'set_property' &&
+    command[1] === 'audio-pitch-correction' &&
+    typeof command[2] === 'string'
+  ) {
+    target.appliedPitchLock = command[2] === 'yes';
+  } else if (
+    command[0] === 'set_property' &&
+    command[1] === 'video-sync' &&
+    (command[2] === 'audio' || command[2] === 'display-resample')
+  ) {
+    target.appliedVideoSync = command[2];
+  } else if (
+    command[0] === 'set_property' &&
+    command[1] === 'deinterlace' &&
+    command[2] === 'auto'
+  ) {
+    target.appliedDeinterlaceMode = 'auto';
+  } else if (
+    command[0] === 'vf' &&
+    command[1] === 'add' &&
+    typeof command[2] === 'string' &&
+    command[2].startsWith('@elv_deint:')
+  ) {
+    target.appliedDeinterlaceMode = 'bwdif';
+  } else if (
+    command[0] === 'vf' &&
+    command[1] === 'remove' &&
+    command[2] === '@elv_deint' &&
+    controls.getDesiredDeinterlaceMode() === 'off'
+  ) {
+    target.appliedDeinterlaceMode = 'off';
+  } else if (
+    command[0] === 'af' &&
+    command[1] === 'add' &&
+    typeof command[2] === 'string' &&
+    command[2].startsWith('@elv_loudnorm:')
+  ) {
+    target.appliedAudioNormalization = true;
+  } else if (command[0] === 'af' && command[1] === 'remove' && command[2] === '@elv_loudnorm') {
+    target.appliedAudioNormalization = false;
+  }
 }

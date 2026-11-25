@@ -2,8 +2,15 @@ import type {
   AndroidDecoderMode,
   BufferPreset,
   DnsFamilyPreference,
+  DrmClearKeyPair,
+  DrmConfig,
+  DrmScheme,
+  NightModeDrcPreset,
   SubtitleStyleConfig,
 } from '@elv/domain';
+import type { DesktopAudioOutputConfig, DisplaySyncPolicy } from './display-sync';
+
+export type { DrmClearKeyPair, DrmConfig, DrmScheme };
 
 /** Monotonic tune token; the service increments it per tune, retry rung and zap. */
 export type AttemptToken = number;
@@ -33,6 +40,8 @@ export interface StreamRequest {
   readonly dnsFamily?: DnsFamilyPreference;
   /** Per-source validated literal IP host override (`#172`). */
   readonly hostOverride?: string;
+  /** Play-time DRM configuration resolved outside SQLite (`#272`). Never log or persist. */
+  readonly drm?: DrmConfig;
 }
 
 /** An external sidecar subtitle track attached at tune time or live during playback (`#32`, `#308`). */
@@ -74,6 +83,12 @@ export interface LoadOptions {
   readonly dnsFamily?: DnsFamilyPreference;
   /** Per-source validated literal IP host override forwarded to the engine (`#172`). */
   readonly hostOverride?: string;
+  /** Display Auto Frame-Rate and HDR switching policy forwarded to the engine (`#116`, `#188`, `#199`, `#214`). */
+  readonly displaySync?: DisplaySyncPolicy;
+  /** Night-Mode dynamic range compression preset forwarded to the engine (`#115`). */
+  readonly nightModeDrc?: NightModeDrcPreset;
+  /** Desktop audio passthrough, exclusive output, AC3 encode, and channel layout config (`#213`). */
+  readonly desktopAudioOutput?: DesktopAudioOutputConfig;
 }
 
 /** One selectable audio or embedded/external subtitle track reported by the engine. */
@@ -272,6 +287,12 @@ export interface PlayerEngine {
   addExternalSubtitle?(attempt: AttemptToken, track: ExternalSubtitleTrack): void;
   /** Applies live subtitle appearance styling without restarting playback (`#32`). */
   setSubtitleStyle?(style: SubtitleStyleConfig): void;
+  /** Applies a live Night-Mode DRC preset without restarting playback (`#115`). */
+  setNightModeDrc?(preset: NightModeDrcPreset): void;
+  /** Updates display Auto Frame-Rate and HDR switching policy live (`#116`, `#188`, `#199`, `#214`). */
+  setDisplaySync?(policy: DisplaySyncPolicy): void;
+  /** Updates desktop audio passthrough and channel layout output live (`#213`). */
+  setDesktopAudioOutput?(config: DesktopAudioOutputConfig): void;
   /** Shifts audio timing relative to video in milliseconds (`[-30_000, 30_000]`, `#59`, `#203`, `#239`). */
   setAudioDelay?(attempt: AttemptToken, delayMs: number): void;
   /** Shifts subtitle cue timing in milliseconds (`[-30_000, 30_000]`, `#59`, `#203`, `#239`). */

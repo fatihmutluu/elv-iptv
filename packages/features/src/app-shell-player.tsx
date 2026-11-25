@@ -126,6 +126,15 @@ function AppShellPlayerView({
       }}
       windowAspectRatioLock={prefs.windowAspectRatioLock}
       backgroundAudioPlayback={prefs.backgroundAudioPlayback}
+      autoFrameRate={prefs.autoFrameRate}
+      autoDynamicRange={prefs.autoDynamicRange}
+      nightModeDrc={prefs.nightModeDrc}
+      audioDelayByRefreshRateMs={prefs.audioDelayByRefreshRateMs}
+      audioPassthrough={prefs.audioPassthrough}
+      audioPassthroughCodecs={prefs.audioPassthroughCodecs}
+      audioExclusive={prefs.audioExclusive}
+      audioAc3Encode={prefs.audioAc3Encode}
+      audioChannelLayout={prefs.audioChannelLayout}
       {...(Platform.OS === 'android'
         ? {
             androidDecoderMode: prefs.androidDecoderMode,

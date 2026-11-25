@@ -1,3 +1,4 @@
+import type { DrmConfig } from '@elv/domain';
 import type { ScanStats } from './stats';
 
 /** What kind of content a playlist entry most likely is. */
@@ -29,6 +30,8 @@ export interface M3uEntry {
   recordDays?: number;
   headers: { userAgent?: string; referer?: string; other: Record<string, string> };
   kodiProps: Record<string, string>;
+  /** Validated DRM configuration parsed from `#KODIPROP:inputstream.adaptive.license_*` (`#272`). */
+  readonly drm?: DrmConfig;
   extra: Record<string, string>;
   kindHint: KindHint;
   nonHttp: boolean;

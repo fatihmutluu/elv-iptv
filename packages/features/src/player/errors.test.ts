@@ -67,7 +67,7 @@ describe('describePlaybackFailure, extractHttpStatus & sanitizeErrorDetail (#316
       evidence: 'code=playback/unsupported-format',
     });
     expect(describePlaybackFailure(elvError('playback', 'drm'))).toEqual({
-      messageId: 'player.diag.codecUnsupported',
+      messageId: 'player.error.drmUnsupported',
       hintId: 'player.hint.unsupportedFormat',
       verdict: 'codec-unsupported',
       evidence: 'code=playback/drm',

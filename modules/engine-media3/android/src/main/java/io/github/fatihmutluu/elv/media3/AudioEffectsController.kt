@@ -41,24 +41,29 @@ internal fun createPlatformLoudnessEnhancer(audioSessionId: Int): GainEffect? {
 }
 
 /**
- * Manages optional stereo audio gain boost via [LoudnessEnhancer] (#260):
+ * Manages optional stereo audio gain boost via [LoudnessEnhancer] (#260) and API 28+ Night-Mode DRC via
+ * [android.media.audiofx.DynamicsProcessing] (#115):
  * - Never attaches to `audioSessionId <= 0` / `C.AUDIO_SESSION_ID_UNSET`.
- * - Automatically disables and releases on multichannel (`channelCount > 2`, e.g. 5.1/7.1) streams or `boostDb <= 0`.
- * - Wraps native [LoudnessEnhancer] calls in `runCatching` so buggy OEM audio HALs never crash playback.
- * - Periodically refreshes target gain on [handler] (default 5 min) to counter AOSP DRC downward drift, cancelling
- *   strictly on [onStop], session change, multichannel switch, and [release].
+ * - Automatically disables and releases on multichannel (`channelCount > 2`, e.g. 5.1/7.1) streams or `OFF`/`boostDb <= 0`.
+ * - Wraps native audio effect calls in `runCatching` so buggy OEM audio HALs never crash playback.
+ * - Periodically refreshes loudness target gain on [handler] (default 5 min) to counter AOSP DRC downward drift,
+ *   cancelling strictly on [onStop], session change, multichannel switch, and [release].
  */
 @OptIn(UnstableApi::class)
 internal class AudioEffectsController(
   private val handler: Handler,
   private val effectFactory: (Int) -> GainEffect? = ::createPlatformLoudnessEnhancer,
   private val refreshIntervalMs: Long = DEFAULT_REFRESH_INTERVAL_MS,
+  private val drcEffectFactory: (Int) -> DrcEffect? = ::createPlatformDynamicsProcessing,
 ) {
   private var boostDb: Double = 0.0
+  private var drcPreset: NightModeDrcPreset = NightModeDrcPreset.OFF
   private var audioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
   private var multichannelActive: Boolean = false
   private var effect: GainEffect? = null
   private var effectSessionId: Int = C.AUDIO_SESSION_ID_UNSET
+  private var drcEffect: DrcEffect? = null
+  private var drcSessionId: Int = C.AUDIO_SESSION_ID_UNSET
   private var released: Boolean = false
 
   private val refreshRunnable = Runnable { refreshGain() }
@@ -66,10 +71,20 @@ internal class AudioEffectsController(
   internal val isEffectActive: Boolean
     get() = effect != null
 
+  internal val isDrcEffectActive: Boolean
+    get() = drcEffect != null
+
   fun setBoostDb(db: Double) {
     if (released) return
     boostDb = if (db.isFinite() && db > 0.0) db.coerceAtMost(MAX_BOOST_DB) else 0.0
     syncEffect()
+  }
+
+  /** Sets the stereo Night-Mode DRC preset (`OFF` / `LIGHT` / `NIGHT`, #115). */
+  fun setNightModeDrc(preset: NightModeDrcPreset) {
+    if (released) return
+    drcPreset = preset
+    syncDrcEffect()
   }
 
   fun onAudioSessionIdChanged(sessionId: Int) {
@@ -79,7 +94,11 @@ internal class AudioEffectsController(
     if (effectSessionId != sessionId) {
       releaseActiveEffect()
     }
+    if (drcSessionId != sessionId) {
+      releaseActiveDrcEffect()
+    }
     syncEffect()
+    syncDrcEffect()
   }
 
   fun onTracksChanged(tracks: Tracks) {
@@ -96,12 +115,14 @@ internal class AudioEffectsController(
     }
     multichannelActive = maxSelectedChannels > 2
     syncEffect()
+    syncDrcEffect()
   }
 
   fun onStop() {
     if (released) return
     multichannelActive = false
     releaseActiveEffect()
+    releaseActiveDrcEffect()
   }
 
   fun release() {
@@ -109,11 +130,19 @@ internal class AudioEffectsController(
     audioSessionId = C.AUDIO_SESSION_ID_UNSET
     multichannelActive = false
     releaseActiveEffect()
+    releaseActiveDrcEffect()
   }
 
   private fun shouldActivate(): Boolean =
     !released &&
       boostDb > 0.0 &&
+      audioSessionId > 0 &&
+      audioSessionId != C.AUDIO_SESSION_ID_UNSET &&
+      !multichannelActive
+
+  private fun shouldActivateDrc(): Boolean =
+    !released &&
+      drcPreset != NightModeDrcPreset.OFF &&
       audioSessionId > 0 &&
       audioSessionId != C.AUDIO_SESSION_ID_UNSET &&
       !multichannelActive
@@ -141,6 +170,28 @@ internal class AudioEffectsController(
       return
     }
     scheduleRefresh()
+  }
+
+  private fun syncDrcEffect() {
+    val config = nightModeDrcConfigFor(drcPreset)
+    if (!shouldActivateDrc() || config == null) {
+      releaseActiveDrcEffect()
+      return
+    }
+    if (drcEffect == null || drcSessionId != audioSessionId) {
+      releaseActiveDrcEffect()
+      val created = runCatching { drcEffectFactory(audioSessionId) }.getOrNull() ?: return
+      drcEffect = created
+      drcSessionId = audioSessionId
+    }
+    val applied = runCatching {
+      val target = drcEffect ?: return
+      target.applyConfig(config)
+      target.setEnabled(true)
+    }.isSuccess
+    if (!applied) {
+      releaseActiveDrcEffect()
+    }
   }
 
   private fun refreshGain() {
@@ -172,6 +223,16 @@ internal class AudioEffectsController(
     val current = effect
     effect = null
     effectSessionId = C.AUDIO_SESSION_ID_UNSET
+    if (current != null) {
+      runCatching { current.setEnabled(false) }
+      runCatching { current.release() }
+    }
+  }
+
+  private fun releaseActiveDrcEffect() {
+    val current = drcEffect
+    drcEffect = null
+    drcSessionId = C.AUDIO_SESSION_ID_UNSET
     if (current != null) {
       runCatching { current.setEnabled(false) }
       runCatching { current.release() }

@@ -1,4 +1,8 @@
-import type { ArtworkCacheLimitMbPref } from '@elv/domain';
+import {
+  type ArtworkCacheLimitMbPref,
+  isRefreshRateBucket,
+  type RefreshRateBucket,
+} from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
 import {
   defaultLoadedArtworkUris,
@@ -28,7 +32,7 @@ import {
 import { LiveTvSettingsPanel } from './LiveTvSettingsPanel';
 import { activateLiveTvControl } from './live-tv-controls';
 import { PlaybackSettingsPanel } from './PlaybackSettingsPanel';
-import { activatePlaybackControl } from './playback-controls';
+import { activatePlaybackControl, adjustPlaybackControl } from './playback-controls';
 import { RemoteKeysSettingsPanel } from './RemoteKeysSettingsPanel';
 import {
   type AppearanceFocusId,
@@ -179,6 +183,9 @@ export function SettingsScreen({
   const [uncontrolledSection, setUncontrolledSection] = useState<SettingsSection>(initialSection);
   const [hoveredSection, setHoveredSection] = useState<SettingsSection | null>(null);
   const [artworkCacheCleared, setArtworkCacheCleared] = useState(false);
+  const [selectedDelayBucket, setSelectedDelayBucket] = useState<RefreshRateBucket>('23.976');
+  const selectedDelayBucketRef = useRef<RefreshRateBucket>(selectedDelayBucket);
+  selectedDelayBucketRef.current = selectedDelayBucket;
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -256,7 +263,10 @@ export function SettingsScreen({
         return;
       }
       if (sec === 'playback') {
-        activatePlaybackControl(controlId as PlaybackFocusId, preferences);
+        activatePlaybackControl(controlId as PlaybackFocusId, preferences, {
+          selectedDelayBucket: selectedDelayBucketRef.current,
+          onSelectDelayBucket: setSelectedDelayBucket,
+        });
         return;
       }
       activateLiveTvControl(controlId as LiveTvFocusId, preferences, onOpenChannelManagement);
@@ -272,16 +282,41 @@ export function SettingsScreen({
     ],
   );
 
+  const handleAdjustControl = useCallback(
+    (sec: PreferenceSettingsSection, controlId: string, delta: -1 | 1) => {
+      if (sec === 'playback') {
+        adjustPlaybackControl(
+          controlId as PlaybackFocusId,
+          delta,
+          preferences,
+          selectedDelayBucketRef.current,
+        );
+      }
+    },
+    [preferences],
+  );
+
   const tv = useTvSettingsNavigation({
     isTv,
     isActiveScope,
     section: activeSection,
     onSectionChange: handleSelectSection,
     onActivateControl: handleActivateControl,
+    onAdjustControl: handleAdjustControl,
     showAndroidDecoder,
     preservePaneOnBlur: hasTransientOverlay,
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
+
+  useEffect(() => {
+    if (activeSection !== 'playback' || tv.focusedControlId === null) return;
+    if (tv.focusedControlId.startsWith('delay-bucket-')) {
+      const bucket = tv.focusedControlId.slice('delay-bucket-'.length);
+      if (isRefreshRateBucket(bucket)) {
+        setSelectedDelayBucket(bucket);
+      }
+    }
+  }, [activeSection, tv.focusedControlId]);
 
   const embeddedSlot = useMemo<SettingsPaneSlotProps>(
     () => ({
@@ -316,6 +351,8 @@ export function SettingsScreen({
           activeSection === 'playback' ? (tv.focusedControlId as PlaybackFocusId | null) : null
         }
         showAndroidDecoder={showAndroidDecoder}
+        selectedDelayBucket={selectedDelayBucket}
+        onSelectDelayBucket={setSelectedDelayBucket}
       />
     ) : activeSection === 'liveTv' ? (
       <LiveTvSettingsPanel

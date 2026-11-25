@@ -1,6 +1,9 @@
 import AetherEngine
 import AVFoundation
 import Combine
+#if os(tvOS)
+import CoreMedia
+#endif
 import Foundation
 
 /// `PlayerBackend` adapter over a single lazily-allocated `AetherEngine` instance on the main actor.
@@ -23,6 +26,7 @@ final class AetherBackend: PlayerBackend {
   var onObservation: ((BackendObservation, Int) -> Void)?
   var onSubtitlePresentation: ((SubtitlePresentation) -> Void)?
   var onPlayerLayerMayHaveChanged: (() -> Void)?
+  var onHdmiShutterSettle: ((Int) -> Void)?
 
   var isAvPlayerRouteActive: Bool {
     currentPlan?.isLiveTs != true && engine?.currentAVPlayer != nil
@@ -105,6 +109,14 @@ final class AetherBackend: PlayerBackend {
   var playbackActiveIntent = false
   var lastDroppedVideoFrames = 0
   var lastLiveSeekableWindow: LiveSeekableWindow?
+  var displaySyncSettings: AppleDisplaySyncSettings = .default
+  var appliedDisplayRefreshRate: Float?
+  var appliedDisplayDynamicRange: AppleHdrDynamicRange?
+  var lastObservedVideoFps: Double?
+  var lastObservedVideoHdr: AppleHdrDynamicRange?
+  #if os(tvOS)
+  var lastObservedFormatDescription: CMFormatDescription?
+  #endif
 
   init(gate: ConnectionGate, httpSession: EngineHttpSession, handleAudioFocus: Bool = true) {
     self.gate = gate
@@ -190,6 +202,11 @@ final class AetherBackend: PlayerBackend {
     loadStartUptimeMs = ProcessInfo.processInfo.systemUptime * 1_000.0
     currentPlan = plan
     currentLoadOptions = options
+    displaySyncSettings = options.displaySync
+    resetObservedDisplayVideoMetadata()
+    if !displaySyncSettings.isEnabled {
+      resetDisplayCriteria()
+    }
     desiredAudioStreamId = options.audioStreamIndex.map(Int.init)
     desiredSubtitleStreamId = options.subtitlesDisabled ? nil : options.initialSubtitleTrackId
     if let secId = options.secondarySubtitleTrackId,
@@ -229,7 +246,12 @@ final class AetherBackend: PlayerBackend {
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
     resetSyncDelaysAndQualityOnEngine()
-    engine?.stop(resetDisplayCriteria: false, finalTeardown: false)
+    resetObservedDisplayVideoMetadata()
+    let shouldResetCriteria = shouldResetDisplayCriteria(reason: .zap, settings: displaySyncSettings)
+    engine?.stop(resetDisplayCriteria: shouldResetCriteria, finalTeardown: false)
+    if shouldResetCriteria {
+      resetDisplayCriteria()
+    }
     audioSessionController.deactivateIfOwned()
   }
 
@@ -329,12 +351,17 @@ final class AetherBackend: PlayerBackend {
     publishSubtitlePresentation(.empty)
     clearEngineSubscriptions()
 
+    resetObservedDisplayVideoMetadata()
+    let shouldResetCriteria = shouldResetDisplayCriteria(reason: .rebuild, settings: displaySyncSettings)
     if let previous = engine {
-      previous.stop(resetDisplayCriteria: false, finalTeardown: true)
+      previous.stop(resetDisplayCriteria: shouldResetCriteria, finalTeardown: true)
       if let view = boundPlayerView {
         previous.unbind(view: view)
       }
       engine = nil
+    }
+    if shouldResetCriteria {
+      resetDisplayCriteria()
     }
     audioSessionController.deactivateIfOwned()
     _ = try installFreshEngine()
@@ -360,12 +387,17 @@ final class AetherBackend: PlayerBackend {
     legacyHttpSession?.dispose()
     legacyHttpSession = nil
 
+    resetObservedDisplayVideoMetadata()
+    let shouldResetCriteria = shouldResetDisplayCriteria(reason: .dispose, settings: displaySyncSettings)
     if let previous = engine {
-      previous.stop(resetDisplayCriteria: true, finalTeardown: true)
+      previous.stop(resetDisplayCriteria: shouldResetCriteria, finalTeardown: true)
       if let view = boundPlayerView {
         previous.unbind(view: view)
       }
       engine = nil
+    }
+    if shouldResetCriteria {
+      resetDisplayCriteria()
     }
     audioSessionController.deactivateIfOwned()
     boundPlayerView = nil

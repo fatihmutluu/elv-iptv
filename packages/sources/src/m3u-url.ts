@@ -1,4 +1,5 @@
-import { sanitizeHeaderName, sanitizeHeaderValue } from '@elv/domain';
+import { type DrmConfig, sanitizeHeaderName, sanitizeHeaderValue } from '@elv/domain';
+import { parseM3uDrmProps } from './m3u-drm';
 import type { KindHint, M3uEntry } from './m3u-types';
 
 const VOD_EXTENSIONS = new Set([
@@ -203,6 +204,8 @@ export function finishEntry(e: M3uEntry, rawUrl: string, baseUrl: string | undef
   }
   e.url = url;
   if (backups.length > 0) e.backupUrls = backups;
+  const drm = parseM3uDrmProps(e.kodiProps);
+  if (drm !== undefined) (e as { drm?: DrmConfig }).drm = drm;
   if (end < 0) return;
   const scheme = url.slice(0, end).toLowerCase();
   e.nonHttp = scheme !== 'http' && scheme !== 'https';

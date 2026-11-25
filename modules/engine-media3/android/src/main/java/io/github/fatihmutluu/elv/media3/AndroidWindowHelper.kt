@@ -11,6 +11,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Looper
 import android.util.Rational
+import android.view.Display
 import android.view.OrientationEventListener
 import android.view.View
 import android.view.WindowManager
@@ -556,3 +557,74 @@ private fun androidOrientationSensor(
     }
   }
 }
+
+@RequiresApi(Build.VERSION_CODES.S)
+private fun alternativeRefreshRatesApi31(mode: Display.Mode): List<Float> =
+  runCatching { mode.alternativeRefreshRates.toList() }.getOrDefault(emptyList())
+
+@RequiresApi(Build.VERSION_CODES.M)
+private fun readDisplayModesApi23(activity: Activity): Pair<Int, List<DisplayModeInfo>>? {
+  val display: Display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    activity.display
+  } else {
+    @Suppress("DEPRECATION")
+    activity.windowManager?.defaultDisplay
+  } ?: return null
+  val current = display.mode ?: return null
+  val supported = display.supportedModes ?: return null
+  val mapped = supported.map { m ->
+    val alts = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) alternativeRefreshRatesApi31(m) else emptyList()
+    DisplayModeInfo(
+      modeId = m.modeId,
+      physicalWidth = m.physicalWidth,
+      physicalHeight = m.physicalHeight,
+      refreshRate = m.refreshRate,
+      alternativeRefreshRates = alts,
+    )
+  }
+  return current.modeId to mapped
+}
+
+/** Reads the active [Display.Mode] ID and supported display modes on API 23+, or `null` if unavailable (#116). */
+internal fun readDisplayModes(activity: Activity, sdkInt: Int = Build.VERSION.SDK_INT): Pair<Int, List<DisplayModeInfo>>? {
+  if (sdkInt < Build.VERSION_CODES.M || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+  if (activity.isFinishing || activity.isDestroyed) return null
+  return runCatching { readDisplayModesApi23(activity) }.getOrNull()
+}
+
+@RequiresApi(Build.VERSION_CODES.M)
+private fun setPreferredDisplayModeIdApi23(activity: Activity, modeId: Int): Boolean {
+  if (activity.isFinishing || activity.isDestroyed) return false
+  val window = activity.window ?: return false
+  val params = window.attributes ?: return false
+  if (params.preferredDisplayModeId == modeId) return true
+  params.preferredDisplayModeId = modeId
+  window.attributes = params
+  return true
+}
+
+/**
+ * Applies [WindowManager.LayoutParams.preferredDisplayModeId] on the UI thread (API 23+, #116), guarding finishing
+ * activities and OEM window-manager exceptions cleanly.
+ */
+internal fun applyPreferredDisplayMode(
+  activity: Activity,
+  modeId: Int,
+  sdkInt: Int = Build.VERSION.SDK_INT,
+): Boolean {
+  if (modeId < 0) return false
+  if (sdkInt < Build.VERSION_CODES.M || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false
+  if (activity.isFinishing || activity.isDestroyed) return false
+  return runOnActivityUiThreadSync(activity) {
+    runCatching { setPreferredDisplayModeIdApi23(activity, modeId) }.getOrDefault(false)
+  }
+}
+
+/**
+ * Restores `WindowManager.LayoutParams.preferredDisplayModeId = 0` on the UI thread (API 23+, #116) when playback
+ * stops, AFR is turned off, or the player/activity unmounts.
+ */
+internal fun restoreDefaultDisplayMode(
+  activity: Activity,
+  sdkInt: Int = Build.VERSION.SDK_INT,
+): Boolean = applyPreferredDisplayMode(activity, modeId = 0, sdkInt = sdkInt)

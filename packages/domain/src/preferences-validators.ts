@@ -1,4 +1,10 @@
 import {
+  mergeWaveF7aPreferences,
+  parseWaveF7aPreferences,
+  serializeWaveF7aPreferences,
+  type WaveF7aPreferencesFields,
+} from './preferences-wave-f7a';
+import {
   DEFAULT_SUBTITLE_STYLE,
   mergeSubtitleStyle,
   normalizeSubtitleStyle,
@@ -100,7 +106,7 @@ export type LogoBackdropModePref = 'plate' | 'invert' | 'off';
 export type ArtworkCacheLimitMbPref = 64 | 128 | 256;
 
 /** Extended playback, Live TV, guide, and artwork cache preference fields. */
-export interface ExtendedPreferencesFields {
+export interface ExtendedPreferencesFields extends WaveF7aPreferencesFields {
   readonly preferredAudioLang: string;
   readonly preferredSubtitleLang: string;
   readonly preferredAudioLanguages: readonly string[];
@@ -528,6 +534,7 @@ export function parseExtendedPreferences(
     ),
     minimizeToTray: boolOr(parsed.minimizeToTray, defaults.minimizeToTray),
     autoEnterPip: boolOr(parsed.autoEnterPip, defaults.autoEnterPip),
+    ...parseWaveF7aPreferences(parsed, defaults),
     subtitleStyle: normalizeSubtitleStyle(parsed.subtitleStyle),
   };
 }
@@ -535,9 +542,10 @@ export function parseExtendedPreferences(
 export function serializeExtendedPreferences(
   snapshot: ExtendedPreferencesFields,
   defaults: ExtendedPreferencesFields,
-): Omit<ExtendedPreferencesFields, 'subtitleStyle'> & {
-  readonly subtitleStyle?: SubtitleStyleConfig;
-} {
+): Omit<ExtendedPreferencesFields, 'subtitleStyle' | keyof WaveF7aPreferencesFields> &
+  Partial<WaveF7aPreferencesFields> & {
+    readonly subtitleStyle?: SubtitleStyleConfig;
+  } {
   const audio = resolveSerializedLangPair(
     snapshot.preferredAudioLanguages,
     snapshot.preferredAudioLang,
@@ -633,6 +641,7 @@ export function serializeExtendedPreferences(
     vodEnrichmentEnabled: Boolean(snapshot.vodEnrichmentEnabled),
     minimizeToTray: Boolean(snapshot.minimizeToTray),
     autoEnterPip: Boolean(snapshot.autoEnterPip),
+    ...serializeWaveF7aPreferences(snapshot, defaults),
     ...(subtitleStyleEquals(subtitleStyle, DEFAULT_SUBTITLE_STYLE) ? {} : { subtitleStyle }),
   };
 }
@@ -764,6 +773,7 @@ export function mergeExtendedPreferences(
     vodEnrichmentEnabled: boolOr(patch.vodEnrichmentEnabled, base.vodEnrichmentEnabled ?? false),
     minimizeToTray: boolOr(patch.minimizeToTray, base.minimizeToTray),
     autoEnterPip: boolOr(patch.autoEnterPip, base.autoEnterPip),
+    ...mergeWaveF7aPreferences(base, patch),
     subtitleStyle: mergeSubtitleStyle(base.subtitleStyle, patch.subtitleStyle),
   };
 }

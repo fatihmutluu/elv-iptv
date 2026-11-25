@@ -1,5 +1,6 @@
-import { type ContentKind, elvError, m3uStableKey } from '@elv/domain';
+import { type ContentKind, type DrmConfig, elvError, m3uStableKey } from '@elv/domain';
 import type { M3uEntry } from '@elv/sources';
+import { type DrmSpecMap, partitionDrmSpecs } from './drm-secret-store';
 import { type RunCtx, Stop } from './import-run';
 import { collectSampleUrls, holdEntry } from './m3u-headers';
 import { RuleBook } from './m3u-rules';
@@ -20,6 +21,8 @@ export interface M3uImportState {
   placedSeries: Set<string>;
   /** Tracks per-import occurrence indices by base stable key -> legacy key so distinct duplicates get `#2`, `#3` while exact duplicates coalesce. */
   occurrences: Map<string, Map<string, number>>;
+  /** Per-item DRM configs collected during M3U scan; persisted strictly in `SecretStore` (`#272`). */
+  drmSpecs: Map<string, DrmConfig>;
   written: Record<'live' | 'movies' | 'episodes' | 'series', number>;
 }
 
@@ -95,6 +98,7 @@ export function createM3uImportState(
     positions: new Map(),
     placedSeries: new Set(),
     occurrences: new Map(),
+    drmSpecs: new Map(),
     written: { live: 0, movies: 0, episodes: 0, series: 0 },
   };
 }
@@ -137,6 +141,7 @@ export interface StagedM3u {
   rules: SegmentRule[];
   discovered: string[] | undefined;
   vars: UrlVars;
+  drmSpecs: DrmSpecMap;
 }
 
 /** Finalizes staged rules, guide URLs, and `urlvars` secrets for an M3U import run. */
@@ -171,11 +176,16 @@ export function finishM3uRun(
   if (partitionUrlVars(vars) === undefined) {
     throw new Stop(elvError('source-format', 'urlvars-too-large'));
   }
+  const drmSpecs: DrmSpecMap = {};
+  for (const [key, cfg] of st.drmSpecs) drmSpecs[key] = cfg;
+  if (st.drmSpecs.size > 0 && partitionDrmSpecs(drmSpecs) === undefined) {
+    throw new Stop(elvError('storage', 'secret-store-failed'));
+  }
   c.counts.live = st.written.live;
   c.counts.movies = st.written.movies;
   c.counts.series = st.written.series;
   c.counts.episodes = st.written.episodes;
   c.counts.categories =
     st.categories.live.size + st.categories.movie.size + st.categories.series.size;
-  return { rules: st.rules.final(), discovered, vars };
+  return { rules: st.rules.final(), discovered, vars, drmSpecs };
 }

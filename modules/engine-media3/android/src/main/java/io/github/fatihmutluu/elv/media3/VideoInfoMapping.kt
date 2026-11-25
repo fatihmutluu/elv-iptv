@@ -76,16 +76,21 @@ internal fun extractSelectedVideoFormat(tracks: Tracks): Format? {
   return null
 }
 
-/** Derives a [VideoInfoSnapshot] from active Media3 video [format] and decoded [videoSize]. */
+/** Derives a [VideoInfoSnapshot] from active Media3 video [format], decoded [videoSize], and optional PTS [estimatedFps] (#58, #199). */
 @OptIn(UnstableApi::class)
-internal fun deriveVideoInfo(format: Format?, videoSize: VideoSize?): VideoInfoSnapshot? {
+internal fun deriveVideoInfo(
+  format: Format?,
+  videoSize: VideoSize?,
+  estimatedFps: Float? = null,
+): VideoInfoSnapshot? {
   val width = videoSize?.width?.takeIf { it > 0 }
     ?: format?.width?.takeIf { it != Format.NO_VALUE && it > 0 }
   val height = videoSize?.height?.takeIf { it > 0 }
     ?: format?.height?.takeIf { it != Format.NO_VALUE && it > 0 }
-  val fps = format?.frameRate
+  val rawFps = format?.frameRate
     ?.takeIf { it != Format.NO_VALUE.toFloat() && it.isFinite() && it > 0f }
-    ?.let { (it.toDouble() * 100.0).roundToLong() / 100.0 }
+    ?: estimatedFps?.takeIf { it.isFinite() && it > 0f }
+  val fps = rawFps?.let { (it.toDouble() * 100.0).roundToLong() / 100.0 }
   val codec = normalizeVideoCodec(format?.sampleMimeType, format?.codecs)
   val hdr = if (format != null || (width != null && height != null)) {
     classifyVideoHdr(format?.sampleMimeType, format?.colorInfo?.colorTransfer)

@@ -394,8 +394,16 @@ internal data class LoadRequest(
   val secondarySubtitleTrackId: String? = null,
   /** Optional live subtitle appearance style applied on load and reloads (#32). */
   val subtitleStyle: SubtitleStyleConfig? = null,
+  /** Optional play-time DRM configuration (`clearkey` / `widevine` / `playready`, #272). Never logged. */
+  val drm: ParsedDrmConfig? = null,
+  /** Optional auto frame-rate policy forwarded on load (`#116`). */
+  val autoFrameRate: AutoFrameRateMode? = null,
+  /** Optional Night-Mode DRC preset forwarded on load (`#115`). */
+  val nightModeDrc: NightModeDrcPreset? = null,
+  /** Optional per-refresh-rate A/V delay offsets forwarded on load (`#115`). */
+  val audioDelayByRefreshRateMs: Map<String, Long>? = null,
 ) {
-  /** Names no URL, no host override IP, and no header value: each may carry credentials or provider info. */
+  /** Names no URL, no host override IP, no DRM secrets, and no header value: each may carry credentials or provider info. */
   override fun toString(): String {
     val dvSuffix = if (preferHevcOverDolbyVision) ", preferHevcOverDolbyVision=true" else ""
     val presetSuffix = if (bufferPreset != BufferPreset.AUTO) ", bufferPreset=${bufferPreset.wireName}" else ""
@@ -405,9 +413,10 @@ internal data class LoadRequest(
     val dnsSuffix = if (dnsFamily != DnsFamilyPreference.SYSTEM) ", dnsFamily=${dnsFamily.wireName}" else ""
     val overrideSuffix = if (hostOverride != null) ", hostOverride=set" else ""
     val extSuffix = if (externalSubtitles.isNotEmpty()) ", externalSubtitles=${externalSubtitles.size}" else ""
+    val drmSuffix = if (drm != null) ", drm=${drm.scheme.wireName}" else ""
     return "LoadRequest(live=$live, startMs=$startMs, softwareAudio=$softwareAudio, " +
       "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix$decoderSuffix" +
-      "$sdhSuffix$tlsSuffix$dnsSuffix$overrideSuffix$extSuffix)"
+      "$sdhSuffix$tlsSuffix$dnsSuffix$overrideSuffix$extSuffix$drmSuffix)"
   }
 }
 
@@ -450,6 +459,13 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
   val externalSubtitles = parseExternalSubtitleConfigs(args["externalSubtitles"])
   val secondarySubtitleTrackId = (args["secondarySubtitleTrackId"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
   val subtitleStyle = SubtitleStyleMapper.parse(args["subtitleStyle"])
+  val drm = parseDrmConfig(args["drm"])
+  val displaySyncMap = args["displaySync"] as? Map<*, *>
+  val rawAutoFrameRate = (args["autoFrameRate"] as? String) ?: (displaySyncMap?.get("autoFrameRate") as? String)
+  val autoFrameRate = rawAutoFrameRate?.let { parseAutoFrameRateMode(it) }
+  val nightModeDrc = (args["nightModeDrc"] as? String)?.let(::parseNightModeDrcPreset)
+  val audioDelayByRefreshRateMs =
+    if (args.containsKey("audioDelayByRefreshRateMs")) parseAudioDelayByRefreshRate(args["audioDelayByRefreshRateMs"]) else null
   return attempt to LoadRequest(
     url = url,
     headers = headers,
@@ -468,6 +484,10 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
     externalSubtitles = externalSubtitles,
     secondarySubtitleTrackId = secondarySubtitleTrackId,
     subtitleStyle = subtitleStyle,
+    drm = drm,
+    autoFrameRate = autoFrameRate,
+    nightModeDrc = nightModeDrc,
+    audioDelayByRefreshRateMs = audioDelayByRefreshRateMs,
   )
 }
 

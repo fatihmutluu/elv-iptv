@@ -33,6 +33,7 @@ export function useInitialTrackSelection(params: {
   readonly subtitleMode: SubtitleModePref;
   readonly statusKind?: PlaybackStatus['kind'] | undefined;
   readonly onHydratedResizeMode?: ((mode: VideoResizeMode) => void) | undefined;
+  readonly onHydratedAudioDelayMs?: ((delayMs: number) => void) | undefined;
 }): void {
   const {
     activeService,
@@ -47,12 +48,15 @@ export function useInitialTrackSelection(params: {
     subtitleMode,
     statusKind,
     onHydratedResizeMode,
+    onHydratedAudioDelayMs,
   } = params;
   const appliedAudioItemRef = useRef<string | null>(null);
   const appliedSubtitleItemRef = useRef<string | null>(null);
   const appliedDelayItemRef = useRef<string | null>(null);
   const onHydratedResizeModeRef = useRef(onHydratedResizeMode);
   onHydratedResizeModeRef.current = onHydratedResizeMode;
+  const onHydratedAudioDelayMsRef = useRef(onHydratedAudioDelayMs);
+  onHydratedAudioDelayMsRef.current = onHydratedAudioDelayMs;
 
   const scopeKey = resolveTrackPreferenceScopeKey(activeTarget);
   const hasPersistedStore = catalog?.getTrackPreference !== undefined;
@@ -191,7 +195,11 @@ export function useInitialTrackSelection(params: {
       appliedDelayItemRef.current = activeTarget.itemKey;
       if (persistedPref !== null) {
         if (persistedPref.audioDelayMs !== 0) {
-          activeService.setAudioDelay(persistedPref.audioDelayMs);
+          if (onHydratedAudioDelayMsRef.current !== undefined) {
+            onHydratedAudioDelayMsRef.current(persistedPref.audioDelayMs);
+          } else {
+            activeService.setAudioDelay(persistedPref.audioDelayMs);
+          }
         }
         if (persistedPref.subDelayMs !== 0) {
           activeService.setSubtitleDelay(persistedPref.subDelayMs);

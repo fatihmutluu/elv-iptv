@@ -458,6 +458,17 @@ class AndroidWindowHelperTest {
     }
   }
 
+  @Test
+  fun `applyPreferredDisplayMode and restoreDefaultDisplayMode update preferredDisplayModeId safely (#116)`() {
+    val activity = Robolectric.buildActivity(Activity::class.java).create().get()
+    assertFalse(applyPreferredDisplayMode(activity, modeId = -1))
+    assertFalse(applyPreferredDisplayMode(activity, modeId = 3, sdkInt = Build.VERSION_CODES.LOLLIPOP_MR1))
+    assertTrue(applyPreferredDisplayMode(activity, modeId = 5))
+    assertEquals(5, activity.window.attributes.preferredDisplayModeId)
+    assertTrue(restoreDefaultDisplayMode(activity))
+    assertEquals(0, activity.window.attributes.preferredDisplayModeId)
+  }
+
   class TestPipActivity : Activity(), OnPictureInPictureModeChangedProvider {
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<Consumer<PictureInPictureModeChangedInfo>>()
 

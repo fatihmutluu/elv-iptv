@@ -14,6 +14,7 @@ export function usePlayerSyncAndQuality(params: {
   readonly tracks: MediaTracks;
   readonly openedEngine: OpenVideoEngine | undefined;
   readonly audioDelayMs: number;
+  readonly onChangeManualAudioDelayMs?: ((nextManualMs: number) => void) | undefined;
   readonly subtitleDelayMs: number;
   readonly selectedVideoQualityId: string | null;
   readonly serviceRef: MutableRefObject<PlaybackService | null>;
@@ -24,6 +25,7 @@ export function usePlayerSyncAndQuality(params: {
     tracks,
     openedEngine,
     audioDelayMs,
+    onChangeManualAudioDelayMs,
     subtitleDelayMs,
     selectedVideoQualityId,
     serviceRef,
@@ -34,6 +36,8 @@ export function usePlayerSyncAndQuality(params: {
   activeTargetRef.current = activeTarget;
   const audioDelayRef = useRef(audioDelayMs);
   audioDelayRef.current = audioDelayMs;
+  const onChangeManualAudioDelayRef = useRef(onChangeManualAudioDelayMs);
+  onChangeManualAudioDelayRef.current = onChangeManualAudioDelayMs;
   const subtitleDelayRef = useRef(subtitleDelayMs);
   subtitleDelayRef.current = subtitleDelayMs;
 
@@ -48,7 +52,11 @@ export function usePlayerSyncAndQuality(params: {
     (deltaMs: number, reset = false): void => {
       const next = reset ? 0 : clampSyncDelayMs(audioDelayRef.current + deltaMs);
       audioDelayRef.current = next;
-      serviceRef.current?.setAudioDelay(next);
+      if (onChangeManualAudioDelayRef.current !== undefined) {
+        onChangeManualAudioDelayRef.current(next);
+      } else {
+        serviceRef.current?.setAudioDelay(next);
+      }
       const save = catalogRef.current.saveTrackPreference;
       if (save === undefined) return;
       const cur = activeTargetRef.current;

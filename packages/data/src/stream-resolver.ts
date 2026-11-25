@@ -1,4 +1,5 @@
 import {
+  type DrmConfig,
   elvError,
   err,
   type HttpClient,
@@ -17,6 +18,7 @@ import {
 } from '@elv/domain';
 import { createXtreamClient, resolveXtreamBaseUrl, type XtreamClient } from '@elv/sources';
 import { isCredentialFingerprint, resolveAccountPoolKey } from './credential-fingerprint';
+import { type DrmSpecMap, loadDrmSpecs } from './drm-secret-store';
 import { getFailoverGroupByChannel } from './failover-groups-repo';
 import { placeholderNames } from './m3u-templating';
 import { queryPlayable } from './queries';
@@ -98,6 +100,18 @@ export function normalizeMulticastUrl(url: string): string {
   return url.replace(MULTICAST_AT_RE, '$1://');
 }
 
+function cloneDrmConfig(cfg: DrmConfig): DrmConfig {
+  return {
+    scheme: cfg.scheme,
+    ...(cfg.licenseUrl !== undefined ? { licenseUrl: cfg.licenseUrl } : {}),
+    ...(cfg.licenseHeaders !== undefined ? { licenseHeaders: { ...cfg.licenseHeaders } } : {}),
+    ...(cfg.clearKeys !== undefined
+      ? { clearKeys: cfg.clearKeys.map((pair) => ({ kid: pair.kid, key: pair.key })) }
+      : {}),
+    ...(cfg.multiSession !== undefined ? { multiSession: cfg.multiSession } : {}),
+  };
+}
+
 function resolveInlineAlternates(
   backupUrlsJson: string | null,
   resolver: StreamResolver,
@@ -107,6 +121,7 @@ function resolveInlineAlternates(
     'allowLegacyTls' | 'dnsFamily' | 'hostOverride'
   >,
   primaryHost: string | undefined,
+  drm?: DrmConfig,
 ): StreamAlternate[] {
   if (backupUrlsJson === null) return [];
   let parsed: unknown;
@@ -133,6 +148,7 @@ function resolveInlineAlternates(
       ...(transportMeta.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
       ...(transportMeta.dnsFamily !== undefined ? { dnsFamily: transportMeta.dnsFamily } : {}),
       ...(useHostOverride ? { hostOverride: transportMeta.hostOverride } : {}),
+      ...(drm !== undefined ? { drm: cloneDrmConfig(drm) } : {}),
     });
   }
   return alternates;
@@ -290,6 +306,7 @@ function toAlternateFromRequest(req: StreamRequest): StreamAlternate {
     ...(req.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
     ...(req.dnsFamily !== undefined ? { dnsFamily: req.dnsFamily } : {}),
     ...(req.hostOverride !== undefined ? { hostOverride: req.hostOverride } : {}),
+    ...(req.drm !== undefined ? { drm: cloneDrmConfig(req.drm) } : {}),
   };
 }
 
@@ -317,9 +334,19 @@ export function createPlaytimeResolverCache(deps: {
   primaryCooldownMs?: number;
 }): PlaytimeResolverCache {
   const resolvers = new Map<string, Promise<StreamResolver>>();
+  const drmSpecsCache = new Map<string, Promise<DrmSpecMap>>();
   const xtreamSecrets = new Map<string, Promise<XtreamSecret | undefined>>();
   const xtreamClients = new Map<string, XtreamClient>();
   const stalkerState = createStalkerResolverState({ secrets: deps.secrets, http: deps.http });
+
+  const drmSpecsFor = (sourceId: string): Promise<DrmSpecMap> => {
+    let cached = drmSpecsCache.get(sourceId);
+    if (cached === undefined) {
+      cached = loadDrmSpecs(deps.secrets, sourceId);
+      drmSpecsCache.set(sourceId, cached);
+    }
+    return cached;
+  };
 
   const resolverFor = (sourceId: string): Promise<StreamResolver> => {
     let cached = resolvers.get(sourceId);
@@ -379,7 +406,22 @@ export function createPlaytimeResolverCache(deps: {
 
     let primaryUrl: string;
     let primaryHostOverride = connectionMeta.hostOverride;
+    let drm: DrmConfig | undefined;
     const collectedAlternates: StreamAlternate[] = [];
+
+    const drmMetaRows = await deps.db.all<{ scheme: string }>(
+      'SELECT scheme FROM item_drm_meta WHERE source_id = ? AND item_key = ? LIMIT 1',
+      [play.sourceId, itemKey],
+    );
+    if (drmMetaRows.length > 0) {
+      const specs = await drmSpecsFor(play.sourceId);
+      const foundDrm = specs[itemKey];
+      if (foundDrm !== undefined && foundDrm.scheme === drmMetaRows[0]?.scheme) {
+        drm = cloneDrmConfig(foundDrm);
+      } else {
+        drmSpecsCache.delete(play.sourceId);
+      }
+    }
 
     if (source.kind === 'stalker') {
       const stalkerRes = await stalkerState.resolvePrimaryUrl(
@@ -454,6 +496,7 @@ export function createPlaytimeResolverCache(deps: {
           headers,
           connectionMeta,
           hostnameOf(primaryUrl),
+          drm,
         ),
       );
     }
@@ -506,6 +549,7 @@ export function createPlaytimeResolverCache(deps: {
       channelKey: itemKey,
       ...restConnectionMeta,
       ...(primaryHostOverride !== undefined ? { hostOverride: primaryHostOverride } : {}),
+      ...(drm === undefined ? {} : { drm }),
       ...(alternates === undefined ? {} : { alternates }),
     });
   }
@@ -513,6 +557,7 @@ export function createPlaytimeResolverCache(deps: {
   return {
     evict(sourceId) {
       resolvers.delete(sourceId);
+      drmSpecsCache.delete(sourceId);
       xtreamSecrets.delete(sourceId);
       xtreamClients.delete(sourceId);
       stalkerState.evict(sourceId);
@@ -520,6 +565,7 @@ export function createPlaytimeResolverCache(deps: {
 
     clear() {
       resolvers.clear();
+      drmSpecsCache.clear();
       xtreamSecrets.clear();
       xtreamClients.clear();
       stalkerState.clear();

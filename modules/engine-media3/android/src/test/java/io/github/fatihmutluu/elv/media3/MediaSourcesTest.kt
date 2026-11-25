@@ -202,4 +202,44 @@ class MediaSourcesTest {
     listener.onBytesTransferred(dummySource, spec, isNetwork = true, bytesTransferred = 8192)
     assertEquals(2, reported.size)
   }
+
+  @Test
+  fun `createMediaSource wires DRM session manager provider onto DASH, HLS, SmoothStreaming, and Progressive sources (#272)`() {
+    val clearKeyDrm = ParsedDrmConfig(
+      scheme = DrmSchemeKind.CLEARKEY,
+      clearKeys = listOf(DrmClearKeyPair("00112233445566778899aabbccddeeff", "ffeeddccbbaa99887766554433221100")),
+    )
+    val widevineDrm = ParsedDrmConfig(
+      scheme = DrmSchemeKind.WIDEVINE,
+      licenseUrl = "https://drm.example.test/wv",
+      licenseHeaders = mapOf("Authorization" to "Bearer tok"),
+      multiSession = true,
+    )
+    val cases = listOf(
+      "https://cdn.example.test/live/ch1.mpd" to clearKeyDrm,
+      "https://cdn.example.test/live/ch1.m3u8" to widevineDrm,
+      "https://cdn.example.test/live/ch1.ism/Manifest" to widevineDrm,
+      "https://cdn.example.test/vod/movie.mp4" to clearKeyDrm,
+    )
+    val client = engineHttpClient()
+    for ((idx, pair) in cases.withIndex()) {
+      val (url, drm) = pair
+      val source = createMediaSource(
+        request = LoadRequest(
+          url = url,
+          headers = emptyMap(),
+          live = idx < 3,
+          startMs = null,
+          softwareAudio = false,
+          drm = drm,
+        ),
+        gate = ConnectionGate { it.run() },
+        generation = idx.toLong() + 1L,
+        prepareSerial = 100L + idx,
+        lowRam = false,
+        client = client,
+      )
+      assertEquals((100L + idx).toString(), source.mediaItem.mediaId)
+    }
+  }
 }

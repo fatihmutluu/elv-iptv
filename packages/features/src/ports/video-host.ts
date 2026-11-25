@@ -1,5 +1,12 @@
-import type { AccessibilityFontFamily, DeinterlaceMode, SubtitleStyleConfig } from '@elv/domain';
 import type {
+  AccessibilityFontFamily,
+  DeinterlaceMode,
+  NightModeDrcPreset,
+  SubtitleStyleConfig,
+} from '@elv/domain';
+import type {
+  DesktopAudioOutputConfig,
+  DisplaySyncPolicy,
   ExternalSubtitleTrack,
   MultiViewDeviceCapabilities,
   PlayerEngine,
@@ -181,6 +188,14 @@ export interface OpenVideoEngine {
   readonly onTvPanGesture?: (listener: (event: TvPanGestureEvent) => void) => () => void;
   /** Optional host file picker returning a validated local external subtitle track (`#32`). */
   readonly pickSubtitleFile?: () => Promise<ExternalSubtitleTrack | null>;
+  /** Optional Android Night-Mode DRC preset setter (`#115`). */
+  readonly setNightModeDrc?: (preset: NightModeDrcPreset) => void;
+  /** Optional display auto-frame-rate & HDR matching policy setter (`#116`, `#188`, `#199`, `#214`). */
+  readonly setDisplaySync?: (policy: DisplaySyncPolicy) => void;
+  /** Optional Desktop audio passthrough / exclusive / AC3 / layout setter (`#213`). */
+  readonly setDesktopAudioOutput?: (config: DesktopAudioOutputConfig) => void;
+  /** Optional notification fired when Desktop audio passthrough falls back to PCM (`#213`). */
+  readonly onPassthroughFallback?: (listener: () => void) => () => void;
 }
 
 /** Optional screen-coordinate hint rectangle for OS Picture-in-Picture entry animations (`#34`). */

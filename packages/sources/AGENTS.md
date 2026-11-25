@@ -21,8 +21,8 @@ M3U/XMLTV scanners, Xtream client, and Stalker/Ministra MAC portal client.
   >4 KiB `data:` logos in O(1) memory (`m3u-logo-filter.ts`), skips >1 MiB lines. Splits `#http`/`#rtmp`/`#rtsp`/`#udp`/`#rtp`
   `backupUrls`, normalizes `udp://@`/`rtp://@`, trims `tvg-id`/`channel-id`, supports `\"`/`\'`/`\\` escapes, limits Sat>IP
   prefix stripping to live (`finishEntry`), validates artwork URLs (`artwork-url.ts`: `http(s)://` or bounded non-SVG
-  `data:image/*` across M3U/XMLTV/Xtream). Prototype-free `extra`/`kodiProps`/`headers.other`/`header.attrs`. Rejects HLS.
-  Files: `m3u.ts`, `m3u-logo-filter.ts`, `m3u-attrs.ts`, `m3u-url.ts`, `m3u-types.ts`, `artwork-url.ts`.
+  `data:image/*` across M3U/XMLTV/Xtream), and parses `#KODIPROP:inputstream.adaptive.license_type`/`license_key` DRM into optional `M3uEntry.drm` via `parseM3uDrmProps` (`m3u-drm.ts`, `#272`). Prototype-free `extra`/`kodiProps`/`headers.other`/`header.attrs`. Rejects HLS.
+  Files: `m3u.ts`, `m3u-logo-filter.ts`, `m3u-attrs.ts`, `m3u-url.ts`, `m3u-drm.ts`, `m3u-types.ts`, `artwork-url.ts`.
 - Utilities: `decodeMaybeGzip` (`gzip-stream.ts` + `gzip-member-splitter.ts`, multi-member `.gz`, 256 MiB ceiling),
   `decodeLegacyCodepage`/`decodeCodepageSlice` (`codepages.ts`, `windows-1256`/`iso-8859-6`/`windows-1254`/`windows-1252`/`windows-1251`),
   `detectAndDecodeText`/`normalizeBomChunks` (`encoding.ts`), `toElvError`, `decodeUtf8`, `ByteBuffer`, `decodeEntities`, `createStats`/`warn`.

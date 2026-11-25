@@ -1,5 +1,7 @@
 import type {
   AttemptToken,
+  DesktopAudioOutputConfig,
+  DisplaySyncPolicy,
   EngineCapabilities,
   EngineEvent,
   ExternalSubtitleTrack,
@@ -90,6 +92,12 @@ export interface DesktopEngine extends PlayerEngine {
   setPitchLock(lockedOrAttempt: boolean | AttemptToken, maybeLocked?: boolean): void;
   /** Toggles labeled EBU R128 `@elv_loudnorm` audio normalization (`#243`). */
   setAudioNormalization(enabled: boolean): void;
+  /** Updates display Auto Frame-Rate and HDR switching policy live (`#214`, `#116`). */
+  setDisplaySync(policy: DisplaySyncPolicy): void;
+  /** Updates desktop audio passthrough, exclusive mode, AC3 encode, and channel layout live (`#213`). */
+  setDesktopAudioOutput(config: DesktopAudioOutputConfig): void;
+  /** Subscribes to safe PCM fallback notifications when desktop passthrough open fails (`#213`). */
+  onPassthroughFallback(listener: () => void): () => void;
   /** Queues the next resolved VOD episode via mpv `append-play` (`#205`). */
   queueNext(request: QueueNextRequest): void;
   /** Clears any pending queued `append-play` episode (`#205`). */
@@ -144,6 +152,7 @@ export async function createDesktopEngine(
     (devices: readonly AudioDeviceInfo[], active: string) => void
   >();
   const queueAdvancedListeners = new Set<(itemKey: string) => void>();
+  const passthroughFallbackListeners = new Set<() => void>();
   const remoteMediaActionListeners = new Set<(action: RemoteMediaAction) => void>();
   const frameUnsubs = new Set<() => void>();
   let engineId: string | undefined;
@@ -200,6 +209,15 @@ export async function createDesktopEngine(
           listener(ui.itemKey);
         } catch {
           // isolate queueAdvanced subscribers
+        }
+      }
+    }
+    if (ui.type === 'passthroughFallback') {
+      for (const listener of [...passthroughFallbackListeners]) {
+        try {
+          listener();
+        } catch {
+          // isolate passthrough fallback subscribers
         }
       }
     }
@@ -343,6 +361,15 @@ export async function createDesktopEngine(
       send({ name: 'setPitchLock', locked });
     },
     setAudioNormalization: (enabled) => send({ name: 'setAudioNormalization', enabled }),
+    setDisplaySync: (policy) => send({ name: 'setDisplaySync', policy }),
+    setDesktopAudioOutput: (config) => send({ name: 'setDesktopAudioOutput', config }),
+    onPassthroughFallback(listener) {
+      if (released) return () => undefined;
+      passthroughFallbackListeners.add(listener);
+      return () => {
+        passthroughFallbackListeners.delete(listener);
+      };
+    },
     queueNext: (request) => send({ name: 'queueNext', request }),
     clearQueue: () => send({ name: 'clearQueue' }),
     onQueueAdvanced(listener) {
@@ -375,6 +402,7 @@ export async function createDesktopEngine(
       uiListeners.clear();
       audioDeviceListeners.clear();
       queueAdvancedListeners.clear();
+      passthroughFallbackListeners.clear();
       remoteMediaActionListeners.clear();
       for (const offFrame of [...frameUnsubs]) offFrame();
       frameUnsubs.clear();
