@@ -173,7 +173,7 @@ describe('FeedbackSettingsPanel', () => {
     });
   });
 
-  it('renders TvFocusGuideRegion and calls onBack on TV D-pad left at left edge and Back', async () => {
+  it('renders TvFocusGuideRegion, preserves D-pad left for wrapped chips, and calls onBack on TV Back', async () => {
     const dispatcher = createTvRemoteDispatcher();
     const onBack = jest.fn();
 
@@ -202,11 +202,11 @@ describe('FeedbackSettingsPanel', () => {
     await act(async () => {
       dispatcher.dispatch({ key: 'left', action: 'press', time: 10 }, false);
     });
-    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(onBack).not.toHaveBeenCalled();
 
     await act(async () => {
       dispatcher.dispatch({ key: 'back', action: 'press', time: 20 }, false);
     });
-    expect(onBack).toHaveBeenCalledTimes(2);
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 });

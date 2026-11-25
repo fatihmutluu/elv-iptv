@@ -16,7 +16,7 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactElement, useCallback, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { FeedbackCategoryId, FeedbackPort, TelemetryPort } from '../ports/wave-f9-ports';
 import { useRouteActive } from '../shared';
@@ -80,11 +80,9 @@ export interface FeedbackSettingsPanelProps {
 }
 
 function FeedbackPanelTvBridge({
-  isAtLeftEdge,
   onBack,
   onFocusTopNav,
 }: {
-  readonly isAtLeftEdge: () => boolean;
   readonly onBack?: () => void;
   readonly onFocusTopNav?: () => void;
 }): null {
@@ -100,15 +98,9 @@ function FeedbackPanelTvBridge({
           return true;
         }
       }
-      if (event.kind === 'press' && event.key === 'left' && isAtLeftEdge()) {
-        if (onBack !== undefined) {
-          onBack();
-          return true;
-        }
-      }
       return false;
     },
-    [isAtLeftEdge, onBack, onFocusTopNav],
+    [onBack, onFocusTopNav],
   );
   useKeyInterpreter(handleKey);
   return null;
@@ -143,12 +135,6 @@ export function FeedbackSettingsPanel({
   const [messageFocused, setMessageFocused] = useState(false);
   const [sending, setSending] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'sent' | 'empty' | 'error'>('idle');
-
-  const atLeftEdgeRef = useRef(true);
-  useEffect(() => {
-    if (isActiveScope) atLeftEdgeRef.current = true;
-  }, [isActiveScope]);
-  const isAtLeftEdge = useCallback(() => atLeftEdgeRef.current, []);
 
   const telemetryOptIn =
     preferences !== undefined ? preferences.preferences.telemetryOptIn : localOptIn;
@@ -213,7 +199,6 @@ export function FeedbackSettingsPanel({
         >
           {isTv && isActiveScope && (onBack !== undefined || onFocusTopNav !== undefined) ? (
             <FeedbackPanelTvBridge
-              isAtLeftEdge={isAtLeftEdge}
               {...(onBack !== undefined ? { onBack } : {})}
               {...(onFocusTopNav !== undefined ? { onFocusTopNav } : {})}
             />
@@ -243,9 +228,6 @@ export function FeedbackSettingsPanel({
               aria-checked={telemetryOptIn}
               focusable
               hasTVPreferredFocus={isTv && isActiveScope}
-              onFocus={() => {
-                atLeftEdgeRef.current = true;
-              }}
               onPress={handleToggleTelemetry}
               style={(state) => [
                 styles.toggleRow,
@@ -404,10 +386,7 @@ export function FeedbackSettingsPanel({
                   multiline
                   maxLength={MAX_FEEDBACK_LENGTH}
                   editable={!sending}
-                  onFocus={() => {
-                    atLeftEdgeRef.current = true;
-                    setMessageFocused(true);
-                  }}
+                  onFocus={() => setMessageFocused(true)}
                   onBlur={() => setMessageFocused(false)}
                   style={[
                     theme.typography.body,
@@ -425,9 +404,6 @@ export function FeedbackSettingsPanel({
               accessibilityState={{ checked: includeDiagnostics }}
               aria-checked={includeDiagnostics}
               focusable
-              onFocus={() => {
-                atLeftEdgeRef.current = true;
-              }}
               onPress={() => setIncludeDiagnostics((prev) => !prev)}
               style={(state) => [
                 styles.toggleRow,

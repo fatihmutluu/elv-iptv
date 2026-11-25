@@ -9,7 +9,7 @@ import {
   useTheme,
   useViewport,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactElement, useCallback, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import type { SyncAccountPort } from '../ports/wave-f9-ports';
 import { useRouteActive } from '../shared';
@@ -43,11 +43,9 @@ export interface AccountSettingsPanelProps {
 }
 
 function AccountPanelTvBridge({
-  isAtLeftEdge,
   onBack,
   onFocusTopNav,
 }: {
-  readonly isAtLeftEdge: () => boolean;
   readonly onBack?: () => void;
   readonly onFocusTopNav?: () => void;
 }): null {
@@ -63,15 +61,9 @@ function AccountPanelTvBridge({
           return true;
         }
       }
-      if (event.kind === 'press' && event.key === 'left' && isAtLeftEdge()) {
-        if (onBack !== undefined) {
-          onBack();
-          return true;
-        }
-      }
       return false;
     },
-    [isAtLeftEdge, onBack, onFocusTopNav],
+    [onBack, onFocusTopNav],
   );
   useKeyInterpreter(handleKey);
   return null;
@@ -105,15 +97,6 @@ export function AccountSettingsPanel({
   pendingClaimRef.current = pendingClaimCode;
   const [autoClaimStatus, setAutoClaimStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [deleteSuccessBanner, setDeleteSuccessBanner] = useState(false);
-
-  const atLeftEdgeRef = useRef(true);
-  useEffect(() => {
-    if (isActiveScope) atLeftEdgeRef.current = true;
-  }, [isActiveScope]);
-  const isAtLeftEdge = useCallback(() => atLeftEdgeRef.current, []);
-  const handleLeftEdgeChange = useCallback((atEdge: boolean) => {
-    atLeftEdgeRef.current = atEdge;
-  }, []);
 
   const effectiveSyncServerUrl = syncServerUrl ?? preferences?.preferences.syncServerUrl ?? '';
   const handleSyncServerUrlChange = useCallback(
@@ -168,7 +151,6 @@ export function AccountSettingsPanel({
         >
           {isTv && isActiveScope && (onBack !== undefined || onFocusTopNav !== undefined) ? (
             <AccountPanelTvBridge
-              isAtLeftEdge={isAtLeftEdge}
               {...(onBack !== undefined ? { onBack } : {})}
               {...(onFocusTopNav !== undefined ? { onFocusTopNav } : {})}
             />
@@ -199,7 +181,6 @@ export function AccountSettingsPanel({
               onDeleteSuccess={handleDeleteSuccess}
               syncServerUrl={effectiveSyncServerUrl}
               onSyncServerUrlChange={handleSyncServerUrlChange}
-              onLeftEdgeChange={handleLeftEdgeChange}
             />
           ) : (
             <AccountSignedOutSection
@@ -212,7 +193,6 @@ export function AccountSettingsPanel({
               deleteSuccessBanner={deleteSuccessBanner}
               syncServerUrl={effectiveSyncServerUrl}
               onSyncServerUrlChange={handleSyncServerUrlChange}
-              onLeftEdgeChange={handleLeftEdgeChange}
               {...(qrPollIntervalMs !== undefined ? { qrPollIntervalMs } : {})}
             />
           )}

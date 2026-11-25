@@ -268,7 +268,7 @@ describe('AccountSettingsPanel', () => {
     });
   });
 
-  it('supports TV focus guide handoff and D-pad left at left edge returning to Settings sidebar', async () => {
+  it('supports TV focus guide handoff, preserves D-pad left for horizontal controls, and returns on Back', async () => {
     const { port } = createStatefulSyncAccount();
     const dispatcher = createTvRemoteDispatcher();
     const onBack = jest.fn();
@@ -280,17 +280,15 @@ describe('AccountSettingsPanel', () => {
 
     expect(screen.getByTestId('settings-panel-account-focus-guide')).toBeTruthy();
 
-    // Moving focus to a non-left-edge tab keeps D-pad left inside the horizontal tab bar
-    await fireEvent(screen.getByTestId('account-tab-signup'), 'focus');
+    // D-pad left stays unhandled by JS bridge so native TV focus navigates horizontal controls cleanly
     await act(async () => {
       dispatcher.dispatch({ key: 'left', action: 'press', time: 10 }, false);
     });
     expect(onBack).not.toHaveBeenCalled();
 
-    // Returning focus to the left-edge tab enables D-pad left -> onBack()
-    await fireEvent(screen.getByTestId('account-tab-signin'), 'focus');
+    // TV Back returns cleanly to Settings sidebar
     await act(async () => {
-      dispatcher.dispatch({ key: 'left', action: 'press', time: 20 }, false);
+      dispatcher.dispatch({ key: 'back', action: 'press', time: 20 }, false);
     });
     expect(onBack).toHaveBeenCalledTimes(1);
   });

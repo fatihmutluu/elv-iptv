@@ -16,7 +16,6 @@ export interface AccountSignedInSectionProps {
   readonly onDeleteSuccess: () => void;
   readonly syncServerUrl: string;
   readonly onSyncServerUrlChange?: (nextUrl: string) => void;
-  readonly onLeftEdgeChange?: (atLeftEdge: boolean) => void;
 }
 
 /** Signed-in Settings view: email badge, Sync Now, custom Sync server URL, Approve Device Pairing, Sign Out & Delete Account. */
@@ -29,7 +28,6 @@ export function AccountSignedInSection({
   onDeleteSuccess,
   syncServerUrl,
   onSyncServerUrlChange,
-  onLeftEdgeChange,
 }: AccountSignedInSectionProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -185,7 +183,6 @@ export function AccountSignedInSection({
           {...(onSyncServerUrlChange !== undefined
             ? { onChangeValidUrl: onSyncServerUrlChange }
             : {})}
-          onFocus={() => onLeftEdgeChange?.(true)}
           editable={!isSyncing}
         />
       </Surface>
@@ -207,7 +204,6 @@ export function AccountSignedInSection({
           onChangeText={setClaimInput}
           placeholder="elviptv://pair?..."
           editable={!claimBusy}
-          onFocus={() => onLeftEdgeChange?.(true)}
         />
         {effectiveClaimSuccess ? (
           <Text
@@ -283,7 +279,6 @@ export function AccountSignedInSection({
               secureTextEntry
               autoComplete="password"
               editable={!deleteBusy}
-              onFocus={() => onLeftEdgeChange?.(true)}
             />
             {deleteErrorKey !== null ? (
               <Text

@@ -31,7 +31,6 @@ export interface AccountSignedOutSectionProps {
   readonly deleteSuccessBanner: boolean;
   readonly syncServerUrl: string;
   readonly onSyncServerUrlChange?: (nextUrl: string) => void;
-  readonly onLeftEdgeChange?: (atLeftEdge: boolean) => void;
   readonly qrPollIntervalMs?: number;
 }
 
@@ -46,7 +45,6 @@ export function AccountSignedOutSection({
   deleteSuccessBanner,
   syncServerUrl,
   onSyncServerUrlChange,
-  onLeftEdgeChange,
   qrPollIntervalMs,
 }: AccountSignedOutSectionProps): ReactElement {
   const theme = useTheme();
@@ -184,7 +182,6 @@ export function AccountSignedOutSection({
                 aria-selected={selected}
                 focusable
                 hasTVPreferredFocus={isTv && isActiveScope && idx === 0}
-                onFocus={() => onLeftEdgeChange?.(idx === 0)}
                 onPress={() => handleSelectTab(item.id)}
                 style={(state) => [
                   styles.tabItem,
@@ -225,7 +222,6 @@ export function AccountSignedOutSection({
               keyboardType="email-address"
               autoComplete="email"
               editable={!submitting}
-              onFocus={() => onLeftEdgeChange?.(true)}
             />
             <AccountTextField
               testID="account-password-input"
@@ -236,7 +232,6 @@ export function AccountSignedOutSection({
               secureTextEntry
               autoComplete="password"
               editable={!submitting}
-              onFocus={() => onLeftEdgeChange?.(true)}
             />
             {errorKey !== null ? (
               <Text
@@ -268,7 +263,6 @@ export function AccountSignedOutSection({
               keyboardType="email-address"
               autoComplete="email"
               editable={!submitting}
-              onFocus={() => onLeftEdgeChange?.(true)}
             />
             <AccountTextField
               testID="account-password-input"
@@ -279,7 +273,6 @@ export function AccountSignedOutSection({
               secureTextEntry
               autoComplete="new-password"
               editable={!submitting}
-              onFocus={() => onLeftEdgeChange?.(true)}
             />
             <AccountTextField
               testID="account-confirm-password-input"
@@ -290,7 +283,6 @@ export function AccountSignedOutSection({
               secureTextEntry
               autoComplete="new-password"
               editable={!submitting}
-              onFocus={() => onLeftEdgeChange?.(true)}
             />
             {errorKey !== null ? (
               <Text
@@ -321,7 +313,6 @@ export function AccountSignedOutSection({
             ? { onChangeValidUrl: onSyncServerUrlChange }
             : {})}
           onValidityChange={setServerUrlValid}
-          onFocus={() => onLeftEdgeChange?.(true)}
           editable={!submitting}
         />
 
@@ -349,7 +340,6 @@ export function AccountSignedOutSection({
           value={claimInput}
           onChangeText={setClaimInput}
           placeholder="elviptv://pair?..."
-          onFocus={() => onLeftEdgeChange?.(true)}
         />
         {pendingClaimCode !== null ? (
           <Text
