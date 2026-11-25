@@ -1,6 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import type { EngineEvent } from '@elv/playback';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PlayerBridge, PlayerCommandMessage } from '../../../src/shared/player-ipc.ts';
 import type { WindowBridge } from '../../../src/shared/window-ipc.ts';
+import type {
+  MediaMetadataInitLike,
+  MediaSessionActionDetailsLike,
+  MediaSessionActionName,
+  MediaSessionLike,
+} from '../media-session.ts';
 import { createDesktopVideoHost } from './desktop-video-host.tsx';
 
 vi.mock('react-native', () => ({
@@ -9,9 +16,51 @@ vi.mock('react-native', () => ({
   StyleSheet: { create: <T>(s: T): T => s },
 }));
 
+class FakeMediaMetadata {
+  readonly title: string;
+  readonly artist: string;
+  readonly album: string;
+  readonly artwork: readonly { readonly src: string }[];
+
+  constructor(init: MediaMetadataInitLike) {
+    this.title = init.title ?? '';
+    this.artist = init.artist ?? '';
+    this.album = init.album ?? '';
+    this.artwork = init.artwork ?? [];
+  }
+}
+
+function stubGlobalMediaSession() {
+  const handlers = new Map<
+    MediaSessionActionName,
+    ((details?: MediaSessionActionDetailsLike) => void) | null
+  >();
+  const mediaSession: MediaSessionLike = {
+    metadata: null,
+    playbackState: 'none',
+    setActionHandler(action, handler) {
+      handlers.set(action, handler);
+    },
+    setPositionState() {
+      // no-op
+    },
+  };
+  vi.stubGlobal('navigator', { mediaSession });
+  vi.stubGlobal('MediaMetadata', FakeMediaMetadata);
+  return {
+    mediaSession,
+    handlers,
+    trigger(action: MediaSessionActionName, details?: MediaSessionActionDetailsLike) {
+      handlers.get(action)?.(details);
+    },
+  };
+}
+
 function fakePlayerBridge() {
+  let seq = 0;
   const sent: PlayerCommandMessage[] = [];
-  const open = vi.fn(async () => ({ engineId: 'engine-1', mainNowMs: 100 }));
+  const eventListeners = new Set<(message: { engineId: string; event: EngineEvent }) => void>();
+  const open = vi.fn(async () => ({ engineId: `engine-${++seq}`, mainNowMs: 100 }));
   const close = vi.fn(async () => undefined);
   const setPrimary = vi.fn(async () => undefined);
   const bridge: PlayerBridge = {
@@ -20,12 +69,20 @@ function fakePlayerBridge() {
     setPrimary,
     send: (m) => void sent.push(m),
     setArea: () => undefined,
-    onEvent: () => () => undefined,
+    onEvent: (listener) => {
+      eventListeners.add(listener);
+      return () => {
+        eventListeners.delete(listener);
+      };
+    },
     onUi: () => () => undefined,
     onRemoteMediaAction: () => () => undefined,
     reportGate: () => undefined,
   };
-  return { bridge, sent, open, close, setPrimary };
+  const emitEvent = (engineId: string, event: EngineEvent) => {
+    for (const listener of [...eventListeners]) listener({ engineId, event });
+  };
+  return { bridge, sent, open, close, setPrimary, emitEvent };
 }
 
 function fakeWindowBridge(): WindowBridge {
@@ -94,5 +151,156 @@ describe('createDesktopVideoHost (#34)', () => {
   it('returns null when no playerBridge is available', async () => {
     const host = createDesktopVideoHost({ playerBridge: undefined });
     await expect(host.open()).resolves.toBeNull();
+  });
+
+  describe('Multi-View navigator.mediaSession ownership (HIGH #1)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('keeps primary mediaSession intact when a secondary tile opens and plays, and when secondary tile releases', async () => {
+      const env = stubGlobalMediaSession();
+      const fake = fakePlayerBridge();
+      const host = createDesktopVideoHost({
+        playerBridge: fake.bridge,
+        windowBridge: fakeWindowBridge(),
+        presenterKind: 'canvas',
+      });
+
+      const tile1 = await host.open({ replaceExisting: true, primary: true });
+      expect(tile1).not.toBeNull();
+      const off1 = tile1?.engine.subscribe(() => undefined);
+      tile1?.setMediaMetadata?.({
+        title: 'Primary Channel',
+        subtitle: 'Live 1',
+        kind: 'live',
+        canStepTrack: false,
+      });
+      tile1?.engine.load({
+        attempt: 1,
+        kind: 'live',
+        url: 'http://sim.example.test/1.ts',
+        headers: {},
+      });
+      fake.emitEvent('engine-1', { attempt: 1, type: 'state', state: 'playing' });
+
+      expect((env.mediaSession.metadata as FakeMediaMetadata | null)?.title).toBe(
+        'Primary Channel',
+      );
+      expect(env.mediaSession.playbackState).toBe('playing');
+
+      // Open secondary tile (primary: false)
+      const tile2 = await host.open({ replaceExisting: false, primary: false });
+      expect(tile2).not.toBeNull();
+      const off2 = tile2?.engine.subscribe(() => undefined);
+      tile2?.setMediaMetadata?.({
+        title: 'Secondary Muted Channel',
+        subtitle: 'Live 2',
+        kind: 'live',
+        canStepTrack: false,
+      });
+      tile2?.engine.load({
+        attempt: 2,
+        kind: 'live',
+        url: 'http://sim.example.test/2.ts',
+        headers: {},
+      });
+      fake.emitEvent('engine-2', { attempt: 2, type: 'state', state: 'playing' });
+
+      // (a) Secondary tile MUST NOT overwrite navigator.mediaSession metadata or handlers
+      expect((env.mediaSession.metadata as FakeMediaMetadata | null)?.title).toBe(
+        'Primary Channel',
+      );
+      expect(env.mediaSession.playbackState).toBe('playing');
+      env.trigger('pause');
+      expect(fake.sent).toContainEqual({
+        engineId: 'engine-1',
+        command: { name: 'pause', attempt: 1 },
+      });
+      expect(fake.sent).not.toContainEqual({
+        engineId: 'engine-2',
+        command: { name: 'pause', attempt: 2 },
+      });
+
+      // (b) Releasing secondary tile MUST NOT clear navigator.mediaSession while primary is playing
+      off2?.();
+      tile2?.engine.release();
+      expect((env.mediaSession.metadata as FakeMediaMetadata | null)?.title).toBe(
+        'Primary Channel',
+      );
+      expect(env.mediaSession.playbackState).toBe('playing');
+      expect(env.handlers.get('pause')).toBeTypeOf('function');
+
+      off1?.();
+      tile1?.engine.release();
+      expect(env.mediaSession.metadata).toBeNull();
+      expect(env.mediaSession.playbackState).toBe('none');
+    });
+
+    it('transfers navigator.mediaSession ownership cleanly on setPrimary() and skips clear on demoted release', async () => {
+      const env = stubGlobalMediaSession();
+      const fake = fakePlayerBridge();
+      const host = createDesktopVideoHost({
+        playerBridge: fake.bridge,
+        windowBridge: fakeWindowBridge(),
+        presenterKind: 'canvas',
+      });
+
+      const tile1 = await host.open({ replaceExisting: true, primary: true });
+      const tile2 = await host.open({ replaceExisting: false, primary: false });
+      const off1 = tile1?.engine.subscribe(() => undefined);
+      const off2 = tile2?.engine.subscribe(() => undefined);
+
+      tile1?.setMediaMetadata?.({
+        title: 'Channel One',
+        subtitle: 'News',
+        kind: 'live',
+        canStepTrack: false,
+      });
+      tile1?.engine.load({
+        attempt: 1,
+        kind: 'live',
+        url: 'http://sim.example.test/1.ts',
+        headers: {},
+      });
+      fake.emitEvent('engine-1', { attempt: 1, type: 'state', state: 'playing' });
+
+      tile2?.setMediaMetadata?.({
+        title: 'Channel Two',
+        subtitle: 'Sports',
+        kind: 'live',
+        canStepTrack: false,
+      });
+      tile2?.engine.load({
+        attempt: 2,
+        kind: 'live',
+        url: 'http://sim.example.test/2.ts',
+        headers: {},
+      });
+      fake.emitEvent('engine-2', { attempt: 2, type: 'state', state: 'playing' });
+
+      // (c) Calling setPrimary() on tile 2 promotes mediaSession ownership cleanly
+      tile2?.setPrimary?.();
+      expect((env.mediaSession.metadata as FakeMediaMetadata | null)?.title).toBe('Channel Two');
+      expect(env.mediaSession.playbackState).toBe('playing');
+      env.trigger('pause');
+      expect(fake.sent).toContainEqual({
+        engineId: 'engine-2',
+        command: { name: 'pause', attempt: 2 },
+      });
+
+      // Subsequent events or release from demoted tile 1 MUST NOT overwrite or clear tile 2's mediaSession
+      fake.emitEvent('engine-1', { attempt: 1, type: 'state', state: 'paused' });
+      expect(env.mediaSession.playbackState).toBe('playing');
+      off1?.();
+      tile1?.engine.release();
+      expect((env.mediaSession.metadata as FakeMediaMetadata | null)?.title).toBe('Channel Two');
+      expect(env.mediaSession.playbackState).toBe('playing');
+
+      off2?.();
+      tile2?.engine.release();
+      expect(env.mediaSession.metadata).toBeNull();
+      expect(env.mediaSession.playbackState).toBe('none');
+    });
   });
 });

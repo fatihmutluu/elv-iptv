@@ -12,7 +12,7 @@ import {
   type ThermalDevicePort,
   type VideoHost,
 } from '@elv/features';
-import { resolveLocale } from '@elv/i18n';
+import { createAppI18n, resolveLocale } from '@elv/i18n';
 import { UiAdaptersProvider } from '@elv/ui-kit';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -170,19 +170,29 @@ function AppRoot() {
     const windowBridge = window.elv?.window;
     if (!windowBridge || typeof windowBridge.setMinimizeToTray !== 'function') return;
     let active = true;
-    let lastSent: boolean | undefined;
-    const syncTray = (enabled: boolean): void => {
-      if (!active || lastSent === enabled) return;
-      lastSent = enabled;
-      void windowBridge.setMinimizeToTray(enabled).catch(() => undefined);
+    let lastSent: string | undefined;
+    const trayI18n = createAppI18n(systemLocale);
+    const syncTray = (enabled: boolean, localePref: string): void => {
+      const resolved = localePref === 'system' ? systemLocale : resolveLocale([localePref]);
+      trayI18n.setLocale(resolved);
+      const labels = {
+        restore: trayI18n.t('desktop.tray.restore'),
+        quit: trayI18n.t('desktop.tray.quit'),
+      };
+      const key = `${enabled ? '1' : '0'}|${labels.restore}|${labels.quit}`;
+      if (!active || lastSent === key) return;
+      lastSent = key;
+      void windowBridge.setMinimizeToTray(enabled, labels).catch(() => undefined);
     };
-    void preferencesStore.load().then((snap) => syncTray(snap.minimizeToTray));
-    const unsubscribe = preferencesStore.subscribe((snap) => syncTray(snap.minimizeToTray));
+    void preferencesStore.load().then((snap) => syncTray(snap.minimizeToTray, snap.locale));
+    const unsubscribe = preferencesStore.subscribe((snap) =>
+      syncTray(snap.minimizeToTray, snap.locale),
+    );
     return () => {
       active = false;
       unsubscribe();
     };
-  }, [preferencesStore]);
+  }, [preferencesStore, systemLocale]);
 
   useEffect(() => {
     const windowBridge = window.elv?.window;

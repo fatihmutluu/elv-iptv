@@ -322,7 +322,7 @@ describe('Wave F6 Desktop Tray & Popout (#158), Persistent Mini-Player (#233) & 
     }
   });
 
-  it('shows autoEnterPip on mobile/tablet/TV and minimizeToTray on desktop with persistence', async () => {
+  it('shows autoEnterPip strictly on phone/tablet, hides it on TV & desktop, and shows minimizeToTray on desktop (MEDIUM #7)', async () => {
     const mobileView = await render(
       <SettingsHarness
         viewport={{
@@ -345,6 +345,36 @@ describe('Wave F6 Desktop Tray & Popout (#158), Persistent Mini-Player (#233) & 
       ).toBe(false);
     });
     await mobileView.unmount();
+
+    const tabletView = await render(
+      <SettingsHarness
+        viewport={{
+          formFactor: 'tablet',
+          orientation: 'landscape',
+          inputModality: 'touch',
+          width: 1194,
+          height: 834,
+        }}
+      />,
+    );
+    expect(screen.getByTestId('settings-playback-toggle-auto-enter-pip')).toBeTruthy();
+    expect(screen.queryByTestId('settings-playback-toggle-minimize-to-tray')).toBeNull();
+    await tabletView.unmount();
+
+    const tvView = await render(
+      <SettingsHarness
+        viewport={{
+          formFactor: 'tv',
+          orientation: 'landscape',
+          inputModality: 'tv',
+          width: 1920,
+          height: 1080,
+        }}
+      />,
+    );
+    expect(screen.queryByTestId('settings-playback-toggle-auto-enter-pip')).toBeNull();
+    expect(screen.queryByTestId('settings-playback-toggle-minimize-to-tray')).toBeNull();
+    await tvView.unmount();
 
     const desktopView = await render(
       <SettingsHarness

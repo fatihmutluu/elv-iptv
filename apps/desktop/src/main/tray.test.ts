@@ -130,4 +130,48 @@ describe('tray controller (#158)', () => {
     expect(calls).toEqual(['restore', 'show', 'focus']);
     expect(sent).toEqual([{ channel: WINDOW_CHANNELS.windowRestored, args: [] }]);
   });
+
+  it('updates tray context menu labels dynamically via setLabels before and after ensureShown (LOW #11)', () => {
+    const created: Array<ReturnType<typeof fakeTray>> = [];
+    const builtTemplates: TrayMenuItemTemplate[][] = [];
+    const onRestore = vi.fn();
+    const onQuit = vi.fn();
+
+    const controller = createTrayController({
+      icon: { kind: 'fake-icon' },
+      createTray: () => {
+        const ft = fakeTray();
+        created.push(ft);
+        return ft.tray;
+      },
+      buildMenu: (template) => {
+        builtTemplates.push([...template]);
+        return { template };
+      },
+      onRestore,
+      onQuit,
+    });
+
+    // Updating labels before tray is shown persists them for the initial menu build
+    controller.setLabels({ restore: 'ELV IPTV Penceresini Geri Yükle', quit: 'Çıkış' });
+    controller.ensureShown();
+    expect(builtTemplates).toHaveLength(1);
+    expect(builtTemplates[0]?.map((i) => i.label ?? i.type)).toEqual([
+      'ELV IPTV Penceresini Geri Yükle',
+      'separator',
+      'Çıkış',
+    ]);
+
+    // Updating labels while tray is visible rebuilds and applies the context menu live
+    controller.setLabels({ restore: 'Restore ELV IPTV', quit: 'Quit' });
+    expect(builtTemplates).toHaveLength(2);
+    expect(builtTemplates[1]?.map((i) => i.label ?? i.type)).toEqual([
+      'Restore ELV IPTV',
+      'separator',
+      'Quit',
+    ]);
+    expect(created[0]?.getMenu()).toEqual({ template: builtTemplates[1] });
+
+    controller.destroy();
+  });
 });

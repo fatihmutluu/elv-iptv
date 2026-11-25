@@ -320,11 +320,20 @@ export function createMultiViewController(
       }
 
       closingTileIds.add(tileId);
+      let closeFailed = false;
       try {
         await awaitClose(oldTile);
+      } catch (err) {
+        closeFailed = true;
+        throw err;
       } finally {
         tracker.release(oldTile.streamId);
         closingTileIds.delete(tileId);
+        if (closeFailed) {
+          tiles = tiles.filter((t) => t.tileId !== tileId);
+          syncAudioFlags();
+          notify();
+        }
       }
 
       if (closingAll) {

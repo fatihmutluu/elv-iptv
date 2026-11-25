@@ -299,14 +299,27 @@ class Media3Engine : SharedObject {
 
   /** Configures Multi-View audio focus ownership and tile-count buffer scaling (`#34`, `#221`). */
   fun configureMultiView(handleAudioFocus: Boolean, tileCount: Int) = post {
+    val wasAudioFocus = this.handleAudioFocus
     this.handleAudioFocus = handleAudioFocus
     this.multiViewTileCount = clampMultiViewTileCount(tileCount)
-    player?.volume = if (handleAudioFocus) 1f else 0f
-    if (!handleAudioFocus) mediaSessionController.onPlaybackStopped()
-    if (player != null && request == null &&
-      (playerHandleAudioFocus != this.handleAudioFocus || playerMultiViewTileCount != this.multiViewTileCount)
-    ) {
+    val current = player ?: return@post
+    val desiredFocus = this.handleAudioFocus && playerFactory.audioFocusAllowed
+    if (request == null && (playerHandleAudioFocus != desiredFocus || playerMultiViewTileCount != this.multiViewTileCount)) {
+      if (!this.handleAudioFocus) mediaSessionController.detachPlayer()
       replacePlayer(playerSoftwareAudio, playerPreferHevc, playerStreamKind, playerBufferPreset, playerDecoderMode)
+      return@post
+    }
+    current.volume = if (this.handleAudioFocus) 1f else 0f
+    if (playerHandleAudioFocus != desiredFocus || wasAudioFocus != this.handleAudioFocus) {
+      playerHandleAudioFocus = applyMultiViewAudioFocus(current, this.handleAudioFocus, playerFactory)
+    }
+    if (!this.handleAudioFocus) {
+      mediaSessionController.detachPlayer()
+    } else if (!wasAudioFocus || mediaSessionController.activeForwardingPlayerForTest == null) {
+      mediaSessionController.onPlayerChanged(current)
+      if (request != null) {
+        mediaSessionController.onPlaybackActive(); mediaSessionController.updatePlayingState(current.isPlaying)
+      }
     }
   }
 
@@ -675,7 +688,8 @@ class Media3Engine : SharedObject {
     val rebuild = forceRebuild || existing == null || terminal || playerSoftwareAudio != next.softwareAudio ||
       playerPreferHevc != next.preferHevcOverDolbyVision || playerStreamKind != streamKind ||
       playerBufferPreset != bufferPreset || playerDecoderMode != decoderMode ||
-      playerHandleAudioFocus != handleAudioFocus || playerMultiViewTileCount != multiViewTileCount
+      playerHandleAudioFocus != (handleAudioFocus && playerFactory.audioFocusAllowed) ||
+      playerMultiViewTileCount != multiViewTileCount
     if (rebuild) {
       pendingRebuildDeferred = false
       replacePlayer(next.softwareAudio, next.preferHevcOverDolbyVision, streamKind, bufferPreset, decoderMode)
@@ -731,13 +745,14 @@ class Media3Engine : SharedObject {
   ): ExoPlayer {
     playerSoftwareAudio = softwareAudio; playerPreferHevc = preferHevc
     playerStreamKind = streamKind; playerBufferPreset = bufferPreset; playerDecoderMode = decoderMode
-    playerHandleAudioFocus = handleAudioFocus; playerMultiViewTileCount = multiViewTileCount
+    playerMultiViewTileCount = multiViewTileCount
     return playerFactory.build(
       softwareAudio = softwareAudio, preferHevcOverDolbyVision = preferHevc,
       live = streamKind != StreamKind.VOD, streamKind = streamKind,
       bufferPreset = bufferPreset, decoderMode = decoderMode,
       handleAudioFocus = handleAudioFocus, multiViewTileCount = multiViewTileCount,
     ).also { built ->
+      playerHandleAudioFocus = handleAudioFocus && playerFactory.audioFocusAllowed
       built.volume = if (handleAudioFocus) 1f else 0f
       built.addListener(reporter); built.addAnalyticsListener(reporter); built.addListener(pictures)
       built.playbackParameters =
@@ -749,20 +764,21 @@ class Media3Engine : SharedObject {
     }
   }
 
+  private fun detachPlayerInstance(old: ExoPlayer, clearSurface: Boolean) {
+    old.isScrubbingModeEnabled = false
+    old.removeListener(reporter); old.removeAnalyticsListener(reporter); old.removeListener(pictures)
+    if (clearSurface) old.clearVideoSurface()
+    audioEffects.onStop(); audioEffects.onAudioSessionIdChanged(C.AUDIO_SESSION_ID_UNSET)
+    mediaSessionController.updatePlayingState(false)
+  }
+
   private fun replacePlayer(
     softwareAudio: Boolean, preferHevc: Boolean = false, streamKind: StreamKind = StreamKind.VOD,
     bufferPreset: BufferPreset = BufferPreset.AUTO, decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
   ): ExoPlayer {
     val old = player; player = null
-    surfaces.detachAssOverlaySync(DETACH_TIMEOUT_MS)
-    assOverlay.release()
-    if (old != null) {
-      old.isScrubbingModeEnabled = false
-      old.removeListener(reporter); old.removeAnalyticsListener(reporter); old.removeListener(pictures)
-      old.clearVideoSurface()
-      audioEffects.onStop(); audioEffects.onAudioSessionIdChanged(C.AUDIO_SESSION_ID_UNSET)
-      mediaSessionController.updatePlayingState(false)
-    }
+    surfaces.detachAssOverlaySync(DETACH_TIMEOUT_MS); assOverlay.release()
+    if (old != null) detachPlayerInstance(old, clearSurface = true)
     try {
       return buildPlayer(softwareAudio, preferHevc, streamKind, bufferPreset, decoderMode).also { player = it }
     } finally {
@@ -774,18 +790,10 @@ class Media3Engine : SharedObject {
   }
 
   private fun releasePlayer() {
-    val old = player ?: run {
-      surfaces.detachAssOverlaySync(DETACH_TIMEOUT_MS)
-      assOverlay.release()
-      return
-    }
-    player = null
-    surfaces.detachAssOverlaySync(DETACH_TIMEOUT_MS)
-    assOverlay.release()
-    old.isScrubbingModeEnabled = false
-    old.removeListener(reporter); old.removeAnalyticsListener(reporter); old.removeListener(pictures)
-    audioEffects.onStop(); audioEffects.onAudioSessionIdChanged(C.AUDIO_SESSION_ID_UNSET)
-    mediaSessionController.updatePlayingState(false)
+    val old = player; player = null
+    surfaces.detachAssOverlaySync(DETACH_TIMEOUT_MS); assOverlay.release()
+    if (old == null) return
+    detachPlayerInstance(old, clearSurface = false)
     old.release(); gate.dropForced()
   }
 }

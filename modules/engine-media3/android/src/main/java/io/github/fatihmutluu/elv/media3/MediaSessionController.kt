@@ -240,12 +240,14 @@ internal class MediaSessionController(
 
   /** Updates the thread-safe actively-playing flag read by [ElvPlaybackSessionService.onTaskRemoved]. */
   fun updatePlayingState(isPlaying: Boolean) {
-    ElvPlaybackSessionService.setSessionActivelyPlaying(mediaSession != null && isPlaying)
+    val session = mediaSession ?: return
+    if (ElvPlaybackSessionService.activeSession() === session) {
+      ElvPlaybackSessionService.setSessionActivelyPlaying(isPlaying)
+    }
   }
 
   /** Stops [ElvPlaybackSessionService] and releases the active `MediaSession` while preserving metadata for resume. */
   fun onPlaybackStopped() {
-    ElvPlaybackSessionService.setSessionActivelyPlaying(false)
     val session = mediaSession
     mediaSession = null
     if (session != null) {
@@ -254,8 +256,17 @@ internal class MediaSessionController(
     }
     if (serviceStarted) {
       serviceStarted = false
-      serviceBridge.stop(context)
+      if (ElvPlaybackSessionService.activeSession() == null) {
+        serviceBridge.stop(context)
+      }
     }
+  }
+
+  /** Detaches the bound player and stops any active `MediaSession` (e.g. Multi-View demotion, `#34`). */
+  fun detachPlayer() {
+    onPlaybackStopped()
+    currentPlayer = null
+    forwardingPlayer = null
   }
 
   /** Permanently clears metadata, releases the session, and prevents future session creation. */

@@ -252,12 +252,16 @@ export function createDesktopMediaSession(
 /** Hooks for {@link bindDesktopMediaSession}. */
 export interface BindDesktopMediaSessionHooks {
   readonly onTrackStep?: (direction: 'next' | 'previous') => void;
+  /** Whether this engine initially owns `navigator.mediaSession` (`true` by default; `false` for muted Multi-View tiles). */
+  readonly initialPrimary?: boolean;
 }
 
 /** A {@link DesktopEngine} wrapped with typed OS `MediaSession` synchronization (`#166`, `#435`). */
 export interface MediaSessionBoundDesktopEngine extends DesktopEngine {
   /** Updates OS media metadata from typed playback metadata, or clears it when `null`. */
   setMediaMetadata(meta: MediaSessionMetadata | null): void;
+  /** Promotes or demotes this engine's ownership of `navigator.mediaSession` without clearing a sibling's session. */
+  setMediaSessionPrimary(primary: boolean): void;
 }
 
 /**
@@ -270,13 +274,17 @@ export function bindDesktopMediaSession(
   session: DesktopMediaSession,
   hooks?: BindDesktopMediaSessionHooks,
 ): MediaSessionBoundDesktopEngine {
+  let isPrimary = hooks?.initialPrimary !== false;
   let activeAttempt: AttemptToken | null = null;
   let activeKind: MediaKind = 'live';
   let activeMeta: MediaSessionMetadata | null = null;
+  let lastPlaybackState: MediaSessionPlaybackStateValue = 'none';
   let lastPositionMs = 0;
   let lastDurationMs: number | undefined;
+  let lastRate = 1;
 
   const syncMetadata = (): void => {
+    if (!isPrimary) return;
     session.setMetadata({
       title: activeMeta?.title.trim() || 'ELV IPTV',
       artist: activeMeta?.subtitle?.trim() || 'ELV IPTV',
@@ -291,6 +299,7 @@ export function bindDesktopMediaSession(
   };
 
   const syncHandlers = (): void => {
+    if (!isPrimary) return;
     session.setHandlers({
       play: () => activeAttempt !== null && engine.play(activeAttempt),
       pause: () => activeAttempt !== null && engine.pause(activeAttempt),
@@ -318,20 +327,28 @@ export function bindDesktopMediaSession(
     if (activeAttempt !== null && event.attempt !== activeAttempt) return;
     if (event.type === 'state') {
       if (event.state === 'playing') {
-        syncMetadata();
-        session.setPlaybackState('playing');
+        lastPlaybackState = 'playing';
+        if (isPrimary) {
+          syncMetadata();
+          session.setPlaybackState('playing');
+        }
       } else if (event.state === 'paused') {
-        session.setPlaybackState('paused');
+        lastPlaybackState = 'paused';
+        if (isPrimary) session.setPlaybackState('paused');
       } else if (event.state === 'ended') {
-        session.setPlaybackState('none');
-        session.clearPositionState();
+        lastPlaybackState = 'none';
+        if (isPrimary) {
+          session.setPlaybackState('none');
+          session.clearPositionState();
+        }
       }
       return;
     }
     if (event.type === 'clock') {
       lastPositionMs = event.anchor.positionMs;
       lastDurationMs = event.anchor.durationMs;
-      if (activeKind === 'vod' && lastDurationMs !== undefined && lastDurationMs > 0) {
+      lastRate = event.anchor.rate;
+      if (isPrimary && activeKind === 'vod' && lastDurationMs !== undefined && lastDurationMs > 0) {
         session.setPositionState({
           durationSec: lastDurationMs / 1000,
           positionSec: lastPositionMs / 1000,
@@ -351,22 +368,39 @@ export function bindDesktopMediaSession(
   const offRemoteAction =
     hooks?.onTrackStep && typeof engine.onRemoteMediaAction === 'function'
       ? engine.onRemoteMediaAction((action) => {
-          if (activeMeta?.canStepTrack === true) hooks.onTrackStep?.(action);
+          if (isPrimary && activeMeta?.canStepTrack === true) hooks.onTrackStep?.(action);
         })
       : undefined;
 
   return {
     ...engine,
+    setMediaSessionPrimary(primary: boolean) {
+      if (isPrimary === primary) return;
+      isPrimary = primary;
+      if (!isPrimary) return;
+      if (activeMeta === null && activeAttempt === null) return;
+      if (activeKind === 'live') session.clearPositionState();
+      syncMetadata();
+      syncHandlers();
+      session.setPlaybackState(lastPlaybackState);
+      if (activeKind === 'vod' && lastDurationMs !== undefined && lastDurationMs > 0) {
+        session.setPositionState({
+          durationSec: lastDurationMs / 1000,
+          positionSec: lastPositionMs / 1000,
+          playbackRate: lastRate,
+        });
+      }
+    },
     setMediaMetadata(meta) {
       activeMeta = meta;
       if (typeof engine.setMediaMetadata === 'function') {
         engine.setMediaMetadata(meta);
       }
       if (meta === null) {
-        session.clear();
+        if (isPrimary) session.clear();
         return;
       }
-      if (meta.kind === 'live' && activeKind !== 'live') session.clearPositionState();
+      if (meta.kind === 'live' && activeKind !== 'live' && isPrimary) session.clearPositionState();
       activeKind = meta.kind;
       syncMetadata();
       syncHandlers();
@@ -374,9 +408,10 @@ export function bindDesktopMediaSession(
     load(cmd) {
       activeAttempt = cmd.attempt;
       activeKind = cmd.kind;
+      lastPlaybackState = 'none';
       lastPositionMs = cmd.startMs ?? 0;
       lastDurationMs = undefined;
-      if (cmd.kind === 'live') session.clearPositionState();
+      if (cmd.kind === 'live' && isPrimary) session.clearPositionState();
       syncMetadata();
       syncHandlers();
       engine.load(cmd);
@@ -390,14 +425,17 @@ export function bindDesktopMediaSession(
     recreate: track((a) => engine.recreate(a)),
     stop(attempt) {
       activeAttempt = attempt;
-      session.setPlaybackState('none');
-      session.clearPositionState();
+      lastPlaybackState = 'none';
+      if (isPrimary) {
+        session.setPlaybackState('none');
+        session.clearPositionState();
+      }
       engine.stop(attempt);
     },
     release() {
       activeMeta = null;
       offRemoteAction?.();
-      session.dispose();
+      if (isPrimary) session.dispose();
       engine.release();
     },
     subscribe(listener) {

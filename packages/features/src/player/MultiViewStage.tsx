@@ -22,7 +22,10 @@ import { MultiViewTileCard } from './MultiViewTileCard';
 import {
   computeMultiViewGridLayout,
   formatMultiViewBannerText,
+  getMultiViewTileActions,
+  type MultiViewTileAction,
   moveMultiViewGridFocus,
+  moveMultiViewTileActionFocus,
 } from './multiview-model';
 import { useMultiViewSession } from './useMultiViewSession';
 
@@ -83,6 +86,10 @@ export function MultiViewStage({
 
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
   const [focusedSlot, setFocusedSlot] = useState(0);
+  const [tileActionFocus, setTileActionFocus] = useState<{
+    readonly tileId: string;
+    readonly actionIndex: number;
+  } | null>(null);
   const exitingRef = useRef(false);
 
   const handleExit = useCallback(() => {
@@ -121,10 +128,29 @@ export function MultiViewStage({
   pickerOpenRef.current = pickerMode !== null;
   const tilesRef = useRef(state.tiles);
   tilesRef.current = state.tiles;
+  const activeAudioTileIdRef = useRef(state.activeAudioTileId);
+  activeAudioTileIdRef.current = state.activeAudioTileId;
   const totalSlotsRef = useRef(totalSlots);
   totalSlotsRef.current = totalSlots;
   const focusRef = useRef(clampedFocus);
   focusRef.current = clampedFocus;
+  const tileActionFocusRef = useRef(tileActionFocus);
+  tileActionFocusRef.current = tileActionFocus;
+
+  useEffect(() => {
+    if (tileActionFocus === null) return;
+    const focusedTile = state.tiles[clampedFocus];
+    if (pickerMode !== null || focusedTile?.tileId !== tileActionFocus.tileId) {
+      setTileActionFocus(null);
+    }
+  }, [clampedFocus, pickerMode, state.tiles, tileActionFocus]);
+
+  const resolveFocusedAction = (tileId: string): MultiViewTileAction | null => {
+    if (tileActionFocus === null || tileActionFocus.tileId !== tileId) return null;
+    const actions = getMultiViewTileActions(state.activeAudioTileId === tileId);
+    const idx = Math.max(0, Math.min(actions.length - 1, tileActionFocus.actionIndex));
+    return actions[idx] ?? null;
+  };
 
   useEffect(() => {
     if ((Platform.OS as string) !== 'web') return;
@@ -146,9 +172,68 @@ export function MultiViewStage({
 
   useKeyInterpreter((event: KeyEvent) => {
     if (pickerOpenRef.current) return false;
+    const activeActionBar = tileActionFocusRef.current;
+    if (activeActionBar !== null) {
+      const tile = tilesRef.current.find((t) => t.tileId === activeActionBar.tileId);
+      if (tile === undefined) {
+        setTileActionFocus(null);
+      } else {
+        const actions = getMultiViewTileActions(activeAudioTileIdRef.current === tile.tileId);
+        if (
+          event.kind === 'press' &&
+          (event.key === 'back' || event.key === 'menu' || event.key === 'up')
+        ) {
+          setTileActionFocus(null);
+          return true;
+        }
+        if (
+          (event.kind === 'press' || event.kind === 'repeat') &&
+          (event.key === 'left' || event.key === 'right')
+        ) {
+          setTileActionFocus((prev) =>
+            prev === null
+              ? null
+              : {
+                  ...prev,
+                  actionIndex: moveMultiViewTileActionFocus(
+                    prev.actionIndex,
+                    actions.length,
+                    event.key,
+                  ),
+                },
+          );
+          return true;
+        }
+        if (event.kind === 'press' && event.key === 'select') {
+          const clampedIdx = Math.max(0, Math.min(actions.length - 1, activeActionBar.actionIndex));
+          const chosen = actions[clampedIdx];
+          setTileActionFocus(null);
+          if (chosen === 'audio') {
+            session.selectAudioTile(tile.tileId);
+          } else if (chosen === 'replace') {
+            setPickerMode({ kind: 'replace', tileId: tile.tileId });
+          } else if (chosen === 'remove') {
+            void session.removeTile(tile.tileId);
+          }
+          return true;
+        }
+        return true;
+      }
+    }
     if (event.kind === 'press' && event.key === 'back') {
       handleExit();
       return true;
+    }
+    if (
+      (event.kind === 'press' && event.key === 'menu') ||
+      (event.kind === 'long' && event.key === 'select')
+    ) {
+      const tile = tilesRef.current[focusRef.current];
+      if (tile !== undefined) {
+        setTileActionFocus({ tileId: tile.tileId, actionIndex: 0 });
+        return true;
+      }
+      return false;
     }
     if (
       (event.kind === 'press' || event.kind === 'repeat') &&
@@ -217,6 +302,13 @@ export function MultiViewStage({
           label={i18n.t('player.multiView.tileCount', { count: state.tiles.length })}
           tone="neutral"
         />
+        {isTv ? (
+          <MicroPill
+            testID="multiview-tv-actions-hint"
+            label={`${i18n.t('remote.longPressBadge')} · ${i18n.t('live.contextMenuTitle')}`}
+            tone="neutral"
+          />
+        ) : null}
         <View style={styles.flex1} />
         <Pressable
           testID="multiview-add-button"
@@ -307,6 +399,9 @@ export function MultiViewStage({
               isActiveAudio={state.activeAudioTileId === tile.tileId}
               isTv={isTv}
               tvFocused={isTv && clampedFocus === idx}
+              focusedAction={
+                isTv && clampedFocus === idx ? resolveFocusedAction(tile.tileId) : null
+              }
               i18n={i18n}
               onSelectAudio={session.selectAudioTile}
               onRequestReplace={(id) => setPickerMode({ kind: 'replace', tileId: id })}
@@ -358,6 +453,9 @@ export function MultiViewStage({
                   isActiveAudio={state.activeAudioTileId === tile.tileId}
                   isTv={isTv}
                   tvFocused={isTv && clampedFocus === idx}
+                  focusedAction={
+                    isTv && clampedFocus === idx ? resolveFocusedAction(tile.tileId) : null
+                  }
                   i18n={i18n}
                   onSelectAudio={session.selectAudioTile}
                   onRequestReplace={(id) => setPickerMode({ kind: 'replace', tileId: id })}

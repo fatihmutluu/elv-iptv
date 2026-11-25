@@ -1,5 +1,5 @@
 import { deflateSync } from 'node:zlib';
-import { WINDOW_CHANNELS } from '../shared/window-ipc.ts';
+import { type TrayLabels, WINDOW_CHANNELS } from '../shared/window-ipc.ts';
 import { WINDOW_TITLE } from './window-options.ts';
 
 /** Minimal menu item descriptor passed to `Menu.buildFromTemplate`. */
@@ -36,6 +36,7 @@ export interface TrayRestorableWindow {
 export interface TrayControllerDeps<TIcon = unknown> {
   readonly icon: TIcon;
   readonly tooltip?: string;
+  readonly labels?: TrayLabels;
   readonly createTray: (icon: TIcon) => TrayLike;
   readonly buildMenu: (template: TrayMenuItemTemplate[]) => unknown;
   readonly onRestore: () => void;
@@ -46,6 +47,7 @@ export interface TrayControllerDeps<TIcon = unknown> {
 export interface TrayController {
   ensureShown(): void;
   isShown(): boolean;
+  setLabels(labels: TrayLabels): void;
   destroy(): void;
 }
 
@@ -57,25 +59,37 @@ export function createTrayController<TIcon = unknown>(
   deps: TrayControllerDeps<TIcon>,
 ): TrayController {
   let tray: TrayLike | undefined;
+  let labels: TrayLabels = deps.labels ?? {
+    restore: `Restore ${WINDOW_TITLE}`,
+    quit: 'Quit',
+  };
   const tooltip = deps.tooltip ?? WINDOW_TITLE;
+
+  const buildContextMenu = (): unknown =>
+    deps.buildMenu([
+      { label: labels.restore, click: () => deps.onRestore() },
+      { type: 'separator' },
+      { label: labels.quit, click: () => deps.onQuit() },
+    ]);
 
   return {
     ensureShown() {
       if (tray && !tray.isDestroyed()) return;
       const instance = deps.createTray(deps.icon);
       instance.setToolTip(tooltip);
-      const menu = deps.buildMenu([
-        { label: `Restore ${WINDOW_TITLE}`, click: () => deps.onRestore() },
-        { type: 'separator' },
-        { label: 'Quit', click: () => deps.onQuit() },
-      ]);
-      instance.setContextMenu(menu);
+      instance.setContextMenu(buildContextMenu());
       instance.on('click', () => deps.onRestore());
       instance.on('double-click', () => deps.onRestore());
       tray = instance;
     },
     isShown() {
       return tray !== undefined && !tray.isDestroyed();
+    },
+    setLabels(nextLabels: TrayLabels) {
+      labels = nextLabels;
+      if (tray && !tray.isDestroyed()) {
+        tray.setContextMenu(buildContextMenu());
+      }
     },
     destroy() {
       if (tray && !tray.isDestroyed()) {

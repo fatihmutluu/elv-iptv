@@ -47,6 +47,7 @@ export {
   noopAppLifecycle,
 } from './ports/app-lifecycle';
 export type {
+  DesktopTrayLabels,
   DesktopWindowPort,
   PopoutDockPayload,
   PopoutLaunchPayload,

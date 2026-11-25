@@ -11,6 +11,7 @@ import {
 import { type ReactElement, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { OpenVideoEngine } from '../ports/video-host';
+import type { MultiViewTileAction } from './multiview-model';
 
 /** Props of {@link MultiViewTileCard}. */
 export interface MultiViewTileCardProps {
@@ -20,6 +21,8 @@ export interface MultiViewTileCardProps {
   readonly isActiveAudio: boolean;
   readonly isTv: boolean;
   readonly tvFocused: boolean;
+  /** Currently focused inline action button when TV D-pad tile-action mode is open on this tile. */
+  readonly focusedAction?: MultiViewTileAction | null | undefined;
   readonly i18n: AppI18n;
   readonly onSelectAudio: (tileId: string) => void;
   readonly onRequestReplace: (tileId: string) => void;
@@ -38,6 +41,7 @@ export function MultiViewTileCard({
   isActiveAudio,
   isTv,
   tvFocused,
+  focusedAction = null,
   i18n,
   onSelectAudio,
   onRequestReplace,
@@ -45,13 +49,14 @@ export function MultiViewTileCard({
 }: MultiViewTileCardProps): ReactElement {
   const theme = useTheme();
   const [hovered, setHovered] = useState(false);
+  const actionModeActive = isTv && tvFocused && focusedAction !== null;
   const showChrome = isTv ? tvFocused : hovered || !isActiveAudio;
   const showActions = isTv ? tvFocused : hovered;
   const pointer = !isTv ? webCursorPointer() : undefined;
   const transition = webTransition(theme, 'border-color, background-color, opacity');
 
   const borderColor = isTv
-    ? tvFocused
+    ? tvFocused && !actionModeActive
       ? theme.colors.focusRingColor
       : isActiveAudio
         ? theme.colors.accent
@@ -63,7 +68,7 @@ export function MultiViewTileCard({
         : theme.colors.glassBorder;
 
   const borderWidth = isTv
-    ? tvFocused
+    ? tvFocused && !actionModeActive
       ? theme.focus.ringWidth
       : isActiveAudio
         ? 2
@@ -71,6 +76,20 @@ export function MultiViewTileCard({
     : isActiveAudio
       ? 2
       : 1;
+
+  const actionButtonStyle = (action: MultiViewTileAction) => {
+    const focused = actionModeActive && focusedAction === action;
+    return [
+      styles.actionBtn,
+      pointer,
+      {
+        backgroundColor: focused ? theme.colors.focusFill : theme.colors.chipBg,
+        borderColor: focused ? theme.colors.focusRingColor : theme.colors.chipBorder,
+        borderWidth: focused ? theme.focus.ringWidth : 1,
+        borderRadius: theme.radius.button,
+      },
+    ];
+  };
 
   const statusText =
     tile.status === 'error'
@@ -180,17 +199,10 @@ export function MultiViewTileCard({
                   testID={`multiview-tile-audio-btn-${index}`}
                   accessibilityRole="button"
                   accessibilityLabel={i18n.t('player.multiView.swapAudio')}
+                  accessibilityState={{ selected: actionModeActive && focusedAction === 'audio' }}
                   focusable={!isTv}
                   onPress={() => onSelectAudio(tile.tileId)}
-                  style={[
-                    styles.actionBtn,
-                    pointer,
-                    {
-                      backgroundColor: theme.colors.chipBg,
-                      borderColor: theme.colors.chipBorder,
-                      borderRadius: theme.radius.button,
-                    },
-                  ]}
+                  style={actionButtonStyle('audio')}
                 >
                   <Icon name="audio" size={14} color={theme.colors.textPrimary} />
                   <Text style={[theme.typography.micro, { color: theme.colors.textPrimary }]}>
@@ -202,17 +214,10 @@ export function MultiViewTileCard({
                 testID={`multiview-tile-replace-btn-${index}`}
                 accessibilityRole="button"
                 accessibilityLabel={i18n.t('player.multiView.replaceChannel')}
+                accessibilityState={{ selected: actionModeActive && focusedAction === 'replace' }}
                 focusable={!isTv}
                 onPress={() => onRequestReplace(tile.tileId)}
-                style={[
-                  styles.actionBtn,
-                  pointer,
-                  {
-                    backgroundColor: theme.colors.chipBg,
-                    borderColor: theme.colors.chipBorder,
-                    borderRadius: theme.radius.button,
-                  },
-                ]}
+                style={actionButtonStyle('replace')}
               >
                 <Icon name="refresh" size={14} color={theme.colors.textPrimary} />
                 <Text style={[theme.typography.micro, { color: theme.colors.textPrimary }]}>
@@ -223,17 +228,10 @@ export function MultiViewTileCard({
                 testID={`multiview-tile-remove-btn-${index}`}
                 accessibilityRole="button"
                 accessibilityLabel={i18n.t('player.multiView.removeTile')}
+                accessibilityState={{ selected: actionModeActive && focusedAction === 'remove' }}
                 focusable={!isTv}
                 onPress={() => onRemove(tile.tileId)}
-                style={[
-                  styles.actionBtn,
-                  pointer,
-                  {
-                    backgroundColor: theme.colors.chipBg,
-                    borderColor: theme.colors.chipBorder,
-                    borderRadius: theme.radius.button,
-                  },
-                ]}
+                style={actionButtonStyle('remove')}
               >
                 <Icon name="close" size={14} color={theme.colors.textPrimary} />
                 <Text style={[theme.typography.micro, { color: theme.colors.textPrimary }]}>

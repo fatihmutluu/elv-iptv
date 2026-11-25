@@ -67,6 +67,7 @@ export interface MobileVideoHostDeps {
     metadata: AetherMediaMetadata | null,
   ) => void;
   readonly setAetherBackgroundAudioEnabled: (engine: PlayerEngine, enabled: boolean) => void;
+  readonly configureAetherMultiView: (engine: PlayerEngine, handleAudioFocus: boolean) => void;
   readonly subscribeAetherRemoteMediaAction: (
     engine: PlayerEngine,
     listener: (action: AetherRemoteMediaAction) => void,
@@ -129,8 +130,12 @@ export function createMobileVideoHost(deps: MobileVideoHostDeps): MobileVideoHos
       const engine = deps.createEngine(toMedia3EngineOptions(options));
       if (engine === null) return null;
 
-      let appleMuted = false;
+      let appleMuted = options?.handleAudioFocus === false;
       const tileCount = options?.multiViewTileCount ?? 1;
+      const isMultiView =
+        options?.replaceExisting === false ||
+        options?.handleAudioFocus !== undefined ||
+        tileCount > 1;
 
       return {
         engine,
@@ -159,6 +164,14 @@ export function createMobileVideoHost(deps: MobileVideoHostDeps): MobileVideoHos
               setMuted: (muted: boolean) => {
                 appleMuted = muted;
                 deps.setAppleEngineMuted(engine, muted);
+                if (isMultiView && muted) {
+                  deps.configureAetherMultiView(engine, false);
+                }
+              },
+              setPrimary: () => {
+                appleMuted = false;
+                deps.setAppleEngineMuted(engine, false);
+                deps.configureAetherMultiView(engine, true);
               },
               setVolume: (volume: number) => deps.setAppleEngineVolume(engine, volume),
               enterPictureInPicture: () => deps.enterAetherPictureInPicture(engine),

@@ -221,7 +221,6 @@ const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
   ['deinterlace-off', 'deinterlace-auto', 'deinterlace-bwdif'],
   ['toggle-pitch-lock'],
   ['toggle-audio-normalization'],
-  ['toggle-auto-enter-pip'],
   ['osd-time-total', 'osd-time-remaining', 'osd-time-endsAt'],
   ['oled-0', 'oled-5', 'oled-10', 'oled-15', 'oled-30'],
   [

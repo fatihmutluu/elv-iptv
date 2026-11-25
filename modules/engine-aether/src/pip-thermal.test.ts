@@ -25,9 +25,10 @@ function fakeNative() {
     stop: vi.fn(),
     recreate: vi.fn(),
     release: vi.fn(),
+    configureMultiView: vi.fn(),
     addListener: vi.fn(() => ({ remove: vi.fn() })),
   };
-  const Engine = vi.fn(function construct() {
+  const Engine = vi.fn(function construct(_options?: unknown) {
     return engine;
   });
   const uptimeMs = vi.fn(() => 0);
@@ -72,6 +73,7 @@ function fakeNative() {
 
   return {
     engine,
+    Engine,
     enterPictureInPicture,
     canStartPictureInPicture,
     setAutoEnterPictureInPicture,
@@ -243,5 +245,45 @@ describe('Apple thermal watchdog and physical memory probe (#232)', () => {
     expect(native.moduleRemove).toHaveBeenCalledTimes(1);
     native.emitModule('onThermalStateChanged', { state: 'critical' });
     expect(states).toHaveLength(5);
+  });
+});
+
+describe('Apple Aether Multi-View audio focus ownership (#34)', () => {
+  it('forwards handleAudioFocus on createAetherEngine and configureAetherMultiView for live owned engines', async () => {
+    const native = fakeNative();
+    const mod = await load();
+
+    const primary = mod.createAetherEngine();
+    expect(primary).not.toBeNull();
+    expect(native.Engine).toHaveBeenNthCalledWith(1);
+
+    const secondary = mod.createAetherEngine({ handleAudioFocus: false });
+    expect(secondary).not.toBeNull();
+    expect(native.Engine).toHaveBeenNthCalledWith(2, { handleAudioFocus: false });
+
+    if (primary === null || secondary === null) throw new Error('engines expected');
+
+    mod.configureAetherMultiView(secondary, true);
+    mod.configureAetherMultiView(primary, false);
+    expect(native.engine.configureMultiView).toHaveBeenNthCalledWith(1, true);
+    expect(native.engine.configureMultiView).toHaveBeenNthCalledWith(2, false);
+
+    // Foreign and released engines are ignored safely
+    const foreign = { release() {} } as unknown as PlayerEngine;
+    mod.configureAetherMultiView(foreign, true);
+    secondary.release();
+    mod.configureAetherMultiView(secondary, false);
+    expect(native.engine.configureMultiView).toHaveBeenCalledTimes(2);
+
+    // Legacy native handle without configureMultiView does not throw
+    const { configureMultiView: _omitted, ...legacyNative } = native.engine;
+    native.Engine.mockImplementationOnce(function constructLegacy() {
+      return legacyNative as typeof native.engine;
+    });
+    const legacy = mod.createAetherEngine({ handleAudioFocus: true });
+    if (legacy === null) throw new Error('legacy expected');
+    expect(() => mod.configureAetherMultiView(legacy, false)).not.toThrow();
+    legacy.release();
+    primary.release();
   });
 });

@@ -3,9 +3,18 @@ import { ok } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import { createConnectionTracker, type ThermalState } from '@elv/playback';
 import { createFakePlayerEngine } from '@elv/playback/testing';
-import { FormFactorProvider, I18nProvider, ThemeProvider, ViewportProvider } from '@elv/ui-kit';
+import {
+  type AndroidKeyEvent,
+  type AndroidKeySource,
+  FormFactorProvider,
+  I18nProvider,
+  RemoteKeysProvider,
+  ThemeProvider,
+  TvRemoteProvider,
+  ViewportProvider,
+} from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import type {
   OpenVideoEngine,
   ThermalDevicePort,
@@ -223,5 +232,173 @@ describe('Wave F6 Multi-View Grid, #221 Connection Clamp & #232 Thermal Watchdog
     expect(openCalls[1]?.releaseSpy).toHaveBeenCalledTimes(1);
 
     await view.unmount();
+  });
+
+  it('replaces and removes Multi-View tiles strictly via TV D-pad remote keys (MEDIUM #5)', async () => {
+    const origOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    const KEYCODE_DPAD_RIGHT = 22;
+    const KEYCODE_DPAD_CENTER = 23;
+    const KEYCODE_MENU = 82;
+    const KEYCODE_BACK = 4;
+
+    const multiRows: readonly ItemRow[] = [
+      ...LIVE_ROWS,
+      {
+        key: 'live:src-2:2',
+        sourceId: 'src-2',
+        kind: 'live',
+        name: 'Beta Documentary',
+        logo: null,
+      } as unknown as ItemRow,
+    ];
+
+    let listener: ((ev: AndroidKeyEvent) => void) | null = null;
+    const androidSource: AndroidKeySource = {
+      addListener(fn) {
+        listener = fn;
+        return {
+          remove() {
+            if (listener === fn) listener = null;
+          },
+        };
+      },
+    };
+    const sendKey = async (keyCode: number) => {
+      await act(async () => {
+        listener?.({ keyCode, action: 'down', canceled: false, ageMs: 0 });
+        listener?.({ keyCode, action: 'up', canceled: false, ageMs: 0 });
+      });
+    };
+
+    const tracker = createConnectionTracker();
+    const videoHost: VideoHost = {
+      supportsMultiView: true,
+      open: (): OpenVideoEngine => ({
+        engine: createFakePlayerEngine({
+          now: () => performance.now(),
+          schedule: (fn, ms) => setTimeout(fn, ms),
+          cancel: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+        }),
+        renderSurface: ({ testID }) => <View testID={testID ?? 'mv-surface'} />,
+        setMuted: jest.fn(),
+        setPrimary: jest.fn(),
+      }),
+    };
+    const thermalDevice: ThermalDevicePort = {
+      getThermalState: () => 'nominal',
+      subscribeThermalState: () => () => undefined,
+      getMultiViewCapabilities: () => ({
+        platform: 'android',
+        totalMemoryBytes: 4 * 1024 * 1024 * 1024,
+        supported: true,
+      }),
+    };
+    const catalog = {
+      ...makeCatalog(),
+      allSourcesItems: async () => [...multiRows],
+    };
+    const onExit = jest.fn();
+
+    let view: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      view = await render(
+        <RemoteKeysProvider android={androidSource}>
+          <TvRemoteProvider>
+            <FormFactorProvider value="tv">
+              <ViewportProvider
+                value={{
+                  formFactor: 'tv',
+                  inputModality: 'tv',
+                  orientation: 'landscape',
+                  width: 1920,
+                  height: 1080,
+                }}
+              >
+                <I18nProvider i18n={createAppI18n('en')}>
+                  <ThemeProvider preset="obsidianCrimson">
+                    <MultiViewStage
+                      catalog={catalog}
+                      videoHost={videoHost}
+                      tracker={tracker}
+                      sources={SOURCES}
+                      thermalDevice={thermalDevice}
+                      initialSeed={{
+                        itemKey: 'live:src-1:1',
+                        sourceId: 'src-1',
+                        title: 'Alpha News',
+                        kind: 'live',
+                      }}
+                      onExit={onExit}
+                    />
+                  </ThemeProvider>
+                </I18nProvider>
+              </ViewportProvider>
+            </FormFactorProvider>
+          </TvRemoteProvider>
+        </RemoteKeysProvider>,
+      );
+
+      await waitFor(() => expect(screen.getByTestId('multiview-tile-0')).toBeTruthy());
+
+      // Move right to empty slot -> press select to open channel picker -> select Beta Cinema (src-2)
+      await sendKey(KEYCODE_DPAD_RIGHT);
+      await sendKey(KEYCODE_DPAD_CENTER);
+      await waitFor(() => expect(screen.getByTestId('multiview-channel-picker')).toBeTruthy());
+      // Index 0 is Alpha Sports (src-1, max=1 blocked), move down to Beta Cinema (src-2)
+      await act(async () => {
+        listener?.({ keyCode: 20, action: 'down', canceled: false, ageMs: 0 });
+        listener?.({ keyCode: 20, action: 'up', canceled: false, ageMs: 0 });
+      });
+      await sendKey(KEYCODE_DPAD_CENTER);
+      await waitFor(() => expect(screen.getByTestId('multiview-tile-1')).toBeTruthy());
+      expect(screen.getByTestId('multiview-tile-title-1').props.children).toBe('Beta Cinema');
+
+      // Tile 1 (index 1) is currently focused (non-active audio: actions = [audio, replace, remove]).
+      // Press MENU -> enters inline tile-action focus bar on Tile 1; BACK closes bar without exiting stage!
+      await sendKey(KEYCODE_MENU);
+      await waitFor(() => {
+        const audioBtn = screen.getByTestId('multiview-tile-audio-btn-1');
+        expect(audioBtn.props.accessibilityState?.selected).toBe(true);
+      });
+      await sendKey(KEYCODE_BACK);
+      expect(onExit).not.toHaveBeenCalled();
+
+      // Press MENU again -> RIGHT to Replace -> verify focus ring -> SELECT opens picker -> replace with Beta Documentary!
+      await sendKey(KEYCODE_MENU);
+      await sendKey(KEYCODE_DPAD_RIGHT);
+      const replaceBtn = screen.getByTestId('multiview-tile-replace-btn-1');
+      expect(replaceBtn.props.accessibilityState?.selected).toBe(true);
+      const replaceStyle = StyleSheet.flatten(replaceBtn.props.style);
+      expect(replaceStyle.borderWidth).toBeGreaterThanOrEqual(2);
+
+      await sendKey(KEYCODE_DPAD_CENTER);
+      await waitFor(() => expect(screen.getByTestId('multiview-channel-picker')).toBeTruthy());
+      // Candidates exclude Alpha News & Beta Cinema -> [Alpha Sports, Beta Documentary]; move down to Beta Documentary
+      await act(async () => {
+        listener?.({ keyCode: 20, action: 'down', canceled: false, ageMs: 0 });
+        listener?.({ keyCode: 20, action: 'up', canceled: false, ageMs: 0 });
+      });
+      await sendKey(KEYCODE_DPAD_CENTER);
+      await waitFor(() =>
+        expect(screen.getByTestId('multiview-tile-title-1').props.children).toBe(
+          'Beta Documentary',
+        ),
+      );
+
+      // Press MENU -> RIGHT -> RIGHT to Remove -> SELECT removes Tile 1 strictly via TV D-pad!
+      await sendKey(KEYCODE_MENU);
+      await sendKey(KEYCODE_DPAD_RIGHT);
+      await sendKey(KEYCODE_DPAD_RIGHT);
+      expect(
+        screen.getByTestId('multiview-tile-remove-btn-1').props.accessibilityState?.selected,
+      ).toBe(true);
+      await sendKey(KEYCODE_DPAD_CENTER);
+      await waitFor(() => expect(screen.queryByTestId('multiview-tile-1')).toBeNull());
+      expect(onExit).not.toHaveBeenCalled();
+    } finally {
+      await view?.unmount();
+      Object.defineProperty(Platform, 'OS', { value: origOs, configurable: true });
+    }
   });
 });

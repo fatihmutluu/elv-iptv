@@ -4,10 +4,13 @@ import {
   isMinimizeToTrayFlag,
   isPopoutDockPayload,
   isPopoutLaunchPayload,
+  isTrayLabels,
   type PopoutDockPayload,
   type PopoutLaunchPayload,
   sanitizePopoutDockPayload,
   sanitizePopoutLaunchPayload,
+  sanitizeTrayLabels,
+  type TrayLabels,
   WINDOW_CHANNELS,
 } from '../shared/window-ipc.ts';
 
@@ -52,7 +55,7 @@ export interface WindowIpcDeps {
   ipcMain: WindowIpcMainLike;
   getWindowFromSender(sender: unknown): AlwaysOnTopWindowLike | null | undefined;
   onSetAspectRatioLock?(win: AlwaysOnTopWindowLike, enabled: boolean): void;
-  onSetMinimizeToTray?(enabled: boolean): boolean;
+  onSetMinimizeToTray?(enabled: boolean, labels?: TrayLabels): boolean;
   getMinimizeToTray?(): boolean;
   onOpenPopout?(payload: PopoutLaunchPayload): Promise<boolean> | boolean;
   onClosePopout?(): Promise<void> | void;
@@ -148,12 +151,20 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     return enabled;
   });
 
-  ipcMain.handle(WINDOW_CHANNELS.setMinimizeToTray, (_event, enabled) => {
+  ipcMain.handle(WINDOW_CHANNELS.setMinimizeToTray, (_event, enabled, rawLabels) => {
     if (!isMinimizeToTrayFlag(enabled)) {
       log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.setMinimizeToTray} payload`);
       return deps.getMinimizeToTray?.() ?? false;
     }
-    return deps.onSetMinimizeToTray ? deps.onSetMinimizeToTray(enabled) : enabled;
+    let labels: TrayLabels | undefined;
+    if (rawLabels !== undefined) {
+      if (!isTrayLabels(rawLabels)) {
+        log?.(`window ipc: dropped invalid ${WINDOW_CHANNELS.setMinimizeToTray} tray labels`);
+        return deps.getMinimizeToTray?.() ?? false;
+      }
+      labels = sanitizeTrayLabels(rawLabels);
+    }
+    return deps.onSetMinimizeToTray ? deps.onSetMinimizeToTray(enabled, labels) : enabled;
   });
 
   ipcMain.handle(WINDOW_CHANNELS.openPopout, async (_event, payload) => {

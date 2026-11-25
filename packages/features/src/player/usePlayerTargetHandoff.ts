@@ -58,6 +58,7 @@ export interface PlayerTargetHandoffParams {
   liveChannelSwitchModeRef?: MutableRefObject<LiveChannelSwitchModePref>;
   resolvedNextEpisodeRef?: MutableRefObject<PlayableEntry | undefined>;
   backgroundAudioPlaybackRef?: MutableRefObject<boolean>;
+  onRegisterStopActivePlayer?: ((stop: (() => Promise<void>) | null) => void) | undefined;
 }
 
 /**
@@ -85,6 +86,7 @@ export function usePlayerTargetHandoff({
   liveChannelSwitchModeRef,
   resolvedNextEpisodeRef,
   backgroundAudioPlaybackRef,
+  onRegisterStopActivePlayer,
 }: PlayerTargetHandoffParams) {
   const [activeTarget, setActiveTarget] = useState<PlayTarget>(target);
   const [previewTarget, setPreviewTarget] = useState<PlayTarget | null>(null);
@@ -529,17 +531,19 @@ export function usePlayerTargetHandoff({
     };
   }, [cancelPendingResume, flushProgressRef]);
 
+  const stopSession = useCallback((): Promise<void> => {
+    cancelPendingResume();
+    vodResumeMsRef.current = undefined;
+    zapController.reset(activeTargetRef.current.playlist?.currentIndex ?? 0);
+    resumeOnActiveRef.current = false;
+    return Promise.resolve(serviceRef.current?.stop());
+  }, [cancelPendingResume, serviceRef, zapController]);
+
   useEffect(() => {
     mountedRef.current = true;
     const unregGuard = playbackGuard?.registerSession?.({
       getSourceId: () => activeTargetRef.current.sourceId,
-      stop: () => {
-        cancelPendingResume();
-        vodResumeMsRef.current = undefined;
-        zapController.reset(activeTargetRef.current.playlist?.currentIndex ?? 0);
-        resumeOnActiveRef.current = false;
-        serviceRef.current?.stop();
-      },
+      stop: stopSession,
     });
     return () => {
       mountedRef.current = false;
@@ -548,7 +552,13 @@ export function usePlayerTargetHandoff({
       zapController.reset(activeTargetRef.current.playlist?.currentIndex ?? 0);
       unregGuard?.();
     };
-  }, [cancelPendingResume, playbackGuard, serviceRef, zapController]);
+  }, [playbackGuard, stopSession, zapController]);
+
+  useEffect(() => {
+    if (onRegisterStopActivePlayer === undefined) return;
+    onRegisterStopActivePlayer(stopSession);
+    return () => onRegisterStopActivePlayer(null);
+  }, [onRegisterStopActivePlayer, stopSession]);
 
   useEffect(() => {
     const nextIdentity = targetIdentityKey(target);

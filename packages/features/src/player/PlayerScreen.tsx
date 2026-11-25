@@ -121,6 +121,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onExpandMiniPlayer,
     onEnterMultiView,
     onPopoutPlayer,
+    onRegisterStopActivePlayer,
   } = props;
   const formFactor = useFormFactor();
   const i18n = useI18n();
@@ -179,6 +180,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     liveChannelSwitchModeRef: switchModeRef,
     resolvedNextEpisodeRef,
     backgroundAudioPlaybackRef: backgroundAudioRef,
+    onRegisterStopActivePlayer,
   });
   reloadActiveTargetRef.current = handoff.reloadActiveTarget;
   const { activeTarget, previewTarget, zapBy, jumpToChannel } = handoff;

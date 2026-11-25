@@ -27,6 +27,7 @@ interface AppShellPlayerViewProps {
   readonly onEnterMultiView?: (target: PlayTarget) => void;
   readonly onPopoutPlayer?: (target: PlayTarget, positionMs?: number) => void;
   readonly onPlaybackActiveChange: (active: boolean) => void;
+  readonly onRegisterStopActivePlayer?: (stop: (() => Promise<void>) | null) => void;
   readonly onTargetChange: (next: PlayTarget) => void;
   readonly onExit: () => void;
 }
@@ -47,6 +48,7 @@ function AppShellPlayerView({
   onExpandMiniPlayer,
   onEnterMultiView,
   onPopoutPlayer,
+  onRegisterStopActivePlayer,
   onPlaybackActiveChange,
   onTargetChange,
   onExit,
@@ -138,6 +140,7 @@ function AppShellPlayerView({
       {...(onExpandMiniPlayer !== undefined ? { onExpandMiniPlayer } : {})}
       {...(onEnterMultiView !== undefined ? { onEnterMultiView } : {})}
       {...(onPopoutPlayer !== undefined ? { onPopoutPlayer } : {})}
+      {...(onRegisterStopActivePlayer !== undefined ? { onRegisterStopActivePlayer } : {})}
       liveChannelSwitchMode={prefs.liveChannelSwitchMode}
       onTargetChange={onTargetChange}
       onExit={onExit}
@@ -160,6 +163,7 @@ export interface AppShellPlayerHostProps {
   readonly externalOverlayOpen: boolean;
   readonly crashProps: Omit<ComponentProps<typeof CrashRecoveryBoundary>, 'resetKey' | 'children'>;
   readonly onPlaybackActiveChange: (active: boolean) => void;
+  readonly onRegisterStopActivePlayer?: (stop: (() => Promise<void>) | null) => void;
   readonly onTargetChange: (next: PlayTarget) => void;
   readonly onExit: () => void;
 }
@@ -205,6 +209,9 @@ export function AppShellPlayerHost(p: AppShellPlayerHostProps): ReactElement | n
           onExpandMiniPlayer={modes.expandMiniPlayer}
           onEnterMultiView={modes.enterMultiView}
           {...(modes.popoutPlayer !== undefined ? { onPopoutPlayer: modes.popoutPlayer } : {})}
+          {...(p.onRegisterStopActivePlayer !== undefined
+            ? { onRegisterStopActivePlayer: p.onRegisterStopActivePlayer }
+            : {})}
           onPlaybackActiveChange={p.onPlaybackActiveChange}
           onTargetChange={p.onTargetChange}
           onExit={p.onExit}

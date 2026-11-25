@@ -471,4 +471,62 @@ describe('multiview-controller (#34, #221, #232)', () => {
     clearGate.resolve();
     await clearPromise;
   });
+
+  it('removes oldTile, promotes remaining tile audio, notifies subscribers, and releases tracker slot if awaitClose rejects in replaceTile', async () => {
+    const tracker = createConnectionTracker();
+    const ctrl = createMultiViewController({
+      capabilities: { platform: 'desktop' },
+      tracker,
+    });
+
+    const t1 = ctrl.addTile({
+      itemKey: 'ch-1',
+      title: 'Ch 1',
+      sourceId: 's1',
+      accountKey: 'acct-1',
+      maxConnections: 1,
+    });
+    const t2 = ctrl.addTile({
+      itemKey: 'ch-2',
+      title: 'Ch 2',
+      sourceId: 's2',
+      accountKey: 'acct-2',
+      maxConnections: 1,
+    });
+    expect(t1.ok && t2.ok).toBe(true);
+    if (!t1.ok || !t2.ok) return;
+
+    const observedInNotify: { tileIds: string[]; acct1Count: number }[] = [];
+    ctrl.subscribe((state) => {
+      observedInNotify.push({
+        tileIds: state.tiles.map((t) => t.tileId),
+        acct1Count: tracker.activeCount('acct-1'),
+      });
+    });
+
+    await expect(
+      ctrl.replaceTile(
+        t1.tile.tileId,
+        {
+          itemKey: 'ch-3',
+          title: 'Ch 3',
+          sourceId: 's1',
+          accountKey: 'acct-1',
+          maxConnections: 1,
+        },
+        async () => {
+          throw new Error('close failed');
+        },
+      ),
+    ).rejects.toThrow('close failed');
+
+    expect(tracker.activeCount('acct-1')).toBe(0);
+    expect(tracker.activeCount('acct-2')).toBe(1);
+    const state = ctrl.getState();
+    expect(state.tiles).toHaveLength(1);
+    expect(state.tiles[0]?.tileId).toBe(t2.tile.tileId);
+    expect(state.tiles[0]?.muted).toBe(false);
+    expect(state.activeAudioTileId).toBe(t2.tile.tileId);
+    expect(observedInNotify).toEqual([{ tileIds: [t2.tile.tileId], acct1Count: 0 }]);
+  });
 });

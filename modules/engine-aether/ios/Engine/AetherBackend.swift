@@ -98,6 +98,7 @@ final class AetherBackend: PlayerBackend {
   var requestedSubtitleDelaySeconds: Double = 0
   var requestedVideoQualityCap: VideoQualityCap?
   var backgroundAudioEnabled = false
+  var handleAudioFocus: Bool
   var desiredMuted = false
   var desiredVolume: Float = 1.0
   var lastAVBufferReportedBuffering = false
@@ -105,9 +106,11 @@ final class AetherBackend: PlayerBackend {
   var lastDroppedVideoFrames = 0
   var lastLiveSeekableWindow: LiveSeekableWindow?
 
-  init(gate: ConnectionGate, httpSession: EngineHttpSession) {
+  init(gate: ConnectionGate, httpSession: EngineHttpSession, handleAudioFocus: Bool = true) {
     self.gate = gate
     self.httpSession = httpSession
+    self.handleAudioFocus = handleAudioFocus
+    self.desiredMuted = !handleAudioFocus
     self.audioSessionObserver = AetherAudioSessionObserver { [weak self] event in
       self?.handleAudioSessionEvent(event)
     }
@@ -115,6 +118,17 @@ final class AetherBackend: PlayerBackend {
       self?.handleAirPlayServicesUpdated(services)
     }
     _ = try? installFreshEngine()
+  }
+
+  /// Updates Multi-View primary audio-focus ownership on this backend (`#34`).
+  func setHandleAudioFocus(_ enabled: Bool) {
+    handleAudioFocus = enabled
+    if enabled {
+      if activeLoadSerial > 0 || playbackActiveIntent {
+        audioSessionController.activateForPlayback(handleAudioFocus: true)
+      }
+      syncAirPlayState()
+    }
   }
 
   func bindPlayerView(_ view: AetherPlayerView?) {
@@ -193,7 +207,7 @@ final class AetherBackend: PlayerBackend {
     airPlayTracker.updateExternalPlayback(active: isExternal)
     syncAirPlayState()
     audioSessionPolicy.clearLatchesOnUserPlay()
-    audioSessionController.activateForPlayback()
+    audioSessionController.activateForPlayback(handleAudioFocus: handleAudioFocus)
 
     runMediaLoad(plan: plan, fallbackOptions: options, serial: serial, currentEngine: currentEngine)
     if isExternal {
@@ -225,7 +239,7 @@ final class AetherBackend: PlayerBackend {
       playbackActiveIntent = true
     }
     audioSessionPolicy.clearLatchesOnUserPlay()
-    audioSessionController.activateForPlayback()
+    audioSessionController.activateForPlayback(handleAudioFocus: handleAudioFocus)
     engine?.play()
   }
 
@@ -527,7 +541,7 @@ final class AetherBackend: PlayerBackend {
     case .resume:
       guard serial > 0 else { return }
       playbackActiveIntent = true
-      audioSessionController.activateForPlayback()
+      audioSessionController.activateForPlayback(handleAudioFocus: handleAudioFocus)
       engine?.play()
     }
   }

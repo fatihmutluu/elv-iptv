@@ -6,6 +6,7 @@ import {
   isPopoutLaunchPayload,
   type PopoutDockPayload,
   type PopoutLaunchPayload,
+  type TrayLabels,
   WINDOW_CHANNELS,
   type WindowBridge,
 } from '../shared/window-ipc.ts';
@@ -50,8 +51,11 @@ export function createWindowBridge(ipc: WindowIpcRendererLike): WindowBridge {
       }
       return reply;
     },
-    async setMinimizeToTray(enabled: boolean): Promise<boolean> {
-      const reply = await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, enabled);
+    async setMinimizeToTray(enabled: boolean, labels?: TrayLabels): Promise<boolean> {
+      const reply =
+        labels === undefined
+          ? await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, enabled)
+          : await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, enabled, labels);
       if (!isMinimizeToTrayFlag(reply)) {
         throw new Error('window:set-minimize-to-tray returned an unexpected reply');
       }

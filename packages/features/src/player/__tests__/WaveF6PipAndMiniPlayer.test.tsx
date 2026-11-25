@@ -10,7 +10,7 @@ import {
   ViewportProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../../ports/play-target';
 import type { OpenVideoEngine, VideoHost, VideoSurfaceProps } from '../../ports/video-host';
 import { computeMiniPlayerFrame } from '../FloatingMiniPlayerChrome';
@@ -326,6 +326,40 @@ describe('Wave F6 OS Picture-in-Picture (#34) & Floating Corner Mini-Player (#23
     expect(screen.queryByTestId('player-tv-focus-anchor')).toBeNull();
     expect(screen.getByTestId('player-surface-host').props.focusable).toBe(false);
     expect(surfaceProps[surfaceProps.length - 1]?.osdVisible).toBe(false);
+
+    // Expand & Close buttons meet >= 40x40px touch target and render crisp focusRingColor on TV focus (MEDIUM #6)
+    const expandBtn = screen.getByTestId('mini-player-expand');
+    const closeBtn = screen.getByTestId('mini-player-close');
+    const expandIdleStyle = StyleSheet.flatten(expandBtn.props.style);
+    const closeIdleStyle = StyleSheet.flatten(closeBtn.props.style);
+    expect(
+      Math.max(Number(expandIdleStyle.width ?? 0), Number(expandIdleStyle.minWidth ?? 0)),
+    ).toBeGreaterThanOrEqual(40);
+    expect(
+      Math.max(Number(expandIdleStyle.height ?? 0), Number(expandIdleStyle.minHeight ?? 0)),
+    ).toBeGreaterThanOrEqual(40);
+    expect(
+      Math.max(Number(closeIdleStyle.width ?? 0), Number(closeIdleStyle.minWidth ?? 0)),
+    ).toBeGreaterThanOrEqual(40);
+    expect(
+      Math.max(Number(closeIdleStyle.height ?? 0), Number(closeIdleStyle.minHeight ?? 0)),
+    ).toBeGreaterThanOrEqual(40);
+
+    await fireEvent(expandBtn, 'focus');
+    const expandFocusedStyle = StyleSheet.flatten(
+      screen.getByTestId('mini-player-expand').props.style,
+    );
+    expect(expandFocusedStyle.borderColor).not.toBe(expandIdleStyle.borderColor);
+    expect(expandFocusedStyle.borderWidth).toBeGreaterThanOrEqual(2);
+    await fireEvent(screen.getByTestId('mini-player-expand'), 'blur');
+
+    await fireEvent(closeBtn, 'focus');
+    const closeFocusedStyle = StyleSheet.flatten(
+      screen.getByTestId('mini-player-close').props.style,
+    );
+    expect(closeFocusedStyle.borderColor).not.toBe(closeIdleStyle.borderColor);
+    expect(closeFocusedStyle.borderWidth).toBeGreaterThanOrEqual(2);
+    await fireEvent(screen.getByTestId('mini-player-close'), 'blur');
 
     // Expand & Close actions work cleanly
     await fireEvent.press(screen.getByTestId('mini-player-expand'));

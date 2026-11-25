@@ -169,3 +169,24 @@ export function moveMultiViewGridFocus(
   if (key === 'up') return Math.max(0, clamped - 2);
   return clamped;
 }
+
+/** Inline tile actions reachable via TV D-pad action focus mode (`#34`). */
+export type MultiViewTileAction = 'audio' | 'replace' | 'remove';
+
+/** Ordered inline tile actions rendered for a Multi-View tile (`Swap Audio` omitted on the active-audio tile). */
+export function getMultiViewTileActions(isActiveAudio: boolean): readonly MultiViewTileAction[] {
+  return isActiveAudio ? ['replace', 'remove'] : ['audio', 'replace', 'remove'];
+}
+
+/** Moves TV D-pad focus horizontally within a tile's inline action bar. */
+export function moveMultiViewTileActionFocus(
+  currentIndex: number,
+  actionCount: number,
+  key: KeyEvent['key'],
+): number {
+  if (actionCount <= 0) return 0;
+  const clamped = Math.max(0, Math.min(actionCount - 1, currentIndex));
+  if (key === 'right') return Math.min(actionCount - 1, clamped + 1);
+  if (key === 'left') return Math.max(0, clamped - 1);
+  return clamped;
+}

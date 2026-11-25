@@ -269,13 +269,9 @@ extension AetherPipController: AVPictureInPictureControllerDelegate {
     _ pictureInPictureController: AVPictureInPictureController,
     restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
   ) {
-    if Thread.isMainThread {
-      completionHandler(true)
-    } else {
-      DispatchQueue.main.async {
-        completionHandler(true)
-      }
-    }
+    // AVKit invokes delegate callbacks on the main thread; complete synchronously without
+    // capturing non-@Sendable completionHandler inside a @Sendable DispatchQueue closure.
+    completionHandler(true)
   }
 }
 #else

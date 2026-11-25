@@ -95,6 +95,15 @@ describe('createWindowBridge (#408)', () => {
     expect(await bridge.setMinimizeToTray(true)).toBe(true);
     expect(fake.invoke).toHaveBeenLastCalledWith(WINDOW_CHANNELS.setMinimizeToTray, true);
 
+    fake.invoke.mockResolvedValueOnce(true);
+    expect(
+      await bridge.setMinimizeToTray(true, { restore: 'Restore ELV IPTV', quit: 'Quit' }),
+    ).toBe(true);
+    expect(fake.invoke).toHaveBeenLastCalledWith(WINDOW_CHANNELS.setMinimizeToTray, true, {
+      restore: 'Restore ELV IPTV',
+      quit: 'Quit',
+    });
+
     const launch = { itemKey: 'live:s1:1', kind: 'live' as const, title: 'News' };
     fake.invoke.mockResolvedValueOnce(true);
     expect(await bridge.openPopout(launch)).toBe(true);

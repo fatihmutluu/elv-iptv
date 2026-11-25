@@ -7,14 +7,17 @@ final class EngineObject: SharedObject, @unchecked Sendable {
   private let gate = ConnectionGate(forceCloseAfterMs: 1_000, settleAfterCloseMs: 25)
   private let httpSession = EngineHttpSession()
   private let initialAutoEnterPip: Bool
+  private let initialHandleAudioFocus: Bool
   private let onDisposed: @Sendable (EngineObject) -> Void
   @MainActor private var driver: EngineMainDriver?
 
   init(
     initialAutoEnterPip: Bool = false,
+    handleAudioFocus: Bool = true,
     onDisposed: @escaping @Sendable (EngineObject) -> Void = { _ in }
   ) {
     self.initialAutoEnterPip = initialAutoEnterPip
+    self.initialHandleAudioFocus = handleAudioFocus
     self.onDisposed = onDisposed
     super.init()
     enqueueMain { [weak self] in
@@ -130,6 +133,14 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     enqueueMain { [weak self] in
       guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
       driver.setMediaMetadata(metadata)
+    }
+  }
+
+  func configureMultiView(handleAudioFocus: Bool) {
+    guard !fence.isDisposedNow else { return }
+    enqueueMain { [weak self] in
+      guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
+      driver.configureMultiView(handleAudioFocus: handleAudioFocus)
     }
   }
 
@@ -286,7 +297,12 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     if let driver {
       return driver
     }
-    let created = EngineMainDriver(owner: self, gate: gate, httpSession: httpSession)
+    let created = EngineMainDriver(
+      owner: self,
+      gate: gate,
+      httpSession: httpSession,
+      handleAudioFocus: initialHandleAudioFocus
+    )
     if initialAutoEnterPip {
       _ = created.setAutoEnterPictureInPicture(true)
     }

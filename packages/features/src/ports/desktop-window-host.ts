@@ -21,9 +21,18 @@ export interface PopoutDockPayload {
   readonly positionMs?: number;
 }
 
+/** Localized context menu labels for the desktop system tray (`#158`). */
+export interface DesktopTrayLabels {
+  readonly restore: string;
+  readonly quit: string;
+}
+
 /** Desktop shell window port for persistent minimize-to-tray and standalone popout playback (`#158`). */
 export interface DesktopWindowPort {
-  readonly setMinimizeToTray?: (enabled: boolean) => Promise<void> | void;
+  readonly setMinimizeToTray?: (
+    enabled: boolean,
+    labels?: DesktopTrayLabels,
+  ) => Promise<void> | void;
   readonly openPopout?: (payload: PopoutLaunchPayload) => Promise<boolean>;
   readonly closePopout?: () => Promise<void> | void;
   readonly onPopoutDocked?: (listener: (payload: PopoutDockPayload) => void) => () => void;

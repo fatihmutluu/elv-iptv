@@ -263,6 +263,29 @@ internal class PlayerFactory(
   }
 }
 
+/**
+ * Updates [ExoPlayer] audio-focus handling for Multi-View promotion/demotion without rebuilding the player (`#34`),
+ * falling back to `handleAudioFocus = false` if firmware throws `SecurityException` on `TAKE_AUDIO_FOCUS`.
+ */
+@OptIn(UnstableApi::class)
+internal fun applyMultiViewAudioFocus(
+  player: ExoPlayer,
+  desiredFocus: Boolean,
+  factory: PlayerFactory,
+): Boolean {
+  if (desiredFocus && factory.audioFocusAllowed) {
+    try {
+      player.setAudioAttributes(STREAM_AUDIO_ATTRIBUTES, true)
+      return true
+    } catch (e: SecurityException) {
+      Log.w(TAG, "TAKE_AUDIO_FOCUS denied (${e.javaClass.simpleName}); falling back to handleAudioFocus=false")
+      factory.disableAudioFocus()
+    }
+  }
+  player.setAudioAttributes(STREAM_AUDIO_ATTRIBUTES, false)
+  return false
+}
+
 @OptIn(UnstableApi::class)
 private class TrackingRenderersFactory(
   private val delegate: RenderersFactory,

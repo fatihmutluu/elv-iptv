@@ -153,6 +153,13 @@ struct MediaMetadataArgs: Record {
   }
 }
 
+/// Optional initial Multi-View engine configuration passed to `new Engine(options)` (`#34`).
+struct AetherEngineOptionsArgs: Record {
+  @Field var handleAudioFocus: Bool? = nil
+
+  init() {}
+}
+
 private struct WeakEngineRef {
   weak var value: EngineObject?
 }
@@ -312,9 +319,13 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
     }
 
     Class("Engine", EngineObject.self) {
-      Constructor { () -> EngineObject in
+      Constructor { (options: AetherEngineOptionsArgs?) -> EngineObject in
         let initialAutoEnterPip = self.enginesLock.withLock { self.autoEnterPipEnabled }
-        let instance = EngineObject(initialAutoEnterPip: initialAutoEnterPip) { [weak self] disposed in
+        let handleAudioFocus = options?.handleAudioFocus ?? true
+        let instance = EngineObject(
+          initialAutoEnterPip: initialAutoEnterPip,
+          handleAudioFocus: handleAudioFocus
+        ) { [weak self] disposed in
           self?.unregister(disposed)
         }
         self.register(instance)
@@ -363,6 +374,10 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
 
       Function("setMediaMetadata") { (engine: EngineObject, args: MediaMetadataArgs?) in
         engine.setMediaMetadata(args?.toNowPlayingMetadata())
+      }
+
+      Function("configureMultiView") { (engine: EngineObject, handleAudioFocus: Bool) in
+        engine.configureMultiView(handleAudioFocus: handleAudioFocus)
       }
 
       Function("selectAudioTrack") { (engine: EngineObject, attempt: Int, id: String) in

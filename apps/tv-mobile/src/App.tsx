@@ -2,6 +2,7 @@ import { type CatalogService, createCoalescedCatalog } from '@elv/data';
 import {
   type AppleSafeAreaInsets,
   canStartAetherPictureInPicture,
+  configureAetherMultiView,
   enterAetherPictureInPicture,
   getAppleDeviceModel,
   getApplePhysicalMemoryBytes,
@@ -191,6 +192,7 @@ function AppRoot() {
         subscribeAndroidPictureInPicture,
         setAetherMediaMetadata,
         setAetherBackgroundAudioEnabled,
+        configureAetherMultiView,
         subscribeAetherRemoteMediaAction,
         subscribeAppleHardwareKeys,
         setAppleEngineMuted,

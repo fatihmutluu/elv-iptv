@@ -25,6 +25,7 @@ export interface DesktopVideoHostDeps {
  * alongside full single-player desktop features (`#34`, `#408`).
  */
 export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
+  const mediaSessionOwners = new Set<{ setMediaSessionPrimary(primary: boolean): void }>();
   const resolvePlayerBridge = (): PlayerBridge | undefined =>
     deps && 'playerBridge' in deps
       ? deps.playerBridge
@@ -102,13 +103,31 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
       let offWindowAlwaysOnTop = windowBridge?.onAlwaysOnTopChanged((pinned) => {
         notifyAlwaysOnTop(pinned);
       });
+      const initialPrimary = options?.primary !== false;
+      if (initialPrimary) {
+        for (const owner of mediaSessionOwners) owner.setMediaSessionPrimary(false);
+      }
       const boundEngine = bindDesktopMediaSession(rawEngine, mediaSession, {
+        initialPrimary,
         onTrackStep: (dir) =>
           activeHostKeyListener?.(dir === 'next' ? 'channel-up' : 'channel-down'),
       });
+      const ownerHandle = {
+        setMediaSessionPrimary: (primary: boolean) => boundEngine.setMediaSessionPrimary(primary),
+      };
+      mediaSessionOwners.add(ownerHandle);
+      const promotePrimary = (): void => {
+        for (const owner of mediaSessionOwners) {
+          if (owner !== ownerHandle) owner.setMediaSessionPrimary(false);
+        }
+        ownerHandle.setMediaSessionPrimary(true);
+        rawEngine.setPrimary();
+      };
       const engine = {
         ...boundEngine,
+        setPrimary: promotePrimary,
         release() {
+          mediaSessionOwners.delete(ownerHandle);
           offPresenterOverlay();
           overlayModeListeners.clear();
           offWindowAlwaysOnTop?.();
@@ -147,7 +166,7 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
         },
         toggleMute: () => rawEngine.toggleMute(),
         setMuted: (muted: boolean) => rawEngine.setMuted(muted),
-        setPrimary: () => rawEngine.setPrimary(),
+        setPrimary: promotePrimary,
         setVolume: (volume: number) => rawEngine.setVolume(volume),
         setDeinterlace: (enabled: boolean) => rawEngine.setDeinterlace(enabled),
         setDeinterlaceMode: (mode: DeinterlaceMode) => rawEngine.setDeinterlaceMode(mode),

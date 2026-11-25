@@ -122,19 +122,23 @@ private final class BoundedArtworkDelegate: NSObject, URLSessionDataDelegate, @u
   }
 }
 
-/// `@MainActor` bridge owning `MPNowPlayingInfoCenter` and `MPRemoteCommandCenter` for one `EngineMainDriver` (`#413`).
+/// `@MainActor` bridge owning `MPNowPlayingInfoCenter` and `MPRemoteCommandCenter` for one `EngineMainDriver` (`#413`, `#34`).
 @MainActor
 final class AetherNowPlayingBridge {
   private static let defaultSkipIntervalSeconds: Double = 10.0
   private static let supportedPlaybackRates: [NSNumber] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
   private static let maxArtworkBytes = 4 * 1024 * 1024
+  private static var ownership = NowPlayingOwnershipTracker()
+  private static var nextOwnerId: UInt64 = 0
 
+  private let ownerId: UInt64
   private let infoCenter: MPNowPlayingInfoCenter
   private let commandCenter: MPRemoteCommandCenter
   private let actions: NowPlayingRemoteActions
   private let artworkDelegate: BoundedArtworkDelegate
   private let artworkSession: URLSession
 
+  private var ownsNowPlaying: Bool
   private var policy = NowPlayingPolicy()
   private var commandTokens: [(command: MPRemoteCommand, token: Any)] = []
   private var lastSnapshot: NowPlayingSnapshot?
@@ -145,11 +149,19 @@ final class AetherNowPlayingBridge {
   private var cachedArtwork: MPMediaItemArtwork?
   private var isDisposed = false
 
+  private var isActiveOwner: Bool {
+    ownsNowPlaying && Self.ownership.isCurrentOwner(ownerId)
+  }
+
   init(
     actions: NowPlayingRemoteActions,
+    ownsNowPlaying: Bool = true,
     infoCenter: MPNowPlayingInfoCenter = .default(),
     commandCenter: MPRemoteCommandCenter = .shared()
   ) {
+    Self.nextOwnerId &+= 1
+    self.ownerId = Self.nextOwnerId
+    self.ownsNowPlaying = ownsNowPlaying
     self.actions = actions
     self.infoCenter = infoCenter
     self.commandCenter = commandCenter
@@ -164,25 +176,51 @@ final class AetherNowPlayingBridge {
     self.artworkDelegate = delegate
     self.artworkSession = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
 
-    registerRemoteCommands()
-    applyCapabilities(.disabled)
+    if ownsNowPlaying {
+      Self.ownership.claim(ownerId: ownerId)
+      registerRemoteCommandsIfNeeded()
+      applyCapabilities(.disabled)
+    }
   }
 
-  /// Stores or clears Now Playing metadata; re-evaluates immediately if playback is active.
+  /// Promotes or demotes this engine's ownership of singleton `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter` (`#34`).
+  func setHandleAudioFocus(_ enabled: Bool, playbackState: NowPlayingPlaybackState) {
+    guard !isDisposed else { return }
+    if enabled {
+      ownsNowPlaying = true
+      Self.ownership.claim(ownerId: ownerId)
+      registerRemoteCommandsIfNeeded()
+      policy.resetPlayback()
+      if playbackState.isActive {
+        update(state: playbackState, force: true)
+      } else {
+        applyCapabilities(.disabled)
+      }
+      return
+    }
+    ownsNowPlaying = false
+    _ = Self.ownership.releaseIfOwner(ownerId)
+    policy.resetPlayback()
+    cancelArtworkFetch(clearCache: false)
+    lastSnapshot = nil
+    unregisterRemoteCommands(disableCommands: false)
+  }
+
+  /// Stores or clears Now Playing metadata; re-evaluates immediately if playback is active and this bridge owns focus.
   func setMetadata(_ metadata: NowPlayingMetadata?, playbackState: NowPlayingPlaybackState) {
     guard !isDisposed else { return }
     policy.setMetadata(metadata)
     if metadata == nil {
       cancelArtworkFetch(clearCache: true)
     }
-    if playbackState.isActive {
+    if isActiveOwner, playbackState.isActive {
       update(state: playbackState, force: true)
     }
   }
 
-  /// Evaluates a playback state update against `NowPlayingPolicy` and publishes or clears system state.
+  /// Evaluates a playback state update against `NowPlayingPolicy` and publishes or clears system state when active owner.
   func update(state: NowPlayingPlaybackState, force: Bool = false) {
-    guard !isDisposed else { return }
+    guard !isDisposed, isActiveOwner else { return }
     let nowSeconds = ProcessInfo.processInfo.systemUptime
     switch policy.evaluate(state: state, nowSeconds: nowSeconds, force: force) {
     case .unchanged:
@@ -194,28 +232,37 @@ final class AetherNowPlayingBridge {
     }
   }
 
-  /// Clears active Now Playing info and disables all remote commands while preserving configured metadata.
+  /// Clears active Now Playing info and disables all remote commands while preserving configured metadata,
+  /// strictly when this bridge is the current Now Playing owner.
   func clear() {
     guard !isDisposed else { return }
     policy.resetPlayback()
+    guard isActiveOwner else {
+      cancelArtworkFetch(clearCache: false)
+      lastSnapshot = nil
+      return
+    }
     clearPlaybackState()
   }
 
-  /// Permanently tears down Now Playing info, removes every `MPRemoteCommandCenter` target, and cancels artwork fetches.
+  /// Permanently tears down Now Playing info (only if still the active owner), removes this bridge's
+  /// `MPRemoteCommandCenter` targets, and cancels artwork fetches.
   func dispose() {
     guard !isDisposed else { return }
     isDisposed = true
+    let wasCurrentOwner = ownsNowPlaying && Self.ownership.releaseIfOwner(ownerId)
+    ownsNowPlaying = false
     policy.setMetadata(nil)
     policy.resetPlayback()
-    clearPlaybackState()
+    if wasCurrentOwner {
+      clearPlaybackState()
+    } else {
+      lastSnapshot = nil
+    }
     cancelArtworkFetch(clearCache: true)
     artworkDelegate.cancelAll()
     artworkSession.invalidateAndCancel()
-    for entry in commandTokens {
-      entry.command.removeTarget(entry.token)
-      entry.command.isEnabled = false
-    }
-    commandTokens.removeAll()
+    unregisterRemoteCommands(disableCommands: wasCurrentOwner)
   }
 
   private func clearPlaybackState() {
@@ -281,6 +328,7 @@ final class AetherNowPlayingBridge {
       AetherBackend.onMainActor { [weak self] in
         guard let self,
               !self.isDisposed,
+              self.isActiveOwner,
               self.artworkGeneration == generation,
               self.cachedArtworkUrl == url
         else { return }
@@ -310,7 +358,8 @@ final class AetherNowPlayingBridge {
     }
   }
 
-  private func registerRemoteCommands() {
+  private func registerRemoteCommandsIfNeeded() {
+    guard commandTokens.isEmpty else { return }
     commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: Self.defaultSkipIntervalSeconds)]
     commandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: Self.defaultSkipIntervalSeconds)]
     commandCenter.changePlaybackRateCommand.supportedPlaybackRates = Self.supportedPlaybackRates
@@ -318,7 +367,7 @@ final class AetherNowPlayingBridge {
     register(commandCenter.playCommand) { [weak self] _ in
       guard let self else { return .commandFailed }
       AetherBackend.onMainActor { [weak self] in
-        guard let self, !self.isDisposed else { return }
+        guard let self, !self.isDisposed, self.isActiveOwner else { return }
         self.actions.onPlay()
       }
       return .success
@@ -327,7 +376,7 @@ final class AetherNowPlayingBridge {
     register(commandCenter.pauseCommand) { [weak self] _ in
       guard let self else { return .commandFailed }
       AetherBackend.onMainActor { [weak self] in
-        guard let self, !self.isDisposed else { return }
+        guard let self, !self.isDisposed, self.isActiveOwner else { return }
         self.actions.onPause()
       }
       return .success
@@ -336,7 +385,7 @@ final class AetherNowPlayingBridge {
     register(commandCenter.togglePlayPauseCommand) { [weak self] _ in
       guard let self else { return .commandFailed }
       AetherBackend.onMainActor { [weak self] in
-        guard let self, !self.isDisposed else { return }
+        guard let self, !self.isDisposed, self.isActiveOwner else { return }
         self.actions.onTogglePlayPause()
       }
       return .success
@@ -345,7 +394,7 @@ final class AetherNowPlayingBridge {
     register(commandCenter.stopCommand) { [weak self] _ in
       guard let self else { return .commandFailed }
       AetherBackend.onMainActor { [weak self] in
-        guard let self, !self.isDisposed else { return }
+        guard let self, !self.isDisposed, self.isActiveOwner else { return }
         self.actions.onStop()
       }
       return .success
@@ -356,7 +405,7 @@ final class AetherNowPlayingBridge {
       let raw = (event as? MPSkipIntervalCommandEvent)?.interval ?? Self.defaultSkipIntervalSeconds
       let delta = (raw.isFinite && raw > 0) ? raw : Self.defaultSkipIntervalSeconds
       AetherBackend.onMainActor { [weak self] in
-        guard let self, !self.isDisposed else { return }
+        guard let self, !self.isDisposed, self.isActiveOwner else { return }
         self.actions.onSkipBy(delta)
       }
       return .success
@@ -367,7 +416,7 @@ final class AetherNowPlayingBridge {
       let raw = (event as? MPSkipIntervalCommandEvent)?.interval ?? Self.defaultSkipIntervalSeconds
       let delta = (raw.isFinite && raw > 0) ? raw : Self.defaultSkipIntervalSeconds
       AetherBackend.onMainActor { [weak self] in
-        guard let self, !self.isDisposed else { return }
+        guard let self, !self.isDisposed, self.isActiveOwner else { return }
         self.actions.onSkipBy(-delta)
       }
       return .success
@@ -380,7 +429,7 @@ final class AetherNowPlayingBridge {
       let target = positionEvent.positionTime
       guard target.isFinite else { return .commandFailed }
       AetherBackend.onMainActor { [weak self] in
-        guard let self, !self.isDisposed else { return }
+        guard let self, !self.isDisposed, self.isActiveOwner else { return }
         self.actions.onSeekTo(max(0, target))
       }
       return .success
@@ -393,7 +442,7 @@ final class AetherNowPlayingBridge {
       let rate = Double(rateEvent.playbackRate)
       guard rate.isFinite, rate > 0 else { return .commandFailed }
       AetherBackend.onMainActor { [weak self] in
-        guard let self, !self.isDisposed else { return }
+        guard let self, !self.isDisposed, self.isActiveOwner else { return }
         self.actions.onChangeRate(rate)
       }
       return .success
@@ -402,7 +451,7 @@ final class AetherNowPlayingBridge {
     register(commandCenter.nextTrackCommand) { [weak self] _ in
       guard let self else { return .commandFailed }
       AetherBackend.onMainActor { [weak self] in
-        guard let self, !self.isDisposed else { return }
+        guard let self, !self.isDisposed, self.isActiveOwner else { return }
         self.actions.onNextTrack()
       }
       return .success
@@ -411,11 +460,21 @@ final class AetherNowPlayingBridge {
     register(commandCenter.previousTrackCommand) { [weak self] _ in
       guard let self else { return .commandFailed }
       AetherBackend.onMainActor { [weak self] in
-        guard let self, !self.isDisposed else { return }
+        guard let self, !self.isDisposed, self.isActiveOwner else { return }
         self.actions.onPreviousTrack()
       }
       return .success
     }
+  }
+
+  private func unregisterRemoteCommands(disableCommands: Bool) {
+    for entry in commandTokens {
+      entry.command.removeTarget(entry.token)
+      if disableCommands {
+        entry.command.isEnabled = false
+      }
+    }
+    commandTokens.removeAll()
   }
 
   private func register(

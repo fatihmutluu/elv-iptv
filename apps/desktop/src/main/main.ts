@@ -572,7 +572,10 @@ if (hasLock) {
         aspectRatioLockControllers.get(win as BrowserWindow)?.setEnabled(enabled);
       },
       getMinimizeToTray: () => shellPrefs?.getMinimizeToTray() ?? false,
-      onSetMinimizeToTray: (enabled) => shellPrefs?.setMinimizeToTray(enabled) ?? false,
+      onSetMinimizeToTray: (enabled, labels) => {
+        if (labels) trayController?.setLabels(labels);
+        return shellPrefs?.setMinimizeToTray(enabled) ?? false;
+      },
       onOpenPopout: (payload) =>
         gateQuery === null ? (popoutController?.open(payload) ?? false) : false,
       onClosePopout: () => popoutController?.close(),

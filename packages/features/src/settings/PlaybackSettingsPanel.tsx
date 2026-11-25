@@ -330,7 +330,8 @@ export function PlaybackSettingsPanel({
               onToggle={() => applyPatch({ minimizeToTray: !activePrefs.minimizeToTray })}
             />
           </>
-        ) : (
+        ) : null}
+        {isMobile ? (
           <>
             <SettingsDivider />
             <SettingsToggleRow
@@ -342,10 +343,6 @@ export function PlaybackSettingsPanel({
               isTv={isTv}
               onToggle={() => applyPatch({ autoEnterPip: !activePrefs.autoEnterPip })}
             />
-          </>
-        )}
-        {isMobile ? (
-          <>
             <SettingsDivider />
             <SettingsToggleRow
               testID="settings-playback-toggle-background-audio"

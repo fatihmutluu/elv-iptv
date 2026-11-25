@@ -24,6 +24,8 @@ export interface UseLiveTwoStepPreviewOptions {
   readonly live: Pick<LiveCatalogState, 'tuneChannel' | 'buildPlayTarget'>;
   readonly memoryRef: MutableRefObject<LiveTabMemory>;
   readonly onPlay: (target: PlayTarget) => void;
+  /** Suppresses embedded live previews (e.g. while Floating Mini-Player owns the active stream). */
+  readonly suppressEmbeddedPreview?: boolean;
   readonly videoHost?: VideoHost;
   readonly playbackGuard?: PlaybackGuard;
 }
@@ -50,6 +52,7 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
     live,
     memoryRef,
     onPlay,
+    suppressEmbeddedPreview = false,
     videoHost,
     playbackGuard,
   } = opts;
@@ -91,13 +94,16 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
   }, [activeProfileId, clearTwoStepPreview, parentalUnlocked]);
 
   useEffect(() => {
-    if (!liveOkTwoStepPreview || mode === 'favorites') {
+    if (!liveOkTwoStepPreview || mode === 'favorites' || suppressEmbeddedPreview) {
       clearTwoStepPreview();
     }
-  }, [clearTwoStepPreview, liveOkTwoStepPreview, mode]);
+  }, [clearTwoStepPreview, liveOkTwoStepPreview, mode, suppressEmbeddedPreview]);
 
   const twoStepPreviewActive =
-    liveOkTwoStepPreview && (mode === 'channels' || mode === 'epg') && previewedChannel !== null;
+    !suppressEmbeddedPreview &&
+    liveOkTwoStepPreview &&
+    (mode === 'channels' || mode === 'epg') &&
+    previewedChannel !== null;
   const previewChannel =
     mode === 'favorites'
       ? activeFavoriteChannel
@@ -106,7 +112,7 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
         : null;
 
   const preview = useLiveEmbeddedPreview({
-    enabled: previewChannel !== null,
+    enabled: !suppressEmbeddedPreview && previewChannel !== null,
     activeChannel: previewChannel,
     sources: readySources,
     catalog,

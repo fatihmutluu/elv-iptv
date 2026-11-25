@@ -7,7 +7,7 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
+import { type ReactElement, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 /** Computed `16:9` bottom-right frame dimensions for the floating corner mini-player (`#233`). */
@@ -77,8 +77,25 @@ export function FloatingMiniPlayerChrome({
   onClose,
 }: FloatingMiniPlayerChromeProps): ReactElement {
   const theme = useTheme();
+  const [focusedButton, setFocusedButton] = useState<'expand' | 'close' | null>(null);
   const pointer = !isTv ? webCursorPointer() : undefined;
   const transition = webTransition(theme, 'background-color, border-color, opacity');
+
+  const renderControlStyle = (kind: 'expand' | 'close', pressed: boolean) => {
+    const focused = focusedButton === kind;
+    return [
+      styles.iconButton,
+      transition,
+      pointer,
+      {
+        borderRadius: theme.radius.pill,
+        backgroundColor: focused || pressed ? theme.colors.focusFill : theme.colors.glassBg,
+        borderColor: focused ? theme.colors.focusRingColor : theme.colors.glassBorder,
+        borderWidth: focused ? theme.focus.ringWidth : 1,
+      },
+      webBackdropBlur(12),
+    ];
+  };
 
   return (
     <View testID="mini-player-chrome" pointerEvents="box-none" style={styles.overlay}>
@@ -97,39 +114,25 @@ export function FloatingMiniPlayerChrome({
             testID="mini-player-expand"
             accessibilityRole="button"
             accessibilityLabel={i18n.t('player.miniPlayer.expand')}
+            hitSlop={4}
+            onFocus={() => setFocusedButton('expand')}
+            onBlur={() => setFocusedButton((prev) => (prev === 'expand' ? null : prev))}
             onPress={onExpand}
-            style={({ pressed }) => [
-              styles.iconButton,
-              transition,
-              pointer,
-              {
-                borderRadius: theme.radius.pill,
-                backgroundColor: pressed ? theme.colors.focusFill : theme.colors.glassBg,
-                borderColor: theme.colors.glassBorder,
-              },
-              webBackdropBlur(12),
-            ]}
+            style={({ pressed }) => renderControlStyle('expand', pressed)}
           >
-            <Icon name="fullscreen" size={16} color={theme.colors.textPrimary} />
+            <Icon name="fullscreen" size={18} color={theme.colors.textPrimary} />
           </Pressable>
           <Pressable
             testID="mini-player-close"
             accessibilityRole="button"
             accessibilityLabel={i18n.t('player.miniPlayer.close')}
+            hitSlop={4}
+            onFocus={() => setFocusedButton('close')}
+            onBlur={() => setFocusedButton((prev) => (prev === 'close' ? null : prev))}
             onPress={onClose}
-            style={({ pressed }) => [
-              styles.iconButton,
-              transition,
-              pointer,
-              {
-                borderRadius: theme.radius.pill,
-                backgroundColor: pressed ? theme.colors.focusFill : theme.colors.glassBg,
-                borderColor: theme.colors.glassBorder,
-              },
-              webBackdropBlur(12),
-            ]}
+            style={({ pressed }) => renderControlStyle('close', pressed)}
           >
-            <Icon name="close" size={16} color={theme.colors.textPrimary} />
+            <Icon name="close" size={18} color={theme.colors.textPrimary} />
           </Pressable>
         </View>
       </View>
@@ -206,8 +209,10 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   iconButton: {
-    width: 30,
-    height: 30,
+    width: 40,
+    height: 40,
+    minWidth: 40,
+    minHeight: 40,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',

@@ -27,6 +27,7 @@ function makeDeps(overrides: Partial<MobileVideoHostDeps> = {}): MobileVideoHost
     subscribeAndroidPictureInPicture: vi.fn(() => () => {}),
     setAetherMediaMetadata: vi.fn(),
     setAetherBackgroundAudioEnabled: vi.fn(),
+    configureAetherMultiView: vi.fn(),
     subscribeAetherRemoteMediaAction: vi.fn(() => () => {}),
     subscribeAppleHardwareKeys: vi.fn(() => () => {}),
     setAppleEngineMuted: vi.fn(),
@@ -133,8 +134,41 @@ describe('createMobileVideoHost (#34, #221, #232)', () => {
 
     opened?.setMuted?.(true);
     expect(deps.setAppleEngineMuted).toHaveBeenLastCalledWith(engine, true);
+    expect(deps.configureAetherMultiView).not.toHaveBeenCalled();
     opened?.toggleMute?.();
     expect(deps.setAppleEngineMuted).toHaveBeenLastCalledWith(engine, false);
+  });
+
+  it('wires Apple Multi-View handleAudioFocus, setPrimary, and demotion via setMuted (#34)', () => {
+    const engine = fakeEngine();
+    const deps = makeDeps({
+      os: 'ios',
+      isTV: true,
+      createEngine: vi.fn(() => engine),
+    });
+
+    const host = createMobileVideoHost(deps);
+    const opened = host.open({
+      replaceExisting: false,
+      primary: false,
+      handleAudioFocus: false,
+      multiViewTileCount: 2,
+    });
+    expect(opened).not.toBeNull();
+    expect(deps.createEngine).toHaveBeenCalledWith({
+      handleAudioFocus: false,
+      multiViewTileCount: 2,
+    });
+
+    // Promoting tile to primary unmutes and claims Aether Now Playing / audio focus
+    opened?.setPrimary?.();
+    expect(deps.setAppleEngineMuted).toHaveBeenLastCalledWith(engine, false);
+    expect(deps.configureAetherMultiView).toHaveBeenLastCalledWith(engine, true);
+
+    // Demoting Multi-View tile via setMuted(true) releases Aether Now Playing / audio focus
+    opened?.setMuted?.(true);
+    expect(deps.setAppleEngineMuted).toHaveBeenLastCalledWith(engine, true);
+    expect(deps.configureAetherMultiView).toHaveBeenLastCalledWith(engine, false);
   });
 
   it('returns null from open when createEngine returns null', () => {

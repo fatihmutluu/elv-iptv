@@ -171,6 +171,10 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const handleRegisterStopPreview = useCallback((stop: (() => Promise<void>) | null) => {
     stopEmbeddedPreviewRef.current = stop;
   }, []);
+  const stopActivePlayerRef = useRef<(() => Promise<void>) | null>(null);
+  const handleRegisterStopActivePlayer = useCallback((stop: (() => Promise<void>) | null) => {
+    stopActivePlayerRef.current = stop;
+  }, []);
   const hasProfileOverlay = profile.profilePickerOpen || profile.pinDialog !== null;
   const confirmExitOnBack = preferences.preferences.confirmExitOnBack;
   const confirmExitOnBackRef = useRef(confirmExitOnBack);
@@ -322,7 +326,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     desktopWindow: props.desktopWindow,
     thermalDevice: props.thermalDevice,
     videoHost,
-    playbackGuard,
+    stopActivePlayerRef,
     minimizeToTray: preferences.preferences.minimizeToTray,
     backgroundAudioPlayback: preferences.preferences.backgroundAudioPlayback,
     playTargetRef,
@@ -716,6 +720,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     onOpenChannelManagement={mgmtOverlays.openChannelManager}
                     onOpenGuideManagement={mgmtOverlays.openGuideManager}
                     onRegisterStopPreview={handleRegisterStopPreview}
+                    suppressEmbeddedPreview={playTarget !== null}
                     onChannelsMutated={handleChannelsMutated}
                     reminderVersion={reminderVersion}
                     onReminderChanged={handleReminderChanged}
@@ -739,6 +744,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
               externalOverlayOpen={hasRootOverlay}
               crashProps={crashProps}
               onPlaybackActiveChange={setPlayerPlaybackActive}
+              onRegisterStopActivePlayer={handleRegisterStopActivePlayer}
               onTargetChange={onPlayerTargetChange}
               onExit={onPlayerExit}
             />

@@ -361,4 +361,67 @@ describe('window-ipc (#408)', () => {
 
     dispose();
   });
+
+  it('validates and sanitizes localized tray labels on window:set-minimize-to-tray (LOW #11)', async () => {
+    const ipc = fakeIpcMain();
+    const fw = fakeWindow();
+    const logs: string[] = [];
+    const received: Array<{ enabled: boolean; labels?: { restore: string; quit: string } }> = [];
+    let trayEnabled = false;
+
+    const dispose = registerWindowIpc({
+      ipcMain: ipc.ipcMain,
+      getWindowFromSender: (s) => (s === fw.sender ? fw.win : null),
+      getMinimizeToTray: () => trayEnabled,
+      onSetMinimizeToTray: (enabled, labels) => {
+        trayEnabled = enabled;
+        received.push(labels ? { enabled, labels } : { enabled });
+        return enabled;
+      },
+      log: (line) => logs.push(line),
+    });
+
+    // Valid localized labels are trimmed and forwarded
+    expect(
+      await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, fw.sender, true, {
+        restore: '  ELV IPTV Geri Yükle  ',
+        quit: ' Çıkış ',
+      }),
+    ).toBe(true);
+    expect(received).toEqual([
+      { enabled: true, labels: { restore: 'ELV IPTV Geri Yükle', quit: 'Çıkış' } },
+    ]);
+
+    // Malformed labels (extra keys, control chars, empty, oversized) are dropped cleanly
+    expect(
+      await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, fw.sender, false, {
+        restore: 'Restore',
+        quit: 'Quit',
+        extra: 'nope',
+      }),
+    ).toBe(true);
+    expect(
+      await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, fw.sender, false, {
+        restore: 'Line\nBreak',
+        quit: 'Quit',
+      }),
+    ).toBe(true);
+    expect(
+      await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, fw.sender, false, {
+        restore: '   ',
+        quit: 'Quit',
+      }),
+    ).toBe(true);
+    expect(
+      await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, fw.sender, false, {
+        restore: 'a'.repeat(200),
+        quit: 'Quit',
+      }),
+    ).toBe(true);
+
+    expect(received).toHaveLength(1);
+    expect(logs).toHaveLength(4);
+
+    dispose();
+  });
 });

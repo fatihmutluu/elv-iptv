@@ -1,4 +1,5 @@
 import type {
+  DesktopTrayLabels,
   DesktopWindowPort,
   PopoutDockPayload,
   PopoutLaunchPayload,
@@ -45,8 +46,10 @@ export function createDesktopWindowPort(
 ): DesktopWindowPort | undefined {
   if (!bridge) return undefined;
   return {
-    setMinimizeToTray: async (enabled: boolean) => {
-      await bridge.setMinimizeToTray(enabled);
+    setMinimizeToTray: async (enabled: boolean, labels?: DesktopTrayLabels) => {
+      await (labels === undefined
+        ? bridge.setMinimizeToTray(enabled)
+        : bridge.setMinimizeToTray(enabled, labels));
     },
     openPopout: (payload: PopoutLaunchPayload) => bridge.openPopout(payload),
     closePopout: () => bridge.closePopout(),

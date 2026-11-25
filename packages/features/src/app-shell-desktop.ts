@@ -7,7 +7,6 @@ import type {
   PopoutLaunchPayload,
 } from './ports/desktop-window-host';
 import type { PlayTarget } from './ports/play-target';
-import type { PlaybackGuard } from './ports/playback-guard';
 import type { ThermalDevicePort, VideoHost } from './ports/video-host';
 
 /** Builds a sanitized {@link PopoutLaunchPayload} from an active {@link PlayTarget} (`#158`). */
@@ -55,7 +54,7 @@ export interface UseShellPlaybackModesOptions {
   readonly desktopWindow?: DesktopWindowPort | undefined;
   readonly thermalDevice?: ThermalDevicePort | undefined;
   readonly videoHost: VideoHost;
-  readonly playbackGuard: PlaybackGuard;
+  readonly stopActivePlayerRef: MutableRefObject<(() => Promise<void>) | null>;
   readonly minimizeToTray: boolean;
   readonly backgroundAudioPlayback: boolean;
   readonly playTargetRef: MutableRefObject<PlayTarget | null>;
@@ -73,7 +72,7 @@ export function useShellPlaybackModes({
   desktopWindow,
   thermalDevice,
   videoHost,
-  playbackGuard,
+  stopActivePlayerRef,
   minimizeToTray,
   backgroundAudioPlayback,
   playTargetRef,
@@ -155,7 +154,7 @@ export function useShellPlaybackModes({
     (target: PlayTarget) => {
       if (!multiViewSupported) return;
       setPlayerViewMode('full');
-      void Promise.resolve(playbackGuard.stopIfUsingSource(target.sourceId))
+      void Promise.resolve(stopActivePlayerRef.current?.())
         .catch(() => undefined)
         .finally(() => {
           stopActiveRef.current();
@@ -164,7 +163,7 @@ export function useShellPlaybackModes({
           });
         });
     },
-    [multiViewSupported, playbackGuard],
+    [multiViewSupported, stopActivePlayerRef],
   );
 
   const exitMultiView = useCallback((resumeTarget: PlayTarget | null) => {
@@ -181,7 +180,7 @@ export function useShellPlaybackModes({
     return (target: PlayTarget, positionMs?: number) => {
       const payload = buildPopoutLaunchPayload(target, positionMs);
       setPlayerViewMode('full');
-      void Promise.resolve(playbackGuard.stopIfUsingSource(target.sourceId))
+      void Promise.resolve(stopActivePlayerRef.current?.())
         .catch(() => undefined)
         .then(() => {
           stopActiveRef.current();
@@ -197,7 +196,7 @@ export function useShellPlaybackModes({
           requestPlayRef.current(target);
         });
     };
-  }, [openPopout, playbackGuard]);
+  }, [openPopout, stopActivePlayerRef]);
 
   return {
     playerViewMode,

@@ -135,6 +135,8 @@ export interface PlayerScreenProps {
   onEnterMultiView?: (target: PlayTarget) => void;
   /** Detaches active playback into the standalone Desktop Popout window (`#158`). */
   onPopoutPlayer?: (target: PlayTarget, positionMs?: number) => void;
+  /** Registers an async stop callback so `AppShell` can stop active playback cleanly before Multi-View/Popout handoff without wiping catalog caches. */
+  onRegisterStopActivePlayer?: (stop: (() => Promise<void>) | null) => void;
   /** When `true`, suspends player remote/keyboard shortcuts while a root overlay is open. */
   externalOverlayOpen?: boolean;
   onTargetChange?: (next: PlayTarget) => void;

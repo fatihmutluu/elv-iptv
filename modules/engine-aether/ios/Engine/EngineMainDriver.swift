@@ -14,16 +14,23 @@ final class EngineMainDriver: EngineSink {
   private var pipController: AetherPipController!
   weak var boundSurface: AetherSurfaceView?
   var activeEpoch = 0
+  private var handleAudioFocus: Bool
   private var backgroundAudioEnabled = false
   private var explicitDetachedSurfaceAllowed = false
   private var pipDetachedSurfaceAllowed = false
   private var hasExplicitSubtitleStyle = false
   private var activeSubtitleStyle: UserSubtitleStyleOverride?
 
-  init(owner: EngineObject, gate: ConnectionGate, httpSession: EngineHttpSession) {
+  init(
+    owner: EngineObject,
+    gate: ConnectionGate,
+    httpSession: EngineHttpSession,
+    handleAudioFocus: Bool = true
+  ) {
     self.owner = owner
     self.ownerId = ObjectIdentifier(owner)
-    self.backend = AetherBackend(gate: gate, httpSession: httpSession)
+    self.handleAudioFocus = handleAudioFocus
+    self.backend = AetherBackend(gate: gate, httpSession: httpSession, handleAudioFocus: handleAudioFocus)
     self.core = EngineCore(
       backend: backend,
       sink: self,
@@ -99,7 +106,8 @@ final class EngineMainDriver: EngineSink {
         onPreviousTrack: { [weak self] in
           self?.owner?.emitRemoteMediaAction("previous")
         }
-      )
+      ),
+      ownsNowPlaying: handleAudioFocus
     )
     self.pipController = AetherPipController(
       onDetachedSurfaceChanged: { [weak self] allowed in
@@ -137,6 +145,13 @@ final class EngineMainDriver: EngineSink {
 
   func setMediaMetadata(_ metadata: NowPlayingMetadata?) {
     nowPlayingBridge.setMetadata(metadata, playbackState: core.nowPlayingPlaybackState)
+  }
+
+  /// Promotes or demotes Multi-View primary audio-focus and Now Playing ownership (`#34`).
+  func configureMultiView(handleAudioFocus: Bool) {
+    self.handleAudioFocus = handleAudioFocus
+    backend.setHandleAudioFocus(handleAudioFocus)
+    nowPlayingBridge.setHandleAudioFocus(handleAudioFocus, playbackState: core.nowPlayingPlaybackState)
   }
 
   func setBackgroundAudioEnabled(_ enabled: Bool) {
