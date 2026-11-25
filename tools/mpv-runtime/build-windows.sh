@@ -232,16 +232,16 @@ is_windows_system_dll() {
   lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$lower" in
     api-ms-win-*.dll | ext-ms-win-*.dll) return 0 ;;
-    advapi32.dll | avrt.dll | bcrypt.dll | bcryptprimitives.dll | cfgmgr32.dll | combase.dll | comctl32.dll | \
+    advapi32.dll | avicap32.dll | avifil32.dll | avrt.dll | bcrypt.dll | bcryptprimitives.dll | cfgmgr32.dll | combase.dll | comctl32.dll | \
     comdlg32.dll | crypt32.dll | cryptbase.dll | d2d1.dll | d3d9.dll | d3d11.dll | \
     dbghelp.dll | dcomp.dll | dnsapi.dll | dwmapi.dll | dwrite.dll | dxgi.dll | dxva2.dll | \
     evr.dll | gdi32.dll | hid.dll | imm32.dll | iphlpapi.dll | kernel32.dll | kernelbase.dll | \
-    ksuser.dll | mfplat.dll | mfuuid.dll | mmdevapi.dll | mpr.dll | msimg32.dll | msvcrt.dll | \
+    ksuser.dll | mfplat.dll | mfuuid.dll | mmdevapi.dll | mpr.dll | msimg32.dll | msvcrt.dll | msvfw32.dll | \
     mswsock.dll | ncrypt.dll | netapi32.dll | normaliz.dll | ntdll.dll | ole32.dll | \
     oleacc.dll | oleaut32.dll | opengl32.dll | pathcch.dll | powrprof.dll | propsys.dll | psapi.dll | \
     rpcrt4.dll | secur32.dll | setupapi.dll | shcore.dll | shell32.dll | shfolder.dll | \
     shlwapi.dll | sspicli.dll | strmiids.dll | ucrtbase.dll | user32.dll | userenv.dll | \
-    usp10.dll | uxtheme.dll | version.dll | windowscodecs.dll | winhttp.dll | winmm.dll | \
+    usp10.dll | uxtheme.dll | version.dll | vfw32.dll | windowscodecs.dll | winhttp.dll | winmm.dll | \
     winspool.drv | wlanapi.dll | ws2_32.dll | wsock32.dll | wtsapi32.dll)
       return 0
       ;;
@@ -360,6 +360,9 @@ fi
 
 echo "==> smoke test"
 cat >"$work/smoke.c" <<'EOF'
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
