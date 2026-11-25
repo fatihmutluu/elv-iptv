@@ -47,6 +47,7 @@ import {
   type AppLifecyclePort,
   AppProviders,
   AppShell,
+  type AppShellProps,
   createLazyCatalog,
   type SourceImportHost,
   type ThermalDevicePort,
@@ -58,7 +59,7 @@ import { RemoteKeysProvider, TvFocusAnchor, UiAdaptersProvider } from '@elv/ui-k
 import Constants from 'expo-constants';
 import { getLocales } from 'expo-localization';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { createComposedAppLifecycle } from './android-lifecycle';
 import { createDeviceCatalog } from './catalog';
@@ -80,6 +81,12 @@ import {
   createSecureSecretStore,
 } from './storage';
 import { createMobileDiagnosticsPort } from './storage/diag-log';
+import {
+  createTvMobileSyncPorts,
+  type FeedbackPort,
+  type SyncAccountPort,
+  type TelemetryPort,
+} from './sync/sync-runtime';
 import { createMobileVideoHost } from './thermal-and-pip';
 import { createMobileThermalDevicePort } from './thermal-device-port';
 import { createTvHomeChannelsPort } from './tv-home-channels/adapter';
@@ -111,8 +118,65 @@ function AppRoot() {
   const tvHomeChannelsPort = useMemo(() => createTvHomeChannelsPort(), []);
   const externalPlayerPort = useMemo(() => createMobileExternalPlayerPort(), []);
   const diagnosticsPort = useMemo(() => createMobileDiagnosticsPort(), []);
+  const syncSecretStore = useMemo(() => createSecureSecretStore(), []);
+  const syncPrefsRef = useRef<{ telemetryOptIn: boolean; syncServerUrl: string }>({
+    telemetryOptIn: false,
+    syncServerUrl: '',
+  });
+  const syncPorts = useMemo(
+    () =>
+      createTvMobileSyncPorts({
+        secretStore: syncSecretStore,
+        getServerUrl: () => syncPrefsRef.current.syncServerUrl,
+        getPreferences: () => syncPrefsRef.current,
+        onTelemetryOptInChange: (enabled) => {
+          syncPrefsRef.current = { ...syncPrefsRef.current, telemetryOptIn: enabled };
+          void preferencesStore.update({ telemetryOptIn: enabled }).catch(() => undefined);
+        },
+        getDeviceMeta: () => ({
+          platform:
+            Platform.OS === 'android'
+              ? Platform.isTV
+                ? 'android-tv'
+                : 'android'
+              : Platform.OS === 'ios'
+                ? Platform.isTV
+                  ? 'tvos'
+                  : 'ios'
+                : Platform.OS,
+          appVersion: Constants.expoConfig?.version ?? '0.0.0',
+          locale: systemLocale,
+          ...(Platform.Version !== undefined ? { osVersion: String(Platform.Version) } : {}),
+        }),
+        getRecentLogs: (maxLines) => diagnosticsPort.readLogTail(maxLines),
+        subscribeAppState: (listener) => {
+          const sub = AppState.addEventListener('change', listener);
+          return () => sub.remove();
+        },
+      }),
+    [diagnosticsPort, preferencesStore, syncSecretStore, systemLocale],
+  );
   const { pendingDeepLink, clearPendingDeepLink } = usePlayDeepLink();
   const uiAdapters = useMemo(() => createMobileTvUiAdapters(), []);
+
+  useEffect(() => {
+    let active = true;
+    const applyPrefs = (snap: { telemetryOptIn: boolean; syncServerUrl: string }): void => {
+      if (!active) return;
+      syncPrefsRef.current = {
+        telemetryOptIn: snap.telemetryOptIn,
+        syncServerUrl: snap.syncServerUrl,
+      };
+    };
+    void preferencesStore.load().then(applyPrefs);
+    const unsubPrefs = preferencesStore.subscribe(applyPrefs);
+    void syncPorts.hydrate();
+    return () => {
+      active = false;
+      unsubPrefs();
+      syncPorts.dispose();
+    };
+  }, [preferencesStore, syncPorts]);
 
   useEffect(() => {
     if (isAndroidMobile) {
@@ -206,8 +270,9 @@ function AppRoot() {
         setAetherAutoEnterPictureInPicture,
         subscribeAetherPictureInPicture,
         panGestures: isAppleTv ? remotePanGestures : null,
+        telemetry: syncPorts.telemetry,
       }),
-    [isAppleTv],
+    [isAppleTv, syncPorts.telemetry],
   );
 
   const thermalDevice = useMemo<ThermalDevicePort>(
@@ -291,6 +356,30 @@ function AppRoot() {
 
   useEffect(() => attachAppStateDeadHostReset(AppState), []);
 
+  const shellProps: AppShellProps & {
+    syncAccount?: SyncAccountPort;
+    telemetry?: TelemetryPort;
+    feedback?: FeedbackPort;
+  } = {
+    catalog,
+    videoHost,
+    appLifecycle,
+    thermalDevice,
+    profilePreferences: preferencesStore,
+    keymapStore,
+    lanPairing: lanPairingPort,
+    tvHomeChannels: tvHomeChannelsPort,
+    pendingDeepLink,
+    onDeepLinkHandled: clearPendingDeepLink,
+    externalPlayer: externalPlayerPort,
+    diagnostics: diagnosticsPort,
+    syncAccount: syncPorts.syncAccount,
+    telemetry: syncPorts.telemetry,
+    feedback: syncPorts.feedback,
+    ...(sourceImportHost !== undefined ? { sourceImportHost } : {}),
+    externalRefreshToken: refreshToken,
+  };
+
   return (
     <UiAdaptersProvider adapters={uiAdapters}>
       <AppProviders
@@ -300,22 +389,7 @@ function AppRoot() {
         systemLocale={systemLocale}
         {...(viewportOverride !== undefined ? { viewport: viewportOverride } : {})}
       >
-        <AppShell
-          catalog={catalog}
-          videoHost={videoHost}
-          appLifecycle={appLifecycle}
-          thermalDevice={thermalDevice}
-          profilePreferences={preferencesStore}
-          keymapStore={keymapStore}
-          lanPairing={lanPairingPort}
-          tvHomeChannels={tvHomeChannelsPort}
-          pendingDeepLink={pendingDeepLink}
-          onDeepLinkHandled={clearPendingDeepLink}
-          externalPlayer={externalPlayerPort}
-          diagnostics={diagnosticsPort}
-          {...(sourceImportHost !== undefined ? { sourceImportHost } : {})}
-          externalRefreshToken={refreshToken}
-        />
+        <AppShell {...shellProps} />
         <StatusBar style="light" />
       </AppProviders>
     </UiAdaptersProvider>

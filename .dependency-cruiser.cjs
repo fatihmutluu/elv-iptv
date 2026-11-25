@@ -3,7 +3,7 @@
  * repository root; workspace packages resolve to their real folders through pnpm links.
  */
 
-const PURE = 'domain|sources|data|playback|focus-core';
+const PURE = 'domain|sources|data|playback|focus-core|sync';
 const WORKSPACE = '^(packages|modules|apps)/';
 /** The test-database helper of a pure package: the one non-test file that may use node:* and dev dependencies. */
 const TEST_DB = '^packages/[^/]+/src/test-db\\.ts$';
@@ -42,9 +42,9 @@ module.exports = {
     ),
     {
       name: 'leaf-packages-import-domain-only',
-      comment: 'sources, playback, focus-core and i18n may import domain and themselves only',
+      comment: 'sources, playback, focus-core, i18n and sync may import domain and themselves only',
       severity: 'error',
-      from: { path: '^packages/(sources|playback|focus-core|i18n)/' },
+      from: { path: '^packages/(sources|playback|focus-core|i18n|sync)/' },
       to: { path: WORKSPACE, pathNot: '^packages/(domain|$1)/' },
     },
     layer(

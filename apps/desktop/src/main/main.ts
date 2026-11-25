@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import { lstat, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type { SecretStore } from '@elv/domain';
 import {
   app,
   BrowserWindow,
@@ -89,6 +90,8 @@ import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { createShellPrefsController, type ShellPrefsController } from './shell-prefs.ts';
 import { focusWindow, startSingleInstance } from './single-instance.ts';
 import { registerSourcesIpc } from './sources-ipc.ts';
+import { registerSyncIpc } from './sync/sync-ipc-handlers.ts';
+import { createDesktopSyncService } from './sync/sync-service.ts';
 import {
   createTaskbarController,
   createTaskbarIconPngs,
@@ -468,16 +471,20 @@ async function startPlayer(): Promise<void> {
   });
 }
 
-function startCatalog(): CatalogCoordinator<MessagePortMain> {
+function createSharedSecretStore(): SecretStore {
   const userData = app.getPath('userData');
   const useTestCipher = !app.isPackaged && process.argv.includes('--elv-test-cipher');
   const cipher = useTestCipher
     ? createAesGcmTestCipher()
     : createSafeStorageCipher(safeStorage, process.platform);
-  const secrets = createEncryptedFileSecretStore({
+  return createEncryptedFileSecretStore({
     filePath: join(userData, 'secrets.json'),
     cipher,
   });
+}
+
+function startCatalog(secrets: SecretStore): CatalogCoordinator<MessagePortMain> {
+  const userData = app.getPath('userData');
   const coordinator = createCatalogCoordinator<MessagePortMain>({
     dbPath: join(userData, 'catalog.db'),
     workerPath: join(__dirname, '..', 'utility', 'catalog-worker.js'),
@@ -524,6 +531,7 @@ let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
 let artworkCache: DesktopArtworkCache | undefined;
 let lanPairingIpc: LanPairingIpcHandle | undefined;
 let disposeDiagnosticsIpc: (() => void) | undefined;
+let disposeSyncIpc: (() => void) | undefined;
 
 registerCatalogQuitHandler({
   app,
@@ -640,7 +648,25 @@ if (hasLock) {
       log: logger.log,
     });
     serveRenderer();
-    catalogCoordinator = startCatalog();
+    const sharedSecrets = createSharedSecretStore();
+    const syncService = createDesktopSyncService({
+      secretStore: sharedSecrets,
+      platform: `desktop-${process.platform}`,
+      appVersion: app.getVersion(),
+      mpvVersion: '0.42.0',
+      readLogTail: (maxLines) => logger.readRedactedTail(maxLines),
+    });
+    disposeSyncIpc = registerSyncIpc({
+      ipcMain,
+      service: syncService,
+      devOrigin: devServerOrigin,
+      getBroadcastTargets: () => BrowserWindow.getAllWindows().map((w) => w.webContents),
+      log: logger.log,
+    });
+    if (gateQuery === null) {
+      void syncService.hydrate();
+    }
+    catalogCoordinator = startCatalog(sharedSecrets);
     await startPlayer();
     createWindow();
     appInitialized = true;
@@ -670,6 +696,8 @@ app.on('will-quit', () => {
   lanPairingIpc = undefined;
   disposeDiagnosticsIpc?.();
   disposeDiagnosticsIpc = undefined;
+  disposeSyncIpc?.();
+  disposeSyncIpc = undefined;
   mediaBridge?.dispose();
   mediaBridge = undefined;
   for (const ctl of [...windowBoundsControllers]) ctl.dispose();

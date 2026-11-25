@@ -19,6 +19,7 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
 - `pnpm ffmpeg-media3 fetch [--force]` and `pnpm ffmpeg-media3 verify [--dir <folder>]` install and verify the LGPL-2.1+ Android FFmpeg + Media3 JNI bundle (`modules/engine-media3/ffmpeg-media3.lock.json`, 16 KB ELF alignment, dynamic `DT_NEEDED`).
 - `pnpm notices:sync` regenerates `packages/features/src/notices/notices-data.ts` from workspace runtime dependencies and native engine lock pins (`pnpm check --only notices` verifies freshness).
+- `pnpm telemetry:digest [--input <file.json> | --url <url>] [--format md|json] [--out <path>] [--since <iso>]` renders an AI-ready Markdown/JSON telemetry & feedback digest (`ELV_SYNC_URL` + `ELV_ADMIN_TOKEN`).
 - `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `ELV_BENCH=1` adds 95k/100k/857k perf suites; `SIM_HUGE=1` adds 500k).
 
 ## Layout

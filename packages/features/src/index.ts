@@ -1,4 +1,5 @@
 export { AppShell, type AppShellProps, type AppTab } from './AppShell';
+export * from './account';
 export {
   buildEpisodeDeepLinkPlayTarget,
   type ResolvedDeepLinkAction,
@@ -29,9 +30,16 @@ export {
   type UseTvHomeChannelsSyncOptions,
   useTvHomeChannelsSync,
 } from './app-shell-tv-channels';
+export {
+  AppShellWaveF9Overlays,
+  type UseWaveF9ControllerOptions,
+  useWaveF9Controller,
+  type WaveF9Controller,
+} from './app-shell-wave-f9';
 export * from './browse';
 export * from './catalog';
 export * from './detail';
+export * from './feedback';
 export * from './home';
 export * from './live';
 export * from './notices';
@@ -41,6 +49,7 @@ export {
   ConnectionLimitDialog,
   type ConnectionLimitDialogProps,
 } from './player/ConnectionLimitDialog';
+export * from './ports';
 export {
   type AppLifecyclePort,
   type AppLifecycleState,

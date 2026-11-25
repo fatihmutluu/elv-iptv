@@ -3072,3 +3072,216 @@ msgstr "Close"
 
 msgid "crash.report.emptyLogs"
 msgstr "No recent diagnostic logs captured."
+
+msgid "settings.section.account"
+msgstr "Account & Sync"
+
+msgid "settings.section.feedback"
+msgstr "Feedback & Telemetry"
+
+msgid "welcome.title"
+msgstr "Sync Across Every Screen"
+
+msgid "welcome.subtitle"
+msgstr "Sign in to keep your playlists, favorites, and watch progress end-to-end encrypted across TV, mobile, and desktop."
+
+msgid "welcome.tabSignIn"
+msgstr "Sign In"
+
+msgid "welcome.tabCreateAccount"
+msgstr "Create Account"
+
+msgid "welcome.tabPairQr"
+msgstr "Pair via QR"
+
+msgid "welcome.continueWithoutAccount"
+msgstr "Continue without account"
+
+msgid "welcome.localOnlyNote"
+msgstr "All playback and playlist features work 100% locally without an account."
+
+msgid "account.title"
+msgstr "Sync Account"
+
+msgid "account.subtitle"
+msgstr "Zero-knowledge end-to-end encrypted sync. Provider credentials never leave your devices unencrypted."
+
+msgid "account.emailLabel"
+msgstr "Email"
+
+msgid "account.emailPlaceholder"
+msgstr "you@example.com"
+
+msgid "account.passwordLabel"
+msgstr "Password"
+
+msgid "account.passwordPlaceholder"
+msgstr "At least 10 characters"
+
+msgid "account.confirmPasswordLabel"
+msgstr "Confirm password"
+
+msgid "account.confirmPasswordPlaceholder"
+msgstr "Re-enter password"
+
+msgid "account.signInAction"
+msgstr "Sign In"
+
+msgid "account.createAccountAction"
+msgstr "Create Account"
+
+msgid "account.signOutAction"
+msgstr "Sign Out"
+
+msgid "account.syncNowAction"
+msgstr "Sync Now"
+
+msgid "account.syncingStatus"
+msgstr "Syncing encrypted vault..."
+
+msgid "account.syncedStatus"
+msgstr "Encrypted vault up to date"
+
+msgid "account.signedInAs"
+msgstr "Signed in as"
+
+msgid "account.serverUrlLabel"
+msgstr "Sync server URL (optional)"
+
+msgid "account.oauthComingSoon"
+msgstr "Apple and Google sign-in support will be available in a future store update."
+
+msgid "account.recoveryTitle"
+msgstr "Save Your Recovery Code"
+
+msgid "account.recoveryBody"
+msgstr "Store this recovery code offline. Because sync is end-to-end encrypted, we cannot reset your vault key without it."
+
+msgid "account.recoverySavedAction"
+msgstr "I Saved My Recovery Code"
+
+msgid "account.qrTitle"
+msgstr "Pair Another Device via QR"
+
+msgid "account.qrBody"
+msgstr "Scan this QR code from a signed-in ELV IPTV app on your phone, tablet, or desktop to sign in automatically."
+
+msgid "account.qrGenerateAction"
+msgstr "Show Pairing QR"
+
+msgid "account.qrClaimTitle"
+msgstr "Approve Device Pairing"
+
+msgid "account.qrClaimInputLabel"
+msgstr "Pairing code or QR link"
+
+msgid "account.qrClaimAction"
+msgstr "Approve Pairing"
+
+msgid "account.qrClaimSignInFirst"
+msgstr "Sign in or create an account first to finish pairing this device."
+
+msgid "account.qrClaimSuccess"
+msgstr "Device paired securely."
+
+msgid "account.qrExpired"
+msgstr "Pairing code expired. Generate a new code."
+
+msgid "account.deleteTitle"
+msgstr "Delete Account Permanently"
+
+msgid "account.deleteBody"
+msgstr "Permanently erases your sync account, encrypted vault, and active sessions from the server. Local playlists on this device stay untouched."
+
+msgid "account.deleteAction"
+msgstr "Delete Account Permanently"
+
+msgid "account.deleteConfirmAction"
+msgstr "Confirm Permanent Deletion"
+
+msgid "account.deleteCancelAction"
+msgstr "Cancel"
+
+msgid "account.deleteSuccess"
+msgstr "Your account has been permanently deleted."
+
+msgid "account.errorInvalidEmail"
+msgstr "Enter a valid email address."
+
+msgid "account.errorWeakPassword"
+msgstr "Password must be at least 10 characters."
+
+msgid "account.errorPasswordMismatch"
+msgstr "Passwords do not match."
+
+msgid "account.errorGeneric"
+msgstr "Sync request failed. Check your connection and try again."
+
+msgid "telemetry.title"
+msgstr "Opt-In Runtime Telemetry"
+
+msgid "telemetry.subtitle"
+msgstr "Help improve startup speed, smoothness, and playback codec compatibility. Strictly opt-in; never collects URLs, credentials, or watched titles."
+
+msgid "telemetry.optInLabel"
+msgstr "Share anonymous performance & codec diagnostics"
+
+msgid "telemetry.previewAction"
+msgstr "Preview JSON Payload"
+
+msgid "telemetry.hidePreviewAction"
+msgstr "Hide Preview"
+
+msgid "telemetry.queuedLabel"
+msgstr "Queued events"
+
+msgid "feedback.title"
+msgstr "Feedback & Report Issue"
+
+msgid "feedback.subtitle"
+msgstr "Report a playback bug, EPG mismatch, or suggest an improvement directly to the ELV IPTV team."
+
+msgid "feedback.categoryLabel"
+msgstr "Category"
+
+msgid "feedback.catPlayback"
+msgstr "Playback Issue"
+
+msgid "feedback.catChannelEpg"
+msgstr "Channel / EPG"
+
+msgid "feedback.catUiRemote"
+msgstr "UI & Remote"
+
+msgid "feedback.catSyncAccount"
+msgstr "Sync & Account"
+
+msgid "feedback.catFeature"
+msgstr "Feature Request"
+
+msgid "feedback.catOther"
+msgstr "Other"
+
+msgid "feedback.messageLabel"
+msgstr "Details"
+
+msgid "feedback.messagePlaceholder"
+msgstr "Describe what happened or what we can improve..."
+
+msgid "feedback.attachDiagnosticsLabel"
+msgstr "Attach redacted device & codec diagnostics"
+
+msgid "feedback.submitAction"
+msgstr "Send Feedback"
+
+msgid "feedback.sendingStatus"
+msgstr "Sending feedback..."
+
+msgid "feedback.sentSuccess"
+msgstr "Thank you! Your feedback has been received."
+
+msgid "feedback.errorEmpty"
+msgstr "Please write a brief description before sending."
+
+msgid "feedback.errorFailed"
+msgstr "Could not send feedback right now. Please try again later."

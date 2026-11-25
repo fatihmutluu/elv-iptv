@@ -4,6 +4,7 @@ import { AppShellProfileOverlays, type useShellManagementOverlays } from './app-
 import type { useProgrammeReminders } from './app-shell-reminders';
 import { AppShellExitToast } from './app-shell-sections';
 import { buildShellCrashProps } from './app-shell-state';
+import { AppShellWaveF9Overlays, type WaveF9Controller } from './app-shell-wave-f9';
 import { ChannelManagementOverlay } from './live';
 import { ConnectionLimitDialog } from './player/ConnectionLimitDialog';
 import {
@@ -120,6 +121,7 @@ export function AppShellRootOverlays(props: {
   readonly reminders: ReturnType<typeof useProgrammeReminders>;
   readonly oledScreensaver: ReturnType<typeof useOledScreensaver>;
   readonly wave: ReturnType<typeof useAppShellWaveF7b>;
+  readonly waveF9?: WaveF9Controller;
   readonly diagnostics?: DiagnosticsPort;
   readonly includeLogs: boolean;
 }): ReactElement {
@@ -134,6 +136,7 @@ export function AppShellRootOverlays(props: {
     reminders,
     oledScreensaver,
     wave,
+    waveF9,
     diagnostics,
     includeLogs,
   } = props;
@@ -186,6 +189,7 @@ export function AppShellRootOverlays(props: {
           onClose={wave.closeDiagnosticsPreview}
         />
       ) : null}
+      <AppShellWaveF9Overlays waveF9={waveF9} />
       <OledScreensaverOverlay state={oledScreensaver.state} onWake={oledScreensaver.wake} />
     </>
   );

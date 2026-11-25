@@ -12,6 +12,8 @@ export type SettingsSection =
   | 'remote'
   | 'profiles'
   | 'sources'
+  | 'account'
+  | 'feedback'
   | 'licenses';
 
 /** Preference sections navigated row-by-row directly via {@link useTvSettingsNavigation}. */
@@ -25,6 +27,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'remote',
   'profiles',
   'sources',
+  'account',
+  'feedback',
   'licenses',
 ];
 

@@ -7,6 +7,7 @@ import { enWaveF5bMessages } from './en-wave-f5b';
 import { enWaveF6Messages } from './en-wave-f6';
 import { enWaveF7aMessages } from './en-wave-f7a';
 import { enWaveF7bMessages } from './en-wave-f7b';
+import { enWaveF9Messages } from './en-wave-f9';
 
 /** English (source) message catalog. Every other locale must define the exact same keys. */
 export const enMessages = {
@@ -705,6 +706,7 @@ export const enMessages = {
   ...enWaveF6Messages,
   ...enWaveF7aMessages,
   ...enWaveF7bMessages,
+  ...enWaveF9Messages,
 } as const;
 
 /** Valid message identifier across all supported locales. */

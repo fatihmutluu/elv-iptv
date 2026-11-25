@@ -40,6 +40,12 @@ import { createDesktopReminderHost } from './reminders/adapter.ts';
 import { attachScrollBlurGuard } from './scroll-blur-guard.ts';
 import { createDesktopKeymapStore } from './storage/keymap.ts';
 import { createDesktopPreferencesStore } from './storage/preferences.ts';
+import {
+  createDesktopSyncPorts,
+  type DesktopFeedbackPort,
+  type DesktopSyncAccountPort,
+  type DesktopTelemetryPort,
+} from './sync/desktop-sync-ports.ts';
 import { attachDeadHostOnlineReset, createDesktopUiAdapters } from './ui/desktop-adapters.tsx';
 import { shouldMountWorkbench } from './workbench/presets.ts';
 
@@ -237,10 +243,33 @@ function AppRoot() {
     [],
   );
 
+  const desktopSync = useMemo(() => createDesktopSyncPorts(window.elv), []);
+
+  useEffect(() => {
+    let active = true;
+    let lastServerUrl: string | undefined;
+    const syncServerUrlPref = (nextUrl: string): void => {
+      if (!active || lastServerUrl === nextUrl) return;
+      lastServerUrl = nextUrl;
+      void desktopSync.setServerUrl(nextUrl);
+    };
+    void desktopSync.hydrate();
+    void preferencesStore.load().then((snap) => syncServerUrlPref(snap.syncServerUrl));
+    const unsubPrefs = preferencesStore.subscribe((snap) => syncServerUrlPref(snap.syncServerUrl));
+    return () => {
+      active = false;
+      unsubPrefs();
+      desktopSync.dispose();
+    };
+  }, [desktopSync, preferencesStore]);
+
   const shellProps: AppShellProps & {
     sourceImportHost?: SourceImportHost;
     profilePreferences?: ProfilePreferencesManager;
     diagnostics?: DiagnosticsPort;
+    syncAccount?: DesktopSyncAccountPort;
+    telemetry?: DesktopTelemetryPort;
+    feedback?: DesktopFeedbackPort;
   } = {
     catalog,
     videoHost,
@@ -253,6 +282,9 @@ function AppRoot() {
     ...(desktopWindow === undefined ? {} : { desktopWindow }),
     ...(sourceImportHost === undefined ? {} : { sourceImportHost }),
     ...(lanPairing === undefined ? {} : { lanPairing }),
+    ...(desktopSync.syncAccount === undefined ? {} : { syncAccount: desktopSync.syncAccount }),
+    ...(desktopSync.telemetry === undefined ? {} : { telemetry: desktopSync.telemetry }),
+    ...(desktopSync.feedback === undefined ? {} : { feedback: desktopSync.feedback }),
   };
 
   return (

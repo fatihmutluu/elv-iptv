@@ -1,0 +1,13 @@
+name = "elv-sync-server"
+main = "src/worker.ts"
+compatibility_date = "2026-01-01"
+
+[vars]
+TELEMETRY_DISABLED = "false"
+PUBLIC_ORIGIN = "*"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "elv-sync-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

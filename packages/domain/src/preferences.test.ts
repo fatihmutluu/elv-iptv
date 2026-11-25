@@ -95,6 +95,9 @@ describe('preferences codec', () => {
       crashReportsIncludeLogs: false,
       externalPlayerMode: 'off',
       externalPlayerCustomScheme: '',
+      telemetryOptIn: false,
+      welcomeDismissed: false,
+      syncServerUrl: '',
       subtitleStyle: {
         fontSize: 'medium',
         textColor: 'white',

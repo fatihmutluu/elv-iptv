@@ -30,6 +30,7 @@
     "@elv/domain": "workspace:*",
     "@elv/playback": "workspace:*",
     "@elv/sources": "workspace:*",
+    "@elv/sync": "workspace:*",
     "better-sqlite3": "13.0.3"
   },
   "devDependencies": {

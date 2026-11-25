@@ -1,0 +1,10 @@
+{
+  "extends": "@elv/config/tsconfig.pure.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "tsBuildInfoFile": "../../node_modules/.cache/sync-server.tsbuildinfo"
+  },
+  "include": ["src", "vitest.config.ts"]
+}

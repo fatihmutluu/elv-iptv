@@ -14,6 +14,13 @@ import {
 } from './preferences-validators';
 import { DEFAULT_WAVE_F7A_PREFERENCES } from './preferences-wave-f7a';
 import { DEFAULT_WAVE_F7B_PREFERENCES } from './preferences-wave-f7b';
+import {
+  DEFAULT_WAVE_F9_PREFERENCES,
+  mergeWaveF9Preferences,
+  parseWaveF9Preferences,
+  serializeWaveF9Preferences,
+  type WaveF9PreferencesFields,
+} from './preferences-wave-f9';
 import { elvError, err, ok, type Result } from './result';
 import { DEFAULT_SUBTITLE_STYLE, type SubtitleStyleConfig } from './subtitle-style';
 
@@ -88,6 +95,13 @@ export {
   normalizeExternalPlayerScheme,
   type WaveF7bPreferencesFields,
 } from './preferences-wave-f7b';
+export {
+  DEFAULT_WAVE_F9_PREFERENCES,
+  isValidSyncServerUrl,
+  MAX_SYNC_SERVER_URL_LENGTH,
+  normalizeSyncServerUrl,
+  type WaveF9PreferencesFields,
+} from './preferences-wave-f9';
 
 /** Schema version stored inside serialized preferences payloads. */
 export const PREFERENCES_SCHEMA_VERSION = 1 as const;
@@ -98,7 +112,7 @@ export const MAX_PREFERENCES_BYTES = 4096;
 const DEFAULT_PREFERENCES_KEY = 'elv.preferences.v1';
 
 /** Immutable snapshot of user-configurable app preferences. */
-export interface PreferencesSnapshot extends ExtendedPreferencesFields {
+export interface PreferencesSnapshot extends ExtendedPreferencesFields, WaveF9PreferencesFields {
   readonly version: typeof PREFERENCES_SCHEMA_VERSION;
   readonly themePreset: string;
   readonly locale: string;
@@ -170,6 +184,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   autoEnterPip: true,
   ...DEFAULT_WAVE_F7A_PREFERENCES,
   ...DEFAULT_WAVE_F7B_PREFERENCES,
+  ...DEFAULT_WAVE_F9_PREFERENCES,
   subtitleStyle: DEFAULT_SUBTITLE_STYLE,
 });
 
@@ -267,6 +282,7 @@ export function parsePreferences(raw: string | undefined): PreferencesSnapshot {
     autoPlayNextEpisode,
     playerVolume,
     ...parseExtendedPreferences(parsed, DEFAULT_PREFERENCES),
+    ...parseWaveF9Preferences(parsed, DEFAULT_PREFERENCES),
   });
 }
 
@@ -294,6 +310,7 @@ export function serializePreferences(snapshot: PreferencesSnapshot): Result<stri
         ? clampPlayerVolume(snapshot.playerVolume)
         : DEFAULT_PREFERENCES.playerVolume,
     ...serializeExtendedPreferences(snapshot, DEFAULT_PREFERENCES),
+    ...serializeWaveF9Preferences(snapshot, DEFAULT_PREFERENCES),
   });
   if (utf8ByteLength(payload) > MAX_PREFERENCES_BYTES) {
     return err(elvError('storage', 'preferences-too-large'));
@@ -337,6 +354,7 @@ function mergeCandidate(base: PreferencesSnapshot, patch: PreferencesPatch): Pre
     autoPlayNextEpisode,
     playerVolume,
     ...mergeExtendedPreferences(base, patch),
+    ...mergeWaveF9Preferences(base, patch),
   });
 }
 
@@ -375,6 +393,7 @@ function mergeRawCandidate(
         ? clampPlayerVolume(patch.playerVolume)
         : base.playerVolume,
     ...mergeExtendedPreferences(base, patch),
+    ...mergeWaveF9Preferences(base, patch),
   };
 }
 
