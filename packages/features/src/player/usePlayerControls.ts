@@ -249,6 +249,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
     sleepTimerMinutes: params.sleepTimerMinutes,
     hasTimeDisplay: params.onCycleTimeDisplayMode !== undefined,
     hasAlwaysOnTop: params.onToggleAlwaysOnTop !== undefined,
+    hasMiniPlayer: params.onMinimizeToMiniPlayer !== undefined,
+    hasPip: params.onEnterPip !== undefined,
+    hasMultiView: params.onEnterMultiView !== undefined,
+    hasPopout: params.onPopoutPlayer !== undefined,
     hasNextEpisode: params.hasNextEpisode ?? false,
     hasPreviousChannel,
     ...(params.hasBackToLive === true ? { hasBackToLive: true } : {}),
@@ -413,7 +417,14 @@ export function usePlayerControls(params: PlayerControlsParams) {
     else if (isTv && s.tvScrubberFocused) overlay.blurTvScrubber();
     else if (isTv && s.tvOsdFocused) overlay.blurTvOsd();
     else if (s.osdTier === 'progress') overlay.hideOsd();
-    else onExitRef.current();
+    else if (
+      isTv &&
+      cbRef.current.activeTarget.kind === 'live' &&
+      cbRef.current.tvBackMinimizesLive === true &&
+      cbRef.current.onMinimizeToMiniPlayer !== undefined
+    ) {
+      cbRef.current.onMinimizeToMiniPlayer();
+    } else onExitRef.current();
   };
 
   const jumpToLiveEdge = (): void => {
@@ -531,6 +542,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
         toggleAudioNormalization: cbRef.current.onToggleAudioNormalization,
         toggleAutoSubtitlesOnSkipBack: cbRef.current.onToggleAutoSubtitlesOnSkipBack,
         toggleAutoPlayNextEpisode: cbRef.current.onToggleAutoPlayNextEpisode,
+        onMinimizeToMiniPlayer: cbRef.current.onMinimizeToMiniPlayer,
+        onEnterPip: cbRef.current.onEnterPip,
+        onEnterMultiView: cbRef.current.onEnterMultiView,
+        onPopoutPlayer: cbRef.current.onPopoutPlayer,
         onChannelListMove: cbRef.current.onChannelListMove,
         onChannelListSwitchTab: cbRef.current.onChannelListSwitchTab,
         onChannelListSelect: cbRef.current.onChannelListSelect,

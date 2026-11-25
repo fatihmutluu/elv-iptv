@@ -27,6 +27,8 @@ export interface UseConnectionLimitGuardOptions {
 
 /** Pre-flight connection tracker state and play/zap/exit handlers for `AppShell` (`#87`). */
 export interface ConnectionLimitGuard {
+  /** Shared per-account active stream tracker (`#87`, `#221`). */
+  readonly tracker: ConnectionTracker;
   readonly pending: PendingConnectionPrompt | null;
   readonly requestPlay: (target: PlayTarget) => void;
   readonly replaceActiveTarget: (target: PlayTarget) => void;
@@ -180,6 +182,7 @@ export function useConnectionLimitGuard({
   }, [commitPlay]);
 
   return {
+    tracker,
     pending,
     requestPlay,
     replaceActiveTarget,

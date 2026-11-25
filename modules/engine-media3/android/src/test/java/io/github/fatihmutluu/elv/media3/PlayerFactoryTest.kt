@@ -243,4 +243,38 @@ class PlayerFactoryTest {
       swPlayer.release()
     }
   }
+
+  @Test
+  fun `skips Android audio focus acquisition when handleAudioFocus is false for secondary Multi-View tiles (#34, #221)`() {
+    val app = RuntimeEnvironment.getApplication()
+    val probeCalls = mutableListOf<Boolean>()
+    val factory = PlayerFactory(
+      context = app,
+      looper = Looper.getMainLooper(),
+      buffers = loadControlFor(lowRam = false, live = true),
+      codecPolicy = CodecPolicy(),
+      audioFocusProbe = { probeCalls += it },
+    )
+    val secondaryPlayer = factory.build(
+      softwareAudio = false,
+      live = true,
+      streamKind = StreamKind.HLS_LIVE,
+      handleAudioFocus = false,
+      multiViewTileCount = 4,
+    )
+    val primaryPlayer = factory.build(
+      softwareAudio = false,
+      live = true,
+      streamKind = StreamKind.HLS_LIVE,
+      handleAudioFocus = true,
+      multiViewTileCount = 4,
+    )
+    try {
+      assertEquals(listOf(false, true), probeCalls)
+      assertTrue("explicit handleAudioFocus=false must not permanently disable factory audioFocusAllowed", factory.audioFocusAllowed)
+    } finally {
+      secondaryPlayer.release()
+      primaryPlayer.release()
+    }
+  }
 }

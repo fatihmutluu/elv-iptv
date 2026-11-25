@@ -1,4 +1,18 @@
-import { isAlwaysOnTopFlag, isAspectRatioLockFlag, WINDOW_CHANNELS } from '../shared/window-ipc.ts';
+import {
+  isAlwaysOnTopFlag,
+  isAspectRatioLockFlag,
+  isMinimizeToTrayFlag,
+  isPopoutDockPayload,
+  isPopoutLaunchPayload,
+  isTrayLabels,
+  type PopoutDockPayload,
+  type PopoutLaunchPayload,
+  sanitizePopoutDockPayload,
+  sanitizePopoutLaunchPayload,
+  sanitizeTrayLabels,
+  type TrayLabels,
+  WINDOW_CHANNELS,
+} from '../shared/window-ipc.ts';
 
 type IpcHandler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
 
@@ -41,6 +55,12 @@ export interface WindowIpcDeps {
   ipcMain: WindowIpcMainLike;
   getWindowFromSender(sender: unknown): AlwaysOnTopWindowLike | null | undefined;
   onSetAspectRatioLock?(win: AlwaysOnTopWindowLike, enabled: boolean): void;
+  onSetMinimizeToTray?(enabled: boolean, labels?: TrayLabels): boolean;
+  getMinimizeToTray?(): boolean;
+  onOpenPopout?(payload: PopoutLaunchPayload): Promise<boolean> | boolean;
+  onClosePopout?(): Promise<void> | void;
+  onGetPopoutPayload?(sender: unknown): PopoutLaunchPayload | null;
+  onDockPopout?(sender: unknown, payload: PopoutDockPayload): Promise<void> | void;
   log?(line: string): void;
 }
 
@@ -59,9 +79,9 @@ function syncChildWindowZOrder(win: AlwaysOnTopWindowLike, enabled: boolean): vo
 }
 
 /**
- * Registers typed `window:set-always-on-top` and `window:get-always-on-top` handlers on `ipcMain`,
- * keeping child presenter HWND z-order consistent and pushing deduplicated `window:always-on-top-changed`
- * events back to the owning renderer (`#408`). Returns the disposer.
+ * Registers typed window control, minimize-to-tray (`#158`), and popout window (`#158`) IPC
+ * handlers on `ipcMain`. Every payload is strictly validated; invalid payloads are dropped and
+ * logged by channel name only. Returns the disposer.
  */
 export function registerWindowIpc(deps: WindowIpcDeps): () => void {
   const { ipcMain, getWindowFromSender, onSetAspectRatioLock, log } = deps;
@@ -131,10 +151,56 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     return enabled;
   });
 
+  ipcMain.handle(WINDOW_CHANNELS.setMinimizeToTray, (_event, enabled, rawLabels) => {
+    if (!isMinimizeToTrayFlag(enabled)) {
+      log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.setMinimizeToTray} payload`);
+      return deps.getMinimizeToTray?.() ?? false;
+    }
+    let labels: TrayLabels | undefined;
+    if (rawLabels !== undefined) {
+      if (!isTrayLabels(rawLabels)) {
+        log?.(`window ipc: dropped invalid ${WINDOW_CHANNELS.setMinimizeToTray} tray labels`);
+        return deps.getMinimizeToTray?.() ?? false;
+      }
+      labels = sanitizeTrayLabels(rawLabels);
+    }
+    return deps.onSetMinimizeToTray ? deps.onSetMinimizeToTray(enabled, labels) : enabled;
+  });
+
+  ipcMain.handle(WINDOW_CHANNELS.openPopout, async (_event, payload) => {
+    if (!isPopoutLaunchPayload(payload)) {
+      log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.openPopout} payload`);
+      return false;
+    }
+    if (!deps.onOpenPopout) return false;
+    return Boolean(await deps.onOpenPopout(sanitizePopoutLaunchPayload(payload)));
+  });
+
+  ipcMain.handle(WINDOW_CHANNELS.closePopout, async () => {
+    await deps.onClosePopout?.();
+  });
+
+  ipcMain.handle(WINDOW_CHANNELS.getPopoutPayload, ({ sender }) => {
+    return deps.onGetPopoutPayload?.(sender) ?? null;
+  });
+
+  ipcMain.handle(WINDOW_CHANNELS.dockPopout, async ({ sender }, payload) => {
+    if (!isPopoutDockPayload(payload)) {
+      log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.dockPopout} payload`);
+      return;
+    }
+    await deps.onDockPopout?.(sender, sanitizePopoutDockPayload(payload));
+  });
+
   return () => {
     ipcMain.removeHandler(WINDOW_CHANNELS.getAlwaysOnTop);
     ipcMain.removeHandler(WINDOW_CHANNELS.setAlwaysOnTop);
     ipcMain.removeHandler(WINDOW_CHANNELS.setAspectRatioLock);
+    ipcMain.removeHandler(WINDOW_CHANNELS.setMinimizeToTray);
+    ipcMain.removeHandler(WINDOW_CHANNELS.openPopout);
+    ipcMain.removeHandler(WINDOW_CHANNELS.closePopout);
+    ipcMain.removeHandler(WINDOW_CHANNELS.getPopoutPayload);
+    ipcMain.removeHandler(WINDOW_CHANNELS.dockPopout);
     for (const detach of detachListeners.splice(0)) detach();
   };
 }

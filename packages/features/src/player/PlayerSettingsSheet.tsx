@@ -95,6 +95,10 @@ export interface PlayerSettingsSheetProps {
   readonly onToggleAudioNormalization?: () => void;
   readonly onToggleAutoSubtitlesOnSkipBack?: () => void;
   readonly onToggleAutoPlayNextEpisode?: () => void;
+  readonly onMinimizeToMiniPlayer?: () => void;
+  readonly onEnterPip?: () => void;
+  readonly onEnterMultiView?: () => void;
+  readonly onPopoutPlayer?: () => void;
   readonly onToggleStats: () => void;
   readonly onClose: () => void;
 }
@@ -376,6 +380,66 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         role: 'switch',
         accessibilityLabel: i18n.t('player.autoPlayNextEpisode'),
         onPress: props.onToggleAutoPlayNextEpisode,
+      });
+    }
+    if (props.onMinimizeToMiniPlayer !== undefined) {
+      toggles.push({
+        testID: 'player-settings-miniplayer',
+        icon: 'miniplayer',
+        label: i18n.t('player.miniPlayer.minimize'),
+        pillLabel: i18n.t('player.miniPlayer.minimize'),
+        active: false,
+        role: 'button',
+        accessibilityLabel: i18n.t('player.miniPlayer.minimize'),
+        onPress: () => {
+          props.onClose();
+          props.onMinimizeToMiniPlayer?.();
+        },
+      });
+    }
+    if (props.onEnterPip !== undefined) {
+      toggles.push({
+        testID: 'player-settings-pip',
+        icon: 'pip',
+        label: i18n.t('player.pip.enter'),
+        pillLabel: i18n.t('player.pip.enter'),
+        active: false,
+        role: 'button',
+        accessibilityLabel: i18n.t('player.pip.enter'),
+        onPress: () => {
+          props.onClose();
+          props.onEnterPip?.();
+        },
+      });
+    }
+    if (props.onEnterMultiView !== undefined) {
+      toggles.push({
+        testID: 'player-settings-multiview',
+        icon: 'multiview',
+        label: i18n.t('player.multiView.enter'),
+        pillLabel: i18n.t('player.multiView.title'),
+        active: false,
+        role: 'button',
+        accessibilityLabel: i18n.t('player.multiView.enter'),
+        onPress: () => {
+          props.onClose();
+          props.onEnterMultiView?.();
+        },
+      });
+    }
+    if (props.onPopoutPlayer !== undefined) {
+      toggles.push({
+        testID: 'player-settings-popout',
+        icon: 'popout',
+        label: i18n.t('player.popout.open'),
+        pillLabel: i18n.t('player.popout.open'),
+        active: false,
+        role: 'button',
+        accessibilityLabel: i18n.t('player.popout.open'),
+        onPress: () => {
+          props.onClose();
+          props.onPopoutPlayer?.();
+        },
       });
     }
     toggles.push({

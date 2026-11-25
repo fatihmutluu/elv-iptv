@@ -20,11 +20,14 @@ import {
   safeStorage,
   screen,
   session,
+  Tray,
   utilityProcess,
   type WebContents,
 } from 'electron';
 import { ARTWORK_PROTOCOL_SCHEME } from '../shared/artwork-ipc.ts';
 import { CATALOG_CHANNELS } from '../shared/catalog-ipc.ts';
+import type { PresenterKind } from '../shared/player-ipc.ts';
+import { WINDOW_CHANNELS } from '../shared/window-ipc.ts';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
 import {
   createDesktopArtworkCache,
@@ -65,7 +68,7 @@ import { createEngineFor } from './player/factory.ts';
 import { registerPlayerIpc } from './player/ipc.ts';
 import { sweepLeftovers, systemSweepDeps } from './player/mpv/pid-sweep.ts';
 import { createPowerBlocker } from './player/power-blocker.ts';
-import { parsePresenterOverride } from './player/presenter/choose.ts';
+import { choosePresenter, parsePresenterOverride } from './player/presenter/choose.ts';
 import { sampleArea } from './player/presenter/visible.ts';
 import { mpvRuntimePaths, resolveMacMediaAddonPath } from './player/runtime-path.ts';
 import { createSubtitleFilePicker } from './player/subtitle-fetch.ts';
@@ -74,8 +77,14 @@ import {
   extractPlaylistPathsFromArgv,
   readValidatedPlaylistFile,
 } from './playlist-open.ts';
+import {
+  createPopoutWindowController,
+  POPOUT_STATE_FILENAME,
+  type PopoutWindowController,
+} from './popout-window.ts';
 import { lockDownSession, lockDownWebContents } from './security.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
+import { createShellPrefsController, type ShellPrefsController } from './shell-prefs.ts';
 import { focusWindow, startSingleInstance } from './single-instance.ts';
 import { registerSourcesIpc } from './sources-ipc.ts';
 import {
@@ -83,6 +92,12 @@ import {
   createTaskbarIconPngs,
   type TaskbarIcons,
 } from './taskbar-controls.ts';
+import {
+  createTrayController,
+  createTrayIconPng,
+  restoreWindowFromTray,
+  type TrayController,
+} from './tray.ts';
 import {
   createWindowAspectRatioLockController,
   createWindowBoundsController,
@@ -106,6 +121,11 @@ const gateQuery = parseGateFlag(process.argv, app.isPackaged);
 const pendingPlaylists = createPendingPlaylistQueue();
 let hasLock = false;
 let appInitialized = false;
+let isQuitting = false;
+let mainWindow: BrowserWindow | undefined;
+let shellPrefs: ShellPrefsController | undefined;
+let trayController: TrayController | undefined;
+let popoutController: PopoutWindowController | undefined;
 const enqueuePlaylistPaths = (paths: readonly string[]): void => {
   for (const p of paths) {
     void readValidatedPlaylistFile(p)
@@ -115,7 +135,28 @@ const enqueuePlaylistPaths = (paths: readonly string[]): void => {
       .catch(() => undefined);
   }
 };
+const resolveActivePresenterKind = (): PresenterKind => {
+  const requested = choosePresenter(
+    process.platform,
+    parsePresenterOverride(process.env.ELV_DESKTOP_PRESENTER),
+  );
+  if (process.platform === 'darwin' && requested === 'canvas') {
+    const runtime = mpvRuntimePaths({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+      platform: process.platform,
+      arch: process.arch,
+    });
+    if (!runtime?.canvasExecutable || !runtime.ioSurfaceAddon) return 'own-window';
+  }
+  return requested;
+};
 const focusOrCreateWindow = (): void => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    restoreWindowFromTray(mainWindow);
+    return;
+  }
   const existing = BrowserWindow.getAllWindows()[0];
   if (existing) focusWindow(existing);
   else if (appInitialized) createWindow();
@@ -220,6 +261,7 @@ function createWindow(): void {
   const window = new BrowserWindow(
     buildWindowOptions(join(__dirname, '..', 'preload', 'preload.js'), {
       gate: isGate,
+      presenter: resolveActivePresenterKind(),
       ...(saved === undefined
         ? {}
         : {
@@ -232,6 +274,25 @@ function createWindow(): void {
           }),
     }),
   );
+  mainWindow = window;
+  window.on('close', (event) => {
+    if (!isQuitting && !isGate && shellPrefs?.getMinimizeToTray()) {
+      event.preventDefault();
+      if (!window.webContents.isDestroyed()) {
+        window.webContents.send(WINDOW_CHANNELS.hiddenToTray);
+      }
+      window.hide();
+      trayController?.ensureShown();
+    }
+  });
+  window.on('restore', () => {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(WINDOW_CHANNELS.windowRestored);
+    }
+  });
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = undefined;
+  });
   if (saved) {
     if (saved.isMaximized) window.maximize();
     const boundsController = createWindowBoundsController(window, statePath, screen, {
@@ -479,6 +540,30 @@ if (hasLock) {
       cache: artworkCache,
       log: logger.log,
     });
+    shellPrefs = createShellPrefsController(join(app.getPath('userData'), 'shell-prefs.json'));
+    const appBaseUrl = devServerOrigin !== null ? `${devServerOrigin}/` : `${APP_ORIGIN}/`;
+    const activePresenter = resolveActivePresenterKind();
+    trayController = createTrayController({
+      icon: nativeImage.createFromBuffer(createTrayIconPng(32)),
+      createTray: (icon) => new Tray(icon),
+      buildMenu: (template) => Menu.buildFromTemplate(template),
+      onRestore: () => focusOrCreateWindow(),
+      onQuit: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    });
+    popoutController = createPopoutWindowController({
+      preloadPath: join(__dirname, '..', 'preload', 'preload.js'),
+      appBaseUrl,
+      popoutStatePath: join(app.getPath('userData'), POPOUT_STATE_FILENAME),
+      screen,
+      devOrigin: devServerOrigin,
+      presenter: activePresenter,
+      getMainWindow: () => mainWindow,
+      createWindow: (options) => new BrowserWindow(options),
+      log: logger.log,
+    });
     registerWindowIpc({
       ipcMain,
       getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
@@ -486,6 +571,16 @@ if (hasLock) {
         aspectRatioLockEnabled = enabled;
         aspectRatioLockControllers.get(win as BrowserWindow)?.setEnabled(enabled);
       },
+      getMinimizeToTray: () => shellPrefs?.getMinimizeToTray() ?? false,
+      onSetMinimizeToTray: (enabled, labels) => {
+        if (labels) trayController?.setLabels(labels);
+        return shellPrefs?.setMinimizeToTray(enabled) ?? false;
+      },
+      onOpenPopout: (payload) =>
+        gateQuery === null ? (popoutController?.open(payload) ?? false) : false,
+      onClosePopout: () => popoutController?.close(),
+      onGetPopoutPayload: (sender) => popoutController?.getPayloadForSender(sender) ?? null,
+      onDockPopout: (sender, payload) => popoutController?.dock(sender, payload),
       log: logger.log,
     });
     registerSourcesIpc<BrowserWindow>({
@@ -517,16 +612,27 @@ if (hasLock) {
     createWindow();
     appInitialized = true;
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        restoreWindowFromTray(mainWindow);
+      } else if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
     });
   });
 }
 
 app.on('before-quit', () => {
+  isQuitting = true;
+  trayController?.destroy();
+  popoutController?.dispose();
   void lanPairingIpc?.stop();
 });
 
 app.on('will-quit', () => {
+  trayController?.destroy();
+  trayController = undefined;
+  popoutController?.dispose();
+  popoutController = undefined;
   void lanPairingIpc?.dispose();
   lanPairingIpc = undefined;
   mediaBridge?.dispose();

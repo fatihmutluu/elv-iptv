@@ -101,6 +101,8 @@ export type PlaybackFocusId =
   | 'toggle-pitch-lock'
   | 'toggle-audio-normalization'
   | 'toggle-window-aspect-ratio-lock'
+  | 'toggle-minimize-to-tray'
+  | 'toggle-auto-enter-pip'
   | 'toggle-background-audio'
   | 'osd-time-total'
   | 'osd-time-remaining'

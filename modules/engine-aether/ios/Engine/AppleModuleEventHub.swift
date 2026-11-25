@@ -171,6 +171,12 @@ final class AppleModuleEventHub: @unchecked Sendable {
   }
   #endif
 
+  @MainActor
+  func emitPictureInPictureChanged(_ inPip: Bool) {
+    let target: ElvEngineAetherModule? = lock.withLock { module }
+    target?.emit(event: "onPictureInPictureChanged", payload: ["inPip": inPip])
+  }
+
   private static func toDictionary(_ insets: SurfaceEdgeInsets) -> [String: Double] {
     [
       "top": insets.top,

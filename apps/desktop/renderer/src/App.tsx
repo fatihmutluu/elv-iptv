@@ -1,21 +1,18 @@
 import { createCoalescedCatalog } from '@elv/data';
-import type {
-  AccessibilityFontFamily,
-  DeinterlaceMode,
-  ProfilePreferencesManager,
-} from '@elv/domain';
+import type { ProfilePreferencesManager } from '@elv/domain';
 import {
   AppProviders,
   AppShell,
   type AppShellProps,
   createLazyCatalog,
+  type DesktopWindowPort,
   type LanPairingPort,
   type ReminderHostPort,
   type SourceImportHost,
+  type ThermalDevicePort,
   type VideoHost,
 } from '@elv/features';
-import { resolveLocale } from '@elv/i18n';
-import type { StreamRequest } from '@elv/playback';
+import { createAppI18n, resolveLocale } from '@elv/i18n';
 import { UiAdaptersProvider } from '@elv/ui-kit';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -30,14 +27,13 @@ import { createDesktopCatalog } from './catalog/index.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
 import { createDesktopLanPairingPort } from './lan-pairing/adapter.ts';
-import { bindDesktopMediaSession, createDesktopMediaSession } from './media-session.ts';
-import { createDesktopEngine } from './player/desktop-engine.ts';
+import { createDesktopVideoHost } from './player/desktop-video-host.tsx';
+import { PopoutApp } from './popout/PopoutApp.tsx';
 import {
-  type DesktopHostKey,
-  dispatchDesktopClose,
-  routeDesktopUiEvent,
-} from './player/host-keys.ts';
-import { PlayerView } from './player/PlayerView.tsx';
+  createDesktopThermalDevicePort,
+  createDesktopWindowPort,
+  isPopoutSearch,
+} from './popout/popout-controller.ts';
 import { createDesktopReminderHost } from './reminders/adapter.ts';
 import { attachScrollBlurGuard } from './scroll-blur-guard.ts';
 import { createDesktopKeymapStore } from './storage/keymap.ts';
@@ -50,9 +46,11 @@ declare const __DEV__: boolean;
 // Computed once: a re-render must never hand the gate new params, which would restart the run. Main loads the query only
 // for an unpackaged `--elv-gate=` launch, and the preload flags gate mode; a page with just the query gets no gate.
 const GATE = resolveGate(window.location.search, window.elv);
+const IS_POPOUT = GATE === undefined && isPopoutSearch(window.location.search);
 const IS_DEV = typeof __DEV__ !== 'undefined' && __DEV__;
 const MOUNT_WORKBENCH =
   IS_DEV &&
+  !IS_POPOUT &&
   shouldMountWorkbench({
     isDev: IS_DEV,
     hasGate: GATE !== undefined,
@@ -90,160 +88,14 @@ function AppRoot() {
     [],
   );
 
-  const videoHost = useMemo<VideoHost>(
-    () => ({
-      async open() {
-        const playerBridge = window.elv?.player;
-        if (!playerBridge) return null;
-        const rawEngine = await createDesktopEngine(playerBridge, () => performance.now());
-        const mediaSession = createDesktopMediaSession();
-        let activeHostKeyListener: ((key: DesktopHostKey) => void) | null = null;
-        let overlayMode: 'floating' | 'docked' = 'floating';
-        const overlayModeListeners = new Set<(mode: 'floating' | 'docked') => void>();
-        const offPresenterOverlay = rawEngine.onUi((event) => {
-          if (event.type !== 'presenter') return;
-          const nextMode: 'floating' | 'docked' =
-            event.kind === 'canvas' || !event.coversArea ? 'floating' : 'docked';
-          if (nextMode === overlayMode) return;
-          overlayMode = nextMode;
-          for (const listener of [...overlayModeListeners]) {
-            try {
-              listener(nextMode);
-            } catch {
-              // isolate overlay mode subscribers
-            }
-          }
-        });
-        const windowBridge = window.elv?.window;
-        let alwaysOnTop = windowBridge
-          ? await windowBridge.getAlwaysOnTop().catch(() => false)
-          : false;
-        const alwaysOnTopListeners = new Set<(pinned: boolean) => void>();
-        const notifyAlwaysOnTop = (pinned: boolean): void => {
-          if (alwaysOnTop === pinned) return;
-          alwaysOnTop = pinned;
-          for (const listener of [...alwaysOnTopListeners]) {
-            try {
-              listener(pinned);
-            } catch {
-              // isolate always-on-top subscribers
-            }
-          }
-        };
-        let offWindowAlwaysOnTop = windowBridge?.onAlwaysOnTopChanged((pinned) => {
-          notifyAlwaysOnTop(pinned);
-        });
-        const boundEngine = bindDesktopMediaSession(rawEngine, mediaSession, {
-          onTrackStep: (dir) =>
-            activeHostKeyListener?.(dir === 'next' ? 'channel-up' : 'channel-down'),
-        });
-        const engine = {
-          ...boundEngine,
-          release() {
-            offPresenterOverlay();
-            overlayModeListeners.clear();
-            offWindowAlwaysOnTop?.();
-            offWindowAlwaysOnTop = undefined;
-            alwaysOnTopListeners.clear();
-            boundEngine.release();
-          },
-        };
-        const opened = {
-          engine,
-          get overlayMode(): 'floating' | 'docked' {
-            return overlayMode;
-          },
-          onOverlayModeChange: (listener: (mode: 'floating' | 'docked') => void) => {
-            overlayModeListeners.add(listener);
-            return () => {
-              overlayModeListeners.delete(listener);
-            };
-          },
-          renderSurface: ({
-            failed,
-            resizeMode,
-          }: {
-            failed: boolean;
-            resizeMode?: 'fit' | 'fill' | 'stretch';
-          }) => <PlayerView engine={engine} status="" failed={failed} resizeMode={resizeMode} />,
-          toggleFullscreen: () => rawEngine.toggleFullscreen(),
-          isFullscreen: () => rawEngine.isFullscreen(),
-          onFullscreenChange: (listener: (fullscreen: boolean) => void) => {
-            let last: boolean | undefined;
-            return rawEngine.onUi((event) => {
-              if (event.type !== 'fullscreen-changed' || event.fullscreen === last) return;
-              last = event.fullscreen;
-              listener(event.fullscreen);
-            });
-          },
-          toggleMute: () => rawEngine.toggleMute(),
-          setVolume: (volume: number) => rawEngine.setVolume(volume),
-          setDeinterlace: (enabled: boolean) => rawEngine.setDeinterlace(enabled),
-          setDeinterlaceMode: (mode: DeinterlaceMode) => rawEngine.setDeinterlaceMode(mode),
-          setPitchLock: (locked: boolean) => rawEngine.setPitchLock(locked),
-          setAudioNormalization: (enabled: boolean) => rawEngine.setAudioNormalization(enabled),
-          queueNext: (request: {
-            readonly itemKey: string;
-            readonly stream: StreamRequest;
-            readonly preferHevcOverDolbyVision?: boolean;
-            readonly filterSdhSubtitles?: boolean;
-          }) => rawEngine.queueNext(request),
-          clearQueue: () => rawEngine.clearQueue(),
-          onQueueAdvanced: (listener: (itemKey: string) => void) =>
-            rawEngine.onQueueAdvanced(listener),
-          setResizeMode: (mode: 'fit' | 'fill' | 'stretch') => rawEngine.setResizeMode(mode),
-          setFilterSdh: (enabled: boolean) => rawEngine.setFilterSdh(enabled),
-          setSubtitleFontFamily: (family: AccessibilityFontFamily) =>
-            rawEngine.setSubtitleFontFamily(family),
-          ...(playerBridge.pickSubtitleFile
-            ? {
-                pickSubtitleFile: () => playerBridge.pickSubtitleFile?.() ?? Promise.resolve(null),
-              }
-            : {}),
-          setMediaMetadata: (metadata: Parameters<typeof engine.setMediaMetadata>[0]) =>
-            engine.setMediaMetadata(metadata),
-          getAudioDevices: () => rawEngine.getAudioDevices(),
-          getActiveAudioDevice: () => rawEngine.getActiveAudioDevice(),
-          setAudioDevice: (name: string) => rawEngine.setAudioDevice(name),
-          onAudioDevicesChange: (listener: Parameters<typeof rawEngine.onAudioDevicesChange>[0]) =>
-            rawEngine.onAudioDevicesChange(listener),
-          ...(windowBridge
-            ? {
-                toggleAlwaysOnTop: () => {
-                  void windowBridge
-                    .setAlwaysOnTop(!alwaysOnTop)
-                    .then((pinned) => notifyAlwaysOnTop(pinned))
-                    .catch(() => undefined);
-                },
-                isAlwaysOnTop: () => alwaysOnTop,
-                onAlwaysOnTopChange: (listener: (pinned: boolean) => void) => {
-                  alwaysOnTopListeners.add(listener);
-                  return () => {
-                    alwaysOnTopListeners.delete(listener);
-                  };
-                },
-              }
-            : {}),
-          onHostKey: (listener: (key: DesktopHostKey) => void) => {
-            activeHostKeyListener = listener;
-            const offUi = rawEngine.onUi((event) =>
-              routeDesktopUiEvent(event, {
-                toggleFullscreen: () => listener('fullscreen'),
-                onHostKey: listener,
-                onClose: () => dispatchDesktopClose(listener),
-              }),
-            );
-            return () => {
-              if (activeHostKeyListener === listener) activeHostKeyListener = null;
-              offUi();
-            };
-          },
-        };
-        return opened;
-      },
-    }),
+  const videoHost = useMemo<VideoHost>(() => createDesktopVideoHost(), []);
+
+  const desktopWindow = useMemo<DesktopWindowPort | undefined>(
+    () => createDesktopWindowPort(window.elv?.window),
     [],
   );
+
+  const thermalDevice = useMemo<ThermalDevicePort>(() => createDesktopThermalDevicePort(), []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -314,6 +166,44 @@ function AppRoot() {
     };
   }, [preferencesStore]);
 
+  useEffect(() => {
+    const windowBridge = window.elv?.window;
+    if (!windowBridge || typeof windowBridge.setMinimizeToTray !== 'function') return;
+    let active = true;
+    let lastSent: string | undefined;
+    const trayI18n = createAppI18n(systemLocale);
+    const syncTray = (enabled: boolean, localePref: string): void => {
+      const resolved = localePref === 'system' ? systemLocale : resolveLocale([localePref]);
+      trayI18n.setLocale(resolved);
+      const labels = {
+        restore: trayI18n.t('desktop.tray.restore'),
+        quit: trayI18n.t('desktop.tray.quit'),
+      };
+      const key = `${enabled ? '1' : '0'}|${labels.restore}|${labels.quit}`;
+      if (!active || lastSent === key) return;
+      lastSent = key;
+      void windowBridge.setMinimizeToTray(enabled, labels).catch(() => undefined);
+    };
+    void preferencesStore.load().then((snap) => syncTray(snap.minimizeToTray, snap.locale));
+    const unsubscribe = preferencesStore.subscribe((snap) =>
+      syncTray(snap.minimizeToTray, snap.locale),
+    );
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [preferencesStore, systemLocale]);
+
+  useEffect(() => {
+    const windowBridge = window.elv?.window;
+    if (!windowBridge || typeof windowBridge.onWindowRestored !== 'function') return;
+    return windowBridge.onWindowRestored(() => {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.style.cursor = '';
+      }
+    });
+  }, []);
+
   const sourceImportHost = useMemo<SourceImportHost | undefined>(() => {
     const sourcesBridge = window.elv?.sources;
     if (!sourcesBridge) return undefined;
@@ -346,10 +236,12 @@ function AppRoot() {
   } = {
     catalog,
     videoHost,
+    thermalDevice,
     profilePreferences: preferencesStore,
     keymapStore,
     reminderHost,
     externalRefreshToken: refreshToken,
+    ...(desktopWindow === undefined ? {} : { desktopWindow }),
     ...(sourceImportHost === undefined ? {} : { sourceImportHost }),
     ...(lanPairing === undefined ? {} : { lanPairing }),
   };
@@ -384,7 +276,7 @@ const appStyles = StyleSheet.create({
   shell: { flex: 1, minHeight: 0 },
 });
 
-/** Root of the desktop renderer: mounts the gate harness on `--elv-gate=`, the dev-only UI Workbench in plain browser dev mode, and `AppShell` (#13) otherwise. */
+/** Root of the desktop renderer: mounts the gate harness on `--elv-gate=`, standalone popout on `?popout=1`, the dev-only UI Workbench in plain browser dev mode, and `AppShell` (#13) otherwise. */
 export function App() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -392,6 +284,7 @@ export function App() {
   }, []);
 
   if (GATE) return <GateScreen params={GATE} />;
+  if (IS_POPOUT) return <PopoutApp />;
   if (MOUNT_WORKBENCH && WorkbenchShell !== null) {
     return (
       <Suspense fallback={null}>

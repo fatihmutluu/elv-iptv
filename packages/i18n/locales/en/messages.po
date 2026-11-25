@@ -2784,3 +2784,105 @@ msgstr "No titles in this collection yet."
 
 msgid "collections.viewAll"
 msgstr "View all"
+
+msgid "player.pip.enter"
+msgstr "Picture-in-Picture"
+
+msgid "player.pip.unsupported"
+msgstr "Picture-in-Picture is unavailable for this stream"
+
+msgid "settings.playback.autoEnterPipTitle"
+msgstr "Auto-enter Picture-in-Picture"
+
+msgid "settings.playback.autoEnterPipDescription"
+msgstr "Keep video playing in a floating window when leaving the app."
+
+msgid "player.miniPlayer.minimize"
+msgstr "Minimize player"
+
+msgid "player.miniPlayer.expand"
+msgstr "Expand player"
+
+msgid "player.miniPlayer.close"
+msgstr "Close mini-player"
+
+msgid "player.miniPlayer.activeLabel"
+msgstr "Mini-player active"
+
+msgid "player.multiView.title"
+msgstr "Multi-View"
+
+msgid "player.multiView.enter"
+msgstr "Multi-View"
+
+msgid "player.multiView.exit"
+msgstr "Exit Multi-View"
+
+msgid "player.multiView.addChannel"
+msgstr "Add channel"
+
+msgid "player.multiView.replaceChannel"
+msgstr "Replace channel"
+
+msgid "player.multiView.removeTile"
+msgstr "Remove screen"
+
+msgid "player.multiView.swapAudio"
+msgstr "Switch audio here"
+
+msgid "player.multiView.activeAudio"
+msgstr "Audio active"
+
+msgid "player.multiView.muted"
+msgstr "Muted"
+
+msgid "player.multiView.emptySlot"
+msgstr "Add channel"
+
+msgid "player.multiView.tileCount"
+msgstr "{count, plural, one {# screen} other {# screens}}"
+
+msgid "player.multiView.connectionLimitTitle"
+msgstr "Connection limit reached"
+
+msgid "player.multiView.connectionLimitBody"
+msgstr "This source allows {active} / {max} active connections. Pick a channel from another source or close an open screen."
+
+msgid "player.multiView.thermalSerious"
+msgstr "Device is warm — adding more screens is temporarily paused."
+
+msgid "player.multiView.thermalCriticalShed"
+msgstr "Device overheated — secondary screens were closed to protect playback."
+
+msgid "player.multiView.lowRamUnsupported"
+msgstr "Multi-View is unavailable on this low-memory device."
+
+msgid "player.multiView.deviceCapReached"
+msgstr "This device supports up to {max} simultaneous screens."
+
+msgid "player.popout.open"
+msgstr "Pop out player"
+
+msgid "player.popout.dock"
+msgstr "Return to main window"
+
+msgid "player.popout.pin"
+msgstr "Always on top"
+
+msgid "player.popout.unpin"
+msgstr "Unpin window"
+
+msgid "player.popout.close"
+msgstr "Close popout"
+
+msgid "settings.desktop.minimizeToTrayTitle"
+msgstr "Minimize to system tray"
+
+msgid "settings.desktop.minimizeToTrayDescription"
+msgstr "Keep the app running in the system tray when closing the main window."
+
+msgid "desktop.tray.restore"
+msgstr "Restore ELV IPTV"
+
+msgid "desktop.tray.quit"
+msgstr "Quit"

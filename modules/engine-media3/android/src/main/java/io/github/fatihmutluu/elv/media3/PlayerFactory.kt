@@ -50,6 +50,9 @@ internal data class DeviceMemoryProfile(
 
   fun loadControl(streamKind: StreamKind, preset: BufferPreset = BufferPreset.AUTO): LoadControlValues =
     loadControlForStream(isLowRamDevice, totalMemBytes, streamKind, preset)
+
+  fun loadControl(streamKind: StreamKind, preset: BufferPreset, multiViewTileCount: Int): LoadControlValues =
+    loadControlForStream(isLowRamDevice, totalMemBytes, streamKind, preset, multiViewTileCount)
 }
 
 internal fun readDeviceMemoryProfile(context: Context): DeviceMemoryProfile {
@@ -149,8 +152,10 @@ internal class PlayerFactory(
     streamKind: StreamKind = if (live) StreamKind.HLS_LIVE else StreamKind.VOD,
     bufferPreset: BufferPreset = BufferPreset.AUTO,
     decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
+    handleAudioFocus: Boolean = true,
+    multiViewTileCount: Int = MIN_MULTIVIEW_TILES,
   ): ExoPlayer {
-    if (audioFocusAllowed) {
+    if (handleAudioFocus && audioFocusAllowed) {
       try {
         audioFocusProbe(true)
         return buildInternal(
@@ -160,6 +165,7 @@ internal class PlayerFactory(
           bufferPreset = bufferPreset,
           decoderMode = decoderMode,
           handleAudioFocus = true,
+          multiViewTileCount = multiViewTileCount,
         )
       } catch (e: SecurityException) {
         Log.w(TAG, "TAKE_AUDIO_FOCUS denied (${e.javaClass.simpleName}); falling back to handleAudioFocus=false")
@@ -174,6 +180,7 @@ internal class PlayerFactory(
       bufferPreset = bufferPreset,
       decoderMode = decoderMode,
       handleAudioFocus = false,
+      multiViewTileCount = multiViewTileCount,
     )
   }
 
@@ -184,8 +191,13 @@ internal class PlayerFactory(
     bufferPreset: BufferPreset,
     decoderMode: VideoDecoderMode,
     handleAudioFocus: Boolean,
+    multiViewTileCount: Int,
   ): ExoPlayer {
-    val buffers = loadControlForStream(streamKind, bufferPreset)
+    val buffers = scaleLoadControlForMultiView(
+      base = loadControlForStream(streamKind, bufferPreset),
+      streamKind = streamKind,
+      multiViewTileCount = multiViewTileCount,
+    )
     assOverlayBridge?.beginPlayerSession()
     val baseRenderers = createRenderersFactory(
       context = context,
@@ -249,6 +261,29 @@ internal class PlayerFactory(
         assOverlayBridge?.attachPlayer(built)
       }
   }
+}
+
+/**
+ * Updates [ExoPlayer] audio-focus handling for Multi-View promotion/demotion without rebuilding the player (`#34`),
+ * falling back to `handleAudioFocus = false` if firmware throws `SecurityException` on `TAKE_AUDIO_FOCUS`.
+ */
+@OptIn(UnstableApi::class)
+internal fun applyMultiViewAudioFocus(
+  player: ExoPlayer,
+  desiredFocus: Boolean,
+  factory: PlayerFactory,
+): Boolean {
+  if (desiredFocus && factory.audioFocusAllowed) {
+    try {
+      player.setAudioAttributes(STREAM_AUDIO_ATTRIBUTES, true)
+      return true
+    } catch (e: SecurityException) {
+      Log.w(TAG, "TAKE_AUDIO_FOCUS denied (${e.javaClass.simpleName}); falling back to handleAudioFocus=false")
+      factory.disableAudioFocus()
+    }
+  }
+  player.setAudioAttributes(STREAM_AUDIO_ATTRIBUTES, false)
+  return false
 }
 
 @OptIn(UnstableApi::class)

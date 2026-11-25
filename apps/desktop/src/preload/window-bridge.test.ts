@@ -74,5 +74,90 @@ describe('createWindowBridge (#408)', () => {
 
     fake.invoke.mockResolvedValueOnce('nope');
     await expect(bridge.setAspectRatioLock(false)).rejects.toThrow('unexpected reply');
+
+    fake.invoke.mockResolvedValueOnce('nope');
+    await expect(bridge.setMinimizeToTray(true)).rejects.toThrow('unexpected reply');
+
+    fake.invoke.mockResolvedValueOnce('nope');
+    await expect(
+      bridge.openPopout({ itemKey: 'live:1', kind: 'live', title: 'Ch' }),
+    ).rejects.toThrow('unexpected reply');
+
+    fake.invoke.mockResolvedValueOnce({ bad: true });
+    await expect(bridge.getPopoutPayload()).rejects.toThrow('unexpected reply');
+  });
+
+  it('forwards minimize-to-tray, popout launch/dock/close, and tray restore/hidden events (#158)', async () => {
+    const fake = fakeIpcRenderer();
+    const bridge = createWindowBridge(fake.ipc);
+
+    fake.invoke.mockResolvedValueOnce(true);
+    expect(await bridge.setMinimizeToTray(true)).toBe(true);
+    expect(fake.invoke).toHaveBeenLastCalledWith(WINDOW_CHANNELS.setMinimizeToTray, true);
+
+    fake.invoke.mockResolvedValueOnce(true);
+    expect(
+      await bridge.setMinimizeToTray(true, { restore: 'Restore ELV IPTV', quit: 'Quit' }),
+    ).toBe(true);
+    expect(fake.invoke).toHaveBeenLastCalledWith(WINDOW_CHANNELS.setMinimizeToTray, true, {
+      restore: 'Restore ELV IPTV',
+      quit: 'Quit',
+    });
+
+    const launch = { itemKey: 'live:s1:1', kind: 'live' as const, title: 'News' };
+    fake.invoke.mockResolvedValueOnce(true);
+    expect(await bridge.openPopout(launch)).toBe(true);
+    expect(fake.invoke).toHaveBeenLastCalledWith(WINDOW_CHANNELS.openPopout, launch);
+
+    fake.invoke.mockResolvedValueOnce(launch);
+    expect(await bridge.getPopoutPayload()).toEqual(launch);
+
+    fake.invoke.mockResolvedValueOnce(null);
+    expect(await bridge.getPopoutPayload()).toBeNull();
+
+    await bridge.dockPopout({ itemKey: 'live:s1:1', kind: 'live', title: 'News', positionMs: 500 });
+    expect(fake.invoke).toHaveBeenLastCalledWith(WINDOW_CHANNELS.dockPopout, {
+      itemKey: 'live:s1:1',
+      kind: 'live',
+      title: 'News',
+      positionMs: 500,
+    });
+
+    await bridge.closePopout();
+    expect(fake.invoke).toHaveBeenLastCalledWith(WINDOW_CHANNELS.closePopout);
+
+    const seenPopout: unknown[] = [];
+    const seenDocked: unknown[] = [];
+    let restoredCount = 0;
+    let hiddenCount = 0;
+    const offPopout = bridge.onPopoutPayload((p) => seenPopout.push(p));
+    const offDocked = bridge.onPopoutDocked((p) => seenDocked.push(p));
+    const offRestored = bridge.onWindowRestored(() => {
+      restoredCount += 1;
+    });
+    const offHidden = bridge.onHiddenToTray(() => {
+      hiddenCount += 1;
+    });
+
+    fake.emit(WINDOW_CHANNELS.popoutPayload, launch);
+    fake.emit(WINDOW_CHANNELS.popoutPayload, { bad: 1 });
+    fake.emit(WINDOW_CHANNELS.popoutDocked, { itemKey: 'live:s1:1', kind: 'live', title: 'News' });
+    fake.emit(WINDOW_CHANNELS.popoutDocked, { bad: 1 });
+    fake.emit(WINDOW_CHANNELS.windowRestored);
+    fake.emit(WINDOW_CHANNELS.hiddenToTray);
+
+    expect(seenPopout).toEqual([launch]);
+    expect(seenDocked).toEqual([{ itemKey: 'live:s1:1', kind: 'live', title: 'News' }]);
+    expect(restoredCount).toBe(1);
+    expect(hiddenCount).toBe(1);
+
+    offPopout();
+    offDocked();
+    offRestored();
+    offHidden();
+    expect(fake.listenerCount(WINDOW_CHANNELS.popoutPayload)).toBe(0);
+    expect(fake.listenerCount(WINDOW_CHANNELS.popoutDocked)).toBe(0);
+    expect(fake.listenerCount(WINDOW_CHANNELS.windowRestored)).toBe(0);
+    expect(fake.listenerCount(WINDOW_CHANNELS.hiddenToTray)).toBe(0);
   });
 });

@@ -22,6 +22,7 @@ describe('PLAYER_CHANNELS', () => {
     expect(PLAYER_CHANNELS).toEqual({
       open: 'player:open',
       close: 'player:close',
+      setPrimary: 'player:set-primary',
       command: 'player:command',
       event: 'player:event',
       area: 'player:area',

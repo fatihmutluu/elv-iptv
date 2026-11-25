@@ -74,6 +74,7 @@ export interface AppShellStageProps {
   readonly onOpenChannelManagement: () => void;
   readonly onOpenGuideManagement: (sourceId: string) => void;
   readonly onRegisterStopPreview?: (stop: (() => Promise<void>) | null) => void;
+  readonly suppressEmbeddedPreview?: boolean;
   readonly onChannelsMutated: () => void;
   readonly reminderVersion?: number;
   readonly onReminderChanged?: () => void;
@@ -232,6 +233,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
       {...(p.onRegisterStopPreview !== undefined
         ? { onRegisterStopPreview: p.onRegisterStopPreview }
         : {})}
+      {...(p.suppressEmbeddedPreview ? { suppressEmbeddedPreview: true } : {})}
       onPlay={p.onPlay}
       onOpenSources={p.onOpenSources}
       onOpenSearch={() => p.onSelectTab('search', true)}

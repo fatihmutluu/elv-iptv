@@ -430,6 +430,18 @@ export function activatePlaybackControl(
     });
     return;
   }
+  if (controlId === 'toggle-minimize-to-tray') {
+    void preferences.updatePreferences({
+      minimizeToTray: !preferences.preferences.minimizeToTray,
+    });
+    return;
+  }
+  if (controlId === 'toggle-auto-enter-pip') {
+    void preferences.updatePreferences({
+      autoEnterPip: !preferences.preferences.autoEnterPip,
+    });
+    return;
+  }
   if (controlId === 'toggle-background-audio') {
     void preferences.updatePreferences({
       backgroundAudioPlayback: !preferences.preferences.backgroundAudioPlayback,

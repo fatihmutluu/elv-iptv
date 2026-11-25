@@ -16,6 +16,7 @@ import type {
   PlayerArea,
   PlayerBridge,
   PlayerEventMessage,
+  PlayerOpenOptions,
   PlayerRemoteMediaActionMessage,
   PlayerUiEvent,
   PlayerUiMessage,
@@ -59,6 +60,10 @@ export interface DesktopEngine extends PlayerEngine {
   isFullscreen(): boolean;
   /** Toggles mpv audio mute (`cycle mute`). */
   toggleMute(): void;
+  /** Explicitly sets mpv audio mute (`set_property mute yes|no`, `#34`). */
+  setMuted(muted: boolean): void;
+  /** Promotes this engine to primary for OS media/taskbar/aspect lock (`#34`). */
+  setPrimary(): void;
   /** Sets mpv output volume (`0`–`100`, `#434`). */
   setVolume(volume: number): void;
   /** Sets mpv audio delay (`(attempt, delayMs)` in ms per `PlayerEngine`, or `(delaySec)` in seconds, `#59`, `#239`, `#434`). */
@@ -131,6 +136,7 @@ const shiftAnchor = (event: EngineEvent, offset: number): EngineEvent => {
 export async function createDesktopEngine(
   bridge: PlayerBridge,
   now: () => number,
+  options?: PlayerOpenOptions,
 ): Promise<DesktopEngine> {
   const listeners = new Set<(event: EngineEvent) => void>();
   const uiListeners = new Set<(event: PlayerUiEvent) => void>();
@@ -243,7 +249,7 @@ export async function createDesktopEngine(
   const t0 = now();
   let reply: Awaited<ReturnType<PlayerBridge['open']>>;
   try {
-    reply = await bridge.open();
+    reply = options === undefined ? await bridge.open() : await bridge.open(options);
   } catch (error) {
     offEvent();
     offUi();
@@ -288,6 +294,10 @@ export async function createDesktopEngine(
     toggleFullscreen: () => send({ name: 'fullscreen' }),
     isFullscreen: () => fullscreen,
     toggleMute: () => send({ name: 'mute' }),
+    setMuted: (muted) => send({ name: 'setMuted', muted }),
+    setPrimary: () => {
+      if (!released) void bridge.setPrimary?.(id).catch(() => undefined);
+    },
     setVolume: (volume) => send({ name: 'setVolume', volume }),
     setAudioDelay(attemptOrDelaySec: AttemptToken | number, maybeDelayMs?: number) {
       if (maybeDelayMs !== undefined) {

@@ -46,6 +46,9 @@ export interface AetherMediaMetadata {
 /** Remote media transport action emitted from Apple Control Center / Lock Screen / Siri Remote (`#413`). */
 export type AetherRemoteMediaAction = 'next' | 'previous' | 'stop';
 
+/** Normalized Apple `ProcessInfo.ThermalState` level (`#232`). */
+export type AppleThermalState = 'nominal' | 'fair' | 'serious' | 'critical';
+
 /** Hardware keyboard playback shortcut emitted by iOS/iPadOS `UIKeyCommand` (`#415`). */
 export type AppleHardwareKey =
   | 'play-pause'
@@ -81,6 +84,12 @@ interface RawInsets {
   left?: unknown;
 }
 
+/** Optional Multi-View engine configuration forwarded to Apple `AetherEngine` (`#34`). */
+export interface AetherEngineOptions {
+  /** Whether this engine owns `MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`, and primary audio focus (default `true`). */
+  readonly handleAudioFocus?: boolean;
+}
+
 /** Live subtitle appearance configuration forwarded to `AetherSurface` and `setSubtitleStyle` (`#32`). */
 export type AetherSubtitleStyle = NonNullable<LoadOptions['subtitleStyle']>;
 
@@ -96,6 +105,7 @@ interface AetherNativeEngineHandle extends NativeEngineHandle {
   setBackgroundAudioEnabled?(enabled: boolean): void;
   setAllowDetachedSurface?(enabled: boolean): void;
   setMediaMetadata?(metadata: AetherMediaMetadata | null): void;
+  configureMultiView?(handleAudioFocus: boolean): void;
   addListener: {
     (eventName: 'onEngineEvent', listener: (event: EngineEvent) => void): { remove(): void };
     (eventName: 'onRemoteMediaAction', listener: (payload: unknown) => void): { remove(): void };
@@ -103,10 +113,15 @@ interface AetherNativeEngineHandle extends NativeEngineHandle {
 }
 
 interface NativeEngineModule {
-  Engine: new () => AetherNativeEngineHandle;
+  Engine: new (options?: AetherEngineOptions) => AetherNativeEngineHandle;
   uptimeMs(): number;
   engineVersion(): string;
   deviceModel?(): string;
+  thermalState?(): unknown;
+  physicalMemoryBytes?(): unknown;
+  enterPictureInPicture?(engine?: AetherNativeEngineHandle): boolean;
+  canStartPictureInPicture?(engine?: AetherNativeEngineHandle): boolean;
+  setAutoEnterPictureInPicture?(enabled: boolean, engine?: AetherNativeEngineHandle): boolean;
   readPersistentValue?(key: string): string | null | undefined;
   writePersistentValue?(key: string, value: string): boolean;
   writeLocalPersistentValue?(key: string, value: string): boolean;
@@ -115,7 +130,11 @@ interface NativeEngineModule {
   readClipboardText?(): Promise<string | null | undefined>;
   pickPlaylistFile?(): Promise<RawPickedPlaylistFile | null | undefined>;
   addListener?(
-    eventName: 'onSafeAreaInsetsChanged' | 'onHardwareKey',
+    eventName:
+      | 'onSafeAreaInsetsChanged'
+      | 'onHardwareKey'
+      | 'onThermalStateChanged'
+      | 'onPictureInPictureChanged',
     listener: (payload: unknown) => void,
   ): { remove(): void };
 }
@@ -157,6 +176,29 @@ function parseRemoteMediaAction(payload: unknown): AetherRemoteMediaAction | nul
   return candidate === 'next' || candidate === 'previous' || candidate === 'stop'
     ? candidate
     : null;
+}
+
+function parseThermalState(payload: unknown): AppleThermalState | null {
+  const candidate =
+    typeof payload === 'string'
+      ? payload
+      : typeof payload === 'object' && payload !== null && 'state' in payload
+        ? (payload as Record<string, unknown>).state
+        : null;
+  return candidate === 'nominal' ||
+    candidate === 'fair' ||
+    candidate === 'serious' ||
+    candidate === 'critical'
+    ? candidate
+    : null;
+}
+
+function readBooleanField(payload: unknown, key: string): boolean {
+  if (typeof payload === 'boolean') return payload;
+  if (typeof payload === 'object' && payload !== null && key in payload) {
+    return Boolean((payload as Record<string, unknown>)[key]);
+  }
+  return false;
 }
 
 const B64_TABLE = new Int16Array(128).fill(-1);
@@ -385,6 +427,14 @@ export function setAetherMediaMetadata(
   handles.get(engine)?.setMediaMetadata?.(metadata);
 }
 
+/**
+ * Updates Multi-View primary/audio-focus ownership (`MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`,
+ * and primary audio session routing) on a live AetherEngine (`#34`).
+ */
+export function configureAetherMultiView(engine: PlayerEngine, handleAudioFocus: boolean): void {
+  handles.get(engine)?.configureMultiView?.(Boolean(handleAudioFocus));
+}
+
 /** Subscribes to Apple `MPRemoteCommandCenter` remote next/previous/stop actions on a live AetherEngine (`#413`). */
 export function subscribeAetherRemoteMediaAction(
   engine: PlayerEngine,
@@ -398,6 +448,107 @@ export function subscribeAetherRemoteMediaAction(
   return () => {
     sub?.remove();
   };
+}
+
+/**
+ * Requests Apple system Picture-in-Picture via `AVPictureInPictureController` (`#34`).
+ * Returns `false` cleanly on unsupported or raw-TS non-`AVPlayer` routes so JS can fall back
+ * to the in-app floating mini-player.
+ */
+export function enterAetherPictureInPicture(engine?: PlayerEngine): boolean {
+  const nativeHandle = engine === undefined ? undefined : handles.get(engine);
+  if (engine !== undefined && nativeHandle === undefined) return false;
+  try {
+    return Boolean(
+      nativeHandle === undefined
+        ? nativeModule?.enterPictureInPicture?.()
+        : nativeModule?.enterPictureInPicture?.(nativeHandle),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns `true` when Apple system Picture-in-Picture can currently be started for the active
+ * `AVPlayerLayer` route (`#34`), or `false` on raw-TS / unsupported routes.
+ */
+export function canStartAetherPictureInPicture(engine?: PlayerEngine): boolean {
+  const nativeHandle = engine === undefined ? undefined : handles.get(engine);
+  if (engine !== undefined && nativeHandle === undefined) return false;
+  try {
+    return Boolean(
+      nativeHandle === undefined
+        ? nativeModule?.canStartPictureInPicture?.()
+        : nativeModule?.canStartPictureInPicture?.(nativeHandle),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Enables or disables automatic Picture-in-Picture entry when backgrounding from inline playback
+ * on iOS/iPadOS (`#34`). Safely returns `false` on tvOS or when unavailable.
+ */
+export function setAetherAutoEnterPictureInPicture(
+  enabled: boolean,
+  engine?: PlayerEngine,
+): boolean {
+  const nativeHandle = engine === undefined ? undefined : handles.get(engine);
+  if (engine !== undefined && nativeHandle === undefined) return false;
+  try {
+    const flag = Boolean(enabled);
+    return Boolean(
+      nativeHandle === undefined
+        ? nativeModule?.setAutoEnterPictureInPicture?.(flag)
+        : nativeModule?.setAutoEnterPictureInPicture?.(flag, nativeHandle),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Subscribes to Apple system Picture-in-Picture active state transitions (`#34`). */
+export function subscribeAetherPictureInPicture(listener: (inPip: boolean) => void): () => void {
+  const sub = nativeModule?.addListener?.('onPictureInPictureChanged', (payload) => {
+    listener(readBooleanField(payload, 'inPip'));
+  });
+  return () => {
+    sub?.remove();
+  };
+}
+
+/** Reads the current normalized Apple `ProcessInfo.ThermalState` level (`'nominal'` when unavailable, `#232`). */
+export function getAppleThermalState(): AppleThermalState {
+  try {
+    return parseThermalState(nativeModule?.thermalState?.()) ?? 'nominal';
+  } catch {
+    return 'nominal';
+  }
+}
+
+/** Subscribes to live Apple `ProcessInfo.thermalStateDidChangeNotification` updates (`#232`). */
+export function subscribeAppleThermalState(
+  listener: (state: AppleThermalState) => void,
+): () => void {
+  const sub = nativeModule?.addListener?.('onThermalStateChanged', (payload) => {
+    const state = parseThermalState(payload);
+    if (state !== null) listener(state);
+  });
+  return () => {
+    sub?.remove();
+  };
+}
+
+/** Returns device physical RAM in bytes from `ProcessInfo.processInfo.physicalMemory` (`0` when unavailable, `#232`). */
+export function getApplePhysicalMemoryBytes(): number {
+  try {
+    const raw = nativeModule?.physicalMemoryBytes?.();
+    return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -425,8 +576,11 @@ export async function pickApplePlaylistFile(): Promise<ApplePickedPlaylistFile |
   return normalizePickedPlaylist(raw);
 }
 
-function wrap(module: NativeEngineModule): PlayerEngine {
-  const native = new module.Engine();
+function wrap(module: NativeEngineModule, options?: AetherEngineOptions): PlayerEngine {
+  const native =
+    options?.handleAudioFocus === undefined
+      ? new module.Engine()
+      : new module.Engine({ handleAudioFocus: Boolean(options.handleAudioFocus) });
   const bridged = bridgeNativeEngine(native, {
     capabilities: CAPABILITIES,
     uptimeMs: () => module.uptimeMs(),
@@ -490,10 +644,12 @@ function wrap(module: NativeEngineModule): PlayerEngine {
 
 /**
  * Creates an AetherEngine player engine (tvOS, iOS, iPadOS) implementing the `PlayerEngine` port,
- * or returns `null` where the native module is absent. Call `release()` when the player screen unmounts.
+ * or returns `null` where the native module is absent. Pass `{ handleAudioFocus: false }` for
+ * muted secondary Multi-View tiles so they never clobber `MPNowPlayingInfoCenter` or `MPRemoteCommandCenter` (`#34`).
+ * Call `release()` when the player screen unmounts.
  */
-export function createAetherEngine(): PlayerEngine | null {
-  return nativeModule === null ? null : wrap(nativeModule);
+export function createAetherEngine(options?: AetherEngineOptions): PlayerEngine | null {
+  return nativeModule === null ? null : wrap(nativeModule, options);
 }
 
 /** Props of {@link AetherSurface}. */

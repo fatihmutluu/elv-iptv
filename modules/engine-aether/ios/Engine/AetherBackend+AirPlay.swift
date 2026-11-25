@@ -23,7 +23,10 @@ extension AetherBackend {
 
   func syncAirPlayState() {
     let mode = airPlayTracker.recommendedAudioMode
-    audioSessionController.setMultichannelEnabled(mode == .surroundPassthrough)
+    audioSessionController.setMultichannelEnabled(
+      mode == .surroundPassthrough,
+      handleAudioFocus: handleAudioFocus
+    )
     if activeLoadSerial > 0 && airPlayTracker.shouldBrowseBonjour {
       airPlayMonitor?.start()
     } else {
@@ -34,7 +37,7 @@ extension AetherBackend {
   func resetAirPlayState() {
     airPlayMonitor?.stop()
     airPlayTracker.reset()
-    audioSessionController.setMultichannelEnabled(true)
+    audioSessionController.setMultichannelEnabled(true, handleAudioFocus: handleAudioFocus)
   }
 
   func handleAirPlayRouteChanged(_ airPlayPortName: String?) {

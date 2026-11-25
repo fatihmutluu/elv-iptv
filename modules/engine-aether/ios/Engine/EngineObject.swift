@@ -6,10 +6,18 @@ final class EngineObject: SharedObject, @unchecked Sendable {
   private let fence = CommandFence()
   private let gate = ConnectionGate(forceCloseAfterMs: 1_000, settleAfterCloseMs: 25)
   private let httpSession = EngineHttpSession()
+  private let initialAutoEnterPip: Bool
+  private let initialHandleAudioFocus: Bool
   private let onDisposed: @Sendable (EngineObject) -> Void
   @MainActor private var driver: EngineMainDriver?
 
-  init(onDisposed: @escaping @Sendable (EngineObject) -> Void = { _ in }) {
+  init(
+    initialAutoEnterPip: Bool = false,
+    handleAudioFocus: Bool = true,
+    onDisposed: @escaping @Sendable (EngineObject) -> Void = { _ in }
+  ) {
+    self.initialAutoEnterPip = initialAutoEnterPip
+    self.initialHandleAudioFocus = handleAudioFocus
     self.onDisposed = onDisposed
     super.init()
     enqueueMain { [weak self] in
@@ -128,9 +136,40 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     }
   }
 
+  func configureMultiView(handleAudioFocus: Bool) {
+    guard !fence.isDisposedNow else { return }
+    enqueueMain { [weak self] in
+      guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
+      driver.configureMultiView(handleAudioFocus: handleAudioFocus)
+    }
+  }
+
   @MainActor
   func isCurrentlyLive() -> Bool {
     driver?.core.isLivePlayback ?? true
+  }
+
+  @MainActor
+  var hasBoundSurface: Bool {
+    !fence.isDisposedNow && driver?.boundSurface != nil
+  }
+
+  @MainActor
+  func canStartPictureInPicture() -> Bool {
+    guard !fence.isDisposedNow, let driver else { return false }
+    return driver.canStartPictureInPicture()
+  }
+
+  @MainActor
+  func enterPictureInPicture() -> Bool {
+    guard !fence.isDisposedNow, let driver else { return false }
+    return driver.enterPictureInPicture()
+  }
+
+  @MainActor
+  func setAutoEnterPictureInPicture(_ enabled: Bool) -> Bool {
+    guard !fence.isDisposedNow, let driver = ensureDriver() else { return false }
+    return driver.setAutoEnterPictureInPicture(enabled)
   }
 
   func selectAudioTrack(_ attempt: Int, id: String) {
@@ -258,7 +297,15 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     if let driver {
       return driver
     }
-    let created = EngineMainDriver(owner: self, gate: gate, httpSession: httpSession)
+    let created = EngineMainDriver(
+      owner: self,
+      gate: gate,
+      httpSession: httpSession,
+      handleAudioFocus: initialHandleAudioFocus
+    )
+    if initialAutoEnterPip {
+      _ = created.setAutoEnterPictureInPicture(true)
+    }
     driver = created
     return created
   }

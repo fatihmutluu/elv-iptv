@@ -80,6 +80,8 @@ describe('preferences codec', () => {
       windowAspectRatioLock: false,
       backgroundAudioPlayback: false,
       vodEnrichmentEnabled: false,
+      minimizeToTray: false,
+      autoEnterPip: true,
       subtitleStyle: {
         fontSize: 'medium',
         textColor: 'white',

@@ -4,14 +4,9 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine`, `Media3Surface` view
 monitor, and mobile window helpers (player core spec 6.1).
 
 ## API and contract
-- `createMedia3Engine(): PlayerEngine | null` (`src/index.ts`; `null` without `ElvEngineMedia3`) creates a native
-  `Engine` shared object; `release()` frees it. Helpers: `setMedia3PitchLock`, `setMedia3MediaMetadata`,
-  `setMedia3BackgroundAudioEnabled`, `subscribeMedia3RemoteMediaAction`. `Media3Surface` renders `Media3SurfaceView`.
-- Native (`ElvEngineMedia3Module`, `LoadRequest`): `load(flattened LoadCommand + externalSubtitles? + subtitleStyle? + secondarySubtitleTrackId? + bufferPreset? + decoderMode? + allowLegacyTls? + dnsFamily? + hostOverride?)`, `retry`, `play`, `pause`, `seek`, `setScrubbing`/`setSpeed`/`setPitchLock` (VOD, `[0.25, 4.0]`), `setAudioDelay`/`setSubtitleDelay` (`[-30_000, 30_000]` ms), `selectVideoQuality` (`#59`), `selectAudioTrack`, `selectSubtitleTrack`, `selectSecondarySubtitleTrack` (`#402`), `addExternalSubtitle` (`#32`, `#308`), `setSubtitleStyle` (`#32`), `setAudioBoostDb`, `setMediaMetadata`, `setBackgroundAudioEnabled`, `supportsHardwareHevc4k`, `stop`, `recreate`, `onEngineEvent`, `onRemoteMediaAction`, `uptimeMs()`, `readClipboardText()`/`pickPlaylistFile()` (`AndroidSourceImport.kt`, `#51`).
-- Module events & window controls: `onStandbyChanged` (TV `StandbyMonitor`, 6 s debounce), `onSafeAreaInsetsChanged`
-  (`max(systemBars, displayCutout)` dp, zero on TV), `onPictureInPictureChanged`, `setOrientationLocked`,
-  `requestTemporaryOrientation`, `applyShortEdgesCutoutMode`, `getSafeAreaInsets`, `isStatusBarFullscreen`,
-  `enterPictureInPicture` (`[0.418410, 2.39]`), `notifyPictureInPictureModeChanged`.
+- `createMedia3Engine(options?): PlayerEngine | null` (`src/index.ts`; `null` without `ElvEngineMedia3`) creates a native `Engine` shared object with optional Multi-View `{ handleAudioFocus?, multiViewTileCount? }` (`#34`, `#221`); `release()` frees it. Helpers: `configureMedia3MultiView`, `setMedia3PitchLock`, `setMedia3MediaMetadata`, `setMedia3BackgroundAudioEnabled`, `subscribeMedia3RemoteMediaAction`, `getAndroidThermalState`, `subscribeAndroidThermalState`, `getAndroidDeviceMemoryInfo`, `enterAndroidPictureInPicture` (optional `sourceRect`), `setAndroidAutoEnterPictureInPicture` (API 31+). `Media3Surface` renders `Media3SurfaceView`.
+- Native (`ElvEngineMedia3Module`, `LoadRequest`): `load(flattened LoadCommand + externalSubtitles? + subtitleStyle? + secondarySubtitleTrackId? + bufferPreset? + decoderMode? + allowLegacyTls? + dnsFamily? + hostOverride?)`, `retry`, `play`, `pause`, `seek`, `setScrubbing`/`setSpeed`/`setPitchLock` (VOD, `[0.25, 4.0]`), `setAudioDelay`/`setSubtitleDelay` (`[-30_000, 30_000]` ms), `selectVideoQuality` (`#59`), `selectAudioTrack`, `selectSubtitleTrack`, `selectSecondarySubtitleTrack` (`#402`), `addExternalSubtitle` (`#32`, `#308`), `setSubtitleStyle` (`#32`), `setAudioBoostDb`, `setMediaMetadata`, `setBackgroundAudioEnabled`, `configureMultiView` (`#34`, `#221`), `supportsHardwareHevc4k`, `stop`, `recreate`, `onEngineEvent`, `onRemoteMediaAction`, `uptimeMs()`, `getThermalState()`, `getDeviceMemoryInfo()`, `readClipboardText()`/`pickPlaylistFile()` (`AndroidSourceImport.kt`, `#51`).
+- Module events & window controls: `onStandbyChanged` (TV `StandbyMonitor`, 6 s debounce), `onThermalStateChanged` (`ThermalMonitor`, API 29+ `PowerManager` watchdog, `#232`), `onSafeAreaInsetsChanged` (`max(systemBars, displayCutout)` dp, zero on TV), `onPictureInPictureChanged`, `setOrientationLocked`, `requestTemporaryOrientation`, `applyShortEdgesCutoutMode`, `getSafeAreaInsets`, `isStatusBarFullscreen`, `enterPictureInPicture` (`[0.418410, 2.39]` + optional `sourceRectHint`), `setAutoEnterPictureInPicture` (API 31+ non-TV, `#34`), `notifyPictureInPictureModeChanged`.
 - Manifest declares `WAKE_LOCK`, `ACCESS_WIFI_STATE`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`,
   `POST_NOTIFICATIONS`, and `ElvPlaybackSessionService` (`mediaPlayback` foreground `MediaSessionService`, `#412`).
 
@@ -24,7 +19,9 @@ monitor, and mobile window helpers (player core spec 6.1).
   before releasing old instances, strips artwork credentials, restricts untrusted controllers to transport commands, and
   attaches/removes sessions on `ElvPlaybackSessionService` so Media3 manages foreground notifications atomically.
 - `PlayerFactory` + `LoadControlConfig`: splits `StreamKind` (`RAW_TS_LIVE`, `HLS_LIVE`, `VOD`) x `BufferPreset` with
-  RAM-proportional cap & low-RAM `16 MiB` hard cap; `DefaultTrackSelector` (`AudioOffloadPreferences`, `CaptioningManager`).
+  RAM-proportional cap, low-RAM `16 MiB` hard cap, Multi-View tile scaling (`targetBufferBytes / tileCount` floored at
+  `8 MiB`, conservative durations, secondary tiles `handleAudioFocus = false`, `#34`); `DefaultTrackSelector`
+  (`AudioOffloadPreferences`, `CaptioningManager`).
 - `CodecPolicy` + `PolicyVideoRenderer` + `FfmpegAudio` + `AudioEffectsController`: LGPL-2.1+ FFmpeg 9.0.2; off-UI-thread
   4K HEVC probe; `VideoDecoderMode` (`auto`/`hardware`/`software`, `#411`); `DeviceQuirks`; stereo-only `LoudnessEnhancer`.
 - `SurfaceController` + `Media3SurfaceView` (`VIEW.md`): `SurfaceView` + opt-in `useTextureView` + `surfaceRecreationToken`

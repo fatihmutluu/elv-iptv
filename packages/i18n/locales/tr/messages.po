@@ -2784,3 +2784,105 @@ msgstr "Bu koleksiyonda henüz yapım yok."
 
 msgid "collections.viewAll"
 msgstr "Tümünü gör"
+
+msgid "player.pip.enter"
+msgstr "Pencere içinde pencere"
+
+msgid "player.pip.unsupported"
+msgstr "Pencere içinde pencere bu yayın için kullanılamıyor"
+
+msgid "settings.playback.autoEnterPipTitle"
+msgstr "Otomatik pencere içinde pencere"
+
+msgid "settings.playback.autoEnterPipDescription"
+msgstr "Uygulamadan çıkarken videoyu yüzen pencerede oynatmaya devam eder."
+
+msgid "player.miniPlayer.minimize"
+msgstr "Oynatıcıyı küçült"
+
+msgid "player.miniPlayer.expand"
+msgstr "Oynatıcıyı büyüt"
+
+msgid "player.miniPlayer.close"
+msgstr "Mini oynatıcıyı kapat"
+
+msgid "player.miniPlayer.activeLabel"
+msgstr "Mini oynatıcı etkin"
+
+msgid "player.multiView.title"
+msgstr "Çoklu Görünüm"
+
+msgid "player.multiView.enter"
+msgstr "Çoklu Görünüm"
+
+msgid "player.multiView.exit"
+msgstr "Çoklu Görünümden çık"
+
+msgid "player.multiView.addChannel"
+msgstr "Kanal ekle"
+
+msgid "player.multiView.replaceChannel"
+msgstr "Kanalı değiştir"
+
+msgid "player.multiView.removeTile"
+msgstr "Ekranı kaldır"
+
+msgid "player.multiView.swapAudio"
+msgstr "Sesi buraya al"
+
+msgid "player.multiView.activeAudio"
+msgstr "Ses etkin"
+
+msgid "player.multiView.muted"
+msgstr "Sessiz"
+
+msgid "player.multiView.emptySlot"
+msgstr "Kanal ekle"
+
+msgid "player.multiView.tileCount"
+msgstr "{count} ekran"
+
+msgid "player.multiView.connectionLimitTitle"
+msgstr "Bağlantı sınırına ulaşıldı"
+
+msgid "player.multiView.connectionLimitBody"
+msgstr "Bu kaynak {active} / {max} etkin bağlantıya izin verir. Başka bir kaynaktan kanal seçin veya açık bir ekranı kapatın."
+
+msgid "player.multiView.thermalSerious"
+msgstr "Cihaz ısındı — yeni ekran ekleme geçici olarak duraklatıldı."
+
+msgid "player.multiView.thermalCriticalShed"
+msgstr "Cihaz aşırı ısındı — oynatmayı korumak için ikincil ekranlar kapatıldı."
+
+msgid "player.multiView.lowRamUnsupported"
+msgstr "Çoklu Görünüm bu düşük bellekli cihazda kullanılamıyor."
+
+msgid "player.multiView.deviceCapReached"
+msgstr "Bu cihaz en fazla {max} eşzamanlı ekranı destekler."
+
+msgid "player.popout.open"
+msgstr "Ayrı pencerede aç"
+
+msgid "player.popout.dock"
+msgstr "Ana pencereye dön"
+
+msgid "player.popout.pin"
+msgstr "Her zaman üstte"
+
+msgid "player.popout.unpin"
+msgstr "Sabitlemeyi kaldır"
+
+msgid "player.popout.close"
+msgstr "Pencereyi kapat"
+
+msgid "settings.desktop.minimizeToTrayTitle"
+msgstr "Sistem tepsisine küçült"
+
+msgid "settings.desktop.minimizeToTrayDescription"
+msgstr "Ana pencere kapatıldığında uygulamayı sistem tepsisinde çalışır tutar."
+
+msgid "desktop.tray.restore"
+msgstr "ELV IPTV penceresini göster"
+
+msgid "desktop.tray.quit"
+msgstr "Çıkış"

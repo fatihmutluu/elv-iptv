@@ -1,5 +1,11 @@
 import type { AccessibilityFontFamily, DeinterlaceMode, SubtitleStyleConfig } from '@elv/domain';
-import type { ExternalSubtitleTrack, PlayerEngine, StreamRequest } from '@elv/playback';
+import type {
+  ExternalSubtitleTrack,
+  MultiViewDeviceCapabilities,
+  PlayerEngine,
+  StreamRequest,
+  ThermalState,
+} from '@elv/playback';
 import type { ReactElement } from 'react';
 
 /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover, `stretch` fills bounds ignoring aspect). */
@@ -94,6 +100,10 @@ export interface OpenVideoEngine {
   onFullscreenChange?: (listener: (fullscreen: boolean) => void) => () => void;
   /** Optional host audio mute toggle. */
   toggleMute?: () => void;
+  /** Optional explicit host audio mute setter (`#34` Multi-View single active-audio tile). */
+  setMuted?: (muted: boolean) => void;
+  /** Optional host primary-engine promotion for Multi-View OS media/taskbar handoff (`#34`). */
+  setPrimary?: () => void;
   /** Optional host output volume setter (`0`–`100`, `#394`). */
   setVolume?: (volume: number) => void;
   /** Optional initial host output volume (`0`–`100`, `#394`). */
@@ -104,9 +114,22 @@ export interface OpenVideoEngine {
   setOrientationLocked?: (locked: boolean) => void;
   /** Optional temporary sensor-releasing orientation request on mobile (`#266`). */
   requestTemporaryOrientation?: (landscape: boolean) => void;
-  /** Optional Picture-in-Picture entry trigger on Android phones/tablets (`#266`). */
-  enterPictureInPicture?: (aspectWidth?: number, aspectHeight?: number) => boolean;
-  /** Optional Picture-in-Picture mode subscription (`#266`). */
+  /** Optional Picture-in-Picture entry trigger on Android/Apple (`#34`, `#266`). */
+  enterPictureInPicture?: (
+    aspectWidth?: number,
+    aspectHeight?: number,
+    sourceRect?: PipSourceRect,
+  ) => boolean;
+  /** Optional check indicating whether OS PiP is supported for the active route (`#34`). */
+  canStartPictureInPicture?: () => boolean;
+  /** Optional OS auto-enter-PiP configuration (`#34`). */
+  setAutoEnterPictureInPicture?: (
+    enabled: boolean,
+    aspectWidth?: number,
+    aspectHeight?: number,
+    sourceRect?: PipSourceRect,
+  ) => boolean | undefined;
+  /** Optional Picture-in-Picture mode subscription (`#34`, `#266`). */
   onPictureInPictureChange?: (listener: (inPip: boolean) => void) => () => void;
   /** Optional per-stream deinterlace toggle (e.g. desktop mpv interlaced broadcast support, `#131`). */
   setDeinterlace?: (enabled: boolean) => void;
@@ -160,7 +183,36 @@ export interface OpenVideoEngine {
   readonly pickSubtitleFile?: () => Promise<ExternalSubtitleTrack | null>;
 }
 
+/** Optional screen-coordinate hint rectangle for OS Picture-in-Picture entry animations (`#34`). */
+export interface PipSourceRect {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/** Optional per-engine open options supporting concurrent Multi-View tiles (`#34`, `#221`). */
+export interface VideoHostOpenOptions {
+  /** When `false`, opens an additional engine without tearing down existing engines in the window. */
+  readonly replaceExisting?: boolean;
+  /** When `false`, engine is secondary (no OS media-control or window aspect hijack). */
+  readonly primary?: boolean;
+  /** On Android, secondary muted tiles pass `false` so they do not steal `AUDIOFOCUS_GAIN`. */
+  readonly handleAudioFocus?: boolean;
+  /** Active tile count hint so native loaders can scale RAM buffer targets safely. */
+  readonly multiViewTileCount?: number;
+}
+
+/** Platform thermal and Multi-View hardware capability port (`#34`, `#232`). */
+export interface ThermalDevicePort {
+  getThermalState(): ThermalState;
+  subscribeThermalState(listener: (state: ThermalState) => void): () => void;
+  getMultiViewCapabilities(): MultiViewDeviceCapabilities;
+}
+
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */
 export interface VideoHost {
-  open(): OpenVideoEngine | null | Promise<OpenVideoEngine | null>;
+  open(options?: VideoHostOpenOptions): OpenVideoEngine | null | Promise<OpenVideoEngine | null>;
+  /** True when the active presenter supports concurrent Multi-View tiles (`#34`). */
+  readonly supportsMultiView?: boolean;
 }

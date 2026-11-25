@@ -5,6 +5,9 @@ import java.util.Locale
 private const val MIB = 1024 * 1024
 private const val LOW_RAM_TOTAL_BYTES = 1536L * MIB
 private const val LOW_RAM_TARGET_BYTES = 16 * MIB
+private const val MULTIVIEW_MIN_TARGET_BYTES = 8 * MIB
+const val MIN_MULTIVIEW_TILES = 1
+const val MAX_MULTIVIEW_TILES = 4
 private const val AUTO_MIN_TARGET_BYTES = 16L * MIB
 private const val AUTO_MAX_TARGET_BYTES = 96L * MIB
 private const val BALANCED_MIN_TARGET_BYTES = 32L * MIB
@@ -62,20 +65,80 @@ data class LoadControlValues(
 fun isLowRam(isLowRamDevice: Boolean, totalMemBytes: Long): Boolean =
   isLowRamDevice || totalMemBytes < LOW_RAM_TOTAL_BYTES
 
+/** Clamps a Multi-View tile count into the supported `[1, 4]` range (`#34`). */
+fun clampMultiViewTileCount(tileCount: Int): Int =
+  tileCount.coerceIn(MIN_MULTIVIEW_TILES, MAX_MULTIVIEW_TILES)
+
+/** Initial or updated Multi-View engine configuration (`#34`, `#221`). */
+data class MultiViewEngineOptions(
+  val handleAudioFocus: Boolean = true,
+  val multiViewTileCount: Int = MIN_MULTIVIEW_TILES,
+)
+
+/** Parses optional JS Multi-View engine options (`handleAudioFocus`, `multiViewTileCount`) with safe clamping. */
+internal fun parseMultiViewEngineOptions(raw: Map<String, Any?>?): MultiViewEngineOptions {
+  if (raw == null) return MultiViewEngineOptions()
+  val handleAudioFocus = raw["handleAudioFocus"] as? Boolean ?: true
+  val rawCount = (raw["multiViewTileCount"] as? Number)?.toDouble()
+  val tileCount = if (rawCount != null && rawCount.isFinite()) {
+    clampMultiViewTileCount(rawCount.toInt())
+  } else {
+    MIN_MULTIVIEW_TILES
+  }
+  return MultiViewEngineOptions(
+    handleAudioFocus = handleAudioFocus,
+    multiViewTileCount = tileCount,
+  )
+}
+
 /**
- * Stream-type and RAM-proportional load control profile (#147, #150, #262, #422).
- * Low-RAM devices are always capped at `16 MiB` with `prioritizeTimeOverSizeThresholds = false` regardless of [preset].
+ * Scales a single-tile [LoadControlValues] profile for simultaneous Multi-View decoders (`#34`):
+ * divides `targetBufferBytes` by clamped `tileCount` (floored at `8 MiB`), disables time-over-size priority,
+ * and caps live/VOD buffer durations conservatively while preserving ExoPlayer invariants.
+ */
+internal fun scaleLoadControlForMultiView(
+  base: LoadControlValues,
+  streamKind: StreamKind,
+  multiViewTileCount: Int,
+): LoadControlValues {
+  val tiles = clampMultiViewTileCount(multiViewTileCount)
+  if (tiles <= 1) return base
+  val scaledBytes = (base.targetBufferBytes / tiles).coerceAtLeast(MULTIVIEW_MIN_TARGET_BYTES)
+  val floorMinMs = maxOf(base.bufferForPlaybackMs, base.bufferForPlaybackAfterRebufferMs)
+  val (capMinMs, capMaxMs, capBackMs) = when (streamKind) {
+    StreamKind.RAW_TS_LIVE -> if (tiles >= 3) Triple(6_000, 12_000, 0) else Triple(8_000, 15_000, 0)
+    StreamKind.HLS_LIVE -> if (tiles >= 3) Triple(8_000, 15_000, 0) else Triple(10_000, 20_000, 0)
+    StreamKind.VOD -> if (tiles >= 3) Triple(8_000, 16_000, 3_000) else Triple(12_000, 24_000, 5_000)
+  }
+  val minMs = minOf(base.minBufferMs, capMinMs).coerceAtLeast(floorMinMs)
+  val maxMs = minOf(base.maxBufferMs, capMaxMs).coerceAtLeast(minMs)
+  val backMs = minOf(base.backBufferMs, capBackMs).coerceAtLeast(0)
+  return base.copy(
+    minBufferMs = minMs,
+    maxBufferMs = maxMs,
+    targetBufferBytes = scaledBytes,
+    backBufferMs = backMs,
+    retainBackBufferFromKeyframe = backMs > 0 && base.retainBackBufferFromKeyframe,
+    prioritizeTimeOverSizeThresholds = false,
+  )
+}
+
+/**
+ * Stream-type and RAM-proportional load control profile (#147, #150, #262, #422, #34).
+ * Low-RAM devices are always capped at `16 MiB` (or `8 MiB` floor when [multiViewTileCount] > 1) with
+ * `prioritizeTimeOverSizeThresholds = false` regardless of [preset].
  */
 fun loadControlForStream(
   isLowRamDevice: Boolean,
   totalMemBytes: Long,
   streamKind: StreamKind,
   preset: BufferPreset = BufferPreset.AUTO,
+  multiViewTileCount: Int = MIN_MULTIVIEW_TILES,
 ): LoadControlValues {
   val lowRam = isLowRam(isLowRamDevice, totalMemBytes)
   val targetBytes = targetBufferBytesFor(lowRam, totalMemBytes, preset)
   val afterRebufferMs = if (lowRam) REBUFFER_MS_LOW_RAM else REBUFFER_MS_STANDARD
-  return when (streamKind) {
+  val base = when (streamKind) {
     StreamKind.RAW_TS_LIVE -> {
       val (minMs, maxMs) = when {
         lowRam -> 10_000 to 20_000
@@ -131,6 +194,7 @@ fun loadControlForStream(
       )
     }
   }
+  return scaleLoadControlForMultiView(base, streamKind, multiViewTileCount)
 }
 
 /** Backward-compatible load control values for low-RAM vs standard tiers, split by [live] vs VOD (#422). */

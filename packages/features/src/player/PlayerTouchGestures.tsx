@@ -17,6 +17,16 @@ export const HOLD_SPEED_DELAY_MS = 500;
 const SCRUB_FULL_WIDTH_MS = 90_000;
 const HOLD_MOVE_SLOP_PX = 10;
 
+/** Pinch scale threshold (`< 0.78x`) triggering tablet floating mini-player minimize (`#233`). */
+const PINCH_MINIMIZE_RATIO = 0.78;
+
+/** Returns `true` when a 2-finger pinch-out narrows below {@link PINCH_MINIMIZE_RATIO} (`#233`). */
+export function isPinchOutMinimize(initialDistance: number, currentDistance: number): boolean {
+  if (!Number.isFinite(initialDistance) || !Number.isFinite(currentDistance)) return false;
+  if (initialDistance <= 10 || currentDistance < 0) return false;
+  return currentDistance / initialDistance <= PINCH_MINIMIZE_RATIO;
+}
+
 /** Classification returned by {@link classifyTouchGesture}. */
 export type TouchGestureKind = 'none' | 'edge-excluded' | 'brightness' | 'volume' | 'scrub';
 
@@ -39,6 +49,8 @@ export interface PlayerTouchGesturesProps {
   readonly onScrubCommit?: (deltaMs: number) => void;
   readonly onHoldSpeedStart?: () => void;
   readonly onHoldSpeedEnd?: () => void;
+  /** Optional tablet pinch-out (`< 1.0x`) callback to minimize into the floating mini-player (`#233`). */
+  readonly onPinchMinimize?: () => void;
 }
 
 interface TouchPointEvent {
@@ -51,6 +63,12 @@ interface TouchPointEvent {
     readonly pageY?: number;
     readonly clientX?: number;
     readonly clientY?: number;
+    readonly touches?: ReadonlyArray<{
+      readonly pageX?: number;
+      readonly pageY?: number;
+      readonly locationX?: number;
+      readonly locationY?: number;
+    }>;
   };
 }
 
@@ -142,6 +160,27 @@ function readPoint(event: TouchPointEvent | undefined): { x: number; y: number }
     : null;
 }
 
+function readPinchDistance(event: TouchPointEvent | undefined): number | null {
+  const touches = event?.nativeEvent?.touches;
+  if (touches === undefined || touches.length < 2) return null;
+  const a = touches[0];
+  const b = touches[1];
+  if (a === undefined || b === undefined) return null;
+  const ax = a.pageX ?? a.locationX;
+  const ay = a.pageY ?? a.locationY;
+  const bx = b.pageX ?? b.locationX;
+  const by = b.pageY ?? b.locationY;
+  if (
+    typeof ax !== 'number' ||
+    typeof ay !== 'number' ||
+    typeof bx !== 'number' ||
+    typeof by !== 'number'
+  ) {
+    return null;
+  }
+  return Math.hypot(bx - ax, by - ay);
+}
+
 /**
  * Mobile/tablet Cinema Quietude v2 touch gesture surface (`#114`):
  * `24px` system edge exclusion, left-half brightness swipe + visual dim fallback,
@@ -162,6 +201,8 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
     kind: TouchGestureKind;
     lastScrubDeltaMs: number;
     holdActive: boolean;
+    pinchInitialDist: number | null;
+    pinchTriggered: boolean;
   } | null>(null);
 
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -202,6 +243,7 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
     if (pt === null) return;
     const { width, height } = layoutRef.current;
     const edgeExcluded = isInEdgeExclusionZone(pt.x, pt.y, width, height);
+    const pinchDist = readPinchDistance(event);
     gestureRef.current = {
       startX: pt.x,
       startY: pt.y,
@@ -210,8 +252,10 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
       kind: edgeExcluded ? 'edge-excluded' : 'none',
       lastScrubDeltaMs: 0,
       holdActive: false,
+      pinchInitialDist: pinchDist,
+      pinchTriggered: false,
     };
-    if (edgeExcluded) return;
+    if (edgeExcluded || pinchDist !== null) return;
     stopHoldTimer();
     if (p.isVod && p.onHoldSpeedStart !== undefined) {
       holdTimerRef.current = setTimeout(() => {
@@ -230,6 +274,21 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
   const handleMove = (event: TouchPointEvent): void => {
     const g = gestureRef.current;
     if (g === null || g.kind === 'edge-excluded' || g.holdActive) return;
+    const pinchDist = readPinchDistance(event);
+    if (pinchDist !== null) {
+      stopHoldTimer();
+      stopTapTimer();
+      if (g.pinchInitialDist === null) {
+        g.pinchInitialDist = pinchDist;
+        return;
+      }
+      if (!g.pinchTriggered && isPinchOutMinimize(g.pinchInitialDist, pinchDist)) {
+        g.pinchTriggered = true;
+        propsRef.current.onPinchMinimize?.();
+      }
+      return;
+    }
+    if (g.pinchTriggered) return;
     const pt = readPoint(event);
     if (pt === null) return;
     const dx = pt.x - g.startX;
@@ -277,7 +336,7 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
     const g = gestureRef.current;
     gestureRef.current = null;
     setFeedbackText(null);
-    if (g === null || g.kind === 'edge-excluded') return;
+    if (g === null || g.kind === 'edge-excluded' || g.pinchInitialDist !== null) return;
 
     const p = propsRef.current;
     if (g.holdActive) {

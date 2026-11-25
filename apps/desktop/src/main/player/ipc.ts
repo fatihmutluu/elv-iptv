@@ -1,24 +1,28 @@
 import type { AttemptToken, ExternalSubtitleTrack } from '@elv/playback';
 import {
-  type DesktopMediaMetadata,
+  isEngineId,
   isGateReport,
   isPlayerAreaMessage,
   isPlayerCommandMessage,
+  isPlayerOpenOptions,
+  MAX_ENGINES_PER_WINDOW,
   PLAYER_CHANNELS,
   type PlayerEventMessage,
+  type PlayerOpenOptions,
   type PlayerOpenReply,
-  type PlayerRemoteMediaActionMessage,
   type PlayerUiEvent,
   type PlayerUiMessage,
   sanitizeDesktopMediaMetadata,
 } from '../../shared/player-ipc.ts';
-import type {
-  DesktopMediaBridge,
-  DesktopMediaCommand,
-  DesktopMediaPlaybackStatus,
-} from '../media-bridge.ts';
+import type { DesktopMediaBridge, DesktopMediaCommand } from '../media-bridge.ts';
 import type { TaskbarAction, TaskbarController } from '../taskbar-controls.ts';
 import type { MpvEngine } from './engine.ts';
+import {
+  dispatchDesktopMediaCommand,
+  type MediaBridgeState,
+  stoppedMediaState,
+  type TaskbarState,
+} from './ipc-media.ts';
 import type { PowerBlocker } from './power-blocker.ts';
 
 /** The part of Electron's `WebContents` the player IPC uses. */
@@ -89,40 +93,24 @@ export interface PlayerIpcDeps {
 
 const DEFAULT_BUFFERING_RELEASE_MS = 30_000;
 
-interface TaskbarState {
-  active: boolean;
-  isVod: boolean;
-  paused: boolean;
-  positionMs: number;
-  durationMs: number;
-}
-
-interface MediaBridgeState {
-  status: DesktopMediaPlaybackStatus;
-  isNavigating: boolean;
-  kind: 'live' | 'vod';
-  positionUs: number;
-  durationUs: number;
-  rate: number;
-  volume: number;
-  metadata: DesktopMediaMetadata | null;
-}
-
 interface Entry {
   owner: WebContentsLike;
   engine: MpvEngine;
   attempt: AttemptToken;
+  isPrimary: boolean;
+  lastAspectRatio: number | undefined;
+  emitUi: (ui: PlayerUiEvent) => void;
   unsubscribe(): void;
-  taskbar?: TaskbarController;
+  taskbar?: TaskbarController | undefined;
   taskbarState: TaskbarState;
   mediaState: MediaBridgeState;
 }
 
 /**
- * Serves the renderer's player proxy: `player:open` creates the engine owned by the calling webContents (a second open
- * releases the first), commands and area updates reach only that owner's engine, events flow back to the owner only.
- * A main-frame navigation, a renderer crash or the webContents going away releases its engine. Every payload is validated; an
- * invalid one is dropped with a log line that names the channel but never the payload. Returns the disposer.
+ * Serves the renderer's player proxy: `player:open` creates an engine owned by the calling `webContents`
+ * (replacing existing engines by default, or opening up to 4 concurrent Canvas Multi-View tiles when
+ * `{ replaceExisting: false }`), `player:set-primary` promotes the active audio/media/taskbar tile,
+ * and a main-frame navigation, renderer crash, or window close releases all owned engines.
  */
 export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   const { ipcMain, log, powerBlocker, mediaBridge } = deps;
@@ -134,29 +122,24 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   const entries = new Map<string, Entry>();
   const bufferingTimers = new Map<string, unknown>();
   const watched = new Set<number>();
-  const generations = new Map<number, number>();
+  const ownerGenerations = new Map<number, number>();
+  const pendingOpens = new Map<number, Set<string>>();
   let activeMediaEngineId: string | undefined;
   let counter = 0;
   let disposed = false;
 
   const pushStoppedMediaState = (): void => {
-    mediaBridge?.updateState({
-      status: 'Stopped',
-      isNavigating: false,
-      kind: 'live',
-      positionUs: 0,
-      durationUs: 0,
-      rate: 1,
-      volume: 1,
-      metadata: null,
-    });
+    mediaBridge?.updateState(stoppedMediaState());
   };
 
   const pushMediaState = (id: string, promote = false): void => {
     if (!mediaBridge) return;
     const entry = entries.get(id);
     if (!entry) return;
-    if (promote || activeMediaEngineId === undefined || !entries.has(activeMediaEngineId)) {
+    if (
+      entry.isPrimary &&
+      (promote || activeMediaEngineId === undefined || !entries.has(activeMediaEngineId))
+    ) {
       activeMediaEngineId = id;
     }
     if (activeMediaEngineId !== id) return;
@@ -168,10 +151,12 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       const active = entries.get(activeMediaEngineId);
       if (active) return { id: activeMediaEngineId, entry: active };
     }
-    let last: { id: string; entry: Entry } | undefined;
-    for (const [id, entry] of entries) last = { id, entry };
-    if (last) activeMediaEngineId = last.id;
-    return last;
+    let lastPrimary: { id: string; entry: Entry } | undefined;
+    for (const [id, entry] of entries) {
+      if (entry.isPrimary) lastPrimary = { id, entry };
+    }
+    if (lastPrimary) activeMediaEngineId = lastPrimary.id;
+    return lastPrimary;
   };
 
   const clearBufferingTimer = (id: string): void => {
@@ -195,10 +180,19 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     powerBlocker?.release(id);
   };
 
-  const bumpGeneration = (ownerId: number): number => {
-    const next = (generations.get(ownerId) ?? 0) + 1;
-    generations.set(ownerId, next);
+  const bumpOwnerGeneration = (ownerId: number): number => {
+    const next = (ownerGenerations.get(ownerId) ?? 0) + 1;
+    ownerGenerations.set(ownerId, next);
+    pendingOpens.delete(ownerId);
     return next;
+  };
+
+  const countOwnedBy = (ownerId: number): number => {
+    let count = 0;
+    for (const entry of entries.values()) {
+      if (entry.owner.id === ownerId) count += 1;
+    }
+    return count;
   };
 
   const syncTaskbar = (taskbar: TaskbarController | undefined, s: TaskbarState): void => {
@@ -212,13 +206,25 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     });
   };
 
+  const demoteOwnerPrimaries = (ownerId: number, exceptId?: string): void => {
+    for (const [id, other] of entries) {
+      if (other.owner.id !== ownerId || id === exceptId || !other.isPrimary) continue;
+      other.isPrimary = false;
+      other.taskbar?.clear();
+      other.taskbar = undefined;
+    }
+  };
+
   const release = (id: string): void => {
     releasePowerBlocker(id);
     const entry = entries.get(id);
     if (!entry) return;
     entries.delete(id);
-    deps.onVideoAspectRatioChange?.(entry.owner, undefined);
+    if (entry.isPrimary) {
+      deps.onVideoAspectRatioChange?.(entry.owner, undefined);
+    }
     entry.taskbar?.clear();
+    entry.taskbar = undefined;
     entry.unsubscribe();
     entry.engine.release();
     if (activeMediaEngineId === id) {
@@ -234,7 +240,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   };
 
   const invalidateOwner = (owner: WebContentsLike): void => {
-    bumpGeneration(owner.id);
+    bumpOwnerGeneration(owner.id);
     releaseOwnedBy(owner);
   };
 
@@ -253,7 +259,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     owner.once('destroyed', () => {
       watched.delete(owner.id);
       invalidateOwner(owner);
-      generations.delete(owner.id);
+      ownerGenerations.delete(owner.id);
     });
     owner.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument) invalidateOwner(owner);
@@ -261,35 +267,81 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     owner.on('render-process-gone', () => invalidateOwner(owner));
   };
 
-  const onOpen: IpcListener = async ({ sender }): Promise<PlayerOpenReply> => {
+  const onOpen: IpcListener = async ({ sender }, rawOptions): Promise<PlayerOpenReply> => {
     if (disposed || sender.isDestroyed()) {
       throw new Error('the window closed while the player was starting');
     }
+    let options: PlayerOpenOptions | undefined;
+    if (rawOptions !== undefined) {
+      if (!isPlayerOpenOptions(rawOptions)) {
+        log(`player ipc: dropped an invalid ${PLAYER_CHANNELS.open} payload`);
+        throw new Error('invalid player:open options');
+      }
+      options = rawOptions;
+    }
+    const replaceExisting = options?.replaceExisting ?? true;
+    const primary = options?.primary ?? true;
+
     const arrivedAtMs = deps.now();
     watch(sender);
-    const gen = bumpGeneration(sender.id);
-    releaseOwnedBy(sender);
+
+    let gen: number;
+    if (replaceExisting) {
+      gen = bumpOwnerGeneration(sender.id);
+      releaseOwnedBy(sender);
+    } else {
+      gen = ownerGenerations.get(sender.id) ?? 0;
+      const inFlight = pendingOpens.get(sender.id)?.size ?? 0;
+      if (countOwnedBy(sender.id) + inFlight >= MAX_ENGINES_PER_WINDOW) {
+        throw new Error(
+          `maximum concurrent player engines (${MAX_ENGINES_PER_WINDOW}) reached for this window`,
+        );
+      }
+    }
+
     counter += 1;
     const engineId = `engine-${counter}`;
+    let pendingSet = pendingOpens.get(sender.id);
+    if (!pendingSet) {
+      pendingSet = new Set<string>();
+      pendingOpens.set(sender.id, pendingSet);
+    }
+    pendingSet.add(engineId);
+
     let registered = false;
     const isCurrent = (): boolean =>
       !disposed &&
       !sender.isDestroyed() &&
-      generations.get(sender.id) === gen &&
+      (ownerGenerations.get(sender.id) ?? 0) === gen &&
       (!registered || entries.has(engineId));
     const emitUi = (ui: PlayerUiEvent): void => {
       if (!isCurrent()) return;
       const message: PlayerUiMessage = { engineId, ui };
       sendTo(sender, PLAYER_CHANNELS.ui, message);
     };
-    const engine = await deps.createEngine(sender, emitUi, engineId);
+
+    let engine: MpvEngine;
+    try {
+      engine = await deps.createEngine(sender, emitUi, engineId);
+    } finally {
+      if (pendingOpens.get(sender.id) === pendingSet) {
+        pendingSet.delete(engineId);
+        if (pendingSet.size === 0) pendingOpens.delete(sender.id);
+      }
+    }
+
     if (!isCurrent()) {
       engine.release();
       throw new Error('the player open was superseded or the window closed while starting');
     }
-    const taskbar = deps.createTaskbarController?.(sender, (action) =>
-      emitUi({ type: 'key', key: action }),
-    );
+
+    if (primary) {
+      demoteOwnerPrimaries(sender.id, engineId);
+    }
+
+    const taskbar = primary
+      ? deps.createTaskbarController?.(sender, (action) => emitUi({ type: 'key', key: action }))
+      : undefined;
     const taskbarState: TaskbarState = {
       active: false,
       isVod: false,
@@ -307,17 +359,31 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       volume: 1,
       metadata: null,
     };
-    const unsubscribe = engine.subscribe((event) => {
+
+    const entry: Entry = {
+      owner: sender,
+      engine,
+      attempt: 0,
+      isPrimary: primary,
+      lastAspectRatio: undefined,
+      emitUi,
+      unsubscribe: () => undefined,
+      ...(taskbar === undefined ? {} : { taskbar }),
+      taskbarState,
+      mediaState,
+    };
+
+    entry.unsubscribe = engine.subscribe((event) => {
       if (event.type === 'state') {
         if (event.state === 'playing') {
           clearBufferingTimer(engineId);
           powerBlocker?.acquire(engineId);
           taskbarState.active = true;
           taskbarState.paused = false;
-          syncTaskbar(taskbar, taskbarState);
+          if (entry.isPrimary) syncTaskbar(entry.taskbar, taskbarState);
           mediaState.status = 'Playing';
           mediaState.isNavigating = false;
-          pushMediaState(engineId, true);
+          pushMediaState(engineId, entry.isPrimary);
         } else if (event.state === 'buffering') {
           armBufferingTimer(engineId);
         } else if (
@@ -329,15 +395,18 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
           if (event.state === 'paused') {
             taskbarState.active = true;
             taskbarState.paused = true;
-            syncTaskbar(taskbar, taskbarState);
+            if (entry.isPrimary) syncTaskbar(entry.taskbar, taskbarState);
             mediaState.status = 'Paused';
             mediaState.isNavigating = false;
-            pushMediaState(engineId, true);
+            pushMediaState(engineId, entry.isPrimary);
           } else if (event.state === 'ended') {
             taskbarState.active = false;
             taskbarState.paused = false;
-            taskbar?.clear();
-            deps.onVideoAspectRatioChange?.(sender, undefined);
+            entry.lastAspectRatio = undefined;
+            if (entry.isPrimary) {
+              entry.taskbar?.clear();
+              deps.onVideoAspectRatioChange?.(sender, undefined);
+            }
             mediaState.status = 'Stopped';
             mediaState.isNavigating = false;
             mediaState.positionUs = 0;
@@ -352,9 +421,10 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         }
       } else if (event.type === 'clock') {
         taskbarState.positionMs = event.anchor.positionMs;
-        if (event.anchor.durationMs !== undefined)
+        if (event.anchor.durationMs !== undefined) {
           taskbarState.durationMs = event.anchor.durationMs;
-        if (taskbarState.active) syncTaskbar(taskbar, taskbarState);
+        }
+        if (entry.isPrimary && taskbarState.active) syncTaskbar(entry.taskbar, taskbarState);
         mediaState.positionUs = Math.max(0, Math.round(event.anchor.positionMs * 1000));
         if (event.anchor.durationMs !== undefined) {
           mediaState.durationUs = Math.max(0, Math.round(event.anchor.durationMs * 1000));
@@ -369,14 +439,20 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
           Number.isFinite(event.info.aspectRatio) &&
           event.info.aspectRatio > 0
         ) {
-          deps.onVideoAspectRatioChange?.(sender, event.info.aspectRatio);
+          entry.lastAspectRatio = event.info.aspectRatio;
+          if (entry.isPrimary) {
+            deps.onVideoAspectRatioChange?.(sender, event.info.aspectRatio);
+          }
         }
       } else if (event.type === 'error') {
         releasePowerBlocker(engineId);
         taskbarState.active = false;
         taskbarState.paused = false;
-        taskbar?.clear();
-        deps.onVideoAspectRatioChange?.(sender, undefined);
+        entry.lastAspectRatio = undefined;
+        if (entry.isPrimary) {
+          entry.taskbar?.clear();
+          deps.onVideoAspectRatioChange?.(sender, undefined);
+        }
         mediaState.status = 'Stopped';
         mediaState.isNavigating = false;
         pushMediaState(engineId);
@@ -384,16 +460,9 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       const message: PlayerEventMessage = { engineId, event };
       sendTo(sender, PLAYER_CHANNELS.event, message);
     });
-    entries.set(engineId, {
-      owner: sender,
-      engine,
-      attempt: 0,
-      unsubscribe,
-      ...(taskbar === undefined ? {} : { taskbar }),
-      taskbarState,
-      mediaState,
-    });
-    activeMediaEngineId = engineId;
+
+    entries.set(engineId, entry);
+    if (primary) activeMediaEngineId = engineId;
     registered = true;
     engine.start();
     return { engineId, mainNowMs: (arrivedAtMs + deps.now()) / 2 };
@@ -409,6 +478,30 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
 
   const onClose: IpcListener = ({ sender }, engineId) => {
     if (typeof engineId === 'string' && ownedEntry(sender, engineId)) release(engineId);
+  };
+
+  const onSetPrimary: IpcListener = ({ sender }, engineId) => {
+    if (!isEngineId(engineId)) {
+      log(`player ipc: dropped an invalid ${PLAYER_CHANNELS.setPrimary} message`);
+      return;
+    }
+    const entry = ownedEntry(sender, engineId);
+    if (!entry) {
+      log(
+        `player ipc: dropped a ${PLAYER_CHANNELS.setPrimary} message for an engine the sender does not own`,
+      );
+      return;
+    }
+    demoteOwnerPrimaries(sender.id, engineId);
+    entry.isPrimary = true;
+    entry.taskbar ??= deps.createTaskbarController?.(sender, (action: TaskbarAction) =>
+      entry.emitUi({ type: 'key', key: action }),
+    );
+    if (entry.taskbarState.active) syncTaskbar(entry.taskbar, entry.taskbarState);
+    else entry.taskbar?.clear();
+    deps.onVideoAspectRatioChange?.(sender, entry.lastAspectRatio);
+    activeMediaEngineId = engineId;
+    pushMediaState(engineId, true);
   };
 
   const onPickSubtitleFile: IpcListener = async ({ sender }) => {
@@ -441,8 +534,9 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     switch (command.name) {
       case 'load':
         entry.attempt = command.cmd.attempt;
+        entry.lastAspectRatio = undefined;
         releasePowerBlocker(engineId);
-        deps.onVideoAspectRatioChange?.(sender, undefined);
+        if (entry.isPrimary) deps.onVideoAspectRatioChange?.(sender, undefined);
         entry.taskbarState.isVod = command.cmd.kind === 'vod';
         entry.taskbarState.positionMs = command.cmd.startMs ?? 0;
         entry.taskbarState.durationMs = 0;
@@ -454,7 +548,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         entry.mediaState.kind = command.cmd.kind;
         entry.mediaState.positionUs = Math.max(0, Math.round((command.cmd.startMs ?? 0) * 1000));
         entry.mediaState.durationUs = 0;
-        pushMediaState(engineId, true);
+        pushMediaState(engineId, entry.isPrimary);
         engine.load(command.cmd);
         break;
       case 'pause':
@@ -463,7 +557,8 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         entry.attempt = command.attempt;
         releasePowerBlocker(engineId);
         if (command.name === 'stop') {
-          deps.onVideoAspectRatioChange?.(sender, undefined);
+          entry.lastAspectRatio = undefined;
+          if (entry.isPrimary) deps.onVideoAspectRatioChange?.(sender, undefined);
           entry.taskbarState.active = false;
           entry.taskbarState.paused = false;
           entry.taskbar?.clear();
@@ -473,7 +568,8 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
           entry.mediaState.durationUs = 0;
           pushMediaState(engineId);
         } else if (command.name === 'recreate') {
-          deps.onVideoAspectRatioChange?.(sender, undefined);
+          entry.lastAspectRatio = undefined;
+          if (entry.isPrimary) deps.onVideoAspectRatioChange?.(sender, undefined);
         }
         engine[command.name](command.attempt);
         break;
@@ -577,7 +673,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         const sanitized = sanitizeDesktopMediaMetadata(command.metadata);
         entry.mediaState.metadata = sanitized;
         if (sanitized !== null) entry.mediaState.kind = sanitized.kind;
-        pushMediaState(engineId, sanitized !== null);
+        pushMediaState(engineId, entry.isPrimary && sanitized !== null);
         break;
       }
       case 'fullscreen':
@@ -585,6 +681,9 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         break;
       case 'mute':
         engine.toggleMute();
+        break;
+      case 'setMuted':
+        engine.setMuted?.(command.muted);
         break;
       case 'release':
         release(engineId);
@@ -621,103 +720,22 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     if (disposed) return;
     const active = resolveActiveMediaEntry();
     if (!active) return;
-    const { id, entry } = active;
-    switch (cmd.type) {
-      case 'play':
-        entry.engine.play(entry.attempt);
-        break;
-      case 'pause':
-        entry.engine.pause(entry.attempt);
-        break;
-      case 'togglePlayPause':
-        if (entry.mediaState.status === 'Playing') entry.engine.pause(entry.attempt);
-        else entry.engine.play(entry.attempt);
-        break;
-      case 'stop':
-        releasePowerBlocker(id);
-        deps.onVideoAspectRatioChange?.(entry.owner, undefined);
-        entry.taskbarState.active = false;
-        entry.taskbarState.paused = false;
-        entry.taskbar?.clear();
-        entry.mediaState.status = 'Stopped';
-        entry.mediaState.isNavigating = false;
-        entry.mediaState.positionUs = 0;
-        entry.mediaState.durationUs = 0;
-        pushMediaState(id);
-        entry.engine.stop(entry.attempt);
-        break;
-      case 'next':
-      case 'previous': {
-        const canStep = entry.mediaState.metadata
-          ? entry.mediaState.metadata.canStepTrack
-          : entry.mediaState.kind === 'live';
-        if (!canStep) break;
-        const msg: PlayerRemoteMediaActionMessage = { engineId: id, action: cmd.type };
-        sendTo(entry.owner, PLAYER_CHANNELS.remoteMediaAction, msg);
-        break;
-      }
-      case 'seekByUs': {
-        if (
-          entry.mediaState.kind !== 'vod' ||
-          entry.mediaState.durationUs <= 0 ||
-          !Number.isFinite(cmd.offsetUs)
-        ) {
-          break;
-        }
-        const targetUs = Math.max(
-          0,
-          Math.min(
-            entry.mediaState.durationUs,
-            Math.round(entry.mediaState.positionUs + cmd.offsetUs),
-          ),
-        );
-        entry.mediaState.positionUs = targetUs;
-        entry.engine.seek(entry.attempt, targetUs / 1000);
-        mediaBridge?.notifySeeked?.(targetUs);
-        pushMediaState(id);
-        break;
-      }
-      case 'seekToUs': {
-        if (
-          entry.mediaState.kind !== 'vod' ||
-          entry.mediaState.durationUs <= 0 ||
-          !Number.isFinite(cmd.positionUs)
-        ) {
-          break;
-        }
-        const targetUs = Math.max(
-          0,
-          Math.min(entry.mediaState.durationUs, Math.round(cmd.positionUs)),
-        );
-        entry.mediaState.positionUs = targetUs;
-        entry.engine.seek(entry.attempt, targetUs / 1000);
-        mediaBridge?.notifySeeked?.(targetUs);
-        pushMediaState(id);
-        break;
-      }
-      case 'setRate': {
-        if (entry.mediaState.kind !== 'vod' || !Number.isFinite(cmd.rate) || cmd.rate <= 0) break;
-        const clamped = Math.max(0.25, Math.min(4, cmd.rate));
-        entry.mediaState.rate = clamped;
-        entry.engine.setSpeed?.(entry.attempt, clamped);
-        pushMediaState(id);
-        break;
-      }
-      case 'setVolume': {
-        if (!Number.isFinite(cmd.volume)) break;
-        const clamped = Math.max(0, Math.min(1, cmd.volume));
-        entry.mediaState.volume = clamped;
-        entry.engine.setVolume(Math.round(clamped * 100));
-        pushMediaState(id);
-        break;
-      }
-    }
+    dispatchDesktopMediaCommand(cmd, active, {
+      ...(mediaBridge === undefined ? {} : { mediaBridge }),
+      releasePowerBlocker,
+      ...(deps.onVideoAspectRatioChange === undefined
+        ? {}
+        : { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }),
+      pushMediaState,
+      sendTo,
+    });
   };
 
   const offMediaCommand = mediaBridge?.onCommand(handleMediaCommand);
 
   ipcMain.handle(PLAYER_CHANNELS.open, onOpen);
   ipcMain.handle(PLAYER_CHANNELS.close, onClose);
+  ipcMain.handle(PLAYER_CHANNELS.setPrimary, onSetPrimary);
   ipcMain.handle(PLAYER_CHANNELS.pickSubtitleFile, onPickSubtitleFile);
   ipcMain.on(PLAYER_CHANNELS.command, onCommand);
   ipcMain.on(PLAYER_CHANNELS.area, onArea);
@@ -728,6 +746,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     offMediaCommand?.();
     ipcMain.removeHandler(PLAYER_CHANNELS.open);
     ipcMain.removeHandler(PLAYER_CHANNELS.close);
+    ipcMain.removeHandler(PLAYER_CHANNELS.setPrimary);
     ipcMain.removeHandler(PLAYER_CHANNELS.pickSubtitleFile);
     ipcMain.removeListener(PLAYER_CHANNELS.command, onCommand);
     ipcMain.removeListener(PLAYER_CHANNELS.area, onArea);

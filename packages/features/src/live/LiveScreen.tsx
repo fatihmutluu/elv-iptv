@@ -82,6 +82,8 @@ export interface LiveScreenProps {
   readonly onEmbeddedPlaybackActiveChange?: (active: boolean) => void;
   /** Registers an async teardown hook allowing `AppShell` to release embedded previews before tuning another target (`#35`). */
   readonly onRegisterStopPreview?: (stop: (() => Promise<void>) | null) => void;
+  /** Suppresses embedded live previews while another active stream (e.g. Floating Mini-Player) is playing (`#233`). */
+  readonly suppressEmbeddedPreview?: boolean;
 }
 
 /**
@@ -114,6 +116,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     onReminderChanged,
     onEmbeddedPlaybackActiveChange,
     onRegisterStopPreview,
+    suppressEmbeddedPreview = false,
   } = props;
   const theme = useTheme();
   const viewport = useViewport();
@@ -214,6 +217,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     live,
     memoryRef,
     onPlay,
+    suppressEmbeddedPreview,
     ...(videoHost !== undefined ? { videoHost } : {}),
     ...(playbackGuard !== undefined ? { playbackGuard } : {}),
   });

@@ -96,6 +96,10 @@ export interface PlayerOsdProps {
   onSetVolume?: (volume: number) => void;
   onToggleFullscreen?: () => void;
   onToggleAlwaysOnTop?: () => void;
+  onMinimizeToMiniPlayer?: () => void;
+  onEnterPip?: () => void;
+  onEnterMultiView?: () => void;
+  onPopoutPlayer?: () => void;
   onLock?: () => void;
   onJumpPreviousChannel?: () => void;
   onJumpToLiveEdge?: () => void;
@@ -325,6 +329,54 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
             size={38}
             accessibilityLabel={i18n.t('player.aspect')}
             onPress={p.onToggleResizeMode}
+            isTv={isTv}
+          />
+        ) : null}
+
+        {!isPortraitPhone && service !== null && p.onMinimizeToMiniPlayer !== undefined ? (
+          <OsdButton
+            testID="player-minimize-button"
+            icon="miniplayer"
+            variant="bare"
+            size={38}
+            accessibilityLabel={i18n.t('player.miniPlayer.minimize')}
+            onPress={p.onMinimizeToMiniPlayer}
+            isTv={isTv}
+          />
+        ) : null}
+
+        {!isPortraitPhone && service !== null && p.onEnterPip !== undefined ? (
+          <OsdButton
+            testID="player-pip-button"
+            icon="pip"
+            variant="bare"
+            size={38}
+            accessibilityLabel={i18n.t('player.pip.enter')}
+            onPress={p.onEnterPip}
+            isTv={isTv}
+          />
+        ) : null}
+
+        {!isPortraitPhone && service !== null && p.onEnterMultiView !== undefined ? (
+          <OsdButton
+            testID="player-multiview-button"
+            icon="multiview"
+            variant="bare"
+            size={38}
+            accessibilityLabel={i18n.t('player.multiView.enter')}
+            onPress={p.onEnterMultiView}
+            isTv={isTv}
+          />
+        ) : null}
+
+        {!isPortraitPhone && isDesktop && service !== null && p.onPopoutPlayer !== undefined ? (
+          <OsdButton
+            testID="player-popout-button"
+            icon="popout"
+            variant="bare"
+            size={38}
+            accessibilityLabel={i18n.t('player.popout.open')}
+            onPress={p.onPopoutPlayer}
             isTv={isTv}
           />
         ) : null}

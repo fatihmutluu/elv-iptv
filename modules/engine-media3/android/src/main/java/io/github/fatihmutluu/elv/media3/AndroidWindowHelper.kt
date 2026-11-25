@@ -7,12 +7,14 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Rect
 import android.os.Build
 import android.os.Looper
 import android.util.Rational
 import android.view.OrientationEventListener
 import android.view.View
 import android.view.WindowManager
+import androidx.annotation.RequiresApi
 import androidx.core.app.OnPictureInPictureModeChangedProvider
 import androidx.core.app.PictureInPictureModeChangedInfo
 import androidx.core.util.Consumer
@@ -266,39 +268,151 @@ internal fun isActivityStatusBarFullscreen(activity: Activity): Boolean {
 }
 
 /**
- * Enters Android Picture-in-Picture mode with strictly clamped aspect ratio on non-TV API >= 26 devices (#266).
- * Returns `false` on TV, unsupported API levels, finishing activities, or OEM exceptions.
+ * Validates and rounds optional PiP `sourceRectHint` coordinates (`left`, `top`, `right`, `bottom`) into a
+ * non-empty non-negative [Rect] (`right > left && bottom > top`), or returns `null` when omitted or invalid (#34).
  */
-internal fun enterPictureInPicture(
+internal fun resolvePipSourceRect(
+  left: Double?,
+  top: Double?,
+  right: Double?,
+  bottom: Double?,
+): Rect? {
+  if (left == null || top == null || right == null || bottom == null) return null
+  if (!left.isFinite() || !top.isFinite() || !right.isFinite() || !bottom.isFinite()) return null
+  if (left < 0.0 || top < 0.0 || right <= left || bottom <= top) return null
+  val l = round(left).coerceIn(0.0, Int.MAX_VALUE.toDouble()).toInt()
+  val t = round(top).coerceIn(0.0, Int.MAX_VALUE.toDouble()).toInt()
+  val r = round(right).coerceIn(0.0, Int.MAX_VALUE.toDouble()).toInt()
+  val b = round(bottom).coerceIn(0.0, Int.MAX_VALUE.toDouble()).toInt()
+  return if (r > l && b > t) Rect(l, t, r, b) else null
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+private fun buildPipParams(
+  aspectWidth: Int,
+  aspectHeight: Int,
+  sourceRect: Rect?,
+  autoEnterEnabled: Boolean? = null,
+  sdkInt: Int = Build.VERSION.SDK_INT,
+): PictureInPictureParams {
+  val builder = PictureInPictureParams.Builder()
+    .setAspectRatio(Rational(aspectWidth, aspectHeight))
+  if (sourceRect != null) {
+    builder.setSourceRectHint(sourceRect)
+  }
+  if (autoEnterEnabled != null && sdkInt >= Build.VERSION_CODES.S && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    applyPipAutoEnterEnabledApi31(builder, autoEnterEnabled)
+  }
+  return builder.build()
+}
+
+@RequiresApi(Build.VERSION_CODES.S)
+private fun applyPipAutoEnterEnabledApi31(
+  builder: PictureInPictureParams.Builder,
+  enabled: Boolean,
+) {
+  builder.setAutoEnterEnabled(enabled)
+}
+
+@RequiresApi(Build.VERSION_CODES.S)
+private fun applyAutoEnterPipParamsApi31(
   activity: Activity,
-  aspectWidth: Double?,
-  aspectHeight: Double?,
+  enabled: Boolean,
+  aspect: Pair<Int, Int>,
+  sourceRect: Rect?,
 ): Boolean {
-  if (isTvDevice(activity)) return false
-  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
-  if (activity.isFinishing || activity.isDestroyed) return false
-  val (w, h) = clampPipAspectRatio(aspectWidth, aspectHeight)
+  val params = buildPipParams(
+    aspectWidth = aspect.first,
+    aspectHeight = aspect.second,
+    sourceRect = sourceRect,
+    autoEnterEnabled = enabled,
+    sdkInt = Build.VERSION_CODES.S,
+  )
+  activity.setPictureInPictureParams(params)
+  return true
+}
 
-  fun invoke(): Boolean = runCatching {
-    if (activity.isFinishing || activity.isDestroyed) return false
-    val params = PictureInPictureParams.Builder()
-      .setAspectRatio(Rational(w, h))
-      .build()
-    activity.enterPictureInPictureMode(params)
-  }.getOrDefault(false)
-
-  if (Looper.myLooper() == Looper.getMainLooper()) return invoke()
+private fun runOnActivityUiThreadSync(activity: Activity, action: () -> Boolean): Boolean {
+  if (Looper.myLooper() == Looper.getMainLooper()) return action()
   val result = AtomicBoolean(false)
   val done = CountDownLatch(1)
   activity.runOnUiThread {
     try {
-      result.set(invoke())
+      result.set(action())
     } finally {
       done.countDown()
     }
   }
   done.await(PIP_UI_THREAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
   return result.get()
+}
+
+/**
+ * Enters Android Picture-in-Picture mode with strictly clamped aspect ratio and optional `sourceRectHint` on
+ * non-TV API >= 26 devices (#266, #34). Returns `false` on TV, unsupported API levels, finishing activities, or
+ * OEM exceptions.
+ */
+internal fun enterPictureInPicture(
+  activity: Activity,
+  aspectWidth: Double?,
+  aspectHeight: Double?,
+  sourceLeft: Double? = null,
+  sourceTop: Double? = null,
+  sourceRight: Double? = null,
+  sourceBottom: Double? = null,
+  sdkInt: Int = Build.VERSION.SDK_INT,
+): Boolean {
+  if (isTvDevice(activity)) return false
+  if (sdkInt < Build.VERSION_CODES.O) return false
+  if (activity.isFinishing || activity.isDestroyed) return false
+  val (w, h) = clampPipAspectRatio(aspectWidth, aspectHeight)
+  val sourceRect = resolvePipSourceRect(sourceLeft, sourceTop, sourceRight, sourceBottom)
+
+  return runOnActivityUiThreadSync(activity) {
+    runCatching {
+      if (activity.isFinishing || activity.isDestroyed) return@runCatching false
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return@runCatching false
+      val params = buildPipParams(w, h, sourceRect, autoEnterEnabled = null, sdkInt = sdkInt)
+      activity.enterPictureInPictureMode(params)
+    }.getOrDefault(false)
+  }
+}
+
+/**
+ * Configures Android 12+ (API 31+) `PictureInPictureParams.Builder.setAutoEnterEnabled` with clamped aspect ratio
+ * and optional `sourceRectHint` on non-TV devices (#34). Returns `false` safely on TV, API < 31, finishing
+ * activities, or OEM exceptions.
+ */
+internal fun setAutoEnterPictureInPicture(
+  activity: Activity,
+  enabled: Boolean,
+  aspectWidth: Double? = null,
+  aspectHeight: Double? = null,
+  sourceLeft: Double? = null,
+  sourceTop: Double? = null,
+  sourceRight: Double? = null,
+  sourceBottom: Double? = null,
+  sdkInt: Int = Build.VERSION.SDK_INT,
+  applyAutoEnter: ((Activity, Boolean, Pair<Int, Int>, Rect?) -> Boolean)? = null,
+): Boolean {
+  if (isTvDevice(activity)) return false
+  if (sdkInt < Build.VERSION_CODES.S) return false
+  if (activity.isFinishing || activity.isDestroyed) return false
+  val aspect = clampPipAspectRatio(aspectWidth, aspectHeight)
+  val sourceRect = resolvePipSourceRect(sourceLeft, sourceTop, sourceRight, sourceBottom)
+
+  return runOnActivityUiThreadSync(activity) {
+    runCatching {
+      if (activity.isFinishing || activity.isDestroyed) return@runCatching false
+      if (applyAutoEnter != null) {
+        applyAutoEnter(activity, enabled, aspect, sourceRect)
+      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        applyAutoEnterPipParamsApi31(activity, enabled, aspect, sourceRect)
+      } else {
+        false
+      }
+    }.getOrDefault(false)
+  }
 }
 
 /**

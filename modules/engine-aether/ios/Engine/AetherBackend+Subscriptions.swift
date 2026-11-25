@@ -62,6 +62,7 @@ extension AetherBackend {
           self.onObservation?(.firstFrame, serial)
           self.refreshSubtitleGeometry(from: target)
           self.inspectAndEmitVideoInfo(from: target, serial: serial)
+          self.onPlayerLayerMayHaveChanged?()
         }
       }
       .store(in: &cancellables)
@@ -338,10 +339,14 @@ extension AetherBackend {
     }
     avPlayerBufferCancellables.removeAll()
     lastAVBufferReportedBuffering = false
-    guard let player else { return }
+    guard let player else {
+      onPlayerLayerMayHaveChanged?()
+      return
+    }
     player.preventsDisplaySleepDuringVideoPlayback = true
     player.allowsExternalPlayback = true
     applyOutputAudioPreferences(to: player)
+    onPlayerLayerMayHaveChanged?()
     let playerId = ObjectIdentifier(player)
     observedAVPlayerId = playerId
     player.publisher(for: \.isExternalPlaybackActive, options: [.initial, .new])

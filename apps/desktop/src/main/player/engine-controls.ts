@@ -61,6 +61,7 @@ export interface EngineControls {
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
   toggleMute(): void;
+  setMuted(muted: boolean): void;
   setSpeed(attempt: AttemptToken, rate: number): void;
   setVolume(volume: number): void;
   setAudioDelay(attempt: AttemptToken, delayMs: number): void;
@@ -214,6 +215,11 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
       if (deps.isReleased()) return;
       audioRamp.cancel(true);
       deps.enqueueCommand(['cycle', 'mute']);
+    },
+    setMuted(muted) {
+      if (deps.isReleased()) return;
+      audioRamp.cancel(true);
+      setProp('mute', muted ? 'yes' : 'no');
     },
     setSpeed(attempt, rate) {
       const media = deps.getMedia();

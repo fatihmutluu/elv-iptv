@@ -86,6 +86,8 @@ export function PlaybackSettingsPanel({
       focusedControlId === 'toggle-pitch-lock' ||
       focusedControlId === 'toggle-audio-normalization' ||
       focusedControlId === 'toggle-window-aspect-ratio-lock' ||
+      focusedControlId === 'toggle-minimize-to-tray' ||
+      focusedControlId === 'toggle-auto-enter-pip' ||
       focusedControlId === 'toggle-background-audio' ||
       focusedControlId.startsWith('osd-time-') ||
       focusedControlId.startsWith('oled-') ||
@@ -317,10 +319,30 @@ export function PlaybackSettingsPanel({
                 applyPatch({ windowAspectRatioLock: !activePrefs.windowAspectRatioLock })
               }
             />
+            <SettingsDivider />
+            <SettingsToggleRow
+              testID="settings-playback-toggle-minimize-to-tray"
+              title={i18n.t('settings.desktop.minimizeToTrayTitle')}
+              description={i18n.t('settings.desktop.minimizeToTrayDescription')}
+              checked={activePrefs.minimizeToTray}
+              focused={focusedControlId === 'toggle-minimize-to-tray'}
+              isTv={isTv}
+              onToggle={() => applyPatch({ minimizeToTray: !activePrefs.minimizeToTray })}
+            />
           </>
         ) : null}
         {isMobile ? (
           <>
+            <SettingsDivider />
+            <SettingsToggleRow
+              testID="settings-playback-toggle-auto-enter-pip"
+              title={i18n.t('settings.playback.autoEnterPipTitle')}
+              description={i18n.t('settings.playback.autoEnterPipDescription')}
+              checked={activePrefs.autoEnterPip}
+              focused={focusedControlId === 'toggle-auto-enter-pip'}
+              isTv={isTv}
+              onToggle={() => applyPatch({ autoEnterPip: !activePrefs.autoEnterPip })}
+            />
             <SettingsDivider />
             <SettingsToggleRow
               testID="settings-playback-toggle-background-audio"

@@ -22,7 +22,12 @@ const mockMedia3RemoteActionListeners = new Set<(action: 'next' | 'previous' | '
 const mockRequestTemporaryOrientation = jest.fn();
 const mockApplyShortEdgesCutoutMode = jest.fn();
 const mockGetSafeAreaInsets = jest.fn(() => ({ top: 24, right: 0, bottom: 16, left: 0 }));
-const mockEnterPip = jest.fn<boolean, [number?, number?]>(() => true);
+const mockEnterPip = jest.fn<boolean, [number?, number?, unknown?]>(() => true);
+const mockGetAndroidDeviceMemoryInfo = jest.fn(() => ({
+  isLowRamDevice: false,
+  totalMemBytes: 4 * 1024 * 1024 * 1024,
+  lowRam: false,
+}));
 const mockStandbyListeners = new Set<(standby: boolean) => void>();
 const mockSafeAreaListeners = new Set<
   (insets: { top: number; right: number; bottom: number; left: number }) => void
@@ -151,71 +156,77 @@ jest.mock('@elv/engine-aether', () => {
     },
   };
 });
-jest.mock('@elv/engine-media3', () => ({
-  createMedia3Engine: () => mockMedia3Engine,
-  setOrientationLocked: (locked: boolean) => mockSetOrientationLocked(locked),
-  setMedia3PitchLock: (engine: PlayerEngine, locked: boolean) =>
-    mockSetMedia3PitchLock(engine, locked),
-  setMedia3MediaMetadata: (engine: PlayerEngine, metadata: unknown) =>
-    mockSetMedia3MediaMetadata(engine, metadata),
-  setMedia3BackgroundAudioEnabled: (engine: PlayerEngine, enabled: boolean) =>
-    mockSetMedia3BackgroundAudioEnabled(engine, enabled),
-  subscribeMedia3RemoteMediaAction: (
-    _engine: PlayerEngine,
-    listener: (action: 'next' | 'previous' | 'stop') => void,
-  ) => {
-    mockMedia3RemoteActionListeners.add(listener);
-    return () => {
-      mockMedia3RemoteActionListeners.delete(listener);
-    };
-  },
-  requestTemporaryOrientation: (landscape: boolean) => mockRequestTemporaryOrientation(landscape),
-  applyAndroidShortEdgesCutoutMode: () => mockApplyShortEdgesCutoutMode(),
-  getAndroidSafeAreaInsets: () => mockGetSafeAreaInsets(),
-  enterAndroidPictureInPicture: (w?: number, h?: number) => mockEnterPip(w, h),
-  subscribeAndroidStandby: (listener: (standby: boolean) => void) => {
-    mockStandbyListeners.add(listener);
-    return () => {
-      mockStandbyListeners.delete(listener);
-    };
-  },
-  subscribeAndroidSafeAreaInsets: (
-    listener: (insets: { top: number; right: number; bottom: number; left: number }) => void,
-  ) => {
-    mockSafeAreaListeners.add(listener);
-    return () => {
-      mockSafeAreaListeners.delete(listener);
-    };
-  },
-  subscribeAndroidPictureInPicture: (listener: (inPip: boolean) => void) => {
-    mockPipListeners.add(listener);
-    return () => {
-      mockPipListeners.delete(listener);
-    };
-  },
-  Media3Surface: ({
-    testID,
-    resizeMode,
-    subtitleBottomInsetPx,
-    surfaceRecreationToken,
-    useTextureView,
-  }: {
-    testID?: string;
-    resizeMode?: string;
-    subtitleBottomInsetPx?: number;
-    surfaceRecreationToken?: number;
-    useTextureView?: boolean;
-  }) => {
-    lastMedia3SurfaceProps = {
+jest.mock('@elv/engine-media3', () => {
+  const actual = jest.requireActual<typeof import('@elv/engine-media3')>('@elv/engine-media3');
+  return {
+    ...actual,
+    createMedia3Engine: () => mockMedia3Engine,
+    getAndroidDeviceMemoryInfo: () => mockGetAndroidDeviceMemoryInfo(),
+    setOrientationLocked: (locked: boolean) => mockSetOrientationLocked(locked),
+    setMedia3PitchLock: (engine: PlayerEngine, locked: boolean) =>
+      mockSetMedia3PitchLock(engine, locked),
+    setMedia3MediaMetadata: (engine: PlayerEngine, metadata: unknown) =>
+      mockSetMedia3MediaMetadata(engine, metadata),
+    setMedia3BackgroundAudioEnabled: (engine: PlayerEngine, enabled: boolean) =>
+      mockSetMedia3BackgroundAudioEnabled(engine, enabled),
+    subscribeMedia3RemoteMediaAction: (
+      _engine: PlayerEngine,
+      listener: (action: 'next' | 'previous' | 'stop') => void,
+    ) => {
+      mockMedia3RemoteActionListeners.add(listener);
+      return () => {
+        mockMedia3RemoteActionListeners.delete(listener);
+      };
+    },
+    requestTemporaryOrientation: (landscape: boolean) => mockRequestTemporaryOrientation(landscape),
+    applyAndroidShortEdgesCutoutMode: () => mockApplyShortEdgesCutoutMode(),
+    getAndroidSafeAreaInsets: () => mockGetSafeAreaInsets(),
+    enterAndroidPictureInPicture: (w?: number, h?: number, rect?: unknown) =>
+      mockEnterPip(w, h, rect),
+    subscribeAndroidStandby: (listener: (standby: boolean) => void) => {
+      mockStandbyListeners.add(listener);
+      return () => {
+        mockStandbyListeners.delete(listener);
+      };
+    },
+    subscribeAndroidSafeAreaInsets: (
+      listener: (insets: { top: number; right: number; bottom: number; left: number }) => void,
+    ) => {
+      mockSafeAreaListeners.add(listener);
+      return () => {
+        mockSafeAreaListeners.delete(listener);
+      };
+    },
+    subscribeAndroidPictureInPicture: (listener: (inPip: boolean) => void) => {
+      mockPipListeners.add(listener);
+      return () => {
+        mockPipListeners.delete(listener);
+      };
+    },
+    Media3Surface: ({
+      testID,
       resizeMode,
       subtitleBottomInsetPx,
       surfaceRecreationToken,
       useTextureView,
-    };
-    const { View } = require('react-native');
-    return <View testID={testID ?? 'media3-surface'} accessibilityLabel="media3-surface" />;
-  },
-}));
+    }: {
+      testID?: string;
+      resizeMode?: string;
+      subtitleBottomInsetPx?: number;
+      surfaceRecreationToken?: number;
+      useTextureView?: boolean;
+    }) => {
+      lastMedia3SurfaceProps = {
+        resizeMode,
+        subtitleBottomInsetPx,
+        surfaceRecreationToken,
+        useTextureView,
+      };
+      const { View } = require('react-native');
+      return <View testID={testID ?? 'media3-surface'} accessibilityLabel="media3-surface" />;
+    },
+  };
+});
 jest.mock('@op-engineering/op-sqlite', () => ({ open: jest.fn() }));
 jest.mock('expo-localization', () => ({
   getLocales: jest.fn(() => [{ languageTag: 'en-US', languageCode: 'en' }]),
@@ -355,6 +366,7 @@ afterEach(() => {
   mockApplyShortEdgesCutoutMode.mockReset();
   mockGetSafeAreaInsets.mockClear();
   mockEnterPip.mockClear();
+  mockGetAndroidDeviceMemoryInfo.mockClear();
   mockStandbyListeners.clear();
   mockSafeAreaListeners.clear();
   mockPipListeners.clear();
@@ -747,6 +759,14 @@ describe('App', () => {
     expect(mockLastAppShellProps?.keymapStore).toBe(mockLastAppProvidersProps?.keymapStore);
     expect(mockLastAppShellProps?.lanPairing).toBeDefined();
     expect(mockLastAppShellProps?.tvHomeChannels).toBeDefined();
+    expect(mockLastAppShellProps?.thermalDevice).toBeDefined();
+    expect(mockLastAppShellProps?.thermalDevice?.getMultiViewCapabilities()).toEqual({
+      platform: 'android',
+      totalMemoryBytes: 4 * 1024 * 1024 * 1024,
+      isLowRamDevice: false,
+      supported: true,
+    });
+    expect(mockLastAppShellProps?.videoHost.supportsMultiView).toBe(true);
     expect(mockObservedDeepLinks).toContainEqual({ itemKey: 'ck-1', kind: 'live' });
     expect(mockLastAppShellProps?.pendingDeepLink).toBeNull();
 

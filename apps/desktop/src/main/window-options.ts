@@ -1,4 +1,5 @@
 import type { BrowserWindowConstructorOptions } from 'electron';
+import type { PresenterKind } from '../shared/player-ipc.ts';
 import type { Rect } from './window-bounds.ts';
 
 /** Title shown in the window frame and the task bar. */
@@ -29,8 +30,11 @@ export interface CrashRecoverableWindow {
  */
 export function buildWindowOptions(
   preloadPath: string,
-  opts: { gate?: boolean; bounds?: Rect } = {},
+  opts: { gate?: boolean; bounds?: Rect; presenter?: PresenterKind } = {},
 ): BrowserWindowConstructorOptions {
+  const additionalArguments: string[] = [];
+  if (opts.gate) additionalArguments.push('--elv-gate-mode');
+  if (opts.presenter !== undefined) additionalArguments.push(`--elv-presenter=${opts.presenter}`);
   return {
     title: WINDOW_TITLE,
     ...(opts.bounds
@@ -53,7 +57,7 @@ export function buildWindowOptions(
       nodeIntegration: false,
       sandbox: true,
       backgroundThrottling: false,
-      ...(opts.gate ? { additionalArguments: ['--elv-gate-mode'] } : {}),
+      ...(additionalArguments.length > 0 ? { additionalArguments } : {}),
     },
   };
 }
