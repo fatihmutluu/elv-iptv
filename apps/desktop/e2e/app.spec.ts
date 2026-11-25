@@ -11,6 +11,9 @@ test('opens a window titled ELV IPTV that mounts SourcesScreen on desktop', asyn
   try {
     const window = await app.firstWindow();
     await expect(window).toHaveTitle('ELV IPTV');
+    await expect(window.getByTestId('welcome-sync-overlay')).toBeVisible();
+    await window.getByTestId('welcome-continue-without-account').click();
+    await expect(window.getByTestId('welcome-sync-overlay')).toHaveCount(0);
     await expect(window.getByText('ELV IPTV')).toBeVisible();
     await expect(window.getByTestId('sources-screen')).toBeVisible();
     await expect(window.getByTestId('sources-layout-desktop')).toBeVisible();
