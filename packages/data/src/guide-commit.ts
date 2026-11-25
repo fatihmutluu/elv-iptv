@@ -80,7 +80,7 @@ const SWAP_PROGRAMMES = `INSERT INTO programmes (${PROGRAMME_COLUMNS})
   WHERE CASE WHEN next_start IS NOT NULL AND stop > next_start THEN next_start ELSE stop END > start`;
 
 /** Cap per `tx.batch` chunk in guide commit so 5,000-channel JSI marshalling stays under 100 ms (`#478`). */
-const MAX_COMMIT_BATCH = 500;
+const MAX_COMMIT_BATCH = 250;
 /** Mapped `guide_id`s indexed per `programmes_fts` chunk (`<= 251` bind params, well below 999 ceiling `#478`). */
 const FTS_GUIDE_ID_CHUNK = 250;
 
@@ -158,6 +158,7 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
     if (!finalMap.has(key)) finalMap.set(key, guideId);
   }
   const mappings = [...finalMap];
+  if (mappings.length >= MAX_COMMIT_BATCH) await c.deps.scheduler.yieldNow();
 
   const mapped = new Set(mappings.map(([, guideId]) => guideId));
   const empty = ![...mapped].some((guideId) => (g.staged.get(guideId) ?? 0) > 0);

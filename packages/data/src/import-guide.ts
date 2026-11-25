@@ -9,7 +9,7 @@ import {
   openGuide,
 } from './guide-fetch';
 import {
-  buildChannelIndex,
+  buildChannelIndexAsync,
   type ChannelIndex,
   matchGuideChannel,
   stripFeedId,
@@ -63,7 +63,7 @@ const MAX_GUIDE_SCAN_SLICE = 500;
 /** Upper bound on staged programme rows written per SQLite WAL transaction (`#25`). */
 const MAX_GUIDE_WRITE_BATCH = 2_500;
 /** Channels processed per event-loop slice so 5,000-channel finalization never stalls JS (`#478`). */
-const CHANNEL_YIELD_SLICE = 500;
+const CHANNEL_YIELD_SLICE = 200;
 
 type GuideOutcome =
   | { kind: 'imported'; slot: string; state: GuideState; validator: HttpCacheValidator | undefined }
@@ -266,7 +266,7 @@ async function execute(
     c.warnings += res.warnings;
     for (const code of res.warningCodes) c.warningCodes.push(code);
     const st: GuideState = {
-      index: buildChannelIndex(live),
+      index: await buildChannelIndexAsync(live, c.deps.scheduler),
       channelsById: new Map(),
       channelRows: [],
       open: new Map(),
@@ -370,7 +370,7 @@ async function execute(
   const effectiveDaysBack = Math.max(window.daysBack, maxCatchupDays);
   const retentionFloorMs = now - effectiveDaysBack * DAY_MS;
   const st: GuideState = {
-    index: buildChannelIndex(live),
+    index: await buildChannelIndexAsync(live, c.deps.scheduler),
     channelsById: new Map(),
     channelRows: [],
     open: new Map(),

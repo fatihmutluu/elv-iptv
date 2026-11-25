@@ -1,3 +1,4 @@
+import type { Scheduler } from '@elv/domain';
 import { foldGuideMatchText, foldText } from './fold';
 
 /** Live channels of a source indexed for guide matching; values are channel keys. */
@@ -32,14 +33,20 @@ export function stripFeedId(id: string): string {
   return at > 0 ? id.slice(0, at) : id;
 }
 
+const RESOLUTION_ASCII_HINT_RE = /[0-9][pP]/;
+const CHANNEL_INDEX_YIELD_CHUNK = 200;
+
 function stripGuideTags(name: string): string {
-  return name
-    .replace(BRACKET_TAG_RE, ' ')
-    .replace(PAREN_TAG_RE, (_match, inner: string) => {
+  let out = name;
+  if (out.includes('[')) out = out.replace(BRACKET_TAG_RE, ' ');
+  if (out.includes('(')) {
+    out = out.replace(PAREN_TAG_RE, (_match, inner: string) => {
       const trimmed = inner.trim();
       return CALL_SIGN_RE.test(trimmed) ? ` ${trimmed} ` : ' ';
-    })
-    .replace(TWENTY_FOUR_SEVEN_RE, ' ');
+    });
+  }
+  if (out.includes('24/7')) out = out.replace(TWENTY_FOUR_SEVEN_RE, ' ');
+  return out;
 }
 
 /**
@@ -58,7 +65,10 @@ export function normalizeGuideName(name: string): string {
 }
 
 function normalizeGuideMatchName(name: string): string {
-  const cleaned = stripGuideTags(name).replace(RESOLUTION_NOISE_RE, ' ');
+  const stripped = stripGuideTags(name);
+  const cleaned = RESOLUTION_ASCII_HINT_RE.test(stripped)
+    ? stripped.replace(RESOLUTION_NOISE_RE, ' ')
+    : stripped;
   const folded = foldGuideMatchText(cleaned);
   if (folded === '') return '';
   return folded
@@ -84,17 +94,16 @@ function extractChannelNumber(name: string): number | undefined {
   return Number.isFinite(num) && num > 0 ? num : undefined;
 }
 
-/** Indexes live channel rows by exact/case-insensitive/base guide id, folded/normalized name, and positive finite channel number. */
-export function buildChannelIndex(
-  rows: readonly {
-    key: string;
-    guide_id: string | null;
-    name?: string;
-    name_fold: string;
-    num?: number | null;
-  }[],
-): ChannelIndex {
-  const index: ChannelIndex = {
+type ChannelIndexRow = {
+  key: string;
+  guide_id: string | null;
+  name?: string;
+  name_fold: string;
+  num?: number | null;
+};
+
+function createEmptyChannelIndex(): ChannelIndex {
+  return {
     byGuideId: new Map(),
     byGuideIdFold: new Map(),
     byBaseGuideId: new Map(),
@@ -104,23 +113,50 @@ export function buildChannelIndex(
     byNum: new Map(),
     nameFoldByKey: new Map(),
   };
-  for (const row of rows) {
-    if (row.guide_id !== null && row.guide_id !== '') {
-      push(index.byGuideId, row.guide_id, row.key);
-      push(index.byGuideIdFold, row.guide_id.toLowerCase(), row.key);
-      const baseId = stripFeedId(row.guide_id).toLowerCase();
-      if (baseId !== '') push(index.byBaseGuideId, baseId, row.key);
-    }
-    const foldedName = row.name_fold !== '' ? row.name_fold : foldText(row.name ?? '');
-    if (foldedName !== '') index.nameFoldByKey.set(row.key, foldedName);
-    if (row.name_fold !== '') push(index.byFold, row.name_fold, row.key);
-    const rawName = row.name ?? row.name_fold;
-    const norm = normalizeGuideName(rawName);
-    if (norm !== '') push(index.byNormalizedName, norm, row.key);
-    const guideFold = normalizeGuideMatchName(rawName);
-    if (guideFold !== '') push(index.byGuideFold, guideFold, row.key);
-    if (typeof row.num === 'number' && Number.isFinite(row.num) && row.num > 0) {
-      push(index.byNum, row.num, row.key);
+}
+
+function indexChannelRow(index: ChannelIndex, row: ChannelIndexRow): void {
+  if (row.guide_id !== null && row.guide_id !== '') {
+    push(index.byGuideId, row.guide_id, row.key);
+    push(index.byGuideIdFold, row.guide_id.toLowerCase(), row.key);
+    const baseId = stripFeedId(row.guide_id).toLowerCase();
+    if (baseId !== '') push(index.byBaseGuideId, baseId, row.key);
+  }
+  const foldedName = row.name_fold !== '' ? row.name_fold : foldText(row.name ?? '');
+  if (foldedName !== '') index.nameFoldByKey.set(row.key, foldedName);
+  if (row.name_fold !== '') push(index.byFold, row.name_fold, row.key);
+  const rawName = row.name ?? row.name_fold;
+  const norm = normalizeGuideName(rawName);
+  if (norm !== '') push(index.byNormalizedName, norm, row.key);
+  const guideFold = normalizeGuideMatchName(rawName);
+  if (guideFold !== '') push(index.byGuideFold, guideFold, row.key);
+  if (typeof row.num === 'number' && Number.isFinite(row.num) && row.num > 0) {
+    push(index.byNum, row.num, row.key);
+  }
+}
+
+/** Indexes live channel rows by exact/case-insensitive/base guide id, folded/normalized name, and positive finite channel number. */
+export function buildChannelIndex(rows: readonly ChannelIndexRow[]): ChannelIndex {
+  const index = createEmptyChannelIndex();
+  for (const row of rows) indexChannelRow(index, row);
+  return index;
+}
+
+/**
+ * Chunked async variant of {@link buildChannelIndex} that yields between slices so indexing
+ * thousands of live channels on Hermes TV never blocks the JS event loop (`#478`).
+ */
+export async function buildChannelIndexAsync(
+  rows: readonly ChannelIndexRow[],
+  scheduler: Scheduler,
+  chunkSize = CHANNEL_INDEX_YIELD_CHUNK,
+): Promise<ChannelIndex> {
+  const index = createEmptyChannelIndex();
+  const slice = Math.max(1, Math.floor(chunkSize));
+  for (let i = 0; i < rows.length; i += 1) {
+    indexChannelRow(index, rows[i] as ChannelIndexRow);
+    if ((i + 1) % slice === 0 && i + 1 < rows.length) {
+      await scheduler.yieldNow();
     }
   }
   return index;

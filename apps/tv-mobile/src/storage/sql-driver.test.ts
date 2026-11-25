@@ -129,7 +129,7 @@ describe('createOpSqliteDriver', () => {
     expect(writer.log).toEqual([]);
   });
 
-  it('batch inside a transaction packs multi-row INSERTs on tx.execute and uses prepared statements for UPDATE', async () => {
+  it('batch inside a transaction packs multi-row INSERTs on async execute and uses prepared statements for UPDATE (#478)', async () => {
     const { db, writer } = await setup();
     await db.transaction(async (tx) => {
       await tx.batch('INSERT INTO t VALUES (?)', [[1], [2]]);
@@ -139,22 +139,22 @@ describe('createOpSqliteDriver', () => {
       ]);
     });
     expect(writer.log).toEqual([
-      'transaction:begin',
-      'tx.execute:INSERT INTO t VALUES (?), (?)|[1,2]',
+      'execute:BEGIN IMMEDIATE;',
+      'execute:INSERT INTO t VALUES (?), (?)|[1,2]',
       'stmt:UPDATE t SET a = ? WHERE id = ?|[9,1]',
       'stmt:UPDATE t SET a = ? WHERE id = ?|[8,2]',
-      'transaction:end',
+      'execute:COMMIT;',
     ]);
   });
 
-  it('transaction rolls back when the callback throws', async () => {
+  it('transaction rolls back asynchronously when the callback throws (#478)', async () => {
     const { db, writer } = await setup();
     await expect(
       db.transaction(async () => {
         throw new Error('stop');
       }),
     ).rejects.toThrow('stop');
-    expect(writer.log).toContain('transaction:rollback');
+    expect(writer.log).toEqual(['execute:BEGIN IMMEDIATE;', 'execute:ROLLBACK;']);
   });
 
   it('transaction rejects nesting', async () => {
@@ -229,11 +229,11 @@ describe('createOpSqliteDriver', () => {
       .catch((e: Error) => e);
     expect(await outcome).toMatchObject({ name: 'AbortError' });
     expect(writer.log).toEqual([
-      'transaction:begin',
-      'tx.execute:INSERT INTO t VALUES (1)',
-      'tx.execute:INSERT INTO t VALUES (?), (?)|[2,3]',
+      'execute:BEGIN IMMEDIATE;',
+      'execute:INSERT INTO t VALUES (1)',
+      'execute:INSERT INTO t VALUES (?), (?)|[2,3]',
       'interrupt',
-      'transaction:rollback',
+      'execute:ROLLBACK;',
     ]);
   });
 

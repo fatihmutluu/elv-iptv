@@ -410,23 +410,22 @@ export async function createOpSqliteDriver(
       ),
     transaction: <T>(fn: (tx: SqlDriver) => Promise<T>) =>
       writes(async () => {
-        let value: T | undefined;
-        let callbackError: { error: unknown } | undefined;
+        // Use async BEGIN/COMMIT/ROLLBACK on op-sqlite's worker thread instead of `writer.transaction()`,
+        // which calls `executeSync("COMMIT;")` synchronously on the Hermes JS thread and stalls the UI
+        // during large WAL checkpoints (`#478`).
+        await writeGuard(() => writer.execute('BEGIN IMMEDIATE;'));
         try {
-          await writeGuard(() =>
-            writer.transaction(async (tx) => {
-              try {
-                value = await fn(inTransaction(tx));
-              } catch (error) {
-                callbackError = { error };
-                throw error;
-              }
-            }),
-          );
+          const value = await fn(inTransaction(writer));
+          await writeGuard(() => writer.execute('COMMIT;'));
+          return value;
         } catch (error) {
-          throw callbackError ? callbackError.error : error;
+          try {
+            await writer.execute('ROLLBACK;');
+          } catch {
+            // SQLite may already have rolled back automatically on interrupt or constraint failure.
+          }
+          throw error;
         }
-        return value as T;
       }),
     close() {
       if (closePromise !== undefined) return closePromise;
