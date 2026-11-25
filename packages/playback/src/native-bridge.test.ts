@@ -397,4 +397,127 @@ describe('bridgeNativeEngine', () => {
       },
     ]);
   });
+
+  it('sanitizes incoming clock anchor bufferHealth and drops invalid or NaN fields (#350)', () => {
+    const { clock, emit, engine } = fakeHandle();
+    clock.now = 20_000;
+    clock.uptime = 5_000;
+    const received: EngineEvent[] = [];
+    engine.subscribe((event) => received.push(event));
+
+    engine.load({ attempt: 1, url: 'http://sim/movie/1.mp4', headers: {}, kind: 'vod' });
+
+    // Valid complete payload
+    emit({
+      attempt: 1,
+      type: 'clock',
+      anchor: {
+        positionMs: 10_000,
+        atMs: 4_900,
+        rate: 1,
+        durationMs: 120_000,
+        bufferHealth: {
+          bufferedAheadMs: 45_000,
+          bufferedBehindMs: 12_000,
+          diskCacheBytes: 16_777_216,
+          throttled: true,
+        },
+      },
+    });
+
+    // Valid required fields with invalid optional fields -> drops optional fields cleanly
+    emit({
+      attempt: 1,
+      type: 'clock',
+      anchor: {
+        positionMs: 11_000,
+        atMs: 4_950,
+        rate: 1,
+        bufferHealth: {
+          bufferedAheadMs: 0,
+          bufferedBehindMs: 5_000,
+          diskCacheBytes: -50,
+          throttled: 'yes' as unknown as boolean,
+        },
+      },
+    });
+
+    // Invalid required fields (NaN / negative) -> drops bufferHealth entirely
+    emit({
+      attempt: 1,
+      type: 'clock',
+      anchor: {
+        positionMs: 12_000,
+        atMs: 5_000,
+        rate: 1,
+        bufferHealth: {
+          bufferedAheadMs: Number.NaN,
+          bufferedBehindMs: 5_000,
+        },
+      },
+    });
+    emit({
+      attempt: 1,
+      type: 'clock',
+      anchor: {
+        positionMs: 13_000,
+        atMs: 5_000,
+        rate: 1,
+        bufferHealth: {
+          bufferedAheadMs: 10_000,
+          bufferedBehindMs: -1,
+        },
+      },
+    });
+
+    expect(received).toEqual([
+      {
+        attempt: 1,
+        type: 'clock',
+        anchor: {
+          positionMs: 10_000,
+          atMs: 19_900,
+          rate: 1,
+          durationMs: 120_000,
+          bufferHealth: {
+            bufferedAheadMs: 45_000,
+            bufferedBehindMs: 12_000,
+            diskCacheBytes: 16_777_216,
+            throttled: true,
+          },
+        },
+      },
+      {
+        attempt: 1,
+        type: 'clock',
+        anchor: {
+          positionMs: 11_000,
+          atMs: 19_950,
+          rate: 1,
+          bufferHealth: {
+            bufferedAheadMs: 0,
+            bufferedBehindMs: 5_000,
+          },
+        },
+      },
+      {
+        attempt: 1,
+        type: 'clock',
+        anchor: {
+          positionMs: 12_000,
+          atMs: 20_000,
+          rate: 1,
+        },
+      },
+      {
+        attempt: 1,
+        type: 'clock',
+        anchor: {
+          positionMs: 13_000,
+          atMs: 20_000,
+          rate: 1,
+        },
+      },
+    ]);
+  });
 });

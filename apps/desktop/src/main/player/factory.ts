@@ -30,6 +30,10 @@ export interface EngineFactoryDeps {
   renderContext?: boolean;
   /** Optional persistent adaptive readahead tier store (defaults to `<userData>/mpv-readahead.json`). */
   readaheadStore?: ReadaheadTierStore;
+  /** Optional sandbox-safe root directory for ephemeral VOD disk cache sessions (`#350`). */
+  vodCacheRoot?: string;
+  /** Optional dynamic Multi-View tile count for the owning window (`>= 2` disables VOD disk caching, `#350`). */
+  getMultiViewTileCount?: () => number;
   /** Optional macOS `[NSScreen screensHaveSeparateSpaces]` query for multi-monitor fullscreen guard (`#301`). */
   screensHaveSeparateSpaces?: () => boolean;
   /** Override for Electron's `process.mas` flag (Mac App Store App Sandbox blocks cross-process `IOSurfaceLookup`). */
@@ -109,6 +113,10 @@ export async function createEngineFor(
     loadMode: deps.loadMode,
     platform: deps.platform,
     readaheadStore,
+    ...(deps.vodCacheRoot === undefined ? {} : { vodCacheRoot: deps.vodCacheRoot }),
+    ...(deps.getMultiViewTileCount === undefined
+      ? {}
+      : { getMultiViewTileCount: deps.getMultiViewTileCount }),
     now: () => performance.now(),
     timers: {
       setTimeout: (fn, ms) => setTimeout(fn, ms),

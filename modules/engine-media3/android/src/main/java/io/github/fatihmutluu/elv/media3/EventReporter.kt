@@ -20,8 +20,11 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import androidx.media3.exoplayer.video.MediaCodecVideoDecoderException
+import kotlin.math.abs
 
 private const val TICK_MS = 1_000L
+private const val PAUSED_VOD_BUFFER_DELTA_MS = 500L
+private const val PAUSED_VOD_DISK_DELTA_BYTES = 64L * 1024L
 private const val MAX_BEHIND_LIVE_RECOVERIES = 2
 
 /**
@@ -45,12 +48,26 @@ internal class EventReporter(
   private val onCue: (ScreenCue, Boolean) -> Unit,
   private val onTerminalError: () -> Unit = {},
   private val onVideoFrameRateDetected: (Float) -> Unit = {},
+  private val vodBufferHealthProvider: (() -> Pair<Long, Boolean>?)? = null,
+  private val onHttpError: (live: Boolean, httpStatus: Int) -> Unit = { _, _ -> },
 ) : Player.Listener, AnalyticsListener {
+  private data class VodBufferSnapshot(
+    val aheadMs: Long,
+    val behindMs: Long,
+    val diskCacheBytes: Long,
+    val throttled: Boolean,
+  )
+
   private var player: Player? = null
   private var active = false
   private var live = false
   private var isLiveTs = false
   private var ringWindowProvider: (() -> RingBufferTimeShiftWindow?)? = null
+  private var activeVodBackBufferMs = 0L
+  private var activeVodBufferHealthProvider: (() -> Pair<Long, Boolean>?)? = null
+  private var vodBufferedStartMs = C.TIME_UNSET
+  private var vodLastBufferedPositionMs = C.TIME_UNSET
+  private var lastEmittedVodBuffer: VodBufferSnapshot? = null
   private var lastTimeShiftSupported = false
   private var lastState: String? = null
   private var played = false
@@ -64,7 +81,11 @@ internal class EventReporter(
   private var analyticsDroppedFrames = 0
   private var reportedDroppedFrames = 0
   private val timelineWindow = Timeline.Window()
-  private val tick = Runnable { player?.let { anchor(it) } }
+  private var tickScheduled = false
+  private val tick = Runnable {
+    tickScheduled = false
+    player?.let { onTick(it) }
+  }
 
   /** True while this prepare is opening, buffering, or stalled and transfer progress should be reported. */
   @Volatile
@@ -82,12 +103,19 @@ internal class EventReporter(
     reused: Boolean,
     isLiveTs: Boolean = false,
     ringWindowProvider: (() -> RingBufferTimeShiftWindow?)? = null,
+    vodBackBufferMs: Long = 0L,
+    vodBufferHealthProvider: (() -> Pair<Long, Boolean>?)? = null,
+    vodStartPositionMs: Long? = null,
   ) {
     end()
     this.player = player
     this.live = live
     this.isLiveTs = live && isLiveTs
     this.ringWindowProvider = if (live) ringWindowProvider else null
+    this.activeVodBackBufferMs = if (!live) vodBackBufferMs.coerceAtLeast(0L) else 0L
+    this.activeVodBufferHealthProvider = if (!live) (vodBufferHealthProvider ?: this.vodBufferHealthProvider) else null
+    this.vodBufferedStartMs = if (!live && vodStartPositionMs != null) vodStartPositionMs.coerceAtLeast(0L) else C.TIME_UNSET
+    this.vodLastBufferedPositionMs = this.vodBufferedStartMs
     fence.begin(prepareSerial, reused = reused)
     player.createMessage { _, _ -> fence.passed(prepareSerial) }.setLooper(handler.looper).send()
     active = true
@@ -101,6 +129,11 @@ internal class EventReporter(
     active = false
     isLiveTs = false
     ringWindowProvider = null
+    activeVodBackBufferMs = 0L
+    activeVodBufferHealthProvider = null
+    vodBufferedStartMs = C.TIME_UNSET
+    vodLastBufferedPositionMs = C.TIME_UNSET
+    lastEmittedVodBuffer = null
     lastTimeShiftSupported = false
     isWaitingForMedia = false
     fence.reset()
@@ -115,7 +148,7 @@ internal class EventReporter(
     lastReportedRawFps = null
     analyticsDroppedFrames = 0
     reportedDroppedFrames = 0
-    handler.removeCallbacks(tick)
+    cancelTick()
   }
 
   /** Accepts stabilized PTS fallback FPS when container/format omits frameRate (#199). */
@@ -163,7 +196,21 @@ internal class EventReporter(
   ) {
     val seek = reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
     val current = player
-    if (active && seek && current != null && fence.acceptsPlayer(current)) anchor(current)
+    if (active && seek && current != null && fence.acceptsPlayer(current)) {
+      if (!live) {
+        val targetMs = newPosition.positionMs.takeIf { it != C.TIME_UNSET && it >= 0L }
+          ?: current.currentPosition.coerceAtLeast(0L)
+        val inBufferedSpan =
+          vodBufferedStartMs != C.TIME_UNSET &&
+            vodLastBufferedPositionMs != C.TIME_UNSET &&
+            targetMs in vodBufferedStartMs..vodLastBufferedPositionMs
+        if (!inBufferedSpan) {
+          vodBufferedStartMs = targetMs
+          vodLastBufferedPositionMs = targetMs
+        }
+      }
+      anchor(current)
+    }
   }
 
   override fun onRenderedFirstFrame() {
@@ -281,6 +328,7 @@ internal class EventReporter(
       played = played,
       surfaceLost = surfaceLost,
     )
+    if (status != null) onHttpError(live, status)
     sendError(code, status, detail)
   }
 
@@ -313,14 +361,81 @@ internal class EventReporter(
     }
     isWaitingForMedia = !played || stalled || lastState == "opening" || lastState == "buffering"
     if (player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED || player.playerError != null) {
-      handler.removeCallbacks(tick)
+      cancelTick()
       lastTimeShiftSupported = false
     }
-    if (effectiveRate(player) != anchoredRate) anchor(player)
+    val rate = effectiveRate(player)
+    if (rate != anchoredRate) {
+      anchor(player)
+    } else if (!tickScheduled && !live && rate == 0f && isPausedTickEligible(player)) {
+      scheduleTick()
+    }
   }
 
-  private fun anchor(player: Player) {
+  private fun onTick(player: Player) {
+    if (!active) return
+    val rate = effectiveRate(player)
+    if (!live && rate == 0f) {
+      if (!isPausedTickEligible(player)) {
+        cancelTick()
+        return
+      }
+      val snapshot = computeVodBufferSnapshot(player)
+      if (hasMeaningfulVodBufferDelta(lastEmittedVodBuffer, snapshot)) {
+        anchor(player, precomputedVod = snapshot)
+      } else {
+        scheduleTick()
+      }
+      return
+    }
+    anchor(player)
+  }
+
+  private fun computeVodBufferSnapshot(player: Player): VodBufferSnapshot {
+    val positionMs = player.currentPosition.coerceAtLeast(0L)
+    val bufferedPosMs = player.bufferedPosition.coerceAtLeast(positionMs)
+    if (vodBufferedStartMs == C.TIME_UNSET || positionMs < vodBufferedStartMs) {
+      vodBufferedStartMs = positionMs
+    } else if (activeVodBackBufferMs > 0L) {
+      vodBufferedStartMs = maxOf(vodBufferedStartMs, positionMs - activeVodBackBufferMs)
+    } else {
+      vodBufferedStartMs = positionMs
+    }
+    vodLastBufferedPositionMs = bufferedPosMs
+    val bufferedAheadMs = (player.bufferedPosition - positionMs).coerceAtLeast(0L)
+    val bufferedBehindMs = minOf((positionMs - vodBufferedStartMs).coerceAtLeast(0L), activeVodBackBufferMs)
+    val vodTelemetry = activeVodBufferHealthProvider?.invoke()
+    val diskCacheBytes = vodTelemetry?.first?.coerceAtLeast(0L) ?: 0L
+    val throttled = vodTelemetry?.second == true
+    return VodBufferSnapshot(bufferedAheadMs, bufferedBehindMs, diskCacheBytes, throttled)
+  }
+
+  private fun hasMeaningfulVodBufferDelta(prev: VodBufferSnapshot?, cur: VodBufferSnapshot): Boolean {
+    if (prev == null) return true
+    if (abs(cur.aheadMs - prev.aheadMs) >= PAUSED_VOD_BUFFER_DELTA_MS) return true
+    if (abs(cur.behindMs - prev.behindMs) >= PAUSED_VOD_BUFFER_DELTA_MS) return true
+    if ((cur.diskCacheBytes > 0L) != (prev.diskCacheBytes > 0L)) return true
+    if (abs(cur.diskCacheBytes - prev.diskCacheBytes) >= PAUSED_VOD_DISK_DELTA_BYTES) return true
+    return cur.throttled != prev.throttled
+  }
+
+  private fun isPausedTickEligible(player: Player): Boolean =
+    (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING) &&
+      player.playerError == null
+
+  private fun cancelTick() {
     handler.removeCallbacks(tick)
+    tickScheduled = false
+  }
+
+  private fun scheduleTick() {
+    handler.removeCallbacks(tick)
+    tickScheduled = true
+    handler.postDelayed(tick, TICK_MS)
+  }
+
+  private fun anchor(player: Player, precomputedVod: VodBufferSnapshot? = null) {
+    cancelTick()
     if (!active) return
     val rate = effectiveRate(player)
     anchoredRate = rate
@@ -359,6 +474,15 @@ internal class EventReporter(
       if (duration != C.TIME_UNSET) {
         anchor["durationMs"] = duration.toDouble()
       }
+      val snapshot = precomputedVod ?: computeVodBufferSnapshot(player)
+      lastEmittedVodBuffer = snapshot
+      val bufferHealth = mutableMapOf<String, Any?>(
+        "bufferedAheadMs" to snapshot.aheadMs.toDouble(),
+        "bufferedBehindMs" to snapshot.behindMs.toDouble(),
+      )
+      if (snapshot.diskCacheBytes > 0L) bufferHealth["diskCacheBytes"] = snapshot.diskCacheBytes.toDouble()
+      if (snapshot.throttled) bufferHealth["throttled"] = true
+      anchor["bufferHealth"] = bufferHealth
     }
     val tracks = player.currentTracks
     val hasVideo = if (tracks.isEmpty) null else hasSelectedVideoTrack(tracks)
@@ -372,13 +496,9 @@ internal class EventReporter(
       anchor["decodedVideoFrames"] = 0.0
     }
     send(mapOf("type" to "clock", "anchor" to anchor))
-    val keepPausedLiveTick =
-      live &&
-        lastTimeShiftSupported &&
-        player.playbackState != Player.STATE_IDLE &&
-        player.playbackState != Player.STATE_ENDED &&
-        player.playerError == null
-    if (rate > 0f || keepPausedLiveTick) handler.postDelayed(tick, TICK_MS)
+    val keepPausedLiveTick = live && lastTimeShiftSupported && isPausedTickEligible(player)
+    val keepPausedVodTick = !live && rate == 0f && isPausedTickEligible(player)
+    if (rate > 0f || keepPausedLiveTick || keepPausedVodTick) scheduleTick()
   }
 
   private fun maybeEmitDroppedFrames(total: Int) {
@@ -396,7 +516,7 @@ internal class EventReporter(
     send(mapOf("type" to "stall", "phase" to phase, "atMs" to SystemClock.uptimeMillis().toDouble()))
 
   private fun sendError(code: String, httpStatus: Int?, detail: String) {
-    handler.removeCallbacks(tick)
+    cancelTick()
     lastTimeShiftSupported = false
     val error = mutableMapOf<String, Any?>("code" to code, "detail" to detail)
     if (httpStatus != null) error["httpStatus"] = httpStatus

@@ -35,6 +35,7 @@ import { headerFields } from './mpv/options.ts';
 import type { MpvProcess } from './mpv/process.ts';
 import type { ReadaheadTierStore } from './mpv/readahead.ts';
 import { createTrackTracker } from './mpv/tracks.ts';
+import { createVodCacheCoordinator, resolveVodCacheRoot } from './mpv/vod-cache.ts';
 import type { VideoPresenter } from './presenter/types.ts';
 import { createSubtitleFetchSession } from './subtitle-fetch.ts';
 
@@ -54,6 +55,10 @@ export interface MpvEngineDeps {
   platform?: NodeJS.Platform;
   audioRampMs?: number;
   readaheadStore?: ReadaheadTierStore;
+  vodCacheRoot?: string;
+  getDeviceRamBytes?: () => number;
+  readFreeDiskBytes?: (dir: string) => number | undefined;
+  getMultiViewTileCount?: () => number;
 }
 
 /** The desktop `PlayerEngine`: one mpv process per player window, kept across zaps. */
@@ -123,6 +128,14 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   const tracks = createTrackTracker();
   const opening = createOpeningGate<MediaSlot>({ now: deps.now, timers });
   const subtitleFetcher = createSubtitleFetchSession();
+  const vodCache = createVodCacheCoordinator({
+    cacheRoot: deps.vodCacheRoot ?? resolveVodCacheRoot(),
+    ...(deps.getDeviceRamBytes === undefined ? {} : { getDeviceRamBytes: deps.getDeviceRamBytes }),
+    ...(deps.readFreeDiskBytes === undefined ? {} : { readFreeDiskBytes: deps.readFreeDiskBytes }),
+    ...(deps.getMultiViewTileCount === undefined
+      ? {}
+      : { getMultiViewTileCount: deps.getMultiViewTileCount }),
+  });
   let released = false;
   let spawns = 0;
   let lastArea: PlayerArea | undefined;
@@ -144,6 +157,9 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   };
 
   const emit = (events: readonly EngineEvent[]): void => {
+    if (media && !released) {
+      vodCache.onPlaybackEvents(media.request.url, media.request.kind, events);
+    }
     for (const event of events) {
       if (released) return;
       if (event.type === 'clock' && media) media.lastPositionMs = event.anchor.positionMs;
@@ -194,6 +210,9 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     L.audioDevices.reset();
     L.repeatGate.reset();
     L.readahead.reset();
+    vodCache.discardQueuedSession();
+    vodCache.retireActiveSession();
+    void L.proc.exited.finally(() => vodCache.sweepRetired());
     opening.finish();
     for (const waiter of [...L.endWaiters]) waiter.done(false);
   };
@@ -246,7 +265,11 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     getDesiredVideoQualityId: () => desiredVideoQualityId,
     isSpdifPassthroughActive: () => controls.isSpdifPassthroughActive(),
     isAudioNormalizationSuppressed: () => controls.isAudioNormalizationSuppressed(),
-    onMpvLog: (entry) => controls.onMpvLog(entry),
+    onMpvLog: (entry) => {
+      controls.onMpvLog(entry);
+      if (media) vodCache.onMpvLog(media.token, media.request.url, media.request.kind, entry.text);
+    },
+    vodCache,
     ...(deps.readaheadStore === undefined ? {} : { readaheadStore: deps.readaheadStore }),
   });
 
@@ -296,6 +319,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       if (L.hasQueuedPlaylist) await session.clearQueuedPlaylist(L);
       detach(L);
       await L.proc.quit(QUIT_GRACE_MS).catch(() => undefined);
+      vodCache.sweepRetired();
     }
     await ensureProcess();
   };
@@ -310,13 +334,25 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
           return runRecreate();
         case 'stop': {
           const L = live;
-          if (!L) return;
+          if (!L) {
+            vodCache.discardQueuedSession();
+            vodCache.retireActiveSession();
+            vodCache.sweepRetired();
+            return;
+          }
           if (L.hasQueuedPlaylist) await session.clearQueuedPlaylist(L);
           if (L.hasCustomHeaders) {
             const propReply = await session.send(L, ['set_property', 'http-header-fields', []]);
             if (propReply?.error === 'success') L.hasCustomHeaders = false;
           }
-          await session.send(L, ['stop']);
+          vodCache.discardQueuedSession();
+          vodCache.retireActiveSession();
+          if (L.entries.current()) {
+            await session.stopCurrent(L);
+          } else {
+            await session.send(L, ['stop']);
+          }
+          vodCache.sweepRetired();
           opening.finish();
           return;
         }
@@ -510,6 +546,9 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         url: request.stream.url,
         headers: request.stream.headers,
         kind: 'vod',
+        ...(media.request.bufferPreset === undefined
+          ? {}
+          : { bufferPreset: media.request.bufferPreset }),
         ...(request.preferHevcOverDolbyVision === undefined
           ? {}
           : { preferHevcOverDolbyVision: request.preferHevcOverDolbyVision }),
@@ -599,6 +638,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
           ? {}
           : { externalSubtitles }),
         ...(options?.programId === undefined ? {} : { programId: options.programId }),
+        ...(options?.bufferPreset === undefined ? {} : { bufferPreset: options.bufferPreset }),
       };
       startMedia(cmd.attempt, withStart(req, cmd.startMs));
     },
@@ -713,7 +753,12 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       const L = live;
       if (L) {
         detach(L);
-        void L.proc.quit(QUIT_GRACE_MS).catch(() => undefined);
+        void L.proc
+          .quit(QUIT_GRACE_MS)
+          .catch(() => undefined)
+          .finally(() => vodCache.dispose());
+      } else {
+        vodCache.dispose();
       }
       presenter.dispose();
     },

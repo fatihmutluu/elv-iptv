@@ -44,6 +44,7 @@ class EventReporterTest {
     var suppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_NONE
     var scriptedDuration = C.TIME_UNSET
     var scriptedPosition = 0L
+    var scriptedBufferedPosition: Long? = null
     var scriptedTracks: Tracks = Tracks.EMPTY
     var scriptedVideoCounters: DecoderCounters? = null
     var scriptedSeekable: Boolean? = null
@@ -55,6 +56,7 @@ class EventReporterTest {
     override fun getPlaybackSuppressionReason(): Int = suppressionReason
     override fun getDuration(): Long = scriptedDuration
     override fun getCurrentPosition(): Long = scriptedPosition
+    override fun getBufferedPosition(): Long = scriptedBufferedPosition ?: real.bufferedPosition
     override fun getCurrentTracks(): Tracks = scriptedTracks
     override fun getVideoDecoderCounters(): DecoderCounters? = scriptedVideoCounters
     override fun isCurrentMediaItemSeekable(): Boolean = scriptedSeekable ?: real.isCurrentMediaItemSeekable
@@ -65,6 +67,32 @@ class EventReporterTest {
   private fun eventsFlag(vararg flags: Int): Player.Events =
     Player.Events(FlagSet.Builder().addAll(*flags).build())
 
+  private fun newReporter(
+    events: MutableList<Map<String, Any?>>,
+    hasInvalidAttachedSurface: () -> Boolean = { false },
+    onBehindLiveWindow: () -> Unit = {},
+    onAudioFocusDenied: () -> Boolean = { false },
+    onVideoCodecFailed: (MediaCodecInfo) -> Unit = {},
+    onDolbyVisionFailed: () -> Unit = {},
+    onAudioCodecFailed: () -> Boolean = { false },
+    onFirstFrame: () -> Unit = {},
+    vodBufferHealthProvider: (() -> Pair<Long, Boolean>?)? = null,
+  ): EventReporter = EventReporter(
+    handler = Handler(Looper.getMainLooper()),
+    fence = PrepareFence(),
+    hasInvalidAttachedSurface = hasInvalidAttachedSurface,
+    send = { events += it },
+    onHlsDetected = {},
+    onBehindLiveWindow = onBehindLiveWindow,
+    onAudioFocusDenied = onAudioFocusDenied,
+    onVideoCodecFailed = onVideoCodecFailed,
+    onDolbyVisionFailed = onDolbyVisionFailed,
+    onAudioCodecFailed = onAudioCodecFailed,
+    onFirstFrame = onFirstFrame,
+    onCue = { _, _ -> },
+    vodBufferHealthProvider = vodBufferHealthProvider,
+  )
+
   @Test
   fun `maps released surface to surface-lost, records failed video codec on valid surface, and ignores SupersededMediaException (#109)`() {
     val events = mutableListOf<Map<String, Any?>>()
@@ -72,17 +100,10 @@ class EventReporterTest {
     var invalidAttachedSurface = false
     val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
     try {
-      val reporter = EventReporter(
-        handler = Handler(Looper.getMainLooper()),
-        fence = PrepareFence(),
+      val reporter = newReporter(
+        events = events,
         hasInvalidAttachedSurface = { invalidAttachedSurface },
-        send = { events += it },
-        onHlsDetected = {},
-        onBehindLiveWindow = {},
-        onAudioFocusDenied = { false },
         onVideoCodecFailed = { failedCodecs += it.name },
-        onFirstFrame = {},
-        onCue = { _, _ -> },
       )
       reporter.begin(real, live = true, prepareSerial = 1L, reused = false)
       events.clear()
@@ -164,17 +185,7 @@ class EventReporterTest {
           scriptedDuration = durationMs
           scriptedPosition = positionMs
         }
-        val reporter = EventReporter(
-          handler = Handler(Looper.getMainLooper()),
-          fence = PrepareFence(),
-          send = { events += it },
-          onHlsDetected = {},
-          onBehindLiveWindow = {},
-          onAudioFocusDenied = { false },
-          onVideoCodecFailed = {},
-          onFirstFrame = {},
-          onCue = { _, _ -> },
-        )
+        val reporter = newReporter(events)
         reporter.begin(player, live = live, prepareSerial = 1L, reused = false)
         val changed = eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED)
         if (playFirst) {
@@ -217,17 +228,7 @@ class EventReporterTest {
       player.scriptedTracks = Tracks(
         listOf(Tracks.Group(TrackGroup("a", audioFmt), false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)))
       )
-      val reporter = EventReporter(
-        handler = Handler(Looper.getMainLooper()),
-        fence = PrepareFence(),
-        send = { events += it },
-        onHlsDetected = {},
-        onBehindLiveWindow = {},
-        onAudioFocusDenied = { false },
-        onVideoCodecFailed = {},
-        onFirstFrame = { shutterLifted = true },
-        onCue = { _, _ -> },
-      )
+      val reporter = newReporter(events, onFirstFrame = { shutterLifted = true })
       reporter.begin(player, live = true, prepareSerial = 1L, reused = false)
       events.clear()
 
@@ -286,20 +287,12 @@ class EventReporterTest {
     var handleAudioFailure = true
     val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
     try {
-      val reporter = EventReporter(
-        handler = Handler(Looper.getMainLooper()),
-        fence = PrepareFence(),
-        send = { events += it },
-        onHlsDetected = {},
-        onBehindLiveWindow = {},
-        onAudioFocusDenied = { false },
-        onVideoCodecFailed = {},
+      val reporter = newReporter(
+        events = events,
         onAudioCodecFailed = {
           audioFailures += 1
           handleAudioFailure
         },
-        onFirstFrame = {},
-        onCue = { _, _ -> },
       )
       reporter.begin(real, live = false, prepareSerial = 1L, reused = false)
       events.clear()
@@ -375,19 +368,13 @@ class EventReporterTest {
     val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
     try {
       val player = ScriptedPlayer(real)
-      val reporter = EventReporter(
-        handler = Handler(Looper.getMainLooper()),
-        fence = PrepareFence(),
-        send = { events += it },
-        onHlsDetected = {},
+      val reporter = newReporter(
+        events = events,
         onBehindLiveWindow = { recoveries += 1 },
         onAudioFocusDenied = {
           focusDenied += 1
           true
         },
-        onVideoCodecFailed = {},
-        onFirstFrame = {},
-        onCue = { _, _ -> },
       )
       reporter.begin(player, live = true, prepareSerial = 1L, reused = false)
       events.clear()
@@ -437,18 +424,7 @@ class EventReporterTest {
           Tracks.Group(TrackGroup("a", audioFmt), false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)),
         )
       )
-      val reporter = EventReporter(
-        handler = Handler(Looper.getMainLooper()),
-        fence = PrepareFence(),
-        send = { events += it },
-        onHlsDetected = {},
-        onBehindLiveWindow = {},
-        onAudioFocusDenied = { false },
-        onVideoCodecFailed = {},
-        onDolbyVisionFailed = { dvFailures += 1 },
-        onFirstFrame = {},
-        onCue = { _, _ -> },
-      )
+      val reporter = newReporter(events, onDolbyVisionFailed = { dvFailures += 1 })
       reporter.begin(player, live = false, prepareSerial = 1L, reused = false)
       events.clear()
 
@@ -517,17 +493,7 @@ class EventReporterTest {
         scriptedPosition = 10_000L
         scriptedDuration = 30_000L
       }
-      val reporter = EventReporter(
-        handler = Handler(Looper.getMainLooper()),
-        fence = PrepareFence(),
-        send = { events += it },
-        onHlsDetected = {},
-        onBehindLiveWindow = {},
-        onAudioFocusDenied = { false },
-        onVideoCodecFailed = {},
-        onFirstFrame = {},
-        onCue = { _, _ -> },
-      )
+      val reporter = newReporter(events)
 
       // Live MPEG-TS emits isLiveTs = true
       reporter.begin(player, live = true, prepareSerial = 1L, reused = false, isLiveTs = true)
@@ -577,17 +543,7 @@ class EventReporterTest {
           Tracks.Group(TrackGroup("v", videoFmt), false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)),
         )
       )
-      val reporter = EventReporter(
-        handler = Handler(Looper.getMainLooper()),
-        fence = PrepareFence(),
-        send = { events += it },
-        onHlsDetected = {},
-        onBehindLiveWindow = {},
-        onAudioFocusDenied = { false },
-        onVideoCodecFailed = {},
-        onFirstFrame = {},
-        onCue = { _, _ -> },
-      )
+      val reporter = newReporter(events)
       reporter.begin(player, live = true, prepareSerial = 1L, reused = false)
       events.clear()
 
@@ -622,17 +578,7 @@ class EventReporterTest {
         state = Player.STATE_READY
         playing = true
       }
-      val reporter = EventReporter(
-        handler = Handler(Looper.getMainLooper()),
-        fence = PrepareFence(),
-        send = { events += it },
-        onHlsDetected = {},
-        onBehindLiveWindow = {},
-        onAudioFocusDenied = { false },
-        onVideoCodecFailed = {},
-        onFirstFrame = {},
-        onCue = { _, _ -> },
-      )
+      val reporter = newReporter(events)
       reporter.begin(player, live = false, prepareSerial = 1L, reused = false)
       events.clear()
 
@@ -689,69 +635,55 @@ class EventReporterTest {
   }
 
   @Test
-  fun `emits liveSeekableStartMs, liveEdgeMs, and timeShiftSupported from Timeline Window (#28)`() {
+  fun `VOD bufferedBehindMs is 0 after uncached seek or resume and grows only as playback advances contiguously`() {
     val events = mutableListOf<Map<String, Any?>>()
     val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
     try {
-      val liveTimeline = object : Timeline() {
-        override fun getWindowCount(): Int = 1
-        override fun getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Long): Window =
-          window.set(
-            "live",
-            androidx.media3.common.MediaItem.EMPTY,
-            null,
-            C.TIME_UNSET,
-            C.TIME_UNSET,
-            C.TIME_UNSET,
-            true,
-            true,
-            androidx.media3.common.MediaItem.LiveConfiguration.UNSET,
-            0L,
-            60_000_000L,
-            0,
-            0,
-            0L,
-          )
-        override fun getPeriodCount(): Int = 1
-        override fun getPeriod(periodIndex: Int, period: Period, setIds: Boolean): Period =
-          period.set("p", "p", 0, 60_000_000L, 0L)
-        override fun getIndexOfPeriod(uid: Any): Int = 0
-        override fun getUidOfPeriod(periodIndex: Int): Any = "p"
-      }
       val player = ScriptedPlayer(real).apply {
         state = Player.STATE_READY
         playing = true
-        scriptedPosition = 45_000L
-        scriptedDuration = 60_000L
-        scriptedSeekable = true
-        scriptedTimeline = liveTimeline
+        scriptedDuration = 300_000L
+        scriptedPosition = 10_000L
+        scriptedBufferedPosition = 30_000L
       }
-      val reporter = EventReporter(
-        handler = Handler(Looper.getMainLooper()),
-        fence = PrepareFence(),
-        send = { events += it },
-        onHlsDetected = {},
-        onBehindLiveWindow = {},
-        onAudioFocusDenied = { false },
-        onVideoCodecFailed = {},
-        onFirstFrame = {},
-        onCue = { _, _ -> },
-      )
-      reporter.begin(player, live = true, prepareSerial = 1L, reused = false)
+      val reporter = newReporter(events)
+      reporter.begin(player, live = false, prepareSerial = 1L, reused = false, vodBackBufferMs = 20_000L)
       events.clear()
-      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
-      val seekableClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
-      assertEquals(0.0, seekableClock["liveSeekableStartMs"])
-      assertEquals(60_000.0, seekableClock["liveEdgeMs"])
-      assertEquals(true, seekableClock["timeShiftSupported"])
 
-      player.scriptedSeekable = false
-      reporter.begin(player, live = true, prepareSerial = 2L, reused = false)
-      events.clear()
+      // Mid-stream start at 10s reports 0ms behind (nothing buffered behind start yet)
       reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
-      val nonSeekableClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
-      assertFalse(nonSeekableClock.containsKey("liveSeekableStartMs"))
-      assertEquals(false, nonSeekableClock["timeShiftSupported"])
+      val startHealth = (events.first { it["type"] == "clock" }["anchor"] as Map<*, *>)["bufferHealth"] as Map<*, *>
+      assertEquals(0.0, startHealth["bufferedBehindMs"])
+
+      // Uncached forward seek to 60_000 ms (outside [10_000, 30_000]) reports bufferedBehindMs == 0
+      events.clear()
+      player.scriptedPosition = 60_000L
+      player.scriptedBufferedPosition = 62_000L
+      reporter.onPositionDiscontinuity(
+        Player.PositionInfo(null, 0, null, null, 0, 10_000L, 10_000L, C.INDEX_UNSET, C.INDEX_UNSET),
+        Player.PositionInfo(null, 0, null, null, 0, 60_000L, 60_000L, C.INDEX_UNSET, C.INDEX_UNSET),
+        Player.DISCONTINUITY_REASON_SEEK,
+      )
+      val seekHealth = (events.first { it["type"] == "clock" }["anchor"] as Map<*, *>)["bufferHealth"] as Map<*, *>
+      assertEquals(0.0, seekHealth["bufferedBehindMs"])
+      assertEquals(2_000.0, seekHealth["bufferedAheadMs"])
+
+      // Advancing contiguously to 68_000 ms reports bufferedBehindMs == 8_000 ms
+      events.clear()
+      player.scriptedPosition = 68_000L
+      player.scriptedBufferedPosition = 95_000L
+      Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
+      val advHealth = (events.single { it["type"] == "clock" }["anchor"] as Map<*, *>)["bufferHealth"] as Map<*, *>
+      assertEquals(8_000.0, advHealth["bufferedBehindMs"])
+      assertEquals(27_000.0, advHealth["bufferedAheadMs"])
+
+      // Advancing past backBuffer cap clamps bufferedBehindMs to activeVodBackBufferMs (20_000 ms)
+      events.clear()
+      player.scriptedPosition = 95_000L
+      player.scriptedBufferedPosition = 120_000L
+      Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
+      val cappedHealth = (events.single { it["type"] == "clock" }["anchor"] as Map<*, *>)["bufferHealth"] as Map<*, *>
+      assertEquals(20_000.0, cappedHealth["bufferedBehindMs"])
       reporter.end()
     } finally {
       real.release()
@@ -759,122 +691,63 @@ class EventReporterTest {
   }
 
   @Test
-  fun `keeps 1s clock tick alive while paused on live time-shift stream and stops on idle, ended, error, or end (#28)`() {
+  fun `paused VOD emits throttled bufferHealth updates when buffer grows and stops emitting once static`() {
     val events = mutableListOf<Map<String, Any?>>()
     val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
     try {
-      var liveWindowDurationUs = 60_000_000L
-      val liveTimeline = object : Timeline() {
-        override fun getWindowCount(): Int = 1
-        override fun getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Long): Window =
-          window.set(
-            "live",
-            androidx.media3.common.MediaItem.EMPTY,
-            null,
-            C.TIME_UNSET,
-            C.TIME_UNSET,
-            C.TIME_UNSET,
-            true,
-            true,
-            androidx.media3.common.MediaItem.LiveConfiguration.UNSET,
-            0L,
-            liveWindowDurationUs,
-            0,
-            0,
-            0L,
-          )
-        override fun getPeriodCount(): Int = 1
-        override fun getPeriod(periodIndex: Int, period: Period, setIds: Boolean): Period =
-          period.set("p", "p", 0, liveWindowDurationUs, 0L)
-        override fun getIndexOfPeriod(uid: Any): Int = 0
-        override fun getUidOfPeriod(periodIndex: Int): Any = "p"
-      }
+      var diskBytes = 0L
       val player = ScriptedPlayer(real).apply {
         state = Player.STATE_READY
         playing = true
         wantPlay = true
-        scriptedPosition = 60_000L
-        scriptedDuration = 60_000L
-        scriptedSeekable = true
-        scriptedTimeline = liveTimeline
+        scriptedDuration = 300_000L
+        scriptedPosition = 30_000L
+        scriptedBufferedPosition = 40_000L
       }
-      val reporter = EventReporter(
-        handler = Handler(Looper.getMainLooper()),
-        fence = PrepareFence(),
-        send = { events += it },
-        onHlsDetected = {},
-        onBehindLiveWindow = {},
-        onAudioFocusDenied = { false },
-        onVideoCodecFailed = {},
-        onFirstFrame = {},
-        onCue = { _, _ -> },
-      )
-      reporter.begin(player, live = true, prepareSerial = 1L, reused = false)
+      val reporter = newReporter(events, vodBufferHealthProvider = { diskBytes to false })
+      reporter.begin(player, live = false, prepareSerial = 1L, reused = false, vodBackBufferMs = 20_000L)
       reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
 
-      // Pause live time-shift stream -> emits rate=0 anchor and keeps ticking every 1s!
+      // Pause VOD -> emits initial paused anchor with rate=0
       events.clear()
       player.playing = false
       player.wantPlay = false
       reporter.onEvents(player, eventsFlag(Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
       assertEquals(1, events.count { it["type"] == "clock" })
 
-      // Advance 1s while paused -> liveEdgeMs grows from 60s to 61s while position stays 60s
+      // Sub-threshold growth (< 500 ms) while paused emits 0 duplicate anchors
       events.clear()
-      liveWindowDurationUs = 61_000_000L
-      player.scriptedDuration = 61_000L
+      player.scriptedBufferedPosition = 40_300L
       Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
-      val tick1 = events.single { it["type"] == "clock" }["anchor"] as Map<*, *>
-      assertEquals(0.0, tick1["rate"])
-      assertEquals(60_000.0, tick1["positionMs"])
-      assertEquals(61_000.0, tick1["liveEdgeMs"])
-      assertEquals(true, tick1["timeShiftSupported"])
+      assertTrue("sub-500ms paused buffer delta must not spam anchors", events.none { it["type"] == "clock" })
 
-      // Transition to STATE_ENDED stops the paused live tick immediately
+      // Meaningful read-ahead growth (>= 500 ms) emits updated anchor with rate=0
+      player.scriptedBufferedPosition = 55_000L
+      Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
+      val grownAnchor = events.single { it["type"] == "clock" }["anchor"] as Map<*, *>
+      assertEquals(0.0, grownAnchor["rate"])
+      assertEquals(25_000.0, (grownAnchor["bufferHealth"] as Map<*, *>)["bufferedAheadMs"])
+
+      // Once buffer is static/full, subsequent ticks emit ZERO duplicate anchors
+      events.clear()
+      Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+      assertTrue("static paused VOD buffer must not emit duplicate anchors", events.none { it["type"] == "clock" })
+
+      // Disk cache growth triggers a single updated anchor
+      diskBytes = 256L * 1024L
+      Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
+      val diskAnchor = events.single { it["type"] == "clock" }["anchor"] as Map<*, *>
+      assertEquals((256L * 1024L).toDouble(), (diskAnchor["bufferHealth"] as Map<*, *>)["diskCacheBytes"])
+
+      // STATE_ENDED stops paused VOD tick cleanly
       events.clear()
       player.state = Player.STATE_ENDED
       reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED))
       events.clear()
-      liveWindowDurationUs = 65_000_000L
+      player.scriptedBufferedPosition = 80_000L
       Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
-      assertTrue("tick must stop once stream ends", events.none { it["type"] == "clock" })
-
-      // Ring-buffer live TS advertises timeShiftSupported=true once >= 2s buffered and ticks while paused
-      var ringWindow: RingBufferTimeShiftWindow? = RingBufferTimeShiftWindow(0L, 5_000L, 5_000L)
-      player.state = Player.STATE_READY
-      player.playing = false
-      player.wantPlay = false
-      player.scriptedSeekable = false
-      player.scriptedTimeline = Timeline.EMPTY
-      player.scriptedPosition = 5_000L
-      player.scriptedDuration = C.TIME_UNSET
-      reporter.begin(
-        player,
-        live = true,
-        prepareSerial = 2L,
-        reused = false,
-        isLiveTs = true,
-        ringWindowProvider = { ringWindow },
-      )
-      events.clear()
-      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_PLAY_WHEN_READY_CHANGED))
-      val pausedRingClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
-      assertEquals(true, pausedRingClock["isLiveTs"])
-      assertEquals(true, pausedRingClock["timeShiftSupported"])
-      assertEquals(0.0, pausedRingClock["liveSeekableStartMs"])
-      assertEquals(5_000.0, pausedRingClock["liveEdgeMs"])
-
-      events.clear()
-      ringWindow = RingBufferTimeShiftWindow(0L, 6_000L, 6_000L)
-      Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
-      val pausedRingTick = events.single { it["type"] == "clock" }["anchor"] as Map<*, *>
-      assertEquals(6_000.0, pausedRingTick["liveEdgeMs"])
-
-      // reporter.end() cancels all pending ticks
+      assertTrue("paused VOD tick must stop on STATE_ENDED", events.none { it["type"] == "clock" })
       reporter.end()
-      events.clear()
-      Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
-      assertTrue(events.isEmpty())
     } finally {
       real.release()
     }

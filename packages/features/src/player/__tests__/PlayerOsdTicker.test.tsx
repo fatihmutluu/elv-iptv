@@ -6,9 +6,14 @@ import {
   type PlaybackState,
 } from '@elv/playback';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { Platform } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { PlayerOsd } from '../PlayerScreenParts';
 import { VodProgressBar } from '../VodProgressBar';
+import {
+  previewProgressSnapshot,
+  readProgressSnapshot,
+  sameProgressSnapshot,
+} from '../vod-progress-helpers';
 
 function createFakeService(anchor: ClockAnchor | undefined) {
   let state: PlaybackState = {
@@ -249,5 +254,113 @@ describe('VodProgressBar and OsdClock gated ticking', () => {
       />,
     );
     expect(screen.queryByTestId('player-error-evidence')).toBeNull();
+  });
+
+  it('computes 0.5%-quantized buffered ranges and renders player-progress-buffered behind player-progress-fill (#350)', async () => {
+    // Pure snapshot helper checks
+    const noHealth = readProgressSnapshot(PAUSED, NOW);
+    expect(noHealth.hasBufferedRange).toBe(false);
+    expect(noHealth.bufferedStartPercent).toBe(0);
+    expect(noHealth.bufferedEndPercent).toBe(0);
+
+    // 30s / 120s = 25%; behind 12s -> 18s (15%), ahead 30s -> 60s (50%)
+    const bufferedAnchor: ClockAnchor = {
+      positionMs: 30_000,
+      atMs: NOW,
+      rate: 0,
+      durationMs: 120_000,
+      bufferHealth: { bufferedAheadMs: 30_000, bufferedBehindMs: 12_000 },
+    };
+    const snapA = readProgressSnapshot(bufferedAnchor, NOW);
+    expect(snapA.hasBufferedRange).toBe(true);
+    expect(snapA.bufferedStartPercent).toBe(15);
+    expect(snapA.bufferedEndPercent).toBe(50);
+
+    // Sub-0.5% jitter does not break sameProgressSnapshot equality
+    const snapTinyJitter = readProgressSnapshot(
+      {
+        ...bufferedAnchor,
+        bufferHealth: { bufferedAheadMs: 30_100, bufferedBehindMs: 11_900 },
+      },
+      NOW,
+    );
+    expect(sameProgressSnapshot(snapA, snapTinyJitter)).toBe(true);
+
+    // Meaningful >= 0.5% buffer change breaks sameProgressSnapshot equality
+    const snapBigger = readProgressSnapshot(
+      {
+        ...bufferedAnchor,
+        bufferHealth: { bufferedAheadMs: 36_000, bufferedBehindMs: 12_000 },
+      },
+      NOW,
+    );
+    expect(snapBigger.bufferedEndPercent).toBe(55);
+    expect(sameProgressSnapshot(snapA, snapBigger)).toBe(false);
+
+    // Clamps to [0, durationMs] and preserves buffered range on scrub preview
+    const clamped = readProgressSnapshot(
+      {
+        positionMs: 10_000,
+        atMs: NOW,
+        rate: 0,
+        durationMs: 100_000,
+        bufferHealth: { bufferedAheadMs: 200_000, bufferedBehindMs: 50_000 },
+      },
+      NOW,
+    );
+    expect(clamped.bufferedStartPercent).toBe(0);
+    expect(clamped.bufferedEndPercent).toBe(100);
+    const preview = previewProgressSnapshot(snapA, 45_000);
+    expect(preview.hasBufferedRange).toBe(true);
+    expect(preview.bufferedStartPercent).toBe(15);
+    expect(preview.bufferedEndPercent).toBe(50);
+
+    // Rendered DOM order & Cinema Quietude v2 styling inside player-progress-rail
+    const fake = createFakeService(PAUSED);
+    const view = await render(
+      <VodProgressBar
+        service={fake.service}
+        clock={clock}
+        isTv={false}
+        label="Progress"
+        onSeekRatio={jest.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('player-progress-buffered')).toBeNull();
+
+    await act(async () => {
+      fake.setAnchor(bufferedAnchor);
+    });
+    const buffered = screen.getByTestId('player-progress-buffered');
+    expect(buffered.props.pointerEvents).toBe('none');
+    const bufferedStyle = StyleSheet.flatten(buffered.props.style);
+    expect(bufferedStyle).toMatchObject({
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: '15%',
+      width: '35%',
+      opacity: 0.35,
+      borderRadius: 3,
+    });
+
+    // Must sit inside player-progress-rail directly BEFORE player-progress-fill
+    const rail = screen.getByTestId('player-progress-rail');
+    const railChildren = (Array.isArray(rail.children) ? rail.children : [rail.children]).filter(
+      (c) => typeof c !== 'string',
+    );
+    const testIds = railChildren.map((c) => c.props.testID);
+    expect(testIds).toEqual(['player-progress-buffered', 'player-progress-fill']);
+
+    // Zero-width bufferHealth hides the bar cleanly
+    await act(async () => {
+      fake.setAnchor({
+        ...bufferedAnchor,
+        bufferHealth: { bufferedAheadMs: 0, bufferedBehindMs: 0 },
+      });
+    });
+    expect(screen.queryByTestId('player-progress-buffered')).toBeNull();
+
+    await view.unmount();
   });
 });

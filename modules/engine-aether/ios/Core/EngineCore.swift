@@ -40,6 +40,8 @@ public final class EngineCore {
   var lastLiveEdgeSeconds: Double?
   var lastLiveSeekableStartSeconds: Double?
   var lastTimeShiftSupported: Bool?
+  var lastBufferHealth: AppleBufferHealth?
+  var lastEmittedBufferHealth: AppleBufferHealth?
   var lastAnchoredPositionMs: Double?
   var lastProgressUptimeMs: Double?
   var lastProgressBytes: Int64 = 0
@@ -299,7 +301,8 @@ public final class EngineCore {
       durationSeconds,
       liveEdgeSeconds,
       liveSeekableStartSeconds,
-      timeShiftSupported
+      timeShiftSupported,
+      bufferHealth
     ):
       handleClock(
         positionSeconds: positionSeconds,
@@ -307,8 +310,12 @@ public final class EngineCore {
         durationSeconds: durationSeconds,
         liveEdgeSeconds: liveEdgeSeconds,
         liveSeekableStartSeconds: liveSeekableStartSeconds,
-        timeShiftSupported: timeShiftSupported
+        timeShiftSupported: timeShiftSupported,
+        bufferHealth: bufferHealth
       )
+
+    case let .bufferHealth(bufferHealth):
+      handleBufferHealth(bufferHealth)
 
     case let .duration(durationSeconds):
       handleDuration(durationSeconds)
@@ -457,6 +464,8 @@ public final class EngineCore {
     lastLiveEdgeSeconds = nil
     lastLiveSeekableStartSeconds = nil
     lastTimeShiftSupported = nil
+    lastBufferHealth = nil
+    lastEmittedBufferHealth = nil
     lastAnchoredPositionMs = validStartMs
     lastProgressUptimeMs = nil
     lastProgressBytes = 0

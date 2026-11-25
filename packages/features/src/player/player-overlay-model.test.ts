@@ -624,5 +624,81 @@ describe('player-overlay-model', () => {
       expect(fromVideoInfo).toHaveLength(4);
       expect(fromVideoInfo[3]).toBe('Dropped frames: 3');
     });
+
+    it('appends compact BufferHealth line in formatStatsHudLines when present (#350)', () => {
+      const mib = 1024 * 1024;
+      const basic = formatStatsHudLines(
+        makeState({
+          anchor: {
+            positionMs: 30_000,
+            atMs: 1_000,
+            rate: 1,
+            durationMs: 300_000,
+            bufferHealth: { bufferedAheadMs: 42_000, bufferedBehindMs: 12_000 },
+          },
+        }),
+        1_000,
+        i18nEn,
+      );
+      expect(basic).toHaveLength(4);
+      expect(basic[3]).toBe('Buffer: +42s / -12s');
+
+      const withDiskAndThrottle = formatStatsHudLines(
+        makeState({
+          droppedFrames: 2,
+          anchor: {
+            positionMs: 30_000,
+            atMs: 1_000,
+            rate: 1,
+            durationMs: 300_000,
+            bufferHealth: {
+              bufferedAheadMs: 18_400,
+              bufferedBehindMs: 4_600,
+              diskCacheBytes: Math.round(1.5 * mib),
+              throttled: true,
+            },
+          },
+        }),
+        1_000,
+        i18nEn,
+      );
+      expect(withDiskAndThrottle).toHaveLength(5);
+      expect(withDiskAndThrottle[3]).toBe('Dropped frames: 2');
+      expect(withDiskAndThrottle[4]).toBe('Buffer: +18s / -5s (1.5 MB) [throttled]');
+
+      const withLargeDisk = formatStatsHudLines(
+        makeState({
+          anchor: {
+            positionMs: 30_000,
+            atMs: 1_000,
+            rate: 1,
+            durationMs: 300_000,
+            bufferHealth: {
+              bufferedAheadMs: 60_000,
+              bufferedBehindMs: 15_000,
+              diskCacheBytes: 24 * mib,
+            },
+          },
+        }),
+        1_000,
+        i18nEn,
+      );
+      expect(withLargeDisk[3]).toBe('Buffer: +60s / -15s (24 MB)');
+
+      const invalid = formatStatsHudLines(
+        makeState({
+          anchor: {
+            positionMs: 30_000,
+            atMs: 1_000,
+            rate: 1,
+            durationMs: 300_000,
+            bufferHealth: { bufferedAheadMs: Number.NaN, bufferedBehindMs: 5_000 },
+          },
+        }),
+        1_000,
+        i18nEn,
+      );
+      expect(invalid).toHaveLength(3);
+    });
   });
 });

@@ -173,6 +173,10 @@ export interface SetupOptions {
   platform?: NodeJS.Platform;
   audioRampMs?: number;
   readaheadStore?: ReadaheadTierStore;
+  vodCacheRoot?: string;
+  getDeviceRamBytes?: () => number;
+  readFreeDiskBytes?: (dir: string) => number | undefined;
+  getMultiViewTileCount?: () => number;
 }
 
 export async function setupEngineTest(cleanups: Array<() => Promise<void>>, o: SetupOptions = {}) {
@@ -192,6 +196,12 @@ export async function setupEngineTest(cleanups: Array<() => Promise<void>>, o: S
     ...(o.platform ? { platform: o.platform } : {}),
     ...(o.audioRampMs === undefined ? {} : { audioRampMs: o.audioRampMs }),
     ...(o.readaheadStore === undefined ? {} : { readaheadStore: o.readaheadStore }),
+    ...(o.vodCacheRoot === undefined ? {} : { vodCacheRoot: o.vodCacheRoot }),
+    ...(o.getDeviceRamBytes === undefined ? {} : { getDeviceRamBytes: o.getDeviceRamBytes }),
+    ...(o.readFreeDiskBytes === undefined ? {} : { readFreeDiskBytes: o.readFreeDiskBytes }),
+    ...(o.getMultiViewTileCount === undefined
+      ? {}
+      : { getMultiViewTileCount: o.getMultiViewTileCount }),
   });
   const events: EngineEvent[] = [];
   engine.subscribe((e) => events.push(e));

@@ -193,18 +193,26 @@ export function loadfileCommand(
     subtitleStyle?: SubtitleStyleConfig;
     secondarySubtitleActive?: boolean;
     programId?: string;
+    vodCacheOptions?: Readonly<Record<string, string>>;
   },
   mode: 'replace' | 'append-play' = 'replace',
 ): MpvCommand {
-  const options: Record<string, string> = {
-    ...headerOptions(r.headers),
-    ...(r.kind === 'live'
-      ? { 'demuxer-max-bytes': '32MiB', 'demuxer-max-back-bytes': '128MiB' }
+  const cacheOptions: Record<string, string> =
+    r.kind === 'live'
+      ? {
+          'cache-on-disk': 'no',
+          'demuxer-max-bytes': '32MiB',
+          'demuxer-max-back-bytes': '128MiB',
+        }
       : {
           'demuxer-max-bytes': '64MiB',
           'demuxer-max-back-bytes': '16MiB',
           'demuxer-hysteresis-secs': '10',
-        }),
+          ...(r.vodCacheOptions ?? {}),
+        };
+  const options: Record<string, string> = {
+    ...headerOptions(r.headers),
+    ...cacheOptions,
     'secondary-sub-pos': String(DEFAULT_SECONDARY_SUB_POS),
     ...(r.subtitleStyle === undefined
       ? {}

@@ -37,6 +37,20 @@ struct AetherDisplaySyncOptions: Equatable, Sendable {
   }
 }
 
+/// Parsed per-load VOD read-ahead buffer preset forwarded from JavaScript (`#350`).
+///
+/// Applied to `AVPlayerItem.preferredForwardBufferDuration` inside `AetherBackend.observeAVPlayerItem`
+/// for VOD items only while keeping `maxConcurrentSourceRequests = 1` and `urlCache = nil`.
+struct AetherVodBufferOptions: Equatable, Sendable {
+  let isLive: Bool
+  let bufferPreset: AppleBufferPreset
+
+  init(from options: EngineLoadOptions) {
+    self.isLive = options.isLive
+    self.bufferPreset = options.bufferPreset
+  }
+}
+
 /// Translates engine-neutral `EngineLoadOptions` from `Core` onto `AetherEngine.LoadOptions`.
 ///
 /// Note: `options.dnsFamily` and `options.hostOverride` are parsed and validated on `EngineLoadOptions` /
@@ -44,6 +58,7 @@ struct AetherDisplaySyncOptions: Equatable, Sendable {
 /// the iOS/tvOS OS network stack so TLS SNI and App Transport Security are never bypassed (`#172`).
 func aetherOptions(_ options: EngineLoadOptions) -> LoadOptions {
   _ = AetherNetworkTransportOptions(from: options)
+  _ = AetherVodBufferOptions(from: options)
   let displaySyncOptions = AetherDisplaySyncOptions(from: options)
   var out = LoadOptions()
   out.isLive = options.isLive

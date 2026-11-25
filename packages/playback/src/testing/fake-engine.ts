@@ -1,6 +1,7 @@
 import type { SubtitleStyleConfig } from '@elv/domain';
 import type {
   AttemptToken,
+  BufferHealth,
   ClockAnchor,
   EngineCapabilities,
   EngineError,
@@ -25,6 +26,7 @@ export type FakeStep = { afterMs: number } & (
       liveSeekableStartMs?: number;
       timeShiftSupported?: boolean;
       isLiveTs?: boolean;
+      bufferHealth?: BufferHealth;
     }
   | { emit: 'tracks'; tracks: MediaTracks }
   | { emit: 'stall'; phase: 'start' | 'end' }
@@ -143,6 +145,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
               ? {}
               : { timeShiftSupported: step.timeShiftSupported }),
             ...(step.isLiveTs === undefined ? {} : { isLiveTs: step.isLiveTs }),
+            ...(step.bufferHealth === undefined ? {} : { bufferHealth: step.bufferHealth }),
           },
         };
       case 'tracks':

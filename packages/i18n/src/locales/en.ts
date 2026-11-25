@@ -544,6 +544,8 @@ export const enMessages = {
   'player.stats.droppedFrames': 'Dropped frames',
   'player.stats.cacheHitRate': 'Cache hit rate',
   'player.stats.longTasks': 'UI stalls',
+  'player.stats.buffer': 'Buffer',
+  'player.stats.throttled': 'throttled',
   'player.scrub.normal': '1×',
   'player.scrub.quarter': '0.25× · Fine',
   'player.scrub.fine': '0.1× · Ultra fine',

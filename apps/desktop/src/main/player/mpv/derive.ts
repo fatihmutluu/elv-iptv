@@ -1,4 +1,11 @@
-import type { AttemptToken, ClockAnchor, EngineEvent, EngineState, MediaKind } from '@elv/playback';
+import type {
+  AttemptToken,
+  BufferHealth,
+  ClockAnchor,
+  EngineEvent,
+  EngineState,
+  MediaKind,
+} from '@elv/playback';
 import type { MpvEvent } from './codec.ts';
 import { classifyEnd, type MpvLogLine } from './errors.ts';
 import { createMpvTelemetry, type MpvTelemetry } from './telemetry.ts';
@@ -11,6 +18,13 @@ const MIN_LIVE_TIMESHIFT_SPAN_MS = 2_000;
 const PAUSED_LIVE_WINDOW_DELTA_MS = 500;
 /** Minimum interval (ms) between paused `demuxer-cache-state` clock anchors (`#28`). */
 const PAUSED_LIVE_WINDOW_THROTTLE_MS = 500;
+/** Tolerance (seconds) when matching `timePos` against mpv `seekable-ranges` for VOD (`#350`). */
+const VOD_RANGE_TOLERANCE_SEC = 0.5;
+
+interface CacheRange {
+  readonly startSec: number;
+  readonly endSec: number;
+}
 
 /** Latest seekable live cache bounds extracted from mpv `demuxer-cache-state` (`#28`). */
 interface LiveCacheWindow {
@@ -73,6 +87,9 @@ interface Media {
   duration: number | undefined;
   cacheStart: number | undefined;
   cacheEnd: number | undefined;
+  cacheDuration: number | undefined;
+  seekableRanges: readonly CacheRange[];
+  lastAnchorBufferHealth: BufferHealth | undefined;
   lastTimeShiftSupported: boolean;
   lastAnchorLiveStartMs: number | undefined;
   lastAnchorLiveEdgeMs: number | undefined;
@@ -95,11 +112,17 @@ const nonNegSec = (v: unknown): number | undefined => {
   return n !== undefined && n >= 0 ? n : undefined;
 };
 
-function parseLiveCacheWindow(value: unknown): { startSec?: number; endSec?: number } {
-  if (typeof value !== 'object' || value === null) return {};
+function parseDemuxerCacheState(value: unknown): {
+  startSec?: number;
+  endSec?: number;
+  cacheDurationSec?: number;
+  ranges: readonly CacheRange[];
+} {
+  if (typeof value !== 'object' || value === null) return { ranges: [] };
   const record = value as Record<string, unknown>;
   let rangeStart: number | undefined;
   let rangeEnd: number | undefined;
+  const ranges: CacheRange[] = [];
   const rawRanges = record['seekable-ranges'];
   if (Array.isArray(rawRanges)) {
     for (const item of rawRanges) {
@@ -108,18 +131,82 @@ function parseLiveCacheWindow(value: unknown): { startSec?: number; endSec?: num
       const start = nonNegSec(range['start']);
       const end = nonNegSec(range['end']);
       if (start === undefined || end === undefined || end < start) continue;
+      ranges.push({ startSec: start, endSec: end });
       if (rangeStart === undefined || start < rangeStart) rangeStart = start;
       if (rangeEnd === undefined || end > rangeEnd) rangeEnd = end;
     }
   }
   const cacheBegin = nonNegSec(record['cache-begin']);
   const cacheEnd = nonNegSec(record['cache-end']);
+  const cacheDurationSec = nonNegSec(record['cache-duration']);
   const startSec = rangeStart ?? cacheBegin;
   const endSec = rangeEnd ?? cacheEnd;
   return {
     ...(startSec === undefined ? {} : { startSec }),
     ...(endSec === undefined ? {} : { endSec }),
+    ...(cacheDurationSec === undefined ? {} : { cacheDurationSec }),
+    ranges,
   };
+}
+
+function resolveVodBufferHealth(media: Media): BufferHealth | undefined {
+  if (media.kind !== 'vod' || media.timePos === undefined) return undefined;
+  const posSec = media.timePos;
+  let enclosing: CacheRange | undefined;
+  for (const r of media.seekableRanges) {
+    if (
+      posSec >= r.startSec - VOD_RANGE_TOLERANCE_SEC &&
+      posSec <= r.endSec + VOD_RANGE_TOLERANCE_SEC
+    ) {
+      if (enclosing === undefined || r.endSec > enclosing.endSec) enclosing = r;
+    }
+  }
+  if (enclosing !== undefined) {
+    return {
+      bufferedAheadMs: Math.max(0, Math.round((enclosing.endSec - posSec) * 1000)) + 0,
+      bufferedBehindMs: Math.max(0, Math.round((posSec - enclosing.startSec) * 1000)) + 0,
+    };
+  }
+  if (
+    media.cacheStart === undefined &&
+    media.cacheEnd === undefined &&
+    media.cacheDuration === undefined
+  ) {
+    return undefined;
+  }
+  if (
+    media.seekableRanges.length === 0 &&
+    media.cacheStart !== undefined &&
+    media.cacheEnd !== undefined &&
+    posSec >= media.cacheStart - VOD_RANGE_TOLERANCE_SEC &&
+    posSec <= media.cacheEnd + VOD_RANGE_TOLERANCE_SEC
+  ) {
+    return {
+      bufferedAheadMs: Math.max(0, Math.round((media.cacheEnd - posSec) * 1000)) + 0,
+      bufferedBehindMs: Math.max(0, Math.round((posSec - media.cacheStart) * 1000)) + 0,
+    };
+  }
+  if (media.cacheDuration !== undefined) {
+    const behindSec =
+      media.seekableRanges.length === 0 &&
+      media.cacheStart !== undefined &&
+      media.cacheStart <= posSec
+        ? posSec - media.cacheStart
+        : 0;
+    return {
+      bufferedAheadMs: Math.max(0, Math.round(media.cacheDuration * 1000)) + 0,
+      bufferedBehindMs: Math.max(0, Math.round(behindSec * 1000)) + 0,
+    };
+  }
+  if (media.seekableRanges.length === 0 && media.cacheEnd !== undefined) {
+    const behindSec =
+      media.cacheStart !== undefined && media.cacheStart <= posSec ? posSec - media.cacheStart : 0;
+    return {
+      bufferedAheadMs: Math.max(0, Math.round((media.cacheEnd - posSec) * 1000)) + 0,
+      bufferedBehindMs: Math.max(0, Math.round(behindSec * 1000)) + 0,
+    };
+  }
+  return undefined;
 }
 
 function resolveLiveWindowMs(media: Media): {
@@ -162,8 +249,10 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
     media.lastAnchorAt = atMs;
     const currentRate = rate(media);
     const liveBounds = media.kind === 'live' ? resolveLiveWindowMs(media) : undefined;
+    const bufferHealth = media.kind === 'vod' ? resolveVodBufferHealth(media) : undefined;
     media.lastAnchorLiveStartMs = liveBounds?.liveSeekableStartMs;
     media.lastAnchorLiveEdgeMs = liveBounds?.liveEdgeMs;
+    media.lastAnchorBufferHealth = bufferHealth;
     const a: ClockAnchor = {
       positionMs: Math.max(0, Math.round(media.timePos * 1000)) + 0,
       atMs,
@@ -172,6 +261,7 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
       ...(media.kind === 'vod' && media.duration !== undefined
         ? { durationMs: Math.max(0, Math.round(media.duration * 1000)) + 0 }
         : {}),
+      ...(bufferHealth === undefined ? {} : { bufferHealth }),
       ...(liveBounds === undefined
         ? {}
         : {
@@ -348,9 +438,11 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         return dropped ? [ev(media, dropped)] : [];
       }
       case 'demuxer-cache-state': {
-        const parsed = parseLiveCacheWindow(value);
+        const parsed = parseDemuxerCacheState(value);
         media.cacheStart = parsed.startSec;
         media.cacheEnd = parsed.endSec;
+        media.seekableRanges = parsed.ranges;
+        if (parsed.cacheDurationSec !== undefined) media.cacheDuration = parsed.cacheDurationSec;
         const out: EngineEvent[] = [];
         const progress = media.telemetry.onCacheState(value, opts.now(), isWaiting(media));
         if (progress) out.push(ev(media, progress));
@@ -383,10 +475,24 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
               }
             }
           }
+        } else if (media.restarted && media.paused && !media.cache) {
+          const nextHealth = resolveVodBufferHealth(media);
+          const prevHealth = media.lastAnchorBufferHealth;
+          const healthChanged =
+            nextHealth !== undefined &&
+            (prevHealth === undefined ||
+              Math.abs(nextHealth.bufferedAheadMs - prevHealth.bufferedAheadMs) >=
+                PAUSED_LIVE_WINDOW_DELTA_MS ||
+              Math.abs(nextHealth.bufferedBehindMs - prevHealth.bufferedBehindMs) >=
+                PAUSED_LIVE_WINDOW_DELTA_MS);
+          if (healthChanged && opts.now() - media.lastAnchorAt >= opts.clockIntervalMs) {
+            out.push(...anchor(media));
+          }
         }
         return out;
       }
       case 'demuxer-cache-duration': {
+        media.cacheDuration = nonNegSec(value);
         const progress = media.telemetry.onCacheDuration(value, opts.now(), isWaiting(media));
         return progress ? [ev(media, progress)] : [];
       }
@@ -428,6 +534,9 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         duration: undefined,
         cacheStart: undefined,
         cacheEnd: undefined,
+        cacheDuration: undefined,
+        seekableRanges: [],
+        lastAnchorBufferHealth: undefined,
         lastTimeShiftSupported: false,
         lastAnchorLiveStartMs: undefined,
         lastAnchorLiveEdgeMs: undefined,

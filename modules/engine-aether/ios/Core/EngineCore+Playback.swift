@@ -113,16 +113,21 @@ extension EngineCore {
     durationSeconds: Double?,
     liveEdgeSeconds: Double?,
     liveSeekableStartSeconds: Double? = nil,
-    timeShiftSupported: Bool? = nil
+    timeShiftSupported: Bool? = nil,
+    bufferHealth: AppleBufferHealth? = nil
   ) {
     if let d = durationSeconds, d.isFinite, d > 0 { lastDurationSeconds = d }
     if let e = liveEdgeSeconds, e.isFinite, e >= 0 { lastLiveEdgeSeconds = e }
     if currentPlan?.isLiveTs == true {
       lastLiveSeekableStartSeconds = nil
+      lastBufferHealth = nil
+      lastEmittedBufferHealth = nil
       if timeShiftSupported != nil || liveSeekableStartSeconds != nil {
         lastTimeShiftSupported = false
       }
     } else if currentRequest?.live == true {
+      lastBufferHealth = nil
+      lastEmittedBufferHealth = nil
       if timeShiftSupported == false {
         lastLiveSeekableStartSeconds = nil
         lastTimeShiftSupported = false
@@ -140,6 +145,9 @@ extension EngineCore {
     } else {
       lastLiveSeekableStartSeconds = nil
       lastTimeShiftSupported = nil
+      if let bufferHealth {
+        lastBufferHealth = bufferHealth
+      }
     }
     guard framed, !seeking, !reloading else { return }
     if positionSeconds.isFinite { lastPositionSeconds = max(0, positionSeconds) }
@@ -149,6 +157,35 @@ extension EngineCore {
     guard forceNextClock || lastClockRate != rate || elapsed else { return }
     forceNextClock = false
     emitAnchor(rate: rate, atMs: now)
+  }
+
+  func handleBufferHealth(_ health: AppleBufferHealth?) {
+    if currentRequest?.live == true {
+      lastBufferHealth = nil
+      lastEmittedBufferHealth = nil
+      return
+    }
+    lastBufferHealth = health
+    guard let health,
+          framed, !seeking, !reloading, played, !stalled,
+          lastClockRate == 0,
+          hasMeaningfulBufferHealthDelta(previous: lastEmittedBufferHealth, current: health)
+    else { return }
+    let now = uptimeMs()
+    let elapsed = lastClockUptimeMs.map { now - $0 >= 1_000 } ?? true
+    guard elapsed else { return }
+    emitAnchor(rate: 0, atMs: now)
+  }
+
+  private func hasMeaningfulBufferHealthDelta(
+    previous: AppleBufferHealth?,
+    current: AppleBufferHealth
+  ) -> Bool {
+    guard let previous else { return true }
+    if previous.throttled != current.throttled { return true }
+    if abs(current.bufferedAheadMs - previous.bufferedAheadMs) >= 500.0 { return true }
+    if abs(current.bufferedBehindMs - previous.bufferedBehindMs) >= 500.0 { return true }
+    return false
   }
 
   func handleDuration(_ durationSeconds: Double) {
@@ -231,6 +268,8 @@ extension EngineCore {
     lastAnchoredPositionMs = positionMs
     lastClockRate = rate
     lastClockUptimeMs = atMs
+    let effectiveBufferHealth: AppleBufferHealth? = (currentRequest?.live == true) ? nil : lastBufferHealth
+    lastEmittedBufferHealth = effectiveBufferHealth
     let anchor = ClockAnchorOut(
       positionMs: positionMs,
       atMs: atMs,
@@ -239,7 +278,8 @@ extension EngineCore {
       liveEdgeMs: lastLiveEdgeSeconds.map { $0 * 1_000.0 },
       liveSeekableStartMs: lastLiveSeekableStartSeconds.map { $0 * 1_000.0 },
       timeShiftSupported: lastTimeShiftSupported,
-      isLiveTs: (currentPlan?.isLiveTs == true) ? true : nil
+      isLiveTs: (currentPlan?.isLiveTs == true) ? true : nil,
+      bufferHealth: effectiveBufferHealth
     )
     emit(.clock(attempt: token, anchor: anchor))
   }

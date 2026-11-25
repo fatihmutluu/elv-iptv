@@ -20,6 +20,9 @@ export interface ProgressSnapshot {
   readonly timeText: string;
   readonly currentText: string;
   readonly fillPercent: number;
+  readonly bufferedStartPercent: number;
+  readonly bufferedEndPercent: number;
+  readonly hasBufferedRange: boolean;
   readonly positionMs: number;
   readonly positionSec: number;
   readonly durationSec: number;
@@ -48,6 +51,10 @@ export interface PressGeometry {
   } | null;
 }
 
+function quantizeHalfPercent(ratio: number): number {
+  return Math.round(clampProgressRatio(ratio) * 200) / 2;
+}
+
 export function readProgressSnapshot(
   anchor: ClockAnchor | undefined,
   nowMs: number,
@@ -57,6 +64,9 @@ export function readProgressSnapshot(
       timeText: '0:00 / --:--',
       currentText: '0:00',
       fillPercent: 0,
+      bufferedStartPercent: 0,
+      bufferedEndPercent: 0,
+      hasBufferedRange: false,
       positionMs: 0,
       positionSec: 0,
       durationSec: 0,
@@ -70,12 +80,38 @@ export function readProgressSnapshot(
   const clampedPos = hasDuration ? Math.min(Math.max(0, rawPos), durationMs) : Math.max(0, rawPos);
   const ratio = hasDuration ? clampedPos / durationMs : 0;
   const fillPercent = Math.round(clampProgressRatio(ratio) * 1000) / 10;
+  let bufferedStartPercent = 0;
+  let bufferedEndPercent = 0;
+  let hasBufferedRange = false;
+  if (hasDuration && anchor.bufferHealth !== undefined) {
+    const behindMs =
+      Number.isFinite(anchor.bufferHealth.bufferedBehindMs) &&
+      anchor.bufferHealth.bufferedBehindMs > 0
+        ? anchor.bufferHealth.bufferedBehindMs
+        : 0;
+    const aheadMs =
+      Number.isFinite(anchor.bufferHealth.bufferedAheadMs) &&
+      anchor.bufferHealth.bufferedAheadMs > 0
+        ? anchor.bufferHealth.bufferedAheadMs
+        : 0;
+    const bufferedStartMs = Math.max(0, clampedPos - behindMs);
+    const bufferedEndMs = Math.min(durationMs, clampedPos + aheadMs);
+    bufferedStartPercent = quantizeHalfPercent(bufferedStartMs / durationMs);
+    bufferedEndPercent = Math.max(
+      bufferedStartPercent,
+      quantizeHalfPercent(bufferedEndMs / durationMs),
+    );
+    hasBufferedRange = bufferedEndPercent > bufferedStartPercent;
+  }
   const currentText = formatPlaybackPosition(clampedPos);
   const timeText = `${currentText} / ${hasDuration ? formatPlaybackPosition(durationMs) : '--:--'}`;
   return {
     timeText,
     currentText,
     fillPercent,
+    bufferedStartPercent,
+    bufferedEndPercent,
+    hasBufferedRange,
     positionMs: clampedPos,
     positionSec: Math.floor(clampedPos / 1000),
     durationSec: hasDuration ? Math.floor(durationMs / 1000) : 0,
@@ -85,14 +121,20 @@ export function readProgressSnapshot(
 }
 
 export function sameProgressSnapshot(a: ProgressSnapshot, b: ProgressSnapshot): boolean {
-  return a.timeText === b.timeText && a.fillPercent === b.fillPercent;
+  return (
+    a.timeText === b.timeText &&
+    a.fillPercent === b.fillPercent &&
+    a.hasBufferedRange === b.hasBufferedRange &&
+    a.bufferedStartPercent === b.bufferedStartPercent &&
+    a.bufferedEndPercent === b.bufferedEndPercent
+  );
 }
 
 export function previewProgressSnapshot(
   live: ProgressSnapshot,
   previewPositionMs: number,
 ): ProgressSnapshot {
-  return readProgressSnapshot(
+  const preview = readProgressSnapshot(
     {
       positionMs: previewPositionMs,
       atMs: 0,
@@ -101,6 +143,12 @@ export function previewProgressSnapshot(
     },
     0,
   );
+  return {
+    ...preview,
+    bufferedStartPercent: live.bufferedStartPercent,
+    bufferedEndPercent: live.bufferedEndPercent,
+    hasBufferedRange: live.hasBufferedRange,
+  };
 }
 
 export function readTrackRect(

@@ -243,6 +243,7 @@ internal fun createMediaSource(
   timeShiftTracker: TimeShiftWindowTracker? = null,
   context: Context? = null,
   extractorsDecorator: (ExtractorsFactory) -> ExtractorsFactory = { it },
+  vodCache: VodEphemeralCache? = null,
   subtitleDataSourceFactoryProvider: (ExternalSubtitleConfig, Boolean) -> DataSource.Factory = { sub, legacyTls ->
     StreamHttp.subtitleDataSourceFactory(
       subtitleHeaders = sub.headers,
@@ -260,7 +261,8 @@ internal fun createMediaSource(
     client = client,
     transferListener = transferListener,
   ) { manifestLoaded.set(true) }
-  val progressive = DataSource.Factory {
+  val activeVodCache = if (!request.live) vodCache else null
+  val progressiveBase = DataSource.Factory {
     val upstream = gated(RequestKind.PROGRESSIVE)
     if (request.live && type == SourceType.TS && timeShiftRingBuffer != null) {
       TimeShiftDataSource(
@@ -272,11 +274,19 @@ internal fun createMediaSource(
       upstream
     }
   }
+  val progressive = activeVodCache?.wrapUpstream(progressiveBase) ?: progressiveBase
+  val cachedSegmentFactory = activeVodCache?.wrapUpstream(DataSource.Factory { gated(RequestKind.SEGMENT) })
   val factory: MediaSource.Factory = when (type) {
     SourceType.HLS ->
       HlsMediaSource.Factory(
         HlsDataSourceFactory { dataType ->
-          SchemeRoutingDataSource(defaultDataSourceFactory = { gated(requestKindFor(dataType)) })
+          val upstreamFactory: () -> DataSource =
+            if (cachedSegmentFactory != null && (dataType == C.DATA_TYPE_MEDIA || dataType == C.DATA_TYPE_MEDIA_INITIALIZATION)) {
+              { cachedSegmentFactory.createDataSource() }
+            } else {
+              { gated(requestKindFor(dataType)) }
+            }
+          SchemeRoutingDataSource(defaultDataSourceFactory = upstreamFactory)
         }
       )
         .setExtractorFactory(DefaultHlsExtractorFactory(TS_FLAGS, true))
@@ -305,12 +315,12 @@ internal fun createMediaSource(
         }
     SourceType.DASH ->
       DashMediaSource.Factory(
-        DefaultDashChunkSource.Factory(DataSource.Factory { gated(RequestKind.SEGMENT) }),
+        DefaultDashChunkSource.Factory(cachedSegmentFactory ?: DataSource.Factory { gated(RequestKind.SEGMENT) }),
         DataSource.Factory { gated(RequestKind.OTHER) },
       )
     SourceType.SMOOTH_STREAMING ->
       SsMediaSource.Factory(
-        DefaultSsChunkSource.Factory(DataSource.Factory { gated(RequestKind.SEGMENT) }),
+        DefaultSsChunkSource.Factory(cachedSegmentFactory ?: DataSource.Factory { gated(RequestKind.SEGMENT) }),
         DataSource.Factory { gated(RequestKind.OTHER) },
       )
     SourceType.TS -> ProgressiveMediaSource.Factory(progressive, TsOnlyExtractorsFactory(lowRam, request.live))

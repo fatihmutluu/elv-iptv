@@ -176,7 +176,12 @@ describe('registerPlayerIpc', () => {
     const reply = await open(t, a);
     expect(reply.engineId).toEqual(expect.any(String));
     expect(reply.mainNowMs).toBe(777);
-    expect(t.createEngine).toHaveBeenCalledWith(a, expect.any(Function), reply.engineId);
+    expect(t.createEngine).toHaveBeenCalledWith(
+      a,
+      expect.any(Function),
+      reply.engineId,
+      expect.any(Function),
+    );
   });
 
   it('a second open from the same window releases the first engine', async () => {

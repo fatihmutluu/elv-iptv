@@ -409,6 +409,21 @@ export function VodProgressBar({
             webTransition(theme, 'height', theme.motion.fastMs),
           ]}
         >
+          {snapshot.hasBufferedRange &&
+          snapshot.bufferedEndPercent > snapshot.bufferedStartPercent ? (
+            <View
+              testID="player-progress-buffered"
+              pointerEvents="none"
+              style={[
+                styles.trackBuffered,
+                {
+                  left: `${snapshot.bufferedStartPercent}%`,
+                  width: `${Math.max(0, snapshot.bufferedEndPercent - snapshot.bufferedStartPercent)}%`,
+                  backgroundColor: theme.colors.textMuted,
+                },
+              ]}
+            />
+          ) : null}
           <View
             testID="player-progress-fill"
             style={[
@@ -511,12 +526,20 @@ const styles = StyleSheet.create({
   hoverPillText: { fontWeight: '700' },
   focusRing: { position: 'absolute', left: -4, right: -4, top: 3, bottom: 3 },
   trackRail: {
+    position: 'relative',
     height: 3,
     borderRadius: 999,
     overflow: 'hidden',
     direction: 'ltr',
   },
-  trackFill: { height: '100%' },
+  trackBuffered: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    opacity: 0.35,
+    borderRadius: 3,
+  },
+  trackFill: { position: 'relative', height: '100%' },
   chapterDot: {
     position: 'absolute',
     width: 6,

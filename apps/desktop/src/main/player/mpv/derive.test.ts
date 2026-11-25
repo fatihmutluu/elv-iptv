@@ -713,4 +713,66 @@ describe('deriver', () => {
     vod.clock.t = 5000;
     expect(vod.d.tick()).toEqual([]);
   });
+
+  it('derives VOD bufferHealth from enclosing seekable-ranges or cache fallback and omits on live (#350)', () => {
+    const s = setup('vod');
+    s.d.property('duration', 600);
+    s.d.property('demuxer-cache-state', {
+      'seekable-ranges': [
+        { start: 0, end: 30 },
+        { start: 100, end: 185.5 },
+      ],
+      'cache-begin': 0,
+      'cache-end': 185.5,
+    });
+    s.d.fileEvent({ event: 'file-loaded' });
+    s.d.property('video-params', { w: 1280 });
+    s.d.property('time-pos', 120);
+    expect(clocks(restart(s.d))[0]?.bufferHealth).toEqual({
+      bufferedAheadMs: 65_500,
+      bufferedBehindMs: 20_000,
+    });
+
+    // Boundary tolerance (0.5s) encloses range edge cleanly without negative values
+    s.clock.t = 2200;
+    expect(clocks(s.d.property('time-pos', 99.7))[0]?.bufferHealth).toEqual({
+      bufferedAheadMs: 85_800,
+      bufferedBehindMs: 0,
+    });
+
+    // Fallback to demuxer-cache-duration when seekable-ranges do not enclose timePos
+    s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 0, end: 10 }] });
+    s.d.property('demuxer-cache-duration', 14.25);
+    s.clock.t = 3500;
+    expect(clocks(s.d.property('time-pos', 250))[0]?.bufferHealth).toEqual({
+      bufferedAheadMs: 14_250,
+      bufferedBehindMs: 0,
+    });
+
+    // Paused VOD emits throttled anchor when demuxer-cache-state expands buffer health
+    s.clock.t = 3600;
+    s.d.property('pause', true);
+    s.clock.t = 4000;
+    expect(
+      clocks(
+        s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 230, end: 295 }] }),
+      ),
+    ).toEqual([]);
+    s.clock.t = 4700;
+    const pausedGrow = clocks(
+      s.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 230, end: 310 }] }),
+    );
+    expect(pausedGrow).toHaveLength(1);
+    expect(pausedGrow[0]?.bufferHealth).toEqual({
+      bufferedAheadMs: 60_000,
+      bufferedBehindMs: 20_000,
+    });
+
+    // Live streams never emit bufferHealth
+    const live = setup('live');
+    live.d.property('demuxer-cache-state', { 'seekable-ranges': [{ start: 10, end: 40 }] });
+    play(live);
+    live.clock.t = 2500;
+    expect(clocks(live.d.property('time-pos', 25))[0]?.bufferHealth).toBeUndefined();
+  });
 });

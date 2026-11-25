@@ -164,6 +164,14 @@ describe('isPlayerCommandMessage', () => {
         name: 'setMediaMetadata',
         metadata: { title: 'Movie', kind: 'vod', canStepTrack: false },
       },
+      {
+        name: 'load',
+        cmd: {
+          ...load,
+          kind: 'vod',
+          options: { bufferPreset: 'large' },
+        },
+      },
       { name: 'release' },
       { name: 'fullscreen' },
       { name: 'mute' },
@@ -544,5 +552,24 @@ describe('sanitizeDesktopArtworkUrl & sanitizeDesktopMediaMetadata', () => {
       kind: 'vod',
       canStepTrack: false,
     });
+  });
+});
+
+describe('Wave F10 bufferPreset IPC validation (#350)', () => {
+  it('accepts auto, balanced, and large bufferPreset values and rejects malformed ones', () => {
+    for (const preset of ['auto', 'balanced', 'large']) {
+      expect(
+        isPlayerCommandMessage(
+          msg({ name: 'load', cmd: { ...load, kind: 'vod', options: { bufferPreset: preset } } }),
+        ),
+      ).toBe(true);
+    }
+    for (const bad of ['huge', 'small', '', 123, null, {}, true]) {
+      expect(
+        isPlayerCommandMessage(
+          msg({ name: 'load', cmd: { ...load, kind: 'vod', options: { bufferPreset: bad } } }),
+        ),
+      ).toBe(false);
+    }
   });
 });

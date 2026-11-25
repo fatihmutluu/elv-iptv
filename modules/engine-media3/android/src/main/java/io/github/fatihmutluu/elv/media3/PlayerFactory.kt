@@ -146,6 +146,10 @@ internal class PlayerFactory(
   var lastTrackSelector: DualSubtitleTrackSelector? = null
     private set
 
+  @Volatile
+  internal var lastLoadControlValuesForTest: LoadControlValues? = null
+    private set
+
   fun disableAudioFocus() {
     audioFocusAllowed = false
   }
@@ -160,6 +164,7 @@ internal class PlayerFactory(
     handleAudioFocus: Boolean = true,
     multiViewTileCount: Int = MIN_MULTIVIEW_TILES,
     autoFrameRateMode: AutoFrameRateMode = AutoFrameRateMode.SEAMLESS,
+    vodBudget: VodBufferBudget? = null,
   ): ExoPlayer {
     if (handleAudioFocus && audioFocusAllowed) {
       try {
@@ -173,6 +178,7 @@ internal class PlayerFactory(
           handleAudioFocus = true,
           multiViewTileCount = multiViewTileCount,
           autoFrameRateMode = autoFrameRateMode,
+          vodBudget = vodBudget,
         )
       } catch (e: SecurityException) {
         Log.w(TAG, "TAKE_AUDIO_FOCUS denied (${e.javaClass.simpleName}); falling back to handleAudioFocus=false")
@@ -189,6 +195,7 @@ internal class PlayerFactory(
       handleAudioFocus = false,
       multiViewTileCount = multiViewTileCount,
       autoFrameRateMode = autoFrameRateMode,
+      vodBudget = vodBudget,
     )
   }
 
@@ -201,12 +208,19 @@ internal class PlayerFactory(
     handleAudioFocus: Boolean,
     multiViewTileCount: Int,
     autoFrameRateMode: AutoFrameRateMode,
+    vodBudget: VodBufferBudget?,
   ): ExoPlayer {
-    val buffers = scaleLoadControlForMultiView(
+    val scaledBase = scaleLoadControlForMultiView(
       base = loadControlForStream(streamKind, bufferPreset),
       streamKind = streamKind,
       multiViewTileCount = multiViewTileCount,
     )
+    val buffers = if (streamKind == StreamKind.VOD && vodBudget != null) {
+      applyVodBudgetToLoadControl(scaledBase, vodBudget)
+    } else {
+      scaledBase
+    }
+    lastLoadControlValuesForTest = buffers
     assOverlayBridge?.beginPlayerSession()
     val baseRenderers = createRenderersFactory(
       context = context,

@@ -1,5 +1,5 @@
 import { type SubtitleStyleConfig, subtitleStyleEquals } from '@elv/domain';
-import { type ClockAnchor, EMPTY_TRACKS, type StreamVideoInfo } from './engine';
+import { type BufferHealth, type ClockAnchor, EMPTY_TRACKS, type StreamVideoInfo } from './engine';
 import type { PlaybackState, PlaybackStatus } from './types';
 
 function sameStatus(a: PlaybackStatus, b: PlaybackStatus): boolean {
@@ -26,6 +26,21 @@ function sameStatus(a: PlaybackStatus, b: PlaybackStatus): boolean {
   }
 }
 
+/** @internal Structural equality check for optional {@link BufferHealth} telemetry (`#350`). */
+export function sameBufferHealth(
+  a: BufferHealth | undefined,
+  b: BufferHealth | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return (
+    a.bufferedAheadMs === b.bufferedAheadMs &&
+    a.bufferedBehindMs === b.bufferedBehindMs &&
+    a.diskCacheBytes === b.diskCacheBytes &&
+    a.throttled === b.throttled
+  );
+}
+
 function sameAnchor(a: ClockAnchor | undefined, b: ClockAnchor | undefined): boolean {
   if (a === b) return true;
   if (a === undefined || b === undefined) return false;
@@ -37,7 +52,8 @@ function sameAnchor(a: ClockAnchor | undefined, b: ClockAnchor | undefined): boo
     a.liveEdgeMs === b.liveEdgeMs &&
     a.liveSeekableStartMs === b.liveSeekableStartMs &&
     a.timeShiftSupported === b.timeShiftSupported &&
-    a.isLiveTs === b.isLiveTs
+    a.isLiveTs === b.isLiveTs &&
+    sameBufferHealth(a.bufferHealth, b.bufferHealth)
   );
 }
 

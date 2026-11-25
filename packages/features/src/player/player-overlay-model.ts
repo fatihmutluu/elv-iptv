@@ -2,6 +2,7 @@ import type { ItemRow, LiveVariantOption } from '@elv/data';
 import type { AndroidDecoderMode, DefaultResizeModePref } from '@elv/domain';
 import { type AppI18n, resolveLanguageLabel } from '@elv/i18n';
 import {
+  type BufferHealth,
   type ChapterInfo,
   type MediaTracks,
   type PlaybackClock,
@@ -460,10 +461,38 @@ export interface StatsHudExtras {
   readonly uiStalls?: number | undefined;
 }
 
+function formatBufferHealthLine(
+  health: BufferHealth | undefined,
+  i18n: Pick<AppI18n, 't'>,
+): string | undefined {
+  if (health === undefined) return undefined;
+  const { bufferedAheadMs, bufferedBehindMs, diskCacheBytes, throttled } = health;
+  if (
+    !Number.isFinite(bufferedAheadMs) ||
+    bufferedAheadMs < 0 ||
+    !Number.isFinite(bufferedBehindMs) ||
+    bufferedBehindMs < 0
+  ) {
+    return undefined;
+  }
+  const aheadSec = Math.round(bufferedAheadMs / 1000);
+  const behindSec = Math.round(bufferedBehindMs / 1000);
+  let line = `${i18n.t('player.stats.buffer')}: +${aheadSec}s / -${behindSec}s`;
+  if (diskCacheBytes !== undefined && Number.isFinite(diskCacheBytes) && diskCacheBytes > 0) {
+    const rawMb = diskCacheBytes / (1024 * 1024);
+    const diskMb = rawMb < 10 ? Math.round(rawMb * 10) / 10 : Math.round(rawMb);
+    line += ` (${diskMb} MB)`;
+  }
+  if (throttled === true) {
+    line += ` [${i18n.t('player.stats.throttled')}]`;
+  }
+  return line;
+}
+
 /**
  * Formats concise monospace Stats HUD lines directly from live {@link PlaybackState} telemetry
  * (status & clock, active audio/subtitle tracks, first-frame latency, attempt, stale events,
- * dropped frames, UI cache hit rate, and UI stalls `#160`).
+ * dropped frames, UI cache hit rate, UI stalls, and VOD buffer health `#160`, `#350`).
  */
 export function formatStatsHudLines(
   state: PlaybackState,
@@ -518,7 +547,9 @@ export function formatStatsHudLines(
     line4Parts.push(`${i18n.t('player.stats.longTasks')}: ${Math.round(extras.uiStalls)}`);
   }
 
-  return line4Parts.length > 0
-    ? [line1, line2, line3Parts.join(' · '), line4Parts.join(' · ')]
-    : [line1, line2, line3Parts.join(' · ')];
+  const lines: string[] = [line1, line2, line3Parts.join(' · ')];
+  if (line4Parts.length > 0) lines.push(line4Parts.join(' · '));
+  const bufferLine = formatBufferHealthLine(state.anchor?.bufferHealth, i18n);
+  if (bufferLine !== undefined) lines.push(bufferLine);
+  return lines;
 }

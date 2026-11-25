@@ -222,6 +222,7 @@ describe('loadfileCommand', () => {
   });
   it('live and vod get their cache limits including bounded 128MiB live back-buffer (#244, #28)', () => {
     expect(loadfileCommand({ ...base, kind: 'live' })[4]).toEqual({
+      'cache-on-disk': 'no',
       'demuxer-max-bytes': '32MiB',
       'demuxer-max-back-bytes': '128MiB',
       'secondary-sub-pos': '10',
@@ -267,6 +268,45 @@ describe('loadfileCommand', () => {
       'demuxer-hysteresis-secs': '10',
       hwdec: 'no',
       'sub-filter-sdh': 'yes',
+    });
+  });
+
+  it('applies vodCacheOptions for VOD while keeping live strictly cache-on-disk=no (#350)', () => {
+    const vodCmd = loadfileCommand({
+      ...base,
+      kind: 'vod',
+      vodCacheOptions: {
+        'cache-on-disk': 'yes',
+        'demuxer-cache-dir': '/cache/elv-vod-cache/s-1234',
+        'demuxer-max-bytes': '154MiB',
+        'demuxer-max-back-bytes': '38MiB',
+        'demuxer-hysteresis-secs': '10',
+        'demuxer-readahead-secs': '120',
+      },
+    });
+    expect(vodCmd[4]).toMatchObject({
+      'cache-on-disk': 'yes',
+      'demuxer-cache-dir': '/cache/elv-vod-cache/s-1234',
+      'demuxer-max-bytes': '154MiB',
+      'demuxer-max-back-bytes': '38MiB',
+      'demuxer-hysteresis-secs': '10',
+      'demuxer-readahead-secs': '120',
+    });
+
+    const liveCmd = loadfileCommand({
+      ...base,
+      kind: 'live',
+      vodCacheOptions: {
+        'cache-on-disk': 'yes',
+        'demuxer-cache-dir': '/cache/elv-vod-cache/s-1234',
+        'demuxer-max-bytes': '154MiB',
+      },
+    });
+    expect(liveCmd[4]).toEqual({
+      'cache-on-disk': 'no',
+      'demuxer-max-bytes': '32MiB',
+      'demuxer-max-back-bytes': '128MiB',
+      'secondary-sub-pos': '10',
     });
   });
 });

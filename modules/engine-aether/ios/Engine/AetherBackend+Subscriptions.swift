@@ -3,6 +3,9 @@ import AVFoundation
 import Combine
 import CoreMedia
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 extension AetherBackend {
   func subscribe(to target: AetherEngine) {
@@ -178,6 +181,7 @@ extension AetherBackend {
               let capturedDomain = info.underlyingDomain
               let capturedCode = info.underlyingCode
               self.errorReportedSerial = errorSerial
+              self.recordVodThrottleIfNeeded(kind: capturedKind, underlyingCode: capturedCode, serial: errorSerial)
               if let capturedReaderFault {
                 self.onObservation?(.readerFault(capturedReaderFault), errorSerial)
               }
@@ -200,6 +204,7 @@ extension AetherBackend {
                   let kind = target.errorInfo?.kind.rawValue ?? "unknown"
                   let domain = target.errorInfo?.underlyingDomain
                   let code = target.errorInfo?.underlyingCode
+                  self.recordVodThrottleIfNeeded(kind: kind, underlyingCode: code, serial: errorSerial)
                   self.onObservation?(
                     .failure(.engine(kind: kind, underlyingDomain: domain, underlyingCode: code)),
                     errorSerial
@@ -330,6 +335,8 @@ extension AetherBackend {
     externalSubtitleClockCancellable?.cancel()
     externalSubtitleClockCancellable = nil
     lastAVBufferReportedBuffering = false
+    lastObservedErrorLogCount = 0
+    latestVodBufferHealth = nil
   }
 
   private func observeAVPlayer(_ player: AVPlayer?, target: AetherEngine) {
@@ -390,6 +397,7 @@ extension AetherBackend {
     refreshSubtitleGeometry(from: target)
     guard let item else { return }
     applyVideoQualityCap(to: item)
+    applyVodBufferBudget(to: item, target: target)
     updateSubtitleClockSubscription(
       target: target,
       cues: target.subtitleCues,
@@ -402,16 +410,35 @@ extension AetherBackend {
     observedAVPlayerItemId = itemId
     itemProgressCancellable = item.publisher(for: \.loadedTimeRanges)
       .sink { [weak self, weak target] ranges in
+        var samples: [LoadedTimeRangeSample] = []
+        samples.reserveCapacity(ranges.count)
         let bufferedEnd = ranges.reduce(0.0) { acc, value in
-          let end = CMTimeGetSeconds(CMTimeRangeGetEnd(value.timeRangeValue))
+          let range = value.timeRangeValue
+          let start = CMTimeGetSeconds(range.start)
+          let duration = CMTimeGetSeconds(range.duration)
+          if start.isFinite, duration.isFinite {
+            samples.append(LoadedTimeRangeSample(startSeconds: start, durationSeconds: duration))
+          }
+          let end = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
           return (end.isFinite && end > acc) ? end : acc
         }
+        let capturedSamples = samples
         Self.onMainActor {
           guard let self, let target,
                 self.engine === target,
                 self.engineLoadSerial == observedSerial,
                 self.observedAVPlayerItemId == itemId
           else { return }
+          if !self.isCurrentStreamLive(target: target),
+             let health = extractAppleBufferHealth(
+               ranges: capturedSamples,
+               currentTimeSeconds: target.currentTime,
+               throttled: self.vodThrottleBackoffLevel > 0
+             )
+          {
+            self.latestVodBufferHealth = health
+            self.onObservation?(.bufferHealth(health), observedSerial)
+          }
           let accessEvents = target.currentAVPlayerItem?.accessLog()?.events ?? []
           let bytes = accessEvents.reduce(Int64(0)) { acc, ev in
             acc + max(0, ev.numberOfBytesTransferred)
@@ -428,6 +455,42 @@ extension AetherBackend {
           }
         }
       }
+
+    NotificationCenter.default.publisher(for: AVPlayerItem.newErrorLogEntryNotification, object: item)
+      .sink { [weak self, weak target] _ in
+        Self.onMainActor {
+          guard let self, let target,
+                let item = self.activeObservedAVPlayerItem(target: target, observedSerial: observedSerial, itemId: itemId)
+          else { return }
+          self.handleVodErrorLogUpdate(for: item, target: target)
+        }
+      }
+      .store(in: &avPlayerItemBufferCancellables)
+
+    NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)
+      .sink { [weak self, weak target] _ in
+        Self.onMainActor {
+          guard let self, let target,
+                let item = self.activeObservedAVPlayerItem(target: target, observedSerial: observedSerial, itemId: itemId)
+          else { return }
+          self.applyVodBufferBudget(to: item, target: target)
+        }
+      }
+      .store(in: &avPlayerItemBufferCancellables)
+
+    #if canImport(UIKit)
+    NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)
+      .sink { [weak self, weak target] _ in
+        Self.onMainActor {
+          guard let self, let target,
+                let item = self.activeObservedAVPlayerItem(target: target, observedSerial: observedSerial, itemId: itemId)
+          else { return }
+          self.vodMemoryWarningLatched = true
+          self.applyVodBufferBudget(to: item, target: target)
+        }
+      }
+      .store(in: &avPlayerItemBufferCancellables)
+    #endif
 
     item.publisher(for: \.isPlaybackBufferEmpty, options: [.new])
       .sink { [weak self, weak target] _ in
@@ -574,6 +637,105 @@ extension AetherBackend {
     return evaluateLiveSeekRanges(ranges)
   }
 
+  func isCurrentStreamLive(target: AetherEngine) -> Bool {
+    currentLoadOptions?.isLive ?? target.isLive
+  }
+
+  private func activeObservedAVPlayerItem(
+    target: AetherEngine,
+    observedSerial: Int,
+    itemId: ObjectIdentifier
+  ) -> AVPlayerItem? {
+    guard engine === target,
+          engineLoadSerial == observedSerial,
+          observedAVPlayerItemId == itemId,
+          let item = target.currentAVPlayerItem ?? target.currentAVPlayer?.currentItem,
+          ObjectIdentifier(item) == itemId
+    else { return nil }
+    return item
+  }
+
+  func applyVodBufferBudget(to item: AVPlayerItem, target: AetherEngine) {
+    let currentIsLive = isCurrentStreamLive(target: target)
+    if currentIsLive {
+      item.preferredForwardBufferDuration = 0
+      return
+    }
+    let preset = currentLoadOptions?.bufferPreset ?? .auto
+    let lowMemoryPressure = shouldApplyAppleLowMemoryPressure(
+      thermalState: ProcessInfo.processInfo.thermalState,
+      memoryWarningActive: vodMemoryWarningLatched
+    )
+    let budget = computeAppleVodBufferBudget(
+      isLive: false,
+      preset: preset,
+      physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
+      throttleBackoffLevel: vodThrottleBackoffLevel,
+      lowMemoryPressure: lowMemoryPressure
+    )
+    item.preferredForwardBufferDuration = budget.enabled ? budget.preferredForwardBufferDurationSeconds : 0
+  }
+
+  func recordVodThrottleIfNeeded(kind: String?, underlyingCode: Int?, serial: Int) {
+    guard !(currentLoadOptions?.isLive ?? engine?.isLive ?? true),
+          vodThrottleRecordedSerial != serial
+    else { return }
+    let status: Int?
+    if underlyingCode == 429 || underlyingCode == 509 {
+      status = underlyingCode
+    } else if kind == "sourceRateLimited" {
+      status = 429
+    } else {
+      status = nil
+    }
+    guard let status else { return }
+    vodThrottleRecordedSerial = serial
+    vodThrottleBackoffLevel = nextAppleThrottleBackoffLevel(current: vodThrottleBackoffLevel, httpStatus: status)
+    if let target = engine, let item = target.currentAVPlayerItem ?? target.currentAVPlayer?.currentItem {
+      applyVodBufferBudget(to: item, target: target)
+    }
+  }
+
+  private func handleVodErrorLogUpdate(for item: AVPlayerItem, target: AetherEngine) {
+    guard !isCurrentStreamLive(target: target) else { return }
+    let events = item.errorLog()?.events ?? []
+    guard events.count > lastObservedErrorLogCount else { return }
+    let newEvents = events[lastObservedErrorLogCount...]
+    lastObservedErrorLogCount = events.count
+    var updated = false
+    for event in newEvents {
+      let nextLevel = nextAppleThrottleBackoffLevel(
+        current: vodThrottleBackoffLevel,
+        httpStatus: event.errorStatusCode
+      )
+      if nextLevel != vodThrottleBackoffLevel {
+        vodThrottleBackoffLevel = nextLevel
+        updated = true
+      }
+    }
+    if updated {
+      applyVodBufferBudget(to: item, target: target)
+    }
+  }
+
+  func readVodBufferHealth(from target: AetherEngine, currentTimeSeconds: Double) -> AppleBufferHealth? {
+    guard !isCurrentStreamLive(target: target),
+          let item = target.currentAVPlayerItem ?? target.currentAVPlayer?.currentItem
+    else { return nil }
+    let samples: [LoadedTimeRangeSample] = item.loadedTimeRanges.compactMap { value in
+      let range = value.timeRangeValue
+      let start = CMTimeGetSeconds(range.start)
+      let duration = CMTimeGetSeconds(range.duration)
+      guard start.isFinite, duration.isFinite else { return nil }
+      return LoadedTimeRangeSample(startSeconds: start, durationSeconds: duration)
+    }
+    return extractAppleBufferHealth(
+      ranges: samples,
+      currentTimeSeconds: currentTimeSeconds,
+      throttled: vodThrottleBackoffLevel > 0
+    )
+  }
+
   func emitClockSnapshot(
     from target: AetherEngine,
     positionSeconds: Double,
@@ -594,6 +756,14 @@ extension AetherBackend {
     let fallbackLiveEdge: Double? =
       (target.isLive && target.liveEdgeTime.isFinite && target.liveEdgeTime > 0) ? target.liveEdgeTime : nil
     let liveEdgeSeconds: Double? = liveWindow?.endSec ?? fallbackLiveEdge
+    let bufferHealth: AppleBufferHealth?
+    if !isCurrentStreamLive(target: target) {
+      let current = readVodBufferHealth(from: target, currentTimeSeconds: positionSeconds) ?? latestVodBufferHealth
+      latestVodBufferHealth = current
+      bufferHealth = current
+    } else {
+      bufferHealth = nil
+    }
     onObservation?(
       .clock(
         positionSeconds: positionSeconds,
@@ -601,7 +771,8 @@ extension AetherBackend {
         durationSeconds: durationSeconds,
         liveEdgeSeconds: liveEdgeSeconds,
         liveSeekableStartSeconds: liveWindow?.startSec,
-        timeShiftSupported: target.isLive ? (liveWindow != nil) : nil
+        timeShiftSupported: target.isLive ? (liveWindow != nil) : nil,
+        bufferHealth: bufferHealth
       ),
       serial
     )

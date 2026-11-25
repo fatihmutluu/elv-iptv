@@ -90,6 +90,7 @@ struct LoadArgs: Record {
   @Field var preferHevcOverDolbyVision: Bool = false
   @Field var filterSdhSubtitles: Bool = false
   @Field var allowLegacyTls: Bool = false
+  @Field var bufferPreset: String? = nil
   @Field var dnsFamily: String? = nil
   @Field var hostOverride: String? = nil
   @Field var autoFrameRate: String? = nil
@@ -138,7 +139,8 @@ struct LoadArgs: Record {
       dnsFamily: DnsFamilyPreference.parse(dnsFamily),
       hostOverride: validateHostOverride(hostOverride),
       autoFrameRate: resolvedAutoFrameRate,
-      autoDynamicRange: resolvedAutoDynamicRange
+      autoDynamicRange: resolvedAutoDynamicRange,
+      bufferPreset: AppleBufferPreset.parse(bufferPreset)
     )
   }
 }

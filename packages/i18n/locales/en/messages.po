@@ -3285,3 +3285,9 @@ msgstr "Please write a brief description before sending."
 
 msgid "feedback.errorFailed"
 msgstr "Could not send feedback right now. Please try again later."
+
+msgid "player.stats.buffer"
+msgstr "Buffer"
+
+msgid "player.stats.throttled"
+msgstr "throttled"

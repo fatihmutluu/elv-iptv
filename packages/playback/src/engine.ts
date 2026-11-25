@@ -191,6 +191,14 @@ export interface EngineError {
   finalUrl?: string;
 }
 
+/** Live read-ahead and back-buffer telemetry reported by the engine (`#350`). */
+export interface BufferHealth {
+  readonly bufferedAheadMs: number;
+  readonly bufferedBehindMs: number;
+  readonly diskCacheBytes?: number;
+  readonly throttled?: boolean;
+}
+
 /** Position sample: the media was at `positionMs` when the JS clock read `atMs`. */
 export interface ClockAnchor {
   positionMs: number;
@@ -208,6 +216,8 @@ export interface ClockAnchor {
   decodedVideoFrames?: number;
   /** Whether the active media declares a video track (distinguishes radio/audio-only from black screen). */
   hasVideoTrack?: boolean;
+  /** Live VOD read-ahead and back-buffer telemetry reported by the engine (`#350`). */
+  readonly bufferHealth?: BufferHealth;
 }
 
 /** Dynamic range transfer classification of the active video stream (`#58`). */

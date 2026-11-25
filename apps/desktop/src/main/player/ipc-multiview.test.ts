@@ -184,24 +184,29 @@ describe('Multi-Engine player IPC (#34)', () => {
     const ipc = fakeIpcMain();
     const sender = fakeContents(1);
     const created: StubEngine[] = [];
+    const tileCountGetters: Array<(() => number) | undefined> = [];
     const logs: string[] = [];
 
     const dispose = registerPlayerIpc({
       ipcMain: ipc.ipcMain,
       now: () => 100,
       log: (line) => logs.push(line),
-      createEngine: async () => {
+      createEngine: async (_owner, _onUi, _engineId, getMultiViewTileCount) => {
         const eng = stubEngine();
         created.push(eng);
+        tileCountGetters.push(getMultiViewTileCount);
         return eng;
       },
     });
 
     const r1 = (await ipc.invoke(PLAYER_CHANNELS.open, sender)) as { engineId: string };
+    expect(tileCountGetters[0]?.()).toBe(1);
     const r2 = (await ipc.invoke(PLAYER_CHANNELS.open, sender, {
       replaceExisting: false,
       primary: false,
     })) as { engineId: string };
+    expect(tileCountGetters[0]?.()).toBe(2);
+    expect(tileCountGetters[1]?.()).toBe(2);
     const r3 = (await ipc.invoke(PLAYER_CHANNELS.open, sender, {
       replaceExisting: false,
       primary: false,
@@ -228,6 +233,7 @@ describe('Multi-Engine player IPC (#34)', () => {
     // Closing one slot allows opening a replacement
     await ipc.invoke(PLAYER_CHANNELS.close, sender, r4.engineId);
     expect(created[3]?.released).toBe(1);
+    expect(tileCountGetters[0]?.()).toBe(3);
     const r5 = (await ipc.invoke(PLAYER_CHANNELS.open, sender, {
       replaceExisting: false,
       primary: false,
