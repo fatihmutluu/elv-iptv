@@ -132,14 +132,18 @@ function fakeMainWindow() {
 }
 
 describe('popout-window (#158)', () => {
-  it('builds hardened frameless popout window options with 640x360 default and 320x180 minimums', () => {
+  it('builds hardened native-chrome popout window options with 960x540 default, 480x270 minimums, maximizable, and alwaysOnTop false by default', () => {
     const opts = buildPopoutWindowOptions('/app/preload.js', { presenter: 'canvas' });
+    expect(opts.width).toBe(960);
+    expect(opts.height).toBe(540);
     expect(opts.width).toBe(POPOUT_BOUNDS_DEFAULTS.width);
     expect(opts.height).toBe(POPOUT_BOUNDS_DEFAULTS.height);
-    expect(opts.minWidth).toBe(320);
-    expect(opts.minHeight).toBe(180);
-    expect(opts.frame).toBe(false);
-    expect(opts.alwaysOnTop).toBe(true);
+    expect(opts.minWidth).toBe(480);
+    expect(opts.minHeight).toBe(270);
+    expect(opts.frame).toBe(true);
+    expect(opts.titleBarStyle).toBeUndefined();
+    expect(opts.maximizable).toBe(true);
+    expect(opts.alwaysOnTop).toBe(false);
     expect(opts.webPreferences).toMatchObject({
       preload: '/app/preload.js',
       contextIsolation: true,
@@ -148,6 +152,9 @@ describe('popout-window (#158)', () => {
       backgroundThrottling: false,
       additionalArguments: ['--elv-presenter=canvas'],
     });
+
+    const pinnedOpts = buildPopoutWindowOptions('/app/preload.js', { pinned: true });
+    expect(pinnedOpts.alwaysOnTop).toBe(true);
   });
 
   it('creates hardened popout window, persists separate bounds, updates existing popout, and docks back cleanly', () => {
@@ -183,6 +190,7 @@ describe('popout-window (#158)', () => {
       title: 'Channel One',
       subtitle: 'News',
       logo: 'https://user:pass@cdn.example.test/ch1.png?token=secret',
+      transferEngineId: 'engine-7',
     };
     expect(controller.open(payload1)).toBe(true);
     expect(controller.isOpen()).toBe(true);
@@ -195,7 +203,7 @@ describe('popout-window (#158)', () => {
     expect(pop.wcListeners.has('will-navigate')).toBe(true);
     expect(pop.wcListeners.has('render-process-gone')).toBe(true);
     expect(pop.loadedUrls).toEqual(['app://elv/?popout=1']);
-    expect(pop.calls).toContain('aot:true:floating');
+    expect(pop.calls).toContain('aot:false:floating');
     expect(pop.calls).toContain('menuBar:false');
 
     // Pull payload returns sanitized payload ONLY to popout webContents
@@ -205,6 +213,7 @@ describe('popout-window (#158)', () => {
       title: 'Channel One',
       subtitle: 'News',
       logo: 'https://cdn.example.test/ch1.png',
+      transferEngineId: 'engine-7',
     });
     expect(controller.getPayloadForSender({ other: true })).toBeNull();
 
@@ -231,12 +240,13 @@ describe('popout-window (#158)', () => {
     controller.dock({ wrong: true }, { itemKey: 'movie:src1:42', kind: 'movie', title: 'X' });
     expect(mainWin.sent).toEqual([]);
 
-    // Docking from popout restores mainWindow, sends PopoutDockPayload, and closes popout
+    // Docking from popout restores mainWindow, sends PopoutDockPayload (including transferEngineId), and closes popout
     controller.dock(pop.win.webContents, {
       itemKey: 'movie:src1:42',
       kind: 'movie',
       title: 'Cinema Feature',
       positionMs: 99_000,
+      transferEngineId: 'engine-7',
     });
     expect(controller.isOpen()).toBe(false);
     expect(mainWin.calls).toEqual(['restore', 'show', 'focus']);
@@ -250,6 +260,7 @@ describe('popout-window (#158)', () => {
             kind: 'movie',
             title: 'Cinema Feature',
             positionMs: 99_000,
+            transferEngineId: 'engine-7',
           },
         ],
       },

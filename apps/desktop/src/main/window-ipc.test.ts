@@ -289,7 +289,7 @@ describe('window-ipc (#408)', () => {
     expect(trayEnabled).toBe(true);
     expect(await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, fw.sender, 'yes')).toBe(true);
 
-    // Popout launch strips credential query params from logo and rejects raw URL itemKeys or extra keys
+    // Popout launch strips credential query params from logo, accepts valid transferEngineId, and rejects raw URL itemKeys or invalid engineIds
     expect(
       await ipc.invoke(WINDOW_CHANNELS.openPopout, fw.sender, {
         itemKey: 'live:s1:ch1',
@@ -298,6 +298,7 @@ describe('window-ipc (#408)', () => {
         logo: 'https://user:secret@cdn.example.test/logo.png?token=abc&size=2x',
         resumePositionMs: 1200,
         pinned: true,
+        transferEngineId: 'engine-4',
       }),
     ).toBe(true);
     expect(openedPayloads).toEqual([
@@ -308,8 +309,18 @@ describe('window-ipc (#408)', () => {
         logo: 'https://cdn.example.test/logo.png?size=2x',
         resumePositionMs: 1200,
         pinned: true,
+        transferEngineId: 'engine-4',
       },
     ]);
+
+    expect(
+      await ipc.invoke(WINDOW_CHANNELS.openPopout, fw.sender, {
+        itemKey: 'live:s1:ch1',
+        kind: 'live',
+        title: 'Bad transferEngineId',
+        transferEngineId: 'x'.repeat(65),
+      }),
+    ).toBe(false);
 
     expect(
       await ipc.invoke(WINDOW_CHANNELS.openPopout, fw.sender, {
@@ -338,6 +349,7 @@ describe('window-ipc (#408)', () => {
       kind: 'movie',
       title: 'Cinema Film',
       positionMs: 42_500.4,
+      transferEngineId: 'engine-4',
     });
     expect(dockedPayloads).toEqual([
       {
@@ -345,8 +357,15 @@ describe('window-ipc (#408)', () => {
         kind: 'movie',
         title: 'Cinema Film',
         positionMs: 42_500,
+        transferEngineId: 'engine-4',
       },
     ]);
+    await ipc.invoke(WINDOW_CHANNELS.dockPopout, fw.sender, {
+      itemKey: 'movie:s1:m1',
+      kind: 'movie',
+      title: 'Bad transferEngineId',
+      transferEngineId: '',
+    });
     await ipc.invoke(WINDOW_CHANNELS.dockPopout, fw.sender, {
       itemKey: 'movie:s1:m1',
       kind: 'movie',

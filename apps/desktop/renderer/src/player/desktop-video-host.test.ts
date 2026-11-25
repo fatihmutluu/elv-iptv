@@ -62,10 +62,14 @@ function fakePlayerBridge() {
   const eventListeners = new Set<(message: { engineId: string; event: EngineEvent }) => void>();
   const open = vi.fn(async () => ({ engineId: `engine-${++seq}`, mainNowMs: 100 }));
   const close = vi.fn(async () => undefined);
+  const park = vi.fn(async () => true);
+  const adopt = vi.fn(async (id: string) => ({ engineId: id, mainNowMs: 100 }));
   const setPrimary = vi.fn(async () => undefined);
   const bridge: PlayerBridge = {
     open,
     close,
+    park,
+    adopt,
     setPrimary,
     send: (m) => void sent.push(m),
     setArea: () => undefined,
@@ -82,7 +86,7 @@ function fakePlayerBridge() {
   const emitEvent = (engineId: string, event: EngineEvent) => {
     for (const listener of [...eventListeners]) listener({ engineId, event });
   };
-  return { bridge, sent, open, close, setPrimary, emitEvent };
+  return { bridge, sent, open, close, park, adopt, setPrimary, emitEvent };
 }
 
 function fakeWindowBridge(): WindowBridge {
@@ -394,6 +398,72 @@ describe('createDesktopVideoHost (#34)', () => {
         error: { code: 'network' },
       });
       expect(telemetry.recordPlaybackError).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('zero-reload parkForTransfer and adoptEngine (Wave P3)', () => {
+    it('exposes hostEngineId, parks without closing mpv on subsequent release, and adopts parked engines', async () => {
+      const fake = fakePlayerBridge();
+      const host = createDesktopVideoHost({
+        playerBridge: fake.bridge,
+        windowBridge: fakeWindowBridge(),
+        presenterKind: 'canvas',
+      });
+
+      const opened = await host.open({ replaceExisting: true, primary: true });
+      expect(opened).not.toBeNull();
+      const openedExt = opened as typeof opened & {
+        readonly hostEngineId?: string;
+        parkForTransfer?(): Promise<string | null>;
+      };
+      expect(openedExt?.hostEngineId).toBe('engine-1');
+
+      const parkedId = await openedExt?.parkForTransfer?.();
+      expect(parkedId).toBe('engine-1');
+      expect(fake.park).toHaveBeenCalledWith('engine-1');
+
+      // Release after successful parkForTransfer must NOT close mpv!
+      opened?.engine.release();
+      expect(fake.close).not.toHaveBeenCalled();
+      expect(fake.sent).not.toContainEqual({
+        engineId: 'engine-1',
+        command: { name: 'release' },
+      });
+
+      // Adopting the parked engine in the destination host binds hostEngineId & full controls
+      const hostExt = host as typeof host & {
+        adoptEngine?(id: string): Promise<typeof openedExt>;
+      };
+      const adopted = await hostExt.adoptEngine?.('engine-1');
+      expect(adopted).not.toBeNull();
+      expect(fake.adopt).toHaveBeenCalledWith('engine-1');
+      expect(adopted?.hostEngineId).toBe('engine-1');
+      adopted?.setVolume?.(75);
+      expect(fake.sent).toContainEqual({
+        engineId: 'engine-1',
+        command: { name: 'setVolume', volume: 75 },
+      });
+      adopted?.engine.release();
+      expect(fake.close).toHaveBeenCalledWith('engine-1');
+    });
+
+    it('returns null from parkForTransfer when main declines parking (e.g. non-canvas presenter)', async () => {
+      const fake = fakePlayerBridge();
+      fake.park.mockResolvedValueOnce(false);
+      const host = createDesktopVideoHost({
+        playerBridge: fake.bridge,
+        windowBridge: fakeWindowBridge(),
+        presenterKind: 'child-window',
+      });
+
+      const opened = await host.open();
+      const openedExt = opened as typeof opened & {
+        parkForTransfer?(): Promise<string | null>;
+      };
+      await expect(openedExt?.parkForTransfer?.()).resolves.toBeNull();
+      // Since park failed, normal release still closes mpv cleanly
+      opened?.engine.release();
+      expect(fake.close).toHaveBeenCalledWith('engine-1');
     });
   });
 });

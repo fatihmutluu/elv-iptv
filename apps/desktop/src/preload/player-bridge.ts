@@ -146,6 +146,16 @@ export function createPlayerBridge(
     async close(engineId) {
       await ipc.invoke(PLAYER_CHANNELS.close, engineId);
     },
+    async park(engineId) {
+      const reply = await ipc.invoke(PLAYER_CHANNELS.park, engineId);
+      return reply === true;
+    },
+    async adopt(engineId) {
+      const reply = await ipc.invoke(PLAYER_CHANNELS.adopt, engineId);
+      if (reply === null || reply === undefined) return null;
+      if (!isOpenReply(reply)) throw new Error('player:adopt returned an unexpected reply');
+      return { engineId: reply.engineId, mainNowMs: reply.mainNowMs };
+    },
     async setPrimary(engineId) {
       await ipc.invoke(PLAYER_CHANNELS.setPrimary, engineId);
     },

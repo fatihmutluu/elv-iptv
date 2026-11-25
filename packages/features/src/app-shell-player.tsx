@@ -7,7 +7,7 @@ import { DEFAULT_AUTO_HIDE_OSD_MS, MultiViewStage, PlayerScreen } from './player
 import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
 import type { PlaybackGuard } from './ports/playback-guard';
-import type { ThermalDevicePort, VideoHost } from './ports/video-host';
+import type { AdoptedPlaybackSession, ThermalDevicePort, VideoHost } from './ports/video-host';
 import { CrashRecoveryBoundary, type PreferencesContextValue } from './shell';
 
 /** Props of {@link AppShellPlayerView}. */
@@ -22,10 +22,20 @@ interface AppShellPlayerViewProps {
   readonly multiViewSupported?: boolean;
   readonly restoreCursorToken?: number;
   readonly externalOverlayOpen?: boolean;
+  readonly adoptedSession?: AdoptedPlaybackSession | undefined;
+  readonly adoptEngineId?: string | undefined;
+  readonly onConsumeAdoptedSession?: ((session: AdoptedPlaybackSession) => void) | undefined;
   readonly onMinimizeToMiniPlayer?: () => void;
   readonly onExpandMiniPlayer?: () => void;
   readonly onEnterMultiView?: (target: PlayTarget) => void;
-  readonly onPopoutPlayer?: (target: PlayTarget, positionMs?: number) => void;
+  readonly onPopoutPlayer?: (
+    target: PlayTarget,
+    positionMs?: number,
+    transferEngineId?: string,
+  ) => void;
+  readonly onRegisterHandoffSession?:
+    | ((fn: (() => AdoptedPlaybackSession | null) | null) => void)
+    | undefined;
   readonly onPlaybackActiveChange: (active: boolean) => void;
   readonly onRegisterStopActivePlayer?: (stop: (() => Promise<void>) | null) => void;
   readonly onTargetChange: (next: PlayTarget) => void;
@@ -44,10 +54,14 @@ function AppShellPlayerView({
   multiViewSupported = false,
   restoreCursorToken = 0,
   externalOverlayOpen,
+  adoptedSession,
+  adoptEngineId,
+  onConsumeAdoptedSession,
   onMinimizeToMiniPlayer,
   onExpandMiniPlayer,
   onEnterMultiView,
   onPopoutPlayer,
+  onRegisterHandoffSession,
   onRegisterStopActivePlayer,
   onPlaybackActiveChange,
   onTargetChange,
@@ -152,6 +166,10 @@ function AppShellPlayerView({
       {...(onExpandMiniPlayer !== undefined ? { onExpandMiniPlayer } : {})}
       {...(onEnterMultiView !== undefined ? { onEnterMultiView } : {})}
       {...(onPopoutPlayer !== undefined ? { onPopoutPlayer } : {})}
+      {...(adoptedSession !== undefined ? { adoptedSession } : {})}
+      {...(adoptEngineId !== undefined ? { adoptEngineId } : {})}
+      {...(onConsumeAdoptedSession !== undefined ? { onConsumeAdoptedSession } : {})}
+      {...(onRegisterHandoffSession !== undefined ? { onRegisterHandoffSession } : {})}
       {...(onRegisterStopActivePlayer !== undefined ? { onRegisterStopActivePlayer } : {})}
       liveChannelSwitchMode={prefs.liveChannelSwitchMode}
       onTargetChange={onTargetChange}
@@ -186,6 +204,7 @@ export interface AppShellPlayerHostProps {
  */
 export function AppShellPlayerHost(p: AppShellPlayerHostProps): ReactElement | null {
   const { modes } = p;
+  const prefs = p.preferences.preferences;
   if (modes.multiViewSeed !== null) {
     return (
       <MultiViewStage
@@ -195,6 +214,18 @@ export function AppShellPlayerHost(p: AppShellPlayerHostProps): ReactElement | n
         sources={p.sources}
         thermalDevice={p.thermalDevice}
         initialSeed={modes.multiViewSeed}
+        {...(modes.multiViewAdoptedSession !== null
+          ? { initialAdoptedSession: modes.multiViewAdoptedSession }
+          : {})}
+        onConsumeAdoptedSession={modes.markAdoptedSessionConsumed}
+        playerVolume={prefs.playerVolume}
+        onPersistPlayerVolume={(playerVolume) => {
+          void p.preferences.updatePreferences({ playerVolume });
+        }}
+        preferredAudioDevice={prefs.preferredAudioDevice}
+        audioNormalization={prefs.audioNormalization}
+        pitchLock={prefs.pitchLock}
+        deinterlaceMode={prefs.deinterlaceMode}
         onExit={modes.exitMultiView}
       />
     );
@@ -205,8 +236,12 @@ export function AppShellPlayerHost(p: AppShellPlayerHostProps): ReactElement | n
       pointerEvents={modes.playerViewMode === 'mini' ? 'box-none' : 'auto'}
       style={modes.playerViewMode === 'mini' ? hostStyles.miniHost : hostStyles.fullHost}
     >
-      <CrashRecoveryBoundary resetKey={p.playTarget.itemKey} {...p.crashProps}>
+      <CrashRecoveryBoundary
+        resetKey={`${p.playTarget.itemKey}:${modes.playerHandoffKey}`}
+        {...p.crashProps}
+      >
         <AppShellPlayerView
+          key={modes.playerHandoffKey}
           catalog={p.catalog}
           videoHost={p.videoHost}
           target={p.playTarget}
@@ -215,6 +250,14 @@ export function AppShellPlayerHost(p: AppShellPlayerHostProps): ReactElement | n
           preferences={p.preferences}
           multiViewSupported={modes.multiViewSupported}
           restoreCursorToken={modes.restoreCursorToken}
+          {...(modes.pendingAdoptedSession !== null
+            ? { adoptedSession: modes.pendingAdoptedSession }
+            : {})}
+          {...(modes.pendingAdoptEngineId !== undefined
+            ? { adoptEngineId: modes.pendingAdoptEngineId }
+            : {})}
+          onConsumeAdoptedSession={modes.markAdoptedSessionConsumed}
+          onRegisterHandoffSession={modes.registerHandoffSession}
           {...(p.appLifecycle !== undefined ? { appLifecycle: p.appLifecycle } : {})}
           externalOverlayOpen={p.externalOverlayOpen}
           onMinimizeToMiniPlayer={modes.minimizeToMiniPlayer}

@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PopoutLaunchPayload } from '../../../src/shared/window-ipc.ts';
 import {
+  buildPlayTargetFromPopoutLaunch,
   buildPopoutDockPayload,
+  buildPopoutDockPayloadFromTarget,
   createDesktopThermalDevicePort,
   createDesktopWindowPort,
   isPopoutSearch,
@@ -39,16 +41,55 @@ describe('popout-controller & desktop shell ports (#158, #34)', () => {
       title: 'Cinema Feature',
       resumePositionMs: 1000,
     };
-    expect(buildPopoutDockPayload(vodPayload, 88_432.7)).toEqual({
+    expect(buildPopoutDockPayload(vodPayload, 88_432.7, 'engine-7')).toEqual({
       itemKey: 'movie:s1:m9',
       kind: 'movie',
       title: 'Cinema Feature',
       positionMs: 88_433,
+      transferEngineId: 'engine-7',
     });
     expect(buildPopoutDockPayload(vodPayload, -5)).toEqual({
       itemKey: 'movie:s1:m9',
       kind: 'movie',
       title: 'Cinema Feature',
+    });
+
+    expect(
+      buildPlayTargetFromPopoutLaunch({
+        itemKey: 'movie:s1:m9',
+        kind: 'movie',
+        title: 'Cinema Feature',
+        sourceId: 's1',
+        resumePositionMs: 12_345.6,
+        transferEngineId: 'engine-3',
+      }),
+    ).toEqual({
+      itemKey: 'movie:s1:m9',
+      sourceId: 's1',
+      title: 'Cinema Feature',
+      kind: 'vod',
+      itemKind: 'movie',
+      startPositionMs: 12_346,
+    });
+
+    expect(
+      buildPopoutDockPayloadFromTarget(
+        {
+          itemKey: 'live:s1:ch2',
+          sourceId: 's1',
+          title: 'Zapped Channel',
+          kind: 'live',
+          itemKind: 'live',
+        },
+        45_000,
+        'engine-9',
+      ),
+    ).toEqual({
+      itemKey: 'live:s1:ch2',
+      kind: 'live',
+      title: 'Zapped Channel',
+      sourceId: 's1',
+      transferEngineId: 'engine-9',
     });
   });
 

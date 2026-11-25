@@ -19,6 +19,16 @@ import type { DesktopDisplayRefreshController } from './display-refresh.ts';
 import type { MpvEngine } from './engine.ts';
 import { dispatchPlayerBridgeCommand } from './ipc-commands.ts';
 import {
+  DEFAULT_PARKED_ORPHAN_MS,
+  type EntrySnapshots,
+  type HandoffEntry,
+  handleAdoptEngine,
+  handleParkEngine,
+  recordEntryEventSnapshot,
+  recordEntryUiSnapshot,
+  syncPrimaryOwnerEffects,
+} from './ipc-handoff.ts';
+import {
   dispatchDesktopMediaCommand,
   type MediaBridgeState,
   stoppedMediaState,
@@ -82,6 +92,10 @@ export interface PlayerIpcDeps {
   ): TaskbarController | undefined;
   /** Optional active video display aspect ratio sink for windowed aspect-ratio lock (`#332`). */
   onVideoAspectRatioChange?(owner: WebContentsLike, aspectRatio: number | undefined): void;
+  /** Optional retarget callback moving a live canvas engine to a new owning window (`Wave P3`). */
+  retargetOwner?(engine: MpvEngine, nextOwner: WebContentsLike): boolean;
+  /** Orphan timeout (ms) before an unadopted parked engine is released (default `15_000`). */
+  parkedOrphanMs?: number;
   /** Optional OS media bridge (Linux MPRIS2 `#238` or macOS MediaPlayer `#301`). */
   mediaBridge?: DesktopMediaBridge;
   /** Optional fullscreen Auto Frame-Rate display refresh controller (`#214`, `#116`). */
@@ -104,10 +118,12 @@ interface Entry {
   engine: MpvEngine;
   attempt: AttemptToken;
   isPrimary: boolean;
+  parked: boolean;
   lastAspectRatio: number | undefined;
   lastFps: number | undefined;
   lastFullscreen: boolean;
   lastDisplaySync: DisplaySyncPolicy | undefined;
+  snapshots: EntrySnapshots;
   emitUi: (ui: PlayerUiEvent) => void;
   unsubscribe(): void;
   taskbar?: TaskbarController | undefined;
@@ -126,12 +142,14 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   const resolveDisplayId = (owner: WebContentsLike): string | undefined =>
     deps.getDisplayId?.(owner);
   const bufferingReleaseMs = Math.max(0, deps.bufferingReleaseMs ?? DEFAULT_BUFFERING_RELEASE_MS);
+  const parkedOrphanMs = Math.max(0, deps.parkedOrphanMs ?? DEFAULT_PARKED_ORPHAN_MS);
   const timers: PlayerIpcTimers = deps.timers ?? {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   };
   const entries = new Map<string, Entry>();
   const bufferingTimers = new Map<string, unknown>();
+  const parkedTimers = new Map<string, unknown>();
   const watched = new Set<number>();
   const ownerGenerations = new Map<number, number>();
   const pendingOpens = new Map<number, Set<string>>();
@@ -198,10 +216,30 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     return next;
   };
 
+  const clearParkedTimer = (id: string): void => {
+    const handle = parkedTimers.get(id);
+    if (handle === undefined) return;
+    parkedTimers.delete(id);
+    timers.clearTimeout(handle);
+  };
+
+  const armParkedTimer = (id: string): void => {
+    clearParkedTimer(id);
+    const handle = timers.setTimeout(() => {
+      parkedTimers.delete(id);
+      const current = entries.get(id);
+      if (current?.parked) {
+        log('player ipc: releasing orphaned parked engine after timeout');
+        release(id);
+      }
+    }, parkedOrphanMs);
+    parkedTimers.set(id, handle);
+  };
+
   const countOwnedBy = (ownerId: number): number => {
     let count = 0;
     for (const entry of entries.values()) {
-      if (entry.owner.id === ownerId) count += 1;
+      if (entry.owner.id === ownerId && !entry.parked) count += 1;
     }
     return count;
   };
@@ -228,12 +266,13 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   };
 
   const release = (id: string): void => {
+    clearParkedTimer(id);
     releasePowerBlocker(id);
     displayRefreshController?.restoreForEngine(id);
     const entry = entries.get(id);
     if (!entry) return;
     entries.delete(id);
-    if (entry.isPrimary) {
+    if (entry.isPrimary && !entry.parked) {
       deps.onVideoAspectRatioChange?.(entry.owner, undefined);
     }
     entry.taskbar?.clear();
@@ -249,7 +288,9 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   };
 
   const releaseOwnedBy = (owner: WebContentsLike): void => {
-    for (const [id, entry] of [...entries]) if (entry.owner.id === owner.id) release(id);
+    for (const [id, entry] of [...entries]) {
+      if (entry.owner.id === owner.id && !entry.parked) release(id);
+    }
   };
 
   const invalidateOwner = (owner: WebContentsLike): void => {
@@ -259,7 +300,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
 
   const ownedEntry = (sender: WebContentsLike, engineId: string): Entry | undefined => {
     const entry = entries.get(engineId);
-    return entry && entry.owner.id === sender.id ? entry : undefined;
+    return entry && !entry.parked && entry.owner.id === sender.id ? entry : undefined;
   };
 
   const sendTo = (owner: WebContentsLike, channel: string, message: unknown): void => {
@@ -323,40 +364,48 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
 
     let registered = false;
     let initialFullscreen = false;
-    const isCurrent = (): boolean =>
-      !disposed &&
-      !sender.isDestroyed() &&
-      (ownerGenerations.get(sender.id) ?? 0) === gen &&
-      (!registered || entries.has(engineId));
+    const preSnapshots: EntrySnapshots = {};
+    const isCurrent = (): boolean => {
+      if (disposed) return false;
+      if (!registered) {
+        return !sender.isDestroyed() && (ownerGenerations.get(sender.id) ?? 0) === gen;
+      }
+      return entries.has(engineId);
+    };
     const emitUi = (ui: PlayerUiEvent): void => {
       if (!isCurrent()) return;
+      const currentEntry = entries.get(engineId);
+      recordEntryUiSnapshot(currentEntry ? currentEntry.snapshots : preSnapshots, ui);
+      const targetOwner = currentEntry ? currentEntry.owner : sender;
       if (ui.type === 'fullscreen-changed') {
         initialFullscreen = ui.fullscreen;
-        const currentEntry = entries.get(engineId);
         if (currentEntry) {
           currentEntry.lastFullscreen = ui.fullscreen;
-          if (currentEntry.isPrimary) {
+          if (currentEntry.isPrimary && !currentEntry.parked) {
             displayRefreshController?.setFullscreen(
               engineId,
               ui.fullscreen,
-              resolveDisplayId(sender),
+              resolveDisplayId(targetOwner),
             );
           }
         } else if (primary) {
           displayRefreshController?.setFullscreen(
             engineId,
             ui.fullscreen,
-            resolveDisplayId(sender),
+            resolveDisplayId(targetOwner),
           );
         }
       }
+      if (currentEntry?.parked) return;
       const message: PlayerUiMessage = { engineId, ui };
-      sendTo(sender, PLAYER_CHANNELS.ui, message);
+      sendTo(targetOwner, PLAYER_CHANNELS.ui, message);
     };
 
     let engine: MpvEngine;
-    const getMultiViewTileCount = (): number =>
-      Math.max(1, countOwnedBy(sender.id) + (pendingOpens.get(sender.id)?.size ?? 0));
+    const getMultiViewTileCount = (): number => {
+      const ownerId = entries.get(engineId)?.owner.id ?? sender.id;
+      return Math.max(1, countOwnedBy(ownerId) + (pendingOpens.get(ownerId)?.size ?? 0));
+    };
     try {
       engine = await deps.createEngine(sender, emitUi, engineId, getMultiViewTileCount);
     } finally {
@@ -401,10 +450,12 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       engine,
       attempt: 0,
       isPrimary: primary,
+      parked: false,
       lastAspectRatio: undefined,
       lastFps: undefined,
       lastFullscreen: initialFullscreen,
       lastDisplaySync: undefined,
+      snapshots: preSnapshots,
       emitUi,
       unsubscribe: () => undefined,
       ...(taskbar === undefined ? {} : { taskbar }),
@@ -413,15 +464,21 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     };
 
     entry.unsubscribe = engine.subscribe((event) => {
+      recordEntryEventSnapshot(entry.snapshots, event);
+      const activePrimary = entry.isPrimary && !entry.parked;
       if (event.type === 'state') {
         if (event.state === 'playing') {
           clearBufferingTimer(engineId);
           powerBlocker?.acquire(engineId);
           taskbarState.active = true;
           taskbarState.paused = false;
-          if (entry.isPrimary) {
+          if (activePrimary) {
             syncTaskbar(entry.taskbar, taskbarState);
-            displayRefreshController?.setPlaybackActive(engineId, true, resolveDisplayId(sender));
+            displayRefreshController?.setPlaybackActive(
+              engineId,
+              true,
+              resolveDisplayId(entry.owner),
+            );
           }
           mediaState.status = 'Playing';
           mediaState.isNavigating = false;
@@ -437,7 +494,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
           if (event.state === 'paused') {
             taskbarState.active = true;
             taskbarState.paused = true;
-            if (entry.isPrimary) syncTaskbar(entry.taskbar, taskbarState);
+            if (activePrimary) syncTaskbar(entry.taskbar, taskbarState);
             mediaState.status = 'Paused';
             mediaState.isNavigating = false;
             pushMediaState(engineId, entry.isPrimary);
@@ -446,13 +503,13 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
             taskbarState.paused = false;
             entry.lastAspectRatio = undefined;
             entry.lastFps = undefined;
-            if (entry.isPrimary) {
+            if (activePrimary) {
               entry.taskbar?.clear();
-              deps.onVideoAspectRatioChange?.(sender, undefined);
+              deps.onVideoAspectRatioChange?.(entry.owner, undefined);
               displayRefreshController?.setPlaybackActive(
                 engineId,
                 false,
-                resolveDisplayId(sender),
+                resolveDisplayId(entry.owner),
               );
             }
             mediaState.status = 'Stopped';
@@ -472,7 +529,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         if (event.anchor.durationMs !== undefined) {
           taskbarState.durationMs = event.anchor.durationMs;
         }
-        if (entry.isPrimary && taskbarState.active) syncTaskbar(entry.taskbar, taskbarState);
+        if (activePrimary && taskbarState.active) syncTaskbar(entry.taskbar, taskbarState);
         mediaState.positionUs = Math.max(0, Math.round(event.anchor.positionMs * 1000));
         if (event.anchor.durationMs !== undefined) {
           mediaState.durationUs = Math.max(0, Math.round(event.anchor.durationMs * 1000));
@@ -488,8 +545,8 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
           event.info.aspectRatio > 0
         ) {
           entry.lastAspectRatio = event.info.aspectRatio;
-          if (entry.isPrimary) {
-            deps.onVideoAspectRatioChange?.(sender, event.info.aspectRatio);
+          if (activePrimary) {
+            deps.onVideoAspectRatioChange?.(entry.owner, event.info.aspectRatio);
           }
         }
         if (
@@ -498,11 +555,11 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
           event.info.fps > 0
         ) {
           entry.lastFps = event.info.fps;
-          if (entry.isPrimary) {
+          if (activePrimary) {
             displayRefreshController?.setContentFps(
               engineId,
               event.info.fps,
-              resolveDisplayId(sender),
+              resolveDisplayId(entry.owner),
             );
           }
         }
@@ -512,17 +569,23 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         taskbarState.paused = false;
         entry.lastAspectRatio = undefined;
         entry.lastFps = undefined;
-        if (entry.isPrimary) {
+        if (activePrimary) {
           entry.taskbar?.clear();
-          deps.onVideoAspectRatioChange?.(sender, undefined);
-          displayRefreshController?.setPlaybackActive(engineId, false, resolveDisplayId(sender));
+          deps.onVideoAspectRatioChange?.(entry.owner, undefined);
+          displayRefreshController?.setPlaybackActive(
+            engineId,
+            false,
+            resolveDisplayId(entry.owner),
+          );
         }
         mediaState.status = 'Stopped';
         mediaState.isNavigating = false;
         pushMediaState(engineId);
       }
-      const message: PlayerEventMessage = { engineId, event };
-      sendTo(sender, PLAYER_CHANNELS.event, message);
+      if (!entry.parked) {
+        const message: PlayerEventMessage = { engineId, event };
+        sendTo(entry.owner, PLAYER_CHANNELS.event, message);
+      }
     });
 
     entries.set(engineId, entry);
@@ -540,9 +603,54 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     }
   };
 
+  const syncPrimary = (engineId: string, entry: HandoffEntry<WebContentsLike>): void =>
+    syncPrimaryOwnerEffects(engineId, entry, {
+      ...(deps.createTaskbarController
+        ? { createTaskbarController: deps.createTaskbarController }
+        : {}),
+      syncTaskbar,
+      ...(deps.onVideoAspectRatioChange
+        ? { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }
+        : {}),
+      ...(displayRefreshController ? { displayRefreshController } : {}),
+      resolveDisplayId,
+      promoteMedia: (id) => {
+        activeMediaEngineId = id;
+        pushMediaState(id, true);
+      },
+    });
+
   const onClose: IpcListener = ({ sender }, engineId) => {
     if (typeof engineId === 'string' && ownedEntry(sender, engineId)) release(engineId);
   };
+
+  const onPark: IpcListener = ({ sender }, engineId): boolean =>
+    handleParkEngine(sender, engineId, {
+      disposed,
+      hasRetargetOwner: deps.retargetOwner !== undefined,
+      log,
+      ownedEntry,
+      ...(deps.onVideoAspectRatioChange
+        ? { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }
+        : {}),
+      ...(displayRefreshController ? { displayRefreshController } : {}),
+      armParkedTimer,
+    });
+
+  const onAdopt: IpcListener = ({ sender }, engineId): PlayerOpenReply | null =>
+    handleAdoptEngine(sender, engineId, {
+      disposed,
+      now: deps.now,
+      log,
+      getEntry: (id) => entries.get(id),
+      clearParkedTimer,
+      armParkedTimer,
+      ...(deps.retargetOwner ? { retargetOwner: deps.retargetOwner } : {}),
+      releaseOwnedBy,
+      watch,
+      syncPrimary,
+      sendTo,
+    });
 
   const onSetPrimary: IpcListener = ({ sender }, engineId) => {
     if (!isEngineId(engineId)) {
@@ -558,27 +666,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     }
     demoteOwnerPrimaries(sender.id, engineId);
     entry.isPrimary = true;
-    entry.taskbar ??= deps.createTaskbarController?.(sender, (action: TaskbarAction) =>
-      entry.emitUi({ type: 'key', key: action }),
-    );
-    if (entry.taskbarState.active) syncTaskbar(entry.taskbar, entry.taskbarState);
-    else entry.taskbar?.clear();
-    deps.onVideoAspectRatioChange?.(sender, entry.lastAspectRatio);
-    if (displayRefreshController) {
-      const displayId = resolveDisplayId(sender);
-      if (entry.lastDisplaySync !== undefined) {
-        displayRefreshController.setPolicy(engineId, entry.lastDisplaySync);
-      }
-      displayRefreshController.setFullscreen(engineId, entry.lastFullscreen, displayId);
-      displayRefreshController.setContentFps(engineId, entry.lastFps, displayId);
-      displayRefreshController.setPlaybackActive(
-        engineId,
-        entry.mediaState.status === 'Playing',
-        displayId,
-      );
-    }
-    activeMediaEngineId = engineId;
-    pushMediaState(engineId, true);
+    syncPrimary(engineId, entry);
   };
 
   const onPickSubtitleFile: IpcListener = async ({ sender }) => {
@@ -665,6 +753,8 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
 
   ipcMain.handle(PLAYER_CHANNELS.open, onOpen);
   ipcMain.handle(PLAYER_CHANNELS.close, onClose);
+  ipcMain.handle(PLAYER_CHANNELS.park, onPark);
+  ipcMain.handle(PLAYER_CHANNELS.adopt, onAdopt);
   ipcMain.handle(PLAYER_CHANNELS.setPrimary, onSetPrimary);
   ipcMain.handle(PLAYER_CHANNELS.pickSubtitleFile, onPickSubtitleFile);
   ipcMain.on(PLAYER_CHANNELS.command, onCommand);
@@ -676,11 +766,14 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     offMediaCommand?.();
     ipcMain.removeHandler(PLAYER_CHANNELS.open);
     ipcMain.removeHandler(PLAYER_CHANNELS.close);
+    ipcMain.removeHandler(PLAYER_CHANNELS.park);
+    ipcMain.removeHandler(PLAYER_CHANNELS.adopt);
     ipcMain.removeHandler(PLAYER_CHANNELS.setPrimary);
     ipcMain.removeHandler(PLAYER_CHANNELS.pickSubtitleFile);
     ipcMain.removeListener(PLAYER_CHANNELS.command, onCommand);
     ipcMain.removeListener(PLAYER_CHANNELS.area, onArea);
     ipcMain.removeListener(PLAYER_CHANNELS.gateReport, onGate);
+    for (const id of [...parkedTimers.keys()]) clearParkedTimer(id);
     for (const id of [...bufferingTimers.keys()]) clearBufferingTimer(id);
     for (const id of [...entries.keys()]) release(id);
     displayRefreshController?.restoreAll();

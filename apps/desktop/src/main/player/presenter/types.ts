@@ -18,6 +18,8 @@ export interface VideoPresenter {
   setArea(area: PlayerArea): void;
   /** Child window: the app window's fullscreen; own window: mpv's. */
   toggleFullscreen(): void;
+  /** Optional zero-reload window handoff (supported by the `'canvas'` shared-texture presenter). */
+  retargetWindow?(nextWindow: AppWindowLike): void;
   onEvent(listener: (event: PresenterEvent) => void): () => void;
   /** Destroys what the presenter created; later calls do nothing and `prepare` rejects. */
   dispose(): void;

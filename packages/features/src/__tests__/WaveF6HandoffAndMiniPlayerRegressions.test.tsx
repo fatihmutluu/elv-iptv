@@ -269,17 +269,11 @@ describe('Wave F6 regressions: Live preview suppression (HIGH #3) & cache/detail
     }
   });
 
-  it('stops active player cleanly before entering Multi-View without calling playbackGuard.stopIfUsingSource (HIGH #4)', async () => {
+  it('hands off active player seamlessly into Multi-View without calling stop or playbackGuard.stopIfUsingSource (HIGH #4 + Wave P3)', async () => {
     const env = await createSeededEnv();
     const stopSpy = jest.fn();
-    let stopCalledBeforeMultiViewOpen = false;
-    let openCount = 0;
 
     const openEngineSpy = jest.fn(() => {
-      openCount += 1;
-      if (openCount === 2) {
-        stopCalledBeforeMultiViewOpen = stopSpy.mock.calls.length > 0;
-      }
       const engine = createFakePlayerEngine({
         now: () => performance.now(),
         schedule: (fn, ms) => setTimeout(fn, ms),
@@ -330,7 +324,8 @@ describe('Wave F6 regressions: Live preview suppression (HIGH #3) & cache/detail
       await fireEvent.press(screen.getByTestId('player-multiview-button'));
       await waitFor(() => expect(screen.getByTestId('multiview-stage')).toBeTruthy());
 
-      expect(stopCalledBeforeMultiViewOpen).toBe(true);
+      expect(openEngineSpy).toHaveBeenCalledTimes(1);
+      expect(stopSpy).not.toHaveBeenCalled();
       expect(guardStopSpy).not.toHaveBeenCalled();
     } finally {
       await view?.unmount();

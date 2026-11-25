@@ -65,8 +65,8 @@ export interface CanvasPresenterDeps<
   appWindow: AppWindowLike;
   engineId: string;
   sharedTexture: SharedTextureImporterLike<TFrame, TImported>;
-  getMainFrame(): TFrame | null | undefined;
-  getScaleFactor(): number;
+  getMainFrame(window?: AppWindowLike): TFrame | null | undefined;
+  getScaleFactor(window?: AppWindowLike): number;
   createPipeServer(pipePath: string): CanvasPipeServerLike;
   onDisplayChange?(listener: () => void): () => void;
   ioSurfaceResolver?: IoSurfaceResolver;
@@ -136,7 +136,7 @@ export function createCanvasPresenter<
   TFrame = unknown,
   TImported extends SharedTextureImportedLike = SharedTextureImportedLike,
 >(deps: CanvasPresenterDeps<TFrame, TImported>): VideoPresenter {
-  const { appWindow } = deps;
+  let currentWindow: AppWindowLike = deps.appWindow;
   const surface = createSurfaceTracker();
   const slots = new Map<number, TImported>();
   let server: CanvasPipeServerLike | undefined;
@@ -167,8 +167,10 @@ export function createCanvasPresenter<
   };
 
   const syncSize = (): void => {
-    if (disposed || !area || appWindow.isDestroyed() || area.width <= 0 || area.height <= 0) return;
-    const wc = appWindow.webContents as { getZoomFactor(): number; isDestroyed?(): boolean };
+    if (disposed || !area || currentWindow.isDestroyed() || area.width <= 0 || area.height <= 0) {
+      return;
+    }
+    const wc = currentWindow.webContents as { getZoomFactor(): number; isDestroyed?(): boolean };
     if (wc.isDestroyed?.()) return;
     let rawZoom = 1;
     try {
@@ -176,7 +178,7 @@ export function createCanvasPresenter<
     } catch {
       return;
     }
-    const factor = positiveOrOne(rawZoom) * positiveOrOne(deps.getScaleFactor());
+    const factor = positiveOrOne(rawZoom) * positiveOrOne(deps.getScaleFactor(currentWindow));
     const width = clampDim(area.width * factor);
     const height = clampDim(area.height * factor);
     if (!activeSocket || (width === sent.w && height === sent.h)) return;
@@ -226,8 +228,9 @@ export function createCanvasPresenter<
 
     const ack = `A ${gen} ${slot}\n`;
     const imported = gen === currentGen ? slots.get(slot) : undefined;
-    const ready = !disposed && visible && !appWindow.isDestroyed() && !appWindow.isMinimized();
-    const frame = ready && imported ? deps.getMainFrame() : undefined;
+    const ready =
+      !disposed && visible && !currentWindow.isDestroyed() && !currentWindow.isMinimized();
+    const frame = ready && imported ? deps.getMainFrame(currentWindow) : undefined;
     if (!imported || !frame) {
       writeLine(socket, ack);
       return;
@@ -359,7 +362,7 @@ export function createCanvasPresenter<
     return promise;
   };
 
-  for (const event of FOLLOWED_EVENTS) appWindow.on(event, syncSize);
+  for (const event of FOLLOWED_EVENTS) currentWindow.on(event, syncSize);
   let stopDisplay = deps.onDisplayChange?.(syncSize);
 
   return {
@@ -367,7 +370,7 @@ export function createCanvasPresenter<
     coversArea: false,
     async prepare() {
       if (disposed) throw new Error('presenter disposed');
-      if (appWindow.isDestroyed()) throw new Error('app window is gone');
+      if (currentWindow.isDestroyed()) throw new Error('app window is gone');
       const listeningPath = await ensureServer();
       if (disposed) throw new Error('presenter disposed');
       return [`--elv-canvas-pipe=${listeningPath}`, '--input-vo-keyboard=no'];
@@ -380,20 +383,35 @@ export function createCanvasPresenter<
       syncSize();
     },
     toggleFullscreen() {
-      if (disposed || appWindow.isDestroyed()) return;
+      if (disposed || currentWindow.isDestroyed()) return;
       const useSimple = deps.useSimpleFullscreen?.() === true;
-      const next = !isAppWindowFullscreen(appWindow);
-      const mode = setAppWindowFullscreen(appWindow, next, useSimple);
+      const next = !isAppWindowFullscreen(currentWindow);
+      const mode = setAppWindowFullscreen(currentWindow, next, useSimple);
       if (mode === 'simple') {
         deps.onFullscreenChange?.(next);
         syncSize();
       }
     },
+    retargetWindow(nextWindow) {
+      if (disposed || nextWindow === currentWindow) return;
+      const prevWindow = currentWindow;
+      for (const event of FOLLOWED_EVENTS) {
+        safeRun(() => prevWindow.removeListener(event, syncSize));
+      }
+      currentWindow = nextWindow;
+      if (!currentWindow.isDestroyed()) {
+        for (const event of FOLLOWED_EVENTS) currentWindow.on(event, syncSize);
+      }
+      sent = { w: 0, h: 0 };
+      syncSize();
+    },
     onEvent: (listener) => surface.onEvent(listener),
     dispose() {
       if (disposed) return;
       disposed = true;
-      for (const event of FOLLOWED_EVENTS) appWindow.removeListener(event, syncSize);
+      for (const event of FOLLOWED_EVENTS) {
+        safeRun(() => currentWindow.removeListener(event, syncSize));
+      }
       stopDisplay?.();
       stopDisplay = undefined;
       closeActiveSocket();

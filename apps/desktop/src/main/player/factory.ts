@@ -11,6 +11,7 @@ import {
 } from './mpv/readahead.ts';
 import { choosePresenter } from './presenter/choose.ts';
 import { type CreatePresenterOptions, createPresenter } from './presenter/create.ts';
+import type { AppWindowLike } from './presenter/types.ts';
 import type { MpvRuntimePaths } from './runtime-path.ts';
 
 /** What `createEngineFor` needs besides the window. */
@@ -126,32 +127,65 @@ export async function createEngineFor(
     deferStart: true,
   });
   deps.onUi({ type: 'presenter', kind: presenter.kind, coversArea: presenter.coversArea });
-  if (
-    typeof owner.on === 'function' &&
-    typeof owner.removeListener === 'function' &&
-    typeof owner.isFullScreen === 'function'
-  ) {
-    const onEnterFullScreen = (): void => emitFullscreen(true);
-    const onLeaveFullScreen = (): void => emitFullscreen(false);
-    owner.on('enter-full-screen', onEnterFullScreen);
-    owner.on('leave-full-screen', onLeaveFullScreen);
-    if (
-      owner.isFullScreen() ||
-      (typeof owner.isSimpleFullScreen === 'function' && owner.isSimpleFullScreen())
-    ) {
-      emitFullscreen(true);
+  const onEnterFullScreen = (): void => emitFullscreen(true);
+  const onLeaveFullScreen = (): void => emitFullscreen(false);
+  let activeOwner: BrowserWindow = owner;
+  let cleanedUp = false;
+
+  const isFullscreenOwner = (win: BrowserWindow): boolean =>
+    typeof win.on === 'function' &&
+    typeof win.removeListener === 'function' &&
+    typeof win.isFullScreen === 'function';
+
+  const detachFullscreen = (win: BrowserWindow): void => {
+    if (!isFullscreenOwner(win)) return;
+    if (typeof win.isDestroyed !== 'function' || !win.isDestroyed()) {
+      win.removeListener('enter-full-screen', onEnterFullScreen);
+      win.removeListener('leave-full-screen', onLeaveFullScreen);
     }
+  };
+
+  const attachFullscreen = (win: BrowserWindow, emitCurrent: boolean): void => {
+    if (!isFullscreenOwner(win)) return;
+    if (typeof win.isDestroyed === 'function' && win.isDestroyed()) return;
+    win.on('enter-full-screen', onEnterFullScreen);
+    win.on('leave-full-screen', onLeaveFullScreen);
+    const fs =
+      win.isFullScreen() ||
+      (typeof win.isSimpleFullScreen === 'function' && win.isSimpleFullScreen());
+    if (emitCurrent || fs) {
+      emitFullscreen(fs);
+    }
+  };
+
+  if (isFullscreenOwner(owner)) {
+    attachFullscreen(owner, false);
+  }
+
+  const baseRetarget = engine.retargetWindow;
+  if (isFullscreenOwner(owner) || typeof baseRetarget === 'function') {
     const baseRelease = engine.release;
-    let cleanedUp = false;
     engine.release = () => {
       if (!cleanedUp) {
         cleanedUp = true;
-        if (typeof owner.isDestroyed !== 'function' || !owner.isDestroyed()) {
-          owner.removeListener('enter-full-screen', onEnterFullScreen);
-          owner.removeListener('leave-full-screen', onLeaveFullScreen);
-        }
+        detachFullscreen(activeOwner);
       }
       baseRelease();
+    };
+  }
+
+  if (typeof baseRetarget === 'function') {
+    engine.retargetWindow = (nextWindow: AppWindowLike): boolean => {
+      if (cleanedUp) return false;
+      const nextOwner = nextWindow as BrowserWindow;
+      const ok = baseRetarget(nextWindow);
+      if (!ok) return false;
+      if (nextOwner !== activeOwner) {
+        detachFullscreen(activeOwner);
+        activeOwner = nextOwner;
+        attachFullscreen(activeOwner, true);
+      }
+      return true;
     };
   }
   return engine;

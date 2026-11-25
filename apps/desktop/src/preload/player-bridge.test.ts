@@ -66,12 +66,14 @@ describe('createPlayerBridge', () => {
     const bridge = createPlayerBridge(ipc);
     expect(Object.keys(bridge).sort()).toEqual(
       [
+        'adopt',
         'close',
         'onEvent',
         'onFrame',
         'onRemoteMediaAction',
         'onUi',
         'open',
+        'park',
         'pickSubtitleFile',
         'reportGate',
         'send',
@@ -143,6 +145,28 @@ describe('createPlayerBridge', () => {
     await expect(bridge.open()).rejects.toThrow(/reply/);
     ipc.invoke.mockResolvedValueOnce(null);
     await expect(bridge.open()).rejects.toThrow(/reply/);
+  });
+
+  it('park and adopt invoke player:park and player:adopt and validate replies (Wave P3)', async () => {
+    const { ipc } = fakeIpcRenderer();
+    const bridge = createPlayerBridge(ipc);
+
+    ipc.invoke.mockResolvedValueOnce(true);
+    await expect(bridge.park?.('e1')).resolves.toBe(true);
+    expect(ipc.invoke).toHaveBeenCalledWith(PLAYER_CHANNELS.park, 'e1');
+
+    ipc.invoke.mockResolvedValueOnce(false);
+    await expect(bridge.park?.('e1')).resolves.toBe(false);
+
+    ipc.invoke.mockResolvedValueOnce({ engineId: 'e1', mainNowMs: 789 });
+    await expect(bridge.adopt?.('e1')).resolves.toEqual({ engineId: 'e1', mainNowMs: 789 });
+    expect(ipc.invoke).toHaveBeenCalledWith(PLAYER_CHANNELS.adopt, 'e1');
+
+    ipc.invoke.mockResolvedValueOnce(null);
+    await expect(bridge.adopt?.('e1')).resolves.toBeNull();
+
+    ipc.invoke.mockResolvedValueOnce({ engineId: 42 });
+    await expect(bridge.adopt?.('e1')).rejects.toThrow(/reply/);
   });
 
   it('close, send, setArea and reportGate use their channels', async () => {

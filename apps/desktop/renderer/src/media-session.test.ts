@@ -263,6 +263,7 @@ describe('bindDesktopMediaSession', () => {
       seek: vi.fn(),
       setSpeed: vi.fn(),
       stop: vi.fn(),
+      detach: vi.fn(),
       recreate: vi.fn(),
       setArea: vi.fn(),
       toggleFullscreen: vi.fn(),

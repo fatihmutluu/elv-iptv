@@ -36,6 +36,8 @@ export interface MultiViewAddTileInput {
   readonly channelNumber?: number;
   readonly streamId?: string;
   readonly providerActiveCons?: number;
+  /** When `true`, adopts an already-open live stream (0 new connections) and registers its lease without limit rejection (`Wave P3`). */
+  readonly adoptedExistingStream?: boolean;
 }
 
 /** Reason why a Multi-View tile admission or replacement was rejected. */
@@ -231,20 +233,22 @@ export function createMultiViewController(
       const gateError = checkThermalAndCap(false);
       if (gateError !== null) return gateError;
 
-      const limit = tracker.checkLimit({
-        accountKey: input.accountKey,
-        maxConnections: input.maxConnections,
-        ...(input.providerActiveCons === undefined
-          ? {}
-          : { providerActiveCons: input.providerActiveCons }),
-      });
-      if (limit.exceeds) {
-        return {
-          ok: false,
-          reason: 'connection-limit',
-          activeCount: limit.ownActiveCount,
-          maxConnections: limit.maxConnections,
-        };
+      if (input.adoptedExistingStream !== true) {
+        const limit = tracker.checkLimit({
+          accountKey: input.accountKey,
+          maxConnections: input.maxConnections,
+          ...(input.providerActiveCons === undefined
+            ? {}
+            : { providerActiveCons: input.providerActiveCons }),
+        });
+        if (limit.exceeds) {
+          return {
+            ok: false,
+            reason: 'connection-limit',
+            activeCount: limit.ownActiveCount,
+            maxConnections: limit.maxConnections,
+          };
+        }
       }
 
       const tileId = nextTileId();

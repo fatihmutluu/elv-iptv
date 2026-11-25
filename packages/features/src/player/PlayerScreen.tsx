@@ -41,7 +41,7 @@ import {
 } from './usePlayerDisplayAndAudioSync';
 import { usePlayerNowNext } from './usePlayerNowNext';
 import { usePlayerParentalUnlock } from './usePlayerParentalUnlock';
-import { readServicePositionMs, usePlayerPip, useRestoreOsdOnToken } from './usePlayerPip';
+import { usePlayerPip, usePlayerWindowHandoff, useRestoreOsdOnToken } from './usePlayerPip';
 import { usePlayerSession } from './usePlayerSession';
 import { usePlayerSubtitlesSuite } from './usePlayerSubtitlesSuite';
 import { usePlayerSyncAndQuality } from './usePlayerSyncAndQuality';
@@ -103,6 +103,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const effectiveBackgroundAudio = !isTv && !isDesktop && backgroundAudioPlayback;
 
   const serviceRef = useRef<PlaybackService | null>(null);
+  const handoffModeRef = useRef<'none' | 'session' | 'parked'>('none');
   const flushProgressRef = useRef<(overridePosMs?: number) => void>(() => undefined);
   const flushEndedProgressRef = useRef<() => void>(() => undefined);
   const cancelScrubRef = useRef<() => void>(() => undefined);
@@ -171,21 +172,17 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     activeTarget,
     isDesktop,
     subtitleFontFamily,
-    ...(props.deinterlaceMode !== undefined ? { deinterlaceMode: props.deinterlaceMode } : {}),
-    ...(props.pitchLock !== undefined ? { pitchLock: props.pitchLock } : {}),
-    ...(props.audioNormalization !== undefined
-      ? { audioNormalization: props.audioNormalization }
-      : {}),
+    deinterlaceMode: props.deinterlaceMode,
+    pitchLock: props.pitchLock,
+    audioNormalization: props.audioNormalization,
     backgroundAudioPlayback: effectiveBackgroundAudio,
-    ...(props.windowAspectRatioLock !== undefined
-      ? { windowAspectRatioLock: props.windowAspectRatioLock }
-      : {}),
-    ...(props.onWindowAspectRatioLockChange !== undefined
-      ? { onWindowAspectRatioLockChange: props.onWindowAspectRatioLockChange }
-      : {}),
-    ...(props.canAcquireAlternate !== undefined
-      ? { canAcquireAlternate: props.canAcquireAlternate }
-      : {}),
+    windowAspectRatioLock: props.windowAspectRatioLock,
+    onWindowAspectRatioLockChange: props.onWindowAspectRatioLockChange,
+    canAcquireAlternate: props.canAcquireAlternate,
+    adoptedSession: props.adoptedSession,
+    adoptEngineId: props.adoptEngineId,
+    onConsumeAdoptedSession: props.onConsumeAdoptedSession,
+    handoffModeRef,
     catalogRef,
     serviceRef,
     clockRef,
@@ -249,23 +246,27 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     autoEnterPip,
     onMinimizeToMiniPlayer: props.onMinimizeToMiniPlayer,
   });
-  const handleEnterPip = pip.canShowPipAction
-    ? () => {
-        pip.enterPip();
-      }
-    : undefined;
+  const handleEnterPip = pip.canShowPipAction ? () => pip.enterPip() : undefined;
   const handleEnterMultiView =
     multiViewSupported && activeTarget.kind === 'live' && props.onEnterMultiView !== undefined
       ? () => props.onEnterMultiView?.(activeTarget)
       : undefined;
-  const handlePopoutPlayer =
-    props.onPopoutPlayer !== undefined
-      ? () => {
-          const posMs = readServicePositionMs(serviceRef.current, clockRef.current);
-          flushProgress(posMs);
-          props.onPopoutPlayer?.(activeTarget, posMs);
-        }
-      : undefined;
+  const mutedStateRef = useRef(props.adoptedSession?.muted === true);
+  const volumeStateRef = useRef(props.adoptedSession?.volume ?? initialVolume ?? 100);
+  const { handlePopoutPlayer, handleDockPopout } = usePlayerWindowHandoff({
+    openedEngine,
+    activeService,
+    activeTarget,
+    mutedRef: mutedStateRef,
+    volumeRef: volumeStateRef,
+    handoffModeRef,
+    serviceRef,
+    clockRef,
+    flushProgress,
+    onRegisterHandoffSession: props.onRegisterHandoffSession,
+    onPopoutPlayer: props.onPopoutPlayer,
+    onDockPopout: props.onDockPopout,
+  });
   const subtitlesSuite = usePlayerSubtitlesSuite({
     activeItemKey: activeTarget.itemKey,
     tracks,
@@ -326,7 +327,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onPersistPitchLock: props.onPersistPitchLock,
     audioNormalization: props.audioNormalization,
     onPersistAudioNormalization: props.onPersistAudioNormalization,
-    initialVolume,
+    initialVolume: props.adoptedSession?.volume ?? initialVolume,
     preferredAudioDevice: props.preferredAudioDevice,
     preferredAudioLanguages: props.preferredAudioLanguages,
     preferredSubtitleLanguages: props.preferredSubtitleLanguages,
@@ -397,7 +398,8 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     hasJumpToLive: activeTarget.kind === 'live' && liveTimeShift.showJumpToLive,
     initialOsdHidden,
     autoHideOsdMs,
-    initialVolume: initialVolume ?? openedEngine?.initialVolume,
+    initialMuted: props.adoptedSession?.muted,
+    initialVolume: props.adoptedSession?.volume ?? initialVolume ?? openedEngine?.initialVolume,
     autoSubtitlesOnSkipBack: props.autoSubtitlesOnSkipBack,
     seekStepSec,
     defaultResizeMode,
@@ -466,6 +468,8 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   });
   hostKeyRef.current = controls.handleHostKey;
   cancelScrubRef.current = controls.cancelScrub;
+  mutedStateRef.current = controls.muted;
+  volumeStateRef.current = controls.volume;
   useRestoreOsdOnToken(restoreCursorToken, isMini, controls.showOsd);
 
   const handleRetryWithParental = usePlayerParentalUnlock({
@@ -694,6 +698,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onEnterPip: handleEnterPip,
     onEnterMultiView: handleEnterMultiView,
     onPopoutPlayer: handlePopoutPlayer,
+    onDockPopout: handleDockPopout,
     onExit,
     onCycleTimeDisplayMode: extras.handleCycleTimeDisplayMode,
     onFineScrubHaptic: props.onFineScrubHaptic,

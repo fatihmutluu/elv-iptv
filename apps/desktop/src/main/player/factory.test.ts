@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     platform: NodeJS.Platform;
     opts: unknown;
   }>,
+  retargetCalls: [] as unknown[],
   engineDeps: [] as MpvEngineDeps[],
   spawnCalls: [] as unknown[],
 }));
@@ -31,6 +32,13 @@ vi.mock('./presenter/create.ts', () => ({
       attach: () => undefined,
       setArea: () => undefined,
       toggleFullscreen: () => undefined,
+      ...(kind === 'canvas'
+        ? {
+            retargetWindow: (nextWindow: unknown) => {
+              mocks.retargetCalls.push(nextWindow);
+            },
+          }
+        : {}),
       onEvent: () => () => undefined,
       dispose: () => undefined,
     };
@@ -42,6 +50,16 @@ vi.mock('./engine.ts', () => ({
     mocks.engineDeps.push(deps);
     return {
       presenterKind: deps.presenter.kind,
+      ...(deps.presenter.retargetWindow
+        ? {
+            retargetWindow: (
+              nextWindow: Parameters<NonNullable<VideoPresenter['retargetWindow']>>[0],
+            ) => {
+              deps.presenter.retargetWindow?.(nextWindow);
+              return true;
+            },
+          }
+        : {}),
       release: vi.fn(),
     } as unknown as MpvEngine;
   },
@@ -66,6 +84,7 @@ const stubReadaheadStore: ReadaheadTierStore = {
 
 beforeEach(() => {
   mocks.presenterCalls = [];
+  mocks.retargetCalls = [];
   mocks.engineDeps = [];
   mocks.spawnCalls = [];
 });
@@ -374,5 +393,67 @@ describe('createEngineFor', () => {
       'C:\\Users\\demo\\AppData\\Local\\Cache\\elv-vod-cache',
     );
     expect(mocks.engineDeps[0]?.getMultiViewTileCount).toBe(getMultiViewTileCount);
+  });
+
+  it('rebinds fullscreen listeners and delegates to presenter.retargetWindow on retargetWindow (Wave P3)', async () => {
+    const makeOwner = (initialFs: boolean) => {
+      const listeners = new Map<string, Set<() => void>>();
+      let fs = initialFs;
+      const win = {
+        isFullScreen: () => fs,
+        isDestroyed: () => false,
+        on: vi.fn((event: string, listener: () => void) => {
+          const set = listeners.get(event) ?? new Set();
+          set.add(listener);
+          listeners.set(event, set);
+        }),
+        removeListener: vi.fn((event: string, listener: () => void) => {
+          listeners.get(event)?.delete(listener);
+        }),
+      } as unknown as BrowserWindow;
+      return {
+        win,
+        listeners,
+        emit(event: string) {
+          if (event === 'enter-full-screen') fs = true;
+          if (event === 'leave-full-screen') fs = false;
+          for (const l of [...(listeners.get(event) ?? [])]) l();
+        },
+      };
+    };
+
+    const ownerA = makeOwner(true);
+    const ownerB = makeOwner(false);
+    const uiEvents: PlayerUiEvent[] = [];
+
+    const engine = await createEngineFor(ownerA.win, {
+      runtime,
+      platform: 'win32',
+      loadMode: 'replace',
+      pidFile: 'C:\\tmp\\mpv-pids.json',
+      engineId: 'engine-retarget',
+      readaheadStore: stubReadaheadStore,
+      onUi: (ev) => uiEvents.push(ev),
+    });
+
+    expect(typeof engine.retargetWindow).toBe('function');
+    expect(engine.retargetWindow?.(ownerB.win)).toBe(true);
+    expect(mocks.retargetCalls).toEqual([ownerB.win]);
+
+    // Listeners detached from ownerA and attached to ownerB
+    expect(ownerA.listeners.get('enter-full-screen')?.size).toBe(0);
+    expect(ownerA.listeners.get('leave-full-screen')?.size).toBe(0);
+    expect(ownerB.listeners.get('enter-full-screen')?.size).toBe(1);
+    expect(ownerB.listeners.get('leave-full-screen')?.size).toBe(1);
+
+    // Emits new ownerB fullscreen state and responds to ownerB fullscreen events
+    expect(uiEvents.at(-1)).toEqual({ type: 'fullscreen-changed', fullscreen: false });
+    ownerB.emit('enter-full-screen');
+    expect(uiEvents.at(-1)).toEqual({ type: 'fullscreen-changed', fullscreen: true });
+
+    // Release cleans up ownerB listeners
+    engine.release();
+    expect(ownerB.listeners.get('enter-full-screen')?.size).toBe(0);
+    expect(ownerB.listeners.get('leave-full-screen')?.size).toBe(0);
   });
 });
