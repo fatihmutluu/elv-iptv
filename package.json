@@ -31,8 +31,8 @@
     "telemetry:digest": "node tools/bin/telemetry-digest.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.7",
-    "dependency-cruiser": "18.7.2",
+    "@biomejs/biome": "2.6.8",
+    "dependency-cruiser": "18.8.0",
     "knip": "6.45.1",
     "lefthook": "2.2.2",
     "typescript": "~6.0.3"

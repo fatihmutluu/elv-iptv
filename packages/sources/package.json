@@ -18,6 +18,6 @@
     "@elv/config": "workspace:*",
     "@vitest/coverage-v8": "catalog:",
     "fast-check": "catalog:",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   }
 }
