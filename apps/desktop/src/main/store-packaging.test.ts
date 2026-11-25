@@ -83,6 +83,10 @@ describe('official desktop store packaging contract (#77, #486)', () => {
     expect(appxBlock).toMatch(/^\s*applicationId\s*:\s*ELVIPTV\s*$/m);
     expect(appxBlock).toMatch(/^\s*backgroundColor\s*:\s*"#0b0e14"\s*$/m);
     expect(appxBlock).toMatch(/^\s*showNameOnTiles\s*:\s*true\s*$/m);
+    expect(appxBlock).toMatch(/^\s*capabilities\s*:\s*$/m);
+    expect(appxBlock).toMatch(/^\s*-\s*runFullTrust\s*$/m);
+    expect(appxBlock).toMatch(/^\s*-\s*internetClient\s*$/m);
+    expect(appxBlock).toMatch(/^\s*-\s*privateNetworkClientServer\s*$/m);
     expect(appxBlock).toMatch(/^\s*languages\s*:\s*$/m);
     expect(appxBlock).toMatch(/^\s*-\s*en-US\s*$/m);
     expect(appxBlock).toMatch(/^\s*-\s*tr-TR\s*$/m);
@@ -100,6 +104,7 @@ describe('official desktop store packaging contract (#77, #486)', () => {
 
     const masBlock = getTopLevelBlock(raw, 'mas');
     expect(masBlock).not.toBeNull();
+    expect(masBlock).toMatch(/^\s*identity\s*:\s*""\s*$/m);
     expect(masBlock).toMatch(/^\s*entitlements\s*:\s*resources\/entitlements\.mas\.plist\s*$/m);
     expect(masBlock).toMatch(
       /^\s*entitlementsInherit\s*:\s*resources\/entitlements\.mas\.inherit\.plist\s*$/m,
@@ -139,9 +144,8 @@ describe('official desktop store packaging contract (#77, #486)', () => {
     ]) {
       expect(masPlist).toMatch(new RegExp(`<key>${key}</key>\\s*<true/>`));
     }
-    expect(masPlist).toMatch(
-      /<key>com\.apple\.security\.application-groups<\/key>\s*<array>\s*<string>io\.github\.fatihmutluu\.elviptv<\/string>\s*<\/array>/,
-    );
+    expect(masPlist).toMatch(/<key>com\.apple\.security\.application-groups<\/key>\s*<array\s*\/>/);
+    expect(masPlist).not.toContain('<string>io.github.fatihmutluu.elviptv</string>');
 
     const inheritPlist = readFileSync(
       join(RESOURCES_DIR, 'entitlements.mas.inherit.plist'),

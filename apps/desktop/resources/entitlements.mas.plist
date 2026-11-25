@@ -10,10 +10,8 @@
     <true/>
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
-    <!-- Team ID prefix (e.g. TEAMID.io.github.fatihmutluu.elviptv) is substituted during Mac App Store release signing. -->
+    <!-- @electron/osx-sign preAutoEntitlements automatically injects <ElectronTeamID>.io.github.fatihmutluu.elviptv during signed package:mas builds; do not hardcode an unprefixed group here (ITMS-90286). -->
     <key>com.apple.security.application-groups</key>
-    <array>
-      <string>io.github.fatihmutluu.elviptv</string>
-    </array>
+    <array/>
   </dict>
 </plist>

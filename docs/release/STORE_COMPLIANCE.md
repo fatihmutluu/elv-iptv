@@ -8,7 +8,7 @@ This workbook is the release-time compliance reference for submitting **ELV IPTV
 4. **Google Play** (Android & Android TV)
 5. **Amazon Appstore** (Fire TV)
 
-> **Distribution model:** ELV IPTV is a proprietary closed-source media player distributed exclusively through official app stores. It ships **zero media content**, **zero playlists**, and **zero content subscriptions**. Users supply their own M3U/M3U8 playlists or Xtream Codes server credentials. Third-party open-source dependencies (including dynamically linked LGPL media engines) retain their upstream licenses and are disclosed in-app under **Settings → About → Third-Party Notices**.
+> **Distribution model:** ELV IPTV is a proprietary closed-source media player distributed exclusively through official app stores. It ships **zero media content**, **zero playlists**, and **zero content subscriptions**. Users supply their own M3U/M3U8 playlists or Xtream Codes server credentials. Third-party open-source dependencies (including dynamically linked LGPL media engines) retain their upstream licenses and are disclosed in-app under **Settings → About & Licenses → Third-Party Notices**.
 
 ---
 
@@ -48,7 +48,7 @@ Configured in `apps/tv-mobile/config/build-app-config.ts` (`ios.privacyManifests
   - `NSBonjourServices: ['_airplay._tcp']`
   - `NSLocalNetworkUsageDescription`: *"ELV IPTV uses your local network to discover AirPlay receivers and pair devices over QR code."*
 - **Export Compliance:** `ITSAppUsesNonExemptEncryption: false` (uses only standard OS TLS/HTTPS and exempt encryption).
-- **LGPL Dynamic Linking:** Proprietary app bundle dynamically links LGPL media engine frameworks and displays full third-party license notices in-app under **Settings → About → Third-Party Notices**.
+- **LGPL Dynamic Linking:** Proprietary app bundle dynamically links LGPL media engine frameworks and displays full third-party license notices in-app under **Settings → About & Licenses → Third-Party Notices**.
 
 ### 1.4 App Review Notes (Apple)
 
@@ -68,7 +68,7 @@ Main app bundle (`apps/desktop/resources/entitlements.mas.plist`):
 | Entitlement | Value | Purpose |
 |---|---|---|
 | `com.apple.security.app-sandbox` | `true` | Required by the Mac App Store. |
-| `com.apple.security.application-groups` | `$(TeamIdentifierPrefix)io.github.fatihmutluu.elviptv` | Shared sandbox container for main and helper processes. |
+| `com.apple.security.application-groups` | `<array/>` (populated to `<ElectronTeamID>.io.github.fatihmutluu.elviptv` by `@electron/osx-sign` `preAutoEntitlements` during `package:mas`) | Shared sandbox container for main and helper processes without shipping an invalid unprefixed App Group (`ITMS-90286`). |
 | `com.apple.security.files.user-selected.read-write` | `true` | Allows users to open/save `.m3u`, `.m3u8`, and backup files via native macOS Open/Save dialogs. |
 | `com.apple.security.network.client` | `true` | Outbound HTTP/HTTPS connections to user-supplied IPTV servers and optional E2EE sync. |
 | `com.apple.security.network.server` | `true` | Local-network listener for QR code device pairing. |
@@ -239,7 +239,7 @@ ELV IPTV is a proprietary software media player. ELV IPTV does not provide, host
 You are solely responsible for the playlists, server credentials, and media streams you configure in ELV IPTV, and for ensuring you have the legal right to access and view that content in your jurisdiction.
 
 ## 3. License & Third-Party Software
-ELV IPTV is licensed, not sold, under a proprietary end-user license subject to the terms of the official app store from which you downloaded it. Third-party open-source components retain their respective licenses as listed in-app under **Settings → About → Third-Party Notices**.
+ELV IPTV is licensed, not sold, under a proprietary end-user license subject to the terms of the official app store from which you downloaded it. Third-party open-source components retain their respective licenses as listed in-app under **Settings → About & Licenses → Third-Party Notices**.
 
 ## 4. Optional Sync Service
 If you create an optional sync account, you are responsible for safeguarding your account credentials and encryption passphrase. We may suspend accounts that abuse service infrastructure. You may delete your account at any time in-app or via `<https://your-sync-domain.example/account-deletion>`.

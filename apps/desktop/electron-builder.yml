@@ -56,6 +56,10 @@ appx:
   applicationId: ELVIPTV
   backgroundColor: "#0b0e14"
   showNameOnTiles: true
+  capabilities:
+    - runFullTrust
+    - internetClient
+    - privateNetworkClientServer
   languages:
     - en-US
     - tr-TR
@@ -86,6 +90,8 @@ mac:
   target:
     - dir
 mas:
+  # Clear inherited mac.identity ("-") so package:mas uses CSC_NAME / Apple Distribution keychain auto-discovery.
+  identity: ""
   entitlements: resources/entitlements.mas.plist
   entitlementsInherit: resources/entitlements.mas.inherit.plist
   hardenedRuntime: false
