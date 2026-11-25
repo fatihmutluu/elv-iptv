@@ -1,25 +1,37 @@
 import { type CatalogService, createCoalescedCatalog } from '@elv/data';
 import {
   type AppleSafeAreaInsets,
+  canStartAetherPictureInPicture,
+  enterAetherPictureInPicture,
+  getAppleDeviceModel,
+  getApplePhysicalMemoryBytes,
   getAppleSafeAreaInsets,
+  getAppleThermalState,
   pickApplePlaylistFile,
   readAppleClipboardText,
+  setAetherAutoEnterPictureInPicture,
   setAetherBackgroundAudioEnabled,
   setAetherMediaMetadata,
   setAppleEngineMuted,
   setAppleEngineVolume,
+  subscribeAetherPictureInPicture,
   subscribeAetherRemoteMediaAction,
   subscribeAppleHardwareKeys,
   subscribeAppleSafeAreaInsets,
+  subscribeAppleThermalState,
 } from '@elv/engine-aether';
 import {
   type AndroidSafeAreaInsets,
   applyAndroidShortEdgesCutoutMode,
+  configureMedia3MultiView,
   enterAndroidPictureInPicture,
+  getAndroidDeviceMemoryInfo,
   getAndroidSafeAreaInsets,
+  getAndroidThermalState,
   pickAndroidPlaylistFile,
   readAndroidClipboardText,
   requestTemporaryOrientation,
+  setAndroidAutoEnterPictureInPicture,
   setMedia3BackgroundAudioEnabled,
   setMedia3MediaMetadata,
   setMedia3PitchLock,
@@ -27,6 +39,7 @@ import {
   subscribeAndroidPictureInPicture,
   subscribeAndroidSafeAreaInsets,
   subscribeAndroidStandby,
+  subscribeAndroidThermalState,
   subscribeMedia3RemoteMediaAction,
 } from '@elv/engine-media3';
 import {
@@ -35,6 +48,7 @@ import {
   AppShell,
   createLazyCatalog,
   type SourceImportHost,
+  type ThermalDevicePort,
   type VideoHost,
 } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
@@ -63,6 +77,8 @@ import {
   createDevicePreferencesStore,
   createSecureSecretStore,
 } from './storage';
+import { createMobileVideoHost } from './thermal-and-pip';
+import { createMobileThermalDevicePort } from './thermal-device-port';
 import { createTvHomeChannelsPort } from './tv-home-channels/adapter';
 import { usePlayDeepLink } from './tv-home-channels/use-play-deep-link';
 import { attachAppStateDeadHostReset, createMobileTvUiAdapters } from './ui/platform-adapters';
@@ -131,15 +147,14 @@ function AppRoot() {
   );
 
   const videoHost = useMemo<VideoHost>(
-    () => ({
-      open() {
-        const engine = createPlatformEngine();
-        if (engine === null) return null;
-        let appleMuted = false;
-        const panGestures = isAppleTv ? remotePanGestures : null;
-        return {
+    () =>
+      createMobileVideoHost({
+        os: Platform.OS,
+        isTV: Platform.isTV,
+        createEngine: createPlatformEngine,
+        renderSurface: (
           engine,
-          renderSurface: ({
+          {
             resizeMode,
             subtitleBottomInsetPx,
             subtitleFontFamily,
@@ -148,91 +163,61 @@ function AppRoot() {
             useTextureView,
             osdVisible,
             testID,
-          }) => (
-            <PlayerSurface
-              engine={engine}
-              style={styles.surface}
-              {...(resizeMode !== undefined ? { resizeMode } : {})}
-              {...(subtitleBottomInsetPx !== undefined ? { subtitleBottomInsetPx } : {})}
-              {...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {})}
-              {...(subtitleStyle !== undefined ? { subtitleStyle } : {})}
-              {...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {})}
-              {...(useTextureView !== undefined ? { useTextureView } : {})}
-              {...(osdVisible !== undefined ? { osdVisible } : {})}
-              {...(testID !== undefined ? { testID } : {})}
-            />
-          ),
-          ...(Platform.OS === 'ios'
-            ? {
-                setMediaMetadata: (metadata) => setAetherMediaMetadata(engine, metadata),
-                setBackgroundAudioEnabled: (enabled) =>
-                  setAetherBackgroundAudioEnabled(engine, enabled),
-                onHostKey: (listener) => {
-                  const unsubRemote = subscribeAetherRemoteMediaAction(engine, (action) =>
-                    listener(
-                      action === 'next'
-                        ? 'channel-up'
-                        : action === 'previous'
-                          ? 'channel-down'
-                          : 'stop',
-                    ),
-                  );
-                  const unsubKeyboard = isAppleMobile
-                    ? subscribeAppleHardwareKeys(listener)
-                    : undefined;
-                  return () => {
-                    unsubRemote();
-                    unsubKeyboard?.();
-                  };
-                },
-                toggleMute: () => {
-                  appleMuted = !appleMuted;
-                  setAppleEngineMuted(engine, appleMuted);
-                },
-                setVolume: (volume: number) => setAppleEngineVolume(engine, volume),
-              }
-            : {}),
-          ...(panGestures !== null
-            ? {
-                setTvPanGestureEnabled: (enabled) => panGestures.setEnabled(enabled),
-                onTvPanGesture: (listener) => {
-                  const sub = panGestures.addListener(listener);
-                  return () => {
-                    sub.remove();
-                  };
-                },
-              }
-            : {}),
-          ...(Platform.OS === 'android'
-            ? {
-                setOrientationLocked,
-                setPitchLock: (locked) => setMedia3PitchLock(engine, locked),
-                setMediaMetadata: (metadata) => setMedia3MediaMetadata(engine, metadata),
-                setBackgroundAudioEnabled: (enabled) =>
-                  setMedia3BackgroundAudioEnabled(engine, enabled),
-                onHostKey: (listener) =>
-                  subscribeMedia3RemoteMediaAction(engine, (action) =>
-                    listener(
-                      action === 'next'
-                        ? 'channel-up'
-                        : action === 'previous'
-                          ? 'channel-down'
-                          : 'stop',
-                    ),
-                  ),
-              }
-            : {}),
-          ...(isAndroidMobile
-            ? {
-                requestTemporaryOrientation,
-                enterPictureInPicture: enterAndroidPictureInPicture,
-                onPictureInPictureChange: subscribeAndroidPictureInPicture,
-              }
-            : {}),
-        };
-      },
-    }),
-    [isAndroidMobile, isAppleMobile, isAppleTv],
+          },
+        ) => (
+          <PlayerSurface
+            engine={engine}
+            style={styles.surface}
+            {...(resizeMode !== undefined ? { resizeMode } : {})}
+            {...(subtitleBottomInsetPx !== undefined ? { subtitleBottomInsetPx } : {})}
+            {...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {})}
+            {...(subtitleStyle !== undefined ? { subtitleStyle } : {})}
+            {...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {})}
+            {...(useTextureView !== undefined ? { useTextureView } : {})}
+            {...(osdVisible !== undefined ? { osdVisible } : {})}
+            {...(testID !== undefined ? { testID } : {})}
+          />
+        ),
+        getAndroidDeviceMemoryInfo,
+        configureMedia3MultiView,
+        setOrientationLocked,
+        requestTemporaryOrientation,
+        setMedia3PitchLock,
+        setMedia3MediaMetadata,
+        setMedia3BackgroundAudioEnabled,
+        subscribeMedia3RemoteMediaAction,
+        enterAndroidPictureInPicture,
+        setAndroidAutoEnterPictureInPicture,
+        subscribeAndroidPictureInPicture,
+        setAetherMediaMetadata,
+        setAetherBackgroundAudioEnabled,
+        subscribeAetherRemoteMediaAction,
+        subscribeAppleHardwareKeys,
+        setAppleEngineMuted,
+        setAppleEngineVolume,
+        enterAetherPictureInPicture,
+        canStartAetherPictureInPicture,
+        setAetherAutoEnterPictureInPicture,
+        subscribeAetherPictureInPicture,
+        panGestures: isAppleTv ? remotePanGestures : null,
+      }),
+    [isAppleTv],
+  );
+
+  const thermalDevice = useMemo<ThermalDevicePort>(
+    () =>
+      createMobileThermalDevicePort({
+        os: Platform.OS,
+        isTV: Platform.isTV,
+        getAndroidThermalState,
+        subscribeAndroidThermalState,
+        getAndroidDeviceMemoryInfo,
+        getAppleThermalState,
+        subscribeAppleThermalState,
+        getApplePhysicalMemoryBytes,
+        getAppleDeviceModel,
+      }),
+    [],
   );
 
   const appLifecycle = useMemo<AppLifecyclePort>(
@@ -240,7 +225,11 @@ function AppRoot() {
       createComposedAppLifecycle({
         appState: AppState,
         ...(Platform.OS === 'android' ? { subscribeStandby: subscribeAndroidStandby } : {}),
-        ...(isAndroidMobile ? { subscribePip: subscribeAndroidPictureInPicture } : {}),
+        ...(isAndroidMobile
+          ? { subscribePip: subscribeAndroidPictureInPicture }
+          : Platform.OS === 'ios'
+            ? { subscribePip: subscribeAetherPictureInPicture }
+            : {}),
       }),
     [isAndroidMobile],
   );
@@ -309,6 +298,7 @@ function AppRoot() {
           catalog={catalog}
           videoHost={videoHost}
           appLifecycle={appLifecycle}
+          thermalDevice={thermalDevice}
           profilePreferences={preferencesStore}
           keymapStore={keymapStore}
           lanPairing={lanPairingPort}

@@ -104,6 +104,15 @@ describe('window-ipc (#408)', () => {
       getAlwaysOnTop: 'window:get-always-on-top',
       alwaysOnTopChanged: 'window:always-on-top-changed',
       setAspectRatioLock: 'window:set-aspect-ratio-lock',
+      setMinimizeToTray: 'window:set-minimize-to-tray',
+      windowRestored: 'window:restored',
+      hiddenToTray: 'window:hidden-to-tray',
+      openPopout: 'window:open-popout',
+      closePopout: 'window:close-popout',
+      getPopoutPayload: 'window:get-popout-payload',
+      popoutPayload: 'window:popout-payload',
+      dockPopout: 'window:dock-popout',
+      popoutDocked: 'window:popout-docked',
     });
     expect(isAlwaysOnTopFlag(true)).toBe(true);
     expect(isAlwaysOnTopFlag(false)).toBe(true);
@@ -241,6 +250,114 @@ describe('window-ipc (#408)', () => {
 
     fw.destroy();
     expect(await ipc.invoke(WINDOW_CHANNELS.setAspectRatioLock, fw.sender, true)).toBe(false);
+
+    dispose();
+  });
+
+  it('validates and forwards tray and popout IPC channels while dropping malformed payloads (#158)', async () => {
+    const ipc = fakeIpcMain();
+    const fw = fakeWindow();
+    const logs: string[] = [];
+    let trayEnabled = false;
+    const openedPayloads: unknown[] = [];
+    const dockedPayloads: unknown[] = [];
+    const onClosePopout = vi.fn();
+
+    const dispose = registerWindowIpc({
+      ipcMain: ipc.ipcMain,
+      getWindowFromSender: (s) => (s === fw.sender ? fw.win : null),
+      getMinimizeToTray: () => trayEnabled,
+      onSetMinimizeToTray: (enabled) => {
+        trayEnabled = enabled;
+        return enabled;
+      },
+      onOpenPopout: (payload) => {
+        openedPayloads.push(payload);
+        return true;
+      },
+      onClosePopout,
+      onGetPopoutPayload: (sender) =>
+        sender === fw.sender ? { itemKey: 'live:s1:ch1', kind: 'live', title: 'News HD' } : null,
+      onDockPopout: (_sender, payload) => {
+        dockedPayloads.push(payload);
+      },
+      log: (line) => logs.push(line),
+    });
+
+    // Minimize-to-tray valid & invalid
+    expect(await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, fw.sender, true)).toBe(true);
+    expect(trayEnabled).toBe(true);
+    expect(await ipc.invoke(WINDOW_CHANNELS.setMinimizeToTray, fw.sender, 'yes')).toBe(true);
+
+    // Popout launch strips credential query params from logo and rejects raw URL itemKeys or extra keys
+    expect(
+      await ipc.invoke(WINDOW_CHANNELS.openPopout, fw.sender, {
+        itemKey: 'live:s1:ch1',
+        kind: 'live',
+        title: 'News HD',
+        logo: 'https://user:secret@cdn.example.test/logo.png?token=abc&size=2x',
+        resumePositionMs: 1200,
+        pinned: true,
+      }),
+    ).toBe(true);
+    expect(openedPayloads).toEqual([
+      {
+        itemKey: 'live:s1:ch1',
+        kind: 'live',
+        title: 'News HD',
+        logo: 'https://cdn.example.test/logo.png?size=2x',
+        resumePositionMs: 1200,
+        pinned: true,
+      },
+    ]);
+
+    expect(
+      await ipc.invoke(WINDOW_CHANNELS.openPopout, fw.sender, {
+        itemKey: 'http://secret.panel/live/u/p/1.ts',
+        kind: 'live',
+        title: 'Raw URL forbidden',
+      }),
+    ).toBe(false);
+    expect(
+      await ipc.invoke(WINDOW_CHANNELS.openPopout, fw.sender, {
+        itemKey: 'live:s1:ch1',
+        kind: 'live',
+        title: 'Extra key forbidden',
+        url: 'http://leak.example/stream.ts',
+      }),
+    ).toBe(false);
+
+    // Pull payload & dock & close
+    expect(await ipc.invoke(WINDOW_CHANNELS.getPopoutPayload, fw.sender)).toEqual({
+      itemKey: 'live:s1:ch1',
+      kind: 'live',
+      title: 'News HD',
+    });
+    await ipc.invoke(WINDOW_CHANNELS.dockPopout, fw.sender, {
+      itemKey: 'movie:s1:m1',
+      kind: 'movie',
+      title: 'Cinema Film',
+      positionMs: 42_500.4,
+    });
+    expect(dockedPayloads).toEqual([
+      {
+        itemKey: 'movie:s1:m1',
+        kind: 'movie',
+        title: 'Cinema Film',
+        positionMs: 42_500,
+      },
+    ]);
+    await ipc.invoke(WINDOW_CHANNELS.dockPopout, fw.sender, {
+      itemKey: 'movie:s1:m1',
+      kind: 'movie',
+      title: 'Negative pos',
+      positionMs: -10,
+    });
+    expect(dockedPayloads).toHaveLength(1);
+
+    await ipc.invoke(WINDOW_CHANNELS.closePopout, fw.sender);
+    expect(onClosePopout).toHaveBeenCalledTimes(1);
+    expect(logs.length).toBeGreaterThanOrEqual(4);
 
     dispose();
   });

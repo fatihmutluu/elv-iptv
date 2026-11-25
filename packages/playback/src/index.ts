@@ -59,6 +59,18 @@ export {
   sanitizeExternalSubtitleHeaders,
 } from './external-subtitles';
 export {
+  createMultiViewController,
+  type MultiViewAddResult,
+  type MultiViewAddTileInput,
+  type MultiViewCloseTileFn,
+  type MultiViewController,
+  type MultiViewControllerOptions,
+  type MultiViewRejectReason,
+  type MultiViewState,
+  type MultiViewTile,
+  type MultiViewTileStatus,
+} from './multiview-controller';
+export {
   bridgeNativeEngine,
   type NativeEngineHandle,
   type NativeLoadCommand,
@@ -101,6 +113,18 @@ export {
   MAX_SYNC_DELAY_MS,
   MIN_SYNC_DELAY_MS,
 } from './sync-delay';
+export {
+  createThermalWatchdog,
+  evaluateMultiViewThermalPolicy,
+  type MultiViewCapEvaluation,
+  type MultiViewDeviceCapabilities,
+  normalizeThermalState,
+  resolveHardwareMultiViewCap,
+  type ThermalPolicyAction,
+  type ThermalState,
+  type ThermalWatchdog,
+  type ThermalWatchdogOptions,
+} from './thermal-watchdog';
 export {
   clampLiveSeekPosition,
   DEFAULT_LIVE_BEHIND_THRESHOLD_MS,

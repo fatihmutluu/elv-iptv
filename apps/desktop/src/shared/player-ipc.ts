@@ -118,6 +118,7 @@ export type PlayerUiEvent =
 export const PLAYER_CHANNELS = Object.freeze({
   open: 'player:open',
   close: 'player:close',
+  setPrimary: 'player:set-primary',
   command: 'player:command',
   event: 'player:event',
   area: 'player:area',
@@ -126,6 +127,15 @@ export const PLAYER_CHANNELS = Object.freeze({
   pickSubtitleFile: 'player:pick-subtitle-file',
   gateReport: 'gate:report',
 } as const);
+
+/** Maximum concurrent mpv engines permitted per `BrowserWindow` / `WebContents` (`#34`). */
+export const MAX_ENGINES_PER_WINDOW = 4;
+
+/** Optional open behavior for `player:open` supporting concurrent Canvas Multi-View tiles (`#34`). */
+export interface PlayerOpenOptions {
+  readonly replaceExisting?: boolean;
+  readonly primary?: boolean;
+}
 
 /** Sanitized playback metadata mirrored from renderer to OS media bridges (`#238`, `#301`). */
 export interface DesktopMediaMetadata {
@@ -183,7 +193,8 @@ export type BridgeCommand =
   | { name: 'setMediaMetadata'; metadata: DesktopMediaMetadata | null }
   | { name: 'release' }
   | { name: 'fullscreen' }
-  | { name: 'mute' };
+  | { name: 'mute' }
+  | { name: 'setMuted'; muted: boolean };
 
 /** Renderer to main (`player:command`). */
 export interface PlayerCommandMessage {
@@ -217,8 +228,10 @@ export interface PlayerOpenReply {
 
 /** What the preload exposes as `window.elv.player`; nothing else of Electron reaches the renderer. */
 export interface PlayerBridge {
-  open(): Promise<PlayerOpenReply>;
+  open(options?: PlayerOpenOptions): Promise<PlayerOpenReply>;
   close(engineId: string): Promise<void>;
+  /** Promotes an existing Multi-View engine to primary (OS media, taskbar, aspect lock, `#34`). */
+  setPrimary?(engineId: string): Promise<void>;
   send(message: PlayerCommandMessage): void;
   setArea(message: PlayerAreaMessage): void;
   /** Returns the unsubscribe function. */
@@ -261,8 +274,21 @@ const isNumber = (x: unknown): x is number => typeof x === 'number' && Number.is
 const isCoordinate = (x: unknown): x is number => isNumber(x) && Math.abs(x) <= MAX_AREA_VALUE;
 const isExtent = (x: unknown): x is number => isCoordinate(x) && x >= 0;
 const isMs = (x: unknown): x is number => isNumber(x) && x >= 0 && x <= MAX_DURATION_MS;
-const isEngineId = (x: unknown): x is string =>
+const PLAYER_OPEN_OPTIONS_KEYS: ReadonlySet<string> = new Set(['replaceExisting', 'primary']);
+const SET_MUTED_CMD_KEYS: ReadonlySet<string> = new Set(['name', 'muted']);
+
+/** Main-side check of a player engine identifier string. */
+export const isEngineId = (x: unknown): x is string =>
   typeof x === 'string' && x.length > 0 && x.length <= 64;
+
+/** Main-side check of optional `player:open` options (`#34`). */
+export function isPlayerOpenOptions(x: unknown): x is PlayerOpenOptions {
+  if (!isRecord(x) || !hasOnlyKeys(x, PLAYER_OPEN_OPTIONS_KEYS)) return false;
+  return (
+    (x['replaceExisting'] === undefined || typeof x['replaceExisting'] === 'boolean') &&
+    (x['primary'] === undefined || typeof x['primary'] === 'boolean')
+  );
+}
 
 const hasControlChar = (text: string): boolean => {
   for (let i = 0; i < text.length; i += 1) {
@@ -560,6 +586,8 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
     case 'fullscreen':
     case 'mute':
       return true;
+    case 'setMuted':
+      return hasOnlyKeys(x, SET_MUTED_CMD_KEYS) && typeof x['muted'] === 'boolean';
     default:
       return false;
   }

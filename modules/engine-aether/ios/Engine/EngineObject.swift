@@ -6,10 +6,15 @@ final class EngineObject: SharedObject, @unchecked Sendable {
   private let fence = CommandFence()
   private let gate = ConnectionGate(forceCloseAfterMs: 1_000, settleAfterCloseMs: 25)
   private let httpSession = EngineHttpSession()
+  private let initialAutoEnterPip: Bool
   private let onDisposed: @Sendable (EngineObject) -> Void
   @MainActor private var driver: EngineMainDriver?
 
-  init(onDisposed: @escaping @Sendable (EngineObject) -> Void = { _ in }) {
+  init(
+    initialAutoEnterPip: Bool = false,
+    onDisposed: @escaping @Sendable (EngineObject) -> Void = { _ in }
+  ) {
+    self.initialAutoEnterPip = initialAutoEnterPip
     self.onDisposed = onDisposed
     super.init()
     enqueueMain { [weak self] in
@@ -131,6 +136,29 @@ final class EngineObject: SharedObject, @unchecked Sendable {
   @MainActor
   func isCurrentlyLive() -> Bool {
     driver?.core.isLivePlayback ?? true
+  }
+
+  @MainActor
+  var hasBoundSurface: Bool {
+    !fence.isDisposedNow && driver?.boundSurface != nil
+  }
+
+  @MainActor
+  func canStartPictureInPicture() -> Bool {
+    guard !fence.isDisposedNow, let driver else { return false }
+    return driver.canStartPictureInPicture()
+  }
+
+  @MainActor
+  func enterPictureInPicture() -> Bool {
+    guard !fence.isDisposedNow, let driver else { return false }
+    return driver.enterPictureInPicture()
+  }
+
+  @MainActor
+  func setAutoEnterPictureInPicture(_ enabled: Bool) -> Bool {
+    guard !fence.isDisposedNow, let driver = ensureDriver() else { return false }
+    return driver.setAutoEnterPictureInPicture(enabled)
   }
 
   func selectAudioTrack(_ attempt: Int, id: String) {
@@ -259,6 +287,9 @@ final class EngineObject: SharedObject, @unchecked Sendable {
       return driver
     }
     let created = EngineMainDriver(owner: self, gate: gate, httpSession: httpSession)
+    if initialAutoEnterPip {
+      _ = created.setAutoEnterPictureInPicture(true)
+    }
     driver = created
     return created
   }

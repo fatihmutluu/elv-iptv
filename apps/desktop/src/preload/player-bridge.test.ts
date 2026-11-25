@@ -76,6 +76,7 @@ describe('createPlayerBridge', () => {
         'reportGate',
         'send',
         'setArea',
+        'setPrimary',
       ].sort(),
     );
     for (const value of Object.values(bridge)) expect(typeof value).toBe('function');
@@ -121,12 +122,23 @@ describe('createPlayerBridge', () => {
     expect(onRemote).toHaveBeenCalledTimes(1);
   });
 
-  it('open invokes player:open and validates the reply', async () => {
+  it('open invokes player:open (with optional options) and validates the reply', async () => {
     const { ipc } = fakeIpcRenderer();
     const bridge = createPlayerBridge(ipc);
     ipc.invoke.mockResolvedValueOnce({ engineId: 'e1', mainNowMs: 123 });
     await expect(bridge.open()).resolves.toEqual({ engineId: 'e1', mainNowMs: 123 });
     expect(ipc.invoke).toHaveBeenCalledWith(PLAYER_CHANNELS.open);
+    ipc.invoke.mockResolvedValueOnce({ engineId: 'e2', mainNowMs: 456 });
+    await expect(bridge.open({ replaceExisting: false, primary: false })).resolves.toEqual({
+      engineId: 'e2',
+      mainNowMs: 456,
+    });
+    expect(ipc.invoke).toHaveBeenLastCalledWith(PLAYER_CHANNELS.open, {
+      replaceExisting: false,
+      primary: false,
+    });
+    await bridge.setPrimary?.('e2');
+    expect(ipc.invoke).toHaveBeenLastCalledWith(PLAYER_CHANNELS.setPrimary, 'e2');
     ipc.invoke.mockResolvedValueOnce({ engineId: 7 });
     await expect(bridge.open()).rejects.toThrow(/reply/);
     ipc.invoke.mockResolvedValueOnce(null);

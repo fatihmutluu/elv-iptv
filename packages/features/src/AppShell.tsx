@@ -5,13 +5,14 @@ import { useI18n, useViewport } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { usePlayDeepLinkHandler } from './app-shell-deep-link';
+import { useShellPlaybackModes } from './app-shell-desktop';
 import {
   AppShellProfileOverlays,
   buildShellProfileUtility,
   useShellManagementOverlays,
   useShellProfileEffects,
 } from './app-shell-overlays';
-import { AppShellPlayerView } from './app-shell-player';
+import { AppShellPlayerHost } from './app-shell-player';
 import { useProgrammeReminders } from './app-shell-reminders';
 import {
   AppShellExitToast,
@@ -45,6 +46,7 @@ import {
 } from './live';
 import { ConnectionLimitDialog } from './player/ConnectionLimitDialog';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
+import type { DesktopWindowPort } from './ports/desktop-window-host';
 import type { LanPairingPort } from './ports/lan-pairing-host';
 import type { PlayDeepLinkTarget } from './ports/play-deep-link';
 import type { PlayTarget } from './ports/play-target';
@@ -52,7 +54,7 @@ import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard'
 import type { ReminderHostPort } from './ports/reminder-host';
 import type { SourceImportHost } from './ports/source-import-host';
 import type { TvHomeChannelsPort } from './ports/tv-home-channels';
-import type { VideoHost } from './ports/video-host';
+import type { ThermalDevicePort, VideoHost } from './ports/video-host';
 import { ReminderToastBanner } from './reminders';
 import { OledScreensaverOverlay, useOledScreensaver } from './screensaver';
 import type { SettingsSection } from './settings';
@@ -90,6 +92,10 @@ export interface AppShellProps {
   catalog: CatalogService;
   videoHost: VideoHost;
   appLifecycle?: AppLifecyclePort;
+  /** Optional thermal and hardware Multi-View capability port (`#34`, `#232`). */
+  thermalDevice?: ThermalDevicePort;
+  /** Optional desktop tray and standalone popout window port (`#158`). */
+  desktopWindow?: DesktopWindowPort;
   /** Optional multi-profile preferences manager (`#15`); falls back to `usePreferences().profilePreferences`. */
   profilePreferences?: ProfilePreferencesManager;
   externalRefreshToken?: number;
@@ -214,12 +220,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const [liveEmbeddedPlaybackActive, setLiveEmbeddedPlaybackActive] = useState(false);
   const [stageKey, setStageKey] = useState(0);
   const [appForeground, setAppForeground] = useState(true);
-  const oledScreensaver = useOledScreensaver({
-    timeoutMin: preferences.preferences.oledScreensaverTimeoutMin,
-    isBlocked:
-      (playTarget !== null && playerPlaybackActive) ||
-      (playTarget === null && activeTab === 'live' && liveEmbeddedPlaybackActive),
-  });
+  const resetToFullModeRef = useRef<() => void>(() => undefined);
   const userPickedTabRef = useRef(false);
   const userPickedSettingsSectionRef = useRef(false);
   const playTargetRef = useRef(playTarget);
@@ -255,6 +256,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   uiCache.setRevision(catalogRevision, locale, profileScopeKey);
   const openPlayTarget = useCallback((enriched: PlayTarget) => {
     exitBackGuardRef.current?.reset();
+    resetToFullModeRef.current();
     setHeroScrolled(false);
     playTargetRef.current = enriched;
     setPlayTarget(enriched);
@@ -289,6 +291,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
       if (playTargetRef.current?.sourceId === sourceId) {
         playTargetRef.current = null;
         setPlayTarget(null);
+        resetToFullModeRef.current();
         connectionGuard.releaseActive();
       }
       uiCache.invalidateSource(sourceId);
@@ -313,7 +316,31 @@ function AppShellContent(props: AppShellProps): ReactElement {
     connectionGuard.releaseActive();
     playTargetRef.current = null;
     setPlayTarget(null);
+    resetToFullModeRef.current();
   }, [connectionGuard.releaseActive]);
+  const modes = useShellPlaybackModes({
+    desktopWindow: props.desktopWindow,
+    thermalDevice: props.thermalDevice,
+    videoHost,
+    playbackGuard,
+    minimizeToTray: preferences.preferences.minimizeToTray,
+    backgroundAudioPlayback: preferences.preferences.backgroundAudioPlayback,
+    playTargetRef,
+    onStopActivePlayback: stopActivePlayback,
+    onRequestPlay: handlePlay,
+  });
+  resetToFullModeRef.current = modes.resetToFullMode;
+  const isBrowsing =
+    modes.multiViewSeed === null && (playTarget === null || modes.playerViewMode === 'mini');
+  const isFullPlayerActive =
+    modes.multiViewSeed !== null || (playTarget !== null && modes.playerViewMode === 'full');
+  const oledScreensaver = useOledScreensaver({
+    timeoutMin: preferences.preferences.oledScreensaverTimeoutMin,
+    isBlocked:
+      modes.multiViewSeed !== null ||
+      (playTarget !== null && playerPlaybackActive) ||
+      (isBrowsing && activeTab === 'live' && liveEmbeddedPlaybackActive),
+  });
   const resetTransientMemory = useCallback(() => {
     focusMemory.clear();
     userPickedLiveModeRef.current = false;
@@ -365,7 +392,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     enabled:
       documentVisible &&
       appForeground &&
-      playTarget === null &&
+      isBrowsing &&
       !(activeTab === 'live' && liveEmbeddedPlaybackActive),
     onGuideRefreshed: handleGuideRefreshed,
   });
@@ -455,15 +482,10 @@ function AppShellContent(props: AppShellProps): ReactElement {
   }, []);
   const handleFocusTopNav = useCallback(() => setTopNavFocused(true), []);
   useEffect(() => {
-    if (
-      !confirmExitOnBack ||
-      playTarget !== null ||
-      activeTab !== 'home' ||
-      activeDetail !== null
-    ) {
+    if (!confirmExitOnBack || isFullPlayerActive || activeTab !== 'home' || activeDetail !== null) {
       exitBackGuardRef.current?.reset();
     }
-  }, [activeDetail, activeTab, confirmExitOnBack, playTarget]);
+  }, [activeDetail, activeTab, confirmExitOnBack, isFullPlayerActive]);
   const handleNavBack = useCallback(
     () =>
       handleShellTopNavBack({
@@ -602,6 +624,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     connectionGuard.releaseActive();
     playTargetRef.current = null;
     setPlayTarget(null);
+    modes.resetToFullMode();
     setHeroScrolled(false);
     setUserStateVersion((v) => v + 1);
   };
@@ -616,22 +639,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
       <CatalogUiCacheProvider cache={uiCache}>
         <BrowseFocusMemoryProvider memory={focusMemory}>
           <View style={styles.root} onTouchStart={oledScreensaver.recordActivity}>
-            {playTarget !== null ? (
-              <CrashRecoveryBoundary resetKey={playTarget.itemKey} {...crashProps}>
-                <AppShellPlayerView
-                  catalog={observedCatalog}
-                  videoHost={videoHost}
-                  target={playTarget}
-                  playbackGuard={playbackGuard}
-                  preferences={preferences}
-                  {...(appLifecycle !== undefined ? { appLifecycle } : {})}
-                  externalOverlayOpen={hasRootOverlay}
-                  onPlaybackActiveChange={setPlayerPlaybackActive}
-                  onTargetChange={onPlayerTargetChange}
-                  onExit={onPlayerExit}
-                />
-              </CrashRecoveryBoundary>
-            ) : (
+            {isBrowsing ? (
               <AdaptiveNavShell
                 brandTitle={i18n.t('app.title')}
                 showBrand
@@ -716,8 +724,25 @@ function AppShellContent(props: AppShellProps): ReactElement {
                   />
                 </CrashRecoveryBoundary>
               </AdaptiveNavShell>
-            )}
-            <AppShellExitToast visible={exitToastVisible && playTarget === null} />
+            ) : null}
+            <AppShellPlayerHost
+              catalog={observedCatalog}
+              videoHost={videoHost}
+              tracker={connectionGuard.tracker}
+              sources={sources}
+              thermalDevice={props.thermalDevice}
+              playTarget={playTarget}
+              modes={modes}
+              playbackGuard={playbackGuard}
+              preferences={preferences}
+              {...(appLifecycle !== undefined ? { appLifecycle } : {})}
+              externalOverlayOpen={hasRootOverlay}
+              crashProps={crashProps}
+              onPlaybackActiveChange={setPlayerPlaybackActive}
+              onTargetChange={onPlayerTargetChange}
+              onExit={onPlayerExit}
+            />
+            <AppShellExitToast visible={exitToastVisible && isBrowsing} />
             {connectionGuard.pending !== null ? (
               <ConnectionLimitDialog
                 check={connectionGuard.pending.check}

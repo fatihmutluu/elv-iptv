@@ -11,10 +11,12 @@ final class EngineMainDriver: EngineSink {
   let backend: AetherBackend
   private(set) var core: EngineCore!
   private var nowPlayingBridge: AetherNowPlayingBridge!
+  private var pipController: AetherPipController!
   weak var boundSurface: AetherSurfaceView?
   var activeEpoch = 0
   private var backgroundAudioEnabled = false
   private var explicitDetachedSurfaceAllowed = false
+  private var pipDetachedSurfaceAllowed = false
   private var hasExplicitSubtitleStyle = false
   private var activeSubtitleStyle: UserSubtitleStyleOverride?
 
@@ -99,12 +101,23 @@ final class EngineMainDriver: EngineSink {
         }
       )
     )
+    self.pipController = AetherPipController(
+      onDetachedSurfaceChanged: { [weak self] allowed in
+        self?.setPipDetachedSurfaceAllowed(allowed)
+      },
+      onPipStateChanged: { inPip in
+        AppleModuleEventHub.shared.emitPictureInPictureChanged(inPip)
+      }
+    )
     self.backend.onObservation = { [weak self] observation, serial in
       self?.core.observe(observation, serial: serial)
     }
     self.backend.onSubtitlePresentation = { [weak self] presentation in
       guard let self else { return }
       self.boundSurface?.applySubtitles(presentation, from: self.owner)
+    }
+    self.backend.onPlayerLayerMayHaveChanged = { [weak self] in
+      self?.syncPipController()
     }
   }
 
@@ -144,17 +157,55 @@ final class EngineMainDriver: EngineSink {
     boundSurface?.applySubtitleStyle(style, from: owner)
   }
 
+  private func setPipDetachedSurfaceAllowed(_ allowed: Bool) {
+    pipDetachedSurfaceAllowed = allowed
+    syncDetachedSurfacePolicy()
+  }
+
   private func syncDetachedSurfacePolicy() {
-    core.setAllowDetachedSurface(backgroundAudioEnabled || explicitDetachedSurfaceAllowed)
+    core.setAllowDetachedSurface(
+      backgroundAudioEnabled || explicitDetachedSurfaceAllowed || pipDetachedSurfaceAllowed
+    )
+  }
+
+  func syncPipController() {
+    pipController.sync(
+      playerView: boundSurface?.playerView,
+      isAvPlayerRoute: backend.isAvPlayerRouteActive
+    )
+  }
+
+  func canStartPictureInPicture() -> Bool {
+    pipController.canStartPictureInPicture(
+      playerView: boundSurface?.playerView,
+      isAvPlayerRoute: backend.isAvPlayerRouteActive
+    )
+  }
+
+  func enterPictureInPicture() -> Bool {
+    pipController.enterPictureInPicture(
+      playerView: boundSurface?.playerView,
+      isAvPlayerRoute: backend.isAvPlayerRouteActive
+    )
+  }
+
+  func setAutoEnterPictureInPicture(_ enabled: Bool) -> Bool {
+    pipController.setAutoEnterPictureInPicture(
+      enabled,
+      playerView: boundSurface?.playerView,
+      isAvPlayerRoute: backend.isAvPlayerRouteActive
+    )
   }
 
   func stopPlayback(_ attempt: Int) {
+    pipController.reset()
     core.stop(attempt)
     nowPlayingBridge.clear()
   }
 
   @discardableResult
   func recreatePlayback(_ attempt: Int) -> Bool {
+    pipController.reset()
     nowPlayingBridge.clear()
     return core.recreate(attempt)
   }
@@ -189,6 +240,7 @@ final class EngineMainDriver: EngineSink {
     boundSurface = view
     backend.setVideoGravity(view.currentVideoGravity)
     backend.bindPlayerView(view.playerView)
+    syncPipController()
     core.setOsdVisible(view.currentOsdVisible)
     let snapshot = core.viewSnapshot
     view.applyShutter(covered: snapshot.shutterCovered, from: owner)
@@ -208,6 +260,7 @@ final class EngineMainDriver: EngineSink {
     core.setOsdVisible(true)
     boundSurface = nil
     backend.bindPlayerView(nil)
+    pipController.handleSurfaceUnbound()
     IdleTimer.setHeld(false, ownerId: ownerId)
   }
 
@@ -236,6 +289,7 @@ final class EngineMainDriver: EngineSink {
   }
 
   func dispose() {
+    pipController.dispose()
     nowPlayingBridge.dispose()
     if let previous = boundSurface {
       previous.detachEngineReference(owner)

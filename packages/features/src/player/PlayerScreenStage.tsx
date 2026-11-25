@@ -15,7 +15,7 @@ import type {
 } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { PlaybackClock, PlaybackService, PlaybackTimers } from '@elv/playback';
-import { MicroPill, TvFocusAnchor, useTheme, useViewport } from '@elv/ui-kit';
+import { MicroPill, TvFocusAnchor, useTheme, useViewport, webBackdropBlur } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { AppLifecyclePort } from '../ports/app-lifecycle';
@@ -28,6 +28,7 @@ import {
   ExternalSubtitleUrlOverlay,
   type ExternalSubtitleUrlOverlayProps,
 } from './ExternalSubtitleUrlOverlay';
+import { computeMiniPlayerFrame, FloatingMiniPlayerChrome } from './FloatingMiniPlayerChrome';
 import {
   DesktopDockedTopBar,
   HIDE_CURSOR_WEB_STYLE,
@@ -116,6 +117,24 @@ export interface PlayerScreenProps {
   onWindowAspectRatioLockChange?: (enabled: boolean) => void;
   backgroundAudioPlayback?: boolean;
   liveChannelSwitchMode?: LiveChannelSwitchModePref;
+  /** Presentation mode (`'full'` fullscreen player vs `'mini'` floating corner mini-player, `#233`). */
+  viewMode?: 'full' | 'mini';
+  /** Auto-enter OS Picture-in-Picture when leaving the app during playback (`#34`). */
+  autoEnterPip?: boolean;
+  /** True when the host supports launching Multi-View from the active player (`#34`, `#232`). */
+  multiViewSupported?: boolean;
+  /** Monotonic token bumped on desktop window restore from tray to unhide cursor/OSD (`#158`). */
+  restoreCursorToken?: number;
+  /** When `true`, TV hardware Back/Menu minimizes live playback to mini-player instead of exiting (`#233`). */
+  tvBackMinimizesLive?: boolean;
+  /** Minimizes active playback into the floating corner mini-player without tearing down the stream (`#233`). */
+  onMinimizeToMiniPlayer?: () => void;
+  /** Restores the floating corner mini-player back to fullscreen (`#233`). */
+  onExpandMiniPlayer?: () => void;
+  /** Launches Multi-View seeded with the currently playing channel (`#34`). */
+  onEnterMultiView?: (target: PlayTarget) => void;
+  /** Detaches active playback into the standalone Desktop Popout window (`#158`). */
+  onPopoutPlayer?: (target: PlayTarget, positionMs?: number) => void;
   /** When `true`, suspends player remote/keyboard shortcuts while a root overlay is open. */
   externalOverlayOpen?: boolean;
   onTargetChange?: (next: PlayTarget) => void;
@@ -127,6 +146,7 @@ export interface PlayerScreenStageProps {
   readonly isTv: boolean;
   readonly isDesktop: boolean;
   readonly inPip: boolean;
+  readonly isMini?: boolean;
   readonly isVod: boolean;
   readonly useDockedDesktopLayout: boolean;
   readonly hideDesktopCursor: boolean;
@@ -174,32 +194,53 @@ export interface PlayerScreenStageProps {
   readonly onVolumeChange: (volume: number) => void;
   readonly onBrightnessChange: (level: number) => void;
   readonly onUnlock: () => void;
+  readonly onExpandMiniPlayer?: (() => void) | undefined;
+  readonly onCloseMiniPlayer?: (() => void) | undefined;
+  readonly onPinchMinimize?: (() => void) | undefined;
 }
 
 /**
  * Presentational root layout of `PlayerScreen`, separating floating cinema scrims (`overlayMode: 'floating'`)
- * from native child-HWND flex-safe docked desktop layout (`overlayMode: 'docked'`).
+ * from native child-HWND flex-safe docked desktop layout (`overlayMode: 'docked'`), while keeping
+ * `surfaceNode` mounted at a stable React tree position across `'full' <-> 'mini'` transitions (`#233`).
  */
 export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
   const { pinDialog, profilePickerOpen } = useProfile();
   const hasExternalOverlay = pinDialog !== null || profilePickerOpen;
+  const isMini = p.isMini === true;
+  const suppressChrome = p.inPip || isMini;
   const osdNode = <PlayerOsd {...p.osdProps} />;
+  const miniFrame = isMini
+    ? computeMiniPlayerFrame({
+        viewportWidth: viewport.width,
+        viewportHeight: viewport.height,
+        formFactor: viewport.formFactor,
+        orientation: viewport.orientation,
+        safeArea: viewport.safeArea,
+        overscan: viewport.overscan,
+      })
+    : null;
 
   return (
     <View
       testID="player-screen"
-      style={[
-        playerStyles.root,
-        { backgroundColor: theme.colors.bgCanvas },
-        p.hideDesktopCursor ? HIDE_CURSOR_WEB_STYLE : undefined,
-      ]}
-      {...p.desktopFallbackKeyProps}
-      {...p.touchHoverProps}
-      {...p.desktopWebProps}
+      pointerEvents={isMini ? 'box-none' : 'auto'}
+      style={
+        isMini
+          ? stageStyles.miniRoot
+          : [
+              playerStyles.root,
+              { backgroundColor: theme.colors.bgCanvas },
+              p.hideDesktopCursor ? HIDE_CURSOR_WEB_STYLE : undefined,
+            ]
+      }
+      {...(!isMini ? p.desktopFallbackKeyProps : {})}
+      {...(!isMini ? p.touchHoverProps : {})}
+      {...(!isMini ? p.desktopWebProps : {})}
     >
-      {p.isTv ? (
+      {p.isTv && !suppressChrome ? (
         <TvFocusAnchor
           testID="player-tv-focus-anchor"
           hasTVPreferredFocus={
@@ -208,19 +249,59 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
         />
       ) : null}
 
-      {p.useDockedDesktopLayout ? (
-        <>
-          {!p.inPip && !p.osdHidden ? <DesktopDockedTopBar {...p.osdProps} /> : null}
-          <View testID="player-desktop-stage" style={playerStyles.desktopStageRow}>
-            {!p.inPip ? p.channelDrawerNode : null}
-            {p.surfaceNode}
-          </View>
-        </>
-      ) : (
-        p.surfaceNode
-      )}
+      <View
+        testID={isMini ? 'floating-mini-player' : 'player-stage-frame'}
+        {...(isMini ? { accessibilityLabel: p.i18n.t('player.miniPlayer.activeLabel') } : {})}
+        style={
+          isMini && miniFrame !== null
+            ? [
+                stageStyles.miniFrame,
+                {
+                  width: miniFrame.width,
+                  height: miniFrame.height,
+                  right: miniFrame.right,
+                  bottom: miniFrame.bottom,
+                  backgroundColor: theme.colors.bgElevated,
+                  borderColor: theme.colors.glassBorder,
+                  borderRadius: theme.radius.card,
+                  shadowColor: theme.colors.bgCanvas,
+                },
+                webBackdropBlur(16),
+              ]
+            : playerStyles.flex1
+        }
+      >
+        {!suppressChrome && p.useDockedDesktopLayout && !p.osdHidden ? (
+          <DesktopDockedTopBar {...p.osdProps} />
+        ) : null}
+        <View
+          testID={
+            p.useDockedDesktopLayout && !isMini ? 'player-desktop-stage' : 'player-surface-host'
+          }
+          {...(isMini
+            ? { focusable: false, accessible: false, pointerEvents: 'none' as const }
+            : {})}
+          style={
+            p.useDockedDesktopLayout && !isMini ? playerStyles.desktopStageRow : playerStyles.flex1
+          }
+        >
+          {!suppressChrome && p.useDockedDesktopLayout ? p.channelDrawerNode : null}
+          {p.surfaceNode}
+        </View>
+        {isMini ? (
+          <FloatingMiniPlayerChrome
+            title={p.osdProps.title}
+            subtitle={p.osdProps.subtitle}
+            isLive={!p.isVod}
+            isTv={p.isTv}
+            i18n={p.i18n}
+            onExpand={p.onExpandMiniPlayer ?? (() => undefined)}
+            onClose={p.onCloseMiniPlayer ?? (() => undefined)}
+          />
+        ) : null}
+      </View>
 
-      {!p.inPip && !p.isTv && !p.isDesktop && p.brightness < 1 ? (
+      {!suppressChrome && !p.isTv && !p.isDesktop && p.brightness < 1 ? (
         <View
           testID="player-brightness-dim-overlay"
           pointerEvents="none"
@@ -234,7 +315,7 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
         />
       ) : null}
 
-      {p.showTouchGestures ? (
+      {!suppressChrome && p.showTouchGestures ? (
         <PlayerTouchGestures
           isVod={p.isVod}
           volume={p.volume}
@@ -256,10 +337,11 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
             : {})}
           onVolumeChange={p.onVolumeChange}
           onBrightnessChange={p.onBrightnessChange}
+          {...(p.onPinchMinimize !== undefined ? { onPinchMinimize: p.onPinchMinimize } : {})}
         />
       ) : null}
 
-      {p.holdSpeedActive && !p.showTouchGestures ? (
+      {!suppressChrome && p.holdSpeedActive && !p.showTouchGestures ? (
         <View
           pointerEvents="none"
           style={[
@@ -276,7 +358,7 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
       ) : null}
 
       <PlayerStatsHud
-        visible={!p.inPip && p.statsVisible}
+        visible={!suppressChrome && p.statsVisible}
         osdVisible={!p.osdHidden}
         service={p.activeService}
         clock={p.clock}
@@ -285,7 +367,7 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
         docked={p.useDockedDesktopLayout}
       />
 
-      {p.inPip ? null : p.useDockedDesktopLayout ? (
+      {suppressChrome ? null : p.useDockedDesktopLayout ? (
         <>
           {p.nextEpisodeNode}
           {p.trackPickerNode}
@@ -330,7 +412,9 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
         </>
       )}
 
-      {p.externalSubtitleFeedback !== undefined && p.externalSubtitleFeedback !== null ? (
+      {!suppressChrome &&
+      p.externalSubtitleFeedback !== undefined &&
+      p.externalSubtitleFeedback !== null ? (
         <View
           pointerEvents="none"
           style={[
@@ -350,7 +434,7 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
         </View>
       ) : null}
 
-      {p.externalSubtitleOverlay !== undefined ? (
+      {!suppressChrome && p.externalSubtitleOverlay !== undefined ? (
         <ExternalSubtitleUrlOverlay
           visible={p.externalSubtitleOverlay.visible}
           isTv={p.isTv}
@@ -361,7 +445,7 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
       ) : null}
 
       <StillWatchingPrompt
-        visible={!p.inPip && p.stillWatchingVisible}
+        visible={!suppressChrome && p.stillWatchingVisible}
         remainingSeconds={p.stillWatchingRemainingSec}
         isTv={p.isTv}
         docked={p.useDockedDesktopLayout}
@@ -373,3 +457,22 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
     </View>
   );
 }
+
+const stageStyles = StyleSheet.create({
+  miniRoot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  miniFrame: {
+    position: 'absolute',
+    borderWidth: 1,
+    overflow: 'hidden',
+    shadowOpacity: 0.42,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+});

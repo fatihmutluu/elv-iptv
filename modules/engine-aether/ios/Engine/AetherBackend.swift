@@ -22,6 +22,11 @@ final class AetherBackend: PlayerBackend {
 
   var onObservation: ((BackendObservation, Int) -> Void)?
   var onSubtitlePresentation: ((SubtitlePresentation) -> Void)?
+  var onPlayerLayerMayHaveChanged: (() -> Void)?
+
+  var isAvPlayerRouteActive: Bool {
+    currentPlan?.isLiveTs != true && engine?.currentAVPlayer != nil
+  }
 
   let gate: ConnectionGate
   let httpSession: EngineHttpSession
@@ -128,6 +133,7 @@ final class AetherBackend: PlayerBackend {
         _ = try? installFreshEngine()
       }
     }
+    onPlayerLayerMayHaveChanged?()
   }
 
   func unbindIfMatching(viewId: ObjectIdentifier) {

@@ -5,6 +5,7 @@ import { trFailoverNetworkMessages } from './tr-failover-network';
 import { trProfilesMessages } from './tr-profiles';
 import { trSubtitlesSuiteMessages } from './tr-subtitles-suite';
 import { trWaveF5bMessages } from './tr-wave-f5b';
+import { trWaveF6Messages } from './tr-wave-f6';
 
 /** Turkish (`tr`) message catalog. */
 export const trMessages: Readonly<Record<MessageId, string>> = {
@@ -714,4 +715,5 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trSubtitlesSuiteMessages,
   ...trFailoverNetworkMessages,
   ...trWaveF5bMessages,
+  ...trWaveF6Messages,
 };

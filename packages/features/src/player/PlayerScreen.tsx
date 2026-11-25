@@ -14,12 +14,9 @@ import type { HostKey } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import { useLiveTimeShiftState } from './LiveTimeShiftBar';
 import { targetIdentityKey } from './live-timeshift-model';
-import { NextEpisodeBanner } from './NextEpisodeBanner';
-import { type ChannelDrawerNavHandle, PlayerChannelDrawer } from './PlayerChannelDrawer';
-import { PlayerInfoSheet } from './PlayerInfoSheet';
+import type { ChannelDrawerNavHandle } from './PlayerChannelDrawer';
 import {
   buildDesktopWebProps,
-  buildSettingsSheetOptionalProps,
   computeSubtitleBottomInsetPx,
   DEFAULT_PLAYER_CLOCK,
   DEFAULT_PLAYER_TIMERS,
@@ -29,10 +26,9 @@ import {
   usePlayerTouchScrubAndBrightness,
   usePreviewOsdAndResizeSync,
 } from './PlayerScreenParts';
+import { buildPlayerOverlayNodes } from './PlayerScreenSheets';
 import { type PlayerScreenProps, PlayerScreenStage } from './PlayerScreenStage';
-import { PlayerSettingsSheet } from './PlayerSettingsSheet';
 import { buildPlayerOsdProps } from './player-osd-props';
-import { TrackPickerModal } from './TrackPickerModal';
 import { buildTouchHoverProps } from './touch-hover-guard';
 import { useGaplessEpisodeQueue } from './useGaplessEpisodeQueue';
 import { useLiveQualityVariants } from './useLiveQualityVariants';
@@ -41,6 +37,7 @@ import { usePlayerCinemaExtras } from './usePlayerCinemaExtras';
 import { usePlayerControls } from './usePlayerControls';
 import { usePlayerNowNext } from './usePlayerNowNext';
 import { usePlayerParentalUnlock } from './usePlayerParentalUnlock';
+import { readServicePositionMs, usePlayerPip, useRestoreOsdOnToken } from './usePlayerPip';
 import { usePlayerSession } from './usePlayerSession';
 import { usePlayerSubtitlesSuite } from './usePlayerSubtitlesSuite';
 import { usePlayerSyncAndQuality } from './usePlayerSyncAndQuality';
@@ -59,41 +56,77 @@ export const DEFAULT_AUTO_HIDE_OSD_MS = 3_500;
 
 /** Cross-platform Minimalist Cinema playback screen over injected {@link VideoHost} and {@link AppLifecyclePort} ports. */
 export function PlayerScreen(props: PlayerScreenProps): ReactElement {
-  const { catalog, videoHost, target, playbackGuard, onTargetChange, onExit } = props;
   const {
+    catalog,
+    videoHost,
+    target,
+    playbackGuard,
+    onTargetChange,
+    onExit,
     appLifecycle = noopAppLifecycle,
     clock = DEFAULT_PLAYER_CLOCK,
     wallClock = Date.now,
-  } = props;
-  const { timers = DEFAULT_PLAYER_TIMERS, initialOsdHidden, autoHideOsdMs, initialVolume } = props;
-  const { onPersistVolume, autoSubtitlesOnSkipBack, onToggleAutoSubtitlesOnSkipBack } = props;
-  const {
+    timers = DEFAULT_PLAYER_TIMERS,
+    initialOsdHidden,
+    autoHideOsdMs,
+    initialVolume,
+    onPersistVolume,
+    autoSubtitlesOnSkipBack,
+    onToggleAutoSubtitlesOnSkipBack,
     autoPlayNextEpisode,
     onToggleAutoPlayNextEpisode,
     reduceMotion,
     bufferPreset = 'auto',
-  } = props;
-  const { useTextureView = false, seekStepSec = 10, defaultResizeMode = 'fit' } = props;
-  const { onPersistResizeMode, preferredAudioLang, preferredSubtitleLang } = props;
-  const {
+    useTextureView = false,
+    seekStepSec = 10,
+    defaultResizeMode = 'fit',
+    onPersistResizeMode,
+    preferredAudioLang,
+    preferredSubtitleLang,
     preferredAudioLanguages,
     preferredSubtitleLanguages,
     preferDefaultAudioTrack = true,
+    preferHevcOverDolbyVision = false,
+    filterSdhSubtitles = false,
+    subtitleMode = 'smart',
+    subtitleFontFamily = 'system',
+    tvClockMode = 'always',
+    osdTimeDisplayMode = 'total',
+    onPersistOsdTimeDisplayMode,
+    sleepTimerDefaultAction = 'stop',
+    onPersistSleepTimerAction,
+    stillWatchingTimeoutMin = 0,
+    onPlaybackActiveChange,
+    onFineScrubHaptic,
+    preferredAudioDevice,
+    onPersistAudioDevice,
+    androidDecoderMode,
+    onSelectAndroidDecoderMode,
+    liveChannelSwitchMode = 'instant',
+    deinterlaceMode,
+    onPersistDeinterlaceMode,
+    pitchLock,
+    onPersistPitchLock,
+    audioNormalization,
+    onPersistAudioNormalization,
+    windowAspectRatioLock,
+    onWindowAspectRatioLockChange,
+    backgroundAudioPlayback = false,
+    viewMode = 'full',
+    autoEnterPip = true,
+    multiViewSupported = false,
+    restoreCursorToken = 0,
+    tvBackMinimizesLive,
+    onMinimizeToMiniPlayer,
+    onExpandMiniPlayer,
+    onEnterMultiView,
+    onPopoutPlayer,
   } = props;
-  const { preferHevcOverDolbyVision = false, filterSdhSubtitles = false } = props;
-  const { subtitleMode = 'smart', subtitleFontFamily = 'system', tvClockMode = 'always' } = props;
-  const { osdTimeDisplayMode = 'total', onPersistOsdTimeDisplayMode } = props;
-  const { sleepTimerDefaultAction = 'stop', onPersistSleepTimerAction } = props;
-  const { stillWatchingTimeoutMin = 0, onPlaybackActiveChange, onFineScrubHaptic } = props;
-  const { preferredAudioDevice, onPersistAudioDevice, androidDecoderMode } = props;
-  const { onSelectAndroidDecoderMode, liveChannelSwitchMode = 'instant' } = props;
-  const { deinterlaceMode, onPersistDeinterlaceMode, pitchLock, onPersistPitchLock } = props;
-  const { audioNormalization, onPersistAudioNormalization, windowAspectRatioLock } = props;
-  const { onWindowAspectRatioLockChange, backgroundAudioPlayback = false } = props;
   const formFactor = useFormFactor();
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
   const isDesktop = formFactor === 'desktop';
+  const isMini = viewMode === 'mini';
   const effectiveBackgroundAudio = !isTv && !isDesktop && backgroundAudioPlayback;
 
   const serviceRef = useRef<PlaybackService | null>(null);
@@ -198,7 +231,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const nowNext = usePlayerNowNext({
     catalog,
     itemKey: previewTarget?.itemKey ?? activeTarget.itemKey,
-    enabled: activeTarget.kind === 'live' && !inPip,
+    enabled: activeTarget.kind === 'live' && !inPip && !isMini,
     wallClock,
   });
   const quality = useLiveQualityVariants({
@@ -218,6 +251,30 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   }, [activeTargetKey]);
 
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
+  const pip = usePlayerPip({
+    openedEngine,
+    statusKind: status.kind,
+    videoInfo,
+    autoEnterPip,
+    onMinimizeToMiniPlayer,
+  });
+  const handleEnterPip = pip.canShowPipAction
+    ? () => {
+        pip.enterPip();
+      }
+    : undefined;
+  const handleEnterMultiView =
+    multiViewSupported && activeTarget.kind === 'live' && onEnterMultiView !== undefined
+      ? () => onEnterMultiView(activeTarget)
+      : undefined;
+  const handlePopoutPlayer =
+    onPopoutPlayer !== undefined
+      ? () => {
+          const posMs = readServicePositionMs(serviceRef.current, clockRef.current);
+          flushProgress(posMs);
+          onPopoutPlayer(activeTarget, posMs);
+        }
+      : undefined;
   const subtitlesSuite = usePlayerSubtitlesSuite({
     activeItemKey: activeTarget.itemKey,
     tracks,
@@ -400,12 +457,19 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     previewChannelActive: previewTarget !== null,
     onConfirmPreviewChannel: handoff.confirmPreviewChannel,
     onCancelPreviewChannel: handoff.cancelPreviewChannel,
-    stillWatchingVisible: !inPip && extras.stillWatching.promptVisible,
+    stillWatchingVisible: !inPip && !isMini && extras.stillWatching.promptVisible,
     onStillWatchingKey: extras.handleStillWatchingKey,
-    externalOverlayOpen: props.externalOverlayOpen === true || subtitlesSuite.urlOverlayOpen,
+    onMinimizeToMiniPlayer,
+    onEnterPip: handleEnterPip,
+    onEnterMultiView: handleEnterMultiView,
+    onPopoutPlayer: handlePopoutPlayer,
+    tvBackMinimizesLive: tvBackMinimizesLive ?? Platform.OS === 'ios',
+    externalOverlayOpen:
+      isMini || props.externalOverlayOpen === true || subtitlesSuite.urlOverlayOpen,
   });
   hostKeyRef.current = controls.handleHostKey;
   cancelScrubRef.current = controls.cancelScrub;
+  useRestoreOsdOnToken(restoreCursorToken, isMini, controls.showOsd);
 
   const handleRetryWithParental = usePlayerParentalUnlock({
     itemKey: activeTarget.itemKey,
@@ -469,11 +533,11 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   usePlayerTvPan({
     openedEngine,
     isTv,
-    hasService: activeService !== null,
+    hasService: !isMini && activeService !== null,
     isVod: activeTarget.kind === 'vod',
     hasChannelList: canZap,
     anySheetOpen,
-    stillWatchingVisible: !inPip && extras.stillWatching.promptVisible,
+    stillWatchingVisible: !inPip && !isMini && extras.stillWatching.promptVisible,
     durationMs: touch.durationMs,
     controls,
     recordActivity,
@@ -483,7 +547,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const isWebDesktop = isDesktop && (Platform.OS as string) === 'web';
   const useDockedDesktopLayout = isDesktop && overlayMode === 'docked';
   const hideDesktopCursor =
-    isWebDesktop && controls.osdHidden && status.kind === 'playing' && !anySheetOpen;
+    !isMini && isWebDesktop && controls.osdHidden && status.kind === 'playing' && !anySheetOpen;
   const desktopWebProps = buildDesktopWebProps(
     isWebDesktop,
     controls.handleWheelVolume,
@@ -499,14 +563,15 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       controls.handlePointerHover(pt, pos);
     },
   );
-  const osdVisible = !inPip && !controls.osdHidden && !controls.locked;
+  const osdVisible = !isMini && !inPip && !controls.osdHidden && !controls.locked;
   const subtitleBottomInsetPx = computeSubtitleBottomInsetPx({
     useDockedDesktopLayout,
     osdVisible,
     isTv,
     osdTier: controls.osdTier,
   });
-  const showTouchGestures = !inPip && !isTv && !isDesktop && !controls.locked && !anySheetOpen;
+  const showTouchGestures =
+    !isMini && !inPip && !isTv && !isDesktop && !controls.locked && !anySheetOpen;
 
   const surfaceNode =
     sessionState.kind === 'ready' ? (
@@ -525,142 +590,72 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       />
     ) : null;
 
-  const nextEpisodeNode = (
-    <NextEpisodeBanner
-      nextEpisode={nextEpisode}
-      statusKind={status.kind}
-      dismissed={nextEpisodeDismissed}
-      service={activeService}
-      clock={clock}
-      isTv={isTv}
-      tvFocused={isTv && controls.tvOsdFocused && controls.tvOsdAction === 'nextEpisode'}
-      i18n={i18n}
-      {...(autoPlayNextEpisode !== undefined ? { autoPlayNextEpisode } : {})}
-      autoAdvanceDisabled={isGaplessArmed}
-      {...(reduceMotion !== undefined ? { reduceMotion } : {})}
-      timers={timers}
-      onPlayNext={(expectedKey) => handoff.handlePlayNextEpisode(expectedKey, nextEpisode)}
-      onDismiss={() => {
-        extras.stillWatching.recordUserActivity();
-        setNextEpisodeDismissed(true);
-      }}
-      onVisibilityChange={setNextEpisodeVisible}
-    />
-  );
-
-  const trackPickerNode =
-    controls.tracksOpen && activeService !== null ? (
-      <TrackPickerModal
-        tracks={tracks}
-        cursor={controls.pickerCursor}
-        isTv={isTv}
-        formFactor={formFactor}
-        i18n={i18n}
-        onSelectAudio={controls.selectAudio}
-        onSelectSubtitle={controls.selectSubtitle}
-        {...subtitlesSuite.trackPickerProps}
-        onClose={controls.closeTracks}
-      />
-    ) : null;
-
-  const infoSheetNode = (
-    <PlayerInfoSheet
-      visible={controls.infoOpen && activeService !== null}
-      docked={useDockedDesktopLayout}
-      title={activeTarget.title}
-      subtitle={activeTarget.subtitle}
-      isVod={activeTarget.kind === 'vod'}
-      nowNext={nowNext}
-      videoInfo={videoInfo}
-      tracks={tracks}
-      formFactor={formFactor}
-      isTv={isTv}
-      i18n={i18n}
-      nowMs={wallClock()}
-      onClose={controls.closeInfo}
-    />
-  );
-
-  const channelDrawerNode = (
-    <PlayerChannelDrawer
-      visible={controls.channelListOpen && canZap}
-      docked={useDockedDesktopLayout}
-      playlist={activeTarget.playlist}
-      currentItemKey={activeTarget.itemKey}
-      formFactor={formFactor}
-      isTv={isTv}
-      i18n={i18n}
-      fetchNowNext={extras.fetchChannelNowNext}
-      {...(catalog.listRecentChannels !== undefined
-        ? { fetchRecentChannels: extras.fetchRecentChannels }
-        : {})}
-      navigationRef={channelDrawerNavRef}
-      onSelectChannel={(entry, index) => {
-        extras.stillWatching.recordUserActivity();
-        handoff.selectChannel(entry, index);
-        controls.closeChannelList();
-      }}
-      onClose={controls.closeChannelList}
-    />
-  );
-
-  const settingsSheetNode = (
-    <PlayerSettingsSheet
-      visible={controls.settingsOpen && activeService !== null}
-      docked={useDockedDesktopLayout}
-      menuState={controls.settingsMenu}
-      tracks={tracks}
-      isVod={activeTarget.kind === 'vod'}
-      playbackSpeed={controls.playbackSpeed}
-      resizeMode={controls.resizeMode}
-      onToggleResizeMode={controls.toggleResizeMode}
-      timeDisplayMode={extras.timeDisplayMode}
-      onCycleTimeDisplayMode={extras.handleCycleTimeDisplayMode}
-      onToggleInfo={controls.toggleInfo}
-      {...buildSettingsSheetOptionalProps({
-        alwaysOnTop,
-        hostToggleAlwaysOnTop,
-        activeDeinterlaceMode: extras.activeDeinterlaceMode,
-        cycleDeinterlaceMode: extras.cycleDeinterlaceMode,
-        hostSetDeinterlace,
-        deinterlace: controls.deinterlace,
-        toggleDeinterlace: controls.toggleDeinterlace,
-        activePitchLock: extras.activePitchLock,
-        togglePitchLock: extras.togglePitchLock,
-        activeAudioNorm: extras.activeAudioNorm,
-        toggleAudioNormalization: extras.toggleAudioNormalization,
-        autoSubtitlesOnSkipBack,
-        onToggleAutoSubtitlesOnSkipBack,
-        autoPlayNextEpisode,
-        onToggleAutoPlayNextEpisode,
-        hostSetAudioDevice,
-        audioDevices,
-        activeAudioDevice,
-        selectAudioDevice,
-        showAndroidDecoder,
-        activeDecoderMode,
-        handleSelectAndroidDecoderMode,
-      })}
-      chapters={chapters}
-      onSelectChapter={extras.handleSelectChapter}
-      sleepTimer={extras.sleepTimer}
-      onSelectSleepTimer={extras.selectSleepTimer}
-      onToggleSleepTimerAction={extras.toggleSleepTimerAction}
-      statsVisible={controls.statsVisible}
-      {...quality.sheetProps}
-      {...syncAndQuality.sheetProps}
-      {...subtitlesSuite.settingsSheetProps}
-      isTv={isTv}
-      formFactor={formFactor}
-      i18n={i18n}
-      onOpenView={controls.openSettingsView}
-      onSelectAudio={controls.selectAudio}
-      onSelectSubtitle={controls.selectSubtitle}
-      onSelectSpeed={controls.selectSpeed}
-      onToggleStats={controls.toggleStats}
-      onClose={controls.closeSettings}
-    />
-  );
+  const { nextEpisodeNode, trackPickerNode, infoSheetNode, channelDrawerNode, settingsSheetNode } =
+    buildPlayerOverlayNodes({
+      activeTarget,
+      nextEpisode,
+      nextEpisodeDismissed,
+      isGaplessArmed,
+      status,
+      activeService,
+      clock,
+      timers,
+      wallClock,
+      isTv,
+      formFactor,
+      i18n,
+      useDockedDesktopLayout,
+      canZap,
+      tracks,
+      videoInfo,
+      nowNext,
+      chapters,
+      alwaysOnTop,
+      hostToggleAlwaysOnTop,
+      hostSetDeinterlace,
+      hostSetAudioDevice,
+      audioDevices,
+      activeAudioDevice,
+      selectAudioDevice,
+      showAndroidDecoder,
+      activeDecoderMode,
+      handleSelectAndroidDecoderMode,
+      autoSubtitlesOnSkipBack,
+      onToggleAutoSubtitlesOnSkipBack,
+      autoPlayNextEpisode,
+      onToggleAutoPlayNextEpisode,
+      reduceMotion,
+      activeDeinterlaceMode: extras.activeDeinterlaceMode,
+      cycleDeinterlaceMode: extras.cycleDeinterlaceMode,
+      activePitchLock: extras.activePitchLock,
+      togglePitchLock: extras.togglePitchLock,
+      activeAudioNorm: extras.activeAudioNorm,
+      toggleAudioNormalization: extras.toggleAudioNormalization,
+      timeDisplayMode: extras.timeDisplayMode,
+      handleCycleTimeDisplayMode: extras.handleCycleTimeDisplayMode,
+      handleSelectChapter: extras.handleSelectChapter,
+      sleepTimer: extras.sleepTimer,
+      selectSleepTimer: extras.selectSleepTimer,
+      toggleSleepTimerAction: extras.toggleSleepTimerAction,
+      fetchChannelNowNext: extras.fetchChannelNowNext,
+      fetchRecentChannels:
+        catalog.listRecentChannels !== undefined ? extras.fetchRecentChannels : undefined,
+      channelDrawerNavRef,
+      controls,
+      qualitySheetProps: quality.sheetProps,
+      syncAndQualitySheetProps: syncAndQuality.sheetProps,
+      subtitlesTrackPickerProps: subtitlesSuite.trackPickerProps,
+      subtitlesSettingsSheetProps: subtitlesSuite.settingsSheetProps,
+      onRecordUserActivity: extras.stillWatching.recordUserActivity,
+      onPlayNextEpisode: (expectedKey) => handoff.handlePlayNextEpisode(expectedKey, nextEpisode),
+      onDismissNextEpisode: () => setNextEpisodeDismissed(true),
+      onNextEpisodeVisibilityChange: setNextEpisodeVisible,
+      onSelectChannel: handoff.selectChannel,
+      onMinimizeToMiniPlayer,
+      onEnterPip: handleEnterPip,
+      onEnterMultiView: handleEnterMultiView,
+      onPopoutPlayer: handlePopoutPlayer,
+    });
 
   const osdProps = buildPlayerOsdProps({
     activeTarget,
@@ -697,6 +692,10 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     hostToggleMute,
     hostToggleFullscreen,
     hostToggleAlwaysOnTop,
+    onMinimizeToMiniPlayer,
+    onEnterPip: handleEnterPip,
+    onEnterMultiView: handleEnterMultiView,
+    onPopoutPlayer: handlePopoutPlayer,
     onExit,
     onCycleTimeDisplayMode: extras.handleCycleTimeDisplayMode,
     onFineScrubHaptic,
@@ -724,6 +723,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       isTv={isTv}
       isDesktop={isDesktop}
       inPip={inPip}
+      isMini={isMini}
       isVod={activeTarget.kind === 'vod'}
       useDockedDesktopLayout={useDockedDesktopLayout}
       hideDesktopCursor={hideDesktopCursor}
@@ -778,6 +778,9 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       onVolumeChange={controls.setVolume}
       onBrightnessChange={touch.handleBrightnessChange}
       onUnlock={controls.unlockControls}
+      onExpandMiniPlayer={onExpandMiniPlayer}
+      onCloseMiniPlayer={onExit}
+      onPinchMinimize={formFactor === 'tablet' ? onMinimizeToMiniPlayer : undefined}
     />
   );
 }

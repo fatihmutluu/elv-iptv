@@ -12,6 +12,11 @@ const WAVE_C1_ICONS: readonly IconName[] = [
   'chapters',
   'skipPrev',
   'skipNext',
+  'pip',
+  'multiview',
+  'miniplayer',
+  'popout',
+  'dock',
 ];
 
 describe('Icon rendering for Wave C1 cinema player icons', () => {

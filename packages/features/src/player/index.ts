@@ -13,4 +13,6 @@ export {
   shouldShowLiveJumpToLive,
   targetIdentityKey,
 } from './live-timeshift-model';
+export { MultiViewStage, type MultiViewStageProps } from './MultiViewStage';
+export { resolveMultiViewCapabilities } from './multiview-model';
 export { DEFAULT_AUTO_HIDE_OSD_MS, PlayerScreen, type PlayerScreenProps } from './PlayerScreen';

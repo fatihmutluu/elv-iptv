@@ -132,6 +132,8 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   windowAspectRatioLock: false,
   backgroundAudioPlayback: false,
   vodEnrichmentEnabled: false,
+  minimizeToTray: false,
+  autoEnterPip: true,
   subtitleStyle: DEFAULT_SUBTITLE_STYLE,
 });
 

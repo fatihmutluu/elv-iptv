@@ -56,6 +56,10 @@ export function buildSettingsSheetOptionalProps(opts: {
   readonly showAndroidDecoder: boolean;
   readonly activeDecoderMode: AndroidDecoderMode | undefined;
   readonly handleSelectAndroidDecoderMode: (mode: AndroidDecoderMode) => void;
+  readonly onMinimizeToMiniPlayer?: (() => void) | undefined;
+  readonly onEnterPip?: (() => void) | undefined;
+  readonly onEnterMultiView?: (() => void) | undefined;
+  readonly onPopoutPlayer?: (() => void) | undefined;
 }) {
   return {
     ...(opts.hostToggleAlwaysOnTop
@@ -103,6 +107,12 @@ export function buildSettingsSheetOptionalProps(opts: {
           onSelectAndroidDecoderMode: opts.handleSelectAndroidDecoderMode,
         }
       : {}),
+    ...(opts.onMinimizeToMiniPlayer !== undefined
+      ? { onMinimizeToMiniPlayer: opts.onMinimizeToMiniPlayer }
+      : {}),
+    ...(opts.onEnterPip !== undefined ? { onEnterPip: opts.onEnterPip } : {}),
+    ...(opts.onEnterMultiView !== undefined ? { onEnterMultiView: opts.onEnterMultiView } : {}),
+    ...(opts.onPopoutPlayer !== undefined ? { onPopoutPlayer: opts.onPopoutPlayer } : {}),
   };
 }
 

@@ -50,6 +50,10 @@ export interface BuildPlayerOsdPropsInput {
   readonly hostToggleMute: (() => void) | undefined;
   readonly hostToggleFullscreen: (() => void) | undefined;
   readonly hostToggleAlwaysOnTop: (() => void) | undefined;
+  readonly onMinimizeToMiniPlayer?: (() => void) | undefined;
+  readonly onEnterPip?: (() => void) | undefined;
+  readonly onEnterMultiView?: (() => void) | undefined;
+  readonly onPopoutPlayer?: (() => void) | undefined;
   readonly onExit: () => void;
   readonly onCycleTimeDisplayMode: () => void;
   readonly onFineScrubHaptic: ((kind: 'tier' | 'origin') => void) | undefined;
@@ -147,6 +151,12 @@ export function buildPlayerOsdProps(p: BuildPlayerOsdPropsInput): PlayerOsdProps
     ...(p.hostToggleAlwaysOnTop !== undefined
       ? { onToggleAlwaysOnTop: p.hostToggleAlwaysOnTop }
       : {}),
+    ...(p.onMinimizeToMiniPlayer !== undefined
+      ? { onMinimizeToMiniPlayer: p.onMinimizeToMiniPlayer }
+      : {}),
+    ...(p.onEnterPip !== undefined ? { onEnterPip: p.onEnterPip } : {}),
+    ...(p.onEnterMultiView !== undefined ? { onEnterMultiView: p.onEnterMultiView } : {}),
+    ...(p.onPopoutPlayer !== undefined ? { onPopoutPlayer: p.onPopoutPlayer } : {}),
     onLock: controls.lockControls,
     onJumpPreviousChannel: p.onJumpPreviousChannel,
     onJumpToLiveEdge: controls.jumpToLiveEdge,

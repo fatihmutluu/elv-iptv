@@ -1,9 +1,10 @@
+import type { Media3EngineOptions } from '@elv/engine-media3';
 import type { PlayerEngine } from '@elv/playback';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { createAetherEngine, createMedia3Engine } = vi.hoisted(() => ({
   createAetherEngine: vi.fn<() => PlayerEngine | null>(),
-  createMedia3Engine: vi.fn<() => PlayerEngine | null>(),
+  createMedia3Engine: vi.fn<(options?: Media3EngineOptions) => PlayerEngine | null>(),
 }));
 
 vi.mock('@elv/engine-aether', () => ({ createAetherEngine }));
@@ -27,11 +28,15 @@ describe('createPlatformEngine', () => {
     expect(createMedia3Engine).not.toHaveBeenCalled();
   });
 
-  it('falls back to Media3 when Aether is absent', () => {
+  it('falls back to Media3 when Aether is absent and forwards Multi-View options', () => {
     const media3 = fake('media3');
     createAetherEngine.mockReturnValue(null);
     createMedia3Engine.mockReturnValue(media3);
-    expect(createPlatformEngine()).toBe(media3);
+    expect(createPlatformEngine({ handleAudioFocus: false, multiViewTileCount: 4 })).toBe(media3);
+    expect(createMedia3Engine).toHaveBeenCalledWith({
+      handleAudioFocus: false,
+      multiViewTileCount: 4,
+    });
   });
 
   it('returns null when neither native engine exists', () => {

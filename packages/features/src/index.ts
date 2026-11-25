@@ -47,6 +47,11 @@ export {
   noopAppLifecycle,
 } from './ports/app-lifecycle';
 export type {
+  DesktopWindowPort,
+  PopoutDockPayload,
+  PopoutLaunchPayload,
+} from './ports/desktop-window-host';
+export type {
   LanPairingPort,
   LanPairingSession,
   LanPairingSourcePayload,
@@ -70,8 +75,11 @@ export type {
 } from './ports/tv-home-channels';
 export type {
   OpenVideoEngine,
+  PipSourceRect,
   QueuedEpisodeHostRequest,
+  ThermalDevicePort,
   VideoHost,
+  VideoHostOpenOptions,
   VideoSurfaceProps,
 } from './ports/video-host';
 export * from './profiles';

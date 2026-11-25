@@ -179,4 +179,80 @@ class LoadControlConfigTest {
     assertFalse(isLowRam(isLowRamDevice = false, totalMemBytes = 3 * gib / 2))
     assertFalse(isLowRam(isLowRamDevice = false, totalMemBytes = 2 * gib))
   }
+
+  @Test
+  fun `scales targetBufferBytes by multiViewTileCount with 8 MiB floor and conservative durations (#34)`() {
+    assertEquals(1, clampMultiViewTileCount(-2))
+    assertEquals(1, clampMultiViewTileCount(0))
+    assertEquals(1, clampMultiViewTileCount(1))
+    assertEquals(2, clampMultiViewTileCount(2))
+    assertEquals(4, clampMultiViewTileCount(4))
+    assertEquals(4, clampMultiViewTileCount(8))
+
+    // 4 GiB standard device (AUTO 96 MiB base) scales down proportionally per tile
+    val single = loadControlForStream(false, 4 * gib, StreamKind.HLS_LIVE, BufferPreset.AUTO, multiViewTileCount = 1)
+    val twoTiles = loadControlForStream(false, 4 * gib, StreamKind.HLS_LIVE, BufferPreset.AUTO, multiViewTileCount = 2)
+    val threeTiles = loadControlForStream(false, 4 * gib, StreamKind.HLS_LIVE, BufferPreset.AUTO, multiViewTileCount = 3)
+    val fourTiles = loadControlForStream(false, 4 * gib, StreamKind.HLS_LIVE, BufferPreset.AUTO, multiViewTileCount = 4)
+    assertEquals(96 * mib, single.targetBufferBytes)
+    assertEquals(48 * mib, twoTiles.targetBufferBytes)
+    assertEquals(32 * mib, threeTiles.targetBufferBytes)
+    assertEquals(24 * mib, fourTiles.targetBufferBytes)
+    assertFalse("multi-view must prioritize byte cap over time threshold", twoTiles.prioritizeTimeOverSizeThresholds)
+    assertFalse(fourTiles.prioritizeTimeOverSizeThresholds)
+    assertTrue("multi-view maxBufferMs must stay conservative", twoTiles.maxBufferMs < single.maxBufferMs)
+    assertTrue("4-tile maxBufferMs must not exceed 2-tile maxBufferMs", fourTiles.maxBufferMs <= twoTiles.maxBufferMs)
+
+    // Low-RAM (16 MiB base) floors cleanly at 8 MiB even at 4 tiles
+    val lowTwo = loadControlForStream(true, 1 * gib, StreamKind.RAW_TS_LIVE, BufferPreset.AUTO, multiViewTileCount = 2)
+    val lowFour = loadControlForStream(true, 1 * gib, StreamKind.RAW_TS_LIVE, BufferPreset.AUTO, multiViewTileCount = 4)
+    assertEquals(8 * mib, lowTwo.targetBufferBytes)
+    assertEquals(8 * mib, lowFour.targetBufferBytes)
+
+    // VOD back-buffer shrinks under multi-view
+    val singleVod = loadControlForStream(false, 4 * gib, StreamKind.VOD, BufferPreset.LARGE, multiViewTileCount = 1)
+    val quadVod = loadControlForStream(false, 4 * gib, StreamKind.VOD, BufferPreset.LARGE, multiViewTileCount = 4)
+    assertTrue(quadVod.maxBufferMs < singleVod.maxBufferMs)
+    assertTrue(quadVod.backBufferMs < singleVod.backBufferMs)
+
+    // Every multi-tile combination must satisfy ExoPlayer DefaultLoadControl buffer duration invariants
+    val mems = listOf(1 * gib, 2 * gib, 4 * gib, 8 * gib)
+    for (mem in mems) {
+      for (lowFlag in listOf(false, true)) {
+        for (kind in StreamKind.entries) {
+          for (preset in BufferPreset.entries) {
+            for (tiles in 2..4) {
+              val v = loadControlForStream(lowFlag, mem, kind, preset, multiViewTileCount = tiles)
+              assertTrue(v.bufferForPlaybackMs >= 0)
+              assertTrue(v.bufferForPlaybackAfterRebufferMs >= 0)
+              assertTrue(v.minBufferMs >= v.bufferForPlaybackMs)
+              assertTrue(v.minBufferMs >= v.bufferForPlaybackAfterRebufferMs)
+              assertTrue(v.maxBufferMs >= v.minBufferMs)
+              assertTrue(v.targetBufferBytes >= 8 * mib)
+              assertFalse(v.prioritizeTimeOverSizeThresholds)
+              assertTrue(v.backBufferMs >= 0)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  @Test
+  fun `parseMultiViewEngineOptions validates and clamps JS options map (#34, #221)`() {
+    assertEquals(MultiViewEngineOptions(handleAudioFocus = true, multiViewTileCount = 1), parseMultiViewEngineOptions(null))
+    assertEquals(MultiViewEngineOptions(handleAudioFocus = true, multiViewTileCount = 1), parseMultiViewEngineOptions(emptyMap()))
+    assertEquals(
+      MultiViewEngineOptions(handleAudioFocus = false, multiViewTileCount = 3),
+      parseMultiViewEngineOptions(mapOf("handleAudioFocus" to false, "multiViewTileCount" to 3.0)),
+    )
+    assertEquals(
+      MultiViewEngineOptions(handleAudioFocus = true, multiViewTileCount = 4),
+      parseMultiViewEngineOptions(mapOf("multiViewTileCount" to 99)),
+    )
+    assertEquals(
+      MultiViewEngineOptions(handleAudioFocus = true, multiViewTileCount = 1),
+      parseMultiViewEngineOptions(mapOf("multiViewTileCount" to Double.NaN)),
+    )
+  }
 }

@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Rect
+import android.os.Build
 import android.view.OrientationEventListener
 import androidx.core.app.OnPictureInPictureModeChangedProvider
 import androidx.core.app.PictureInPictureModeChangedInfo
@@ -236,6 +238,125 @@ class AndroidWindowHelperTest {
     val activity = Robolectric.buildActivity(Activity::class.java).create().get()
     Shadows.shadowOf(activity.packageManager).setSystemFeature(PackageManager.FEATURE_LEANBACK, true)
     assertFalse("PiP must return false on TV devices", enterPictureInPicture(activity, 1920.0, 1080.0))
+    assertFalse(
+      "PiP with sourceRect must return false on TV devices",
+      enterPictureInPicture(activity, 1920.0, 1080.0, 0.0, 0.0, 1080.0, 608.0),
+    )
+  }
+
+  @Test
+  fun `resolvePipSourceRect validates non-empty non-negative bounds and rounds fractional coordinates (#34)`() {
+    assertEquals(null, resolvePipSourceRect(null, 0.0, 100.0, 100.0))
+    assertEquals(null, resolvePipSourceRect(0.0, null, 100.0, 100.0))
+    assertEquals(null, resolvePipSourceRect(0.0, 0.0, null, 100.0))
+    assertEquals(null, resolvePipSourceRect(0.0, 0.0, 100.0, null))
+    assertEquals(null, resolvePipSourceRect(Double.NaN, 0.0, 100.0, 100.0))
+    assertEquals(null, resolvePipSourceRect(0.0, 0.0, Double.POSITIVE_INFINITY, 100.0))
+    assertEquals(null, resolvePipSourceRect(-1.0, 0.0, 100.0, 100.0))
+    assertEquals(null, resolvePipSourceRect(0.0, -5.0, 100.0, 100.0))
+    assertEquals(null, resolvePipSourceRect(100.0, 0.0, 100.0, 100.0))
+    assertEquals(null, resolvePipSourceRect(120.0, 0.0, 100.0, 100.0))
+    assertEquals(null, resolvePipSourceRect(0.0, 100.0, 100.0, 100.0))
+    assertEquals(null, resolvePipSourceRect(10.4, 20.0, 10.45, 50.0))
+
+    assertEquals(Rect(0, 0, 1080, 608), resolvePipSourceRect(0.0, 0.0, 1080.0, 608.0))
+    assertEquals(Rect(10, 21, 300, 201), resolvePipSourceRect(10.2, 20.7, 300.4, 200.6))
+  }
+
+  @Test
+  fun `setAutoEnterPictureInPicture gates on API 31+, non-TV, and forwards clamped aspect ratio and sourceRect (#34)`() {
+    val activity = Robolectric.buildActivity(Activity::class.java).create().get()
+    var appliedCalls = 0
+    var lastEnabled: Boolean? = null
+    var lastAspect: Pair<Int, Int>? = null
+    var lastRect: Rect? = null
+
+    val fakeApply: (Activity, Boolean, Pair<Int, Int>, Rect?) -> Boolean = { _, enabled, aspect, rect ->
+      appliedCalls += 1
+      lastEnabled = enabled
+      lastAspect = aspect
+      lastRect = rect
+      true
+    }
+
+    // API < 31 returns false cleanly without invoking API 31 builder
+    assertFalse(
+      setAutoEnterPictureInPicture(
+        activity = activity,
+        enabled = true,
+        aspectWidth = 16.0,
+        aspectHeight = 9.0,
+        sdkInt = Build.VERSION_CODES.R,
+        applyAutoEnter = fakeApply,
+      ),
+    )
+    assertEquals(0, appliedCalls)
+
+    // API 31+ on mobile applies clamped aspect ratio and validated sourceRect
+    assertTrue(
+      setAutoEnterPictureInPicture(
+        activity = activity,
+        enabled = true,
+        aspectWidth = 3840.0,
+        aspectHeight = 1080.0,
+        sourceLeft = 10.0,
+        sourceTop = 20.0,
+        sourceRight = 1010.0,
+        sourceBottom = 580.0,
+        sdkInt = Build.VERSION_CODES.S,
+        applyAutoEnter = fakeApply,
+      ),
+    )
+    assertEquals(1, appliedCalls)
+    assertEquals(true, lastEnabled)
+    assertEquals(239 to 100, lastAspect)
+    assertEquals(Rect(10, 20, 1010, 580), lastRect)
+
+    // Disabling auto-enter with invalid rect omits sourceRect
+    assertTrue(
+      setAutoEnterPictureInPicture(
+        activity = activity,
+        enabled = false,
+        aspectWidth = 16.0,
+        aspectHeight = 9.0,
+        sourceLeft = 50.0,
+        sourceTop = 50.0,
+        sourceRight = 50.0,
+        sourceBottom = 100.0,
+        sdkInt = Build.VERSION_CODES.S,
+        applyAutoEnter = fakeApply,
+      ),
+    )
+    assertEquals(2, appliedCalls)
+    assertEquals(false, lastEnabled)
+    assertEquals(16 to 9, lastAspect)
+    assertEquals(null, lastRect)
+
+    // OEM exception returns false safely
+    assertFalse(
+      setAutoEnterPictureInPicture(
+        activity = activity,
+        enabled = true,
+        aspectWidth = 16.0,
+        aspectHeight = 9.0,
+        sdkInt = Build.VERSION_CODES.S,
+        applyAutoEnter = { _, _, _, _ -> throw IllegalStateException("OEM PiP disabled") },
+      ),
+    )
+
+    // TV device returns false even on API 31+
+    Shadows.shadowOf(activity.packageManager).setSystemFeature(PackageManager.FEATURE_LEANBACK, true)
+    assertFalse(
+      setAutoEnterPictureInPicture(
+        activity = activity,
+        enabled = true,
+        aspectWidth = 16.0,
+        aspectHeight = 9.0,
+        sdkInt = Build.VERSION_CODES.S,
+        applyAutoEnter = fakeApply,
+      ),
+    )
+    assertEquals(2, appliedCalls)
   }
 
   @Test

@@ -161,14 +161,24 @@ private struct WeakEngineRef {
 public final class ElvEngineAetherModule: Module, @unchecked Sendable {
   private let enginesLock = NSLock()
   private var engineTable: [ObjectIdentifier: WeakEngineRef] = [:]
+  private var engineOrder: [ObjectIdentifier] = []
+  private var autoEnterPipEnabled = false
+  private var thermalObserver: NSObjectProtocol?
+  private var isDestroyed = false
 
   public func definition() -> ModuleDefinition {
     Name("ElvEngineAether")
 
-    Events("onSafeAreaInsetsChanged", "onHardwareKey")
+    Events(
+      "onSafeAreaInsetsChanged",
+      "onHardwareKey",
+      "onThermalStateChanged",
+      "onPictureInPictureChanged"
+    )
 
     OnCreate {
       AppleModuleEventHub.shared.attach(module: self)
+      self.installThermalObserver()
     }
 
     OnStartObserving("onSafeAreaInsetsChanged") {
@@ -197,6 +207,54 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
 
     Function("deviceModel") { () -> String in
       resolveAppleDeviceModel()
+    }
+
+    Function("thermalState") { () -> String in
+      mapProcessInfoThermalState(ProcessInfo.processInfo.thermalState).rawValue
+    }
+
+    Function("physicalMemoryBytes") { () -> Double in
+      Double(ProcessInfo.processInfo.physicalMemory)
+    }
+
+    Function("enterPictureInPicture") { (engine: EngineObject?) -> Bool in
+      self.runSyncOnMain {
+        guard let target = self.resolvePipTargetEngine(preferred: engine) else {
+          return false
+        }
+        return target.enterPictureInPicture()
+      }
+    }
+
+    Function("canStartPictureInPicture") { (engine: EngineObject?) -> Bool in
+      self.runSyncOnMain {
+        guard let target = self.resolvePipTargetEngine(preferred: engine) else {
+          return false
+        }
+        return target.canStartPictureInPicture()
+      }
+    }
+
+    Function("setAutoEnterPictureInPicture") { (enabled: Bool, engine: EngineObject?) -> Bool in
+      if engine == nil {
+        self.enginesLock.withLock {
+          self.autoEnterPipEnabled = enabled
+        }
+      }
+      return self.runSyncOnMain {
+        if let engine {
+          return engine.setAutoEnterPictureInPicture(enabled)
+        }
+        let engines = self.liveEnginesNewestFirst()
+        if engines.isEmpty {
+          return AetherPipController.isAutoEnterSupported
+        }
+        var anyApplied = false
+        for item in engines where item.setAutoEnterPictureInPicture(enabled) {
+          anyApplied = true
+        }
+        return anyApplied
+      }
     }
 
     Function("readPersistentValue") { (key: String) -> String? in
@@ -239,10 +297,13 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
     }.runOnQueue(.main)
 
     OnDestroy {
+      self.removeThermalObserver()
       AppleModuleEventHub.shared.detach(module: self)
       let remaining: [EngineObject] = self.enginesLock.withLock {
+        self.isDestroyed = true
         let list = self.engineTable.values.compactMap(\.value)
         self.engineTable.removeAll()
+        self.engineOrder.removeAll()
         return list
       }
       for engine in remaining {
@@ -252,7 +313,8 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
 
     Class("Engine", EngineObject.self) {
       Constructor { () -> EngineObject in
-        let instance = EngineObject { [weak self] disposed in
+        let initialAutoEnterPip = self.enginesLock.withLock { self.autoEnterPipEnabled }
+        let instance = EngineObject(initialAutoEnterPip: initialAutoEnterPip) { [weak self] disposed in
           self?.unregister(disposed)
         }
         self.register(instance)
@@ -372,10 +434,101 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
     }
   }
 
+  private func installThermalObserver() {
+    let previous: NSObjectProtocol? = enginesLock.withLock {
+      isDestroyed = false
+      let old = thermalObserver
+      thermalObserver = nil
+      return old
+    }
+    if let previous {
+      NotificationCenter.default.removeObserver(previous)
+    }
+    let token = NotificationCenter.default.addObserver(
+      forName: ProcessInfo.thermalStateDidChangeNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      guard let self else { return }
+      let destroyed = self.enginesLock.withLock { self.isDestroyed }
+      guard !destroyed else { return }
+      let level = mapProcessInfoThermalState(ProcessInfo.processInfo.thermalState)
+      self.emit(event: "onThermalStateChanged", payload: ["state": level.rawValue])
+    }
+    let shouldDrop: Bool = enginesLock.withLock {
+      if isDestroyed {
+        return true
+      }
+      thermalObserver = token
+      return false
+    }
+    if shouldDrop {
+      NotificationCenter.default.removeObserver(token)
+    }
+  }
+
+  private func removeThermalObserver() {
+    let token: NSObjectProtocol? = enginesLock.withLock {
+      let old = thermalObserver
+      thermalObserver = nil
+      return old
+    }
+    if let token {
+      NotificationCenter.default.removeObserver(token)
+    }
+  }
+
+  private func runSyncOnMain<T: Sendable>(_ block: @escaping @MainActor @Sendable () -> T) -> T {
+    if Thread.isMainThread {
+      return MainActor.assumeIsolated {
+        block()
+      }
+    }
+    return DispatchQueue.main.sync {
+      MainActor.assumeIsolated {
+        block()
+      }
+    }
+  }
+
+  private func liveEnginesNewestFirst() -> [EngineObject] {
+    enginesLock.withLock {
+      var alive: [EngineObject] = []
+      var keptOrder: [ObjectIdentifier] = []
+      for key in engineOrder {
+        if let engine = engineTable[key]?.value {
+          keptOrder.append(key)
+          alive.append(engine)
+        } else {
+          engineTable.removeValue(forKey: key)
+        }
+      }
+      engineOrder = keptOrder
+      return alive.reversed()
+    }
+  }
+
+  @MainActor
+  private func resolvePipTargetEngine(preferred: EngineObject?) -> EngineObject? {
+    if let preferred {
+      return preferred
+    }
+    let engines = liveEnginesNewestFirst()
+    if let pipReady = engines.first(where: { $0.canStartPictureInPicture() }) {
+      return pipReady
+    }
+    if let surfaceBound = engines.first(where: { $0.hasBoundSurface }) {
+      return surfaceBound
+    }
+    return engines.first
+  }
+
   private func register(_ engine: EngineObject) {
     let key = ObjectIdentifier(engine)
     enginesLock.withLock {
       engineTable[key] = WeakEngineRef(value: engine)
+      engineOrder.removeAll { $0 == key }
+      engineOrder.append(key)
     }
   }
 
@@ -383,6 +536,7 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
     let key = ObjectIdentifier(engine)
     _ = enginesLock.withLock {
       engineTable.removeValue(forKey: key)
+      engineOrder.removeAll { $0 == key }
     }
   }
 }

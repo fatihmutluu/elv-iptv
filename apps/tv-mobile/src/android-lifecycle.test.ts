@@ -109,4 +109,26 @@ describe('createComposedAppLifecycle (#143, #266)', () => {
     expect(appState.remove).toHaveBeenCalledTimes(1);
     expect(pip.unsub).toHaveBeenCalledTimes(1);
   });
+
+  it('suppresses background stop for Apple subscribePip without standby subscription (#34)', () => {
+    const appState = makeAppState('active');
+    const applePip = makeBoolSource();
+    const lifecycle = createComposedAppLifecycle({
+      appState: appState.state,
+      subscribePip: applePip.subscribe,
+    });
+
+    const events: Array<'active' | 'background'> = [];
+    const off = lifecycle.subscribe((s) => events.push(s));
+
+    applePip.emit(true);
+    appState.emit('background');
+    expect(events).toEqual([]);
+
+    applePip.emit(false);
+    expect(events).toEqual(['background']);
+
+    off();
+    expect(applePip.unsub).toHaveBeenCalledTimes(1);
+  });
 });

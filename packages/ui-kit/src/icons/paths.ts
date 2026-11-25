@@ -48,7 +48,12 @@ export type IconName =
   | 'moon'
   | 'chapters'
   | 'skipPrev'
-  | 'skipNext';
+  | 'skipNext'
+  | 'pip'
+  | 'multiview'
+  | 'miniplayer'
+  | 'popout'
+  | 'dock';
 
 /** Single SVG primitive shape within a 24x24 icon viewBox. */
 export type IconShape =
@@ -232,6 +237,29 @@ export const ICON_PATHS: Readonly<Record<IconName, IconSpec>> = {
   chapters: stroke(p('M4 5h5v8.5l-2.5-1.8L4 13.5z'), p('M13 6.5h7M13 12h7M4 18h16')),
   skipPrev: filled(fp('M5 5h2.5v14H5z'), fp('M19 5v14L9 12z')),
   skipNext: filled(fp('M5 5v14l10-7z'), fp('M16.5 5H19v14h-2.5z')),
+  pip: stroke(rect(2, 4, 20, 16, 2), rect(12, 11, 7.5, 6, 1.2)),
+  multiview: stroke(
+    rect(3, 4, 8, 7, 1.5),
+    rect(13, 4, 8, 7, 1.5),
+    rect(3, 13, 8, 7, 1.5),
+    rect(13, 13, 8, 7, 1.5),
+  ),
+  miniplayer: stroke(
+    rect(2, 4, 20, 16, 2),
+    p('M7 9l4 4'),
+    p('M11 9v4H7'),
+    rect(13.5, 13, 6, 4.5, 1),
+  ),
+  popout: stroke(
+    p('M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'),
+    p('M15 3h6v6'),
+    p('M10 14 21 3'),
+  ),
+  dock: stroke(
+    p('M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'),
+    p('M21 3 11 13'),
+    p('M11 7v6h6'),
+  ),
 };
 
 /** Ordered list of every icon identifier registered in {@link ICON_PATHS}. */

@@ -175,6 +175,10 @@ export interface PlayerOverlayStateParams {
   sleepTimerMinutes?: number | undefined;
   hasTimeDisplay?: boolean | undefined;
   hasAlwaysOnTop?: boolean | undefined;
+  hasMiniPlayer?: boolean | undefined;
+  hasPip?: boolean | undefined;
+  hasMultiView?: boolean | undefined;
+  hasPopout?: boolean | undefined;
   hasNextEpisode: boolean;
   hasPreviousChannel: boolean;
   hasBackToLive?: boolean;

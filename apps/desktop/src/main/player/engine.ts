@@ -63,6 +63,7 @@ export interface MpvEngine extends PlayerEngine {
   readonly lastArea: PlayerArea | undefined;
   toggleFullscreen(): void;
   toggleMute(): void;
+  setMuted?(muted: boolean): void;
   setVolume(volume: number): void;
   setAudioDelay(attempt: AttemptToken, delayMs: number): void;
   setAudioDelay(delaySec: number): void;
@@ -503,6 +504,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     },
     toggleFullscreen: () => !released && presenter.toggleFullscreen(),
     toggleMute: () => controls.toggleMute(),
+    setMuted: (muted) => controls.setMuted(muted),
     setVolume: (volume) => controls.setVolume(volume),
     setAudioDelay(attemptOrDelaySec: AttemptToken | number, maybeDelayMs?: number) {
       if (maybeDelayMs !== undefined) {

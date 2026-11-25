@@ -1,0 +1,473 @@
+import type { CatalogService, SourceRow } from '@elv/data';
+import type { KeyEvent } from '@elv/focus-core';
+import type { ConnectionTracker, PlaybackClock, PlaybackTimers } from '@elv/playback';
+import {
+  Icon,
+  IconButton,
+  MicroPill,
+  TvFocusAnchor,
+  useI18n,
+  useKeyInterpreter,
+  useTheme,
+  useViewport,
+  webBackdropBlur,
+  webCursorPointer,
+} from '@elv/ui-kit';
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import type { PlayableEntry, PlayTarget } from '../ports/play-target';
+import type { ThermalDevicePort, VideoHost } from '../ports/video-host';
+import { MultiViewChannelPicker } from './MultiViewChannelPicker';
+import { MultiViewTileCard } from './MultiViewTileCard';
+import {
+  computeMultiViewGridLayout,
+  formatMultiViewBannerText,
+  moveMultiViewGridFocus,
+} from './multiview-model';
+import { useMultiViewSession } from './useMultiViewSession';
+
+/** Props of {@link MultiViewStage}. */
+export interface MultiViewStageProps {
+  readonly catalog: Pick<
+    CatalogService,
+    'resolveStream' | 'categories' | 'items' | 'allSourcesItems'
+  >;
+  readonly videoHost: VideoHost;
+  readonly tracker: ConnectionTracker;
+  readonly sources: readonly SourceRow[];
+  readonly thermalDevice?: ThermalDevicePort | undefined;
+  readonly initialSeed?: PlayableEntry | undefined;
+  readonly clock?: PlaybackClock;
+  readonly timers?: PlaybackTimers;
+  readonly onExit: (resumeTarget: PlayTarget | null) => void;
+}
+
+type PickerMode =
+  | { readonly kind: 'add' }
+  | { readonly kind: 'replace'; readonly tileId: string }
+  | null;
+
+/**
+ * Full-screen Cinema Quietude Multi-View Grid (`#34`, `#221`, `#232`):
+ * pure `16:9` 2-tile / 4-tile grid (`gap: 6`), single active-audio tile highlight, inline channel
+ * picker (zero RN `<Modal>`), inline `#221` connection-limit & `#232` thermal banners, and full
+ * 2D TV D-pad + desktop Escape support.
+ */
+export function MultiViewStage({
+  catalog,
+  videoHost,
+  tracker,
+  sources,
+  thermalDevice,
+  initialSeed,
+  clock,
+  timers,
+  onExit,
+}: MultiViewStageProps): ReactElement {
+  const theme = useTheme();
+  const i18n = useI18n();
+  const viewport = useViewport();
+  const isTv = viewport.formFactor === 'tv';
+  const pointer = !isTv ? webCursorPointer() : undefined;
+
+  const session = useMultiViewSession({
+    catalog,
+    videoHost,
+    tracker,
+    sources,
+    thermalDevice,
+    initialSeed,
+    ...(clock !== undefined ? { clock } : {}),
+    ...(timers !== undefined ? { timers } : {}),
+  });
+
+  const [pickerMode, setPickerMode] = useState<PickerMode>(null);
+  const [focusedSlot, setFocusedSlot] = useState(0);
+  const exitingRef = useRef(false);
+
+  const handleExit = useCallback(() => {
+    if (exitingRef.current) return;
+    exitingRef.current = true;
+    void session.exitMultiView().then((resumeTarget) => {
+      onExit(resumeTarget);
+    });
+  }, [onExit, session]);
+
+  const { state, banner } = session;
+  const grid = computeMultiViewGridLayout(
+    state.tiles.length,
+    state.effectiveMaxTiles,
+    state.canAddTile,
+  );
+  const totalSlots = state.tiles.length + (grid.showEmptySlot ? 1 : 0);
+  const clampedFocus = Math.max(0, Math.min(Math.max(0, totalSlots - 1), focusedSlot));
+
+  const excludeItemKeys = useMemo(() => new Set(state.tiles.map((t) => t.itemKey)), [state.tiles]);
+
+  const handlePickerSelect = useCallback(
+    (entry: PlayableEntry) => {
+      const mode = pickerMode;
+      setPickerMode(null);
+      if (mode?.kind === 'replace') {
+        void session.replaceChannel(mode.tileId, entry);
+      } else {
+        session.addChannel(entry);
+      }
+    },
+    [pickerMode, session],
+  );
+
+  const pickerOpenRef = useRef(false);
+  pickerOpenRef.current = pickerMode !== null;
+  const tilesRef = useRef(state.tiles);
+  tilesRef.current = state.tiles;
+  const totalSlotsRef = useRef(totalSlots);
+  totalSlotsRef.current = totalSlots;
+  const focusRef = useRef(clampedFocus);
+  focusRef.current = clampedFocus;
+
+  useEffect(() => {
+    if ((Platform.OS as string) !== 'web') return;
+    const onKeyDown = (event: { key?: string; preventDefault?: () => void }) => {
+      if (event.key === 'Escape' && !pickerOpenRef.current) {
+        event.preventDefault?.();
+        handleExit();
+      }
+    };
+    const win = globalThis as unknown as {
+      addEventListener?: (type: string, fn: (e: unknown) => void) => void;
+      removeEventListener?: (type: string, fn: (e: unknown) => void) => void;
+    };
+    win.addEventListener?.('keydown', onKeyDown as (e: unknown) => void);
+    return () => {
+      win.removeEventListener?.('keydown', onKeyDown as (e: unknown) => void);
+    };
+  }, [handleExit]);
+
+  useKeyInterpreter((event: KeyEvent) => {
+    if (pickerOpenRef.current) return false;
+    if (event.kind === 'press' && event.key === 'back') {
+      handleExit();
+      return true;
+    }
+    if (
+      (event.kind === 'press' || event.kind === 'repeat') &&
+      (event.key === 'left' || event.key === 'right' || event.key === 'up' || event.key === 'down')
+    ) {
+      setFocusedSlot((prev) => moveMultiViewGridFocus(prev, totalSlotsRef.current, event.key));
+      return true;
+    }
+    if (event.kind === 'press' && event.key === 'select') {
+      const tile = tilesRef.current[focusRef.current];
+      if (tile !== undefined) {
+        session.selectAudioTile(tile.tileId);
+      } else if (state.canAddTile) {
+        setPickerMode({ kind: 'add' });
+      }
+      return true;
+    }
+    return false;
+  });
+
+  const bannerCopy = banner !== null ? formatMultiViewBannerText(banner, i18n) : null;
+  const padH = (isTv ? 32 : 16) + viewport.overscan.x;
+  const padTop = (isTv ? 20 : 12) + viewport.safeArea.top + viewport.overscan.y;
+  const padBottom = (isTv ? 20 : 12) + viewport.safeArea.bottom + viewport.overscan.y;
+
+  const row1Items = state.tiles.slice(0, 2);
+  const row2Items = state.tiles.slice(2, 4);
+  const emptyInRow1 = grid.showEmptySlot && row1Items.length < 2;
+  const emptyInRow2 = grid.showEmptySlot && !emptyInRow1;
+
+  return (
+    <View
+      testID="multiview-stage"
+      style={[
+        styles.root,
+        {
+          backgroundColor: theme.colors.bgCanvas,
+          paddingTop: padTop,
+          paddingBottom: padBottom,
+          paddingLeft: padH + viewport.safeArea.left,
+          paddingRight: padH + viewport.safeArea.right,
+        },
+      ]}
+    >
+      {isTv && pickerMode === null ? (
+        <TvFocusAnchor testID="multiview-tv-focus-anchor" hasTVPreferredFocus />
+      ) : null}
+
+      <View style={styles.header}>
+        <IconButton
+          testID="multiview-exit-button"
+          icon="back"
+          size={38}
+          accessibilityLabel={i18n.t('player.multiView.exit')}
+          focusable={!isTv}
+          onPress={handleExit}
+        />
+        <Text
+          testID="multiview-title"
+          style={[theme.typography.h2, { color: theme.colors.textPrimary }]}
+        >
+          {i18n.t('player.multiView.title')}
+        </Text>
+        <MicroPill
+          testID="multiview-tile-count"
+          label={i18n.t('player.multiView.tileCount', { count: state.tiles.length })}
+          tone="neutral"
+        />
+        <View style={styles.flex1} />
+        <Pressable
+          testID="multiview-add-button"
+          disabled={!state.canAddTile}
+          focusable={!isTv && state.canAddTile}
+          accessibilityRole="button"
+          accessibilityLabel={i18n.t('player.multiView.addChannel')}
+          accessibilityState={{ disabled: !state.canAddTile }}
+          onPress={() => {
+            if (state.canAddTile) setPickerMode({ kind: 'add' });
+          }}
+          style={[
+            styles.addButton,
+            pointer,
+            {
+              borderRadius: theme.radius.button,
+              backgroundColor: state.canAddTile ? theme.colors.ctaBg : theme.colors.chipBg,
+              borderColor: theme.colors.glassBorder,
+              opacity: state.canAddTile ? 1 : 0.45,
+            },
+          ]}
+        >
+          <Icon
+            name="plus"
+            size={16}
+            color={state.canAddTile ? theme.colors.ctaFg : theme.colors.textMuted}
+          />
+          <Text
+            style={[
+              theme.typography.caption,
+              styles.addLabel,
+              { color: state.canAddTile ? theme.colors.ctaFg : theme.colors.textMuted },
+            ]}
+          >
+            {i18n.t('player.multiView.addChannel')}
+          </Text>
+        </Pressable>
+      </View>
+
+      {bannerCopy !== null && banner !== null ? (
+        <View
+          testID={`multiview-banner-${banner.kind}`}
+          style={[
+            styles.banner,
+            {
+              backgroundColor: theme.colors.bgElevated,
+              borderColor:
+                bannerCopy.tone === 'danger' ? theme.colors.liveColor : theme.colors.accent,
+              borderRadius: theme.radius.card,
+            },
+            webBackdropBlur(14),
+          ]}
+        >
+          <Icon
+            name="warning"
+            size={18}
+            color={bannerCopy.tone === 'danger' ? theme.colors.liveColor : theme.colors.accent}
+          />
+          <View style={styles.bannerCopy}>
+            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
+              {bannerCopy.title}
+            </Text>
+            {bannerCopy.body !== undefined ? (
+              <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+                {bannerCopy.body}
+              </Text>
+            ) : null}
+          </View>
+          <IconButton
+            testID="multiview-banner-dismiss"
+            icon="close"
+            size={32}
+            accessibilityLabel={i18n.t('player.close')}
+            focusable={!isTv}
+            onPress={session.dismissBanner}
+          />
+        </View>
+      ) : null}
+
+      <View testID="multiview-grid" style={styles.grid}>
+        <View style={styles.gridRow}>
+          {row1Items.map((tile, idx) => (
+            <MultiViewTileCard
+              key={tile.tileId}
+              tile={tile}
+              index={idx}
+              openedEngine={session.getTileEngine(tile.tileId)}
+              isActiveAudio={state.activeAudioTileId === tile.tileId}
+              isTv={isTv}
+              tvFocused={isTv && clampedFocus === idx}
+              i18n={i18n}
+              onSelectAudio={session.selectAudioTile}
+              onRequestReplace={(id) => setPickerMode({ kind: 'replace', tileId: id })}
+              onRemove={(id) => {
+                void session.removeTile(id);
+              }}
+            />
+          ))}
+          {emptyInRow1 ? (
+            <Pressable
+              testID="multiview-empty-slot"
+              accessibilityRole="button"
+              accessibilityLabel={i18n.t('player.multiView.emptySlot')}
+              focusable={!isTv}
+              onPress={() => setPickerMode({ kind: 'add' })}
+              style={[
+                styles.emptySlot,
+                pointer,
+                {
+                  backgroundColor: theme.colors.bgSurface,
+                  borderColor:
+                    isTv && clampedFocus === row1Items.length
+                      ? theme.colors.focusRingColor
+                      : theme.colors.glassBorder,
+                  borderWidth:
+                    isTv && clampedFocus === row1Items.length ? theme.focus.ringWidth : 1,
+                  borderRadius: theme.radius.card,
+                },
+              ]}
+            >
+              <Icon name="plus" size={24} color={theme.colors.textSecondary} />
+              <Text style={[theme.typography.title, { color: theme.colors.textSecondary }]}>
+                {i18n.t('player.multiView.emptySlot')}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {grid.rows === 2 ? (
+          <View style={styles.gridRow}>
+            {row2Items.map((tile, offset) => {
+              const idx = 2 + offset;
+              return (
+                <MultiViewTileCard
+                  key={tile.tileId}
+                  tile={tile}
+                  index={idx}
+                  openedEngine={session.getTileEngine(tile.tileId)}
+                  isActiveAudio={state.activeAudioTileId === tile.tileId}
+                  isTv={isTv}
+                  tvFocused={isTv && clampedFocus === idx}
+                  i18n={i18n}
+                  onSelectAudio={session.selectAudioTile}
+                  onRequestReplace={(id) => setPickerMode({ kind: 'replace', tileId: id })}
+                  onRemove={(id) => {
+                    void session.removeTile(id);
+                  }}
+                />
+              );
+            })}
+            {emptyInRow2 ? (
+              <Pressable
+                testID="multiview-empty-slot"
+                accessibilityRole="button"
+                accessibilityLabel={i18n.t('player.multiView.emptySlot')}
+                focusable={!isTv}
+                onPress={() => setPickerMode({ kind: 'add' })}
+                style={[
+                  styles.emptySlot,
+                  pointer,
+                  {
+                    backgroundColor: theme.colors.bgSurface,
+                    borderColor:
+                      isTv && clampedFocus === state.tiles.length
+                        ? theme.colors.focusRingColor
+                        : theme.colors.glassBorder,
+                    borderWidth:
+                      isTv && clampedFocus === state.tiles.length ? theme.focus.ringWidth : 1,
+                    borderRadius: theme.radius.card,
+                  },
+                ]}
+              >
+                <Icon name="plus" size={24} color={theme.colors.textSecondary} />
+                <Text style={[theme.typography.title, { color: theme.colors.textSecondary }]}>
+                  {i18n.t('player.multiView.emptySlot')}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+
+      <MultiViewChannelPicker
+        visible={pickerMode !== null}
+        title={
+          pickerMode?.kind === 'replace'
+            ? i18n.t('player.multiView.replaceChannel')
+            : i18n.t('player.multiView.addChannel')
+        }
+        catalog={catalog}
+        sources={sources}
+        excludeItemKeys={excludeItemKeys}
+        isTv={isTv}
+        i18n={i18n}
+        onSelect={handlePickerSelect}
+        onClose={() => setPickerMode(null)}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    gap: 10,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  flex1: { flex: 1 },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  addLabel: {
+    fontWeight: '600',
+  },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  bannerCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  grid: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 6,
+  },
+  gridRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  emptySlot: {
+    flex: 1,
+    aspectRatio: 16 / 9,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+});

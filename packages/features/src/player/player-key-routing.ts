@@ -114,6 +114,11 @@ export interface PlayerControlsParams {
   previewChannelActive?: boolean | undefined;
   onConfirmPreviewChannel?: (() => void) | undefined;
   onCancelPreviewChannel?: (() => void) | undefined;
+  onMinimizeToMiniPlayer?: (() => void) | undefined;
+  onEnterPip?: (() => void) | undefined;
+  onEnterMultiView?: (() => void) | undefined;
+  onPopoutPlayer?: (() => void) | undefined;
+  tvBackMinimizesLive?: boolean | undefined;
   /** When `true`, suspends player remote/keyboard shortcuts while a root overlay is open. */
   externalOverlayOpen?: boolean | undefined;
 }
@@ -160,6 +165,10 @@ export function readSettingsMenuOptionsFromControls(p: PlayerControlsParams, can
     hasTimeDisplay: p.onCycleTimeDisplayMode !== undefined,
     hasInfo: canOpenInfo,
     hasAlwaysOnTop: p.onToggleAlwaysOnTop !== undefined,
+    hasMiniPlayer: p.onMinimizeToMiniPlayer !== undefined,
+    hasPip: p.onEnterPip !== undefined,
+    hasMultiView: p.onEnterMultiView !== undefined,
+    hasPopout: p.onPopoutPlayer !== undefined,
   };
 }
 
@@ -198,6 +207,10 @@ export interface OverlayKeyRouteDeps {
   readonly sleepTimerMinutes?: number;
   readonly hasTimeDisplay?: boolean;
   readonly hasAlwaysOnTop?: boolean;
+  readonly hasMiniPlayer?: boolean;
+  readonly hasPip?: boolean;
+  readonly hasMultiView?: boolean;
+  readonly hasPopout?: boolean;
   readonly playbackSpeed: number;
   readonly state: PlayerOverlayLive;
   readonly service: PlaybackService | null;
@@ -216,6 +229,10 @@ export interface OverlayKeyRouteDeps {
   readonly toggleAudioNormalization?: () => void;
   readonly toggleAutoSubtitlesOnSkipBack?: () => void;
   readonly toggleAutoPlayNextEpisode?: () => void;
+  readonly onMinimizeToMiniPlayer?: (() => void) | undefined;
+  readonly onEnterPip?: (() => void) | undefined;
+  readonly onEnterMultiView?: (() => void) | undefined;
+  readonly onPopoutPlayer?: (() => void) | undefined;
   readonly onChannelListMove?: (delta: 1 | -1) => void;
   readonly onChannelListSwitchTab?: ((dir: -1 | 1) => void) | undefined;
   readonly onChannelListSelect?: () => void;
@@ -483,6 +500,10 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       hasTimeDisplay: d.hasTimeDisplay === true,
       hasInfo: s.canOpenInfo,
       hasAlwaysOnTop: d.hasAlwaysOnTop === true,
+      hasMiniPlayer: d.hasMiniPlayer === true,
+      hasPip: d.hasPip === true,
+      hasMultiView: d.hasMultiView === true,
+      hasPopout: d.hasPopout === true,
     });
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'close') d.closeSettings();
@@ -496,7 +517,19 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     else if (intent?.kind === 'toggleAudioNormalization') d.toggleAudioNormalization?.();
     else if (intent?.kind === 'toggleAutoSubtitlesOnSkipBack') d.toggleAutoSubtitlesOnSkipBack?.();
     else if (intent?.kind === 'toggleAutoPlayNextEpisode') d.toggleAutoPlayNextEpisode?.();
-    else if (intent?.kind === 'toggleStats') d.toggleStats();
+    else if (intent?.kind === 'minimizeToMiniPlayer') {
+      d.closeSettings();
+      d.onMinimizeToMiniPlayer?.();
+    } else if (intent?.kind === 'enterPip') {
+      d.closeSettings();
+      d.onEnterPip?.();
+    } else if (intent?.kind === 'enterMultiView') {
+      d.closeSettings();
+      d.onEnterMultiView?.();
+    } else if (intent?.kind === 'popoutPlayer') {
+      d.closeSettings();
+      d.onPopoutPlayer?.();
+    } else if (intent?.kind === 'toggleStats') d.toggleStats();
     else if (intent?.kind === 'audio') {
       if (d.selectAudio !== undefined) d.selectAudio(intent.id);
       else d.service?.selectAudioTrack(intent.id);

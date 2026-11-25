@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, sharedTexture } from 'electron';
 import { createArtworkBridge } from './artwork-bridge.ts';
 import { createCatalogBridge } from './catalog-bridge.ts';
-import { isGateMode } from './gate-flag.ts';
+import { isGateMode, parsePresenterArg } from './gate-flag.ts';
 import { createLanPairingBridge } from './lan-pairing-bridge.ts';
 import { createPlayerBridge } from './player-bridge.ts';
 import { createSourcesBridge } from './sources-bridge.ts';
@@ -17,5 +17,6 @@ contextBridge.exposeInMainWorld(
     sources: createSourcesBridge(ipcRenderer),
     lanPairing: createLanPairingBridge(ipcRenderer),
     gate: isGateMode(process.argv),
+    presenter: parsePresenterArg(process.argv),
   }),
 );

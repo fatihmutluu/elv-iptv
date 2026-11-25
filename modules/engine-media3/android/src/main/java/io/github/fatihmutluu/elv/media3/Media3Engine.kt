@@ -54,22 +54,24 @@ class Media3Engine : SharedObject {
 
   private val assOverlay: AssOverlayBridge
 
-  constructor(context: Context, appContext: AppContext, onDisposed: (Media3Engine) -> Unit) : super(appContext) {
+  constructor(
+    context: Context, appContext: AppContext,
+    options: MultiViewEngineOptions = MultiViewEngineOptions(), onDisposed: (Media3Engine) -> Unit,
+  ) : super(appContext) {
     this.hasAppContext = true
     this.onDisposed = onDisposed
     this.assOverlay = AssOverlayBridge()
-    initEngine(context)
+    initEngine(context, options)
   }
 
   internal constructor(
-    context: Context,
-    onDisposed: (Media3Engine) -> Unit = {},
-    assOverlay: AssOverlayBridge = AssOverlayBridge(),
+    context: Context, onDisposed: (Media3Engine) -> Unit = {},
+    assOverlay: AssOverlayBridge = AssOverlayBridge(), options: MultiViewEngineOptions = MultiViewEngineOptions(),
   ) : super() {
     this.hasAppContext = false
     this.onDisposed = onDisposed
     this.assOverlay = assOverlay
-    initEngine(context)
+    initEngine(context, options)
   }
 
   private val thread = HandlerThread("ElvMedia3").apply { start() }
@@ -125,7 +127,7 @@ class Media3Engine : SharedObject {
     override fun onIsPlayingChanged(isPlaying: Boolean) {
       val current = player ?: return
       if (request != null && fence.acceptsPlayer(current)) {
-        mediaSessionController.updatePlayingState(isPlaying)
+        if (handleAudioFocus) mediaSessionController.updatePlayingState(isPlaying)
         if (isPlaying) {
           applyResolvedSubtitleCues(current)
         } else {
@@ -153,6 +155,10 @@ class Media3Engine : SharedObject {
   private var playerStreamKind: StreamKind = StreamKind.VOD
   private var playerBufferPreset: BufferPreset = BufferPreset.AUTO
   private var playerDecoderMode: VideoDecoderMode = VideoDecoderMode.AUTO
+  private var handleAudioFocus: Boolean = true
+  private var multiViewTileCount: Int = MIN_MULTIVIEW_TILES
+  private var playerHandleAudioFocus: Boolean = true
+  private var playerMultiViewTileCount: Int = MIN_MULTIVIEW_TILES
   private var currentSpeed: Float = PlaybackSpeedPolicy.DEFAULT_SPEED
   private var pitchLock: Boolean = true
   private var audioFallbackAttempted = false
@@ -224,7 +230,7 @@ class Media3Engine : SharedObject {
 
   fun play(attempt: Int) = postInEpoch(attempt) {
     player?.play()
-    if (request != null) mediaSessionController.onPlaybackActive()
+    if (request != null && handleAudioFocus) mediaSessionController.onPlaybackActive()
   }
   fun pause(attempt: Int) = postInEpoch(attempt) { player?.pause() }
 
@@ -269,9 +275,8 @@ class Media3Engine : SharedObject {
   }
 
   /** Enables Media3's scrubbing mode on VOD streams only; reset unconditionally on stop/load/retry/recreate (#222). */
-  fun setScrubbing(attempt: Int, scrubbing: Boolean) = postInEpoch(attempt) {
-    player?.let { it.isScrubbingModeEnabled = scrubbing && request?.live == false }
-  }
+  fun setScrubbing(attempt: Int, scrubbing: Boolean) =
+    postInEpoch(attempt) { player?.let { it.isScrubbingModeEnabled = scrubbing && request?.live == false } }
 
   /** Applies clamped `[0.25, 4.0]` playback speed on VOD streams only with current [pitchLock] (#264). */
   fun setSpeed(attempt: Int, rate: Double) = postInEpoch(attempt) {
@@ -283,19 +288,26 @@ class Media3Engine : SharedObject {
   /** Updates pitch-lock preference and re-applies [PlaybackParameters] immediately while VOD is active (#264). */
   fun setPitchLock(locked: Boolean) = post {
     pitchLock = locked
-    if (request?.live == false) {
-      player?.playbackParameters = PlaybackSpeedPolicy.parameters(currentSpeed, pitchLock)
-    }
+    if (request?.live == false) player?.playbackParameters = PlaybackSpeedPolicy.parameters(currentSpeed, pitchLock)
   }
 
   /** Updates Android lock-screen / Bluetooth `MediaSession` metadata and track-stepping state (#412). */
-  internal fun setMediaMetadata(payload: MediaSessionMetadataPayload?) = post {
-    mediaSessionController.setMediaMetadata(payload)
-  }
+  internal fun setMediaMetadata(payload: MediaSessionMetadataPayload?) = post { mediaSessionController.setMediaMetadata(payload) }
 
   /** Enables or disables opt-in background audio playback across task removal (#412). */
-  fun setBackgroundAudioEnabled(enabled: Boolean) = post {
-    mediaSessionController.setBackgroundAudioEnabled(enabled)
+  fun setBackgroundAudioEnabled(enabled: Boolean) = post { mediaSessionController.setBackgroundAudioEnabled(enabled) }
+
+  /** Configures Multi-View audio focus ownership and tile-count buffer scaling (`#34`, `#221`). */
+  fun configureMultiView(handleAudioFocus: Boolean, tileCount: Int) = post {
+    this.handleAudioFocus = handleAudioFocus
+    this.multiViewTileCount = clampMultiViewTileCount(tileCount)
+    player?.volume = if (handleAudioFocus) 1f else 0f
+    if (!handleAudioFocus) mediaSessionController.onPlaybackStopped()
+    if (player != null && request == null &&
+      (playerHandleAudioFocus != this.handleAudioFocus || playerMultiViewTileCount != this.multiViewTileCount)
+    ) {
+      replacePlayer(playerSoftwareAudio, playerPreferHevc, playerStreamKind, playerBufferPreset, playerDecoderMode)
+    }
   }
 
   /** Configures stereo loudness boost in dB via [AudioEffectsController] (multichannel-safe, #260). */
@@ -336,9 +348,7 @@ class Media3Engine : SharedObject {
   internal fun setSubtitleStyle(style: SubtitleStyleConfig?) = post { surfaces.onSubtitleStyle(style) }
 
   /** Shifts audio timing relative to video in milliseconds (`[-30_000, 30_000]`) without buffer reallocation (#203, #59). */
-  fun setAudioDelay(attempt: Int, delayMs: Long) = postInEpoch(attempt) {
-    audioDelayUs.set(syncDelayMsToUs(delayMs))
-  }
+  fun setAudioDelay(attempt: Int, delayMs: Long) = postInEpoch(attempt) { audioDelayUs.set(syncDelayMsToUs(delayMs)) }
 
   /** Shifts subtitle cue timing in milliseconds (`[-30_000, 30_000]`) without flushing buffered cues (#203, #59). */
   fun setSubtitleDelay(attempt: Int, delayMs: Long) = postInEpoch(attempt) {
@@ -348,9 +358,7 @@ class Media3Engine : SharedObject {
   }
 
   /** Constrains or selects an adaptive video rendition ID, or restores automatic ABR when [id] is `null` (#59). */
-  fun selectVideoQuality(attempt: Int, id: String?) = postInEpoch(attempt) {
-    tracksBridge.selectVideoQuality(player, id)
-  }
+  fun selectVideoQuality(attempt: Int, id: String?) = postInEpoch(attempt) { tracksBridge.selectVideoQuality(player, id) }
 
   fun stop(attempt: Int) {
     val epoch = commandFence.recordStop(attempt) ?: return
@@ -575,7 +583,9 @@ class Media3Engine : SharedObject {
   private fun beginGeneration() { generation += 1; gate.beginMedia(generation) }
   private fun tearDownTimeShiftCache() { activeTimeShiftBuffer?.close(); activeTimeShiftBuffer = null; activeTimeShiftTracker = null }
 
-  private fun initEngine(context: Context) {
+  private fun initEngine(context: Context, options: MultiViewEngineOptions = MultiViewEngineOptions()) {
+    handleAudioFocus = options.handleAudioFocus
+    multiViewTileCount = clampMultiViewTileCount(options.multiViewTileCount)
     appContextRef = context.applicationContext ?: context
     externalSubLoader = ExternalSubtitleLoader(context = appContextRef)
     val profile = readDeviceMemoryProfile(context)
@@ -664,7 +674,8 @@ class Media3Engine : SharedObject {
     val terminal = existing != null && (existing.playbackState == Player.STATE_ENDED || existing.playerError != null)
     val rebuild = forceRebuild || existing == null || terminal || playerSoftwareAudio != next.softwareAudio ||
       playerPreferHevc != next.preferHevcOverDolbyVision || playerStreamKind != streamKind ||
-      playerBufferPreset != bufferPreset || playerDecoderMode != decoderMode
+      playerBufferPreset != bufferPreset || playerDecoderMode != decoderMode ||
+      playerHandleAudioFocus != handleAudioFocus || playerMultiViewTileCount != multiViewTileCount
     if (rebuild) {
       pendingRebuildDeferred = false
       replacePlayer(next.softwareAudio, next.preferHevcOverDolbyVision, streamKind, bufferPreset, decoderMode)
@@ -711,7 +722,7 @@ class Media3Engine : SharedObject {
     if (positionMs == null) current.setMediaSource(source, true) else current.setMediaSource(source, positionMs)
     current.playWhenReady = true
     current.prepare()
-    mediaSessionController.onPlaybackActive()
+    if (handleAudioFocus) mediaSessionController.onPlaybackActive()
   }
 
   private fun buildPlayer(
@@ -720,18 +731,21 @@ class Media3Engine : SharedObject {
   ): ExoPlayer {
     playerSoftwareAudio = softwareAudio; playerPreferHevc = preferHevc
     playerStreamKind = streamKind; playerBufferPreset = bufferPreset; playerDecoderMode = decoderMode
+    playerHandleAudioFocus = handleAudioFocus; playerMultiViewTileCount = multiViewTileCount
     return playerFactory.build(
       softwareAudio = softwareAudio, preferHevcOverDolbyVision = preferHevc,
       live = streamKind != StreamKind.VOD, streamKind = streamKind,
       bufferPreset = bufferPreset, decoderMode = decoderMode,
+      handleAudioFocus = handleAudioFocus, multiViewTileCount = multiViewTileCount,
     ).also { built ->
+      built.volume = if (handleAudioFocus) 1f else 0f
       built.addListener(reporter); built.addAnalyticsListener(reporter); built.addListener(pictures)
       built.playbackParameters =
         if (streamKind == StreamKind.VOD) PlaybackSpeedPolicy.parameters(currentSpeed, pitchLock) else PlaybackParameters.DEFAULT
       audioEffects.onAudioSessionIdChanged(built.audioSessionId)
       surfaces.attachToNewPlayer(built, ::sendSurfaceChange)
       surfaces.onAssOverlayHandle(assOverlay.activeHandle)
-      mediaSessionController.onPlayerChanged(built)
+      if (handleAudioFocus) mediaSessionController.onPlayerChanged(built)
     }
   }
 

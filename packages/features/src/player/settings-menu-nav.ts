@@ -56,6 +56,10 @@ export type SettingsRootItem =
   | 'audioNormalization'
   | 'autoSubtitlesOnSkipBack'
   | 'autoPlayNextEpisode'
+  | 'miniPlayer'
+  | 'pip'
+  | 'multiView'
+  | 'popout'
   | 'stats';
 
 /** Stepper actions shown inside Audio/Subtitle delay sub-views (`0` = Reset, `#59`). */
@@ -139,6 +143,10 @@ export interface SettingsMenuOptions {
   readonly hasTimeDisplay?: boolean;
   readonly hasInfo?: boolean;
   readonly hasAlwaysOnTop?: boolean;
+  readonly hasMiniPlayer?: boolean;
+  readonly hasPip?: boolean;
+  readonly hasMultiView?: boolean;
+  readonly hasPopout?: boolean;
 }
 
 /** Builds ordered root Player Settings rows from a {@link SettingsMenuOptions} bag. */
@@ -165,6 +173,10 @@ function settingsRootItemsFromOptions(options?: SettingsMenuOptions): readonly S
   if (options?.hasAudioNormalization === true) items.push('audioNormalization');
   if (options?.hasAutoSubtitlesOnSkipBack === true) items.push('autoSubtitlesOnSkipBack');
   if (options?.hasAutoPlayNextEpisode === true) items.push('autoPlayNextEpisode');
+  if (options?.hasMiniPlayer === true) items.push('miniPlayer');
+  if (options?.hasPip === true) items.push('pip');
+  if (options?.hasMultiView === true) items.push('multiView');
+  if (options?.hasPopout === true) items.push('popout');
   items.push('stats');
   return items;
 }
@@ -203,6 +215,10 @@ export type SettingsMenuIntent =
   | { readonly kind: 'toggleAudioNormalization' }
   | { readonly kind: 'toggleAutoSubtitlesOnSkipBack' }
   | { readonly kind: 'toggleAutoPlayNextEpisode' }
+  | { readonly kind: 'minimizeToMiniPlayer' }
+  | { readonly kind: 'enterPip' }
+  | { readonly kind: 'enterMultiView' }
+  | { readonly kind: 'popoutPlayer' }
   | { readonly kind: 'toggleStats' }
   | { readonly kind: 'audio'; readonly id: string }
   | { readonly kind: 'audioDelay'; readonly deltaMs: number; readonly reset?: boolean }
@@ -589,6 +605,10 @@ export function routeSettingsMenuKey(
       if (item === 'audioNormalization') return { kind: 'toggleAudioNormalization' };
       if (item === 'autoSubtitlesOnSkipBack') return { kind: 'toggleAutoSubtitlesOnSkipBack' };
       if (item === 'autoPlayNextEpisode') return { kind: 'toggleAutoPlayNextEpisode' };
+      if (item === 'miniPlayer') return { kind: 'minimizeToMiniPlayer' };
+      if (item === 'pip') return { kind: 'enterPip' };
+      if (item === 'multiView') return { kind: 'enterMultiView' };
+      if (item === 'popout') return { kind: 'popoutPlayer' };
       if (item === 'stats') return { kind: 'toggleStats' };
       return item !== undefined ? openSubView(item, tracks, options) : null;
     }

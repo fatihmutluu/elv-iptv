@@ -4,6 +4,7 @@ import { enFailoverNetworkMessages } from './en-failover-network';
 import { enProfilesMessages } from './en-profiles';
 import { enSubtitlesSuiteMessages } from './en-subtitles-suite';
 import { enWaveF5bMessages } from './en-wave-f5b';
+import { enWaveF6Messages } from './en-wave-f6';
 
 /** English (source) message catalog. Every other locale must define the exact same keys. */
 export const enMessages = {
@@ -699,6 +700,7 @@ export const enMessages = {
   ...enSubtitlesSuiteMessages,
   ...enFailoverNetworkMessages,
   ...enWaveF5bMessages,
+  ...enWaveF6Messages,
 } as const;
 
 /** Valid message identifier across all supported locales. */

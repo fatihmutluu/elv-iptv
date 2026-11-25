@@ -24,6 +24,7 @@ class ElvEngineMedia3Module : Module() {
   private val orientationController = SmartOrientationController()
   private val lifecycleLock = Any()
   private var standbyMonitor: StandbyMonitor? = null
+  private var thermalMonitor: ThermalMonitor? = null
   private var detachSafeAreaObserver: (() -> Unit)? = null
   private var observedInsetsActivity: WeakReference<Activity>? = null
   private var detachPipObserver: (() -> Unit)? = null
@@ -33,10 +34,35 @@ class ElvEngineMedia3Module : Module() {
   override fun definition() = ModuleDefinition {
     Name("ElvEngineMedia3")
 
-    Events("onStandbyChanged", "onSafeAreaInsetsChanged", "onPictureInPictureChanged")
+    Events("onStandbyChanged", "onSafeAreaInsetsChanged", "onPictureInPictureChanged", "onThermalStateChanged")
 
     Function("uptimeMs") {
       SystemClock.uptimeMillis().toDouble()
+    }
+
+    Function("getThermalState") {
+      val active = synchronized(lifecycleLock) { thermalMonitor }
+      if (active != null) {
+        active.currentThermalState()
+      } else {
+        val context = appContext.reactContext?.applicationContext ?: return@Function THERMAL_STATE_NOMINAL
+        readCurrentThermalState(context)
+      }
+    }
+
+    Function("getDeviceMemoryInfo") {
+      val context = appContext.reactContext?.applicationContext
+        ?: return@Function mapOf(
+          "isLowRamDevice" to true,
+          "totalMemBytes" to 0.0,
+          "lowRam" to true,
+        )
+      val profile = readDeviceMemoryProfile(context)
+      mapOf(
+        "isLowRamDevice" to profile.isLowRamDevice,
+        "totalMemBytes" to profile.totalMemBytes.toDouble(),
+        "lowRam" to profile.lowRam,
+      )
     }
 
     Function("setOrientationLocked") { locked: Boolean ->
@@ -65,9 +91,38 @@ class ElvEngineMedia3Module : Module() {
       isActivityStatusBarFullscreen(activity)
     }
 
-    Function("enterPictureInPicture") { aspectWidth: Double?, aspectHeight: Double? ->
+    Function("enterPictureInPicture") {
+        aspectWidth: Double?,
+        aspectHeight: Double?,
+        sourceLeft: Double?,
+        sourceTop: Double?,
+        sourceRight: Double?,
+        sourceBottom: Double?,
+      ->
       val activity = appContext.currentActivity ?: return@Function false
-      enterPictureInPicture(activity, aspectWidth, aspectHeight)
+      enterPictureInPicture(activity, aspectWidth, aspectHeight, sourceLeft, sourceTop, sourceRight, sourceBottom)
+    }
+
+    Function("setAutoEnterPictureInPicture") {
+        enabled: Boolean,
+        aspectWidth: Double?,
+        aspectHeight: Double?,
+        sourceLeft: Double?,
+        sourceTop: Double?,
+        sourceRight: Double?,
+        sourceBottom: Double?,
+      ->
+      val activity = appContext.currentActivity ?: return@Function false
+      setAutoEnterPictureInPicture(
+        activity = activity,
+        enabled = enabled,
+        aspectWidth = aspectWidth,
+        aspectHeight = aspectHeight,
+        sourceLeft = sourceLeft,
+        sourceTop = sourceTop,
+        sourceRight = sourceRight,
+        sourceBottom = sourceBottom,
+      )
     }
 
     Function("notifyPictureInPictureModeChanged") { inPip: Boolean ->
@@ -135,24 +190,29 @@ class ElvEngineMedia3Module : Module() {
 
     OnCreate {
       startStandbyMonitor()
+      startThermalMonitor()
       attachSafeAreaObserver()
       attachPipObserver()
     }
 
     OnActivityEntersForeground {
       startStandbyMonitor()
+      startThermalMonitor()
       attachSafeAreaObserver()
       attachPipObserver()
     }
 
     OnDestroy {
       val monitorToStop: StandbyMonitor?
+      val thermalToStop: ThermalMonitor?
       val insetsToDetach: (() -> Unit)?
       val pipToDetach: (() -> Unit)?
       val pickToCancel: Promise?
       synchronized(lifecycleLock) {
         monitorToStop = standbyMonitor
         standbyMonitor = null
+        thermalToStop = thermalMonitor
+        thermalMonitor = null
         insetsToDetach = detachSafeAreaObserver
         detachSafeAreaObserver = null
         observedInsetsActivity = null
@@ -164,6 +224,7 @@ class ElvEngineMedia3Module : Module() {
       }
       pickToCancel?.resolve(null)
       monitorToStop?.stop()
+      thermalToStop?.stop()
       insetsToDetach?.invoke()
       pipToDetach?.invoke()
       orientationController.dispose()
@@ -172,9 +233,10 @@ class ElvEngineMedia3Module : Module() {
     }
 
     Class("Engine", Media3Engine::class) {
-      Constructor {
+      Constructor { options: Map<String, Any?>? ->
         val context = appContext.reactContext?.applicationContext ?: throw Exceptions.ReactContextLost()
-        Media3Engine(context, appContext) { engines.remove(it) }.also { engines.add(it) }
+        val parsed = parseMultiViewEngineOptions(options)
+        Media3Engine(context, appContext, parsed) { engines.remove(it) }.also { engines.add(it) }
       }
 
       Events("onEngineEvent", "onRemoteMediaAction")
@@ -212,6 +274,10 @@ class ElvEngineMedia3Module : Module() {
 
       Function("setBackgroundAudioEnabled") { engine: Media3Engine, enabled: Boolean ->
         engine.setBackgroundAudioEnabled(enabled)
+      }
+
+      Function("configureMultiView") { engine: Media3Engine, handleAudioFocus: Boolean, tileCount: Int ->
+        engine.configureMultiView(handleAudioFocus, tileCount)
       }
 
       Function("setAudioBoostDb") { engine: Media3Engine, attempt: Int, db: Double ->
@@ -299,6 +365,20 @@ class ElvEngineMedia3Module : Module() {
           sendEvent("onStandbyChanged", mapOf("standby" to standby))
         }
       }.also { standbyMonitor = it }
+    }
+    monitor.start()
+  }
+
+  private fun startThermalMonitor() {
+    val context = appContext.reactContext?.applicationContext ?: return
+    val monitor = synchronized(lifecycleLock) {
+      if (thermalMonitor != null) return
+      val weakModule = WeakReference(this)
+      ThermalMonitor(context) { state ->
+        weakModule.get()?.runCatching {
+          sendEvent("onThermalStateChanged", mapOf("state" to state))
+        }
+      }.also { thermalMonitor = it }
     }
     monitor.start()
   }

@@ -566,4 +566,29 @@ describe('createDesktopEngine', () => {
     ]);
     for (const msg of f.sent) expect(isPlayerCommandMessage(msg)).toBe(true);
   });
+
+  it('forwards Multi-View open options, setMuted, and setPrimary (#34)', async () => {
+    const f = fakeBridge();
+    const setPrimary = vi.fn(async (_id: string) => undefined);
+    f.bridge.setPrimary = setPrimary;
+
+    const engine = await createDesktopEngine(f.bridge, () => 0, {
+      replaceExisting: false,
+      primary: false,
+    });
+    expect(f.bridge.open).toHaveBeenCalledWith({ replaceExisting: false, primary: false });
+
+    engine.setMuted(true);
+    engine.setMuted(false);
+    engine.setPrimary();
+    expect(f.sent).toEqual([
+      { engineId: 'e1', command: { name: 'setMuted', muted: true } },
+      { engineId: 'e1', command: { name: 'setMuted', muted: false } },
+    ]);
+    expect(setPrimary).toHaveBeenCalledWith('e1');
+
+    engine.release();
+    engine.setPrimary();
+    expect(setPrimary).toHaveBeenCalledTimes(1);
+  });
 });

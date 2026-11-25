@@ -50,6 +50,30 @@ export interface AndroidMediaMetadata {
 /** Remote media transport action emitted from Android lock-screen / Bluetooth controls (`#412`). */
 export type AndroidRemoteMediaAction = 'next' | 'previous' | 'stop';
 
+/** Normalized Android thermal pressure state from `PowerManager` (`#232`). */
+export type AndroidThermalState = 'nominal' | 'fair' | 'serious' | 'critical';
+
+/** Snapshot of Android device memory capabilities from `ActivityManager` (`#232`). */
+export interface AndroidDeviceMemoryInfo {
+  readonly isLowRamDevice: boolean;
+  readonly totalMemBytes: number;
+  readonly lowRam: boolean;
+}
+
+/** Optional video bounds in screen pixels forwarded to Android PiP `sourceRectHint` (`#34`). */
+export interface AndroidPipSourceRect {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/** Optional Multi-View configuration passed when creating or updating a Media3 engine (`#34`, `#221`). */
+export interface Media3EngineOptions {
+  readonly handleAudioFocus?: boolean;
+  readonly multiViewTileCount?: number;
+}
+
 interface RawPickedPlaylistFile {
   name?: unknown;
   bytes?: unknown;
@@ -57,12 +81,23 @@ interface RawPickedPlaylistFile {
 }
 
 const ZERO_INSETS: AndroidSafeAreaInsets = Object.freeze({ top: 0, right: 0, bottom: 0, left: 0 });
+const DEFAULT_MEMORY_INFO: AndroidDeviceMemoryInfo = Object.freeze({
+  isLowRamDevice: false,
+  totalMemBytes: 0,
+  lowRam: false,
+});
 
 interface RawInsets {
   top?: unknown;
   right?: unknown;
   bottom?: unknown;
   left?: unknown;
+}
+
+interface RawMemoryInfo {
+  isLowRamDevice?: unknown;
+  totalMemBytes?: unknown;
+  lowRam?: unknown;
 }
 
 interface Media3NativeEngineHandle extends NativeEngineHandle {
@@ -75,6 +110,7 @@ interface Media3NativeEngineHandle extends NativeEngineHandle {
   setSubtitleStyle?(style: Media3SubtitleStyle): void;
   setMediaMetadata?(metadata: AndroidMediaMetadata | null): void;
   setBackgroundAudioEnabled?(enabled: boolean): void;
+  configureMultiView?(handleAudioFocus: boolean, tileCount: number): void;
   addListener: {
     (eventName: 'onEngineEvent', listener: (event: EngineEvent) => void): { remove(): void };
     (eventName: 'onRemoteMediaAction', listener: (payload: unknown) => void): { remove(): void };
@@ -82,17 +118,42 @@ interface Media3NativeEngineHandle extends NativeEngineHandle {
 }
 
 interface NativeEngineModule {
-  Engine: new () => Media3NativeEngineHandle;
+  Engine: new (options?: {
+    handleAudioFocus: boolean;
+    multiViewTileCount: number;
+  }) => Media3NativeEngineHandle;
   uptimeMs(): number;
+  getThermalState?(): unknown;
+  getDeviceMemoryInfo?(): RawMemoryInfo | null | undefined;
   setOrientationLocked?(locked: boolean): void;
   requestTemporaryOrientation?(landscape: boolean): void;
   applyShortEdgesCutoutMode?(): void;
   getSafeAreaInsets?(): RawInsets | null | undefined;
-  enterPictureInPicture?(aspectWidth?: number, aspectHeight?: number): boolean;
+  enterPictureInPicture?(
+    aspectWidth?: number,
+    aspectHeight?: number,
+    sourceLeft?: number,
+    sourceTop?: number,
+    sourceRight?: number,
+    sourceBottom?: number,
+  ): boolean;
+  setAutoEnterPictureInPicture?(
+    enabled: boolean,
+    aspectWidth?: number,
+    aspectHeight?: number,
+    sourceLeft?: number,
+    sourceTop?: number,
+    sourceRight?: number,
+    sourceBottom?: number,
+  ): boolean;
   readClipboardText?(): Promise<string | null | undefined>;
   pickPlaylistFile?(): Promise<RawPickedPlaylistFile | null | undefined>;
   addListener?(
-    eventName: 'onStandbyChanged' | 'onSafeAreaInsetsChanged' | 'onPictureInPictureChanged',
+    eventName:
+      | 'onStandbyChanged'
+      | 'onSafeAreaInsetsChanged'
+      | 'onPictureInPictureChanged'
+      | 'onThermalStateChanged',
     listener: (payload: unknown) => void,
   ): { remove(): void };
 }
@@ -130,6 +191,66 @@ function parseRemoteMediaAction(payload: unknown): AndroidRemoteMediaAction | nu
   return candidate === 'next' || candidate === 'previous' || candidate === 'stop'
     ? candidate
     : null;
+}
+
+function parseThermalState(payload: unknown): AndroidThermalState | null {
+  const candidate =
+    typeof payload === 'string'
+      ? payload
+      : typeof payload === 'object' && payload !== null && 'state' in payload
+        ? (payload as Record<string, unknown>).state
+        : null;
+  return candidate === 'nominal' ||
+    candidate === 'fair' ||
+    candidate === 'serious' ||
+    candidate === 'critical'
+    ? candidate
+    : null;
+}
+
+function normalizeDeviceMemoryInfo(raw: unknown): AndroidDeviceMemoryInfo {
+  if (typeof raw !== 'object' || raw === null) return DEFAULT_MEMORY_INFO;
+  const r = raw as RawMemoryInfo;
+  return {
+    isLowRamDevice: Boolean(r.isLowRamDevice),
+    totalMemBytes: finiteNonNeg(r.totalMemBytes),
+    lowRam: Boolean(r.lowRam),
+  };
+}
+
+function normalizePipSourceRect(
+  rect: AndroidPipSourceRect | undefined,
+): AndroidPipSourceRect | null {
+  if (rect === undefined) return null;
+  const { left, top, right, bottom } = rect;
+  if (
+    !Number.isFinite(left) ||
+    !Number.isFinite(top) ||
+    !Number.isFinite(right) ||
+    !Number.isFinite(bottom)
+  ) {
+    return null;
+  }
+  if (left < 0 || top < 0 || right <= left || bottom <= top) return null;
+  return { left, top, right, bottom };
+}
+
+function clampMultiViewTileCount(tileCount: number | undefined): number {
+  if (typeof tileCount !== 'number' || !Number.isFinite(tileCount)) return 1;
+  const rounded = Math.trunc(tileCount);
+  if (rounded < 1) return 1;
+  if (rounded > 4) return 4;
+  return rounded;
+}
+
+function normalizeEngineOptions(options: Media3EngineOptions): {
+  handleAudioFocus: boolean;
+  multiViewTileCount: number;
+} {
+  return {
+    handleAudioFocus: options.handleAudioFocus ?? true,
+    multiViewTileCount: clampMultiViewTileCount(options.multiViewTileCount),
+  };
 }
 
 const B64_TABLE = new Int16Array(128).fill(-1);
@@ -207,8 +328,11 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
 /** The native shared object behind each live engine this module created; `Media3Surface` binds its view to it. */
 const handles = new WeakMap<PlayerEngine, Media3NativeEngineHandle>();
 
-function wrap(module: NativeEngineModule): PlayerEngine {
-  const native = new module.Engine();
+function wrap(module: NativeEngineModule, options?: Media3EngineOptions): PlayerEngine {
+  const native =
+    options === undefined
+      ? new module.Engine()
+      : new module.Engine(normalizeEngineOptions(options));
   let pendingNetwork: Media3NetworkLoadOptions = {};
   const nativeBridgeTarget = new Proxy(native, {
     get(target, prop) {
@@ -292,10 +416,19 @@ const nativeModule = requireOptionalNativeModule<NativeEngineModule>('ElvEngineM
 /**
  * Creates a Media3 player engine (Android) implementing the `PlayerEngine` port, or returns null where the native
  * module is absent (iOS, web). Each call creates its own native player on its own playback thread; call `release()`
- * when the player screen goes away.
+ * when the player screen goes away. Pass `options` for Multi-View secondary tiles (`handleAudioFocus: false`,
+ * `multiViewTileCount: 2..4`).
  */
-export function createMedia3Engine(): PlayerEngine | null {
-  return nativeModule === null ? null : wrap(nativeModule);
+export function createMedia3Engine(options?: Media3EngineOptions): PlayerEngine | null {
+  return nativeModule === null ? null : wrap(nativeModule, options);
+}
+
+/** Updates Multi-View audio focus ownership and tile-count buffer scaling on a live Media3 engine (`#34`, `#221`). */
+export function configureMedia3MultiView(engine: PlayerEngine, options: Media3EngineOptions): void {
+  const normalized = normalizeEngineOptions(options);
+  handles
+    .get(engine)
+    ?.configureMultiView?.(normalized.handleAudioFocus, normalized.multiViewTileCount);
 }
 
 /** Toggles VOD audio pitch preservation on a live Media3 engine created by {@link createMedia3Engine} (`#264`). */
@@ -376,9 +509,78 @@ export function subscribeAndroidSafeAreaInsets(
   };
 }
 
-/** Requests Android Picture-in-Picture with aspect ratio clamped to Android's safe bounds (`#266`). */
-export function enterAndroidPictureInPicture(aspectWidth?: number, aspectHeight?: number): boolean {
+/** Requests Android Picture-in-Picture with aspect ratio clamped to Android's safe bounds (`#266`, `#34`). */
+export function enterAndroidPictureInPicture(
+  aspectWidth?: number,
+  aspectHeight?: number,
+  sourceRect?: AndroidPipSourceRect,
+): boolean {
+  const validRect = normalizePipSourceRect(sourceRect);
+  if (validRect !== null) {
+    return Boolean(
+      nativeModule?.enterPictureInPicture?.(
+        aspectWidth,
+        aspectHeight,
+        validRect.left,
+        validRect.top,
+        validRect.right,
+        validRect.bottom,
+      ),
+    );
+  }
   return Boolean(nativeModule?.enterPictureInPicture?.(aspectWidth, aspectHeight));
+}
+
+/**
+ * Configures Android 12+ (API 31+) automatic PiP entry (`setAutoEnterEnabled`) with clamped aspect ratio and
+ * optional `sourceRectHint` on non-TV devices (`#34`). Returns `false` when unsupported or absent.
+ */
+export function setAndroidAutoEnterPictureInPicture(
+  enabled: boolean,
+  aspectWidth?: number,
+  aspectHeight?: number,
+  sourceRect?: AndroidPipSourceRect,
+): boolean {
+  const validRect = normalizePipSourceRect(sourceRect);
+  if (validRect !== null) {
+    return Boolean(
+      nativeModule?.setAutoEnterPictureInPicture?.(
+        Boolean(enabled),
+        aspectWidth,
+        aspectHeight,
+        validRect.left,
+        validRect.top,
+        validRect.right,
+        validRect.bottom,
+      ),
+    );
+  }
+  return Boolean(
+    nativeModule?.setAutoEnterPictureInPicture?.(Boolean(enabled), aspectWidth, aspectHeight),
+  );
+}
+
+/** Reads the current normalized Android thermal pressure level (`#232`), defaulting to `'nominal'` when absent. */
+export function getAndroidThermalState(): AndroidThermalState {
+  return parseThermalState(nativeModule?.getThermalState?.()) ?? 'nominal';
+}
+
+/** Subscribes to live Android `PowerManager` thermal state transitions (`#232`). */
+export function subscribeAndroidThermalState(
+  listener: (state: AndroidThermalState) => void,
+): () => void {
+  const sub = nativeModule?.addListener?.('onThermalStateChanged', (payload) => {
+    const parsed = parseThermalState(payload);
+    if (parsed !== null) listener(parsed);
+  });
+  return () => {
+    sub?.remove();
+  };
+}
+
+/** Reads Android `ActivityManager` RAM tier metadata for Multi-View admission gating (`#232`). */
+export function getAndroidDeviceMemoryInfo(): AndroidDeviceMemoryInfo {
+  return normalizeDeviceMemoryInfo(nativeModule?.getDeviceMemoryInfo?.());
 }
 
 /** Subscribes to Android Picture-in-Picture mode transitions (`#266`). */

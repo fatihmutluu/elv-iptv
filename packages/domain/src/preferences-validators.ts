@@ -144,6 +144,8 @@ export interface ExtendedPreferencesFields {
   readonly windowAspectRatioLock: boolean;
   readonly backgroundAudioPlayback: boolean;
   readonly vodEnrichmentEnabled?: boolean;
+  readonly minimizeToTray: boolean;
+  readonly autoEnterPip: boolean;
   readonly subtitleStyle: SubtitleStyleConfig;
 }
 
@@ -230,6 +232,10 @@ export function clampOverscan(value: number): number {
   const clamped = Math.min(MAX_PREF_OVERSCAN, Math.max(MIN_PREF_OVERSCAN, value));
   const rounded = Math.round(clamped * 100) / 100;
   return rounded === 0 ? 0 : rounded;
+}
+
+function boolOr(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 function normalizeOverscan(value: unknown, fallback: number): number {
@@ -431,18 +437,15 @@ export function parseExtendedPreferences(
     preferredSubtitleLang: subtitle.first,
     preferredAudioLanguages: audio.list,
     preferredSubtitleLanguages: subtitle.list,
-    preferDefaultAudioTrack:
-      typeof parsed.preferDefaultAudioTrack === 'boolean'
-        ? parsed.preferDefaultAudioTrack
-        : defaults.preferDefaultAudioTrack,
-    preferHevcOverDolbyVision:
-      typeof parsed.preferHevcOverDolbyVision === 'boolean'
-        ? parsed.preferHevcOverDolbyVision
-        : defaults.preferHevcOverDolbyVision,
-    filterSdhSubtitles:
-      typeof parsed.filterSdhSubtitles === 'boolean'
-        ? parsed.filterSdhSubtitles
-        : defaults.filterSdhSubtitles,
+    preferDefaultAudioTrack: boolOr(
+      parsed.preferDefaultAudioTrack,
+      defaults.preferDefaultAudioTrack,
+    ),
+    preferHevcOverDolbyVision: boolOr(
+      parsed.preferHevcOverDolbyVision,
+      defaults.preferHevcOverDolbyVision,
+    ),
+    filterSdhSubtitles: boolOr(parsed.filterSdhSubtitles, defaults.filterSdhSubtitles),
     subtitleMode: normalizeSubtitleModePref(parsed.subtitleMode, defaults.subtitleMode),
     seekStepSec: isSeekStepSecPref(parsed.seekStepSec) ? parsed.seekStepSec : defaults.seekStepSec,
     defaultResizeMode: isDefaultResizeModePref(parsed.defaultResizeMode)
@@ -470,10 +473,8 @@ export function parseExtendedPreferences(
     epgRowDensity: isEpgRowDensity(parsed.epgRowDensity)
       ? parsed.epgRowDensity
       : defaults.epgRowDensity,
-    epgGenreTints:
-      typeof parsed.epgGenreTints === 'boolean' ? parsed.epgGenreTints : defaults.epgGenreTints,
-    epgShowClock:
-      typeof parsed.epgShowClock === 'boolean' ? parsed.epgShowClock : defaults.epgShowClock,
+    epgGenreTints: boolOr(parsed.epgGenreTints, defaults.epgGenreTints),
+    epgShowClock: boolOr(parsed.epgShowClock, defaults.epgShowClock),
     defaultLiveMode: isDefaultLiveModePref(parsed.defaultLiveMode)
       ? parsed.defaultLiveMode
       : defaults.defaultLiveMode,
@@ -489,37 +490,19 @@ export function parseExtendedPreferences(
     logoBackdropMode: isLogoBackdropModePref(parsed.logoBackdropMode)
       ? parsed.logoBackdropMode
       : defaults.logoBackdropMode,
-    showSourceBadges:
-      typeof parsed.showSourceBadges === 'boolean'
-        ? parsed.showSourceBadges
-        : defaults.showSourceBadges,
-    liveOkTwoStepPreview:
-      typeof parsed.liveOkTwoStepPreview === 'boolean'
-        ? parsed.liveOkTwoStepPreview
-        : defaults.liveOkTwoStepPreview,
-    cleanChannelTitles:
-      typeof parsed.cleanChannelTitles === 'boolean'
-        ? parsed.cleanChannelTitles
-        : defaults.cleanChannelTitles,
+    showSourceBadges: boolOr(parsed.showSourceBadges, defaults.showSourceBadges),
+    liveOkTwoStepPreview: boolOr(parsed.liveOkTwoStepPreview, defaults.liveOkTwoStepPreview),
+    cleanChannelTitles: boolOr(parsed.cleanChannelTitles, defaults.cleanChannelTitles),
     artworkCacheLimitMb: isArtworkCacheLimitMbPref(parsed.artworkCacheLimitMb)
       ? parsed.artworkCacheLimitMb
       : defaults.artworkCacheLimitMb,
-    confirmExitOnBack:
-      typeof parsed.confirmExitOnBack === 'boolean'
-        ? parsed.confirmExitOnBack
-        : defaults.confirmExitOnBack,
+    confirmExitOnBack: boolOr(parsed.confirmExitOnBack, defaults.confirmExitOnBack),
     preferredAudioDevice: normalizeAudioDevice(parsed.preferredAudioDevice),
     androidDecoderMode: isAndroidDecoderMode(parsed.androidDecoderMode)
       ? parsed.androidDecoderMode
       : defaults.androidDecoderMode,
-    collapseLiveVariants:
-      typeof parsed.collapseLiveVariants === 'boolean'
-        ? parsed.collapseLiveVariants
-        : defaults.collapseLiveVariants,
-    groupVodVersions:
-      typeof parsed.groupVodVersions === 'boolean'
-        ? parsed.groupVodVersions
-        : defaults.groupVodVersions,
+    collapseLiveVariants: boolOr(parsed.collapseLiveVariants, defaults.collapseLiveVariants),
+    groupVodVersions: boolOr(parsed.groupVodVersions, defaults.groupVodVersions),
     uiFontFamily: isAccessibilityFontFamily(parsed.uiFontFamily)
       ? parsed.uiFontFamily
       : defaults.uiFontFamily,
@@ -532,23 +515,19 @@ export function parseExtendedPreferences(
     deinterlaceMode: isDeinterlaceMode(parsed.deinterlaceMode)
       ? parsed.deinterlaceMode
       : defaults.deinterlaceMode,
-    pitchLock: typeof parsed.pitchLock === 'boolean' ? parsed.pitchLock : defaults.pitchLock,
-    audioNormalization:
-      typeof parsed.audioNormalization === 'boolean'
-        ? parsed.audioNormalization
-        : defaults.audioNormalization,
-    windowAspectRatioLock:
-      typeof parsed.windowAspectRatioLock === 'boolean'
-        ? parsed.windowAspectRatioLock
-        : defaults.windowAspectRatioLock,
-    backgroundAudioPlayback:
-      typeof parsed.backgroundAudioPlayback === 'boolean'
-        ? parsed.backgroundAudioPlayback
-        : defaults.backgroundAudioPlayback,
-    vodEnrichmentEnabled:
-      typeof parsed.vodEnrichmentEnabled === 'boolean'
-        ? parsed.vodEnrichmentEnabled
-        : (defaults.vodEnrichmentEnabled ?? false),
+    pitchLock: boolOr(parsed.pitchLock, defaults.pitchLock),
+    audioNormalization: boolOr(parsed.audioNormalization, defaults.audioNormalization),
+    windowAspectRatioLock: boolOr(parsed.windowAspectRatioLock, defaults.windowAspectRatioLock),
+    backgroundAudioPlayback: boolOr(
+      parsed.backgroundAudioPlayback,
+      defaults.backgroundAudioPlayback,
+    ),
+    vodEnrichmentEnabled: boolOr(
+      parsed.vodEnrichmentEnabled,
+      defaults.vodEnrichmentEnabled ?? false,
+    ),
+    minimizeToTray: boolOr(parsed.minimizeToTray, defaults.minimizeToTray),
+    autoEnterPip: boolOr(parsed.autoEnterPip, defaults.autoEnterPip),
     subtitleStyle: normalizeSubtitleStyle(parsed.subtitleStyle),
   };
 }
@@ -652,6 +631,8 @@ export function serializeExtendedPreferences(
     windowAspectRatioLock: Boolean(snapshot.windowAspectRatioLock),
     backgroundAudioPlayback: Boolean(snapshot.backgroundAudioPlayback),
     vodEnrichmentEnabled: Boolean(snapshot.vodEnrichmentEnabled),
+    minimizeToTray: Boolean(snapshot.minimizeToTray),
+    autoEnterPip: Boolean(snapshot.autoEnterPip),
     ...(subtitleStyleEquals(subtitleStyle, DEFAULT_SUBTITLE_STYLE) ? {} : { subtitleStyle }),
   };
 }
@@ -776,23 +757,13 @@ export function mergeExtendedPreferences(
     deinterlaceMode: isDeinterlaceMode(patch.deinterlaceMode)
       ? patch.deinterlaceMode
       : base.deinterlaceMode,
-    pitchLock: typeof patch.pitchLock === 'boolean' ? patch.pitchLock : base.pitchLock,
-    audioNormalization:
-      typeof patch.audioNormalization === 'boolean'
-        ? patch.audioNormalization
-        : base.audioNormalization,
-    windowAspectRatioLock:
-      typeof patch.windowAspectRatioLock === 'boolean'
-        ? patch.windowAspectRatioLock
-        : base.windowAspectRatioLock,
-    backgroundAudioPlayback:
-      typeof patch.backgroundAudioPlayback === 'boolean'
-        ? patch.backgroundAudioPlayback
-        : base.backgroundAudioPlayback,
-    vodEnrichmentEnabled:
-      typeof patch.vodEnrichmentEnabled === 'boolean'
-        ? patch.vodEnrichmentEnabled
-        : (base.vodEnrichmentEnabled ?? false),
+    pitchLock: boolOr(patch.pitchLock, base.pitchLock),
+    audioNormalization: boolOr(patch.audioNormalization, base.audioNormalization),
+    windowAspectRatioLock: boolOr(patch.windowAspectRatioLock, base.windowAspectRatioLock),
+    backgroundAudioPlayback: boolOr(patch.backgroundAudioPlayback, base.backgroundAudioPlayback),
+    vodEnrichmentEnabled: boolOr(patch.vodEnrichmentEnabled, base.vodEnrichmentEnabled ?? false),
+    minimizeToTray: boolOr(patch.minimizeToTray, base.minimizeToTray),
+    autoEnterPip: boolOr(patch.autoEnterPip, base.autoEnterPip),
     subtitleStyle: mergeSubtitleStyle(base.subtitleStyle, patch.subtitleStyle),
   };
 }

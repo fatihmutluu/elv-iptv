@@ -50,6 +50,11 @@ const EXPECTED_ICON_NAMES: readonly IconName[] = [
   'chapters',
   'skipPrev',
   'skipNext',
+  'pip',
+  'multiview',
+  'miniplayer',
+  'popout',
+  'dock',
 ];
 
 const FILLED_ICONS: ReadonlySet<IconName> = new Set([
@@ -173,5 +178,15 @@ describe('ICON_PATHS', () => {
     expect(ICON_PATHS.skipNext.filled).toBe(true);
     expect(ICON_PATHS.skipPrev.shapes.length).toBeGreaterThanOrEqual(2);
     expect(ICON_PATHS.skipNext.shapes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('defines crisp Wave F6 stroke icons for pip, multiview, miniplayer, popout, and dock', () => {
+    for (const name of ['pip', 'multiview', 'miniplayer', 'popout', 'dock'] as const) {
+      const spec = ICON_PATHS[name];
+      expect(spec.viewBox).toBe('0 0 24 24');
+      expect(spec.filled).toBeUndefined();
+      expect(spec.shapes.length).toBeGreaterThanOrEqual(2);
+    }
+    expect(ICON_PATHS.multiview.shapes).toHaveLength(4);
   });
 });

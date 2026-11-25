@@ -3,6 +3,7 @@ import {
   PLAYER_CHANNELS,
   type PlayerBridge,
   type PlayerEventMessage,
+  type PlayerOpenOptions,
   type PlayerOpenReply,
   type PlayerRemoteMediaActionMessage,
   type PlayerUiMessage,
@@ -83,13 +84,19 @@ export function createPlayerBridge(
   }
 
   const bridge: PlayerBridge = {
-    async open() {
-      const reply = await ipc.invoke(PLAYER_CHANNELS.open);
+    async open(options?: PlayerOpenOptions) {
+      const reply =
+        options === undefined
+          ? await ipc.invoke(PLAYER_CHANNELS.open)
+          : await ipc.invoke(PLAYER_CHANNELS.open, options);
       if (!isOpenReply(reply)) throw new Error('player:open returned an unexpected reply');
       return { engineId: reply.engineId, mainNowMs: reply.mainNowMs };
     },
     async close(engineId) {
       await ipc.invoke(PLAYER_CHANNELS.close, engineId);
+    },
+    async setPrimary(engineId) {
+      await ipc.invoke(PLAYER_CHANNELS.setPrimary, engineId);
     },
     send(message) {
       ipc.send(PLAYER_CHANNELS.command, message);
