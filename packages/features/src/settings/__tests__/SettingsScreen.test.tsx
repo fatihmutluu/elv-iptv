@@ -189,7 +189,7 @@ describe('SettingsScreen', () => {
     );
     expect(screen.getByTestId('settings-about-card')).toBeTruthy();
     expect(screen.getByTestId('settings-about-license-badge')).toHaveTextContent(
-      'GPL-3.0-only · LGPL media engines',
+      'Proprietary · LGPL media engines',
     );
     expect(screen.getByTestId('mock-licenses-pane')).toBeTruthy();
   });

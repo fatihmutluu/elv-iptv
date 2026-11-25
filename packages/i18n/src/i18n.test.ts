@@ -219,8 +219,8 @@ describe('@elv/i18n', () => {
       ['settings.title', 'Settings', 'Ayarlar'],
       [
         'settings.subtitle',
-        'Customize appearance, manage sources, and view open-source licenses.',
-        'Görünümü özelleştirin, kaynakları yönetin ve açık kaynak lisanslarını inceleyin.',
+        'Customize appearance, manage sources, and view third-party notices.',
+        'Görünümü özelleştirin, kaynakları yönetin ve üçüncü taraf bildirimlerini inceleyin.',
       ],
       ['settings.section.appearance', 'Appearance', 'Görünüm'],
       ['settings.section.sources', 'Sources', 'Kaynaklar'],
@@ -292,13 +292,13 @@ describe('@elv/i18n', () => {
       ['settings.about.title', 'About ELV IPTV', 'ELV IPTV Hakkında'],
       [
         'settings.about.licenseBadge',
-        'GPL-3.0-only · LGPL media engines',
-        'GPL-3.0-only · LGPL medya motorları',
+        'Proprietary · LGPL media engines',
+        'Tescilli · LGPL medya motorları',
       ],
       [
         'settings.about.statement',
-        'ELV IPTV is an open-source player and ships no media content. Native playback engines dynamically link LGPL libraries. Provider credentials remain encrypted on-device and never enter the catalog database.',
-        'ELV IPTV açık kaynaklı bir oynatıcıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz.',
+        'ELV IPTV is an independent IPTV player and ships no media content. Native playback engines dynamically link LGPL libraries. Provider credentials remain encrypted on-device and never enter the catalog database.',
+        'ELV IPTV bağımsız bir IPTV oynatıcısıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz.',
       ],
     ];
     for (const [id, expectedEn, expectedTr] of cases) {

@@ -33,6 +33,7 @@ web-build/
 # Electron
 out/
 release/
+!docs/release/
 
 # Test and tool output
 coverage/

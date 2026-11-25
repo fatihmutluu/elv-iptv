@@ -28,6 +28,8 @@ export interface CanvasEndpointDeps {
   mkdtempSync?: (prefix: string) => string;
   chmodSync?: (path: string, mode: number) => void;
   rmSync?: (path: string, options: { recursive: boolean; force: boolean }) => void;
+  /** Override for Electron's `process.mas` flag (Mac App Store App Sandbox forbids `/tmp`). */
+  isMas?: boolean;
 }
 
 const MAX_UNIX_SOCK_PATH = 96;
@@ -72,8 +74,10 @@ export function loadIoSurfaceAddon(
 
 /**
  * Creates a per-presenter canvas IPC endpoint: an exclusive Windows named pipe on `'win32'`,
- * or a Unix domain socket inside a `0o700` private temporary directory on POSIX platforms
- * (falling back to `'/tmp'` whenever `tmpdir()` would exceed macOS's 104-byte `SUN_LEN`).
+ * or a Unix domain socket inside a `0o700` private temporary directory on POSIX platforms.
+ * Outside Mac App Store builds, falls back to `'/tmp'` when `tmpdir()` would exceed macOS's
+ * 104-byte `SUN_LEN`; inside Mac App Store App Sandbox (`isMas`), stays inside the container
+ * `tmpdir()` using a compact prefix and throws rather than touching `'/tmp'`.
  */
 export function createCanvasEndpoint(
   platform: NodeJS.Platform,
@@ -90,14 +94,29 @@ export function createCanvasEndpoint(
   const makeTempDir = deps?.mkdtempSync ?? mkdtempSync;
   const chmod = deps?.chmodSync ?? chmodSync;
   const remove = deps?.rmSync ?? rmSync;
+  const isMas = deps?.isMas ?? Boolean((process as NodeJS.Process & { mas?: boolean }).mas);
 
   const candidateTmp = getTmpDir();
-  const baseDir =
+  let baseDir = candidateTmp;
+  let dirPrefix = 'elv-c-';
+  let sockName = 'c.sock';
+  if (
     Buffer.byteLength(join(candidateTmp, 'elv-c-XXXXXX', 'c.sock'), 'utf8') > MAX_UNIX_SOCK_PATH
-      ? '/tmp'
-      : candidateTmp;
-  const dir = makeTempDir(join(baseDir, 'elv-c-'));
-  const path = join(dir, 'c.sock');
+  ) {
+    if (isMas) {
+      if (Buffer.byteLength(join(candidateTmp, 'e-XXXXXX', 's'), 'utf8') > MAX_UNIX_SOCK_PATH) {
+        throw new Error(
+          `Cannot allocate Unix domain socket inside Mac App Store App Sandbox tmpdir: path exceeds ${MAX_UNIX_SOCK_PATH} UTF-8 bytes`,
+        );
+      }
+      dirPrefix = 'e-';
+      sockName = 's';
+    } else {
+      baseDir = '/tmp';
+    }
+  }
+  const dir = makeTempDir(join(baseDir, dirPrefix));
+  const path = join(dir, sockName);
   let cleaned = false;
 
   return {

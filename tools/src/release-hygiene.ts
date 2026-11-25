@@ -11,6 +11,12 @@ const DEV_KEY_PATTERN = /(?<![A-Za-z0-9_])DEV_[A-Z0-9]+(?:_[A-Z0-9]+)*/g;
 const GATE_FLAG_PATTERN = /(?:"gate"\s*:\s*true\b|\bgate\s*:\s*!0\b)/;
 const DEV_SEED_MARKER = 'elv.dev.seeded';
 const DEV_SEED_PAYLOAD_PATTERN = /(?:"seed"\s*:\s*\{|\bseed\s*:\s*\{\s*kind\s*:)/;
+const REQUIRED_APPLE_PRIVACY_APIS = [
+  { category: 'NSPrivacyAccessedAPICategoryUserDefaults', reason: 'CA92.1' },
+  { category: 'NSPrivacyAccessedAPICategoryFileTimestamp', reason: 'C617.1' },
+  { category: 'NSPrivacyAccessedAPICategorySystemBootTime', reason: '35F9.1' },
+  { category: 'NSPrivacyAccessedAPICategoryDiskSpace', reason: 'E174.1' },
+] as const;
 
 export interface ManifestCheckOptions {
   readonly tv?: boolean;
@@ -20,6 +26,7 @@ export interface ReleaseHygieneOptions {
   readonly gradleDeps?: readonly string[];
   readonly androidManifests?: readonly string[];
   readonly applePlists?: readonly string[];
+  readonly applePrivacyManifests?: readonly string[];
   readonly artifacts?: readonly string[];
   readonly tv?: boolean;
 }
@@ -107,6 +114,63 @@ export function checkAppleInfoPlist(plistXml: string): string[] {
   }
   if (!/<key>NSAllowsArbitraryLoads<\/key>\s*<true\s*\/>/.test(stripped)) {
     errors.push('Info.plist must declare NSAllowsArbitraryLoads = true (#12)');
+  }
+
+  return errors;
+}
+
+/** Checks Apple `PrivacyInfo.xcprivacy` XML for `NSPrivacyTracking = false` and all 4 Required Reason APIs (#486). */
+export function checkApplePrivacyManifest(privacyXml: string): string[] {
+  const errors: string[] = [];
+  const stripped = privacyXml.replace(/<!--[\s\S]*?-->/g, '');
+
+  if (!/<plist\b[^>]*>[\s\S]*<dict>[\s\S]*<\/dict>[\s\S]*<\/plist>/.test(stripped)) {
+    errors.push('PrivacyInfo.xcprivacy is empty or malformed XML plist');
+    return errors;
+  }
+
+  if (stripped.includes(DEV_PACKAGE_ID)) {
+    errors.push(`PrivacyInfo.xcprivacy references development identifier ${DEV_PACKAGE_ID}`);
+  }
+
+  if (/<key>NSPrivacyTracking<\/key>\s*<true\s*\/>/.test(stripped)) {
+    errors.push('PrivacyInfo.xcprivacy must declare NSPrivacyTracking = false (found true)');
+  } else if (!/<key>NSPrivacyTracking<\/key>\s*<false\s*\/>/.test(stripped)) {
+    errors.push('PrivacyInfo.xcprivacy must declare NSPrivacyTracking = false');
+  }
+
+  const declaredReasons = new Map<string, Set<string>>();
+  const leafDictPattern = /<dict>(?:(?!<dict>)[\s\S])*?<\/dict>/g;
+  for (const match of stripped.matchAll(leafDictPattern)) {
+    const dict = match[0];
+    const typeMatch = /<key>NSPrivacyAccessedAPIType<\/key>\s*<string>([^<]+)<\/string>/.exec(dict);
+    const rawCategory = typeMatch?.[1];
+    if (rawCategory === undefined) continue;
+    const category = rawCategory.trim();
+    const reasons = declaredReasons.get(category) ?? new Set<string>();
+    const arrayMatch =
+      /<key>NSPrivacyAccessedAPITypeReasons<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(dict);
+    const arrayBody = arrayMatch?.[1];
+    if (arrayBody !== undefined) {
+      for (const reasonMatch of arrayBody.matchAll(/<string>([^<]+)<\/string>/g)) {
+        const rawReason = reasonMatch[1];
+        if (rawReason !== undefined) reasons.add(rawReason.trim());
+      }
+    }
+    declaredReasons.set(category, reasons);
+  }
+
+  for (const { category, reason } of REQUIRED_APPLE_PRIVACY_APIS) {
+    const reasons = declaredReasons.get(category);
+    if (reasons === undefined) {
+      errors.push(
+        `PrivacyInfo.xcprivacy is missing Required Reason API category ${category} (${reason})`,
+      );
+    } else if (!reasons.has(reason)) {
+      errors.push(
+        `PrivacyInfo.xcprivacy category ${category} is missing required reason code ${reason}`,
+      );
+    }
   }
 
   return errors;
@@ -204,6 +268,16 @@ export function runReleaseHygiene(options: ReleaseHygieneOptions): ReleaseHygien
       continue;
     }
     for (const err of checkAppleInfoPlist(readFileSync(file, 'utf8'))) {
+      errors.push(`${file}: ${err}`);
+    }
+  }
+
+  for (const file of options.applePrivacyManifests ?? []) {
+    if (!existsSync(file)) {
+      errors.push(`missing PrivacyInfo.xcprivacy: ${file}`);
+      continue;
+    }
+    for (const err of checkApplePrivacyManifest(readFileSync(file, 'utf8'))) {
       errors.push(`${file}: ${err}`);
     }
   }

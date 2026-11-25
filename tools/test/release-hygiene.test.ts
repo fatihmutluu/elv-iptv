@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   checkAndroidManifest,
   checkAppleInfoPlist,
+  checkApplePrivacyManifest,
   checkGradleDependencies,
   checkReleaseArtifactBuffer,
   runReleaseHygiene,
@@ -52,6 +53,54 @@ const CLEAN_INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
     <key>NSAllowsArbitraryLoads</key>
     <true/>
   </dict>
+</dict>
+</plist>`;
+
+const CLEAN_PRIVACY_MANIFEST = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSPrivacyTracking</key>
+  <false/>
+  <key>NSPrivacyTrackingDomains</key>
+  <array/>
+  <key>NSPrivacyCollectedDataTypes</key>
+  <array/>
+  <key>NSPrivacyAccessedAPITypes</key>
+  <array>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>CA92.1</string>
+      </array>
+    </dict>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>C617.1</string>
+      </array>
+    </dict>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>35F9.1</string>
+      </array>
+    </dict>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>E174.1</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>`;
 
@@ -173,6 +222,60 @@ describe('checkAppleInfoPlist (#12)', () => {
   });
 });
 
+describe('checkApplePrivacyManifest (#486)', () => {
+  it('accepts a clean PrivacyInfo.xcprivacy with NSPrivacyTracking=false and all 4 Required Reason APIs', () => {
+    expect(checkApplePrivacyManifest(CLEAN_PRIVACY_MANIFEST)).toEqual([]);
+  });
+
+  it('rejects empty, malformed, or .dev-leaking privacy manifests', () => {
+    expect(checkApplePrivacyManifest('').join('\n')).toContain('PrivacyInfo.xcprivacy');
+    expect(checkApplePrivacyManifest('<not-a-plist/>').join('\n')).toContain(
+      'PrivacyInfo.xcprivacy',
+    );
+    const devLeak = CLEAN_PRIVACY_MANIFEST.replace(
+      '<array/>',
+      '<array><string>io.github.fatihmutluu.elviptv.dev</string></array>',
+    );
+    expect(checkApplePrivacyManifest(devLeak).join('\n')).toContain('.dev');
+  });
+
+  it('rejects NSPrivacyTracking = true or missing NSPrivacyTracking', () => {
+    const trackingTrue = CLEAN_PRIVACY_MANIFEST.replace(
+      '<key>NSPrivacyTracking</key>\n  <false/>',
+      '<key>NSPrivacyTracking</key>\n  <true/>',
+    );
+    const trackingMissing = CLEAN_PRIVACY_MANIFEST.replace(
+      '<key>NSPrivacyTracking</key>\n  <false/>',
+      '',
+    );
+    expect(checkApplePrivacyManifest(trackingTrue).join('\n')).toContain('NSPrivacyTracking');
+    expect(checkApplePrivacyManifest(trackingMissing).join('\n')).toContain('NSPrivacyTracking');
+  });
+
+  it.each([
+    ['NSPrivacyAccessedAPICategoryUserDefaults', 'CA92.1'],
+    ['NSPrivacyAccessedAPICategoryFileTimestamp', 'C617.1'],
+    ['NSPrivacyAccessedAPICategorySystemBootTime', '35F9.1'],
+    ['NSPrivacyAccessedAPICategoryDiskSpace', 'E174.1'],
+  ])('rejects missing category %s or wrong reason code (expected %s)', (category, reason) => {
+    const missingCategory = CLEAN_PRIVACY_MANIFEST.replace(category, 'NSPrivacyAccessedAPIOther');
+    expect(checkApplePrivacyManifest(missingCategory).join('\n')).toContain(category);
+
+    const wrongReason = CLEAN_PRIVACY_MANIFEST.replace(reason, 'XXXX.9');
+    const reasonErrors = checkApplePrivacyManifest(wrongReason).join('\n');
+    expect(reasonErrors).toContain(category);
+    expect(reasonErrors).toContain(reason);
+  });
+
+  it('rejects commented-out Required Reason API declarations', () => {
+    const commented = CLEAN_PRIVACY_MANIFEST.replace(
+      '<string>E174.1</string>',
+      '<!-- <string>E174.1</string> -->',
+    );
+    expect(checkApplePrivacyManifest(commented).join('\n')).toContain('E174.1');
+  });
+});
+
 describe('checkReleaseArtifactBuffer & runReleaseHygiene', () => {
   it('accepts clean JS bundles (__DEV__=false) and production app.config JSON', () => {
     const bundle = Buffer.from(
@@ -239,21 +342,25 @@ describe('checkReleaseArtifactBuffer & runReleaseHygiene', () => {
     const depsFile = join(dir, 'deps.txt');
     const manifestFile = join(dir, 'AndroidManifest.xml');
     const plistFile = join(dir, 'Info.plist');
+    const privacyFile = join(dir, 'PrivacyInfo.xcprivacy');
     const bundleDir = join(dir, 'bundle');
     rmSync(bundleDir, { recursive: true, force: true });
 
     writeFileSync(depsFile, CLEAN_GRADLE_DEPS, 'utf8');
     writeFileSync(manifestFile, CLEAN_TV_MANIFEST, 'utf8');
     writeFileSync(plistFile, CLEAN_INFO_PLIST, 'utf8');
+    writeFileSync(privacyFile, CLEAN_PRIVACY_MANIFEST, 'utf8');
 
     const missingResult = runReleaseHygiene({
       gradleDeps: [depsFile],
       androidManifests: [manifestFile],
       applePlists: [plistFile],
+      applePrivacyManifests: [join(dir, 'missing-PrivacyInfo.xcprivacy')],
       artifacts: [join(dir, 'does-not-exist.asar')],
       tv: true,
     });
     expect(missingResult.ok).toBe(false);
+    expect(missingResult.errors.join('\n')).toContain('missing PrivacyInfo.xcprivacy');
 
     const asarFile = join(dir, 'app.asar');
     writeFileSync(asarFile, 'HEADER{"files":{"index.js":{"size":24}}}var __DEV__=false;', 'utf8');
@@ -261,6 +368,7 @@ describe('checkReleaseArtifactBuffer & runReleaseHygiene', () => {
       gradleDeps: [depsFile],
       androidManifests: [manifestFile],
       applePlists: [plistFile],
+      applePrivacyManifests: [privacyFile],
       artifacts: [asarFile],
       tv: true,
     });

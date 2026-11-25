@@ -264,7 +264,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'ui.error.retry': 'Tekrar dene',
   'settings.title': 'Ayarlar',
   'settings.subtitle':
-    'Görünümü özelleştirin, kaynakları yönetin ve açık kaynak lisanslarını inceleyin.',
+    'Görünümü özelleştirin, kaynakları yönetin ve üçüncü taraf bildirimlerini inceleyin.',
   'settings.section.appearance': 'Görünüm',
   'settings.section.sources': 'Kaynaklar',
   'settings.section.licenses': 'Hakkında ve Lisanslar',
@@ -293,9 +293,9 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'settings.reduceMotion.description': 'Odak yakınlaştırmasını ve arayüz geçişlerini kapatır.',
   'settings.reset': 'Görünümü varsayılana sıfırla',
   'settings.about.title': 'ELV IPTV Hakkında',
-  'settings.about.licenseBadge': 'GPL-3.0-only · LGPL medya motorları',
+  'settings.about.licenseBadge': 'Tescilli · LGPL medya motorları',
   'settings.about.statement':
-    'ELV IPTV açık kaynaklı bir oynatıcıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz.',
+    'ELV IPTV bağımsız bir IPTV oynatıcısıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz.',
   'home.title': 'Ana Sayfa',
   'home.continueWatching': 'İzlemeye devam et',
   'home.onAirNow': 'Şu an yayında',

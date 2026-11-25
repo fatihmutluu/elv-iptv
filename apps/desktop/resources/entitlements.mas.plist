@@ -6,5 +6,14 @@
     <true/>
     <key>com.apple.security.network.client</key>
     <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <!-- Team ID prefix (e.g. TEAMID.io.github.fatihmutluu.elviptv) is substituted during Mac App Store release signing. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+      <string>io.github.fatihmutluu.elviptv</string>
+    </array>
   </dict>
 </plist>

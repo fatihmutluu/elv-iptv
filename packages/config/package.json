@@ -2,7 +2,7 @@
   "name": "@elv/config",
   "private": true,
   "version": "0.0.0",
-  "license": "GPL-3.0-only",
+  "license": "UNLICENSED",
   "type": "module",
   "exports": {
     "./tsconfig.base.json": "./tsconfig.base.json",

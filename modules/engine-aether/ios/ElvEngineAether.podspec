@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.name           = 'ElvEngineAether'
   s.version        = package['version']
   s.summary        = 'ELV IPTV Apple playback engine over AetherEngine'
-  s.license        = { :type => package['license'] }
+  s.license        = { :type => 'Proprietary', :text => 'Copyright (c) ELV IPTV. All rights reserved.' }
   s.author         = 'ELV IPTV'
   s.homepage       = 'https://github.com/fatihmutluu/elv-iptv'
   s.platforms      = { :ios => '18.0', :tvos => '18.0' }

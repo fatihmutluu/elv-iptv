@@ -1,12 +1,12 @@
 # ELV IPTV
 
-Free, open-source IPTV player for every screen — Android TV, Fire TV, Apple TV, Android, iPhone, iPad, macOS, Windows and Linux. Bring your own M3U or Xtream Codes playlist; no content included.
+Cross-platform IPTV player for every screen — Android TV, Fire TV, Apple TV, Android, iPhone, iPad, macOS, Windows and Linux. Bring your own M3U or Xtream Codes playlist; no content included.
 
 ## Mission
 
-Most IPTV viewers today face an unpleasant choice: pay \$30–\$40 per platform for closed apps, put up with dated or half-finished interfaces, or juggle completely different players across their TV, phone and computer.
+Most IPTV viewers today face an unpleasant choice: put up with dated or half-finished interfaces, or juggle completely different players across their TV, phone and computer.
 
-ELV IPTV is built openly with the community so everyone has a fast, rock-solid, complete IPTV player on every screen — free and open source. You bring your own M3U/M3U8 playlist (URL or file) or Xtream Codes source; the app works out of the box with no account required (an optional account later will only add end-to-end encrypted cross-device sync).
+ELV IPTV provides a single fast, rock-solid, complete IPTV player across TV, mobile, and desktop — distributed exclusively through official app stores. You bring your own M3U/M3U8 playlist (URL or file) or Xtream Codes source; the app works out of the box with no account required (an optional account later will only add end-to-end encrypted cross-device sync).
 
 ## What it is not
 
@@ -19,7 +19,7 @@ ELV IPTV is built openly with the community so everyone has a fast, rock-solid, 
 Development is priority-driven and tracked openly on the public [roadmap](https://github.com/users/fatihmutluu/projects/1) and [issues](https://github.com/fatihmutluu/elv-iptv/issues) using `priority:*` (`critical`, `high`, `medium`, `low`), 12 `cluster:*` workstream labels, and Parent Epics — without rigid version-bucket gates. Releases are cut whenever ready.
 
 - **Working today:** Cross-platform live TV, movies and series player across Android TV, Fire OS, Android, Apple TV, iPhone/iPad, Windows and macOS — Cinema Quietude UI/UX design system, M3U and Xtream import into on-device SQLite, instant 100k+ item navigation, sub-second warm channel switching, strict single-connection safety on 1-connection providers, stream fault recovery, live Favorites stage, VOD play/pause/seek/speed, multi-audio and subtitle track selection, and English + Turkish localization.
-- **Active backlog (by priority):** XMLTV electronic program guide (EPG) grid, Home screen continue watching & favorites sync, watch progress/resume, Turkish-aware FTS5 search, in-canvas desktop video overlays, playback & codec hardening, direct-download GitHub Releases pipeline, optional end-to-end encrypted cross-device sync, local profiles, catch-up, live time-shift, Stalker portals, parental controls, external subtitles & styling, remote key remapping, picture-in-picture & multi-view, official store launches, and Vega / Tizen / webOS targets.
+- **Active backlog (by priority):** XMLTV electronic program guide (EPG) grid, Home screen continue watching & favorites sync, watch progress/resume, Turkish-aware FTS5 search, in-canvas desktop video overlays, playback & codec hardening, official app store launches (Apple App Store, Mac App Store, Microsoft Store, Google Play, Amazon Appstore), optional end-to-end encrypted cross-device sync, local profiles, catch-up, live time-shift, Stalker portals, parental controls, external subtitles & styling, remote key remapping, picture-in-picture & multi-view, and Vega / Tizen / webOS targets.
 
 ## Platforms
 
@@ -37,7 +37,7 @@ Development is priority-driven and tracked openly on the public [roadmap](https:
 | Samsung Tizen | Web-TV app from the react-native-web bundle | Planned |
 | LG webOS | Web-TV app from the same bundle | Planned |
 
-Hardware that the project does not own is tested on emulators and simulators and marked "not verified on hardware". Once releases begin, GitHub Releases on [`fatihmutluu/elv-iptv`](https://github.com/fatihmutluu/elv-iptv/releases) and the official store listings named here will be the only authentic download sources.
+Hardware that the project does not own is tested on emulators and simulators and marked "not verified on hardware". Official store listings on the Apple App Store, Mac App Store, Microsoft Store, Google Play, and Amazon Appstore are the only authentic download sources.
 
 ## Pillars
 
@@ -48,16 +48,15 @@ In priority order:
 3. **Premium streaming-app UX.** One coherent experience across TV remote, touch, mouse and keyboard.
 4. **Built to be extended.** Clean pure-TypeScript architecture, strict layer boundaries, tests first for every change, and concise docs that both humans and AI coding agents can follow.
 
-## How to help
+## Feedback and bug reports
 
-Every kind of contribution moves the project forward:
+External code contributions are currently closed while ELV IPTV is proprietary (see [ADR 0016](docs/adr/0016-proprietary-store-only-distribution.md)), but product feedback and bug reports are welcome:
 
-- **Share ideas and missing workflows:** You do not need to write code to help. Opening a [feature request](https://github.com/fatihmutluu/elv-iptv/issues/new?template=feature_request.yml) about a workflow, shortcut or detail you loved in another player — or always wished existed — helps hugely (please describe the behavior itself without naming third-party apps or pasting real playlist URLs).
-- **Test and report bugs:** Try builds on real TV boxes, sticks, phones and desktops and file [bug reports](https://github.com/fatihmutluu/elv-iptv/issues/new?template=bug_report.yml) (always strip playlist URLs and credentials).
-- **Build features and fixes:** Browse open [issues](https://github.com/fatihmutluu/elv-iptv/issues) by priority (`priority:critical`, `priority:high`, `priority:medium`, `priority:low`), workstream cluster (`cluster:*`), or `help wanted` / `good first issue`, and read [CONTRIBUTING.md](CONTRIBUTING.md). The repository ships shared agent rules and skills (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/`, `.claude/`) so contributors using AI coding tools automatically follow the project's test-first workflow.
+- **Share ideas and missing workflows:** Open a [feature request](https://github.com/fatihmutluu/elv-iptv/issues/new?template=feature_request.yml) about a workflow, shortcut or detail you would like to see (please describe the behavior itself without naming third-party apps or pasting real playlist URLs).
+- **Report bugs:** File [bug reports](https://github.com/fatihmutluu/elv-iptv/issues/new?template=bug_report.yml) with your platform, OS version and reproduction steps (always strip playlist URLs and credentials).
 
-Contributions require signing the [CLA](CLA.md) on your first pull request. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md) and report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Full documentation is indexed in [docs/INDEX.md](docs/INDEX.md).
+Please follow the [Code of Conduct](CODE_OF_CONDUCT.md) and report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Full documentation is indexed in [docs/INDEX.md](docs/INDEX.md).
 
 ## License
 
-ELV IPTV is open source under the [GNU General Public License v3.0](LICENSE) (`GPL-3.0-only`). Contributions come under the [CLA](CLA.md), which allows the owner to relicense the project, including a commercial or store-specific release; every version released under GPL-3.0 stays available under GPL-3.0 forever. Third-party components keep their own licenses, and shipped builds dynamically link LGPL media libraries only.
+ELV IPTV is proprietary software — `Copyright (c) 2026 Fatih Mutlu. All Rights Reserved.` (see [LICENSE](LICENSE) and [ADR 0016](docs/adr/0016-proprietary-store-only-distribution.md)). Official builds are distributed exclusively through the Apple App Store, Mac App Store, Microsoft Store, Google Play, and Amazon Appstore. Third-party open-source dependencies retain their respective upstream licenses (listed offline in the in-app Third-Party Notices screen), and native media engines dynamically link LGPL libraries only. Prior versions explicitly released under GPL-3.0 remain available under that license as originally distributed; [CLA.md](CLA.md) is preserved as a historical record for prior contributions.

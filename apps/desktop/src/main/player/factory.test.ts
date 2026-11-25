@@ -250,6 +250,65 @@ describe('createEngineFor', () => {
     expect(mocks.spawnCalls[0]).toMatchObject({ executable: macFallbackRuntime.executable });
   });
 
+  it('falls back to own-window on darwin under Mac App Store sandbox (isMas: true) even when canvas artifacts exist', async () => {
+    const uiEvents: PlayerUiEvent[] = [];
+    const macRuntime = {
+      executable: '/res/mpv/ELV IPTV Player.app/Contents/MacOS/mpv',
+      canvasExecutable: '/res/mpv/ELV IPTV Player.app/Contents/MacOS/elv-mpv',
+      ioSurfaceAddon: '/res/mpv/elv-iosurface.node',
+      inputConf: '/res/mpv-input.conf',
+    };
+    const engine = await createEngineFor(fakeOwner, {
+      runtime: macRuntime,
+      platform: 'darwin',
+      isMas: true,
+      loadMode: 'replace',
+      pidFile: '/tmp/mpv-pids.json',
+      engineId: 'engine-mas-1',
+      readaheadStore: stubReadaheadStore,
+      onUi: (ev) => uiEvents.push(ev),
+    });
+
+    expect(engine.presenterKind).toBe('own-window');
+    expect(mocks.presenterCalls).toEqual([
+      {
+        kind: 'own-window',
+        owner: fakeOwner,
+        platform: 'darwin',
+        opts: { engineId: 'engine-mas-1' },
+      },
+    ]);
+    const baseArgs = mocks.engineDeps[0]?.baseArgs ?? [];
+    expect(baseArgs).toContain('--force-window=immediate');
+    expect(baseArgs).not.toContain('--vo=libmpv');
+    expect(uiEvents).toEqual([{ type: 'presenter', kind: 'own-window', coversArea: false }]);
+
+    await mocks.engineDeps[0]?.spawn(['--arg'], new AbortController().signal);
+    expect(mocks.spawnCalls[0]).toMatchObject({ executable: macRuntime.executable });
+  });
+
+  it('keeps canvas presenter on darwin when isMas is explicitly false and canvas artifacts exist', async () => {
+    const macRuntime = {
+      executable: '/res/mpv/ELV IPTV Player.app/Contents/MacOS/mpv',
+      canvasExecutable: '/res/mpv/ELV IPTV Player.app/Contents/MacOS/elv-mpv',
+      ioSurfaceAddon: '/res/mpv/elv-iosurface.node',
+      inputConf: '/res/mpv-input.conf',
+    };
+    const engine = await createEngineFor(fakeOwner, {
+      runtime: macRuntime,
+      platform: 'darwin',
+      isMas: false,
+      loadMode: 'replace',
+      pidFile: '/tmp/mpv-pids.json',
+      engineId: 'engine-mac-non-mas',
+      readaheadStore: stubReadaheadStore,
+      onUi: () => undefined,
+    });
+
+    expect(engine.presenterKind).toBe('canvas');
+    expect(mocks.presenterCalls[0]?.kind).toBe('canvas');
+  });
+
   it('forwards owner enter-full-screen and leave-full-screen events as fullscreen-changed UI and detaches on release (#394)', async () => {
     const listeners = new Map<string, Set<() => void>>();
     let fullScreen = true;

@@ -32,6 +32,8 @@ export interface EngineFactoryDeps {
   readaheadStore?: ReadaheadTierStore;
   /** Optional macOS `[NSScreen screensHaveSeparateSpaces]` query for multi-monitor fullscreen guard (`#301`). */
   screensHaveSeparateSpaces?: () => boolean;
+  /** Override for Electron's `process.mas` flag (Mac App Store App Sandbox blocks cross-process `IOSurfaceLookup`). */
+  isMas?: boolean;
   /** Presentation events for the window's renderer. */
   onUi(event: PlayerUiEvent): void;
 }
@@ -44,11 +46,12 @@ export async function createEngineFor(
   owner: BrowserWindow,
   deps: EngineFactoryDeps,
 ): Promise<MpvEngine> {
+  const isMas = deps.isMas ?? Boolean((process as NodeJS.Process & { mas?: boolean }).mas);
   const requestedKind = choosePresenter(deps.platform, deps.presenterOverride);
   const kind: PresenterKind =
     deps.platform === 'darwin' &&
     requestedKind === 'canvas' &&
-    (!deps.runtime.canvasExecutable || !deps.runtime.ioSurfaceAddon)
+    (isMas || !deps.runtime.canvasExecutable || !deps.runtime.ioSurfaceAddon)
       ? 'own-window'
       : requestedKind;
   const ioSurfaceAddon = kind === 'canvas' ? deps.runtime.ioSurfaceAddon : undefined;

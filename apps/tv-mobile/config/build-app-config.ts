@@ -181,11 +181,34 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
     ios: {
       bundleIdentifier: id,
       supportsTablet: true,
+      privacyManifests: {
+        NSPrivacyTracking: false,
+        NSPrivacyTrackingDomains: [],
+        NSPrivacyCollectedDataTypes: [],
+        NSPrivacyAccessedAPITypes: [
+          {
+            NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults',
+            NSPrivacyAccessedAPITypeReasons: ['CA92.1'],
+          },
+          {
+            NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryFileTimestamp',
+            NSPrivacyAccessedAPITypeReasons: ['C617.1'],
+          },
+          {
+            NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategorySystemBootTime',
+            NSPrivacyAccessedAPITypeReasons: ['35F9.1'],
+          },
+          {
+            NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryDiskSpace',
+            NSPrivacyAccessedAPITypeReasons: ['E174.1'],
+          },
+        ],
+      },
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSBonjourServices: ['_airplay._tcp'],
         NSLocalNetworkUsageDescription:
-          'ELV IPTV discovers AirPlay receivers on your local network to match supported audio formats.',
+          'ELV IPTV uses your local network to discover AirPlay receivers and pair devices over QR code.',
         ...(!tv
           ? {
               UIBackgroundModes: ['audio'],
