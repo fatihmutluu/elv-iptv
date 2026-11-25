@@ -222,6 +222,7 @@ describe('removeSource', () => {
         "(item_key, source_id, clean_title, fetched_at, expires_at) VALUES (?, ?, 'Title', 1, 9999)",
       vod_collection_items:
         "(collection_id, item_key, source_id, kind, position, added_at) VALUES ('vc1', ?, ?, 'movie', 0, 1)",
+      item_drm_meta: "(source_id, item_key, scheme) VALUES (?, 'k', 'clearkey')",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -320,6 +321,7 @@ describe('removeSource', () => {
         "(item_key, source_id, clean_title, fetched_at, expires_at) VALUES (?, ?, 'Title', 1, 9999)",
       vod_collection_items:
         "(collection_id, item_key, source_id, kind, position, added_at) VALUES ('vc1', ?, ?, 'movie', 0, 1)",
+      item_drm_meta: "(source_id, item_key, scheme) VALUES (?, 'k', 'clearkey')",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {

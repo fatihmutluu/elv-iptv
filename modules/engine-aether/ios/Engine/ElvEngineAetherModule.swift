@@ -71,6 +71,14 @@ struct SubtitleStyleArgs: Record {
   }
 }
 
+/// Display Auto Frame-Rate & HDR switching policy record passed from JavaScript (`#188`, `#116`).
+struct DisplaySyncArgs: Record {
+  @Field var autoFrameRate: String? = nil
+  @Field var autoDynamicRange: Bool? = nil
+
+  init() {}
+}
+
 /// Flattened `LoadCommand` record sent from JavaScript (`@elv/playback`'s `bridgeNativeEngine`).
 struct LoadArgs: Record {
   @Field var attempt: Int = 0
@@ -84,6 +92,9 @@ struct LoadArgs: Record {
   @Field var allowLegacyTls: Bool = false
   @Field var dnsFamily: String? = nil
   @Field var hostOverride: String? = nil
+  @Field var autoFrameRate: String? = nil
+  @Field var autoDynamicRange: Bool? = nil
+  @Field var displaySync: DisplaySyncArgs? = nil
   @Field var audioTrackId: String? = nil
   @Field var subtitleTrackId: ValueOrUndefined<String?> = .undefined
   @Field var secondarySubtitleTrackId: String? = nil
@@ -108,6 +119,8 @@ struct LoadArgs: Record {
     let trimmedSecondary = secondarySubtitleTrackId?.trimmingCharacters(in: .whitespacesAndNewlines)
     let parsedExternal = (externalSubtitles ?? []).compactMap { $0.toDescriptor() }
     let cleanStartMs = startMs.flatMap { $0.isFinite ? $0 : nil }
+    let resolvedAutoFrameRate = AppleAutoFrameRateMode.parseExact(autoFrameRate ?? displaySync?.autoFrameRate)
+    let resolvedAutoDynamicRange = autoDynamicRange ?? displaySync?.autoDynamicRange
     return LoadRequest(
       url: url,
       headers: headers,
@@ -123,7 +136,9 @@ struct LoadArgs: Record {
       externalSubtitles: parsedExternal,
       subtitleStyle: subtitleStyle?.toOverride(),
       dnsFamily: DnsFamilyPreference.parse(dnsFamily),
-      hostOverride: validateHostOverride(hostOverride)
+      hostOverride: validateHostOverride(hostOverride),
+      autoFrameRate: resolvedAutoFrameRate,
+      autoDynamicRange: resolvedAutoDynamicRange
     )
   }
 }
@@ -399,6 +414,10 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
 
       Function("setSubtitleStyle") { (engine: EngineObject, args: SubtitleStyleArgs?) in
         engine.setSubtitleStyle(args?.toOverride())
+      }
+
+      Function("setDisplaySync") { (engine: EngineObject, autoFrameRate: String?, autoDynamicRange: Bool?) in
+        engine.setDisplaySync(autoFrameRate: autoFrameRate, autoDynamicRange: autoDynamicRange)
       }
 
       Function("setAudioDelay") { (engine: EngineObject, attempt: Int, delayMs: Double) in

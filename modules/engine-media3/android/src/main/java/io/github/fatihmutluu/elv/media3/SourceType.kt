@@ -1,10 +1,12 @@
 package io.github.fatihmutluu.elv.media3
 
-/** How the engine builds the media source: the HLS module, the TS extractor alone, or container sniffing. */
-enum class SourceType { HLS, TS, PROGRESSIVE }
+/** How the engine builds the media source: HLS, DASH, SmoothStreaming, TS-only, or container sniffing. */
+enum class SourceType { HLS, DASH, SMOOTH_STREAMING, TS, PROGRESSIVE }
 
 private const val MAX_REMEMBERED_HLS_URLS = 256
 private val HLS_EXTENSIONS = setOf("m3u8", "m3u")
+private val DASH_EXTENSIONS = setOf("mpd")
+private val SMOOTH_STREAMING_EXTENSIONS = setOf("ism", "isml")
 private val TS_EXTENSIONS = setOf("ts", "mts", "m2ts")
 private val LIVE_PROGRESSIVE_EXTENSIONS = setOf(
   "mp4",
@@ -63,8 +65,15 @@ fun sourceTypeFor(url: String, live: Boolean, playlistDetected: Boolean = false)
   }
   val last = path.trimEnd('/').substringAfterLast('/').substringBefore(';')
   val extension = if ('.' in last) last.substringAfterLast('.').lowercase() else ""
+  val lowerPath = path.lowercase()
+  val isSmoothManifest =
+    extension in SMOOTH_STREAMING_EXTENSIONS ||
+      lowerPath.contains(".ism/manifest") ||
+      lowerPath.contains(".isml/manifest")
   return when {
     extension in HLS_EXTENSIONS -> SourceType.HLS
+    extension in DASH_EXTENSIONS -> SourceType.DASH
+    isSmoothManifest -> SourceType.SMOOTH_STREAMING
     extension in TS_EXTENSIONS -> SourceType.TS
     live -> if (extension in LIVE_PROGRESSIVE_EXTENSIONS) SourceType.PROGRESSIVE else SourceType.TS
     else -> SourceType.PROGRESSIVE

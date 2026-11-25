@@ -50,6 +50,7 @@ export {
   type M3uHeader,
   scanM3u,
 } from './m3u';
+export { parseM3uDrmProps } from './m3u-drm';
 export { toElvError } from './scan-error';
 export {
   createStalkerClient,

@@ -155,4 +155,31 @@ struct MediaPlanTests {
     #expect(sanitizedOpts.dnsFamily == .ipv4)
     #expect(sanitizedOpts.hostOverride == nil)
   }
+
+  @Test("displaySync preferences map displayCriteriaOwner and survive hlsHandoffOptions (#188, #116)")
+  func displaySyncOptionsPropagation() throws {
+    let disabledReq = LoadRequest(
+      url: "https://tv.example/live/101.ts",
+      live: true,
+      autoFrameRate: .off,
+      autoDynamicRange: false
+    )
+    let disabledOpts = loadOptions(for: try #require(planMedia(disabledReq)), request: disabledReq)
+    #expect(disabledOpts.displayCriteriaOwner == .host)
+    #expect(disabledOpts.displaySync == .disabled)
+    let disabledHandoff = hlsHandoffOptions(from: disabledOpts)
+    #expect(disabledHandoff.displayCriteriaOwner == .host)
+    #expect(disabledHandoff.displaySync == .disabled)
+
+    let afrOnlyReq = LoadRequest(
+      url: "https://tv.example/live/102.ts",
+      live: true,
+      autoFrameRate: .always,
+      autoDynamicRange: false
+    )
+    let afrOnlyOpts = loadOptions(for: try #require(planMedia(afrOnlyReq)), request: afrOnlyReq)
+    #expect(afrOnlyOpts.displayCriteriaOwner == .engine)
+    #expect(afrOnlyOpts.displaySync == AppleDisplaySyncSettings(autoFrameRate: .always, autoDynamicRange: false))
+    #expect(hlsHandoffOptions(from: afrOnlyOpts).displaySync == afrOnlyOpts.displaySync)
+  }
 }

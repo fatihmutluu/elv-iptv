@@ -20,6 +20,8 @@ final class EngineMainDriver: EngineSink {
   private var pipDetachedSurfaceAllowed = false
   private var hasExplicitSubtitleStyle = false
   private var activeSubtitleStyle: UserSubtitleStyleOverride?
+  private var hasExplicitDisplaySync = false
+  private var activeDisplaySync: AppleDisplaySyncSettings = .default
 
   init(
     owner: EngineObject,
@@ -127,6 +129,10 @@ final class EngineMainDriver: EngineSink {
     self.backend.onPlayerLayerMayHaveChanged = { [weak self] in
       self?.syncPipController()
     }
+    self.backend.onHdmiShutterSettle = { [weak self] durationMs in
+      guard let self else { return }
+      self.boundSurface?.triggerHdmiShutterSettle(durationMs: durationMs, from: self.owner)
+    }
   }
 
   func send(_ event: EngineEventOut) {
@@ -172,6 +178,32 @@ final class EngineMainDriver: EngineSink {
     boundSurface?.applySubtitleStyle(style, from: owner)
   }
 
+  /// Updates live AFR/HDR display-sync policy without restarting playback (`#188`, `#116`).
+  func setDisplaySync(_ settings: AppleDisplaySyncSettings) {
+    hasExplicitDisplaySync = true
+    activeDisplaySync = settings
+    backend.setDisplaySync(settings)
+  }
+
+  /// Merges per-load display-sync overrides with any live `setDisplaySync` settings.
+  func resolveLoadRequest(_ request: LoadRequest) -> LoadRequest {
+    var effective = request
+    if request.autoFrameRate != nil || request.autoDynamicRange != nil {
+      let resolved = AppleDisplaySyncSettings(
+        autoFrameRate: request.autoFrameRate ?? activeDisplaySync.autoFrameRate,
+        autoDynamicRange: request.autoDynamicRange ?? activeDisplaySync.autoDynamicRange
+      )
+      hasExplicitDisplaySync = true
+      activeDisplaySync = resolved
+      effective.autoFrameRate = resolved.autoFrameRate
+      effective.autoDynamicRange = resolved.autoDynamicRange
+    } else if hasExplicitDisplaySync {
+      effective.autoFrameRate = activeDisplaySync.autoFrameRate
+      effective.autoDynamicRange = activeDisplaySync.autoDynamicRange
+    }
+    return effective
+  }
+
   private func setPipDetachedSurfaceAllowed(_ allowed: Bool) {
     pipDetachedSurfaceAllowed = allowed
     syncDetachedSurfacePolicy()
@@ -215,6 +247,7 @@ final class EngineMainDriver: EngineSink {
   func stopPlayback(_ attempt: Int) {
     pipController.reset()
     core.stop(attempt)
+    backend.stopDisplayCriteriaForUserStop()
     nowPlayingBridge.clear()
   }
 

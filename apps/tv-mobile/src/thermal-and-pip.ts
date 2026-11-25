@@ -179,6 +179,7 @@ export function createMobileVideoHost(deps: MobileVideoHostDeps): MobileVideoHos
               setAutoEnterPictureInPicture: (enabled: boolean) =>
                 deps.setAetherAutoEnterPictureInPicture(enabled, engine),
               onPictureInPictureChange: deps.subscribeAetherPictureInPicture,
+              setDisplaySync: (policy) => engine.setDisplaySync?.(policy),
             }
           : {}),
         ...(deps.panGestures !== null
@@ -213,6 +214,8 @@ export function createMobileVideoHost(deps: MobileVideoHostDeps): MobileVideoHos
                 deps.subscribeMedia3RemoteMediaAction(engine, (action) =>
                   listener(mapRemoteMediaAction(action)),
                 ),
+              setNightModeDrc: (preset) => engine.setNightModeDrc?.(preset),
+              setDisplaySync: (policy) => engine.setDisplaySync?.(policy),
             }
           : {}),
         ...(isAndroidMobile

@@ -310,4 +310,34 @@ class LoadRequestTest {
     assertEquals(DnsFamilyPreference.SYSTEM, badReq.dnsFamily)
     assertNull(badReq.hostOverride)
   }
+
+  @Test
+  fun `parseLoadArgs parses drm, displaySync, nightModeDrc, and audioDelayByRefreshRateMs without leaking secrets in toString (#115, #116, #272)`() {
+    val (_, req) = parseLoadArgs(
+      mapOf(
+        "attempt" to 7,
+        "url" to "https://cdn.example.test/live/ch1.mpd",
+        "kind" to "live",
+        "autoFrameRate" to "always",
+        "nightModeDrc" to "night",
+        "audioDelayByRefreshRateMs" to mapOf("23.976" to 45.0, "60" to -25.0),
+        "drm" to mapOf(
+          "scheme" to "widevine",
+          "licenseUrl" to "https://drm.example.test/license?key=s3cr3t",
+          "licenseHeaders" to mapOf("X-License-Token" to "tok999"),
+          "multiSession" to true,
+        ),
+      ),
+    )
+    assertEquals(AutoFrameRateMode.ALWAYS, req.autoFrameRate)
+    assertEquals(NightModeDrcPreset.NIGHT, req.nightModeDrc)
+    assertEquals(mapOf("23.976" to 45L, "60" to -25L), req.audioDelayByRefreshRateMs)
+    assertEquals(DrmSchemeKind.WIDEVINE, req.drm?.scheme)
+    assertTrue(req.drm?.multiSession == true)
+    val text = req.toString()
+    assertTrue(text.contains("drm=widevine"))
+    for (leak in listOf("drm.example.test", "s3cr3t", "tok999", "X-License-Token")) {
+      assertFalse("LoadRequest.toString must never leak $leak: $text", text.contains(leak))
+    }
+  }
 }

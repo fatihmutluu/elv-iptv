@@ -1,3 +1,4 @@
+import type { RefreshRateBucket } from '@elv/domain';
 import { createFocusStore, type FocusStore, findList, type KeyEvent } from '@elv/focus-core';
 import type { THEME_PRESET_IDS } from '@elv/ui-kit';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -100,6 +101,15 @@ export type PlaybackFocusId =
   | 'deinterlace-bwdif'
   | 'toggle-pitch-lock'
   | 'toggle-audio-normalization'
+  | 'afr-off'
+  | 'afr-seamless'
+  | 'afr-always'
+  | 'toggle-auto-dynamic-range'
+  | 'night-drc-off'
+  | 'night-drc-light'
+  | 'night-drc-night'
+  | `delay-bucket-${RefreshRateBucket}`
+  | 'delay-stepper'
   | 'toggle-window-aspect-ratio-lock'
   | 'toggle-minimize-to-tray'
   | 'toggle-auto-enter-pip'
@@ -214,7 +224,7 @@ const PLAYBACK_DECODER_ROW: readonly PlaybackFocusId[] = [
   'video-decoder-software',
 ];
 
-const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
+const PLAYBACK_ROWS_TAIL_BEFORE_DRC: readonly (readonly PlaybackFocusId[])[] = [
   ['toggle-prefer-default-audio'],
   ['toggle-filter-sdh'],
   ['toggle-prefer-hevc-dv'],
@@ -230,22 +240,53 @@ const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
     'still-watching-180',
     'still-watching-240',
   ],
+  ['afr-off', 'afr-seamless', 'afr-always'],
+  ['toggle-auto-dynamic-range'],
+];
+
+const PLAYBACK_NIGHT_DRC_ROW: readonly PlaybackFocusId[] = [
+  'night-drc-off',
+  'night-drc-light',
+  'night-drc-night',
+];
+
+const PLAYBACK_ROWS_TAIL_AFTER_DRC: readonly (readonly PlaybackFocusId[])[] = [
+  [
+    'delay-bucket-23.976',
+    'delay-bucket-24',
+    'delay-bucket-25',
+    'delay-bucket-29.97',
+    'delay-bucket-30',
+    'delay-bucket-50',
+    'delay-bucket-59.94',
+    'delay-bucket-60',
+  ],
+  ['delay-stepper'],
   ['toggle-auto-play-next'],
   ['toggle-skip-back-subtitles'],
   ['toggle-group-vod-versions'],
   ['audio-device-auto'],
 ];
 
-const PLAYBACK_ROWS_DEFAULT: readonly (readonly PlaybackFocusId[])[] = [
+const buildPlaybackRows = (
+  showAndroidDecoder: boolean,
+  showNightModeDrc: boolean,
+): readonly (readonly PlaybackFocusId[])[] => [
   ...PLAYBACK_ROWS_HEAD,
-  ...PLAYBACK_ROWS_TAIL,
+  ...(showAndroidDecoder ? [PLAYBACK_DECODER_ROW] : []),
+  ...PLAYBACK_ROWS_TAIL_BEFORE_DRC,
+  ...(showNightModeDrc ? [PLAYBACK_NIGHT_DRC_ROW] : []),
+  ...PLAYBACK_ROWS_TAIL_AFTER_DRC,
 ];
 
-const PLAYBACK_ROWS_WITH_DECODER: readonly (readonly PlaybackFocusId[])[] = [
-  ...PLAYBACK_ROWS_HEAD,
-  PLAYBACK_DECODER_ROW,
-  ...PLAYBACK_ROWS_TAIL,
-];
+const PLAYBACK_ROWS_DEFAULT = buildPlaybackRows(false, false);
+
+const PLAYBACK_ROWS_CACHE: Readonly<Record<string, readonly (readonly PlaybackFocusId[])[]>> = {
+  '0:0': PLAYBACK_ROWS_DEFAULT,
+  '0:1': buildPlaybackRows(false, true),
+  '1:0': buildPlaybackRows(true, false),
+  '1:1': buildPlaybackRows(true, true),
+};
 
 const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
   ['live-mode-favorites', 'live-mode-channels', 'live-mode-epg'],
@@ -278,11 +319,13 @@ const PREFERENCE_SECTIONS: readonly PreferenceSettingsSection[] = [
 
 function getSectionRows(
   showAndroidDecoder: boolean,
+  showNightModeDrc: boolean,
   includeTvDisplayRows: boolean,
 ): Readonly<Record<PreferenceSettingsSection, readonly (readonly string[])[]>> {
+  const playbackKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}`;
   return {
     appearance: includeTvDisplayRows ? APPEARANCE_ROWS_TV : APPEARANCE_ROWS_DEFAULT,
-    playback: showAndroidDecoder ? PLAYBACK_ROWS_WITH_DECODER : PLAYBACK_ROWS_DEFAULT,
+    playback: PLAYBACK_ROWS_CACHE[playbackKey] ?? PLAYBACK_ROWS_DEFAULT,
     liveTv: LIVE_TV_ROWS,
   };
 }
@@ -298,10 +341,11 @@ const rowListId = (section: PreferenceSettingsSection, rowIndex: number): string
 function createSettingsFocusStore(
   initialSection: SettingsSection,
   showAndroidDecoder: boolean,
+  showNightModeDrc: boolean,
   includeTvDisplayRows: boolean,
 ): FocusStore {
   const initialIdx = Math.max(0, SETTINGS_SECTIONS.indexOf(initialSection));
-  const sectionRows = getSectionRows(showAndroidDecoder, includeTvDisplayRows);
+  const sectionRows = getSectionRows(showAndroidDecoder, showNightModeDrc, includeTvDisplayRows);
   const sectionLists = PREFERENCE_SECTIONS.flatMap((sec) =>
     sectionRows[sec].map((row, i) => ({
       id: rowListId(sec, i),
@@ -342,11 +386,19 @@ export interface UseTvSettingsNavigationOptions {
   readonly section: SettingsSection;
   readonly onSectionChange: (next: SettingsSection) => void;
   readonly onActivateControl?: (section: PreferenceSettingsSection, controlId: string) => void;
+  /** Optional left/right D-pad adjustment handler for inline steppers (e.g. per-refresh-rate delay `#115`). */
+  readonly onAdjustControl?: (
+    section: PreferenceSettingsSection,
+    controlId: string,
+    delta: -1 | 1,
+  ) => void;
   /** Backwards-compatible Appearance-only activation callback. */
   readonly onActivateAppearanceControl?: (id: AppearanceFocusId) => void;
   readonly onFocusTopNav?: () => void;
   /** Whether the Android-only Video decoder row is rendered in Playback settings (`#411`). */
   readonly showAndroidDecoder?: boolean;
+  /** Whether the Android-only Night-Mode DRC row is rendered in Playback settings (`#115`). */
+  readonly showNightModeDrc?: boolean;
   /** When `true`, keeps the current Settings pane (`'nav'` | `'content'`) while `isActiveScope` temporarily blurs for a root overlay. */
   readonly preservePaneOnBlur?: boolean;
 }
@@ -374,9 +426,11 @@ export function useTvSettingsNavigation({
   section,
   onSectionChange,
   onActivateControl,
+  onAdjustControl,
   onActivateAppearanceControl,
   onFocusTopNav,
   showAndroidDecoder = Platform.OS === 'android',
+  showNightModeDrc = Platform.OS === 'android',
   preservePaneOnBlur = false,
 }: UseTvSettingsNavigationOptions): TvSettingsNavigationState {
   const [pane, setPane] = useState<'nav' | 'content'>(() =>
@@ -384,15 +438,20 @@ export function useTvSettingsNavigation({
   );
   const [coords, setCoords] = useState<SectionCoords>(INITIAL_COORDS);
 
-  const sectionRows = getSectionRows(showAndroidDecoder, isTv);
+  const sectionRows = getSectionRows(showAndroidDecoder, showNightModeDrc, isTv);
   const sectionRowsRef = useRef(sectionRows);
   sectionRowsRef.current = sectionRows;
   const storeRef = useRef<FocusStore | null>(null);
-  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${isTv ? '1' : '0'}`;
+  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${isTv ? '1' : '0'}`;
   const storeConfigKeyRef = useRef(storeConfigKey);
   if (storeRef.current === null || storeConfigKeyRef.current !== storeConfigKey) {
     storeConfigKeyRef.current = storeConfigKey;
-    storeRef.current = createSettingsFocusStore(section, showAndroidDecoder, isTv);
+    storeRef.current = createSettingsFocusStore(
+      section,
+      showAndroidDecoder,
+      showNightModeDrc,
+      isTv,
+    );
   }
   const store = storeRef.current;
 
@@ -406,6 +465,8 @@ export function useTvSettingsNavigation({
   onSectionChangeRef.current = onSectionChange;
   const onActivateControlRef = useRef(onActivateControl);
   onActivateControlRef.current = onActivateControl;
+  const onAdjustControlRef = useRef(onAdjustControl);
+  onAdjustControlRef.current = onAdjustControl;
   const onActivateAppearanceRef = useRef(onActivateAppearanceControl);
   onActivateAppearanceRef.current = onActivateAppearanceControl;
   const onFocusTopNavRef = useRef(onFocusTopNav);
@@ -520,6 +581,25 @@ export function useTvSettingsNavigation({
         const nextListId = rowListId(activeSection, nextRow);
         store.focus(nextListId, nextCol);
         setCoords((prev) => ({ ...prev, [activeSection]: { row: nextRow, col: nextCol } }));
+        return true;
+      }
+
+      const currentRowItems = rows[currentRow] ?? [];
+      const currentCol = Math.min(
+        coordsRef.current[activeSection].col,
+        Math.max(0, currentRowItems.length - 1),
+      );
+      const activeControlId = currentRowItems[currentCol];
+      if (
+        activeControlId === 'delay-stepper' &&
+        (event.kind === 'press' || event.kind === 'repeat') &&
+        (event.key === 'left' || event.key === 'right')
+      ) {
+        onAdjustControlRef.current?.(
+          activeSection,
+          activeControlId,
+          event.key === 'right' ? 1 : -1,
+        );
         return true;
       }
 

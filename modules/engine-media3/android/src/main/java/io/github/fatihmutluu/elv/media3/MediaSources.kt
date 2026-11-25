@@ -12,10 +12,14 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.TransferListener
+import androidx.media3.exoplayer.dash.DashMediaSource
+import androidx.media3.exoplayer.dash.DefaultDashChunkSource
 import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
 import androidx.media3.exoplayer.hls.HlsDataSourceFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.hls.playlist.DefaultHlsPlaylistTracker
+import androidx.media3.exoplayer.smoothstreaming.DefaultSsChunkSource
+import androidx.media3.exoplayer.smoothstreaming.SsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -299,9 +303,28 @@ internal fun createMediaSource(
             )
           }
         }
+    SourceType.DASH ->
+      DashMediaSource.Factory(
+        DefaultDashChunkSource.Factory(DataSource.Factory { gated(RequestKind.SEGMENT) }),
+        DataSource.Factory { gated(RequestKind.OTHER) },
+      )
+    SourceType.SMOOTH_STREAMING ->
+      SsMediaSource.Factory(
+        DefaultSsChunkSource.Factory(DataSource.Factory { gated(RequestKind.SEGMENT) }),
+        DataSource.Factory { gated(RequestKind.OTHER) },
+      )
     SourceType.TS -> ProgressiveMediaSource.Factory(progressive, TsOnlyExtractorsFactory(lowRam, request.live))
     SourceType.PROGRESSIVE ->
       ProgressiveMediaSource.Factory(progressive, extractorsDecorator(tsCapableFactory(lowRam, request.live)))
+  }
+  val drmConfig = request.drm
+  if (drmConfig != null) {
+    val drmHttpFactory = DataSource.Factory {
+      streamDataSource(drmConfig.licenseHeaders, client, drmConfig.licenseUrl).first
+    }
+    buildDrmSessionManagerProvider(drmConfig, drmHttpFactory)?.let { provider ->
+      factory.setDrmSessionManagerProvider(provider)
+    }
   }
   val mediaItem = MediaItem.Builder()
     .setUri(request.url)

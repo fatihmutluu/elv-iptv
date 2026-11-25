@@ -1,4 +1,9 @@
-import { DEFAULT_PREFERENCES, type PreferencesPatch, type PreferencesSnapshot } from '@elv/domain';
+import {
+  DEFAULT_PREFERENCES,
+  type PreferencesPatch,
+  type PreferencesSnapshot,
+  type RefreshRateBucket,
+} from '@elv/domain';
 import { Surface, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -7,10 +12,13 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { SettingsPreferencesController } from './appearance-controls';
+import { DesktopAudioPassthroughSection } from './DesktopAudioPassthroughSection';
 import { buildPlaybackChipOptions } from './playback-controls';
+import { RefreshRateDelayEditor } from './RefreshRateDelayEditor';
 import {
   type SettingsChipOption,
   SettingsDivider,
@@ -27,6 +35,12 @@ export interface PlaybackSettingsPanelProps {
   readonly focusedControlId?: PlaybackFocusId | null;
   /** Shows the Android-only Media3 Video decoder row (defaults to `Platform.OS === 'android'`, `#411`). */
   readonly showAndroidDecoder?: boolean;
+  /** Shows the Android-only Night-Mode DRC row (defaults to `Platform.OS === 'android'`, `#115`). */
+  readonly showNightModeDrc?: boolean;
+  /** Controlled active refresh-rate bucket for the per-refresh-rate A/V delay editor (`#115`). */
+  readonly selectedDelayBucket?: RefreshRateBucket;
+  /** Invoked when the user selects a refresh-rate bucket in the per-refresh-rate A/V delay editor (`#115`). */
+  readonly onSelectDelayBucket?: (bucket: RefreshRateBucket) => void;
 }
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
@@ -40,6 +54,9 @@ export function PlaybackSettingsPanel({
   preferences: suppliedPrefs,
   focusedControlId = null,
   showAndroidDecoder = Platform.OS === 'android',
+  showNightModeDrc = Platform.OS === 'android',
+  selectedDelayBucket: controlledDelayBucket,
+  onSelectDelayBucket,
 }: PlaybackSettingsPanelProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -48,9 +65,20 @@ export function PlaybackSettingsPanel({
   const isDesktop = viewport.formFactor === 'desktop';
   const isMobile = viewport.formFactor === 'phone' || viewport.formFactor === 'tablet';
 
+  const [uncontrolledDelayBucket, setUncontrolledDelayBucket] =
+    useState<RefreshRateBucket>('23.976');
+  const activeDelayBucket = controlledDelayBucket ?? uncontrolledDelayBucket;
+  const handleSelectDelayBucket = useCallback(
+    (bucket: RefreshRateBucket): void => {
+      if (controlledDelayBucket === undefined) setUncontrolledDelayBucket(bucket);
+      onSelectDelayBucket?.(bucket);
+    },
+    [controlledDelayBucket, onSelectDelayBucket],
+  );
+
   const scrollRef = useRef<ScrollViewHandle | null>(null);
   const cardYRef = useRef<
-    Partial<Record<'tracks' | 'transport' | 'cinema' | 'automation', number>>
+    Partial<Record<'tracks' | 'transport' | 'cinema' | 'displaySync' | 'automation', number>>
   >({});
 
   const activePrefs: PreferencesSnapshot = suppliedPrefs?.preferences ?? DEFAULT_PREFERENCES;
@@ -78,6 +106,15 @@ export function PlaybackSettingsPanel({
       focusedControlId.startsWith('video-decoder-')
     ) {
       const y = cardYRef.current.transport;
+      if (y !== undefined) targetY = Math.max(0, y - 12);
+    } else if (
+      focusedControlId.startsWith('afr-') ||
+      focusedControlId === 'toggle-auto-dynamic-range' ||
+      focusedControlId.startsWith('night-drc-') ||
+      focusedControlId.startsWith('delay-bucket-') ||
+      focusedControlId === 'delay-stepper'
+    ) {
+      const y = cardYRef.current.displaySync;
       if (y !== undefined) targetY = Math.max(0, y - 12);
     } else if (
       focusedControlId.startsWith('toggle-prefer-') ||
@@ -389,6 +426,78 @@ export function PlaybackSettingsPanel({
           onSelect={(stillWatchingTimeoutMin) => applyPatch({ stillWatchingTimeoutMin })}
         />
       </Surface>
+
+      <Surface
+        testID="settings-section-display-audio-sync"
+        tone="surface"
+        bordered
+        rounded="modal"
+        style={styles.sectionCard}
+        onLayout={(e) => {
+          cardYRef.current.displaySync = e.nativeEvent.layout.y;
+        }}
+      >
+        <SettingsOptionRow
+          title={i18n.t('settings.playback.autoFrameRateTitle')}
+          description={i18n.t('settings.playback.autoFrameRateDescription')}
+          options={opts.autoFrameRateOptions}
+          selectedValue={activePrefs.autoFrameRate}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          onSelect={(autoFrameRate) => applyPatch({ autoFrameRate })}
+        />
+        <SettingsDivider />
+        <SettingsToggleRow
+          testID="settings-playback-toggle-auto-dynamic-range"
+          title={i18n.t('settings.playback.autoDynamicRangeTitle')}
+          description={i18n.t('settings.playback.autoDynamicRangeDescription')}
+          checked={activePrefs.autoDynamicRange}
+          focused={focusedControlId === 'toggle-auto-dynamic-range'}
+          isTv={isTv}
+          onToggle={() => applyPatch({ autoDynamicRange: !activePrefs.autoDynamicRange })}
+        />
+        {showNightModeDrc && !isDesktop ? (
+          <>
+            <SettingsDivider />
+            <SettingsOptionRow
+              title={i18n.t('settings.playback.nightModeDrcTitle')}
+              description={i18n.t('settings.playback.nightModeDrcDescription')}
+              options={opts.nightModeDrcOptions}
+              selectedValue={activePrefs.nightModeDrc}
+              focusedControlId={focusedControlId}
+              isTv={isTv}
+              onSelect={(nightModeDrc) => applyPatch({ nightModeDrc })}
+            />
+          </>
+        ) : null}
+        <SettingsDivider />
+        <RefreshRateDelayEditor
+          delays={activePrefs.audioDelayByRefreshRateMs}
+          selectedBucket={activeDelayBucket}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          onSelectBucket={handleSelectDelayBucket}
+          onChangeDelays={(audioDelayByRefreshRateMs) => applyPatch({ audioDelayByRefreshRateMs })}
+        />
+      </Surface>
+
+      {isDesktop ? (
+        <DesktopAudioPassthroughSection
+          audioPassthrough={activePrefs.audioPassthrough}
+          audioPassthroughCodecs={activePrefs.audioPassthroughCodecs}
+          audioExclusive={activePrefs.audioExclusive}
+          audioAc3Encode={activePrefs.audioAc3Encode}
+          audioChannelLayout={activePrefs.audioChannelLayout}
+          channelLayoutOptions={opts.audioChannelLayoutOptions}
+          onTogglePassthrough={() =>
+            applyPatch({ audioPassthrough: !activePrefs.audioPassthrough })
+          }
+          onChangeCodecs={(audioPassthroughCodecs) => applyPatch({ audioPassthroughCodecs })}
+          onToggleExclusive={() => applyPatch({ audioExclusive: !activePrefs.audioExclusive })}
+          onToggleAc3Encode={() => applyPatch({ audioAc3Encode: !activePrefs.audioAc3Encode })}
+          onSelectChannelLayout={(audioChannelLayout) => applyPatch({ audioChannelLayout })}
+        />
+      ) : null}
 
       <Surface
         tone="surface"

@@ -16,7 +16,11 @@ import {
   type QueueNextRequest,
   type ResizeMode,
 } from '../../shared/player-ipc.ts';
-import { createEngineControls, isSpdifPassthroughValue } from './engine-controls.ts';
+import {
+  createEngineControls,
+  isSpdifPassthroughValue,
+  trackAppliedControlCommand,
+} from './engine-controls.ts';
 import { createEngineQueue, type QueuedOp } from './engine-queue.ts';
 import type { MpvCommand } from './mpv/codec.ts';
 import {
@@ -235,10 +239,14 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     getDesiredDeinterlaceMode: () => controls.getDesiredDeinterlaceMode(),
     getDesiredPitchLock: () => controls.getDesiredPitchLock(),
     getDesiredAudioNormalization: () => controls.getDesiredAudioNormalization(),
+    getDesiredDisplaySync: () => controls.getDesiredDisplaySync(),
+    getDesiredDesktopAudioOutput: () => controls.getDesiredDesktopAudioOutput(),
     getDesiredAudioDelayMs: () => desiredAudioDelayMs,
     getDesiredSubtitleDelayMs: () => desiredSubtitleDelayMs,
     getDesiredVideoQualityId: () => desiredVideoQualityId,
     isSpdifPassthroughActive: () => controls.isSpdifPassthroughActive(),
+    isAudioNormalizationSuppressed: () => controls.isAudioNormalizationSuppressed(),
+    onMpvLog: (entry) => controls.onMpvLog(entry),
     ...(deps.readaheadStore === undefined ? {} : { readaheadStore: deps.readaheadStore }),
   });
 
@@ -332,58 +340,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
               const target = live;
               await session.send(target, op.command);
               if (live === target) {
-                if (
-                  op.command[0] === 'set_property' &&
-                  op.command[1] === 'audio-device' &&
-                  typeof op.command[2] === 'string'
-                ) {
-                  target.appliedAudioDevice = op.command[2];
-                } else if (
-                  op.command[0] === 'set_property' &&
-                  op.command[1] === 'sub-font' &&
-                  typeof op.command[2] === 'string'
-                ) {
-                  target.appliedSubtitleFont = op.command[2];
-                } else if (
-                  op.command[0] === 'set_property' &&
-                  op.command[1] === 'audio-pitch-correction' &&
-                  typeof op.command[2] === 'string'
-                ) {
-                  target.appliedPitchLock = op.command[2] === 'yes';
-                } else if (
-                  op.command[0] === 'set_property' &&
-                  op.command[1] === 'deinterlace' &&
-                  op.command[2] === 'auto'
-                ) {
-                  target.appliedDeinterlaceMode = 'auto';
-                } else if (
-                  op.command[0] === 'vf' &&
-                  op.command[1] === 'add' &&
-                  typeof op.command[2] === 'string' &&
-                  op.command[2].startsWith('@elv_deint:')
-                ) {
-                  target.appliedDeinterlaceMode = 'bwdif';
-                } else if (
-                  op.command[0] === 'vf' &&
-                  op.command[1] === 'remove' &&
-                  op.command[2] === '@elv_deint' &&
-                  controls.getDesiredDeinterlaceMode() === 'off'
-                ) {
-                  target.appliedDeinterlaceMode = 'off';
-                } else if (
-                  op.command[0] === 'af' &&
-                  op.command[1] === 'add' &&
-                  typeof op.command[2] === 'string' &&
-                  op.command[2].startsWith('@elv_loudnorm:')
-                ) {
-                  target.appliedAudioNormalization = true;
-                } else if (
-                  op.command[0] === 'af' &&
-                  op.command[1] === 'remove' &&
-                  op.command[2] === '@elv_loudnorm'
-                ) {
-                  target.appliedAudioNormalization = false;
-                }
+                trackAppliedControlCommand(target, op.command, controls);
               }
             }
           } finally {
@@ -437,6 +394,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     ),
     ...(deps.audioRampMs === undefined ? {} : { audioRampMs: deps.audioRampMs }),
     isSecondarySubtitleActive: () => tracks.hasActiveSecondarySubtitle(),
+    onPassthroughFallback: () => ui({ type: 'passthroughFallback' }),
   });
 
   const clearQueue = (): void => {
@@ -538,6 +496,8 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     setPitchLock: (lockedOrAttempt, maybeLocked) =>
       controls.setPitchLock(lockedOrAttempt, maybeLocked),
     setAudioNormalization: (enabled) => controls.setAudioNormalization(enabled),
+    setDisplaySync: (policy) => controls.setDisplaySync(policy),
+    setDesktopAudioOutput: (config) => controls.setDesktopAudioOutput(config),
     queueNext(request) {
       if (released || !media || media.request.kind !== 'vod') return;
       const activeCustom = headerFields(media.request.headers);
@@ -607,6 +567,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       resetPerMediaOverrides();
       tracks.onLoad(cmd.options);
       const { url, headers, kind, options } = cmd;
+      if (options?.displaySync !== undefined) controls.rememberDisplaySync(options.displaySync);
+      if (options?.desktopAudioOutput !== undefined) {
+        controls.rememberDesktopAudioOutput(options.desktopAudioOutput);
+      }
       const effectiveStyle =
         options?.subtitleStyle !== undefined
           ? controls.rememberSubtitleStyle(options.subtitleStyle)

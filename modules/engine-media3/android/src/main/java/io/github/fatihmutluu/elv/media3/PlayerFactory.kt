@@ -72,12 +72,17 @@ internal fun isSystemCaptioningEnabled(context: Context): Boolean =
     .getOrDefault(false)
 
 /**
- * Selects Media3's video frame-rate switching strategy by Android API level (#151):
- * enables seamless-only frame-rate switching on Android 11+ (API 30+) and disables it on older APIs.
+ * Selects Media3's video frame-rate switching strategy by Android API level and AFR [mode] (#151, #116):
+ * - API < 30 or [AutoFrameRateMode.OFF]: `VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF`.
+ * - API 30+ with [AutoFrameRateMode.SEAMLESS] or [AutoFrameRateMode.ALWAYS]: `VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS`
+ *   (non-seamless HDMI mode switches in `ALWAYS` mode are coordinated via `preferredDisplayModeId` in [DisplayRefreshController]).
  */
 @OptIn(UnstableApi::class)
-internal fun videoChangeFrameRateStrategyForApi(sdkInt: Int): Int =
-  if (sdkInt >= Build.VERSION_CODES.R) {
+internal fun videoChangeFrameRateStrategyForApi(
+  sdkInt: Int,
+  mode: AutoFrameRateMode = AutoFrameRateMode.SEAMLESS,
+): Int =
+  if (sdkInt >= Build.VERSION_CODES.R && mode != AutoFrameRateMode.OFF) {
     C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
   } else {
     C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
@@ -154,6 +159,7 @@ internal class PlayerFactory(
     decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
     handleAudioFocus: Boolean = true,
     multiViewTileCount: Int = MIN_MULTIVIEW_TILES,
+    autoFrameRateMode: AutoFrameRateMode = AutoFrameRateMode.SEAMLESS,
   ): ExoPlayer {
     if (handleAudioFocus && audioFocusAllowed) {
       try {
@@ -166,6 +172,7 @@ internal class PlayerFactory(
           decoderMode = decoderMode,
           handleAudioFocus = true,
           multiViewTileCount = multiViewTileCount,
+          autoFrameRateMode = autoFrameRateMode,
         )
       } catch (e: SecurityException) {
         Log.w(TAG, "TAKE_AUDIO_FOCUS denied (${e.javaClass.simpleName}); falling back to handleAudioFocus=false")
@@ -181,6 +188,7 @@ internal class PlayerFactory(
       decoderMode = decoderMode,
       handleAudioFocus = false,
       multiViewTileCount = multiViewTileCount,
+      autoFrameRateMode = autoFrameRateMode,
     )
   }
 
@@ -192,6 +200,7 @@ internal class PlayerFactory(
     decoderMode: VideoDecoderMode,
     handleAudioFocus: Boolean,
     multiViewTileCount: Int,
+    autoFrameRateMode: AutoFrameRateMode,
   ): ExoPlayer {
     val buffers = scaleLoadControlForMultiView(
       base = loadControlForStream(streamKind, bufferPreset),
@@ -254,7 +263,7 @@ internal class PlayerFactory(
       .setReleaseTimeoutMs(PLAYER_RELEASE_TIMEOUT_MS)
       .setDetachSurfaceTimeoutMs(PLAYER_DETACH_SURFACE_TIMEOUT_MS)
       .setStuckBufferingDetectionTimeoutMs(PLAYER_STUCK_BUFFERING_TIMEOUT_MS)
-      .setVideoChangeFrameRateStrategy(videoChangeFrameRateStrategyForApi(sdkInt))
+      .setVideoChangeFrameRateStrategy(videoChangeFrameRateStrategyForApi(sdkInt, autoFrameRateMode))
       .enablePerStreamMediaProgression(true)
       .build()
       .also { built ->

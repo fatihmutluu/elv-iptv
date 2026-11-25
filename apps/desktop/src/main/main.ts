@@ -63,6 +63,7 @@ import {
 } from './macos-media.ts';
 import type { DesktopMediaBridge } from './media-bridge.ts';
 import { createMprisBridge } from './mpris/mpris-bridge.ts';
+import { createDesktopDisplayRefreshController } from './player/display-refresh.ts';
 import type { MpvEngine } from './player/engine.ts';
 import { createEngineFor } from './player/factory.ts';
 import { registerPlayerIpc } from './player/ipc.ts';
@@ -185,6 +186,7 @@ const windowBoundsControllers = new Set<WindowBoundsController>();
 const aspectRatioLockControllers = new Map<BrowserWindow, WindowAspectRatioLockController>();
 let aspectRatioLockEnabled = false;
 const powerBlocker = createPowerBlocker(powerSaveBlocker);
+const displayRefreshController = createDesktopDisplayRefreshController();
 let cachedTaskbarIcons: TaskbarIcons<NativeImage> | undefined;
 
 function getTaskbarIcons(): TaskbarIcons<NativeImage> {
@@ -370,6 +372,12 @@ async function startPlayer(): Promise<void> {
     now: () => performance.now(),
     log: logger.log,
     powerBlocker,
+    displayRefreshController,
+    getDisplayId: (owner) => {
+      const win = BrowserWindow.fromWebContents(owner as WebContents);
+      if (!win || win.isDestroyed()) return undefined;
+      return String(screen.getDisplayMatching(win.getBounds()).id);
+    },
     ...(mediaBridge ? { mediaBridge } : {}),
     pickSubtitleFile: createSubtitleFilePicker<BrowserWindow>({
       getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
@@ -642,10 +650,12 @@ app.on('will-quit', () => {
   for (const ctl of [...aspectRatioLockControllers.values()]) ctl.dispose();
   aspectRatioLockControllers.clear();
   void artworkCache?.dispose();
+  displayRefreshController.restoreAll();
   powerBlocker.releaseAll();
 });
 
 app.on('window-all-closed', () => {
+  displayRefreshController.restoreAll();
   powerBlocker.releaseAll();
   if (process.platform !== 'darwin') app.quit();
 });

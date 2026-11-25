@@ -65,6 +65,10 @@ class ElvEngineMedia3Module : Module() {
       )
     }
 
+    Function("getDrmCapabilities") {
+      probeDrmCapabilities()
+    }
+
     Function("setOrientationLocked") { locked: Boolean ->
       val activity = appContext.currentActivity ?: return@Function
       orientationController.setLocked(activity, locked)
@@ -228,6 +232,7 @@ class ElvEngineMedia3Module : Module() {
       insetsToDetach?.invoke()
       pipToDetach?.invoke()
       orientationController.dispose()
+      appContext.currentActivity?.let(::restoreDefaultDisplayMode)
       val alive = synchronized(engines) { engines.toList() }
       alive.forEach { it.dispose() }
     }
@@ -282,6 +287,20 @@ class ElvEngineMedia3Module : Module() {
 
       Function("setAudioBoostDb") { engine: Media3Engine, attempt: Int, db: Double ->
         if (db.isFinite()) engine.setAudioBoostDb(attempt, db)
+      }
+
+      Function("setNightModeDrc") { engine: Media3Engine, preset: String? ->
+        engine.setNightModeDrc(parseNightModeDrcPreset(preset))
+      }
+
+      Function("setDisplaySync") { engine: Media3Engine, policy: Map<String, Any?>? ->
+        val afr = parseAutoFrameRateMode(policy?.get("autoFrameRate") as? String)
+        val hdr = policy?.get("autoDynamicRange") as? Boolean ?: true
+        engine.setDisplaySync(afr, hdr)
+      }
+
+      Function("setAudioDelayByRefreshRate") { engine: Media3Engine, offsets: Map<String, Any?>? ->
+        engine.setAudioDelayByRefreshRate(parseAudioDelayByRefreshRate(offsets))
       }
 
       Function("supportsHardwareHevc4k") { engine: Media3Engine ->

@@ -59,13 +59,18 @@ public func loadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoad
   }
 
   let cushion = request.liveEdgeCushionSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+  let displaySync = AppleDisplaySyncSettings.resolve(
+    autoFrameRate: request.autoFrameRate,
+    autoDynamicRange: request.autoDynamicRange
+  )
 
   return EngineLoadOptions(
     isLive: isLive,
     httpHeaders: sanitizeRequestHeaders(request.headers),
     maxConcurrentSourceRequests: maxConcurrent,
     preferSoftwareDecode: request.preferHevcOverDolbyVision,
-    displayCriteriaOwner: .engine,
+    displayCriteriaOwner: resolveDisplayCriteriaOwner(for: displaySync),
+    displaySync: displaySync,
     liveStartupGraceSeconds: liveStartupGraceSeconds,
     liveStartupSingleSegmentMinimumSeconds: liveStartupSingleSegmentMinimumSeconds,
     liveEdgeCushionSeconds: cushion,

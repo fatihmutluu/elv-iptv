@@ -76,6 +76,10 @@ final class AetherSurfaceView: ExpoView {
   private var propSubtitleStyle: UserSubtitleStyleOverride?
   private var engineSubtitleStyle: UserSubtitleStyleOverride?
   private var preferEngineSubtitleStyle = false
+  private var coreShutterCovered = true
+  private var hdmiSettleActive = false
+  private var hdmiSettleTask: Task<Void, Never>?
+  private var hdmiSettleSeq = 0
   #if os(iOS)
   var keyboardMapper = HardwareKeyboardMapper()
   private var playbackKeyCommands: [UIKeyCommand] = []
@@ -222,6 +226,7 @@ final class AetherSurfaceView: ExpoView {
       boundOwnerId = nil
     }
     if let previous = boundEngine {
+      cancelHdmiShutterSettle()
       wantsScreenOn = false
       engineSubtitleStyle = nil
       preferEngineSubtitleStyle = false
@@ -244,11 +249,13 @@ final class AetherSurfaceView: ExpoView {
         driver.bindSurface(self)
       }
     } else {
+      cancelHdmiShutterSettle()
       engineSubtitleStyle = nil
       preferEngineSubtitleStyle = false
       applyEffectiveSubtitleStyle()
       subtitleOverlayView.clear()
-      shutterView.isHidden = false
+      coreShutterCovered = true
+      refreshShutterVisibility()
       wantsScreenOn = false
       refreshIdleTimer()
     }
@@ -330,7 +337,40 @@ final class AetherSurfaceView: ExpoView {
   @MainActor
   func applyShutter(covered: Bool, from engine: EngineObject?) {
     guard let engine, boundEngine === engine else { return }
-    shutterView.isHidden = !covered
+    coreShutterCovered = covered
+    refreshShutterVisibility()
+  }
+
+  /// Holds the black zap shutter over an HDMI refresh-rate / HDR resync settle window (`#188`, `#116`).
+  @MainActor
+  func triggerHdmiShutterSettle(durationMs: Int, from engine: EngineObject?) {
+    guard let engine, boundEngine === engine, durationMs > 0 else { return }
+    hdmiSettleTask?.cancel()
+    hdmiSettleSeq &+= 1
+    let seq = hdmiSettleSeq
+    hdmiSettleActive = true
+    refreshShutterVisibility()
+    let sleepNanos = UInt64(durationMs) * 1_000_000
+    hdmiSettleTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: sleepNanos)
+      guard let self, !Task.isCancelled, self.hdmiSettleSeq == seq else { return }
+      self.hdmiSettleActive = false
+      self.hdmiSettleTask = nil
+      self.refreshShutterVisibility()
+    }
+  }
+
+  @MainActor
+  private func cancelHdmiShutterSettle() {
+    hdmiSettleSeq &+= 1
+    hdmiSettleTask?.cancel()
+    hdmiSettleTask = nil
+    hdmiSettleActive = false
+  }
+
+  @MainActor
+  private func refreshShutterVisibility() {
+    shutterView.isHidden = !(coreShutterCovered || hdmiSettleActive)
   }
 
   @MainActor
@@ -349,13 +389,15 @@ final class AetherSurfaceView: ExpoView {
   @MainActor
   func detachEngineReference(_ engine: EngineObject?) {
     guard engine == nil || boundEngine === engine else { return }
+    cancelHdmiShutterSettle()
     boundEngine = nil
     engineSubtitleStyle = nil
     preferEngineSubtitleStyle = false
     applyEffectiveSubtitleStyle()
     wantsScreenOn = false
     subtitleOverlayView.clear()
-    shutterView.isHidden = false
+    coreShutterCovered = true
+    refreshShutterVisibility()
     if let prevId = boundOwnerId {
       boundOwnerId = nil
       IdleTimer.setHeld(false, ownerId: prevId)

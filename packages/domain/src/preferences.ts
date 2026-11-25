@@ -12,6 +12,7 @@ import {
   serializeExtendedPreferences,
   utf8ByteLength,
 } from './preferences-validators';
+import { DEFAULT_WAVE_F7A_PREFERENCES } from './preferences-wave-f7a';
 import { elvError, err, ok, type Result } from './result';
 import { DEFAULT_SUBTITLE_STYLE, type SubtitleStyleConfig } from './subtitle-style';
 
@@ -54,6 +55,28 @@ export {
   TV_CLOCK_MODES,
   type TvClockMode,
 } from './preferences-validators';
+export {
+  AUDIO_CHANNEL_LAYOUTS,
+  AUDIO_PASSTHROUGH_CODECS,
+  AUTO_FRAME_RATE_MODES,
+  type AudioChannelLayout,
+  type AudioPassthroughCodec,
+  type AutoFrameRateMode,
+  DEFAULT_AUDIO_PASSTHROUGH_CODECS,
+  isAudioChannelLayout,
+  isAudioPassthroughCodec,
+  isAutoFrameRateMode,
+  isNightModeDrcPreset,
+  isRefreshRateBucket,
+  MAX_REFRESH_RATE_AUDIO_DELAY_MS,
+  MIN_REFRESH_RATE_AUDIO_DELAY_MS,
+  NIGHT_MODE_DRC_PRESETS,
+  type NightModeDrcPreset,
+  normalizeAudioDelayByRefreshRateMs,
+  normalizeAudioPassthroughCodecs,
+  REFRESH_RATE_BUCKETS,
+  type RefreshRateBucket,
+} from './preferences-wave-f7a';
 
 /** Schema version stored inside serialized preferences payloads. */
 export const PREFERENCES_SCHEMA_VERSION = 1 as const;
@@ -134,6 +157,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   vodEnrichmentEnabled: false,
   minimizeToTray: false,
   autoEnterPip: true,
+  ...DEFAULT_WAVE_F7A_PREFERENCES,
   subtitleStyle: DEFAULT_SUBTITLE_STYLE,
 });
 

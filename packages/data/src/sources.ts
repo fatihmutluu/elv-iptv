@@ -15,6 +15,7 @@ import {
 } from '@elv/domain';
 import { normalizeStalkerPortalUrl } from '@elv/sources';
 import { fingerprintStalkerCredentials } from './credential-fingerprint';
+import { deleteDrmSpecs } from './drm-secret-store';
 import { pruneSourceFailoverMembersInTx } from './failover-groups-repo';
 import { deleteStalkerCmdMap } from './stalker-cmds-store';
 import type { SegmentRule, UrlVars } from './templates';
@@ -241,6 +242,7 @@ const WITHOUT_ROWID_DELETE_SPECS: readonly (readonly [string, string])[] = [
   ['channel_guide_overrides', 'channel_key'],
   ['programmes', '(guide_id, start)'],
   ['programmes_next', '(guide_id, start)'],
+  ['item_drm_meta', 'item_key'],
 ];
 
 const BULK_DELETE_SPECS: readonly BulkDeleteSpec[] = [
@@ -285,12 +287,12 @@ export const SOURCE_ID = /^[A-Za-z0-9._-]+$/;
 /**
  * Secret keys: `source.<id>.xtream` (JSON server, username, password), `.playlist`, `.urlvars` (JSON
  * {@link UrlVars}), `.stalker` (JSON portalUrl, mac, optional serialNumber), `.stalker_cmds` (JSON
- * opaque Stalker command map). Only letters, digits, `.`, `-` and `_`, the set the strictest platform
+ * opaque Stalker command map), `.drm_specs` (JSON play-time DRM spec map). Only letters, digits, `.`, `-` and `_`, the set the strictest platform
  * secret store allows.
  */
 export function secretKey(
   id: string,
-  part: 'xtream' | 'playlist' | 'urlvars' | 'stalker' | 'stalker_cmds',
+  part: 'xtream' | 'playlist' | 'urlvars' | 'stalker' | 'stalker_cmds' | 'drm_specs',
 ): string {
   return `source.${id}.${part}`;
 }
@@ -628,16 +630,18 @@ export async function updateXtreamBackupServers(
   }
 }
 
-/** Deletes the secrets of a source (including all `urlvars` and `stalker_cmds` shards); reports `storage/secret-delete-failed` on failure. */
+/** Deletes the secrets of a source (including all `urlvars`, `stalker_cmds`, and `drm_specs` shards); reports `storage/secret-delete-failed` on failure. */
 export async function removeSecrets(id: string, secrets: SecretStore): Promise<Result<void>> {
-  const [partResults, urlvarsResult, stalkerCmdsResult] = await Promise.all([
+  const [partResults, urlvarsResult, stalkerCmdsResult, drmSpecsResult] = await Promise.all([
     Promise.allSettled(NON_SHARDED_PARTS.map((part) => secrets.delete(secretKey(id, part)))),
     deleteUrlVars(secrets, id),
     deleteStalkerCmdMap(secrets, id),
+    deleteDrmSpecs(secrets, id),
   ]);
   return partResults.some((r) => r.status === 'rejected') ||
     !urlvarsResult.ok ||
-    !stalkerCmdsResult.ok
+    !stalkerCmdsResult.ok ||
+    !drmSpecsResult.ok
     ? err(elvError('storage', 'secret-delete-failed'))
     : ok(undefined);
 }

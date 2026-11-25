@@ -2886,3 +2886,87 @@ msgstr "ELV IPTV penceresini göster"
 
 msgid "desktop.tray.quit"
 msgstr "Çıkış"
+
+msgid "settings.playback.autoFrameRateTitle"
+msgstr "Kare hızını eşleştir"
+
+msgid "settings.playback.autoFrameRateDescription"
+msgstr "Daha akıcı görüntü için ekran yenileme hızını video kare hızıyla eşleştirir."
+
+msgid "settings.playback.autoFrameRateOff"
+msgstr "Kapalı"
+
+msgid "settings.playback.autoFrameRateSeamless"
+msgstr "Yalnızca kesintisiz"
+
+msgid "settings.playback.autoFrameRateAlways"
+msgstr "Her zaman"
+
+msgid "settings.playback.autoDynamicRangeTitle"
+msgstr "Dinamik aralığı eşleştir"
+
+msgid "settings.playback.autoDynamicRangeDescription"
+msgstr "Ekran çıkışını SDR, HDR10, HLG ve Dolby Vision arasında otomatik değiştirir."
+
+msgid "settings.playback.nightModeDrcTitle"
+msgstr "Gece modu (dinamik aralık)"
+
+msgid "settings.playback.nightModeDrcDescription"
+msgstr "Gece izlerken yüksek ses efektlerini kısar ve alçak diyalogları netleştirir."
+
+msgid "settings.playback.nightModeDrcOff"
+msgstr "Kapalı"
+
+msgid "settings.playback.nightModeDrcLight"
+msgstr "Hafif"
+
+msgid "settings.playback.nightModeDrcNight"
+msgstr "Gece"
+
+msgid "settings.playback.refreshRateAudioDelayTitle"
+msgstr "Yenileme hızına göre ses gecikmesi"
+
+msgid "settings.playback.refreshRateAudioDelayDescription"
+msgstr "Her ekran yenileme hızı için ayrı ses eşitleme gecikmesini otomatik uygular."
+
+msgid "settings.desktop.audioPassthroughTitle"
+msgstr "Ses doğrudan aktarımı (bit akışı)"
+
+msgid "settings.desktop.audioPassthroughDescription"
+msgstr "Kodlanmış çevresel sesi HDMI veya optik çıkışla doğrudan harici alıcıya gönderir."
+
+msgid "settings.desktop.audioPassthroughCodecsTitle"
+msgstr "Doğrudan aktarım çözücüleri"
+
+msgid "settings.desktop.audioExclusiveTitle"
+msgstr "Özel ses aygıtı modu"
+
+msgid "settings.desktop.audioExclusiveDescription"
+msgstr "Oynatma sırasında sistem karıştırıcısını atlamak için ses çıkışını özel modda kullanır."
+
+msgid "settings.desktop.audioAc3EncodeTitle"
+msgstr "Gerçek zamanlı AC-3 kodlama"
+
+msgid "settings.desktop.audioAc3EncodeDescription"
+msgstr "Çok kanallı sesi optik S/PDIF alıcılar için gerçek zamanlı AC-3 olarak kodlar."
+
+msgid "settings.desktop.audioChannelLayoutTitle"
+msgstr "Hoparlör kanal düzeni"
+
+msgid "settings.desktop.audioChannelLayoutAuto"
+msgstr "Otomatik"
+
+msgid "settings.desktop.audioChannelLayoutStereo"
+msgstr "Stereo (2.0)"
+
+msgid "settings.desktop.audioChannelLayout51"
+msgstr "5.1 Çevresel"
+
+msgid "settings.desktop.audioChannelLayout71"
+msgstr "7.1 Çevresel"
+
+msgid "player.audio.passthroughFallbackNotice"
+msgstr "Bu cihazda ses doğrudan aktarımı kullanılamıyor — PCM çıkışına geçildi."
+
+msgid "player.error.drmUnsupported"
+msgstr "Korumalı yayın bu cihazda oynatılamıyor."

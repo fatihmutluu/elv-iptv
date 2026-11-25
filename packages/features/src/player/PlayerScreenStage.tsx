@@ -39,9 +39,10 @@ import {
 import { PlayerStatsHud } from './PlayerStatsHud';
 import { computeBrightnessDimOpacity, PlayerTouchGestures } from './PlayerTouchGestures';
 import { StillWatchingPrompt } from './StillWatchingPrompt';
+import type { WaveF7aPlayerPreferences } from './usePlayerDisplayAndAudioSync';
 
 /** Props of `PlayerScreen`. */
-export interface PlayerScreenProps {
+export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
   catalog: Pick<CatalogService, 'resolveStream' | 'getProgress' | 'saveProgress'> &
     Partial<
       Pick<
@@ -181,6 +182,7 @@ export interface PlayerScreenStageProps {
     'visible' | 'onSubmit' | 'onClose'
   >;
   readonly externalSubtitleFeedback?: 'loaded' | 'failed' | null;
+  readonly passthroughFallbackVisible?: boolean;
   readonly stillWatchingVisible: boolean;
   readonly stillWatchingRemainingSec: number;
   readonly stillWatchingFocusedAction?: 'continue' | 'stop';
@@ -432,6 +434,23 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
                 : 'player.externalSubtitle.failed',
             )}
             tone="accent"
+          />
+        </View>
+      ) : null}
+
+      {!suppressChrome && p.passthroughFallbackVisible === true ? (
+        <View
+          pointerEvents="none"
+          style={[
+            playerStyles.holdSpeedWrap,
+            { top: 20 + viewport.safeArea.top + viewport.overscan.y },
+          ]}
+        >
+          <MicroPill
+            testID="player-passthrough-fallback-notice"
+            label={p.i18n.t('player.audio.passthroughFallbackNotice')}
+            tone="neutral"
+            icon="audio"
           />
         </View>
       ) : null}

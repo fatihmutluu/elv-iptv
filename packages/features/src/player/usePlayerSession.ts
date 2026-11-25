@@ -22,6 +22,10 @@ import {
 import type { PlayTarget } from '../ports/play-target';
 import type { AudioDeviceInfo, HostKey, OpenVideoEngine, VideoHost } from '../ports/video-host';
 import { useStreamHealth } from '../shared';
+import {
+  type WaveF7aLoadOptions,
+  wrapEngineWithWaveF7aLoadOptions,
+} from './usePlayerDisplayAndAudioSync';
 
 type SessionState =
   | { readonly kind: 'opening' }
@@ -84,6 +88,7 @@ export function usePlayerSession(params: {
   timersRef: MutableRefObject<PlaybackTimers>;
   hostKeyRef: MutableRefObject<(key: HostKey) => void>;
   onExitRef: MutableRefObject<() => void>;
+  waveF7aLoadOptionsRef?: MutableRefObject<WaveF7aLoadOptions>;
   onServiceReady: (service: PlaybackService) => void;
 }) {
   const {
@@ -104,6 +109,7 @@ export function usePlayerSession(params: {
     timersRef,
     hostKeyRef,
     onExitRef,
+    waveF7aLoadOptionsRef,
   } = params;
   const streamHealth = useStreamHealth();
   const streamHealthRef = useRef(streamHealth);
@@ -139,8 +145,12 @@ export function usePlayerSession(params: {
         return;
       }
       const health = streamHealthRef.current;
+      const boundEngine =
+        waveF7aLoadOptionsRef !== undefined
+          ? wrapEngineWithWaveF7aLoadOptions(opened.engine, () => waveF7aLoadOptionsRef.current)
+          : opened.engine;
       const service = createPlaybackService({
-        engine: opened.engine,
+        engine: boundEngine,
         clock: clockRef.current,
         timers: timersRef.current,
         healthCache: health.healthCache,
@@ -202,7 +212,16 @@ export function usePlayerSession(params: {
         activeSession = null;
       }
     };
-  }, [catalogRef, clockRef, hostKeyRef, onExitRef, serviceRef, timersRef, videoHost]);
+  }, [
+    catalogRef,
+    clockRef,
+    hostKeyRef,
+    onExitRef,
+    serviceRef,
+    timersRef,
+    videoHost,
+    waveF7aLoadOptionsRef,
+  ]);
 
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : null;
   const [inPip, setInPip] = useState(false);

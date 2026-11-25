@@ -1,4 +1,4 @@
-import type { AttemptToken, ExternalSubtitleTrack } from '@elv/playback';
+import type { AttemptToken, DisplaySyncPolicy, ExternalSubtitleTrack } from '@elv/playback';
 import {
   isEngineId,
   isGateReport,
@@ -12,11 +12,12 @@ import {
   type PlayerOpenReply,
   type PlayerUiEvent,
   type PlayerUiMessage,
-  sanitizeDesktopMediaMetadata,
 } from '../../shared/player-ipc.ts';
 import type { DesktopMediaBridge, DesktopMediaCommand } from '../media-bridge.ts';
 import type { TaskbarAction, TaskbarController } from '../taskbar-controls.ts';
+import type { DesktopDisplayRefreshController } from './display-refresh.ts';
 import type { MpvEngine } from './engine.ts';
+import { dispatchPlayerBridgeCommand } from './ipc-commands.ts';
 import {
   dispatchDesktopMediaCommand,
   type MediaBridgeState,
@@ -82,6 +83,10 @@ export interface PlayerIpcDeps {
   onVideoAspectRatioChange?(owner: WebContentsLike, aspectRatio: number | undefined): void;
   /** Optional OS media bridge (Linux MPRIS2 `#238` or macOS MediaPlayer `#301`). */
   mediaBridge?: DesktopMediaBridge;
+  /** Optional fullscreen Auto Frame-Rate display refresh controller (`#214`, `#116`). */
+  displayRefreshController?: DesktopDisplayRefreshController;
+  /** Resolves the active display identifier for an owning renderer `WebContents` (`#214`). */
+  getDisplayId?(owner: WebContentsLike): string | undefined;
   /** Optional sandboxed subtitle file picker (`#32`). */
   pickSubtitleFile?(owner: WebContentsLike): Promise<ExternalSubtitleTrack | null>;
   /**
@@ -99,6 +104,9 @@ interface Entry {
   attempt: AttemptToken;
   isPrimary: boolean;
   lastAspectRatio: number | undefined;
+  lastFps: number | undefined;
+  lastFullscreen: boolean;
+  lastDisplaySync: DisplaySyncPolicy | undefined;
   emitUi: (ui: PlayerUiEvent) => void;
   unsubscribe(): void;
   taskbar?: TaskbarController | undefined;
@@ -113,7 +121,9 @@ interface Entry {
  * and a main-frame navigation, renderer crash, or window close releases all owned engines.
  */
 export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
-  const { ipcMain, log, powerBlocker, mediaBridge } = deps;
+  const { ipcMain, log, powerBlocker, mediaBridge, displayRefreshController } = deps;
+  const resolveDisplayId = (owner: WebContentsLike): string | undefined =>
+    deps.getDisplayId?.(owner);
   const bufferingReleaseMs = Math.max(0, deps.bufferingReleaseMs ?? DEFAULT_BUFFERING_RELEASE_MS);
   const timers: PlayerIpcTimers = deps.timers ?? {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -212,11 +222,13 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       other.isPrimary = false;
       other.taskbar?.clear();
       other.taskbar = undefined;
+      displayRefreshController?.setPlaybackActive(id, false, resolveDisplayId(other.owner));
     }
   };
 
   const release = (id: string): void => {
     releasePowerBlocker(id);
+    displayRefreshController?.restoreForEngine(id);
     const entry = entries.get(id);
     if (!entry) return;
     entries.delete(id);
@@ -309,6 +321,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     pendingSet.add(engineId);
 
     let registered = false;
+    let initialFullscreen = false;
     const isCurrent = (): boolean =>
       !disposed &&
       !sender.isDestroyed() &&
@@ -316,6 +329,26 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       (!registered || entries.has(engineId));
     const emitUi = (ui: PlayerUiEvent): void => {
       if (!isCurrent()) return;
+      if (ui.type === 'fullscreen-changed') {
+        initialFullscreen = ui.fullscreen;
+        const currentEntry = entries.get(engineId);
+        if (currentEntry) {
+          currentEntry.lastFullscreen = ui.fullscreen;
+          if (currentEntry.isPrimary) {
+            displayRefreshController?.setFullscreen(
+              engineId,
+              ui.fullscreen,
+              resolveDisplayId(sender),
+            );
+          }
+        } else if (primary) {
+          displayRefreshController?.setFullscreen(
+            engineId,
+            ui.fullscreen,
+            resolveDisplayId(sender),
+          );
+        }
+      }
       const message: PlayerUiMessage = { engineId, ui };
       sendTo(sender, PLAYER_CHANNELS.ui, message);
     };
@@ -366,6 +399,9 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       attempt: 0,
       isPrimary: primary,
       lastAspectRatio: undefined,
+      lastFps: undefined,
+      lastFullscreen: initialFullscreen,
+      lastDisplaySync: undefined,
       emitUi,
       unsubscribe: () => undefined,
       ...(taskbar === undefined ? {} : { taskbar }),
@@ -380,7 +416,10 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
           powerBlocker?.acquire(engineId);
           taskbarState.active = true;
           taskbarState.paused = false;
-          if (entry.isPrimary) syncTaskbar(entry.taskbar, taskbarState);
+          if (entry.isPrimary) {
+            syncTaskbar(entry.taskbar, taskbarState);
+            displayRefreshController?.setPlaybackActive(engineId, true, resolveDisplayId(sender));
+          }
           mediaState.status = 'Playing';
           mediaState.isNavigating = false;
           pushMediaState(engineId, entry.isPrimary);
@@ -403,9 +442,15 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
             taskbarState.active = false;
             taskbarState.paused = false;
             entry.lastAspectRatio = undefined;
+            entry.lastFps = undefined;
             if (entry.isPrimary) {
               entry.taskbar?.clear();
               deps.onVideoAspectRatioChange?.(sender, undefined);
+              displayRefreshController?.setPlaybackActive(
+                engineId,
+                false,
+                resolveDisplayId(sender),
+              );
             }
             mediaState.status = 'Stopped';
             mediaState.isNavigating = false;
@@ -444,14 +489,30 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
             deps.onVideoAspectRatioChange?.(sender, event.info.aspectRatio);
           }
         }
+        if (
+          typeof event.info.fps === 'number' &&
+          Number.isFinite(event.info.fps) &&
+          event.info.fps > 0
+        ) {
+          entry.lastFps = event.info.fps;
+          if (entry.isPrimary) {
+            displayRefreshController?.setContentFps(
+              engineId,
+              event.info.fps,
+              resolveDisplayId(sender),
+            );
+          }
+        }
       } else if (event.type === 'error') {
         releasePowerBlocker(engineId);
         taskbarState.active = false;
         taskbarState.paused = false;
         entry.lastAspectRatio = undefined;
+        entry.lastFps = undefined;
         if (entry.isPrimary) {
           entry.taskbar?.clear();
           deps.onVideoAspectRatioChange?.(sender, undefined);
+          displayRefreshController?.setPlaybackActive(engineId, false, resolveDisplayId(sender));
         }
         mediaState.status = 'Stopped';
         mediaState.isNavigating = false;
@@ -500,6 +561,19 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     if (entry.taskbarState.active) syncTaskbar(entry.taskbar, entry.taskbarState);
     else entry.taskbar?.clear();
     deps.onVideoAspectRatioChange?.(sender, entry.lastAspectRatio);
+    if (displayRefreshController) {
+      const displayId = resolveDisplayId(sender);
+      if (entry.lastDisplaySync !== undefined) {
+        displayRefreshController.setPolicy(engineId, entry.lastDisplaySync);
+      }
+      displayRefreshController.setFullscreen(engineId, entry.lastFullscreen, displayId);
+      displayRefreshController.setContentFps(engineId, entry.lastFps, displayId);
+      displayRefreshController.setPlaybackActive(
+        engineId,
+        entry.mediaState.status === 'Playing',
+        displayId,
+      );
+    }
     activeMediaEngineId = engineId;
     pushMediaState(engineId, true);
   };
@@ -530,165 +604,18 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       );
       return;
     }
-    const { engine } = entry;
-    switch (command.name) {
-      case 'load':
-        entry.attempt = command.cmd.attempt;
-        entry.lastAspectRatio = undefined;
-        releasePowerBlocker(engineId);
-        if (entry.isPrimary) deps.onVideoAspectRatioChange?.(sender, undefined);
-        entry.taskbarState.isVod = command.cmd.kind === 'vod';
-        entry.taskbarState.positionMs = command.cmd.startMs ?? 0;
-        entry.taskbarState.durationMs = 0;
-        entry.taskbarState.active = false;
-        entry.taskbarState.paused = false;
-        entry.taskbar?.clear();
-        entry.mediaState.status = 'Stopped';
-        entry.mediaState.isNavigating = true;
-        entry.mediaState.kind = command.cmd.kind;
-        entry.mediaState.positionUs = Math.max(0, Math.round((command.cmd.startMs ?? 0) * 1000));
-        entry.mediaState.durationUs = 0;
-        pushMediaState(engineId, entry.isPrimary);
-        engine.load(command.cmd);
-        break;
-      case 'pause':
-      case 'stop':
-      case 'recreate':
-        entry.attempt = command.attempt;
-        releasePowerBlocker(engineId);
-        if (command.name === 'stop') {
-          entry.lastAspectRatio = undefined;
-          if (entry.isPrimary) deps.onVideoAspectRatioChange?.(sender, undefined);
-          entry.taskbarState.active = false;
-          entry.taskbarState.paused = false;
-          entry.taskbar?.clear();
-          entry.mediaState.status = 'Stopped';
-          entry.mediaState.isNavigating = false;
-          entry.mediaState.positionUs = 0;
-          entry.mediaState.durationUs = 0;
-          pushMediaState(engineId);
-        } else if (command.name === 'recreate') {
-          entry.lastAspectRatio = undefined;
-          if (entry.isPrimary) deps.onVideoAspectRatioChange?.(sender, undefined);
-        }
-        engine[command.name](command.attempt);
-        break;
-      case 'retry':
-      case 'play':
-        entry.attempt = command.attempt;
-        engine[command.name](command.attempt);
-        break;
-      case 'seek': {
-        entry.attempt = command.attempt;
-        const posUs = Math.max(0, Math.round(command.positionMs * 1000));
-        entry.mediaState.positionUs = posUs;
-        if (activeMediaEngineId === engineId) {
-          mediaBridge?.notifySeeked?.(posUs);
-        }
-        pushMediaState(engineId);
-        engine.seek(command.attempt, command.positionMs);
-        break;
-      }
-      case 'jumpToLiveEdge':
-        entry.attempt = command.attempt;
-        engine.jumpToLiveEdge?.(command.attempt);
-        break;
-      case 'setSpeed':
-        entry.attempt = command.attempt;
-        entry.mediaState.rate = command.rate;
-        pushMediaState(engineId);
-        engine.setSpeed?.(command.attempt, command.rate);
-        break;
-      case 'selectAudioTrack':
-        engine.selectAudioTrack?.(command.attempt, command.id);
-        break;
-      case 'selectSubtitleTrack':
-        engine.selectSubtitleTrack?.(command.attempt, command.id);
-        break;
-      case 'selectSecondarySubtitleTrack':
-        engine.selectSecondarySubtitleTrack?.(command.attempt, command.id);
-        break;
-      case 'addExternalSubtitle':
-        engine.addExternalSubtitle?.(command.attempt, command.track);
-        break;
-      case 'setSubtitleStyle':
-        engine.setSubtitleStyle?.(command.style);
-        break;
-      case 'selectVideoQuality':
-        engine.selectVideoQuality?.(command.attempt, command.id);
-        break;
-      case 'setVolume':
-        entry.mediaState.volume = Math.max(0, Math.min(1, command.volume / 100));
-        pushMediaState(engineId);
-        engine.setVolume(command.volume);
-        break;
-      case 'setAudioDelay':
-        if (command.attempt !== undefined) {
-          engine.setAudioDelay(command.attempt, command.delaySec * 1000);
-        } else {
-          engine.setAudioDelay(command.delaySec);
-        }
-        break;
-      case 'setSubtitleDelay':
-        if (command.attempt !== undefined) {
-          engine.setSubtitleDelay(command.attempt, command.delaySec * 1000);
-        } else {
-          engine.setSubtitleDelay(command.delaySec);
-        }
-        break;
-      case 'setAudioDevice':
-        engine.setAudioDevice(command.device);
-        break;
-      case 'setDeinterlace':
-        engine.setDeinterlace(command.enabled);
-        break;
-      case 'setDeinterlaceMode':
-        engine.setDeinterlaceMode(command.mode);
-        break;
-      case 'setPitchLock':
-        engine.setPitchLock(command.locked);
-        break;
-      case 'setAudioNormalization':
-        engine.setAudioNormalization(command.enabled);
-        break;
-      case 'queueNext':
-        engine.queueNext(command.request);
-        break;
-      case 'clearQueue':
-        engine.clearQueue();
-        break;
-      case 'setHwdec':
-        engine.setHwdec(command.profile);
-        break;
-      case 'setResizeMode':
-        engine.setResizeMode(command.mode);
-        break;
-      case 'setFilterSdh':
-        engine.setFilterSdh(command.enabled);
-        break;
-      case 'setSubtitleFontFamily':
-        engine.setSubtitleFontFamily(command.family);
-        break;
-      case 'setMediaMetadata': {
-        const sanitized = sanitizeDesktopMediaMetadata(command.metadata);
-        entry.mediaState.metadata = sanitized;
-        if (sanitized !== null) entry.mediaState.kind = sanitized.kind;
-        pushMediaState(engineId, entry.isPrimary && sanitized !== null);
-        break;
-      }
-      case 'fullscreen':
-        engine.toggleFullscreen();
-        break;
-      case 'mute':
-        engine.toggleMute();
-        break;
-      case 'setMuted':
-        engine.setMuted?.(command.muted);
-        break;
-      case 'release':
-        release(engineId);
-        break;
-    }
+    dispatchPlayerBridgeCommand(engineId, entry, command, {
+      ...(mediaBridge === undefined ? {} : { mediaBridge }),
+      ...(displayRefreshController === undefined ? {} : { displayRefreshController }),
+      resolveDisplayId,
+      releasePowerBlocker,
+      ...(deps.onVideoAspectRatioChange === undefined
+        ? {}
+        : { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }),
+      pushMediaState,
+      isActiveMediaEngine: (id) => activeMediaEngineId === id,
+      releaseEngine: release,
+    });
   };
 
   const onArea: IpcListener = ({ sender }, message) =>
@@ -753,6 +680,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     ipcMain.removeListener(PLAYER_CHANNELS.gateReport, onGate);
     for (const id of [...bufferingTimers.keys()]) clearBufferingTimer(id);
     for (const id of [...entries.keys()]) release(id);
+    displayRefreshController?.restoreAll();
     powerBlocker?.releaseAll();
   };
 }

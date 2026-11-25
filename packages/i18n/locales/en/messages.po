@@ -2886,3 +2886,87 @@ msgstr "Restore ELV IPTV"
 
 msgid "desktop.tray.quit"
 msgstr "Quit"
+
+msgid "settings.playback.autoFrameRateTitle"
+msgstr "Match frame rate"
+
+msgid "settings.playback.autoFrameRateDescription"
+msgstr "Switch display refresh rate to match video frame rate for smoother motion."
+
+msgid "settings.playback.autoFrameRateOff"
+msgstr "Off"
+
+msgid "settings.playback.autoFrameRateSeamless"
+msgstr "Seamless only"
+
+msgid "settings.playback.autoFrameRateAlways"
+msgstr "Always"
+
+msgid "settings.playback.autoDynamicRangeTitle"
+msgstr "Match dynamic range"
+
+msgid "settings.playback.autoDynamicRangeDescription"
+msgstr "Automatically switch display output between SDR, HDR10, HLG, and Dolby Vision."
+
+msgid "settings.playback.nightModeDrcTitle"
+msgstr "Night mode (dynamic range)"
+
+msgid "settings.playback.nightModeDrcDescription"
+msgstr "Compress loud sound effects and boost quiet dialogue for late-night viewing."
+
+msgid "settings.playback.nightModeDrcOff"
+msgstr "Off"
+
+msgid "settings.playback.nightModeDrcLight"
+msgstr "Light"
+
+msgid "settings.playback.nightModeDrcNight"
+msgstr "Night"
+
+msgid "settings.playback.refreshRateAudioDelayTitle"
+msgstr "Per-refresh-rate audio delay"
+
+msgid "settings.playback.refreshRateAudioDelayDescription"
+msgstr "Apply fine audio sync offsets automatically for each display refresh rate."
+
+msgid "settings.desktop.audioPassthroughTitle"
+msgstr "Audio passthrough (bitstream)"
+
+msgid "settings.desktop.audioPassthroughDescription"
+msgstr "Send encoded surround audio directly to an external receiver over HDMI or optical."
+
+msgid "settings.desktop.audioPassthroughCodecsTitle"
+msgstr "Passthrough codecs"
+
+msgid "settings.desktop.audioExclusiveTitle"
+msgstr "Exclusive audio device"
+
+msgid "settings.desktop.audioExclusiveDescription"
+msgstr "Request exclusive OS audio output to bypass system mixing during playback."
+
+msgid "settings.desktop.audioAc3EncodeTitle"
+msgstr "Real-time AC-3 encoding"
+
+msgid "settings.desktop.audioAc3EncodeDescription"
+msgstr "Encode multichannel audio to AC-3 for optical S/PDIF receivers."
+
+msgid "settings.desktop.audioChannelLayoutTitle"
+msgstr "Speaker channel layout"
+
+msgid "settings.desktop.audioChannelLayoutAuto"
+msgstr "Auto"
+
+msgid "settings.desktop.audioChannelLayoutStereo"
+msgstr "Stereo (2.0)"
+
+msgid "settings.desktop.audioChannelLayout51"
+msgstr "5.1 Surround"
+
+msgid "settings.desktop.audioChannelLayout71"
+msgstr "7.1 Surround"
+
+msgid "player.audio.passthroughFallbackNotice"
+msgstr "Audio passthrough unavailable on this device — switched to PCM."
+
+msgid "player.error.drmUnsupported"
+msgstr "Protected stream cannot be played on this device."

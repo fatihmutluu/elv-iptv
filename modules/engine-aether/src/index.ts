@@ -4,12 +4,19 @@ import {
   type EngineEvent,
   type ExternalSubtitleTrack,
   type LoadOptions,
-  type NativeEngineHandle,
   type PlayerEngine,
 } from '@elv/playback';
 import { requireNativeViewManager, requireOptionalNativeModule } from 'expo-modules-core';
 import { type ComponentType, createElement, type ReactElement } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
+import {
+  type AetherNativeDisplaySyncHandle,
+  type AppleAutoFrameRateMode,
+  type AppleDisplaySyncPolicy,
+  createDisplaySyncBridgeAdapter,
+} from './display-sync';
+
+export type { AppleAutoFrameRateMode, AppleDisplaySyncPolicy };
 
 /** The JS clock of React Native and Node; declared here because the package compiles without DOM types. */
 declare const performance: { now(): number };
@@ -93,7 +100,7 @@ export interface AetherEngineOptions {
 /** Live subtitle appearance configuration forwarded to `AetherSurface` and `setSubtitleStyle` (`#32`). */
 export type AetherSubtitleStyle = NonNullable<LoadOptions['subtitleStyle']>;
 
-interface AetherNativeEngineHandle extends NativeEngineHandle {
+interface AetherNativeEngineHandle extends AetherNativeDisplaySyncHandle {
   setMuted?(muted: boolean): void;
   setVolume?(volume: number): void;
   setAudioDelay?(attempt: number, delayMs: number): void;
@@ -581,7 +588,7 @@ function wrap(module: NativeEngineModule, options?: AetherEngineOptions): Player
     options?.handleAudioFocus === undefined
       ? new module.Engine()
       : new module.Engine({ handleAudioFocus: Boolean(options.handleAudioFocus) });
-  const bridged = bridgeNativeEngine(native, {
+  const bridged = bridgeNativeEngine(createDisplaySyncBridgeAdapter(native), {
     capabilities: CAPABILITIES,
     uptimeMs: () => module.uptimeMs(),
     now: () => performance.now(),
@@ -675,7 +682,7 @@ export interface AetherSurfaceProps {
 }
 
 interface NativeSurfaceProps {
-  engine: NativeEngineHandle;
+  engine: AetherNativeEngineHandle;
   style?: StyleProp<ViewStyle>;
   resizeMode?: 'fit' | 'fill' | 'stretch';
   subtitleBottomInsetPx?: number;

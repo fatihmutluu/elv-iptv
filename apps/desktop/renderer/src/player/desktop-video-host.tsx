@@ -1,6 +1,6 @@
 import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
 import type { VideoHost, VideoHostOpenOptions } from '@elv/features';
-import type { StreamRequest } from '@elv/playback';
+import type { DesktopAudioOutputConfig, DisplaySyncPolicy, StreamRequest } from '@elv/playback';
 import type {
   PlayerBridge,
   PlayerOpenOptions,
@@ -172,6 +172,10 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
         setDeinterlaceMode: (mode: DeinterlaceMode) => rawEngine.setDeinterlaceMode(mode),
         setPitchLock: (locked: boolean) => rawEngine.setPitchLock(locked),
         setAudioNormalization: (enabled: boolean) => rawEngine.setAudioNormalization(enabled),
+        setDisplaySync: (policy: DisplaySyncPolicy) => rawEngine.setDisplaySync(policy),
+        setDesktopAudioOutput: (config: DesktopAudioOutputConfig) =>
+          rawEngine.setDesktopAudioOutput(config),
+        onPassthroughFallback: (listener: () => void) => rawEngine.onPassthroughFallback(listener),
         queueNext: (request: {
           readonly itemKey: string;
           readonly stream: StreamRequest;

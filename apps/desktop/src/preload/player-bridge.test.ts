@@ -153,6 +153,30 @@ describe('createPlayerBridge', () => {
     const command = { engineId: 'e1', command: { name: 'stop', attempt: 2 } } as const;
     bridge.send(command);
     expect(ipc.send).toHaveBeenCalledWith(PLAYER_CHANNELS.command, command);
+    const displaySyncCmd = {
+      engineId: 'e1',
+      command: {
+        name: 'setDisplaySync',
+        policy: { autoFrameRate: 'seamless', autoDynamicRange: true },
+      },
+    } as const;
+    bridge.send(displaySyncCmd);
+    expect(ipc.send).toHaveBeenCalledWith(PLAYER_CHANNELS.command, displaySyncCmd);
+    const audioOutCmd = {
+      engineId: 'e1',
+      command: {
+        name: 'setDesktopAudioOutput',
+        config: {
+          passthrough: true,
+          codecs: ['ac3', 'eac3'],
+          exclusive: false,
+          ac3Encode: false,
+          channelLayout: 'auto',
+        },
+      },
+    } as const;
+    bridge.send(audioOutCmd);
+    expect(ipc.send).toHaveBeenCalledWith(PLAYER_CHANNELS.command, audioOutCmd);
     const area = { engineId: 'e1', area: { x: 0, y: 0, width: 2, height: 2, visible: true } };
     bridge.setArea(area);
     expect(ipc.send).toHaveBeenCalledWith(PLAYER_CHANNELS.area, area);

@@ -86,10 +86,8 @@ export function describePlaybackFailure(
     };
   }
   const diagnosis = diagnosePlaybackFailure({ ...context, error });
-  const verdict: PlaybackVerdict =
-    diagnosis.verdict === 'unknown' && error.code === 'drm'
-      ? 'codec-unsupported'
-      : diagnosis.verdict;
+  const isDrmError = diagnosis.verdict === 'unknown' && error.code === 'drm';
+  const verdict: PlaybackVerdict = isDrmError ? 'codec-unsupported' : diagnosis.verdict;
   const copy = VERDICT_COPY[verdict];
   const candidateStatus = diagnosis.httpStatus ?? extractHttpStatus(error);
   const httpStatus =
@@ -98,7 +96,7 @@ export function describePlaybackFailure(
       : undefined;
   const safeEvidence = sanitizeErrorDetail(diagnosis.evidence);
   return {
-    messageId: copy.messageId,
+    messageId: isDrmError ? 'player.error.drmUnsupported' : copy.messageId,
     hintId: copy.hintId,
     verdict,
     ...(httpStatus !== undefined ? { httpStatus } : {}),

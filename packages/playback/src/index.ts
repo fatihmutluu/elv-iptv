@@ -29,9 +29,20 @@ export {
   type PlaybackVerdict,
 } from './diagnoser';
 export {
+  type DesktopAudioOutputConfig,
+  type DisplaySyncPolicy,
+  refreshRateBucketKey,
+  resolveEffectiveAudioDelayMs,
+  STANDARD_FRAME_RATES,
+  snapStandardFrameRate,
+} from './display-sync';
+export {
   type AttemptToken,
   type ChapterInfo,
   type ClockAnchor,
+  type DrmClearKeyPair,
+  type DrmConfig,
+  type DrmScheme,
   EMPTY_TRACKS,
   type EngineCapabilities,
   type EngineError,

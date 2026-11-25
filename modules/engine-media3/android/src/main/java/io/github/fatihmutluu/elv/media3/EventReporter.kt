@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -43,6 +44,7 @@ internal class EventReporter(
   private val onFirstFrame: () -> Unit,
   private val onCue: (ScreenCue, Boolean) -> Unit,
   private val onTerminalError: () -> Unit = {},
+  private val onVideoFrameRateDetected: (Float) -> Unit = {},
 ) : Player.Listener, AnalyticsListener {
   private var player: Player? = null
   private var active = false
@@ -57,6 +59,8 @@ internal class EventReporter(
   private var anchoredRate: Float? = null
   private var lastVideoSize: VideoSize? = null
   private var lastVideoInfo: VideoInfoSnapshot? = null
+  private var estimatedFps: Float? = null
+  private var lastReportedRawFps: Float? = null
   private var analyticsDroppedFrames = 0
   private var reportedDroppedFrames = 0
   private val timelineWindow = Timeline.Window()
@@ -107,9 +111,21 @@ internal class EventReporter(
     anchoredRate = null
     lastVideoSize = null
     lastVideoInfo = null
+    estimatedFps = null
+    lastReportedRawFps = null
     analyticsDroppedFrames = 0
     reportedDroppedFrames = 0
     handler.removeCallbacks(tick)
+  }
+
+  /** Accepts stabilized PTS fallback FPS when container/format omits frameRate (#199). */
+  fun onEstimatedFrameRate(fps: Float) {
+    if (!active || !fps.isFinite() || fps <= 0f) return
+    estimatedFps = fps
+    val current = player ?: return
+    if (fence.acceptsPlayer(current)) {
+      maybeEmitMediaInfo(current)
+    }
   }
 
   /** Emits a byte-progress event while opening, buffering, or stalled (#314, #321). */
@@ -245,11 +261,13 @@ internal class EventReporter(
         onDolbyVisionFailed()
       }
     }
-    val status = causeOf<HttpDataSource.InvalidResponseCodeException>(error)?.responseCode
-    val contentType = causeOf<HttpDataSource.InvalidContentTypeException>(error)?.contentType
-    val notice = causeOf<ProviderNoticeException>(error)
-    val uri = causeOf<HttpDataSource.HttpDataSourceException>(error)?.dataSpec?.uri
+    val isDrmError = error.errorCode in 6000..6999
+    val status = if (isDrmError) null else causeOf<HttpDataSource.InvalidResponseCodeException>(error)?.responseCode
+    val contentType = if (isDrmError) null else causeOf<HttpDataSource.InvalidContentTypeException>(error)?.contentType
+    val notice = if (isDrmError) null else causeOf<ProviderNoticeException>(error)
+    val uri = if (isDrmError) null else causeOf<HttpDataSource.HttpDataSourceException>(error)?.dataSpec?.uri
     val detail = when {
+      isDrmError -> error.errorCodeName
       notice != null -> "${error.errorCodeName} provider notice ${notice.contentType.orEmpty()}".trimEnd()
       uri != null -> "${error.errorCodeName} ${redactUrl(uri.toString())}"
       else -> error.errorCodeName
@@ -389,7 +407,14 @@ internal class EventReporter(
 
   private fun maybeEmitMediaInfo(player: Player, tracks: Tracks = player.currentTracks) {
     val format = extractSelectedVideoFormat(tracks) ?: (player as? ExoPlayer)?.videoFormat
-    val snapshot = deriveVideoInfo(format, lastVideoSize) ?: return
+    val rawFps = format?.frameRate
+      ?.takeIf { it != Format.NO_VALUE.toFloat() && it.isFinite() && it > 0f }
+      ?: estimatedFps?.takeIf { it.isFinite() && it > 0f }
+    if (rawFps != null && rawFps != lastReportedRawFps) {
+      lastReportedRawFps = rawFps
+      onVideoFrameRateDetected(rawFps)
+    }
+    val snapshot = deriveVideoInfo(format, lastVideoSize, estimatedFps) ?: return
     if (snapshot == lastVideoInfo) return
     lastVideoInfo = snapshot
     send(mapOf("type" to "mediaInfo", "info" to snapshot.toMap()))

@@ -1,9 +1,17 @@
 import type { SubtitleStyleConfig } from '@elv/domain';
-import type { AttemptToken, EngineEvent, ExternalSubtitleTrack, MediaKind } from '@elv/playback';
+import type {
+  AttemptToken,
+  DesktopAudioOutputConfig,
+  DisplaySyncPolicy,
+  EngineEvent,
+  ExternalSubtitleTrack,
+  MediaKind,
+} from '@elv/playback';
 import type { DeinterlaceMode, PlayerUiEvent } from '../../../shared/player-ipc.ts';
 import type { VideoPresenter } from '../presenter/types.ts';
 import { type AudioDeviceTracker, createAudioDeviceTracker } from './audio-devices.ts';
 import { type AudioHotplug, createAudioHotplug } from './audio-hotplug.ts';
+import { desktopAudioOutputCommands, sameDesktopAudioOutputConfig } from './audio-output.ts';
 import { MpvWedgedError } from './client.ts';
 import type { MpvCommand, MpvEvent, MpvReply } from './codec.ts';
 import { createDeriver, type Deriver, isLiveMpegTsUrl } from './derive.ts';
@@ -16,6 +24,8 @@ import {
   headerFields,
   loadfileCommand,
   pitchLockCommand,
+  videoSyncCommand,
+  videoSyncModeFor,
 } from './options.ts';
 import type { MpvProcess } from './process.ts';
 import {
@@ -80,6 +90,8 @@ export interface LiveSession {
   appliedDeinterlaceMode?: DeinterlaceMode;
   appliedPitchLock?: boolean;
   appliedAudioNormalization?: boolean;
+  appliedVideoSync?: 'audio' | 'display-resample';
+  appliedDesktopAudioOutput?: DesktopAudioOutputConfig;
   audioDelayMs?: number;
   subtitleDelayMs?: number;
   inFlight?: MediaSlot;
@@ -123,10 +135,18 @@ export interface LiveSessionHooks {
   getDesiredDeinterlaceMode?(): DeinterlaceMode | undefined;
   getDesiredPitchLock?(): boolean | undefined;
   getDesiredAudioNormalization?(): boolean | undefined;
+  getDesiredDisplaySync?(): DisplaySyncPolicy | undefined;
+  getDesiredDesktopAudioOutput?(): DesktopAudioOutputConfig | undefined;
   getDesiredAudioDelayMs?(): number;
   getDesiredSubtitleDelayMs?(): number;
   getDesiredVideoQualityId?(): string | null;
   isSpdifPassthroughActive?(): boolean;
+  isAudioNormalizationSuppressed?(): boolean;
+  onMpvLog?(entry: {
+    readonly prefix: string;
+    readonly level: string;
+    readonly text: string;
+  }): void;
   readaheadStore?: ReadaheadTierStore;
 }
 
@@ -352,9 +372,11 @@ export function createSessionController(hooks: LiveSessionHooks) {
         return;
       }
       case 'log-message': {
+        const prefix = String(e['prefix'] ?? '');
         const level = String(e['level']);
         const text = String(e['text'] ?? '').trimEnd();
-        if (keepMpvLog(level, text)) L.deriver.log({ prefix: String(e['prefix']), level, text });
+        hooks.onMpvLog?.({ prefix, level, text });
+        if (keepMpvLog(level, text)) L.deriver.log({ prefix, level, text });
         return;
       }
       case 'client-message': {
@@ -505,9 +527,21 @@ export function createSessionController(hooks: LiveSessionHooks) {
         L.appliedPitchLock = desiredPitchLock;
         void send(L, pitchLockCommand(desiredPitchLock));
       }
+      const desiredDisplaySync = hooks.getDesiredDisplaySync?.();
+      if (desiredDisplaySync !== undefined) {
+        L.appliedVideoSync = videoSyncModeFor(desiredDisplaySync);
+        void send(L, videoSyncCommand(desiredDisplaySync));
+      }
+      const desiredDesktopAudio = hooks.getDesiredDesktopAudioOutput?.();
+      if (desiredDesktopAudio !== undefined) {
+        L.appliedDesktopAudioOutput = desiredDesktopAudio;
+        for (const cmd of desktopAudioOutputCommands(desiredDesktopAudio)) void send(L, cmd);
+      }
       const desiredNorm = hooks.getDesiredAudioNormalization?.();
       if (desiredNorm !== undefined) {
-        const effectiveNorm = desiredNorm && !hooks.isSpdifPassthroughActive?.();
+        const suppressed =
+          hooks.isAudioNormalizationSuppressed?.() ?? hooks.isSpdifPassthroughActive?.() ?? false;
+        const effectiveNorm = desiredNorm && !suppressed;
         L.appliedAudioNormalization = effectiveNorm;
         if (effectiveNorm || !desiredNorm) {
           void send(L, audioNormalizationCommand(effectiveNorm));
@@ -614,9 +648,31 @@ export function createSessionController(hooks: LiveSessionHooks) {
         await send(L, pitchLockCommand(desiredPitchLock));
         if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
       }
+      const desiredDisplaySync = hooks.getDesiredDisplaySync?.();
+      if (desiredDisplaySync !== undefined) {
+        const targetSync = videoSyncModeFor(desiredDisplaySync);
+        if (L.appliedVideoSync !== targetSync) {
+          L.appliedVideoSync = targetSync;
+          await send(L, videoSyncCommand(desiredDisplaySync));
+          if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
+        }
+      }
+      const desiredDesktopAudio = hooks.getDesiredDesktopAudioOutput?.();
+      if (
+        desiredDesktopAudio !== undefined &&
+        !sameDesktopAudioOutputConfig(L.appliedDesktopAudioOutput, desiredDesktopAudio)
+      ) {
+        L.appliedDesktopAudioOutput = desiredDesktopAudio;
+        for (const cmd of desktopAudioOutputCommands(desiredDesktopAudio)) {
+          await send(L, cmd);
+          if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
+        }
+      }
       const desiredNorm = hooks.getDesiredAudioNormalization?.();
       if (desiredNorm !== undefined) {
-        const effectiveNorm = desiredNorm && !hooks.isSpdifPassthroughActive?.();
+        const suppressed =
+          hooks.isAudioNormalizationSuppressed?.() ?? hooks.isSpdifPassthroughActive?.() ?? false;
+        const effectiveNorm = desiredNorm && !suppressed;
         if (L.appliedAudioNormalization !== effectiveNorm) {
           L.appliedAudioNormalization = effectiveNorm;
           await send(L, audioNormalizationCommand(effectiveNorm));

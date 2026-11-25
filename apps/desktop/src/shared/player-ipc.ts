@@ -9,6 +9,8 @@ import {
 } from '@elv/domain';
 import type {
   AttemptToken,
+  DesktopAudioOutputConfig,
+  DisplaySyncPolicy,
   EngineCapabilities,
   EngineEvent,
   ExternalSubtitleTrack,
@@ -23,6 +25,13 @@ import {
   MAX_EXTERNAL_SUBTITLES_PER_LOAD,
   SET_SUBTITLE_STYLE_CMD_KEYS,
 } from './player-ipc-subtitles.ts';
+import {
+  hasValidWaveF7aLoadOptions,
+  isDesktopAudioOutputConfig,
+  isDisplaySyncPolicy,
+  SET_DESKTOP_AUDIO_OUTPUT_CMD_KEYS,
+  SET_DISPLAY_SYNC_CMD_KEYS,
+} from './player-ipc-wave-f7a.ts';
 
 export type {
   AccessibilityFontFamily,
@@ -111,6 +120,7 @@ export type PlayerUiEvent =
   | { type: 'fullscreen-changed'; fullscreen: boolean }
   | { type: 'audio-devices'; devices: readonly AudioDeviceInfo[]; active: string }
   | { type: 'queueAdvanced'; itemKey: string; attempt?: AttemptToken }
+  | { type: 'passthroughFallback' }
   | { type: 'key'; key: PlayerUiKey }
   | { type: 'closed' };
 
@@ -184,6 +194,8 @@ export type BridgeCommand =
   | { name: 'setDeinterlaceMode'; mode: DeinterlaceMode }
   | { name: 'setPitchLock'; locked: boolean }
   | { name: 'setAudioNormalization'; enabled: boolean }
+  | { name: 'setDisplaySync'; policy: DisplaySyncPolicy }
+  | { name: 'setDesktopAudioOutput'; config: DesktopAudioOutputConfig }
   | { name: 'queueNext'; request: QueueNextRequest }
   | { name: 'clearQueue' }
   | { name: 'setHwdec'; profile: HwdecProfile }
@@ -496,6 +508,7 @@ function isLoadCommand(x: unknown): x is LoadCommand {
   if (!isRecord(x)) return false;
   if (!isAttempt(x['attempt']) || !isStreamUrl(x['url']) || !isHeaders(x['headers'])) return false;
   if (x['kind'] !== 'live' && x['kind'] !== 'vod') return false;
+  if (x['drm'] !== undefined) return false;
   if (x['startMs'] !== undefined && !isMs(x['startMs'])) return false;
   const options = x['options'];
   if (options === undefined) return true;
@@ -520,7 +533,8 @@ function isLoadCommand(x: unknown): x is LoadCommand {
       (Array.isArray(options['externalSubtitles']) &&
         options['externalSubtitles'].length <= MAX_EXTERNAL_SUBTITLES_PER_LOAD &&
         options['externalSubtitles'].every((t) => isExternalSubtitleTrack(t, isHeaders)))) &&
-    (options['subtitleStyle'] === undefined || isSubtitleStyleConfig(options['subtitleStyle']))
+    (options['subtitleStyle'] === undefined || isSubtitleStyleConfig(options['subtitleStyle'])) &&
+    hasValidWaveF7aLoadOptions(options)
   );
 }
 
@@ -570,6 +584,12 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
       return isDeinterlaceMode(x['mode']);
     case 'setPitchLock':
       return typeof x['locked'] === 'boolean';
+    case 'setDisplaySync':
+      return hasOnlyKeys(x, SET_DISPLAY_SYNC_CMD_KEYS) && isDisplaySyncPolicy(x['policy']);
+    case 'setDesktopAudioOutput':
+      return (
+        hasOnlyKeys(x, SET_DESKTOP_AUDIO_OUTPUT_CMD_KEYS) && isDesktopAudioOutputConfig(x['config'])
+      );
     case 'queueNext':
       return isQueueNextRequest(x['request']);
     case 'clearQueue':

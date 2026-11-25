@@ -1,6 +1,8 @@
 package io.github.fatihmutluu.elv.media3
 
+import android.app.Activity
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -12,7 +14,6 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
-import androidx.media3.common.text.Cue
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -29,7 +30,6 @@ import java.util.concurrent.atomic.AtomicLong
 private const val TAG = "ElvMedia3"
 private const val EVENT = "onEngineEvent"
 private const val REMOTE_ACTION_EVENT = "onRemoteMediaAction"
-private const val SUBTITLE_DELAY_TICK_MS = 50L
 private val ENGINE_IDS = AtomicInteger(0)
 
 /**
@@ -51,6 +51,7 @@ class Media3Engine : SharedObject {
   private lateinit var playerFactory: PlayerFactory
   private lateinit var tracksBridge: TrackSelectorBridge
   private lateinit var mediaSessionController: MediaSessionController
+  private lateinit var displayRefresh: DisplayRefreshController
 
   private val assOverlay: AssOverlayBridge
 
@@ -61,17 +62,18 @@ class Media3Engine : SharedObject {
     this.hasAppContext = true
     this.onDisposed = onDisposed
     this.assOverlay = AssOverlayBridge()
-    initEngine(context, options)
+    initEngine(context, options, activityProvider = { appContext.currentActivity })
   }
 
   internal constructor(
     context: Context, onDisposed: (Media3Engine) -> Unit = {},
     assOverlay: AssOverlayBridge = AssOverlayBridge(), options: MultiViewEngineOptions = MultiViewEngineOptions(),
+    activityProvider: () -> Activity? = { null },
   ) : super() {
     this.hasAppContext = false
     this.onDisposed = onDisposed
     this.assOverlay = assOverlay
-    initEngine(context, options)
+    initEngine(context, options, activityProvider = activityProvider)
   }
 
   private val thread = HandlerThread("ElvMedia3").apply { start() }
@@ -83,19 +85,21 @@ class Media3Engine : SharedObject {
   internal val codecPolicy = CodecPolicy()
   private val audioEffects = AudioEffectsController(handler)
   private val audioDelayUs = AtomicLong(0L)
-  private val subtitleCueBuffer = TimedSubtitleCueBuffer()
-  private var lastDeliveredCues: List<Cue>? = null
-  private val subtitleTick = Runnable { refreshDelayedSubtitles() }
+  private var baseAudioDelayMs: Long = 0L
+  private var audioDelayByRefreshRateMs: Map<String, Long> = emptyMap()
   private val fence = PrepareFence()
   private val surfaces = SurfaceController()
-  private val secondarySubs = SecondarySubtitleController(onSecondaryCues = surfaces::onSecondaryCues)
+  private val subtitles = EngineSubtitleDelivery(handler, surfaces) { player?.let(::applyResolvedSubtitleCues) }
   private val secondaryTextOutput = TextOutput { cueGroup ->
     val current = player ?: return@TextOutput
-    if (request != null && fence.isRendererOpen && tracksBridge.selectedSecondarySubtitleId != null) {
-      val positionUs = current.currentPosition.coerceAtLeast(0L) * 1_000L
-      secondarySubs.onRendererCues(positionUs, cueGroup.cues, filterSdh = request?.filterSdhSubtitles == true)
-      applyResolvedSubtitleCues(current)
-    }
+    val req = request ?: return@TextOutput
+    subtitles.onSecondaryRendererCues(
+      current, cueGroup.cues, req.filterSdhSubtitles, tracksBridge.isTextDisabled,
+      fence.isRendererOpen, tracksBridge.selectedExternalPrimaryId, tracksBridge.selectedSecondarySubtitleId,
+    )
+  }
+  private val ptsEstimator = PtsFrameRateEstimator { fps, gen ->
+    post { if (gen == generation && request != null) reporter.onEstimatedFrameRate(fps) }
   }
   private val reporter = EventReporter(
     handler = handler, fence = fence, hasInvalidAttachedSurface = surfaces::hasInvalidAttachedSurface,
@@ -104,6 +108,7 @@ class Media3Engine : SharedObject {
     onDolbyVisionFailed = codecPolicy::recordDolbyVisionFallback, onAudioCodecFailed = ::handleAudioCodecFailed,
     onFirstFrame = surfaces::onFramed, onCue = surfaces::onCue,
     onTerminalError = { mediaSessionController.onPlaybackStopped() },
+    onVideoFrameRateDetected = { fps -> displayRefresh.onContentFrameRate(fps) },
   )
   private val pictures = object : Player.Listener {
     override fun onVideoSizeChanged(videoSize: VideoSize) { if (fence.isRendererOpen) surfaces.onVideoSizeChanged(videoSize) }
@@ -116,23 +121,18 @@ class Media3Engine : SharedObject {
     }
     override fun onCues(cueGroup: CueGroup) {
       val current = player ?: return
-      if (request != null && fence.isRendererOpen && !tracksBridge.isTextDisabled) {
-        val sanitized = sanitizeCues(cueGroup.cues, filterSdh = request?.filterSdhSubtitles == true)
-        val positionUs = current.currentPosition.coerceAtLeast(0L) * 1_000L
-        subtitleCueBuffer.record(positionUs, sanitized)
-        applyResolvedSubtitleCues(current)
-      }
+      val req = request ?: return
+      subtitles.onPrimaryCues(
+        current, cueGroup.cues, req.filterSdhSubtitles, tracksBridge.isTextDisabled,
+        fence.isRendererOpen, tracksBridge.selectedExternalPrimaryId, tracksBridge.selectedSecondarySubtitleId,
+      )
     }
     override fun onAudioSessionIdChanged(audioSessionId: Int) = audioEffects.onAudioSessionIdChanged(audioSessionId)
     override fun onIsPlayingChanged(isPlaying: Boolean) {
       val current = player ?: return
       if (request != null && fence.acceptsPlayer(current)) {
         if (handleAudioFocus) mediaSessionController.updatePlayingState(isPlaying)
-        if (isPlaying) {
-          applyResolvedSubtitleCues(current)
-        } else {
-          handler.removeCallbacks(subtitleTick)
-        }
+        if (isPlaying) applyResolvedSubtitleCues(current) else subtitles.cancelTick()
       }
     }
     override fun onPlaybackStateChanged(playbackState: Int) {
@@ -192,10 +192,14 @@ class Media3Engine : SharedObject {
       token = attempt
       request = normalized
       audioFallbackAttempted = false
-      audioDelayUs.set(0L)
-      secondarySubs.resetAll()
+      baseAudioDelayMs = 0L
+      normalized.audioDelayByRefreshRateMs?.let { audioDelayByRefreshRateMs = it }
+      syncEffectiveAudioDelay()
+      normalized.autoFrameRate?.let(::applyDisplaySyncMode)
+      normalized.nightModeDrc?.let(audioEffects::setNightModeDrc)
+      ptsEstimator.reset()
+      subtitles.resetAll()
       assOverlay.clearForZap()
-      clearSubtitles(resetDelay = true)
       normalized.subtitleStyle?.let(surfaces::onSubtitleStyle)
       currentSpeed = PlaybackSpeedPolicy.DEFAULT_SPEED
       lastVodPositionMs = if (normalized.live) null else normalized.startMs?.coerceAtLeast(0L)
@@ -236,42 +240,9 @@ class Media3Engine : SharedObject {
 
   fun seek(attempt: Int, positionMs: Long) = postInEpoch(attempt) {
     val current = player ?: return@postInEpoch
-    if (request?.live == true) {
-      val ringWindow = activeTimeShiftTracker?.currentWindow()
-      val ringSeekable = ringWindow != null && ringWindow.bufferedWindowMs >= MIN_LIVE_TIMESHIFT_WINDOW_MS
-      val isSeekable = current.isCurrentMediaItemSeekable || ringSeekable
-      if (!isSeekable) return@postInEpoch
-      val edgeMs = if (current.isCurrentMediaItemSeekable && current.duration != C.TIME_UNSET) {
-        current.duration
-      } else {
-        ringWindow?.liveEdgeMs ?: current.duration
-      }
-      val minStartMs = if (current.isCurrentMediaItemSeekable) 0L else (ringWindow?.liveSeekableStartMs ?: 0L)
-      when (val resolution = resolveMedia3LiveSeek(positionMs, isSeekable, edgeMs, minStartMs = minStartMs)) {
-        LiveSeekResolution.Ignore -> return@postInEpoch
-        LiveSeekResolution.JumpToDefaultLiveEdge -> {
-          clearSubtitles(resetDelay = false)
-          if (current.isCurrentMediaItemSeekable) {
-            current.seekToDefaultPosition()
-          } else if (edgeMs != C.TIME_UNSET && edgeMs >= 0L) {
-            current.seekTo(edgeMs)
-          }
-        }
-        is LiveSeekResolution.SeekTo -> {
-          clearSubtitles(resetDelay = false)
-          current.seekTo(resolution.positionMs)
-        }
-      }
-      return@postInEpoch
-    }
-    if (!current.isCurrentMediaItemSeekable) return@postInEpoch
-    val clamped = positionMs.coerceAtLeast(0L)
-    if (request?.live == false) {
-      lastVodPositionMs = clamped
-      current.setSeekParameters(vodSeekParametersFor(clamped, current.currentPosition))
-    }
-    clearSubtitles(resetDelay = false)
-    current.seekTo(clamped)
+    performEngineSeek(current, request, positionMs, activeTimeShiftTracker) {
+      clearSubtitles(resetDelay = false)
+    }?.let { lastVodPositionMs = it }
   }
 
   /** Enables Media3's scrubbing mode on VOD streams only; reset unconditionally on stop/load/retry/recreate (#222). */
@@ -326,6 +297,19 @@ class Media3Engine : SharedObject {
   /** Configures stereo loudness boost in dB via [AudioEffectsController] (multichannel-safe, #260). */
   fun setAudioBoostDb(attempt: Int, db: Double) = postInEpoch(attempt) { if (db.isFinite()) audioEffects.setBoostDb(db) }
 
+  /** Configures stereo API 28+ Night-Mode DRC preset (`OFF`/`LIGHT`/`NIGHT`, multichannel-safe, #115). */
+  internal fun setNightModeDrc(preset: NightModeDrcPreset) = post { audioEffects.setNightModeDrc(preset) }
+
+  /** Configures Android Auto Frame-Rate display sync policy (`OFF`/`SEAMLESS`/`ALWAYS`, #116). */
+  internal fun setDisplaySync(autoFrameRate: AutoFrameRateMode, @Suppress("UNUSED_PARAMETER") autoDynamicRange: Boolean = true) =
+    post { applyDisplaySyncMode(autoFrameRate) }
+
+  /** Configures per-refresh-rate A/V delay offsets in ms (`[-1000, 1000]`, #115). */
+  internal fun setAudioDelayByRefreshRate(offsets: Map<String, Long>) = post {
+    audioDelayByRefreshRateMs = offsets
+    syncEffectiveAudioDelay()
+  }
+
   fun selectAudioTrack(attempt: Int, id: String) = postInEpoch(attempt) { tracksBridge.selectAudioTrack(player, id) }
   fun selectSubtitleTrack(attempt: Int, id: String?) = postInEpoch(attempt) {
     tracksBridge.selectSubtitleTrack(player, id)
@@ -344,14 +328,14 @@ class Media3Engine : SharedObject {
     if (!alreadyAttached) {
       request = currentReq.copy(externalSubtitles = currentReq.externalSubtitles + track)
     }
-    if (!secondarySubs.registerExternalTrack(track)) return@postInEpoch
+    if (!subtitles.registerExternalTrack(track)) return@postInEpoch
     tracksBridge.onDynamicExternalSubtitlesChanged(player)
     val loadGen = generation
     externalSubLoader.loadAsync(track, allowLegacyTls = currentReq.allowLegacyTls) { cues ->
       if (cues == null) return@loadAsync
       post {
         if (generation != loadGen || request == null) return@post
-        secondarySubs.storeSidecarCues(track.trackId, cues)
+        subtitles.storeSidecarCues(track.trackId, cues)
         player?.let { applyResolvedSubtitleCues(it) }
       }
     }
@@ -360,13 +344,15 @@ class Media3Engine : SharedObject {
   /** Updates live subtitle appearance styling immediately without restarting playback (#32). */
   internal fun setSubtitleStyle(style: SubtitleStyleConfig?) = post { surfaces.onSubtitleStyle(style) }
 
-  /** Shifts audio timing relative to video in milliseconds (`[-30_000, 30_000]`) without buffer reallocation (#203, #59). */
-  fun setAudioDelay(attempt: Int, delayMs: Long) = postInEpoch(attempt) { audioDelayUs.set(syncDelayMsToUs(delayMs)) }
+  /** Shifts audio timing relative to video in milliseconds (`[-30_000, 30_000]`) without buffer reallocation (#203, #59, #115). */
+  fun setAudioDelay(attempt: Int, delayMs: Long) = postInEpoch(attempt) {
+    baseAudioDelayMs = delayMs
+    syncEffectiveAudioDelay()
+  }
 
   /** Shifts subtitle cue timing in milliseconds (`[-30_000, 30_000]`) without flushing buffered cues (#203, #59). */
   fun setSubtitleDelay(attempt: Int, delayMs: Long) = postInEpoch(attempt) {
-    subtitleCueBuffer.setDelayMs(delayMs)
-    secondarySubs.setDelayMs(delayMs)
+    subtitles.setDelayMs(delayMs)
     player?.let { applyResolvedSubtitleCues(it) }
   }
 
@@ -497,14 +483,16 @@ class Media3Engine : SharedObject {
 
   private fun clearSessionState() {
     reporter.end()
+    ptsEstimator.reset()
+    displayRefresh.restoreDefault()
     tearDownTimeShiftCache()
     player?.isScrubbingModeEnabled = false
     currentSpeed = PlaybackSpeedPolicy.DEFAULT_SPEED
     player?.playbackParameters = PlaybackParameters.DEFAULT
+    baseAudioDelayMs = 0L
     audioDelayUs.set(0L)
-    secondarySubs.resetAll()
+    subtitles.resetAll()
     assOverlay.clearForZap()
-    clearSubtitles(resetDelay = true)
     audioEffects.onStop()
     mediaSessionController.onPlaybackStopped()
     request = null
@@ -515,47 +503,25 @@ class Media3Engine : SharedObject {
     beginGeneration()
   }
 
-  private fun clearPrimarySubtitles(resetDelay: Boolean) {
-    if (resetDelay) subtitleCueBuffer.reset() else subtitleCueBuffer.clearCues()
-    lastDeliveredCues = null
-    surfaces.clearCues()
-  }
-
-  private fun clearSubtitles(resetDelay: Boolean) {
-    handler.removeCallbacks(subtitleTick)
-    clearPrimarySubtitles(resetDelay = resetDelay)
-    secondarySubs.clearSecondaryCues(resetDelay = resetDelay)
-  }
+  private fun clearSubtitles(resetDelay: Boolean) = subtitles.clearAll(resetDelay = resetDelay)
 
   private fun applyResolvedSubtitleCues(current: ExoPlayer) {
-    handler.removeCallbacks(subtitleTick)
     val req = request ?: return
-    if (!fence.isRendererOpen) return
-    val positionMs = current.currentPosition.coerceAtLeast(0L)
-    val positionUs = positionMs * 1_000L
-    val extPrimaryId = tracksBridge.selectedExternalPrimaryId
-    if (extPrimaryId != null) {
-      val extCues = secondarySubs.resolvePrimarySidecar(positionMs, extPrimaryId, req.filterSdhSubtitles) ?: emptyList()
-      if (extCues != lastDeliveredCues) {
-        lastDeliveredCues = extCues
-        surfaces.onCues(extCues)
-      }
-    } else if (!tracksBridge.isTextDisabled) {
-      val resolved = subtitleCueBuffer.resolveCues(positionUs)
-      if (resolved != lastDeliveredCues) {
-        lastDeliveredCues = resolved
-        surfaces.onCues(resolved)
-      }
-    }
-    secondarySubs.resolveAndDeliverSecondary(positionMs, tracksBridge.selectedSecondarySubtitleId, req.filterSdhSubtitles)
-    val needsTick = current.isPlaying && (
-      (subtitleCueBuffer.delayMs != 0L && (subtitleCueBuffer.isNotEmpty || secondarySubs.isSecondaryBufferNotEmpty)) ||
-        secondarySubs.hasActiveSidecars
-      )
-    if (needsTick) handler.postDelayed(subtitleTick, SUBTITLE_DELAY_TICK_MS)
+    subtitles.applyResolved(
+      current, req.filterSdhSubtitles, tracksBridge.isTextDisabled,
+      fence.isRendererOpen, tracksBridge.selectedExternalPrimaryId, tracksBridge.selectedSecondarySubtitleId,
+    )
   }
 
-  private fun refreshDelayedSubtitles() { player?.let(::applyResolvedSubtitleCues) }
+  private fun applyDisplaySyncMode(mode: AutoFrameRateMode) {
+    displayRefresh.setMode(mode)
+    player?.videoChangeFrameRateStrategy = videoChangeFrameRateStrategyForApi(Build.VERSION.SDK_INT, mode)
+  }
+
+  private fun syncEffectiveAudioDelay() {
+    val offsetMs = resolveAudioDelayOffsetForRefreshRate(audioDelayByRefreshRateMs, displayRefresh.activeRefreshRateHz)
+    audioDelayUs.set(syncDelayMsToUs(baseAudioDelayMs + offsetMs))
+  }
 
   private fun stopFromTaskRemoved() = post {
     clearSessionState(); player?.stop(); player?.clearMediaItems()
@@ -593,14 +559,26 @@ class Media3Engine : SharedObject {
     if (hasAppContext) emit(EVENT, payload)
   }
 
-  private fun beginGeneration() { generation += 1; gate.beginMedia(generation) }
+  private fun beginGeneration() {
+    generation += 1
+    ptsEstimator.reset(generation)
+    gate.beginMedia(generation)
+  }
   private fun tearDownTimeShiftCache() { activeTimeShiftBuffer?.close(); activeTimeShiftBuffer = null; activeTimeShiftTracker = null }
 
-  private fun initEngine(context: Context, options: MultiViewEngineOptions = MultiViewEngineOptions()) {
+  private fun initEngine(
+    context: Context,
+    options: MultiViewEngineOptions = MultiViewEngineOptions(),
+    activityProvider: () -> Activity? = { null },
+  ) {
     handleAudioFocus = options.handleAudioFocus
     multiViewTileCount = clampMultiViewTileCount(options.multiViewTileCount)
     appContextRef = context.applicationContext ?: context
     externalSubLoader = ExternalSubtitleLoader(context = appContextRef)
+    displayRefresh = DisplayRefreshController(
+      activityProvider = activityProvider,
+      onActiveRefreshRateChanged = { _ -> syncEffectiveAudioDelay() },
+    )
     val profile = readDeviceMemoryProfile(context)
     lowRamDevice = profile.lowRam
     val cacheDir: File? = context.cacheDir
@@ -615,10 +593,10 @@ class Media3Engine : SharedObject {
     tracksBridge = TrackSelectorBridge(
       isActivePlayer = { candidate -> candidate === player && fence.acceptsPlayer(candidate) },
       onTracks = { snapshot -> if (request != null) sendEvent(mapOf("type" to "tracks", "tracks" to snapshot)) },
-      onClearCues = { clearPrimarySubtitles(resetDelay = false) },
+      onClearCues = { subtitles.clearPrimary(resetDelay = false) },
       captioningEnabled = { isSystemCaptioningEnabled(context) },
-      onClearSecondaryCues = { secondarySubs.clearSecondaryCues(resetDelay = false) },
-      extraExternalSubtitles = secondarySubs::dynamicExternalTrackSnapshots,
+      onClearSecondaryCues = { subtitles.clearSecondary(resetDelay = false) },
+      extraExternalSubtitles = subtitles::dynamicExternalTrackSnapshots,
       onSecondaryTargetChanged = { target, primaryOff ->
         playerFactory.lastTrackSelector?.setSecondarySelection(target, primaryOff)
       },
@@ -751,10 +729,12 @@ class Media3Engine : SharedObject {
       live = streamKind != StreamKind.VOD, streamKind = streamKind,
       bufferPreset = bufferPreset, decoderMode = decoderMode,
       handleAudioFocus = handleAudioFocus, multiViewTileCount = multiViewTileCount,
+      autoFrameRateMode = displayRefresh.mode,
     ).also { built ->
       playerHandleAudioFocus = handleAudioFocus && playerFactory.audioFocusAllowed
       built.volume = if (handleAudioFocus) 1f else 0f
       built.addListener(reporter); built.addAnalyticsListener(reporter); built.addListener(pictures)
+      built.setVideoFrameMetadataListener(ptsEstimator)
       built.playbackParameters =
         if (streamKind == StreamKind.VOD) PlaybackSpeedPolicy.parameters(currentSpeed, pitchLock) else PlaybackParameters.DEFAULT
       audioEffects.onAudioSessionIdChanged(built.audioSessionId)
@@ -766,6 +746,7 @@ class Media3Engine : SharedObject {
 
   private fun detachPlayerInstance(old: ExoPlayer, clearSurface: Boolean) {
     old.isScrubbingModeEnabled = false
+    old.clearVideoFrameMetadataListener(ptsEstimator)
     old.removeListener(reporter); old.removeAnalyticsListener(reporter); old.removeListener(pictures)
     if (clearSurface) old.clearVideoSurface()
     audioEffects.onStop(); audioEffects.onAudioSessionIdChanged(C.AUDIO_SESSION_ID_UNSET)

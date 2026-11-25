@@ -112,4 +112,28 @@ class VideoInfoMappingTest {
     assertEquals(MimeTypes.VIDEO_VP9, extracted?.sampleMimeType)
     assertEquals(1920, extracted?.width)
   }
+
+  @Test
+  fun `falls back to PTS estimatedFps only when format frameRate is NO_VALUE (#199)`() {
+    val noFpsFmt = Format.Builder()
+      .setSampleMimeType(MimeTypes.VIDEO_H264)
+      .setWidth(1920)
+      .setHeight(1080)
+      .build()
+    assertEquals(
+      VideoInfoSnapshot(width = 1920, height = 1080, fps = 23.98, codec = "h264", hdr = "sdr"),
+      deriveVideoInfo(noFpsFmt, null, estimatedFps = 23.976f),
+    )
+
+    val declaredFpsFmt = Format.Builder()
+      .setSampleMimeType(MimeTypes.VIDEO_H264)
+      .setWidth(1920)
+      .setHeight(1080)
+      .setFrameRate(50f)
+      .build()
+    assertEquals(
+      VideoInfoSnapshot(width = 1920, height = 1080, fps = 50.0, codec = "h264", hdr = "sdr"),
+      deriveVideoInfo(declaredFpsFmt, null, estimatedFps = 25f),
+    )
+  }
 }

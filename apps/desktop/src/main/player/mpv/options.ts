@@ -1,5 +1,5 @@
 import type { SubtitleStyleConfig } from '@elv/domain';
-import type { MediaKind } from '@elv/playback';
+import type { DisplaySyncPolicy, MediaKind } from '@elv/playback';
 import type { DeinterlaceMode, HwdecProfile } from '../../../shared/player-ipc.ts';
 import type { MpvCommand } from './codec.ts';
 import { DEFAULT_SECONDARY_SUB_POS, subtitleStyleLoadOptions } from './subtitle-style.ts';
@@ -40,6 +40,16 @@ export function pitchLockCommand(locked: boolean): MpvCommand {
 /** Builds the labeled `@elv_loudnorm` `af` add/remove command (`#243`). */
 export function audioNormalizationCommand(enabled: boolean): MpvCommand {
   return enabled ? ['af', 'add', LOUDNORM_FILTER] : ['af', 'remove', '@elv_loudnorm'];
+}
+
+/** Maps a {@link DisplaySyncPolicy} to mpv's `video-sync` mode (`#116`, `#214`). */
+export function videoSyncModeFor(policy: DisplaySyncPolicy): 'audio' | 'display-resample' {
+  return policy.autoFrameRate === 'off' ? 'audio' : 'display-resample';
+}
+
+/** Builds the mpv `video-sync` property command for a {@link DisplaySyncPolicy} (`#116`, `#214`). */
+export function videoSyncCommand(policy: DisplaySyncPolicy): MpvCommand {
+  return ['set_property', 'video-sync', videoSyncModeFor(policy)];
 }
 
 /** Returns whether an `audio-spdif` property value indicates active S/PDIF/HDMI bitstream passthrough. */

@@ -6,12 +6,13 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Zero `e
 
 ## Module layout
 - `engine.ts` & `engine-controls.ts`: orchestrator composing `EngineQueue`, `OpeningGate`, `LiveSession`,
-  `TrackTracker`, speed coalescing, 175 ms play/pause audio ramp (`mpv/audio-ramp.ts`), `setHwdec` / property setters, labeled `vf`/`af` filters (`setDeinterlaceMode` `'off'|'auto'|'bwdif'` via `@elv_deint`, `setPitchLock` via `audio-pitch-correction`, `setAudioNormalization` via `@elv_loudnorm` with S/PDIF passthrough suppression, `#243`), gapless VOD `append-play` queue (`queueNext`/`clearQueue`/`queueAdvanced` with `--prefetch-playlist=no` and custom-header match guard, `#205`), and `VideoPresenter`.
+  `TrackTracker`, speed coalescing, 175 ms play/pause audio ramp (`mpv/audio-ramp.ts`), `setHwdec` / property setters, labeled `vf`/`af` filters (`setDeinterlaceMode` `'off'|'auto'|'bwdif'` via `@elv_deint`, `setPitchLock` via `audio-pitch-correction`, `setAudioNormalization` via `@elv_loudnorm` with S/PDIF passthrough and `@ac3:lavcac3enc` suppression, `#243`, `#213`), desktop audio passthrough/exclusive/AC3-encode/layout with automatic AO-error safe PCM fallback (`mpv/audio-output.ts`, `#213`), `video-sync=display-resample` AFR policy (`#214`, `#116`), gapless VOD `append-play` queue (`queueNext`/`clearQueue`/`queueAdvanced` with `--prefetch-playlist=no` and custom-header match guard, `#205`), and `VideoPresenter`.
+- `display-refresh.ts`: pure same-resolution fullscreen refresh-rate selector (`selectDesktopRefreshMode`, exact match `<= 0.15 Hz` then `2x..5x` integer multiple) and `createDesktopDisplayRefreshController` with injectable OS adapter (safe no-op fallback) guaranteeing original display mode restore on stop, exiting fullscreen, window close, engine release, and `will-quit` (`#214`, `#116`).
 - `engine-queue.ts`: generation-tagged serialized async op queue (`load`, `command`, `stop`, `recreate`) that purges
   superseded `load`/`command` ops on `load`, `stop` or `recreate`.
 - `power-blocker.ts`: reference-counted `prevent-display-sleep` guard wired in `ipc.ts`/`main.ts` to `'playing'`,
   released after a 30 s buffering-stall grace timeout (re-acquired on `'playing'`) and on `paused`/`ended`/`error`/`stop`/`release`/crash.
-- `factory.ts`, `ipc.ts`, `runtime-path.ts`: Electron composition, fenced `WebContents` IPC, and bundled mpv lookup.
+- `factory.ts`, `ipc.ts`, `ipc-commands.ts`, `runtime-path.ts`: Electron composition, fenced `WebContents` IPC + command dispatcher, and bundled mpv lookup.
   On macOS, `runtime-path.ts` exposes optional `canvasExecutable` (`ELV IPTV Player.app/Contents/MacOS/elv-mpv`) and
   `ioSurfaceAddon` (`elv-iosurface.node`) when both exist; `factory.ts` defaults macOS to `'canvas'` with
   `renderContext: true` when present and falls back cleanly to `'own-window'` (standalone `mpv`) when absent or overridden.

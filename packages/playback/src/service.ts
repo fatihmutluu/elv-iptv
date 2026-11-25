@@ -242,6 +242,7 @@ export function createPlaybackServiceWith(
       kind: current.kind,
       ...(startMs === undefined ? {} : { startMs }),
       ...(Object.keys(options).length > 0 ? { options } : {}),
+      ...(stream.drm === undefined ? {} : { drm: stream.drm }),
     });
     const postLoad = state();
     if (

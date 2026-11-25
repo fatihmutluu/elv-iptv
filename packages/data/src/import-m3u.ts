@@ -13,6 +13,13 @@ import {
 import { type M3uEntry, normalizeCatchupMode, scanM3u } from '@elv/sources';
 import { allowlistForKind, reconcileCategorySelection } from './category-selection';
 import { fingerprintM3uCredentials } from './credential-fingerprint';
+import {
+  type DrmSpecMap,
+  deleteDrmSpecs,
+  loadDrmSpecs,
+  partitionDrmSpecs,
+  saveDrmSpecs,
+} from './drm-secret-store';
 import { foldText } from './fold';
 import {
   clearDiscoveredGuideValidators,
@@ -227,6 +234,7 @@ async function processBatch(
     if (st.book.byteLength > MAX_URLVARS_BYTES) {
       throw new Stop(elvError('source-format', 'urlvars-too-large'));
     }
+    if (entry.drm !== undefined) st.drmSpecs.set(row.key, entry.drm);
     if (kind === 'movie') {
       movies.push(row);
       st.written.movies += 1;
@@ -437,10 +445,14 @@ export async function importM3u(
     playlistUrl = storedUrl;
   }
   const oldVars = await readUrlVars(deps, source.id);
+  const oldDrmSpecs = await loadDrmSpecs(deps.secrets, source.id);
+  const hadOldDrm = Object.keys(oldDrmSpecs).length > 0;
   const meter = createStreamProgressMeter();
   let outcome: M3uOutcome | undefined;
   let secretsStaged = false;
   let stagedMerged = false;
+  let drmSpecsStaged = false;
+  let drmSpecsMerged = false;
   return performRun(source, deps, wrapCleanupProgress(opts, meter, notify), {
     execute: async (c) => {
       outcome = await execute(c, source, playlistUrl, oldVars, meter);
@@ -458,6 +470,19 @@ export async function importM3u(
       secretsStaged = true;
       const written = await writeUrlVars(deps.secrets, source.id, toStage);
       if (!written.ok) throw new Stop(written.error);
+      const nextDrm = outcome.staged.drmSpecs;
+      if (Object.keys(nextDrm).length > 0) {
+        const mergedDrm: DrmSpecMap = { ...oldDrmSpecs, ...nextDrm };
+        const toStageDrm = partitionDrmSpecs(mergedDrm) !== undefined ? mergedDrm : nextDrm;
+        drmSpecsMerged = toStageDrm === mergedDrm;
+        drmSpecsStaged = true;
+        const savedDrm = await saveDrmSpecs(deps.secrets, source.id, toStageDrm);
+        if (!savedDrm.ok) throw new Stop(savedDrm.error);
+      } else if (hadOldDrm) {
+        drmSpecsStaged = true;
+        const deletedDrm = await deleteDrmSpecs(deps.secrets, source.id);
+        if (!deletedDrm.ok) throw new Stop(deletedDrm.error);
+      }
     },
     beforeCleanup: async (tx, c) => {
       if (outcome === undefined) return;
@@ -477,6 +502,14 @@ export async function importM3u(
           [c.sourceId, c.runId],
         );
         c.counts[table] = r[0]?.n ?? 0;
+      }
+      await tx.run('DELETE FROM item_drm_meta WHERE source_id = ?', [c.sourceId]);
+      const drmEntries = Object.entries(staged.drmSpecs);
+      if (drmEntries.length > 0) {
+        await tx.batch(
+          'INSERT OR REPLACE INTO item_drm_meta (source_id, item_key, scheme) VALUES (?, ?, ?)',
+          drmEntries.map(([itemKey, cfg]) => [c.sourceId, itemKey, cfg.scheme]),
+        );
       }
       let settings: SourceSettings = { ...current };
       if (staged.rules.length > 0) settings.segmentRules = staged.rules;
@@ -514,19 +547,35 @@ export async function importM3u(
       ) {
         await writeUrlVars(deps.secrets, source.id, finalVars).catch(() => undefined);
       }
+      const nextDrm = outcome.staged.drmSpecs;
+      if (
+        drmSpecsMerged &&
+        Object.keys(oldDrmSpecs).some((k) => !Object.hasOwn(nextDrm, k)) &&
+        partitionDrmSpecs(nextDrm) !== undefined
+      ) {
+        await saveDrmSpecs(deps.secrets, source.id, nextDrm).catch(() => undefined);
+      }
     },
     onAbortOrFail: async (_c, outcomeKind) => {
-      if (!secretsStaged) return;
-      if (outcomeKind === 'source-removed') {
-        await deleteUrlVars(deps.secrets, source.id).catch(() => undefined);
-      } else {
-        const liveVars = await readUrlVars(deps, source.id);
-        const restored = mergeLiveCustomGuideVars(oldVars, liveVars);
-        await writeUrlVars(
-          deps.secrets,
-          source.id,
-          partitionUrlVars(restored) !== undefined ? restored : oldVars,
-        ).catch(() => undefined);
+      if (secretsStaged) {
+        if (outcomeKind === 'source-removed') {
+          await deleteUrlVars(deps.secrets, source.id).catch(() => undefined);
+        } else {
+          const liveVars = await readUrlVars(deps, source.id);
+          const restored = mergeLiveCustomGuideVars(oldVars, liveVars);
+          await writeUrlVars(
+            deps.secrets,
+            source.id,
+            partitionUrlVars(restored) !== undefined ? restored : oldVars,
+          ).catch(() => undefined);
+        }
+      }
+      if (drmSpecsStaged) {
+        if (outcomeKind === 'source-removed' || !hadOldDrm) {
+          await deleteDrmSpecs(deps.secrets, source.id).catch(() => undefined);
+        } else {
+          await saveDrmSpecs(deps.secrets, source.id, oldDrmSpecs).catch(() => undefined);
+        }
       }
     },
   });

@@ -64,4 +64,13 @@ class SourceTypeTest {
     assertEquals(SourceType.TS, sourceTypeFor("http://provider.example/u/p/7?ext=.mp4", live = true))
     assertEquals(SourceType.PROGRESSIVE, sourceTypeFor("http://provider.example/get?x=1.m3u8", live = false))
   }
+
+  @Test
+  fun `mpd paths are DASH and ism or isml manifests are SmoothStreaming (#272)`() {
+    assertEquals(SourceType.DASH, sourceTypeFor("https://cdn.example/live/ch1.mpd", live = true))
+    assertEquals(SourceType.DASH, sourceTypeFor("https://cdn.example/vod/movie.MPD?token=1", live = false))
+    assertEquals(SourceType.SMOOTH_STREAMING, sourceTypeFor("https://cdn.example/live/ch1.ism/Manifest", live = true))
+    assertEquals(SourceType.SMOOTH_STREAMING, sourceTypeFor("https://cdn.example/live/ch1.isml/manifest", live = false))
+    assertEquals(SourceType.SMOOTH_STREAMING, sourceTypeFor("https://cdn.example/live/ch1.ism", live = true))
+  }
 }

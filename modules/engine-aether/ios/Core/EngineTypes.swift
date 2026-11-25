@@ -52,6 +52,8 @@ public struct LoadRequest: Equatable, Sendable {
   public var liveEdgeCushionSeconds: Double?
   public var dnsFamily: DnsFamilyPreference
   public var hostOverride: String?
+  public var autoFrameRate: AppleAutoFrameRateMode?
+  public var autoDynamicRange: Bool?
 
   public init(
     url: String,
@@ -69,7 +71,9 @@ public struct LoadRequest: Equatable, Sendable {
     subtitleStyle: UserSubtitleStyleOverride? = nil,
     liveEdgeCushionSeconds: Double? = nil,
     dnsFamily: DnsFamilyPreference = .system,
-    hostOverride: String? = nil
+    hostOverride: String? = nil,
+    autoFrameRate: AppleAutoFrameRateMode? = nil,
+    autoDynamicRange: Bool? = nil
   ) {
     self.url = url
     self.headers = headers
@@ -87,6 +91,8 @@ public struct LoadRequest: Equatable, Sendable {
     self.liveEdgeCushionSeconds = liveEdgeCushionSeconds
     self.dnsFamily = dnsFamily
     self.hostOverride = hostOverride
+    self.autoFrameRate = autoFrameRate
+    self.autoDynamicRange = autoDynamicRange
   }
 }
 
@@ -109,6 +115,7 @@ public struct EngineLoadOptions: Equatable, Sendable {
   public var maxConcurrentSourceRequests: Int?
   public var preferSoftwareDecode: Bool
   public var displayCriteriaOwner: DisplayCriteriaOwnerOption
+  public var displaySync: AppleDisplaySyncSettings
   public var liveStartupGraceSeconds: Double?
   public var liveStartupSingleSegmentMinimumSeconds: Double?
   public var liveEdgeCushionSeconds: Double?
@@ -135,6 +142,7 @@ public struct EngineLoadOptions: Equatable, Sendable {
     maxConcurrentSourceRequests: Int? = nil,
     preferSoftwareDecode: Bool = false,
     displayCriteriaOwner: DisplayCriteriaOwnerOption = .engine,
+    displaySync: AppleDisplaySyncSettings = .default,
     liveStartupGraceSeconds: Double? = nil,
     liveStartupSingleSegmentMinimumSeconds: Double? = nil,
     liveEdgeCushionSeconds: Double? = nil,
@@ -160,6 +168,7 @@ public struct EngineLoadOptions: Equatable, Sendable {
     self.maxConcurrentSourceRequests = maxConcurrentSourceRequests
     self.preferSoftwareDecode = preferSoftwareDecode
     self.displayCriteriaOwner = displayCriteriaOwner
+    self.displaySync = displaySync
     self.liveStartupGraceSeconds = liveStartupGraceSeconds
     self.liveStartupSingleSegmentMinimumSeconds = liveStartupSingleSegmentMinimumSeconds
     self.liveEdgeCushionSeconds = liveEdgeCushionSeconds

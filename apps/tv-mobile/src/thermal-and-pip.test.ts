@@ -171,6 +171,57 @@ describe('createMobileVideoHost (#34, #221, #232)', () => {
     expect(deps.configureAetherMultiView).toHaveBeenLastCalledWith(engine, false);
   });
 
+  it('wires Android setNightModeDrc and setDisplaySync onto OpenVideoEngine (#115, #116, #199)', () => {
+    const setNightModeDrc = vi.fn();
+    const setDisplaySync = vi.fn();
+    const engine = {
+      tag: 'engine',
+      setNightModeDrc,
+      setDisplaySync,
+    } as unknown as PlayerEngine;
+    const deps = makeDeps({
+      os: 'android',
+      isTV: true,
+      createEngine: vi.fn(() => engine),
+    });
+
+    const host = createMobileVideoHost(deps);
+    const opened = host.open();
+    expect(opened).not.toBeNull();
+    expect(opened?.setNightModeDrc).toBeTypeOf('function');
+    expect(opened?.setDisplaySync).toBeTypeOf('function');
+
+    opened?.setNightModeDrc?.('night');
+    expect(setNightModeDrc).toHaveBeenCalledWith('night');
+
+    const policy = { autoFrameRate: 'always', autoDynamicRange: true } as const;
+    opened?.setDisplaySync?.(policy);
+    expect(setDisplaySync).toHaveBeenCalledWith(policy);
+  });
+
+  it('wires Apple setDisplaySync onto OpenVideoEngine and leaves setNightModeDrc undefined (#116, #188)', () => {
+    const setDisplaySync = vi.fn();
+    const engine = {
+      tag: 'engine',
+      setDisplaySync,
+    } as unknown as PlayerEngine;
+    const deps = makeDeps({
+      os: 'ios',
+      isTV: true,
+      createEngine: vi.fn(() => engine),
+    });
+
+    const host = createMobileVideoHost(deps);
+    const opened = host.open();
+    expect(opened).not.toBeNull();
+    expect(opened?.setDisplaySync).toBeTypeOf('function');
+    expect(opened?.setNightModeDrc).toBeUndefined();
+
+    const policy = { autoFrameRate: 'seamless', autoDynamicRange: false } as const;
+    opened?.setDisplaySync?.(policy);
+    expect(setDisplaySync).toHaveBeenCalledWith(policy);
+  });
+
   it('returns null from open when createEngine returns null', () => {
     const deps = makeDeps({ createEngine: vi.fn(() => null) });
     const host = createMobileVideoHost(deps);

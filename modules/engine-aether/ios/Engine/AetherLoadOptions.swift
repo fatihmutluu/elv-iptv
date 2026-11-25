@@ -24,6 +24,19 @@ struct AetherNetworkTransportOptions: Equatable, Sendable {
   }
 }
 
+/// Parsed per-load tvOS display refresh-rate and dynamic-range sync preferences (`#188`, `#116`).
+struct AetherDisplaySyncOptions: Equatable, Sendable {
+  let displayMatchFrameRate: AppleAutoFrameRateMode
+  let displayMatchDynamicRange: Bool
+  let displayCriteriaOwner: DisplayCriteriaOwnerOption
+
+  init(from options: EngineLoadOptions) {
+    self.displayMatchFrameRate = options.displaySync.autoFrameRate
+    self.displayMatchDynamicRange = options.displaySync.autoDynamicRange
+    self.displayCriteriaOwner = resolveDisplayCriteriaOwner(for: options.displaySync)
+  }
+}
+
 /// Translates engine-neutral `EngineLoadOptions` from `Core` onto `AetherEngine.LoadOptions`.
 ///
 /// Note: `options.dnsFamily` and `options.hostOverride` are parsed and validated on `EngineLoadOptions` /
@@ -31,6 +44,7 @@ struct AetherNetworkTransportOptions: Equatable, Sendable {
 /// the iOS/tvOS OS network stack so TLS SNI and App Transport Security are never bypassed (`#172`).
 func aetherOptions(_ options: EngineLoadOptions) -> LoadOptions {
   _ = AetherNetworkTransportOptions(from: options)
+  let displaySyncOptions = AetherDisplaySyncOptions(from: options)
   var out = LoadOptions()
   out.isLive = options.isLive
   out.httpHeaders = options.httpHeaders
@@ -38,7 +52,7 @@ func aetherOptions(_ options: EngineLoadOptions) -> LoadOptions {
   out.generatesBackgroundScrubPreviews = options.generatesBackgroundScrubPreviews
   out.skipsContainerAttachments = options.skipsContainerAttachments
   out.hostRetriesExhaustedLiveReplay = options.hostRetriesExhaustedLiveReplay
-  out.displayCriteriaOwner = mapDisplayCriteriaOwner(options.displayCriteriaOwner)
+  out.displayCriteriaOwner = mapDisplayCriteriaOwner(displaySyncOptions.displayCriteriaOwner)
   out.preferredAudioLanguages = options.preferredAudioLanguages
   out.initialSubtitleTrackID = options.subtitlesDisabled ? nil : options.initialSubtitleTrackId
   out.preferredSubtitleLanguages = options.subtitlesDisabled ? [] : options.preferredSubtitleLanguages

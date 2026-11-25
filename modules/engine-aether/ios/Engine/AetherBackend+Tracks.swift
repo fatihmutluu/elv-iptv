@@ -529,7 +529,11 @@ extension AetherBackend {
     inReloadFromState = false
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
-    currentEngine.stop(resetDisplayCriteria: false, finalTeardown: false)
+    let shouldResetCriteria = shouldResetDisplayCriteria(reason: .zap, settings: displaySyncSettings)
+    currentEngine.stop(resetDisplayCriteria: shouldResetCriteria, finalTeardown: false)
+    if shouldResetCriteria {
+      resetDisplayCriteria()
+    }
     runMediaLoad(plan: .liveTs(url), fallbackOptions: options, serial: serial, currentEngine: currentEngine)
   }
 
@@ -575,6 +579,11 @@ extension AetherBackend {
           : nil
         let (codec, hdr) = Self.classifyFormatDescriptions(descriptions)
         let info = StreamVideoInfo(width: width, height: height, fps: fps, codec: codec, hdr: hdr)
+        self.handleStabilizedVideoMetadata(
+          fps: fps,
+          hdr: hdr,
+          formatDescription: descriptions.first
+        )
         if !info.isEmpty {
           self.onObservation?(.mediaInfo(info), serial)
         }
