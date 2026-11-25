@@ -85,6 +85,7 @@ describe('Wave C5A #243: mpv deinterlaceMode, scaletempo2 pitchLock, and labeled
     expect(fake.sent).toContainEqual(['set_property', 'deinterlace', 'auto']);
     expect(fake.sent).toContainEqual(['vf', 'remove', '@elv_deint']);
     expect(fake.sent).toContainEqual(['set_property', 'deinterlace', 'no']);
+    expect(DEINTERLACE_BWDIF_FILTER).toContain('bwdif=mode=send_field');
     expect(fake.sent).toContainEqual(['vf', 'add', DEINTERLACE_BWDIF_FILTER]);
     expect(fake.sent).toContainEqual(['set_property', 'audio-pitch-correction', 'no']);
     expect(fake.sent).toContainEqual(['set_property', 'audio-pitch-correction', 'yes']);
@@ -154,6 +155,7 @@ describe('Wave C5A #243: mpv deinterlaceMode, scaletempo2 pitchLock, and labeled
     releaseFirstSpawn?.();
 
     await vi.waitFor(() => {
+      expect(DEINTERLACE_BWDIF_FILTER).toContain('bwdif=mode=send_field');
       expect(fake.sent).toContainEqual(['vf', 'add', DEINTERLACE_BWDIF_FILTER]);
       expect(fake.sent).toContainEqual(['set_property', 'audio-pitch-correction', 'no']);
       expect(fake.sent).toContainEqual(['af', 'add', LOUDNORM_FILTER]);

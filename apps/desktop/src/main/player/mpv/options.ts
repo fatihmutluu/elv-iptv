@@ -5,9 +5,9 @@ import type { MpvCommand } from './codec.ts';
 import { DEFAULT_SECONDARY_SUB_POS, subtitleStyleLoadOptions } from './subtitle-style.ts';
 import { parseProgramNumber } from './track-snapshot.ts';
 
-/** Labeled mpv video filter for broadcast-grade `bwdif` deinterlacing (`#243`). */
+/** Labeled mpv video filter for broadcast-grade 50/60fps `bwdif` deinterlacing (`#243`). */
 export const DEINTERLACE_BWDIF_FILTER =
-  '@elv_deint:lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]';
+  '@elv_deint:lavfi=[bwdif=mode=send_field:parity=auto:deint=interlaced]';
 
 /** Labeled mpv audio filter for EBU R128 loudness normalization (`#243`). */
 export const LOUDNORM_FILTER = '@elv_loudnorm:lavfi=[loudnorm=I=-16:TP=-1.5:LRA=11]';

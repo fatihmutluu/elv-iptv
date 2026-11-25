@@ -174,7 +174,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   tvClockMode: 'always',
   overscanX: DEFAULT_PREF_OVERSCAN,
   overscanY: DEFAULT_PREF_OVERSCAN,
-  deinterlaceMode: 'off',
+  deinterlaceMode: 'auto',
   pitchLock: true,
   audioNormalization: false,
   windowAspectRatioLock: false,

@@ -1,5 +1,5 @@
 /*
- * In-canvas D3D11 render context and triple-buffered shared-texture named-pipe host for elv-mpv.
+ * In-canvas D3D11 render context and 5-slot ring-buffered shared-texture named-pipe host for elv-mpv.
  * Active only when --elv-canvas-pipe=\\.\pipe\<name> is passed; legacy mode never calls this header.
  */
 #ifndef ELV_MPV_CANVAS_H_
@@ -23,9 +23,10 @@
 #include "elv-mpv-canvas-io.h"
 
 enum {
-    CANVAS_SLOTS = 3, CANVAS_DEFAULT_W = 1280, CANVAS_DEFAULT_H = 720,
+    CANVAS_SLOTS = 5, CANVAS_DEFAULT_W = 1280, CANVAS_DEFAULT_H = 720,
     CANVAS_MIN_DIM = 16, CANVAS_MAX_DIM = 4096,
     CANVAS_TIMEOUT_MS = 2000, CANVAS_DRAIN_TIMEOUT_MS = 250,
+    CANVAS_GPU_WAIT_MS = 50,
     EV_RENDER_STOP = 0, EV_RESIZE = 1, EV_FRAME = 2,
     EV_SHUTDOWN = 3, EV_READ = 4, EV_WRITE = 5,
     EV_DUP_FREE = 6, EV_DUP_EMPTY = 7, EV_PIPE_EOF = 8, EV_COUNT = 9
@@ -53,6 +54,7 @@ typedef struct CanvasState {
     HMODULE d3d11_dll;
     ID3D11Device *device;
     ID3D11DeviceContext *ctx;
+    ID3D11Query *frame_query;
     mpv_render_context *rc;
     HANDLE parent, pipe, ev[EV_COUNT], render_thread, reader_thread;
     CRITICAL_SECTION state_cs, write_cs;
@@ -130,9 +132,9 @@ static int canvas_wait_dup_space(CanvasState *c) {
 
 static int canvas_recreate_ring(CanvasState *c, int w, int h)
 {
-    ID3D11Texture2D *new_tex[CANVAS_SLOTS] = { NULL, NULL, NULL };
-    HANDLE new_shared[CANVAS_SLOTS] = { NULL, NULL, NULL };
-    HANDLE dups[CANVAS_SLOTS] = { NULL, NULL, NULL };
+    ID3D11Texture2D *new_tex[CANVAS_SLOTS] = { NULL };
+    HANDLE new_shared[CANVAS_SLOTS] = { NULL };
+    HANDLE dups[CANVAS_SLOTS] = { NULL };
     D3D11_TEXTURE2D_DESC desc = { 0 };
     unsigned int new_gen;
     int i;
@@ -201,6 +203,36 @@ fail:
     return 0;
 }
 
+/* Synchronizes cross-device D3D11 texture access so Electron's GPU never reads mid-render or mid-clear. */
+static void canvas_wait_gpu_done(CanvasState *c)
+{
+    ULONGLONG deadline;
+    BOOL done = FALSE;
+    int spins = 0;
+
+    if (!c->frame_query) {
+        ID3D11DeviceContext_Flush(c->ctx);
+        return;
+    }
+    ID3D11DeviceContext_End(c->ctx, (ID3D11Asynchronous *)c->frame_query);
+    ID3D11DeviceContext_Flush(c->ctx);
+    deadline = GetTickCount64() + CANVAS_GPU_WAIT_MS;
+    while (!done) {
+        HRESULT hr = ID3D11DeviceContext_GetData(
+            c->ctx, (ID3D11Asynchronous *)c->frame_query, &done, sizeof(done), 0);
+        if ((hr == S_OK && done) || (hr != S_OK && hr != S_FALSE))
+            break;
+        if (WaitForSingleObject(c->ev[EV_RENDER_STOP], 0) == WAIT_OBJECT_0)
+            break;
+        if (GetTickCount64() >= deadline)
+            break;
+        if (spins++ < 8)
+            SwitchToThread();
+        else
+            Sleep(1);
+    }
+}
+
 static void canvas_render_frame(CanvasState *c, int force_redraw)
 {
     uint64_t flags = c->render_update(c->rc);
@@ -226,7 +258,12 @@ static void canvas_render_frame(CanvasState *c, int force_redraw)
         c->render_report_swap(c->rc);
         return;
     }
-    if (!c->tex[slot]) return;
+    if (!c->tex[slot]) {
+        EnterCriticalSection(&c->state_cs);
+        if (c->gen == cur_gen) c->in_flight[slot] = 0;
+        LeaveCriticalSection(&c->state_cs);
+        return;
+    }
     {
         mpv_d3d11_fbo fbo = { c->tex[slot] };
         mpv_render_param p[] = { { MPV_RENDER_PARAM_D3D11_FBO, &fbo }, { MPV_RENDER_PARAM_INVALID, NULL } };
@@ -237,7 +274,7 @@ static void canvas_render_frame(CanvasState *c, int force_redraw)
             return;
         }
     }
-    ID3D11DeviceContext_Flush(c->ctx);
+    canvas_wait_gpu_done(c);
     c->render_report_swap(c->rc);
     c->has_rendered = 1;
     n = snprintf(msg, sizeof(msg), "F %u %d %d %d\n", cur_gen, slot, c->cur_w, c->cur_h);
@@ -341,6 +378,11 @@ static int canvas_prepare(CanvasState *c, const wchar_t *pipe_path, HANDLE paren
         ID3D10Multithread_SetMultithreadProtected(mt, TRUE);
         ID3D10Multithread_Release(mt);
     }
+    {
+        D3D11_QUERY_DESC qd = { D3D11_QUERY_EVENT, 0 };
+        if (FAILED(ID3D11Device_CreateQuery(c->device, &qd, &c->frame_query)))
+            c->frame_query = NULL;
+    }
     InitializeCriticalSection(&c->state_cs); InitializeCriticalSection(&c->write_cs);
     c->cs_init = 1;
     for (i = 0; i < EV_COUNT; i++) {
@@ -387,6 +429,7 @@ static void canvas_stop(CanvasState *c) {
         pending_dup_close_all(&c->pending_dups, c->parent);
     if (c->rc) { c->render_set_cb(c->rc, NULL, NULL); c->render_free(c->rc); c->rc = NULL; }
     canvas_release_slots(c);
+    if (c->frame_query) { ID3D11Query_Release(c->frame_query); c->frame_query = NULL; }
     if (c->ctx) { ID3D11DeviceContext_Release(c->ctx); c->ctx = NULL; }
     if (c->device) { ID3D11Device_Release(c->device); c->device = NULL; }
     if (c->pipe != INVALID_HANDLE_VALUE) { CloseHandle(c->pipe); c->pipe = INVALID_HANDLE_VALUE; }

@@ -328,4 +328,35 @@ describe('PlayerCanvas', () => {
 
     hookState.unmount();
   });
+
+  it('requests an opaque (alpha: false) 2D context once, caches it across frames, and clears with opaque black fillRect', () => {
+    const { engine, deliver } = createFakeEngine();
+    const fillRect = vi.fn();
+    const drawImage = vi.fn();
+    const ctx = { drawImage, fillRect, fillStyle: '' };
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => ctx),
+    };
+
+    renderCanvas(
+      { engine, visible: true },
+      canvas as unknown as ReturnType<typeof createFakeCanvas>['canvas'],
+    );
+    deliver(createFrame(1920, 1080));
+    deliver(createFrame(1920, 1080));
+    expect(canvas.getContext).toHaveBeenCalledTimes(1);
+    expect(canvas.getContext).toHaveBeenCalledWith('2d', { alpha: false });
+    expect(drawImage).toHaveBeenCalledTimes(2);
+
+    renderCanvas(
+      { engine, visible: false },
+      canvas as unknown as ReturnType<typeof createFakeCanvas>['canvas'],
+    );
+    expect(ctx.fillStyle).toBe('#000000');
+    expect(fillRect).toHaveBeenCalledWith(0, 0, 1920, 1080);
+
+    hookState.unmount();
+  });
 });

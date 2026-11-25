@@ -132,8 +132,8 @@ describe('createReadaheadTierStore (#196)', () => {
 });
 
 describe('createReadaheadController (#196)', () => {
-  it('defines fast (2s), normal (8s) and aggressive (20s) tiers', () => {
-    expect(READAHEAD_TIER_SECS).toEqual({ fast: 2, normal: 8, aggressive: 20 });
+  it('defines fast (4s), normal (8s) and aggressive (20s) tiers', () => {
+    expect(READAHEAD_TIER_SECS).toEqual({ fast: 4, normal: 8, aggressive: 20 });
     expect(DEFAULT_READAHEAD_STEP_UP_COOLDOWN_MS).toBe(10_000);
     expect(DEFAULT_READAHEAD_STEP_DOWN_HEALTHY_MS).toBe(120_000);
   });
@@ -147,7 +147,7 @@ describe('createReadaheadController (#196)', () => {
     });
 
     ctrl.beginMedia('http://sim.test/live/1001.ts');
-    expect(applied).toEqual([2]);
+    expect(applied).toEqual([4]);
 
     // During opening (before playback-restart & firstFrame)
     ctrl.property('paused-for-cache', true);
@@ -180,7 +180,7 @@ describe('createReadaheadController (#196)', () => {
     nowMs += 1_000;
     ctrl.property('paused-for-cache', true);
     expect(ctrl.tier).toBe('normal');
-    expect(applied).toEqual([2, 8]);
+    expect(applied).toEqual([4, 8]);
   });
 
   it('enforces step-up cooldown so a single burst never skips tiers', () => {
@@ -198,26 +198,26 @@ describe('createReadaheadController (#196)', () => {
     // First stall: fast -> normal
     ctrl.property('paused-for-cache', true);
     expect(ctrl.tier).toBe('normal');
-    expect(applied).toEqual([2, 8]);
+    expect(applied).toEqual([4, 8]);
 
     // Burst within 10 s cooldown must NOT skip to aggressive
     nowMs += 9_999;
     ctrl.property('paused-for-cache', true);
     ctrl.property('demuxer-cache-duration', 0.1);
     expect(ctrl.tier).toBe('normal');
-    expect(applied).toEqual([2, 8]);
+    expect(applied).toEqual([4, 8]);
 
     // After cooldown expires: normal -> aggressive
     nowMs += 1;
     ctrl.property('paused-for-cache', true);
     expect(ctrl.tier).toBe('aggressive');
-    expect(applied).toEqual([2, 8, 20]);
+    expect(applied).toEqual([4, 8, 20]);
 
     // Further stalls at max tier are no-ops
     nowMs += 20_000;
     ctrl.property('paused-for-cache', true);
     expect(ctrl.tier).toBe('aggressive');
-    expect(applied).toEqual([2, 8, 20]);
+    expect(applied).toEqual([4, 8, 20]);
   });
 
   it('steps up on critically low demuxer-cache-duration during steady playback', () => {
@@ -234,10 +234,10 @@ describe('createReadaheadController (#196)', () => {
 
     ctrl.property('demuxer-cache-duration', 0.4);
     expect(ctrl.tier).toBe('normal');
-    expect(applied).toEqual([2, 8]);
+    expect(applied).toEqual([4, 8]);
   });
 
-  it('steps down only after 120 s of sustained healthy cache (>= 75% of tier) without dips or stalls', () => {
+  it('steps down from aggressive to normal after 120 s of healthy cache and keeps normal sticky', () => {
     let nowMs = 1_000;
     const applied: number[] = [];
     const store = createReadaheadTierStore();
@@ -280,13 +280,13 @@ describe('createReadaheadController (#196)', () => {
     expect(applied).toEqual([20, 8]);
     expect(store.get(streamFingerprint(url))).toBe('normal');
 
-    // Another 120 s sustained healthy (>= 6 s for normal) -> steps down to fast (2 s)
+    // Once at normal, sustained healthy cache must NOT step back down to fast (prevents 2-min re-stall loops)
     ctrl.property('demuxer-cache-duration', 6.5);
     nowMs += 120_000;
     ctrl.property('demuxer-cache-duration', 6.5);
-    expect(ctrl.tier).toBe('fast');
-    expect(applied).toEqual([20, 8, 2]);
-    expect(store.get(streamFingerprint(url))).toBe('fast');
+    expect(ctrl.tier).toBe('normal');
+    expect(applied).toEqual([20, 8]);
+    expect(store.get(streamFingerprint(url))).toBe('normal');
   });
 
   it('remembers stepped-up tier per stream fingerprint across channel switches', () => {
@@ -304,17 +304,17 @@ describe('createReadaheadController (#196)', () => {
     ctrl.onPlaybackRestart();
     ctrl.onFirstFrame();
     ctrl.property('paused-for-cache', true);
-    expect(applied).toEqual([2, 8]);
+    expect(applied).toEqual([4, 8]);
 
-    // Switch to Stream B -> starts at fast (2s)
+    // Switch to Stream B -> starts at fast (4s)
     nowMs += 1_000;
     ctrl.beginMedia('http://sim.test/live/chB.ts');
-    expect(applied).toEqual([2, 8, 2]);
+    expect(applied).toEqual([4, 8, 4]);
 
     // Switch back to Stream A (with different query token) -> restores normal (8s)
     nowMs += 1_000;
     ctrl.beginMedia('http://sim.test/live/chA.ts?token=2');
-    expect(applied).toEqual([2, 8, 2, 8]);
+    expect(applied).toEqual([4, 8, 4, 8]);
   });
 
   it('re-applies target readahead on every beginMedia even when two consecutive streams share the same tier', () => {
@@ -326,6 +326,6 @@ describe('createReadaheadController (#196)', () => {
 
     ctrl.beginMedia('http://sim.test/live/chB.ts');
     ctrl.beginMedia('http://sim.test/live/chC.ts');
-    expect(applied).toEqual([2, 2]);
+    expect(applied).toEqual([4, 4]);
   });
 });

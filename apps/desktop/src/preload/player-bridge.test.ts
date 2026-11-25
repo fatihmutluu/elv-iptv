@@ -317,4 +317,52 @@ describe('createPlayerBridge', () => {
     expect(getVideoFrame).not.toHaveBeenCalled();
     expect(release2).toHaveBeenCalledTimes(1);
   });
+
+  it('defers importedSharedTexture.release until after requestAnimationFrame commit when rAF is present', async () => {
+    vi.useFakeTimers();
+    const rafQueue: Array<() => void> = [];
+    const origRaf = globalThis.requestAnimationFrame;
+    const origCancelRaf = globalThis.cancelAnimationFrame;
+    globalThis.requestAnimationFrame = vi.fn((cb: FrameRequestCallback) => {
+      rafQueue.push(() => cb(0));
+      return rafQueue.length;
+    });
+    globalThis.cancelAnimationFrame = vi.fn();
+    try {
+      const { ipc } = fakeIpcRenderer();
+      const shared = fakeSharedTexture();
+      const bridge = createPlayerBridge(ipc, shared.api);
+      const seen: VideoFrameLike[] = [];
+      bridge.onFrame?.('e1', (frame) => seen.push(frame));
+
+      const frame = fakeFrame();
+      const release = vi.fn();
+      const pending = shared.deliver({ getVideoFrame: () => frame, release }, 'e1');
+      expect(seen).toEqual([frame]);
+      expect(release).not.toHaveBeenCalled();
+      expect(rafQueue).toHaveLength(1);
+
+      // Firing rAF schedules post-paint release on the next macrotask turn
+      rafQueue.shift()?.();
+      expect(release).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(0);
+      await pending;
+      expect(release).toHaveBeenCalledTimes(1);
+
+      // If rAF stalls (occluded window), bounded 34 ms fallback still releases the slot
+      const frame2 = fakeFrame();
+      const release2 = vi.fn();
+      const pending2 = shared.deliver({ getVideoFrame: () => frame2, release: release2 }, 'e1');
+      expect(release2).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(34);
+      await pending2;
+      expect(release2).toHaveBeenCalledTimes(1);
+      expect(globalThis.cancelAnimationFrame).toHaveBeenCalled();
+    } finally {
+      globalThis.requestAnimationFrame = origRaf;
+      globalThis.cancelAnimationFrame = origCancelRaf;
+      vi.useRealTimers();
+    }
+  });
 });

@@ -1,5 +1,5 @@
 /*
- * In-canvas OpenGL/CGL + IOSurface render context and triple-buffered Unix-socket host for macOS elv-mpv.
+ * In-canvas OpenGL/CGL + IOSurface render context and 5-slot ring-buffered Unix-socket host for macOS elv-mpv.
  * Active only when --elv-canvas-pipe=/abs/path is passed; standalone mode never calls this header.
  */
 #ifndef ELV_MPV_MACOS_CANVAS_H_
@@ -16,7 +16,7 @@
 #include <mpv/render_gl.h>
 
 enum {
-    CANVAS_SLOTS = 3, CANVAS_MAX_PENDING = 24, CANVAS_DEFAULT_W = 1280, CANVAS_DEFAULT_H = 720,
+    CANVAS_SLOTS = 5, CANVAS_MAX_PENDING = 40, CANVAS_DEFAULT_W = 1280, CANVAS_DEFAULT_H = 720,
     CANVAS_MIN_DIM = 16, CANVAS_MAX_DIM = 4096, CANVAS_TIMEOUT_MS = 2000, CANVAS_DRAIN_TIMEOUT_MS = 250
 };
 
@@ -195,8 +195,8 @@ static void canvas_release_arrays(GLuint fbo[CANVAS_SLOTS], GLuint tex[CANVAS_SL
     }
 }
 static int canvas_recreate_ring(CanvasState *c, int w, int h) {
-    IOSurfaceRef ns[CANVAS_SLOTS] = { NULL, NULL, NULL };
-    GLuint nt[CANVAS_SLOTS] = { 0, 0, 0 }, nf[CANVAS_SLOTS] = { 0, 0, 0 };
+    IOSurfaceRef ns[CANVAS_SLOTS] = { NULL };
+    GLuint nt[CANVAS_SLOTS] = { 0 }, nf[CANVAS_SLOTS] = { 0 };
     int64_t deadline = monotonic_ms() + CANVAS_TIMEOUT_MS; unsigned int new_gen; int i, ok;
     pthread_mutex_lock(&c->state_mu);
     while (!c->render_stop && c->pending.count + CANVAS_SLOTS > CANVAS_MAX_PENDING)
