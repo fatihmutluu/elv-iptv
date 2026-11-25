@@ -7,8 +7,12 @@ import {
 } from '@elv/playback';
 import type { PlayTarget } from '../ports/play-target';
 
-const LIVE_TS_JUMP_MIN_EDGE_MS = 3_000;
-const LIVE_TS_JUMP_LAG_MS = 4_000;
+const LIVE_TS_JUMP_LAG_MS = 15_000;
+
+/** Optional visibility overrides for {@link shouldShowLiveJumpToLive}. */
+export interface LiveJumpToLiveOptions {
+  readonly jumpingToLive?: boolean;
+}
 
 /** View-model snapshot for the Cinema Quietude bounded live time-shift bar (`#28`). */
 export interface LiveTimeShiftSnapshot {
@@ -47,10 +51,11 @@ export function readLiveTimeShiftSnapshot(
   anchor: ClockAnchor | undefined,
   nowMs: number,
   isPaused: boolean,
+  opts?: LiveJumpToLiveOptions,
 ): LiveTimeShiftSnapshot {
   const win = resolveLiveTimeShiftWindow(anchor, nowMs);
   if (win === null) {
-    const showJump = shouldShowLiveJumpToLive(anchor, nowMs, isPaused);
+    const showJump = shouldShowLiveJumpToLive(anchor, nowMs, isPaused, opts);
     return isPaused || showJump
       ? { ...UNSUPPORTED_SNAPSHOT, isPaused, showJumpToLive: showJump }
       : UNSUPPORTED_SNAPSHOT;
@@ -69,7 +74,7 @@ export function readLiveTimeShiftSnapshot(
     isPaused,
     isBehindLive: behind,
     offsetText: formatLiveOffset(win.behindLiveMs),
-    showJumpToLive: isPaused || behind,
+    showJumpToLive: opts?.jumpingToLive === true || isPaused || behind,
   };
 }
 
@@ -102,23 +107,27 @@ export function computeLiveTimeShiftTargetMs(
 }
 
 /**
- * Returns `true` when `"Jump to live"` should appear on a live stream: either bounded time-shift
- * is active while paused / behind live edge (`#28`), or a raw MPEG-TS stream lags > 4 s (`#141`).
+ * Returns `true` when `"Jump to live"` should appear on a live stream: ONLY when the stream
+ * supports live seeking/time-shift (`resolveLiveTimeShiftWindow !== null` or raw MPEG-TS with
+ * `liveEdgeMs > 15_000`) AND (`isPaused` or genuinely behind live edge or currently syncing).
  */
 export function shouldShowLiveJumpToLive(
   anchor: ClockAnchor | undefined,
   nowMs: number,
   isPaused: boolean,
+  opts?: LiveJumpToLiveOptions,
 ): boolean {
   if (anchor === undefined) return false;
+  const jumping = opts?.jumpingToLive === true;
   if (resolveLiveTimeShiftWindow(anchor, nowMs) !== null) {
-    return isPaused || isBehindLiveEdge(anchor, nowMs);
+    return jumping || isPaused || isBehindLiveEdge(anchor, nowMs);
   }
   if (anchor.isLiveTs !== true) return false;
   const edge = anchor.liveEdgeMs;
-  if (edge === undefined || !Number.isFinite(edge) || edge <= LIVE_TS_JUMP_MIN_EDGE_MS) {
+  if (edge === undefined || !Number.isFinite(edge) || edge <= LIVE_TS_JUMP_LAG_MS) {
     return false;
   }
+  if (jumping || isPaused) return true;
   const pos = positionAt(anchor, nowMs);
   return Number.isFinite(pos) && edge - pos > LIVE_TS_JUMP_LAG_MS;
 }

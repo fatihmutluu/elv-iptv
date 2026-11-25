@@ -328,6 +328,10 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onPersistAudioNormalization: props.onPersistAudioNormalization,
     initialVolume,
     preferredAudioDevice: props.preferredAudioDevice,
+    preferredAudioLanguages: props.preferredAudioLanguages,
+    preferredSubtitleLanguages: props.preferredSubtitleLanguages,
+    subtitleMode: props.subtitleMode,
+    onPersistTrackLanguagePatch: props.onPersistTrackLanguagePatch,
   });
 
   const hasTracks =
@@ -777,6 +781,9 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       onExpandMiniPlayer={props.onExpandMiniPlayer}
       onCloseMiniPlayer={onExit}
       onPinchMinimize={formFactor === 'tablet' ? props.onMinimizeToMiniPlayer : undefined}
+      resizeMode={controls.resizeMode}
+      aspectToastNonce={controls.aspectToastNonce}
+      reduceMotion={props.reduceMotion}
     />
   );
 }

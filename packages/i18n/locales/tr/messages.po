@@ -3291,3 +3291,93 @@ msgstr "Önbellek"
 
 msgid "player.stats.throttled"
 msgstr "kısıtlı"
+
+msgid "player.live.syncing"
+msgstr "Canlıya dönülüyor..."
+
+msgid "player.mini.resize"
+msgstr "Mini oynatıcıyı boyutlandır"
+
+msgid "player.mini.drag"
+msgstr "Köşeye taşımak için sürükle"
+
+msgid "detail.version.choose"
+msgstr "Sürüm seç"
+
+msgid "player.settings.desc.subtitles"
+msgstr "Altyazı izini seçin veya harici altyazı yükleyin"
+
+msgid "player.settings.desc.audio"
+msgstr "Mevcut ses dili izleri arasında geçiş yapın"
+
+msgid "player.settings.desc.audioDelay"
+msgstr "Ses senkronizasyon gecikmesini milisaniye cinsinden ayarlayın"
+
+msgid "player.settings.desc.subtitleDelay"
+msgstr "Altyazı zamanlamasını öne veya geriye kaydırın"
+
+msgid "player.settings.desc.subtitleStyle"
+msgstr "Altyazı boyutunu, rengini ve arka planını özelleştirin"
+
+msgid "player.settings.desc.audioDevice"
+msgstr "Sistem ses çıkış cihazını seçin"
+
+msgid "player.settings.desc.videoQuality"
+msgstr "Belirli bir yayın çözünürlüğü veya Otomatik seçin"
+
+msgid "player.settings.desc.quality"
+msgstr "Alternatif kanal yayın kaliteleri arasında geçiş yapın"
+
+msgid "player.settings.desc.speed"
+msgstr "Oynatma hızı çarpanını değiştirin"
+
+msgid "player.settings.desc.chapters"
+msgstr "Doğrudan bir bölüm işaretine atlayın"
+
+msgid "player.settings.desc.sleepTimer"
+msgstr "Belirli bir süre sonra oynatmayı otomatik durdurun veya duraklatın"
+
+msgid "player.settings.desc.videoDecoder"
+msgstr "Donanım veya yazılım video çözücüsünü seçin"
+
+msgid "player.settings.desc.resizeMode"
+msgstr "En-boy oranını Sığdır, Doldur ve Uzat arasında değiştirin"
+
+msgid "player.settings.desc.timeDisplay"
+msgstr "Toplam, kalan ve bitiş süresi arasında geçiş yapın"
+
+msgid "player.settings.desc.info"
+msgstr "Yayın üst verilerini, kodek ve program ayrıntılarını gösterin"
+
+msgid "player.settings.desc.alwaysOnTop"
+msgstr "Oynatıcı penceresini diğer pencerelerin üstünde tutun"
+
+msgid "player.settings.desc.deinterlace"
+msgstr "Taramalı yayın video karelerini yumuşatın"
+
+msgid "player.settings.desc.pitchLock"
+msgstr "Farklı hızlarda doğal ses tonunu koruyun"
+
+msgid "player.settings.desc.audioNormalization"
+msgstr "Kısık diyalogları ve yüksek kanalları dengeleyin"
+
+msgid "player.settings.desc.autoSubtitlesOnSkipBack"
+msgstr "Geri sararken altyazıları geçici olarak gösterin"
+
+msgid "player.settings.desc.autoPlayNextEpisode"
+msgstr "Hazır olduğunda sonraki bölümü otomatik başlatın"
+
+msgid "player.settings.desc.miniPlayer"
+msgstr "Oynatmayı köşede yüzen mini oynatıcıya küçültün"
+
+msgid "player.settings.desc.pip"
+msgstr "Videoyu sistem Resim İçinde Resim moduna alın"
+
+msgid "player.settings.desc.multiView"
+msgstr "Birden fazla canlı kanalı yan yana izleyin"
+
+msgid "player.settings.desc.popout"
+msgstr "Oynatmayı ayrı bir masaüstü penceresinde açın"
+
+msgid "player.settings.desc.stats"
+msgstr "Canlı bit hızı, FPS ve arabellek ölçümlerini gösterin"

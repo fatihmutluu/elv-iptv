@@ -32,6 +32,7 @@ import {
 } from './skip-back-subtitles';
 import { type clampTvOsdAction, initialTvOsdAction } from './tv-osd-nav';
 import { isWebButtonActive, useDesktopPlayerShortcuts } from './useDesktopPlayerShortcuts';
+import { useJumpToLiveState } from './useJumpToLiveState';
 import { usePlayerOverlayState } from './usePlayerOverlayState';
 import { usePlayerScrub } from './usePlayerScrub';
 
@@ -431,12 +432,12 @@ export function usePlayerControls(params: PlayerControlsParams) {
     } else onExitRef.current();
   };
 
-  const jumpToLiveEdge = (): void => {
-    const svc = serviceRef.current;
-    if (svc === null) return;
-    svc.jumpToLiveEdge();
-    if (svc.getState().status.kind === 'paused') svc.play();
-  };
+  const { jumpingToLive, jumpToLiveEdge } = useJumpToLiveState({
+    activeTargetKey,
+    serviceRef,
+    clockRef,
+    timersRef,
+  });
 
   const activateTvOsd = (act: ReturnType<typeof clampTvOsdAction>): void => {
     if (!allowTvSelect()) return;
@@ -775,6 +776,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     seekToRatio,
     setBarScrubbing,
     timeShiftUnavailableVisible,
+    jumpingToLive,
     jumpToLiveEdge,
     selectProgram,
     selectAudio,

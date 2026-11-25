@@ -7,6 +7,7 @@ import type {
   DeinterlaceMode,
   LiveChannelSwitchModePref,
   OsdTimeDisplayMode,
+  PreferencesPatch,
   SeekStepSecPref,
   SleepTimerAction,
   SubtitleModePref,
@@ -15,9 +16,16 @@ import type {
 } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { PlaybackClock, PlaybackService, PlaybackTimers } from '@elv/playback';
-import { MicroPill, TvFocusAnchor, useTheme, useViewport, webBackdropBlur } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
-import { StyleSheet, View } from 'react-native';
+import {
+  Icon,
+  MicroPill,
+  TvFocusAnchor,
+  useTheme,
+  useViewport,
+  webBackdropBlur,
+} from '@elv/ui-kit';
+import { type ReactElement, useEffect, useRef, useState } from 'react';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 import type { AppLifecyclePort } from '../ports/app-lifecycle';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
@@ -29,7 +37,7 @@ import {
   ExternalSubtitleUrlOverlay,
   type ExternalSubtitleUrlOverlayProps,
 } from './ExternalSubtitleUrlOverlay';
-import { computeMiniPlayerFrame, FloatingMiniPlayerChrome } from './FloatingMiniPlayerChrome';
+import { FloatingMiniPlayerChrome, useMiniPlayerController } from './FloatingMiniPlayerChrome';
 import {
   DesktopDockedTopBar,
   HIDE_CURSOR_WEB_STYLE,
@@ -94,6 +102,7 @@ export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
   preferHevcOverDolbyVision?: boolean;
   filterSdhSubtitles?: boolean;
   subtitleMode?: SubtitleModePref;
+  onPersistTrackLanguagePatch?: (patch: PreferencesPatch) => void;
   subtitleFontFamily?: AccessibilityFontFamily;
   subtitleStyle?: SubtitleStyleConfig;
   onPersistSubtitleStyle?: (style: SubtitleStyleConfig) => void;
@@ -203,6 +212,121 @@ export interface PlayerScreenStageProps {
   readonly onExpandMiniPlayer?: (() => void) | undefined;
   readonly onCloseMiniPlayer?: (() => void) | undefined;
   readonly onPinchMinimize?: (() => void) | undefined;
+  readonly resizeMode?: VideoResizeMode | undefined;
+  readonly aspectToastNonce?: number | undefined;
+  readonly reduceMotion?: boolean | undefined;
+}
+
+const ASPECT_TOAST_HOLD_MS = 1_100;
+const ASPECT_TOAST_FADE_MS = 400;
+
+function formatResizeModeLabel(mode: VideoResizeMode, i18n: AppI18n): string {
+  if (mode === 'fill') return i18n.t('player.aspect.fill');
+  if (mode === 'stretch') return i18n.t('player.aspect.stretch');
+  return i18n.t('player.aspect.fit');
+}
+
+function AspectModeToast({
+  resizeMode,
+  nonce,
+  reduceMotion,
+  topInset,
+  i18n,
+}: {
+  readonly resizeMode: VideoResizeMode;
+  readonly nonce: number;
+  readonly reduceMotion: boolean;
+  readonly topInset: number;
+  readonly i18n: AppI18n;
+}): ReactElement | null {
+  const theme = useTheme();
+  const [visible, setVisible] = useState(false);
+  const opacityRef = useRef<Animated.Value | null>(null);
+  if (opacityRef.current === null) {
+    opacityRef.current = new Animated.Value(0);
+  }
+  const opacity = opacityRef.current;
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fadeAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const effectiveReduceMotion = reduceMotion || theme.reduceMotion;
+
+  useEffect(() => {
+    if (holdTimerRef.current !== null) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    fadeAnimRef.current?.stop();
+    fadeAnimRef.current = null;
+
+    if (nonce <= 0) {
+      opacity.setValue(0);
+      setVisible(false);
+      return;
+    }
+
+    opacity.setValue(1);
+    setVisible(true);
+    holdTimerRef.current = setTimeout(() => {
+      holdTimerRef.current = null;
+      if (effectiveReduceMotion) {
+        opacity.setValue(0);
+        setVisible(false);
+        return;
+      }
+      const anim = Animated.timing(opacity, {
+        toValue: 0,
+        duration: ASPECT_TOAST_FADE_MS,
+        useNativeDriver: false,
+      });
+      fadeAnimRef.current = anim;
+      anim.start(({ finished }) => {
+        if (fadeAnimRef.current === anim) fadeAnimRef.current = null;
+        if (finished) setVisible(false);
+      });
+    }, ASPECT_TOAST_HOLD_MS);
+
+    return () => {
+      if (holdTimerRef.current !== null) {
+        clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = null;
+      }
+      fadeAnimRef.current?.stop();
+      fadeAnimRef.current = null;
+    };
+  }, [effectiveReduceMotion, nonce, opacity]);
+
+  if (!visible) return null;
+
+  return (
+    <Animated.View
+      testID="player-aspect-toast"
+      pointerEvents="none"
+      style={[
+        stageStyles.aspectToastWrap,
+        {
+          top: topInset,
+          opacity,
+        },
+      ]}
+    >
+      <View
+        style={[
+          stageStyles.aspectToastPill,
+          {
+            backgroundColor: theme.colors.glassBg,
+            borderColor: theme.colors.glassBorder,
+            borderRadius: theme.radius.pill,
+          },
+          webBackdropBlur(16),
+        ]}
+      >
+        <Icon name="aspect" size={16} color={theme.colors.accent} />
+        <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
+          {formatResizeModeLabel(resizeMode, i18n)}
+        </Text>
+      </View>
+    </Animated.View>
+  );
 }
 
 /**
@@ -218,16 +342,17 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
   const isMini = p.isMini === true;
   const suppressChrome = p.inPip || isMini;
   const osdNode = <PlayerOsd {...p.osdProps} />;
-  const miniFrame = isMini
-    ? computeMiniPlayerFrame({
-        viewportWidth: viewport.width,
-        viewportHeight: viewport.height,
-        formFactor: viewport.formFactor,
-        orientation: viewport.orientation,
-        safeArea: viewport.safeArea,
-        overscan: viewport.overscan,
-      })
-    : null;
+  const miniController = useMiniPlayerController({
+    enabled: isMini,
+    isTv: p.isTv,
+    reduceMotion: p.reduceMotion === true || theme.reduceMotion,
+    viewportWidth: viewport.width,
+    viewportHeight: viewport.height,
+    formFactor: viewport.formFactor,
+    orientation: viewport.orientation,
+    safeArea: viewport.safeArea,
+    overscan: viewport.overscan,
+  });
 
   return (
     <View
@@ -255,18 +380,18 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
         />
       ) : null}
 
-      <View
+      <Animated.View
         testID={isMini ? 'floating-mini-player' : 'player-stage-frame'}
         {...(isMini ? { accessibilityLabel: p.i18n.t('player.miniPlayer.activeLabel') } : {})}
         style={
-          isMini && miniFrame !== null
+          isMini
             ? [
                 stageStyles.miniFrame,
                 {
-                  width: miniFrame.width,
-                  height: miniFrame.height,
-                  right: miniFrame.right,
-                  bottom: miniFrame.bottom,
+                  width: miniController.width,
+                  height: miniController.height,
+                  left: miniController.animPos.x,
+                  top: miniController.animPos.y,
                   backgroundColor: theme.colors.bgElevated,
                   borderColor: theme.colors.glassBorder,
                   borderRadius: theme.radius.card,
@@ -300,12 +425,16 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
             subtitle={p.osdProps.subtitle}
             isLive={!p.isVod}
             isTv={p.isTv}
+            corner={miniController.corner}
             i18n={p.i18n}
             onExpand={p.onExpandMiniPlayer ?? (() => undefined)}
             onClose={p.onCloseMiniPlayer ?? (() => undefined)}
+            onDragStart={miniController.startDrag}
+            onResizeStart={miniController.startResize}
+            shouldSuppressExpand={miniController.shouldSuppressExpand}
           />
         ) : null}
-      </View>
+      </Animated.View>
 
       {!suppressChrome && p.externalPlaybackActive === true ? (
         <ExternalDisplayCard i18n={p.i18n} />
@@ -365,6 +494,16 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
             tone="accent"
           />
         </View>
+      ) : null}
+
+      {!suppressChrome && p.aspectToastNonce !== undefined && p.aspectToastNonce > 0 ? (
+        <AspectModeToast
+          resizeMode={p.resizeMode ?? 'fit'}
+          nonce={p.aspectToastNonce}
+          reduceMotion={p.reduceMotion === true}
+          topInset={28 + viewport.safeArea.top + viewport.overscan.y}
+          i18n={p.i18n}
+        />
       ) : null}
 
       <PlayerStatsHud
@@ -501,5 +640,20 @@ const stageStyles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
     elevation: 10,
+  },
+  aspectToastWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 40,
+  },
+  aspectToastPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderWidth: 1,
   },
 });

@@ -89,17 +89,17 @@ async function mountScreen(opts: { formFactor: FormFactor; target: PlayTarget })
     engine.emit({ attempt, type: 'firstFrame', atMs: clock.now() });
     engine.emit({ attempt, type: 'state', state: 'playing' });
   });
-  return { view, engine, clock, attempt };
+  return { view, engine, clock, manual, attempt };
 }
 
 describe('PlayerScreen Jump to live button (#141)', () => {
-  it('shows Jump to live ONLY on lagging live MPEG-TS (never HLS or within 4s) and invokes jumpToLiveEdge on mobile OSD', async () => {
+  it('shows Jump to live ONLY on seekable or lagging > 15s live MPEG-TS, renders syncing feedback on press, disables duplicates, and clears on post-seek clock', async () => {
     const { view, engine, clock, attempt } = await mountScreen({
       formFactor: 'phone',
       target: LIVE_TARGET,
     });
 
-    // HLS live (isLiveTs omitted) -> never shown
+    // HLS live (isLiveTs omitted, no seekable window) -> never shown
     await act(async () => {
       engine.emit({
         attempt,
@@ -109,7 +109,7 @@ describe('PlayerScreen Jump to live button (#141)', () => {
     });
     expect(screen.queryByTestId('player-jump-to-live')).toBeNull();
 
-    // HLS live (isLiveTs: false) -> never shown
+    // Non-seekable live stream (timeShiftSupported: false) -> never shown
     await act(async () => {
       engine.emit({
         attempt,
@@ -119,19 +119,36 @@ describe('PlayerScreen Jump to live button (#141)', () => {
           atMs: clock.now(),
           rate: 1,
           liveEdgeMs: 30_000,
-          isLiveTs: false,
+          timeShiftSupported: false,
         },
       });
     });
     expect(screen.queryByTestId('player-jump-to-live')).toBeNull();
 
-    // Live MPEG-TS within 4s of live edge -> hidden
+    // Bounded live time-shift within 12s normal readahead (8s behind) -> hidden (no false positive!)
     await act(async () => {
       engine.emit({
         attempt,
         type: 'clock',
         anchor: {
-          positionMs: 26_500,
+          positionMs: 52_000,
+          atMs: clock.now(),
+          rate: 1,
+          liveSeekableStartMs: 0,
+          liveEdgeMs: 60_000,
+          timeShiftSupported: true,
+        },
+      });
+    });
+    expect(screen.queryByTestId('player-jump-to-live')).toBeNull();
+
+    // Live MPEG-TS within 15s of live edge (10s behind) -> hidden
+    await act(async () => {
+      engine.emit({
+        attempt,
+        type: 'clock',
+        anchor: {
+          positionMs: 20_000,
           atMs: clock.now(),
           rate: 1,
           liveEdgeMs: 30_000,
@@ -141,7 +158,7 @@ describe('PlayerScreen Jump to live button (#141)', () => {
     });
     expect(screen.queryByTestId('player-jump-to-live')).toBeNull();
 
-    // Live MPEG-TS lagging > 4s behind liveEdgeMs -> Jump to live appears
+    // Live MPEG-TS lagging > 15s behind liveEdgeMs -> Jump to live appears
     await act(async () => {
       engine.emit({
         attempt,
@@ -158,15 +175,38 @@ describe('PlayerScreen Jump to live button (#141)', () => {
     const jumpBtn = screen.getByTestId('player-jump-to-live');
     expect(jumpBtn).toHaveTextContent(/Jump to live/);
 
-    // Pressing Jump to live seeks to liveEdgeMs - 3_000 (27_000) and hides button
+    // Pressing Jump to live seeks to liveEdgeMs - 1_000 (29_000), shows syncing spinner/label, and disables duplicates
     await fireEvent.press(jumpBtn);
-    expect(engine.commands.at(-1)).toEqual({ name: 'seek', attempt, positionMs: 27_000 });
+    expect(engine.commands.at(-1)).toEqual({ name: 'seek', attempt, positionMs: 29_000 });
+    const syncingBtn = screen.getByTestId('player-jump-to-live');
+    expect(syncingBtn).toHaveTextContent(/Jumping to live/);
+    expect(screen.getByTestId('player-jump-to-live-loading')).toBeTruthy();
+
+    // Duplicate click while syncing is ignored
+    const cmdCount = engine.commands.length;
+    await fireEvent.press(syncingBtn);
+    expect(engine.commands.length).toBe(cmdCount);
+
+    // Next clock update confirming we're back at live edge clears syncing and hides button
+    await act(async () => {
+      engine.emit({
+        attempt,
+        type: 'clock',
+        anchor: {
+          positionMs: 29_500,
+          atMs: clock.now() + 200,
+          rate: 1,
+          liveEdgeMs: 30_500,
+          isLiveTs: true,
+        },
+      });
+    });
     expect(screen.queryByTestId('player-jump-to-live')).toBeNull();
 
     await view.unmount();
   });
 
-  it('renders Jump to live on DesktopCinemaBar for lagging live MPEG-TS and hides it on VOD', async () => {
+  it('renders Jump to live on DesktopCinemaBar, clears syncing after 4s safety timer, unpauses in 1 click, and hides on VOD', async () => {
     const desktop = await mountScreen({ formFactor: 'desktop', target: LIVE_TARGET });
     await act(async () => {
       desktop.engine.emit({
@@ -187,7 +227,43 @@ describe('PlayerScreen Jump to live button (#141)', () => {
     expect(desktop.engine.commands.at(-1)).toEqual({
       name: 'seek',
       attempt: desktop.attempt,
-      positionMs: 22_000,
+      positionMs: 24_000,
+    });
+    expect(screen.getByTestId('player-jump-to-live')).toHaveTextContent(/Jumping to live/);
+
+    // 4_000 ms safety timer clears syncing even if engine never emits another clock
+    await act(async () => {
+      desktop.manual.advance(4_000);
+    });
+    expect(screen.queryByTestId('player-jump-to-live')).toBeNull();
+
+    // Paused bounded time-shift stream jumps & unpauses cleanly in 1 click without extra attempt race
+    await act(async () => {
+      desktop.engine.emit({
+        attempt: desktop.attempt,
+        type: 'clock',
+        anchor: {
+          positionMs: 55_000,
+          atMs: desktop.clock.now(),
+          rate: 0,
+          liveSeekableStartMs: 0,
+          liveEdgeMs: 60_000,
+          timeShiftSupported: true,
+        },
+      });
+      desktop.engine.emit({ attempt: desktop.attempt, type: 'state', state: 'paused' });
+    });
+    const pausedBtn = screen.getByTestId('player-jump-to-live');
+    await fireEvent.press(pausedBtn);
+    expect(desktop.engine.commands.slice(-2)).toEqual([
+      { name: 'seek', attempt: desktop.attempt, positionMs: 60_000 },
+      { name: 'play', attempt: desktop.attempt },
+    ]);
+    expect(screen.getByTestId('player-jump-to-live')).toHaveTextContent(/Jumping to live/);
+
+    // Playing confirmation clears syncing
+    await act(async () => {
+      desktop.engine.emit({ attempt: desktop.attempt, type: 'state', state: 'playing' });
     });
     expect(screen.queryByTestId('player-jump-to-live')).toBeNull();
     await desktop.view.unmount();

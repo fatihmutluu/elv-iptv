@@ -124,6 +124,9 @@ function AppShellPlayerView({
       onPersistAudioNormalization={(audioNormalization) => {
         void preferences.updatePreferences({ audioNormalization });
       }}
+      onPersistTrackLanguagePatch={(patch) => {
+        void preferences.updatePreferences(patch);
+      }}
       windowAspectRatioLock={prefs.windowAspectRatioLock}
       backgroundAudioPlayback={prefs.backgroundAudioPlayback}
       autoFrameRate={prefs.autoFrameRate}

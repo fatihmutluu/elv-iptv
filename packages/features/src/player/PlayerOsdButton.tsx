@@ -43,12 +43,13 @@ const sameText = (a: string, b: string): boolean => a === b;
 const sameBool = (a: boolean, b: boolean): boolean => a === b;
 
 /**
- * Compact Cinema Quietude `"Jump to live"` button rendered when a live stream is behind the live
- * edge or paused with bounded time-shift (`#28`) or lagging > 4 s on raw MPEG-TS (`#141`).
+ * Compact Cinema Quietude `"Jump to live"` button rendered when a live stream supports live
+ * seeking/time-shift and is paused, genuinely behind the live edge, or actively syncing (`#28`, `#141`).
  */
 export function JumpToLiveButton(p: {
   isVod: boolean;
   isPaused?: boolean;
+  jumpingToLive?: boolean;
   service: PlaybackService | null;
   clock: PlaybackClock;
   i18n: AppI18n;
@@ -58,12 +59,13 @@ export function JumpToLiveButton(p: {
   onPress?: () => void;
 }): ReactElement | null {
   const isPaused = p.isPaused === true;
+  const jumpingToLive = p.jumpingToLive === true;
   const derive = useCallback(
     (anchor: ClockAnchor | undefined, nowMs: number) =>
-      shouldShowLiveJumpToLive(anchor, nowMs, isPaused),
-    [isPaused],
+      shouldShowLiveJumpToLive(anchor, nowMs, isPaused, { jumpingToLive }),
+    [isPaused, jumpingToLive],
   );
-  const show = usePlaybackTicker({
+  const tickedShow = usePlaybackTicker({
     service: p.isVod ? null : p.service,
     clock: p.clock,
     mode: 'second',
@@ -71,15 +73,24 @@ export function JumpToLiveButton(p: {
     derive,
     isEqual: sameBool,
   });
+  const show =
+    !p.isVod && p.service !== null && p.onPress !== undefined
+      ? shouldShowLiveJumpToLive(p.service.getState().anchor, p.clock.now(), isPaused, {
+          jumpingToLive,
+        })
+      : tickedShow;
   if (p.isVod || p.service === null || p.onPress === undefined || !show) return null;
+  const label = jumpingToLive ? p.i18n.t('player.live.syncing') : p.i18n.t('player.jumpToLive');
   return (
     <OsdButton
       testID="player-jump-to-live"
       variant="pill-cta"
       icon="play"
       iconSize={14}
-      label={p.i18n.t('player.jumpToLive')}
-      accessibilityLabel={p.i18n.t('player.jumpToLive')}
+      loading={jumpingToLive}
+      disabled={jumpingToLive}
+      label={label}
+      accessibilityLabel={label}
       compact={p.compact === true}
       onPress={p.onPress}
       isTv={p.isTv}
@@ -141,6 +152,7 @@ export interface OsdButtonProps {
   tabularLabel?: boolean;
   active?: boolean;
   loading?: boolean;
+  disabled?: boolean;
   onPress: () => void;
   onHoverIn?: () => void;
   onHoverOut?: () => void;
@@ -253,11 +265,15 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
     >
       <Pressable
         testID={p.testID}
+        {...(p.disabled === true ? { disabled: true } : {})}
         {...(p.isTv ? { focusable: false } : {})}
         {...webShortcutProps}
         accessibilityRole="button"
         accessibilityLabel={p.accessibilityLabel ?? p.label ?? p.testID}
-        accessibilityState={{ selected: focused }}
+        accessibilityState={{
+          selected: focused,
+          ...(p.disabled === true ? { disabled: true } : {}),
+        }}
         onHoverIn={() => {
           setHovered(true);
           p.onHoverIn?.();
@@ -269,6 +285,7 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
         onPressIn={() => setPressed(true)}
         onPressOut={() => setPressed(false)}
         onPress={(e) => {
+          if (p.disabled === true) return;
           blurWebTarget(e.currentTarget);
           p.onPress();
         }}

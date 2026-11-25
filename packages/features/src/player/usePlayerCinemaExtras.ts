@@ -1,5 +1,11 @@
 import type { CatalogService } from '@elv/data';
-import type { DeinterlaceMode, OsdTimeDisplayMode, SleepTimerAction } from '@elv/domain';
+import type {
+  DeinterlaceMode,
+  OsdTimeDisplayMode,
+  PreferencesPatch,
+  SleepTimerAction,
+  SubtitleModePref,
+} from '@elv/domain';
 import {
   type ChapterInfo,
   type MediaTracks,
@@ -8,13 +14,17 @@ import {
   type PlaybackStatus,
   type PlaybackTimers,
   positionAt,
+  type TrackInfo,
 } from '@elv/playback';
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { PlayTarget } from '../ports/play-target';
 import type { OpenVideoEngine, VideoResizeMode } from '../ports/video-host';
 import { resolveChapterJumpTarget } from './chapters';
 import { mapRecentChannelRows } from './PlayerScreenParts';
-import { resolveTrackPreferenceScopeKey } from './track-preferences';
+import {
+  computeGlobalTrackLanguagePatch,
+  resolveTrackPreferenceScopeKey,
+} from './track-preferences';
 import { useSleepTimer } from './useSleepTimer';
 import { useStillWatching } from './useStillWatching';
 import { cycleOsdTimeDisplayMode } from './vod-progress-math';
@@ -82,6 +92,10 @@ export function usePlayerCinemaExtras(params: {
   readonly volume?: number | undefined;
   readonly resizeMode?: VideoResizeMode | undefined;
   readonly preferredAudioDevice?: string | undefined;
+  readonly preferredAudioLanguages?: readonly string[] | undefined;
+  readonly preferredSubtitleLanguages?: readonly string[] | undefined;
+  readonly subtitleMode?: SubtitleModePref | undefined;
+  readonly onPersistTrackLanguagePatch?: ((patch: PreferencesPatch) => void) | undefined;
 }) {
   const {
     activeTarget,
@@ -114,6 +128,10 @@ export function usePlayerCinemaExtras(params: {
     volume,
     resizeMode,
     preferredAudioDevice,
+    preferredAudioLanguages,
+    preferredSubtitleLanguages,
+    subtitleMode,
+    onPersistTrackLanguagePatch,
   } = params;
 
   const activeTargetRef = useRef(activeTarget);
@@ -128,6 +146,25 @@ export function usePlayerCinemaExtras(params: {
   onPersistTimeModeRef.current = onPersistOsdTimeDisplayMode;
   const onPersistResizeModeRef = useRef(onPersistResizeMode);
   onPersistResizeModeRef.current = onPersistResizeMode;
+  const onPersistTrackLanguagePatchRef = useRef(onPersistTrackLanguagePatch);
+  onPersistTrackLanguagePatchRef.current = onPersistTrackLanguagePatch;
+  const preferredAudioLanguagesRef = useRef<readonly string[]>(preferredAudioLanguages ?? []);
+  useEffect(() => {
+    preferredAudioLanguagesRef.current = preferredAudioLanguages ?? [];
+  }, [preferredAudioLanguages]);
+  const preferredSubtitleLanguagesRef = useRef<readonly string[]>(preferredSubtitleLanguages ?? []);
+  useEffect(() => {
+    preferredSubtitleLanguagesRef.current = preferredSubtitleLanguages ?? [];
+  }, [preferredSubtitleLanguages]);
+  const subtitleModeRef = useRef<SubtitleModePref | undefined>(subtitleMode);
+  useEffect(() => {
+    subtitleModeRef.current = subtitleMode;
+  }, [subtitleMode]);
+  const lastSelectedAudioTrackRef = useRef<TrackInfo | undefined>(undefined);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clear session audio override when switching items
+  useEffect(() => {
+    lastSelectedAudioTrackRef.current = undefined;
+  }, [activeTarget.itemKey]);
 
   const [timeDisplayMode, setTimeDisplayMode] = useState<OsdTimeDisplayMode>(initialTimeMode);
   useEffect(() => {
@@ -292,10 +329,22 @@ export function usePlayerCinemaExtras(params: {
 
   const handleAudioTrackSelected = useCallback(
     (id: string): void => {
-      const save = catalogRef.current.saveTrackPreference;
-      if (save === undefined) return;
       const track = tracksRef.current.audio.find((t) => t.id === id);
       if (track === undefined) return;
+      lastSelectedAudioTrackRef.current = track;
+      const globalPatch = computeGlobalTrackLanguagePatch({
+        kind: 'audio',
+        track,
+        existingAudioLanguages: preferredAudioLanguagesRef.current,
+      });
+      if (globalPatch !== null) {
+        if (globalPatch.preferredAudioLanguages !== undefined) {
+          preferredAudioLanguagesRef.current = globalPatch.preferredAudioLanguages;
+        }
+        onPersistTrackLanguagePatchRef.current?.(globalPatch);
+      }
+      const save = catalogRef.current.saveTrackPreference;
+      if (save === undefined) return;
       const cur = activeTargetRef.current;
       void Promise.resolve(
         save({
@@ -311,9 +360,32 @@ export function usePlayerCinemaExtras(params: {
 
   const handleSubtitleTrackSelected = useCallback(
     (id: string | null): void => {
+      const cur = activeTargetRef.current;
+      const track = id === null ? null : tracksRef.current.subtitles.find((t) => t.id === id);
+      const activeAudioTrack =
+        lastSelectedAudioTrackRef.current ??
+        tracksRef.current.audio.find((t) => t.id === tracksRef.current.selectedAudioId) ??
+        tracksRef.current.audio.find((t) => t.isDefault === true) ??
+        tracksRef.current.audio[0];
+      const globalPatch = computeGlobalTrackLanguagePatch({
+        kind: 'subtitle',
+        track,
+        activeAudioTrack,
+        existingSubtitleLanguages: preferredSubtitleLanguagesRef.current,
+        currentSubtitleMode: subtitleModeRef.current,
+        mediaKind: cur.kind,
+      });
+      if (globalPatch !== null) {
+        if (globalPatch.preferredSubtitleLanguages !== undefined) {
+          preferredSubtitleLanguagesRef.current = globalPatch.preferredSubtitleLanguages;
+        }
+        if (globalPatch.subtitleMode !== undefined) {
+          subtitleModeRef.current = globalPatch.subtitleMode;
+        }
+        onPersistTrackLanguagePatchRef.current?.(globalPatch);
+      }
       const save = catalogRef.current.saveTrackPreference;
       if (save === undefined) return;
-      const cur = activeTargetRef.current;
       const scopeKey = resolveTrackPreferenceScopeKey(cur);
       if (id === null) {
         void Promise.resolve(
@@ -327,7 +399,6 @@ export function usePlayerCinemaExtras(params: {
         ).catch(() => undefined);
         return;
       }
-      const track = tracksRef.current.subtitles.find((t) => t.id === id);
       void Promise.resolve(
         save({
           scopeKey,

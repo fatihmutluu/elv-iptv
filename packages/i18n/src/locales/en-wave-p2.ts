@@ -1,0 +1,36 @@
+/** English (source) messages for Wave P2 player OSD polish, mini-player ergonomics & version picker. */
+export const enWaveP2Messages = {
+  'player.live.syncing': 'Jumping to live...',
+  'player.mini.resize': 'Resize mini player',
+  'player.mini.drag': 'Drag to move corner',
+  'detail.version.choose': 'Select version',
+  'player.settings.desc.subtitles': 'Choose subtitle track or load external captions',
+  'player.settings.desc.audio': 'Switch between available audio language tracks',
+  'player.settings.desc.audioDelay': 'Adjust audio sync offset in milliseconds',
+  'player.settings.desc.subtitleDelay': 'Shift subtitle timing earlier or later',
+  'player.settings.desc.subtitleStyle': 'Customize caption size, color, and backdrop',
+  'player.settings.desc.audioDevice': 'Select the system audio output device',
+  'player.settings.desc.videoQuality': 'Pick a specific stream resolution or Auto',
+  'player.settings.desc.quality': 'Switch between alternate channel stream qualities',
+  'player.settings.desc.speed': 'Change playback speed multiplier',
+  'player.settings.desc.chapters': 'Jump directly to a chapter marker',
+  'player.settings.desc.sleepTimer': 'Automatically stop or pause playback after a timer',
+  'player.settings.desc.videoDecoder': 'Choose hardware or software video decoding',
+  'player.settings.desc.resizeMode': 'Cycle aspect ratio between Fit, Fill, and Stretch',
+  'player.settings.desc.timeDisplay': 'Switch between total, remaining, and end time',
+  'player.settings.desc.info': 'Show stream metadata, codec, and programme details',
+  'player.settings.desc.alwaysOnTop': 'Keep the player window floating above other windows',
+  'player.settings.desc.deinterlace': 'Smooth interlaced broadcast video frames',
+  'player.settings.desc.pitchLock': 'Preserve natural voice pitch at different speeds',
+  'player.settings.desc.audioNormalization': 'Balance quiet dialogue and loud channels',
+  'player.settings.desc.autoSubtitlesOnSkipBack': 'Temporarily show captions when skipping back',
+  'player.settings.desc.autoPlayNextEpisode': 'Automatically start the next episode when ready',
+  'player.settings.desc.miniPlayer': 'Dock playback into a floating corner mini player',
+  'player.settings.desc.pip': 'Pop video into system Picture-in-Picture',
+  'player.settings.desc.multiView': 'Watch multiple live channels side by side',
+  'player.settings.desc.popout': 'Open playback in a standalone desktop window',
+  'player.settings.desc.stats': 'Display live playback bitrate, FPS, and buffer metrics',
+} as const;
+
+/** Message identifiers for Wave P2 player OSD polish, mini-player ergonomics & version picker. */
+export type WaveP2MessageId = keyof typeof enWaveP2Messages;

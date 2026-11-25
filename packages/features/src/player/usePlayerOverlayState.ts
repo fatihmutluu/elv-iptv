@@ -44,10 +44,10 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const canLock = formFactor === 'phone' || formFactor === 'tablet';
   const hasAspect = true;
   const hasDeinterlace = params.onSetDeinterlace !== undefined;
-  const hasPitchLock = params.hasPitchLock === true;
+  const hasPitchLock = isVod && params.hasPitchLock === true;
   const hasAudioNormalization = params.hasAudioNormalization === true;
-  const hasAutoSubtitlesOnSkipBack = params.hasAutoSubtitlesOnSkipBack === true;
-  const hasAutoPlayNextEpisode = params.hasAutoPlayNextEpisode === true;
+  const hasAutoSubtitlesOnSkipBack = isVod && params.hasAutoSubtitlesOnSkipBack === true;
+  const hasAutoPlayNextEpisode = isVod && params.hasAutoPlayNextEpisode === true;
   const hasAudioDevice = params.hasAudioDevice === true;
   const audioDevices = params.audioDevices;
   const activeAudioDevice = params.activeAudioDevice;
@@ -75,11 +75,11 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const hasChapters = isVod && (chapters?.length ?? 0) > 0;
   const hasSleepTimer = params.hasSleepTimer === true;
   const sleepTimerMinutes = params.sleepTimerMinutes;
-  const hasTimeDisplay = params.hasTimeDisplay === true;
+  const hasTimeDisplay = isVod && params.hasTimeDisplay === true;
   const hasAlwaysOnTop = params.hasAlwaysOnTop === true;
   const hasMiniPlayer = params.hasMiniPlayer === true;
   const hasPip = params.hasPip === true;
-  const hasMultiView = params.hasMultiView === true;
+  const hasMultiView = !isVod && params.hasMultiView === true;
   const hasPopout = params.hasPopout === true;
   const canOpenInfo = params.hasInfo !== false;
   const canOpenChannelList = !isVod && params.hasChannelList === true;

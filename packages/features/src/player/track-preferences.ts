@@ -1,4 +1,9 @@
-import type { SubtitleModePref } from '@elv/domain';
+import {
+  extractLanguageCodeFromLabel,
+  normalizeLanguageCode,
+  type PreferencesPatch,
+  type SubtitleModePref,
+} from '@elv/domain';
 import type { TrackInfo } from '@elv/playback';
 
 const ISO_639_2_TO_1: Readonly<Record<string, string>> = {
@@ -138,4 +143,84 @@ export function resolveEffectiveTrackPrefs(input: {
         ? 'smart'
         : baseMode;
   return { audioLang, subtitleLang, subtitleMode };
+}
+
+const MAX_PREFERRED_LANGUAGES = 5;
+
+function resolveCanonicalTrackLang(track: TrackInfo | undefined): string {
+  if (track === undefined) return '';
+  const fromCode = normalizeLanguageCode(track.language) ?? normalizeTrackLanguage(track.language);
+  if (fromCode.length > 0) return fromCode;
+  return extractLanguageCodeFromLabel(track.label) ?? '';
+}
+
+function promoteLanguage(lang: string, existing: readonly string[] | undefined): readonly string[] {
+  const deduped: string[] = [lang];
+  if (existing !== undefined) {
+    for (const raw of existing) {
+      const normalized = normalizeLanguageCode(raw) ?? normalizeTrackLanguage(raw);
+      if (normalized.length > 0 && !deduped.includes(normalized)) {
+        deduped.push(normalized);
+        if (deduped.length >= MAX_PREFERRED_LANGUAGES) break;
+      }
+    }
+  }
+  return deduped;
+}
+
+/** Input for {@link computeGlobalTrackLanguagePatch}. */
+export type GlobalTrackLanguagePatchInput =
+  | {
+      readonly kind: 'audio';
+      readonly track: TrackInfo | undefined;
+      readonly existingAudioLanguages?: readonly string[] | undefined;
+    }
+  | {
+      readonly kind: 'subtitle';
+      readonly track: TrackInfo | null | undefined;
+      readonly activeAudioTrack?: TrackInfo | undefined;
+      readonly existingSubtitleLanguages?: readonly string[] | undefined;
+      readonly currentSubtitleMode?: SubtitleModePref | undefined;
+      readonly mediaKind: 'live' | 'vod';
+    };
+
+/**
+ * Computes a sticky global {@link PreferencesPatch} when the user manually picks an audio or
+ * subtitle track inside the player, so subsequent movies and series automatically inherit the
+ * user's preferred language pairing.
+ */
+export function computeGlobalTrackLanguagePatch(
+  input: GlobalTrackLanguagePatchInput,
+): PreferencesPatch | null {
+  if (input.kind === 'audio') {
+    const lang = resolveCanonicalTrackLang(input.track);
+    if (lang.length === 0) return null;
+    return {
+      preferredAudioLang: lang,
+      preferredAudioLanguages: promoteLanguage(lang, input.existingAudioLanguages),
+      preferDefaultAudioTrack: false,
+    };
+  }
+
+  if (input.track === null) {
+    return input.mediaKind === 'vod' ? { subtitleMode: 'off' } : null;
+  }
+
+  const lang = resolveCanonicalTrackLang(input.track);
+  if (lang.length === 0) return null;
+
+  const nextSubtitleLanguages = promoteLanguage(lang, input.existingSubtitleLanguages);
+  const activeAudioLang = resolveCanonicalTrackLang(input.activeAudioTrack);
+  let nextMode: SubtitleModePref | undefined;
+  if (activeAudioLang.length > 0 && nextSubtitleLanguages.includes(activeAudioLang)) {
+    nextMode = 'always';
+  } else if (input.currentSubtitleMode === 'off') {
+    nextMode = 'smart';
+  }
+
+  return {
+    preferredSubtitleLang: lang,
+    preferredSubtitleLanguages: nextSubtitleLanguages,
+    ...(nextMode !== undefined ? { subtitleMode: nextMode } : {}),
+  };
 }

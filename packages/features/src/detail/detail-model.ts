@@ -11,11 +11,8 @@ import type { DetailTarget } from '../shared';
 export { mergeVodEnrichment } from './detail-data-helpers';
 export {
   buildTechnicalBadges,
-  cyclePrePlayOption,
   type DescribedDetailError,
   describeDetailSeasonsError,
-  PREPLAY_AUDIO_OPTIONS,
-  PREPLAY_SUBTITLE_OPTIONS,
   SYNOPSIS_EXPAND_THRESHOLD,
 } from './detail-preplay';
 

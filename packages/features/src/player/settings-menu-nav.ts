@@ -151,31 +151,34 @@ export interface SettingsMenuOptions {
 
 /** Builds ordered root Player Settings rows from a {@link SettingsMenuOptions} bag. */
 function settingsRootItemsFromOptions(options?: SettingsMenuOptions): readonly SettingsRootItem[] {
+  const isVod = options?.isVod === true;
   const items: SettingsRootItem[] = ['subtitles', 'audio'];
   if (options?.hasAudioDelay === true) items.push('audioDelay');
   if (options?.hasSubtitleDelay === true) items.push('subtitleDelay');
   if (options?.hasSubtitleStyle === true) items.push('subtitleStyle');
   if (options?.hasAudioDevice === true) items.push('audioDevice');
   if (options?.hasVideoQuality === true) items.push('videoQuality');
-  if (options?.hasQuality === true && (options.qualityVariants?.length ?? 0) > 1) {
+  if (!isVod && options?.hasQuality === true && (options.qualityVariants?.length ?? 0) > 1) {
     items.push('quality');
   }
-  if (options?.isVod === true) items.push('speed');
-  if (options?.hasChapters === true && (options.chapters?.length ?? 0) > 0) items.push('chapters');
+  if (isVod) items.push('speed');
+  if (isVod && options?.hasChapters === true && (options.chapters?.length ?? 0) > 0) {
+    items.push('chapters');
+  }
   if (options?.hasSleepTimer === true) items.push('sleepTimer');
   if (options?.hasVideoDecoder === true) items.push('videoDecoder');
   if (options?.hasAspect !== false) items.push('aspect');
-  if (options?.hasTimeDisplay === true) items.push('timeDisplay');
+  if (isVod && options?.hasTimeDisplay === true) items.push('timeDisplay');
   if (options?.hasInfo === true) items.push('info');
   if (options?.hasAlwaysOnTop === true) items.push('alwaysOnTop');
   if (options?.hasDeinterlace === true) items.push('deinterlace');
-  if (options?.hasPitchLock === true) items.push('pitchLock');
+  if (isVod && options?.hasPitchLock === true) items.push('pitchLock');
   if (options?.hasAudioNormalization === true) items.push('audioNormalization');
-  if (options?.hasAutoSubtitlesOnSkipBack === true) items.push('autoSubtitlesOnSkipBack');
-  if (options?.hasAutoPlayNextEpisode === true) items.push('autoPlayNextEpisode');
+  if (isVod && options?.hasAutoSubtitlesOnSkipBack === true) items.push('autoSubtitlesOnSkipBack');
+  if (isVod && options?.hasAutoPlayNextEpisode === true) items.push('autoPlayNextEpisode');
   if (options?.hasMiniPlayer === true) items.push('miniPlayer');
   if (options?.hasPip === true) items.push('pip');
-  if (options?.hasMultiView === true) items.push('multiView');
+  if (!isVod && options?.hasMultiView === true) items.push('multiView');
   if (options?.hasPopout === true) items.push('popout');
   items.push('stats');
   return items;
@@ -272,11 +275,12 @@ function selectedVideoDecoderIndex(mode: AndroidDecoderMode | undefined): number
   return Math.max(ANDROID_DECODER_MODES.indexOf(mode ?? 'auto'), 0);
 }
 
-function selectedSleepTimerIndex(minutes: number | undefined): number {
+function selectedSleepTimerIndex(minutes: number | undefined, isVod: boolean): number {
   const idx = SLEEP_TIMER_PRESETS_MIN.indexOf(
     (minutes ?? 0) as (typeof SLEEP_TIMER_PRESETS_MIN)[number],
   );
-  // Row 0 is the action toggle (Stop vs Pause); presets start at index 1
+  if (!isVod) return Math.max(idx, 0);
+  // On VOD, row 0 is the action toggle (Stop vs Pause); presets start at index 1
   return idx >= 0 ? idx + 1 : 1;
 }
 
@@ -329,7 +333,10 @@ export function initialSettingsMenu(
     return { view, index: selectedVideoDecoderIndex(options?.androidDecoderMode) };
   }
   if (view === 'sleepTimer') {
-    return { view, index: selectedSleepTimerIndex(options?.sleepTimerMinutes) };
+    return {
+      view,
+      index: selectedSleepTimerIndex(options?.sleepTimerMinutes, options?.isVod === true),
+    };
   }
   return { view, index: 0 };
 }
@@ -370,13 +377,21 @@ export function settingsRowCount(
       : 0;
   }
   if (view === 'quality') {
-    return options?.hasQuality === true ? (options.qualityVariants?.length ?? 0) : 0;
+    return options?.isVod !== true && options?.hasQuality === true
+      ? (options.qualityVariants?.length ?? 0)
+      : 0;
   }
   if (view === 'speed') return options?.isVod === true ? PLAYBACK_SPEED_OPTIONS.length : 0;
-  if (view === 'chapters')
-    return options?.hasChapters === true ? (options.chapters?.length ?? 0) : 0;
+  if (view === 'chapters') {
+    return options?.isVod === true && options?.hasChapters === true
+      ? (options.chapters?.length ?? 0)
+      : 0;
+  }
   if (view === 'sleepTimer') {
-    return options?.hasSleepTimer === true ? SLEEP_TIMER_PRESETS_MIN.length + 1 : 0;
+    if (options?.hasSleepTimer !== true) return 0;
+    return options.isVod === true
+      ? SLEEP_TIMER_PRESETS_MIN.length + 1
+      : SLEEP_TIMER_PRESETS_MIN.length;
   }
   if (view === 'videoDecoder') {
     return options?.hasVideoDecoder === true ? ANDROID_DECODER_MODES.length : 0;
@@ -411,13 +426,17 @@ export function clampSettingsMenu(
   }
   if (
     state.view === 'quality' &&
-    (options?.hasQuality !== true || (options.qualityVariants?.length ?? 0) <= 1)
+    (options?.isVod === true ||
+      options?.hasQuality !== true ||
+      (options.qualityVariants?.length ?? 0) <= 1)
   ) {
     return { view: 'root', index: 0 };
   }
   if (
     state.view === 'chapters' &&
-    (options?.hasChapters !== true || (options.chapters?.length ?? 0) === 0)
+    (options?.isVod !== true ||
+      options?.hasChapters !== true ||
+      (options.chapters?.length ?? 0) === 0)
   ) {
     return { view: 'root', index: 0 };
   }
@@ -506,6 +525,7 @@ function openSubView(
   }
   if (
     item === 'quality' &&
+    options?.isVod !== true &&
     options?.hasQuality === true &&
     (options.qualityVariants?.length ?? 0) > 1
   ) {
@@ -523,13 +543,21 @@ function openSubView(
       state: { view: 'speed', index: selectedSpeedIndex(options.playbackSpeed) },
     };
   }
-  if (item === 'chapters' && options?.hasChapters === true && (options.chapters?.length ?? 0) > 0) {
+  if (
+    item === 'chapters' &&
+    options?.isVod === true &&
+    options?.hasChapters === true &&
+    (options.chapters?.length ?? 0) > 0
+  ) {
     return { kind: 'state', state: { view: 'chapters', index: 0 } };
   }
   if (item === 'sleepTimer' && options?.hasSleepTimer === true) {
     return {
       kind: 'state',
-      state: { view: 'sleepTimer', index: selectedSleepTimerIndex(options.sleepTimerMinutes) },
+      state: {
+        view: 'sleepTimer',
+        index: selectedSleepTimerIndex(options.sleepTimerMinutes, options.isVod === true),
+      },
     };
   }
   if (item === 'videoDecoder' && options?.hasVideoDecoder === true) {
@@ -668,8 +696,12 @@ export function routeSettingsMenuKey(
       return ch !== undefined ? { kind: 'chapter', startMs: ch.startMs } : null;
     }
     if (cur.view === 'sleepTimer') {
-      if (cur.index === 0) return { kind: 'toggleSleepTimerAction' };
-      const minutes = SLEEP_TIMER_PRESETS_MIN[cur.index - 1];
+      if (options?.isVod === true) {
+        if (cur.index === 0) return { kind: 'toggleSleepTimerAction' };
+        const minutes = SLEEP_TIMER_PRESETS_MIN[cur.index - 1];
+        return minutes !== undefined ? { kind: 'sleepTimer', minutes } : null;
+      }
+      const minutes = SLEEP_TIMER_PRESETS_MIN[cur.index];
       return minutes !== undefined ? { kind: 'sleepTimer', minutes } : null;
     }
     if (cur.view === 'videoDecoder') {

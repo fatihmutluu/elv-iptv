@@ -199,21 +199,22 @@ describe('timeshift pure helpers (#28)', () => {
     ).toBeUndefined();
   });
 
-  it('evaluates isBehindLiveEdge with 2s default threshold and clock extrapolation', () => {
-    expect(DEFAULT_LIVE_BEHIND_THRESHOLD_MS).toBe(2_000);
+  it('evaluates isBehindLiveEdge with 12s default threshold and clock extrapolation', () => {
+    expect(DEFAULT_LIVE_BEHIND_THRESHOLD_MS).toBe(12_000);
     expect(isBehindLiveEdge(undefined, 10_000)).toBe(false);
     expect(isBehindLiveEdge({ positionMs: 10_000, atMs: 10_000, rate: 1 }, 10_000)).toBe(false);
 
     const playing: ClockAnchor = {
-      positionMs: 25_000,
+      positionMs: 15_000,
       atMs: 10_000,
       rate: 1,
       liveEdgeMs: 30_000,
       timeShiftSupported: true,
     };
-    expect(isBehindLiveEdge(playing, 10_000)).toBe(true); // 5_000 > 2_000
-    expect(isBehindLiveEdge(playing, 13_000)).toBe(false); // 2_000 <= 2_000
-    expect(isBehindLiveEdge(playing, 13_000, 1_500)).toBe(true); // 2_000 > 1_500
+    expect(isBehindLiveEdge(playing, 10_000)).toBe(true); // 15_000 > 12_000
+    expect(isBehindLiveEdge(playing, 13_000)).toBe(false); // 12_000 <= 12_000
+    expect(isBehindLiveEdge(playing, 17_000)).toBe(false); // 8_000 <= 12_000 (normal readahead)
+    expect(isBehindLiveEdge(playing, 13_000, 1_500)).toBe(true); // 12_000 > 1_500
 
     const paused: ClockAnchor = { ...playing, rate: 0 };
     expect(isBehindLiveEdge(paused, 20_000)).toBe(true);
@@ -372,17 +373,17 @@ describe('PlaybackService bounded live time-shift (#28)', () => {
     expect(service.getState().anchor?.positionMs).toBe(20_000);
   });
 
-  it('jumpToLiveEdge() seeks directly to liveEdgeMs when timeShiftSupported is true and behind > 2s', async () => {
+  it('jumpToLiveEdge() seeks directly to liveEdgeMs when timeShiftSupported is true and behind > 12s', async () => {
     const { engine, service } = setup();
     const t = service.tune(tuneReq('http://provider.invalid/live/hls.m3u8', { kind: 'live' }));
     await vi.advanceTimersByTimeAsync(300);
 
-    // Within 2s -> returns false
+    // Within 12s (e.g. 8s normal readahead) -> returns false
     engine.emit({
       attempt: t,
       type: 'clock',
       anchor: {
-        positionMs: 178_500,
+        positionMs: 172_000,
         atMs: Date.now(),
         rate: 1,
         liveSeekableStartMs: 60_000,
@@ -409,6 +410,69 @@ describe('PlaybackService bounded live time-shift (#28)', () => {
     expect(service.getState().anchor?.positionMs).toBe(180_000);
     expect(service.getState().atLiveEdge).toBe(true);
     expect(engine.commands.at(-1)).toEqual({ name: 'seek', attempt: t, positionMs: 180_000 });
+  });
+
+  it('jumpToLiveEdge() unpauses a paused live stream cleanly without an extra attempt bump', async () => {
+    const { engine, service } = setup();
+    const t = service.tune(tuneReq('http://provider.invalid/live/paused.m3u8', { kind: 'live' }));
+    await vi.advanceTimersByTimeAsync(300);
+
+    service.pause();
+    const pausedAttempt = service.getState().attempt;
+    engine.emit({ attempt: pausedAttempt, type: 'state', state: 'paused' });
+    engine.emit({
+      attempt: pausedAttempt,
+      type: 'clock',
+      anchor: {
+        positionMs: 175_000,
+        atMs: Date.now(),
+        rate: 0,
+        liveSeekableStartMs: 60_000,
+        liveEdgeMs: 180_000,
+        timeShiftSupported: true,
+      },
+    });
+
+    // Even when behind by only 5s (< 12s), paused stream jumps to live edge and unpauses on same attempt
+    expect(service.jumpToLiveEdge()).toBe(true);
+    expect(pausedAttempt).toBeGreaterThan(t);
+    expect(service.getState().attempt).toBe(pausedAttempt);
+    expect(service.getState().status.kind).toBe('tuning');
+    expect(service.getState().anchor?.positionMs).toBe(180_000);
+    expect(service.getState().atLiveEdge).toBe(true);
+    expect(engine.commands.slice(-2)).toEqual([
+      { name: 'seek', attempt: pausedAttempt, positionMs: 180_000 },
+      { name: 'play', attempt: pausedAttempt },
+    ]);
+
+    // Native engine.jumpToLiveEdge handles unpause in one shot without extra attempt bump
+    const native = setup({ withNativeJump: true });
+    const nt = native.service.tune(
+      tuneReq('http://provider.invalid/live/paused-native.m3u8', { kind: 'live' }),
+    );
+    await vi.advanceTimersByTimeAsync(300);
+    native.service.pause();
+    const nativePausedAttempt = native.service.getState().attempt;
+    native.engine.emit({ attempt: nativePausedAttempt, type: 'state', state: 'paused' });
+    native.engine.emit({
+      attempt: nativePausedAttempt,
+      type: 'clock',
+      anchor: {
+        positionMs: 175_000,
+        atMs: Date.now(),
+        rate: 0,
+        liveSeekableStartMs: 60_000,
+        liveEdgeMs: 180_000,
+        timeShiftSupported: true,
+      },
+    });
+
+    expect(native.service.jumpToLiveEdge()).toBe(true);
+    expect(native.service.getState().attempt).toBe(nativePausedAttempt);
+    expect(native.service.getState().status.kind).toBe('tuning');
+    expect(native.jumpSpy).toHaveBeenCalledWith(nativePausedAttempt);
+    expect(native.engine.commands.filter((c) => c.name === 'play')).toHaveLength(0);
+    expect(nativePausedAttempt).toBeGreaterThan(nt);
   });
 
   it('jumpToLiveEdge() delegates to engine.jumpToLiveEdge when supported', async () => {

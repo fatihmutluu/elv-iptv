@@ -45,6 +45,7 @@ export type SettingsNavRow = readonly [
   summary: string,
   targetView: SettingsMenuView,
   tabular: boolean,
+  description: string,
 ];
 
 function activeTrackSummary(
@@ -152,6 +153,7 @@ export function buildSettingsNavRows(
       subSummary,
       'subtitles',
       false,
+      i18n.t('player.settings.desc.subtitles'),
     ],
     [
       'player-settings-row-audio',
@@ -160,6 +162,7 @@ export function buildSettingsNavRows(
       audioSummary,
       'audio',
       false,
+      i18n.t('player.settings.desc.audio'),
     ],
   ];
   if (extras?.showAudioDelay === true) {
@@ -170,6 +173,7 @@ export function buildSettingsNavRows(
       formatSyncDelayMs(extras.audioDelayMs ?? 0),
       'audioDelay',
       true,
+      i18n.t('player.settings.desc.audioDelay'),
     ]);
   }
   if (extras?.showSubtitleDelay === true) {
@@ -180,6 +184,7 @@ export function buildSettingsNavRows(
       formatSyncDelayMs(extras.subtitleDelayMs ?? 0),
       'subtitleDelay',
       true,
+      i18n.t('player.settings.desc.subtitleDelay'),
     ]);
   }
   if (extras?.showSubtitleStyle === true) {
@@ -190,6 +195,7 @@ export function buildSettingsNavRows(
       formatSubtitleStyleSummary(extras.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE, i18n),
       'subtitleStyle',
       false,
+      i18n.t('player.settings.desc.subtitleStyle'),
     ]);
   }
   if (audioDevice?.show === true) {
@@ -200,6 +206,7 @@ export function buildSettingsNavRows(
       activeAudioDeviceSummary(audioDevice.devices, audioDevice.activeDevice, i18n),
       'audioDevice',
       false,
+      i18n.t('player.settings.desc.audioDevice'),
     ]);
   }
   const videoQualities = tracks.videoQualities;
@@ -221,10 +228,11 @@ export function buildSettingsNavRows(
       activeOption?.label ?? i18n.t('player.videoQualityAuto'),
       'videoQuality',
       true,
+      i18n.t('player.settings.desc.videoQuality'),
     ]);
   }
   const qualityVariants = extras?.qualityVariants;
-  if (qualityVariants !== undefined && qualityVariants.length > 1) {
+  if (!isVod && qualityVariants !== undefined && qualityVariants.length > 1) {
     const activeVariant = qualityVariants.find((v) => v.key === extras?.activeQualityKey);
     const qualitySummary =
       activeVariant?.qualityLabel ||
@@ -236,6 +244,7 @@ export function buildSettingsNavRows(
       qualitySummary,
       'quality',
       false,
+      i18n.t('player.settings.desc.quality'),
     ]);
   }
   if (isVod) {
@@ -246,9 +255,10 @@ export function buildSettingsNavRows(
       formatPlaybackSpeed(playbackSpeed),
       'speed',
       true,
+      i18n.t('player.settings.desc.speed'),
     ]);
   }
-  if ((extras?.chapters?.length ?? 0) > 0) {
+  if (isVod && (extras?.chapters?.length ?? 0) > 0) {
     rows.push([
       'player-settings-row-chapters',
       'chapters',
@@ -256,6 +266,7 @@ export function buildSettingsNavRows(
       i18n.t('player.chapterCount', { count: extras?.chapters?.length ?? 0 }),
       'chapters',
       true,
+      i18n.t('player.settings.desc.chapters'),
     ]);
   }
   if (extras?.showSleepTimer === true) {
@@ -271,6 +282,7 @@ export function buildSettingsNavRows(
       summary,
       'sleepTimer',
       true,
+      i18n.t('player.settings.desc.sleepTimer'),
     ]);
   }
   if (videoDecoder?.show === true) {
@@ -281,6 +293,7 @@ export function buildSettingsNavRows(
       formatVideoDecoderLabel(videoDecoder.mode, i18n),
       'videoDecoder',
       false,
+      i18n.t('player.settings.desc.videoDecoder'),
     ]);
   }
   return rows;
@@ -290,6 +303,7 @@ export function buildSettingsNavRows(
 export function buildSettingsRadioItems(params: {
   view: SettingsMenuView;
   tracks: MediaTracks;
+  isVod?: boolean;
   playbackSpeed: number;
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
@@ -322,6 +336,7 @@ export function buildSettingsRadioItems(params: {
   const {
     view,
     tracks,
+    isVod = false,
     playbackSpeed,
     audioDevices,
     activeAudioDevice = 'auto',
@@ -414,6 +429,20 @@ export function buildSettingsRadioItems(params: {
     const action: SleepTimerAction = sleepTimer?.action ?? 'stop';
     const actionLabel =
       action === 'pause' ? i18n.t('player.sleepTimerPause') : i18n.t('player.sleepTimerStop');
+    const presets: SettingsRadioItem[] = SLEEP_TIMER_PRESETS_MIN.map((minutes) => ({
+      key: `sleep-${minutes}`,
+      testID: `player-settings-sleep-${minutes}`,
+      label:
+        minutes === 0
+          ? i18n.t('player.sleepTimerOff')
+          : i18n.t('player.sleepTimerMinutes', { minutes }),
+      selected: activeMin === minutes,
+      tabular: true,
+      onPress: () => onSelectSleepTimer?.(minutes),
+    }));
+    if (!isVod) {
+      return presets;
+    }
     return [
       {
         key: 'sleep-action',
@@ -422,17 +451,7 @@ export function buildSettingsRadioItems(params: {
         selected: false,
         onPress: () => onToggleSleepTimerAction?.(),
       },
-      ...SLEEP_TIMER_PRESETS_MIN.map((minutes) => ({
-        key: `sleep-${minutes}`,
-        testID: `player-settings-sleep-${minutes}`,
-        label:
-          minutes === 0
-            ? i18n.t('player.sleepTimerOff')
-            : i18n.t('player.sleepTimerMinutes', { minutes }),
-        selected: activeMin === minutes,
-        tabular: true,
-        onPress: () => onSelectSleepTimer?.(minutes),
-      })),
+      ...presets,
     ];
   }
 

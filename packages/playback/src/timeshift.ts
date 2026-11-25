@@ -2,7 +2,10 @@ import { positionAt } from './clock';
 import type { ClockAnchor } from './engine';
 
 /** Default behind-live threshold (ms) above which a live stream is considered behind the live edge (`#28`). */
-export const DEFAULT_LIVE_BEHIND_THRESHOLD_MS = 2_000;
+export const DEFAULT_LIVE_BEHIND_THRESHOLD_MS = 12_000;
+
+const LIVE_TS_EDGE_MARGIN_MS = 1_000;
+const LIVE_TS_AT_EDGE_WINDOW_MS = 15_000;
 
 /** Resolved bounded live time-shift window in milliseconds (`#28`). */
 export interface LiveTimeShiftWindow {
@@ -69,7 +72,7 @@ export function clampLiveSeekPosition(
 
 /**
  * Returns `true` when `anchor` has a finite `liveEdgeMs` and its extrapolated playback position
- * at `nowMs` trails `liveEdgeMs` by strictly more than `thresholdMs` (default `2_000 ms`, `#28`).
+ * at `nowMs` trails `liveEdgeMs` by strictly more than `thresholdMs` (default `12_000 ms`, `#28`).
  */
 export function isBehindLiveEdge(
   anchor: ClockAnchor | undefined,
@@ -83,6 +86,33 @@ export function isBehindLiveEdge(
   const behindMs = liveEdgeMs - pos;
   const safeThreshold = Number.isFinite(thresholdMs) ? Math.max(0, thresholdMs) : 0;
   return Number.isFinite(behindMs) && behindMs > safeThreshold;
+}
+
+/**
+ * Resolves the target position for `jumpToLiveEdge`, returning `undefined` when the stream is not
+ * eligible (non-seekable, insufficient live buffer, or already within live-edge threshold while playing).
+ */
+export function resolveJumpToLiveTarget(
+  anchor: ClockAnchor | undefined,
+  nowMs: number,
+  wasPaused: boolean,
+): { readonly targetMs: number; readonly liveEdgeMs: number } | undefined {
+  if (anchor === undefined) return undefined;
+  const liveEdgeMs = nonNegativeFinite(anchor.liveEdgeMs);
+  if (liveEdgeMs === undefined) return undefined;
+  if (resolveLiveTimeShiftWindow(anchor, nowMs) !== null) {
+    if (!wasPaused && !isBehindLiveEdge(anchor, nowMs)) return undefined;
+    return { targetMs: liveEdgeMs, liveEdgeMs };
+  }
+  if (anchor.isLiveTs !== true || liveEdgeMs <= LIVE_TS_AT_EDGE_WINDOW_MS) return undefined;
+  const currentPos = positionAt(anchor, nowMs);
+  if (
+    !wasPaused &&
+    (!Number.isFinite(currentPos) || liveEdgeMs - currentPos <= LIVE_TS_AT_EDGE_WINDOW_MS)
+  ) {
+    return undefined;
+  }
+  return { targetMs: Math.max(0, liveEdgeMs - LIVE_TS_EDGE_MARGIN_MS), liveEdgeMs };
 }
 
 /**
