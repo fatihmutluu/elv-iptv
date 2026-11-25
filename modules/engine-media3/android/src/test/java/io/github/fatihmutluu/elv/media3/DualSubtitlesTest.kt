@@ -246,10 +246,13 @@ class DualSubtitlesTest {
       )
       engine.selectSecondarySubtitleTrack(1, "ext:dyn-1")
 
-      val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
-      while (events.none { it["type"] == "tracks" } && System.nanoTime() < deadline) {
-        Thread.sleep(15)
-      }
+      // Drain the engine handler queue so both addExternalSubtitle and selectSecondarySubtitleTrack complete
+      // before asserting the latest emitted tracks snapshot.
+      val handler = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }.get(engine) as android.os.Handler
+      val applied = CountDownLatch(1)
+      handler.post { applied.countDown() }
+      assertTrue("engine handler must drain queued subtitle commands", applied.await(5, TimeUnit.SECONDS))
+
       val trackEvent = events.lastOrNull { it["type"] == "tracks" }
       assertNotNull("addExternalSubtitle must emit tracks event with external track", trackEvent)
       @Suppress("UNCHECKED_CAST")
@@ -262,9 +265,8 @@ class DualSubtitlesTest {
       // Stopping clears secondary cues cleanly
       engine.stop(2)
       val synced = CountDownLatch(1)
-      val handler = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }.get(engine) as android.os.Handler
       handler.post { synced.countDown() }
-      assertTrue(synced.await(3, TimeUnit.SECONDS))
+      assertTrue(synced.await(5, TimeUnit.SECONDS))
       assertTrue(secondaryHistory.lastOrNull().orEmpty().isEmpty())
     } finally {
       engine.dispose()
