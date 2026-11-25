@@ -9,12 +9,14 @@ import {
   TABULAR_NUMS_STYLE,
   useI18n,
   useTheme,
+  useViewport,
   webBackdropBlur,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
 import { memo, type ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { computeHeroHeight } from '../shared';
 import type { DetailTechnicalMeta } from '../shared/detail-target';
 import { DetailPrePlayControls, DetailSynopsisBlock } from './DetailHeroExtras';
 import {
@@ -119,6 +121,13 @@ function DetailHeroInner({
 }: DetailHeroProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
+  const viewport = useViewport();
+  const heroHeight = computeHeroHeight(
+    viewport.height,
+    isPortrait,
+    isTv,
+    viewport.formFactor === 'desktop',
+  );
 
   const playLabel = resolvePlayLabel(primaryAction, i18n.t);
   const resumeRatio =
@@ -151,7 +160,7 @@ function DetailHeroInner({
       style={[
         styles.container,
         {
-          minHeight: isPortrait ? 360 : 400,
+          minHeight: heroHeight,
           paddingTop: topClearance,
           paddingHorizontal: padX,
           paddingBottom: theme.spacing.lg,

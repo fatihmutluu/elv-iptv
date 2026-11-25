@@ -740,7 +740,7 @@ describe('HomeScreen', () => {
     }
   });
 
-  it('caps Home card widths and tightens hero height to ~52-58% viewport height across form factors', () => {
+  it('caps Home card widths and computes unified hero height across form factors', () => {
     const theme = { spacing: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 } } as Parameters<
       typeof computeHomeLayout
     >[1];
@@ -760,7 +760,7 @@ describe('HomeScreen', () => {
     );
     expect(desktop.posterCardWidth).toBeLessThanOrEqual(184);
     expect(desktop.wideCardWidth).toBeLessThanOrEqual(296);
-    expect(desktop.heroHeight).toBe(Math.round(820 * 0.55));
+    expect(desktop.heroHeight).toBe(Math.round(820 * 0.62));
 
     const phone = computeHomeLayout(
       {
@@ -778,6 +778,6 @@ describe('HomeScreen', () => {
     );
     expect(phone.posterCardWidth).toBeLessThanOrEqual(124);
     expect(phone.wideCardWidth).toBeLessThanOrEqual(270);
-    expect(phone.heroHeight).toBe(410);
+    expect(phone.heroHeight).toBe(460);
   });
 });

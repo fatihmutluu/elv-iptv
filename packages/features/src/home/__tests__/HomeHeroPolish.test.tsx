@@ -12,7 +12,7 @@ import {
   ViewportProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Platform } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { RouteActiveProvider } from '../../shared';
 import { buildHeroActionIds, HomeHero } from '../HomeHero';
 import { HOME_HERO_AUTO_ROTATE_MS, HomeScreen } from '../HomeScreen';
@@ -215,6 +215,12 @@ describe('HomeHero crossfade, Details CTA & auto-rotation (#399) + Watched clean
     const view = await render(renderHero(0, false));
     const detailsBtn = screen.getByTestId('home-hero-details');
     expect(detailsBtn).toHaveTextContent('Details');
+    const dotsFooterStyle = StyleSheet.flatten(screen.getByTestId('home-hero-dots').props.style);
+    expect(dotsFooterStyle).toMatchObject({
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+    });
     await fireEvent.press(detailsBtn);
     expect(onOpenDetails).toHaveBeenCalledWith(slides[0]);
 

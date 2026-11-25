@@ -280,20 +280,21 @@ export function ArtworkImage({
   const radius = borderRadius ?? theme.radius.card;
   const resolvedLogoMode: LogoBackdropMode = logoBackdropMode ?? (logoBackdrop ? 'plate' : 'off');
   const usesPlate = resolvedLogoMode === 'plate' || (resolvedLogoMode === 'invert' && !isWeb);
+  const showPlate = !failed && usesPlate;
   const usesWebInvert = resolvedLogoMode === 'invert' && isWeb;
 
   const containerBg =
-    resolvedLogoMode === 'plate'
+    !failed && resolvedLogoMode === 'plate'
       ? theme.colors.subtleHighlight
-      : resolvedLogoMode === 'invert' && !isWeb
+      : !failed && resolvedLogoMode === 'invert' && !isWeb
         ? theme.colors.actionGlassHoverBg
         : theme.colors.bgCard;
   const logoPlateBorderStyle: ViewStyle | undefined =
-    usesPlate && theme.highContrast
+    showPlate && theme.highContrast
       ? { borderWidth: 1, borderColor: theme.colors.surfaceBorder }
       : undefined;
   const logoPlatePaddingStyle: ViewStyle | undefined =
-    usesPlate && resizeMode === 'contain' ? { padding: theme.spacing.xxs } : undefined;
+    showPlate && resizeMode === 'contain' ? { padding: theme.spacing.xxs } : undefined;
   const webInvertStyle: ViewStyle | undefined = usesWebInvert
     ? ({ filter: 'invert(1) brightness(1.15)' } as unknown as ViewStyle)
     : undefined;
@@ -360,7 +361,7 @@ export function ArtworkImage({
         </View>
       ) : (
         <>
-          {!isLoaded ? (
+          {!isLoaded && !showPlate ? (
             <View
               testID={testID ? `${testID}-placeholder` : undefined}
               {...DECORATIVE_VIEW_PROPS}

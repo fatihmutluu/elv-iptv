@@ -380,6 +380,43 @@ describe('PosterCard & WideCard (Cinema Quietude compliance)', () => {
     expect(screen.queryByTestId('qa-poster-quick-play')).toBeNull();
     await desktopView.unmount();
 
+    // Regression: entering nested quick-action Pressables triggers parent Pressable hoverOut on web
+    // (react-gui:hover:lock), which must NOT collapse the quick-actions overlay while pointer stays
+    // inside the outer hover container.
+    const nestedHoverView = await render(
+      <ThemeProvider>
+        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+          <PosterCard
+            title="Arrival"
+            quickActions={{
+              onPlay,
+              playLabel: 'Play Arrival',
+              isFavorite: false,
+              onToggleFavorite,
+              favoriteLabel: 'Add to My list',
+              isWatched: false,
+              onToggleWatched,
+              watchedLabel: 'Mark watched',
+            }}
+            testID="nested-poster"
+          />
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+    await fireEvent(screen.getByTestId('nested-poster-hover-container'), 'pointerEnter');
+    expect(screen.getByTestId('nested-poster-quick-favorite')).toBeTruthy();
+
+    // Simulated react-native-web nested Pressable hover lock cancelling parent Pressable hover
+    await fireEvent(screen.getByTestId('nested-poster'), 'hoverOut');
+    expect(screen.getByTestId('nested-poster-quick-favorite')).toBeTruthy();
+    expect(screen.getByTestId('nested-poster-quick-play')).toBeTruthy();
+    expect(screen.getByTestId('nested-poster-quick-watched')).toBeTruthy();
+
+    // Leaving the outer hover container cleanly unmounts the overlay
+    await fireEvent(screen.getByTestId('nested-poster-hover-container'), 'pointerLeave');
+    expect(screen.queryByTestId('nested-poster-quick-favorite')).toBeNull();
+    await nestedHoverView.unmount();
+
     // Never renders on touch or TV even if hoverIn fires.
     for (const vp of [
       { formFactor: 'phone' as const, orientation: 'portrait' as const },
@@ -445,9 +482,15 @@ describe('PosterCard & WideCard (Cinema Quietude compliance)', () => {
     expect(wideStyle.width).toBe(320);
     expect(wideStyle.transform).toEqual([{ scale: 1 }]);
     expect(flat(screen.getByTestId('wide-progress-fill').props.style).width).toBe('0%');
+    // Live logoBackdrop cards keep a single clipped surface (no outer bgCard bleed + inner borderRadius=0)
     expect(flat(screen.getByTestId('wide-artwork-frame').props.style).backgroundColor).toBe(
+      'transparent',
+    );
+    expect(flat(screen.getByTestId('wide-image').props.style).borderRadius).toBe(0);
+    expect(flat(screen.getByTestId('vod-artwork-frame').props.style).backgroundColor).toBe(
       hcTheme.colors.bgCard,
     );
+    expect(flat(screen.getByTestId('vod-image').props.style).borderRadius).toBe(0);
     const wideFocusRing = flat(screen.getByTestId('wide-focus-ring').props.style);
     expect(wideFocusRing.bottom).toBe(-3);
     expect(wideFocusRing.borderRadius).toBe(hcTheme.radius.card + 3);

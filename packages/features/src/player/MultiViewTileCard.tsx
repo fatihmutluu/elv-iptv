@@ -3,13 +3,14 @@ import type { MultiViewTile } from '@elv/playback';
 import {
   Icon,
   MicroPill,
+  Tooltip,
   useTheme,
   webBackdropBlur,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
 import { type ReactElement, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { OpenVideoEngine } from '../ports/video-host';
 import type { MultiViewTileAction } from './multiview-model';
 
@@ -48,6 +49,7 @@ export function MultiViewTileCard({
   onRemove,
 }: MultiViewTileCardProps): ReactElement {
   const theme = useTheme();
+  const isWeb = (Platform.OS as string) === 'web';
   const [hovered, setHovered] = useState(false);
   const actionModeActive = isTv && tvFocused && focusedAction !== null;
   const showChrome = isTv ? tvFocused : hovered || !isActiveAudio;
@@ -98,18 +100,16 @@ export function MultiViewTileCard({
         ? i18n.t('player.status.tuning')
         : tile.title;
 
+  const pointerHandlers = isWeb
+    ? ({
+        onPointerEnter: () => setHovered(true),
+        onPointerLeave: () => setHovered(false),
+      } as Record<string, unknown>)
+    : undefined;
+
   return (
-    <Pressable
-      testID={`multiview-tile-${index}`}
-      accessibilityRole="button"
-      accessibilityLabel={`${tile.title} — ${
-        isActiveAudio ? i18n.t('player.multiView.activeAudio') : i18n.t('player.multiView.muted')
-      }`}
-      accessibilityState={{ selected: isActiveAudio }}
-      focusable={!isTv}
-      onHoverIn={() => setHovered(true)}
-      onHoverOut={() => setHovered(false)}
-      onPress={() => onSelectAudio(tile.tileId)}
+    <View
+      {...pointerHandlers}
       style={[
         styles.card,
         transition,
@@ -122,127 +122,165 @@ export function MultiViewTileCard({
         },
       ]}
     >
-      <View
-        testID={`multiview-tile-surface-${index}`}
-        pointerEvents="none"
-        focusable={false}
-        style={styles.surfaceWrap}
+      <Pressable
+        testID={`multiview-tile-${index}`}
+        accessibilityRole="button"
+        accessibilityLabel={`${tile.title} — ${
+          isActiveAudio ? i18n.t('player.multiView.activeAudio') : i18n.t('player.multiView.muted')
+        }`}
+        accessibilityState={{ selected: isActiveAudio }}
+        focusable={!isTv}
+        onHoverIn={() => setHovered(true)}
+        onHoverOut={!isWeb ? () => setHovered(false) : undefined}
+        onPress={() => onSelectAudio(tile.tileId)}
+        style={styles.cardPressArea}
       >
-        {openedEngine !== undefined ? (
-          openedEngine.renderSurface({
-            statusText,
-            failed: tile.status === 'error',
-            osdVisible: false,
-            testID: `multiview-surface-${tile.tileId}`,
-          })
-        ) : (
-          <View style={styles.loadingWrap}>
-            <ActivityIndicator size="small" color={theme.colors.textSecondary} />
-          </View>
-        )}
-      </View>
-
-      {showChrome ? (
         <View
-          testID={`multiview-tile-chrome-${index}`}
-          pointerEvents="box-none"
-          style={styles.chromeOverlay}
+          testID={`multiview-tile-surface-${index}`}
+          pointerEvents="none"
+          focusable={false}
+          style={styles.surfaceWrap}
         >
-          <View style={styles.topBar}>
-            <View
-              style={[
-                styles.titlePill,
-                {
-                  backgroundColor: theme.colors.glassBg,
-                  borderColor: theme.colors.glassBorder,
-                  borderRadius: theme.radius.button,
-                },
-                webBackdropBlur(12),
-              ]}
-            >
-              <Text
-                testID={`multiview-tile-title-${index}`}
-                numberOfLines={1}
+          {openedEngine !== undefined ? (
+            openedEngine.renderSurface({
+              statusText,
+              failed: tile.status === 'error',
+              osdVisible: false,
+              testID: `multiview-surface-${tile.tileId}`,
+            })
+          ) : (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+            </View>
+          )}
+        </View>
+
+        {showChrome ? (
+          <View
+            testID={`multiview-tile-chrome-${index}`}
+            pointerEvents="box-none"
+            style={styles.chromeOverlay}
+          >
+            <View style={styles.topBar}>
+              <View
                 style={[
-                  theme.typography.caption,
-                  styles.titleText,
-                  { color: theme.colors.textPrimary },
+                  styles.titlePill,
+                  {
+                    backgroundColor: theme.colors.glassBg,
+                    borderColor: theme.colors.glassBorder,
+                    borderRadius: theme.radius.button,
+                  },
+                  webBackdropBlur(12),
                 ]}
               >
-                {tile.title}
-              </Text>
-            </View>
-            <MicroPill
-              testID={`multiview-tile-audio-badge-${index}`}
-              label={
-                isActiveAudio
-                  ? i18n.t('player.multiView.activeAudio')
-                  : i18n.t('player.multiView.muted')
-              }
-              tone={isActiveAudio ? 'accent' : 'neutral'}
-            />
-          </View>
-
-          {showActions ? (
-            <View
-              style={[
-                styles.actionsBar,
-                {
-                  backgroundColor: theme.colors.glassBg,
-                  borderTopColor: theme.colors.glassBorder,
-                },
-                webBackdropBlur(12),
-              ]}
-            >
-              {!isActiveAudio ? (
-                <Pressable
-                  testID={`multiview-tile-audio-btn-${index}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={i18n.t('player.multiView.swapAudio')}
-                  accessibilityState={{ selected: actionModeActive && focusedAction === 'audio' }}
-                  focusable={!isTv}
-                  onPress={() => onSelectAudio(tile.tileId)}
-                  style={actionButtonStyle('audio')}
+                <Text
+                  testID={`multiview-tile-title-${index}`}
+                  numberOfLines={1}
+                  style={[
+                    theme.typography.caption,
+                    styles.titleText,
+                    { color: theme.colors.textPrimary },
+                  ]}
                 >
-                  <Icon name="audio" size={14} color={theme.colors.textPrimary} />
-                  <Text style={[theme.typography.micro, { color: theme.colors.textPrimary }]}>
-                    {i18n.t('player.multiView.swapAudio')}
-                  </Text>
-                </Pressable>
-              ) : null}
-              <Pressable
-                testID={`multiview-tile-replace-btn-${index}`}
-                accessibilityRole="button"
-                accessibilityLabel={i18n.t('player.multiView.replaceChannel')}
-                accessibilityState={{ selected: actionModeActive && focusedAction === 'replace' }}
-                focusable={!isTv}
-                onPress={() => onRequestReplace(tile.tileId)}
-                style={actionButtonStyle('replace')}
-              >
-                <Icon name="refresh" size={14} color={theme.colors.textPrimary} />
-                <Text style={[theme.typography.micro, { color: theme.colors.textPrimary }]}>
-                  {i18n.t('player.multiView.replaceChannel')}
+                  {tile.title}
                 </Text>
-              </Pressable>
-              <Pressable
-                testID={`multiview-tile-remove-btn-${index}`}
-                accessibilityRole="button"
-                accessibilityLabel={i18n.t('player.multiView.removeTile')}
-                accessibilityState={{ selected: actionModeActive && focusedAction === 'remove' }}
-                focusable={!isTv}
-                onPress={() => onRemove(tile.tileId)}
-                style={actionButtonStyle('remove')}
-              >
-                <Icon name="close" size={14} color={theme.colors.textPrimary} />
-                <Text style={[theme.typography.micro, { color: theme.colors.textPrimary }]}>
-                  {i18n.t('player.multiView.removeTile')}
-                </Text>
-              </Pressable>
+              </View>
+              <MicroPill
+                testID={`multiview-tile-audio-badge-${index}`}
+                label={
+                  isActiveAudio
+                    ? i18n.t('player.multiView.activeAudio')
+                    : i18n.t('player.multiView.muted')
+                }
+                tone={isActiveAudio ? 'accent' : 'neutral'}
+              />
             </View>
-          ) : null}
-        </View>
-      ) : null}
-    </Pressable>
+
+            {showActions ? (
+              <View
+                style={[
+                  styles.actionsBar,
+                  {
+                    backgroundColor: theme.colors.glassBg,
+                    borderTopColor: theme.colors.glassBorder,
+                  },
+                  webBackdropBlur(12),
+                ]}
+              >
+                {!isActiveAudio ? (
+                  <Tooltip
+                    content={i18n.t('player.multiView.swapAudio')}
+                    placement="top"
+                    disabled={isTv}
+                  >
+                    <Pressable
+                      testID={`multiview-tile-audio-btn-${index}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={i18n.t('player.multiView.swapAudio')}
+                      accessibilityState={{
+                        selected: actionModeActive && focusedAction === 'audio',
+                      }}
+                      focusable={!isTv}
+                      onPress={() => onSelectAudio(tile.tileId)}
+                      style={actionButtonStyle('audio')}
+                    >
+                      <Icon name="audio" size={14} color={theme.colors.textPrimary} />
+                      <Text style={[theme.typography.micro, { color: theme.colors.textPrimary }]}>
+                        {i18n.t('player.multiView.swapAudio')}
+                      </Text>
+                    </Pressable>
+                  </Tooltip>
+                ) : null}
+                <Tooltip
+                  content={i18n.t('player.multiView.replaceChannel')}
+                  placement="top"
+                  disabled={isTv}
+                >
+                  <Pressable
+                    testID={`multiview-tile-replace-btn-${index}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={i18n.t('player.multiView.replaceChannel')}
+                    accessibilityState={{
+                      selected: actionModeActive && focusedAction === 'replace',
+                    }}
+                    focusable={!isTv}
+                    onPress={() => onRequestReplace(tile.tileId)}
+                    style={actionButtonStyle('replace')}
+                  >
+                    <Icon name="refresh" size={14} color={theme.colors.textPrimary} />
+                    <Text style={[theme.typography.micro, { color: theme.colors.textPrimary }]}>
+                      {i18n.t('player.multiView.replaceChannel')}
+                    </Text>
+                  </Pressable>
+                </Tooltip>
+                <Tooltip
+                  content={i18n.t('player.multiView.removeTile')}
+                  placement="top"
+                  disabled={isTv}
+                >
+                  <Pressable
+                    testID={`multiview-tile-remove-btn-${index}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={i18n.t('player.multiView.removeTile')}
+                    accessibilityState={{
+                      selected: actionModeActive && focusedAction === 'remove',
+                    }}
+                    focusable={!isTv}
+                    onPress={() => onRemove(tile.tileId)}
+                    style={actionButtonStyle('remove')}
+                  >
+                    <Icon name="close" size={14} color={theme.colors.textPrimary} />
+                    <Text style={[theme.typography.micro, { color: theme.colors.textPrimary }]}>
+                      {i18n.t('player.multiView.removeTile')}
+                    </Text>
+                  </Pressable>
+                </Tooltip>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+      </Pressable>
+    </View>
   );
 }
 
@@ -251,6 +289,10 @@ const styles = StyleSheet.create({
     flex: 1,
     aspectRatio: 16 / 9,
     overflow: 'hidden',
+    position: 'relative',
+  },
+  cardPressArea: {
+    flex: 1,
     position: 'relative',
   },
   surfaceWrap: {

@@ -13,6 +13,7 @@ import {
 import { AccessibilityInfo, Platform } from 'react-native';
 import { DEFAULT_THEME_PRESET, type ThemePalette, type ThemePresetId } from './presets';
 import { buildTheme, clampFontScale, FONT_FAMILY_SANS, type Theme } from './tokens';
+import { TooltipHostProvider } from './tooltip-host';
 import { buildFocusVisibleCss } from './web-styles';
 
 const WEB_BASE_STYLE_ID = 'elv-ui-kit-web-base';
@@ -321,7 +322,11 @@ export function ThemeProvider({
     ],
   );
 
-  return <ThemeContext.Provider value={controller}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={controller}>
+      <TooltipHostProvider theme={theme}>{children}</TooltipHostProvider>
+    </ThemeContext.Provider>
+  );
 }
 
 /** Reads the active {@link Theme} tokens (falls back to `obsidianCrimson` outside a provider). */

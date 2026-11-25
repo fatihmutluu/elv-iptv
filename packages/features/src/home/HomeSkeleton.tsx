@@ -8,6 +8,7 @@ import {
 } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { computeHeroHeight } from '../shared';
 import { computePeekCardWidth } from './home-model';
 
 /** Resolved responsive layout metrics shared by {@link HomeScreen}, {@link HomeHero}, and {@link HomeSkeleton}. */
@@ -44,9 +45,12 @@ export function computeHomeLayout(viewport: ViewportInfo, theme: Theme): HomeLay
     : viewport.safeArea.top;
   const posterMaxW = isTv ? 184 : isPortrait ? (viewport.formFactor === 'tablet' ? 164 : 124) : 184;
   const wideMaxW = isTv ? 290 : isPortrait ? (viewport.formFactor === 'tablet' ? 285 : 270) : 296;
-  const heroHeight = isPortrait
-    ? Math.min(410, Math.max(320, Math.round(safeHeight * 0.52)))
-    : Math.min(480, Math.max(300, Math.round(safeHeight * 0.55)));
+  const heroHeight = computeHeroHeight(
+    safeHeight,
+    isPortrait,
+    isTv,
+    viewport.formFactor === 'desktop',
+  );
   return {
     isTv,
     isTouch,

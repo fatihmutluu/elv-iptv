@@ -107,6 +107,8 @@ function WideCardInner({
   const hasPills = live || trimmedBadge.length > 0;
   const showBottomScrim = clamped !== undefined || live;
   const resolvedShowPlayBadge = showPlayBadge ?? (clamped !== undefined && !live);
+  const usesLogoBackdrop =
+    logoBackdropMode !== undefined ? logoBackdropMode !== 'off' : logoBackdrop;
   const cardTransition = webTransition(theme, 'transform, opacity');
   const shadowTransition = webTransition(theme, 'box-shadow');
   const cursor = webCursorPointer();
@@ -168,7 +170,7 @@ function WideCardInner({
                 styles.artworkShadow,
                 {
                   borderRadius: theme.radius.card,
-                  backgroundColor: theme.colors.bgCard,
+                  backgroundColor: usesLogoBackdrop ? 'transparent' : theme.colors.bgCard,
                 },
                 frameShadow,
                 shadowTransition,
@@ -180,7 +182,7 @@ function WideCardInner({
                   label={title}
                   aspectRatio={16 / 9}
                   maxDecodePx={maxDecodePx}
-                  borderRadius={theme.radius.card}
+                  borderRadius={0}
                   logoBackdrop={logoBackdrop}
                   {...(logoBackdropMode !== undefined ? { logoBackdropMode } : {})}
                   zoomed={showPointerHover}

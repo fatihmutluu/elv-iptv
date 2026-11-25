@@ -3,11 +3,14 @@ import { Pressable, type StyleProp, StyleSheet, View, type ViewStyle } from 'rea
 import { Icon, type IconName } from '../icons';
 import { useTheme, webBackdropBlur, webCursorPointer, webShadow, webTransition } from '../theme';
 import { useViewport } from '../viewport';
+import { Tooltip } from './Tooltip';
 
 /** Props of {@link IconButton}. */
 export interface IconButtonProps {
   icon: IconName;
   accessibilityLabel: string;
+  /** Optional pointer-only hover tooltip override. Defaults to `accessibilityLabel`; pass `false` to disable. */
+  tooltip?: string | false | undefined;
   active?: boolean;
   size?: number;
   onPress?: () => void;
@@ -34,6 +37,7 @@ const TV_FOCUS_NATIVE_SHADOW: ViewStyle = {
 export function IconButton({
   icon,
   accessibilityLabel,
+  tooltip,
   active = false,
   size = 40,
   onPress,
@@ -55,6 +59,7 @@ export function IconButton({
 
   const resolvedSize = Math.max(40, size);
   const iconSize = Math.round(resolvedSize * 0.45);
+  const resolvedTooltip = tooltip === false ? undefined : (tooltip ?? accessibilityLabel);
   const glassBlur = webBackdropBlur(12);
   const transition = webTransition(
     theme,
@@ -62,7 +67,7 @@ export function IconButton({
   );
   const cursor = !disabled ? webCursorPointer() : undefined;
 
-  return (
+  const button = (
     <Pressable
       testID={testID}
       accessibilityRole="button"
@@ -154,6 +159,16 @@ export function IconButton({
         );
       }}
     </Pressable>
+  );
+
+  return (
+    <Tooltip
+      content={resolvedTooltip}
+      disabled={disabled}
+      testID={testID ? `${testID}-tooltip` : undefined}
+    >
+      {button}
+    </Tooltip>
   );
 }
 

@@ -81,33 +81,42 @@ export function useLiveFavorites(opts: {
     }
 
     const readyIds = new Set(sources.map((s) => s.id));
-    const keysPromise = catalog.listFavoriteKeys
-      ? catalog.listFavoriteKeys().catch(() => [] as string[])
-      : Promise.resolve([] as string[]);
-    const rowsPromise = catalog.listFavorites
-      ? catalog.listFavorites(MAX_LIVE_FAVORITES).catch(() => [] as FavoriteRow[])
-      : Promise.resolve([] as FavoriteRow[]);
+    const keysPromise: Promise<readonly string[] | null> = catalog.listFavoriteKeys
+      ? catalog.listFavoriteKeys().catch(() => null)
+      : Promise.resolve([]);
+    const rowsPromise: Promise<readonly FavoriteRow[] | null> = catalog.listFavorites
+      ? catalog.listFavorites(MAX_LIVE_FAVORITES).catch(() => null)
+      : Promise.resolve([]);
 
     void Promise.all([keysPromise, rowsPromise]).then(async ([rawKeys, rawRows]) => {
       if (!active) return;
-      const liveRows = rawRows.filter((r) => r.kind === 'live' && readyIds.has(r.sourceId));
-      const resolved = await Promise.all(
-        liveRows.map(async (fav, idx): Promise<ItemRow | null> => {
-          if (!catalog.itemDetail) return fallbackItemFromFavorite(fav, idx);
-          const detail = await catalog.itemDetail(fav.itemKey).catch(() => null);
-          return detail && detail.kind === 'live' ? detail : null;
-        }),
-      );
-      if (!active) return;
-      const nextChannels: ItemRow[] = [];
-      const seen = new Set<string>();
-      for (const ch of resolved) {
-        if (ch && !seen.has(ch.key)) {
-          seen.add(ch.key);
-          nextChannels.push(ch);
+      if (rawKeys === null && rawRows === null) return;
+
+      let nextChannels: ItemRow[];
+      if (rawRows === null) {
+        nextChannels = [...favChannelsRef.current];
+      } else {
+        const liveRows = rawRows.filter((r) => r.kind === 'live' && readyIds.has(r.sourceId));
+        const resolved = await Promise.all(
+          liveRows.map(async (fav, idx): Promise<ItemRow | null> => {
+            if (!catalog.itemDetail) return fallbackItemFromFavorite(fav, idx);
+            const detail = await catalog.itemDetail(fav.itemKey).catch(() => null);
+            return detail && detail.kind === 'live' ? detail : null;
+          }),
+        );
+        if (!active) return;
+        nextChannels = [];
+        const seen = new Set<string>();
+        for (const ch of resolved) {
+          if (ch && !seen.has(ch.key)) {
+            seen.add(ch.key);
+            nextChannels.push(ch);
+          }
         }
       }
-      const nextKeys = new Set<string>(rawKeys);
+
+      const seen = new Set(nextChannels.map((ch) => ch.key));
+      const nextKeys = new Set<string>(rawKeys ?? favKeysRef.current);
       for (const ch of nextChannels) nextKeys.add(ch.key);
 
       // Preserve any in-flight optimistic toggles so background refresh never clobbers them.
@@ -129,7 +138,9 @@ export function useLiveFavorites(opts: {
 
       uiCacheRef.current?.setLiveFavorites(nextKeys, nextChannels);
       setFavoriteKeys(nextKeys);
-      setFavoriteChannels(nextChannels);
+      if (rawRows !== null) {
+        setFavoriteChannels(nextChannels);
+      }
       setFavoritesVersion((v) => v + 1);
     });
 

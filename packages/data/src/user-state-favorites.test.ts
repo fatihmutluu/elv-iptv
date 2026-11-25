@@ -132,4 +132,30 @@ describe('setFavorite idempotent favorite mutations', () => {
     expect(await service.listFavoriteKeys?.()).toEqual([]);
     await service.close();
   });
+
+  it('supports listing up to 250 favorites without truncating at 100', async () => {
+    const { db } = await setupDb();
+    let now = 1_000;
+    const clock = () => (now += 10);
+
+    for (let i = 1; i <= 125; i += 1) {
+      const res = await setFavorite(
+        db,
+        {
+          sourceId: 's1',
+          itemKey: `x:s1:live:${i}`,
+          kind: 'live',
+          title: `Channel ${i}`,
+        },
+        true,
+        clock,
+      );
+      expect(res).toEqual({ ok: true, value: true });
+    }
+
+    const rows200 = await listFavorites(db, 200);
+    expect(rows200).toHaveLength(125);
+    const rowsCapped = await listFavorites(db, 500);
+    expect(rowsCapped).toHaveLength(125);
+  });
 });

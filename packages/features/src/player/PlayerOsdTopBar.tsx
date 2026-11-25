@@ -9,8 +9,8 @@ import type {
   PlaybackStatus,
   StreamVideoInfo,
 } from '@elv/playback';
-import { MicroPill, useTheme, useViewport, webBackdropBlur } from '@elv/ui-kit';
-import { type ReactElement, useState } from 'react';
+import { MicroPill, useSafeHoverBridge, useTheme, useViewport, webBackdropBlur } from '@elv/ui-kit';
+import { type ReactElement, useCallback } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { AmbientTvClock } from '../shared/AmbientTvClock';
 import type { DescribedPlaybackFailure } from './errors';
@@ -142,7 +142,6 @@ export function deduplicateOsdTitle(title: string, subtitle: string | null): str
 export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean }): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
-  const [volumePopoverOpen, setVolumePopoverOpen] = useState(false);
 
   const {
     i18n,
@@ -157,6 +156,15 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
   } = p;
   const isDesktop = p.isDesktop ?? viewport.formFactor === 'desktop';
   const isPortraitPhone = viewport.formFactor === 'phone' && viewport.orientation === 'portrait';
+  const volumeBridge = useSafeHoverBridge({
+    disabled: !isDesktop || isPortraitPhone || p.onSetVolume === undefined,
+  });
+  const handleVolumeDragStateChange = useCallback(
+    (dragging: boolean) => {
+      volumeBridge.setLocked(dragging);
+    },
+    [volumeBridge.setLocked],
+  );
   const isFocused = (action: TvOsdAction): boolean =>
     isTv && p.tvOsdFocused && p.tvOsdAction === action;
 
@@ -274,48 +282,58 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
         ) : null}
 
         {!isPortraitPhone && service !== null && p.onToggleMute !== undefined ? (
-          <View
-            testID="player-volume-control"
-            style={styles.volumeWrap}
-            {...(isDesktop
-              ? ({
-                  onPointerEnter: () => setVolumePopoverOpen(true),
-                  onPointerLeave: () => setVolumePopoverOpen(false),
-                } as Record<string, unknown>)
-              : {})}
-          >
-            <OsdButton
-              testID="player-mute-button"
-              icon={muted ? 'volumeMute' : 'audio'}
-              variant="bare"
-              size={38}
-              accessibilityLabel={muted ? i18n.t('player.unmute') : i18n.t('player.mute')}
-              {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.mute } : {})}
-              active={muted}
-              onHoverIn={isDesktop ? () => setVolumePopoverOpen(true) : undefined}
-              onPress={p.onToggleMute}
-              isTv={isTv}
-            />
-            {isDesktop && volumePopoverOpen && p.onSetVolume !== undefined ? (
+          <View testID="player-volume-control" style={styles.volumeWrap}>
+            <View
+              ref={volumeBridge.triggerRef as never}
+              {...(isDesktop ? (volumeBridge.triggerProps as Record<string, unknown>) : {})}
+            >
+              <OsdButton
+                testID="player-mute-button"
+                icon={muted ? 'volumeMute' : 'audio'}
+                variant="bare"
+                size={38}
+                accessibilityLabel={muted ? i18n.t('player.unmute') : i18n.t('player.mute')}
+                tooltipPlacement="left"
+                tooltipDisabled={volumeBridge.open}
+                {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.mute } : {})}
+                active={muted}
+                onHoverIn={isDesktop ? () => volumeBridge.setOpen(true) : undefined}
+                onPress={p.onToggleMute}
+                isTv={isTv}
+              />
+            </View>
+            {isDesktop && volumeBridge.open && p.onSetVolume !== undefined ? (
               <View
-                testID="player-volume-popover"
-                style={[
-                  p.docked === true ? styles.volumeInlineDocked : styles.volumePopoverFloating,
-                  {
-                    backgroundColor: theme.colors.glassBg,
-                    borderColor: theme.colors.glassBorder,
-                    borderRadius: theme.radius.card,
-                  },
-                  webBackdropBlur(16),
-                ]}
+                ref={volumeBridge.panelRef as never}
+                testID="player-volume-popover-bridge"
+                {...(volumeBridge.panelProps as Record<string, unknown>)}
+                style={
+                  p.docked === true
+                    ? styles.volumeInlineDockedBridge
+                    : styles.volumePopoverFloatingBridge
+                }
               >
-                <OsdVolumeSlider
-                  testID="player-volume-slider"
-                  volume={volume}
-                  muted={muted}
-                  onChange={p.onSetVolume}
-                  i18n={i18n}
-                />
+                <View
+                  testID="player-volume-popover"
+                  style={[
+                    p.docked === true ? styles.volumeInlineDocked : styles.volumePopoverFloating,
+                    {
+                      backgroundColor: theme.colors.glassBg,
+                      borderColor: theme.colors.glassBorder,
+                      borderRadius: theme.radius.card,
+                    },
+                    webBackdropBlur(16),
+                  ]}
+                >
+                  <OsdVolumeSlider
+                    testID="player-volume-slider"
+                    volume={volume}
+                    muted={muted}
+                    onChange={p.onSetVolume}
+                    onDragStateChange={handleVolumeDragStateChange}
+                    i18n={i18n}
+                  />
+                </View>
               </View>
             ) : null}
           </View>
@@ -454,19 +472,24 @@ const styles = StyleSheet.create({
   titleText: { flexShrink: 1, fontWeight: '700', letterSpacing: -0.3 },
   utilityCluster: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   volumeWrap: { position: 'relative', flexDirection: 'row', alignItems: 'center' },
-  volumePopoverFloating: {
+  volumePopoverFloatingBridge: {
     position: 'absolute',
-    top: 44,
+    top: 38,
     right: 0,
+    paddingTop: 6,
+    zIndex: 40,
+  },
+  volumePopoverFloating: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderWidth: 1,
-    zIndex: 40,
+  },
+  volumeInlineDockedBridge: {
+    paddingLeft: 4,
   },
   volumeInlineDocked: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderWidth: 1,
-    marginLeft: 4,
   },
 });
