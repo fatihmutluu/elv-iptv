@@ -20,6 +20,7 @@ public final class StreamingGzipDecoder {
   private var headerBuf: [UInt8] = []
   private var stream = z_stream()
   private var initialized = false
+  private var sawStreamEnd = false
   private var outBuf = [UInt8](repeating: 0, count: 65_536)
 
   public init() {}
@@ -64,6 +65,12 @@ public final class StreamingGzipDecoder {
   }
 
   public func finish(onBytes: (UnsafeBufferPointer<UInt8>) throws -> Void) throws {
+    defer {
+      if initialized {
+        inflateEnd(&stream)
+        initialized = false
+      }
+    }
     if mode == .undecided && !headerBuf.isEmpty {
       let pending = headerBuf
       headerBuf.removeAll(keepingCapacity: false)
@@ -71,10 +78,41 @@ public final class StreamingGzipDecoder {
       try pending.withUnsafeBufferPointer { ptr in
         try onBytes(ptr)
       }
+      return
     }
-    if initialized {
-      inflateEnd(&stream)
-      initialized = false
+    if mode == .gzip {
+      if initialized && !sawStreamEnd {
+        stream.next_in = nil
+        stream.avail_in = 0
+        while true {
+          var produced = 0
+          var rc: Int32 = Z_OK
+          outBuf.withUnsafeMutableBufferPointer { outPtr in
+            stream.next_out = outPtr.baseAddress
+            stream.avail_out = uInt(outPtr.count)
+            rc = inflate(&stream, Z_FINISH)
+            produced = outPtr.count - Int(stream.avail_out)
+          }
+          if produced > 0 {
+            try outBuf.withUnsafeBufferPointer { outPtr in
+              try onBytes(UnsafeBufferPointer(start: outPtr.baseAddress, count: produced))
+            }
+          }
+          if rc == Z_STREAM_END {
+            sawStreamEnd = true
+            break
+          }
+          if rc == Z_BUF_ERROR || produced == 0 {
+            break
+          }
+          if rc != Z_OK {
+            throw XmltvStreamError.gzipCorrupt
+          }
+        }
+      }
+      if !sawStreamEnd {
+        throw XmltvStreamError.gzipCorrupt
+      }
     }
   }
 
@@ -83,6 +121,7 @@ public final class StreamingGzipDecoder {
     let rc = inflateInit2_(&stream, 15 + 32, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
     guard rc == Z_OK else { throw XmltvStreamError.gzipInitFailed }
     initialized = true
+    sawStreamEnd = false
   }
 
   private func inflateChunk(
@@ -90,6 +129,10 @@ public final class StreamingGzipDecoder {
     onBytes: (UnsafeBufferPointer<UInt8>) throws -> Void
   ) throws {
     guard let base = chunk.baseAddress, chunk.count > 0 else { return }
+    if sawStreamEnd {
+      guard inflateReset(&stream) == Z_OK else { throw XmltvStreamError.gzipCorrupt }
+      sawStreamEnd = false
+    }
     stream.next_in = UnsafeMutablePointer<Bytef>(mutating: base)
     stream.avail_in = uInt(chunk.count)
 
@@ -108,8 +151,10 @@ public final class StreamingGzipDecoder {
         }
       }
       if rc == Z_STREAM_END {
+        sawStreamEnd = true
         if stream.avail_in > 0 {
           guard inflateReset(&stream) == Z_OK else { throw XmltvStreamError.gzipCorrupt }
+          sawStreamEnd = false
         } else {
           break
         }

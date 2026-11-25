@@ -366,4 +366,52 @@ describe('importGuide native stager (#478)', () => {
     expect(httpGet).toHaveBeenCalledTimes(1);
     expect(await titles(e)).toEqual(['Ended', 'Running', 'Later', 'Named Match', 'Next Week']);
   });
+
+  it('bypasses nativeGuideStager and falls back to JS http.get when transport.dnsFamily is ipv4 or ipv6', async () => {
+    for (const dnsFamily of ['ipv4', 'ipv6'] as const) {
+      const e = await ready();
+      await updateSourceSettings(e.db, e.sourceId, {
+        ...(await settings(e)),
+        transport: { dnsFamily },
+      });
+      const httpGet = vi.spyOn(e.deps.http, 'get');
+      const nativeStage = vi.fn();
+      const r = await importGuide(
+        e.sourceId,
+        { ...e.deps, nativeGuideStager: { stage: nativeStage } },
+        { now: NOW },
+      );
+      expect(r.ok).toBe(true);
+      expect(nativeStage).not.toHaveBeenCalled();
+      expect(httpGet).toHaveBeenCalledTimes(1);
+    }
+
+    // dnsFamily: 'system' still uses nativeGuideStager
+    const eSys = await ready();
+    await updateSourceSettings(eSys.db, eSys.sourceId, {
+      ...(await settings(eSys)),
+      transport: { dnsFamily: 'system' },
+    });
+    const httpGetSys = vi.spyOn(eSys.deps.http, 'get');
+    const nativeStageSys = vi.fn(async (req: NativeGuideStageRequest) => {
+      await stageRow(eSys.db, req, 'haber1.tr', NOW, NOW + HOUR, 'System DNS Native Show');
+      return {
+        kind: 'staged' as const,
+        channels: [{ id: 'haber1.tr', names: ['Haber 1'] }],
+        stagedCounts: { 'haber1.tr': 1 },
+        seenProgrammes: 1,
+        stagedProgrammes: 1,
+        warnings: 0,
+        warningCodes: [],
+      };
+    });
+    const rSys = await importGuide(
+      eSys.sourceId,
+      { ...eSys.deps, nativeGuideStager: { stage: nativeStageSys } },
+      { now: NOW },
+    );
+    expect(rSys.ok).toBe(true);
+    expect(nativeStageSys).toHaveBeenCalledTimes(1);
+    expect(httpGetSys).not.toHaveBeenCalled();
+  });
 });

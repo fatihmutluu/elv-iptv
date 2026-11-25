@@ -38,7 +38,7 @@ export interface PlaybackSettingsPanelProps {
   readonly showAndroidDecoder?: boolean;
   /** Shows the Android-only Night-Mode DRC row (defaults to `Platform.OS === 'android'`, `#115`). */
   readonly showNightModeDrc?: boolean;
-  /** Shows the mobile External Player row (defaults to `Platform.OS === 'android' || Platform.OS === 'ios'`, `#406`). */
+  /** Shows the mobile External Player row (defaults to `Platform.OS === 'android' || (Platform.OS === 'ios' && !Platform.isTV)`, `#406`). */
   readonly showExternalPlayer?: boolean;
   /** Controlled active refresh-rate bucket for the per-refresh-rate A/V delay editor (`#115`). */
   readonly selectedDelayBucket?: RefreshRateBucket;
@@ -58,7 +58,7 @@ export function PlaybackSettingsPanel({
   focusedControlId = null,
   showAndroidDecoder = Platform.OS === 'android',
   showNightModeDrc = Platform.OS === 'android',
-  showExternalPlayer = Platform.OS === 'android' || Platform.OS === 'ios',
+  showExternalPlayer = Platform.OS === 'android' || (Platform.OS === 'ios' && !Platform.isTV),
   selectedDelayBucket: controlledDelayBucket,
   onSelectDelayBucket,
 }: PlaybackSettingsPanelProps): ReactElement {

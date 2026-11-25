@@ -7,6 +7,23 @@ export type ExternalPlayerMode = (typeof EXTERNAL_PLAYER_MODES)[number];
 /** Safe RFC 3986 URI scheme pattern for optional custom external player scheme (`#406`). */
 export const EXTERNAL_PLAYER_SCHEME_RE = /^[a-z][a-z0-9+.-]{0,31}$/i;
 
+const BLOCKED_EXTERNAL_PLAYER_SCHEMES: ReadonlySet<string> = new Set([
+  'http',
+  'https',
+  'file',
+  'tel',
+  'sms',
+  'mailto',
+  'javascript',
+  'data',
+  'blob',
+  'about',
+  'elviptv',
+  'ftp',
+  'ws',
+  'wss',
+]);
+
 /** Wave F7B crash diagnostics and external player preference fields (`#226`, `#406`). */
 export interface WaveF7bPreferencesFields {
   readonly crashReportsOptIn: boolean;
@@ -28,19 +45,24 @@ export function isExternalPlayerMode(value: unknown): value is ExternalPlayerMod
   return typeof value === 'string' && (EXTERNAL_PLAYER_MODES as readonly string[]).includes(value);
 }
 
-/** Returns true when `value` is empty or a safe URI scheme name (never a full URL or credentials). */
+/** Returns true when `value` is empty or a safe URI scheme name (never a full URL, credentials, or blocked system scheme). */
 export function isValidExternalPlayerScheme(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const trimmed = value.trim();
-  return trimmed.length === 0 || EXTERNAL_PLAYER_SCHEME_RE.test(trimmed);
+  if (trimmed.length === 0) return true;
+  const lower = trimmed.toLowerCase();
+  return EXTERNAL_PLAYER_SCHEME_RE.test(lower) && !BLOCKED_EXTERNAL_PLAYER_SCHEMES.has(lower);
 }
 
-/** Normalizes a custom external player URI scheme to lowercase or falls back when invalid. */
+/** Normalizes a custom external player URI scheme to lowercase or falls back when invalid or blocked. */
 export function normalizeExternalPlayerScheme(value: unknown, fallback = ''): string {
   if (typeof value !== 'string') return fallback;
   const trimmed = value.trim();
   if (trimmed.length === 0) return '';
-  return EXTERNAL_PLAYER_SCHEME_RE.test(trimmed) ? trimmed.toLowerCase() : fallback;
+  const lower = trimmed.toLowerCase();
+  return EXTERNAL_PLAYER_SCHEME_RE.test(lower) && !BLOCKED_EXTERNAL_PLAYER_SCHEMES.has(lower)
+    ? lower
+    : fallback;
 }
 
 function boolOr(value: unknown, fallback: boolean): boolean {

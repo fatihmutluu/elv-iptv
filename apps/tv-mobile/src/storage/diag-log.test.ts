@@ -49,4 +49,10 @@ describe('createMobileDiagnosticsPort (#226)', () => {
     });
     await expect(port.exportMarkdown?.('# Report')).resolves.toBe(false);
   });
+
+  it('omits exportMarkdown on tvOS where UIActivityViewController is unavailable', () => {
+    const port = createMobileDiagnosticsPort({ os: 'ios', isTV: true });
+    expect(port.platformLabel).toBe('tvOS');
+    expect(port.exportMarkdown).toBeUndefined();
+  });
 });

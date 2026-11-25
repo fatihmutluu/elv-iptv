@@ -20,10 +20,14 @@ describe('Windows LGPL mpv CI build scripts and workflow (#94)', () => {
 
     expect(activeLines).not.toMatch(/--enable-gpl(?![\w-])/);
     expect(activeLines).not.toMatch(/--enable-nonfree(?![\w-])/);
+    expect(activeLines).not.toContain('-Dd3d11=enabled');
 
     for (const flag of [
       '--disable-gpl',
       '--disable-nonfree',
+      '--disable-bzlib',
+      '--disable-iconv',
+      '--disable-lzma',
       '--enable-shared',
       '--disable-static',
       '--disable-programs',
@@ -35,7 +39,8 @@ describe('Windows LGPL mpv CI build scripts and workflow (#94)', () => {
       '-Dlibmpv=true',
       '-Dcplayer=false',
       '-Dlua=luajit',
-      '-Dd3d11=enabled',
+      '-Dd3d11=disabled',
+      '-Dopengl=enabled',
       '-Dgl=enabled',
       '-Drubberband=disabled',
       '-Ddvdnav=disabled',

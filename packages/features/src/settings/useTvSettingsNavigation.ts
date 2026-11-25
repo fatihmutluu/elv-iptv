@@ -461,7 +461,7 @@ export function useTvSettingsNavigation({
   onFocusTopNav,
   showAndroidDecoder = Platform.OS === 'android',
   showNightModeDrc = Platform.OS === 'android',
-  showExternalPlayer = Platform.OS === 'android' || Platform.OS === 'ios',
+  showExternalPlayer = Platform.OS === 'android' || (Platform.OS === 'ios' && !Platform.isTV),
   preservePaneOnBlur = false,
 }: UseTvSettingsNavigationOptions): TvSettingsNavigationState {
   const [pane, setPane] = useState<'nav' | 'content'>(() =>

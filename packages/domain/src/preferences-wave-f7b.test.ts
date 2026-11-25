@@ -35,6 +35,30 @@ describe('Wave F7B preferences (#226, #406)', () => {
     expect(normalizeExternalPlayerScheme('  My-Player  ')).toBe('my-player');
     expect(normalizeExternalPlayerScheme('https://evil.test/x', 'fallback')).toBe('fallback');
     expect(normalizeExternalPlayerScheme('')).toBe('');
+
+    const blockedSchemes = [
+      'http',
+      'https',
+      'file',
+      'tel',
+      'sms',
+      'mailto',
+      'javascript',
+      'data',
+      'blob',
+      'about',
+      'elviptv',
+      'ftp',
+      'ws',
+      'wss',
+      'HTTPS',
+      'JavaScript',
+      'ELVIPTV',
+    ];
+    for (const scheme of blockedSchemes) {
+      expect(isValidExternalPlayerScheme(scheme)).toBe(false);
+      expect(normalizeExternalPlayerScheme(scheme, 'fallback')).toBe('fallback');
+    }
   });
 
   it('round-trips valid Wave F7B preferences and omits default values from serialized JSON', () => {

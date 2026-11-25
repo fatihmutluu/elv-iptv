@@ -8,6 +8,7 @@ const xmltvNative = vi.hoisted(() => ({
   isNativeXmltvStagerAvailable: vi.fn(() => false),
   stageXmltv: vi.fn(),
   cancelXmltvStage: vi.fn(),
+  cleanupStageFile: vi.fn(),
 }));
 vi.mock('@elv/xmltv-native', () => xmltvNative);
 
@@ -47,7 +48,7 @@ const driver = {
   transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(driver)),
   setAbortSignal: vi.fn(),
   getDbPath: vi.fn(() => '/data/data/app/databases/catalog.db'),
-  runExclusiveWrite: vi.fn(async <T>(work: () => Promise<T>) => work()),
+  attachAndCopyProgrammes: vi.fn(async () => undefined),
   close: vi.fn(async () => undefined),
 };
 const createOpSqliteDriver = vi.fn(async (_name: string, _location?: string) => driver);
@@ -83,11 +84,12 @@ beforeEach(() => {
   userData.write.mockClear();
   driver.close.mockClear();
   driver.getDbPath.mockClear();
-  driver.runExclusiveWrite.mockClear();
+  driver.attachAndCopyProgrammes.mockClear();
   driver.all.mockImplementation(migrated);
   xmltvNative.isNativeXmltvStagerAvailable.mockReset().mockReturnValue(false);
   xmltvNative.stageXmltv.mockReset();
   xmltvNative.cancelXmltvStage.mockReset();
+  xmltvNative.cleanupStageFile.mockReset();
   createCatalogServiceSpy.lastDeps = undefined;
 });
 
@@ -197,11 +199,19 @@ describe('createDeviceCatalog', () => {
     await expect(createDeviceCatalog()).resolves.toBeDefined();
   });
 
-  it('wires nativeGuideStager through db.runExclusiveWrite and db.getDbPath when @elv/xmltv-native is available (#478)', async () => {
+  it('wires nativeGuideStager through temp stage DB attach/copy and cleanup when @elv/xmltv-native is available (#478)', async () => {
     platform.OS = 'android';
+    const stageDbPath = '/data/data/app/databases/catalog.db.xmltv-stage-job-99.db';
     xmltvNative.isNativeXmltvStagerAvailable.mockReturnValue(true);
     xmltvNative.stageXmltv.mockResolvedValue({
-      kind: 'not-modified',
+      kind: 'staged',
+      stageDbPath,
+      channels: [{ id: 'ch1', names: ['News'] }],
+      stagedCounts: { ch1: 2 },
+      seenProgrammes: 2,
+      stagedProgrammes: 2,
+      warnings: 0,
+      warningCodes: [],
       etag: '"v1"',
     });
 
@@ -225,7 +235,6 @@ describe('createDeviceCatalog', () => {
       toMs: 200,
       ifNoneMatch: '"v1"',
     });
-    expect(driver.runExclusiveWrite).toHaveBeenCalledTimes(1);
     expect(driver.getDbPath).toHaveBeenCalledTimes(1);
     expect(xmltvNative.stageXmltv).toHaveBeenCalledWith({
       jobId: 'job-99',
@@ -237,7 +246,18 @@ describe('createDeviceCatalog', () => {
       toMs: 200,
       ifNoneMatch: '"v1"',
     });
-    expect(res).toEqual({ kind: 'not-modified', etag: '"v1"' });
+    expect(driver.attachAndCopyProgrammes).toHaveBeenCalledWith(stageDbPath);
+    expect(xmltvNative.cleanupStageFile).toHaveBeenCalledWith(stageDbPath);
+    expect(res).toEqual({
+      kind: 'staged',
+      channels: [{ id: 'ch1', names: ['News'] }],
+      stagedCounts: { ch1: 2 },
+      seenProgrammes: 2,
+      stagedProgrammes: 2,
+      warnings: 0,
+      warningCodes: [],
+      etag: '"v1"',
+    });
 
     stager?.cancel?.('job-99');
     expect(xmltvNative.cancelXmltvStage).toHaveBeenCalledWith('job-99');

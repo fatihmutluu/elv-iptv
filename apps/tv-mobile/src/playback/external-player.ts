@@ -8,10 +8,13 @@ import type {
 import { Linking, Platform } from 'react-native';
 
 const EXTERNAL_RETURN_URL = 'elviptv://external-return';
+const HTTP_STREAM_URL_RE = /^https?:\/\/\S+$/i;
 
 interface Media3ExternalPlayerBridge {
   readonly isExternalPlayerSupported?: () => boolean;
-  readonly launchExternalPlayer?: (req: ExternalPlayerRequest) => Promise<ExternalPlayerResult>;
+  readonly launchExternalPlayer?: (
+    req: ExternalPlayerRequest,
+  ) => Promise<ExternalPlayerResult | null | undefined>;
 }
 
 /** Minimal Linking surface injected for unit testing (`#406`). */
@@ -28,19 +31,40 @@ export interface CreateMobileExternalPlayerPortOptions {
   readonly media3Bridge?: Media3ExternalPlayerBridge;
 }
 
-/** Builds a safe iOS URL-scheme handoff URI for an external player (`#406`). */
-export function buildIosExternalPlayerUrl(streamUrl: string, customScheme?: string): string {
-  const scheme = normalizeExternalPlayerScheme(customScheme, '');
-  const encodedUrl = encodeURIComponent(streamUrl);
-  const encodedReturn = encodeURIComponent(EXTERNAL_RETURN_URL);
-  if (scheme.length === 0) {
-    return streamUrl;
+function isAllowedStreamUrl(url: string): boolean {
+  const trimmed = url.trim();
+  if (!HTTP_STREAM_URL_RE.test(trimmed)) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
   }
+}
+
+/** Builds a safe iOS URL-scheme handoff URI for an external player (`#406`), or `null` when URL/scheme is disallowed. */
+export function buildIosExternalPlayerUrl(streamUrl: string, customScheme?: string): string | null {
+  const trimmedUrl = streamUrl.trim();
+  if (!isAllowedStreamUrl(trimmedUrl)) {
+    return null;
+  }
+  const scheme = normalizeExternalPlayerScheme(customScheme, '');
+  if (scheme.length === 0) {
+    return null;
+  }
+  const encodedUrl = encodeURIComponent(trimmedUrl);
+  const encodedReturn = encodeURIComponent(EXTERNAL_RETURN_URL);
   if (scheme === 'vlc-x-callback') {
     return `vlc-x-callback://x-callback-url/stream?url=${encodedUrl}&x-success=${encodedReturn}`;
   }
   if (scheme === 'infuse') {
     return `infuse://x-callback-url/play?url=${encodedUrl}&x-success=${encodedReturn}`;
+  }
+  if (scheme === 'outplayer') {
+    return `outplayer://${trimmedUrl}`;
+  }
+  if (scheme === 'nplayer-http' || scheme === 'nplayer-https') {
+    return `${scheme}://${trimmedUrl.replace(/^https?:\/\//i, '')}`;
   }
   return `${scheme}://${encodedUrl}`;
 }
@@ -72,7 +96,11 @@ export function createMobileExternalPlayerPort(
           return { launched: false, errorCode: 'unsupported' };
         }
         try {
-          return await bridge.launchExternalPlayer(req);
+          const result = await bridge.launchExternalPlayer(req);
+          if (result == null) {
+            return { launched: false, errorCode: 'launch_failed' };
+          }
+          return result;
         } catch {
           return { launched: false, errorCode: 'launch_failed' };
         }
@@ -84,17 +112,51 @@ export function createMobileExternalPlayerPort(
     return {
       isSupported: true,
       async launch(req: ExternalPlayerRequest): Promise<ExternalPlayerResult> {
-        const targetUrl = buildIosExternalPlayerUrl(req.url, req.customScheme);
-        try {
-          const canOpen = await linking.canOpenURL(targetUrl);
-          if (!canOpen) {
-            return { launched: false, errorCode: 'cannot_open_url' };
-          }
-          await linking.openURL(targetUrl);
-          return { launched: true };
-        } catch {
-          return { launched: false, errorCode: 'launch_failed' };
+        const trimmedUrl = req.url.trim();
+        if (!isAllowedStreamUrl(trimmedUrl)) {
+          return { launched: false, errorCode: 'invalid_url' };
         }
+        const rawScheme = req.customScheme?.trim() ?? '';
+        if (rawScheme.length > 0) {
+          const targetUrl = buildIosExternalPlayerUrl(trimmedUrl, rawScheme);
+          if (targetUrl === null) {
+            return { launched: false, errorCode: 'invalid_scheme' };
+          }
+          try {
+            const canOpen = await linking.canOpenURL(targetUrl);
+            if (!canOpen) {
+              return { launched: false, errorCode: 'cannot_open_url' };
+            }
+            await linking.openURL(targetUrl);
+            return { launched: true };
+          } catch {
+            return { launched: false, errorCode: 'launch_failed' };
+          }
+        }
+
+        const nplayerScheme = trimmedUrl.toLowerCase().startsWith('https://')
+          ? 'nplayer-https'
+          : 'nplayer-http';
+        const candidates = ['vlc-x-callback', 'infuse', 'outplayer', nplayerScheme] as const;
+        for (const candidate of candidates) {
+          const candidateUrl = buildIosExternalPlayerUrl(trimmedUrl, candidate);
+          if (candidateUrl === null) continue;
+          let canOpen = false;
+          try {
+            canOpen = await linking.canOpenURL(candidateUrl);
+          } catch {
+            canOpen = false;
+          }
+          if (canOpen) {
+            try {
+              await linking.openURL(candidateUrl);
+              return { launched: true };
+            } catch {
+              return { launched: false, errorCode: 'launch_failed' };
+            }
+          }
+        }
+        return { launched: false, errorCode: 'no_player_available' };
       },
     };
   }

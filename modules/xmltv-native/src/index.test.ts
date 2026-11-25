@@ -48,6 +48,9 @@ describe('@elv/xmltv-native JS bridge', () => {
     expect(mod.isNativeXmltvStagerAvailable()).toBe(false);
     await expect(mod.stageXmltv(SAMPLE_REQUEST)).resolves.toBeNull();
     expect(() => mod.cancelXmltvStage('job-1')).not.toThrow();
+    expect(() =>
+      mod.cleanupStageFile('/data/data/app/databases/catalog.db.xmltv-stage-job-1.db'),
+    ).not.toThrow();
     expect(requireOptionalNativeModule).not.toHaveBeenCalled();
   });
 
@@ -59,11 +62,16 @@ describe('@elv/xmltv-native JS bridge', () => {
     expect(requireOptionalNativeModule).toHaveBeenCalledWith('ElvXmltvNative');
     await expect(mod.stageXmltv(SAMPLE_REQUEST)).resolves.toBeNull();
     expect(() => mod.cancelXmltvStage('job-1')).not.toThrow();
+    expect(() =>
+      mod.cleanupStageFile('/data/data/app/databases/catalog.db.xmltv-stage-job-1.db'),
+    ).not.toThrow();
   });
 
-  it('forwards stageXmltv staged results and cancelXmltvStage to native', async () => {
+  it('forwards stageXmltv staged results (including stageDbPath), cancelXmltvStage, and cleanupStageFile to native', async () => {
+    const stageDbPath = '/data/data/app/databases/catalog.db.xmltv-stage-job-1.db';
     const stageXmltv = vi.fn(async () => ({
       kind: 'staged',
+      stageDbPath,
       channels: [
         { id: 'ch1', names: ['News HD', 'News'], icon: 'https://cdn.example/ch1.png', lcn: '101' },
         { id: 'ch2', names: ['Sports'], icon: '', lcn: '' },
@@ -77,7 +85,12 @@ describe('@elv/xmltv-native JS bridge', () => {
       lastModified: '',
     }));
     const cancelXmltvStage = vi.fn();
-    requireOptionalNativeModule.mockReturnValue({ stageXmltv, cancelXmltvStage });
+    const cleanupStageFile = vi.fn();
+    requireOptionalNativeModule.mockReturnValue({
+      stageXmltv,
+      cancelXmltvStage,
+      cleanupStageFile,
+    });
     const mod = await loadModule();
 
     expect(mod.isNativeXmltvStagerAvailable()).toBe(true);
@@ -85,6 +98,7 @@ describe('@elv/xmltv-native JS bridge', () => {
     expect(stageXmltv).toHaveBeenCalledWith(SAMPLE_REQUEST);
     expect(res).toEqual({
       kind: 'staged',
+      stageDbPath,
       channels: [
         { id: 'ch1', names: ['News HD', 'News'], icon: 'https://cdn.example/ch1.png', lcn: '101' },
         { id: 'ch2', names: ['Sports'] },
@@ -99,6 +113,13 @@ describe('@elv/xmltv-native JS bridge', () => {
 
     mod.cancelXmltvStage('job-1');
     expect(cancelXmltvStage).toHaveBeenCalledWith('job-1');
+
+    mod.cleanupStageFile('/data/data/app/databases/catalog.db');
+    mod.cleanupStageFile('/data/data/app/databases/catalog.db.xmltv-stage-.db');
+    expect(cleanupStageFile).not.toHaveBeenCalled();
+
+    mod.cleanupStageFile(stageDbPath);
+    expect(cleanupStageFile).toHaveBeenCalledWith(stageDbPath);
   });
 
   it('normalizes not-modified and http-error native responses without leaking URLs', async () => {

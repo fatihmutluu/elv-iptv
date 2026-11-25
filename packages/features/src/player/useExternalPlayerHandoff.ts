@@ -2,7 +2,7 @@ import { type CatalogService, computeResumePositionMs, type UserItemKind } from 
 import type { ExternalPlayerMode } from '@elv/domain';
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { PlayTarget } from '../ports/play-target';
-import type { ExternalPlayerPort } from '../ports/wave-f7b-ports';
+import type { ExternalPlayerPort, ExternalPlayerResult } from '../ports/wave-f7b-ports';
 
 const ERROR_TOAST_MS = 4_000;
 
@@ -81,7 +81,7 @@ export async function runExternalPlayerHandoff(
   }
 
   const trimmedScheme = input.customScheme?.trim() ?? '';
-  let result: Awaited<ReturnType<ExternalPlayerPort['launch']>>;
+  let result: ExternalPlayerResult | null | undefined;
   try {
     result = await externalPlayer.launch({
       url: resolved.value.url,
@@ -91,10 +91,10 @@ export async function runExternalPlayerHandoff(
       ...(trimmedScheme.length > 0 ? { customScheme: trimmedScheme } : {}),
     });
   } catch {
-    return { ok: false };
+    result = { launched: false, errorCode: 'launch_failed' };
   }
 
-  if (!result.launched) {
+  if (!result?.launched) {
     return { ok: false };
   }
 

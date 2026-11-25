@@ -62,6 +62,10 @@ class ElvXmltvNativeModule : Module() {
       stager.cancel(jobId)
     }
 
+    Function("cleanupStageFile") { path: String ->
+      NativeXmltvStager.cleanupStageFile(path)
+    }
+
     OnDestroy {
       stager.cancelAll()
     }
@@ -91,8 +95,9 @@ class ElvXmltvNativeModule : Module() {
           if (!ch.lcn.isNullOrEmpty()) entry["lcn"] = ch.lcn
           entry
         }
-        val map = HashMap<String, Any?>(9)
+        val map = HashMap<String, Any?>(10)
         map["kind"] = "staged"
+        map["stageDbPath"] = outcome.stageDbPath
         map["channels"] = channels
         map["stagedCounts"] = outcome.summary.stagedCounts
         map["seenProgrammes"] = outcome.summary.seenProgrammes

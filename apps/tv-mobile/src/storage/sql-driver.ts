@@ -53,6 +53,14 @@ const CONNECTION_PRAGMAS = [
   'PRAGMA foreign_keys = ON',
 ];
 
+const COPY_STAGED_PROGRAMMES_SQL =
+  'INSERT OR REPLACE INTO programmes_next ' +
+  '(source_id, guide_id, start, stop, title, sub_title, description, categories_json, ' +
+  'episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold) ' +
+  'SELECT source_id, guide_id, start, stop, title, sub_title, description, categories_json, ' +
+  'episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold ' +
+  'FROM xmltv_stage.programmes_next';
+
 const OPEN_MAX_ATTEMPTS = 3;
 const OPEN_BACKOFF_MS: readonly number[] = [100, 250];
 const TRANSIENT_SQLITE_LOCK_RE = /sqlite_busy|sqlite_locked|database(?:\s+table)?\s+is\s+locked/i;
@@ -228,10 +236,12 @@ export interface OpSqliteDriver extends SqlDriver {
   /** Returns the resolved on-disk SQLite file path for native off-thread helpers (`#478`). */
   getDbPath(): string;
   /**
-   * Runs `work` exclusively on the writer serialization queue so native SQLite connections (such as
-   * `@elv/xmltv-native`) never overlap with `op-sqlite` write transactions (`#478`).
+   * Attaches a temporary XMLTV stage SQLite file on `op-sqlite`'s own writer connection, copies
+   * its `programmes_next` rows into the main catalog database, and always detaches it (`#478`).
+   * Runs directly on the serialized writer connection (outside a SQLite transaction, since SQLite
+   * forbids `ATTACH DATABASE` inside a transaction).
    */
-  runExclusiveWrite<T>(work: () => Promise<T>): Promise<T>;
+  attachAndCopyProgrammes(stageDbPath: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -363,7 +373,26 @@ export async function createOpSqliteDriver(
     getDbPath() {
       return location === undefined ? writer.getDbPath() : writer.getDbPath(location);
     },
-    runExclusiveWrite: <T>(work: () => Promise<T>) => writes(work),
+    attachAndCopyProgrammes: (stageDbPath: string) =>
+      writes(() =>
+        writeGuard(async () => {
+          await writer.execute('ATTACH DATABASE ? AS xmltv_stage', [stageDbPath]);
+          let copyError: unknown;
+          let failed = false;
+          try {
+            await writer.execute(COPY_STAGED_PROGRAMMES_SQL);
+          } catch (error) {
+            failed = true;
+            copyError = error;
+          }
+          try {
+            await writer.execute('DETACH DATABASE xmltv_stage');
+          } catch (detachError) {
+            if (!failed) throw detachError;
+          }
+          if (failed) throw copyError;
+        }),
+      ),
     exec: (sql) => writes(() => writeGuard(() => statements((s) => writer.execute(s), sql))),
     run: (sql, params) =>
       writes(() => writeGuard(async () => changes(await writer.execute(sql, [...(params ?? [])])))),

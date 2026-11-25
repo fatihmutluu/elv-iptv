@@ -192,12 +192,12 @@ class ElvEngineMedia3Module : Module() {
       displaced?.reject("E_EXTERNAL_PLAYER_SUPERSEDED", "Superseded by a newer external player launch", null)
       try {
         activity.startActivityForResult(intent, REQUEST_CODE_EXTERNAL_PLAYER)
-      } catch (err: ActivityNotFoundException) {
+      } catch (_: ActivityNotFoundException) {
         clearPendingExternalPlayerIfSame(promise)
-          ?.reject("E_EXTERNAL_PLAYER_NOT_FOUND", "No external video player available", err)
-      } catch (err: SecurityException) {
+          ?.reject("E_EXTERNAL_PLAYER_NOT_FOUND", "No external video player available", null)
+      } catch (_: SecurityException) {
         clearPendingExternalPlayerIfSame(promise)
-          ?.reject("E_EXTERNAL_PLAYER_UNAVAILABLE", "External video player launch blocked", err)
+          ?.reject("E_EXTERNAL_PLAYER_UNAVAILABLE", "External video player launch blocked", null)
       }
     }.runOnQueue(Queues.MAIN)
 

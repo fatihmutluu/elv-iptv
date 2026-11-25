@@ -427,37 +427,50 @@ describe('createOpSqliteDriver', () => {
     expect(appleDb.getDbPath()).toBe('/app/Library/Caches/catalog.db');
   });
 
-  it('serializes runExclusiveWrite through the writer queue and recovers after rejection (#478)', async () => {
+  it('serializes attachAndCopyProgrammes through the writer queue and always detaches on failure (#478)', async () => {
     const { db, writer } = await setup();
-    const order: string[] = [];
+    const stagePath = '/default/databases/catalog.db.xmltv-stage-job_1.db';
     const gate = writer.hold();
 
-    const first = db.run('UPDATE a SET x = 1').then(() => {
-      order.push('first-run');
-    });
-    const exclusive = db.runExclusiveWrite(async () => {
-      order.push('exclusive-start');
-      await Promise.resolve();
-      order.push('exclusive-end');
-      return 42;
-    });
-    const second = db.run('UPDATE b SET x = 1').then(() => {
-      order.push('second-run');
-    });
+    const first = db.run('UPDATE a SET x = 1');
+    const copy = db.attachAndCopyProgrammes(stagePath);
+    const second = db.run('UPDATE b SET x = 1');
 
     await Promise.resolve();
-    expect(order).toEqual([]);
+    expect(writer.log).toEqual(['execute:UPDATE a SET x = 1']);
     gate.release();
 
-    const [_, value] = await Promise.all([first, exclusive, second]);
-    expect(value).toBe(42);
-    expect(order).toEqual(['first-run', 'exclusive-start', 'exclusive-end', 'second-run']);
+    await Promise.all([first, copy, second]);
+    expect(writer.log).toEqual([
+      'execute:UPDATE a SET x = 1',
+      `execute:ATTACH DATABASE ? AS xmltv_stage|${JSON.stringify([stagePath])}`,
+      'execute:INSERT OR REPLACE INTO programmes_next (source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold) SELECT source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold FROM xmltv_stage.programmes_next',
+      'execute:DETACH DATABASE xmltv_stage',
+      'execute:UPDATE b SET x = 1',
+    ]);
 
-    await expect(
-      db.runExclusiveWrite(async () => {
-        throw new Error('native-boom');
-      }),
-    ).rejects.toThrow('native-boom');
+    // Failure during INSERT still executes DETACH and keeps the writer queue healthy
+    writer.log.length = 0;
+    const origExecute = writer.execute;
+    writer.execute = async (sql, params) => {
+      if (sql.startsWith('INSERT OR REPLACE INTO programmes_next')) {
+        writer.log.push(`execute:${sql}`);
+        throw new Error('disk full');
+      }
+      return origExecute(sql, params);
+    };
+    await expect(db.attachAndCopyProgrammes(stagePath)).rejects.toMatchObject({
+      category: 'storage',
+      code: 'sql-failed',
+      detail: 'disk full',
+    });
+    expect(writer.log).toEqual([
+      `execute:ATTACH DATABASE ? AS xmltv_stage|${JSON.stringify([stagePath])}`,
+      'execute:INSERT OR REPLACE INTO programmes_next (source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold) SELECT source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold FROM xmltv_stage.programmes_next',
+      'execute:DETACH DATABASE xmltv_stage',
+    ]);
+
+    writer.execute = origExecute;
     expect(await db.run('UPDATE c SET x = 1')).toEqual({ changes: 1 });
   });
 });

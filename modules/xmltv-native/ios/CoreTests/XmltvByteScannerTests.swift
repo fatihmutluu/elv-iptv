@@ -123,41 +123,13 @@ struct XmltvByteScannerTests {
     let toMs = try #require(XmltvTextHelpers.parseXmltvTime("20261126000000 +0000"))
 
     let tmpDir = FileManager.default.temporaryDirectory
-    let dbURL = tmpDir.appendingPathComponent("xmltv-test-\(UUID().uuidString).sqlite")
-    defer { try? FileManager.default.removeItem(at: dbURL) }
-
-    var setupDb: OpaquePointer?
-    let openRc = sqlite3_open(dbURL.path, &setupDb)
-    #expect(openRc == SQLITE_OK)
-    let createSql = """
-    CREATE TABLE programmes_next (
-      source_id TEXT NOT NULL,
-      guide_id TEXT NOT NULL,
-      start INTEGER NOT NULL,
-      stop INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      sub_title TEXT,
-      description TEXT,
-      categories_json TEXT,
-      episode_num TEXT,
-      icon TEXT,
-      run_id INTEGER NOT NULL,
-      genre TEXT,
-      flags INTEGER NOT NULL DEFAULT 0,
-      rating_system TEXT,
-      rating_value TEXT,
-      title_fold TEXT NOT NULL DEFAULT '',
-      description_fold TEXT NOT NULL DEFAULT '',
-      PRIMARY KEY (source_id, guide_id, start)
-    ) WITHOUT ROWID;
-    """
-    let createRc = sqlite3_exec(setupDb, createSql, nil, nil, nil)
-    #expect(createRc == SQLITE_OK)
-    sqlite3_close(setupDb)
+    let catalogPath = tmpDir.appendingPathComponent("catalog-\(UUID().uuidString).db").path
+    let stagePath = XmltvSqliteWriter.stageDbPath(for: catalogPath, jobId: "src:gz/0")
+    defer { XmltvSqliteWriter.cleanupStageFile(stagePath) }
 
     let decoder = StreamingGzipDecoder()
     let scanner = XmltvByteScanner(sourceId: "src-gz", runId: 7, fromMs: fromMs, toMs: toMs)
-    let writer = try XmltvSqliteWriter(dbPath: dbURL.path, batchSize: 1)
+    let writer = try XmltvSqliteWriter(stageDbPath: stagePath, batchSize: 1)
 
     // Feed tiny 17-byte chunks to verify streaming boundary safety
     var offset = 0
@@ -187,7 +159,7 @@ struct XmltvByteScannerTests {
     #expect(summary.stagedCounts["c1"] == 2)
 
     var verifyDb: OpaquePointer?
-    let verifyOpen = sqlite3_open_v2(dbURL.path, &verifyDb, SQLITE_OPEN_READONLY, nil)
+    let verifyOpen = sqlite3_open_v2(stagePath, &verifyDb, SQLITE_OPEN_READONLY, nil)
     #expect(verifyOpen == SQLITE_OK)
     defer { sqlite3_close(verifyDb) }
 
@@ -234,5 +206,173 @@ struct XmltvByteScannerTests {
     #expect(utc == istanbul)
     let kidsGenre = XmltvTextHelpers.normalizeEpgGenre(["Çizgi Film"])
     #expect(kidsGenre == "kids")
+  }
+
+  @Test("rejects truncated gzip streams in finish() and supports multi-member gzip")
+  func truncatedAndMultiMemberGzip() throws {
+    let payload = Array("<tv><channel id=\"gz1\"><display-name>One</display-name></channel></tv>".utf8)
+    let gz = try gzipCompress(payload)
+    #expect(gz.count > 12)
+
+    // Truncated single member (missing trailer/tail bytes)
+    let truncated = Array(gz.prefix(gz.count - 8))
+    let truncatedDecoder = StreamingGzipDecoder()
+    try truncated.withUnsafeBufferPointer { ptr in
+      try truncatedDecoder.feed(ptr) { _ in }
+    }
+    #expect(throws: XmltvStreamError.gzipCorrupt) {
+      try truncatedDecoder.finish { _ in }
+    }
+
+    // Valid multi-member concatenated gzip fed across exact member boundary
+    let member2 = try gzipCompress(Array("<tv><channel id=\"gz2\"/></tv>".utf8))
+    let multiDecoder = StreamingGzipDecoder()
+    var combined: [UInt8] = []
+    try gz.withUnsafeBufferPointer { ptr in
+      try multiDecoder.feed(ptr) { combined.append(contentsOf: $0) }
+    }
+    try member2.withUnsafeBufferPointer { ptr in
+      try multiDecoder.feed(ptr) { combined.append(contentsOf: $0) }
+    }
+    try multiDecoder.finish { combined.append(contentsOf: $0) }
+    #expect(String(decoding: combined, as: UTF8.self).contains("gz2"))
+
+    // Truncated second member must still throw gzipCorrupt
+    let truncatedSecond = Array(member2.prefix(member2.count - 6))
+    let multiTruncDecoder = StreamingGzipDecoder()
+    try gz.withUnsafeBufferPointer { ptr in
+      try multiTruncDecoder.feed(ptr) { _ in }
+    }
+    try truncatedSecond.withUnsafeBufferPointer { ptr in
+      try multiTruncDecoder.feed(ptr) { _ in }
+    }
+    #expect(throws: XmltvStreamError.gzipCorrupt) {
+      try multiTruncDecoder.finish { _ in }
+    }
+  }
+
+  @Test("matchTagName returns mismatch before EOF length check and parses trailing channel at EOF")
+  func trailingShortChannelAtEof() throws {
+    let shortChan = Array("<channel/>".utf8)
+    let progBytes = Array("programme".utf8)
+    let chanBytes = Array("channel".utf8)
+    #expect(XmltvByteTokens.matchTagName(shortChan, at: 1, limit: shortChan.count, expected: progBytes) == 0)
+    #expect(XmltvByteTokens.matchTagName(shortChan, at: 1, limit: shortChan.count, expected: chanBytes) == 1)
+
+    let partialProg = Array("<progr".utf8)
+    #expect(XmltvByteTokens.matchTagName(partialProg, at: 1, limit: partialProg.count, expected: progBytes) == -1)
+
+    let fromMs = try #require(XmltvTextHelpers.parseXmltvTime("20261125000000 +0000"))
+    let toMs = try #require(XmltvTextHelpers.parseXmltvTime("20261126000000 +0000"))
+    let scanner = XmltvByteScanner(sourceId: "s1", runId: 1, fromMs: fromMs, toMs: toMs)
+    let eofBytes = Array("<tv><channel id=\"x\"/>".utf8)
+    try eofBytes.withUnsafeBufferPointer { ptr in
+      try scanner.feed(ptr) { _ in }
+    }
+    let summary = try scanner.finish { _ in }
+    #expect(summary.channels.count == 1)
+    #expect(summary.channels[0].id == "x")
+  }
+
+  @Test("ignores nested programme metadata tags inside wrapper elements")
+  func ignoresNestedProgrammeMetadata() throws {
+    let xml = """
+    <tv>
+      <programme start="20261125120000 +0000" stop="20261125130000 +0000" channel="ch1">
+        <credits>
+          <title>Dr.</title>
+          <sub-title>Nested Sub</sub-title>
+          <desc>Nested Desc</desc>
+          <category>NestedCat</category>
+          <episode-num system="xmltv_ns">9.9.</episode-num>
+        </credits>
+        <title>Top Title</title>
+        <sub-title>Top Sub</sub-title>
+        <desc>Top Desc</desc>
+        <category>News</category>
+        <episode-num system="onscreen">S01E02</episode-num>
+      </programme>
+    </tv>
+    """
+    let fromMs = try #require(XmltvTextHelpers.parseXmltvTime("20261125000000 +0000"))
+    let toMs = try #require(XmltvTextHelpers.parseXmltvTime("20261126000000 +0000"))
+    let scanner = XmltvByteScanner(sourceId: "src-1", runId: 1, fromMs: fromMs, toMs: toMs)
+    var rows: [StagedProgrammeRow] = []
+    let bytes = Array(xml.utf8)
+    try bytes.withUnsafeBufferPointer { ptr in
+      try scanner.feed(ptr) { rows.append($0) }
+    }
+    _ = try scanner.finish { rows.append($0) }
+
+    #expect(rows.count == 1)
+    #expect(rows[0].title == "Top Title")
+    #expect(rows[0].subTitle == "Top Sub")
+    #expect(rows[0].description == "Top Desc")
+    #expect(rows[0].categoriesJson == "[\"News\"]")
+    #expect(rows[0].episodeNum == "S01E02")
+  }
+
+  @Test("strips Authorization, Proxy-Authorization, and Cookie on cross-origin redirects")
+  func crossOriginRedirectHeaderStripping() throws {
+    let orig = try #require(URL(string: "https://guide.example:443/epg.xml"))
+    let sameOrigin = try #require(URL(string: "https://GUIDE.EXAMPLE/v2/epg.xml"))
+    let diffHost = try #require(URL(string: "https://cdn.other.example/epg.xml"))
+    let diffScheme = try #require(URL(string: "http://guide.example/epg.xml"))
+    let diffPort = try #require(URL(string: "https://guide.example:8443/epg.xml"))
+
+    #expect(XmltvRedirectPolicy.isSameOrigin(orig, sameOrigin))
+    #expect(!XmltvRedirectPolicy.isSameOrigin(orig, diffHost))
+    #expect(!XmltvRedirectPolicy.isSameOrigin(orig, diffScheme))
+    #expect(!XmltvRedirectPolicy.isSameOrigin(orig, diffPort))
+
+    func makeReq(_ url: URL) -> URLRequest {
+      var req = URLRequest(url: url)
+      req.setValue("Bearer secret", forHTTPHeaderField: "Authorization")
+      req.setValue("Basic proxy", forHTTPHeaderField: "Proxy-Authorization")
+      req.setValue("session=abc", forHTTPHeaderField: "Cookie")
+      req.setValue("ELV/1.0", forHTTPHeaderField: "User-Agent")
+      return req
+    }
+
+    let kept = XmltvRedirectPolicy.sanitizedRedirectRequest(originalUrl: orig, newRequest: makeReq(sameOrigin))
+    #expect(kept.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+    #expect(kept.value(forHTTPHeaderField: "Proxy-Authorization") == "Basic proxy")
+    #expect(kept.value(forHTTPHeaderField: "Cookie") == "session=abc")
+    #expect(kept.value(forHTTPHeaderField: "User-Agent") == "ELV/1.0")
+
+    for target in [diffHost, diffScheme, diffPort] {
+      let stripped = XmltvRedirectPolicy.sanitizedRedirectRequest(originalUrl: orig, newRequest: makeReq(target))
+      #expect(stripped.value(forHTTPHeaderField: "Authorization") == nil)
+      #expect(stripped.value(forHTTPHeaderField: "Proxy-Authorization") == nil)
+      #expect(stripped.value(forHTTPHeaderField: "Cookie") == nil)
+      #expect(stripped.value(forHTTPHeaderField: "User-Agent") == "ELV/1.0")
+    }
+  }
+
+  @Test("cleanupStageFile deletes only matching temp stage files and sidecars")
+  func cleanupStageFileSafety() throws {
+    let fm = FileManager.default
+    let dir = fm.temporaryDirectory.appendingPathComponent("xmltv-cleanup-\(UUID().uuidString)")
+    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: dir) }
+
+    let catalog = dir.appendingPathComponent("catalog.db").path
+    fm.createFile(atPath: catalog, contents: Data("keep".utf8))
+    let stagePath = XmltvSqliteWriter.stageDbPath(for: catalog, jobId: "src:1/slot:0")
+    #expect(XmltvSqliteWriter.isValidStageFilePath(stagePath))
+    #expect(!XmltvSqliteWriter.isValidStageFilePath(catalog))
+
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+      fm.createFile(atPath: stagePath + suffix, contents: Data("tmp".utf8))
+    }
+
+    XmltvSqliteWriter.cleanupStageFile(catalog)
+    #expect(fm.fileExists(atPath: catalog))
+
+    XmltvSqliteWriter.cleanupStageFile(stagePath)
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+      #expect(!fm.fileExists(atPath: stagePath + suffix))
+    }
+    #expect(fm.fileExists(atPath: catalog))
   }
 }

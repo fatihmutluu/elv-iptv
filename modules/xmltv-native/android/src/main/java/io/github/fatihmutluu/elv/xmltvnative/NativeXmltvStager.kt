@@ -2,6 +2,7 @@ package io.github.fatihmutluu.elv.xmltvnative
 
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteStatement
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
@@ -31,14 +32,15 @@ internal sealed class NativeStageOutcome {
   data class HttpError(val status: Int, val retryable: Boolean, val code: String) : NativeStageOutcome()
   data class Staged(
     val summary: ScanSummary,
+    val stageDbPath: String,
     val etag: String?,
     val lastModified: String?,
   ) : NativeStageOutcome()
 }
 
 /**
- * Streams HTTP(S) XMLTV feeds on a background thread and writes staged rows directly into SQLite
- * `programmes_next` using a compiled `SQLiteStatement` in 2,500-row WAL transactions.
+ * Streams HTTP(S) XMLTV feeds on a background thread and stages rows into a brand-new temp SQLite
+ * database (never opening `catalog.db`) using a compiled `SQLiteStatement` in 2,500-row transactions.
  * API 28+ / SQLite 3.22 compatible (`INSERT OR REPLACE`, zero `ON CONFLICT DO UPDATE`).
  * Never logs URLs, headers, or credentials.
  */
@@ -46,13 +48,105 @@ internal class NativeXmltvStager {
   companion object {
     private const val MAX_REDIRECTS = 5
     private const val TX_BATCH_SIZE = 2_500
+    private const val MAX_JOB_ID_LEN = 96
     const val DEFAULT_TIMEOUT_MS = 180_000
+
+    private val UNSAFE_JOB_ID_REGEX = Regex("[^A-Za-z0-9_-]")
+    private val STAGE_FILE_NAME_REGEX = Regex("""\.xmltv-stage-[A-Za-z0-9_-]+\.db$""")
+    private val SENSITIVE_REDIRECT_HEADERS = setOf(
+      "authorization",
+      "proxy-authorization",
+      "cookie",
+    )
+
+    private const val CREATE_STAGE_TABLE_SQL =
+      "CREATE TABLE programmes_next (" +
+        "source_id TEXT NOT NULL, " +
+        "guide_id TEXT NOT NULL, " +
+        "start INTEGER NOT NULL, " +
+        "stop INTEGER NOT NULL, " +
+        "title TEXT NOT NULL, " +
+        "sub_title TEXT, " +
+        "description TEXT, " +
+        "categories_json TEXT, " +
+        "episode_num TEXT, " +
+        "icon TEXT, " +
+        "run_id INTEGER NOT NULL, " +
+        "genre TEXT, " +
+        "flags INTEGER NOT NULL DEFAULT 0, " +
+        "rating_system TEXT, " +
+        "rating_value TEXT, " +
+        "title_fold TEXT NOT NULL DEFAULT '', " +
+        "description_fold TEXT NOT NULL DEFAULT '', " +
+        "PRIMARY KEY (source_id, guide_id, start)" +
+        ") WITHOUT ROWID"
 
     private const val INSERT_SQL =
       "INSERT OR REPLACE INTO programmes_next " +
         "(source_id, guide_id, start, stop, title, sub_title, description, categories_json, " +
         "episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold) " +
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+
+    internal fun buildStageDbPath(dbPath: String, jobId: String): String {
+      val safeJobId = jobId
+        .replace(UNSAFE_JOB_ID_REGEX, "_")
+        .take(MAX_JOB_ID_LEN)
+        .ifEmpty { "job" }
+      return "$dbPath.xmltv-stage-$safeJobId.db"
+    }
+
+    internal fun isValidStageFilePath(path: String): Boolean {
+      if (path.isEmpty() || path.indexOf('\u0000') >= 0) return false
+      val name = File(path).name
+      return name.isNotEmpty() && STAGE_FILE_NAME_REGEX.containsMatchIn(name)
+    }
+
+    internal fun cleanupStageFile(path: String) {
+      if (!isValidStageFilePath(path)) return
+      val suffixes = arrayOf("", "-wal", "-shm", "-journal")
+      for (suffix in suffixes) {
+        try {
+          val file = File(path + suffix)
+          if (file.exists() && file.isFile) {
+            file.delete()
+          }
+        } catch (_: Throwable) {
+          // Best-effort cleanup of temp stage file.
+        }
+      }
+    }
+
+    private fun defaultPortForScheme(scheme: String): Int = when (scheme) {
+      "https" -> 443
+      "http" -> 80
+      else -> -1
+    }
+
+    internal fun isSameOrigin(a: URL, b: URL): Boolean {
+      val schemeA = a.protocol.lowercase(Locale.US)
+      val schemeB = b.protocol.lowercase(Locale.US)
+      if (schemeA != schemeB) return false
+      if (!a.host.equals(b.host, ignoreCase = true)) return false
+      val portA = if (a.port != -1) a.port else defaultPortForScheme(schemeA)
+      val portB = if (b.port != -1) b.port else defaultPortForScheme(schemeB)
+      return portA == portB
+    }
+
+    internal fun headersForHop(
+      headers: Map<String, String>,
+      originalUrl: URL,
+      hopUrl: URL,
+    ): Map<String, String> {
+      val sameOrigin = isSameOrigin(originalUrl, hopUrl)
+      val out = LinkedHashMap<String, String>(headers.size)
+      for ((k, v) in headers) {
+        val lower = k.lowercase(Locale.US)
+        if (lower == "accept-encoding") continue
+        if (!sameOrigin && lower in SENSITIVE_REDIRECT_HEADERS) continue
+        out[k] = v
+      }
+      return out
+    }
   }
 
   private class JobHandle {
@@ -117,10 +211,15 @@ internal class NativeXmltvStager {
       }
       val contentEncoding = conn.contentEncoding?.lowercase(Locale.US) ?: ""
       val forceGzip = contentEncoding.contains("gzip")
-      val summary = conn.inputStream.use { rawStream ->
+      val (summary, stageDbPath) = conn.inputStream.use { rawStream ->
         stageStreamToSqlite(req, rawStream, forceGzip, handle.cancelled)
       }
-      return NativeStageOutcome.Staged(summary = summary, etag = etag, lastModified = lastModified)
+      return NativeStageOutcome.Staged(
+        summary = summary,
+        stageDbPath = stageDbPath,
+        etag = etag,
+        lastModified = lastModified,
+      )
     } finally {
       try {
         conn?.disconnect()
@@ -132,6 +231,7 @@ internal class NativeXmltvStager {
   }
 
   private fun openWithRedirects(req: NativeStageRequest, handle: JobHandle): HttpURLConnection {
+    val originalUrl = URL(req.url)
     var currentUrl = req.url
     for (hop in 0..MAX_REDIRECTS) {
       if (handle.cancelled.get()) throw StageCancelledException()
@@ -140,6 +240,7 @@ internal class NativeXmltvStager {
       if (scheme != "http" && scheme != "https") {
         throw IllegalArgumentException("Unsupported scheme")
       }
+      val hopHeaders = headersForHop(req.headers, originalUrl, parsed)
       val conn = (parsed.openConnection() as HttpURLConnection).apply {
         requestMethod = "GET"
         instanceFollowRedirects = false
@@ -147,10 +248,8 @@ internal class NativeXmltvStager {
         readTimeout = req.timeoutMs
         useCaches = false
         setRequestProperty("Accept-Encoding", "gzip")
-        for ((k, v) in req.headers) {
-          if (!k.equals("accept-encoding", ignoreCase = true)) {
-            setRequestProperty(k, v)
-          }
+        for ((k, v) in hopHeaders) {
+          setRequestProperty(k, v)
         }
         if (!req.ifNoneMatch.isNullOrEmpty()) {
           setRequestProperty("If-None-Match", req.ifNoneMatch)
@@ -180,19 +279,27 @@ internal class NativeXmltvStager {
     rawStream: java.io.InputStream,
     forceGzip: Boolean,
     cancelled: AtomicBoolean,
-  ): ScanSummary {
-    val db = SQLiteDatabase.openDatabase(req.dbPath, null, SQLiteDatabase.OPEN_READWRITE)
+  ): Pair<ScanSummary, String> {
+    val stageDbPath = buildStageDbPath(req.dbPath, req.jobId)
+    cleanupStageFile(stageDbPath)
+    File(stageDbPath).parentFile?.mkdirs()
+
+    var db: SQLiteDatabase? = null
     var stmt: SQLiteStatement? = null
     var inTx = false
     var inBatch = 0
+    var succeeded = false
     try {
-      applyPragma(db, "PRAGMA busy_timeout = 5000")
-      applyPragma(db, "PRAGMA synchronous = NORMAL")
-      applyPragma(db, "PRAGMA temp_store = MEMORY")
+      val opened = SQLiteDatabase.openOrCreateDatabase(stageDbPath, null)
+      db = opened
+      applyPragma(opened, "PRAGMA journal_mode = OFF")
+      applyPragma(opened, "PRAGMA synchronous = OFF")
+      applyPragma(opened, "PRAGMA temp_store = MEMORY")
+      opened.execSQL(CREATE_STAGE_TABLE_SQL)
 
-      stmt = db.compileStatement(INSERT_SQL)
+      stmt = opened.compileStatement(INSERT_SQL)
       val compiled = stmt
-      db.beginTransactionNonExclusive()
+      opened.beginTransaction()
       inTx = true
 
       val scanner = XmltvByteScanner(
@@ -208,25 +315,26 @@ internal class NativeXmltvStager {
         compiled.executeInsert()
         inBatch += 1
         if (inBatch >= TX_BATCH_SIZE) {
-          db.setTransactionSuccessful()
-          db.endTransaction()
+          opened.setTransactionSuccessful()
+          opened.endTransaction()
           inTx = false
           inBatch = 0
           if (cancelled.get()) throw StageCancelledException()
-          db.beginTransactionNonExclusive()
+          opened.beginTransaction()
           inTx = true
         }
       }
       if (inTx) {
-        db.setTransactionSuccessful()
-        db.endTransaction()
+        opened.setTransactionSuccessful()
+        opened.endTransaction()
         inTx = false
       }
-      return summary
+      succeeded = true
+      return Pair(summary, stageDbPath)
     } finally {
       if (inTx) {
         try {
-          db.endTransaction()
+          db?.endTransaction()
         } catch (_: Throwable) {
         }
       }
@@ -235,8 +343,11 @@ internal class NativeXmltvStager {
       } catch (_: Throwable) {
       }
       try {
-        db.close()
+        db?.close()
       } catch (_: Throwable) {
+      }
+      if (!succeeded) {
+        cleanupStageFile(stageDbPath)
       }
     }
   }

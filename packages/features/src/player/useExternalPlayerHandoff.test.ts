@@ -117,4 +117,71 @@ describe('runExternalPlayerHandoff (#406)', () => {
     expect(res).toEqual({ ok: false });
     expect(saveProgress).not.toHaveBeenCalled();
   });
+
+  it('returns { ok: false } without crashing when externalPlayer.launch throws or returns null', async () => {
+    const onReleaseConnection = vi.fn();
+    const throwingRes = await runExternalPlayerHandoff({
+      target: VOD_TARGET,
+      catalog: {
+        resolveStream: vi.fn(async () =>
+          ok({ url: 'https://stream.example.test/movie.mp4', headers: {} }),
+        ),
+      },
+      externalPlayer: {
+        isSupported: true,
+        launch: vi.fn(async () => {
+          throw new Error('native bridge crash');
+        }),
+      },
+      onReleaseConnection,
+    });
+    expect(throwingRes).toEqual({ ok: false });
+    expect(onReleaseConnection).toHaveBeenCalledTimes(1);
+
+    const nullRes = await runExternalPlayerHandoff({
+      target: VOD_TARGET,
+      catalog: {
+        resolveStream: vi.fn(async () =>
+          ok({ url: 'https://stream.example.test/movie.mp4', headers: {} }),
+        ),
+      },
+      externalPlayer: {
+        isSupported: true,
+        launch: vi.fn(
+          async () =>
+            null as unknown as { readonly launched: boolean; readonly errorCode?: string },
+        ),
+      },
+    });
+    expect(nullRes).toEqual({ ok: false });
+  });
+
+  it('still unmounts active mini-player and releases connection when stopActivePlayer throws', async () => {
+    let activePlayTarget: PlayTarget | null = VOD_TARGET;
+    const stopActivePlayback = vi.fn(() => {
+      activePlayTarget = null;
+    });
+
+    const res = await runExternalPlayerHandoff({
+      target: VOD_TARGET,
+      catalog: {
+        resolveStream: vi.fn(async () => {
+          expect(activePlayTarget).toBeNull();
+          return ok({ url: 'https://stream.example.test/movie.mp4', headers: {} });
+        }),
+      },
+      externalPlayer: {
+        isSupported: true,
+        launch: vi.fn(async () => ({ launched: true })),
+      },
+      stopActivePlayer: vi.fn(async () => {
+        throw new Error('stop error');
+      }),
+      onReleaseConnection: stopActivePlayback,
+    });
+
+    expect(res).toEqual({ ok: true });
+    expect(stopActivePlayback).toHaveBeenCalledTimes(1);
+    expect(activePlayTarget).toBeNull();
+  });
 });

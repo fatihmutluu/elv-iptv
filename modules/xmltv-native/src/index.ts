@@ -39,6 +39,7 @@ export type NativeXmltvStageResult =
     }
   | {
       readonly kind: 'staged';
+      readonly stageDbPath?: string;
       readonly channels: readonly NativeXmltvChannel[];
       readonly stagedCounts: Readonly<Record<string, number>>;
       readonly seenProgrammes: number;
@@ -52,7 +53,10 @@ export type NativeXmltvStageResult =
 interface NativeXmltvModule {
   stageXmltv(request: Record<string, unknown>): Promise<unknown>;
   cancelXmltvStage(jobId: string): void;
+  cleanupStageFile?(path: string): void;
 }
+
+const STAGE_FILE_NAME_RE = /\.xmltv-stage-[A-Za-z0-9_-]+\.db$/;
 
 const native: NativeXmltvModule | null =
   Platform.OS === 'web' ? null : requireOptionalNativeModule<NativeXmltvModule>('ElvXmltvNative');
@@ -133,8 +137,10 @@ function normalizeStageResult(raw: unknown): NativeXmltvStageResult {
         : 0;
     const warnings =
       typeof obj.warnings === 'number' && Number.isFinite(obj.warnings) ? obj.warnings : 0;
+    const stageDbPath = optionalNonEmptyString(obj.stageDbPath);
     return {
       kind: 'staged',
+      ...(stageDbPath === undefined ? {} : { stageDbPath }),
       channels,
       stagedCounts,
       seenProgrammes,
@@ -183,4 +189,16 @@ export async function stageXmltv(
 export function cancelXmltvStage(jobId: string): void {
   if (native === null || jobId.length === 0) return;
   native.cancelXmltvStage(jobId);
+}
+
+/**
+ * Deletes a temporary XMLTV stage SQLite file (and any `-wal`/`-shm`/`-journal` sidecars) created
+ * by {@link stageXmltv}. Strictly ignores paths whose basename does not match
+ * `\.xmltv-stage-[A-Za-z0-9_-]+\.db$`. Safe no-op when unavailable.
+ */
+export function cleanupStageFile(path: string): void {
+  if (native === null || path.length === 0) return;
+  const base = path.split(/[\\/]/).pop() ?? '';
+  if (!STAGE_FILE_NAME_RE.test(base)) return;
+  native.cleanupStageFile?.(path);
 }

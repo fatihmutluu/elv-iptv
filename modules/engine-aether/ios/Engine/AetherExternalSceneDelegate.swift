@@ -1,6 +1,170 @@
 #if os(iOS)
 import UIKit
 
+/// Main-actor dispatcher delivering iOS scene deep links and universal links directly to React Native's
+/// `RCTLinkingManager` via `RCTOpenURLNotification`, since `UIApplicationSceneManifest` causes
+/// `RCTLinkingManager`'s legacy `AppDelegate` entry points to return `NO` (`#258`).
+@MainActor
+final class AetherSceneLinkDispatcher {
+  static let shared = AetherSceneLinkDispatcher()
+
+  private var replay = SceneLinkReplay()
+  private var jsLoadObserver: NSObjectProtocol?
+  private var didBecomeActiveObserver: NSObjectProtocol?
+  private var activeFallbackWorkItem: DispatchWorkItem?
+
+  private init() {
+    ensureJavaScriptLoadObserver()
+  }
+
+  /// Handles cold-launch URL contexts and universal-link user activities from `scene(_:willConnectTo:options:)`.
+  func handleColdLaunch(urlContexts: Set<UIOpenURLContext>, userActivities: Set<NSUserActivity>) {
+    ensureJavaScriptLoadObserver()
+    let extracted = extractURLs(from: urlContexts, userActivities: userActivities)
+    guard !extracted.isEmpty else { return }
+
+    let immediate = replay.enqueueColdLaunchURLs(extracted)
+    if !immediate.isEmpty {
+      schedulePostOpenURLNotifications(immediate)
+      return
+    }
+
+    if replay.hasPendingColdLaunchURLs {
+      if UIApplication.shared.applicationState == .active {
+        handleDidBecomeActiveFallback()
+      } else {
+        ensureActiveFallbackObserver()
+      }
+    }
+  }
+
+  /// Delivers warm `scene(_:openURLContexts:)` URLs directly to `RCTLinkingManager`.
+  func handleWarmURLContexts(_ urlContexts: Set<UIOpenURLContext>) {
+    guard !urlContexts.isEmpty else { return }
+    let urls = replay.prepareWarmURLs(urlContexts.map { $0.url.absoluteString }.sorted())
+    postOpenURLNotifications(urls)
+  }
+
+  /// Delivers warm `scene(_:continue:)` universal links (`NSUserActivityTypeBrowsingWeb`) to `RCTLinkingManager`.
+  func handleWarmUserActivities(_ activities: Set<NSUserActivity>) {
+    guard !activities.isEmpty else { return }
+    let extracted = activities
+      .compactMap {
+        SceneLinkReplay.extractBrowsingWebURL(activityType: $0.activityType, webpageURL: $0.webpageURL)
+      }
+      .sorted()
+    let urls = replay.prepareWarmURLs(extracted)
+    postOpenURLNotifications(urls)
+  }
+
+  private func ensureJavaScriptLoadObserver() {
+    guard !replay.isJavaScriptLoaded, jsLoadObserver == nil else { return }
+    jsLoadObserver = NotificationCenter.default.addObserver(
+      forName: Notification.Name(SceneLinkReplay.javaScriptDidLoadNotificationName),
+      object: nil,
+      queue: nil
+    ) { [weak self] _ in
+      AetherBackend.onMainActor {
+        self?.handleJavaScriptDidLoad()
+      }
+    }
+  }
+
+  private func ensureActiveFallbackObserver() {
+    guard didBecomeActiveObserver == nil else { return }
+    didBecomeActiveObserver = NotificationCenter.default.addObserver(
+      forName: UIApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: nil
+    ) { [weak self] _ in
+      AetherBackend.onMainActor {
+        self?.handleDidBecomeActiveFallback()
+      }
+    }
+  }
+
+  private func handleJavaScriptDidLoad() {
+    removeJavaScriptLoadObserver()
+    cancelActiveFallback()
+    let urls = replay.markJavaScriptLoaded()
+    guard !urls.isEmpty else { return }
+    schedulePostOpenURLNotifications(urls)
+  }
+
+  private func handleDidBecomeActiveFallback() {
+    removeActiveFallbackObserver()
+    guard replay.hasPendingColdLaunchURLs else { return }
+    activeFallbackWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      AetherBackend.onMainActor {
+        guard let self else { return }
+        self.activeFallbackWorkItem = nil
+        let urls = self.replay.flushPendingForActiveFallback()
+        self.postOpenURLNotifications(urls)
+      }
+    }
+    activeFallbackWorkItem = workItem
+    // Allow RCTJavaScriptDidLoadNotification to deliver first on cold launch; fall back once if it never fires.
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(750), execute: workItem)
+  }
+
+  private func removeJavaScriptLoadObserver() {
+    if let observer = jsLoadObserver {
+      NotificationCenter.default.removeObserver(observer)
+      jsLoadObserver = nil
+    }
+  }
+
+  private func cancelActiveFallback() {
+    removeActiveFallbackObserver()
+    activeFallbackWorkItem?.cancel()
+    activeFallbackWorkItem = nil
+  }
+
+  private func removeActiveFallbackObserver() {
+    if let observer = didBecomeActiveObserver {
+      NotificationCenter.default.removeObserver(observer)
+      didBecomeActiveObserver = nil
+    }
+  }
+
+  private func extractURLs(
+    from urlContexts: Set<UIOpenURLContext>,
+    userActivities: Set<NSUserActivity>
+  ) -> [String] {
+    var urls = urlContexts.map { $0.url.absoluteString }.sorted()
+    let activityURLs = userActivities
+      .compactMap {
+        SceneLinkReplay.extractBrowsingWebURL(activityType: $0.activityType, webpageURL: $0.webpageURL)
+      }
+      .sorted()
+    urls.append(contentsOf: activityURLs)
+    return urls
+  }
+
+  private func schedulePostOpenURLNotifications(_ urls: [String]) {
+    guard !urls.isEmpty else { return }
+    // Defer one main-queue tick so JS `Linking.addEventListener('url', ...)` mounts before delivery.
+    DispatchQueue.main.async { [weak self] in
+      AetherBackend.onMainActor {
+        self?.postOpenURLNotifications(urls)
+      }
+    }
+  }
+
+  private func postOpenURLNotifications(_ urls: [String]) {
+    guard !urls.isEmpty else { return }
+    let notificationName = Notification.Name(SceneLinkReplay.openURLNotificationName)
+    for url in urls {
+      NotificationCenter.default.post(
+        name: notificationName,
+        object: nil,
+        userInfo: [SceneLinkReplay.openURLUserInfoKey: url]
+      )
+    }
+  }
+}
+
 /// Primary `UIWindowSceneDelegate` preserving Expo `AppDelegate`'s root `UIWindow` and `elviptv://` deep links
 /// when `UIApplicationSceneManifest` enables dedicated external display scenes on iOS/iPadOS (`#258`).
 @objc(AetherPrimaryWindowSceneDelegate)
@@ -15,16 +179,22 @@ final class AetherPrimaryWindowSceneDelegate: UIResponder, UIWindowSceneDelegate
   ) {
     guard let windowScene = scene as? UIWindowScene else { return }
     attachAppDelegateWindowIfNeeded(to: windowScene)
-    forwardOpenURLContexts(connectionOptions.urlContexts)
-    forwardUserActivities(connectionOptions.userActivities)
+    AetherSceneLinkDispatcher.shared.handleColdLaunch(
+      urlContexts: connectionOptions.urlContexts,
+      userActivities: connectionOptions.userActivities
+    )
+    forwardOpenURLContextsToAppDelegate(connectionOptions.urlContexts)
+    forwardUserActivitiesToAppDelegate(connectionOptions.userActivities)
   }
 
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-    forwardOpenURLContexts(URLContexts)
+    AetherSceneLinkDispatcher.shared.handleWarmURLContexts(URLContexts)
+    forwardOpenURLContextsToAppDelegate(URLContexts)
   }
 
   func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
-    forwardUserActivities([userActivity])
+    AetherSceneLinkDispatcher.shared.handleWarmUserActivities([userActivity])
+    forwardUserActivitiesToAppDelegate([userActivity])
   }
 
   func sceneWillEnterForeground(_ scene: UIScene) {
@@ -77,7 +247,7 @@ final class AetherPrimaryWindowSceneDelegate: UIResponder, UIWindowSceneDelegate
     }
   }
 
-  private func forwardOpenURLContexts(_ urlContexts: Set<UIOpenURLContext>) {
+  private func forwardOpenURLContextsToAppDelegate(_ urlContexts: Set<UIOpenURLContext>) {
     guard !urlContexts.isEmpty, let delegate = UIApplication.shared.delegate else { return }
     let app = UIApplication.shared
     for context in urlContexts {
@@ -94,7 +264,7 @@ final class AetherPrimaryWindowSceneDelegate: UIResponder, UIWindowSceneDelegate
     }
   }
 
-  private func forwardUserActivities(_ activities: Set<NSUserActivity>) {
+  private func forwardUserActivitiesToAppDelegate(_ activities: Set<NSUserActivity>) {
     guard !activities.isEmpty, let delegate = UIApplication.shared.delegate else { return }
     let app = UIApplication.shared
     for activity in activities {

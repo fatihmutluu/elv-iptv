@@ -523,6 +523,7 @@ hasLock = startSingleInstance(app, {
 let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
 let artworkCache: DesktopArtworkCache | undefined;
 let lanPairingIpc: LanPairingIpcHandle | undefined;
+let disposeDiagnosticsIpc: (() => void) | undefined;
 
 registerCatalogQuitHandler({
   app,
@@ -615,7 +616,7 @@ if (hasLock) {
             }),
     });
     lanPairingIpc = registerLanPairingIpc({ ipcMain });
-    registerDiagnosticsIpc<BrowserWindow>({
+    disposeDiagnosticsIpc = registerDiagnosticsIpc<BrowserWindow>({
       ipcMain,
       getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
       readLogTail: (maxLines) => logger.readRedactedTail(maxLines),
@@ -667,6 +668,8 @@ app.on('will-quit', () => {
   popoutController = undefined;
   void lanPairingIpc?.dispose();
   lanPairingIpc = undefined;
+  disposeDiagnosticsIpc?.();
+  disposeDiagnosticsIpc = undefined;
   mediaBridge?.dispose();
   mediaBridge = undefined;
   for (const ctl of [...windowBoundsControllers]) ctl.dispose();

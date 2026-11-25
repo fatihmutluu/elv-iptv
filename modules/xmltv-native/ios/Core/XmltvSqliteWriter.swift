@@ -10,10 +10,33 @@ public enum XmltvSqliteError: Error, Sendable, Equatable {
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// Direct `libsqlite3` writer staging `StagedProgrammeRow` records into `programmes_next`
-/// using a prepared `INSERT OR REPLACE` statement in 2,500-row `BEGIN IMMEDIATE` transactions.
+/// Direct `libsqlite3` writer staging `StagedProgrammeRow` records into a brand-new temp SQLite
+/// database (never opening `catalog.db`) in 2,500-row transactions.
 public final class XmltvSqliteWriter {
   public static let defaultBatchSize = 2_500
+  private static let maxJobIdLen = 96
+
+  private static let createTableSql =
+    "CREATE TABLE programmes_next (" +
+    "source_id TEXT NOT NULL, " +
+    "guide_id TEXT NOT NULL, " +
+    "start INTEGER NOT NULL, " +
+    "stop INTEGER NOT NULL, " +
+    "title TEXT NOT NULL, " +
+    "sub_title TEXT, " +
+    "description TEXT, " +
+    "categories_json TEXT, " +
+    "episode_num TEXT, " +
+    "icon TEXT, " +
+    "run_id INTEGER NOT NULL, " +
+    "genre TEXT, " +
+    "flags INTEGER NOT NULL DEFAULT 0, " +
+    "rating_system TEXT, " +
+    "rating_value TEXT, " +
+    "title_fold TEXT NOT NULL DEFAULT '', " +
+    "description_fold TEXT NOT NULL DEFAULT '', " +
+    "PRIMARY KEY (source_id, guide_id, start)" +
+    ") WITHOUT ROWID;"
 
   private static let insertSql =
     "INSERT OR REPLACE INTO programmes_next " +
@@ -21,25 +44,77 @@ public final class XmltvSqliteWriter {
     "episode_num, icon, run_id, genre, flags, rating_system, rating_value, title_fold, description_fold) " +
     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 
+  public static func stageDbPath(for dbPath: String, jobId: String) -> String {
+    var safe = ""
+    safe.reserveCapacity(min(jobId.count, maxJobIdLen))
+    for scalar in jobId.unicodeScalars {
+      if safe.count >= maxJobIdLen { break }
+      let v = scalar.value
+      let allowed =
+        (v >= 65 && v <= 90) || (v >= 97 && v <= 122) ||
+        (v >= 48 && v <= 57) || v == 95 || v == 45
+      safe.append(allowed ? Character(scalar) : "_")
+    }
+    if safe.isEmpty { safe = "job" }
+    return "\(dbPath).xmltv-stage-\(safe).db"
+  }
+
+  public static func isValidStageFilePath(_ path: String) -> Bool {
+    guard !path.isEmpty, !path.contains("\0") else { return false }
+    let name = (path as NSString).lastPathComponent
+    guard name.hasSuffix(".db") else { return false }
+    let withoutExt = name.dropLast(3)
+    guard let marker = withoutExt.range(of: ".xmltv-stage-", options: .backwards) else {
+      return false
+    }
+    let jobPart = withoutExt[marker.upperBound...]
+    guard !jobPart.isEmpty else { return false }
+    for scalar in jobPart.unicodeScalars {
+      let v = scalar.value
+      let allowed =
+        (v >= 65 && v <= 90) || (v >= 97 && v <= 122) ||
+        (v >= 48 && v <= 57) || v == 95 || v == 45
+      if !allowed { return false }
+    }
+    return true
+  }
+
+  public static func cleanupStageFile(_ path: String) {
+    guard isValidStageFilePath(path) else { return }
+    let fm = FileManager.default
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+      let candidate = path + suffix
+      if fm.fileExists(atPath: candidate) {
+        try? fm.removeItem(atPath: candidate)
+      }
+    }
+  }
+
+  public let stageDbPath: String
   private var db: OpaquePointer?
   private var stmt: OpaquePointer?
   private let batchSize: Int
   private var inTransaction = false
   private var batchCount = 0
 
-  public init(dbPath: String, batchSize: Int = XmltvSqliteWriter.defaultBatchSize) throws {
+  public init(stageDbPath: String, batchSize: Int = XmltvSqliteWriter.defaultBatchSize) throws {
+    self.stageDbPath = stageDbPath
     self.batchSize = max(1, batchSize)
+    Self.removeFileAndSidecars(stageDbPath)
     var handle: OpaquePointer?
-    let openRc = sqlite3_open_v2(dbPath, &handle, SQLITE_OPEN_READWRITE, nil)
+    let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
+    let openRc = sqlite3_open_v2(stageDbPath, &handle, flags, nil)
     guard openRc == SQLITE_OK, let opened = handle else {
       if let handle { sqlite3_close(handle) }
+      Self.removeFileAndSidecars(stageDbPath)
       throw XmltvSqliteError.openFailed(openRc)
     }
     self.db = opened
     do {
-      try exec("PRAGMA busy_timeout = 5000;")
-      try exec("PRAGMA synchronous = NORMAL;")
+      try exec("PRAGMA journal_mode = OFF;")
+      try exec("PRAGMA synchronous = OFF;")
       try exec("PRAGMA temp_store = MEMORY;")
+      try exec(Self.createTableSql)
       var prepared: OpaquePointer?
       let prepRc = sqlite3_prepare_v2(opened, Self.insertSql, -1, &prepared, nil)
       guard prepRc == SQLITE_OK, let compiled = prepared else {
@@ -50,6 +125,7 @@ public final class XmltvSqliteWriter {
       self.inTransaction = true
     } catch {
       close()
+      Self.removeFileAndSidecars(stageDbPath)
       throw error
     }
   }
@@ -111,6 +187,7 @@ public final class XmltvSqliteWriter {
       batchCount = 0
     }
     close()
+    Self.removeFileAndSidecars(stageDbPath)
   }
 
   public func close() {
@@ -125,6 +202,16 @@ public final class XmltvSqliteWriter {
     if let db {
       sqlite3_close(db)
       self.db = nil
+    }
+  }
+
+  private static func removeFileAndSidecars(_ path: String) {
+    let fm = FileManager.default
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+      let candidate = path + suffix
+      if fm.fileExists(atPath: candidate) {
+        try? fm.removeItem(atPath: candidate)
+      }
     }
   }
 

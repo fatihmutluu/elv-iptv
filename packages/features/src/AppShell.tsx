@@ -573,7 +573,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     stopEmbeddedPreviewRef,
     stopActivePlayerRef,
     onOpenIntegrated: openPlayTarget,
-    onReleaseConnection: connectionGuard.releaseActive,
+    onReleaseConnection: stopActivePlayback,
     onProgressSaved: bumpUserState,
     stageKey,
     bumpStageKey,

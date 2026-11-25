@@ -39,6 +39,7 @@ private final class StreamingXmltvJob: NSObject, URLSessionDataDelegate, @unchec
   private var gzipDecoder: StreamingGzipDecoder?
   private var scanner: XmltvByteScanner?
   private var writer: XmltvSqliteWriter?
+  private var stageDbPath: String?
   private var streamError: [String: Any]?
 
   init(request: NativeStageJobRequest, onFinish: @escaping ([String: Any]) -> Void) {
@@ -141,7 +142,11 @@ private final class StreamingXmltvJob: NSObject, URLSessionDataDelegate, @unchec
       return
     }
     redirectCount += 1
-    completionHandler(request)
+    let sanitized = XmltvRedirectPolicy.sanitizedRedirectRequest(
+      originalUrl: self.request.url,
+      newRequest: request
+    )
+    completionHandler(sanitized)
   }
 
   func urlSession(
@@ -186,7 +191,9 @@ private final class StreamingXmltvJob: NSObject, URLSessionDataDelegate, @unchec
     }
 
     do {
-      self.writer = try XmltvSqliteWriter(dbPath: request.dbPath)
+      let stagePath = XmltvSqliteWriter.stageDbPath(for: request.dbPath, jobId: request.jobId)
+      self.writer = try XmltvSqliteWriter(stageDbPath: stagePath)
+      self.stageDbPath = stagePath
       self.gzipDecoder = StreamingGzipDecoder()
       self.scanner = XmltvByteScanner(
         sourceId: request.sourceId,
@@ -249,7 +256,7 @@ private final class StreamingXmltvJob: NSObject, URLSessionDataDelegate, @unchec
       completeOnce(["kind": "http-error", "status": 0, "retryable": true, "code": "request-failed"])
       return
     }
-    guard let gzip = gzipDecoder, let scanner = scanner, let writer = writer else {
+    guard let gzip = gzipDecoder, let scanner = scanner, let writer = writer, let stagePath = stageDbPath else {
       completeOnce(["kind": "http-error", "status": 0, "retryable": false, "code": "native-stage-failed"])
       return
     }
@@ -273,6 +280,7 @@ private final class StreamingXmltvJob: NSObject, URLSessionDataDelegate, @unchec
       }
       var result: [String: Any] = [
         "kind": "staged",
+        "stageDbPath": stagePath,
         "channels": channels,
         "stagedCounts": summary.stagedCounts,
         "seenProgrammes": summary.seenProgrammes,
@@ -283,6 +291,8 @@ private final class StreamingXmltvJob: NSObject, URLSessionDataDelegate, @unchec
       if let etag, !etag.isEmpty { result["etag"] = etag }
       if let lastModified, !lastModified.isEmpty { result["lastModified"] = lastModified }
       completeOnce(result)
+    } catch XmltvStreamError.gzipCorrupt {
+      completeOnce(["kind": "http-error", "status": 0, "retryable": true, "code": "gzip-truncated"])
     } catch {
       completeOnce(["kind": "http-error", "status": 0, "retryable": false, "code": "native-stage-failed"])
     }
@@ -346,6 +356,10 @@ public final class ElvXmltvNativeModule: Module, @unchecked Sendable {
 
     Function("cancelXmltvStage") { (jobId: String) in
       self.cancelJob(jobId)
+    }
+
+    Function("cleanupStageFile") { (path: String) in
+      XmltvSqliteWriter.cleanupStageFile(path)
     }
 
     OnDestroy {

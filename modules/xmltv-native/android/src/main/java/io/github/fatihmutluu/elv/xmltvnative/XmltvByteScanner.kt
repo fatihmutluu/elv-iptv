@@ -436,14 +436,18 @@ internal class XmltvByteScanner(
         if (XmltvByteTokens.isTag(buf, ns, nLen, BYTES_PREVIOUSLY_SHOWN)) { previouslyShown = true; if (!selfClosing) pushOpen(ns, nLen); i = tagEnd; continue }
       }
 
-      val wantedBytes = when {
-        XmltvByteTokens.isTag(buf, ns, nLen, BYTES_TITLE) -> BYTES_TITLE
-        XmltvByteTokens.isTag(buf, ns, nLen, BYTES_DESC) -> BYTES_DESC
-        XmltvByteTokens.isTag(buf, ns, nLen, BYTES_CATEGORY) -> BYTES_CATEGORY
-        XmltvByteTokens.isTag(buf, ns, nLen, BYTES_EPISODE_NUM) -> BYTES_EPISODE_NUM
-        XmltvByteTokens.isTag(buf, ns, nLen, BYTES_SUB_TITLE) -> BYTES_SUB_TITLE
-        XmltvByteTokens.isTag(buf, ns, nLen, BYTES_RATING) -> BYTES_RATING
-        else -> null
+      val wantedBytes = if (openDepth == 0) {
+        when {
+          XmltvByteTokens.isTag(buf, ns, nLen, BYTES_TITLE) -> BYTES_TITLE
+          XmltvByteTokens.isTag(buf, ns, nLen, BYTES_DESC) -> BYTES_DESC
+          XmltvByteTokens.isTag(buf, ns, nLen, BYTES_CATEGORY) -> BYTES_CATEGORY
+          XmltvByteTokens.isTag(buf, ns, nLen, BYTES_EPISODE_NUM) -> BYTES_EPISODE_NUM
+          XmltvByteTokens.isTag(buf, ns, nLen, BYTES_SUB_TITLE) -> BYTES_SUB_TITLE
+          XmltvByteTokens.isTag(buf, ns, nLen, BYTES_RATING) -> BYTES_RATING
+          else -> null
+        }
+      } else {
+        null
       }
       if (wantedBytes == null) {
         if (!selfClosing) pushOpen(ns, nLen)

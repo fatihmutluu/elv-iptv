@@ -113,6 +113,9 @@ ffmpeg_flags=(
   --disable-doc
   --disable-gpl
   --disable-nonfree
+  --disable-bzlib
+  --disable-iconv
+  --disable-lzma
   --enable-d3d11va
   --enable-dxva2
   --enable-schannel
@@ -123,7 +126,7 @@ mpv_flags=(
   -Dlibmpv=true
   -Dcplayer=false
   -Dlua=luajit
-  -Dd3d11=enabled
+  -Dd3d11=disabled
   -Dgl=enabled
   -Drubberband=disabled
   -Ddvdnav=disabled
@@ -145,7 +148,7 @@ unpack libass
 meson_build libass -Dfontconfig=disabled -Ddirectwrite=enabled -Dasm=enabled
 
 clone libplacebo
-meson_build libplacebo -Dvulkan=disabled -Dopengl=enabled -Dd3d11=enabled \
+meson_build libplacebo -Dvulkan=disabled -Dopengl=enabled -Dd3d11=disabled \
   -Dglslang=disabled -Dshaderc=disabled -Dlcms=disabled -Dlibdovi=disabled \
   -Dxxhash=disabled -Ddemos=false
 

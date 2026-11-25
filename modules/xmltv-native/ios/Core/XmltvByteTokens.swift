@@ -45,8 +45,11 @@ enum XmltvByteTokens {
   }
 
   static func matchTagName(_ bytes: [UInt8], at: Int, limit: Int, expected: [UInt8]) -> Int {
-    if at + expected.count >= limit { return -1 }
-    for i in 0..<expected.count where bytes[at + i] != expected[i] { return 0 }
+    let available = limit - at
+    if available <= 0 { return -1 }
+    let checkLen = min(expected.count, available)
+    for i in 0..<checkLen where bytes[at + i] != expected[i] { return 0 }
+    if available <= expected.count { return -1 }
     let after = bytes[at + expected.count]
     return (after == 32 || after == 9 || after == 13 || after == 10 || after == 62 || after == 47) ? 1 : 0
   }

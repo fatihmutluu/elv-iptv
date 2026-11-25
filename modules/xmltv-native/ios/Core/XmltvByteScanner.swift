@@ -451,13 +451,18 @@ public final class XmltvByteScanner {
       enum Wanted { case title, desc, category, episodeNum, subTitle, rating }
       let wanted: Wanted?
       let closeName: [UInt8]
-      if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bTitle) { wanted = .title; closeName = Self.bTitle }
-      else if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bDesc) { wanted = .desc; closeName = Self.bDesc }
-      else if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bCategory) { wanted = .category; closeName = Self.bCategory }
-      else if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bEpisodeNum) { wanted = .episodeNum; closeName = Self.bEpisodeNum }
-      else if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bSubTitle) { wanted = .subTitle; closeName = Self.bSubTitle }
-      else if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bRating) { wanted = .rating; closeName = Self.bRating }
-      else { wanted = nil; closeName = [] }
+      if openDepth == 0 {
+        if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bTitle) { wanted = .title; closeName = Self.bTitle }
+        else if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bDesc) { wanted = .desc; closeName = Self.bDesc }
+        else if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bCategory) { wanted = .category; closeName = Self.bCategory }
+        else if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bEpisodeNum) { wanted = .episodeNum; closeName = Self.bEpisodeNum }
+        else if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bSubTitle) { wanted = .subTitle; closeName = Self.bSubTitle }
+        else if XmltvByteTokens.isTag(buf, at: ns, len: nLen, expected: Self.bRating) { wanted = .rating; closeName = Self.bRating }
+        else { wanted = nil; closeName = [] }
+      } else {
+        wanted = nil
+        closeName = []
+      }
       guard let wanted else { if !selfClosing { pushOpen(ns, nLen) }; i = tagEnd; continue }
       if selfClosing { i = tagEnd; continue }
       let close = XmltvByteTokens.findCloseTag(buf, from: tagEnd, limit: bodyEnd, name: closeName, allowIncomplete: false)

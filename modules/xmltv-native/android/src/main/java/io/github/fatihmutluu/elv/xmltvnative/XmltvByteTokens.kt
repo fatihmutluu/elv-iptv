@@ -51,10 +51,13 @@ internal object XmltvByteTokens {
 
   /** Returns `1` if tag name equals `expected`, `0` if not, `-1` if more bytes are needed. */
   fun matchTagName(bytes: ByteArray, at: Int, limit: Int, expected: ByteArray): Int {
-    if (at + expected.size >= limit) return -1
-    for (i in expected.indices) {
+    val available = limit - at
+    if (available <= 0) return -1
+    val checkLen = minOf(expected.size, available)
+    for (i in 0 until checkLen) {
       if (bytes[at + i] != expected[i]) return 0
     }
+    if (available <= expected.size) return -1
     val after = bytes[at + expected.size].toInt() and 0xFF
     return if (after == ' '.code || after == '\t'.code || after == '\r'.code || after == '\n'.code ||
       after == '>'.code || after == '/'.code

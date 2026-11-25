@@ -39,6 +39,7 @@ export function createMobileDiagnosticsPort(
 
   const buffer = createRingLogBuffer(options.maxLines ?? MAX_CRASH_LOG_LINES);
   const shareFn = options.shareFn ?? ((content: { message: string }) => Share.share(content));
+  const supportsShare = !(os === 'ios' && isTV);
 
   const copyTextFn = options.copyTextFn;
 
@@ -60,14 +61,18 @@ export function createMobileDiagnosticsPort(
           },
         }
       : {}),
-    async exportMarkdown(markdown: string): Promise<boolean> {
-      try {
-        await shareFn({ message: redactText(markdown) });
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    ...(supportsShare
+      ? {
+          async exportMarkdown(markdown: string): Promise<boolean> {
+            try {
+              await shareFn({ message: redactText(markdown) });
+              return true;
+            } catch {
+              return false;
+            }
+          },
+        }
+      : {}),
     recordDiagnosticLog(line: string): void {
       buffer.push(line, new Date().toISOString());
     },

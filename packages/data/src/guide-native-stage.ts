@@ -37,6 +37,12 @@ export function canUseNativeGuideStager(
   if (stager === undefined || candidates.length === 0) return false;
   if (source.settings.transport?.allowLegacyTls === true) return false;
   if (source.settings.transport?.hostOverride !== undefined) return false;
+  if (
+    source.settings.transport?.dnsFamily !== undefined &&
+    source.settings.transport.dnsFamily !== 'system'
+  ) {
+    return false;
+  }
   return candidates.every((cand) => isNativeStageUrl(cand.url));
 }
 

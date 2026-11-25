@@ -494,4 +494,31 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     expect(screen.getByTestId('settings-playback-toggle-pitch-lock')).toBeTruthy();
     expect(screen.getByTestId('settings-playback-toggle-audio-normalization')).toBeTruthy();
   });
+
+  it('hides External Player settings by default on tvOS (#406)', async () => {
+    const origOs = Platform.OS;
+    const origIsTv = Platform.isTV;
+    Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true });
+    Object.defineProperty(Platform, 'isTV', { value: true, configurable: true });
+    try {
+      const store = createMemoryPreferencesStore();
+      await render(
+        <Harness
+          store={store}
+          initialSection="playback"
+          viewport={{
+            formFactor: 'tv',
+            orientation: 'landscape',
+            inputModality: 'tv',
+            width: 1920,
+            height: 1080,
+          }}
+        />,
+      );
+      expect(screen.queryByTestId('settings-section-external-player')).toBeNull();
+    } finally {
+      Object.defineProperty(Platform, 'OS', { value: origOs, configurable: true });
+      Object.defineProperty(Platform, 'isTV', { value: origIsTv, configurable: true });
+    }
+  });
 });

@@ -2,14 +2,12 @@ import {
   type CatalogService,
   createCatalogService,
   type ManifestStore,
-  type NativeGuideStager,
   openCatalog,
   reconcileManifest,
   reconcileUserData,
   type UserDataStore,
 } from '@elv/data';
 import type { ElvError, SqlDriver } from '@elv/domain';
-import { cancelXmltvStage, isNativeXmltvStagerAvailable, stageXmltv } from '@elv/xmltv-native';
 import { Platform } from 'react-native';
 import {
   createAppleUserDataStore,
@@ -21,6 +19,7 @@ import {
   databaseLocation,
 } from '../storage';
 import { createMobileLocalPlaylistStore } from './local-playlist-store';
+import { createDeviceNativeGuideStager } from './native-guide-stager';
 
 /**
  * File name of the catalog database: in `Library/Caches` on Apple platforms (tvOS hardware gives apps only purgeable
@@ -96,38 +95,7 @@ async function open(): Promise<CatalogService> {
     const localPlaylistStore = createMobileLocalPlaylistStore(() =>
       createOpSqliteDriver('local-playlists.db', databaseLocation(Platform.OS)),
     );
-    const nativeGuideStager: NativeGuideStager | undefined = isNativeXmltvStagerAvailable()
-      ? {
-          stage: (req) =>
-            db.runExclusiveWrite(async () => {
-              const res = await stageXmltv({
-                jobId: req.jobId,
-                url: req.url,
-                dbPath: db.getDbPath(),
-                sourceId: req.sourceId,
-                runId: req.runId,
-                fromMs: req.fromMs,
-                toMs: req.toMs,
-                ...(req.headers === undefined ? {} : { headers: req.headers }),
-                ...(req.ifNoneMatch === undefined ? {} : { ifNoneMatch: req.ifNoneMatch }),
-                ...(req.ifModifiedSince === undefined
-                  ? {}
-                  : { ifModifiedSince: req.ifModifiedSince }),
-                ...(req.defaultTimeZone === undefined
-                  ? {}
-                  : { defaultTimeZone: req.defaultTimeZone }),
-                ...(req.timeoutMs === undefined ? {} : { timeoutMs: req.timeoutMs }),
-              });
-              if (res === null) {
-                return { kind: 'http-error', status: 0, retryable: false, code: 'unavailable' };
-              }
-              return res;
-            }),
-          cancel: (jobId) => {
-            cancelXmltvStage(jobId);
-          },
-        }
-      : undefined;
+    const nativeGuideStager = createDeviceNativeGuideStager(db);
     return createCatalogService({
       db,
       secrets: createSecureSecretStore(),
