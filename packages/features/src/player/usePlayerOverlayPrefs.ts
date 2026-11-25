@@ -26,6 +26,7 @@ export function usePlayerOverlayPrefs(params: {
   const [resizeMode, setResizeModeState] = useState<VideoResizeMode>(
     () => defaultResizeMode ?? 'fit',
   );
+  const [aspectToastNonce, setAspectToastNonce] = useState(0);
   const [deinterlace, setDeinterlace] = useState(false);
   const [statsVisible, setStatsVisible] = useState(false);
 
@@ -66,6 +67,7 @@ export function usePlayerOverlayPrefs(params: {
   useEffect(() => {
     deinterlaceRef.current = false;
     setDeinterlace(false);
+    setAspectToastNonce(0);
     const fallback = defaultResizeModeRef.current;
     resizeModeRef.current = fallback;
     setResizeModeState(fallback);
@@ -82,6 +84,7 @@ export function usePlayerOverlayPrefs(params: {
     const next: VideoResizeMode = prev === 'fit' ? 'fill' : prev === 'fill' ? 'stretch' : 'fit';
     resizeModeRef.current = next;
     setResizeModeState(next);
+    setAspectToastNonce((n) => n + 1);
     onResizeModeChangeRef.current?.(next);
   };
   const toggleDeinterlace = (): void => {
@@ -96,6 +99,7 @@ export function usePlayerOverlayPrefs(params: {
   return {
     publicPrefs: {
       resizeMode,
+      aspectToastNonce,
       deinterlace,
       statsVisible,
       setResizeMode,

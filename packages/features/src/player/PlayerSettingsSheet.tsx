@@ -11,19 +11,16 @@ import type { ChapterInfo, MediaTracks } from '@elv/playback';
 import {
   AdaptiveSheet,
   type FormFactor,
-  Icon,
   IconButton,
   type IconName,
-  MicroPill,
-  TABULAR_NUMS_STYLE,
   useTheme,
   webBackdropBlur,
 } from '@elv/ui-kit';
 import { type ComponentRef, Fragment, type ReactElement, useEffect, useRef } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { AudioDeviceInfo, VideoResizeMode } from '../ports/video-host';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
-import { blurWebTarget, SettingsToggleRow, settingsRowStyle } from './PlayerSettingsRows';
+import { SettingsRadioRow, SettingsRow, SettingsToggleRow } from './PlayerSettingsRows';
 import { SubtitleStyleSection } from './SubtitleStyleSection';
 import {
   formatSyncDelayMs,
@@ -107,6 +104,7 @@ interface ToggleDescriptor {
   readonly testID: string;
   readonly icon: IconName;
   readonly label: string;
+  readonly description: string;
   readonly pillLabel: string;
   readonly active: boolean;
   readonly role: 'button' | 'switch';
@@ -245,6 +243,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-resize-mode-toggle',
         icon: 'aspect',
         label: i18n.t('player.aspect'),
+        description: i18n.t('player.settings.desc.resizeMode'),
         pillLabel: rmLabel,
         active: rm !== 'fit',
         role: 'button',
@@ -252,7 +251,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         onPress: props.onToggleResizeMode,
       });
     }
-    if (props.onCycleTimeDisplayMode !== undefined) {
+    if (isVod && props.onCycleTimeDisplayMode !== undefined) {
       const tm = props.timeDisplayMode ?? 'total';
       const tmLabel =
         tm === 'remaining'
@@ -264,6 +263,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-time-display-toggle',
         icon: 'speed',
         label: i18n.t('player.timeDisplayMode'),
+        description: i18n.t('player.settings.desc.timeDisplay'),
         pillLabel: tmLabel,
         active: tm !== 'total',
         role: 'button',
@@ -276,6 +276,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-info-button',
         icon: 'info',
         label: i18n.t('player.info'),
+        description: i18n.t('player.settings.desc.info'),
         pillLabel: i18n.t('home.details'),
         active: false,
         role: 'button',
@@ -289,6 +290,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-always-on-top-button',
         icon: 'pin',
         label: pinned ? i18n.t('player.exitAlwaysOnTop') : i18n.t('player.alwaysOnTop'),
+        description: i18n.t('player.settings.desc.alwaysOnTop'),
         pillLabel: pinned ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
         active: pinned,
         role: 'switch',
@@ -311,6 +313,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-deinterlace-toggle',
         icon: 'layers',
         label: i18n.t('player.deinterlace'),
+        description: i18n.t('player.settings.desc.deinterlace'),
         pillLabel: modeLabel,
         active: mode !== 'off',
         role: 'button',
@@ -323,6 +326,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-deinterlace-toggle',
         icon: 'layers',
         label: i18n.t('player.deinterlace'),
+        description: i18n.t('player.settings.desc.deinterlace'),
         pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
         active: on,
         role: 'switch',
@@ -330,12 +334,13 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         onPress: props.onToggleDeinterlace,
       });
     }
-    if (props.onTogglePitchLock !== undefined) {
+    if (isVod && props.onTogglePitchLock !== undefined) {
       const on = props.pitchLock !== false;
       toggles.push({
         testID: 'player-pitch-lock-toggle',
         icon: 'speed',
         label: i18n.t('settings.pitchLock'),
+        description: i18n.t('player.settings.desc.pitchLock'),
         pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
         active: on,
         role: 'switch',
@@ -349,6 +354,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-audio-normalization-toggle',
         icon: 'audio',
         label: i18n.t('settings.audioNormalization'),
+        description: i18n.t('player.settings.desc.audioNormalization'),
         pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
         active: on,
         role: 'switch',
@@ -362,6 +368,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-auto-subtitles-skip-back-toggle',
         icon: 'subtitles',
         label: i18n.t('player.autoSubtitlesOnSkipBack'),
+        description: i18n.t('player.settings.desc.autoSubtitlesOnSkipBack'),
         pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
         active: on,
         role: 'switch',
@@ -375,6 +382,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-auto-play-next-toggle',
         icon: 'play',
         label: i18n.t('player.autoPlayNextEpisode'),
+        description: i18n.t('player.settings.desc.autoPlayNextEpisode'),
         pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
         active: on,
         role: 'switch',
@@ -387,6 +395,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-settings-miniplayer',
         icon: 'miniplayer',
         label: i18n.t('player.miniPlayer.minimize'),
+        description: i18n.t('player.settings.desc.miniPlayer'),
         pillLabel: i18n.t('player.miniPlayer.minimize'),
         active: false,
         role: 'button',
@@ -402,6 +411,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-settings-pip',
         icon: 'pip',
         label: i18n.t('player.pip.enter'),
+        description: i18n.t('player.settings.desc.pip'),
         pillLabel: i18n.t('player.pip.enter'),
         active: false,
         role: 'button',
@@ -412,11 +422,12 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         },
       });
     }
-    if (props.onEnterMultiView !== undefined) {
+    if (!isVod && props.onEnterMultiView !== undefined) {
       toggles.push({
         testID: 'player-settings-multiview',
         icon: 'multiview',
         label: i18n.t('player.multiView.enter'),
+        description: i18n.t('player.settings.desc.multiView'),
         pillLabel: i18n.t('player.multiView.title'),
         active: false,
         role: 'button',
@@ -432,6 +443,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         testID: 'player-settings-popout',
         icon: 'popout',
         label: i18n.t('player.popout.open'),
+        description: i18n.t('player.settings.desc.popout'),
         pillLabel: i18n.t('player.popout.open'),
         active: false,
         role: 'button',
@@ -446,6 +458,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
       testID: 'player-stats-toggle',
       icon: 'info',
       label: i18n.t('player.statsHud'),
+      description: i18n.t('player.settings.desc.stats'),
       pillLabel: statsVisible ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
       active: statsVisible,
       role: 'switch',
@@ -459,6 +472,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
     : buildSettingsRadioItems({
         view: menuState.view,
         tracks,
+        isVod,
         playbackSpeed,
         audioDevices: props.audioDevices,
         activeAudioDevice,
@@ -524,39 +538,20 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
           style={styles.rootList}
           contentContainerStyle={styles.listGap}
         >
-          {navRows.map(([testID, icon, label, summary, targetView, tabular], idx) => (
-            <Pressable
+          {navRows.map(([testID, icon, label, summary, targetView, tabular, description], idx) => (
+            <SettingsRow
               key={testID}
               testID={testID}
-              focusable={!isTv}
-              accessibilityRole="button"
-              accessibilityLabel={`${label}: ${summary}`}
-              onPress={(e) => {
-                blurWebTarget(e.currentTarget);
-                props.onOpenView(targetView);
-              }}
-              style={settingsRowStyle(theme, showCursor && menuState.index === idx, false, isTv)}
-            >
-              <Icon name={icon} size={18} color={theme.colors.textSecondary} />
-              <Text
-                numberOfLines={1}
-                style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
-              >
-                {label}
-              </Text>
-              <Text
-                numberOfLines={1}
-                style={[
-                  theme.typography.caption,
-                  tabular ? TABULAR_NUMS_STYLE : undefined,
-                  styles.summary,
-                  { color: theme.colors.textSecondary },
-                ]}
-              >
-                {summary}
-              </Text>
-              <Icon name="chevronRight" size={16} color={theme.colors.textMuted} />
-            </Pressable>
+              icon={icon}
+              label={label}
+              summary={summary}
+              description={description}
+              tabular={tabular}
+              focused={showCursor && menuState.index === idx}
+              isTv={isTv}
+              theme={theme}
+              onPress={() => props.onOpenView(targetView)}
+            />
           ))}
           {toggles.map((item, idx) => (
             <SettingsToggleRow
@@ -605,70 +600,12 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
                     {item.sectionHeader}
                   </Text>
                 ) : null}
-                <Pressable
-                  testID={item.testID}
-                  disabled={item.disabled === true}
-                  focusable={!isTv && item.disabled !== true}
-                  accessibilityRole={item.role ?? 'radio'}
-                  accessibilityLabel={
-                    item.disabledHint !== undefined
-                      ? `${item.label} (${item.disabledHint})`
-                      : item.label
-                  }
-                  accessibilityState={
-                    (item.role ?? 'radio') === 'radio'
-                      ? {
-                          selected: item.selected,
-                          checked: item.selected,
-                          ...(item.disabled === true ? { disabled: true } : {}),
-                        }
-                      : { ...(item.disabled === true ? { disabled: true } : {}) }
-                  }
-                  {...((item.role ?? 'radio') === 'radio' ? { 'aria-checked': item.selected } : {})}
-                  onPress={(e) => {
-                    if (item.disabled === true) return;
-                    blurWebTarget(e.currentTarget);
-                    item.onPress();
-                  }}
-                  style={[
-                    settingsRowStyle(
-                      theme,
-                      showCursor && menuState.index === idx,
-                      item.selected,
-                      isTv,
-                    ),
-                    item.disabled === true ? styles.disabledRow : undefined,
-                  ]}
-                >
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      theme.typography.title,
-                      item.tabular === true ? TABULAR_NUMS_STYLE : undefined,
-                      styles.flex1,
-                      {
-                        color:
-                          item.disabled === true
-                            ? theme.colors.textMuted
-                            : item.selected
-                              ? theme.colors.textPrimary
-                              : theme.colors.textSecondary,
-                        fontWeight: item.selected ? '700' : '500',
-                      },
-                    ]}
-                  >
-                    {item.label}
-                  </Text>
-                  {item.badgeLabel !== undefined ? (
-                    <MicroPill label={item.badgeLabel} tone="accent" />
-                  ) : null}
-                  {item.disabledHint !== undefined ? (
-                    <MicroPill label={item.disabledHint} tone="neutral" />
-                  ) : null}
-                  {item.selected ? (
-                    <Icon name="check" size={16} color={theme.colors.accent} />
-                  ) : null}
-                </Pressable>
+                <SettingsRadioRow
+                  item={item}
+                  focused={showCursor && menuState.index === idx}
+                  isTv={isTv}
+                  theme={theme}
+                />
               </Fragment>
             ))
           ) : (
@@ -745,8 +682,6 @@ const styles = StyleSheet.create({
   listGap: { gap: 2 },
   rootList: { maxHeight: 440 },
   subList: { maxHeight: 280 },
-  summary: { maxWidth: 120, textAlign: 'right' },
   sectionHeader: { paddingTop: 8, paddingBottom: 2, paddingHorizontal: 10 },
-  disabledRow: { opacity: 0.55 },
   empty: { paddingVertical: 12, paddingHorizontal: 4 },
 });

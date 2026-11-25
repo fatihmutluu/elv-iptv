@@ -666,13 +666,9 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     jumpToLiveEdge(attempt) {
       if (released || !media || media.request.kind !== 'live') return;
       if (attempt < media.token) return;
-      const win = live?.deriver.liveWindow();
       controls.onSeekQueued();
-      if (win?.endMs !== undefined && Number.isFinite(win.endMs) && win.endMs > 0) {
-        command(attempt, ['seek', win.endMs / 1000, 'absolute']);
-      } else {
-        command(attempt, ['seek', 100, 'absolute-percent']);
-      }
+      command(attempt, ['seek', 100, 'absolute-percent']);
+      command(attempt, ['set_property', 'pause', false]);
     },
     setSpeed: (attempt, rate) => controls.setSpeed(attempt, rate),
     selectAudioTrack(attempt, id) {

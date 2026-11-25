@@ -38,7 +38,11 @@ import { createPlaybackStateStore } from './state-store';
 import type { IdleProbeController, StreamHealthCache } from './stream-health-cache';
 import { createStreamHealthScorer, type StreamHealthScorer } from './stream-health-scorer';
 import { clampSyncDelayMs } from './sync-delay';
-import { clampLiveSeekPosition, isBehindLiveEdge, resolveLiveTimeShiftWindow } from './timeshift';
+import {
+  clampLiveSeekPosition,
+  resolveJumpToLiveTarget,
+  resolveLiveTimeShiftWindow,
+} from './timeshift';
 import { createTrackPreferences } from './track-preferences';
 import type {
   PlaybackClock,
@@ -50,8 +54,13 @@ import type {
 } from './types';
 
 const SPEED_BLOCKED = new Set<PlaybackStatus['kind']>(['idle', 'ended', 'recovering']);
-const LIVE_TS_EDGE_MARGIN_MS = 3_000;
-const LIVE_TS_AT_EDGE_WINDOW_MS = 4_000;
+const JUMP_LIVE_BLOCKED = new Set<PlaybackStatus['kind']>([
+  'idle',
+  'ended',
+  'failed',
+  'limited',
+  'recovering',
+]);
 
 /** Dependencies of {@link createPlaybackService}. */
 export interface PlaybackServiceDeps {
@@ -619,55 +628,43 @@ export function createPlaybackServiceWith(
       performSeek(basePos + deltaMs);
     },
     jumpToLiveEdge() {
-      const st = state();
-      const statusKind = st.status.kind;
-      const anchor = st.anchor;
-      if (
-        disposed ||
-        !loaded ||
-        current?.kind !== 'live' ||
-        statusKind === 'idle' ||
-        statusKind === 'ended' ||
-        statusKind === 'failed' ||
-        statusKind === 'limited' ||
-        statusKind === 'recovering' ||
-        anchor === undefined
-      ) {
-        return false;
-      }
-      const liveEdgeMs = anchor.liveEdgeMs;
-      if (liveEdgeMs === undefined || !Number.isFinite(liveEdgeMs)) {
+      const { status, anchor } = state();
+      if (disposed || !loaded || current?.kind !== 'live' || JUMP_LIVE_BLOCKED.has(status.kind)) {
         return false;
       }
       const now = clock.now();
-      if (anchor.timeShiftSupported === true) {
-        if (!isBehindLiveEdge(anchor, now)) {
-          return false;
+      const wasPaused = status.kind === 'paused';
+      const resolved = resolveJumpToLiveTarget(anchor, now, wasPaused);
+      if (resolved === undefined || anchor === undefined) return false;
+      const { liveEdgeMs, targetMs } = resolved;
+      const armResume = (): void => {
+        if (wasPaused && state().status.kind === 'tuning' && !startTimeout.isArmed()) {
+          armStartTimeout(startTimeoutMs());
         }
-        if (engine.jumpToLiveEdge !== undefined) {
-          store.batch(() => {
-            const optimistic = buildOptimisticSeekAnchor(liveEdgeMs, now, statusKind, anchor);
-            store.update({ anchor: optimistic, atLiveEdge: true });
-            const attemptBefore = state().attempt;
-            hooks.onSeek?.(liveEdgeMs);
-            if (state().attempt === attemptBefore && loaded) {
-              seekCoalescer.reset();
-              engine.jumpToLiveEdge?.(state().attempt);
-            }
-          });
-          return true;
-        }
-        performSeek(liveEdgeMs);
+      };
+      if (engine.jumpToLiveEdge !== undefined) {
+        store.batch(() => {
+          const optimistic = buildOptimisticSeekAnchor(liveEdgeMs, now, status.kind, anchor);
+          const resumePatch = wasPaused ? { status: { kind: 'tuning' as const } } : {};
+          store.update({ anchor: optimistic, atLiveEdge: true, ...resumePatch });
+          const attemptBefore = state().attempt;
+          hooks.onSeek?.(liveEdgeMs);
+          if (state().attempt === attemptBefore && loaded) {
+            seekCoalescer.reset();
+            engine.jumpToLiveEdge?.(attemptBefore);
+            armResume();
+          }
+        });
         return true;
       }
-      if (anchor.isLiveTs !== true || liveEdgeMs <= LIVE_TS_EDGE_MARGIN_MS) {
-        return false;
-      }
-      const currentPos = positionAt(anchor, now);
-      if (!Number.isFinite(currentPos) || liveEdgeMs - currentPos <= LIVE_TS_AT_EDGE_WINDOW_MS) {
-        return false;
-      }
-      performSeek(Math.max(0, liveEdgeMs - LIVE_TS_EDGE_MARGIN_MS));
+      store.batch(() => {
+        performSeek(targetMs);
+        if (wasPaused && loaded) {
+          if (state().status.kind === 'paused') store.update({ status: { kind: 'tuning' } });
+          engine.play(state().attempt);
+          armResume();
+        }
+      });
       return true;
     },
     setScrubbing(scrubbing) {

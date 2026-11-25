@@ -75,7 +75,7 @@ describe('live-timeshift-model & catch-up player helpers', () => {
     expect(
       shouldShowLiveJumpToLive(
         {
-          positionMs: 299_500,
+          positionMs: 292_000,
           atMs: 1_000,
           rate: 1,
           liveSeekableStartMs: 100_000,
@@ -86,12 +86,64 @@ describe('live-timeshift-model & catch-up player helpers', () => {
         false,
       ),
     ).toBe(false);
-    // Legacy MPEG-TS lag fallback still works when timeShiftSupported is absent
+    // Keeping button visible while jumpingToLive on a seekable stream at live edge
     expect(
       shouldShowLiveJumpToLive(
-        { positionMs: 10_000, atMs: 1_000, rate: 1, liveEdgeMs: 20_000, isLiveTs: true },
+        {
+          positionMs: 300_000,
+          atMs: 1_000,
+          rate: 1,
+          liveSeekableStartMs: 100_000,
+          liveEdgeMs: 300_000,
+          timeShiftSupported: true,
+        },
         1_000,
         false,
+        { jumpingToLive: true },
+      ),
+    ).toBe(true);
+    // Non-seekable stream NEVER shows Jump to live even when paused or jumpingToLive
+    expect(
+      shouldShowLiveJumpToLive(
+        {
+          positionMs: 10_000,
+          atMs: 1_000,
+          rate: 0,
+          liveEdgeMs: 60_000,
+          timeShiftSupported: false,
+        },
+        1_000,
+        true,
+        { jumpingToLive: true },
+      ),
+    ).toBe(false);
+    // Legacy MPEG-TS lag fallback: healthy 10s readahead is hidden; > 15s lag or paused with >15s edge shows
+    expect(
+      shouldShowLiveJumpToLive(
+        { positionMs: 20_000, atMs: 1_000, rate: 1, liveEdgeMs: 30_000, isLiveTs: true },
+        1_000,
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      shouldShowLiveJumpToLive(
+        { positionMs: 10_000, atMs: 1_000, rate: 1, liveEdgeMs: 30_000, isLiveTs: true },
+        1_000,
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      shouldShowLiveJumpToLive(
+        { positionMs: 5_000, atMs: 1_000, rate: 0, liveEdgeMs: 15_000, isLiveTs: true },
+        1_000,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      shouldShowLiveJumpToLive(
+        { positionMs: 25_000, atMs: 1_000, rate: 0, liveEdgeMs: 30_000, isLiveTs: true },
+        1_000,
+        true,
       ),
     ).toBe(true);
   });
@@ -162,9 +214,9 @@ describe('live-timeshift-model & catch-up player helpers', () => {
     expect(liveTsActions).toContain('jumpToLive');
   });
 
-  it('surfaces raw MPEG-TS lag > 4s in readLiveTimeShiftSnapshot and routes live time-shift keys (#8, #19)', () => {
+  it('surfaces raw MPEG-TS lag > 15s in readLiveTimeShiftSnapshot and routes live time-shift keys (#8, #19)', () => {
     const rawTsLag = readLiveTimeShiftSnapshot(
-      { positionMs: 10_000, atMs: 1_000, rate: 1, liveEdgeMs: 20_000, isLiveTs: true },
+      { positionMs: 10_000, atMs: 1_000, rate: 1, liveEdgeMs: 30_000, isLiveTs: true },
       1_000,
       false,
     );

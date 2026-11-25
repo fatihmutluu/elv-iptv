@@ -3291,3 +3291,93 @@ msgstr "Buffer"
 
 msgid "player.stats.throttled"
 msgstr "throttled"
+
+msgid "player.live.syncing"
+msgstr "Jumping to live..."
+
+msgid "player.mini.resize"
+msgstr "Resize mini player"
+
+msgid "player.mini.drag"
+msgstr "Drag to move corner"
+
+msgid "detail.version.choose"
+msgstr "Select version"
+
+msgid "player.settings.desc.subtitles"
+msgstr "Choose subtitle track or load external captions"
+
+msgid "player.settings.desc.audio"
+msgstr "Switch between available audio language tracks"
+
+msgid "player.settings.desc.audioDelay"
+msgstr "Adjust audio sync offset in milliseconds"
+
+msgid "player.settings.desc.subtitleDelay"
+msgstr "Shift subtitle timing earlier or later"
+
+msgid "player.settings.desc.subtitleStyle"
+msgstr "Customize caption size, color, and backdrop"
+
+msgid "player.settings.desc.audioDevice"
+msgstr "Select the system audio output device"
+
+msgid "player.settings.desc.videoQuality"
+msgstr "Pick a specific stream resolution or Auto"
+
+msgid "player.settings.desc.quality"
+msgstr "Switch between alternate channel stream qualities"
+
+msgid "player.settings.desc.speed"
+msgstr "Change playback speed multiplier"
+
+msgid "player.settings.desc.chapters"
+msgstr "Jump directly to a chapter marker"
+
+msgid "player.settings.desc.sleepTimer"
+msgstr "Automatically stop or pause playback after a timer"
+
+msgid "player.settings.desc.videoDecoder"
+msgstr "Choose hardware or software video decoding"
+
+msgid "player.settings.desc.resizeMode"
+msgstr "Cycle aspect ratio between Fit, Fill, and Stretch"
+
+msgid "player.settings.desc.timeDisplay"
+msgstr "Switch between total, remaining, and end time"
+
+msgid "player.settings.desc.info"
+msgstr "Show stream metadata, codec, and programme details"
+
+msgid "player.settings.desc.alwaysOnTop"
+msgstr "Keep the player window floating above other windows"
+
+msgid "player.settings.desc.deinterlace"
+msgstr "Smooth interlaced broadcast video frames"
+
+msgid "player.settings.desc.pitchLock"
+msgstr "Preserve natural voice pitch at different speeds"
+
+msgid "player.settings.desc.audioNormalization"
+msgstr "Balance quiet dialogue and loud channels"
+
+msgid "player.settings.desc.autoSubtitlesOnSkipBack"
+msgstr "Temporarily show captions when skipping back"
+
+msgid "player.settings.desc.autoPlayNextEpisode"
+msgstr "Automatically start the next episode when ready"
+
+msgid "player.settings.desc.miniPlayer"
+msgstr "Dock playback into a floating corner mini player"
+
+msgid "player.settings.desc.pip"
+msgstr "Pop video into system Picture-in-Picture"
+
+msgid "player.settings.desc.multiView"
+msgstr "Watch multiple live channels side by side"
+
+msgid "player.settings.desc.popout"
+msgstr "Open playback in a standalone desktop window"
+
+msgid "player.settings.desc.stats"
+msgstr "Display live playback bitrate, FPS, and buffer metrics"

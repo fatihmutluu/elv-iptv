@@ -10,13 +10,10 @@ import {
   buildMoviePlayTarget,
   buildPrimaryPlayAction,
   buildTechnicalBadges,
-  cyclePrePlayOption,
   describeDetailSeasonsError,
   detailProgressRatio,
   formatEpisodeDuration,
   mergeVodEnrichment,
-  PREPLAY_AUDIO_OPTIONS,
-  PREPLAY_SUBTITLE_OPTIONS,
   resolveSeriesPrimaryEpisode,
 } from './detail-model';
 
@@ -609,15 +606,6 @@ describe('detail-model', () => {
         { key: 'container', label: 'MKV' },
         { key: 'durationMin', label: '124m' },
       ]);
-    });
-
-    it('cycles pre-play audio and subtitle language options cleanly', () => {
-      expect(cyclePrePlayOption(PREPLAY_AUDIO_OPTIONS, '')).toBe('tr');
-      expect(cyclePrePlayOption(PREPLAY_AUDIO_OPTIONS, 'es')).toBe('');
-      expect(cyclePrePlayOption(PREPLAY_AUDIO_OPTIONS, 'unknown')).toBe('tr');
-      expect(cyclePrePlayOption(PREPLAY_SUBTITLE_OPTIONS, '')).toBe('off');
-      expect(cyclePrePlayOption(PREPLAY_SUBTITLE_OPTIONS, 'off')).toBe('tr');
-      expect(cyclePrePlayOption(PREPLAY_SUBTITLE_OPTIONS, 'es')).toBe('');
     });
 
     it('forwards preferredAudioLang and preferredSubtitleLang onto movie and episode PlayTargets', () => {

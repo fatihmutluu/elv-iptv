@@ -102,6 +102,7 @@ export interface PlayerOsdProps {
   onPopoutPlayer?: () => void;
   onLock?: () => void;
   onJumpPreviousChannel?: () => void;
+  jumpingToLive?: boolean;
   onJumpToLiveEdge?: () => void;
   onBackToLive?: () => void;
   onPrev: () => void;

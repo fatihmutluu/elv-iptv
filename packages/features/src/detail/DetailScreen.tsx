@@ -82,8 +82,6 @@ export function DetailScreen({
   catalog,
   refreshToken,
   userStateVersion = 0,
-  preferredAudioLang,
-  preferredSubtitleLang,
   vodEnrichmentEnabled = false,
   onBack,
   onPlay,
@@ -127,15 +125,9 @@ export function DetailScreen({
       data.versions[0];
     return picked;
   }, [data.movieProgress?.preferredItemKey, data.versions, selectedVersionKey, target.itemKey]);
-  const cycleVersion = useCallback(() => {
-    if (data.versions.length <= 1) return;
-    const currentIdx = Math.max(
-      0,
-      data.versions.findIndex((v) => v.key === activeVersion?.key),
-    );
-    const next = data.versions[(currentIdx + 1) % data.versions.length];
-    if (next) setSelectedVersionKey(next.key);
-  }, [activeVersion?.key, data.versions]);
+  const handleSelectVersion = useCallback((key: string) => {
+    setSelectedVersionKey(key);
+  }, []);
   const relatedQuickActions = useCardQuickActionsState({
     catalog,
     refreshToken,
@@ -144,9 +136,9 @@ export function DetailScreen({
   const extras = useDetailExtrasState({
     target,
     plot: data.plot,
-    hasVersions: data.versions.length > 1,
-    ...(preferredAudioLang !== undefined ? { preferredAudioLang } : {}),
-    ...(preferredSubtitleLang !== undefined ? { preferredSubtitleLang } : {}),
+    versions: data.versions,
+    ...(activeVersion !== undefined ? { activeVersionKey: activeVersion.key } : {}),
+    onSelectVersion: handleSelectVersion,
   });
   const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const scrolledRef = useRef(false);
@@ -181,19 +173,8 @@ export function DetailScreen({
         episodes: data.episodes,
         episodeProgressByKey: data.episodeProgressByKey,
         t: i18n.t,
-        ...(extras.audioLang ? { preferredAudioLang: extras.audioLang } : {}),
-        ...(extras.subtitleLang ? { preferredSubtitleLang: extras.subtitleLang } : {}),
       }),
-    [
-      data.episodeProgressByKey,
-      data.episodes,
-      data.movieProgress,
-      data.title,
-      extras.audioLang,
-      extras.subtitleLang,
-      i18n.t,
-      target,
-    ],
+    [data.episodeProgressByKey, data.episodes, data.movieProgress, data.title, i18n.t, target],
   );
 
   const handlePlayPrimary = useCallback(() => {
@@ -223,21 +204,10 @@ export function DetailScreen({
           seriesTitle: data.title,
           t: i18n.t,
           nextEpisodes: data.episodes.slice(index + 1),
-          ...(extras.audioLang ? { preferredAudioLang: extras.audioLang } : {}),
-          ...(extras.subtitleLang ? { preferredSubtitleLang: extras.subtitleLang } : {}),
         }),
       );
     },
-    [
-      data.episodeProgressByKey,
-      data.episodes,
-      data.title,
-      extras.audioLang,
-      extras.subtitleLang,
-      i18n.t,
-      onPlay,
-      target,
-    ],
+    [data.episodeProgressByKey, data.episodes, data.title, i18n.t, onPlay, target],
   );
 
   const handlePressRelated = useCallback(
@@ -342,9 +312,7 @@ export function DetailScreen({
       if (rowId === 'hero-play') {
         const slot = extras.heroPlaySlots[colIndex];
         if (slot === 'play') handlePlayPrimary();
-        else if (slot === 'preplay-version') cycleVersion();
-        else if (slot === 'preplay-audio') extras.cycleAudio();
-        else if (slot === 'preplay-subtitles') extras.cycleSubtitles();
+        else if (slot === 'preplay-version') extras.toggleVersionMenu();
         else if (slot === 'synopsis') extras.toggleSynopsis();
         return;
       }
@@ -374,7 +342,6 @@ export function DetailScreen({
       }
     },
     [
-      cycleVersion,
       data.related,
       data.retrySeasons,
       data.selectSeason,
@@ -508,16 +475,18 @@ export function DetailScreen({
           inMyList={data.inMyList}
           watched={data.movieProgress?.watched === true}
           primaryAction={primaryAction}
-          audioLang={extras.audioLang}
-          subtitleLang={extras.subtitleLang}
-          {...(activeVersion !== undefined
+          {...(activeVersion !== undefined && data.versions.length > 1
             ? {
-                versionLabel: activeVersion.versionLabel || activeVersion.title,
-                onCycleVersion: cycleVersion,
+                versions: data.versions,
+                activeVersionKey: activeVersion.key,
+                activeVersionLabel: activeVersion.versionLabel || activeVersion.title,
+                versionMenuOpen: extras.versionMenuOpen,
+                versionMenuIndex: extras.versionMenuIndex,
+                onToggleVersionMenu: extras.toggleVersionMenu,
+                onCloseVersionMenu: extras.closeVersionMenu,
+                onSelectVersion: handleSelectVersion,
               }
             : {})}
-          onCycleAudio={extras.cycleAudio}
-          onCycleSubtitles={extras.cycleSubtitles}
           synopsisExpanded={extras.synopsisExpanded}
           onToggleSynopsis={extras.toggleSynopsis}
           onBack={onBack}

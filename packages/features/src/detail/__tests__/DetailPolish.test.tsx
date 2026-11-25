@@ -277,23 +277,14 @@ describe('DetailScreen technical badges, pre-play selectors, expandable synopsis
       expect(screen.getByTestId('detail-tech-badge-container')).toHaveTextContent('MKV');
       expect(screen.getByTestId('detail-tech-badge-durationMin')).toHaveTextContent('124m');
 
-      // Pre-play controls initialized from props and cycle on press
-      expect(screen.getByTestId('detail-preplay-controls')).toBeTruthy();
-      expect(screen.getByTestId('detail-preplay-audio')).toHaveTextContent(/English/i);
-      expect(screen.getByTestId('detail-preplay-subtitles')).toHaveTextContent(/Turkish/i);
-
-      // Cycle audio en -> de, subtitles tr -> en
-      await fireEvent.press(screen.getByTestId('detail-preplay-audio'));
-      await fireEvent.press(screen.getByTestId('detail-preplay-subtitles'));
-      expect(screen.getByTestId('detail-preplay-audio')).toHaveTextContent(/German/i);
-      expect(screen.getByTestId('detail-preplay-subtitles')).toHaveTextContent(/English/i);
+      // Pre-play audio/subtitle buttons are removed (managed globally via sticky player track memory)
+      expect(screen.queryByTestId('detail-preplay-audio')).toBeNull();
+      expect(screen.queryByTestId('detail-preplay-subtitles')).toBeNull();
 
       await fireEvent.press(screen.getByTestId('detail-play'));
       expect(onPlay).toHaveBeenCalledTimes(1);
       expect(onPlay.mock.calls[0]?.[0]).toMatchObject({
         itemKey: movie.key,
-        preferredAudioLang: 'de',
-        preferredSubtitleLang: 'en',
       });
 
       // Expandable synopsis opens modal reader sheet and toggles Read more / Show less
@@ -434,15 +425,7 @@ describe('DetailScreen technical badges, pre-play selectors, expandable synopsis
       // Lands directly on primary Play CTA
       expect(screen.getByTestId('detail-play-focus-ring')).toBeTruthy();
 
-      // Right -> Audio cycler -> Select cycles Default -> Turkish
-      await pressKey(KEYCODE_DPAD_RIGHT);
-      expect(screen.getByTestId('detail-preplay-audio-focus-ring')).toBeTruthy();
-      await pressKey(KEYCODE_DPAD_CENTER);
-      expect(screen.getByTestId('detail-preplay-audio')).toHaveTextContent(/Turkish/i);
-
-      // Right -> Subtitles cycler -> Right -> Synopsis Read more -> Select opens sheet
-      await pressKey(KEYCODE_DPAD_RIGHT);
-      expect(screen.getByTestId('detail-preplay-subtitles-focus-ring')).toBeTruthy();
+      // Right -> Synopsis Read more -> Select opens sheet (audio/subtitle pre-play buttons removed)
       await pressKey(KEYCODE_DPAD_RIGHT);
       expect(screen.getByTestId('detail-synopsis-toggle-focus-ring')).toBeTruthy();
       await pressKey(KEYCODE_DPAD_CENTER);
@@ -473,7 +456,7 @@ describe('DetailScreen technical badges, pre-play selectors, expandable synopsis
       await pressKey(KEYCODE_DPAD_CENTER);
       expect(onSearchPerson).toHaveBeenCalledWith('Leyla Demir');
 
-      // Down moves to Seasons row -> Down moves to Episode 0 -> Select plays with pre-play audio override!
+      // Down moves to Seasons row -> Down moves to Episode 0 -> Select plays episode cleanly
       await pressKey(KEYCODE_DPAD_DOWN);
       expect(screen.getByTestId('detail-season-1-focus-ring')).toBeTruthy();
       await pressKey(KEYCODE_DPAD_DOWN);
@@ -481,7 +464,6 @@ describe('DetailScreen technical badges, pre-play selectors, expandable synopsis
       expect(onPlay).toHaveBeenCalledWith(
         expect.objectContaining({
           itemKind: 'episode',
-          preferredAudioLang: 'tr',
         }),
       );
 

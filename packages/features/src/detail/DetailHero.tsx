@@ -1,3 +1,4 @@
+import type { VodVersionOption } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import {
   ArtworkImage,
@@ -18,7 +19,7 @@ import { memo, type ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { computeHeroHeight } from '../shared';
 import type { DetailTechnicalMeta } from '../shared/detail-target';
-import { DetailPrePlayControls, DetailSynopsisBlock } from './DetailHeroExtras';
+import { DetailSynopsisBlock, DetailVersionDropdown } from './DetailHeroExtras';
 import {
   buildTechnicalBadges,
   detailProgressRatio,
@@ -34,8 +35,6 @@ export type DetailHeroFocusSlot =
   | 'collections'
   | 'play'
   | 'preplay-version'
-  | 'preplay-audio'
-  | 'preplay-subtitles'
   | 'synopsis';
 
 /** Props of {@link DetailHero}. */
@@ -55,12 +54,14 @@ export interface DetailHeroProps {
   readonly inMyList: boolean;
   readonly watched: boolean;
   readonly primaryAction: PrimaryPlayAction;
-  readonly audioLang?: string;
-  readonly subtitleLang?: string;
-  readonly versionLabel?: string;
-  readonly onCycleVersion?: () => void;
-  readonly onCycleAudio?: () => void;
-  readonly onCycleSubtitles?: () => void;
+  readonly versions?: readonly VodVersionOption[];
+  readonly activeVersionKey?: string;
+  readonly activeVersionLabel?: string;
+  readonly versionMenuOpen?: boolean;
+  readonly versionMenuIndex?: number;
+  readonly onToggleVersionMenu?: () => void;
+  readonly onCloseVersionMenu?: () => void;
+  readonly onSelectVersion?: (key: string) => void;
   readonly synopsisExpanded?: boolean;
   readonly onToggleSynopsis?: () => void;
   readonly onBack: () => void;
@@ -101,12 +102,14 @@ function DetailHeroInner({
   inMyList,
   watched,
   primaryAction,
-  audioLang = '',
-  subtitleLang = '',
-  versionLabel,
-  onCycleVersion,
-  onCycleAudio,
-  onCycleSubtitles,
+  versions,
+  activeVersionKey,
+  activeVersionLabel,
+  versionMenuOpen = false,
+  versionMenuIndex = 0,
+  onToggleVersionMenu,
+  onCloseVersionMenu,
+  onSelectVersion,
   synopsisExpanded = false,
   onToggleSynopsis,
   onBack,
@@ -143,12 +146,7 @@ function DetailHeroInner({
   const backFocused = isTv && focusedSlot === 'back';
   const collectionsFocused = isTv && focusedSlot === 'collections';
   const synopsisFocused = isTv && focusedSlot === 'synopsis';
-  const prePlayFocused =
-    focusedSlot === 'preplay-version' ||
-    focusedSlot === 'preplay-audio' ||
-    focusedSlot === 'preplay-subtitles'
-      ? focusedSlot
-      : null;
+  const versionFocused = focusedSlot === 'preplay-version';
   const backLabel = i18n.t('detail.back');
   const glassBlur = webBackdropBlur(12);
   const transition = webTransition(theme, 'transform, background-color, border-color, opacity');
@@ -168,17 +166,19 @@ function DetailHeroInner({
         },
       ]}
     >
-      <ArtworkImage
-        testID="detail-hero-backdrop"
-        uri={backdropUri}
-        label={title}
-        maxDecodePx={960}
-        borderRadius={0}
-        decorative
-        style={StyleSheet.absoluteFill}
-      />
-      <Scrim direction="bottom" intensity="strong" testID="detail-hero-scrim-bottom" />
-      <Scrim direction="left" intensity="strong" testID="detail-hero-scrim-left" />
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.backdropClip]}>
+        <ArtworkImage
+          testID="detail-hero-backdrop"
+          uri={backdropUri}
+          label={title}
+          maxDecodePx={960}
+          borderRadius={0}
+          decorative
+          style={StyleSheet.absoluteFill}
+        />
+        <Scrim direction="bottom" intensity="strong" testID="detail-hero-scrim-bottom" />
+        <Scrim direction="left" intensity="strong" testID="detail-hero-scrim-left" />
+      </View>
 
       <View style={styles.foreground}>
         <Pressable
@@ -487,17 +487,24 @@ function DetailHeroInner({
               {...(onToggleSynopsis !== undefined ? { onToggle: onToggleSynopsis } : {})}
             />
 
-            {onCycleAudio && onCycleSubtitles ? (
-              <DetailPrePlayControls
-                audioLang={audioLang}
-                subtitleLang={subtitleLang}
-                {...(versionLabel !== undefined && onCycleVersion !== undefined
-                  ? { versionLabel, onCycleVersion }
-                  : {})}
-                onCycleAudio={onCycleAudio}
-                onCycleSubtitles={onCycleSubtitles}
+            {versions !== undefined &&
+            versions.length > 1 &&
+            activeVersionKey !== undefined &&
+            activeVersionLabel !== undefined &&
+            onToggleVersionMenu !== undefined &&
+            onCloseVersionMenu !== undefined &&
+            onSelectVersion !== undefined ? (
+              <DetailVersionDropdown
+                versions={versions}
+                activeVersionKey={activeVersionKey}
+                activeVersionLabel={activeVersionLabel}
+                open={versionMenuOpen}
                 isTv={isTv}
-                focusedControl={prePlayFocused}
+                focused={versionFocused}
+                tvHighlightedIndex={versionMenuIndex}
+                onToggleOpen={onToggleVersionMenu}
+                onClose={onCloseVersionMenu}
+                onSelectVersion={onSelectVersion}
               />
             ) : null}
           </View>
@@ -516,7 +523,8 @@ export const DetailHero = memo(DetailHeroInner);
 DetailHero.displayName = 'DetailHero';
 
 const styles = StyleSheet.create({
-  container: { position: 'relative', overflow: 'hidden' },
+  container: { position: 'relative', zIndex: 10 },
+  backdropClip: { overflow: 'hidden' },
   foreground: { position: 'relative', zIndex: 2, flex: 1, justifyContent: 'space-between' },
   backButton: {
     position: 'relative',

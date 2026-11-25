@@ -1,151 +1,285 @@
+import type { VodVersionOption } from '@elv/data';
 import {
   AdaptiveSheet,
   CtaButton,
   Icon,
+  Tooltip,
   useI18n,
   useTheme,
   webBackdropBlur,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { memo, type ReactElement } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { formatPrePlayLangLabel } from './detail-preplay';
+import { type ComponentRef, memo, type ReactElement, useEffect, useRef, useState } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-/** Props of {@link DetailPrePlayControls}. */
-export interface DetailPrePlayControlsProps {
-  readonly audioLang: string;
-  readonly subtitleLang: string;
-  readonly versionLabel?: string;
-  readonly onCycleVersion?: () => void;
-  readonly onCycleAudio: () => void;
-  readonly onCycleSubtitles: () => void;
+/** Props of {@link DetailVersionDropdown}. */
+export interface DetailVersionDropdownProps {
+  readonly versions: readonly VodVersionOption[];
+  readonly activeVersionKey: string;
+  readonly activeVersionLabel: string;
+  readonly open: boolean;
   readonly isTv: boolean;
-  readonly focusedControl: 'preplay-version' | 'preplay-audio' | 'preplay-subtitles' | null;
+  readonly focused: boolean;
+  readonly tvHighlightedIndex?: number;
+  readonly onToggleOpen: () => void;
+  readonly onClose: () => void;
+  readonly onSelectVersion: (key: string) => void;
 }
 
 /**
- * Compact Cinema Quietude pre-play Version, Audio & Subtitle cyclers for VOD Detail screens (`#398`, `#404`).
- * Uses sharp `4px` frosted surfaces (never pill-bubble chips) with crisp 10-ft TV focus rings.
+ * Compact Cinema Quietude VOD Version Dropdown (`#404`) shown only when `versions.length > 1`.
+ * Opens a dark-glass popover listing every available version with active checkmark, hover
+ * highlight, click-outside / Escape dismissal, and 10-ft TV D-pad support.
  */
-export const DetailPrePlayControls = memo(function DetailPrePlayControlsInner({
-  audioLang,
-  subtitleLang,
-  versionLabel,
-  onCycleVersion,
-  onCycleAudio,
-  onCycleSubtitles,
+export const DetailVersionDropdown = memo(function DetailVersionDropdownInner({
+  versions,
+  activeVersionKey,
+  activeVersionLabel,
+  open,
   isTv,
-  focusedControl,
-}: DetailPrePlayControlsProps): ReactElement {
+  focused,
+  tvHighlightedIndex = 0,
+  onToggleOpen,
+  onClose,
+  onSelectVersion,
+}: DetailVersionDropdownProps): ReactElement | null {
   const theme = useTheme();
   const i18n = useI18n();
   const blur = webBackdropBlur(10);
+  const menuBlur = webBackdropBlur(14);
   const cursor = webCursorPointer();
   const transition = webTransition(theme, 'transform, background-color, border-color, opacity');
+  const containerRef = useRef<ComponentRef<typeof View>>(null);
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
 
-  const audioValue = formatPrePlayLangLabel(audioLang, i18n.t);
-  const subValue = formatPrePlayLangLabel(subtitleLang, i18n.t);
-  const versionFocused = isTv && focusedControl === 'preplay-version';
-  const audioFocused = isTv && focusedControl === 'preplay-audio';
-  const subFocused = isTv && focusedControl === 'preplay-subtitles';
+  useEffect(() => {
+    if (!open) setHoveredKey(null);
+  }, [open]);
 
-  const renderControl = (
-    testID: string,
-    icon: 'layers' | 'audio' | 'subtitles',
-    prefix: string,
-    value: string,
-    focused: boolean,
-    onPress: () => void,
-  ) => (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={`${prefix}: ${value}`}
-      focusable={!isTv}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.controlBtn,
-        blur,
-        cursor,
-        transition,
-        {
-          borderRadius: theme.radius.button,
-          backgroundColor: focused ? theme.colors.focusFill : theme.colors.actionGlassBg,
-          borderColor: theme.colors.actionGlassBorder,
-          opacity: pressed ? 0.85 : 1,
-          transform: [
-            {
-              scale: pressed
-                ? theme.reduceMotion
-                  ? 1
-                  : 0.98
-                : focused
-                  ? theme.focus.buttonScale
-                  : 1,
-            },
-          ],
-        },
-      ]}
-    >
-      <Icon name={icon} size={14} color={theme.colors.textSecondary} />
-      <Text numberOfLines={1} style={[theme.typography.caption, { color: theme.colors.textMuted }]}>
-        {`${prefix}:`}
-      </Text>
-      <Text
-        numberOfLines={1}
-        style={[theme.typography.caption, { color: theme.colors.textPrimary, fontWeight: '600' }]}
-      >
-        {value}
-      </Text>
-      {focused ? (
-        <View
-          pointerEvents="none"
-          testID={`${testID}-focus-ring`}
-          style={[
-            styles.focusRing,
-            {
-              borderRadius: theme.radius.button,
-              borderWidth: theme.focus.ringWidth,
-              borderColor: theme.colors.focusRingColor,
-            },
-          ]}
-        />
-      ) : null}
-    </Pressable>
-  );
+  useEffect(() => {
+    if (!open || Platform.OS !== 'web') return undefined;
+    const win = (
+      globalThis as {
+        window?: {
+          addEventListener?: (type: string, fn: (ev: unknown) => void, capture?: boolean) => void;
+          removeEventListener?: (
+            type: string,
+            fn: (ev: unknown) => void,
+            capture?: boolean,
+          ) => void;
+        };
+      }
+    ).window;
+    if (typeof win?.addEventListener !== 'function') return undefined;
+
+    const handleKeyDown = (ev: unknown) => {
+      const key = (ev as { key?: string } | null)?.key;
+      if (key === 'Escape') onClose();
+    };
+    const handlePointerDown = (ev: unknown) => {
+      const target = (ev as { target?: unknown } | null)?.target;
+      const host = containerRef.current as unknown as {
+        contains?: (node: unknown) => boolean;
+      } | null;
+      if (host && typeof host.contains === 'function' && host.contains(target)) return;
+      onClose();
+    };
+
+    win.addEventListener('keydown', handleKeyDown);
+    win.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      win.removeEventListener?.('keydown', handleKeyDown);
+      win.removeEventListener?.('pointerdown', handlePointerDown, true);
+    };
+  }, [onClose, open]);
+
+  if (versions.length <= 1) return null;
+
+  const versionPrefix = i18n.t('detail.versionLabel');
+  const chooseTooltip = i18n.t('detail.version.choose');
+  const triggerFocused = isTv && focused && !open;
 
   return (
     <View
-      testID="detail-preplay-controls"
-      style={[styles.controlsRow, { marginTop: theme.spacing.sm, gap: theme.spacing.sm }]}
+      ref={containerRef}
+      testID="detail-preplay-version-dropdown"
+      style={[
+        styles.dropdownWrap,
+        {
+          marginTop: theme.spacing.sm,
+          zIndex: open ? 40 : 2,
+        },
+      ]}
     >
-      {versionLabel !== undefined && onCycleVersion !== undefined
-        ? renderControl(
-            'detail-preplay-version',
-            'layers',
-            i18n.t('detail.versionLabel'),
-            versionLabel,
-            versionFocused,
-            onCycleVersion,
-          )
-        : null}
-      {renderControl(
-        'detail-preplay-audio',
-        'audio',
-        i18n.t('detail.prePlayAudio'),
-        audioValue,
-        audioFocused,
-        onCycleAudio,
-      )}
-      {renderControl(
-        'detail-preplay-subtitles',
-        'subtitles',
-        i18n.t('detail.prePlaySubtitles'),
-        subValue,
-        subFocused,
-        onCycleSubtitles,
-      )}
+      {open ? (
+        <Pressable
+          testID="detail-preplay-version-backdrop"
+          accessibilityRole="button"
+          accessibilityLabel={i18n.t('detail.back')}
+          focusable={false}
+          onPress={onClose}
+          style={styles.dismissBackdrop}
+        />
+      ) : null}
+
+      <Tooltip content={chooseTooltip} disabled={isTv || open}>
+        <Pressable
+          testID="detail-preplay-version"
+          accessibilityRole="button"
+          accessibilityLabel={`${versionPrefix}: ${activeVersionLabel}`}
+          accessibilityState={{ expanded: open }}
+          focusable={!isTv}
+          onPress={onToggleOpen}
+          style={({ pressed }) => [
+            styles.controlBtn,
+            blur,
+            cursor,
+            transition,
+            {
+              borderRadius: theme.radius.button,
+              backgroundColor:
+                triggerFocused || open ? theme.colors.focusFill : theme.colors.actionGlassBg,
+              borderColor: open ? theme.colors.accent : theme.colors.actionGlassBorder,
+              opacity: pressed ? 0.85 : 1,
+              transform: [
+                {
+                  scale: pressed
+                    ? theme.reduceMotion
+                      ? 1
+                      : 0.98
+                    : triggerFocused
+                      ? theme.focus.buttonScale
+                      : 1,
+                },
+              ],
+            },
+          ]}
+        >
+          <Icon name="layers" size={14} color={theme.colors.textSecondary} />
+          <Text
+            numberOfLines={1}
+            style={[theme.typography.caption, { color: theme.colors.textMuted }]}
+          >
+            {`${versionPrefix}:`}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={[
+              theme.typography.caption,
+              { color: theme.colors.textPrimary, fontWeight: '600' },
+            ]}
+          >
+            {activeVersionLabel}
+          </Text>
+          <Icon name="chevronDown" size={14} color={theme.colors.textSecondary} />
+          {triggerFocused ? (
+            <View
+              pointerEvents="none"
+              testID="detail-preplay-version-focus-ring"
+              style={[
+                styles.focusRing,
+                {
+                  borderRadius: theme.radius.button,
+                  borderWidth: theme.focus.ringWidth,
+                  borderColor: theme.colors.focusRingColor,
+                },
+              ]}
+            />
+          ) : null}
+        </Pressable>
+      </Tooltip>
+
+      {open ? (
+        <View
+          testID="detail-preplay-version-menu"
+          accessibilityRole="menu"
+          style={[
+            styles.menuPopover,
+            menuBlur,
+            {
+              borderRadius: theme.radius.button,
+              backgroundColor: theme.colors.bgElevated,
+              borderColor: theme.colors.surfaceBorder,
+            },
+          ]}
+        >
+          {versions.map((option, idx) => {
+            const label = option.versionLabel || option.title;
+            const isSelected = option.key === activeVersionKey;
+            const isTvFocused = isTv && tvHighlightedIndex === idx;
+            const isHovered = hoveredKey === option.key;
+            return (
+              <Pressable
+                key={option.key}
+                testID={`detail-preplay-version-option-${idx}`}
+                accessibilityRole="menuitem"
+                accessibilityLabel={label}
+                accessibilityState={{ selected: isSelected }}
+                focusable={!isTv}
+                onHoverIn={() => setHoveredKey(option.key)}
+                onHoverOut={() => setHoveredKey((cur) => (cur === option.key ? null : cur))}
+                onPress={() => {
+                  onSelectVersion(option.key);
+                  onClose();
+                }}
+                style={({ pressed }) => [
+                  styles.menuOption,
+                  cursor,
+                  transition,
+                  {
+                    borderRadius: theme.radius.button,
+                    backgroundColor: isTvFocused
+                      ? theme.colors.focusFill
+                      : isHovered
+                        ? theme.colors.actionGlassHoverBg
+                        : isSelected
+                          ? theme.colors.accentTint
+                          : 'transparent',
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    theme.typography.caption,
+                    styles.menuOptionLabel,
+                    {
+                      color: isSelected ? theme.colors.textPrimary : theme.colors.textSecondary,
+                      fontWeight: isSelected ? '600' : '500',
+                    },
+                  ]}
+                >
+                  {label}
+                </Text>
+                {isSelected ? (
+                  <Icon
+                    testID={`detail-preplay-version-check-${idx}`}
+                    name="check"
+                    size={14}
+                    color={theme.colors.accent}
+                  />
+                ) : null}
+                {isTvFocused ? (
+                  <View
+                    pointerEvents="none"
+                    testID={`detail-preplay-version-option-${idx}-focus-ring`}
+                    style={[
+                      styles.optionFocusRing,
+                      {
+                        borderRadius: theme.radius.button,
+                        borderWidth: theme.focus.ringWidth,
+                        borderColor: theme.colors.focusRingColor,
+                      },
+                    ]}
+                  />
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 });
@@ -296,13 +430,21 @@ export const DetailSynopsisSheet = memo(function DetailSynopsisSheetInner({
 });
 
 const styles = StyleSheet.create({
-  controlsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
+  dropdownWrap: {
+    position: 'relative',
+    alignSelf: 'flex-start',
+  },
+  dismissBackdrop: {
+    position: 'absolute',
+    top: -1200,
+    bottom: -1200,
+    left: -1200,
+    right: -1200,
+    zIndex: 1,
   },
   controlBtn: {
     position: 'relative',
+    zIndex: 2,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -317,6 +459,38 @@ const styles = StyleSheet.create({
     bottom: -3,
     left: -3,
     right: -3,
+  },
+  menuPopover: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    marginTop: 6,
+    minWidth: 200,
+    maxWidth: 320,
+    padding: 4,
+    borderWidth: 1,
+    zIndex: 3,
+    gap: 2,
+  },
+  menuOption: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minHeight: 34,
+  },
+  menuOptionLabel: {
+    flex: 1,
+  },
+  optionFocusRing: {
+    position: 'absolute',
+    top: -2,
+    bottom: -2,
+    left: -2,
+    right: -2,
   },
   synopsisScroll: {
     maxHeight: 280,

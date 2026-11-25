@@ -167,6 +167,7 @@ export function PlayerOsdBottomBar(
           <JumpToLiveButton
             isVod={isVod}
             isPaused={p.isPausedOrEnded}
+            jumpingToLive={p.jumpingToLive === true}
             service={service}
             clock={p.clock}
             i18n={i18n}

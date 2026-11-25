@@ -159,6 +159,7 @@ export function buildPlayerOsdProps(p: BuildPlayerOsdPropsInput): PlayerOsdProps
     ...(p.onPopoutPlayer !== undefined ? { onPopoutPlayer: p.onPopoutPlayer } : {}),
     onLock: controls.lockControls,
     onJumpPreviousChannel: p.onJumpPreviousChannel,
+    jumpingToLive: controls.jumpingToLive,
     onJumpToLiveEdge: controls.jumpToLiveEdge,
     ...(p.isCatchup ? { onBackToLive: p.onBackToLive } : {}),
     onPrev: p.onPrev,

@@ -1,74 +1,73 @@
+import type { VodVersionOption } from '@elv/data';
 import type { KeyEvent } from '@elv/focus-core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DetailTarget } from '../shared';
 import type { DetailHeroFocusSlot } from './DetailHero';
-import {
-  cyclePrePlayOption,
-  normalizePrePlayLang,
-  PREPLAY_AUDIO_OPTIONS,
-  PREPLAY_SUBTITLE_OPTIONS,
-  SYNOPSIS_EXPAND_THRESHOLD,
-} from './detail-preplay';
+import { SYNOPSIS_EXPAND_THRESHOLD } from './detail-preplay';
 
 /** Options for {@link useDetailExtrasState}. */
 export interface UseDetailExtrasStateOptions {
   readonly target: DetailTarget;
   readonly plot: string | null;
-  readonly preferredAudioLang?: string;
-  readonly preferredSubtitleLang?: string;
-  readonly hasVersions?: boolean;
+  readonly versions?: readonly VodVersionOption[];
+  readonly activeVersionKey?: string;
+  readonly onSelectVersion?: (key: string) => void;
 }
 
-/** Local pre-play language selectors, synopsis sheet toggle, and derived TV focus slots for `DetailScreen`. */
+/** Local version dropdown state, synopsis sheet toggle, and derived TV focus slots for `DetailScreen`. */
 export interface DetailExtrasState {
-  readonly audioLang: string;
-  readonly subtitleLang: string;
+  readonly versionMenuOpen: boolean;
+  readonly versionMenuIndex: number;
   readonly synopsisExpanded: boolean;
   readonly trimmedPlot: string;
   readonly canExpandSynopsis: boolean;
   readonly heroPlaySlots: readonly DetailHeroFocusSlot[];
   readonly castPeople: readonly string[];
-  readonly cycleAudio: () => void;
-  readonly cycleSubtitles: () => void;
+  readonly toggleVersionMenu: () => void;
+  readonly closeVersionMenu: () => void;
   readonly toggleSynopsis: () => void;
   readonly dismissSynopsis: () => void;
   readonly interceptTvKey: (event: KeyEvent, fallback: (ev: KeyEvent) => boolean) => boolean;
 }
 
 /**
- * Manages pre-play audio/subtitle overrides, expandable synopsis sheet state, and derived hero/cast
- * focus slots for {@link DetailScreen}, resetting cleanly whenever the active title changes (`#398`).
+ * Manages VOD version dropdown state, expandable synopsis sheet state, and derived hero/cast
+ * focus slots for {@link DetailScreen}, resetting cleanly whenever the active title changes (`#398`, `#404`).
  */
 export function useDetailExtrasState({
   target,
   plot,
-  preferredAudioLang,
-  preferredSubtitleLang,
-  hasVersions = false,
+  versions = [],
+  activeVersionKey,
+  onSelectVersion,
 }: UseDetailExtrasStateOptions): DetailExtrasState {
-  const [audioLang, setAudioLang] = useState(() =>
-    normalizePrePlayLang(preferredAudioLang, PREPLAY_AUDIO_OPTIONS),
-  );
-  const [subtitleLang, setSubtitleLang] = useState(() =>
-    normalizePrePlayLang(preferredSubtitleLang, PREPLAY_SUBTITLE_OPTIONS),
-  );
+  const [versionMenuOpen, setVersionMenuOpen] = useState(false);
+  const [versionMenuIndex, setVersionMenuIndex] = useState(0);
   const [synopsisExpanded, setSynopsisExpanded] = useState(false);
+  const hasVersions = versions.length > 1;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset sheet & track overrides whenever opening a new title
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset sheet & version menu whenever opening a new title
   useEffect(() => {
     setSynopsisExpanded(false);
-    setAudioLang(normalizePrePlayLang(preferredAudioLang, PREPLAY_AUDIO_OPTIONS));
-    setSubtitleLang(normalizePrePlayLang(preferredSubtitleLang, PREPLAY_SUBTITLE_OPTIONS));
-  }, [preferredAudioLang, preferredSubtitleLang, target.itemKey]);
+    setVersionMenuOpen(false);
+    setVersionMenuIndex(0);
+  }, [target.itemKey]);
 
-  const cycleAudio = useCallback(
-    () => setAudioLang((prev) => cyclePrePlayOption(PREPLAY_AUDIO_OPTIONS, prev)),
-    [],
-  );
-  const cycleSubtitles = useCallback(
-    () => setSubtitleLang((prev) => cyclePrePlayOption(PREPLAY_SUBTITLE_OPTIONS, prev)),
-    [],
-  );
+  const toggleVersionMenu = useCallback(() => {
+    if (!hasVersions) return;
+    setVersionMenuOpen((prev) => {
+      if (!prev) {
+        const activeIdx = Math.max(
+          0,
+          versions.findIndex((v) => v.key === activeVersionKey),
+        );
+        setVersionMenuIndex(activeIdx);
+      }
+      return !prev;
+    });
+  }, [activeVersionKey, hasVersions, versions]);
+
+  const closeVersionMenu = useCallback(() => setVersionMenuOpen(false), []);
   const toggleSynopsis = useCallback(() => setSynopsisExpanded((v) => !v), []);
   const dismissSynopsis = useCallback(() => setSynopsisExpanded(false), []);
 
@@ -79,8 +78,6 @@ export function useDetailExtrasState({
     () => [
       'play',
       ...(hasVersions ? (['preplay-version'] as const) : []),
-      'preplay-audio',
-      'preplay-subtitles',
       ...(canExpandSynopsis ? (['synopsis'] as const) : []),
     ],
     [canExpandSynopsis, hasVersions],
@@ -98,6 +95,24 @@ export function useDetailExtrasState({
 
   const interceptTvKey = useCallback(
     (event: KeyEvent, fallback: (ev: KeyEvent) => boolean): boolean => {
+      if (versionMenuOpen) {
+        if (event.kind === 'press') {
+          if (event.key === 'back') {
+            setVersionMenuOpen(false);
+          } else if (event.key === 'up' || event.key === 'left') {
+            setVersionMenuIndex(
+              (idx) => (idx - 1 + versions.length) % Math.max(1, versions.length),
+            );
+          } else if (event.key === 'down' || event.key === 'right') {
+            setVersionMenuIndex((idx) => (idx + 1) % Math.max(1, versions.length));
+          } else if (event.key === 'select') {
+            const chosen = versions[versionMenuIndex];
+            if (chosen) onSelectVersion?.(chosen.key);
+            setVersionMenuOpen(false);
+          }
+        }
+        return true;
+      }
       if (synopsisExpanded) {
         if (event.kind === 'press' && (event.key === 'back' || event.key === 'select')) {
           setSynopsisExpanded(false);
@@ -106,19 +121,19 @@ export function useDetailExtrasState({
       }
       return fallback(event);
     },
-    [synopsisExpanded],
+    [onSelectVersion, synopsisExpanded, versionMenuIndex, versionMenuOpen, versions],
   );
 
   return {
-    audioLang,
-    subtitleLang,
+    versionMenuOpen,
+    versionMenuIndex,
     synopsisExpanded,
     trimmedPlot,
     canExpandSynopsis,
     heroPlaySlots,
     castPeople,
-    cycleAudio,
-    cycleSubtitles,
+    toggleVersionMenu,
+    closeVersionMenu,
     toggleSynopsis,
     dismissSynopsis,
     interceptTvKey,

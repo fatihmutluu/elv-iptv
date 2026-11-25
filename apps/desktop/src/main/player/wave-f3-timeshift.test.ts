@@ -92,29 +92,40 @@ describe('Desktop libmpv bounded live time-shift (#28)', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(s.fake.sent.filter((c) => c[0] === 'seek')).toHaveLength(seekCountBeforeStale);
 
-    // Current attempt jumps directly to liveEdgeMs (40s)
+    // Current attempt always seeks 100 absolute-percent and unpauses in one shot
     s.engine.jumpToLiveEdge?.(2);
     await vi.waitFor(
-      () =>
-        expect(
-          s.fake.sent.filter((c) => c[0] === 'seek' && c[1] === 40 && c[2] === 'absolute'),
-        ).toHaveLength(2),
+      () => {
+        expect(s.fake.sent).toContainEqual(['seek', 100, 'absolute-percent']);
+        expect(s.fake.sent).toContainEqual(['set_property', 'pause', false]);
+      },
       { interval: 5 },
     );
   });
 
-  it('falls back to seek 100 absolute-percent when liveEdgeMs is not cached yet and ignores VOD', async () => {
+  it('always sends seek 100 absolute-percent + set_property pause false (including while paused) and ignores VOD', async () => {
     const s = await setupEngineTest(cleanups, {
       scripts: { [URL_B]: LIVE_NO_CACHE_EDGE, [URL_VOD]: VOD },
+      audioRampMs: 0,
     });
 
     s.engine.load(live(1, URL_B));
     await playing(s.events, 1);
 
+    s.engine.pause(1);
+    await vi.waitFor(
+      () => expect(s.events.some((e) => e.type === 'state' && e.state === 'paused')).toBe(true),
+      { interval: 5 },
+    );
+
     s.engine.jumpToLiveEdge?.(1);
-    await vi.waitFor(() => expect(s.fake.sent).toContainEqual(['seek', 100, 'absolute-percent']), {
-      interval: 5,
-    });
+    await vi.waitFor(
+      () => {
+        expect(s.fake.sent).toContainEqual(['seek', 100, 'absolute-percent']);
+        expect(s.fake.sent).toContainEqual(['set_property', 'pause', false]);
+      },
+      { interval: 5 },
+    );
 
     // VOD ignores jumpToLiveEdge
     s.engine.load({ attempt: 2, url: URL_VOD, headers: {}, kind: 'vod' });
@@ -217,9 +228,13 @@ describe('Desktop libmpv bounded live time-shift (#28)', () => {
     );
 
     desktopEngine.jumpToLiveEdge?.(1);
-    await vi.waitFor(() => expect(s.fake.sent).toContainEqual(['seek', 40, 'absolute']), {
-      interval: 5,
-    });
+    await vi.waitFor(
+      () => {
+        expect(s.fake.sent).toContainEqual(['seek', 100, 'absolute-percent']);
+        expect(s.fake.sent).toContainEqual(['set_property', 'pause', false]);
+      },
+      { interval: 5 },
+    );
   });
 
   it('keeps advancing liveEdgeMs and liveSeekableStartMs anchors while a live stream is paused', async () => {

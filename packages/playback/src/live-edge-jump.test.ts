@@ -42,7 +42,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('PlaybackService.jumpToLiveEdge (#141)', () => {
-  it('seeks to liveEdgeMs - 3_000 on live MPEG-TS streams lagging behind live edge and returns true', async () => {
+  it('seeks to liveEdgeMs - 1_000 on live MPEG-TS streams lagging > 15s behind live edge and returns true', async () => {
     const { engine, service } = setup();
     const t = service.tune(tuneReq('http://provider.invalid/live/1.ts', { kind: 'live' }));
     await vi.advanceTimersByTimeAsync(300);
@@ -60,24 +60,25 @@ describe('PlaybackService.jumpToLiveEdge (#141)', () => {
     });
 
     expect(service.jumpToLiveEdge()).toBe(true);
-    expect(service.getState().anchor?.positionMs).toBe(27_000);
+    expect(service.getState().anchor?.positionMs).toBe(29_000);
     expect(service.getState().anchor?.isLiveTs).toBe(true);
     expect(service.getState().atLiveEdge).toBe(true);
-    expect(engine.commands.at(-1)).toEqual({ name: 'seek', attempt: t, positionMs: 27_000 });
+    expect(engine.commands.at(-1)).toEqual({ name: 'seek', attempt: t, positionMs: 29_000 });
 
-    // Immediate second call is now within 4s of live edge -> returns false (no-op)
+    // Immediate second call is now within 15s of live edge -> returns false (no-op)
     const countBefore = engine.commands.length;
     expect(service.jumpToLiveEdge()).toBe(false);
     expect(engine.commands.length).toBe(countBefore);
   });
 
-  it('works while paused on a live MPEG-TS stream behind live edge', async () => {
+  it('works while paused on a live MPEG-TS stream and unpauses cleanly on the same attempt', async () => {
     const { engine, service } = setup();
     const t = service.tune(tuneReq('http://provider.invalid/live/2.ts', { kind: 'live' }));
     await vi.advanceTimersByTimeAsync(300);
 
     service.pause();
     const pausedToken = service.getState().attempt;
+    engine.emit({ attempt: pausedToken, type: 'state', state: 'paused' });
     engine.emit({
       attempt: pausedToken,
       type: 'clock',
@@ -91,12 +92,13 @@ describe('PlaybackService.jumpToLiveEdge (#141)', () => {
     });
 
     expect(service.jumpToLiveEdge()).toBe(true);
-    expect(service.getState().anchor?.positionMs).toBe(22_000);
-    expect(engine.commands.at(-1)).toEqual({
-      name: 'seek',
-      attempt: pausedToken,
-      positionMs: 22_000,
-    });
+    expect(service.getState().attempt).toBe(pausedToken);
+    expect(service.getState().status.kind).toBe('tuning');
+    expect(service.getState().anchor?.positionMs).toBe(24_000);
+    expect(engine.commands.slice(-2)).toEqual([
+      { name: 'seek', attempt: pausedToken, positionMs: 24_000 },
+      { name: 'play', attempt: pausedToken },
+    ]);
     expect(pausedToken).toBeGreaterThan(t);
   });
 
@@ -146,7 +148,7 @@ describe('PlaybackService.jumpToLiveEdge (#141)', () => {
     expect(engine.commands.filter((c) => c.name === 'seek')).toHaveLength(0);
   });
 
-  it('returns false when liveEdgeMs is absent, <= 3_000, non-finite, already within 4s, or idle/disposed', async () => {
+  it('returns false when liveEdgeMs is absent, <= 15_000, non-finite, already within 15s, or idle/disposed', async () => {
     const { engine, service } = setup();
 
     // Idle
@@ -163,11 +165,11 @@ describe('PlaybackService.jumpToLiveEdge (#141)', () => {
     });
     expect(service.jumpToLiveEdge()).toBe(false);
 
-    // liveEdgeMs <= 3_000
+    // liveEdgeMs <= 15_000
     engine.emit({
       attempt: t,
       type: 'clock',
-      anchor: { positionMs: 0, atMs: Date.now(), rate: 1, liveEdgeMs: 3_000, isLiveTs: true },
+      anchor: { positionMs: 0, atMs: Date.now(), rate: 1, liveEdgeMs: 15_000, isLiveTs: true },
     });
     expect(service.jumpToLiveEdge()).toBe(false);
 
@@ -185,12 +187,12 @@ describe('PlaybackService.jumpToLiveEdge (#141)', () => {
     });
     expect(service.jumpToLiveEdge()).toBe(false);
 
-    // Already within 4s of live edge (26_000 vs 30_000 -> lag = 4_000 <= 4_000)
+    // Already within 15s of live edge (18_000 vs 30_000 -> lag = 12_000 <= 15_000)
     engine.emit({
       attempt: t,
       type: 'clock',
       anchor: {
-        positionMs: 26_000,
+        positionMs: 18_000,
         atMs: Date.now(),
         rate: 1,
         liveEdgeMs: 30_000,
@@ -199,12 +201,12 @@ describe('PlaybackService.jumpToLiveEdge (#141)', () => {
     });
     expect(service.jumpToLiveEdge()).toBe(false);
 
-    // Extrapolated position catches up within 4s after clock advances
+    // Extrapolated position catches up within 15s after clock advances
     engine.emit({
       attempt: t,
       type: 'clock',
       anchor: {
-        positionMs: 20_000,
+        positionMs: 10_000,
         atMs: Date.now(),
         rate: 1,
         liveEdgeMs: 30_000,
