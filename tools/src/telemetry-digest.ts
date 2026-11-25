@@ -97,6 +97,7 @@ export interface TelemetryDigestReport {
     readonly uniqueSessions: number;
     readonly feedbackSubmissions: number;
   };
+  readonly pendingAccountDeletionRequests: number;
   readonly versionPlatformMatrix: readonly VersionPlatformRow[];
   readonly startupLatency: LatencySummary;
   readonly screenLatencies: readonly ScreenLatencyRow[];
@@ -215,6 +216,8 @@ function assertTelemetryDigestReport(raw: unknown): TelemetryDigestReport {
     typeof raw.totals.telemetryEvents !== 'number' ||
     typeof raw.totals.uniqueSessions !== 'number' ||
     typeof raw.totals.feedbackSubmissions !== 'number' ||
+    (raw.pendingAccountDeletionRequests !== undefined &&
+      typeof raw.pendingAccountDeletionRequests !== 'number') ||
     !Array.isArray(raw.versionPlatformMatrix) ||
     !isObjectRecord(raw.startupLatency) ||
     !Array.isArray(raw.screenLatencies) ||
@@ -225,7 +228,14 @@ function assertTelemetryDigestReport(raw: unknown): TelemetryDigestReport {
   ) {
     throw new Error('Digest payload does not match TelemetryDigestReport schema.');
   }
-  return raw as unknown as TelemetryDigestReport;
+  const normalized = raw as unknown as TelemetryDigestReport;
+  return {
+    ...normalized,
+    pendingAccountDeletionRequests:
+      typeof raw.pendingAccountDeletionRequests === 'number'
+        ? raw.pendingAccountDeletionRequests
+        : 0,
+  };
 }
 
 /** Loads a `TelemetryDigestReport` from a local JSON file or remote `/v1/admin/digest` endpoint. */
@@ -303,6 +313,7 @@ export function formatTelemetryDigestMarkdown(report: TelemetryDigestReport): st
   lines.push(`- **Telemetry Events:** ${report.totals.telemetryEvents}`);
   lines.push(`- **Unique Sessions:** ${report.totals.uniqueSessions}`);
   lines.push(`- **Feedback Submissions:** ${report.totals.feedbackSubmissions}`);
+  lines.push(`- **Pending Account Deletion Requests:** ${report.pendingAccountDeletionRequests}`);
   lines.push(
     `- **Startup Latency:** p50=${fmtMs(report.startupLatency.p50Ms)}, p95=${fmtMs(report.startupLatency.p95Ms)}, max=${fmtMs(report.startupLatency.maxMs)} (n=${report.startupLatency.count})`,
   );

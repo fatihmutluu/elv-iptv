@@ -303,4 +303,97 @@ describe('createDesktopVideoHost (#34)', () => {
       expect(env.mediaSession.playbackState).toBe('none');
     });
   });
+
+  describe('opt-in desktop playback telemetry (MEDIUM #15)', () => {
+    it('emits ZERO telemetry when opted out, records media_decode_failure and playback_error when opted in, and unsubscribes on release', async () => {
+      const fake = fakePlayerBridge();
+      let optedIn = false;
+      const telemetry = {
+        isOptedIn: vi.fn(() => optedIn),
+        recordMediaDecodeFailure: vi.fn(),
+        recordPlaybackError: vi.fn(),
+      };
+      const host = createDesktopVideoHost({
+        playerBridge: fake.bridge,
+        windowBridge: fakeWindowBridge(),
+        presenterKind: 'canvas',
+        telemetry,
+      });
+
+      const opened = await host.open();
+      expect(opened).not.toBeNull();
+
+      // Opted out -> zero calls on playback errors
+      fake.emitEvent('engine-1', {
+        attempt: 1,
+        type: 'error',
+        error: { code: 'decoder', detail: 'hevc mpegts decode failed' },
+      });
+      expect(telemetry.recordMediaDecodeFailure).not.toHaveBeenCalled();
+      expect(telemetry.recordPlaybackError).not.toHaveBeenCalled();
+
+      // Opt in -> mediaInfo + tracks + clock + decoder error emits structured media_decode_failure
+      optedIn = true;
+      fake.emitEvent('engine-1', {
+        attempt: 2,
+        type: 'clock',
+        anchor: { positionMs: 0, atMs: 100, rate: 1, isLiveTs: true },
+      });
+      fake.emitEvent('engine-1', {
+        attempt: 2,
+        type: 'mediaInfo',
+        info: { codec: 'video/HEVC', hdr: 'hdr10' },
+      });
+      fake.emitEvent('engine-1', {
+        attempt: 2,
+        type: 'tracks',
+        tracks: {
+          audio: [{ id: 'a1', label: 'English', codec: 'audio/ac3' }],
+          subtitles: [],
+          selectedAudioId: 'a1',
+          selectedSubtitleId: null,
+        },
+      });
+      fake.emitEvent('engine-1', {
+        attempt: 2,
+        type: 'error',
+        error: { code: 'decoder', detail: 'hwdec failed' },
+      });
+      expect(telemetry.recordMediaDecodeFailure).toHaveBeenCalledWith({
+        engine: 'mpv',
+        container: 'mpegts',
+        videoCodec: 'hevc',
+        audioCodec: 'ac3',
+        errorCode: 'decoder',
+        hdrFormat: 'hdr10',
+        isLive: true,
+      });
+
+      // VOD network error emits playback_error with isLive: false
+      fake.emitEvent('engine-1', {
+        attempt: 3,
+        type: 'clock',
+        anchor: { positionMs: 5000, durationMs: 3_600_000, atMs: 200, rate: 1 },
+      });
+      fake.emitEvent('engine-1', {
+        attempt: 3,
+        type: 'error',
+        error: { code: 'http-other', httpStatus: 503 },
+      });
+      expect(telemetry.recordPlaybackError).toHaveBeenCalledWith({
+        engine: 'mpv',
+        errorCode: 'http-other',
+        isLive: false,
+      });
+
+      // After release, subsequent events do not record telemetry
+      opened?.engine.release();
+      fake.emitEvent('engine-1', {
+        attempt: 3,
+        type: 'error',
+        error: { code: 'network' },
+      });
+      expect(telemetry.recordPlaybackError).toHaveBeenCalledTimes(1);
+    });
+  });
 });

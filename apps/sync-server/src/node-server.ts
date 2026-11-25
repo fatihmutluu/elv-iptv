@@ -2,8 +2,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createSyncApp, type SyncAppConfig } from './app.ts';
-import { randomBase64Url } from './crypto.ts';
+import { assertValidJwtSecret, randomBase64Url } from './crypto.ts';
 import { createMemoryStorage } from './storage-memory.ts';
+import { BODY_LIMITS, PayloadTooLargeError } from './validation.ts';
 
 /** Options for starting the Node HTTP bridge around `createSyncApp`. */
 export interface NodeSyncServerOptions {
@@ -13,8 +14,10 @@ export interface NodeSyncServerOptions {
   readonly adminToken?: string;
   readonly telemetryDisabled?: boolean;
   readonly publicOrigin?: string;
+  readonly trustProxy?: SyncAppConfig['trustProxy'];
   readonly storage?: SyncAppConfig['storage'];
   readonly verifierHashIterations?: number;
+  readonly rateLimits?: SyncAppConfig['rateLimits'];
 }
 
 /** Running Node HTTP sync server handle. */
@@ -25,9 +28,23 @@ export interface RunningNodeSyncServer {
   close(): Promise<void>;
 }
 
-const MAX_NODE_STREAM_BYTES = 5 * 1024 * 1024;
+function resolveNodeMaxBodyBytes(method: string, pathname: string): number {
+  if (method === 'PUT' && pathname === '/v1/vault') return BODY_LIMITS.vault;
+  if (method === 'POST' && pathname === '/v1/telemetry') return BODY_LIMITS.telemetry;
+  if (method === 'POST' && pathname === '/account-deletion') return BODY_LIMITS.accountDeletion;
+  return BODY_LIMITS.auth;
+}
 
-function readNodeRequestBody(req: IncomingMessage): Promise<Buffer> {
+function readNodeRequestBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const declaredLen = req.headers['content-length'];
+  if (typeof declaredLen === 'string') {
+    const parsed = Number(declaredLen);
+    if (Number.isFinite(parsed) && parsed > maxBytes) {
+      req.pause();
+      return Promise.reject(new PayloadTooLargeError(maxBytes));
+    }
+  }
+
   return new Promise((resolveBody, rejectBody) => {
     const chunks: Buffer[] = [];
     let total = 0;
@@ -36,10 +53,10 @@ function readNodeRequestBody(req: IncomingMessage): Promise<Buffer> {
     req.on('data', (chunk: Buffer) => {
       if (settled) return;
       total += chunk.byteLength;
-      if (total > MAX_NODE_STREAM_BYTES) {
+      if (total > maxBytes) {
         settled = true;
-        req.destroy();
-        rejectBody(new Error('NODE_BODY_LIMIT_EXCEEDED'));
+        req.pause();
+        rejectBody(new PayloadTooLargeError(maxBytes));
         return;
       }
       chunks.push(chunk);
@@ -54,6 +71,11 @@ function readNodeRequestBody(req: IncomingMessage): Promise<Buffer> {
       settled = true;
       rejectBody(err);
     });
+    req.on('aborted', () => {
+      if (settled) return;
+      settled = true;
+      rejectBody(new Error('NODE_REQUEST_ABORTED'));
+    });
   });
 }
 
@@ -66,13 +88,11 @@ function toWebHeaders(req: IncomingMessage): Headers {
       headers.set(key, value);
     }
   }
-  if (!headers.has('x-forwarded-for') && req.socket.remoteAddress) {
-    headers.set('x-forwarded-for', req.socket.remoteAddress);
-  }
   return headers;
 }
 
 async function writeWebResponse(res: ServerResponse, response: Response): Promise<void> {
+  if (res.writableEnded || res.destroyed) return;
   const headerEntries: Record<string, string> = {};
   response.headers.forEach((value, key) => {
     headerEntries[key] = value;
@@ -88,7 +108,13 @@ export async function startNodeSyncServer(
 ): Promise<RunningNodeSyncServer> {
   const host = options.host ?? '127.0.0.1';
   const requestedPort = options.port ?? 8787;
-  const jwtSecret = options.jwtSecret ?? process.env.JWT_SECRET ?? randomBase64Url(32);
+  const jwtSecret =
+    options.jwtSecret !== undefined
+      ? options.jwtSecret
+      : process.env.JWT_SECRET !== undefined
+        ? process.env.JWT_SECRET
+        : randomBase64Url(32);
+  assertValidJwtSecret(jwtSecret);
 
   const app = createSyncApp({
     storage: options.storage ?? createMemoryStorage(),
@@ -96,32 +122,60 @@ export async function startNodeSyncServer(
     adminToken: options.adminToken ?? process.env.ADMIN_TOKEN ?? '',
     telemetryDisabled: options.telemetryDisabled ?? process.env.TELEMETRY_DISABLED === 'true',
     publicOrigin: options.publicOrigin ?? process.env.PUBLIC_ORIGIN ?? '*',
+    trustProxy: options.trustProxy ?? 'none',
     ...(options.verifierHashIterations !== undefined
       ? { verifierHashIterations: options.verifierHashIterations }
       : {}),
+    ...(options.rateLimits !== undefined ? { rateLimits: options.rateLimits } : {}),
   });
 
   const server = createServer((req, res) => {
     void (async () => {
       try {
         const method = (req.method ?? 'GET').toUpperCase();
-        const url = `http://${req.headers.host ?? `${host}:${requestedPort}`}${req.url ?? '/'}`;
+        const rawHost = req.headers.host ?? `${host}:${requestedPort}`;
+        const rawPath = req.url ?? '/';
+        let parsedUrl: URL;
+        try {
+          if (!rawPath.startsWith('/') || /[\s/@\\]/.test(rawHost)) {
+            throw new TypeError('Invalid Host header');
+          }
+          parsedUrl = new URL(`http://${rawHost}${rawPath}`);
+        } catch {
+          if (!res.writableEnded && !res.destroyed) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ error: 'invalid_request_url' }));
+          }
+          return;
+        }
+
         const headers = toWebHeaders(req);
         const hasBody = method !== 'GET' && method !== 'HEAD';
-        const bodyBytes = hasBody ? await readNodeRequestBody(req) : undefined;
+        const maxBodyBytes = resolveNodeMaxBodyBytes(method, parsedUrl.pathname);
+        const bodyBytes = hasBody ? await readNodeRequestBody(req, maxBodyBytes) : undefined;
         const init: RequestInit = { method, headers };
         if (bodyBytes && bodyBytes.byteLength > 0) {
           init.body = new Uint8Array(bodyBytes);
         }
-        const webReq = new Request(url, init);
-        const webRes = await app.fetch(webReq);
+        const webReq = new Request(parsedUrl.toString(), init);
+        const webRes = await app.fetch(webReq, {
+          clientIp: req.socket.remoteAddress ?? 'unknown',
+        });
         await writeWebResponse(res, webRes);
       } catch (error) {
-        const isTooLarge = error instanceof Error && error.message === 'NODE_BODY_LIMIT_EXCEEDED';
-        res.writeHead(isTooLarge ? 413 : 500, {
+        if (res.writableEnded || res.destroyed) return;
+        if (error instanceof PayloadTooLargeError) {
+          res.writeHead(413, {
+            'Content-Type': 'application/json; charset=utf-8',
+            Connection: 'close',
+          });
+          res.end(JSON.stringify({ error: 'payload_too_large', maxBytes: error.maxBytes }));
+          return;
+        }
+        res.writeHead(500, {
           'Content-Type': 'application/json; charset=utf-8',
         });
-        res.end(JSON.stringify({ error: isTooLarge ? 'payload_too_large' : 'internal_error' }));
+        res.end(JSON.stringify({ error: 'internal_error' }));
       }
     })();
   });
@@ -157,7 +211,7 @@ const isDirectEntry =
 if (isDirectEntry) {
   const port = Number(process.env.PORT ?? '8787');
   const host = process.env.HOST ?? '127.0.0.1';
-  if (!process.env.JWT_SECRET) {
+  if (process.env.JWT_SECRET === undefined) {
     process.stderr.write(
       'warn: JWT_SECRET not set; generated ephemeral secret for this process only.\n',
     );

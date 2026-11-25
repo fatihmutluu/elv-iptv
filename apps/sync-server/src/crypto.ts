@@ -13,6 +13,21 @@ export const REFRESH_TOKEN_TTL_SEC = 30 * 24 * 60 * 60;
 /** Default QR pairing session lifetime in seconds (5 minutes). */
 export const PAIR_SESSION_TTL_SEC = 5 * 60;
 
+const MIN_JWT_SECRET_BYTES = 16;
+
+/** Validates that `jwtSecret` has at least 16 non-whitespace characters/bytes. */
+export function assertValidJwtSecret(secret: string): void {
+  const trimmed = typeof secret === 'string' ? secret.trim() : '';
+  if (
+    trimmed.length < MIN_JWT_SECRET_BYTES ||
+    encoder.encode(trimmed).byteLength < MIN_JWT_SECRET_BYTES
+  ) {
+    throw new Error(
+      `JWT_SECRET must be at least ${MIN_JWT_SECRET_BYTES} non-whitespace characters/bytes.`,
+    );
+  }
+}
+
 const PAIRING_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const PAIRING_CODE_LENGTH = 12;
 
@@ -33,9 +48,10 @@ function base64UrlEncode(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-/** Decodes an unpadded or padded base64url string into bytes, returning null on invalid input. */
+/** Decodes a strict unpadded base64url string into bytes, returning null on invalid input. */
 function base64UrlDecode(input: string): Uint8Array | null {
-  if (!/^[A-Za-z0-9_-]*={0,2}$/.test(input)) return null;
+  if (input.length === 0 || input.length % 4 === 1) return null;
+  if (!/^[A-Za-z0-9_-]+$/.test(input)) return null;
   const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
   const padLen = (4 - (normalized.length % 4)) % 4;
   const padded = normalized + '='.repeat(padLen);
@@ -45,6 +61,7 @@ function base64UrlDecode(input: string): Uint8Array | null {
     for (let i = 0; i < binary.length; i += 1) {
       out[i] = binary.charCodeAt(i);
     }
+    if (base64UrlEncode(out) !== input) return null;
     return out;
   } catch {
     return null;

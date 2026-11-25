@@ -96,7 +96,12 @@ function AppRoot() {
     [],
   );
 
-  const videoHost = useMemo<VideoHost>(() => createDesktopVideoHost(), []);
+  const desktopSync = useMemo(() => createDesktopSyncPorts(window.elv), []);
+
+  const videoHost = useMemo<VideoHost>(
+    () => createDesktopVideoHost({ telemetry: desktopSync.telemetry }),
+    [desktopSync.telemetry],
+  );
 
   const desktopWindow = useMemo<DesktopWindowPort | undefined>(
     () => createDesktopWindowPort(window.elv?.window),
@@ -243,19 +248,26 @@ function AppRoot() {
     [],
   );
 
-  const desktopSync = useMemo(() => createDesktopSyncPorts(window.elv), []);
-
   useEffect(() => {
     let active = true;
     let lastServerUrl: string | undefined;
-    const syncServerUrlPref = (nextUrl: string): void => {
-      if (!active || lastServerUrl === nextUrl) return;
-      lastServerUrl = nextUrl;
-      void desktopSync.setServerUrl(nextUrl);
+    let lastTelemetryOptIn: boolean | undefined;
+    const syncPrefs = (snap: { syncServerUrl: string; telemetryOptIn: boolean }): void => {
+      if (!active) return;
+      if (lastServerUrl !== snap.syncServerUrl) {
+        lastServerUrl = snap.syncServerUrl;
+        void desktopSync.setServerUrl(snap.syncServerUrl);
+      }
+      if (lastTelemetryOptIn !== snap.telemetryOptIn) {
+        lastTelemetryOptIn = snap.telemetryOptIn;
+        if (desktopSync.telemetry?.isOptedIn() !== snap.telemetryOptIn) {
+          desktopSync.telemetry?.setOptIn(snap.telemetryOptIn);
+        }
+      }
     };
     void desktopSync.hydrate();
-    void preferencesStore.load().then((snap) => syncServerUrlPref(snap.syncServerUrl));
-    const unsubPrefs = preferencesStore.subscribe((snap) => syncServerUrlPref(snap.syncServerUrl));
+    void preferencesStore.load().then(syncPrefs);
+    const unsubPrefs = preferencesStore.subscribe(syncPrefs);
     return () => {
       active = false;
       unsubPrefs();

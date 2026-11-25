@@ -10,7 +10,7 @@ Self-hostable zero-knowledge E2EE sync, universal QR pairing, and opt-in redacte
 ## Routes
 - `GET /health` — liveness probe.
 - `GET /account-deletion`, `POST /account-deletion` — public EN/TR account deletion guide and non-enumerating request form.
-- `POST /v1/auth/register`, `POST /v1/auth/login`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/auth/account`.
+- `POST /v1/auth/register`, `POST /v1/auth/login`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `POST /v1/auth/pair-token`, `DELETE /v1/auth/account`.
 - `POST /v1/pair/create`, `POST /v1/pair/claim`, `GET /v1/pair/poll/:id` (5m TTL, single-use atomic consumption).
 - `GET /v1/vault`, `PUT /v1/vault` (optimistic concurrency via `expectedRevision`, opaque ciphertext only).
 - `POST /v1/telemetry`, `POST /v1/feedback` (strict allowlist + secret/URL/path rejection + remote kill-switch).

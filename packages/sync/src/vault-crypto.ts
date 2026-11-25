@@ -15,6 +15,27 @@ export const DEFAULT_KDF_ITERATIONS = 210_000;
 /** Minimum allowed KDF iteration count accepted for vault unlock and registration. */
 export const MIN_KDF_ITERATIONS = 100_000;
 
+/** Maximum allowed KDF iteration count accepted for vault unlock and registration (DoS guard). */
+export const MAX_KDF_ITERATIONS = 5_000_000;
+
+/** Returns true when `iterations` is a safe integer within `[MIN_KDF_ITERATIONS, MAX_KDF_ITERATIONS]`. */
+export function isValidKdfIterations(iterations: unknown): iterations is number {
+  return (
+    typeof iterations === 'number' &&
+    Number.isSafeInteger(iterations) &&
+    iterations >= MIN_KDF_ITERATIONS &&
+    iterations <= MAX_KDF_ITERATIONS
+  );
+}
+
+function assertValidKdfIterations(iterations: number): void {
+  if (!isValidKdfIterations(iterations)) {
+    throw new Error(
+      `KDF iterations must be a safe integer between ${MIN_KDF_ITERATIONS} and ${MAX_KDF_ITERATIONS}`,
+    );
+  }
+}
+
 const VAULT_KEY_BYTES = 32;
 const AES_GCM_IV_BYTES = 12;
 const KDF_SALT_BYTES = 16;
@@ -84,6 +105,7 @@ export async function deriveAuthVerifier(
   password: string,
   iterations = DEFAULT_KDF_ITERATIONS,
 ): Promise<string> {
+  assertValidKdfIterations(iterations);
   const normalized = normalizeSyncEmail(email);
   if (normalized.length === 0) throw new Error('Email must not be empty');
   if (password.length === 0) throw new Error('Password must not be empty');
@@ -141,6 +163,7 @@ export async function createNewVaultBundle(
   password: string,
   iterations = DEFAULT_KDF_ITERATIONS,
 ): Promise<NewVaultBundle> {
+  assertValidKdfIterations(iterations);
   const kdfSalt = base64UrlEncode(crypto.randomBytes(KDF_SALT_BYTES));
   const vaultKey = crypto.randomBytes(VAULT_KEY_BYTES);
   const recoveryCode = formatRecoveryCode(crypto.randomBytes(RECOVERY_ENTROPY_BYTES));
@@ -189,6 +212,7 @@ export async function unlockVaultWithPassword(
   password: string,
   meta: Pick<VaultKeyMetadata, 'kdfSalt' | 'kdfIterations' | 'wrappedVaultKey'>,
 ): Promise<Uint8Array> {
+  assertValidKdfIterations(meta.kdfIterations);
   if (password.length === 0) throw new Error('Password must not be empty');
   const vaultKek = await crypto.deriveKeyPbkdf2(
     utf8Encode(password),
@@ -205,6 +229,7 @@ export async function unlockVaultWithRecoveryCode(
   recoveryCode: string,
   meta: Pick<VaultKeyMetadata, 'kdfSalt' | 'kdfIterations' | 'recoveryWrappedVaultKey'>,
 ): Promise<Uint8Array> {
+  assertValidKdfIterations(meta.kdfIterations);
   const normalized = normalizeRecoveryCode(recoveryCode);
   const recoveryKek = await crypto.deriveKeyPbkdf2(
     utf8Encode(normalized),
@@ -249,6 +274,21 @@ export async function encryptVaultSnapshot(
   };
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isTombstoneItemArray(value: unknown, keyField: 'id' | 'key' | 'seriesKey'): boolean {
+  if (!Array.isArray(value)) return false;
+  for (const item of value) {
+    if (!isPlainObject(item)) return false;
+    if (typeof item[keyField] !== 'string') return false;
+    if (typeof item.updatedAt !== 'number' || !Number.isFinite(item.updatedAt)) return false;
+    if (keyField === 'seriesKey' && typeof item.bitsB64 !== 'string') return false;
+  }
+  return true;
+}
+
 /** Decrypts and authenticates an {@link EncryptedVaultBlob} bound to `(userId, revision)`. */
 export async function decryptVaultSnapshot(
   crypto: VaultCryptoPort,
@@ -268,12 +308,22 @@ export async function decryptVaultSnapshot(
   const aad = buildVaultBlobAad(userId, revision);
   const plaintext = await crypto.decryptAesGcm(vaultKey, iv, ciphertext, aad);
   const parsed: unknown = JSON.parse(utf8Decode(plaintext));
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    (parsed as { schemaVersion?: unknown }).schemaVersion !== VAULT_SCHEMA_VERSION
-  ) {
+  if (!isPlainObject(parsed) || parsed.schemaVersion !== VAULT_SCHEMA_VERSION) {
     throw new Error('Invalid vault snapshot schemaVersion');
   }
-  return parsed as VaultSnapshot;
+  if (
+    typeof parsed.updatedAt !== 'number' ||
+    !Number.isFinite(parsed.updatedAt) ||
+    !isTombstoneItemArray(parsed.sources, 'id') ||
+    !isTombstoneItemArray(parsed.favorites, 'key') ||
+    !isTombstoneItemArray(parsed.hiddenChannels, 'key') ||
+    !isTombstoneItemArray(parsed.pinnedChannels, 'key') ||
+    !isTombstoneItemArray(parsed.customGroups, 'id') ||
+    !isTombstoneItemArray(parsed.collections, 'id') ||
+    !isTombstoneItemArray(parsed.watchProgress, 'key') ||
+    !isTombstoneItemArray(parsed.watchedEpisodesBitfields, 'seriesKey')
+  ) {
+    throw new Error('Invalid vault snapshot structure');
+  }
+  return parsed as unknown as VaultSnapshot;
 }

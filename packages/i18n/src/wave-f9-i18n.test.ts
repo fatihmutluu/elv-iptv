@@ -54,8 +54,8 @@ const EXPECTED_PAIRS: ReadonlyArray<readonly [MessageId, string, string]> = [
   ],
   [
     'account.oauthComingSoon',
-    'Apple and Google sign-in support will be available in a future store update.',
-    'Apple ve Google ile giriş desteği gelecek mağaza güncellemesinde eklenecek.',
+    'Sign in with your email and password, or pair this device with a QR code.',
+    'E-posta ve şifrenizle giriş yapın veya bu cihazı QR kod ile eşleştirin.',
   ],
   ['account.recoveryTitle', 'Save Your Recovery Code', 'Kurtarma Kodunuzu Kaydedin'],
   [

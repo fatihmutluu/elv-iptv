@@ -1,4 +1,5 @@
 export {
+  type AccountPreferencesSlice,
   AccountSettingsPanel,
   type AccountSettingsPanelProps,
 } from './AccountSettingsPanel';

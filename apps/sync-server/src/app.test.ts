@@ -740,6 +740,7 @@ describe('ELV Sync Server (@elv/sync-server)', () => {
 
   it('rate limits abusive clients per IP with 429 and Retry-After', async () => {
     const { app, advanceMs } = makeApp({
+      trustProxy: 'cloudflare',
       rateLimits: {
         auth: { windowMs: 10_000, maxRequests: 2 },
       },
@@ -756,7 +757,7 @@ describe('ELV Sync Server (@elv/sync-server)', () => {
 
     // Different IP is unaffected
     const otherIp = await app.fetch(
-      jsonReq('/v1/auth/login', 'POST', {}, { 'x-forwarded-for': '198.51.100.7, 10.0.0.1' }),
+      jsonReq('/v1/auth/login', 'POST', {}, { 'cf-connecting-ip': '198.51.100.7' }),
     );
     expect(otherIp.status).toBe(401);
 

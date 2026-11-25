@@ -87,6 +87,7 @@ export interface TelemetryDigestReport {
     readonly uniqueSessions: number;
     readonly feedbackSubmissions: number;
   };
+  readonly pendingAccountDeletionRequests: number;
   readonly versionPlatformMatrix: readonly VersionPlatformRow[];
   readonly startupLatency: LatencySummary;
   readonly screenLatencies: readonly ScreenLatencyRow[];
@@ -155,6 +156,7 @@ export function buildTelemetryDigest(
   feedback: readonly FeedbackSubmissionRecord[],
   generatedAt: string,
   sinceIso: string | null,
+  pendingAccountDeletionRequests = 0,
 ): TelemetryDigestReport {
   const uniqueSessions = new Set<string>();
   const matrixAcc = new Map<
@@ -415,6 +417,7 @@ export function buildTelemetryDigest(
       uniqueSessions: sessionCount,
       feedbackSubmissions: feedback.length,
     },
+    pendingAccountDeletionRequests,
     versionPlatformMatrix,
     startupLatency: summarizeLatencies(startupDurations),
     screenLatencies,

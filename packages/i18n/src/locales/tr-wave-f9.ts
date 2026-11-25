@@ -36,7 +36,7 @@ export const trWaveF9Messages: Readonly<Record<WaveF9MessageId, string>> = {
   'account.signedInAs': 'Giriş yapılan hesap',
   'account.serverUrlLabel': 'Eşitleme sunucusu adresi (isteğe bağlı)',
   'account.oauthComingSoon':
-    'Apple ve Google ile giriş desteği gelecek mağaza güncellemesinde eklenecek.',
+    'E-posta ve şifrenizle giriş yapın veya bu cihazı QR kod ile eşleştirin.',
   'account.recoveryTitle': 'Kurtarma Kodunuzu Kaydedin',
   'account.recoveryBody':
     'Bu kurtarma kodunu çevrimdışı saklayın. Eşitleme uçtan uca şifreli olduğu için bu kod olmadan kasa anahtarınız sıfırlanamaz.',

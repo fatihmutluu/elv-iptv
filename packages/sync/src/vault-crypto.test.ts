@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { base64UrlDecode, base64UrlEncode } from './encoding';
 import { createPureJsVaultCryptoPort, createWebCryptoVaultPort } from './pure-crypto';
 import {
@@ -7,14 +7,21 @@ import {
   deriveAuthVerifier,
   encryptVaultSnapshot,
   formatRecoveryCode,
+  isValidKdfIterations,
+  MAX_KDF_ITERATIONS,
+  MIN_KDF_ITERATIONS,
   normalizeRecoveryCode,
   unlockVaultWithPassword,
   unlockVaultWithRecoveryCode,
 } from './vault-crypto';
-import { createEmptyVaultSnapshot, encodeEpisodeBitfield, type VaultSnapshot } from './vault-merge';
+import {
+  createEmptyVaultSnapshot,
+  encodeEpisodeBitfield,
+  mergeVaultSnapshots,
+  type VaultSnapshot,
+} from './vault-merge';
 
-// Fast iteration count for unit tests; production default is 210_000.
-const TEST_ITERATIONS = 1_000;
+const TEST_ITERATIONS = MIN_KDF_ITERATIONS;
 
 function seededRandom(seed = 99): (len: number) => Uint8Array {
   let state = seed >>> 0;
@@ -30,7 +37,9 @@ function seededRandom(seed = 99): (len: number) => Uint8Array {
 
 describe('vault-crypto zero-knowledge lifecycle', () => {
   it('derives deterministic email-normalized auth verifiers without sending password', async () => {
-    const crypto = createPureJsVaultCryptoPort(seededRandom(1));
+    const crypto = createWebCryptoVaultPort(globalThis.crypto.subtle, (arr) =>
+      globalThis.crypto.getRandomValues(arr),
+    );
     const v1 = await deriveAuthVerifier(
       crypto,
       'User@Example.COM ',
@@ -106,7 +115,9 @@ describe('vault-crypto zero-knowledge lifecycle', () => {
   });
 
   it('encrypts and decrypts snapshots and rejects tampered AAD, revision, userId, or tag', async () => {
-    const crypto = createPureJsVaultCryptoPort(seededRandom(21));
+    const crypto = createWebCryptoVaultPort(globalThis.crypto.subtle, (arr) =>
+      globalThis.crypto.getRandomValues(arr),
+    );
     const bundle = await createNewVaultBundle(
       crypto,
       'bob@example.com',
@@ -172,5 +183,106 @@ describe('vault-crypto zero-knowledge lifecycle', () => {
     await expect(
       encryptVaultSnapshot(crypto, new Uint8Array(16), 'usr_abc', 4, snapshot),
     ).rejects.toThrow();
+  });
+
+  it('enforces KDF iteration bounds [MIN_KDF_ITERATIONS, MAX_KDF_ITERATIONS] across all vault KDF entrypoints', async () => {
+    expect(MIN_KDF_ITERATIONS).toBe(100_000);
+    expect(MAX_KDF_ITERATIONS).toBe(5_000_000);
+    expect(isValidKdfIterations(MIN_KDF_ITERATIONS)).toBe(true);
+    expect(isValidKdfIterations(MAX_KDF_ITERATIONS)).toBe(true);
+    expect(isValidKdfIterations(MIN_KDF_ITERATIONS - 1)).toBe(false);
+    expect(isValidKdfIterations(MAX_KDF_ITERATIONS + 1)).toBe(false);
+    expect(isValidKdfIterations(100_000.5)).toBe(false);
+    expect(isValidKdfIterations(Number.NaN)).toBe(false);
+    expect(isValidKdfIterations(Number.POSITIVE_INFINITY)).toBe(false);
+
+    const crypto = createPureJsVaultCryptoPort(seededRandom(41));
+    const deriveSpy = vi.spyOn(crypto, 'deriveKeyPbkdf2');
+    const recoveryCode = formatRecoveryCode(new Uint8Array(15).fill(0x22));
+
+    for (const badIter of [
+      0,
+      -10,
+      1,
+      MIN_KDF_ITERATIONS - 1,
+      MAX_KDF_ITERATIONS + 1,
+      1_000_000_000,
+      100_000.25,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ]) {
+      await expect(
+        deriveAuthVerifier(crypto, 'alice@example.com', 'password-1234', badIter),
+      ).rejects.toThrow(/KDF iterations/);
+      await expect(
+        createNewVaultBundle(crypto, 'alice@example.com', 'password-1234', badIter),
+      ).rejects.toThrow(/KDF iterations/);
+      await expect(
+        unlockVaultWithPassword(crypto, 'password-1234', {
+          kdfSalt: 'c2FsdA',
+          kdfIterations: badIter,
+          wrappedVaultKey: 'v1.aaaa.bbbb',
+        }),
+      ).rejects.toThrow(/KDF iterations/);
+      await expect(
+        unlockVaultWithRecoveryCode(crypto, recoveryCode, {
+          kdfSalt: 'c2FsdA',
+          kdfIterations: badIter,
+          recoveryWrappedVaultKey: 'v1.aaaa.bbbb',
+        }),
+      ).rejects.toThrow(/KDF iterations/);
+    }
+    expect(deriveSpy).not.toHaveBeenCalled();
+  });
+
+  it('validates all VaultSnapshot collection fields in decryptVaultSnapshot so mergeVaultSnapshots never throws', async () => {
+    const crypto = createPureJsVaultCryptoPort(seededRandom(61));
+    const vaultKey = new Uint8Array(32).fill(0x42);
+    const valid = createEmptyVaultSnapshot(1_700_000_000_000);
+
+    const validBlob = await encryptVaultSnapshot(crypto, vaultKey, 'usr_1', 1, valid);
+    const decryptedValid = await decryptVaultSnapshot(crypto, vaultKey, 'usr_1', 1, validBlob);
+    expect(mergeVaultSnapshots(decryptedValid, createEmptyVaultSnapshot(0))).toEqual(valid);
+
+    const collectionKeys = [
+      'sources',
+      'favorites',
+      'hiddenChannels',
+      'pinnedChannels',
+      'customGroups',
+      'collections',
+      'watchProgress',
+      'watchedEpisodesBitfields',
+    ] as const;
+
+    for (const key of collectionKeys) {
+      const broken = { ...valid, [key]: { notAnArray: true } } as unknown as VaultSnapshot;
+      const blob = await encryptVaultSnapshot(crypto, vaultKey, 'usr_1', 2, broken);
+      await expect(decryptVaultSnapshot(crypto, vaultKey, 'usr_1', 2, blob)).rejects.toThrow(
+        /Invalid vault snapshot structure/,
+      );
+    }
+
+    const malformedPayloads: unknown[] = [
+      null,
+      [],
+      { ...valid, schemaVersion: 99 },
+      { ...valid, updatedAt: 'not-a-number' },
+      { ...valid, sources: [null] },
+      { ...valid, favorites: [{ updatedAt: 1 }] },
+      { ...valid, watchedEpisodesBitfields: [{ seriesKey: 's1', updatedAt: 1 }] },
+    ];
+    for (const malformed of malformedPayloads) {
+      const blob = await encryptVaultSnapshot(
+        crypto,
+        vaultKey,
+        'usr_1',
+        3,
+        malformed as VaultSnapshot,
+      );
+      await expect(decryptVaultSnapshot(crypto, vaultKey, 'usr_1', 3, blob)).rejects.toThrow(
+        /Invalid vault snapshot/,
+      );
+    }
   });
 });

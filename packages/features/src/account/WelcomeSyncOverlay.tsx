@@ -3,7 +3,7 @@ import type { MessageId } from '@elv/i18n';
 import {
   CtaButton,
   TextEntryBoundary,
-  TvFocusAnchor,
+  TvFocusGuideRegion,
   useI18n,
   useKeyInterpreter,
   useTheme,
@@ -35,11 +35,11 @@ export interface WelcomeSyncOverlayProps {
   readonly qrPollIntervalMs?: number;
 }
 
-function WelcomeTvKeyBridge({ onBack }: { readonly onBack: () => void }): ReactElement {
+function WelcomeTvKeyBridge({ onBack }: { readonly onBack: (() => void) | undefined }): null {
   const handleKey = useCallback(
     (event: KeyEvent): boolean => {
       if (event.kind === 'press' && event.key === 'back') {
-        onBack();
+        onBack?.();
         return true;
       }
       return false;
@@ -47,7 +47,7 @@ function WelcomeTvKeyBridge({ onBack }: { readonly onBack: () => void }): ReactE
     [onBack],
   );
   useKeyInterpreter(handleKey);
-  return <TvFocusAnchor testID="welcome-tv-focus-anchor" />;
+  return null;
 }
 
 /**
@@ -176,8 +176,14 @@ export function WelcomeSyncOverlay({
 
   return (
     <TextEntryBoundary>
-      <View
-        testID="welcome-sync-overlay"
+      <TvFocusGuideRegion
+        testID="welcome-sync-focus-guide"
+        enabled={isTv}
+        autoFocus
+        trapFocusUp
+        trapFocusDown
+        trapFocusLeft
+        trapFocusRight
         style={[
           styles.backdrop,
           {
@@ -187,215 +193,223 @@ export function WelcomeSyncOverlay({
           },
         ]}
       >
-        {isTv ? (
-          <WelcomeTvKeyBridge
-            onBack={recoveryCode !== null ? handleAcknowledgeRecovery : onContinueWithoutAccount}
-          />
-        ) : null}
+        <View testID="welcome-sync-overlay" style={styles.overlayCenter}>
+          {isTv ? (
+            <WelcomeTvKeyBridge
+              onBack={recoveryCode === null ? onContinueWithoutAccount : undefined}
+            />
+          ) : null}
 
-        <View
-          style={[
-            styles.panel,
-            {
-              backgroundColor: theme.colors.bgElevated,
-              borderColor: theme.colors.glassBorder,
-              borderRadius: theme.radius.modal,
-            },
-            webBackdropBlur(20),
-          ]}
-        >
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={[styles.scrollContent, { gap: theme.spacing.md }]}
-            keyboardShouldPersistTaps="handled"
+          <View
+            style={[
+              styles.panel,
+              {
+                backgroundColor: theme.colors.bgElevated,
+                borderColor: theme.colors.glassBorder,
+                borderRadius: theme.radius.modal,
+              },
+              webBackdropBlur(20),
+            ]}
           >
-            <View style={styles.header}>
-              <Text
-                testID="welcome-title"
-                accessibilityRole="header"
-                style={[theme.typography.h1, { color: theme.colors.textPrimary }]}
-              >
-                {i18n.t('welcome.title')}
-              </Text>
-              <Text style={[theme.typography.body, { color: theme.colors.textSecondary }]}>
-                {i18n.t('welcome.subtitle')}
-              </Text>
-            </View>
-
-            {recoveryCode !== null ? (
-              <AccountRecoveryBanner
-                recoveryCode={recoveryCode}
-                onAcknowledge={handleAcknowledgeRecovery}
-                testIDPrefix="welcome"
-                hasTVPreferredFocus={isTv}
-              />
-            ) : (
-              <>
-                <View
-                  testID="welcome-tabs"
-                  accessibilityRole="tablist"
-                  style={[styles.tabRow, { borderBottomColor: theme.colors.surfaceBorder }]}
+            <ScrollView
+              style={styles.scroll}
+              contentContainerStyle={[styles.scrollContent, { gap: theme.spacing.md }]}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.header}>
+                <Text
+                  testID="welcome-title"
+                  accessibilityRole="header"
+                  style={[theme.typography.h1, { color: theme.colors.textPrimary }]}
                 >
-                  {tabs.map((item) => {
-                    const selected = tab === item.id;
-                    return (
-                      <Pressable
-                        key={item.id}
-                        testID={`welcome-tab-${item.id}`}
-                        accessibilityRole="tab"
-                        accessibilityLabel={i18n.t(item.labelKey)}
-                        accessibilityState={{ selected }}
-                        aria-selected={selected}
-                        focusable
-                        onPress={() => handleSelectTab(item.id)}
-                        style={(state) => [
-                          styles.tabItem,
-                          cursorPointer,
-                          tabTransition,
-                          {
-                            borderBottomColor: selected ? theme.colors.accent : 'transparent',
-                            backgroundColor: state.focused ? theme.colors.focusFill : 'transparent',
-                            borderRadius: state.focused ? theme.radius.button : 0,
-                          },
-                        ]}
-                      >
-                        <Text
-                          numberOfLines={1}
-                          style={[
-                            theme.typography.title,
+                  {i18n.t('welcome.title')}
+                </Text>
+                <Text style={[theme.typography.body, { color: theme.colors.textSecondary }]}>
+                  {i18n.t('welcome.subtitle')}
+                </Text>
+              </View>
+
+              {recoveryCode !== null ? (
+                <AccountRecoveryBanner
+                  recoveryCode={recoveryCode}
+                  onAcknowledge={handleAcknowledgeRecovery}
+                  testIDPrefix="welcome"
+                  hasTVPreferredFocus={isTv}
+                />
+              ) : (
+                <>
+                  <View
+                    testID="welcome-tabs"
+                    accessibilityRole="tablist"
+                    style={[styles.tabRow, { borderBottomColor: theme.colors.surfaceBorder }]}
+                  >
+                    {tabs.map((item) => {
+                      const selected = tab === item.id;
+                      return (
+                        <Pressable
+                          key={item.id}
+                          testID={`welcome-tab-${item.id}`}
+                          accessibilityRole="tab"
+                          accessibilityLabel={i18n.t(item.labelKey)}
+                          accessibilityState={{ selected }}
+                          aria-selected={selected}
+                          focusable
+                          onPress={() => handleSelectTab(item.id)}
+                          style={(state) => [
+                            styles.tabItem,
+                            cursorPointer,
+                            tabTransition,
                             {
-                              color: selected
-                                ? theme.colors.textPrimary
-                                : theme.colors.textSecondary,
-                              fontWeight: selected ? '700' : '500',
+                              borderBottomColor: selected ? theme.colors.accent : 'transparent',
+                              backgroundColor: state.focused
+                                ? theme.colors.focusFill
+                                : 'transparent',
+                              borderRadius: state.focused ? theme.radius.button : 0,
                             },
                           ]}
                         >
-                          {i18n.t(item.labelKey)}
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              theme.typography.title,
+                              {
+                                color: selected
+                                  ? theme.colors.textPrimary
+                                  : theme.colors.textSecondary,
+                                fontWeight: selected ? '700' : '500',
+                              },
+                            ]}
+                          >
+                            {i18n.t(item.labelKey)}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {tab === 'signin' ? (
+                    <View testID="welcome-signin-form" style={styles.form}>
+                      <AccountTextField
+                        testID="welcome-email-input"
+                        label={i18n.t('account.emailLabel')}
+                        value={email}
+                        onChangeText={setEmail}
+                        placeholder={i18n.t('account.emailPlaceholder')}
+                        keyboardType="email-address"
+                        autoComplete="email"
+                        editable={!submitting}
+                      />
+                      <AccountTextField
+                        testID="welcome-password-input"
+                        label={i18n.t('account.passwordLabel')}
+                        value={password}
+                        onChangeText={setPassword}
+                        placeholder={i18n.t('account.passwordPlaceholder')}
+                        secureTextEntry
+                        autoComplete="password"
+                        editable={!submitting}
+                      />
+                      {errorKey !== null ? (
+                        <Text
+                          testID="welcome-error"
+                          accessibilityLiveRegion="polite"
+                          style={[theme.typography.caption, { color: theme.colors.liveColor }]}
+                        >
+                          {i18n.t(errorKey)}
                         </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                      ) : null}
+                      <CtaButton
+                        testID="welcome-signin-submit"
+                        variant="primary"
+                        label={i18n.t('account.signInAction')}
+                        disabled={submitting}
+                        onPress={() => {
+                          void handleSignIn();
+                        }}
+                      />
+                    </View>
+                  ) : tab === 'signup' ? (
+                    <View testID="welcome-signup-form" style={styles.form}>
+                      <AccountTextField
+                        testID="welcome-email-input"
+                        label={i18n.t('account.emailLabel')}
+                        value={email}
+                        onChangeText={setEmail}
+                        placeholder={i18n.t('account.emailPlaceholder')}
+                        keyboardType="email-address"
+                        autoComplete="email"
+                        editable={!submitting}
+                      />
+                      <AccountTextField
+                        testID="welcome-password-input"
+                        label={i18n.t('account.passwordLabel')}
+                        value={password}
+                        onChangeText={setPassword}
+                        placeholder={i18n.t('account.passwordPlaceholder')}
+                        secureTextEntry
+                        autoComplete="new-password"
+                        editable={!submitting}
+                      />
+                      <AccountTextField
+                        testID="welcome-confirm-password-input"
+                        label={i18n.t('account.confirmPasswordLabel')}
+                        value={confirmPassword}
+                        onChangeText={setConfirmPassword}
+                        placeholder={i18n.t('account.confirmPasswordPlaceholder')}
+                        secureTextEntry
+                        autoComplete="new-password"
+                        editable={!submitting}
+                      />
+                      {errorKey !== null ? (
+                        <Text
+                          testID="welcome-error"
+                          accessibilityLiveRegion="polite"
+                          style={[theme.typography.caption, { color: theme.colors.liveColor }]}
+                        >
+                          {i18n.t(errorKey)}
+                        </Text>
+                      ) : null}
+                      <CtaButton
+                        testID="welcome-signup-submit"
+                        variant="primary"
+                        label={i18n.t('account.createAccountAction')}
+                        disabled={submitting}
+                        onPress={() => {
+                          void handleSignUp();
+                        }}
+                      />
+                    </View>
+                  ) : (
+                    <View testID="welcome-qr-pane" style={styles.form}>
+                      <AccountQrPairingView
+                        pairing={pairing}
+                        size={180}
+                        testIDPrefix="welcome-qr"
+                      />
+                    </View>
+                  )}
 
-                {tab === 'signin' ? (
-                  <View testID="welcome-signin-form" style={styles.form}>
-                    <AccountTextField
-                      testID="welcome-email-input"
-                      label={i18n.t('account.emailLabel')}
-                      value={email}
-                      onChangeText={setEmail}
-                      placeholder={i18n.t('account.emailPlaceholder')}
-                      keyboardType="email-address"
-                      autoComplete="email"
-                      editable={!submitting}
-                    />
-                    <AccountTextField
-                      testID="welcome-password-input"
-                      label={i18n.t('account.passwordLabel')}
-                      value={password}
-                      onChangeText={setPassword}
-                      placeholder={i18n.t('account.passwordPlaceholder')}
-                      secureTextEntry
-                      autoComplete="password"
-                      editable={!submitting}
-                    />
-                    {errorKey !== null ? (
-                      <Text
-                        testID="welcome-error"
-                        accessibilityLiveRegion="polite"
-                        style={[theme.typography.caption, { color: theme.colors.liveColor }]}
-                      >
-                        {i18n.t(errorKey)}
-                      </Text>
-                    ) : null}
+                  <View style={[styles.footer, { borderTopColor: theme.colors.surfaceBorder }]}>
                     <CtaButton
-                      testID="welcome-signin-submit"
-                      variant="primary"
-                      label={i18n.t('account.signInAction')}
-                      disabled={submitting}
-                      onPress={() => {
-                        void handleSignIn();
-                      }}
+                      testID="welcome-continue-without-account"
+                      variant="secondary"
+                      label={i18n.t('welcome.continueWithoutAccount')}
+                      hasTVPreferredFocus={isTv}
+                      onPress={onContinueWithoutAccount}
                     />
+                    <Text
+                      testID="welcome-local-only-note"
+                      style={[theme.typography.caption, { color: theme.colors.textMuted }]}
+                    >
+                      {i18n.t('welcome.localOnlyNote')}
+                    </Text>
                   </View>
-                ) : tab === 'signup' ? (
-                  <View testID="welcome-signup-form" style={styles.form}>
-                    <AccountTextField
-                      testID="welcome-email-input"
-                      label={i18n.t('account.emailLabel')}
-                      value={email}
-                      onChangeText={setEmail}
-                      placeholder={i18n.t('account.emailPlaceholder')}
-                      keyboardType="email-address"
-                      autoComplete="email"
-                      editable={!submitting}
-                    />
-                    <AccountTextField
-                      testID="welcome-password-input"
-                      label={i18n.t('account.passwordLabel')}
-                      value={password}
-                      onChangeText={setPassword}
-                      placeholder={i18n.t('account.passwordPlaceholder')}
-                      secureTextEntry
-                      autoComplete="new-password"
-                      editable={!submitting}
-                    />
-                    <AccountTextField
-                      testID="welcome-confirm-password-input"
-                      label={i18n.t('account.confirmPasswordLabel')}
-                      value={confirmPassword}
-                      onChangeText={setConfirmPassword}
-                      placeholder={i18n.t('account.confirmPasswordPlaceholder')}
-                      secureTextEntry
-                      autoComplete="new-password"
-                      editable={!submitting}
-                    />
-                    {errorKey !== null ? (
-                      <Text
-                        testID="welcome-error"
-                        accessibilityLiveRegion="polite"
-                        style={[theme.typography.caption, { color: theme.colors.liveColor }]}
-                      >
-                        {i18n.t(errorKey)}
-                      </Text>
-                    ) : null}
-                    <CtaButton
-                      testID="welcome-signup-submit"
-                      variant="primary"
-                      label={i18n.t('account.createAccountAction')}
-                      disabled={submitting}
-                      onPress={() => {
-                        void handleSignUp();
-                      }}
-                    />
-                  </View>
-                ) : (
-                  <View testID="welcome-qr-pane" style={styles.form}>
-                    <AccountQrPairingView pairing={pairing} size={180} testIDPrefix="welcome-qr" />
-                  </View>
-                )}
-
-                <View style={[styles.footer, { borderTopColor: theme.colors.surfaceBorder }]}>
-                  <CtaButton
-                    testID="welcome-continue-without-account"
-                    variant="secondary"
-                    label={i18n.t('welcome.continueWithoutAccount')}
-                    hasTVPreferredFocus={isTv}
-                    onPress={onContinueWithoutAccount}
-                  />
-                  <Text
-                    testID="welcome-local-only-note"
-                    style={[theme.typography.caption, { color: theme.colors.textMuted }]}
-                  >
-                    {i18n.t('welcome.localOnlyNote')}
-                  </Text>
-                </View>
-              </>
-            )}
-          </ScrollView>
+                </>
+              )}
+            </ScrollView>
+          </View>
         </View>
-      </View>
+      </TvFocusGuideRegion>
     </TextEntryBoundary>
   );
 }
@@ -408,6 +422,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     zIndex: 66,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  overlayCenter: {
+    width: '100%',
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

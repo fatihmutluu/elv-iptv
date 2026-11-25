@@ -99,6 +99,11 @@ describe('registerSyncIpc (#26, #458)', () => {
     expect(isTrustedSyncIpcEvent({ senderFrame: { url: 'http://127.0.0.1:8081/' } }, null)).toBe(
       false,
     );
+    // MEDIUM #14: fail closed when senderFrame is null/undefined/empty — NEVER fall back to sender.getURL()
+    const trustedSender = { getURL: () => 'app://elv/' };
+    expect(isTrustedSyncIpcEvent({ senderFrame: null, sender: trustedSender })).toBe(false);
+    expect(isTrustedSyncIpcEvent({ senderFrame: undefined, sender: trustedSender })).toBe(false);
+    expect(isTrustedSyncIpcEvent({ senderFrame: { url: '' }, sender: trustedSender })).toBe(false);
 
     const ipc = makeFakeIpcMain();
     const { service } = makeStubService();
@@ -107,6 +112,9 @@ describe('registerSyncIpc (#26, #458)', () => {
 
     await expect(
       ipc.invoke(SYNC_CHANNELS.getState, { senderFrame: { url: 'https://evil.test/' } }),
+    ).rejects.toThrow(/untrusted/i);
+    await expect(
+      ipc.invoke(SYNC_CHANNELS.getState, { senderFrame: null, sender: trustedSender }),
     ).rejects.toThrow(/untrusted/i);
     await expect(
       ipc.invoke(

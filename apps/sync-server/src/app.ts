@@ -5,6 +5,7 @@ import {
 import {
   ACCESS_TOKEN_TTL_SEC,
   type AccessTokenClaims,
+  assertValidJwtSecret,
   DEFAULT_VERIFIER_HASH_ITERATIONS,
   hashAuthVerifier,
   PAIR_SESSION_TTL_SEC,
@@ -25,6 +26,7 @@ import {
   extractClientIp,
   type RateLimitConfig,
   type SlidingWindowRateLimiter,
+  type TrustProxyMode,
 } from './rate-limit.ts';
 import type { SyncServerStorage, UserRecord } from './storage.ts';
 import {
@@ -32,6 +34,7 @@ import {
   PayloadTooLargeError,
   readBoundedJson,
   readBoundedText,
+  validateAccountDeletionInput,
   validateDeleteAccountInput,
   validateFeedbackInput,
   validateLoginInput,
@@ -49,6 +52,7 @@ export interface SyncAppConfig {
   readonly adminToken?: string;
   readonly telemetryDisabled?: boolean;
   readonly publicOrigin?: string;
+  readonly trustProxy?: TrustProxyMode;
   readonly now?: () => number;
   readonly verifierHashIterations?: number;
   readonly rateLimiter?: SlidingWindowRateLimiter;
@@ -57,7 +61,7 @@ export interface SyncAppConfig {
 
 /** Web-Standard Fetch handler interface shared across Cloudflare Workers and Node HTTP. */
 export interface SyncApp {
-  fetch(request: Request): Promise<Response>;
+  fetch(request: Request, meta?: { readonly clientIp?: string }): Promise<Response>;
 }
 
 const DUMMY_VERIFIER_SALT = 'AAAAAAAAAAAAAAAAAAAAAA';
@@ -72,9 +76,11 @@ function extractBearerToken(request: Request): string | null {
 
 /** Creates the Web-Standard HTTP application serving sync, pairing, telemetry, feedback, and admin digest routes. */
 export function createSyncApp(config: SyncAppConfig): SyncApp {
+  assertValidJwtSecret(config.jwtSecret);
   const storage = config.storage;
   const nowMs = config.now ?? (() => Date.now());
   const publicOrigin = config.publicOrigin ?? '*';
+  const trustProxy: TrustProxyMode = config.trustProxy ?? 'none';
   const telemetryDisabled = config.telemetryDisabled ?? false;
   const adminToken = config.adminToken ?? '';
   const verifierIterations = config.verifierHashIterations ?? DEFAULT_VERIFIER_HASH_ITERATIONS;
@@ -82,9 +88,11 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
   const limits: RateLimitConfig = {
     auth: config.rateLimits?.auth ?? DEFAULT_RATE_LIMITS.auth,
     pair: config.rateLimits?.pair ?? DEFAULT_RATE_LIMITS.pair,
+    vault: config.rateLimits?.vault ?? DEFAULT_RATE_LIMITS.vault,
     telemetry: config.rateLimits?.telemetry ?? DEFAULT_RATE_LIMITS.telemetry,
     feedback: config.rateLimits?.feedback ?? DEFAULT_RATE_LIMITS.feedback,
     accountDeletion: config.rateLimits?.accountDeletion ?? DEFAULT_RATE_LIMITS.accountDeletion,
+    admin: config.rateLimits?.admin ?? DEFAULT_RATE_LIMITS.admin,
   };
 
   function corsHeaders(): Record<string, string> {
@@ -120,8 +128,13 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     });
   }
 
-  function checkRateLimit(request: Request, bucket: keyof RateLimitConfig): Response | null {
-    const decision = limiter.check(bucket, extractClientIp(request), limits[bucket]);
+  function checkRateLimit(
+    request: Request,
+    bucket: keyof RateLimitConfig,
+    directClientIp?: string,
+  ): Response | null {
+    const clientIp = extractClientIp(request, trustProxy, directClientIp);
+    const decision = limiter.check(bucket, clientIp, limits[bucket]);
     if (decision.allowed) return null;
     return jsonResponse(
       429,
@@ -136,12 +149,17 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     return verifyAccessToken(token, config.jwtSecret, Math.floor(nowMs() / 1000));
   }
 
-  async function issueSessionTokens(
-    user: UserRecord,
+  async function requireActiveUser(request: Request): Promise<UserRecord | null> {
+    const claims = await requireAuth(request);
+    if (!claims) return null;
+    return storage.findUserById(claims.sub);
+  }
+
+  async function issueRefreshToken(
+    userId: string,
     familyId: string,
     currentMs: number,
-  ): Promise<{ readonly accessToken: string; readonly refreshToken: string }> {
-    const nowSec = Math.floor(currentMs / 1000);
+  ): Promise<string> {
     const createdAt = new Date(currentMs).toISOString();
     const expiresAt = new Date(currentMs + REFRESH_TOKEN_TTL_SEC * 1000).toISOString();
     const rawRefreshToken = randomBase64Url(32);
@@ -149,7 +167,7 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
 
     await storage.insertRefreshToken({
       id: randomId(),
-      userId: user.id,
+      userId,
       familyId,
       tokenHash,
       replacedById: null,
@@ -157,22 +175,30 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
       expiresAt,
       createdAt,
     });
+    return rawRefreshToken;
+  }
 
+  async function issueSessionTokens(
+    user: UserRecord,
+    familyId: string,
+    currentMs: number,
+  ): Promise<{ readonly accessToken: string; readonly refreshToken: string }> {
+    const refreshToken = await issueRefreshToken(user.id, familyId, currentMs);
     const accessToken = await signAccessToken(
       { sub: user.id, email: user.email },
       config.jwtSecret,
-      nowSec,
+      Math.floor(currentMs / 1000),
       ACCESS_TOKEN_TTL_SEC,
     );
-    return { accessToken, refreshToken: rawRefreshToken };
+    return { accessToken, refreshToken };
   }
 
   function publicUser(user: UserRecord) {
     return { id: user.id, email: user.email, createdAt: user.createdAt };
   }
 
-  async function handleRegister(request: Request): Promise<Response> {
-    const limited = checkRateLimit(request, 'auth');
+  async function handleRegister(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'auth', clientIp);
     if (limited) return limited;
 
     const parsed = await readBoundedJson(request, BODY_LIMITS.auth);
@@ -209,8 +235,8 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     });
   }
 
-  async function handleLogin(request: Request): Promise<Response> {
-    const limited = checkRateLimit(request, 'auth');
+  async function handleLogin(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'auth', clientIp);
     if (limited) return limited;
 
     const parsed = await readBoundedJson(request, BODY_LIMITS.auth);
@@ -252,8 +278,8 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     });
   }
 
-  async function handleRefresh(request: Request): Promise<Response> {
-    const limited = checkRateLimit(request, 'auth');
+  async function handleRefresh(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'auth', clientIp);
     if (limited) return limited;
 
     const parsed = await readBoundedJson(request, BODY_LIMITS.auth);
@@ -319,8 +345,8 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     });
   }
 
-  async function handleLogout(request: Request): Promise<Response> {
-    const limited = checkRateLimit(request, 'auth');
+  async function handleLogout(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'auth', clientIp);
     if (limited) return limited;
 
     const parsed = await readBoundedJson(request, BODY_LIMITS.auth);
@@ -333,20 +359,28 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     return jsonResponse(200, { ok: true });
   }
 
-  async function handleDeleteAccount(request: Request): Promise<Response> {
-    const limited = checkRateLimit(request, 'auth');
+  async function handlePairToken(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'auth', clientIp);
     if (limited) return limited;
 
-    const claims = await requireAuth(request);
-    if (!claims) return jsonResponse(401, { error: 'unauthorized' });
+    const user = await requireActiveUser(request);
+    if (!user) return jsonResponse(401, { error: 'unauthorized' });
+
+    const refreshToken = await issueRefreshToken(user.id, randomId(), nowMs());
+    return jsonResponse(201, { refreshToken });
+  }
+
+  async function handleDeleteAccount(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'auth', clientIp);
+    if (limited) return limited;
+
+    const user = await requireActiveUser(request);
+    if (!user) return jsonResponse(401, { error: 'unauthorized' });
 
     const parsed = await readBoundedJson(request, BODY_LIMITS.auth);
     if (!parsed.ok) return jsonResponse(400, { error: parsed.error });
     const valid = validateDeleteAccountInput(parsed.value);
     if (!valid.ok) return jsonResponse(400, { error: valid.error });
-
-    const user = await storage.findUserById(claims.sub);
-    if (!user) return jsonResponse(401, { error: 'unauthorized' });
 
     const verified = await verifyAuthVerifier(
       valid.value,
@@ -360,8 +394,8 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     return jsonResponse(200, { deleted: true });
   }
 
-  async function handlePairCreate(request: Request): Promise<Response> {
-    const limited = checkRateLimit(request, 'pair');
+  async function handlePairCreate(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'pair', clientIp);
     if (limited) return limited;
 
     const currentMs = nowMs();
@@ -387,12 +421,12 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     return jsonResponse(201, { pairingId, code, pollToken, expiresAt });
   }
 
-  async function handlePairClaim(request: Request): Promise<Response> {
-    const limited = checkRateLimit(request, 'pair');
+  async function handlePairClaim(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'pair', clientIp);
     if (limited) return limited;
 
-    const claims = await requireAuth(request);
-    if (!claims) return jsonResponse(401, { error: 'unauthorized' });
+    const user = await requireActiveUser(request);
+    if (!user) return jsonResponse(401, { error: 'unauthorized' });
 
     const parsed = await readBoundedJson(request, BODY_LIMITS.pair);
     if (!parsed.ok) return jsonResponse(400, { error: parsed.error });
@@ -401,7 +435,7 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
 
     const result = await storage.claimPairSession(
       valid.value.code,
-      claims.sub,
+      user.id,
       valid.value.encryptedPayload,
       valid.value.iv,
       new Date(nowMs()).toISOString(),
@@ -415,8 +449,12 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     return jsonResponse(200, { claimed: true });
   }
 
-  async function handlePairPoll(request: Request, pairingId: string): Promise<Response> {
-    const limited = checkRateLimit(request, 'pair');
+  async function handlePairPoll(
+    request: Request,
+    pairingId: string,
+    clientIp?: string,
+  ): Promise<Response> {
+    const limited = checkRateLimit(request, 'pair', clientIp);
     if (limited) return limited;
 
     const pollToken = request.headers.get('x-pair-poll-token')?.trim();
@@ -450,11 +488,14 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     });
   }
 
-  async function handleVaultGet(request: Request): Promise<Response> {
-    const claims = await requireAuth(request);
-    if (!claims) return jsonResponse(401, { error: 'unauthorized' });
+  async function handleVaultGet(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'vault', clientIp);
+    if (limited) return limited;
 
-    const vault = await storage.getVault(claims.sub);
+    const user = await requireActiveUser(request);
+    if (!user) return jsonResponse(401, { error: 'unauthorized' });
+
+    const vault = await storage.getVault(user.id);
     if (!vault) {
       return jsonResponse(200, { revision: 0, ciphertext: null, iv: null, updatedAt: null });
     }
@@ -466,9 +507,12 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     });
   }
 
-  async function handleVaultPut(request: Request): Promise<Response> {
-    const claims = await requireAuth(request);
-    if (!claims) return jsonResponse(401, { error: 'unauthorized' });
+  async function handleVaultPut(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'vault', clientIp);
+    if (limited) return limited;
+
+    const user = await requireActiveUser(request);
+    if (!user) return jsonResponse(401, { error: 'unauthorized' });
 
     const parsed = await readBoundedJson(request, BODY_LIMITS.vault);
     if (!parsed.ok) return jsonResponse(400, { error: parsed.error });
@@ -477,7 +521,7 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
 
     const updatedAt = new Date(nowMs()).toISOString();
     const res = await storage.putVault(
-      claims.sub,
+      user.id,
       valid.value.expectedRevision,
       valid.value.ciphertext,
       valid.value.iv,
@@ -492,8 +536,8 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     return jsonResponse(200, { revision: res.revision, updatedAt: res.updatedAt });
   }
 
-  async function handleTelemetry(request: Request): Promise<Response> {
-    const limited = checkRateLimit(request, 'telemetry');
+  async function handleTelemetry(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'telemetry', clientIp);
     if (limited) return limited;
 
     if (telemetryDisabled) {
@@ -525,8 +569,8 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     return jsonResponse(200, { accepted: records.length, disabled: false });
   }
 
-  async function handleFeedback(request: Request): Promise<Response> {
-    const limited = checkRateLimit(request, 'feedback');
+  async function handleFeedback(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'feedback', clientIp);
     if (limited) return limited;
 
     const parsed = await readBoundedJson(request, BODY_LIMITS.feedback);
@@ -548,7 +592,14 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     return jsonResponse(201, { id });
   }
 
-  async function handleAdminDigest(request: Request, url: URL): Promise<Response> {
+  async function handleAdminDigest(
+    request: Request,
+    url: URL,
+    clientIp?: string,
+  ): Promise<Response> {
+    const limited = checkRateLimit(request, 'admin', clientIp);
+    if (limited) return limited;
+
     if (adminToken.length === 0) {
       return jsonResponse(503, { error: 'admin_not_configured' });
     }
@@ -561,31 +612,67 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     let sinceIso: string | null = null;
     if (rawSince !== null && rawSince.trim().length > 0) {
       const parsedMs = Date.parse(rawSince);
-      if (Number.isNaN(parsedMs)) {
+      if (Number.isNaN(parsedMs) || Math.abs(parsedMs) > 8.64e15) {
         return jsonResponse(400, { error: 'invalid_since' });
       }
       sinceIso = new Date(parsedMs).toISOString();
     }
 
-    const [events, feedback] = await Promise.all([
+    const [events, feedback, pendingAccountDeletionRequests] = await Promise.all([
       storage.listTelemetryEvents(sinceIso),
       storage.listFeedbackSubmissions(sinceIso),
+      storage.countAccountDeletionRequests(),
     ]);
     const report = buildTelemetryDigest(
       events,
       feedback,
       new Date(nowMs()).toISOString(),
       sinceIso,
+      pendingAccountDeletionRequests,
     );
     return jsonResponse(200, report);
   }
 
-  async function handleAccountDeletionPost(request: Request): Promise<Response> {
-    const limited = checkRateLimit(request, 'accountDeletion');
+  async function handleAccountDeletionPost(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'accountDeletion', clientIp);
     if (limited) return limited;
 
-    await readBoundedText(request, BODY_LIMITS.accountDeletion);
+    const rawBody = await readBoundedText(request, BODY_LIMITS.accountDeletion);
+    const contentType = (request.headers.get('content-type') ?? '').toLowerCase();
     const accept = request.headers.get('accept') ?? '';
+    const wantsJson =
+      accept.includes('application/json') || contentType.includes('application/json');
+
+    let parsedBody: unknown;
+    if (contentType.includes('application/json')) {
+      try {
+        parsedBody = JSON.parse(rawBody) as unknown;
+      } catch {
+        return jsonResponse(400, { error: 'invalid_json' });
+      }
+    } else {
+      const params = new URLSearchParams(rawBody);
+      parsedBody = {
+        email: params.get('email') ?? '',
+        note: params.get('note') ?? undefined,
+      };
+    }
+
+    const valid = validateAccountDeletionInput(parsedBody);
+    if (!valid.ok) {
+      return wantsJson
+        ? jsonResponse(400, { error: valid.error })
+        : htmlResponse(400, renderAccountDeletionHtml(false));
+    }
+
+    const emailHash = await sha256Base64Url(valid.value.email);
+    await storage.insertAccountDeletionRequest({
+      id: randomId(),
+      emailHash,
+      note: valid.value.note,
+      createdAtMs: nowMs(),
+    });
+
     if (accept.includes('application/json')) {
       return jsonResponse(200, {
         accepted: true,
@@ -597,8 +684,9 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
   }
 
   return {
-    async fetch(request: Request): Promise<Response> {
+    async fetch(request: Request, meta?: { readonly clientIp?: string }): Promise<Response> {
       try {
+        const clientIp = meta?.clientIp;
         const method = request.method.toUpperCase();
         if (method === 'OPTIONS') {
           return new Response(null, { status: 204, headers: corsHeaders() });
@@ -614,50 +702,58 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
           return htmlResponse(200, renderAccountDeletionHtml(false));
         }
         if (method === 'POST' && path === '/account-deletion') {
-          return await handleAccountDeletionPost(request);
+          return await handleAccountDeletionPost(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/auth/register') {
-          return await handleRegister(request);
+          return await handleRegister(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/auth/login') {
-          return await handleLogin(request);
+          return await handleLogin(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/auth/refresh') {
-          return await handleRefresh(request);
+          return await handleRefresh(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/auth/logout') {
-          return await handleLogout(request);
+          return await handleLogout(request, clientIp);
+        }
+        if (method === 'POST' && path === '/v1/auth/pair-token') {
+          return await handlePairToken(request, clientIp);
         }
         if (method === 'DELETE' && path === '/v1/auth/account') {
-          return await handleDeleteAccount(request);
+          return await handleDeleteAccount(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/pair/create') {
-          return await handlePairCreate(request);
+          return await handlePairCreate(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/pair/claim') {
-          return await handlePairClaim(request);
+          return await handlePairClaim(request, clientIp);
         }
         if (method === 'GET' && path.startsWith('/v1/pair/poll/')) {
-          const pairingId = decodeURIComponent(path.slice('/v1/pair/poll/'.length));
+          let pairingId: string;
+          try {
+            pairingId = decodeURIComponent(path.slice('/v1/pair/poll/'.length));
+          } catch {
+            return jsonResponse(400, { error: 'invalid_pairing_id' });
+          }
           if (!pairingId || pairingId.includes('/')) {
             return jsonResponse(404, { error: 'not_found' });
           }
-          return await handlePairPoll(request, pairingId);
+          return await handlePairPoll(request, pairingId, clientIp);
         }
         if (method === 'GET' && path === '/v1/vault') {
-          return await handleVaultGet(request);
+          return await handleVaultGet(request, clientIp);
         }
         if (method === 'PUT' && path === '/v1/vault') {
-          return await handleVaultPut(request);
+          return await handleVaultPut(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/telemetry') {
-          return await handleTelemetry(request);
+          return await handleTelemetry(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/feedback') {
-          return await handleFeedback(request);
+          return await handleFeedback(request, clientIp);
         }
         if (method === 'GET' && path === '/v1/admin/digest') {
-          return await handleAdminDigest(request, url);
+          return await handleAdminDigest(request, url, clientIp);
         }
 
         return jsonResponse(404, { error: 'not_found' });

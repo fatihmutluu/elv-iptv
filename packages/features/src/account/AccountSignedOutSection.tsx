@@ -10,7 +10,7 @@ import {
 import { type ReactElement, useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { SyncAccountPort } from '../ports/wave-f9-ports';
-import { AccountQrPairingView, AccountTextField } from './AccountFormParts';
+import { AccountQrPairingView, AccountServerUrlField, AccountTextField } from './AccountFormParts';
 import {
   mapSyncErrorCodeToMessageId,
   useSyncQrPairing,
@@ -29,10 +29,13 @@ export interface AccountSignedOutSectionProps {
   readonly onQueuePendingClaim: (codeOrUri: string) => void;
   readonly onAuthSucceeded: () => Promise<void>;
   readonly deleteSuccessBanner: boolean;
+  readonly syncServerUrl: string;
+  readonly onSyncServerUrlChange?: (nextUrl: string) => void;
+  readonly onLeftEdgeChange?: (atLeftEdge: boolean) => void;
   readonly qrPollIntervalMs?: number;
 }
 
-/** Signed-out Settings card offering Sign In, Create Account, Pair via QR, and queued QR claim. */
+/** Signed-out Settings card offering Sign In, Create Account, Pair via QR, custom Sync server URL, and queued QR claim. */
 export function AccountSignedOutSection({
   syncAccount,
   isTv,
@@ -41,6 +44,9 @@ export function AccountSignedOutSection({
   onQueuePendingClaim,
   onAuthSucceeded,
   deleteSuccessBanner,
+  syncServerUrl,
+  onSyncServerUrlChange,
+  onLeftEdgeChange,
   qrPollIntervalMs,
 }: AccountSignedOutSectionProps): ReactElement {
   const theme = useTheme();
@@ -52,6 +58,7 @@ export function AccountSignedOutSection({
   const [claimInput, setClaimInput] = useState(pendingClaimCode ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [errorKey, setErrorKey] = useState<MessageId | null>(null);
+  const [serverUrlValid, setServerUrlValid] = useState(true);
 
   const pairing = useSyncQrPairing(syncAccount, tab === 'qr', undefined, qrPollIntervalMs);
 
@@ -61,6 +68,10 @@ export function AccountSignedOutSection({
   }, []);
 
   const handleSignIn = useCallback(async () => {
+    if (!serverUrlValid) {
+      setErrorKey('source.validation.invalidAddress');
+      return;
+    }
     const errKey = validateSignInFields(email, password);
     if (errKey !== null) {
       setErrorKey(errKey);
@@ -80,9 +91,13 @@ export function AccountSignedOutSection({
     } finally {
       setSubmitting(false);
     }
-  }, [email, onAuthSucceeded, password, syncAccount]);
+  }, [email, onAuthSucceeded, password, serverUrlValid, syncAccount]);
 
   const handleSignUp = useCallback(async () => {
+    if (!serverUrlValid) {
+      setErrorKey('source.validation.invalidAddress');
+      return;
+    }
     const errKey = validateSignUpFields(email, password, confirmPassword);
     if (errKey !== null) {
       setErrorKey(errKey);
@@ -102,7 +117,7 @@ export function AccountSignedOutSection({
     } finally {
       setSubmitting(false);
     }
-  }, [confirmPassword, email, onAuthSucceeded, password, syncAccount]);
+  }, [confirmPassword, email, onAuthSucceeded, password, serverUrlValid, syncAccount]);
 
   const handleQueueClaim = useCallback(() => {
     const trimmed = claimInput.trim();
@@ -169,6 +184,7 @@ export function AccountSignedOutSection({
                 aria-selected={selected}
                 focusable
                 hasTVPreferredFocus={isTv && isActiveScope && idx === 0}
+                onFocus={() => onLeftEdgeChange?.(idx === 0)}
                 onPress={() => handleSelectTab(item.id)}
                 style={(state) => [
                   styles.tabItem,
@@ -209,6 +225,7 @@ export function AccountSignedOutSection({
               keyboardType="email-address"
               autoComplete="email"
               editable={!submitting}
+              onFocus={() => onLeftEdgeChange?.(true)}
             />
             <AccountTextField
               testID="account-password-input"
@@ -219,6 +236,7 @@ export function AccountSignedOutSection({
               secureTextEntry
               autoComplete="password"
               editable={!submitting}
+              onFocus={() => onLeftEdgeChange?.(true)}
             />
             {errorKey !== null ? (
               <Text
@@ -250,6 +268,7 @@ export function AccountSignedOutSection({
               keyboardType="email-address"
               autoComplete="email"
               editable={!submitting}
+              onFocus={() => onLeftEdgeChange?.(true)}
             />
             <AccountTextField
               testID="account-password-input"
@@ -260,6 +279,7 @@ export function AccountSignedOutSection({
               secureTextEntry
               autoComplete="new-password"
               editable={!submitting}
+              onFocus={() => onLeftEdgeChange?.(true)}
             />
             <AccountTextField
               testID="account-confirm-password-input"
@@ -270,6 +290,7 @@ export function AccountSignedOutSection({
               secureTextEntry
               autoComplete="new-password"
               editable={!submitting}
+              onFocus={() => onLeftEdgeChange?.(true)}
             />
             {errorKey !== null ? (
               <Text
@@ -293,6 +314,16 @@ export function AccountSignedOutSection({
         ) : (
           <AccountQrPairingView pairing={pairing} size={180} testIDPrefix="account-qr" />
         )}
+
+        <AccountServerUrlField
+          value={syncServerUrl}
+          {...(onSyncServerUrlChange !== undefined
+            ? { onChangeValidUrl: onSyncServerUrlChange }
+            : {})}
+          onValidityChange={setServerUrlValid}
+          onFocus={() => onLeftEdgeChange?.(true)}
+          editable={!submitting}
+        />
 
         <Text
           testID="account-oauth-coming-soon"
@@ -318,6 +349,7 @@ export function AccountSignedOutSection({
           value={claimInput}
           onChangeText={setClaimInput}
           placeholder="elviptv://pair?..."
+          onFocus={() => onLeftEdgeChange?.(true)}
         />
         {pendingClaimCode !== null ? (
           <Text

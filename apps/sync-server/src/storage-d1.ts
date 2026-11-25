@@ -1,4 +1,5 @@
 import type {
+  AccountDeletionRequestRecord,
   FeedbackSubmissionRecord,
   PairClaimResult,
   PairConsumeResult,
@@ -502,7 +503,8 @@ export function createD1Storage(db: D1Database): SyncServerStorage {
                       app_version, platform, os_version, form_factor, payload_json
                FROM telemetry_events
                WHERE received_at >= ?
-               ORDER BY received_at ASC`,
+               ORDER BY received_at ASC
+               LIMIT 5000`,
             )
             .bind(sinceIso)
             .all<TelemetryEventRow>()
@@ -511,7 +513,8 @@ export function createD1Storage(db: D1Database): SyncServerStorage {
               `SELECT id, received_at, event_ts, session_id, kind,
                       app_version, platform, os_version, form_factor, payload_json
                FROM telemetry_events
-               ORDER BY received_at ASC`,
+               ORDER BY received_at ASC
+               LIMIT 5000`,
             )
             .all<TelemetryEventRow>();
       return (res.results ?? []).map(mapTelemetryEvent);
@@ -544,7 +547,8 @@ export function createD1Storage(db: D1Database): SyncServerStorage {
               `SELECT id, received_at, category, message, app_version, platform, locale, diagnostics_json
                FROM feedback_submissions
                WHERE received_at >= ?
-               ORDER BY received_at DESC`,
+               ORDER BY received_at DESC
+               LIMIT 500`,
             )
             .bind(sinceIso)
             .all<FeedbackRow>()
@@ -552,10 +556,29 @@ export function createD1Storage(db: D1Database): SyncServerStorage {
             .prepare(
               `SELECT id, received_at, category, message, app_version, platform, locale, diagnostics_json
                FROM feedback_submissions
-               ORDER BY received_at DESC`,
+               ORDER BY received_at DESC
+               LIMIT 500`,
             )
             .all<FeedbackRow>();
       return (res.results ?? []).map(mapFeedback);
+    },
+
+    async insertAccountDeletionRequest(request: AccountDeletionRequestRecord): Promise<void> {
+      await db
+        .prepare(
+          `INSERT INTO account_deletion_requests (
+            id, email_hash, note, created_at_ms
+          ) VALUES (?, ?, ?, ?)`,
+        )
+        .bind(request.id, request.emailHash, request.note, request.createdAtMs)
+        .run();
+    },
+
+    async countAccountDeletionRequests(): Promise<number> {
+      const row = await db
+        .prepare('SELECT COUNT(*) AS count FROM account_deletion_requests')
+        .first<{ readonly count: number }>();
+      return Number(row?.count ?? 0);
     },
   };
 }

@@ -134,10 +134,20 @@ describe('AppShell Wave F9 integration', () => {
         expect(screen.queryByTestId('welcome-sync-overlay')).toBeNull();
       });
 
-      // Navigate Settings -> Account & Sync
+      // Navigate Settings -> Account & Sync and persist optional sync server URL to preferences
       await fireEvent.press(screen.getByTestId('settings-tab-account'));
       await waitFor(() => {
         expect(screen.getByTestId('settings-panel-account')).toBeTruthy();
+        expect(screen.getByTestId('account-server-url-input')).toBeTruthy();
+      });
+
+      await fireEvent.changeText(
+        screen.getByTestId('account-server-url-input'),
+        'https://sync.selfhosted.example/',
+      );
+      await waitFor(async () => {
+        const snapshot = await prefsStore.load();
+        expect(snapshot.syncServerUrl).toBe('https://sync.selfhosted.example');
       });
 
       // Navigate Settings -> Feedback & Telemetry

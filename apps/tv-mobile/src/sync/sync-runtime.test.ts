@@ -1,7 +1,28 @@
+import { webcrypto } from 'node:crypto';
 import type { SecretStore } from '@elv/domain';
-import { createEmptyVaultSnapshot, type VaultSnapshot } from '@elv/sync';
+import {
+  createEmptyVaultSnapshot,
+  createWebCryptoVaultPort,
+  type VaultCryptoPort,
+  type VaultSnapshot,
+} from '@elv/sync';
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@elv/lan-pairing', () => ({
+  generateLanPairingToken: () => null,
+}));
+
 import { createTvMobileSyncPorts, type SyncFetchFn } from './sync-runtime';
+
+const TEST_KDF_ITERATIONS = 100_000;
+
+function makeTestCrypto(seed = 1): VaultCryptoPort {
+  const random = makeDeterministicRandom(seed);
+  return createWebCryptoVaultPort(webcrypto.subtle as unknown as SubtleCrypto, (arr) => {
+    arr.set(random(arr.length));
+    return arr;
+  });
+}
 
 function makeMemorySecretStore(): { store: SecretStore; data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -63,24 +84,49 @@ interface MockServerState {
       iv?: string;
     }
   >;
+  refreshTokens: Map<string, { userId: string; familyId: string; used: boolean; revoked: boolean }>;
+  revokedFamilies: Set<string>;
+  issuedPairTokens: string[];
+  failNextPairToken401: boolean;
+  failNextClaim401: boolean;
+  omitUserOnNextRefresh: boolean;
   telemetryBatches: unknown[];
   feedbackItems: unknown[];
-  calls: Array<{ method: string; url: string; body?: string }>;
+  calls: Array<{ method: string; url: string; body?: string; auth?: string }>;
 }
 
 function makeMockSyncServer(): { fetchFn: SyncFetchFn; state: MockServerState } {
   const state: MockServerState = {
     users: new Map(),
     pairings: new Map(),
+    refreshTokens: new Map(),
+    revokedFamilies: new Set(),
+    issuedPairTokens: [],
+    failNextPairToken401: false,
+    failNextClaim401: false,
+    omitUserOnNextRefresh: false,
     telemetryBatches: [],
     feedbackItems: [],
     calls: [],
   };
   let seq = 0;
 
+  const mintRefreshToken = (userId: string, familyId: string): string => {
+    seq += 1;
+    const token = `ref-${userId}-${familyId}-${seq}`;
+    state.refreshTokens.set(token, { userId, familyId, used: false, revoked: false });
+    return token;
+  };
+
   const fetchFn: SyncFetchFn = async (url, init) => {
     const method = init?.method ?? 'GET';
-    state.calls.push({ method, url, ...(init?.body !== undefined ? { body: init.body } : {}) });
+    const authHeader = init?.headers?.Authorization;
+    state.calls.push({
+      method,
+      url,
+      ...(init?.body !== undefined ? { body: init.body } : {}),
+      ...(authHeader !== undefined ? { auth: authHeader } : {}),
+    });
     const parsed = new URL(url);
     const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
 
@@ -105,13 +151,14 @@ function makeMockSyncServer(): { fetchFn: SyncFetchFn; state: MockServerState } 
         iv: null,
       };
       state.users.set(email, user);
+      const refreshToken = mintRefreshToken(user.id, `fam-${seq}`);
       return {
         status: 201,
         text: async () =>
           JSON.stringify({
             user: { id: user.id, email: user.email },
             accessToken: `acc-${user.id}`,
-            refreshToken: `ref-${user.id}-1`,
+            refreshToken,
           }),
       };
     }
@@ -122,35 +169,71 @@ function makeMockSyncServer(): { fetchFn: SyncFetchFn; state: MockServerState } 
       if (!user || user.authVerifier !== String(body.authVerifier)) {
         return { status: 401, text: async () => JSON.stringify({ error: 'invalid_credentials' }) };
       }
+      const refreshToken = mintRefreshToken(user.id, `fam-login-${++seq}`);
       return {
         status: 200,
         text: async () =>
           JSON.stringify({
             user: { id: user.id, email: user.email },
             accessToken: `acc-${user.id}`,
-            refreshToken: `ref-${user.id}-2`,
+            refreshToken,
             vaultMeta: user.vaultMeta,
           }),
       };
     }
 
+    if (method === 'POST' && parsed.pathname === '/v1/auth/pair-token') {
+      if (state.failNextPairToken401) {
+        state.failNextPairToken401 = false;
+        return { status: 401, text: async () => JSON.stringify({ error: 'unauthorized' }) };
+      }
+      const userId = (authHeader ?? '').replace(/^Bearer acc-/, '');
+      const user = [...state.users.values()].find((u) => u.id === userId);
+      if (!user) {
+        return { status: 401, text: async () => JSON.stringify({ error: 'unauthorized' }) };
+      }
+      const refreshToken = mintRefreshToken(user.id, `fam-pair-${++seq}`);
+      state.issuedPairTokens.push(refreshToken);
+      return {
+        status: 201,
+        text: async () => JSON.stringify({ refreshToken }),
+      };
+    }
+
     if (method === 'POST' && parsed.pathname === '/v1/auth/refresh') {
       const rt = String(body.refreshToken);
-      const user = [...state.users.values()].find((u) => rt.startsWith(`ref-${u.id}`));
+      const rec = state.refreshTokens.get(rt);
+      if (!rec || rec.revoked || state.revokedFamilies.has(rec.familyId)) {
+        return {
+          status: 401,
+          text: async () => JSON.stringify({ error: 'invalid_refresh_token' }),
+        };
+      }
+      if (rec.used) {
+        state.revokedFamilies.add(rec.familyId);
+        return {
+          status: 401,
+          text: async () => JSON.stringify({ error: 'refresh_token_reused' }),
+        };
+      }
+      rec.used = true;
+      const user = [...state.users.values()].find((u) => u.id === rec.userId);
       if (!user) {
         return {
           status: 401,
           text: async () => JSON.stringify({ error: 'invalid_refresh_token' }),
         };
       }
-      seq += 1;
+      const nextRefresh = mintRefreshToken(user.id, rec.familyId);
+      const omitUser = state.omitUserOnNextRefresh;
+      state.omitUserOnNextRefresh = false;
       return {
         status: 200,
         text: async () =>
           JSON.stringify({
-            user: { id: user.id, email: user.email },
+            ...(omitUser ? {} : { user: { id: user.id, email: user.email } }),
             accessToken: `acc-${user.id}`,
-            refreshToken: `ref-${user.id}-${seq}`,
+            refreshToken: nextRefresh,
           }),
       };
     }
@@ -230,6 +313,10 @@ function makeMockSyncServer(): { fetchFn: SyncFetchFn; state: MockServerState } 
     }
 
     if (method === 'POST' && parsed.pathname === '/v1/pair/claim') {
+      if (state.failNextClaim401) {
+        state.failNextClaim401 = false;
+        return { status: 401, text: async () => JSON.stringify({ error: 'unauthorized' }) };
+      }
       const code = String(body.code);
       const session = [...state.pairings.values()].find((p) => p.code === code);
       if (!session)
@@ -290,9 +377,10 @@ describe('createTvMobileSyncPorts (#26, #458)', () => {
       fetchFn: server.fetchFn,
       getServerUrl: () => 'https://sync.example.test',
       getDeviceMeta: () => ({ platform: 'android-tv', appVersion: '1.2.3', locale: 'en' }),
+      crypto: makeTestCrypto(7),
       randomBytes: makeDeterministicRandom(7),
       clock: { now: () => nowMs },
-      kdfIterations: 10,
+      kdfIterations: TEST_KDF_ITERATIONS,
       flushIntervalMs: 0,
       getLocalSnapshot: () => localSnap,
       applyMergedSnapshot: (snap) => {
@@ -339,9 +427,10 @@ describe('createTvMobileSyncPorts (#26, #458)', () => {
       fetchFn: server.fetchFn,
       getServerUrl: () => 'https://sync.example.test',
       getDeviceMeta: () => ({ platform: 'android-tv', appVersion: '1.2.3' }),
+      crypto: makeTestCrypto(11),
       randomBytes: makeDeterministicRandom(11),
       clock: { now: () => nowMs },
-      kdfIterations: 10,
+      kdfIterations: TEST_KDF_ITERATIONS,
       flushIntervalMs: 0,
       getLocalSnapshot: () => hydratedSnap,
       applyMergedSnapshot: (snap) => {
@@ -388,9 +477,10 @@ describe('createTvMobileSyncPorts (#26, #458)', () => {
       fetchFn: server.fetchFn,
       getServerUrl: () => 'https://sync.example.test',
       getDeviceMeta: () => ({ platform: 'ios', appVersion: '1.0.0' }),
+      crypto: makeTestCrypto(21),
       randomBytes: makeDeterministicRandom(21),
       clock: { now: () => nowMs },
-      kdfIterations: 10,
+      kdfIterations: TEST_KDF_ITERATIONS,
       flushIntervalMs: 0,
     });
     const tv = createTvMobileSyncPorts({
@@ -398,13 +488,17 @@ describe('createTvMobileSyncPorts (#26, #458)', () => {
       fetchFn: server.fetchFn,
       getServerUrl: () => 'https://sync.example.test',
       getDeviceMeta: () => ({ platform: 'tvos', appVersion: '1.0.0' }),
+      crypto: makeTestCrypto(33),
       randomBytes: makeDeterministicRandom(33),
       clock: { now: () => nowMs },
-      kdfIterations: 10,
+      kdfIterations: TEST_KDF_ITERATIONS,
       flushIntervalMs: 0,
     });
 
     await phone.syncAccount.register('pair@example.test', 'StrongPass123!', 'StrongPass123!');
+    const phoneStoredBefore = JSON.parse(secretsA.data.get('elv.sync.session.v1') ?? '{}') as {
+      refreshToken: string;
+    };
 
     const session = await tv.syncAccount.createQrPairing();
     expect(session.qrUri.startsWith('elviptv://pair?')).toBe(true);
@@ -413,12 +507,105 @@ describe('createTvMobileSyncPorts (#26, #458)', () => {
 
     const claim = await phone.syncAccount.claimQrPairing(session.qrUri);
     expect(claim.ok).toBe(true);
+    // CRITICAL #1: scanner minted an independent pair refresh token, never reusing its own live refresh token
+    expect(server.state.issuedPairTokens).toHaveLength(1);
+    expect(server.state.issuedPairTokens[0]).not.toBe(phoneStoredBefore.refreshToken);
 
     expect(await tv.syncAccount.pollQrPairing(session.pairingId)).toBe('claimed');
     expect(tv.syncAccount.getState().status).toBe('signed_in');
     expect(tv.syncAccount.getState().email).toBe('pair@example.test');
     expect(secretsB.data.has('elv.sync.session.v1')).toBe(true);
 
+    // Both devices must remain independently authenticated after restart/refresh (zero family revocation!)
+    const phoneRestarted = createTvMobileSyncPorts({
+      secretStore: secretsA.store,
+      fetchFn: server.fetchFn,
+      getServerUrl: () => 'https://sync.example.test',
+      getDeviceMeta: () => ({ platform: 'ios', appVersion: '1.0.0' }),
+      crypto: makeTestCrypto(22),
+      randomBytes: makeDeterministicRandom(22),
+      clock: { now: () => nowMs },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+    });
+    await phoneRestarted.hydrate();
+    expect((await phoneRestarted.syncAccount.syncNow()).ok).toBe(true);
+    expect((await tv.syncAccount.syncNow()).ok).toBe(true);
+    expect(server.state.revokedFamilies.size).toBe(0);
+
+    phoneRestarted.dispose();
+    phone.dispose();
+    tv.dispose();
+  });
+
+  it('retries claimQrPairing once on 401 from pair-token or claim, and fails explicitly on refresh missing user.id (MEDIUM #15, LOW #21)', async () => {
+    const server = makeMockSyncServer();
+    const secretsA = makeMemorySecretStore();
+    const secretsB = makeMemorySecretStore();
+    const nowMs = 1_700_000_000_000;
+
+    const phone = createTvMobileSyncPorts({
+      secretStore: secretsA.store,
+      fetchFn: server.fetchFn,
+      getServerUrl: () => 'https://sync.example.test',
+      getDeviceMeta: () => ({ platform: 'ios', appVersion: '1.0.0' }),
+      crypto: makeTestCrypto(41),
+      randomBytes: makeDeterministicRandom(41),
+      clock: { now: () => nowMs },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+    });
+    const tv = createTvMobileSyncPorts({
+      secretStore: secretsB.store,
+      fetchFn: server.fetchFn,
+      getServerUrl: () => 'https://sync.example.test',
+      getDeviceMeta: () => ({ platform: 'tvos', appVersion: '1.0.0' }),
+      crypto: makeTestCrypto(42),
+      randomBytes: makeDeterministicRandom(42),
+      clock: { now: () => nowMs },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+    });
+
+    await phone.syncAccount.register('retry@example.test', 'StrongPass123!', 'StrongPass123!');
+
+    // 401 on POST /v1/auth/pair-token triggers refresh + retry
+    const s1 = await tv.syncAccount.createQrPairing();
+    server.state.failNextPairToken401 = true;
+    expect(await phone.syncAccount.claimQrPairing(s1.qrUri)).toEqual({ ok: true });
+
+    // 401 on POST /v1/pair/claim triggers refresh + retry
+    const s2 = await tv.syncAccount.createQrPairing();
+    server.state.failNextClaim401 = true;
+    expect(await phone.syncAccount.claimQrPairing(s2.qrUri)).toEqual({ ok: true });
+
+    // LOW #21: pollQrPairing fails explicitly when refresh omits user.id (never falls back to email!)
+    server.state.omitUserOnNextRefresh = true;
+    expect(await tv.syncAccount.pollQrPairing(s2.pairingId)).toBe('expired');
+    expect(tv.syncAccount.getState().status).toBe('signed_out');
+    expect(tv.syncAccount.getState().errorCode).toBe('invalid_session');
+    expect(secretsB.data.has('elv.sync.session.v1')).toBe(false);
+
+    // LOW #21: hydrated session refresh omitting user.id fails explicitly with invalid_session
+    const phoneRestarted = createTvMobileSyncPorts({
+      secretStore: secretsA.store,
+      fetchFn: server.fetchFn,
+      getServerUrl: () => 'https://sync.example.test',
+      getDeviceMeta: () => ({ platform: 'ios', appVersion: '1.0.0' }),
+      crypto: makeTestCrypto(43),
+      randomBytes: makeDeterministicRandom(43),
+      clock: { now: () => nowMs },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+    });
+    await phoneRestarted.hydrate();
+    server.state.omitUserOnNextRefresh = true;
+    expect(await phoneRestarted.syncAccount.syncNow()).toEqual({
+      ok: false,
+      errorCode: 'invalid_session',
+    });
+
+    phoneRestarted.dispose();
     phone.dispose();
     tv.dispose();
   });

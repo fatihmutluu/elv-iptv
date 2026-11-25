@@ -1,4 +1,5 @@
 import type {
+  AccountDeletionRequestRecord,
   FeedbackSubmissionRecord,
   PairClaimResult,
   PairConsumeResult,
@@ -11,6 +12,10 @@ import type {
   VaultRecord,
 } from './storage.ts';
 
+const MAX_TELEMETRY_EVENTS = 5_000;
+const MAX_FEEDBACK_SUBMISSIONS = 500;
+const MAX_ACCOUNT_DELETION_REQUESTS = 5_000;
+
 /** Creates an in-memory `SyncServerStorage` for Node self-hosting and unit tests. */
 export function createMemoryStorage(): SyncServerStorage {
   const usersById = new Map<string, UserRecord>();
@@ -22,6 +27,25 @@ export function createMemoryStorage(): SyncServerStorage {
   const pairSessionIdsByCode = new Map<string, string>();
   const telemetryEvents: TelemetryEventRecord[] = [];
   const feedbackSubmissions: FeedbackSubmissionRecord[] = [];
+  const accountDeletionRequests: AccountDeletionRequestRecord[] = [];
+
+  function pruneExpiredRefreshTokens(referenceIso: string): void {
+    for (const [id, token] of refreshTokensById) {
+      if (token.expiresAt <= referenceIso) {
+        refreshTokensById.delete(id);
+        refreshTokenIdsByHash.delete(token.tokenHash);
+      }
+    }
+  }
+
+  function pruneExpiredPairSessions(referenceIso: string): void {
+    for (const [id, session] of pairSessionsById) {
+      if (session.expiresAt <= referenceIso) {
+        pairSessionsById.delete(id);
+        pairSessionIdsByCode.delete(session.code);
+      }
+    }
+  }
 
   return {
     async createUser(user: UserRecord): Promise<{ readonly created: boolean }> {
@@ -66,6 +90,7 @@ export function createMemoryStorage(): SyncServerStorage {
     },
 
     async insertRefreshToken(token: RefreshTokenRecord): Promise<void> {
+      pruneExpiredRefreshTokens(token.createdAt);
       refreshTokensById.set(token.id, token);
       refreshTokenIdsByHash.set(token.tokenHash, token.id);
     },
@@ -85,6 +110,7 @@ export function createMemoryStorage(): SyncServerStorage {
       if (!existing || existing.replacedById !== null || existing.revokedAt !== null) {
         return false;
       }
+      pruneExpiredRefreshTokens(revokedAt);
       refreshTokensById.set(oldTokenId, {
         ...existing,
         replacedById: newToken.id,
@@ -139,6 +165,7 @@ export function createMemoryStorage(): SyncServerStorage {
     },
 
     async createPairSession(session: PairSessionRecord): Promise<void> {
+      pruneExpiredPairSessions(session.createdAt);
       pairSessionsById.set(session.id, session);
       pairSessionIdsByCode.set(session.code, session.id);
     },
@@ -205,6 +232,9 @@ export function createMemoryStorage(): SyncServerStorage {
       for (const event of events) {
         telemetryEvents.push(event);
       }
+      if (telemetryEvents.length > MAX_TELEMETRY_EVENTS) {
+        telemetryEvents.splice(0, telemetryEvents.length - MAX_TELEMETRY_EVENTS);
+      }
     },
 
     async listTelemetryEvents(sinceIso: string | null): Promise<TelemetryEventRecord[]> {
@@ -214,6 +244,9 @@ export function createMemoryStorage(): SyncServerStorage {
 
     async insertFeedbackSubmission(feedback: FeedbackSubmissionRecord): Promise<void> {
       feedbackSubmissions.push(feedback);
+      if (feedbackSubmissions.length > MAX_FEEDBACK_SUBMISSIONS) {
+        feedbackSubmissions.splice(0, feedbackSubmissions.length - MAX_FEEDBACK_SUBMISSIONS);
+      }
     },
 
     async listFeedbackSubmissions(sinceIso: string | null): Promise<FeedbackSubmissionRecord[]> {
@@ -221,6 +254,20 @@ export function createMemoryStorage(): SyncServerStorage {
         ? feedbackSubmissions.filter((item) => item.receivedAt >= sinceIso)
         : [...feedbackSubmissions];
       return filtered.sort((a, b) => (a.receivedAt < b.receivedAt ? 1 : -1));
+    },
+
+    async insertAccountDeletionRequest(request: AccountDeletionRequestRecord): Promise<void> {
+      accountDeletionRequests.push(request);
+      if (accountDeletionRequests.length > MAX_ACCOUNT_DELETION_REQUESTS) {
+        accountDeletionRequests.splice(
+          0,
+          accountDeletionRequests.length - MAX_ACCOUNT_DELETION_REQUESTS,
+        );
+      }
+    },
+
+    async countAccountDeletionRequests(): Promise<number> {
+      return accountDeletionRequests.length;
     },
   };
 }

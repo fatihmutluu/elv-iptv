@@ -27,6 +27,7 @@ import {
   type FeedbackPort,
   type FeedbackSubmitInput,
   generateSessionId,
+  isAuthTokenExpiredError,
   type PersistedSessionRecord,
   parsePersistedSession,
   redactDiagnosticsLine,
@@ -62,7 +63,7 @@ export function createTvMobileSyncPorts(
 ): TvMobileSyncPorts {
   const randomBytes = options.randomBytes ?? defaultCsprngBytes;
   const clock: SyncClockPort = options.clock ?? { now: () => Date.now() };
-  const cryptoPort = createPureJsVaultCryptoPort(randomBytes);
+  const cryptoPort = options.crypto ?? createPureJsVaultCryptoPort(randomBytes);
   const fetchFn: SyncFetchFn =
     options.fetchFn ??
     ((input, init) =>
@@ -139,20 +140,36 @@ export function createTvMobileSyncPorts(
   const ensureAccessToken = async (
     baseUrl: string,
     forceRefresh = false,
-  ): Promise<SyncSession | null> => {
-    if (activeSession === null) return null;
-    if (!forceRefresh && activeSession.accessToken.length > 0) return activeSession;
+  ): Promise<
+    | { readonly ok: true; readonly session: SyncSession }
+    | { readonly ok: false; readonly errorCode: 'session_expired' | 'invalid_session' }
+  > => {
+    if (activeSession === null) return { ok: false, errorCode: 'session_expired' };
+    if (!forceRefresh && activeSession.accessToken.length > 0) {
+      return { ok: true, session: activeSession };
+    }
     const refreshed = await makeAuthClient(baseUrl).refresh(activeSession.refreshToken);
-    if (!refreshed.ok) return null;
+    if (!refreshed.ok) return { ok: false, errorCode: 'session_expired' };
+    const refreshedUser = refreshed.value.user;
+    if (
+      refreshedUser === undefined ||
+      typeof refreshedUser.id !== 'string' ||
+      refreshedUser.id.trim().length === 0
+    ) {
+      return { ok: false, errorCode: 'invalid_session' };
+    }
     const updated: SyncSession = {
       ...activeSession,
-      user: refreshed.value.user ?? activeSession.user,
+      user: {
+        id: refreshedUser.id,
+        email: refreshedUser.email.length > 0 ? refreshedUser.email : activeSession.user.email,
+      },
       accessToken: refreshed.value.accessToken,
       refreshToken: refreshed.value.refreshToken,
     };
     activeSession = updated;
     await persistSession(updated, state.lastSyncedAtIso, lastRevision);
-    return updated;
+    return { ok: true, session: updated };
   };
 
   let hydrated = false;
@@ -251,19 +268,25 @@ export function createTvMobileSyncPorts(
 
       setState({ ...state, status: 'syncing', errorCode: null });
       const client = makeAuthClient(baseUrl);
-      let session = await ensureAccessToken(baseUrl);
-      if (session === null) {
-        setState({ ...state, status: 'signed_in', errorCode: 'session_expired' });
-        return { ok: false, errorCode: 'session_expired' };
+      const tokenRes = await ensureAccessToken(baseUrl);
+      if (!tokenRes.ok) {
+        setState({ ...state, status: 'signed_in', errorCode: tokenRes.errorCode });
+        return { ok: false, errorCode: tokenRes.errorCode };
       }
+      let session = tokenRes.session;
 
       let pullRes = await client.pullVault(session);
-      if (!pullRes.ok && pullRes.error.code === 'auth') {
-        session = await ensureAccessToken(baseUrl, true);
-        if (session !== null) pullRes = await client.pullVault(session);
+      if (!pullRes.ok && isAuthTokenExpiredError(pullRes.error)) {
+        const retryToken = await ensureAccessToken(baseUrl, true);
+        if (!retryToken.ok) {
+          setState({ ...state, status: 'signed_in', errorCode: retryToken.errorCode });
+          return { ok: false, errorCode: retryToken.errorCode };
+        }
+        session = retryToken.session;
+        pullRes = await client.pullVault(session);
       }
-      if (!pullRes.ok || session === null) {
-        const code = pullRes.ok ? 'session_expired' : errorCodeFrom(pullRes.error);
+      if (!pullRes.ok) {
+        const code = errorCodeFrom(pullRes.error);
         setState({ ...state, status: 'signed_in', errorCode: code });
         return { ok: false, errorCode: code };
       }
@@ -322,17 +345,21 @@ export function createTvMobileSyncPorts(
       if (activeSession === null) return { ok: false, errorCode: 'not_signed_in' };
 
       const client = makeAuthClient(baseUrl);
-      let session = await ensureAccessToken(baseUrl);
-      if (session === null) {
-        setState({ ...state, errorCode: 'session_expired' });
-        return { ok: false, errorCode: 'session_expired' };
+      const tokenRes = await ensureAccessToken(baseUrl);
+      if (!tokenRes.ok) {
+        setState({ ...state, errorCode: tokenRes.errorCode });
+        return { ok: false, errorCode: tokenRes.errorCode };
       }
+      let session = tokenRes.session;
       let res = await client.deleteAccount(session.accessToken, session.user.email, password);
-      if (!res.ok && res.error.code === 'auth' && res.error.detail === 'unauthorized') {
-        session = await ensureAccessToken(baseUrl, true);
-        if (session !== null) {
-          res = await client.deleteAccount(session.accessToken, session.user.email, password);
+      if (!res.ok && isAuthTokenExpiredError(res.error)) {
+        const retryToken = await ensureAccessToken(baseUrl, true);
+        if (!retryToken.ok) {
+          setState({ ...state, errorCode: retryToken.errorCode });
+          return { ok: false, errorCode: retryToken.errorCode };
         }
+        session = retryToken.session;
+        res = await client.deleteAccount(session.accessToken, session.user.email, password);
       }
       if (!res.ok) {
         const code = errorCodeFrom(res.error);
@@ -380,11 +407,23 @@ export function createTvMobileSyncPorts(
       if (vaultKey.length !== VAULT_KEY_BYTES) return 'expired';
 
       const refreshed = await makeAuthClient(baseUrl).refresh(res.value.payload.refreshToken);
-      if (!refreshed.ok) return 'expired';
+      if (!refreshed.ok) {
+        setState({ ...state, errorCode: errorCodeFrom(refreshed.error) });
+        return 'expired';
+      }
+      const refreshedUser = refreshed.value.user;
+      if (
+        refreshedUser === undefined ||
+        typeof refreshedUser.id !== 'string' ||
+        refreshedUser.id.trim().length === 0
+      ) {
+        setState({ ...state, errorCode: 'invalid_session' });
+        return 'expired';
+      }
       const pairedSession: SyncSession = {
-        user: refreshed.value.user ?? {
-          id: res.value.payload.email,
-          email: res.value.payload.email,
+        user: {
+          id: refreshedUser.id,
+          email: refreshedUser.email.length > 0 ? refreshedUser.email : res.value.payload.email,
         },
         accessToken: refreshed.value.accessToken,
         refreshToken: refreshed.value.refreshToken,
@@ -411,18 +450,47 @@ export function createTvMobileSyncPorts(
       const parsed = parsePairingQrUri(codeOrUri);
       if (!parsed.ok) return { ok: false, errorCode: errorCodeFrom(parsed.error) };
 
-      const session = await ensureAccessToken(baseUrl);
-      if (session === null) return { ok: false, errorCode: 'session_expired' };
+      const tokenRes = await ensureAccessToken(baseUrl);
+      if (!tokenRes.ok) return { ok: false, errorCode: tokenRes.errorCode };
+      let session = tokenRes.session;
 
-      const claimRes = await makeQrClient(baseUrl).claimSession({
+      const authClient = makeAuthClient(baseUrl);
+      let pairTokenRes = await authClient.issuePairRefreshToken(session.accessToken);
+      if (!pairTokenRes.ok && isAuthTokenExpiredError(pairTokenRes.error)) {
+        const retryToken = await ensureAccessToken(baseUrl, true);
+        if (!retryToken.ok) return { ok: false, errorCode: retryToken.errorCode };
+        session = retryToken.session;
+        pairTokenRes = await authClient.issuePairRefreshToken(session.accessToken);
+      }
+      if (!pairTokenRes.ok) {
+        return { ok: false, errorCode: errorCodeFrom(pairTokenRes.error) };
+      }
+
+      const qrClient = makeQrClient(baseUrl);
+      const claimPayload = {
+        email: session.user.email,
+        refreshToken: pairTokenRes.value.refreshToken,
+        vaultKeyB64: base64UrlEncode(session.vaultKey),
+      };
+      let claimRes = await qrClient.claimSession({
         accessToken: session.accessToken,
         qrUriOrParams: parsed.value,
-        payload: {
-          email: session.user.email,
-          refreshToken: session.refreshToken,
-          vaultKeyB64: base64UrlEncode(session.vaultKey),
-        },
+        payload: claimPayload,
       });
+      if (!claimRes.ok && isAuthTokenExpiredError(claimRes.error)) {
+        const retryToken = await ensureAccessToken(baseUrl, true);
+        if (!retryToken.ok) return { ok: false, errorCode: retryToken.errorCode };
+        session = retryToken.session;
+        claimRes = await qrClient.claimSession({
+          accessToken: session.accessToken,
+          qrUriOrParams: parsed.value,
+          payload: {
+            email: session.user.email,
+            refreshToken: pairTokenRes.value.refreshToken,
+            vaultKeyB64: base64UrlEncode(session.vaultKey),
+          },
+        });
+      }
       return claimRes.ok ? { ok: true } : { ok: false, errorCode: errorCodeFrom(claimRes.error) };
     },
   };

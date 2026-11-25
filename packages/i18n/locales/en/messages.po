@@ -3149,7 +3149,7 @@ msgid "account.serverUrlLabel"
 msgstr "Sync server URL (optional)"
 
 msgid "account.oauthComingSoon"
-msgstr "Apple and Google sign-in support will be available in a future store update."
+msgstr "Sign in with your email and password, or pair this device with a QR code."
 
 msgid "account.recoveryTitle"
 msgstr "Save Your Recovery Code"

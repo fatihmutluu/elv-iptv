@@ -257,4 +257,116 @@ describe('telemetry strict allowlist, redaction, queue, and opt-in uploader', ()
     expect(standalone).not.toContain('https://leak');
     expect(standalone).toContain('"errorCode": "EOF"');
   });
+
+  it('deduplicates concurrent flush() calls via single-flight guard and preserves newer events across ring eviction', async () => {
+    const queue = createTelemetryQueue({ maxEntries: 3, maxBytes: 10_000 });
+    const sentBatches: Array<readonly { ts: number }[]> = [];
+    const firstResolver: {
+      fn: ((res: { status: number; bodyText: string }) => void) | null;
+    } = { fn: null };
+    let requestCount = 0;
+
+    const http: SyncHttpPort = {
+      async request(req) {
+        requestCount += 1;
+        const parsed = JSON.parse(req.body ?? '{}') as { events: Array<{ ts: number }> };
+        sentBatches.push(parsed.events);
+        if (requestCount === 1) {
+          return await new Promise<{ status: number; bodyText: string }>((resolve) => {
+            firstResolver.fn = resolve;
+          });
+        }
+        return { status: 200, bodyText: JSON.stringify({ accepted: parsed.events.length }) };
+      },
+    };
+
+    const uploader = createTelemetryUploader({
+      baseUrl: 'https://sync.example.test',
+      http,
+      queue,
+      isOptedIn: () => true,
+      clock: { now: () => 50_000 },
+      sessionId: 'sess_singleflight',
+      platform: 'desktop',
+      appVersion: '1.0.0',
+    });
+
+    uploader.record({ kind: 'startup', ts: 1, durationMs: 10, coldStart: true });
+    uploader.record({ kind: 'startup', ts: 2, durationMs: 20, coldStart: false });
+    uploader.record({ kind: 'startup', ts: 3, durationMs: 30, coldStart: false });
+
+    // Start two concurrent flushes -> MUST share one single-flight HTTP POST
+    const p1 = uploader.flush();
+    const p2 = uploader.flush();
+    expect(requestCount).toBe(1);
+
+    // While POST #1 (with ts=1,2,3) is in-flight, push ts=4 and ts=5, evicting ts=1 and ts=2 from the 3-slot ring
+    uploader.record({ kind: 'startup', ts: 4, durationMs: 40, coldStart: false });
+    uploader.record({ kind: 'startup', ts: 5, durationMs: 50, coldStart: false });
+    expect(queue.peek().map((e) => e.ts)).toEqual([3, 4, 5]);
+
+    firstResolver.fn?.({ status: 200, bodyText: JSON.stringify({ accepted: 3 }) });
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1).toEqual({ sent: 3 });
+    expect(r2).toEqual({ sent: 3 });
+    expect(requestCount).toBe(1);
+
+    // Only ts=3 was in the sent batch; unsent ts=4 and ts=5 MUST remain queued!
+    expect(queue.peek().map((e) => e.ts)).toEqual([4, 5]);
+
+    // Follow-up flush delivers ts=4 and ts=5 cleanly
+    const r3 = await uploader.flush();
+    expect(r3).toEqual({ sent: 2 });
+    expect(requestCount).toBe(2);
+    expect(sentBatches[0]?.map((e) => e.ts)).toEqual([1, 2, 3]);
+    expect(sentBatches[1]?.map((e) => e.ts)).toEqual([4, 5]);
+    expect(queue.size()).toBe(0);
+  });
+
+  it('rejects bare multi-label and common-TLD hostnames in sanitizeToken while allowing dotted versions and codecs', () => {
+    const bareHostnames = [
+      'my-iptv.provider.com',
+      'cdn.myiptv.net',
+      'stream.internal.lan',
+      'provider.org',
+      'channel.tv',
+      'edge.io',
+      'portal.xyz',
+      'iptv.me',
+      'host.cc',
+      'feed.live',
+      'relay.stream',
+      'demo.example',
+    ];
+    for (const host of bareHostnames) {
+      expect(
+        sanitizeTelemetryEvent({
+          kind: 'playback_error',
+          ts: 1000,
+          engine: 'media3',
+          errorCode: host,
+          isLive: true,
+        }),
+      ).toBeNull();
+    }
+
+    const validDottedTokens = [
+      '0.9.0',
+      '1.2.3-beta.1',
+      'h.264',
+      'av01.0.08M.08',
+      'MEDIA_ERR.DECODE',
+    ];
+    for (const token of validDottedTokens) {
+      const clean = sanitizeTelemetryEvent({
+        kind: 'playback_error',
+        ts: 1000,
+        engine: 'media3',
+        errorCode: token,
+        isLive: true,
+      });
+      expect(clean).not.toBeNull();
+      expect(clean?.kind === 'playback_error' ? clean.errorCode : '').toBe(token);
+    }
+  });
 });

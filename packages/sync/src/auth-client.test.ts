@@ -1,10 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createSyncAuthClient, validateSignupInput } from './auth-client';
-import type { SyncHttpPort, SyncHttpRequest, SyncHttpResponse } from './ports';
-import { createPureJsVaultCryptoPort } from './pure-crypto';
+import type { SyncHttpPort, SyncHttpRequest, SyncHttpResponse, VaultCryptoPort } from './ports';
+import { createPureJsVaultCryptoPort, createWebCryptoVaultPort } from './pure-crypto';
+import { MAX_KDF_ITERATIONS, MIN_KDF_ITERATIONS } from './vault-crypto';
 import { createEmptyVaultSnapshot, type VaultSnapshot } from './vault-merge';
 
-const TEST_ITERATIONS = 1_000;
+const TEST_ITERATIONS = MIN_KDF_ITERATIONS;
+
+function createFastTestWebCrypto(seed = 11): VaultCryptoPort {
+  const rand = seededRandom(seed);
+  return createWebCryptoVaultPort(globalThis.crypto.subtle, (arr) => {
+    arr.set(rand(arr.length));
+    return arr;
+  });
+}
 
 function seededRandom(seed = 11): (len: number) => Uint8Array {
   let state = seed >>> 0;
@@ -41,7 +50,7 @@ describe('auth-client zero-knowledge flow', () => {
   });
 
   it('registers, logs in, pushes/pulls encrypted vaults, handles conflicts, refreshes, logs out, and deletes account', async () => {
-    const crypto = createPureJsVaultCryptoPort(seededRandom(55));
+    const crypto = createFastTestWebCrypto(55);
     const requests: SyncHttpRequest[] = [];
     let storedMeta: Record<string, unknown> | null = null;
     let storedVerifier = '';
@@ -217,7 +226,7 @@ describe('auth-client zero-knowledge flow', () => {
   });
 
   it('handles network failures and malformed responses cleanly', async () => {
-    const crypto = createPureJsVaultCryptoPort(seededRandom(3));
+    const crypto = createFastTestWebCrypto(3);
     const failingHttp: SyncHttpPort = {
       async request() {
         throw new Error('offline');
@@ -234,7 +243,124 @@ describe('auth-client zero-knowledge flow', () => {
     expect((await client.login('a@b.co', '')).ok).toBe(false);
     expect((await client.login('a@b.co', 'password123')).ok).toBe(false);
     expect((await client.refresh('tok')).ok).toBe(false);
+    expect((await client.issuePairRefreshToken('acc_1')).ok).toBe(false);
     expect((await client.logout('tok')).ok).toBe(false);
     expect((await client.deleteAccount('acc', '', '')).ok).toBe(false);
+  });
+
+  it('issues an independent pair refresh token via POST /v1/auth/pair-token with Bearer auth', async () => {
+    const crypto = createPureJsVaultCryptoPort(seededRandom(19));
+    const requests: SyncHttpRequest[] = [];
+    let nextResponse: SyncHttpResponse = {
+      status: 201,
+      bodyText: JSON.stringify({ refreshToken: 'pair_ref_independent_1' }),
+    };
+
+    const http: SyncHttpPort = {
+      async request(req) {
+        requests.push(req);
+        return nextResponse;
+      },
+    };
+    const client = createSyncAuthClient({
+      baseUrl: 'https://sync.example.test/',
+      http,
+      crypto,
+      kdfIterations: TEST_ITERATIONS,
+    });
+
+    const emptyTokenRes = await client.issuePairRefreshToken('   ');
+    expect(emptyTokenRes.ok).toBe(false);
+    expect(requests).toHaveLength(0);
+
+    const issued = await client.issuePairRefreshToken('acc_live_jwt');
+    expect(issued).toEqual({ ok: true, value: { refreshToken: 'pair_ref_independent_1' } });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.method).toBe('POST');
+    expect(requests[0]?.url).toBe('https://sync.example.test/v1/auth/pair-token');
+    expect(requests[0]?.headers?.Authorization).toBe('Bearer acc_live_jwt');
+
+    nextResponse = { status: 401, bodyText: JSON.stringify({ error: 'unauthorized' }) };
+    const unauth = await client.issuePairRefreshToken('acc_expired');
+    expect(unauth).toEqual({ ok: false, error: { category: 'auth', code: 'unauthorized' } });
+
+    nextResponse = { status: 201, bodyText: JSON.stringify({ refreshToken: '' }) };
+    const badBody = await client.issuePairRefreshToken('acc_live_jwt');
+    expect(badBody).toEqual({
+      ok: false,
+      error: { category: 'network', code: 'invalid-pair-token-response' },
+    });
+  });
+
+  it('rejects out-of-bounds or non-integer kdfIterations in client config and login vaultMeta', async () => {
+    const baseCrypto = createFastTestWebCrypto(29);
+    const deriveSpy = vi.spyOn(baseCrypto, 'deriveKeyPbkdf2');
+    const noopHttp: SyncHttpPort = {
+      async request() {
+        return { status: 200, bodyText: '{}' };
+      },
+    };
+
+    for (const badIter of [
+      0,
+      1,
+      MIN_KDF_ITERATIONS - 1,
+      MAX_KDF_ITERATIONS + 1,
+      1_000_000_000,
+      100_000.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ]) {
+      expect(() =>
+        createSyncAuthClient({
+          baseUrl: 'https://sync.example.test',
+          http: noopHttp,
+          crypto: baseCrypto,
+          kdfIterations: badIter,
+        }),
+      ).toThrow(/KDF|kdfIterations/i);
+    }
+
+    for (const badServerIter of [
+      1,
+      MIN_KDF_ITERATIONS - 1,
+      MAX_KDF_ITERATIONS + 1,
+      1_000_000_000,
+      210_000.5,
+      Number.NaN,
+    ]) {
+      deriveSpy.mockClear();
+      const http: SyncHttpPort = {
+        async request() {
+          return {
+            status: 200,
+            bodyText: JSON.stringify({
+              user: { id: 'usr_1', email: 'alice@example.test' },
+              accessToken: 'acc_1',
+              refreshToken: 'ref_1',
+              vaultMeta: {
+                kdfSalt: 'c2FsdA',
+                kdfIterations: badServerIter,
+                wrappedVaultKey: 'v1.aaaa.bbbb',
+                recoveryWrappedVaultKey: 'v1.cccc.dddd',
+              },
+            }),
+          };
+        },
+      };
+      const client = createSyncAuthClient({
+        baseUrl: 'https://sync.example.test',
+        http,
+        crypto: baseCrypto,
+        kdfIterations: TEST_ITERATIONS,
+      });
+      const res = await client.login('alice@example.test', 'StrongPassword!42');
+      expect(res).toEqual({
+        ok: false,
+        error: { category: 'network', code: 'invalid-login-response' },
+      });
+      // Only authVerifier derivation ran; vault unlock PBKDF2 must NEVER run for bad server iterations
+      expect(deriveSpy).toHaveBeenCalledTimes(1);
+    }
   });
 });

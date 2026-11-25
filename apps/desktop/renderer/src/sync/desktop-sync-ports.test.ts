@@ -4,6 +4,7 @@ import type {
   SyncAccountStateIpc,
   SyncBridge,
   TelemetryBridge,
+  TelemetryStatusIpc,
 } from '../../../src/shared/sync-ipc.ts';
 import { createDesktopSyncPorts } from './desktop-sync-ports.ts';
 
@@ -171,5 +172,79 @@ describe('createDesktopSyncPorts (#26, #458)', () => {
 
     ports.dispose();
     expect(stateListener).toBeUndefined();
+  });
+
+  it('guards hydrate() with a monotonic mutation counter so in-flight hydrate() never overwrites a newer setOptIn(true) and notifies onTelemetryStatusChanged after record/flush (MEDIUM #15)', async () => {
+    let resolveHydrateStatus!: (status: {
+      optedIn: boolean;
+      queuedCount: number;
+      previewJson: string;
+    }) => void;
+    let getStatusCalls = 0;
+    let queuedCount = 0;
+    let optedIn = false;
+
+    const telemetryBridge: TelemetryBridge = {
+      setOptIn: vi.fn(async (enabled) => {
+        optedIn = enabled;
+        if (!enabled) queuedCount = 0;
+        return { optedIn, queuedCount, previewJson: `{"optedIn":${String(optedIn)}}` };
+      }),
+      getStatus: vi.fn((): Promise<TelemetryStatusIpc> => {
+        getStatusCalls += 1;
+        if (getStatusCalls === 1) {
+          // Simulate slow initial hydrate() returning stale optedIn: false AFTER user toggles opt-in
+          return new Promise<TelemetryStatusIpc>((resolve) => {
+            resolveHydrateStatus = resolve;
+          });
+        }
+        return Promise.resolve({
+          optedIn,
+          queuedCount,
+          previewJson: `{"optedIn":${String(optedIn)},"queued":${queuedCount}}`,
+        });
+      }),
+      record: vi.fn(async () => {
+        queuedCount += 1;
+      }),
+      flush: vi.fn(async () => {
+        queuedCount = 0;
+      }),
+    };
+
+    const ports = createDesktopSyncPorts({ telemetry: telemetryBridge });
+    const observed: Array<{ optedIn: boolean; queuedCount: number; previewJson: string }> = [];
+    const unsub = ports.onTelemetryStatusChanged((status) => observed.push(status));
+
+    // Start hydrate() (in-flight)
+    const hydratePromise = ports.hydrate();
+
+    // User enables opt-in while hydrate() is still in flight
+    ports.telemetry?.setOptIn(true);
+    expect(ports.telemetry?.isOptedIn()).toBe(true);
+
+    // Stale hydrate() resolves with optedIn: false -> MUST NOT overwrite setOptIn(true)!
+    resolveHydrateStatus({ optedIn: false, queuedCount: 0, previewJson: '{"stale":true}' });
+    await hydratePromise;
+
+    expect(ports.telemetry?.isOptedIn()).toBe(true);
+    expect(ports.telemetry?.getPayloadPreviewJson()).not.toContain('"stale":true');
+
+    // Recording an event refreshes queuedCount & previewJson and notifies subscribers
+    ports.telemetry?.recordPlaybackError({ engine: 'mpv', errorCode: 'network', isLive: true });
+    await vi.waitFor(() => {
+      expect(ports.telemetry?.queuedCount()).toBe(1);
+      expect(ports.telemetry?.getPayloadPreviewJson()).toContain('"queued":1');
+    });
+    expect(observed.some((s) => s.queuedCount === 1)).toBe(true);
+
+    // Flushing refreshes queuedCount back to 0 and notifies subscribers
+    await ports.telemetry?.flush();
+    expect(ports.telemetry?.queuedCount()).toBe(0);
+    expect(ports.telemetry?.getPayloadPreviewJson()).toContain('"queued":0');
+    expect(observed[observed.length - 1]?.queuedCount).toBe(0);
+
+    unsub();
+    ports.dispose();
   });
 });

@@ -3149,7 +3149,7 @@ msgid "account.serverUrlLabel"
 msgstr "Eşitleme sunucusu adresi (isteğe bağlı)"
 
 msgid "account.oauthComingSoon"
-msgstr "Apple ve Google ile giriş desteği gelecek mağaza güncellemesinde eklenecek."
+msgstr "E-posta ve şifrenizle giriş yapın veya bu cihazı QR kod ile eşleştirin."
 
 msgid "account.recoveryTitle"
 msgstr "Kurtarma Kodunuzu Kaydedin"

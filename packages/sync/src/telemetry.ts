@@ -108,6 +108,8 @@ export const DEFAULT_TELEMETRY_MAX_BYTES = 131_072;
 
 const SAFE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const IPV4_RE = /(?:^|[^0-9])(?:\d{1,3}\.){3}\d{1,3}(?:$|[^0-9])/;
+const MULTI_LABEL_HOSTNAME_RE = /[a-z0-9-]+\.[a-z0-9-]+\.[a-z]{2,}/i;
+const COMMON_TLD_HOSTNAME_RE = /[a-z0-9-]+\.(?:com|net|org|tv|io|xyz|me|cc|live|stream|example)\b/i;
 const FORBIDDEN_PATTERNS_RE =
   /(:\/\/|@|\\|\/Users\/|\/home\/|\/data\/|\/etc\/|\/var\/|bearer\s|basic\s|authorization|cookie|passwd|password|secret|token=|api_key|apikey)/i;
 const MAX_SAFE_DURATION_MS = 86_400_000;
@@ -116,7 +118,14 @@ function sanitizeToken(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   if (trimmed.length === 0 || trimmed.length > 64) return null;
-  if (FORBIDDEN_PATTERNS_RE.test(trimmed) || IPV4_RE.test(trimmed)) return null;
+  if (
+    FORBIDDEN_PATTERNS_RE.test(trimmed) ||
+    IPV4_RE.test(trimmed) ||
+    MULTI_LABEL_HOSTNAME_RE.test(trimmed) ||
+    COMMON_TLD_HOSTNAME_RE.test(trimmed)
+  ) {
+    return null;
+  }
   const firstRedacted = redactText(trimmed);
   const secondRedacted = redactText(firstRedacted);
   if (firstRedacted !== trimmed || secondRedacted !== trimmed) return null;
@@ -338,11 +347,19 @@ export function sanitizeTelemetryEvent(raw: unknown): TelemetryEvent | null {
   }
 }
 
+/** Queued telemetry event paired with its monotonic queue sequence ID. */
+export interface TelemetryQueueEntry {
+  readonly id: number;
+  readonly event: TelemetryEvent;
+}
+
 /** Bounded FIFO ring buffer storing sanitized telemetry events. */
 export interface TelemetryQueue {
   push(rawEvent: unknown): boolean;
   peek(limit?: number): readonly TelemetryEvent[];
+  peekEntries?(limit?: number): readonly TelemetryQueueEntry[];
   drain(count: number): readonly TelemetryEvent[];
+  drainByIds?(ids: ReadonlySet<number>): readonly TelemetryEvent[];
   size(): number;
   byteLength(): number;
   clear(): void;
@@ -359,8 +376,13 @@ export function createTelemetryQueue(options?: TelemetryQueueOptions): Telemetry
   const maxEntries = Math.max(1, options?.maxEntries ?? DEFAULT_TELEMETRY_MAX_ENTRIES);
   const maxBytes = Math.max(256, options?.maxBytes ?? DEFAULT_TELEMETRY_MAX_BYTES);
 
-  const items: Array<{ readonly event: TelemetryEvent; readonly bytes: number }> = [];
+  const items: Array<{
+    readonly id: number;
+    readonly event: TelemetryEvent;
+    readonly bytes: number;
+  }> = [];
   let totalBytes = 0;
+  let nextId = 1;
 
   return {
     push(rawEvent: unknown): boolean {
@@ -374,7 +396,9 @@ export function createTelemetryQueue(options?: TelemetryQueueOptions): Telemetry
         if (dropped === undefined) break;
         totalBytes -= dropped.bytes;
       }
-      items.push({ event: clean, bytes });
+      const id = nextId;
+      nextId += 1;
+      items.push({ id, event: clean, bytes });
       totalBytes += bytes;
       return true;
     },
@@ -384,11 +408,35 @@ export function createTelemetryQueue(options?: TelemetryQueueOptions): Telemetry
       return slice.map((item) => item.event);
     },
 
+    peekEntries(limit?: number): readonly TelemetryQueueEntry[] {
+      const slice = limit !== undefined ? items.slice(0, Math.max(0, limit)) : items;
+      return slice.map((item) => ({ id: item.id, event: item.event }));
+    },
+
     drain(count: number): readonly TelemetryEvent[] {
       const n = Math.min(items.length, Math.max(0, Math.trunc(count)));
       const removed = items.splice(0, n);
       for (const item of removed) totalBytes -= item.bytes;
       return removed.map((item) => item.event);
+    },
+
+    drainByIds(ids: ReadonlySet<number>): readonly TelemetryEvent[] {
+      if (ids.size === 0 || items.length === 0) return [];
+      const removed: TelemetryEvent[] = [];
+      let writeIdx = 0;
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        if (item === undefined) continue;
+        if (ids.has(item.id)) {
+          totalBytes -= item.bytes;
+          removed.push(item.event);
+        } else {
+          items[writeIdx] = item;
+          writeIdx += 1;
+        }
+      }
+      items.length = writeIdx;
+      return removed;
     },
 
     size(): number {
@@ -488,6 +536,7 @@ export function createTelemetryUploader(options: TelemetryUploaderOptions): Tele
   let disabled = false;
   let consecutiveFailures = 0;
   let nextAllowedAt = 0;
+  let flushing: Promise<TelemetryFlushResult> | null = null;
 
   const scheduleBackoff = (now: number): void => {
     consecutiveFailures += 1;
@@ -503,21 +552,26 @@ export function createTelemetryUploader(options: TelemetryUploaderOptions): Tele
       return queue.push(rawEvent);
     },
 
-    async flush(signal?: AbortSignal): Promise<TelemetryFlushResult> {
+    flush(signal?: AbortSignal): Promise<TelemetryFlushResult> {
+      if (flushing !== null) {
+        return flushing;
+      }
       if (!options.isOptedIn()) {
-        return { sent: 0, skippedReason: 'opted_out' };
+        return Promise.resolve({ sent: 0, skippedReason: 'opted_out' });
       }
       if (disabled) {
-        return { sent: 0, skippedReason: 'kill_switch' };
+        return Promise.resolve({ sent: 0, skippedReason: 'kill_switch' });
       }
       const now = options.clock.now();
       if (now < nextAllowedAt) {
-        return { sent: 0, skippedReason: 'backoff' };
+        return Promise.resolve({ sent: 0, skippedReason: 'backoff' });
       }
-      const batch = queue.peek(maxBatchSize);
+      const entries = queue.peekEntries ? queue.peekEntries(maxBatchSize) : null;
+      const batch = entries ? entries.map((entry) => entry.event) : queue.peek(maxBatchSize);
       if (batch.length === 0) {
-        return { sent: 0, skippedReason: 'empty' };
+        return Promise.resolve({ sent: 0, skippedReason: 'empty' });
       }
+      const sentIds = entries ? new Set(entries.map((entry) => entry.id)) : null;
 
       const payload: TelemetryBatchPayload = {
         schemaVersion: 1,
@@ -528,38 +582,53 @@ export function createTelemetryUploader(options: TelemetryUploaderOptions): Tele
         events: batch,
       };
 
-      try {
-        const res = await options.http.request({
-          method: 'POST',
-          url: `${baseUrl}/v1/telemetry`,
-          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          ...(signal !== undefined ? { signal } : {}),
-        });
-        if (res.status >= 200 && res.status < 300) {
-          let parsed: Record<string, unknown> | null = null;
-          try {
-            const obj: unknown = JSON.parse(res.bodyText);
-            if (typeof obj === 'object' && obj !== null) parsed = obj as Record<string, unknown>;
-          } catch {
-            // Non-JSON 2xx response still counts as accepted.
+      const run = (async (): Promise<TelemetryFlushResult> => {
+        try {
+          const res = await options.http.request({
+            method: 'POST',
+            url: `${baseUrl}/v1/telemetry`,
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            ...(signal !== undefined ? { signal } : {}),
+          });
+          if (res.status >= 200 && res.status < 300) {
+            let parsed: Record<string, unknown> | null = null;
+            try {
+              const obj: unknown = JSON.parse(res.bodyText);
+              if (typeof obj === 'object' && obj !== null) parsed = obj as Record<string, unknown>;
+            } catch {
+              // Non-JSON 2xx response still counts as accepted.
+            }
+            if (parsed?.disabled === true) {
+              disabled = true;
+              queue.clear();
+              return { sent: 0, skippedReason: 'kill_switch' };
+            }
+            if (sentIds !== null && queue.drainByIds) {
+              queue.drainByIds(sentIds);
+            } else {
+              queue.drain(batch.length);
+            }
+            consecutiveFailures = 0;
+            nextAllowedAt = 0;
+            return { sent: batch.length };
           }
-          if (parsed?.disabled === true) {
-            disabled = true;
-            queue.clear();
-            return { sent: 0, skippedReason: 'kill_switch' };
-          }
-          queue.drain(batch.length);
-          consecutiveFailures = 0;
-          nextAllowedAt = 0;
-          return { sent: batch.length };
+          scheduleBackoff(now);
+          return { sent: 0, skippedReason: 'network_error' };
+        } catch {
+          scheduleBackoff(now);
+          return { sent: 0, skippedReason: 'network_error' };
         }
-        scheduleBackoff(now);
-        return { sent: 0, skippedReason: 'network_error' };
-      } catch {
-        scheduleBackoff(now);
-        return { sent: 0, skippedReason: 'network_error' };
-      }
+      })();
+
+      let tracked: Promise<TelemetryFlushResult> | null = null;
+      tracked = run.finally(() => {
+        if (flushing === tracked) {
+          flushing = null;
+        }
+      });
+      flushing = tracked;
+      return tracked;
     },
 
     isRemotelyDisabled(): boolean {

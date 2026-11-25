@@ -103,15 +103,45 @@ export interface ValidatedFeedbackInput {
   readonly diagnosticsJson: string | null;
 }
 
+/** Validated public account-deletion request payload. */
+export interface AccountDeletionInput {
+  readonly email: string;
+  readonly note: string | null;
+}
+
 /** Validation result wrapper. */
 export type ValidationResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: string };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const MAX_DATE_MS = 8.64e15;
+const MAX_DELETION_NOTE_LENGTH = 500;
+
+const IPV6_BODY =
+  '(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,7}:' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}' +
+  '|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}' +
+  '|:(?::[0-9a-fA-F]{1,4}){1,7}' +
+  '|::ffff:(?:(?:25[0-5]|2[0-4]\\d|1?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d\\d?))';
+
+const IPV6_DETECT_RE = new RegExp(`(?:^|[\\s"'(\\[=:,])${IPV6_BODY}(?=$|[\\s"'\\])},;/%])`, 'i');
+const IPV6_BRACKET_REPLACE_RE = new RegExp(
+  `\\[${IPV6_BODY}(?:%[^\\s\\]]+)?\\](?::\\d{1,5})?`,
+  'gi',
+);
+const IPV6_BARE_REPLACE_RE = new RegExp(
+  `(^|[\\s"'(=:,])${IPV6_BODY}(?:%[^\\s"'),;]+)?(?=$|[\\s"'),;/])`,
+  'gi',
+);
 
 const SENSITIVE_PATTERNS: readonly { readonly label: string; readonly re: RegExp }[] = [
-  { label: 'url_scheme', re: /(?:https?|rtsp|rtmp|udp|mms|file):\/\//i },
+  { label: 'url_scheme', re: /(?:[a-z][a-z0-9+.-]*:\/\/|file:\S)/i },
   { label: 'uri_credentials', re: /[^\s/:@]{1,128}:[^\s/:@]{1,128}@[^\s/:@]+/ },
   {
     label: 'auth_secret',
@@ -119,13 +149,43 @@ const SENSITIVE_PATTERNS: readonly { readonly label: string; readonly re: RegExp
   },
   {
     label: 'private_file_path',
-    re: /(?:^|[\s"'(=])(?:\/(?:Users|home|var|tmp|private|data\/user|storage\/emulated)\/|[A-Za-z]:\\|\\\\[A-Za-z0-9_.-]+\\)/,
+    re: /(?:^|[\s"'(=:])(?:\/(?:Users|home|var|tmp|private|data|storage)\/|[A-Za-z]:\\|\\\\[A-Za-z0-9_.-]+\\)/,
   },
   {
     label: 'ipv4_address',
     re: /\b(?:(?:25[0-5]|2[0-4]\d|1?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|1?\d\d?)\b/,
   },
+  {
+    label: 'ipv6_address',
+    re: IPV6_DETECT_RE,
+  },
 ];
+
+/** Defense-in-depth server-side scrubber stripping URLs, credentials, paths, and IPs from feedback text. */
+function redactFeedbackMessage(text: string): string {
+  return text
+    .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[redacted]')
+    .replace(/\bfile:\S+/gi, '[redacted]')
+    .replace(/(^|[\s"'(=])[^\s/:@]{1,128}:[^\s/:@]{1,128}@[^\s/:@]+/g, '$1[redacted]')
+    .replace(/\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, '[redacted]')
+    .replace(/\bauthorization\s*[:=]\s*\S+(?:\s+\S+)?/gi, '[redacted]')
+    .replace(
+      /\b(?:password|passwd|access_token|refresh_token|api_key)\s*[:=]\s*\S+/gi,
+      '[redacted]',
+    )
+    .replace(
+      /(^|[\s"'(=:])\/(?:Users|home|var|tmp|private|data|storage)\/[^\s"'<>)]+/g,
+      '$1[redacted]',
+    )
+    .replace(/(^|[\s"'(=:])[A-Za-z]:\\[^\s"'<>)]+/g, '$1[redacted]')
+    .replace(/(^|[\s"'(=:])\\\\[A-Za-z0-9_.-]+\\[^\s"'<>)]+/g, '$1[redacted]')
+    .replace(IPV6_BRACKET_REPLACE_RE, '[redacted]')
+    .replace(IPV6_BARE_REPLACE_RE, '$1[redacted]')
+    .replace(
+      /\b(?:(?:25[0-5]|2[0-4]\d|1?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|1?\d\d?)(?::\d{1,5})?\b/g,
+      '[redacted]',
+    );
+}
 
 /** Recursively scans a value for URLs, credentials, authorization tokens, private file paths, or IPs. */
 function findSensitivePattern(value: unknown, depth = 0): string | null {
@@ -442,12 +502,21 @@ export function validateTelemetryBatch(
     const formFactor = nonEmptyString(item.formFactor, 1, 32) ?? defaultFormFactor;
     const rawTs = item.ts ?? item.timestamp;
     let eventTs = nowIso;
-    if (typeof rawTs === 'string') {
-      const parsed = Date.parse(rawTs);
-      if (Number.isNaN(parsed)) return { ok: false, error: 'invalid_event_ts' };
-      eventTs = new Date(parsed).toISOString();
-    } else if (typeof rawTs === 'number' && Number.isFinite(rawTs)) {
-      eventTs = new Date(rawTs).toISOString();
+    if (rawTs !== undefined && rawTs !== null) {
+      if (typeof rawTs === 'string') {
+        const parsed = Date.parse(rawTs);
+        if (Number.isNaN(parsed) || Math.abs(parsed) > MAX_DATE_MS) {
+          return { ok: false, error: 'invalid_event_ts' };
+        }
+        eventTs = new Date(parsed).toISOString();
+      } else if (typeof rawTs === 'number') {
+        if (!Number.isFinite(rawTs) || Math.abs(rawTs) > MAX_DATE_MS) {
+          return { ok: false, error: 'invalid_event_ts' };
+        }
+        eventTs = new Date(rawTs).toISOString();
+      } else {
+        return { ok: false, error: 'invalid_event_ts' };
+      }
     }
 
     const payloadResult = sanitizeTelemetryPayload(kind, item);
@@ -473,8 +542,10 @@ export function validateFeedbackInput(raw: unknown): ValidationResult<ValidatedF
   if (typeof raw.category !== 'string' || !FEEDBACK_CATEGORY_SET.has(raw.category)) {
     return { ok: false, error: 'invalid_category' };
   }
-  const message = nonEmptyString(raw.message, 1, 2_000);
-  if (!message) return { ok: false, error: 'invalid_message' };
+  const rawMessage = nonEmptyString(raw.message, 1, 2_000);
+  if (!rawMessage) return { ok: false, error: 'invalid_message' };
+  const message = redactFeedbackMessage(rawMessage).trim();
+  if (message.length === 0) return { ok: false, error: 'invalid_message' };
   const appVersion = nonEmptyString(raw.appVersion, 1, 64) ?? 'unknown';
   const platform = nonEmptyString(raw.platform, 1, 64) ?? 'unknown';
   const locale = nonEmptyString(raw.locale, 2, 32);
@@ -502,4 +573,19 @@ export function validateFeedbackInput(raw: unknown): ValidationResult<ValidatedF
       diagnosticsJson,
     },
   };
+}
+
+/** Validates `POST /account-deletion` form or JSON payloads and clamps optional notes to 500 chars. */
+export function validateAccountDeletionInput(raw: unknown): ValidationResult<AccountDeletionInput> {
+  if (!isRecord(raw)) return { ok: false, error: 'invalid_body' };
+  const email = normalizeEmail(raw.email);
+  if (!email) return { ok: false, error: 'invalid_email' };
+  let note: string | null = null;
+  if (typeof raw.note === 'string') {
+    const trimmed = raw.note.trim();
+    if (trimmed.length > 0) {
+      note = trimmed.slice(0, MAX_DELETION_NOTE_LENGTH);
+    }
+  }
+  return { ok: true, value: { email, note } };
 }

@@ -1,5 +1,4 @@
-import { webcrypto } from 'node:crypto';
-import { normalizeSyncServerUrl, redactText, type SecretStore } from '@elv/domain';
+import { normalizeSyncServerUrl, type SecretStore } from '@elv/domain';
 import {
   base64UrlDecode,
   base64UrlEncode,
@@ -8,12 +7,10 @@ import {
   createSyncAuthClient,
   createTelemetryQueue,
   createTelemetryUploader,
-  createWebCryptoVaultPort,
   mergeVaultSnapshots,
   parsePairingQrUri,
   type QrPairingSession,
   type SyncClockPort,
-  type SyncHttpPort,
   type SyncSession,
   submitFeedback,
   type TelemetryUploader,
@@ -30,25 +27,23 @@ import type {
   TelemetryRecordRequest,
   TelemetryStatusIpc,
 } from '../../shared/sync-ipc.ts';
+import {
+  createFetchHttpPort,
+  createNodeWebCryptoPort,
+  DEFAULT_FLUSH_INTERVAL_MS,
+  type DesktopSyncFetchFn,
+  errorCodeFrom,
+  FEEDBACK_LOG_TAIL_LINES,
+  isAuthTokenExpiredError,
+  type PersistedSessionRecord,
+  parsePersistedSession,
+  redactDiagnosticsLine,
+  SESSION_SECRET_KEY,
+  SIGNED_OUT_STATE,
+  VAULT_KEY_BYTES,
+} from './sync-service-helpers.ts';
 
-const SESSION_SECRET_KEY = 'elv.sync.session.v1';
-const VAULT_KEY_BYTES = 32;
-const DEFAULT_FLUSH_INTERVAL_MS = 60_000;
-const FEEDBACK_LOG_TAIL_LINES = 25;
-
-/** Minimal Fetch signature accepted by {@link createDesktopSyncService}. */
-export type DesktopSyncFetchFn = (
-  input: string,
-  init?: {
-    readonly method?: string;
-    readonly headers?: Readonly<Record<string, string>>;
-    readonly body?: string;
-    readonly signal?: AbortSignal;
-  },
-) => Promise<{
-  readonly status: number;
-  text(): Promise<string>;
-}>;
+export { type DesktopSyncFetchFn, redactDiagnosticsLine };
 
 /** Options for {@link createDesktopSyncService}. */
 export interface DesktopSyncServiceOptions {
@@ -88,88 +83,6 @@ export interface DesktopSyncService {
   flushTelemetry(): Promise<void>;
   submitFeedback(input: FeedbackSubmitRequest): Promise<FeedbackSubmitResultIpc>;
   dispose(): void;
-}
-
-interface PersistedSessionRecord {
-  readonly userId: string;
-  readonly email: string;
-  readonly refreshToken: string;
-  readonly vaultKeyB64: string;
-  readonly lastSyncedAtIso: string | null;
-  readonly lastRevision: number;
-}
-
-const SIGNED_OUT_STATE: SyncAccountStateIpc = Object.freeze({
-  status: 'signed_out',
-  email: null,
-  lastSyncedAtIso: null,
-  pendingRecoveryCode: null,
-  errorCode: null,
-});
-
-function createNodeWebCryptoPort(): VaultCryptoPort {
-  return createWebCryptoVaultPort(webcrypto.subtle as unknown as SubtleCrypto, (arr) =>
-    webcrypto.getRandomValues(arr),
-  );
-}
-
-function createFetchHttpPort(fetchFn: DesktopSyncFetchFn): SyncHttpPort {
-  return {
-    async request(req) {
-      const res = await fetchFn(req.url, {
-        method: req.method,
-        ...(req.headers !== undefined ? { headers: req.headers } : {}),
-        ...(req.body !== undefined ? { body: req.body } : {}),
-        ...(req.signal !== undefined ? { signal: req.signal } : {}),
-      });
-      return { status: res.status, bodyText: await res.text() };
-    },
-  };
-}
-
-function parsePersistedSession(raw: string | undefined): PersistedSessionRecord | null {
-  if (raw === undefined || raw.length === 0) return null;
-  try {
-    const obj: unknown = JSON.parse(raw);
-    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return null;
-    const rec = obj as Record<string, unknown>;
-    if (
-      typeof rec.userId !== 'string' ||
-      rec.userId.length === 0 ||
-      typeof rec.email !== 'string' ||
-      rec.email.length === 0 ||
-      typeof rec.refreshToken !== 'string' ||
-      rec.refreshToken.length === 0 ||
-      typeof rec.vaultKeyB64 !== 'string' ||
-      rec.vaultKeyB64.length === 0
-    ) {
-      return null;
-    }
-    if (base64UrlDecode(rec.vaultKeyB64).length !== VAULT_KEY_BYTES) return null;
-    return {
-      userId: rec.userId,
-      email: rec.email,
-      refreshToken: rec.refreshToken,
-      vaultKeyB64: rec.vaultKeyB64,
-      lastSyncedAtIso: typeof rec.lastSyncedAtIso === 'string' ? rec.lastSyncedAtIso : null,
-      lastRevision:
-        typeof rec.lastRevision === 'number' &&
-        Number.isInteger(rec.lastRevision) &&
-        rec.lastRevision >= 0
-          ? rec.lastRevision
-          : 0,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function errorCodeFrom(error: { readonly code: string; readonly detail?: string }): string {
-  return error.detail !== undefined && error.detail.length > 0 ? error.detail : error.code;
-}
-
-function redactDiagnosticsLine(line: string): string {
-  return redactText(line.replace(/\bhttps?:\/\/\S+/gi, '<redacted-url>'));
 }
 
 /**
@@ -253,20 +166,36 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
   const ensureAccessToken = async (
     baseUrl: string,
     forceRefresh = false,
-  ): Promise<SyncSession | null> => {
-    if (activeSession === null) return null;
-    if (!forceRefresh && activeSession.accessToken.length > 0) return activeSession;
+  ): Promise<
+    | { readonly ok: true; readonly session: SyncSession }
+    | { readonly ok: false; readonly errorCode: 'session_expired' | 'invalid_session' }
+  > => {
+    if (activeSession === null) return { ok: false, errorCode: 'session_expired' };
+    if (!forceRefresh && activeSession.accessToken.length > 0) {
+      return { ok: true, session: activeSession };
+    }
     const refreshed = await makeAuthClient(baseUrl).refresh(activeSession.refreshToken);
-    if (!refreshed.ok) return null;
+    if (!refreshed.ok) return { ok: false, errorCode: 'session_expired' };
+    const refreshedUser = refreshed.value.user;
+    if (
+      refreshedUser === undefined ||
+      typeof refreshedUser.id !== 'string' ||
+      refreshedUser.id.trim().length === 0
+    ) {
+      return { ok: false, errorCode: 'invalid_session' };
+    }
     const updated: SyncSession = {
       ...activeSession,
-      user: refreshed.value.user ?? activeSession.user,
+      user: {
+        id: refreshedUser.id,
+        email: refreshedUser.email.length > 0 ? refreshedUser.email : activeSession.user.email,
+      },
       accessToken: refreshed.value.accessToken,
       refreshToken: refreshed.value.refreshToken,
     };
     activeSession = updated;
     await persistSession(updated, state.lastSyncedAtIso, lastRevision);
-    return updated;
+    return { ok: true, session: updated };
   };
 
   let hydrated = false;
@@ -418,19 +347,25 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
 
       setState({ ...state, status: 'syncing', errorCode: null });
       const client = makeAuthClient(serverUrl);
-      let session = await ensureAccessToken(serverUrl);
-      if (session === null) {
-        setState({ ...state, status: 'signed_in', errorCode: 'session_expired' });
-        return { ok: false, errorCode: 'session_expired' };
+      const tokenRes = await ensureAccessToken(serverUrl);
+      if (!tokenRes.ok) {
+        setState({ ...state, status: 'signed_in', errorCode: tokenRes.errorCode });
+        return { ok: false, errorCode: tokenRes.errorCode };
       }
+      let session = tokenRes.session;
 
       let pullRes = await client.pullVault(session);
-      if (!pullRes.ok && pullRes.error.code === 'auth') {
-        session = await ensureAccessToken(serverUrl, true);
-        if (session !== null) pullRes = await client.pullVault(session);
+      if (!pullRes.ok && isAuthTokenExpiredError(pullRes.error)) {
+        const retryToken = await ensureAccessToken(serverUrl, true);
+        if (!retryToken.ok) {
+          setState({ ...state, status: 'signed_in', errorCode: retryToken.errorCode });
+          return { ok: false, errorCode: retryToken.errorCode };
+        }
+        session = retryToken.session;
+        pullRes = await client.pullVault(session);
       }
-      if (!pullRes.ok || session === null) {
-        const errorCode = pullRes.ok ? 'session_expired' : errorCodeFrom(pullRes.error);
+      if (!pullRes.ok) {
+        const errorCode = errorCodeFrom(pullRes.error);
         setState({ ...state, status: 'signed_in', errorCode });
         return { ok: false, errorCode };
       }
@@ -492,17 +427,21 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       if (activeSession === null) return { ok: false, errorCode: 'not_signed_in' };
 
       const client = makeAuthClient(serverUrl);
-      let session = await ensureAccessToken(serverUrl);
-      if (session === null) {
-        setState({ ...state, errorCode: 'session_expired' });
-        return { ok: false, errorCode: 'session_expired' };
+      const tokenRes = await ensureAccessToken(serverUrl);
+      if (!tokenRes.ok) {
+        setState({ ...state, errorCode: tokenRes.errorCode });
+        return { ok: false, errorCode: tokenRes.errorCode };
       }
+      let session = tokenRes.session;
       let res = await client.deleteAccount(session.accessToken, session.user.email, password);
-      if (!res.ok && res.error.code === 'auth' && res.error.detail === 'unauthorized') {
-        session = await ensureAccessToken(serverUrl, true);
-        if (session !== null) {
-          res = await client.deleteAccount(session.accessToken, session.user.email, password);
+      if (!res.ok && isAuthTokenExpiredError(res.error)) {
+        const retryToken = await ensureAccessToken(serverUrl, true);
+        if (!retryToken.ok) {
+          setState({ ...state, errorCode: retryToken.errorCode });
+          return { ok: false, errorCode: retryToken.errorCode };
         }
+        session = retryToken.session;
+        res = await client.deleteAccount(session.accessToken, session.user.email, password);
       }
       if (!res.ok) {
         const errorCode = errorCodeFrom(res.error);
@@ -548,11 +487,23 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       if (vaultKey.length !== VAULT_KEY_BYTES) return 'expired';
 
       const refreshed = await makeAuthClient(serverUrl).refresh(res.value.payload.refreshToken);
-      if (!refreshed.ok) return 'expired';
+      if (!refreshed.ok) {
+        setState({ ...state, errorCode: errorCodeFrom(refreshed.error) });
+        return 'expired';
+      }
+      const refreshedUser = refreshed.value.user;
+      if (
+        refreshedUser === undefined ||
+        typeof refreshedUser.id !== 'string' ||
+        refreshedUser.id.trim().length === 0
+      ) {
+        setState({ ...state, errorCode: 'invalid_session' });
+        return 'expired';
+      }
       const pairedSession: SyncSession = {
-        user: refreshed.value.user ?? {
-          id: res.value.payload.email,
-          email: res.value.payload.email,
+        user: {
+          id: refreshedUser.id,
+          email: refreshedUser.email.length > 0 ? refreshedUser.email : res.value.payload.email,
         },
         accessToken: refreshed.value.accessToken,
         refreshToken: refreshed.value.refreshToken,
@@ -578,18 +529,46 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       const parsed = parsePairingQrUri(codeOrUri);
       if (!parsed.ok) return { ok: false, errorCode: errorCodeFrom(parsed.error) };
 
-      const session = await ensureAccessToken(serverUrl);
-      if (session === null) return { ok: false, errorCode: 'session_expired' };
+      const tokenRes = await ensureAccessToken(serverUrl);
+      if (!tokenRes.ok) return { ok: false, errorCode: tokenRes.errorCode };
+      let session = tokenRes.session;
 
-      const res = await makeQrClient(serverUrl).claimSession({
+      const authClient = makeAuthClient(serverUrl);
+      let pairTokenRes = await authClient.issuePairRefreshToken(session.accessToken);
+      if (!pairTokenRes.ok && isAuthTokenExpiredError(pairTokenRes.error)) {
+        const retryToken = await ensureAccessToken(serverUrl, true);
+        if (!retryToken.ok) return { ok: false, errorCode: retryToken.errorCode };
+        session = retryToken.session;
+        pairTokenRes = await authClient.issuePairRefreshToken(session.accessToken);
+      }
+      if (!pairTokenRes.ok) {
+        return { ok: false, errorCode: errorCodeFrom(pairTokenRes.error) };
+      }
+
+      const qrClient = makeQrClient(serverUrl);
+      let res = await qrClient.claimSession({
         accessToken: session.accessToken,
         qrUriOrParams: parsed.value,
         payload: {
           email: session.user.email,
-          refreshToken: session.refreshToken,
+          refreshToken: pairTokenRes.value.refreshToken,
           vaultKeyB64: base64UrlEncode(session.vaultKey),
         },
       });
+      if (!res.ok && isAuthTokenExpiredError(res.error)) {
+        const retryToken = await ensureAccessToken(serverUrl, true);
+        if (!retryToken.ok) return { ok: false, errorCode: retryToken.errorCode };
+        session = retryToken.session;
+        res = await qrClient.claimSession({
+          accessToken: session.accessToken,
+          qrUriOrParams: parsed.value,
+          payload: {
+            email: session.user.email,
+            refreshToken: pairTokenRes.value.refreshToken,
+            vaultKeyB64: base64UrlEncode(session.vaultKey),
+          },
+        });
+      }
       if (!res.ok) return { ok: false, errorCode: errorCodeFrom(res.error) };
       return { ok: true };
     },

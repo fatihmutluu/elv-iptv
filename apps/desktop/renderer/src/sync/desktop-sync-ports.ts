@@ -43,6 +43,7 @@ export interface DesktopTelemetryPort {
   setOptIn(enabled: boolean): void;
   queuedCount(): number;
   getPayloadPreviewJson(): string;
+  subscribe?(listener: (status: TelemetryStatusIpc) => void): () => void;
   recordScreenTransition(screen: string, durationMs: number): void;
   recordMediaDecodeFailure(meta: DesktopTelemetryMediaDecodeFailure): void;
   recordPlaybackError(meta: {
@@ -70,6 +71,7 @@ export interface DesktopSyncPorts {
   readonly syncAccount?: DesktopSyncAccountPort;
   readonly telemetry?: DesktopTelemetryPort;
   readonly feedback?: DesktopFeedbackPort;
+  onTelemetryStatusChanged(listener: (status: TelemetryStatusIpc) => void): () => void;
   hydrate(): Promise<void>;
   setServerUrl(serverUrl: string): Promise<void>;
   dispose(): void;
@@ -207,21 +209,48 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
           },
         };
 
-  let telemetryStatus: TelemetryStatusIpc = {
+  let telemetryStatus: TelemetryStatusIpc = Object.freeze({
     optedIn: false,
     queuedCount: 0,
     previewJson: INITIAL_PREVIEW_JSON,
-  };
+  });
+  let telemetryMutationSeq = 0;
+  const telemetryListeners = new Set<(status: TelemetryStatusIpc) => void>();
 
   const applyTelemetryStatus = (next: TelemetryStatusIpc): void => {
-    if (!disposed) telemetryStatus = next;
+    if (disposed) return;
+    telemetryStatus = Object.freeze({
+      optedIn: Boolean(next.optedIn),
+      queuedCount: next.queuedCount,
+      previewJson: next.previewJson,
+    });
+    for (const listener of [...telemetryListeners]) {
+      try {
+        listener(telemetryStatus);
+      } catch {
+        // Isolate subscriber failures.
+      }
+    }
   };
 
-  const refreshTelemetryStatus = (): void => {
+  const subscribeTelemetryStatus = (
+    listener: (status: TelemetryStatusIpc) => void,
+  ): (() => void) => {
+    telemetryListeners.add(listener);
+    return () => {
+      telemetryListeners.delete(listener);
+    };
+  };
+
+  const refreshTelemetryStatus = (expectedSeq: number): void => {
     if (!telemetryBridge || disposed) return;
     void telemetryBridge
       .getStatus()
-      .then(applyTelemetryStatus)
+      .then((next) => {
+        if (!disposed && expectedSeq === telemetryMutationSeq) {
+          applyTelemetryStatus(next);
+        }
+      })
       .catch(() => undefined);
   };
 
@@ -232,27 +261,35 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
           isOptedIn: () => telemetryStatus.optedIn,
           setOptIn(enabled: boolean): void {
             const next = Boolean(enabled);
-            telemetryStatus = {
+            const seq = ++telemetryMutationSeq;
+            applyTelemetryStatus({
               ...telemetryStatus,
               optedIn: next,
               ...(next ? {} : { queuedCount: 0 }),
-            };
+            });
             void telemetryBridge
               .setOptIn(next)
-              .then(applyTelemetryStatus)
+              .then((status) => {
+                if (!disposed && seq === telemetryMutationSeq) {
+                  applyTelemetryStatus(status);
+                }
+              })
               .catch(() => undefined);
           },
           queuedCount: () => telemetryStatus.queuedCount,
           getPayloadPreviewJson: () => telemetryStatus.previewJson,
+          subscribe: subscribeTelemetryStatus,
           recordScreenTransition(screen: string, durationMs: number): void {
             if (!telemetryStatus.optedIn) return;
+            const seq = telemetryMutationSeq;
             void telemetryBridge
               .record({ kind: 'screen_transition', screen, durationMs })
-              .then(refreshTelemetryStatus)
+              .then(() => refreshTelemetryStatus(seq))
               .catch(() => undefined);
           },
           recordMediaDecodeFailure(meta: DesktopTelemetryMediaDecodeFailure): void {
             if (!telemetryStatus.optedIn) return;
+            const seq = telemetryMutationSeq;
             void telemetryBridge
               .record({
                 kind: 'media_decode_failure',
@@ -264,11 +301,12 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
                 ...(meta.hdrFormat !== undefined ? { hdrFormat: meta.hdrFormat } : {}),
                 isLive: meta.isLive,
               })
-              .then(refreshTelemetryStatus)
+              .then(() => refreshTelemetryStatus(seq))
               .catch(() => undefined);
           },
           recordPlaybackError(meta): void {
             if (!telemetryStatus.optedIn) return;
+            const seq = telemetryMutationSeq;
             void telemetryBridge
               .record({
                 kind: 'playback_error',
@@ -276,15 +314,18 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
                 errorCode: meta.errorCode,
                 isLive: meta.isLive,
               })
-              .then(refreshTelemetryStatus)
+              .then(() => refreshTelemetryStatus(seq))
               .catch(() => undefined);
           },
           async flush(): Promise<void> {
             if (!telemetryStatus.optedIn) return;
+            const seq = telemetryMutationSeq;
             try {
               await telemetryBridge.flush();
               const next = await telemetryBridge.getStatus().catch(() => null);
-              if (next) applyTelemetryStatus(next);
+              if (next && !disposed && seq === telemetryMutationSeq) {
+                applyTelemetryStatus(next);
+              }
             } catch {
               // Swallow flush errors; main uploader applies backoff.
             }
@@ -308,6 +349,7 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
     ...(syncAccount !== undefined ? { syncAccount } : {}),
     ...(telemetry !== undefined ? { telemetry } : {}),
     ...(feedback !== undefined ? { feedback } : {}),
+    onTelemetryStatusChanged: subscribeTelemetryStatus,
     async hydrate(): Promise<void> {
       if (disposed) return;
       if (syncBridge !== undefined) {
@@ -315,8 +357,11 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
         if (next && !disposed) updateSyncState(next);
       }
       if (telemetryBridge !== undefined) {
+        const seqBefore = telemetryMutationSeq;
         const status = await telemetryBridge.getStatus().catch(() => null);
-        if (status && !disposed) applyTelemetryStatus(status);
+        if (status && !disposed && seqBefore === telemetryMutationSeq) {
+          applyTelemetryStatus(status);
+        }
       }
     },
     async setServerUrl(serverUrl: string): Promise<void> {
@@ -327,6 +372,7 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
       disposed = true;
       unsubscribeBridgeState?.();
       stateListeners.clear();
+      telemetryListeners.clear();
     },
   };
 }

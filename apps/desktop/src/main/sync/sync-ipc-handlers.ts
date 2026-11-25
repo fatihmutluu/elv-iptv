@@ -53,18 +53,15 @@ export interface RegisterSyncIpcDeps {
   readonly log?: (line: string) => void;
 }
 
-/** Verifies an IPC event originated from the top-level trusted `app://elv` (or dev) frame. */
+/**
+ * Verifies an IPC event originated from the top-level trusted `app://elv` (or dev) frame.
+ * Fails closed when `event.senderFrame` is `null` or missing (never falls back to `event.sender.getURL()`).
+ */
 export function isTrustedSyncIpcEvent(event: SyncIpcEventLike, devOrigin?: string | null): boolean {
   const frame = event.senderFrame;
-  if (frame !== undefined && frame !== null) {
-    if (frame.top !== undefined && frame.top !== frame) return false;
-  }
-  const url =
-    typeof frame?.url === 'string' && frame.url.length > 0
-      ? frame.url
-      : typeof event.sender?.getURL === 'function'
-        ? event.sender.getURL()
-        : '';
+  if (frame === null || frame === undefined) return false;
+  if (frame.top !== undefined && frame.top !== frame) return false;
+  const url = typeof frame.url === 'string' ? frame.url : '';
   if (url.length === 0) return false;
   if (isAllowedAppNavigation(url)) return true;
   if (devOrigin !== null && devOrigin !== undefined && devOrigin.length > 0) {

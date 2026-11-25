@@ -62,6 +62,7 @@ function assertSqlMatchesSchema(sql: string, schema: SchemaMap): void {
   const selectCols = /^SELECT\s+(.+?)\s+FROM\s+\w+/i.exec(normalized);
   if (selectCols?.[1] && selectCols[1] !== '*') {
     for (const col of selectCols[1].split(',').map((c) => c.trim())) {
+      if (/^COUNT\(\*\)(?:\s+AS\s+\w+)?$/i.test(col)) continue;
       expect(columns.has(col), `Unknown SELECT column ${tableName}.${col}`).toBe(true);
     }
   }
@@ -82,6 +83,7 @@ interface MockD1State {
   pair_sessions: Record<string, Record<string, unknown>>;
   telemetry_events: Record<string, unknown>[];
   feedback_submissions: Record<string, unknown>[];
+  account_deletion_requests: Record<string, unknown>[];
   executedSql: string[];
 }
 
@@ -93,6 +95,7 @@ function createMockD1(schema: SchemaMap): { db: D1Database; state: MockD1State }
     pair_sessions: {},
     telemetry_events: [],
     feedback_submissions: [],
+    account_deletion_requests: [],
     executedSql: [],
   };
 
@@ -303,9 +306,13 @@ function createMockD1(schema: SchemaMap): { db: D1Database; state: MockD1State }
     }
     if (norm.includes('FROM telemetry_events')) {
       const since = params[0] ? String(params[0]) : null;
-      const rows = since
-        ? state.telemetry_events.filter((e) => String(e.received_at) >= since)
-        : [...state.telemetry_events];
+      const limitMatch = /\bLIMIT\s+(\d+)\b/i.exec(norm);
+      const limit = limitMatch?.[1] ? Number(limitMatch[1]) : Number.POSITIVE_INFINITY;
+      const rows = (
+        since
+          ? state.telemetry_events.filter((e) => String(e.received_at) >= since)
+          : [...state.telemetry_events]
+      ).slice(0, limit);
       return { rows, changes: 0 };
     }
     if (norm.startsWith('INSERT INTO feedback_submissions')) {
@@ -323,10 +330,26 @@ function createMockD1(schema: SchemaMap): { db: D1Database; state: MockD1State }
     }
     if (norm.includes('FROM feedback_submissions')) {
       const since = params[0] ? String(params[0]) : null;
-      const rows = since
-        ? state.feedback_submissions.filter((f) => String(f.received_at) >= since)
-        : [...state.feedback_submissions];
+      const limitMatch = /\bLIMIT\s+(\d+)\b/i.exec(norm);
+      const limit = limitMatch?.[1] ? Number(limitMatch[1]) : Number.POSITIVE_INFINITY;
+      const rows = (
+        since
+          ? state.feedback_submissions.filter((f) => String(f.received_at) >= since)
+          : [...state.feedback_submissions]
+      ).slice(0, limit);
       return { rows, changes: 0 };
+    }
+    if (norm.startsWith('INSERT INTO account_deletion_requests')) {
+      state.account_deletion_requests.push({
+        id: params[0],
+        email_hash: params[1],
+        note: params[2],
+        created_at_ms: params[3],
+      });
+      return { rows: [], changes: 1 };
+    }
+    if (norm.includes('FROM account_deletion_requests')) {
+      return { rows: [{ count: state.account_deletion_requests.length }], changes: 0 };
     }
     throw new Error(`Unhandled mock D1 SQL: ${norm}`);
   }
@@ -380,8 +403,9 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
   const migrationSql = readFileSync(MIGRATION_PATH, 'utf8');
   const schema = parseMigrationSchema(migrationSql);
 
-  it('defines all six required tables in migrations/0001_init.sql', () => {
+  it('defines all seven required tables in migrations/0001_init.sql', () => {
     expect([...schema.tables.keys()].sort()).toEqual([
+      'account_deletion_requests',
       'feedback_submissions',
       'pair_sessions',
       'refresh_tokens',
@@ -553,6 +577,28 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
     });
     expect(await storage.listFeedbackSubmissions(null)).toHaveLength(1);
     expect(await storage.listFeedbackSubmissions('2026-11-25T12:00:00.000Z')).toHaveLength(0);
+
+    // Verify explicit D1 query LIMIT clauses
+    expect(
+      state.executedSql.some(
+        (s) => s.includes('FROM telemetry_events') && s.includes('LIMIT 5000'),
+      ),
+    ).toBe(true);
+    expect(
+      state.executedSql.some(
+        (s) => s.includes('FROM feedback_submissions') && s.includes('LIMIT 500'),
+      ),
+    ).toBe(true);
+
+    // Account deletion requests persistence & counting
+    expect(await storage.countAccountDeletionRequests()).toBe(0);
+    await storage.insertAccountDeletionRequest({
+      id: 'del-1',
+      emailHash: 'hashed_email_base64url',
+      note: 'Please remove my account',
+      createdAtMs: 1_764_070_000_000,
+    });
+    expect(await storage.countAccountDeletionRequests()).toBe(1);
 
     // Atomic account deletion cascades all user rows
     expect(await storage.deleteUserAccount('user-1')).toBe(true);

@@ -18,6 +18,7 @@ const SAMPLE_REPORT: TelemetryDigestReport = {
     uniqueSessions: 6,
     feedbackSubmissions: 2,
   },
+  pendingAccountDeletionRequests: 3,
   versionPlatformMatrix: [
     {
       appVersion: '1.3.0',
@@ -173,6 +174,7 @@ describe('telemetry-digest CLI', () => {
     const md = formatTelemetryDigestMarkdown(SAMPLE_REPORT);
     expect(md).toContain('# ELV IPTV Telemetry & Feedback Digest');
     expect(md).toContain('## Executive Summary');
+    expect(md).toContain('- **Pending Account Deletion Requests:** 3');
     expect(md).toContain('## Version & Platform Matrix');
     expect(md).toContain('## Startup & Screen Latency (p50 / p95)');
     expect(md).toContain('## Stall & Jank Hotspots');
@@ -193,6 +195,7 @@ describe('telemetry-digest CLI', () => {
       generatedAt: '2026-11-25T15:00:00.000Z',
       since: null,
       totals: { telemetryEvents: 0, uniqueSessions: 0, feedbackSubmissions: 0 },
+      pendingAccountDeletionRequests: 0,
       versionPlatformMatrix: [],
       startupLatency: { count: 0, p50Ms: null, p95Ms: null, maxMs: null },
       screenLatencies: [],
@@ -222,8 +225,35 @@ describe('telemetry-digest CLI', () => {
       recentFeedback: [],
     };
     const md = formatTelemetryDigestMarkdown(empty);
+    expect(md).toContain('- **Pending Account Deletion Requests:** 0');
     expect(md).toContain('_No media decode failures recorded in this window._');
     expect(md).toContain('_No recent user feedback submissions._');
+  });
+
+  it('defaults legacy reports without pendingAccountDeletionRequests to 0 and rejects invalid types', async () => {
+    const dir = makeTempDir();
+    const legacyPath = join(dir, 'legacy.json');
+    const { pendingAccountDeletionRequests: _omit, ...legacy } = SAMPLE_REPORT;
+    writeFileSync(legacyPath, JSON.stringify(legacy), 'utf8');
+
+    const loaded = await loadTelemetryDigest(
+      { input: legacyPath, url: null, format: 'md', out: null, since: null, help: false },
+      {},
+    );
+    expect(loaded.pendingAccountDeletionRequests).toBe(0);
+
+    const invalidPath = join(dir, 'invalid.json');
+    writeFileSync(
+      invalidPath,
+      JSON.stringify({ ...SAMPLE_REPORT, pendingAccountDeletionRequests: 'bad' }),
+      'utf8',
+    );
+    await expect(
+      loadTelemetryDigest(
+        { input: invalidPath, url: null, format: 'md', out: null, since: null, help: false },
+        {},
+      ),
+    ).rejects.toThrow(/TelemetryDigestReport schema/);
   });
 
   it('loads from --input JSON, filters --since, and writes --out via runTelemetryDigestCli', async () => {

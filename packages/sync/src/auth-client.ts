@@ -6,6 +6,9 @@ import {
   decryptVaultSnapshot,
   deriveAuthVerifier,
   encryptVaultSnapshot,
+  isValidKdfIterations,
+  MAX_KDF_ITERATIONS,
+  MIN_KDF_ITERATIONS,
   normalizeSyncEmail,
   unlockVaultWithPassword,
   type VaultKeyMetadata,
@@ -58,6 +61,11 @@ export interface RefreshResult {
   readonly user?: SyncUser;
 }
 
+/** Result returned by {@link SyncAuthClient.issuePairRefreshToken}. */
+export interface PairRefreshTokenResult {
+  readonly refreshToken: string;
+}
+
 /** Result returned by {@link SyncAuthClient.pullVault}. */
 export interface PullVaultResult {
   readonly revision: number;
@@ -88,6 +96,10 @@ export interface SyncAuthClient {
   ): Promise<Result<RegisterResult>>;
   login(email: string, password: string, signal?: AbortSignal): Promise<Result<SyncSession>>;
   refresh(refreshToken: string, signal?: AbortSignal): Promise<Result<RefreshResult>>;
+  issuePairRefreshToken(
+    accessToken: string,
+    signal?: AbortSignal,
+  ): Promise<Result<PairRefreshTokenResult>>;
   logout(refreshToken: string, accessToken?: string, signal?: AbortSignal): Promise<Result<void>>;
   deleteAccount(
     accessToken: string,
@@ -146,13 +158,16 @@ function isSyncUser(value: unknown): value is SyncUser {
 }
 
 function isVaultMeta(value: unknown): value is VaultKeyMetadata {
-  if (typeof value !== 'object' || value === null) return false;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const rec = value as Record<string, unknown>;
   return (
     typeof rec.kdfSalt === 'string' &&
-    typeof rec.kdfIterations === 'number' &&
+    rec.kdfSalt.length > 0 &&
+    isValidKdfIterations(rec.kdfIterations) &&
     typeof rec.wrappedVaultKey === 'string' &&
-    typeof rec.recoveryWrappedVaultKey === 'string'
+    rec.wrappedVaultKey.length > 0 &&
+    typeof rec.recoveryWrappedVaultKey === 'string' &&
+    rec.recoveryWrappedVaultKey.length > 0
   );
 }
 
@@ -180,6 +195,11 @@ function mapHttpError(status: number, body: Record<string, unknown> | null) {
 export function createSyncAuthClient(options: SyncAuthClientOptions): SyncAuthClient {
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
   const iterations = options.kdfIterations ?? DEFAULT_KDF_ITERATIONS;
+  if (!isValidKdfIterations(iterations)) {
+    throw new Error(
+      `kdfIterations must be a safe integer between ${MIN_KDF_ITERATIONS} and ${MAX_KDF_ITERATIONS}`,
+    );
+  }
 
   const jsonRequest = async (
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
@@ -335,6 +355,24 @@ export function createSyncAuthClient(options: SyncAuthClientOptions): SyncAuthCl
         refreshToken: body.refreshToken,
         ...(isSyncUser(body.user) ? { user: body.user } : {}),
       });
+    },
+
+    async issuePairRefreshToken(accessToken, signal) {
+      if (accessToken.trim().length === 0) {
+        return err(elvError('auth', 'missing-access-token'));
+      }
+      const res = await jsonRequest('POST', '/v1/auth/pair-token', {}, accessToken, signal);
+      if (!res.ok) return res;
+      const { status, body } = res.value;
+      if (status < 200 || status >= 300) return err(mapHttpError(status, body));
+      if (
+        body === null ||
+        typeof body.refreshToken !== 'string' ||
+        body.refreshToken.length === 0
+      ) {
+        return err(elvError('network', 'invalid-pair-token-response'));
+      }
+      return ok({ refreshToken: body.refreshToken });
     },
 
     async logout(refreshToken, accessToken, signal) {

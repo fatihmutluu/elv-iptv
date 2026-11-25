@@ -1,6 +1,13 @@
 import { createAppI18n } from '@elv/i18n';
-import { I18nProvider, ThemeProvider, TvRemoteProvider, ViewportProvider } from '@elv/ui-kit';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import {
+  createTvRemoteDispatcher,
+  I18nProvider,
+  ThemeProvider,
+  type TvRemoteDispatcher,
+  TvRemoteProvider,
+  ViewportProvider,
+} from '@elv/ui-kit';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
 import type {
   SyncAccountPort,
@@ -95,17 +102,36 @@ function createStatefulSyncAccount(initial: Partial<SyncAccountState> = {}): Sta
   return { port, setState };
 }
 
-function renderPanel(ui: ReactElement) {
+function renderPanel(
+  ui: ReactElement,
+  options?: {
+    readonly isTv?: boolean;
+    readonly dispatcher?: TvRemoteDispatcher;
+  },
+) {
+  const isTv = options?.isTv ?? false;
   return render(
-    <TvRemoteProvider>
+    <TvRemoteProvider
+      {...(options?.dispatcher !== undefined ? { dispatcher: options.dispatcher } : {})}
+    >
       <ViewportProvider
-        value={{
-          formFactor: 'desktop',
-          orientation: 'landscape',
-          inputModality: 'pointer',
-          width: 1280,
-          height: 800,
-        }}
+        value={
+          isTv
+            ? {
+                formFactor: 'tv',
+                orientation: 'landscape',
+                inputModality: 'tv',
+                width: 1920,
+                height: 1080,
+              }
+            : {
+                formFactor: 'desktop',
+                orientation: 'landscape',
+                inputModality: 'pointer',
+                width: 1280,
+                height: 800,
+              }
+        }
       >
         <I18nProvider i18n={createAppI18n('en')}>
           <ThemeProvider>{ui}</ThemeProvider>
@@ -116,13 +142,37 @@ function renderPanel(ui: ReactElement) {
 }
 
 describe('AccountSettingsPanel', () => {
-  it('shows OAuth Guideline 4.8 note, live QR pairing, and auto-completes queued pairing code after sign in', async () => {
+  it('shows neutral auth guidance copy, validates optional sync server URL, renders live QR pairing, and auto-completes queued pairing code after sign in', async () => {
     const { port } = createStatefulSyncAccount();
-    await renderPanel(<AccountSettingsPanel syncAccount={port} />);
-
-    expect(screen.getByTestId('account-oauth-coming-soon')).toHaveTextContent(
-      /Apple and Google sign-in support/,
+    const onSyncServerUrlChange = jest.fn();
+    await renderPanel(
+      <AccountSettingsPanel
+        syncAccount={port}
+        syncServerUrl=""
+        onSyncServerUrlChange={onSyncServerUrlChange}
+      />,
     );
+
+    const authHint = screen.getByTestId('account-oauth-coming-soon');
+    expect(authHint).toHaveTextContent(
+      'Sign in with your email and password, or pair this device with a QR code.',
+    );
+    expect(authHint).not.toHaveTextContent(/future store update/i);
+
+    // Optional sync server URL input validates via isValidSyncServerUrl and normalizes valid URLs
+    const serverInput = screen.getByTestId('account-server-url-input');
+    await fireEvent.changeText(serverInput, 'http://insecure.example.com');
+    expect(screen.getByTestId('account-server-url-error')).toHaveTextContent(
+      'The server or URL address is not valid.',
+    );
+    expect(onSyncServerUrlChange).not.toHaveBeenCalled();
+
+    await fireEvent.changeText(serverInput, 'https://sync.example.com/');
+    expect(screen.queryByTestId('account-server-url-error')).toBeNull();
+    expect(onSyncServerUrlChange).toHaveBeenCalledWith('https://sync.example.com');
+
+    await fireEvent.changeText(serverInput, 'http://127.0.0.1:8787');
+    expect(onSyncServerUrlChange).toHaveBeenLastCalledWith('http://127.0.0.1:8787');
 
     // Try claiming a pairing code while signed out -> prompts sign-in first
     await fireEvent.changeText(
@@ -158,7 +208,7 @@ describe('AccountSettingsPanel', () => {
     });
   });
 
-  it('supports recovery code banner, Sync Now, Show Pairing QR, Sign Out, and permanent Delete Account confirmation', async () => {
+  it('supports recovery code banner, Sync Now, Approve Device Pairing (without inverted Show Pairing QR card), Sign Out, and permanent Delete Account confirmation', async () => {
     const { port } = createStatefulSyncAccount({
       status: 'signed_in',
       email: 'viewer@example.com',
@@ -166,7 +216,14 @@ describe('AccountSettingsPanel', () => {
       pendingRecoveryCode: 'AAAA-BBBB-CCCC-DDDD-EEEE-FFFF',
     });
 
-    await renderPanel(<AccountSettingsPanel syncAccount={port} />);
+    await renderPanel(
+      <AccountSettingsPanel syncAccount={port} syncServerUrl="https://sync.example.com" />,
+    );
+
+    // Inverted QR generator card MUST NOT be rendered when signed in
+    expect(screen.queryByTestId('account-qr-card')).toBeNull();
+    expect(screen.queryByTestId('account-show-qr-btn')).toBeNull();
+    expect(port.createQrPairing).not.toHaveBeenCalled();
 
     // Recovery code banner visible & acknowledgeable
     expect(screen.getByTestId('account-recovery-code')).toHaveTextContent(
@@ -180,10 +237,19 @@ describe('AccountSettingsPanel', () => {
     await fireEvent.press(screen.getByTestId('account-sync-now-btn'));
     expect(port.syncNow).toHaveBeenCalledTimes(1);
 
-    // Show Pairing QR
-    await fireEvent.press(screen.getByTestId('account-show-qr-btn'));
+    // Approve Device Pairing works cleanly while signed in
+    await fireEvent.changeText(
+      screen.getByTestId('account-claim-input'),
+      'elviptv://pair?c=TV9999888877&k=DDDDDDDDDDDDDDDDDDDDDD',
+    );
+    await fireEvent.press(screen.getByTestId('account-claim-submit'));
     await waitFor(() => {
-      expect(screen.getByTestId('account-qr-code')).toBeTruthy();
+      expect(port.claimQrPairing).toHaveBeenCalledWith(
+        'elviptv://pair?c=TV9999888877&k=DDDDDDDDDDDDDDDDDDDDDD',
+      );
+      expect(screen.getByTestId('account-claim-success')).toHaveTextContent(
+        'Device paired securely.',
+      );
     });
 
     // Mandatory permanent Delete Account double-confirmation
@@ -200,6 +266,33 @@ describe('AccountSettingsPanel', () => {
       expect(port.deleteAccount).toHaveBeenCalledWith('my-vault-password');
       expect(screen.getByTestId('account-delete-success')).toHaveTextContent(/permanently deleted/);
     });
+  });
+
+  it('supports TV focus guide handoff and D-pad left at left edge returning to Settings sidebar', async () => {
+    const { port } = createStatefulSyncAccount();
+    const dispatcher = createTvRemoteDispatcher();
+    const onBack = jest.fn();
+
+    await renderPanel(<AccountSettingsPanel syncAccount={port} isActiveScope onBack={onBack} />, {
+      isTv: true,
+      dispatcher,
+    });
+
+    expect(screen.getByTestId('settings-panel-account-focus-guide')).toBeTruthy();
+
+    // Moving focus to a non-left-edge tab keeps D-pad left inside the horizontal tab bar
+    await fireEvent(screen.getByTestId('account-tab-signup'), 'focus');
+    await act(async () => {
+      dispatcher.dispatch({ key: 'left', action: 'press', time: 10 }, false);
+    });
+    expect(onBack).not.toHaveBeenCalled();
+
+    // Returning focus to the left-edge tab enables D-pad left -> onBack()
+    await fireEvent(screen.getByTestId('account-tab-signin'), 'focus');
+    await act(async () => {
+      dispatcher.dispatch({ key: 'left', action: 'press', time: 20 }, false);
+    });
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 
   it('degrades cleanly to local-only card when syncAccount port is absent', async () => {

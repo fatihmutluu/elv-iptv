@@ -1,7 +1,13 @@
 import { DEFAULT_PREFERENCES, type PreferencesPatch } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
-import { I18nProvider, ThemeProvider, TvRemoteProvider, ViewportProvider } from '@elv/ui-kit';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import {
+  createTvRemoteDispatcher,
+  I18nProvider,
+  ThemeProvider,
+  TvRemoteProvider,
+  ViewportProvider,
+} from '@elv/ui-kit';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { type ReactElement, useState } from 'react';
 import type { FeedbackPort, FeedbackSubmitInput, TelemetryPort } from '../../ports/wave-f9-ports';
 import { FeedbackSettingsPanel } from '../FeedbackSettingsPanel';
@@ -165,5 +171,42 @@ describe('FeedbackSettingsPanel', () => {
         /Could not send feedback right now/,
       );
     });
+  });
+
+  it('renders TvFocusGuideRegion and calls onBack on TV D-pad left at left edge and Back', async () => {
+    const dispatcher = createTvRemoteDispatcher();
+    const onBack = jest.fn();
+
+    await render(
+      <TvRemoteProvider dispatcher={dispatcher}>
+        <ViewportProvider
+          value={{
+            formFactor: 'tv',
+            orientation: 'landscape',
+            inputModality: 'tv',
+            width: 1920,
+            height: 1080,
+          }}
+        >
+          <I18nProvider i18n={createAppI18n('en')}>
+            <ThemeProvider>
+              <FeedbackSettingsPanel isActiveScope onBack={onBack} />
+            </ThemeProvider>
+          </I18nProvider>
+        </ViewportProvider>
+      </TvRemoteProvider>,
+    );
+
+    expect(screen.getByTestId('settings-panel-feedback-focus-guide')).toBeTruthy();
+
+    await act(async () => {
+      dispatcher.dispatch({ key: 'left', action: 'press', time: 10 }, false);
+    });
+    expect(onBack).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      dispatcher.dispatch({ key: 'back', action: 'press', time: 20 }, false);
+    });
+    expect(onBack).toHaveBeenCalledTimes(2);
   });
 });

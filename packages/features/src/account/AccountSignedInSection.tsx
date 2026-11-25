@@ -3,8 +3,8 @@ import { CtaButton, MicroPill, Surface, useI18n, useTheme } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { SyncAccountPort, SyncAccountState } from '../ports/wave-f9-ports';
-import { AccountQrPairingView, AccountRecoveryBanner, AccountTextField } from './AccountFormParts';
-import { mapSyncErrorCodeToMessageId, useSyncQrPairing } from './account-helpers';
+import { AccountRecoveryBanner, AccountServerUrlField, AccountTextField } from './AccountFormParts';
+import { mapSyncErrorCodeToMessageId } from './account-helpers';
 
 /** Props of {@link AccountSignedInSection}. */
 export interface AccountSignedInSectionProps {
@@ -14,10 +14,12 @@ export interface AccountSignedInSectionProps {
   readonly isActiveScope: boolean;
   readonly autoClaimStatus: 'idle' | 'success' | 'error';
   readonly onDeleteSuccess: () => void;
-  readonly qrPollIntervalMs?: number;
+  readonly syncServerUrl: string;
+  readonly onSyncServerUrlChange?: (nextUrl: string) => void;
+  readonly onLeftEdgeChange?: (atLeftEdge: boolean) => void;
 }
 
-/** Signed-in Settings view: email badge, Sync Now, Pairing QR, Approve Device, Sign Out & Delete Account. */
+/** Signed-in Settings view: email badge, Sync Now, custom Sync server URL, Approve Device Pairing, Sign Out & Delete Account. */
 export function AccountSignedInSection({
   syncAccount,
   state,
@@ -25,14 +27,15 @@ export function AccountSignedInSection({
   isActiveScope,
   autoClaimStatus,
   onDeleteSuccess,
-  qrPollIntervalMs,
+  syncServerUrl,
+  onSyncServerUrlChange,
+  onLeftEdgeChange,
 }: AccountSignedInSectionProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
 
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncErrorKey, setSyncErrorKey] = useState<MessageId | null>(null);
-  const [showQr, setShowQr] = useState(false);
   const [claimInput, setClaimInput] = useState('');
   const [claimBusy, setClaimBusy] = useState(false);
   const [claimStatus, setClaimStatus] = useState<'idle' | 'success' | 'error'>('idle');
@@ -41,8 +44,6 @@ export function AccountSignedInSection({
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteErrorKey, setDeleteErrorKey] = useState<MessageId | null>(null);
-
-  const pairing = useSyncQrPairing(syncAccount, showQr, undefined, qrPollIntervalMs);
 
   const handleSyncNow = useCallback(async () => {
     setSyncErrorKey(null);
@@ -105,14 +106,16 @@ export function AccountSignedInSection({
 
   const isSyncing = syncBusy || state.status === 'syncing';
   const effectiveClaimSuccess = claimStatus === 'success' || autoClaimStatus === 'success';
+  const hasPendingRecovery = state.pendingRecoveryCode !== null;
 
   return (
     <>
-      {state.pendingRecoveryCode !== null ? (
+      {hasPendingRecovery ? (
         <AccountRecoveryBanner
           recoveryCode={state.pendingRecoveryCode}
           onAcknowledge={() => syncAccount.acknowledgeRecoveryCode()}
           testIDPrefix="account"
+          hasTVPreferredFocus={isTv && isActiveScope}
         />
       ) : null}
 
@@ -151,7 +154,7 @@ export function AccountSignedInSection({
               variant="primary"
               label={i18n.t('account.syncNowAction')}
               disabled={isSyncing}
-              hasTVPreferredFocus={isTv && isActiveScope}
+              hasTVPreferredFocus={isTv && isActiveScope && !hasPendingRecovery}
               onPress={() => {
                 void handleSyncNow();
               }}
@@ -176,28 +179,15 @@ export function AccountSignedInSection({
             {i18n.t(syncErrorKey)}
           </Text>
         ) : null}
-      </Surface>
 
-      <Surface testID="account-qr-card" tone="surface" bordered rounded="modal" style={styles.card}>
-        <View style={styles.headerRow}>
-          <View style={styles.headerText}>
-            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
-              {i18n.t('account.qrTitle')}
-            </Text>
-            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-              {i18n.t('account.qrBody')}
-            </Text>
-          </View>
-          <CtaButton
-            testID="account-show-qr-btn"
-            variant="secondary"
-            label={i18n.t('account.qrGenerateAction')}
-            onPress={() => setShowQr((prev) => !prev)}
-          />
-        </View>
-        {showQr ? (
-          <AccountQrPairingView pairing={pairing} size={180} testIDPrefix="account-qr" />
-        ) : null}
+        <AccountServerUrlField
+          value={syncServerUrl}
+          {...(onSyncServerUrlChange !== undefined
+            ? { onChangeValidUrl: onSyncServerUrlChange }
+            : {})}
+          onFocus={() => onLeftEdgeChange?.(true)}
+          editable={!isSyncing}
+        />
       </Surface>
 
       <Surface
@@ -217,6 +207,7 @@ export function AccountSignedInSection({
           onChangeText={setClaimInput}
           placeholder="elviptv://pair?..."
           editable={!claimBusy}
+          onFocus={() => onLeftEdgeChange?.(true)}
         />
         {effectiveClaimSuccess ? (
           <Text
@@ -292,6 +283,7 @@ export function AccountSignedInSection({
               secureTextEntry
               autoComplete="password"
               editable={!deleteBusy}
+              onFocus={() => onLeftEdgeChange?.(true)}
             />
             {deleteErrorKey !== null ? (
               <Text

@@ -45,7 +45,7 @@ export function validateSignUpFields(
 /** Maps a sync port error code to its user-facing localized message key. */
 export function mapSyncErrorCodeToMessageId(errorCode: string | null | undefined): MessageId {
   if (!errorCode) return 'account.errorGeneric';
-  const normalized = errorCode.toLowerCase();
+  const normalized = errorCode.trim().toLowerCase();
   if (normalized === 'invalid_email' || normalized === 'invalid-email') {
     return 'account.errorInvalidEmail';
   }
@@ -55,8 +55,22 @@ export function mapSyncErrorCodeToMessageId(errorCode: string | null | undefined
   if (normalized === 'password_mismatch' || normalized === 'password-mismatch') {
     return 'account.errorPasswordMismatch';
   }
-  if (normalized === 'pairing_expired' || normalized === 'expired') {
+  if (
+    normalized === 'pairing_expired' ||
+    normalized === 'pairing-expired' ||
+    normalized === 'pair_expired' ||
+    normalized === 'pair-expired' ||
+    normalized === 'expired'
+  ) {
     return 'account.qrExpired';
+  }
+  if (
+    normalized === 'server_origin_mismatch' ||
+    normalized === 'server-origin-mismatch' ||
+    normalized === 'server_not_configured' ||
+    normalized === 'server-not-configured'
+  ) {
+    return 'source.validation.invalidAddress';
   }
   return 'account.errorGeneric';
 }

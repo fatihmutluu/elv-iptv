@@ -1,5 +1,12 @@
 import { createAppI18n } from '@elv/i18n';
-import { I18nProvider, ThemeProvider, TvRemoteProvider, ViewportProvider } from '@elv/ui-kit';
+import {
+  createTvRemoteDispatcher,
+  I18nProvider,
+  ThemeProvider,
+  type TvRemoteDispatcher,
+  TvRemoteProvider,
+  ViewportProvider,
+} from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
 import type {
@@ -43,17 +50,36 @@ function createMockSyncAccount(overrides: Partial<SyncAccountPort> = {}): SyncAc
   };
 }
 
-function renderWithProviders(ui: ReactElement) {
+function renderWithProviders(
+  ui: ReactElement,
+  options?: {
+    readonly isTv?: boolean;
+    readonly dispatcher?: TvRemoteDispatcher;
+  },
+) {
+  const isTv = options?.isTv ?? false;
   return render(
-    <TvRemoteProvider>
+    <TvRemoteProvider
+      {...(options?.dispatcher !== undefined ? { dispatcher: options.dispatcher } : {})}
+    >
       <ViewportProvider
-        value={{
-          formFactor: 'desktop',
-          orientation: 'landscape',
-          inputModality: 'pointer',
-          width: 1280,
-          height: 800,
-        }}
+        value={
+          isTv
+            ? {
+                formFactor: 'tv',
+                orientation: 'landscape',
+                inputModality: 'tv',
+                width: 1920,
+                height: 1080,
+              }
+            : {
+                formFactor: 'desktop',
+                orientation: 'landscape',
+                inputModality: 'pointer',
+                width: 1280,
+                height: 800,
+              }
+        }
       >
         <I18nProvider i18n={createAppI18n('en')}>
           <ThemeProvider>{ui}</ThemeProvider>
@@ -234,6 +260,97 @@ describe('WelcomeSyncOverlay', () => {
     await waitFor(() => {
       expect(syncAccount.createQrPairing).toHaveBeenCalledTimes(2);
     });
+
+    await view.unmount();
+  });
+
+  it('traps TV focus without competing preferred-focus anchors and refuses to discard the recovery code on TV Back', async () => {
+    const syncAccount = createMockSyncAccount();
+    const onContinue = jest.fn();
+    const dispatcher = createTvRemoteDispatcher();
+
+    const view = await renderWithProviders(
+      <WelcomeSyncOverlay
+        visible
+        syncAccount={syncAccount}
+        onContinueWithoutAccount={onContinue}
+      />,
+      { isTv: true, dispatcher },
+    );
+
+    expect(screen.getByTestId('welcome-sync-focus-guide')).toBeTruthy();
+    expect(screen.queryByTestId('welcome-tv-focus-anchor')).toBeNull();
+    expect(screen.getByTestId('welcome-continue-without-account').props.hasTVPreferredFocus).toBe(
+      true,
+    );
+
+    const countPreferredFocus = (tree: unknown): number => {
+      if (tree === null || tree === undefined || typeof tree !== 'object') return 0;
+      if (Array.isArray(tree)) {
+        return tree.reduce((sum, item) => sum + countPreferredFocus(item), 0);
+      }
+      const node = tree as { props?: { hasTVPreferredFocus?: unknown }; children?: unknown[] };
+      const self = node.props?.hasTVPreferredFocus === true ? 1 : 0;
+      return self + countPreferredFocus(node.children);
+    };
+
+    // Ensure zero competing hasTVPreferredFocus={true} elements in the tree
+    expect(countPreferredFocus(view.toJSON())).toBe(1);
+
+    // Complete signup to enter the one-time recovery code screen
+    await fireEvent.press(screen.getByTestId('welcome-tab-signup'));
+    await fireEvent.changeText(screen.getByTestId('welcome-email-input'), 'tv@example.com');
+    await fireEvent.changeText(screen.getByTestId('welcome-password-input'), 'supersecret123');
+    await fireEvent.changeText(
+      screen.getByTestId('welcome-confirm-password-input'),
+      'supersecret123',
+    );
+    await fireEvent.press(screen.getByTestId('welcome-signup-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('welcome-recovery-banner')).toBeTruthy();
+    });
+    expect(screen.getByTestId('welcome-recovery-saved-btn').props.hasTVPreferredFocus).toBe(true);
+    expect(countPreferredFocus(view.toJSON())).toBe(1);
+
+    // TV Back MUST be consumed without acknowledging or discarding the recovery code
+    let consumed = false;
+    await act(async () => {
+      consumed = dispatcher.dispatch({ key: 'back', action: 'press', time: 100 }, false);
+    });
+    expect(consumed).toBe(true);
+    expect(syncAccount.acknowledgeRecoveryCode).not.toHaveBeenCalled();
+    expect(onContinue).not.toHaveBeenCalled();
+    expect(screen.getByTestId('welcome-recovery-banner')).toBeTruthy();
+
+    // Only explicitly pressing the acknowledgment button completes onboarding
+    await fireEvent.press(screen.getByTestId('welcome-recovery-saved-btn'));
+    expect(syncAccount.acknowledgeRecoveryCode).toHaveBeenCalledTimes(1);
+    expect(onContinue).toHaveBeenCalledTimes(1);
+
+    await view.unmount();
+  });
+
+  it('dismisses the welcome overlay on TV Back when not showing a recovery code', async () => {
+    const syncAccount = createMockSyncAccount();
+    const onContinue = jest.fn();
+    const dispatcher = createTvRemoteDispatcher();
+
+    const view = await renderWithProviders(
+      <WelcomeSyncOverlay
+        visible
+        syncAccount={syncAccount}
+        onContinueWithoutAccount={onContinue}
+      />,
+      { isTv: true, dispatcher },
+    );
+
+    let consumed = false;
+    await act(async () => {
+      consumed = dispatcher.dispatch({ key: 'back', action: 'press', time: 50 }, false);
+    });
+    expect(consumed).toBe(true);
+    expect(onContinue).toHaveBeenCalledTimes(1);
 
     await view.unmount();
   });

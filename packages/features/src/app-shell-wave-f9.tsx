@@ -82,11 +82,23 @@ export function useWaveF9Controller({
       accountState.status === 'signing_in' ||
       accountState.pendingRecoveryCode !== null);
 
+  const handleSyncServerUrlChange = useCallback(
+    (nextUrl: string) => {
+      void preferences.updatePreferences({ syncServerUrl: nextUrl });
+    },
+    [preferences],
+  );
+
   const renderAccount = useCallback(
     (slot: SettingsPaneSlotProps): ReactElement => (
-      <AccountSettingsPanel {...(syncAccount !== undefined ? { syncAccount } : {})} {...slot} />
+      <AccountSettingsPanel
+        {...(syncAccount !== undefined ? { syncAccount } : {})}
+        syncServerUrl={preferences.preferences.syncServerUrl}
+        onSyncServerUrlChange={handleSyncServerUrlChange}
+        {...slot}
+      />
     ),
-    [syncAccount],
+    [handleSyncServerUrlChange, preferences.preferences.syncServerUrl, syncAccount],
   );
 
   const renderFeedback = useCallback(

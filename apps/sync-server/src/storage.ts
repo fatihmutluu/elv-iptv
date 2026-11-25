@@ -90,6 +90,14 @@ export interface FeedbackSubmissionRecord {
   readonly diagnosticsJson: string | null;
 }
 
+/** Stored privacy-preserving web account deletion request (hashed email only). */
+export interface AccountDeletionRequestRecord {
+  readonly id: string;
+  readonly emailHash: string;
+  readonly note: string | null;
+  readonly createdAtMs: number;
+}
+
 /** Persistence port implemented by both in-memory (Node/tests) and Cloudflare D1 backends. */
 export interface SyncServerStorage {
   createUser(user: UserRecord): Promise<{ readonly created: boolean }>;
@@ -133,4 +141,7 @@ export interface SyncServerStorage {
 
   insertFeedbackSubmission(feedback: FeedbackSubmissionRecord): Promise<void>;
   listFeedbackSubmissions(sinceIso: string | null): Promise<FeedbackSubmissionRecord[]>;
+
+  insertAccountDeletionRequest(request: AccountDeletionRequestRecord): Promise<void>;
+  countAccountDeletionRequests(): Promise<number>;
 }

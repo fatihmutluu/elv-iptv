@@ -56,6 +56,38 @@ export function isFeedbackCategory(value: unknown): value is FeedbackCategory {
   return typeof value === 'string' && (FEEDBACK_CATEGORIES as readonly string[]).includes(value);
 }
 
+const ALL_URI_SCHEME_RE = /[a-z][a-z0-9+.-]*:\/\/\S+/gi;
+const FILE_URI_RE = /\bfile:\S+/gi;
+const BARE_URI_CREDENTIALS_RE = /\b[^\s/:@]{1,128}:[^\s/:@]{1,128}@\S+/g;
+const IPV6_BRACKETED_RE =
+  /\[(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?:%[A-Za-z0-9_.-]+)?\](?::\d{1,5})?/gi;
+const IPV6_FULL_RE = /(^|[\s"'(=,;])(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}(?=$|[\s"'.,;)\]])/gi;
+const IPV6_COMPRESSED_RE =
+  /(^|[\s"'(=,;])(?:(?:[0-9a-f]{1,4}:){1,6}:(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,5})?|::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6}|ffff:(?:\d{1,3}\.){3}\d{1,3}))(?:%[A-Za-z0-9_.-]+)?(?=$|[\s"'.,;)\]])/gi;
+const IPV4_RE =
+  /\b(?:(?:25[0-5]|2[0-4]\d|1?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|1?\d\d?)(?::\d{1,5})?\b/g;
+const UNIX_OS_PATH_RE = /(^|[\s"'(=,;])\/(?:home|Users|data|storage|tmp|var|private)\/\S*/gi;
+const WIN_OS_PATH_RE = /(^|[\s"'(=,;])(?:[A-Za-z]:\\|\\\\[A-Za-z0-9_.-]+\\)\S*/g;
+
+const FORBIDDEN_DIAGNOSTIC_KEYS: ReadonlySet<string> = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+]);
+
+function stripSensitiveBeforeRedact(text: string): string {
+  return text
+    .replace(ALL_URI_SCHEME_RE, '[redacted]')
+    .replace(FILE_URI_RE, '[redacted]')
+    .replace(BARE_URI_CREDENTIALS_RE, '[redacted]')
+    .replace(IPV6_BRACKETED_RE, '[redacted]')
+    .replace(IPV6_FULL_RE, '$1[redacted]')
+    .replace(IPV6_COMPRESSED_RE, '$1[redacted]')
+    .replace(IPV4_RE, '[redacted]')
+    .replace(UNIX_OS_PATH_RE, '$1[redacted]')
+    .replace(WIN_OS_PATH_RE, '$1[redacted]');
+}
+
 function stripUnsafeControlChars(text: string): string {
   let out = '';
   for (let i = 0; i < text.length; i += 1) {
@@ -70,7 +102,8 @@ function stripUnsafeControlChars(text: string): string {
 function doubleRedactAndClamp(raw: string, maxChars: number): string {
   const cleaned = stripUnsafeControlChars(raw).trim();
   if (cleaned.length === 0) return '';
-  const redacted = redactText(redactText(cleaned));
+  const stripped = stripSensitiveBeforeRedact(cleaned);
+  const redacted = redactText(redactText(stripped));
   return redacted.length > maxChars ? redacted.slice(0, maxChars) : redacted;
 }
 
@@ -78,7 +111,7 @@ function sanitizeShortMeta(value: unknown, fallback: string): string {
   if (typeof value !== 'string') return fallback;
   const cleaned = stripUnsafeControlChars(value).trim();
   if (cleaned.length === 0) return fallback;
-  const redacted = redactText(cleaned);
+  const redacted = redactText(stripSensitiveBeforeRedact(cleaned));
   return redacted.length > 64 ? redacted.slice(0, 64) : redacted;
 }
 
@@ -95,7 +128,13 @@ function sanitizeDiagnostics(
   for (const key of Object.keys(raw)) {
     if (entries >= 32) break;
     const safeKey = sanitizeShortMeta(key, '');
-    if (safeKey.length === 0 || safeKey === '__proto__') continue;
+    if (
+      safeKey.length === 0 ||
+      FORBIDDEN_DIAGNOSTIC_KEYS.has(key.trim()) ||
+      FORBIDDEN_DIAGNOSTIC_KEYS.has(safeKey)
+    ) {
+      continue;
+    }
     const val = raw[key];
     if (typeof val === 'string') {
       const safeVal = doubleRedactAndClamp(val, 512);

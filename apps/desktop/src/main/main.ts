@@ -90,6 +90,7 @@ import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { createShellPrefsController, type ShellPrefsController } from './shell-prefs.ts';
 import { focusWindow, startSingleInstance } from './single-instance.ts';
 import { registerSourcesIpc } from './sources-ipc.ts';
+import { createDesktopCatalogSnapshotBridge } from './sync/desktop-catalog-snapshot.ts';
 import { registerSyncIpc } from './sync/sync-ipc-handlers.ts';
 import { createDesktopSyncService } from './sync/sync-service.ts';
 import {
@@ -649,12 +650,25 @@ if (hasLock) {
     });
     serveRenderer();
     const sharedSecrets = createSharedSecretStore();
+    const catalogSnapshotBridge = createDesktopCatalogSnapshotBridge({
+      getCoordinator: () => catalogCoordinator,
+      secretStore: sharedSecrets,
+      onApplied: () => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+            win.webContents.send(CATALOG_CHANNELS.changed);
+          }
+        }
+      },
+    });
     const syncService = createDesktopSyncService({
       secretStore: sharedSecrets,
       platform: `desktop-${process.platform}`,
       appVersion: app.getVersion(),
       mpvVersion: '0.42.0',
       readLogTail: (maxLines) => logger.readRedactedTail(maxLines),
+      getLocalSnapshot: catalogSnapshotBridge.getLocalSnapshot,
+      applyMergedSnapshot: catalogSnapshotBridge.applyMergedSnapshot,
     });
     disposeSyncIpc = registerSyncIpc({
       ipcMain,

@@ -34,7 +34,7 @@ export const enWaveF9Messages = {
   'account.signedInAs': 'Signed in as',
   'account.serverUrlLabel': 'Sync server URL (optional)',
   'account.oauthComingSoon':
-    'Apple and Google sign-in support will be available in a future store update.',
+    'Sign in with your email and password, or pair this device with a QR code.',
   'account.recoveryTitle': 'Save Your Recovery Code',
   'account.recoveryBody':
     'Store this recovery code offline. Because sync is end-to-end encrypted, we cannot reset your vault key without it.',

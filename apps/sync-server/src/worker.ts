@@ -32,6 +32,7 @@ const worker = {
       adminToken: env.ADMIN_TOKEN ?? '',
       telemetryDisabled: env.TELEMETRY_DISABLED === 'true',
       publicOrigin: env.PUBLIC_ORIGIN ?? '*',
+      trustProxy: 'cloudflare',
       rateLimiter: isolateRateLimiter,
     });
     return app.fetch(request);

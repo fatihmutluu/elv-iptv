@@ -84,3 +84,12 @@ CREATE TABLE IF NOT EXISTS feedback_submissions (
 
 CREATE INDEX IF NOT EXISTS idx_feedback_submissions_received_at ON feedback_submissions(received_at);
 CREATE INDEX IF NOT EXISTS idx_feedback_submissions_category ON feedback_submissions(category);
+
+CREATE TABLE IF NOT EXISTS account_deletion_requests (
+  id TEXT PRIMARY KEY,
+  email_hash TEXT NOT NULL,
+  note TEXT,
+  created_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_deletion_requests_created_at ON account_deletion_requests(created_at_ms);

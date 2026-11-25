@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { base64UrlEncode, utf8ByteLength } from './encoding';
-import type { SyncHttpPort, SyncHttpResponse } from './ports';
+import type { SyncHttpPort, SyncHttpRequest, SyncHttpResponse } from './ports';
 import { createPureJsVaultCryptoPort } from './pure-crypto';
 import {
   buildPairingQrUri,
@@ -183,5 +183,178 @@ describe('qr-pairing universal E2EE flow', () => {
       ok: true,
       value: { status: 'expired' },
     });
+  });
+
+  it('rejects cross-origin or mismatched-path QR serverUrl in claimSession with ZERO HTTP requests', async () => {
+    const requests: SyncHttpRequest[] = [];
+    const http: SyncHttpPort = {
+      async request(req) {
+        requests.push(req);
+        return { status: 200, bodyText: JSON.stringify({ claimed: true }) };
+      },
+    };
+    const crypto = createPureJsVaultCryptoPort(seededRandom(303));
+    const keyB64 = base64UrlEncode(new Uint8Array(16).fill(0x5a));
+    const handoffPayload = {
+      email: 'alice@example.test',
+      refreshToken: 'pair_ref_1',
+      vaultKeyB64: base64UrlEncode(new Uint8Array(32).fill(0x11)),
+    };
+
+    const client = createQrPairingClient({
+      baseUrl: 'https://sync.example.test/elv/',
+      http,
+      crypto,
+    });
+
+    const evilUri = buildPairingQrUri({
+      code: 'ABCD1234EFGH',
+      keyB64,
+      serverUrl: 'https://attacker.example.test/elv',
+    });
+    const resDifferentHost = await client.claimSession({
+      accessToken: 'secret_victim_jwt',
+      qrUriOrParams: evilUri,
+      payload: handoffPayload,
+    });
+    expect(resDifferentHost).toEqual({
+      ok: false,
+      error: { category: 'auth', code: 'server_origin_mismatch' },
+    });
+    expect(requests).toHaveLength(0);
+
+    const resDifferentPort = await client.claimSession({
+      accessToken: 'secret_victim_jwt',
+      qrUriOrParams: {
+        code: 'ABCD1234EFGH',
+        keyB64,
+        serverUrl: 'https://sync.example.test:8443/elv',
+      },
+      payload: handoffPayload,
+    });
+    expect(resDifferentPort).toEqual({
+      ok: false,
+      error: { category: 'auth', code: 'server_origin_mismatch' },
+    });
+    expect(requests).toHaveLength(0);
+
+    const resDifferentPath = await client.claimSession({
+      accessToken: 'secret_victim_jwt',
+      qrUriOrParams: {
+        code: 'ABCD1234EFGH',
+        keyB64,
+        serverUrl: 'https://sync.example.test/other',
+      },
+      payload: handoffPayload,
+    });
+    expect(resDifferentPath).toEqual({
+      ok: false,
+      error: { category: 'auth', code: 'server_origin_mismatch' },
+    });
+    expect(requests).toHaveLength(0);
+
+    // Normalized matching origin + path (uppercase host, default port, trailing slash) succeeds
+    const resMatching = await client.claimSession({
+      accessToken: 'secret_victim_jwt',
+      qrUriOrParams: {
+        code: 'ABCD1234EFGH',
+        keyB64,
+        serverUrl: 'HTTPS://SYNC.EXAMPLE.TEST:443/elv',
+      },
+      payload: handoffPayload,
+    });
+    expect(resMatching).toEqual({ ok: true, value: { claimed: true } });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe('https://sync.example.test/elv/v1/pair/claim');
+  });
+
+  it('validates 12-byte IV before decryptAesGcm in pollSession and normalizes pairingAad case', async () => {
+    const targetCrypto = createPureJsVaultCryptoPort(seededRandom(404));
+    const scannerCrypto = createPureJsVaultCryptoPort(seededRandom(505));
+    const decryptSpy = vi.spyOn(targetCrypto, 'decryptAesGcm');
+
+    const storedBox: {
+      current: { code: string; encryptedPayload: string; iv: string } | null;
+    } = { current: null };
+    const http: SyncHttpPort = {
+      async request(req) {
+        if (req.method === 'POST' && req.url.endsWith('/v1/pair/claim')) {
+          storedBox.current = JSON.parse(req.body ?? '{}') as {
+            code: string;
+            encryptedPayload: string;
+            iv: string;
+          };
+          return { status: 200, bodyText: JSON.stringify({ claimed: true }) };
+        }
+        if (req.method === 'GET' && req.url.includes('/v1/pair/poll/')) {
+          return {
+            status: 200,
+            bodyText: JSON.stringify({
+              status: 'claimed',
+              encryptedPayload: storedBox.current?.encryptedPayload ?? '',
+              iv: storedBox.current?.iv ?? '',
+            }),
+          };
+        }
+        return { status: 404, bodyText: '{}' };
+      },
+    };
+
+    const ephemeralKey = new Uint8Array(16).fill(0x7c);
+    const keyB64 = base64UrlEncode(ephemeralKey);
+    const scannerClient = createQrPairingClient({
+      baseUrl: 'https://sync.example.test',
+      http,
+      crypto: scannerCrypto,
+    });
+    const targetClient = createQrPairingClient({
+      baseUrl: 'https://sync.example.test',
+      http,
+      crypto: targetCrypto,
+    });
+
+    // Claim with lowercase code and poll with uppercase code (server uppercases code)
+    const handoffPayload = {
+      email: 'case@example.test',
+      refreshToken: 'pair_ref_case',
+      vaultKeyB64: base64UrlEncode(new Uint8Array(32).fill(0x99)),
+    };
+    const claimRes = await scannerClient.claimSession({
+      accessToken: 'acc_case',
+      qrUriOrParams: { code: 'pair9876xyzw', keyB64 },
+      payload: handoffPayload,
+    });
+    expect(claimRes).toEqual({ ok: true, value: { claimed: true } });
+    expect(storedBox.current?.code).toBe('PAIR9876XYZW');
+
+    const pollRes = await targetClient.pollSession({
+      pairingId: 'pair_case',
+      code: '  PAIR9876XYZW  ',
+      pollToken: 'poll_1',
+      ephemeralKey,
+    });
+    expect(pollRes).toEqual({ ok: true, value: { status: 'claimed', payload: handoffPayload } });
+    expect(decryptSpy).toHaveBeenCalledTimes(1);
+
+    // Invalid IV length (8 bytes and 16 bytes) must fail BEFORE calling decryptAesGcm
+    decryptSpy.mockClear();
+    for (const badIvLen of [0, 8, 16]) {
+      storedBox.current = {
+        code: 'PAIR9876XYZW',
+        encryptedPayload: base64UrlEncode(new Uint8Array(32).fill(0xaa)),
+        iv: base64UrlEncode(new Uint8Array(badIvLen).fill(0xbb)),
+      };
+      const badPoll = await targetClient.pollSession({
+        pairingId: 'pair_bad_iv',
+        code: 'PAIR9876XYZW',
+        pollToken: 'poll_1',
+        ephemeralKey,
+      });
+      expect(badPoll).toEqual({
+        ok: false,
+        error: { category: 'auth', code: 'pair-decrypt-failed' },
+      });
+    }
+    expect(decryptSpy).not.toHaveBeenCalled();
   });
 });

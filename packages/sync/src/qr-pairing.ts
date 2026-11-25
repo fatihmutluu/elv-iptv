@@ -177,7 +177,7 @@ function parseJson(text: string): Record<string, unknown> | null {
 }
 
 function pairingAad(code: string): Uint8Array {
-  return utf8Encode(`elv-pair-v1|${code}`);
+  return utf8Encode(`elv-pair-v1|${code.trim().toUpperCase()}`);
 }
 
 /** Creates an E2EE {@link QrPairingClient} where ephemeral key `k` never leaves the devices. */
@@ -255,9 +255,22 @@ export function createQrPairingClient(options: QrPairingClientOptions): QrPairin
         parsed = qrUriOrParams;
       }
 
+      const normalizedCode = parsed.code.trim().toUpperCase();
       const keyBytes = decodeEphemeralKey(parsed.keyB64);
-      if (keyBytes === null || !validatePairingCode(parsed.code)) {
+      if (keyBytes === null || !validatePairingCode(normalizedCode)) {
         return err(elvError('source-format', 'invalid-qr-params'));
+      }
+
+      if (parsed.serverUrl !== undefined && parsed.serverUrl.trim().length > 0) {
+        const normalizedClientBase = normalizeSyncServerUrl(options.baseUrl, '');
+        const normalizedQrServer = normalizeSyncServerUrl(parsed.serverUrl, '');
+        if (
+          normalizedClientBase.length === 0 ||
+          normalizedQrServer.length === 0 ||
+          normalizedQrServer !== normalizedClientBase
+        ) {
+          return err(elvError('auth', 'server_origin_mismatch'));
+        }
       }
 
       const iv = options.crypto.randomBytes(AES_GCM_IV_BYTES);
@@ -266,21 +279,20 @@ export function createQrPairingClient(options: QrPairingClientOptions): QrPairin
         keyBytes,
         iv,
         plaintext,
-        pairingAad(parsed.code),
+        pairingAad(normalizedCode),
       );
 
-      const targetBase = (parsed.serverUrl ?? baseUrl).replace(/\/+$/, '');
       try {
         const res = await options.http.request({
           method: 'POST',
-          url: `${targetBase}/v1/pair/claim`,
+          url: `${baseUrl}/v1/pair/claim`,
           headers: {
             Accept: 'application/json',
             'Content-Type': 'application/json',
             Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
-            code: parsed.code,
+            code: normalizedCode,
             encryptedPayload: base64UrlEncode(ct),
             iv: base64UrlEncode(iv),
           }),
@@ -342,6 +354,9 @@ export function createQrPairingClient(options: QrPairingClientOptions): QrPairin
 
       try {
         const iv = base64UrlDecode(body.iv);
+        if (iv.length !== AES_GCM_IV_BYTES) {
+          return err(elvError('auth', 'pair-decrypt-failed'));
+        }
         const ct = base64UrlDecode(body.encryptedPayload);
         const decrypted = await options.crypto.decryptAesGcm(
           session.ephemeralKey,

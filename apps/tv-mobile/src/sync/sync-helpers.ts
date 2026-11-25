@@ -1,9 +1,11 @@
 import { redactText, type SecretStore } from '@elv/domain';
+import { generateLanPairingToken } from '@elv/lan-pairing';
 import {
   base64UrlDecode,
   base64UrlEncode,
   type SyncClockPort,
   type SyncHttpPort,
+  type VaultCryptoPort,
   type VaultSnapshot,
 } from '@elv/sync';
 
@@ -143,6 +145,7 @@ export interface CreateTvMobileSyncPortsOptions {
   readonly getDeviceMeta: () => TvMobileDeviceMeta;
   readonly getRecentLogs?: (maxLines?: number) => Promise<readonly string[]> | readonly string[];
   readonly getPreferences?: () => TvMobileSyncPreferences | undefined;
+  readonly crypto?: VaultCryptoPort;
   readonly randomBytes?: (length: number) => Uint8Array;
   readonly clock?: SyncClockPort;
   readonly kdfIterations?: number;
@@ -179,15 +182,45 @@ export const SIGNED_OUT_STATE: SyncAccountState = Object.freeze({
   errorCode: null,
 });
 
+const LAN_TOKEN_HEX_RE = /^[0-9a-f]{48}$/i;
+const LAN_TOKEN_BYTES = 24;
+
+/**
+ * Cryptographic byte generator for Hermes / React Native:
+ * 1. Uses `globalThis.crypto.getRandomValues` when present.
+ * 2. Falls back to `@elv/lan-pairing`'s native `generateLanPairingToken()` (`java.security.SecureRandom`
+ *    on Android / `SecRandomCopyBytes` on Apple iOS/tvOS, 48 hex chars = 24 bytes per call).
+ * 3. Throws fail-closed if neither CSPRNG is available.
+ */
 export function defaultCsprngBytes(length: number): Uint8Array {
+  if (!Number.isInteger(length) || length < 0) {
+    throw new RangeError(`Invalid CSPRNG byte length: ${String(length)}`);
+  }
+  const out = new Uint8Array(length);
+  if (length === 0) return out;
+
   const cryptoApi = (
     globalThis as { crypto?: { getRandomValues?: (array: Uint8Array) => Uint8Array } }
   ).crypto;
-  if (typeof cryptoApi?.getRandomValues !== 'function') {
-    throw new Error('CSPRNG unavailable: globalThis.crypto.getRandomValues is required');
+  if (typeof cryptoApi?.getRandomValues === 'function') {
+    cryptoApi.getRandomValues(out);
+    return out;
   }
-  const out = new Uint8Array(length);
-  if (length > 0) cryptoApi.getRandomValues(out);
+
+  const chunks = Math.ceil(length / LAN_TOKEN_BYTES);
+  let offset = 0;
+  for (let chunk = 0; chunk < chunks; chunk += 1) {
+    const hex = generateLanPairingToken();
+    if (typeof hex !== 'string' || !LAN_TOKEN_HEX_RE.test(hex)) {
+      throw new Error(
+        'CSPRNG unavailable: neither globalThis.crypto.getRandomValues nor native @elv/lan-pairing CSPRNG is available',
+      );
+    }
+    for (let i = 0; i < LAN_TOKEN_BYTES && offset < length; i += 1) {
+      out[offset] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+      offset += 1;
+    }
+  }
   return out;
 }
 
@@ -242,8 +275,70 @@ export function parsePersistedSession(raw: string | undefined): PersistedSession
   }
 }
 
+const IPV6_BODY =
+  '(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,7}:' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}' +
+  '|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}' +
+  '|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}' +
+  '|:(?::[0-9a-fA-F]{1,4}){1,7}' +
+  '|::ffff:(?:(?:25[0-5]|2[0-4]\\d|1?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d\\d?))';
+const IPV6_BRACKET_RE = new RegExp(`\\[${IPV6_BODY}(?:%[^\\s\\]]+)?\\](?::\\d{1,5})?`, 'gi');
+const IPV6_BARE_RE = new RegExp(
+  `(^|[\\s"'(=:,])${IPV6_BODY}(?:%[^\\s"'),;]+)?(?=$|[\\s"'),;/])`,
+  'gi',
+);
+const IPV4_RE =
+  /\b(?:(?:25[0-5]|2[0-4]\d|1?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|1?\d\d?)(?::\d{1,5})?\b/g;
+
+/**
+ * Strips all URI schemes, `file:` references, credentials, auth headers/tokens, private OS paths,
+ * IPv6 addresses, and IPv4 addresses BEFORE delegating to `@elv/domain`'s `redactText()`.
+ */
 export function redactDiagnosticsLine(line: string): string {
-  return redactText(line.replace(/\bhttps?:\/\/\S+/gi, '<redacted-url>'));
+  const preStripped = line
+    .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[redacted]')
+    .replace(/file:\S+/gi, '[redacted]')
+    .replace(/(^|[\s"'(=])[^\s/:@]{1,128}:[^\s/:@]{1,128}@[^\s/:@]+/g, '$1[redacted]')
+    .replace(/\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, '[redacted]')
+    .replace(/\bauthorization\s*[:=]\s*\S+(?:\s+\S+)?/gi, '[redacted]')
+    .replace(
+      /\b(?:password|passwd|access_token|refresh_token|api_key)\s*[:=]\s*\S+/gi,
+      '[redacted]',
+    )
+    .replace(
+      /(^|[\s"'(=:])\/(?:Users|home|var|tmp|private|data|storage)\/[^\s"'<>)]*/g,
+      '$1[redacted]',
+    )
+    .replace(/(^|[\s"'(=:])[A-Za-z]:\\[^\s"'<>)]*/g, '$1[redacted]')
+    .replace(/(^|[\s"'(=:])\\\\[A-Za-z0-9_.-]+\\[^\s"'<>)]*/g, '$1[redacted]')
+    .replace(IPV6_BRACKET_RE, '[redacted]')
+    .replace(IPV6_BARE_RE, '$1[redacted]')
+    .replace(IPV4_RE, '[redacted]');
+  return redactText(preStripped);
+}
+
+/** Returns `true` when an `@elv/sync` error represents an expired/unauthorized bearer token (401). */
+export function isAuthTokenExpiredError(error: {
+  readonly category?: string;
+  readonly code: string;
+  readonly detail?: string;
+}): boolean {
+  if (error.category === 'auth') {
+    return (
+      error.code === 'unauthorized' ||
+      error.code === 'http-401' ||
+      error.code === 'token_expired' ||
+      error.code === 'invalid_token'
+    );
+  }
+  return (
+    error.code === 'auth' &&
+    (error.detail === 'unauthorized' || error.detail === 'http-401' || error.detail === undefined)
+  );
 }
 
 export function errorCodeFrom(error: { readonly code: string; readonly detail?: string }): string {
