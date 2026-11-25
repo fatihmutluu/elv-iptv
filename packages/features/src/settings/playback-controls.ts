@@ -7,6 +7,7 @@ import {
   type BufferPreset,
   type DefaultResizeModePref,
   type DeinterlaceMode,
+  type ExternalPlayerMode,
   isRefreshRateBucket,
   MAX_REFRESH_RATE_AUDIO_DELAY_MS,
   MIN_REFRESH_RATE_AUDIO_DELAY_MS,
@@ -387,6 +388,32 @@ const STILL_WATCHING_OPTIONS: ReadonlyArray<{
   },
 ];
 
+const EXTERNAL_PLAYER_MODE_OPTIONS: ReadonlyArray<{
+  readonly value: ExternalPlayerMode;
+  readonly focusId: PlaybackFocusId;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    value: 'off',
+    focusId: 'external-player-off',
+    testID: 'settings-playback-external-player-off',
+    labelKey: 'settings.playback.externalPlayerOff',
+  },
+  {
+    value: 'ask',
+    focusId: 'external-player-ask',
+    testID: 'settings-playback-external-player-ask',
+    labelKey: 'settings.playback.externalPlayerAsk',
+  },
+  {
+    value: 'always',
+    focusId: 'external-player-always',
+    testID: 'settings-playback-external-player-always',
+    labelKey: 'settings.playback.externalPlayerAlways',
+  },
+];
+
 /** Builds localized chip options for the Playback settings panel. */
 export function buildPlaybackChipOptions(i18n: AppI18n) {
   const mapLabeled = <T>(
@@ -428,6 +455,7 @@ export function buildPlaybackChipOptions(i18n: AppI18n) {
     deinterlaceOptions: mapLabeled(DEINTERLACE_MODE_OPTIONS),
     autoFrameRateOptions: mapLabeled(AUTO_FRAME_RATE_OPTIONS),
     nightModeDrcOptions: mapLabeled(NIGHT_MODE_DRC_OPTIONS),
+    externalPlayerModeOptions: mapLabeled(EXTERNAL_PLAYER_MODE_OPTIONS),
     audioChannelLayoutOptions: AUDIO_CHANNEL_LAYOUT_OPTIONS.map((opt) => ({
       value: opt.value,
       label: i18n.t(opt.labelKey),
@@ -643,6 +671,11 @@ export function activatePlaybackControl(
   }
   if (controlId === 'audio-device-auto') {
     void preferences.updatePreferences({ preferredAudioDevice: 'auto' });
+    return;
+  }
+  const externalPlayerOpt = EXTERNAL_PLAYER_MODE_OPTIONS.find((o) => o.focusId === controlId);
+  if (externalPlayerOpt) {
+    void preferences.updatePreferences({ externalPlayerMode: externalPlayerOpt.value });
   }
 }
 

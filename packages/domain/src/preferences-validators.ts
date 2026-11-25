@@ -5,6 +5,12 @@ import {
   type WaveF7aPreferencesFields,
 } from './preferences-wave-f7a';
 import {
+  mergeWaveF7bPreferences,
+  parseWaveF7bPreferences,
+  serializeWaveF7bPreferences,
+  type WaveF7bPreferencesFields,
+} from './preferences-wave-f7b';
+import {
   DEFAULT_SUBTITLE_STYLE,
   mergeSubtitleStyle,
   normalizeSubtitleStyle,
@@ -106,7 +112,9 @@ export type LogoBackdropModePref = 'plate' | 'invert' | 'off';
 export type ArtworkCacheLimitMbPref = 64 | 128 | 256;
 
 /** Extended playback, Live TV, guide, and artwork cache preference fields. */
-export interface ExtendedPreferencesFields extends WaveF7aPreferencesFields {
+export interface ExtendedPreferencesFields
+  extends WaveF7aPreferencesFields,
+    WaveF7bPreferencesFields {
   readonly preferredAudioLang: string;
   readonly preferredSubtitleLang: string;
   readonly preferredAudioLanguages: readonly string[];
@@ -535,6 +543,7 @@ export function parseExtendedPreferences(
     minimizeToTray: boolOr(parsed.minimizeToTray, defaults.minimizeToTray),
     autoEnterPip: boolOr(parsed.autoEnterPip, defaults.autoEnterPip),
     ...parseWaveF7aPreferences(parsed, defaults),
+    ...parseWaveF7bPreferences(parsed, defaults),
     subtitleStyle: normalizeSubtitleStyle(parsed.subtitleStyle),
   };
 }
@@ -542,8 +551,11 @@ export function parseExtendedPreferences(
 export function serializeExtendedPreferences(
   snapshot: ExtendedPreferencesFields,
   defaults: ExtendedPreferencesFields,
-): Omit<ExtendedPreferencesFields, 'subtitleStyle' | keyof WaveF7aPreferencesFields> &
-  Partial<WaveF7aPreferencesFields> & {
+): Omit<
+  ExtendedPreferencesFields,
+  'subtitleStyle' | keyof WaveF7aPreferencesFields | keyof WaveF7bPreferencesFields
+> &
+  Partial<WaveF7aPreferencesFields & WaveF7bPreferencesFields> & {
     readonly subtitleStyle?: SubtitleStyleConfig;
   } {
   const audio = resolveSerializedLangPair(
@@ -642,6 +654,7 @@ export function serializeExtendedPreferences(
     minimizeToTray: Boolean(snapshot.minimizeToTray),
     autoEnterPip: Boolean(snapshot.autoEnterPip),
     ...serializeWaveF7aPreferences(snapshot, defaults),
+    ...serializeWaveF7bPreferences(snapshot, defaults),
     ...(subtitleStyleEquals(subtitleStyle, DEFAULT_SUBTITLE_STYLE) ? {} : { subtitleStyle }),
   };
 }
@@ -774,6 +787,7 @@ export function mergeExtendedPreferences(
     minimizeToTray: boolOr(patch.minimizeToTray, base.minimizeToTray),
     autoEnterPip: boolOr(patch.autoEnterPip, base.autoEnterPip),
     ...mergeWaveF7aPreferences(base, patch),
+    ...mergeWaveF7bPreferences(base, patch),
     subtitleStyle: mergeSubtitleStyle(base.subtitleStyle, patch.subtitleStyle),
   };
 }

@@ -77,7 +77,10 @@ function fake(
       extractedTo.push(dir);
       events.push(`extract ${archivePath} ${dir}`);
       if (archive !== undefined) {
-        for (const p of Object.keys(archive)) written.set(`${dir}/${p}`, 'bin');
+        const dec = new TextDecoder();
+        for (const [p, bytes] of Object.entries(archive)) {
+          written.set(`${dir}/${p}`, p.endsWith('.json') ? dec.decode(bytes) : 'bin');
+        }
         return;
       }
       written.set(`${dir}/libmpv-2.dll`, 'dll');
@@ -444,6 +447,149 @@ describe('verifyDirectory', () => {
     const bad = fake({ files });
     bad.deps.readBytes = async () => GPL;
     await expect(verifyDirectory(out, bad.deps)).rejects.toThrow(/refused by the licence gate/);
+  });
+
+  it('verifies a Windows multi-DLL build directory and rejects GPL in any FFmpeg DLL', async () => {
+    const winOut = '/tmp/out/win32-x64';
+    const winFiles = {
+      [`${winOut}/libmpv-2.dll`]: 'dll',
+      [`${winOut}/avutil-60.dll`]: 'dll',
+      [`${winOut}/avcodec-62.dll`]: 'dll',
+      [`${winOut}/libass-9.dll`]: 'dll',
+      [`${winOut}/include/mpv/client.h`]: 'h',
+    };
+    const ok = fake({ files: winFiles });
+    ok.deps.readBytes = async (file) => {
+      if (file.endsWith('/libmpv-2.dll')) return MPV;
+      if (file.endsWith('/avutil-60.dll') || file.endsWith('/avcodec-62.dll')) return FFMPEG;
+      return new Uint8Array();
+    };
+    const v = await verifyDirectory(winOut, ok.deps);
+    expect(v.ok).toBe(true);
+    expect(v.lua).toBe(true);
+
+    const gplCodec = fake({ files: winFiles });
+    gplCodec.deps.readBytes = async (file) => {
+      if (file.endsWith('/libmpv-2.dll')) return MPV;
+      if (file.endsWith('/avcodec-62.dll')) return GPL;
+      return FFMPEG;
+    };
+    await expect(verifyDirectory(winOut, gplCodec.deps)).rejects.toThrow(
+      /avcodec-62\.dll.*--enable-gpl/,
+    );
+  });
+});
+
+describe('fetchRuntime on win32-x64 workflow-artifact (multi-DLL)', () => {
+  const WIN_ARTIFACT_LOCK = parseLock({
+    'win32-x64': {
+      kind: 'workflow-artifact',
+      mpv: '0.42.0',
+      repo: 'fatihmutluu/elv-iptv',
+      runId: 777,
+      artifact: 'mpv-runtime-win32-x64',
+      file: 'mpv-runtime-win32-x64.tar.gz',
+      sha256: HASH,
+    },
+  });
+  const winOpts = { root: '/repo', platform: 'win32', arch: 'x64', lock: WIN_ARTIFACT_LOCK };
+  const dir = '/repo/apps/desktop/resources/mpv/win32-x64';
+  const staging = '/repo/.cache/mpv/staging-win32-x64';
+  const runtimeMeta = {
+    target: 'win32-x64',
+    compiler: 'gcc.exe (Rev1, Built by MSYS2 project) 14.2.0',
+    configure: {
+      ffmpeg: '--enable-shared --disable-static --disable-gpl --disable-nonfree',
+      mpv: '-Dgpl=false -Dlibmpv=true -Dcplayer=false -Dlua=luajit',
+    },
+  };
+  const winBundle = (over: Record<string, Uint8Array> = {}): Record<string, Uint8Array> => ({
+    'libmpv-2.dll': MPV,
+    'avutil-60.dll': FFMPEG,
+    'avcodec-62.dll': FFMPEG,
+    'avformat-62.dll': FFMPEG,
+    'swresample-6.dll': new Uint8Array(),
+    'libass-9.dll': new Uint8Array(),
+    'libplacebo-387.dll': new Uint8Array(),
+    'lua51.dll': new Uint8Array(),
+    'libwinpthread-1.dll': new Uint8Array(),
+    'include/mpv/client.h': new Uint8Array(),
+    'licenses/mpv/LICENSE.LGPL': new Uint8Array(),
+    'RUNTIME-BUILDINFO.json': new TextEncoder().encode(JSON.stringify(runtimeMeta)),
+    ...over,
+  });
+
+  it('fetches workflow-artifact, scans every DLL, and preserves RUNTIME-BUILDINFO.json', async () => {
+    const f = fake({ archive: winBundle() });
+    const r = await fetchRuntime(winOpts, f.deps);
+    expect(r.status).toBe('installed');
+    expect(f.downloads).toEqual([]);
+    expect(f.reads).toContain(`${staging}/libmpv-2.dll`);
+    expect(f.reads).toContain(`${staging}/avutil-60.dll`);
+    expect(f.reads).toContain(`${staging}/avcodec-62.dll`);
+    expect(f.reads).toContain(`${staging}/avformat-62.dll`);
+    expect(f.reads).toContain(`${staging}/libass-9.dll`);
+    expect(f.reads).toContain(`${staging}/lua51.dll`);
+    expect(f.reads).toContain(`${staging}/libwinpthread-1.dll`);
+
+    expect(f.written.has(`${dir}/RUNTIME-BUILDINFO.json`)).toBe(true);
+    const info = JSON.parse(f.written.get(`${dir}/BUILDINFO.json`) ?? '{}');
+    expect(info.sha256).toBe(HASH);
+    expect(info.runtimeBuild).toEqual(runtimeMeta);
+  });
+
+  it('rejects a Windows multi-DLL archive when any FFmpeg DLL has --enable-gpl or --enable-nonfree', async () => {
+    const gplCodec = fake({ archive: winBundle({ 'avcodec-62.dll': GPL }) });
+    await expect(fetchRuntime(winOpts, gplCodec.deps)).rejects.toThrow(
+      /avcodec-62\.dll.*--enable-gpl/,
+    );
+    expect([...gplCodec.written.keys()].some((k) => k.startsWith(dir))).toBe(false);
+
+    const nonfreeUtil = fake({
+      archive: winBundle({
+        'avutil-60.dll': enc(
+          '--prefix=/p --enable-shared --disable-static --enable-nonfree --disable-programs',
+        ),
+      }),
+    });
+    await expect(fetchRuntime(winOpts, nonfreeUtil.deps)).rejects.toThrow(
+      /avutil-60\.dll.*--enable-nonfree/,
+    );
+    expect([...nonfreeUtil.written.keys()].some((k) => k.startsWith(dir))).toBe(false);
+
+    const gplMpv = fake({
+      archive: winBundle({ 'libmpv-2.dll': enc('-Dgpl=true -Dlibmpv=true -Dlua=luajit') }),
+    });
+    await expect(fetchRuntime(winOpts, gplMpv.deps)).rejects.toThrow(/libmpv-2\.dll.*-Dgpl=false/);
+    expect([...gplMpv.written.keys()].some((k) => k.startsWith(dir))).toBe(false);
+  });
+
+  it('preserves macOS bundle Resources/BUILDINFO.json under runtimeBuild', async () => {
+    const macLock = parseLock({
+      'darwin-arm64': {
+        kind: 'workflow-artifact',
+        mpv: '0.42.0',
+        repo: 'fatihmutluu/elv-iptv',
+        runId: 99,
+        artifact: 'mpv-runtime-darwin-arm64',
+        file: 'mpv-runtime-darwin-arm64.tar.gz',
+        sha256: HASH,
+      },
+    });
+    const macMeta = { macosDeploymentTarget: '13.0', xcode: 'Xcode 26.4' };
+    const app = 'ELV IPTV Player.app/Contents';
+    const f = fake({
+      archive: {
+        [`${app}/MacOS/mpv`]: MPV,
+        [`${app}/Frameworks/libavutil.60.dylib`]: FFMPEG,
+        [`${app}/Resources/BUILDINFO.json`]: new TextEncoder().encode(JSON.stringify(macMeta)),
+      },
+    });
+    await fetchRuntime({ root: '/repo', platform: 'darwin', arch: 'arm64', lock: macLock }, f.deps);
+    const macDir = '/repo/apps/desktop/resources/mpv/darwin-arm64';
+    const info = JSON.parse(f.written.get(`${macDir}/BUILDINFO.json`) ?? '{}');
+    expect(info.runtimeBuild).toEqual(macMeta);
+    expect(f.written.has(`${macDir}/${app}/Resources/BUILDINFO.json`)).toBe(true);
   });
 });
 

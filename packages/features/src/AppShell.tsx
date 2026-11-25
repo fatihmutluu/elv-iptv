@@ -7,7 +7,6 @@ import { StyleSheet, View } from 'react-native';
 import { usePlayDeepLinkHandler } from './app-shell-deep-link';
 import { useShellPlaybackModes } from './app-shell-desktop';
 import {
-  AppShellProfileOverlays,
   buildShellProfileUtility,
   useShellManagementOverlays,
   useShellProfileEffects,
@@ -15,14 +14,12 @@ import {
 import { AppShellPlayerHost } from './app-shell-player';
 import { useProgrammeReminders } from './app-shell-reminders';
 import {
-  AppShellExitToast,
   AppShellStage,
   useShellArtworkCacheLimit,
   useShellIncomingLocalPlaylist,
 } from './app-shell-sections';
 import {
   type AppTab,
-  buildShellCrashProps,
   buildShellNavigation,
   clearSourceFromCatalogMemory,
   clearSourceFromLiveMemory,
@@ -37,14 +34,9 @@ import {
   pushDetailStack,
 } from './app-shell-state';
 import { useTvHomeChannelsSync } from './app-shell-tv-channels';
+import { AppShellRootOverlays, useAppShellWaveF7b } from './app-shell-wave-f7b';
 import type { CatalogTabMemory } from './catalog';
-import {
-  ChannelManagementOverlay,
-  EMPTY_LIVE_MEMORY,
-  type LiveTabMemory,
-  recordChannelTune,
-} from './live';
-import { ConnectionLimitDialog } from './player/ConnectionLimitDialog';
+import { EMPTY_LIVE_MEMORY, type LiveTabMemory, recordChannelTune } from './live';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { DesktopWindowPort } from './ports/desktop-window-host';
 import type { LanPairingPort } from './ports/lan-pairing-host';
@@ -55,8 +47,8 @@ import type { ReminderHostPort } from './ports/reminder-host';
 import type { SourceImportHost } from './ports/source-import-host';
 import type { TvHomeChannelsPort } from './ports/tv-home-channels';
 import type { ThermalDevicePort, VideoHost } from './ports/video-host';
-import { ReminderToastBanner } from './reminders';
-import { OledScreensaverOverlay, useOledScreensaver } from './screensaver';
+import type { DiagnosticsPort, ExternalPlayerPort } from './ports/wave-f7b-ports';
+import { useOledScreensaver } from './screensaver';
 import type { SettingsSection } from './settings';
 import {
   createProfileScopedCatalog,
@@ -83,7 +75,6 @@ import {
   useShellSources,
 } from './shell';
 import { CachedCatalogStrip } from './sources/CachedCatalogStrip';
-import { GuideManagementOverlay } from './sources/GuideManagementOverlay';
 
 export type { AppTab };
 
@@ -117,6 +108,10 @@ export interface AppShellProps {
   onDeepLinkHandled?: () => void;
   /** Optional test/host hook notified with the active {@link PlaybackGuard}. */
   onPlaybackGuardReady?: (guard: PlaybackGuard) => void;
+  /** Optional platform external player handoff port (`#406`). */
+  externalPlayer?: ExternalPlayerPort;
+  /** Optional platform opt-in redacted diagnostics port (`#226`). */
+  diagnostics?: DiagnosticsPort;
 }
 
 /** Top-level Cinema Quietude shell (`Home`, `Live`, `Movies`, `Series` + `Search`, `Settings`, `DetailScreen`, `PlayerScreen`). */
@@ -281,13 +276,16 @@ function AppShellContent(props: AppShellProps): ReactElement {
       }));
     }
   }, []);
+  const interceptOpenPlayTargetRef = useRef<(enriched: PlayTarget) => void>(openPlayTarget);
   const connectionGuard = useConnectionLimitGuard({
     sourcesRef,
     enrichTarget: enrichPlayTargetAccountKey,
     ...(props.connectionTracker !== undefined
       ? { connectionTracker: props.connectionTracker }
       : {}),
-    onOpenTarget: openPlayTarget,
+    onOpenTarget: useCallback((enriched: PlayTarget) => {
+      interceptOpenPlayTargetRef.current(enriched);
+    }, []),
     onReplaceTarget: replacePlayTarget,
   });
   const stopForSource = useCallback(
@@ -555,32 +553,40 @@ function AppShellContent(props: AppShellProps): ReactElement {
     formatTimingText: formatReminderTimingText,
     ...(props.reminderHost !== undefined ? { reminderHost: props.reminderHost } : {}),
   });
+  const bumpStageKey = useCallback(() => setStageKey((k) => k + 1), []);
+  const clearAllCaches = useCallback(() => {
+    uiCache.clear();
+    shell.bumpCatalogRevision();
+    resetTransientMemory();
+  }, [resetTransientMemory, shell.bumpCatalogRevision, uiCache]);
+  const switchSourceOnCrash = useCallback(() => {
+    playTargetRef.current = null;
+    setPlayTarget(null);
+    openSources();
+  }, [openSources]);
+  const bumpUserState = useCallback(() => setUserStateVersion((v) => v + 1), []);
+  const waveF7b = useAppShellWaveF7b({
+    catalog: observedCatalog,
+    preferences,
+    ...(props.externalPlayer !== undefined ? { externalPlayer: props.externalPlayer } : {}),
+    ...(props.diagnostics !== undefined ? { diagnostics: props.diagnostics } : {}),
+    stopEmbeddedPreviewRef,
+    stopActivePlayerRef,
+    onOpenIntegrated: openPlayTarget,
+    onReleaseConnection: connectionGuard.releaseActive,
+    onProgressSaved: bumpUserState,
+    stageKey,
+    bumpStageKey,
+    clearCaches: clearAllCaches,
+    switchSource: switchSourceOnCrash,
+  });
+  interceptOpenPlayTargetRef.current = waveF7b.externalHandoff.interceptPlayTarget;
   const hasRootOverlay =
-    hasProfileOverlay || mgmtOverlays.anyOpen || (isTv && reminders.activeBanner !== null);
-  const crashProps = useMemo(
-    () =>
-      buildShellCrashProps({
-        stageKey,
-        bumpStageKey: () => setStageKey((k) => k + 1),
-        clearCaches: () => {
-          uiCache.clear();
-          focusMemory.clear();
-          shell.bumpCatalogRevision();
-          userPickedLiveModeRef.current = false;
-          setLiveMemory({ ...EMPTY_LIVE_MEMORY, mode: defaultLiveModeRef.current });
-          setCatalogMemoryByTab(INITIAL_CATALOG_MEMORY);
-          setDetailStack([]);
-          clearSearchSession();
-          setHeroScrolled(false);
-        },
-        switchSource: () => {
-          playTargetRef.current = null;
-          setPlayTarget(null);
-          openSources();
-        },
-      }),
-    [stageKey, shell.bumpCatalogRevision, clearSearchSession, openSources, uiCache, focusMemory],
-  );
+    hasProfileOverlay ||
+    mgmtOverlays.anyOpen ||
+    waveF7b.anyOverlayOpen ||
+    (isTv && reminders.activeBanner !== null);
+  const crashProps = waveF7b.crashProps;
   const readySourcesCount = sources.filter((s) => !s.needsImport).length;
   const isResolvingInitialSources =
     !profile.profilesReady || (!sourcesResolved && !userPickedTab && activeDetail === null);
@@ -719,6 +725,9 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     onOpenSources={openSources}
                     onOpenChannelManagement={mgmtOverlays.openChannelManager}
                     onOpenGuideManagement={mgmtOverlays.openGuideManager}
+                    {...(waveF7b.openDiagnosticsPreview !== undefined
+                      ? { onPreviewDiagnostics: waveF7b.openDiagnosticsPreview }
+                      : {})}
                     onRegisterStopPreview={handleRegisterStopPreview}
                     suppressEmbeddedPreview={playTarget !== null}
                     onChannelsMutated={handleChannelsMutated}
@@ -748,36 +757,20 @@ function AppShellContent(props: AppShellProps): ReactElement {
               onTargetChange={onPlayerTargetChange}
               onExit={onPlayerExit}
             />
-            <AppShellExitToast visible={exitToastVisible && isBrowsing} />
-            {connectionGuard.pending !== null ? (
-              <ConnectionLimitDialog
-                check={connectionGuard.pending.check}
-                onStopOther={connectionGuard.handleStopOther}
-                onCancel={connectionGuard.handleCancel}
-                onContinueAnyway={connectionGuard.handleContinueAnyway}
-              />
-            ) : null}
-            <ChannelManagementOverlay
-              visible={mgmtOverlays.channelManagerOpen}
+            <AppShellRootOverlays
+              exitToastVisible={exitToastVisible && isBrowsing}
+              connectionGuard={connectionGuard}
+              mgmtOverlays={mgmtOverlays}
               catalog={observedCatalog}
               sources={sources}
-              onMutated={handleChannelsMutated}
-              onClose={mgmtOverlays.closeChannelManager}
+              onChannelsMutated={handleChannelsMutated}
+              onOpenProfilesSettings={openProfilesSettings}
+              reminders={reminders}
+              oledScreensaver={oledScreensaver}
+              wave={waveF7b}
+              {...(props.diagnostics !== undefined ? { diagnostics: props.diagnostics } : {})}
+              includeLogs={preferences.preferences.crashReportsIncludeLogs}
             />
-            <GuideManagementOverlay
-              visible={mgmtOverlays.guideSource !== null}
-              source={mgmtOverlays.guideSource}
-              catalog={observedCatalog}
-              onMutated={handleChannelsMutated}
-              onClose={mgmtOverlays.closeGuideManager}
-            />
-            <AppShellProfileOverlays onOpenProfilesSettings={openProfilesSettings} />
-            <ReminderToastBanner
-              banner={reminders.activeBanner}
-              onTune={reminders.tuneActiveBanner}
-              onDismiss={reminders.dismissBanner}
-            />
-            <OledScreensaverOverlay state={oledScreensaver.state} onWake={oledScreensaver.wake} />
           </View>
         </BrowseFocusMemoryProvider>
       </CatalogUiCacheProvider>

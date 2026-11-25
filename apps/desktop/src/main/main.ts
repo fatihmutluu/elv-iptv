@@ -45,6 +45,7 @@ import {
   createSafeStorageCipher,
 } from './catalog/secret-store.ts';
 import { parseDevServerUrl } from './dev-server.ts';
+import { registerDiagnosticsIpc } from './diagnostics-ipc.ts';
 import {
   createVideoSampler,
   GATE_PLAYING_LINE,
@@ -614,6 +615,29 @@ if (hasLock) {
             }),
     });
     lanPairingIpc = registerLanPairingIpc({ ipcMain });
+    registerDiagnosticsIpc<BrowserWindow>({
+      ipcMain,
+      getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      readLogTail: (maxLines) => logger.readRedactedTail(maxLines),
+      showSaveDialog: (win, options) =>
+        win && !win.isDestroyed()
+          ? dialog.showSaveDialog(win, {
+              defaultPath: options.defaultPath,
+              filters: options.filters.map((f) => ({
+                name: f.name,
+                extensions: [...f.extensions],
+              })),
+            })
+          : dialog.showSaveDialog({
+              defaultPath: options.defaultPath,
+              filters: options.filters.map((f) => ({
+                name: f.name,
+                extensions: [...f.extensions],
+              })),
+            }),
+      writeClipboardText: (text) => clipboard.writeText(text),
+      log: logger.log,
+    });
     serveRenderer();
     catalogCoordinator = startCatalog();
     await startPlayer();

@@ -82,6 +82,7 @@ export const RESETTABLE_PROPS: ReadonlyArray<[string, unknown]> = [
   ['aid', 'auto'],
   ['sid', 'auto'],
   ['secondary-sid', 'no'],
+  ['program', 'auto'],
   ['secondary-sub-pos', 0],
   ['speed', 1],
   ['deinterlace', 'no'],

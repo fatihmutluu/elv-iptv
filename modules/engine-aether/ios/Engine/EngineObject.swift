@@ -156,6 +156,11 @@ final class EngineObject: SharedObject, @unchecked Sendable {
   }
 
   @MainActor
+  var isPrimaryAudioOwner: Bool {
+    driver?.isPrimaryAudioOwner ?? initialHandleAudioFocus
+  }
+
+  @MainActor
   func canStartPictureInPicture() -> Bool {
     guard !fence.isDisposedNow, let driver else { return false }
     return driver.canStartPictureInPicture()

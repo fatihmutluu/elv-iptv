@@ -89,6 +89,16 @@ export interface LoadOptions {
   readonly nightModeDrc?: NightModeDrcPreset;
   /** Desktop audio passthrough, exclusive output, AC3 encode, and channel layout config (`#213`). */
   readonly desktopAudioOutput?: DesktopAudioOutputConfig;
+  /** Preferred multi-program MPEG-TS service/program ID to select on load (`#304`). */
+  readonly programId?: string;
+}
+
+/** One selectable service/program inside a multi-program MPEG-TS transport stream (`#304`). */
+export interface ProgramInfo {
+  readonly id: string;
+  readonly label: string;
+  readonly serviceName?: string;
+  readonly programNumber?: number;
 }
 
 /** One selectable audio or embedded/external subtitle track reported by the engine. */
@@ -102,6 +112,8 @@ export interface TrackInfo {
   isDefault?: boolean;
   /** Whether this track originated from a user-attached external sidecar file or URL (`#32`). */
   readonly external?: boolean;
+  /** Optional multi-program MPEG-TS service/program ID this track belongs to (`#304`). */
+  readonly programId?: string;
 }
 
 /** One selectable adaptive video rendition reported by the engine (`#59`). */
@@ -112,6 +124,8 @@ export interface VideoQualityOption {
   readonly height?: number;
   readonly bitrateBps?: number;
   readonly fps?: number;
+  /** Optional multi-program MPEG-TS service/program ID this rendition belongs to (`#304`). */
+  readonly programId?: string;
 }
 
 /** Available audio, subtitle, and adaptive video tracks for the open media (`null` = none / Off / Auto). */
@@ -126,6 +140,10 @@ export interface MediaTracks {
   readonly videoQualities?: readonly VideoQualityOption[];
   /** Selected video rendition ID, or `null` / `undefined` for automatic ABR (`#59`). */
   readonly selectedVideoQualityId?: string | null;
+  /** Selectable services/programs when a multi-program MPEG-TS stream carries > 1 program (`#304`). */
+  readonly programs?: readonly ProgramInfo[];
+  /** Selected multi-program service/program ID, or `null` / `undefined` when not applicable (`#304`). */
+  readonly selectedProgramId?: string | null;
 }
 
 /** Canonical empty track snapshot before tracks arrive or after `tune`/`stop`. */
@@ -252,6 +270,8 @@ export interface EngineCapabilities {
   readonly subtitleStyling?: boolean;
   /** Engine supports simultaneous dual subtitle rendering (`#402`). */
   readonly dualSubtitles?: boolean;
+  /** Engine supports multi-program MPEG-TS service/program selection (`#304`). */
+  readonly programSelection?: boolean;
 }
 
 /**
@@ -299,6 +319,8 @@ export interface PlayerEngine {
   setSubtitleDelay?(attempt: AttemptToken, delayMs: number): void;
   /** Constrains or selects an adaptive video rendition ID, or `null` for automatic ABR (`#59`). */
   selectVideoQuality?(attempt: AttemptToken, id: string | null): void;
+  /** Selects a service/program inside a multi-program MPEG-TS stream (`#304`). */
+  selectProgram?(attempt: AttemptToken, id: string): void;
   stop(attempt: AttemptToken): void;
   /**
    * Releases and rebuilds the native player instance, keeping the view and the surface. The new

@@ -17,6 +17,7 @@ import {
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { SettingsPreferencesController } from './appearance-controls';
 import { DesktopAudioPassthroughSection } from './DesktopAudioPassthroughSection';
+import { ExternalPlayerSettingsSection } from './ExternalPlayerSettingsSection';
 import { buildPlaybackChipOptions } from './playback-controls';
 import { RefreshRateDelayEditor } from './RefreshRateDelayEditor';
 import {
@@ -37,6 +38,8 @@ export interface PlaybackSettingsPanelProps {
   readonly showAndroidDecoder?: boolean;
   /** Shows the Android-only Night-Mode DRC row (defaults to `Platform.OS === 'android'`, `#115`). */
   readonly showNightModeDrc?: boolean;
+  /** Shows the mobile External Player row (defaults to `Platform.OS === 'android' || Platform.OS === 'ios'`, `#406`). */
+  readonly showExternalPlayer?: boolean;
   /** Controlled active refresh-rate bucket for the per-refresh-rate A/V delay editor (`#115`). */
   readonly selectedDelayBucket?: RefreshRateBucket;
   /** Invoked when the user selects a refresh-rate bucket in the per-refresh-rate A/V delay editor (`#115`). */
@@ -55,6 +58,7 @@ export function PlaybackSettingsPanel({
   focusedControlId = null,
   showAndroidDecoder = Platform.OS === 'android',
   showNightModeDrc = Platform.OS === 'android',
+  showExternalPlayer = Platform.OS === 'android' || Platform.OS === 'ios',
   selectedDelayBucket: controlledDelayBucket,
   onSelectDelayBucket,
 }: PlaybackSettingsPanelProps): ReactElement {
@@ -78,7 +82,12 @@ export function PlaybackSettingsPanel({
 
   const scrollRef = useRef<ScrollViewHandle | null>(null);
   const cardYRef = useRef<
-    Partial<Record<'tracks' | 'transport' | 'cinema' | 'displaySync' | 'automation', number>>
+    Partial<
+      Record<
+        'tracks' | 'transport' | 'cinema' | 'displaySync' | 'automation' | 'externalPlayer',
+        number
+      >
+    >
   >({});
 
   const activePrefs: PreferencesSnapshot = suppliedPrefs?.preferences ?? DEFAULT_PREFERENCES;
@@ -131,6 +140,9 @@ export function PlaybackSettingsPanel({
       focusedControlId.startsWith('still-watching-')
     ) {
       const y = cardYRef.current.cinema;
+      if (y !== undefined) targetY = Math.max(0, y - 12);
+    } else if (focusedControlId.startsWith('external-player-')) {
+      const y = cardYRef.current.externalPlayer;
       if (y !== undefined) targetY = Math.max(0, y - 12);
     } else {
       const y = cardYRef.current.automation;
@@ -547,6 +559,23 @@ export function PlaybackSettingsPanel({
           onSelect={(preferredAudioDevice) => applyPatch({ preferredAudioDevice })}
         />
       </Surface>
+
+      {showExternalPlayer && !isDesktop ? (
+        <ExternalPlayerSettingsSection
+          mode={activePrefs.externalPlayerMode}
+          customScheme={activePrefs.externalPlayerCustomScheme}
+          modeOptions={opts.externalPlayerModeOptions}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          onSelectMode={(externalPlayerMode) => applyPatch({ externalPlayerMode })}
+          onChangeCustomScheme={(externalPlayerCustomScheme) =>
+            applyPatch({ externalPlayerCustomScheme })
+          }
+          onLayoutY={(y) => {
+            cardYRef.current.externalPlayer = y;
+          }}
+        />
+      ) : null}
     </ScrollView>
   );
 }

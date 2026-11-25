@@ -16,6 +16,7 @@ internal data class VideoQualitySnapshot(
   val height: Int? = null,
   val bitrateBps: Int? = null,
   val fps: Double? = null,
+  val programId: String? = null,
 ) {
   fun toMap(): Map<String, Any> = buildMap {
     put("id", id)
@@ -24,6 +25,7 @@ internal data class VideoQualitySnapshot(
     if (height != null) put("height", height)
     if (bitrateBps != null) put("bitrateBps", bitrateBps)
     if (fps != null) put("fps", fps)
+    if (programId != null) put("programId", programId)
   }
 }
 
@@ -56,7 +58,17 @@ private fun formatBitrateLabel(bitrateBps: Int): String =
  * Returns an empty list when fewer than 2 distinct selectable renditions exist (non-adaptive streams).
  */
 @OptIn(UnstableApi::class)
-internal fun videoQualityCandidatesOf(tracks: Tracks): List<VideoQualityCandidate> {
+internal fun videoQualityCandidatesOf(
+  tracks: Tracks,
+  includeProgramId: Boolean = false,
+): List<VideoQualityCandidate> {
+  data class DedupKey(
+    val programId: String?,
+    val height: Int?,
+    val width: Int?,
+    val bitrateBps: Int?,
+  )
+
   data class RawCandidate(
     val group: Tracks.Group,
     val trackIndex: Int,
@@ -66,9 +78,10 @@ internal fun videoQualityCandidatesOf(tracks: Tracks): List<VideoQualityCandidat
     val bitrateBps: Int?,
     val fps: Double?,
     val baseLabel: String,
+    val programId: String?,
   )
 
-  val seenKeys = mutableSetOf<Triple<Int?, Int?, Int?>>()
+  val seenKeys = mutableSetOf<DedupKey>()
   val raw = mutableListOf<RawCandidate>()
 
   tracks.groups.forEachIndexed { groupIndex, group ->
@@ -80,7 +93,8 @@ internal fun videoQualityCandidatesOf(tracks: Tracks): List<VideoQualityCandidat
       val height = format.height.takeIf { it != Format.NO_VALUE && it > 0 }
       val bitrateBps = format.bitrate.takeIf { it != Format.NO_VALUE && it > 0 }
       if (height == null && bitrateBps == null) continue
-      val key = Triple(height, width, bitrateBps)
+      val programId = if (includeProgramId) extractTrackProgramId(group, trackIndex) else null
+      val key = DedupKey(programId, height, width, bitrateBps)
       if (!seenKeys.add(key)) continue
       val fps = format.frameRate
         .takeIf { it != Format.NO_VALUE.toFloat() && it.isFinite() && it > 0f }
@@ -99,6 +113,7 @@ internal fun videoQualityCandidatesOf(tracks: Tracks): List<VideoQualityCandidat
         bitrateBps = bitrateBps,
         fps = fps,
         baseLabel = baseLabel,
+        programId = programId,
       )
     }
   }
@@ -130,6 +145,7 @@ internal fun videoQualityCandidatesOf(tracks: Tracks): List<VideoQualityCandidat
           height = item.height,
           bitrateBps = item.bitrateBps,
           fps = item.fps,
+          programId = item.programId,
         ),
       )
     }

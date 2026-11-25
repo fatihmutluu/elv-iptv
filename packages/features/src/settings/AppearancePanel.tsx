@@ -37,6 +37,7 @@ import {
   stepOverscanRatio,
   UI_FONT_OPTIONS,
 } from './appearance-controls';
+import { DiagnosticsSettingsCard } from './DiagnosticsSettingsCard';
 import { SettingsDivider, SettingsToggleRow } from './SettingsRowParts';
 import { ThemePresetGrid } from './ThemePresetGrid';
 import { TvDisplaySettingsCard } from './TvDisplaySettingsCard';
@@ -59,6 +60,8 @@ export interface AppearancePanelProps {
   readonly onClearArtworkCache?: () => void;
   /** Optional controlled cleared-confirmation flag owned by `SettingsScreen`. */
   readonly artworkCacheCleared?: boolean;
+  /** Opens the opt-in redacted diagnostic report preview modal (`#226`). */
+  readonly onPreviewDiagnostics?: () => void;
 }
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
@@ -75,6 +78,7 @@ export function AppearancePanel({
   focusedControlId = null,
   onClearArtworkCache,
   artworkCacheCleared: controlledCleared,
+  onPreviewDiagnostics,
 }: AppearancePanelProps): ReactElement {
   const theme = useTheme();
   const themeCtrl = useThemeController();
@@ -86,7 +90,12 @@ export function AppearancePanel({
   const scrollRef = useRef<ScrollViewHandle | null>(null);
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layoutsRef = useRef<
-    Partial<Record<'theme' | 'font' | 'tvDisplay' | 'artworkCache' | 'reset', SectionLayout>>
+    Partial<
+      Record<
+        'theme' | 'font' | 'tvDisplay' | 'artworkCache' | 'reset' | 'diagnostics',
+        SectionLayout
+      >
+    >
   >({});
   const motionOffsetYRef = useRef(0);
 
@@ -469,6 +478,21 @@ export function AppearancePanel({
           onPress={handleReset}
         />
       </View>
+
+      <DiagnosticsSettingsCard
+        crashReportsOptIn={activePrefs.crashReportsOptIn}
+        crashReportsIncludeLogs={activePrefs.crashReportsIncludeLogs}
+        focusedControlId={focusedControlId}
+        isTv={isTv}
+        onToggleOptIn={() => applyPatch({ crashReportsOptIn: !activePrefs.crashReportsOptIn })}
+        onToggleIncludeLogs={() =>
+          applyPatch({ crashReportsIncludeLogs: !activePrefs.crashReportsIncludeLogs })
+        }
+        {...(onPreviewDiagnostics !== undefined ? { onPreviewReport: onPreviewDiagnostics } : {})}
+        onLayoutBox={(box) => {
+          layoutsRef.current.diagnostics = box;
+        }}
+      />
     </ScrollView>
   );
 }

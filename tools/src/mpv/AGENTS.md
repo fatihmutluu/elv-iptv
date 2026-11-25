@@ -2,17 +2,23 @@
 
 `pnpm mpv fetch [--force]` installs and `pnpm mpv verify` rescans the pinned desktop mpv runtime.
 
-- `apps/desktop/mpv-runtime.lock.json` pins one runtime per `<platform>-<arch>` (URL or CI artifact, SHA-256). Windows
-  entries must come from `github.com/mpv-player/mpv/releases/download/`.
-- `fetch` downloads into `.cache/mpv/<key>/` (Windows: temp `.part` rename; macOS: `gh run download <runId> -R <repo>
-  -n <artifact>`, needing `GH_TOKEN` with `actions: read` in CI), checks SHA-256 (mismatches delete; stale cache files
-  are replaced), and extracts via system `tar` (`-xzf` for `.tar.gz`) into a fresh staging folder. Every path must stay
-  contained with zero symlinks, else staging is removed and fetch fails. After the licence gate scans binaries as
-  strings (nothing runs), the runtime moves to gitignored `apps/desktop/resources/mpv/<key>/` with `BUILDINFO.json`.
-- Licence gate: FFmpeg without `--enable-gpl`/`--enable-nonfree`, mpv with `-Dgpl=false`. Scans `*.dll`, `libavcodec*`,
-  `libavformat*`, `libavutil*`, `libmpv*` dylibs and `mpv`.
+- `apps/desktop/mpv-runtime.lock.json` pins one runtime per `<platform>-<arch>` (upstream release URL or CI workflow
+  artifact, SHA-256). Upstream entries must come from `github.com/mpv-player/mpv/releases/download/`.
+- `fetch` downloads into `.cache/mpv/<key>/` (upstream: temp `.part` rename; workflow-artifact: `gh run download
+  <runId> -R <repo> -n <artifact>`, needing `GH_TOKEN` with `actions: read` in CI), checks SHA-256 (mismatches delete;
+  stale cache files are replaced), and extracts via system `tar` (`-xzf` for `.tar.gz`) into a fresh staging folder.
+  Every path must stay contained with zero symlinks, else staging is removed and fetch fails. After the licence gate
+  scans binaries as strings (nothing runs), the runtime moves to gitignored `apps/desktop/resources/mpv/<key>/` with
+  `BUILDINFO.json` (preserving upstream `RUNTIME-BUILDINFO.json` or macOS `Resources/BUILDINFO.json` under
+  `runtimeBuild`).
+- Licence gate: FFmpeg without `--enable-gpl`/`--enable-nonfree`, mpv with `-Dgpl=false`. Scans every `*.dll` (including
+  multi-DLL Windows layouts), `libavcodec*`, `libavformat*`, `libavutil*`, `libmpv*` dylibs and `mpv`.
 - `verify` checks `BUILDINFO.json` SHA-256 against the lock and rescans; `verify --dir <folder>` gates a build folder.
-- Windows pin update: download archive + `.asc`, `gpg --verify` against the mpv release key, then update URL + SHA-256.
+- Windows CI runtime (`#94`): `.github/workflows/mpv-runtime.yml` (`win32-x64` on `windows-2025`, MSYS2 `MINGW64`) runs
+  `tools/mpv-runtime/build-windows.sh` (local wrapper `build-windows.ps1`) from `versions.json` (`-march=x86-64
+  -mtune=generic`, FFmpeg `--disable-gpl --disable-nonfree --enable-shared`, mpv `-Dgpl=false -Dlibmpv=true
+  -Dcplayer=false -Dlua=luajit`), bundles `libmpv-2.dll`, transitive non-system DLLs via `objdump -p`, `include/mpv/`,
+  `licenses/`, and `RUNTIME-BUILDINFO.json` with zero symlinks, and smoke-tests `LoadLibraryExW` + `mpv_client_api_version`.
 - macOS runtime: `.github/workflows/mpv-runtime.yml` runs `tools/mpv-runtime/build-macos.sh` on `macos-26` from
   `tools/mpv-runtime/versions.json` (pkg-config sees only its prefix). Output `ELV IPTV Player.app` (`Info.plist`,
   `MacOS/mpv`, `Frameworks/*.dylib` via `@executable_path/../Frameworks/`, `Resources/include/mpv/`, licences,

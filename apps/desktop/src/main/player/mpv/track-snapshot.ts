@@ -1,5 +1,5 @@
 import { extractLanguageCodeFromLabel, normalizeLanguageCode, sameLanguageCode } from '@elv/domain';
-import type { MediaTracks, TrackInfo, VideoQualityOption } from '@elv/playback';
+import type { MediaTracks, ProgramInfo, TrackInfo, VideoQualityOption } from '@elv/playback';
 import type { MpvCommand } from './codec.ts';
 
 /** Saved user preference for an audio or subtitle track across reloads. */
@@ -17,6 +17,9 @@ const isRecord = (x: unknown): x is Record<string, unknown> =>
 
 const posInt = (x: unknown): number | undefined =>
   typeof x === 'number' && Number.isInteger(x) && x > 0 && x <= MAX_MPV_TRACK_ID ? x : undefined;
+
+const nonNegInt = (x: unknown): number | undefined =>
+  typeof x === 'number' && Number.isInteger(x) && x >= 0 && x <= MAX_MPV_TRACK_ID ? x : undefined;
 
 const posFinite = (x: unknown): number | undefined =>
   typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : undefined;
@@ -63,7 +66,7 @@ function deduplicateVideoQualities(candidates: VideoQualityOption[]): VideoQuali
   for (const option of candidates) {
     if (seenIds.has(option.id)) continue;
     if (option.height !== undefined) {
-      const key = `${option.height}:${option.bitrateBps ?? 0}`;
+      const key = `${option.programId ?? ''}:${option.height}:${option.bitrateBps ?? 0}`;
       if (seenResBitrate.has(key)) continue;
       seenResBitrate.add(key);
     }
@@ -87,20 +90,46 @@ const cleanLanguage = (x: unknown): string | undefined => {
   return lang !== undefined && normalizeLanguageCode(lang) !== undefined ? lang : undefined;
 };
 
-/** Maps mpv's `track-list`, `aid`, `sid`, `secondary-sid`, and manual video quality into a `MediaTracks` snapshot. */
+const extractProgramNumber = (raw: Record<string, unknown>): number | undefined =>
+  nonNegInt(raw['program-id']) ?? nonNegInt(raw['demux-via-program']);
+
+const extractServiceName = (raw: Record<string, unknown>): string | undefined =>
+  cleanString(raw['service-name']) ??
+  cleanString(raw['program-title']) ??
+  cleanString(raw['service_name']);
+
+/** Maps mpv's `track-list`, `aid`, `sid`, `secondary-sid`, manual video quality, and `program` into a `MediaTracks` snapshot. */
 export function inspectMpvTracks(
   trackList: unknown,
   aid: unknown,
   sid: unknown,
   secondarySid?: unknown,
   manualVideoQualityId?: string | null,
+  program?: unknown,
 ): MediaTracks {
   const entries = Array.isArray(trackList) ? trackList : [];
   const audio: TrackInfo[] = [];
   const subtitles: TrackInfo[] = [];
   const videoCandidates: VideoQualityOption[] = [];
+  const programMeta = new Map<number, { serviceName?: string }>();
   let selectedAudioFromList: string | null = null;
   let selectedSubFromList: string | null = null;
+  let selectedVideoProgramId: string | null = null;
+
+  const noteProgram = (
+    progNum: number | undefined,
+    raw: Record<string, unknown>,
+  ): string | undefined => {
+    if (progNum === undefined) return undefined;
+    const serviceName = extractServiceName(raw);
+    const existing = programMeta.get(progNum);
+    if (!existing) {
+      programMeta.set(progNum, serviceName === undefined ? {} : { serviceName });
+    } else if (existing.serviceName === undefined && serviceName !== undefined) {
+      existing.serviceName = serviceName;
+    }
+    return String(progNum);
+  };
 
   for (const raw of entries) {
     if (!isRecord(raw)) continue;
@@ -110,6 +139,10 @@ export function inspectMpvTracks(
 
     if (type === 'video') {
       if (raw['albumart'] === true) continue;
+      const programId = noteProgram(extractProgramNumber(raw), raw);
+      if (selectedVideoProgramId === null && raw['selected'] === true && programId !== undefined) {
+        selectedVideoProgramId = programId;
+      }
       const width = posInt(raw['demux-w']);
       const height = posInt(raw['demux-h']);
       const rawBitrate = posFinite(raw['hls-bitrate']) ?? posFinite(raw['demux-bitrate']);
@@ -124,6 +157,7 @@ export function inspectMpvTracks(
         ...(height === undefined ? {} : { height }),
         ...(bitrateBps === undefined ? {} : { bitrateBps }),
         ...(fps === undefined ? {} : { fps }),
+        ...(programId === undefined ? {} : { programId }),
       });
       continue;
     }
@@ -141,6 +175,7 @@ export function inspectMpvTracks(
     const forced = raw['forced'] === true;
     const isDefault = raw['default'] === true;
     const external = type === 'sub' && raw['external'] === true;
+    const programId = external ? undefined : noteProgram(extractProgramNumber(raw), raw);
 
     const info: TrackInfo = {
       id,
@@ -151,6 +186,7 @@ export function inspectMpvTracks(
       ...(forced ? { forced: true } : {}),
       ...(isDefault ? { isDefault: true } : {}),
       ...(external ? { external: true } : {}),
+      ...(programId === undefined ? {} : { programId }),
     };
 
     if (type === 'audio') {
@@ -198,6 +234,42 @@ export function inspectMpvTracks(
       ? manualVideoQualityId
       : null;
 
+  const programs: ProgramInfo[] =
+    programMeta.size > 1
+      ? [...programMeta.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([programNumber, meta]) => ({
+            id: String(programNumber),
+            label: meta.serviceName ?? `Program ${programNumber}`,
+            ...(meta.serviceName === undefined ? {} : { serviceName: meta.serviceName }),
+            programNumber,
+          }))
+      : [];
+
+  let selectedProgramId: string | null | undefined;
+  if (programs.length > 1) {
+    const observedProgNum =
+      nonNegInt(program) ?? (typeof program === 'string' ? parseProgramNumber(program) : undefined);
+    const observedProgId = observedProgNum === undefined ? undefined : String(observedProgNum);
+    const selectedAudioProgramId =
+      selectedAudioId === null ? undefined : audio.find((t) => t.id === selectedAudioId)?.programId;
+    if (observedProgId !== undefined && programs.some((p) => p.id === observedProgId)) {
+      selectedProgramId = observedProgId;
+    } else if (
+      selectedVideoProgramId !== null &&
+      programs.some((p) => p.id === selectedVideoProgramId)
+    ) {
+      selectedProgramId = selectedVideoProgramId;
+    } else if (
+      selectedAudioProgramId !== undefined &&
+      programs.some((p) => p.id === selectedAudioProgramId)
+    ) {
+      selectedProgramId = selectedAudioProgramId;
+    } else {
+      selectedProgramId = programs[0]?.id ?? null;
+    }
+  }
+
   return {
     audio,
     subtitles,
@@ -205,6 +277,7 @@ export function inspectMpvTracks(
     selectedSubtitleId,
     ...(selectedSecondarySubtitleId !== null ? { selectedSecondarySubtitleId } : {}),
     ...(videoQualities.length > 1 ? { videoQualities, selectedVideoQualityId } : {}),
+    ...(programs.length > 1 ? { programs, selectedProgramId } : {}),
   };
 }
 
@@ -251,6 +324,43 @@ export function parseVideoQualityCommand(id: string | null): MpvCommand | undefi
     : undefined;
 }
 
+/** Parses a canonical non-negative MPEG-TS program number (`"0"`..`"2147483647"`) for mpv (`#304`). */
+export function parseProgramNumber(id: string): number | undefined {
+  const match = /^(0|[1-9]\d{0,9})$/.exec(id);
+  if (!match) return undefined;
+  const num = Number(match[1]);
+  return Number.isSafeInteger(num) && num >= 0 && num <= MAX_MPV_TRACK_ID ? num : undefined;
+}
+
+/** Builds `['set_property', 'program', <n>]` for a valid numeric MPEG-TS program ID, or `undefined` if malformed (`#304`). */
+export function parseProgramCommand(id: string): MpvCommand | undefined {
+  const num = parseProgramNumber(id);
+  return num === undefined ? undefined : ['set_property', 'program', num];
+}
+
+function programsEqual(
+  a: readonly ProgramInfo[] | undefined,
+  b: readonly ProgramInfo[] | undefined,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      !x ||
+      !y ||
+      x.id !== y.id ||
+      x.label !== y.label ||
+      x.serviceName !== y.serviceName ||
+      x.programNumber !== y.programNumber
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function videoQualitiesEqual(
   a: readonly VideoQualityOption[] | undefined,
   b: readonly VideoQualityOption[] | undefined,
@@ -268,7 +378,8 @@ function videoQualitiesEqual(
       x.width !== y.width ||
       x.height !== y.height ||
       x.bitrateBps !== y.bitrateBps ||
-      x.fps !== y.fps
+      x.fps !== y.fps ||
+      x.programId !== y.programId
     ) {
       return false;
     }
@@ -291,7 +402,8 @@ function trackListsEqual(a: readonly TrackInfo[], b: readonly TrackInfo[]): bool
       x.channels !== y.channels ||
       Boolean(x.forced) !== Boolean(y.forced) ||
       Boolean(x.isDefault) !== Boolean(y.isDefault) ||
-      Boolean(x.external) !== Boolean(y.external)
+      Boolean(x.external) !== Boolean(y.external) ||
+      x.programId !== y.programId
     ) {
       return false;
     }
@@ -307,9 +419,11 @@ export function mediaTracksEqual(a: MediaTracks | undefined, b: MediaTracks): bo
     a.selectedSubtitleId === b.selectedSubtitleId &&
     a.selectedSecondarySubtitleId === b.selectedSecondarySubtitleId &&
     a.selectedVideoQualityId === b.selectedVideoQualityId &&
+    a.selectedProgramId === b.selectedProgramId &&
     trackListsEqual(a.audio, b.audio) &&
     trackListsEqual(a.subtitles, b.subtitles) &&
-    videoQualitiesEqual(a.videoQualities, b.videoQualities)
+    videoQualitiesEqual(a.videoQualities, b.videoQualities) &&
+    programsEqual(a.programs, b.programs)
   );
 }
 

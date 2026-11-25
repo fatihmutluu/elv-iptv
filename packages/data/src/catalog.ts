@@ -47,7 +47,7 @@ import {
 } from './guide-queries';
 import { importGuide } from './import-guide';
 import { createSerializedImportQueue } from './import-queue';
-import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
+import type { ImportDeps, ImportOptions, ImportSummary, NativeGuideStager } from './import-types';
 import { importCatalog, loadSeriesEpisodes } from './import-xtream';
 import { type ManifestStore, saveManifest } from './manifest';
 import { type NextEpisodeRow, queryNextEpisode } from './next-episode';
@@ -177,6 +177,8 @@ export interface CatalogDeps {
   beforeRemoveSource?: (sourceId: string) => void | Promise<void>;
   /** Platform gzip decompressor used for compressed guides and playlists. */
   decompressor?: Decompressor;
+  /** Optional native off-thread XMLTV stager used on mobile/TV for HTTP(S) guides (`#478`). */
+  nativeGuideStager?: NativeGuideStager;
   /** Optional sandboxed local M3U byte store for local file imports (`#51`). */
   localPlaylistStore?: LocalPlaylistStore;
 }
@@ -393,6 +395,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     clock,
     maxBodyBytes: deps.maxBodyBytes ?? DEVICE_MAX_BODY_BYTES,
     ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
+    ...(deps.nativeGuideStager === undefined ? {} : { nativeGuideStager: deps.nativeGuideStager }),
     ...(deps.localPlaylistStore === undefined
       ? {}
       : { localPlaylistStore: deps.localPlaylistStore }),

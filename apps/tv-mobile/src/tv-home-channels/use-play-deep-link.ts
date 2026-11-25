@@ -8,10 +8,17 @@ export interface PlayDeepLinkState {
   readonly clearPendingDeepLink: () => void;
 }
 
+/** Returns true when `url` is the iOS external player return callback (`elviptv://external-return`, `#406`). */
+function isExternalPlayerReturnUrl(url: string | null | undefined): boolean {
+  if (typeof url !== 'string') return false;
+  return url.trim().toLowerCase().startsWith('elviptv://external-return');
+}
+
 /**
  * Listens for production `elviptv://play?key=...` deep links from Android TV Home Screen
  * preview channels (`#273`) via `Linking.getInitialURL()` and `Linking.addEventListener('url', ...)`.
- * Strictly parses incoming URLs through {@link parsePlayDeepLink} and ignores non-play links.
+ * Strictly parses incoming URLs through {@link parsePlayDeepLink} and ignores non-play links
+ * (including `elviptv://external-return` from iOS external player handoffs, `#406`).
  */
 export function usePlayDeepLink(): PlayDeepLinkState {
   const [pendingDeepLink, setPendingDeepLink] = useState<PlayDeepLinkTarget | null>(null);
@@ -22,7 +29,7 @@ export function usePlayDeepLink(): PlayDeepLinkState {
 
     void Linking.getInitialURL().then(
       (url) => {
-        if (!alive || receivedRuntimeEvent) return;
+        if (!alive || receivedRuntimeEvent || isExternalPlayerReturnUrl(url)) return;
         const parsed = parsePlayDeepLink(url);
         if (parsed !== null) {
           setPendingDeepLink((current) => current ?? parsed);
@@ -32,6 +39,7 @@ export function usePlayDeepLink(): PlayDeepLinkState {
     );
 
     const subscription = Linking.addEventListener('url', ({ url }) => {
+      if (isExternalPlayerReturnUrl(url)) return;
       const parsed = parsePlayDeepLink(url);
       if (parsed !== null) {
         receivedRuntimeEvent = true;

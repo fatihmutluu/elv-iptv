@@ -56,6 +56,7 @@ export interface MediaRequest {
   filterSdhSubtitles?: boolean;
   subtitleStyle?: SubtitleStyleConfig;
   externalSubtitles?: readonly ExternalSubtitleTrack[];
+  programId?: string;
 }
 
 /** Active media attempt and its bound mpv playlist entry id. */

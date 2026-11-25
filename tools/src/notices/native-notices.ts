@@ -21,11 +21,21 @@ interface FfmpegMedia3VersionsFile {
   readonly decoders: readonly string[];
 }
 
+type MpvRuntimeLockEntry =
+  | {
+      readonly kind?: 'upstream-libmpv';
+      readonly mpv: string;
+      readonly url: string;
+    }
+  | {
+      readonly kind: 'workflow-artifact';
+      readonly mpv: string;
+      readonly repo: string;
+      readonly runId: number | string;
+    };
+
 interface MpvRuntimeLockFile {
-  readonly 'win32-x64': {
-    readonly mpv: string;
-    readonly url: string;
-  };
+  readonly 'win32-x64': MpvRuntimeLockEntry;
   readonly 'darwin-arm64': {
     readonly mpv: string;
     readonly repo: string;
@@ -207,6 +217,12 @@ function collectMpvNotices(repoRoot: string): ThirdPartyNotice[] {
       ? ` with upstream compile-fix backport (${backportPaths}) documented in tools/mpv-runtime/versions.json`
       : '';
 
+  const winModNote =
+    'url' in win
+      ? `Windows uses pinned upstream LGPL release (${win.url}) loaded dynamically via LoadLibraryExW, alongside reproducible Windows x64 LGPL CI build recipe in tools/mpv-runtime/build-windows.sh (mpv-runtime.yml).`
+      : `Windows x64 builds mpv ${win.mpv} (-Dgpl=false) and FFmpeg ${versions.ffmpeg.version} (without --enable-gpl or --enable-nonfree) via tools/mpv-runtime/build-windows.sh and mpv-runtime.yml (${win.repo}, run ${String(win.runId)}), loaded dynamically via LoadLibraryExW.`;
+  const winReleaseLines = 'url' in win ? [`Windows LGPL binary & source release: ${win.url}.`] : [];
+
   return [
     {
       id: 'desktop-libmpv',
@@ -215,12 +231,12 @@ function collectMpvNotices(repoRoot: string): ThirdPartyNotice[] {
       license: 'LGPL-2.1-or-later AND ISC AND MIT AND FTL',
       platforms: ['Windows', 'macOS'],
       sourceUrl: `https://github.com/mpv-player/mpv/releases/tag/v${win.mpv}`,
-      modificationNote: `Runs out-of-process over JSON IPC. Windows uses unmodified upstream LGPL release (${win.url}) loaded dynamically via LoadLibraryExW. macOS arm64 builds mpv ${mac.mpv} (-Dgpl=false) and FFmpeg ${versions.ffmpeg.version} (without --enable-gpl or --enable-nonfree) via mpv-runtime.yml (${mac.repo}, run ${String(mac.runId)})${backportSummary}.`,
+      modificationNote: `Runs out-of-process over JSON IPC. ${winModNote} macOS arm64 builds mpv ${mac.mpv} (-Dgpl=false) and FFmpeg ${versions.ffmpeg.version} (without --enable-gpl or --enable-nonfree) via mpv-runtime.yml (${mac.repo}, run ${String(mac.runId)})${backportSummary}.`,
       noticeText: [
-        `mpv / libmpv ${mpvVersion} and FFmpeg ${versions.ffmpeg.version} — Licensed under the GNU Lesser General Public License v2.1 or later (LGPL-2.1-or-later), executed in a separate helper process and dynamically linked.`,
-        `Windows LGPL binary & source release: ${win.url}.`,
-        `macOS LGPL build recipe, source pins, and SHA-256 digests: ${workflowUrl} and https://github.com/${mac.repo}/blob/main/tools/mpv-runtime/versions.json (FFmpeg source: ${versions.ffmpeg.url}).`,
-        `Companion libraries in macOS runtime: libplacebo ${versions.libplacebo.version} (LGPL-2.1-or-later), fribidi ${versions.fribidi.version} (LGPL-2.1-or-later), libass ${versions.libass.version} (ISC), HarfBuzz ${versions.harfbuzz.version} (Old-MIT), FreeType ${versions.freetype.version} (FTL), LuaJIT ${versions.luajit.version} (MIT).`,
+        `mpv / libmpv ${mpvVersion} and FFmpeg ${versions.ffmpeg.version} — Licensed under the GNU Lesser General Public License v2.1 or later (LGPL-2.1-or-later), executed in a separate helper process and dynamically linked on Windows and macOS.`,
+        ...winReleaseLines,
+        `Reproducible Windows & macOS LGPL build recipes (tools/mpv-runtime/build-windows.sh, tools/mpv-runtime/build-macos.sh), source pins, and SHA-256 digests: ${workflowUrl} and https://github.com/${mac.repo}/blob/main/tools/mpv-runtime/versions.json (FFmpeg source: ${versions.ffmpeg.url}).`,
+        `Bundled libraries in Windows & macOS mpv runtimes: libmpv ${mpvVersion} (LGPL-2.1-or-later), FFmpeg ${versions.ffmpeg.version} (LGPL-2.1-or-later), libplacebo ${versions.libplacebo.version} (LGPL-2.1-or-later), FriBidi ${versions.fribidi.version} (LGPL-2.1-or-later), libass ${versions.libass.version} (ISC), HarfBuzz ${versions.harfbuzz.version} (Old-MIT), FreeType ${versions.freetype.version} (FTL), LuaJIT ${versions.luajit.version} (MIT).`,
       ].join('\n\n'),
     },
   ];

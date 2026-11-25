@@ -9,6 +9,7 @@ import { type CatalogTabMemory, EMPTY_CATALOG_MEMORY } from './catalog';
 import { EMPTY_LIVE_MEMORY, type LiveTabMemory } from './live';
 import type { LiveChannelPlaylist, PlayableEntry, PlayTarget } from './ports/play-target';
 import type { PlaybackGuard } from './ports/playback-guard';
+import type { DiagnosticsPort } from './ports/wave-f7b-ports';
 import type { DetailTarget } from './shared';
 import type { NavDestination, NavUtility } from './shell';
 
@@ -231,6 +232,10 @@ export function buildShellCrashProps(input: {
   readonly bumpStageKey: () => void;
   readonly clearCaches: () => void;
   readonly switchSource: () => void;
+  readonly crashReportsOptIn?: boolean;
+  readonly crashReportsIncludeLogs?: boolean;
+  readonly diagnostics?: DiagnosticsPort;
+  readonly onToggleIncludeLogs?: (next: boolean) => void;
 }) {
   return {
     remountKey: input.stageKey,
@@ -243,6 +248,16 @@ export function buildShellCrashProps(input: {
       input.switchSource();
       input.bumpStageKey();
     },
+    ...(input.crashReportsOptIn !== undefined
+      ? { crashReportsOptIn: input.crashReportsOptIn }
+      : {}),
+    ...(input.crashReportsIncludeLogs !== undefined
+      ? { crashReportsIncludeLogs: input.crashReportsIncludeLogs }
+      : {}),
+    ...(input.diagnostics !== undefined ? { diagnostics: input.diagnostics } : {}),
+    ...(input.onToggleIncludeLogs !== undefined
+      ? { onToggleIncludeLogs: input.onToggleIncludeLogs }
+      : {}),
   };
 }
 

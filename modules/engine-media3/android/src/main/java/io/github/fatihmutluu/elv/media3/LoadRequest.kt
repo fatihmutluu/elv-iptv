@@ -402,6 +402,8 @@ internal data class LoadRequest(
   val nightModeDrc: NightModeDrcPreset? = null,
   /** Optional per-refresh-rate A/V delay offsets forwarded on load (`#115`). */
   val audioDelayByRefreshRateMs: Map<String, Long>? = null,
+  /** Optional multi-program MPEG-TS service/program ID to select on load (`#304`). */
+  val programId: String? = null,
 ) {
   /** Names no URL, no host override IP, no DRM secrets, and no header value: each may carry credentials or provider info. */
   override fun toString(): String {
@@ -414,9 +416,10 @@ internal data class LoadRequest(
     val overrideSuffix = if (hostOverride != null) ", hostOverride=set" else ""
     val extSuffix = if (externalSubtitles.isNotEmpty()) ", externalSubtitles=${externalSubtitles.size}" else ""
     val drmSuffix = if (drm != null) ", drm=${drm.scheme.wireName}" else ""
+    val programSuffix = if (programId != null) ", programId=$programId" else ""
     return "LoadRequest(live=$live, startMs=$startMs, softwareAudio=$softwareAudio, " +
       "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix$decoderSuffix" +
-      "$sdhSuffix$tlsSuffix$dnsSuffix$overrideSuffix$extSuffix$drmSuffix)"
+      "$sdhSuffix$tlsSuffix$dnsSuffix$overrideSuffix$extSuffix$drmSuffix$programSuffix)"
   }
 }
 
@@ -466,6 +469,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
   val nightModeDrc = (args["nightModeDrc"] as? String)?.let(::parseNightModeDrcPreset)
   val audioDelayByRefreshRateMs =
     if (args.containsKey("audioDelayByRefreshRateMs")) parseAudioDelayByRefreshRate(args["audioDelayByRefreshRateMs"]) else null
+  val programId = (args["programId"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
   return attempt to LoadRequest(
     url = url,
     headers = headers,
@@ -488,6 +492,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
     autoFrameRate = autoFrameRate,
     nightModeDrc = nightModeDrc,
     audioDelayByRefreshRateMs = audioDelayByRefreshRateMs,
+    programId = programId,
   )
 }
 

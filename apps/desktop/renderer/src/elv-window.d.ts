@@ -1,5 +1,6 @@
 import type { ArtworkBridge } from '../../src/shared/artwork-ipc.ts';
 import type { CatalogBridge } from '../../src/shared/catalog-ipc.ts';
+import type { DiagnosticsBridge } from '../../src/shared/diagnostics-ipc.ts';
 import type { LanPairingBridge } from '../../src/shared/lan-pairing-ipc.ts';
 import type { PlayerBridge, PresenterKind } from '../../src/shared/player-ipc.ts';
 import type { SourcesBridge } from '../../src/shared/sources-ipc.ts';
@@ -15,6 +16,7 @@ declare global {
       readonly window?: WindowBridge;
       readonly sources?: SourcesBridge;
       readonly lanPairing?: LanPairingBridge;
+      readonly diagnostics?: DiagnosticsBridge;
       readonly gate?: boolean;
       readonly presenter?: PresenterKind | undefined;
     };

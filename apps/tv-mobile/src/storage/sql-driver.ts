@@ -21,6 +21,7 @@ interface OpConnection {
     bind(params: SqlValue[]): Promise<void>;
     execute(): Promise<OpResult>;
   };
+  getDbPath(location?: string): string;
   interrupt(): void;
   close(): void;
 }
@@ -224,6 +225,13 @@ export interface OpSqliteDriver extends SqlDriver {
    * `AbortError`. Reader queries are never interrupted. Pass `undefined` to detach.
    */
   setAbortSignal(signal: AbortSignal | undefined): void;
+  /** Returns the resolved on-disk SQLite file path for native off-thread helpers (`#478`). */
+  getDbPath(): string;
+  /**
+   * Runs `work` exclusively on the writer serialization queue so native SQLite connections (such as
+   * `@elv/xmltv-native`) never overlap with `op-sqlite` write transactions (`#478`).
+   */
+  runExclusiveWrite<T>(work: () => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -352,6 +360,10 @@ export async function createOpSqliteDriver(
       if (next.aborted) onAbort();
       else next.addEventListener('abort', onAbort, { once: true });
     },
+    getDbPath() {
+      return location === undefined ? writer.getDbPath() : writer.getDbPath(location);
+    },
+    runExclusiveWrite: <T>(work: () => Promise<T>) => writes(work),
     exec: (sql) => writes(() => writeGuard(() => statements((s) => writer.execute(s), sql))),
     run: (sql, params) =>
       writes(() => writeGuard(async () => changes(await writer.execute(sql, [...(params ?? [])])))),

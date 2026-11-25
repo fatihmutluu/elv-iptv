@@ -144,6 +144,7 @@ internal data class TrackInfoSnapshot(
   val isDefault: Boolean = false,
   val formatId: String? = null,
   val external: Boolean = false,
+  val programId: String? = null,
 ) {
   fun toMap(): Map<String, Any> = buildMap {
     put("id", id)
@@ -154,6 +155,7 @@ internal data class TrackInfoSnapshot(
     if (forced) put("forced", true)
     if (isDefault) put("isDefault", true)
     if (external) put("external", true)
+    if (programId != null) put("programId", programId)
   }
 }
 
@@ -166,6 +168,8 @@ internal data class MediaTracksSnapshot(
   val selectedSecondarySubtitleId: String? = null,
   val videoQualities: List<VideoQualitySnapshot> = emptyList(),
   val selectedVideoQualityId: String? = null,
+  val programs: List<ProgramInfoSnapshot> = emptyList(),
+  val selectedProgramId: String? = null,
 ) {
   fun toMap(): Map<String, Any?> = buildMap {
     put("audio", audio.map { it.toMap() })
@@ -176,6 +180,10 @@ internal data class MediaTracksSnapshot(
     if (videoQualities.isNotEmpty()) {
       put("videoQualities", videoQualities.map { it.toMap() })
       put("selectedVideoQualityId", selectedVideoQualityId)
+    }
+    if (programs.size > 1) {
+      put("programs", programs.map { it.toMap() })
+      put("selectedProgramId", selectedProgramId)
     }
   }
 }
@@ -276,7 +284,12 @@ internal fun isSelectableTrack(
       (group.isTrackSelected(trackIndex) || ffmpegSupportsAudio(group.getTrackFormat(trackIndex).sampleMimeType)))
 
 @OptIn(UnstableApi::class)
-private fun snapshotOf(group: Tracks.Group, groupIndex: Int, trackIndex: Int): TrackInfoSnapshot {
+private fun snapshotOf(
+  group: Tracks.Group,
+  groupIndex: Int,
+  trackIndex: Int,
+  includeProgramId: Boolean = false,
+): TrackInfoSnapshot {
   val format = group.getTrackFormat(trackIndex)
   val label = format.label?.trim()?.takeIf { it.isNotEmpty() }
   val language = normalizeLang(format.language) ?: extractLanguageFromLabel(label)
@@ -292,6 +305,7 @@ private fun snapshotOf(group: Tracks.Group, groupIndex: Int, trackIndex: Int): T
   val cleanFormatId = format.id?.trim()?.takeIf { it.isNotEmpty() }
   val isExternalText = group.type == C.TRACK_TYPE_TEXT && cleanFormatId?.startsWith(EXTERNAL_SUBTITLE_ID_PREFIX) == true
   val stableId = if (isExternalText) cleanFormatId!! else "$groupIndex:$trackIndex"
+  val programId = if (includeProgramId && !isExternalText) extractTrackProgramId(group, trackIndex) else null
   return TrackInfoSnapshot(
     id = stableId,
     language = language,
@@ -302,6 +316,7 @@ private fun snapshotOf(group: Tracks.Group, groupIndex: Int, trackIndex: Int): T
     isDefault = (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0,
     formatId = cleanFormatId,
     external = isExternalText,
+    programId = programId,
   )
 }
 
@@ -320,7 +335,10 @@ internal fun inspectMediaTracks(
   extraExternalSubtitles: List<TrackInfoSnapshot> = emptyList(),
   selectedExternalPrimaryId: String? = null,
   preferredPrimarySubtitleId: String? = null,
+  activeProgramId: String? = null,
 ): MediaTracksSnapshot {
+  val programInspection = inspectPrograms(tracks, activeProgramId = activeProgramId, ffmpegSupportsAudio = ffmpegSupportsAudio)
+  val includeProgramId = programInspection.isMultiProgram
   val audio = mutableListOf<TrackInfoSnapshot>()
   val subtitles = mutableListOf<TrackInfoSnapshot>()
   val seenSubtitleIds = HashSet<String>()
@@ -331,7 +349,7 @@ internal fun inspectMediaTracks(
     if (group.type != C.TRACK_TYPE_AUDIO && group.type != C.TRACK_TYPE_TEXT) return@forEachIndexed
     for (trackIndex in 0 until group.length) {
       if (!isSelectableTrack(group, trackIndex, ffmpegSupportsAudio)) continue
-      val info = snapshotOf(group, groupIndex, trackIndex)
+      val info = snapshotOf(group, groupIndex, trackIndex, includeProgramId = includeProgramId)
       if (group.type == C.TRACK_TYPE_AUDIO) {
         audio += info
         if (selectedAudioId == null && group.isTrackSelected(trackIndex)) selectedAudioId = info.id
@@ -368,7 +386,7 @@ internal fun inspectMediaTracks(
     cleanSecondaryId
       ?.takeIf { it != resolvedPrimaryId && seenSubtitleIds.contains(it) }
 
-  val videoQualities = videoQualityCandidatesOf(tracks).map { it.option }
+  val videoQualities = videoQualityCandidatesOf(tracks, includeProgramId = includeProgramId).map { it.option }
   val confirmedVideoQualityId = selectedVideoQualityId?.takeIf { wanted ->
     videoQualities.any { it.id == wanted }
   }
@@ -381,6 +399,8 @@ internal fun inspectMediaTracks(
     selectedSecondarySubtitleId = resolvedSecondaryId,
     videoQualities = videoQualities,
     selectedVideoQualityId = if (videoQualities.isEmpty()) null else confirmedVideoQualityId,
+    programs = programInspection.programs,
+    selectedProgramId = programInspection.selectedProgramId,
   )
 }
 
@@ -389,13 +409,18 @@ internal fun candidatesOf(
   tracks: Tracks,
   trackType: Int,
   ffmpegSupportsAudio: (String?) -> Boolean = ::defaultFfmpegSupportsAudio,
+  includeProgramId: Boolean = false,
 ): List<TrackCandidate> {
   val result = mutableListOf<TrackCandidate>()
   tracks.groups.forEachIndexed { groupIndex, group ->
     if (group.type != trackType) return@forEachIndexed
     for (trackIndex in 0 until group.length) {
       if (!isSelectableTrack(group, trackIndex, ffmpegSupportsAudio)) continue
-      result += TrackCandidate(group = group, trackIndex = trackIndex, info = snapshotOf(group, groupIndex, trackIndex))
+      result += TrackCandidate(
+        group = group,
+        trackIndex = trackIndex,
+        info = snapshotOf(group, groupIndex, trackIndex, includeProgramId = includeProgramId),
+      )
     }
   }
   return result

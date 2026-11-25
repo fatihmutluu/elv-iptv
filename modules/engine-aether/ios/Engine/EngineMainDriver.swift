@@ -18,7 +18,12 @@ final class EngineMainDriver: EngineSink {
   private var backgroundAudioEnabled = false
   private var explicitDetachedSurfaceAllowed = false
   private var pipDetachedSurfaceAllowed = false
+  private(set) var isExternalDisplayActive = false
   private var hasExplicitSubtitleStyle = false
+
+  var isPrimaryAudioOwner: Bool {
+    handleAudioFocus
+  }
   private var activeSubtitleStyle: UserSubtitleStyleOverride?
   private var hasExplicitDisplaySync = false
   private var activeDisplaySync: AppleDisplaySyncSettings = .default
@@ -215,22 +220,35 @@ final class EngineMainDriver: EngineSink {
     )
   }
 
+  /// Updates whether this engine's bound surface is hosted on a dedicated external `UIWindowScene` (`#258`).
+  func setExternalDisplayActive(_ active: Bool) {
+    guard isExternalDisplayActive != active else { return }
+    isExternalDisplayActive = active
+    backend.setExternalDisplaySceneActive(active)
+    if active {
+      pipController.reset()
+    }
+    syncPipController()
+  }
+
   func syncPipController() {
     pipController.sync(
-      playerView: boundSurface?.playerView,
-      isAvPlayerRoute: backend.isAvPlayerRouteActive
+      playerView: isExternalDisplayActive ? nil : boundSurface?.playerView,
+      isAvPlayerRoute: !isExternalDisplayActive && backend.isAvPlayerRouteActive
     )
   }
 
   func canStartPictureInPicture() -> Bool {
-    pipController.canStartPictureInPicture(
+    guard !isExternalDisplayActive else { return false }
+    return pipController.canStartPictureInPicture(
       playerView: boundSurface?.playerView,
       isAvPlayerRoute: backend.isAvPlayerRouteActive
     )
   }
 
   func enterPictureInPicture() -> Bool {
-    pipController.enterPictureInPicture(
+    guard !isExternalDisplayActive else { return false }
+    return pipController.enterPictureInPicture(
       playerView: boundSurface?.playerView,
       isAvPlayerRoute: backend.isAvPlayerRouteActive
     )
@@ -239,8 +257,8 @@ final class EngineMainDriver: EngineSink {
   func setAutoEnterPictureInPicture(_ enabled: Bool) -> Bool {
     pipController.setAutoEnterPictureInPicture(
       enabled,
-      playerView: boundSurface?.playerView,
-      isAvPlayerRoute: backend.isAvPlayerRouteActive
+      playerView: isExternalDisplayActive ? nil : boundSurface?.playerView,
+      isAvPlayerRoute: !isExternalDisplayActive && backend.isAvPlayerRouteActive
     )
   }
 
@@ -337,6 +355,7 @@ final class EngineMainDriver: EngineSink {
   }
 
   func dispose() {
+    isExternalDisplayActive = false
     pipController.dispose()
     nowPlayingBridge.dispose()
     if let previous = boundSurface {

@@ -197,7 +197,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   });
   const { sessionState, activeService, status, tracks, videoInfo, chapters } = session;
   const { surfaceRecreationToken, inPip, isFullscreen, alwaysOnTop, overlayMode } = session;
-  const { audioDevices, activeAudioDevice, subtitleDelayMs } = session;
+  const { audioDevices, activeAudioDevice, subtitleDelayMs, externalPlaybackActive } = session;
 
   const { flushProgress, flushEndedProgress } = useWatchProgressSync({
     activeTarget,
@@ -333,6 +333,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const hasTracks =
     tracks.audio.length > 0 ||
     tracks.subtitles.length > 0 ||
+    (tracks.programs?.length ?? 0) > 1 ||
     subtitlesSuite.supportsExternalSubtitles;
   const showRetry = status.kind === 'failed' && activeService !== null;
   const statusLine =
@@ -717,6 +718,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       isDesktop={isDesktop}
       inPip={inPip}
       isMini={isMini}
+      externalPlaybackActive={externalPlaybackActive}
       isVod={activeTarget.kind === 'vod'}
       useDockedDesktopLayout={useDockedDesktopLayout}
       hideDesktopCursor={hideDesktopCursor}

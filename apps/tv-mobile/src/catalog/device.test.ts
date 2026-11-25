@@ -4,6 +4,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const platform = vi.hoisted(() => ({ OS: 'android' }));
 vi.mock('react-native', () => ({ Platform: platform }));
 
+const xmltvNative = vi.hoisted(() => ({
+  isNativeXmltvStagerAvailable: vi.fn(() => false),
+  stageXmltv: vi.fn(),
+  cancelXmltvStage: vi.fn(),
+}));
+vi.mock('@elv/xmltv-native', () => xmltvNative);
+
+const createCatalogServiceSpy = vi.hoisted(() => ({
+  lastDeps: undefined as Record<string, unknown> | undefined,
+}));
+vi.mock('@elv/data', async () => {
+  const actual = await vi.importActual<typeof import('@elv/data')>('@elv/data');
+  return {
+    ...actual,
+    createCatalogService: (deps: Parameters<typeof actual.createCatalogService>[0]) => {
+      createCatalogServiceSpy.lastDeps = deps as unknown as Record<string, unknown>;
+      return actual.createCatalogService(deps);
+    },
+  };
+});
+
 const FTS_SET = new Set<string>(EXPECTED_FTS_TABLES);
 
 const migrated = async (sql: string, params?: readonly unknown[]): Promise<unknown[]> => {
@@ -25,6 +46,8 @@ const driver = {
   batch: vi.fn(async () => undefined),
   transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(driver)),
   setAbortSignal: vi.fn(),
+  getDbPath: vi.fn(() => '/data/data/app/databases/catalog.db'),
+  runExclusiveWrite: vi.fn(async <T>(work: () => Promise<T>) => work()),
   close: vi.fn(async () => undefined),
 };
 const createOpSqliteDriver = vi.fn(async (_name: string, _location?: string) => driver);
@@ -59,7 +82,13 @@ beforeEach(() => {
   userData.read.mockClear();
   userData.write.mockClear();
   driver.close.mockClear();
+  driver.getDbPath.mockClear();
+  driver.runExclusiveWrite.mockClear();
   driver.all.mockImplementation(migrated);
+  xmltvNative.isNativeXmltvStagerAvailable.mockReset().mockReturnValue(false);
+  xmltvNative.stageXmltv.mockReset();
+  xmltvNative.cancelXmltvStage.mockReset();
+  createCatalogServiceSpy.lastDeps = undefined;
 });
 
 describe('createDeviceCatalog', () => {
@@ -166,5 +195,51 @@ describe('createDeviceCatalog', () => {
     });
     await expect(createDeviceCatalog()).rejects.toThrow('settings sync fail');
     await expect(createDeviceCatalog()).resolves.toBeDefined();
+  });
+
+  it('wires nativeGuideStager through db.runExclusiveWrite and db.getDbPath when @elv/xmltv-native is available (#478)', async () => {
+    platform.OS = 'android';
+    xmltvNative.isNativeXmltvStagerAvailable.mockReturnValue(true);
+    xmltvNative.stageXmltv.mockResolvedValue({
+      kind: 'not-modified',
+      etag: '"v1"',
+    });
+
+    const { createDeviceCatalog } = await import('./device');
+    await createDeviceCatalog();
+
+    const stager = createCatalogServiceSpy.lastDeps?.nativeGuideStager as
+      | {
+          stage(req: Record<string, unknown>): Promise<unknown>;
+          cancel?(jobId: string): void;
+        }
+      | undefined;
+    expect(stager).toBeDefined();
+
+    const res = await stager?.stage({
+      jobId: 'job-99',
+      url: 'https://guide.example/epg.xml',
+      sourceId: 'src-1',
+      runId: 3,
+      fromMs: 100,
+      toMs: 200,
+      ifNoneMatch: '"v1"',
+    });
+    expect(driver.runExclusiveWrite).toHaveBeenCalledTimes(1);
+    expect(driver.getDbPath).toHaveBeenCalledTimes(1);
+    expect(xmltvNative.stageXmltv).toHaveBeenCalledWith({
+      jobId: 'job-99',
+      url: 'https://guide.example/epg.xml',
+      dbPath: '/data/data/app/databases/catalog.db',
+      sourceId: 'src-1',
+      runId: 3,
+      fromMs: 100,
+      toMs: 200,
+      ifNoneMatch: '"v1"',
+    });
+    expect(res).toEqual({ kind: 'not-modified', etag: '"v1"' });
+
+    stager?.cancel?.('job-99');
+    expect(xmltvNative.cancelXmltvStage).toHaveBeenCalledWith('job-99');
   });
 });

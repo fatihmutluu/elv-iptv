@@ -73,6 +73,7 @@ export interface AppShellStageProps {
   readonly onOpenSources: () => void;
   readonly onOpenChannelManagement: () => void;
   readonly onOpenGuideManagement: (sourceId: string) => void;
+  readonly onPreviewDiagnostics?: () => void;
   readonly onRegisterStopPreview?: (stop: (() => Promise<void>) | null) => void;
   readonly suppressEmbeddedPreview?: boolean;
   readonly onChannelsMutated: () => void;
@@ -129,6 +130,9 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         hasTransientOverlay={p.hasTransientOverlay}
         onOpenChannelManagement={p.onOpenChannelManagement}
         onOpenGuideManagement={p.onOpenGuideManagement}
+        {...(p.onPreviewDiagnostics !== undefined
+          ? { onPreviewDiagnostics: p.onPreviewDiagnostics }
+          : {})}
         renderProfiles={(slot) => (
           <ProfilesAndParentalPanel catalog={p.catalog} sources={p.sources} {...slot} />
         )}

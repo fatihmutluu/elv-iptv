@@ -598,6 +598,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         ...(externalSubtitles === undefined || externalSubtitles.length === 0
           ? {}
           : { externalSubtitles }),
+        ...(options?.programId === undefined ? {} : { programId: options.programId }),
       };
       startMedia(cmd.attempt, withStart(req, cmd.startMs));
     },
@@ -661,6 +662,14 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       command(attempt, cmd);
       const events = tracks.sync();
       if (events.length > 0) emit(events);
+    },
+    selectProgram(attempt, id) {
+      if (released) return;
+      const cmd = tracks.selectProgram(id);
+      if (!cmd) return;
+      desiredVideoQualityId = null;
+      if (media) media.request = { ...media.request, programId: id };
+      command(attempt, cmd);
     },
     stop(attempt) {
       if (released) return;

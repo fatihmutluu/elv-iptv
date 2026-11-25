@@ -2970,3 +2970,105 @@ msgstr "Bu cihazda ses doğrudan aktarımı kullanılamıyor — PCM çıkışı
 
 msgid "player.error.drmUnsupported"
 msgstr "Korumalı yayın bu cihazda oynatılamıyor."
+
+msgid "player.externalDisplay.title"
+msgstr "Harici ekranda oynatılıyor"
+
+msgid "player.externalDisplay.subtitle"
+msgstr "Video bağlı TV veya monitöre aktarılıyor."
+
+msgid "player.externalDisplay.hint"
+msgstr "Duraklatmak, sarmak veya parça değiştirmek için aşağıdaki kontrolleri kullanın."
+
+msgid "player.tracks.program"
+msgstr "Program"
+
+msgid "player.tracks.programNumber"
+msgstr "Program {number}"
+
+msgid "settings.playback.externalPlayerTitle"
+msgstr "Harici oynatıcı"
+
+msgid "settings.playback.externalPlayerHint"
+msgstr "Yayın oynatmayı cihazda yüklü başka bir medya oynatıcı uygulamasına devreder."
+
+msgid "settings.playback.externalPlayerOff"
+msgstr "Kapalı"
+
+msgid "settings.playback.externalPlayerAsk"
+msgstr "Her seferinde sor"
+
+msgid "settings.playback.externalPlayerAlways"
+msgstr "Her zaman"
+
+msgid "settings.playback.externalPlayerSchemeLabel"
+msgstr "Özel oynatıcı URL şeması (isteğe bağlı)"
+
+msgid "settings.playback.externalPlayerSchemePlaceholder"
+msgstr "örn. oynatici"
+
+msgid "player.externalPrompt.title"
+msgstr "Yayını şununla aç"
+
+msgid "player.externalPrompt.subtitle"
+msgstr "ELV IPTV içinde oynatmayı veya harici bir oynatıcıya devretmeyi seçin."
+
+msgid "player.externalPrompt.integrated"
+msgstr "Dahili oynatıcı"
+
+msgid "player.externalPrompt.external"
+msgstr "Harici oynatıcı"
+
+msgid "player.externalPrompt.cancel"
+msgstr "İptal"
+
+msgid "player.externalHandoff.failed"
+msgstr "Bu cihazda harici oynatıcı açılamadı."
+
+msgid "settings.diagnostics.title"
+msgstr "Çökme tanılama"
+
+msgid "settings.diagnostics.optInLabel"
+msgstr "Tanılama çökme raporlarını etkinleştir"
+
+msgid "settings.diagnostics.optInHint"
+msgstr "Beklenmeyen bir hata oluştuğunda yerel olarak gizlenmiş Markdown raporları oluşturur."
+
+msgid "settings.diagnostics.includeLogsLabel"
+msgstr "Son gizlenmiş günlükleri ekle"
+
+msgid "settings.diagnostics.includeLogsHint"
+msgstr "Rapor hazırlarken en fazla 250 son gizlenmiş günlük satırı ekler."
+
+msgid "settings.diagnostics.previewAction"
+msgstr "Tanılama raporunu önizle"
+
+msgid "crash.diagnosticsAction"
+msgstr "Tanılamayı görüntüle"
+
+msgid "crash.report.title"
+msgstr "Tanılama raporu"
+
+msgid "crash.report.subtitle"
+msgstr "Kimlik bilgileri, yayın adresleri ve kullanıcı yolları görüntüleme veya dışa aktarma öncesinde gizlenir."
+
+msgid "crash.report.includeLogsToggle"
+msgstr "Son günlükleri ekle"
+
+msgid "crash.report.copy"
+msgstr "Raporu kopyala"
+
+msgid "crash.report.copied"
+msgstr "Panoya kopyalandı"
+
+msgid "crash.report.export"
+msgstr "Markdown dışa aktar"
+
+msgid "crash.report.exported"
+msgstr "Rapor dışa aktarıldı"
+
+msgid "crash.report.close"
+msgstr "Kapat"
+
+msgid "crash.report.emptyLogs"
+msgstr "Yakalanan son tanılama günlüğü yok."

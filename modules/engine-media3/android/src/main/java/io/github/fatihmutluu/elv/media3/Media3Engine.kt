@@ -359,6 +359,12 @@ class Media3Engine : SharedObject {
   /** Constrains or selects an adaptive video rendition ID, or restores automatic ABR when [id] is `null` (#59). */
   fun selectVideoQuality(attempt: Int, id: String?) = postInEpoch(attempt) { tracksBridge.selectVideoQuality(player, id) }
 
+  /** Selects a multi-program MPEG-TS service [id] in place and switches tracks to that service (#304). */
+  fun selectProgram(attempt: Int, id: String) = postInEpoch(attempt) {
+    tracksBridge.selectProgram(player, id)
+    player?.let { applyResolvedSubtitleCues(it) }
+  }
+
   fun stop(attempt: Int) {
     val epoch = commandFence.recordStop(attempt) ?: return
     post {

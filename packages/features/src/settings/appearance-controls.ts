@@ -159,7 +159,7 @@ export function computeAppearanceScrollY(
   controlId: AppearanceFocusId,
   layouts: Partial<
     Record<
-      'theme' | 'font' | 'tvDisplay' | 'artworkCache' | 'reset',
+      'theme' | 'font' | 'tvDisplay' | 'artworkCache' | 'reset' | 'diagnostics',
       { readonly y: number; readonly height: number }
     >
   >,
@@ -196,6 +196,13 @@ export function computeAppearanceScrollY(
   if (controlId === 'reset-preferences') {
     return layouts.reset ? Math.max(0, layouts.reset.y - 12) : undefined;
   }
+  if (
+    controlId === 'toggle-crash-reports-opt-in' ||
+    controlId === 'toggle-crash-reports-include-logs' ||
+    controlId === 'preview-diagnostic-report'
+  ) {
+    return layouts.diagnostics ? Math.max(0, layouts.diagnostics.y - 12) : undefined;
+  }
   return undefined;
 }
 
@@ -212,6 +219,7 @@ export function activateAppearanceControl(
     setLocale: (locale: 'tr' | 'en') => void;
     onSetArtworkCacheLimitMb?: (mb: ArtworkCacheLimitMbPref) => void;
     onClearArtworkCache?: () => void;
+    onPreviewDiagnostics?: () => void;
   },
 ): void {
   const { preferences } = deps;
@@ -311,5 +319,25 @@ export function activateAppearanceControl(
       deps.setReduceMotion(false);
       deps.setUiFontFamily?.('system');
     }
+    return;
+  }
+  if (controlId === 'toggle-crash-reports-opt-in') {
+    if (preferences) {
+      void preferences.updatePreferences({
+        crashReportsOptIn: !preferences.preferences.crashReportsOptIn,
+      });
+    }
+    return;
+  }
+  if (controlId === 'toggle-crash-reports-include-logs') {
+    if (preferences) {
+      void preferences.updatePreferences({
+        crashReportsIncludeLogs: !preferences.preferences.crashReportsIncludeLogs,
+      });
+    }
+    return;
+  }
+  if (controlId === 'preview-diagnostic-report') {
+    deps.onPreviewDiagnostics?.();
   }
 }

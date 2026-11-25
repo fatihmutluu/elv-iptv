@@ -36,6 +36,7 @@ internal class TrackSelectorBridge(
   private var secondarySubtitleChoice: TrackChoice? = null
   private var externalPrimarySubtitleId: String? = null
   private var videoQualityChoice: VideoQualityChoice? = null
+  private var activeProgramId: String? = null
   private var latestTracks: Tracks = Tracks.EMPTY
   private var lastEmitted: MediaTracksSnapshot? = null
   private var prepareEpoch = 0L
@@ -62,6 +63,7 @@ internal class TrackSelectorBridge(
     lastEmitted = null
     videoQualityChoice = null
     externalPrimarySubtitleId = null
+    activeProgramId = request.programId?.trim()?.takeIf { it.isNotEmpty() }
     audioChoice = request.audioTrackId?.let { wantedId ->
       audioChoice?.takeIf { it.id == wantedId } ?: TrackChoice(id = wantedId, language = null, label = null)
     }
@@ -100,6 +102,7 @@ internal class TrackSelectorBridge(
     secondarySubtitleChoice = null
     externalPrimarySubtitleId = null
     videoQualityChoice = null
+    activeProgramId = null
     latestTracks = Tracks.EMPTY
     lastEmitted = null
     onSecondaryTargetChanged(null, false)
@@ -304,16 +307,20 @@ internal class TrackSelectorBridge(
    * video overrides and resolution/bitrate caps to restore automatic ABR when [id] is `null` (`#59`).
    */
   fun selectVideoQuality(player: ExoPlayer?, id: String?) {
+    val tracks = activeTracks(player)
     if (id == null) {
       videoQualityChoice = null
       if (player != null) {
-        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+        val builder = player.trackSelectionParameters.buildUpon()
           .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
           .clearVideoSizeConstraints()
           .setMaxVideoBitrate(Int.MAX_VALUE)
-          .build()
+        val pinnedProgram = activeProgramId
+        if (pinnedProgram != null && !tracks.isEmpty && inspectPrograms(tracks, null, ffmpegSupportsAudio).isMultiProgram) {
+          videoGroupOverridesForProgram(tracks, pinnedProgram).forEach { builder.addOverride(it) }
+        }
+        player.trackSelectionParameters = builder.build()
       }
-      val tracks = activeTracks(player)
       if (!tracks.isEmpty) {
         val textDisabled = if (player != null) isTextEffectivelyDisabled(player) else isTextDisabled
         emitIfChanged(buildSnapshot(tracks, textDisabled = textDisabled, selectedVideoQualityId = null))
@@ -321,8 +328,8 @@ internal class TrackSelectorBridge(
       return
     }
 
-    val tracks = activeTracks(player)
-    val candidates = videoQualityCandidatesOf(tracks)
+    val includeProgramId = inspectPrograms(tracks, null, ffmpegSupportsAudio).isMultiProgram
+    val candidates = videoQualityCandidatesOf(tracks, includeProgramId = includeProgramId)
     val matched = candidates.firstOrNull { it.option.id == id }
     if (!tracks.isEmpty && matched == null) return
 
@@ -353,6 +360,104 @@ internal class TrackSelectorBridge(
     }
   }
 
+  /**
+   * Selects a multi-program MPEG-TS service [id] in place without restarting playback (`#304`), clearing stale
+   * overrides from other programs so video, audio, and embedded subtitles switch cleanly to the selected service.
+   */
+  fun selectProgram(player: ExoPlayer?, id: String) {
+    val cleanId = id.trim().takeIf { it.isNotEmpty() } ?: return
+    val tracks = activeTracks(player)
+    if (!tracks.isEmpty) {
+      val inspected = inspectPrograms(tracks, activeProgramId = null, ffmpegSupportsAudio = ffmpegSupportsAudio)
+      if (!inspected.isMultiProgram || inspected.programs.none { it.id == cleanId }) return
+    }
+
+    val priorAudioLang = audioChoice?.language
+    val priorSubChoice = (subtitleChoice as? SubChoice.Selected)?.choice
+    activeProgramId = cleanId
+    videoQualityChoice = null
+
+    val chosenAudio = if (!tracks.isEmpty) {
+      selectBestAudioForProgram(tracks, cleanId, priorAudioLang, ffmpegSupportsAudio)
+    } else {
+      null
+    }
+    audioChoice = chosenAudio?.let { choiceOf(it.info) }
+
+    var chosenText: TrackCandidate? = null
+    if (subtitleChoice is SubChoice.Selected && externalPrimarySubtitleId == null) {
+      onClearCues()
+      chosenText = if (!tracks.isEmpty) {
+        selectBestTextForProgram(tracks, cleanId, priorSubChoice?.language, ffmpegSupportsAudio)
+      } else {
+        null
+      }
+      subtitleChoice = if (chosenText != null) {
+        SubChoice.Selected(choiceOf(chosenText.info))
+      } else {
+        SubChoice.Default
+      }
+    }
+
+    secondarySubtitleChoice?.let { sec ->
+      if (!tracks.isEmpty) {
+        val secCandidate = candidatesOf(tracks, C.TRACK_TYPE_TEXT, ffmpegSupportsAudio, includeProgramId = true)
+          .firstOrNull { it.info.id == sec.id }
+        if (secCandidate != null && !secCandidate.info.external && secCandidate.info.programId != cleanId) {
+          secondarySubtitleChoice = null
+          onClearSecondaryCues()
+          onSecondaryTargetChanged(null, isTextDisabled)
+        }
+      }
+    }
+
+    if (player != null && !tracks.isEmpty) {
+      val builder = player.trackSelectionParameters.buildUpon()
+        .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+        .clearVideoSizeConstraints()
+        .setMaxVideoBitrate(Int.MAX_VALUE)
+        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+
+      videoGroupOverridesForProgram(tracks, cleanId).forEach { builder.addOverride(it) }
+
+      if (chosenAudio != null) {
+        builder.addOverride(TrackSelectionOverride(chosenAudio.group.mediaTrackGroup, listOf(chosenAudio.trackIndex)))
+        if (chosenAudio.info.language != null) builder.setPreferredAudioLanguage(chosenAudio.info.language)
+      }
+
+      if (chosenText != null) {
+        builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+          .addOverride(TrackSelectionOverride(chosenText.group.mediaTrackGroup, listOf(chosenText.trackIndex)))
+        if (chosenText.info.language != null) builder.setPreferredTextLanguage(chosenText.info.language)
+      } else if (subtitleChoice is SubChoice.Off || externalPrimarySubtitleId != null) {
+        builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, secondarySubtitleChoice == null)
+      }
+
+      player.trackSelectionParameters = builder.build()
+    }
+
+    if (!tracks.isEmpty) {
+      val textDisabled = if (player != null) isTextEffectivelyDisabled(player) else isTextDisabled
+      val built = buildSnapshot(tracks, textDisabled = textDisabled, selectedVideoQualityId = null)
+      val adjustedSubtitleId = when {
+        textDisabled -> externalPrimarySubtitleId
+        chosenText != null -> chosenText.info.id
+        subtitleChoice is SubChoice.Default -> null
+        else -> built.selectedSubtitleId
+      }
+      emitIfChanged(
+        built.copy(
+          selectedAudioId = chosenAudio?.info?.id ?: built.selectedAudioId,
+          selectedSubtitleId = adjustedSubtitleId,
+          selectedSecondarySubtitleId = built.selectedSecondarySubtitleId?.takeIf { it != adjustedSubtitleId },
+          selectedProgramId = cleanId,
+        ),
+      )
+    }
+  }
+
   /** Handles Media3 `onTracksChanged`: ignores `Tracks.EMPTY`, reconciles saved choices and emits confirmed tracks. */
   fun onTracksChanged(player: ExoPlayer, tracks: Tracks) {
     if (tracks.isEmpty) return
@@ -364,17 +469,48 @@ internal class TrackSelectorBridge(
     var targetSubtitleId: String? = null
     var targetVideoQualityId: String? = null
 
-    audioChoice?.let { wanted ->
-      val target = resolveCandidate(tracks, C.TRACK_TYPE_AUDIO, wanted, ffmpegSupportsAudio)
-      if (target != null) {
-        audioChoice = choiceOf(target.info)
-        targetAudioId = target.info.id
-        val currentOverride = params.overrides[target.group.mediaTrackGroup]?.trackIndices
-        if (currentOverride != listOf(target.trackIndex) || params.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO)) {
+    val programInspection = inspectPrograms(tracks, activeProgramId = activeProgramId, ffmpegSupportsAudio = ffmpegSupportsAudio)
+    val desiredProgramId = activeProgramId?.takeIf { wanted ->
+      programInspection.isMultiProgram && programInspection.programs.any { it.id == wanted }
+    }
+    if (desiredProgramId != null) {
+      if (videoQualityChoice == null) {
+        val progVideoOverrides = videoGroupOverridesForProgram(tracks, desiredProgramId)
+        val overridesMismatch = progVideoOverrides.any { ov ->
+          params.overrides[ov.mediaTrackGroup]?.trackIndices != ov.trackIndices
+        }
+        if (progVideoOverrides.isNotEmpty() && (!isSelectedVideoInProgram(tracks, desiredProgramId) || overridesMismatch)) {
+          builder.clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+          progVideoOverrides.forEach { builder.addOverride(it) }
+          changedParams = true
+        }
+      }
+      if (audioChoice == null && !isSelectedAudioInProgram(tracks, desiredProgramId)) {
+        val chosenAudio = selectBestAudioForProgram(tracks, desiredProgramId, null, ffmpegSupportsAudio)
+        if (chosenAudio != null) {
+          audioChoice = choiceOf(chosenAudio.info)
+          targetAudioId = chosenAudio.info.id
           builder.clearOverridesOfType(C.TRACK_TYPE_AUDIO)
             .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-            .addOverride(TrackSelectionOverride(target.group.mediaTrackGroup, listOf(target.trackIndex)))
+            .addOverride(TrackSelectionOverride(chosenAudio.group.mediaTrackGroup, listOf(chosenAudio.trackIndex)))
           changedParams = true
+        }
+      }
+    }
+
+    if (targetAudioId == null) {
+      audioChoice?.let { wanted ->
+        val target = resolveCandidate(tracks, C.TRACK_TYPE_AUDIO, wanted, ffmpegSupportsAudio)
+        if (target != null) {
+          audioChoice = choiceOf(target.info)
+          targetAudioId = target.info.id
+          val currentOverride = params.overrides[target.group.mediaTrackGroup]?.trackIndices
+          if (currentOverride != listOf(target.trackIndex) || params.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO)) {
+            builder.clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+              .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+              .addOverride(TrackSelectionOverride(target.group.mediaTrackGroup, listOf(target.trackIndex)))
+            changedParams = true
+          }
         }
       }
     }
@@ -428,7 +564,7 @@ internal class TrackSelectorBridge(
     }
 
     videoQualityChoice?.let { wantedQuality ->
-      val candidates = videoQualityCandidatesOf(tracks)
+      val candidates = videoQualityCandidatesOf(tracks, includeProgramId = programInspection.isMultiProgram)
       val target = resolveVideoQualityCandidate(candidates, wantedQuality)
       if (target != null) {
         videoQualityChoice = VideoQualityChoice(
@@ -514,6 +650,7 @@ internal class TrackSelectorBridge(
       extraExternalSubtitles = extraExternalSubtitles(),
       selectedExternalPrimaryId = externalPrimarySubtitleId,
       preferredPrimarySubtitleId = (subtitleChoice as? SubChoice.Selected)?.choice?.id,
+      activeProgramId = activeProgramId,
     )
 
   private fun emitSnapshotIfTracksAvailable(

@@ -775,6 +775,11 @@ export function createPlaybackServiceWith(
       store.update({ selectedVideoQualityId: normalized });
       if (loaded) engine.selectVideoQuality?.(state().attempt, normalized);
     },
+    selectProgram(id) {
+      const trimmed = typeof id === 'string' ? id.trim() : '';
+      if (disposed || !loaded || trimmed.length === 0 || state().status.kind === 'idle') return;
+      engine.selectProgram?.(state().attempt, trimmed);
+    },
     getState: state,
     subscribe: (listener) => store.subscribe(listener),
     dispose() {

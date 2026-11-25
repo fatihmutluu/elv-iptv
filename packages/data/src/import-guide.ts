@@ -20,6 +20,7 @@ import {
   resolveEnabledGuideSources,
   serializeGuideValidator,
 } from './guide-multi';
+import { canUseNativeGuideStager, stageGuideNative } from './guide-native-stage';
 import {
   type ClampedBatch,
   closeOpenProgrammes,
@@ -61,6 +62,8 @@ const MAX_CATCHUP_RETENTION_DAYS = 30;
 const MAX_GUIDE_SCAN_SLICE = 500;
 /** Upper bound on staged programme rows written per SQLite WAL transaction (`#25`). */
 const MAX_GUIDE_WRITE_BATCH = 2_500;
+/** Channels processed per event-loop slice so 5,000-channel finalization never stalls JS (`#478`). */
+const CHANNEL_YIELD_SLICE = 500;
 
 type GuideOutcome =
   | { kind: 'imported'; slot: string; state: GuideState; validator: HttpCacheValidator | undefined }
@@ -120,7 +123,8 @@ function mergeChannels(st: GuideState, channels: readonly XmltvChannel[]): void 
   st.channels = st.channelsById.size;
 }
 
-function finalizeChannels(c: RunCtx, st: GuideState): void {
+async function finalizeChannels(c: RunCtx, st: GuideState): Promise<void> {
+  let processed = 0;
   for (const ch of st.channelsById.values()) {
     const exactKeys = st.index.byGuideId.get(ch.id);
     const ciKeys = st.index.byGuideIdFold.get(ch.id.toLowerCase());
@@ -159,6 +163,11 @@ function finalizeChannels(c: RunCtx, st: GuideState): void {
       c.runId,
       ch.lcn ?? null,
     ]);
+    processed += 1;
+    if (processed % CHANNEL_YIELD_SLICE === 0) {
+      checkAbort(c);
+      await c.deps.scheduler.yieldNow();
+    }
   }
   st.channelNameFolds = st.index.nameFoldByKey;
 }
@@ -198,6 +207,121 @@ async function execute(
   meter: StreamProgressMeter,
 ): Promise<GuideOutcome> {
   const allowConditional = await hasStoredProgrammes(c.db, c.sourceId);
+  const nativeStager = c.deps.nativeGuideStager;
+  if (nativeStager !== undefined && canUseNativeGuideStager(nativeStager, source, candidates)) {
+    const live = await c.db.all<{
+      key: string;
+      guide_id: string | null;
+      name: string;
+      name_fold: string;
+      num: number | null;
+      catchup_days: number | null;
+    }>('SELECT key, guide_id, name, name_fold, num, catchup_days FROM live WHERE source_id = ?', [
+      c.sourceId,
+    ]);
+    let rawMaxCatchup = 0;
+    for (const ch of live) {
+      if (
+        ch.catchup_days !== null &&
+        Number.isFinite(ch.catchup_days) &&
+        ch.catchup_days > rawMaxCatchup
+      ) {
+        rawMaxCatchup = ch.catchup_days;
+      }
+    }
+    const maxCatchupDays = Math.min(
+      MAX_CATCHUP_RETENTION_DAYS,
+      Math.max(0, Math.floor(rawMaxCatchup)),
+    );
+    const window = source.settings.guideWindow ?? DEFAULT_WINDOW;
+    const effectiveDaysBack = Math.max(window.daysBack, maxCatchupDays);
+    const retentionFloorMs = now - effectiveDaysBack * DAY_MS;
+    const toMs = now + window.daysForward * DAY_MS;
+    const nativeOutcome = await stageGuideNative(
+      c,
+      nativeStager,
+      source,
+      candidates,
+      allowConditional,
+      retentionFloorMs,
+      toMs,
+      retryDelayMs,
+    );
+    for (const f of nativeOutcome.failed) c.warningCodes.push(`${f.category}/${f.code}`);
+    c.warnings += nativeOutcome.failed.length;
+    if (nativeOutcome.kind === 'not-modified') {
+      c.unchanged = true;
+      c.keepTables.add('guide_channels');
+      c.counts.unchanged = 1;
+      if (nativeOutcome.failed.length > 0) c.counts.guideUrlFallbacks = nativeOutcome.failed.length;
+      meter.completeStream();
+      return {
+        kind: 'not-modified',
+        slot: nativeOutcome.slot,
+        validator: nativeOutcome.validator,
+      };
+    }
+    c.counts.guideUrlFallbacks = nativeOutcome.failed.length;
+    const res = nativeOutcome.result;
+    c.warnings += res.warnings;
+    for (const code of res.warningCodes) c.warningCodes.push(code);
+    const st: GuideState = {
+      index: buildChannelIndex(live),
+      channelsById: new Map(),
+      channelRows: [],
+      open: new Map(),
+      lastByChannel: new Map(),
+      byId: [],
+      byCiId: [],
+      byBaseId: [],
+      byName: [],
+      byNormalizedName: [],
+      byNum: [],
+      staged: new Map(),
+      channels: 0,
+      programmes: res.stagedProgrammes,
+      seenProgrammes: res.seenProgrammes,
+    };
+    for (let i = 0; i < res.channels.length; i += CHANNEL_YIELD_SLICE) {
+      checkAbort(c);
+      const slice = res.channels.slice(i, i + CHANNEL_YIELD_SLICE);
+      mergeChannels(
+        st,
+        slice.map((ch) => ({
+          id: ch.id,
+          names: [...ch.names],
+          ...(ch.icon === undefined ? {} : { icon: ch.icon }),
+          ...(ch.lcn === undefined ? {} : { lcn: ch.lcn }),
+        })),
+      );
+      if (i + CHANNEL_YIELD_SLICE < res.channels.length) {
+        await c.deps.scheduler.yieldNow();
+      }
+    }
+    for (const [guideId, count] of Object.entries(res.stagedCounts)) {
+      if (count > 0) st.staged.set(guideId, count);
+    }
+    if (maxCatchupDays > 0) {
+      st.retentionFloorMs = retentionFloorMs;
+      st.preserveBeforeMs = now;
+    }
+    await finalizeChannels(c, st);
+    if (st.channels === 0 && st.seenProgrammes === 0) {
+      throw new Stop(elvError('source-format', 'not-a-guide'));
+    }
+    const streamDone = st.channels + st.seenProgrammes;
+    c.progress(meter.reportStream('guide-channels', st.channels, streamDone, undefined));
+    c.progress(meter.reportStream('programmes', st.programmes, streamDone, undefined));
+    meter.completeStream();
+    c.counts.guideChannels = st.channels;
+    c.counts.programmes = st.programmes;
+    return {
+      kind: 'imported',
+      slot: nativeOutcome.slot,
+      state: st,
+      validator: nativeOutcome.validator,
+    };
+  }
   const opened = await openGuide(
     candidates,
     source,
@@ -316,7 +440,7 @@ async function execute(
     st.retentionFloorMs = retentionFloorMs;
     st.preserveBeforeMs = now;
   }
-  finalizeChannels(c, st);
+  await finalizeChannels(c, st);
   if (st.channels === 0 && st.seenProgrammes === 0) {
     throw new Stop(elvError('source-format', 'not-a-guide'));
   }

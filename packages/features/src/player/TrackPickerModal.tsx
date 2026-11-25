@@ -1,5 +1,10 @@
 import type { AppI18n } from '@elv/i18n';
-import type { MediaTracks } from '@elv/playback';
+import {
+  filterTracksByProgram,
+  hasMultiplePrograms,
+  type MediaTracks,
+  type ProgramInfo,
+} from '@elv/playback';
 import {
   type FormFactor,
   Icon,
@@ -135,9 +140,20 @@ function TrackRow({
   );
 }
 
+function formatProgramLabel(program: ProgramInfo, i18n: AppI18n): string {
+  if (program.serviceName !== undefined && program.serviceName.trim().length > 0) {
+    return program.serviceName.trim();
+  }
+  if (program.label.trim().length > 0) return program.label.trim();
+  if (program.programNumber !== undefined) {
+    return i18n.t('player.tracks.programNumber', { number: program.programNumber });
+  }
+  return program.id;
+}
+
 /**
- * In-window audio & subtitle track selector placed above `PlayerOsd` (in normal flex flow on
- * desktop so the native `mpv` child window shrinks above it without overlapping).
+ * In-window audio, subtitle & conditional multi-program TS selector placed above `PlayerOsd`
+ * (in normal flex flow on desktop so the native `mpv` child window shrinks above it without overlapping).
  */
 export function TrackPickerModal({
   tracks,
@@ -146,6 +162,7 @@ export function TrackPickerModal({
   formFactor,
   i18n,
   dualSubtitles = false,
+  onSelectProgram,
   onSelectAudio,
   onSelectSubtitle,
   onSelectSecondarySubtitle,
@@ -159,6 +176,7 @@ export function TrackPickerModal({
   formFactor: FormFactor;
   i18n: AppI18n;
   dualSubtitles?: boolean;
+  onSelectProgram?: (id: string) => void;
   onSelectAudio: (id: string) => void;
   onSelectSubtitle: (id: string | null) => void;
   onSelectSecondarySubtitle?: (id: string | null) => void;
@@ -170,9 +188,12 @@ export function TrackPickerModal({
   const viewport = useViewport();
   const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
   const rowPitch = Math.round(APPROX_ROW_PITCH * safeFontScale);
+  const showPrograms = hasMultiplePrograms(tracks);
+  const displayTracks = showPrograms ? filterTracksByProgram(tracks) : tracks;
+  const programs = showPrograms ? (tracks.programs ?? []) : [];
   const offLabel = i18n.t('player.subtitlesOff');
-  const offSelected = tracks.selectedSubtitleId === null;
-  const secondaryOffSelected = (tracks.selectedSecondarySubtitleId ?? null) === null;
+  const offSelected = displayTracks.selectedSubtitleId === null;
+  const secondaryOffSelected = (displayTracks.selectedSecondarySubtitleId ?? null) === null;
   const externalBadge = i18n.t('player.externalSubtitle.badge');
   const sameAsPrimaryHint = i18n.t('player.secondarySameAsPrimary');
   const closeLabel = i18n.t('player.closeTracks');
@@ -181,6 +202,7 @@ export function TrackPickerModal({
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const showCursor = isTv || formFactor === 'desktop';
   const panelRef = useRef<ComponentRef<typeof View> | null>(null);
+  const programScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const audioScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const subtitleScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
 
@@ -189,7 +211,7 @@ export function TrackPickerModal({
     canPickSubtitleFile: onPickSubtitleFile !== undefined,
     canLoadSubtitleUrl: onLoadSubtitleUrl !== undefined,
   };
-  const subtitleEntries = buildSubtitleColumnEntries(tracks, pickerOptions);
+  const subtitleEntries = buildSubtitleColumnEntries(displayTracks, pickerOptions);
   const firstExternalIdx = subtitleEntries.findIndex(
     (entry) => entry.kind === 'pickSubtitleFile' || entry.kind === 'loadSubtitleUrl',
   );
@@ -198,7 +220,12 @@ export function TrackPickerModal({
 
   useEffect(() => {
     if (!showCursor) return;
-    const targetRef = cursor.column === 'audio' ? audioScrollRef : subtitleScrollRef;
+    const targetRef =
+      cursor.column === 'program'
+        ? programScrollRef
+        : cursor.column === 'audio'
+          ? audioScrollRef
+          : subtitleScrollRef;
     targetRef.current?.scrollTo?.({
       y: Math.max(0, (cursor.index - 1) * rowPitch),
       animated: false,
@@ -272,20 +299,42 @@ export function TrackPickerModal({
       </View>
 
       <View style={[styles.columns, isPhone ? styles.columnsStacked : styles.columnsRow]}>
-        {tracks.audio.length > 0 ? (
+        {showPrograms ? (
+          <View testID="player-program-column" style={styles.column}>
+            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+              {i18n.t('player.tracks.program')}
+            </Text>
+            <ScrollView ref={programScrollRef} focusable={!isTv} style={listStyle}>
+              {programs.map((program, idx) => (
+                <TrackRow
+                  key={program.id}
+                  testID={`player-program-track-${program.id}`}
+                  label={formatProgramLabel(program, i18n)}
+                  selected={tracks.selectedProgramId === program.id}
+                  tvFocused={showCursor && cursor.column === 'program' && cursor.index === idx}
+                  isTv={isTv}
+                  isTouch={isTouch}
+                  onPress={() => onSelectProgram?.(program.id)}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
+        {displayTracks.audio.length > 0 ? (
           <View testID="player-audio-column" style={styles.column}>
             <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
               {i18n.t('player.audioTracks')}
             </Text>
             <ScrollView ref={audioScrollRef} focusable={!isTv} style={listStyle}>
-              {tracks.audio.map((track, idx) => {
-                const label = formatTrackLabel(track, idx, tracks.audio, i18n);
+              {displayTracks.audio.map((track, idx) => {
+                const label = formatTrackLabel(track, idx, displayTracks.audio, i18n);
                 return (
                   <TrackRow
                     key={track.id}
                     testID={`player-audio-track-${track.id}`}
                     label={label}
-                    selected={tracks.selectedAudioId === track.id}
+                    selected={displayTracks.selectedAudioId === track.id}
                     tvFocused={showCursor && cursor.column === 'audio' && cursor.index === idx}
                     isTv={isTv}
                     isTouch={isTouch}
@@ -322,7 +371,7 @@ export function TrackPickerModal({
                 const label = formatTrackLabel(
                   entry.track,
                   entry.trackIndex,
-                  tracks.subtitles,
+                  displayTracks.subtitles,
                   i18n,
                 );
                 return (
@@ -330,7 +379,7 @@ export function TrackPickerModal({
                     key={`primary-${entry.track.id}`}
                     testID={`player-subtitle-track-${entry.track.id}`}
                     label={label}
-                    selected={tracks.selectedSubtitleId === entry.track.id}
+                    selected={displayTracks.selectedSubtitleId === entry.track.id}
                     {...(entry.track.external === true
                       ? {
                           badgeLabel: externalBadge,
@@ -373,7 +422,7 @@ export function TrackPickerModal({
                 const label = formatTrackLabel(
                   entry.track,
                   entry.trackIndex,
-                  tracks.subtitles,
+                  displayTracks.subtitles,
                   i18n,
                 );
                 return (
@@ -382,7 +431,8 @@ export function TrackPickerModal({
                     testID={`player-secondary-subtitle-track-${entry.track.id}`}
                     label={label}
                     selected={
-                      !entry.disabled && tracks.selectedSecondarySubtitleId === entry.track.id
+                      !entry.disabled &&
+                      displayTracks.selectedSecondarySubtitleId === entry.track.id
                     }
                     disabled={entry.disabled}
                     {...(entry.track.external === true

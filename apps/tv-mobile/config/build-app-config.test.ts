@@ -8,6 +8,7 @@ import {
 import { withAccessibilityFonts } from './with-accessibility-fonts.ts';
 import { withAetherFrameworks } from './with-aether-frameworks.ts';
 import { withAndroidDisplay } from './with-android-display.ts';
+import { withIosExternalDisplay } from './with-ios-external-display.ts';
 
 const baseOptions: BuildOptions = { version: '1.2.3', now: new Date('2026-11-13T00:00:00Z') };
 const build = (env: Env, overrides: Partial<BuildOptions> = {}) =>
@@ -188,7 +189,10 @@ describe('buildAppConfig', () => {
       const custom = (config.plugins ?? []).some(
         (p) =>
           (typeof p === 'function' && p !== withAetherFrameworks && p !== withAccessibilityFonts) ||
-          (Array.isArray(p) && typeof p[0] === 'function' && p[0] !== withAndroidDisplay),
+          (Array.isArray(p) &&
+            typeof p[0] === 'function' &&
+            p[0] !== withAndroidDisplay &&
+            p[0] !== withIosExternalDisplay),
       );
       expect(custom).toBe(false);
     },
@@ -197,6 +201,30 @@ describe('buildAppConfig', () => {
   it('wires withAndroidDisplay with isTv matching EXPO_TV (#255, #266)', () => {
     expect(build({}).plugins).toContainEqual([withAndroidDisplay, { isTv: false }]);
     expect(build({ EXPO_TV: '1' }).plugins).toContainEqual([withAndroidDisplay, { isTv: true }]);
+  });
+
+  it('wires withIosExternalDisplay with isTv matching EXPO_TV (#258)', () => {
+    expect(build({}).plugins).toContainEqual([withIosExternalDisplay, { isTv: false }]);
+    expect(build({ EXPO_TV: '1' }).plugins).toContainEqual([
+      withIosExternalDisplay,
+      { isTv: true },
+    ]);
+  });
+
+  it('includes generic external player LSApplicationQueriesSchemes only on iOS/iPadOS mobile builds (#406)', () => {
+    expect(build({}).ios?.infoPlist?.LSApplicationQueriesSchemes).toEqual([
+      'vlc-x-callback',
+      'outplayer',
+      'nplayer-http',
+      'nplayer-https',
+      'infuse',
+    ]);
+    expect(build({ EXPO_TV: '1' }).ios?.infoPlist).not.toHaveProperty(
+      'LSApplicationQueriesSchemes',
+    );
+    expect(build({ EXPO_TV: 'true' }).ios?.infoPlist).not.toHaveProperty(
+      'LSApplicationQueriesSchemes',
+    );
   });
 
   it.each(['development', 'production', undefined])(

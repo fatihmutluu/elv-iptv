@@ -32,6 +32,11 @@ import {
   SET_DESKTOP_AUDIO_OUTPUT_CMD_KEYS,
   SET_DISPLAY_SYNC_CMD_KEYS,
 } from './player-ipc-wave-f7a.ts';
+import {
+  hasValidWaveF7bLoadOptions,
+  isProgramId,
+  SELECT_PROGRAM_CMD_KEYS,
+} from './player-ipc-wave-f7b.ts';
 
 export type {
   AccessibilityFontFamily,
@@ -87,6 +92,7 @@ export const DESKTOP_CAPABILITIES: EngineCapabilities = Object.freeze({
   externalSubtitles: true,
   subtitleStyling: true,
   dualSubtitles: true,
+  programSelection: true,
 });
 
 /** One desktop `libmpv` audio output device reported via `audio-device-list` (`#408`). */
@@ -186,6 +192,7 @@ export type BridgeCommand =
   | { name: 'addExternalSubtitle'; attempt: AttemptToken; track: ExternalSubtitleTrack }
   | { name: 'setSubtitleStyle'; style: SubtitleStyleConfig }
   | { name: 'selectVideoQuality'; attempt: AttemptToken; id: string | null }
+  | { name: 'selectProgram'; attempt: AttemptToken; id: string }
   | { name: 'setVolume'; volume: number }
   | { name: 'setAudioDelay'; attempt?: AttemptToken; delaySec: number }
   | { name: 'setSubtitleDelay'; attempt?: AttemptToken; delaySec: number }
@@ -534,7 +541,8 @@ function isLoadCommand(x: unknown): x is LoadCommand {
         options['externalSubtitles'].length <= MAX_EXTERNAL_SUBTITLES_PER_LOAD &&
         options['externalSubtitles'].every((t) => isExternalSubtitleTrack(t, isHeaders)))) &&
     (options['subtitleStyle'] === undefined || isSubtitleStyleConfig(options['subtitleStyle'])) &&
-    hasValidWaveF7aLoadOptions(options)
+    hasValidWaveF7aLoadOptions(options) &&
+    hasValidWaveF7bLoadOptions(options)
   );
 }
 
@@ -569,6 +577,10 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
       return hasOnlyKeys(x, SET_SUBTITLE_STYLE_CMD_KEYS) && isSubtitleStyleConfig(x['style']);
     case 'selectVideoQuality':
       return isAttempt(x['attempt']) && (x['id'] === null || isVideoQualityId(x['id']));
+    case 'selectProgram':
+      return (
+        hasOnlyKeys(x, SELECT_PROGRAM_CMD_KEYS) && isAttempt(x['attempt']) && isProgramId(x['id'])
+      );
     case 'setVolume':
       return isVolume(x['volume']);
     case 'setAudioDelay':

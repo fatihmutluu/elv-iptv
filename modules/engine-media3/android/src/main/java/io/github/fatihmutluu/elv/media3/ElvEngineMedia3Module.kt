@@ -30,6 +30,7 @@ class ElvEngineMedia3Module : Module() {
   private var detachPipObserver: (() -> Unit)? = null
   private var observedPipActivity: WeakReference<Activity>? = null
   private var pendingPlaylistPick: Promise? = null
+  private var pendingExternalPlayer: Promise? = null
 
   override fun definition() = ModuleDefinition {
     Name("ElvEngineMedia3")
@@ -167,7 +168,50 @@ class ElvEngineMedia3Module : Module() {
       }
     }.runOnQueue(Queues.MAIN)
 
+    AsyncFunction("launchExternalPlayer") { rawRequest: Map<String, Any?>, promise: Promise ->
+      val parsed = ExternalPlayerLauncher.parseRequest(rawRequest)
+      if (parsed == null) {
+        promise.reject("E_EXTERNAL_PLAYER_INVALID_URL", "Disallowed or invalid stream URL", null)
+        return@AsyncFunction
+      }
+      val activity = appContext.currentActivity
+      if (activity == null) {
+        promise.reject("E_EXTERNAL_PLAYER_NO_ACTIVITY", "No active Android activity available", null)
+        return@AsyncFunction
+      }
+      val intent = ExternalPlayerLauncher.buildExternalPlayerIntent(parsed)
+      if (intent == null) {
+        promise.reject("E_EXTERNAL_PLAYER_INVALID_URL", "Disallowed or invalid stream URL", null)
+        return@AsyncFunction
+      }
+      val displaced = synchronized(lifecycleLock) {
+        val prev = pendingExternalPlayer
+        pendingExternalPlayer = promise
+        prev
+      }
+      displaced?.reject("E_EXTERNAL_PLAYER_SUPERSEDED", "Superseded by a newer external player launch", null)
+      try {
+        activity.startActivityForResult(intent, REQUEST_CODE_EXTERNAL_PLAYER)
+      } catch (err: ActivityNotFoundException) {
+        clearPendingExternalPlayerIfSame(promise)
+          ?.reject("E_EXTERNAL_PLAYER_NOT_FOUND", "No external video player available", err)
+      } catch (err: SecurityException) {
+        clearPendingExternalPlayerIfSame(promise)
+          ?.reject("E_EXTERNAL_PLAYER_UNAVAILABLE", "External video player launch blocked", err)
+      }
+    }.runOnQueue(Queues.MAIN)
+
     OnActivityResult { activity, payload ->
+      if (payload.requestCode == REQUEST_CODE_EXTERNAL_PLAYER) {
+        val promise = synchronized(lifecycleLock) {
+          val pending = pendingExternalPlayer
+          pendingExternalPlayer = null
+          pending
+        } ?: return@OnActivityResult
+        val result = ExternalPlayerLauncher.parseExternalPlayerResult(payload.resultCode, payload.data)
+        promise.resolve(result.toBridgeMap())
+        return@OnActivityResult
+      }
       if (payload.requestCode != PICK_PLAYLIST_REQUEST_CODE) return@OnActivityResult
       val promise = synchronized(lifecycleLock) {
         val pending = pendingPlaylistPick
@@ -212,6 +256,7 @@ class ElvEngineMedia3Module : Module() {
       val insetsToDetach: (() -> Unit)?
       val pipToDetach: (() -> Unit)?
       val pickToCancel: Promise?
+      val externalPlayerToCancel: Promise?
       synchronized(lifecycleLock) {
         monitorToStop = standbyMonitor
         standbyMonitor = null
@@ -225,8 +270,11 @@ class ElvEngineMedia3Module : Module() {
         observedPipActivity = null
         pickToCancel = pendingPlaylistPick
         pendingPlaylistPick = null
+        externalPlayerToCancel = pendingExternalPlayer
+        pendingExternalPlayer = null
       }
       pickToCancel?.resolve(null)
+      externalPlayerToCancel?.resolve(ExternalPlayerResult(launched = false).toBridgeMap())
       monitorToStop?.stop()
       thermalToStop?.stop()
       insetsToDetach?.invoke()
@@ -339,6 +387,10 @@ class ElvEngineMedia3Module : Module() {
         engine.selectVideoQuality(attempt, id)
       }
 
+      Function("selectProgram") { engine: Media3Engine, attempt: Int, id: String ->
+        engine.selectProgram(attempt, id)
+      }
+
       Function("stop") { engine: Media3Engine, attempt: Int -> engine.stop(attempt) }
 
       Function("recreate") { engine: Media3Engine, attempt: Int -> engine.recreate(attempt) }
@@ -442,6 +494,16 @@ class ElvEngineMedia3Module : Module() {
     synchronized(lifecycleLock) {
       if (pendingPlaylistPick === target) {
         pendingPlaylistPick = null
+        target
+      } else {
+        null
+      }
+    }
+
+  private fun clearPendingExternalPlayerIfSame(target: Promise): Promise? =
+    synchronized(lifecycleLock) {
+      if (pendingExternalPlayer === target) {
+        pendingExternalPlayer = null
         target
       } else {
         null

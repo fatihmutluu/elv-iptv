@@ -3,6 +3,7 @@ import type { DisplaySyncPolicy, MediaKind } from '@elv/playback';
 import type { DeinterlaceMode, HwdecProfile } from '../../../shared/player-ipc.ts';
 import type { MpvCommand } from './codec.ts';
 import { DEFAULT_SECONDARY_SUB_POS, subtitleStyleLoadOptions } from './subtitle-style.ts';
+import { parseProgramNumber } from './track-snapshot.ts';
 
 /** Labeled mpv video filter for broadcast-grade `bwdif` deinterlacing (`#243`). */
 export const DEINTERLACE_BWDIF_FILTER =
@@ -98,7 +99,7 @@ export const LAUNCH_OPTIONS: readonly string[] = [
   '--audio-pitch-correction=yes',
   '--tls-verify=yes',
   '--stream-lavf-o=icy=0,reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5',
-  '--reset-on-next-file=aid,sid,secondary-sid,secondary-sub-pos,vid,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
+  '--reset-on-next-file=aid,sid,secondary-sid,secondary-sub-pos,vid,program,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
   '--network-timeout=10',
   '--curl-enabled=no',
   '--osc=no',
@@ -191,6 +192,7 @@ export function loadfileCommand(
     filterSdhSubtitles?: boolean;
     subtitleStyle?: SubtitleStyleConfig;
     secondarySubtitleActive?: boolean;
+    programId?: string;
   },
   mode: 'replace' | 'append-play' = 'replace',
 ): MpvCommand {
@@ -212,6 +214,10 @@ export function loadfileCommand(
   if (r.preferHevcOverDolbyVision === true) options['hwdec'] = 'no';
   if (r.filterSdhSubtitles !== undefined) {
     options['sub-filter-sdh'] = r.filterSdhSubtitles ? 'yes' : 'no';
+  }
+  if (r.programId !== undefined) {
+    const programNumber = parseProgramNumber(r.programId);
+    if (programNumber !== undefined) options['program'] = String(programNumber);
   }
   return ['loadfile', r.url, mode, -1, options];
 }

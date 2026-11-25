@@ -416,4 +416,48 @@ describe('createOpSqliteDriver', () => {
     expect(fExhaust.conns).toHaveLength(6);
     for (const c of fExhaust.conns) expect(c.log).toContain('close');
   });
+
+  it('exposes getDbPath for default and custom locations without passing undefined (#478)', async () => {
+    const { db } = await setup();
+    expect(db.getDbPath()).toBe('/default/databases/catalog.db');
+
+    const f2 = createFakeOpSqlite();
+    fake.current = f2;
+    const appleDb = await createOpSqliteDriver('catalog.db', '/app/Library/Caches');
+    expect(appleDb.getDbPath()).toBe('/app/Library/Caches/catalog.db');
+  });
+
+  it('serializes runExclusiveWrite through the writer queue and recovers after rejection (#478)', async () => {
+    const { db, writer } = await setup();
+    const order: string[] = [];
+    const gate = writer.hold();
+
+    const first = db.run('UPDATE a SET x = 1').then(() => {
+      order.push('first-run');
+    });
+    const exclusive = db.runExclusiveWrite(async () => {
+      order.push('exclusive-start');
+      await Promise.resolve();
+      order.push('exclusive-end');
+      return 42;
+    });
+    const second = db.run('UPDATE b SET x = 1').then(() => {
+      order.push('second-run');
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual([]);
+    gate.release();
+
+    const [_, value] = await Promise.all([first, exclusive, second]);
+    expect(value).toBe(42);
+    expect(order).toEqual(['first-run', 'exclusive-start', 'exclusive-end', 'second-run']);
+
+    await expect(
+      db.runExclusiveWrite(async () => {
+        throw new Error('native-boom');
+      }),
+    ).rejects.toThrow('native-boom');
+    expect(await db.run('UPDATE c SET x = 1')).toEqual({ changes: 1 });
+  });
 });

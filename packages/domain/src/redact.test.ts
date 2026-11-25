@@ -140,4 +140,25 @@ describe('redactText', () => {
     expect(redactText('HTTP error 404 Not Found')).toBe('HTTP error 404 Not Found');
     expect(redactText('type=m3u&mode=live&channel=42')).toBe('type=m3u&mode=live&channel=42');
   });
+
+  it('redacts OS home directory paths across Windows, macOS, Linux, and Android without leaking usernames', () => {
+    expect(redactText('Error reading C:\\Users\\Alice\\AppData\\Local\\elv\\catalog.db')).toBe(
+      'Error reading <redacted-path>',
+    );
+    expect(redactText('at render (C:/Users/Bob/Desktop/app.tsx:42:10)')).toBe(
+      'at render (<redacted-path>)',
+    );
+    expect(redactText('Failed to open /Users/alice/Library/Logs/elv.log.')).toBe(
+      'Failed to open <redacted-path>.',
+    );
+    expect(redactText('Config at /home/charlie/.config/elv/prefs.json; retrying')).toBe(
+      'Config at <redacted-path>; retrying',
+    );
+    expect(redactText('SQLite busy on /data/user/0/com.elv.iptv/databases/catalog.db')).toBe(
+      'SQLite busy on <redacted-path>',
+    );
+    expect(redactText('Multiple: /Users/alice/a.ts and /home/bob/b.ts')).toBe(
+      'Multiple: <redacted-path> and <redacted-path>',
+    );
+  });
 });

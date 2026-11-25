@@ -47,6 +47,7 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   externalSubtitles: true,
   subtitleStyling: true,
   dualSubtitles: true,
+  programSelection: true,
 });
 
 /** The renderer's `PlayerEngine` for the desktop app, plus the presenter's controls. */
@@ -310,6 +311,7 @@ export async function createDesktopEngine(
     setSubtitleStyle: (style: SubtitleStyleConfig) => send({ name: 'setSubtitleStyle', style }),
     selectVideoQuality: (attempt, qualityId) =>
       send({ name: 'selectVideoQuality', attempt, id: qualityId }),
+    selectProgram: (attempt, programId) => send({ name: 'selectProgram', attempt, id: programId }),
     stop: (attempt) => send({ name: 'stop', attempt }),
     recreate: (attempt) => send({ name: 'recreate', attempt }),
     toggleFullscreen: () => send({ name: 'fullscreen' }),
