@@ -42,6 +42,7 @@ export {
   mergeHydratedCollections,
 } from './collections-model';
 export { type DetailCastMember, type DetailTarget, detailTargetFromItem } from './detail-target';
+export { computeHeroHeight } from './hero-layout';
 export {
   type KeymapContextValue,
   KeymapProvider,

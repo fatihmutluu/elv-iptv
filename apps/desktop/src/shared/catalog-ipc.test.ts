@@ -530,7 +530,7 @@ describe('isCatalogClientMessage', () => {
       },
       { type: 'call', reqId: 1, call: { method: 'setWatched', itemKey: 'k1', watched: 'yes' } },
       { type: 'call', reqId: 1, call: { method: 'getProgress', itemKey: '' } },
-      { type: 'call', reqId: 1, call: { method: 'listContinueWatching', limit: 101 } },
+      { type: 'call', reqId: 1, call: { method: 'listContinueWatching', limit: 251 } },
       { type: 'call', reqId: 1, call: { method: 'listContinueWatching', limit: -1 } },
       {
         type: 'call',

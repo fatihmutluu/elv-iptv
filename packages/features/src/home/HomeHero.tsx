@@ -297,58 +297,60 @@ export function HomeHero({
               />
             ) : null}
           </View>
-
-          {slides.length > 1 ? (
-            <View style={styles.dotsRow}>
-              {slides.map((entry, idx) => {
-                const selected = idx === safeIndex;
-                const dotFocused = isTv && focusedAction === `dot-${idx}`;
-                return (
-                  <Pressable
-                    key={entry.itemKey}
-                    testID={`home-hero-dot-${idx}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={i18n.t('home.heroSlideLabel', {
-                      index: idx + 1,
-                      total: slides.length,
-                    })}
-                    accessibilityState={{ selected }}
-                    focusable={!isTv}
-                    onPress={() => onSelectIndex(idx)}
-                    style={[
-                      styles.dotTouch,
-                      cursor,
-                      dotTransition,
-                      {
-                        minWidth: isTouch ? 40 : 28,
-                        minHeight: isTouch ? 40 : 22,
-                        borderRadius: theme.radius.pill,
-                        borderWidth: dotFocused ? theme.focus.ringWidth : 0,
-                        borderColor: dotFocused ? theme.colors.focusRingColor : 'transparent',
-                        backgroundColor: dotFocused ? theme.colors.focusFill : 'transparent',
-                      },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.dotPill,
-                        dotTransition,
-                        {
-                          width: selected ? 22 : 7,
-                          borderRadius: theme.radius.pill,
-                          backgroundColor: selected
-                            ? theme.colors.ctaBg
-                            : theme.colors.actionGlassHoverBg,
-                        },
-                      ]}
-                    />
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
         </View>
       </View>
+
+      {slides.length > 1 ? (
+        <View testID="home-hero-dots" style={[styles.dotsFooter, { marginTop: theme.spacing.md }]}>
+          <View style={styles.dotsRow}>
+            {slides.map((entry, idx) => {
+              const selected = idx === safeIndex;
+              const dotFocused = isTv && focusedAction === `dot-${idx}`;
+              return (
+                <Pressable
+                  key={entry.itemKey}
+                  testID={`home-hero-dot-${idx}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={i18n.t('home.heroSlideLabel', {
+                    index: idx + 1,
+                    total: slides.length,
+                  })}
+                  accessibilityState={{ selected }}
+                  focusable={!isTv}
+                  onPress={() => onSelectIndex(idx)}
+                  style={[
+                    styles.dotTouch,
+                    cursor,
+                    dotTransition,
+                    {
+                      minWidth: isTouch ? 40 : 28,
+                      minHeight: isTouch ? 40 : 22,
+                      borderRadius: theme.radius.pill,
+                      borderWidth: dotFocused ? theme.focus.ringWidth : 0,
+                      borderColor: dotFocused ? theme.colors.focusRingColor : 'transparent',
+                      backgroundColor: dotFocused ? theme.colors.focusFill : 'transparent',
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.dotPill,
+                      dotTransition,
+                      {
+                        width: selected ? 22 : 7,
+                        borderRadius: theme.radius.pill,
+                        backgroundColor: selected
+                          ? theme.colors.ctaBg
+                          : theme.colors.actionGlassHoverBg,
+                      },
+                    ]}
+                  />
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -392,6 +394,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
+  },
+  dotsFooter: {
+    position: 'relative',
+    zIndex: 2,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   dotsRow: {
     flexDirection: 'row',

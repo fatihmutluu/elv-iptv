@@ -4,7 +4,7 @@ import { sourceOfKey } from './queries-shared';
 /** Default profile identifier used before multi-profile selection is configured. */
 export const DEFAULT_PROFILE_ID = 'default';
 
-const MAX_LIST_LIMIT = 100;
+const MAX_LIST_LIMIT = 250;
 
 /** Content kind stored in `watch_progress` and `favorites`. */
 export type UserItemKind = 'live' | 'movie' | 'series' | 'episode';
@@ -111,7 +111,7 @@ export const normalizeProfileId = (profileId?: string): string => {
 /** @internal Clamps a millisecond position or duration to a non-negative integer. */
 export const clampMs = (v: number): number => (Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
 
-/** @internal Clamps list limits to `[0, 100]`. */
+/** @internal Clamps list limits to `[0, 250]`. */
 export const clampLimit = (limit: number | undefined, fallback: number): number => {
   const n = limit === undefined || !Number.isFinite(limit) ? fallback : Math.floor(limit);
   return Math.min(MAX_LIST_LIMIT, Math.max(0, n));

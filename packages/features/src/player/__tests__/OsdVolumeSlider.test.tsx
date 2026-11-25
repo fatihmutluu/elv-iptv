@@ -88,9 +88,16 @@ describe('OsdVolumeSlider', () => {
     try {
       const i18n = createAppI18n('en');
       const onChange = jest.fn();
+      const onDragStateChange = jest.fn();
       const view = await render(
         <ThemeProvider>
-          <OsdVolumeSlider volume={50} muted={false} onChange={onChange} i18n={i18n} />
+          <OsdVolumeSlider
+            volume={50}
+            muted={false}
+            onChange={onChange}
+            onDragStateChange={onDragStateChange}
+            i18n={i18n}
+          />
         </ThemeProvider>,
       );
 
@@ -123,6 +130,7 @@ describe('OsdVolumeSlider', () => {
         });
       });
       expect(onChange).toHaveBeenLastCalledWith(20);
+      expect(onDragStateChange).toHaveBeenLastCalledWith(true);
 
       await act(async () => {
         for (const fn of listeners.get('pointermove') ?? []) fn({ clientX: 175 });
@@ -133,6 +141,7 @@ describe('OsdVolumeSlider', () => {
         for (const fn of listeners.get('pointerup') ?? []) fn({ clientX: 250 });
       });
       expect(onChange).toHaveBeenLastCalledWith(100);
+      expect(onDragStateChange).toHaveBeenLastCalledWith(false);
 
       await view.unmount();
     } finally {

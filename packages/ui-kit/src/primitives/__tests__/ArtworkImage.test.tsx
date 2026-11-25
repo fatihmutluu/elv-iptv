@@ -677,4 +677,48 @@ describe('ArtworkImage channel-logo readability modes (#126)', () => {
     expect(offFrame.backgroundColor).toBe(defaultTheme.colors.bgCard);
     expect(offFrame.padding).toBeUndefined();
   });
+
+  it('never applies subtleHighlight plate behind opaque fallback or placeholder surfaces', async () => {
+    const registry = createDeadHostRegistry();
+    const loadedUris = createLoadedUriCache();
+    const defaultTheme = buildTheme();
+
+    // Missing/failed logo with logoBackdrop=true must keep bgCard (no subtleHighlight halo behind fallback)
+    const fallbackView = await render(
+      <ThemeProvider>
+        <ArtworkImage
+          uri={null}
+          label="Missing Live Logo"
+          logoBackdrop
+          deadHosts={registry}
+          loadedUris={loadedUris}
+          testID="logo-fallback"
+        />
+      </ThemeProvider>,
+    );
+    const fbFrame = StyleSheet.flatten(screen.getByTestId('logo-fallback').props.style);
+    expect(fbFrame.backgroundColor).toBe(defaultTheme.colors.bgCard);
+    expect(fbFrame.padding).toBeUndefined();
+    await fallbackView.unmount();
+
+    // Loading logo with logoBackdrop=true uses the plate directly without an opaque dark placeholder
+    await render(
+      <ThemeProvider>
+        <ArtworkImage
+          uri="https://img.example/live-logo.png"
+          label="Live Logo"
+          logoBackdrop
+          deadHosts={registry}
+          loadedUris={loadedUris}
+          testID="logo-loading"
+        />
+      </ThemeProvider>,
+    );
+    expect(StyleSheet.flatten(screen.getByTestId('logo-loading').props.style).backgroundColor).toBe(
+      defaultTheme.colors.subtleHighlight,
+    );
+    expect(
+      screen.queryByTestId('logo-loading-placeholder', { includeHiddenElements: true }),
+    ).toBeNull();
+  });
 });

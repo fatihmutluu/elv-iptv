@@ -26,6 +26,8 @@ describe('catalog-ipc recent channels guards (#53)', () => {
         reqId: 5,
         call: { method: 'listRecentChannels', limit: 50, profileId: 'default' },
       },
+      { type: 'call', reqId: 10, call: { method: 'listFavorites', limit: 200 } },
+      { type: 'call', reqId: 11, call: { method: 'listFavorites', limit: 250 } },
     ];
     for (const msg of valid) {
       expect(isCatalogClientMessage(msg), JSON.stringify(msg)).toBe(true);
@@ -73,9 +75,10 @@ describe('catalog-ipc recent channels guards (#53)', () => {
         },
       },
       { type: 'call', reqId: 6, call: { method: 'listRecentChannels', limit: -1 } },
-      { type: 'call', reqId: 7, call: { method: 'listRecentChannels', limit: 101 } },
+      { type: 'call', reqId: 7, call: { method: 'listRecentChannels', limit: 251 } },
       { type: 'call', reqId: 8, call: { method: 'listRecentChannels', limit: 1.5 } },
       { type: 'call', reqId: 9, call: { method: 'listRecentChannels', profileId: '' } },
+      { type: 'call', reqId: 12, call: { method: 'listFavorites', limit: 251 } },
     ];
     for (const msg of invalid) {
       expect(isCatalogClientMessage(msg), JSON.stringify(msg)).toBe(false);

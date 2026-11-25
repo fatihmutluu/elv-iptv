@@ -372,7 +372,7 @@ describe('createCatalogBridge', () => {
     await expect(bridge.alphabetIndex?.({ kind: 'movie', sourceId: '' })).rejects.toThrow(
       /source-format\/invalid-request/,
     );
-    await expect(bridge.listContinueWatching(101)).rejects.toThrow(
+    await expect(bridge.listContinueWatching(251)).rejects.toThrow(
       /source-format\/invalid-request/,
     );
     expect(

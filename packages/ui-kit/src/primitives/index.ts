@@ -58,4 +58,22 @@ export { PosterCard, type PosterCardProps, type PosterCardQuickActions } from '.
 export { Scrim, type ScrimDirection, type ScrimProps } from './Scrim';
 export { SkeletonBox, type SkeletonBoxProps } from './SkeletonBox';
 export { Surface, type SurfaceProps, type SurfaceTone } from './Surface';
+export {
+  computeSafeAimTriangle,
+  isPointInRect,
+  isPointInTriangle,
+  type Point,
+  type RectLike,
+  type Triangle,
+} from './safe-hover-geometry';
+export { Tooltip, type TooltipPlacement, type TooltipProps } from './Tooltip';
+export {
+  createSafeHoverController,
+  type SafeHoverBridgeOptions,
+  type SafeHoverBridgeResult,
+  type SafeHoverController,
+  type SafeHoverControllerOptions,
+  type SafeHoverEventProps,
+  useSafeHoverBridge,
+} from './useSafeHoverBridge';
 export { WideCard, type WideCardProps } from './WideCard';

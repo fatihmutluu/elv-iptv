@@ -1,4 +1,4 @@
-import { memo, type ReactElement, useCallback, useState } from 'react';
+import { memo, type ReactElement, useCallback, useRef, useState } from 'react';
 import {
   type GestureResponderEvent,
   Pressable,
@@ -14,6 +14,7 @@ import { useViewport } from '../viewport';
 import { ArtworkImage } from './ArtworkImage';
 import type { DeadHostRegistry } from './dead-host-registry';
 import { MicroPill } from './MicroPill';
+import { Tooltip } from './Tooltip';
 
 /** Desktop pointer-only hover quick-action handlers for {@link PosterCard} (`#409`). */
 export interface PosterCardQuickActions {
@@ -119,14 +120,26 @@ function PosterCardInner({
   const viewport = useViewport();
   const [nativeFocused, setNativeFocused] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const pointerHoverActiveRef = useRef(false);
 
   const handleFocus = useCallback(() => {
     setNativeFocused(true);
     onFocus?.();
   }, [onFocus]);
   const handleBlur = useCallback(() => setNativeFocused(false), []);
+  const handlePointerEnter = useCallback(() => {
+    pointerHoverActiveRef.current = true;
+    setHovered(true);
+  }, []);
+  const handlePointerLeave = useCallback(() => {
+    pointerHoverActiveRef.current = false;
+    setHovered(false);
+  }, []);
   const handleHoverIn = useCallback(() => setHovered(true), []);
-  const handleHoverOut = useCallback(() => setHovered(false), []);
+  const handleHoverOut = useCallback(() => {
+    if (pointerHoverActiveRef.current) return;
+    setHovered(false);
+  }, []);
 
   const trimmedBadge = badge?.trim() ?? '';
   const showUnplayedCount =
@@ -147,315 +160,336 @@ function PosterCardInner({
       : undefined;
 
   return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={meta ? `${title}, ${meta}` : title}
-      focusable={focusable}
-      onPress={onPress}
-      onFocus={handleFocus}
-      onBlur={handleBlur}
-      onHoverIn={handleHoverIn}
-      onHoverOut={handleHoverOut}
-      style={(state) => {
-        const activeFocus = focused ?? (nativeFocused || Boolean(state.focused));
-        const showTvFocus = focused === true || (viewport.inputModality === 'tv' && activeFocus);
-        const pressScale = theme.reduceMotion ? 1 : 0.98;
-        const scale = state.pressed ? pressScale : showTvFocus ? theme.focus.cardScale : 1;
-
-        return [
-          {
-            ...(width !== undefined ? { width } : {}),
-            opacity: state.pressed ? 0.92 : 1,
-            transform: [{ scale }],
-          },
-          cardTransition,
-          cursor,
-          style,
-        ];
-      }}
+    <View
+      testID={testID ? `${testID}-hover-container` : undefined}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
+      style={[width !== undefined ? { width } : undefined, style]}
     >
-      {({ focused: stateFocused }) => {
-        const activeFocus = focused ?? (nativeFocused || Boolean(stateFocused));
-        const showTvFocus = focused === true || (viewport.inputModality === 'tv' && activeFocus);
-        const showPointerHover = !showTvFocus && viewport.inputModality === 'pointer' && hovered;
+      <Pressable
+        testID={testID}
+        accessibilityRole="button"
+        accessibilityLabel={meta ? `${title}, ${meta}` : title}
+        focusable={focusable}
+        onPress={onPress}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onHoverIn={handleHoverIn}
+        onHoverOut={handleHoverOut}
+        style={(state) => {
+          const activeFocus = focused ?? (nativeFocused || Boolean(state.focused));
+          const showTvFocus = focused === true || (viewport.inputModality === 'tv' && activeFocus);
+          const pressScale = theme.reduceMotion ? 1 : 0.98;
+          const scale = state.pressed ? pressScale : showTvFocus ? theme.focus.cardScale : 1;
 
-        const frameShadow = showTvFocus
-          ? [NATIVE_SHADOW_FOCUS, webShadow('0 18px 36px rgba(0, 0, 0, 0.72)')]
-          : showPointerHover
-            ? [NATIVE_SHADOW_HOVER, webShadow('0 14px 32px rgba(0, 0, 0, 0.65)')]
-            : [NATIVE_SHADOW_REST, webShadow('0 8px 22px rgba(0, 0, 0, 0.44)')];
+          return [
+            {
+              width: '100%',
+              opacity: state.pressed ? 0.92 : 1,
+              transform: [{ scale }],
+            },
+            cardTransition,
+            cursor,
+          ];
+        }}
+      >
+        {({ focused: stateFocused }) => {
+          const activeFocus = focused ?? (nativeFocused || Boolean(stateFocused));
+          const showTvFocus = focused === true || (viewport.inputModality === 'tv' && activeFocus);
+          const showPointerHover = !showTvFocus && viewport.inputModality === 'pointer' && hovered;
 
-        return (
-          <>
-            <View
-              testID={testID ? `${testID}-artwork-frame` : undefined}
-              style={[
-                styles.artworkShadow,
-                {
-                  borderRadius: theme.radius.card,
-                  backgroundColor: theme.colors.bgCard,
-                },
-                frameShadow,
-                shadowTransition,
-              ]}
-            >
-              <View style={[styles.artworkClip, { borderRadius: theme.radius.card }]}>
-                <ArtworkImage
-                  uri={imageUri}
-                  label={title}
-                  aspectRatio={aspectRatio}
-                  maxDecodePx={maxDecodePx}
-                  borderRadius={theme.radius.card}
-                  zoomed={showPointerHover}
-                  {...(deadHosts !== undefined ? { deadHosts } : {})}
-                  testID={testID ? `${testID}-image` : undefined}
-                />
-                {trimmedBadge.length > 0 ? (
-                  <View
-                    pointerEvents="none"
-                    style={[styles.badgeSlot, { top: theme.spacing.xs, left: theme.spacing.xs }]}
-                  >
-                    <MicroPill
-                      label={trimmedBadge}
-                      testID={testID ? `${testID}-badge` : undefined}
-                    />
-                  </View>
-                ) : null}
-                {showUnplayedCount ? (
-                  <View
-                    pointerEvents="none"
-                    style={[styles.badgeSlot, { top: theme.spacing.xs, right: theme.spacing.xs }]}
-                  >
-                    <MicroPill
-                      label={String(Math.floor(unplayedCount))}
-                      accessibilityLabel={unplayedLabel}
-                      testID={testID ? `${testID}-unplayed` : undefined}
-                    />
-                  </View>
-                ) : showAllWatched ? (
-                  <View
-                    pointerEvents="none"
-                    style={[styles.badgeSlot, { top: theme.spacing.xs, right: theme.spacing.xs }]}
-                  >
-                    <MicroPill
-                      icon="check"
-                      tone="success"
-                      accessibilityLabel={unplayedLabel}
-                      testID={testID ? `${testID}-watched-badge` : undefined}
-                    />
-                  </View>
-                ) : null}
-                {showPointerHover && hasQuickActions && quickActions !== undefined ? (
-                  <View
-                    pointerEvents="box-none"
-                    style={[
-                      styles.quickActionsOverlay,
-                      { backgroundColor: theme.colors.scrimSoft },
-                    ]}
-                  >
-                    {quickActions.onPlay !== undefined ? (
-                      <Pressable
-                        testID={testID ? `${testID}-quick-play` : undefined}
-                        accessibilityRole="button"
-                        accessibilityLabel={quickActions.playLabel ?? title}
-                        focusable={false}
-                        onPress={(e) => {
-                          stopQuickActionEvent(e);
-                          quickActions.onPlay?.();
-                        }}
-                        style={({ pressed }) => [
-                          styles.quickPlayButton,
-                          {
-                            borderRadius: theme.radius.pill,
-                            backgroundColor: theme.colors.ctaBg,
-                            opacity: pressed ? 0.88 : 1,
-                          },
-                          cursor,
-                        ]}
-                      >
-                        <Icon name="play" size={18} color={theme.colors.ctaFg} />
-                      </Pressable>
-                    ) : null}
-                    {quickActions.onToggleFavorite !== undefined ||
-                    quickActions.onToggleWatched !== undefined ? (
-                      <View
-                        pointerEvents="box-none"
-                        style={[
-                          styles.quickCornerRow,
-                          {
-                            bottom: theme.spacing.xs + (clamped !== undefined ? 4 : 0),
-                            right: theme.spacing.xs,
-                          },
-                        ]}
-                      >
-                        {quickActions.onToggleFavorite !== undefined ? (
-                          <Pressable
-                            testID={testID ? `${testID}-quick-favorite` : undefined}
-                            accessibilityRole="button"
-                            accessibilityLabel={quickActions.favoriteLabel}
-                            accessibilityState={{ selected: Boolean(quickActions.isFavorite) }}
-                            focusable={false}
-                            onPress={(e) => {
-                              stopQuickActionEvent(e);
-                              quickActions.onToggleFavorite?.();
-                            }}
-                            style={({ pressed }) => [
-                              styles.quickCornerButton,
-                              {
-                                borderRadius: theme.radius.pill,
-                                backgroundColor: quickActions.isFavorite
-                                  ? theme.colors.accentTint
-                                  : theme.colors.scrimStrong,
-                                borderColor: quickActions.isFavorite
-                                  ? theme.colors.accent
-                                  : theme.colors.actionGlassBorder,
-                                opacity: pressed ? 0.85 : 1,
-                              },
-                              cursor,
-                            ]}
-                          >
-                            <Icon
-                              name={quickActions.isFavorite ? 'starFilled' : 'star'}
-                              size={13}
-                              color={
-                                quickActions.isFavorite
-                                  ? theme.colors.accent
-                                  : theme.colors.textPrimary
-                              }
-                            />
-                          </Pressable>
-                        ) : null}
-                        {quickActions.onToggleWatched !== undefined ? (
-                          <Pressable
-                            testID={testID ? `${testID}-quick-watched` : undefined}
-                            accessibilityRole="button"
-                            accessibilityLabel={quickActions.watchedLabel}
-                            accessibilityState={{ selected: Boolean(quickActions.isWatched) }}
-                            focusable={false}
-                            onPress={(e) => {
-                              stopQuickActionEvent(e);
-                              quickActions.onToggleWatched?.();
-                            }}
-                            style={({ pressed }) => [
-                              styles.quickCornerButton,
-                              {
-                                borderRadius: theme.radius.pill,
-                                backgroundColor: theme.colors.scrimStrong,
-                                borderColor: quickActions.isWatched
-                                  ? theme.colors.successColor
-                                  : theme.colors.actionGlassBorder,
-                                opacity: pressed ? 0.85 : 1,
-                              },
-                              cursor,
-                            ]}
-                          >
-                            <Icon
-                              name="check"
-                              size={13}
-                              color={
-                                quickActions.isWatched
-                                  ? theme.colors.successColor
-                                  : theme.colors.textPrimary
-                              }
-                            />
-                          </Pressable>
-                        ) : null}
-                      </View>
-                    ) : null}
-                  </View>
-                ) : null}
-                {clamped !== undefined ? (
-                  <View
-                    pointerEvents="none"
-                    testID={testID ? `${testID}-progress` : undefined}
-                    style={[
-                      styles.progressTrack,
-                      { backgroundColor: theme.colors.actionGlassHoverBg },
-                    ]}
-                  >
-                    <View
-                      testID={testID ? `${testID}-progress-fill` : undefined}
-                      style={[
-                        styles.progressFill,
-                        {
-                          width: `${Math.round(clamped * 1000) / 10}%`,
-                          backgroundColor: theme.colors.accent,
-                        },
-                      ]}
-                    />
-                  </View>
-                ) : null}
-              </View>
-              {showTvFocus || showPointerHover ? (
-                <View
-                  pointerEvents="none"
-                  testID={testID ? `${testID}-focus-ring` : undefined}
-                  style={[
-                    styles.outerRing,
-                    showTvFocus
-                      ? {
-                          top: -3,
-                          bottom: -3,
-                          left: -3,
-                          right: -3,
-                          borderRadius: theme.radius.card + 3,
-                          borderWidth: theme.focus.ringWidth,
-                          borderColor: theme.colors.focusRingColor,
-                        }
-                      : {
-                          top: -1.5,
-                          bottom: -1.5,
-                          left: -1.5,
-                          right: -1.5,
-                          borderRadius: theme.radius.card + 1.5,
-                          borderWidth: 1.5,
-                          borderColor: theme.colors.hoverRingBorder,
-                        },
-                  ]}
-                />
-              ) : null}
-            </View>
-            <View style={styles.info}>
-              <Text
-                numberOfLines={1}
+          const frameShadow = showTvFocus
+            ? [NATIVE_SHADOW_FOCUS, webShadow('0 18px 36px rgba(0, 0, 0, 0.72)')]
+            : showPointerHover
+              ? [NATIVE_SHADOW_HOVER, webShadow('0 14px 32px rgba(0, 0, 0, 0.65)')]
+              : [NATIVE_SHADOW_REST, webShadow('0 8px 22px rgba(0, 0, 0, 0.44)')];
+
+          return (
+            <>
+              <View
+                testID={testID ? `${testID}-artwork-frame` : undefined}
                 style={[
-                  fontFamilyStyle,
+                  styles.artworkShadow,
                   {
-                    fontSize: scaleFont(12.5, theme.fontScale),
-                    lineHeight: Math.round(17 * theme.fontScale),
-                    fontWeight: '600',
-                    letterSpacing: -0.1,
-                    color: theme.colors.textPrimary,
+                    borderRadius: theme.radius.card,
+                    backgroundColor: theme.colors.bgCard,
                   },
+                  frameShadow,
+                  shadowTransition,
                 ]}
               >
-                {title}
-              </Text>
-              {meta ? (
+                <View style={[styles.artworkClip, { borderRadius: theme.radius.card }]}>
+                  <ArtworkImage
+                    uri={imageUri}
+                    label={title}
+                    aspectRatio={aspectRatio}
+                    maxDecodePx={maxDecodePx}
+                    borderRadius={theme.radius.card}
+                    zoomed={showPointerHover}
+                    {...(deadHosts !== undefined ? { deadHosts } : {})}
+                    testID={testID ? `${testID}-image` : undefined}
+                  />
+                  {trimmedBadge.length > 0 ? (
+                    <View
+                      pointerEvents="none"
+                      style={[styles.badgeSlot, { top: theme.spacing.xs, left: theme.spacing.xs }]}
+                    >
+                      <MicroPill
+                        label={trimmedBadge}
+                        testID={testID ? `${testID}-badge` : undefined}
+                      />
+                    </View>
+                  ) : null}
+                  {showUnplayedCount ? (
+                    <View
+                      pointerEvents="none"
+                      style={[styles.badgeSlot, { top: theme.spacing.xs, right: theme.spacing.xs }]}
+                    >
+                      <MicroPill
+                        label={String(Math.floor(unplayedCount))}
+                        accessibilityLabel={unplayedLabel}
+                        testID={testID ? `${testID}-unplayed` : undefined}
+                      />
+                    </View>
+                  ) : showAllWatched ? (
+                    <View
+                      pointerEvents="none"
+                      style={[styles.badgeSlot, { top: theme.spacing.xs, right: theme.spacing.xs }]}
+                    >
+                      <MicroPill
+                        icon="check"
+                        tone="success"
+                        accessibilityLabel={unplayedLabel}
+                        testID={testID ? `${testID}-watched-badge` : undefined}
+                      />
+                    </View>
+                  ) : null}
+                  {showPointerHover && hasQuickActions && quickActions !== undefined ? (
+                    <View
+                      pointerEvents="box-none"
+                      style={[
+                        styles.quickActionsOverlay,
+                        { backgroundColor: theme.colors.scrimSoft },
+                      ]}
+                    >
+                      {quickActions.onPlay !== undefined ? (
+                        <Tooltip
+                          content={quickActions.playLabel ?? title}
+                          testID={testID ? `${testID}-quick-play-tooltip` : undefined}
+                        >
+                          <Pressable
+                            testID={testID ? `${testID}-quick-play` : undefined}
+                            accessibilityRole="button"
+                            accessibilityLabel={quickActions.playLabel ?? title}
+                            focusable={false}
+                            onPress={(e) => {
+                              stopQuickActionEvent(e);
+                              quickActions.onPlay?.();
+                            }}
+                            style={({ pressed }) => [
+                              styles.quickPlayButton,
+                              {
+                                borderRadius: theme.radius.pill,
+                                backgroundColor: theme.colors.ctaBg,
+                                opacity: pressed ? 0.88 : 1,
+                              },
+                              cursor,
+                            ]}
+                          >
+                            <Icon name="play" size={18} color={theme.colors.ctaFg} />
+                          </Pressable>
+                        </Tooltip>
+                      ) : null}
+                      {quickActions.onToggleFavorite !== undefined ||
+                      quickActions.onToggleWatched !== undefined ? (
+                        <View
+                          pointerEvents="box-none"
+                          style={[
+                            styles.quickCornerRow,
+                            {
+                              bottom: theme.spacing.xs + (clamped !== undefined ? 4 : 0),
+                              right: theme.spacing.xs,
+                            },
+                          ]}
+                        >
+                          {quickActions.onToggleFavorite !== undefined ? (
+                            <Tooltip
+                              content={quickActions.favoriteLabel}
+                              testID={testID ? `${testID}-quick-favorite-tooltip` : undefined}
+                            >
+                              <Pressable
+                                testID={testID ? `${testID}-quick-favorite` : undefined}
+                                accessibilityRole="button"
+                                accessibilityLabel={quickActions.favoriteLabel}
+                                accessibilityState={{ selected: Boolean(quickActions.isFavorite) }}
+                                focusable={false}
+                                onPress={(e) => {
+                                  stopQuickActionEvent(e);
+                                  quickActions.onToggleFavorite?.();
+                                }}
+                                style={({ pressed }) => [
+                                  styles.quickCornerButton,
+                                  {
+                                    borderRadius: theme.radius.pill,
+                                    backgroundColor: quickActions.isFavorite
+                                      ? theme.colors.accentTint
+                                      : theme.colors.scrimStrong,
+                                    borderColor: quickActions.isFavorite
+                                      ? theme.colors.accent
+                                      : theme.colors.actionGlassBorder,
+                                    opacity: pressed ? 0.85 : 1,
+                                  },
+                                  cursor,
+                                ]}
+                              >
+                                <Icon
+                                  name={quickActions.isFavorite ? 'starFilled' : 'star'}
+                                  size={13}
+                                  color={
+                                    quickActions.isFavorite
+                                      ? theme.colors.accent
+                                      : theme.colors.textPrimary
+                                  }
+                                />
+                              </Pressable>
+                            </Tooltip>
+                          ) : null}
+                          {quickActions.onToggleWatched !== undefined ? (
+                            <Tooltip
+                              content={quickActions.watchedLabel}
+                              testID={testID ? `${testID}-quick-watched-tooltip` : undefined}
+                            >
+                              <Pressable
+                                testID={testID ? `${testID}-quick-watched` : undefined}
+                                accessibilityRole="button"
+                                accessibilityLabel={quickActions.watchedLabel}
+                                accessibilityState={{ selected: Boolean(quickActions.isWatched) }}
+                                focusable={false}
+                                onPress={(e) => {
+                                  stopQuickActionEvent(e);
+                                  quickActions.onToggleWatched?.();
+                                }}
+                                style={({ pressed }) => [
+                                  styles.quickCornerButton,
+                                  {
+                                    borderRadius: theme.radius.pill,
+                                    backgroundColor: theme.colors.scrimStrong,
+                                    borderColor: quickActions.isWatched
+                                      ? theme.colors.successColor
+                                      : theme.colors.actionGlassBorder,
+                                    opacity: pressed ? 0.85 : 1,
+                                  },
+                                  cursor,
+                                ]}
+                              >
+                                <Icon
+                                  name="check"
+                                  size={13}
+                                  color={
+                                    quickActions.isWatched
+                                      ? theme.colors.successColor
+                                      : theme.colors.textPrimary
+                                  }
+                                />
+                              </Pressable>
+                            </Tooltip>
+                          ) : null}
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null}
+                  {clamped !== undefined ? (
+                    <View
+                      pointerEvents="none"
+                      testID={testID ? `${testID}-progress` : undefined}
+                      style={[
+                        styles.progressTrack,
+                        { backgroundColor: theme.colors.actionGlassHoverBg },
+                      ]}
+                    >
+                      <View
+                        testID={testID ? `${testID}-progress-fill` : undefined}
+                        style={[
+                          styles.progressFill,
+                          {
+                            width: `${Math.round(clamped * 1000) / 10}%`,
+                            backgroundColor: theme.colors.accent,
+                          },
+                        ]}
+                      />
+                    </View>
+                  ) : null}
+                </View>
+                {showTvFocus || showPointerHover ? (
+                  <View
+                    pointerEvents="none"
+                    testID={testID ? `${testID}-focus-ring` : undefined}
+                    style={[
+                      styles.outerRing,
+                      showTvFocus
+                        ? {
+                            top: -3,
+                            bottom: -3,
+                            left: -3,
+                            right: -3,
+                            borderRadius: theme.radius.card + 3,
+                            borderWidth: theme.focus.ringWidth,
+                            borderColor: theme.colors.focusRingColor,
+                          }
+                        : {
+                            top: -1.5,
+                            bottom: -1.5,
+                            left: -1.5,
+                            right: -1.5,
+                            borderRadius: theme.radius.card + 1.5,
+                            borderWidth: 1.5,
+                            borderColor: theme.colors.hoverRingBorder,
+                          },
+                    ]}
+                  />
+                ) : null}
+              </View>
+              <View style={styles.info}>
                 <Text
                   numberOfLines={1}
-                  testID={testID ? `${testID}-meta` : undefined}
                   style={[
                     fontFamilyStyle,
-                    TABULAR_NUMS_STYLE,
                     {
-                      fontSize: scaleFont(11, theme.fontScale),
-                      lineHeight: Math.round(15 * theme.fontScale),
-                      fontWeight: '500',
-                      color: theme.colors.textMuted,
-                      marginTop: 2,
+                      fontSize: scaleFont(12.5, theme.fontScale),
+                      lineHeight: Math.round(17 * theme.fontScale),
+                      fontWeight: '600',
+                      letterSpacing: -0.1,
+                      color: theme.colors.textPrimary,
                     },
                   ]}
                 >
-                  {meta}
+                  {title}
                 </Text>
-              ) : null}
-            </View>
-          </>
-        );
-      }}
-    </Pressable>
+                {meta ? (
+                  <Text
+                    numberOfLines={1}
+                    testID={testID ? `${testID}-meta` : undefined}
+                    style={[
+                      fontFamilyStyle,
+                      TABULAR_NUMS_STYLE,
+                      {
+                        fontSize: scaleFont(11, theme.fontScale),
+                        lineHeight: Math.round(15 * theme.fontScale),
+                        fontWeight: '500',
+                        color: theme.colors.textMuted,
+                        marginTop: 2,
+                      },
+                    ]}
+                  >
+                    {meta}
+                  </Text>
+                ) : null}
+              </View>
+            </>
+          );
+        }}
+      </Pressable>
+    </View>
   );
 }
 

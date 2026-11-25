@@ -2,6 +2,7 @@ import type { AppI18n } from '@elv/i18n';
 import {
   type FormFactor,
   Icon,
+  Tooltip,
   useTheme,
   webBackdropBlur,
   webCursorPointer,
@@ -110,30 +111,34 @@ export function FloatingMiniPlayerChrome({
           style={styles.tapArea}
         />
         <View style={styles.actionsRow}>
-          <Pressable
-            testID="mini-player-expand"
-            accessibilityRole="button"
-            accessibilityLabel={i18n.t('player.miniPlayer.expand')}
-            hitSlop={4}
-            onFocus={() => setFocusedButton('expand')}
-            onBlur={() => setFocusedButton((prev) => (prev === 'expand' ? null : prev))}
-            onPress={onExpand}
-            style={({ pressed }) => renderControlStyle('expand', pressed)}
-          >
-            <Icon name="fullscreen" size={18} color={theme.colors.textPrimary} />
-          </Pressable>
-          <Pressable
-            testID="mini-player-close"
-            accessibilityRole="button"
-            accessibilityLabel={i18n.t('player.miniPlayer.close')}
-            hitSlop={4}
-            onFocus={() => setFocusedButton('close')}
-            onBlur={() => setFocusedButton((prev) => (prev === 'close' ? null : prev))}
-            onPress={onClose}
-            style={({ pressed }) => renderControlStyle('close', pressed)}
-          >
-            <Icon name="close" size={18} color={theme.colors.textPrimary} />
-          </Pressable>
+          <Tooltip content={i18n.t('player.miniPlayer.expand')} placement="top" disabled={isTv}>
+            <Pressable
+              testID="mini-player-expand"
+              accessibilityRole="button"
+              accessibilityLabel={i18n.t('player.miniPlayer.expand')}
+              hitSlop={4}
+              onFocus={() => setFocusedButton('expand')}
+              onBlur={() => setFocusedButton((prev) => (prev === 'expand' ? null : prev))}
+              onPress={onExpand}
+              style={({ pressed }) => renderControlStyle('expand', pressed)}
+            >
+              <Icon name="fullscreen" size={18} color={theme.colors.textPrimary} />
+            </Pressable>
+          </Tooltip>
+          <Tooltip content={i18n.t('player.miniPlayer.close')} placement="top" disabled={isTv}>
+            <Pressable
+              testID="mini-player-close"
+              accessibilityRole="button"
+              accessibilityLabel={i18n.t('player.miniPlayer.close')}
+              hitSlop={4}
+              onFocus={() => setFocusedButton('close')}
+              onBlur={() => setFocusedButton((prev) => (prev === 'close' ? null : prev))}
+              onPress={onClose}
+              style={({ pressed }) => renderControlStyle('close', pressed)}
+            >
+              <Icon name="close" size={18} color={theme.colors.textPrimary} />
+            </Pressable>
+          </Tooltip>
         </View>
       </View>
 

@@ -18,6 +18,7 @@ export interface OsdVolumeSliderProps {
   readonly volume: number;
   readonly muted: boolean;
   readonly onChange: (volume: number) => void;
+  readonly onDragStateChange?: (dragging: boolean) => void;
   readonly i18n: AppI18n;
   readonly disabled?: boolean;
   readonly testID?: string;
@@ -43,6 +44,7 @@ export function OsdVolumeSlider({
   volume,
   muted,
   onChange,
+  onDragStateChange,
   i18n,
   disabled = false,
   testID = 'osd-volume-slider',
@@ -57,15 +59,28 @@ export function OsdVolumeSlider({
   const disabledRef = useRef(disabled);
   disabledRef.current = disabled;
   const dragRatioRef = useRef<number | null>(null);
+  const draggingRef = useRef(false);
   const justDraggedRef = useRef(false);
   const dragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cleanupDragRef = useRef<(() => void) | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onDragStateChangeRef = useRef(onDragStateChange);
+  onDragStateChangeRef.current = onDragStateChange;
+
+  const setDraggingState = (next: boolean): void => {
+    if (draggingRef.current === next) return;
+    draggingRef.current = next;
+    onDragStateChangeRef.current?.(next);
+  };
 
   useEffect(
     () => () => {
       cleanupDragRef.current?.();
+      if (draggingRef.current) {
+        draggingRef.current = false;
+        onDragStateChangeRef.current?.(false);
+      }
       if (dragResetTimerRef.current !== null) clearTimeout(dragResetTimerRef.current);
     },
     [],
@@ -87,6 +102,7 @@ export function OsdVolumeSlider({
     onStart: (ratio) => {
       const next = clampVolume(ratio * 100);
       dragRatioRef.current = ratio;
+      setDraggingState(true);
       setDragVolume(next);
       onChangeRef.current(next);
     },
@@ -99,12 +115,14 @@ export function OsdVolumeSlider({
     onCommit: (ratio) => {
       const next = clampVolume(ratio * 100);
       dragRatioRef.current = null;
+      setDraggingState(false);
       setDragVolume(null);
       markDragEnded();
       onChangeRef.current(next);
     },
     onCancel: () => {
       dragRatioRef.current = null;
+      setDraggingState(false);
       setDragVolume(null);
     },
   });
@@ -126,6 +144,7 @@ export function OsdVolumeSlider({
     cleanupDragRef.current?.();
     const initialVol = clampVolume(initial * 100);
     dragRatioRef.current = initial;
+    setDraggingState(true);
     setDragVolume(initialVol);
     onChangeRef.current(initialVol);
     cleanupDragRef.current = attachWebProgressDrag({
@@ -141,6 +160,7 @@ export function OsdVolumeSlider({
       onCommit: (ratio) => {
         cleanupDragRef.current = null;
         dragRatioRef.current = null;
+        setDraggingState(false);
         markDragEnded();
         setDragVolume(null);
         onChangeRef.current(clampVolume(ratio * 100));
@@ -148,6 +168,7 @@ export function OsdVolumeSlider({
       onCancel: () => {
         cleanupDragRef.current = null;
         dragRatioRef.current = null;
+        setDraggingState(false);
         setDragVolume(null);
       },
     });

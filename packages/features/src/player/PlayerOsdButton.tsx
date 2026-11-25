@@ -9,6 +9,7 @@ import {
   Icon,
   type IconName,
   TABULAR_NUMS_STYLE,
+  Tooltip,
   useTheme,
   useViewport,
   webBackdropBlur,
@@ -143,6 +144,8 @@ export interface OsdButtonProps {
   onPress: () => void;
   onHoverIn?: () => void;
   onHoverOut?: () => void;
+  tooltipPlacement?: 'top' | 'bottom' | 'left' | 'right';
+  tooltipDisabled?: boolean;
   isTv: boolean;
   tvFocused?: boolean;
 }
@@ -240,82 +243,89 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
       : undefined;
 
   const useBlur = isGlassPrimary || isPillCta || (!isPrimary && !isBare);
+  const tooltipText = p.accessibilityLabel ?? p.label;
 
   return (
-    <Pressable
-      testID={p.testID}
-      {...(p.isTv ? { focusable: false } : {})}
-      {...webShortcutProps}
-      accessibilityRole="button"
-      accessibilityLabel={p.accessibilityLabel ?? p.label ?? p.testID}
-      accessibilityState={{ selected: focused }}
-      onHoverIn={() => {
-        setHovered(true);
-        p.onHoverIn?.();
-      }}
-      onHoverOut={() => {
-        setHovered(false);
-        p.onHoverOut?.();
-      }}
-      onPressIn={() => setPressed(true)}
-      onPressOut={() => setPressed(false)}
-      onPress={(e) => {
-        blurWebTarget(e.currentTarget);
-        p.onPress();
-      }}
-      style={[
-        styles.button,
-        p.compact === true ? styles.compactButton : null,
-        isPillCta ? styles.pillCtaButton : null,
-        isBare && hasLabel ? styles.bareLabelButton : null,
-        isIconOnly ? styles.iconButton : isPrimary ? styles.primaryButton : null,
-        isIconOnly
-          ? { width: boxSize, height: boxSize, minWidth: boxSize, minHeight: boxSize }
-          : null,
-        {
-          backgroundColor,
-          borderColor,
-          borderWidth,
-          borderRadius,
-          ...(shouldScale ? { transform: [{ scale }] } : {}),
-        },
-        useBlur ? webBackdropBlur(12) : undefined,
-        webTransition(theme, 'background-color, border-color, transform'),
-        !p.isTv ? webCursorPointer() : undefined,
-      ]}
+    <Tooltip
+      content={tooltipText}
+      placement={p.tooltipPlacement ?? 'bottom'}
+      disabled={p.isTv || p.tooltipDisabled === true || tooltipText === undefined}
     >
-      {p.loading === true ? (
-        <ActivityIndicator testID={`${p.testID}-loading`} size="small" color={foreground} />
-      ) : p.icon !== undefined ? (
-        <Icon name={p.icon} size={iconSize} color={foreground} />
-      ) : null}
-      {!isIconOnly && hasLabel ? (
-        <Text
-          numberOfLines={1}
-          style={[
-            p.compact === true ? theme.typography.caption : theme.typography.title,
-            p.tabularLabel === true ? TABULAR_NUMS_STYLE : undefined,
-            { color: foreground, fontWeight: isPrimary ? '700' : '600' },
-          ]}
-        >
-          {p.label}
-        </Text>
-      ) : null}
-      {(isPrimary || isGlassPrimary) && focused ? (
-        <View
-          pointerEvents="none"
-          testID={`${p.testID}-focus-ring`}
-          style={[
-            styles.primaryFocusRing,
-            {
-              borderRadius: isIconOnly ? theme.radius.pill : theme.radius.button + 4,
-              borderWidth: theme.focus.ringWidth,
-              borderColor: theme.colors.focusRingColor,
-            },
-          ]}
-        />
-      ) : null}
-    </Pressable>
+      <Pressable
+        testID={p.testID}
+        {...(p.isTv ? { focusable: false } : {})}
+        {...webShortcutProps}
+        accessibilityRole="button"
+        accessibilityLabel={p.accessibilityLabel ?? p.label ?? p.testID}
+        accessibilityState={{ selected: focused }}
+        onHoverIn={() => {
+          setHovered(true);
+          p.onHoverIn?.();
+        }}
+        onHoverOut={() => {
+          setHovered(false);
+          p.onHoverOut?.();
+        }}
+        onPressIn={() => setPressed(true)}
+        onPressOut={() => setPressed(false)}
+        onPress={(e) => {
+          blurWebTarget(e.currentTarget);
+          p.onPress();
+        }}
+        style={[
+          styles.button,
+          p.compact === true ? styles.compactButton : null,
+          isPillCta ? styles.pillCtaButton : null,
+          isBare && hasLabel ? styles.bareLabelButton : null,
+          isIconOnly ? styles.iconButton : isPrimary ? styles.primaryButton : null,
+          isIconOnly
+            ? { width: boxSize, height: boxSize, minWidth: boxSize, minHeight: boxSize }
+            : null,
+          {
+            backgroundColor,
+            borderColor,
+            borderWidth,
+            borderRadius,
+            ...(shouldScale ? { transform: [{ scale }] } : {}),
+          },
+          useBlur ? webBackdropBlur(12) : undefined,
+          webTransition(theme, 'background-color, border-color, transform'),
+          !p.isTv ? webCursorPointer() : undefined,
+        ]}
+      >
+        {p.loading === true ? (
+          <ActivityIndicator testID={`${p.testID}-loading`} size="small" color={foreground} />
+        ) : p.icon !== undefined ? (
+          <Icon name={p.icon} size={iconSize} color={foreground} />
+        ) : null}
+        {!isIconOnly && hasLabel ? (
+          <Text
+            numberOfLines={1}
+            style={[
+              p.compact === true ? theme.typography.caption : theme.typography.title,
+              p.tabularLabel === true ? TABULAR_NUMS_STYLE : undefined,
+              { color: foreground, fontWeight: isPrimary ? '700' : '600' },
+            ]}
+          >
+            {p.label}
+          </Text>
+        ) : null}
+        {(isPrimary || isGlassPrimary) && focused ? (
+          <View
+            pointerEvents="none"
+            testID={`${p.testID}-focus-ring`}
+            style={[
+              styles.primaryFocusRing,
+              {
+                borderRadius: isIconOnly ? theme.radius.pill : theme.radius.button + 4,
+                borderWidth: theme.focus.ringWidth,
+                borderColor: theme.colors.focusRingColor,
+              },
+            ]}
+          />
+        ) : null}
+      </Pressable>
+    </Tooltip>
   );
 }
 

@@ -1,4 +1,4 @@
-import { GlassBar, Icon, useTheme, webCursorPointer, webTransition } from '@elv/ui-kit';
+import { GlassBar, Icon, Tooltip, useTheme, webCursorPointer, webTransition } from '@elv/ui-kit';
 import { type ReactElement, useState } from 'react';
 import { Pressable, StyleSheet, Text, type TextStyle, View } from 'react-native';
 import type { NavDestination, NavUtility } from './types';
@@ -58,66 +58,67 @@ export function UtilitiesRow({
             : 'transparent';
 
         return (
-          <Pressable
-            key={util.id}
-            testID={utilTestId}
-            accessibilityRole="tab"
-            accessibilityLabel={util.label}
-            accessibilityState={{ selected }}
-            {...(isTv ? { focusable: false } : {})}
-            onHoverIn={() => setHoveredId(util.id)}
-            onHoverOut={() => setHoveredId((prev) => (prev === util.id ? null : prev))}
-            onPress={() => {
-              util.onPress();
-              onExitNavFocus?.();
-            }}
-            style={[
-              iconOnly ? styles.iconOnlyItem : styles.utilityItem,
-              needsTouchTarget ? styles.touchTarget : null,
-              itemWebTransition,
-              itemWebCursor,
-              {
-                borderRadius: iconOnly ? 999 : theme.radius.button,
-                borderWidth: isTv ? theme.focus.ringWidth : 0,
-                borderColor: tvFocused ? theme.colors.focusRingColor : 'transparent',
-                backgroundColor: bgColor,
-              },
-            ]}
-          >
-            <View style={styles.utilityContent}>
-              {util.renderIcon ? (
-                util.renderIcon({ focused: tvFocused, selected })
-              ) : (
-                <Icon name={util.icon} size={isTv ? 20 : 18} color={fgColor} />
-              )}
+          <Tooltip key={util.id} content={util.label} placement="bottom" disabled={isTv || isTouch}>
+            <Pressable
+              testID={utilTestId}
+              accessibilityRole="tab"
+              accessibilityLabel={util.label}
+              accessibilityState={{ selected }}
+              {...(isTv ? { focusable: false } : {})}
+              onHoverIn={() => setHoveredId(util.id)}
+              onHoverOut={() => setHoveredId((prev) => (prev === util.id ? null : prev))}
+              onPress={() => {
+                util.onPress();
+                onExitNavFocus?.();
+              }}
+              style={[
+                iconOnly ? styles.iconOnlyItem : styles.utilityItem,
+                needsTouchTarget ? styles.touchTarget : null,
+                itemWebTransition,
+                itemWebCursor,
+                {
+                  borderRadius: iconOnly ? 999 : theme.radius.button,
+                  borderWidth: isTv ? theme.focus.ringWidth : 0,
+                  borderColor: tvFocused ? theme.colors.focusRingColor : 'transparent',
+                  backgroundColor: bgColor,
+                },
+              ]}
+            >
+              <View style={styles.utilityContent}>
+                {util.renderIcon ? (
+                  util.renderIcon({ focused: tvFocused, selected })
+                ) : (
+                  <Icon name={util.icon} size={isTv ? 20 : 18} color={fgColor} />
+                )}
+                {showLabel ? (
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      labelWebTransition,
+                      {
+                        ...(bodyFontFamily ? { fontFamily: bodyFontFamily } : {}),
+                        fontSize: labelFontSize,
+                        lineHeight: Math.round(labelFontSize * 1.3),
+                        fontWeight: selected ? '700' : '500',
+                        color: fgColor,
+                      },
+                    ]}
+                  >
+                    {util.label}
+                  </Text>
+                ) : null}
+              </View>
               {showLabel ? (
-                <Text
-                  numberOfLines={1}
+                <View
+                  testID={`${utilTestId}-underline`}
                   style={[
-                    labelWebTransition,
-                    {
-                      ...(bodyFontFamily ? { fontFamily: bodyFontFamily } : {}),
-                      fontSize: labelFontSize,
-                      lineHeight: Math.round(labelFontSize * 1.3),
-                      fontWeight: selected ? '700' : '500',
-                      color: fgColor,
-                    },
+                    styles.activeUnderline,
+                    { backgroundColor: selected ? theme.colors.accent : 'transparent' },
                   ]}
-                >
-                  {util.label}
-                </Text>
+                />
               ) : null}
-            </View>
-            {showLabel ? (
-              <View
-                testID={`${utilTestId}-underline`}
-                style={[
-                  styles.activeUnderline,
-                  { backgroundColor: selected ? theme.colors.accent : 'transparent' },
-                ]}
-              />
-            ) : null}
-          </Pressable>
+            </Pressable>
+          </Tooltip>
         );
       })}
     </View>
