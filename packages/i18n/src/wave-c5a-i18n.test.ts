@@ -24,8 +24,8 @@ describe('Wave C5A i18n parity (#243, #332)', () => {
       ['settings.audioNormalization', 'Loudness normalization', 'Ses seviyesi dengeleme'],
       [
         'settings.audioNormalizationHint',
-        'Balance quiet dialogue and loud channels using EBU R128',
-        'EBU R128 ile kısık diyalogları ve yüksek kanalları dengeler',
+        'Balances quiet dialogue and overly loud channels.',
+        'Kısık diyalogları ve aşırı yüksek kanalları dengeler.',
       ],
       [
         'settings.windowAspectRatioLock',

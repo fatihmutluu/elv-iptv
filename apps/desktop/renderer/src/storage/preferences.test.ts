@@ -20,12 +20,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const DESKTOP_DEFAULT_PREFERENCES = {
+  ...DEFAULT_PREFERENCES,
+  artworkCacheLimitMb: 512,
+};
+
 describe('createDesktopPreferencesStore', () => {
   it('round-trips load, update, and reset against an injected Storage', async () => {
     const storage = createFakeStorage();
     const store = createDesktopPreferencesStore(storage);
 
-    expect(await store.load()).toEqual(DEFAULT_PREFERENCES);
+    expect(await store.load()).toEqual(DESKTOP_DEFAULT_PREFERENCES);
 
     const updated = await store.update({
       themePreset: 'highContrast',
@@ -38,7 +43,7 @@ describe('createDesktopPreferencesStore', () => {
 
     const reloaded = createDesktopPreferencesStore(storage);
     expect(await reloaded.load()).toEqual({
-      ...DEFAULT_PREFERENCES,
+      ...DESKTOP_DEFAULT_PREFERENCES,
       themePreset: 'highContrast',
       locale: 'tr',
       fontScale: 1.2,
@@ -46,7 +51,7 @@ describe('createDesktopPreferencesStore', () => {
     });
 
     const reset = await store.reset();
-    expect(reset).toEqual({ ok: true, value: DEFAULT_PREFERENCES });
+    expect(reset).toEqual({ ok: true, value: DESKTOP_DEFAULT_PREFERENCES });
     expect(storage.removeItem).toHaveBeenCalledWith('elv.preferences.v1');
     expect(storage.data.size).toBe(0);
   });
@@ -64,7 +69,7 @@ describe('createDesktopPreferencesStore', () => {
   it('falls back cleanly to memory store when window is undefined', async () => {
     vi.stubGlobal('window', undefined);
     const store = createDesktopPreferencesStore();
-    expect(await store.load()).toEqual(DEFAULT_PREFERENCES);
+    expect(await store.load()).toEqual(DESKTOP_DEFAULT_PREFERENCES);
     const res = await store.update({ locale: 'tr' });
     expect(res.ok).toBe(true);
     expect((await store.load()).locale).toBe('tr');
@@ -80,7 +85,7 @@ describe('createDesktopPreferencesStore', () => {
     vi.stubGlobal('window', blockedWindow);
 
     const store = createDesktopPreferencesStore();
-    expect(await store.load()).toEqual(DEFAULT_PREFERENCES);
+    expect(await store.load()).toEqual(DESKTOP_DEFAULT_PREFERENCES);
     const res = await store.update({ reduceMotion: true });
     expect(res.ok).toBe(true);
     expect((await store.load()).reduceMotion).toBe(true);

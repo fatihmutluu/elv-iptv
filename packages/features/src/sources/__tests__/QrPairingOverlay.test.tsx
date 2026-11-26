@@ -4,6 +4,7 @@ import { createAppI18n } from '@elv/i18n';
 import { I18nProvider, ThemeProvider, TvRemoteProvider, ViewportProvider } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
+import { StyleSheet } from 'react-native';
 import type {
   LanPairingPort,
   LanPairingSession,
@@ -321,5 +322,59 @@ describe('QrPairingOverlay & SourcesScreen QR pairing (#50)', () => {
       expect(startSession).toHaveBeenCalledTimes(2);
       expect(screen.getByTestId('qr-pairing-code')).toBeTruthy();
     });
+  });
+
+  it('hides Add via Phone QR button on phones and constrains long LAN URLs cleanly inside the modal (Wave P7)', async () => {
+    const supported: LanPairingPort = {
+      isSupported: () => true,
+      startSession: jest.fn(async () => ({
+        url: 'http://192.168.100.254:49152/pair/very-long-ephemeral-token-0123456789abcdef0123456789',
+        token: 'very-long-ephemeral-token-0123456789abcdef0123456789',
+        host: '192.168.100.254',
+        port: 49152,
+        expiresAtMs: Date.now() + 300_000,
+      })),
+      stopSession: jest.fn(async () => undefined),
+      onPayloadReceived: () => () => undefined,
+    };
+
+    const phoneView = await render(
+      <TvRemoteProvider>
+        <ViewportProvider
+          value={{
+            formFactor: 'phone',
+            orientation: 'portrait',
+            inputModality: 'touch',
+            width: 393,
+            height: 852,
+          }}
+        >
+          <I18nProvider i18n={createAppI18n('en')}>
+            <ThemeProvider preset="obsidianCrimson">
+              <SourcesScreen catalog={createFakeCatalog()} lanPairing={supported} />
+            </ThemeProvider>
+          </I18nProvider>
+        </ViewportProvider>
+      </TvRemoteProvider>,
+    );
+    expect(screen.queryByTestId('sources-qr-button')).toBeNull();
+    await phoneView.unmount();
+
+    const overlayView = await render(
+      wrapProviders(
+        <QrPairingOverlay
+          visible
+          catalog={createFakeCatalog()}
+          lanPairing={supported}
+          onClose={jest.fn()}
+        />,
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId('qr-pairing-url')).toBeTruthy());
+    const urlStyle = StyleSheet.flatten(screen.getByTestId('qr-pairing-url').props.style);
+    expect(urlStyle.width).toBe('100%');
+    expect(urlStyle.maxWidth).toBe('100%');
+    expect(urlStyle.flexShrink).toBe(1);
+    await overlayView.unmount();
   });
 });

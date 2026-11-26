@@ -73,8 +73,8 @@ async function tapPin(digits: string) {
   await fireEvent.press(screen.getByTestId('pin-entry-submit'));
 }
 
-describe('ProfilesAndParentalPanel', () => {
-  it('supports profile CRUD (create Kids profile, edit, switch, delete) and enforces last-profile delete guard', async () => {
+describe('ProfilesAndParentalPanel (Kids Mode)', () => {
+  it('removes all profile CRUD from Settings and renders ONLY title, description, and master toggle while Kids Mode is OFF', async () => {
     const env = await createPanelEnv();
     try {
       const view = await render(
@@ -96,60 +96,35 @@ describe('ProfilesAndParentalPanel', () => {
         </AppProviders>,
       );
 
-      // Single default profile disables Delete and shows last-profile hint
       await waitFor(() => {
-        expect(screen.getByTestId('profile-row-default')).toBeTruthy();
-        expect(screen.getByTestId('profiles-cannot-delete-last-hint')).toBeTruthy();
-        expect(screen.getByTestId('profile-delete-default').props.accessibilityState.disabled).toBe(
-          true,
-        );
+        expect(screen.getByTestId('parental-controls-card')).toBeTruthy();
+        expect(screen.getByTestId('parental-toggle-enabled')).toBeTruthy();
       });
 
-      // Add a Kids profile
-      await fireEvent.press(screen.getByTestId('profiles-add-button'));
-      await fireEvent.changeText(screen.getByTestId('profile-form-name-input'), 'Kids Room');
-      await fireEvent.press(screen.getByTestId('profile-avatar-option-emerald'));
-      await fireEvent.press(screen.getByTestId('profile-form-kids-toggle'));
-      await fireEvent.press(screen.getByTestId('profile-form-save'));
+      // Zero profile CRUD UI in Settings
+      expect(screen.queryByTestId('profiles-management-card')).toBeNull();
+      expect(screen.queryByTestId('profiles-add-button')).toBeNull();
+      expect(screen.queryByTestId('profile-row-default')).toBeNull();
 
-      await waitFor(() => {
-        expect(screen.getByText('Kids Room')).toBeTruthy();
-        expect(screen.queryByTestId('profiles-cannot-delete-last-hint')).toBeNull();
-      });
+      // Title + 1-line modeDescription + OFF toggle
+      expect(screen.getByText('Kids Mode')).toBeTruthy();
+      expect(
+        screen.getByText(
+          'Keep younger viewers safe with PIN-protected category locks, age limits, and automatic adult keyword filtering.',
+        ),
+      ).toBeTruthy();
+      expect(screen.getByTestId('parental-toggle-enabled').props.accessibilityState.checked).toBe(
+        false,
+      );
 
-      const listAfterCreate = await env.catalog.listProfiles?.();
-      const kidsProfile = listAfterCreate?.find((p) => p.name === 'Kids Room');
-      expect(kidsProfile?.isKids).toBe(true);
-      expect(kidsProfile?.avatarToken).toBe('emerald');
-      const kidsId = kidsProfile?.id ?? '';
-
-      // Switch to Kids profile -> parental controls become enabled automatically
-      await fireEvent.press(screen.getByTestId(`profile-switch-${kidsId}`));
-      await waitFor(() => {
-        expect(screen.getByTestId(`profile-active-badge-${kidsId}`)).toBeTruthy();
-        expect(screen.getByTestId('parental-toggle-enabled').props.accessibilityState.checked).toBe(
-          true,
-        );
-      });
-
-      // Edit Kids profile name
-      await fireEvent.press(screen.getByTestId(`profile-edit-${kidsId}`));
-      await fireEvent.changeText(screen.getByTestId('profile-form-name-input'), 'Little Ones');
-      await fireEvent.press(screen.getByTestId('profile-form-save'));
-      await waitFor(() => {
-        expect(screen.getByText('Little Ones')).toBeTruthy();
-      });
-
-      // Delete active profile -> confirms inline and switches cleanly back to Default
-      await fireEvent.press(screen.getByTestId(`profile-delete-${kidsId}`));
-      expect(screen.getByTestId(`profile-delete-confirm-${kidsId}`)).toBeTruthy();
-      await fireEvent.press(screen.getByTestId(`profile-delete-confirm-btn-${kidsId}`));
-
-      await waitFor(() => {
-        expect(screen.queryByTestId(`profile-row-${kidsId}`)).toBeNull();
-        expect(screen.getByTestId('profile-active-badge-default')).toBeTruthy();
-        expect(screen.getByTestId('profiles-cannot-delete-last-hint')).toBeTruthy();
-      });
+      // ZERO sub-settings visible while Kids Mode is OFF
+      expect(screen.queryByTestId('parental-pin-status')).toBeNull();
+      expect(screen.queryByTestId('parental-set-pin')).toBeNull();
+      expect(screen.queryByTestId('parental-toggle-adult-keywords')).toBeNull();
+      expect(screen.queryByTestId('parental-max-age-12')).toBeNull();
+      expect(screen.queryByTestId('parental-timeout-15')).toBeNull();
+      expect(screen.queryByTestId('parental-categories-locked')).toBeNull();
+      expect(screen.queryByTestId('parental-cat-kind-bar')).toBeNull();
 
       await view.unmount();
     } finally {
@@ -157,7 +132,7 @@ describe('ProfilesAndParentalPanel', () => {
     }
   });
 
-  it('gates parental policy edits, hides locked categories until unlocked, and requires PIN for add/edit/delete', async () => {
+  it('prompts PIN creation when enabling Kids Mode without a PIN, keeps OFF on cancel, and reveals controls on PIN creation', async () => {
     const env = await createPanelEnv();
     try {
       const view = await render(
@@ -179,45 +154,29 @@ describe('ProfilesAndParentalPanel', () => {
         </AppProviders>,
       );
 
-      // Before any PIN is set, categories are visible in Settings Category Locks
       await waitFor(() => {
-        expect(screen.getByText('Sports')).toBeTruthy();
-        expect(screen.getByText('18+ Adult')).toBeTruthy();
+        expect(screen.getByTestId('parental-toggle-enabled')).toBeTruthy();
       });
 
-      // Set a 4-digit PIN
-      await fireEvent.press(screen.getByTestId('parental-set-pin'));
-      expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy();
-      await tapPin('1234');
-      await tapPin('1234');
-      await waitFor(() => {
-        expect(screen.getByTestId('parental-pin-status')).toHaveTextContent('PIN protected');
-        // Once PIN is set and locked, adult category titles are immediately hidden!
-        expect(screen.getByTestId('parental-categories-locked')).toBeTruthy();
-        expect(screen.queryByText('18+ Adult')).toBeNull();
-        expect(screen.queryByText('Sports')).toBeNull();
-      });
-
-      // Add profile button is gated by PIN while locked!
-      await fireEvent.press(screen.getByTestId('profiles-add-button'));
-      expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy();
-      await fireEvent.press(screen.getByTestId('pin-entry-cancel'));
-      expect(screen.queryByTestId('profile-form-card')).toBeNull();
-
-      // Cancelling Change PIN after verifying old PIN MUST keep parental controls locked!
-      await fireEvent.press(screen.getByTestId('parental-change-pin'));
-      expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy();
-      await tapPin('1234');
-      await waitFor(() => {
-        expect(screen.getByTestId('pin-entry-title')).toHaveTextContent('Create a 4–8 digit PIN');
-      });
-      await fireEvent.press(screen.getByTestId('pin-entry-cancel'));
-      expect(screen.getByTestId('parental-status-badge')).toHaveTextContent('Locked');
-      expect(screen.getByTestId('parental-categories-locked')).toBeTruthy();
-
-      // Enabling parental controls while locked gates through PinEntryOverlay first
+      // Toggling ON without a PIN opens PIN creation dialog
       await fireEvent.press(screen.getByTestId('parental-toggle-enabled'));
       expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy();
+      expect(screen.getByTestId('pin-entry-title')).toHaveTextContent('Create a 4–8 digit PIN');
+
+      // Cancelling PIN creation keeps Kids Mode OFF and sub-settings hidden
+      await fireEvent.press(screen.getByTestId('pin-entry-cancel'));
+      await waitFor(() => {
+        expect(screen.queryByTestId('pin-entry-overlay')).toBeNull();
+      });
+      expect(screen.getByTestId('parental-toggle-enabled').props.accessibilityState.checked).toBe(
+        false,
+      );
+      expect(screen.queryByTestId('parental-toggle-adult-keywords')).toBeNull();
+
+      // Completing PIN creation immediately enables Kids Mode, reveals sub-settings, and stays
+      // unlocked for the active setup session so parents can configure limits/locks without re-entering PIN!
+      await fireEvent.press(screen.getByTestId('parental-toggle-enabled'));
+      await tapPin('1234');
       await tapPin('1234');
 
       await waitFor(() => {
@@ -225,21 +184,26 @@ describe('ProfilesAndParentalPanel', () => {
         expect(screen.getByTestId('parental-toggle-enabled').props.accessibilityState.checked).toBe(
           true,
         );
+        expect(screen.getByTestId('parental-pin-status')).toHaveTextContent('PIN protected');
         expect(screen.getByTestId('parental-status-badge')).toHaveTextContent('Unlocked');
+        expect(screen.getByTestId('parental-toggle-adult-keywords')).toBeTruthy();
+        expect(screen.getByTestId('parental-max-age-12')).toBeTruthy();
+        expect(screen.getByTestId('parental-timeout-15')).toBeTruthy();
+        expect(screen.queryByTestId('parental-categories-locked')).toBeNull();
         expect(screen.getByText('Sports')).toBeTruthy();
         expect(screen.getByText('18+ Adult')).toBeTruthy();
       });
 
-      // While unlocked, changing max age rating & unlock timeout applies directly
+      // Immediately editable without re-prompting for the PIN just created
       await fireEvent.press(screen.getByTestId('parental-max-age-12'));
       await fireEvent.press(screen.getByTestId('parental-timeout-15'));
+      expect(screen.queryByTestId('pin-entry-overlay')).toBeNull();
       await waitFor(async () => {
         const settings = await env.catalog.getParentalSettings?.('default');
         expect(settings?.maxRatingAge).toBe(12);
         expect(settings?.unlockTimeoutMin).toBe(15);
       });
 
-      // Lock Sports category
       const sportsCat = (
         await env.catalog.categories(env.sources[0]?.id ?? '', 'live', {
           includeHidden: true,
@@ -255,28 +219,31 @@ describe('ProfilesAndParentalPanel', () => {
         ).toBe(true);
       });
 
-      // Lock Now re-locks immediately and hides all adult/locked category titles behind Unlock CTA
+      // Lock Now re-locks immediately and hides category titles
       await fireEvent.press(screen.getByTestId('parental-lock-now'));
       await waitFor(() => {
         expect(screen.getByTestId('parental-status-badge')).toHaveTextContent('Locked');
         expect(screen.getByTestId('parental-categories-locked')).toBeTruthy();
         expect(screen.queryByText('18+ Adult')).toBeNull();
-        expect(screen.queryByTestId(`parental-cat-lock-${sportsCat?.id ?? ''}`)).toBeNull();
       });
 
-      // Unlocking via the locked-categories Unlock button reveals the list and permits unlocking Sports
-      await fireEvent.press(screen.getByTestId('parental-categories-unlock'));
+      // Turning Kids Mode OFF requires PIN verification while locked
+      await fireEvent.press(screen.getByTestId('parental-toggle-enabled'));
+      expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy();
+      await fireEvent.press(screen.getByTestId('pin-entry-cancel'));
+      expect(screen.getByTestId('parental-toggle-enabled').props.accessibilityState.checked).toBe(
+        true,
+      );
+
+      // Verify PIN to turn Kids Mode OFF -> collapses sub-settings again
+      await fireEvent.press(screen.getByTestId('parental-toggle-enabled'));
       expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy();
       await tapPin('1234');
       await waitFor(() => {
-        expect(screen.getByTestId(`parental-cat-lock-${sportsCat?.id ?? ''}`)).toBeTruthy();
-      });
-      await fireEvent.press(screen.getByTestId(`parental-cat-lock-${sportsCat?.id ?? ''}`));
-      await waitFor(() => {
-        expect(
-          screen.getByTestId(`parental-cat-lock-${sportsCat?.id ?? ''}`).props.accessibilityState
-            .checked,
-        ).toBe(false);
+        expect(screen.getByTestId('parental-toggle-enabled').props.accessibilityState.checked).toBe(
+          false,
+        );
+        expect(screen.queryByTestId('parental-toggle-adult-keywords')).toBeNull();
       });
 
       await view.unmount();
@@ -285,21 +252,10 @@ describe('ProfilesAndParentalPanel', () => {
     }
   });
 
-  it('prevents Kids -> Adult escape using parent default PIN as guard even when Kids has no own PIN', async () => {
+  it('requires PIN when enabling Kids Mode if a guard PIN already exists and protects Kids profile from disabling Kids Mode', async () => {
     const env = await createPanelEnv();
     try {
       await env.catalog.setParentalPin?.('4321', 'default');
-      const kids = await env.catalog.createProfile?.({
-        name: 'Kids',
-        avatarToken: 'emerald',
-        isKids: true,
-      });
-      if (!kids?.ok) throw new Error('createProfile failed');
-      const kidsId = kids.value.id;
-      await env.profilePreferences.switchProfile(kidsId);
-      await env.profilePreferences.saveActiveProfileId(kidsId);
-
-      const categoriesSpy = jest.spyOn(env.catalog, 'categories');
 
       const view = await render(
         <AppProviders
@@ -321,35 +277,24 @@ describe('ProfilesAndParentalPanel', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId(`profile-active-badge-${kidsId}`)).toBeTruthy();
-        expect(screen.getByTestId('parental-categories-locked')).toBeTruthy();
+        expect(screen.getByTestId('parental-toggle-enabled').props.accessibilityState.checked).toBe(
+          false,
+        );
       });
+      // Still zero sub-settings while OFF even if a PIN already exists
+      expect(screen.queryByTestId('parental-toggle-adult-keywords')).toBeNull();
 
-      // Adult category titles must NEVER be queried or rendered while Kids is locked!
-      expect(categoriesSpy).not.toHaveBeenCalled();
-      expect(screen.queryByText('18+ Adult')).toBeNull();
-
-      // Attempting to switch back to Default requires parent PIN ('4321')!
-      await fireEvent.press(screen.getByTestId('profile-switch-default'));
-      expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy();
-      await fireEvent.press(screen.getByTestId('pin-entry-cancel'));
-      expect(screen.getByTestId(`profile-active-badge-${kidsId}`)).toBeTruthy();
-
-      // Attempting to disable parental controls, add profile, or delete Default also requires parent PIN!
+      // Toggling ON with an existing guard PIN prompts verification instead of create
       await fireEvent.press(screen.getByTestId('parental-toggle-enabled'));
       expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy();
-      await fireEvent.press(screen.getByTestId('pin-entry-cancel'));
-
-      await fireEvent.press(screen.getByTestId('profile-delete-default'));
-      expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy();
-      await fireEvent.press(screen.getByTestId('pin-entry-cancel'));
-
-      // Entering parent PIN '4321' permits switching back to Default cleanly
-      await fireEvent.press(screen.getByTestId('profile-switch-default'));
+      expect(screen.getByTestId('pin-entry-title')).toHaveTextContent('Unlock parental controls');
       await tapPin('4321');
+
       await waitFor(() => {
-        expect(screen.queryByTestId('pin-entry-overlay')).toBeNull();
-        expect(screen.getByTestId('profile-active-badge-default')).toBeTruthy();
+        expect(screen.getByTestId('parental-toggle-enabled').props.accessibilityState.checked).toBe(
+          true,
+        );
+        expect(screen.getByTestId('parental-toggle-adult-keywords')).toBeTruthy();
       });
 
       await view.unmount();
@@ -358,7 +303,7 @@ describe('ProfilesAndParentalPanel', () => {
     }
   });
 
-  it('keeps TV Back inside ProfileFormCard TvTextInput instead of exiting to Settings sidebar', async () => {
+  it('handles TV Back to return to Settings sidebar and keeps TV category-kind chips focusable', async () => {
     const env = await createPanelEnv();
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
@@ -372,6 +317,9 @@ describe('ProfilesAndParentalPanel', () => {
     const onBack = jest.fn();
 
     try {
+      await env.catalog.setParentalPin?.('1234', 'default');
+      await env.catalog.updateParentalSettings?.({ enabled: true }, 'default');
+
       const view = await render(
         <RemoteKeysProvider android={androidSource}>
           <AppProviders
@@ -392,27 +340,24 @@ describe('ProfilesAndParentalPanel', () => {
                 isActiveScope
                 onBack={onBack}
               />
+              <AppShellProfileOverlays onOpenProfilesSettings={jest.fn()} />
             </ProfileProvider>
           </AppProviders>
         </RemoteKeysProvider>,
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('profiles-add-button')).toBeTruthy();
+        expect(screen.getByTestId('parental-categories-unlock')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('parental-categories-unlock'));
+      await tapPin('1234');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('parental-cat-kind-live')).toBeTruthy();
+        expect(screen.getByTestId('parental-cat-kind-movie').props.focusable).not.toBe(false);
+        expect(screen.getByTestId('parental-cat-kind-series').props.focusable).not.toBe(false);
       });
 
-      await fireEvent.press(screen.getByTestId('profiles-add-button'));
-      const input = screen.getByTestId('profile-form-name-input');
-      await fireEvent(input, 'focus');
-
-      // Back while TvTextInput is focused exits text entry without calling onBack()!
-      await act(async () => {
-        keyListener?.({ action: 'down', keyCode: KEYCODE_BACK, canceled: false, ageMs: 0 });
-        keyListener?.({ action: 'up', keyCode: KEYCODE_BACK, canceled: false, ageMs: 10 });
-      });
-      expect(onBack).not.toHaveBeenCalled();
-
-      // Next Back (after text entry exited) returns cleanly to Settings sidebar
       await act(async () => {
         keyListener?.({ action: 'down', keyCode: KEYCODE_BACK, canceled: false, ageMs: 0 });
         keyListener?.({ action: 'up', keyCode: KEYCODE_BACK, canceled: false, ageMs: 10 });
@@ -422,73 +367,6 @@ describe('ProfilesAndParentalPanel', () => {
       await view.unmount();
     } finally {
       jest.restoreAllMocks();
-      await env.cleanup();
-    }
-  });
-
-  it('keeps category-kind chips TV-focusable and closes open profile form/delete UI on parental re-lock', async () => {
-    const env = await createPanelEnv();
-    try {
-      await env.catalog.createProfile?.({ name: 'Kids', avatarToken: 'emerald', isKids: true });
-      await env.catalog.setParentalPin?.('1234', 'default');
-
-      const view = await render(
-        <AppProviders
-          profilePreferences={env.profilePreferences}
-          i18n={createAppI18n('en')}
-          viewport={{
-            formFactor: 'tv',
-            orientation: 'landscape',
-            inputModality: 'tv',
-            width: 1280,
-            height: 720,
-          }}
-        >
-          <ProfileProvider catalog={env.catalog} profilePreferences={env.profilePreferences}>
-            <ProfilesAndParentalPanel catalog={env.catalog} sources={env.sources} />
-            <AppShellProfileOverlays onOpenProfilesSettings={jest.fn()} />
-          </ProfileProvider>
-        </AppProviders>,
-      );
-
-      // Unlock parental controls via Settings unlock button
-      await waitFor(() => {
-        expect(screen.getByTestId('parental-categories-unlock')).toBeTruthy();
-      });
-      await fireEvent.press(screen.getByTestId('parental-categories-unlock'));
-      await tapPin('1234');
-
-      // On 10-foot TV, Live/Movies/Series FilterChips must remain focusable (never focusable={false})
-      await waitFor(() => {
-        expect(screen.getByTestId('parental-cat-kind-live')).toBeTruthy();
-        expect(screen.getByTestId('parental-cat-kind-movie').props.focusable).not.toBe(false);
-        expect(screen.getByTestId('parental-cat-kind-series').props.focusable).not.toBe(false);
-      });
-
-      // Open Add Profile form while unlocked, then re-lock via Lock Now -> form must close immediately
-      await fireEvent.press(screen.getByTestId('profiles-add-button'));
-      expect(screen.getByTestId('profile-form-card')).toBeTruthy();
-      await fireEvent.press(screen.getByTestId('parental-lock-now'));
-      await waitFor(() => {
-        expect(screen.queryByTestId('profile-form-card')).toBeNull();
-      });
-
-      // Unlock again, open Delete confirmation on Kids profile, then re-lock -> confirm closes immediately
-      await fireEvent.press(screen.getByTestId('parental-categories-unlock'));
-      await tapPin('1234');
-      await waitFor(() => {
-        expect(screen.getByTestId('parental-lock-now')).toBeTruthy();
-      });
-      const kidsId = (await env.catalog.listProfiles?.())?.find((p) => p.isKids)?.id ?? '';
-      await fireEvent.press(screen.getByTestId(`profile-delete-${kidsId}`));
-      expect(screen.getByTestId(`profile-delete-confirm-${kidsId}`)).toBeTruthy();
-      await fireEvent.press(screen.getByTestId('parental-lock-now'));
-      await waitFor(() => {
-        expect(screen.queryByTestId(`profile-delete-confirm-${kidsId}`)).toBeNull();
-      });
-
-      await view.unmount();
-    } finally {
       await env.cleanup();
     }
   });

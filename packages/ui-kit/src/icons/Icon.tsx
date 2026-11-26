@@ -2,6 +2,7 @@ import { createElement, type ReactElement } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { useUiAdapters } from '../adapters';
 import { useTheme } from '../theme';
+import { renderNativeVectorSpec } from './native-vector-renderer';
 import { ICON_PATHS, type IconName, type IconShape } from './paths';
 
 /** Props of {@link Icon}. */
@@ -111,17 +112,10 @@ export function Icon({
       testID={testID}
       accessible={accessibilityLabel !== undefined}
       accessibilityLabel={accessibilityLabel}
-      style={[
-        styles.box,
-        styles.nativeFallback,
-        {
-          width: size,
-          height: size,
-          borderRadius: Math.max(2, Math.round(size * 0.2)),
-          borderColor: resolvedColor,
-        },
-      ]}
-    />
+      style={[styles.box, { width: size, height: size }]}
+    >
+      {renderNativeVectorSpec({ spec, size, color: resolvedColor, strokeWidth })}
+    </View>
   );
 }
 
@@ -129,9 +123,5 @@ const styles = StyleSheet.create({
   box: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  nativeFallback: {
-    borderWidth: 1.5,
-    opacity: 0.75,
   },
 });

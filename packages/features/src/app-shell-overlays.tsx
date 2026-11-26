@@ -8,11 +8,19 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createObservedCatalog } from './app-shell-state';
 import { targetIdentityKey } from './player/live-timeshift-model';
 import type { PlayTarget } from './ports/play-target';
+import type { PlaybackGuard } from './ports/playback-guard';
 import { PinEntryOverlay, ProfileAvatarBadge, ProfilePickerOverlay } from './profiles';
-import { type ProfileContextValue, useProfile } from './shared';
-import type { NavUtility } from './shell';
+import {
+  createProfileScopedCatalog,
+  filterSourcesForProfile,
+  type ProfileCatalogScope,
+  type ProfileContextValue,
+  useProfile,
+} from './shared';
+import type { CatalogUiCache, NavUtility } from './shell';
 
 /** Props of {@link AppShellProfileOverlays}. */
 export interface AppShellProfileOverlaysProps {
@@ -20,13 +28,11 @@ export interface AppShellProfileOverlaysProps {
 }
 
 /**
- * Builds the quiet top-right profile monogram utility button when multiple profiles exist or
- * parental controls are active/unlocked (`UI_UX_PHILOSOPHY.md` §2.1).
+ * Builds the quiet top-right profile avatar utility button opening the "Who's Watching?"
+ * profile selector & editor (`UI_UX_PHILOSOPHY.md` §2.1, Wave P7).
  */
 export function buildShellProfileUtility(profile: ProfileContextValue): NavUtility | undefined {
-  const showUtility =
-    profile.profiles.length > 1 || profile.parentalSettings.enabled || profile.parentalUnlocked;
-  if (!showUtility) return undefined;
+  if (profile.profiles.length === 0) return undefined;
   const active = profile.activeProfile;
   return {
     id: 'profile',
@@ -122,24 +128,97 @@ export function useShellProfileEffects(params: {
 }
 
 /**
- * Coordinates root-level `ChannelManagementOverlay` (`#60`) and `GuideManagementOverlay` (`#30`)
- * visibility with parental PIN gating (`#31`) and automatic close on profile switch or relock.
+ * Computes profile-visible sources (`excludedProfileIds` filtered), the excluded-source ID set
+ * for `ProfileCatalogScope`, and manual "Refresh now" catalog/guide callbacks for Settings -> Live TV.
+ */
+export function useShellSourceControls(params: {
+  readonly catalog: CatalogService;
+  readonly sources: readonly SourceRow[];
+  readonly sourcesRef: { readonly current: readonly SourceRow[] };
+  readonly profile: ProfileContextValue;
+  readonly uiCache: CatalogUiCache;
+  readonly syncSourcesAndBump: () => Promise<void>;
+}) {
+  const { catalog, sources, sourcesRef, profile, uiCache, syncSourcesAndBump } = params;
+  const visibleSources = useMemo(
+    () => filterSourcesForProfile(sources, profile.activeProfileId),
+    [profile.activeProfileId, sources],
+  );
+  const excludedSourceIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of sources) {
+      if (s.excludedProfileIds?.includes(profile.activeProfileId)) set.add(s.id);
+    }
+    return set;
+  }, [profile.activeProfileId, sources]);
+  const profileScopeRef = useRef<ProfileCatalogScope>({
+    profileId: profile.activeProfileId,
+    parentalUnlocked: profile.parentalUnlocked,
+    excludedSourceIds,
+  });
+  profileScopeRef.current = {
+    profileId: profile.activeProfileId,
+    parentalUnlocked: profile.parentalUnlocked,
+    excludedSourceIds,
+  };
+  const onRefreshCatalogNow = useCallback(async () => {
+    for (const s of sourcesRef.current) {
+      await catalog.importSource(s.id).catch(() => undefined);
+    }
+    uiCache.clear();
+    await syncSourcesAndBump();
+  }, [catalog, sourcesRef, syncSourcesAndBump, uiCache]);
+  const onRefreshGuideNow = useCallback(async () => {
+    const importGuide = catalog.importGuide;
+    if (importGuide === undefined) return;
+    for (const s of sourcesRef.current) {
+      await importGuide(s.id).catch(() => undefined);
+    }
+    await syncSourcesAndBump();
+  }, [catalog, sourcesRef, syncSourcesAndBump]);
+
+  return {
+    visibleSources,
+    profileScopeRef,
+    onRefreshCatalogNow,
+    onRefreshGuideNow,
+  };
+}
+
+/** Composes the observed and profile-scoped `CatalogService` used across `AppShell`. */
+export function useShellObservedCatalog(
+  catalog: CatalogService,
+  playbackGuard: PlaybackGuard,
+  syncSourcesAndBump: () => Promise<void>,
+  onUserStateMutated: () => void,
+  profileScopeRef: { readonly current: ProfileCatalogScope },
+): CatalogService {
+  return useMemo(
+    () =>
+      createProfileScopedCatalog(
+        createObservedCatalog(
+          catalog,
+          playbackGuard,
+          syncSourcesAndBump,
+          onUserStateMutated,
+          () => profileScopeRef.current.profileId,
+        ),
+        () => profileScopeRef.current,
+      ),
+    [catalog, onUserStateMutated, playbackGuard, profileScopeRef, syncSourcesAndBump],
+  );
+}
+
+/**
+ * Coordinates root-level `GuideManagementOverlay` (`#30`) visibility with parental PIN gating (`#31`)
+ * and automatic close on profile switch or relock.
  */
 export function useShellManagementOverlays(
   profile: ProfileContextValue,
   sources: readonly SourceRow[],
 ) {
-  const [channelManagerOpen, setChannelManagerOpen] = useState(false);
   const [guideManagerSourceId, setGuideManagerSourceId] = useState<string | null>(null);
   const prevProfileIdRef = useRef(profile.activeProfileId);
-
-  const openChannelManager = useCallback(() => {
-    if (profile.hasGuardPin && !profile.parentalUnlocked) {
-      profile.requestParentalUnlock(() => setChannelManagerOpen(true));
-      return;
-    }
-    setChannelManagerOpen(true);
-  }, [profile]);
 
   const openGuideManager = useCallback(
     (sourceId: string) => {
@@ -152,7 +231,6 @@ export function useShellManagementOverlays(
     [profile],
   );
 
-  const closeChannelManager = useCallback(() => setChannelManagerOpen(false), []);
   const closeGuideManager = useCallback(() => setGuideManagerSourceId(null), []);
 
   useEffect(() => {
@@ -160,7 +238,6 @@ export function useShellManagementOverlays(
     prevProfileIdRef.current = profile.activeProfileId;
     const locked = profile.hasGuardPin && !profile.parentalUnlocked;
     if (profileChanged || locked) {
-      setChannelManagerOpen(false);
       setGuideManagerSourceId(null);
     }
   }, [profile.activeProfileId, profile.hasGuardPin, profile.parentalUnlocked]);
@@ -174,12 +251,9 @@ export function useShellManagementOverlays(
   );
 
   return {
-    channelManagerOpen,
     guideSource,
-    anyOpen: channelManagerOpen || guideSource !== null,
-    openChannelManager,
+    anyOpen: guideSource !== null,
     openGuideManager,
-    closeChannelManager,
     closeGuideManager,
   };
 }

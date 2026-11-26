@@ -85,7 +85,6 @@ export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
   initialVolume?: number;
   onPersistVolume?: (volume: number) => void;
   autoSubtitlesOnSkipBack?: boolean;
-  onToggleAutoSubtitlesOnSkipBack?: () => void;
   autoPlayNextEpisode?: boolean;
   onToggleAutoPlayNextEpisode?: () => void;
   reduceMotion?: boolean;

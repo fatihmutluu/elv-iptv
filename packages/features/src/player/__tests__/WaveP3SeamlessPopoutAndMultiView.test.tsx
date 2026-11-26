@@ -332,7 +332,7 @@ describe('Wave P3 — Zero-Reload Detached Popout & Seamless Multi-View Handoff'
       expect(tile1Engine.setAudioDevice).toHaveBeenCalledWith('hdmi-1');
       expect(tile1Engine.setAudioNormalization).toHaveBeenCalledWith(true);
       expect(tile1Engine.setPitchLock).toHaveBeenCalledWith(false);
-      expect(tile1Engine.setDeinterlaceMode).toHaveBeenCalledWith('bwdif');
+      expect(tile1Engine.setDeinterlaceMode).toHaveBeenCalledWith('auto');
 
       // Redundant top-right Add button is hidden when empty '+' slot card is visible!
       expect(screen.getByTestId('multiview-empty-slot')).toBeTruthy();
@@ -366,7 +366,7 @@ describe('Wave P3 — Zero-Reload Detached Popout & Seamless Multi-View Handoff'
       expect(tile2Engine.setAudioDevice).toHaveBeenCalledWith('hdmi-1');
       expect(tile2Engine.setAudioNormalization).toHaveBeenCalledWith(true);
       expect(tile2Engine.setPitchLock).toHaveBeenCalledWith(false);
-      expect(tile2Engine.setDeinterlaceMode).toHaveBeenCalledWith('bwdif');
+      expect(tile2Engine.setDeinterlaceMode).toHaveBeenCalledWith('auto');
 
       // Hover Tile 0 (active audio): top-right Replace + Close icon buttons visible, NO bottom actions bar!
       await act(async () => {

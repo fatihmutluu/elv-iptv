@@ -297,8 +297,8 @@ describe('@elv/i18n', () => {
       ],
       [
         'settings.about.statement',
-        'ELV IPTV is an independent IPTV player and ships no media content. Native playback engines dynamically link LGPL libraries. Provider credentials remain encrypted on-device and never enter the catalog database.',
-        'ELV IPTV bağımsız bir IPTV oynatıcısıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz.',
+        'ELV IPTV is a 100% free, ad-free, independent IPTV player built with care for every screen. It ships no media content — bring your own Xtream, M3U, or Stalker source. Provider credentials stay encrypted on your device and never enter the catalog database.',
+        'ELV IPTV, her ekran için özenle geliştirilmiş %100 ücretsiz, reklamsız ve bağımsız bir IPTV oynatıcısıdır. Hiçbir medya içeriği sunmaz — kendi Xtream, M3U veya Stalker kaynağınızı ekleyin. Sağlayıcı bilgileriniz cihazınızda şifreli saklanır ve katalog veritabanına yazılmaz.',
       ],
     ];
     for (const [id, expectedEn, expectedTr] of cases) {
@@ -707,7 +707,7 @@ describe('@elv/i18n', () => {
       ['player.aspect', 'Aspect', 'Görüntü modu'],
       ['player.aspect.fit', 'Fit', 'Sığdır'],
       ['player.aspect.fill', 'Fill', 'Doldur'],
-      ['player.deinterlace', 'Deinterlace', 'Taramayı gider'],
+      ['player.deinterlace', 'Deinterlace', 'Deinterlace (Çizgi Düzeltme)'],
       ['player.unmute', 'Unmute', 'Sesi aç'],
       ['player.enterFullscreen', 'Fullscreen', 'Tam ekran'],
       ['player.exitFullscreen', 'Exit fullscreen', 'Tam ekrandan çık'],

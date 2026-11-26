@@ -1,7 +1,9 @@
 import {
   type AccessibilityFontFamily,
+  type ArtworkCacheLimitMbPref,
   createMemoryPreferencesStore,
   DEFAULT_PREFERENCES,
+  getPlatformDefaultArtworkCacheLimitMb,
   type KeymapStore,
   ok,
   type PreferencesPatch,
@@ -33,7 +35,19 @@ import {
   useRef,
   useState,
 } from 'react';
+import { Platform } from 'react-native';
 import { StreamHealthProvider } from '../shared';
+
+function resolveInitialArtworkCacheLimitMb(viewport?: ViewportOverride): ArtworkCacheLimitMbPref {
+  if (viewport?.formFactor === 'desktop') return getPlatformDefaultArtworkCacheLimitMb('desktop');
+  if (viewport?.formFactor === 'tv') return getPlatformDefaultArtworkCacheLimitMb('tv');
+  if (viewport?.formFactor === 'phone' || viewport?.formFactor === 'tablet') {
+    return getPlatformDefaultArtworkCacheLimitMb('mobile');
+  }
+  if ((Platform.OS as string) === 'web') return getPlatformDefaultArtworkCacheLimitMb('desktop');
+  if (Platform.isTV) return getPlatformDefaultArtworkCacheLimitMb('tv');
+  return getPlatformDefaultArtworkCacheLimitMb('mobile');
+}
 
 /** Props of {@link AppProviders}. */
 export interface AppProvidersProps {
@@ -96,14 +110,25 @@ export function AppProviders({
   }
   const effectiveSystemLocale: AppLocale = systemLocale ?? initialI18nRef.current.locale;
 
-  const fallbackStore = useMemo(() => createMemoryPreferencesStore(), []);
+  const initialArtworkCacheLimitMb = resolveInitialArtworkCacheLimitMb(viewport);
+  const initialArtworkCacheLimitRef = useRef(initialArtworkCacheLimitMb);
+  const fallbackStore = useMemo(
+    () =>
+      createMemoryPreferencesStore({
+        artworkCacheLimitMb: initialArtworkCacheLimitRef.current,
+      }),
+    [],
+  );
   const store = preferencesStore ?? profilePreferences ?? fallbackStore;
 
   const initialLocaleRef = useRef<AppLocale>(effectiveSystemLocale);
   const fallbackI18n = useMemo(() => createAppI18n(initialLocaleRef.current), []);
   const activeI18n = i18n ?? fallbackI18n;
 
-  const [preferences, setPreferences] = useState<PreferencesSnapshot>(DEFAULT_PREFERENCES);
+  const [preferences, setPreferences] = useState<PreferencesSnapshot>(() => ({
+    ...DEFAULT_PREFERENCES,
+    artworkCacheLimitMb: initialArtworkCacheLimitMb,
+  }));
   const [ready, setReady] = useState(false);
 
   const preferencesRef = useRef(preferences);

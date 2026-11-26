@@ -236,14 +236,14 @@ describe('loadfileCommand', () => {
     });
   });
 
-  it('forwards preferHevcOverDolbyVision as hwdec=no and filterSdhSubtitles as sub-filter-sdh (#124, #310)', () => {
+  it('does not force hwdec=no when preferHevcOverDolbyVision is true and forwards filterSdhSubtitles as sub-filter-sdh (#124, #310)', () => {
     const dvOpts = loadfileCommand({
       ...base,
       kind: 'vod',
       preferHevcOverDolbyVision: true,
       filterSdhSubtitles: true,
     })[4] as Record<string, string>;
-    expect(dvOpts['hwdec']).toBe('no');
+    expect(dvOpts).not.toHaveProperty('hwdec');
     expect(dvOpts['sub-filter-sdh']).toBe('yes');
 
     const offOpts = loadfileCommand({
@@ -266,9 +266,9 @@ describe('loadfileCommand', () => {
       'demuxer-max-bytes': '64MiB',
       'demuxer-max-back-bytes': '16MiB',
       'demuxer-hysteresis-secs': '10',
-      hwdec: 'no',
       'sub-filter-sdh': 'yes',
     });
+    expect(cmd[4]).not.toHaveProperty('hwdec');
   });
 
   it('applies vodCacheOptions for VOD while keeping live strictly cache-on-disk=no (#350)', () => {

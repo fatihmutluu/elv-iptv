@@ -387,16 +387,127 @@ describe('Wave F6 Desktop Tray & Popout (#158), Persistent Mini-Player (#233) & 
         }}
       />,
     );
-    const trayToggle = screen.getByTestId('settings-playback-toggle-minimize-to-tray');
-    expect(trayToggle.props.accessibilityState?.checked).toBe(false);
+    expect(screen.queryByTestId('settings-playback-toggle-minimize-to-tray')).toBeNull();
     expect(screen.queryByTestId('settings-playback-toggle-auto-enter-pip')).toBeNull();
-    await fireEvent.press(trayToggle);
-    await waitFor(() => {
-      expect(
-        screen.getByTestId('settings-playback-toggle-minimize-to-tray').props.accessibilityState
-          ?.checked,
-      ).toBe(true);
-    });
     await desktopView.unmount();
+  });
+
+  it('always stops BOTH active playback and embedded Live preview on hidden-to-tray even when backgroundAudioPlayback is true (Wave P7)', async () => {
+    const env = await createSeededEnv();
+    const sources = await env.catalog.listSources();
+    const firstSource = sources[0];
+    if (firstSource === undefined) throw new Error('expected seeded source');
+    const accountKey = resolveAccountPoolKey(firstSource);
+    const tracker = createConnectionTracker();
+    const prefsStore = createMemoryPreferencesStore({
+      minimizeToTray: true,
+      backgroundAudioPlayback: true,
+    });
+    let hiddenToTrayCb: (() => void) | undefined;
+
+    const desktopWindow: DesktopWindowPort = {
+      setMinimizeToTray: jest.fn(),
+      openPopout: jest.fn(async () => true),
+      onHiddenToTray: (cb) => {
+        hiddenToTrayCb = cb;
+        return () => {
+          hiddenToTrayCb = undefined;
+        };
+      },
+      onWindowRestored: () => () => undefined,
+      onPopoutDocked: () => () => undefined,
+    };
+
+    const openedEngines: ReturnType<typeof createFakePlayerEngine>[] = [];
+    const videoHost: VideoHost = {
+      open: jest.fn(() => {
+        const engine = createFakePlayerEngine({
+          now: () => performance.now(),
+          schedule: (fn, ms) => setTimeout(fn, ms),
+          cancel: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+        });
+        openedEngines.push(engine);
+        return {
+          engine,
+          overlayMode: 'floating' as const,
+          renderSurface: ({ testID }: { testID?: string }) => (
+            <View testID={testID ?? 'shell-surface'} />
+          ),
+        };
+      }),
+      supportsMultiView: true,
+    };
+
+    let view: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      view = await render(
+        <AppProviders preferencesStore={prefsStore}>
+          <FormFactorProvider value="desktop">
+            <ViewportProvider
+              value={{ formFactor: 'desktop', orientation: 'landscape', width: 1280, height: 800 }}
+            >
+              <I18nProvider i18n={createAppI18n('en')}>
+                <AppShell
+                  catalog={env.catalog}
+                  videoHost={videoHost}
+                  connectionTracker={tracker}
+                  desktopWindow={desktopWindow}
+                />
+              </I18nProvider>
+            </ViewportProvider>
+          </FormFactorProvider>
+        </AppProviders>,
+      );
+
+      await waitFor(() => expect(screen.getByTestId('home-live-item-0')).toBeTruthy());
+
+      // 1) Active fullscreen playback stops unconditionally when hidden to tray (even with backgroundAudioPlayback: true)
+      await fireEvent.press(screen.getByTestId('home-live-item-0'));
+      await waitFor(() => expect(screen.getByTestId('player-osd')).toBeTruthy());
+      expect(tracker.activeCount(accountKey)).toBe(1);
+
+      await act(async () => {
+        hiddenToTrayCb?.();
+      });
+      await waitFor(() => expect(screen.queryByTestId('player-osd')).toBeNull());
+      expect(tracker.activeCount(accountKey)).toBe(0);
+
+      // Seed a favorite so Live -> Favorites opens the embedded preview player
+      const liveCats = await env.catalog.categories(firstSource.id, 'live');
+      const liveItems = await env.catalog.items(liveCats[0]?.id ?? '', 0, 5);
+      const favCh = liveItems[0];
+      if (favCh) {
+        await env.catalog.setFavorite?.(
+          {
+            sourceId: favCh.sourceId,
+            itemKey: favCh.key,
+            kind: 'live',
+            title: favCh.name,
+          },
+          true,
+        );
+      }
+
+      // 2) Embedded Live preview in Live -> Favorites also stops unconditionally when hidden to tray
+      await fireEvent.press(screen.getByTestId('nav-tab-live'));
+      await waitFor(() => expect(screen.getByTestId('live-screen')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('live-mode-favorites'));
+      await waitFor(() => expect(openedEngines.length).toBeGreaterThanOrEqual(2));
+      const previewEngine = openedEngines[openedEngines.length - 1];
+      expect(previewEngine).toBeDefined();
+
+      await act(async () => {
+        hiddenToTrayCb?.();
+      });
+      await waitFor(() => {
+        expect(previewEngine?.commands.some((c) => c.name === 'stop' || c.name === 'dispose')).toBe(
+          true,
+        );
+      });
+      expect(tracker.activeCount(accountKey)).toBe(0);
+    } finally {
+      await view?.unmount();
+      await env.cleanup();
+    }
   });
 });

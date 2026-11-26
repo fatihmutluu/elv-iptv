@@ -137,6 +137,8 @@ export interface SourceSettings {
   categorySelection?: SourceCategorySelection;
   /** Marks a local sandboxed M3U source whose bytes are stored in {@link LocalPlaylistStore} (`#51`). */
   isLocalPlaylist?: boolean;
+  /** Profile IDs explicitly excluded from viewing this source (empty/omitted = shared with all profiles). */
+  excludedProfileIds?: readonly string[];
 }
 
 /** A row of the `sources` table. */

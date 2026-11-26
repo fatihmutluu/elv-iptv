@@ -182,7 +182,6 @@ describe('Wave P2 — Aspect Fade Badge, Context-Aware Overflow Menu & Interacti
       onToggleResizeMode: jest.fn(),
       onCycleTimeDisplayMode: jest.fn(),
       onTogglePitchLock: jest.fn(),
-      onToggleAutoSubtitlesOnSkipBack: jest.fn(),
       onToggleAutoPlayNextEpisode: jest.fn(),
       onEnterMultiView: jest.fn(),
       onSelectSleepTimer: jest.fn(),
@@ -233,13 +232,13 @@ describe('Wave P2 — Aspect Fade Badge, Context-Aware Overflow Menu & Interacti
       ),
     ).toEqual({ kind: 'sleepTimer', minutes: 0 });
 
-    // VOD root menu shows VOD-only rows and hides Live-only rows
+    // VOD root menu shows VOD-only rows and hides Live-only rows (autoSubtitlesOnSkipBack removed in Wave P7)
     const vodView = await render(wrap(<PlayerSettingsSheet {...commonProps} isVod />));
     expect(screen.getByTestId('player-pitch-lock-toggle')).toBeTruthy();
     expect(screen.getByTestId('player-time-display-toggle')).toBeTruthy();
     expect(screen.getByTestId('player-settings-row-speed')).toBeTruthy();
     expect(screen.getByTestId('player-settings-row-chapters')).toBeTruthy();
-    expect(screen.getByTestId('player-auto-subtitles-skip-back-toggle')).toBeTruthy();
+    expect(screen.queryByTestId('player-auto-subtitles-skip-back-toggle')).toBeNull();
     expect(screen.getByTestId('player-auto-play-next-toggle')).toBeTruthy();
     expect(screen.queryByTestId('player-settings-row-quality')).toBeNull();
     // Wave P5: Cross-media Multi-View is available on Movies & Series as well as Live TV

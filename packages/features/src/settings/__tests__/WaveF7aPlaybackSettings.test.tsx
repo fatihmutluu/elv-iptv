@@ -23,7 +23,6 @@ import { Platform, View } from 'react-native';
 import { type SettingsPreferencesController, SettingsScreen } from '../index';
 
 const KEYCODE_DPAD_DOWN = 20;
-const KEYCODE_DPAD_LEFT = 21;
 const KEYCODE_DPAD_RIGHT = 22;
 const KEYCODE_DPAD_CENTER = 23;
 
@@ -118,65 +117,45 @@ const TV_VIEWPORT: ViewportOverride = {
   height: 1080,
 };
 
-describe('Wave F7A Playback Settings UI (#115, #116, #188, #213)', () => {
+describe('Wave F7A / P7 Playback Settings UI (#115, #213)', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('persists AFR, Auto HDR, per-refresh-rate A/V delay, and Desktop audio passthrough on desktop while hiding Night-Mode DRC', async () => {
+  it('collapses Desktop Advanced audio by default and persists channel layout, passthrough, codecs, exclusive, and AC3 encode when expanded', async () => {
     const store = createMemoryPreferencesStore();
     const view = await render(<Harness store={store} viewport={DESKTOP_VIEWPORT} />);
-
-    // AFR 3-way selector + Auto HDR toggle
-    await fireEvent.press(screen.getByTestId('settings-playback-afr-always'));
-    await fireEvent.press(screen.getByTestId('settings-playback-toggle-auto-dynamic-range'));
 
     // Night-Mode DRC hidden on desktop
     expect(screen.queryByTestId('settings-playback-night-drc-night')).toBeNull();
 
-    // Per-refresh-rate A/V delay bucket editor (±25 ms, reset to 0 ms)
-    await fireEvent.press(screen.getByTestId('settings-playback-delay-bucket-50'));
-    await fireEvent.press(screen.getByTestId('settings-playback-delay-inc'));
-    await fireEvent.press(screen.getByTestId('settings-playback-delay-inc'));
-    await waitFor(async () => {
-      expect((await store.load()).audioDelayByRefreshRateMs).toEqual({ '50': 50 });
-    });
-    expect(screen.getByTestId('settings-playback-delay-value')).toHaveTextContent('50 Hz · +50 ms');
+    // Advanced audio starts collapsed
+    expect(screen.queryByTestId('settings-playback-toggle-audio-passthrough')).toBeNull();
 
-    await fireEvent.press(screen.getByTestId('settings-playback-delay-dec'));
-    await waitFor(async () => {
-      expect((await store.load()).audioDelayByRefreshRateMs).toEqual({ '50': 25 });
-    });
+    // Expand Advanced audio
+    await fireEvent.press(screen.getByTestId('settings-desktop-advanced-audio-toggle'));
 
-    await fireEvent.press(screen.getByTestId('settings-playback-delay-reset'));
-    await waitFor(async () => {
-      expect((await store.load()).audioDelayByRefreshRateMs).toEqual({});
-    });
+    // Channel layout dropdown
+    await fireEvent.press(screen.getByTestId('settings-playback-channel-layout-dropdown'));
+    await fireEvent.press(screen.getByTestId('settings-playback-channel-layout-7.1'));
 
-    // Desktop Audio Output section: exclusive disabled until passthrough is enabled
-    const exclusiveBefore = screen.getByTestId('settings-playback-toggle-audio-exclusive');
-    expect(exclusiveBefore.props.accessibilityState?.disabled).toBe(true);
-    await fireEvent.press(exclusiveBefore);
-    expect((await store.load()).audioExclusive).toBe(false);
+    // Passthrough sub-controls hidden until passthrough is ON
+    expect(screen.queryByTestId('settings-playback-passthrough-codecs')).toBeNull();
+    expect(screen.queryByTestId('settings-playback-toggle-audio-exclusive')).toBeNull();
+    expect(screen.queryByTestId('settings-playback-toggle-audio-ac3-encode')).toBeNull();
 
-    // Enable passthrough, toggle codecs (add truehd, remove eac3), enable exclusive + AC3 encode + 7.1
+    // Enable passthrough -> reveals codecs, exclusive, and AC3 encode
     await fireEvent.press(screen.getByTestId('settings-playback-toggle-audio-passthrough'));
     await waitFor(() => {
-      expect(
-        screen.getByTestId('settings-playback-toggle-audio-exclusive').props.accessibilityState
-          ?.disabled,
-      ).toBe(false);
+      expect(screen.getByTestId('settings-playback-passthrough-codecs')).toBeTruthy();
     });
     await fireEvent.press(screen.getByTestId('settings-playback-passthrough-codec-truehd'));
     await fireEvent.press(screen.getByTestId('settings-playback-passthrough-codec-eac3'));
     await fireEvent.press(screen.getByTestId('settings-playback-toggle-audio-exclusive'));
     await fireEvent.press(screen.getByTestId('settings-playback-toggle-audio-ac3-encode'));
-    await fireEvent.press(screen.getByTestId('settings-playback-channel-layout-7.1'));
 
     await waitFor(async () => {
       const loaded = await store.load();
-      expect(loaded.autoFrameRate).toBe('always');
-      expect(loaded.autoDynamicRange).toBe(false);
       expect(loaded.audioPassthrough).toBe(true);
       expect(loaded.audioPassthroughCodecs).toEqual(['ac3', 'dts', 'truehd']);
       expect(loaded.audioExclusive).toBe(true);
@@ -188,7 +167,6 @@ describe('Wave F7A Playback Settings UI (#115, #116, #188, #213)', () => {
   });
 
   it('shows Night-Mode DRC strictly on Android and hides it on iOS, tvOS, and Desktop (#115)', async () => {
-    // Android phone: Night-Mode DRC visible & interactive, Desktop Audio hidden
     jest.replaceProperty(Platform, 'OS', 'android');
     const androidStore = createMemoryPreferencesStore();
     const androidView = await render(<Harness store={androidStore} viewport={PHONE_VIEWPORT} />);
@@ -204,7 +182,6 @@ describe('Wave F7A Playback Settings UI (#115, #116, #188, #213)', () => {
     });
     await androidView.unmount();
 
-    // iOS phone: Night-Mode DRC hidden, Desktop Audio hidden
     jest.replaceProperty(Platform, 'OS', 'ios');
     const iosView = await render(<Harness viewport={PHONE_VIEWPORT} />);
     expect(screen.queryByTestId('settings-section-desktop-audio')).toBeNull();
@@ -212,7 +189,6 @@ describe('Wave F7A Playback Settings UI (#115, #116, #188, #213)', () => {
     expect(screen.queryByTestId('settings-playback-night-drc-night')).toBeNull();
     await iosView.unmount();
 
-    // tvOS: Night-Mode DRC hidden, Desktop Audio hidden
     jest.replaceProperty(Platform, 'OS', 'ios');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
     const tvosView = await render(<Harness viewport={TV_VIEWPORT} />);
@@ -221,7 +197,6 @@ describe('Wave F7A Playback Settings UI (#115, #116, #188, #213)', () => {
     expect(screen.queryByTestId('settings-playback-night-drc-night')).toBeNull();
     await tvosView.unmount();
 
-    // Desktop web: Night-Mode DRC hidden, Desktop Audio visible
     jest.replaceProperty(Platform, 'OS', 'web');
     const desktopView = await render(<Harness viewport={DESKTOP_VIEWPORT} />);
     expect(screen.queryByTestId('settings-playback-night-drc-night')).toBeNull();
@@ -229,7 +204,7 @@ describe('Wave F7A Playback Settings UI (#115, #116, #188, #213)', () => {
     await desktopView.unmount();
   });
 
-  it('excludes Night-Mode DRC from TV D-pad rows when showNightModeDrc is false (tvOS / non-Android, #115)', async () => {
+  it('excludes Night-Mode DRC from TV D-pad rows when showNightModeDrc is false and includes it when true (#115)', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
 
@@ -251,10 +226,11 @@ describe('Wave F7A Playback Settings UI (#115, #116, #188, #213)', () => {
       });
     };
 
-    const store = createMemoryPreferencesStore();
-    const view = await render(
+    // showNightModeDrc=false: row 7 should be osd-time-* (skipping Night-Mode DRC)
+    const storeOff = createMemoryPreferencesStore();
+    const viewOff = await render(
       <Harness
-        store={store}
+        store={storeOff}
         viewport={TV_VIEWPORT}
         androidSource={androidSource}
         showAndroidDecoder={false}
@@ -263,114 +239,41 @@ describe('Wave F7A Playback Settings UI (#115, #116, #188, #213)', () => {
     );
 
     expect(screen.queryByTestId('settings-playback-night-drc-off')).toBeNull();
-
-    // Enter Playback content pane (row 0), move down 16 rows to Auto HDR toggle
     await pressKey(KEYCODE_DPAD_RIGHT);
-    for (let i = 0; i < 16; i += 1) {
+    // Rows 0..2: seek, aspect, buffer; Rows 3..6: filterSdh, preferHevcDv, pitchLock, audioNorm -> Row 7: osd-time-*
+    for (let i = 0; i < 7; i += 1) {
       await pressKey(KEYCODE_DPAD_DOWN);
     }
+    await pressKey(KEYCODE_DPAD_RIGHT);
     await pressKey(KEYCODE_DPAD_CENTER);
     await waitFor(async () => {
-      expect((await store.load()).autoDynamicRange).toBe(false);
-    });
-
-    // Next row MUST be delay-bucket-* (skipping Night-Mode DRC): Right -> '24', Down -> delay-stepper, Right -> +25 ms
-    await pressKey(KEYCODE_DPAD_DOWN);
-    await pressKey(KEYCODE_DPAD_RIGHT);
-    await pressKey(KEYCODE_DPAD_DOWN);
-    await pressKey(KEYCODE_DPAD_RIGHT);
-    await waitFor(async () => {
-      const loaded = await store.load();
+      const loaded = await storeOff.load();
       expect(loaded.nightModeDrc).toBe('off');
-      expect(loaded.audioDelayByRefreshRateMs).toEqual({ '24': 25 });
+      expect(loaded.osdTimeDisplayMode).toBe('remaining');
     });
+    await viewOff.unmount();
 
-    await view.unmount();
-  });
-
-  it('supports 10-foot TV D-pad navigation for AFR, Auto HDR, Night-Mode DRC, and left/right A/V delay stepper (#115, #116)', async () => {
-    jest.replaceProperty(Platform, 'OS', 'android');
-    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
-
-    let keyListener: ((e: AndroidKeyEvent) => void) | undefined;
-    const androidSource: AndroidKeySource = {
-      addListener: (l) => {
-        keyListener = l;
-        return {
-          remove: () => {
-            keyListener = undefined;
-          },
-        };
-      },
-    };
-    const pressKey = async (keyCode: number) => {
-      await act(async () => {
-        keyListener?.({ action: 'down', keyCode, canceled: false, ageMs: 0 });
-        keyListener?.({ action: 'up', keyCode, canceled: false, ageMs: 10 });
-      });
-    };
-
-    const store = createMemoryPreferencesStore();
-    const view = await render(
+    // showNightModeDrc=true: row 7 is Night-Mode DRC -> Right -> 'light' -> Select
+    const storeOn = createMemoryPreferencesStore();
+    const viewOn = await render(
       <Harness
-        store={store}
+        store={storeOn}
         viewport={TV_VIEWPORT}
         androidSource={androidSource}
         showAndroidDecoder={false}
+        showNightModeDrc={true}
       />,
     );
-
-    // Desktop audio output must never appear on TV
     expect(screen.queryByTestId('settings-section-desktop-audio')).toBeNull();
-
-    // Enter Playback content pane (row 0) and navigate down 15 rows to AFR row:
-    // 0..5 head (6 rows) + 6..14 cinema/osd/oled/stillWatching (9 rows) = row 15 (afr)
     await pressKey(KEYCODE_DPAD_RIGHT);
-    for (let i = 0; i < 15; i += 1) {
+    for (let i = 0; i < 7; i += 1) {
       await pressKey(KEYCODE_DPAD_DOWN);
     }
-    // Select AFR 'off' (col 0)
-    await pressKey(KEYCODE_DPAD_CENTER);
-    await waitFor(async () => {
-      expect((await store.load()).autoFrameRate).toBe('off');
-    });
-
-    // Row 16: Auto HDR toggle -> press Center to toggle off
-    await pressKey(KEYCODE_DPAD_DOWN);
-    await pressKey(KEYCODE_DPAD_CENTER);
-    await waitFor(async () => {
-      expect((await store.load()).autoDynamicRange).toBe(false);
-    });
-
-    // Row 17: Night-Mode DRC -> Right to 'light' -> Center
-    await pressKey(KEYCODE_DPAD_DOWN);
     await pressKey(KEYCODE_DPAD_RIGHT);
     await pressKey(KEYCODE_DPAD_CENTER);
     await waitFor(async () => {
-      expect((await store.load()).nightModeDrc).toBe('light');
+      expect((await storeOn.load()).nightModeDrc).toBe('light');
     });
-
-    // Row 18: Refresh-rate delay buckets (col 1 = '24', Right -> col 2 = '25')
-    await pressKey(KEYCODE_DPAD_DOWN);
-    await pressKey(KEYCODE_DPAD_RIGHT);
-    // Row 19: Delay stepper -> D-pad Right twice (+50 ms), Left once (+25 ms), Center resets (0 ms)
-    await pressKey(KEYCODE_DPAD_DOWN);
-    await pressKey(KEYCODE_DPAD_RIGHT);
-    await pressKey(KEYCODE_DPAD_RIGHT);
-    await waitFor(async () => {
-      expect((await store.load()).audioDelayByRefreshRateMs).toEqual({ '25': 50 });
-    });
-
-    await pressKey(KEYCODE_DPAD_LEFT);
-    await waitFor(async () => {
-      expect((await store.load()).audioDelayByRefreshRateMs).toEqual({ '25': 25 });
-    });
-
-    await pressKey(KEYCODE_DPAD_CENTER);
-    await waitFor(async () => {
-      expect((await store.load()).audioDelayByRefreshRateMs).toEqual({});
-    });
-
-    await view.unmount();
+    await viewOn.unmount();
   });
 });

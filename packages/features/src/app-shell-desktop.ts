@@ -87,7 +87,7 @@ export interface UseShellPlaybackModesOptions {
   readonly stopActivePlayerRef: MutableRefObject<(() => Promise<void>) | null>;
   readonly stopEmbeddedPreviewRef?: MutableRefObject<(() => Promise<void>) | null> | undefined;
   readonly minimizeToTray: boolean;
-  readonly backgroundAudioPlayback: boolean;
+  readonly backgroundAudioPlayback?: boolean;
   readonly playTarget?: PlayTarget | null;
   readonly liveEmbeddedPlaybackActive?: boolean;
   readonly playTargetRef: MutableRefObject<PlayTarget | null>;
@@ -125,7 +125,6 @@ export function useShellPlaybackModes({
   stopActivePlayerRef,
   stopEmbeddedPreviewRef,
   minimizeToTray,
-  backgroundAudioPlayback,
   playTarget = null,
   liveEmbeddedPlaybackActive = false,
   playTargetRef,
@@ -156,8 +155,6 @@ export function useShellPlaybackModes({
     handoffActiveSessionRef.current = fn;
   }, []);
 
-  const bgAudioRef = useRef(backgroundAudioPlayback);
-  bgAudioRef.current = backgroundAudioPlayback;
   const multiViewSeedRef = useRef(multiViewSeed);
   multiViewSeedRef.current = multiViewSeed;
   const stopActiveRef = useRef(onStopActivePlayback);
@@ -209,13 +206,15 @@ export function useShellPlaybackModes({
     void desktopWindow?.setMinimizeToTray?.(minimizeToTray);
   }, [desktopWindow, minimizeToTray]);
 
-  // Stop invisible active streams when hidden to tray unless background audio is enabled (#158).
+  // Stop all active streams (full/mini player, embedded live preview, and Multi-View) when hidden
+  // to tray so clicking X never leaves phantom audio playing while downloads & sync keep running.
   useEffect(() => {
     const sub = desktopWindow?.onHiddenToTray;
     if (sub === undefined) return;
     return sub(() => {
-      if (bgAudioRef.current) return;
+      void Promise.resolve(stopEmbeddedPreviewRef?.current?.()).catch(() => undefined);
       if (playTargetRef.current !== null) {
+        void Promise.resolve(stopActivePlayerRef.current?.()).catch(() => undefined);
         stopActiveRef.current();
         setPlayerViewMode('full');
         setPendingAdoptedSession(null);
@@ -226,7 +225,7 @@ export function useShellPlaybackModes({
         setMultiViewSeed(null);
       }
     });
-  }, [desktopWindow, playTargetRef]);
+  }, [desktopWindow, playTargetRef, stopActivePlayerRef, stopEmbeddedPreviewRef]);
 
   // Trigger OSD/cursor visibility restore when main window returns from tray (#158).
   useEffect(() => {

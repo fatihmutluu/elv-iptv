@@ -258,10 +258,10 @@ export function isValidIanaTimeZone(tz: string): boolean {
   }
 }
 
-/** Creates a blank initial form state defaulting to Xtream mode. */
+/** Creates a blank initial form state defaulting to M3U mode. */
 export function createInitialSourceForm(): SourceFormState {
   return {
-    mode: 'xtream',
+    mode: 'm3u',
     name: '',
     server: '',
     username: '',

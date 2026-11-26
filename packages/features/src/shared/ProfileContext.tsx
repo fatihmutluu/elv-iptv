@@ -99,6 +99,8 @@ export interface ProfileContextValue {
   ): Promise<Result<void>>;
   setParentalPin(pin: string, currentPin?: string, profileId?: string): Promise<Result<void>>;
   clearParentalPin(currentPin: string, profileId?: string): Promise<Result<void>>;
+  /** Queries whether a specific profile has a parental PIN configured in the catalog. */
+  hasProfilePin(profileId: string): Promise<boolean>;
   refreshParental(): Promise<void>;
   refreshProfiles(): Promise<void>;
   requestParentalUnlock(onSuccess: () => void, options?: { readonly title?: string }): void;
@@ -136,6 +138,7 @@ const DEFAULT_PROFILE_CONTEXT: ProfileContextValue = {
   setParentalLock: unsupported,
   setParentalPin: unsupported,
   clearParentalPin: unsupported,
+  hasProfilePin: async () => false,
   refreshParental: async () => undefined,
   refreshProfiles: async () => undefined,
   requestParentalUnlock: () => undefined,
@@ -280,7 +283,7 @@ export function ProfileProvider({
           : Promise.resolve(candidates.map(() => false)),
       ]);
       const hasPin = pinFlags[0] === true;
-      const guardIdx = pinFlags.findIndex((flag) => flag === true);
+      const guardIdx = pinFlags.indexOf(true);
       const nextGuardId = guardIdx >= 0 ? (candidates[guardIdx] ?? null) : null;
       return { settings, locks, hasPin, guardPinProfileId: nextGuardId };
     },
@@ -498,6 +501,29 @@ export function ProfileProvider({
     [catalog],
   );
 
+  const startParentalUnlockSession = useCallback(() => {
+    clearRelockTimer();
+    parentalUnlockedRef.current = true;
+    setParentalUnlocked(true);
+    const timeoutMin = parentalSettingsRef.current.unlockTimeoutMin;
+    if (timeoutMin > 0) {
+      const durationMs = timeoutMin * 60_000;
+      setParentalUnlockExpiresAt(Date.now() + durationMs);
+      relockTimerRef.current = setTimeout(() => {
+        relockTimerRef.current = null;
+        if (mountedRef.current) lockParentalNow();
+      }, durationMs);
+    } else {
+      setParentalUnlockExpiresAt(null);
+    }
+    setProfileRevision((r) => r + 1);
+    onChangeRef.current?.({
+      activeProfileId: activeProfileIdRef.current,
+      parentalUnlocked: true,
+      reason: 'parental-change',
+    });
+  }, [clearRelockTimer, lockParentalNow]);
+
   const unlockParental = useCallback(
     async (pin: string, targetProfileId?: string): Promise<PinVerifyResult> => {
       const pid = targetProfileId ?? guardPinProfileIdRef.current ?? activeProfileIdRef.current;
@@ -507,30 +533,11 @@ export function ProfileProvider({
       const res = await catalog.verifyParentalPin(pin, pid);
       if (!mountedRef.current) return res;
       if (res.ok && (pid === activeProfileIdRef.current || pid === guardPinProfileIdRef.current)) {
-        clearRelockTimer();
-        parentalUnlockedRef.current = true;
-        setParentalUnlocked(true);
-        const timeoutMin = parentalSettingsRef.current.unlockTimeoutMin;
-        if (timeoutMin > 0) {
-          const durationMs = timeoutMin * 60_000;
-          setParentalUnlockExpiresAt(Date.now() + durationMs);
-          relockTimerRef.current = setTimeout(() => {
-            relockTimerRef.current = null;
-            if (mountedRef.current) lockParentalNow();
-          }, durationMs);
-        } else {
-          setParentalUnlockExpiresAt(null);
-        }
-        setProfileRevision((r) => r + 1);
-        onChangeRef.current?.({
-          activeProfileId: activeProfileIdRef.current,
-          parentalUnlocked: true,
-          reason: 'parental-change',
-        });
+        startParentalUnlockSession();
       }
       return res;
     },
-    [catalog, clearRelockTimer, lockParentalNow],
+    [catalog, startParentalUnlockSession],
   );
 
   const updateParentalSettingsAction = useCallback(
@@ -579,13 +586,29 @@ export function ProfileProvider({
     async (pin: string, currentPin?: string, targetProfileId?: string): Promise<Result<void>> => {
       if (!catalog.setParentalPin) return err(elvError('storage', 'unsupported'));
       const pid = targetProfileId ?? activeProfileIdRef.current;
+      const isCreate = currentPin === undefined;
       const res = await catalog.setParentalPin(pin, pid, currentPin);
       if (res.ok && mountedRef.current) {
         await loadParentalStateFor(activeProfileIdRef.current);
+        if (
+          mountedRef.current &&
+          isCreate &&
+          (pid === activeProfileIdRef.current || pid === guardPinProfileIdRef.current)
+        ) {
+          startParentalUnlockSession();
+        }
       }
       return res;
     },
-    [catalog, loadParentalStateFor],
+    [catalog, loadParentalStateFor, startParentalUnlockSession],
+  );
+
+  const hasProfilePinAction = useCallback(
+    async (profileId: string): Promise<boolean> => {
+      if (!catalog.hasParentalPin) return false;
+      return catalog.hasParentalPin(profileId).catch(() => false);
+    },
+    [catalog],
   );
 
   const clearParentalPinAction = useCallback(
@@ -672,6 +695,7 @@ export function ProfileProvider({
       setParentalLock: setParentalLockAction,
       setParentalPin: setParentalPinAction,
       clearParentalPin: clearParentalPinAction,
+      hasProfilePin: hasProfilePinAction,
       refreshParental,
       refreshProfiles,
       requestParentalUnlock,
@@ -706,6 +730,7 @@ export function ProfileProvider({
       setParentalLockAction,
       setParentalPinAction,
       clearParentalPinAction,
+      hasProfilePinAction,
       refreshParental,
       refreshProfiles,
       requestParentalUnlock,

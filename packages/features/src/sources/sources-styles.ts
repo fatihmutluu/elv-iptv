@@ -34,6 +34,7 @@ export const sourcesStyles = StyleSheet.create({
   segmentItem: { flexShrink: 1 },
   segmentButton: { paddingHorizontal: 12, paddingVertical: 7 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  submitRow: { flexDirection: 'row', justifyContent: 'flex-end', alignSelf: 'stretch', gap: 8 },
   fieldGroup: { gap: 6 },
   inputFrame: { minHeight: 42, justifyContent: 'center' },
   input: { minHeight: 42, paddingHorizontal: 12, paddingVertical: 10 },

@@ -1,11 +1,10 @@
-import type { CatalogService, SourceRow } from '@elv/data';
+import type { CatalogService } from '@elv/data';
 import { type MutableRefObject, type ReactElement, useCallback, useMemo, useState } from 'react';
 import { AppShellProfileOverlays, type useShellManagementOverlays } from './app-shell-overlays';
 import type { useProgrammeReminders } from './app-shell-reminders';
 import { AppShellExitToast } from './app-shell-sections';
 import { buildShellCrashProps } from './app-shell-state';
 import { AppShellWaveF9Overlays, type WaveF9Controller } from './app-shell-wave-f9';
-import { ChannelManagementOverlay } from './live';
 import { ConnectionLimitDialog } from './player/ConnectionLimitDialog';
 import {
   ExternalHandoffErrorToast,
@@ -115,7 +114,6 @@ export function AppShellRootOverlays(props: {
   readonly connectionGuard: ReturnType<typeof useConnectionLimitGuard>;
   readonly mgmtOverlays: ReturnType<typeof useShellManagementOverlays>;
   readonly catalog: CatalogService;
-  readonly sources: readonly SourceRow[];
   readonly onChannelsMutated: () => void;
   readonly onOpenProfilesSettings: () => void;
   readonly reminders: ReturnType<typeof useProgrammeReminders>;
@@ -130,7 +128,6 @@ export function AppShellRootOverlays(props: {
     connectionGuard,
     mgmtOverlays,
     catalog,
-    sources,
     onChannelsMutated,
     onOpenProfilesSettings,
     reminders,
@@ -151,13 +148,6 @@ export function AppShellRootOverlays(props: {
           onContinueAnyway={connectionGuard.handleContinueAnyway}
         />
       ) : null}
-      <ChannelManagementOverlay
-        visible={mgmtOverlays.channelManagerOpen}
-        catalog={catalog}
-        sources={sources}
-        onMutated={onChannelsMutated}
-        onClose={mgmtOverlays.closeChannelManager}
-      />
       <GuideManagementOverlay
         visible={mgmtOverlays.guideSource !== null}
         source={mgmtOverlays.guideSource}

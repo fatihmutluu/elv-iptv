@@ -125,6 +125,7 @@ describe('SourcesScreen localized HTTP errors & moving import progress (#63, #65
         </ThemeProvider>,
       );
 
+      await fireEvent.press(screen.getByTestId('sources-mode-xtream'));
       await fireEvent.changeText(
         screen.getByTestId('sources-input-server'),
         'http://sim.example.test:7878',

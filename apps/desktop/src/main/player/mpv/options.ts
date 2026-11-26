@@ -219,7 +219,6 @@ export function loadfileCommand(
       : subtitleStyleLoadOptions(r.subtitleStyle, r.secondarySubtitleActive === true)),
   };
   if (r.startMs !== undefined) options['start'] = (r.startMs / 1000).toFixed(3);
-  if (r.preferHevcOverDolbyVision === true) options['hwdec'] = 'no';
   if (r.filterSdhSubtitles !== undefined) {
     options['sub-filter-sdh'] = r.filterSdhSubtitles ? 'yes' : 'no';
   }

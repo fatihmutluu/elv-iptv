@@ -9,7 +9,6 @@ import {
   isEpgRowDensity,
   isRecord,
   isValidShortString,
-  type LogoBackdropModePref,
   type OsdTimeDisplayMode,
   type SeekStepSecPref,
   type SubtitleModePref,
@@ -37,13 +36,8 @@ export const SYNCABLE_PREFERENCE_KEYS = [
   'osdTimeDisplayMode',
   'epgTimeSpanHours',
   'epgRowDensity',
-  'epgGenreTints',
   'epgShowClock',
   'defaultLiveMode',
-  'logoBackdropMode',
-  'showSourceBadges',
-  'cleanChannelTitles',
-  'collapseLiveVariants',
   'groupVodVersions',
   'uiFontFamily',
   'subtitleFontFamily',
@@ -54,7 +48,6 @@ export const SYNCABLE_PREFERENCE_KEYS = [
   'preferredAudioLanguages',
   'preferredSubtitleLanguages',
   'autoPlayNextEpisode',
-  'autoSubtitlesOnSkipBack',
   'seekStepSec',
   'homeLayout',
 ] as const;
@@ -66,7 +59,6 @@ const DEFAULT_RESIZE_MODES: ReadonlySet<string> = new Set(['fit', 'fill', 'stret
 const OSD_TIME_DISPLAY_MODES: ReadonlySet<string> = new Set(['total', 'remaining', 'endsAt']);
 const EPG_TIME_SPAN_HOURS: ReadonlySet<number> = new Set([2, 3, 6]);
 const DEFAULT_LIVE_MODES: ReadonlySet<string> = new Set(['favorites', 'channels', 'epg']);
-const LOGO_BACKDROP_MODES: ReadonlySet<string> = new Set(['plate', 'invert', 'off']);
 const SUBTITLE_MODES: ReadonlySet<string> = new Set([
   'default',
   'smart',
@@ -148,13 +140,8 @@ export function extractSyncablePreferences(
     osdTimeDisplayMode: snapshot.osdTimeDisplayMode,
     epgTimeSpanHours: snapshot.epgTimeSpanHours,
     epgRowDensity: snapshot.epgRowDensity,
-    epgGenreTints: snapshot.epgGenreTints,
     epgShowClock: snapshot.epgShowClock,
     defaultLiveMode: snapshot.defaultLiveMode,
-    logoBackdropMode: snapshot.logoBackdropMode,
-    showSourceBadges: snapshot.showSourceBadges,
-    cleanChannelTitles: snapshot.cleanChannelTitles,
-    collapseLiveVariants: snapshot.collapseLiveVariants,
     groupVodVersions: snapshot.groupVodVersions,
     uiFontFamily: snapshot.uiFontFamily,
     subtitleFontFamily: snapshot.subtitleFontFamily,
@@ -165,7 +152,6 @@ export function extractSyncablePreferences(
     preferredAudioLanguages: [...snapshot.preferredAudioLanguages],
     preferredSubtitleLanguages: [...snapshot.preferredSubtitleLanguages],
     autoPlayNextEpisode: snapshot.autoPlayNextEpisode,
-    autoSubtitlesOnSkipBack: snapshot.autoSubtitlesOnSkipBack,
     seekStepSec: snapshot.seekStepSec,
     homeLayout: snapshot.homeLayout.map((s) => ({ id: s.id, visible: s.visible })),
   };
@@ -202,20 +188,9 @@ export function sanitizeInitialPreferencesPatch(raw: unknown): PreferencesPatch 
     patch.epgTimeSpanHours = raw.epgTimeSpanHours as EpgTimeSpanHoursPref;
   }
   if (isEpgRowDensity(raw.epgRowDensity)) patch.epgRowDensity = raw.epgRowDensity;
-  if (typeof raw.epgGenreTints === 'boolean') patch.epgGenreTints = raw.epgGenreTints;
   if (typeof raw.epgShowClock === 'boolean') patch.epgShowClock = raw.epgShowClock;
   if (typeof raw.defaultLiveMode === 'string' && DEFAULT_LIVE_MODES.has(raw.defaultLiveMode)) {
     patch.defaultLiveMode = raw.defaultLiveMode as DefaultLiveModePref;
-  }
-  if (typeof raw.logoBackdropMode === 'string' && LOGO_BACKDROP_MODES.has(raw.logoBackdropMode)) {
-    patch.logoBackdropMode = raw.logoBackdropMode as LogoBackdropModePref;
-  }
-  if (typeof raw.showSourceBadges === 'boolean') patch.showSourceBadges = raw.showSourceBadges;
-  if (typeof raw.cleanChannelTitles === 'boolean') {
-    patch.cleanChannelTitles = raw.cleanChannelTitles;
-  }
-  if (typeof raw.collapseLiveVariants === 'boolean') {
-    patch.collapseLiveVariants = raw.collapseLiveVariants;
   }
   if (typeof raw.groupVodVersions === 'boolean') patch.groupVodVersions = raw.groupVodVersions;
   if (isAccessibilityFontFamily(raw.uiFontFamily)) patch.uiFontFamily = raw.uiFontFamily;
@@ -243,9 +218,6 @@ export function sanitizeInitialPreferencesPatch(raw: unknown): PreferencesPatch 
 
   if (typeof raw.autoPlayNextEpisode === 'boolean') {
     patch.autoPlayNextEpisode = raw.autoPlayNextEpisode;
-  }
-  if (typeof raw.autoSubtitlesOnSkipBack === 'boolean') {
-    patch.autoSubtitlesOnSkipBack = raw.autoSubtitlesOnSkipBack;
   }
   if (typeof raw.seekStepSec === 'number' && SEEK_STEP_SECS.has(raw.seekStepSec)) {
     patch.seekStepSec = raw.seekStepSec as SeekStepSecPref;

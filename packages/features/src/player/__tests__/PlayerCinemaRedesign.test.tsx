@@ -157,7 +157,6 @@ async function mountRedesignedPlayer(opts: {
   const selectSubtitleSpy = jest.spyOn(engine, 'selectSubtitleTrack');
   const toggleMute = jest.fn();
   const onPersistVolume = jest.fn();
-  const onToggleAutoSubtitlesOnSkipBack = jest.fn();
   const onExit = jest.fn();
   const onTargetChange = jest.fn();
   let fullscreenState = false;
@@ -238,7 +237,6 @@ async function mountRedesignedPlayer(opts: {
                 {...(opts.autoSubtitlesOnSkipBack !== undefined
                   ? { autoSubtitlesOnSkipBack: opts.autoSubtitlesOnSkipBack }
                   : {})}
-                onToggleAutoSubtitlesOnSkipBack={onToggleAutoSubtitlesOnSkipBack}
                 {...(opts.autoPlayNextEpisode !== undefined
                   ? { autoPlayNextEpisode: opts.autoPlayNextEpisode }
                   : {})}
@@ -270,7 +268,6 @@ async function mountRedesignedPlayer(opts: {
     toggleMute,
     toggleFullscreen,
     onPersistVolume,
-    onToggleAutoSubtitlesOnSkipBack,
     onTargetChange,
     onExit,
   };
@@ -458,12 +455,9 @@ describe('Cinema Quietude v2 player redesign end-to-end (#391, #58, #394, #114, 
         p.engine.emit({ attempt: p.attempt, type: 'tracks', tracks: TRACKS_51 });
       });
 
-      // Settings exposes auto-subtitles on skip back toggle on VOD
+      // Settings no longer exposes auto-subtitles on skip back toggle (removed in Wave P7)
       await fireEvent.press(screen.getByTestId('player-settings-button'));
-      const toggle = screen.getByTestId('player-auto-subtitles-skip-back-toggle');
-      expect(toggle).toHaveTextContent(/Subtitles on skip back/);
-      await fireEvent.press(toggle);
-      expect(p.onToggleAutoSubtitlesOnSkipBack).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('player-auto-subtitles-skip-back-toggle')).toBeNull();
       await fireEvent.press(screen.getByTestId('player-settings-close'));
 
       // Skipping back (-10s) activates temporary subtitle track and clears it after 15s

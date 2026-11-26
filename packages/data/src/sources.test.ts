@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { createCatalogService } from './catalog';
 import { openCatalog } from './migrate';
+import {
+  MAX_SOURCE_NAME_LENGTH,
+  renameSource,
+  setSourceExcludedProfiles,
+} from './source-mutations';
 import {
   addM3uSource,
   addXtreamSource,
@@ -12,7 +18,8 @@ import {
   TABLES_BY_SOURCE,
   updateSourceSettings,
 } from './sources';
-import { memorySecrets, testDb } from './test-db';
+import { countingScheduler, memorySecrets, testDb } from './test-db';
+import { createCoalescedCatalog } from './write-coalescer';
 
 const PW = ['hunt', 'er2'].join('');
 const USER = 'bobuser';
@@ -641,5 +648,117 @@ describe('connection limit normalization (#87)', () => {
     expect(normalizeActiveConnections('0')).toBe(0);
     expect(normalizeActiveConnections(2)).toBe(2);
     expect(normalizeActiveConnections(' 3 ')).toBe(3);
+  });
+});
+
+describe('renameSource and setSourceExcludedProfiles (Wave P7)', () => {
+  it('trims, validates <=80 chars, and persists renamed source without touching settings', async () => {
+    const s = await setup();
+    const added = await addXtreamSource(
+      {
+        name: 'Original',
+        server: 'https://panel.example',
+        username: USER,
+        password: PW,
+        transport: { userAgent: 'UA-Keep' },
+      },
+      s.deps,
+    );
+    expect(added.ok).toBe(true);
+    expect(MAX_SOURCE_NAME_LENGTH).toBe(80);
+
+    expect(await renameSource(s.db, 'src1', '   ')).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'invalid-source-name' },
+    });
+    expect(await renameSource(s.db, 'src1', 'a'.repeat(81))).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'invalid-source-name' },
+    });
+    expect(await renameSource(s.db, 'missing', 'Valid')).toEqual({
+      ok: false,
+      error: { category: 'storage', code: 'source-not-found' },
+    });
+
+    const renamed = await renameSource(s.db, 'src1', '  Living Room TV  ');
+    expect(renamed.ok).toBe(true);
+    if (renamed.ok) {
+      expect(renamed.value.name).toBe('Living Room TV');
+      expect(renamed.value.settings).toEqual({ transport: { userAgent: 'UA-Keep' } });
+    }
+    expect((await getSource(s.db, 'src1'))?.name).toBe('Living Room TV');
+  });
+
+  it('validates, deduplicates, sorts excludedProfileIds without clobbering existing settings, and wires through CatalogService & write-coalescer', async () => {
+    const s = await setup();
+    const catalog = createCoalescedCatalog(
+      createCatalogService({
+        db: s.db,
+        secrets: s.secrets,
+        scheduler: countingScheduler(),
+        http: {
+          get: async () => {
+            throw new Error('unused');
+          },
+        },
+        clock: () => 5000,
+        newId: () => 'src_p7',
+      }),
+    );
+
+    const added = await catalog.addSource({
+      kind: 'm3u',
+      name: 'Family List',
+      playlistUrl: 'https://h.example/list.m3u',
+      guideUrl: 'https://h.example/epg.xml',
+      transport: { allowLegacyTls: true },
+    });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(added.value.excludedProfileIds).toEqual([]);
+
+    expect(await setSourceExcludedProfiles(s.db, 'src_p7', ['bad/id'])).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'invalid-profile-id' },
+    });
+    expect(await setSourceExcludedProfiles(s.db, 'missing', ['p_kids'])).toEqual({
+      ok: false,
+      error: { category: 'storage', code: 'source-not-found' },
+    });
+
+    const excluded = await catalog.setSourceExcludedProfiles?.('src_p7', [
+      'p_kids',
+      'p_guest',
+      'p_kids',
+    ]);
+    expect(excluded?.ok).toBe(true);
+    if (excluded?.ok) {
+      expect(excluded.value.excludedProfileIds).toEqual(['p_guest', 'p_kids']);
+      expect(excluded.value.allowLegacyTls).toBe(true);
+    }
+
+    const stored = await getSource(s.db, 'src_p7');
+    expect(stored?.settings.guideUrl).toBe('{{g:url}}');
+    expect(stored?.settings.transport?.allowLegacyTls).toBe(true);
+    expect(stored?.settings.excludedProfileIds).toEqual(['p_guest', 'p_kids']);
+
+    const renamed = await catalog.renameSource?.('src_p7', 'Kids Filtered');
+    expect(renamed?.ok).toBe(true);
+    if (renamed?.ok) {
+      expect(renamed.value.name).toBe('Kids Filtered');
+      expect(renamed.value.excludedProfileIds).toEqual(['p_guest', 'p_kids']);
+    }
+
+    const cleared = await catalog.setSourceExcludedProfiles?.('src_p7', []);
+    expect(cleared?.ok).toBe(true);
+    if (cleared?.ok) {
+      expect(cleared.value.excludedProfileIds).toEqual([]);
+    }
+
+    const listed = await catalog.listSources();
+    expect(listed[0]?.name).toBe('Kids Filtered');
+    expect(listed[0]?.excludedProfileIds).toEqual([]);
+
+    await catalog.close();
   });
 });

@@ -336,7 +336,8 @@ describe('createMpvEngine telemetry wiring (#314, #321)', () => {
 
       // Verify loadfile options + resize mode + SDH commands sent to mpv
       const loadCmd = fake.sent.find((c) => c[0] === 'loadfile');
-      expect(loadCmd?.[4]).toMatchObject({ hwdec: 'no', 'sub-filter-sdh': 'yes' });
+      expect(loadCmd?.[4]).toMatchObject({ 'sub-filter-sdh': 'yes' });
+      expect(loadCmd?.[4]).not.toHaveProperty('hwdec');
       expect(fake.sent).toContainEqual(['set_property', 'keepaspect', 'yes']);
       expect(fake.sent).toContainEqual(['set_property', 'panscan', 1]);
       expect(fake.sent).toContainEqual(['set_property', 'keepaspect', 'no']);

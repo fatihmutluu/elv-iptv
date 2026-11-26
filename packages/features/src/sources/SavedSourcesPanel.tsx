@@ -12,14 +12,9 @@ import type { ReactElement } from 'react';
 import { Text, View } from 'react-native';
 import { resolveSourceAccountWarning } from './account-warning';
 import { countPendingCategories } from './category-selection-model';
-import {
-  type NetworkFieldSharedProps,
-  SourceNetworkBadge,
-  SourceNetworkEditor,
-} from './SourceNetworkEditor';
+import { SourceNetworkBadge } from './SourceNetworkEditor';
 import { ActionButton, SourceAccountWarningPill } from './SourcesScreenParts';
 import { sourcesStyles } from './sources-styles';
-import type { SourceNetworkEditorState } from './useSourceNetworkEditor';
 import {
   phaseMessageId,
   type SourceRuntimeStatus,
@@ -124,9 +119,7 @@ export function SavedSourcesPanel({
   tvFocusId,
   recordLayout,
   nowMs,
-  onOpenGuides,
-  networkEditor,
-  fieldShared,
+  onOpenAdvanced,
 }: {
   ctrl: SourcesController;
   i18n: AppI18n;
@@ -134,9 +127,7 @@ export function SavedSourcesPanel({
   tvFocusId: string | undefined;
   recordLayout?: ControlLayoutRecorder;
   nowMs: number;
-  onOpenGuides?: (source: SourceRow) => void;
-  networkEditor?: SourceNetworkEditorState;
-  fieldShared?: NetworkFieldSharedProps;
+  onOpenAdvanced?: (source: SourceRow) => void;
 }): ReactElement {
   const theme = useTheme();
   return (
@@ -170,9 +161,6 @@ export function SavedSourcesPanel({
           const syncTestId = source.needsImport
             ? `source-import-${source.id}`
             : `source-refresh-${source.id}`;
-          const syncLabel = source.needsImport
-            ? i18n.t('sources.action.import')
-            : i18n.t('sources.action.refresh');
           const kindLabel =
             source.kind === 'xtream'
               ? i18n.t('sources.kind.xtream')
@@ -347,85 +335,41 @@ export function SavedSourcesPanel({
                   <ActionButton
                     focusId={`source-cancel-${source.id}`}
                     testID={`source-cancel-${source.id}`}
-                    label={`${i18n.t('sources.action.cancel')} ${source.name}`}
+                    label={i18n.t('sources.action.cancel')}
                     tvFocused={tvFocusId === `source-cancel-${source.id}`}
                     onPress={() => ctrl.cancelImport(source.id)}
                     recordLayout={recordLayout}
                   />
                 ) : (
-                  <>
-                    <ActionButton
-                      focusId={`source-sync-${source.id}`}
-                      testID={syncTestId}
-                      label={`${syncLabel} ${source.name}`}
-                      tvFocused={tvFocusId === `source-sync-${source.id}`}
-                      onPress={() => void ctrl.runImport(source.id)}
-                      recordLayout={recordLayout}
-                    />
-                    {!source.needsImport && ctrl.canRefreshGuide ? (
-                      <ActionButton
-                        focusId={`source-guide-${source.id}`}
-                        testID={`source-refresh-guide-${source.id}`}
-                        label={i18n.t('sources.refreshGuide')}
-                        tvFocused={tvFocusId === `source-guide-${source.id}`}
-                        onPress={() => void ctrl.runGuideRefresh(source.id)}
-                        recordLayout={recordLayout}
-                      />
-                    ) : null}
-                    {onOpenGuides !== undefined ? (
-                      <ActionButton
-                        focusId={`source-guides-manage-${source.id}`}
-                        testID={`source-guides-${source.id}`}
-                        label={i18n.t('sources.guides.button')}
-                        tvFocused={tvFocusId === `source-guides-manage-${source.id}`}
-                        onPress={() => onOpenGuides(source)}
-                        recordLayout={recordLayout}
-                      />
-                    ) : null}
-                    {ctrl.canChooseCategories ? (
-                      <ActionButton
-                        focusId={`source-categories-${source.id}`}
-                        testID={`source-categories-${source.id}`}
-                        label={i18n.t('sources.chooseCategories')}
-                        tvFocused={tvFocusId === `source-categories-${source.id}`}
-                        onPress={() => void ctrl.openCategoryPicker(source)}
-                        recordLayout={recordLayout}
-                      />
-                    ) : null}
-                    {ctrl.canEditNetwork && networkEditor !== undefined ? (
-                      <ActionButton
-                        focusId={`source-network-${source.id}`}
-                        testID={`source-network-${source.id}`}
-                        label={i18n.t('sources.network.title')}
-                        active={networkEditor.openSourceId === source.id}
-                        tvFocused={tvFocusId === `source-network-${source.id}`}
-                        onPress={() => networkEditor.toggleSource(source)}
-                        recordLayout={recordLayout}
-                      />
-                    ) : null}
-                  </>
+                  <ActionButton
+                    focusId={`source-sync-${source.id}`}
+                    testID={syncTestId}
+                    label={i18n.t('sources.action.refreshShort')}
+                    tvFocused={tvFocusId === `source-sync-${source.id}`}
+                    onPress={() => void ctrl.runImport(source.id)}
+                    recordLayout={recordLayout}
+                  />
                 )}
                 <ActionButton
                   focusId={`source-remove-${source.id}`}
                   testID={`source-remove-${source.id}`}
-                  label={`${i18n.t('sources.action.remove')} ${source.name}`}
+                  label={i18n.t('sources.action.removeShort')}
                   danger
                   tvFocused={tvFocusId === `source-remove-${source.id}`}
                   onPress={() => void ctrl.remove(source.id)}
                   recordLayout={recordLayout}
                 />
+                {!isImporting && onOpenAdvanced !== undefined ? (
+                  <ActionButton
+                    focusId={`source-advanced-${source.id}`}
+                    testID={`source-advanced-${source.id}`}
+                    label={i18n.t('sources.action.advanced')}
+                    tvFocused={tvFocusId === `source-advanced-${source.id}`}
+                    onPress={() => onOpenAdvanced(source)}
+                    recordLayout={recordLayout}
+                  />
+                ) : null}
               </View>
-              {networkEditor !== undefined &&
-              fieldShared !== undefined &&
-              networkEditor.openSourceId === source.id ? (
-                <SourceNetworkEditor
-                  source={source}
-                  editor={networkEditor}
-                  tvFocusId={tvFocusId}
-                  fieldShared={fieldShared}
-                  i18n={i18n}
-                />
-              ) : null}
             </Surface>
           );
         })

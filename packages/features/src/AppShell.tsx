@@ -9,7 +9,9 @@ import { useShellPlaybackModes } from './app-shell-desktop';
 import {
   buildShellProfileUtility,
   useShellManagementOverlays,
+  useShellObservedCatalog,
   useShellProfileEffects,
+  useShellSourceControls,
 } from './app-shell-overlays';
 import { AppShellPlayerHost } from './app-shell-player';
 import { useProgrammeReminders } from './app-shell-reminders';
@@ -25,7 +27,6 @@ import {
   clearSourceFromCatalogMemory,
   clearSourceFromLiveMemory,
   createExitBackConfirmGuard,
-  createObservedCatalog,
   DEFAULT_EXIT_BACK_CONFIRM_MS,
   type ExitBackConfirmGuard,
   enrichPlayTargetAccountKey,
@@ -53,13 +54,7 @@ import type { DiagnosticsPort, ExternalPlayerPort } from './ports/wave-f7b-ports
 import type { FeedbackPort, SyncAccountPort, TelemetryPort } from './ports/wave-f9-ports';
 import { useOledScreensaver } from './screensaver';
 import type { SettingsSection } from './settings';
-import {
-  createProfileScopedCatalog,
-  type DetailTarget,
-  KeymapProvider,
-  ProfileProvider,
-  useProfile,
-} from './shared';
+import { type DetailTarget, KeymapProvider, ProfileProvider, useProfile } from './shared';
 import {
   AdaptiveNavShell,
   CrashRecoveryBoundary,
@@ -162,14 +157,6 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const isTv = viewport.formFactor === 'tv';
   const preferences = usePreferences();
   const profile = useProfile();
-  const profileScopeRef = useRef({
-    profileId: profile.activeProfileId,
-    parentalUnlocked: profile.parentalUnlocked,
-  });
-  profileScopeRef.current = {
-    profileId: profile.activeProfileId,
-    parentalUnlocked: profile.parentalUnlocked,
-  };
   const stopEmbeddedPreviewRef = useRef<(() => Promise<void>) | null>(null);
   const handleRegisterStopPreview = useCallback((stop: (() => Promise<void>) | null) => {
     stopEmbeddedPreviewRef.current = stop;
@@ -258,6 +245,15 @@ function AppShellContent(props: AppShellProps): ReactElement {
     onInitialSourcesReady: handleInitialSourcesReady,
   });
   const { sources, sourcesRef, sourcesResolved, refreshToken, catalogRevision } = shell;
+  const { visibleSources, profileScopeRef, onRefreshCatalogNow, onRefreshGuideNow } =
+    useShellSourceControls({
+      catalog,
+      sources,
+      sourcesRef,
+      profile,
+      uiCache,
+      syncSourcesAndBump: shell.syncSourcesAndBump,
+    });
   const mgmtOverlays = useShellManagementOverlays(profile, sources);
   const profileScopeKey = `${profile.activeProfileId}:${profile.parentalUnlocked ? '1' : '0'}:${profile.profileRevision}`;
   uiCache.setRevision(catalogRevision, locale, profileScopeKey);
@@ -316,13 +312,12 @@ function AppShellContent(props: AppShellProps): ReactElement {
   useEffect(() => onPlaybackGuardReady?.(playbackGuard), [onPlaybackGuardReady, playbackGuard]);
   const handlePlay = connectionGuard.requestPlay;
   const bumpUserState = useCallback(() => setUserStateVersion((v) => v + 1), []);
-  const observedCatalog = useMemo(
-    () =>
-      createProfileScopedCatalog(
-        createObservedCatalog(catalog, playbackGuard, shell.syncSourcesAndBump, bumpUserState),
-        () => profileScopeRef.current,
-      ),
-    [bumpUserState, catalog, playbackGuard, shell.syncSourcesAndBump],
+  const observedCatalog = useShellObservedCatalog(
+    catalog,
+    playbackGuard,
+    shell.syncSourcesAndBump,
+    bumpUserState,
+    profileScopeRef,
   );
   const stopActivePlayback = useCallback(() => {
     connectionGuard.releaseActive();
@@ -352,7 +347,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const isFullPlayerActive =
     modes.multiViewSeed !== null || (playTarget !== null && modes.playerViewMode === 'full');
   const oledScreensaver = useOledScreensaver({
-    timeoutMin: preferences.preferences.oledScreensaverTimeoutMin,
+    timeoutMin: 0,
     isBlocked:
       modes.multiViewSeed !== null ||
       (playTarget !== null && playerPlaybackActive) ||
@@ -388,7 +383,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   });
   useCatalogPrewarm({
     catalog: observedCatalog,
-    sources,
+    sources: visibleSources,
     catalogRevision,
     locale,
     profileKey: profileScopeKey,
@@ -397,9 +392,10 @@ function AppShellContent(props: AppShellProps): ReactElement {
     enabled: profile.profilesReady,
     groupVodVersions: preferences.preferences.groupVodVersions,
   });
-  const handleGuideRefreshed = useCallback(() => {
-    void shell.syncSourcesAndBump();
-  }, [shell.syncSourcesAndBump]);
+  const handleGuideRefreshed = useCallback(
+    () => void shell.syncSourcesAndBump(),
+    [shell.syncSourcesAndBump],
+  );
   useGuideAutoRefresh({
     catalog,
     sources,
@@ -594,7 +590,6 @@ function AppShellContent(props: AppShellProps): ReactElement {
     waveF9.isWelcomeVisible ||
     (isTv && reminders.activeBanner !== null);
   const crashProps = waveF7b.crashProps;
-  const readySourcesCount = sources.filter((s) => !s.needsImport).length;
   const isResolvingInitialSources =
     !profile.profilesReady || (!sourcesResolved && !userPickedTab && activeDetail === null);
   const hasHeroOverlay =
@@ -603,8 +598,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const effectiveRefreshToken = refreshToken + profile.profileRevision;
   const effectiveUserStateVersion = userStateVersion + profile.profileRevision;
 
-  const tvHomeChannelsSourceKey = useMemo(() => sources.map((s) => s.id).join(','), [sources]);
-  const tvHomeChannelsSyncKey = `${profile.activeProfileId}:${profile.profileRevision}:${catalogRevision}:${userStateVersion}:${locale}:${tvHomeChannelsSourceKey}`;
+  const tvHomeChannelsSyncKey = `${profile.activeProfileId}:${profile.profileRevision}:${catalogRevision}:${userStateVersion}:${locale}:${visibleSources.map((s) => s.id).join(',')}`;
 
   useTvHomeChannelsSync({
     catalog: observedCatalog,
@@ -614,7 +608,6 @@ function AppShellContent(props: AppShellProps): ReactElement {
     continueWatchingLabel: i18n.t('tvHomeChannels.continueWatching'),
     favoritesLabel: i18n.t('tvHomeChannels.favorites'),
   });
-
   usePlayDeepLinkHandler({
     catalog: observedCatalog,
     profile,
@@ -625,7 +618,6 @@ function AppShellContent(props: AppShellProps): ReactElement {
       ? { onDeepLinkHandled: props.onDeepLinkHandled }
       : {}),
   });
-
   const onPlayerTargetChange = connectionGuard.replaceActiveTarget;
   const onPlayerExit = () => {
     const exiting = playTargetRef.current;
@@ -633,9 +625,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
       setLiveMemory((p) => ({
         ...p,
         activeChannelKey: exiting.itemKey,
-        ...(exiting.previousChannel !== undefined
-          ? { previousChannelKey: exiting.previousChannel.itemKey }
-          : {}),
+        ...(exiting.previousChannel ? { previousChannelKey: exiting.previousChannel.itemKey } : {}),
       }));
     }
     connectionGuard.releaseActive();
@@ -650,6 +640,13 @@ function AppShellContent(props: AppShellProps): ReactElement {
     activeDetail === null &&
     activeTab !== 'settings' &&
     importHealth.health.length > 0;
+  const stageOptionalProps = {
+    ...(props.sourceImportHost !== undefined ? { sourceImportHost: props.sourceImportHost } : {}),
+    ...(props.lanPairing !== undefined ? { lanPairing: props.lanPairing } : {}),
+    ...(waveF7b.openDiagnosticsPreview !== undefined
+      ? { onPreviewDiagnostics: waveF7b.openDiagnosticsPreview }
+      : {}),
+  };
 
   return (
     <AppShellContextProviders
@@ -698,8 +695,8 @@ function AppShellContent(props: AppShellProps): ReactElement {
                 activeDetail={activeDetail}
                 contentIsolationKey={contentIsolationKey}
                 catalog={observedCatalog}
-                sources={sources}
-                readySourcesCount={readySourcesCount}
+                sources={visibleSources}
+                allSources={sources}
                 refreshToken={refreshToken}
                 externalRefreshToken={externalRefreshToken}
                 effectiveRefreshToken={effectiveRefreshToken}
@@ -711,10 +708,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                 onSettingsSectionChange={handleSettingsSectionChange}
                 playbackGuard={playbackGuard}
                 videoHost={videoHost}
-                {...(props.sourceImportHost !== undefined
-                  ? { sourceImportHost: props.sourceImportHost }
-                  : {})}
-                {...(props.lanPairing !== undefined ? { lanPairing: props.lanPairing } : {})}
+                {...stageOptionalProps}
                 incomingLocalPlaylist={incomingLocalPlaylist}
                 onConsumeIncomingLocalPlaylist={consumeIncomingLocalPlaylist}
                 searchQuery={searchQuery}
@@ -736,11 +730,9 @@ function AppShellContent(props: AppShellProps): ReactElement {
                 {...modes.browseStageActions}
                 onSelectTab={selectTab}
                 onOpenSources={openSources}
-                onOpenChannelManagement={mgmtOverlays.openChannelManager}
                 onOpenGuideManagement={mgmtOverlays.openGuideManager}
-                {...(waveF7b.openDiagnosticsPreview !== undefined
-                  ? { onPreviewDiagnostics: waveF7b.openDiagnosticsPreview }
-                  : {})}
+                onRefreshCatalogNow={onRefreshCatalogNow}
+                onRefreshGuideNow={onRefreshGuideNow}
                 onRegisterStopPreview={handleRegisterStopPreview}
                 suppressEmbeddedPreview={playTarget !== null}
                 onChannelsMutated={handleChannelsMutated}
@@ -758,7 +750,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
           catalog={observedCatalog}
           videoHost={videoHost}
           tracker={connectionGuard.tracker}
-          sources={sources}
+          sources={visibleSources}
           thermalDevice={props.thermalDevice}
           playTarget={playTarget}
           modes={modes}
@@ -777,7 +769,6 @@ function AppShellContent(props: AppShellProps): ReactElement {
           connectionGuard={connectionGuard}
           mgmtOverlays={mgmtOverlays}
           catalog={observedCatalog}
-          sources={sources}
           onChannelsMutated={handleChannelsMutated}
           onOpenProfilesSettings={openProfilesSettings}
           reminders={reminders}

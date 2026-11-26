@@ -488,6 +488,9 @@ describe('Wave F3 Review Fixes — Guides TV D-Pad, Uncapped Mapper, Reminder Ba
     await fireEvent.press(screen.getByTestId('nav-tab-settings'));
     await waitFor(() => expect(screen.getByTestId('settings-tab-sources')).toBeTruthy());
     await fireEvent.press(screen.getByTestId('settings-tab-sources'));
+    await waitFor(() => expect(screen.getByTestId('source-advanced-s1')).toBeTruthy());
+
+    await fireEvent.press(screen.getByTestId('source-advanced-s1'));
     await waitFor(() => expect(screen.getByTestId('source-guides-s1')).toBeTruthy());
 
     await fireEvent.press(screen.getByTestId('source-guides-s1'));

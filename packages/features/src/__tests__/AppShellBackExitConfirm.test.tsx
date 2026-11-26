@@ -310,36 +310,42 @@ describe('TV Root Back Exit Confirmation (#55)', () => {
   });
 
   it('toggles and persists confirmExitOnBack inside AppearancePanel', async () => {
-    const store = createMemoryPreferencesStore({ confirmExitOnBack: true });
-    let snapshot = await store.load();
-    const updatePreferences = jest.fn(async (patch) => {
-      const res = await store.update(patch);
-      if (res.ok) snapshot = res.value;
-      return res;
-    });
+    const prevOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    try {
+      const store = createMemoryPreferencesStore({ confirmExitOnBack: true });
+      let snapshot = await store.load();
+      const updatePreferences = jest.fn(async (patch) => {
+        const res = await store.update(patch);
+        if (res.ok) snapshot = res.value;
+        return res;
+      });
 
-    await render(
-      <I18nProvider i18n={createAppI18n('en')}>
-        <ThemeProvider>
-          <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
-            <AppearancePanel
-              preferences={{
-                preferences: snapshot,
-                updatePreferences,
-                resetPreferences: () => store.reset(),
-              }}
-            />
-          </ViewportProvider>
-        </ThemeProvider>
-      </I18nProvider>,
-    );
+      await render(
+        <I18nProvider i18n={createAppI18n('en')}>
+          <ThemeProvider>
+            <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+              <AppearancePanel
+                preferences={{
+                  preferences: snapshot,
+                  updatePreferences,
+                  resetPreferences: () => store.reset(),
+                }}
+              />
+            </ViewportProvider>
+          </ThemeProvider>
+        </I18nProvider>,
+      );
 
-    const toggle = screen.getByTestId('settings-toggle-confirm-exit');
-    expect(toggle.props.accessibilityRole).toBe('switch');
-    expect(toggle.props.accessibilityState.checked).toBe(true);
+      const toggle = screen.getByTestId('settings-toggle-confirm-exit');
+      expect(toggle.props.accessibilityRole).toBe('switch');
+      expect(toggle.props.accessibilityState.checked).toBe(true);
 
-    await fireEvent.press(toggle);
-    expect(updatePreferences).toHaveBeenCalledWith({ confirmExitOnBack: false });
-    expect((await store.load()).confirmExitOnBack).toBe(false);
+      await fireEvent.press(toggle);
+      expect(updatePreferences).toHaveBeenCalledWith({ confirmExitOnBack: false });
+      expect((await store.load()).confirmExitOnBack).toBe(false);
+    } finally {
+      Object.defineProperty(Platform, 'OS', { value: prevOs, configurable: true });
+    }
   });
 });

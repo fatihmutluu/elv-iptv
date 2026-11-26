@@ -20,6 +20,7 @@ import { CategoryPickerPanel } from './CategoryPickerPanel';
 import { GuideManagementOverlay } from './GuideManagementOverlay';
 import { QrPairingOverlay } from './QrPairingOverlay';
 import { SavedSourcesPanel } from './SavedSourcesPanel';
+import { SourceAdvancedOverlay } from './SourceAdvancedOverlay';
 import { AddSourceNetworkFields } from './SourceNetworkEditor';
 import { ActionButton, FieldInput } from './SourcesScreenParts';
 import { StalkerFormFields } from './StalkerFormFields';
@@ -64,12 +65,19 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const twoColumn = formFactor !== 'phone';
   const [qrPairingOpen, setQrPairingOpen] = useState(false);
   const [guideOverlaySource, setGuideOverlaySource] = useState<SourceRow | null>(null);
-  const canQrPair = props.lanPairing?.isSupported() === true;
+  const [advancedSourceId, setAdvancedSourceId] = useState<string | null>(null);
+  const canQrPair =
+    formFactor !== 'phone' &&
+    viewport.formFactor !== 'phone' &&
+    props.lanPairing?.isSupported() === true;
   const canManageGuides =
     props.onOpenGuideManagement !== undefined || props.catalog.listGuideSources !== undefined;
   const onOpenGuideManagement = props.onOpenGuideManagement;
+  const effectiveOnOpenMenu = embedded ? undefined : props.onOpenMenu;
   const openQrPairing = useCallback(() => setQrPairingOpen(true), []);
   const closeQrPairing = useCallback(() => setQrPairingOpen(false), []);
+  const openAdvanced = useCallback((source: SourceRow) => setAdvancedSourceId(source.id), []);
+  const closeAdvanced = useCallback(() => setAdvancedSourceId(null), []);
   const openGuides = useCallback(
     (source: SourceRow) => {
       if (onOpenGuideManagement !== undefined) {
@@ -95,14 +103,17 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
     },
     [ctrl.runImport],
   );
-  const hasOverlayOpen = qrPairingOpen || guideOverlaySource !== null;
+  const advancedSource =
+    advancedSourceId !== null
+      ? (ctrl.sources.find((s) => s.id === advancedSourceId) ?? null)
+      : null;
+  const hasOverlayOpen = qrPairingOpen || guideOverlaySource !== null || advancedSource !== null;
   const tv = useTvSourcesNavigation({
     isTv: isTv && isActiveScope && !hasOverlayOpen,
     ctrl,
-    networkEditor,
+    onOpenAdvanced: openAdvanced,
     ...(canQrPair ? { onOpenQrPairing: openQrPairing } : {}),
-    ...(canManageGuides ? { onOpenGuides: openGuides } : {}),
-    ...(props.onOpenMenu !== undefined ? { onOpenMenu: props.onOpenMenu } : {}),
+    ...(effectiveOnOpenMenu !== undefined ? { onOpenMenu: effectiveOnOpenMenu } : {}),
     ...(props.onBack !== undefined ? { onBack: props.onBack } : {}),
     ...(props.onFocusTopNav !== undefined ? { onFocusTopNav: props.onFocusTopNav } : {}),
   });
@@ -202,12 +213,12 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   recordLayout={tv.recordLayout}
                 />
               ) : null}
-              {props.onOpenMenu !== undefined ? (
+              {effectiveOnOpenMenu !== undefined ? (
                 <ActionButton
                   focusId="open-menu"
                   testID="sources-open-menu"
                   label={i18n.t('sources.openMenu')}
-                  onPress={props.onOpenMenu}
+                  onPress={effectiveOnOpenMenu}
                   tvFocused={tv.tvFocusId === 'open-menu'}
                   recordLayout={tv.recordLayout}
                 />
@@ -255,16 +266,6 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                     ]}
                   >
                     <ActionButton
-                      focusId="mode-xtream"
-                      testID="sources-mode-xtream"
-                      label={i18n.t('sources.mode.xtream')}
-                      segment
-                      active={ctrl.form.mode === 'xtream'}
-                      tvFocused={tv.tvFocusId === 'mode-xtream'}
-                      onPress={() => ctrl.setMode('xtream')}
-                      recordLayout={tv.recordLayout}
-                    />
-                    <ActionButton
                       focusId="mode-m3u"
                       testID="sources-mode-m3u"
                       label={i18n.t('sources.mode.m3u')}
@@ -272,6 +273,16 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                       active={ctrl.form.mode === 'm3u'}
                       tvFocused={tv.tvFocusId === 'mode-m3u'}
                       onPress={() => ctrl.setMode('m3u')}
+                      recordLayout={tv.recordLayout}
+                    />
+                    <ActionButton
+                      focusId="mode-xtream"
+                      testID="sources-mode-xtream"
+                      label={i18n.t('sources.mode.xtream')}
+                      segment
+                      active={ctrl.form.mode === 'xtream'}
+                      tvFocused={tv.tvFocusId === 'mode-xtream'}
+                      onPress={() => ctrl.setMode('xtream')}
                       recordLayout={tv.recordLayout}
                     />
                     <ActionButton
@@ -580,7 +591,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   </View>
                 ) : null}
 
-                <View style={styles.row}>
+                <View testID="sources-submit-row" style={styles.submitRow}>
                   <ActionButton
                     focusId="submit"
                     testID="sources-submit"
@@ -595,17 +606,6 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                     onPress={() => void ctrl.submit()}
                     recordLayout={tv.recordLayout}
                   />
-                  {ctrl.canChooseCategories ? (
-                    <ActionButton
-                      focusId="submit-choose-categories"
-                      testID="sources-submit-choose-categories"
-                      label={i18n.t('sources.chooseCategories')}
-                      disabled={ctrl.submitting}
-                      tvFocused={tv.tvFocusId === 'submit-choose-categories'}
-                      onPress={() => void ctrl.submit({ chooseCategories: true })}
-                      recordLayout={tv.recordLayout}
-                    />
-                  ) : null}
                 </View>
               </Surface>
 
@@ -616,14 +616,20 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                 tvFocusId={tv.tvFocusId}
                 recordLayout={tv.recordLayout}
                 nowMs={(props.now ?? Date.now)()}
-                networkEditor={networkEditor}
-                fieldShared={fieldShared}
-                {...(canManageGuides ? { onOpenGuides: openGuides } : {})}
+                onOpenAdvanced={openAdvanced}
               />
             </View>
           )}
         </View>
       </ScrollView>
+      <SourceAdvancedOverlay
+        source={advancedSource}
+        ctrl={ctrl}
+        networkEditor={networkEditor}
+        i18n={i18n}
+        {...(canManageGuides ? { onOpenGuides: openGuides } : {})}
+        onClose={closeAdvanced}
+      />
       {canManageGuides && onOpenGuideManagement === undefined ? (
         <GuideManagementOverlay
           visible={guideOverlaySource !== null}

@@ -32,7 +32,7 @@ import { createCatalogProfileMethods } from './catalog-profiles';
 import {
   mapNewSourceRow,
   mergeSourceSettings,
-  parseSourceMeta,
+  querySourcesList,
   type SourceRow,
 } from './catalog-source-meta';
 import type { ChannelOverrideRecord, SetChannelOverrideInput } from './channel-overrides-repo';
@@ -108,6 +108,10 @@ import {
 } from './search';
 import { addSourceFromLink, type LinkSourceInput } from './source-link';
 import {
+  type CatalogSourceMutationMethods,
+  createCatalogSourceMutationMethods,
+} from './source-mutations';
+import {
   addLocalM3uSource,
   addM3uSource,
   addStalkerSource,
@@ -118,7 +122,6 @@ import {
   type M3uSourceInput,
   updateSourceSettings as persistSourceSettings,
   removeSource,
-  type SourceKind,
   type SourceRecord,
   type SourceSettings,
   type StalkerSourceInput,
@@ -210,7 +213,8 @@ export interface CatalogService
     Partial<CatalogCollectionsOpsMethods>,
     Partial<CatalogDownloadsOpsMethods>,
     Partial<CatalogNewEpisodesOpsMethods>,
-    Partial<CatalogRatingsOpsMethods> {
+    Partial<CatalogRatingsOpsMethods>,
+    Partial<CatalogSourceMutationMethods> {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
@@ -385,12 +389,6 @@ export interface CatalogService
   close(): Promise<void>;
 }
 
-const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at, s.settings_json,
-  EXISTS (SELECT 1 FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok') AS imported,
-  (SELECT r.finished_at FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok' ORDER BY r.finished_at DESC LIMIT 1) AS last_catalog_sync_at,
-  (SELECT r.finished_at FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'guide' AND r.status = 'ok' ORDER BY r.finished_at DESC LIMIT 1) AS last_guide_sync_at
-  FROM sources s WHERE s.deleting = 0 ORDER BY s.created_at, s.id`;
-
 const notFound = () => err(elvError('storage', 'item-not-found'));
 
 function defaultNewId(clock: () => number): () => string {
@@ -463,6 +461,14 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     playtime,
   });
   const ratingsOpsMethods = createCatalogRatingsOpsMethods({ db, clock, playtime, syncUserData });
+
+  const listSources = () => querySourcesList(db);
+  const sourceMutationMethods = createCatalogSourceMutationMethods({
+    db,
+    evictPlaytime: (id) => playtime.evict(id),
+    syncManifest,
+    listSources,
+  });
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
@@ -559,34 +565,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       );
     },
 
-    async listSources() {
-      const rows = await db.all<{
-        id: string;
-        kind: SourceKind;
-        name: string;
-        created_at: number;
-        settings_json: string;
-        imported: number;
-        last_catalog_sync_at: number | null;
-        last_guide_sync_at: number | null;
-      }>(LIST_SOURCES);
-      return rows.map((r) => ({
-        id: r.id,
-        kind: r.kind,
-        name: r.name,
-        createdAt: r.created_at,
-        needsImport: r.imported === 0,
-        lastCatalogSyncAt:
-          typeof r.last_catalog_sync_at === 'number' && Number.isFinite(r.last_catalog_sync_at)
-            ? r.last_catalog_sync_at
-            : null,
-        lastGuideSyncAt:
-          typeof r.last_guide_sync_at === 'number' && Number.isFinite(r.last_guide_sync_at)
-            ? r.last_guide_sync_at
-            : null,
-        ...parseSourceMeta(r.settings_json),
-      }));
-    },
+    listSources,
 
     latestImportHealth: (sourceId) => latestImportHealth(db, sourceId),
 
@@ -781,6 +760,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...downloadsOpsMethods,
     ...newEpisodesOpsMethods,
     ...ratingsOpsMethods,
+    ...sourceMutationMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

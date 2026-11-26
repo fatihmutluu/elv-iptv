@@ -77,7 +77,7 @@ describe('syncable-preferences (Product Decision #40)', () => {
     expect(extracted.seekStepSec).toBe(15);
     expect(extracted.homeLayout).toEqual(snapshot.homeLayout);
 
-    // Ensure hardware/device-local keys are strictly excluded
+    // Ensure hardware/device-local and locked/removed keys are strictly excluded
     const forbiddenKeys = [
       'overscanX',
       'overscanY',
@@ -89,11 +89,23 @@ describe('syncable-preferences (Product Decision #40)', () => {
       'syncServerUrl',
       'telemetryOptIn',
       'artworkCacheLimitMb',
+      'preferHevcOverDolbyVision',
+      'audioPassthrough',
+      'audioPassthroughCodecs',
+      'audioExclusive',
+      'audioAc3Encode',
+      'audioChannelLayout',
       'autoEnterPip',
       'playerVolume',
       'deinterlaceMode',
       'bufferPreset',
       'version',
+      'epgGenreTints',
+      'logoBackdropMode',
+      'showSourceBadges',
+      'cleanChannelTitles',
+      'collapseLiveVariants',
+      'autoSubtitlesOnSkipBack',
     ];
     for (const key of forbiddenKeys) {
       expect(Object.hasOwn(extracted, key)).toBe(false);
@@ -160,13 +172,8 @@ describe('syncable-preferences (Product Decision #40)', () => {
       osdTimeDisplayMode: 'endsAt',
       epgTimeSpanHours: 6,
       epgRowDensity: 'cinematic',
-      epgGenreTints: false,
       epgShowClock: true,
       defaultLiveMode: 'channels',
-      logoBackdropMode: 'off',
-      showSourceBadges: false,
-      cleanChannelTitles: true,
-      collapseLiveVariants: true,
       groupVodVersions: false,
       uiFontFamily: 'atkinson',
       subtitleStyle: {
@@ -178,7 +185,6 @@ describe('syncable-preferences (Product Decision #40)', () => {
       preferredAudioLanguages: ['tr', 'en'],
       preferredSubtitleLanguages: ['de'],
       autoPlayNextEpisode: false,
-      autoSubtitlesOnSkipBack: true,
       seekStepSec: 30,
       homeLayout: [
         { id: 'live', visible: true },

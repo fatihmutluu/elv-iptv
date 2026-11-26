@@ -53,8 +53,6 @@ export interface BuildPlayerOverlayNodesInput {
   readonly showAndroidDecoder: boolean;
   readonly activeDecoderMode: AndroidDecoderMode | undefined;
   readonly handleSelectAndroidDecoderMode: (mode: AndroidDecoderMode) => void;
-  readonly autoSubtitlesOnSkipBack: boolean | undefined;
-  readonly onToggleAutoSubtitlesOnSkipBack: (() => void) | undefined;
   readonly autoPlayNextEpisode: boolean | undefined;
   readonly onToggleAutoPlayNextEpisode: (() => void) | undefined;
   readonly reduceMotion: boolean | undefined;
@@ -210,8 +208,6 @@ export function buildPlayerOverlayNodes(p: BuildPlayerOverlayNodesInput): {
         togglePitchLock: p.togglePitchLock,
         activeAudioNorm: p.activeAudioNorm,
         toggleAudioNormalization: p.toggleAudioNormalization,
-        autoSubtitlesOnSkipBack: p.autoSubtitlesOnSkipBack,
-        onToggleAutoSubtitlesOnSkipBack: p.onToggleAutoSubtitlesOnSkipBack,
         autoPlayNextEpisode: p.autoPlayNextEpisode,
         onToggleAutoPlayNextEpisode: p.onToggleAutoPlayNextEpisode,
         hostSetAudioDevice: p.hostSetAudioDevice,

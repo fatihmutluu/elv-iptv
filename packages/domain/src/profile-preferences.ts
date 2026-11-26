@@ -91,6 +91,9 @@ export function createProfilePreferencesManager(
   const storeOpts: PreferencesStoreOptions = {};
   const coalesceMs = opts?.debounceMs ?? opts?.coalesceMs;
   if (coalesceMs !== undefined) storeOpts.coalesceMs = coalesceMs;
+  if (opts?.defaultArtworkCacheLimitMb !== undefined) {
+    storeOpts.defaultArtworkCacheLimitMb = opts.defaultArtworkCacheLimitMb;
+  }
   const setTimeoutFn = opts?.timers?.setTimeout ?? opts?.setTimeoutFn;
   if (setTimeoutFn !== undefined) storeOpts.setTimeoutFn = setTimeoutFn;
   const clearTimeoutFn = opts?.timers?.clearTimeout ?? opts?.clearTimeoutFn;

@@ -2,7 +2,7 @@ import type { ProfilesMessageId } from './en-profiles';
 
 /** Turkish (`tr`) messages for Profiles & Parental Controls (`#15`, `#31`). */
 export const trProfilesMessages: Readonly<Record<ProfilesMessageId, string>> = {
-  'settings.section.profiles': 'Profiller ve Ebeveyn',
+  'settings.section.profiles': 'Çocuk Modu',
   'profiles.title': 'Profiller',
   'profiles.subtitle': 'İzleyici değiştirin veya bu cihazdaki yerel profilleri yönetin.',
   'profiles.switchTitle': 'Profil değiştir',
@@ -26,7 +26,7 @@ export const trProfilesMessages: Readonly<Record<ProfilesMessageId, string>> = {
   'profiles.cancel': 'İptal',
   'profiles.defaultName': 'Varsayılan',
   'profiles.manageInSettings': "Profilleri Ayarlar'dan yönet",
-  'parental.title': 'Ebeveyn Denetimleri',
+  'parental.title': 'Çocuk Modu',
   'parental.subtitle':
     'Kategorileri, yetişkin anahtar kelimelerini ve yaş sınırlı programları PIN ile kısıtlayın.',
   'parental.enabledToggle': 'Ebeveyn denetimlerini etkinleştir',

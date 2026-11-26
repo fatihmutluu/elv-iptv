@@ -205,4 +205,77 @@ describe('resolveInitialTrackSelection (#393, #208)', () => {
     });
     expect(resolved.subtitleId).toBe('s-en');
   });
+
+  it('uses fallbackLocale in smart, always, and onlyForced modes when preferred audio & subtitle languages are empty (Wave P7)', () => {
+    const englishAudioTracks: MediaTracks = {
+      audio: [{ id: 'a-en', language: 'eng', label: 'English', isDefault: true }],
+      subtitles: [
+        { id: 's-en', language: 'en', label: 'English', isDefault: true },
+        { id: 's-tr-forced', language: 'tr', label: 'Türkçe Forced', forced: true },
+        { id: 's-tr', language: 'tur', label: 'Turkish' },
+      ],
+      selectedAudioId: 'a-en',
+      selectedSubtitleId: null,
+    };
+
+    // Fresh install with app locale 'tr-TR' watching English audio -> enables Turkish subtitles in smart mode
+    expect(
+      resolveInitialTrackSelection(englishAudioTracks, {
+        profileRules: {
+          preferredAudioLanguages: [],
+          preferredSubtitleLanguages: [],
+          subtitleMode: 'smart',
+          fallbackLocale: 'tr-TR',
+        },
+      }).subtitleId,
+    ).toBe('s-tr');
+
+    // Fresh install with app locale 'en-US' watching English audio -> keeps subtitles off (no forced English track)
+    expect(
+      resolveInitialTrackSelection(englishAudioTracks, {
+        profileRules: {
+          preferredAudioLanguages: [],
+          preferredSubtitleLanguages: [],
+          subtitleMode: 'smart',
+          fallbackLocale: 'en-US',
+        },
+      }).subtitleId,
+    ).toBeNull();
+
+    // Always mode with empty preferred lists uses fallbackLocale
+    expect(
+      resolveInitialTrackSelection(englishAudioTracks, {
+        profileRules: {
+          preferredAudioLanguages: [],
+          preferredSubtitleLanguages: [],
+          subtitleMode: 'always',
+          fallbackLocale: 'tr',
+        },
+      }).subtitleId,
+    ).toBe('s-tr');
+
+    // onlyForced mode with empty preferred lists uses fallbackLocale
+    expect(
+      resolveInitialTrackSelection(englishAudioTracks, {
+        profileRules: {
+          preferredAudioLanguages: [],
+          preferredSubtitleLanguages: [],
+          subtitleMode: 'onlyForced',
+          fallbackLocale: 'tr',
+        },
+      }).subtitleId,
+    ).toBe('s-tr-forced');
+
+    // Explicit preferredSubtitleLanguages takes precedence over fallbackLocale
+    expect(
+      resolveInitialTrackSelection(englishAudioTracks, {
+        profileRules: {
+          preferredAudioLanguages: [],
+          preferredSubtitleLanguages: ['en'],
+          subtitleMode: 'always',
+          fallbackLocale: 'tr',
+        },
+      }).subtitleId,
+    ).toBe('s-en');
+  });
 });

@@ -8,7 +8,7 @@ export interface ShellPrefs {
 
 /** Default main-process shell preferences. */
 export const DEFAULT_SHELL_PREFS: ShellPrefs = Object.freeze({
-  minimizeToTray: false,
+  minimizeToTray: true,
 });
 
 /** Controller providing race-free synchronous reads of main-process shell preferences (`#158`). */
@@ -30,7 +30,10 @@ export function loadShellPrefs(filePath: string): ShellPrefs {
     }
     const rec = parsed as Record<string, unknown>;
     return {
-      minimizeToTray: typeof rec['minimizeToTray'] === 'boolean' ? rec['minimizeToTray'] : false,
+      minimizeToTray:
+        typeof rec['minimizeToTray'] === 'boolean'
+          ? rec['minimizeToTray']
+          : DEFAULT_SHELL_PREFS.minimizeToTray,
     };
   } catch {
     return DEFAULT_SHELL_PREFS;

@@ -21,34 +21,48 @@ function makeController() {
   return { controller, patches };
 }
 
-describe('Wave C3 settings toggles (#218, #404)', () => {
-  it('toggles collapseLiveVariants via Live TV TV-nav control (#218)', () => {
+describe('Settings TV-nav control activation (Wave C3 / C5A / P7)', () => {
+  it('activates Live TV mode, EPG span, clock, dropdowns, and refresh actions', () => {
     const { controller, patches } = makeController();
-    activateLiveTvControl('toggle-collapse-variants', controller);
-    expect(patches).toEqual([{ collapseLiveVariants: true }]);
+    const opened: string[] = [];
+    const onRefreshCatalogNow = vi.fn();
+    const onRefreshGuideNow = vi.fn();
+
+    activateLiveTvControl('live-mode-epg', controller);
+    activateLiveTvControl('toggle-epg-show-clock', controller);
+    activateLiveTvControl('channel-switch-preview', controller);
+    activateLiveTvControl('catalog-refresh-dropdown', controller, {
+      onOpenDropdown: (id) => opened.push(id),
+    });
+    activateLiveTvControl('guide-refresh-dropdown', controller, {
+      onOpenDropdown: (id) => opened.push(id),
+    });
+    activateLiveTvControl('catalog-refresh-now', controller, { onRefreshCatalogNow });
+    activateLiveTvControl('guide-refresh-now', controller, { onRefreshGuideNow });
+
+    expect(patches).toEqual([
+      { defaultLiveMode: 'epg' },
+      { epgShowClock: false },
+      { liveChannelSwitchMode: 'preview' },
+    ]);
+    expect(opened).toEqual(['catalog-refresh-dropdown', 'guide-refresh-dropdown']);
+    expect(onRefreshCatalogNow).toHaveBeenCalledTimes(1);
+    expect(onRefreshGuideNow).toHaveBeenCalledTimes(1);
   });
 
-  it('toggles groupVodVersions via Playback TV-nav control (#404)', () => {
+  it('activates kept Playback controls (pitchLock, audioNormalization, filterSdh, preferHevcDv, autoPlayNext)', () => {
     const { controller, patches } = makeController();
-    activatePlaybackControl('toggle-group-vod-versions', controller);
-    expect(patches).toEqual([{ groupVodVersions: true }]);
-  });
-
-  it('activates Wave C5A deinterlaceMode, pitchLock, audioNormalization, and windowAspectRatioLock controls (#243, #332)', () => {
-    const { controller, patches } = makeController();
-    activatePlaybackControl('deinterlace-auto', controller);
-    activatePlaybackControl('deinterlace-bwdif', controller);
-    activatePlaybackControl('deinterlace-off', controller);
+    activatePlaybackControl('toggle-filter-sdh', controller);
+    activatePlaybackControl('toggle-prefer-hevc-dv', controller);
     activatePlaybackControl('toggle-pitch-lock', controller);
     activatePlaybackControl('toggle-audio-normalization', controller);
-    activatePlaybackControl('toggle-window-aspect-ratio-lock', controller);
+    activatePlaybackControl('toggle-auto-play-next', controller);
     expect(patches).toEqual([
-      { deinterlaceMode: 'auto' },
-      { deinterlaceMode: 'bwdif' },
-      { deinterlaceMode: 'off' },
+      { filterSdhSubtitles: true },
+      { preferHevcOverDolbyVision: true },
       { pitchLock: false },
       { audioNormalization: true },
-      { windowAspectRatioLock: true },
+      { autoPlayNextEpisode: false },
     ]);
   });
 });

@@ -12,7 +12,6 @@ import {
 } from 'react';
 import type { LayoutChangeEvent, ScrollView, View } from 'react-native';
 import { countPendingCategories, discoveredCategoryKey } from './category-selection-model';
-import type { SourceNetworkEditorState } from './useSourceNetworkEditor';
 import type { SourcesController } from './useSourcesController';
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
@@ -41,8 +40,7 @@ function buildSourcesFocusItems(
   ctrl: SourcesController,
   onOpenMenu: (() => void) | undefined,
   onOpenQrPairing?: () => void,
-  onOpenGuides?: (source: SourceRow) => void,
-  networkEditor?: SourceNetworkEditorState,
+  onOpenAdvanced?: (source: SourceRow) => void,
 ): readonly FocusItem[] {
   const picker = ctrl.categoryPicker;
   if (picker !== null) {
@@ -109,8 +107,8 @@ function buildSourcesFocusItems(
     });
   }
   items.push(
-    { id: 'mode-xtream', kind: 'action', rowGroup: 'mode', run: () => ctrl.setMode('xtream') },
     { id: 'mode-m3u', kind: 'action', rowGroup: 'mode', run: () => ctrl.setMode('m3u') },
+    { id: 'mode-xtream', kind: 'action', rowGroup: 'mode', run: () => ctrl.setMode('xtream') },
     { id: 'mode-stalker', kind: 'action', rowGroup: 'mode', run: () => ctrl.setMode('stalker') },
     { id: 'input-name', kind: 'input' },
   );
@@ -221,14 +219,6 @@ function buildSourcesFocusItems(
     rowGroup: 'submit-actions',
     run: () => void ctrl.submit(),
   });
-  if (ctrl.canChooseCategories) {
-    items.push({
-      id: 'submit-choose-categories',
-      kind: 'action',
-      rowGroup: 'submit-actions',
-      run: () => void ctrl.submit({ chooseCategories: true }),
-    });
-  }
   for (const source of ctrl.sources) {
     if (countPendingCategories(source.categorySelection) > 0) {
       const pendingGroup = `source-pending-${source.id}`;
@@ -263,38 +253,6 @@ function buildSourcesFocusItems(
         rowGroup,
         run: () => void ctrl.runImport(source.id),
       });
-      if (!source.needsImport && ctrl.canRefreshGuide) {
-        items.push({
-          id: `source-guide-${source.id}`,
-          kind: 'action',
-          rowGroup,
-          run: () => void ctrl.runGuideRefresh(source.id),
-        });
-      }
-      if (onOpenGuides !== undefined) {
-        items.push({
-          id: `source-guides-manage-${source.id}`,
-          kind: 'action',
-          rowGroup,
-          run: () => onOpenGuides(source),
-        });
-      }
-      if (ctrl.canChooseCategories) {
-        items.push({
-          id: `source-categories-${source.id}`,
-          kind: 'action',
-          rowGroup,
-          run: () => void ctrl.openCategoryPicker(source),
-        });
-      }
-      if (ctrl.canEditNetwork && networkEditor !== undefined) {
-        items.push({
-          id: `source-network-${source.id}`,
-          kind: 'action',
-          rowGroup,
-          run: () => networkEditor.toggleSource(source),
-        });
-      }
     }
     items.push({
       id: `source-remove-${source.id}`,
@@ -302,34 +260,13 @@ function buildSourcesFocusItems(
       rowGroup,
       run: () => void ctrl.remove(source.id),
     });
-    if (networkEditor !== undefined && networkEditor.openSourceId === source.id) {
-      const dnsGroup = `source-network-dns-${source.id}`;
-      items.push(
-        {
-          id: `source-network-dns-system-${source.id}`,
-          kind: 'action',
-          rowGroup: dnsGroup,
-          run: () => networkEditor.setDnsFamily('system'),
-        },
-        {
-          id: `source-network-dns-ipv4-${source.id}`,
-          kind: 'action',
-          rowGroup: dnsGroup,
-          run: () => networkEditor.setDnsFamily('ipv4'),
-        },
-        {
-          id: `source-network-dns-ipv6-${source.id}`,
-          kind: 'action',
-          rowGroup: dnsGroup,
-          run: () => networkEditor.setDnsFamily('ipv6'),
-        },
-        { id: `source-network-host-${source.id}`, kind: 'input' },
-        {
-          id: `source-network-save-${source.id}`,
-          kind: 'action',
-          run: () => void networkEditor.save(source),
-        },
-      );
+    if (status?.kind !== 'importing' && onOpenAdvanced !== undefined) {
+      items.push({
+        id: `source-advanced-${source.id}`,
+        kind: 'action',
+        rowGroup,
+        run: () => onOpenAdvanced(source),
+      });
     }
   }
   return items;
@@ -397,19 +334,17 @@ export function TvRemoteBridge({
 export function useTvSourcesNavigation({
   isTv,
   ctrl,
-  networkEditor,
   onOpenMenu,
   onOpenQrPairing,
-  onOpenGuides,
+  onOpenAdvanced,
   onBack,
   onFocusTopNav,
 }: {
   isTv: boolean;
   ctrl: SourcesController;
-  networkEditor?: SourceNetworkEditorState;
   onOpenMenu?: () => void;
   onOpenQrPairing?: () => void;
-  onOpenGuides?: (source: SourceRow) => void;
+  onOpenAdvanced?: (source: SourceRow) => void;
   onBack?: () => void;
   onFocusTopNav?: () => void;
 }) {
@@ -441,8 +376,8 @@ export function useTvSourcesNavigation({
   );
 
   const controls = useMemo(
-    () => buildSourcesFocusItems(ctrl, onOpenMenu, onOpenQrPairing, onOpenGuides, networkEditor),
-    [ctrl, networkEditor, onOpenGuides, onOpenMenu, onOpenQrPairing],
+    () => buildSourcesFocusItems(ctrl, onOpenMenu, onOpenQrPairing, onOpenAdvanced),
+    [ctrl, onOpenAdvanced, onOpenMenu, onOpenQrPairing],
   );
   const activeEditingInputId =
     editingInputId !== null && controls.some((c) => c.kind === 'input' && c.id === editingInputId)
@@ -584,14 +519,6 @@ export function useTvSourcesNavigation({
     [controls],
   );
 
-  const networkEditorOpenRef = useRef(
-    networkEditor?.openSourceId !== null && networkEditor?.openSourceId !== undefined,
-  );
-  networkEditorOpenRef.current =
-    networkEditor?.openSourceId !== null && networkEditor?.openSourceId !== undefined;
-  const closeNetworkEditorRef = useRef(networkEditor?.close);
-  closeNetworkEditorRef.current = networkEditor?.close;
-
   const handleBackIntent = useCallback(() => {
     const activeInput = editingInputIdRef.current;
     if (activeInput !== null) {
@@ -601,10 +528,6 @@ export function useTvSourcesNavigation({
     }
     if (pickerOpenRef.current) {
       closeCategoryPickerRef.current();
-      return;
-    }
-    if (networkEditorOpenRef.current) {
-      closeNetworkEditorRef.current?.();
       return;
     }
     (onBack ?? onOpenMenu)?.();

@@ -1,44 +1,46 @@
-import type { CatalogService, ParentalQueryOptions } from '@elv/data';
+import type { CatalogService } from '@elv/data';
+import {
+  createProfileScopedBrowseMethods,
+  filterByItemKey,
+  filterBySourceId,
+  filterSourcesForProfile,
+  isKeyFromExcludedSource,
+  mergeParentalOpts,
+  type ProfileCatalogScope,
+  resolveExcludedSourceIds,
+} from './profile-scoped-source-filter';
 
-/** Dynamic active profile and parental-unlock context read at query time. */
-export interface ProfileCatalogScope {
-  readonly profileId: string;
-  readonly parentalUnlocked: boolean;
+export { filterSourcesForProfile, type ProfileCatalogScope };
+
+const OVERFETCH_MIN_LIMIT = 200;
+
+function resolveExcludedFetchLimit(limit: number | undefined): number {
+  if (limit === undefined) return OVERFETCH_MIN_LIMIT;
+  if (!Number.isFinite(limit) || limit <= 0) return 0;
+  return Math.max(Math.floor(limit) * 4, OVERFETCH_MIN_LIMIT);
 }
 
-function mergeParentalOpts<T extends ParentalQueryOptions | undefined>(
-  opts: T,
-  scope: ProfileCatalogScope,
-): T extends undefined ? ParentalQueryOptions : T & ParentalQueryOptions {
-  return {
-    ...opts,
-    profileId: opts?.profileId ?? scope.profileId,
-    parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
-  } as T extends undefined ? ParentalQueryOptions : T & ParentalQueryOptions;
+function filterAndSliceBySourceId<T extends { readonly sourceId: string }>(
+  rows: readonly T[],
+  excluded: ReadonlySet<string>,
+  limit: number | undefined,
+): T[] {
+  const filtered = filterBySourceId(rows, excluded);
+  if (limit === undefined) return filtered;
+  const safeLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
+  return filtered.slice(0, safeLimit);
 }
 
 /**
  * Wraps a {@link CatalogService} so every catalog read, stream resolution, and user-state
- * read/write automatically inherits the active profile ID and temporary parental-unlock state
- * unless explicitly overridden by the caller (e.g. Settings category lock listing).
+ * read/write automatically inherits the active profile ID, temporary parental-unlock state,
+ * and per-profile source exclusions unless explicitly overridden by the caller.
  */
 export function createProfileScopedCatalog(
   catalog: CatalogService,
   getScope: () => ProfileCatalogScope,
 ): CatalogService {
   const c = catalog;
-  const liveVariants = c.liveVariants?.bind(c);
-  const itemVersions = c.itemVersions?.bind(c);
-  const allSourcesItems = c.allSourcesItems?.bind(c);
-  const itemDetail = c.itemDetail?.bind(c);
-  const search = c.search?.bind(c);
-  const searchSuggestions = c.searchSuggestions?.bind(c);
-  const alphabetIndex = c.alphabetIndex?.bind(c);
-  const nowNext = c.nowNext?.bind(c);
-  const epgWindow = c.epgWindow?.bind(c);
-  const epgSlice = c.epgSlice?.bind(c);
-  const channelByNumber = c.channelByNumber?.bind(c);
-  const queryNextEpisode = c.queryNextEpisode?.bind(c);
   const saveProgress = c.saveProgress?.bind(c);
   const setWatched = c.setWatched?.bind(c);
   const getProgress = c.getProgress?.bind(c);
@@ -66,8 +68,6 @@ export function createProfileScopedCatalog(
   const reorderChannels = c.reorderChannels?.bind(c);
   const listCustomGroups = c.listCustomGroups?.bind(c);
   const createCustomGroup = c.createCustomGroup?.bind(c);
-  const resolveCatchupStream = c.resolveCatchupStream?.bind(c);
-  const fetchChannelArchiveEpg = c.fetchChannelArchiveEpg?.bind(c);
   const listReminders = c.listReminders?.bind(c);
   const upsertReminder = c.upsertReminder?.bind(c);
   const removeReminder = c.removeReminder?.bind(c);
@@ -90,6 +90,8 @@ export function createProfileScopedCatalog(
   const getRating = c.getRating?.bind(c);
   const listRatings = c.listRatings?.bind(c);
   const listRatingMap = c.listRatingMap?.bind(c);
+  const excludedFor = (effectivePid: string, scope: ProfileCatalogScope) =>
+    resolveExcludedSourceIds(c, effectivePid, scope);
 
   return {
     addSource: (input) => c.addSource(input),
@@ -99,104 +101,16 @@ export function createProfileScopedCatalog(
       ? { discoverSourceCategories: c.discoverSourceCategories.bind(c) }
       : {}),
     ...(c.updateSourceSettings ? { updateSourceSettings: c.updateSourceSettings.bind(c) } : {}),
+    ...(c.renameSource ? { renameSource: c.renameSource.bind(c) } : {}),
+    ...(c.setSourceExcludedProfiles
+      ? { setSourceExcludedProfiles: c.setSourceExcludedProfiles.bind(c) }
+      : {}),
     removeSource: (id) => c.removeSource(id),
     importSource: (id, opts) => c.importSource(id, opts),
     ...(c.importGuide ? { importGuide: c.importGuide.bind(c) } : {}),
     listSources: () => c.listSources(),
     ...(c.latestImportHealth ? { latestImportHealth: c.latestImportHealth.bind(c) } : {}),
-    categories: (sourceId, kind, opts) =>
-      c.categories(sourceId, kind, mergeParentalOpts(opts, getScope())),
-    items: (categoryId, offset, limit, opts) =>
-      c.items(categoryId, offset, limit, mergeParentalOpts(opts, getScope())),
-    ...(liveVariants
-      ? {
-          liveVariants: (itemKey, categoryId, opts) =>
-            liveVariants(itemKey, categoryId, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
-    ...(itemVersions
-      ? {
-          itemVersions: (itemKey, opts) =>
-            itemVersions(itemKey, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
-    ...(allSourcesItems
-      ? {
-          allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
-            allSourcesItems(kind, offset, limit, sourceIds, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
-    ...(itemDetail
-      ? {
-          itemDetail: (itemKey, opts) => itemDetail(itemKey, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
-    ...(search
-      ? {
-          search: (query, opts) => search(query, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
-    ...(searchSuggestions
-      ? {
-          searchSuggestions: (options) => searchSuggestions(mergeParentalOpts(options, getScope())),
-        }
-      : {}),
-    ...(alphabetIndex
-      ? {
-          alphabetIndex: (input) => alphabetIndex(mergeParentalOpts(input, getScope())),
-        }
-      : {}),
-    ...(nowNext
-      ? {
-          nowNext: (channelKeys, nowMs, opts) =>
-            nowNext(channelKeys, nowMs, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
-    ...(epgWindow
-      ? {
-          epgWindow: (channelKeys, fromMs, toMs, opts) =>
-            epgWindow(channelKeys, fromMs, toMs, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
-    ...(epgSlice
-      ? {
-          epgSlice: (sourceId, fromMs, toMs, limit, opts) =>
-            epgSlice(sourceId, fromMs, toMs, limit, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
-    ...(channelByNumber
-      ? {
-          channelByNumber: (num, sourceId, opts) =>
-            channelByNumber(num, sourceId, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
-    seasons: (seriesId, opts) => c.seasons(seriesId, mergeParentalOpts(opts, getScope())),
-    episodes: (seriesId, season, opts) =>
-      c.episodes(seriesId, season, mergeParentalOpts(opts, getScope())),
-    ...(queryNextEpisode
-      ? {
-          queryNextEpisode: (seriesKey, currentItemKey, profileId, opts) => {
-            const scope = getScope();
-            return queryNextEpisode(seriesKey, currentItemKey, profileId ?? scope.profileId, {
-              ...opts,
-              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
-            });
-          },
-        }
-      : {}),
-    resolveStream: (itemKey, opts) => c.resolveStream(itemKey, mergeParentalOpts(opts, getScope())),
-    ...(resolveCatchupStream
-      ? {
-          resolveCatchupStream: (itemKey, programme, opts) =>
-            resolveCatchupStream(itemKey, programme, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
-    ...(fetchChannelArchiveEpg
-      ? {
-          fetchChannelArchiveEpg: (itemKey, opts) =>
-            fetchChannelArchiveEpg(itemKey, mergeParentalOpts(opts, getScope())),
-        }
-      : {}),
+    ...createProfileScopedBrowseMethods(c, getScope),
     ...(c.listGuideSources ? { listGuideSources: c.listGuideSources.bind(c) } : {}),
     ...(c.addGuideSource ? { addGuideSource: c.addGuideSource.bind(c) } : {}),
     ...(c.updateGuideSource ? { updateGuideSource: c.updateGuideSource.bind(c) } : {}),
@@ -214,12 +128,17 @@ export function createProfileScopedCatalog(
       : {}),
     ...(listReminders
       ? {
-          listReminders: (profileId, opts) => {
+          listReminders: async (profileId, opts) => {
             const scope = getScope();
-            return listReminders(profileId ?? scope.profileId, {
-              ...opts,
-              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
-            });
+            const pid = profileId ?? scope.profileId;
+            const [excluded, rows] = await Promise.all([
+              excludedFor(pid, scope),
+              listReminders(pid, {
+                ...opts,
+                parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+              }),
+            ]);
+            return filterBySourceId(rows, excluded);
           },
         }
       : {}),
@@ -271,23 +190,31 @@ export function createProfileScopedCatalog(
       : {}),
     ...(listContinueWatching
       ? {
-          listContinueWatching: (limit, profileId, opts) => {
+          listContinueWatching: async (limit, profileId, opts) => {
             const scope = getScope();
-            return listContinueWatching(limit, profileId ?? scope.profileId, {
+            const pid = profileId ?? scope.profileId;
+            const excluded = await excludedFor(pid, scope);
+            const fetchLimit = excluded.size > 0 ? resolveExcludedFetchLimit(limit) : limit;
+            const rows = await listContinueWatching(fetchLimit, pid, {
               ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
             });
+            return excluded.size === 0 ? rows : filterAndSliceBySourceId(rows, excluded, limit);
           },
         }
       : {}),
     ...(listWatched
       ? {
-          listWatched: (limit, profileId, opts) => {
+          listWatched: async (limit, profileId, opts) => {
             const scope = getScope();
-            return listWatched(limit, profileId ?? scope.profileId, {
+            const pid = profileId ?? scope.profileId;
+            const excluded = await excludedFor(pid, scope);
+            const fetchLimit = excluded.size > 0 ? resolveExcludedFetchLimit(limit) : limit;
+            const rows = await listWatched(fetchLimit, pid, {
               ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
             });
+            return excluded.size === 0 ? rows : filterAndSliceBySourceId(rows, excluded, limit);
           },
         }
       : {}),
@@ -338,28 +265,46 @@ export function createProfileScopedCatalog(
       : {}),
     ...(listFavorites
       ? {
-          listFavorites: (limit, profileId, opts) => {
+          listFavorites: async (limit, profileId, opts) => {
             const scope = getScope();
-            return listFavorites(limit, profileId ?? scope.profileId, {
+            const pid = profileId ?? scope.profileId;
+            const excluded = await excludedFor(pid, scope);
+            const fetchLimit = excluded.size > 0 ? resolveExcludedFetchLimit(limit) : limit;
+            const rows = await listFavorites(fetchLimit, pid, {
               ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
             });
+            return excluded.size === 0 ? rows : filterAndSliceBySourceId(rows, excluded, limit);
           },
         }
       : {}),
     ...(listFavoriteKeys
       ? {
-          listFavoriteKeys: (profileId) => listFavoriteKeys(profileId ?? getScope().profileId),
+          listFavoriteKeys: async (profileId) => {
+            const scope = getScope();
+            const pid = profileId ?? scope.profileId;
+            const [excluded, keys] = await Promise.all([
+              excludedFor(pid, scope),
+              listFavoriteKeys(pid),
+            ]);
+            return excluded.size === 0
+              ? keys
+              : keys.filter((k) => !isKeyFromExcludedSource(k, excluded));
+          },
         }
       : {}),
     ...(listMyListNewEpisodes
       ? {
-          listMyListNewEpisodes: (limit, profileId, opts) => {
+          listMyListNewEpisodes: async (limit, profileId, opts) => {
             const scope = getScope();
-            return listMyListNewEpisodes(limit, profileId ?? scope.profileId, {
+            const pid = profileId ?? scope.profileId;
+            const excluded = await excludedFor(pid, scope);
+            const fetchLimit = excluded.size > 0 ? resolveExcludedFetchLimit(limit) : limit;
+            const rows = await listMyListNewEpisodes(fetchLimit, pid, {
               ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
             });
+            return excluded.size === 0 ? rows : filterAndSliceBySourceId(rows, excluded, limit);
           },
         }
       : {}),
@@ -404,12 +349,16 @@ export function createProfileScopedCatalog(
       : {}),
     ...(listRecentChannels
       ? {
-          listRecentChannels: (limit, profileId, opts) => {
+          listRecentChannels: async (limit, profileId, opts) => {
             const scope = getScope();
-            return listRecentChannels(limit, profileId ?? scope.profileId, {
+            const pid = profileId ?? scope.profileId;
+            const excluded = await excludedFor(pid, scope);
+            const fetchLimit = excluded.size > 0 ? resolveExcludedFetchLimit(limit) : limit;
+            const rows = await listRecentChannels(fetchLimit, pid, {
               ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
             });
+            return excluded.size === 0 ? rows : filterAndSliceBySourceId(rows, excluded, limit);
           },
         }
       : {}),
@@ -525,8 +474,15 @@ export function createProfileScopedCatalog(
       : {}),
     ...(listCollectionItems
       ? {
-          listCollectionItems: (collectionId, opts) =>
-            listCollectionItems(collectionId, mergeParentalOpts(opts, getScope())),
+          listCollectionItems: async (collectionId, opts) => {
+            const scope = getScope();
+            const merged = mergeParentalOpts(opts, scope);
+            const [excluded, rows] = await Promise.all([
+              excludedFor(merged.profileId ?? scope.profileId, scope),
+              listCollectionItems(collectionId, merged),
+            ]);
+            return filterBySourceId(rows, excluded);
+          },
         }
       : {}),
     ...(listCollectionsForItem
@@ -606,19 +562,37 @@ export function createProfileScopedCatalog(
       : {}),
     ...(listRatings
       ? {
-          listRatings: (opts) => {
+          listRatings: async (opts) => {
             const scope = getScope();
-            return listRatings({
-              ...opts,
-              profileId: opts?.profileId ?? scope.profileId,
-              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
-            });
+            const pid = opts?.profileId ?? scope.profileId;
+            const [excluded, rows] = await Promise.all([
+              excludedFor(pid, scope),
+              listRatings({
+                ...opts,
+                profileId: pid,
+                parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+              }),
+            ]);
+            return filterByItemKey(rows, excluded);
           },
         }
       : {}),
     ...(listRatingMap
       ? {
-          listRatingMap: (profileId) => listRatingMap(profileId ?? getScope().profileId),
+          listRatingMap: async (profileId) => {
+            const scope = getScope();
+            const pid = profileId ?? scope.profileId;
+            const [excluded, map] = await Promise.all([
+              excludedFor(pid, scope),
+              listRatingMap(pid),
+            ]);
+            if (excluded.size === 0) return map;
+            const out: Record<string, (typeof map)[string]> = {};
+            for (const [k, v] of Object.entries(map)) {
+              if (!isKeyFromExcludedSource(k, excluded)) out[k] = v;
+            }
+            return out;
+          },
         }
       : {}),
     ...(c.flushPendingWrites ? { flushPendingWrites: c.flushPendingWrites.bind(c) } : {}),

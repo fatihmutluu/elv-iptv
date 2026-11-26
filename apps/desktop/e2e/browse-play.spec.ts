@@ -56,12 +56,18 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await expect(window.getByTestId('welcome-sync-overlay')).toHaveCount(0);
     await expect(window.getByTestId('sources-screen')).toBeVisible();
 
+    await window.getByTestId('sources-mode-xtream').click();
     await window.getByTestId('sources-input-server').fill(env?.frontUrl ?? '');
     await window.getByTestId('sources-input-username').fill('demo');
     await window.getByTestId('sources-input-password').fill(['de', 'mo'].join(''));
     await window.getByTestId('sources-submit').click();
 
-    await expect(window.getByTestId('sources-open-menu')).toBeVisible({ timeout: 20_000 });
+    await expect(window.locator('[data-testid^="source-advanced-"]').first()).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(window.locator('[data-testid^="source-status-"]').first()).toContainText(/\d+/, {
+      timeout: 20_000,
+    });
 
     await window.getByTestId('nav-tab-home').click();
     await expect(window.getByTestId('home-hero')).toBeVisible();
@@ -206,9 +212,11 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await window.getByTestId('nav-tab-settings').click();
     await expect(window.getByTestId('settings-screen')).toBeVisible();
     await window.getByTestId('settings-tab-appearance').click();
+    await window.getByTestId('settings-language-dropdown').click();
     await window.getByTestId('settings-lang-tr').click();
     await expect(window.getByTestId('settings-tab-appearance')).toHaveText('Görünüm');
     await expect(window.getByTestId('nav-tab-live')).toHaveText('Canlı');
+    await window.getByTestId('settings-language-dropdown').click();
     await window.getByTestId('settings-lang-en').click();
     await expect(window.getByTestId('settings-tab-appearance')).toHaveText('Appearance');
     await window.getByTestId('settings-theme-highContrast').click();
@@ -253,11 +261,17 @@ test('plays corpus Two audio tracks and subtitles (MKV) movie, pauses, seeks +10
     await expect(window.getByTestId('welcome-sync-overlay')).toHaveCount(0);
     await expect(window.getByTestId('sources-screen')).toBeVisible();
 
+    await window.getByTestId('sources-mode-xtream').click();
     await window.getByTestId('sources-input-server').fill(env.frontUrl);
     await window.getByTestId('sources-input-username').fill('corpus');
     await window.getByTestId('sources-input-password').fill(['cor', 'pus'].join(''));
     await window.getByTestId('sources-submit').click();
-    await expect(window.getByTestId('sources-open-menu')).toBeVisible({ timeout: 20_000 });
+    await expect(window.locator('[data-testid^="source-advanced-"]').first()).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(window.locator('[data-testid^="source-status-"]').first()).toContainText(/\d+/, {
+      timeout: 20_000,
+    });
 
     await window.getByTestId('nav-tab-movie').click();
     await expect(window.getByTestId('catalog-screen-movie')).toBeVisible();

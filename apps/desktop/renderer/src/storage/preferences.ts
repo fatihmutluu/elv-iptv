@@ -61,9 +61,12 @@ function createMemoryKvBackend(): PreferencesKvBackend {
 export function createDesktopPreferencesStore(storage?: WebStorageLike): ProfilePreferencesManager {
   const resolved = storage ?? safeWindowLocalStorage();
   if (resolved === undefined) {
-    return createProfilePreferencesManager(createMemoryKvBackend());
+    return createProfilePreferencesManager(createMemoryKvBackend(), {
+      defaultArtworkCacheLimitMb: 512,
+    });
   }
   return createProfilePreferencesManager(createWebStorageBackend(resolved), {
     coalesceMs: 500,
+    defaultArtworkCacheLimitMb: 512,
   });
 }

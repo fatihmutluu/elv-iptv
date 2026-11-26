@@ -11,6 +11,9 @@ export const PROFILE_AVATAR_TOKENS = [
   'violet',
   'emerald',
   'slate',
+  'coral',
+  'teal',
+  'indigo',
 ] as const;
 
 /** Allowed avatar color token for a local profile. */

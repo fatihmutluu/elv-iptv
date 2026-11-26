@@ -159,6 +159,20 @@ describe('production CatalogService wrapper chain (listWatched & VOD collections
 
     expect(await stacked.listCollections?.()).toEqual([]);
 
+    // 3) Wave P7 renameSource & setSourceExcludedProfiles propagate through full stack & trigger syncSourcesAndBump + onUserStateMutated
+    const syncBefore = syncSourcesAndBump.mock.calls.length;
+    const mutatedBefore = onUserStateMutated.mock.calls.length;
+    const renamedSource = await stacked.renameSource?.(added.value.id, 'Cinema VOD');
+    expect(renamedSource?.ok).toBe(true);
+    expect(syncSourcesAndBump.mock.calls.length).toBeGreaterThan(syncBefore);
+    expect(onUserStateMutated.mock.calls.length).toBeGreaterThan(mutatedBefore);
+
+    const excludedRes = await stacked.setSourceExcludedProfiles?.(added.value.id, ['kids-99']);
+    expect(excludedRes?.ok).toBe(true);
+    const listedAfter = await stacked.listSources();
+    expect(listedAfter[0]?.name).toBe('Cinema VOD');
+    expect(listedAfter[0]?.excludedProfileIds).toEqual(['kids-99']);
+
     await stacked.close();
     handle.close();
   });
@@ -190,5 +204,7 @@ describe('production CatalogService wrapper chain (listWatched & VOD collections
     expect((await lazy.addItemToCollection?.('c1', 'm:1', 'movie'))?.ok).toBe(false);
     expect((await lazy.removeItemFromCollection?.('c1', 'm:1'))?.ok).toBe(false);
     expect((await lazy.reorderCollectionItems?.('c1', ['m:1']))?.ok).toBe(false);
+    expect((await lazy.renameSource?.('s1', 'Renamed'))?.ok).toBe(false);
+    expect((await lazy.setSourceExcludedProfiles?.('s1', ['p2']))?.ok).toBe(false);
   });
 });

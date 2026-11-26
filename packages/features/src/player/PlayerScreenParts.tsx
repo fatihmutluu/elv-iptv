@@ -45,8 +45,6 @@ export function buildSettingsSheetOptionalProps(opts: {
   readonly togglePitchLock: (() => void) | undefined;
   readonly activeAudioNorm: boolean;
   readonly toggleAudioNormalization: (() => void) | undefined;
-  readonly autoSubtitlesOnSkipBack: boolean | undefined;
-  readonly onToggleAutoSubtitlesOnSkipBack: (() => void) | undefined;
   readonly autoPlayNextEpisode: boolean | undefined;
   readonly onToggleAutoPlayNextEpisode: (() => void) | undefined;
   readonly hostSetAudioDevice: ((name: string) => void) | undefined;
@@ -80,12 +78,6 @@ export function buildSettingsSheetOptionalProps(opts: {
       ? {
           audioNormalization: opts.activeAudioNorm,
           onToggleAudioNormalization: opts.toggleAudioNormalization,
-        }
-      : {}),
-    ...(opts.onToggleAutoSubtitlesOnSkipBack
-      ? {
-          autoSubtitlesOnSkipBack: opts.autoSubtitlesOnSkipBack === true,
-          onToggleAutoSubtitlesOnSkipBack: opts.onToggleAutoSubtitlesOnSkipBack,
         }
       : {}),
     ...(opts.onToggleAutoPlayNextEpisode

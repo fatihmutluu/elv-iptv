@@ -10,6 +10,7 @@ import {
   defaultDeadHostRegistry,
   extractNativeImageError,
   type ImageAdapterProps,
+  renderNativeVectorSpec,
   type UiAdapters,
 } from '@elv/ui-kit';
 import { type AppStateStatus, Image } from 'react-native';
@@ -52,17 +53,20 @@ function resolveDefaultExpoFileSystemPort(): ArtworkCacheFsPort | undefined {
 export function createMobileTvUiAdapters(options?: {
   readonly hardwareTier?: AppleHardwareTier;
   readonly renderBlur?: UiAdapters['renderBlur'];
+  readonly renderSvg?: UiAdapters['renderSvg'];
   readonly artworkCache?: ArtworkCacheAdapter;
   readonly artworkFs?: ArtworkCacheFsPort;
 }): UiAdapters {
   const tier = options?.hardwareTier ?? resolveAppleHardwareTier(getAppleDeviceModel());
   const renderBlur = tier === 'mid-power' ? undefined : options?.renderBlur;
+  const renderSvg = options?.renderSvg ?? renderNativeVectorSpec;
   const fs = options?.artworkFs ?? resolveDefaultExpoFileSystemPort();
   const artworkCache =
     options?.artworkCache ?? createMobileArtworkCache(fs !== undefined ? { fs } : undefined);
   return {
     artworkCache,
     lowPowerTier: tier === 'mid-power',
+    renderSvg,
     ...(renderBlur !== undefined ? { renderBlur } : {}),
     renderImage({
       uri,

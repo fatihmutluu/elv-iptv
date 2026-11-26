@@ -72,8 +72,14 @@ describe('profiles-repo (#15)', () => {
         'violet',
         'emerald',
         'slate',
+        'coral',
+        'teal',
+        'indigo',
       ]);
       expect(isProfileAvatarToken('sapphire')).toBe(true);
+      expect(isProfileAvatarToken('coral')).toBe(true);
+      expect(isProfileAvatarToken('teal')).toBe(true);
+      expect(isProfileAvatarToken('indigo')).toBe(true);
       expect(isProfileAvatarToken('neon')).toBe(false);
       expect(isValidProfileId('default')).toBe(true);
       expect(isValidProfileId('p_123-abc.ok')).toBe(true);

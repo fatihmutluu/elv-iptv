@@ -124,6 +124,19 @@ describe('createDesktopDisplayRefreshController (#214, #116)', () => {
     }).not.toThrow();
   });
 
+  it('defaults policy autoFrameRate to seamless so fullscreen playback matches refresh rate without explicit setPolicy', () => {
+    const fake = createFakeAdapter({ 'disp-1': MODES_1080P });
+    const ctl = createDesktopDisplayRefreshController(fake.adapter);
+
+    ctl.setFullscreen('e1', true, 'disp-1');
+    ctl.setPlaybackActive('e1', true, 'disp-1');
+    ctl.setContentFps('e1', 23.976, 'disp-1');
+    expect(fake.currentId('disp-1')).toBe('1080p-23976');
+
+    ctl.setPolicy('e1', OFF);
+    expect(fake.currentId('disp-1')).toBe('1080p-60');
+  });
+
   it('never switches OS refresh rate in windowed mode, and switches only when fullscreen + playing', () => {
     const fake = createFakeAdapter({ 'disp-1': MODES_1080P });
     const ctl = createDesktopDisplayRefreshController(fake.adapter);

@@ -31,10 +31,10 @@ describe('artwork-ipc contract and runtime guards (#405)', () => {
     expect(ARTWORK_PROTOCOL_SCHEME).toBe('elv-art');
     expect(ARTWORK_PROTOCOL_ORIGIN).toBe('elv-art://cache');
     expect(ARTWORK_CACHE_MIN_MB).toBe(64);
-    expect(ARTWORK_CACHE_MAX_MB).toBe(256);
+    expect(ARTWORK_CACHE_MAX_MB).toBe(512);
     expect(DEFAULT_ARTWORK_CACHE_MB).toBe(128);
     expect(ARTWORK_CACHE_MIN_BYTES).toBe(64 * 1024 * 1024);
-    expect(ARTWORK_CACHE_MAX_BYTES).toBe(256 * 1024 * 1024);
+    expect(ARTWORK_CACHE_MAX_BYTES).toBe(512 * 1024 * 1024);
     expect(DEFAULT_ARTWORK_CACHE_BYTES).toBe(128 * 1024 * 1024);
   });
 
@@ -71,9 +71,10 @@ describe('artwork-ipc contract and runtime guards (#405)', () => {
     expect(isSafeArtworkUrl('https://[fec0::1]/logo.png')).toBe(true);
   });
 
-  it('validates set-limit byte payloads and clamps to 64..256 MiB', () => {
+  it('validates set-limit byte payloads and clamps to 64..512 MiB', () => {
     expect(isArtworkSetLimitBytes(ARTWORK_CACHE_MIN_BYTES)).toBe(true);
     expect(isArtworkSetLimitBytes(DEFAULT_ARTWORK_CACHE_BYTES)).toBe(true);
+    expect(isArtworkSetLimitBytes(ARTWORK_CACHE_MAX_BYTES)).toBe(true);
     expect(isArtworkSetLimitBytes(0)).toBe(false);
     expect(isArtworkSetLimitBytes(-10)).toBe(false);
     expect(isArtworkSetLimitBytes(Number.NaN)).toBe(false);
@@ -81,7 +82,8 @@ describe('artwork-ipc contract and runtime guards (#405)', () => {
     expect(isArtworkSetLimitBytes('128')).toBe(false);
 
     expect(clampArtworkCacheLimitBytes(1024)).toBe(ARTWORK_CACHE_MIN_BYTES);
-    expect(clampArtworkCacheLimitBytes(512 * 1024 * 1024)).toBe(ARTWORK_CACHE_MAX_BYTES);
+    expect(clampArtworkCacheLimitBytes(512 * 1024 * 1024)).toBe(512 * 1024 * 1024);
+    expect(clampArtworkCacheLimitBytes(1024 * 1024 * 1024)).toBe(ARTWORK_CACHE_MAX_BYTES);
     expect(clampArtworkCacheLimitBytes(DEFAULT_ARTWORK_CACHE_BYTES)).toBe(
       DEFAULT_ARTWORK_CACHE_BYTES,
     );

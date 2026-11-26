@@ -19,20 +19,53 @@ export interface ProfileFormValues {
   readonly isKids: boolean;
 }
 
+/** Optional PIN management controls rendered inside {@link ProfileFormCard} in edit mode. */
+export interface ProfileFormPinSection {
+  readonly hasPin: boolean;
+  readonly onSetPin: () => void;
+  readonly onChangePin: () => void;
+  readonly onRemovePin: () => void;
+}
+
+/** Optional opt-in toggle rendered inside {@link ProfileFormCard} in create mode. */
+export interface ProfileFormCreatePinOption {
+  readonly checked: boolean;
+  readonly onToggle: () => void;
+}
+
+/** Optional Delete profile controls rendered inside {@link ProfileFormCard} in edit mode. */
+export interface ProfileFormDeleteSection {
+  readonly canDelete: boolean;
+  readonly confirming: boolean;
+  readonly onRequestDelete: () => void;
+  readonly onConfirmDelete: () => void;
+  readonly onCancelDelete: () => void;
+}
+
 /** Props of {@link ProfileFormCard}. */
 export interface ProfileFormCardProps {
   readonly mode: 'create' | 'edit';
   readonly initialValues?: Partial<ProfileFormValues>;
   readonly submitting?: boolean;
+  readonly showKidsToggle?: boolean;
+  readonly onBeforeToggleKids?: (nextIsKids: boolean, commit: () => void) => void;
+  readonly createPinOption?: ProfileFormCreatePinOption;
+  readonly pinSection?: ProfileFormPinSection;
+  readonly deleteSection?: ProfileFormDeleteSection;
   readonly onSubmit: (values: ProfileFormValues) => void;
   readonly onCancel: () => void;
 }
 
-/** Inline Cinema Quietude v2 card for creating or editing a local viewer profile (`#15`). */
+/** Cinema Quietude v2 modal card for creating or editing a local viewer profile (`#15`, `#506`). */
 export function ProfileFormCard({
   mode,
   initialValues,
   submitting = false,
+  showKidsToggle = true,
+  onBeforeToggleKids,
+  createPinOption,
+  pinSection,
+  deleteSection,
   onSubmit,
   onCancel,
 }: ProfileFormCardProps): ReactElement {
@@ -46,16 +79,27 @@ export function ProfileFormCard({
   const [nameFocused, setNameFocused] = useState(false);
   const [focusedAvatar, setFocusedAvatar] = useState<ProfileAvatarToken | null>(null);
   const [kidsToggleFocused, setKidsToggleFocused] = useState(false);
+  const [createPinFocused, setCreatePinFocused] = useState(false);
 
   const trimmed = name.trim();
   const canSave = trimmed.length > 0 && trimmed.length <= MAX_PROFILE_NAME_LENGTH && !submitting;
   const cursorPointer = webCursorPointer();
   const transition = webTransition(theme, 'background-color, border-color, transform');
 
+  const handleToggleKids = () => {
+    const nextValue = !isKids;
+    const commit = () => setIsKids(nextValue);
+    if (onBeforeToggleKids) {
+      onBeforeToggleKids(nextValue, commit);
+      return;
+    }
+    commit();
+  };
+
   return (
     <Surface testID="profile-form-card" tone="card" bordered rounded="modal" style={styles.card}>
-      <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
-        {mode === 'create' ? i18n.t('profiles.addProfile') : i18n.t('profiles.editProfile')}
+      <Text style={[theme.typography.h2, { color: theme.colors.textPrimary }]}>
+        {mode === 'create' ? i18n.t('profiles.addNew') : i18n.t('profiles.editProfileTitle')}
       </Text>
 
       <View style={styles.field}>
@@ -94,7 +138,7 @@ export function ProfileFormCard({
         <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
           {i18n.t('profiles.avatarLabel')}
         </Text>
-        <View style={styles.avatarRow}>
+        <View testID="profile-avatar-grid" style={styles.avatarRow}>
           {PROFILE_AVATAR_TOKENS.map((token) => {
             const selected = avatarToken === token;
             return (
@@ -132,7 +176,7 @@ export function ProfileFormCard({
                 }}
               >
                 <ProfileAvatarBadge
-                  name={trimmed || 'P'}
+                  name={trimmed || token}
                   avatarToken={token}
                   size="md"
                   active={selected}
@@ -143,67 +187,231 @@ export function ProfileFormCard({
         </View>
       </View>
 
-      <Pressable
-        testID="profile-form-kids-toggle"
-        accessibilityRole="switch"
-        accessibilityLabel={i18n.t('profiles.kidsToggle')}
-        accessibilityState={{ checked: isKids }}
-        aria-checked={isKids}
-        focusable
-        onFocus={() => setKidsToggleFocused(true)}
-        onBlur={() => setKidsToggleFocused(false)}
-        onPress={() => setIsKids((prev) => !prev)}
-        style={(state) => {
-          const focused = kidsToggleFocused || Boolean(state.focused);
-          return [
-            styles.toggleRow,
-            cursorPointer,
-            transition,
-            {
-              borderRadius: theme.radius.card,
-              backgroundColor: focused ? theme.colors.focusFill : theme.colors.bgSurface,
-              borderWidth: focused ? theme.focus.ringWidth : 1,
-              borderColor: focused ? theme.colors.focusRingColor : theme.colors.surfaceBorder,
-            },
-          ];
-        }}
-      >
-        <View style={styles.toggleText}>
-          <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
-            {i18n.t('profiles.kidsToggle')}
-          </Text>
-          <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-            {i18n.t('profiles.kidsHint')}
-          </Text>
-        </View>
+      {showKidsToggle ? (
+        <Pressable
+          testID="profile-form-kids-toggle"
+          accessibilityRole="switch"
+          accessibilityLabel={i18n.t('profiles.kidsToggleLabel')}
+          accessibilityState={{ checked: isKids }}
+          aria-checked={isKids}
+          focusable
+          onFocus={() => setKidsToggleFocused(true)}
+          onBlur={() => setKidsToggleFocused(false)}
+          onPress={handleToggleKids}
+          style={(state) => {
+            const focused = kidsToggleFocused || Boolean(state.focused);
+            return [
+              styles.toggleRow,
+              cursorPointer,
+              transition,
+              {
+                borderRadius: theme.radius.card,
+                backgroundColor: focused ? theme.colors.focusFill : theme.colors.bgSurface,
+                borderWidth: focused ? theme.focus.ringWidth : 1,
+                borderColor: focused ? theme.colors.focusRingColor : theme.colors.surfaceBorder,
+              },
+            ];
+          }}
+        >
+          <View style={styles.toggleText}>
+            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
+              {i18n.t('profiles.kidsToggleLabel')}
+            </Text>
+            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+              {i18n.t('profiles.kidsHint')}
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.switchTrack,
+              {
+                borderRadius: theme.radius.pill,
+                backgroundColor: isKids ? theme.colors.accent : theme.colors.bgCard,
+                borderColor: isKids ? theme.colors.accent : theme.colors.chipBorder,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.switchThumb,
+                {
+                  borderRadius: theme.radius.pill,
+                  backgroundColor: isKids ? theme.colors.accentContrast : theme.colors.textPrimary,
+                  alignSelf: isKids ? 'flex-end' : 'flex-start',
+                },
+              ]}
+            />
+          </View>
+        </Pressable>
+      ) : null}
+
+      {mode === 'create' && createPinOption !== undefined ? (
+        <Pressable
+          testID="profile-create-pin-toggle"
+          accessibilityRole="checkbox"
+          accessibilityLabel={i18n.t('profiles.setPinOnCreate')}
+          accessibilityState={{ checked: createPinOption.checked }}
+          aria-checked={createPinOption.checked}
+          focusable
+          onFocus={() => setCreatePinFocused(true)}
+          onBlur={() => setCreatePinFocused(false)}
+          onPress={createPinOption.onToggle}
+          style={(state) => {
+            const focused = createPinFocused || Boolean(state.focused);
+            return [
+              styles.toggleRow,
+              cursorPointer,
+              transition,
+              {
+                borderRadius: theme.radius.card,
+                backgroundColor: focused ? theme.colors.focusFill : theme.colors.bgSurface,
+                borderWidth: focused ? theme.focus.ringWidth : 1,
+                borderColor: focused ? theme.colors.focusRingColor : theme.colors.surfaceBorder,
+              },
+            ];
+          }}
+        >
+          <View style={styles.toggleText}>
+            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
+              {i18n.t('profiles.setPinOnCreate')}
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.switchTrack,
+              {
+                borderRadius: theme.radius.pill,
+                backgroundColor: createPinOption.checked
+                  ? theme.colors.accent
+                  : theme.colors.bgCard,
+                borderColor: createPinOption.checked
+                  ? theme.colors.accent
+                  : theme.colors.chipBorder,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.switchThumb,
+                {
+                  borderRadius: theme.radius.pill,
+                  backgroundColor: createPinOption.checked
+                    ? theme.colors.accentContrast
+                    : theme.colors.textPrimary,
+                  alignSelf: createPinOption.checked ? 'flex-end' : 'flex-start',
+                },
+              ]}
+            />
+          </View>
+        </Pressable>
+      ) : null}
+
+      {pinSection !== undefined && mode === 'edit' ? (
         <View
+          testID="profile-edit-pin-section"
           style={[
-            styles.switchTrack,
+            styles.subSection,
             {
-              borderRadius: theme.radius.pill,
-              backgroundColor: isKids ? theme.colors.accent : theme.colors.bgCard,
-              borderColor: isKids ? theme.colors.accent : theme.colors.chipBorder,
+              backgroundColor: theme.colors.bgSurface,
+              borderColor: theme.colors.surfaceBorder,
+              borderRadius: theme.radius.card,
             },
           ]}
         >
+          <View style={styles.subSectionText}>
+            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
+              {i18n.t('profiles.pinManageLabel')}
+            </Text>
+            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+              {pinSection.hasPin ? i18n.t('parental.pinSet') : i18n.t('parental.pinNotSet')}
+            </Text>
+          </View>
+          <View style={styles.subSectionActions}>
+            {!pinSection.hasPin ? (
+              <CtaButton
+                testID="profile-edit-set-pin"
+                variant="secondary"
+                label={i18n.t('parental.setPin')}
+                onPress={pinSection.onSetPin}
+              />
+            ) : (
+              <>
+                <CtaButton
+                  testID="profile-edit-change-pin"
+                  variant="secondary"
+                  label={i18n.t('parental.changePin')}
+                  onPress={pinSection.onChangePin}
+                />
+                <CtaButton
+                  testID="profile-edit-remove-pin"
+                  variant="secondary"
+                  label={i18n.t('parental.removePin')}
+                  onPress={pinSection.onRemovePin}
+                />
+              </>
+            )}
+          </View>
+        </View>
+      ) : null}
+
+      {deleteSection !== undefined && mode === 'edit' ? (
+        deleteSection.confirming ? (
           <View
+            testID="profile-edit-delete-confirm"
             style={[
-              styles.switchThumb,
+              styles.confirmBox,
               {
-                borderRadius: theme.radius.pill,
-                backgroundColor: isKids ? theme.colors.accentContrast : theme.colors.textPrimary,
-                alignSelf: isKids ? 'flex-end' : 'flex-start',
+                borderColor: theme.colors.liveColor,
+                borderRadius: theme.radius.card,
+                backgroundColor: theme.colors.bgSurface,
               },
             ]}
-          />
-        </View>
-      </Pressable>
+          >
+            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
+              {i18n.t('profiles.deleteConfirmTitle')}
+            </Text>
+            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+              {i18n.t('profiles.deleteConfirmBody')}
+            </Text>
+            <View style={styles.actions}>
+              <CtaButton
+                testID="profile-edit-delete-cancel"
+                variant="secondary"
+                label={i18n.t('profiles.cancelAction')}
+                onPress={deleteSection.onCancelDelete}
+              />
+              <CtaButton
+                testID="profile-edit-delete-confirm-btn"
+                variant="primary"
+                label={i18n.t('profiles.deleteProfileAction')}
+                disabled={submitting}
+                onPress={deleteSection.onConfirmDelete}
+              />
+            </View>
+          </View>
+        ) : (
+          <View style={styles.deleteRow}>
+            <CtaButton
+              testID="profile-edit-delete"
+              variant="secondary"
+              label={i18n.t('profiles.deleteProfileAction')}
+              disabled={!deleteSection.canDelete || submitting}
+              onPress={deleteSection.onRequestDelete}
+            />
+            {!deleteSection.canDelete ? (
+              <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]}>
+                {i18n.t('profiles.cannotDeleteLast')}
+              </Text>
+            ) : null}
+          </View>
+        )
+      ) : null}
 
       <View style={styles.actions}>
         <CtaButton
           testID="profile-form-cancel"
           variant="secondary"
-          label={i18n.t('profiles.cancel')}
+          label={i18n.t('profiles.cancelAction')}
           onPress={onCancel}
         />
         <CtaButton
@@ -222,7 +430,7 @@ export function ProfileFormCard({
 
 const styles = StyleSheet.create({
   card: {
-    padding: 16,
+    padding: 20,
     gap: 14,
   },
   field: {
@@ -241,7 +449,7 @@ const styles = StyleSheet.create({
   avatarRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   avatarChoice: {
     padding: 4,
@@ -271,6 +479,37 @@ const styles = StyleSheet.create({
   switchThumb: {
     width: 16,
     height: 16,
+  },
+  subSection: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  subSectionText: {
+    flex: 1,
+    minWidth: 150,
+    gap: 2,
+  },
+  subSectionActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  deleteRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 10,
+  },
+  confirmBox: {
+    padding: 12,
+    borderWidth: 1,
+    gap: 8,
   },
   actions: {
     flexDirection: 'row',

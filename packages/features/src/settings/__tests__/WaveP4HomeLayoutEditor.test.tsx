@@ -96,7 +96,7 @@ describe('Wave P4 HomeLayoutEditor & Sync initialPrefsHint', () => {
     const onAdjustControl = jest.fn();
     const customLayout = moveHomeLayoutSection(DEFAULT_HOME_LAYOUT, 1, 'up'); // live first, continue second
 
-    // Default layout: last Appearance control is home-layout-collections (no invisible reset slot)
+    // Default layout: Home layout rows omit invisible reset slot, and very last Appearance control is reset-preferences
     const defaultHook = await renderHook(() =>
       useTvSettingsNavigation({
         isTv: true,
@@ -110,15 +110,19 @@ describe('Wave P4 HomeLayoutEditor & Sync initialPrefsHint', () => {
     await act(async () => {
       defaultHook.result.current.enterContentPane();
     });
+    const defaultVisited: string[] = [];
     for (let i = 0; i < 30; i++) {
+      const cur = defaultHook.result.current.focusedAppearanceId;
+      if (cur && defaultVisited[defaultVisited.length - 1] !== cur) defaultVisited.push(cur);
       await act(async () => {
         defaultHook.result.current.handleTvKey({ kind: 'press', key: 'down', time: i + 1 });
       });
     }
-    expect(defaultHook.result.current.focusedAppearanceId).toBe('home-layout-collections');
+    expect(defaultVisited).not.toContain('home-layout-reset');
+    expect(defaultHook.result.current.focusedAppearanceId).toBe('reset-preferences');
     await defaultHook.unmount();
 
-    // Customized layout: dynamic section order + reset control + Left/Right reorder
+    // Customized layout: dynamic section order right below Theme + reset control + Left/Right reorder
     const customHook = await renderHook(() =>
       useTvSettingsNavigation({
         isTv: true,
@@ -133,11 +137,12 @@ describe('Wave P4 HomeLayoutEditor & Sync initialPrefsHint', () => {
       customHook.result.current.enterContentPane();
     });
     const visited: string[] = [];
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 12; i++) {
       const cur = customHook.result.current.focusedAppearanceId;
       if (cur?.startsWith('home-layout-') && visited[visited.length - 1] !== cur) {
         visited.push(cur);
       }
+      if (cur === 'home-layout-reset') break;
       await act(async () => {
         customHook.result.current.handleTvKey({ kind: 'press', key: 'down', time: i + 1 });
       });

@@ -94,24 +94,32 @@ describe('SourcesScreen native TV focus & controller concurrency (#71)', () => {
       expect(screen.getByTestId('sources-submit').props.focusable).toBe(false);
 
       // 3. TvTextInputs start non-editable & non-focusable on TV so D-pad never steals focus into IME
-      const serverInput = screen.getByTestId('sources-input-server');
-      expect(serverInput.props.editable).toBe(false);
-      expect(serverInput.props.focusable).toBe(false);
+      const urlInput = screen.getByTestId('sources-input-playlist-url');
+      expect(urlInput.props.editable).toBe(false);
+      expect(urlInput.props.focusable).toBe(false);
 
-      // 4. Horizontal Left/Right moves within [Xtream] <-> [M3U URL] row group
-      expect(screen.getByTestId('sources-mode-xtream').props.accessibilityState?.selected).toBe(
-        true,
-      );
+      // 4. Horizontal Left/Right moves within [M3U] <-> [Xtream] row group
+      expect(screen.getByTestId('sources-mode-m3u').props.accessibilityState?.selected).toBe(true);
       await act(async () => {
         remote.tap(KEYCODE_DPAD_RIGHT);
       });
-      expect(screen.getByTestId('sources-mode-m3u').props.accessibilityState?.selected).toBe(true);
-      await act(async () => {
-        remote.tap(KEYCODE_DPAD_LEFT);
-      });
       expect(screen.getByTestId('sources-mode-xtream').props.accessibilityState?.selected).toBe(
         true,
       );
+      await act(async () => {
+        remote.tap(KEYCODE_DPAD_LEFT);
+      });
+      expect(screen.getByTestId('sources-mode-m3u').props.accessibilityState?.selected).toBe(true);
+      // Select Xtream mode via Right + OK
+      await act(async () => {
+        remote.tap(KEYCODE_DPAD_RIGHT);
+      });
+      await act(async () => {
+        remote.tap(KEYCODE_DPAD_CENTER);
+      });
+      const serverInput = screen.getByTestId('sources-input-server');
+      expect(serverInput.props.editable).toBe(false);
+      expect(serverInput.props.focusable).toBe(false);
 
       // 5. Simulate ScrollView viewport height (300px) and offscreen submit button layout (y: 720, height: 48)
       await fireEvent(screen.getByTestId('sources-screen'), 'layout', {
@@ -121,9 +129,8 @@ describe('SourcesScreen native TV focus & controller concurrency (#71)', () => {
         nativeEvent: { layout: { x: 0, y: 720, width: 200, height: 48 } },
       });
 
-      // Move down to input-server (0: mode-xtream -> 1: mode-m3u -> 2: mode-stalker -> 3: input-name -> 4: input-server)
+      // Move down to input-server (1: mode-xtream -> 2: mode-stalker -> 3: input-name -> 4: input-server)
       await act(async () => {
-        remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
@@ -254,6 +261,7 @@ describe('SourcesScreen native TV focus & controller concurrency (#71)', () => {
       );
 
       await act(async () => {
+        hook.result.current.setMode('xtream');
         hook.result.current.updateField('server', 'http://sim.example.test:7878');
         hook.result.current.updateField('username', 'demo');
         hook.result.current.updateField('password', 'demo');

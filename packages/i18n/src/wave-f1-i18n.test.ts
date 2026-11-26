@@ -6,7 +6,7 @@ describe('Wave F1 Profiles & Parental Controls i18n (#15, #31)', () => {
     const en = createAppI18n('en');
     const tr = createAppI18n('tr');
     const cases: ReadonlyArray<readonly [MessageId, string, string]> = [
-      ['settings.section.profiles', 'Profiles & Parental', 'Profiller ve Ebeveyn'],
+      ['settings.section.profiles', 'Kids Mode', 'Çocuk Modu'],
       ['profiles.title', 'Profiles', 'Profiller'],
       [
         'profiles.subtitle',
@@ -56,7 +56,7 @@ describe('Wave F1 Profiles & Parental Controls i18n (#15, #31)', () => {
     const en = createAppI18n('en');
     const tr = createAppI18n('tr');
     const staticCases: ReadonlyArray<readonly [MessageId, string, string]> = [
-      ['parental.title', 'Parental Controls', 'Ebeveyn Denetimleri'],
+      ['parental.title', 'Kids Mode', 'Çocuk Modu'],
       [
         'parental.subtitle',
         'Restrict categories, adult keywords, and age-rated programs with a PIN.',

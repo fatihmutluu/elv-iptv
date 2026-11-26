@@ -14,6 +14,7 @@ import { trWaveP2Messages } from './tr-wave-p2';
 import { trWaveP4Messages } from './tr-wave-p4';
 import { trWaveP5Messages } from './tr-wave-p5';
 import { trWaveP6Messages } from './tr-wave-p6';
+import { trWaveP7Messages } from './tr-wave-p7';
 
 /** Turkish (`tr`) message catalog. */
 export const trMessages: Readonly<Record<MessageId, string>> = {
@@ -217,7 +218,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.aspect.fill': 'Doldur',
   'player.aspect.stretch': 'Uzat',
   'player.jumpToLive': 'Canlı uca atla',
-  'player.deinterlace': 'Taramayı gider',
+  'player.deinterlace': 'Deinterlace (Çizgi Düzeltme)',
   'player.statsHud': 'Oynatma istatistikleri',
   'player.stats.on': 'Açık',
   'player.stats.off': 'Kapalı',
@@ -301,7 +302,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'settings.about.title': 'ELV IPTV Hakkında',
   'settings.about.licenseBadge': 'Tescilli · LGPL medya motorları',
   'settings.about.statement':
-    'ELV IPTV bağımsız bir IPTV oynatıcısıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz.',
+    'ELV IPTV, her ekran için özenle geliştirilmiş %100 ücretsiz, reklamsız ve bağımsız bir IPTV oynatıcısıdır. Hiçbir medya içeriği sunmaz — kendi Xtream, M3U veya Stalker kaynağınızı ekleyin. Sağlayıcı bilgileriniz cihazınızda şifreli saklanır ve katalog veritabanına yazılmaz.',
   'home.title': 'Ana Sayfa',
   'home.continueWatching': 'İzlemeye devam et',
   'home.onAirNow': 'Şu an yayında',
@@ -578,7 +579,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
     'Aksi seçilmedikçe yayının varsayılan ses parçasını kullan',
   'settings.playback.preferHevcOverDv': 'Dolby Vision yerine HEVC tercih et',
   'settings.playback.preferHevcOverDvDesc':
-    'Dolby Vision siyah ekran veya takılma yaparsa standart HEVC’ye düş',
+    "Renk veya siyah ekran sorunu yaşayan cihazlarda Dolby Vision'ı atlayıp doğrudan standart HEVC kullanır.",
   'settings.playback.filterSdh': 'SDH altyazı açıklamalarını filtrele',
   'settings.playback.filterSdhDesc':
     'Metin altyazılardaki [ses efekti], (açıklama) ve KONUŞMACI: etiketlerini gizle',
@@ -702,7 +703,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'settings.pitchLock': 'Ses tonunu koru',
   'settings.pitchLockHint': 'Oynatma hızı değiştiğinde ses tonunu doğal tutar',
   'settings.audioNormalization': 'Ses seviyesi dengeleme',
-  'settings.audioNormalizationHint': 'EBU R128 ile kısık diyalogları ve yüksek kanalları dengeler',
+  'settings.audioNormalizationHint': 'Kısık diyalogları ve aşırı yüksek kanalları dengeler.',
   'settings.windowAspectRatioLock': 'Pencere en-boy oranını kilitle',
   'settings.windowAspectRatioLockHint':
     'Masaüstünde pencereyi boyutlandırırken siyah kenarlıkları önler',
@@ -733,5 +734,6 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trWaveP4Messages,
   ...trWaveP5Messages,
   ...trWaveP6Messages,
+  ...trWaveP7Messages,
   ...trIssue502Messages,
 };

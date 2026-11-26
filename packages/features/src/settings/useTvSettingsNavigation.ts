@@ -4,7 +4,6 @@ import {
   type HomeLayoutSectionPref,
   homeLayoutEquals,
   normalizeHomeLayout,
-  type RefreshRateBucket,
 } from '@elv/domain';
 import { createFocusStore, type FocusStore, findList, type KeyEvent } from '@elv/focus-core';
 import type { THEME_PRESET_IDS } from '@elv/ui-kit';
@@ -26,7 +25,7 @@ export type SettingsSection =
 /** Preference sections navigated row-by-row directly via {@link useTvSettingsNavigation}. */
 export type PreferenceSettingsSection = 'appearance' | 'playback' | 'liveTv';
 
-/** Ordered Settings sidebar sections. */
+/** Ordered Settings sidebar sections (on non-TV platforms, `'remote'` is filtered out at render time). */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'appearance',
   'playback',
@@ -41,10 +40,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 
 /** Focusable control identifiers inside the Appearance settings panel. */
 export type AppearanceFocusId =
-  | 'lang-system'
-  | 'lang-tr'
-  | 'lang-en'
+  | 'lang-dropdown'
   | `theme-${(typeof THEME_PRESET_IDS)[number]}`
+  | `home-layout-${HomeLayoutSectionId}`
+  | 'home-layout-reset'
   | 'font-90'
   | 'font-100'
   | 'font-110'
@@ -57,7 +56,6 @@ export type AppearanceFocusId =
   | 'sub-font-opendyslexic'
   | 'toggle-reduce-motion'
   | 'toggle-confirm-exit'
-  | 'toggle-vod-enrichment'
   | 'overscan-x-dec'
   | 'overscan-x-inc'
   | 'overscan-y-dec'
@@ -66,36 +64,15 @@ export type AppearanceFocusId =
   | 'tv-clock-menus'
   | 'tv-clock-player'
   | 'tv-clock-never'
-  | 'artwork-cache-64'
-  | 'artwork-cache-128'
-  | 'artwork-cache-256'
+  | 'artwork-cache-dropdown'
   | 'artwork-cache-clear'
-  | 'reset-preferences'
   | 'toggle-crash-reports-opt-in'
   | 'toggle-crash-reports-include-logs'
   | 'preview-diagnostic-report'
-  | `home-layout-${HomeLayoutSectionId}`
-  | 'home-layout-reset';
+  | 'reset-preferences';
 
 /** Focusable control identifiers inside the Playback settings panel. */
 export type PlaybackFocusId =
-  | 'audio-lang-auto'
-  | 'audio-lang-tr'
-  | 'audio-lang-en'
-  | 'audio-lang-de'
-  | 'audio-lang-fr'
-  | 'audio-lang-es'
-  | 'sub-lang-auto'
-  | 'sub-lang-tr'
-  | 'sub-lang-en'
-  | 'sub-lang-de'
-  | 'sub-lang-fr'
-  | 'sub-lang-es'
-  | 'sub-mode-default'
-  | 'sub-mode-smart'
-  | 'sub-mode-onlyForced'
-  | 'sub-mode-always'
-  | 'sub-mode-off'
   | 'seek-step-5'
   | 'seek-step-10'
   | 'seek-step-15'
@@ -109,44 +86,19 @@ export type PlaybackFocusId =
   | 'video-decoder-auto'
   | 'video-decoder-hardware'
   | 'video-decoder-software'
-  | 'toggle-prefer-default-audio'
   | 'toggle-filter-sdh'
   | 'toggle-prefer-hevc-dv'
-  | 'deinterlace-off'
-  | 'deinterlace-auto'
-  | 'deinterlace-bwdif'
   | 'toggle-pitch-lock'
   | 'toggle-audio-normalization'
-  | 'afr-off'
-  | 'afr-seamless'
-  | 'afr-always'
-  | 'toggle-auto-dynamic-range'
   | 'night-drc-off'
   | 'night-drc-light'
   | 'night-drc-night'
-  | `delay-bucket-${RefreshRateBucket}`
-  | 'delay-stepper'
-  | 'toggle-window-aspect-ratio-lock'
-  | 'toggle-minimize-to-tray'
   | 'toggle-auto-enter-pip'
   | 'toggle-background-audio'
   | 'osd-time-total'
   | 'osd-time-remaining'
   | 'osd-time-endsAt'
-  | 'oled-0'
-  | 'oled-5'
-  | 'oled-10'
-  | 'oled-15'
-  | 'oled-30'
-  | 'still-watching-0'
-  | 'still-watching-60'
-  | 'still-watching-120'
-  | 'still-watching-180'
-  | 'still-watching-240'
   | 'toggle-auto-play-next'
-  | 'toggle-skip-back-subtitles'
-  | 'toggle-group-vod-versions'
-  | 'audio-device-auto'
   | 'external-player-off'
   | 'external-player-ask'
   | 'external-player-always';
@@ -162,40 +114,27 @@ export type LiveTvFocusId =
   | 'epg-density-compact'
   | 'epg-density-comfortable'
   | 'epg-density-cinematic'
-  | 'toggle-epg-genre-tints'
   | 'toggle-epg-show-clock'
-  | 'catalog-refresh-0'
-  | 'catalog-refresh-6'
-  | 'catalog-refresh-12'
-  | 'catalog-refresh-24'
-  | 'catalog-refresh-48'
-  | 'guide-refresh-0'
-  | 'guide-refresh-6'
-  | 'guide-refresh-12'
-  | 'guide-refresh-24'
+  | 'catalog-refresh-dropdown'
+  | 'catalog-refresh-now'
+  | 'guide-refresh-dropdown'
+  | 'guide-refresh-now'
   | 'channel-switch-instant'
-  | 'channel-switch-preview'
-  | 'logo-backdrop-plate'
-  | 'logo-backdrop-invert'
-  | 'logo-backdrop-off'
-  | 'toggle-source-badges'
-  | 'toggle-two-step-preview'
-  | 'toggle-clean-titles'
-  | 'toggle-collapse-variants'
-  | 'open-channel-management';
+  | 'channel-switch-preview';
 
 const NAV_LIST_ID = 'settings-nav';
 
-const APPEARANCE_ROWS_HEAD: readonly (readonly AppearanceFocusId[])[] = [
-  ['lang-system', 'lang-tr', 'lang-en'],
+const APPEARANCE_ROWS_TOP: readonly (readonly AppearanceFocusId[])[] = [
+  ['lang-dropdown'],
   ['theme-obsidianCrimson', 'theme-abyssalSapphire', 'theme-theaterAmber'],
   ['theme-velvetViolet', 'theme-pitchEmerald', 'theme-highContrast'],
+];
+
+const APPEARANCE_ROWS_TYPOGRAPHY: readonly (readonly AppearanceFocusId[])[] = [
   ['font-90', 'font-100', 'font-110', 'font-120'],
   ['ui-font-system', 'ui-font-atkinson', 'ui-font-opendyslexic'],
   ['sub-font-system', 'sub-font-atkinson', 'sub-font-opendyslexic'],
   ['toggle-reduce-motion'],
-  ['toggle-confirm-exit'],
-  ['toggle-vod-enrichment'],
 ];
 
 const APPEARANCE_TV_ROWS: readonly (readonly AppearanceFocusId[])[] = [
@@ -204,17 +143,18 @@ const APPEARANCE_TV_ROWS: readonly (readonly AppearanceFocusId[])[] = [
   ['tv-clock-always', 'tv-clock-menus', 'tv-clock-player', 'tv-clock-never'],
 ];
 
-const APPEARANCE_ROWS_TAIL: readonly (readonly AppearanceFocusId[])[] = [
-  ['artwork-cache-64', 'artwork-cache-128', 'artwork-cache-256'],
+const APPEARANCE_ROWS_BOTTOM: readonly (readonly AppearanceFocusId[])[] = [
+  ['artwork-cache-dropdown'],
   ['artwork-cache-clear'],
-  ['reset-preferences'],
   ['toggle-crash-reports-opt-in'],
   ['toggle-crash-reports-include-logs'],
   ['preview-diagnostic-report'],
+  ['reset-preferences'],
 ];
 
 function buildAppearanceRows(
   includeTvDisplayRows: boolean,
+  showConfirmExitOnBack: boolean,
   homeLayout?: readonly HomeLayoutSectionPref[],
 ): readonly (readonly AppearanceFocusId[])[] {
   const normalized = normalizeHomeLayout(homeLayout ?? DEFAULT_HOME_LAYOUT);
@@ -225,24 +165,16 @@ function buildAppearanceRows(
     homeLayoutRows.push(['home-layout-reset']);
   }
   return [
-    ...APPEARANCE_ROWS_HEAD,
-    ...(includeTvDisplayRows ? APPEARANCE_TV_ROWS : []),
-    ...APPEARANCE_ROWS_TAIL,
+    ...APPEARANCE_ROWS_TOP,
     ...homeLayoutRows,
+    ...APPEARANCE_ROWS_TYPOGRAPHY,
+    ...(showConfirmExitOnBack ? ([['toggle-confirm-exit']] as const) : []),
+    ...(includeTvDisplayRows ? APPEARANCE_TV_ROWS : []),
+    ...APPEARANCE_ROWS_BOTTOM,
   ];
 }
 
 const PLAYBACK_ROWS_HEAD: readonly (readonly PlaybackFocusId[])[] = [
-  [
-    'audio-lang-auto',
-    'audio-lang-tr',
-    'audio-lang-en',
-    'audio-lang-de',
-    'audio-lang-fr',
-    'audio-lang-es',
-  ],
-  ['sub-lang-auto', 'sub-lang-tr', 'sub-lang-en', 'sub-lang-de', 'sub-lang-fr', 'sub-lang-es'],
-  ['sub-mode-default', 'sub-mode-smart', 'sub-mode-onlyForced', 'sub-mode-always', 'sub-mode-off'],
   ['seek-step-5', 'seek-step-10', 'seek-step-15', 'seek-step-30'],
   ['aspect-fit', 'aspect-fill', 'aspect-stretch'],
   ['buffer-auto', 'buffer-balanced', 'buffer-large'],
@@ -254,24 +186,11 @@ const PLAYBACK_DECODER_ROW: readonly PlaybackFocusId[] = [
   'video-decoder-software',
 ];
 
-const PLAYBACK_ROWS_TAIL_BEFORE_DRC: readonly (readonly PlaybackFocusId[])[] = [
-  ['toggle-prefer-default-audio'],
+const PLAYBACK_ROWS_CORE: readonly (readonly PlaybackFocusId[])[] = [
   ['toggle-filter-sdh'],
   ['toggle-prefer-hevc-dv'],
-  ['deinterlace-off', 'deinterlace-auto', 'deinterlace-bwdif'],
   ['toggle-pitch-lock'],
   ['toggle-audio-normalization'],
-  ['osd-time-total', 'osd-time-remaining', 'osd-time-endsAt'],
-  ['oled-0', 'oled-5', 'oled-10', 'oled-15', 'oled-30'],
-  [
-    'still-watching-0',
-    'still-watching-60',
-    'still-watching-120',
-    'still-watching-180',
-    'still-watching-240',
-  ],
-  ['afr-off', 'afr-seamless', 'afr-always'],
-  ['toggle-auto-dynamic-range'],
 ];
 
 const PLAYBACK_NIGHT_DRC_ROW: readonly PlaybackFocusId[] = [
@@ -280,22 +199,9 @@ const PLAYBACK_NIGHT_DRC_ROW: readonly PlaybackFocusId[] = [
   'night-drc-night',
 ];
 
-const PLAYBACK_ROWS_TAIL_AFTER_DRC: readonly (readonly PlaybackFocusId[])[] = [
-  [
-    'delay-bucket-23.976',
-    'delay-bucket-24',
-    'delay-bucket-25',
-    'delay-bucket-29.97',
-    'delay-bucket-30',
-    'delay-bucket-50',
-    'delay-bucket-59.94',
-    'delay-bucket-60',
-  ],
-  ['delay-stepper'],
+const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
+  ['osd-time-total', 'osd-time-remaining', 'osd-time-endsAt'],
   ['toggle-auto-play-next'],
-  ['toggle-skip-back-subtitles'],
-  ['toggle-group-vod-versions'],
-  ['audio-device-auto'],
 ];
 
 const PLAYBACK_EXTERNAL_PLAYER_ROW: readonly PlaybackFocusId[] = [
@@ -311,9 +217,9 @@ const buildPlaybackRows = (
 ): readonly (readonly PlaybackFocusId[])[] => [
   ...PLAYBACK_ROWS_HEAD,
   ...(showAndroidDecoder ? [PLAYBACK_DECODER_ROW] : []),
-  ...PLAYBACK_ROWS_TAIL_BEFORE_DRC,
+  ...PLAYBACK_ROWS_CORE,
   ...(showNightModeDrc ? [PLAYBACK_NIGHT_DRC_ROW] : []),
-  ...PLAYBACK_ROWS_TAIL_AFTER_DRC,
+  ...PLAYBACK_ROWS_TAIL,
   ...(showExternalPlayer ? [PLAYBACK_EXTERNAL_PLAYER_ROW] : []),
 ];
 
@@ -334,23 +240,10 @@ const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
   ['live-mode-favorites', 'live-mode-channels', 'live-mode-epg'],
   ['epg-span-2', 'epg-span-3', 'epg-span-6'],
   ['epg-density-compact', 'epg-density-comfortable', 'epg-density-cinematic'],
-  ['toggle-epg-genre-tints'],
   ['toggle-epg-show-clock'],
-  [
-    'catalog-refresh-0',
-    'catalog-refresh-6',
-    'catalog-refresh-12',
-    'catalog-refresh-24',
-    'catalog-refresh-48',
-  ],
-  ['guide-refresh-0', 'guide-refresh-6', 'guide-refresh-12', 'guide-refresh-24'],
+  ['catalog-refresh-dropdown', 'catalog-refresh-now'],
+  ['guide-refresh-dropdown', 'guide-refresh-now'],
   ['channel-switch-instant', 'channel-switch-preview'],
-  ['logo-backdrop-plate', 'logo-backdrop-invert', 'logo-backdrop-off'],
-  ['toggle-source-badges'],
-  ['toggle-two-step-preview'],
-  ['toggle-clean-titles'],
-  ['toggle-collapse-variants'],
-  ['open-channel-management'],
 ];
 
 const PREFERENCE_SECTIONS: readonly PreferenceSettingsSection[] = [
@@ -364,11 +257,12 @@ function getSectionRows(
   showNightModeDrc: boolean,
   showExternalPlayer: boolean,
   includeTvDisplayRows: boolean,
+  showConfirmExitOnBack: boolean,
   homeLayout?: readonly HomeLayoutSectionPref[],
 ): Readonly<Record<PreferenceSettingsSection, readonly (readonly string[])[]>> {
   const playbackKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}`;
   return {
-    appearance: buildAppearanceRows(includeTvDisplayRows, homeLayout),
+    appearance: buildAppearanceRows(includeTvDisplayRows, showConfirmExitOnBack, homeLayout),
     playback: PLAYBACK_ROWS_CACHE[playbackKey] ?? PLAYBACK_ROWS_DEFAULT,
     liveTv: LIVE_TV_ROWS,
   };
@@ -388,6 +282,7 @@ function createSettingsFocusStore(
   showNightModeDrc: boolean,
   showExternalPlayer: boolean,
   includeTvDisplayRows: boolean,
+  showConfirmExitOnBack: boolean,
   homeLayout?: readonly HomeLayoutSectionPref[],
 ): FocusStore {
   const initialIdx = Math.max(0, SETTINGS_SECTIONS.indexOf(initialSection));
@@ -396,6 +291,7 @@ function createSettingsFocusStore(
     showNightModeDrc,
     showExternalPlayer,
     includeTvDisplayRows,
+    showConfirmExitOnBack,
     homeLayout,
   );
   const sectionLists = PREFERENCE_SECTIONS.flatMap((sec) =>
@@ -438,7 +334,7 @@ export interface UseTvSettingsNavigationOptions {
   readonly section: SettingsSection;
   readonly onSectionChange: (next: SettingsSection) => void;
   readonly onActivateControl?: (section: PreferenceSettingsSection, controlId: string) => void;
-  /** Optional left/right D-pad adjustment handler for inline steppers (e.g. per-refresh-rate delay `#115`). */
+  /** Optional left/right D-pad adjustment handler (e.g. Home layout section reorder). */
   readonly onAdjustControl?: (
     section: PreferenceSettingsSection,
     controlId: string,
@@ -453,6 +349,8 @@ export interface UseTvSettingsNavigationOptions {
   readonly showNightModeDrc?: boolean;
   /** Whether the mobile External Player row is rendered in Playback settings (`#406`). */
   readonly showExternalPlayer?: boolean;
+  /** Whether the Android-only Confirm Exit on Back row is rendered in Appearance settings. */
+  readonly showConfirmExitOnBack?: boolean;
   /** When `true`, keeps the current Settings pane (`'nav'` | `'content'`) while `isActiveScope` temporarily blurs for a root overlay. */
   readonly preservePaneOnBlur?: boolean;
   /** Current Home screen section order/visibility so TV Appearance focus matches the rendered `HomeLayoutEditor` order. */
@@ -488,6 +386,7 @@ export function useTvSettingsNavigation({
   showAndroidDecoder = Platform.OS === 'android',
   showNightModeDrc = Platform.OS === 'android',
   showExternalPlayer = Platform.OS === 'android' || (Platform.OS === 'ios' && !Platform.isTV),
+  showConfirmExitOnBack = Platform.OS === 'android',
   preservePaneOnBlur = false,
   homeLayout,
 }: UseTvSettingsNavigationOptions): TvSettingsNavigationState {
@@ -503,12 +402,13 @@ export function useTvSettingsNavigation({
     showNightModeDrc,
     showExternalPlayer,
     isTv,
+    showConfirmExitOnBack,
     normalizedHomeLayout,
   );
   const sectionRowsRef = useRef(sectionRows);
   sectionRowsRef.current = sectionRows;
   const storeRef = useRef<FocusStore | null>(null);
-  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}:${isTv ? '1' : '0'}:${isHomeLayoutCustomized ? '1' : '0'}`;
+  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}:${isTv ? '1' : '0'}:${showConfirmExitOnBack ? '1' : '0'}:${isHomeLayoutCustomized ? '1' : '0'}`;
   const storeConfigKeyRef = useRef(storeConfigKey);
   if (storeRef.current === null || storeConfigKeyRef.current !== storeConfigKey) {
     storeConfigKeyRef.current = storeConfigKey;
@@ -518,6 +418,7 @@ export function useTvSettingsNavigation({
       showNightModeDrc,
       showExternalPlayer,
       isTv,
+      showConfirmExitOnBack,
       normalizedHomeLayout,
     );
   }
@@ -667,18 +568,6 @@ export function useTvSettingsNavigation({
         Math.max(0, currentRowItems.length - 1),
       );
       const activeControlId = currentRowItems[currentCol];
-      if (
-        activeControlId === 'delay-stepper' &&
-        (event.kind === 'press' || event.kind === 'repeat') &&
-        (event.key === 'left' || event.key === 'right')
-      ) {
-        onAdjustControlRef.current?.(
-          activeSection,
-          activeControlId,
-          event.key === 'right' ? 1 : -1,
-        );
-        return true;
-      }
       if (
         activeSection === 'appearance' &&
         activeControlId !== undefined &&
