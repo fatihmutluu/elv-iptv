@@ -340,12 +340,13 @@ export function createDesktopDownloadManager(
         await reader.cancel().catch(() => undefined);
         reader = null;
       }
+      const reason = job.reason;
       if (writeStream !== null) {
-        await closeWriteStream(writeStream, true);
+        const discard = reason === 'cancel' || reason === 'remove';
+        await closeWriteStream(writeStream, discard);
         writeStream = null;
       }
 
-      const reason = job.reason;
       if (reason === 'remove') {
         await safeUnlink(partPath);
         await safeUnlink(finalPath);
