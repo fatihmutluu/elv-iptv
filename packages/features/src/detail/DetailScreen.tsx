@@ -1,4 +1,4 @@
-import type { CatalogService, EpisodeRow, ItemRow } from '@elv/data';
+import type { CatalogService, EpisodeRow, ItemRow, RatingValue } from '@elv/data';
 import { computeDownloadProgressRatio, isPlayableDownload } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import {
@@ -203,6 +203,10 @@ export function DetailScreen({
 
   const handleToggleMyList = useCallback(() => void data.toggleMyList(), [data.toggleMyList]);
   const handleToggleWatched = useCallback(() => void data.toggleWatched(), [data.toggleWatched]);
+  const handleToggleRating = useCallback(
+    (next: RatingValue) => void data.toggleRating(next),
+    [data.toggleRating],
+  );
 
   const handlePressEpisode = useCallback(
     (episode: EpisodeRow, index: number) => {
@@ -422,9 +426,13 @@ export function DetailScreen({
     [contextMenu, data.backdropUri, data.title, downloads, i18n, onPlay, target.sourceId],
   );
 
-  const heroActionSlots = useMemo<readonly ('mylist' | 'watched' | 'download' | 'collections')[]>(
+  const heroActionSlots = useMemo<
+    readonly ('mylist' | 'like' | 'dislike' | 'watched' | 'download' | 'collections')[]
+  >(
     () => [
       'mylist',
+      'like',
+      'dislike',
       ...(target.kind === 'movie' ? (['watched'] as const) : []),
       ...(showMovieDownload ? (['download'] as const) : []),
       ...(hasCollections ? (['collections'] as const) : []),
@@ -482,6 +490,8 @@ export function DetailScreen({
       if (rowId === 'hero-actions') {
         const slot = heroActionSlots[colIndex];
         if (slot === 'mylist') void data.toggleMyList();
+        else if (slot === 'like') void data.toggleRating('like');
+        else if (slot === 'dislike') void data.toggleRating('dislike');
         else if (slot === 'watched') void data.toggleWatched();
         else if (slot === 'download') handlePressMovieDownload();
         else if (slot === 'collections') setCollectionPickerOpen(true);
@@ -524,6 +534,7 @@ export function DetailScreen({
       data.retrySeasons,
       data.selectSeason,
       data.toggleMyList,
+      data.toggleRating,
       data.toggleWatched,
       episodeChunks,
       episodeIndexOffset,
@@ -658,6 +669,7 @@ export function DetailScreen({
           {...(target.technicalMeta !== undefined ? { technicalMeta: target.technicalMeta } : {})}
           seasonsCount={seasons.length}
           inMyList={data.inMyList}
+          userRating={data.userRating}
           watched={data.movieProgress?.watched === true}
           primaryAction={primaryAction}
           {...(activeVersion !== undefined && data.versions.length > 1
@@ -677,6 +689,7 @@ export function DetailScreen({
           onBack={onBack}
           onPlayPrimary={handlePlayPrimary}
           onToggleMyList={handleToggleMyList}
+          onToggleRating={handleToggleRating}
           onToggleWatched={handleToggleWatched}
           isTv={isTv}
           isPortrait={isPortrait}

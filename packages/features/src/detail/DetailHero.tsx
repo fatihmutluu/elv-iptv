@@ -1,4 +1,4 @@
-import type { VodVersionOption } from '@elv/data';
+import type { RatingValue, VodVersionOption } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import {
   ArtworkImage,
@@ -31,6 +31,8 @@ import {
 export type DetailHeroFocusSlot =
   | 'back'
   | 'mylist'
+  | 'like'
+  | 'dislike'
   | 'watched'
   | 'download'
   | 'collections'
@@ -62,6 +64,7 @@ export interface DetailHeroProps {
   readonly technicalMeta?: DetailTechnicalMeta;
   readonly seasonsCount: number;
   readonly inMyList: boolean;
+  readonly userRating?: RatingValue | null;
   readonly watched: boolean;
   readonly primaryAction: PrimaryPlayAction;
   readonly versions?: readonly VodVersionOption[];
@@ -77,6 +80,7 @@ export interface DetailHeroProps {
   readonly onBack: () => void;
   readonly onPlayPrimary: () => void;
   readonly onToggleMyList: () => void;
+  readonly onToggleRating?: (next: RatingValue) => void;
   readonly onToggleWatched: () => void;
   readonly isTv: boolean;
   readonly isPortrait: boolean;
@@ -112,6 +116,7 @@ function DetailHeroInner({
   technicalMeta,
   seasonsCount,
   inMyList,
+  userRating = null,
   watched,
   primaryAction,
   versions,
@@ -127,6 +132,7 @@ function DetailHeroInner({
   onBack,
   onPlayPrimary,
   onToggleMyList,
+  onToggleRating,
   onToggleWatched,
   isTv,
   isPortrait,
@@ -281,13 +287,41 @@ function DetailHeroInner({
             <View style={[styles.iconRow, { gap: theme.spacing.sm }]}>
               <IconButton
                 testID="detail-mylist"
-                icon={inMyList ? 'check' : 'plus'}
+                icon={inMyList ? 'starFilled' : 'star'}
                 active={inMyList}
                 accessibilityLabel={inMyList ? i18n.t('home.inMyList') : i18n.t('home.addToList')}
                 focusable={!isTv}
                 focused={isTv && focusedSlot === 'mylist'}
                 onPress={onToggleMyList}
               />
+              {onToggleRating !== undefined ? (
+                <>
+                  <IconButton
+                    testID="detail-like"
+                    icon={userRating === 'like' ? 'likeFilled' : 'like'}
+                    active={userRating === 'like'}
+                    accessibilityLabel={
+                      userRating === 'like' ? i18n.t('rating.clearLike') : i18n.t('rating.like')
+                    }
+                    focusable={!isTv}
+                    focused={isTv && focusedSlot === 'like'}
+                    onPress={() => onToggleRating('like')}
+                  />
+                  <IconButton
+                    testID="detail-dislike"
+                    icon={userRating === 'dislike' ? 'dislikeFilled' : 'dislike'}
+                    active={userRating === 'dislike'}
+                    accessibilityLabel={
+                      userRating === 'dislike'
+                        ? i18n.t('rating.clearDislike')
+                        : i18n.t('rating.dislike')
+                    }
+                    focusable={!isTv}
+                    focused={isTv && focusedSlot === 'dislike'}
+                    onPress={() => onToggleRating('dislike')}
+                  />
+                </>
+              ) : null}
               {kind === 'movie' ? (
                 <IconButton
                   testID="detail-watched"

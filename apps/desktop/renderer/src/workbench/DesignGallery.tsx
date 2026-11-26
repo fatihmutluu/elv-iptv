@@ -234,7 +234,7 @@ export function DesignGallery(): ReactElement {
                     }}
                   />
                   <IconButton
-                    icon={inMyList ? 'check' : 'plus'}
+                    icon={inMyList ? 'starFilled' : 'star'}
                     accessibilityLabel={copy.myList}
                     active={inMyList}
                     focused={tvMode && tvFocusId === 'hero-list'}

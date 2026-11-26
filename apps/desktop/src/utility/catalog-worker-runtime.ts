@@ -491,6 +491,10 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'clearTrackPreference':
       case 'recordRecentChannel':
       case 'listRecentChannels':
+      case 'setRating':
+      case 'getRating':
+      case 'listRatings':
+      case 'listRatingMap':
         return executeUserStateRpcCall(service, call, sanitizeDisplayText);
       case 'listProfiles':
         return service.listProfiles ? service.listProfiles() : [];

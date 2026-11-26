@@ -163,7 +163,9 @@ function AppRoot() {
     () =>
       createTvMobileSyncPorts({
         secretStore: syncSecretStore,
-        getServerUrl: () => syncPrefsRef.current.syncServerUrl,
+        getServerUrl: () =>
+          syncPrefsRef.current.syncServerUrl.trim() ||
+          (typeof process !== 'undefined' ? (process.env.EXPO_PUBLIC_SYNC_SERVER_URL ?? '') : ''),
         getPreferences: () => syncPrefsRef.current,
         getSyncablePreferences: () => extractSyncablePreferences(latestPrefsRef.current),
         applyInitialPreferences: async (patch) => {

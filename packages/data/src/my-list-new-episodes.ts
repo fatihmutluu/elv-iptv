@@ -36,6 +36,8 @@ export interface RefreshMyListNewEpisodesOptions {
   readonly cooldownMs?: number;
   readonly maxSeries?: number;
   readonly force?: boolean;
+  /** Optional additional series keys (e.g. downloaded series) whose episodes should be refreshed without enrolling them in My List new-episode detection. */
+  readonly extraSeriesKeys?: readonly string[];
 }
 
 /** Result of {@link CatalogService.refreshMyListNewEpisodes}. */

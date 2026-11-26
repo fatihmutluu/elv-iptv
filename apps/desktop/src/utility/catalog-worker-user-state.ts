@@ -27,7 +27,11 @@ export type CatalogUserStateRpcCall = Extract<
       | 'saveTrackPreference'
       | 'clearTrackPreference'
       | 'recordRecentChannel'
-      | 'listRecentChannels';
+      | 'listRecentChannels'
+      | 'setRating'
+      | 'getRating'
+      | 'listRatings'
+      | 'listRatingMap';
   }
 >;
 
@@ -132,5 +136,21 @@ export async function executeUserStateRpcCall(
       return service.listRecentChannels
         ? service.listRecentChannels(call.limit, call.profileId, call.opts)
         : [];
+    case 'setRating':
+      return service.setRating
+        ? service.setRating(
+            {
+              ...call.input,
+              title: sanitizeDisplayText(call.input.title),
+            },
+            call.value,
+          )
+        : err(elvError('storage', 'unsupported'));
+    case 'getRating':
+      return service.getRating ? service.getRating(call.itemKey, call.profileId) : null;
+    case 'listRatings':
+      return service.listRatings ? service.listRatings(call.opts) : [];
+    case 'listRatingMap':
+      return service.listRatingMap ? service.listRatingMap(call.profileId) : {};
   }
 }

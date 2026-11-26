@@ -3619,3 +3619,99 @@ msgstr "New episodes"
 
 msgid "context.dismissNewEpisode"
 msgstr "Dismiss"
+
+msgid "nav.library"
+msgstr "Library"
+
+msgid "library.title"
+msgstr "Library"
+
+msgid "library.tabFollowing"
+msgstr "Following"
+
+msgid "library.tabLikes"
+msgstr "Likes"
+
+msgid "library.tabWatched"
+msgstr "Watched"
+
+msgid "library.tabDownloads"
+msgstr "Downloads"
+
+msgid "library.railLive"
+msgstr "Live TV"
+
+msgid "library.railSeries"
+msgstr "Series"
+
+msgid "library.railMovies"
+msgstr "Movies"
+
+msgid "library.railCollections"
+msgstr "Collections"
+
+msgid "library.railLiked"
+msgstr "Liked"
+
+msgid "library.railDisliked"
+msgstr "Disliked"
+
+msgid "library.railWatchedMovies"
+msgstr "Watched movies"
+
+msgid "library.railWatchedSeries"
+msgstr "Watched series"
+
+msgid "library.railDownloadedMovies"
+msgstr "Downloaded movies"
+
+msgid "library.railDownloadedSeries"
+msgstr "Downloaded series"
+
+msgid "library.episodesDownloaded"
+msgstr "{downloaded} / {total} episodes downloaded"
+
+msgid "library.episodesDownloadedUnknownTotal"
+msgstr "{downloaded} episodes downloaded"
+
+msgid "library.seeAll"
+msgstr "See all"
+
+msgid "library.backToTab"
+msgstr "Back"
+
+msgid "library.emptyFollowingTitle"
+msgstr "Nothing followed yet"
+
+msgid "library.emptyFollowingBody"
+msgstr "Star live channels, series, or movies to keep them together here."
+
+msgid "library.emptyLikesTitle"
+msgstr "No ratings yet"
+
+msgid "library.emptyLikesBody"
+msgstr "Rate movies or series from their detail page or context menu."
+
+msgid "library.emptyWatchedTitle"
+msgstr "Nothing watched yet"
+
+msgid "library.emptyWatchedBody"
+msgstr "Movies and series you finish watching will appear here."
+
+msgid "rating.like"
+msgstr "Like"
+
+msgid "rating.liked"
+msgstr "Liked"
+
+msgid "rating.dislike"
+msgstr "Dislike"
+
+msgid "rating.disliked"
+msgstr "Disliked"
+
+msgid "rating.clearLike"
+msgstr "Remove like"
+
+msgid "rating.clearDislike"
+msgstr "Remove dislike"

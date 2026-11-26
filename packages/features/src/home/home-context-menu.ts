@@ -1,3 +1,4 @@
+import type { RatingValue } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import type { ContextMenuItem } from '@elv/ui-kit';
 import type { HomeRailId } from './HomeRail';
@@ -10,6 +11,7 @@ export interface BuildHomeCardContextMenuInput {
   readonly index: number;
   readonly isFavorite: boolean;
   readonly isWatched: boolean;
+  readonly currentRating?: RatingValue | null;
   readonly isDownloaded?: boolean;
   readonly t: AppI18n['t'];
   readonly onPlay: (entry: HomeRailEntry, index: number) => void;
@@ -19,6 +21,7 @@ export interface BuildHomeCardContextMenuInput {
   readonly onMarkNewEpisodeWatched?: (entry: HomeRailEntry) => void;
   readonly onToggleFavorite?: (entry: HomeRailEntry) => void;
   readonly onToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
+  readonly onToggleRating?: (entry: HomeRailEntry, next: RatingValue) => void;
   readonly onOpenMultiView?: (entry: HomeRailEntry, index: number) => void;
   readonly onOpenPopout?: (entry: HomeRailEntry, index: number) => void;
   readonly onDownload?: (entry: HomeRailEntry) => void;
@@ -35,6 +38,7 @@ export function buildHomeCardContextMenuItems({
   index,
   isFavorite,
   isWatched,
+  currentRating = null,
   isDownloaded = false,
   t,
   onPlay,
@@ -44,12 +48,32 @@ export function buildHomeCardContextMenuItems({
   onMarkNewEpisodeWatched,
   onToggleFavorite,
   onToggleWatched,
+  onToggleRating,
   onOpenMultiView,
   onOpenPopout,
   onDownload,
   onDeleteDownload,
 }: BuildHomeCardContextMenuInput): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
+  const pushRatingActions = () => {
+    if (!onToggleRating || (entry.kind !== 'movie' && entry.kind !== 'series')) return;
+    items.push(
+      {
+        id: 'like',
+        label: t(currentRating === 'like' ? 'rating.clearLike' : 'rating.like'),
+        icon: currentRating === 'like' ? 'likeFilled' : 'like',
+        testID: 'home-context-like',
+        onSelect: () => onToggleRating(entry, 'like'),
+      },
+      {
+        id: 'dislike',
+        label: t(currentRating === 'dislike' ? 'rating.clearDislike' : 'rating.dislike'),
+        icon: currentRating === 'dislike' ? 'dislikeFilled' : 'dislike',
+        testID: 'home-context-dislike',
+        onSelect: () => onToggleRating(entry, 'dislike'),
+      },
+    );
+  };
   const pushDownloadAction = () => {
     if (entry.kind !== 'movie') return;
     if (isDownloaded && onDeleteDownload) {
@@ -113,6 +137,7 @@ export function buildHomeCardContextMenuItems({
         onSelect: () => onToggleWatched(entry, false),
       });
     }
+    pushRatingActions();
     pushDownloadAction();
     return items;
   }
@@ -219,6 +244,7 @@ export function buildHomeCardContextMenuItems({
       onSelect: () => onToggleFavorite(entry),
     });
   }
+  pushRatingActions();
   if (onToggleWatched) {
     items.push({
       id: 'watched',

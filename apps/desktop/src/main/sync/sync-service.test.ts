@@ -717,4 +717,56 @@ describe('createDesktopSyncService (#26, #458)', () => {
     upgraded.dispose();
     deviceA.dispose();
   });
+
+  it('reverts to initialServerUrl when setServerUrl is cleared to empty, and does not silently fall back on invalid non-empty URL', async () => {
+    const server = makeMockServer();
+    const secrets = makeSecretStore();
+    const service = createDesktopSyncService({
+      secretStore: secrets.store,
+      platform: 'desktop-win32',
+      appVersion: '1.0.0',
+      initialServerUrl: 'https://default-sync.example.test',
+      fetchFn: server.fetchFn,
+      clock: { now: () => 1_700_000_000_000 },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+    });
+
+    // Set custom URL -> routes requests to custom URL
+    service.setServerUrl('https://custom-sync.example.test');
+    const customFb = await service.submitFeedback({
+      category: 'playback_issue',
+      message: 'Custom server test',
+      includeDiagnostics: false,
+    });
+    expect(customFb.ok).toBe(true);
+    expect(server.calls[server.calls.length - 1]?.url).toBe(
+      'https://custom-sync.example.test/v1/feedback',
+    );
+
+    // Clearing to empty string reverts to initialServerUrl
+    service.setServerUrl('   ');
+    const revertedFb = await service.submitFeedback({
+      category: 'playback_issue',
+      message: 'Reverted server test',
+      includeDiagnostics: false,
+    });
+    expect(revertedFb.ok).toBe(true);
+    expect(server.calls[server.calls.length - 1]?.url).toBe(
+      'https://default-sync.example.test/v1/feedback',
+    );
+
+    // Invalid non-empty URL must NOT silently fall back to initialServerUrl
+    const callsBeforeInvalid = server.calls.length;
+    service.setServerUrl('not-a-valid-url');
+    const invalidFb = await service.submitFeedback({
+      category: 'playback_issue',
+      message: 'Should fail cleanly',
+      includeDiagnostics: false,
+    });
+    expect(invalidFb).toEqual({ ok: false, errorCode: 'server_not_configured' });
+    expect(server.calls).toHaveLength(callsBeforeInvalid);
+
+    service.dispose();
+  });
 });

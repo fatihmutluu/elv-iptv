@@ -1,4 +1,4 @@
-import type { ItemRow } from '@elv/data';
+import type { ItemRow, RatingValue } from '@elv/data';
 import type { ContextMenuItem } from '@elv/ui-kit';
 import { type DetailTarget, detailTargetFromItem } from '../shared';
 
@@ -49,24 +49,28 @@ export function buildSearchVodContextMenuItems({
   item,
   isFavorite,
   isWatched,
+  currentRating = null,
   isDownloaded = false,
   i18n,
   onOpenDetail,
   onPlayVod,
   onToggleFavorite,
   onToggleWatched,
+  onToggleRating,
   onDownload,
   onDeleteDownload,
 }: {
   readonly item: ItemRow;
   readonly isFavorite: boolean;
   readonly isWatched: boolean;
+  readonly currentRating?: RatingValue | null;
   readonly isDownloaded?: boolean;
   readonly i18n: SearchContextMenuI18n;
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onPlayVod?: (item: ItemRow) => void;
   readonly onToggleFavorite?: (item: ItemRow) => void;
   readonly onToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onToggleRating?: (item: ItemRow, next: RatingValue) => void;
   readonly onDownload?: (item: ItemRow) => void;
   readonly onDeleteDownload?: (item: ItemRow) => void;
 }): ContextMenuItem[] {
@@ -103,6 +107,25 @@ export function buildSearchVodContextMenuItems({
       testID: 'context-menu-favorite',
       onSelect: () => onToggleFavorite(item),
     });
+  }
+
+  if (onToggleRating && (item.kind === 'movie' || item.kind === 'series')) {
+    items.push(
+      {
+        id: 'like',
+        label: i18n.t(currentRating === 'like' ? 'rating.clearLike' : 'rating.like'),
+        icon: currentRating === 'like' ? 'likeFilled' : 'like',
+        testID: 'context-menu-like',
+        onSelect: () => onToggleRating(item, 'like'),
+      },
+      {
+        id: 'dislike',
+        label: i18n.t(currentRating === 'dislike' ? 'rating.clearDislike' : 'rating.dislike'),
+        icon: currentRating === 'dislike' ? 'dislikeFilled' : 'dislike',
+        testID: 'context-menu-dislike',
+        onSelect: () => onToggleRating(item, 'dislike'),
+      },
+    );
   }
 
   if (onToggleWatched) {

@@ -178,7 +178,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   preferredAudioDevice: 'auto',
   androidDecoderMode: 'auto',
   collapseLiveVariants: false,
-  groupVodVersions: true,
+  groupVodVersions: false,
   uiFontFamily: 'system',
   subtitleFontFamily: 'system',
   tvClockMode: 'always',

@@ -4,6 +4,7 @@ import type {
   ItemRow,
   MyListNewEpisodeRow,
   NowNextEntry,
+  RatingValue,
   SeriesUnplayedSummary,
   SourceRow,
   UserItemKind,
@@ -19,6 +20,7 @@ import {
   useProfile,
   useSeriesUnplayedCounts,
 } from '../shared';
+import { type RatingToggleTarget, useRatingMapState } from '../shared/useCardQuickActionsState';
 import {
   applyHomeFavUpdate,
   applyHomeRemoveContinueWatching,
@@ -82,9 +84,11 @@ export interface HomeDataState extends HomeSnapshot {
   readonly nowNextByKey: ReadonlyMap<string, NowNextEntry>;
   readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
+  readonly ratingByKey: ReadonlyMap<string, RatingValue>;
   readonly refreshCollections: () => Promise<void>;
   readonly toggleMyList: (target: ToggleMyListTarget) => Promise<void>;
   readonly toggleWatched: (target: ToggleWatchedTarget, nextWatched: boolean) => Promise<void>;
+  readonly toggleRating: (target: RatingToggleTarget, next: RatingValue) => Promise<boolean>;
   readonly removeFromContinueWatching: (itemKey: string) => Promise<void>;
   readonly dismissNewEpisode: (episodeKey: string) => Promise<void>;
   readonly markNewEpisodeWatched: (entry: HomeRailEntry) => Promise<void>;
@@ -721,6 +725,12 @@ export function useHomeData({
     homeSeriesKeys,
     refreshToken + userStateVersion + unplayedTick,
   );
+  const { ratingByKey, toggleRating } = useRatingMapState({
+    catalog,
+    refreshToken,
+    userStateVersion,
+    profileKey: activeProfileId,
+  });
 
   return useMemo<HomeDataState>(
     () => ({
@@ -731,9 +741,11 @@ export function useHomeData({
       nowNextByKey,
       unplayedBySeriesKey,
       watchedOverrides,
+      ratingByKey,
       refreshCollections,
       toggleMyList,
       toggleWatched,
+      toggleRating,
       removeFromContinueWatching,
       dismissNewEpisode,
       markNewEpisodeWatched,
@@ -745,10 +757,12 @@ export function useHomeData({
       loading,
       markNewEpisodeWatched,
       nowNextByKey,
+      ratingByKey,
       refreshCollections,
       removeFromContinueWatching,
       snap,
       toggleMyList,
+      toggleRating,
       toggleWatched,
       unplayedBySeriesKey,
       watchedOverrides,

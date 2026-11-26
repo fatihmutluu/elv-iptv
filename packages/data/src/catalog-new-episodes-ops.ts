@@ -33,7 +33,10 @@ interface RefreshCandidateRow {
   series_key: string;
   source_id: string;
   last_checked_at: number;
+  isFavorite?: boolean;
 }
+
+const MAX_EXTRA_SERIES_KEYS = 200;
 
 interface NewEpisodesQueueLike {
   run<T>(
@@ -68,6 +71,7 @@ export function createCatalogNewEpisodesOpsMethods(deps: {
   playtime: NewEpisodesPlaytimeLike;
 }): CatalogNewEpisodesOpsMethods {
   const { db, clock, importDeps, queue, playtime } = deps;
+  const extraSeriesCheckedAt = new Map<string, number>();
 
   return {
     async listMyListNewEpisodes(limit, profileId, opts) {
@@ -94,7 +98,7 @@ export function createCatalogNewEpisodesOpsMethods(deps: {
 
       let checkedSeriesCount = 0;
       if (maxSeries > 0) {
-        const candidates = await db.all<RefreshCandidateRow>(
+        const favoriteRows = await db.all<RefreshCandidateRow>(
           `SELECT f.item_key AS series_key,
                   f.source_id,
                   COALESCE(b.last_checked_at, 0) AS last_checked_at
@@ -112,8 +116,48 @@ export function createCatalogNewEpisodesOpsMethods(deps: {
           [normalized],
         );
 
+        const candidates: RefreshCandidateRow[] = favoriteRows.map((row) => ({
+          ...row,
+          isFavorite: true,
+        }));
+        const seenKeys = new Set(candidates.map((row) => row.series_key));
+
+        if (opts?.extraSeriesKeys !== undefined && opts.extraSeriesKeys.length > 0) {
+          const extraKeys: string[] = [];
+          for (const rawKey of opts.extraSeriesKeys) {
+            const trimmed = rawKey.trim();
+            if (trimmed === '' || seenKeys.has(trimmed)) continue;
+            seenKeys.add(trimmed);
+            extraKeys.push(trimmed);
+            if (extraKeys.length >= MAX_EXTRA_SERIES_KEYS) break;
+          }
+          if (extraKeys.length > 0) {
+            const placeholders = extraKeys.map(() => '?').join(', ');
+            const extraRows = await db.all<{ series_key: string; source_id: string }>(
+              `SELECT s.key AS series_key, s.source_id
+                 FROM series s
+                 INNER JOIN sources src
+                   ON src.id = s.source_id
+                  AND src.deleting = 0
+                WHERE s.key IN (${placeholders})
+                  AND src.kind IN ('xtream', 'stalker')
+                ORDER BY s.key ASC`,
+              extraKeys,
+            );
+            for (const row of extraRows) {
+              candidates.push({
+                series_key: row.series_key,
+                source_id: row.source_id,
+                last_checked_at: extraSeriesCheckedAt.get(`${normalized}\0${row.series_key}`) ?? 0,
+                isFavorite: false,
+              });
+            }
+          }
+        }
+
         const stale = candidates
           .filter((c) => force || c.last_checked_at === 0 || now - c.last_checked_at >= cooldownMs)
+          .sort((a, b) => a.last_checked_at - b.last_checked_at)
           .slice(0, maxSeries);
 
         for (const item of stale) {
@@ -129,13 +173,18 @@ export function createCatalogNewEpisodesOpsMethods(deps: {
           );
           if (loaded.ok) {
             checkedSeriesCount += 1;
-            await stampMyListSeriesChecked(
-              db,
-              normalized,
-              item.series_key,
-              item.source_id,
-              clock(),
-            );
+            const checkedNow = Math.max(1, Math.round(clock()));
+            if (item.isFavorite) {
+              await stampMyListSeriesChecked(
+                db,
+                normalized,
+                item.series_key,
+                item.source_id,
+                checkedNow,
+              );
+            } else {
+              extraSeriesCheckedAt.set(`${normalized}\0${item.series_key}`, checkedNow);
+            }
           }
         }
       }

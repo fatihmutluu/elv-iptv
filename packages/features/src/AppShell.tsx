@@ -315,13 +315,14 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const playbackGuard = useMemo(() => createPlaybackGuard(stopForSource), [stopForSource]);
   useEffect(() => onPlaybackGuardReady?.(playbackGuard), [onPlaybackGuardReady, playbackGuard]);
   const handlePlay = connectionGuard.requestPlay;
+  const bumpUserState = useCallback(() => setUserStateVersion((v) => v + 1), []);
   const observedCatalog = useMemo(
     () =>
       createProfileScopedCatalog(
-        createObservedCatalog(catalog, playbackGuard, shell.syncSourcesAndBump),
+        createObservedCatalog(catalog, playbackGuard, shell.syncSourcesAndBump, bumpUserState),
         () => profileScopeRef.current,
       ),
-    [catalog, playbackGuard, shell.syncSourcesAndBump],
+    [bumpUserState, catalog, playbackGuard, shell.syncSourcesAndBump],
   );
   const stopActivePlayback = useCallback(() => {
     connectionGuard.releaseActive();
@@ -569,7 +570,6 @@ function AppShellContent(props: AppShellProps): ReactElement {
     setPlayTarget(null);
     openSources();
   }, [openSources]);
-  const bumpUserState = useCallback(() => setUserStateVersion((v) => v + 1), []);
   const waveF7b = useAppShellWaveF7b({
     catalog: observedCatalog,
     preferences,

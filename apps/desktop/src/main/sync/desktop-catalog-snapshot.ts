@@ -5,6 +5,8 @@ import {
   type FavoriteRow,
   type ItemDetailRow,
   type ItemRow,
+  type RatingRow,
+  type RatingValue,
   type SourceRow,
   secretKey,
   sourceOfKey,
@@ -18,6 +20,7 @@ import {
   type SyncCollection,
   type SyncCustomGroup,
   type SyncKeyedFlag,
+  type SyncRatingRecord,
   type SyncSourceRecord,
   type SyncWatchProgress,
   VAULT_SCHEMA_VERSION,
@@ -203,6 +206,7 @@ export function createDesktopCatalogSnapshotBridge(
           overrideRows,
           customGroupRows,
           collectionRows,
+          ratingRows,
         ] = await Promise.all([
           call<SourceRow[]>({ method: 'listSources' }).catch(() => [] as SourceRow[]),
           call<FavoriteRow[]>({
@@ -226,6 +230,10 @@ export function createDesktopCatalogSnapshotBridge(
             method: 'listCollections',
             opts: { parentalUnlocked: true },
           }).catch(() => [] as VodCollectionRecord[]),
+          call<RatingRow[]>({
+            method: 'listRatings',
+            opts: { limit: 250, parentalUnlocked: true },
+          }).catch(() => [] as RatingRow[]),
         ]);
 
         const sources: SyncSourceRecord[] = [];
@@ -324,6 +332,18 @@ export function createDesktopCatalogSnapshotBridge(
             updatedAt: prog.updatedAt,
           }));
 
+        const ratings: SyncRatingRecord[] = ratingRows.map((row) => ({
+          key: row.itemKey,
+          sourceId: row.sourceId,
+          kind: row.kind,
+          value: row.value,
+          title: row.title,
+          ...(row.logo !== null ? { logo: row.logo } : {}),
+          ...(row.year !== null ? { year: row.year } : {}),
+          ...(row.rating !== null ? { rating: row.rating } : {}),
+          updatedAt: row.updatedAt,
+        }));
+
         return {
           schemaVersion: VAULT_SCHEMA_VERSION,
           updatedAt: now(),
@@ -335,6 +355,7 @@ export function createDesktopCatalogSnapshotBridge(
           collections,
           watchProgress,
           watchedEpisodesBitfields: [],
+          ...(ratings.length > 0 ? { ratings } : {}),
         } satisfies VaultSnapshot;
       });
 
@@ -669,6 +690,49 @@ export function createDesktopCatalogSnapshotBridge(
             },
           }).catch(() => null);
           if (res?.ok) mutated = true;
+        }
+
+        // 7. Ratings (Movies & Series Like/Dislike, LWW + tombstones)
+        if (snapshot.ratings !== undefined && snapshot.ratings.length > 0) {
+          const existingRatings = await call<RatingRow[]>({
+            method: 'listRatings',
+            opts: { limit: 250, parentalUnlocked: true },
+          }).catch(() => [] as RatingRow[]);
+          const existingByKey = new Map(existingRatings.map((r) => [r.itemKey, r]));
+          for (const rec of snapshot.ratings) {
+            const existing = existingByKey.get(rec.key);
+            if (rec.deleted === true) {
+              if (existing !== undefined && rec.updatedAt >= existing.updatedAt) {
+                const cleared = await call<Result<RatingValue | null>>({
+                  method: 'setRating',
+                  input: {
+                    sourceId: existing.sourceId,
+                    itemKey: existing.itemKey,
+                    kind: existing.kind,
+                    title: existing.title,
+                  },
+                  value: null,
+                }).catch(() => null);
+                if (cleared?.ok) mutated = true;
+              }
+              continue;
+            }
+            if (existing !== undefined && rec.updatedAt <= existing.updatedAt) continue;
+            const res = await call<Result<RatingValue | null>>({
+              method: 'setRating',
+              input: {
+                sourceId: rec.sourceId,
+                itemKey: rec.key,
+                kind: rec.kind,
+                title: rec.title,
+                logo: rec.logo ?? null,
+                year: rec.year ?? null,
+                rating: rec.rating ?? null,
+              },
+              value: rec.value,
+            }).catch(() => null);
+            if (res?.ok) mutated = true;
+          }
         }
 
         if (mutated) {

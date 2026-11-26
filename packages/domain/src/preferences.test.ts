@@ -68,7 +68,7 @@ describe('preferences codec', () => {
       preferredAudioDevice: 'auto',
       androidDecoderMode: 'auto',
       collapseLiveVariants: false,
-      groupVodVersions: true,
+      groupVodVersions: false,
       uiFontFamily: 'system',
       subtitleFontFamily: 'system',
       tvClockMode: 'always',

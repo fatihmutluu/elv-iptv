@@ -86,6 +86,10 @@ export function createProfileScopedCatalog(
   const getDownload = c.getDownload?.bind(c);
   const upsertDownload = c.upsertDownload?.bind(c);
   const deleteDownload = c.deleteDownload?.bind(c);
+  const setRating = c.setRating?.bind(c);
+  const getRating = c.getRating?.bind(c);
+  const listRatings = c.listRatings?.bind(c);
+  const listRatingMap = c.listRatingMap?.bind(c);
 
   return {
     addSource: (input) => c.addSource(input),
@@ -581,6 +585,40 @@ export function createProfileScopedCatalog(
       ? {
           deleteDownload: (itemKey, profileId) =>
             deleteDownload(itemKey, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(setRating
+      ? {
+          setRating: (input, value) =>
+            setRating(
+              {
+                ...input,
+                profileId: input.profileId ?? getScope().profileId,
+              },
+              value,
+            ),
+        }
+      : {}),
+    ...(getRating
+      ? {
+          getRating: (itemKey, profileId) => getRating(itemKey, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(listRatings
+      ? {
+          listRatings: (opts) => {
+            const scope = getScope();
+            return listRatings({
+              ...opts,
+              profileId: opts?.profileId ?? scope.profileId,
+              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
+        }
+      : {}),
+    ...(listRatingMap
+      ? {
+          listRatingMap: (profileId) => listRatingMap(profileId ?? getScope().profileId),
         }
       : {}),
     ...(c.flushPendingWrites ? { flushPendingWrites: c.flushPendingWrites.bind(c) } : {}),

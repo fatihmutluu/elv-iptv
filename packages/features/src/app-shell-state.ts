@@ -13,25 +13,25 @@ import type { DiagnosticsPort } from './ports/wave-f7b-ports';
 import type { DetailTarget } from './shared';
 import type { NavDestination, NavUtility } from './shell';
 
-/** Primary top-level destination tabs (`Home`, `Live`, `Movies`, `Series`, `Downloads`). */
-export type PrimaryNavTab = 'home' | BrowseKind | 'downloads';
+/** Primary top-level destination tabs (`Home`, `Live`, `Movies`, `Series`, `Library`). */
+export type PrimaryNavTab = 'home' | BrowseKind | 'library';
 
 /** Top-level shell tab identifier. */
-export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'downloads' | 'search' | 'settings';
+export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'library' | 'search' | 'settings';
 
 function buildShellDestinations(labels: {
   readonly home: string;
   readonly live: string;
   readonly movies: string;
   readonly series: string;
-  readonly downloads: string;
+  readonly library: string;
 }): readonly NavDestination<PrimaryNavTab>[] {
   return [
     { id: 'home', label: labels.home, icon: 'home', testID: 'nav-tab-home' },
     { id: 'live', label: labels.live, icon: 'tv', testID: 'nav-tab-live' },
     { id: 'movie', label: labels.movies, icon: 'film', testID: 'nav-tab-movie' },
     { id: 'series', label: labels.series, icon: 'series', testID: 'nav-tab-series' },
-    { id: 'downloads', label: labels.downloads, icon: 'download', testID: 'nav-tab-downloads' },
+    { id: 'library', label: labels.library, icon: 'library', testID: 'nav-tab-library' },
   ];
 }
 
@@ -278,7 +278,7 @@ export function buildShellNavigation(input: {
       live: input.t('nav.live'),
       movies: input.t('nav.movies'),
       series: input.t('nav.series'),
-      downloads: input.t('nav.downloads'),
+      library: input.t('nav.library'),
     }),
     utilities: buildShellUtilities({
       searchLabel: input.t('nav.search'),
@@ -364,8 +364,26 @@ export function createObservedCatalog(
   catalog: CatalogService,
   playbackGuard: PlaybackGuard,
   syncSourcesAndBump: () => Promise<void>,
+  onUserStateMutated?: () => void,
 ): CatalogService {
   const c = catalog;
+  const wrapUserStateMutation = <Args extends unknown[], R extends { readonly ok: boolean }>(
+    fn: ((...args: Args) => Promise<R>) | undefined,
+  ): ((...args: Args) => Promise<R>) | undefined => {
+    if (fn === undefined) return undefined;
+    return async (...args: Args) => {
+      const res = await fn.apply(c, args);
+      if (res.ok) onUserStateMutated?.();
+      return res;
+    };
+  };
+  const createCollection = wrapUserStateMutation(c.createCollection);
+  const renameCollection = wrapUserStateMutation(c.renameCollection);
+  const reorderCollections = wrapUserStateMutation(c.reorderCollections);
+  const deleteCollection = wrapUserStateMutation(c.deleteCollection);
+  const addItemToCollection = wrapUserStateMutation(c.addItemToCollection);
+  const removeItemFromCollection = wrapUserStateMutation(c.removeItemFromCollection);
+  const reorderCollectionItems = wrapUserStateMutation(c.reorderCollectionItems);
   return {
     addSource: async (input) => {
       const res = await c.addSource(input);
@@ -714,10 +732,28 @@ export function createObservedCatalog(
           },
         }
       : {}),
+    ...(c.getVodEnrichment ? { getVodEnrichment: c.getVodEnrichment.bind(c) } : {}),
+    ...(c.enrichVodItem ? { enrichVodItem: c.enrichVodItem.bind(c) } : {}),
+    ...(c.listCollections ? { listCollections: c.listCollections.bind(c) } : {}),
+    ...(createCollection ? { createCollection } : {}),
+    ...(renameCollection ? { renameCollection } : {}),
+    ...(reorderCollections ? { reorderCollections } : {}),
+    ...(deleteCollection ? { deleteCollection } : {}),
+    ...(c.listCollectionItems ? { listCollectionItems: c.listCollectionItems.bind(c) } : {}),
+    ...(c.listCollectionsForItem
+      ? { listCollectionsForItem: c.listCollectionsForItem.bind(c) }
+      : {}),
+    ...(addItemToCollection ? { addItemToCollection } : {}),
+    ...(removeItemFromCollection ? { removeItemFromCollection } : {}),
+    ...(reorderCollectionItems ? { reorderCollectionItems } : {}),
     ...(c.listDownloads ? { listDownloads: c.listDownloads.bind(c) } : {}),
     ...(c.getDownload ? { getDownload: c.getDownload.bind(c) } : {}),
     ...(c.upsertDownload ? { upsertDownload: c.upsertDownload.bind(c) } : {}),
     ...(c.deleteDownload ? { deleteDownload: c.deleteDownload.bind(c) } : {}),
+    ...(c.setRating ? { setRating: c.setRating.bind(c) } : {}),
+    ...(c.getRating ? { getRating: c.getRating.bind(c) } : {}),
+    ...(c.listRatings ? { listRatings: c.listRatings.bind(c) } : {}),
+    ...(c.listRatingMap ? { listRatingMap: c.listRatingMap.bind(c) } : {}),
     close: () => c.close(),
   };
 }

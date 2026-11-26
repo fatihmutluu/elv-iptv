@@ -1,6 +1,7 @@
 import type {
   CatalogService,
   ItemRow,
+  RatingValue,
   SearchEpisodeHit,
   SearchProgrammeHit,
   SearchScope,
@@ -182,6 +183,11 @@ function SearchScreenBody({
     (item: ItemRow, currentWatched: boolean) =>
       void quickActionsState.toggleWatched(item, currentWatched),
     [quickActionsState.toggleWatched],
+  );
+
+  const handleToggleRating = useCallback(
+    (item: ItemRow, next: RatingValue) => void quickActionsState.toggleRating(item, next),
+    [quickActionsState.toggleRating],
   );
 
   const handleTuneEpgProgramme = useCallback(
@@ -504,6 +510,7 @@ function SearchScreenBody({
             progressByKey={search.progressByKey}
             favoriteKeys={quickActionsState.favoriteKeys}
             watchedOverrides={quickActionsState.watchedOverrides}
+            ratingByKey={quickActionsState.ratingByKey}
             searching={search.searching}
             hasSearched={search.hasSearched}
             padX={layout.padX}
@@ -517,6 +524,7 @@ function SearchScreenBody({
             onPlayVod={handlePlayVod}
             onToggleFavorite={handleToggleFavorite}
             onToggleWatched={handleToggleWatched}
+            onToggleRating={handleToggleRating}
             onSelectEpg={handleSelectEpg}
             onOpenDetail={onOpenDetail}
             onSelectEpisode={handleSelectEpisode}

@@ -95,6 +95,7 @@ import {
   queryLiveVariants,
   type VodVersionOption,
 } from './queries-variants';
+import { type CatalogRatingsOpsMethods, createCatalogRatingsOpsMethods } from './ratings-repo';
 import { listRecentChannels, recordRecentChannel } from './recent-channels-repo';
 import { latestImportHealth, type SourceImportHealth } from './runs';
 import {
@@ -208,7 +209,8 @@ export interface CatalogService
     Partial<CatalogFailoverOpsMethods>,
     Partial<CatalogCollectionsOpsMethods>,
     Partial<CatalogDownloadsOpsMethods>,
-    Partial<CatalogNewEpisodesOpsMethods> {
+    Partial<CatalogNewEpisodesOpsMethods>,
+    Partial<CatalogRatingsOpsMethods> {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
@@ -460,6 +462,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     queue,
     playtime,
   });
+  const ratingsOpsMethods = createCatalogRatingsOpsMethods({ db, clock, playtime, syncUserData });
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
@@ -777,6 +780,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...collectionsOpsMethods,
     ...downloadsOpsMethods,
     ...newEpisodesOpsMethods,
+    ...ratingsOpsMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

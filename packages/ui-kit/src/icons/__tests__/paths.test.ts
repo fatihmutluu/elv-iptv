@@ -55,6 +55,9 @@ const EXPECTED_ICON_NAMES: readonly IconName[] = [
   'miniplayer',
   'popout',
   'dock',
+  'library',
+  'likeFilled',
+  'dislikeFilled',
 ];
 
 const FILLED_ICONS: ReadonlySet<IconName> = new Set([
@@ -65,6 +68,8 @@ const FILLED_ICONS: ReadonlySet<IconName> = new Set([
   'starFilled',
   'skipPrev',
   'skipNext',
+  'likeFilled',
+  'dislikeFilled',
 ]);
 
 function assertValidShape(shape: IconShape): void {

@@ -1,4 +1,10 @@
-import type { ItemRow, ItemSortOrder, SeriesUnplayedSummary, WatchProgressRow } from '@elv/data';
+import type {
+  ItemRow,
+  ItemSortOrder,
+  RatingValue,
+  SeriesUnplayedSummary,
+  WatchProgressRow,
+} from '@elv/data';
 import {
   type ContextMenuAnchor,
   Icon,
@@ -33,6 +39,7 @@ interface GridPosterSlotProps {
   readonly progress: WatchProgressRow | undefined;
   readonly isFavorite: boolean;
   readonly watchedOverride: boolean | undefined;
+  readonly currentRating: RatingValue | null;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly watchedLabel: string;
   readonly formatQuickPlay: (title: string) => string;
@@ -48,6 +55,7 @@ interface GridPosterSlotProps {
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
 }
 
 const GridPosterSlot = memo(function GridPosterSlotInner({
@@ -57,6 +65,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
   progress,
   isFavorite,
   watchedOverride,
+  currentRating,
   unplayedSummary,
   watchedLabel,
   formatQuickPlay,
@@ -72,6 +81,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onQuickToggleRating,
 }: GridPosterSlotProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -100,12 +110,14 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
           categoryId,
           isFavorite,
           isWatched: effectiveWatched,
+          currentRating,
           isDownloaded: canDownloadMovie && hasManagedDownload(downloads.byItemKey.get(item.key)),
           i18n,
           onOpenDetail,
           ...(onQuickPlay !== undefined ? { onQuickPlay } : {}),
           ...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {}),
           ...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {}),
+          ...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {}),
           ...(canDownloadMovie
             ? {
                 onDownload: (it: ItemRow) => {
@@ -127,6 +139,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
     },
     [
       categoryId,
+      currentRating,
       downloads,
       effectiveWatched,
       i18n,
@@ -135,6 +148,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
       onOpenDetail,
       onQuickPlay,
       onQuickToggleFavorite,
+      onQuickToggleRating,
       onQuickToggleWatched,
       openContextMenu,
     ],
@@ -239,6 +253,7 @@ export interface GridRowViewProps {
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
   readonly favoriteKeys?: ReadonlySet<string>;
   readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
   readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly watchedLabel: string;
   readonly layout: CatalogLayoutMetrics;
@@ -247,6 +262,7 @@ export interface GridRowViewProps {
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
 }
 
 /**
@@ -261,6 +277,7 @@ export const GridRowView = memo(function GridRowViewInner({
   progressByKey,
   favoriteKeys,
   watchedOverrides,
+  ratingByKey,
   unplayedBySeriesKey,
   watchedLabel,
   layout,
@@ -269,6 +286,7 @@ export const GridRowView = memo(function GridRowViewInner({
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onQuickToggleRating,
 }: GridRowViewProps): ReactElement {
   const i18n = useI18n();
   const posterHeight = Math.round(layout.gridCardWidth * 1.5);
@@ -305,6 +323,7 @@ export const GridRowView = memo(function GridRowViewInner({
             progress={item ? progressByKey.get(item.key) : undefined}
             isFavorite={item ? (favoriteKeys?.has(item.key) ?? false) : false}
             watchedOverride={item ? watchedOverrides?.get(item.key) : undefined}
+            currentRating={item ? (ratingByKey?.get(item.key) ?? null) : null}
             unplayedSummary={item ? unplayedBySeriesKey?.get(item.key) : undefined}
             watchedLabel={watchedLabel}
             formatQuickPlay={formatQuickPlay}
@@ -320,6 +339,7 @@ export const GridRowView = memo(function GridRowViewInner({
             {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
             {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
             {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
+            {...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {})}
           />
         );
       })}

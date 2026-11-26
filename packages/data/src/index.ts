@@ -48,6 +48,18 @@ export * from './profiles-repo';
 export * from './queries';
 export * from './queries-variants';
 export {
+  type CatalogRatingsOpsMethods,
+  getItemRating,
+  type ListRatingsOptions,
+  listRatingMap,
+  listRatings,
+  type RatingKind,
+  type RatingRow,
+  type RatingValue,
+  type SetRatingInput,
+  setItemRating,
+} from './ratings-repo';
+export {
   DEFAULT_RECENT_CHANNELS_LIMIT,
   isSafeRecentChannelKey,
   listRecentChannels,

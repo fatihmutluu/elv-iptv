@@ -14,8 +14,8 @@ import type { AppTab, CatalogMemoryMap } from './app-shell-state';
 import type { WaveF9Controller } from './app-shell-wave-f9';
 import { CatalogDiscoveryScreen, type CatalogTabMemory } from './catalog';
 import { DetailScreen } from './detail';
-import { DownloadsScreen } from './downloads';
 import { HomeScreen } from './home';
+import { LibraryScreen } from './library';
 import { LiveScreen, type LiveTabMemory } from './live';
 import { ThirdPartyNoticesScreen } from './notices';
 import type { LanPairingPort } from './ports/lan-pairing-host';
@@ -211,15 +211,19 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
     );
   }
 
-  if (p.activeTab === 'downloads') {
+  if (p.activeTab === 'library') {
     return (
-      <DownloadsScreen
+      <LibraryScreen
         key={p.contentIsolationKey}
+        sources={p.sources}
+        userStateVersion={p.effectiveUserStateVersion}
+        isPlaybackActive={p.suppressEmbeddedPreview === true}
         onPlay={handleStagePlay}
-        {...(p.onOpenMultiView !== undefined ? { onOpenMultiView: p.onOpenMultiView } : {})}
         onOpenDetail={p.onOpenDetail}
-        onFocusTopNav={p.onFocusTopNav}
-        isActiveScope={p.isActiveScope}
+        {...(p.onOpenMultiView !== undefined ? { onOpenMultiView: p.onOpenMultiView } : {})}
+        {...(p.onOpenPopout !== undefined ? { onOpenPopout: p.onOpenPopout } : {})}
+        onOpenTab={p.onSelectTab}
+        {...stageProps}
       />
     );
   }

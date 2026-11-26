@@ -100,7 +100,6 @@ import {
   isPinString,
   isPositiveId,
   isRecord,
-  isRefreshMyListNewEpisodesOptions,
   isSafeInt,
   isSafeRecentChannelKey,
   isSaveProgressInput,
@@ -119,6 +118,12 @@ import {
   MAX_ID_CHARS,
   MAX_ITEM_KEY_CHARS,
 } from './catalog-ipc-guards.ts';
+import {
+  type CatalogBridgeRatingsOps,
+  type CatalogRatingsOpsRpcCall,
+  isRatingsOpsRpcCall,
+  isRefreshMyListNewEpisodesOptions,
+} from './catalog-ipc-ratings-guards.ts';
 import {
   type CatalogBridgeWaveF5bOps,
   type CatalogWaveF5bOpsRpcCall,
@@ -309,6 +314,7 @@ export type CatalogRpcMethodCall =
   | { method: 'flushPendingWrites' }
   | CatalogEpgOpsRpcCall
   | CatalogFailoverOpsRpcCall
+  | CatalogRatingsOpsRpcCall
   | CatalogWaveF5bOpsRpcCall;
 
 /** Preload to utility process over `MessagePort`. */
@@ -339,6 +345,7 @@ export interface CatalogImportHandle {
 export interface CatalogBridge
   extends CatalogBridgeEpgOps,
     CatalogBridgeFailoverOps,
+    CatalogBridgeRatingsOps,
     CatalogBridgeWaveF5bOps {
   open(): Promise<Result<void>>;
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
@@ -738,6 +745,7 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isChannelOpsRpcCall(x) ||
         isEpgOpsRpcCall(x) ||
         isFailoverOpsRpcCall(x) ||
+        isRatingsOpsRpcCall(x) ||
         isWaveF5bOpsRpcCall(x)
       );
   }

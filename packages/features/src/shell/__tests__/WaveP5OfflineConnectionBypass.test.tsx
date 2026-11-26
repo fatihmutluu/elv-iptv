@@ -98,11 +98,11 @@ function makeDownloadManager(notifyOnlinePlaybackActive: jest.Mock): DownloadMan
 }
 
 describe('Offline zero-connection bypass & online playback download sync', () => {
-  it('exposes 5 primary destinations including Downloads right after Series', () => {
+  it('exposes 5 primary destinations including Library right after Series', () => {
     const i18n = createAppI18n('en');
     const nav = buildShellNavigation({
       t: i18n.t,
-      activeTab: 'downloads',
+      activeTab: 'library',
       hasActiveDetail: false,
       onOpenSearch: jest.fn(),
       onOpenSettings: jest.fn(),
@@ -112,12 +112,12 @@ describe('Offline zero-connection bypass & online playback download sync', () =>
       'live',
       'movie',
       'series',
-      'downloads',
+      'library',
     ]);
     expect(nav.destinations[4]).toMatchObject({
-      id: 'downloads',
-      icon: 'download',
-      testID: 'nav-tab-downloads',
+      id: 'library',
+      icon: 'library',
+      testID: 'nav-tab-library',
     });
   });
 

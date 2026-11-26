@@ -31,7 +31,7 @@ describe('Wave C3 settings toggles (#218, #404)', () => {
   it('toggles groupVodVersions via Playback TV-nav control (#404)', () => {
     const { controller, patches } = makeController();
     activatePlaybackControl('toggle-group-vod-versions', controller);
-    expect(patches).toEqual([{ groupVodVersions: false }]);
+    expect(patches).toEqual([{ groupVodVersions: true }]);
   });
 
   it('activates Wave C5A deinterlaceMode, pitchLock, audioNormalization, and windowAspectRatioLock controls (#243, #332)', () => {

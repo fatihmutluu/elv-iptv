@@ -1,4 +1,4 @@
-import type { BrowseKind, CatalogService, ItemRow, SourceRow } from '@elv/data';
+import type { BrowseKind, CatalogService, ItemRow, RatingValue, SourceRow } from '@elv/data';
 import { DEFAULT_HOME_LAYOUT, type HomeLayoutSectionPref, normalizeHomeLayout } from '@elv/domain';
 import {
   type ContextMenuAnchor,
@@ -322,6 +322,7 @@ export function HomeScreen({
   const {
     toggleMyList,
     toggleWatched,
+    toggleRating,
     removeFromContinueWatching,
     dismissNewEpisode,
     markNewEpisodeWatched,
@@ -385,6 +386,11 @@ export function HomeScreen({
         rating: entry.rating,
       }),
     [toggleMyList],
+  );
+  const handleQuickToggleRating = useCallback(
+    (entry: HomeRailEntry, next: RatingValue) =>
+      void toggleRating({ ...entry, logo: entry.posterUri ?? entry.backdropUri }, next),
+    [toggleRating],
   );
   const handleQuickToggleWatched = useCallback(
     (entry: HomeRailEntry, currentWatched: boolean) =>
@@ -556,6 +562,7 @@ export function HomeScreen({
         index,
         isFavorite,
         isWatched,
+        currentRating: data.ratingByKey.get(entry.itemKey) ?? null,
         isDownloaded,
         t: i18n.t,
         onPlay: activateEntry,
@@ -565,6 +572,7 @@ export function HomeScreen({
         onMarkNewEpisodeWatched: handleMarkNewEpisodeWatched,
         onToggleFavorite: handleQuickToggleFavorite,
         onToggleWatched: handleQuickToggleWatched,
+        onToggleRating: handleQuickToggleRating,
         ...(onOpenMultiView !== undefined ? { onOpenMultiView: handleOpenLiveMultiView } : {}),
         ...(onOpenPopout !== undefined ? { onOpenPopout: handleOpenLivePopout } : {}),
         ...(canDownloadMovie
@@ -596,6 +604,7 @@ export function HomeScreen({
       activateEntry,
       contextMenu,
       data.favoriteKeys,
+      data.ratingByKey,
       data.unplayedBySeriesKey,
       data.watchedOverrides,
       downloads,
@@ -605,6 +614,7 @@ export function HomeScreen({
       handleOpenLiveMultiView,
       handleOpenLivePopout,
       handleQuickToggleFavorite,
+      handleQuickToggleRating,
       handleQuickToggleWatched,
       handleRemoveFromContinue,
       i18n.t,

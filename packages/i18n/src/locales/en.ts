@@ -12,6 +12,7 @@ import { enWaveF9Messages } from './en-wave-f9';
 import { enWaveP2Messages } from './en-wave-p2';
 import { enWaveP4Messages } from './en-wave-p4';
 import { enWaveP5Messages } from './en-wave-p5';
+import { enWaveP6Messages } from './en-wave-p6';
 
 /** English (source) message catalog. Every other locale must define the exact same keys. */
 export const enMessages = {
@@ -716,6 +717,7 @@ export const enMessages = {
   ...enWaveP2Messages,
   ...enWaveP4Messages,
   ...enWaveP5Messages,
+  ...enWaveP6Messages,
   ...enIssue502Messages,
 } as const;
 
