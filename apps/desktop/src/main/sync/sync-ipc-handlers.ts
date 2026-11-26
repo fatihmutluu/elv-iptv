@@ -6,6 +6,7 @@ import {
   isSyncPollQrRequest,
   isSyncRegisterRequest,
   isSyncSetServerUrlRequest,
+  isSyncSetSyncablePrefsRequest,
   isSyncSignInRequest,
   isTelemetryRecordRequest,
   isTelemetrySetOptInRequest,
@@ -121,8 +122,7 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
     }
   };
 
-  const broadcastState = (state: SyncAccountStateIpc): void => {
-    const safe = sanitizeStateForIpc(state);
+  const broadcastToTrusted = (channel: string, payload: unknown): void => {
     const targets = deps.getBroadcastTargets?.() ?? [];
     for (const target of targets) {
       if (target.isDestroyed?.()) continue;
@@ -135,14 +135,21 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
           isAllowedDevNavigation(url, devOrigin));
       if (!allowed) continue;
       try {
-        target.send?.(SYNC_CHANNELS.stateChanged, safe);
+        target.send?.(channel, payload);
       } catch {
         // Ignore racing window teardown.
       }
     }
   };
 
+  const broadcastState = (state: SyncAccountStateIpc): void => {
+    broadcastToTrusted(SYNC_CHANNELS.stateChanged, sanitizeStateForIpc(state));
+  };
+
   const unsubscribeState = service.subscribe(broadcastState);
+  const unsubscribeInitialPrefs = service.subscribeInitialPreferences((patch) => {
+    broadcastToTrusted(SYNC_CHANNELS.initialPrefsReceived, patch);
+  });
 
   ipcMain.handle(SYNC_CHANNELS.getState, (event): SyncAccountStateIpc => {
     assertTrusted(event, SYNC_CHANNELS.getState);
@@ -225,6 +232,15 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
     service.setServerUrl(raw.serverUrl);
   });
 
+  ipcMain.handle(SYNC_CHANNELS.setSyncablePrefs, (event, raw): void => {
+    assertTrusted(event, SYNC_CHANNELS.setSyncablePrefs);
+    if (!isSyncSetSyncablePrefsRequest(raw)) {
+      log?.(`sync ipc: dropped invalid ${SYNC_CHANNELS.setSyncablePrefs} payload`);
+      throw new Error(`invalid ${SYNC_CHANNELS.setSyncablePrefs} payload`);
+    }
+    service.setSyncablePreferences(raw.preferences);
+  });
+
   ipcMain.handle(SYNC_CHANNELS.telemetrySetOptIn, (event, raw): TelemetryStatusIpc => {
     assertTrusted(event, SYNC_CHANNELS.telemetrySetOptIn);
     if (!isTelemetrySetOptInRequest(raw)) {
@@ -277,6 +293,7 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
     SYNC_CHANNELS.pollQr,
     SYNC_CHANNELS.claimQr,
     SYNC_CHANNELS.setServerUrl,
+    SYNC_CHANNELS.setSyncablePrefs,
     SYNC_CHANNELS.telemetrySetOptIn,
     SYNC_CHANNELS.telemetryGetStatus,
     SYNC_CHANNELS.telemetryRecord,
@@ -286,6 +303,7 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
 
   return () => {
     unsubscribeState();
+    unsubscribeInitialPrefs();
     for (const channel of registeredChannels) {
       ipcMain.removeHandler(channel);
     }

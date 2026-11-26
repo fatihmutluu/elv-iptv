@@ -227,6 +227,9 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
     setHome(snapshot) {
       home = { snapshot, heroIndex: home?.heroIndex ?? 0 };
     },
+    clearHome() {
+      home = null;
+    },
     setHomeHeroIndex(heroIndex) {
       if (home === null) return;
       home = { snapshot: home.snapshot, heroIndex };

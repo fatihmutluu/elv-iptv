@@ -69,6 +69,7 @@ export interface UseShellPlaybackModesOptions {
   readonly thermalDevice?: ThermalDevicePort | undefined;
   readonly videoHost: VideoHost;
   readonly stopActivePlayerRef: MutableRefObject<(() => Promise<void>) | null>;
+  readonly stopEmbeddedPreviewRef?: MutableRefObject<(() => Promise<void>) | null> | undefined;
   readonly minimizeToTray: boolean;
   readonly backgroundAudioPlayback: boolean;
   readonly playTargetRef: MutableRefObject<PlayTarget | null>;
@@ -76,6 +77,20 @@ export interface UseShellPlaybackModesOptions {
   readonly onRequestPlay: (target: PlayTarget) => void;
   /** Direct play setter for zero-reload handoffs (0 new connections), bypassing connection limit & external player interception (`Wave P3`). */
   readonly onAdoptPlay?: ((target: PlayTarget) => void) | undefined;
+}
+
+function runAfterEmbeddedPreview(
+  stopEmbeddedPreviewRef: MutableRefObject<(() => Promise<void>) | null> | undefined,
+  action: () => void,
+): void {
+  const stopPreview = stopEmbeddedPreviewRef?.current;
+  if (stopPreview != null) {
+    void Promise.resolve(stopPreview())
+      .catch(() => undefined)
+      .finally(action);
+    return;
+  }
+  action();
 }
 
 /**
@@ -89,6 +104,7 @@ export function useShellPlaybackModes({
   thermalDevice,
   videoHost,
   stopActivePlayerRef,
+  stopEmbeddedPreviewRef,
   minimizeToTray,
   backgroundAudioPlayback,
   playTargetRef,
@@ -313,6 +329,47 @@ export function useShellPlaybackModes({
     };
   }, [openPopout, stopActivePlayerRef]);
 
+  const openMultiViewFromBrowse = useMemo(
+    () =>
+      multiViewSupported
+        ? (target: PlayTarget) => {
+            runAfterEmbeddedPreview(stopEmbeddedPreviewRef, () => enterMultiView(target));
+          }
+        : undefined,
+    [enterMultiView, multiViewSupported, stopEmbeddedPreviewRef],
+  );
+
+  const openPopoutFromBrowse = useMemo(
+    () =>
+      popoutPlayer !== undefined
+        ? (target: PlayTarget) => {
+            runAfterEmbeddedPreview(stopEmbeddedPreviewRef, () => popoutPlayer(target));
+          }
+        : undefined,
+    [popoutPlayer, stopEmbeddedPreviewRef],
+  );
+
+  const browseStageActions = useMemo(
+    () => ({
+      ...(openMultiViewFromBrowse !== undefined
+        ? { onOpenMultiView: openMultiViewFromBrowse }
+        : {}),
+      ...(openPopoutFromBrowse !== undefined ? { onOpenPopout: openPopoutFromBrowse } : {}),
+    }),
+    [openMultiViewFromBrowse, openPopoutFromBrowse],
+  );
+
+  const tuneFromReminder = useCallback(
+    (target: PlayTarget) => {
+      if (playTargetRef.current === null) {
+        runAfterEmbeddedPreview(stopEmbeddedPreviewRef, () => requestPlayRef.current(target));
+        return;
+      }
+      requestPlayRef.current(target);
+    },
+    [playTargetRef, stopEmbeddedPreviewRef],
+  );
+
   return {
     playerViewMode,
     multiViewSeed,
@@ -330,6 +387,8 @@ export function useShellPlaybackModes({
     enterMultiView,
     exitMultiView,
     popoutPlayer,
+    browseStageActions,
+    tuneFromReminder,
   };
 }
 

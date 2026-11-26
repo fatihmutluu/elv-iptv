@@ -5,6 +5,7 @@ import {
   type FavoriteRow,
   type ItemRow,
   MIN_RESUME_POSITION_MS,
+  type NowNextEntry,
   type UserItemKind,
   type WatchProgressRow,
 } from '@elv/data';
@@ -64,7 +65,10 @@ export interface HomeRailEntry {
 }
 
 /** Semantic identifier of each Home horizontal rail. */
-export type HomeRailKind = 'continue' | 'recentChannels' | 'live' | 'mylist' | 'movies' | 'series';
+export type HomeRailKind = 'continue' | 'live' | 'mylist' | 'movies' | 'series';
+
+/** Maximum number of cards shown in the unified Home Live TV rail. */
+export const HOME_LIVE_RAIL_LIMIT = 12;
 
 /** Dynamic Home horizontal rail identifier for a custom VOD collection (`#403`). */
 export type HomeCollectionRailId = `collection:${string}`;
@@ -293,12 +297,126 @@ export function buildHomeLivePlayTarget(
   };
 }
 
+/**
+ * Resolves a {@link HomePlayTarget} for an entry in the unified Home Live TV rail.
+ * Attaches the category zapping playlist only when the channel exists in `liveItems` (using its
+ * real index in `liveCategory`, not its unified rail position); otherwise returns a standalone
+ * live target with `logo` and `itemKind: 'live'`.
+ */
+export function resolveHomeLivePlayTarget(
+  catalog: CatalogService,
+  liveCategory: CategoryRow | null,
+  liveItems: readonly ItemRow[],
+  entry: HomeRailEntry,
+): HomePlayTarget {
+  if (liveCategory !== null && entry.catalogItem !== undefined) {
+    const liveIndex = liveItems.findIndex((item) => item.key === entry.itemKey);
+    if (liveIndex >= 0) {
+      return buildHomeLivePlayTarget(catalog, liveCategory, entry.catalogItem, liveIndex);
+    }
+  }
+  return {
+    itemKey: entry.itemKey,
+    sourceId: entry.sourceId,
+    title: entry.title,
+    kind: 'live',
+    itemKind: 'live',
+    logo: entry.posterUri ?? entry.backdropUri ?? entry.catalogItem?.logo ?? null,
+  };
+}
+
+/** Input for {@link buildUnifiedLiveRail}. */
+export interface BuildUnifiedLiveRailInput {
+  readonly favorites: readonly FavoriteRow[];
+  readonly recentChannels?: readonly ItemRow[];
+  readonly liveItems: readonly ItemRow[];
+  readonly liveCategoryName: string | null;
+  readonly nowNextByKey?: ReadonlyMap<string, NowNextEntry>;
+  readonly limit?: number;
+}
+
+/**
+ * Builds the unified Home "Live TV" rail capped at `limit` (default 12), filled strictly in
+ * deduplicated priority order:
+ * 1. Live favorites preserving exact DB `sort_order`,
+ * 2. Recently watched live channels,
+ * 3. Current On-Now live channels.
+ */
+export function buildUnifiedLiveRail(input: BuildUnifiedLiveRailInput): HomeRailEntry[] {
+  const limit = input.limit ?? HOME_LIVE_RAIL_LIMIT;
+  if (limit <= 0) return [];
+
+  const catalogByKey = new Map<string, ItemRow>();
+  for (const item of input.liveItems) catalogByKey.set(item.key, item);
+  for (const item of input.recentChannels ?? []) {
+    if (!catalogByKey.has(item.key)) catalogByKey.set(item.key, item);
+  }
+
+  const seen = new Set<string>();
+  const entries: HomeRailEntry[] = [];
+
+  const resolveSubtitle = (key: string, fallback: string | null): string | null =>
+    input.nowNextByKey?.get(key)?.now?.title ?? fallback;
+
+  for (const fav of input.favorites) {
+    if (entries.length >= limit) return entries;
+    if (fav.kind !== 'live' || seen.has(fav.itemKey)) continue;
+    seen.add(fav.itemKey);
+    const matched = catalogByKey.get(fav.itemKey);
+    entries.push({
+      itemKey: fav.itemKey,
+      sourceId: fav.sourceId,
+      kind: 'live',
+      title: matched ? formatLiveChannelName(matched) : fav.title,
+      subtitle: resolveSubtitle(fav.itemKey, input.liveCategoryName),
+      backdropUri: fav.logo ?? matched?.logo ?? null,
+      posterUri: fav.logo ?? matched?.logo ?? null,
+      year: null,
+      rating: null,
+      durationMs: 0,
+      positionMs: 0,
+      watched: false,
+      live: true,
+      channelNum: matched?.num ?? null,
+      ...(matched !== undefined ? { catalogItem: matched } : {}),
+    });
+  }
+
+  const pushLiveItem = (item: ItemRow, fallbackSubtitle: string | null): void => {
+    if (entries.length >= limit || seen.has(item.key)) return;
+    seen.add(item.key);
+    entries.push({
+      itemKey: item.key,
+      sourceId: item.sourceId,
+      kind: 'live',
+      title: formatLiveChannelName(item),
+      subtitle: resolveSubtitle(item.key, fallbackSubtitle),
+      backdropUri: item.logo,
+      posterUri: item.logo,
+      year: null,
+      rating: null,
+      durationMs: 0,
+      positionMs: 0,
+      watched: false,
+      live: true,
+      channelNum: item.num,
+      catalogItem: item,
+    });
+  };
+
+  for (const item of input.recentChannels ?? []) pushLiveItem(item, input.liveCategoryName);
+  for (const item of input.liveItems) pushLiveItem(item, input.liveCategoryName);
+
+  return entries;
+}
+
 /** Input for {@link buildHomeRailSets}. */
 export interface BuildHomeRailSetsInput {
   readonly continueWatching: readonly WatchProgressRow[];
   readonly recentChannels?: readonly ItemRow[];
   readonly liveItems: readonly ItemRow[];
   readonly liveCategoryName: string | null;
+  readonly nowNextByKey?: ReadonlyMap<string, NowNextEntry>;
   readonly favorites: readonly FavoriteRow[];
   readonly movies: readonly ItemRow[];
   readonly series: readonly ItemRow[];
@@ -307,6 +425,8 @@ export interface BuildHomeRailSetsInput {
 
 /** All 5 Home rail entry arrays indexed by {@link HomeRailKind}. */
 export type HomeRailSets = Readonly<Record<HomeRailKind, readonly HomeRailEntry[]>>;
+
+const HOME_MYLIST_LIMIT = 24;
 
 /** Maps bounded Home SQLite rows into pure {@link HomeRailEntry} arrays for all 5 rails. */
 export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
@@ -333,30 +453,6 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
       };
     });
 
-  const seenRecent = new Set<string>();
-  const recentChannels: HomeRailEntry[] = [];
-  for (const item of input.recentChannels ?? []) {
-    if (recentChannels.length >= 20 || seenRecent.has(item.key)) continue;
-    seenRecent.add(item.key);
-    recentChannels.push({
-      itemKey: item.key,
-      sourceId: item.sourceId,
-      kind: 'live',
-      title: formatLiveChannelName(item),
-      subtitle: null,
-      backdropUri: item.logo,
-      posterUri: item.logo,
-      year: null,
-      rating: null,
-      durationMs: 0,
-      positionMs: 0,
-      watched: false,
-      live: true,
-      channelNum: item.num,
-      catalogItem: item,
-    });
-  }
-
   return {
     continue: input.continueWatching.map((row) => ({
       itemKey: row.itemKey,
@@ -372,25 +468,14 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
       positionMs: row.positionMs,
       watched: row.watched,
     })),
-    recentChannels,
-    live: input.liveItems.map((item) => ({
-      itemKey: item.key,
-      sourceId: item.sourceId,
-      kind: 'live',
-      title: formatLiveChannelName(item),
-      subtitle: input.liveCategoryName,
-      backdropUri: item.logo,
-      posterUri: item.logo,
-      year: null,
-      rating: null,
-      durationMs: 0,
-      positionMs: 0,
-      watched: false,
-      live: true,
-      channelNum: item.num,
-      catalogItem: item,
-    })),
-    mylist: input.favorites.map((fav) => {
+    live: buildUnifiedLiveRail({
+      favorites: input.favorites,
+      ...(input.recentChannels !== undefined ? { recentChannels: input.recentChannels } : {}),
+      liveItems: input.liveItems,
+      liveCategoryName: input.liveCategoryName,
+      ...(input.nowNextByKey !== undefined ? { nowNextByKey: input.nowNextByKey } : {}),
+    }),
+    mylist: input.favorites.slice(0, HOME_MYLIST_LIMIT).map((fav) => {
       const prog = input.progressByKey.get(fav.itemKey);
       const matchedSeries = fav.kind === 'series' ? seriesByKey.get(fav.itemKey) : undefined;
       return {

@@ -1,5 +1,5 @@
-import type { CatalogService, ItemRow, SourceRow } from '@elv/data';
-import { useI18n, useTheme, useViewport } from '@elv/ui-kit';
+import type { CatalogService, ItemRow, SourceRow, WatchProgressRow } from '@elv/data';
+import { useContextMenu, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
   type ReactElement,
@@ -15,6 +15,7 @@ import {
   type DetailTarget,
   detailTargetFromItem,
   useCardQuickActionsState,
+  useCatalogUiCache,
 } from '../shared';
 import { AmbientBackdrop } from '../shared/AmbientBackdrop';
 import {
@@ -23,6 +24,7 @@ import {
   CatalogSkeleton,
   CatalogTvKeyBridge,
 } from './CatalogChrome';
+import { CatalogQuickFilterGrid } from './CatalogQuickFilterGrid';
 import { CatalogRailsBody } from './CatalogRailsBody';
 import {
   type CategoryGridAccess,
@@ -33,6 +35,7 @@ import {
   ALPHABET_RAIL_MIN_ITEMS,
   buildCatalogNavRows,
   type CatalogNavRowId,
+  type CatalogQuickFilter,
   type CatalogRailNavEntry,
   type CatalogTabMemory,
   detailTargetFromProgress,
@@ -81,20 +84,32 @@ export function CatalogDiscoveryScreen({
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
+  const contextMenu = useContextMenu();
+  const uiCache = useCatalogUiCache();
   const layout = useMemo(
     () => computeCatalogLayout(viewport, theme, theme.fontScale),
     [theme, viewport],
   );
 
   const { memory: activeMemory, updateMemory } = useCatalogTabMemory(memory, onMemoryChange);
+  const quickFilter: CatalogQuickFilter = activeMemory.quickFilter ?? 'all';
 
   const handleSelectCategory = useCallback(
-    (categoryId: string | null) => updateMemory({ selectedCategoryId: categoryId }),
+    (categoryId: string | null) =>
+      updateMemory({
+        selectedCategoryId: categoryId,
+        ...(categoryId !== null ? { quickFilter: 'all' } : {}),
+      }),
+    [updateMemory],
+  );
+  const handleSelectQuickFilter = useCallback(
+    (nextFilter: CatalogQuickFilter) =>
+      updateMemory({ quickFilter: nextFilter, selectedCategoryId: null }),
     [updateMemory],
   );
   const handleSelectAllCategories = useCallback(
-    () => handleSelectCategory(null),
-    [handleSelectCategory],
+    () => updateMemory({ selectedCategoryId: null, quickFilter: 'all' }),
+    [updateMemory],
   );
   const handleVisibleCategoryCountChange = useCallback(
     (nextCount: number) => updateMemory({ visibleCategoryCount: nextCount }),
@@ -145,13 +160,99 @@ export function CatalogDiscoveryScreen({
     [onOpenDetail, onPlay],
   );
   const handleQuickToggleFavorite = useCallback(
-    (item: ItemRow) => void quickActionsState.toggleFavorite(item),
-    [quickActionsState.toggleFavorite],
+    async (item: ItemRow): Promise<boolean> => {
+      const ok = await quickActionsState.toggleFavorite(item);
+      if (ok) uiCache?.clearHome?.();
+      return ok;
+    },
+    [quickActionsState.toggleFavorite, uiCache],
   );
   const handleQuickToggleWatched = useCallback(
-    (item: ItemRow, currentWatched: boolean) =>
-      void quickActionsState.toggleWatched(item, currentWatched),
-    [quickActionsState.toggleWatched],
+    (item: ItemRow, currentWatched: boolean) => {
+      void quickActionsState.toggleWatched(item, currentWatched).then((ok) => {
+        if (ok) uiCache?.clearHome?.();
+      });
+    },
+    [quickActionsState.toggleWatched, uiCache],
+  );
+  const handleResumeContinue = useCallback(
+    (row: WatchProgressRow) => {
+      if (onPlay && (row.kind === 'movie' || row.kind === 'episode')) {
+        onPlay({
+          itemKey: row.itemKey,
+          sourceId: row.sourceId,
+          title: row.title,
+          kind: 'vod',
+          itemKind: row.kind,
+          startPositionMs: row.positionMs,
+          ...(row.logo !== null ? { logo: row.logo } : {}),
+          ...(row.subtitle !== null ? { subtitle: row.subtitle } : {}),
+          ...(row.seriesKey !== null ? { seriesKey: row.seriesKey } : {}),
+          ...(row.season !== null ? { season: row.season } : {}),
+          ...(row.episode !== null ? { episode: row.episode } : {}),
+        });
+        return;
+      }
+      onOpenDetail(detailTargetFromProgress(row, kind));
+    },
+    [kind, onOpenDetail, onPlay],
+  );
+  const handleHideContinue = useCallback(
+    (row: WatchProgressRow) => {
+      const removed = discovery.removeContinueItem(row.itemKey);
+      if (!catalog.clearProgress) {
+        uiCache?.clearHome?.();
+        return;
+      }
+      void catalog
+        .clearProgress(row.itemKey)
+        .then((res) => {
+          if (res.ok) {
+            uiCache?.clearHome?.();
+          } else if (removed) {
+            discovery.restoreContinueItem(removed);
+          }
+        })
+        .catch(() => {
+          if (removed) discovery.restoreContinueItem(removed);
+        });
+    },
+    [catalog, discovery.removeContinueItem, discovery.restoreContinueItem, uiCache],
+  );
+  const handleMarkContinueWatched = useCallback(
+    (row: WatchProgressRow) => {
+      const removed = discovery.removeContinueItem(row.itemKey);
+      const item: ItemRow = {
+        id: 0,
+        key: row.itemKey,
+        sourceId: row.sourceId,
+        providerId: null,
+        kind: row.kind === 'movie' ? 'movie' : 'series',
+        name: row.title,
+        logo: row.logo,
+        num: null,
+        year: null,
+        rating: null,
+      };
+      void quickActionsState
+        .toggleWatched(item, false)
+        .then((ok) => {
+          if (ok) {
+            uiCache?.clearHome?.();
+          } else if (removed) {
+            discovery.restoreContinueItem(removed);
+          }
+        })
+        .catch(() => {
+          if (removed) discovery.restoreContinueItem(removed);
+        });
+    },
+    [
+      discovery.removeContinueItem,
+      discovery.restoreContinueItem,
+      quickActionsState.toggleWatched,
+      uiCache,
+    ],
   );
 
   const selectedCategory = useMemo(
@@ -162,7 +263,9 @@ export function CatalogDiscoveryScreen({
     [activeMemory.selectedCategoryId, discovery.categories],
   );
 
-  const isGridMode = selectedCategory !== null;
+  const isCategoryGridMode = selectedCategory !== null;
+  const isQuickFilterGridMode = selectedCategory === null && quickFilter !== 'all';
+  const isGridMode = isCategoryGridMode || isQuickFilterGridMode;
 
   const railEntries = useMemo<CatalogRailNavEntry[]>(() => {
     const entries: CatalogRailNavEntry[] = [];
@@ -195,7 +298,11 @@ export function CatalogDiscoveryScreen({
   const hasSources = sources.length > 0;
   const hasCategories = discovery.categories.length > 0;
 
-  const effectiveGridItemCount = selectedCategory?.row.itemCount ?? gridMeta.itemCount;
+  const effectiveGridItemCount = isCategoryGridMode
+    ? (selectedCategory?.row.itemCount ?? gridMeta.itemCount)
+    : isQuickFilterGridMode
+      ? gridMeta.itemCount
+      : 0;
 
   const navRows = useMemo(
     () =>
@@ -203,12 +310,12 @@ export function CatalogDiscoveryScreen({
         isLoading: isInitialLoading,
         hasSources,
         hasCategories,
-        categoryChipCount: hasCategories ? discovery.categories.length + 1 : 0,
-        continueCount: !isGridMode ? discovery.continueItems.length : 0,
-        railEntries,
-        hasLoadMore: !isGridMode && discovery.hasMoreCategories,
+        categoryChipCount: hasCategories ? discovery.categories.length + 3 : 0,
+        continueCount: !isGridMode && quickFilter === 'all' ? discovery.continueItems.length : 0,
+        railEntries: quickFilter === 'all' ? railEntries : [],
+        hasLoadMore: !isGridMode && quickFilter === 'all' && discovery.hasMoreCategories,
         isGridMode,
-        gridHeaderCount: 2,
+        gridHeaderCount: isCategoryGridMode ? 2 : 0,
       }),
     [
       discovery.categories.length,
@@ -216,8 +323,10 @@ export function CatalogDiscoveryScreen({
       discovery.hasMoreCategories,
       hasCategories,
       hasSources,
+      isCategoryGridMode,
       isGridMode,
       isInitialLoading,
+      quickFilter,
       railEntries,
     ],
   );
@@ -230,8 +339,10 @@ export function CatalogDiscoveryScreen({
       }
       if (rowId === 'loadMore') return discovery.loadMoreCategories();
       if (rowId === 'catChips') {
-        if (colIndex === 0) return handleSelectCategory(null);
-        const cat = discovery.categories[colIndex - 1];
+        if (colIndex === 0) return handleSelectQuickFilter('all');
+        if (colIndex === 1) return handleSelectQuickFilter('mylist');
+        if (colIndex === 2) return handleSelectQuickFilter('watched');
+        const cat = discovery.categories[colIndex - 3];
         if (cat) handleSelectCategory(cat.row.id);
         return;
       }
@@ -251,18 +362,26 @@ export function CatalogDiscoveryScreen({
         if (target) onOpenDetail(target);
       }
     },
-    [discovery, handleSelectCategory, handleToggleSort, kind, onOpenDetail, onOpenSources],
+    [
+      discovery,
+      handleSelectCategory,
+      handleSelectQuickFilter,
+      handleToggleSort,
+      kind,
+      onOpenDetail,
+      onOpenSources,
+    ],
   );
 
   const handleActivateGridItem = useCallback(
     (itemIndex: number) => {
-      if (!selectedCategory) return;
+      if (!isGridMode) return;
       const item = gridAccessRef.current.getItem(itemIndex);
       if (!item) return;
-      const target = detailTargetFromItem(item, selectedCategory.row.id);
+      const target = detailTargetFromItem(item, selectedCategory?.row.id);
       if (target) onOpenDetail(target);
     },
-    [onOpenDetail, selectedCategory],
+    [isGridMode, onOpenDetail, selectedCategory],
   );
 
   const handleFocusRow = useCallback(
@@ -295,7 +414,7 @@ export function CatalogDiscoveryScreen({
   }, []);
 
   const activeAlphabetBuckets =
-    isGridMode && sortBy === 'alpha' && effectiveGridItemCount >= ALPHABET_RAIL_MIN_ITEMS
+    isCategoryGridMode && sortBy === 'alpha' && effectiveGridItemCount >= ALPHABET_RAIL_MIN_ITEMS
       ? (gridMeta.alphabetBuckets ?? [])
       : [];
 
@@ -368,7 +487,7 @@ export function CatalogDiscoveryScreen({
           title={ambientTarget?.title ?? ''}
         />
       ) : null}
-      {layout.isTv && isActiveScope ? (
+      {layout.isTv && isActiveScope && !contextMenu.isOpen ? (
         <CatalogTvKeyBridge kind={kind} onEvent={tvNav.handleTvKey} />
       ) : null}
 
@@ -399,8 +518,10 @@ export function CatalogDiscoveryScreen({
             layout={layout}
             categories={discovery.categories}
             selectedCategoryId={selectedCategory?.row.id ?? null}
+            quickFilter={quickFilter}
             focusedCatChipIndex={tvNav.focusedRowId === 'catChips' ? tvNav.focusedCol : null}
             onSelectCategory={handleSelectCategory}
+            onSelectQuickFilter={handleSelectQuickFilter}
           />
 
           {selectedCategory !== null ? (
@@ -429,6 +550,28 @@ export function CatalogDiscoveryScreen({
               onGridMetaChange={setGridMeta}
               gridAccessRef={gridAccessRef}
             />
+          ) : quickFilter !== 'all' ? (
+            <CatalogQuickFilterGrid
+              kind={kind}
+              filter={quickFilter}
+              catalog={catalog}
+              refreshToken={refreshToken}
+              userStateVersion={userStateVersion}
+              layout={layout}
+              safeBottomInset={viewport.safeArea.bottom}
+              railItemsByCategoryId={discovery.railItemsByCategoryId}
+              progressByKey={discovery.progressByKey}
+              unplayedBySeriesKey={discovery.unplayedBySeriesKey}
+              favoriteKeys={quickActionsState.favoriteKeys}
+              watchedOverrides={quickActionsState.watchedOverrides}
+              focusedGridPos={tvNav.focusedGridPos}
+              onGridMetaChange={setGridMeta}
+              gridAccessRef={gridAccessRef}
+              onOpenDetail={onOpenDetail}
+              onQuickPlay={handleQuickPlay}
+              onQuickToggleFavorite={handleQuickToggleFavorite}
+              onQuickToggleWatched={handleQuickToggleWatched}
+            />
           ) : (
             <CatalogRailsBody
               kind={kind}
@@ -447,6 +590,9 @@ export function CatalogDiscoveryScreen({
               focusedRowId={tvNav.focusedRowId}
               focusedCol={tvNav.focusedCol}
               onOpenDetail={onOpenDetail}
+              onResumeContinue={handleResumeContinue}
+              onHideContinue={handleHideContinue}
+              onMarkContinueWatched={handleMarkContinueWatched}
               onQuickPlay={handleQuickPlay}
               onQuickToggleFavorite={handleQuickToggleFavorite}
               onQuickToggleWatched={handleQuickToggleWatched}

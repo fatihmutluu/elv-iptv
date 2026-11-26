@@ -13,6 +13,8 @@ export const SYNC_CHANNELS = Object.freeze({
   pollQr: 'sync:pollQr',
   claimQr: 'sync:claimQr',
   setServerUrl: 'sync:setServerUrl',
+  setSyncablePrefs: 'sync:setSyncablePrefs',
+  initialPrefsReceived: 'sync:initialPrefsReceived',
   stateChanged: 'sync:stateChanged',
   telemetrySetOptIn: 'telemetry:setOptIn',
   telemetryGetStatus: 'telemetry:getStatus',
@@ -72,6 +74,10 @@ export interface SyncClaimQrRequest {
 
 export interface SyncSetServerUrlRequest {
   readonly serverUrl: string;
+}
+
+export interface SyncSetSyncablePrefsRequest {
+  readonly preferences: Readonly<Record<string, unknown>>;
 }
 
 export interface TelemetrySetOptInRequest {
@@ -141,6 +147,10 @@ export interface SyncBridge {
   pollQrPairing(pairingId: string): Promise<SyncQrPollStatusIpc>;
   claimQrPairing(codeOrUri: string): Promise<SyncActionResultIpc>;
   setServerUrl(serverUrl: string): Promise<void>;
+  setSyncablePreferences?(preferences: Readonly<Record<string, unknown>>): Promise<void>;
+  onInitialPreferencesReceived?(
+    listener: (preferences: Readonly<Record<string, unknown>>) => void,
+  ): () => void;
 }
 
 /** Frozen `window.elv.telemetry` bridge exposed by the sandboxed Electron preload (`#458`). */
@@ -241,8 +251,20 @@ export function isSyncClaimQrRequest(x: unknown): x is SyncClaimQrRequest {
   return isSafeRecord(x) && hasExactKeys(x, ['codeOrUri']) && isBoundedString(x.codeOrUri, 256);
 }
 
+const MAX_SYNCABLE_PREF_KEYS = 64;
+
 export function isSyncSetServerUrlRequest(x: unknown): x is SyncSetServerUrlRequest {
   return isSafeRecord(x) && hasExactKeys(x, ['serverUrl']) && isValidSyncServerUrl(x.serverUrl);
+}
+
+export function isSyncInitialPrefsPayload(x: unknown): x is Readonly<Record<string, unknown>> {
+  return isSafeRecord(x) && Object.keys(x).length <= MAX_SYNCABLE_PREF_KEYS;
+}
+
+export function isSyncSetSyncablePrefsRequest(x: unknown): x is SyncSetSyncablePrefsRequest {
+  return (
+    isSafeRecord(x) && hasExactKeys(x, ['preferences']) && isSyncInitialPrefsPayload(x.preferences)
+  );
 }
 
 export function isSyncAccountState(x: unknown): x is SyncAccountStateIpc {

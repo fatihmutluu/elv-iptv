@@ -1,4 +1,4 @@
-import { redactText, type SecretStore } from '@elv/domain';
+import { type PreferencesPatch, redactText, type SecretStore } from '@elv/domain';
 import { generateLanPairingToken } from '@elv/lan-pairing';
 import {
   base64UrlDecode,
@@ -13,6 +13,11 @@ export const SESSION_SECRET_KEY = 'elv.sync.session.v1';
 export const VAULT_KEY_BYTES = 32;
 export const DEFAULT_FLUSH_INTERVAL_MS = 60_000;
 export const FEEDBACK_LOG_TAIL_LINES = 25;
+
+/** Builds a SecureStore-safe per-account key recording whether initial preferences were applied once. */
+export function initialPrefsAppliedKey(userId: string): string {
+  return `elv.sync.initprefs.v1.${userId.replace(/[^A-Za-z0-9._-]/g, '_')}`;
+}
 
 /** Lifecycle state of the optional E2EE sync account session (`#26`). */
 type SyncAccountStatus = 'signed_out' | 'signing_in' | 'signed_in' | 'syncing';
@@ -152,6 +157,8 @@ export interface CreateTvMobileSyncPortsOptions {
   readonly flushIntervalMs?: number;
   readonly getLocalSnapshot?: () => Promise<VaultSnapshot> | VaultSnapshot;
   readonly applyMergedSnapshot?: (snapshot: VaultSnapshot) => Promise<void> | void;
+  readonly getSyncablePreferences?: () => Readonly<Record<string, unknown>> | undefined;
+  readonly applyInitialPreferences?: (patch: PreferencesPatch) => Promise<void> | void;
   readonly subscribeAppState?: (listener: (state: string) => void) => () => void;
   readonly onTelemetryOptInChange?: (enabled: boolean) => void;
 }

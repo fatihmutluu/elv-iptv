@@ -274,8 +274,27 @@ export async function encryptVaultSnapshot(
   };
 }
 
+const MAX_INITIAL_PREFERENCES_KEYS = 64;
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isValidOptionalInitialPreferences(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isPlainObject(value)) return false;
+  if (
+    Object.hasOwn(value, '__proto__') ||
+    Object.hasOwn(value, 'constructor') ||
+    Object.hasOwn(value, 'prototype')
+  ) {
+    return false;
+  }
+  return Object.keys(value).length <= MAX_INITIAL_PREFERENCES_KEYS;
+}
+
+function isValidOptionalTimestamp(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
 }
 
 function isTombstoneItemArray(value: unknown, keyField: 'id' | 'key' | 'seriesKey'): boolean {
@@ -321,7 +340,9 @@ export async function decryptVaultSnapshot(
     !isTombstoneItemArray(parsed.customGroups, 'id') ||
     !isTombstoneItemArray(parsed.collections, 'id') ||
     !isTombstoneItemArray(parsed.watchProgress, 'key') ||
-    !isTombstoneItemArray(parsed.watchedEpisodesBitfields, 'seriesKey')
+    !isTombstoneItemArray(parsed.watchedEpisodesBitfields, 'seriesKey') ||
+    !isValidOptionalInitialPreferences(parsed.initialPreferences) ||
+    !isValidOptionalTimestamp(parsed.initialPreferencesUpdatedAt)
   ) {
     throw new Error('Invalid vault snapshot structure');
   }

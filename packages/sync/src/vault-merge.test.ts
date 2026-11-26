@@ -156,4 +156,40 @@ describe('vault-merge and episode bitfields', () => {
     const ser2 = mergedLR.watchedEpisodesBitfields.find((b) => b.seriesKey === 'ser-2');
     expect(ser2?.deleted).toBe(true);
   });
+
+  it('merges optional initialPreferences by newest initialPreferencesUpdatedAt and preserves when one side omits it', () => {
+    const empty = createEmptyVaultSnapshot(100);
+    const withOldPrefs: VaultSnapshot = {
+      ...empty,
+      updatedAt: 200,
+      initialPreferences: { themePreset: 'obsidianCrimson', locale: 'en' },
+      initialPreferencesUpdatedAt: 150,
+    };
+    const withNewPrefs: VaultSnapshot = {
+      ...empty,
+      updatedAt: 250,
+      initialPreferences: { themePreset: 'midnightGold', locale: 'tr' },
+      initialPreferencesUpdatedAt: 250,
+    };
+
+    // Neither has initialPreferences -> omitted
+    expect(mergeVaultSnapshots(empty, empty).initialPreferences).toBeUndefined();
+
+    // Only remote has initialPreferences -> remote kept
+    const onlyRemote = mergeVaultSnapshots(empty, withOldPrefs);
+    expect(onlyRemote.initialPreferences).toEqual(withOldPrefs.initialPreferences);
+    expect(onlyRemote.initialPreferencesUpdatedAt).toBe(150);
+
+    // Only local has initialPreferences -> local kept
+    const onlyLocal = mergeVaultSnapshots(withOldPrefs, empty);
+    expect(onlyLocal.initialPreferences).toEqual(withOldPrefs.initialPreferences);
+    expect(onlyLocal.initialPreferencesUpdatedAt).toBe(150);
+
+    // Both have initialPreferences -> newer timestamp wins (commutative)
+    const lr = mergeVaultSnapshots(withOldPrefs, withNewPrefs);
+    const rl = mergeVaultSnapshots(withNewPrefs, withOldPrefs);
+    expect(lr.initialPreferences).toEqual(withNewPrefs.initialPreferences);
+    expect(lr.initialPreferencesUpdatedAt).toBe(250);
+    expect(rl).toEqual(lr);
+  });
 });

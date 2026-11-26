@@ -185,6 +185,7 @@ export function renderCatalog(
             refreshToken={props.refreshToken ?? 1}
             onOpenDetail={props.onOpenDetail ?? jest.fn()}
             onOpenSources={props.onOpenSources ?? jest.fn()}
+            {...(props.onPlay !== undefined ? { onPlay: props.onPlay } : {})}
             {...(props.userStateVersion !== undefined
               ? { userStateVersion: props.userStateVersion }
               : {})}

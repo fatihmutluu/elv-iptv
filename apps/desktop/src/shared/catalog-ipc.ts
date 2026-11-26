@@ -81,6 +81,7 @@ import {
   isItemKeyList,
   isLinkSourceInput,
   isListItemsOptions,
+  isListWatchedOptions,
   isLocalM3uSourceInput,
   isNonNegativeFinite,
   isNowNextKeyList,
@@ -88,6 +89,7 @@ import {
   isOptionalSourceId,
   isOptionalStrictProfileId,
   isOptionalUserLimit,
+  isOrderedFavoriteKeys,
   isParentalLockFilter,
   isParentalQueryOptions,
   isParentalUnlockedOption,
@@ -222,11 +224,18 @@ export type CatalogRpcMethodCall =
       profileId?: string;
       opts?: { readonly parentalUnlocked?: boolean };
     }
+  | {
+      method: 'listWatched';
+      limit?: number;
+      profileId?: string;
+      opts?: { readonly kind?: 'movie' | 'series'; readonly parentalUnlocked?: boolean };
+    }
   | { method: 'listProgressByKeys'; itemKeys: readonly string[]; profileId?: string }
   | { method: 'listSeriesUnplayedCounts'; seriesKeys: readonly string[]; profileId?: string }
   | { method: 'clearProgress'; itemKey: string; profileId?: string }
   | { method: 'toggleFavorite'; input: ToggleFavoriteInput }
   | { method: 'setFavorite'; input: ToggleFavoriteInput; active: boolean }
+  | { method: 'reorderFavorites'; orderedItemKeys: readonly string[]; profileId?: string }
   | {
       method: 'listFavorites';
       limit?: number;
@@ -393,6 +402,11 @@ export interface CatalogBridge
     profileId?: string,
     opts?: { readonly parentalUnlocked?: boolean },
   ): Promise<WatchProgressRow[]>;
+  listWatched?(
+    limit?: number,
+    profileId?: string,
+    opts?: { readonly kind?: 'movie' | 'series'; readonly parentalUnlocked?: boolean },
+  ): Promise<WatchProgressRow[]>;
   listProgressByKeys(itemKeys: readonly string[], profileId?: string): Promise<WatchProgressRow[]>;
   listSeriesUnplayedCounts?(
     seriesKeys: readonly string[],
@@ -401,6 +415,7 @@ export interface CatalogBridge
   clearProgress(itemKey: string, profileId?: string): Promise<Result<void>>;
   toggleFavorite(input: ToggleFavoriteInput): Promise<Result<boolean>>;
   setFavorite(input: ToggleFavoriteInput, active: boolean): Promise<Result<boolean>>;
+  reorderFavorites?(orderedItemKeys: readonly string[], profileId?: string): Promise<Result<void>>;
   listFavorites(
     limit?: number,
     profileId?: string,
@@ -609,6 +624,12 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isOptionalProfileId(x['profileId']) &&
         (x['opts'] === undefined || isParentalUnlockedOption(x['opts']))
       );
+    case 'listWatched':
+      return (
+        isOptionalUserLimit(x['limit']) &&
+        isOptionalProfileId(x['profileId']) &&
+        (x['opts'] === undefined || isListWatchedOptions(x['opts']))
+      );
     case 'listFavorites':
       return (
         isOptionalUserLimit(x['limit']) &&
@@ -623,6 +644,8 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isToggleFavoriteInput(x['input']);
     case 'setFavorite':
       return isToggleFavoriteInput(x['input']) && typeof x['active'] === 'boolean';
+    case 'reorderFavorites':
+      return isOrderedFavoriteKeys(x['orderedItemKeys']) && isOptionalProfileId(x['profileId']);
     case 'listFavoriteKeys':
       return isOptionalProfileId(x['profileId']);
     case 'getTrackPreference':

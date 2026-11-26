@@ -1,4 +1,9 @@
-import { normalizeSyncServerUrl, type SecretStore } from '@elv/domain';
+import {
+  normalizeSyncServerUrl,
+  type PreferencesPatch,
+  type SecretStore,
+  sanitizeInitialPreferencesPatch,
+} from '@elv/domain';
 import {
   base64UrlDecode,
   base64UrlEncode,
@@ -34,6 +39,7 @@ import {
   type DesktopSyncFetchFn,
   errorCodeFrom,
   FEEDBACK_LOG_TAIL_LINES,
+  initialPrefsAppliedKey,
   isAuthTokenExpiredError,
   type PersistedSessionRecord,
   parsePersistedSession,
@@ -60,6 +66,7 @@ export interface DesktopSyncServiceOptions {
   readonly readLogTail?: (maxLines: number) => Promise<readonly string[]>;
   readonly getLocalSnapshot?: () => Promise<VaultSnapshot> | VaultSnapshot;
   readonly applyMergedSnapshot?: (snapshot: VaultSnapshot) => Promise<void> | void;
+  readonly onInitialPreferences?: (patch: PreferencesPatch) => Promise<void> | void;
 }
 
 /** Electron main-process E2EE sync, telemetry, and feedback service (`#26`, `#458`). */
@@ -67,7 +74,9 @@ export interface DesktopSyncService {
   hydrate(): Promise<void>;
   getState(): SyncAccountStateIpc;
   subscribe(listener: (state: SyncAccountStateIpc) => void): () => void;
+  subscribeInitialPreferences(listener: (patch: PreferencesPatch) => void): () => void;
   setServerUrl(serverUrl: string): void;
+  setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): void;
   signIn(email: string, password: string): Promise<SyncActionResultIpc>;
   register(email: string, password: string, confirmPassword: string): Promise<SyncActionResultIpc>;
   acknowledgeRecoveryCode(): void;
@@ -106,10 +115,34 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
   let serverUrl = normalizeSyncServerUrl(options.initialServerUrl ?? '', '');
   let state: SyncAccountStateIpc = SIGNED_OUT_STATE;
   const listeners = new Set<(next: SyncAccountStateIpc) => void>();
+  const initialPrefsListeners = new Set<(patch: PreferencesPatch) => void>();
   let activeSession: SyncSession | null = null;
   let lastRevision = 0;
   let localSnapshot: VaultSnapshot = createEmptyVaultSnapshot(0);
+  let localSyncablePrefs: Readonly<Record<string, unknown>> | undefined;
   const qrSessions = new Map<string, QrPairingSession>();
+
+  const hasAppliedInitialPrefs = async (userId: string): Promise<boolean> => {
+    const val = await options.secretStore
+      .get(initialPrefsAppliedKey(userId))
+      .catch(() => undefined);
+    return val === '1';
+  };
+
+  const markInitialPrefsApplied = async (userId: string): Promise<void> => {
+    await options.secretStore.set(initialPrefsAppliedKey(userId), '1').catch(() => undefined);
+  };
+
+  const emitInitialPreferences = async (patch: PreferencesPatch): Promise<void> => {
+    await options.onInitialPreferences?.(patch);
+    for (const listener of [...initialPrefsListeners]) {
+      try {
+        listener(patch);
+      } catch {
+        // Isolate subscriber errors.
+      }
+    }
+  };
 
   const setState = (next: SyncAccountStateIpc): void => {
     state = Object.freeze({
@@ -264,6 +297,9 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
         vaultKey: base64UrlDecode(persisted.vaultKeyB64),
       };
       lastRevision = persisted.lastRevision;
+      if (persisted.lastSyncedAtIso !== null || persisted.lastRevision > 0) {
+        await markInitialPrefsApplied(persisted.userId);
+      }
       setState({
         status: 'signed_in',
         email: persisted.email,
@@ -282,8 +318,20 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       };
     },
 
+    subscribeInitialPreferences(listener) {
+      initialPrefsListeners.add(listener);
+      return () => {
+        initialPrefsListeners.delete(listener);
+      };
+    },
+
     setServerUrl(nextUrl: string): void {
       serverUrl = normalizeSyncServerUrl(nextUrl, '');
+    },
+
+    setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): void {
+      const sanitized = sanitizeInitialPreferencesPatch(preferences) as Record<string, unknown>;
+      localSyncablePrefs = Object.keys(sanitized).length > 0 ? sanitized : undefined;
     },
 
     async signIn(email, password): Promise<SyncActionResultIpc> {
@@ -326,6 +374,7 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       activeSession = res.value.session;
       lastRevision = 0;
       await persistSession(res.value.session, null, 0);
+      await markInitialPrefsApplied(res.value.session.user.id);
       setState({
         status: 'signed_in',
         email: res.value.session.user.email,
@@ -370,9 +419,20 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
         return { ok: false, errorCode };
       }
 
-      const currentLocal = options.getLocalSnapshot
-        ? await options.getLocalSnapshot()
-        : localSnapshot;
+      const alreadyAppliedInitialPrefs = await hasAppliedInitialPrefs(session.user.id);
+      let remoteInitialPrefs = pullRes.value.snapshot?.initialPreferences;
+      const shouldApplyRemoteInitial =
+        !alreadyAppliedInitialPrefs && remoteInitialPrefs !== undefined;
+
+      const baseLocal = options.getLocalSnapshot ? await options.getLocalSnapshot() : localSnapshot;
+      const currentLocal: VaultSnapshot =
+        !shouldApplyRemoteInitial && localSyncablePrefs !== undefined
+          ? {
+              ...baseLocal,
+              initialPreferences: localSyncablePrefs,
+              initialPreferencesUpdatedAt: clock.now(),
+            }
+          : baseLocal;
       let merged =
         pullRes.value.snapshot !== null
           ? mergeVaultSnapshots(currentLocal, pullRes.value.snapshot)
@@ -385,6 +445,9 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
           const errorCode = errorCodeFrom(retryPull.error);
           setState({ ...state, status: 'signed_in', errorCode });
           return { ok: false, errorCode };
+        }
+        if (remoteInitialPrefs === undefined && retryPull.value.snapshot?.initialPreferences) {
+          remoteInitialPrefs = retryPull.value.snapshot.initialPreferences;
         }
         merged =
           retryPull.value.snapshot !== null
@@ -401,6 +464,15 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
 
       localSnapshot = merged;
       await options.applyMergedSnapshot?.(merged);
+      if (!alreadyAppliedInitialPrefs) {
+        if (remoteInitialPrefs !== undefined) {
+          const patch = sanitizeInitialPreferencesPatch(remoteInitialPrefs);
+          if (Object.keys(patch).length > 0) {
+            await emitInitialPreferences(patch);
+          }
+        }
+        await markInitialPrefsApplied(session.user.id);
+      }
       lastRevision = pushRes.value.revision;
       const syncedIso = new Date(clock.now()).toISOString();
       await persistSession(session, syncedIso, lastRevision);
@@ -660,6 +732,7 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       activeSession = null;
       qrSessions.clear();
       listeners.clear();
+      initialPrefsListeners.clear();
     },
   };
 }

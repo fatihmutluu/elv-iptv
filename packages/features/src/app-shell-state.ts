@@ -523,6 +523,7 @@ export function createObservedCatalog(
     ...(c.setWatched ? { setWatched: c.setWatched.bind(c) } : {}),
     ...(c.getProgress ? { getProgress: c.getProgress.bind(c) } : {}),
     ...(c.listContinueWatching ? { listContinueWatching: c.listContinueWatching.bind(c) } : {}),
+    ...(c.listWatched ? { listWatched: c.listWatched.bind(c) } : {}),
     ...(c.listProgressByKeys ? { listProgressByKeys: c.listProgressByKeys.bind(c) } : {}),
     ...(c.listSeriesUnplayedCounts
       ? { listSeriesUnplayedCounts: c.listSeriesUnplayedCounts.bind(c) }
@@ -530,6 +531,7 @@ export function createObservedCatalog(
     ...(c.clearProgress ? { clearProgress: c.clearProgress.bind(c) } : {}),
     ...(c.toggleFavorite ? { toggleFavorite: c.toggleFavorite.bind(c) } : {}),
     ...(c.setFavorite ? { setFavorite: c.setFavorite.bind(c) } : {}),
+    ...(c.reorderFavorites ? { reorderFavorites: c.reorderFavorites.bind(c) } : {}),
     ...(c.listFavorites ? { listFavorites: c.listFavorites.bind(c) } : {}),
     ...(c.listFavoriteKeys ? { listFavoriteKeys: c.listFavoriteKeys.bind(c) } : {}),
     ...(c.flushPendingWrites ? { flushPendingWrites: c.flushPendingWrites.bind(c) } : {}),

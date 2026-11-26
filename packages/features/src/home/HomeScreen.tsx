@@ -1,7 +1,10 @@
 import type { BrowseKind, CatalogService, ItemRow, SourceRow } from '@elv/data';
+import { DEFAULT_HOME_LAYOUT, type HomeLayoutSectionPref, normalizeHomeLayout } from '@elv/domain';
 import {
+  type ContextMenuAnchor,
   CtaButton,
   TvFocusAnchor,
+  useContextMenu,
   useI18n,
   useKeyInterpreter,
   useTheme,
@@ -9,6 +12,7 @@ import {
 } from '@elv/ui-kit';
 import {
   type ComponentRef,
+  Fragment,
   type ReactElement,
   useCallback,
   useEffect,
@@ -30,18 +34,19 @@ import { AmbientBackdrop } from '../shared/AmbientBackdrop';
 import { CollectionManagerOverlay } from '../shared/CollectionManagerOverlay';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
 import { HOME_HERO_AUTO_ROTATE_MS, useHomeHeroAutoRotate } from './HomeHeroBackdrop';
-import { buildHomeRailSpecs, HomeRail, type HomeRailId } from './HomeRail';
+import { buildHomeRailSpecs, HomeRail, type HomeRailId, type HomeRailSpec } from './HomeRail';
 import { computeHomeLayout, HomeEmptyState, HomeSkeleton } from './HomeSkeleton';
+import { buildHomeCardContextMenuItems } from './home-context-menu';
 import {
   buildHeroSlides,
   buildHomeCollectionRails,
   buildHomeDetailTarget,
-  buildHomeLivePlayTarget,
   buildHomeRailSets,
   buildVodPlayTarget,
   type HomeHeroSlide,
   type HomeRailEntry,
   type HomeRailKind,
+  resolveHomeLivePlayTarget,
 } from './home-model';
 import { useHomeData } from './useHomeData';
 import { buildHomeNavRows, type HomeNavRowId, useTvHomeNavigation } from './useTvHomeNavigation';
@@ -53,6 +58,8 @@ export interface HomeScreenProps {
   readonly refreshToken: number;
   readonly userStateVersion?: number;
   readonly onPlay: (target: PlayTarget) => void;
+  readonly onOpenMultiView?: (target: PlayTarget) => void;
+  readonly onOpenPopout?: (target: PlayTarget) => void;
   readonly onOpenTab: (tab: BrowseKind) => void;
   readonly onOpenDetail?: (target: DetailTarget) => void;
   readonly onOpenSeries?: (item: ItemRow) => void;
@@ -60,19 +67,14 @@ export interface HomeScreenProps {
   readonly onScrollTopChange?: (scrolled: boolean) => void;
   readonly onFocusTopNav?: () => void;
   readonly isActiveScope?: boolean;
+  /** User-configured Home section visibility and order from `PreferencesSnapshot.homeLayout`. */
+  readonly homeLayout?: readonly HomeLayoutSectionPref[];
 }
 
 export { HOME_HERO_AUTO_ROTATE_MS };
 
 const SCROLL_FROST_THRESHOLD = 24;
-const RAIL_ORDER: readonly HomeRailKind[] = [
-  'continue',
-  'recentChannels',
-  'live',
-  'mylist',
-  'movies',
-  'series',
-];
+const RAIL_ORDER: readonly HomeRailKind[] = ['continue', 'live', 'mylist', 'movies', 'series'];
 
 type TvKeyHandler = Parameters<typeof useKeyInterpreter>[0];
 
@@ -94,6 +96,8 @@ export function HomeScreen({
   refreshToken,
   userStateVersion = 0,
   onPlay,
+  onOpenMultiView,
+  onOpenPopout,
   onOpenTab,
   onOpenDetail,
   onOpenSeries,
@@ -101,10 +105,12 @@ export function HomeScreen({
   onScrollTopChange,
   onFocusTopNav,
   isActiveScope = true,
+  homeLayout,
 }: HomeScreenProps): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
+  const contextMenu = useContextMenu();
 
   const layout = computeHomeLayout(viewport, theme);
   const { isTv, isTouch, isPortrait, padX, railGap, heroTopClearance } = layout;
@@ -149,12 +155,30 @@ export function HomeScreen({
         recentChannels: data.recentChannels ?? [],
         liveItems: data.liveItems,
         liveCategoryName: data.liveCategory?.name ?? null,
+        nowNextByKey: data.nowNextByKey,
         favorites: data.favorites,
         movies: data.movies,
         series: data.series,
         progressByKey: data.progressByKey,
       }),
     [data],
+  );
+
+  const effectiveHomeLayout = useMemo(
+    () => (homeLayout !== undefined ? normalizeHomeLayout(homeLayout) : DEFAULT_HOME_LAYOUT),
+    [homeLayout],
+  );
+  const visibleSections = useMemo(
+    () => effectiveHomeLayout.filter((section) => section.visible),
+    [effectiveHomeLayout],
+  );
+  const visibleSectionOrder = useMemo(
+    () => visibleSections.map((section) => section.id),
+    [visibleSections],
+  );
+  const collectionsVisible = useMemo(
+    () => visibleSections.some((section) => section.id === 'collections'),
+    [visibleSections],
   );
 
   const collectionRails = useMemo(
@@ -178,7 +202,7 @@ export function HomeScreen({
     RAIL_ORDER.some((railId) => railSets[railId].length > 0) ||
     collectionRails.length > 0;
   const isLoadingInitial = data.loading && !data.hasLoaded;
-  const showCollectionsSection = hasContent && hasCollectionsSupport;
+  const showCollectionsSection = hasContent && hasCollectionsSupport && collectionsVisible;
 
   const navRows = useMemo(
     () =>
@@ -187,9 +211,9 @@ export function HomeScreen({
         hasContent,
         heroActionCount: heroActionIds.length,
         railOrder: RAIL_ORDER,
+        sectionOrder: visibleSectionOrder,
         railCounts: {
           continue: railSets.continue.length,
-          recentChannels: railSets.recentChannels.length,
           live: railSets.live.length,
           mylist: railSets.mylist.length,
           movies: railSets.movies.length,
@@ -205,6 +229,7 @@ export function HomeScreen({
       isLoadingInitial,
       railSets,
       showCollectionsSection,
+      visibleSectionOrder,
     ],
   );
 
@@ -233,24 +258,21 @@ export function HomeScreen({
     [onOpenDetail, onOpenSeries, onOpenTab, onPlay],
   );
 
+  const buildLiveTargetForEntry = useCallback(
+    (entry: HomeRailEntry): PlayTarget =>
+      resolveHomeLivePlayTarget(catalog, data.liveCategory, data.liveItems, entry),
+    [catalog, data.liveCategory, data.liveItems],
+  );
+
   const activateEntry = useCallback(
-    (entry: HomeRailEntry, index: number) => {
+    (entry: HomeRailEntry, _index?: number) => {
       if (entry.kind === 'live') {
-        onPlay(
-          data.liveCategory && entry.catalogItem
-            ? buildHomeLivePlayTarget(catalog, data.liveCategory, entry.catalogItem, index)
-            : {
-                itemKey: entry.itemKey,
-                sourceId: entry.sourceId,
-                title: entry.title,
-                kind: 'live',
-              },
-        );
+        onPlay(buildLiveTargetForEntry(entry));
         return;
       }
       openVodOrSeries(entry);
     },
-    [catalog, data.liveCategory, onPlay, openVodOrSeries],
+    [buildLiveTargetForEntry, onPlay, openVodOrSeries],
   );
 
   const activatePosterEntry = useCallback(
@@ -262,7 +284,30 @@ export function HomeScreen({
     [activateEntry, onOpenDetail],
   );
 
-  const { toggleMyList, toggleWatched } = data;
+  const { toggleMyList, toggleWatched, removeFromContinueWatching } = data;
+  const handleRemoveFromContinue = useCallback(
+    (entry: HomeRailEntry) => void removeFromContinueWatching(entry.itemKey),
+    [removeFromContinueWatching],
+  );
+  const handleOpenEntryDetail = useCallback(
+    (entry: HomeRailEntry) => {
+      const detail = buildHomeDetailTarget(entry);
+      if (detail && onOpenDetail) onOpenDetail(detail);
+    },
+    [onOpenDetail],
+  );
+  const handleOpenLiveMultiView = useCallback(
+    (entry: HomeRailEntry) => {
+      onOpenMultiView?.(buildLiveTargetForEntry(entry));
+    },
+    [buildLiveTargetForEntry, onOpenMultiView],
+  );
+  const handleOpenLivePopout = useCallback(
+    (entry: HomeRailEntry) => {
+      onOpenPopout?.(buildLiveTargetForEntry(entry));
+    },
+    [buildLiveTargetForEntry, onOpenPopout],
+  );
   const handleOpenHeroDetails = useCallback(
     (slide: HomeHeroSlide) => {
       const detail = buildHomeDetailTarget(slide);
@@ -439,7 +484,60 @@ export function HomeScreen({
     () => void data.refreshCollections(),
     [data.refreshCollections],
   );
-  const railSpecs = useMemo(() => buildHomeRailSpecs(i18n.t), [i18n]);
+  const railSpecsById = useMemo(() => {
+    const map = new Map<HomeRailKind, HomeRailSpec>();
+    for (const spec of buildHomeRailSpecs(i18n.t)) map.set(spec.id, spec);
+    return map;
+  }, [i18n]);
+  const openRailContextMenu = useCallback(
+    (railId: HomeRailId, entry: HomeRailEntry, index: number, anchor?: ContextMenuAnchor) => {
+      const isFavorite = data.favoriteKeys.has(entry.itemKey);
+      const isWatched =
+        data.watchedOverrides.get(entry.itemKey) ??
+        (entry.watched ||
+          (entry.kind === 'series' &&
+            data.unplayedBySeriesKey.get(entry.itemKey)?.watched === true));
+      const items = buildHomeCardContextMenuItems({
+        railId,
+        entry,
+        index,
+        isFavorite,
+        isWatched,
+        t: i18n.t,
+        onPlay: activateEntry,
+        ...(onOpenDetail !== undefined ? { onOpenDetail: handleOpenEntryDetail } : {}),
+        onRemoveFromContinue: handleRemoveFromContinue,
+        onToggleFavorite: handleQuickToggleFavorite,
+        onToggleWatched: handleQuickToggleWatched,
+        ...(onOpenMultiView !== undefined ? { onOpenMultiView: handleOpenLiveMultiView } : {}),
+        ...(onOpenPopout !== undefined ? { onOpenPopout: handleOpenLivePopout } : {}),
+      });
+      if (items.length === 0) return;
+      contextMenu.openContextMenu({
+        title: entry.title,
+        ...(entry.subtitle ? { subtitle: entry.subtitle } : {}),
+        ...(anchor !== undefined ? { anchor } : {}),
+        items,
+      });
+    },
+    [
+      activateEntry,
+      contextMenu,
+      data.favoriteKeys,
+      data.unplayedBySeriesKey,
+      data.watchedOverrides,
+      handleOpenEntryDetail,
+      handleOpenLiveMultiView,
+      handleOpenLivePopout,
+      handleQuickToggleFavorite,
+      handleQuickToggleWatched,
+      handleRemoveFromContinue,
+      i18n.t,
+      onOpenDetail,
+      onOpenMultiView,
+      onOpenPopout,
+    ],
+  );
   const focusedAmbientEntry = useMemo(() => {
     if (
       !isTv ||
@@ -471,7 +569,7 @@ export function HomeScreen({
           title={focusedAmbientEntry?.title ?? ''}
         />
       ) : null}
-      {isTv && isActiveScope && !collectionManagerOpen ? (
+      {isTv && isActiveScope && !collectionManagerOpen && !contextMenu.isOpen ? (
         <HomeTvKeyBridge onEvent={tvNav.handleTvKey} />
       ) : null}
 
@@ -522,90 +620,113 @@ export function HomeScreen({
             padX={padX}
             focusedAction={focusedHeroAction}
           />
-          {railSpecs.map((spec) => (
-            <HomeRail
-              key={spec.id}
-              id={spec.id}
-              testID={`home-rail-${spec.id}`}
-              itemTestIdPrefix={`home-${spec.id}-item`}
-              title={spec.title}
-              {...(spec.actionLabel !== undefined ? { actionLabel: spec.actionLabel } : {})}
-              {...(spec.tab !== undefined ? { actionTab: spec.tab, onPressAction: onOpenTab } : {})}
-              variant={spec.variant}
-              items={railSets[spec.id]}
-              cardWidth={spec.variant === 'wide' ? layout.wideCardWidth : layout.posterCardWidth}
-              gap={railGap}
-              padX={padX}
-              isTv={isTv}
-              isTouch={isTouch}
-              focusedIndex={tvNav.focusedRowId === spec.id ? tvNav.focusedCol : null}
-              onPressItem={spec.variant === 'poster' ? activatePosterEntry : activateEntry}
-              {...(spec.variant === 'poster'
-                ? {
-                    favoriteKeys: data.favoriteKeys,
-                    watchedOverrides: data.watchedOverrides,
-                    unplayedBySeriesKey: data.unplayedBySeriesKey,
-                    onQuickPlay: activateEntry,
-                    onQuickToggleFavorite: handleQuickToggleFavorite,
-                    onQuickToggleWatched: handleQuickToggleWatched,
-                  }
-                : {})}
-              onLayoutY={recordRailY}
-            />
-          ))}
-          {showCollectionsSection ? (
-            <View
-              testID="home-collections-header"
-              onLayout={(e) => {
-                railYRef.current.set('collections-manage', e.nativeEvent.layout.y);
-              }}
-              style={[styles.collectionsHeader, { paddingHorizontal: padX }]}
-            >
-              <View style={styles.collectionsTitleWrap}>
-                <Text style={[theme.typography.h2, { color: theme.colors.textPrimary }]}>
-                  {i18n.t('collections.title')}
-                </Text>
-                {collectionRails.length === 0 ? (
-                  <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-                    {i18n.t('collections.subtitle')}
-                  </Text>
-                ) : null}
-              </View>
-              <CtaButton
-                testID="home-collections-manage-btn"
-                variant="secondary"
-                label={i18n.t('collections.manageTitle')}
-                focusable={!isTv}
-                focused={isTv && tvNav.focusedRowId === 'collections-manage'}
-                onPress={handleOpenCollectionManager}
+          {visibleSections.map((section) => {
+            if (section.id === 'collections') {
+              return (
+                <Fragment key="collections">
+                  {showCollectionsSection ? (
+                    <View
+                      testID="home-collections-header"
+                      onLayout={(e) => {
+                        railYRef.current.set('collections-manage', e.nativeEvent.layout.y);
+                      }}
+                      style={[styles.collectionsHeader, { paddingHorizontal: padX }]}
+                    >
+                      <View style={styles.collectionsTitleWrap}>
+                        <Text style={[theme.typography.h2, { color: theme.colors.textPrimary }]}>
+                          {i18n.t('collections.title')}
+                        </Text>
+                        {collectionRails.length === 0 ? (
+                          <Text
+                            style={[
+                              theme.typography.caption,
+                              { color: theme.colors.textSecondary },
+                            ]}
+                          >
+                            {i18n.t('collections.subtitle')}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <CtaButton
+                        testID="home-collections-manage-btn"
+                        variant="secondary"
+                        label={i18n.t('collections.manageTitle')}
+                        focusable={!isTv}
+                        focused={isTv && tvNav.focusedRowId === 'collections-manage'}
+                        onPress={handleOpenCollectionManager}
+                      />
+                    </View>
+                  ) : null}
+                  {collectionRails.map((colRail) => (
+                    <HomeRail
+                      key={colRail.id}
+                      id={colRail.id}
+                      testID={`home-rail-collection-${colRail.collectionId}`}
+                      itemTestIdPrefix={`home-collection-${colRail.collectionId}-item`}
+                      title={colRail.title}
+                      variant="poster"
+                      items={colRail.items}
+                      cardWidth={layout.posterCardWidth}
+                      gap={railGap}
+                      padX={padX}
+                      isTv={isTv}
+                      isTouch={isTouch}
+                      focusedIndex={tvNav.focusedRowId === colRail.id ? tvNav.focusedCol : null}
+                      onPressItem={activatePosterEntry}
+                      onContextMenuItem={(entry, index, anchor) =>
+                        openRailContextMenu(colRail.id, entry, index, anchor)
+                      }
+                      favoriteKeys={data.favoriteKeys}
+                      watchedOverrides={data.watchedOverrides}
+                      unplayedBySeriesKey={data.unplayedBySeriesKey}
+                      onQuickPlay={activateEntry}
+                      onQuickToggleFavorite={handleQuickToggleFavorite}
+                      onQuickToggleWatched={handleQuickToggleWatched}
+                      onLayoutY={recordRailY}
+                    />
+                  ))}
+                </Fragment>
+              );
+            }
+            const spec = railSpecsById.get(section.id);
+            if (!spec) return null;
+            return (
+              <HomeRail
+                key={spec.id}
+                id={spec.id}
+                testID={`home-rail-${spec.id}`}
+                itemTestIdPrefix={`home-${spec.id}-item`}
+                title={spec.title}
+                {...(spec.actionLabel !== undefined ? { actionLabel: spec.actionLabel } : {})}
+                {...(spec.tab !== undefined
+                  ? { actionTab: spec.tab, onPressAction: onOpenTab }
+                  : {})}
+                variant={spec.variant}
+                items={railSets[spec.id]}
+                cardWidth={spec.variant === 'wide' ? layout.wideCardWidth : layout.posterCardWidth}
+                gap={railGap}
+                padX={padX}
+                isTv={isTv}
+                isTouch={isTouch}
+                focusedIndex={tvNav.focusedRowId === spec.id ? tvNav.focusedCol : null}
+                onPressItem={spec.variant === 'poster' ? activatePosterEntry : activateEntry}
+                onContextMenuItem={(entry, index, anchor) =>
+                  openRailContextMenu(spec.id, entry, index, anchor)
+                }
+                {...(spec.variant === 'poster'
+                  ? {
+                      favoriteKeys: data.favoriteKeys,
+                      watchedOverrides: data.watchedOverrides,
+                      unplayedBySeriesKey: data.unplayedBySeriesKey,
+                      onQuickPlay: activateEntry,
+                      onQuickToggleFavorite: handleQuickToggleFavorite,
+                      onQuickToggleWatched: handleQuickToggleWatched,
+                    }
+                  : {})}
+                onLayoutY={recordRailY}
               />
-            </View>
-          ) : null}
-          {collectionRails.map((colRail) => (
-            <HomeRail
-              key={colRail.id}
-              id={colRail.id}
-              testID={`home-rail-collection-${colRail.collectionId}`}
-              itemTestIdPrefix={`home-collection-${colRail.collectionId}-item`}
-              title={colRail.title}
-              variant="poster"
-              items={colRail.items}
-              cardWidth={layout.posterCardWidth}
-              gap={railGap}
-              padX={padX}
-              isTv={isTv}
-              isTouch={isTouch}
-              focusedIndex={tvNav.focusedRowId === colRail.id ? tvNav.focusedCol : null}
-              onPressItem={activatePosterEntry}
-              favoriteKeys={data.favoriteKeys}
-              watchedOverrides={data.watchedOverrides}
-              unplayedBySeriesKey={data.unplayedBySeriesKey}
-              onQuickPlay={activateEntry}
-              onQuickToggleFavorite={handleQuickToggleFavorite}
-              onQuickToggleWatched={handleQuickToggleWatched}
-              onLayoutY={recordRailY}
-            />
-          ))}
+            );
+          })}
         </ScrollView>
       )}
       <CollectionManagerOverlay

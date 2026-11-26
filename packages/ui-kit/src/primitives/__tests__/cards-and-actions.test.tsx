@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { buildTheme, TABULAR_NUMS_STYLE, ThemeProvider } from '../../theme';
 import { ViewportProvider } from '../../viewport';
 import { CtaButton } from '../CtaButton';
@@ -503,5 +503,73 @@ describe('PosterCard & WideCard (Cinema Quietude compliance)', () => {
     expect(playBadgeStyle.height).toBe(28);
     expect(playBadgeStyle.backgroundColor).toBe(hcTheme.colors.ctaBg);
     expect(screen.queryByTestId('vod-nobadge-play-badge')).toBeNull();
+  });
+
+  it('invokes onContextMenu with pointer anchor on web right-click and without anchor on long-press for PosterCard and WideCard without triggering onPress', async () => {
+    try {
+      jest.replaceProperty(Platform, 'OS', 'web');
+      const onPosterPress = jest.fn();
+      const onPosterCtx = jest.fn();
+      const onWidePress = jest.fn();
+      const onWideCtx = jest.fn();
+
+      const view = await render(
+        <ThemeProvider>
+          <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+            <PosterCard
+              title="Arrival"
+              onPress={onPosterPress}
+              onContextMenu={onPosterCtx}
+              testID="ctx-poster"
+            />
+            <WideCard
+              title="News 24"
+              live
+              onPress={onWidePress}
+              onContextMenu={onWideCtx}
+              testID="ctx-wide"
+            />
+          </ViewportProvider>
+        </ThemeProvider>,
+      );
+
+      const posterPrevent = jest.fn();
+      const posterStop = jest.fn();
+      await fireEvent(screen.getByTestId('ctx-poster'), 'contextMenu', {
+        preventDefault: posterPrevent,
+        stopPropagation: posterStop,
+        nativeEvent: { clientX: 310, clientY: 220 },
+      });
+      expect(posterPrevent).toHaveBeenCalledTimes(1);
+      expect(posterStop).toHaveBeenCalledTimes(1);
+      expect(onPosterCtx).toHaveBeenCalledWith({ x: 310, y: 220 });
+      expect(onPosterPress).not.toHaveBeenCalled();
+
+      const widePrevent = jest.fn();
+      const wideStop = jest.fn();
+      await fireEvent(screen.getByTestId('ctx-wide'), 'contextMenu', {
+        preventDefault: widePrevent,
+        stopPropagation: wideStop,
+        clientX: 420,
+        clientY: 180,
+      });
+      expect(widePrevent).toHaveBeenCalledTimes(1);
+      expect(wideStop).toHaveBeenCalledTimes(1);
+      expect(onWideCtx).toHaveBeenCalledWith({ x: 420, y: 180 });
+      expect(onWidePress).not.toHaveBeenCalled();
+
+      // Long-press invokes onContextMenu with no anchor and does not trigger onPress
+      await fireEvent(screen.getByTestId('ctx-poster'), 'longPress');
+      expect(onPosterCtx).toHaveBeenLastCalledWith();
+      expect(onPosterPress).not.toHaveBeenCalled();
+
+      await fireEvent(screen.getByTestId('ctx-wide'), 'longPress');
+      expect(onWideCtx).toHaveBeenLastCalledWith();
+      expect(onWidePress).not.toHaveBeenCalled();
+
+      await view.unmount();
+    } finally {
+      jest.restoreAllMocks();
+    }
   });
 });

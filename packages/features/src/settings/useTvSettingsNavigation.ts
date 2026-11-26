@@ -1,4 +1,11 @@
-import type { RefreshRateBucket } from '@elv/domain';
+import {
+  DEFAULT_HOME_LAYOUT,
+  type HomeLayoutSectionId,
+  type HomeLayoutSectionPref,
+  homeLayoutEquals,
+  normalizeHomeLayout,
+  type RefreshRateBucket,
+} from '@elv/domain';
 import { createFocusStore, type FocusStore, findList, type KeyEvent } from '@elv/focus-core';
 import type { THEME_PRESET_IDS } from '@elv/ui-kit';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -66,7 +73,9 @@ export type AppearanceFocusId =
   | 'reset-preferences'
   | 'toggle-crash-reports-opt-in'
   | 'toggle-crash-reports-include-logs'
-  | 'preview-diagnostic-report';
+  | 'preview-diagnostic-report'
+  | `home-layout-${HomeLayoutSectionId}`
+  | 'home-layout-reset';
 
 /** Focusable control identifiers inside the Playback settings panel. */
 export type PlaybackFocusId =
@@ -204,16 +213,24 @@ const APPEARANCE_ROWS_TAIL: readonly (readonly AppearanceFocusId[])[] = [
   ['preview-diagnostic-report'],
 ];
 
-const APPEARANCE_ROWS_DEFAULT: readonly (readonly AppearanceFocusId[])[] = [
-  ...APPEARANCE_ROWS_HEAD,
-  ...APPEARANCE_ROWS_TAIL,
-];
-
-const APPEARANCE_ROWS_TV: readonly (readonly AppearanceFocusId[])[] = [
-  ...APPEARANCE_ROWS_HEAD,
-  ...APPEARANCE_TV_ROWS,
-  ...APPEARANCE_ROWS_TAIL,
-];
+function buildAppearanceRows(
+  includeTvDisplayRows: boolean,
+  homeLayout?: readonly HomeLayoutSectionPref[],
+): readonly (readonly AppearanceFocusId[])[] {
+  const normalized = normalizeHomeLayout(homeLayout ?? DEFAULT_HOME_LAYOUT);
+  const homeLayoutRows: (readonly AppearanceFocusId[])[] = normalized.map((entry) => [
+    `home-layout-${entry.id}` as AppearanceFocusId,
+  ]);
+  if (!homeLayoutEquals(normalized, DEFAULT_HOME_LAYOUT)) {
+    homeLayoutRows.push(['home-layout-reset']);
+  }
+  return [
+    ...APPEARANCE_ROWS_HEAD,
+    ...(includeTvDisplayRows ? APPEARANCE_TV_ROWS : []),
+    ...APPEARANCE_ROWS_TAIL,
+    ...homeLayoutRows,
+  ];
+}
 
 const PLAYBACK_ROWS_HEAD: readonly (readonly PlaybackFocusId[])[] = [
   [
@@ -347,10 +364,11 @@ function getSectionRows(
   showNightModeDrc: boolean,
   showExternalPlayer: boolean,
   includeTvDisplayRows: boolean,
+  homeLayout?: readonly HomeLayoutSectionPref[],
 ): Readonly<Record<PreferenceSettingsSection, readonly (readonly string[])[]>> {
   const playbackKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}`;
   return {
-    appearance: includeTvDisplayRows ? APPEARANCE_ROWS_TV : APPEARANCE_ROWS_DEFAULT,
+    appearance: buildAppearanceRows(includeTvDisplayRows, homeLayout),
     playback: PLAYBACK_ROWS_CACHE[playbackKey] ?? PLAYBACK_ROWS_DEFAULT,
     liveTv: LIVE_TV_ROWS,
   };
@@ -370,6 +388,7 @@ function createSettingsFocusStore(
   showNightModeDrc: boolean,
   showExternalPlayer: boolean,
   includeTvDisplayRows: boolean,
+  homeLayout?: readonly HomeLayoutSectionPref[],
 ): FocusStore {
   const initialIdx = Math.max(0, SETTINGS_SECTIONS.indexOf(initialSection));
   const sectionRows = getSectionRows(
@@ -377,6 +396,7 @@ function createSettingsFocusStore(
     showNightModeDrc,
     showExternalPlayer,
     includeTvDisplayRows,
+    homeLayout,
   );
   const sectionLists = PREFERENCE_SECTIONS.flatMap((sec) =>
     sectionRows[sec].map((row, i) => ({
@@ -435,6 +455,8 @@ export interface UseTvSettingsNavigationOptions {
   readonly showExternalPlayer?: boolean;
   /** When `true`, keeps the current Settings pane (`'nav'` | `'content'`) while `isActiveScope` temporarily blurs for a root overlay. */
   readonly preservePaneOnBlur?: boolean;
+  /** Current Home screen section order/visibility so TV Appearance focus matches the rendered `HomeLayoutEditor` order. */
+  readonly homeLayout?: readonly HomeLayoutSectionPref[];
 }
 
 /** Return value of {@link useTvSettingsNavigation}. */
@@ -467,22 +489,26 @@ export function useTvSettingsNavigation({
   showNightModeDrc = Platform.OS === 'android',
   showExternalPlayer = Platform.OS === 'android' || (Platform.OS === 'ios' && !Platform.isTV),
   preservePaneOnBlur = false,
+  homeLayout,
 }: UseTvSettingsNavigationOptions): TvSettingsNavigationState {
   const [pane, setPane] = useState<'nav' | 'content'>(() =>
     isActiveScope && section === 'sources' ? 'content' : 'nav',
   );
   const [coords, setCoords] = useState<SectionCoords>(INITIAL_COORDS);
 
+  const normalizedHomeLayout = normalizeHomeLayout(homeLayout ?? DEFAULT_HOME_LAYOUT);
+  const isHomeLayoutCustomized = !homeLayoutEquals(normalizedHomeLayout, DEFAULT_HOME_LAYOUT);
   const sectionRows = getSectionRows(
     showAndroidDecoder,
     showNightModeDrc,
     showExternalPlayer,
     isTv,
+    normalizedHomeLayout,
   );
   const sectionRowsRef = useRef(sectionRows);
   sectionRowsRef.current = sectionRows;
   const storeRef = useRef<FocusStore | null>(null);
-  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}:${isTv ? '1' : '0'}`;
+  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}:${isTv ? '1' : '0'}:${isHomeLayoutCustomized ? '1' : '0'}`;
   const storeConfigKeyRef = useRef(storeConfigKey);
   if (storeRef.current === null || storeConfigKeyRef.current !== storeConfigKey) {
     storeConfigKeyRef.current = storeConfigKey;
@@ -492,9 +518,19 @@ export function useTvSettingsNavigation({
       showNightModeDrc,
       showExternalPlayer,
       isTv,
+      normalizedHomeLayout,
     );
   }
   const store = storeRef.current;
+
+  const appearanceRowCount = sectionRows.appearance.length;
+  useEffect(() => {
+    setCoords((prev) => {
+      const maxRow = Math.max(0, appearanceRowCount - 1);
+      if (prev.appearance.row <= maxRow) return prev;
+      return { ...prev, appearance: { row: maxRow, col: 0 } };
+    });
+  }, [appearanceRowCount]);
 
   const paneRef = useRef(pane);
   paneRef.current = pane;
@@ -641,6 +677,32 @@ export function useTvSettingsNavigation({
           activeControlId,
           event.key === 'right' ? 1 : -1,
         );
+        return true;
+      }
+      if (
+        activeSection === 'appearance' &&
+        activeControlId !== undefined &&
+        activeControlId.startsWith('home-layout-') &&
+        activeControlId !== 'home-layout-reset' &&
+        (event.kind === 'press' || event.kind === 'repeat') &&
+        (event.key === 'left' || event.key === 'right')
+      ) {
+        const delta: -1 | 1 = event.key === 'right' ? 1 : -1;
+        const firstHomeRowIdx = rows.findIndex(
+          (row) => row[0]?.startsWith('home-layout-') && row[0] !== 'home-layout-reset',
+        );
+        const sectionIdx = firstHomeRowIdx >= 0 ? currentRow - firstHomeRowIdx : -1;
+        const targetSectionIdx = sectionIdx + delta;
+        if (
+          firstHomeRowIdx >= 0 &&
+          targetSectionIdx >= 0 &&
+          targetSectionIdx < DEFAULT_HOME_LAYOUT.length
+        ) {
+          onAdjustControlRef.current?.(activeSection, activeControlId, delta);
+          const nextRow = firstHomeRowIdx + targetSectionIdx;
+          store.focus(rowListId(activeSection, nextRow), 0);
+          setCoords((prev) => ({ ...prev, [activeSection]: { row: nextRow, col: 0 } }));
+        }
         return true;
       }
 

@@ -8,11 +8,13 @@ import {
   isSyncActionResult,
   isSyncClaimQrRequest,
   isSyncDeleteAccountRequest,
+  isSyncInitialPrefsPayload,
   isSyncPollQrRequest,
   isSyncQrPairingSession,
   isSyncQrPollStatus,
   isSyncRegisterRequest,
   isSyncSetServerUrlRequest,
+  isSyncSetSyncablePrefsRequest,
   isSyncSignInRequest,
   isTelemetryRecordRequest,
   isTelemetrySetOptInRequest,
@@ -165,6 +167,31 @@ export function createSyncBridges(ipc: SyncIpcRendererLike): DesktopSyncPreloadB
         throw new Error(`${SYNC_CHANNELS.setServerUrl} received invalid server URL`);
       }
       await ipc.invoke(SYNC_CHANNELS.setServerUrl, payload);
+    },
+
+    async setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): Promise<void> {
+      const payload = { preferences };
+      if (!isSyncSetSyncablePrefsRequest(payload)) {
+        throw new Error(`${SYNC_CHANNELS.setSyncablePrefs} received invalid preferences payload`);
+      }
+      await ipc.invoke(SYNC_CHANNELS.setSyncablePrefs, payload);
+    },
+
+    onInitialPreferencesReceived(
+      listener: (preferences: Readonly<Record<string, unknown>>) => void,
+    ): () => void {
+      const wrapped = (_event: unknown, payload: unknown): void => {
+        if (!isSyncInitialPrefsPayload(payload)) return;
+        try {
+          listener(payload);
+        } catch {
+          // Isolate renderer listener failures.
+        }
+      };
+      ipc.on(SYNC_CHANNELS.initialPrefsReceived, wrapped);
+      return () => {
+        ipc.removeListener(SYNC_CHANNELS.initialPrefsReceived, wrapped);
+      };
     },
   });
 

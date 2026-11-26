@@ -41,6 +41,7 @@ export interface UseLiveCatalogOptions {
   readonly sources: readonly SourceRow[];
   readonly refreshToken?: number;
   readonly userStateVersion?: number;
+  readonly onFavoritesMutated?: () => void;
   readonly mode?: LiveMode;
   readonly selectedCategoryId: string | null;
   readonly activeChannelKey: string | null;
@@ -72,6 +73,7 @@ export interface LiveCatalogState {
   readonly favoriteSource: PagedListSource<ItemRow>;
   readonly favoritesVersion: number;
   readonly toggleFavorite: (channel: ItemRow) => Promise<void>;
+  readonly reorderFavorite: (fromIndex: number, toIndex: number) => Promise<void>;
   readonly nowNextByKey: ReadonlyMap<string, NowNextEntry>;
   readonly nowNextVersion: number;
   readonly hydrateNowNext: (channelKeys: readonly string[]) => void;
@@ -232,7 +234,15 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
 
   const nowNext = useLiveNowNext({ catalog, refreshToken, nowRef });
   const { hydrateNowNext } = nowNext;
-  const favorites = useLiveFavorites({ catalog, sources, refreshToken, userStateVersion });
+  const favorites = useLiveFavorites({
+    catalog,
+    sources,
+    refreshToken,
+    userStateVersion,
+    ...(options.onFavoritesMutated !== undefined
+      ? { onFavoritesMutated: options.onFavoritesMutated }
+      : {}),
+  });
   const { favoriteChannels } = favorites;
   const chHistory = useLiveChannelHistory({
     catalog,

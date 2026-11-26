@@ -53,6 +53,8 @@ export interface CatalogDiscoveryState {
   readonly hasLoadedCategories: boolean;
   readonly hasMoreCategories: boolean;
   readonly loadMoreCategories: () => void;
+  readonly removeContinueItem: (itemKey: string) => WatchProgressRow | undefined;
+  readonly restoreContinueItem: (row: WatchProgressRow) => void;
 }
 
 const EMPTY_ITEMS_MAP: ReadonlyMap<string, readonly ItemRow[]> = new Map();
@@ -410,6 +412,30 @@ export function useCatalogDiscovery({
     }
   }, [categories.length, onVisibleCategoryCountChange, visibleCategoryCount]);
 
+  const removeContinueItem = useCallback(
+    (itemKey: string): WatchProgressRow | undefined => {
+      const removed = continueItemsRef.current.find((row) => row.itemKey === itemKey);
+      if (!removed) return undefined;
+      const next = continueItemsRef.current.filter((row) => row.itemKey !== itemKey);
+      continueItemsRef.current = next;
+      setContinueItems(next);
+      if (hasLoadedRef.current) syncCache({ continueItems: next });
+      return removed;
+    },
+    [syncCache],
+  );
+
+  const restoreContinueItem = useCallback(
+    (row: WatchProgressRow) => {
+      if (continueItemsRef.current.some((entry) => entry.itemKey === row.itemKey)) return;
+      const next = [row, ...continueItemsRef.current].sort((a, b) => b.updatedAt - a.updatedAt);
+      continueItemsRef.current = next;
+      setContinueItems(next);
+      if (hasLoadedRef.current) syncCache({ continueItems: next });
+    },
+    [syncCache],
+  );
+
   return useMemo<CatalogDiscoveryState>(
     () => ({
       categories,
@@ -423,6 +449,8 @@ export function useCatalogDiscovery({
       hasLoadedCategories,
       hasMoreCategories,
       loadMoreCategories,
+      removeContinueItem,
+      restoreContinueItem,
     }),
     [
       categories,
@@ -434,6 +462,8 @@ export function useCatalogDiscovery({
       loadingRailIds,
       progressByKey,
       railItemsByCategoryId,
+      removeContinueItem,
+      restoreContinueItem,
       unplayedBySeriesKey,
       visibleCategories,
     ],

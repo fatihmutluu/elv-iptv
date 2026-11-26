@@ -1,16 +1,18 @@
 import type { ItemRow, NowNextEntry, ProgrammeRow } from '@elv/data';
 import type { LogoBackdropModePref } from '@elv/domain';
 import { TvScrollEdgeFade, useI18n, useTheme, webBackdropBlur } from '@elv/ui-kit';
-import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
+import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  Platform,
   StyleSheet,
   View,
   VirtualizedList,
 } from 'react-native';
 import type { CatalogLayoutMetrics, PagedListSource } from '../shared';
 import { ZapChannelRow } from './LiveZapRow';
+import { computeDragTargetIndex } from './live-favorite-reorder';
 import type { SourceBadgeInfo } from './source-badge';
 
 /** Width of the left-anchored Mini-Guide Zap Drawer on Landscape viewports (`UI_UX_PHILOSOPHY.md` §3). */
@@ -57,11 +59,17 @@ export interface LiveZapDrawerProps {
   readonly cleanChannelTitles?: boolean;
   readonly hydrateNowNext: (channelKeys: readonly string[]) => void;
   readonly onSelectChannel: (channel: ItemRow, index: number) => void;
+  readonly onReorderFavorite?: (fromIndex: number, toIndex: number) => void;
   readonly onOpenContextMenu?: (
     channel: ItemRow,
     index: number,
     programme: ProgrammeRow | null,
   ) => void;
+}
+
+interface DragPointerState {
+  readonly startIndex: number;
+  readonly targetIndex: number;
 }
 
 /**
@@ -83,6 +91,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     cleanChannelTitles = false,
     hydrateNowNext,
     onSelectChannel,
+    onReorderFavorite,
     onOpenContextMenu,
   } = p;
   const theme = useTheme();
@@ -90,14 +99,74 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
   const zapRowHeight = layout.isTouch ? 58 : 54;
   const lastBucketRef = useRef(-1);
   const zapVisibleRef = useRef({ start: 0, end: 12 });
+  const [dragState, setDragState] = useState<DragPointerState | null>(null);
+  const dragRef = useRef<{ startIndex: number; startY: number; targetIndex: number } | null>(null);
+  const onReorderRef = useRef(onReorderFavorite);
+  onReorderRef.current = onReorderFavorite;
 
   const itemCount = channelSource?.count() ?? 0;
+  const reorderable = onReorderFavorite !== undefined && itemCount > 1;
   const tvFocus = Math.max(0, focusedZapIndex ?? 0);
   const tvWindowStart =
     itemCount <= TV_ZAP_WINDOW_SIZE
       ? 0
       : Math.max(0, Math.min(itemCount - TV_ZAP_WINDOW_SIZE, tvFocus - TV_ZAP_LEAD_ROWS));
   const tvWindowEnd = Math.min(itemCount - 1, tvWindowStart + TV_ZAP_WINDOW_SIZE - 1);
+
+  const handleStartDrag = useCallback((index: number, clientY: number) => {
+    dragRef.current = { startIndex: index, startY: clientY, targetIndex: index };
+    setDragState({ startIndex: index, targetIndex: index });
+  }, []);
+
+  const handleMoveUp = useCallback((index: number) => {
+    if (index > 0) onReorderRef.current?.(index, index - 1);
+  }, []);
+
+  const handleMoveDown = useCallback(
+    (index: number) => {
+      if (index < itemCount - 1) onReorderRef.current?.(index, index + 1);
+    },
+    [itemCount],
+  );
+
+  const isDraggingAny = dragState !== null;
+  useEffect(() => {
+    if (!isDraggingAny || (Platform.OS as string) !== 'web') return;
+    const win = globalThis as {
+      addEventListener?: (type: string, fn: (e: { clientY?: number }) => void) => void;
+      removeEventListener?: (type: string, fn: (e: { clientY?: number }) => void) => void;
+    };
+    const onPointerMove = (e: { clientY?: number }) => {
+      const cur = dragRef.current;
+      if (!cur) return;
+      const deltaY = (e.clientY ?? cur.startY) - cur.startY;
+      const nextTarget = computeDragTargetIndex(cur.startIndex, deltaY, zapRowHeight, itemCount);
+      if (nextTarget !== cur.targetIndex) {
+        cur.targetIndex = nextTarget;
+        setDragState({ startIndex: cur.startIndex, targetIndex: nextTarget });
+      }
+    };
+    const finishDrag = (commit: boolean) => {
+      const cur = dragRef.current;
+      dragRef.current = null;
+      setDragState(null);
+      if (commit && cur && cur.targetIndex !== cur.startIndex) {
+        onReorderRef.current?.(cur.startIndex, cur.targetIndex);
+      }
+    };
+    const onPointerUp = () => finishDrag(true);
+    const onPointerCancel = () => finishDrag(false);
+    win.addEventListener?.('pointermove', onPointerMove);
+    win.addEventListener?.('pointerup', onPointerUp);
+    win.addEventListener?.('pointercancel', onPointerCancel);
+    win.addEventListener?.('blur', onPointerCancel);
+    return () => {
+      win.removeEventListener?.('pointermove', onPointerMove);
+      win.removeEventListener?.('pointerup', onPointerUp);
+      win.removeEventListener?.('pointercancel', onPointerCancel);
+      win.removeEventListener?.('blur', onPointerCancel);
+    };
+  }, [isDraggingAny, itemCount, zapRowHeight]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset zap hydration on channelSource change
   useEffect(() => {
@@ -155,6 +224,15 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     (slot: ZapListSlot) => {
       const row = slot.item;
       const isFocused = layout.isTv && focusedZapIndex === slot.index;
+      const isDragging = dragState !== null && dragState.startIndex === slot.index;
+      const dropIndicator: 'above' | 'below' | null =
+        dragState !== null &&
+        dragState.targetIndex !== dragState.startIndex &&
+        dragState.targetIndex === slot.index
+          ? dragState.targetIndex < dragState.startIndex
+            ? 'above'
+            : 'below'
+          : null;
       return (
         <View key={slot.index} style={isFocused ? styles.focusedRowLayer : undefined}>
           <ZapChannelRow
@@ -171,6 +249,13 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
             logoBackdropMode={logoBackdropMode}
             sourceBadge={row ? (sourceBadges?.get(row.sourceId) ?? null) : null}
             cleanChannelTitles={cleanChannelTitles}
+            reorderable={reorderable}
+            isDragging={isDragging}
+            dropIndicator={dropIndicator}
+            totalCount={itemCount}
+            onStartDrag={handleStartDrag}
+            onMoveUp={handleMoveUp}
+            onMoveDown={handleMoveDown}
             onSelectChannel={onSelectChannel}
             {...(onOpenContextMenu !== undefined ? { onOpenContextMenu } : {})}
           />
@@ -180,7 +265,12 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     [
       activeChannelKey,
       cleanChannelTitles,
+      dragState,
       focusedZapIndex,
+      handleMoveDown,
+      handleMoveUp,
+      handleStartDrag,
+      itemCount,
       layout.isTouch,
       layout.isTv,
       logoBackdropMode,
@@ -188,6 +278,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
       nowNextByKey,
       onOpenContextMenu,
       onSelectChannel,
+      reorderable,
       sourceBadges,
       zapRowHeight,
     ],
@@ -216,13 +307,17 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
       logoBackdropMode,
       sourceBadges,
       cleanChannelTitles,
+      dragState,
+      reorderable,
     }),
     [
       activeChannelKey,
       cleanChannelTitles,
+      dragState,
       focusedZapIndex,
       logoBackdropMode,
       nowNextVersion,
+      reorderable,
       sourceBadges,
       sourceVersion,
     ],

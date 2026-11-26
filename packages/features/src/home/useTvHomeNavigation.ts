@@ -1,3 +1,4 @@
+import type { HomeLayoutSectionId } from '@elv/domain';
 import { createFocusStore, type FocusStore, findList, type KeyEvent } from '@elv/focus-core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useBrowseFocusMemory } from '../shared';
@@ -27,7 +28,6 @@ const STATIC_HOME_ROW_IDS: readonly HomeNavRowId[] = [
   'empty',
   'hero',
   'continue',
-  'recentChannels',
   'live',
   'mylist',
   'movies',
@@ -75,6 +75,7 @@ export function buildHomeNavRows(input: {
   readonly heroActionCount: number;
   readonly railOrder: readonly HomeRailKind[];
   readonly railCounts: Readonly<Record<HomeRailKind, number>>;
+  readonly sectionOrder?: readonly HomeLayoutSectionId[];
   readonly showCollectionsManage?: boolean;
   readonly collectionRails?: readonly {
     readonly id: HomeCollectionRailId;
@@ -85,16 +86,33 @@ export function buildHomeNavRows(input: {
   if (!input.hasContent) return [{ id: 'empty', count: 1 }];
   const rows: HomeNavRowDescriptor[] = [];
   if (input.heroActionCount > 0) rows.push({ id: 'hero', count: input.heroActionCount });
+
+  const pushCollections = (): void => {
+    if (input.showCollectionsManage) {
+      rows.push({ id: 'collections-manage', count: 1 });
+    }
+    for (const col of input.collectionRails ?? []) {
+      if (col.count > 0) rows.push({ id: col.id, count: col.count });
+    }
+  };
+
+  if (input.sectionOrder !== undefined) {
+    for (const sectionId of input.sectionOrder) {
+      if (sectionId === 'collections') {
+        pushCollections();
+      } else {
+        const count = input.railCounts[sectionId];
+        if (count > 0) rows.push({ id: sectionId, count });
+      }
+    }
+    return rows;
+  }
+
   for (const id of input.railOrder) {
     const count = input.railCounts[id];
     if (count > 0) rows.push({ id, count });
   }
-  if (input.showCollectionsManage) {
-    rows.push({ id: 'collections-manage', count: 1 });
-  }
-  for (const col of input.collectionRails ?? []) {
-    if (col.count > 0) rows.push({ id: col.id, count: col.count });
-  }
+  pushCollections();
   return rows;
 }
 

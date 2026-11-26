@@ -1,4 +1,4 @@
-import type { ItemRow, WatchProgressRow } from '@elv/data';
+import type { FavoriteRow, ItemRow, WatchProgressRow } from '@elv/data';
 import { describe, expect, it } from 'vitest';
 import { createPagedListSource } from '../shared';
 import {
@@ -7,14 +7,19 @@ import {
   CATEGORY_LOAD_BATCH,
   chunkRowItems,
   clampGridFocus,
+  collectWatchedCatalogItems,
   computeProgressRatio,
   computeRowCount,
+  detailTargetFromFavorite,
   detailTargetFromProgress,
   EMPTY_CATALOG_MEMORY,
   filterContinueWatchingForCatalog,
+  filterFavoritesForCatalog,
   GRID_MAX_PAGES,
   GRID_PAGE_SIZE,
   INITIAL_VISIBLE_CATEGORIES,
+  itemRowFromFavorite,
+  itemRowFromWatchProgress,
   MAX_CONCURRENT_RAIL_QUERIES,
   RAIL_ITEM_LIMIT,
   resolveActiveAlphabetLetter,
@@ -321,5 +326,119 @@ describe('resolveActiveAlphabetLetter & stepAlphabetRailLetter (#407)', () => {
     expect(stepAlphabetRailLetter(buckets, 'M', 'down')).toBe('Z');
     expect(stepAlphabetRailLetter(buckets, 'Z', 'down')).toBe('Z');
     expect(stepAlphabetRailLetter(buckets, 'Z', 'up')).toBe('M');
+  });
+});
+
+describe('quick filter helpers (My List & Watched)', () => {
+  it('filters favorites by kind and converts to ItemRow and DetailTarget', () => {
+    const favMovie: FavoriteRow = {
+      profileId: 'default',
+      sourceId: 'src-1',
+      itemKey: 'movie:fav-1',
+      kind: 'movie',
+      title: 'Blade Runner',
+      logo: 'https://img.test/br.jpg',
+      year: 1982,
+      rating: 8.1,
+      addedAt: 1000,
+    };
+    const favSeries: FavoriteRow = {
+      profileId: 'default',
+      sourceId: 'src-1',
+      itemKey: 'series:fav-2',
+      kind: 'series',
+      title: 'Andor',
+      logo: null,
+      year: 2022,
+      rating: 8.5,
+      addedAt: 2000,
+    };
+
+    expect(filterFavoritesForCatalog([favMovie, favSeries], 'movie')).toEqual([favMovie]);
+    expect(filterFavoritesForCatalog([favMovie, favSeries], 'series')).toEqual([favSeries]);
+
+    expect(itemRowFromFavorite(favMovie, 'movie')).toMatchObject({
+      key: 'movie:fav-1',
+      kind: 'movie',
+      name: 'Blade Runner',
+      year: 1982,
+      rating: 8.1,
+    });
+    expect(detailTargetFromFavorite(favSeries, 'series')).toEqual({
+      itemKey: 'series:fav-2',
+      sourceId: 'src-1',
+      kind: 'series',
+      title: 'Andor',
+      posterUri: null,
+      backdropUri: null,
+      year: 2022,
+      rating: 8.5,
+    });
+  });
+
+  it('collects deduplicated watched catalog items honoring watchedOverrides', () => {
+    const m0 = makeItem(0, 'movie');
+    const m1 = makeItem(1, 'movie');
+    const m2 = makeItem(2, 'movie');
+    const s0 = makeItem(0, 'series');
+
+    const watched = collectWatchedCatalogItems({
+      kind: 'movie',
+      railItemsByCategoryId: new Map([['cat-0', [m0, m1]]]),
+      extraItems: [m1, m2, s0],
+      progressByKey: new Map([
+        [m0.key, makeProgress(m0.key, { watched: true })],
+        [m1.key, makeProgress(m1.key, { watched: true })],
+      ]),
+      watchedOverrides: new Map([
+        [m1.key, false],
+        [m2.key, true],
+      ]),
+    });
+
+    expect(watched.map((i) => i.key)).toEqual([m0.key, m2.key]);
+  });
+
+  it('prefers full-catalog watchedRows, enriches rail metadata, honors watchedOverrides, and omits gridBack when gridHeaderCount is 0', () => {
+    const mRail = makeItem(0, 'movie');
+    const mOpt = makeItem(1, 'movie');
+    const deepWatched = makeProgress('movie:deep-50000', {
+      title: 'Deep Archive Film',
+      watched: true,
+    });
+    const railWatched = makeProgress(mRail.key, { title: mRail.name, watched: true });
+    const unmarked = makeProgress('movie:unmarked', { title: 'Unmarked Film', watched: true });
+
+    expect(itemRowFromWatchProgress(deepWatched, 'movie')).toMatchObject({
+      key: 'movie:deep-50000',
+      kind: 'movie',
+      name: 'Deep Archive Film',
+    });
+
+    const watched = collectWatchedCatalogItems({
+      kind: 'movie',
+      railItemsByCategoryId: new Map([['cat-0', [mRail, mOpt]]]),
+      watchedRows: [deepWatched, railWatched, unmarked],
+      progressByKey: new Map(),
+      watchedOverrides: new Map([
+        [unmarked.itemKey, false],
+        [mOpt.key, true],
+      ]),
+    });
+
+    expect(watched.map((i) => i.key)).toEqual(['movie:deep-50000', mRail.key, mOpt.key]);
+    expect(watched[1]?.year).toBe(mRail.year);
+    expect(watched[1]?.rating).toBe(mRail.rating);
+
+    expect(
+      buildCatalogNavRows({
+        isLoading: false,
+        hasSources: true,
+        hasCategories: true,
+        categoryChipCount: 5,
+        isGridMode: true,
+        gridHeaderCount: 0,
+      }),
+    ).toEqual([{ id: 'catChips', count: 5 }]);
   });
 });

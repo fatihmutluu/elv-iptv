@@ -1,8 +1,23 @@
 import { memo, type ReactElement, useCallback, useState } from 'react';
-import { Pressable, type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  type StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+} from 'react-native';
 import { useI18n } from '../i18n';
 import { Icon } from '../icons';
-import { TABULAR_NUMS_STYLE, useTheme, webCursorPointer, webShadow, webTransition } from '../theme';
+import {
+  type ContextMenuAnchor,
+  TABULAR_NUMS_STYLE,
+  useTheme,
+  webCursorPointer,
+  webShadow,
+  webTransition,
+} from '../theme';
 import { useViewport } from '../viewport';
 import { ArtworkImage, type LogoBackdropMode } from './ArtworkImage';
 import type { DeadHostRegistry } from './dead-host-registry';
@@ -23,6 +38,8 @@ export interface WideCardProps {
   /** Renders the circular play pill at bottom-left over artwork (defaults to `progress !== undefined && !live`). */
   showPlayBadge?: boolean;
   onPress?: () => void;
+  /** Invoked on desktop web right-click (with pointer anchor) or touch/TV long-press (centered). */
+  readonly onContextMenu?: (anchor?: ContextMenuAnchor) => void;
   onFocus?: () => void;
   focusable?: boolean;
   focused?: boolean;
@@ -66,6 +83,25 @@ function scaleFont(size: number, fontScale: number): number {
   return Math.round(size * fontScale * 2) / 2;
 }
 
+interface WebContextMenuEventLike {
+  preventDefault?: () => void;
+  stopPropagation?: () => void;
+  clientX?: number;
+  clientY?: number;
+  nativeEvent?: { clientX?: number; clientY?: number };
+}
+
+function readContextMenuAnchor(
+  event: WebContextMenuEventLike | undefined,
+): ContextMenuAnchor | undefined {
+  const x = event?.nativeEvent?.clientX ?? event?.clientX;
+  const y = event?.nativeEvent?.clientY ?? event?.clientY;
+  if (typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)) {
+    return { x, y };
+  }
+  return undefined;
+}
+
 function WideCardInner({
   title,
   subtitle,
@@ -78,6 +114,7 @@ function WideCardInner({
   logoBackdropMode,
   showPlayBadge,
   onPress,
+  onContextMenu,
   onFocus,
   focusable = true,
   focused,
@@ -101,6 +138,26 @@ function WideCardInner({
   const handleBlur = useCallback(() => setNativeFocused(false), []);
   const handleHoverIn = useCallback(() => setHovered(true), []);
   const handleHoverOut = useCallback(() => setHovered(false), []);
+  const handleLongPress = useCallback(() => {
+    onContextMenu?.();
+  }, [onContextMenu]);
+  const handleWebContextMenu = useCallback(
+    (event: WebContextMenuEventLike | undefined) => {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      const anchor = readContextMenuAnchor(event);
+      if (anchor !== undefined) {
+        onContextMenu?.(anchor);
+      } else {
+        onContextMenu?.();
+      }
+    },
+    [onContextMenu],
+  );
+  const webContextMenuProps =
+    Platform.OS === 'web' && onContextMenu !== undefined
+      ? ({ onContextMenu: handleWebContextMenu } as Record<string, unknown>)
+      : {};
 
   const trimmedBadge = badge?.trim() ?? '';
   const clamped = progress !== undefined ? clampProgress(progress) : undefined;
@@ -124,6 +181,10 @@ function WideCardInner({
       accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
       focusable={focusable}
       onPress={onPress}
+      {...(onContextMenu !== undefined
+        ? { onLongPress: handleLongPress, delayLongPress: 450 }
+        : {})}
+      {...webContextMenuProps}
       onFocus={handleFocus}
       onBlur={handleBlur}
       onHoverIn={handleHoverIn}

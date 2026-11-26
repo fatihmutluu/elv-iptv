@@ -70,6 +70,8 @@ export interface AppShellStageProps {
   readonly onPopDetail: () => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onPlay: (target: PlayTarget) => void;
+  readonly onOpenMultiView?: (target: PlayTarget) => void;
+  readonly onOpenPopout?: (target: PlayTarget) => void;
   readonly onSelectTab: (tab: AppTab, focusContent?: boolean) => void;
   readonly onOpenSources: () => void;
   readonly onOpenChannelManagement: () => void;
@@ -78,6 +80,7 @@ export interface AppShellStageProps {
   readonly onRegisterStopPreview?: (stop: (() => Promise<void>) | null) => void;
   readonly suppressEmbeddedPreview?: boolean;
   readonly onChannelsMutated: () => void;
+  readonly onFavoritesMutated?: () => void;
   readonly reminderVersion?: number;
   readonly onReminderChanged?: () => void;
   readonly onScrollTopChange: (scrolled: boolean) => void;
@@ -191,7 +194,10 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         key={p.contentIsolationKey}
         sources={p.sources}
         userStateVersion={p.effectiveUserStateVersion}
+        homeLayout={p.preferences.preferences.homeLayout}
         onPlay={p.onPlay}
+        {...(p.onOpenMultiView !== undefined ? { onOpenMultiView: p.onOpenMultiView } : {})}
+        {...(p.onOpenPopout !== undefined ? { onOpenPopout: p.onOpenPopout } : {})}
         onOpenTab={p.onSelectTab}
         onOpenDetail={p.onOpenDetail}
         onOpenSources={p.onOpenSources}
@@ -244,10 +250,13 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         : {})}
       {...(p.suppressEmbeddedPreview ? { suppressEmbeddedPreview: true } : {})}
       onPlay={p.onPlay}
+      {...(p.onOpenMultiView !== undefined ? { onOpenMultiView: p.onOpenMultiView } : {})}
+      {...(p.onOpenPopout !== undefined ? { onOpenPopout: p.onOpenPopout } : {})}
       onOpenSources={p.onOpenSources}
       onOpenSearch={() => p.onSelectTab('search', true)}
       onOpenHome={() => p.onSelectTab('home', true)}
       onChannelsMutated={p.onChannelsMutated}
+      {...(p.onFavoritesMutated !== undefined ? { onFavoritesMutated: p.onFavoritesMutated } : {})}
       {...(p.reminderVersion !== undefined ? { reminderVersion: p.reminderVersion } : {})}
       {...(p.onReminderChanged !== undefined ? { onReminderChanged: p.onReminderChanged } : {})}
       {...stageProps}

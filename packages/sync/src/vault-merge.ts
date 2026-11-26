@@ -70,6 +70,8 @@ export interface VaultSnapshot {
   readonly collections: readonly SyncCollection[];
   readonly watchProgress: readonly SyncWatchProgress[];
   readonly watchedEpisodesBitfields: readonly SyncEpisodeBitfield[];
+  readonly initialPreferences?: Readonly<Record<string, unknown>>;
+  readonly initialPreferencesUpdatedAt?: number;
 }
 
 /** Creates an empty {@link VaultSnapshot} at `updatedAt`. */
@@ -217,6 +219,45 @@ function mergeBitfieldCollection(
     .map(([, value]) => value);
 }
 
+function mergeInitialPreferences(
+  local: VaultSnapshot,
+  remote: VaultSnapshot,
+): Pick<VaultSnapshot, 'initialPreferences' | 'initialPreferencesUpdatedAt'> {
+  const localPrefs = local.initialPreferences;
+  const remotePrefs = remote.initialPreferences;
+  if (localPrefs === undefined && remotePrefs === undefined) return {};
+  if (localPrefs !== undefined && remotePrefs === undefined) {
+    return {
+      initialPreferences: localPrefs,
+      ...(local.initialPreferencesUpdatedAt !== undefined
+        ? { initialPreferencesUpdatedAt: local.initialPreferencesUpdatedAt }
+        : {}),
+    };
+  }
+  if (localPrefs === undefined && remotePrefs !== undefined) {
+    return {
+      initialPreferences: remotePrefs,
+      ...(remote.initialPreferencesUpdatedAt !== undefined
+        ? { initialPreferencesUpdatedAt: remote.initialPreferencesUpdatedAt }
+        : {}),
+    };
+  }
+  const localTs = local.initialPreferencesUpdatedAt ?? 0;
+  const remoteTs = remote.initialPreferencesUpdatedAt ?? 0;
+  const pickLocal =
+    localTs !== remoteTs
+      ? localTs > remoteTs
+      : JSON.stringify(localPrefs) >= JSON.stringify(remotePrefs);
+  const chosenPrefs = pickLocal ? localPrefs : remotePrefs;
+  const chosenTs = pickLocal
+    ? local.initialPreferencesUpdatedAt
+    : remote.initialPreferencesUpdatedAt;
+  return {
+    ...(chosenPrefs !== undefined ? { initialPreferences: chosenPrefs } : {}),
+    ...(chosenTs !== undefined ? { initialPreferencesUpdatedAt: chosenTs } : {}),
+  };
+}
+
 /**
  * Deterministic, commutative, tombstone-aware LWW merge of two {@link VaultSnapshot} values.
  * Active watched-episode bitfields combine via bitwise OR while respecting newer tombstones.
@@ -236,5 +277,6 @@ export function mergeVaultSnapshots(local: VaultSnapshot, remote: VaultSnapshot)
       local.watchedEpisodesBitfields,
       remote.watchedEpisodesBitfields,
     ),
+    ...mergeInitialPreferences(local, remote),
   };
 }

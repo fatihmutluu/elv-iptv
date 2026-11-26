@@ -1,6 +1,7 @@
 import { memo, type ReactElement, useCallback, useRef, useState } from 'react';
 import {
   type GestureResponderEvent,
+  Platform,
   Pressable,
   type StyleProp,
   StyleSheet,
@@ -9,7 +10,14 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { Icon } from '../icons';
-import { TABULAR_NUMS_STYLE, useTheme, webCursorPointer, webShadow, webTransition } from '../theme';
+import {
+  type ContextMenuAnchor,
+  TABULAR_NUMS_STYLE,
+  useTheme,
+  webCursorPointer,
+  webShadow,
+  webTransition,
+} from '../theme';
 import { useViewport } from '../viewport';
 import { ArtworkImage } from './ArtworkImage';
 import type { DeadHostRegistry } from './dead-host-registry';
@@ -45,6 +53,8 @@ export interface PosterCardProps {
   /** Pointer-only hover quick-actions (`#409`). Never rendered on touch or TV. */
   readonly quickActions?: PosterCardQuickActions;
   onPress?: () => void;
+  /** Invoked on desktop web right-click (with pointer anchor) or touch/TV long-press (centered). */
+  readonly onContextMenu?: (anchor?: ContextMenuAnchor) => void;
   onFocus?: () => void;
   focusable?: boolean;
   focused?: boolean;
@@ -95,6 +105,25 @@ function stopQuickActionEvent(event: GestureResponderEvent | undefined): void {
   evt?.preventDefault?.();
 }
 
+interface WebContextMenuEventLike {
+  preventDefault?: () => void;
+  stopPropagation?: () => void;
+  clientX?: number;
+  clientY?: number;
+  nativeEvent?: { clientX?: number; clientY?: number };
+}
+
+function readContextMenuAnchor(
+  event: WebContextMenuEventLike | undefined,
+): ContextMenuAnchor | undefined {
+  const x = event?.nativeEvent?.clientX ?? event?.clientX;
+  const y = event?.nativeEvent?.clientY ?? event?.clientY;
+  if (typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)) {
+    return { x, y };
+  }
+  return undefined;
+}
+
 function PosterCardInner({
   title,
   meta,
@@ -107,6 +136,7 @@ function PosterCardInner({
   unplayedLabel,
   quickActions,
   onPress,
+  onContextMenu,
   onFocus,
   focusable = true,
   focused,
@@ -140,6 +170,26 @@ function PosterCardInner({
     if (pointerHoverActiveRef.current) return;
     setHovered(false);
   }, []);
+  const handleLongPress = useCallback(() => {
+    onContextMenu?.();
+  }, [onContextMenu]);
+  const handleWebContextMenu = useCallback(
+    (event: WebContextMenuEventLike | undefined) => {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      const anchor = readContextMenuAnchor(event);
+      if (anchor !== undefined) {
+        onContextMenu?.(anchor);
+      } else {
+        onContextMenu?.();
+      }
+    },
+    [onContextMenu],
+  );
+  const webContextMenuProps =
+    Platform.OS === 'web' && onContextMenu !== undefined
+      ? ({ onContextMenu: handleWebContextMenu } as Record<string, unknown>)
+      : {};
 
   const trimmedBadge = badge?.trim() ?? '';
   const showUnplayedCount =
@@ -172,6 +222,10 @@ function PosterCardInner({
         accessibilityLabel={meta ? `${title}, ${meta}` : title}
         focusable={focusable}
         onPress={onPress}
+        {...(onContextMenu !== undefined
+          ? { onLongPress: handleLongPress, delayLongPress: 450 }
+          : {})}
+        {...webContextMenuProps}
         onFocus={handleFocus}
         onBlur={handleBlur}
         onHoverIn={handleHoverIn}

@@ -27,6 +27,7 @@ import { AboutLicensesPanel } from './AboutLicensesPanel';
 import {
   AppearancePanel,
   activateAppearanceControl,
+  adjustAppearanceControl,
   type SettingsPreferencesController,
 } from './AppearancePanel';
 import { LiveTvSettingsPanel } from './LiveTvSettingsPanel';
@@ -313,6 +314,10 @@ export function SettingsScreen({
 
   const handleAdjustControl = useCallback(
     (sec: PreferenceSettingsSection, controlId: string, delta: -1 | 1) => {
+      if (sec === 'appearance') {
+        adjustAppearanceControl(controlId as AppearanceFocusId, delta, preferences);
+        return;
+      }
       if (sec === 'playback') {
         adjustPlaybackControl(
           controlId as PlaybackFocusId,
@@ -336,6 +341,7 @@ export function SettingsScreen({
     showNightModeDrc,
     showExternalPlayer,
     preservePaneOnBlur: hasTransientOverlay,
+    ...(preferences !== undefined ? { homeLayout: preferences.preferences.homeLayout } : {}),
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
 

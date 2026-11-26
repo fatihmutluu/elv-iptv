@@ -60,6 +60,7 @@ export {
   type LiveWatchStageProps,
 } from './LiveWatchStage';
 export { LiveZapDrawer, type LiveZapDrawerProps, ZAP_DRAWER_WIDTH } from './LiveZapDrawer';
+export { computeDragTargetIndex, moveFavoriteItem } from './live-favorite-reorder';
 export {
   appendNumberDigit,
   type BoundedTtlCache,

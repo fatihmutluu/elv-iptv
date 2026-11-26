@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { createCatalogService } from './catalog';
 import { openCatalog } from './migrate';
+import { setParentalLock, updateParentalSettings } from './parental-repo';
 import { testDb } from './test-db';
 import {
   getWatchProgress,
   listContinueWatching,
+  listWatched,
   saveWatchProgress,
   setItemWatched,
 } from './user-state';
@@ -191,6 +194,201 @@ describe('user-state #432 fixes (setItemWatched UPSERT, monotonic watched, durat
       );
       const cw = await listContinueWatching(db, 10);
       expect(cw.map((r) => r.itemKey)).toEqual(['x:s1:movie:valid']);
+    } finally {
+      close();
+    }
+  });
+});
+
+describe('listWatched (P0-3)', () => {
+  it('returns watched movies, explicitly watched series, and episode-completed series ordered by updatedAt DESC, itemKey ASC', async () => {
+    const { db, close } = await setupDb();
+    try {
+      await db.run(
+        "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1', 'xtream', 'Src', 100, '{}')",
+      );
+      await db.run(
+        `INSERT INTO movies (source_id, key, name, name_fold, logo, run_id, version_group_key)
+         VALUES
+           ('s1', 'x:s1:movie:1', 'Movie One', 'movie one', 'https://img/m1.png', 1, 'vg:m1'),
+           ('s1', 'x:s1:movie:1b', 'Movie One 4K', 'movie one 4k', 'https://img/m1b.png', 1, 'vg:m1'),
+           ('s1', 'x:s1:movie:2', 'Movie Two', 'movie two', 'https://img/m2.png', 1, ''),
+           ('s1', 'x:s1:movie:3', 'In Progress Movie', 'in progress movie', NULL, 1, '')`,
+      );
+      await db.run(
+        `INSERT INTO series (source_id, key, name, name_fold, cover, run_id)
+         VALUES
+           ('s1', 'x:s1:series:explicit', 'Explicit Series', 'explicit series', 'https://img/se.png', 1),
+           ('s1', 'x:s1:series:epdone', 'Episode Completed Series', 'episode completed series', 'https://img/sd.png', 1),
+           ('s1', 'x:s1:series:partial', 'Partial Series', 'partial series', 'https://img/sp.png', 1)`,
+      );
+      await db.run(
+        `INSERT INTO episodes (source_id, key, series_key, season, episode, title, run_id)
+         VALUES
+           ('s1', 'x:s1:ep:d1', 'x:s1:series:epdone', 1, 1, 'Ep 1', 1),
+           ('s1', 'x:s1:ep:d2', 'x:s1:series:epdone', 1, 2, 'Ep 2', 1),
+           ('s1', 'x:s1:ep:p1', 'x:s1:series:partial', 1, 1, 'Part 1', 1),
+           ('s1', 'x:s1:ep:p2', 'x:s1:series:partial', 1, 2, 'Part 2', 1)`,
+      );
+      await db.run(
+        "INSERT INTO live (source_id, key, name, name_fold, logo, run_id) VALUES ('s1', 'x:s1:live:1', 'Live Ch', 'live ch', NULL, 1)",
+      );
+
+      // Multi-version movie watched (both versions in watch_progress -> should deduplicate to 1)
+      await saveWatchProgress(
+        db,
+        {
+          sourceId: 's1',
+          itemKey: 'x:s1:movie:1',
+          kind: 'movie',
+          title: 'Movie One',
+          positionMs: 95_000,
+          durationMs: 100_000,
+        },
+        () => 1_000,
+      );
+      await saveWatchProgress(
+        db,
+        {
+          sourceId: 's1',
+          itemKey: 'x:s1:movie:1b',
+          kind: 'movie',
+          title: 'Movie One 4K',
+          positionMs: 95_000,
+          durationMs: 100_000,
+        },
+        () => 1_500,
+      );
+
+      // Movie Two watched at 2_000 (same timestamp tie-break check with Explicit Series)
+      await setItemWatched(db, 'x:s1:movie:2', true, () => 2_000);
+      // In-progress movie (must NOT appear)
+      await saveWatchProgress(
+        db,
+        {
+          sourceId: 's1',
+          itemKey: 'x:s1:movie:3',
+          kind: 'movie',
+          title: 'In Progress Movie',
+          positionMs: 30_000,
+          durationMs: 100_000,
+        },
+        () => 5_000,
+      );
+      // Live item marked watched (must NOT appear in movie/series listWatched)
+      await setItemWatched(db, 'x:s1:live:1', true, () => 6_000);
+
+      // Explicit series watched at 2_000 (tie-breaks after x:s1:movie:2 by itemKey ASC)
+      await setItemWatched(db, 'x:s1:series:explicit', true, () => 2_000);
+
+      // All episodes watched for epdone (parent series NOT explicitly in watch_progress)
+      await setItemWatched(db, 'x:s1:ep:d1', true, () => 2_500);
+      await setItemWatched(db, 'x:s1:ep:d2', true, () => 3_000);
+
+      // Only 1 of 2 episodes watched for partial -> must NOT appear
+      await setItemWatched(db, 'x:s1:ep:p1', true, () => 4_000);
+
+      // Another profile's watched movie -> isolated
+      await setItemWatched(db, 'x:s1:movie:2', true, () => 9_000, 'kids');
+
+      // Omitted kind returns movies + series (explicit + episode-completed), ordered by updatedAt DESC, itemKey ASC
+      const all = await listWatched(db, 100, 'default');
+      expect(all.map((r) => [r.itemKey, r.kind, r.title, r.updatedAt])).toEqual([
+        ['x:s1:series:epdone', 'series', 'Episode Completed Series', 3_000],
+        ['x:s1:movie:2', 'movie', 'Movie Two', 2_000],
+        ['x:s1:series:explicit', 'series', 'Explicit Series', 2_000],
+        ['x:s1:movie:1', 'movie', 'Movie One', 1_500],
+      ]);
+
+      // Filter kind='movie'
+      const moviesOnly = await listWatched(db, 100, 'default', { kind: 'movie' });
+      expect(moviesOnly.map((r) => r.itemKey)).toEqual(['x:s1:movie:2', 'x:s1:movie:1']);
+
+      // Filter kind='series'
+      const seriesOnly = await listWatched(db, 100, 'default', { kind: 'series' });
+      expect(seriesOnly.map((r) => r.itemKey)).toEqual([
+        'x:s1:series:epdone',
+        'x:s1:series:explicit',
+      ]);
+
+      // Limit clamping (0 -> empty, 2 -> top 2)
+      expect(await listWatched(db, 0, 'default')).toEqual([]);
+      expect((await listWatched(db, 2, 'default')).map((r) => r.itemKey)).toEqual([
+        'x:s1:series:epdone',
+        'x:s1:movie:2',
+      ]);
+
+      // Profile isolation
+      expect((await listWatched(db, 100, 'kids')).map((r) => r.itemKey)).toEqual(['x:s1:movie:2']);
+
+      // Unmarking epdone series clears episode watched flags -> disappears from listWatched
+      await setItemWatched(db, 'x:s1:series:epdone', false, () => 4_500);
+      expect(
+        (await listWatched(db, 100, 'default', { kind: 'series' })).map((r) => r.itemKey),
+      ).toEqual(['x:s1:series:explicit']);
+    } finally {
+      close();
+    }
+  });
+
+  it('enforces parental locks unless parentalUnlocked is true and wires through CatalogService', async () => {
+    const { db, close } = await setupDb();
+    try {
+      await db.run(
+        "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1', 'xtream', 'Src', 100, '{}')",
+      );
+      await db.run(
+        `INSERT INTO movies (source_id, key, name, name_fold, logo, run_id)
+         VALUES
+           ('s1', 'x:s1:movie:safe', 'Family Film', 'family film', NULL, 1),
+           ('s1', 'x:s1:movie:locked', 'Restricted Film', 'restricted film', NULL, 1)`,
+      );
+      await setItemWatched(db, 'x:s1:movie:safe', true, () => 1_000);
+      await setItemWatched(db, 'x:s1:movie:locked', true, () => 2_000);
+      await updateParentalSettings(db, 'default', { enabled: true });
+      await setParentalLock(
+        db,
+        {
+          profileId: 'default',
+          sourceId: 's1',
+          targetKind: 'item',
+          itemKind: 'movie',
+          targetKey: 'x:s1:movie:locked',
+        },
+        true,
+      );
+
+      expect((await listWatched(db, 10, 'default')).map((r) => r.itemKey)).toEqual([
+        'x:s1:movie:safe',
+      ]);
+      expect(
+        (await listWatched(db, 10, 'default', { parentalUnlocked: true })).map((r) => r.itemKey),
+      ).toEqual(['x:s1:movie:locked', 'x:s1:movie:safe']);
+
+      const secrets = new Map<string, string>();
+      const svc = createCatalogService({
+        db,
+        secrets: {
+          get: async (k) => secrets.get(k),
+          set: async (k, v) => {
+            secrets.set(k, v);
+          },
+          delete: async (k) => {
+            secrets.delete(k);
+          },
+        },
+        scheduler: { yieldNow: async () => undefined },
+        http: {
+          get: async () => {
+            throw new Error('unused');
+          },
+        },
+        clock: () => 3_000,
+      });
+      expect(
+        (await svc.listWatched?.(10, 'default', { kind: 'movie' }))?.map((r) => r.itemKey),
+      ).toEqual(['x:s1:movie:safe']);
+      await svc.close();
     } finally {
       close();
     }

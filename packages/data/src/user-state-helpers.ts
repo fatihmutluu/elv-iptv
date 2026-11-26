@@ -4,7 +4,8 @@ import { sourceOfKey } from './queries-shared';
 /** Default profile identifier used before multi-profile selection is configured. */
 export const DEFAULT_PROFILE_ID = 'default';
 
-const MAX_LIST_LIMIT = 250;
+/** Maximum number of user-state rows returned or reordered in a single call. */
+export const MAX_USER_LIST_LIMIT = 250;
 
 /** Content kind stored in `watch_progress` and `favorites`. */
 export type UserItemKind = 'live' | 'movie' | 'series' | 'episode';
@@ -44,6 +45,7 @@ export interface FavoriteRow {
   year: number | null;
   rating: number | null;
   addedAt: number;
+  readonly sortOrder?: number;
 }
 
 /** @internal Raw SQLite shape for `watch_progress`. */
@@ -77,6 +79,7 @@ export interface RawFavoriteRow {
   year: number | null;
   rating: number | null;
   added_at: number;
+  readonly sort_order: number;
 }
 
 /** @internal Catalog metadata hydrated when marking an unplayed item watched via UPSERT. */
@@ -114,7 +117,7 @@ export const clampMs = (v: number): number => (Number.isFinite(v) ? Math.max(0, 
 /** @internal Clamps list limits to `[0, 250]`. */
 export const clampLimit = (limit: number | undefined, fallback: number): number => {
   const n = limit === undefined || !Number.isFinite(limit) ? fallback : Math.floor(limit);
-  return Math.min(MAX_LIST_LIMIT, Math.max(0, n));
+  return Math.min(MAX_USER_LIST_LIMIT, Math.max(0, n));
 };
 
 /** @internal Coerces finite numeric values to truncated integers or `null`. */
@@ -164,6 +167,7 @@ export const mapFavoriteRow = (r: RawFavoriteRow): FavoriteRow => ({
   year: r.year,
   rating: r.rating,
   addedAt: r.added_at,
+  sortOrder: r.sort_order ?? 0,
 });
 
 /** @internal Validates required non-empty item metadata for user-state writes. */

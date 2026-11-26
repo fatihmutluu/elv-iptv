@@ -143,6 +143,27 @@ describe('createCatalogUiCache', () => {
     expect(cache.getHome()).toBeNull();
   });
 
+  it('clearHome invalidates only the Home snapshot while preserving Live and Catalog caches', () => {
+    const cache = createCatalogUiCache({ locale: 'en' });
+    cache.setHome({
+      continueWatching: [],
+      favorites: [],
+      favoriteKeys: new Set(),
+      progressByKey: new Map(),
+      liveCategory: null,
+      liveItems: [],
+      movies: [],
+      series: [],
+    });
+    cache.setLiveCategories([makeCategory('src-1', 'live', 0)]);
+    expect(cache.getHome()).not.toBeNull();
+    expect(cache.getLive()).not.toBeNull();
+
+    cache.clearHome?.();
+    expect(cache.getHome()).toBeNull();
+    expect(cache.getLive()).not.toBeNull();
+  });
+
   it('caps catalog rail categories (16) and items per rail (18) and enforces LRU max 12 grid first pages', () => {
     const cache = createCatalogUiCache({ locale: 'en' });
     const categories = Array.from({ length: 20 }, (_, i) => makeCategory('src-1', 'movie', i));

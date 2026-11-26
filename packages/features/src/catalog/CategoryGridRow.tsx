@@ -1,10 +1,12 @@
 import type { ItemRow, ItemSortOrder, SeriesUnplayedSummary, WatchProgressRow } from '@elv/data';
 import {
+  type ContextMenuAnchor,
   Icon,
   PosterCard,
   type PosterCardQuickActions,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
+  useContextMenu,
   useI18n,
   useTheme,
   webCursorPointer,
@@ -19,6 +21,7 @@ import {
   formatVodMeta,
   resolveSeriesBadgeProps,
 } from '../shared';
+import { buildCatalogPosterContextMenuItems } from './catalog-context-menu';
 import { computeProgressRatio } from './catalog-model';
 
 interface GridPosterSlotProps {
@@ -72,6 +75,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
 }: GridPosterSlotProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
+  const { openContextMenu } = useContextMenu();
   const handlePress = useCallback(() => {
     if (!item) return;
     const target = detailTargetFromItem(item, categoryId);
@@ -82,6 +86,39 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
   const progressWatched = progress?.watched === true;
   const effectiveWatched =
     watchedOverride ?? (progressWatched || (isSeries && unplayedSummary?.watched === true));
+
+  const handleContextMenu = useCallback(
+    (anchor?: ContextMenuAnchor) => {
+      if (!item) return;
+      openContextMenu({
+        title: item.name,
+        ...(anchor !== undefined ? { anchor } : {}),
+        items: buildCatalogPosterContextMenuItems({
+          item,
+          categoryId,
+          isFavorite,
+          isWatched: effectiveWatched,
+          i18n,
+          onOpenDetail,
+          ...(onQuickPlay !== undefined ? { onQuickPlay } : {}),
+          ...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {}),
+          ...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {}),
+        }),
+      });
+    },
+    [
+      categoryId,
+      effectiveWatched,
+      i18n,
+      isFavorite,
+      item,
+      onOpenDetail,
+      onQuickPlay,
+      onQuickToggleFavorite,
+      onQuickToggleWatched,
+      openContextMenu,
+    ],
+  );
 
   const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
     if (!item || (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched)) {
@@ -170,6 +207,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
       focusable={!isTv}
       focused={focused}
       onPress={handlePress}
+      onContextMenu={handleContextMenu}
     />
   );
 });

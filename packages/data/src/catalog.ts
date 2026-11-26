@@ -131,6 +131,8 @@ import {
   listFavorites,
   listProgressByKeys,
   listSeriesUnplayedCounts,
+  listWatched,
+  reorderFavorites,
   type SaveProgressInput,
   type SeriesUnplayedSummary,
   saveWatchProgress,
@@ -286,6 +288,11 @@ export interface CatalogService
     profileId?: string,
     opts?: { readonly parentalUnlocked?: boolean },
   ): Promise<WatchProgressRow[]>;
+  listWatched?(
+    limit?: number,
+    profileId?: string,
+    opts?: { readonly kind?: 'movie' | 'series'; readonly parentalUnlocked?: boolean },
+  ): Promise<WatchProgressRow[]>;
   listProgressByKeys?(itemKeys: readonly string[], profileId?: string): Promise<WatchProgressRow[]>;
   listSeriesUnplayedCounts?(
     seriesKeys: readonly string[],
@@ -294,6 +301,7 @@ export interface CatalogService
   clearProgress?(itemKey: string, profileId?: string): Promise<Result<void>>;
   toggleFavorite?(input: ToggleFavoriteInput): Promise<Result<boolean>>;
   setFavorite?(input: ToggleFavoriteInput, active: boolean): Promise<Result<boolean>>;
+  reorderFavorites?(orderedItemKeys: readonly string[], profileId?: string): Promise<Result<void>>;
   listFavorites?(
     limit?: number,
     profileId?: string,
@@ -680,6 +688,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     },
     listContinueWatching: async (limit, profileId, opts) =>
       playtime.resolveRowLogos(await listContinueWatching(db, limit, profileId, opts)),
+    listWatched: async (limit, profileId, opts) =>
+      playtime.resolveRowLogos(await listWatched(db, limit, profileId, opts)),
     listProgressByKeys: async (itemKeys, profileId) =>
       playtime.resolveRowLogos(await listProgressByKeys(db, itemKeys, profileId)),
     listSeriesUnplayedCounts: (seriesKeys, profileId) =>
@@ -698,6 +708,11 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       const updated = await setFavorite(db, input, active, clock);
       if (updated.ok) await syncUserData();
       return updated;
+    },
+    async reorderFavorites(orderedItemKeys, profileId) {
+      const reordered = await reorderFavorites(db, orderedItemKeys, profileId);
+      if (reordered.ok) await syncUserData();
+      return reordered;
     },
     listFavorites: async (limit, profileId, opts) =>
       playtime.resolveRowLogos(await listFavorites(db, limit, profileId, opts)),

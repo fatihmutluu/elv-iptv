@@ -149,6 +149,8 @@ export function createDesktopCatalogFromBridge(
     getProgress: (itemKey, profileId) => bridge.getProgress(itemKey, profileId),
     listContinueWatching: (limit, profileId, opts) =>
       bridge.listContinueWatching(limit, profileId, opts),
+    listWatched: (limit, profileId, opts) =>
+      bridge.listWatched ? bridge.listWatched(limit, profileId, opts) : Promise.resolve([]),
     listProgressByKeys: (itemKeys, profileId) => bridge.listProgressByKeys(itemKeys, profileId),
     listSeriesUnplayedCounts: (seriesKeys, profileId) =>
       bridge.listSeriesUnplayedCounts
@@ -159,6 +161,10 @@ export function createDesktopCatalogFromBridge(
       bridge.toggleFavorite({ ...input, title: sanitizeDisplayText(input.title) }),
     setFavorite: (input, active) =>
       bridge.setFavorite({ ...input, title: sanitizeDisplayText(input.title) }, active),
+    reorderFavorites: (orderedItemKeys, profileId) =>
+      bridge.reorderFavorites
+        ? bridge.reorderFavorites(orderedItemKeys, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
     listFavorites: (limit, profileId, opts) => bridge.listFavorites(limit, profileId, opts),
     listFavoriteKeys: (profileId) => bridge.listFavoriteKeys(profileId),
     getTrackPreference: (scopeKey, profileId) =>

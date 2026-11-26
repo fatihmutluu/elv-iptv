@@ -1,8 +1,11 @@
 import {
   type AccessibilityFontFamily,
   type ArtworkCacheLimitMbPref,
+  DEFAULT_HOME_LAYOUT,
+  isHomeLayoutSectionId,
   MAX_PREF_OVERSCAN,
   MIN_PREF_OVERSCAN,
+  normalizeHomeLayout,
   type PreferencesPatch,
   type PreferencesSnapshot,
   type Result,
@@ -10,6 +13,7 @@ import {
 } from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
 import { THEME_PRESETS, type ThemePresetId } from '@elv/ui-kit';
+import { moveHomeLayoutSection } from './HomeLayoutEditor';
 import type { AppearanceFocusId } from './useTvSettingsNavigation';
 
 /** Preferences read/write contract consumed by settings panels and {@link SettingsScreen}. */
@@ -159,7 +163,7 @@ export function computeAppearanceScrollY(
   controlId: AppearanceFocusId,
   layouts: Partial<
     Record<
-      'theme' | 'font' | 'tvDisplay' | 'artworkCache' | 'reset' | 'diagnostics',
+      'theme' | 'font' | 'tvDisplay' | 'artworkCache' | 'reset' | 'diagnostics' | 'homeLayout',
       { readonly y: number; readonly height: number }
     >
   >,
@@ -202,6 +206,9 @@ export function computeAppearanceScrollY(
     controlId === 'preview-diagnostic-report'
   ) {
     return layouts.diagnostics ? Math.max(0, layouts.diagnostics.y - 12) : undefined;
+  }
+  if (controlId.startsWith('home-layout-')) {
+    return layouts.homeLayout ? Math.max(0, layouts.homeLayout.y - 12) : undefined;
   }
   return undefined;
 }
@@ -339,5 +346,40 @@ export function activateAppearanceControl(
   }
   if (controlId === 'preview-diagnostic-report') {
     deps.onPreviewDiagnostics?.();
+    return;
+  }
+  if (controlId === 'home-layout-reset') {
+    if (preferences) void preferences.updatePreferences({ homeLayout: DEFAULT_HOME_LAYOUT });
+    return;
+  }
+  if (controlId.startsWith('home-layout-')) {
+    const sectionId = controlId.slice('home-layout-'.length);
+    if (preferences && isHomeLayoutSectionId(sectionId)) {
+      const current = normalizeHomeLayout(preferences.preferences.homeLayout);
+      const next = current.map((entry) =>
+        entry.id === sectionId ? { ...entry, visible: !entry.visible } : entry,
+      );
+      void preferences.updatePreferences({ homeLayout: next });
+    }
+  }
+}
+
+/** Applies a TV D-pad Left/Right adjustment on an Appearance control (reordering Home sections). */
+export function adjustAppearanceControl(
+  controlId: AppearanceFocusId,
+  delta: -1 | 1,
+  preferences?: SettingsPreferencesController,
+): void {
+  if (!preferences || controlId === 'home-layout-reset' || !controlId.startsWith('home-layout-')) {
+    return;
+  }
+  const sectionId = controlId.slice('home-layout-'.length);
+  if (!isHomeLayoutSectionId(sectionId)) return;
+  const current = normalizeHomeLayout(preferences.preferences.homeLayout);
+  const index = current.findIndex((entry) => entry.id === sectionId);
+  if (index < 0) return;
+  const next = moveHomeLayoutSection(current, index, delta < 0 ? 'up' : 'down');
+  if (next !== current) {
+    void preferences.updatePreferences({ homeLayout: next });
   }
 }

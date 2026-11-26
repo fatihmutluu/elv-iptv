@@ -1,5 +1,10 @@
 import { type CatalogService, createCoalescedCatalog } from '@elv/data';
 import {
+  DEFAULT_PREFERENCES,
+  extractSyncablePreferences,
+  type PreferencesSnapshot,
+} from '@elv/domain';
+import {
   type AppleSafeAreaInsets,
   canStartAetherPictureInPicture,
   configureAetherMultiView,
@@ -151,12 +156,17 @@ function AppRoot() {
     telemetryOptIn: false,
     syncServerUrl: '',
   });
+  const latestPrefsRef = useRef<PreferencesSnapshot>(DEFAULT_PREFERENCES);
   const syncPorts = useMemo(
     () =>
       createTvMobileSyncPorts({
         secretStore: syncSecretStore,
         getServerUrl: () => syncPrefsRef.current.syncServerUrl,
         getPreferences: () => syncPrefsRef.current,
+        getSyncablePreferences: () => extractSyncablePreferences(latestPrefsRef.current),
+        applyInitialPreferences: async (patch) => {
+          await preferencesStore.update(patch);
+        },
         getLocalSnapshot: catalogSnapshotBridge.getLocalSnapshot,
         applyMergedSnapshot: catalogSnapshotBridge.applyMergedSnapshot,
         onTelemetryOptInChange: (enabled) => {
@@ -192,16 +202,14 @@ function AppRoot() {
   useEffect(() => {
     let active = true;
     let receivedLivePrefUpdate = false;
-    const applyPrefs = (
-      snap: { telemetryOptIn: boolean; syncServerUrl: string },
-      isLiveUpdate: boolean,
-    ): void => {
+    const applyPrefs = (snap: PreferencesSnapshot, isLiveUpdate: boolean): void => {
       if (!active) return;
       if (isLiveUpdate) {
         receivedLivePrefUpdate = true;
       } else if (receivedLivePrefUpdate) {
         return;
       }
+      latestPrefsRef.current = snap;
       syncPrefsRef.current = {
         telemetryOptIn: snap.telemetryOptIn,
         syncServerUrl: snap.syncServerUrl,

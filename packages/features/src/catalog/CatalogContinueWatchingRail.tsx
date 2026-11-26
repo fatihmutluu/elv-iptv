@@ -1,8 +1,16 @@
 import type { WatchProgressRow } from '@elv/data';
-import { HorizontalRailScroll, useI18n, useTheme, WideCard } from '@elv/ui-kit';
+import {
+  type ContextMenuAnchor,
+  HorizontalRailScroll,
+  useContextMenu,
+  useI18n,
+  useTheme,
+  WideCard,
+} from '@elv/ui-kit';
 import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, useRef } from 'react';
 import { type LayoutChangeEvent, type ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { DetailTarget } from '../shared';
+import { buildContinueWatchingContextMenuItems } from './catalog-context-menu';
 import {
   computeProgressRatio,
   detailTargetFromProgress,
@@ -19,6 +27,9 @@ export interface CatalogContinueWatchingRailProps {
   readonly isTv: boolean;
   readonly focusedIndex: number | null;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly onResumeContinue?: (row: WatchProgressRow) => void;
+  readonly onHideContinue?: (row: WatchProgressRow) => void;
+  readonly onMarkContinueWatched?: (row: WatchProgressRow) => void;
   readonly onLayoutY?: (y: number) => void;
 }
 
@@ -31,6 +42,9 @@ interface ContinueCardItemProps {
   readonly testID: string;
   readonly formatRemMin: (minutes: number) => string;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly onResumeContinue?: (row: WatchProgressRow) => void;
+  readonly onHideContinue?: (row: WatchProgressRow) => void;
+  readonly onMarkContinueWatched?: (row: WatchProgressRow) => void;
 }
 
 const ContinueCardItem = memo(function ContinueCardItemInner({
@@ -42,10 +56,45 @@ const ContinueCardItem = memo(function ContinueCardItemInner({
   testID,
   formatRemMin,
   onOpenDetail,
+  onResumeContinue,
+  onHideContinue,
+  onMarkContinueWatched,
 }: ContinueCardItemProps): ReactElement {
+  const i18n = useI18n();
+  const { openContextMenu } = useContextMenu();
+
   const handlePress = useCallback(() => {
     onOpenDetail(detailTargetFromProgress(row, kind));
   }, [kind, onOpenDetail, row]);
+
+  const handleContextMenu = useCallback(
+    (anchor?: ContextMenuAnchor) => {
+      openContextMenu({
+        title: row.title,
+        ...(row.subtitle ? { subtitle: row.subtitle } : {}),
+        ...(anchor !== undefined ? { anchor } : {}),
+        items: buildContinueWatchingContextMenuItems({
+          kind,
+          row,
+          i18n,
+          onOpenDetail,
+          ...(onResumeContinue !== undefined ? { onResume: onResumeContinue } : {}),
+          ...(onHideContinue !== undefined ? { onHideContinue } : {}),
+          ...(onMarkContinueWatched !== undefined ? { onMarkWatched: onMarkContinueWatched } : {}),
+        }),
+      });
+    },
+    [
+      i18n,
+      kind,
+      onHideContinue,
+      onMarkContinueWatched,
+      onOpenDetail,
+      onResumeContinue,
+      openContextMenu,
+      row,
+    ],
+  );
 
   const ratio = computeProgressRatio(row);
   const remMin = formatCatalogRemainingMinutes(row.positionMs, row.durationMs);
@@ -68,6 +117,7 @@ const ContinueCardItem = memo(function ContinueCardItemInner({
       focusable={!isTv}
       focused={focused}
       onPress={handlePress}
+      onContextMenu={handleContextMenu}
     />
   );
 });
@@ -81,6 +131,9 @@ function CatalogContinueWatchingRailInner({
   isTv,
   focusedIndex,
   onOpenDetail,
+  onResumeContinue,
+  onHideContinue,
+  onMarkContinueWatched,
   onLayoutY,
 }: CatalogContinueWatchingRailProps): ReactElement | null {
   const theme = useTheme();
@@ -147,6 +200,9 @@ function CatalogContinueWatchingRailInner({
             testID={`catalog-continue-item-${index}`}
             formatRemMin={formatRemMin}
             onOpenDetail={onOpenDetail}
+            {...(onResumeContinue !== undefined ? { onResumeContinue } : {})}
+            {...(onHideContinue !== undefined ? { onHideContinue } : {})}
+            {...(onMarkContinueWatched !== undefined ? { onMarkContinueWatched } : {})}
           />
         ))}
       </HorizontalRailScroll>
