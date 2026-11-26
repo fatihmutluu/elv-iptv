@@ -135,7 +135,7 @@ export function buildContinueWatchingContextMenuItems({
   const items: ContextMenuItem[] = [
     {
       id: 'resume',
-      label: i18n.t('context.resume'),
+      label: i18n.t(row.positionMs > 0 ? 'context.resume' : 'context.play'),
       icon: 'play',
       testID: 'context-menu-resume',
       onSelect: () => {

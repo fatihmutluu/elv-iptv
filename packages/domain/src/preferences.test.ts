@@ -107,6 +107,7 @@ describe('preferences codec', () => {
       },
       homeLayout: [
         { id: 'continue', visible: true },
+        { id: 'newEpisodes', visible: true },
         { id: 'live', visible: true },
         { id: 'mylist', visible: true },
         { id: 'movies', visible: true },

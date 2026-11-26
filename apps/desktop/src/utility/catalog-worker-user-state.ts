@@ -20,6 +20,9 @@ export type CatalogUserStateRpcCall = Extract<
       | 'reorderFavorites'
       | 'listFavorites'
       | 'listFavoriteKeys'
+      | 'listMyListNewEpisodes'
+      | 'dismissMyListNewEpisode'
+      | 'refreshMyListNewEpisodes'
       | 'getTrackPreference'
       | 'saveTrackPreference'
       | 'clearTrackPreference'
@@ -96,6 +99,18 @@ export async function executeUserStateRpcCall(
         : [];
     case 'listFavoriteKeys':
       return service.listFavoriteKeys ? service.listFavoriteKeys(call.profileId) : [];
+    case 'listMyListNewEpisodes':
+      return service.listMyListNewEpisodes
+        ? service.listMyListNewEpisodes(call.limit, call.profileId, call.opts)
+        : [];
+    case 'dismissMyListNewEpisode':
+      return service.dismissMyListNewEpisode
+        ? service.dismissMyListNewEpisode(call.episodeKey, call.profileId)
+        : err(elvError('storage', 'unsupported'));
+    case 'refreshMyListNewEpisodes':
+      return service.refreshMyListNewEpisodes
+        ? service.refreshMyListNewEpisodes(call.profileId, call.opts)
+        : err(elvError('storage', 'unsupported'));
     case 'getTrackPreference':
       return service.getTrackPreference
         ? service.getTrackPreference(call.scopeKey, call.profileId)

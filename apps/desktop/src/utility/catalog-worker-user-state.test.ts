@@ -280,6 +280,30 @@ describe('catalog worker runtime setFavorite IPC', () => {
       [`m:${sourceId}:movie:w1`, `m:${sourceId}:series:w2`].sort(),
     );
 
+    // My List new episodes IPC round-trips (#502)
+    expect(
+      await client.call({
+        method: 'refreshMyListNewEpisodes',
+        profileId: 'default',
+        opts: { maxSeries: 5 },
+      }),
+    ).toEqual({ ok: true, value: { checkedSeriesCount: 0, newlyDetectedCount: 0 } });
+    expect(
+      await client.call({
+        method: 'listMyListNewEpisodes',
+        limit: 12,
+        profileId: 'default',
+        opts: { parentalUnlocked: false },
+      }),
+    ).toEqual([]);
+    expect(
+      await client.call<Result<void>>({
+        method: 'dismissMyListNewEpisode',
+        episodeKey: `m:${sourceId}:ep:1`,
+        profileId: 'default',
+      }),
+    ).toEqual({ ok: true, value: undefined });
+
     await h.shutdown();
   });
 });

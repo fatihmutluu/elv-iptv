@@ -449,6 +449,25 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         method: 'listFavoriteKeys',
         ...(profileId === undefined ? {} : { profileId }),
       }),
+    listMyListNewEpisodes: (limit, profileId, opts) =>
+      callValue({
+        method: 'listMyListNewEpisodes',
+        ...(limit === undefined ? {} : { limit }),
+        ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    dismissMyListNewEpisode: (episodeKey, profileId) =>
+      callResult({
+        method: 'dismissMyListNewEpisode',
+        episodeKey,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    refreshMyListNewEpisodes: (profileId, opts) =>
+      callResult({
+        method: 'refreshMyListNewEpisodes',
+        ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
+      }),
     getTrackPreference: (scopeKey, profileId) =>
       callValue({
         method: 'getTrackPreference',

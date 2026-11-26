@@ -285,32 +285,15 @@ describe('PosterCard & WideCard (Cinema Quietude compliance)', () => {
     expect(hoverRingStyle.bottom).toBe(-1.5);
   });
 
-  it('renders unplayed count badge or watched checkmark badge across platforms (#409)', async () => {
+  it('renders watched checkmark badge when allWatched is true and never renders a numeric unplayed pill (#409, #502)', async () => {
     await render(
       <ThemeProvider>
         <ViewportProvider value={{ formFactor: 'phone', orientation: 'portrait' }}>
-          <PosterCard
-            title="Show A"
-            unplayedCount={5}
-            unplayedLabel="5 unwatched"
-            testID="series-unplayed"
-          />
-          <PosterCard
-            title="Show B"
-            unplayedCount={0}
-            allWatched
-            unplayedLabel="Watched"
-            testID="series-watched"
-          />
-          <PosterCard title="Show C" unplayedCount={0} testID="series-none" />
+          <PosterCard title="Show B" allWatched testID="series-watched" />
+          <PosterCard title="Show C" testID="series-none" />
         </ViewportProvider>
       </ThemeProvider>,
     );
-
-    const unplayed = screen.getByTestId('series-unplayed-unplayed');
-    expect(unplayed.props.accessibilityLabel).toBe('5 unwatched');
-    expect(screen.getByText('5')).toBeTruthy();
-    expect(screen.queryByTestId('series-unplayed-watched-badge')).toBeNull();
 
     const watched = screen.getByTestId('series-watched-watched-badge');
     expect(flat(watched.props.style).borderColor).toBe(defaultTheme.colors.successColor);

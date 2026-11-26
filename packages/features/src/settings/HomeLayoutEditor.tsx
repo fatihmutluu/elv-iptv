@@ -23,6 +23,7 @@ import type { AppearanceFocusId } from './useTvSettingsNavigation';
 /** Maps each customizable Home layout section id to its i18n label key. */
 export const HOME_SECTION_LABEL_KEYS: Readonly<Record<HomeLayoutSectionId, MessageId>> = {
   continue: 'settings.homeSectionContinue',
+  newEpisodes: 'settings.homeSectionNewEpisodes',
   live: 'settings.homeSectionLive',
   mylist: 'settings.homeSectionMyList',
   movies: 'settings.homeSectionMovies',
@@ -30,7 +31,7 @@ export const HOME_SECTION_LABEL_KEYS: Readonly<Record<HomeLayoutSectionId, Messa
   collections: 'settings.homeSectionCollections',
 };
 
-const WIDE_SECTIONS = new Set<HomeLayoutSectionId>(['continue', 'live']);
+const WIDE_SECTIONS = new Set<HomeLayoutSectionId>(['continue', 'newEpisodes', 'live']);
 
 /** Moves the section at `index` one slot up or down, returning a new layout array. */
 export function moveHomeLayoutSection(

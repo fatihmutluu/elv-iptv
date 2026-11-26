@@ -225,6 +225,12 @@ describe('removeSource', () => {
       item_drm_meta: "(source_id, item_key, scheme) VALUES (?, 'k', 'clearkey')",
       downloads:
         "(id, profile_id, source_id, item_key, kind, title, local_file_name) VALUES ('dl1', 'default', ?, ?, 'movie', 'Film', 'dl1.mp4')",
+      my_list_series_baselines:
+        "(profile_id, series_key, source_id, baseline_at, last_checked_at, known_keys_json) VALUES ('default', ?, ?, 1, 1, '[]')",
+      my_list_new_episodes:
+        "(profile_id, episode_key, series_key, source_id, series_title, episode_title, detected_at, dismissed) VALUES ('default', ?, 's1', ?, 'Show', 'Ep 1', 1, 0)",
+      continue_watching_dismissals:
+        "(profile_id, series_key, source_id, dismissed_at) VALUES ('default', ?, ?, 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -247,7 +253,10 @@ describe('removeSource', () => {
           table === 'custom_group_items' ||
           table === 'guide_sources' ||
           table === 'vod_enrichment' ||
-          table === 'vod_collection_items'
+          table === 'vod_collection_items' ||
+          table === 'my_list_series_baselines' ||
+          table === 'my_list_new_episodes' ||
+          table === 'continue_watching_dismissals'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
         } else {
@@ -327,6 +336,12 @@ describe('removeSource', () => {
       item_drm_meta: "(source_id, item_key, scheme) VALUES (?, 'k', 'clearkey')",
       downloads:
         "(id, profile_id, source_id, item_key, kind, title, local_file_name) VALUES ('dl1', 'default', ?, ?, 'movie', 'Film', 'dl1.mp4')",
+      my_list_series_baselines:
+        "(profile_id, series_key, source_id, baseline_at, last_checked_at, known_keys_json) VALUES ('default', ?, ?, 1, 1, '[]')",
+      my_list_new_episodes:
+        "(profile_id, episode_key, series_key, source_id, series_title, episode_title, detected_at, dismissed) VALUES ('default', ?, 's1', ?, 'Show', 'Ep 1', 1, 0)",
+      continue_watching_dismissals:
+        "(profile_id, series_key, source_id, dismissed_at) VALUES ('default', ?, ?, 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -349,7 +364,10 @@ describe('removeSource', () => {
           table === 'custom_group_items' ||
           table === 'guide_sources' ||
           table === 'vod_enrichment' ||
-          table === 'vod_collection_items'
+          table === 'vod_collection_items' ||
+          table === 'my_list_series_baselines' ||
+          table === 'my_list_new_episodes' ||
+          table === 'continue_watching_dismissals'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
         } else {

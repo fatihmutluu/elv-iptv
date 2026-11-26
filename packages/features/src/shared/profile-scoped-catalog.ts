@@ -52,6 +52,9 @@ export function createProfileScopedCatalog(
   const reorderFavorites = c.reorderFavorites?.bind(c);
   const listFavorites = c.listFavorites?.bind(c);
   const listFavoriteKeys = c.listFavoriteKeys?.bind(c);
+  const listMyListNewEpisodes = c.listMyListNewEpisodes?.bind(c);
+  const dismissMyListNewEpisode = c.dismissMyListNewEpisode?.bind(c);
+  const refreshMyListNewEpisodes = c.refreshMyListNewEpisodes?.bind(c);
   const getTrackPreference = c.getTrackPreference?.bind(c);
   const saveTrackPreference = c.saveTrackPreference?.bind(c);
   const clearTrackPreference = c.clearTrackPreference?.bind(c);
@@ -343,6 +346,29 @@ export function createProfileScopedCatalog(
     ...(listFavoriteKeys
       ? {
           listFavoriteKeys: (profileId) => listFavoriteKeys(profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(listMyListNewEpisodes
+      ? {
+          listMyListNewEpisodes: (limit, profileId, opts) => {
+            const scope = getScope();
+            return listMyListNewEpisodes(limit, profileId ?? scope.profileId, {
+              ...opts,
+              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
+        }
+      : {}),
+    ...(dismissMyListNewEpisode
+      ? {
+          dismissMyListNewEpisode: (episodeKey, profileId) =>
+            dismissMyListNewEpisode(episodeKey, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(refreshMyListNewEpisodes
+      ? {
+          refreshMyListNewEpisodes: (profileId, opts) =>
+            refreshMyListNewEpisodes(profileId ?? getScope().profileId, opts),
         }
       : {}),
     ...(getTrackPreference

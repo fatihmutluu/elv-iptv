@@ -276,4 +276,60 @@ describe('createDesktopCatalogSnapshotBridge (HIGH #9)', () => {
     expect(fake.closedPorts).toEqual([1]);
     expect(fake.disconnected).toEqual([1]);
   });
+
+  it('excludes synthetic Next-Up rows (positionMs <= 0 && !watched) from exported watchProgress (#502)', async () => {
+    const secrets = makeMemorySecrets();
+    const fake = makeFakeCoordinator((rpc) => {
+      if (rpc.method === 'listContinueWatching') {
+        return [
+          {
+            itemKey: 'x:d-x:ep:102',
+            positionMs: 0,
+            durationMs: 2_820_000,
+            watched: false,
+            updatedAt: 500,
+          },
+          {
+            itemKey: 'x:d-x:movie:2',
+            positionMs: 60_000,
+            durationMs: 1_800_000,
+            watched: false,
+            updatedAt: 400,
+          },
+          {
+            itemKey: 'x:d-x:ep:101',
+            positionMs: 0,
+            durationMs: 2_700_000,
+            watched: true,
+            updatedAt: 300,
+          },
+        ];
+      }
+      return [];
+    });
+
+    const bridge = createDesktopCatalogSnapshotBridge({
+      getCoordinator: () => fake.coordinator,
+      secretStore: secrets.store,
+      clock: () => 5000,
+    });
+
+    const snap = await bridge.getLocalSnapshot();
+    expect(snap.watchProgress).toEqual([
+      {
+        key: 'x:d-x:movie:2',
+        positionMs: 60_000,
+        durationMs: 1_800_000,
+        completed: false,
+        updatedAt: 400,
+      },
+      {
+        key: 'x:d-x:ep:101',
+        positionMs: 0,
+        durationMs: 2_700_000,
+        completed: true,
+        updatedAt: 300,
+      },
+    ]);
+  });
 });

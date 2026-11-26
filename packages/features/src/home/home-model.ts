@@ -5,6 +5,7 @@ import {
   type FavoriteRow,
   type ItemRow,
   MIN_RESUME_POSITION_MS,
+  type MyListNewEpisodeRow,
   type NowNextEntry,
   type UserItemKind,
   type WatchProgressRow,
@@ -61,11 +62,15 @@ export interface HomeRailEntry {
   readonly watched: boolean;
   readonly live?: boolean;
   readonly channelNum?: number | null;
+  readonly badgeLabel?: string | null;
+  readonly seriesKey?: string;
+  readonly season?: number | null;
+  readonly episode?: number | null;
   readonly catalogItem?: ItemRow;
 }
 
 /** Semantic identifier of each Home horizontal rail. */
-export type HomeRailKind = 'continue' | 'live' | 'mylist' | 'movies' | 'series';
+export type HomeRailKind = 'continue' | 'newEpisodes' | 'live' | 'mylist' | 'movies' | 'series';
 
 /** Maximum number of cards shown in the unified Home Live TV rail. */
 export const HOME_LIVE_RAIL_LIMIT = 12;
@@ -214,6 +219,9 @@ export interface VodPlayTargetInput {
   readonly kind: UserItemKind;
   readonly logo?: string | null;
   readonly subtitle?: string | null;
+  readonly seriesKey?: string | null;
+  readonly season?: number | null;
+  readonly episode?: number | null;
   readonly positionMs?: number;
   readonly watched?: boolean;
 }
@@ -235,6 +243,9 @@ export function buildVodPlayTarget(input: VodPlayTargetInput): HomePlayTarget {
     startPositionMs,
     logo: input.logo ?? null,
     subtitle: input.subtitle ?? null,
+    ...(input.seriesKey !== undefined ? { seriesKey: input.seriesKey } : {}),
+    ...(input.season !== undefined ? { season: input.season } : {}),
+    ...(input.episode !== undefined ? { episode: input.episode } : {}),
     itemKind: input.kind,
   };
 }
@@ -410,9 +421,49 @@ export function buildUnifiedLiveRail(input: BuildUnifiedLiveRailInput): HomeRail
   return entries;
 }
 
+const EPISODE_CODE_PREFIX_RE = /^(?:S\d+(?:\s*[·•\-:]?\s*E\d+)?|E\d+)(?:\s|$|[·•—\-:])/i;
+
+/** Formats a newly arrived episode subtitle safely without ever rendering null placeholders. */
+export function formatNewEpisodeSubtitle(
+  season: number | null,
+  episode: number | null,
+  episodeTitle: string,
+): string | null {
+  const trimmedTitle = episodeTitle.trim();
+  const hasSeason = typeof season === 'number' && Number.isFinite(season);
+  const hasEpisode = typeof episode === 'number' && Number.isFinite(episode);
+  const code =
+    hasSeason && hasEpisode
+      ? `S${season} · E${episode}`
+      : hasEpisode
+        ? `E${episode}`
+        : hasSeason
+          ? `S${season}`
+          : '';
+  if (code !== '' && trimmedTitle !== '') return `${code} — ${trimmedTitle}`;
+  if (code !== '') return code;
+  return trimmedTitle !== '' ? trimmedTitle : null;
+}
+
+/**
+ * Formats an episode subtitle with `S# · E# — Title` when season/episode metadata is present,
+ * avoiding double-prefixing if `rawSubtitle` already starts with an `S#`/`E#` prefix.
+ */
+export function formatContinueEpisodeSubtitle(
+  season: number | null | undefined,
+  episode: number | null | undefined,
+  rawSubtitle: string | null,
+): string | null {
+  const trimmed = rawSubtitle?.trim() ?? '';
+  if (trimmed !== '' && EPISODE_CODE_PREFIX_RE.test(trimmed)) return trimmed;
+  return formatNewEpisodeSubtitle(season ?? null, episode ?? null, trimmed);
+}
+
 /** Input for {@link buildHomeRailSets}. */
 export interface BuildHomeRailSetsInput {
   readonly continueWatching: readonly WatchProgressRow[];
+  readonly newEpisodes?: readonly MyListNewEpisodeRow[];
+  readonly newEpisodeBadgeLabel?: string;
   readonly recentChannels?: readonly ItemRow[];
   readonly liveItems: readonly ItemRow[];
   readonly liveCategoryName: string | null;
@@ -423,12 +474,12 @@ export interface BuildHomeRailSetsInput {
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
 }
 
-/** All 5 Home rail entry arrays indexed by {@link HomeRailKind}. */
+/** All 6 Home rail entry arrays indexed by {@link HomeRailKind}. */
 export type HomeRailSets = Readonly<Record<HomeRailKind, readonly HomeRailEntry[]>>;
 
 const HOME_MYLIST_LIMIT = 24;
 
-/** Maps bounded Home SQLite rows into pure {@link HomeRailEntry} arrays for all 5 rails. */
+/** Maps bounded Home SQLite rows into pure {@link HomeRailEntry} arrays for all 6 rails. */
 export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
   const seriesByKey = new Map<string, ItemRow>();
   for (const s of input.series) seriesByKey.set(s.key, s);
@@ -459,7 +510,10 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
       sourceId: row.sourceId,
       kind: row.kind,
       title: row.title,
-      subtitle: row.subtitle,
+      subtitle:
+        row.kind === 'episode'
+          ? formatContinueEpisodeSubtitle(row.season, row.episode, row.subtitle)
+          : row.subtitle,
       backdropUri: row.logo,
       posterUri: row.logo,
       year: null,
@@ -467,6 +521,27 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
       durationMs: row.durationMs,
       positionMs: row.positionMs,
       watched: row.watched,
+      ...(row.seriesKey ? { seriesKey: row.seriesKey } : {}),
+      ...(row.season !== null ? { season: row.season } : {}),
+      ...(row.episode !== null ? { episode: row.episode } : {}),
+    })),
+    newEpisodes: (input.newEpisodes ?? []).map((row) => ({
+      itemKey: row.episodeKey,
+      sourceId: row.sourceId,
+      kind: 'episode' as const,
+      title: row.seriesTitle,
+      subtitle: formatNewEpisodeSubtitle(row.season, row.episode, row.episodeTitle),
+      backdropUri: row.seriesLogo,
+      posterUri: row.seriesLogo,
+      year: null,
+      rating: null,
+      durationMs: 0,
+      positionMs: 0,
+      watched: false,
+      ...(input.newEpisodeBadgeLabel ? { badgeLabel: input.newEpisodeBadgeLabel } : {}),
+      seriesKey: row.seriesKey,
+      season: row.season,
+      episode: row.episode,
     })),
     live: buildUnifiedLiveRail({
       favorites: input.favorites,
@@ -499,10 +574,22 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
   };
 }
 
-/** Converts a movie or series Home hero slide or rail entry into a {@link DetailTarget}. */
+/** Converts a movie, series, or series-linked episode Home entry into a {@link DetailTarget}. */
 export function buildHomeDetailTarget(
   item: HomeHeroSlide | HomeRailEntry,
 ): DetailTarget | undefined {
+  if (item.kind === 'episode' && 'seriesKey' in item && item.seriesKey) {
+    return {
+      itemKey: item.seriesKey,
+      sourceId: item.sourceId,
+      kind: 'series',
+      title: item.title,
+      posterUri: item.posterUri,
+      backdropUri: item.backdropUri,
+      year: item.year,
+      rating: item.rating,
+    };
+  }
   if (item.kind !== 'movie' && item.kind !== 'series') return undefined;
   const { itemKey, sourceId, kind, title, posterUri, backdropUri, year, rating, catalogItem } =
     item;

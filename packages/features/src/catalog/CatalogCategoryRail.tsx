@@ -76,7 +76,6 @@ interface CatalogPosterCardItemProps {
   readonly watchedOverride: boolean | undefined;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly watchedLabel: string;
-  readonly formatUnplayed: (count: number) => string;
   readonly formatQuickPlay: (title: string) => string;
   readonly addToListLabel: string;
   readonly inMyListLabel: string;
@@ -100,7 +99,6 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
   watchedOverride,
   unplayedSummary,
   watchedLabel,
-  formatUnplayed,
   formatQuickPlay,
   addToListLabel,
   inMyListLabel,
@@ -225,8 +223,6 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
         summary: unplayedSummary,
         progressWatched,
         watchedOverride,
-        formatUnplayed,
-        watchedLabel,
       })
     : {};
   const versionBadge =
@@ -298,10 +294,6 @@ function CatalogCategoryRailInner({
     onSeeAll(category.row.id);
   }, [category.row.id, onSeeAll]);
 
-  const formatUnplayed = useCallback(
-    (count: number) => i18n.t('card.unplayedCount', { count }),
-    [i18n],
-  );
   const formatQuickPlay = useCallback(
     (title: string) => i18n.t('card.quickPlay', { title }),
     [i18n],
@@ -424,7 +416,6 @@ function CatalogCategoryRailInner({
                 watchedOverride={watchedOverrides?.get(item.key)}
                 unplayedSummary={unplayedBySeriesKey?.get(item.key)}
                 watchedLabel={watchedLabel}
-                formatUnplayed={formatUnplayed}
                 formatQuickPlay={formatQuickPlay}
                 addToListLabel={addToListLabel}
                 inMyListLabel={inMyListLabel}

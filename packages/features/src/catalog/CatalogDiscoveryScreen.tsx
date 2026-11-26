@@ -222,6 +222,45 @@ export function CatalogDiscoveryScreen({
   const handleMarkContinueWatched = useCallback(
     (row: WatchProgressRow) => {
       const removed = discovery.removeContinueItem(row.itemKey);
+      if (row.kind === 'episode') {
+        const persist =
+          typeof catalog.setWatched === 'function'
+            ? catalog.setWatched(row.itemKey, true)
+            : typeof catalog.saveProgress === 'function'
+              ? catalog.saveProgress({
+                  sourceId: row.sourceId,
+                  itemKey: row.itemKey,
+                  kind: 'episode',
+                  title: row.title,
+                  subtitle: row.subtitle,
+                  logo: row.logo,
+                  seriesKey: row.seriesKey,
+                  season: row.season,
+                  episode: row.episode,
+                  positionMs: row.durationMs,
+                  durationMs: row.durationMs,
+                  watched: true,
+                })
+              : null;
+        if (!persist) {
+          uiCache?.clearHome?.();
+          discovery.refreshContinueWatching();
+          return;
+        }
+        void persist
+          .then((res) => {
+            if (res.ok) {
+              uiCache?.clearHome?.();
+              discovery.refreshContinueWatching();
+            } else if (removed) {
+              discovery.restoreContinueItem(removed);
+            }
+          })
+          .catch(() => {
+            if (removed) discovery.restoreContinueItem(removed);
+          });
+        return;
+      }
       const item: ItemRow = {
         id: 0,
         key: row.itemKey,
@@ -248,6 +287,8 @@ export function CatalogDiscoveryScreen({
         });
     },
     [
+      catalog,
+      discovery.refreshContinueWatching,
       discovery.removeContinueItem,
       discovery.restoreContinueItem,
       quickActionsState.toggleWatched,

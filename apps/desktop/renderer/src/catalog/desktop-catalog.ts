@@ -167,6 +167,18 @@ export function createDesktopCatalogFromBridge(
         : Promise.resolve(err(elvError('storage', 'unsupported'))),
     listFavorites: (limit, profileId, opts) => bridge.listFavorites(limit, profileId, opts),
     listFavoriteKeys: (profileId) => bridge.listFavoriteKeys(profileId),
+    listMyListNewEpisodes: (limit, profileId, opts) =>
+      bridge.listMyListNewEpisodes
+        ? bridge.listMyListNewEpisodes(limit, profileId, opts)
+        : Promise.resolve([]),
+    dismissMyListNewEpisode: (episodeKey, profileId) =>
+      bridge.dismissMyListNewEpisode
+        ? bridge.dismissMyListNewEpisode(episodeKey, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    refreshMyListNewEpisodes: (profileId, opts) =>
+      bridge.refreshMyListNewEpisodes
+        ? bridge.refreshMyListNewEpisodes(profileId, opts)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
     getTrackPreference: (scopeKey, profileId) =>
       bridge.getTrackPreference
         ? bridge.getTrackPreference(scopeKey, profileId)

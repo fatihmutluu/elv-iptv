@@ -89,7 +89,6 @@ interface QuickFilterPosterItemProps {
   readonly watchedOverride: boolean | undefined;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly watchedLabel: string;
-  readonly formatUnplayed: (count: number) => string;
   readonly formatQuickPlay: (title: string) => string;
   readonly addToListLabel: string;
   readonly inMyListLabel: string;
@@ -112,7 +111,6 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
   watchedOverride,
   unplayedSummary,
   watchedLabel,
-  formatUnplayed,
   formatQuickPlay,
   addToListLabel,
   inMyListLabel,
@@ -234,8 +232,6 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
         summary: unplayedSummary,
         progressWatched,
         watchedOverride,
-        formatUnplayed,
-        watchedLabel,
       })
     : {};
   const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
@@ -497,10 +493,6 @@ export function CatalogQuickFilterGrid({
       ? focusedGridPos.row * layout.gridColumns + focusedGridPos.col
       : -1;
 
-  const formatUnplayed = useCallback(
-    (count: number) => i18n.t('card.unplayedCount', { count }),
-    [i18n],
-  );
   const formatQuickPlay = useCallback(
     (title: string) => i18n.t('card.quickPlay', { title }),
     [i18n],
@@ -553,7 +545,6 @@ export function CatalogQuickFilterGrid({
           watchedOverride={watchedOverrides.get(item.key)}
           unplayedSummary={unplayedBySeriesKey?.get(item.key)}
           watchedLabel={watchedLabel}
-          formatUnplayed={formatUnplayed}
           formatQuickPlay={formatQuickPlay}
           addToListLabel={addToListLabel}
           inMyListLabel={inMyListLabel}

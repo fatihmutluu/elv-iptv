@@ -2,6 +2,7 @@ import type {
   CatalogService,
   FavoriteRow,
   ItemRow,
+  MyListNewEpisodeRow,
   NowNextEntry,
   SeriesUnplayedSummary,
   SourceRow,
@@ -21,65 +22,25 @@ import {
 import {
   applyHomeFavUpdate,
   applyHomeRemoveContinueWatching,
+  applyHomeRemoveNewEpisode,
+  applyHomeRestoreNewEpisode,
   applyHomeWatchedUpdate,
+  collectUnifiedLiveKeys,
   EMPTY_HOME_SNAPSHOT,
   fetchHomeKindCategory,
+  fetchHydratedCollections,
   mergeOptimisticHomeSnapshot,
   releaseInFlightKey,
 } from './home-data-helpers';
-import { HOME_LIVE_RAIL_LIMIT } from './home-model';
+import type { HomeRailEntry } from './home-model';
 
 const HOME_CONTINUE_LIMIT = 16;
+const HOME_NEW_EPISODES_LIMIT = 24;
 const HOME_RECENT_CHANNELS_LIMIT = 20;
 const HOME_FAVORITES_LIMIT = 250;
 const HOME_LIVE_LIMIT = 12;
 const HOME_MOVIES_LIMIT = 18;
 const HOME_SERIES_LIMIT = 18;
-const HOME_COLLECTIONS_LIMIT = 20;
-
-function collectUnifiedLiveKeys(
-  favorites: readonly FavoriteRow[],
-  recentChannels: readonly ItemRow[],
-  liveItems: readonly ItemRow[],
-): string[] {
-  const seen = new Set<string>();
-  const keys: string[] = [];
-  const pushKey = (key: string) => {
-    if (keys.length >= HOME_LIVE_RAIL_LIMIT || seen.has(key)) return;
-    seen.add(key);
-    keys.push(key);
-  };
-  for (const fav of favorites) {
-    if (fav.kind === 'live') pushKey(fav.itemKey);
-  }
-  for (const item of recentChannels) pushKey(item.key);
-  for (const item of liveItems) pushKey(item.key);
-  return keys;
-}
-
-async function fetchHydratedCollections(
-  catalog: CatalogService,
-): Promise<readonly HydratedVodCollection[] | null> {
-  if (
-    typeof catalog.listCollections !== 'function' ||
-    typeof catalog.listCollectionItems !== 'function'
-  ) {
-    return [];
-  }
-  try {
-    const cols = await catalog.listCollections();
-    const bounded = cols.slice(0, HOME_COLLECTIONS_LIMIT);
-    return await Promise.all(
-      bounded.map(async (collection) => ({
-        collection,
-        items:
-          (await catalog.listCollectionItems?.(collection.id).catch(() => [] as ItemRow[])) ?? [],
-      })),
-    );
-  } catch {
-    return null;
-  }
-}
 
 /** Options for {@link useHomeData}. */
 export interface UseHomeDataOptions {
@@ -87,6 +48,8 @@ export interface UseHomeDataOptions {
   readonly sources: readonly SourceRow[];
   readonly refreshToken: number;
   readonly userStateVersion?: number;
+  readonly isPlaybackActive?: boolean;
+  readonly routeActive?: boolean;
 }
 
 interface ToggleMyListTarget {
@@ -123,6 +86,8 @@ export interface HomeDataState extends HomeSnapshot {
   readonly toggleMyList: (target: ToggleMyListTarget) => Promise<void>;
   readonly toggleWatched: (target: ToggleWatchedTarget, nextWatched: boolean) => Promise<void>;
   readonly removeFromContinueWatching: (itemKey: string) => Promise<void>;
+  readonly dismissNewEpisode: (episodeKey: string) => Promise<void>;
+  readonly markNewEpisodeWatched: (entry: HomeRailEntry) => Promise<void>;
 }
 
 /**
@@ -135,6 +100,8 @@ export function useHomeData({
   sources,
   refreshToken,
   userStateVersion = 0,
+  isPlaybackActive = false,
+  routeActive = true,
 }: UseHomeDataOptions): HomeDataState {
   const uiCache = useCatalogUiCache();
   const { activeProfileId } = useProfile();
@@ -171,6 +138,9 @@ export function useHomeData({
   );
   const watchedGenByKeyRef = useRef(new Map<string, number>());
   const watchedInFlightRef = useRef(new Map<string, number>());
+  const newEpInFlightRef = useRef(new Map<string, number>());
+  const newEpRefreshRunIdRef = useRef(0);
+  const newEpRefreshInFlightRef = useRef(0);
   const committedWatchedRef = useRef(
     new Map<
       string,
@@ -237,6 +207,7 @@ export function useHomeData({
       try {
         const [
           cwRows,
+          newEpisodeRows,
           recentChannelRows,
           favRows,
           favKeys,
@@ -247,6 +218,8 @@ export function useHomeData({
         ] = await Promise.all([
           catalog.listContinueWatching?.(HOME_CONTINUE_LIMIT).catch(() => []) ??
             Promise.resolve([] as WatchProgressRow[]),
+          catalog.listMyListNewEpisodes?.(HOME_NEW_EPISODES_LIMIT).catch(() => []) ??
+            Promise.resolve([] as MyListNewEpisodeRow[]),
           catalog.listRecentChannels?.(HOME_RECENT_CHANNELS_LIMIT).catch(() => []) ??
             Promise.resolve([] as ItemRow[]),
           catalog.listFavorites?.(HOME_FAVORITES_LIMIT).catch(() => []) ??
@@ -311,6 +284,7 @@ export function useHomeData({
 
         const fetchedSnap: HomeSnapshot = {
           continueWatching: cwRows,
+          newEpisodes: newEpisodeRows,
           favorites: favRows,
           favoriteKeys: nextFavKeys,
           progressByKey: nextProgress,
@@ -325,6 +299,7 @@ export function useHomeData({
           snapRef.current,
           favInFlightRef.current,
           watchedInFlightRef.current,
+          newEpInFlightRef.current,
         );
         snapRef.current = mergedSnap;
         uiCacheRef.current?.setHome(mergedSnap);
@@ -343,6 +318,64 @@ export function useHomeData({
       cancelled = true;
     };
   }, [activeProfileId, catalog, sources, refreshToken, userStateVersion]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: userStateVersion and activeProfileId re-trigger cooldown-gated background checks
+  useEffect(() => {
+    if (
+      !routeActive ||
+      isPlaybackActive ||
+      sources.length === 0 ||
+      typeof catalog.refreshMyListNewEpisodes !== 'function'
+    ) {
+      return undefined;
+    }
+    if (newEpRefreshInFlightRef.current !== 0) return undefined;
+    const runId = newEpRefreshRunIdRef.current + 1;
+    newEpRefreshRunIdRef.current = runId;
+    newEpRefreshInFlightRef.current = runId;
+
+    let cancelled = false;
+    void catalog
+      .refreshMyListNewEpisodes()
+      .then(async (res) => {
+        if (cancelled || !mountedRef.current || !res.ok || res.value.newlyDetectedCount <= 0) {
+          return;
+        }
+        const fresh = await catalog
+          .listMyListNewEpisodes?.(HOME_NEW_EPISODES_LIMIT)
+          .catch(() => null);
+        if (cancelled || !mountedRef.current || fresh === null || fresh === undefined) return;
+        const filtered = fresh.filter(
+          (row) => (newEpInFlightRef.current.get(row.episodeKey) ?? 0) <= 0,
+        );
+        const nextSync: HomeSnapshot = { ...snapRef.current, newEpisodes: filtered };
+        snapRef.current = nextSync;
+        uiCacheRef.current?.setHome(nextSync);
+        setSnap((prev) => {
+          const next: HomeSnapshot = { ...prev, newEpisodes: filtered };
+          snapRef.current = next;
+          uiCacheRef.current?.setHome(next);
+          return next;
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (newEpRefreshInFlightRef.current === runId) newEpRefreshInFlightRef.current = 0;
+      });
+
+    return () => {
+      cancelled = true;
+      if (newEpRefreshInFlightRef.current === runId) newEpRefreshInFlightRef.current = 0;
+    };
+  }, [
+    activeProfileId,
+    catalog,
+    isPlaybackActive,
+    refreshToken,
+    routeActive,
+    sources.length,
+    userStateVersion,
+  ]);
 
   const applyFavState = useCallback(
     (itemKey: string, inList: boolean, row: FavoriteRow | undefined) => {
@@ -579,6 +612,96 @@ export function useHomeData({
     [applyWatchedState, catalog],
   );
 
+  const removeNewEpisodeOptimistic = useCallback((episodeKey: string) => {
+    const nextSync = applyHomeRemoveNewEpisode(snapRef.current, episodeKey);
+    snapRef.current = nextSync;
+    uiCacheRef.current?.setHome(nextSync);
+    setSnap((prev) => {
+      const next = applyHomeRemoveNewEpisode(prev, episodeKey);
+      snapRef.current = next;
+      uiCacheRef.current?.setHome(next);
+      return next;
+    });
+  }, []);
+
+  const restoreNewEpisode = useCallback((row: MyListNewEpisodeRow | undefined) => {
+    if (row === undefined) return;
+    const nextSync = applyHomeRestoreNewEpisode(snapRef.current, row);
+    snapRef.current = nextSync;
+    uiCacheRef.current?.setHome(nextSync);
+    setSnap((prev) => {
+      const next = applyHomeRestoreNewEpisode(prev, row);
+      snapRef.current = next;
+      uiCacheRef.current?.setHome(next);
+      return next;
+    });
+  }, []);
+
+  const dismissNewEpisode = useCallback(
+    async (episodeKey: string): Promise<void> => {
+      const prevRow = (snapRef.current.newEpisodes ?? []).find((r) => r.episodeKey === episodeKey);
+      newEpInFlightRef.current.set(episodeKey, (newEpInFlightRef.current.get(episodeKey) ?? 0) + 1);
+      removeNewEpisodeOptimistic(episodeKey);
+      if (typeof catalog.dismissMyListNewEpisode !== 'function') {
+        releaseInFlightKey(newEpInFlightRef.current, episodeKey);
+        return;
+      }
+      try {
+        const res = await catalog.dismissMyListNewEpisode(episodeKey);
+        if (!mountedRef.current) return;
+        if (!res.ok) restoreNewEpisode(prevRow);
+      } catch {
+        if (mountedRef.current) restoreNewEpisode(prevRow);
+      } finally {
+        releaseInFlightKey(newEpInFlightRef.current, episodeKey);
+      }
+    },
+    [catalog, removeNewEpisodeOptimistic, restoreNewEpisode],
+  );
+
+  const markNewEpisodeWatched = useCallback(
+    async (entry: HomeRailEntry): Promise<void> => {
+      const episodeKey = entry.itemKey;
+      const prevRow = (snapRef.current.newEpisodes ?? []).find((r) => r.episodeKey === episodeKey);
+      newEpInFlightRef.current.set(episodeKey, (newEpInFlightRef.current.get(episodeKey) ?? 0) + 1);
+      removeNewEpisodeOptimistic(episodeKey);
+      if (typeof catalog.setWatched !== 'function' && typeof catalog.saveProgress !== 'function') {
+        releaseInFlightKey(newEpInFlightRef.current, episodeKey);
+        return;
+      }
+      try {
+        const res =
+          typeof catalog.setWatched === 'function'
+            ? await catalog.setWatched(episodeKey, true)
+            : await catalog.saveProgress?.({
+                sourceId: entry.sourceId,
+                itemKey: episodeKey,
+                kind: 'episode',
+                title: entry.title,
+                subtitle: entry.subtitle ?? null,
+                logo: entry.posterUri ?? entry.backdropUri ?? null,
+                seriesKey: entry.seriesKey ?? null,
+                season: entry.season ?? null,
+                episode: entry.episode ?? null,
+                positionMs: 0,
+                durationMs: 0,
+                watched: true,
+              });
+        if (!mountedRef.current || !res) return;
+        if (res.ok) {
+          setUnplayedTick((t) => t + 1);
+        } else {
+          restoreNewEpisode(prevRow);
+        }
+      } catch {
+        if (mountedRef.current) restoreNewEpisode(prevRow);
+      } finally {
+        releaseInFlightKey(newEpInFlightRef.current, episodeKey);
+      }
+    },
+    [catalog, removeNewEpisodeOptimistic, restoreNewEpisode],
+  );
+
   const homeSeriesKeys = useMemo(() => {
     const keys: string[] = [];
     for (const row of snap.series) keys.push(row.key);
@@ -612,11 +735,15 @@ export function useHomeData({
       toggleMyList,
       toggleWatched,
       removeFromContinueWatching,
+      dismissNewEpisode,
+      markNewEpisodeWatched,
     }),
     [
       collections,
+      dismissNewEpisode,
       hasLoaded,
       loading,
+      markNewEpisodeWatched,
       nowNextByKey,
       refreshCollections,
       removeFromContinueWatching,

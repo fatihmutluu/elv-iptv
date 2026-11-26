@@ -4,6 +4,7 @@ import type {
   FavoriteRow,
   ItemDetailRow,
   ItemRow,
+  MyListNewEpisodeRow,
   NowNextEntry,
   ProgrammeRow,
   SearchResults,
@@ -17,6 +18,7 @@ import type { DisplayCategory } from './catalog-helpers';
 /** Bounded Home snapshot stored in {@link CatalogUiCache}. */
 export interface CachedHomeSnapshot {
   readonly continueWatching: readonly WatchProgressRow[];
+  readonly newEpisodes?: readonly MyListNewEpisodeRow[];
   readonly favorites: readonly FavoriteRow[];
   readonly favoriteKeys: ReadonlySet<string>;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;

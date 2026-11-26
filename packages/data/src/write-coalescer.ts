@@ -255,6 +255,9 @@ export function createCoalescedCatalog(
   const reorderFavoritesFn = c.reorderFavorites?.bind(c);
   const listFavoritesFn = c.listFavorites?.bind(c);
   const listFavoriteKeysFn = c.listFavoriteKeys?.bind(c);
+  const listMyListNewEpisodesFn = c.listMyListNewEpisodes?.bind(c);
+  const dismissMyListNewEpisodeFn = c.dismissMyListNewEpisode?.bind(c);
+  const refreshMyListNewEpisodesFn = c.refreshMyListNewEpisodes?.bind(c);
 
   const deleteProfileFn = c.deleteProfile?.bind(c);
 
@@ -478,6 +481,34 @@ export function createCoalescedCatalog(
           listFavoriteKeys: async (profileId) => {
             await coalescer.flushPrefix(`fav:${normalizeProfile(profileId)}:`);
             return listFavoriteKeysFn(profileId);
+          },
+        }
+      : {}),
+    ...(listMyListNewEpisodesFn
+      ? {
+          listMyListNewEpisodes: async (limit, profileId, listOpts) => {
+            const p = normalizeProfile(profileId);
+            await coalescer.flushPrefix(`fav:${p}:`);
+            await coalescer.flushPrefix(`progress:${p}:`);
+            await coalescer.flushPrefix(`watched:${p}:`);
+            return listMyListNewEpisodesFn(limit, profileId, listOpts);
+          },
+        }
+      : {}),
+    ...(dismissMyListNewEpisodeFn
+      ? {
+          dismissMyListNewEpisode: (episodeKey, profileId) =>
+            dismissMyListNewEpisodeFn(episodeKey, profileId),
+        }
+      : {}),
+    ...(refreshMyListNewEpisodesFn
+      ? {
+          refreshMyListNewEpisodes: async (profileId, refreshOpts) => {
+            const p = normalizeProfile(profileId);
+            await coalescer.flushPrefix(`fav:${p}:`);
+            await coalescer.flushPrefix(`progress:${p}:`);
+            await coalescer.flushPrefix(`watched:${p}:`);
+            return refreshMyListNewEpisodesFn(profileId, refreshOpts);
           },
         }
       : {}),

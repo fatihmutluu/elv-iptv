@@ -113,8 +113,8 @@ function createTestCatalog(overrides: Partial<CatalogService> = {}): CatalogServ
   } as unknown as CatalogService;
 }
 
-describe('Desktop card hover quick-actions & series unplayed badges (#409)', () => {
-  it('shows batched unplayed counts and all-watched checkmark on Series cards in HomeScreen and supports pointer hover quick-actions', async () => {
+describe('Desktop card hover quick-actions & series watched badges (#409, #502)', () => {
+  it('shows all-watched checkmark without numeric unplayed counts on Series cards in HomeScreen and supports pointer hover quick-actions', async () => {
     const catalog = createTestCatalog();
     const onPlay = jest.fn();
     const onOpenDetail = jest.fn();
@@ -139,10 +139,11 @@ describe('Desktop card hover quick-actions & series unplayed badges (#409)', () 
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('home-series-item-0-unplayed')).toBeTruthy();
+      expect(screen.getByTestId('home-series-item-1-watched-badge')).toBeTruthy();
     });
-    expect(screen.getByText('4')).toBeTruthy();
-    expect(screen.getByTestId('home-series-item-1-watched-badge')).toBeTruthy();
+    expect(screen.queryByTestId('home-series-item-0-unplayed')).toBeNull();
+    expect(screen.queryByTestId('home-series-item-0-watched-badge')).toBeNull();
+    expect(screen.queryByTestId('home-series-item-1-unplayed')).toBeNull();
 
     const movieCard = screen.getByTestId('home-movies-item-0');
     await fireEvent(movieCard, 'hoverIn');
@@ -152,7 +153,7 @@ describe('Desktop card hover quick-actions & series unplayed badges (#409)', () 
     expect(onOpenDetail).not.toHaveBeenCalled();
   });
 
-  it('unwatches an all-episodes-watched series on HomeScreen with nextWatched=false, optimistic badge restore, and rollback on failure', async () => {
+  it('unwatches an all-episodes-watched series on HomeScreen with nextWatched=false, optimistic badge clear, and rollback on failure', async () => {
     let rejectUnwatch!: (err: Error) => void;
     const setWatched = jest.fn(
       () =>
@@ -192,8 +193,7 @@ describe('Desktop card hover quick-actions & series unplayed badges (#409)', () 
     await fireEvent.press(watchedBtn, { stopPropagation: jest.fn(), preventDefault: jest.fn() });
     expect(setWatched).toHaveBeenCalledWith(SERIES_2.key, false);
     expect(screen.queryByTestId('home-series-item-1-watched-badge')).toBeNull();
-    expect(screen.getByTestId('home-series-item-1-unplayed')).toBeTruthy();
-    expect(screen.getByText('12')).toBeTruthy();
+    expect(screen.queryByTestId('home-series-item-1-unplayed')).toBeNull();
 
     await act(async () => {
       rejectUnwatch(new Error('sqlite-busy'));
@@ -295,7 +295,7 @@ describe('Desktop card hover quick-actions & series unplayed badges (#409)', () 
     });
   });
 
-  it('shows series unplayed counts in CatalogDiscoveryScreen rails and CategoryGridView, and in DetailRelatedRail', async () => {
+  it('shows all-watched checkmarks without numeric unplayed counts in CatalogDiscoveryScreen rails, CategoryGridView, and DetailRelatedRail', async () => {
     const catalog = createTestCatalog();
     const i18n = createAppI18n('en');
 
@@ -317,19 +317,21 @@ describe('Desktop card hover quick-actions & series unplayed badges (#409)', () 
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('catalog-rail-0-item-0-unplayed')).toBeTruthy();
+      expect(screen.getByTestId('catalog-rail-0-item-1-watched-badge')).toBeTruthy();
     });
-    expect(screen.getByTestId('catalog-rail-0-item-1-watched-badge')).toBeTruthy();
+    expect(screen.queryByTestId('catalog-rail-0-item-0-unplayed')).toBeNull();
+    expect(screen.queryByTestId('catalog-rail-0-item-0-watched-badge')).toBeNull();
 
     // Drill into CategoryGridView via See All
     await fireEvent.press(screen.getByTestId('catalog-rail-see-all-0'));
     await waitFor(() => {
-      expect(screen.getByTestId('catalog-grid-item-0-unplayed')).toBeTruthy();
+      expect(screen.getByTestId('catalog-grid-item-1-watched-badge')).toBeTruthy();
     });
-    expect(screen.getByTestId('catalog-grid-item-1-watched-badge')).toBeTruthy();
+    expect(screen.queryByTestId('catalog-grid-item-0-unplayed')).toBeNull();
+    expect(screen.queryByTestId('catalog-grid-item-0-watched-badge')).toBeNull();
     await catalogView.unmount();
 
-    // DetailScreen related rail for series shows unplayed badge too
+    // DetailScreen related rail for series shows watched checkmark without numeric unplayed pill
     await render(
       <I18nProvider i18n={i18n}>
         <ThemeProvider>
@@ -358,8 +360,9 @@ describe('Desktop card hover quick-actions & series unplayed badges (#409)', () 
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('detail-related-item-0-unplayed')).toBeTruthy();
+      expect(screen.getByTestId('detail-related-item-1-watched-badge')).toBeTruthy();
     });
-    expect(screen.getByTestId('detail-related-item-1-watched-badge')).toBeTruthy();
+    expect(screen.queryByTestId('detail-related-item-0-unplayed')).toBeNull();
+    expect(screen.queryByTestId('detail-related-item-0-watched-badge')).toBeNull();
   });
 });

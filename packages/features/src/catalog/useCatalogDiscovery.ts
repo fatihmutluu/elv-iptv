@@ -55,6 +55,7 @@ export interface CatalogDiscoveryState {
   readonly loadMoreCategories: () => void;
   readonly removeContinueItem: (itemKey: string) => WatchProgressRow | undefined;
   readonly restoreContinueItem: (row: WatchProgressRow) => void;
+  readonly refreshContinueWatching: () => void;
 }
 
 const EMPTY_ITEMS_MAP: ReadonlyMap<string, readonly ItemRow[]> = new Map();
@@ -105,6 +106,7 @@ export function useCatalogDiscovery({
     () => initialCached?.progressByKey ?? EMPTY_PROGRESS_MAP,
   );
   const [railRefreshTick, setRailRefreshTick] = useState(0);
+  const [continueRefreshTick, setContinueRefreshTick] = useState(0);
 
   const catGenRef = useRef(0);
   const continueGenRef = useRef(0);
@@ -151,7 +153,7 @@ export function useCatalogDiscovery({
     [effectiveGroupVersions, kind],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion trigger fresh continue-watching reads
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken, userStateVersion, and continueRefreshTick trigger fresh continue-watching reads
   useEffect(() => {
     continueGenRef.current += 1;
     const gen = continueGenRef.current;
@@ -178,7 +180,15 @@ export function useCatalogDiscovery({
     return () => {
       continueGenRef.current += 1;
     };
-  }, [catalog, kind, refreshToken, sources.length, syncCache, userStateVersion]);
+  }, [
+    catalog,
+    continueRefreshTick,
+    kind,
+    refreshToken,
+    sources.length,
+    syncCache,
+    userStateVersion,
+  ]);
 
   useEffect(() => {
     catGenRef.current += 1;
@@ -400,7 +410,7 @@ export function useCatalogDiscovery({
   const unplayedBySeriesKey = useSeriesUnplayedCounts(
     catalog,
     loadedSeriesKeys,
-    refreshToken + userStateVersion,
+    refreshToken + userStateVersion + continueRefreshTick,
   );
 
   const hasMoreCategories = categories.length > visibleCategories.length;
@@ -436,6 +446,10 @@ export function useCatalogDiscovery({
     [syncCache],
   );
 
+  const refreshContinueWatching = useCallback(() => {
+    setContinueRefreshTick((t) => t + 1);
+  }, []);
+
   return useMemo<CatalogDiscoveryState>(
     () => ({
       categories,
@@ -451,6 +465,7 @@ export function useCatalogDiscovery({
       loadMoreCategories,
       removeContinueItem,
       restoreContinueItem,
+      refreshContinueWatching,
     }),
     [
       categories,
@@ -462,6 +477,7 @@ export function useCatalogDiscovery({
       loadingRailIds,
       progressByKey,
       railItemsByCategoryId,
+      refreshContinueWatching,
       removeContinueItem,
       restoreContinueItem,
       unplayedBySeriesKey,

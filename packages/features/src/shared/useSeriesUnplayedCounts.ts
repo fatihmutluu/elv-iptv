@@ -6,46 +6,28 @@ const MAX_BATCH_KEYS = 200;
 
 /** Resolved badge props for a series {@link PosterCard}. */
 export interface SeriesBadgeProps {
-  readonly unplayedCount?: number;
   readonly allWatched?: boolean;
-  readonly unplayedLabel?: string;
 }
 
 /**
- * Resolves `unplayedCount`, `allWatched`, and localized `unplayedLabel` for a series card (`#409`).
- * Honors explicit optimistic `watchedOverride` ahead of persisted progress/unplayed counts.
+ * Resolves `allWatched` badge state for a series card (`#409`, `#502`).
+ * Honors explicit optimistic `watchedOverride` ahead of persisted progress/episode summary
+ * and never emits numeric unplayed episode counts.
  */
 export function resolveSeriesBadgeProps(options: {
   readonly summary: SeriesUnplayedSummary | undefined;
   readonly progressWatched: boolean;
   readonly watchedOverride: boolean | undefined;
-  readonly formatUnplayed: (count: number) => string;
-  readonly watchedLabel: string;
 }): SeriesBadgeProps {
-  const { summary, progressWatched, watchedOverride, formatUnplayed, watchedLabel } = options;
+  const { summary, progressWatched, watchedOverride } = options;
   if (watchedOverride === true) {
-    return { allWatched: true, unplayedLabel: watchedLabel };
+    return { allWatched: true };
   }
   if (watchedOverride === false) {
-    if (summary && summary.unplayed > 0) {
-      return { unplayedCount: summary.unplayed, unplayedLabel: formatUnplayed(summary.unplayed) };
-    }
-    if (summary?.watched && summary.total > 0) {
-      return { unplayedCount: summary.total, unplayedLabel: formatUnplayed(summary.total) };
-    }
     return {};
   }
-  if (summary !== undefined) {
-    if (summary.unplayed > 0 && !progressWatched) {
-      return { unplayedCount: summary.unplayed, unplayedLabel: formatUnplayed(summary.unplayed) };
-    }
-    if (summary.watched || progressWatched) {
-      return { allWatched: true, unplayedLabel: watchedLabel };
-    }
-    return {};
-  }
-  if (progressWatched) {
-    return { allWatched: true, unplayedLabel: watchedLabel };
+  if (progressWatched || summary?.watched === true) {
+    return { allWatched: true };
   }
   return {};
 }

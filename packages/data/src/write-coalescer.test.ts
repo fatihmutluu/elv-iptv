@@ -714,4 +714,80 @@ describe('createCoalescedCatalog', () => {
     await pendingFav;
     expect(events).toEqual(['setFav:true', 'deleteProfile:kids']);
   });
+
+  it('forwards My List new-episode methods and flushes fav/progress/watched prefixes (#502)', async () => {
+    const timers = createFakeTimers();
+    const events: string[] = [];
+    const base = makeStubCatalog({
+      setFavorite: vi.fn(async (_input, active) => {
+        events.push(`fav:${active}`);
+        return ok(active);
+      }),
+      saveProgress: vi.fn(async (input) => {
+        events.push(`save:${input.itemKey}`);
+        return ok({} as WatchProgressRow);
+      }),
+      setWatched: vi.fn(async (k, w) => {
+        events.push(`watched:${k}:${w}`);
+        return ok(undefined);
+      }),
+      listMyListNewEpisodes: vi.fn(async (_l, p, o) => {
+        events.push(`listNew:${p ?? 'default'}:${String(o?.parentalUnlocked)}`);
+        return [];
+      }),
+      dismissMyListNewEpisode: vi.fn(async (k, p) => {
+        events.push(`dismissNew:${k}:${p ?? 'default'}`);
+        return ok(undefined);
+      }),
+      refreshMyListNewEpisodes: vi.fn(async (p, o) => {
+        events.push(`refreshNew:${p ?? 'default'}:${String(o?.force)}`);
+        return ok({ checkedSeriesCount: 1, newlyDetectedCount: 1 });
+      }),
+    });
+    const catalog = createCoalescedCatalog(base, {
+      windowMs: 500,
+      setTimeoutFn: timers.setTimeoutFn,
+      clearTimeoutFn: timers.clearTimeoutFn,
+    });
+
+    const p1 = catalog.setFavorite?.(
+      { profileId: 'kids', sourceId: 's1', itemKey: 'x:s1:series:1', kind: 'series', title: 'S1' },
+      true,
+    );
+    const p2 = catalog.saveProgress?.({
+      profileId: 'kids',
+      sourceId: 's1',
+      itemKey: 'x:s1:ep:1',
+      kind: 'episode',
+      title: 'S1',
+      seriesKey: 'x:s1:series:1',
+      positionMs: 15_000,
+      durationMs: 100_000,
+    });
+    const p3 = catalog.setWatched?.('x:s1:ep:2', true, 'kids');
+    await catalog.listMyListNewEpisodes?.(12, 'kids', { parentalUnlocked: true });
+    await Promise.all([p1, p2, p3]);
+
+    const p4 = catalog.setFavorite?.(
+      { profileId: 'kids', sourceId: 's1', itemKey: 'x:s1:series:2', kind: 'series', title: 'S2' },
+      true,
+    );
+    const p5 = catalog.setWatched?.('x:s1:ep:3', true, 'kids');
+    expect(await catalog.refreshMyListNewEpisodes?.('kids', { force: true })).toEqual(
+      ok({ checkedSeriesCount: 1, newlyDetectedCount: 1 }),
+    );
+    await Promise.all([p4, p5]);
+
+    expect(await catalog.dismissMyListNewEpisode?.('x:s1:ep:2', 'kids')).toEqual(ok(undefined));
+    expect(events).toEqual([
+      'fav:true',
+      'save:x:s1:ep:1',
+      'watched:x:s1:ep:2:true',
+      'listNew:kids:true',
+      'fav:true',
+      'watched:x:s1:ep:3:true',
+      'refreshNew:kids:true',
+      'dismissNew:x:s1:ep:2:kids',
+    ]);
+  });
 });

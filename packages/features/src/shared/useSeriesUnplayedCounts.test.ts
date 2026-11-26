@@ -21,9 +21,8 @@ function Probe({
   return null;
 }
 
-describe('resolveSeriesBadgeProps & useSeriesUnplayedCounts (#409)', () => {
-  it('resolves series badge states across summary, progressWatched, and optimistic watchedOverride', () => {
-    const fmt = (count: number) => `${count} unwatched`;
+describe('resolveSeriesBadgeProps & useSeriesUnplayedCounts (#409, #502)', () => {
+  it('resolves allWatched badge state across summary, progressWatched, and optimistic watchedOverride without numeric counts', () => {
     const summary: SeriesUnplayedSummary = {
       seriesKey: 's:1',
       total: 10,
@@ -42,38 +41,30 @@ describe('resolveSeriesBadgeProps & useSeriesUnplayedCounts (#409)', () => {
         summary,
         progressWatched: false,
         watchedOverride: true,
-        formatUnplayed: fmt,
-        watchedLabel: 'Watched',
       }),
-    ).toEqual({ allWatched: true, unplayedLabel: 'Watched' });
+    ).toEqual({ allWatched: true });
 
     expect(
       resolveSeriesBadgeProps({
         summary,
         progressWatched: true,
         watchedOverride: false,
-        formatUnplayed: fmt,
-        watchedLabel: 'Watched',
       }),
-    ).toEqual({ unplayedCount: 3, unplayedLabel: '3 unwatched' });
+    ).toEqual({});
 
     expect(
       resolveSeriesBadgeProps({
         summary: watchedSummary,
         progressWatched: false,
         watchedOverride: false,
-        formatUnplayed: fmt,
-        watchedLabel: 'Watched',
       }),
-    ).toEqual({ unplayedCount: 10, unplayedLabel: '10 unwatched' });
+    ).toEqual({});
 
     expect(
       resolveSeriesBadgeProps({
         summary: undefined,
         progressWatched: true,
         watchedOverride: false,
-        formatUnplayed: fmt,
-        watchedLabel: 'Watched',
       }),
     ).toEqual({});
 
@@ -82,28 +73,22 @@ describe('resolveSeriesBadgeProps & useSeriesUnplayedCounts (#409)', () => {
         summary,
         progressWatched: false,
         watchedOverride: undefined,
-        formatUnplayed: fmt,
-        watchedLabel: 'Watched',
       }),
-    ).toEqual({ unplayedCount: 3, unplayedLabel: '3 unwatched' });
+    ).toEqual({});
 
     expect(
       resolveSeriesBadgeProps({
         summary: watchedSummary,
         progressWatched: false,
         watchedOverride: undefined,
-        formatUnplayed: fmt,
-        watchedLabel: 'Watched',
       }),
-    ).toEqual({ allWatched: true, unplayedLabel: 'Watched' });
+    ).toEqual({ allWatched: true });
 
     expect(
       resolveSeriesBadgeProps({
         summary: { seriesKey: 's:3', total: 0, unplayed: 0, watched: false },
         progressWatched: false,
         watchedOverride: undefined,
-        formatUnplayed: fmt,
-        watchedLabel: 'Watched',
       }),
     ).toEqual({});
 
@@ -112,18 +97,14 @@ describe('resolveSeriesBadgeProps & useSeriesUnplayedCounts (#409)', () => {
         summary: undefined,
         progressWatched: true,
         watchedOverride: undefined,
-        formatUnplayed: fmt,
-        watchedLabel: 'Watched',
       }),
-    ).toEqual({ allWatched: true, unplayedLabel: 'Watched' });
+    ).toEqual({ allWatched: true });
 
     expect(
       resolveSeriesBadgeProps({
         summary: undefined,
         progressWatched: false,
         watchedOverride: undefined,
-        formatUnplayed: fmt,
-        watchedLabel: 'Watched',
       }),
     ).toEqual({});
   });
