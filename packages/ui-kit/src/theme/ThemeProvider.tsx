@@ -11,6 +11,7 @@ import {
   useState,
 } from 'react';
 import { AccessibilityInfo, Platform } from 'react-native';
+import { ContextMenuHostProvider } from './context-menu-host';
 import { DEFAULT_THEME_PRESET, type ThemePalette, type ThemePresetId } from './presets';
 import { buildTheme, clampFontScale, FONT_FAMILY_SANS, type Theme } from './tokens';
 import { TooltipHostProvider } from './tooltip-host';
@@ -324,7 +325,9 @@ export function ThemeProvider({
 
   return (
     <ThemeContext.Provider value={controller}>
-      <TooltipHostProvider theme={theme}>{children}</TooltipHostProvider>
+      <TooltipHostProvider theme={theme}>
+        <ContextMenuHostProvider theme={theme}>{children}</ContextMenuHostProvider>
+      </TooltipHostProvider>
     </ThemeContext.Provider>
   );
 }

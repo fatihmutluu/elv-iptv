@@ -120,13 +120,13 @@ async function openCatalogWithMovies(): Promise<{
   };
 }
 
-describe('HomeScreen TV ambient backdrop & recentChannels navigation (#414)', () => {
+describe('HomeScreen TV ambient backdrop & unified live rail navigation (#414)', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     jest.useRealTimers();
   });
 
-  it('tracks recentChannels rail focus and horizontal selection in useTvHomeNavigation', async () => {
+  it('tracks live rail focus and horizontal selection in useTvHomeNavigation', async () => {
     const onActivate = jest.fn();
     const { result, unmount } = await renderHook(() =>
       useTvHomeNavigation({
@@ -134,7 +134,7 @@ describe('HomeScreen TV ambient backdrop & recentChannels navigation (#414)', ()
         isActiveScope: true,
         rows: [
           { id: 'hero', count: 1 },
-          { id: 'recentChannels', count: 3 },
+          { id: 'live', count: 3 },
         ],
         onActivate,
       }),
@@ -144,7 +144,7 @@ describe('HomeScreen TV ambient backdrop & recentChannels navigation (#414)', ()
     await act(async () => {
       result.current.handleTvKey({ key: 'down', kind: 'press', time: 10 });
     });
-    expect(result.current.focusedRowId).toBe('recentChannels');
+    expect(result.current.focusedRowId).toBe('live');
     expect(result.current.focusedCol).toBe(0);
 
     await act(async () => {
@@ -155,7 +155,7 @@ describe('HomeScreen TV ambient backdrop & recentChannels navigation (#414)', ()
     await act(async () => {
       result.current.handleTvKey({ key: 'select', kind: 'press', time: 30 });
     });
-    expect(onActivate).toHaveBeenCalledWith('recentChannels', 1);
+    expect(onActivate).toHaveBeenCalledWith('live', 1);
 
     await unmount();
   });

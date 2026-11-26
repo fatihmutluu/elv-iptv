@@ -285,4 +285,41 @@ describe('vault-crypto zero-knowledge lifecycle', () => {
       );
     }
   });
+
+  it('accepts valid optional initialPreferences and rejects malformed or oversized initialPreferences', async () => {
+    const crypto = createPureJsVaultCryptoPort(seededRandom(77));
+    const vaultKey = new Uint8Array(32).fill(0x55);
+    const withPrefs: VaultSnapshot = {
+      ...createEmptyVaultSnapshot(1_700_000_000_000),
+      initialPreferences: { themePreset: 'midnightGold', locale: 'tr', fontScale: 1.1 },
+      initialPreferencesUpdatedAt: 1_700_000_000_123,
+    };
+    const blob = await encryptVaultSnapshot(crypto, vaultKey, 'usr_1', 1, withPrefs);
+    const decrypted = await decryptVaultSnapshot(crypto, vaultKey, 'usr_1', 1, blob);
+    expect(decrypted).toEqual(withPrefs);
+
+    const tooManyKeys: Record<string, unknown> = {};
+    for (let i = 0; i < 65; i += 1) tooManyKeys[`k${i}`] = i;
+
+    const badSnapshots: unknown[] = [
+      { ...createEmptyVaultSnapshot(1), initialPreferences: ['not', 'an', 'object'] },
+      { ...createEmptyVaultSnapshot(1), initialPreferences: 'invalid' },
+      { ...createEmptyVaultSnapshot(1), initialPreferences: null },
+      { ...createEmptyVaultSnapshot(1), initialPreferences: tooManyKeys },
+      { ...createEmptyVaultSnapshot(1), initialPreferencesUpdatedAt: -1 },
+      { ...createEmptyVaultSnapshot(1), initialPreferencesUpdatedAt: '123' },
+    ];
+    for (const bad of badSnapshots) {
+      const badBlob = await encryptVaultSnapshot(
+        crypto,
+        vaultKey,
+        'usr_1',
+        2,
+        bad as VaultSnapshot,
+      );
+      await expect(decryptVaultSnapshot(crypto, vaultKey, 'usr_1', 2, badBlob)).rejects.toThrow(
+        /Invalid vault snapshot structure/,
+      );
+    }
+  });
 });

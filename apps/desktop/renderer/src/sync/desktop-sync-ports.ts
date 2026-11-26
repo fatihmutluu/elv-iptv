@@ -1,3 +1,4 @@
+import { type PreferencesPatch, sanitizeInitialPreferencesPatch } from '@elv/domain';
 import type {
   FeedbackBridge,
   FeedbackSubmitRequest,
@@ -72,8 +73,10 @@ export interface DesktopSyncPorts {
   readonly telemetry?: DesktopTelemetryPort;
   readonly feedback?: DesktopFeedbackPort;
   onTelemetryStatusChanged(listener: (status: TelemetryStatusIpc) => void): () => void;
+  onInitialPreferences(listener: (patch: PreferencesPatch) => void): () => void;
   hydrate(): Promise<void>;
   setServerUrl(serverUrl: string): Promise<void>;
+  setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): Promise<void>;
   dispose(): void;
 }
 
@@ -125,6 +128,20 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
 
   const unsubscribeBridgeState = syncBridge?.onStateChanged((next) => {
     if (!disposed) updateSyncState(next);
+  });
+
+  const initialPrefsListeners = new Set<(patch: PreferencesPatch) => void>();
+  const unsubscribeBridgeInitialPrefs = syncBridge?.onInitialPreferencesReceived?.((raw) => {
+    if (disposed) return;
+    const patch = sanitizeInitialPreferencesPatch(raw);
+    if (Object.keys(patch).length === 0) return;
+    for (const listener of [...initialPrefsListeners]) {
+      try {
+        listener(patch);
+      } catch {
+        // Isolate subscriber failures.
+      }
+    }
   });
 
   const syncAccount: DesktopSyncAccountPort | undefined =
@@ -350,6 +367,12 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
     ...(telemetry !== undefined ? { telemetry } : {}),
     ...(feedback !== undefined ? { feedback } : {}),
     onTelemetryStatusChanged: subscribeTelemetryStatus,
+    onInitialPreferences(listener: (patch: PreferencesPatch) => void): () => void {
+      initialPrefsListeners.add(listener);
+      return () => {
+        initialPrefsListeners.delete(listener);
+      };
+    },
     async hydrate(): Promise<void> {
       if (disposed) return;
       if (syncBridge !== undefined) {
@@ -368,10 +391,16 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
       if (!syncBridge || disposed) return;
       await syncBridge.setServerUrl(serverUrl).catch(() => undefined);
     },
+    async setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): Promise<void> {
+      if (!syncBridge?.setSyncablePreferences || disposed) return;
+      await syncBridge.setSyncablePreferences(preferences).catch(() => undefined);
+    },
     dispose(): void {
       disposed = true;
       unsubscribeBridgeState?.();
+      unsubscribeBridgeInitialPrefs?.();
       stateListeners.clear();
+      initialPrefsListeners.clear();
       telemetryListeners.clear();
     },
   };

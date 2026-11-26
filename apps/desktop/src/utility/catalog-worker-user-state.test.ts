@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { FavoriteRow, SourceRow } from '@elv/data';
+import type { FavoriteRow, SourceRow, WatchProgressRow } from '@elv/data';
 import type { FetchLike, Result } from '@elv/domain';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -216,6 +216,70 @@ describe('catalog worker runtime setFavorite IPC', () => {
         seriesKeys: [`m:${sourceId}:series:1`],
       }),
     ).toEqual([]);
+
+    // Reorder favorites round-trip
+    for (const [n, title] of [
+      [1, 'Ch A'],
+      [2, 'Ch B'],
+      [3, 'Ch C'],
+    ] as const) {
+      await client.call<Result<boolean>>({
+        method: 'setFavorite',
+        input: { sourceId, itemKey: `m:${sourceId}:live:${n}`, kind: 'live', title },
+        active: true,
+      });
+    }
+    expect(
+      await client.call<Result<void>>({
+        method: 'reorderFavorites',
+        orderedItemKeys: [`m:${sourceId}:live:3`, `m:${sourceId}:live:1`],
+      }),
+    ).toEqual({ ok: true, value: undefined });
+    const reorderedFavs = await client.call<FavoriteRow[]>({ method: 'listFavorites', limit: 10 });
+    expect(reorderedFavs.map((f) => [f.itemKey, f.sortOrder])).toEqual([
+      [`m:${sourceId}:live:3`, 1],
+      [`m:${sourceId}:live:1`, 2],
+      [`m:${sourceId}:live:2`, 3],
+    ]);
+
+    // listWatched round-trip (movies & series)
+    await client.call({
+      method: 'saveProgress',
+      input: {
+        sourceId,
+        itemKey: `m:${sourceId}:movie:w1`,
+        kind: 'movie',
+        title: 'Watched Film',
+        positionMs: 95_000,
+        durationMs: 100_000,
+      },
+    });
+    await client.call({
+      method: 'saveProgress',
+      input: {
+        sourceId,
+        itemKey: `m:${sourceId}:series:w2`,
+        kind: 'series',
+        title: 'Watched Show',
+        positionMs: 100_000,
+        durationMs: 100_000,
+        watched: true,
+      },
+    });
+    const watchedMovies = await client.call<WatchProgressRow[]>({
+      method: 'listWatched',
+      limit: 10,
+      opts: { kind: 'movie' },
+    });
+    expect(watchedMovies.map((r) => r.itemKey)).toEqual([`m:${sourceId}:movie:w1`]);
+    const watchedAll = await client.call<WatchProgressRow[]>({
+      method: 'listWatched',
+      limit: 10,
+    });
+    expect(watchedAll.map((r) => r.itemKey).sort()).toEqual(
+      [`m:${sourceId}:movie:w1`, `m:${sourceId}:series:w2`].sort(),
+    );
+
     await h.shutdown();
   });
 });

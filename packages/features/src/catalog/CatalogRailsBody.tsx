@@ -29,6 +29,9 @@ export interface CatalogRailsBodyProps {
   readonly focusedRowId: string | null;
   readonly focusedCol: number | null;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly onResumeContinue?: (row: WatchProgressRow) => void;
+  readonly onHideContinue?: (row: WatchProgressRow) => void;
+  readonly onMarkContinueWatched?: (row: WatchProgressRow) => void;
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
@@ -56,6 +59,9 @@ export function CatalogRailsBody({
   focusedRowId,
   focusedCol,
   onOpenDetail,
+  onResumeContinue,
+  onHideContinue,
+  onMarkContinueWatched,
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
@@ -97,6 +103,9 @@ export function CatalogRailsBody({
               isTv={layout.isTv}
               focusedIndex={focusedRowId === 'continue' ? focusedCol : null}
               onOpenDetail={onOpenDetail}
+              {...(onResumeContinue !== undefined ? { onResumeContinue } : {})}
+              {...(onHideContinue !== undefined ? { onHideContinue } : {})}
+              {...(onMarkContinueWatched !== undefined ? { onMarkContinueWatched } : {})}
             />
           </TvFocusGuideRegion>
         </View>

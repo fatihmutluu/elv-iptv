@@ -56,10 +56,13 @@ export interface LiveScreenProps {
   readonly memory?: LiveTabMemory;
   readonly onMemoryChange?: (next: LiveTabMemory) => void;
   readonly onPlay: (target: PlayTarget) => void;
+  readonly onOpenMultiView?: (target: PlayTarget) => void;
+  readonly onOpenPopout?: (target: PlayTarget) => void;
   readonly onOpenSources: () => void;
   readonly onOpenSearch?: () => void;
   readonly onOpenHome?: () => void;
   readonly onChannelsMutated?: () => void;
+  readonly onFavoritesMutated?: () => void;
   readonly onFocusTopNav?: () => void;
   readonly isActiveScope?: boolean;
   readonly videoHost?: VideoHost;
@@ -95,10 +98,13 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   const { catalog, sources, refreshToken, userStateVersion = 0, memory, onMemoryChange } = props;
   const {
     onPlay,
+    onOpenMultiView,
+    onOpenPopout,
     onOpenSources,
     onOpenSearch,
     onOpenHome,
     onChannelsMutated,
+    onFavoritesMutated,
     onFocusTopNav,
     isActiveScope = true,
     videoHost,
@@ -178,6 +184,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     sources: readySources,
     refreshToken: refreshToken + guideRefreshTick,
     userStateVersion,
+    ...(onFavoritesMutated !== undefined ? { onFavoritesMutated } : {}),
     mode,
     selectedCategoryId: activeMemory.categoryId,
     activeChannelKey: activeMemory.activeChannelKey,
@@ -326,6 +333,30 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   const handleToggleZapDrawer = useCallback(
     () => updateMemory({ zapDrawerOpen: !memoryRef.current.zapDrawerOpen }),
     [memoryRef, updateMemory],
+  );
+  const handleReorderFavorite = useCallback(
+    (fromIdx: number, toIdx: number) => void live.reorderFavorite(fromIdx, toIdx),
+    [live.reorderFavorite],
+  );
+  const contextFavIndex = contextMenu
+    ? live.favoriteChannels.findIndex((c) => c.key === contextMenu.channel.key)
+    : -1;
+  const handleMoveContextFavorite = useCallback(
+    (dir: 'up' | 'down') => {
+      if (contextFavIndex >= 0) {
+        void live.reorderFavorite(contextFavIndex, contextFavIndex + (dir === 'up' ? -1 : 1));
+      }
+    },
+    [contextFavIndex, live.reorderFavorite],
+  );
+  const targetScope = mode === 'favorites' ? 'favorites' : 'category';
+  const handleContextMultiView = useCallback(
+    (ch: ItemRow, idx: number) => onOpenMultiView?.(live.buildPlayTarget(ch, idx, targetScope)),
+    [live, onOpenMultiView, targetScope],
+  );
+  const handleContextPopout = useCallback(
+    (ch: ItemRow, idx: number) => onOpenPopout?.(live.buildPlayTarget(ch, idx, targetScope)),
+    [live, onOpenPopout, targetScope],
   );
   const handleToggleFavorite = useCallback(
     (ch: ItemRow) => void live.toggleFavorite(ch),
@@ -677,6 +708,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                 onToggleFavorite={handleToggleFavorite}
                 onBrowseChannels={handleBrowseChannels}
                 onSelectChannel={live.tuneChannel}
+                onReorderFavorite={handleReorderFavorite}
                 onOpenContextMenu={handleOpenContextMenu}
                 onWatchFullscreen={handleWatchFromFavorites}
                 focusedControl={tvNav.focusedWatchControl}
@@ -697,7 +729,12 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
         isTv={layout.isTv}
         cleanChannelTitles={cleanChannelTitles}
         onPlay={mode === 'favorites' ? handleWatchFromFavorites : handleWatchAndPlay}
+        {...(onOpenMultiView !== undefined ? { onOpenMultiView: handleContextMultiView } : {})}
+        {...(onOpenPopout !== undefined ? { onOpenPopout: handleContextPopout } : {})}
         onToggleFavorite={handleToggleFavorite}
+        canMoveUp={contextFavIndex > 0}
+        canMoveDown={contextFavIndex >= 0 && contextFavIndex < live.favoriteChannels.length - 1}
+        onMoveFavorite={handleMoveContextFavorite}
         onShowProgrammeDetails={handleShowProgrammeDetails}
         {...(catalog.setChannelOverride !== undefined
           ? {

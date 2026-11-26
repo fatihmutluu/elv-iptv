@@ -354,6 +354,10 @@ export const isNowNextKeyList = (x: unknown): x is readonly string[] =>
   isBoundedKeyList(x, MAX_NOW_NEXT_KEYS);
 export const isEpgWindowKeyList = (x: unknown): x is readonly string[] =>
   isBoundedKeyList(x, MAX_EPG_WINDOW_KEYS);
+export const isOrderedFavoriteKeys = (x: unknown): x is readonly string[] =>
+  Array.isArray(x) &&
+  x.length <= MAX_USER_LIST_LIMIT &&
+  x.every((k) => isCleanKey(k, MAX_ID_CHARS) && k.trim().length > 0);
 
 const TRANSPORT_SETTINGS_KEYS = new Set<keyof TransportSettings>([
   'userAgent',
@@ -652,6 +656,7 @@ const SET_PARENTAL_LOCK_KEYS = new Set([
 ]);
 const PARENTAL_QUERY_OPT_KEYS = new Set(['profileId', 'parentalUnlocked']);
 const PARENTAL_UNLOCKED_OPT_KEYS = new Set(['parentalUnlocked']);
+const LIST_WATCHED_OPT_KEYS = new Set(['kind', 'parentalUnlocked']);
 
 export function hasOnlyKeys(
   record: Record<string, unknown>,
@@ -680,6 +685,15 @@ export function isParentalQueryOptions(x: unknown): x is ParentalQueryOptions {
 
 export function isParentalUnlockedOption(x: unknown): x is { readonly parentalUnlocked?: boolean } {
   if (!isRecord(x) || !hasOnlyKeys(x, PARENTAL_UNLOCKED_OPT_KEYS)) return false;
+  return x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean';
+}
+
+export function isListWatchedOptions(
+  x: unknown,
+): x is { readonly kind?: 'movie' | 'series'; readonly parentalUnlocked?: boolean } {
+  if (!isRecord(x) || !hasOnlyKeys(x, LIST_WATCHED_OPT_KEYS)) return false;
+  const kind = x['kind'];
+  if (kind !== undefined && kind !== 'movie' && kind !== 'series') return false;
   return x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean';
 }
 

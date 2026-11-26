@@ -1,3 +1,4 @@
+import { DEFAULT_HOME_LAYOUT } from './home-layout';
 import {
   type BufferPreset,
   clampFontScale,
@@ -24,6 +25,15 @@ import {
 import { elvError, err, ok, type Result } from './result';
 import { DEFAULT_SUBTITLE_STYLE, type SubtitleStyleConfig } from './subtitle-style';
 
+export {
+  DEFAULT_HOME_LAYOUT,
+  HOME_LAYOUT_SECTION_IDS,
+  type HomeLayoutSectionId,
+  type HomeLayoutSectionPref,
+  homeLayoutEquals,
+  isHomeLayoutSectionId,
+  normalizeHomeLayout,
+} from './home-layout';
 export {
   ACCESSIBILITY_FONT_FAMILIES,
   type AccessibilityFontFamily,
@@ -186,6 +196,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   ...DEFAULT_WAVE_F7B_PREFERENCES,
   ...DEFAULT_WAVE_F9_PREFERENCES,
   subtitleStyle: DEFAULT_SUBTITLE_STYLE,
+  homeLayout: DEFAULT_HOME_LAYOUT,
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */

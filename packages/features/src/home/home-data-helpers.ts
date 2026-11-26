@@ -8,7 +8,7 @@ import type {
 } from '@elv/data';
 import type { CachedHomeSnapshot } from '../shared';
 
-const HOME_FAVORITES_LIMIT = 24;
+const HOME_FAVORITES_LIMIT = 250;
 const MAX_SOURCES_TO_PROBE = 3;
 
 export const EMPTY_HOME_SNAPSHOT: CachedHomeSnapshot = {
@@ -134,5 +134,16 @@ export function applyHomeWatchedUpdate(
     restoreCw !== undefined
       ? [restoreCw, ...filtered].sort((a, b) => b.updatedAt - a.updatedAt)
       : filtered;
+  return { ...prev, progressByKey: nextProg, continueWatching: nextCw };
+}
+
+/** Optimistically removes an item from Continue Watching and clears its cached progress row. */
+export function applyHomeRemoveContinueWatching(
+  prev: CachedHomeSnapshot,
+  itemKey: string,
+): CachedHomeSnapshot {
+  const nextProg = new Map(prev.progressByKey);
+  nextProg.delete(itemKey);
+  const nextCw = prev.continueWatching.filter((r) => r.itemKey !== itemKey);
   return { ...prev, progressByKey: nextProg, continueWatching: nextCw };
 }

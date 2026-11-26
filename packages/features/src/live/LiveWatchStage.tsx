@@ -44,6 +44,7 @@ export interface LiveWatchStageProps {
   readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onBrowseChannels?: () => void;
   readonly onSelectChannel: (channel: ItemRow, index: number) => void;
+  readonly onReorderFavorite?: (fromIndex: number, toIndex: number) => void;
   readonly onOpenContextMenu?: (
     channel: ItemRow,
     index: number,
@@ -295,6 +296,9 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
             cleanChannelTitles={cleanChannelTitles}
             hydrateNowNext={p.hydrateNowNext}
             onSelectChannel={p.onSelectChannel}
+            {...(p.onReorderFavorite !== undefined
+              ? { onReorderFavorite: p.onReorderFavorite }
+              : {})}
             {...(p.onOpenContextMenu !== undefined
               ? { onOpenContextMenu: p.onOpenContextMenu }
               : {})}
@@ -377,6 +381,7 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
           cleanChannelTitles={cleanChannelTitles}
           hydrateNowNext={p.hydrateNowNext}
           onSelectChannel={p.onSelectChannel}
+          {...(p.onReorderFavorite !== undefined ? { onReorderFavorite: p.onReorderFavorite } : {})}
           {...(p.onOpenContextMenu !== undefined ? { onOpenContextMenu: p.onOpenContextMenu } : {})}
         />
       ) : null}

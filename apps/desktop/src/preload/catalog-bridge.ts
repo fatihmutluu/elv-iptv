@@ -404,6 +404,13 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         ...(profileId === undefined ? {} : { profileId }),
         ...(opts === undefined ? {} : { opts }),
       }),
+    listWatched: (limit, profileId, opts) =>
+      callValue({
+        method: 'listWatched',
+        ...(limit === undefined ? {} : { limit }),
+        ...(profileId === undefined ? {} : { profileId }),
+        ...(opts === undefined ? {} : { opts }),
+      }),
     listProgressByKeys: (itemKeys, profileId) =>
       callValue({
         method: 'listProgressByKeys',
@@ -424,6 +431,12 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       }),
     toggleFavorite: (input) => callResult({ method: 'toggleFavorite', input }),
     setFavorite: (input, active) => callResult({ method: 'setFavorite', input, active }),
+    reorderFavorites: (orderedItemKeys, profileId) =>
+      callResult({
+        method: 'reorderFavorites',
+        orderedItemKeys,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
     listFavorites: (limit, profileId, opts) =>
       callValue({
         method: 'listFavorites',

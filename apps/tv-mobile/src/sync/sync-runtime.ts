@@ -1,4 +1,4 @@
-import { normalizeSyncServerUrl } from '@elv/domain';
+import { normalizeSyncServerUrl, sanitizeInitialPreferencesPatch } from '@elv/domain';
 import {
   base64UrlDecode,
   base64UrlEncode,
@@ -27,6 +27,7 @@ import {
   type FeedbackPort,
   type FeedbackSubmitInput,
   generateSessionId,
+  initialPrefsAppliedKey,
   isAuthTokenExpiredError,
   type PersistedSessionRecord,
   parsePersistedSession,
@@ -90,6 +91,17 @@ export function createTvMobileSyncPorts(
   let lastRevision = 0;
   let localSnapshot: VaultSnapshot = createEmptyVaultSnapshot(0);
   const qrSessions = new Map<string, QrPairingSession>();
+
+  const hasAppliedInitialPrefs = async (userId: string): Promise<boolean> => {
+    const val = await options.secretStore
+      .get(initialPrefsAppliedKey(userId))
+      .catch(() => undefined);
+    return val === '1';
+  };
+
+  const markInitialPrefsApplied = async (userId: string): Promise<void> => {
+    await options.secretStore.set(initialPrefsAppliedKey(userId), '1').catch(() => undefined);
+  };
 
   const setState = (next: SyncAccountState): void => {
     state = Object.freeze({ ...next });
@@ -186,6 +198,9 @@ export function createTvMobileSyncPorts(
       vaultKey: base64UrlDecode(persisted.vaultKeyB64),
     };
     lastRevision = persisted.lastRevision;
+    if (persisted.lastSyncedAtIso !== null || persisted.lastRevision > 0) {
+      await markInitialPrefsApplied(persisted.userId);
+    }
     setState({
       status: 'signed_in',
       email: persisted.email,
@@ -246,6 +261,7 @@ export function createTvMobileSyncPorts(
       activeSession = res.value.session;
       lastRevision = 0;
       await persistSession(res.value.session, null, 0);
+      await markInitialPrefsApplied(res.value.session.user.id);
       setState({
         status: 'signed_in',
         email: res.value.session.user.email,
@@ -291,9 +307,28 @@ export function createTvMobileSyncPorts(
         return { ok: false, errorCode: code };
       }
 
-      const currentLocal = options.getLocalSnapshot
-        ? await options.getLocalSnapshot()
-        : localSnapshot;
+      const alreadyAppliedInitialPrefs = await hasAppliedInitialPrefs(session.user.id);
+      let remoteInitialPrefs = pullRes.value.snapshot?.initialPreferences;
+      const shouldApplyRemoteInitial =
+        !alreadyAppliedInitialPrefs && remoteInitialPrefs !== undefined;
+
+      const baseLocal = options.getLocalSnapshot ? await options.getLocalSnapshot() : localSnapshot;
+      const rawLocalSeed =
+        !shouldApplyRemoteInitial && options.getSyncablePreferences
+          ? options.getSyncablePreferences()
+          : undefined;
+      const sanitizedLocalSeed =
+        rawLocalSeed !== undefined
+          ? (sanitizeInitialPreferencesPatch(rawLocalSeed) as Record<string, unknown>)
+          : undefined;
+      const currentLocal: VaultSnapshot =
+        sanitizedLocalSeed !== undefined && Object.keys(sanitizedLocalSeed).length > 0
+          ? {
+              ...baseLocal,
+              initialPreferences: sanitizedLocalSeed,
+              initialPreferencesUpdatedAt: clock.now(),
+            }
+          : baseLocal;
       let merged =
         pullRes.value.snapshot !== null
           ? mergeVaultSnapshots(currentLocal, pullRes.value.snapshot)
@@ -306,6 +341,9 @@ export function createTvMobileSyncPorts(
           const code = errorCodeFrom(retryPull.error);
           setState({ ...state, status: 'signed_in', errorCode: code });
           return { ok: false, errorCode: code };
+        }
+        if (remoteInitialPrefs === undefined && retryPull.value.snapshot?.initialPreferences) {
+          remoteInitialPrefs = retryPull.value.snapshot.initialPreferences;
         }
         merged =
           retryPull.value.snapshot !== null
@@ -322,6 +360,15 @@ export function createTvMobileSyncPorts(
 
       localSnapshot = merged;
       await options.applyMergedSnapshot?.(merged);
+      if (!alreadyAppliedInitialPrefs) {
+        if (remoteInitialPrefs !== undefined) {
+          const patch = sanitizeInitialPreferencesPatch(remoteInitialPrefs);
+          if (Object.keys(patch).length > 0) {
+            await options.applyInitialPreferences?.(patch);
+          }
+        }
+        await markInitialPrefsApplied(session.user.id);
+      }
       lastRevision = pushRes.value.revision;
       const syncedIso = new Date(clock.now()).toISOString();
       await persistSession(session, syncedIso, lastRevision);

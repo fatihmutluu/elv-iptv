@@ -334,6 +334,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     thermalDevice: props.thermalDevice,
     videoHost,
     stopActivePlayerRef,
+    stopEmbeddedPreviewRef,
     minimizeToTray: preferences.preferences.minimizeToTray,
     backgroundAudioPlayback: preferences.preferences.backgroundAudioPlayback,
     playTargetRef,
@@ -530,20 +531,11 @@ function AppShellContent(props: AppShellProps): ReactElement {
     shell.bumpCatalogRevision();
     setUserStateVersion((v) => v + 1);
   }, [shell.bumpCatalogRevision, uiCache]);
+  const handleFavoritesMutated = useCallback(() => {
+    uiCache.clearHome?.();
+    setUserStateVersion((v) => v + 1);
+  }, [uiCache]);
   const handleReminderChanged = useCallback(() => setReminderVersion((v) => v + 1), []);
-  const handleReminderTune = useCallback(
-    (target: PlayTarget) => {
-      const stopPreview = stopEmbeddedPreviewRef.current;
-      if (playTargetRef.current === null && stopPreview !== null) {
-        void stopPreview()
-          .catch(() => undefined)
-          .finally(() => handlePlay(target));
-        return;
-      }
-      handlePlay(target);
-    },
-    [handlePlay],
-  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: locale updates translated reminder timing text on live language switch
   const formatReminderTimingText = useCallback(
     (startsInMinutes: number) =>
@@ -559,7 +551,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     profileRevision: profile.profileRevision,
     catalogRevision,
     reminderVersion,
-    onTuneChannel: handleReminderTune,
+    onTuneChannel: modes.tuneFromReminder,
     formatTimingText: formatReminderTimingText,
     ...(props.reminderHost !== undefined ? { reminderHost: props.reminderHost } : {}),
   });
@@ -733,6 +725,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     onPopDetail={popDetail}
                     onOpenDetail={openDetail}
                     onPlay={handlePlay}
+                    {...modes.browseStageActions}
                     onSelectTab={selectTab}
                     onOpenSources={openSources}
                     onOpenChannelManagement={mgmtOverlays.openChannelManager}
@@ -743,6 +736,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
                     onRegisterStopPreview={handleRegisterStopPreview}
                     suppressEmbeddedPreview={playTarget !== null}
                     onChannelsMutated={handleChannelsMutated}
+                    onFavoritesMutated={handleFavoritesMutated}
                     reminderVersion={reminderVersion}
                     onReminderChanged={handleReminderChanged}
                     onScrollTopChange={setHeroScrolled}

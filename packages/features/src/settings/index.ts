@@ -4,6 +4,14 @@ export {
   type AppearancePanelProps,
   type SettingsPreferencesController,
 } from './AppearancePanel';
+export {
+  HOME_SECTION_LABEL_KEYS,
+  HomeLayoutEditor,
+  type HomeLayoutEditorProps,
+  moveHomeLayoutSection,
+  reorderHomeLayoutSection,
+  toggleHomeLayoutSection,
+} from './HomeLayoutEditor';
 export { LiveTvSettingsPanel, type LiveTvSettingsPanelProps } from './LiveTvSettingsPanel';
 export { PlaybackSettingsPanel, type PlaybackSettingsPanelProps } from './PlaybackSettingsPanel';
 export {

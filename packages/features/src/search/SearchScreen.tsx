@@ -5,7 +5,7 @@ import type {
   SearchProgrammeHit,
   SearchScope,
 } from '@elv/data';
-import { TextEntryBoundary, useI18n, useTheme, useViewport } from '@elv/ui-kit';
+import { TextEntryBoundary, useContextMenu, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
   type ReactElement,
@@ -16,7 +16,12 @@ import {
 } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
-import { computeCatalogLayout, type DetailTarget, detailTargetFromItem } from '../shared';
+import {
+  computeCatalogLayout,
+  type DetailTarget,
+  detailTargetFromItem,
+  useCardQuickActionsState,
+} from '../shared';
 import { createImeSubmitGuard } from '../shared/ime-guard';
 import {
   SearchEmptyPanel,
@@ -76,6 +81,7 @@ function SearchScreenBody({
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
+  const contextMenu = useContextMenu();
   const layout = useMemo(
     () => computeCatalogLayout(viewport, theme, theme.fontScale),
     [theme, viewport],
@@ -135,11 +141,47 @@ function SearchScreenBody({
     sectionYRef.current.set(section, y);
   }, []);
 
+  const quickActionsState = useCardQuickActionsState({
+    catalog,
+    refreshToken,
+    userStateVersion,
+  });
+
   const handlePlayLive = useCallback(
     (item: ItemRow) => {
       onPlay(buildLiveSearchPlayTarget(item));
     },
     [onPlay],
+  );
+
+  const handlePlayVod = useCallback(
+    (item: ItemRow) => {
+      if (item.kind === 'movie') {
+        onPlay({
+          itemKey: item.key,
+          sourceId: item.sourceId,
+          title: item.name,
+          kind: 'vod',
+          itemKind: 'movie',
+          ...(item.logo !== null ? { logo: item.logo } : {}),
+        });
+        return;
+      }
+      const target = detailTargetFromItem(item);
+      if (target) onOpenDetail(target);
+    },
+    [onOpenDetail, onPlay],
+  );
+
+  const handleToggleFavorite = useCallback(
+    (item: ItemRow) => void quickActionsState.toggleFavorite(item),
+    [quickActionsState.toggleFavorite],
+  );
+
+  const handleToggleWatched = useCallback(
+    (item: ItemRow, currentWatched: boolean) =>
+      void quickActionsState.toggleWatched(item, currentWatched),
+    [quickActionsState.toggleWatched],
   );
 
   const handleTuneEpgProgramme = useCallback(
@@ -392,7 +434,7 @@ function SearchScreenBody({
 
   return (
     <View testID="search-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
-      {layout.isTv && isActiveScope && selectedEpgProgramme === null ? (
+      {layout.isTv && isActiveScope && selectedEpgProgramme === null && !contextMenu.isOpen ? (
         <SearchTvKeyBridge onEvent={tv.handleTvKey} />
       ) : null}
 
@@ -460,6 +502,8 @@ function SearchScreenBody({
             results={search.results}
             scope={search.scope}
             progressByKey={search.progressByKey}
+            favoriteKeys={quickActionsState.favoriteKeys}
+            watchedOverrides={quickActionsState.watchedOverrides}
             searching={search.searching}
             hasSearched={search.hasSearched}
             padX={layout.padX}
@@ -470,6 +514,9 @@ function SearchScreenBody({
             focusedRowId={tv.focusedRowId}
             focusedCol={tv.focusedCol}
             onPlayLive={handlePlayLive}
+            onPlayVod={handlePlayVod}
+            onToggleFavorite={handleToggleFavorite}
+            onToggleWatched={handleToggleWatched}
             onSelectEpg={handleSelectEpg}
             onOpenDetail={onOpenDetail}
             onSelectEpisode={handleSelectEpisode}

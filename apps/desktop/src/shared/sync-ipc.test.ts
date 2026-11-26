@@ -33,6 +33,8 @@ describe('sync-ipc guards (#26, #458)', () => {
       pollQr: 'sync:pollQr',
       claimQr: 'sync:claimQr',
       setServerUrl: 'sync:setServerUrl',
+      setSyncablePrefs: 'sync:setSyncablePrefs',
+      initialPrefsReceived: 'sync:initialPrefsReceived',
       stateChanged: 'sync:stateChanged',
       telemetrySetOptIn: 'telemetry:setOptIn',
       telemetryGetStatus: 'telemetry:getStatus',

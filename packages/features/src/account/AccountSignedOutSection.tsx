@@ -164,6 +164,12 @@ export function AccountSignedOutSection({
           <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
             {i18n.t('account.subtitle')}
           </Text>
+          <Text
+            testID="account-sync-initial-prefs-hint"
+            style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+          >
+            {i18n.t('sync.initialPrefsHint')}
+          </Text>
         </View>
 
         <View

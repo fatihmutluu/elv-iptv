@@ -145,6 +145,12 @@ export function AccountSignedInSection({
                   ? `${i18n.t('account.syncedStatus')} · ${state.lastSyncedAtIso}`
                   : i18n.t('account.syncedStatus')}
             </Text>
+            <Text
+              testID="account-sync-initial-prefs-hint"
+              style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+            >
+              {i18n.t('sync.initialPrefsHint')}
+            </Text>
           </View>
           <View style={styles.actionsRow}>
             <CtaButton

@@ -1,6 +1,7 @@
 import type { BrowseKind, SeriesUnplayedSummary } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import {
+  type ContextMenuAnchor,
   HorizontalRailScroll,
   Icon,
   PosterCard,
@@ -52,15 +53,8 @@ export function buildHomeRailSpecs(t: AppI18n['t']): readonly HomeRailSpec[] {
   return [
     { id: 'continue', title: t('home.continueWatching'), variant: 'wide' },
     {
-      id: 'recentChannels',
-      title: t('home.recentChannels'),
-      variant: 'wide',
-      actionLabel: t('home.channels'),
-      tab: 'live',
-    },
-    {
       id: 'live',
-      title: t('home.onAirNow'),
+      title: t('home.liveTv'),
       variant: 'wide',
       actionLabel: t('home.channels'),
       tab: 'live',
@@ -102,6 +96,11 @@ export interface HomeRailProps {
   readonly isTouch: boolean;
   readonly focusedIndex: number | null;
   readonly onPressItem: (entry: HomeRailEntry, index: number) => void;
+  readonly onContextMenuItem?: (
+    entry: HomeRailEntry,
+    index: number,
+    anchor?: ContextMenuAnchor,
+  ) => void;
   readonly favoriteKeys?: ReadonlySet<string>;
   readonly watchedOverrides?: ReadonlyMap<string, boolean>;
   readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
@@ -141,6 +140,11 @@ interface RailCardItemProps {
   readonly markWatchedLabel: string;
   readonly markUnwatchedLabel: string;
   readonly onPressItem: (entry: HomeRailEntry, index: number) => void;
+  readonly onContextMenuItem?: (
+    entry: HomeRailEntry,
+    index: number,
+    anchor?: ContextMenuAnchor,
+  ) => void;
   readonly onQuickPlay?: (entry: HomeRailEntry, index: number) => void;
   readonly onQuickToggleFavorite?: (entry: HomeRailEntry) => void;
   readonly onQuickToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
@@ -167,6 +171,7 @@ const RailCardItem = memo(function RailCardItemInner({
   markWatchedLabel,
   markUnwatchedLabel,
   onPressItem,
+  onContextMenuItem,
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
@@ -174,6 +179,12 @@ const RailCardItem = memo(function RailCardItemInner({
   const handlePress = useCallback(() => {
     onPressItem(entry, index);
   }, [entry, index, onPressItem]);
+  const handleContextMenu = useCallback(
+    (anchor?: ContextMenuAnchor) => {
+      onContextMenuItem?.(entry, index, anchor);
+    },
+    [entry, index, onContextMenuItem],
+  );
 
   const isSeries = entry.kind === 'series';
   const effectiveWatched =
@@ -253,6 +264,7 @@ const RailCardItem = memo(function RailCardItemInner({
         focusable={!isTv}
         focused={focused}
         onPress={handlePress}
+        {...(onContextMenuItem !== undefined ? { onContextMenu: handleContextMenu } : {})}
       />
     );
   }
@@ -288,6 +300,7 @@ const RailCardItem = memo(function RailCardItemInner({
       focusable={!isTv}
       focused={focused}
       onPress={handlePress}
+      {...(onContextMenuItem !== undefined ? { onContextMenu: handleContextMenu } : {})}
     />
   );
 });
@@ -307,6 +320,7 @@ function HomeRailInner({
   isTouch,
   focusedIndex,
   onPressItem,
+  onContextMenuItem,
   favoriteKeys,
   watchedOverrides,
   unplayedBySeriesKey,
@@ -433,6 +447,7 @@ function HomeRailInner({
               markWatchedLabel={markWatchedLabel}
               markUnwatchedLabel={markUnwatchedLabel}
               onPressItem={onPressItem}
+              {...(onContextMenuItem !== undefined ? { onContextMenuItem } : {})}
               {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
               {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
               {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}

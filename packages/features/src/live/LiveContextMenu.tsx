@@ -23,7 +23,12 @@ export interface LiveContextMenuProps {
   readonly isTv: boolean;
   readonly cleanChannelTitles?: boolean;
   readonly onPlay: (channel: ItemRow, index: number) => void;
+  readonly onOpenMultiView?: (channel: ItemRow, index: number) => void;
+  readonly onOpenPopout?: (channel: ItemRow, index: number) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
+  readonly canMoveUp?: boolean;
+  readonly canMoveDown?: boolean;
+  readonly onMoveFavorite?: (direction: 'up' | 'down') => void;
   readonly onShowProgrammeDetails?: (
     channel: ItemRow,
     index: number,
@@ -37,9 +42,19 @@ export interface LiveContextMenuProps {
 }
 
 interface ContextActionItem {
-  readonly id: 'play' | 'favorite' | 'details' | 'hide' | 'manage';
+  readonly id:
+    | 'play'
+    | 'multiview'
+    | 'popout'
+    | 'favorite'
+    | 'moveUp'
+    | 'moveDown'
+    | 'details'
+    | 'hide'
+    | 'manage';
   readonly testID: string;
   readonly icon: IconName;
+  readonly rotateDeg?: number;
   readonly label: string;
   readonly run: () => void;
 }
@@ -67,7 +82,12 @@ export function LiveContextMenu({
   isTv,
   cleanChannelTitles = false,
   onPlay,
+  onOpenMultiView,
+  onOpenPopout,
   onToggleFavorite,
+  canMoveUp = false,
+  canMoveDown = false,
+  onMoveFavorite,
   onShowProgrammeDetails,
   onHideChannel,
   onManageChannels,
@@ -93,6 +113,30 @@ export function LiveContextMenu({
         },
       },
     ];
+    if (onOpenMultiView !== undefined) {
+      list.push({
+        id: 'multiview',
+        testID: 'live-context-multiview',
+        icon: 'multiview',
+        label: i18n.t('context.openMultiView'),
+        run: () => {
+          onClose();
+          onOpenMultiView(channel, channelIndex);
+        },
+      });
+    }
+    if (onOpenPopout !== undefined) {
+      list.push({
+        id: 'popout',
+        testID: 'live-context-popout',
+        icon: 'popout',
+        label: i18n.t('context.openPopout'),
+        run: () => {
+          onClose();
+          onOpenPopout(channel, channelIndex);
+        },
+      });
+    }
     if (onToggleFavorite !== undefined) {
       list.push({
         id: 'favorite',
@@ -102,6 +146,31 @@ export function LiveContextMenu({
         run: () => {
           onClose();
           onToggleFavorite(channel);
+        },
+      });
+    }
+    if (isFavorite && onMoveFavorite !== undefined && canMoveUp) {
+      list.push({
+        id: 'moveUp',
+        testID: 'live-context-move-up',
+        icon: 'chevronDown',
+        rotateDeg: 180,
+        label: i18n.t('context.moveUp'),
+        run: () => {
+          onClose();
+          onMoveFavorite('up');
+        },
+      });
+    }
+    if (isFavorite && onMoveFavorite !== undefined && canMoveDown) {
+      list.push({
+        id: 'moveDown',
+        testID: 'live-context-move-down',
+        icon: 'chevronDown',
+        label: i18n.t('context.moveDown'),
+        run: () => {
+          onClose();
+          onMoveFavorite('down');
         },
       });
     }
@@ -143,6 +212,8 @@ export function LiveContextMenu({
     }
     return list;
   }, [
+    canMoveDown,
+    canMoveUp,
     channel,
     channelIndex,
     i18n,
@@ -150,6 +221,9 @@ export function LiveContextMenu({
     onClose,
     onHideChannel,
     onManageChannels,
+    onMoveFavorite,
+    onOpenMultiView,
+    onOpenPopout,
     onPlay,
     onShowProgrammeDetails,
     onToggleFavorite,
@@ -284,11 +358,19 @@ export function LiveContextMenu({
                   transition,
                 ]}
               >
-                <Icon
-                  name={action.icon}
-                  size={18}
-                  color={focused ? theme.colors.textPrimary : theme.colors.textSecondary}
-                />
+                <View
+                  style={
+                    action.rotateDeg !== undefined
+                      ? { transform: [{ rotate: `${action.rotateDeg}deg` }] }
+                      : undefined
+                  }
+                >
+                  <Icon
+                    name={action.icon}
+                    size={18}
+                    color={focused ? theme.colors.textPrimary : theme.colors.textSecondary}
+                  />
+                </View>
                 <Text
                   numberOfLines={1}
                   style={[

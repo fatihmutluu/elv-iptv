@@ -1,0 +1,156 @@
+import type { AppI18n } from '@elv/i18n';
+import type { ContextMenuItem } from '@elv/ui-kit';
+import type { HomeRailId } from './HomeRail';
+import type { HomeRailEntry } from './home-model';
+
+/** Input for {@link buildHomeCardContextMenuItems}. */
+export interface BuildHomeCardContextMenuInput {
+  readonly railId: HomeRailId;
+  readonly entry: HomeRailEntry;
+  readonly index: number;
+  readonly isFavorite: boolean;
+  readonly isWatched: boolean;
+  readonly t: AppI18n['t'];
+  readonly onPlay: (entry: HomeRailEntry, index: number) => void;
+  readonly onOpenDetail?: (entry: HomeRailEntry) => void;
+  readonly onRemoveFromContinue?: (entry: HomeRailEntry) => void;
+  readonly onToggleFavorite?: (entry: HomeRailEntry) => void;
+  readonly onToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
+  readonly onOpenMultiView?: (entry: HomeRailEntry, index: number) => void;
+  readonly onOpenPopout?: (entry: HomeRailEntry, index: number) => void;
+}
+
+/**
+ * Builds universal right-click / long-press context menu actions for a Home screen card
+ * across Continue Watching, unified Live TV, My List, Movies, Series, and Collections rails.
+ */
+export function buildHomeCardContextMenuItems({
+  railId,
+  entry,
+  index,
+  isFavorite,
+  isWatched,
+  t,
+  onPlay,
+  onOpenDetail,
+  onRemoveFromContinue,
+  onToggleFavorite,
+  onToggleWatched,
+  onOpenMultiView,
+  onOpenPopout,
+}: BuildHomeCardContextMenuInput): ContextMenuItem[] {
+  const items: ContextMenuItem[] = [];
+
+  if (railId === 'continue') {
+    items.push({
+      id: 'resume',
+      label: t('context.resume'),
+      icon: 'play',
+      testID: 'home-context-resume',
+      onSelect: () => onPlay(entry, index),
+    });
+    if (onOpenDetail && (entry.kind === 'movie' || entry.kind === 'series')) {
+      items.push({
+        id: 'details',
+        label: t('context.goToDetails'),
+        icon: 'info',
+        testID: 'home-context-details',
+        onSelect: () => onOpenDetail(entry),
+      });
+    }
+    if (onRemoveFromContinue) {
+      items.push({
+        id: 'hideFromContinue',
+        label: t('context.hideFromContinue'),
+        icon: 'close',
+        destructive: true,
+        testID: 'home-context-hide-continue',
+        onSelect: () => onRemoveFromContinue(entry),
+      });
+    }
+    if (onToggleWatched) {
+      items.push({
+        id: 'markWatched',
+        label: t('context.markWatched'),
+        icon: 'check',
+        testID: 'home-context-mark-watched',
+        onSelect: () => onToggleWatched(entry, false),
+      });
+    }
+    return items;
+  }
+
+  if (railId === 'live' || entry.kind === 'live') {
+    items.push({
+      id: 'play',
+      label: t('context.play'),
+      icon: 'play',
+      testID: 'home-context-play',
+      onSelect: () => onPlay(entry, index),
+    });
+    if (onOpenMultiView) {
+      items.push({
+        id: 'multiview',
+        label: t('context.openMultiView'),
+        icon: 'multiview',
+        testID: 'home-context-multiview',
+        onSelect: () => onOpenMultiView(entry, index),
+      });
+    }
+    if (onOpenPopout) {
+      items.push({
+        id: 'popout',
+        label: t('context.openPopout'),
+        icon: 'popout',
+        testID: 'home-context-popout',
+        onSelect: () => onOpenPopout(entry, index),
+      });
+    }
+    if (onToggleFavorite) {
+      items.push({
+        id: 'favorite',
+        label: t(isFavorite ? 'context.removeFavorite' : 'context.addFavorite'),
+        icon: isFavorite ? 'starFilled' : 'star',
+        testID: 'home-context-favorite',
+        onSelect: () => onToggleFavorite(entry),
+      });
+    }
+    return items;
+  }
+
+  items.push({
+    id: 'play',
+    label: t('context.play'),
+    icon: 'play',
+    testID: 'home-context-play',
+    onSelect: () => onPlay(entry, index),
+  });
+  if (onOpenDetail && (entry.kind === 'movie' || entry.kind === 'series')) {
+    items.push({
+      id: 'details',
+      label: t('context.goToDetails'),
+      icon: 'info',
+      testID: 'home-context-details',
+      onSelect: () => onOpenDetail(entry),
+    });
+  }
+  if (onToggleFavorite) {
+    items.push({
+      id: 'mylist',
+      label: t(isFavorite ? 'context.removeFromMyList' : 'context.addToMyList'),
+      icon: isFavorite ? 'starFilled' : 'star',
+      testID: 'home-context-mylist',
+      onSelect: () => onToggleFavorite(entry),
+    });
+  }
+  if (onToggleWatched) {
+    items.push({
+      id: 'watched',
+      label: t(isWatched ? 'context.markUnwatched' : 'context.markWatched'),
+      icon: 'check',
+      testID: 'home-context-watched',
+      onSelect: () => onToggleWatched(entry, isWatched),
+    });
+  }
+  return items;
+}

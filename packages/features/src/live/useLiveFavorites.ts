@@ -1,6 +1,7 @@
 import type { CatalogService, FavoriteRow, ItemRow, SourceRow } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type PagedListSource, useCatalogUiCache } from '../shared';
+import { moveFavoriteItem } from './live-favorite-reorder';
 import { createStaticPagedListSource } from './live-model';
 
 const MAX_LIVE_FAVORITES = 200;
@@ -12,6 +13,7 @@ export interface LiveFavoritesState {
   readonly favoriteSource: PagedListSource<ItemRow>;
   readonly favoritesVersion: number;
   readonly toggleFavorite: (channel: ItemRow) => Promise<void>;
+  readonly reorderFavorite: (fromIndex: number, toIndex: number) => Promise<void>;
 }
 
 function fallbackItemFromFavorite(fav: FavoriteRow, idx: number): ItemRow {
@@ -39,11 +41,14 @@ export function useLiveFavorites(opts: {
   readonly sources: readonly SourceRow[];
   readonly refreshToken: number;
   readonly userStateVersion?: number;
+  readonly onFavoritesMutated?: () => void;
 }): LiveFavoritesState {
-  const { catalog, sources, refreshToken, userStateVersion = 0 } = opts;
+  const { catalog, sources, refreshToken, userStateVersion = 0, onFavoritesMutated } = opts;
   const uiCache = useCatalogUiCache();
   const uiCacheRef = useRef(uiCache);
   uiCacheRef.current = uiCache;
+  const onFavoritesMutatedRef = useRef(onFavoritesMutated);
+  onFavoritesMutatedRef.current = onFavoritesMutated;
   const initialLive = sources.length > 0 ? (uiCache?.getLive() ?? null) : null;
 
   const [favoriteKeys, setFavoriteKeys] = useState<ReadonlySet<string>>(
@@ -62,6 +67,9 @@ export function useLiveFavorites(opts: {
   const toggleGenByKeyRef = useRef(new Map<string, number>());
   const inFlightByKeyRef = useRef(new Map<string, number>());
   const committedFavByKeyRef = useRef(new Map<string, boolean>());
+  const reorderGenRef = useRef(0);
+  const reorderInFlightRef = useRef(0);
+  const committedOrderRef = useRef<readonly ItemRow[] | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -136,9 +144,11 @@ export function useLiveFavorites(opts: {
         }
       }
 
-      uiCacheRef.current?.setLiveFavorites(nextKeys, nextChannels);
+      const resolvedChannels =
+        reorderInFlightRef.current > 0 ? favChannelsRef.current : nextChannels;
+      uiCacheRef.current?.setLiveFavorites(nextKeys, resolvedChannels);
       setFavoriteKeys(nextKeys);
-      if (rawRows !== null) {
+      if (rawRows !== null && reorderInFlightRef.current === 0) {
         setFavoriteChannels(nextChannels);
       }
       setFavoritesVersion((v) => v + 1);
@@ -204,6 +214,7 @@ export function useLiveFavorites(opts: {
           if (toggleGenByKeyRef.current.get(key) === gen && res.value !== nextActive) {
             applyState(res.value);
           }
+          onFavoritesMutatedRef.current?.();
         } else if (toggleGenByKeyRef.current.get(key) === gen) {
           applyState(committedFavByKeyRef.current.get(key) ?? false);
         }
@@ -215,6 +226,63 @@ export function useLiveFavorites(opts: {
         const rem = Math.max(0, (inFlightByKeyRef.current.get(key) ?? 1) - 1);
         if (rem === 0) inFlightByKeyRef.current.delete(key);
         else inFlightByKeyRef.current.set(key, rem);
+      }
+    },
+    [catalog],
+  );
+
+  const reorderFavorite = useCallback(
+    async (fromIndex: number, toIndex: number): Promise<void> => {
+      const prevChannels = favChannelsRef.current;
+      const nextChannels = moveFavoriteItem(prevChannels, fromIndex, toIndex);
+      if (nextChannels === prevChannels) return;
+
+      const gen = reorderGenRef.current + 1;
+      reorderGenRef.current = gen;
+      if (reorderInFlightRef.current === 0) {
+        committedOrderRef.current = prevChannels;
+      }
+      reorderInFlightRef.current += 1;
+
+      const applyChannels = (channels: readonly ItemRow[]) => {
+        const nextKeys = new Set(favKeysRef.current);
+        for (const ch of channels) nextKeys.add(ch.key);
+        favKeysRef.current = nextKeys;
+        favChannelsRef.current = channels;
+        uiCacheRef.current?.setLiveFavorites(nextKeys, channels);
+        setFavoriteKeys(nextKeys);
+        setFavoriteChannels(channels);
+        setFavoritesVersion((v) => v + 1);
+      };
+
+      applyChannels(nextChannels);
+
+      if (!catalog.reorderFavorites) {
+        committedOrderRef.current = nextChannels;
+        onFavoritesMutatedRef.current?.();
+        reorderInFlightRef.current = Math.max(0, reorderInFlightRef.current - 1);
+        return;
+      }
+
+      try {
+        const res = await catalog.reorderFavorites(nextChannels.map((c) => c.key));
+        if (!aliveRef.current) return;
+        if (res.ok) {
+          committedOrderRef.current = nextChannels;
+          onFavoritesMutatedRef.current?.();
+        } else if (reorderGenRef.current === gen && committedOrderRef.current !== null) {
+          applyChannels(committedOrderRef.current);
+        }
+      } catch {
+        if (
+          aliveRef.current &&
+          reorderGenRef.current === gen &&
+          committedOrderRef.current !== null
+        ) {
+          applyChannels(committedOrderRef.current);
+        }
+      } finally {
+        reorderInFlightRef.current = Math.max(0, reorderInFlightRef.current - 1);
       }
     },
     [catalog],
@@ -232,7 +300,15 @@ export function useLiveFavorites(opts: {
       favoriteSource,
       favoritesVersion,
       toggleFavorite,
+      reorderFavorite,
     }),
-    [favoriteChannels, favoriteKeys, favoriteSource, favoritesVersion, toggleFavorite],
+    [
+      favoriteChannels,
+      favoriteKeys,
+      favoriteSource,
+      favoritesVersion,
+      reorderFavorite,
+      toggleFavorite,
+    ],
   );
 }

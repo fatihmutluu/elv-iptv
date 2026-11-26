@@ -2,6 +2,7 @@ import type {
   CatalogService,
   FavoriteRow,
   ItemRow,
+  NowNextEntry,
   SeriesUnplayedSummary,
   SourceRow,
   UserItemKind,
@@ -19,20 +20,42 @@ import {
 } from '../shared';
 import {
   applyHomeFavUpdate,
+  applyHomeRemoveContinueWatching,
   applyHomeWatchedUpdate,
   EMPTY_HOME_SNAPSHOT,
   fetchHomeKindCategory,
   mergeOptimisticHomeSnapshot,
   releaseInFlightKey,
 } from './home-data-helpers';
+import { HOME_LIVE_RAIL_LIMIT } from './home-model';
 
 const HOME_CONTINUE_LIMIT = 16;
 const HOME_RECENT_CHANNELS_LIMIT = 20;
-const HOME_FAVORITES_LIMIT = 24;
+const HOME_FAVORITES_LIMIT = 250;
 const HOME_LIVE_LIMIT = 12;
 const HOME_MOVIES_LIMIT = 18;
 const HOME_SERIES_LIMIT = 18;
 const HOME_COLLECTIONS_LIMIT = 20;
+
+function collectUnifiedLiveKeys(
+  favorites: readonly FavoriteRow[],
+  recentChannels: readonly ItemRow[],
+  liveItems: readonly ItemRow[],
+): string[] {
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  const pushKey = (key: string) => {
+    if (keys.length >= HOME_LIVE_RAIL_LIMIT || seen.has(key)) return;
+    seen.add(key);
+    keys.push(key);
+  };
+  for (const fav of favorites) {
+    if (fav.kind === 'live') pushKey(fav.itemKey);
+  }
+  for (const item of recentChannels) pushKey(item.key);
+  for (const item of liveItems) pushKey(item.key);
+  return keys;
+}
 
 async function fetchHydratedCollections(
   catalog: CatalogService,
@@ -93,11 +116,13 @@ export interface HomeDataState extends HomeSnapshot {
   readonly loading: boolean;
   readonly hasLoaded: boolean;
   readonly collections: readonly HydratedVodCollection[];
+  readonly nowNextByKey: ReadonlyMap<string, NowNextEntry>;
   readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
   readonly refreshCollections: () => Promise<void>;
   readonly toggleMyList: (target: ToggleMyListTarget) => Promise<void>;
   readonly toggleWatched: (target: ToggleWatchedTarget, nextWatched: boolean) => Promise<void>;
+  readonly removeFromContinueWatching: (itemKey: string) => Promise<void>;
 }
 
 /**
@@ -121,6 +146,9 @@ export function useHomeData({
   const [hasLoaded, setHasLoaded] = useState(() => initialCached !== null);
   const [snap, setSnap] = useState<HomeSnapshot>(() => initialCached ?? EMPTY_HOME_SNAPSHOT);
   const [collections, setCollections] = useState<readonly HydratedVodCollection[]>([]);
+  const [nowNextByKey, setNowNextByKey] = useState<ReadonlyMap<string, NowNextEntry>>(
+    () => new Map(),
+  );
   const [watchedOverrides, setWatchedOverrides] = useState<ReadonlyMap<string, boolean>>(
     () => new Map(),
   );
@@ -193,6 +221,7 @@ export function useHomeData({
       setSnap(EMPTY_HOME_SNAPSHOT);
       collectionsRef.current = [];
       setCollections([]);
+      setNowNextByKey(new Map());
       setLoading(false);
       hasLoadedRef.current = true;
       setHasLoaded(true);
@@ -260,14 +289,22 @@ export function useHomeData({
           ...favRows.map((f) => f.itemKey),
           ...nextCollections.flatMap((c) => c.items.map((item) => item.key)),
         ]);
-        const nextProgress =
+        const liveKeys = collectUnifiedLiveKeys(favRows, recentChannelRows, liveRows);
+        const [nextProgress, nowNextRows] = await Promise.all([
           keySet.size > 0
-            ? await batchLoadProgressByKeys(catalog, Array.from(keySet)).catch(
+            ? batchLoadProgressByKeys(catalog, Array.from(keySet)).catch(
                 () => new Map<string, WatchProgressRow>(),
               )
-            : new Map<string, WatchProgressRow>();
+            : Promise.resolve(new Map<string, WatchProgressRow>()),
+          liveKeys.length > 0 && typeof catalog.nowNext === 'function'
+            ? catalog.nowNext(liveKeys, Date.now()).catch(() => [] as NowNextEntry[])
+            : Promise.resolve([] as NowNextEntry[]),
+        ]);
         if (cancelled) return;
         for (const row of cwRows) nextProgress.set(row.itemKey, row);
+        const nextNowNext = new Map<string, NowNextEntry>();
+        for (const entry of nowNextRows) nextNowNext.set(entry.channelKey, entry);
+        setNowNextByKey(nextNowNext);
 
         const nextFavKeys = new Set<string>(favKeys);
         for (const row of favRows) nextFavKeys.add(row.itemKey);
@@ -513,6 +550,35 @@ export function useHomeData({
     [applyWatchedState, catalog, setWatchedOverrideForKey],
   );
 
+  const removeFromContinueWatching = useCallback(
+    async (itemKey: string): Promise<void> => {
+      const prevRow = snapRef.current.progressByKey.get(itemKey);
+      const prevCwRow = snapRef.current.continueWatching.find((r) => r.itemKey === itemKey);
+      const nextSync = applyHomeRemoveContinueWatching(snapRef.current, itemKey);
+      snapRef.current = nextSync;
+      uiCacheRef.current?.setHome(nextSync);
+      setSnap((prev) => {
+        const next = applyHomeRemoveContinueWatching(prev, itemKey);
+        snapRef.current = next;
+        uiCacheRef.current?.setHome(next);
+        return next;
+      });
+      if (typeof catalog.clearProgress !== 'function') return;
+      try {
+        const res = await catalog.clearProgress(itemKey);
+        if (!mountedRef.current) return;
+        if (!res.ok) {
+          applyWatchedState(itemKey, prevRow, prevCwRow);
+        }
+      } catch {
+        if (mountedRef.current) {
+          applyWatchedState(itemKey, prevRow, prevCwRow);
+        }
+      }
+    },
+    [applyWatchedState, catalog],
+  );
+
   const homeSeriesKeys = useMemo(() => {
     const keys: string[] = [];
     for (const row of snap.series) keys.push(row.key);
@@ -539,17 +605,21 @@ export function useHomeData({
       hasLoaded,
       ...snap,
       collections,
+      nowNextByKey,
       unplayedBySeriesKey,
       watchedOverrides,
       refreshCollections,
       toggleMyList,
       toggleWatched,
+      removeFromContinueWatching,
     }),
     [
       collections,
       hasLoaded,
       loading,
+      nowNextByKey,
       refreshCollections,
+      removeFromContinueWatching,
       snap,
       toggleMyList,
       toggleWatched,

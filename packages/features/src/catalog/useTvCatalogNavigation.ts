@@ -248,7 +248,13 @@ export function useTvCatalogNavigation({
       if (gridItemCountRef.current > 0) {
         commitGrid({ row: 0, col: 0 });
       } else {
-        commitRow('gridBack', 0);
+        const lastRow = rowsRef.current[rowsRef.current.length - 1];
+        if (lastRow) {
+          const saved = colMemoryRef.current.get(lastRow.id) ?? 0;
+          commitRow(lastRow.id, Math.min(Math.max(0, saved), lastRow.count - 1));
+        } else {
+          commitRow(null, 0);
+        }
       }
     } else {
       const firstRow = rowsRef.current[0];

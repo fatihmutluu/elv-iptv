@@ -376,7 +376,7 @@ describe('watch progress queries & mutations', () => {
 });
 
 describe('favorites queries & mutations', () => {
-  it('toggles, lists in addedAt DESC order, isolates profiles, and lists keys', async () => {
+  it('toggles, lists in sort_order order, isolates profiles, and lists keys', async () => {
     const { db } = await setupDb();
     let now = 1_000;
     const clock = () => (now += 100);
@@ -424,10 +424,10 @@ describe('favorites queries & mutations', () => {
     );
 
     const favs = await listFavorites(db, 10);
-    expect(favs.map((f) => f.itemKey)).toEqual(['s:s1:2', 'm:s1:1']);
-    expect(favs[1]).toMatchObject({ year: 2025, rating: 8.2, logo: 'https://img.example/1.jpg' });
+    expect(favs.map((f) => f.itemKey)).toEqual(['m:s1:1', 's:s1:2']);
+    expect(favs[0]).toMatchObject({ year: 2025, rating: 8.2, logo: 'https://img.example/1.jpg' });
     expect(await listFavorites(db, 0)).toEqual([]);
-    expect(await listFavoriteKeys(db)).toEqual(['s:s1:2', 'm:s1:1']);
+    expect(await listFavoriteKeys(db)).toEqual(['m:s1:1', 's:s1:2']);
     expect(await listFavoriteKeys(db, 'kids')).toEqual(['m:s1:1']);
 
     // Toggle off removes only from default profile

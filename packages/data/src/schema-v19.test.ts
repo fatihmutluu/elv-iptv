@@ -29,9 +29,9 @@ function memorySecrets(): SecretStore & { data: Map<string, string> } {
 describe('schema v19 (item_drm_meta)', () => {
   it('sets SCHEMA_VERSION to 19 and creates item_drm_meta with only non-secret columns and index', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(19);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(19);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 19 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
 
     expect(Object.keys(EXPECTED_TABLE_COLUMNS)).toContain('item_drm_meta');
     expect(TABLES_BY_SOURCE).toContain('item_drm_meta');
@@ -66,7 +66,7 @@ describe('schema v19 (item_drm_meta)', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 19 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
     expect(await db.all('SELECT key, name FROM live')).toEqual([
       { key: 'm:s1:live:1', name: 'Sports HD' },
     ]);

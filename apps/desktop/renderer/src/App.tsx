@@ -1,5 +1,9 @@
 import { createCoalescedCatalog } from '@elv/data';
-import type { ProfilePreferencesManager } from '@elv/domain';
+import {
+  extractSyncablePreferences,
+  type PreferencesSnapshot,
+  type ProfilePreferencesManager,
+} from '@elv/domain';
 import {
   AppProviders,
   AppShell,
@@ -252,7 +256,8 @@ function AppRoot() {
     let active = true;
     let lastServerUrl: string | undefined;
     let lastTelemetryOptIn: boolean | undefined;
-    const syncPrefs = (snap: { syncServerUrl: string; telemetryOptIn: boolean }): void => {
+    let lastSyncableJson: string | undefined;
+    const syncPrefs = (snap: PreferencesSnapshot): void => {
       if (!active) return;
       if (lastServerUrl !== snap.syncServerUrl) {
         lastServerUrl = snap.syncServerUrl;
@@ -264,12 +269,23 @@ function AppRoot() {
           desktopSync.telemetry?.setOptIn(snap.telemetryOptIn);
         }
       }
+      const syncable = extractSyncablePreferences(snap);
+      const syncableJson = JSON.stringify(syncable);
+      if (lastSyncableJson !== syncableJson) {
+        lastSyncableJson = syncableJson;
+        void desktopSync.setSyncablePreferences(syncable);
+      }
     };
+    const unsubInitialPrefs = desktopSync.onInitialPreferences((patch) => {
+      if (!active) return;
+      void preferencesStore.update(patch);
+    });
     void desktopSync.hydrate();
     void preferencesStore.load().then(syncPrefs);
     const unsubPrefs = preferencesStore.subscribe(syncPrefs);
     return () => {
       active = false;
+      unsubInitialPrefs();
       unsubPrefs();
       desktopSync.dispose();
     };

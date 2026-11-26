@@ -1,7 +1,10 @@
 import {
   type AlphabetBucket,
+  type FavoriteRow,
+  type ItemRow,
   type ItemSortOrder,
   MIN_RESUME_POSITION_MS,
+  type SeriesUnplayedSummary,
   type WatchProgressRow,
 } from '@elv/data';
 import type { DetailTarget, PagedListSource } from '../shared';
@@ -30,10 +33,14 @@ export const CATALOG_CONTINUE_LIMIT = 20;
 /** Minimum item count required before rendering the A–Z `AlphabetJumpRail` (`#407`). */
 export const ALPHABET_RAIL_MIN_ITEMS = 40;
 
+/** Quick filter view shown alongside provider categories on Movies & Series screens. */
+export type CatalogQuickFilter = 'all' | 'mylist' | 'watched';
+
 /** Preserved tab navigation state for a Movies or Series tab across tab switches. */
 export interface CatalogTabMemory {
   readonly selectedCategoryId: string | null;
   readonly visibleCategoryCount: number;
+  readonly quickFilter?: CatalogQuickFilter;
   readonly gridScrollRow?: number;
   readonly sortBy?: ItemSortOrder;
 }
@@ -152,6 +159,136 @@ export function detailTargetFromProgress(
   };
 }
 
+/** Filters {@link FavoriteRow} entries to those matching the Movies or Series catalog tab. */
+export function filterFavoritesForCatalog(
+  rows: readonly FavoriteRow[],
+  kind: 'movie' | 'series',
+): FavoriteRow[] {
+  return rows.filter((row) => row.kind === kind);
+}
+
+/** Converts a Movie or Series {@link FavoriteRow} into a renderable {@link ItemRow} card model. */
+export function itemRowFromFavorite(row: FavoriteRow, kind: 'movie' | 'series'): ItemRow {
+  return {
+    id: 0,
+    key: row.itemKey,
+    sourceId: row.sourceId,
+    providerId: null,
+    kind,
+    name: row.title,
+    logo: row.logo,
+    num: null,
+    year: row.year,
+    rating: row.rating,
+  };
+}
+
+/** Builds a {@link DetailTarget} from a Movie or Series {@link FavoriteRow}. */
+export function detailTargetFromFavorite(row: FavoriteRow, kind: 'movie' | 'series'): DetailTarget {
+  return {
+    itemKey: row.itemKey,
+    sourceId: row.sourceId,
+    kind,
+    title: row.title,
+    posterUri: row.logo,
+    backdropUri: row.logo,
+    year: row.year,
+    rating: row.rating,
+  };
+}
+
+/** Converts a watched {@link WatchProgressRow} into a renderable {@link ItemRow} card model. */
+export function itemRowFromWatchProgress(row: WatchProgressRow, kind: 'movie' | 'series'): ItemRow {
+  return {
+    id: 0,
+    key: kind === 'series' ? (row.seriesKey ?? row.itemKey) : row.itemKey,
+    sourceId: row.sourceId,
+    providerId: null,
+    kind,
+    name: row.title,
+    logo: row.logo,
+    num: null,
+    year: null,
+    rating: null,
+  };
+}
+
+/** Input for {@link collectWatchedCatalogItems}. */
+export interface CollectWatchedCatalogItemsInput {
+  readonly kind: 'movie' | 'series';
+  readonly railItemsByCategoryId: ReadonlyMap<string, readonly ItemRow[]>;
+  readonly watchedRows?: readonly WatchProgressRow[];
+  readonly extraItems?: readonly ItemRow[];
+  readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
+  readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
+}
+
+/**
+ * Deduplicates watched catalog items for `kind`, preferring full-catalog `watchedRows` (enriched
+ * with loaded rail metadata when present) and honoring optimistic `watchedOverrides` ahead of
+ * persisted progress/unplayed state.
+ */
+export function collectWatchedCatalogItems({
+  kind,
+  railItemsByCategoryId,
+  watchedRows,
+  extraItems,
+  progressByKey,
+  watchedOverrides,
+  unplayedBySeriesKey,
+}: CollectWatchedCatalogItemsInput): ItemRow[] {
+  const seen = new Set<string>();
+  const out: ItemRow[] = [];
+
+  if (watchedRows !== undefined) {
+    const itemByKey = new Map<string, ItemRow>();
+    for (const rows of railItemsByCategoryId.values()) {
+      for (const item of rows) {
+        if (item.kind === kind && !itemByKey.has(item.key)) itemByKey.set(item.key, item);
+      }
+    }
+    if (extraItems) {
+      for (const item of extraItems) {
+        if (item.kind === kind && !itemByKey.has(item.key)) itemByKey.set(item.key, item);
+      }
+    }
+    for (const row of watchedRows) {
+      const key = kind === 'series' ? (row.seriesKey ?? row.itemKey) : row.itemKey;
+      if (seen.has(key)) continue;
+      const override = watchedOverrides?.get(key) ?? watchedOverrides?.get(row.itemKey);
+      if (override === false) continue;
+      seen.add(key);
+      out.push(itemByKey.get(key) ?? itemRowFromWatchProgress(row, kind));
+    }
+  }
+
+  const consider = (item: ItemRow) => {
+    if (item.kind !== kind || seen.has(item.key)) return;
+    seen.add(item.key);
+    const override = watchedOverrides?.get(item.key);
+    if (watchedRows !== undefined) {
+      const seriesWatched =
+        kind === 'series' && unplayedBySeriesKey?.get(item.key)?.watched === true;
+      const effectiveWatched = override ?? seriesWatched;
+      if (effectiveWatched) out.push(item);
+      return;
+    }
+    const progressWatched = progressByKey.get(item.key)?.watched === true;
+    const seriesWatched = kind === 'series' && unplayedBySeriesKey?.get(item.key)?.watched === true;
+    const effectiveWatched = override ?? (progressWatched || seriesWatched);
+    if (effectiveWatched) out.push(item);
+  };
+
+  for (const rows of railItemsByCategoryId.values()) {
+    for (const item of rows) consider(item);
+  }
+  if (extraItems) {
+    for (const item of extraItems) consider(item);
+  }
+  return out;
+}
+
 /** Returns a `[0, 1]` watch-progress bar ratio for unwatched in-progress items, or `undefined`. */
 export function computeProgressRatio(progress: WatchProgressRow | undefined): number | undefined {
   if (progress === undefined || progress.watched) return undefined;
@@ -259,7 +396,10 @@ export function buildCatalogNavRows(input: BuildCatalogNavRowsInput): CatalogNav
   }
 
   if (input.isGridMode) {
-    rows.push({ id: 'gridBack', count: Math.max(1, input.gridHeaderCount ?? 1) });
+    const headerCount = input.gridHeaderCount ?? 1;
+    if (headerCount > 0) {
+      rows.push({ id: 'gridBack', count: headerCount });
+    }
     return rows;
   }
 

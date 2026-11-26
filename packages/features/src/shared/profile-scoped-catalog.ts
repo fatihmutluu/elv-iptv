@@ -43,11 +43,13 @@ export function createProfileScopedCatalog(
   const setWatched = c.setWatched?.bind(c);
   const getProgress = c.getProgress?.bind(c);
   const listContinueWatching = c.listContinueWatching?.bind(c);
+  const listWatched = c.listWatched?.bind(c);
   const listProgressByKeys = c.listProgressByKeys?.bind(c);
   const listSeriesUnplayedCounts = c.listSeriesUnplayedCounts?.bind(c);
   const clearProgress = c.clearProgress?.bind(c);
   const toggleFavorite = c.toggleFavorite?.bind(c);
   const setFavorite = c.setFavorite?.bind(c);
+  const reorderFavorites = c.reorderFavorites?.bind(c);
   const listFavorites = c.listFavorites?.bind(c);
   const listFavoriteKeys = c.listFavoriteKeys?.bind(c);
   const getTrackPreference = c.getTrackPreference?.bind(c);
@@ -267,6 +269,17 @@ export function createProfileScopedCatalog(
           },
         }
       : {}),
+    ...(listWatched
+      ? {
+          listWatched: (limit, profileId, opts) => {
+            const scope = getScope();
+            return listWatched(limit, profileId ?? scope.profileId, {
+              ...opts,
+              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+          },
+        }
+      : {}),
     ...(listProgressByKeys
       ? {
           listProgressByKeys: (itemKeys, profileId) =>
@@ -304,6 +317,12 @@ export function createProfileScopedCatalog(
               },
               active,
             ),
+        }
+      : {}),
+    ...(reorderFavorites
+      ? {
+          reorderFavorites: (orderedItemKeys, profileId) =>
+            reorderFavorites(orderedItemKeys, profileId ?? getScope().profileId),
         }
       : {}),
     ...(listFavorites

@@ -133,6 +133,7 @@ export interface CatalogUiCache {
   getMetrics?(): CatalogUiCacheMetrics;
   getHome(): CachedHomeEntry | null;
   setHome(snapshot: CachedHomeSnapshot): void;
+  clearHome?(): void;
   setHomeHeroIndex(heroIndex: number): void;
   getCatalog(
     kind: 'movie' | 'series',

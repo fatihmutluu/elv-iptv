@@ -1,11 +1,13 @@
 import type { ItemRow, SeriesUnplayedSummary, WatchProgressRow } from '@elv/data';
 import {
+  type ContextMenuAnchor,
   HorizontalRailScroll,
   Icon,
   PosterCard,
   type PosterCardQuickActions,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
+  useContextMenu,
   useI18n,
   useTheme,
   webCursorPointer,
@@ -35,6 +37,7 @@ import {
   formatVodMeta,
   resolveSeriesBadgeProps,
 } from '../shared';
+import { buildCatalogPosterContextMenuItems } from './catalog-context-menu';
 import { computeProgressRatio } from './catalog-model';
 
 /** Props of {@link CatalogCategoryRail}. */
@@ -115,11 +118,44 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
     if (target) onOpenDetail(target);
   }, [categoryId, item, onOpenDetail]);
   const i18n = useI18n();
+  const { openContextMenu } = useContextMenu();
 
   const isSeries = item.kind === 'series';
   const progressWatched = progress?.watched === true;
   const effectiveWatched =
     watchedOverride ?? (progressWatched || (isSeries && unplayedSummary?.watched === true));
+
+  const handleContextMenu = useCallback(
+    (anchor?: ContextMenuAnchor) => {
+      openContextMenu({
+        title: item.name,
+        ...(anchor !== undefined ? { anchor } : {}),
+        items: buildCatalogPosterContextMenuItems({
+          item,
+          categoryId,
+          isFavorite,
+          isWatched: effectiveWatched,
+          i18n,
+          onOpenDetail,
+          ...(onQuickPlay !== undefined ? { onQuickPlay } : {}),
+          ...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {}),
+          ...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {}),
+        }),
+      });
+    },
+    [
+      categoryId,
+      effectiveWatched,
+      i18n,
+      isFavorite,
+      item,
+      onOpenDetail,
+      onQuickPlay,
+      onQuickToggleFavorite,
+      onQuickToggleWatched,
+      openContextMenu,
+    ],
+  );
 
   const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
     if (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched) return undefined;
@@ -192,6 +228,7 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
       focusable={!isTv}
       focused={focused}
       onPress={handlePress}
+      onContextMenu={handleContextMenu}
     />
   );
 });

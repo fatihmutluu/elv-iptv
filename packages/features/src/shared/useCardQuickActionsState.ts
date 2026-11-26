@@ -15,8 +15,8 @@ export interface UseCardQuickActionsStateOptions {
 export interface CardQuickActionsState {
   readonly favoriteKeys: ReadonlySet<string>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
-  readonly toggleFavorite: (item: ItemRow) => Promise<void>;
-  readonly toggleWatched: (item: ItemRow, currentWatched: boolean) => Promise<void>;
+  readonly toggleFavorite: (item: ItemRow) => Promise<boolean>;
+  readonly toggleWatched: (item: ItemRow, currentWatched: boolean) => Promise<boolean>;
 }
 
 function releaseCount(map: Map<string, number>, key: string): void {
@@ -116,7 +116,7 @@ export function useCardQuickActionsState({
   }, []);
 
   const toggleFavorite = useCallback(
-    async (item: ItemRow): Promise<void> => {
+    async (item: ItemRow): Promise<boolean> => {
       const key = item.key;
       const gen = (favGenRef.current.get(key) ?? 0) + 1;
       favGenRef.current.set(key, gen);
@@ -142,23 +142,27 @@ export function useCardQuickActionsState({
       if (!catalog.setFavorite && !catalog.toggleFavorite) {
         favCommittedRef.current.set(key, nextFav);
         releaseCount(favInFlightRef.current, key);
-        return;
+        return true;
       }
 
       try {
         const res = catalog.setFavorite
           ? await catalog.setFavorite(input, nextFav)
           : await catalog.toggleFavorite?.(input);
-        if (!mountedRef.current || !res) return;
+        if (!mountedRef.current || !res) return Boolean(res?.ok);
         if (res.ok) {
           favCommittedRef.current.set(key, res.value);
-        } else if (favGenRef.current.get(key) === gen) {
+          return true;
+        }
+        if (favGenRef.current.get(key) === gen) {
           setFavForKey(key, favCommittedRef.current.get(key) ?? false);
         }
+        return false;
       } catch {
         if (mountedRef.current && favGenRef.current.get(key) === gen) {
           setFavForKey(key, favCommittedRef.current.get(key) ?? false);
         }
+        return false;
       } finally {
         releaseCount(favInFlightRef.current, key);
       }
@@ -167,7 +171,7 @@ export function useCardQuickActionsState({
   );
 
   const toggleWatched = useCallback(
-    async (item: ItemRow, currentWatched: boolean): Promise<void> => {
+    async (item: ItemRow, currentWatched: boolean): Promise<boolean> => {
       const key = item.key;
       const gen = (watchedGenRef.current.get(key) ?? 0) + 1;
       watchedGenRef.current.set(key, gen);
@@ -183,7 +187,7 @@ export function useCardQuickActionsState({
       if (!catalog.setWatched && !(nextWatched && catalog.saveProgress)) {
         watchedCommittedRef.current.set(key, nextWatched);
         releaseCount(watchedInFlightRef.current, key);
-        return;
+        return true;
       }
 
       try {
@@ -199,16 +203,20 @@ export function useCardQuickActionsState({
               durationMs: 0,
               watched: true,
             });
-        if (!mountedRef.current || !res) return;
+        if (!mountedRef.current || !res) return Boolean(res?.ok);
         if (res.ok) {
           watchedCommittedRef.current.set(key, nextWatched);
-        } else if (watchedGenRef.current.get(key) === gen) {
+          return true;
+        }
+        if (watchedGenRef.current.get(key) === gen) {
           setWatchedForKey(key, watchedCommittedRef.current.get(key));
         }
+        return false;
       } catch {
         if (mountedRef.current && watchedGenRef.current.get(key) === gen) {
           setWatchedForKey(key, watchedCommittedRef.current.get(key));
         }
+        return false;
       } finally {
         releaseCount(watchedInFlightRef.current, key);
       }

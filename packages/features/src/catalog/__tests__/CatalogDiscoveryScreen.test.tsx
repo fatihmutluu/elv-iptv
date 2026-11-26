@@ -302,8 +302,10 @@ describe('CatalogDiscoveryScreen', () => {
         expect.objectContaining({ itemKey: 'movie:c0:i1', categoryId: bigCat.id }),
       );
 
-      // Navigate back up to catChips, move right to Action chip, select -> enters O(1) TV Grid
+      // Navigate back up to catChips, move right past My List & Watched to Action chip, select -> enters O(1) TV Grid
       await sendKey(KEYCODE_DPAD_UP);
+      await sendKey(KEYCODE_DPAD_RIGHT);
+      await sendKey(KEYCODE_DPAD_RIGHT);
       await sendKey(KEYCODE_DPAD_RIGHT);
       await sendKey(KEYCODE_DPAD_CENTER);
 

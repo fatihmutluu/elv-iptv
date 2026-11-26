@@ -3381,3 +3381,124 @@ msgstr "Open playback in a standalone desktop window"
 
 msgid "player.settings.desc.stats"
 msgstr "Display live playback bitrate, FPS, and buffer metrics"
+
+
+msgid "home.liveTv"
+msgstr "Live TV"
+
+msgid "settings.homeLayoutTitle"
+msgstr "Home screen layout"
+
+msgid "settings.homeLayoutDesc"
+msgstr "Choose which rows appear on Home and arrange their order."
+
+msgid "settings.homeLayoutPreview"
+msgstr "Preview"
+
+msgid "settings.homeLayoutMoveUp"
+msgstr "Move row up"
+
+msgid "settings.homeLayoutMoveDown"
+msgstr "Move row down"
+
+msgid "settings.homeLayoutReset"
+msgstr "Reset default layout"
+
+msgid "settings.homeSectionContinue"
+msgstr "Continue watching"
+
+msgid "settings.homeSectionLive"
+msgstr "Live TV"
+
+msgid "settings.homeSectionMyList"
+msgstr "My list"
+
+msgid "settings.homeSectionMovies"
+msgstr "Featured movies"
+
+msgid "settings.homeSectionSeries"
+msgstr "Featured series"
+
+msgid "settings.homeSectionCollections"
+msgstr "Collections"
+
+msgid "settings.homeLayoutHiddenCount"
+msgstr "{count} hidden"
+
+msgid "live.reorderHint"
+msgstr "Drag to reorder favorites"
+
+msgid "live.moveFavoriteUp"
+msgstr "Move favorite up"
+
+msgid "live.moveFavoriteDown"
+msgstr "Move favorite down"
+
+msgid "catalog.filterAll"
+msgstr "All"
+
+msgid "catalog.filterMyList"
+msgstr "My List"
+
+msgid "catalog.filterWatched"
+msgstr "Watched"
+
+msgid "catalog.emptyMyListTitle"
+msgstr "Your list is empty"
+
+msgid "catalog.emptyMyListBody"
+msgstr "Add movies or series to your list to keep them ready here."
+
+msgid "catalog.emptyWatchedTitle"
+msgstr "Nothing watched yet"
+
+msgid "catalog.emptyWatchedBody"
+msgstr "Titles you finish watching will appear here."
+
+msgid "context.play"
+msgstr "Play"
+
+msgid "context.resume"
+msgstr "Resume"
+
+msgid "context.goToDetails"
+msgstr "Go to details"
+
+msgid "context.hideFromContinue"
+msgstr "Remove from Continue Watching"
+
+msgid "context.addToMyList"
+msgstr "Add to My List"
+
+msgid "context.removeFromMyList"
+msgstr "Remove from My List"
+
+msgid "context.markWatched"
+msgstr "Mark as watched"
+
+msgid "context.markUnwatched"
+msgstr "Mark as unwatched"
+
+msgid "context.addFavorite"
+msgstr "Add to favorites"
+
+msgid "context.removeFavorite"
+msgstr "Remove from favorites"
+
+msgid "context.openMultiView"
+msgstr "Open in Multi-View"
+
+msgid "context.openPopout"
+msgstr "Open in popout window"
+
+msgid "context.hideChannel"
+msgstr "Hide channel"
+
+msgid "context.moveUp"
+msgstr "Move up"
+
+msgid "context.moveDown"
+msgstr "Move down"
+
+msgid "sync.initialPrefsHint"
+msgstr "Appearance and playback preferences transfer once when pairing a new device, then stay independent per device."

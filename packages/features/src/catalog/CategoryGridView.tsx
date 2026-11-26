@@ -4,6 +4,7 @@ import {
   AlphabetJumpRail,
   TvFocusAnchor,
   TvScrollEdgeFade,
+  useContextMenu,
   useI18n,
   useKeyInterpreter,
   useTheme,
@@ -124,6 +125,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
   const sortBy = props.sortBy ?? 'default';
   const theme = useTheme();
   const i18n = useI18n();
+  const contextMenu = useContextMenu();
   const cols = layout.gridColumns;
 
   const gridData = useCategoryGridData({
@@ -593,7 +595,9 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
 
   return (
     <View testID="catalog-grid" style={styles.root}>
-      {isStandaloneTv ? <StandaloneGridTvKeyBridge onEvent={handleStandaloneTvKey} /> : null}
+      {isStandaloneTv && !contextMenu.isOpen ? (
+        <StandaloneGridTvKeyBridge onEvent={handleStandaloneTvKey} />
+      ) : null}
       <GridHeaderBar
         backLabel={backLabel}
         categoryLabel={category.label}

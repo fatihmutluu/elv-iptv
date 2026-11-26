@@ -13,6 +13,11 @@ export const VAULT_KEY_BYTES = 32;
 export const DEFAULT_FLUSH_INTERVAL_MS = 60_000;
 export const FEEDBACK_LOG_TAIL_LINES = 25;
 
+/** Builds a storage-safe per-account key recording whether initial preferences were applied once. */
+export function initialPrefsAppliedKey(userId: string): string {
+  return `elv.sync.initprefs.v1.${userId.replace(/[^A-Za-z0-9._-]/g, '_')}`;
+}
+
 /** Minimal Fetch signature accepted by `createDesktopSyncService`. */
 export type DesktopSyncFetchFn = (
   input: string,

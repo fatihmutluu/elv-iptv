@@ -252,6 +252,7 @@ export function createCoalescedCatalog(
   const clearProgressFn = c.clearProgress?.bind(c);
   const setFavoriteFn = c.setFavorite?.bind(c);
   const toggleFavoriteFn = c.toggleFavorite?.bind(c);
+  const reorderFavoritesFn = c.reorderFavorites?.bind(c);
   const listFavoritesFn = c.listFavorites?.bind(c);
   const listFavoriteKeysFn = c.listFavoriteKeys?.bind(c);
 
@@ -453,6 +454,14 @@ export function createCoalescedCatalog(
           toggleFavorite: async (input) => {
             await coalescer.flushKey(favKey(input.itemKey, input.profileId));
             return toggleFavoriteFn(input);
+          },
+        }
+      : {}),
+    ...(reorderFavoritesFn
+      ? {
+          reorderFavorites: async (orderedItemKeys, profileId) => {
+            await coalescer.flushPrefix(`fav:${normalizeProfile(profileId)}:`);
+            return reorderFavoritesFn(orderedItemKeys, profileId);
           },
         }
       : {}),

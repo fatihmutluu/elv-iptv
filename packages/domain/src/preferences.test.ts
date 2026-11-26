@@ -105,6 +105,14 @@ describe('preferences codec', () => {
         edgeStyle: 'outline',
         verticalPosition: 'bottom',
       },
+      homeLayout: [
+        { id: 'continue', visible: true },
+        { id: 'live', visible: true },
+        { id: 'mylist', visible: true },
+        { id: 'movies', visible: true },
+        { id: 'series', visible: true },
+        { id: 'collections', visible: true },
+      ],
     });
   });
 

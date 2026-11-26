@@ -11,8 +11,11 @@ import {
 import { memo, type ReactElement, useCallback, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { type CatalogLayoutMetrics, type DisplayCategory, useRouteActive } from '../shared';
+import type { CatalogQuickFilter } from './catalog-model';
 
 const ALL_CATEGORIES_ID = '__all__';
+const MY_LIST_FILTER_ID = '__mylist__';
+const WATCHED_FILTER_ID = '__watched__';
 
 /** TV key interpreter bridge mounted only when the Catalog tab is the active 10-ft focus scope. */
 export function CatalogTvKeyBridge({
@@ -146,8 +149,10 @@ export interface CatalogFilterHeaderProps {
   readonly layout: CatalogLayoutMetrics;
   readonly categories: readonly DisplayCategory[];
   readonly selectedCategoryId: string | null;
+  readonly quickFilter?: CatalogQuickFilter;
   readonly focusedCatChipIndex: number | null;
   readonly onSelectCategory: (categoryId: string | null) => void;
+  readonly onSelectQuickFilter?: (filter: CatalogQuickFilter) => void;
 }
 
 /** Top screen title + editorial underline category bar for Movies & Series. */
@@ -156,8 +161,10 @@ export const CatalogFilterHeader = memo(function CatalogFilterHeaderInner({
   layout,
   categories,
   selectedCategoryId,
+  quickFilter = 'all',
   focusedCatChipIndex,
   onSelectCategory,
+  onSelectQuickFilter,
 }: CatalogFilterHeaderProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -166,8 +173,18 @@ export const CatalogFilterHeader = memo(function CatalogFilterHeaderInner({
     () => [
       {
         id: ALL_CATEGORIES_ID,
-        label: i18n.t('catalog.allCategories'),
+        label: i18n.t('catalog.filterAll'),
         testID: 'catalog-cat-chip-all',
+      },
+      {
+        id: MY_LIST_FILTER_ID,
+        label: i18n.t('catalog.filterMyList'),
+        testID: 'catalog-filter-mylist',
+      },
+      {
+        id: WATCHED_FILTER_ID,
+        label: i18n.t('catalog.filterWatched'),
+        testID: 'catalog-filter-watched',
       },
       ...categories.map((cat, index) => ({
         id: cat.row.id,
@@ -179,9 +196,32 @@ export const CatalogFilterHeader = memo(function CatalogFilterHeaderInner({
   );
 
   const handleSelect = useCallback(
-    (id: string) => onSelectCategory(id === ALL_CATEGORIES_ID ? null : id),
-    [onSelectCategory],
+    (id: string) => {
+      if (id === ALL_CATEGORIES_ID) {
+        onSelectQuickFilter?.('all');
+        onSelectCategory(null);
+      } else if (id === MY_LIST_FILTER_ID) {
+        onSelectQuickFilter?.('mylist');
+        onSelectCategory(null);
+      } else if (id === WATCHED_FILTER_ID) {
+        onSelectQuickFilter?.('watched');
+        onSelectCategory(null);
+      } else {
+        onSelectQuickFilter?.('all');
+        onSelectCategory(id);
+      }
+    },
+    [onSelectCategory, onSelectQuickFilter],
   );
+
+  const activeId =
+    selectedCategoryId !== null
+      ? selectedCategoryId
+      : quickFilter === 'mylist'
+        ? MY_LIST_FILTER_ID
+        : quickFilter === 'watched'
+          ? WATCHED_FILTER_ID
+          : ALL_CATEGORIES_ID;
 
   return (
     <View style={[styles.headerRoot, { paddingTop: theme.spacing.sm }]}>
@@ -197,7 +237,7 @@ export const CatalogFilterHeader = memo(function CatalogFilterHeaderInner({
 
       <EditorialCategoryBar
         items={items}
-        activeId={selectedCategoryId ?? ALL_CATEGORIES_ID}
+        activeId={activeId}
         onSelect={handleSelect}
         pickerLabel={i18n.t('catalog.categories')}
         padX={layout.padX}

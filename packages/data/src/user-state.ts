@@ -8,6 +8,7 @@ import {
   type FavoriteRow,
   hasValidMeta,
   lookupCatalogItemForWatched,
+  MAX_USER_LIST_LIMIT,
   mapFavoriteRow,
   mapProgressRow,
   normalizeProfileId,
@@ -343,6 +344,139 @@ export async function listContinueWatching(
   return mapped.filter((r) => !restricted.has(r.itemKey)).slice(0, clamped);
 }
 
+/** Options for {@link listWatched}. */
+export interface ListWatchedOptions {
+  readonly kind?: 'movie' | 'series';
+  readonly parentalUnlocked?: boolean;
+}
+
+/**
+ * Lists completed (`watched = 1`) movies and/or series for a profile, ordered by
+ * `updated_at DESC, item_key ASC` and clamped to `MAX_USER_LIST_LIMIT` (250).
+ * Deduplicates multi-version movies by `version_group_key` (`#404`) and includes series
+ * whose imported episodes are all watched even when the series parent key was not explicitly marked.
+ */
+export async function listWatched(
+  db: SqlDriver,
+  limit = 100,
+  profileId: string = DEFAULT_PROFILE_ID,
+  opts?: ListWatchedOptions,
+): Promise<WatchProgressRow[]> {
+  const clamped = clampLimit(limit, 100);
+  if (clamped === 0) return [];
+  const normalized = normalizeProfileId(profileId);
+  const filter = await loadActiveParentalFilter(db, normalized, opts?.parentalUnlocked);
+  const fetchLimit = filter === null ? clamped : Math.min(MAX_USER_LIST_LIMIT * 4, clamped * 4);
+
+  let rows: RawProgressRow[];
+  if (opts?.kind === 'movie') {
+    rows = await db.all<RawProgressRow>(
+      `SELECT ${PROGRESS_COLS} FROM (
+         SELECT ${PROGRESS_COLS},
+                ROW_NUMBER() OVER (
+                  PARTITION BY COALESCE(NULLIF(version_group_key, ''), item_key)
+                  ORDER BY updated_at DESC, item_key ASC
+                ) AS rn
+           FROM watch_progress
+          WHERE profile_id = ? AND watched = 1 AND kind = 'movie'
+       ) WHERE rn = 1
+       ORDER BY updated_at DESC, item_key ASC
+       LIMIT ?`,
+      [normalized, fetchLimit],
+    );
+  } else {
+    const directKindClause =
+      opts?.kind === 'series' ? "kind = 'series'" : "kind IN ('movie', 'series')";
+    rows = await db.all<RawProgressRow>(
+      `WITH direct_watched AS (
+         SELECT ${PROGRESS_COLS} FROM (
+           SELECT ${PROGRESS_COLS},
+                  ROW_NUMBER() OVER (
+                    PARTITION BY COALESCE(NULLIF(version_group_key, ''), item_key)
+                    ORDER BY updated_at DESC, item_key ASC
+                  ) AS rn
+             FROM watch_progress
+            WHERE profile_id = ? AND watched = 1 AND ${directKindClause}
+         ) WHERE rn = 1
+       ),
+       watched_ep_series AS (
+         SELECT wp.source_id, wp.series_key, MAX(wp.updated_at) AS updated_at
+           FROM watch_progress wp
+          WHERE wp.profile_id = ?
+            AND wp.watched = 1
+            AND wp.kind = 'episode'
+            AND wp.series_key IS NOT NULL
+            AND wp.series_key != ''
+          GROUP BY wp.source_id, wp.series_key
+       ),
+       completed_series AS (
+         SELECT ? AS profile_id,
+                wes.source_id,
+                wes.series_key AS item_key,
+                'series' AS kind,
+                s.name AS title,
+                NULL AS subtitle,
+                s.cover AS logo,
+                NULL AS series_key,
+                NULL AS season,
+                NULL AS episode,
+                0 AS position_ms,
+                0 AS duration_ms,
+                1 AS watched,
+                wes.updated_at,
+                NULL AS version_group_key,
+                NULL AS preferred_item_key
+           FROM watched_ep_series wes
+           JOIN series s
+             ON s.source_id = wes.source_id AND s.key = wes.series_key
+          WHERE NOT EXISTS (
+                  SELECT 1 FROM watch_progress wp_s
+                   WHERE wp_s.profile_id = ?
+                     AND wp_s.item_key = wes.series_key
+                     AND wp_s.kind = 'series'
+                     AND wp_s.watched = 1
+                )
+            AND EXISTS (
+                  SELECT 1 FROM episodes e
+                   WHERE e.source_id = wes.source_id AND e.series_key = wes.series_key
+                )
+            AND NOT EXISTS (
+                  SELECT 1 FROM episodes e
+                   LEFT JOIN watch_progress wp_e
+                     ON wp_e.profile_id = ? AND wp_e.item_key = e.key
+                   WHERE e.source_id = wes.source_id
+                     AND e.series_key = wes.series_key
+                     AND COALESCE(wp_e.watched, 0) = 0
+                )
+       )
+       SELECT ${PROGRESS_COLS}
+         FROM (
+           SELECT ${PROGRESS_COLS} FROM direct_watched
+           UNION ALL
+           SELECT ${PROGRESS_COLS} FROM completed_series
+         )
+        ORDER BY updated_at DESC, item_key ASC
+        LIMIT ?`,
+      [normalized, normalized, normalized, normalized, normalized, fetchLimit],
+    );
+  }
+
+  const mapped = rows.map(mapProgressRow);
+  if (filter === null) return mapped;
+  const restricted = await findRestrictedItemKeys(
+    db,
+    filter,
+    mapped.map((r) => ({
+      itemKey: r.itemKey,
+      sourceId: r.sourceId,
+      kind: r.kind,
+      title: r.title,
+      seriesKey: r.seriesKey,
+    })),
+  );
+  return mapped.filter((r) => !restricted.has(r.itemKey)).slice(0, clamped);
+}
+
 /** Fetches watch progress rows for up to 200 distinct item keys in one indexed lookup, including cross-version movie progress (`#404`). */
 export async function listProgressByKeys(
   db: SqlDriver,
@@ -419,12 +553,20 @@ export async function clearWatchProgress(
   return ok(undefined);
 }
 
+const FAVORITES_ORDER_BY =
+  'CASE WHEN f.sort_order > 0 THEN 0 ELSE 1 END, f.sort_order ASC, f.added_at DESC, f.item_key ASC';
+
 const UPSERT_FAVORITE = `INSERT INTO favorites (
-  profile_id, source_id, item_key, kind, title, logo, year, rating, added_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  profile_id, source_id, item_key, kind, title, logo, year, rating, added_at, sort_order
+) VALUES (
+  ?, ?, ?, ?, ?, ?, ?, ?, ?,
+  COALESCE((SELECT MAX(sort_order) FROM favorites WHERE profile_id = ?), 0) + 1
+)
 ON CONFLICT(profile_id, item_key) DO UPDATE SET
   source_id = excluded.source_id, kind = excluded.kind, title = excluded.title,
-  logo = excluded.logo, year = excluded.year, rating = excluded.rating, added_at = excluded.added_at`;
+  logo = excluded.logo, year = excluded.year, rating = excluded.rating,
+  added_at = excluded.added_at,
+  sort_order = CASE WHEN favorites.sort_order > 0 THEN favorites.sort_order ELSE excluded.sort_order END`;
 
 /**
  * Idempotently sets My List favorite state for `(profileId, itemKey)`:
@@ -456,6 +598,7 @@ export async function setFavorite(
     optInt(input.year),
     optFloat(input.rating),
     Math.round(clock()),
+    profileId,
   ]);
   return ok(true);
 }
@@ -492,13 +635,68 @@ export async function toggleFavorite(
       optInt(input.year),
       optFloat(input.rating),
       addedAt,
+      profileId,
     ]);
     return true;
   });
   return ok(added);
 }
 
-/** Lists My List favorites for a profile, most recently added first (applying live `channel_overrides` `#60`). */
+/**
+ * Reorders My List favorites for `profileId` into a dense `1..N` sequence.
+ * Specified keys belonging to `profileId` receive `1..k` in order; any remaining favorites
+ * in `profileId` are re-numbered starting at `k + 1` in their existing display order.
+ */
+export async function reorderFavorites(
+  db: SqlDriver,
+  orderedItemKeys: readonly string[],
+  profileId: string = DEFAULT_PROFILE_ID,
+): Promise<Result<void>> {
+  const normalized = normalizeProfileId(profileId);
+  const requested: string[] = [];
+  const seen = new Set<string>();
+  for (const rawKey of orderedItemKeys) {
+    const trimmed = rawKey.trim();
+    if (trimmed === '' || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    requested.push(trimmed);
+    if (requested.length >= MAX_USER_LIST_LIMIT) break;
+  }
+  await db.transaction(async (tx) => {
+    const existingRows = await tx.all<{ item_key: string }>(
+      `SELECT f.item_key
+         FROM favorites f
+        WHERE f.profile_id = ?
+        ORDER BY ${FAVORITES_ORDER_BY}`,
+      [normalized],
+    );
+    if (existingRows.length === 0) return;
+    const existingSet = new Set(existingRows.map((r) => r.item_key));
+    const matched: string[] = [];
+    const matchedSet = new Set<string>();
+    for (const key of requested) {
+      if (existingSet.has(key)) {
+        matched.push(key);
+        matchedSet.add(key);
+      }
+    }
+    const remaining: string[] = [];
+    for (const row of existingRows) {
+      if (!matchedSet.has(row.item_key)) remaining.push(row.item_key);
+    }
+    const finalOrder = [...matched, ...remaining];
+    for (let i = 0; i < finalOrder.length; i += 1) {
+      await tx.run('UPDATE favorites SET sort_order = ? WHERE profile_id = ? AND item_key = ?', [
+        i + 1,
+        normalized,
+        finalOrder[i] ?? '',
+      ]);
+    }
+  });
+  return ok(undefined);
+}
+
+/** Lists My List favorites for a profile in custom `sort_order` order, falling back to `added_at DESC` (applying live `channel_overrides` `#60`). */
 export async function listFavorites(
   db: SqlDriver,
   limit = 50,
@@ -516,12 +714,12 @@ export async function listFavorites(
     `SELECT f.profile_id, f.source_id, f.item_key, f.kind,
             CASE WHEN f.kind = 'live' THEN COALESCE(NULLIF(co.custom_name, ''), f.title) ELSE f.title END AS title,
             f.title AS raw_title,
-            f.logo, f.year, f.rating, f.added_at
+            f.logo, f.year, f.rating, f.added_at, f.sort_order
        FROM favorites f
        LEFT JOIN channel_overrides co
          ON co.profile_id = f.profile_id AND co.item_key = f.item_key
       WHERE f.profile_id = ?${hiddenClause}
-      ORDER BY f.added_at DESC
+      ORDER BY ${FAVORITES_ORDER_BY}
       LIMIT ?`,
     [normalized, fetchLimit],
   );
@@ -540,13 +738,17 @@ export async function listFavorites(
   return mapped.filter((r) => !restricted.has(r.itemKey)).slice(0, clamped);
 }
 
-/** Lists favorited item keys for a profile (capped at 2,000), most recently added first. */
+/** Lists favorited item keys for a profile (capped at 2,000) in custom `sort_order` order, falling back to `added_at DESC`. */
 export async function listFavoriteKeys(
   db: SqlDriver,
   profileId: string = DEFAULT_PROFILE_ID,
 ): Promise<string[]> {
   const rows = await db.all<{ item_key: string }>(
-    'SELECT item_key FROM favorites WHERE profile_id = ? ORDER BY added_at DESC LIMIT ?',
+    `SELECT f.item_key
+       FROM favorites f
+      WHERE f.profile_id = ?
+      ORDER BY ${FAVORITES_ORDER_BY}
+      LIMIT ?`,
     [normalizeProfileId(profileId), MAX_FAVORITE_KEYS],
   );
   return rows.map((r) => r.item_key);

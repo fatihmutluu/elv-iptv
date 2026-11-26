@@ -3381,3 +3381,124 @@ msgstr "Oynatmayı ayrı bir masaüstü penceresinde açın"
 
 msgid "player.settings.desc.stats"
 msgstr "Canlı bit hızı, FPS ve arabellek ölçümlerini gösterin"
+
+
+msgid "home.liveTv"
+msgstr "Canlı Yayınlar"
+
+msgid "settings.homeLayoutTitle"
+msgstr "Ana sayfa düzeni"
+
+msgid "settings.homeLayoutDesc"
+msgstr "Ana sayfada görünecek satırları seçin ve sıralamasını ayarlayın."
+
+msgid "settings.homeLayoutPreview"
+msgstr "Önizleme"
+
+msgid "settings.homeLayoutMoveUp"
+msgstr "Satırı yukarı taşı"
+
+msgid "settings.homeLayoutMoveDown"
+msgstr "Satırı aşağı taşı"
+
+msgid "settings.homeLayoutReset"
+msgstr "Varsayılan düzene dön"
+
+msgid "settings.homeSectionContinue"
+msgstr "İzlemeye devam et"
+
+msgid "settings.homeSectionLive"
+msgstr "Canlı Yayınlar"
+
+msgid "settings.homeSectionMyList"
+msgstr "Listem"
+
+msgid "settings.homeSectionMovies"
+msgstr "Öne çıkan filmler"
+
+msgid "settings.homeSectionSeries"
+msgstr "Öne çıkan diziler"
+
+msgid "settings.homeSectionCollections"
+msgstr "Koleksiyonlar"
+
+msgid "settings.homeLayoutHiddenCount"
+msgstr "{count} gizli"
+
+msgid "live.reorderHint"
+msgstr "Sıralamak için sürükleyin"
+
+msgid "live.moveFavoriteUp"
+msgstr "Favoriyi yukarı taşı"
+
+msgid "live.moveFavoriteDown"
+msgstr "Favoriyi aşağı taşı"
+
+msgid "catalog.filterAll"
+msgstr "Tümü"
+
+msgid "catalog.filterMyList"
+msgstr "Listem"
+
+msgid "catalog.filterWatched"
+msgstr "İzlenenler"
+
+msgid "catalog.emptyMyListTitle"
+msgstr "Listeniz henüz boş"
+
+msgid "catalog.emptyMyListBody"
+msgstr "Film veya dizileri listenize ekleyerek burada kolayca bulabilirsiniz."
+
+msgid "catalog.emptyWatchedTitle"
+msgstr "Henüz izlenen içerik yok"
+
+msgid "catalog.emptyWatchedBody"
+msgstr "İzlemeyi tamamladığınız içerikler burada görünür."
+
+msgid "context.play"
+msgstr "Oynat"
+
+msgid "context.resume"
+msgstr "Devam et"
+
+msgid "context.goToDetails"
+msgstr "Detaylara git"
+
+msgid "context.hideFromContinue"
+msgstr "Önermeyi kapat"
+
+msgid "context.addToMyList"
+msgstr "Listeme ekle"
+
+msgid "context.removeFromMyList"
+msgstr "Listemden çıkar"
+
+msgid "context.markWatched"
+msgstr "İzlendi işaretle"
+
+msgid "context.markUnwatched"
+msgstr "İzlenmedi işaretle"
+
+msgid "context.addFavorite"
+msgstr "Favorilere ekle"
+
+msgid "context.removeFavorite"
+msgstr "Favorilerden çıkar"
+
+msgid "context.openMultiView"
+msgstr "Çoklu görünümde aç"
+
+msgid "context.openPopout"
+msgstr "Ayrı pencerede aç"
+
+msgid "context.hideChannel"
+msgstr "Kanalı gizle"
+
+msgid "context.moveUp"
+msgstr "Yukarı taşı"
+
+msgid "context.moveDown"
+msgstr "Aşağı taşı"
+
+msgid "sync.initialPrefsHint"
+msgstr "Görünüm ve oynatma ayarları yeni cihaz eşleştirildiğinde bir kez aktarılır; sonrasında her cihazda bağımsız kalır."

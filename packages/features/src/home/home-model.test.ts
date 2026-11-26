@@ -1,15 +1,27 @@
-import type { CatalogService, CategoryRow, ItemRow, WatchProgressRow } from '@elv/data';
+import type {
+  CatalogService,
+  CategoryRow,
+  FavoriteRow,
+  ItemRow,
+  NowNextEntry,
+  WatchProgressRow,
+} from '@elv/data';
+import { createAppI18n } from '@elv/i18n';
 import { describe, expect, it, vi } from 'vitest';
+import { buildHomeCardContextMenuItems } from './home-context-menu';
 import {
   buildHeroSlides,
   buildHomeCollectionRails,
   buildHomeDetailTarget,
   buildHomeLivePlayTarget,
+  buildUnifiedLiveRail,
   buildVodPlayTarget,
   computePeekCardWidth,
   formatLiveChannelName,
   formatRemainingMinutes,
+  HOME_LIVE_RAIL_LIMIT,
   progressRatio,
+  resolveHomeLivePlayTarget,
 } from './home-model';
 
 function makeProgress(overrides: Partial<WatchProgressRow> = {}): WatchProgressRow {
@@ -309,5 +321,244 @@ describe('home-model', () => {
       watched: false,
     });
     expect(rails[0]?.items[1]?.kind).toBe('series');
+  });
+
+  it('builds unified 12-card Live TV rail in strict Favorites -> Recent -> On-Now cascade order with deduplication and EPG enrichment', () => {
+    const favorites: FavoriteRow[] = [
+      {
+        profileId: 'default',
+        sourceId: 'src-1',
+        itemKey: 'x:src-1:movie:99',
+        kind: 'movie',
+        title: 'Ignored Movie Fav',
+        logo: null,
+        year: 2024,
+        rating: 8,
+        addedAt: 100,
+      },
+      {
+        profileId: 'default',
+        sourceId: 'src-1',
+        itemKey: 'x:src-1:live:fav-2',
+        kind: 'live',
+        title: 'Fav Two',
+        logo: 'https://art.example.test/fav2.png',
+        year: null,
+        rating: null,
+        addedAt: 200,
+      },
+      {
+        profileId: 'default',
+        sourceId: 'src-1',
+        itemKey: 'x:src-1:live:fav-1',
+        kind: 'live',
+        title: 'Fav One',
+        logo: 'https://art.example.test/fav1.png',
+        year: null,
+        rating: null,
+        addedAt: 100,
+      },
+    ];
+    const recentChannels: ItemRow[] = [
+      makeItem({ id: 10, key: 'x:src-1:live:fav-1', kind: 'live', name: 'Fav One', num: 1 }),
+      makeItem({ id: 11, key: 'x:src-1:live:rec-1', kind: 'live', name: 'Recent One', num: 11 }),
+      makeItem({ id: 12, key: 'x:src-1:live:rec-2', kind: 'live', name: 'Recent Two', num: 12 }),
+    ];
+    const liveItems: ItemRow[] = Array.from({ length: 15 }, (_, idx) =>
+      makeItem({
+        id: 100 + idx,
+        key: idx === 0 ? 'x:src-1:live:rec-1' : `x:src-1:live:on-${idx}`,
+        kind: 'live',
+        name: `On Now ${idx}`,
+        num: 20 + idx,
+      }),
+    );
+    const nowNextByKey = new Map<string, NowNextEntry>([
+      [
+        'x:src-1:live:fav-2',
+        {
+          channelKey: 'x:src-1:live:fav-2',
+          now: {
+            channelKey: 'x:src-1:live:fav-2',
+            title: 'Evening News',
+            description: null,
+            start: 1_000,
+            stop: 2_000,
+          } as unknown as NowNextEntry['now'],
+          next: null,
+        },
+      ],
+    ]);
+
+    const result = buildUnifiedLiveRail({
+      favorites,
+      recentChannels,
+      liveItems,
+      liveCategoryName: 'General',
+      nowNextByKey,
+    });
+
+    expect(result).toHaveLength(HOME_LIVE_RAIL_LIMIT);
+    expect(result.map((e) => e.itemKey).slice(0, 6)).toEqual([
+      'x:src-1:live:fav-2',
+      'x:src-1:live:fav-1',
+      'x:src-1:live:rec-1',
+      'x:src-1:live:rec-2',
+      'x:src-1:live:on-1',
+      'x:src-1:live:on-2',
+    ]);
+    expect(result[0]?.subtitle).toBe('Evening News');
+    expect(result[1]?.title).toBe('1. Fav One');
+    expect(result[2]?.subtitle).toBe('General');
+  });
+
+  it('builds context menu items for Continue Watching, Live TV, and Poster Home rails', () => {
+    const i18n = createAppI18n('en');
+    const onPlay = vi.fn();
+    const onOpenDetail = vi.fn();
+    const onRemoveFromContinue = vi.fn();
+    const onToggleFavorite = vi.fn();
+    const onToggleWatched = vi.fn();
+    const onOpenMultiView = vi.fn();
+    const onOpenPopout = vi.fn();
+
+    const cwEntry = {
+      itemKey: 'x:src-1:movie:1',
+      sourceId: 'src-1',
+      kind: 'movie' as const,
+      title: 'Neon Horizon',
+      subtitle: null,
+      backdropUri: null,
+      posterUri: null,
+      year: 2025,
+      rating: 8.1,
+      durationMs: 600_000,
+      positionMs: 120_000,
+      watched: false,
+    };
+    const cwItems = buildHomeCardContextMenuItems({
+      railId: 'continue',
+      entry: cwEntry,
+      index: 0,
+      isFavorite: false,
+      isWatched: false,
+      t: i18n.t,
+      onPlay,
+      onOpenDetail,
+      onRemoveFromContinue,
+      onToggleWatched,
+    });
+    expect(cwItems.map((i) => i.id)).toEqual([
+      'resume',
+      'details',
+      'hideFromContinue',
+      'markWatched',
+    ]);
+    expect(cwItems.find((i) => i.id === 'hideFromContinue')?.destructive).toBe(true);
+
+    const liveItems = buildHomeCardContextMenuItems({
+      railId: 'live',
+      entry: { ...cwEntry, itemKey: 'x:src-1:live:1', kind: 'live', live: true },
+      index: 1,
+      isFavorite: true,
+      isWatched: false,
+      t: i18n.t,
+      onPlay,
+      onOpenMultiView,
+      onOpenPopout,
+      onToggleFavorite,
+    });
+    expect(liveItems.map((i) => i.id)).toEqual(['play', 'multiview', 'popout', 'favorite']);
+    expect(liveItems.find((i) => i.id === 'favorite')?.label).toBe('Remove from favorites');
+
+    const posterItems = buildHomeCardContextMenuItems({
+      railId: 'movies',
+      entry: cwEntry,
+      index: 2,
+      isFavorite: true,
+      isWatched: true,
+      t: i18n.t,
+      onPlay,
+      onOpenDetail,
+      onToggleFavorite,
+      onToggleWatched,
+    });
+    expect(posterItems.map((i) => i.id)).toEqual(['play', 'details', 'mylist', 'watched']);
+    expect(posterItems.find((i) => i.id === 'watched')?.label).toBe('Mark as unwatched');
+  });
+
+  it('resolves unified Live TV rail PlayTarget using real liveItems index or standalone fallback with logo', () => {
+    const liveCategory = {
+      id: 'cat-live',
+      sourceId: 'src-1',
+      kind: 'live' as const,
+      name: 'General',
+      position: 0,
+      itemCount: 3,
+    };
+    const ch0 = makeItem({
+      id: 1,
+      key: 'x:src-1:live:1',
+      kind: 'live',
+      name: 'Alpha',
+      num: 1,
+      logo: 'https://art.test/a.png',
+    });
+    const ch1 = makeItem({
+      id: 2,
+      key: 'x:src-1:live:2',
+      kind: 'live',
+      name: 'Beta',
+      num: 2,
+      logo: 'https://art.test/b.png',
+    });
+    const otherCatCh = makeItem({
+      id: 99,
+      key: 'x:src-1:live:99',
+      kind: 'live',
+      name: 'Sports Fav',
+      num: 99,
+      logo: 'https://art.test/s.png',
+    });
+    const catalog = { items: vi.fn(async () => [ch0, ch1]) } as unknown as CatalogService;
+
+    const inCatTarget = resolveHomeLivePlayTarget(catalog, liveCategory, [ch0, ch1], {
+      itemKey: ch1.key,
+      sourceId: 'src-1',
+      kind: 'live',
+      title: '2. Beta',
+      subtitle: null,
+      backdropUri: ch1.logo,
+      posterUri: ch1.logo,
+      year: null,
+      rating: null,
+      durationMs: 0,
+      positionMs: 0,
+      watched: false,
+      live: true,
+      catalogItem: ch1,
+    });
+    expect(inCatTarget.playlist?.currentIndex).toBe(1);
+    expect(inCatTarget.itemKind).toBe('live');
+
+    const foreignTarget = resolveHomeLivePlayTarget(catalog, liveCategory, [ch0, ch1], {
+      itemKey: otherCatCh.key,
+      sourceId: 'src-1',
+      kind: 'live',
+      title: '99. Sports Fav',
+      subtitle: null,
+      backdropUri: null,
+      posterUri: 'https://art.test/fav-override.png',
+      year: null,
+      rating: null,
+      durationMs: 0,
+      positionMs: 0,
+      watched: false,
+      live: true,
+      catalogItem: otherCatCh,
+    });
+    expect(foreignTarget.playlist).toBeUndefined();
+    expect(foreignTarget.itemKind).toBe('live');
+    expect(foreignTarget.logo).toBe('https://art.test/fav-override.png');
   });
 });

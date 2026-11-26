@@ -8,22 +8,25 @@ import type {
   WatchProgressRow,
 } from '@elv/data';
 import {
-  MicroPill,
+  type ContextMenuAnchor,
   PosterCard,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
+  useContextMenu,
   useI18n,
   useTheme,
   WideCard,
-  webCursorPointer,
-  webTransition,
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback } from 'react';
-import { type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import { type LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { type DetailTarget, detailTargetFromItem, formatVodMeta } from '../shared';
+import { SearchEpgCardItem, SearchEpisodeCardItem } from './SearchSecondaryCards';
+import {
+  buildSearchLiveContextMenuItems,
+  buildSearchVodContextMenuItems,
+} from './search-context-menu';
 import {
   computeSearchProgressRatio,
-  formatSearchProgrammeTime,
   type SearchNavRowId,
   type SearchResultSectionId,
 } from './search-model';
@@ -36,6 +39,8 @@ export interface SearchResultsSectionProps {
   readonly results: SearchResults;
   readonly scope: SearchScope;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
+  readonly favoriteKeys?: ReadonlySet<string>;
+  readonly watchedOverrides?: ReadonlyMap<string, boolean>;
   readonly searching: boolean;
   readonly hasSearched: boolean;
   readonly padX: number;
@@ -46,6 +51,9 @@ export interface SearchResultsSectionProps {
   readonly focusedRowId: SearchNavRowId | null;
   readonly focusedCol: number | null;
   readonly onPlayLive: (item: ItemRow) => void;
+  readonly onPlayVod?: (item: ItemRow) => void;
+  readonly onToggleFavorite?: (item: ItemRow) => void;
+  readonly onToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onSelectEpg?: (programme: SearchProgrammeHit) => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onSelectEpisode?: (episode: SearchEpisodeHit) => void;
@@ -57,25 +65,48 @@ export interface SearchResultsSectionProps {
 interface SearchLiveCardItemProps {
   readonly item: ItemRow;
   readonly index: number;
+  readonly isFavorite: boolean;
   readonly width: number;
   readonly isTv: boolean;
   readonly focused: boolean;
   readonly liveKindLabel: string;
   readonly onPlayLive: (item: ItemRow) => void;
+  readonly onToggleFavorite?: (item: ItemRow) => void;
 }
 
 const SearchLiveCardItem = memo(function SearchLiveCardItemInner({
   item,
   index,
+  isFavorite,
   width,
   isTv,
   focused,
   liveKindLabel,
   onPlayLive,
+  onToggleFavorite,
 }: SearchLiveCardItemProps): ReactElement {
+  const i18n = useI18n();
+  const { openContextMenu } = useContextMenu();
   const handlePress = useCallback(() => {
     onPlayLive(item);
   }, [item, onPlayLive]);
+
+  const handleContextMenu = useCallback(
+    (anchor?: ContextMenuAnchor) => {
+      openContextMenu({
+        title: item.name,
+        ...(anchor !== undefined ? { anchor } : {}),
+        items: buildSearchLiveContextMenuItems({
+          item,
+          isFavorite,
+          i18n,
+          onPlayLive,
+          ...(onToggleFavorite !== undefined ? { onToggleFavorite } : {}),
+        }),
+      });
+    },
+    [i18n, isFavorite, item, onPlayLive, onToggleFavorite, openContextMenu],
+  );
 
   const subtitle = item.num !== null ? `${item.num} · ${liveKindLabel}` : liveKindLabel;
 
@@ -92,121 +123,8 @@ const SearchLiveCardItem = memo(function SearchLiveCardItemInner({
       focusable={!isTv}
       focused={focused}
       onPress={handlePress}
+      onContextMenu={handleContextMenu}
     />
-  );
-});
-
-interface SearchEpgCardItemProps {
-  readonly hit: SearchProgrammeHit;
-  readonly index: number;
-  readonly width: number;
-  readonly isTv: boolean;
-  readonly focused: boolean;
-  readonly nowMs: number;
-  readonly airingNowLabel: string;
-  readonly upcomingLabel: string;
-  readonly onSelectEpg?: (programme: SearchProgrammeHit) => void;
-}
-
-const SearchEpgCardItem = memo(function SearchEpgCardItemInner({
-  hit,
-  index,
-  width,
-  isTv,
-  focused,
-  nowMs,
-  airingNowLabel,
-  upcomingLabel,
-  onSelectEpg,
-}: SearchEpgCardItemProps): ReactElement {
-  const theme = useTheme();
-  const handlePress = useCallback(() => {
-    onSelectEpg?.(hit);
-  }, [hit, onSelectEpg]);
-
-  const isEnded = !hit.isLiveNow && hit.stop < nowMs;
-  const badgeLabel = hit.isLiveNow ? airingNowLabel : isEnded ? null : upcomingLabel;
-  const timeWindow = `${formatSearchProgrammeTime(hit.start)} – ${formatSearchProgrammeTime(hit.stop)}`;
-  const channelSubtitle = hit.category ? `${hit.channelName} · ${hit.category}` : hit.channelName;
-
-  return (
-    <Pressable
-      testID={`search-epg-item-${index}`}
-      accessibilityRole="button"
-      accessibilityLabel={
-        badgeLabel !== null
-          ? `${hit.title}, ${hit.channelName}, ${badgeLabel}, ${timeWindow}`
-          : `${hit.title}, ${hit.channelName}, ${timeWindow}`
-      }
-      focusable={!isTv}
-      onPress={handlePress}
-      style={({ pressed }) => [
-        styles.epgCard,
-        webTransition(theme, 'background-color, border-color, opacity, transform'),
-        webCursorPointer(),
-        {
-          width,
-          borderRadius: theme.radius.card,
-          backgroundColor: focused ? theme.colors.focusFill : theme.colors.bgSurface,
-          borderColor: focused ? 'transparent' : theme.colors.surfaceBorder,
-          borderWidth: 1,
-          opacity: pressed ? 0.88 : 1,
-          transform: [{ scale: focused ? theme.focus.buttonScale : 1 }],
-        },
-      ]}
-    >
-      <View style={styles.epgTopRow}>
-        {badgeLabel !== null ? (
-          <MicroPill
-            testID={`search-epg-item-${index}-badge`}
-            label={badgeLabel}
-            tone={hit.isLiveNow ? 'live' : 'accent'}
-          />
-        ) : null}
-        <Text
-          testID={`search-epg-item-${index}-time`}
-          numberOfLines={1}
-          style={[
-            theme.typography.micro,
-            TABULAR_NUMS_STYLE,
-            { color: theme.colors.textMuted, flexShrink: 0 },
-          ]}
-        >
-          {timeWindow}
-        </Text>
-      </View>
-      <Text
-        testID={`search-epg-item-${index}-title`}
-        numberOfLines={1}
-        style={[
-          theme.typography.title,
-          { color: theme.colors.textPrimary, fontWeight: '600', marginTop: 6 },
-        ]}
-      >
-        {hit.title}
-      </Text>
-      <Text
-        testID={`search-epg-item-${index}-channel`}
-        numberOfLines={1}
-        style={[theme.typography.caption, { color: theme.colors.textSecondary, marginTop: 2 }]}
-      >
-        {channelSubtitle}
-      </Text>
-      {focused ? (
-        <View
-          pointerEvents="none"
-          testID={`search-epg-item-${index}-focus-ring`}
-          style={[
-            styles.cardFocusRing,
-            {
-              borderRadius: theme.radius.card,
-              borderWidth: theme.focus.ringWidth,
-              borderColor: theme.colors.focusRingColor,
-            },
-          ]}
-        />
-      ) : null}
-    </Pressable>
   );
 });
 
@@ -215,12 +133,17 @@ interface SearchVodCardItemProps {
   readonly index: number;
   readonly kindPrefix: 'movie' | 'series';
   readonly progress: WatchProgressRow | undefined;
+  readonly isFavorite: boolean;
+  readonly watchedOverride: boolean | undefined;
   readonly watchedLabel: string;
   readonly matchedInCastLabel: string;
   readonly width: number;
   readonly isTv: boolean;
   readonly focused: boolean;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly onPlayVod?: (item: ItemRow) => void;
+  readonly onToggleFavorite?: (item: ItemRow) => void;
+  readonly onToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
 }
 
 const SearchVodCardItem = memo(function SearchVodCardItemInner({
@@ -228,29 +151,68 @@ const SearchVodCardItem = memo(function SearchVodCardItemInner({
   index,
   kindPrefix,
   progress,
+  isFavorite,
+  watchedOverride,
   watchedLabel,
   matchedInCastLabel,
   width,
   isTv,
   focused,
   onOpenDetail,
+  onPlayVod,
+  onToggleFavorite,
+  onToggleWatched,
 }: SearchVodCardItemProps): ReactElement {
+  const i18n = useI18n();
+  const { openContextMenu } = useContextMenu();
   const handlePress = useCallback(() => {
     const target = detailTargetFromItem(item);
     if (target) onOpenDetail(target);
   }, [item, onOpenDetail]);
 
+  const effectiveWatched = watchedOverride ?? progress?.watched === true;
+
+  const handleContextMenu = useCallback(
+    (anchor?: ContextMenuAnchor) => {
+      openContextMenu({
+        title: item.name,
+        ...(anchor !== undefined ? { anchor } : {}),
+        items: buildSearchVodContextMenuItems({
+          item,
+          isFavorite,
+          isWatched: effectiveWatched,
+          i18n,
+          onOpenDetail,
+          ...(onPlayVod !== undefined ? { onPlayVod } : {}),
+          ...(onToggleFavorite !== undefined ? { onToggleFavorite } : {}),
+          ...(onToggleWatched !== undefined ? { onToggleWatched } : {}),
+        }),
+      });
+    },
+    [
+      effectiveWatched,
+      i18n,
+      isFavorite,
+      item,
+      onOpenDetail,
+      onPlayVod,
+      onToggleFavorite,
+      onToggleWatched,
+      openContextMenu,
+    ],
+  );
+
   const baseMeta = formatVodMeta(item.year, item.rating);
   const isCastMatch = item.matchedBy === 'cast' || item.matchedBy === 'director';
-  const showCastBadge = isCastMatch && !progress?.watched;
-  const badge = progress?.watched ? watchedLabel : showCastBadge ? matchedInCastLabel : undefined;
+  const showCastBadge = isCastMatch && !effectiveWatched;
+  const badge = effectiveWatched ? watchedLabel : showCastBadge ? matchedInCastLabel : undefined;
   const meta =
     isCastMatch && !showCastBadge
       ? baseMeta !== undefined
         ? `${baseMeta} · ${matchedInCastLabel}`
         : matchedInCastLabel
       : baseMeta;
-  const ratio = computeSearchProgressRatio(progress);
+  const ratio = !effectiveWatched ? computeSearchProgressRatio(progress) : undefined;
 
   return (
     <PosterCard
@@ -265,100 +227,8 @@ const SearchVodCardItem = memo(function SearchVodCardItemInner({
       focusable={!isTv}
       focused={focused}
       onPress={handlePress}
+      onContextMenu={handleContextMenu}
     />
-  );
-});
-
-interface SearchEpisodeCardItemProps {
-  readonly hit: SearchEpisodeHit;
-  readonly index: number;
-  readonly episodeLabel: string;
-  readonly width: number;
-  readonly isTv: boolean;
-  readonly focused: boolean;
-  readonly onSelectEpisode?: (episode: SearchEpisodeHit) => void;
-}
-
-const SearchEpisodeCardItem = memo(function SearchEpisodeCardItemInner({
-  hit,
-  index,
-  episodeLabel,
-  width,
-  isTv,
-  focused,
-  onSelectEpisode,
-}: SearchEpisodeCardItemProps): ReactElement {
-  const theme = useTheme();
-  const handlePress = useCallback(() => {
-    onSelectEpisode?.(hit);
-  }, [hit, onSelectEpisode]);
-
-  const displayTitle = hit.title.trim() || episodeLabel;
-
-  return (
-    <Pressable
-      testID={`search-episode-item-${index}`}
-      accessibilityRole="button"
-      accessibilityLabel={`${hit.seriesName}, ${episodeLabel}, ${displayTitle}`}
-      focusable={!isTv}
-      onPress={handlePress}
-      style={({ pressed }) => [
-        styles.epgCard,
-        webTransition(theme, 'background-color, border-color, opacity, transform'),
-        webCursorPointer(),
-        {
-          width,
-          borderRadius: theme.radius.card,
-          backgroundColor: focused ? theme.colors.focusFill : theme.colors.bgSurface,
-          borderColor: focused ? 'transparent' : theme.colors.surfaceBorder,
-          borderWidth: 1,
-          opacity: pressed ? 0.88 : 1,
-          transform: [{ scale: focused ? theme.focus.buttonScale : 1 }],
-        },
-      ]}
-    >
-      <View style={styles.epgTopRow}>
-        <Text
-          testID={`search-episode-item-${index}-series`}
-          numberOfLines={1}
-          style={[
-            theme.typography.caption,
-            { color: theme.colors.textSecondary, flex: 1, fontWeight: '600' },
-          ]}
-        >
-          {hit.seriesName}
-        </Text>
-        <MicroPill
-          testID={`search-episode-item-${index}-label`}
-          label={episodeLabel}
-          tone="neutral"
-        />
-      </View>
-      <Text
-        testID={`search-episode-item-${index}-title`}
-        numberOfLines={1}
-        style={[
-          theme.typography.title,
-          { color: theme.colors.textPrimary, fontWeight: '600', marginTop: 6 },
-        ]}
-      >
-        {displayTitle}
-      </Text>
-      {focused ? (
-        <View
-          pointerEvents="none"
-          testID={`search-episode-item-${index}-focus-ring`}
-          style={[
-            styles.cardFocusRing,
-            {
-              borderRadius: theme.radius.card,
-              borderWidth: theme.focus.ringWidth,
-              borderColor: theme.colors.focusRingColor,
-            },
-          ]}
-        />
-      ) : null}
-    </Pressable>
   );
 });
 
@@ -394,6 +264,8 @@ function SearchResultsSectionInner({
   results,
   scope,
   progressByKey,
+  favoriteKeys,
+  watchedOverrides,
   searching,
   hasSearched,
   padX,
@@ -404,6 +276,9 @@ function SearchResultsSectionInner({
   focusedRowId,
   focusedCol,
   onPlayLive,
+  onPlayVod,
+  onToggleFavorite,
+  onToggleWatched,
   onSelectEpg,
   onOpenDetail,
   onSelectEpisode,
@@ -537,11 +412,13 @@ function SearchResultsSectionInner({
                 key={item.key}
                 item={item}
                 index={index}
+                isFavorite={favoriteKeys?.has(item.key) ?? false}
                 width={wideCardWidth}
                 isTv={isTv}
                 focused={isTv && focusedRowId === 'live' && focusedCol === index}
                 liveKindLabel={liveKindLabel}
                 onPlayLive={onPlayLive}
+                {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
               />
             ))}
           </View>
@@ -589,12 +466,17 @@ function SearchResultsSectionInner({
                 index={index}
                 kindPrefix="movie"
                 progress={progressByKey.get(item.key)}
+                isFavorite={favoriteKeys?.has(item.key) ?? false}
+                watchedOverride={watchedOverrides?.get(item.key)}
                 watchedLabel={watchedLabel}
                 matchedInCastLabel={matchedInCastLabel}
                 width={posterCardWidth}
                 isTv={isTv}
                 focused={isTv && focusedRowId === 'movies' && focusedCol === index}
                 onOpenDetail={onOpenDetail}
+                {...(onPlayVod !== undefined ? { onPlayVod } : {})}
+                {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
+                {...(onToggleWatched !== undefined ? { onToggleWatched } : {})}
               />
             ))}
           </View>
@@ -616,12 +498,17 @@ function SearchResultsSectionInner({
                 index={index}
                 kindPrefix="series"
                 progress={progressByKey.get(item.key)}
+                isFavorite={favoriteKeys?.has(item.key) ?? false}
+                watchedOverride={watchedOverrides?.get(item.key)}
                 watchedLabel={watchedLabel}
                 matchedInCastLabel={matchedInCastLabel}
                 width={posterCardWidth}
                 isTv={isTv}
                 focused={isTv && focusedRowId === 'series' && focusedCol === index}
                 onOpenDetail={onOpenDetail}
+                {...(onPlayVod !== undefined ? { onPlayVod } : {})}
+                {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
+                {...(onToggleWatched !== undefined ? { onToggleWatched } : {})}
               />
             ))}
           </View>
@@ -679,26 +566,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'flex-start',
-  },
-  epgCard: {
-    position: 'relative',
-    minHeight: 84,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    justifyContent: 'center',
-  },
-  epgTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  cardFocusRing: {
-    position: 'absolute',
-    top: -2,
-    bottom: -2,
-    left: -2,
-    right: -2,
   },
   skeletonLabel: { marginTop: 8 },
 });

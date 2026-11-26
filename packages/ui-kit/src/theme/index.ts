@@ -6,6 +6,18 @@ export {
   relativeLuminance,
 } from './color-utils';
 export {
+  CONTEXT_MENU_MARGIN_PX,
+  type ContextMenuAnchor,
+  type ContextMenuHostController,
+  ContextMenuHostProvider,
+  type ContextMenuItem,
+  type ContextMenuPosition,
+  type ContextMenuRequest,
+  type ContextMenuSize,
+  computeContextMenuPosition,
+  useContextMenu,
+} from './context-menu-host';
+export {
   DEFAULT_THEME_PRESET,
   isThemePresetId,
   THEME_PRESET_IDS,

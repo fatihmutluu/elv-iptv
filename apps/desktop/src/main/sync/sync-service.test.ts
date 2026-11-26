@@ -9,6 +9,7 @@ import {
   type DesktopSyncFetchFn,
   redactDiagnosticsLine,
 } from './sync-service.ts';
+import { initialPrefsAppliedKey, SESSION_SECRET_KEY } from './sync-service-helpers.ts';
 
 const TEST_KDF_ITERATIONS = 100_000;
 
@@ -553,5 +554,167 @@ describe('createDesktopSyncService (#26, #458)', () => {
       expect(out).not.toContain('C:\\Users');
       expect(out).not.toContain('\\\\nas\\');
     }
+  });
+
+  it('syncs initialPreferences once on new device sign-in and never overwrites on subsequent syncs (Product Decision #40)', async () => {
+    const server = makeMockServer();
+    const secretsA = makeSecretStore();
+    const secretsB = makeSecretStore();
+    const appliedOnA: unknown[] = [];
+    const appliedOnB: unknown[] = [];
+    let nowMs = 1_700_000_000_000;
+
+    const deviceA = createDesktopSyncService({
+      secretStore: secretsA.store,
+      platform: 'desktop-win32',
+      appVersion: '1.0.0',
+      initialServerUrl: 'https://sync.example.test',
+      fetchFn: server.fetchFn,
+      clock: { now: () => nowMs },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+      onInitialPreferences: (patch) => {
+        appliedOnA.push(patch);
+      },
+    });
+    const deviceB = createDesktopSyncService({
+      secretStore: secretsB.store,
+      platform: 'desktop-darwin',
+      appVersion: '1.0.0',
+      initialServerUrl: 'https://sync.example.test',
+      fetchFn: server.fetchFn,
+      clock: { now: () => nowMs },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+      onInitialPreferences: (patch) => {
+        appliedOnB.push(patch);
+      },
+    });
+
+    // Device A sets its syncable preferences (including a forbidden key that must be stripped)
+    deviceA.setSyncablePreferences({
+      themePreset: 'midnightGold',
+      locale: 'tr',
+      fontScale: 1.1,
+      overscanX: 0.09,
+      syncServerUrl: 'https://evil.example.test',
+    });
+
+    // Device A registers (marks itself applied immediately) and pushes seed
+    expect(
+      (await deviceA.register('initprefs@example.test', 'StrongPass123!', 'StrongPass123!')).ok,
+    ).toBe(true);
+    expect(await deviceA.syncNow()).toEqual({ ok: true });
+    expect(appliedOnA).toHaveLength(0);
+
+    // Device B signs in with default prefs and syncs -> receives Device A's seed ONCE
+    nowMs += 5_000;
+    deviceB.setSyncablePreferences({ themePreset: 'obsidianCrimson', locale: 'en' });
+    expect(await deviceB.signIn('initprefs@example.test', 'StrongPass123!')).toEqual({ ok: true });
+    expect(await deviceB.syncNow()).toEqual({ ok: true });
+    expect(appliedOnB).toHaveLength(1);
+    expect(appliedOnB[0]).toEqual({
+      themePreset: 'midnightGold',
+      locale: 'tr',
+      fontScale: 1.1,
+    });
+
+    // Device A later changes theme and syncs again
+    nowMs += 5_000;
+    deviceA.setSyncablePreferences({ themePreset: 'auroraBlue', locale: 'de' });
+    expect(await deviceA.syncNow()).toEqual({ ok: true });
+
+    // Device B syncs again -> MUST NOT overwrite local preferences a second time
+    nowMs += 5_000;
+    expect(await deviceB.syncNow()).toEqual({ ok: true });
+    expect(appliedOnB).toHaveLength(1);
+
+    // Even after restart of Device B, persisted flag prevents re-applying
+    const deviceBRestarted = createDesktopSyncService({
+      secretStore: secretsB.reopen(),
+      platform: 'desktop-darwin',
+      appVersion: '1.0.0',
+      initialServerUrl: 'https://sync.example.test',
+      fetchFn: server.fetchFn,
+      clock: { now: () => nowMs + 5_000 },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+      onInitialPreferences: (patch) => {
+        appliedOnB.push(patch);
+      },
+    });
+    await deviceBRestarted.hydrate();
+    expect(await deviceBRestarted.syncNow()).toEqual({ ok: true });
+    expect(appliedOnB).toHaveLength(1);
+
+    deviceBRestarted.dispose();
+    deviceA.dispose();
+    deviceB.dispose();
+  });
+
+  it('marks pre-Wave-P4 hydrated sessions as initialPrefs-applied so upgrades never overwrite local preferences (P1-1)', async () => {
+    const server = makeMockServer();
+    const secretsA = makeSecretStore();
+    const secretsUpgraded = makeSecretStore();
+    const appliedOnUpgraded: unknown[] = [];
+    const nowMs = 1_700_000_000_000;
+
+    const deviceA = createDesktopSyncService({
+      secretStore: secretsA.store,
+      platform: 'desktop-win32',
+      appVersion: '1.0.0',
+      initialServerUrl: 'https://sync.example.test',
+      fetchFn: server.fetchFn,
+      clock: { now: () => nowMs },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+    });
+    deviceA.setSyncablePreferences({ themePreset: 'midnightGold', locale: 'tr', fontScale: 1.2 });
+    expect(
+      (await deviceA.register('upgrade@example.test', 'StrongPass123!', 'StrongPass123!')).ok,
+    ).toBe(true);
+    expect(await deviceA.syncNow()).toEqual({ ok: true });
+
+    // Simulate existing pre-Wave-P4 device that signed in and synced before Wave P4 existed:
+    // perform signIn + syncNow, then delete initialPrefsAppliedKey to emulate pre-Wave-P4 storage.
+    const preUpgrade = createDesktopSyncService({
+      secretStore: secretsUpgraded.store,
+      platform: 'desktop-darwin',
+      appVersion: '1.0.0',
+      initialServerUrl: 'https://sync.example.test',
+      fetchFn: server.fetchFn,
+      clock: { now: () => nowMs + 1_000 },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+    });
+    expect(await preUpgrade.signIn('upgrade@example.test', 'StrongPass123!')).toEqual({ ok: true });
+    expect(await preUpgrade.syncNow()).toEqual({ ok: true });
+    preUpgrade.dispose();
+
+    const persistedRaw = await secretsUpgraded.store.get(SESSION_SECRET_KEY);
+    expect(persistedRaw).toBeDefined();
+    const parsed = JSON.parse(persistedRaw as string) as { userId: string };
+    await secretsUpgraded.store.delete(initialPrefsAppliedKey(parsed.userId));
+
+    // Device upgrades to Wave P4, hydrates persisted session, and syncs -> MUST NOT apply remote initialPreferences
+    const upgraded = createDesktopSyncService({
+      secretStore: secretsUpgraded.reopen(),
+      platform: 'desktop-darwin',
+      appVersion: '1.1.0',
+      initialServerUrl: 'https://sync.example.test',
+      fetchFn: server.fetchFn,
+      clock: { now: () => nowMs + 5_000 },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+      onInitialPreferences: (patch) => {
+        appliedOnUpgraded.push(patch);
+      },
+    });
+    await upgraded.hydrate();
+    expect(await upgraded.syncNow()).toEqual({ ok: true });
+    expect(appliedOnUpgraded).toHaveLength(0);
+
+    upgraded.dispose();
+    deviceA.dispose();
   });
 });

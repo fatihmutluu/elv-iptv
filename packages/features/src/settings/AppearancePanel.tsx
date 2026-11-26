@@ -38,6 +38,7 @@ import {
   UI_FONT_OPTIONS,
 } from './appearance-controls';
 import { DiagnosticsSettingsCard } from './DiagnosticsSettingsCard';
+import { HomeLayoutEditor } from './HomeLayoutEditor';
 import { SettingsDivider, SettingsToggleRow } from './SettingsRowParts';
 import { ThemePresetGrid } from './ThemePresetGrid';
 import { TvDisplaySettingsCard } from './TvDisplaySettingsCard';
@@ -45,6 +46,7 @@ import type { AppearanceFocusId } from './useTvSettingsNavigation';
 
 export {
   activateAppearanceControl,
+  adjustAppearanceControl,
   type SettingsPreferencesController,
 } from './appearance-controls';
 
@@ -92,7 +94,7 @@ export function AppearancePanel({
   const layoutsRef = useRef<
     Partial<
       Record<
-        'theme' | 'font' | 'tvDisplay' | 'artworkCache' | 'reset' | 'diagnostics',
+        'theme' | 'font' | 'tvDisplay' | 'artworkCache' | 'reset' | 'diagnostics' | 'homeLayout',
         SectionLayout
       >
     >
@@ -491,6 +493,16 @@ export function AppearancePanel({
         {...(onPreviewDiagnostics !== undefined ? { onPreviewReport: onPreviewDiagnostics } : {})}
         onLayoutBox={(box) => {
           layoutsRef.current.diagnostics = box;
+        }}
+      />
+
+      <HomeLayoutEditor
+        layout={activePrefs.homeLayout}
+        focusedControlId={focusedControlId}
+        isTv={isTv}
+        onChange={(nextLayout) => applyPatch({ homeLayout: nextLayout })}
+        onLayoutBox={(box) => {
+          layoutsRef.current.homeLayout = box;
         }}
       />
     </ScrollView>

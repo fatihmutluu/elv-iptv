@@ -23,6 +23,7 @@ export {
   CATEGORY_LOAD_BATCH,
   type CatalogNavRowDescriptor,
   type CatalogNavRowId,
+  type CatalogQuickFilter,
   type CatalogRailNavEntry,
   type CatalogTabMemory,
   chunkRowItems,

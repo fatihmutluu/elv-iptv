@@ -327,6 +327,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'year', alterDefinition: 'INTEGER' },
     { name: 'rating', alterDefinition: 'REAL' },
     { name: 'added_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'sort_order', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
   track_preferences: [
     { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
