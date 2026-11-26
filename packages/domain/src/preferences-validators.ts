@@ -104,10 +104,10 @@ export type EpgRowDensity = (typeof EPG_ROW_DENSITIES)[number];
 export type DefaultLiveModePref = 'favorites' | 'channels' | 'epg';
 
 /** User-selectable EPG guide auto-refresh interval in hours (`0` = manual only, `#68`, `#401`). */
-export type GuideRefreshHoursPref = 0 | 6 | 12 | 24;
+export type GuideRefreshHoursPref = 0 | 3 | 6 | 12 | 24 | 48;
 
 /** User-selectable catalog auto-refresh interval in hours (`0` = manual only, `#68`). */
-export type CatalogRefreshHoursPref = 0 | 6 | 12 | 24 | 48;
+export type CatalogRefreshHoursPref = 0 | 3 | 6 | 12 | 24 | 48;
 
 /** User-selectable Live TV channel switch behavior during playback (`#251`). */
 export type LiveChannelSwitchModePref = 'instant' | 'preview';
@@ -116,7 +116,24 @@ export type LiveChannelSwitchModePref = 'instant' | 'preview';
 export type LogoBackdropModePref = 'plate' | 'invert' | 'off';
 
 /** User-selectable on-device artwork cache budget in MiB (`#405`). */
-export type ArtworkCacheLimitMbPref = 64 | 128 | 256;
+export type ArtworkCacheLimitMbPref = 64 | 128 | 256 | 512;
+
+/** Platform form factor used to compute the default on-device artwork cache budget. */
+export type ArtworkCacheFormFactor = 'tv' | 'mobile' | 'desktop';
+
+/** Returns the default on-device artwork cache budget (MiB) for a platform form factor. */
+export function getPlatformDefaultArtworkCacheLimitMb(
+  formFactor: ArtworkCacheFormFactor,
+): ArtworkCacheLimitMbPref {
+  switch (formFactor) {
+    case 'desktop':
+      return 512;
+    case 'mobile':
+      return 256;
+    default:
+      return 128;
+  }
+}
 
 /** Extended playback, Live TV, guide, and artwork cache preference fields. */
 export interface ExtendedPreferencesFields
@@ -190,11 +207,11 @@ const SEEK_STEP_SECS: readonly SeekStepSecPref[] = [5, 10, 15, 30];
 const DEFAULT_RESIZE_MODES: readonly DefaultResizeModePref[] = ['fit', 'fill', 'stretch'];
 const EPG_TIME_SPAN_HOURS: readonly EpgTimeSpanHoursPref[] = [2, 3, 6];
 const DEFAULT_LIVE_MODES: readonly DefaultLiveModePref[] = ['favorites', 'channels', 'epg'];
-const GUIDE_REFRESH_HOURS: readonly GuideRefreshHoursPref[] = [0, 6, 12, 24];
-const CATALOG_REFRESH_HOURS: readonly CatalogRefreshHoursPref[] = [0, 6, 12, 24, 48];
+const GUIDE_REFRESH_HOURS: readonly GuideRefreshHoursPref[] = [0, 3, 6, 12, 24, 48];
+const CATALOG_REFRESH_HOURS: readonly CatalogRefreshHoursPref[] = [0, 3, 6, 12, 24, 48];
 const LIVE_CHANNEL_SWITCH_MODES: readonly LiveChannelSwitchModePref[] = ['instant', 'preview'];
 const LOGO_BACKDROP_MODES: readonly LogoBackdropModePref[] = ['plate', 'invert', 'off'];
-const ARTWORK_CACHE_LIMITS_MB: readonly ArtworkCacheLimitMbPref[] = [64, 128, 256];
+const ARTWORK_CACHE_LIMITS_MB: readonly ArtworkCacheLimitMbPref[] = [64, 128, 256, 512];
 
 export function clampFontScale(value: number): number {
   return Math.min(MAX_PREF_FONT_SCALE, Math.max(MIN_PREF_FONT_SCALE, value));
@@ -333,7 +350,8 @@ function isLogoBackdropModePref(value: unknown): value is LogoBackdropModePref {
   return typeof value === 'string' && (LOGO_BACKDROP_MODES as readonly string[]).includes(value);
 }
 
-function isArtworkCacheLimitMbPref(value: unknown): value is ArtworkCacheLimitMbPref {
+/** Returns true when `value` is a supported {@link ArtworkCacheLimitMbPref}. */
+export function isArtworkCacheLimitMbPref(value: unknown): value is ArtworkCacheLimitMbPref {
   return (
     typeof value === 'number' && (ARTWORK_CACHE_LIMITS_MB as readonly number[]).includes(value)
   );

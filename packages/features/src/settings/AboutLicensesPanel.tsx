@@ -1,4 +1,4 @@
-import { MicroPill, Surface, useI18n, useTheme, useViewport } from '@elv/ui-kit';
+import { Surface, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import type { ReactElement, ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -9,7 +9,7 @@ export interface AboutLicensesPanelProps {
 }
 
 /**
- * Cinema Quietude About & Licenses settings section: compact license/privacy summary card paired
+ * Cinema Quietude About & Licenses settings section: compact summary card paired
  * with the embedded offline Third-Party Notices browser (`flex: 1`).
  */
 export function AboutLicensesPanel({ children }: AboutLicensesPanelProps): ReactElement {
@@ -37,11 +37,6 @@ export function AboutLicensesPanel({ children }: AboutLicensesPanelProps): React
           >
             {i18n.t('settings.about.title')}
           </Text>
-          <MicroPill
-            testID="settings-about-license-badge"
-            tone="accent"
-            label={i18n.t('settings.about.licenseBadge')}
-          />
         </View>
         <Text
           numberOfLines={compactHeight ? 2 : undefined}

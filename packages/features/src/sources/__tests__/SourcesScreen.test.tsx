@@ -59,6 +59,7 @@ describe('SourcesScreen (#71)', () => {
         </FormFactorProvider>,
       );
 
+      await fireEvent.press(screen.getByTestId('sources-mode-xtream'));
       await fireEvent.changeText(
         screen.getByTestId('sources-input-server'),
         'http://sim.example.test:7878',
@@ -139,6 +140,7 @@ describe('SourcesScreen (#71)', () => {
       );
 
       // 1. Missing scheme (pre-import validation)
+      await fireEvent.press(screen.getByTestId('sources-mode-xtream'));
       await fireEvent.changeText(
         screen.getByTestId('sources-input-server'),
         'panel.example.test:8080',
@@ -150,6 +152,7 @@ describe('SourcesScreen (#71)', () => {
       expect(missingSchemeEn).toContain('http://');
 
       // 2. Wrong credentials -> auth/invalid-credentials
+      await fireEvent.press(screen.getByTestId('sources-mode-xtream'));
       await fireEvent.changeText(
         screen.getByTestId('sources-input-server'),
         'http://sim.example.test:7878',
@@ -229,6 +232,7 @@ describe('SourcesScreen (#71)', () => {
         </FormFactorProvider>,
       );
 
+      await fireEvent.press(screen.getByTestId('sources-mode-xtream'));
       await fireEvent.changeText(
         screen.getByTestId('sources-input-server'),
         'http://sim.example.test:7878',
@@ -273,10 +277,11 @@ describe('SourcesScreen (#71)', () => {
         expect(screen.getByTestId('sources-screen')).toBeTruthy();
         expect(screen.getByTestId(`sources-layout-${ff}`)).toBeTruthy();
         expect(screen.getByTestId('sources-open-menu')).toBeTruthy();
-        expect(screen.getByTestId('sources-mode-xtream')).toBeTruthy();
         expect(screen.getByTestId('sources-mode-m3u')).toBeTruthy();
+        expect(screen.getByTestId('sources-mode-xtream')).toBeTruthy();
+        expect(screen.getByTestId('sources-mode-stalker')).toBeTruthy();
         expect(screen.getByTestId('sources-input-name')).toBeTruthy();
-        expect(screen.getByTestId('sources-input-server')).toBeTruthy();
+        expect(screen.getByTestId('sources-input-playlist-url')).toBeTruthy();
         expect(screen.getByTestId('sources-submit')).toBeTruthy();
         await view.unmount();
       } finally {
@@ -307,20 +312,23 @@ describe('SourcesScreen (#71)', () => {
         </RemoteKeysProvider>,
       );
 
-      // Initial focus starts on first control: sources-mode-xtream (index 0)
-      expect(screen.getByTestId('sources-mode-xtream').props.accessibilityState?.selected).toBe(
-        true,
-      );
+      // Initial focus starts on first control: sources-mode-m3u (index 0)
+      expect(screen.getByTestId('sources-mode-m3u').props.accessibilityState?.selected).toBe(true);
       // Offset outer focus ring renders on tvFocused active mode button (visible over ctaBg)
       const modeRingStyle = StyleSheet.flatten(
-        screen.getByTestId('sources-mode-xtream-focus-ring').props.style,
+        screen.getByTestId('sources-mode-m3u-focus-ring').props.style,
       );
       expect(modeRingStyle.top).toBe(-4);
       expect(modeRingStyle.borderColor).toBe(buildTheme().colors.focusRingColor);
 
-      // Move down to sources-mode-m3u (1) -> sources-mode-stalker (2) -> sources-input-name (3) -> sources-input-server (4)
+      // Switch to Xtream mode (index 1) via D-pad Down + OK, then move to sources-input-server (4)
       await act(async () => {
         remote.tap(KEYCODE_DPAD_DOWN);
+      });
+      await act(async () => {
+        remote.tap(KEYCODE_DPAD_CENTER);
+      });
+      await act(async () => {
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
@@ -440,6 +448,7 @@ describe('SourcesScreen (#71)', () => {
         </FormFactorProvider>,
       );
 
+      await fireEvent.press(screen.getByTestId('sources-mode-xtream'));
       const serverInput = screen.getByTestId('sources-input-server');
       const userInput = screen.getByTestId('sources-input-username');
       const passInput = screen.getByTestId('sources-input-password');

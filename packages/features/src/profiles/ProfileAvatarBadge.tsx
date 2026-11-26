@@ -1,11 +1,18 @@
 import type { ProfileAvatarToken } from '@elv/data';
-import { useI18n, useTheme } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { getProfileInitials, resolveProfileAvatarColors } from './avatar-palette';
+import {
+  type IconShape,
+  type IconSpec,
+  renderNativeVectorSpec,
+  useI18n,
+  useTheme,
+  useUiAdapters,
+} from '@elv/ui-kit';
+import { createElement, type ReactElement } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+import { getProfileAvatarPreset, resolveProfileAvatarColors } from './avatar-palette';
 
 /** Size variant for {@link ProfileAvatarBadge}. */
-export type ProfileAvatarSize = 'sm' | 'md' | 'lg';
+export type ProfileAvatarSize = 'sm' | 'md' | 'lg' | 'xl';
 
 /** Props of {@link ProfileAvatarBadge}. */
 export interface ProfileAvatarBadgeProps {
@@ -18,17 +25,112 @@ export interface ProfileAvatarBadgeProps {
   readonly testID?: string;
 }
 
-const SIZE_MAP: Readonly<
-  Record<ProfileAvatarSize, { readonly box: number; readonly font: number }>
-> = {
-  sm: { box: 28, font: 11.5 },
-  md: { box: 42, font: 15 },
-  lg: { box: 64, font: 22 },
+interface AvatarDimensions {
+  readonly box: number;
+  readonly art: number;
+  readonly strokeWidth: number;
+}
+
+const SIZE_MAP: Readonly<Record<ProfileAvatarSize, AvatarDimensions>> = {
+  sm: { box: 28, art: 19, strokeWidth: 1.75 },
+  md: { box: 44, art: 30, strokeWidth: 1.65 },
+  lg: { box: 68, art: 46, strokeWidth: 1.55 },
+  xl: { box: 112, art: 74, strokeWidth: 1.45 },
 };
 
+function renderWebVectorShape(shape: IconShape, key: number, filled: boolean, strokeWidth: number) {
+  const fill = shape.fill ?? (filled ? 'currentColor' : 'none');
+  const stroke = fill === 'currentColor' ? 'none' : 'currentColor';
+  const sw = shape.strokeWidth ?? strokeWidth;
+
+  if (shape.kind === 'path') {
+    return createElement('path', { key, d: shape.d, fill, stroke, strokeWidth: sw });
+  }
+  if (shape.kind === 'circle') {
+    return createElement('circle', {
+      key,
+      cx: shape.cx,
+      cy: shape.cy,
+      r: shape.r,
+      fill,
+      stroke,
+      strokeWidth: sw,
+    });
+  }
+  return createElement('rect', {
+    key,
+    x: shape.x,
+    y: shape.y,
+    width: shape.width,
+    height: shape.height,
+    rx: shape.rx,
+    fill,
+    stroke,
+    strokeWidth: sw,
+  });
+}
+
 /**
- * Circular Cinema Quietude v2 profile monogram badge (`#15`).
- * Derives every color dynamically from `theme` and `THEME_PRESETS` with zero hardcoded hex values.
+ * Renders any 24x24 {@link IconSpec} via `UiAdapters.renderSvg` when provided, inline `<svg>` on web,
+ * or `@elv/ui-kit`'s native vector geometry renderer on iOS, iPadOS, tvOS, Android, Android TV, and Fire OS.
+ */
+export function VectorSpecGraphic({
+  spec,
+  size,
+  color,
+  strokeWidth = 1.65,
+  testID,
+}: {
+  readonly spec: IconSpec;
+  readonly size: number;
+  readonly color: string;
+  readonly strokeWidth?: number;
+  readonly testID?: string;
+}): ReactElement {
+  const adapters = useUiAdapters();
+
+  if (adapters.renderSvg) {
+    return (
+      <View testID={testID} style={[styles.vectorBox, { width: size, height: size }]}>
+        {adapters.renderSvg({ spec, size, color, strokeWidth })}
+      </View>
+    );
+  }
+
+  if (Platform.OS === 'web') {
+    const filled = Boolean(spec.filled);
+    return (
+      <View testID={testID} style={[styles.vectorBox, { width: size, height: size }]}>
+        {createElement(
+          'svg',
+          {
+            width: size,
+            height: size,
+            viewBox: spec.viewBox,
+            fill: filled ? 'currentColor' : 'none',
+            stroke: filled ? 'none' : 'currentColor',
+            strokeWidth,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+            style: { color, display: 'block' },
+            'aria-hidden': true,
+          },
+          spec.shapes.map((shape, idx) => renderWebVectorShape(shape, idx, filled, strokeWidth)),
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <View testID={testID} style={[styles.vectorBox, { width: size, height: size }]}>
+      {renderNativeVectorSpec({ spec, size, color, strokeWidth })}
+    </View>
+  );
+}
+
+/**
+ * Circular Cinema Quietude v2 illustrated local profile avatar (`#15`, `#506`).
+ * Renders 9 distinct circular vector character motifs derived from theme tokens with zero hardcoded hex.
  */
 export function ProfileAvatarBadge({
   name,
@@ -42,12 +144,13 @@ export function ProfileAvatarBadge({
   const theme = useTheme();
   const i18n = useI18n();
   const dims = SIZE_MAP[size];
+  const preset = getProfileAvatarPreset(avatarToken);
   const colors = resolveProfileAvatarColors(avatarToken, theme);
-  const initials = getProfileInitials(name);
 
   return (
-    <View testID={testID} style={styles.wrap}>
+    <View testID={testID} accessibilityLabel={name} style={styles.wrap}>
       <View
+        testID={testID ? `${testID}-circle` : undefined}
         style={[
           styles.circle,
           {
@@ -55,26 +158,18 @@ export function ProfileAvatarBadge({
             height: dims.box,
             borderRadius: theme.radius.pill,
             backgroundColor: colors.bg,
-            borderWidth: active ? 2 : 1,
+            borderWidth: active ? (size === 'xl' ? 3 : 2) : 1,
             borderColor: active ? theme.colors.focusRingColor : theme.colors.glassBorder,
           },
         ]}
       >
-        <Text
-          numberOfLines={1}
-          style={[
-            styles.initials,
-            {
-              fontSize: Math.round(dims.font * theme.fontScale),
-              color: colors.fg,
-              ...(theme.typography.title.fontFamily
-                ? { fontFamily: theme.typography.title.fontFamily }
-                : {}),
-            },
-          ]}
-        >
-          {initials}
-        </Text>
+        <VectorSpecGraphic
+          spec={preset.artwork}
+          size={dims.art}
+          color={colors.fg}
+          strokeWidth={dims.strokeWidth}
+          testID={testID ? `${testID}-art-${avatarToken}` : undefined}
+        />
       </View>
 
       {isKids && showKidsPill ? (
@@ -107,10 +202,11 @@ const styles = StyleSheet.create({
   circle: {
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  initials: {
-    fontWeight: '700',
-    letterSpacing: 0.4,
+  vectorBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   kidsPill: {
     marginTop: -8,

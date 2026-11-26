@@ -189,6 +189,7 @@ describe('AppShell', () => {
       expect(screen.queryByTestId('nav-tab-sources')).toBeNull();
       expect(screen.queryByTestId('nav-tab-notices')).toBeNull();
 
+      await fireEvent.press(screen.getByTestId('sources-mode-xtream'));
       await fireEvent.changeText(
         screen.getByTestId('sources-input-server'),
         'http://sim.example.test:8080',
@@ -201,8 +202,11 @@ describe('AppShell', () => {
       await fireEvent.press(screen.getByTestId('sources-submit'));
 
       await waitFor(() => {
-        expect(screen.getByTestId('sources-open-menu')).toBeTruthy();
+        expect(screen.getByTestId('source-row-src-1')).toBeTruthy();
+        expect(screen.getByTestId('source-advanced-src-1')).toBeTruthy();
       });
+      // Redundant "Browse catalog" button is suppressed when SourcesScreen is embedded in Settings
+      expect(screen.queryByTestId('sources-open-menu')).toBeNull();
 
       await fireEvent.press(screen.getByTestId('nav-tab-home'));
       await waitFor(() => {
@@ -371,6 +375,7 @@ describe('AppShell', () => {
       await fireEvent.press(screen.getByTestId('settings-tab-appearance'));
       expect(screen.getByTestId('settings-panel-appearance')).toBeTruthy();
 
+      await fireEvent.press(screen.getByTestId('settings-language-dropdown'));
       await fireEvent.press(screen.getByTestId('settings-lang-tr'));
       await waitFor(() => {
         expect(screen.getByTestId('nav-tab-home')).toHaveTextContent('Ana Sayfa');
@@ -378,6 +383,7 @@ describe('AppShell', () => {
         expect(screen.getByTestId('nav-tab-settings').props.accessibilityLabel).toBe('Ayarlar');
       });
 
+      await fireEvent.press(screen.getByTestId('settings-language-dropdown'));
       await fireEvent.press(screen.getByTestId('settings-lang-en'));
       await waitFor(() => {
         expect(screen.getByTestId('nav-tab-home')).toHaveTextContent('Home');
@@ -536,11 +542,14 @@ describe('AppShell', () => {
             keyListener?.({ action: 'up', keyCode: 21, canceled: false, ageMs: 50 });
           });
           expect(screen.getByTestId('nav-tab-search').props.accessibilityState.selected).toBe(true);
+          // Right x3 moves Search -> Settings -> Profile utility -> wraps around to Home
           await act(async () => {
             keyListener?.({ action: 'down', keyCode: 22, canceled: false, ageMs: 60 });
             keyListener?.({ action: 'up', keyCode: 22, canceled: false, ageMs: 70 });
             keyListener?.({ action: 'down', keyCode: 22, canceled: false, ageMs: 80 });
             keyListener?.({ action: 'up', keyCode: 22, canceled: false, ageMs: 90 });
+            keyListener?.({ action: 'down', keyCode: 22, canceled: false, ageMs: 100 });
+            keyListener?.({ action: 'up', keyCode: 22, canceled: false, ageMs: 110 });
           });
           expect(screen.getByTestId('nav-tab-home').props.accessibilityState.selected).toBe(true);
         }

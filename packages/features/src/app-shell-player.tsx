@@ -10,6 +10,8 @@ import type { PlaybackGuard } from './ports/playback-guard';
 import type { AdoptedPlaybackSession, ThermalDevicePort, VideoHost } from './ports/video-host';
 import { CrashRecoveryBoundary, type PreferencesContextValue } from './shell';
 
+const EMPTY_AUDIO_DELAY_BY_REFRESH_RATE = Object.freeze({});
+
 /** Props of {@link AppShellPlayerView}. */
 interface AppShellPlayerViewProps {
   readonly catalog: CatalogService;
@@ -83,12 +85,7 @@ function AppShellPlayerView({
       onPersistVolume={(playerVolume) => {
         void preferences.updatePreferences({ playerVolume });
       }}
-      autoSubtitlesOnSkipBack={prefs.autoSubtitlesOnSkipBack}
-      onToggleAutoSubtitlesOnSkipBack={() => {
-        void preferences.updatePreferences({
-          autoSubtitlesOnSkipBack: !prefs.autoSubtitlesOnSkipBack,
-        });
-      }}
+      autoSubtitlesOnSkipBack={false}
       autoPlayNextEpisode={prefs.autoPlayNextEpisode}
       onToggleAutoPlayNextEpisode={() => {
         void preferences.updatePreferences({ autoPlayNextEpisode: !prefs.autoPlayNextEpisode });
@@ -120,13 +117,13 @@ function AppShellPlayerView({
       onPersistSleepTimerAction={(sleepTimerDefaultAction) => {
         void preferences.updatePreferences({ sleepTimerDefaultAction });
       }}
-      stillWatchingTimeoutMin={prefs.stillWatchingTimeoutMin}
+      stillWatchingTimeoutMin={0}
       onPlaybackActiveChange={onPlaybackActiveChange}
       preferredAudioDevice={prefs.preferredAudioDevice}
       onPersistAudioDevice={(preferredAudioDevice) => {
         void preferences.updatePreferences({ preferredAudioDevice });
       }}
-      deinterlaceMode={prefs.deinterlaceMode}
+      deinterlaceMode="auto"
       onPersistDeinterlaceMode={(deinterlaceMode) => {
         void preferences.updatePreferences({ deinterlaceMode });
       }}
@@ -141,12 +138,12 @@ function AppShellPlayerView({
       onPersistTrackLanguagePatch={(patch) => {
         void preferences.updatePreferences(patch);
       }}
-      windowAspectRatioLock={prefs.windowAspectRatioLock}
+      windowAspectRatioLock={false}
       backgroundAudioPlayback={prefs.backgroundAudioPlayback}
-      autoFrameRate={prefs.autoFrameRate}
-      autoDynamicRange={prefs.autoDynamicRange}
+      autoFrameRate="seamless"
+      autoDynamicRange={true}
       nightModeDrc={prefs.nightModeDrc}
-      audioDelayByRefreshRateMs={prefs.audioDelayByRefreshRateMs}
+      audioDelayByRefreshRateMs={EMPTY_AUDIO_DELAY_BY_REFRESH_RATE}
       audioPassthrough={prefs.audioPassthrough}
       audioPassthroughCodecs={prefs.audioPassthroughCodecs}
       audioExclusive={prefs.audioExclusive}
@@ -225,7 +222,7 @@ export function AppShellPlayerHost(p: AppShellPlayerHostProps): ReactElement | n
         preferredAudioDevice={prefs.preferredAudioDevice}
         audioNormalization={prefs.audioNormalization}
         pitchLock={prefs.pitchLock}
-        deinterlaceMode={prefs.deinterlaceMode}
+        deinterlaceMode="auto"
         onOnlineStreamActiveChange={modes.onMultiViewOnlineStreamChange}
         onExit={modes.exitMultiView}
       />

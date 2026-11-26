@@ -70,7 +70,11 @@ export {
   createPagedListSource,
   type PagedListSource,
 } from './paged-list-source';
-export { createProfileScopedCatalog } from './profile-scoped-catalog';
+export {
+  createProfileScopedCatalog,
+  filterSourcesForProfile,
+  type ProfileCatalogScope,
+} from './profile-scoped-catalog';
 export {
   type StreamHealthContextValue,
   StreamHealthProvider,

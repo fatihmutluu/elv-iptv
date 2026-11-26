@@ -1,4 +1,10 @@
-import { DEFAULT_PREFERENCES, type PreferencesPatch, type PreferencesSnapshot } from '@elv/domain';
+import {
+  type CatalogRefreshHoursPref,
+  DEFAULT_PREFERENCES,
+  type GuideRefreshHoursPref,
+  type PreferencesPatch,
+  type PreferencesSnapshot,
+} from '@elv/domain';
 import { CtaButton, Surface, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -7,6 +13,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { SettingsPreferencesController } from './appearance-controls';
@@ -17,10 +24,14 @@ import {
   EPG_ROW_DENSITY_OPTIONS,
   EPG_SPAN_OPTIONS,
   GUIDE_REFRESH_OPTIONS,
-  LOGO_BACKDROP_OPTIONS,
 } from './live-tv-controls';
+import { type SettingsDropdownOption, SettingsDropdownRow } from './SettingsDropdownRow';
 import { SettingsDivider, SettingsOptionRow, SettingsToggleRow } from './SettingsRowParts';
 import type { LiveTvFocusId } from './useTvSettingsNavigation';
+
+const REFRESHED_FEEDBACK_MS = 2_500;
+
+type RefreshStatus = 'idle' | 'refreshing' | 'refreshed';
 
 /** Props of {@link LiveTvSettingsPanel}. */
 export interface LiveTvSettingsPanelProps {
@@ -28,21 +39,39 @@ export interface LiveTvSettingsPanelProps {
   readonly preferences?: SettingsPreferencesController;
   /** Currently focused Live TV & Guide control on 10-foot TV D-pad navigation. */
   readonly focusedControlId?: LiveTvFocusId | null;
-  /** Opens the Channel Management & Custom Groups overlay (`#60`). */
-  readonly onOpenChannelManagement?: () => void;
+  /** Triggers an immediate catalog refresh across active sources. */
+  readonly onRefreshCatalogNow?: () => Promise<void> | void;
+  /** Triggers an immediate TV guide (EPG) refresh across active sources. */
+  readonly onRefreshGuideNow?: () => Promise<void> | void;
+  /** Optional controlled TV dropdown modal id owned by `SettingsScreen`. */
+  readonly openTvDropdownId?: 'catalog-refresh-dropdown' | 'guide-refresh-dropdown' | null;
+  /** Invoked when a TV dropdown modal opens or closes. */
+  readonly onOpenTvDropdownChange?: (
+    id: 'catalog-refresh-dropdown' | 'guide-refresh-dropdown' | null,
+  ) => void;
+  /** Optional controlled catalog refresh status owned by `SettingsScreen` (for TV D-pad trigger). */
+  readonly catalogRefreshStatus?: RefreshStatus;
+  /** Optional controlled guide refresh status owned by `SettingsScreen` (for TV D-pad trigger). */
+  readonly guideRefreshStatus?: RefreshStatus;
 }
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
 
 /**
- * Cinema Quietude Live TV & Guide preferences panel (`#401`, `#126`, `#145`):
- * default Live TV sub-mode, EPG time window, genre tints, live clock, refresh interval,
- * channel logo readability backdrop, source badges, two-step OK preview, and title cleanup.
+ * Cinema Quietude Live TV & Guide preferences panel:
+ * default Live TV sub-mode, EPG time window, EPG row density, live guide clock,
+ * Catalog & Guide refresh interval dropdowns (`3–48 h`) with adjacent "Refresh now" actions,
+ * and TV-only `CH+/CH-` channel switch mode.
  */
 export function LiveTvSettingsPanel({
   preferences: suppliedPrefs,
   focusedControlId = null,
-  onOpenChannelManagement,
+  onRefreshCatalogNow,
+  onRefreshGuideNow,
+  openTvDropdownId = null,
+  onOpenTvDropdownChange,
+  catalogRefreshStatus: controlledCatalogStatus,
+  guideRefreshStatus: controlledGuideStatus,
 }: LiveTvSettingsPanelProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -50,7 +79,26 @@ export function LiveTvSettingsPanel({
   const isTv = viewport.formFactor === 'tv';
 
   const scrollRef = useRef<ScrollViewHandle | null>(null);
-  const cardYRef = useRef<Partial<Record<'guide' | 'display', number>>>({});
+  const cardYRef = useRef<Partial<Record<'guide' | 'tvRemote', number>>>({});
+  const mountedRef = useRef(true);
+  const catalogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const guideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [localCatalogStatus, setLocalCatalogStatus] = useState<RefreshStatus>('idle');
+  const [localGuideStatus, setLocalGuideStatus] = useState<RefreshStatus>('idle');
+  const [openPopover, setOpenPopover] = useState<'catalog' | 'guide' | null>(null);
+
+  const catalogStatus = controlledCatalogStatus ?? localCatalogStatus;
+  const guideStatus = controlledGuideStatus ?? localGuideStatus;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (catalogTimerRef.current !== null) clearTimeout(catalogTimerRef.current);
+      if (guideTimerRef.current !== null) clearTimeout(guideTimerRef.current);
+    };
+  }, []);
 
   const activePrefs: PreferencesSnapshot = suppliedPrefs?.preferences ?? DEFAULT_PREFERENCES;
 
@@ -61,25 +109,63 @@ export function LiveTvSettingsPanel({
     [suppliedPrefs],
   );
 
+  const handleRefreshCatalog = useCallback(() => {
+    if (catalogStatus === 'refreshing') return;
+    if (controlledCatalogStatus !== undefined) {
+      void onRefreshCatalogNow?.();
+      return;
+    }
+    setLocalCatalogStatus('refreshing');
+    if (catalogTimerRef.current !== null) {
+      clearTimeout(catalogTimerRef.current);
+      catalogTimerRef.current = null;
+    }
+    void Promise.resolve(onRefreshCatalogNow?.())
+      .catch(() => undefined)
+      .finally(() => {
+        if (!mountedRef.current) return;
+        setLocalCatalogStatus('refreshed');
+        catalogTimerRef.current = setTimeout(() => {
+          catalogTimerRef.current = null;
+          if (mountedRef.current) setLocalCatalogStatus('idle');
+        }, REFRESHED_FEEDBACK_MS);
+      });
+  }, [catalogStatus, controlledCatalogStatus, onRefreshCatalogNow]);
+
+  const handleRefreshGuide = useCallback(() => {
+    if (guideStatus === 'refreshing') return;
+    if (controlledGuideStatus !== undefined) {
+      void onRefreshGuideNow?.();
+      return;
+    }
+    setLocalGuideStatus('refreshing');
+    if (guideTimerRef.current !== null) {
+      clearTimeout(guideTimerRef.current);
+      guideTimerRef.current = null;
+    }
+    void Promise.resolve(onRefreshGuideNow?.())
+      .catch(() => undefined)
+      .finally(() => {
+        if (!mountedRef.current) return;
+        setLocalGuideStatus('refreshed');
+        guideTimerRef.current = setTimeout(() => {
+          guideTimerRef.current = null;
+          if (mountedRef.current) setLocalGuideStatus('idle');
+        }, REFRESHED_FEEDBACK_MS);
+      });
+  }, [controlledGuideStatus, guideStatus, onRefreshGuideNow]);
+
   useEffect(() => {
     if (!isTv || !focusedControlId) return;
     let targetY: number | undefined;
-    if (
-      focusedControlId.startsWith('live-mode-') ||
-      focusedControlId.startsWith('epg-span-') ||
-      focusedControlId.startsWith('epg-density-') ||
-      focusedControlId === 'toggle-epg-genre-tints' ||
-      focusedControlId === 'toggle-epg-show-clock' ||
-      focusedControlId.startsWith('catalog-refresh-') ||
-      focusedControlId.startsWith('guide-refresh-')
-    ) {
-      targetY = focusedControlId.startsWith('live-mode-')
-        ? 0
-        : cardYRef.current.guide !== undefined
-          ? Math.max(0, cardYRef.current.guide - 12)
-          : 0;
-    } else if (cardYRef.current.display !== undefined) {
-      targetY = Math.max(0, cardYRef.current.display - 12);
+    if (focusedControlId.startsWith('live-mode-')) {
+      targetY = 0;
+    } else if (focusedControlId.startsWith('channel-switch-')) {
+      if (cardYRef.current.tvRemote !== undefined) {
+        targetY = Math.max(0, cardYRef.current.tvRemote - 12);
+      }
+    } else if (cardYRef.current.guide !== undefined) {
+      targetY = Math.max(0, cardYRef.current.guide - 12);
     }
     if (targetY !== undefined) {
       scrollRef.current?.scrollTo({ y: targetY, animated: !theme.reduceMotion });
@@ -119,29 +205,21 @@ export function LiveTvSettingsPanel({
     [i18n],
   );
 
-  const catalogRefreshOptions = useMemo(
+  const catalogRefreshOptions = useMemo<readonly SettingsDropdownOption<CatalogRefreshHoursPref>[]>(
     () =>
       CATALOG_REFRESH_OPTIONS.map((opt) => ({
         value: opt.hours,
-        label:
-          opt.hours === 0
-            ? i18n.t('settings.liveTv.refreshManualOnly')
-            : i18n.t('settings.liveTv.refreshHours', { hours: opt.hours }),
-        focusId: opt.focusId,
+        label: i18n.t('settings.liveTv.refreshHours', { hours: opt.hours }),
         testID: opt.testID,
       })),
     [i18n],
   );
 
-  const guideRefreshOptions = useMemo(
+  const guideRefreshOptions = useMemo<readonly SettingsDropdownOption<GuideRefreshHoursPref>[]>(
     () =>
       GUIDE_REFRESH_OPTIONS.map((opt) => ({
         value: opt.hours,
-        label:
-          opt.hours === 0
-            ? i18n.t('settings.liveTv.refreshManualOnly')
-            : i18n.t('settings.liveTv.guideRefreshHours', { hours: opt.hours }),
-        focusId: opt.focusId,
+        label: i18n.t('settings.liveTv.guideRefreshHours', { hours: opt.hours }),
         testID: opt.testID,
       })),
     [i18n],
@@ -158,16 +236,12 @@ export function LiveTvSettingsPanel({
     [i18n],
   );
 
-  const logoBackdropOptions = useMemo(
-    () =>
-      LOGO_BACKDROP_OPTIONS.map((opt) => ({
-        value: opt.value,
-        label: i18n.t(opt.labelKey),
-        focusId: opt.focusId,
-        testID: opt.testID,
-      })),
-    [i18n],
-  );
+  const refreshLabel = (status: RefreshStatus): string =>
+    status === 'refreshing'
+      ? i18n.t('settings.liveTv.refreshing')
+      : status === 'refreshed'
+        ? i18n.t('settings.liveTv.refreshed')
+        : i18n.t('settings.liveTv.refreshNow');
 
   return (
     <ScrollView
@@ -190,7 +264,10 @@ export function LiveTvSettingsPanel({
         tone="surface"
         bordered
         rounded="modal"
-        style={styles.sectionCard}
+        style={[
+          styles.sectionCard,
+          openPopover !== null || openTvDropdownId !== null ? styles.elevatedCard : undefined,
+        ]}
         onLayout={(e) => {
           cardYRef.current.guide = e.nativeEvent.layout.y;
         }}
@@ -230,17 +307,6 @@ export function LiveTvSettingsPanel({
         <SettingsDivider />
 
         <SettingsToggleRow
-          testID="settings-livetv-toggle-epg-genre-tints"
-          title={i18n.t('settings.liveTv.epgGenreTints')}
-          checked={activePrefs.epgGenreTints}
-          focused={focusedControlId === 'toggle-epg-genre-tints'}
-          isTv={isTv}
-          onToggle={() => applyPatch({ epgGenreTints: !activePrefs.epgGenreTints })}
-        />
-
-        <SettingsDivider />
-
-        <SettingsToggleRow
           testID="settings-livetv-toggle-epg-show-clock"
           title={i18n.t('settings.liveTv.epgShowClock')}
           checked={activePrefs.epgShowClock}
@@ -251,129 +317,105 @@ export function LiveTvSettingsPanel({
 
         <SettingsDivider />
 
-        <SettingsOptionRow
+        <SettingsDropdownRow
+          testID="settings-livetv-catalog-refresh-dropdown"
           title={i18n.t('settings.liveTv.catalogRefreshInterval')}
           description={i18n.t('settings.liveTv.catalogRefreshIntervalDesc')}
           options={catalogRefreshOptions}
           selectedValue={activePrefs.catalogRefreshHours}
-          focusedControlId={focusedControlId}
+          {...(activePrefs.catalogRefreshHours === 0
+            ? { fallbackLabel: i18n.t('settings.liveTv.refreshManualOnly') }
+            : {})}
+          focused={focusedControlId === 'catalog-refresh-dropdown'}
           isTv={isTv}
           tabularNums
+          open={
+            isTv && onOpenTvDropdownChange !== undefined
+              ? openTvDropdownId === 'catalog-refresh-dropdown'
+              : openPopover === 'catalog'
+          }
+          onOpenChange={(next) => {
+            if (isTv && onOpenTvDropdownChange !== undefined) {
+              onOpenTvDropdownChange(next ? 'catalog-refresh-dropdown' : null);
+            } else {
+              setOpenPopover((prev) => (next ? 'catalog' : prev === 'catalog' ? null : prev));
+            }
+          }}
           onSelect={(catalogRefreshHours) => applyPatch({ catalogRefreshHours })}
+          accessory={
+            <CtaButton
+              testID="settings-livetv-catalog-refresh-now"
+              variant="secondary"
+              label={refreshLabel(catalogStatus)}
+              disabled={catalogStatus === 'refreshing'}
+              focused={focusedControlId === 'catalog-refresh-now'}
+              focusable={!isTv}
+              onPress={handleRefreshCatalog}
+            />
+          }
         />
 
         <SettingsDivider />
 
-        <SettingsOptionRow
+        <SettingsDropdownRow
+          testID="settings-livetv-guide-refresh-dropdown"
           title={i18n.t('settings.liveTv.guideRefresh')}
           options={guideRefreshOptions}
           selectedValue={activePrefs.guideRefreshHours}
-          focusedControlId={focusedControlId}
+          {...(activePrefs.guideRefreshHours === 0
+            ? { fallbackLabel: i18n.t('settings.liveTv.refreshManualOnly') }
+            : {})}
+          focused={focusedControlId === 'guide-refresh-dropdown'}
           isTv={isTv}
           tabularNums
+          open={
+            isTv && onOpenTvDropdownChange !== undefined
+              ? openTvDropdownId === 'guide-refresh-dropdown'
+              : openPopover === 'guide'
+          }
+          onOpenChange={(next) => {
+            if (isTv && onOpenTvDropdownChange !== undefined) {
+              onOpenTvDropdownChange(next ? 'guide-refresh-dropdown' : null);
+            } else {
+              setOpenPopover((prev) => (next ? 'guide' : prev === 'guide' ? null : prev));
+            }
+          }}
           onSelect={(guideRefreshHours) => applyPatch({ guideRefreshHours })}
+          accessory={
+            <CtaButton
+              testID="settings-livetv-guide-refresh-now"
+              variant="secondary"
+              label={refreshLabel(guideStatus)}
+              disabled={guideStatus === 'refreshing'}
+              focused={focusedControlId === 'guide-refresh-now'}
+              focusable={!isTv}
+              onPress={handleRefreshGuide}
+            />
+          }
         />
       </Surface>
 
-      <Surface
-        tone="surface"
-        bordered
-        rounded="modal"
-        style={styles.sectionCard}
-        onLayout={(e) => {
-          cardYRef.current.display = e.nativeEvent.layout.y;
-        }}
-      >
-        <SettingsOptionRow
-          title={i18n.t('settings.liveTv.channelSwitchMode')}
-          description={i18n.t('settings.liveTv.channelSwitchModeDesc')}
-          options={channelSwitchModeOptions}
-          selectedValue={activePrefs.liveChannelSwitchMode}
-          focusedControlId={focusedControlId}
-          isTv={isTv}
-          onSelect={(liveChannelSwitchMode) => applyPatch({ liveChannelSwitchMode })}
-        />
-
-        <SettingsDivider />
-
-        <SettingsOptionRow
-          title={i18n.t('settings.liveTv.logoBackdrop')}
-          options={logoBackdropOptions}
-          selectedValue={activePrefs.logoBackdropMode}
-          focusedControlId={focusedControlId}
-          isTv={isTv}
-          onSelect={(logoBackdropMode) => applyPatch({ logoBackdropMode })}
-        />
-
-        <SettingsDivider />
-
-        <SettingsToggleRow
-          testID="settings-livetv-toggle-source-badges"
-          title={i18n.t('settings.liveTv.sourceBadges')}
-          checked={activePrefs.showSourceBadges}
-          focused={focusedControlId === 'toggle-source-badges'}
-          isTv={isTv}
-          onToggle={() => applyPatch({ showSourceBadges: !activePrefs.showSourceBadges })}
-        />
-
-        <SettingsDivider />
-
-        <SettingsToggleRow
-          testID="settings-livetv-toggle-two-step-preview"
-          title={i18n.t('settings.liveTv.twoStepPreview')}
-          checked={activePrefs.liveOkTwoStepPreview}
-          focused={focusedControlId === 'toggle-two-step-preview'}
-          isTv={isTv}
-          onToggle={() => applyPatch({ liveOkTwoStepPreview: !activePrefs.liveOkTwoStepPreview })}
-        />
-
-        <SettingsDivider />
-
-        <SettingsToggleRow
-          testID="settings-livetv-toggle-clean-titles"
-          title={i18n.t('settings.liveTv.cleanTitles')}
-          checked={activePrefs.cleanChannelTitles}
-          focused={focusedControlId === 'toggle-clean-titles'}
-          isTv={isTv}
-          onToggle={() => applyPatch({ cleanChannelTitles: !activePrefs.cleanChannelTitles })}
-        />
-
-        <SettingsDivider />
-
-        <SettingsToggleRow
-          testID="settings-livetv-toggle-collapse-variants"
-          title={i18n.t('settings.liveTv.collapseVariants')}
-          description={i18n.t('settings.liveTv.collapseVariantsDesc')}
-          checked={activePrefs.collapseLiveVariants}
-          focused={focusedControlId === 'toggle-collapse-variants'}
-          isTv={isTv}
-          onToggle={() => applyPatch({ collapseLiveVariants: !activePrefs.collapseLiveVariants })}
-        />
-
-        {onOpenChannelManagement !== undefined ? (
-          <>
-            <SettingsDivider />
-            <View style={styles.manageChannelsRow}>
-              <View style={styles.manageChannelsText}>
-                <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
-                  {i18n.t('channels.manage.title')}
-                </Text>
-                <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-                  {i18n.t('channels.manage.subtitle')}
-                </Text>
-              </View>
-              <CtaButton
-                testID="settings-livetv-manage-channels"
-                label={i18n.t('channels.manage.openButton')}
-                variant="secondary"
-                focusable={!isTv}
-                focused={focusedControlId === 'open-channel-management'}
-                onPress={onOpenChannelManagement}
-              />
-            </View>
-          </>
-        ) : null}
-      </Surface>
+      {isTv ? (
+        <Surface
+          tone="surface"
+          bordered
+          rounded="modal"
+          style={styles.sectionCard}
+          onLayout={(e) => {
+            cardYRef.current.tvRemote = e.nativeEvent.layout.y;
+          }}
+        >
+          <SettingsOptionRow
+            title={i18n.t('settings.liveTv.channelSwitchMode')}
+            description={i18n.t('settings.liveTv.channelSwitchModeDesc')}
+            options={channelSwitchModeOptions}
+            selectedValue={activePrefs.liveChannelSwitchMode}
+            focusedControlId={focusedControlId}
+            isTv={isTv}
+            onSelect={(liveChannelSwitchMode) => applyPatch({ liveChannelSwitchMode })}
+          />
+        </Surface>
+      ) : null}
     </ScrollView>
   );
 }
@@ -383,12 +425,5 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 24 },
   headerBlock: { gap: 4 },
   sectionCard: { padding: 18, gap: 14 },
-  manageChannelsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  manageChannelsText: { flex: 1, minWidth: 180, gap: 2 },
+  elevatedCard: { zIndex: 40 },
 });

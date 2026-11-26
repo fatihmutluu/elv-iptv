@@ -1,4 +1,5 @@
 import { createProfilePreferencesManager, type ProfilePreferencesManager } from '@elv/domain';
+import { Platform } from 'react-native';
 import { createDeviceKvBackend } from './kv-backend';
 
 /**
@@ -12,5 +13,8 @@ import { createDeviceKvBackend } from './kv-backend';
  */
 export function createDevicePreferencesStore(): ProfilePreferencesManager {
   const { backend, persistent } = createDeviceKvBackend();
-  return createProfilePreferencesManager(backend, { coalesceMs: persistent ? 500 : 0 });
+  return createProfilePreferencesManager(backend, {
+    coalesceMs: persistent ? 500 : 0,
+    defaultArtworkCacheLimitMb: Platform.isTV ? 128 : 256,
+  });
 }

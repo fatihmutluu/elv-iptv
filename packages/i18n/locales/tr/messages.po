@@ -739,7 +739,7 @@ msgid "settings.about.licenseBadge"
 msgstr "Tescilli · LGPL medya motorları"
 
 msgid "settings.about.statement"
-msgstr "ELV IPTV bağımsız bir IPTV oynatıcısıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz."
+msgstr "ELV IPTV, her ekran için özenle geliştirilmiş %100 ücretsiz, reklamsız ve bağımsız bir IPTV oynatıcısıdır. Hiçbir medya içeriği sunmaz — kendi Xtream, M3U veya Stalker kaynağınızı ekleyin. Sağlayıcı bilgileriniz cihazınızda şifreli saklanır ve katalog veritabanına yazılmaz."
 
 msgid "home.title"
 msgstr "Ana Sayfa"
@@ -1108,7 +1108,7 @@ msgid "player.aspect.fill"
 msgstr "Doldur"
 
 msgid "player.deinterlace"
-msgstr "Taramayı gider"
+msgstr "Deinterlace (Çizgi Düzeltme)"
 
 msgid "desktop.catalogDisconnected.title"
 msgstr "Katalog servisi beklenmedik şekilde durdu"
@@ -1546,7 +1546,7 @@ msgid "settings.playback.preferHevcOverDv"
 msgstr "Dolby Vision yerine HEVC tercih et"
 
 msgid "settings.playback.preferHevcOverDvDesc"
-msgstr "Dolby Vision siyah ekran veya takılma yaparsa standart HEVC’ye düş"
+msgstr "Renk veya siyah ekran sorunu yaşayan cihazlarda Dolby Vision'ı atlayıp doğrudan standart HEVC kullanır."
 
 msgid "settings.playback.filterSdh"
 msgstr "SDH altyazı açıklamalarını filtrele"
@@ -1897,7 +1897,7 @@ msgid "settings.audioNormalization"
 msgstr "Ses seviyesi dengeleme"
 
 msgid "settings.audioNormalizationHint"
-msgstr "EBU R128 ile kısık diyalogları ve yüksek kanalları dengeler"
+msgstr "Kısık diyalogları ve aşırı yüksek kanalları dengeler."
 
 msgid "settings.windowAspectRatioLock"
 msgstr "Pencere en-boy oranını kilitle"
@@ -1942,7 +1942,7 @@ msgid "player.delayReset"
 msgstr "Sıfırla (0 ms)"
 
 msgid "settings.section.profiles"
-msgstr "Profiller ve Ebeveyn"
+msgstr "Çocuk Modu"
 
 msgid "profiles.title"
 msgstr "Profiller"
@@ -2008,7 +2008,7 @@ msgid "profiles.manageInSettings"
 msgstr "Profilleri Ayarlar'dan yönet"
 
 msgid "parental.title"
-msgstr "Ebeveyn Denetimleri"
+msgstr "Çocuk Modu"
 
 msgid "parental.subtitle"
 msgstr "Kategorileri, yetişkin anahtar kelimelerini ve yaş sınırlı programları PIN ile kısıtlayın."
@@ -3269,7 +3269,7 @@ msgid "feedback.messagePlaceholder"
 msgstr "Ne olduğunu veya neyi iyileştirebileceğimizi yazın..."
 
 msgid "feedback.attachDiagnosticsLabel"
-msgstr "Gizlenmiş cihaz ve kodek tanılamalarını ekle"
+msgstr "Kişisel bilgileri temizlenmiş cihaz ve kodek bilgilerini ekle"
 
 msgid "feedback.submitAction"
 msgstr "Geri Bildirim Gönder"
@@ -3715,3 +3715,99 @@ msgstr "Beğeniyi kaldır"
 
 msgid "rating.clearDislike"
 msgstr "Beğenmemeyi kaldır"
+
+msgid "parental.modeDescription"
+msgstr "PIN korumalı kategori kilitleri, yaş sınırları ve otomatik yetişkin anahtar kelime filtresiyle çocuk izleyicileri güvende tutun."
+
+msgid "profiles.whoIsWatching"
+msgstr "Kim İzliyor?"
+
+msgid "profiles.addNew"
+msgstr "Yeni profil"
+
+msgid "profiles.chooseTypeTitle"
+msgstr "Profil türünü seçin"
+
+msgid "profiles.typeAdultTitle"
+msgstr "Standart profil"
+
+msgid "profiles.typeAdultDesc"
+msgstr "Kişisel favoriler, izleme geçmişi ve ayarlarla tam katalog erişimi."
+
+msgid "profiles.typeKidsTitle"
+msgstr "Çocuk profili"
+
+msgid "profiles.typeKidsDesc"
+msgstr "Varsayılan olarak Çocuk Modu, yaş sınırları ve anahtar kelime filtresi açık güvenli izleme deneyimi."
+
+msgid "profiles.editProfileTitle"
+msgstr "Profili düzenle"
+
+msgid "profiles.kidsToggleLabel"
+msgstr "Çocuk Modu"
+
+msgid "profiles.pinManageLabel"
+msgstr "PIN'i yönet"
+
+msgid "profiles.setPinOnCreate"
+msgstr "Bu profil için PIN belirle"
+
+msgid "profiles.deleteProfileAction"
+msgstr "Profili sil"
+
+msgid "profiles.continueAction"
+msgstr "Devam et"
+
+msgid "profiles.cancelAction"
+msgstr "İptal"
+
+msgid "settings.dropdown.selectHint"
+msgstr "Bir seçenek belirleyin"
+
+msgid "settings.artworkCacheUsage"
+msgstr "{limitMb} MB içinden {usedMb} MB kullanılıyor"
+
+msgid "settings.playback.advancedAudioTitle"
+msgstr "Gelişmiş ses"
+
+msgid "settings.playback.advancedAudioDescription"
+msgstr "Çıkış cihazı, kanal düzeni, özel erişim modu ve doğrudan ses aktarımı."
+
+msgid "settings.liveTv.refreshNow"
+msgstr "Şimdi yenile"
+
+msgid "settings.liveTv.refreshing"
+msgstr "Yenileniyor…"
+
+msgid "settings.liveTv.refreshed"
+msgstr "Yenilendi"
+
+msgid "sources.action.refreshShort"
+msgstr "Yenile"
+
+msgid "sources.action.removeShort"
+msgstr "Kaldır"
+
+msgid "sources.action.advanced"
+msgstr "Gelişmiş"
+
+msgid "sources.advanced.title"
+msgstr "Kaynak ayarları"
+
+msgid "sources.advanced.rename"
+msgstr "Kaynağı yeniden adlandır"
+
+msgid "sources.advanced.renamePlaceholder"
+msgstr "Kaynak adını girin"
+
+msgid "sources.advanced.renameSave"
+msgstr "Adı kaydet"
+
+msgid "sources.advanced.sharedProfiles"
+msgstr "Paylaşılan profiller"
+
+msgid "sources.advanced.sharedProfilesHint"
+msgstr "Bu kaynaktaki kanal ve katalog içeriklerini hangi profillerin görebileceğini seçin."
+
+msgid "sources.advanced.allProfilesShared"
+msgstr "Tüm profillerle paylaşılıyor"

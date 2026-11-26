@@ -239,6 +239,10 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       callResult({ method: 'discoverSourceCategories', sourceId }),
     updateSourceSettings: (sourceId, patch) =>
       callValue({ method: 'updateSourceSettings', sourceId, patch }),
+    renameSource: (sourceId, name) =>
+      notifyOnOk(callResult({ method: 'renameSource', sourceId, name })),
+    setSourceExcludedProfiles: (sourceId, excludedProfileIds) =>
+      notifyOnOk(callResult({ method: 'setSourceExcludedProfiles', sourceId, excludedProfileIds })),
     removeSource: (id) => callResult({ method: 'removeSource', id }),
     startImport(id: string, opts?: CatalogBridgeImportOptions): CatalogImportHandle {
       const reqId = ++nextReqId;

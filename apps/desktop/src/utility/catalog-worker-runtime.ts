@@ -391,6 +391,18 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         await checkpointWal(db);
         return undefined;
       }
+      case 'renameSource': {
+        if (!service.renameSource) return err(elvError('storage', 'unsupported'));
+        const res = await service.renameSource(call.sourceId, sanitizeDisplayText(call.name));
+        await checkpointWal(db);
+        return res;
+      }
+      case 'setSourceExcludedProfiles': {
+        if (!service.setSourceExcludedProfiles) return err(elvError('storage', 'unsupported'));
+        const res = await service.setSourceExcludedProfiles(call.sourceId, call.excludedProfileIds);
+        await checkpointWal(db);
+        return res;
+      }
       case 'removeSource': {
         if (!SAFE_SOURCE_ID_RE.test(call.id)) return ok(undefined);
         const res = await service.removeSource(call.id);

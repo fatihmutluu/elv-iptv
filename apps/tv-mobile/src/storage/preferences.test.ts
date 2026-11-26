@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   os: 'ios' as string,
+  isTV: false,
   settingsValues: {} as Record<string, unknown>,
   settingsGet: vi.fn((key: string): unknown => mocks.settingsValues[key]),
   settingsSet: vi.fn((values: Record<string, unknown>) => {
@@ -19,6 +20,9 @@ vi.mock('react-native', () => ({
     get OS() {
       return mocks.os;
     },
+    get isTV() {
+      return mocks.isTV;
+    },
   },
   Settings: {
     get: mocks.settingsGet,
@@ -34,8 +38,19 @@ vi.mock('expo-secure-store', () => ({
 
 import { createDevicePreferencesStore } from './preferences';
 
+const MOBILE_DEFAULT_PREFERENCES = {
+  ...DEFAULT_PREFERENCES,
+  artworkCacheLimitMb: 256,
+};
+
+const TV_DEFAULT_PREFERENCES = {
+  ...DEFAULT_PREFERENCES,
+  artworkCacheLimitMb: 128,
+};
+
 beforeEach(() => {
   mocks.os = 'ios';
+  mocks.isTV = false;
   mocks.settingsValues = {};
   mocks.settingsGet
     .mockReset()
@@ -64,15 +79,21 @@ describe('createDevicePreferencesStore', () => {
 
     it('reads defaults when missing, non-string, or Settings.get throws', async () => {
       const store = createDevicePreferencesStore();
-      expect(await store.load()).toEqual(DEFAULT_PREFERENCES);
+      expect(await store.load()).toEqual(MOBILE_DEFAULT_PREFERENCES);
 
       mocks.settingsValues['elv.preferences.v1'] = 12345;
-      expect(await store.load()).toEqual(DEFAULT_PREFERENCES);
+      expect(await store.load()).toEqual(MOBILE_DEFAULT_PREFERENCES);
 
       mocks.settingsGet.mockImplementationOnce(() => {
         throw new Error('SettingsManager unavailable');
       });
-      expect(await store.load()).toEqual(DEFAULT_PREFERENCES);
+      expect(await store.load()).toEqual(MOBILE_DEFAULT_PREFERENCES);
+    });
+
+    it('defaults artworkCacheLimitMb to 128 on TV form factors', async () => {
+      mocks.isTV = true;
+      const store = createDevicePreferencesStore();
+      expect(await store.load()).toEqual(TV_DEFAULT_PREFERENCES);
     });
 
     it('persists updates via Settings.set and reloads them across instances', async () => {
@@ -92,7 +113,7 @@ describe('createDevicePreferencesStore', () => {
       const second = createDevicePreferencesStore();
       const loaded = await second.load();
       expect(loaded).toEqual({
-        ...DEFAULT_PREFERENCES,
+        ...MOBILE_DEFAULT_PREFERENCES,
         themePreset: 'highContrast',
         locale: 'tr',
         fontScale: 1.15,
@@ -104,9 +125,9 @@ describe('createDevicePreferencesStore', () => {
       const store = createDevicePreferencesStore();
       await store.update({ locale: 'tr' });
       const res = await store.reset();
-      expect(res).toEqual({ ok: true, value: DEFAULT_PREFERENCES });
+      expect(res).toEqual({ ok: true, value: MOBILE_DEFAULT_PREFERENCES });
       expect(mocks.settingsSet).toHaveBeenLastCalledWith({ 'elv.preferences.v1': null });
-      expect(await createDevicePreferencesStore().load()).toEqual(DEFAULT_PREFERENCES);
+      expect(await createDevicePreferencesStore().load()).toEqual(MOBILE_DEFAULT_PREFERENCES);
     });
 
     it('returns storage/preferences-write-failed when Settings.set throws', async () => {
@@ -140,10 +161,10 @@ describe('createDevicePreferencesStore', () => {
 
     it('reads defaults when empty or SecureStore.getItemAsync rejects', async () => {
       const store = createDevicePreferencesStore();
-      expect(await store.load()).toEqual(DEFAULT_PREFERENCES);
+      expect(await store.load()).toEqual(MOBILE_DEFAULT_PREFERENCES);
 
       mocks.getItemAsync.mockRejectedValueOnce(new Error('Keystore locked'));
-      expect(await store.load()).toEqual(DEFAULT_PREFERENCES);
+      expect(await store.load()).toEqual(MOBILE_DEFAULT_PREFERENCES);
     });
 
     it('persists updates via SecureStore and reloads them across instances', async () => {
@@ -159,7 +180,7 @@ describe('createDevicePreferencesStore', () => {
 
       const second = createDevicePreferencesStore();
       expect(await second.load()).toEqual({
-        ...DEFAULT_PREFERENCES,
+        ...MOBILE_DEFAULT_PREFERENCES,
         themePreset: 'midnightCobalt',
         locale: 'en',
         fontScale: 1.1,
@@ -171,7 +192,7 @@ describe('createDevicePreferencesStore', () => {
       const store = createDevicePreferencesStore();
       await store.update({ reduceMotion: true });
       const res = await store.reset();
-      expect(res).toEqual({ ok: true, value: DEFAULT_PREFERENCES });
+      expect(res).toEqual({ ok: true, value: MOBILE_DEFAULT_PREFERENCES });
       expect(mocks.deleteItemAsync).toHaveBeenCalledWith('elv.preferences.v1');
       expect(mocks.secureData.has('elv.preferences.v1')).toBe(false);
     });
@@ -200,15 +221,15 @@ describe('createDevicePreferencesStore', () => {
     it('falls back to in-memory preferences store on unsupported platforms', async () => {
       mocks.os = 'web';
       const store = createDevicePreferencesStore();
-      expect(await store.load()).toEqual(DEFAULT_PREFERENCES);
+      expect(await store.load()).toEqual(MOBILE_DEFAULT_PREFERENCES);
       const updated = await store.update({ locale: 'tr', reduceMotion: true });
       expect(updated.ok).toBe(true);
       expect(await store.load()).toEqual({
-        ...DEFAULT_PREFERENCES,
+        ...MOBILE_DEFAULT_PREFERENCES,
         locale: 'tr',
         reduceMotion: true,
       });
-      expect(await store.reset()).toEqual({ ok: true, value: DEFAULT_PREFERENCES });
+      expect(await store.reset()).toEqual({ ok: true, value: MOBILE_DEFAULT_PREFERENCES });
       expect(mocks.settingsGet).not.toHaveBeenCalled();
       expect(mocks.settingsSet).not.toHaveBeenCalled();
       expect(mocks.getItemAsync).not.toHaveBeenCalled();

@@ -83,6 +83,11 @@ export {
 export * from './search';
 export * from './short-epg-queue';
 export * from './source-link';
+export {
+  MAX_SOURCE_NAME_LENGTH,
+  renameSource,
+  setSourceExcludedProfiles,
+} from './source-mutations';
 export * from './sources';
 export { stalkerKey } from './stalker-secret';
 export * from './stream-resolver';

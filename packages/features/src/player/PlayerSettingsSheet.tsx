@@ -47,7 +47,6 @@ export interface PlayerSettingsSheetProps {
   readonly deinterlaceMode?: DeinterlaceMode;
   readonly pitchLock?: boolean;
   readonly audioNormalization?: boolean;
-  readonly autoSubtitlesOnSkipBack?: boolean;
   readonly autoPlayNextEpisode?: boolean;
   readonly statsVisible: boolean;
   readonly chapters?: readonly ChapterInfo[] | undefined;
@@ -90,7 +89,6 @@ export interface PlayerSettingsSheetProps {
   readonly onCycleDeinterlaceMode?: () => void;
   readonly onTogglePitchLock?: () => void;
   readonly onToggleAudioNormalization?: () => void;
-  readonly onToggleAutoSubtitlesOnSkipBack?: () => void;
   readonly onToggleAutoPlayNextEpisode?: () => void;
   readonly onMinimizeToMiniPlayer?: () => void;
   readonly onEnterPip?: () => void;
@@ -360,20 +358,6 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         role: 'switch',
         accessibilityLabel: i18n.t('settings.audioNormalization'),
         onPress: props.onToggleAudioNormalization,
-      });
-    }
-    if (isVod && props.onToggleAutoSubtitlesOnSkipBack !== undefined) {
-      const on = props.autoSubtitlesOnSkipBack === true;
-      toggles.push({
-        testID: 'player-auto-subtitles-skip-back-toggle',
-        icon: 'subtitles',
-        label: i18n.t('player.autoSubtitlesOnSkipBack'),
-        description: i18n.t('player.settings.desc.autoSubtitlesOnSkipBack'),
-        pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
-        active: on,
-        role: 'switch',
-        accessibilityLabel: i18n.t('player.autoSubtitlesOnSkipBack'),
-        onPress: props.onToggleAutoSubtitlesOnSkipBack,
       });
     }
     if (isVod && props.onToggleAutoPlayNextEpisode !== undefined) {

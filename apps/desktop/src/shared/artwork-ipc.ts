@@ -1,7 +1,7 @@
 /** Minimum user-configurable artwork disk cache ceiling in MiB (`#405`). */
 export const ARTWORK_CACHE_MIN_MB = 64;
 /** Maximum user-configurable artwork disk cache ceiling in MiB (`#405`). */
-export const ARTWORK_CACHE_MAX_MB = 256;
+export const ARTWORK_CACHE_MAX_MB = 512;
 /** Default artwork disk cache ceiling in MiB (`#405`). */
 export const DEFAULT_ARTWORK_CACHE_MB = 128;
 
@@ -66,7 +66,7 @@ export function isArtworkProtocolUrl(x: unknown): x is string {
   return typeof x === 'string' && ARTWORK_PROTOCOL_URL.test(x);
 }
 
-/** Clamps a byte limit to `[64 MiB, 256 MiB]` (defaulting to `128 MiB` on non-finite input). */
+/** Clamps a byte limit to `[64 MiB, 512 MiB]` (defaulting to `128 MiB` on non-finite input). */
 export function clampArtworkCacheLimitBytes(bytes: number): number {
   if (!Number.isFinite(bytes)) return DEFAULT_ARTWORK_CACHE_BYTES;
   const rounded = Math.floor(bytes);

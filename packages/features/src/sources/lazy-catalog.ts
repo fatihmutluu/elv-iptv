@@ -66,6 +66,20 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     updateSourceSettings: async (sourceId, patch) => {
       await (await open()).updateSourceSettings?.(sourceId, patch);
     },
+    renameSource: (sourceId, name) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.renameSource
+          ? cat.renameSource(sourceId, name)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    setSourceExcludedProfiles: (sourceId, excludedProfileIds) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.setSourceExcludedProfiles
+          ? cat.setSourceExcludedProfiles(sourceId, excludedProfileIds)
+          : err(elvError('storage', 'unsupported'));
+      }),
     removeSource: (id) => wrapResult(async () => (await open()).removeSource(id)),
     importSource: (id, opts) => wrapResult(async () => (await open()).importSource(id, opts)),
     importGuide: (id, opts) =>

@@ -1,4 +1,3 @@
-import { DEFAULT_PREFERENCES, type PreferencesPatch } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import {
   createTvRemoteDispatcher,
@@ -8,27 +7,9 @@ import {
   ViewportProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { type ReactElement, useState } from 'react';
-import type { FeedbackPort, FeedbackSubmitInput, TelemetryPort } from '../../ports/wave-f9-ports';
+import type { ReactElement } from 'react';
+import type { FeedbackPort, FeedbackSubmitInput } from '../../ports/wave-f9-ports';
 import { FeedbackSettingsPanel } from '../FeedbackSettingsPanel';
-
-function createMockTelemetry(): jest.Mocked<TelemetryPort> {
-  let optIn = false;
-  return {
-    isOptedIn: jest.fn(() => optIn),
-    setOptIn: jest.fn((enabled: boolean) => {
-      optIn = enabled;
-    }),
-    queuedCount: jest.fn(() => 3),
-    getPayloadPreviewJson: jest.fn(() =>
-      JSON.stringify({ sessionId: 'anon-123', events: [{ kind: 'startup', durationMs: 120 }] }),
-    ),
-    recordScreenTransition: jest.fn(),
-    recordMediaDecodeFailure: jest.fn(),
-    recordPlaybackError: jest.fn(),
-    flush: jest.fn(async () => undefined),
-  };
-}
 
 function createMockFeedback() {
   const submit = jest.fn(
@@ -40,14 +21,7 @@ function createMockFeedback() {
   return { submit };
 }
 
-function Harness({
-  telemetry,
-  feedback,
-}: {
-  readonly telemetry?: TelemetryPort;
-  readonly feedback?: FeedbackPort;
-}): ReactElement {
-  const [telemetryOptIn, setTelemetryOptIn] = useState(DEFAULT_PREFERENCES.telemetryOptIn);
+function Harness({ feedback }: { readonly feedback?: FeedbackPort }): ReactElement {
   return (
     <TvRemoteProvider>
       <ViewportProvider
@@ -61,18 +35,7 @@ function Harness({
       >
         <I18nProvider i18n={createAppI18n('en')}>
           <ThemeProvider>
-            <FeedbackSettingsPanel
-              {...(telemetry !== undefined ? { telemetry } : {})}
-              {...(feedback !== undefined ? { feedback } : {})}
-              preferences={{
-                preferences: { telemetryOptIn },
-                updatePreferences: (patch: PreferencesPatch) => {
-                  if (patch.telemetryOptIn !== undefined) {
-                    setTelemetryOptIn(patch.telemetryOptIn);
-                  }
-                },
-              }}
-            />
+            <FeedbackSettingsPanel {...(feedback !== undefined ? { feedback } : {})} />
           </ThemeProvider>
         </I18nProvider>
       </ViewportProvider>
@@ -81,46 +44,30 @@ function Harness({
 }
 
 describe('FeedbackSettingsPanel', () => {
-  it('defaults telemetry opt-in to false, toggles preference + port, and previews redacted JSON payload', async () => {
-    const telemetry = createMockTelemetry();
+  it('omits the Optional Runtime Telemetry card and defaults attachDiagnostics to true', async () => {
     const feedback = createMockFeedback();
 
-    await render(<Harness telemetry={telemetry} feedback={feedback} />);
+    await render(<Harness feedback={feedback} />);
 
-    const toggle = screen.getByTestId('telemetry-opt-in-toggle');
-    expect(toggle.props.accessibilityState.checked).toBe(false);
-    expect(screen.getByTestId('telemetry-queued-count')).toHaveTextContent('Queued events: 3');
+    expect(screen.queryByTestId('telemetry-settings-card')).toBeNull();
+    expect(screen.queryByTestId('telemetry-opt-in-toggle')).toBeNull();
     expect(screen.queryByTestId('telemetry-payload-preview')).toBeNull();
 
-    // Toggle opt-in ON
-    await fireEvent.press(toggle);
-    expect(telemetry.setOptIn).toHaveBeenCalledWith(true);
-    expect(screen.getByTestId('telemetry-opt-in-toggle').props.accessibilityState.checked).toBe(
-      true,
-    );
-
-    // Open JSON payload preview
-    await fireEvent.press(screen.getByTestId('telemetry-preview-toggle'));
-    expect(screen.getByTestId('telemetry-payload-preview-text')).toHaveTextContent(/anon-123/);
-    expect(screen.getByTestId('telemetry-payload-preview-text')).toHaveTextContent(/startup/);
-
-    // Close preview
-    await fireEvent.press(screen.getByTestId('telemetry-preview-toggle'));
-    expect(screen.queryByTestId('telemetry-payload-preview')).toBeNull();
+    const diagToggle = screen.getByTestId('feedback-attach-diagnostics-toggle');
+    expect(diagToggle.props.accessibilityState.checked).toBe(true);
   });
 
-  it('validates empty feedback message, selects category, attaches diagnostics, and submits', async () => {
-    const telemetry = createMockTelemetry();
+  it('validates empty feedback message, submits with diagnostics ON by default, and allows opting out', async () => {
     const feedback = createMockFeedback();
 
-    await render(<Harness telemetry={telemetry} feedback={feedback} />);
+    await render(<Harness feedback={feedback} />);
 
     // Empty message rejected cleanly
     await fireEvent.press(screen.getByTestId('feedback-submit-btn'));
     expect(screen.getByTestId('feedback-error')).toHaveTextContent(/Please write a brief/);
     expect(feedback.submit).not.toHaveBeenCalled();
 
-    // Pick category + type message + enable redacted diagnostics
+    // Pick category + type message -> diagnostics already ON by default
     await fireEvent.press(screen.getByTestId('feedback-cat-channel_epg'));
     expect(screen.getByTestId('feedback-cat-channel_epg').props.accessibilityState.selected).toBe(
       true,
@@ -129,10 +76,6 @@ describe('FeedbackSettingsPanel', () => {
       screen.getByTestId('feedback-message-input'),
       'EPG timestamps are offset by 1 hour.',
     );
-    await fireEvent.press(screen.getByTestId('feedback-attach-diagnostics-toggle'));
-    expect(
-      screen.getByTestId('feedback-attach-diagnostics-toggle').props.accessibilityState.checked,
-    ).toBe(true);
 
     await fireEvent.press(screen.getByTestId('feedback-submit-btn'));
 
@@ -146,19 +89,31 @@ describe('FeedbackSettingsPanel', () => {
         'Thank you! Your feedback has been received.',
       );
     });
+
+    // User can opt out of diagnostics before submitting again
+    await fireEvent.press(screen.getByTestId('feedback-attach-diagnostics-toggle'));
+    expect(
+      screen.getByTestId('feedback-attach-diagnostics-toggle').props.accessibilityState.checked,
+    ).toBe(false);
+    await fireEvent.changeText(
+      screen.getByTestId('feedback-message-input'),
+      'Another report without logs.',
+    );
+    await fireEvent.press(screen.getByTestId('feedback-submit-btn'));
+    await waitFor(() => {
+      expect(feedback.submit).toHaveBeenLastCalledWith({
+        category: 'channel_epg',
+        message: 'Another report without logs.',
+        includeDiagnostics: false,
+      });
+    });
   });
 
-  it('shows error banner when submission fails and renders static preview when telemetry port is absent', async () => {
+  it('shows error banner when submission fails', async () => {
     const feedback = createMockFeedback();
     feedback.submit.mockResolvedValueOnce({ ok: false, errorCode: 'rate_limited' });
 
     await render(<Harness feedback={feedback} />);
-
-    // Static fallback JSON preview still works
-    await fireEvent.press(screen.getByTestId('telemetry-preview-toggle'));
-    expect(screen.getByTestId('telemetry-payload-preview-text')).toHaveTextContent(
-      /media_decode_failure/,
-    );
 
     await fireEvent.changeText(
       screen.getByTestId('feedback-message-input'),

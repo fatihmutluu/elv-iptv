@@ -1,10 +1,12 @@
 import { DEFAULT_HOME_LAYOUT } from './home-layout';
 import {
+  type ArtworkCacheLimitMbPref,
   type BufferPreset,
   clampFontScale,
   clampPlayerVolume,
   DEFAULT_PREF_OVERSCAN,
   type ExtendedPreferencesFields,
+  isArtworkCacheLimitMbPref,
   isBufferPreset,
   isRecord,
   isValidShortString,
@@ -39,6 +41,7 @@ export {
   type AccessibilityFontFamily,
   ANDROID_DECODER_MODES,
   type AndroidDecoderMode,
+  type ArtworkCacheFormFactor,
   type ArtworkCacheLimitMbPref,
   BUFFER_PRESETS,
   type BufferPreset,
@@ -53,8 +56,10 @@ export {
   type EpgRowDensity,
   type EpgTimeSpanHoursPref,
   type GuideRefreshHoursPref,
+  getPlatformDefaultArtworkCacheLimitMb,
   isAccessibilityFontFamily,
   isAndroidDecoderMode,
+  isArtworkCacheLimitMbPref,
   isDeinterlaceMode,
   isEpgRowDensity,
   isTvClockMode,
@@ -161,15 +166,15 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   oledScreensaverTimeoutMin: 0,
   stillWatchingTimeoutMin: 0,
   sleepTimerDefaultAction: 'stop',
-  epgTimeSpanHours: 3,
-  epgRowDensity: 'comfortable',
-  epgGenreTints: true,
+  epgTimeSpanHours: 6,
+  epgRowDensity: 'cinematic',
+  epgGenreTints: false,
   epgShowClock: true,
   defaultLiveMode: 'favorites',
   guideRefreshHours: 12,
   catalogRefreshHours: 24,
   liveChannelSwitchMode: 'instant',
-  logoBackdropMode: 'plate',
+  logoBackdropMode: 'off',
   showSourceBadges: true,
   liveOkTwoStepPreview: false,
   cleanChannelTitles: false,
@@ -190,7 +195,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   windowAspectRatioLock: false,
   backgroundAudioPlayback: false,
   vodEnrichmentEnabled: false,
-  minimizeToTray: false,
+  minimizeToTray: true,
   autoEnterPip: true,
   ...DEFAULT_WAVE_F7A_PREFERENCES,
   ...DEFAULT_WAVE_F7B_PREFERENCES,
@@ -218,6 +223,11 @@ export interface PreferencesStoreOptions {
    * Defaults to `0` (immediate writes).
    */
   coalesceMs?: number;
+  /**
+   * Optional platform-specific default artwork cache budget (MiB) applied for unstored profiles
+   * and after `reset()` (see {@link getPlatformDefaultArtworkCacheLimitMb}).
+   */
+  defaultArtworkCacheLimitMb?: ArtworkCacheLimitMbPref;
   /** Injectable timer scheduler for deterministic tests (defaults to `globalThis.setTimeout`). */
   setTimeoutFn?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   /** Injectable timer canceller for deterministic tests (defaults to `globalThis.clearTimeout`). */
@@ -238,48 +248,47 @@ export interface PreferencesStore {
  * on missing/invalid JSON, mismatched schema versions, invalid field types, or strings over 64 characters.
  * Clamps `fontScale` to `[MIN_PREF_FONT_SCALE, MAX_PREF_FONT_SCALE]`.
  */
-export function parsePreferences(raw: string | undefined): PreferencesSnapshot {
-  if (raw === undefined || raw === '') return DEFAULT_PREFERENCES;
+export function parsePreferences(
+  raw: string | undefined,
+  defaults: PreferencesSnapshot = DEFAULT_PREFERENCES,
+): PreferencesSnapshot {
+  if (raw === undefined || raw === '') return defaults;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return DEFAULT_PREFERENCES;
+    return defaults;
   }
   if (!isRecord(parsed) || parsed.version !== PREFERENCES_SCHEMA_VERSION) {
-    return DEFAULT_PREFERENCES;
+    return defaults;
   }
   const themePreset = isValidShortString(parsed.themePreset)
     ? parsed.themePreset
-    : DEFAULT_PREFERENCES.themePreset;
-  const locale = isValidShortString(parsed.locale) ? parsed.locale : DEFAULT_PREFERENCES.locale;
+    : defaults.themePreset;
+  const locale = isValidShortString(parsed.locale) ? parsed.locale : defaults.locale;
   const fontScale =
     typeof parsed.fontScale === 'number' && Number.isFinite(parsed.fontScale)
       ? clampFontScale(parsed.fontScale)
-      : DEFAULT_PREFERENCES.fontScale;
+      : defaults.fontScale;
   const reduceMotion =
-    typeof parsed.reduceMotion === 'boolean'
-      ? parsed.reduceMotion
-      : DEFAULT_PREFERENCES.reduceMotion;
+    typeof parsed.reduceMotion === 'boolean' ? parsed.reduceMotion : defaults.reduceMotion;
   const bufferPreset = isBufferPreset(parsed.bufferPreset)
     ? parsed.bufferPreset
-    : DEFAULT_PREFERENCES.bufferPreset;
+    : defaults.bufferPreset;
   const useTextureView =
-    typeof parsed.useTextureView === 'boolean'
-      ? parsed.useTextureView
-      : DEFAULT_PREFERENCES.useTextureView;
+    typeof parsed.useTextureView === 'boolean' ? parsed.useTextureView : defaults.useTextureView;
   const autoSubtitlesOnSkipBack =
     typeof parsed.autoSubtitlesOnSkipBack === 'boolean'
       ? parsed.autoSubtitlesOnSkipBack
-      : DEFAULT_PREFERENCES.autoSubtitlesOnSkipBack;
+      : defaults.autoSubtitlesOnSkipBack;
   const autoPlayNextEpisode =
     typeof parsed.autoPlayNextEpisode === 'boolean'
       ? parsed.autoPlayNextEpisode
-      : DEFAULT_PREFERENCES.autoPlayNextEpisode;
+      : defaults.autoPlayNextEpisode;
   const playerVolume =
     typeof parsed.playerVolume === 'number' && Number.isFinite(parsed.playerVolume)
       ? clampPlayerVolume(parsed.playerVolume)
-      : DEFAULT_PREFERENCES.playerVolume;
+      : defaults.playerVolume;
 
   return Object.freeze({
     version: PREFERENCES_SCHEMA_VERSION,
@@ -292,8 +301,8 @@ export function parsePreferences(raw: string | undefined): PreferencesSnapshot {
     autoSubtitlesOnSkipBack,
     autoPlayNextEpisode,
     playerVolume,
-    ...parseExtendedPreferences(parsed, DEFAULT_PREFERENCES),
-    ...parseWaveF9Preferences(parsed, DEFAULT_PREFERENCES),
+    ...parseExtendedPreferences(parsed, defaults),
+    ...parseWaveF9Preferences(parsed, defaults),
   });
 }
 
@@ -435,8 +444,17 @@ export function createKvPreferencesStore(
       globalThis.clearTimeout(handle);
     });
 
-  let current: PreferencesSnapshot = DEFAULT_PREFERENCES;
-  let committed: PreferencesSnapshot = DEFAULT_PREFERENCES;
+  const baseDefaults: PreferencesSnapshot = isArtworkCacheLimitMbPref(
+    opts?.defaultArtworkCacheLimitMb,
+  )
+    ? Object.freeze({
+        ...DEFAULT_PREFERENCES,
+        artworkCacheLimitMb: opts.defaultArtworkCacheLimitMb,
+      })
+    : DEFAULT_PREFERENCES;
+
+  let current: PreferencesSnapshot = baseDefaults;
+  let committed: PreferencesSnapshot = baseDefaults;
   let hydrated = false;
   let tail: Promise<unknown> = Promise.resolve();
   const listeners = new Set<(snapshot: PreferencesSnapshot) => void>();
@@ -469,7 +487,7 @@ export function createKvPreferencesStore(
   const readFromBackend = async (): Promise<PreferencesSnapshot> => {
     try {
       const raw = await backend.get(key);
-      current = parsePreferences(raw);
+      current = parsePreferences(raw, baseDefaults);
       committed = current;
       hydrated = true;
       return current;
@@ -593,7 +611,7 @@ export function createKvPreferencesStore(
           if (backend.delete !== undefined) {
             await backend.delete(key);
           } else {
-            const encoded = serializePreferences(DEFAULT_PREFERENCES);
+            const encoded = serializePreferences(baseDefaults);
             if (!encoded.ok) {
               if (superseded !== undefined) {
                 for (const resolve of superseded.waiters) resolve(encoded);
@@ -609,8 +627,8 @@ export function createKvPreferencesStore(
           }
           return failure;
         }
-        current = DEFAULT_PREFERENCES;
-        committed = DEFAULT_PREFERENCES;
+        current = baseDefaults;
+        committed = baseDefaults;
         hydrated = true;
         notify(current);
         const result = ok(current);

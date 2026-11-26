@@ -14,7 +14,7 @@ import {
   webBackdropBlur,
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, type TextStyle, View } from 'react-native';
 import type {
   LanPairingPort,
   LanPairingSession,
@@ -378,23 +378,29 @@ export function QrPairingOverlay({
                 >
                   {i18n.t('sources.qr.orVisit')}
                 </Text>
-                <Text
-                  testID="qr-pairing-url"
-                  selectable
+                <View
                   style={[
-                    theme.typography.body,
-                    styles.centerText,
-                    styles.urlText,
+                    styles.urlBox,
                     {
-                      color: theme.colors.textPrimary,
                       backgroundColor: theme.colors.bgCard,
                       borderColor: theme.colors.surfaceBorder,
                       borderRadius: theme.radius.button,
                     },
                   ]}
                 >
-                  {activeSession.url}
-                </Text>
+                  <Text
+                    testID="qr-pairing-url"
+                    selectable
+                    style={[
+                      theme.typography.body,
+                      styles.centerText,
+                      styles.urlText,
+                      { color: theme.colors.textPrimary },
+                    ]}
+                  >
+                    {activeSession.url}
+                  </Text>
+                </View>
                 <Text
                   testID="qr-pairing-countdown"
                   style={[
@@ -487,15 +493,27 @@ const styles = StyleSheet.create({
     padding: 24,
     gap: 14,
     alignItems: 'center',
+    overflow: 'hidden',
   },
-  headerBlock: { gap: 4, alignItems: 'center' },
-  errorBlock: { gap: 6, alignItems: 'center' },
-  qrBody: { alignItems: 'center', gap: 10, width: '100%' },
-  urlText: {
+  headerBlock: { gap: 4, alignItems: 'center', width: '100%' },
+  errorBlock: { gap: 6, alignItems: 'center', width: '100%' },
+  qrBody: { alignItems: 'center', gap: 10, width: '100%', maxWidth: '100%' },
+  urlBox: {
+    width: '100%',
+    maxWidth: '100%',
+    flexShrink: 1,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderWidth: 1,
     overflow: 'hidden',
+  },
+  urlText: {
+    width: '100%',
+    maxWidth: '100%',
+    flexShrink: 1,
+    ...(Platform.OS === 'web'
+      ? ({ wordBreak: 'break-all', overflowWrap: 'anywhere' } as unknown as TextStyle)
+      : {}),
   },
   centerText: { textAlign: 'center' },
   actionsRow: {

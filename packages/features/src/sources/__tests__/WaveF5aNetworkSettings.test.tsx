@@ -54,6 +54,7 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
         </FormFactorProvider>,
       );
 
+      await fireEvent.press(screen.getByTestId('sources-mode-xtream'));
       await fireEvent.changeText(
         screen.getByTestId('sources-input-server'),
         'http://sim.example.test:7878',
@@ -105,6 +106,7 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
         </FormFactorProvider>,
       );
 
+      await fireEvent.press(screen.getByTestId('sources-mode-xtream'));
       await fireEvent.changeText(
         screen.getByTestId('sources-input-server'),
         'http://sim.example.test:7878',
@@ -151,9 +153,10 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('source-network-src-1')).toBeTruthy();
+        expect(screen.getByTestId('source-advanced-src-1')).toBeTruthy();
       });
 
+      await fireEvent.press(screen.getByTestId('source-advanced-src-1'));
       await fireEvent.press(screen.getByTestId('source-network-src-1'));
       expect(screen.getByTestId('source-network-editor-src-1')).toBeTruthy();
 
@@ -232,31 +235,34 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('source-network-src-1')).toBeTruthy();
+        expect(screen.getByTestId('source-advanced-src-1')).toBeTruthy();
       });
 
-      // Walk down until source-network-src-1 receives TV focus
+      // Walk down until source-advanced-src-1 receives TV focus
       for (let i = 0; i < 20; i += 1) {
-        if (screen.queryByTestId('source-network-src-1-focus-ring') !== null) break;
+        if (screen.queryByTestId('source-advanced-src-1-focus-ring') !== null) break;
         await act(async () => {
           remote.tap(KEYCODE_DPAD_DOWN);
         });
       }
-      expect(screen.getByTestId('source-network-src-1-focus-ring')).toBeTruthy();
+      expect(screen.getByTestId('source-advanced-src-1-focus-ring')).toBeTruthy();
 
-      // Select opens inline Network editor
+      // Select opens Advanced modal; walk down to Network item and press Select
+      await act(async () => {
+        remote.tap(KEYCODE_DPAD_CENTER);
+      });
+      await waitFor(() => expect(screen.getByTestId('source-network-src-1')).toBeTruthy());
+      for (let i = 0; i < 6; i += 1) {
+        await act(async () => {
+          remote.tap(KEYCODE_DPAD_DOWN);
+        });
+      }
       await act(async () => {
         remote.tap(KEYCODE_DPAD_CENTER);
       });
       expect(screen.getByTestId('source-network-editor-src-1')).toBeTruthy();
 
-      // Move down to DNS preference row, right to IPv4, select IPv4
-      for (let i = 0; i < 6; i += 1) {
-        if (screen.queryByTestId('source-network-dns-system-src-1-focus-ring') !== null) break;
-        await act(async () => {
-          remote.tap(KEYCODE_DPAD_DOWN);
-        });
-      }
+      // In Network sub-view: focus starts on dns-system -> Right to IPv4 -> Select IPv4
       expect(screen.getByTestId('source-network-dns-system-src-1-focus-ring')).toBeTruthy();
 
       await act(async () => {
@@ -268,13 +274,11 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
         remote.tap(KEYCODE_DPAD_CENTER);
       });
 
-      // Move down to Save button and press Select
-      for (let i = 0; i < 6; i += 1) {
-        if (screen.queryByTestId('source-network-save-src-1-focus-ring') !== null) break;
-        await act(async () => {
-          remote.tap(KEYCODE_DPAD_DOWN);
-        });
-      }
+      // Down -> host input -> Down -> Save button -> Select
+      await act(async () => {
+        remote.tap(KEYCODE_DPAD_DOWN);
+        remote.tap(KEYCODE_DPAD_DOWN);
+      });
       expect(screen.getByTestId('source-network-save-src-1-focus-ring')).toBeTruthy();
 
       await act(async () => {
@@ -323,9 +327,10 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('source-network-src-1')).toBeTruthy();
+        expect(screen.getByTestId('source-advanced-src-1')).toBeTruthy();
       });
 
+      await fireEvent.press(screen.getByTestId('source-advanced-src-1'));
       await fireEvent.press(screen.getByTestId('source-network-src-1'));
       expect(screen.getByTestId('source-network-host-src-1').props.value).toBe('203.0.113.10');
 
@@ -379,9 +384,10 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('source-network-src-1')).toBeTruthy();
+        expect(screen.getByTestId('source-advanced-src-1')).toBeTruthy();
       });
 
+      await fireEvent.press(screen.getByTestId('source-advanced-src-1'));
       await fireEvent.press(screen.getByTestId('source-network-src-1'));
       await fireEvent.changeText(screen.getByTestId('source-network-host-src-1'), '203.0.113.20');
       await fireEvent.press(screen.getByTestId('source-network-save-src-1'));
@@ -423,15 +429,16 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('source-network-src-1')).toBeTruthy();
+        expect(screen.getByTestId('source-advanced-src-1')).toBeTruthy();
       });
 
       errorSpy.mockClear();
+      await fireEvent.press(screen.getByTestId('source-advanced-src-1'));
       await fireEvent.press(screen.getByTestId('source-network-src-1'));
       expect(screen.getByTestId('source-network-editor-src-1')).toBeTruthy();
       expect(screen.getByTestId('source-network-host-src-1').props.value).toBe('2001:db8::9');
 
-      await fireEvent.press(screen.getByTestId('source-network-src-1'));
+      await fireEvent.press(screen.getByTestId('source-advanced-close'));
       expect(screen.queryByTestId('source-network-editor-src-1')).toBeNull();
 
       const reactStateWarnings = errorSpy.mock.calls.filter((args) =>

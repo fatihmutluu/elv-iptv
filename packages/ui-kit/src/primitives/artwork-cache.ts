@@ -1,7 +1,7 @@
 /** Minimum user-configurable on-device artwork disk cache ceiling in MiB (`#405`). */
 export const ARTWORK_CACHE_MIN_MB = 64;
 /** Maximum user-configurable on-device artwork disk cache ceiling in MiB (`#405`). */
-export const ARTWORK_CACHE_MAX_MB = 256;
+export const ARTWORK_CACHE_MAX_MB = 512;
 /** Default on-device artwork disk cache ceiling in MiB (`#405`). */
 export const DEFAULT_ARTWORK_CACHE_MB = 128;
 

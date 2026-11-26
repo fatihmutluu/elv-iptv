@@ -128,7 +128,7 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     defaultLoadedArtworkUris.clear();
   });
 
-  it('exposes all 9 Settings sections in canonical order', async () => {
+  it('exposes canonical Settings sections, hiding Remote Keys on desktop and showing it on TV', async () => {
     expect(SETTINGS_SECTIONS).toEqual([
       'appearance',
       'playback',
@@ -141,20 +141,34 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
       'licenses',
     ]);
 
-    await render(<Harness />);
+    const desktopView = await render(<Harness />);
 
     expect(screen.getByTestId('settings-tab-appearance')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-playback')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-liveTv')).toBeTruthy();
-    expect(screen.getByTestId('settings-tab-remote')).toBeTruthy();
+    expect(screen.queryByTestId('settings-tab-remote')).toBeNull();
     expect(screen.getByTestId('settings-tab-profiles')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-sources')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-account')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-feedback')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-licenses')).toBeTruthy();
+    await desktopView.unmount();
+
+    await render(
+      <Harness
+        viewport={{
+          formFactor: 'tv',
+          orientation: 'landscape',
+          inputModality: 'tv',
+          width: 1920,
+          height: 1080,
+        }}
+      />,
+    );
+    expect(screen.getByTestId('settings-tab-remote')).toBeTruthy();
   });
 
-  it('persists artwork cache limit and clears disk + in-memory loaded artwork cache (#405)', async () => {
+  it('persists artwork cache limit via dropdown and clears disk + in-memory loaded artwork cache (#405)', async () => {
     const store = createMemoryPreferencesStore();
     const setLimitBytes = jest.fn(async () => undefined);
     const clear = jest.fn(async () => undefined);
@@ -163,6 +177,7 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
 
     await render(<Harness store={store} artworkCache={{ setLimitBytes, clear }} />);
 
+    await fireEvent.press(screen.getByTestId('settings-artwork-cache-dropdown'));
     await fireEvent.press(screen.getByTestId('settings-artwork-cache-256'));
     await waitFor(async () => {
       const loaded = await store.load();
@@ -180,55 +195,56 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     });
   });
 
-  it('persists every Playback panel preference via updatePreferences (#401)', async () => {
+  it('persists active Playback panel preferences via updatePreferences', async () => {
     const store = createMemoryPreferencesStore();
     await render(<Harness store={store} initialSection="playback" />);
 
     expect(screen.getByTestId('settings-panel-playback')).toBeTruthy();
 
-    await fireEvent.press(screen.getByTestId('settings-playback-audio-tr'));
-    await fireEvent.press(screen.getByTestId('settings-playback-subtitle-en'));
-    await fireEvent.press(screen.getByTestId('settings-playback-subtitle-mode-always'));
     await fireEvent.press(screen.getByTestId('settings-playback-seek-15'));
     await fireEvent.press(screen.getByTestId('settings-playback-aspect-fill'));
     await fireEvent.press(screen.getByTestId('settings-playback-buffer-large'));
+    await fireEvent.press(screen.getByTestId('settings-playback-toggle-filter-sdh'));
+    await fireEvent.press(screen.getByTestId('settings-playback-toggle-pitch-lock'));
+    await fireEvent.press(screen.getByTestId('settings-playback-toggle-audio-normalization'));
+    await fireEvent.press(screen.getByTestId('settings-playback-osd-time-endsAt'));
     await fireEvent.press(screen.getByTestId('settings-playback-toggle-auto-play-next'));
-    await fireEvent.press(screen.getByTestId('settings-playback-toggle-skip-back-subtitles'));
 
     await waitFor(async () => {
       const loaded = await store.load();
-      expect(loaded.preferredAudioLang).toBe('tr');
-      expect(loaded.preferredSubtitleLang).toBe('en');
-      expect(loaded.subtitleMode).toBe('always');
       expect(loaded.seekStepSec).toBe(15);
       expect(loaded.defaultResizeMode).toBe('fill');
       expect(loaded.bufferPreset).toBe('large');
+      expect(loaded.filterSdhSubtitles).toBe(true);
+      expect(loaded.pitchLock).toBe(false);
+      expect(loaded.audioNormalization).toBe(true);
+      expect(loaded.osdTimeDisplayMode).toBe('endsAt');
       expect(loaded.autoPlayNextEpisode).toBe(false);
-      expect(loaded.autoSubtitlesOnSkipBack).toBe(true);
     });
   });
 
-  it('displays saved preferredAudioDevice in PlaybackSettingsPanel and resets to System default (#408)', async () => {
+  it('displays saved preferredAudioDevice inside expanded Desktop Advanced audio dropdown and resets to System default (#408)', async () => {
     const store = createMemoryPreferencesStore({ preferredAudioDevice: 'wasapi/hdmi' });
     await render(<Harness store={store} initialSection="playback" />);
 
+    // Expand Desktop Advanced audio
+    await fireEvent.press(screen.getByTestId('settings-desktop-advanced-audio-toggle'));
     await waitFor(() => {
-      expect(screen.getByTestId('settings-playback-audio-device-current')).toBeTruthy();
+      expect(screen.getByTestId('settings-playback-audio-device-dropdown')).toHaveTextContent(
+        'wasapi/hdmi',
+      );
     });
-    expect(
-      screen.getByTestId('settings-playback-audio-device-current').props.accessibilityState
-        .selected,
-    ).toBe(true);
 
+    await fireEvent.press(screen.getByTestId('settings-playback-audio-device-dropdown'));
+    expect(screen.getByTestId('settings-playback-audio-device-current')).toBeTruthy();
     await fireEvent.press(screen.getByTestId('settings-playback-audio-device-auto'));
     await waitFor(async () => {
       const loaded = await store.load();
       expect(loaded.preferredAudioDevice).toBe('auto');
     });
-    expect(screen.queryByTestId('settings-playback-audio-device-current')).toBeNull();
   });
 
-  it('persists every Live TV & Guide panel preference via updatePreferences (#401, #126, #145)', async () => {
+  it('persists active Live TV & Guide panel preferences via updatePreferences', async () => {
     const store = createMemoryPreferencesStore();
     await render(<Harness store={store} initialSection="liveTv" />);
 
@@ -236,25 +252,16 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
 
     await fireEvent.press(screen.getByTestId('settings-livetv-mode-epg'));
     await fireEvent.press(screen.getByTestId('settings-livetv-epg-span-6'));
-    await fireEvent.press(screen.getByTestId('settings-livetv-toggle-epg-genre-tints'));
     await fireEvent.press(screen.getByTestId('settings-livetv-toggle-epg-show-clock'));
+    await fireEvent.press(screen.getByTestId('settings-livetv-guide-refresh-dropdown'));
     await fireEvent.press(screen.getByTestId('settings-livetv-guide-refresh-24'));
-    await fireEvent.press(screen.getByTestId('settings-livetv-logo-backdrop-invert'));
-    await fireEvent.press(screen.getByTestId('settings-livetv-toggle-source-badges'));
-    await fireEvent.press(screen.getByTestId('settings-livetv-toggle-two-step-preview'));
-    await fireEvent.press(screen.getByTestId('settings-livetv-toggle-clean-titles'));
 
     await waitFor(async () => {
       const loaded = await store.load();
       expect(loaded.defaultLiveMode).toBe('epg');
       expect(loaded.epgTimeSpanHours).toBe(6);
-      expect(loaded.epgGenreTints).toBe(false);
       expect(loaded.epgShowClock).toBe(false);
       expect(loaded.guideRefreshHours).toBe(24);
-      expect(loaded.logoBackdropMode).toBe('invert');
-      expect(loaded.showSourceBadges).toBe(false);
-      expect(loaded.liveOkTwoStepPreview).toBe(true);
-      expect(loaded.cleanChannelTitles).toBe(true);
     });
   });
 
@@ -301,19 +308,9 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
       true,
     );
 
-    // Enter Playback panel -> row 0 (audio lang): Right to 'tr' -> Select
+    // Enter Playback panel -> row 0 (seekStepSec): Right x2 to 15s -> Select
     await pressKey(KEYCODE_DPAD_RIGHT);
     await pressKey(KEYCODE_DPAD_RIGHT);
-    await pressKey(KEYCODE_DPAD_CENTER);
-
-    await waitFor(async () => {
-      expect((await store.load()).preferredAudioLang).toBe('tr');
-    });
-
-    // Down x3 to skip interval row -> col 1 is 10s, move Right to 15s (col 2) -> Select
-    await pressKey(KEYCODE_DPAD_DOWN);
-    await pressKey(KEYCODE_DPAD_DOWN);
-    await pressKey(KEYCODE_DPAD_DOWN);
     await pressKey(KEYCODE_DPAD_RIGHT);
     await pressKey(KEYCODE_DPAD_CENTER);
 
@@ -339,17 +336,16 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
       expect((await store.load()).defaultLiveMode).toBe('channels');
     });
 
-    // Move down 10 rows to two-step preview toggle (row 10, after epgRowDensity row) -> Select
-    for (let i = 0; i < 10; i += 1) {
-      await pressKey(KEYCODE_DPAD_DOWN);
-    }
+    // Row 1: epgSpan, Row 2: epgDensity, Row 3: toggle-epg-show-clock -> Select toggles false
+    await pressKey(KEYCODE_DPAD_DOWN);
+    await pressKey(KEYCODE_DPAD_DOWN);
+    await pressKey(KEYCODE_DPAD_DOWN);
     await pressKey(KEYCODE_DPAD_CENTER);
 
     await waitFor(async () => {
-      expect((await store.load()).liveOkTwoStepPreview).toBe(true);
+      expect((await store.load()).epgShowClock).toBe(false);
     });
 
-    // Up back to row 0 stays inside Live TV panel cleanly
     await pressKey(KEYCODE_DPAD_UP);
     expect(screen.getByTestId('settings-panel-liveTv')).toBeTruthy();
   });
@@ -411,9 +407,9 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
       />,
     );
 
-    // Enter Playback content pane (row 0), move down 6 rows to Video decoder row, Right to Hardware, Select
+    // Enter Playback content pane (row 0 = seekStep), Down x3 -> row 3 = Video decoder, Right to Hardware, Select
     await pressKey(KEYCODE_DPAD_RIGHT);
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 3; i += 1) {
       await pressKey(KEYCODE_DPAD_DOWN);
     }
     await pressKey(KEYCODE_DPAD_RIGHT);
@@ -424,61 +420,11 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     });
   });
 
-  it('persists all Wave C1 Playback preferences (#393, #310, #124, #160, #118)', async () => {
+  it('shows preferHevcOverDolbyVision on TV and hides it on desktop', async () => {
     const store = createMemoryPreferencesStore();
-    await render(<Harness store={store} initialSection="playback" />);
-
-    // 5-mode subtitle selector (#393)
-    expect(screen.getByTestId('settings-playback-subtitle-mode-default')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-subtitle-mode-smart')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-subtitle-mode-onlyForced')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-subtitle-mode-always')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-subtitle-mode-off')).toBeTruthy();
-
-    await fireEvent.press(screen.getByTestId('settings-playback-subtitle-mode-onlyForced'));
-    await fireEvent.press(screen.getByTestId('settings-playback-toggle-prefer-default-audio'));
-    await fireEvent.press(screen.getByTestId('settings-playback-toggle-filter-sdh'));
-    await fireEvent.press(screen.getByTestId('settings-playback-toggle-prefer-hevc-dv'));
-    await fireEvent.press(screen.getByTestId('settings-playback-osd-time-endsAt'));
-    await fireEvent.press(screen.getByTestId('settings-playback-oled-15'));
-    await fireEvent.press(screen.getByTestId('settings-playback-still-watching-180'));
-
-    await waitFor(async () => {
-      const loaded = await store.load();
-      expect(loaded.subtitleMode).toBe('onlyForced');
-      expect(loaded.preferDefaultAudioTrack).toBe(false);
-      expect(loaded.filterSdhSubtitles).toBe(true);
-      expect(loaded.preferHevcOverDolbyVision).toBe(true);
-      expect(loaded.osdTimeDisplayMode).toBe('endsAt');
-      expect(loaded.oledScreensaverTimeoutMin).toBe(15);
-      expect(loaded.stillWatchingTimeoutMin).toBe(180);
-    });
-  });
-
-  it('renders deinterlaceMode, pitchLock, audioNormalization, and desktop-only windowAspectRatioLock in PlaybackSettingsPanel (#243, #332)', async () => {
-    const store = createMemoryPreferencesStore();
-    const { unmount } = await render(<Harness store={store} initialSection="playback" />);
-
-    expect(screen.getByTestId('settings-playback-deinterlace-off')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-deinterlace-auto')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-deinterlace-bwdif')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-toggle-pitch-lock')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-toggle-audio-normalization')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-toggle-window-aspect-ratio-lock')).toBeTruthy();
-
-    await fireEvent.press(screen.getByTestId('settings-playback-deinterlace-bwdif'));
-    await fireEvent.press(screen.getByTestId('settings-playback-toggle-pitch-lock'));
-    await fireEvent.press(screen.getByTestId('settings-playback-toggle-audio-normalization'));
-    await fireEvent.press(screen.getByTestId('settings-playback-toggle-window-aspect-ratio-lock'));
-
-    await waitFor(async () => {
-      const loaded = await store.load();
-      expect(loaded.deinterlaceMode).toBe('bwdif');
-      expect(loaded.pitchLock).toBe(false);
-      expect(loaded.audioNormalization).toBe(true);
-      expect(loaded.windowAspectRatioLock).toBe(true);
-    });
-    await unmount();
+    const desktopView = await render(<Harness store={store} initialSection="playback" />);
+    expect(screen.queryByTestId('settings-playback-toggle-prefer-hevc-dv')).toBeNull();
+    await desktopView.unmount();
 
     await render(
       <Harness
@@ -493,10 +439,10 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
         }}
       />,
     );
-    expect(screen.queryByTestId('settings-playback-toggle-window-aspect-ratio-lock')).toBeNull();
-    expect(screen.getByTestId('settings-playback-deinterlace-bwdif')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-toggle-pitch-lock')).toBeTruthy();
-    expect(screen.getByTestId('settings-playback-toggle-audio-normalization')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('settings-playback-toggle-prefer-hevc-dv'));
+    await waitFor(async () => {
+      expect((await store.load()).preferHevcOverDolbyVision).toBe(true);
+    });
   });
 
   it('hides External Player settings by default on tvOS (#406)', async () => {

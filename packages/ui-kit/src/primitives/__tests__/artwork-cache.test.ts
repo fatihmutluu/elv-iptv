@@ -9,7 +9,7 @@ import {
 describe('artwork-cache constants & pure LRU index (#405)', () => {
   it('exports the expected MiB bounds and default', () => {
     expect(ARTWORK_CACHE_MIN_MB).toBe(64);
-    expect(ARTWORK_CACHE_MAX_MB).toBe(256);
+    expect(ARTWORK_CACHE_MAX_MB).toBe(512);
     expect(DEFAULT_ARTWORK_CACHE_MB).toBe(128);
   });
 

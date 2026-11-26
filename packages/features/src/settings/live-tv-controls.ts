@@ -5,7 +5,6 @@ import type {
   EpgTimeSpanHoursPref,
   GuideRefreshHoursPref,
   LiveChannelSwitchModePref,
-  LogoBackdropModePref,
 } from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
 import type { SettingsPreferencesController } from './appearance-controls';
@@ -75,25 +74,24 @@ export const EPG_ROW_DENSITY_OPTIONS: ReadonlyArray<{
 
 export const CATALOG_REFRESH_OPTIONS: ReadonlyArray<{
   readonly hours: CatalogRefreshHoursPref;
-  readonly focusId: LiveTvFocusId;
   readonly testID: string;
 }> = [
-  { hours: 0, focusId: 'catalog-refresh-0', testID: 'settings-livetv-catalog-refresh-0' },
-  { hours: 6, focusId: 'catalog-refresh-6', testID: 'settings-livetv-catalog-refresh-6' },
-  { hours: 12, focusId: 'catalog-refresh-12', testID: 'settings-livetv-catalog-refresh-12' },
-  { hours: 24, focusId: 'catalog-refresh-24', testID: 'settings-livetv-catalog-refresh-24' },
-  { hours: 48, focusId: 'catalog-refresh-48', testID: 'settings-livetv-catalog-refresh-48' },
+  { hours: 3, testID: 'settings-livetv-catalog-refresh-3' },
+  { hours: 6, testID: 'settings-livetv-catalog-refresh-6' },
+  { hours: 12, testID: 'settings-livetv-catalog-refresh-12' },
+  { hours: 24, testID: 'settings-livetv-catalog-refresh-24' },
+  { hours: 48, testID: 'settings-livetv-catalog-refresh-48' },
 ];
 
 export const GUIDE_REFRESH_OPTIONS: ReadonlyArray<{
   readonly hours: GuideRefreshHoursPref;
-  readonly focusId: LiveTvFocusId;
   readonly testID: string;
 }> = [
-  { hours: 0, focusId: 'guide-refresh-0', testID: 'settings-livetv-guide-refresh-0' },
-  { hours: 6, focusId: 'guide-refresh-6', testID: 'settings-livetv-guide-refresh-6' },
-  { hours: 12, focusId: 'guide-refresh-12', testID: 'settings-livetv-guide-refresh-12' },
-  { hours: 24, focusId: 'guide-refresh-24', testID: 'settings-livetv-guide-refresh-24' },
+  { hours: 3, testID: 'settings-livetv-guide-refresh-3' },
+  { hours: 6, testID: 'settings-livetv-guide-refresh-6' },
+  { hours: 12, testID: 'settings-livetv-guide-refresh-12' },
+  { hours: 24, testID: 'settings-livetv-guide-refresh-24' },
+  { hours: 48, testID: 'settings-livetv-guide-refresh-48' },
 ];
 
 export const CHANNEL_SWITCH_MODE_OPTIONS: ReadonlyArray<{
@@ -116,40 +114,29 @@ export const CHANNEL_SWITCH_MODE_OPTIONS: ReadonlyArray<{
   },
 ];
 
-export const LOGO_BACKDROP_OPTIONS: ReadonlyArray<{
-  readonly value: LogoBackdropModePref;
-  readonly focusId: LiveTvFocusId;
-  readonly testID: string;
-  readonly labelKey: MessageId;
-}> = [
-  {
-    value: 'plate',
-    focusId: 'logo-backdrop-plate',
-    testID: 'settings-livetv-logo-backdrop-plate',
-    labelKey: 'settings.liveTv.logoBackdrop.plate',
-  },
-  {
-    value: 'invert',
-    focusId: 'logo-backdrop-invert',
-    testID: 'settings-livetv-logo-backdrop-invert',
-    labelKey: 'settings.liveTv.logoBackdrop.invert',
-  },
-  {
-    value: 'off',
-    focusId: 'logo-backdrop-off',
-    testID: 'settings-livetv-logo-backdrop-off',
-    labelKey: 'settings.liveTv.logoBackdrop.off',
-  },
-];
+/** Optional action callbacks used when activating Live TV controls via 10-ft TV D-pad. */
+export interface LiveTvControlActions {
+  readonly onOpenDropdown?: (id: 'catalog-refresh-dropdown' | 'guide-refresh-dropdown') => void;
+  readonly onRefreshCatalogNow?: () => void;
+  readonly onRefreshGuideNow?: () => void;
+}
 
-/** Applies a TV D-pad activation on a Live TV & Guide settings control (`#68`, `#251`, `#401`, `#126`, `#145`, `#60`). */
+/** Applies a TV D-pad activation on a Live TV & Guide settings control. */
 export function activateLiveTvControl(
   controlId: LiveTvFocusId,
   preferences?: SettingsPreferencesController,
-  onOpenChannelManagement?: () => void,
+  actions?: LiveTvControlActions,
 ): void {
-  if (controlId === 'open-channel-management') {
-    onOpenChannelManagement?.();
+  if (controlId === 'catalog-refresh-dropdown' || controlId === 'guide-refresh-dropdown') {
+    actions?.onOpenDropdown?.(controlId);
+    return;
+  }
+  if (controlId === 'catalog-refresh-now') {
+    actions?.onRefreshCatalogNow?.();
+    return;
+  }
+  if (controlId === 'guide-refresh-now') {
+    actions?.onRefreshGuideNow?.();
     return;
   }
   if (!preferences) return;
@@ -168,55 +155,12 @@ export function activateLiveTvControl(
     void preferences.updatePreferences({ epgRowDensity: densityOpt.value });
     return;
   }
-  if (controlId === 'toggle-epg-genre-tints') {
-    void preferences.updatePreferences({ epgGenreTints: !preferences.preferences.epgGenreTints });
-    return;
-  }
   if (controlId === 'toggle-epg-show-clock') {
     void preferences.updatePreferences({ epgShowClock: !preferences.preferences.epgShowClock });
-    return;
-  }
-  const catalogRefreshOpt = CATALOG_REFRESH_OPTIONS.find((o) => o.focusId === controlId);
-  if (catalogRefreshOpt) {
-    void preferences.updatePreferences({ catalogRefreshHours: catalogRefreshOpt.hours });
-    return;
-  }
-  const refreshOpt = GUIDE_REFRESH_OPTIONS.find((o) => o.focusId === controlId);
-  if (refreshOpt) {
-    void preferences.updatePreferences({ guideRefreshHours: refreshOpt.hours });
     return;
   }
   const switchOpt = CHANNEL_SWITCH_MODE_OPTIONS.find((o) => o.focusId === controlId);
   if (switchOpt) {
     void preferences.updatePreferences({ liveChannelSwitchMode: switchOpt.value });
-    return;
-  }
-  const logoOpt = LOGO_BACKDROP_OPTIONS.find((o) => o.focusId === controlId);
-  if (logoOpt) {
-    void preferences.updatePreferences({ logoBackdropMode: logoOpt.value });
-    return;
-  }
-  if (controlId === 'toggle-source-badges') {
-    void preferences.updatePreferences({
-      showSourceBadges: !preferences.preferences.showSourceBadges,
-    });
-    return;
-  }
-  if (controlId === 'toggle-two-step-preview') {
-    void preferences.updatePreferences({
-      liveOkTwoStepPreview: !preferences.preferences.liveOkTwoStepPreview,
-    });
-    return;
-  }
-  if (controlId === 'toggle-clean-titles') {
-    void preferences.updatePreferences({
-      cleanChannelTitles: !preferences.preferences.cleanChannelTitles,
-    });
-    return;
-  }
-  if (controlId === 'toggle-collapse-variants') {
-    void preferences.updatePreferences({
-      collapseLiveVariants: !preferences.preferences.collapseLiveVariants,
-    });
   }
 }

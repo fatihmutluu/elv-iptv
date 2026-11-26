@@ -1,4 +1,4 @@
-import { createDeadHostRegistry } from '@elv/ui-kit';
+import { createDeadHostRegistry, ICON_PATHS, THEME_PRESETS } from '@elv/ui-kit';
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import { type AppStateStatus, View } from 'react-native';
 import { attachAppStateDeadHostReset, createMobileTvUiAdapters } from '../platform-adapters';
@@ -143,6 +143,54 @@ describe('createMobileTvUiAdapters (#311, #202)', () => {
       maxBytes: 64 * 1024 * 1024,
     });
     await expect(adapters.artworkCache.clear()).resolves.toBeUndefined();
+  });
+
+  it('wires a native renderSvg adapter that produces distinct vector geometry per IconSpec', async () => {
+    const adapters = createMobileTvUiAdapters();
+    expect(adapters.renderSvg).toBeDefined();
+    if (!adapters.renderSvg) throw new Error('expected renderSvg adapter');
+
+    const color = THEME_PRESETS.obsidianCrimson.textPrimary;
+    const lockView = await render(
+      adapters.renderSvg({
+        spec: ICON_PATHS.lock,
+        size: 24,
+        color,
+        strokeWidth: 1.8,
+      }),
+    );
+    const lockJson = JSON.stringify(lockView.toJSON());
+    await lockView.unmount();
+
+    const plusView = await render(
+      adapters.renderSvg({
+        spec: ICON_PATHS.plus,
+        size: 24,
+        color,
+        strokeWidth: 1.8,
+      }),
+    );
+    const plusJson = JSON.stringify(plusView.toJSON());
+    await plusView.unmount();
+
+    const playView = await render(
+      adapters.renderSvg({
+        spec: ICON_PATHS.play,
+        size: 24,
+        color,
+        strokeWidth: 1.8,
+      }),
+    );
+    const playJson = JSON.stringify(playView.toJSON());
+    await playView.unmount();
+
+    expect(lockJson).not.toBe(plusJson);
+    expect(lockJson).not.toBe(playJson);
+    expect(plusJson).not.toBe(playJson);
+
+    const customRenderSvg = jest.fn(() => <View testID="custom-svg" />);
+    const overridden = createMobileTvUiAdapters({ renderSvg: customRenderSvg });
+    expect(overridden.renderSvg).toBe(customRenderSvg);
   });
 
   it('wires the Expo native FileSystem port into artworkCache when available (#405)', async () => {

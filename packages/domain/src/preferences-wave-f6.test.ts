@@ -8,8 +8,8 @@ import {
 } from './index';
 
 describe('Wave F6 preferences — minimizeToTray (#158) & autoEnterPip (#34)', () => {
-  it('defaults minimizeToTray to false and autoEnterPip to true in DEFAULT_PREFERENCES', () => {
-    expect(DEFAULT_PREFERENCES.minimizeToTray).toBe(false);
+  it('defaults minimizeToTray to true and autoEnterPip to true in DEFAULT_PREFERENCES', () => {
+    expect(DEFAULT_PREFERENCES.minimizeToTray).toBe(true);
     expect(DEFAULT_PREFERENCES.autoEnterPip).toBe(true);
   });
 
@@ -21,7 +21,7 @@ describe('Wave F6 preferences — minimizeToTray (#158) & autoEnterPip (#34)', (
         locale: 'en',
       }),
     );
-    expect(legacy.minimizeToTray).toBe(false);
+    expect(legacy.minimizeToTray).toBe(true);
     expect(legacy.autoEnterPip).toBe(true);
   });
 
@@ -43,7 +43,7 @@ describe('Wave F6 preferences — minimizeToTray (#158) & autoEnterPip (#34)', (
       const parsed = parsePreferences(
         JSON.stringify({ version: 1, minimizeToTray: invalid, autoEnterPip: invalid }),
       );
-      expect(parsed.minimizeToTray).toBe(false);
+      expect(parsed.minimizeToTray).toBe(true);
       expect(parsed.autoEnterPip).toBe(true);
     }
   });
@@ -73,13 +73,13 @@ describe('Wave F6 preferences — minimizeToTray (#158) & autoEnterPip (#34)', (
     const store = createMemoryPreferencesStore();
 
     const initial = await store.load();
-    expect(initial.minimizeToTray).toBe(false);
+    expect(initial.minimizeToTray).toBe(true);
     expect(initial.autoEnterPip).toBe(true);
 
-    const updated = await store.update({ minimizeToTray: true, autoEnterPip: false });
+    const updated = await store.update({ minimizeToTray: false, autoEnterPip: false });
     expect(updated.ok).toBe(true);
     if (updated.ok) {
-      expect(updated.value.minimizeToTray).toBe(true);
+      expect(updated.value.minimizeToTray).toBe(false);
       expect(updated.value.autoEnterPip).toBe(false);
     }
 
@@ -89,14 +89,14 @@ describe('Wave F6 preferences — minimizeToTray (#158) & autoEnterPip (#34)', (
     });
     expect(invalidPatch.ok).toBe(true);
     if (invalidPatch.ok) {
-      expect(invalidPatch.value.minimizeToTray).toBe(true);
+      expect(invalidPatch.value.minimizeToTray).toBe(false);
       expect(invalidPatch.value.autoEnterPip).toBe(false);
     }
 
     const reset = await store.reset();
     expect(reset.ok).toBe(true);
     if (reset.ok) {
-      expect(reset.value.minimizeToTray).toBe(false);
+      expect(reset.value.minimizeToTray).toBe(true);
       expect(reset.value.autoEnterPip).toBe(true);
     }
   });

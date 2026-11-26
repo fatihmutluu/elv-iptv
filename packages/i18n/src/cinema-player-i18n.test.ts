@@ -90,8 +90,8 @@ describe('@elv/i18n Wave C1 cinema player, sleep timer, screensaver, scrub & tra
       ],
       [
         'settings.playback.preferHevcOverDvDesc',
-        'Fallback to standard HEVC if Dolby Vision causes black screens or stutter',
-        'Dolby Vision siyah ekran veya takılma yaparsa standart HEVC’ye düş',
+        'Skip Dolby Vision and use standard HEVC on devices with color or black-screen issues.',
+        "Renk veya siyah ekran sorunu yaşayan cihazlarda Dolby Vision'ı atlayıp doğrudan standart HEVC kullanır.",
       ],
       [
         'settings.playback.filterSdh',

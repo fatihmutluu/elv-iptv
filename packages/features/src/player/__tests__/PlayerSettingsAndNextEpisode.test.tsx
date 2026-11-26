@@ -267,7 +267,7 @@ describe('PlayerSettingsSheet 2-level menu', () => {
     );
     const toggleTr = screen.getByTestId('player-deinterlace-toggle');
     expect(toggleTr.props.accessibilityState).toEqual({ checked: true });
-    expect(toggleTr).toHaveTextContent(/Taramayı gider/);
+    expect(toggleTr).toHaveTextContent(/Deinterlace/);
     expect(toggleTr).toHaveTextContent(/Açık/);
     expect(flatStyle('player-stats-toggle')?.borderColor).toBe(hcTheme.colors.focusRingColor);
 

@@ -5,9 +5,9 @@ import { fireEvent, render, screen } from '@testing-library/react-native';
 import { SavedSourcesPanel } from '../SavedSourcesPanel';
 import type { SourcesController } from '../useSourcesController';
 
-describe('Wave C2 SavedSourcesPanel (#68)', () => {
-  it('renders last synced timestamps and per-source Refresh guide button', async () => {
-    const runGuideRefresh = jest.fn(async () => undefined);
+describe('Wave C2 / Wave P7 SavedSourcesPanel (#68)', () => {
+  it('renders last synced timestamps and 3 clean buttons (Refresh, Remove, Advanced) without source-name suffixes', async () => {
+    const onOpenAdvanced = jest.fn();
     const readySource: SourceRow = {
       id: 's1',
       kind: 'xtream',
@@ -31,7 +31,7 @@ describe('Wave C2 SavedSourcesPanel (#68)', () => {
       statusById: {},
       canRefreshGuide: true,
       runImport: jest.fn(async () => undefined),
-      runGuideRefresh,
+      runGuideRefresh: jest.fn(async () => undefined),
       cancelImport: jest.fn(),
       remove: jest.fn(async () => undefined),
     } as unknown as SourcesController;
@@ -55,6 +55,7 @@ describe('Wave C2 SavedSourcesPanel (#68)', () => {
                 twoColumn={false}
                 tvFocusId={undefined}
                 nowMs={1_700_000_000_000 + 2 * 3_600_000}
+                onOpenAdvanced={onOpenAdvanced}
               />
             </ViewportProvider>
           </FormFactorProvider>
@@ -64,7 +65,11 @@ describe('Wave C2 SavedSourcesPanel (#68)', () => {
 
     expect(screen.getByTestId('source-last-synced-s1').props.children).toContain('2h');
     expect(screen.getByTestId('source-last-synced-s2').props.children).toBe('Not synced yet');
-    await fireEvent.press(screen.getByTestId('source-refresh-guide-s1'));
-    expect(runGuideRefresh).toHaveBeenCalledWith('s1');
+    expect(screen.getByTestId('source-refresh-s1')).toHaveTextContent('Refresh');
+    expect(screen.getByTestId('source-remove-s1')).toHaveTextContent('Remove');
+    expect(screen.getByTestId('source-advanced-s1')).toHaveTextContent('Advanced');
+    expect(screen.queryByTestId('source-refresh-guide-s1')).toBeNull();
+    await fireEvent.press(screen.getByTestId('source-advanced-s1'));
+    expect(onOpenAdvanced).toHaveBeenCalledWith(readySource);
   });
 });

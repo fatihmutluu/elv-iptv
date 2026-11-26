@@ -1,6 +1,6 @@
 /** English (source) messages for Profiles & Parental Controls (`#15`, `#31`). */
 export const enProfilesMessages = {
-  'settings.section.profiles': 'Profiles & Parental',
+  'settings.section.profiles': 'Kids Mode',
   'profiles.title': 'Profiles',
   'profiles.subtitle': 'Switch viewers or manage local profiles on this device.',
   'profiles.switchTitle': 'Switch profile',
@@ -23,7 +23,7 @@ export const enProfilesMessages = {
   'profiles.cancel': 'Cancel',
   'profiles.defaultName': 'Default',
   'profiles.manageInSettings': 'Manage profiles in Settings',
-  'parental.title': 'Parental Controls',
+  'parental.title': 'Kids Mode',
   'parental.subtitle': 'Restrict categories, adult keywords, and age-rated programs with a PIN.',
   'parental.enabledToggle': 'Enable parental controls',
   'parental.enabledHint': 'Hides restricted channels, titles, and categories while locked.',

@@ -26,6 +26,8 @@ export interface ProfileTrackRules {
   readonly preferDefaultAudioTrack?: boolean;
   readonly preferredSubtitleLanguages?: readonly string[];
   readonly subtitleMode?: SubtitleModePref;
+  /** Optional app UI locale (e.g. `'tr'` or `'tr-TR'`) used when preferred audio & subtitle lists are empty. */
+  readonly fallbackLocale?: string;
 }
 
 /** Combined rule hierarchy for {@link resolveInitialTrackSelection}. */
@@ -185,11 +187,17 @@ function resolveSubtitleTrack(
 
   const prefSubs = normalizeLangList(profile?.preferredSubtitleLanguages);
   const prefAudio = normalizeLangList(profile?.preferredAudioLanguages);
+  const fallbackLang =
+    prefSubs.length === 0 && prefAudio.length === 0
+      ? normalizeLanguageCode(profile?.fallbackLocale)
+      : undefined;
+  const effectivePrefSubs =
+    prefSubs.length > 0 ? prefSubs : fallbackLang !== undefined ? [fallbackLang] : [];
 
   if (mode === 'onlyForced') {
     const forcedPref = findByPreferredLanguages(
       tracks.subtitles,
-      prefSubs,
+      effectivePrefSubs,
       (t) => t.forced === true,
       true,
     );
@@ -206,12 +214,12 @@ function resolveSubtitleTrack(
   if (mode === 'always') {
     const fullPref = findByPreferredLanguages(
       tracks.subtitles,
-      prefSubs,
+      effectivePrefSubs,
       (t) => t.forced !== true,
       true,
     );
     if (fullPref) return fullPref.id;
-    const anyPref = findByPreferredLanguages(tracks.subtitles, prefSubs, () => true, true);
+    const anyPref = findByPreferredLanguages(tracks.subtitles, effectivePrefSubs, () => true, true);
     if (anyPref) return anyPref.id;
     const def = tracks.subtitles.find((t) => t.isDefault === true);
     return def?.id ?? tracks.subtitles[0]?.id ?? null;
@@ -237,7 +245,14 @@ function resolveSubtitleTrack(
   }
 
   // mode === 'smart'
-  const understoodLangs = prefSubs.length > 0 ? prefSubs : prefAudio;
+  const understoodLangs =
+    prefSubs.length > 0
+      ? prefSubs
+      : prefAudio.length > 0
+        ? prefAudio
+        : fallbackLang !== undefined
+          ? [fallbackLang]
+          : [];
   const audioUnderstood =
     effectiveAudioLang !== undefined &&
     (understoodLangs.length === 0 || understoodLangs.includes(effectiveAudioLang));

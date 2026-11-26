@@ -1,10 +1,12 @@
 import {
   type DnsFamilyPreference,
   normalizeDnsFamily,
+  type SqlDriver,
   type TransportSettings,
   validateHostOverride,
 } from '@elv/domain';
 import { isCredentialFingerprint } from './credential-fingerprint';
+import { isValidProfileId } from './profiles-repo';
 import {
   normalizeActiveConnections,
   normalizeMaxConnections,
@@ -32,6 +34,7 @@ export interface SourceRow {
   readonly allowLegacyTls?: boolean;
   readonly dnsFamily?: DnsFamilyPreference;
   readonly hostOverride?: string;
+  readonly excludedProfileIds?: readonly string[];
 }
 
 const CATEGORY_SELECTION_KEYS = [
@@ -45,6 +48,15 @@ const CATEGORY_SELECTION_KEYS = [
   'pendingMovie',
   'pendingSeries',
 ] as const;
+
+function sanitizeExcludedProfileIds(raw: unknown): readonly string[] {
+  if (!Array.isArray(raw)) return [];
+  const unique = new Set<string>();
+  for (const item of raw) {
+    if (isValidProfileId(item)) unique.add(item);
+  }
+  return [...unique].sort();
+}
 
 function sanitizeCategorySelection(raw: unknown): SourceCategorySelection | undefined {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
@@ -72,6 +84,12 @@ export function mergeSourceSettings(
   let invalidatePlaylistCache = false;
   for (const [key, value] of Object.entries(patch)) {
     if (key === 'isLocalPlaylist') {
+      continue;
+    }
+    if (key === 'excludedProfileIds') {
+      const sanitized = sanitizeExcludedProfileIds(value);
+      if (sanitized.length === 0) delete next.excludedProfileIds;
+      else next.excludedProfileIds = sanitized;
       continue;
     }
     if (key === 'xmltvTimezone') {
@@ -165,13 +183,13 @@ type ParsedSourceMeta = Pick<
   | 'allowLegacyTls'
   | 'dnsFamily'
   | 'hostOverride'
+  | 'excludedProfileIds'
 >;
 
-/** @internal Extracts non-secret display metadata from `sources.settings_json`. */
-export function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
+function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
   try {
     const parsed = JSON.parse(settingsJson) as Partial<SourceSettings> | null;
-    if (parsed === null || typeof parsed !== 'object') return {};
+    if (parsed === null || typeof parsed !== 'object') return { excludedProfileIds: [] };
     const out: {
       accountMeta?: SourceAccountMeta;
       credentialFingerprint?: string;
@@ -181,7 +199,10 @@ export function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
       allowLegacyTls?: boolean;
       dnsFamily?: DnsFamilyPreference;
       hostOverride?: string;
-    } = {};
+      excludedProfileIds: readonly string[];
+    } = {
+      excludedProfileIds: sanitizeExcludedProfileIds(parsed.excludedProfileIds),
+    };
     if (isCredentialFingerprint(parsed.credentialFingerprint)) {
       out.credentialFingerprint = parsed.credentialFingerprint;
     }
@@ -231,7 +252,7 @@ export function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
     }
     return out;
   } catch {
-    return {};
+    return { excludedProfileIds: [] };
   }
 }
 
@@ -244,6 +265,7 @@ export const mapNewSourceRow = (r: SourceRecord): SourceRow => ({
   needsImport: true,
   lastCatalogSyncAt: null,
   lastGuideSyncAt: null,
+  excludedProfileIds: sanitizeExcludedProfileIds(r.settings.excludedProfileIds),
   ...(r.settings.accountMeta === undefined ? {} : { accountMeta: r.settings.accountMeta }),
   ...(isCredentialFingerprint(r.settings.credentialFingerprint)
     ? { credentialFingerprint: r.settings.credentialFingerprint }
@@ -268,3 +290,39 @@ export const mapNewSourceRow = (r: SourceRecord): SourceRow => ({
     return validated.ok && validated.value !== undefined ? { hostOverride: validated.value } : {};
   })(),
 });
+
+const LIST_SOURCES_SQL = `SELECT s.id, s.kind, s.name, s.created_at, s.settings_json,
+  EXISTS (SELECT 1 FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok') AS imported,
+  (SELECT r.finished_at FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok' ORDER BY r.finished_at DESC LIMIT 1) AS last_catalog_sync_at,
+  (SELECT r.finished_at FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'guide' AND r.status = 'ok' ORDER BY r.finished_at DESC LIMIT 1) AS last_guide_sync_at
+  FROM sources s WHERE s.deleting = 0 ORDER BY s.created_at, s.id`;
+
+/** @internal Queries all active sources with import status and parsed display metadata. */
+export async function querySourcesList(db: SqlDriver): Promise<SourceRow[]> {
+  const rows = await db.all<{
+    id: string;
+    kind: SourceKind;
+    name: string;
+    created_at: number;
+    settings_json: string;
+    imported: number;
+    last_catalog_sync_at: number | null;
+    last_guide_sync_at: number | null;
+  }>(LIST_SOURCES_SQL);
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    name: r.name,
+    createdAt: r.created_at,
+    needsImport: r.imported === 0,
+    lastCatalogSyncAt:
+      typeof r.last_catalog_sync_at === 'number' && Number.isFinite(r.last_catalog_sync_at)
+        ? r.last_catalog_sync_at
+        : null,
+    lastGuideSyncAt:
+      typeof r.last_guide_sync_at === 'number' && Number.isFinite(r.last_guide_sync_at)
+        ? r.last_guide_sync_at
+        : null,
+    ...parseSourceMeta(r.settings_json),
+  }));
+}

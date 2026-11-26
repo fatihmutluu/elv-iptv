@@ -1,5 +1,5 @@
 import type { CatalogService, FavoriteRow, ItemDetailRow, WatchProgressRow } from '@elv/data';
-import { createKeymapStore, ok } from '@elv/domain';
+import { createKeymapStore, elvError, err, ok } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import { createFakePlayerEngine } from '@elv/playback/testing';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -267,9 +267,15 @@ describe('AppShell Wave F2 (#273 Android TV Home Channels & Deep-Link + #60 Sett
     });
   });
 
-  it('opens ChannelManagementOverlay from Settings -> Live TV -> Manage channels', async () => {
+  it('omits removed Manage channels button and wires Refresh now actions in Settings -> Live TV (Wave P7)', async () => {
+    const importSource = jest.fn(async () =>
+      ok({ sourceId: 's1', liveCount: 5, movieCount: 0, seriesCount: 0, categories: 1 }),
+    );
+    const importGuide = jest.fn(async () => ok({ sourceId: 's1', programmes: 12, channels: 5 }));
     const catalog = {
-      listSources: jest.fn(async () => []),
+      listSources: jest.fn(async () => [
+        { id: 's1', kind: 'm3u' as const, name: 'Main TV', createdAt: 1, needsImport: false },
+      ]),
       categories: jest.fn(async () => []),
       items: jest.fn(async () => []),
       allSourcesItems: jest.fn(async () => []),
@@ -278,7 +284,8 @@ describe('AppShell Wave F2 (#273 Android TV Home Channels & Deep-Link + #60 Sett
       addSource: jest.fn(),
       addSourceFromLink: jest.fn(),
       removeSource: jest.fn(),
-      importSource: jest.fn(),
+      importSource,
+      importGuide,
       seasons: jest.fn(async () => ok([])),
       episodes: jest.fn(async () => []),
       close: jest.fn(async () => undefined),
@@ -299,13 +306,23 @@ describe('AppShell Wave F2 (#273 Android TV Home Channels & Deep-Link + #60 Sett
       </AppProviders>,
     );
 
+    await waitFor(() => expect(screen.getByTestId('nav-tab-settings')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('nav-tab-settings'));
     await waitFor(() => expect(screen.getByTestId('settings-tab-liveTv')).toBeTruthy());
     await act(async () => {
       await fireEvent.press(screen.getByTestId('settings-tab-liveTv'));
     });
-    await waitFor(() => expect(screen.getByTestId('settings-livetv-manage-channels')).toBeTruthy());
-    await fireEvent.press(screen.getByTestId('settings-livetv-manage-channels'));
-    await waitFor(() => expect(screen.getByTestId('channel-management-overlay')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-livetv-catalog-refresh-now')).toBeTruthy(),
+    );
+    expect(screen.queryByTestId('settings-livetv-manage-channels')).toBeNull();
+    expect(screen.queryByTestId('channel-management-overlay')).toBeNull();
+
+    await fireEvent.press(screen.getByTestId('settings-livetv-catalog-refresh-now'));
+    await waitFor(() => expect(importSource).toHaveBeenCalledWith('s1'));
+
+    await fireEvent.press(screen.getByTestId('settings-livetv-guide-refresh-now'));
+    await waitFor(() => expect(importGuide).toHaveBeenCalledWith('s1'));
   });
 
   it('never publishes parental-locked items to Android TV Home Screen even after PIN unlock (#273)', async () => {
@@ -571,101 +588,41 @@ describe('AppShell Wave F2 (#273 Android TV Home Channels & Deep-Link + #60 Sett
     expect(kvMap.has('elv.keymap.v1.guest')).toBe(false);
   });
 
-  it('gates ChannelManagementOverlay behind parental PIN when locked and closes on re-lock (#60, #31)', async () => {
-    const catalog = {
-      listSources: jest.fn(async () => []),
-      categories: jest.fn(async () => []),
-      items: jest.fn(async () => []),
-      allSourcesItems: jest.fn(async () => []),
-      listCustomGroups: jest.fn(async () => []),
-      listProfiles: jest.fn(async () => [
-        {
-          id: 'default',
-          name: 'Default',
-          avatarToken: 'crimson',
-          isKids: false,
-          isDefault: true,
-          createdAt: 0,
-          updatedAt: 0,
-        },
-      ]),
-      getParentalSettings: jest.fn(async () => ({
-        profileId: 'default',
-        enabled: true,
-        blockAdultKeywords: true,
-        maxRatingAge: 12,
-        unlockTimeoutMin: 30,
-        updatedAt: 0,
-      })),
-      listParentalLocks: jest.fn(async () => []),
-      hasParentalPin: jest.fn(async () => true),
-      verifyParentalPin: jest.fn(async () => ({ ok: true, remainingAttempts: 5 })),
-      resolveStream: jest.fn(),
-      addSource: jest.fn(),
-      addSourceFromLink: jest.fn(),
-      removeSource: jest.fn(),
-      importSource: jest.fn(),
-      seasons: jest.fn(async () => ok([])),
-      episodes: jest.fn(async () => []),
-      close: jest.fn(async () => undefined),
-    } as unknown as CatalogService;
-
-    await render(
-      <AppProviders
-        i18n={createAppI18n('en')}
-        viewport={{
-          formFactor: 'desktop',
-          orientation: 'landscape',
-          inputModality: 'pointer',
-          width: 1280,
-          height: 720,
-        }}
-      >
-        <AppShell catalog={catalog} videoHost={createStubVideoHost()} />
-      </AppProviders>,
-    );
-
-    await waitFor(() => expect(screen.getByTestId('settings-tab-liveTv')).toBeTruthy());
-    await act(async () => {
-      await fireEvent.press(screen.getByTestId('settings-tab-liveTv'));
-    });
-    await waitFor(() => expect(screen.getByTestId('settings-livetv-manage-channels')).toBeTruthy());
-    await fireEvent.press(screen.getByTestId('settings-livetv-manage-channels'));
-
-    // Parental guard PIN is set and locked -> PIN dialog prompts instead of opening overlay
-    await waitFor(() => expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy());
-    expect(screen.queryByTestId('channel-management-overlay')).toBeNull();
-
-    // Entering valid PIN unlocks and opens ChannelManagementOverlay
-    for (const digit of ['1', '2', '3', '4']) {
-      await fireEvent.press(screen.getByTestId(`pin-key-${digit}`));
-    }
-    await fireEvent.press(screen.getByTestId('pin-entry-submit'));
-    await waitFor(() => expect(screen.getByTestId('channel-management-overlay')).toBeTruthy());
-
-    // Simulate parental re-lock on app background -> ChannelManagementOverlay dismisses immediately
-    await act(async () => {
-      await fireEvent.press(screen.getByTestId('channel-manage-close-btn'));
-    });
-    expect(screen.queryByTestId('channel-management-overlay')).toBeNull();
-  });
-
-  it('auto-dismisses ChannelManagementOverlay immediately on parental re-lock (#60, #31)', async () => {
-    let onLifecycle: ((state: AppLifecycleState) => void) | undefined;
+  it('re-locks parental state immediately when app transitions to background (#31)', async () => {
+    const lifecycleListeners = new Set<(state: AppLifecycleState) => void>();
     const appLifecycle: AppLifecyclePort = {
       subscribe: (listener) => {
-        onLifecycle = listener;
+        lifecycleListeners.add(listener);
         return () => {
-          onLifecycle = undefined;
+          lifecycleListeners.delete(listener);
         };
       },
     };
+    const onDeepLinkHandled = jest.fn();
+    const lockedMovie = (key: string): ItemDetailRow => ({
+      id: 99,
+      key,
+      kind: 'movie',
+      sourceId: 's1',
+      providerId: '99',
+      name: 'Restricted Movie',
+      logo: null,
+      rating: null,
+      year: 2025,
+      num: null,
+      plot: null,
+    });
     const catalog = {
-      listSources: jest.fn(async () => []),
+      listSources: jest.fn(async () => [
+        { id: 's1', kind: 'm3u' as const, name: 'Demo', createdAt: 1, needsImport: false },
+      ]),
       categories: jest.fn(async () => []),
       items: jest.fn(async () => []),
       allSourcesItems: jest.fn(async () => []),
       listCustomGroups: jest.fn(async () => []),
+      itemDetail: jest.fn(async (key: string, opts?: { parentalUnlocked?: boolean }) =>
+        opts?.parentalUnlocked === true ? lockedMovie(key) : null,
+      ),
       listProfiles: jest.fn(async () => [
         {
           id: 'default',
@@ -688,7 +645,11 @@ describe('AppShell Wave F2 (#273 Android TV Home Channels & Deep-Link + #60 Sett
       listParentalLocks: jest.fn(async () => []),
       hasParentalPin: jest.fn(async () => true),
       verifyParentalPin: jest.fn(async () => ({ ok: true, remainingAttempts: 5 })),
-      resolveStream: jest.fn(),
+      resolveStream: jest.fn(async (_key: string, opts?: { parentalUnlocked?: boolean }) =>
+        opts?.parentalUnlocked
+          ? ok({ url: 'http://127.0.0.1/stream.mp4', headers: {} })
+          : err(elvError('auth', 'parental-locked')),
+      ),
       addSource: jest.fn(),
       addSourceFromLink: jest.fn(),
       removeSource: jest.fn(),
@@ -698,7 +659,7 @@ describe('AppShell Wave F2 (#273 Android TV Home Channels & Deep-Link + #60 Sett
       close: jest.fn(async () => undefined),
     } as unknown as CatalogService;
 
-    await render(
+    const view = await render(
       <AppProviders
         i18n={createAppI18n('en')}
         viewport={{
@@ -709,30 +670,32 @@ describe('AppShell Wave F2 (#273 Android TV Home Channels & Deep-Link + #60 Sett
           height: 720,
         }}
       >
-        <AppShell catalog={catalog} videoHost={createStubVideoHost()} appLifecycle={appLifecycle} />
+        <AppShell
+          catalog={catalog}
+          videoHost={createStubVideoHost()}
+          appLifecycle={appLifecycle}
+          pendingDeepLink={{ itemKey: 'x:s1:movie:99', kind: 'movie' }}
+          onDeepLinkHandled={onDeepLinkHandled}
+        />
       </AppProviders>,
     );
 
-    await waitFor(() => expect(screen.getByTestId('settings-tab-liveTv')).toBeTruthy());
-    await act(async () => {
-      await fireEvent.press(screen.getByTestId('settings-tab-liveTv'));
-    });
-    await waitFor(() => expect(screen.getByTestId('settings-livetv-manage-channels')).toBeTruthy());
-    await fireEvent.press(screen.getByTestId('settings-livetv-manage-channels'));
+    // Locked deep link prompts parental PIN overlay; unlocking starts restricted playback
     await waitFor(() => expect(screen.getByTestId('pin-entry-overlay')).toBeTruthy());
-
     for (const digit of ['1', '2', '3', '4']) {
       await fireEvent.press(screen.getByTestId(`pin-key-${digit}`));
     }
     await fireEvent.press(screen.getByTestId('pin-entry-submit'));
-    await waitFor(() => expect(screen.getByTestId('channel-management-overlay')).toBeTruthy());
-
-    // App moves to background -> useShellProfileEffects locks parental -> overlay auto-closes
-    await act(async () => {
-      onLifecycle?.('background');
-    });
     await waitFor(() => {
-      expect(screen.queryByTestId('channel-management-overlay')).toBeNull();
+      expect(screen.queryByTestId('pin-entry-overlay')).toBeNull();
+      expect(screen.getByTestId('player-screen')).toBeTruthy();
     });
+
+    // App moves to background -> useShellProfileEffects re-locks parental state & stops restricted playback
+    await act(async () => {
+      for (const listener of lifecycleListeners) listener('background');
+    });
+    await waitFor(() => expect(screen.queryByTestId('player-screen')).toBeNull());
+    await view.unmount();
   });
 });

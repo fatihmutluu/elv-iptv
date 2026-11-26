@@ -196,11 +196,17 @@ describe('createMobileArtworkCache (#405)', () => {
     loadedUris.markLoaded('https://cdn.example/mem.jpg');
     const memoryOnly = createMobileArtworkCache({ loadedUris });
     expect(await memoryOnly.resolveUri?.('https://cdn.example/mem.jpg', 320)).toBeNull();
-    await memoryOnly.setLimitBytes?.(256 * 1024 * 1024);
+    await memoryOnly.setLimitBytes?.(512 * 1024 * 1024);
     expect(await memoryOnly.stats?.()).toEqual({
       bytes: 0,
       entries: 0,
-      maxBytes: 256 * 1024 * 1024,
+      maxBytes: 512 * 1024 * 1024,
+    });
+    await memoryOnly.setLimitBytes?.(1024 * 1024 * 1024);
+    expect(await memoryOnly.stats?.()).toEqual({
+      bytes: 0,
+      entries: 0,
+      maxBytes: 512 * 1024 * 1024,
     });
     await memoryOnly.clear();
     expect(loadedUris.size).toBe(0);
@@ -419,7 +425,7 @@ describe('createMobileArtworkCache (#405)', () => {
     expect(indexWrites).toBe(writesBeforeHits);
 
     // Waiting past debounce delay coalesces into a single index.json flush
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
     expect(indexWrites).toBe(writesBeforeHits + 1);
 
     // Another hit followed by dispose() flushes immediately

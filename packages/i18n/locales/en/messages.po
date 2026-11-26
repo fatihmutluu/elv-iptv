@@ -739,7 +739,7 @@ msgid "settings.about.licenseBadge"
 msgstr "Proprietary · LGPL media engines"
 
 msgid "settings.about.statement"
-msgstr "ELV IPTV is an independent IPTV player and ships no media content. Native playback engines dynamically link LGPL libraries. Provider credentials remain encrypted on-device and never enter the catalog database."
+msgstr "ELV IPTV is a 100% free, ad-free, independent IPTV player built with care for every screen. It ships no media content — bring your own Xtream, M3U, or Stalker source. Provider credentials stay encrypted on your device and never enter the catalog database."
 
 msgid "home.title"
 msgstr "Home"
@@ -1546,7 +1546,7 @@ msgid "settings.playback.preferHevcOverDv"
 msgstr "Prefer HEVC over Dolby Vision"
 
 msgid "settings.playback.preferHevcOverDvDesc"
-msgstr "Fallback to standard HEVC if Dolby Vision causes black screens or stutter"
+msgstr "Skip Dolby Vision and use standard HEVC on devices with color or black-screen issues."
 
 msgid "settings.playback.filterSdh"
 msgstr "Filter SDH subtitle cues"
@@ -1897,7 +1897,7 @@ msgid "settings.audioNormalization"
 msgstr "Loudness normalization"
 
 msgid "settings.audioNormalizationHint"
-msgstr "Balance quiet dialogue and loud channels using EBU R128"
+msgstr "Balances quiet dialogue and overly loud channels."
 
 msgid "settings.windowAspectRatioLock"
 msgstr "Lock window aspect ratio"
@@ -1942,7 +1942,7 @@ msgid "player.delayReset"
 msgstr "Reset (0 ms)"
 
 msgid "settings.section.profiles"
-msgstr "Profiles & Parental"
+msgstr "Kids Mode"
 
 msgid "profiles.title"
 msgstr "Profiles"
@@ -2008,7 +2008,7 @@ msgid "profiles.manageInSettings"
 msgstr "Manage profiles in Settings"
 
 msgid "parental.title"
-msgstr "Parental Controls"
+msgstr "Kids Mode"
 
 msgid "parental.subtitle"
 msgstr "Restrict categories, adult keywords, and age-rated programs with a PIN."
@@ -3715,3 +3715,99 @@ msgstr "Remove like"
 
 msgid "rating.clearDislike"
 msgstr "Remove dislike"
+
+msgid "parental.modeDescription"
+msgstr "Keep younger viewers safe with PIN-protected category locks, age limits, and automatic adult keyword filtering."
+
+msgid "profiles.whoIsWatching"
+msgstr "Who's Watching?"
+
+msgid "profiles.addNew"
+msgstr "Add profile"
+
+msgid "profiles.chooseTypeTitle"
+msgstr "Choose profile type"
+
+msgid "profiles.typeAdultTitle"
+msgstr "Standard profile"
+
+msgid "profiles.typeAdultDesc"
+msgstr "Full catalog access with personal favorites, watch history, and settings."
+
+msgid "profiles.typeKidsTitle"
+msgstr "Kids profile"
+
+msgid "profiles.typeKidsDesc"
+msgstr "Child-safe experience with Kids Mode, age limits, and keyword filtering enabled by default."
+
+msgid "profiles.editProfileTitle"
+msgstr "Edit profile"
+
+msgid "profiles.kidsToggleLabel"
+msgstr "Kids Mode"
+
+msgid "profiles.pinManageLabel"
+msgstr "Manage PIN"
+
+msgid "profiles.setPinOnCreate"
+msgstr "Set a PIN for this profile"
+
+msgid "profiles.deleteProfileAction"
+msgstr "Delete profile"
+
+msgid "profiles.continueAction"
+msgstr "Continue"
+
+msgid "profiles.cancelAction"
+msgstr "Cancel"
+
+msgid "settings.dropdown.selectHint"
+msgstr "Select an option"
+
+msgid "settings.artworkCacheUsage"
+msgstr "{usedMb} MB of {limitMb} MB used"
+
+msgid "settings.playback.advancedAudioTitle"
+msgstr "Advanced audio"
+
+msgid "settings.playback.advancedAudioDescription"
+msgstr "Output device, channel layout, exclusive mode, and bitstream passthrough."
+
+msgid "settings.liveTv.refreshNow"
+msgstr "Refresh now"
+
+msgid "settings.liveTv.refreshing"
+msgstr "Refreshing…"
+
+msgid "settings.liveTv.refreshed"
+msgstr "Refreshed"
+
+msgid "sources.action.refreshShort"
+msgstr "Refresh"
+
+msgid "sources.action.removeShort"
+msgstr "Remove"
+
+msgid "sources.action.advanced"
+msgstr "Advanced"
+
+msgid "sources.advanced.title"
+msgstr "Source settings"
+
+msgid "sources.advanced.rename"
+msgstr "Rename source"
+
+msgid "sources.advanced.renamePlaceholder"
+msgstr "Enter source name"
+
+msgid "sources.advanced.renameSave"
+msgstr "Save name"
+
+msgid "sources.advanced.sharedProfiles"
+msgstr "Shared with profiles"
+
+msgid "sources.advanced.sharedProfilesHint"
+msgstr "Choose which profiles can view channels and catalog items from this source."
+
+msgid "sources.advanced.allProfilesShared"
+msgstr "Shared with all profiles"

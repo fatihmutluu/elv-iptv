@@ -47,7 +47,7 @@ export interface AppShellStageProps {
   readonly contentIsolationKey: string;
   readonly catalog: CatalogService;
   readonly sources: readonly SourceRow[];
-  readonly readySourcesCount: number;
+  readonly allSources?: readonly SourceRow[];
   readonly refreshToken: number;
   readonly externalRefreshToken: number;
   readonly effectiveRefreshToken: number;
@@ -83,8 +83,9 @@ export interface AppShellStageProps {
   readonly onOpenPopout?: (target: PlayTarget) => void;
   readonly onSelectTab: (tab: AppTab, focusContent?: boolean) => void;
   readonly onOpenSources: () => void;
-  readonly onOpenChannelManagement: () => void;
   readonly onOpenGuideManagement: (sourceId: string) => void;
+  readonly onRefreshCatalogNow?: () => Promise<void> | void;
+  readonly onRefreshGuideNow?: () => Promise<void> | void;
   readonly onPreviewDiagnostics?: () => void;
   readonly onRegisterStopPreview?: (stop: (() => Promise<void>) | null) => void;
   readonly suppressEmbeddedPreview?: boolean;
@@ -136,7 +137,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         userStateVersion={p.effectiveUserStateVersion}
         preferredAudioLang={p.preferences.preferences.preferredAudioLang}
         preferredSubtitleLang={p.preferences.preferences.preferredSubtitleLang}
-        vodEnrichmentEnabled={p.preferences.preferences.vodEnrichmentEnabled}
+        vodEnrichmentEnabled={false}
         onSearchPerson={p.onSearchPerson}
         onBack={p.onPopDetail}
         onPlay={handleStagePlay}
@@ -156,13 +157,20 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         onFocusTopNav={p.onFocusTopNav}
         isActiveScope={p.isActiveScope}
         hasTransientOverlay={p.hasTransientOverlay}
-        onOpenChannelManagement={p.onOpenChannelManagement}
         onOpenGuideManagement={p.onOpenGuideManagement}
+        {...(p.onRefreshCatalogNow !== undefined
+          ? { onRefreshCatalogNow: p.onRefreshCatalogNow }
+          : {})}
+        {...(p.onRefreshGuideNow !== undefined ? { onRefreshGuideNow: p.onRefreshGuideNow } : {})}
         {...(p.onPreviewDiagnostics !== undefined
           ? { onPreviewDiagnostics: p.onPreviewDiagnostics }
           : {})}
         renderProfiles={(slot) => (
-          <ProfilesAndParentalPanel catalog={p.catalog} sources={p.sources} {...slot} />
+          <ProfilesAndParentalPanel
+            catalog={p.catalog}
+            sources={p.allSources ?? p.sources}
+            {...slot}
+          />
         )}
         renderSources={(slot) => (
           <SourcesScreen
@@ -181,7 +189,6 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
                 }
               : {})}
             externalRefreshToken={p.externalRefreshToken + p.refreshToken}
-            {...(p.readySourcesCount > 0 ? { onOpenMenu: () => p.onSelectTab('home') } : {})}
             {...slot}
           />
         )}
@@ -278,13 +285,13 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
       defaultLiveMode={p.preferences.preferences.defaultLiveMode}
       epgTimeSpanHours={p.preferences.preferences.epgTimeSpanHours}
       epgRowDensity={p.preferences.preferences.epgRowDensity}
-      epgGenreTints={p.preferences.preferences.epgGenreTints}
+      epgGenreTints={false}
       epgShowClock={p.preferences.preferences.epgShowClock}
-      logoBackdropMode={p.preferences.preferences.logoBackdropMode}
-      showSourceBadges={p.preferences.preferences.showSourceBadges}
-      liveOkTwoStepPreview={p.preferences.preferences.liveOkTwoStepPreview}
-      cleanChannelTitles={p.preferences.preferences.cleanChannelTitles}
-      collapseVariants={p.preferences.preferences.collapseLiveVariants}
+      logoBackdropMode="off"
+      showSourceBadges={true}
+      liveOkTwoStepPreview={false}
+      cleanChannelTitles={false}
+      collapseVariants={false}
       onEmbeddedPlaybackActiveChange={p.onEmbeddedPlaybackActiveChange}
       {...(p.onRegisterStopPreview !== undefined
         ? { onRegisterStopPreview: p.onRegisterStopPreview }

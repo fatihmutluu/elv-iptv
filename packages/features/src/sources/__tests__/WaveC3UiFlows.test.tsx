@@ -174,6 +174,9 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
       }),
     );
 
+    await waitFor(() => expect(screen.getByTestId('source-advanced-s1')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('source-advanced-s1'));
+    await waitFor(() => expect(screen.getByTestId('source-categories-s1')).toBeTruthy());
     await fireEvent.press(screen.getByTestId('source-categories-s1'));
     await waitFor(() => expect(screen.getByTestId('category-picker-s1')).toBeTruthy());
     await fireEvent.press(screen.getByTestId('category-picker-item-live-c2'));
@@ -231,17 +234,9 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
 
       await waitFor(() => expect(screen.getByTestId('source-pending-categories-s1')).toBeTruthy());
 
-      // Switch to M3U mode via D-pad Right + OK
+      // M3U is default mode (index 0: mode-m3u -> 1: mode-xtream -> 2: mode-stalker -> 3: input-name -> 4: input-playlist-url -> 5: paste-clipboard)
       await act(async () => {
-        remote.tap(KEYCODE_DPAD_RIGHT);
-      });
-      await act(async () => {
-        remote.tap(KEYCODE_DPAD_CENTER);
-      });
-
-      // Navigate down through M3U Wave C3 controls:
-      // 1: mode-m3u -> 2: mode-stalker -> 3: input-name -> 4: input-playlist-url -> 5: paste-clipboard
-      await act(async () => {
+        remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
@@ -287,7 +282,7 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
       });
       expect(screen.getByTestId('sources-toggle-legacy-tls-focus-ring')).toBeTruthy();
 
-      // Down past DNS preference (system/ipv4/ipv6) + host override -> submit -> Right -> submit-choose-categories
+      // Down past DNS preference (system/ipv4/ipv6) + host override -> submit
       await act(async () => {
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
@@ -296,10 +291,7 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
         remote.tap(KEYCODE_DPAD_DOWN);
       });
       expect(screen.getByTestId('sources-submit-focus-ring')).toBeTruthy();
-      await act(async () => {
-        remote.tap(KEYCODE_DPAD_RIGHT);
-      });
-      expect(screen.getByTestId('sources-submit-choose-categories-focus-ring')).toBeTruthy();
+      expect(screen.queryByTestId('sources-submit-choose-categories')).toBeNull();
 
       // Down -> source-include-pending-s1 -> Right -> source-dismiss-pending-s1
       await act(async () => {
@@ -311,14 +303,20 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
       });
       expect(screen.getByTestId('source-dismiss-pending-s1-focus-ring')).toBeTruthy();
 
-      // Down -> source-sync-s1 -> Right -> source-categories-s1 -> OK opens full-width picker
+      // Down -> source-sync-s1 -> Right -> source-remove-s1 -> Right -> source-advanced-s1 -> OK opens Advanced modal
       await act(async () => {
         remote.tap(KEYCODE_DPAD_DOWN);
       });
       await act(async () => {
         remote.tap(KEYCODE_DPAD_RIGHT);
+        remote.tap(KEYCODE_DPAD_RIGHT);
       });
-      expect(screen.getByTestId('source-categories-s1-focus-ring')).toBeTruthy();
+      expect(screen.getByTestId('source-advanced-s1-focus-ring')).toBeTruthy();
+      await act(async () => {
+        remote.tap(KEYCODE_DPAD_CENTER);
+      });
+      await waitFor(() => expect(screen.getByTestId('source-advanced-overlay-s1')).toBeTruthy());
+      // First entry in stub catalog (no renameSource/setSourceExcludedProfiles) is Choose categories -> OK opens full-width picker
       await act(async () => {
         remote.tap(KEYCODE_DPAD_CENTER);
       });
@@ -358,10 +356,12 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
       expect(screen.queryByTestId('category-picker-s1')).toBeNull();
       expect(onBack).not.toHaveBeenCalled();
 
-      // Re-open picker and confirm with OK on Import selected
-      await waitFor(() =>
-        expect(screen.getByTestId('source-categories-s1-focus-ring')).toBeTruthy(),
-      );
+      // Re-open picker via Advanced modal and confirm with OK on Import selected
+      await waitFor(() => expect(screen.getByTestId('source-advanced-s1-focus-ring')).toBeTruthy());
+      await act(async () => {
+        remote.tap(KEYCODE_DPAD_CENTER);
+      });
+      await waitFor(() => expect(screen.getByTestId('source-advanced-overlay-s1')).toBeTruthy());
       await act(async () => {
         remote.tap(KEYCODE_DPAD_CENTER);
       });
@@ -407,6 +407,8 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
     const screen = await render(
       wrap(<SourcesScreen catalog={catalog} onConsumeIncomingLocalPlaylist={onConsume} />),
     );
+    await waitFor(() => expect(screen.getByTestId('source-advanced-s1')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('source-advanced-s1'));
     await waitFor(() => expect(screen.getByTestId('source-categories-s1')).toBeTruthy());
     await fireEvent.press(screen.getByTestId('source-categories-s1'));
     await waitFor(() => expect(screen.getByTestId('category-picker-s1')).toBeTruthy());

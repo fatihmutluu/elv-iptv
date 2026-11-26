@@ -45,7 +45,7 @@ describe('Wave C2 Live TV & EPG preferences (#68, #251)', () => {
     const parsed = parsePreferences(
       JSON.stringify({
         version: 1,
-        guideRefreshHours: 48,
+        guideRefreshHours: 72,
         catalogRefreshHours: 72,
         liveChannelSwitchMode: 'manual',
       }),
@@ -54,7 +54,7 @@ describe('Wave C2 Live TV & EPG preferences (#68, #251)', () => {
     expect(parsed.catalogRefreshHours).toBe(24);
     expect(parsed.liveChannelSwitchMode).toBe('instant');
 
-    for (const bad of [-1, 3, '12', null, true]) {
+    for (const bad of [-1, 5, '12', null, true]) {
       const p = parsePreferences(
         JSON.stringify({
           version: 1,

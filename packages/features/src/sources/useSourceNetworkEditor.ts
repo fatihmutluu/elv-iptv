@@ -16,6 +16,7 @@ export interface SourceNetworkEditorState {
   readonly saving: boolean;
   readonly savedSourceId: string | null;
   toggleSource(source: SourceRow): void;
+  openSource(source: SourceRow): void;
   setDnsFamily(family: DnsFamilyPreference): void;
   setHostOverride(raw: string): void;
   save(source: SourceRow): Promise<void>;
@@ -75,15 +76,9 @@ export function useSourceNetworkEditor({
     clearSavedNotice();
   }, [clearSavedNotice]);
 
-  const toggleSource = useCallback(
+  const openSource = useCallback(
     (source: SourceRow) => {
       clearSavedNotice();
-      if (openSourceIdRef.current === source.id) {
-        openSourceIdRef.current = null;
-        setOpenSourceId(null);
-        setValidationError(null);
-        return;
-      }
       const initialDns = source.dnsFamily ?? 'system';
       const initialHost = source.hostOverride ?? '';
       openSourceIdRef.current = source.id;
@@ -95,6 +90,20 @@ export function useSourceNetworkEditor({
       setValidationError(null);
     },
     [clearSavedNotice],
+  );
+
+  const toggleSource = useCallback(
+    (source: SourceRow) => {
+      clearSavedNotice();
+      if (openSourceIdRef.current === source.id) {
+        openSourceIdRef.current = null;
+        setOpenSourceId(null);
+        setValidationError(null);
+        return;
+      }
+      openSource(source);
+    },
+    [clearSavedNotice, openSource],
   );
 
   const setDnsFamily = useCallback(
@@ -168,6 +177,7 @@ export function useSourceNetworkEditor({
     saving,
     savedSourceId,
     toggleSource,
+    openSource,
     setDnsFamily,
     setHostOverride,
     save,

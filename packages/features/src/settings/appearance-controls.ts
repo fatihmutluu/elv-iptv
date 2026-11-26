@@ -1,7 +1,9 @@
 import {
   type AccessibilityFontFamily,
+  type ArtworkCacheFormFactor,
   type ArtworkCacheLimitMbPref,
   DEFAULT_HOME_LAYOUT,
+  getPlatformDefaultArtworkCacheLimitMb,
   isHomeLayoutSectionId,
   MAX_PREF_OVERSCAN,
   MIN_PREF_OVERSCAN,
@@ -24,19 +26,13 @@ export interface SettingsPreferencesController {
 }
 
 export const LANGUAGE_OPTIONS: ReadonlyArray<{
-  readonly id: 'system' | 'tr' | 'en';
-  readonly focusId: AppearanceFocusId;
+  readonly id: 'system' | 'en' | 'tr';
   readonly testID: string;
   readonly labelKey: MessageId;
 }> = [
-  {
-    id: 'system',
-    focusId: 'lang-system',
-    testID: 'settings-lang-system',
-    labelKey: 'settings.language.system',
-  },
-  { id: 'tr', focusId: 'lang-tr', testID: 'settings-lang-tr', labelKey: 'settings.language.tr' },
-  { id: 'en', focusId: 'lang-en', testID: 'settings-lang-en', labelKey: 'settings.language.en' },
+  { id: 'system', testID: 'settings-lang-system', labelKey: 'settings.language.system' },
+  { id: 'en', testID: 'settings-lang-en', labelKey: 'settings.language.en' },
+  { id: 'tr', testID: 'settings-lang-tr', labelKey: 'settings.language.tr' },
 ];
 
 export const FONT_SCALE_OPTIONS: ReadonlyArray<{
@@ -137,13 +133,40 @@ export const TV_CLOCK_MODE_OPTIONS: ReadonlyArray<{
 
 export const ARTWORK_CACHE_OPTIONS: ReadonlyArray<{
   readonly mb: ArtworkCacheLimitMbPref;
-  readonly focusId: AppearanceFocusId;
   readonly testID: string;
 }> = [
-  { mb: 64, focusId: 'artwork-cache-64', testID: 'settings-artwork-cache-64' },
-  { mb: 128, focusId: 'artwork-cache-128', testID: 'settings-artwork-cache-128' },
-  { mb: 256, focusId: 'artwork-cache-256', testID: 'settings-artwork-cache-256' },
+  { mb: 64, testID: 'settings-artwork-cache-64' },
+  { mb: 128, testID: 'settings-artwork-cache-128' },
+  { mb: 256, testID: 'settings-artwork-cache-256' },
+  { mb: 512, testID: 'settings-artwork-cache-512' },
 ];
+
+/** Builds a preferences patch that resets ONLY Appearance-tab settings for the given platform form factor. */
+export function buildAppearanceResetPatch(formFactor: ArtworkCacheFormFactor): {
+  readonly patch: PreferencesPatch;
+  readonly platformDefaultMb: ArtworkCacheLimitMbPref;
+} {
+  const platformDefaultMb = getPlatformDefaultArtworkCacheLimitMb(formFactor);
+  return {
+    platformDefaultMb,
+    patch: {
+      locale: 'system',
+      themePreset: 'obsidianCrimson',
+      fontScale: 1,
+      uiFontFamily: 'system',
+      subtitleFontFamily: 'system',
+      reduceMotion: false,
+      confirmExitOnBack: true,
+      overscanX: 0,
+      overscanY: 0,
+      tvClockMode: 'never',
+      artworkCacheLimitMb: platformDefaultMb,
+      crashReportsOptIn: false,
+      crashReportsIncludeLogs: false,
+      homeLayout: DEFAULT_HOME_LAYOUT,
+    },
+  };
+}
 
 /** Steps an overscan ratio cleanly by `delta` (`±0.01`), clamped to `[0, 0.1]`. */
 export function stepOverscanRatio(current: number, delta: number): number {
@@ -169,13 +192,16 @@ export function computeAppearanceScrollY(
   >,
   motionOffsetY: number,
 ): number | undefined {
-  if (controlId.startsWith('lang-')) return 0;
+  if (controlId === 'lang-dropdown') return 0;
   if (controlId.startsWith('theme-')) {
     const box = layouts.theme;
     if (!box) return undefined;
     return SECOND_THEME_ROW_IDS.has(controlId)
       ? Math.max(0, box.y + Math.round(box.height * 0.45) - 12)
       : Math.max(0, box.y - 12);
+  }
+  if (controlId.startsWith('home-layout-')) {
+    return layouts.homeLayout ? Math.max(0, layouts.homeLayout.y - 12) : undefined;
   }
   if (
     controlId.startsWith('font-') ||
@@ -184,21 +210,14 @@ export function computeAppearanceScrollY(
   ) {
     return layouts.font ? Math.max(0, layouts.font.y - 12) : undefined;
   }
-  if (
-    controlId === 'toggle-reduce-motion' ||
-    controlId === 'toggle-confirm-exit' ||
-    controlId === 'toggle-vod-enrichment'
-  ) {
+  if (controlId === 'toggle-reduce-motion' || controlId === 'toggle-confirm-exit') {
     return layouts.font ? Math.max(0, layouts.font.y + motionOffsetY - 12) : undefined;
   }
   if (controlId.startsWith('overscan-') || controlId.startsWith('tv-clock-')) {
     return layouts.tvDisplay ? Math.max(0, layouts.tvDisplay.y - 12) : undefined;
   }
-  if (controlId.startsWith('artwork-cache-')) {
+  if (controlId === 'artwork-cache-dropdown' || controlId === 'artwork-cache-clear') {
     return layouts.artworkCache ? Math.max(0, layouts.artworkCache.y - 12) : undefined;
-  }
-  if (controlId === 'reset-preferences') {
-    return layouts.reset ? Math.max(0, layouts.reset.y - 12) : undefined;
   }
   if (
     controlId === 'toggle-crash-reports-opt-in' ||
@@ -207,8 +226,8 @@ export function computeAppearanceScrollY(
   ) {
     return layouts.diagnostics ? Math.max(0, layouts.diagnostics.y - 12) : undefined;
   }
-  if (controlId.startsWith('home-layout-')) {
-    return layouts.homeLayout ? Math.max(0, layouts.homeLayout.y - 12) : undefined;
+  if (controlId === 'reset-preferences') {
+    return layouts.reset ? Math.max(0, layouts.reset.y - 12) : undefined;
   }
   return undefined;
 }
@@ -219,21 +238,20 @@ export function activateAppearanceControl(
   deps: {
     preferences?: SettingsPreferencesController;
     reduceMotion: boolean;
+    platformFormFactor?: ArtworkCacheFormFactor;
     setPreset: (id: ThemePresetId) => void;
     setFontScale: (scale: number) => void;
     setReduceMotion: (next: boolean) => void;
     setUiFontFamily?: (family: AccessibilityFontFamily) => void;
-    setLocale: (locale: 'tr' | 'en') => void;
+    onOpenDropdown?: (dropdownId: 'lang-dropdown' | 'artwork-cache-dropdown') => void;
     onSetArtworkCacheLimitMb?: (mb: ArtworkCacheLimitMbPref) => void;
     onClearArtworkCache?: () => void;
     onPreviewDiagnostics?: () => void;
   },
 ): void {
   const { preferences } = deps;
-  if (controlId === 'lang-system' || controlId === 'lang-tr' || controlId === 'lang-en') {
-    const locale = controlId === 'lang-system' ? 'system' : controlId === 'lang-tr' ? 'tr' : 'en';
-    if (preferences) void preferences.updatePreferences({ locale });
-    else if (locale !== 'system') deps.setLocale(locale);
+  if (controlId === 'lang-dropdown' || controlId === 'artwork-cache-dropdown') {
+    deps.onOpenDropdown?.(controlId);
     return;
   }
   if (controlId.startsWith('theme-')) {
@@ -275,14 +293,6 @@ export function activateAppearanceControl(
     }
     return;
   }
-  if (controlId === 'toggle-vod-enrichment') {
-    if (preferences) {
-      void preferences.updatePreferences({
-        vodEnrichmentEnabled: !(preferences.preferences.vodEnrichmentEnabled === true),
-      });
-    }
-    return;
-  }
   if (controlId === 'overscan-x-dec' || controlId === 'overscan-x-inc') {
     if (preferences) {
       const next = stepOverscanRatio(
@@ -308,24 +318,21 @@ export function activateAppearanceControl(
     if (preferences) void preferences.updatePreferences({ tvClockMode: clockOpt.id });
     return;
   }
-  const cacheOpt = ARTWORK_CACHE_OPTIONS.find((opt) => opt.focusId === controlId);
-  if (cacheOpt) {
-    if (preferences) void preferences.updatePreferences({ artworkCacheLimitMb: cacheOpt.mb });
-    deps.onSetArtworkCacheLimitMb?.(cacheOpt.mb);
-    return;
-  }
   if (controlId === 'artwork-cache-clear') {
     deps.onClearArtworkCache?.();
     return;
   }
   if (controlId === 'reset-preferences') {
-    if (preferences) void preferences.resetPreferences();
-    else {
+    const { patch, platformDefaultMb } = buildAppearanceResetPatch(deps.platformFormFactor ?? 'tv');
+    if (preferences) {
+      void preferences.updatePreferences(patch);
+    } else {
       deps.setPreset('obsidianCrimson');
       deps.setFontScale(1);
       deps.setReduceMotion(false);
       deps.setUiFontFamily?.('system');
     }
+    deps.onSetArtworkCacheLimitMb?.(platformDefaultMb);
     return;
   }
   if (controlId === 'toggle-crash-reports-opt-in') {

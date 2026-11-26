@@ -153,7 +153,7 @@ const EXPECTED_PAIRS: ReadonlyArray<readonly [MessageId, string, string]> = [
   [
     'feedback.attachDiagnosticsLabel',
     'Attach redacted device & codec diagnostics',
-    'Gizlenmiş cihaz ve kodek tanılamalarını ekle',
+    'Kişisel bilgileri temizlenmiş cihaz ve kodek bilgilerini ekle',
   ],
   ['feedback.submitAction', 'Send Feedback', 'Geri Bildirim Gönder'],
   ['feedback.sendingStatus', 'Sending feedback...', 'Geri bildirim gönderiliyor...'],

@@ -1,4 +1,5 @@
 import {
+  type ArtworkCacheFormFactor,
   type ArtworkCacheLimitMbPref,
   DEFAULT_PREFERENCES,
   type PreferencesPatch,
@@ -23,12 +24,14 @@ import {
   type ReactElement,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   ARTWORK_CACHE_OPTIONS,
+  buildAppearanceResetPatch,
   computeAppearanceScrollY,
   FONT_SCALE_OPTIONS,
   LANGUAGE_OPTIONS,
@@ -39,6 +42,7 @@ import {
 } from './appearance-controls';
 import { DiagnosticsSettingsCard } from './DiagnosticsSettingsCard';
 import { HomeLayoutEditor } from './HomeLayoutEditor';
+import { type SettingsDropdownOption, SettingsDropdownRow } from './SettingsDropdownRow';
 import { SettingsDivider, SettingsToggleRow } from './SettingsRowParts';
 import { ThemePresetGrid } from './ThemePresetGrid';
 import { TvDisplaySettingsCard } from './TvDisplaySettingsCard';
@@ -47,10 +51,16 @@ import type { AppearanceFocusId } from './useTvSettingsNavigation';
 export {
   activateAppearanceControl,
   adjustAppearanceControl,
+  buildAppearanceResetPatch,
   type SettingsPreferencesController,
 } from './appearance-controls';
 
 const CLEAR_FEEDBACK_MS = 3_000;
+
+function formatBytesToMb(bytes: number): number {
+  if (!Number.isFinite(bytes) || bytes <= 0) return 0;
+  return Math.round((bytes / (1024 * 1024)) * 10) / 10;
+}
 
 /** Props of {@link AppearancePanel}. */
 export interface AppearancePanelProps {
@@ -59,11 +69,15 @@ export interface AppearancePanelProps {
   /** Currently focused Appearance control on 10-foot TV D-pad navigation. */
   readonly focusedControlId?: AppearanceFocusId | null;
   /** Optional external clear handler shared with TV D-pad activation in `SettingsScreen`. */
-  readonly onClearArtworkCache?: () => void;
+  readonly onClearArtworkCache?: () => Promise<void> | void;
   /** Optional controlled cleared-confirmation flag owned by `SettingsScreen`. */
   readonly artworkCacheCleared?: boolean;
   /** Opens the opt-in redacted diagnostic report preview modal (`#226`). */
   readonly onPreviewDiagnostics?: () => void;
+  /** Optional controlled TV dropdown modal id owned by `SettingsScreen`. */
+  readonly openTvDropdownId?: 'lang-dropdown' | 'artwork-cache-dropdown' | null;
+  /** Invoked when a TV dropdown modal opens or closes. */
+  readonly onOpenTvDropdownChange?: (id: 'lang-dropdown' | 'artwork-cache-dropdown' | null) => void;
 }
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
@@ -71,9 +85,9 @@ type SectionLayout = { readonly y: number; readonly height: number };
 
 /**
  * Cinema Quietude Appearance, Accessibility & Artwork Cache settings panel:
- * live in-app Language switcher (`#16`), 6 dynamic Theme Presets including WCAG AAA High Contrast
- * (`#325`), Text Size scaling (`90%–120%`, `#62`), Reduce Motion toggle (`#325`), bounded Artwork
- * Cache budget & clear (`#405`), and Reset.
+ * live in-app Language dropdown (`#16`), 6 dynamic Theme Presets including WCAG AAA High Contrast
+ * (`#325`), Home Layout Editor, Typography & Reduce Motion, Android Exit Guard, TV Display,
+ * bounded Artwork Cache dropdown (`64–512 MB`) + live disk usage, Diagnostics, and scoped Appearance Reset.
  */
 export function AppearancePanel({
   preferences: suppliedPrefs,
@@ -81,6 +95,8 @@ export function AppearancePanel({
   onClearArtworkCache,
   artworkCacheCleared: controlledCleared,
   onPreviewDiagnostics,
+  openTvDropdownId = null,
+  onOpenTvDropdownChange,
 }: AppearancePanelProps): ReactElement {
   const theme = useTheme();
   const themeCtrl = useThemeController();
@@ -88,9 +104,12 @@ export function AppearancePanel({
   const viewport = useViewport();
   const adapters = useUiAdapters();
   const [localCleared, setLocalCleared] = useState(false);
+  const [cacheUsedMb, setCacheUsedMb] = useState<number | null>(null);
+  const [openPopover, setOpenPopover] = useState<'lang' | 'cache' | null>(null);
 
   const scrollRef = useRef<ScrollViewHandle | null>(null);
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
   const layoutsRef = useRef<
     Partial<
       Record<
@@ -102,6 +121,10 @@ export function AppearancePanel({
   const motionOffsetYRef = useRef(0);
 
   const isTv = viewport.formFactor === 'tv';
+  const showConfirmExitOnBack = Platform.OS === 'android';
+  const platformFormFactor: ArtworkCacheFormFactor =
+    viewport.formFactor === 'desktop' ? 'desktop' : viewport.formFactor === 'tv' ? 'tv' : 'mobile';
+
   const activePrefs: PreferencesSnapshot = suppliedPrefs?.preferences ?? {
     ...DEFAULT_PREFERENCES,
     themePreset: theme.preset === 'custom' ? DEFAULT_PREFERENCES.themePreset : theme.preset,
@@ -111,11 +134,32 @@ export function AppearancePanel({
     uiFontFamily: theme.uiFontFamily,
   };
 
+  const refreshArtworkCacheStats = useCallback(() => {
+    const readStats = adapters.artworkCache?.stats;
+    if (!readStats) return;
+    void Promise.resolve(readStats())
+      .then((stats) => {
+        if (mountedRef.current && stats) {
+          setCacheUsedMb(formatBytesToMb(stats.bytes));
+        }
+      })
+      .catch(() => undefined);
+  }, [adapters.artworkCache]);
+
   useEffect(() => {
+    mountedRef.current = true;
+    refreshArtworkCacheStats();
     return () => {
+      mountedRef.current = false;
       if (clearTimerRef.current !== null) clearTimeout(clearTimerRef.current);
     };
-  }, []);
+  }, [refreshArtworkCacheStats]);
+
+  useEffect(() => {
+    if (controlledCleared) {
+      refreshArtworkCacheStats();
+    }
+  }, [controlledCleared, refreshArtworkCacheStats]);
 
   useEffect(() => {
     if (!isTv || !focusedControlId) return;
@@ -151,37 +195,74 @@ export function AppearancePanel({
       applyPatch({ artworkCacheLimitMb: mb });
       const setLimitBytes = adapters.artworkCache?.setLimitBytes;
       if (setLimitBytes !== undefined) {
-        void Promise.resolve(setLimitBytes(mb * 1024 * 1024)).catch(() => undefined);
+        void Promise.resolve(setLimitBytes(mb * 1024 * 1024))
+          .then(() => refreshArtworkCacheStats())
+          .catch(() => undefined);
       }
     },
-    [adapters.artworkCache, applyPatch],
+    [adapters.artworkCache, applyPatch, refreshArtworkCacheStats],
   );
 
   const handleClearArtworkCache = useCallback(() => {
     if (onClearArtworkCache) {
-      onClearArtworkCache();
+      void Promise.resolve(onClearArtworkCache()).then(() => refreshArtworkCacheStats());
       return;
     }
     defaultLoadedArtworkUris.clear();
-    void Promise.resolve(adapters.artworkCache?.clear()).catch(() => undefined);
+    void Promise.resolve(adapters.artworkCache?.clear())
+      .then(() => refreshArtworkCacheStats())
+      .catch(() => undefined);
     setLocalCleared(true);
     if (clearTimerRef.current !== null) clearTimeout(clearTimerRef.current);
     clearTimerRef.current = setTimeout(() => {
       clearTimerRef.current = null;
       setLocalCleared(false);
     }, CLEAR_FEEDBACK_MS);
-  }, [adapters.artworkCache, onClearArtworkCache]);
+  }, [adapters.artworkCache, onClearArtworkCache, refreshArtworkCacheStats]);
 
   const handleReset = useCallback(() => {
+    const { patch, platformDefaultMb } = buildAppearanceResetPatch(platformFormFactor);
     if (suppliedPrefs) {
-      void suppliedPrefs.resetPreferences();
-      return;
+      void suppliedPrefs.updatePreferences(patch);
+    } else {
+      themeCtrl.setPreset('obsidianCrimson');
+      themeCtrl.setFontScale(1);
+      themeCtrl.setReduceMotion(false);
+      themeCtrl.setUiFontFamily('system');
     }
-    themeCtrl.setPreset('obsidianCrimson');
-    themeCtrl.setFontScale(1);
-    themeCtrl.setReduceMotion(false);
-    themeCtrl.setUiFontFamily('system');
-  }, [suppliedPrefs, themeCtrl]);
+    const setLimitBytes = adapters.artworkCache?.setLimitBytes;
+    if (setLimitBytes !== undefined) {
+      void Promise.resolve(setLimitBytes(platformDefaultMb * 1024 * 1024))
+        .then(() => refreshArtworkCacheStats())
+        .catch(() => undefined);
+    }
+  }, [
+    adapters.artworkCache,
+    platformFormFactor,
+    refreshArtworkCacheStats,
+    suppliedPrefs,
+    themeCtrl,
+  ]);
+
+  const languageOptions = useMemo<readonly SettingsDropdownOption<'system' | 'en' | 'tr'>[]>(
+    () =>
+      LANGUAGE_OPTIONS.map((opt) => ({
+        value: opt.id,
+        label: opt.id === 'en' ? 'English' : opt.id === 'tr' ? 'Türkçe' : i18n.t(opt.labelKey),
+        testID: opt.testID,
+      })),
+    [i18n],
+  );
+
+  const artworkCacheOptions = useMemo<readonly SettingsDropdownOption<ArtworkCacheLimitMbPref>[]>(
+    () =>
+      ARTWORK_CACHE_OPTIONS.map((opt) => ({
+        value: opt.mb,
+        label: i18n.t('settings.artworkCacheLimitMb', { mb: opt.mb }),
+        testID: opt.testID,
+      })),
+    [i18n],
+  );
 
   const showClearedMessage = controlledCleared ?? localCleared;
 
@@ -193,32 +274,43 @@ export function AppearancePanel({
       style={styles.scroll}
       contentContainerStyle={[styles.content, { gap: theme.spacing.md }]}
     >
-      <Surface tone="surface" bordered rounded="modal" style={styles.sectionCard}>
-        <View style={styles.rowHeader}>
-          <View style={styles.rowText}>
-            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
-              {i18n.t('settings.language.label')}
-            </Text>
-            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-              {i18n.t('settings.language.description')}
-            </Text>
-          </View>
-          <View style={[styles.chipRow, { gap: theme.spacing.xs }]}>
-            {LANGUAGE_OPTIONS.map((opt) => (
-              <FilterChip
-                key={opt.id}
-                testID={opt.testID}
-                label={i18n.t(opt.labelKey)}
-                selected={activePrefs.locale === opt.id}
-                focused={focusedControlId === opt.focusId}
-                focusable={!isTv}
-                onPress={() => applyPatch({ locale: opt.id })}
-              />
-            ))}
-          </View>
-        </View>
+      {/* 1. Language */}
+      <Surface
+        tone="surface"
+        bordered
+        rounded="modal"
+        style={[
+          styles.sectionCard,
+          openPopover === 'lang' || openTvDropdownId === 'lang-dropdown'
+            ? styles.elevatedCard
+            : undefined,
+        ]}
+      >
+        <SettingsDropdownRow
+          testID="settings-language-dropdown"
+          title={i18n.t('settings.language.label')}
+          description={i18n.t('settings.language.description')}
+          options={languageOptions}
+          selectedValue={activePrefs.locale}
+          focused={focusedControlId === 'lang-dropdown'}
+          isTv={isTv}
+          open={
+            isTv && onOpenTvDropdownChange !== undefined
+              ? openTvDropdownId === 'lang-dropdown'
+              : openPopover === 'lang'
+          }
+          onOpenChange={(next) => {
+            if (isTv && onOpenTvDropdownChange !== undefined) {
+              onOpenTvDropdownChange(next ? 'lang-dropdown' : null);
+            } else {
+              setOpenPopover((prev) => (next ? 'lang' : prev === 'lang' ? null : prev));
+            }
+          }}
+          onSelect={(locale) => applyPatch({ locale })}
+        />
       </Surface>
 
+      {/* 2. Theme */}
       <Surface
         testID="settings-section-theme"
         tone="surface"
@@ -248,6 +340,18 @@ export function AppearancePanel({
         />
       </Surface>
 
+      {/* 3. Home Layout Editor */}
+      <HomeLayoutEditor
+        layout={activePrefs.homeLayout}
+        focusedControlId={focusedControlId}
+        isTv={isTv}
+        onChange={(nextLayout) => applyPatch({ homeLayout: nextLayout })}
+        onLayoutBox={(box) => {
+          layoutsRef.current.homeLayout = box;
+        }}
+      />
+
+      {/* 4. Typography, Reduce Motion & Android Exit Guard */}
       <Surface
         testID="settings-section-font"
         tone="surface"
@@ -352,32 +456,22 @@ export function AppearancePanel({
           onToggle={() => applyPatch({ reduceMotion: !activePrefs.reduceMotion })}
         />
 
-        <SettingsDivider />
-
-        <SettingsToggleRow
-          testID="settings-toggle-confirm-exit"
-          title={i18n.t('settings.appearance.confirmExitOnBack')}
-          checked={activePrefs.confirmExitOnBack}
-          focused={focusedControlId === 'toggle-confirm-exit'}
-          isTv={isTv}
-          onToggle={() => applyPatch({ confirmExitOnBack: !activePrefs.confirmExitOnBack })}
-        />
-
-        <SettingsDivider />
-
-        <SettingsToggleRow
-          testID="settings-vod-enrichment-toggle"
-          title={i18n.t('settings.appearance.vodEnrichmentTitle')}
-          description={i18n.t('settings.appearance.vodEnrichmentDescription')}
-          checked={activePrefs.vodEnrichmentEnabled === true}
-          focused={focusedControlId === 'toggle-vod-enrichment'}
-          isTv={isTv}
-          onToggle={() =>
-            applyPatch({ vodEnrichmentEnabled: !(activePrefs.vodEnrichmentEnabled === true) })
-          }
-        />
+        {showConfirmExitOnBack ? (
+          <>
+            <SettingsDivider />
+            <SettingsToggleRow
+              testID="settings-toggle-confirm-exit"
+              title={i18n.t('settings.appearance.confirmExitOnBack')}
+              checked={activePrefs.confirmExitOnBack}
+              focused={focusedControlId === 'toggle-confirm-exit'}
+              isTv={isTv}
+              onToggle={() => applyPatch({ confirmExitOnBack: !activePrefs.confirmExitOnBack })}
+            />
+          </>
+        ) : null}
       </Surface>
 
+      {/* 5. (TV only) TvDisplaySettingsCard */}
       {isTv ? (
         <TvDisplaySettingsCard
           overscanX={activePrefs.overscanX}
@@ -398,12 +492,18 @@ export function AppearancePanel({
         />
       ) : null}
 
+      {/* 6. Artwork Cache */}
       <Surface
         testID="settings-section-artwork-cache"
         tone="surface"
         bordered
         rounded="modal"
-        style={styles.sectionCard}
+        style={[
+          styles.sectionCard,
+          openPopover === 'cache' || openTvDropdownId === 'artwork-cache-dropdown'
+            ? styles.elevatedCard
+            : undefined,
+        ]}
         onLayout={(e) => {
           layoutsRef.current.artworkCache = {
             y: e.nativeEvent.layout.y,
@@ -411,32 +511,28 @@ export function AppearancePanel({
           };
         }}
       >
-        <View style={styles.rowHeader}>
-          <View style={styles.rowText}>
-            <Text
-              style={[
-                theme.typography.title,
-                TABULAR_NUMS_STYLE,
-                { color: theme.colors.textPrimary },
-              ]}
-            >
-              {i18n.t('settings.artworkCache')}
-            </Text>
-          </View>
-          <View style={[styles.chipRow, { gap: theme.spacing.xs }]}>
-            {ARTWORK_CACHE_OPTIONS.map((opt) => (
-              <FilterChip
-                key={opt.testID}
-                testID={opt.testID}
-                label={i18n.t('settings.artworkCacheLimitMb', { mb: opt.mb })}
-                selected={activePrefs.artworkCacheLimitMb === opt.mb}
-                focused={focusedControlId === opt.focusId}
-                focusable={!isTv}
-                onPress={() => handleSelectArtworkCacheLimit(opt.mb)}
-              />
-            ))}
-          </View>
-        </View>
+        <SettingsDropdownRow
+          testID="settings-artwork-cache-dropdown"
+          title={i18n.t('settings.artworkCache')}
+          options={artworkCacheOptions}
+          selectedValue={activePrefs.artworkCacheLimitMb}
+          focused={focusedControlId === 'artwork-cache-dropdown'}
+          isTv={isTv}
+          tabularNums
+          open={
+            isTv && onOpenTvDropdownChange !== undefined
+              ? openTvDropdownId === 'artwork-cache-dropdown'
+              : openPopover === 'cache'
+          }
+          onOpenChange={(next) => {
+            if (isTv && onOpenTvDropdownChange !== undefined) {
+              onOpenTvDropdownChange(next ? 'artwork-cache-dropdown' : null);
+            } else {
+              setOpenPopover((prev) => (next ? 'cache' : prev === 'cache' ? null : prev));
+            }
+          }}
+          onSelect={handleSelectArtworkCacheLimit}
+        />
 
         <SettingsDivider />
 
@@ -449,6 +545,21 @@ export function AppearancePanel({
             focusable={!isTv}
             onPress={handleClearArtworkCache}
           />
+          {cacheUsedMb !== null ? (
+            <Text
+              testID="settings-artwork-cache-usage"
+              style={[
+                theme.typography.caption,
+                TABULAR_NUMS_STYLE,
+                { color: theme.colors.textSecondary },
+              ]}
+            >
+              {i18n.t('settings.artworkCacheUsage', {
+                usedMb: cacheUsedMb,
+                limitMb: activePrefs.artworkCacheLimitMb,
+              })}
+            </Text>
+          ) : null}
           {showClearedMessage ? (
             <Text
               testID="settings-artwork-cache-cleared"
@@ -461,6 +572,23 @@ export function AppearancePanel({
         </View>
       </Surface>
 
+      {/* 7. Diagnostics */}
+      <DiagnosticsSettingsCard
+        crashReportsOptIn={activePrefs.crashReportsOptIn}
+        crashReportsIncludeLogs={activePrefs.crashReportsIncludeLogs}
+        focusedControlId={focusedControlId}
+        isTv={isTv}
+        onToggleOptIn={() => applyPatch({ crashReportsOptIn: !activePrefs.crashReportsOptIn })}
+        onToggleIncludeLogs={() =>
+          applyPatch({ crashReportsIncludeLogs: !activePrefs.crashReportsIncludeLogs })
+        }
+        {...(onPreviewDiagnostics !== undefined ? { onPreviewReport: onPreviewDiagnostics } : {})}
+        onLayoutBox={(box) => {
+          layoutsRef.current.diagnostics = box;
+        }}
+      />
+
+      {/* 8. Reset Appearance (very bottom) */}
       <View
         testID="settings-section-reset"
         style={styles.footerRow}
@@ -480,31 +608,6 @@ export function AppearancePanel({
           onPress={handleReset}
         />
       </View>
-
-      <DiagnosticsSettingsCard
-        crashReportsOptIn={activePrefs.crashReportsOptIn}
-        crashReportsIncludeLogs={activePrefs.crashReportsIncludeLogs}
-        focusedControlId={focusedControlId}
-        isTv={isTv}
-        onToggleOptIn={() => applyPatch({ crashReportsOptIn: !activePrefs.crashReportsOptIn })}
-        onToggleIncludeLogs={() =>
-          applyPatch({ crashReportsIncludeLogs: !activePrefs.crashReportsIncludeLogs })
-        }
-        {...(onPreviewDiagnostics !== undefined ? { onPreviewReport: onPreviewDiagnostics } : {})}
-        onLayoutBox={(box) => {
-          layoutsRef.current.diagnostics = box;
-        }}
-      />
-
-      <HomeLayoutEditor
-        layout={activePrefs.homeLayout}
-        focusedControlId={focusedControlId}
-        isTv={isTv}
-        onChange={(nextLayout) => applyPatch({ homeLayout: nextLayout })}
-        onLayoutBox={(box) => {
-          layoutsRef.current.homeLayout = box;
-        }}
-      />
     </ScrollView>
   );
 }
@@ -513,6 +616,7 @@ const styles = StyleSheet.create({
   scroll: { flex: 1, minHeight: 0 },
   content: { paddingBottom: 24 },
   sectionCard: { padding: 18, gap: 14 },
+  elevatedCard: { zIndex: 40 },
   blockHeader: { gap: 4 },
   rowHeader: {
     flexDirection: 'row',

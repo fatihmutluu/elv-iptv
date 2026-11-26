@@ -85,7 +85,8 @@ export const trWaveF9Messages: Readonly<Record<WaveF9MessageId, string>> = {
   'feedback.catOther': 'Diğer',
   'feedback.messageLabel': 'Açıklama',
   'feedback.messagePlaceholder': 'Ne olduğunu veya neyi iyileştirebileceğimizi yazın...',
-  'feedback.attachDiagnosticsLabel': 'Gizlenmiş cihaz ve kodek tanılamalarını ekle',
+  'feedback.attachDiagnosticsLabel':
+    'Kişisel bilgileri temizlenmiş cihaz ve kodek bilgilerini ekle',
   'feedback.submitAction': 'Geri Bildirim Gönder',
   'feedback.sendingStatus': 'Geri bildirim gönderiliyor...',
   'feedback.sentSuccess': 'Teşekkürler! Geri bildiriminiz alındı.',

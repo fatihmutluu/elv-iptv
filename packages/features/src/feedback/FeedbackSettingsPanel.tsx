@@ -5,7 +5,6 @@ import {
   CtaButton,
   FilterChip,
   Surface,
-  TABULAR_NUMS_STYLE,
   TextEntryBoundary,
   TvFocusGuideRegion,
   TvTextInput,
@@ -17,36 +16,11 @@ import {
   webTransition,
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { FeedbackCategoryId, FeedbackPort, TelemetryPort } from '../ports/wave-f9-ports';
 import { useRouteActive } from '../shared';
 
 const MAX_FEEDBACK_LENGTH = 2_000;
-
-const STATIC_REDACTED_TELEMETRY_EXAMPLE = JSON.stringify(
-  {
-    sessionId: 'anon-session-redacted',
-    platform: 'tv-mobile',
-    events: [
-      {
-        kind: 'screen_transition',
-        screen: 'home',
-        durationMs: 42,
-      },
-      {
-        kind: 'media_decode_failure',
-        engine: 'media3',
-        container: 'mpegts',
-        videoCodec: 'hevc',
-        audioCodec: 'eac3',
-        errorCode: 'DECODER_INIT_FAILED',
-        isLive: true,
-      },
-    ],
-  },
-  null,
-  2,
-);
 
 const FEEDBACK_CATEGORIES: readonly {
   readonly id: FeedbackCategoryId;
@@ -60,7 +34,7 @@ const FEEDBACK_CATEGORIES: readonly {
   { id: 'other', labelKey: 'feedback.catOther' },
 ];
 
-/** Structural preferences slice consumed by {@link FeedbackSettingsPanel}. */
+/** Structural preferences slice accepted by {@link FeedbackSettingsPanel}. */
 export interface FeedbackPreferencesSlice {
   readonly preferences: Pick<PreferencesSnapshot, 'telemetryOptIn'>;
   readonly updatePreferences: (patch: PreferencesPatch) => unknown;
@@ -68,8 +42,10 @@ export interface FeedbackPreferencesSlice {
 
 /** Props of {@link FeedbackSettingsPanel}. */
 export interface FeedbackSettingsPanelProps {
+  /** @deprecated Telemetry card removed from Settings in Wave P7; kept optional for AppShell compatibility. */
   readonly telemetry?: TelemetryPort;
   readonly feedback?: FeedbackPort;
+  /** @deprecated Telemetry card removed from Settings in Wave P7; kept optional for AppShell compatibility. */
   readonly preferences?: FeedbackPreferencesSlice;
   /** Whether this Settings detail pane currently owns 10-foot TV remote focus. */
   readonly isActiveScope?: boolean;
@@ -107,13 +83,11 @@ function FeedbackPanelTvBridge({
 }
 
 /**
- * Cinema Quietude v2 Settings panel for Opt-In Runtime Telemetry (with live JSON payload preview)
- * and Feedback & Report Issue submission (`#458`).
+ * Cinema Quietude v2 Settings panel for categorized Feedback & Bug Report submission (`#458`).
+ * Defaults redacted diagnostic attachment to enabled so users can opt out if desired.
  */
 export function FeedbackSettingsPanel({
-  telemetry,
   feedback,
-  preferences,
   isActiveScope = true,
   onBack,
   onFocusTopNav,
@@ -124,29 +98,12 @@ export function FeedbackSettingsPanel({
   const routeActive = useRouteActive();
   const isTv = viewport.formFactor === 'tv' || viewport.inputModality === 'tv';
 
-  const [localOptIn, setLocalOptIn] = useState<boolean>(
-    () => preferences?.preferences.telemetryOptIn ?? telemetry?.isOptedIn() ?? false,
-  );
-  const [previewOpen, setPreviewOpen] = useState(false);
-
   const [category, setCategory] = useState<FeedbackCategoryId>('playback_issue');
   const [message, setMessage] = useState('');
-  const [includeDiagnostics, setIncludeDiagnostics] = useState(false);
+  const [includeDiagnostics, setIncludeDiagnostics] = useState(true);
   const [messageFocused, setMessageFocused] = useState(false);
   const [sending, setSending] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'sent' | 'empty' | 'error'>('idle');
-
-  const telemetryOptIn =
-    preferences !== undefined ? preferences.preferences.telemetryOptIn : localOptIn;
-  const queuedCount = telemetry?.queuedCount() ?? 0;
-  const payloadPreview = telemetry?.getPayloadPreviewJson() ?? STATIC_REDACTED_TELEMETRY_EXAMPLE;
-
-  const handleToggleTelemetry = useCallback(() => {
-    const next = !telemetryOptIn;
-    setLocalOptIn(next);
-    telemetry?.setOptIn(next);
-    void preferences?.updatePreferences({ telemetryOptIn: next });
-  }, [preferences, telemetry, telemetryOptIn]);
 
   const handleSubmitFeedback = useCallback(async () => {
     const trimmed = message.trim();
@@ -181,7 +138,6 @@ export function FeedbackSettingsPanel({
 
   const cursorPointer = webCursorPointer();
   const transition = webTransition(theme, 'background-color, border-color');
-  const monoFont = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
   return (
     <TextEntryBoundary>
@@ -203,124 +159,6 @@ export function FeedbackSettingsPanel({
               {...(onFocusTopNav !== undefined ? { onFocusTopNav } : {})}
             />
           ) : null}
-
-          <Surface
-            testID="telemetry-settings-card"
-            tone="surface"
-            bordered
-            rounded="modal"
-            style={styles.card}
-          >
-            <View style={styles.headerBlock}>
-              <Text style={[theme.typography.h2, { color: theme.colors.textPrimary }]}>
-                {i18n.t('telemetry.title')}
-              </Text>
-              <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-                {i18n.t('telemetry.subtitle')}
-              </Text>
-            </View>
-
-            <Pressable
-              testID="telemetry-opt-in-toggle"
-              accessibilityRole="switch"
-              accessibilityLabel={i18n.t('telemetry.optInLabel')}
-              accessibilityState={{ checked: telemetryOptIn }}
-              aria-checked={telemetryOptIn}
-              focusable
-              hasTVPreferredFocus={isTv && isActiveScope}
-              onPress={handleToggleTelemetry}
-              style={(state) => [
-                styles.toggleRow,
-                cursorPointer,
-                transition,
-                {
-                  borderRadius: theme.radius.card,
-                  backgroundColor: state.focused ? theme.colors.focusFill : theme.colors.bgCard,
-                  borderWidth: state.focused ? theme.focus.ringWidth : 1,
-                  borderColor: state.focused
-                    ? theme.colors.focusRingColor
-                    : theme.colors.surfaceBorder,
-                },
-              ]}
-            >
-              <Text
-                style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
-              >
-                {i18n.t('telemetry.optInLabel')}
-              </Text>
-              <View
-                style={[
-                  styles.switchTrack,
-                  {
-                    borderRadius: theme.radius.pill,
-                    backgroundColor: telemetryOptIn ? theme.colors.accent : theme.colors.bgSurface,
-                    borderColor: telemetryOptIn ? theme.colors.accent : theme.colors.chipBorder,
-                  },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.switchThumb,
-                    {
-                      borderRadius: theme.radius.pill,
-                      backgroundColor: telemetryOptIn
-                        ? theme.colors.accentContrast
-                        : theme.colors.textPrimary,
-                      alignSelf: telemetryOptIn ? 'flex-end' : 'flex-start',
-                    },
-                  ]}
-                />
-              </View>
-            </Pressable>
-
-            <View style={styles.telemetryMetaRow}>
-              <Text
-                testID="telemetry-queued-count"
-                style={[
-                  theme.typography.caption,
-                  TABULAR_NUMS_STYLE,
-                  { color: theme.colors.textSecondary },
-                ]}
-              >
-                {`${i18n.t('telemetry.queuedLabel')}: ${queuedCount}`}
-              </Text>
-              <CtaButton
-                testID="telemetry-preview-toggle"
-                variant="secondary"
-                label={
-                  previewOpen
-                    ? i18n.t('telemetry.hidePreviewAction')
-                    : i18n.t('telemetry.previewAction')
-                }
-                onPress={() => setPreviewOpen((prev) => !prev)}
-              />
-            </View>
-
-            {previewOpen ? (
-              <View
-                testID="telemetry-payload-preview"
-                style={[
-                  styles.previewBox,
-                  {
-                    backgroundColor: theme.colors.bgCanvas,
-                    borderColor: theme.colors.surfaceBorder,
-                    borderRadius: theme.radius.card,
-                  },
-                ]}
-              >
-                <Text
-                  testID="telemetry-payload-preview-text"
-                  selectable
-                  style={[
-                    theme.typography.caption,
-                    { color: theme.colors.textSecondary, fontFamily: monoFont },
-                  ]}
-                >
-                  {payloadPreview}
-                </Text>
-              </View>
-            ) : null}
-          </Surface>
 
           <Surface
             testID="feedback-form-card"
@@ -519,17 +357,6 @@ const styles = StyleSheet.create({
   switchThumb: {
     width: 16,
     height: 16,
-  },
-  telemetryMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  previewBox: {
-    borderWidth: 1,
-    padding: 12,
   },
   field: { gap: 8 },
   chipRow: {

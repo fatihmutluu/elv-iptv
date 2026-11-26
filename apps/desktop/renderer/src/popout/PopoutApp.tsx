@@ -126,12 +126,7 @@ export function PopoutPlayerStage({
           onPersistVolume={(playerVolume) => {
             void preferences.updatePreferences({ playerVolume });
           }}
-          autoSubtitlesOnSkipBack={prefs.autoSubtitlesOnSkipBack}
-          onToggleAutoSubtitlesOnSkipBack={() => {
-            void preferences.updatePreferences({
-              autoSubtitlesOnSkipBack: !prefs.autoSubtitlesOnSkipBack,
-            });
-          }}
+          autoSubtitlesOnSkipBack={false}
           autoPlayNextEpisode={prefs.autoPlayNextEpisode}
           onToggleAutoPlayNextEpisode={() => {
             void preferences.updatePreferences({

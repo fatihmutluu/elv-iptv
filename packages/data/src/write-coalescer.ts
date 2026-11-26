@@ -270,6 +270,10 @@ export function createCoalescedCatalog(
       ? { discoverSourceCategories: c.discoverSourceCategories.bind(c) }
       : {}),
     ...(c.updateSourceSettings ? { updateSourceSettings: c.updateSourceSettings.bind(c) } : {}),
+    ...(c.renameSource ? { renameSource: c.renameSource.bind(c) } : {}),
+    ...(c.setSourceExcludedProfiles
+      ? { setSourceExcludedProfiles: c.setSourceExcludedProfiles.bind(c) }
+      : {}),
     async removeSource(id) {
       await flushPendingWrites();
       return c.removeSource(id);

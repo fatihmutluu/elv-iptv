@@ -30,6 +30,7 @@ export function useInitialTrackSelection(params: {
   readonly preferredAudioLanguages?: readonly string[] | undefined;
   readonly preferredSubtitleLanguages?: readonly string[] | undefined;
   readonly preferDefaultAudioTrack?: boolean | undefined;
+  readonly fallbackLocale?: string | undefined;
   readonly subtitleMode: SubtitleModePref;
   readonly statusKind?: PlaybackStatus['kind'] | undefined;
   readonly onHydratedResizeMode?: ((mode: VideoResizeMode) => void) | undefined;
@@ -45,6 +46,7 @@ export function useInitialTrackSelection(params: {
     preferredAudioLanguages,
     preferredSubtitleLanguages,
     preferDefaultAudioTrack = true,
+    fallbackLocale,
     subtitleMode,
     statusKind,
     onHydratedResizeMode,
@@ -162,6 +164,7 @@ export function useInitialTrackSelection(params: {
         preferDefaultAudioTrack,
         preferredSubtitleLanguages: effectiveSubLangs,
         subtitleMode: effective.subtitleMode,
+        ...(fallbackLocale !== undefined ? { fallbackLocale } : {}),
       },
     });
 
@@ -211,6 +214,7 @@ export function useInitialTrackSelection(params: {
     activeTarget.itemKey,
     effectiveAudioLangs,
     effectiveSubLangs,
+    fallbackLocale,
     persistedPref,
     prefReady,
     preferDefaultAudioTrack,

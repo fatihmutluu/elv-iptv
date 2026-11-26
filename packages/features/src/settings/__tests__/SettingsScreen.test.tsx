@@ -159,7 +159,7 @@ describe('SettingsScreen', () => {
     jest.restoreAllMocks();
   });
 
-  it('renders Landscape 2-column sidebar, switches all 3 sections, and shows About ELV IPTV + Licenses', async () => {
+  it('renders Landscape 2-column sidebar, switches sections, and shows About ELV IPTV + Licenses without license pill', async () => {
     await render(
       <SettingsTestHarness
         viewport={{
@@ -178,6 +178,7 @@ describe('SettingsScreen', () => {
       true,
     );
     expect(screen.getByTestId('settings-panel-appearance')).toBeTruthy();
+    expect(screen.queryByTestId('settings-tab-remote')).toBeNull();
 
     await fireEvent.press(screen.getByTestId('settings-tab-sources'));
     expect(screen.getByTestId('settings-tab-sources').props.accessibilityState.selected).toBe(true);
@@ -188,13 +189,11 @@ describe('SettingsScreen', () => {
       true,
     );
     expect(screen.getByTestId('settings-about-card')).toBeTruthy();
-    expect(screen.getByTestId('settings-about-license-badge')).toHaveTextContent(
-      'Proprietary · LGPL media engines',
-    );
+    expect(screen.queryByTestId('settings-about-license-badge')).toBeNull();
     expect(screen.getByTestId('mock-licenses-pane')).toBeTruthy();
   });
 
-  it('renders Portrait horizontal chip strip with >= 40px touch targets and switches sections', async () => {
+  it('renders Portrait horizontal tab strip without Remote Keys and switches sections', async () => {
     await render(
       <SettingsTestHarness
         viewport={{
@@ -210,6 +209,7 @@ describe('SettingsScreen', () => {
     expect(screen.getByTestId('settings-portrait-tabs')).toBeTruthy();
     expect(screen.getByTestId('settings-portrait-tabs-rail-scroll')).toBeTruthy();
     expect(screen.queryByTestId('settings-sidebar')).toBeNull();
+    expect(screen.queryByTestId('settings-tab-remote')).toBeNull();
     expect(screen.getByTestId('settings-tab-appearance').props.accessibilityState.selected).toBe(
       true,
     );
@@ -221,7 +221,7 @@ describe('SettingsScreen', () => {
     expect(screen.getByTestId('settings-about-card')).toBeTruthy();
   });
 
-  it('updates Language, all 6 Theme presets (including High Contrast AAA), Font Scale, Reduce Motion, and Reset live', async () => {
+  it('updates Language dropdown, all 6 Theme presets, Font Scale, Reduce Motion, and scoped Appearance Reset live', async () => {
     await render(
       <SettingsTestHarness
         viewport={{
@@ -234,12 +234,12 @@ describe('SettingsScreen', () => {
       />,
     );
 
-    // All 6 theme presets are rendered
     for (const presetId of THEME_PRESET_IDS) {
       expect(screen.getByTestId(`settings-theme-${presetId}`)).toBeTruthy();
     }
 
-    // Switch Language to Turkish -> UI updates immediately without restart
+    // Switch Language to Turkish via dropdown -> UI updates immediately without restart
+    await fireEvent.press(screen.getByTestId('settings-language-dropdown'));
     await fireEvent.press(screen.getByTestId('settings-lang-tr'));
     await waitFor(() => {
       expect(screen.getByTestId('settings-tab-appearance')).toHaveTextContent('Görünüm');
@@ -249,7 +249,8 @@ describe('SettingsScreen', () => {
       );
     });
 
-    // Switch back to English
+    // Switch back to English via dropdown
+    await fireEvent.press(screen.getByTestId('settings-language-dropdown'));
     await fireEvent.press(screen.getByTestId('settings-lang-en'));
     await waitFor(() => {
       expect(screen.getByTestId('settings-tab-appearance')).toHaveTextContent('Appearance');
@@ -286,19 +287,17 @@ describe('SettingsScreen', () => {
       ).toBe(true);
     });
 
-    // Reset preferences restores defaults
+    // Reset preferences restores Appearance defaults
     await fireEvent.press(screen.getByTestId('settings-reset-preferences'));
     await waitFor(() => {
       expect(screen.getByTestId('probe-preset')).toHaveTextContent('obsidianCrimson');
       expect(screen.getByTestId('probe-font-scale')).toHaveTextContent('1');
       expect(screen.getByTestId('probe-reduce-motion')).toHaveTextContent('false');
-      expect(screen.getByTestId('settings-lang-system').props.accessibilityState.selected).toBe(
-        true,
-      );
+      expect(screen.getByTestId('settings-language-dropdown')).toHaveTextContent('System');
     });
   });
 
-  it('supports 10-foot TV D-pad sidebar traversal, Appearance controls, and embedded pane focus handoff', async () => {
+  it('supports 10-foot TV D-pad sidebar traversal, TV language dropdown modal, and embedded pane focus handoff', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
 
@@ -340,7 +339,6 @@ describe('SettingsScreen', () => {
       />,
     );
 
-    // Starts on sidebar ('appearance') with settings-tv-focus-anchor mounted
     expect(
       screen.getByTestId('settings-tv-focus-anchor', { includeHiddenElements: true }),
     ).toBeTruthy();
@@ -349,19 +347,21 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_UP);
     expect(onFocusTopNav).toHaveBeenCalledTimes(1);
 
-    // Right enters Appearance content pane -> Right to 'tr' -> Select updates locale live
+    // Right enters Appearance content pane (Language dropdown) -> Select opens TV modal -> Down x2 to 'tr' -> Select updates locale live
     await pressKey(KEYCODE_DPAD_RIGHT);
-    await pressKey(KEYCODE_DPAD_RIGHT);
+    await pressKey(KEYCODE_DPAD_CENTER);
+    expect(screen.getByTestId('settings-language-dropdown-tv-modal')).toBeTruthy();
+    await pressKey(KEYCODE_DPAD_DOWN);
+    await pressKey(KEYCODE_DPAD_DOWN);
     await pressKey(KEYCODE_DPAD_CENTER);
     await waitFor(() => {
       expect(screen.getByTestId('settings-tab-appearance')).toHaveTextContent('Görünüm');
     });
 
-    // Left twice returns to sidebar (row start edge)
-    await pressKey(KEYCODE_DPAD_LEFT);
+    // Left returns to sidebar
     await pressKey(KEYCODE_DPAD_LEFT);
 
-    // Down x5 selects 'sources', Down again selects 'licenses' -> Right hands focus to embedded licenses slot
+    // Traverse all 9 sidebar tabs on TV (including Remote Keys) down to Licenses
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(screen.getByTestId('settings-tab-playback').props.accessibilityState.selected).toBe(
       true,
@@ -394,7 +394,6 @@ describe('SettingsScreen', () => {
       screen.queryByTestId('settings-tv-focus-anchor', { includeHiddenElements: true }),
     ).toBeNull();
 
-    // Embedded slot calling onBack returns focus to sidebar; Back again calls onFocusTopNav
     await act(async () => {
       latestLicensesSlot?.onBack();
     });
@@ -459,7 +458,7 @@ describe('SettingsScreen', () => {
     expect(onFocusTopNav).toHaveBeenCalledTimes(1);
   });
 
-  it('disables native focusable on Appearance FilterChips/CtaButton on TV and auto-scrolls focused rows into view', async () => {
+  it('disables native focusable on Appearance controls on TV and auto-scrolls focused rows in Wave P7 order', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
     const scrollToSpy = jest
@@ -470,7 +469,11 @@ describe('SettingsScreen', () => {
     const androidSource: AndroidKeySource = {
       addListener: (l) => {
         keyListener = l;
-        return { remove: () => {} };
+        return {
+          remove: () => {
+            keyListener = undefined;
+          },
+        };
       },
     };
     const pressKey = async (keyCode: number) => {
@@ -494,9 +497,7 @@ describe('SettingsScreen', () => {
     );
 
     for (const id of [
-      'settings-lang-system',
-      'settings-lang-tr',
-      'settings-lang-en',
+      'settings-language-dropdown',
       'settings-font-90',
       'settings-font-100',
       'settings-font-110',
@@ -515,9 +516,7 @@ describe('SettingsScreen', () => {
       'settings-tv-clock-menus',
       'settings-tv-clock-player',
       'settings-tv-clock-never',
-      'settings-artwork-cache-64',
-      'settings-artwork-cache-128',
-      'settings-artwork-cache-256',
+      'settings-artwork-cache-dropdown',
       'settings-artwork-cache-clear',
       'settings-reset-preferences',
     ]) {
@@ -527,75 +526,73 @@ describe('SettingsScreen', () => {
     await fireEvent(screen.getByTestId('settings-section-theme'), 'layout', {
       nativeEvent: { layout: { x: 0, y: 120, width: 640, height: 220 } },
     });
+    await fireEvent(screen.getByTestId('settings-section-home-layout'), 'layout', {
+      nativeEvent: { layout: { x: 0, y: 360, width: 640, height: 240 } },
+    });
     await fireEvent(screen.getByTestId('settings-section-font'), 'layout', {
-      nativeEvent: { layout: { x: 0, y: 360, width: 640, height: 180 } },
+      nativeEvent: { layout: { x: 0, y: 620, width: 640, height: 180 } },
     });
     await fireEvent(screen.getByTestId('settings-toggle-reduce-motion'), 'layout', {
       nativeEvent: { layout: { x: 0, y: 110, width: 600, height: 48 } },
     });
     await fireEvent(screen.getByTestId('settings-section-tv-display'), 'layout', {
-      nativeEvent: { layout: { x: 0, y: 500, width: 640, height: 180 } },
+      nativeEvent: { layout: { x: 0, y: 820, width: 640, height: 180 } },
     });
     await fireEvent(screen.getByTestId('settings-section-artwork-cache'), 'layout', {
-      nativeEvent: { layout: { x: 0, y: 700, width: 640, height: 120 } },
+      nativeEvent: { layout: { x: 0, y: 1020, width: 640, height: 120 } },
+    });
+    await fireEvent(screen.getByTestId('settings-section-diagnostics'), 'layout', {
+      nativeEvent: { layout: { x: 0, y: 1160, width: 640, height: 140 } },
     });
     await fireEvent(screen.getByTestId('settings-section-reset'), 'layout', {
-      nativeEvent: { layout: { x: 0, y: 850, width: 640, height: 52 } },
+      nativeEvent: { layout: { x: 0, y: 1320, width: 640, height: 52 } },
     });
 
-    // Right enters Appearance row 0 (Language) -> scrolls to y: 0
+    // Row 0: Language dropdown -> y: 0
     await pressKey(KEYCODE_DPAD_RIGHT);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 0, animated: true });
 
-    // Down x3 -> Font Scale row -> scrolls to font section
+    // Row 1-2: Theme -> Row 3: Home Layout Editor
     await pressKey(KEYCODE_DPAD_DOWN);
     await pressKey(KEYCODE_DPAD_DOWN);
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 348, animated: true });
 
-    // Down x2 -> Interface font & Subtitle font rows -> stay in font section
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 348, animated: true });
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 348, animated: true });
-
-    // Down -> Reduce Motion row -> scrolls to font.y + motionOffsetY - 12
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 458, animated: true });
-
-    // Down -> Confirm Exit on Back row -> stays inside font/accessibility card
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 458, animated: true });
-
-    // Down -> VOD Enrichment toggle row -> stays inside font/accessibility card
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 458, animated: true });
-
-    // Down x3 -> TV Display card (overscanX, overscanY, tvClockMode) -> scrolls to tvDisplay section
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 488, animated: true });
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 488, animated: true });
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 488, animated: true });
-
-    // Down -> Artwork cache limit row -> scrolls to artworkCache section
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 688, animated: true });
-
-    // Down -> Artwork cache clear row -> stays on artworkCache section
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 688, animated: true });
-
-    // Down -> Reset row -> scrolls to reset section
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 838, animated: true });
-
-    // Up x14 -> back to Language row -> resets scroll to y: 0
-    for (let i = 0; i < 14; i += 1) {
-      await pressKey(KEYCODE_DPAD_UP);
+    // Skip remaining 6 Home Layout rows -> Row 10: Font Scale -> font.y - 12 = 608
+    for (let i = 0; i < 7; i += 1) {
+      await pressKey(KEYCODE_DPAD_DOWN);
     }
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 0, animated: true });
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 608, animated: true });
+
+    // UI Font, Subtitle Font -> Reduce Motion (620 + 110 - 12 = 718) -> Confirm Exit (Android)
+    await pressKey(KEYCODE_DPAD_DOWN);
+    await pressKey(KEYCODE_DPAD_DOWN);
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 718, animated: true });
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 718, animated: true });
+
+    // TV Display (3 rows) -> 808
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 808, animated: true });
+    await pressKey(KEYCODE_DPAD_DOWN);
+    await pressKey(KEYCODE_DPAD_DOWN);
+
+    // Artwork Cache (dropdown + clear) -> 1008
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 1008, animated: true });
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 1008, animated: true });
+
+    // Diagnostics (3 rows) -> 1148
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 1148, animated: true });
+    await pressKey(KEYCODE_DPAD_DOWN);
+    await pressKey(KEYCODE_DPAD_DOWN);
+
+    // Reset (very bottom) -> 1308
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 1308, animated: true });
   });
 
   it('preserves Settings content pane across transient PIN overlay blur when preservePaneOnBlur is true', async () => {
@@ -612,19 +609,16 @@ describe('SettingsScreen', () => {
     });
     expect(stateRef.current?.pane).toBe('content');
 
-    // Transient overlay opens: isActiveScope=false, preservePaneOnBlur=true -> stays in 'content'!
     await view.rerender(
       <SettingsNavPreserveHarness isActiveScope={false} preservePaneOnBlur stateRef={stateRef} />,
     );
     expect(stateRef.current?.pane).toBe('content');
 
-    // Overlay closes: still in 'content'
     await view.rerender(
       <SettingsNavPreserveHarness isActiveScope preservePaneOnBlur={false} stateRef={stateRef} />,
     );
     expect(stateRef.current?.pane).toBe('content');
 
-    // Normal Top Nav focus blur (preservePaneOnBlur=false) resets pane to 'nav'
     await view.rerender(
       <SettingsNavPreserveHarness
         isActiveScope={false}

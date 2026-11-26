@@ -327,11 +327,14 @@ describe('registerArtworkIpc (#405)', () => {
     expect(cache.resolve).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledTimes(1);
 
-    await handlers.get(ARTWORK_CHANNELS.setLimit)?.({}, 256 * 1024 * 1024);
-    expect(cache.setLimitBytes).toHaveBeenCalledWith(256 * 1024 * 1024);
+    await handlers.get(ARTWORK_CHANNELS.setLimit)?.({}, 512 * 1024 * 1024);
+    expect(cache.setLimitBytes).toHaveBeenCalledWith(512 * 1024 * 1024);
+
+    await handlers.get(ARTWORK_CHANNELS.setLimit)?.({}, 1024 * 1024 * 1024);
+    expect(cache.setLimitBytes).toHaveBeenLastCalledWith(512 * 1024 * 1024);
 
     await handlers.get(ARTWORK_CHANNELS.setLimit)?.({}, 'bad');
-    expect(cache.setLimitBytes).toHaveBeenCalledTimes(1);
+    expect(cache.setLimitBytes).toHaveBeenCalledTimes(2);
     expect(log).toHaveBeenCalledTimes(2);
 
     const stats = await handlers.get(ARTWORK_CHANNELS.stats)?.({});

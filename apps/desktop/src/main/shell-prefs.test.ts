@@ -24,35 +24,39 @@ afterEach(() => {
 });
 
 describe('shell-prefs (#158)', () => {
-  it('defaults minimizeToTray to false when file is missing, corrupt, oversized, or malformed', () => {
+  it('defaults minimizeToTray to true when file is missing, corrupt, oversized, or malformed', () => {
     const missing = makeTempFile();
+    expect(DEFAULT_SHELL_PREFS).toEqual({ minimizeToTray: true });
     expect(loadShellPrefs(missing)).toEqual(DEFAULT_SHELL_PREFS);
 
     writeFileSync(missing, '{not valid json', 'utf8');
-    expect(loadShellPrefs(missing)).toEqual({ minimizeToTray: false });
+    expect(loadShellPrefs(missing)).toEqual({ minimizeToTray: true });
 
     writeFileSync(missing, JSON.stringify({ minimizeToTray: 'yes' }), 'utf8');
-    expect(loadShellPrefs(missing)).toEqual({ minimizeToTray: false });
+    expect(loadShellPrefs(missing)).toEqual({ minimizeToTray: true });
+
+    writeFileSync(missing, JSON.stringify({}), 'utf8');
+    expect(loadShellPrefs(missing)).toEqual({ minimizeToTray: true });
 
     writeFileSync(missing, 'x'.repeat(10_000), 'utf8');
-    expect(loadShellPrefs(missing)).toEqual({ minimizeToTray: false });
+    expect(loadShellPrefs(missing)).toEqual({ minimizeToTray: true });
   });
 
-  it('persists minimizeToTray atomically and reads it synchronously via controller', () => {
+  it('honors explicit stored false and persists minimizeToTray atomically via controller', () => {
     const filePath = makeTempFile();
-    saveShellPrefs(filePath, { minimizeToTray: true });
-    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({ minimizeToTray: true });
-    expect(loadShellPrefs(filePath)).toEqual({ minimizeToTray: true });
+    saveShellPrefs(filePath, { minimizeToTray: false });
+    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({ minimizeToTray: false });
+    expect(loadShellPrefs(filePath)).toEqual({ minimizeToTray: false });
 
     const ctl = createShellPrefsController(filePath);
-    expect(ctl.getMinimizeToTray()).toBe(true);
-
-    expect(ctl.setMinimizeToTray(false)).toBe(false);
     expect(ctl.getMinimizeToTray()).toBe(false);
-    expect(loadShellPrefs(filePath)).toEqual({ minimizeToTray: false });
 
     expect(ctl.setMinimizeToTray(true)).toBe(true);
     expect(ctl.getMinimizeToTray()).toBe(true);
     expect(loadShellPrefs(filePath)).toEqual({ minimizeToTray: true });
+
+    expect(ctl.setMinimizeToTray(false)).toBe(false);
+    expect(ctl.getMinimizeToTray()).toBe(false);
+    expect(loadShellPrefs(filePath)).toEqual({ minimizeToTray: false });
   });
 });

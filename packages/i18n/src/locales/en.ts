@@ -13,6 +13,7 @@ import { enWaveP2Messages } from './en-wave-p2';
 import { enWaveP4Messages } from './en-wave-p4';
 import { enWaveP5Messages } from './en-wave-p5';
 import { enWaveP6Messages } from './en-wave-p6';
+import { enWaveP7Messages } from './en-wave-p7';
 
 /** English (source) message catalog. Every other locale must define the exact same keys. */
 export const enMessages = {
@@ -291,7 +292,7 @@ export const enMessages = {
   'settings.about.title': 'About ELV IPTV',
   'settings.about.licenseBadge': 'Proprietary · LGPL media engines',
   'settings.about.statement':
-    'ELV IPTV is an independent IPTV player and ships no media content. Native playback engines dynamically link LGPL libraries. Provider credentials remain encrypted on-device and never enter the catalog database.',
+    'ELV IPTV is a 100% free, ad-free, independent IPTV player built with care for every screen. It ships no media content — bring your own Xtream, M3U, or Stalker source. Provider credentials stay encrypted on your device and never enter the catalog database.',
   'home.title': 'Home',
   'home.continueWatching': 'Continue watching',
   'home.onAirNow': 'On air now',
@@ -565,7 +566,7 @@ export const enMessages = {
     "Keep the provider's default audio track unless overridden",
   'settings.playback.preferHevcOverDv': 'Prefer HEVC over Dolby Vision',
   'settings.playback.preferHevcOverDvDesc':
-    'Fallback to standard HEVC if Dolby Vision causes black screens or stutter',
+    'Skip Dolby Vision and use standard HEVC on devices with color or black-screen issues.',
   'settings.playback.filterSdh': 'Filter SDH subtitle cues',
   'settings.playback.filterSdhDesc':
     'Hide [sound effects], (descriptions), and SPEAKER: labels in text subtitles',
@@ -688,7 +689,7 @@ export const enMessages = {
   'settings.pitchLock': 'Preserve audio pitch',
   'settings.pitchLockHint': 'Keep voices natural when changing playback speed',
   'settings.audioNormalization': 'Loudness normalization',
-  'settings.audioNormalizationHint': 'Balance quiet dialogue and loud channels using EBU R128',
+  'settings.audioNormalizationHint': 'Balances quiet dialogue and overly loud channels.',
   'settings.windowAspectRatioLock': 'Lock window aspect ratio',
   'settings.windowAspectRatioLockHint': 'Keep windowed playback bar-free when resizing on desktop',
   'settings.backgroundAudio': 'Background audio playback',
@@ -718,6 +719,7 @@ export const enMessages = {
   ...enWaveP4Messages,
   ...enWaveP5Messages,
   ...enWaveP6Messages,
+  ...enWaveP7Messages,
   ...enIssue502Messages,
 } as const;
 

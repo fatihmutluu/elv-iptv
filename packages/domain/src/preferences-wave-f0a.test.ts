@@ -11,9 +11,9 @@ import {
 } from './index';
 
 describe('Wave F0A preferences (#6, #25)', () => {
-  it('exposes EPG_ROW_DENSITIES and defaults epgRowDensity to comfortable', () => {
+  it('exposes EPG_ROW_DENSITIES and defaults epgRowDensity to cinematic', () => {
     expect(EPG_ROW_DENSITIES).toEqual(['compact', 'comfortable', 'cinematic']);
-    expect(DEFAULT_PREFERENCES.epgRowDensity).toBe('comfortable');
+    expect(DEFAULT_PREFERENCES.epgRowDensity).toBe('cinematic');
     expect(isEpgRowDensity('compact')).toBe(true);
     expect(isEpgRowDensity('comfortable')).toBe(true);
     expect(isEpgRowDensity('cinematic')).toBe(true);
@@ -31,11 +31,11 @@ describe('Wave F0A preferences (#6, #25)', () => {
         epgTimeSpanHours: 6,
       }),
     );
-    expect(legacy.epgRowDensity).toBe('comfortable');
+    expect(legacy.epgRowDensity).toBe('cinematic');
     expect(legacy.epgTimeSpanHours).toBe(6);
   });
 
-  it('parses valid epgRowDensity values and falls back to comfortable on invalid values', () => {
+  it('parses valid epgRowDensity values and falls back to cinematic on invalid values', () => {
     for (const density of EPG_ROW_DENSITIES) {
       const parsed = parsePreferences(JSON.stringify({ version: 1, epgRowDensity: density }));
       expect(parsed.epgRowDensity).toBe(density);
@@ -43,7 +43,7 @@ describe('Wave F0A preferences (#6, #25)', () => {
 
     for (const invalid of ['', 'ultra', 1, true, null, {}, []]) {
       const parsed = parsePreferences(JSON.stringify({ version: 1, epgRowDensity: invalid }));
-      expect(parsed.epgRowDensity).toBe('comfortable');
+      expect(parsed.epgRowDensity).toBe('cinematic');
     }
   });
 
@@ -68,7 +68,7 @@ describe('Wave F0A preferences (#6, #25)', () => {
     });
     expect(fallbackEncoded.ok).toBe(true);
     if (fallbackEncoded.ok) {
-      expect(parsePreferences(fallbackEncoded.value).epgRowDensity).toBe('comfortable');
+      expect(parsePreferences(fallbackEncoded.value).epgRowDensity).toBe('cinematic');
     }
   });
 
@@ -79,18 +79,18 @@ describe('Wave F0A preferences (#6, #25)', () => {
     expect(u1.ok).toBe(true);
     if (u1.ok) expect(u1.value.epgRowDensity).toBe('compact');
 
-    const u2 = await store.update({ epgRowDensity: 'cinematic' });
+    const u2 = await store.update({ epgRowDensity: 'comfortable' });
     expect(u2.ok).toBe(true);
-    if (u2.ok) expect(u2.value.epgRowDensity).toBe('cinematic');
+    if (u2.ok) expect(u2.value.epgRowDensity).toBe('comfortable');
 
     const u3 = await store.update({
       epgRowDensity: 'dense' as unknown as EpgRowDensity,
     });
     expect(u3.ok).toBe(true);
-    if (u3.ok) expect(u3.value.epgRowDensity).toBe('cinematic');
+    if (u3.ok) expect(u3.value.epgRowDensity).toBe('comfortable');
 
     const reset = await store.reset();
     expect(reset.ok).toBe(true);
-    if (reset.ok) expect(reset.value.epgRowDensity).toBe('comfortable');
+    if (reset.ok) expect(reset.value.epgRowDensity).toBe('cinematic');
   });
 });

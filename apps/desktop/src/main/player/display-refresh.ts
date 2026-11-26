@@ -34,7 +34,7 @@ const INTEGER_MULTIPLIERS = [2, 3, 4, 5] as const;
 const DEFAULT_DISPLAY_ID = 'primary';
 
 const DEFAULT_POLICY: DisplaySyncPolicy = {
-  autoFrameRate: 'off',
+  autoFrameRate: 'seamless',
   autoDynamicRange: true,
 };
 

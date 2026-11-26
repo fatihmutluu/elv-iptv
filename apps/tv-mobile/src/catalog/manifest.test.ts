@@ -124,6 +124,7 @@ describe('reconcileManifest', () => {
           activeConnections: 0,
         },
         credentialFingerprint: expect.stringMatching(/^fp:[0-9a-f]{64}$/),
+        excludedProfileIds: [],
       },
     ]);
     must(await after.service.importSource(id));

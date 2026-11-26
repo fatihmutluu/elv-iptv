@@ -1,9 +1,11 @@
 import type { ProfileRecord } from '@elv/data';
 import type { KeyEvent, KeyInput } from '@elv/focus-core';
 import {
-  CtaButton,
-  MicroPill,
+  Icon,
+  IconButton,
+  TextEntryBoundary,
   TvFocusAnchor,
+  TvFocusGuideRegion,
   useFormFactor,
   useI18n,
   useKeyInterpreter,
@@ -16,25 +18,34 @@ import {
   webTransition,
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { ProfileAvatarBadge } from './ProfileAvatarBadge';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useProfile } from '../shared';
+import { ProfileAvatarTile } from './ProfileAvatarTile';
+import { ProfileFormCard, type ProfileFormValues } from './ProfileFormCard';
+import { ProfileTypeStepCard } from './ProfileTypeStepCard';
 
 /** Props of {@link ProfilePickerOverlay}. */
 export interface ProfilePickerOverlayProps {
   readonly profiles: readonly ProfileRecord[];
   readonly activeProfileId: string;
   readonly onSelectProfile: (profileId: string) => void;
-  readonly onManageInSettings: () => void;
+  /** Retained for caller compatibility; Wave P7 manages profiles inline inside this overlay. */
+  readonly onManageInSettings?: () => void;
   readonly onClose: () => void;
   readonly testID?: string;
 }
+
+type SubModalState =
+  | null
+  | { readonly kind: 'add-type'; readonly selectedIsKids: boolean }
+  | { readonly kind: 'add-details'; readonly isKids: boolean }
+  | { readonly kind: 'edit'; readonly profileId: string };
 
 const NOOP_TV_SUBSCRIBER = (): boolean => false;
 
 function useExclusiveTvKeySource(
   onInput: ((input: KeyInput) => boolean | undefined) | ((input: KeyInput) => void),
 ): void {
-  // Keep TvRemoteProvider's lazy platform listener attached even if no screen underneath subscribes.
   useTvKeySource(NOOP_TV_SUBSCRIBER);
   useTvKeyInterceptor((input) => {
     onInput(input);
@@ -51,16 +62,31 @@ function PickerTvKeyBridge({
   return <TvFocusAnchor testID="profile-picker-tv-focus-anchor" hasTVPreferredFocus />;
 }
 
+function SubModalTvBackBridge({ onBack }: { readonly onBack: () => void }): ReactElement {
+  const handleKey = useCallback(
+    (event: KeyEvent): boolean => {
+      if (event.kind === 'press' && event.key === 'back') {
+        onBack();
+        return true;
+      }
+      return false;
+    },
+    [onBack],
+  );
+  useKeyInterpreter(handleKey, { keySource: useExclusiveTvKeySource });
+  return <TvFocusAnchor testID="profile-submodal-tv-focus-anchor" hasTVPreferredFocus />;
+}
+
 /**
- * In-tree Cinema Quietude v2 viewer profile switcher overlay (`#15`).
- * Renders over the shell without React Native `<Modal>` so 10-foot TV D-pad focus and Back
- * dismissal stay predictable across TV, desktop, and touch devices.
+ * Redesigned Cinema Quietude v2 "Who's Watching?" overlay (`#15`, `#506`).
+ * Renders large circular illustrated avatars, per-avatar edit pencils (hover on web, corner badge +
+ * long-press on touch, focused action on TV), circular `+` Add profile (2-step Adult/Kids flow),
+ * and an inline Edit Profile modal with name, 9 avatars, Kids toggle, PIN management, and Delete.
  */
 export function ProfilePickerOverlay({
   profiles,
   activeProfileId,
   onSelectProfile,
-  onManageInSettings,
   onClose,
   testID = 'profile-picker-overlay',
 }: ProfilePickerOverlayProps): ReactElement {
@@ -69,21 +95,121 @@ export function ProfilePickerOverlay({
   const formFactor = useFormFactor();
   const viewport = useViewport();
   const isTv = formFactor === 'tv';
+  const isWeb = (Platform.OS as string) === 'web';
+  const isTouch = !isTv && !isWeb;
+
+  const {
+    hasGuardPin,
+    hasParentalPin,
+    guardPinProfileId,
+    parentalUnlocked,
+    pinDialog,
+    createProfile,
+    updateProfile,
+    deleteProfile,
+    hasProfilePin,
+    requestParentalUnlock,
+    openPinDialog,
+  } = useProfile();
 
   const initialIdx = Math.max(
     0,
     profiles.findIndex((p) => p.id === activeProfileId),
   );
-  // Zone 'profiles': index 0..profiles.length-1; Zone 'footer': col 0 = Manage, col 1 = Cancel
-  const [zone, setZone] = useState<'profiles' | 'footer'>('profiles');
-  const [profileIdx, setProfileIdx] = useState(initialIdx);
-  const [footerIdx, setFooterIdx] = useState(0);
 
-  const stateRef = useRef({ zone, profileIdx, footerIdx, count: profiles.length });
-  stateRef.current = { zone, profileIdx, footerIdx, count: profiles.length };
+  const [tvZone, setTvZone] = useState<'tiles' | 'edit'>('tiles');
+  const [tvIdx, setTvIdx] = useState(initialIdx);
+  const [hoveredProfileId, setHoveredProfileId] = useState<string | null>(null);
+  const [subModal, setSubModal] = useState<SubModalState>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [createWithPin, setCreateWithPin] = useState(false);
+  const [editingPinState, setEditingPinState] = useState<{
+    readonly profileId: string;
+    readonly hasPin: boolean;
+  } | null>(null);
+
+  const editingProfile =
+    subModal?.kind === 'edit' ? (profiles.find((p) => p.id === subModal.profileId) ?? null) : null;
+  const editingProfileId = editingProfile?.id ?? null;
+  const editingProfileIdRef = useRef<string | null>(editingProfileId);
+  editingProfileIdRef.current = editingProfileId;
+
+  const runProtected = useCallback(
+    (action: () => void) => {
+      if (hasGuardPin && !parentalUnlocked) {
+        requestParentalUnlock(action);
+        return;
+      }
+      action();
+    },
+    [hasGuardPin, parentalUnlocked, requestParentalUnlock],
+  );
+
+  const openAddFlow = useCallback(() => {
+    runProtected(() => {
+      setConfirmDelete(false);
+      setCreateWithPin(false);
+      setSubModal({ kind: 'add-type', selectedIsKids: false });
+    });
+  }, [runProtected]);
+
+  const openEditModal = useCallback(
+    (profile: ProfileRecord) => {
+      runProtected(() => {
+        setConfirmDelete(false);
+        setEditingPinState(null);
+        setSubModal({ kind: 'edit', profileId: profile.id });
+      });
+    },
+    [runProtected],
+  );
+
+  const closeSubModal = useCallback(() => {
+    setConfirmDelete(false);
+    setCreateWithPin(false);
+    setEditingPinState(null);
+    setSubModal(null);
+    setTvZone('tiles');
+  }, []);
 
   useEffect(() => {
-    if ((Platform.OS as string) !== 'web') return undefined;
+    if (editingProfileId === null) {
+      setEditingPinState(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setEditingPinState((prev) => (prev?.profileId === editingProfileId ? prev : null));
+    void hasProfilePin(editingProfileId).then((hasPin) => {
+      if (!cancelled) {
+        setEditingPinState({ profileId: editingProfileId, hasPin });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingProfileId, hasProfilePin]);
+
+  useEffect(() => {
+    if (tvIdx > profiles.length) {
+      setTvIdx(Math.max(0, profiles.length - 1));
+      setTvZone('tiles');
+    }
+  }, [profiles.length, tvIdx]);
+
+  useEffect(() => {
+    if (subModal?.kind === 'edit' && editingProfile === null) {
+      setSubModal(null);
+      setConfirmDelete(false);
+      setTvZone('tiles');
+    }
+  }, [editingProfile, subModal]);
+
+  const stateRef = useRef({ tvZone, tvIdx, count: profiles.length });
+  stateRef.current = { tvZone, tvIdx, count: profiles.length };
+
+  useEffect(() => {
+    if (!isWeb || pinDialog !== null) return undefined;
     type WebKeyEvent = {
       key?: string;
       preventDefault?: () => void;
@@ -113,12 +239,16 @@ export function ProfilePickerOverlay({
         event.preventDefault?.();
         event.stopPropagation?.();
         event.stopImmediatePropagation?.();
-        onClose();
+        if (subModal !== null) {
+          closeSubModal();
+        } else {
+          onClose();
+        }
       }
     };
     host.addEventListener('keydown', onKeyDown, true);
     return () => host.removeEventListener?.('keydown', onKeyDown, true);
-  }, [onClose]);
+  }, [closeSubModal, isWeb, onClose, pinDialog, subModal]);
 
   const handleTvKey = useCallback(
     (event: KeyEvent): boolean => {
@@ -129,21 +259,37 @@ export function ProfilePickerOverlay({
       if (event.kind !== 'press' && event.kind !== 'repeat') return false;
       const cur = stateRef.current;
 
-      if (cur.zone === 'profiles') {
+      if (event.kind === 'press' && event.key === 'menu') {
+        const picked = profiles[cur.tvIdx];
+        if (picked) {
+          openEditModal(picked);
+          return true;
+        }
+        return false;
+      }
+
+      if (cur.tvZone === 'tiles') {
         if (event.key === 'left') {
-          setProfileIdx(Math.max(0, cur.profileIdx - 1));
+          setTvIdx(Math.max(0, cur.tvIdx - 1));
           return true;
         }
         if (event.key === 'right') {
-          setProfileIdx(Math.min(Math.max(0, cur.count - 1), cur.profileIdx + 1));
+          setTvIdx(Math.min(cur.count, cur.tvIdx + 1));
           return true;
         }
         if (event.key === 'down') {
-          setZone('footer');
-          return true;
+          if (cur.tvIdx < cur.count) {
+            setTvZone('edit');
+            return true;
+          }
+          return false;
         }
         if (event.kind === 'press' && event.key === 'select') {
-          const picked = profiles[cur.profileIdx];
+          if (cur.tvIdx === cur.count) {
+            openAddFlow();
+            return true;
+          }
+          const picked = profiles[cur.tvIdx];
           if (picked) onSelectProfile(picked.id);
           return true;
         }
@@ -151,29 +297,164 @@ export function ProfilePickerOverlay({
       }
 
       if (event.key === 'up') {
-        setZone('profiles');
+        setTvZone('tiles');
         return true;
       }
       if (event.key === 'left') {
-        setFooterIdx(0);
+        setTvIdx(Math.max(0, cur.tvIdx - 1));
         return true;
       }
       if (event.key === 'right') {
-        setFooterIdx(1);
+        setTvIdx(Math.min(Math.max(0, cur.count - 1), cur.tvIdx + 1));
         return true;
       }
       if (event.kind === 'press' && event.key === 'select') {
-        if (cur.footerIdx === 0) onManageInSettings();
-        else onClose();
+        const picked = profiles[cur.tvIdx];
+        if (picked) openEditModal(picked);
         return true;
       }
       return false;
     },
-    [onClose, onManageInSettings, onSelectProfile, profiles],
+    [onClose, onSelectProfile, openAddFlow, openEditModal, profiles],
   );
 
-  const cardTransition = webTransition(theme, 'transform, background-color, border-color');
+  const handleSubmitCreate = useCallback(
+    async (values: ProfileFormValues) => {
+      const execute = async () => {
+        setBusy(true);
+        try {
+          const shouldPromptPin = createWithPin || (values.isKids && !hasGuardPin);
+          const res = await createProfile(values);
+          if (res.ok) {
+            closeSubModal();
+            if (shouldPromptPin) {
+              openPinDialog({
+                mode: 'create',
+                profileId: res.value.id,
+              });
+            }
+          }
+        } finally {
+          setBusy(false);
+        }
+      };
+      if (hasGuardPin && !parentalUnlocked) {
+        runProtected(() => {
+          void execute();
+        });
+        return;
+      }
+      await execute();
+    },
+    [
+      closeSubModal,
+      createProfile,
+      createWithPin,
+      hasGuardPin,
+      openPinDialog,
+      parentalUnlocked,
+      runProtected,
+    ],
+  );
+
+  const handleSubmitEdit = useCallback(
+    async (profileId: string, values: ProfileFormValues) => {
+      const execute = async () => {
+        setBusy(true);
+        try {
+          const res = await updateProfile(profileId, values);
+          if (res.ok) closeSubModal();
+        } finally {
+          setBusy(false);
+        }
+      };
+      if (hasGuardPin && !parentalUnlocked) {
+        runProtected(() => {
+          void execute();
+        });
+        return;
+      }
+      await execute();
+    },
+    [closeSubModal, hasGuardPin, parentalUnlocked, runProtected, updateProfile],
+  );
+
+  const handleConfirmDelete = useCallback(
+    async (profileId: string) => {
+      const execute = async () => {
+        setBusy(true);
+        try {
+          const res = await deleteProfile(profileId);
+          if (res.ok) closeSubModal();
+        } finally {
+          setBusy(false);
+        }
+      };
+      if (hasGuardPin && !parentalUnlocked) {
+        runProtected(() => {
+          void execute();
+        });
+        return;
+      }
+      await execute();
+    },
+    [closeSubModal, deleteProfile, hasGuardPin, parentalUnlocked, runProtected],
+  );
+
+  const refreshEditingPinState = useCallback(
+    (targetProfileId: string) => {
+      void hasProfilePin(targetProfileId).then((hasPin) => {
+        if (editingProfileIdRef.current === targetProfileId) {
+          setEditingPinState({ profileId: targetProfileId, hasPin });
+        }
+      });
+    },
+    [hasProfilePin],
+  );
+
+  const buildEditPinSection = (targetProfileId: string) => {
+    const profileHasPin =
+      editingPinState?.profileId === targetProfileId
+        ? editingPinState.hasPin
+        : targetProfileId === activeProfileId
+          ? hasParentalPin
+          : targetProfileId === guardPinProfileId;
+    return {
+      hasPin: profileHasPin,
+      onSetPin: () =>
+        runProtected(() =>
+          openPinDialog({
+            mode: 'create',
+            profileId: targetProfileId,
+            onSuccess: () => {
+              setEditingPinState({ profileId: targetProfileId, hasPin: true });
+              refreshEditingPinState(targetProfileId);
+            },
+          }),
+        ),
+      onChangePin: () =>
+        openPinDialog({
+          mode: 'change',
+          profileId: targetProfileId,
+          onSuccess: () => {
+            refreshEditingPinState(targetProfileId);
+          },
+        }),
+      onRemovePin: () =>
+        openPinDialog({
+          mode: 'remove',
+          profileId: targetProfileId,
+          onSuccess: () => {
+            setEditingPinState({ profileId: targetProfileId, hasPin: false });
+            refreshEditingPinState(targetProfileId);
+          },
+        }),
+    };
+  };
+
+  const tileTransition = webTransition(theme, 'transform, background-color, border-color, opacity');
   const cursorPointer = webCursorPointer();
+  const addFocused = isTv && tvZone === 'tiles' && tvIdx === profiles.length;
 
   return (
     <View
@@ -181,123 +462,214 @@ export function ProfilePickerOverlay({
       style={[
         styles.backdrop,
         {
-          backgroundColor: theme.colors.overlayBackdrop,
-          paddingHorizontal: 20 + viewport.overscan.x,
-          paddingVertical: 20 + viewport.overscan.y,
+          backgroundColor: theme.colors.scrimStrong,
+          paddingHorizontal: 24 + viewport.overscan.x,
+          paddingVertical: 24 + viewport.overscan.y,
         },
+        webBackdropBlur(24),
       ]}
     >
-      {isTv ? <PickerTvKeyBridge onEvent={handleTvKey} /> : null}
+      {isTv && subModal === null && pinDialog === null ? (
+        <PickerTvKeyBridge onEvent={handleTvKey} />
+      ) : null}
 
-      <View
-        testID="profile-picker-panel"
-        style={[
-          styles.panel,
-          isTv ? styles.panelTv : null,
-          {
-            backgroundColor: theme.colors.glassBg,
-            borderColor: theme.colors.glassBorder,
-            borderRadius: theme.radius.modal,
-          },
-          webBackdropBlur(20),
-        ]}
-      >
-        <View style={styles.header}>
-          <Text
-            testID="profile-picker-title"
-            style={[theme.typography.h1, { color: theme.colors.textPrimary }]}
-          >
-            {i18n.t('profiles.switchTitle')}
-          </Text>
-          <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-            {i18n.t('profiles.subtitle')}
-          </Text>
+      {!isTv ? (
+        <View
+          style={[
+            styles.closeAnchor,
+            { top: 20 + viewport.overscan.y, right: 20 + viewport.overscan.x },
+          ]}
+        >
+          <IconButton
+            testID="profile-picker-close"
+            icon="close"
+            accessibilityLabel={i18n.t('profiles.cancelAction')}
+            onPress={onClose}
+          />
         </View>
+      ) : null}
 
-        <View style={styles.grid}>
-          {profiles.map((profile, idx) => {
-            const active = profile.id === activeProfileId;
-            const focused = isTv && zone === 'profiles' && profileIdx === idx;
-            return (
-              <Pressable
-                key={profile.id}
-                testID={`profile-picker-card-${profile.id}`}
-                accessibilityRole="button"
-                accessibilityLabel={profile.name}
-                accessibilityState={{ selected: active }}
-                {...(isTv ? { focusable: false } : {})}
-                onPress={() => onSelectProfile(profile.id)}
-                style={[
-                  styles.card,
-                  cardTransition,
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.centerContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text
+          testID="profile-picker-title"
+          style={[
+            isTv ? theme.typography.display : theme.typography.h1,
+            styles.title,
+            { color: theme.colors.textPrimary },
+          ]}
+        >
+          {i18n.t('profiles.whoIsWatching')}
+        </Text>
+
+        <View style={[styles.grid, isTv ? styles.gridTv : null]}>
+          {profiles.map((profile, idx) => (
+            <ProfileAvatarTile
+              key={profile.id}
+              profile={profile}
+              active={profile.id === activeProfileId}
+              isTv={isTv}
+              isWeb={isWeb}
+              isTouch={isTouch}
+              hovered={hoveredProfileId === profile.id}
+              tileFocused={isTv && tvZone === 'tiles' && tvIdx === idx}
+              editFocused={isTv && tvZone === 'edit' && tvIdx === idx}
+              showTvEditPill={isTv && tvIdx === idx}
+              onHoverIn={() => setHoveredProfileId(profile.id)}
+              onHoverOut={() => setHoveredProfileId((prev) => (prev === profile.id ? null : prev))}
+              onSelect={() => onSelectProfile(profile.id)}
+              onEdit={() => openEditModal(profile)}
+            />
+          ))}
+
+          <View style={styles.addWrap}>
+            <Pressable
+              testID="profile-picker-add"
+              accessibilityRole="button"
+              accessibilityLabel={i18n.t('profiles.addNew')}
+              {...(isTv ? { focusable: false } : {})}
+              onPress={openAddFlow}
+              style={(state) => {
+                const hovered = Boolean((state as { hovered?: boolean }).hovered);
+                return [
+                  styles.addCircle,
                   cursorPointer,
+                  tileTransition,
                   {
-                    borderRadius: theme.radius.card,
-                    backgroundColor: focused
+                    borderRadius: theme.radius.pill,
+                    backgroundColor: addFocused
                       ? theme.colors.focusFill
-                      : active
-                        ? theme.colors.subtleHighlight
+                      : hovered
+                        ? theme.colors.actionGlassHoverBg
                         : theme.colors.bgSurface,
-                    borderWidth: focused ? theme.focus.ringWidth : 1,
-                    borderColor: focused
+                    borderWidth: addFocused ? theme.focus.ringWidth : 1.5,
+                    borderColor: addFocused
                       ? theme.colors.focusRingColor
-                      : active
-                        ? theme.colors.accent
-                        : theme.colors.surfaceBorder,
+                      : hovered
+                        ? theme.colors.hoverRingBorder
+                        : theme.colors.chipBorder,
+                    transform: addFocused ? [{ scale: theme.focus.cardScale }] : undefined,
                   },
-                ]}
+                ];
+              }}
+            >
+              <Icon name="plus" size={38} color={theme.colors.textPrimary} />
+            </Pressable>
+            <Text
+              numberOfLines={1}
+              style={[
+                theme.typography.title,
+                styles.addLabel,
+                { color: theme.colors.textSecondary },
+              ]}
+            >
+              {i18n.t('profiles.addNew')}
+            </Text>
+          </View>
+        </View>
+      </ScrollView>
+
+      {subModal !== null ? (
+        <View
+          testID="profile-submodal-backdrop"
+          style={[
+            styles.subModalBackdrop,
+            {
+              backgroundColor: theme.colors.overlayBackdrop,
+              paddingHorizontal: 20 + viewport.overscan.x,
+              paddingVertical: 20 + viewport.overscan.y,
+            },
+          ]}
+        >
+          <TextEntryBoundary>
+            {isTv && pinDialog === null ? <SubModalTvBackBridge onBack={closeSubModal} /> : null}
+            <TvFocusGuideRegion
+              enabled={isTv && pinDialog === null}
+              trapFocusLeft
+              trapFocusRight
+              trapFocusUp
+              trapFocusDown
+              style={styles.subModalContainer}
+            >
+              <ScrollView
+                testID="profile-submodal-scroll"
+                style={styles.subModalScroll}
+                contentContainerStyle={styles.subModalScrollContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
               >
-                <ProfileAvatarBadge
-                  name={profile.name}
-                  avatarToken={profile.avatarToken}
-                  size="lg"
-                  isKids={profile.isKids}
-                  showKidsPill={profile.isKids}
-                  active={active}
-                />
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    theme.typography.title,
-                    styles.cardName,
-                    { color: theme.colors.textPrimary },
-                  ]}
-                >
-                  {profile.name}
-                </Text>
-                {active ? (
-                  <MicroPill
-                    testID={`profile-picker-active-${profile.id}`}
-                    label={i18n.t('profiles.activeBadge')}
-                    tone="accent"
+                {subModal.kind === 'add-type' ? (
+                  <ProfileTypeStepCard
+                    selectedIsKids={subModal.selectedIsKids}
+                    onSelectType={(selectedIsKids) =>
+                      setSubModal({ kind: 'add-type', selectedIsKids })
+                    }
+                    onContinue={() => {
+                      setCreateWithPin(subModal.selectedIsKids && !hasGuardPin);
+                      setSubModal({ kind: 'add-details', isKids: subModal.selectedIsKids });
+                    }}
+                    onCancel={closeSubModal}
                   />
                 ) : null}
-              </Pressable>
-            );
-          })}
-        </View>
 
-        <View style={styles.footer}>
-          <CtaButton
-            testID="profile-picker-manage"
-            variant="secondary"
-            label={i18n.t('profiles.manageInSettings')}
-            focused={isTv && zone === 'footer' && footerIdx === 0}
-            focusable={!isTv}
-            onPress={onManageInSettings}
-            style={styles.footerBtn}
-          />
-          <CtaButton
-            testID="profile-picker-close"
-            variant="secondary"
-            label={i18n.t('profiles.cancel')}
-            focused={isTv && zone === 'footer' && footerIdx === 1}
-            focusable={!isTv}
-            onPress={onClose}
-            style={styles.footerBtn}
-          />
+                {subModal.kind === 'add-details' ? (
+                  <View testID="profile-add-details-modal">
+                    <ProfileFormCard
+                      mode="create"
+                      initialValues={{ isKids: subModal.isKids }}
+                      showKidsToggle={false}
+                      submitting={busy}
+                      createPinOption={{
+                        checked: createWithPin,
+                        onToggle: () => setCreateWithPin((prev) => !prev),
+                      }}
+                      onSubmit={(values) => {
+                        void handleSubmitCreate(values);
+                      }}
+                      onCancel={closeSubModal}
+                    />
+                  </View>
+                ) : null}
+
+                {subModal.kind === 'edit' && editingProfile !== null ? (
+                  <View testID="profile-edit-modal">
+                    <ProfileFormCard
+                      mode="edit"
+                      initialValues={{
+                        name: editingProfile.name,
+                        avatarToken: editingProfile.avatarToken,
+                        isKids: editingProfile.isKids,
+                      }}
+                      showKidsToggle
+                      onBeforeToggleKids={(_nextIsKids, commit) => {
+                        runProtected(commit);
+                      }}
+                      submitting={busy}
+                      pinSection={buildEditPinSection(editingProfile.id)}
+                      deleteSection={{
+                        canDelete: profiles.length > 1,
+                        confirming: confirmDelete,
+                        onRequestDelete: () => runProtected(() => setConfirmDelete(true)),
+                        onConfirmDelete: () => {
+                          void handleConfirmDelete(editingProfile.id);
+                        },
+                        onCancelDelete: () => setConfirmDelete(false),
+                      }}
+                      onSubmit={(values) => {
+                        void handleSubmitEdit(editingProfile.id, values);
+                      }}
+                      onCancel={closeSubModal}
+                    />
+                  </View>
+                ) : null}
+              </ScrollView>
+            </TvFocusGuideRegion>
+          </TextEntryBoundary>
         </View>
-      </View>
+      ) : null}
     </View>
   );
 }
@@ -309,50 +681,72 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
     zIndex: 50,
   },
-  panel: {
-    width: '100%',
-    maxWidth: 620,
-    borderWidth: 1,
-    padding: 24,
-    gap: 20,
+  closeAnchor: {
+    position: 'absolute',
+    zIndex: 51,
   },
-  panelTv: {
-    maxWidth: 740,
-    padding: 32,
-    gap: 24,
+  scroll: {
+    flex: 1,
   },
-  header: {
-    gap: 4,
+  centerContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    gap: 36,
+  },
+  title: {
+    textAlign: 'center',
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    gap: 28,
+    maxWidth: 880,
   },
-  card: {
-    minWidth: 132,
-    flexGrow: 1,
-    flexBasis: 132,
-    maxWidth: 180,
-    paddingVertical: 16,
-    paddingHorizontal: 12,
+  gridTv: {
+    gap: 36,
+    maxWidth: 1020,
+  },
+  addWrap: {
+    width: 132,
     alignItems: 'center',
-    gap: 8,
-  },
-  cardName: {
-    textAlign: 'center',
-  },
-  footer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
     gap: 10,
   },
-  footerBtn: {
-    minHeight: 42,
+  addCircle: {
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addLabel: {
+    textAlign: 'center',
+    maxWidth: 132,
+  },
+  subModalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 52,
+  },
+  subModalContainer: {
+    width: '100%',
+    maxWidth: 500,
+    maxHeight: '86%',
+  },
+  subModalScroll: {
+    width: '100%',
+    flexGrow: 0,
+  },
+  subModalScrollContent: {
+    flexGrow: 1,
   },
 });

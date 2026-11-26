@@ -365,6 +365,7 @@ export function createObservedCatalog(
   playbackGuard: PlaybackGuard,
   syncSourcesAndBump: () => Promise<void>,
   onUserStateMutated?: () => void,
+  getActiveProfileId?: () => string,
 ): CatalogService {
   const c = catalog;
   const wrapUserStateMutation = <Args extends unknown[], R extends { readonly ok: boolean }>(
@@ -377,6 +378,41 @@ export function createObservedCatalog(
       return res;
     };
   };
+  const wrapSourceResultMutation = <Args extends unknown[], R extends { readonly ok: boolean }>(
+    fn: ((...args: Args) => Promise<R>) | undefined,
+  ): ((...args: Args) => Promise<R>) | undefined => {
+    if (fn === undefined) return undefined;
+    return async (...args: Args) => {
+      const res = await fn.apply(c, args);
+      if (res.ok) {
+        await syncSourcesAndBump();
+        onUserStateMutated?.();
+      }
+      return res;
+    };
+  };
+  const renameSource = wrapSourceResultMutation(c.renameSource);
+  const rawSetSourceExcludedProfiles = c.setSourceExcludedProfiles;
+  const setSourceExcludedProfiles: CatalogService['setSourceExcludedProfiles'] =
+    rawSetSourceExcludedProfiles === undefined
+      ? undefined
+      : async (sourceId, excludedProfileIds) => {
+          const res = await rawSetSourceExcludedProfiles.call(c, sourceId, excludedProfileIds);
+          if (res.ok) {
+            const activeProfileId = getActiveProfileId?.();
+            const effectiveExcluded = res.value.excludedProfileIds ?? excludedProfileIds;
+            if (
+              activeProfileId !== undefined &&
+              activeProfileId !== '' &&
+              effectiveExcluded.includes(activeProfileId)
+            ) {
+              await playbackGuard.stopIfUsingSource(sourceId);
+            }
+            await syncSourcesAndBump();
+            onUserStateMutated?.();
+          }
+          return res;
+        };
   const createCollection = wrapUserStateMutation(c.createCollection);
   const renameCollection = wrapUserStateMutation(c.renameCollection);
   const reorderCollections = wrapUserStateMutation(c.reorderCollections);
@@ -424,6 +460,8 @@ export function createObservedCatalog(
           },
         }
       : {}),
+    ...(renameSource ? { renameSource } : {}),
+    ...(setSourceExcludedProfiles ? { setSourceExcludedProfiles } : {}),
     removeSource: async (id) => {
       await playbackGuard.stopIfUsingSource(id);
       const res = await c.removeSource(id);

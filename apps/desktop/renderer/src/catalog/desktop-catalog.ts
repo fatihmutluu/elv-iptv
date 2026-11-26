@@ -67,6 +67,14 @@ export function createDesktopCatalogFromBridge(
       bridge.updateSourceSettings
         ? bridge.updateSourceSettings(sourceId, patch)
         : Promise.resolve(),
+    renameSource: (sourceId, name) =>
+      bridge.renameSource
+        ? bridge.renameSource(sourceId, sanitizeDisplayText(name))
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    setSourceExcludedProfiles: (sourceId, excludedProfileIds) =>
+      bridge.setSourceExcludedProfiles
+        ? bridge.setSourceExcludedProfiles(sourceId, excludedProfileIds)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
     removeSource: (id) => bridge.removeSource(id),
     async importSource(id, opts?: DeviceImportOptions) {
       if (opts?.signal?.aborted) {

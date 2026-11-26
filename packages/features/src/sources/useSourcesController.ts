@@ -5,7 +5,7 @@ import type {
   ImportSummary,
   SourceRow,
 } from '@elv/data';
-import { elvError, err } from '@elv/domain';
+import { elvError, err, type Result } from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { noopPlaybackGuard, type PlaybackGuard } from '../ports/playback-guard';
@@ -71,8 +71,15 @@ export interface SourcesController {
   canPickLocalFile: boolean;
   canChooseCategories: boolean;
   canEditNetwork: boolean;
+  canRenameSource: boolean;
+  canShareProfiles: boolean;
   categoryPicker: CategoryPickerState | null;
   refreshSources(): Promise<SourceRow[]>;
+  renameSource(sourceId: string, name: string): Promise<Result<SourceRow>>;
+  setSourceExcludedProfiles(
+    sourceId: string,
+    excludedProfileIds: readonly string[],
+  ): Promise<Result<SourceRow>>;
   setMode(mode: 'xtream' | 'm3u' | 'stalker'): void;
   updateField<K extends keyof SourceFormState>(key: K, value: SourceFormState[K]): void;
   toggleAdvanced(): void;
@@ -674,6 +681,34 @@ export function useSourcesController({
     [catalog, playbackGuard, refreshSources, setStatus],
   );
 
+  const renameSource = useCallback(
+    async (sourceId: string, name: string): Promise<Result<SourceRow>> => {
+      if (catalog.renameSource === undefined) {
+        return err(elvError('storage', 'unsupported'));
+      }
+      const res = await catalog.renameSource(sourceId, name.trim());
+      if (res.ok && mountedRef.current) {
+        await refreshSources();
+      }
+      return res;
+    },
+    [catalog, refreshSources],
+  );
+
+  const setSourceExcludedProfiles = useCallback(
+    async (sourceId: string, excludedProfileIds: readonly string[]): Promise<Result<SourceRow>> => {
+      if (catalog.setSourceExcludedProfiles === undefined) {
+        return err(elvError('storage', 'unsupported'));
+      }
+      const res = await catalog.setSourceExcludedProfiles(sourceId, excludedProfileIds);
+      if (res.ok && mountedRef.current) {
+        await refreshSources();
+      }
+      return res;
+    },
+    [catalog, refreshSources],
+  );
+
   const detectedXtreamInM3u =
     form.mode === 'm3u' &&
     (form.localFile ?? null) === null &&
@@ -684,6 +719,8 @@ export function useSourcesController({
   const canChooseCategories =
     catalog.discoverSourceCategories !== undefined && catalog.updateSourceSettings !== undefined;
   const canEditNetwork = catalog.updateSourceSettings !== undefined;
+  const canRenameSource = catalog.renameSource !== undefined;
+  const canShareProfiles = catalog.setSourceExcludedProfiles !== undefined;
 
   return {
     form,
@@ -699,8 +736,12 @@ export function useSourcesController({
     canPickLocalFile,
     canChooseCategories,
     canEditNetwork,
+    canRenameSource,
+    canShareProfiles,
     categoryPicker,
     refreshSources,
+    renameSource,
+    setSourceExcludedProfiles,
     setMode,
     updateField,
     toggleAdvanced,

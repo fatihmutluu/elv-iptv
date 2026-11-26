@@ -573,6 +573,7 @@ if (hasLock) {
     lockDownSession(session.defaultSession);
     artworkCache = createDesktopArtworkCache({
       userDataDir: app.getPath('userData'),
+      maxBytes: 512 * 1024 * 1024,
       onClear: () => session.defaultSession.clearCache(),
     });
     serveArtwork(artworkCache.dir);
@@ -612,7 +613,7 @@ if (hasLock) {
         aspectRatioLockEnabled = enabled;
         aspectRatioLockControllers.get(win as BrowserWindow)?.setEnabled(enabled);
       },
-      getMinimizeToTray: () => shellPrefs?.getMinimizeToTray() ?? false,
+      getMinimizeToTray: () => shellPrefs?.getMinimizeToTray() ?? true,
       onSetMinimizeToTray: (enabled, labels) => {
         if (labels) trayController?.setLabels(labels);
         return shellPrefs?.setMinimizeToTray(enabled) ?? false;

@@ -30,12 +30,12 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
     expect(DEFAULT_PREFERENCES.subtitleMode).toBe('smart');
     expect(DEFAULT_PREFERENCES.seekStepSec).toBe(10);
     expect(DEFAULT_PREFERENCES.defaultResizeMode).toBe('fit');
-    expect(DEFAULT_PREFERENCES.epgTimeSpanHours).toBe(3);
-    expect(DEFAULT_PREFERENCES.epgGenreTints).toBe(true);
+    expect(DEFAULT_PREFERENCES.epgTimeSpanHours).toBe(6);
+    expect(DEFAULT_PREFERENCES.epgGenreTints).toBe(false);
     expect(DEFAULT_PREFERENCES.epgShowClock).toBe(true);
     expect(DEFAULT_PREFERENCES.defaultLiveMode).toBe('favorites');
     expect(DEFAULT_PREFERENCES.guideRefreshHours).toBe(12);
-    expect(DEFAULT_PREFERENCES.logoBackdropMode).toBe('plate');
+    expect(DEFAULT_PREFERENCES.logoBackdropMode).toBe('off');
     expect(DEFAULT_PREFERENCES.showSourceBadges).toBe(true);
     expect(DEFAULT_PREFERENCES.liveOkTwoStepPreview).toBe(false);
     expect(DEFAULT_PREFERENCES.cleanChannelTitles).toBe(false);
@@ -190,7 +190,7 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
         showSourceBadges: 'true',
         liveOkTwoStepPreview: 1,
         cleanChannelTitles: 'false',
-        artworkCacheLimitMb: 512,
+        artworkCacheLimitMb: 1024,
       }),
     );
     expect(parsed).toEqual(DEFAULT_PREFERENCES);
@@ -283,7 +283,7 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       defaultResizeMode: 'bogus' as unknown as DefaultResizeModePref,
       epgTimeSpanHours: 10 as unknown as EpgTimeSpanHoursPref,
       defaultLiveMode: 'bogus' as unknown as DefaultLiveModePref,
-      guideRefreshHours: 48 as unknown as GuideRefreshHoursPref,
+      guideRefreshHours: 99 as unknown as GuideRefreshHoursPref,
       logoBackdropMode: 'bogus' as unknown as LogoBackdropModePref,
       artworkCacheLimitMb: 1024 as unknown as ArtworkCacheLimitMbPref,
     });
@@ -371,7 +371,7 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       defaultResizeMode: 'crop' as unknown as DefaultResizeModePref,
       epgTimeSpanHours: 5 as unknown as EpgTimeSpanHoursPref,
       defaultLiveMode: 'invalid' as unknown as DefaultLiveModePref,
-      guideRefreshHours: 3 as unknown as GuideRefreshHoursPref,
+      guideRefreshHours: 99 as unknown as GuideRefreshHoursPref,
       logoBackdropMode: 'shadow' as unknown as LogoBackdropModePref,
       artworkCacheLimitMb: 32 as unknown as ArtworkCacheLimitMbPref,
     });
