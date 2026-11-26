@@ -242,7 +242,8 @@ describe('Wave P2 — Aspect Fade Badge, Context-Aware Overflow Menu & Interacti
     expect(screen.getByTestId('player-auto-subtitles-skip-back-toggle')).toBeTruthy();
     expect(screen.getByTestId('player-auto-play-next-toggle')).toBeTruthy();
     expect(screen.queryByTestId('player-settings-row-quality')).toBeNull();
-    expect(screen.queryByTestId('player-settings-multiview')).toBeNull();
+    // Wave P5: Cross-media Multi-View is available on Movies & Series as well as Live TV
+    expect(screen.getByTestId('player-settings-multiview')).toBeTruthy();
     await vodView.unmount();
 
     // VOD sleep timer sub-view shows Pause action toggle

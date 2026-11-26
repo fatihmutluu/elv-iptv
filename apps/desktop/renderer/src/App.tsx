@@ -30,6 +30,7 @@ import {
 } from './CatalogCrashBanner.tsx';
 import { createDesktopCatalog } from './catalog/index.ts';
 import { createDesktopDiagnosticsPort } from './diagnostics-port.ts';
+import { createDesktopDownloadsPort } from './downloads/desktop-downloads-port.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
 import { createDesktopLanPairingPort } from './lan-pairing/adapter.ts';
@@ -252,6 +253,8 @@ function AppRoot() {
     [],
   );
 
+  const downloadManager = useMemo(() => createDesktopDownloadsPort(window.elv?.downloads), []);
+
   useEffect(() => {
     let active = true;
     let lastServerUrl: string | undefined;
@@ -306,6 +309,7 @@ function AppRoot() {
     keymapStore,
     reminderHost,
     diagnostics,
+    downloadManager,
     externalRefreshToken: refreshToken,
     ...(desktopWindow === undefined ? {} : { desktopWindow }),
     ...(sourceImportHost === undefined ? {} : { sourceImportHost }),

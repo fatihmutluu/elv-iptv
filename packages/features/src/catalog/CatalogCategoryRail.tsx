@@ -35,7 +35,9 @@ import {
   type DisplayCategory,
   detailTargetFromItem,
   formatVodMeta,
+  hasManagedDownload,
   resolveSeriesBadgeProps,
+  useDownloads,
 } from '../shared';
 import { buildCatalogPosterContextMenuItems } from './catalog-context-menu';
 import { computeProgressRatio } from './catalog-model';
@@ -119,6 +121,7 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
   }, [categoryId, item, onOpenDetail]);
   const i18n = useI18n();
   const { openContextMenu } = useContextMenu();
+  const downloads = useDownloads();
 
   const isSeries = item.kind === 'series';
   const progressWatched = progress?.watched === true;
@@ -127,6 +130,7 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
 
   const handleContextMenu = useCallback(
     (anchor?: ContextMenuAnchor) => {
+      const canDownloadMovie = downloads.supported && item.kind === 'movie';
       openContextMenu({
         title: item.name,
         ...(anchor !== undefined ? { anchor } : {}),
@@ -135,16 +139,34 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
           categoryId,
           isFavorite,
           isWatched: effectiveWatched,
+          isDownloaded: canDownloadMovie && hasManagedDownload(downloads.byItemKey.get(item.key)),
           i18n,
           onOpenDetail,
           ...(onQuickPlay !== undefined ? { onQuickPlay } : {}),
           ...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {}),
           ...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {}),
+          ...(canDownloadMovie
+            ? {
+                onDownload: (it: ItemRow) => {
+                  void downloads.enqueue({
+                    sourceId: it.sourceId,
+                    itemKey: it.key,
+                    kind: 'movie',
+                    title: it.name,
+                    poster: it.logo ?? null,
+                  });
+                },
+                onDeleteDownload: (it: ItemRow) => {
+                  void downloads.remove(it.key);
+                },
+              }
+            : {}),
         }),
       });
     },
     [
       categoryId,
+      downloads,
       effectiveWatched,
       i18n,
       isFavorite,

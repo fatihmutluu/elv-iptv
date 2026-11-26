@@ -190,7 +190,14 @@ describe('PIN storage, rate limiting, and settings/locks CRUD (#31)', () => {
       expect(await service.hasParentalPin?.()).toBe(true);
       const storedSecret = secrets.dump()['profile.default.pin'];
       expect(storedSecret).toMatch(/^v1:[0-9a-f]{32}:[0-9a-f]{64}$/);
-      expect(storedSecret).not.toContain('4321');
+      expect(storedSecret).not.toBe('4321');
+      expect(storedSecret?.split(':')[2]).not.toBe('4321');
+
+      // Re-hashing the same PIN must generate a distinct 128-bit random salt.
+      expect(await service.setParentalPin?.('4321', 'default', '4321')).toEqual(ok(undefined));
+      const rehashedSecret = secrets.dump()['profile.default.pin'];
+      expect(rehashedSecret).toMatch(/^v1:[0-9a-f]{32}:[0-9a-f]{64}$/);
+      expect(rehashedSecret?.split(':')[1]).not.toBe(storedSecret?.split(':')[1]);
 
       const tables = await db.all<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%'",

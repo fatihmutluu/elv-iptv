@@ -226,6 +226,7 @@ export function AppShellPlayerHost(p: AppShellPlayerHostProps): ReactElement | n
         audioNormalization={prefs.audioNormalization}
         pitchLock={prefs.pitchLock}
         deinterlaceMode={prefs.deinterlaceMode}
+        onOnlineStreamActiveChange={modes.onMultiViewOnlineStreamChange}
         onExit={modes.exitMultiView}
       />
     );

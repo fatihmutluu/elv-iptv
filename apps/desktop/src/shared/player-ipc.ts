@@ -18,6 +18,7 @@ import type {
   LoadCommand,
   StreamRequest,
 } from '@elv/playback';
+import { isManagedDownloadFileUrlShape } from './downloads-ipc.ts';
 import {
   ADD_EXTERNAL_SUBTITLE_CMD_KEYS,
   hasOnlyKeys,
@@ -325,12 +326,13 @@ const hasControlChar = (text: string): boolean => {
 };
 
 const isStreamUrl = (x: unknown): boolean => {
-  if (
-    typeof x !== 'string' ||
-    x.length > MAX_STREAM_URL_CHARS ||
-    !/^https?:[/][/]/i.test(x) ||
-    hasControlChar(x)
-  ) {
+  if (typeof x !== 'string' || x.length > MAX_STREAM_URL_CHARS || hasControlChar(x)) {
+    return false;
+  }
+  if (/^file:[/][/]/i.test(x)) {
+    return isManagedDownloadFileUrlShape(x);
+  }
+  if (!/^https?:[/][/]/i.test(x)) {
     return false;
   }
   try {
@@ -524,6 +526,9 @@ function isLoadCommand(x: unknown): x is LoadCommand {
   if (!isRecord(x)) return false;
   if (!isAttempt(x['attempt']) || !isStreamUrl(x['url']) || !isHeaders(x['headers'])) return false;
   if (x['kind'] !== 'live' && x['kind'] !== 'vod') return false;
+  if (typeof x['url'] === 'string' && /^file:/i.test(x['url']) && x['kind'] !== 'vod') {
+    return false;
+  }
   if (x['drm'] !== undefined) return false;
   if (x['startMs'] !== undefined && !isMs(x['startMs'])) return false;
   const options = x['options'];

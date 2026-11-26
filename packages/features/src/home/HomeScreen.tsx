@@ -29,7 +29,13 @@ import {
   View,
 } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
-import { type DetailTarget, useCatalogUiCache, useRouteActive } from '../shared';
+import {
+  type DetailTarget,
+  hasManagedDownload,
+  useCatalogUiCache,
+  useDownloads,
+  useRouteActive,
+} from '../shared';
 import { AmbientBackdrop } from '../shared/AmbientBackdrop';
 import { CollectionManagerOverlay } from '../shared/CollectionManagerOverlay';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
@@ -489,6 +495,7 @@ export function HomeScreen({
     for (const spec of buildHomeRailSpecs(i18n.t)) map.set(spec.id, spec);
     return map;
   }, [i18n]);
+  const downloads = useDownloads();
   const openRailContextMenu = useCallback(
     (railId: HomeRailId, entry: HomeRailEntry, index: number, anchor?: ContextMenuAnchor) => {
       const isFavorite = data.favoriteKeys.has(entry.itemKey);
@@ -497,12 +504,16 @@ export function HomeScreen({
         (entry.watched ||
           (entry.kind === 'series' &&
             data.unplayedBySeriesKey.get(entry.itemKey)?.watched === true));
+      const canDownloadMovie = downloads.supported && entry.kind === 'movie';
+      const isDownloaded =
+        canDownloadMovie && hasManagedDownload(downloads.byItemKey.get(entry.itemKey));
       const items = buildHomeCardContextMenuItems({
         railId,
         entry,
         index,
         isFavorite,
         isWatched,
+        isDownloaded,
         t: i18n.t,
         onPlay: activateEntry,
         ...(onOpenDetail !== undefined ? { onOpenDetail: handleOpenEntryDetail } : {}),
@@ -511,6 +522,22 @@ export function HomeScreen({
         onToggleWatched: handleQuickToggleWatched,
         ...(onOpenMultiView !== undefined ? { onOpenMultiView: handleOpenLiveMultiView } : {}),
         ...(onOpenPopout !== undefined ? { onOpenPopout: handleOpenLivePopout } : {}),
+        ...(canDownloadMovie
+          ? {
+              onDownload: (e: HomeRailEntry) => {
+                void downloads.enqueue({
+                  sourceId: e.sourceId,
+                  itemKey: e.itemKey,
+                  kind: 'movie',
+                  title: e.title,
+                  poster: e.posterUri ?? e.backdropUri ?? null,
+                });
+              },
+              onDeleteDownload: (e: HomeRailEntry) => {
+                void downloads.remove(e.itemKey);
+              },
+            }
+          : {}),
       });
       if (items.length === 0) return;
       contextMenu.openContextMenu({
@@ -526,6 +553,7 @@ export function HomeScreen({
       data.favoriteKeys,
       data.unplayedBySeriesKey,
       data.watchedOverrides,
+      downloads,
       handleOpenEntryDetail,
       handleOpenLiveMultiView,
       handleOpenLivePopout,

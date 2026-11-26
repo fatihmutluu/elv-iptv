@@ -5,6 +5,7 @@ import {
   elvError,
   err,
   type LiveChannelSwitchModePref,
+  ok,
   type SubtitleStyleConfig,
 } from '@elv/domain';
 import {
@@ -150,6 +151,18 @@ export function usePlayerTargetHandoff({
         accountKey: entry.accountKey ?? entry.sourceId,
         kind: entry.kind,
         resolve: async () => {
+          if (
+            entry.isLocalOffline === true &&
+            typeof entry.localFileUri === 'string' &&
+            entry.localFileUri.length > 0
+          ) {
+            return ok({
+              url: entry.localFileUri,
+              headers: {},
+              sourceId: entry.sourceId,
+              channelKey: entry.itemKey,
+            });
+          }
           const catchup = entry.catchup;
           const res =
             catchup !== undefined

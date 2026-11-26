@@ -182,4 +182,51 @@ struct MediaPlanTests {
     #expect(afrOnlyOpts.displaySync == AppleDisplaySyncSettings(autoFrameRate: .always, autoDynamicRange: false))
     #expect(hlsHandoffOptions(from: afrOnlyOpts).displaySync == afrOnlyOpts.displaySync)
   }
+
+  @Test("planMedia allows only verified managed download file:// URLs inside allowedDownloadsRoot")
+  func managedDownloadFileAllowlist() throws {
+    let fm = FileManager.default
+    let baseDir = fm.temporaryDirectory.appendingPathComponent("elv-aether-downloads-test-\(UUID().uuidString)", isDirectory: true)
+    let downloadsDir = baseDir.appendingPathComponent("downloads", isDirectory: true)
+    let outsideDir = baseDir.appendingPathComponent("outside", isDirectory: true)
+    try fm.createDirectory(at: downloadsDir, withIntermediateDirectories: true)
+    try fm.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: baseDir) }
+
+    let validMovie = downloadsDir.appendingPathComponent("movie-101.mp4")
+    fm.createFile(atPath: validMovie.path, contents: Data([0x00, 0x00, 0x00, 0x18]))
+    let outsideMovie = outsideDir.appendingPathComponent("secret.mp4")
+    fm.createFile(atPath: outsideMovie.path, contents: Data([0x00, 0x00, 0x00, 0x18]))
+    let symlinkEscape = downloadsDir.appendingPathComponent("escape.mp4")
+    try fm.createSymbolicLink(at: symlinkEscape, withDestinationURL: outsideMovie)
+    let directoryPretendingToBeVideo = downloadsDir.appendingPathComponent("fake-dir.mp4", isDirectory: true)
+    try fm.createDirectory(at: directoryPretendingToBeVideo, withIntermediateDirectories: true)
+    let missingMovie = downloadsDir.appendingPathComponent("missing-movie.mp4")
+
+    // Default allowedDownloadsRoot (nil) always rejects file:// URLs.
+    #expect(planMedia(LoadRequest(url: validMovie.absoluteString, live: false)) == nil)
+    #expect(isAllowedManagedDownloadFileURL(validMovie, allowedDownloadsRoot: downloadsDir))
+
+    // Valid managed download resolves as .vod with startSeconds.
+    let planned = try #require(
+      planMedia(
+        LoadRequest(url: validMovie.absoluteString, live: false, startMs: 15_000),
+        allowedDownloadsRoot: downloadsDir
+      )
+    )
+    #expect(planned == .vod(validMovie.standardizedFileURL.resolvingSymlinksInPath(), startSeconds: 15.0))
+
+    // Reject outside files, symlinks escaping root, directories matching video extensions, missing files, traversal, query/fragment, remote authority, and non-video extensions.
+    #expect(!isAllowedManagedDownloadFileURL(directoryPretendingToBeVideo, allowedDownloadsRoot: downloadsDir))
+    #expect(planMedia(LoadRequest(url: directoryPretendingToBeVideo.absoluteString, live: false), allowedDownloadsRoot: downloadsDir) == nil)
+    #expect(!isAllowedManagedDownloadFileURL(missingMovie, allowedDownloadsRoot: downloadsDir))
+    #expect(planMedia(LoadRequest(url: missingMovie.absoluteString, live: false), allowedDownloadsRoot: downloadsDir) == nil)
+    #expect(planMedia(LoadRequest(url: outsideMovie.absoluteString, live: false), allowedDownloadsRoot: downloadsDir) == nil)
+    #expect(planMedia(LoadRequest(url: symlinkEscape.absoluteString, live: false), allowedDownloadsRoot: downloadsDir) == nil)
+    #expect(planMedia(LoadRequest(url: "\(downloadsDir.absoluteString)../outside/secret.mp4", live: false), allowedDownloadsRoot: downloadsDir) == nil)
+    #expect(planMedia(LoadRequest(url: "\(validMovie.absoluteString)?token=1", live: false), allowedDownloadsRoot: downloadsDir) == nil)
+    #expect(planMedia(LoadRequest(url: "\(validMovie.absoluteString)#t=10", live: false), allowedDownloadsRoot: downloadsDir) == nil)
+    #expect(planMedia(LoadRequest(url: "file://evil.example/downloads/movie.mp4", live: false), allowedDownloadsRoot: downloadsDir) == nil)
+    #expect(planMedia(LoadRequest(url: downloadsDir.appendingPathComponent("notes.txt").absoluteString, live: false), allowedDownloadsRoot: downloadsDir) == nil)
+  }
 }

@@ -3502,3 +3502,108 @@ msgstr "Aşağı taşı"
 
 msgid "sync.initialPrefsHint"
 msgstr "Görünüm ve oynatma ayarları yeni cihaz eşleştirildiğinde bir kez aktarılır; sonrasında her cihazda bağımsız kalır."
+
+msgid "nav.downloads"
+msgstr "İndirilenler"
+
+msgid "downloads.title"
+msgstr "İndirilenler"
+
+msgid "downloads.activeSection"
+msgstr "Devam edenler"
+
+msgid "downloads.completedSection"
+msgstr "Çevrimdışı izlemeye hazır"
+
+msgid "downloads.emptyTitle"
+msgstr "Henüz indirilen içerik yok"
+
+msgid "downloads.emptyBody"
+msgstr "Çevrimdışı izlemek veya Çoklu Görünümde canlı yayının yanında açmak için film ve dizileri detay sayfasından indirin."
+
+msgid "downloads.unsupportedTitle"
+msgstr "Bu cihazda indirme kullanılamıyor"
+
+msgid "downloads.unsupportedBody"
+msgstr "Çevrimdışı film ve dizi bölümü indirme şu an masaüstü uygulamasında destekleniyor."
+
+msgid "downloads.actionDownload"
+msgstr "İndir"
+
+msgid "downloads.actionDownloading"
+msgstr "İndiriliyor %{percent}"
+
+msgid "downloads.actionDownloaded"
+msgstr "İndirildi"
+
+msgid "downloads.actionPause"
+msgstr "İndirmeyi duraklat"
+
+msgid "downloads.actionResume"
+msgstr "İndirmeye devam et"
+
+msgid "downloads.actionCancel"
+msgstr "İndirmeyi iptal et"
+
+msgid "downloads.actionDelete"
+msgstr "İndirmeyi sil"
+
+msgid "downloads.actionPlayOffline"
+msgstr "Çevrimdışı oynat"
+
+msgid "downloads.statusQueued"
+msgstr "Sırada"
+
+msgid "downloads.statusDownloading"
+msgstr "İndiriliyor"
+
+msgid "downloads.statusPaused"
+msgstr "Duraklatıldı"
+
+msgid "downloads.statusPausedForPlayback"
+msgstr "Yayın izlenirken duraklatıldı"
+
+msgid "downloads.statusFailed"
+msgstr "İndirme başarısız"
+
+msgid "downloads.statusCompleted"
+msgstr "Çevrimdışı"
+
+msgid "downloads.offlineBadge"
+msgstr "Çevrimdışı"
+
+msgid "downloads.storageUsed"
+msgstr "{size} çevrimdışı kayıtlı"
+
+msgid "context.download"
+msgstr "Çevrimdışı indir"
+
+msgid "context.deleteDownload"
+msgstr "İndirmeyi sil"
+
+msgid "multiview.picker.title"
+msgstr "İçerik seç"
+
+msgid "multiview.picker.tabLive"
+msgstr "Canlı Yayın"
+
+msgid "multiview.picker.tabMovies"
+msgstr "Filmler"
+
+msgid "multiview.picker.tabSeries"
+msgstr "Diziler"
+
+msgid "multiview.picker.tabDownloads"
+msgstr "İndirilenler"
+
+msgid "multiview.picker.downloadsHint"
+msgstr "İndirilenler ek bağlantı hakkı harcamaz."
+
+msgid "multiview.picker.emptyDownloads"
+msgstr "Henüz tamamlanmış indirme yok."
+
+msgid "multiview.picker.emptyMovies"
+msgstr "Uygun film bulunamadı."
+
+msgid "multiview.picker.emptySeries"
+msgstr "Uygun dizi bölümü bulunamadı."

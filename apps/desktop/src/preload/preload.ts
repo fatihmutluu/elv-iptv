@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, sharedTexture } from 'electron';
 import { createArtworkBridge } from './artwork-bridge.ts';
 import { createCatalogBridge } from './catalog-bridge.ts';
 import { createDiagnosticsBridge } from './diagnostics-bridge.ts';
+import { createDownloadsBridge } from './downloads-bridge.ts';
 import { isGateMode, parsePresenterArg } from './gate-flag.ts';
 import { createLanPairingBridge } from './lan-pairing-bridge.ts';
 import { createPlayerBridge } from './player-bridge.ts';
@@ -21,6 +22,7 @@ contextBridge.exposeInMainWorld(
     sources: createSourcesBridge(ipcRenderer),
     lanPairing: createLanPairingBridge(ipcRenderer),
     diagnostics: createDiagnosticsBridge(ipcRenderer),
+    downloads: createDownloadsBridge(ipcRenderer),
     sync: syncBridges.sync,
     telemetry: syncBridges.telemetry,
     feedback: syncBridges.feedback,

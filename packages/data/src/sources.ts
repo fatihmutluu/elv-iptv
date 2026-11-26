@@ -278,6 +278,7 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'failover_group_members',
   'vod_enrichment',
   'vod_collection_items',
+  'downloads',
 ];
 const NON_SHARDED_PARTS = ['xtream', 'playlist', 'stalker'] as const;
 
@@ -701,6 +702,7 @@ export async function finishDeletingSource(
     await tx.run('DELETE FROM programme_reminders WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM vod_enrichment WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM vod_collection_items WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM downloads WHERE source_id = ?', [id]);
     await pruneSourceFailoverMembersInTx(tx, id);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });

@@ -34,6 +34,10 @@ export function buildPlayTargetFromPopoutLaunch(payload: PopoutLaunchPayload): P
     payload.resumePositionMs >= 0
       ? { startPositionMs: Math.round(payload.resumePositionMs) }
       : {}),
+    ...(payload.isLocalOffline === true && payload.kind !== 'live' ? { isLocalOffline: true } : {}),
+    ...(payload.localFileUri && payload.kind !== 'live'
+      ? { localFileUri: payload.localFileUri }
+      : {}),
   };
 }
 
@@ -67,6 +71,8 @@ export function buildPopoutDockPayloadFromTarget(
     ...(target.sourceId ? { sourceId: target.sourceId } : {}),
     ...(validPos === undefined ? {} : { positionMs: validPos }),
     ...(cleanTransferId === undefined ? {} : { transferEngineId: cleanTransferId }),
+    ...(target.isLocalOffline === true && kind !== 'live' ? { isLocalOffline: true } : {}),
+    ...(target.localFileUri && kind !== 'live' ? { localFileUri: target.localFileUri } : {}),
   };
 }
 
@@ -96,6 +102,10 @@ export function buildPopoutDockPayload(
     ...(payload.sourceId === undefined ? {} : { sourceId: payload.sourceId }),
     ...(validPos === undefined ? {} : { positionMs: validPos }),
     ...(cleanTransferId === undefined ? {} : { transferEngineId: cleanTransferId }),
+    ...(payload.isLocalOffline === true && payload.kind !== 'live' ? { isLocalOffline: true } : {}),
+    ...(payload.localFileUri && payload.kind !== 'live'
+      ? { localFileUri: payload.localFileUri }
+      : {}),
   };
 }
 

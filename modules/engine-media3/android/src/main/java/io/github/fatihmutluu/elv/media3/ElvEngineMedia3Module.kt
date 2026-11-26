@@ -295,7 +295,8 @@ class ElvEngineMedia3Module : Module() {
       Events("onEngineEvent", "onRemoteMediaAction")
 
       Function("load") { engine: Media3Engine, args: Map<String, Any?> ->
-        val (attempt, request) = parseLoadArgs(args)
+        val downloadsDir = appContext.reactContext?.applicationContext?.let { java.io.File(it.filesDir, "downloads") }
+        val (attempt, request) = parseLoadArgs(args, managedDownloadsDir = downloadsDir)
         engine.load(attempt, request)
       }
 

@@ -15,11 +15,14 @@ export interface BuildCatalogPosterContextMenuInput {
   readonly categoryId?: string;
   readonly isFavorite: boolean;
   readonly isWatched: boolean;
+  readonly isDownloaded?: boolean;
   readonly i18n: CatalogContextMenuI18n;
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onDownload?: (item: ItemRow) => void;
+  readonly onDeleteDownload?: (item: ItemRow) => void;
 }
 
 /** Builds universal right-click / long-press context menu actions for a Movie or Series poster card. */
@@ -28,11 +31,14 @@ export function buildCatalogPosterContextMenuItems({
   categoryId = '',
   isFavorite,
   isWatched,
+  isDownloaded = false,
   i18n,
   onOpenDetail,
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onDownload,
+  onDeleteDownload,
 }: BuildCatalogPosterContextMenuInput): ContextMenuItem[] {
   const openDetail = () => {
     const target = detailTargetFromItem(item, categoryId || undefined);
@@ -77,6 +83,27 @@ export function buildCatalogPosterContextMenuItems({
       testID: 'context-menu-watched',
       onSelect: () => onQuickToggleWatched(item, isWatched),
     });
+  }
+
+  if (item.kind === 'movie') {
+    if (isDownloaded && onDeleteDownload) {
+      items.push({
+        id: 'deleteDownload',
+        label: i18n.t('context.deleteDownload'),
+        icon: 'trash',
+        destructive: true,
+        testID: 'context-menu-delete-download',
+        onSelect: () => onDeleteDownload(item),
+      });
+    } else if (!isDownloaded && onDownload) {
+      items.push({
+        id: 'download',
+        label: i18n.t('context.download'),
+        icon: 'download',
+        testID: 'context-menu-download',
+        onSelect: () => onDownload(item),
+      });
+    }
   }
 
   return items;

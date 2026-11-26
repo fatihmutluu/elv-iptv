@@ -422,7 +422,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         },
       });
     }
-    if (!isVod && props.onEnterMultiView !== undefined) {
+    if (props.onEnterMultiView !== undefined) {
       toggles.push({
         testID: 'player-settings-multiview',
         icon: 'multiview',

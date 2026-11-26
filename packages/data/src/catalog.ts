@@ -15,6 +15,10 @@ import {
   type CatalogCollectionsOpsMethods,
   createCatalogCollectionsOpsMethods,
 } from './catalog-collections-ops';
+import {
+  type CatalogDownloadsOpsMethods,
+  createCatalogDownloadsOpsMethods,
+} from './catalog-downloads-ops';
 import { type CatalogEpgOpsMethods, createCatalogEpgOpsMethods } from './catalog-epg-ops';
 import {
   type CatalogFailoverOpsMethods,
@@ -183,6 +187,8 @@ export interface CatalogDeps {
   nativeGuideStager?: NativeGuideStager;
   /** Optional sandboxed local M3U byte store for local file imports (`#51`). */
   localPlaylistStore?: LocalPlaylistStore;
+  /** Optional hook resolving a completed managed local download URI for offline VOD playback. */
+  resolveLocalDownload?: (itemKey: string, profileId?: string) => Promise<string | null>;
 }
 
 /** Input of {@link CatalogService.addSource}. */
@@ -195,7 +201,8 @@ export type AddSourceInput =
 export interface CatalogService
   extends Partial<CatalogEpgOpsMethods>,
     Partial<CatalogFailoverOpsMethods>,
-    Partial<CatalogCollectionsOpsMethods> {
+    Partial<CatalogCollectionsOpsMethods>,
+    Partial<CatalogDownloadsOpsMethods> {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
@@ -409,7 +416,15 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       : { localPlaylistStore: deps.localPlaylistStore }),
   };
   const queue = createSerializedImportQueue(db);
-  const playtime = createPlaytimeResolverCache({ db, secrets, http: deps.http, clock });
+  const playtime = createPlaytimeResolverCache({
+    db,
+    secrets,
+    http: deps.http,
+    clock,
+    ...(deps.resolveLocalDownload === undefined
+      ? {}
+      : { resolveLocalDownload: deps.resolveLocalDownload }),
+  });
   let closePromise: Promise<void> | undefined;
   const { manifest, userData } = deps;
   const syncManifest = () => (manifest === undefined ? undefined : saveManifest(db, manifest));
@@ -431,6 +446,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
   });
   const failoverOpsMethods = createCatalogFailoverOpsMethods({ db, clock, playtime });
   const collectionsOpsMethods = createCatalogCollectionsOpsMethods({ db, clock, playtime });
+  const downloadsOpsMethods = createCatalogDownloadsOpsMethods({ db, clock });
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
@@ -660,12 +676,12 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       if (filter !== null && (await isItemRestricted(db, filter, itemKey))) {
         return err(elvError('auth', 'parental-locked'));
       }
-      return playtime.resolveStream(
-        itemKey,
-        filter === null
-          ? undefined
-          : { isAlternateRestricted: (channelKey) => isItemRestricted(db, filter, channelKey) },
-      );
+      return playtime.resolveStream(itemKey, {
+        ...(opts?.profileId === undefined ? {} : { profileId: opts.profileId }),
+        ...(filter === null
+          ? {}
+          : { isAlternateRestricted: (channelKey) => isItemRestricted(db, filter, channelKey) }),
+      });
     },
 
     async saveProgress(input) {
@@ -738,6 +754,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...epgOpsMethods,
     ...failoverOpsMethods,
     ...collectionsOpsMethods,
+    ...downloadsOpsMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

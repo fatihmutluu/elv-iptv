@@ -79,7 +79,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const hasAlwaysOnTop = params.hasAlwaysOnTop === true;
   const hasMiniPlayer = params.hasMiniPlayer === true;
   const hasPip = params.hasPip === true;
-  const hasMultiView = !isVod && params.hasMultiView === true;
+  const hasMultiView = params.hasMultiView === true;
   const hasPopout = params.hasPopout === true;
   const canOpenInfo = params.hasInfo !== false;
   const canOpenChannelList = !isVod && params.hasChannelList === true;

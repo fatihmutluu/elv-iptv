@@ -3502,3 +3502,108 @@ msgstr "Move down"
 
 msgid "sync.initialPrefsHint"
 msgstr "Appearance and playback preferences transfer once when pairing a new device, then stay independent per device."
+
+msgid "nav.downloads"
+msgstr "Downloads"
+
+msgid "downloads.title"
+msgstr "Downloads"
+
+msgid "downloads.activeSection"
+msgstr "In progress"
+
+msgid "downloads.completedSection"
+msgstr "Ready to watch offline"
+
+msgid "downloads.emptyTitle"
+msgstr "No downloads yet"
+
+msgid "downloads.emptyBody"
+msgstr "Download movies or series episodes from their detail page to watch offline or alongside Live TV in Multi-View."
+
+msgid "downloads.unsupportedTitle"
+msgstr "Downloads unavailable on this device"
+
+msgid "downloads.unsupportedBody"
+msgstr "Offline movie and episode downloads are currently supported on Desktop."
+
+msgid "downloads.actionDownload"
+msgstr "Download"
+
+msgid "downloads.actionDownloading"
+msgstr "Downloading {percent}%"
+
+msgid "downloads.actionDownloaded"
+msgstr "Downloaded"
+
+msgid "downloads.actionPause"
+msgstr "Pause download"
+
+msgid "downloads.actionResume"
+msgstr "Resume download"
+
+msgid "downloads.actionCancel"
+msgstr "Cancel download"
+
+msgid "downloads.actionDelete"
+msgstr "Delete download"
+
+msgid "downloads.actionPlayOffline"
+msgstr "Play offline"
+
+msgid "downloads.statusQueued"
+msgstr "Queued"
+
+msgid "downloads.statusDownloading"
+msgstr "Downloading"
+
+msgid "downloads.statusPaused"
+msgstr "Paused"
+
+msgid "downloads.statusPausedForPlayback"
+msgstr "Paused while streaming"
+
+msgid "downloads.statusFailed"
+msgstr "Download failed"
+
+msgid "downloads.statusCompleted"
+msgstr "Offline"
+
+msgid "downloads.offlineBadge"
+msgstr "Offline"
+
+msgid "downloads.storageUsed"
+msgstr "{size} saved offline"
+
+msgid "context.download"
+msgstr "Download for offline"
+
+msgid "context.deleteDownload"
+msgstr "Delete download"
+
+msgid "multiview.picker.title"
+msgstr "Choose stream"
+
+msgid "multiview.picker.tabLive"
+msgstr "Live TV"
+
+msgid "multiview.picker.tabMovies"
+msgstr "Movies"
+
+msgid "multiview.picker.tabSeries"
+msgstr "Series"
+
+msgid "multiview.picker.tabDownloads"
+msgstr "Downloads"
+
+msgid "multiview.picker.downloadsHint"
+msgstr "Offline downloads use zero provider connections."
+
+msgid "multiview.picker.emptyDownloads"
+msgstr "No completed downloads yet."
+
+msgid "multiview.picker.emptyMovies"
+msgstr "No movies available."
+
+msgid "multiview.picker.emptySeries"
+msgstr "No series episodes available."

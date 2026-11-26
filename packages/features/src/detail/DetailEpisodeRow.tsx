@@ -1,7 +1,9 @@
 import type { EpisodeRow, WatchProgressRow } from '@elv/data';
+import { computeDownloadProgressRatio, type DownloadRecord, isPlayableDownload } from '@elv/domain';
 import {
   ArtworkImage,
   Icon,
+  IconButton,
   MicroPill,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
@@ -25,6 +27,9 @@ export interface DetailEpisodeRowProps {
   readonly focused: boolean;
   readonly watchedLabel: string;
   readonly onPressEpisode: (episode: EpisodeRow, index: number) => void;
+  readonly downloadsSupported?: boolean;
+  readonly downloadRecord?: DownloadRecord | undefined;
+  readonly onPressDownload?: (episode: EpisodeRow) => void;
 }
 
 function DetailEpisodeRowInner({
@@ -37,6 +42,9 @@ function DetailEpisodeRowInner({
   focused,
   watchedLabel,
   onPressEpisode,
+  downloadsSupported = false,
+  downloadRecord,
+  onPressDownload,
 }: DetailEpisodeRowProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -44,6 +52,48 @@ function DetailEpisodeRowInner({
   const handlePress = useCallback(() => {
     onPressEpisode(episode, index);
   }, [episode, index, onPressEpisode]);
+
+  const handleDownloadPress = useCallback(
+    (e?: { stopPropagation?: () => void }) => {
+      e?.stopPropagation?.();
+      onPressDownload?.(episode);
+    },
+    [episode, onPressDownload],
+  );
+
+  const downloadButtonMeta = (() => {
+    if (!downloadsSupported || onPressDownload === undefined) return null;
+    if (isPlayableDownload(downloadRecord)) {
+      return {
+        icon: 'check' as const,
+        active: true,
+        label: i18n.t('downloads.actionDownloaded'),
+      };
+    }
+    if (downloadRecord?.status === 'downloading' || downloadRecord?.status === 'queued') {
+      const pct = Math.round(
+        (computeDownloadProgressRatio(downloadRecord.bytesDownloaded, downloadRecord.totalBytes) ??
+          0) * 100,
+      );
+      return {
+        icon: 'pause' as const,
+        active: true,
+        label: i18n.t('downloads.actionDownloading', { percent: pct }),
+      };
+    }
+    if (downloadRecord?.status === 'paused' || downloadRecord?.status === 'failed') {
+      return {
+        icon: 'download' as const,
+        active: false,
+        label: i18n.t('downloads.actionResume'),
+      };
+    }
+    return {
+      icon: 'download' as const,
+      active: false,
+      label: i18n.t('downloads.actionDownload'),
+    };
+  })();
 
   const epNum = episode.episode ?? index + 1;
   const trimmedTitle = episode.title?.trim() ?? '';
@@ -187,6 +237,17 @@ function DetailEpisodeRowInner({
           </Text>
         ) : null}
       </View>
+
+      {downloadButtonMeta !== null ? (
+        <IconButton
+          testID={`${testID}-download`}
+          icon={downloadButtonMeta.icon}
+          active={downloadButtonMeta.active}
+          accessibilityLabel={downloadButtonMeta.label}
+          focusable={!isTv}
+          onPress={handleDownloadPress as () => void}
+        />
+      ) : null}
 
       {focused ? (
         <View

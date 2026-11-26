@@ -565,4 +565,118 @@ describe('multiview-controller (#34, #221, #232)', () => {
       maxConnections: 1,
     });
   });
+
+  it('allows 1 Live tile + 1 Offline Movie/Episode tile on a maxConnections = 1 account using only 1 connection', async () => {
+    const tracker = createConnectionTracker();
+    const ctrl = createMultiViewController({
+      capabilities: { platform: 'desktop' },
+      tracker,
+    });
+
+    const live = ctrl.addTile({
+      itemKey: 'live-1',
+      title: 'Match Live',
+      sourceId: 's1',
+      accountKey: 'acct-1',
+      maxConnections: 1,
+      kind: 'live',
+    });
+    expect(live.ok).toBe(true);
+    expect(tracker.activeCount('acct-1')).toBe(1);
+
+    const offlineMovie = ctrl.addTile({
+      itemKey: 'movie-1',
+      title: 'Downloaded Film',
+      sourceId: 's1',
+      accountKey: 'acct-1',
+      maxConnections: 1,
+      kind: 'movie',
+      isLocalOffline: true,
+    });
+    expect(offlineMovie.ok).toBe(true);
+    if (offlineMovie.ok) {
+      expect(offlineMovie.tile.kind).toBe('movie');
+      expect(offlineMovie.tile.isLocalOffline).toBe(true);
+    }
+    expect(tracker.activeCount('acct-1')).toBe(1);
+
+    const offlineEp = ctrl.addTile({
+      itemKey: 'ep-1',
+      title: 'S01E01 Offline',
+      sourceId: 's1',
+      accountKey: 'acct-1',
+      maxConnections: 1,
+      kind: 'episode',
+      isLocalOffline: true,
+    });
+    expect(offlineEp.ok).toBe(true);
+    expect(tracker.activeCount('acct-1')).toBe(1);
+
+    // Removing an offline tile does not touch the online tile's connection lease
+    if (offlineEp.ok) {
+      expect(await ctrl.removeTile(offlineEp.tile.tileId, async () => undefined)).toBe(true);
+      expect(tracker.activeCount('acct-1')).toBe(1);
+    }
+
+    // Swapping offline -> online while live already uses the 1 connection must be rejected
+    if (offlineMovie.ok) {
+      const swapBlocked = await ctrl.replaceTile(
+        offlineMovie.tile.tileId,
+        {
+          itemKey: 'live-2',
+          title: 'Second Live',
+          sourceId: 's1',
+          accountKey: 'acct-1',
+          maxConnections: 1,
+          kind: 'live',
+        },
+        async () => undefined,
+      );
+      expect(swapBlocked).toMatchObject({
+        ok: false,
+        reason: 'connection-limit',
+        activeCount: 1,
+        maxConnections: 1,
+      });
+      expect(tracker.activeCount('acct-1')).toBe(1);
+    }
+
+    // Swapping online -> offline releases the online connection and uses 0 connections
+    if (live.ok) {
+      const swapToOffline = await ctrl.replaceTile(
+        live.tile.tileId,
+        {
+          itemKey: 'ep-2',
+          title: 'S01E02 Offline',
+          sourceId: 's1',
+          accountKey: 'acct-1',
+          maxConnections: 1,
+          kind: 'episode',
+          isLocalOffline: true,
+        },
+        async () => undefined,
+      );
+      expect(swapToOffline.ok).toBe(true);
+      expect(tracker.activeCount('acct-1')).toBe(0);
+
+      // Now swapping offline -> online succeeds and acquires 1 connection
+      const swapBackOnline = await ctrl.replaceTile(
+        live.tile.tileId,
+        {
+          itemKey: 'live-3',
+          title: 'Back Online',
+          sourceId: 's1',
+          accountKey: 'acct-1',
+          maxConnections: 1,
+          kind: 'live',
+        },
+        async () => undefined,
+      );
+      expect(swapBackOnline.ok).toBe(true);
+      expect(tracker.activeCount('acct-1')).toBe(1);
+    }
+
+    await ctrl.clearAll(async () => undefined);
+    expect(tracker.activeCount('acct-1')).toBe(0);
+  });
 });

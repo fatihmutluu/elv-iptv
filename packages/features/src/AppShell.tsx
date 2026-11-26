@@ -1,5 +1,5 @@
 import type { CatalogService, SearchScope } from '@elv/data';
-import type { KeymapStore, ProfilePreferencesManager } from '@elv/domain';
+import type { DownloadManagerPort, KeymapStore, ProfilePreferencesManager } from '@elv/domain';
 import type { ConnectionTracker } from '@elv/playback';
 import { useI18n, useViewport } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -14,6 +14,7 @@ import {
 import { AppShellPlayerHost } from './app-shell-player';
 import { useProgrammeReminders } from './app-shell-reminders';
 import {
+  AppShellContextProviders,
   AppShellStage,
   useShellArtworkCacheLimit,
   useShellIncomingLocalPlaylist,
@@ -61,12 +62,9 @@ import {
 } from './shared';
 import {
   AdaptiveNavShell,
-  BrowseFocusMemoryProvider,
-  CatalogUiCacheProvider,
   CrashRecoveryBoundary,
   createBrowseFocusMemory,
   createCatalogUiCache,
-  RouteActiveProvider,
   useCatalogPrewarm,
   useConnectionLimitGuard,
   useDocumentVisible,
@@ -120,6 +118,8 @@ export interface AppShellProps {
   readonly telemetry?: TelemetryPort;
   /** Optional Settings feedback & issue report submission port (`#458`). */
   readonly feedback?: FeedbackPort;
+  /** Optional cross-platform offline VOD download manager port (`Wave P5`). */
+  readonly downloadManager?: DownloadManagerPort;
 }
 
 /** Top-level Cinema Quietude shell (`Home`, `Live`, `Movies`, `Series` + `Search`, `Settings`, `DetailScreen`, `PlayerScreen`). */
@@ -332,11 +332,14 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const modes = useShellPlaybackModes({
     desktopWindow: props.desktopWindow,
     thermalDevice: props.thermalDevice,
+    downloadManager: props.downloadManager,
     videoHost,
     stopActivePlayerRef,
     stopEmbeddedPreviewRef,
     minimizeToTray: preferences.preferences.minimizeToTray,
     backgroundAudioPlayback: preferences.preferences.backgroundAudioPlayback,
+    playTarget,
+    liveEmbeddedPlaybackActive,
     playTargetRef,
     onStopActivePlayback: stopActivePlayback,
     onRequestPlay: handlePlay,
@@ -649,140 +652,143 @@ function AppShellContent(props: AppShellProps): ReactElement {
     importHealth.health.length > 0;
 
   return (
-    <RouteActiveProvider active={documentVisible && appForeground}>
-      <CatalogUiCacheProvider cache={uiCache}>
-        <BrowseFocusMemoryProvider memory={focusMemory}>
-          <View style={styles.root} onTouchStart={oledScreensaver.recordActivity}>
-            {isBrowsing ? (
-              <AdaptiveNavShell
-                brandTitle={i18n.t('app.title')}
-                showBrand
-                destinations={destinations}
-                utilities={utilities}
-                activeId={activeTab}
-                onSelectDestination={handleSelectDestination}
-                navFocused={topNavFocused && !hasRootOverlay}
-                onExitNavFocus={handleExitNavFocus}
-                onBack={handleNavBack}
-                overlay={hasHeroOverlay}
-                frosted={hasHeroOverlay ? heroScrolled : true}
-                tvClockMode={preferences.preferences.tvClockMode}
-                testID="app-shell"
-              >
-                <CrashRecoveryBoundary
-                  resetKey={`${activeTab}:${activeDetail?.itemKey ?? ''}:${contentIsolationKey}`}
-                  {...crashProps}
-                >
-                  {showCachedStrip ? (
-                    <View style={styles.cachedStripWrap}>
-                      <CachedCatalogStrip
-                        health={importHealth.health}
-                        retrying={importHealth.retrying}
-                        onRetry={importHealth.retryFailedSources}
-                      />
-                    </View>
-                  ) : null}
-                  <AppShellStage
-                    isTv={isTv}
-                    topNavFocused={topNavFocused}
-                    isResolvingInitialSources={isResolvingInitialSources}
-                    activeTab={activeTab}
-                    activeDetail={activeDetail}
-                    contentIsolationKey={contentIsolationKey}
-                    catalog={observedCatalog}
-                    sources={sources}
-                    readySourcesCount={readySourcesCount}
-                    refreshToken={refreshToken}
-                    externalRefreshToken={externalRefreshToken}
-                    effectiveRefreshToken={effectiveRefreshToken}
-                    effectiveUserStateVersion={effectiveUserStateVersion}
-                    hasTransientOverlay={hasRootOverlay}
-                    isActiveScope={!topNavFocused && !hasRootOverlay}
-                    preferences={preferences}
-                    settingsSection={settingsSection}
-                    onSettingsSectionChange={handleSettingsSectionChange}
-                    playbackGuard={playbackGuard}
-                    videoHost={videoHost}
-                    {...(props.sourceImportHost !== undefined
-                      ? { sourceImportHost: props.sourceImportHost }
-                      : {})}
-                    {...(props.lanPairing !== undefined ? { lanPairing: props.lanPairing } : {})}
-                    incomingLocalPlaylist={incomingLocalPlaylist}
-                    onConsumeIncomingLocalPlaylist={consumeIncomingLocalPlaylist}
-                    searchQuery={searchQuery}
-                    onSearchQueryChange={setSearchQuery}
-                    searchScope={searchScope}
-                    onSearchScopeChange={setSearchScope}
-                    recentSearches={recentSearches}
-                    onRecentSearchesChange={setRecentSearches}
-                    catalogMemoryByTab={catalogMemoryByTab}
-                    onMovieMemoryChange={handleMovieMemoryChange}
-                    onSeriesMemoryChange={handleSeriesMemoryChange}
-                    liveMemory={liveMemory}
-                    onLiveMemoryChange={handleLiveMemoryChange}
-                    onEmbeddedPlaybackActiveChange={setLiveEmbeddedPlaybackActive}
-                    onSearchPerson={handleSearchPerson}
-                    onPopDetail={popDetail}
-                    onOpenDetail={openDetail}
-                    onPlay={handlePlay}
-                    {...modes.browseStageActions}
-                    onSelectTab={selectTab}
-                    onOpenSources={openSources}
-                    onOpenChannelManagement={mgmtOverlays.openChannelManager}
-                    onOpenGuideManagement={mgmtOverlays.openGuideManager}
-                    {...(waveF7b.openDiagnosticsPreview !== undefined
-                      ? { onPreviewDiagnostics: waveF7b.openDiagnosticsPreview }
-                      : {})}
-                    onRegisterStopPreview={handleRegisterStopPreview}
-                    suppressEmbeddedPreview={playTarget !== null}
-                    onChannelsMutated={handleChannelsMutated}
-                    onFavoritesMutated={handleFavoritesMutated}
-                    reminderVersion={reminderVersion}
-                    onReminderChanged={handleReminderChanged}
-                    onScrollTopChange={setHeroScrolled}
-                    onFocusTopNav={handleFocusTopNav}
-                    waveF9={waveF9}
+    <AppShellContextProviders
+      routeActive={documentVisible && appForeground}
+      uiCache={uiCache}
+      focusMemory={focusMemory}
+      {...(props.downloadManager !== undefined ? { downloadManager: props.downloadManager } : {})}
+      catalog={observedCatalog}
+      profileId={profile.activeProfileId}
+    >
+      <View style={styles.root} onTouchStart={oledScreensaver.recordActivity}>
+        {isBrowsing ? (
+          <AdaptiveNavShell
+            brandTitle={i18n.t('app.title')}
+            showBrand
+            destinations={destinations}
+            utilities={utilities}
+            activeId={activeTab}
+            onSelectDestination={handleSelectDestination}
+            navFocused={topNavFocused && !hasRootOverlay}
+            onExitNavFocus={handleExitNavFocus}
+            onBack={handleNavBack}
+            overlay={hasHeroOverlay}
+            frosted={hasHeroOverlay ? heroScrolled : true}
+            tvClockMode={preferences.preferences.tvClockMode}
+            testID="app-shell"
+          >
+            <CrashRecoveryBoundary
+              resetKey={`${activeTab}:${activeDetail?.itemKey ?? ''}:${contentIsolationKey}`}
+              {...crashProps}
+            >
+              {showCachedStrip ? (
+                <View style={styles.cachedStripWrap}>
+                  <CachedCatalogStrip
+                    health={importHealth.health}
+                    retrying={importHealth.retrying}
+                    onRetry={importHealth.retryFailedSources}
                   />
-                </CrashRecoveryBoundary>
-              </AdaptiveNavShell>
-            ) : null}
-            <AppShellPlayerHost
-              catalog={observedCatalog}
-              videoHost={videoHost}
-              tracker={connectionGuard.tracker}
-              sources={sources}
-              thermalDevice={props.thermalDevice}
-              playTarget={playTarget}
-              modes={modes}
-              playbackGuard={playbackGuard}
-              preferences={preferences}
-              {...(appLifecycle !== undefined ? { appLifecycle } : {})}
-              externalOverlayOpen={hasRootOverlay}
-              crashProps={crashProps}
-              onPlaybackActiveChange={setPlayerPlaybackActive}
-              onRegisterStopActivePlayer={handleRegisterStopActivePlayer}
-              onTargetChange={onPlayerTargetChange}
-              onExit={onPlayerExit}
-            />
-            <AppShellRootOverlays
-              exitToastVisible={exitToastVisible && isBrowsing}
-              connectionGuard={connectionGuard}
-              mgmtOverlays={mgmtOverlays}
-              catalog={observedCatalog}
-              sources={sources}
-              onChannelsMutated={handleChannelsMutated}
-              onOpenProfilesSettings={openProfilesSettings}
-              reminders={reminders}
-              oledScreensaver={oledScreensaver}
-              wave={waveF7b}
-              waveF9={waveF9}
-              {...(props.diagnostics !== undefined ? { diagnostics: props.diagnostics } : {})}
-              includeLogs={preferences.preferences.crashReportsIncludeLogs}
-            />
-          </View>
-        </BrowseFocusMemoryProvider>
-      </CatalogUiCacheProvider>
-    </RouteActiveProvider>
+                </View>
+              ) : null}
+              <AppShellStage
+                isTv={isTv}
+                topNavFocused={topNavFocused}
+                isResolvingInitialSources={isResolvingInitialSources}
+                activeTab={activeTab}
+                activeDetail={activeDetail}
+                contentIsolationKey={contentIsolationKey}
+                catalog={observedCatalog}
+                sources={sources}
+                readySourcesCount={readySourcesCount}
+                refreshToken={refreshToken}
+                externalRefreshToken={externalRefreshToken}
+                effectiveRefreshToken={effectiveRefreshToken}
+                effectiveUserStateVersion={effectiveUserStateVersion}
+                hasTransientOverlay={hasRootOverlay}
+                isActiveScope={!topNavFocused && !hasRootOverlay}
+                preferences={preferences}
+                settingsSection={settingsSection}
+                onSettingsSectionChange={handleSettingsSectionChange}
+                playbackGuard={playbackGuard}
+                videoHost={videoHost}
+                {...(props.sourceImportHost !== undefined
+                  ? { sourceImportHost: props.sourceImportHost }
+                  : {})}
+                {...(props.lanPairing !== undefined ? { lanPairing: props.lanPairing } : {})}
+                incomingLocalPlaylist={incomingLocalPlaylist}
+                onConsumeIncomingLocalPlaylist={consumeIncomingLocalPlaylist}
+                searchQuery={searchQuery}
+                onSearchQueryChange={setSearchQuery}
+                searchScope={searchScope}
+                onSearchScopeChange={setSearchScope}
+                recentSearches={recentSearches}
+                onRecentSearchesChange={setRecentSearches}
+                catalogMemoryByTab={catalogMemoryByTab}
+                onMovieMemoryChange={handleMovieMemoryChange}
+                onSeriesMemoryChange={handleSeriesMemoryChange}
+                liveMemory={liveMemory}
+                onLiveMemoryChange={handleLiveMemoryChange}
+                onEmbeddedPlaybackActiveChange={setLiveEmbeddedPlaybackActive}
+                onSearchPerson={handleSearchPerson}
+                onPopDetail={popDetail}
+                onOpenDetail={openDetail}
+                onPlay={handlePlay}
+                {...modes.browseStageActions}
+                onSelectTab={selectTab}
+                onOpenSources={openSources}
+                onOpenChannelManagement={mgmtOverlays.openChannelManager}
+                onOpenGuideManagement={mgmtOverlays.openGuideManager}
+                {...(waveF7b.openDiagnosticsPreview !== undefined
+                  ? { onPreviewDiagnostics: waveF7b.openDiagnosticsPreview }
+                  : {})}
+                onRegisterStopPreview={handleRegisterStopPreview}
+                suppressEmbeddedPreview={playTarget !== null}
+                onChannelsMutated={handleChannelsMutated}
+                onFavoritesMutated={handleFavoritesMutated}
+                reminderVersion={reminderVersion}
+                onReminderChanged={handleReminderChanged}
+                onScrollTopChange={setHeroScrolled}
+                onFocusTopNav={handleFocusTopNav}
+                waveF9={waveF9}
+              />
+            </CrashRecoveryBoundary>
+          </AdaptiveNavShell>
+        ) : null}
+        <AppShellPlayerHost
+          catalog={observedCatalog}
+          videoHost={videoHost}
+          tracker={connectionGuard.tracker}
+          sources={sources}
+          thermalDevice={props.thermalDevice}
+          playTarget={playTarget}
+          modes={modes}
+          playbackGuard={playbackGuard}
+          preferences={preferences}
+          {...(appLifecycle !== undefined ? { appLifecycle } : {})}
+          externalOverlayOpen={hasRootOverlay}
+          crashProps={crashProps}
+          onPlaybackActiveChange={setPlayerPlaybackActive}
+          onRegisterStopActivePlayer={handleRegisterStopActivePlayer}
+          onTargetChange={onPlayerTargetChange}
+          onExit={onPlayerExit}
+        />
+        <AppShellRootOverlays
+          exitToastVisible={exitToastVisible && isBrowsing}
+          connectionGuard={connectionGuard}
+          mgmtOverlays={mgmtOverlays}
+          catalog={observedCatalog}
+          sources={sources}
+          onChannelsMutated={handleChannelsMutated}
+          onOpenProfilesSettings={openProfilesSettings}
+          reminders={reminders}
+          oledScreensaver={oledScreensaver}
+          wave={waveF7b}
+          waveF9={waveF9}
+          {...(props.diagnostics !== undefined ? { diagnostics: props.diagnostics } : {})}
+          includeLogs={preferences.preferences.crashReportsIncludeLogs}
+        />
+      </View>
+    </AppShellContextProviders>
   );
 }
 

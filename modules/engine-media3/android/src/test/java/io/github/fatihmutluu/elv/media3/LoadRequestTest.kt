@@ -340,4 +340,78 @@ class LoadRequestTest {
       assertFalse("LoadRequest.toString must never leak $leak: $text", text.contains(leak))
     }
   }
+
+  @Test
+  fun `isAllowedManagedDownloadFileUri and parseLoadArgs allow only verified files inside managedDownloadsDir`() {
+    val baseDir = java.nio.file.Files.createTempDirectory("elv-media3-downloads-test").toFile()
+    val downloadsDir = java.io.File(baseDir, "downloads").apply { mkdirs() }
+    val outsideDir = java.io.File(baseDir, "outside").apply { mkdirs() }
+    try {
+      val validMovie = java.io.File(downloadsDir, "movie-42.mp4").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+      val validMkv = java.io.File(downloadsDir, "episode-1.mkv").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+      val badExtFile = java.io.File(downloadsDir, "notes.txt").apply { writeText("secret") }
+      val dirNamedMp4 = java.io.File(downloadsDir, "folder.mp4").apply { mkdirs() }
+      val outsideMovie = java.io.File(outsideDir, "outside.mp4").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+
+      val validUri = "file://" + validMovie.toURI().rawPath
+      val validMkvUri = "file://" + validMkv.toURI().rawPath
+      val badExtUri = "file://" + badExtFile.toURI().rawPath
+      val dirMp4Uri = "file://" + dirNamedMp4.toURI().rawPath
+      val outsideUri = "file://" + outsideMovie.toURI().rawPath
+      val traversalUri = "file://" + downloadsDir.toURI().rawPath.trimEnd('/') + "/../outside/outside.mp4"
+
+      // Arbitrary file:// always rejected by isAllowedPlaybackUrl and when managedDownloadsDir is null.
+      assertFalse(isAllowedPlaybackUrl(validUri))
+      assertFalse(isAllowedManagedDownloadFileUri(validUri, null))
+
+      // Valid managed downloads inside downloadsDir pass.
+      assertTrue(isAllowedManagedDownloadFileUri(validUri, downloadsDir))
+      assertTrue(isAllowedManagedDownloadFileUri(validMkvUri, downloadsDir))
+      assertTrue(isAllowedPlaybackOrManagedDownloadUrl(validUri, downloadsDir))
+
+      // Outside dir, traversal, query/fragment, control chars, remote authority, non-video ext, and directories fail.
+      for (rejected in listOf(
+        outsideUri,
+        traversalUri,
+        badExtUri,
+        dirMp4Uri,
+        "$validUri?token=1",
+        "$validUri#frag",
+        "$validUri\u0000",
+        "file://evil.example/downloads/movie-42.mp4",
+        "file:///etc/passwd",
+      )) {
+        assertFalse("expected rejected: $rejected", isAllowedManagedDownloadFileUri(rejected, downloadsDir))
+      }
+
+      // Symlink inside downloadsDir pointing outside must be rejected after canonical resolution.
+      val symlinkFile = java.io.File(downloadsDir, "escape.mp4")
+      val symlinkCreated = try {
+        java.nio.file.Files.createSymbolicLink(symlinkFile.toPath(), outsideMovie.toPath())
+        true
+      } catch (_: Exception) {
+        false
+      }
+      if (symlinkCreated) {
+        val symlinkUri = "file://" + symlinkFile.toURI().rawPath
+        assertFalse(isAllowedManagedDownloadFileUri(symlinkUri, downloadsDir))
+      }
+
+      // parseLoadArgs preserves verified managed download URI and strips disallowed file:// URIs.
+      val (_, acceptedReq) = parseLoadArgs(
+        mapOf("attempt" to 2, "url" to validUri, "kind" to "vod"),
+        managedDownloadsDir = downloadsDir,
+      )
+      assertEquals(validUri, acceptedReq.url)
+      assertEquals(downloadsDir, acceptedReq.managedDownloadsDir)
+
+      val (_, rejectedReq) = parseLoadArgs(
+        mapOf("attempt" to 3, "url" to outsideUri, "kind" to "vod"),
+        managedDownloadsDir = downloadsDir,
+      )
+      assertEquals("", rejectedReq.url)
+    } finally {
+      baseDir.deleteRecursively()
+    }
+  }
 }

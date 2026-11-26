@@ -1,4 +1,5 @@
 import type { CatalogService, SearchScope, SourceRow } from '@elv/data';
+import type { DownloadManagerPort } from '@elv/domain';
 import {
   TvFocusAnchor,
   useI18n,
@@ -7,12 +8,13 @@ import {
   useViewport,
   webBackdropBlur,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactElement, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { AppTab, CatalogMemoryMap } from './app-shell-state';
 import type { WaveF9Controller } from './app-shell-wave-f9';
 import { CatalogDiscoveryScreen, type CatalogTabMemory } from './catalog';
 import { DetailScreen } from './detail';
+import { DownloadsScreen } from './downloads';
 import { HomeScreen } from './home';
 import { LiveScreen, type LiveTabMemory } from './live';
 import { ThirdPartyNoticesScreen } from './notices';
@@ -24,8 +26,15 @@ import type { VideoHost } from './ports/video-host';
 import { ProfilesAndParentalPanel } from './profiles';
 import { SearchScreen } from './search';
 import { SettingsScreen, type SettingsSection } from './settings';
-import type { DetailTarget } from './shared';
-import type { PreferencesContextValue } from './shell';
+import { type DetailTarget, DownloadsProvider, useDownloads } from './shared';
+import {
+  type BrowseFocusMemory,
+  BrowseFocusMemoryProvider,
+  type CatalogUiCache,
+  CatalogUiCacheProvider,
+  type PreferencesContextValue,
+  RouteActiveProvider,
+} from './shell';
 import { SourcesScreen } from './sources';
 
 /** Props of {@link AppShellStage}. */
@@ -88,8 +97,22 @@ export interface AppShellStageProps {
   readonly waveF9?: WaveF9Controller;
 }
 
-/** Active content stage inside {@link AppShell} (boot, Detail, Settings, Search, Home, Movies/Series, Live). */
+/** Active content stage inside {@link AppShell} (boot, Detail, Settings, Search, Downloads, Home, Movies/Series, Live). */
 export function AppShellStage(p: AppShellStageProps): ReactElement {
+  const downloads = useDownloads();
+  const handleStagePlay = useCallback(
+    (target: PlayTarget) => {
+      if (target.kind === 'vod' && target.isLocalOffline !== true) {
+        const localUri = downloads.getOfflineUri(target.itemKey);
+        if (localUri !== null) {
+          p.onPlay({ ...target, isLocalOffline: true, localFileUri: localUri });
+          return;
+        }
+      }
+      p.onPlay(target);
+    },
+    [downloads.getOfflineUri, p.onPlay],
+  );
   const stageProps = {
     catalog: p.catalog,
     refreshToken: p.effectiveRefreshToken,
@@ -116,7 +139,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         vodEnrichmentEnabled={p.preferences.preferences.vodEnrichmentEnabled}
         onSearchPerson={p.onSearchPerson}
         onBack={p.onPopDetail}
-        onPlay={p.onPlay}
+        onPlay={handleStagePlay}
         onOpenDetail={p.onOpenDetail}
         onScrollTopChange={p.onScrollTopChange}
         {...stageProps}
@@ -181,9 +204,22 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         onScopeChange={p.onSearchScopeChange}
         recentSearches={p.recentSearches}
         onRecentSearchesChange={p.onRecentSearchesChange}
-        onPlay={p.onPlay}
+        onPlay={handleStagePlay}
         onOpenDetail={p.onOpenDetail}
         {...stageProps}
+      />
+    );
+  }
+
+  if (p.activeTab === 'downloads') {
+    return (
+      <DownloadsScreen
+        key={p.contentIsolationKey}
+        onPlay={handleStagePlay}
+        {...(p.onOpenMultiView !== undefined ? { onOpenMultiView: p.onOpenMultiView } : {})}
+        onOpenDetail={p.onOpenDetail}
+        onFocusTopNav={p.onFocusTopNav}
+        isActiveScope={p.isActiveScope}
       />
     );
   }
@@ -195,7 +231,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         sources={p.sources}
         userStateVersion={p.effectiveUserStateVersion}
         homeLayout={p.preferences.preferences.homeLayout}
-        onPlay={p.onPlay}
+        onPlay={handleStagePlay}
         {...(p.onOpenMultiView !== undefined ? { onOpenMultiView: p.onOpenMultiView } : {})}
         {...(p.onOpenPopout !== undefined ? { onOpenPopout: p.onOpenPopout } : {})}
         onOpenTab={p.onSelectTab}
@@ -217,7 +253,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         groupVersions={p.activeTab === 'movie' ? p.preferences.preferences.groupVodVersions : false}
         memory={p.catalogMemoryByTab[p.activeTab]}
         onMemoryChange={p.activeTab === 'movie' ? p.onMovieMemoryChange : p.onSeriesMemoryChange}
-        onPlay={p.onPlay}
+        onPlay={handleStagePlay}
         onOpenDetail={p.onOpenDetail}
         onOpenSources={p.onOpenSources}
         {...stageProps}
@@ -359,6 +395,41 @@ export function AppShellExitToast({ visible }: { readonly visible: boolean }): R
         </Text>
       </View>
     </View>
+  );
+}
+
+/** Composes the shell-level reactive providers (`RouteActive`, UI cache, focus memory, downloads). */
+export function AppShellContextProviders({
+  routeActive,
+  uiCache,
+  focusMemory,
+  downloadManager,
+  catalog,
+  profileId,
+  children,
+}: {
+  readonly routeActive: boolean;
+  readonly uiCache: CatalogUiCache;
+  readonly focusMemory: BrowseFocusMemory;
+  readonly downloadManager?: DownloadManagerPort;
+  readonly catalog: CatalogService;
+  readonly profileId: string;
+  readonly children: ReactNode;
+}): ReactElement {
+  return (
+    <RouteActiveProvider active={routeActive}>
+      <CatalogUiCacheProvider cache={uiCache}>
+        <BrowseFocusMemoryProvider memory={focusMemory}>
+          <DownloadsProvider
+            {...(downloadManager !== undefined ? { manager: downloadManager } : {})}
+            catalog={catalog}
+            profileId={profileId}
+          >
+            {children}
+          </DownloadsProvider>
+        </BrowseFocusMemoryProvider>
+      </CatalogUiCacheProvider>
+    </RouteActiveProvider>
   );
 }
 

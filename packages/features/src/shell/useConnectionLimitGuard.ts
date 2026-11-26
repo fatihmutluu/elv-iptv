@@ -108,11 +108,14 @@ export function useConnectionLimitGuard({
       const prevId = activeStreamIdRef.current;
       if (prevId !== null) {
         tracker.release(prevId);
+        activeStreamIdRef.current = null;
       }
-      seqRef.current += 1;
-      const nextId = `shell:${seqRef.current}:${target.itemKey}`;
-      tracker.acquire(accountKey, nextId);
-      activeStreamIdRef.current = nextId;
+      if (target.isLocalOffline !== true) {
+        seqRef.current += 1;
+        const nextId = `shell:${seqRef.current}:${target.itemKey}`;
+        tracker.acquire(accountKey, nextId);
+        activeStreamIdRef.current = nextId;
+      }
       if (mode === 'replace') onReplaceTarget(target);
       else if (mode === 'adopt') (onAdoptTarget ?? onOpenTarget)(target);
       else onOpenTarget(target);
@@ -122,6 +125,12 @@ export function useConnectionLimitGuard({
 
   const requestPlay = useCallback(
     (target: PlayTarget) => {
+      if (target.isLocalOffline === true) {
+        pendingRef.current = null;
+        setPending(null);
+        commitPlay(target, target.accountKey ?? target.sourceId, 'open');
+        return;
+      }
       const info = resolveConnectionInfo(target, sourcesRef.current, enrichTarget);
       const check = tracker.checkLimit({
         accountKey: info.accountKey,
@@ -145,9 +154,13 @@ export function useConnectionLimitGuard({
 
   const adoptPlay = useCallback(
     (target: PlayTarget) => {
-      const info = resolveConnectionInfo(target, sourcesRef.current, enrichTarget);
       pendingRef.current = null;
       setPending(null);
+      if (target.isLocalOffline === true) {
+        commitPlay(target, target.accountKey ?? target.sourceId, 'adopt');
+        return;
+      }
+      const info = resolveConnectionInfo(target, sourcesRef.current, enrichTarget);
       commitPlay(info.enriched, info.accountKey, 'adopt');
     },
     [commitPlay, enrichTarget, sourcesRef],
@@ -155,6 +168,10 @@ export function useConnectionLimitGuard({
 
   const replaceActiveTarget = useCallback(
     (target: PlayTarget) => {
+      if (target.isLocalOffline === true) {
+        commitPlay(target, target.accountKey ?? target.sourceId, 'replace');
+        return;
+      }
       const info = resolveConnectionInfo(target, sourcesRef.current, enrichTarget);
       tracker.checkLimit({
         accountKey: info.accountKey,

@@ -1,3 +1,4 @@
+import type { DownloadManagerPort } from '@elv/domain';
 import { resolveHardwareMultiViewCap } from '@elv/playback';
 import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { resolveMultiViewCapabilities } from './player';
@@ -22,6 +23,12 @@ export function buildPopoutLaunchPayload(
       ? Math.round(positionMs)
       : target.startPositionMs;
   const trimmedTransferId = transferEngineId?.trim();
+  const offlineUri =
+    target.isLocalOffline === true &&
+    typeof target.localFileUri === 'string' &&
+    target.localFileUri.trim().length > 0
+      ? target.localFileUri.trim()
+      : undefined;
   return {
     itemKey: target.itemKey,
     kind,
@@ -35,11 +42,18 @@ export function buildPopoutLaunchPayload(
     ...(trimmedTransferId !== undefined && trimmedTransferId.length > 0
       ? { transferEngineId: trimmedTransferId }
       : {}),
+    ...(offlineUri !== undefined ? { isLocalOffline: true, localFileUri: offlineUri } : {}),
   };
 }
 
 /** Converts a docked {@link PopoutDockPayload} back into a {@link PlayTarget} for `AppShell` (`#158`). */
 export function buildPlayTargetFromPopoutDock(payload: PopoutDockPayload): PlayTarget {
+  const offlineUri =
+    payload.isLocalOffline === true &&
+    typeof payload.localFileUri === 'string' &&
+    payload.localFileUri.trim().length > 0
+      ? payload.localFileUri.trim()
+      : undefined;
   return {
     itemKey: payload.itemKey,
     sourceId: payload.sourceId ?? '',
@@ -51,6 +65,7 @@ export function buildPlayTargetFromPopoutDock(payload: PopoutDockPayload): PlayT
     ...(payload.positionMs !== undefined && Number.isFinite(payload.positionMs)
       ? { startPositionMs: Math.max(0, Math.round(payload.positionMs)) }
       : {}),
+    ...(offlineUri !== undefined ? { isLocalOffline: true, localFileUri: offlineUri } : {}),
   };
 }
 
@@ -67,11 +82,14 @@ function disposeAdoptedSession(session: AdoptedPlaybackSession): void {
 export interface UseShellPlaybackModesOptions {
   readonly desktopWindow?: DesktopWindowPort | undefined;
   readonly thermalDevice?: ThermalDevicePort | undefined;
+  readonly downloadManager?: DownloadManagerPort | undefined;
   readonly videoHost: VideoHost;
   readonly stopActivePlayerRef: MutableRefObject<(() => Promise<void>) | null>;
   readonly stopEmbeddedPreviewRef?: MutableRefObject<(() => Promise<void>) | null> | undefined;
   readonly minimizeToTray: boolean;
   readonly backgroundAudioPlayback: boolean;
+  readonly playTarget?: PlayTarget | null;
+  readonly liveEmbeddedPlaybackActive?: boolean;
   readonly playTargetRef: MutableRefObject<PlayTarget | null>;
   readonly onStopActivePlayback: () => void;
   readonly onRequestPlay: (target: PlayTarget) => void;
@@ -102,11 +120,14 @@ function runAfterEmbeddedPreview(
 export function useShellPlaybackModes({
   desktopWindow,
   thermalDevice,
+  downloadManager,
   videoHost,
   stopActivePlayerRef,
   stopEmbeddedPreviewRef,
   minimizeToTray,
   backgroundAudioPlayback,
+  playTarget = null,
+  liveEmbeddedPlaybackActive = false,
   playTargetRef,
   onStopActivePlayback,
   onRequestPlay,
@@ -114,6 +135,7 @@ export function useShellPlaybackModes({
 }: UseShellPlaybackModesOptions) {
   const [playerViewMode, setPlayerViewMode] = useState<'full' | 'mini'>('full');
   const [multiViewSeed, setMultiViewSeed] = useState<PlayTarget | null>(null);
+  const [multiViewHasOnlineStream, setMultiViewHasOnlineStream] = useState<boolean | null>(null);
   const [multiViewAdoptedSession, setMultiViewAdoptedSession] =
     useState<AdoptedPlaybackSession | null>(null);
   const [pendingAdoptedSession, setPendingAdoptedSession] = useState<AdoptedPlaybackSession | null>(
@@ -122,6 +144,7 @@ export function useShellPlaybackModes({
   const [pendingAdoptEngineId, setPendingAdoptEngineId] = useState<string | undefined>(undefined);
   const [playerHandoffKey, setPlayerHandoffKey] = useState(0);
   const [restoreCursorToken, setRestoreCursorToken] = useState(0);
+  const lastPopoutTargetRef = useRef<PlayTarget | null>(null);
 
   const consumedAdoptedRef = useRef(new WeakSet<AdoptedPlaybackSession>());
   const markAdoptedSessionConsumed = useCallback((session: AdoptedPlaybackSession) => {
@@ -169,6 +192,18 @@ export function useShellPlaybackModes({
     [thermalDevice, videoHost],
   );
 
+  useEffect(() => {
+    if (multiViewSeed === null) setMultiViewHasOnlineStream(null);
+  }, [multiViewSeed]);
+
+  useShellOnlinePlaybackSync({
+    downloadManager,
+    playTarget,
+    liveEmbeddedPlaybackActive,
+    multiViewSeed,
+    multiViewHasOnlineStream,
+  });
+
   // Sync minimize-to-tray preference into Electron main process (#158).
   useEffect(() => {
     void desktopWindow?.setMinimizeToTray?.(minimizeToTray);
@@ -215,7 +250,21 @@ export function useShellPlaybackModes({
       setPendingAdoptEngineId(hasTransfer ? payload.transferEngineId : undefined);
       setPlayerHandoffKey((k) => k + 1);
       setPlayerViewMode('full');
-      const target = buildPlayTargetFromPopoutDock(payload);
+      const rawTarget = buildPlayTargetFromPopoutDock(payload);
+      const prevPopout = lastPopoutTargetRef.current;
+      const target: PlayTarget =
+        rawTarget.isLocalOffline !== true &&
+        prevPopout?.itemKey === rawTarget.itemKey &&
+        prevPopout.isLocalOffline === true &&
+        typeof prevPopout.localFileUri === 'string' &&
+        prevPopout.localFileUri.trim().length > 0
+          ? {
+              ...rawTarget,
+              isLocalOffline: true,
+              localFileUri: prevPopout.localFileUri.trim(),
+            }
+          : rawTarget;
+      lastPopoutTargetRef.current = null;
       if (hasTransfer) {
         adoptPlayRef.current(target);
       } else {
@@ -293,6 +342,7 @@ export function useShellPlaybackModes({
   const popoutPlayer = useMemo(() => {
     if (openPopout === undefined) return undefined;
     return (target: PlayTarget, positionMs?: number, transferEngineId?: string) => {
+      lastPopoutTargetRef.current = target;
       const payload = buildPopoutLaunchPayload(target, positionMs, transferEngineId);
       setPlayerViewMode('full');
       if (transferEngineId !== undefined && transferEngineId.length > 0) {
@@ -386,6 +436,7 @@ export function useShellPlaybackModes({
     resetToFullMode,
     enterMultiView,
     exitMultiView,
+    onMultiViewOnlineStreamChange: setMultiViewHasOnlineStream,
     popoutPlayer,
     browseStageActions,
     tuneFromReminder,
@@ -394,3 +445,50 @@ export function useShellPlaybackModes({
 
 /** Return value of {@link useShellPlaybackModes}. */
 export type ShellPlaybackModes = ReturnType<typeof useShellPlaybackModes>;
+
+/**
+ * Notifies {@link DownloadManagerPort.notifyOnlinePlaybackActive} whenever online playback
+ * starts or stops so `max_connections = 1` accounts auto-pause active downloads cleanly.
+ */
+export function useShellOnlinePlaybackSync(params: {
+  readonly downloadManager?: DownloadManagerPort | undefined;
+  readonly playTarget: PlayTarget | null;
+  readonly liveEmbeddedPlaybackActive: boolean;
+  readonly multiViewSeed: PlayTarget | null;
+  readonly multiViewHasOnlineStream?: boolean | null | undefined;
+}): void {
+  const {
+    downloadManager,
+    playTarget,
+    liveEmbeddedPlaybackActive,
+    multiViewSeed,
+    multiViewHasOnlineStream,
+  } = params;
+  const multiViewOnline =
+    multiViewSeed !== null &&
+    (multiViewHasOnlineStream != null
+      ? multiViewHasOnlineStream
+      : multiViewSeed.isLocalOffline !== true);
+  const isOnlinePlaying =
+    (playTarget !== null && playTarget.isLocalOffline !== true) ||
+    liveEmbeddedPlaybackActive ||
+    multiViewOnline;
+  const lastSentRef = useRef(false);
+
+  useEffect(() => {
+    const notify = downloadManager?.notifyOnlinePlaybackActive;
+    if (notify === undefined) return;
+    if (lastSentRef.current === isOnlinePlaying) return;
+    lastSentRef.current = isOnlinePlaying;
+    void notify.call(downloadManager, isOnlinePlaying);
+  }, [downloadManager, isOnlinePlaying]);
+
+  useEffect(() => {
+    return () => {
+      if (lastSentRef.current) {
+        lastSentRef.current = false;
+        void downloadManager?.notifyOnlinePlaybackActive?.(false);
+      }
+    };
+  }, [downloadManager]);
+}

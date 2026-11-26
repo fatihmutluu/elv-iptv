@@ -38,10 +38,15 @@ final class EngineMainDriver: EngineSink {
     self.ownerId = ObjectIdentifier(owner)
     self.handleAudioFocus = handleAudioFocus
     self.backend = AetherBackend(gate: gate, httpSession: httpSession, handleAudioFocus: handleAudioFocus)
+    let downloadsRoot = FileManager.default
+      .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+      .first?
+      .appendingPathComponent("downloads", isDirectory: true)
     self.core = EngineCore(
       backend: backend,
       sink: self,
-      uptimeMs: { ProcessInfo.processInfo.systemUptime * 1_000.0 }
+      uptimeMs: { ProcessInfo.processInfo.systemUptime * 1_000.0 },
+      allowedDownloadsRoot: downloadsRoot
     )
     self.nowPlayingBridge = AetherNowPlayingBridge(
       actions: NowPlayingRemoteActions(

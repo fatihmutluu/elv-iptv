@@ -41,6 +41,8 @@ export interface StreamRequest {
   readonly hostOverride?: string;
   /** Optional play-time DRM config resolved strictly from `SecretStore`; omitted when absent (`#272`). */
   readonly drm?: DrmConfig;
+  /** `true` when resolved from a managed local offline VOD download (uses 0 provider connections). */
+  readonly isLocalOffline?: boolean;
 }
 
 /** Alias for {@link StreamRequest}. */
@@ -85,6 +87,8 @@ export interface SourceStreamMeta {
 export interface ResolveStreamInternalOptions {
   /** Predicate returning `true` when a failover sibling channel is restricted (e.g. parental-locked). */
   readonly isAlternateRestricted?: (channelKey: string) => Promise<boolean>;
+  /** Active profile identifier forwarded to optional local offline download resolution. */
+  readonly profileId?: string;
 }
 
 /** @internal Session cache for M3U `urlvars` resolvers, Xtream secrets, and split-failover Xtream clients. */

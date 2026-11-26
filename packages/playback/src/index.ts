@@ -78,6 +78,7 @@ export {
   type MultiViewCloseTileFn,
   type MultiViewController,
   type MultiViewControllerOptions,
+  type MultiViewMediaKind,
   type MultiViewRejectReason,
   type MultiViewState,
   type MultiViewTile,

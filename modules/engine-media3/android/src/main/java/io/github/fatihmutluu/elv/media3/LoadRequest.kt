@@ -2,6 +2,7 @@ package io.github.fatihmutluu.elv.media3
 
 import androidx.media3.common.MimeTypes
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -19,6 +20,15 @@ internal val ALLOWED_LOCAL_SUBTITLE_EXTENSIONS = setOf(
   "dfxp",
   "sub",
   "xml",
+)
+
+internal val ALLOWED_MANAGED_DOWNLOAD_EXTENSIONS = setOf(
+  "mp4",
+  "mkv",
+  "ts",
+  "m4v",
+  "webm",
+  "mov",
 )
 
 private const val MAX_EXTERNAL_SUBTITLE_ID_LENGTH = 256
@@ -91,6 +101,67 @@ internal fun hasAllowedLocalSubtitleExtension(path: String): Boolean {
   val ext = fileName.substring(dot + 1).lowercase(Locale.ROOT)
   return ext in ALLOWED_LOCAL_SUBTITLE_EXTENSIONS
 }
+
+/** True only when [path] ends with an allowlisted managed download video extension (case-insensitive). */
+internal fun hasAllowedManagedDownloadExtension(path: String): Boolean {
+  if (path.isEmpty() || path.endsWith('/') || path.endsWith('\\')) return false
+  val lastSep = maxOf(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  val fileName = if (lastSep < 0) path else path.substring(lastSep + 1)
+  if (fileName.startsWith('.')) return false
+  val dot = fileName.lastIndexOf('.')
+  if (dot <= 0 || dot + 1 >= fileName.length) return false
+  val ext = fileName.substring(dot + 1).lowercase(Locale.ROOT)
+  return ext in ALLOWED_MANAGED_DOWNLOAD_EXTENSIONS
+}
+
+/**
+ * Returns `true` only when [url] is a `file://` URI pointing to an existing regular video file strictly
+ * contained inside [managedDownloadsDir] after canonical symlink resolution, rejecting control characters,
+ * query/fragment spoofing, `..` traversal, remote authorities, and non-video extensions.
+ */
+internal fun isAllowedManagedDownloadFileUri(url: String, managedDownloadsDir: File?): Boolean {
+  if (managedDownloadsDir == null) return false
+  if (url.isEmpty() || url.length > MAX_EXTERNAL_SUBTITLE_URI_LENGTH) return false
+  if (url.any { it.code <= 0x1f || it.code == 0x7f }) return false
+  val trimmed = url.trim()
+  if (trimmed.isEmpty() || !trimmed.startsWith("file://", ignoreCase = true)) return false
+  val afterScheme = trimmed.substring(7)
+  if (afterScheme.isEmpty() || '?' in afterScheme || '#' in afterScheme) return false
+  val rawPath = when {
+    afterScheme.startsWith('/') -> afterScheme
+    afterScheme.startsWith("localhost/", ignoreCase = true) -> afterScheme.substring("localhost".length)
+    isWindowsLocalDrivePath(afterScheme) -> afterScheme
+    else -> return false
+  }
+  val decoded = percentDecodeUtf8(rawPath) ?: return false
+  if (decoded.isEmpty() || decoded.any { it.code <= 0x1f || it.code == 0x7f }) return false
+  if (decoded.split('/', '\\').any { it == ".." }) return false
+  if (!hasAllowedManagedDownloadExtension(decoded)) return false
+  val targetFile =
+    if (decoded.length >= 4 && decoded[0] == '/' && isWindowsLocalDrivePath(decoded.substring(1))) {
+      File(decoded.substring(1))
+    } else {
+      File(decoded)
+    }
+  return try {
+    val canonicalRoot = managedDownloadsDir.canonicalFile.path
+    val rootPrefix = if (canonicalRoot.endsWith(File.separator)) canonicalRoot else canonicalRoot + File.separator
+    val canonicalTarget = targetFile.canonicalFile
+    val canonicalPath = canonicalTarget.path
+    canonicalPath.startsWith(rootPrefix) &&
+      hasAllowedManagedDownloadExtension(canonicalPath) &&
+      canonicalTarget.isFile
+  } catch (_: Exception) {
+    false
+  }
+}
+
+/**
+ * Returns `true` when [url] is either an allowed HTTP(S) playback URL or a verified managed download
+ * `file://` URI strictly contained within [managedDownloadsDir].
+ */
+internal fun isAllowedPlaybackOrManagedDownloadUrl(url: String, managedDownloadsDir: File?): Boolean =
+  isAllowedPlaybackUrl(url) || isAllowedManagedDownloadFileUri(url, managedDownloadsDir)
 
 private fun hexDigit(c: Char): Int = when (c) {
   in '0'..'9' -> c - '0'
@@ -404,6 +475,8 @@ internal data class LoadRequest(
   val audioDelayByRefreshRateMs: Map<String, Long>? = null,
   /** Optional multi-program MPEG-TS service/program ID to select on load (`#304`). */
   val programId: String? = null,
+  /** Optional app-private managed downloads directory for scoped `file://` validation (never logged). */
+  val managedDownloadsDir: File? = null,
 ) {
   /** Names no URL, no host override IP, no DRM secrets, and no header value: each may carry credentials or provider info. */
   override fun toString(): String {
@@ -428,9 +501,21 @@ internal data class LoadRequest(
  * `subtitleTrackId` ([SubtitlePreference.Default]), `null` ([SubtitlePreference.Off]), and a track id string
  * ([SubtitlePreference.Selected]).
  */
-internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
+internal fun parseLoadArgs(
+  args: Map<String, Any?>,
+  managedDownloadsDir: File? = null,
+): Pair<Int, LoadRequest> {
   val attempt = (args["attempt"] as? Number)?.toInt() ?: 0
-  val url = args["url"] as? String ?: ""
+  val rawUrl = args["url"] as? String ?: ""
+  val url =
+    if (
+      rawUrl.trim().startsWith("file:", ignoreCase = true) &&
+        !isAllowedManagedDownloadFileUri(rawUrl, managedDownloadsDir)
+    ) {
+      ""
+    } else {
+      rawUrl
+    }
   val rawHeaders = args["headers"] as? Map<*, *>
   val headers =
     rawHeaders
@@ -493,6 +578,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
     nightModeDrc = nightModeDrc,
     audioDelayByRefreshRateMs = audioDelayByRefreshRateMs,
     programId = programId,
+    managedDownloadsDir = managedDownloadsDir,
   )
 }
 

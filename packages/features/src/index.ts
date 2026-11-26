@@ -39,6 +39,7 @@ export {
 export * from './browse';
 export * from './catalog';
 export * from './detail';
+export * from './downloads';
 export * from './feedback';
 export * from './home';
 export * from './live';
