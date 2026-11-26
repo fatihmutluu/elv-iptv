@@ -58,6 +58,18 @@ export interface SyncEpisodeBitfield extends SyncTombstoneMeta {
   readonly bitsB64: string;
 }
 
+/** Tombstone-aware personal Like/Dislike rating for a Movie or Series. */
+export interface SyncRatingRecord extends SyncTombstoneMeta {
+  readonly key: string;
+  readonly sourceId: string;
+  readonly kind: 'movie' | 'series';
+  readonly value: 'like' | 'dislike';
+  readonly title: string;
+  readonly logo?: string | null;
+  readonly year?: number | null;
+  readonly rating?: number | null;
+}
+
 /** Complete client-side E2EE vault payload (`schemaVersion: 1`). */
 export interface VaultSnapshot {
   readonly schemaVersion: typeof VAULT_SCHEMA_VERSION;
@@ -70,6 +82,7 @@ export interface VaultSnapshot {
   readonly collections: readonly SyncCollection[];
   readonly watchProgress: readonly SyncWatchProgress[];
   readonly watchedEpisodesBitfields: readonly SyncEpisodeBitfield[];
+  readonly ratings?: readonly SyncRatingRecord[];
   readonly initialPreferences?: Readonly<Record<string, unknown>>;
   readonly initialPreferencesUpdatedAt?: number;
 }
@@ -263,6 +276,11 @@ function mergeInitialPreferences(
  * Active watched-episode bitfields combine via bitwise OR while respecting newer tombstones.
  */
 export function mergeVaultSnapshots(local: VaultSnapshot, remote: VaultSnapshot): VaultSnapshot {
+  const mergedRatings = mergeKeyedCollection(
+    local.ratings ?? [],
+    remote.ratings ?? [],
+    (r) => r.key,
+  );
   return {
     schemaVersion: VAULT_SCHEMA_VERSION,
     updatedAt: Math.max(local.updatedAt, remote.updatedAt),
@@ -277,6 +295,7 @@ export function mergeVaultSnapshots(local: VaultSnapshot, remote: VaultSnapshot)
       local.watchedEpisodesBitfields,
       remote.watchedEpisodesBitfields,
     ),
+    ...(mergedRatings.length > 0 ? { ratings: mergedRatings } : {}),
     ...mergeInitialPreferences(local, remote),
   };
 }

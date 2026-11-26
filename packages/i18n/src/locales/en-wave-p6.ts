@@ -1,0 +1,38 @@
+/** English (source) messages for Wave P6 Library hub, Like/Dislike ratings & grouped series downloads. */
+export const enWaveP6Messages = {
+  'nav.library': 'Library',
+  'library.title': 'Library',
+  'library.tabFollowing': 'Following',
+  'library.tabLikes': 'Likes',
+  'library.tabWatched': 'Watched',
+  'library.tabDownloads': 'Downloads',
+  'library.railLive': 'Live TV',
+  'library.railSeries': 'Series',
+  'library.railMovies': 'Movies',
+  'library.railCollections': 'Collections',
+  'library.railLiked': 'Liked',
+  'library.railDisliked': 'Disliked',
+  'library.railWatchedMovies': 'Watched movies',
+  'library.railWatchedSeries': 'Watched series',
+  'library.railDownloadedMovies': 'Downloaded movies',
+  'library.railDownloadedSeries': 'Downloaded series',
+  'library.episodesDownloaded': '{downloaded} / {total} episodes downloaded',
+  'library.episodesDownloadedUnknownTotal': '{downloaded} episodes downloaded',
+  'library.seeAll': 'See all',
+  'library.backToTab': 'Back',
+  'library.emptyFollowingTitle': 'Nothing followed yet',
+  'library.emptyFollowingBody': 'Star live channels, series, or movies to keep them together here.',
+  'library.emptyLikesTitle': 'No ratings yet',
+  'library.emptyLikesBody': 'Rate movies or series from their detail page or context menu.',
+  'library.emptyWatchedTitle': 'Nothing watched yet',
+  'library.emptyWatchedBody': 'Movies and series you finish watching will appear here.',
+  'rating.like': 'Like',
+  'rating.liked': 'Liked',
+  'rating.dislike': 'Dislike',
+  'rating.disliked': 'Disliked',
+  'rating.clearLike': 'Remove like',
+  'rating.clearDislike': 'Remove dislike',
+} as const;
+
+/** Message identifiers for Wave P6. */
+export type WaveP6MessageId = keyof typeof enWaveP6Messages;

@@ -282,6 +282,7 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'my_list_series_baselines',
   'my_list_new_episodes',
   'continue_watching_dismissals',
+  'ratings',
 ];
 const NON_SHARDED_PARTS = ['xtream', 'playlist', 'stalker'] as const;
 
@@ -709,6 +710,7 @@ export async function finishDeletingSource(
     await tx.run('DELETE FROM continue_watching_dismissals WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM my_list_series_baselines WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM my_list_new_episodes WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM ratings WHERE source_id = ?', [id]);
     await pruneSourceFailoverMembersInTx(tx, id);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });

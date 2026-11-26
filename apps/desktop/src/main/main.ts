@@ -123,6 +123,7 @@ import { registerWindowIpc } from './window-ipc.ts';
 import { attachRendererCrashRecovery, buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
 
 declare const __ELV_DEV_SEED__: boolean;
+declare const __ELV_SYNC_SERVER_URL__: string;
 
 const rendererDir = join(__dirname, '..', 'renderer');
 
@@ -682,8 +683,13 @@ if (hasLock) {
         }
       },
     });
+    const initialSyncServerUrl =
+      typeof __ELV_SYNC_SERVER_URL__ === 'string' && __ELV_SYNC_SERVER_URL__.length > 0
+        ? __ELV_SYNC_SERVER_URL__
+        : (process.env['ELV_SYNC_SERVER_URL'] ?? '');
     const syncService = createDesktopSyncService({
       secretStore: sharedSecrets,
+      initialServerUrl: initialSyncServerUrl,
       platform: `desktop-${process.platform}`,
       appVersion: app.getVersion(),
       mpvVersion: '0.42.0',

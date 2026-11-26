@@ -10,6 +10,7 @@ import {
   type SyncCollection,
   type SyncCustomGroup,
   type SyncKeyedFlag,
+  type SyncRatingRecord,
   type SyncSourceRecord,
   type SyncWatchProgress,
   VAULT_SCHEMA_VERSION,
@@ -116,6 +117,7 @@ export function createTvMobileCatalogSnapshotBridge(
         overrideRows,
         customGroupRows,
         collectionRows,
+        ratingRows,
       ] = await Promise.all([
         catalog.listSources().catch(() => []),
         catalog
@@ -129,6 +131,8 @@ export function createTvMobileCatalogSnapshotBridge(
           .listCustomGroups?.(undefined, { includeHidden: true, parentalUnlocked: true })
           .catch(() => []) ?? Promise.resolve([]),
         catalog.listCollections?.(undefined, { parentalUnlocked: true }).catch(() => []) ??
+          Promise.resolve([]),
+        catalog.listRatings?.({ limit: 250, parentalUnlocked: true }).catch(() => []) ??
           Promise.resolve([]),
       ]);
 
@@ -227,6 +231,18 @@ export function createTvMobileCatalogSnapshotBridge(
           updatedAt: prog.updatedAt,
         }));
 
+      const ratings: SyncRatingRecord[] = ratingRows.map((row) => ({
+        key: row.itemKey,
+        sourceId: row.sourceId,
+        kind: row.kind,
+        value: row.value,
+        title: row.title,
+        ...(row.logo !== null ? { logo: row.logo } : {}),
+        ...(row.year !== null ? { year: row.year } : {}),
+        ...(row.rating !== null ? { rating: row.rating } : {}),
+        updatedAt: row.updatedAt,
+      }));
+
       return {
         schemaVersion: VAULT_SCHEMA_VERSION,
         updatedAt: now(),
@@ -238,6 +254,7 @@ export function createTvMobileCatalogSnapshotBridge(
         collections,
         watchProgress,
         watchedEpisodesBitfields: [],
+        ...(ratings.length > 0 ? { ratings } : {}),
       };
     },
 
@@ -539,6 +556,54 @@ export function createTvMobileCatalogSnapshotBridge(
               durationMs: prog.durationMs,
               watched: prog.completed,
             })
+            .catch(() => null);
+          if (res?.ok) changed = true;
+        }
+      }
+
+      // 7. Ratings (Movies & Series Like/Dislike, LWW + tombstones)
+      if (
+        snapshot.ratings !== undefined &&
+        snapshot.ratings.length > 0 &&
+        catalog.setRating !== undefined
+      ) {
+        const existingRatings =
+          (await catalog.listRatings?.({ limit: 250, parentalUnlocked: true }).catch(() => [])) ??
+          [];
+        const existingByKey = new Map(existingRatings.map((r) => [r.itemKey, r]));
+        for (const rec of snapshot.ratings) {
+          const existing = existingByKey.get(rec.key);
+          if (rec.deleted === true) {
+            if (existing !== undefined && rec.updatedAt >= existing.updatedAt) {
+              const cleared = await catalog
+                .setRating(
+                  {
+                    sourceId: existing.sourceId,
+                    itemKey: existing.itemKey,
+                    kind: existing.kind,
+                    title: existing.title,
+                  },
+                  null,
+                )
+                .catch(() => null);
+              if (cleared?.ok) changed = true;
+            }
+            continue;
+          }
+          if (existing !== undefined && rec.updatedAt <= existing.updatedAt) continue;
+          const res = await catalog
+            .setRating(
+              {
+                sourceId: rec.sourceId,
+                itemKey: rec.key,
+                kind: rec.kind,
+                title: rec.title,
+                logo: rec.logo ?? null,
+                year: rec.year ?? null,
+                rating: rec.rating ?? null,
+              },
+              rec.value,
+            )
             .catch(() => null);
           if (res?.ok) changed = true;
         }

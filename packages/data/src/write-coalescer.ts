@@ -247,6 +247,7 @@ export function createCoalescedCatalog(
   const getProgressFn = c.getProgress?.bind(c);
   const queryNextEpisodeFn = c.queryNextEpisode?.bind(c);
   const listContinueWatchingFn = c.listContinueWatching?.bind(c);
+  const listWatchedFn = c.listWatched?.bind(c);
   const listProgressByKeysFn = c.listProgressByKeys?.bind(c);
   const listSeriesUnplayedCountsFn = c.listSeriesUnplayedCounts?.bind(c);
   const clearProgressFn = c.clearProgress?.bind(c);
@@ -400,6 +401,14 @@ export function createCoalescedCatalog(
     ...(c.reorderCollectionItems
       ? { reorderCollectionItems: c.reorderCollectionItems.bind(c) }
       : {}),
+    ...(c.setRating ? { setRating: c.setRating.bind(c) } : {}),
+    ...(c.getRating ? { getRating: c.getRating.bind(c) } : {}),
+    ...(c.listRatings ? { listRatings: c.listRatings.bind(c) } : {}),
+    ...(c.listRatingMap ? { listRatingMap: c.listRatingMap.bind(c) } : {}),
+    ...(c.listDownloads ? { listDownloads: c.listDownloads.bind(c) } : {}),
+    ...(c.getDownload ? { getDownload: c.getDownload.bind(c) } : {}),
+    ...(c.upsertDownload ? { upsertDownload: c.upsertDownload.bind(c) } : {}),
+    ...(c.deleteDownload ? { deleteDownload: c.deleteDownload.bind(c) } : {}),
     ...(queryNextEpisodeFn
       ? {
           queryNextEpisode: async (seriesKey, currentItemKey, profileId, nextOpts) => {
@@ -426,6 +435,16 @@ export function createCoalescedCatalog(
             await coalescer.flushPrefix(`progress:${p}:`);
             await coalescer.flushPrefix(`watched:${p}:`);
             return listContinueWatchingFn(limit, profileId, listOpts);
+          },
+        }
+      : {}),
+    ...(listWatchedFn
+      ? {
+          listWatched: async (limit, profileId, listOpts) => {
+            const p = normalizeProfile(profileId);
+            await coalescer.flushPrefix(`progress:${p}:`);
+            await coalescer.flushPrefix(`watched:${p}:`);
+            return listWatchedFn(limit, profileId, listOpts);
           },
         }
       : {}),

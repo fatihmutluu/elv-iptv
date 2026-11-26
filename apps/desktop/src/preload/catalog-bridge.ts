@@ -730,6 +730,20 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
           ...(profileId === undefined ? {} : { profileId }),
         }),
       ),
+    setRating: (input, value) => notifyOnOk(callResult({ method: 'setRating', input, value })),
+    getRating: (itemKey, profileId) =>
+      callValue({
+        method: 'getRating',
+        itemKey,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    listRatings: (opts) =>
+      callValue({ method: 'listRatings', ...(opts === undefined ? {} : { opts }) }),
+    listRatingMap: (profileId) =>
+      callValue({
+        method: 'listRatingMap',
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
     flushPendingWrites: () => callValue({ method: 'flushPendingWrites' }),
     onChanged(listener: () => void): () => void {
       changedListeners.add(listener);

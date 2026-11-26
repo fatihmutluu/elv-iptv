@@ -1,4 +1,10 @@
-import type { AlphabetBucket, CatalogService, ItemRow, ItemSortOrder } from '@elv/data';
+import type {
+  AlphabetBucket,
+  CatalogService,
+  ItemRow,
+  ItemSortOrder,
+  RatingValue,
+} from '@elv/data';
 import type { KeyEvent } from '@elv/focus-core';
 import {
   AlphabetJumpRail,
@@ -95,9 +101,11 @@ export interface CategoryGridViewProps {
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly favoriteKeys?: ReadonlySet<string>;
   readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
   readonly onGridMetaChange?: (meta: CategoryGridMeta) => void;
   readonly gridAccessRef?: MutableRefObject<CategoryGridAccess>;
   readonly onJumpToGridPos?: (pos: GridFocusPosition) => void;
@@ -510,6 +518,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       progressByKey: gridData.progressByKey,
       ...(props.favoriteKeys !== undefined ? { favoriteKeys: props.favoriteKeys } : {}),
       ...(props.watchedOverrides !== undefined ? { watchedOverrides: props.watchedOverrides } : {}),
+      ...(props.ratingByKey !== undefined ? { ratingByKey: props.ratingByKey } : {}),
       unplayedBySeriesKey: gridData.unplayedBySeriesKey,
       watchedLabel,
       layout,
@@ -520,6 +529,9 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
         : {}),
       ...(props.onQuickToggleWatched !== undefined
         ? { onQuickToggleWatched: props.onQuickToggleWatched }
+        : {}),
+      ...(props.onQuickToggleRating !== undefined
+        ? { onQuickToggleRating: props.onQuickToggleRating }
         : {}),
     }),
     [
@@ -532,7 +544,9 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       props.favoriteKeys,
       props.onQuickPlay,
       props.onQuickToggleFavorite,
+      props.onQuickToggleRating,
       props.onQuickToggleWatched,
+      props.ratingByKey,
       props.watchedOverrides,
       watchedLabel,
     ],
@@ -561,6 +575,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       unplayedBySeriesKey: gridData.unplayedBySeriesKey,
       favoriteKeys: props.favoriteKeys,
       watchedOverrides: props.watchedOverrides,
+      ratingByKey: props.ratingByKey,
     }),
     [
       cols,
@@ -568,6 +583,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       gridData.progressByKey,
       gridData.unplayedBySeriesKey,
       props.favoriteKeys,
+      props.ratingByKey,
       props.watchedOverrides,
     ],
   );

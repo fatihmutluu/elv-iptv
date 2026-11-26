@@ -192,4 +192,33 @@ describe('vault-merge and episode bitfields', () => {
     expect(lr.initialPreferencesUpdatedAt).toBe(250);
     expect(rl).toEqual(lr);
   });
+
+  it('omits ratings when merging empty ratings arrays and merges non-empty ratings commutatively', () => {
+    const empty = createEmptyVaultSnapshot(100);
+    const withEmptyRatings: VaultSnapshot = { ...empty, ratings: [] };
+
+    const mergedBothEmpty = mergeVaultSnapshots(withEmptyRatings, withEmptyRatings);
+    expect(mergedBothEmpty.ratings).toBeUndefined();
+    expect('ratings' in mergedBothEmpty).toBe(false);
+
+    const mergedOneEmpty = mergeVaultSnapshots(withEmptyRatings, empty);
+    expect(mergedOneEmpty.ratings).toBeUndefined();
+    expect('ratings' in mergedOneEmpty).toBe(false);
+
+    const withLike: VaultSnapshot = {
+      ...empty,
+      ratings: [
+        {
+          key: 'movie:s1:1',
+          sourceId: 's1',
+          kind: 'movie',
+          value: 'like',
+          title: 'Dune',
+          updatedAt: 200,
+        },
+      ],
+    };
+    const mergedNonEmpty = mergeVaultSnapshots(withLike, withEmptyRatings);
+    expect(mergedNonEmpty.ratings).toEqual(withLike.ratings);
+  });
 });

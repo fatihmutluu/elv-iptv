@@ -1,8 +1,27 @@
-import type { CatalogService, ItemRow, ToggleFavoriteInput } from '@elv/data';
+import type {
+  CatalogService,
+  ItemRow,
+  RatingValue,
+  SetRatingInput,
+  ToggleFavoriteInput,
+  UserItemKind,
+} from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const EMPTY_FAV_SET: ReadonlySet<string> = new Set();
 const EMPTY_WATCHED_MAP: ReadonlyMap<string, boolean> = new Map();
+const EMPTY_RATING_MAP: ReadonlyMap<string, RatingValue> = new Map();
+
+/** Target payload for {@link useRatingMapState} optimistic Like/Dislike mutations. */
+export interface RatingToggleTarget {
+  readonly sourceId: string;
+  readonly itemKey: string;
+  readonly kind: UserItemKind;
+  readonly title: string;
+  readonly logo?: string | null;
+  readonly year?: number | null;
+  readonly rating?: number | null;
+}
 
 /** Options for {@link useCardQuickActionsState}. */
 export interface UseCardQuickActionsStateOptions {
@@ -11,18 +30,149 @@ export interface UseCardQuickActionsStateOptions {
   readonly userStateVersion?: number;
 }
 
-/** Optimistic favorite & watched mutation controller for poster card quick-actions (`#409`). */
+/** Optimistic favorite, watched & rating mutation controller for poster cards (`#409`). */
 export interface CardQuickActionsState {
   readonly favoriteKeys: ReadonlySet<string>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
+  readonly ratingByKey: ReadonlyMap<string, RatingValue>;
   readonly toggleFavorite: (item: ItemRow) => Promise<boolean>;
   readonly toggleWatched: (item: ItemRow, currentWatched: boolean) => Promise<boolean>;
+  readonly toggleRating: (item: ItemRow, next: RatingValue) => Promise<boolean>;
 }
 
 function releaseCount(map: Map<string, number>, key: string): void {
   const next = (map.get(key) ?? 1) - 1;
   if (next <= 0) map.delete(key);
   else map.set(key, next);
+}
+
+/**
+ * Loads `ratingByKey` via `catalog.listRatingMap?.()` and exposes optimistic generation-tracked
+ * `toggleRating` for Movies & Series ONLY (strictly no-ops for Live TV / non-VOD kinds).
+ */
+export function useRatingMapState(opts: {
+  readonly catalog: CatalogService;
+  readonly refreshToken: number;
+  readonly userStateVersion?: number;
+  readonly profileKey?: string;
+}): {
+  readonly ratingByKey: ReadonlyMap<string, RatingValue>;
+  readonly toggleRating: (target: RatingToggleTarget, next: RatingValue) => Promise<boolean>;
+} {
+  const { catalog, refreshToken, userStateVersion = 0, profileKey = '' } = opts;
+  const [ratingByKey, setRatingByKey] =
+    useState<ReadonlyMap<string, RatingValue>>(EMPTY_RATING_MAP);
+
+  const mountedRef = useRef(true);
+  const ratingByKeyRef = useRef(ratingByKey);
+  ratingByKeyRef.current = ratingByKey;
+  const ratingGenRef = useRef(new Map<string, number>());
+  const ratingInFlightRef = useRef(new Map<string, number>());
+  const ratingCommittedRef = useRef(new Map<string, RatingValue | null>());
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken, userStateVersion, and profileKey trigger fresh rating-map reads
+  useEffect(() => {
+    let cancelled = false;
+    if (!catalog.listRatingMap) return undefined;
+    void catalog
+      .listRatingMap()
+      .then((record) => {
+        if (cancelled || !mountedRef.current) return;
+        setRatingByKey((prev) => {
+          const next = new Map<string, RatingValue>();
+          for (const [k, v] of Object.entries(record)) {
+            if (v === 'like' || v === 'dislike') next.set(k, v);
+          }
+          for (const [key, count] of ratingInFlightRef.current) {
+            if (count <= 0) continue;
+            const optimistic = prev.get(key);
+            if (optimistic !== undefined) next.set(key, optimistic);
+            else next.delete(key);
+          }
+          ratingByKeyRef.current = next;
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, profileKey, refreshToken, userStateVersion]);
+
+  const setRatingForKey = useCallback((key: string, value: RatingValue | null) => {
+    setRatingByKey((prev) => {
+      const current = prev.get(key) ?? null;
+      if (current === value) return prev;
+      const next = new Map(prev);
+      if (value === null) next.delete(key);
+      else next.set(key, value);
+      ratingByKeyRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const toggleRating = useCallback(
+    async (target: RatingToggleTarget, next: RatingValue): Promise<boolean> => {
+      if (target.kind !== 'movie' && target.kind !== 'series') return false;
+      const key = target.itemKey;
+      const gen = (ratingGenRef.current.get(key) ?? 0) + 1;
+      ratingGenRef.current.set(key, gen);
+      const inFlight = ratingInFlightRef.current.get(key) ?? 0;
+      const current = ratingByKeyRef.current.get(key) ?? null;
+      if (inFlight === 0) {
+        ratingCommittedRef.current.set(key, current);
+      }
+      ratingInFlightRef.current.set(key, inFlight + 1);
+
+      const nextVal: RatingValue | null = current === next ? null : next;
+      setRatingForKey(key, nextVal);
+
+      const input: SetRatingInput = {
+        sourceId: target.sourceId,
+        itemKey: key,
+        kind: target.kind,
+        title: target.title,
+        logo: target.logo ?? null,
+        year: target.year ?? null,
+        rating: target.rating ?? null,
+      };
+      if (!catalog.setRating) {
+        ratingCommittedRef.current.set(key, nextVal);
+        releaseCount(ratingInFlightRef.current, key);
+        return true;
+      }
+
+      try {
+        const res = await catalog.setRating(input, nextVal);
+        if (!mountedRef.current) return Boolean(res.ok);
+        if (res.ok) {
+          ratingCommittedRef.current.set(key, res.value);
+          return true;
+        }
+        if (ratingGenRef.current.get(key) === gen) {
+          setRatingForKey(key, ratingCommittedRef.current.get(key) ?? null);
+        }
+        return false;
+      } catch {
+        if (mountedRef.current && ratingGenRef.current.get(key) === gen) {
+          setRatingForKey(key, ratingCommittedRef.current.get(key) ?? null);
+        }
+        return false;
+      } finally {
+        releaseCount(ratingInFlightRef.current, key);
+      }
+    },
+    [catalog, setRatingForKey],
+  );
+
+  return useMemo(() => ({ ratingByKey, toggleRating }), [ratingByKey, toggleRating]);
 }
 
 /**
@@ -224,8 +374,38 @@ export function useCardQuickActionsState({
     [catalog, setWatchedForKey],
   );
 
+  const { ratingByKey, toggleRating: toggleRatingEntry } = useRatingMapState({
+    catalog,
+    refreshToken,
+    userStateVersion,
+  });
+
+  const toggleRating = useCallback(
+    (item: ItemRow, next: RatingValue): Promise<boolean> =>
+      toggleRatingEntry(
+        {
+          sourceId: item.sourceId,
+          itemKey: item.key,
+          kind: item.kind,
+          title: item.name,
+          logo: item.logo,
+          year: item.year,
+          rating: item.rating,
+        },
+        next,
+      ),
+    [toggleRatingEntry],
+  );
+
   return useMemo<CardQuickActionsState>(
-    () => ({ favoriteKeys, watchedOverrides, toggleFavorite, toggleWatched }),
-    [favoriteKeys, toggleFavorite, toggleWatched, watchedOverrides],
+    () => ({
+      favoriteKeys,
+      watchedOverrides,
+      ratingByKey,
+      toggleFavorite,
+      toggleWatched,
+      toggleRating,
+    }),
+    [favoriteKeys, ratingByKey, toggleFavorite, toggleRating, toggleWatched, watchedOverrides],
   );
 }

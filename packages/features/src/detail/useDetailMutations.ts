@@ -1,4 +1,4 @@
-import type { CatalogService, WatchProgressRow } from '@elv/data';
+import type { CatalogService, RatingValue, WatchProgressRow } from '@elv/data';
 import { type MutableRefObject, useCallback } from 'react';
 import { type DetailTarget, useProfile } from '../shared';
 import { buildOptimisticWatchedRow, type DetailSnapshot } from './detail-data-helpers';
@@ -14,12 +14,16 @@ export interface DetailMutationRefs {
   readonly watchedGenRef: MutableRefObject<number>;
   readonly watchedInFlightRef: MutableRefObject<number>;
   readonly committedMovieProgressRef: MutableRefObject<WatchProgressRow | null | undefined>;
+  readonly userRatingRef: MutableRefObject<RatingValue | null>;
+  readonly ratingGenRef: MutableRefObject<number>;
+  readonly ratingInFlightRef: MutableRefObject<number>;
+  readonly committedRatingRef: MutableRefObject<RatingValue | null | undefined>;
 }
 
 /**
- * Optimistic generation-tracked `toggleMyList` and `toggleWatched` actions for {@link useDetailData}.
- * Tracks the last committed baseline so even-count rapid toggles whose writes fail roll back to
- * persisted truth instead of an unpersisted intermediate state (`#230`).
+ * Optimistic generation-tracked `toggleMyList`, `toggleWatched`, and `toggleRating` actions for
+ * {@link useDetailData}. Tracks the last committed baseline so even-count rapid toggles whose
+ * writes fail roll back to persisted truth instead of an unpersisted intermediate state (`#230`).
  */
 export function useDetailMutations(opts: {
   readonly catalog: CatalogService;
@@ -34,11 +38,24 @@ export function useDetailMutations(opts: {
     updater: (prev: DetailSnapshot) => DetailSnapshot,
     persist?: boolean,
   ) => void;
+  readonly setUserRating: (next: RatingValue | null) => void;
 }): {
   readonly toggleMyList: () => Promise<void>;
   readonly toggleWatched: () => Promise<void>;
+  readonly toggleRating: (next: RatingValue) => Promise<void>;
 } {
-  const { catalog, target, title, posterUri, backdropUri, year, rating, refs, updateSnap } = opts;
+  const {
+    catalog,
+    target,
+    title,
+    posterUri,
+    backdropUri,
+    year,
+    rating,
+    refs,
+    updateSnap,
+    setUserRating,
+  } = opts;
   const { activeProfileId } = useProfile();
 
   const toggleMyList = useCallback(async (): Promise<void> => {
@@ -174,5 +191,72 @@ export function useDetailMutations(opts: {
     updateSnap,
   ]);
 
-  return { toggleMyList, toggleWatched };
+  const toggleRating = useCallback(
+    async (next: RatingValue): Promise<void> => {
+      const reqKey = target.itemKey;
+      const gen = ++refs.ratingGenRef.current;
+      const current = refs.userRatingRef.current;
+      if (refs.ratingInFlightRef.current === 0 || refs.committedRatingRef.current === undefined) {
+        refs.committedRatingRef.current = current;
+      }
+      refs.ratingInFlightRef.current += 1;
+      const nextVal: RatingValue | null = current === next ? null : next;
+      refs.userRatingRef.current = nextVal;
+      setUserRating(nextVal);
+      if (!catalog.setRating) {
+        refs.committedRatingRef.current = nextVal;
+        refs.ratingInFlightRef.current = Math.max(0, refs.ratingInFlightRef.current - 1);
+        return;
+      }
+      try {
+        const res = await catalog.setRating(
+          {
+            sourceId: target.sourceId,
+            itemKey: reqKey,
+            kind: target.kind,
+            title,
+            logo: posterUri ?? backdropUri,
+            year,
+            rating,
+          },
+          nextVal,
+        );
+        if (!refs.mountedRef.current || refs.activeItemKeyRef.current !== reqKey) return;
+        if (res.ok) {
+          refs.committedRatingRef.current = res.value;
+        } else if (refs.ratingGenRef.current === gen) {
+          const baseline = refs.committedRatingRef.current ?? null;
+          refs.userRatingRef.current = baseline;
+          setUserRating(baseline);
+        }
+      } catch {
+        if (
+          refs.mountedRef.current &&
+          refs.activeItemKeyRef.current === reqKey &&
+          refs.ratingGenRef.current === gen
+        ) {
+          const baseline = refs.committedRatingRef.current ?? null;
+          refs.userRatingRef.current = baseline;
+          setUserRating(baseline);
+        }
+      } finally {
+        refs.ratingInFlightRef.current = Math.max(0, refs.ratingInFlightRef.current - 1);
+      }
+    },
+    [
+      backdropUri,
+      catalog,
+      posterUri,
+      rating,
+      refs,
+      setUserRating,
+      target.itemKey,
+      target.kind,
+      target.sourceId,
+      title,
+      year,
+    ],
+  );
+
+  return { toggleMyList, toggleWatched, toggleRating };
 }

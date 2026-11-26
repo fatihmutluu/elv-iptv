@@ -213,6 +213,8 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
       (await open()).getProgress?.(itemKey, profileId) ?? null,
     listContinueWatching: async (limit, profileId, opts) =>
       (await open()).listContinueWatching?.(limit, profileId, opts) ?? [],
+    listWatched: async (limit, profileId, opts) =>
+      (await open()).listWatched?.(limit, profileId, opts) ?? [],
     listProgressByKeys: async (itemKeys, profileId) =>
       (await open()).listProgressByKeys?.(itemKeys, profileId) ?? [],
     listSeriesUnplayedCounts: async (seriesKeys, profileId) =>
@@ -238,9 +240,26 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
           ? cat.setFavorite(input, active)
           : err(elvError('storage', 'unsupported'));
       }),
+    reorderFavorites: (orderedItemKeys, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.reorderFavorites
+          ? cat.reorderFavorites(orderedItemKeys, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
     listFavorites: async (limit, profileId, opts) =>
       (await open()).listFavorites?.(limit, profileId, opts) ?? [],
     listFavoriteKeys: async (profileId) => (await open()).listFavoriteKeys?.(profileId) ?? [],
+    setRating: (input, value) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.setRating
+          ? cat.setRating(input, value)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    getRating: async (itemKey, profileId) => (await open()).getRating?.(itemKey, profileId) ?? null,
+    listRatings: async (opts) => (await open()).listRatings?.(opts) ?? [],
+    listRatingMap: async (profileId) => (await open()).listRatingMap?.(profileId) ?? {},
     listMyListNewEpisodes: async (limit, profileId, opts) =>
       (await open()).listMyListNewEpisodes?.(limit, profileId, opts) ?? [],
     dismissMyListNewEpisode: (episodeKey, profileId) =>
@@ -403,6 +422,81 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
         const cat = await open();
         return cat.removeChannelFromCustomGroup
           ? cat.removeChannelFromCustomGroup(groupId, itemKey)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    getVodEnrichment: async (itemKey, nowMs) =>
+      (await open()).getVodEnrichment?.(itemKey, nowMs) ?? null,
+    enrichVodItem: async (itemKey, opts) => (await open()).enrichVodItem?.(itemKey, opts) ?? null,
+    listCollections: async (profileId, opts) =>
+      (await open()).listCollections?.(profileId, opts) ?? [],
+    createCollection: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.createCollection
+          ? cat.createCollection(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    renameCollection: (id, name, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.renameCollection
+          ? cat.renameCollection(id, name, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    reorderCollections: (orderedIds, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.reorderCollections
+          ? cat.reorderCollections(orderedIds, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    deleteCollection: (id, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.deleteCollection
+          ? cat.deleteCollection(id, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    listCollectionItems: async (collectionId, opts) =>
+      (await open()).listCollectionItems?.(collectionId, opts) ?? [],
+    listCollectionsForItem: async (itemKey, profileId) =>
+      (await open()).listCollectionsForItem?.(itemKey, profileId) ?? [],
+    addItemToCollection: (collectionId, itemKey, kind, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.addItemToCollection
+          ? cat.addItemToCollection(collectionId, itemKey, kind, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    removeItemFromCollection: (collectionId, itemKey, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.removeItemFromCollection
+          ? cat.removeItemFromCollection(collectionId, itemKey, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    reorderCollectionItems: (collectionId, orderedItemKeys, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.reorderCollectionItems
+          ? cat.reorderCollectionItems(collectionId, orderedItemKeys, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    listDownloads: async (opts) => (await open()).listDownloads?.(opts) ?? [],
+    getDownload: async (itemKey, profileId) =>
+      (await open()).getDownload?.(itemKey, profileId) ?? null,
+    upsertDownload: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.upsertDownload
+          ? cat.upsertDownload(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    deleteDownload: (itemKey, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.deleteDownload
+          ? cat.deleteDownload(itemKey, profileId)
           : err(elvError('storage', 'unsupported'));
       }),
     flushPendingWrites: async () => {

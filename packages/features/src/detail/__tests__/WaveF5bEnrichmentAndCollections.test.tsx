@@ -301,8 +301,10 @@ describe('Wave F5B DetailScreen: Key-Free VOD Enrichment (#215) & Collection Pic
         expect(screen.getByTestId('detail-collections')).toBeTruthy();
       });
 
-      // Navigate TV D-pad: hero-play -> Up (mylist) -> Right (watched) -> Right (collections) -> Select
+      // Navigate TV D-pad: hero-play -> Up (mylist) -> Right (like) -> Right (dislike) -> Right (watched) -> Right (collections) -> Select
       await pressKey(KEYCODE_DPAD_UP);
+      await pressKey(KEYCODE_DPAD_RIGHT);
+      await pressKey(KEYCODE_DPAD_RIGHT);
       await pressKey(KEYCODE_DPAD_RIGHT);
       await pressKey(KEYCODE_DPAD_RIGHT);
       expect(screen.getByTestId('detail-collections-focus-ring')).toBeTruthy();

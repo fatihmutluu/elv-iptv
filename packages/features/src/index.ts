@@ -42,6 +42,7 @@ export * from './detail';
 export * from './downloads';
 export * from './feedback';
 export * from './home';
+export * from './library';
 export * from './live';
 export * from './notices';
 export * from './player';

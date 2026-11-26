@@ -231,6 +231,8 @@ describe('removeSource', () => {
         "(profile_id, episode_key, series_key, source_id, series_title, episode_title, detected_at, dismissed) VALUES ('default', ?, 's1', ?, 'Show', 'Ep 1', 1, 0)",
       continue_watching_dismissals:
         "(profile_id, series_key, source_id, dismissed_at) VALUES ('default', ?, ?, 1)",
+      ratings:
+        "(profile_id, source_id, item_key, kind, value, title, updated_at) VALUES ('default', ?, ?, 'movie', 'like', 'Film', 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -244,7 +246,8 @@ describe('removeSource', () => {
           table === 'recent_channels' ||
           table === 'programme_reminders' ||
           table === 'failover_group_members' ||
-          table === 'downloads'
+          table === 'downloads' ||
+          table === 'ratings'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
         } else if (
@@ -342,6 +345,8 @@ describe('removeSource', () => {
         "(profile_id, episode_key, series_key, source_id, series_title, episode_title, detected_at, dismissed) VALUES ('default', ?, 's1', ?, 'Show', 'Ep 1', 1, 0)",
       continue_watching_dismissals:
         "(profile_id, series_key, source_id, dismissed_at) VALUES ('default', ?, ?, 1)",
+      ratings:
+        "(profile_id, source_id, item_key, kind, value, title, updated_at) VALUES ('default', ?, ?, 'movie', 'like', 'Film', 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -355,7 +360,8 @@ describe('removeSource', () => {
           table === 'recent_channels' ||
           table === 'programme_reminders' ||
           table === 'failover_group_members' ||
-          table === 'downloads'
+          table === 'downloads' ||
+          table === 'ratings'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
         } else if (

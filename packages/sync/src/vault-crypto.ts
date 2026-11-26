@@ -308,6 +308,38 @@ function isTombstoneItemArray(value: unknown, keyField: 'id' | 'key' | 'seriesKe
   return true;
 }
 
+function isValidOptionalRatings(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value)) return false;
+  for (const item of value) {
+    if (!isPlainObject(item)) return false;
+    if (typeof item.key !== 'string' || typeof item.sourceId !== 'string') return false;
+    if (item.kind !== 'movie' && item.kind !== 'series') return false;
+    if (item.value !== 'like' && item.value !== 'dislike') return false;
+    if (typeof item.title !== 'string') return false;
+    if (typeof item.updatedAt !== 'number' || !Number.isFinite(item.updatedAt)) return false;
+    if (item.deleted !== undefined && typeof item.deleted !== 'boolean') return false;
+    if (item.logo !== undefined && item.logo !== null && typeof item.logo !== 'string') {
+      return false;
+    }
+    if (
+      item.year !== undefined &&
+      item.year !== null &&
+      (typeof item.year !== 'number' || !Number.isFinite(item.year))
+    ) {
+      return false;
+    }
+    if (
+      item.rating !== undefined &&
+      item.rating !== null &&
+      (typeof item.rating !== 'number' || !Number.isFinite(item.rating))
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Decrypts and authenticates an {@link EncryptedVaultBlob} bound to `(userId, revision)`. */
 export async function decryptVaultSnapshot(
   crypto: VaultCryptoPort,
@@ -341,6 +373,7 @@ export async function decryptVaultSnapshot(
     !isTombstoneItemArray(parsed.collections, 'id') ||
     !isTombstoneItemArray(parsed.watchProgress, 'key') ||
     !isTombstoneItemArray(parsed.watchedEpisodesBitfields, 'seriesKey') ||
+    !isValidOptionalRatings(parsed.ratings) ||
     !isValidOptionalInitialPreferences(parsed.initialPreferences) ||
     !isValidOptionalTimestamp(parsed.initialPreferencesUpdatedAt)
   ) {

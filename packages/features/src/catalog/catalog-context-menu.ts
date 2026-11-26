@@ -1,4 +1,4 @@
-import type { ItemRow, WatchProgressRow } from '@elv/data';
+import type { ItemRow, RatingValue, WatchProgressRow } from '@elv/data';
 import type { ContextMenuItem } from '@elv/ui-kit';
 import type { DetailTarget } from '../shared';
 import { detailTargetFromItem } from '../shared';
@@ -15,12 +15,14 @@ export interface BuildCatalogPosterContextMenuInput {
   readonly categoryId?: string;
   readonly isFavorite: boolean;
   readonly isWatched: boolean;
+  readonly currentRating?: RatingValue | null;
   readonly isDownloaded?: boolean;
   readonly i18n: CatalogContextMenuI18n;
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
   readonly onDownload?: (item: ItemRow) => void;
   readonly onDeleteDownload?: (item: ItemRow) => void;
 }
@@ -31,12 +33,14 @@ export function buildCatalogPosterContextMenuItems({
   categoryId = '',
   isFavorite,
   isWatched,
+  currentRating = null,
   isDownloaded = false,
   i18n,
   onOpenDetail,
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onQuickToggleRating,
   onDownload,
   onDeleteDownload,
 }: BuildCatalogPosterContextMenuInput): ContextMenuItem[] {
@@ -73,6 +77,25 @@ export function buildCatalogPosterContextMenuItems({
       testID: 'context-menu-favorite',
       onSelect: () => onQuickToggleFavorite(item),
     });
+  }
+
+  if (onQuickToggleRating && (item.kind === 'movie' || item.kind === 'series')) {
+    items.push(
+      {
+        id: 'like',
+        label: i18n.t(currentRating === 'like' ? 'rating.clearLike' : 'rating.like'),
+        icon: currentRating === 'like' ? 'likeFilled' : 'like',
+        testID: 'context-menu-like',
+        onSelect: () => onQuickToggleRating(item, 'like'),
+      },
+      {
+        id: 'dislike',
+        label: i18n.t(currentRating === 'dislike' ? 'rating.clearDislike' : 'rating.dislike'),
+        icon: currentRating === 'dislike' ? 'dislikeFilled' : 'dislike',
+        testID: 'context-menu-dislike',
+        onSelect: () => onQuickToggleRating(item, 'dislike'),
+      },
+    );
   }
 
   if (onQuickToggleWatched) {

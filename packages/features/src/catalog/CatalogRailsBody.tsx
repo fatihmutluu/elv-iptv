@@ -1,4 +1,4 @@
-import type { ItemRow, SeriesUnplayedSummary, WatchProgressRow } from '@elv/data';
+import type { ItemRow, RatingValue, SeriesUnplayedSummary, WatchProgressRow } from '@elv/data';
 import { CtaButton, TvFocusGuideRegion, useI18n, useTheme } from '@elv/ui-kit';
 import type { ComponentRef, ReactElement, RefObject } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
@@ -24,6 +24,7 @@ export interface CatalogRailsBodyProps {
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
   readonly favoriteKeys?: ReadonlySet<string>;
   readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
   readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly hasMoreCategories: boolean;
   readonly focusedRowId: string | null;
@@ -35,6 +36,7 @@ export interface CatalogRailsBodyProps {
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
   readonly onSeeAll: (categoryId: string) => void;
   readonly onLoadMore: () => void;
   readonly onLayoutContinueY?: (y: number) => void;
@@ -54,6 +56,7 @@ export function CatalogRailsBody({
   progressByKey,
   favoriteKeys,
   watchedOverrides,
+  ratingByKey,
   unplayedBySeriesKey,
   hasMoreCategories,
   focusedRowId,
@@ -65,6 +68,7 @@ export function CatalogRailsBody({
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onQuickToggleRating,
   onSeeAll,
   onLoadMore,
   onLayoutContinueY,
@@ -130,6 +134,7 @@ export function CatalogRailsBody({
                 progressByKey={progressByKey}
                 {...(favoriteKeys !== undefined ? { favoriteKeys } : {})}
                 {...(watchedOverrides !== undefined ? { watchedOverrides } : {})}
+                {...(ratingByKey !== undefined ? { ratingByKey } : {})}
                 {...(unplayedBySeriesKey !== undefined ? { unplayedBySeriesKey } : {})}
                 cardWidth={layout.posterRailWidth}
                 gap={layout.railGap}
@@ -141,6 +146,7 @@ export function CatalogRailsBody({
                 {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
                 {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
                 {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
+                {...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {})}
                 onSeeAll={onSeeAll}
               />
             </TvFocusGuideRegion>

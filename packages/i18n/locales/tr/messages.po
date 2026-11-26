@@ -3619,3 +3619,99 @@ msgstr "Yeni bölümler"
 
 msgid "context.dismissNewEpisode"
 msgstr "Kaldır"
+
+msgid "nav.library"
+msgstr "Kitaplık"
+
+msgid "library.title"
+msgstr "Kitaplık"
+
+msgid "library.tabFollowing"
+msgstr "Takip Edilenler"
+
+msgid "library.tabLikes"
+msgstr "Beğeniler"
+
+msgid "library.tabWatched"
+msgstr "İzlenenler"
+
+msgid "library.tabDownloads"
+msgstr "İndirilenler"
+
+msgid "library.railLive"
+msgstr "Canlı Yayınlar"
+
+msgid "library.railSeries"
+msgstr "Diziler"
+
+msgid "library.railMovies"
+msgstr "Filmler"
+
+msgid "library.railCollections"
+msgstr "Koleksiyonlar"
+
+msgid "library.railLiked"
+msgstr "Beğendiklerim"
+
+msgid "library.railDisliked"
+msgstr "Beğenmediklerim"
+
+msgid "library.railWatchedMovies"
+msgstr "İzlenen filmler"
+
+msgid "library.railWatchedSeries"
+msgstr "İzlenen diziler"
+
+msgid "library.railDownloadedMovies"
+msgstr "İndirilen filmler"
+
+msgid "library.railDownloadedSeries"
+msgstr "İndirilen diziler"
+
+msgid "library.episodesDownloaded"
+msgstr "{downloaded} / {total} bölüm indirildi"
+
+msgid "library.episodesDownloadedUnknownTotal"
+msgstr "{downloaded} bölüm indirildi"
+
+msgid "library.seeAll"
+msgstr "Tümünü gör"
+
+msgid "library.backToTab"
+msgstr "Geri"
+
+msgid "library.emptyFollowingTitle"
+msgstr "Henüz takip edilen içerik yok"
+
+msgid "library.emptyFollowingBody"
+msgstr "Canlı kanalları, dizileri veya filmleri yıldızlayarak burada toplayabilirsiniz."
+
+msgid "library.emptyLikesTitle"
+msgstr "Henüz beğeni veya beğenmeme yok"
+
+msgid "library.emptyLikesBody"
+msgstr "Film ve dizileri detay sayfasından veya sağ tık menüsünden değerlendirebilirsiniz."
+
+msgid "library.emptyWatchedTitle"
+msgstr "Henüz izlenen içerik yok"
+
+msgid "library.emptyWatchedBody"
+msgstr "İzlemeyi tamamladığınız film ve diziler burada görünür."
+
+msgid "rating.like"
+msgstr "Beğendim"
+
+msgid "rating.liked"
+msgstr "Beğenildi"
+
+msgid "rating.dislike"
+msgstr "Beğenmedim"
+
+msgid "rating.disliked"
+msgstr "Beğenilmedi"
+
+msgid "rating.clearLike"
+msgstr "Beğeniyi kaldır"
+
+msgid "rating.clearDislike"
+msgstr "Beğenmemeyi kaldır"

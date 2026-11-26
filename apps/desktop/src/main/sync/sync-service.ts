@@ -112,7 +112,8 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       }));
   const http = createFetchHttpPort(fetchFn);
 
-  let serverUrl = normalizeSyncServerUrl(options.initialServerUrl ?? '', '');
+  const defaultServerUrl = normalizeSyncServerUrl(options.initialServerUrl ?? '', '');
+  let serverUrl = defaultServerUrl;
   let state: SyncAccountStateIpc = SIGNED_OUT_STATE;
   const listeners = new Set<(next: SyncAccountStateIpc) => void>();
   const initialPrefsListeners = new Set<(patch: PreferencesPatch) => void>();
@@ -326,7 +327,8 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
     },
 
     setServerUrl(nextUrl: string): void {
-      serverUrl = normalizeSyncServerUrl(nextUrl, '');
+      const trimmed = nextUrl.trim();
+      serverUrl = trimmed.length === 0 ? defaultServerUrl : normalizeSyncServerUrl(trimmed, '');
     },
 
     setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): void {

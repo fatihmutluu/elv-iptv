@@ -1,5 +1,6 @@
 import type {
   ItemRow,
+  RatingValue,
   SearchEpisodeHit,
   SearchItemHit,
   SearchProgrammeHit,
@@ -47,6 +48,7 @@ export interface SearchResultsSectionProps {
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
   readonly favoriteKeys?: ReadonlySet<string>;
   readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
   readonly searching: boolean;
   readonly hasSearched: boolean;
   readonly padX: number;
@@ -60,6 +62,7 @@ export interface SearchResultsSectionProps {
   readonly onPlayVod?: (item: ItemRow) => void;
   readonly onToggleFavorite?: (item: ItemRow) => void;
   readonly onToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onToggleRating?: (item: ItemRow, next: RatingValue) => void;
   readonly onSelectEpg?: (programme: SearchProgrammeHit) => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onSelectEpisode?: (episode: SearchEpisodeHit) => void;
@@ -141,6 +144,7 @@ interface SearchVodCardItemProps {
   readonly progress: WatchProgressRow | undefined;
   readonly isFavorite: boolean;
   readonly watchedOverride: boolean | undefined;
+  readonly currentRating: RatingValue | null;
   readonly watchedLabel: string;
   readonly matchedInCastLabel: string;
   readonly width: number;
@@ -150,6 +154,7 @@ interface SearchVodCardItemProps {
   readonly onPlayVod?: (item: ItemRow) => void;
   readonly onToggleFavorite?: (item: ItemRow) => void;
   readonly onToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onToggleRating?: (item: ItemRow, next: RatingValue) => void;
 }
 
 const SearchVodCardItem = memo(function SearchVodCardItemInner({
@@ -159,6 +164,7 @@ const SearchVodCardItem = memo(function SearchVodCardItemInner({
   progress,
   isFavorite,
   watchedOverride,
+  currentRating,
   watchedLabel,
   matchedInCastLabel,
   width,
@@ -168,6 +174,7 @@ const SearchVodCardItem = memo(function SearchVodCardItemInner({
   onPlayVod,
   onToggleFavorite,
   onToggleWatched,
+  onToggleRating,
 }: SearchVodCardItemProps): ReactElement {
   const i18n = useI18n();
   const { openContextMenu } = useContextMenu();
@@ -189,12 +196,14 @@ const SearchVodCardItem = memo(function SearchVodCardItemInner({
           item,
           isFavorite,
           isWatched: effectiveWatched,
+          currentRating,
           isDownloaded: canDownloadMovie && hasManagedDownload(downloads.byItemKey.get(item.key)),
           i18n,
           onOpenDetail,
           ...(onPlayVod !== undefined ? { onPlayVod } : {}),
           ...(onToggleFavorite !== undefined ? { onToggleFavorite } : {}),
           ...(onToggleWatched !== undefined ? { onToggleWatched } : {}),
+          ...(onToggleRating !== undefined ? { onToggleRating } : {}),
           ...(canDownloadMovie
             ? {
                 onDownload: (it: ItemRow) => {
@@ -215,6 +224,7 @@ const SearchVodCardItem = memo(function SearchVodCardItemInner({
       });
     },
     [
+      currentRating,
       downloads,
       effectiveWatched,
       i18n,
@@ -223,6 +233,7 @@ const SearchVodCardItem = memo(function SearchVodCardItemInner({
       onOpenDetail,
       onPlayVod,
       onToggleFavorite,
+      onToggleRating,
       onToggleWatched,
       openContextMenu,
     ],
@@ -292,6 +303,7 @@ function SearchResultsSectionInner({
   progressByKey,
   favoriteKeys,
   watchedOverrides,
+  ratingByKey,
   searching,
   hasSearched,
   padX,
@@ -305,6 +317,7 @@ function SearchResultsSectionInner({
   onPlayVod,
   onToggleFavorite,
   onToggleWatched,
+  onToggleRating,
   onSelectEpg,
   onOpenDetail,
   onSelectEpisode,
@@ -494,6 +507,7 @@ function SearchResultsSectionInner({
                 progress={progressByKey.get(item.key)}
                 isFavorite={favoriteKeys?.has(item.key) ?? false}
                 watchedOverride={watchedOverrides?.get(item.key)}
+                currentRating={ratingByKey?.get(item.key) ?? null}
                 watchedLabel={watchedLabel}
                 matchedInCastLabel={matchedInCastLabel}
                 width={posterCardWidth}
@@ -503,6 +517,7 @@ function SearchResultsSectionInner({
                 {...(onPlayVod !== undefined ? { onPlayVod } : {})}
                 {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
                 {...(onToggleWatched !== undefined ? { onToggleWatched } : {})}
+                {...(onToggleRating !== undefined ? { onToggleRating } : {})}
               />
             ))}
           </View>
@@ -526,6 +541,7 @@ function SearchResultsSectionInner({
                 progress={progressByKey.get(item.key)}
                 isFavorite={favoriteKeys?.has(item.key) ?? false}
                 watchedOverride={watchedOverrides?.get(item.key)}
+                currentRating={ratingByKey?.get(item.key) ?? null}
                 watchedLabel={watchedLabel}
                 matchedInCastLabel={matchedInCastLabel}
                 width={posterCardWidth}
@@ -535,6 +551,7 @@ function SearchResultsSectionInner({
                 {...(onPlayVod !== undefined ? { onPlayVod } : {})}
                 {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
                 {...(onToggleWatched !== undefined ? { onToggleWatched } : {})}
+                {...(onToggleRating !== undefined ? { onToggleRating } : {})}
               />
             ))}
           </View>

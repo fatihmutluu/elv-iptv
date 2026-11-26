@@ -529,4 +529,16 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'dismissed_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
+  ratings: [
+    { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT 'movie'" },
+    { name: 'value', alterDefinition: "TEXT NOT NULL DEFAULT 'like'" },
+    { name: 'title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'logo', alterDefinition: 'TEXT' },
+    { name: 'year', alterDefinition: 'INTEGER' },
+    { name: 'rating', alterDefinition: 'REAL' },
+    { name: 'updated_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
 };

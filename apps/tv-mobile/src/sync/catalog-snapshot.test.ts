@@ -458,4 +458,136 @@ describe('createTvMobileCatalogSnapshotBridge (HIGH #9)', () => {
       },
     ]);
   });
+
+  it('exports ratings and applies LWW updates and tombstone deletions cleanly', async () => {
+    const secrets = makeMemorySecrets();
+    const setRating = vi.fn(async (_input, value) => ok(value));
+    const catalog = {
+      listSources: vi.fn(async () => []),
+      listFavorites: vi.fn(async () => []),
+      listContinueWatching: vi.fn(async () => []),
+      listChannelOverrides: vi.fn(async () => []),
+      listCustomGroups: vi.fn(async () => []),
+      listCollections: vi.fn(async () => []),
+      listRatings: vi.fn(async () => [
+        {
+          profileId: 'default',
+          sourceId: 'src-x',
+          itemKey: 'x:src-x:movie:1',
+          kind: 'movie' as const,
+          value: 'like' as const,
+          title: 'Dune',
+          logo: 'https://cdn.example/dune.jpg',
+          year: 2021,
+          rating: 8.3,
+          updatedAt: 500,
+        },
+        {
+          profileId: 'default',
+          sourceId: 'src-x',
+          itemKey: 'x:src-x:series:2',
+          kind: 'series' as const,
+          value: 'dislike' as const,
+          title: 'Dark',
+          logo: null,
+          year: 2017,
+          rating: 8.7,
+          updatedAt: 600,
+        },
+      ]),
+      setRating,
+      flushPendingWrites: vi.fn(async () => undefined),
+    } as unknown as CatalogService;
+
+    const onApplied = vi.fn();
+    const bridge = createTvMobileCatalogSnapshotBridge({
+      getCatalog: async () => catalog,
+      secretStore: secrets.store,
+      clock: () => 9999,
+      onApplied,
+    });
+
+    const exported = await bridge.getLocalSnapshot();
+    expect(exported.ratings).toEqual([
+      {
+        key: 'x:src-x:movie:1',
+        sourceId: 'src-x',
+        kind: 'movie',
+        value: 'like',
+        title: 'Dune',
+        logo: 'https://cdn.example/dune.jpg',
+        year: 2021,
+        rating: 8.3,
+        updatedAt: 500,
+      },
+      {
+        key: 'x:src-x:series:2',
+        sourceId: 'src-x',
+        kind: 'series',
+        value: 'dislike',
+        title: 'Dark',
+        year: 2017,
+        rating: 8.7,
+        updatedAt: 600,
+      },
+    ]);
+
+    const merged: VaultSnapshot = {
+      ...createEmptyVaultSnapshot(7000),
+      ratings: [
+        // Stale update ignored (400 <= 500)
+        {
+          key: 'x:src-x:movie:1',
+          sourceId: 'src-x',
+          kind: 'movie',
+          value: 'dislike',
+          title: 'Dune',
+          updatedAt: 400,
+        },
+        // Newer tombstone deletes existing series rating (700 >= 600)
+        {
+          key: 'x:src-x:series:2',
+          sourceId: 'src-x',
+          kind: 'series',
+          value: 'dislike',
+          title: 'Dark',
+          updatedAt: 700,
+          deleted: true,
+        },
+        // New rating inserted
+        {
+          key: 'x:src-x:movie:3',
+          sourceId: 'src-x',
+          kind: 'movie',
+          value: 'like',
+          title: 'Arrival',
+          year: 2016,
+          rating: 7.9,
+          updatedAt: 800,
+        },
+      ],
+    };
+    await bridge.applyMergedSnapshot(merged);
+
+    expect(setRating).toHaveBeenCalledTimes(2);
+    expect(setRating).toHaveBeenNthCalledWith(
+      1,
+      { sourceId: 'src-x', itemKey: 'x:src-x:series:2', kind: 'series', title: 'Dark' },
+      null,
+    );
+    expect(setRating).toHaveBeenNthCalledWith(
+      2,
+      {
+        sourceId: 'src-x',
+        itemKey: 'x:src-x:movie:3',
+        kind: 'movie',
+        title: 'Arrival',
+        logo: null,
+        year: 2016,
+        rating: 7.9,
+      },
+      'like',
+    );
+    expect(onApplied).toHaveBeenCalledTimes(1);
+  });
 });

@@ -2,6 +2,7 @@ import type {
   CatalogService,
   FavoriteRow,
   ItemRow,
+  RatingValue,
   SeriesUnplayedSummary,
   WatchProgressRow,
 } from '@elv/data';
@@ -72,6 +73,7 @@ export interface CatalogQuickFilterGridProps {
   readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly favoriteKeys: ReadonlySet<string>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
+  readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
   readonly focusedGridPos?: GridFocusPosition | null;
   readonly onGridMetaChange?: (meta: CategoryGridMeta) => void;
   readonly gridAccessRef?: MutableRefObject<CategoryGridAccess>;
@@ -79,6 +81,7 @@ export interface CatalogQuickFilterGridProps {
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
   readonly onQuickToggleFavorite?: (item: ItemRow) => unknown;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
 }
 
 interface QuickFilterPosterItemProps {
@@ -87,6 +90,7 @@ interface QuickFilterPosterItemProps {
   readonly progress: WatchProgressRow | undefined;
   readonly isFavorite: boolean;
   readonly watchedOverride: boolean | undefined;
+  readonly currentRating: RatingValue | null;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly watchedLabel: string;
   readonly formatQuickPlay: (title: string) => string;
@@ -101,6 +105,7 @@ interface QuickFilterPosterItemProps {
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
 }
 
 const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
@@ -109,6 +114,7 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
   progress,
   isFavorite,
   watchedOverride,
+  currentRating,
   unplayedSummary,
   watchedLabel,
   formatQuickPlay,
@@ -123,6 +129,7 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onQuickToggleRating,
 }: QuickFilterPosterItemProps): ReactElement {
   const i18n = useI18n();
   const { openContextMenu } = useContextMenu();
@@ -148,12 +155,14 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
           item,
           isFavorite,
           isWatched: effectiveWatched,
+          currentRating,
           isDownloaded: canDownloadMovie && hasManagedDownload(downloads.byItemKey.get(item.key)),
           i18n,
           onOpenDetail,
           ...(onQuickPlay !== undefined ? { onQuickPlay } : {}),
           ...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {}),
           ...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {}),
+          ...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {}),
           ...(canDownloadMovie
             ? {
                 onDownload: (it: ItemRow) => {
@@ -174,6 +183,7 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
       });
     },
     [
+      currentRating,
       downloads,
       effectiveWatched,
       i18n,
@@ -182,6 +192,7 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
       onOpenDetail,
       onQuickPlay,
       onQuickToggleFavorite,
+      onQuickToggleRating,
       onQuickToggleWatched,
       openContextMenu,
     ],
@@ -273,6 +284,7 @@ export function CatalogQuickFilterGrid({
   unplayedBySeriesKey,
   favoriteKeys,
   watchedOverrides,
+  ratingByKey,
   focusedGridPos = null,
   onGridMetaChange,
   gridAccessRef,
@@ -280,6 +292,7 @@ export function CatalogQuickFilterGrid({
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onQuickToggleRating,
 }: CatalogQuickFilterGridProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -543,6 +556,7 @@ export function CatalogQuickFilterGrid({
           progress={mergedProgress.get(item.key)}
           isFavorite={filter === 'mylist' ? true : favoriteKeys.has(item.key)}
           watchedOverride={watchedOverrides.get(item.key)}
+          currentRating={ratingByKey?.get(item.key) ?? null}
           unplayedSummary={unplayedBySeriesKey?.get(item.key)}
           watchedLabel={watchedLabel}
           formatQuickPlay={formatQuickPlay}
@@ -559,6 +573,7 @@ export function CatalogQuickFilterGrid({
             ? { onQuickToggleFavorite: handleToggleFavorite }
             : {})}
           {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
+          {...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {})}
         />
       ))}
     </ScrollView>

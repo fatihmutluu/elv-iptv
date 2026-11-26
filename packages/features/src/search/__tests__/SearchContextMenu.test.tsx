@@ -38,12 +38,17 @@ describe('SearchScreen — Universal Context Menus', () => {
 
     const setFavorite = jest.fn(async () => ({ ok: true as const, value: true }));
     const setWatched = jest.fn(async () => ({ ok: true as const, value: undefined }));
+    const setRating = jest.fn(async (_input: unknown, value: 'like' | 'dislike' | null) =>
+      ok(value),
+    );
     const catalog = {
       search: jest.fn(async () => results),
       listProgressByKeys: jest.fn(async () => []),
       listFavoriteKeys: jest.fn(async () => []),
+      listRatingMap: jest.fn(async () => ({})),
       setFavorite,
       setWatched,
+      setRating,
     } as unknown as CatalogService;
 
     const onPlay = jest.fn<void, [PlayTarget]>();
@@ -78,14 +83,25 @@ describe('SearchScreen — Universal Context Menus', () => {
       expect(screen.getByTestId('search-movie-item-0')).toBeTruthy();
     });
 
-    // Long-press Live card -> Add to My List
+    // Long-press Live card -> Add to My List (and NEVER Like/Dislike)
     await fireEvent(screen.getByTestId('search-live-item-0'), 'longPress');
     await waitFor(() => {
       expect(screen.getByTestId('context-menu-play')).toBeTruthy();
       expect(screen.getByTestId('context-menu-favorite')).toBeTruthy();
     });
+    expect(screen.queryByTestId('context-menu-like')).toBeNull();
+    expect(screen.queryByTestId('context-menu-dislike')).toBeNull();
     await fireEvent.press(screen.getByTestId('context-menu-favorite'));
     expect(setFavorite).toHaveBeenCalledWith(expect.objectContaining({ itemKey: 'live:1' }), true);
+
+    // Long-press Movie card -> Like & Dislike
+    await fireEvent(screen.getByTestId('search-movie-item-0'), 'longPress');
+    await waitFor(() => {
+      expect(screen.getByTestId('context-menu-like')).toBeTruthy();
+      expect(screen.getByTestId('context-menu-dislike')).toBeTruthy();
+    });
+    await fireEvent.press(screen.getByTestId('context-menu-like'));
+    expect(setRating).toHaveBeenCalledWith(expect.objectContaining({ itemKey: 'movie:1' }), 'like');
 
     // Long-press Movie card -> Play
     await fireEvent(screen.getByTestId('search-movie-item-0'), 'longPress');

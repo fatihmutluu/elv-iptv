@@ -13,7 +13,7 @@ import {
 describe('Wave C3 preferences & transport (#182, #218, #404)', () => {
   it('exposes Wave C3 defaults on DEFAULT_PREFERENCES', () => {
     expect(DEFAULT_PREFERENCES.collapseLiveVariants).toBe(false);
-    expect(DEFAULT_PREFERENCES.groupVodVersions).toBe(true);
+    expect(DEFAULT_PREFERENCES.groupVodVersions).toBe(false);
   });
 
   it('parses valid boolean values and falls back to defaults on invalid inputs', () => {
@@ -21,11 +21,11 @@ describe('Wave C3 preferences & transport (#182, #218, #404)', () => {
       JSON.stringify({
         version: 1,
         collapseLiveVariants: true,
-        groupVodVersions: false,
+        groupVodVersions: true,
       }),
     );
     expect(parsed.collapseLiveVariants).toBe(true);
-    expect(parsed.groupVodVersions).toBe(false);
+    expect(parsed.groupVodVersions).toBe(true);
 
     for (const bad of ['true', 'false', 1, 0, null, {}]) {
       const p = parsePreferences(
@@ -36,7 +36,7 @@ describe('Wave C3 preferences & transport (#182, #218, #404)', () => {
         }),
       );
       expect(p.collapseLiveVariants).toBe(false);
-      expect(p.groupVodVersions).toBe(true);
+      expect(p.groupVodVersions).toBe(false);
     }
   });
 
@@ -44,7 +44,7 @@ describe('Wave C3 preferences & transport (#182, #218, #404)', () => {
     const encoded = serializePreferences({
       ...DEFAULT_PREFERENCES,
       collapseLiveVariants: true,
-      groupVodVersions: false,
+      groupVodVersions: true,
     });
     expect(encoded.ok).toBe(true);
     if (encoded.ok) {
@@ -53,7 +53,7 @@ describe('Wave C3 preferences & transport (#182, #218, #404)', () => {
       );
       const parsed = parsePreferences(encoded.value);
       expect(parsed.collapseLiveVariants).toBe(true);
-      expect(parsed.groupVodVersions).toBe(false);
+      expect(parsed.groupVodVersions).toBe(true);
     }
   });
 
@@ -62,12 +62,12 @@ describe('Wave C3 preferences & transport (#182, #218, #404)', () => {
 
     const u1 = await store.update({
       collapseLiveVariants: true,
-      groupVodVersions: false,
+      groupVodVersions: true,
     });
     expect(u1.ok).toBe(true);
     if (u1.ok) {
       expect(u1.value.collapseLiveVariants).toBe(true);
-      expect(u1.value.groupVodVersions).toBe(false);
+      expect(u1.value.groupVodVersions).toBe(true);
     }
 
     const u2 = await store.update({
@@ -77,14 +77,14 @@ describe('Wave C3 preferences & transport (#182, #218, #404)', () => {
     expect(u2.ok).toBe(true);
     if (u2.ok) {
       expect(u2.value.collapseLiveVariants).toBe(true);
-      expect(u2.value.groupVodVersions).toBe(false);
+      expect(u2.value.groupVodVersions).toBe(true);
     }
 
     const reset = await store.reset();
     expect(reset.ok).toBe(true);
     if (reset.ok) {
       expect(reset.value.collapseLiveVariants).toBe(false);
-      expect(reset.value.groupVodVersions).toBe(true);
+      expect(reset.value.groupVodVersions).toBe(false);
     }
   });
 

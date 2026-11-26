@@ -1,4 +1,4 @@
-import type { CatalogService, ItemRow, SourceRow, WatchProgressRow } from '@elv/data';
+import type { CatalogService, ItemRow, RatingValue, SourceRow, WatchProgressRow } from '@elv/data';
 import { useContextMenu, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -174,6 +174,12 @@ export function CatalogDiscoveryScreen({
       });
     },
     [quickActionsState.toggleWatched, uiCache],
+  );
+  const handleQuickToggleRating = useCallback(
+    (item: ItemRow, next: RatingValue) => {
+      void quickActionsState.toggleRating(item, next);
+    },
+    [quickActionsState.toggleRating],
   );
   const handleResumeContinue = useCallback(
     (row: WatchProgressRow) => {
@@ -585,9 +591,11 @@ export function CatalogDiscoveryScreen({
               onJumpToGridPos={tvNav.jumpToGridPos}
               favoriteKeys={quickActionsState.favoriteKeys}
               watchedOverrides={quickActionsState.watchedOverrides}
+              ratingByKey={quickActionsState.ratingByKey}
               onQuickPlay={handleQuickPlay}
               onQuickToggleFavorite={handleQuickToggleFavorite}
               onQuickToggleWatched={handleQuickToggleWatched}
+              onQuickToggleRating={handleQuickToggleRating}
               onGridMetaChange={setGridMeta}
               gridAccessRef={gridAccessRef}
             />
@@ -605,6 +613,7 @@ export function CatalogDiscoveryScreen({
               unplayedBySeriesKey={discovery.unplayedBySeriesKey}
               favoriteKeys={quickActionsState.favoriteKeys}
               watchedOverrides={quickActionsState.watchedOverrides}
+              ratingByKey={quickActionsState.ratingByKey}
               focusedGridPos={tvNav.focusedGridPos}
               onGridMetaChange={setGridMeta}
               gridAccessRef={gridAccessRef}
@@ -612,6 +621,7 @@ export function CatalogDiscoveryScreen({
               onQuickPlay={handleQuickPlay}
               onQuickToggleFavorite={handleQuickToggleFavorite}
               onQuickToggleWatched={handleQuickToggleWatched}
+              onQuickToggleRating={handleQuickToggleRating}
             />
           ) : (
             <CatalogRailsBody
@@ -626,6 +636,7 @@ export function CatalogDiscoveryScreen({
               progressByKey={discovery.progressByKey}
               favoriteKeys={quickActionsState.favoriteKeys}
               watchedOverrides={quickActionsState.watchedOverrides}
+              ratingByKey={quickActionsState.ratingByKey}
               unplayedBySeriesKey={discovery.unplayedBySeriesKey}
               hasMoreCategories={discovery.hasMoreCategories}
               focusedRowId={tvNav.focusedRowId}
@@ -637,6 +648,7 @@ export function CatalogDiscoveryScreen({
               onQuickPlay={handleQuickPlay}
               onQuickToggleFavorite={handleQuickToggleFavorite}
               onQuickToggleWatched={handleQuickToggleWatched}
+              onQuickToggleRating={handleQuickToggleRating}
               onSeeAll={handleSelectCategory}
               onLoadMore={discovery.loadMoreCategories}
               onLayoutContinueY={recordContinueY}

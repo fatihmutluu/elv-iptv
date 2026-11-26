@@ -1,6 +1,7 @@
 import type {
   CatalogService,
   EpisodeRow,
+  RatingValue,
   SeriesUnplayedSummary,
   VodEnrichmentRecord,
   VodVersionOption,
@@ -44,10 +45,12 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly setCollectionIds: (ids: readonly string[]) => void;
   readonly relatedUnplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly versions: readonly VodVersionOption[];
+  readonly userRating: RatingValue | null;
   readonly selectSeason: (season: number) => void;
   readonly retrySeasons: () => void;
   readonly toggleMyList: () => Promise<void>;
   readonly toggleWatched: () => Promise<void>;
+  readonly toggleRating: (next: RatingValue) => Promise<void>;
 }
 
 /**
@@ -76,6 +79,7 @@ export function useDetailData({
   const [versions, setVersions] = useState<readonly VodVersionOption[]>([]);
   const [enrichment, setEnrichment] = useState<VodEnrichmentRecord | null>(null);
   const [collectionIds, setCollectionIds] = useState<readonly string[]>([]);
+  const [userRating, setUserRatingState] = useState<RatingValue | null>(null);
 
   const mountedRef = useRef(true);
   const snapRef = useRef(snap);
@@ -97,6 +101,10 @@ export function useDetailData({
   const committedMovieProgressRef = useRef<WatchProgressRow | null | undefined>(
     initialCached?.snap.movieProgress,
   );
+  const userRatingRef = useRef<RatingValue | null>(null);
+  const ratingGenRef = useRef(0);
+  const ratingInFlightRef = useRef(0);
+  const committedRatingRef = useRef<RatingValue | null | undefined>(undefined);
   const hydrationGenRef = useRef(0);
 
   const persistToCache = useCallback(
@@ -156,10 +164,15 @@ export function useDetailData({
       setVersions([]);
       setEnrichment(null);
       setCollectionIds([]);
+      userRatingRef.current = null;
+      setUserRatingState(null);
       myListGenRef.current += 1;
       myListInFlightRef.current = 0;
       watchedGenRef.current += 1;
       watchedInFlightRef.current = 0;
+      ratingGenRef.current += 1;
+      ratingInFlightRef.current = 0;
+      committedRatingRef.current = undefined;
       cancelPrewarm();
       const cached = uiCacheRef.current?.getDetail(target.itemKey) ?? null;
       if (cached) {
@@ -188,18 +201,25 @@ export function useDetailData({
         target.kind === 'series' && target.catalogId !== undefined
           ? catalog.seasons(target.catalogId).catch(() => null)
           : null;
-      const [hydratedDetail, favKeys, fetchedMovieProg, fetchedVersions, relatedResult] =
-        await Promise.all([
-          catalog.itemDetail ? catalog.itemDetail(target.itemKey).catch(() => null) : null,
-          catalog.listFavoriteKeys ? catalog.listFavoriteKeys().catch(() => [] as string[]) : [],
-          target.kind === 'movie' && catalog.getProgress
-            ? catalog.getProgress(target.itemKey).catch(() => null)
-            : null,
-          target.kind === 'movie' && catalog.itemVersions
-            ? catalog.itemVersions(target.itemKey).catch(() => [] as readonly VodVersionOption[])
-            : ([] as readonly VodVersionOption[]),
-          fetchRelatedDetailItems(catalog, target),
-        ]);
+      const [
+        hydratedDetail,
+        favKeys,
+        fetchedMovieProg,
+        fetchedVersions,
+        relatedResult,
+        fetchedRating,
+      ] = await Promise.all([
+        catalog.itemDetail ? catalog.itemDetail(target.itemKey).catch(() => null) : null,
+        catalog.listFavoriteKeys ? catalog.listFavoriteKeys().catch(() => [] as string[]) : [],
+        target.kind === 'movie' && catalog.getProgress
+          ? catalog.getProgress(target.itemKey).catch(() => null)
+          : null,
+        target.kind === 'movie' && catalog.itemVersions
+          ? catalog.itemVersions(target.itemKey).catch(() => [] as readonly VodVersionOption[])
+          : ([] as readonly VodVersionOption[]),
+        fetchRelatedDetailItems(catalog, target),
+        catalog.getRating ? catalog.getRating(target.itemKey).catch(() => null) : null,
+      ]);
       if (isStale()) return;
 
       setVersions(fetchedVersions.length > 1 ? fetchedVersions : []);
@@ -208,6 +228,11 @@ export function useDetailData({
       if (myListInFlightRef.current === 0) committedMyListRef.current = isFav;
       if (target.kind === 'movie' && watchedInFlightRef.current === 0) {
         committedMovieProgressRef.current = fetchedMovieProg;
+      }
+      if (ratingInFlightRef.current === 0) {
+        committedRatingRef.current = fetchedRating;
+        userRatingRef.current = fetchedRating;
+        setUserRatingState(fetchedRating);
       }
       updateSnap((prev) => ({
         ...prev,
@@ -422,10 +447,14 @@ export function useDetailData({
       watchedGenRef,
       watchedInFlightRef,
       committedMovieProgressRef,
+      userRatingRef,
+      ratingGenRef,
+      ratingInFlightRef,
+      committedRatingRef,
     }),
     [],
   );
-  const { toggleMyList, toggleWatched } = useDetailMutations({
+  const { toggleMyList, toggleWatched, toggleRating } = useDetailMutations({
     catalog,
     target,
     title,
@@ -435,6 +464,7 @@ export function useDetailData({
     rating,
     refs: mutationRefs,
     updateSnap,
+    setUserRating: setUserRatingState,
   });
 
   const relatedSeriesKeys = useMemo(
@@ -463,10 +493,12 @@ export function useDetailData({
       setCollectionIds,
       relatedUnplayedBySeriesKey,
       versions,
+      userRating,
       selectSeason,
       retrySeasons,
       toggleMyList,
       toggleWatched,
+      toggleRating,
     };
   }, [
     backdropUri,
@@ -482,7 +514,9 @@ export function useDetailData({
     snap,
     title,
     toggleMyList,
+    toggleRating,
     toggleWatched,
+    userRating,
     versions,
     year,
   ]);

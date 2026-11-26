@@ -1,4 +1,4 @@
-import type { CatalogService, ItemRow } from '@elv/data';
+import type { CatalogService, ItemRow, RatingValue } from '@elv/data';
 import { elvError, err, ok, type Result } from '@elv/domain';
 import { act, createElement } from 'react';
 import { createRoot } from 'test-renderer';
@@ -170,6 +170,88 @@ describe('useCardQuickActionsState (#409)', () => {
       await state.toggleWatched(ITEM, false);
     });
     expect(state.watchedOverrides.get(ITEM.key)).toBe(true);
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it('hydrates ratingByKey, toggles like/dislike/clear with rollback, and ignores live items', async () => {
+    const listRatingMap = vi.fn(async () => ({ 'x:s1:movie:existing': 'like' as RatingValue }));
+    const setRating = vi.fn(
+      async (_input: unknown, value: RatingValue | null): Promise<Result<RatingValue | null>> =>
+        ok(value),
+    );
+    const catalog = { listRatingMap, setRating } as unknown as CatalogService;
+    const liveItem: ItemRow = { ...ITEM, key: 'x:s1:live:9', kind: 'live', name: 'News HD' };
+
+    let state!: CardQuickActionsState;
+    const root = createRoot();
+    await act(async () => {
+      root.render(
+        createElement(Probe, {
+          catalog,
+          onState: (s) => {
+            state = s;
+          },
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(state.ratingByKey.get('x:s1:movie:existing')).toBe('like');
+    expect(state.ratingByKey.get(ITEM.key)).toBeUndefined();
+
+    // Like -> Dislike -> Clear
+    await act(async () => {
+      await state.toggleRating(ITEM, 'like');
+    });
+    expect(state.ratingByKey.get(ITEM.key)).toBe('like');
+    expect(setRating).toHaveBeenLastCalledWith(
+      expect.objectContaining({ itemKey: ITEM.key }),
+      'like',
+    );
+
+    await act(async () => {
+      await state.toggleRating(ITEM, 'dislike');
+    });
+    expect(state.ratingByKey.get(ITEM.key)).toBe('dislike');
+    expect(setRating).toHaveBeenLastCalledWith(
+      expect.objectContaining({ itemKey: ITEM.key }),
+      'dislike',
+    );
+
+    await act(async () => {
+      await state.toggleRating(ITEM, 'dislike');
+    });
+    expect(state.ratingByKey.get(ITEM.key)).toBeUndefined();
+    expect(setRating).toHaveBeenLastCalledWith(
+      expect.objectContaining({ itemKey: ITEM.key }),
+      null,
+    );
+
+    // Error Result & rejection roll back cleanly
+    setRating.mockResolvedValueOnce(err(elvError('storage', 'write-failed')));
+    await act(async () => {
+      await state.toggleRating(ITEM, 'like');
+    });
+    expect(state.ratingByKey.get(ITEM.key)).toBeUndefined();
+
+    setRating.mockRejectedValueOnce(new Error('sqlite-busy'));
+    await act(async () => {
+      await state.toggleRating(ITEM, 'dislike');
+    });
+    expect(state.ratingByKey.get(ITEM.key)).toBeUndefined();
+
+    // Live TV items are strictly ignored
+    const callsBeforeLive = setRating.mock.calls.length;
+    await act(async () => {
+      const okLive = await state.toggleRating(liveItem, 'like');
+      expect(okLive).toBe(false);
+    });
+    expect(setRating.mock.calls.length).toBe(callsBeforeLive);
+    expect(state.ratingByKey.get(liveItem.key)).toBeUndefined();
 
     act(() => {
       root.unmount();

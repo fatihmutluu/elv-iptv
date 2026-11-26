@@ -467,6 +467,15 @@ export function createDesktopCatalogFromBridge(
       bridge.reorderCollectionItems
         ? bridge.reorderCollectionItems(collectionId, orderedItemKeys, profileId)
         : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    setRating: (input, value) =>
+      bridge.setRating
+        ? bridge.setRating({ ...input, title: sanitizeDisplayText(input.title) }, value)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    getRating: (itemKey, profileId) =>
+      bridge.getRating ? bridge.getRating(itemKey, profileId) : Promise.resolve(null),
+    listRatings: (opts) => (bridge.listRatings ? bridge.listRatings(opts) : Promise.resolve([])),
+    listRatingMap: (profileId) =>
+      bridge.listRatingMap ? bridge.listRatingMap(profileId) : Promise.resolve({}),
     flushPendingWrites: () =>
       bridge.flushPendingWrites ? bridge.flushPendingWrites() : Promise.resolve(),
     async close() {

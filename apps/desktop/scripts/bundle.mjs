@@ -5,6 +5,7 @@ import { build } from 'esbuild';
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = process.env.ELV_DESKTOP_OUT_DIR ?? join(rootDir, 'dist');
 const development = process.env.APP_VARIANT === 'development';
+const defaultSyncServerUrl = (process.env.ELV_SYNC_SERVER_URL ?? '').trim();
 
 await build({
   entryPoints: [join(rootDir, 'src', 'main', 'main.ts')],
@@ -14,6 +15,7 @@ await build({
   external: ['electron'],
   define: {
     __ELV_DEV_SEED__: JSON.stringify(development),
+    __ELV_SYNC_SERVER_URL__: JSON.stringify(defaultSyncServerUrl),
   },
   outfile: join(outDir, 'main', 'main.js'),
   logLevel: 'warning',
