@@ -35,7 +35,6 @@ interface GridPosterSlotProps {
   readonly watchedOverride: boolean | undefined;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly watchedLabel: string;
-  readonly formatUnplayed: (count: number) => string;
   readonly formatQuickPlay: (title: string) => string;
   readonly addToListLabel: string;
   readonly inMyListLabel: string;
@@ -60,7 +59,6 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
   watchedOverride,
   unplayedSummary,
   watchedLabel,
-  formatUnplayed,
   formatQuickPlay,
   addToListLabel,
   inMyListLabel,
@@ -204,8 +202,6 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
         summary: unplayedSummary,
         progressWatched,
         watchedOverride,
-        formatUnplayed,
-        watchedLabel,
       })
     : {};
   const versionBadge =
@@ -276,10 +272,6 @@ export const GridRowView = memo(function GridRowViewInner({
 }: GridRowViewProps): ReactElement {
   const i18n = useI18n();
   const posterHeight = Math.round(layout.gridCardWidth * 1.5);
-  const formatUnplayed = useCallback(
-    (count: number) => i18n.t('card.unplayedCount', { count }),
-    [i18n],
-  );
   const formatQuickPlay = useCallback(
     (title: string) => i18n.t('card.quickPlay', { title }),
     [i18n],
@@ -315,7 +307,6 @@ export const GridRowView = memo(function GridRowViewInner({
             watchedOverride={item ? watchedOverrides?.get(item.key) : undefined}
             unplayedSummary={item ? unplayedBySeriesKey?.get(item.key) : undefined}
             watchedLabel={watchedLabel}
-            formatUnplayed={formatUnplayed}
             formatQuickPlay={formatQuickPlay}
             addToListLabel={addToListLabel}
             inMyListLabel={inMyListLabel}

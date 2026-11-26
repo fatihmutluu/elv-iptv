@@ -13,9 +13,10 @@ import {
 } from './index';
 
 describe('homeLayout preference (Wave P4)', () => {
-  it('defines canonical DEFAULT_HOME_LAYOUT with all 6 sections visible', () => {
+  it('defines canonical DEFAULT_HOME_LAYOUT with all 7 sections visible', () => {
     expect(HOME_LAYOUT_SECTION_IDS).toEqual([
       'continue',
+      'newEpisodes',
       'live',
       'mylist',
       'movies',
@@ -24,6 +25,7 @@ describe('homeLayout preference (Wave P4)', () => {
     ]);
     expect(DEFAULT_HOME_LAYOUT).toEqual([
       { id: 'continue', visible: true },
+      { id: 'newEpisodes', visible: true },
       { id: 'live', visible: true },
       { id: 'mylist', visible: true },
       { id: 'movies', visible: true },
@@ -65,11 +67,24 @@ describe('homeLayout preference (Wave P4)', () => {
       { id: 'live', visible: true },
       { id: 'movies', visible: false },
       { id: 'continue', visible: true },
+      { id: 'newEpisodes', visible: true },
       { id: 'mylist', visible: true },
       { id: 'series', visible: true },
       { id: 'collections', visible: true },
     ]);
     expect(Object.isFrozen(normalized)).toBe(true);
+  });
+
+  it('preserves saved pre-#502 layouts and appends newEpisodes as visible', () => {
+    const legacy = [
+      { id: 'continue', visible: true },
+      { id: 'live', visible: false },
+      { id: 'mylist', visible: true },
+      { id: 'movies', visible: true },
+      { id: 'series', visible: true },
+      { id: 'collections', visible: false },
+    ];
+    expect(normalizeHomeLayout(legacy)).toEqual([...legacy, { id: 'newEpisodes', visible: true }]);
   });
 
   it('returns canonical DEFAULT_HOME_LAYOUT reference when normalized matches default', () => {
@@ -92,6 +107,7 @@ describe('homeLayout preference (Wave P4)', () => {
     const customLayout = [
       { id: 'live', visible: true },
       { id: 'continue', visible: true },
+      { id: 'newEpisodes', visible: true },
       { id: 'mylist', visible: false },
       { id: 'series', visible: true },
       { id: 'movies', visible: true },
@@ -133,6 +149,7 @@ describe('homeLayout preference (Wave P4)', () => {
       { id: 'movies', visible: true },
       { id: 'live', visible: false },
       { id: 'continue', visible: true },
+      { id: 'newEpisodes', visible: true },
       { id: 'mylist', visible: true },
       { id: 'series', visible: true },
       { id: 'collections', visible: true },

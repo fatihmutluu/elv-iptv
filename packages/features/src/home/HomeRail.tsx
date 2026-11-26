@@ -2,6 +2,7 @@ import type { BrowseKind, SeriesUnplayedSummary } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import {
   type ContextMenuAnchor,
+  CtaButton,
   HorizontalRailScroll,
   Icon,
   PosterCard,
@@ -15,6 +16,7 @@ import {
 } from '@elv/ui-kit';
 import {
   type ComponentRef,
+  Fragment,
   memo,
   type ReactElement,
   useCallback,
@@ -32,7 +34,9 @@ import {
 } from 'react-native';
 import { resolveSeriesBadgeProps, useRouteActive } from '../shared';
 import {
+  formatContinueEpisodeSubtitle,
   formatRemainingMinutes,
+  type HomeCollectionRail,
   type HomeCollectionRailId,
   type HomeRailEntry,
   type HomeRailKind,
@@ -52,6 +56,7 @@ export interface HomeRailSpec {
 export function buildHomeRailSpecs(t: AppI18n['t']): readonly HomeRailSpec[] {
   return [
     { id: 'continue', title: t('home.continueWatching'), variant: 'wide' },
+    { id: 'newEpisodes', title: t('home.newEpisodes'), variant: 'wide' },
     {
       id: 'live',
       title: t('home.liveTv'),
@@ -133,7 +138,6 @@ interface RailCardItemProps {
   readonly watchedOverride: boolean | undefined;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly formatRemMin: (minutes: number) => string;
-  readonly formatUnplayed: (count: number) => string;
   readonly formatQuickPlay: (title: string) => string;
   readonly addToListLabel: string;
   readonly inMyListLabel: string;
@@ -164,7 +168,6 @@ const RailCardItem = memo(function RailCardItemInner({
   watchedOverride,
   unplayedSummary,
   formatRemMin,
-  formatUnplayed,
   formatQuickPlay,
   addToListLabel,
   inMyListLabel,
@@ -234,26 +237,33 @@ const RailCardItem = memo(function RailCardItemInner({
 
   if (variant === 'wide') {
     const isLive = Boolean(entry.live || entry.kind === 'live');
+    const isInProgress = !isLive && entry.positionMs > 0;
     const ratio =
-      !isLive && entry.durationMs > 0
+      isInProgress && entry.durationMs > 0
         ? progressRatio(entry.positionMs, entry.durationMs)
         : undefined;
     const remMin =
-      !isLive && entry.durationMs > 0
+      isInProgress && entry.durationMs > 0
         ? formatRemainingMinutes(entry.positionMs, entry.durationMs)
         : null;
     const remLabel = remMin !== null ? formatRemMin(remMin) : undefined;
-    const subtitle = isLive
+    const baseSubtitle = isLive
       ? (entry.subtitle ?? liveKindLabel)
-      : entry.subtitle && remLabel
-        ? `${entry.subtitle} · ${remLabel}`
-        : (remLabel ?? entry.subtitle ?? undefined);
+      : entry.kind === 'episode'
+        ? formatContinueEpisodeSubtitle(entry.season, entry.episode, entry.subtitle)
+        : entry.subtitle;
+    const subtitle = isLive
+      ? (baseSubtitle ?? liveKindLabel)
+      : baseSubtitle && remLabel
+        ? `${baseSubtitle} · ${remLabel}`
+        : (remLabel ?? baseSubtitle ?? undefined);
 
     return (
       <WideCard
         testID={testID}
         title={entry.title}
         {...(subtitle !== undefined ? { subtitle } : {})}
+        {...(entry.badgeLabel ? { badge: entry.badgeLabel } : {})}
         imageUri={entry.backdropUri}
         live={isLive}
         logoBackdrop={isLive}
@@ -279,8 +289,6 @@ const RailCardItem = memo(function RailCardItemInner({
         summary: unplayedSummary,
         progressWatched: entry.watched,
         watchedOverride,
-        formatUnplayed,
-        watchedLabel,
       })
     : {};
   const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
@@ -355,10 +363,6 @@ function HomeRailInner({
 
   const formatRemMin = useCallback(
     (minutes: number) => i18n.t('home.remainingMin', { minutes }),
-    [i18n],
-  );
-  const formatUnplayed = useCallback(
-    (count: number) => i18n.t('card.unplayedCount', { count }),
     [i18n],
   );
   const formatQuickPlay = useCallback(
@@ -440,7 +444,6 @@ function HomeRailInner({
               watchedOverride={watchedOverrides?.get(entry.itemKey)}
               unplayedSummary={unplayedBySeriesKey?.get(entry.itemKey)}
               formatRemMin={formatRemMin}
-              formatUnplayed={formatUnplayed}
               formatQuickPlay={formatQuickPlay}
               addToListLabel={addToListLabel}
               inMyListLabel={inMyListLabel}
@@ -466,6 +469,99 @@ function HomeRailInner({
 export const HomeRail = memo(HomeRailInner);
 HomeRail.displayName = 'HomeRail';
 
+/** Props of {@link HomeCollectionsSection}. */
+export interface HomeCollectionsSectionProps {
+  readonly showHeader: boolean;
+  readonly collectionRails: readonly HomeCollectionRail[];
+  readonly cardWidth: number;
+  readonly gap: number;
+  readonly padX: number;
+  readonly isTv: boolean;
+  readonly isTouch: boolean;
+  readonly focusedRowId: string | null;
+  readonly focusedCol: number | null;
+  readonly favoriteKeys: ReadonlySet<string>;
+  readonly watchedOverrides: ReadonlyMap<string, boolean>;
+  readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
+  readonly onOpenManager: () => void;
+  readonly onHeaderLayoutY: (y: number) => void;
+  readonly onPressItem: (entry: HomeRailEntry, index: number) => void;
+  readonly onContextMenuItem: (
+    railId: HomeRailId,
+    entry: HomeRailEntry,
+    index: number,
+    anchor?: ContextMenuAnchor,
+  ) => void;
+  readonly onQuickPlay: (entry: HomeRailEntry, index: number) => void;
+  readonly onQuickToggleFavorite: (entry: HomeRailEntry) => void;
+  readonly onQuickToggleWatched: (entry: HomeRailEntry, currentWatched: boolean) => void;
+  readonly onLayoutY: (id: HomeRailId, y: number) => void;
+}
+
+/** Renders the custom VOD Collections header and its hydrated horizontal poster rails on Home. */
+export function HomeCollectionsSection(p: HomeCollectionsSectionProps): ReactElement {
+  const theme = useTheme();
+  const i18n = useI18n();
+  return (
+    <Fragment>
+      {p.showHeader ? (
+        <View
+          testID="home-collections-header"
+          onLayout={(e) => p.onHeaderLayoutY(e.nativeEvent.layout.y)}
+          style={[styles.collectionsHeader, { paddingHorizontal: p.padX }]}
+        >
+          <View style={styles.collectionsTitleWrap}>
+            <Text style={[theme.typography.h2, { color: theme.colors.textPrimary }]}>
+              {i18n.t('collections.title')}
+            </Text>
+            {p.collectionRails.length === 0 ? (
+              <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+                {i18n.t('collections.subtitle')}
+              </Text>
+            ) : null}
+          </View>
+          <CtaButton
+            testID="home-collections-manage-btn"
+            variant="secondary"
+            label={i18n.t('collections.manageTitle')}
+            focusable={!p.isTv}
+            focused={p.isTv && p.focusedRowId === 'collections-manage'}
+            onPress={p.onOpenManager}
+          />
+        </View>
+      ) : null}
+      {p.collectionRails.map((colRail) => (
+        <HomeRail
+          key={colRail.id}
+          id={colRail.id}
+          testID={`home-rail-collection-${colRail.collectionId}`}
+          itemTestIdPrefix={`home-collection-${colRail.collectionId}-item`}
+          title={colRail.title}
+          variant="poster"
+          items={colRail.items}
+          cardWidth={p.cardWidth}
+          gap={p.gap}
+          padX={p.padX}
+          isTv={p.isTv}
+          isTouch={p.isTouch}
+          focusedIndex={p.focusedRowId === colRail.id ? p.focusedCol : null}
+          onPressItem={p.onPressItem}
+          onContextMenuItem={(entry, index, anchor) =>
+            p.onContextMenuItem(colRail.id, entry, index, anchor)
+          }
+          favoriteKeys={p.favoriteKeys}
+          watchedOverrides={p.watchedOverrides}
+          unplayedBySeriesKey={p.unplayedBySeriesKey}
+          onQuickPlay={p.onQuickPlay}
+          onQuickToggleFavorite={p.onQuickToggleFavorite}
+          onQuickToggleWatched={p.onQuickToggleWatched}
+          onLayoutY={p.onLayoutY}
+        />
+      ))}
+    </Fragment>
+  );
+}
+
 const styles = StyleSheet.create({
   section: { marginTop: 22 },
   header: {
@@ -485,4 +581,13 @@ const styles = StyleSheet.create({
   },
   touchAction: { minHeight: 40, minWidth: 40, justifyContent: 'center' },
   stripContent: { alignItems: 'flex-start' },
+  collectionsHeader: {
+    marginTop: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  collectionsTitleWrap: { flexShrink: 1, gap: 2 },
 });

@@ -423,4 +423,95 @@ describe('CatalogDiscoveryScreen — Quick Filter Tabs & Universal Context Menus
 
     await view.unmount();
   });
+
+  it('surfaces Series Next-Up episodes cleanly, calls setWatched directly on Mark Watched, advances Next-Up, and rolls back on error (#502 P0-3/P0-4/P1-4)', async () => {
+    const cat0 = makeCategory(0, { name: 'Drama', kind: 'series', itemCount: 1 });
+    const show0 = makeItem(0, 0, 'series');
+    const epNext: WatchProgressRow = makeProgress('ep:102', {
+      kind: 'episode',
+      seriesKey: show0.key,
+      season: 1,
+      episode: 2,
+      title: 'Starlight Harbor',
+      subtitle: 'Drydock',
+      positionMs: 0,
+      durationMs: 2_700_000,
+      watched: false,
+    });
+    const epAfter: WatchProgressRow = makeProgress('ep:103', {
+      kind: 'episode',
+      seriesKey: show0.key,
+      season: 1,
+      episode: 3,
+      title: 'Starlight Harbor',
+      subtitle: 'Aftermath',
+      positionMs: 0,
+      durationMs: 2_700_000,
+      watched: false,
+    });
+
+    const { catalog: baseCatalog } = createMockCatalog({
+      categories: [cat0],
+      itemsByCategory: new Map([[cat0.id, [show0]]]),
+    });
+    const listContinueWatching = jest
+      .fn<Promise<WatchProgressRow[]>, [number?]>()
+      .mockResolvedValueOnce([epNext])
+      .mockResolvedValueOnce([epAfter]);
+    const setWatched = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: true as const, value: undefined })
+      .mockResolvedValueOnce(err(elvError('storage', 'disk-full')));
+    const saveProgress = jest.fn();
+    const catalog = {
+      ...baseCatalog,
+      listContinueWatching,
+      setWatched,
+      saveProgress,
+    } as unknown as CatalogService;
+
+    const view = await renderCatalog({
+      kind: 'series',
+      catalog,
+      sources: [makeSource()],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('catalog-continue-item-0')).toBeTruthy();
+    });
+
+    // Next-Up renders without 0% progress bar or bogus remaining minutes
+    expect(screen.queryByTestId('catalog-continue-item-0-progress')).toBeNull();
+    expect(screen.getByText('S1 · E2 — Drydock')).toBeTruthy();
+    expect(screen.queryByText(/left/i)).toBeNull();
+
+    // Context menu shows Play (not Resume) and Mark Watched calls setWatched directly & advances Next-Up
+    await fireEvent(screen.getByTestId('catalog-continue-item-0'), 'longPress');
+    await waitFor(() => {
+      expect(screen.getByTestId('context-menu-resume')).toBeTruthy();
+      expect(screen.getByTestId('context-menu-mark-watched')).toBeTruthy();
+    });
+    expect(screen.getByText('Play')).toBeTruthy();
+    expect(screen.queryByText('Resume')).toBeNull();
+
+    await fireEvent.press(screen.getByTestId('context-menu-mark-watched'));
+    await waitFor(() => {
+      expect(setWatched).toHaveBeenCalledWith('ep:102', true);
+      expect(screen.getByText('S1 · E3 — Aftermath')).toBeTruthy();
+    });
+    expect(saveProgress).not.toHaveBeenCalled();
+
+    // Failed setWatched rolls back the episode card instead of dropping it
+    await fireEvent(screen.getByTestId('catalog-continue-item-0'), 'longPress');
+    await waitFor(() => {
+      expect(screen.getByTestId('context-menu-mark-watched')).toBeTruthy();
+    });
+    await fireEvent.press(screen.getByTestId('context-menu-mark-watched'));
+    await waitFor(() => {
+      expect(setWatched).toHaveBeenCalledWith('ep:103', true);
+      expect(screen.getByText('S1 · E3 — Aftermath')).toBeTruthy();
+    });
+
+    await view.unmount();
+  });
 });

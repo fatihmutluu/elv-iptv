@@ -15,6 +15,8 @@ export interface BuildHomeCardContextMenuInput {
   readonly onPlay: (entry: HomeRailEntry, index: number) => void;
   readonly onOpenDetail?: (entry: HomeRailEntry) => void;
   readonly onRemoveFromContinue?: (entry: HomeRailEntry) => void;
+  readonly onDismissNewEpisode?: (entry: HomeRailEntry) => void;
+  readonly onMarkNewEpisodeWatched?: (entry: HomeRailEntry) => void;
   readonly onToggleFavorite?: (entry: HomeRailEntry) => void;
   readonly onToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
   readonly onOpenMultiView?: (entry: HomeRailEntry, index: number) => void;
@@ -38,6 +40,8 @@ export function buildHomeCardContextMenuItems({
   onPlay,
   onOpenDetail,
   onRemoveFromContinue,
+  onDismissNewEpisode,
+  onMarkNewEpisodeWatched,
   onToggleFavorite,
   onToggleWatched,
   onOpenMultiView,
@@ -71,12 +75,17 @@ export function buildHomeCardContextMenuItems({
   if (railId === 'continue') {
     items.push({
       id: 'resume',
-      label: t('context.resume'),
+      label: entry.positionMs > 0 ? t('context.resume') : t('context.play'),
       icon: 'play',
       testID: 'home-context-resume',
       onSelect: () => onPlay(entry, index),
     });
-    if (onOpenDetail && (entry.kind === 'movie' || entry.kind === 'series')) {
+    if (
+      onOpenDetail &&
+      (entry.kind === 'movie' ||
+        entry.kind === 'series' ||
+        (entry.kind === 'episode' && Boolean(entry.seriesKey)))
+    ) {
       items.push({
         id: 'details',
         label: t('context.goToDetails'),
@@ -105,6 +114,45 @@ export function buildHomeCardContextMenuItems({
       });
     }
     pushDownloadAction();
+    return items;
+  }
+
+  if (railId === 'newEpisodes') {
+    items.push({
+      id: 'play',
+      label: t('context.play'),
+      icon: 'play',
+      testID: 'home-context-play',
+      onSelect: () => onPlay(entry, index),
+    });
+    if (onOpenDetail && entry.seriesKey) {
+      items.push({
+        id: 'details',
+        label: t('context.goToDetails'),
+        icon: 'info',
+        testID: 'home-context-details',
+        onSelect: () => onOpenDetail(entry),
+      });
+    }
+    if (onMarkNewEpisodeWatched) {
+      items.push({
+        id: 'markWatched',
+        label: t('context.markWatched'),
+        icon: 'check',
+        testID: 'home-context-mark-watched',
+        onSelect: () => onMarkNewEpisodeWatched(entry),
+      });
+    }
+    if (onDismissNewEpisode) {
+      items.push({
+        id: 'dismissNewEpisode',
+        label: t('context.dismissNewEpisode'),
+        icon: 'close',
+        destructive: true,
+        testID: 'home-context-dismiss-new-episode',
+        onSelect: () => onDismissNewEpisode(entry),
+      });
+    }
     return items;
   }
 

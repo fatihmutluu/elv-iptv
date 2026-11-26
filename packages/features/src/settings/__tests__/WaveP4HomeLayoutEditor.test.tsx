@@ -19,10 +19,10 @@ import { useTvSettingsNavigation } from '../useTvSettingsNavigation';
 describe('Wave P4 HomeLayoutEditor & Sync initialPrefsHint', () => {
   it('moves and toggles Home layout sections cleanly with pure helpers', () => {
     const moved = moveHomeLayoutSection(DEFAULT_HOME_LAYOUT, 1, 'up');
-    expect(moved.map((s) => s.id).slice(0, 2)).toEqual(['live', 'continue']);
+    expect(moved.map((s) => s.id).slice(0, 3)).toEqual(['newEpisodes', 'continue', 'live']);
 
-    const toggled = toggleHomeLayoutSection(moved, 'movies');
-    expect(toggled.find((s) => s.id === 'movies')?.visible).toBe(false);
+    const toggled = toggleHomeLayoutSection(moved, 'newEpisodes');
+    expect(toggled.find((s) => s.id === 'newEpisodes')?.visible).toBe(false);
   });
 
   it('renders live wireframe preview, toggles visibility, reorders rows, and resets to default', async () => {
@@ -38,13 +38,14 @@ describe('Wave P4 HomeLayoutEditor & Sync initialPrefsHint', () => {
     );
 
     expect(screen.getByTestId('home-layout-preview')).toBeTruthy();
+    expect(screen.getByTestId('home-layout-preview-row-newEpisodes')).toBeTruthy();
     expect(screen.getByTestId('home-layout-preview-row-live')).toBeTruthy();
     expect(screen.queryByTestId('home-layout-reset')).toBeNull();
 
-    await fireEvent.press(screen.getByTestId('home-layout-up-live'));
+    await fireEvent.press(screen.getByTestId('home-layout-up-newEpisodes'));
     expect(onChange).toHaveBeenCalledTimes(1);
     const reordered = onChange.mock.calls[0]?.[0];
-    expect(reordered[0]).toEqual({ id: 'live', visible: true });
+    expect(reordered[0]).toEqual({ id: 'newEpisodes', visible: true });
 
     const withHidden = toggleHomeLayoutSection(reordered, 'movies');
     await rerender(
@@ -142,8 +143,9 @@ describe('Wave P4 HomeLayoutEditor & Sync initialPrefsHint', () => {
       });
     }
     expect(visited).toEqual([
-      'home-layout-live',
+      'home-layout-newEpisodes',
       'home-layout-continue',
+      'home-layout-live',
       'home-layout-mylist',
       'home-layout-movies',
       'home-layout-series',
@@ -176,8 +178,8 @@ describe('Wave P4 HomeLayoutEditor & Sync initialPrefsHint', () => {
     const savedOrder = updatePreferences.mock.calls[0]?.[0]?.homeLayout?.map(
       (s: { id: string }) => s.id,
     );
-    expect(savedOrder?.[4]).toBe('collections');
-    expect(savedOrder?.[5]).toBe('series');
+    expect(savedOrder?.[5]).toBe('collections');
+    expect(savedOrder?.[6]).toBe('series');
 
     await customHook.unmount();
   });

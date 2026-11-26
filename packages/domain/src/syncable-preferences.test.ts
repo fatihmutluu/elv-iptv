@@ -184,6 +184,7 @@ describe('syncable-preferences (Product Decision #40)', () => {
         { id: 'live', visible: true },
         { id: 'movies', visible: false },
         { id: 'continue', visible: true },
+        { id: 'newEpisodes', visible: true },
         { id: 'mylist', visible: true },
         { id: 'series', visible: true },
         { id: 'collections', visible: true },

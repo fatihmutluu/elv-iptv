@@ -49,7 +49,6 @@ interface RelatedPosterItemProps {
   readonly isTv: boolean;
   readonly focused: boolean;
   readonly watchedLabel: string;
-  readonly formatUnplayed: (count: number) => string;
   readonly formatQuickPlay: (title: string) => string;
   readonly addToListLabel: string;
   readonly inMyListLabel: string;
@@ -72,7 +71,6 @@ const RelatedPosterItem = memo(function RelatedPosterItemInner({
   isTv,
   focused,
   watchedLabel,
-  formatUnplayed,
   formatQuickPlay,
   addToListLabel,
   inMyListLabel,
@@ -140,8 +138,6 @@ const RelatedPosterItem = memo(function RelatedPosterItemInner({
         summary: unplayedSummary,
         progressWatched,
         watchedOverride,
-        formatUnplayed,
-        watchedLabel,
       })
     : {};
   const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
@@ -199,10 +195,6 @@ function DetailRelatedRailInner({
     [onLayoutY],
   );
 
-  const formatUnplayed = useCallback(
-    (count: number) => i18n.t('card.unplayedCount', { count }),
-    [i18n],
-  );
   const formatQuickPlay = useCallback(
     (title: string) => i18n.t('card.quickPlay', { title }),
     [i18n],
@@ -260,7 +252,6 @@ function DetailRelatedRailInner({
             isTv={isTv}
             focused={isTv && focusedIndex === index}
             watchedLabel={watchedLabel}
-            formatUnplayed={formatUnplayed}
             formatQuickPlay={formatQuickPlay}
             addToListLabel={addToListLabel}
             inMyListLabel={inMyListLabel}

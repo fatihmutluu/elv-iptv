@@ -42,9 +42,9 @@ describe('schema v21 & downloads-repo', () => {
     for (let i = 0; i < 20; i += 1) await db.exec(MIGRATIONS[i] ?? '');
     await db.exec('PRAGMA user_version = 20');
 
-    expect(SCHEMA_VERSION).toBe(21);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(21);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 21 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
     expect(EXPECTED_TABLE_COLUMNS.downloads?.length).toBeGreaterThan(0);
 
     await expect(

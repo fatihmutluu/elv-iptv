@@ -1,4 +1,10 @@
 import { elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
+import {
+  lookupSeriesRefForDismissal,
+  queryContinueWatchingWithNextUp,
+  recordContinueWatchingDismissal,
+} from './continue-watching-next-up';
+import { captureMyListSeriesBaseline, clearMyListSeriesTracking } from './my-list-new-episodes';
 import { findRestrictedItemKeys, loadActiveParentalFilter } from './parental-repo';
 import { resolveSafeStorageLogo, sourceOfKey } from './queries';
 import {
@@ -308,7 +314,8 @@ export async function getWatchProgress(
 
 /**
  * Lists in-progress, unwatched items with known positive duration (`duration_ms > 0`) at or above
- * {@link MIN_RESUME_POSITION_MS}, deduplicated per series and per movie `version_group_key` (`#404`), most recent first.
+ * {@link MIN_RESUME_POSITION_MS} plus synthesized Next-Up episodes for completed series,
+ * deduplicated per series and per movie `version_group_key` (`#404`), most recent first.
  */
 export async function listContinueWatching(
   db: SqlDriver,
@@ -316,32 +323,14 @@ export async function listContinueWatching(
   profileId: string = DEFAULT_PROFILE_ID,
   opts?: { readonly parentalUnlocked?: boolean },
 ): Promise<WatchProgressRow[]> {
-  const clamped = clampLimit(limit, 24);
-  if (clamped === 0) return [];
-  const normalized = normalizeProfileId(profileId);
-  const filter = await loadActiveParentalFilter(db, normalized, opts?.parentalUnlocked);
-  const fetchLimit = filter === null ? clamped : Math.min(100, clamped * 4);
-  const rows = await db.all<RawProgressRow>(
-    `SELECT ${PROGRESS_COLS} FROM (
-       SELECT ${PROGRESS_COLS}, ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(series_key, ''), NULLIF(version_group_key, ''), item_key) ORDER BY updated_at DESC, item_key ASC) AS rn
-         FROM watch_progress WHERE profile_id = ? AND watched = 0 AND position_ms >= ? AND duration_ms > 0
-     ) WHERE rn = 1 ORDER BY updated_at DESC, item_key ASC LIMIT ?`,
-    [normalized, MIN_RESUME_POSITION_MS, fetchLimit],
-  );
-  const mapped = rows.map(mapProgressRow);
-  if (filter === null) return mapped;
-  const restricted = await findRestrictedItemKeys(
+  return queryContinueWatchingWithNextUp(
     db,
-    filter,
-    mapped.map((r) => ({
-      itemKey: r.itemKey,
-      sourceId: r.sourceId,
-      kind: r.kind,
-      title: r.title,
-      seriesKey: r.seriesKey,
-    })),
+    PROGRESS_COLS,
+    MIN_RESUME_POSITION_MS,
+    limit,
+    profileId,
+    opts,
   );
-  return mapped.filter((r) => !restricted.has(r.itemKey)).slice(0, clamped);
 }
 
 /** Options for {@link listWatched}. */
@@ -532,14 +521,22 @@ export async function listProgressByKeys(
   return [...byKey.values()];
 }
 
-/** Deletes a watch progress row for `(profileId, itemKey)` and any synced sibling versions in its `version_group_key` (`#404`). */
+/**
+ * Deletes a watch progress row for `(profileId, itemKey)` and any synced sibling versions in its
+ * `version_group_key` (`#404`), and records a Continue Watching dismissal when `itemKey` belongs
+ * to a series episode so Next-Up stays hidden until another episode is watched.
+ */
 export async function clearWatchProgress(
   db: SqlDriver,
   itemKey: string,
   profileId: string = DEFAULT_PROFILE_ID,
+  clock: () => number = Date.now,
 ): Promise<Result<void>> {
   const normalizedProfile = normalizeProfileId(profileId);
-  const versionGroupKey = await lookupMovieVersionGroupKey(db, itemKey);
+  const [versionGroupKey, seriesRef] = await Promise.all([
+    lookupMovieVersionGroupKey(db, itemKey),
+    lookupSeriesRefForDismissal(db, normalizedProfile, itemKey),
+  ]);
   await db.run('DELETE FROM watch_progress WHERE profile_id = ? AND item_key = ?', [
     normalizedProfile,
     itemKey,
@@ -549,6 +546,9 @@ export async function clearWatchProgress(
       normalizedProfile,
       versionGroupKey,
     ]);
+  }
+  if (seriesRef !== null) {
+    await recordContinueWatchingDismissal(db, normalizedProfile, seriesRef, clock);
   }
   return ok(undefined);
 }
@@ -584,6 +584,7 @@ export async function setFavorite(
       profileId,
       input.itemKey,
     ]);
+    await clearMyListSeriesTracking(db, profileId, input.itemKey);
     return ok(false);
   }
   if (!hasValidMeta(input)) return err(elvError('source-format', 'invalid-favorite'));
@@ -600,6 +601,9 @@ export async function setFavorite(
     Math.round(clock()),
     profileId,
   ]);
+  if (input.kind === 'series') {
+    await captureMyListSeriesBaseline(db, profileId, input.itemKey, input.sourceId, clock);
+  }
   return ok(true);
 }
 
@@ -623,6 +627,7 @@ export async function toggleFavorite(
         profileId,
         input.itemKey,
       ]);
+      await clearMyListSeriesTracking(tx, profileId, input.itemKey);
       return false;
     }
     await tx.run(UPSERT_FAVORITE, [
@@ -637,6 +642,9 @@ export async function toggleFavorite(
       addedAt,
       profileId,
     ]);
+    if (input.kind === 'series') {
+      await captureMyListSeriesBaseline(tx, profileId, input.itemKey, input.sourceId, clock);
+    }
     return true;
   });
   return ok(added);

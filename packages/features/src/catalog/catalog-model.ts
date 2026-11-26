@@ -135,7 +135,9 @@ export function filterContinueWatchingForCatalog(
   kind: 'movie' | 'series',
 ): WatchProgressRow[] {
   return rows.filter((row) => {
-    if (row.watched || row.positionMs < MIN_RESUME_POSITION_MS) return false;
+    if (row.watched) return false;
+    const isNextUpEpisode = row.kind === 'episode' && row.positionMs === 0;
+    if (!isNextUpEpisode && row.positionMs < MIN_RESUME_POSITION_MS) return false;
     return kind === 'movie'
       ? row.kind === 'movie'
       : row.kind === 'series' || row.kind === 'episode';
@@ -311,6 +313,34 @@ export function formatCatalogRemainingMinutes(
   if (!Number.isFinite(positionMs) || !Number.isFinite(durationMs) || durationMs <= 0) return null;
   const remainingMs = Math.max(0, durationMs - Math.max(0, positionMs));
   return Math.max(1, Math.ceil(remainingMs / 60_000));
+}
+
+const CATALOG_EPISODE_CODE_PREFIX_RE = /^(?:S\d+(?:\s*[·•\-:]?\s*E\d+)?|E\d+)(?:\s|$|[·•—\-:])/i;
+
+/**
+ * Formats an episode subtitle as `S# · E# — Title` when season/episode metadata is present,
+ * avoiding double-prefixing if `rawSubtitle` already starts with an `S#`/`E#` code.
+ */
+export function formatCatalogEpisodeSubtitle(
+  season: number | null | undefined,
+  episode: number | null | undefined,
+  rawSubtitle: string | null,
+): string | null {
+  const trimmed = rawSubtitle?.trim() ?? '';
+  if (trimmed !== '' && CATALOG_EPISODE_CODE_PREFIX_RE.test(trimmed)) return trimmed;
+  const hasSeason = typeof season === 'number' && Number.isFinite(season);
+  const hasEpisode = typeof episode === 'number' && Number.isFinite(episode);
+  const code =
+    hasSeason && hasEpisode
+      ? `S${season} · E${episode}`
+      : hasEpisode
+        ? `E${episode}`
+        : hasSeason
+          ? `S${season}`
+          : '';
+  if (code !== '' && trimmed !== '') return `${code} — ${trimmed}`;
+  if (code !== '') return code;
+  return trimmed !== '' ? trimmed : null;
 }
 
 /** Clamps a 2D TV grid focus coordinate `(row, col)` to a valid item slot, including partial last rows. */

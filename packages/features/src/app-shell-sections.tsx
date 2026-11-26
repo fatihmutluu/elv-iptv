@@ -231,6 +231,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         sources={p.sources}
         userStateVersion={p.effectiveUserStateVersion}
         homeLayout={p.preferences.preferences.homeLayout}
+        isPlaybackActive={p.suppressEmbeddedPreview === true}
         onPlay={handleStagePlay}
         {...(p.onOpenMultiView !== undefined ? { onOpenMultiView: p.onOpenMultiView } : {})}
         {...(p.onOpenPopout !== undefined ? { onOpenPopout: p.onOpenPopout } : {})}

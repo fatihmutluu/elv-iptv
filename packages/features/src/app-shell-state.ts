@@ -531,6 +531,13 @@ export function createObservedCatalog(
     ...(c.listSeriesUnplayedCounts
       ? { listSeriesUnplayedCounts: c.listSeriesUnplayedCounts.bind(c) }
       : {}),
+    ...(c.listMyListNewEpisodes ? { listMyListNewEpisodes: c.listMyListNewEpisodes.bind(c) } : {}),
+    ...(c.dismissMyListNewEpisode
+      ? { dismissMyListNewEpisode: c.dismissMyListNewEpisode.bind(c) }
+      : {}),
+    ...(c.refreshMyListNewEpisodes
+      ? { refreshMyListNewEpisodes: c.refreshMyListNewEpisodes.bind(c) }
+      : {}),
     ...(c.clearProgress ? { clearProgress: c.clearProgress.bind(c) } : {}),
     ...(c.toggleFavorite ? { toggleFavorite: c.toggleFavorite.bind(c) } : {}),
     ...(c.setFavorite ? { setFavorite: c.setFavorite.bind(c) } : {}),

@@ -1,6 +1,8 @@
 import type { FavoriteRow, ItemRow, WatchProgressRow } from '@elv/data';
-import { describe, expect, it } from 'vitest';
+import { createAppI18n } from '@elv/i18n';
+import { describe, expect, it, vi } from 'vitest';
 import { createPagedListSource } from '../shared';
+import { buildContinueWatchingContextMenuItems } from './catalog-context-menu';
 import {
   ALPHABET_RAIL_MIN_ITEMS,
   buildCatalogNavRows,
@@ -15,6 +17,7 @@ import {
   EMPTY_CATALOG_MEMORY,
   filterContinueWatchingForCatalog,
   filterFavoritesForCatalog,
+  formatCatalogEpisodeSubtitle,
   GRID_MAX_PAGES,
   GRID_PAGE_SIZE,
   INITIAL_VISIBLE_CATEGORIES,
@@ -171,6 +174,62 @@ describe('filterContinueWatchingForCatalog & detailTargetFromProgress', () => {
       'series:1',
       'ep:1',
     ]);
+  });
+
+  it('allows unwatched Next-Up episodes (positionMs === 0) on Series tab only and formats Play label & subtitle (#502 P0-3/P0-4)', () => {
+    const nextUp = makeProgress('ep:next', {
+      kind: 'episode',
+      seriesKey: 'series:2',
+      season: 2,
+      episode: 6,
+      title: 'Dark Sky',
+      subtitle: 'The Return',
+      positionMs: 0,
+      durationMs: 2_700_000,
+      watched: false,
+    });
+    const movieUnstarted = makeProgress('movie:unstarted', {
+      kind: 'movie',
+      positionMs: 0,
+      watched: false,
+    });
+    const epWatched = makeProgress('ep:done', {
+      kind: 'episode',
+      positionMs: 0,
+      watched: true,
+    });
+    const epShort = makeProgress('ep:short', {
+      kind: 'episode',
+      positionMs: 5_000,
+      watched: false,
+    });
+
+    const rows = [nextUp, movieUnstarted, epWatched, epShort];
+    expect(filterContinueWatchingForCatalog(rows, 'series').map((r) => r.itemKey)).toEqual([
+      'ep:next',
+    ]);
+    expect(filterContinueWatchingForCatalog(rows, 'movie')).toEqual([]);
+
+    expect(formatCatalogEpisodeSubtitle(2, 6, 'The Return')).toBe('S2 · E6 — The Return');
+    expect(formatCatalogEpisodeSubtitle(2, 6, 'S2 · E6 — The Return')).toBe('S2 · E6 — The Return');
+    expect(formatCatalogEpisodeSubtitle(null, 6, 'The Return')).toBe('E6 — The Return');
+
+    const i18n = createAppI18n('en');
+    const nextUpMenu = buildContinueWatchingContextMenuItems({
+      kind: 'series',
+      row: nextUp,
+      i18n,
+      onOpenDetail: vi.fn(),
+    });
+    expect(nextUpMenu[0]?.label).toBe('Play');
+
+    const inProgressMenu = buildContinueWatchingContextMenuItems({
+      kind: 'series',
+      row: { ...nextUp, positionMs: 120_000 },
+      i18n,
+      onOpenDetail: vi.fn(),
+    });
+    expect(inProgressMenu[0]?.label).toBe('Resume');
   });
 
   it('builds DetailTarget from movie or episode progress rows', () => {

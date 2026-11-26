@@ -373,4 +373,89 @@ describe('createTvMobileCatalogSnapshotBridge (HIGH #9)', () => {
     expect(flushPendingWrites).toHaveBeenCalledTimes(1);
     expect(onApplied).toHaveBeenCalledTimes(1);
   });
+
+  it('excludes synthetic Next-Up rows (positionMs <= 0 && !watched) from exported watchProgress (#502)', async () => {
+    const secrets = makeMemorySecrets();
+    const catalog = {
+      listSources: vi.fn(async () => []),
+      listFavorites: vi.fn(async () => []),
+      listContinueWatching: vi.fn(async () => [
+        {
+          profileId: 'default',
+          sourceId: 'src-x',
+          itemKey: 'x:src-x:ep:102',
+          kind: 'episode',
+          title: 'Show',
+          subtitle: 'S1 · E2 — Next',
+          logo: null,
+          seriesKey: 'x:src-x:series:1',
+          season: 1,
+          episode: 2,
+          positionMs: 0,
+          durationMs: 2_820_000,
+          watched: false,
+          updatedAt: 5000,
+        },
+        {
+          profileId: 'default',
+          sourceId: 'src-x',
+          itemKey: 'x:src-x:movie:501',
+          kind: 'movie',
+          title: 'Space Movie',
+          subtitle: null,
+          logo: null,
+          seriesKey: null,
+          season: null,
+          episode: null,
+          positionMs: 120_000,
+          durationMs: 3_600_000,
+          watched: false,
+          updatedAt: 4000,
+        },
+        {
+          profileId: 'default',
+          sourceId: 'src-x',
+          itemKey: 'x:src-x:ep:101',
+          kind: 'episode',
+          title: 'Show',
+          subtitle: 'Pilot',
+          logo: null,
+          seriesKey: 'x:src-x:series:1',
+          season: 1,
+          episode: 1,
+          positionMs: 0,
+          durationMs: 2_700_000,
+          watched: true,
+          updatedAt: 3000,
+        },
+      ]),
+      listChannelOverrides: vi.fn(async () => []),
+      listCustomGroups: vi.fn(async () => []),
+      listCollections: vi.fn(async () => []),
+    } as unknown as CatalogService;
+
+    const bridge = createTvMobileCatalogSnapshotBridge({
+      getCatalog: async () => catalog,
+      secretStore: secrets.store,
+      clock: () => 9999,
+    });
+
+    const snap = await bridge.getLocalSnapshot();
+    expect(snap.watchProgress).toEqual([
+      {
+        key: 'x:src-x:movie:501',
+        positionMs: 120_000,
+        durationMs: 3_600_000,
+        completed: false,
+        updatedAt: 4000,
+      },
+      {
+        key: 'x:src-x:ep:101',
+        positionMs: 0,
+        durationMs: 2_700_000,
+        completed: true,
+        updatedAt: 3000,
+      },
+    ]);
+  });
 });

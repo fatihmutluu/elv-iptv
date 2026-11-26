@@ -22,6 +22,7 @@ import type {
   ListItemsOptions,
   LiveVariantOption,
   LocalM3uSourceInput,
+  MyListNewEpisodeRow,
   NextEpisodeRow,
   NowNextEntry,
   ParentalLockFilter,
@@ -32,6 +33,8 @@ import type {
   PinVerifyResult,
   ProfileRecord,
   ProgrammeRow,
+  RefreshMyListNewEpisodesOptions,
+  RefreshMyListNewEpisodesResult,
   SaveProgressInput,
   SaveTrackPreferenceInput,
   SearchOptions,
@@ -85,6 +88,7 @@ import {
   isLocalM3uSourceInput,
   isNonNegativeFinite,
   isNowNextKeyList,
+  isOptionalNewEpisodesLimit,
   isOptionalProfileId,
   isOptionalSourceId,
   isOptionalStrictProfileId,
@@ -96,6 +100,7 @@ import {
   isPinString,
   isPositiveId,
   isRecord,
+  isRefreshMyListNewEpisodesOptions,
   isSafeInt,
   isSafeRecentChannelKey,
   isSaveProgressInput,
@@ -243,6 +248,18 @@ export type CatalogRpcMethodCall =
       opts?: { readonly parentalUnlocked?: boolean; readonly includeHidden?: boolean };
     }
   | { method: 'listFavoriteKeys'; profileId?: string }
+  | {
+      method: 'listMyListNewEpisodes';
+      limit?: number;
+      profileId?: string;
+      opts?: { readonly parentalUnlocked?: boolean };
+    }
+  | { method: 'dismissMyListNewEpisode'; episodeKey: string; profileId?: string }
+  | {
+      method: 'refreshMyListNewEpisodes';
+      profileId?: string;
+      opts?: RefreshMyListNewEpisodesOptions;
+    }
   | { method: 'getTrackPreference'; scopeKey: string; profileId?: string }
   | { method: 'saveTrackPreference'; input: SaveTrackPreferenceInput }
   | { method: 'clearTrackPreference'; scopeKey: string; profileId?: string }
@@ -422,6 +439,16 @@ export interface CatalogBridge
     opts?: { readonly parentalUnlocked?: boolean; readonly includeHidden?: boolean },
   ): Promise<FavoriteRow[]>;
   listFavoriteKeys(profileId?: string): Promise<string[]>;
+  listMyListNewEpisodes?(
+    limit?: number,
+    profileId?: string,
+    opts?: { readonly parentalUnlocked?: boolean },
+  ): Promise<MyListNewEpisodeRow[]>;
+  dismissMyListNewEpisode?(episodeKey: string, profileId?: string): Promise<Result<void>>;
+  refreshMyListNewEpisodes?(
+    profileId?: string,
+    opts?: RefreshMyListNewEpisodesOptions,
+  ): Promise<Result<RefreshMyListNewEpisodesResult>>;
   getTrackPreference?(
     scopeKey: string,
     profileId?: string,
@@ -648,6 +675,19 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isOrderedFavoriteKeys(x['orderedItemKeys']) && isOptionalProfileId(x['profileId']);
     case 'listFavoriteKeys':
       return isOptionalProfileId(x['profileId']);
+    case 'listMyListNewEpisodes':
+      return (
+        isOptionalNewEpisodesLimit(x['limit']) &&
+        isOptionalProfileId(x['profileId']) &&
+        (x['opts'] === undefined || isParentalUnlockedOption(x['opts']))
+      );
+    case 'dismissMyListNewEpisode':
+      return isCleanKey(x['episodeKey']) && isOptionalProfileId(x['profileId']);
+    case 'refreshMyListNewEpisodes':
+      return (
+        isOptionalProfileId(x['profileId']) &&
+        (x['opts'] === undefined || isRefreshMyListNewEpisodesOptions(x['opts']))
+      );
     case 'getTrackPreference':
     case 'clearTrackPreference':
       return isCleanKey(x['scopeKey']) && isOptionalProfileId(x['profileId']);

@@ -14,10 +14,13 @@ import {
   buildHomeCollectionRails,
   buildHomeDetailTarget,
   buildHomeLivePlayTarget,
+  buildHomeRailSets,
   buildUnifiedLiveRail,
   buildVodPlayTarget,
   computePeekCardWidth,
+  formatContinueEpisodeSubtitle,
   formatLiveChannelName,
+  formatNewEpisodeSubtitle,
   formatRemainingMinutes,
   HOME_LIVE_RAIL_LIMIT,
   progressRatio,
@@ -560,5 +563,161 @@ describe('home-model', () => {
     expect(foreignTarget.playlist).toBeUndefined();
     expect(foreignTarget.itemKind).toBe('live');
     expect(foreignTarget.logo).toBe('https://art.test/fav-override.png');
+  });
+
+  it('formats new episode subtitles safely without null placeholders and builds newEpisodes rail + context menu (#502)', () => {
+    expect(formatNewEpisodeSubtitle(2, 5, 'The Signal')).toBe('S2 · E5 — The Signal');
+    expect(formatNewEpisodeSubtitle(null, 5, 'The Signal')).toBe('E5 — The Signal');
+    expect(formatNewEpisodeSubtitle(2, null, 'Special')).toBe('S2 — Special');
+    expect(formatNewEpisodeSubtitle(null, null, 'Pilot')).toBe('Pilot');
+    expect(formatNewEpisodeSubtitle(null, null, '   ')).toBeNull();
+    expect(formatNewEpisodeSubtitle(1, 3, '')).toBe('S1 · E3');
+
+    const sets = buildHomeRailSets({
+      continueWatching: [],
+      newEpisodes: [
+        {
+          profileId: 'default',
+          episodeKey: 'x:src-1:episode:501',
+          seriesKey: 'x:src-1:series:10',
+          sourceId: 'src-1',
+          seriesTitle: 'Starlight Harbor',
+          seriesLogo: 'https://art.test/starlight.jpg',
+          season: 2,
+          episode: 5,
+          episodeTitle: 'The Signal',
+          detectedAt: 1_700_000_000_000,
+        },
+      ],
+      newEpisodeBadgeLabel: 'NEW',
+      liveItems: [],
+      liveCategoryName: null,
+      favorites: [],
+      movies: [],
+      series: [],
+      progressByKey: new Map(),
+    });
+
+    expect(sets.newEpisodes).toHaveLength(1);
+    const ep = sets.newEpisodes[0];
+    expect(ep).toMatchObject({
+      itemKey: 'x:src-1:episode:501',
+      seriesKey: 'x:src-1:series:10',
+      kind: 'episode',
+      title: 'Starlight Harbor',
+      subtitle: 'S2 · E5 — The Signal',
+      badgeLabel: 'NEW',
+      season: 2,
+      episode: 5,
+    });
+
+    expect(ep && buildHomeDetailTarget(ep)).toMatchObject({
+      itemKey: 'x:src-1:series:10',
+      kind: 'series',
+      title: 'Starlight Harbor',
+    });
+
+    const i18n = createAppI18n('en');
+    const menuItems = ep
+      ? buildHomeCardContextMenuItems({
+          railId: 'newEpisodes',
+          entry: ep,
+          index: 0,
+          isFavorite: false,
+          isWatched: false,
+          t: i18n.t,
+          onPlay: vi.fn(),
+          onOpenDetail: vi.fn(),
+          onMarkNewEpisodeWatched: vi.fn(),
+          onDismissNewEpisode: vi.fn(),
+        })
+      : [];
+    expect(menuItems.map((m) => m.id)).toEqual([
+      'play',
+      'details',
+      'markWatched',
+      'dismissNewEpisode',
+    ]);
+    expect(menuItems.find((m) => m.id === 'dismissNewEpisode')?.destructive).toBe(true);
+  });
+
+  it('maps seriesKey/season/episode onto Continue Watching entries, avoids double subtitle prefixing, and renders Play + Go to details for Next-Up (#502 P0-2/P0-4)', () => {
+    expect(formatContinueEpisodeSubtitle(2, 6, 'The Return')).toBe('S2 · E6 — The Return');
+    expect(formatContinueEpisodeSubtitle(2, 6, 'S2 · E6 — The Return')).toBe(
+      'S2 · E6 — The Return',
+    );
+    expect(formatContinueEpisodeSubtitle(1, 3, 'S1 E3 · Drydock')).toBe('S1 E3 · Drydock');
+    expect(formatContinueEpisodeSubtitle(2, 6, null)).toBe('S2 · E6');
+
+    const sets = buildHomeRailSets({
+      continueWatching: [
+        makeProgress({
+          itemKey: 'x:src-1:episode:206',
+          kind: 'episode',
+          title: 'Starlight Harbor',
+          subtitle: 'The Return',
+          seriesKey: 'x:src-1:series:10',
+          season: 2,
+          episode: 6,
+          positionMs: 0,
+          durationMs: 2_700_000,
+        }),
+      ],
+      liveItems: [],
+      liveCategoryName: null,
+      favorites: [],
+      movies: [],
+      series: [],
+      progressByKey: new Map(),
+    });
+
+    const nextUp = sets.continue[0];
+    expect(nextUp).toMatchObject({
+      itemKey: 'x:src-1:episode:206',
+      kind: 'episode',
+      seriesKey: 'x:src-1:series:10',
+      season: 2,
+      episode: 6,
+      positionMs: 0,
+      subtitle: 'S2 · E6 — The Return',
+    });
+
+    const i18n = createAppI18n('en');
+    const nextUpMenu = nextUp
+      ? buildHomeCardContextMenuItems({
+          railId: 'continue',
+          entry: nextUp,
+          index: 0,
+          isFavorite: false,
+          isWatched: false,
+          t: i18n.t,
+          onPlay: vi.fn(),
+          onOpenDetail: vi.fn(),
+          onRemoveFromContinue: vi.fn(),
+          onToggleWatched: vi.fn(),
+        })
+      : [];
+    expect(nextUpMenu.map((m) => m.id)).toEqual([
+      'resume',
+      'details',
+      'hideFromContinue',
+      'markWatched',
+    ]);
+    expect(nextUpMenu[0]?.label).toBe('Play');
+
+    const inProgressMenu = nextUp
+      ? buildHomeCardContextMenuItems({
+          railId: 'continue',
+          entry: { ...nextUp, positionMs: 120_000 },
+          index: 0,
+          isFavorite: false,
+          isWatched: false,
+          t: i18n.t,
+          onPlay: vi.fn(),
+          onOpenDetail: vi.fn(),
+        })
+      : [];
+    expect(inProgressMenu[0]?.label).toBe('Resume');
+    expect(inProgressMenu.map((m) => m.id)).toEqual(['resume', 'details']);
   });
 });

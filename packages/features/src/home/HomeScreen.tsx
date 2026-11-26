@@ -2,7 +2,6 @@ import type { BrowseKind, CatalogService, ItemRow, SourceRow } from '@elv/data';
 import { DEFAULT_HOME_LAYOUT, type HomeLayoutSectionPref, normalizeHomeLayout } from '@elv/domain';
 import {
   type ContextMenuAnchor,
-  CtaButton,
   TvFocusAnchor,
   useContextMenu,
   useI18n,
@@ -12,7 +11,6 @@ import {
 } from '@elv/ui-kit';
 import {
   type ComponentRef,
-  Fragment,
   type ReactElement,
   useCallback,
   useEffect,
@@ -25,7 +23,6 @@ import {
   type NativeSyntheticEvent,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
@@ -40,7 +37,13 @@ import { AmbientBackdrop } from '../shared/AmbientBackdrop';
 import { CollectionManagerOverlay } from '../shared/CollectionManagerOverlay';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
 import { HOME_HERO_AUTO_ROTATE_MS, useHomeHeroAutoRotate } from './HomeHeroBackdrop';
-import { buildHomeRailSpecs, HomeRail, type HomeRailId, type HomeRailSpec } from './HomeRail';
+import {
+  buildHomeRailSpecs,
+  HomeCollectionsSection,
+  HomeRail,
+  type HomeRailId,
+  type HomeRailSpec,
+} from './HomeRail';
 import { computeHomeLayout, HomeEmptyState, HomeSkeleton } from './HomeSkeleton';
 import { buildHomeCardContextMenuItems } from './home-context-menu';
 import {
@@ -73,6 +76,8 @@ export interface HomeScreenProps {
   readonly onScrollTopChange?: (scrolled: boolean) => void;
   readonly onFocusTopNav?: () => void;
   readonly isActiveScope?: boolean;
+  /** True while full/mini/multi-view playback is active so background network refreshes pause (`#502`). */
+  readonly isPlaybackActive?: boolean;
   /** User-configured Home section visibility and order from `PreferencesSnapshot.homeLayout`. */
   readonly homeLayout?: readonly HomeLayoutSectionPref[];
 }
@@ -80,7 +85,14 @@ export interface HomeScreenProps {
 export { HOME_HERO_AUTO_ROTATE_MS };
 
 const SCROLL_FROST_THRESHOLD = 24;
-const RAIL_ORDER: readonly HomeRailKind[] = ['continue', 'live', 'mylist', 'movies', 'series'];
+const RAIL_ORDER: readonly HomeRailKind[] = [
+  'continue',
+  'newEpisodes',
+  'live',
+  'mylist',
+  'movies',
+  'series',
+];
 
 type TvKeyHandler = Parameters<typeof useKeyInterpreter>[0];
 
@@ -111,6 +123,7 @@ export function HomeScreen({
   onScrollTopChange,
   onFocusTopNav,
   isActiveScope = true,
+  isPlaybackActive = false,
   homeLayout,
 }: HomeScreenProps): ReactElement {
   const theme = useTheme();
@@ -123,7 +136,14 @@ export function HomeScreen({
 
   const uiCache = useCatalogUiCache();
   const routeActive = useRouteActive();
-  const data = useHomeData({ catalog, sources, refreshToken, userStateVersion });
+  const data = useHomeData({
+    catalog,
+    sources,
+    refreshToken,
+    userStateVersion,
+    isPlaybackActive,
+    routeActive,
+  });
   const [heroIndex, setHeroIndexState] = useState(() => uiCache?.getHome()?.heroIndex ?? 0);
   const [heroHovered, setHeroHovered] = useState(false);
   const [heroKeyboardFocused, setHeroKeyboardFocused] = useState(false);
@@ -154,10 +174,13 @@ export function HomeScreen({
     if (heroIndex >= heroSlides.length && heroSlides.length > 0) setHeroIndex(0);
   }, [heroIndex, heroSlides.length, setHeroIndex]);
 
+  const newEpisodeBadgeLabel = i18n.t('home.newEpisodeBadge');
   const railSets = useMemo(
     () =>
       buildHomeRailSets({
         continueWatching: data.continueWatching,
+        newEpisodes: data.newEpisodes ?? [],
+        newEpisodeBadgeLabel,
         recentChannels: data.recentChannels ?? [],
         liveItems: data.liveItems,
         liveCategoryName: data.liveCategory?.name ?? null,
@@ -167,7 +190,7 @@ export function HomeScreen({
         series: data.series,
         progressByKey: data.progressByKey,
       }),
-    [data],
+    [data, newEpisodeBadgeLabel],
   );
 
   const effectiveHomeLayout = useMemo(
@@ -220,6 +243,7 @@ export function HomeScreen({
         sectionOrder: visibleSectionOrder,
         railCounts: {
           continue: railSets.continue.length,
+          newEpisodes: railSets.newEpisodes.length,
           live: railSets.live.length,
           mylist: railSets.mylist.length,
           movies: railSets.movies.length,
@@ -256,6 +280,11 @@ export function HomeScreen({
           kind: item.kind,
           logo: item.posterUri ?? item.backdropUri,
           subtitle: item.subtitle,
+          ...('seriesKey' in item && item.seriesKey !== undefined
+            ? { seriesKey: item.seriesKey }
+            : {}),
+          ...('season' in item && item.season !== undefined ? { season: item.season } : {}),
+          ...('episode' in item && item.episode !== undefined ? { episode: item.episode } : {}),
           positionMs: item.positionMs,
           watched: item.watched,
         }),
@@ -290,10 +319,24 @@ export function HomeScreen({
     [activateEntry, onOpenDetail],
   );
 
-  const { toggleMyList, toggleWatched, removeFromContinueWatching } = data;
+  const {
+    toggleMyList,
+    toggleWatched,
+    removeFromContinueWatching,
+    dismissNewEpisode,
+    markNewEpisodeWatched,
+  } = data;
   const handleRemoveFromContinue = useCallback(
     (entry: HomeRailEntry) => void removeFromContinueWatching(entry.itemKey),
     [removeFromContinueWatching],
+  );
+  const handleDismissNewEpisode = useCallback(
+    (entry: HomeRailEntry) => void dismissNewEpisode(entry.itemKey),
+    [dismissNewEpisode],
+  );
+  const handleMarkNewEpisodeWatched = useCallback(
+    (entry: HomeRailEntry) => void markNewEpisodeWatched(entry),
+    [markNewEpisodeWatched],
   );
   const handleOpenEntryDetail = useCallback(
     (entry: HomeRailEntry) => {
@@ -518,6 +561,8 @@ export function HomeScreen({
         onPlay: activateEntry,
         ...(onOpenDetail !== undefined ? { onOpenDetail: handleOpenEntryDetail } : {}),
         onRemoveFromContinue: handleRemoveFromContinue,
+        onDismissNewEpisode: handleDismissNewEpisode,
+        onMarkNewEpisodeWatched: handleMarkNewEpisodeWatched,
         onToggleFavorite: handleQuickToggleFavorite,
         onToggleWatched: handleQuickToggleWatched,
         ...(onOpenMultiView !== undefined ? { onOpenMultiView: handleOpenLiveMultiView } : {}),
@@ -555,6 +600,8 @@ export function HomeScreen({
       data.watchedOverrides,
       downloads,
       handleOpenEntryDetail,
+      handleDismissNewEpisode,
+      handleMarkNewEpisodeWatched,
       handleOpenLiveMultiView,
       handleOpenLivePopout,
       handleQuickToggleFavorite,
@@ -651,69 +698,29 @@ export function HomeScreen({
           {visibleSections.map((section) => {
             if (section.id === 'collections') {
               return (
-                <Fragment key="collections">
-                  {showCollectionsSection ? (
-                    <View
-                      testID="home-collections-header"
-                      onLayout={(e) => {
-                        railYRef.current.set('collections-manage', e.nativeEvent.layout.y);
-                      }}
-                      style={[styles.collectionsHeader, { paddingHorizontal: padX }]}
-                    >
-                      <View style={styles.collectionsTitleWrap}>
-                        <Text style={[theme.typography.h2, { color: theme.colors.textPrimary }]}>
-                          {i18n.t('collections.title')}
-                        </Text>
-                        {collectionRails.length === 0 ? (
-                          <Text
-                            style={[
-                              theme.typography.caption,
-                              { color: theme.colors.textSecondary },
-                            ]}
-                          >
-                            {i18n.t('collections.subtitle')}
-                          </Text>
-                        ) : null}
-                      </View>
-                      <CtaButton
-                        testID="home-collections-manage-btn"
-                        variant="secondary"
-                        label={i18n.t('collections.manageTitle')}
-                        focusable={!isTv}
-                        focused={isTv && tvNav.focusedRowId === 'collections-manage'}
-                        onPress={handleOpenCollectionManager}
-                      />
-                    </View>
-                  ) : null}
-                  {collectionRails.map((colRail) => (
-                    <HomeRail
-                      key={colRail.id}
-                      id={colRail.id}
-                      testID={`home-rail-collection-${colRail.collectionId}`}
-                      itemTestIdPrefix={`home-collection-${colRail.collectionId}-item`}
-                      title={colRail.title}
-                      variant="poster"
-                      items={colRail.items}
-                      cardWidth={layout.posterCardWidth}
-                      gap={railGap}
-                      padX={padX}
-                      isTv={isTv}
-                      isTouch={isTouch}
-                      focusedIndex={tvNav.focusedRowId === colRail.id ? tvNav.focusedCol : null}
-                      onPressItem={activatePosterEntry}
-                      onContextMenuItem={(entry, index, anchor) =>
-                        openRailContextMenu(colRail.id, entry, index, anchor)
-                      }
-                      favoriteKeys={data.favoriteKeys}
-                      watchedOverrides={data.watchedOverrides}
-                      unplayedBySeriesKey={data.unplayedBySeriesKey}
-                      onQuickPlay={activateEntry}
-                      onQuickToggleFavorite={handleQuickToggleFavorite}
-                      onQuickToggleWatched={handleQuickToggleWatched}
-                      onLayoutY={recordRailY}
-                    />
-                  ))}
-                </Fragment>
+                <HomeCollectionsSection
+                  key="collections"
+                  showHeader={showCollectionsSection}
+                  collectionRails={collectionRails}
+                  cardWidth={layout.posterCardWidth}
+                  gap={railGap}
+                  padX={padX}
+                  isTv={isTv}
+                  isTouch={isTouch}
+                  focusedRowId={tvNav.focusedRowId}
+                  focusedCol={tvNav.focusedCol}
+                  favoriteKeys={data.favoriteKeys}
+                  watchedOverrides={data.watchedOverrides}
+                  unplayedBySeriesKey={data.unplayedBySeriesKey}
+                  onOpenManager={handleOpenCollectionManager}
+                  onHeaderLayoutY={(y) => railYRef.current.set('collections-manage', y)}
+                  onPressItem={activatePosterEntry}
+                  onContextMenuItem={openRailContextMenu}
+                  onQuickPlay={activateEntry}
+                  onQuickToggleFavorite={handleQuickToggleFavorite}
+                  onQuickToggleWatched={handleQuickToggleWatched}
+                  onLayoutY={recordRailY}
+                />
               );
             }
             const spec = railSpecsById.get(section.id);
@@ -770,13 +777,4 @@ export function HomeScreen({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  collectionsHeader: {
-    marginTop: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    flexWrap: 'wrap',
-  },
-  collectionsTitleWrap: { flexShrink: 1, gap: 2 },
 });

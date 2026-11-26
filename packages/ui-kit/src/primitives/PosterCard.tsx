@@ -44,12 +44,8 @@ export interface PosterCardProps {
   aspectRatio?: number;
   progress?: number;
   badge?: string;
-  /** Remaining unwatched episode count for series cards (`#409`). */
-  readonly unplayedCount?: number;
-  /** Shows a restrained watched checkmark pill when `true` and `unplayedCount` is not positive (`#409`). */
+  /** Shows a restrained watched checkmark pill when `true` (`#409`, `#502`). */
   readonly allWatched?: boolean;
-  /** Localized accessibility label for the unplayed count or watched checkmark badge (`#409`). */
-  readonly unplayedLabel?: string;
   /** Pointer-only hover quick-actions (`#409`). Never rendered on touch or TV. */
   readonly quickActions?: PosterCardQuickActions;
   onPress?: () => void;
@@ -131,9 +127,7 @@ function PosterCardInner({
   aspectRatio = 2 / 3,
   progress,
   badge,
-  unplayedCount,
   allWatched,
-  unplayedLabel,
   quickActions,
   onPress,
   onContextMenu,
@@ -192,9 +186,7 @@ function PosterCardInner({
       : {};
 
   const trimmedBadge = badge?.trim() ?? '';
-  const showUnplayedCount =
-    unplayedCount !== undefined && Number.isFinite(unplayedCount) && unplayedCount > 0;
-  const showAllWatched = !showUnplayedCount && allWatched === true;
+  const showAllWatched = allWatched === true;
   const hasQuickActions =
     quickActions !== undefined &&
     (quickActions.onPlay !== undefined ||
@@ -294,18 +286,7 @@ function PosterCardInner({
                       />
                     </View>
                   ) : null}
-                  {showUnplayedCount ? (
-                    <View
-                      pointerEvents="none"
-                      style={[styles.badgeSlot, { top: theme.spacing.xs, right: theme.spacing.xs }]}
-                    >
-                      <MicroPill
-                        label={String(Math.floor(unplayedCount))}
-                        accessibilityLabel={unplayedLabel}
-                        testID={testID ? `${testID}-unplayed` : undefined}
-                      />
-                    </View>
-                  ) : showAllWatched ? (
+                  {showAllWatched ? (
                     <View
                       pointerEvents="none"
                       style={[styles.badgeSlot, { top: theme.spacing.xs, right: theme.spacing.xs }]}
@@ -313,7 +294,6 @@ function PosterCardInner({
                       <MicroPill
                         icon="check"
                         tone="success"
-                        accessibilityLabel={unplayedLabel}
                         testID={testID ? `${testID}-watched-badge` : undefined}
                       />
                     </View>

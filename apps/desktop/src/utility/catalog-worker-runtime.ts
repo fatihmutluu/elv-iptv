@@ -483,6 +483,9 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'reorderFavorites':
       case 'listFavorites':
       case 'listFavoriteKeys':
+      case 'listMyListNewEpisodes':
+      case 'dismissMyListNewEpisode':
+      case 'refreshMyListNewEpisodes':
       case 'getTrackPreference':
       case 'saveTrackPreference':
       case 'clearTrackPreference':

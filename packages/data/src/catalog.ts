@@ -24,6 +24,10 @@ import {
   type CatalogFailoverOpsMethods,
   createCatalogFailoverOpsMethods,
 } from './catalog-failover-ops';
+import {
+  type CatalogNewEpisodesOpsMethods,
+  createCatalogNewEpisodesOpsMethods,
+} from './catalog-new-episodes-ops';
 import { createCatalogProfileMethods } from './catalog-profiles';
 import {
   mapNewSourceRow,
@@ -54,6 +58,7 @@ import { createSerializedImportQueue } from './import-queue';
 import type { ImportDeps, ImportOptions, ImportSummary, NativeGuideStager } from './import-types';
 import { importCatalog, loadSeriesEpisodes } from './import-xtream';
 import { type ManifestStore, saveManifest } from './manifest';
+import { reconcileMyListNewEpisodesForSource } from './my-list-new-episodes';
 import { type NextEpisodeRow, queryNextEpisode } from './next-episode';
 import type {
   ParentalLockFilter,
@@ -202,7 +207,8 @@ export interface CatalogService
   extends Partial<CatalogEpgOpsMethods>,
     Partial<CatalogFailoverOpsMethods>,
     Partial<CatalogCollectionsOpsMethods>,
-    Partial<CatalogDownloadsOpsMethods> {
+    Partial<CatalogDownloadsOpsMethods>,
+    Partial<CatalogNewEpisodesOpsMethods> {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
@@ -447,6 +453,13 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
   const failoverOpsMethods = createCatalogFailoverOpsMethods({ db, clock, playtime });
   const collectionsOpsMethods = createCatalogCollectionsOpsMethods({ db, clock, playtime });
   const downloadsOpsMethods = createCatalogDownloadsOpsMethods({ db, clock });
+  const newEpisodesOpsMethods = createCatalogNewEpisodesOpsMethods({
+    db,
+    clock,
+    importDeps,
+    queue,
+    playtime,
+  });
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
@@ -512,14 +525,18 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         id,
         'catalog',
         opts.signal,
-        (runSignal) => {
+        async (runSignal) => {
           const { maxBodyBytes, batchSize, ...rest } = opts;
           const runDeps = maxBodyBytes === undefined ? importDeps : { ...importDeps, maxBodyBytes };
-          return importCatalog(id, runDeps, {
+          const imported = await importCatalog(id, runDeps, {
             ...rest,
             batchSize: batchSize ?? DEVICE_BATCH_SIZE,
             signal: runSignal,
           });
+          if (imported.ok) {
+            await reconcileMyListNewEpisodesForSource(db, id, { clock }).catch(() => undefined);
+          }
+          return imported;
         },
         {
           onStart: () => playtime.evict(id),
@@ -655,6 +672,10 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
             { taskKey: series.key },
           );
           if (!loaded.ok) return loaded;
+          await reconcileMyListNewEpisodesForSource(db, series.sourceId, {
+            seriesKey: series.key,
+            clock,
+          }).catch(() => undefined);
           seasons = await querySeasons(db, series, opts);
         }
       }
@@ -711,7 +732,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     listSeriesUnplayedCounts: (seriesKeys, profileId) =>
       listSeriesUnplayedCounts(db, seriesKeys, profileId),
     async clearProgress(itemKey, profileId) {
-      const cleared = await clearWatchProgress(db, itemKey, profileId);
+      const cleared = await clearWatchProgress(db, itemKey, profileId, clock);
       if (cleared.ok) await syncUserData();
       return cleared;
     },
@@ -755,6 +776,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...failoverOpsMethods,
     ...collectionsOpsMethods,
     ...downloadsOpsMethods,
+    ...newEpisodesOpsMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

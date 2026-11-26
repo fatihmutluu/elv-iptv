@@ -297,6 +297,9 @@ export async function deleteProfile(
     );
     await tx.run('DELETE FROM vod_collections WHERE profile_id = ?', [id]);
     await tx.run('DELETE FROM programme_reminders WHERE profile_id = ?', [id]);
+    await tx.run('DELETE FROM my_list_series_baselines WHERE profile_id = ?', [id]);
+    await tx.run('DELETE FROM my_list_new_episodes WHERE profile_id = ?', [id]);
+    await tx.run('DELETE FROM continue_watching_dismissals WHERE profile_id = ?', [id]);
 
     if (target.is_default !== 0) {
       const nextDefault = allProfiles.find((p) => p.id !== id);

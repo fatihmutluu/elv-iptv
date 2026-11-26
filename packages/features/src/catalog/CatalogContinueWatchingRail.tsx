@@ -14,6 +14,7 @@ import { buildContinueWatchingContextMenuItems } from './catalog-context-menu';
 import {
   computeProgressRatio,
   detailTargetFromProgress,
+  formatCatalogEpisodeSubtitle,
   formatCatalogRemainingMinutes,
 } from './catalog-model';
 
@@ -63,6 +64,11 @@ const ContinueCardItem = memo(function ContinueCardItemInner({
   const i18n = useI18n();
   const { openContextMenu } = useContextMenu();
 
+  const baseSubtitle =
+    row.kind === 'episode'
+      ? formatCatalogEpisodeSubtitle(row.season, row.episode, row.subtitle)
+      : row.subtitle;
+
   const handlePress = useCallback(() => {
     onOpenDetail(detailTargetFromProgress(row, kind));
   }, [kind, onOpenDetail, row]);
@@ -71,7 +77,7 @@ const ContinueCardItem = memo(function ContinueCardItemInner({
     (anchor?: ContextMenuAnchor) => {
       openContextMenu({
         title: row.title,
-        ...(row.subtitle ? { subtitle: row.subtitle } : {}),
+        ...(baseSubtitle ? { subtitle: baseSubtitle } : {}),
         ...(anchor !== undefined ? { anchor } : {}),
         items: buildContinueWatchingContextMenuItems({
           kind,
@@ -85,6 +91,7 @@ const ContinueCardItem = memo(function ContinueCardItemInner({
       });
     },
     [
+      baseSubtitle,
       i18n,
       kind,
       onHideContinue,
@@ -97,12 +104,13 @@ const ContinueCardItem = memo(function ContinueCardItemInner({
   );
 
   const ratio = computeProgressRatio(row);
-  const remMin = formatCatalogRemainingMinutes(row.positionMs, row.durationMs);
+  const remMin =
+    row.positionMs > 0 ? formatCatalogRemainingMinutes(row.positionMs, row.durationMs) : null;
   const remLabel = remMin !== null ? formatRemMin(remMin) : undefined;
   const subtitle =
-    row.subtitle && remLabel
-      ? `${row.subtitle} · ${remLabel}`
-      : (remLabel ?? row.subtitle ?? undefined);
+    baseSubtitle && remLabel
+      ? `${baseSubtitle} · ${remLabel}`
+      : (remLabel ?? baseSubtitle ?? undefined);
 
   return (
     <WideCard

@@ -241,6 +241,22 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     listFavorites: async (limit, profileId, opts) =>
       (await open()).listFavorites?.(limit, profileId, opts) ?? [],
     listFavoriteKeys: async (profileId) => (await open()).listFavoriteKeys?.(profileId) ?? [],
+    listMyListNewEpisodes: async (limit, profileId, opts) =>
+      (await open()).listMyListNewEpisodes?.(limit, profileId, opts) ?? [],
+    dismissMyListNewEpisode: (episodeKey, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.dismissMyListNewEpisode
+          ? cat.dismissMyListNewEpisode(episodeKey, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    refreshMyListNewEpisodes: (profileId, opts) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.refreshMyListNewEpisodes
+          ? cat.refreshMyListNewEpisodes(profileId, opts)
+          : err(elvError('storage', 'unsupported'));
+      }),
     getTrackPreference: async (scopeKey, profileId) =>
       (await open()).getTrackPreference?.(scopeKey, profileId) ?? null,
     saveTrackPreference: async (input) => {

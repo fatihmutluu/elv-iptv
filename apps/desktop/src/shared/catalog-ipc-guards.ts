@@ -11,6 +11,7 @@ import {
   type LocalM3uSourceInput,
   type ParentalLockFilter,
   type ParentalQueryOptions,
+  type RefreshMyListNewEpisodesOptions,
   type SaveProgressInput,
   type SaveTrackPreferenceInput,
   type SearchOptions,
@@ -120,6 +121,8 @@ export const isOptionalSourceId = (x: unknown): boolean =>
   x === undefined || isCleanKey(x, MAX_ID_CHARS);
 export const isOptionalUserLimit = (x: unknown): boolean =>
   x === undefined || (isSafeInt(x) && x >= 0 && x <= MAX_USER_LIST_LIMIT);
+export const isOptionalNewEpisodesLimit = (x: unknown): boolean =>
+  x === undefined || (isSafeInt(x) && x >= 0 && x <= 100);
 const isOptionalNullableBoundedString = (x: unknown, max: number): boolean =>
   x === undefined || x === null || isBoundedString(x, 0, max);
 const isOptionalNullableCleanString = (x: unknown, max: number): boolean =>
@@ -757,6 +760,22 @@ export function isSetParentalLockInput(x: unknown): x is SetParentalLockInput {
 export function isSourceIdList(x: unknown): x is readonly string[] {
   return (
     Array.isArray(x) && x.length <= MAX_SOURCE_IDS && x.every((id) => isCleanKey(id, MAX_ID_CHARS))
+  );
+}
+
+const REFRESH_NEW_EPISODES_OPT_KEYS = new Set(['cooldownMs', 'maxSeries', 'force']);
+const MAX_NEW_EPISODES_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function isRefreshMyListNewEpisodesOptions(
+  x: unknown,
+): x is RefreshMyListNewEpisodesOptions {
+  if (!isRecord(x) || !hasOnlyKeys(x, REFRESH_NEW_EPISODES_OPT_KEYS)) return false;
+  const cd = x['cooldownMs'];
+  const max = x['maxSeries'];
+  return (
+    (cd === undefined || (isSafeInt(cd) && cd >= 0 && cd <= MAX_NEW_EPISODES_COOLDOWN_MS)) &&
+    (max === undefined || (isSafeInt(max) && max >= 0 && max <= 50)) &&
+    (x['force'] === undefined || typeof x['force'] === 'boolean')
   );
 }
 

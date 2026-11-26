@@ -3607,3 +3607,15 @@ msgstr "Uygun film bulunamadı."
 
 msgid "multiview.picker.emptySeries"
 msgstr "Uygun dizi bölümü bulunamadı."
+
+msgid "home.newEpisodes"
+msgstr "Yeni bölümler"
+
+msgid "home.newEpisodeBadge"
+msgstr "YENİ"
+
+msgid "settings.homeSectionNewEpisodes"
+msgstr "Yeni bölümler"
+
+msgid "context.dismissNewEpisode"
+msgstr "Kaldır"

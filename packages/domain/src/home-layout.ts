@@ -1,6 +1,7 @@
-/** Canonical Home screen section identifiers in default order (Wave P4). */
+/** Canonical Home screen section identifiers in default order (Wave P4, `#502`). */
 export const HOME_LAYOUT_SECTION_IDS = [
   'continue',
+  'newEpisodes',
   'live',
   'mylist',
   'movies',
@@ -17,7 +18,7 @@ export interface HomeLayoutSectionPref {
   readonly visible: boolean;
 }
 
-/** Default Home screen layout with all 6 canonical sections visible in canonical order. */
+/** Default Home screen layout with all 7 canonical sections visible in canonical order. */
 export const DEFAULT_HOME_LAYOUT: readonly HomeLayoutSectionPref[] = Object.freeze(
   HOME_LAYOUT_SECTION_IDS.map((id) => Object.freeze({ id, visible: true })),
 );

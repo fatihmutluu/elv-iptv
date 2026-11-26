@@ -217,13 +217,15 @@ export function createTvMobileCatalogSnapshotBridge(
         });
       }
 
-      const watchProgress: SyncWatchProgress[] = progressRows.map((prog) => ({
-        key: prog.itemKey,
-        positionMs: prog.positionMs,
-        durationMs: prog.durationMs,
-        completed: prog.watched,
-        updatedAt: prog.updatedAt,
-      }));
+      const watchProgress: SyncWatchProgress[] = progressRows
+        .filter((prog) => prog.positionMs > 0 || prog.watched)
+        .map((prog) => ({
+          key: prog.itemKey,
+          positionMs: prog.positionMs,
+          durationMs: prog.durationMs,
+          completed: prog.watched,
+          updatedAt: prog.updatedAt,
+        }));
 
       return {
         schemaVersion: VAULT_SCHEMA_VERSION,

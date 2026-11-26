@@ -2,6 +2,7 @@ import type { MessageId } from './en';
 import { trCatchupEpgMessages } from './tr-catchup-epg';
 import { trErgonomicsMessages } from './tr-ergonomics';
 import { trFailoverNetworkMessages } from './tr-failover-network';
+import { trIssue502Messages } from './tr-issue-502';
 import { trProfilesMessages } from './tr-profiles';
 import { trSubtitlesSuiteMessages } from './tr-subtitles-suite';
 import { trWaveF5bMessages } from './tr-wave-f5b';
@@ -730,4 +731,5 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trWaveP2Messages,
   ...trWaveP4Messages,
   ...trWaveP5Messages,
+  ...trIssue502Messages,
 };

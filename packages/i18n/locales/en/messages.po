@@ -3607,3 +3607,15 @@ msgstr "No movies available."
 
 msgid "multiview.picker.emptySeries"
 msgstr "No series episodes available."
+
+msgid "home.newEpisodes"
+msgstr "New episodes"
+
+msgid "home.newEpisodeBadge"
+msgstr "NEW"
+
+msgid "settings.homeSectionNewEpisodes"
+msgstr "New episodes"
+
+msgid "context.dismissNewEpisode"
+msgstr "Dismiss"
