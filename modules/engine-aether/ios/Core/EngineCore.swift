@@ -6,6 +6,7 @@ public final class EngineCore {
   let backend: PlayerBackend
   weak var sink: EngineSink?
   let uptimeMs: () -> Double
+  private let allowedDownloadsRoot: URL?
 
   var token = 0
   var serial = 0
@@ -56,10 +57,16 @@ public final class EngineCore {
   public private(set) var allowDetachedSurface = false
   public private(set) var isSurfaceDetached = false
 
-  public init(backend: PlayerBackend, sink: EngineSink, uptimeMs: @escaping () -> Double) {
+  public init(
+    backend: PlayerBackend,
+    sink: EngineSink,
+    uptimeMs: @escaping () -> Double,
+    allowedDownloadsRoot: URL? = nil
+  ) {
     self.backend = backend
     self.sink = sink
     self.uptimeMs = uptimeMs
+    self.allowedDownloadsRoot = allowedDownloadsRoot
   }
 
   public func load(_ request: LoadRequest, attempt: Int) {
@@ -80,7 +87,7 @@ public final class EngineCore {
     currentPlan = nil
     setShutter(covered: true)
 
-    guard let plan = planMedia(request) else {
+    guard let plan = planMedia(request, allowedDownloadsRoot: allowedDownloadsRoot) else {
       active = false
       errorReported = true
       setScreenOn(false)
@@ -112,7 +119,7 @@ public final class EngineCore {
       request.startMs = resumeMs
     }
 
-    guard let plan = planMedia(request) else { return }
+    guard let plan = planMedia(request, allowedDownloadsRoot: allowedDownloadsRoot) else { return }
     serial += 1
     backend.stopMedia()
     resetSerialState(startMs: resumeMs)

@@ -248,7 +248,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   });
   const handleEnterPip = pip.canShowPipAction ? () => pip.enterPip() : undefined;
   const handleEnterMultiView =
-    multiViewSupported && activeTarget.kind === 'live' && props.onEnterMultiView !== undefined
+    multiViewSupported && props.onEnterMultiView !== undefined
       ? () => props.onEnterMultiView?.(activeTarget)
       : undefined;
   const mutedStateRef = useRef(props.adoptedSession?.muted === true);

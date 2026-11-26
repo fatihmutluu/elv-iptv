@@ -4,13 +4,13 @@ import { EXPECTED_TABLE_COLUMNS, MIGRATIONS } from './schema';
 import { testDb } from './test-db';
 
 describe('schema v20 (favorites.sort_order)', () => {
-  it('sets SCHEMA_VERSION to 20 and includes sort_order on favorites', async () => {
+  it('sets SCHEMA_VERSION >= 20 and includes sort_order on favorites', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(20);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(20);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 20 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
 
-    expect(EXPECTED_TABLE_COLUMNS['favorites']?.map((c) => c.name)).toContain('sort_order');
+    expect(EXPECTED_TABLE_COLUMNS.favorites?.map((c) => c.name)).toContain('sort_order');
 
     const cols = (await db.all<{ name: string }>('PRAGMA table_info(favorites)')).map(
       (c) => c.name,
@@ -28,16 +28,19 @@ describe('schema v20 (favorites.sort_order)', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 20 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
     expect(await db.all('SELECT item_key, title, sort_order FROM favorites')).toEqual([
       { item_key: 'x:s1:live:1', title: 'Channel One', sort_order: 0 },
     ]);
   });
 
-  it('self-heals a drifted v20 database missing favorites.sort_order', async () => {
+  it('self-heals a drifted database missing favorites.sort_order', async () => {
     const { db } = testDb();
-    for (let i = 0; i < 19; i += 1) await db.exec(MIGRATIONS[i] ?? '');
-    await db.exec('PRAGMA user_version = 20');
+    for (let i = 0; i < MIGRATIONS.length; i += 1) {
+      if (i === 19) continue;
+      await db.exec(MIGRATIONS[i] ?? '');
+    }
+    await db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 
     const colsBefore = (await db.all<{ name: string }>('PRAGMA table_info(favorites)')).map(
       (c) => c.name,

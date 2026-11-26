@@ -44,6 +44,7 @@ class Media3Engine : SharedObject {
   private val onDisposed: (Media3Engine) -> Unit
   private var lowRamDevice = false
   private var appCacheDir: File? = null
+  private var appDownloadsDir: File? = null
   private lateinit var appContextRef: Context
   private lateinit var externalSubLoader: ExternalSubtitleLoader
   private var activeTimeShiftBuffer: TimeShiftRingBuffer? = null
@@ -186,7 +187,7 @@ class Media3Engine : SharedObject {
       activeEpoch = action.epoch
       reporter.end()
       tearDownTimeShiftCache()
-      if (!isAllowedPlaybackUrl(next.url)) {
+      if (!isAllowedPlaybackOrManagedDownloadUrl(next.url, next.managedDownloadsDir ?: appDownloadsDir)) {
         rejectDisallowedUrl(attempt, rebuildFirst = action.rebuildFirst)
         return@post
       }
@@ -221,7 +222,7 @@ class Media3Engine : SharedObject {
       activeEpoch = action.epoch
       adopt(attempt)
       val current = request ?: action.request ?: return@post
-      if (!isAllowedPlaybackUrl(current.url)) {
+      if (!isAllowedPlaybackOrManagedDownloadUrl(current.url, current.managedDownloadsDir ?: appDownloadsDir)) {
         rejectDisallowedUrl(attempt, rebuildFirst = action.rebuildFirst)
         return@post
       }
@@ -586,6 +587,7 @@ class Media3Engine : SharedObject {
     val profile = readDeviceMemoryProfile(context)
     lowRamDevice = profile.lowRam
     val cacheDir: File? = context.cacheDir; appCacheDir = cacheDir
+    appDownloadsDir = context.filesDir?.let { File(it, "downloads") }
     vodCache = VodCacheController(appContextRef, cacheDir, profile)
     cacheDir?.let { TimeShiftRingBuffer.purgeOrphansOnStartup(it) }; vodCache.purgeOrphansOnStartup()
     playerFactory = PlayerFactory(

@@ -332,6 +332,8 @@ export function createPlaytimeResolverCache(deps: {
   http: HttpClient;
   clock?: () => number;
   primaryCooldownMs?: number;
+  /** Optional hook resolving a completed managed local download URI for offline VOD playback without touching credentials. */
+  resolveLocalDownload?: (itemKey: string, profileId?: string) => Promise<string | null>;
 }): PlaytimeResolverCache {
   const resolvers = new Map<string, Promise<StreamResolver>>();
   const drmSpecsCache = new Map<string, Promise<DrmSpecMap>>();
@@ -397,7 +399,23 @@ export function createPlaytimeResolverCache(deps: {
     itemKey: string,
     includeGroupAlternates: boolean,
     isAlternateRestricted?: ResolveStreamInternalOptions['isAlternateRestricted'],
+    profileId?: string,
   ): Promise<Result<StreamRequest>> {
+    if (includeGroupAlternates && deps.resolveLocalDownload !== undefined) {
+      const localUri = await deps.resolveLocalDownload(itemKey, profileId);
+      if (typeof localUri === 'string' && !hasControlChar(localUri)) {
+        const trimmed = localUri.trim();
+        if (trimmed.length > 0) {
+          return ok({
+            url: trimmed,
+            headers: {},
+            channelKey: itemKey,
+            isLocalOffline: true,
+          });
+        }
+      }
+    }
+
     const play = await queryPlayable(deps.db, itemKey);
     if (play === undefined) return notFound();
     const source = await getSource(deps.db, play.sourceId);
@@ -597,7 +615,7 @@ export function createPlaytimeResolverCache(deps: {
     },
 
     resolveStream: (itemKey, opts) =>
-      resolveSingleStream(itemKey, true, opts?.isAlternateRestricted),
+      resolveSingleStream(itemKey, true, opts?.isAlternateRestricted, opts?.profileId),
 
     resolveCatchupStream: (itemKey, programme, nowMs) =>
       resolveCatchupStreamInternal(itemKey, programme, nowMs, {

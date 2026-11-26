@@ -1,5 +1,5 @@
 import type { CatalogService, SourceRow } from '@elv/data';
-import type { DeinterlaceMode } from '@elv/domain';
+import { type DeinterlaceMode, ok } from '@elv/domain';
 import {
   type ConnectionTracker,
   createMultiViewController,
@@ -316,10 +316,22 @@ export function useMultiViewSession({
   );
 
   const mountTileEngine = useCallback(
-    (tile: MultiViewTile, totalTileCount: number): void => {
+    (tile: MultiViewTile, totalTileCount: number, entry?: PlayableEntry): void => {
       const token = ++openSeqRef.current;
       openingTokensRef.current.set(tile.tileId, token);
+      if (entry !== undefined) {
+        tileTargetsRef.current.set(tile.tileId, entry);
+      }
       const isPrimary = !tile.muted;
+      const storedEntry = entry ?? tileTargetsRef.current.get(tile.tileId);
+      const localOfflineUri =
+        tile.isLocalOffline === true &&
+        typeof storedEntry?.localFileUri === 'string' &&
+        storedEntry.localFileUri.length > 0
+          ? storedEntry.localFileUri
+          : null;
+      const tuneKind: 'live' | 'vod' =
+        tile.kind === 'live' || tile.kind === undefined ? 'live' : 'vod';
 
       const attach = (opened: OpenVideoEngine | null): void => {
         if (!mountedRef.current || openingTokensRef.current.get(tile.tileId) !== token) {
@@ -350,9 +362,18 @@ export function useMultiViewSession({
 
         void service.tune({
           item: tile.itemKey,
-          kind: 'live',
+          kind: tuneKind,
           accountKey: tile.accountKey,
-          resolve: () => catalogRef.current.resolveStream(tile.itemKey),
+          resolve:
+            localOfflineUri !== null
+              ? async () =>
+                  ok({
+                    url: localOfflineUri,
+                    headers: {},
+                    sourceId: tile.sourceId,
+                    channelKey: tile.itemKey,
+                  })
+              : () => catalogRef.current.resolveStream(tile.itemKey),
         });
       };
 
@@ -398,7 +419,7 @@ export function useMultiViewSession({
             onConsumeAdoptedRef.current?.(adopted);
             attachAdoptedTileEngine(res.tile, adopted);
           } else {
-            mountTileEngine(res.tile, controller.getState().tiles.length);
+            mountTileEngine(res.tile, controller.getState().tiles.length, seedEntry);
           }
         } else {
           if (adopted !== undefined) {
@@ -452,7 +473,7 @@ export function useMultiViewSession({
       setBanner((prev) =>
         prev?.kind === 'thermal-serious' || prev?.kind === 'thermal-critical' ? prev : null,
       );
-      mountTileEngine(res.tile, controller.getState().tiles.length);
+      mountTileEngine(res.tile, controller.getState().tiles.length, entry);
       return res;
     },
     [controller, mountTileEngine],
@@ -473,7 +494,7 @@ export function useMultiViewSession({
       setBanner((prev) =>
         prev?.kind === 'thermal-serious' || prev?.kind === 'thermal-critical' ? prev : null,
       );
-      mountTileEngine(res.tile, controller.getState().tiles.length);
+      mountTileEngine(res.tile, controller.getState().tiles.length, entry);
       syncEngineAudioStates(controller.getState().activeAudioTileId);
       return res;
     },
@@ -511,13 +532,18 @@ export function useMultiViewSession({
       return { resumeTarget: null, adoptedSession: null };
     }
     const preservedTarget = tileTargetsRef.current.get(activeTile.tileId);
+    const fallbackKind: 'live' | 'vod' =
+      activeTile.kind === 'live' || activeTile.kind === undefined ? 'live' : 'vod';
+    const fallbackItemKind =
+      activeTile.kind === 'episode' ? 'episode' : activeTile.kind === 'movie' ? 'movie' : 'live';
     const resumeTarget: PlayTarget = preservedTarget ?? {
       itemKey: activeTile.itemKey,
       sourceId: activeTile.sourceId,
       accountKey: activeTile.accountKey,
       title: activeTile.title,
-      kind: 'live',
-      itemKind: 'live',
+      kind: fallbackKind,
+      itemKind: fallbackItemKind,
+      ...(activeTile.isLocalOffline === true ? { isLocalOffline: true } : {}),
       ...(activeTile.logo !== undefined ? { logo: activeTile.logo } : {}),
     };
     const mounted = enginesRef.current.get(activeTile.tileId);

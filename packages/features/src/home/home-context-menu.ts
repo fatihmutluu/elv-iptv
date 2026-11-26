@@ -10,6 +10,7 @@ export interface BuildHomeCardContextMenuInput {
   readonly index: number;
   readonly isFavorite: boolean;
   readonly isWatched: boolean;
+  readonly isDownloaded?: boolean;
   readonly t: AppI18n['t'];
   readonly onPlay: (entry: HomeRailEntry, index: number) => void;
   readonly onOpenDetail?: (entry: HomeRailEntry) => void;
@@ -18,6 +19,8 @@ export interface BuildHomeCardContextMenuInput {
   readonly onToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
   readonly onOpenMultiView?: (entry: HomeRailEntry, index: number) => void;
   readonly onOpenPopout?: (entry: HomeRailEntry, index: number) => void;
+  readonly onDownload?: (entry: HomeRailEntry) => void;
+  readonly onDeleteDownload?: (entry: HomeRailEntry) => void;
 }
 
 /**
@@ -30,6 +33,7 @@ export function buildHomeCardContextMenuItems({
   index,
   isFavorite,
   isWatched,
+  isDownloaded = false,
   t,
   onPlay,
   onOpenDetail,
@@ -38,8 +42,31 @@ export function buildHomeCardContextMenuItems({
   onToggleWatched,
   onOpenMultiView,
   onOpenPopout,
+  onDownload,
+  onDeleteDownload,
 }: BuildHomeCardContextMenuInput): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
+  const pushDownloadAction = () => {
+    if (entry.kind !== 'movie') return;
+    if (isDownloaded && onDeleteDownload) {
+      items.push({
+        id: 'deleteDownload',
+        label: t('context.deleteDownload'),
+        icon: 'trash',
+        destructive: true,
+        testID: 'home-context-delete-download',
+        onSelect: () => onDeleteDownload(entry),
+      });
+    } else if (!isDownloaded && onDownload) {
+      items.push({
+        id: 'download',
+        label: t('context.download'),
+        icon: 'download',
+        testID: 'home-context-download',
+        onSelect: () => onDownload(entry),
+      });
+    }
+  };
 
   if (railId === 'continue') {
     items.push({
@@ -77,6 +104,7 @@ export function buildHomeCardContextMenuItems({
         onSelect: () => onToggleWatched(entry, false),
       });
     }
+    pushDownloadAction();
     return items;
   }
 
@@ -152,5 +180,6 @@ export function buildHomeCardContextMenuItems({
       onSelect: () => onToggleWatched(entry, isWatched),
     });
   }
+  pushDownloadAction();
   return items;
 }

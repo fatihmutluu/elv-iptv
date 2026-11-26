@@ -1,3 +1,4 @@
+import { isManagedDownloadFileUrlShape } from './downloads-ipc.ts';
 import { isEngineId, sanitizeDesktopArtworkUrl } from './player-ipc.ts';
 import { hasOnlyKeys } from './player-ipc-subtitles.ts';
 
@@ -12,6 +13,8 @@ export interface PopoutLaunchPayload {
   readonly resumePositionMs?: number;
   readonly pinned?: boolean;
   readonly transferEngineId?: string;
+  readonly isLocalOffline?: boolean;
+  readonly localFileUri?: string;
 }
 
 /** Payload sent back to the main window when a standalone Desktop Popout player docks (`#158`). */
@@ -24,6 +27,8 @@ export interface PopoutDockPayload {
   readonly sourceId?: string;
   readonly positionMs?: number;
   readonly transferEngineId?: string;
+  readonly isLocalOffline?: boolean;
+  readonly localFileUri?: string;
 }
 
 const MAX_ITEM_KEY_CHARS = 512;
@@ -46,6 +51,8 @@ const POPOUT_LAUNCH_KEYS: ReadonlySet<string> = new Set([
   'resumePositionMs',
   'pinned',
   'transferEngineId',
+  'isLocalOffline',
+  'localFileUri',
 ]);
 
 const POPOUT_DOCK_KEYS: ReadonlySet<string> = new Set([
@@ -57,6 +64,8 @@ const POPOUT_DOCK_KEYS: ReadonlySet<string> = new Set([
   'sourceId',
   'positionMs',
   'transferEngineId',
+  'isLocalOffline',
+  'localFileUri',
 ]);
 
 const isSafeRecord = (x: unknown): x is Record<string, unknown> =>
@@ -106,6 +115,12 @@ const isOptionalPositionMs = (x: unknown): boolean =>
 const isOptionalTransferEngineId = (x: unknown): boolean =>
   x === undefined || (isEngineId(x) && !hasControlChar(x) && x.trim().length > 0);
 
+const isOptionalLocalFileUri = (x: unknown, kind: unknown): boolean => {
+  if (x === undefined) return true;
+  if (kind === 'live') return false;
+  return isManagedDownloadFileUrlShape(x);
+};
+
 /** Strict runtime guard for `window:open-popout` / `window:popout-payload` (`#158`). */
 export function isPopoutLaunchPayload(x: unknown): x is PopoutLaunchPayload {
   if (!isSafeRecord(x) || !hasOnlyKeys(x, POPOUT_LAUNCH_KEYS)) return false;
@@ -118,7 +133,9 @@ export function isPopoutLaunchPayload(x: unknown): x is PopoutLaunchPayload {
     isBoundedText(x['sourceId'], MAX_SOURCE_ID_CHARS, false) &&
     isOptionalPositionMs(x['resumePositionMs']) &&
     (x['pinned'] === undefined || typeof x['pinned'] === 'boolean') &&
-    isOptionalTransferEngineId(x['transferEngineId'])
+    isOptionalTransferEngineId(x['transferEngineId']) &&
+    (x['isLocalOffline'] === undefined || typeof x['isLocalOffline'] === 'boolean') &&
+    isOptionalLocalFileUri(x['localFileUri'], x['kind'])
   );
 }
 
@@ -133,7 +150,9 @@ export function isPopoutDockPayload(x: unknown): x is PopoutDockPayload {
     isOptionalLogo(x['logo']) &&
     isBoundedText(x['sourceId'], MAX_SOURCE_ID_CHARS, false) &&
     isOptionalPositionMs(x['positionMs']) &&
-    isOptionalTransferEngineId(x['transferEngineId'])
+    isOptionalTransferEngineId(x['transferEngineId']) &&
+    (x['isLocalOffline'] === undefined || typeof x['isLocalOffline'] === 'boolean') &&
+    isOptionalLocalFileUri(x['localFileUri'], x['kind'])
   );
 }
 
@@ -143,6 +162,10 @@ export function sanitizePopoutLaunchPayload(payload: PopoutLaunchPayload): Popou
   const subtitle = payload.subtitle?.trim();
   const sourceId = payload.sourceId?.trim();
   const transferEngineId = payload.transferEngineId?.trim();
+  const safeLocalUri =
+    payload.kind !== 'live' && isManagedDownloadFileUrlShape(payload.localFileUri)
+      ? payload.localFileUri.trim()
+      : undefined;
   return {
     itemKey: payload.itemKey.trim(),
     kind: payload.kind,
@@ -155,6 +178,8 @@ export function sanitizePopoutLaunchPayload(payload: PopoutLaunchPayload): Popou
       : {}),
     ...(payload.pinned !== undefined ? { pinned: payload.pinned } : {}),
     ...(transferEngineId && isEngineId(transferEngineId) ? { transferEngineId } : {}),
+    ...(payload.isLocalOffline === true && payload.kind !== 'live' ? { isLocalOffline: true } : {}),
+    ...(safeLocalUri ? { localFileUri: safeLocalUri } : {}),
   };
 }
 
@@ -164,6 +189,10 @@ export function sanitizePopoutDockPayload(payload: PopoutDockPayload): PopoutDoc
   const subtitle = payload.subtitle?.trim();
   const sourceId = payload.sourceId?.trim();
   const transferEngineId = payload.transferEngineId?.trim();
+  const safeLocalUri =
+    payload.kind !== 'live' && isManagedDownloadFileUrlShape(payload.localFileUri)
+      ? payload.localFileUri.trim()
+      : undefined;
   return {
     itemKey: payload.itemKey.trim(),
     kind: payload.kind,
@@ -173,5 +202,7 @@ export function sanitizePopoutDockPayload(payload: PopoutDockPayload): PopoutDoc
     ...(sourceId ? { sourceId } : {}),
     ...(payload.positionMs !== undefined ? { positionMs: Math.round(payload.positionMs) } : {}),
     ...(transferEngineId && isEngineId(transferEngineId) ? { transferEngineId } : {}),
+    ...(payload.isLocalOffline === true && payload.kind !== 'live' ? { isLocalOffline: true } : {}),
+    ...(safeLocalUri ? { localFileUri: safeLocalUri } : {}),
   };
 }

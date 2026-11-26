@@ -13,23 +13,25 @@ import type { DiagnosticsPort } from './ports/wave-f7b-ports';
 import type { DetailTarget } from './shared';
 import type { NavDestination, NavUtility } from './shell';
 
-/** Primary top-level destination tabs (`Home`, `Live`, `Movies`, `Series`). */
-export type PrimaryNavTab = 'home' | BrowseKind;
+/** Primary top-level destination tabs (`Home`, `Live`, `Movies`, `Series`, `Downloads`). */
+export type PrimaryNavTab = 'home' | BrowseKind | 'downloads';
 
 /** Top-level shell tab identifier. */
-export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'search' | 'settings';
+export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'downloads' | 'search' | 'settings';
 
 function buildShellDestinations(labels: {
   readonly home: string;
   readonly live: string;
   readonly movies: string;
   readonly series: string;
+  readonly downloads: string;
 }): readonly NavDestination<PrimaryNavTab>[] {
   return [
     { id: 'home', label: labels.home, icon: 'home', testID: 'nav-tab-home' },
     { id: 'live', label: labels.live, icon: 'tv', testID: 'nav-tab-live' },
     { id: 'movie', label: labels.movies, icon: 'film', testID: 'nav-tab-movie' },
     { id: 'series', label: labels.series, icon: 'series', testID: 'nav-tab-series' },
+    { id: 'downloads', label: labels.downloads, icon: 'download', testID: 'nav-tab-downloads' },
   ];
 }
 
@@ -261,7 +263,7 @@ export function buildShellCrashProps(input: {
   };
 }
 
-/** Builds the canonical 4+2 `AdaptiveNavShell` destinations and utilities in one call. */
+/** Builds the canonical 5+2 `AdaptiveNavShell` destinations and utilities in one call. */
 export function buildShellNavigation(input: {
   readonly t: AppI18n['t'];
   readonly activeTab: string;
@@ -276,6 +278,7 @@ export function buildShellNavigation(input: {
       live: input.t('nav.live'),
       movies: input.t('nav.movies'),
       series: input.t('nav.series'),
+      downloads: input.t('nav.downloads'),
     }),
     utilities: buildShellUtilities({
       searchLabel: input.t('nav.search'),
@@ -704,6 +707,10 @@ export function createObservedCatalog(
           },
         }
       : {}),
+    ...(c.listDownloads ? { listDownloads: c.listDownloads.bind(c) } : {}),
+    ...(c.getDownload ? { getDownload: c.getDownload.bind(c) } : {}),
+    ...(c.upsertDownload ? { upsertDownload: c.upsertDownload.bind(c) } : {}),
+    ...(c.deleteDownload ? { deleteDownload: c.deleteDownload.bind(c) } : {}),
     close: () => c.close(),
   };
 }

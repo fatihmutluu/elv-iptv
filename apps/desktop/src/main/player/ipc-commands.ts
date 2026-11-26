@@ -1,5 +1,7 @@
-import type { AttemptToken, DisplaySyncPolicy } from '@elv/playback';
+import { pathToFileURL } from 'node:url';
+import type { AttemptToken, DisplaySyncPolicy, LoadCommand } from '@elv/playback';
 import { type BridgeCommand, sanitizeDesktopMediaMetadata } from '../../shared/player-ipc.ts';
+import { validateManagedDownloadPath } from '../downloads/managed-path.ts';
 import type { DesktopMediaBridge } from '../media-bridge.ts';
 import type { TaskbarController } from '../taskbar-controls.ts';
 import type { DesktopDisplayRefreshController } from './display-refresh.ts';
@@ -30,6 +32,65 @@ export interface PlayerCommandDispatchHooks<TOwner> {
   readonly pushMediaState: (engineId: string, promote?: boolean) => void;
   readonly isActiveMediaEngine: (engineId: string) => boolean;
   readonly releaseEngine: (engineId: string) => void;
+  readonly downloadsRoot?: string;
+  readonly log?: (line: string) => void;
+  readonly sendError?: (
+    owner: TOwner,
+    engineId: string,
+    attempt: AttemptToken,
+    detail: string,
+  ) => void;
+  readonly isEngineAlive?: (engineId: string) => boolean;
+}
+
+const entryLoadSeq = new WeakMap<object, number>();
+const entryQueueSeq = new WeakMap<object, number>();
+
+const bumpLoadSeq = (entry: object): number => {
+  const next = (entryLoadSeq.get(entry) ?? 0) + 1;
+  entryLoadSeq.set(entry, next);
+  return next;
+};
+
+const bumpQueueSeq = (entry: object): number => {
+  const next = (entryQueueSeq.get(entry) ?? 0) + 1;
+  entryQueueSeq.set(entry, next);
+  return next;
+};
+
+function applyLoadCommand<TOwner>(
+  engineId: string,
+  entry: PlayerCommandEntry<TOwner>,
+  cmd: LoadCommand,
+  hooks: PlayerCommandDispatchHooks<TOwner>,
+): void {
+  const { engine, owner } = entry;
+  entry.attempt = cmd.attempt;
+  entry.lastAspectRatio = undefined;
+  entry.lastFps = undefined;
+  hooks.releasePowerBlocker(engineId);
+  if (cmd.options?.displaySync !== undefined) {
+    entry.lastDisplaySync = cmd.options.displaySync;
+  }
+  if (entry.isPrimary) {
+    hooks.onVideoAspectRatioChange?.(owner, undefined);
+    if (cmd.options?.displaySync !== undefined) {
+      hooks.displayRefreshController?.setPolicy(engineId, cmd.options.displaySync);
+    }
+  }
+  entry.taskbarState.isVod = cmd.kind === 'vod';
+  entry.taskbarState.positionMs = cmd.startMs ?? 0;
+  entry.taskbarState.durationMs = 0;
+  entry.taskbarState.active = false;
+  entry.taskbarState.paused = false;
+  entry.taskbar?.clear();
+  entry.mediaState.status = 'Stopped';
+  entry.mediaState.isNavigating = true;
+  entry.mediaState.kind = cmd.kind;
+  entry.mediaState.positionUs = Math.max(0, Math.round((cmd.startMs ?? 0) * 1000));
+  entry.mediaState.durationUs = 0;
+  hooks.pushMediaState(engineId, entry.isPrimary);
+  engine.load(cmd);
 }
 
 /** Dispatches one validated `player:command` payload onto an owned engine and host integrations. */
@@ -42,37 +103,43 @@ export function dispatchPlayerBridgeCommand<TOwner>(
   const { engine, owner } = entry;
   switch (command.name) {
     case 'load': {
-      entry.attempt = command.cmd.attempt;
-      entry.lastAspectRatio = undefined;
-      entry.lastFps = undefined;
-      hooks.releasePowerBlocker(engineId);
-      if (command.cmd.options?.displaySync !== undefined) {
-        entry.lastDisplaySync = command.cmd.options.displaySync;
-      }
-      if (entry.isPrimary) {
-        hooks.onVideoAspectRatioChange?.(owner, undefined);
-        if (command.cmd.options?.displaySync !== undefined) {
-          hooks.displayRefreshController?.setPolicy(engineId, command.cmd.options.displaySync);
+      const loadSeq = bumpLoadSeq(entry);
+      bumpQueueSeq(entry);
+      if (command.cmd.url.trim().toLowerCase().startsWith('file:')) {
+        entry.attempt = command.cmd.attempt;
+        const root = hooks.downloadsRoot;
+        if (!root) {
+          hooks.log?.('player ipc: dropped a disallowed local load target');
+          hooks.sendError?.(owner, engineId, command.cmd.attempt, 'disallowed-file-url');
+          break;
         }
+        void validateManagedDownloadPath(root, command.cmd.url).then((validatedPath) => {
+          if (entryLoadSeq.get(entry) !== loadSeq) return;
+          if (hooks.isEngineAlive && !hooks.isEngineAlive(engineId)) return;
+          if (validatedPath === null) {
+            hooks.log?.('player ipc: dropped a disallowed local load target');
+            hooks.sendError?.(owner, engineId, command.cmd.attempt, 'disallowed-file-url');
+            return;
+          }
+          applyLoadCommand(
+            engineId,
+            entry,
+            { ...command.cmd, url: pathToFileURL(validatedPath).toString() },
+            hooks,
+          );
+        });
+        break;
       }
-      entry.taskbarState.isVod = command.cmd.kind === 'vod';
-      entry.taskbarState.positionMs = command.cmd.startMs ?? 0;
-      entry.taskbarState.durationMs = 0;
-      entry.taskbarState.active = false;
-      entry.taskbarState.paused = false;
-      entry.taskbar?.clear();
-      entry.mediaState.status = 'Stopped';
-      entry.mediaState.isNavigating = true;
-      entry.mediaState.kind = command.cmd.kind;
-      entry.mediaState.positionUs = Math.max(0, Math.round((command.cmd.startMs ?? 0) * 1000));
-      entry.mediaState.durationUs = 0;
-      hooks.pushMediaState(engineId, entry.isPrimary);
-      engine.load(command.cmd);
+      applyLoadCommand(engineId, entry, command.cmd, hooks);
       break;
     }
     case 'pause':
     case 'stop':
     case 'recreate':
+      if (command.name !== 'pause') {
+        bumpLoadSeq(entry);
+        bumpQueueSeq(entry);
+      }
       entry.attempt = command.attempt;
       hooks.releasePowerBlocker(engineId);
       if (command.name === 'stop') {
@@ -192,10 +259,33 @@ export function dispatchPlayerBridgeCommand<TOwner>(
     case 'setDesktopAudioOutput':
       engine.setDesktopAudioOutput?.(command.config);
       break;
-    case 'queueNext':
+    case 'queueNext': {
+      const queueSeq = bumpQueueSeq(entry);
+      if (command.request.stream.url.trim().toLowerCase().startsWith('file:')) {
+        const root = hooks.downloadsRoot;
+        if (!root) {
+          hooks.log?.('player ipc: dropped a disallowed local queue target');
+          break;
+        }
+        void validateManagedDownloadPath(root, command.request.stream.url).then((validatedPath) => {
+          if (entryQueueSeq.get(entry) !== queueSeq) return;
+          if (hooks.isEngineAlive && !hooks.isEngineAlive(engineId)) return;
+          if (validatedPath === null) {
+            hooks.log?.('player ipc: dropped a disallowed local queue target');
+            return;
+          }
+          engine.queueNext({
+            ...command.request,
+            stream: { ...command.request.stream, url: pathToFileURL(validatedPath).toString() },
+          });
+        });
+        break;
+      }
       engine.queueNext(command.request);
       break;
+    }
     case 'clearQueue':
+      bumpQueueSeq(entry);
       engine.clearQueue();
       break;
     case 'setHwdec':
@@ -227,6 +317,8 @@ export function dispatchPlayerBridgeCommand<TOwner>(
       engine.setMuted?.(command.muted);
       break;
     case 'release':
+      bumpLoadSeq(entry);
+      bumpQueueSeq(entry);
       hooks.releaseEngine(engineId);
       break;
   }

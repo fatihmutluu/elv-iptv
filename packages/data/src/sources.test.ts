@@ -223,6 +223,8 @@ describe('removeSource', () => {
       vod_collection_items:
         "(collection_id, item_key, source_id, kind, position, added_at) VALUES ('vc1', ?, ?, 'movie', 0, 1)",
       item_drm_meta: "(source_id, item_key, scheme) VALUES (?, 'k', 'clearkey')",
+      downloads:
+        "(id, profile_id, source_id, item_key, kind, title, local_file_name) VALUES ('dl1', 'default', ?, ?, 'movie', 'Film', 'dl1.mp4')",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -235,7 +237,8 @@ describe('removeSource', () => {
           table === 'favorites' ||
           table === 'recent_channels' ||
           table === 'programme_reminders' ||
-          table === 'failover_group_members'
+          table === 'failover_group_members' ||
+          table === 'downloads'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
         } else if (
@@ -322,6 +325,8 @@ describe('removeSource', () => {
       vod_collection_items:
         "(collection_id, item_key, source_id, kind, position, added_at) VALUES ('vc1', ?, ?, 'movie', 0, 1)",
       item_drm_meta: "(source_id, item_key, scheme) VALUES (?, 'k', 'clearkey')",
+      downloads:
+        "(id, profile_id, source_id, item_key, kind, title, local_file_name) VALUES ('dl1', 'default', ?, ?, 'movie', 'Film', 'dl1.mp4')",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -334,7 +339,8 @@ describe('removeSource', () => {
           table === 'favorites' ||
           table === 'recent_channels' ||
           table === 'programme_reminders' ||
-          table === 'failover_group_members'
+          table === 'failover_group_members' ||
+          table === 'downloads'
         ) {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
         } else if (

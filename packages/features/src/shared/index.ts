@@ -41,6 +41,7 @@ export {
   type HydratedVodCollection,
   mergeHydratedCollections,
 } from './collections-model';
+export { DownloadsProvider, hasManagedDownload, useDownloads } from './DownloadsContext';
 export { type DetailCastMember, type DetailTarget, detailTargetFromItem } from './detail-target';
 export { computeHeroHeight } from './hero-layout';
 export {

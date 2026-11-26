@@ -32,6 +32,10 @@ export interface PlayableEntry {
   readonly preferredSubtitleLang?: string;
   /** Present when playing a past programme via provider catch-up archive (`#27`). */
   readonly catchup?: PlayableCatchupMeta;
+  /** `true` when playing a locally saved offline VOD download (consumes 0 provider connections). */
+  readonly isLocalOffline?: boolean;
+  /** Verified managed local `file://` URI for offline playback when {@link isLocalOffline} is `true`. */
+  readonly localFileUri?: string | null;
 }
 
 /** Channel list context enabling Up/Down live zapping across paged categories without materializing all rows. */

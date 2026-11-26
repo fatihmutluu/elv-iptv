@@ -19,7 +19,13 @@ import {
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback } from 'react';
 import { type LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
-import { type DetailTarget, detailTargetFromItem, formatVodMeta } from '../shared';
+import {
+  type DetailTarget,
+  detailTargetFromItem,
+  formatVodMeta,
+  hasManagedDownload,
+  useDownloads,
+} from '../shared';
 import { SearchEpgCardItem, SearchEpisodeCardItem } from './SearchSecondaryCards';
 import {
   buildSearchLiveContextMenuItems,
@@ -165,6 +171,7 @@ const SearchVodCardItem = memo(function SearchVodCardItemInner({
 }: SearchVodCardItemProps): ReactElement {
   const i18n = useI18n();
   const { openContextMenu } = useContextMenu();
+  const downloads = useDownloads();
   const handlePress = useCallback(() => {
     const target = detailTargetFromItem(item);
     if (target) onOpenDetail(target);
@@ -174,6 +181,7 @@ const SearchVodCardItem = memo(function SearchVodCardItemInner({
 
   const handleContextMenu = useCallback(
     (anchor?: ContextMenuAnchor) => {
+      const canDownloadMovie = downloads.supported && item.kind === 'movie';
       openContextMenu({
         title: item.name,
         ...(anchor !== undefined ? { anchor } : {}),
@@ -181,15 +189,33 @@ const SearchVodCardItem = memo(function SearchVodCardItemInner({
           item,
           isFavorite,
           isWatched: effectiveWatched,
+          isDownloaded: canDownloadMovie && hasManagedDownload(downloads.byItemKey.get(item.key)),
           i18n,
           onOpenDetail,
           ...(onPlayVod !== undefined ? { onPlayVod } : {}),
           ...(onToggleFavorite !== undefined ? { onToggleFavorite } : {}),
           ...(onToggleWatched !== undefined ? { onToggleWatched } : {}),
+          ...(canDownloadMovie
+            ? {
+                onDownload: (it: ItemRow) => {
+                  void downloads.enqueue({
+                    sourceId: it.sourceId,
+                    itemKey: it.key,
+                    kind: 'movie',
+                    title: it.name,
+                    poster: it.logo ?? null,
+                  });
+                },
+                onDeleteDownload: (it: ItemRow) => {
+                  void downloads.remove(it.key);
+                },
+              }
+            : {}),
         }),
       });
     },
     [
+      downloads,
       effectiveWatched,
       i18n,
       isFavorite,

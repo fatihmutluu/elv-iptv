@@ -1,4 +1,5 @@
 import type { EpisodeRow, WatchProgressRow } from '@elv/data';
+import type { DownloadRecord } from '@elv/domain';
 import {
   CtaButton,
   EditorialCategoryBar,
@@ -37,6 +38,9 @@ export interface DetailEpisodesProps {
   readonly focusedEpisodeIndex: number | null;
   readonly focusedRetry: boolean;
   readonly onLayoutY?: (y: number) => void;
+  readonly downloadsSupported?: boolean;
+  readonly downloadsByKey?: ReadonlyMap<string, DownloadRecord>;
+  readonly onPressEpisodeDownload?: (episode: EpisodeRow) => void;
 }
 
 function DetailEpisodesInner({
@@ -62,6 +66,9 @@ function DetailEpisodesInner({
   focusedEpisodeIndex,
   focusedRetry,
   onLayoutY,
+  downloadsSupported = false,
+  downloadsByKey,
+  onPressEpisodeDownload,
 }: DetailEpisodesProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -254,6 +261,11 @@ function DetailEpisodesInner({
                     focused={isTv && focusedEpisodeIndex === localIdx}
                     watchedLabel={watchedLabel}
                     onPressEpisode={onPressEpisode}
+                    downloadsSupported={downloadsSupported}
+                    downloadRecord={downloadsByKey?.get(ep.key)}
+                    {...(onPressEpisodeDownload !== undefined
+                      ? { onPressDownload: onPressEpisodeDownload }
+                      : {})}
                   />
                 );
               })}

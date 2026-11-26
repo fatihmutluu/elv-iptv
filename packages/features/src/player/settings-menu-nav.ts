@@ -178,7 +178,7 @@ function settingsRootItemsFromOptions(options?: SettingsMenuOptions): readonly S
   if (isVod && options?.hasAutoPlayNextEpisode === true) items.push('autoPlayNextEpisode');
   if (options?.hasMiniPlayer === true) items.push('miniPlayer');
   if (options?.hasPip === true) items.push('pip');
-  if (!isVod && options?.hasMultiView === true) items.push('multiView');
+  if (options?.hasMultiView === true) items.push('multiView');
   if (options?.hasPopout === true) items.push('popout');
   items.push('stats');
   return items;

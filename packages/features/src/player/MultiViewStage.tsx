@@ -38,7 +38,8 @@ export interface MultiViewStageProps {
   readonly catalog: Pick<
     CatalogService,
     'resolveStream' | 'categories' | 'items' | 'allSourcesItems'
-  >;
+  > &
+    Partial<Pick<CatalogService, 'seasons' | 'episodes' | 'itemDetail'>>;
   readonly videoHost: VideoHost;
   readonly tracker: ConnectionTracker;
   readonly sources: readonly SourceRow[];
@@ -54,6 +55,7 @@ export interface MultiViewStageProps {
   readonly deinterlaceMode?: DeinterlaceMode | undefined;
   readonly clock?: PlaybackClock;
   readonly timers?: PlaybackTimers;
+  readonly onOnlineStreamActiveChange?: ((active: boolean) => void) | undefined;
   readonly onExit: (
     resumeTarget: PlayTarget | null,
     adoptedSession?: AdoptedPlaybackSession | null,
@@ -89,6 +91,7 @@ export function MultiViewStage({
   deinterlaceMode,
   clock,
   timers,
+  onOnlineStreamActiveChange,
   onExit,
 }: MultiViewStageProps): ReactElement {
   const theme = useTheme();
@@ -161,6 +164,18 @@ export function MultiViewStage({
   );
 
   const { state, banner } = session;
+  const hasOnlineTile = state.tiles.some((tile) => tile.isLocalOffline !== true);
+  useEffect(() => {
+    if (state.tiles.length === 0) return;
+    onOnlineStreamActiveChange?.(hasOnlineTile);
+  }, [hasOnlineTile, onOnlineStreamActiveChange, state.tiles.length]);
+
+  useEffect(() => {
+    return () => {
+      onOnlineStreamActiveChange?.(false);
+    };
+  }, [onOnlineStreamActiveChange]);
+
   const grid = computeMultiViewGridLayout(
     state.tiles.length,
     state.effectiveMaxTiles,

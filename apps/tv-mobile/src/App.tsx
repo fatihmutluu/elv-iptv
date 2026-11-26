@@ -69,6 +69,7 @@ import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { createComposedAppLifecycle } from './android-lifecycle';
 import { createDeviceCatalog } from './catalog';
 import { waitForCatalogForeground } from './catalog/ios-prewarm-gate';
+import { createMobileDownloadManagerPort } from './downloads';
 import { ContractGateScreen } from './gate/contract/ContractGateScreen';
 import { CorpusGateScreen } from './gate/corpus/CorpusGateScreen';
 import { EpgGateScreen } from './gate/epg/EpgGateScreen';
@@ -141,6 +142,7 @@ function AppRoot() {
     () => createCoalescedCatalog(createLazyCatalog(openSharedCatalog), { windowMs: 500 }),
     [openSharedCatalog],
   );
+  const downloadManagerPort = useMemo(() => createMobileDownloadManagerPort(catalog), [catalog]);
 
   const syncSecretStore = useMemo(() => createSecureSecretStore(), []);
   const catalogSnapshotBridge = useMemo(
@@ -405,6 +407,7 @@ function AppRoot() {
     syncAccount: syncPorts.syncAccount,
     telemetry: syncPorts.telemetry,
     feedback: syncPorts.feedback,
+    downloadManager: downloadManagerPort,
     ...(sourceImportHost !== undefined ? { sourceImportHost } : {}),
     externalRefreshToken: refreshToken,
   };

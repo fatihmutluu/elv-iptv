@@ -104,6 +104,8 @@ export interface PlayerIpcDeps {
   getDisplayId?(owner: WebContentsLike): string | undefined;
   /** Optional sandboxed subtitle file picker (`#32`). */
   pickSubtitleFile?(owner: WebContentsLike): Promise<ExternalSubtitleTrack | null>;
+  /** Optional app-private managed downloads directory for scoped `file://` playback allowlist. */
+  downloadsRoot?: string;
   /**
    * Dev gate only: receives each valid `gate:report` line and the sender's engine (`undefined` when it has none). The
    * channel is not registered without it.
@@ -706,6 +708,19 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       pushMediaState,
       isActiveMediaEngine: (id) => activeMediaEngineId === id,
       releaseEngine: release,
+      ...(deps.downloadsRoot === undefined ? {} : { downloadsRoot: deps.downloadsRoot }),
+      log,
+      isEngineAlive: (id) => entries.has(id),
+      sendError: (owner, id, attempt, detail) =>
+        sendTo(owner, PLAYER_CHANNELS.event, {
+          engineId: id,
+          event: {
+            type: 'error',
+            attempt,
+            atMs: deps.now(),
+            error: { code: 'unsupported-format', detail },
+          },
+        }),
     });
   };
 

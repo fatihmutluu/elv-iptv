@@ -1,6 +1,14 @@
 import type { CatalogService, EpisodeRow, ItemRow } from '@elv/data';
+import { computeDownloadProgressRatio, isPlayableDownload } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
-import { TvFocusAnchor, useI18n, useKeyInterpreter, useTheme, useViewport } from '@elv/ui-kit';
+import {
+  TvFocusAnchor,
+  useContextMenu,
+  useI18n,
+  useKeyInterpreter,
+  useTheme,
+  useViewport,
+} from '@elv/ui-kit';
 import {
   type ComponentRef,
   type ReactElement,
@@ -23,12 +31,13 @@ import {
   type DetailTarget,
   detailTargetFromItem,
   useCardQuickActionsState,
+  useDownloads,
   useRouteActive,
 } from '../shared';
 import { CollectionPickerOverlay } from '../shared/CollectionPickerOverlay';
 import { DetailCastStrip } from './DetailCastStrip';
 import { DetailEpisodes } from './DetailEpisodes';
-import { DetailHero, type DetailHeroFocusSlot } from './DetailHero';
+import { DetailHero, type DetailHeroDownloadState, type DetailHeroFocusSlot } from './DetailHero';
 import { DetailSynopsisSheet } from './DetailHeroExtras';
 import { DetailRelatedRail } from './DetailRelatedRail';
 import {
@@ -94,6 +103,8 @@ export function DetailScreen({
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
+  const downloads = useDownloads();
+  const contextMenu = useContextMenu();
 
   const { isTv, isPortrait, padX, railGap, heroTopClearance, posterRailWidth } =
     computeCatalogLayout(viewport, theme);
@@ -246,13 +257,179 @@ export function DetailScreen({
 
   const seasons = data.seasonsState.kind === 'ready' ? data.seasonsState.seasons : [];
   const hasCollections = typeof catalog.listCollections === 'function';
-  const heroActionSlots = useMemo<readonly ('mylist' | 'watched' | 'collections')[]>(
+  const showMovieDownload = target.kind === 'movie' && downloads.supported;
+  const activeMovieKey = activeVersion?.key ?? target.itemKey;
+  const activeMovieTitle = activeVersion?.title ?? data.title;
+  const movieDownloadRecord = showMovieDownload
+    ? downloads.byItemKey.get(activeMovieKey)
+    : undefined;
+
+  const movieDownloadState = useMemo<DetailHeroDownloadState | undefined>(() => {
+    if (!showMovieDownload) return undefined;
+    if (isPlayableDownload(movieDownloadRecord)) {
+      return { icon: 'check', active: true, label: i18n.t('downloads.actionDownloaded') };
+    }
+    if (movieDownloadRecord?.status === 'downloading' || movieDownloadRecord?.status === 'queued') {
+      const pct = Math.round(
+        (computeDownloadProgressRatio(
+          movieDownloadRecord.bytesDownloaded,
+          movieDownloadRecord.totalBytes,
+        ) ?? 0) * 100,
+      );
+      return {
+        icon: 'pause',
+        active: true,
+        label: i18n.t('downloads.actionDownloading', { percent: pct }),
+      };
+    }
+    if (movieDownloadRecord?.status === 'paused' || movieDownloadRecord?.status === 'failed') {
+      return { icon: 'download', active: false, label: i18n.t('downloads.actionResume') };
+    }
+    return { icon: 'download', active: false, label: i18n.t('downloads.actionDownload') };
+  }, [i18n, movieDownloadRecord, showMovieDownload]);
+
+  const handlePressMovieDownload = useCallback(() => {
+    if (!showMovieDownload) return;
+    if (movieDownloadRecord && isPlayableDownload(movieDownloadRecord)) {
+      contextMenu.openContextMenu({
+        title: activeMovieTitle,
+        items: [
+          {
+            id: 'play-offline',
+            label: i18n.t('downloads.actionPlayOffline'),
+            icon: 'play',
+            testID: 'detail-download-play-offline',
+            onSelect: () => {
+              onPlay({
+                itemKey: activeMovieKey,
+                sourceId: target.sourceId,
+                title: activeMovieTitle,
+                kind: 'vod',
+                itemKind: 'movie',
+                isLocalOffline: true,
+                localFileUri: movieDownloadRecord.localUri,
+                ...(data.backdropUri !== null ? { logo: data.backdropUri } : {}),
+              });
+            },
+          },
+          {
+            id: 'delete-download',
+            label: i18n.t('downloads.actionDelete'),
+            icon: 'trash',
+            destructive: true,
+            testID: 'detail-download-delete',
+            onSelect: () => {
+              void downloads.remove(activeMovieKey);
+            },
+          },
+        ],
+      });
+      return;
+    }
+    if (movieDownloadRecord?.status === 'downloading' || movieDownloadRecord?.status === 'queued') {
+      void downloads.pause(activeMovieKey);
+      return;
+    }
+    if (movieDownloadRecord?.status === 'paused' || movieDownloadRecord?.status === 'failed') {
+      void downloads.resume(activeMovieKey);
+      return;
+    }
+    void downloads.enqueue({
+      sourceId: target.sourceId,
+      itemKey: activeMovieKey,
+      kind: 'movie',
+      title: activeMovieTitle,
+      poster: data.backdropUri,
+    });
+  }, [
+    activeMovieKey,
+    activeMovieTitle,
+    contextMenu,
+    data.backdropUri,
+    downloads,
+    i18n,
+    movieDownloadRecord,
+    onPlay,
+    showMovieDownload,
+    target.sourceId,
+  ]);
+
+  const handlePressEpisodeDownload = useCallback(
+    (episode: EpisodeRow) => {
+      if (!downloads.supported) return;
+      const rec = downloads.byItemKey.get(episode.key);
+      const epTitle =
+        episode.title?.trim() ||
+        i18n.t('series.episodeUntitled', { episode: episode.episode ?? 1 });
+      if (rec && isPlayableDownload(rec)) {
+        contextMenu.openContextMenu({
+          title: epTitle,
+          items: [
+            {
+              id: 'play-offline',
+              label: i18n.t('downloads.actionPlayOffline'),
+              icon: 'play',
+              testID: 'detail-episode-download-play-offline',
+              onSelect: () => {
+                onPlay({
+                  itemKey: episode.key,
+                  sourceId: target.sourceId,
+                  title: epTitle,
+                  kind: 'vod',
+                  itemKind: 'episode',
+                  isLocalOffline: true,
+                  localFileUri: rec.localUri,
+                  subtitle: data.title,
+                  ...(episode.season !== null ? { season: episode.season } : {}),
+                  ...(episode.episode !== null ? { episode: episode.episode } : {}),
+                  ...(data.backdropUri !== null ? { logo: data.backdropUri } : {}),
+                });
+              },
+            },
+            {
+              id: 'delete-download',
+              label: i18n.t('downloads.actionDelete'),
+              icon: 'trash',
+              destructive: true,
+              testID: 'detail-episode-download-delete',
+              onSelect: () => {
+                void downloads.remove(episode.key);
+              },
+            },
+          ],
+        });
+        return;
+      }
+      if (rec?.status === 'downloading' || rec?.status === 'queued') {
+        void downloads.pause(episode.key);
+        return;
+      }
+      if (rec?.status === 'paused' || rec?.status === 'failed') {
+        void downloads.resume(episode.key);
+        return;
+      }
+      void downloads.enqueue({
+        sourceId: target.sourceId,
+        itemKey: episode.key,
+        kind: 'episode',
+        title: epTitle,
+        seriesTitle: data.title,
+        season: episode.season,
+        episodeNum: episode.episode,
+        poster: data.backdropUri,
+      });
+    },
+    [contextMenu, data.backdropUri, data.title, downloads, i18n, onPlay, target.sourceId],
+  );
+
+  const heroActionSlots = useMemo<readonly ('mylist' | 'watched' | 'download' | 'collections')[]>(
     () => [
       'mylist',
       ...(target.kind === 'movie' ? (['watched'] as const) : []),
+      ...(showMovieDownload ? (['download'] as const) : []),
       ...(hasCollections ? (['collections'] as const) : []),
     ],
-    [hasCollections, target.kind],
+    [hasCollections, showMovieDownload, target.kind],
   );
   const heroActionCount = heroActionSlots.length;
   const handleOpenCollections = useCallback(() => setCollectionPickerOpen(true), []);
@@ -306,6 +483,7 @@ export function DetailScreen({
         const slot = heroActionSlots[colIndex];
         if (slot === 'mylist') void data.toggleMyList();
         else if (slot === 'watched') void data.toggleWatched();
+        else if (slot === 'download') handlePressMovieDownload();
         else if (slot === 'collections') setCollectionPickerOpen(true);
         return;
       }
@@ -352,6 +530,7 @@ export function DetailScreen({
       extras,
       handlePlayPrimary,
       handlePressEpisode,
+      handlePressMovieDownload,
       handlePressRelated,
       handleSelectChunk,
       heroActionSlots,
@@ -444,7 +623,7 @@ export function DetailScreen({
 
   return (
     <View testID="detail-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
-      {isTv && isActiveScope && !collectionPickerOpen ? (
+      {isTv && isActiveScope && !collectionPickerOpen && !contextMenu.isOpen ? (
         <DetailTvKeyBridge onEvent={handleTvKeyWithSheet} />
       ) : null}
 
@@ -470,6 +649,12 @@ export function DetailScreen({
           isEnriched={data.isEnriched}
           collectionCount={data.collectionIds.length}
           {...(hasCollections ? { onOpenCollections: handleOpenCollections } : {})}
+          {...(movieDownloadState !== undefined
+            ? {
+                downloadState: movieDownloadState,
+                onPressDownload: handlePressMovieDownload,
+              }
+            : {})}
           {...(target.technicalMeta !== undefined ? { technicalMeta: target.technicalMeta } : {})}
           seasonsCount={seasons.length}
           inMyList={data.inMyList}
@@ -536,6 +721,9 @@ export function DetailScreen({
             focusedEpisodeIndex={tvNav.focusedRowId === 'episodes' ? tvNav.focusedCol : null}
             focusedRetry={tvNav.focusedRowId === 'retry'}
             onLayoutY={recordEpisodesY}
+            downloadsSupported={downloads.supported}
+            downloadsByKey={downloads.byItemKey}
+            onPressEpisodeDownload={handlePressEpisodeDownload}
           />
         ) : null}
 

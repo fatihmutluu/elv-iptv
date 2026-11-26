@@ -10,6 +10,9 @@ import {
 /** Playback lifecycle status for a single Multi-View tile. */
 export type MultiViewTileStatus = 'loading' | 'playing' | 'paused' | 'error';
 
+/** Media kind supported inside a Multi-View tile (`live`, `movie`, or `episode`). */
+export type MultiViewMediaKind = 'live' | 'movie' | 'episode';
+
 /** Immutable snapshot of a single active Multi-View tile (`#34`, `#221`, `#232`). */
 export interface MultiViewTile {
   readonly tileId: string;
@@ -18,6 +21,8 @@ export interface MultiViewTile {
   readonly sourceId: string;
   readonly accountKey: string;
   readonly maxConnections: number;
+  readonly kind?: MultiViewMediaKind;
+  readonly isLocalOffline?: boolean;
   readonly logo?: string;
   readonly channelNumber?: number;
   readonly streamId: string;
@@ -32,6 +37,8 @@ export interface MultiViewAddTileInput {
   readonly sourceId: string;
   readonly accountKey: string;
   readonly maxConnections: number;
+  readonly kind?: MultiViewMediaKind;
+  readonly isLocalOffline?: boolean;
   readonly logo?: string;
   readonly channelNumber?: number;
   readonly streamId?: string;
@@ -179,6 +186,8 @@ export function createMultiViewController(
       sourceId: input.sourceId,
       accountKey: input.accountKey,
       maxConnections: input.maxConnections,
+      kind: input.kind ?? 'live',
+      isLocalOffline: input.isLocalOffline === true,
       ...(input.logo !== undefined ? { logo: input.logo } : {}),
       ...(input.channelNumber !== undefined ? { channelNumber: input.channelNumber } : {}),
       streamId,
@@ -233,7 +242,8 @@ export function createMultiViewController(
       const gateError = checkThermalAndCap(false);
       if (gateError !== null) return gateError;
 
-      if (input.adoptedExistingStream !== true) {
+      const isLocalOffline = input.isLocalOffline === true;
+      if (!isLocalOffline && input.adoptedExistingStream !== true) {
         const limit = tracker.checkLimit({
           accountKey: input.accountKey,
           maxConnections: input.maxConnections,
@@ -254,7 +264,9 @@ export function createMultiViewController(
       const tileId = nextTileId();
       const isPrimary = tiles.length === 0 || activeAudioTileId === null;
       const tile = makeTile(tileId, input, !isPrimary);
-      tracker.acquire(tile.accountKey, tile.streamId);
+      if (!isLocalOffline) {
+        tracker.acquire(tile.accountKey, tile.streamId);
+      }
       tiles = [...tiles, tile];
       if (isPrimary) {
         activeAudioTileId = tile.tileId;
@@ -271,7 +283,9 @@ export function createMultiViewController(
       try {
         await awaitClose(target);
       } finally {
-        tracker.release(target.streamId);
+        if (target.isLocalOffline !== true) {
+          tracker.release(target.streamId);
+        }
         tiles = tiles.filter((t) => t.tileId !== tileId);
         closingTileIds.delete(tileId);
         if (activeAudioTileId === tileId) {
@@ -304,23 +318,28 @@ export function createMultiViewController(
       const gateError = checkThermalAndCap(true);
       if (gateError !== null) return gateError;
 
-      const limit = tracker.checkLimit({
-        accountKey: nextInput.accountKey,
-        maxConnections: nextInput.maxConnections,
-        ...(nextInput.accountKey === oldTile.accountKey
-          ? { replacingStreamId: oldTile.streamId }
-          : {}),
-        ...(nextInput.providerActiveCons === undefined
-          ? {}
-          : { providerActiveCons: nextInput.providerActiveCons }),
-      });
-      if (limit.exceeds) {
-        return {
-          ok: false,
-          reason: 'connection-limit',
-          activeCount: limit.ownActiveCount,
-          maxConnections: limit.maxConnections,
-        };
+      const oldIsOffline = oldTile.isLocalOffline === true;
+      const nextIsOffline = nextInput.isLocalOffline === true;
+
+      if (!nextIsOffline) {
+        const limit = tracker.checkLimit({
+          accountKey: nextInput.accountKey,
+          maxConnections: nextInput.maxConnections,
+          ...(!oldIsOffline && nextInput.accountKey === oldTile.accountKey
+            ? { replacingStreamId: oldTile.streamId }
+            : {}),
+          ...(nextInput.providerActiveCons === undefined
+            ? {}
+            : { providerActiveCons: nextInput.providerActiveCons }),
+        });
+        if (limit.exceeds) {
+          return {
+            ok: false,
+            reason: 'connection-limit',
+            activeCount: limit.ownActiveCount,
+            maxConnections: limit.maxConnections,
+          };
+        }
       }
 
       closingTileIds.add(tileId);
@@ -331,7 +350,9 @@ export function createMultiViewController(
         closeFailed = true;
         throw err;
       } finally {
-        tracker.release(oldTile.streamId);
+        if (!oldIsOffline) {
+          tracker.release(oldTile.streamId);
+        }
         closingTileIds.delete(tileId);
         if (closeFailed) {
           tiles = tiles.filter((t) => t.tileId !== tileId);
@@ -355,28 +376,32 @@ export function createMultiViewController(
         return postGateError;
       }
 
-      const postLimit = tracker.checkLimit({
-        accountKey: nextInput.accountKey,
-        maxConnections: nextInput.maxConnections,
-        ...(nextInput.providerActiveCons === undefined
-          ? {}
-          : { providerActiveCons: nextInput.providerActiveCons }),
-      });
-      if (postLimit.exceeds) {
-        tiles = tiles.filter((t) => t.tileId !== tileId);
-        syncAudioFlags();
-        notify();
-        return {
-          ok: false,
-          reason: 'connection-limit',
-          activeCount: postLimit.ownActiveCount,
-          maxConnections: postLimit.maxConnections,
-        };
+      if (!nextIsOffline) {
+        const postLimit = tracker.checkLimit({
+          accountKey: nextInput.accountKey,
+          maxConnections: nextInput.maxConnections,
+          ...(nextInput.providerActiveCons === undefined
+            ? {}
+            : { providerActiveCons: nextInput.providerActiveCons }),
+        });
+        if (postLimit.exceeds) {
+          tiles = tiles.filter((t) => t.tileId !== tileId);
+          syncAudioFlags();
+          notify();
+          return {
+            ok: false,
+            reason: 'connection-limit',
+            activeCount: postLimit.ownActiveCount,
+            maxConnections: postLimit.maxConnections,
+          };
+        }
       }
 
       const keepActiveAudio = activeAudioTileId === tileId;
       const newTile = makeTile(tileId, nextInput, !keepActiveAudio);
-      tracker.acquire(newTile.accountKey, newTile.streamId);
+      if (!nextIsOffline) {
+        tracker.acquire(newTile.accountKey, newTile.streamId);
+      }
       const idx = tiles.findIndex((t) => t.tileId === tileId);
       if (idx >= 0) {
         tiles = [...tiles.slice(0, idx), newTile, ...tiles.slice(idx + 1)];
@@ -425,7 +450,9 @@ export function createMultiViewController(
         try {
           await awaitCloseTile(tile);
         } finally {
-          tracker.release(tile.streamId);
+          if (tile.isLocalOffline !== true) {
+            tracker.release(tile.streamId);
+          }
           tiles = tiles.filter((t) => t.tileId !== tile.tileId);
           closingTileIds.delete(tile.tileId);
           shedIds.push(tile.tileId);
@@ -446,7 +473,9 @@ export function createMultiViewController(
           try {
             await awaitCloseTile(tile);
           } finally {
-            tracker.release(tile.streamId);
+            if (tile.isLocalOffline !== true) {
+              tracker.release(tile.streamId);
+            }
             closingTileIds.delete(tile.tileId);
           }
         }

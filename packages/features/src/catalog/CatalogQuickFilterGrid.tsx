@@ -31,7 +31,9 @@ import {
   type DetailTarget,
   detailTargetFromItem,
   formatVodMeta,
+  hasManagedDownload,
   resolveSeriesBadgeProps,
+  useDownloads,
 } from '../shared';
 import { CatalogEmptyState } from './CatalogChrome';
 import type { CategoryGridAccess, CategoryGridMeta } from './CategoryGridView';
@@ -126,6 +128,7 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
 }: QuickFilterPosterItemProps): ReactElement {
   const i18n = useI18n();
   const { openContextMenu } = useContextMenu();
+  const downloads = useDownloads();
 
   const handlePress = useCallback(() => {
     const target = detailTargetFromItem(item);
@@ -139,6 +142,7 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
 
   const handleContextMenu = useCallback(
     (anchor?: ContextMenuAnchor) => {
+      const canDownloadMovie = downloads.supported && item.kind === 'movie';
       openContextMenu({
         title: item.name,
         ...(anchor !== undefined ? { anchor } : {}),
@@ -146,15 +150,33 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
           item,
           isFavorite,
           isWatched: effectiveWatched,
+          isDownloaded: canDownloadMovie && hasManagedDownload(downloads.byItemKey.get(item.key)),
           i18n,
           onOpenDetail,
           ...(onQuickPlay !== undefined ? { onQuickPlay } : {}),
           ...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {}),
           ...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {}),
+          ...(canDownloadMovie
+            ? {
+                onDownload: (it: ItemRow) => {
+                  void downloads.enqueue({
+                    sourceId: it.sourceId,
+                    itemKey: it.key,
+                    kind: 'movie',
+                    title: it.name,
+                    poster: it.logo ?? null,
+                  });
+                },
+                onDeleteDownload: (it: ItemRow) => {
+                  void downloads.remove(it.key);
+                },
+              }
+            : {}),
         }),
       });
     },
     [
+      downloads,
       effectiveWatched,
       i18n,
       isFavorite,

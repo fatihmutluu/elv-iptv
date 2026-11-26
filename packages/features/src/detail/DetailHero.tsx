@@ -32,10 +32,18 @@ export type DetailHeroFocusSlot =
   | 'back'
   | 'mylist'
   | 'watched'
+  | 'download'
   | 'collections'
   | 'play'
   | 'preplay-version'
   | 'synopsis';
+
+/** Visual state for the movie offline download icon button in {@link DetailHero}. */
+export interface DetailHeroDownloadState {
+  readonly icon: 'download' | 'pause' | 'check';
+  readonly active: boolean;
+  readonly label: string;
+}
 
 /** Props of {@link DetailHero}. */
 export interface DetailHeroProps {
@@ -49,6 +57,8 @@ export interface DetailHeroProps {
   readonly isEnriched?: boolean;
   readonly collectionCount?: number;
   readonly onOpenCollections?: () => void;
+  readonly downloadState?: DetailHeroDownloadState;
+  readonly onPressDownload?: () => void;
   readonly technicalMeta?: DetailTechnicalMeta;
   readonly seasonsCount: number;
   readonly inMyList: boolean;
@@ -97,6 +107,8 @@ function DetailHeroInner({
   isEnriched = false,
   collectionCount = 0,
   onOpenCollections,
+  downloadState,
+  onPressDownload,
   technicalMeta,
   seasonsCount,
   inMyList,
@@ -287,6 +299,17 @@ function DetailHeroInner({
                   focusable={!isTv}
                   focused={isTv && focusedSlot === 'watched'}
                   onPress={onToggleWatched}
+                />
+              ) : null}
+              {kind === 'movie' && downloadState !== undefined && onPressDownload !== undefined ? (
+                <IconButton
+                  testID="detail-download"
+                  icon={downloadState.icon}
+                  active={downloadState.active}
+                  accessibilityLabel={downloadState.label}
+                  focusable={!isTv}
+                  focused={isTv && focusedSlot === 'download'}
+                  onPress={onPressDownload}
                 />
               ) : null}
               {onOpenCollections !== undefined ? (

@@ -10,6 +10,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSchemeDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.dash.DashMediaSource
@@ -261,17 +262,22 @@ internal fun createMediaSource(
     client = client,
     transferListener = transferListener,
   ) { manifestLoaded.set(true) }
-  val activeVodCache = if (!request.live) vodCache else null
-  val progressiveBase = DataSource.Factory {
-    val upstream = gated(RequestKind.PROGRESSIVE)
-    if (request.live && type == SourceType.TS && timeShiftRingBuffer != null) {
-      TimeShiftDataSource(
-        upstream = upstream,
-        ringBuffer = timeShiftRingBuffer,
-        tracker = timeShiftTracker,
-      )
-    } else {
-      upstream
+  val isManagedLocalFile = request.url.startsWith("file://", ignoreCase = true)
+  val activeVodCache = if (!request.live && !isManagedLocalFile) vodCache else null
+  val progressiveBase = if (isManagedLocalFile) {
+    FileDataSource.Factory()
+  } else {
+    DataSource.Factory {
+      val upstream = gated(RequestKind.PROGRESSIVE)
+      if (request.live && type == SourceType.TS && timeShiftRingBuffer != null) {
+        TimeShiftDataSource(
+          upstream = upstream,
+          ringBuffer = timeShiftRingBuffer,
+          tracker = timeShiftTracker,
+        )
+      } else {
+        upstream
+      }
     }
   }
   val progressive = activeVodCache?.wrapUpstream(progressiveBase) ?: progressiveBase

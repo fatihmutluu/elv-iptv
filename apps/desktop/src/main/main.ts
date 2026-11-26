@@ -48,6 +48,12 @@ import {
 import { parseDevServerUrl } from './dev-server.ts';
 import { registerDiagnosticsIpc } from './diagnostics-ipc.ts';
 import {
+  createDesktopDownloadManager,
+  type DesktopDownloadManager,
+} from './downloads/download-manager.ts';
+import { registerDownloadsIpc } from './downloads/ipc.ts';
+import { getManagedDownloadsDir } from './downloads/managed-path.ts';
+import {
   createVideoSampler,
   GATE_PLAYING_LINE,
   mergeGateLine,
@@ -388,6 +394,7 @@ async function startPlayer(): Promise<void> {
       return String(screen.getDisplayMatching(win.getBounds()).id);
     },
     ...(mediaBridge ? { mediaBridge } : {}),
+    downloadsRoot: getManagedDownloadsDir(app.getPath('userData')),
     pickSubtitleFile: createSubtitleFilePicker<BrowserWindow>({
       getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
       showOpenDialog: (win, options) =>
@@ -545,6 +552,8 @@ let lanPairingIpc: LanPairingIpcHandle | undefined;
 let disposePlayerIpc: (() => void) | undefined;
 let disposeDiagnosticsIpc: (() => void) | undefined;
 let disposeSyncIpc: (() => void) | undefined;
+let desktopDownloadManager: DesktopDownloadManager | undefined;
+let disposeDownloadsIpc: (() => void) | undefined;
 
 registerCatalogQuitHandler({
   app,
@@ -692,6 +701,20 @@ if (hasLock) {
     if (gateQuery === null) {
       void syncService.hydrate();
     }
+    desktopDownloadManager = createDesktopDownloadManager({
+      downloadsDir: getManagedDownloadsDir(app.getPath('userData')),
+      log: logger.log,
+    });
+    disposeDownloadsIpc = registerDownloadsIpc({
+      ipcMain,
+      manager: desktopDownloadManager,
+      devOrigin: devServerOrigin,
+      getBroadcastTargets: () => BrowserWindow.getAllWindows().map((w) => w.webContents),
+      log: logger.log,
+    });
+    if (gateQuery === null) {
+      void desktopDownloadManager.hydrate();
+    }
     catalogCoordinator = startCatalog(sharedSecrets);
     await startPlayer();
     createWindow();
@@ -728,6 +751,10 @@ app.on('will-quit', () => {
   disposeDiagnosticsIpc = undefined;
   disposeSyncIpc?.();
   disposeSyncIpc = undefined;
+  disposeDownloadsIpc?.();
+  disposeDownloadsIpc = undefined;
+  void desktopDownloadManager?.dispose();
+  desktopDownloadManager = undefined;
   mediaBridge?.dispose();
   mediaBridge = undefined;
   for (const ctl of [...windowBoundsControllers]) ctl.dispose();

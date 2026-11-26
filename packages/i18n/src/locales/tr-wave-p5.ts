@@ -1,0 +1,42 @@
+import type { WaveP5MessageId } from './en-wave-p5';
+
+/** Turkish (`tr`) messages for Wave P5 offline VOD downloads & cross-media Multi-View. */
+export const trWaveP5Messages: Readonly<Record<WaveP5MessageId, string>> = {
+  'nav.downloads': 'İndirilenler',
+  'downloads.title': 'İndirilenler',
+  'downloads.activeSection': 'Devam edenler',
+  'downloads.completedSection': 'Çevrimdışı izlemeye hazır',
+  'downloads.emptyTitle': 'Henüz indirilen içerik yok',
+  'downloads.emptyBody':
+    'Çevrimdışı izlemek veya Çoklu Görünümde canlı yayının yanında açmak için film ve dizileri detay sayfasından indirin.',
+  'downloads.unsupportedTitle': 'Bu cihazda indirme kullanılamıyor',
+  'downloads.unsupportedBody':
+    'Çevrimdışı film ve dizi bölümü indirme şu an masaüstü uygulamasında destekleniyor.',
+  'downloads.actionDownload': 'İndir',
+  'downloads.actionDownloading': 'İndiriliyor %{percent}',
+  'downloads.actionDownloaded': 'İndirildi',
+  'downloads.actionPause': 'İndirmeyi duraklat',
+  'downloads.actionResume': 'İndirmeye devam et',
+  'downloads.actionCancel': 'İndirmeyi iptal et',
+  'downloads.actionDelete': 'İndirmeyi sil',
+  'downloads.actionPlayOffline': 'Çevrimdışı oynat',
+  'downloads.statusQueued': 'Sırada',
+  'downloads.statusDownloading': 'İndiriliyor',
+  'downloads.statusPaused': 'Duraklatıldı',
+  'downloads.statusPausedForPlayback': 'Yayın izlenirken duraklatıldı',
+  'downloads.statusFailed': 'İndirme başarısız',
+  'downloads.statusCompleted': 'Çevrimdışı',
+  'downloads.offlineBadge': 'Çevrimdışı',
+  'downloads.storageUsed': '{size} çevrimdışı kayıtlı',
+  'context.download': 'Çevrimdışı indir',
+  'context.deleteDownload': 'İndirmeyi sil',
+  'multiview.picker.title': 'İçerik seç',
+  'multiview.picker.tabLive': 'Canlı Yayın',
+  'multiview.picker.tabMovies': 'Filmler',
+  'multiview.picker.tabSeries': 'Diziler',
+  'multiview.picker.tabDownloads': 'İndirilenler',
+  'multiview.picker.downloadsHint': 'İndirilenler ek bağlantı hakkı harcamaz.',
+  'multiview.picker.emptyDownloads': 'Henüz tamamlanmış indirme yok.',
+  'multiview.picker.emptyMovies': 'Uygun film bulunamadı.',
+  'multiview.picker.emptySeries': 'Uygun dizi bölümü bulunamadı.',
+};

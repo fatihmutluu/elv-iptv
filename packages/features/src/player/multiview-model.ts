@@ -5,6 +5,7 @@ import type {
   MultiViewAddResult,
   MultiViewAddTileInput,
   MultiViewDeviceCapabilities,
+  MultiViewMediaKind,
   MultiViewTileStatus,
   PlaybackStatus,
 } from '@elv/playback';
@@ -44,6 +45,14 @@ export function resolveMultiViewCapabilities(
   };
 }
 
+/** Resolves the Multi-View media kind (`'live' | 'movie' | 'episode'`) from a {@link PlayableEntry}. */
+function resolveMultiViewMediaKind(
+  entry: Pick<PlayableEntry, 'kind' | 'itemKind'>,
+): MultiViewMediaKind {
+  if (entry.kind === 'live') return 'live';
+  return entry.itemKind === 'episode' ? 'episode' : 'movie';
+}
+
 /** Builds a {@link MultiViewAddTileInput} enriched with per-account pool key and `maxConnections` (`#221`). */
 export function buildMultiViewTileInput(
   entry: PlayableEntry,
@@ -60,6 +69,8 @@ export function buildMultiViewTileInput(
     sourceId: entry.sourceId,
     accountKey,
     maxConnections,
+    kind: resolveMultiViewMediaKind(entry),
+    ...(entry.isLocalOffline === true ? { isLocalOffline: true } : {}),
     ...(entry.logo !== undefined && entry.logo !== null ? { logo: entry.logo } : {}),
     ...(providerActiveCons !== undefined ? { providerActiveCons } : {}),
   };

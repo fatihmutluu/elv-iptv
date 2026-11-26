@@ -211,6 +211,13 @@ export function MultiViewTileCard({
                   }
                   tone={isActiveAudio ? 'accent' : 'neutral'}
                 />
+                {tile.isLocalOffline === true ? (
+                  <MicroPill
+                    testID={`multiview-tile-offline-badge-${index}`}
+                    label={i18n.t('downloads.offlineBadge')}
+                    tone="neutral"
+                  />
+                ) : null}
               </View>
 
               {showActions ? (

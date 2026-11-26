@@ -79,6 +79,10 @@ export function createProfileScopedCatalog(
   const addItemToCollection = c.addItemToCollection?.bind(c);
   const removeItemFromCollection = c.removeItemFromCollection?.bind(c);
   const reorderCollectionItems = c.reorderCollectionItems?.bind(c);
+  const listDownloads = c.listDownloads?.bind(c);
+  const getDownload = c.getDownload?.bind(c);
+  const upsertDownload = c.upsertDownload?.bind(c);
+  const deleteDownload = c.deleteDownload?.bind(c);
 
   return {
     addSource: (input) => c.addSource(input),
@@ -521,6 +525,36 @@ export function createProfileScopedCatalog(
               orderedItemKeys,
               profileId ?? getScope().profileId,
             ),
+        }
+      : {}),
+    ...(listDownloads
+      ? {
+          listDownloads: (opts) =>
+            listDownloads({
+              ...opts,
+              profileId: opts?.profileId ?? getScope().profileId,
+            }),
+        }
+      : {}),
+    ...(getDownload
+      ? {
+          getDownload: (itemKey, profileId) =>
+            getDownload(itemKey, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(upsertDownload
+      ? {
+          upsertDownload: (input) =>
+            upsertDownload({
+              ...input,
+              profileId: input.profileId ?? getScope().profileId,
+            }),
+        }
+      : {}),
+    ...(deleteDownload
+      ? {
+          deleteDownload: (itemKey, profileId) =>
+            deleteDownload(itemKey, profileId ?? getScope().profileId),
         }
       : {}),
     ...(c.flushPendingWrites ? { flushPendingWrites: c.flushPendingWrites.bind(c) } : {}),
