@@ -380,10 +380,15 @@ describe('OnboardingFlowOverlay & StartupRefreshOverlay', () => {
       expect(screen.getByTestId('elv-preview-root')).toBeTruthy();
     });
 
-    // Master toggle starts ON; toggling sub-toggles updates prefs live
+    // Master toggle starts ON; toggling sub-toggles updates prefs live including smart recommendations
     expect(
       screen.getByTestId('onboarding-elv-master-toggle').props.accessibilityState.checked,
     ).toBe(true);
+    expect(screen.getByTestId('onboarding-elv-recs-toggle').props.accessibilityState.checked).toBe(
+      true,
+    );
+    await fireEvent.press(screen.getByTestId('onboarding-elv-recs-toggle'));
+    expect(onPrefsSpy).toHaveBeenCalledWith({ elvSmartRecommendations: false });
     await fireEvent.press(screen.getByTestId('onboarding-elv-categories-toggle'));
     expect(onPrefsSpy).toHaveBeenCalledWith({ elvCategorySource: 'provider' });
 

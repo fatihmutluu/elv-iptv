@@ -43,6 +43,7 @@ export interface ElvPreviewOptions {
 /** One category item rendered in the preview category bar. */
 interface ElvPreviewCategory {
   readonly id: string;
+  readonly slotKey: string;
   readonly labelKey: ElvPreviewMessageKey;
   readonly clean: boolean;
   readonly active: boolean;
@@ -51,6 +52,7 @@ interface ElvPreviewCategory {
 /** One poster card rendered in the 4-card interactive ELV Mode preview. */
 export interface ElvPreviewCard {
   readonly id: string;
+  readonly slotKey: string;
   readonly artworkId: ElvPreviewArtworkId;
   readonly titleKey: ElvPreviewMessageKey | null;
   readonly rawFilename: string;
@@ -82,16 +84,58 @@ export const ELV_PREVIEW_DUPLICATE_FILENAMES = [
 ] as const;
 
 const CLEAN_CATEGORIES: readonly ElvPreviewCategory[] = [
-  { id: 'scifi', labelKey: 'elv.preview.genre.scifi', clean: true, active: true },
-  { id: 'drama', labelKey: 'elv.preview.genre.drama', clean: true, active: false },
-  { id: 'thriller', labelKey: 'elv.preview.genre.thriller', clean: true, active: false },
-  { id: 'mystery', labelKey: 'elv.preview.genre.mystery', clean: true, active: false },
+  {
+    id: 'scifi',
+    slotKey: 'cat-slot-0',
+    labelKey: 'elv.preview.genre.scifi',
+    clean: true,
+    active: true,
+  },
+  {
+    id: 'drama',
+    slotKey: 'cat-slot-1',
+    labelKey: 'elv.preview.genre.drama',
+    clean: true,
+    active: false,
+  },
+  {
+    id: 'thriller',
+    slotKey: 'cat-slot-2',
+    labelKey: 'elv.preview.genre.thriller',
+    clean: true,
+    active: false,
+  },
+  {
+    id: 'mystery',
+    slotKey: 'cat-slot-3',
+    labelKey: 'elv.preview.genre.mystery',
+    clean: true,
+    active: false,
+  },
 ];
 
 const RAW_CATEGORIES: readonly ElvPreviewCategory[] = [
-  { id: 'raw-1', labelKey: 'elv.preview.rawCat1', clean: false, active: true },
-  { id: 'raw-2', labelKey: 'elv.preview.rawCat2', clean: false, active: false },
-  { id: 'raw-3', labelKey: 'elv.preview.rawCat3', clean: false, active: false },
+  {
+    id: 'raw-1',
+    slotKey: 'cat-slot-0',
+    labelKey: 'elv.preview.rawCat1',
+    clean: false,
+    active: true,
+  },
+  {
+    id: 'raw-2',
+    slotKey: 'cat-slot-1',
+    labelKey: 'elv.preview.rawCat2',
+    clean: false,
+    active: false,
+  },
+  {
+    id: 'raw-3',
+    slotKey: 'cat-slot-2',
+    labelKey: 'elv.preview.rawCat3',
+    clean: false,
+    active: false,
+  },
 ];
 
 interface FictionalFilmSeed {
@@ -159,8 +203,9 @@ export function buildElvPreviewState(opts: ElvPreviewOptions): ElvPreviewState {
   const categories = effectiveCategories ? CLEAN_CATEGORIES : RAW_CATEGORIES;
 
   const cards: readonly ElvPreviewCard[] = effectiveMerge
-    ? FICTIONAL_FILMS.map((film) => ({
+    ? FICTIONAL_FILMS.map((film, idx) => ({
         id: film.id,
+        slotKey: `slot-${idx}`,
         artworkId: film.artworkId,
         titleKey: film.titleKey,
         rawFilename: film.rawFilename,
@@ -172,6 +217,7 @@ export function buildElvPreviewState(opts: ElvPreviewOptions): ElvPreviewState {
       }))
     : ELV_PREVIEW_DUPLICATE_FILENAMES.map((rawFilename, idx) => ({
         id: `dup-${idx + 1}`,
+        slotKey: `slot-${idx}`,
         artworkId: 'velvet-meridian',
         titleKey: null,
         rawFilename,

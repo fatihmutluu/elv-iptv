@@ -5,12 +5,14 @@ import {
   type AndroidKeyEvent,
   type AndroidKeySource,
   I18nProvider,
+  ICON_PATHS,
   RemoteKeysProvider,
   ThemeProvider,
+  UiAdaptersProvider,
   ViewportProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Platform } from 'react-native';
+import { Platform, View } from 'react-native';
 import type { DetailTarget } from '../../shared';
 import { DetailHero } from '../DetailHero';
 import { DetailScreen } from '../DetailScreen';
@@ -53,8 +55,9 @@ function makeDetailCatalog(initialRating: RatingValue | null = null) {
   return { catalog, getRating, setRating };
 }
 
-describe('Wave P6 DetailHero & DetailScreen — Star unification and Like/Dislike ratings', () => {
-  it('DetailHero uses star / starFilled (never plus) for detail-mylist', async () => {
+describe('Wave P6 DetailHero & DetailScreen — My List plus/check icons and Like/Dislike ratings', () => {
+  it('DetailHero uses plus / check (never star) for detail-mylist', async () => {
+    const renderedIcons: unknown[] = [];
     const view = await render(
       <ViewportProvider
         value={{
@@ -67,27 +70,36 @@ describe('Wave P6 DetailHero & DetailScreen — Star unification and Like/Dislik
       >
         <ThemeProvider preset="obsidianCrimson">
           <I18nProvider i18n={createAppI18n('en')}>
-            <DetailHero
-              kind="movie"
-              title="Arrival"
-              backdropUri={null}
-              year={2016}
-              rating={7.9}
-              plot="Linguist communicates with visitors."
-              seasonsCount={0}
-              inMyList={false}
-              watched={false}
-              primaryAction={{ kind: 'pending' }}
-              onBack={jest.fn()}
-              onPlayPrimary={jest.fn()}
-              onToggleMyList={jest.fn()}
-              onToggleWatched={jest.fn()}
-              isTv={false}
-              isPortrait={false}
-              topClearance={64}
-              padX={32}
-              focusedSlot={null}
-            />
+            <UiAdaptersProvider
+              adapters={{
+                renderSvg: ({ spec }) => {
+                  renderedIcons.push(spec);
+                  return <View />;
+                },
+              }}
+            >
+              <DetailHero
+                kind="movie"
+                title="Arrival"
+                backdropUri={null}
+                year={2016}
+                rating={7.9}
+                plot="Linguist communicates with visitors."
+                seasonsCount={0}
+                inMyList={false}
+                watched={false}
+                primaryAction={{ kind: 'pending' }}
+                onBack={jest.fn()}
+                onPlayPrimary={jest.fn()}
+                onToggleMyList={jest.fn()}
+                onToggleWatched={jest.fn()}
+                isTv={false}
+                isPortrait={false}
+                topClearance={64}
+                padX={32}
+                focusedSlot={null}
+              />
+            </UiAdaptersProvider>
           </I18nProvider>
         </ThemeProvider>
       </ViewportProvider>,
@@ -96,9 +108,61 @@ describe('Wave P6 DetailHero & DetailScreen — Star unification and Like/Dislik
     const myListBtn = screen.getByTestId('detail-mylist');
     expect(myListBtn.props.accessibilityState?.selected).toBe(false);
     expect(screen.getByTestId('detail-mylist-icon')).toBeTruthy();
+    expect(renderedIcons).toContain(ICON_PATHS.plus);
+    expect(renderedIcons).not.toContain(ICON_PATHS.star);
     expect(screen.getByTestId('detail-hero-icon-row')).toBeTruthy();
     expect(screen.getByTestId('detail-play')).toBeTruthy();
     expect(screen.queryByTestId('detail-collections')).toBeNull();
+
+    renderedIcons.length = 0;
+    await view.rerender(
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <ThemeProvider preset="obsidianCrimson">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <UiAdaptersProvider
+              adapters={{
+                renderSvg: ({ spec }) => {
+                  renderedIcons.push(spec);
+                  return <View />;
+                },
+              }}
+            >
+              <DetailHero
+                kind="movie"
+                title="Arrival"
+                backdropUri={null}
+                year={2016}
+                rating={7.9}
+                plot="Linguist communicates with visitors."
+                seasonsCount={0}
+                inMyList
+                watched={false}
+                primaryAction={{ kind: 'pending' }}
+                onBack={jest.fn()}
+                onPlayPrimary={jest.fn()}
+                onToggleMyList={jest.fn()}
+                onToggleWatched={jest.fn()}
+                isTv={false}
+                isPortrait={false}
+                topClearance={64}
+                padX={32}
+                focusedSlot={null}
+              />
+            </UiAdaptersProvider>
+          </I18nProvider>
+        </ThemeProvider>
+      </ViewportProvider>,
+    );
+    expect(renderedIcons).toContain(ICON_PATHS.check);
+    expect(renderedIcons).not.toContain(ICON_PATHS.starFilled);
     await view.unmount();
   });
 

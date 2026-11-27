@@ -14,7 +14,7 @@ export interface OnboardingElvModeStepProps {
 
 /**
  * Onboarding Screen 3 (`#513`): Live 4-card interactive ELV Mode showcase using the shared
- * {@link ElvModeInteractivePreview} paired with master ELV Mode and 3 key sub-toggles.
+ * {@link ElvModeInteractivePreview} paired with master ELV Mode and 4 key sub-toggles.
  */
 export function OnboardingElvModeStep({
   preferences,
@@ -84,6 +84,18 @@ export function OnboardingElvModeStep({
             onToggle={() =>
               onUpdatePreferences({
                 elvCategorySource: imdbCategories ? 'provider' : 'imdb',
+              })
+            }
+          />
+          <OnboardingSwitchRow
+            testID="onboarding-elv-recs-toggle"
+            title={i18n.t('onboarding.elv.recommendationsToggle')}
+            checked={preferences.elvSmartRecommendations}
+            disabled={!elvEnabledEffective}
+            compact
+            onToggle={() =>
+              onUpdatePreferences({
+                elvSmartRecommendations: !preferences.elvSmartRecommendations,
               })
             }
           />

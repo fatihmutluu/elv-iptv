@@ -377,7 +377,7 @@ function PosterCardInner({
                                 ]}
                               >
                                 <Icon
-                                  name={quickActions.isFavorite ? 'starFilled' : 'star'}
+                                  name={quickActions.isFavorite ? 'check' : 'plus'}
                                   size={13}
                                   color={
                                     quickActions.isFavorite

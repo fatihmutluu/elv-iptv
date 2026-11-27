@@ -285,7 +285,7 @@ describe('CatalogDiscoveryScreen — Wave E2 IMDb Genres & ELV Picks (#512)', ()
       expect(screen.getByText('Building your personal picks')).toBeTruthy();
       expect(
         screen.getByText(
-          'Like, star, or watch a few titles and ELV Mode will tailor picks from your library.',
+          'Like, save to My List, or watch a few titles and ELV Mode will tailor picks from your library.',
         ),
       ).toBeTruthy();
     });

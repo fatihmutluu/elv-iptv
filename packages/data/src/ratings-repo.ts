@@ -45,6 +45,7 @@ export interface SetRatingInput {
 /** Filter options for {@link listRatings}. */
 export interface ListRatingsOptions {
   readonly value?: RatingValue;
+  readonly kind?: RatingKind;
   readonly limit?: number;
   readonly profileId?: string;
   readonly parentalUnlocked?: boolean;
@@ -192,22 +193,27 @@ export async function listRatings(db: SqlDriver, opts?: ListRatingsOptions): Pro
   const clamped = clampLimit(opts?.limit, 50);
   if (clamped === 0) return [];
   if (opts?.value !== undefined && !isRatingValue(opts.value)) return [];
+  if (opts?.kind !== undefined && !isRatingKind(opts.kind)) return [];
   const normalized = normalizeProfileId(opts?.profileId);
   const filter = await loadActiveParentalFilter(db, normalized, opts?.parentalUnlocked);
   const fetchLimit = filter === null ? clamped : Math.min(MAX_USER_LIST_LIMIT, clamped * 4);
 
   const params: SqlValue[] = [normalized];
-  let valueClause = '';
+  let filterClause = '';
   if (opts?.value !== undefined) {
-    valueClause = ' AND value = ?';
+    filterClause += ' AND value = ?';
     params.push(opts.value);
+  }
+  if (opts?.kind !== undefined) {
+    filterClause += ' AND kind = ?';
+    params.push(opts.kind);
   }
   params.push(fetchLimit);
 
   const rows = await db.all<RawRatingRow>(
     `SELECT profile_id, source_id, item_key, kind, value, title, logo, year, rating, updated_at
        FROM ratings
-      WHERE profile_id = ?${valueClause}
+      WHERE profile_id = ?${filterClause}
       ORDER BY updated_at DESC, item_key ASC
       LIMIT ?`,
     params,

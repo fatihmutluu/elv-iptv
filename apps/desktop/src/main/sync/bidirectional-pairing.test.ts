@@ -420,14 +420,14 @@ describe('createBidirectionalPairingController (strict 2-phase SAS-gated pairing
       expect(resp.adopted).toHaveLength(0);
     }
 
-    // Case 2A: responder_to_host (Responder confirms first -> /transfer -> Host confirms -> adopts)
+    // Case 2A: responder_to_host (Signed-out Host waits on SAS -> signed-in Responder confirms SAS -> Host auto-adopts on poll)
     {
       const host = makeDevice(server.http, null, () => now);
       const resp = makeDevice(server.http, 'alice@example.test', () => now);
       const started = await host.controller.startBidirectionalPairing();
       const joined = await resp.controller.joinBidirectionalPairing(started.qrUri ?? started.code);
 
-      // P0-1: Phase 1 returns awaiting_sas, sends ZERO payload/iv on /respond, mints ZERO tokens!
+      // P0-1: Phase 1 returns awaiting_sas on signed-in Responder, sends ZERO payload/iv on /respond, mints ZERO tokens!
       expect(joined.status).toBe('awaiting_sas');
       expect(joined.direction).toBe('responder_to_host');
       expect(joined.sas).toMatch(/^\d{4}$/);
@@ -436,12 +436,14 @@ describe('createBidirectionalPairingController (strict 2-phase SAS-gated pairing
       expect(respondReq?.body.encryptedPayload).toBeUndefined();
       expect(respondReq?.body.iv).toBeUndefined();
 
+      // Signed-out Host displays matching 4-digit SAS in waiting_approval (no confirm button needed on signed-out receiver)
       const hostPolled = await host.controller.pollBidirectionalPairing(started.pairingId);
-      expect(hostPolled.status).toBe('awaiting_sas');
+      expect(hostPolled.status).toBe('waiting_approval');
       expect(hostPolled.sas).toBe(joined.sas);
       expect(hostPolled.peerMaskedEmail).toBe('a***@example.test');
+      expect(host.adopted).toHaveLength(0);
 
-      // Responder confirms SAS -> NOW mints refreshToken and calls POST /v1/pair/transfer
+      // Signed-in Responder confirms SAS -> mints refreshToken and calls POST /v1/pair/transfer
       expect(await resp.controller.confirmBidirectionalPairing(joined.pairingId)).toEqual({
         ok: true,
       });
@@ -452,15 +454,9 @@ describe('createBidirectionalPairingController (strict 2-phase SAS-gated pairing
         ],
       ).toBeTruthy();
 
-      // Host polls BEFORE confirming -> NEVER adopts prior to host SAS confirmation
-      const hostBeforeConfirm = await host.controller.pollBidirectionalPairing(started.pairingId);
-      expect(hostBeforeConfirm.status).toBe('awaiting_sas');
-      expect(host.adopted).toHaveLength(0);
-
-      // Host confirms SAS -> approves, consumes, decrypts, adopts
-      expect(await host.controller.confirmBidirectionalPairing(started.pairingId)).toEqual({
-        ok: true,
-      });
+      // Signed-out Host polls after Responder confirmed -> auto-approves, burns, decrypts, and adopts cleanly!
+      const hostAdopted = await host.controller.pollBidirectionalPairing(started.pairingId);
+      expect(hostAdopted.status).toBe('completed');
       expect(host.getEmail()).toBe('alice@example.test');
       expect(host.syncCount.value).toBe(1);
 
@@ -494,41 +490,34 @@ describe('createBidirectionalPairingController (strict 2-phase SAS-gated pairing
       expect(host.getEmail()).toBe('alice2@example.test');
     }
 
-    // Case 3: host_to_responder (Host confirms BEFORE Responder -> Responder polls -> MUST buffer & NOT adopt until Responder confirms!)
+    // Case 3: host_to_responder (Signed-in Host confirms SAS -> Signed-out Responder shows 4-digit SAS waiting & auto-adopts on poll!)
     {
       const host = makeDevice(server.http, 'bob@example.test', () => now);
       const resp = makeDevice(server.http, null, () => now);
       const started = await host.controller.startBidirectionalPairing();
       const joined = await resp.controller.joinBidirectionalPairing(started.code);
-      expect(joined.status).toBe('awaiting_sas');
+      expect(joined.status).toBe('waiting_approval');
       expect(joined.direction).toBe('host_to_responder');
+      expect(joined.sas).toMatch(/^\d{4}$/);
       const hostPolled = await host.controller.pollBidirectionalPairing(started.pairingId);
+      expect(hostPolled.status).toBe('awaiting_sas');
       expect(hostPolled.sas).toBe(joined.sas);
 
-      // Host approves and uploads encrypted return payload
+      // Before Host confirms SAS, Responder stays waiting_approval with zero adoption
+      const respBeforeHost = await resp.controller.pollBidirectionalPairing(joined.pairingId);
+      expect(respBeforeHost.status).toBe('waiting_approval');
+      expect(resp.adopted).toHaveLength(0);
+
+      // Signed-in Host verifies SAS matches Responder and clicks Confirm -> uploads encrypted payload
       expect(await host.controller.confirmBidirectionalPairing(started.pairingId)).toEqual({
         ok: true,
       });
 
-      // P0-1 SECURITY: Responder polls BEFORE local SAS confirm -> MUST buffer payload and NOT adopt!
-      const respPreConfirmPoll1 = await resp.controller.pollBidirectionalPairing(joined.pairingId);
-      expect(respPreConfirmPoll1.status).toBe('awaiting_sas');
-      expect(resp.adopted).toHaveLength(0);
-      expect(resp.getEmail()).toBeNull();
-      // Even a second poll (after server burned the payload) stays awaiting_sas and preserves buffered ciphertext
-      const respPreConfirmPoll2 = await resp.controller.pollBidirectionalPairing(joined.pairingId);
-      expect(respPreConfirmPoll2.status).toBe('awaiting_sas');
-      expect(resp.adopted).toHaveLength(0);
-
-      // Responder user explicitly confirms SAS -> decrypts buffered payload & adopts!
-      expect(await resp.controller.confirmBidirectionalPairing(joined.pairingId)).toEqual({
-        ok: true,
-      });
+      // Signed-out Responder polls -> auto-decrypts & adopts without redundant second confirm click!
+      const respAdopted = await resp.controller.pollBidirectionalPairing(joined.pairingId);
+      expect(respAdopted.status).toBe('completed');
       expect(resp.getEmail()).toBe('bob@example.test');
       expect(resp.syncCount.value).toBe(1);
-      expect((await resp.controller.pollBidirectionalPairing(joined.pairingId)).status).toBe(
-        'completed',
-      );
     }
 
     // Case 4: same_account -> triggers immediate sync on both devices
@@ -623,13 +612,13 @@ describe('createBidirectionalPairingController (strict 2-phase SAS-gated pairing
     ).toBeTruthy();
     expect(hostPendingRandoms[0]?.every((b) => b === 0)).toBe(true);
 
-    // 2. Responder buffers host payload pre-SAS, then cancels -> POST /v1/pair/cancel with X-Pair-Responder-Token, never adopts!
+    // 2. different_accounts Responder buffers early host payload pre-SAS, then cancels -> POST /v1/pair/cancel, never adopts!
     const host2 = makeDevice(server.http, 'dan@example.test', () => now);
-    const resp2 = makeDevice(server.http, null, () => now);
+    const resp2 = makeDevice(server.http, 'other@example.test', () => now);
     const s2 = await host2.controller.startBidirectionalPairing();
     const j2 = await resp2.controller.joinBidirectionalPairing(s2.code);
     await host2.controller.pollBidirectionalPairing(s2.pairingId);
-    await host2.controller.confirmBidirectionalPairing(s2.pairingId);
+    await host2.controller.confirmBidirectionalPairing(s2.pairingId, 'host_to_responder');
     expect((await resp2.controller.pollBidirectionalPairing(j2.pairingId)).status).toBe(
       'awaiting_sas',
     );

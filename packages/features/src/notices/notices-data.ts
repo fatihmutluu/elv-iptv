@@ -96,6 +96,31 @@ export const THIRD_PARTY_NOTICES: readonly ThirdPartyNotice[] = [
       'mpv / libmpv 0.42.0 and FFmpeg 9.0.2 — Licensed under the GNU Lesser General Public License v2.1 or later (LGPL-2.1-or-later), executed in a separate helper process and dynamically linked on Windows and macOS.\n\nWindows LGPL binary & source release: https://github.com/mpv-player/mpv/releases/download/v0.42.0/libmpv-v0.42.0-x86_64-w64-mingw32-lgpl.zip.\n\nReproducible Windows & macOS LGPL build recipes (tools/mpv-runtime/build-windows.sh, tools/mpv-runtime/build-macos.sh), source pins, and SHA-256 digests: https://github.com/fatihmutluu/elv-iptv/blob/main/.github/workflows/mpv-runtime.yml and https://github.com/fatihmutluu/elv-iptv/blob/main/tools/mpv-runtime/versions.json (FFmpeg source: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz).\n\nBundled libraries in Windows & macOS mpv runtimes: libmpv 0.42.0 (LGPL-2.1-or-later), FFmpeg 9.0.2 (LGPL-2.1-or-later), libplacebo 7.387.0 (LGPL-2.1-or-later), FriBidi 1.0.18 (LGPL-2.1-or-later), libass 0.17.5 (ISC), HarfBuzz 15.1.0 (Old-MIT), FreeType 2.15.0 (FTL), LuaJIT 2.1 (MIT).',
   },
   {
+    id: 'androidx-camerax',
+    name: 'AndroidX CameraX',
+    version: '1.4.2',
+    license: 'Apache-2.0',
+    platforms: ['Android'],
+    sourceUrl:
+      'https://android.googlesource.com/platform/frameworks/support/+/androidx-main/camera',
+    modificationNote:
+      'Unmodified AndroidX CameraX 1.4.2 artifacts (camera-core, camera-camera2, camera-lifecycle, camera-view) used for handheld Android QR pairing without Google Play Services.',
+    noticeText:
+      'Copyright (C) The Android Open Source Project (AndroidX CameraX 1.4.2).\n\nLicensed under the Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).',
+  },
+  {
+    id: 'zxing-core',
+    name: 'ZXing Core',
+    version: '3.5.3',
+    license: 'Apache-2.0',
+    platforms: ['Android'],
+    sourceUrl: 'https://github.com/zxing/zxing/tree/zxing-3.5.3',
+    modificationNote:
+      'Unmodified Maven Central artifact (com.google.zxing:core:3.5.3) used for pure-Java on-device QR decoding on handheld Android without Google Play Services or MLKit.',
+    noticeText:
+      'ZXing Core 3.5.3 (https://github.com/zxing/zxing).\n\nLicensed under the Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).',
+  },
+  {
     id: 'atkinson-hyperlegible-next',
     name: 'Atkinson Hyperlegible Next',
     version: 'bundled',

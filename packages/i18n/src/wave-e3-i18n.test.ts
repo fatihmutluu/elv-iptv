@@ -50,22 +50,32 @@ const EXPECTED_KEYS: readonly MessageId[] = [
   'onboarding.privacy.sectionRightsTitle',
   'onboarding.privacy.sectionRightsBody',
   'onboarding.privacy.close',
-  // Onboarding Syncing Step (2)
+  // Onboarding Syncing Step (11)
   'onboarding.syncing.title',
   'onboarding.syncing.subtitle',
+  'onboarding.syncing.stageAccount',
+  'onboarding.syncing.stageSources',
+  'onboarding.syncing.stagePreparing',
+  'onboarding.syncing.sourceCounter',
+  'onboarding.syncing.itemsProgress',
+  'onboarding.syncing.failedTitle',
+  'onboarding.syncing.failedBody',
+  'onboarding.syncing.retryAction',
+  'onboarding.syncing.continueAction',
   // Onboarding Screen 2 — Add First Source (5)
   'onboarding.source.title',
   'onboarding.source.subtitle',
   'onboarding.source.continueAction',
   'onboarding.source.browseWithoutSource',
   'onboarding.source.pairPhoneAction',
-  // Onboarding Screen 3 — ELV Mode (6)
+  // Onboarding Screen 3 — ELV Mode (7)
   'onboarding.elv.title',
   'onboarding.elv.subtitle',
   'onboarding.elv.masterToggle',
   'onboarding.elv.mergeToggle',
   'onboarding.elv.postersToggle',
   'onboarding.elv.categoriesToggle',
+  'onboarding.elv.recommendationsToggle',
   // Onboarding Top Import Bar & Dynamic CTA (9)
   'onboarding.import.loading',
   'onboarding.import.ready',
@@ -147,8 +157,8 @@ function parsePoEntries(raw: string): Record<string, string> {
 }
 
 describe('Wave E3 Smart Onboarding & ELV Mode Preview i18n (#513)', () => {
-  it('defines all 93 EN and TR keys with strict parity, .po sync, and clean copy', () => {
-    expect(EXPECTED_KEYS).toHaveLength(93);
+  it('defines all 103 EN and TR keys with strict parity, .po sync, and clean copy', () => {
+    expect(EXPECTED_KEYS).toHaveLength(103);
     expect(Object.keys(enWaveE3Messages).sort()).toEqual([...EXPECTED_KEYS].sort());
     expect(Object.keys(trWaveE3Messages).sort()).toEqual([...EXPECTED_KEYS].sort());
 

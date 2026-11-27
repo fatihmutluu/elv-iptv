@@ -1,7 +1,9 @@
 import { createAppI18n } from '@elv/i18n';
 import { I18nProvider, ThemeProvider } from '@elv/ui-kit';
-import { render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import { HomeHero } from '../HomeHero';
+import { HomeHeroBackdrop } from '../HomeHeroBackdrop';
 
 describe('HomeHero decorative backdrop guard (#186)', () => {
   it('marks home-hero-backdrop as non-interactive and hidden from focus/accessibility', async () => {
@@ -104,5 +106,94 @@ describe('HomeHero decorative backdrop guard (#186)', () => {
     expect(ambient.props.pointerEvents).toBe('none');
     expect(ambient.props.accessible).toBe(false);
     await view.unmount();
+  });
+
+  it('keeps the previous backdrop mounted underneath until the new backdrop finishes loading (onLoad) and crossfades', async () => {
+    jest.useFakeTimers();
+    try {
+      const view = await render(
+        <ThemeProvider>
+          <HomeHeroBackdrop
+            slideKey="slide-a"
+            uri="https://img.example/backdrop-a.jpg"
+            title="Movie A"
+          />
+        </ThemeProvider>,
+      );
+
+      await fireEvent(
+        screen.getByTestId('home-hero-backdrop-img', { includeHiddenElements: true }),
+        'load',
+      );
+      expect(
+        screen.queryByTestId('home-hero-backdrop-prev', { includeHiddenElements: true }),
+      ).toBeNull();
+
+      // Switch to Slide B: prev backdrop MUST stay mounted and new layer MUST remain hidden (opacity 0) until onLoad
+      await view.rerender(
+        <ThemeProvider>
+          <HomeHeroBackdrop
+            slideKey="slide-b"
+            uri="https://img.example/backdrop-b.jpg"
+            title="Movie B"
+          />
+        </ThemeProvider>,
+      );
+
+      expect(
+        screen.getByTestId('home-hero-backdrop-prev', { includeHiddenElements: true }).props
+          .accessibilityLabel,
+      ).toBeUndefined();
+      expect(
+        screen.getByTestId('home-hero-backdrop-prev-img', { includeHiddenElements: true }).props
+          .source.uri,
+      ).toBe('https://img.example/backdrop-a.jpg');
+      expect(
+        StyleSheet.flatten(
+          screen.getByTestId('home-hero-backdrop-layer', { includeHiddenElements: true }).props
+            .style,
+        ).opacity,
+      ).toBe(0);
+
+      // Advancing timers before Backdrop B loads must NOT unmount Backdrop A
+      await act(async () => {
+        jest.advanceTimersByTime(1_000);
+      });
+      expect(
+        screen.getByTestId('home-hero-backdrop-prev-img', { includeHiddenElements: true }).props
+          .source.uri,
+      ).toBe('https://img.example/backdrop-a.jpg');
+
+      // Rapid switch to Slide C before B loads MUST keep Slide A underneath (not unloaded Slide B)
+      await view.rerender(
+        <ThemeProvider>
+          <HomeHeroBackdrop
+            slideKey="slide-c"
+            uri="https://img.example/backdrop-c.jpg"
+            title="Movie C"
+          />
+        </ThemeProvider>,
+      );
+      expect(
+        screen.getByTestId('home-hero-backdrop-prev-img', { includeHiddenElements: true }).props
+          .source.uri,
+      ).toBe('https://img.example/backdrop-a.jpg');
+
+      // Fire onLoad for Backdrop C -> crossfade animates and unmounts Backdrop A once complete
+      await fireEvent(
+        screen.getByTestId('home-hero-backdrop-img', { includeHiddenElements: true }),
+        'load',
+      );
+      await act(async () => {
+        jest.advanceTimersByTime(400);
+      });
+      expect(
+        screen.queryByTestId('home-hero-backdrop-prev', { includeHiddenElements: true }),
+      ).toBeNull();
+
+      await view.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

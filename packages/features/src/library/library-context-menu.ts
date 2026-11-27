@@ -116,7 +116,7 @@ export function buildLibraryVodMenuItems(params: {
     {
       id: 'toggle-favorite',
       label: isFavorite ? t('context.removeFromMyList') : t('context.addToMyList'),
-      icon: isFavorite ? 'starFilled' : 'star',
+      icon: isFavorite ? 'check' : 'plus',
       testID: 'library-context-favorite',
       onSelect: onToggleFavorite,
     },

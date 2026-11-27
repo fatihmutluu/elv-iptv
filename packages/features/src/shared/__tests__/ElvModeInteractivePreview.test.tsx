@@ -124,4 +124,68 @@ describe('ElvModeInteractivePreview (Wave E3 #513)', () => {
       expect(screen.queryByTestId(`elv-preview-clean-poster-${i}`)).toBeNull();
     }
   });
+
+  it('keeps outer card slots and category slots mounted without unmount flicker when toggling ELV Mode', async (): Promise<void> => {
+    const view = await renderPreview({
+      elvModeEnabled: true,
+      mergeVersions: true,
+      enrichMetadata: true,
+      imdbCategories: true,
+    });
+
+    const cardSlotsBefore = [0, 1, 2, 3].map((i) => screen.getByTestId(`elv-preview-card-${i}`));
+    const catBarBefore = screen.getByTestId('elv-preview-categories');
+
+    const i18n = createAppI18n('en');
+    await view.rerender(
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <I18nProvider i18n={i18n}>
+          <ThemeProvider preset="obsidianCrimson">
+            <ElvModeInteractivePreview
+              elvModeEnabled={false}
+              mergeVersions
+              enrichMetadata
+              imdbCategories
+            />
+          </ThemeProvider>
+        </I18nProvider>
+      </ViewportProvider>,
+    );
+
+    const cardSlotsAfterOff = [0, 1, 2, 3].map((i) => screen.getByTestId(`elv-preview-card-${i}`));
+    for (let i = 0; i < 4; i += 1) {
+      expect(cardSlotsAfterOff[i]).toBe(cardSlotsBefore[i]);
+    }
+    expect(screen.getByTestId('elv-preview-categories')).toBe(catBarBefore);
+
+    await view.rerender(
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <I18nProvider i18n={i18n}>
+          <ThemeProvider preset="obsidianCrimson">
+            <ElvModeInteractivePreview elvModeEnabled mergeVersions enrichMetadata imdbCategories />
+          </ThemeProvider>
+        </I18nProvider>
+      </ViewportProvider>,
+    );
+
+    for (let i = 0; i < 4; i += 1) {
+      expect(screen.getByTestId(`elv-preview-card-${i}`)).toBe(cardSlotsBefore[i]);
+    }
+  });
 });

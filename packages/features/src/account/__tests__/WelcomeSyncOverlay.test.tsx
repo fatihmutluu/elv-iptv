@@ -125,7 +125,7 @@ describe('WelcomeSyncOverlay', () => {
     expect(onContinue).toHaveBeenCalledTimes(1);
   });
 
-  it('validates signup email, min 10-char password, matching confirm password, and shows recovery code', async () => {
+  it('validates signup email, min 6-char password, matching confirm password, and shows recovery code', async () => {
     const syncAccount = createMockSyncAccount();
     const onContinue = jest.fn();
     await renderWithProviders(
@@ -149,12 +149,18 @@ describe('WelcomeSyncOverlay', () => {
     expect(screen.getByTestId('welcome-error')).toHaveTextContent('Enter a valid email address.');
     expect(syncAccount.register).not.toHaveBeenCalled();
 
-    // Weak password (< 10 chars)
+    // Weak password (< 6 chars)
     await fireEvent.changeText(screen.getByTestId('welcome-email-input'), 'viewer@example.com');
-    await fireEvent.changeText(screen.getByTestId('welcome-password-input'), 'short9');
-    await fireEvent.changeText(screen.getByTestId('welcome-confirm-password-input'), 'short9');
+    await fireEvent.changeText(screen.getByTestId('welcome-password-input'), 'short');
+    await fireEvent.changeText(screen.getByTestId('welcome-confirm-password-input'), 'short');
     await fireEvent.press(screen.getByTestId('welcome-signup-submit'));
-    expect(screen.getByTestId('welcome-error')).toHaveTextContent(/at least 10 characters/);
+    expect(screen.getByTestId('welcome-error')).toHaveTextContent(/at least 6 characters/);
+
+    // 6-char password passes validation cleanly
+    await fireEvent.changeText(screen.getByTestId('welcome-password-input'), 'pass12');
+    await fireEvent.changeText(screen.getByTestId('welcome-confirm-password-input'), 'mismatch');
+    await fireEvent.press(screen.getByTestId('welcome-signup-submit'));
+    expect(screen.getByTestId('welcome-error')).toHaveTextContent('Passwords do not match.');
 
     // Mismatched confirm password
     await fireEvent.changeText(screen.getByTestId('welcome-password-input'), 'supersecret123');

@@ -379,8 +379,31 @@ function BidirectionalPairingContent({
         );
         if (!mountedRef.current) return;
         if (res.ok) {
+          const isLocalReceiverChoice =
+            session.direction === 'different_accounts' &&
+            ((session.role === 'responder' && chosenDirection === 'host_to_responder') ||
+              (session.role === 'host' && chosenDirection === 'responder_to_host'));
+          let updated: BidirectionalPairingSnapshot | null = null;
+          if (syncAccount.pollBidirectionalPairing) {
+            try {
+              const polled = await syncAccount.pollBidirectionalPairing(session.pairingId);
+              if (!mountedRef.current) return;
+              if (polled.pairingId === session.pairingId && polled.status !== 'pending') {
+                updated = polled;
+              }
+            } catch {
+              // Fall back to deterministic local transition below; interval poller continues if waiting.
+            }
+          }
+          if (!mountedRef.current) return;
           setSession((prev) => {
-            const next = prev ? { ...prev, status: 'completed' as const } : prev;
+            if (!prev || prev.pairingId !== session.pairingId) return prev;
+            const next =
+              updated ??
+              ({
+                ...prev,
+                status: isLocalReceiverChoice ? 'waiting_approval' : 'completed',
+              } as const);
             sessionRef.current = next;
             return next;
           });

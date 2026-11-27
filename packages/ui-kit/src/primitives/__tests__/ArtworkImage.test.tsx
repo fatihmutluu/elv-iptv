@@ -568,6 +568,74 @@ describe('ArtworkImage ambient placeholder, loaded-URI cache & resolveUri (#405)
     expect(resolveUri).not.toHaveBeenCalled();
     expect(screen.getByTestId('dead-fallback')).toBeTruthy();
   });
+
+  it('keeps loaded URI A visible without placeholder or fallback flash while URI B awaits async resolveUri and loads', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    const registry = createDeadHostRegistry();
+    const loadedUris = createLoadedUriCache();
+    let resolveB: ((uri: string | null) => void) | undefined;
+    const resolveUri = jest.fn((targetUri: string) => {
+      if (targetUri === 'https://cdn.example/a.jpg') {
+        return Promise.resolve('file:///cache/artwork/a.img');
+      }
+      return new Promise<string | null>((resolve) => {
+        resolveB = resolve;
+      });
+    });
+
+    const onLoadSpy = jest.fn();
+    const renderTree = (targetUri: string) => (
+      <ThemeProvider>
+        <UiAdaptersProvider
+          adapters={{
+            artworkCache: { resolveUri, clear: async () => undefined },
+          }}
+        >
+          <ArtworkImage
+            uri={targetUri}
+            label="Hero Art"
+            deadHosts={registry}
+            loadedUris={loadedUris}
+            onLoad={onLoadSpy}
+            testID="hero"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>
+    );
+
+    const view = await render(renderTree('https://cdn.example/a.jpg'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('hero-img').props.source.uri).toBe('file:///cache/artwork/a.img');
+    await fireEvent(screen.getByTestId('hero-img'), 'load');
+    expect(onLoadSpy).toHaveBeenCalledTimes(1);
+
+    // Switch to URI B while resolveUri(B) is still pending (!resolutionReady)
+    await view.rerender(renderTree('https://cdn.example/b.jpg'));
+    expect(screen.queryByTestId('hero-fallback')).toBeNull();
+    expect(screen.queryByTestId('hero-placeholder', { includeHiddenElements: true })).toBeNull();
+    expect(screen.getByTestId('hero-prev-img').props.source.uri).toBe(
+      'file:///cache/artwork/a.img',
+    );
+
+    // Once URI B resolves, URI A stays mounted underneath until URI B fires onLoad
+    await act(async () => {
+      resolveB?.('file:///cache/artwork/b.img');
+    });
+    expect(screen.getByTestId('hero-img').props.source.uri).toBe('file:///cache/artwork/b.img');
+    expect(screen.getByTestId('hero-prev-img').props.source.uri).toBe(
+      'file:///cache/artwork/a.img',
+    );
+    expect(screen.queryByTestId('hero-placeholder', { includeHiddenElements: true })).toBeNull();
+
+    // Once URI B finishes loading, prev-img unmounts and onLoad fires for B
+    await fireEvent(screen.getByTestId('hero-img'), 'load');
+    expect(onLoadSpy).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId('hero-prev-img')).toBeNull();
+
+    await view.unmount();
+  });
 });
 
 describe('ArtworkImage channel-logo readability modes (#126)', () => {

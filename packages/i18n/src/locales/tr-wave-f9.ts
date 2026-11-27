@@ -24,7 +24,7 @@ export const trWaveF9Messages: Readonly<Record<WaveF9MessageId, string>> = {
   'account.emailLabel': 'E-posta',
   'account.emailPlaceholder': 'ornek@eposta.com',
   'account.passwordLabel': 'Şifre',
-  'account.passwordPlaceholder': 'En az 10 karakter',
+  'account.passwordPlaceholder': 'En az 6 karakter',
   'account.confirmPasswordLabel': 'Şifreyi onayla',
   'account.confirmPasswordPlaceholder': 'Şifreyi tekrar girin',
   'account.signInAction': 'Giriş Yap',
@@ -60,7 +60,7 @@ export const trWaveF9Messages: Readonly<Record<WaveF9MessageId, string>> = {
   'account.deleteCancelAction': 'İptal',
   'account.deleteSuccess': 'Hesabınız kalıcı olarak silindi.',
   'account.errorInvalidEmail': 'Geçerli bir e-posta adresi girin.',
-  'account.errorWeakPassword': 'Şifre en az 10 karakter olmalıdır.',
+  'account.errorWeakPassword': 'Şifre en az 6 karakter olmalıdır.',
   'account.errorPasswordMismatch': 'Şifreler eşleşmiyor.',
   'account.errorGeneric':
     'Eşitleme isteği başarısız oldu. Bağlantınızı kontrol edip tekrar deneyin.',

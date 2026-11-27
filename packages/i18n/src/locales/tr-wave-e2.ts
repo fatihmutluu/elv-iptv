@@ -5,7 +5,7 @@ export const trWaveE2Messages: Readonly<Record<keyof typeof enWaveE2Messages, st
   'home.section.elvShowcase': 'Gündem ve Sana Özel',
   'catalog.elvPicks.emptyTitle': 'Kişisel önerilerin hazırlanıyor',
   'catalog.elvPicks.emptyBody':
-    'Birkaç yapımı beğen, yıldızla veya izle; ELV Mode kütüphanenden sana özel öneriler çıkarsın.',
+    'Birkaç yapımı beğen, listene ekle veya izle; ELV Mode kütüphanenden sana özel öneriler çıkarsın.',
   'elv.reason.moreLikeThis': 'Beğendiklerine benzer',
   'elv.reason.trending': 'Gündemde',
   'elv.reason.topPicks': 'Öne çıkan',

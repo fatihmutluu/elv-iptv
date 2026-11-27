@@ -37,7 +37,7 @@ const EXPECTED_PAIRS: ReadonlyArray<readonly [MessageId, string, string]> = [
   ['account.emailLabel', 'Email', 'E-posta'],
   ['account.emailPlaceholder', 'you@example.com', 'ornek@eposta.com'],
   ['account.passwordLabel', 'Password', 'Şifre'],
-  ['account.passwordPlaceholder', 'At least 10 characters', 'En az 10 karakter'],
+  ['account.passwordPlaceholder', 'At least 6 characters', 'En az 6 karakter'],
   ['account.confirmPasswordLabel', 'Confirm password', 'Şifreyi onayla'],
   ['account.confirmPasswordPlaceholder', 'Re-enter password', 'Şifreyi tekrar girin'],
   ['account.signInAction', 'Sign In', 'Giriş Yap'],
@@ -106,8 +106,8 @@ const EXPECTED_PAIRS: ReadonlyArray<readonly [MessageId, string, string]> = [
   ],
   [
     'account.errorWeakPassword',
-    'Password must be at least 10 characters.',
-    'Şifre en az 10 karakter olmalıdır.',
+    'Password must be at least 6 characters.',
+    'Şifre en az 6 karakter olmalıdır.',
   ],
   ['account.errorPasswordMismatch', 'Passwords do not match.', 'Şifreler eşleşmiyor.'],
   [

@@ -33,7 +33,9 @@ import {
   partitionLibraryDownloads,
   partitionRatingsForLibrary,
   resolveLibraryDownloadStatusKey,
+  resolveLibrarySeeAllItems,
 } from './library-model';
+import { buildLibraryNavRails } from './useTvLibraryNavigation';
 
 function makeDownload(overrides: Partial<DownloadRecord>): DownloadRecord {
   return {
@@ -246,12 +248,54 @@ describe('library-model', () => {
     ];
 
     const res = partitionRatingsForLibrary(ratings);
-    expect(res.liked).toHaveLength(1);
-    expect(res.liked[0]?.itemKey).toBe('movie:s1:1');
-    expect(res.liked[0]?.ratingValue).toBe('like');
-    expect(res.disliked).toHaveLength(1);
-    expect(res.disliked[0]?.itemKey).toBe('series:s1:2');
-    expect(res.disliked[0]?.ratingValue).toBe('dislike');
+    expect(res.likedMovies).toHaveLength(1);
+    expect(res.likedMovies[0]?.itemKey).toBe('movie:s1:1');
+    expect(res.likedMovies[0]?.ratingValue).toBe('like');
+    expect(res.likedSeries).toHaveLength(0);
+    expect(res.dislikedMovies).toHaveLength(0);
+    expect(res.dislikedSeries).toHaveLength(1);
+    expect(res.dislikedSeries[0]?.itemKey).toBe('series:s1:2');
+    expect(res.dislikedSeries[0]?.ratingValue).toBe('dislike');
+
+    const i18n = createAppI18n('en');
+    const rails = buildLibraryNavRails({
+      activeTab: 'likes',
+      favPartition: { live: [], series: [], movies: [] },
+      collectionRails: [],
+      ratingPartition: res,
+      watchedMovieCards: [],
+      watchedSeriesCards: [],
+      activeDownloads: [],
+      completedMovieCards: [],
+      downloadedSeriesGroups: [],
+    });
+    expect(rails.map((r) => r.id)).toEqual(['liked-movies', 'disliked-series']);
+    expect(
+      resolveLibrarySeeAllItems({
+        seeAll: { railId: 'liked-movies', title: 'Liked Movies', kind: 'poster' },
+        favPartition: { live: [], series: [], movies: [] },
+        ratingPartition: res,
+        watchedMovieCards: [],
+        watchedSeriesCards: [],
+        completedMovieCards: [],
+        downloadedSeriesGroups: [],
+        collectionRails: [],
+        t: i18n.t,
+      }).map((c) => c.itemKey),
+    ).toEqual(['movie:s1:1']);
+    expect(
+      resolveLibrarySeeAllItems({
+        seeAll: { railId: 'disliked-series', title: 'Disliked Series', kind: 'poster' },
+        favPartition: { live: [], series: [], movies: [] },
+        ratingPartition: res,
+        watchedMovieCards: [],
+        watchedSeriesCards: [],
+        completedMovieCards: [],
+        downloadedSeriesGroups: [],
+        collectionRails: [],
+        t: i18n.t,
+      }).map((c) => c.itemKey),
+    ).toEqual(['series:s1:2']);
   });
 
   it('maps watched rows and collection items into deduplicated library cards', () => {
@@ -531,6 +575,21 @@ describe('library-model', () => {
       'download',
     ]);
     expect(vodItems.find((i) => i.id === 'toggle-like')?.label).toBe('Remove like');
+    expect(vodItems.find((i) => i.id === 'toggle-favorite')?.icon).toBe('check');
+    expect(liveItems.find((i) => i.id === 'remove-favorite')?.icon).toBe('starFilled');
+
+    const vodNotSaved = buildLibraryVodMenuItems({
+      t: i18n.t,
+      kind: 'movie',
+      isFavorite: false,
+      ratingValue: null,
+      isWatched: false,
+      onOpenDetail: vi.fn(),
+      onToggleFavorite: vi.fn(),
+      onToggleLike: vi.fn(),
+      onToggleDislike: vi.fn(),
+    });
+    expect(vodNotSaved.find((i) => i.id === 'toggle-favorite')?.icon).toBe('plus');
 
     const dlItems = buildDownloadedMediaMenuItems({
       t: i18n.t,

@@ -7,6 +7,7 @@ import {
 } from './build-app-config';
 import { withAccessibilityFonts } from './with-accessibility-fonts.ts';
 import { withAetherFrameworks } from './with-aether-frameworks.ts';
+import { withAndroidCameraFeature } from './with-android-camera-feature.ts';
 import { withAndroidDisplay } from './with-android-display.ts';
 import { withIosExternalDisplay } from './with-ios-external-display.ts';
 
@@ -192,6 +193,7 @@ describe('buildAppConfig', () => {
           (Array.isArray(p) &&
             typeof p[0] === 'function' &&
             p[0] !== withAndroidDisplay &&
+            p[0] !== withAndroidCameraFeature &&
             p[0] !== withIosExternalDisplay),
       );
       expect(custom).toBe(false);
@@ -201,6 +203,14 @@ describe('buildAppConfig', () => {
   it('wires withAndroidDisplay with isTv matching EXPO_TV (#255, #266)', () => {
     expect(build({}).plugins).toContainEqual([withAndroidDisplay, { isTv: false }]);
     expect(build({ EXPO_TV: '1' }).plugins).toContainEqual([withAndroidDisplay, { isTv: true }]);
+  });
+
+  it('wires withAndroidCameraFeature with isTv matching EXPO_TV (#510)', () => {
+    expect(build({}).plugins).toContainEqual([withAndroidCameraFeature, { isTv: false }]);
+    expect(build({ EXPO_TV: '1' }).plugins).toContainEqual([
+      withAndroidCameraFeature,
+      { isTv: true },
+    ]);
   });
 
   it('wires withIosExternalDisplay with isTv matching EXPO_TV (#258)', () => {
@@ -325,11 +335,39 @@ describe('buildAppConfig', () => {
       voicePermission,
     );
 
-    expect(build({ STORE: 'play' }).android?.permissions).toBeUndefined();
-    expect(build({}).android?.permissions).toBeUndefined();
+    expect(build({ STORE: 'play' }).android?.permissions).not.toContain(voicePermission);
+    expect(build({}).android?.permissions).not.toContain(voicePermission);
     expect(
       build({ STORE: 'direct', APP_VARIANT: 'development' }).android?.permissions,
-    ).toBeUndefined();
+    ).not.toContain(voicePermission);
+  });
+
+  it('includes handheld-only camera permission and NSCameraUsageDescription, omitting both on TV (#510)', () => {
+    for (const env of [
+      {},
+      { APP_VARIANT: 'development' },
+      { STORE: 'play' },
+      { STORE: 'amazon' },
+    ] satisfies Env[]) {
+      const cfg = build(env);
+      expect(cfg.android?.permissions).toContain('android.permission.CAMERA');
+      expect(cfg.android?.blockedPermissions).not.toContain('android.permission.CAMERA');
+      expect(cfg.ios?.infoPlist?.NSCameraUsageDescription).toBe(
+        'ELV IPTV uses the camera to scan pairing QR codes.',
+      );
+    }
+
+    for (const env of [
+      { EXPO_TV: '1' },
+      { EXPO_TV: 'true' },
+      { EXPO_TV: '1', STORE: 'amazon' },
+      { EXPO_TV: '1', APP_VARIANT: 'development' },
+    ] satisfies Env[]) {
+      const cfg = build(env);
+      expect(cfg.android?.permissions ?? []).not.toContain('android.permission.CAMERA');
+      expect(cfg.android?.blockedPermissions).toContain('android.permission.CAMERA');
+      expect(cfg.ios?.infoPlist).not.toHaveProperty('NSCameraUsageDescription');
+    }
   });
 
   it('records build metadata', () => {

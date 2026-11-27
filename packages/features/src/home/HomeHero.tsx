@@ -281,7 +281,15 @@ export function HomeHero({
             ) : null}
             <IconButton
               testID="home-hero-mylist"
-              icon={inMyList ? 'starFilled' : 'star'}
+              icon={
+                slide.kind === 'live'
+                  ? inMyList
+                    ? 'starFilled'
+                    : 'star'
+                  : inMyList
+                    ? 'check'
+                    : 'plus'
+              }
               active={inMyList}
               accessibilityLabel={inMyList ? i18n.t('home.inMyList') : i18n.t('home.addToList')}
               focusable={!isTv}

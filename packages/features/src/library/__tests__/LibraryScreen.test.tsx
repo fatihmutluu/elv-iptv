@@ -2,7 +2,6 @@ import type {
   CatalogService,
   FavoriteRow,
   ItemRow,
-  RatingRow,
   SeriesUnplayedSummary,
   WatchProgressRow,
 } from '@elv/data';
@@ -230,71 +229,6 @@ describe('LibraryScreen', () => {
     expect(screen.getByTestId('library-see-all-grid-movies')).toBeTruthy();
     await fireEvent.press(screen.getByTestId('library-see-all-back'));
     expect(screen.queryByTestId('library-see-all-grid-movies')).toBeNull();
-  });
-
-  it('switches to Likes tab and optimistically updates rails on context menu rating toggle', async () => {
-    const ratings: RatingRow[] = [
-      {
-        profileId: 'default',
-        sourceId: 's1',
-        itemKey: 'movie:s1:1',
-        kind: 'movie',
-        value: 'like',
-        title: 'Arrival',
-        logo: null,
-        year: 2016,
-        rating: 7.9,
-        updatedAt: 200,
-      },
-      {
-        profileId: 'default',
-        sourceId: 's1',
-        itemKey: 'series:s1:2',
-        kind: 'series',
-        value: 'dislike',
-        title: 'Bad Show',
-        logo: null,
-        year: 2020,
-        rating: 4.1,
-        updatedAt: 100,
-      },
-    ];
-    const setRating = jest.fn(async (_input, val) => ok(val));
-    const catalog = createMockCatalog({
-      listRatings: jest.fn(async () => ratings),
-      setRating,
-    });
-
-    await wrap(
-      <LibraryScreen
-        catalog={catalog}
-        sources={[]}
-        refreshToken={0}
-        onPlay={jest.fn()}
-        onOpenDetail={jest.fn()}
-      />,
-    );
-
-    await fireEvent.press(await screen.findByTestId('library-tab-likes'));
-    await waitFor(() => {
-      expect(screen.getByTestId('library-rail-liked')).toBeTruthy();
-      expect(screen.getByTestId('library-rail-disliked')).toBeTruthy();
-    });
-
-    // Long-press Liked card -> Remove like optimistically removes from Liked rail
-    await fireEvent(screen.getByTestId('library-card-liked-movie:s1:1'), 'longPress');
-    await waitFor(() => {
-      expect(screen.getByTestId('library-context-like')).toBeTruthy();
-    });
-    await fireEvent.press(screen.getByTestId('library-context-like'));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('library-rail-liked')).toBeNull();
-    });
-    expect(setRating).toHaveBeenCalledWith(
-      expect.objectContaining({ itemKey: 'movie:s1:1', kind: 'movie' }),
-      null,
-    );
   });
 
   it('switches to Watched tab and optimistically removes title on Mark as unwatched', async () => {

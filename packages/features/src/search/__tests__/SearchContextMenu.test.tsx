@@ -6,6 +6,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import type { PlayTarget } from '../../ports/play-target';
 import { type DetailTarget, DownloadsProvider } from '../../shared';
 import { SearchScreen } from '../SearchScreen';
+import {
+  buildSearchLiveContextMenuItems,
+  buildSearchVodContextMenuItems,
+} from '../search-context-menu';
 
 function makeItem(overrides: Partial<ItemRow> & Pick<ItemRow, 'key' | 'kind' | 'name'>): ItemRow {
   return {
@@ -232,5 +236,35 @@ describe('SearchScreen — Universal Context Menus', () => {
     expect(screen.queryByTestId('context-menu-delete-download')).toBeNull();
 
     await view.unmount();
+
+    const t = (k: string) => k;
+    const liveMenu = buildSearchLiveContextMenuItems({
+      item: makeItem({ key: 'live:9', kind: 'live', name: 'News' }),
+      isFavorite: false,
+      i18n: { t },
+      onPlayLive: jest.fn(),
+      onToggleFavorite: jest.fn(),
+    });
+    expect(liveMenu.find((m) => m.id === 'favorite')?.icon).toBe('star');
+
+    const vodNotSaved = buildSearchVodContextMenuItems({
+      item: makeItem({ key: 'movie:9', kind: 'movie', name: 'Film' }),
+      isFavorite: false,
+      isWatched: false,
+      i18n: { t },
+      onOpenDetail: jest.fn(),
+      onToggleFavorite: jest.fn(),
+    });
+    expect(vodNotSaved.find((m) => m.id === 'favorite')?.icon).toBe('plus');
+
+    const vodSaved = buildSearchVodContextMenuItems({
+      item: makeItem({ key: 'movie:9', kind: 'movie', name: 'Film' }),
+      isFavorite: true,
+      isWatched: false,
+      i18n: { t },
+      onOpenDetail: jest.fn(),
+      onToggleFavorite: jest.fn(),
+    });
+    expect(vodSaved.find((m) => m.id === 'favorite')?.icon).toBe('check');
   });
 });

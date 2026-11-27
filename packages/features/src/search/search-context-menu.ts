@@ -103,7 +103,7 @@ export function buildSearchVodContextMenuItems({
     items.push({
       id: 'favorite',
       label: i18n.t(isFavorite ? 'context.removeFromMyList' : 'context.addToMyList'),
-      icon: isFavorite ? 'starFilled' : 'star',
+      icon: isFavorite ? 'check' : 'plus',
       testID: 'context-menu-favorite',
       onSelect: () => onToggleFavorite(item),
     });

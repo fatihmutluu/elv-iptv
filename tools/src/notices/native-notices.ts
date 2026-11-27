@@ -290,12 +290,55 @@ function collectAccessibilityFontNotices(repoRoot: string): ThirdPartyNotice[] {
   ];
 }
 
-/** Collects pinned native media engine and bundled accessibility font notices. */
+/** Collects third-party notices for GMS-free Android handheld QR scanning (`#510`). */
+function collectQrScannerNotices(repoRoot: string): ThirdPartyNotice[] {
+  const gradlePath = join(repoRoot, 'modules', 'qr-scanner', 'android', 'build.gradle');
+  if (!existsSync(gradlePath)) return [];
+  const gradle = readFileSync(gradlePath, 'utf8');
+  const cameraxMatch = /def\s+camerax\s*=\s*['"]([^'"]+)['"]/.exec(gradle);
+  const zxingMatch = /com\.google\.zxing:core:([^'"]+)/.exec(gradle);
+  const cameraxVersion = cameraxMatch?.[1] ?? '1.4.2';
+  const zxingVersion = zxingMatch?.[1] ?? '3.5.3';
+  const handheldAndroid = ['Android'];
+
+  return [
+    {
+      id: 'androidx-camerax',
+      name: 'AndroidX CameraX',
+      version: cameraxVersion,
+      license: 'Apache-2.0',
+      platforms: handheldAndroid,
+      sourceUrl:
+        'https://android.googlesource.com/platform/frameworks/support/+/androidx-main/camera',
+      modificationNote: `Unmodified AndroidX CameraX ${cameraxVersion} artifacts (camera-core, camera-camera2, camera-lifecycle, camera-view) used for handheld Android QR pairing without Google Play Services.`,
+      noticeText: [
+        `Copyright (C) The Android Open Source Project (AndroidX CameraX ${cameraxVersion}).`,
+        'Licensed under the Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).',
+      ].join('\n\n'),
+    },
+    {
+      id: 'zxing-core',
+      name: 'ZXing Core',
+      version: zxingVersion,
+      license: 'Apache-2.0',
+      platforms: handheldAndroid,
+      sourceUrl: `https://github.com/zxing/zxing/tree/zxing-${zxingVersion}`,
+      modificationNote: `Unmodified Maven Central artifact (com.google.zxing:core:${zxingVersion}) used for pure-Java on-device QR decoding on handheld Android without Google Play Services or MLKit.`,
+      noticeText: [
+        `ZXing Core ${zxingVersion} (https://github.com/zxing/zxing).`,
+        'Licensed under the Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).',
+      ].join('\n\n'),
+    },
+  ];
+}
+
+/** Collects pinned native media engine, QR scanner, and bundled accessibility font notices. */
 export function collectNativeNotices(repoRoot: string): ThirdPartyNotice[] {
   return [
     ...collectAetherNotices(repoRoot),
     ...collectMedia3Notices(repoRoot),
     ...collectMpvNotices(repoRoot),
+    ...collectQrScannerNotices(repoRoot),
     ...collectAccessibilityFontNotices(repoRoot),
   ];
 }

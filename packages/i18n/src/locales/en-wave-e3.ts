@@ -3,7 +3,8 @@ export const enWaveE3Messages = {
   // Shared Interactive ELV Mode Preview
   'elv.preview.badgeClean': 'ELV Mode Active',
   'elv.preview.badgeRaw': 'Raw IPTV Feed',
-  'elv.preview.captionAllOn': 'Clean posters, IMDb ratings, merged copies, and curated genres.',
+  'elv.preview.captionAllOn':
+    'Smart categories, personalized movie & series picks, clean posters, and merged copies.',
   'elv.preview.captionChaos':
     'Toggle ELV Mode features on to tame duplicates, broken art, and messy folders.',
   'elv.preview.genre.scifi': 'Sci-Fi',
@@ -58,6 +59,16 @@ export const enWaveE3Messages = {
   // Onboarding Syncing Step
   'onboarding.syncing.title': 'Syncing your data…',
   'onboarding.syncing.subtitle': 'Downloading your encrypted vault and preferences.',
+  'onboarding.syncing.stageAccount': 'Syncing account & profiles',
+  'onboarding.syncing.stageSources': 'Loading sources & catalog',
+  'onboarding.syncing.stagePreparing': 'Preparing ELV Mode & home screen',
+  'onboarding.syncing.sourceCounter': 'Source {index} of {total}: {name}',
+  'onboarding.syncing.itemsProgress': '{count} items loaded',
+  'onboarding.syncing.failedTitle': 'Some sources could not finish loading',
+  'onboarding.syncing.failedBody':
+    'Your account synced cleanly. Retry now or continue into the app and finish loading later.',
+  'onboarding.syncing.retryAction': 'Retry',
+  'onboarding.syncing.continueAction': 'Continue to App',
 
   // Onboarding Screen 2 — Add First Source
   'onboarding.source.title': 'Add Your First Source',
@@ -70,11 +81,12 @@ export const enWaveE3Messages = {
   // Onboarding Screen 3 — ELV Mode
   'onboarding.elv.title': 'Meet ELV Mode',
   'onboarding.elv.subtitle':
-    'Transform raw IPTV lists into a cinema-grade library with clean posters, ratings, merged duplicates, and curated genres.',
+    'Organize messy playlists into smart categories, get personalized movie and series recommendations, clean up posters and ratings, and merge duplicate copies.',
   'onboarding.elv.masterToggle': 'ELV Mode',
   'onboarding.elv.mergeToggle': 'Merge movie & series versions',
   'onboarding.elv.postersToggle': 'Enhance posters & ratings',
-  'onboarding.elv.categoriesToggle': 'Organize categories by genre',
+  'onboarding.elv.categoriesToggle': 'Smart category organization',
+  'onboarding.elv.recommendationsToggle': 'Personalized movie & series recommendations',
 
   // Onboarding Top Import Bar & Dynamic CTA
   'onboarding.import.loading': 'Importing your library…',

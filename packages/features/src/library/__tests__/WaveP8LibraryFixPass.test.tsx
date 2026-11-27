@@ -436,9 +436,9 @@ describe('Wave P8 Library Fix Pass regressions', () => {
       // Likes tab -> long-press collected movie
       await fireEvent.press(await screen.findByTestId('library-tab-likes'));
       await waitFor(() => {
-        expect(screen.getByTestId(`library-card-liked-${m1.key}`)).toBeTruthy();
+        expect(screen.getByTestId(`library-card-liked-movies-${m1.key}`)).toBeTruthy();
       });
-      await fireEvent(screen.getByTestId(`library-card-liked-${m1.key}`), 'longPress');
+      await fireEvent(screen.getByTestId(`library-card-liked-movies-${m1.key}`), 'longPress');
       await waitFor(() => {
         expect(screen.getByTestId('library-context-remove-collection')).toBeTruthy();
         expect(screen.getByTestId(`library-context-move-collection-${c2.value.id}`)).toBeTruthy();

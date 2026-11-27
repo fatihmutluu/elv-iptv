@@ -73,10 +73,14 @@ export function buildLibraryNavRails(input: {
   }
   if (input.activeTab === 'likes') {
     const out: LibraryNavRailDescriptor[] = [];
-    if (input.ratingPartition.liked.length > 0)
-      out.push({ id: 'liked', kind: 'vod', items: input.ratingPartition.liked });
-    if (input.ratingPartition.disliked.length > 0)
-      out.push({ id: 'disliked', kind: 'vod', items: input.ratingPartition.disliked });
+    if (input.ratingPartition.likedMovies.length > 0)
+      out.push({ id: 'liked-movies', kind: 'vod', items: input.ratingPartition.likedMovies });
+    if (input.ratingPartition.likedSeries.length > 0)
+      out.push({ id: 'liked-series', kind: 'vod', items: input.ratingPartition.likedSeries });
+    if (input.ratingPartition.dislikedMovies.length > 0)
+      out.push({ id: 'disliked-movies', kind: 'vod', items: input.ratingPartition.dislikedMovies });
+    if (input.ratingPartition.dislikedSeries.length > 0)
+      out.push({ id: 'disliked-series', kind: 'vod', items: input.ratingPartition.dislikedSeries });
     return out;
   }
   if (input.activeTab === 'watched') {

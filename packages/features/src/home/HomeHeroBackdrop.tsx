@@ -1,5 +1,5 @@
 import { ArtworkImage, Scrim, useTheme } from '@elv/ui-kit';
-import { type ReactElement, useEffect, useRef, useState } from 'react';
+import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Platform, StyleSheet } from 'react-native';
 import { BlurredAmbientBackdrop } from '../shared/BlurredAmbientBackdrop';
 
@@ -31,9 +31,23 @@ function normalizeUrl(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function slideVisualId(slide: BackdropSlideSnapshot): string {
+  return `${slide.key}|${slide.uri ?? ''}|${slide.posterUri ?? ''}|${slide.isPortraitFallback ? 1 : 0}`;
+}
+
+function needsImageLoad(slide: BackdropSlideSnapshot): boolean {
+  const portraitAmbientUri = slide.isPortraitFallback
+    ? (slide.posterUri ?? slide.uri)
+    : slide.uri === null
+      ? slide.posterUri
+      : null;
+  return portraitAmbientUri === null && slide.uri !== null;
+}
+
 function renderSlideBackdrop(
   slide: BackdropSlideSnapshot,
   testIdPrefix: 'home-hero-backdrop' | 'home-hero-backdrop-prev',
+  onReady?: () => void,
 ): ReactElement {
   const portraitAmbientUri = slide.isPortraitFallback
     ? (slide.posterUri ?? slide.uri)
@@ -56,12 +70,15 @@ function renderSlideBackdrop(
 
   return (
     <ArtworkImage
+      key={slideVisualId(slide)}
       testID={testIdPrefix}
       uri={slide.uri}
       label={slide.title}
       maxDecodePx={960}
       borderRadius={0}
       decorative
+      onLoad={onReady}
+      onError={onReady}
       style={StyleSheet.absoluteFill}
     />
   );
@@ -71,6 +88,8 @@ function renderSlideBackdrop(
  * Full-bleed crossfading Hero backdrop (`#399`).
  * Renders genuine landscape backdrops cleanly with `cover`, or switches to a heavily blurred dark
  * ambient backdrop when only a vertical `2:3` poster is available so vertical artwork never stretches.
+ * Keeps the previous backdrop layer mounted underneath until the incoming backdrop finishes loading
+ * (`onLoad`) so hero switches never flash a dark canvas.
  */
 export function HomeHeroBackdrop({
   slideKey,
@@ -89,29 +108,65 @@ export function HomeHeroBackdrop({
     isPortraitFallback,
     title,
   };
+  const currentId = slideVisualId(currentSlide);
 
-  const [prevBackdrop, setPrevBackdrop] = useState<BackdropSlideSnapshot | null>(null);
-  const lastSlideRef = useRef<BackdropSlideSnapshot>(currentSlide);
+  const [transition, setTransition] = useState<{
+    readonly activeId: string;
+    readonly activeSlide: BackdropSlideSnapshot;
+    readonly prevBackdrop: BackdropSlideSnapshot | null;
+    readonly currentLoaded: boolean;
+  }>(() => ({
+    activeId: currentId,
+    activeSlide: currentSlide,
+    prevBackdrop: null,
+    currentLoaded: !needsImageLoad(currentSlide),
+  }));
+
+  if (transition.activeId !== currentId) {
+    const nextPrev = transition.currentLoaded
+      ? transition.activeSlide
+      : (transition.prevBackdrop ?? transition.activeSlide);
+    const hasPrevVisual = nextPrev.uri !== null || nextPrev.posterUri !== null;
+    setTransition({
+      activeId: currentId,
+      activeSlide: currentSlide,
+      prevBackdrop: hasPrevVisual ? nextPrev : null,
+      currentLoaded: !needsImageLoad(currentSlide),
+    });
+  }
+
+  const activeIdRef = useRef(currentId);
+  activeIdRef.current = currentId;
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
-  useEffect(() => {
-    const prev = lastSlideRef.current;
-    const next: BackdropSlideSnapshot = {
-      key: slideKey,
-      uri: normalizedUri,
-      posterUri: normalizedPoster,
-      isPortraitFallback,
-      title,
-    };
-    lastSlideRef.current = next;
+  const handleCurrentReady = useCallback(() => {
+    const id = activeIdRef.current;
+    setTransition((prev) =>
+      prev.activeId === id && !prev.currentLoaded ? { ...prev, currentLoaded: true } : prev,
+    );
+  }, []);
 
-    if (theme.reduceMotion || prev.key === next.key) {
-      setPrevBackdrop(null);
+  const hasPrevBackdrop = transition.prevBackdrop !== null;
+
+  useEffect(() => {
+    if (!hasPrevBackdrop) {
       fadeAnim.setValue(1);
-      return;
+      return undefined;
+    }
+    if (!transition.currentLoaded) {
+      fadeAnim.setValue(0);
+      return undefined;
+    }
+    if (theme.reduceMotion) {
+      fadeAnim.setValue(1);
+      setTransition((prev) =>
+        prev.activeId === currentId && prev.prevBackdrop !== null
+          ? { ...prev, prevBackdrop: null }
+          : prev,
+      );
+      return undefined;
     }
 
-    setPrevBackdrop(prev);
     fadeAnim.setValue(0);
     const anim = Animated.timing(fadeAnim, {
       toValue: 1,
@@ -119,32 +174,31 @@ export function HomeHeroBackdrop({
       useNativeDriver: Platform.OS !== 'web',
     });
     anim.start(({ finished }) => {
-      if (finished) setPrevBackdrop(null);
+      if (finished) {
+        setTransition((prev) =>
+          prev.activeId === currentId ? { ...prev, prevBackdrop: null } : prev,
+        );
+      }
     });
     return () => {
       anim.stop();
     };
-  }, [
-    fadeAnim,
-    isPortraitFallback,
-    normalizedPoster,
-    normalizedUri,
-    slideKey,
-    theme.reduceMotion,
-    title,
-  ]);
+  }, [currentId, fadeAnim, hasPrevBackdrop, theme.reduceMotion, transition.currentLoaded]);
+
+  const layerOpacity =
+    hasPrevBackdrop && !transition.currentLoaded ? 0 : theme.reduceMotion ? 1 : fadeAnim;
 
   return (
     <>
-      {prevBackdrop !== null && !theme.reduceMotion
-        ? renderSlideBackdrop(prevBackdrop, 'home-hero-backdrop-prev')
+      {transition.prevBackdrop !== null
+        ? renderSlideBackdrop(transition.prevBackdrop, 'home-hero-backdrop-prev')
         : null}
       <Animated.View
         pointerEvents="none"
         testID="home-hero-backdrop-layer"
-        style={[StyleSheet.absoluteFill, { opacity: theme.reduceMotion ? 1 : fadeAnim }]}
+        style={[StyleSheet.absoluteFill, { opacity: layerOpacity }]}
       >
-        {renderSlideBackdrop(currentSlide, 'home-hero-backdrop')}
+        {renderSlideBackdrop(currentSlide, 'home-hero-backdrop', handleCurrentReady)}
       </Animated.View>
       <Scrim direction="bottom" intensity="strong" testID="home-hero-scrim-bottom" />
       <Scrim direction="left" intensity="strong" testID="home-hero-scrim-left" />

@@ -73,6 +73,7 @@ describe('onboarding-model pure helpers', () => {
     expect(validateOnboardingSignUp('viewer@example.com', 'short', 'short')).toBe(
       'account.errorWeakPassword',
     );
+    expect(validateOnboardingSignUp('viewer@example.com', 'abc123', 'abc123')).toBeNull();
     expect(validateOnboardingSignUp('viewer@example.com', 'longpassword123', 'mismatch123')).toBe(
       'account.errorPasswordMismatch',
     );

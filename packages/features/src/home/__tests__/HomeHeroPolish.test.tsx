@@ -236,8 +236,12 @@ describe('HomeHero crossfade, Details CTA & auto-rotation (#399) + Watched clean
       screen.getByTestId('home-hero-backdrop-prev', { includeHiddenElements: true }),
     ).toBeTruthy();
 
-    // Switching with reduceMotion: true skips prev backdrop and keeps instant opacity
+    // Switching with reduceMotion: true skips the crossfade animation once incoming backdrop loads
     await view.rerender(renderHero(0, true));
+    await fireEvent(
+      screen.getByTestId('home-hero-backdrop-img', { includeHiddenElements: true }),
+      'load',
+    );
     expect(
       screen.queryByTestId('home-hero-backdrop-prev', { includeHiddenElements: true }),
     ).toBeNull();

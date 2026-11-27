@@ -22,7 +22,7 @@ export const enWaveF9Messages = {
   'account.emailLabel': 'Email',
   'account.emailPlaceholder': 'you@example.com',
   'account.passwordLabel': 'Password',
-  'account.passwordPlaceholder': 'At least 10 characters',
+  'account.passwordPlaceholder': 'At least 6 characters',
   'account.confirmPasswordLabel': 'Confirm password',
   'account.confirmPasswordPlaceholder': 'Re-enter password',
   'account.signInAction': 'Sign In',
@@ -57,7 +57,7 @@ export const enWaveF9Messages = {
   'account.deleteCancelAction': 'Cancel',
   'account.deleteSuccess': 'Your account has been permanently deleted.',
   'account.errorInvalidEmail': 'Enter a valid email address.',
-  'account.errorWeakPassword': 'Password must be at least 10 characters.',
+  'account.errorWeakPassword': 'Password must be at least 6 characters.',
   'account.errorPasswordMismatch': 'Passwords do not match.',
   'account.errorGeneric': 'Sync request failed. Check your connection and try again.',
 
