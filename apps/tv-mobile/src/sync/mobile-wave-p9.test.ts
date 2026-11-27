@@ -428,7 +428,7 @@ describe('Mobile Wave P9 auto-sync, bidirectional X25519 pairing, and 13-kind te
       return { ctrl, adopted, minted, synced };
     };
 
-    // Case 1: responder_to_host — /respond sends ZERO payload & never mints token before confirm
+    // Case 1: responder_to_host — signed-in phone confirms SAS; signed-out TV waits on SAS & auto-adopts on poll
     const tv1 = makeDevice(null, 11);
     const phone1 = makeDevice('alice@example.test', 22);
     const start1 = await tv1.ctrl.startBidirectionalPairing();
@@ -441,31 +441,34 @@ describe('Mobile Wave P9 auto-sync, bidirectional X25519 pairing, and 13-kind te
     expect(respondReq?.body.iv).toBeUndefined();
 
     const poll1 = await tv1.ctrl.pollBidirectionalPairing(start1.pairingId);
-    expect(poll1.status).toBe('awaiting_sas');
+    expect(poll1.status).toBe('waiting_approval');
     expect(poll1.sas).toBe(join1.sas);
     expect(tv1.adopted).toHaveLength(0);
 
     expect(await phone1.ctrl.confirmBidirectionalPairing(join1.pairingId)).toEqual({ ok: true });
     expect(phone1.minted).toHaveBeenCalledTimes(1);
-    expect(tv1.adopted).toHaveLength(0);
-    expect(await tv1.ctrl.confirmBidirectionalPairing(start1.pairingId)).toEqual({ ok: true });
+    const adoptedTv1 = await tv1.ctrl.pollBidirectionalPairing(start1.pairingId);
+    expect(adoptedTv1.status).toBe('completed');
     expect(tv1.adopted).toHaveLength(1);
     expect(tv1.adopted[0]?.email).toBe('alice@example.test');
 
-    // Case 2: host_to_responder — responder NEVER adopts before local confirm even if host approves first!
+    // Case 2: host_to_responder — signed-in Host confirms SAS; signed-out Responder waits on SAS & auto-adopts on poll!
     const host2 = makeDevice('bob@example.test', 33);
     const resp2 = makeDevice(null, 44);
     const start2 = await host2.ctrl.startBidirectionalPairing();
     const join2 = await resp2.ctrl.joinBidirectionalPairing(start2.code);
-    expect(join2.status).toBe('awaiting_sas');
+    expect(join2.status).toBe('waiting_approval');
+    expect(join2.sas).toMatch(/^\d{4}$/);
     expect((await host2.ctrl.pollBidirectionalPairing(start2.pairingId)).sas).toBe(join2.sas);
-    expect(await host2.ctrl.confirmBidirectionalPairing(start2.pairingId)).toEqual({ ok: true });
-    // Responder polls BEFORE confirming SAS -> MUST NOT adopt yet!
-    const earlyPoll = await resp2.ctrl.pollBidirectionalPairing(join2.pairingId);
-    expect(earlyPoll.status).toBe('awaiting_sas');
+    // Before Host approves, Responder stays waiting_approval
+    expect((await resp2.ctrl.pollBidirectionalPairing(join2.pairingId)).status).toBe(
+      'waiting_approval',
+    );
     expect(resp2.adopted).toHaveLength(0);
-    // Now responder confirms SAS -> decrypts buffered payload & adopts!
-    expect(await resp2.ctrl.confirmBidirectionalPairing(join2.pairingId)).toEqual({ ok: true });
+    // Host confirms SAS -> Responder adopts automatically on poll
+    expect(await host2.ctrl.confirmBidirectionalPairing(start2.pairingId)).toEqual({ ok: true });
+    const adoptedResp2 = await resp2.ctrl.pollBidirectionalPairing(join2.pairingId);
+    expect(adoptedResp2.status).toBe('completed');
     expect(resp2.adopted).toHaveLength(1);
     expect(resp2.adopted[0]?.email).toBe('bob@example.test');
 

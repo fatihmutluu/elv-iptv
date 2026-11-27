@@ -83,10 +83,24 @@ describe('Desktop Catalog IPC — ratings & extraSeriesKeys', () => {
         reqId: 6,
         call: {
           method: 'listRatings',
-          opts: { value: 'dislike', limit: 25, profileId: 'default', parentalUnlocked: true },
+          opts: {
+            value: 'dislike',
+            kind: 'series',
+            limit: 25,
+            profileId: 'default',
+            parentalUnlocked: true,
+          },
         },
       }),
     ).toBe(true);
+
+    expect(
+      isCatalogClientMessage({
+        type: 'call',
+        reqId: 61,
+        call: { method: 'listRatings', opts: { kind: 'live' } },
+      }),
+    ).toBe(false);
 
     expect(
       isCatalogClientMessage({
@@ -179,7 +193,7 @@ describe('Desktop Catalog IPC — ratings & extraSeriesKeys', () => {
       ),
     ).toEqual({ 's1:movie:1': 'like' });
 
-    // Preload bridge round-trip + notifyOnOk on setRating
+    // Preload bridge round-trip (setRating omits notifyOnOk to keep rating toggles zero-flash)
     const emitter = new EventEmitter();
     let onMessage: ((ev: { readonly data: unknown }) => void) | undefined;
     const posted: unknown[] = [];
@@ -233,7 +247,7 @@ describe('Desktop Catalog IPC — ratings & extraSeriesKeys', () => {
         'like',
       ),
     ).toEqual({ ok: true, value: 'like' });
-    expect(changed).toHaveBeenCalledTimes(1);
+    expect(changed).not.toHaveBeenCalled();
     expect(await bridge.getRating?.('s1:movie:1')).toBe('like');
     expect(await bridge.listRatings?.({ value: 'like' })).toEqual([]);
     expect(await bridge.listRatingMap?.('default')).toEqual({ 's1:movie:1': 'like' });

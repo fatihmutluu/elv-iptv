@@ -3,7 +3,7 @@ export const enWaveE2Messages = {
   'home.section.elvShowcase': 'Trending & Picks for You',
   'catalog.elvPicks.emptyTitle': 'Building your personal picks',
   'catalog.elvPicks.emptyBody':
-    'Like, star, or watch a few titles and ELV Mode will tailor picks from your library.',
+    'Like, save to My List, or watch a few titles and ELV Mode will tailor picks from your library.',
   'elv.reason.moreLikeThis': 'Because of your likes',
   'elv.reason.trending': 'Trending now',
   'elv.reason.topPicks': 'Top pick',

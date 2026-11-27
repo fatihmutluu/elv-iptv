@@ -147,8 +147,18 @@ describe('MIGRATION_V23 & ratings-repo', () => {
     const dislikesOnly = await listRatings(db, { value: 'dislike' });
     expect(dislikesOnly.map((r) => r.itemKey)).toEqual(['s1:series:1']);
 
+    const moviesOnly = await listRatings(db, { kind: 'movie' });
+    expect(moviesOnly.map((r) => r.itemKey)).toEqual(['s1:movie:1']);
+
+    const seriesLikesOnly = await listRatings(db, { value: 'like', kind: 'series' });
+    expect(seriesLikesOnly).toEqual([]);
+
+    const seriesDislikesOnly = await listRatings(db, { value: 'dislike', kind: 'series' });
+    expect(seriesDislikesOnly.map((r) => r.itemKey)).toEqual(['s1:series:1']);
+
     expect(await listRatings(db, { limit: 0 })).toEqual([]);
     expect(await listRatings(db, { value: 'bogus' as RatingValue })).toEqual([]);
+    expect(await listRatings(db, { kind: 'live' as RatingKind })).toEqual([]);
 
     // Switch movie from like -> dislike
     const r3 = await setItemRating(
@@ -381,6 +391,43 @@ describe('MIGRATION_V23 & ratings-repo', () => {
     expect(fetchCount).toBe(2);
 
     await catalog.close();
+    close();
+  });
+
+  it('filters listRatings by kind so 210+ rated movies never crowd out series ratings', async () => {
+    const { db, close } = testDb();
+    expect((await openCatalog(db)).ok).toBe(true);
+    let ts = 1_000;
+    await setItemRating(
+      db,
+      { sourceId: 's1', itemKey: 's1:series:old-like', kind: 'series', title: 'Severance' },
+      'like',
+      () => ts++,
+    );
+    await setItemRating(
+      db,
+      { sourceId: 's1', itemKey: 's1:series:old-dislike', kind: 'series', title: 'Bad Pilot' },
+      'dislike',
+      () => ts++,
+    );
+    for (let i = 1; i <= 210; i += 1) {
+      await setItemRating(
+        db,
+        { sourceId: 's1', itemKey: `s1:movie:${i}`, kind: 'movie', title: `Movie ${i}` },
+        'like',
+        () => ts++,
+      );
+    }
+
+    const unfiltered = await listRatings(db, { limit: 200 });
+    expect(unfiltered.some((r) => r.kind === 'series')).toBe(false);
+
+    const likedSeries = await listRatings(db, { value: 'like', kind: 'series', limit: 150 });
+    expect(likedSeries.map((r) => r.itemKey)).toEqual(['s1:series:old-like']);
+
+    const dislikedSeries = await listRatings(db, { value: 'dislike', kind: 'series', limit: 150 });
+    expect(dislikedSeries.map((r) => r.itemKey)).toEqual(['s1:series:old-dislike']);
+
     close();
   });
 });

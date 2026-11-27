@@ -1,7 +1,7 @@
 import type { CatalogService, ItemRow } from '@elv/data';
 import { createAppI18n } from '@elv/i18n';
 import { I18nProvider, ThemeProvider, ViewportProvider } from '@elv/ui-kit';
-import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { StyleSheet, VirtualizedList } from 'react-native';
 import type { CatalogLayoutMetrics, DisplayCategory } from '../../shared';
 import { CategoryGridView } from '../CategoryGridView';
@@ -163,6 +163,84 @@ describe('CategoryGridView layout, padding/border math, and resize handling (#16
     });
     expect(screen.getByTestId('catalog-grid-list').props.extraData.cols).toBe(5);
     expect(scrollToOffsetSpy).toHaveBeenCalledWith({ offset: 500, animated: false });
+
+    await view.unmount();
+  });
+
+  it('prefetches the visible window past index 180 on non-TV grids whenever pagedSource swaps', async () => {
+    const allItems = makeItems(400);
+    const itemsMock = jest.fn(async (_catId: string, offset: number, limit: number) =>
+      allItems.slice(offset, offset + limit),
+    );
+    const catalog = {
+      ...makeCatalog(allItems),
+      items: itemsMock,
+    } as unknown as CatalogService;
+
+    const bigCategory: DisplayCategory = {
+      row: { ...CATEGORY.row, itemCount: 400 },
+      label: CATEGORY.label,
+    };
+    const layout = makeLayout({ gridColumns: 6, visibleGridRows: 3, gridRowHeight: 200 });
+
+    const renderAtRefresh = (refreshToken: number) => (
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <ThemeProvider>
+          <I18nProvider i18n={createAppI18n('en')}>
+            <CategoryGridView
+              kind="movie"
+              category={bigCategory}
+              catalog={catalog}
+              refreshToken={refreshToken}
+              userStateVersion={0}
+              layout={layout}
+              backFocused={false}
+              focusedGridPos={null}
+              onBack={jest.fn()}
+              onOpenDetail={jest.fn()}
+            />
+          </I18nProvider>
+        </ThemeProvider>
+      </ViewportProvider>
+    );
+
+    const view = await render(renderAtRefresh(0));
+    await waitFor(() => {
+      expect(itemsMock).toHaveBeenCalledWith(bigCategory.row.id, 0, 180, undefined);
+    });
+
+    // Scroll past row 30 (index 192 >= GRID_PAGE_SIZE 180)
+    const list = screen.getByTestId('catalog-grid-list');
+    await act(async () => {
+      fireEvent.scroll(list, {
+        nativeEvent: {
+          contentOffset: { x: 0, y: 32 * 200 },
+          contentSize: { width: 1200, height: 15000 },
+          layoutMeasurement: { width: 1200, height: 600 },
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(itemsMock).toHaveBeenCalledWith(bigCategory.row.id, 180, 180, undefined);
+    });
+
+    // Trigger a pagedSource swap via refreshToken bump while remaining scrolled past row 30
+    itemsMock.mockClear();
+    await act(async () => {
+      await view.rerender(renderAtRefresh(1));
+    });
+
+    await waitFor(() => {
+      expect(itemsMock).toHaveBeenCalledWith(bigCategory.row.id, 180, 180, undefined);
+    });
 
     await view.unmount();
   });

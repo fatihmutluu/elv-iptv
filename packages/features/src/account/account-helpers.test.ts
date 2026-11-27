@@ -45,9 +45,10 @@ describe('account-helpers (#26)', () => {
     expect(validateSignUpFields('bad-email', 'longpassword123', 'longpassword123')).toBe(
       'account.errorInvalidEmail',
     );
-    expect(validateSignUpFields('alice@example.com', 'short9', 'short9')).toBe(
+    expect(validateSignUpFields('alice@example.com', 'short', 'short')).toBe(
       'account.errorWeakPassword',
     );
+    expect(validateSignUpFields('alice@example.com', 'short9', 'short9')).toBeNull();
     expect(validateSignUpFields('alice@example.com', 'longpassword123', 'mismatch1234')).toBe(
       'account.errorPasswordMismatch',
     );

@@ -120,9 +120,26 @@ export function useLibraryData({
     const collectionsGen = ++collectionsSyncGenRef.current;
 
     const loadAll = async (): Promise<void> => {
-      const [favs, rats, wMovies, wSeries, newEps, rawCols] = await Promise.all([
+      const [
+        favs,
+        likedMovies,
+        likedSeries,
+        dislikedMovies,
+        dislikedSeries,
+        wMovies,
+        wSeries,
+        newEps,
+        rawCols,
+      ] = await Promise.all([
         catalog.listFavorites?.(200).catch(() => []) ?? Promise.resolve([]),
-        catalog.listRatings?.({ limit: 200 }).catch(() => []) ?? Promise.resolve([]),
+        catalog.listRatings?.({ value: 'like', kind: 'movie', limit: 150 }).catch(() => []) ??
+          Promise.resolve([]),
+        catalog.listRatings?.({ value: 'like', kind: 'series', limit: 150 }).catch(() => []) ??
+          Promise.resolve([]),
+        catalog.listRatings?.({ value: 'dislike', kind: 'movie', limit: 150 }).catch(() => []) ??
+          Promise.resolve([]),
+        catalog.listRatings?.({ value: 'dislike', kind: 'series', limit: 150 }).catch(() => []) ??
+          Promise.resolve([]),
         catalog.listWatched?.(100, undefined, { kind: 'movie' }).catch(() => []) ??
           Promise.resolve([]),
         catalog.listWatched?.(100, undefined, { kind: 'series' }).catch(() => []) ??
@@ -130,6 +147,14 @@ export function useLibraryData({
         catalog.listMyListNewEpisodes?.().catch(() => []) ?? Promise.resolve([]),
         catalog.listCollections?.().catch(() => []) ?? Promise.resolve([]),
       ]);
+
+      const mergedRatingsMap = new Map<string, RatingRow>();
+      for (const batch of [likedMovies, likedSeries, dislikedMovies, dislikedSeries]) {
+        for (const row of batch) {
+          if (!mergedRatingsMap.has(row.itemKey)) mergedRatingsMap.set(row.itemKey, row);
+        }
+      }
+      const rats = [...mergedRatingsMap.values()];
 
       if (cancelled || !mountedRef.current) return;
       setFavorites(favs);

@@ -1,5 +1,6 @@
 import type {
   CategoryRow,
+  ElvItemEnrichment,
   EpisodeRow,
   FavoriteRow,
   ItemDetailRow,
@@ -109,6 +110,12 @@ export interface BoundedTtlMap<T> {
   size(): number;
 }
 
+/** Bounded snapshot of cached ELV enrichment records and settled lookup keys (`#511`). */
+export interface ElvEnrichmentCacheSnapshot {
+  readonly enrichmentByKey: ReadonlyMap<string, ElvItemEnrichment>;
+  readonly resolvedKeys: ReadonlySet<string>;
+}
+
 /** Options for {@link createCatalogUiCache}. */
 export interface CatalogUiCacheOptions {
   readonly revision?: number;
@@ -168,6 +175,11 @@ export interface CatalogUiCache {
   getSearch(query: string, scope: SearchScope): CachedSearchSnapshot | null;
   setSearch(snapshot: CachedSearchSnapshot): void;
   clearSearch(): void;
+  getElvEnrichmentSnapshot?(keys: readonly string[]): ElvEnrichmentCacheSnapshot;
+  setElvEnrichmentBatch?(
+    entries: ReadonlyMap<string, ElvItemEnrichment>,
+    resolvedKeys?: readonly string[],
+  ): void;
   invalidateSource(sourceId: string): void;
   clear(): void;
 }

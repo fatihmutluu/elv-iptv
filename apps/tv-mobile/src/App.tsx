@@ -89,7 +89,10 @@ import {
 } from './storage';
 import { createMobileDiagnosticsPort } from './storage/diag-log';
 import { createTvMobileCatalogSnapshotBridge } from './sync/catalog-snapshot';
-import { createMobileQrScannerPort } from './sync/qr-scanner-port';
+import {
+  createMobileQrScannerPort,
+  createNativeMobileQrScannerBackend,
+} from './sync/qr-scanner-port';
 import { classifyMobileRamBucket, extractSafeMobileErrorSignature } from './sync/sync-helpers';
 import {
   createTvMobileSyncPorts,
@@ -181,7 +184,10 @@ function AppRoot() {
     syncServerUrl: '',
   });
   const latestPrefsRef = useRef<PreferencesSnapshot>(DEFAULT_PREFERENCES);
-  const qrScannerPort = useMemo(() => createMobileQrScannerPort(), []);
+  const qrScannerPort = useMemo(
+    () => createMobileQrScannerPort(createNativeMobileQrScannerBackend()),
+    [],
+  );
   const syncPorts = useMemo(
     () =>
       createTvMobileSyncPorts({

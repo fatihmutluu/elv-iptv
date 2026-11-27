@@ -300,7 +300,7 @@ function DetailHeroInner({
             <View testID="detail-hero-icon-row" style={[styles.iconRow, { gap: theme.spacing.sm }]}>
               <IconButton
                 testID="detail-mylist"
-                icon={inMyList ? 'starFilled' : 'star'}
+                icon={inMyList ? 'check' : 'plus'}
                 active={inMyList}
                 accessibilityLabel={inMyList ? i18n.t('home.inMyList') : i18n.t('home.addToList')}
                 focusable={!isTv}

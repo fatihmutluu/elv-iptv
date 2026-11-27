@@ -1,5 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
+import { UiAdaptersProvider } from '../../adapters';
+import { ICON_PATHS } from '../../icons';
 import { buildTheme, TABULAR_NUMS_STYLE, ThemeProvider } from '../../theme';
 import { ViewportProvider } from '../../viewport';
 import { CtaButton } from '../CtaButton';
@@ -490,6 +492,65 @@ describe('PosterCard & WideCard (Cinema Quietude compliance)', () => {
     await fireEvent(screen.getByTestId('nested-poster-hover-container'), 'pointerLeave');
     expect(screen.queryByTestId('nested-poster-quick-favorite')).toBeNull();
     await nestedHoverView.unmount();
+
+    // Quick-favorite uses plus (when not saved) and check (when saved) — never star
+    const svgSpecs: unknown[] = [];
+    const iconCheckView = await render(
+      <ThemeProvider>
+        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+          <UiAdaptersProvider
+            adapters={{
+              renderSvg: ({ spec }) => {
+                svgSpecs.push(spec);
+                return <View />;
+              },
+            }}
+          >
+            <PosterCard
+              title="Arrival"
+              quickActions={{
+                onToggleFavorite,
+                isFavorite: false,
+                favoriteLabel: 'Add to My list',
+              }}
+              testID="qa-icon-poster"
+            />
+          </UiAdaptersProvider>
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+    await fireEvent(screen.getByTestId('qa-icon-poster'), 'hoverIn');
+    expect(svgSpecs).toContain(ICON_PATHS.plus);
+    expect(svgSpecs).not.toContain(ICON_PATHS.star);
+
+    svgSpecs.length = 0;
+    await iconCheckView.rerender(
+      <ThemeProvider>
+        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+          <UiAdaptersProvider
+            adapters={{
+              renderSvg: ({ spec }) => {
+                svgSpecs.push(spec);
+                return <View />;
+              },
+            }}
+          >
+            <PosterCard
+              title="Arrival"
+              quickActions={{
+                onToggleFavorite,
+                isFavorite: true,
+                favoriteLabel: 'In My list',
+              }}
+              testID="qa-icon-poster"
+            />
+          </UiAdaptersProvider>
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+    expect(svgSpecs).toContain(ICON_PATHS.check);
+    expect(svgSpecs).not.toContain(ICON_PATHS.starFilled);
+    await iconCheckView.unmount();
 
     // Never renders on touch or TV even if hoverIn fires.
     for (const vp of [

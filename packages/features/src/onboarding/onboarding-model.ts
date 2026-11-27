@@ -64,7 +64,7 @@ export interface OnboardingSourceValidationError {
 /** One-shot startup gate decision evaluated after `preferences`, `profiles`, and `sources` resolve. */
 export type StartupGateDecision = 'onboarding' | 'auto_migrate' | 'returning';
 
-const MIN_ONBOARDING_PASSWORD_LENGTH = 10;
+const MIN_ONBOARDING_PASSWORD_LENGTH = 6;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const OTHER_URI_SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:(?!\d+(?:[/?#]|$))/;
@@ -117,7 +117,7 @@ export function validateOnboardingSignIn(email: string, password: string): Messa
   return null;
 }
 
-/** Validates email + password (>= 10 chars) + matching confirm password for Screen 1 Registration. */
+/** Validates email + password (>= 6 chars) + matching confirm password for Screen 1 Registration. */
 export function validateOnboardingSignUp(
   email: string,
   password: string,

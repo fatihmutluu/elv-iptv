@@ -4,16 +4,39 @@ import type { ReactElement } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { BidirectionalPairingSnapshot } from '../ports/wave-f9-ports';
 
-/** Returns whether a bidirectional pairing session requires the 4-digit SAS confirmation card. */
-export function shouldShowSasConfirmCard(session: BidirectionalPairingSnapshot | null): boolean {
-  if (session === null || session.sas === null) return false;
-  const status: string = session.status;
+/** Returns whether the current local device is the signed-in authorizing sender of credentials. */
+function isLocalPairingSender(session: BidirectionalPairingSnapshot): boolean {
+  return (
+    (session.role === 'host' && session.direction === 'host_to_responder') ||
+    (session.role === 'responder' && session.direction === 'responder_to_host')
+  );
+}
+
+function isSasConfirmPhaseStatus(
+  status: string,
+  role: BidirectionalPairingSnapshot['role'],
+): boolean {
   return (
     status === 'awaiting_sas' ||
     status === 'responder_joined' ||
     status === 'responder_transferred' ||
-    (status === 'approved' && session.role === 'responder')
+    (status === 'approved' && role === 'responder')
   );
+}
+
+/**
+ * Returns whether a bidirectional pairing session should show interactive SAS confirmation buttons.
+ * For single-direction transfers (`host_to_responder` / `responder_to_host`), ONLY the signed-in
+ * authorizing sender shows Confirm; the signed-out receiving device stays on waiting-approval.
+ */
+export function shouldShowSasConfirmCard(session: BidirectionalPairingSnapshot | null): boolean {
+  if (session === null || session.sas === null) return false;
+  if (!isSasConfirmPhaseStatus(session.status, session.role)) return false;
+  if (session.direction === 'different_accounts') return true;
+  if (session.direction === 'host_to_responder' || session.direction === 'responder_to_host') {
+    return isLocalPairingSender(session);
+  }
+  return false;
 }
 
 /** Returns whether a bidirectional pairing session should render the waiting-for-peer card. */
@@ -24,6 +47,7 @@ export function shouldShowWaitingCard(session: BidirectionalPairingSnapshot | nu
     status === 'waiting_approval' ||
     status === 'approved' ||
     status === 'awaiting_sas' ||
+    status === 'responder_joined' ||
     status === 'responder_transferred'
   );
 }
@@ -156,9 +180,7 @@ export function BidirectionalPairingSasCard({
   const theme = useTheme();
   const i18n = useI18n();
   const isDifferent = session.direction === 'different_accounts';
-  const isLocalSender =
-    (session.role === 'host' && session.direction === 'host_to_responder') ||
-    (session.role === 'responder' && session.direction === 'responder_to_host');
+  const isLocalSender = isLocalPairingSender(session);
   const transferDir: 'host_to_responder' | 'responder_to_host' | undefined =
     session.direction === 'host_to_responder' || session.direction === 'responder_to_host'
       ? session.direction

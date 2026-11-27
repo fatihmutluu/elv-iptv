@@ -691,4 +691,39 @@ describe('createCatalogBridge', () => {
     }
     await Promise.all(calls);
   });
+
+  it('does NOT fire onChanged listeners when setRating succeeds (prevents global cache wipe & poster flash)', async () => {
+    const h = createFakeIpcRenderer();
+    const bridge = createCatalogBridge(h.ipc);
+
+    const openP = bridge.open();
+    const port = new FakeRendererPort();
+    h.deliverPort(1, port);
+    await Promise.resolve();
+    port.deliver({ type: 'result', reqId: 1, value: ok(undefined) });
+    await openP;
+
+    let changedCount = 0;
+    const off = bridge.onChanged(() => {
+      changedCount += 1;
+    });
+
+    const ratingP = bridge.setRating?.(
+      {
+        sourceId: 's1',
+        itemKey: 'x:s1:movie:1',
+        kind: 'movie',
+        title: 'Silent Horizon',
+      },
+      'like',
+    );
+    await Promise.resolve();
+    port.deliver({ type: 'result', reqId: 2, value: ok('like') });
+
+    expect(await ratingP).toEqual({ ok: true, value: 'like' });
+    expect(changedCount).toBe(0);
+
+    off();
+    await bridge.close();
+  });
 });

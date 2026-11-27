@@ -1,9 +1,28 @@
 import type { QrScannerPort } from '@elv/features';
+import { isQrScannerAvailable, scanQrCode } from '@elv/qr-scanner';
+import { Platform } from 'react-native';
 
 /** Optional native camera scanner backend injected into {@link createMobileQrScannerPort}. */
 export interface MobileQrScannerBackend {
   readonly isAvailable: () => boolean;
   readonly scan: () => Promise<string | null>;
+}
+
+/**
+ * Creates the native {@link MobileQrScannerBackend} backed by `@elv/qr-scanner` (`#510`).
+ * Always reports unavailable and resolves `null` on TV targets (`Platform.isTV === true`).
+ */
+export function createNativeMobileQrScannerBackend(): MobileQrScannerBackend {
+  return {
+    isAvailable: () => {
+      if (Platform.isTV) return false;
+      return isQrScannerAvailable();
+    },
+    scan: async () => {
+      if (Platform.isTV) return null;
+      return scanQrCode();
+    },
+  };
 }
 
 /**

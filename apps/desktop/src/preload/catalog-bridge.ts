@@ -735,7 +735,7 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
           ...(profileId === undefined ? {} : { profileId }),
         }),
       ),
-    setRating: (input, value) => notifyOnOk(callResult({ method: 'setRating', input, value })),
+    setRating: (input, value) => callResult({ method: 'setRating', input, value }),
     getRating: (itemKey, profileId) =>
       callValue({
         method: 'getRating',

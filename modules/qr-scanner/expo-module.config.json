@@ -1,0 +1,9 @@
+{
+  "platforms": ["android", "apple"],
+  "android": {
+    "modules": ["io.github.fatihmutluu.elv.qrscanner.ElvQrScannerModule"]
+  },
+  "apple": {
+    "modules": ["ElvQrScannerModule"]
+  }
+}

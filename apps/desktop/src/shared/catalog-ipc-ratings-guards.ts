@@ -71,7 +71,7 @@ const SET_RATING_INPUT_KEYS = new Set([
   'year',
   'rating',
 ]);
-const LIST_RATINGS_OPT_KEYS = new Set(['value', 'limit', 'profileId', 'parentalUnlocked']);
+const LIST_RATINGS_OPT_KEYS = new Set(['value', 'kind', 'limit', 'profileId', 'parentalUnlocked']);
 
 const SET_RATING_CALL_KEYS = new Set(['method', 'input', 'value']);
 const GET_RATING_CALL_KEYS = new Set(['method', 'itemKey', 'profileId']);
@@ -110,6 +110,7 @@ function isSetRatingInput(x: unknown): x is SetRatingInput {
 function isListRatingsOptions(x: unknown): x is ListRatingsOptions {
   if (!isRecord(x) || !hasOnlyKeys(x, LIST_RATINGS_OPT_KEYS)) return false;
   if (x['value'] !== undefined && !isRatingValue(x['value'])) return false;
+  if (x['kind'] !== undefined && !isRatingKind(x['kind'])) return false;
   if (!isOptionalUserLimit(x['limit'])) return false;
   if (!isOptionalProfileId(x['profileId'])) return false;
   return x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean';

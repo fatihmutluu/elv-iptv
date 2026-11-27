@@ -1,4 +1,4 @@
-import type { ItemRow, NowNextEntry } from '@elv/data';
+import type { ElvItemEnrichment, ItemRow, NowNextEntry } from '@elv/data';
 import type {
   BoundedTtlMap,
   CachedCatalogKindState,
@@ -10,6 +10,7 @@ import type {
   CatalogUiCache,
   CatalogUiCacheMetrics,
   CatalogUiCacheOptions,
+  ElvEnrichmentCacheSnapshot,
 } from './catalog-ui-cache-types';
 
 export type {
@@ -20,6 +21,7 @@ export type {
   CachedHomeSnapshot,
   CatalogUiCache,
   CatalogUiCacheOptions,
+  ElvEnrichmentCacheSnapshot,
 } from './catalog-ui-cache-types';
 
 /** Max category rails retained per Movies/Series discovery slice (safe for 1 GB TV sticks). */
@@ -34,6 +36,8 @@ export const MAX_LIVE_CHANNEL_CATEGORIES = 8;
 export const LIVE_CHANNEL_ROWS_CAP = 120;
 /** Max Detail screen entries retained in the bounded LRU cache. */
 export const MAX_DETAIL_ENTRIES = 32;
+/** Max ELV enrichment entries (matched or settled-unmatched) retained via LRU (`#511`). */
+export const MAX_ELV_ENRICHMENT_ENTRIES = 1_500;
 const CACHE_EPG_MAX_ENTRIES = 240;
 const CACHE_NOW_NEXT_TTL_MS = 90_000;
 
@@ -181,9 +185,10 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
   );
 
   const detailByItemKey = createBoundedLru<CachedDetailEntry>(MAX_DETAIL_ENTRIES);
+  const elvEnrichment = createBoundedLru<ElvItemEnrichment | null>(MAX_ELV_ENRICHMENT_ENTRIES);
   let search: CachedSearchSnapshot | null = null;
 
-  function clearAll(): void {
+  function clearAll(preserveElvEnrichment = false): void {
     home = null;
     catalogByKind.movie = null;
     catalogByKind.series = null;
@@ -194,6 +199,9 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
     nowNext.clear();
     epgWindow.clear();
     detailByItemKey.clear();
+    if (!preserveElvEnrichment) {
+      elvEnrichment.clear();
+    }
     search = null;
   }
 
@@ -222,11 +230,12 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
       ) {
         return;
       }
+      const localeChanged = nextLocale !== locale;
       revision = nextRevision;
       locale = nextLocale;
       profileKey = resolvedProfileKey;
       elvKey = resolvedElvKey;
-      clearAll();
+      clearAll(!localeChanged);
     },
 
     getHome: () => {
@@ -340,6 +349,35 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
       search = null;
     },
 
+    getElvEnrichmentSnapshot(keys): ElvEnrichmentCacheSnapshot {
+      const enrichmentByKey = new Map<string, ElvItemEnrichment>();
+      const resolvedKeys = new Set<string>();
+      for (const key of keys) {
+        if (key === '') continue;
+        const hit = elvEnrichment.get(key);
+        if (hit !== undefined) {
+          resolvedKeys.add(key);
+          if (hit !== null) {
+            enrichmentByKey.set(key, hit);
+          }
+        }
+      }
+      return { enrichmentByKey, resolvedKeys };
+    },
+    setElvEnrichmentBatch(entries, resolvedKeys) {
+      if (resolvedKeys !== undefined) {
+        for (const key of resolvedKeys) {
+          if (key === '') continue;
+          elvEnrichment.set(key, entries.get(key) ?? null);
+        }
+      }
+      for (const [key, value] of entries) {
+        if (key !== '') {
+          elvEnrichment.set(key, value);
+        }
+      }
+    },
+
     invalidateSource(sourceId) {
       const catPrefix = `${sourceId}|`;
       home = null;
@@ -381,9 +419,13 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
       detailByItemKey.deleteWhere(
         (key, entry) => entry.sourceId === sourceId || itemKeyBelongsToSource(key, sourceId),
       );
+      elvEnrichment.deleteWhere(
+        (key, entry) =>
+          (entry !== null && entry.sourceId === sourceId) || itemKeyBelongsToSource(key, sourceId),
+      );
       search = null;
     },
 
-    clear: clearAll,
+    clear: () => clearAll(false),
   };
 }

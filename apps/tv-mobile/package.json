@@ -21,6 +21,7 @@
     "@elv/i18n": "workspace:*",
     "@elv/lan-pairing": "workspace:*",
     "@elv/playback": "workspace:*",
+    "@elv/qr-scanner": "workspace:*",
     "@elv/remote-keys": "workspace:*",
     "@elv/sources": "workspace:*",
     "@elv/sync": "workspace:*",

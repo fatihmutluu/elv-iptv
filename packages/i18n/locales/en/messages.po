@@ -3116,7 +3116,7 @@ msgid "account.passwordLabel"
 msgstr "Password"
 
 msgid "account.passwordPlaceholder"
-msgstr "At least 10 characters"
+msgstr "At least 6 characters"
 
 msgid "account.confirmPasswordLabel"
 msgstr "Confirm password"
@@ -3209,7 +3209,7 @@ msgid "account.errorInvalidEmail"
 msgstr "Enter a valid email address."
 
 msgid "account.errorWeakPassword"
-msgstr "Password must be at least 10 characters."
+msgstr "Password must be at least 6 characters."
 
 msgid "account.errorPasswordMismatch"
 msgstr "Passwords do not match."
@@ -3627,7 +3627,7 @@ msgid "library.title"
 msgstr "Library"
 
 msgid "library.tabFollowing"
-msgstr "Following"
+msgstr "My List"
 
 msgid "library.tabLikes"
 msgstr "Likes"
@@ -3653,8 +3653,20 @@ msgstr "Collections"
 msgid "library.railLiked"
 msgstr "Liked"
 
+msgid "library.railLikedMovies"
+msgstr "Liked Movies"
+
+msgid "library.railLikedSeries"
+msgstr "Liked Series"
+
 msgid "library.railDisliked"
 msgstr "Disliked"
+
+msgid "library.railDislikedMovies"
+msgstr "Disliked Movies"
+
+msgid "library.railDislikedSeries"
+msgstr "Disliked Series"
 
 msgid "library.railWatchedMovies"
 msgstr "Watched movies"
@@ -3681,10 +3693,10 @@ msgid "library.backToTab"
 msgstr "Back"
 
 msgid "library.emptyFollowingTitle"
-msgstr "Nothing followed yet"
+msgstr "Your list is empty"
 
 msgid "library.emptyFollowingBody"
-msgstr "Star live channels, series, or movies to keep them together here."
+msgstr "Add live channels, series, or movies to My List to keep them together here."
 
 msgid "library.emptyLikesTitle"
 msgstr "No ratings yet"
@@ -4104,7 +4116,7 @@ msgid "catalog.elvPicks.emptyTitle"
 msgstr "Building your personal picks"
 
 msgid "catalog.elvPicks.emptyBody"
-msgstr "Like, star, or watch a few titles and ELV Mode will tailor picks from your library."
+msgstr "Like, save to My List, or watch a few titles and ELV Mode will tailor picks from your library."
 
 msgid "elv.reason.moreLikeThis"
 msgstr "Because of your likes"
@@ -4257,7 +4269,7 @@ msgid "elv.preview.badgeRaw"
 msgstr "Raw IPTV Feed"
 
 msgid "elv.preview.captionAllOn"
-msgstr "Clean posters, IMDb ratings, merged copies, and curated genres."
+msgstr "Smart categories, personalized movie & series picks, clean posters, and merged copies."
 
 msgid "elv.preview.captionChaos"
 msgstr "Toggle ELV Mode features on to tame duplicates, broken art, and messy folders."
@@ -4379,6 +4391,33 @@ msgstr "Syncing your data…"
 msgid "onboarding.syncing.subtitle"
 msgstr "Downloading your encrypted vault and preferences."
 
+msgid "onboarding.syncing.stageAccount"
+msgstr "Syncing account & profiles"
+
+msgid "onboarding.syncing.stageSources"
+msgstr "Loading sources & catalog"
+
+msgid "onboarding.syncing.stagePreparing"
+msgstr "Preparing ELV Mode & home screen"
+
+msgid "onboarding.syncing.sourceCounter"
+msgstr "Source {index} of {total}: {name}"
+
+msgid "onboarding.syncing.itemsProgress"
+msgstr "{count} items loaded"
+
+msgid "onboarding.syncing.failedTitle"
+msgstr "Some sources could not finish loading"
+
+msgid "onboarding.syncing.failedBody"
+msgstr "Your account synced cleanly. Retry now or continue into the app and finish loading later."
+
+msgid "onboarding.syncing.retryAction"
+msgstr "Retry"
+
+msgid "onboarding.syncing.continueAction"
+msgstr "Continue to App"
+
 msgid "onboarding.source.title"
 msgstr "Add Your First Source"
 
@@ -4398,7 +4437,7 @@ msgid "onboarding.elv.title"
 msgstr "Meet ELV Mode"
 
 msgid "onboarding.elv.subtitle"
-msgstr "Transform raw IPTV lists into a cinema-grade library with clean posters, ratings, merged duplicates, and curated genres."
+msgstr "Organize messy playlists into smart categories, get personalized movie and series recommendations, clean up posters and ratings, and merge duplicate copies."
 
 msgid "onboarding.elv.masterToggle"
 msgstr "ELV Mode"
@@ -4410,7 +4449,10 @@ msgid "onboarding.elv.postersToggle"
 msgstr "Enhance posters & ratings"
 
 msgid "onboarding.elv.categoriesToggle"
-msgstr "Organize categories by genre"
+msgstr "Smart category organization"
+
+msgid "onboarding.elv.recommendationsToggle"
+msgstr "Personalized movie & series recommendations"
 
 msgid "onboarding.import.loading"
 msgstr "Importing your library…"

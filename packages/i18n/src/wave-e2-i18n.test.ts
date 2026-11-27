@@ -15,8 +15,8 @@ const EXPECTED_PAIRS: ReadonlyArray<readonly [MessageId, string, string]> = [
   ],
   [
     'catalog.elvPicks.emptyBody',
-    'Like, star, or watch a few titles and ELV Mode will tailor picks from your library.',
-    'Birkaç yapımı beğen, yıldızla veya izle; ELV Mode kütüphanenden sana özel öneriler çıkarsın.',
+    'Like, save to My List, or watch a few titles and ELV Mode will tailor picks from your library.',
+    'Birkaç yapımı beğen, listene ekle veya izle; ELV Mode kütüphanenden sana özel öneriler çıkarsın.',
   ],
   ['elv.reason.moreLikeThis', 'Because of your likes', 'Beğendiklerine benzer'],
   ['elv.reason.trending', 'Trending now', 'Gündemde'],

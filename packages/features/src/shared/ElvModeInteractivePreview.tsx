@@ -6,6 +6,7 @@ import {
   type Theme,
   useI18n,
   useTheme,
+  webTransition,
 } from '@elv/ui-kit';
 import { type ReactElement, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -144,23 +145,45 @@ function PreviewCardTile({
   const displayTitle =
     isCleanMerged && card.titleKey !== null ? i18n.t(card.titleKey) : card.rawFilename;
   const subMetaText = card.cleanPoster ? card.year : card.rawQualityTag;
+  const frameTransition = webTransition(theme, 'border-color, background-color, opacity');
+  const layerTransition = webTransition(theme, 'opacity');
 
   return (
     <View testID={`elv-preview-card-${index}`} style={s.cardCol}>
       <View
         style={[
           s.posterFrame,
+          frameTransition,
           {
             borderRadius: theme.radius.card,
             borderColor: card.cleanPoster ? theme.colors.glassBorder : theme.colors.dangerBorder,
-            borderStyle: card.cleanPoster ? 'solid' : 'dashed',
+            borderStyle: 'solid',
             backgroundColor: theme.colors.bgRail,
           },
         ]}
       >
+        {/* Keep both visual layers persistently mounted so toggling ELV Mode crossfades with zero unmount flicker */}
+        <View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, layerTransition, { opacity: card.cleanPoster ? 1 : 0 }]}
+        >
+          <CleanPosterComposition artworkId={card.artworkId} theme={theme} />
+        </View>
+        <View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, layerTransition, { opacity: card.cleanPoster ? 0 : 1 }]}
+        >
+          <View
+            style={[s.glitchTop, { backgroundColor: hexToRgba(theme.colors.dangerBorder, 0.24) }]}
+          />
+          <View
+            style={[s.glitchMid, { backgroundColor: hexToRgba(theme.colors.textMuted, 0.22) }]}
+          />
+          <View style={[s.glitchBot, { backgroundColor: hexToRgba(theme.colors.accent, 0.18) }]} />
+        </View>
+
         {card.cleanPoster ? (
           <View testID={`elv-preview-clean-poster-${index}`} style={StyleSheet.absoluteFill}>
-            <CleanPosterComposition artworkId={card.artworkId} theme={theme} />
             <View
               style={[
                 s.ratingBadge,
@@ -212,15 +235,6 @@ function PreviewCardTile({
           </View>
         ) : (
           <View testID={`elv-preview-chaos-poster-${index}`} style={s.chaosLayer}>
-            <View
-              style={[s.glitchTop, { backgroundColor: hexToRgba(theme.colors.dangerBorder, 0.24) }]}
-            />
-            <View
-              style={[s.glitchMid, { backgroundColor: hexToRgba(theme.colors.textMuted, 0.22) }]}
-            />
-            <View
-              style={[s.glitchBot, { backgroundColor: hexToRgba(theme.colors.accent, 0.18) }]}
-            />
             <View style={s.chaosTopRow}>
               <View
                 style={[
@@ -286,9 +300,9 @@ function PreviewCardTile({
         )}
       </View>
 
-      <View style={s.metaBlock}>
+      <View style={[s.metaBlock, { minHeight: compact ? 42 : 46 }]}>
         <Text
-          numberOfLines={isCleanMerged ? 1 : 2}
+          numberOfLines={2}
           style={[
             compact ? theme.typography.micro : theme.typography.caption,
             s.cardTitle,
@@ -388,51 +402,52 @@ export function ElvModeInteractivePreview({
         testID="elv-preview-categories"
         style={[
           s.catRow,
-          state.effectiveCategories
-            ? {
-                borderBottomWidth: 1,
-                borderBottomColor: theme.colors.surfaceBorder,
-                gap: theme.spacing.md,
-              }
-            : { gap: theme.spacing.xs },
+          {
+            minHeight: 28,
+            borderBottomWidth: 1,
+            borderBottomColor: state.effectiveCategories
+              ? theme.colors.surfaceBorder
+              : 'transparent',
+            gap: state.effectiveCategories ? theme.spacing.md : theme.spacing.xs,
+          },
         ]}
       >
-        {state.categories.map((cat) =>
-          cat.clean ? (
-            <View key={cat.id} style={s.cleanCatTab}>
-              <Text
-                numberOfLines={1}
-                style={[
-                  theme.typography.caption,
-                  {
-                    color: cat.active ? theme.colors.textPrimary : theme.colors.textSecondary,
-                    fontWeight: cat.active ? '700' : '500',
-                  },
-                ]}
-              >
-                {i18n.t(cat.labelKey)}
-              </Text>
-              {cat.active ? (
-                <View style={[s.cleanCatBar, { backgroundColor: theme.colors.accent }]} />
-              ) : null}
-            </View>
-          ) : (
-            <View
-              key={cat.id}
-              style={[
-                s.rawCat,
-                { backgroundColor: theme.colors.bgRail, borderColor: theme.colors.surfaceBorder },
-              ]}
+        {state.categories.map((cat) => (
+          <View
+            key={cat.slotKey}
+            style={
+              cat.clean
+                ? s.cleanCatTab
+                : [
+                    s.rawCat,
+                    {
+                      backgroundColor: theme.colors.bgRail,
+                      borderColor: theme.colors.surfaceBorder,
+                    },
+                  ]
+            }
+          >
+            <Text
+              numberOfLines={1}
+              style={
+                cat.clean
+                  ? [
+                      theme.typography.caption,
+                      {
+                        color: cat.active ? theme.colors.textPrimary : theme.colors.textSecondary,
+                        fontWeight: cat.active ? '700' : '500',
+                      },
+                    ]
+                  : [theme.typography.micro, s.rawCatTxt, { color: theme.colors.textMuted }]
+              }
             >
-              <Text
-                numberOfLines={1}
-                style={[theme.typography.micro, s.rawCatTxt, { color: theme.colors.textMuted }]}
-              >
-                {i18n.t(cat.labelKey)}
-              </Text>
-            </View>
-          ),
-        )}
+              {i18n.t(cat.labelKey)}
+            </Text>
+            {cat.clean && cat.active ? (
+              <View style={[s.cleanCatBar, { backgroundColor: theme.colors.accent }]} />
+            ) : null}
+          </View>
+        ))}
       </View>
 
       <View
@@ -441,7 +456,7 @@ export function ElvModeInteractivePreview({
       >
         {state.cards.map((card, index) => (
           <PreviewCardTile
-            key={card.id}
+            key={card.slotKey}
             card={card}
             index={index}
             compact={compact}

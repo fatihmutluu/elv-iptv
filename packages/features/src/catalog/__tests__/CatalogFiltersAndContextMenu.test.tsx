@@ -4,6 +4,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import { Platform } from 'react-native';
 import type { PlayTarget } from '../../ports/play-target';
 import type { DetailTarget } from '../../shared';
+import { buildCatalogPosterContextMenuItems } from '../catalog-context-menu';
 import {
   createAndroidSource,
   createMockCatalog,
@@ -497,5 +498,25 @@ describe('CatalogDiscoveryScreen — Quick Filter Tabs & Universal Context Menus
     });
 
     await view.unmount();
+
+    const t = (k: string) => k;
+    const movieMenuNotSaved = buildCatalogPosterContextMenuItems({
+      item: makeItem(0, 0),
+      isFavorite: false,
+      isWatched: false,
+      i18n: { t },
+      onOpenDetail: jest.fn(),
+      onQuickToggleFavorite: jest.fn(),
+    });
+    expect(movieMenuNotSaved.find((m) => m.id === 'favorite')?.icon).toBe('plus');
+    const movieMenuSaved = buildCatalogPosterContextMenuItems({
+      item: makeItem(0, 0),
+      isFavorite: true,
+      isWatched: false,
+      i18n: { t },
+      onOpenDetail: jest.fn(),
+      onQuickToggleFavorite: jest.fn(),
+    });
+    expect(movieMenuSaved.find((m) => m.id === 'favorite')?.icon).toBe('check');
   });
 });

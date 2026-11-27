@@ -22,13 +22,38 @@ describe('buildElvPreviewState', () => {
     expect(state.captionKey).toBe('elv.preview.captionAllOn');
 
     expect(state.categories).toEqual([
-      { id: 'scifi', labelKey: 'elv.preview.genre.scifi', clean: true, active: true },
-      { id: 'drama', labelKey: 'elv.preview.genre.drama', clean: true, active: false },
-      { id: 'thriller', labelKey: 'elv.preview.genre.thriller', clean: true, active: false },
-      { id: 'mystery', labelKey: 'elv.preview.genre.mystery', clean: true, active: false },
+      {
+        id: 'scifi',
+        slotKey: 'cat-slot-0',
+        labelKey: 'elv.preview.genre.scifi',
+        clean: true,
+        active: true,
+      },
+      {
+        id: 'drama',
+        slotKey: 'cat-slot-1',
+        labelKey: 'elv.preview.genre.drama',
+        clean: true,
+        active: false,
+      },
+      {
+        id: 'thriller',
+        slotKey: 'cat-slot-2',
+        labelKey: 'elv.preview.genre.thriller',
+        clean: true,
+        active: false,
+      },
+      {
+        id: 'mystery',
+        slotKey: 'cat-slot-3',
+        labelKey: 'elv.preview.genre.mystery',
+        clean: true,
+        active: false,
+      },
     ]);
 
     expect(state.cards).toHaveLength(4);
+    expect(state.cards.map((c) => c.slotKey)).toEqual(['slot-0', 'slot-1', 'slot-2', 'slot-3']);
     expect(state.cards.map((c) => c.titleKey)).toEqual([
       'elv.preview.film1.title',
       'elv.preview.film2.title',
@@ -66,12 +91,31 @@ describe('buildElvPreviewState', () => {
     expect(state.captionKey).toBe('elv.preview.captionChaos');
 
     expect(state.categories).toEqual([
-      { id: 'raw-1', labelKey: 'elv.preview.rawCat1', clean: false, active: true },
-      { id: 'raw-2', labelKey: 'elv.preview.rawCat2', clean: false, active: false },
-      { id: 'raw-3', labelKey: 'elv.preview.rawCat3', clean: false, active: false },
+      {
+        id: 'raw-1',
+        slotKey: 'cat-slot-0',
+        labelKey: 'elv.preview.rawCat1',
+        clean: false,
+        active: true,
+      },
+      {
+        id: 'raw-2',
+        slotKey: 'cat-slot-1',
+        labelKey: 'elv.preview.rawCat2',
+        clean: false,
+        active: false,
+      },
+      {
+        id: 'raw-3',
+        slotKey: 'cat-slot-2',
+        labelKey: 'elv.preview.rawCat3',
+        clean: false,
+        active: false,
+      },
     ]);
 
     expect(state.cards).toHaveLength(4);
+    expect(state.cards.map((c) => c.slotKey)).toEqual(['slot-0', 'slot-1', 'slot-2', 'slot-3']);
     expect(state.cards.map((c) => c.rawFilename)).toEqual([...ELV_PREVIEW_DUPLICATE_FILENAMES]);
     expect(state.cards.every((c) => c.isDuplicate && !c.cleanPoster && c.titleKey === null)).toBe(
       true,

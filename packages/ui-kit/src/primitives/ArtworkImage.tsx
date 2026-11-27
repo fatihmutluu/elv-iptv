@@ -57,6 +57,10 @@ export interface ArtworkImageProps {
   deadHosts?: DeadHostRegistry;
   /** Injectable loaded-URI session cache for zero-flicker revisits (defaults to {@link defaultLoadedArtworkUris}, `#405`). */
   loadedUris?: LoadedUriCache;
+  /** Invoked when the active `uri` finishes loading (or immediately on warm cache hit). */
+  onLoad?: () => void;
+  /** Invoked when the active `uri` permanently fails to load (or hits a dead host). */
+  onError?: (error?: ImageErrorInfo) => void;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }
@@ -135,6 +139,8 @@ export function ArtworkImage({
   decorative = false,
   deadHosts = defaultDeadHostRegistry,
   loadedUris = defaultLoadedArtworkUris,
+  onLoad,
+  onError,
   style,
   testID,
 }: ArtworkImageProps): ReactElement {
@@ -151,7 +157,34 @@ export function ArtworkImage({
     readonly source: string;
     readonly local: string | null;
   } | null>(null);
-  const [rejectedLocalUri, setRejectedLocalUri] = useState<string | null>(null);
+  const [rejectedLocal, setRejectedLocal] = useState<{
+    readonly source: string;
+    readonly local: string;
+  } | null>(null);
+  const [lastLoaded, setLastLoaded] = useState<{
+    readonly sourceUri: string;
+    readonly renderUri: string;
+  } | null>(() =>
+    cachedOnRender
+      ? {
+          sourceUri: trimmedUri,
+          renderUri: getRememberedLocalUri(loadedUris, trimmedUri) ?? trimmedUri,
+        }
+      : null,
+  );
+
+  const onLoadRef = useRef(onLoad);
+  const onErrorRef = useRef(onError);
+  onLoadRef.current = onLoad;
+  onErrorRef.current = onError;
+  const lastPropUriRef = useRef(trimmedUri);
+  const lastNotifiedLoadUriRef = useRef<string | null>(null);
+  const lastNotifiedErrorUriRef = useRef<string | null>(null);
+  if (lastPropUriRef.current !== trimmedUri) {
+    lastPropUriRef.current = trimmedUri;
+    lastNotifiedLoadUriRef.current = null;
+    lastNotifiedErrorUriRef.current = null;
+  }
 
   const failed =
     trimmedUri.length === 0 || failedUri === trimmedUri || deadHosts.isDead(trimmedUri);
@@ -202,7 +235,14 @@ export function ArtworkImage({
       ? resolvedState.local
       : null;
   const localCandidate =
-    rawLocalCandidate !== null && rawLocalCandidate !== rejectedLocalUri ? rawLocalCandidate : null;
+    rawLocalCandidate !== null &&
+    !(
+      rejectedLocal !== null &&
+      rejectedLocal.source === trimmedUri &&
+      rejectedLocal.local === rawLocalCandidate
+    )
+      ? rawLocalCandidate
+      : null;
   const effectiveUri = localCandidate ?? trimmedUri;
 
   const activeUriRef = useRef(trimmedUri);
@@ -217,7 +257,29 @@ export function ArtworkImage({
       activeUriRef.current = '';
       activeRenderUriRef.current = '';
     };
-  }, [trimmedUri, effectiveUri]);
+  }, [effectiveUri, trimmedUri]);
+
+  useEffect(() => {
+    if (failed) {
+      setLastLoaded(null);
+      if (trimmedUri.length > 0 && lastNotifiedErrorUriRef.current !== trimmedUri) {
+        lastNotifiedErrorUriRef.current = trimmedUri;
+        onErrorRef.current?.();
+      }
+      return;
+    }
+    if (isLoaded && trimmedUri.length > 0) {
+      setLastLoaded((prev) =>
+        prev && prev.sourceUri === trimmedUri && prev.renderUri === effectiveUri
+          ? prev
+          : { sourceUri: trimmedUri, renderUri: effectiveUri },
+      );
+      if (cachedOnRender && lastNotifiedLoadUriRef.current !== trimmedUri) {
+        lastNotifiedLoadUriRef.current = trimmedUri;
+        onLoadRef.current?.();
+      }
+    }
+  }, [cachedOnRender, effectiveUri, failed, isLoaded, trimmedUri]);
 
   const handleLoadFor = useCallback(
     (sourceUri: string, renderUri: string) => () => {
@@ -234,7 +296,12 @@ export function ArtworkImage({
       if (renderUri !== sourceUri) {
         rememberLocalUri(loadedUris, sourceUri, renderUri);
       }
+      setLastLoaded({ sourceUri, renderUri });
       setLoadedUri(sourceUri);
+      if (lastNotifiedLoadUriRef.current !== sourceUri) {
+        lastNotifiedLoadUriRef.current = sourceUri;
+        onLoadRef.current?.();
+      }
     },
     [deadHosts, loadedUris],
   );
@@ -250,11 +317,16 @@ export function ArtworkImage({
       }
       if (renderUri !== sourceUri) {
         forgetLocalUri(loadedUris, sourceUri);
-        setRejectedLocalUri(renderUri);
+        setRejectedLocal({ source: sourceUri, local: renderUri });
         return;
       }
+      setLastLoaded(null);
       deadHosts.recordFailure(sourceUri, error);
       setFailedUri(sourceUri);
+      if (lastNotifiedErrorUriRef.current !== sourceUri) {
+        lastNotifiedErrorUriRef.current = sourceUri;
+        onErrorRef.current?.(error);
+      }
     },
     [deadHosts, loadedUris],
   );
@@ -327,6 +399,8 @@ export function ArtworkImage({
     : undefined;
 
   const decorativeViewProps = decorative ? DECORATIVE_VIEW_PROPS : undefined;
+  const hasRetainedUnderlay =
+    !failed && !isLoaded && lastLoaded !== null && (!resolutionReady || !showPlate);
 
   return (
     <View
@@ -361,7 +435,7 @@ export function ArtworkImage({
         </View>
       ) : (
         <>
-          {!isLoaded && !showPlate ? (
+          {!isLoaded && !showPlate && !hasRetainedUnderlay ? (
             <View
               testID={testID ? `${testID}-placeholder` : undefined}
               {...DECORATIVE_VIEW_PROPS}
@@ -371,6 +445,39 @@ export function ArtworkImage({
                 placeholderSheen,
               ]}
             />
+          ) : null}
+          {hasRetainedUnderlay ? (
+            <View
+              testID={testID ? `${testID}-prev` : undefined}
+              {...decorativeViewProps}
+              style={[styles.placeholder, zoomStyle]}
+            >
+              <View style={[styles.image, webInvertStyle]}>
+                {!resolutionReady && adapters.renderImage ? (
+                  adapters.renderImage({
+                    uri: lastLoaded.renderUri,
+                    resizeMode,
+                    maxDecodePx: cappedPx,
+                    style: styles.image,
+                    ...(decorative ? {} : { accessibilityLabel: label }),
+                  })
+                ) : (
+                  <Image
+                    testID={testID ? `${testID}-prev-img` : undefined}
+                    source={
+                      isWeb
+                        ? { uri: lastLoaded.renderUri }
+                        : { uri: lastLoaded.renderUri, width: cappedPx, height: cappedPx }
+                    }
+                    resizeMode={resizeMode}
+                    resizeMethod="resize"
+                    fadeDuration={0}
+                    {...(decorative ? { accessible: false } : { accessibilityLabel: label })}
+                    style={styles.image}
+                  />
+                )}
+              </View>
+            </View>
           ) : null}
           {resolutionReady ? (
             <View

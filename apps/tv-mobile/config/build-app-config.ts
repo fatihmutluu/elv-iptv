@@ -1,6 +1,7 @@
 import type { ExpoConfig } from 'expo/config';
 import { withAccessibilityFonts } from './with-accessibility-fonts.ts';
 import { withAetherFrameworks } from './with-aether-frameworks.ts';
+import { withAndroidCameraFeature } from './with-android-camera-feature.ts';
 import { withAndroidDisplay } from './with-android-display.ts';
 import { withIosExternalDisplay } from './with-ios-external-display.ts';
 
@@ -163,7 +164,10 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
     env.ELV_SYNC_SERVER_URL ?? env.EXPO_PUBLIC_SYNC_SERVER_URL,
   );
   const appLinkHost = resolveAppLinkHost(env, syncServerUrl);
-  const androidPermissions = tv || store === 'amazon' ? [FIRE_OS_VOICE_PERMISSION] : undefined;
+  const androidPermissionsList: string[] = [];
+  if (tv || store === 'amazon') androidPermissionsList.push(FIRE_OS_VOICE_PERMISSION);
+  if (!tv) androidPermissionsList.push('android.permission.CAMERA');
+  const androidPermissions = androidPermissionsList.length > 0 ? androidPermissionsList : undefined;
 
   const plugins: NonNullable<ExpoConfig['plugins']> = [
     [
@@ -200,6 +204,9 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
   plugins.push([withAndroidDisplay, { isTv: tv }] as unknown as NonNullable<
     ExpoConfig['plugins']
   >[number]);
+  plugins.push([withAndroidCameraFeature, { isTv: tv }] as unknown as NonNullable<
+    ExpoConfig['plugins']
+  >[number]);
   plugins.push([withIosExternalDisplay, { isTv: tv }] as unknown as NonNullable<
     ExpoConfig['plugins']
   >[number]);
@@ -226,7 +233,10 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
             ],
           }
         : {}),
-      blockedPermissions: [...BLOCKED_ANDROID_PERMISSIONS],
+      blockedPermissions: [
+        ...BLOCKED_ANDROID_PERMISSIONS,
+        ...(tv ? ['android.permission.CAMERA'] : []),
+      ],
       predictiveBackGestureEnabled: false,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
@@ -267,6 +277,7 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
           'ELV IPTV uses your local network to discover AirPlay receivers and pair devices over QR code.',
         ...(!tv
           ? {
+              NSCameraUsageDescription: 'ELV IPTV uses the camera to scan pairing QR codes.',
               UIBackgroundModes: ['audio'],
               LSApplicationQueriesSchemes: [...IOS_EXTERNAL_PLAYER_QUERY_SCHEMES],
             }

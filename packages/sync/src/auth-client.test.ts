@@ -37,6 +37,10 @@ describe('auth-client zero-knowledge flow', () => {
       ok: false,
       error: 'weak_password',
     });
+    expect(validateSignupInput('user@example.com', 'abc123', 'abc123')).toEqual({
+      ok: true,
+      value: { email: 'user@example.com', password: 'abc123' },
+    });
     expect(validateSignupInput('user@example.com', 'longpassword123', 'otherpassword12')).toEqual({
       ok: false,
       error: 'password_mismatch',

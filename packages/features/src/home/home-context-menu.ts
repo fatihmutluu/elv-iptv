@@ -239,7 +239,7 @@ export function buildHomeCardContextMenuItems({
     items.push({
       id: 'mylist',
       label: t(isFavorite ? 'context.removeFromMyList' : 'context.addToMyList'),
-      icon: isFavorite ? 'starFilled' : 'star',
+      icon: isFavorite ? 'check' : 'plus',
       testID: 'home-context-mylist',
       onSelect: () => onToggleFavorite(entry),
     });

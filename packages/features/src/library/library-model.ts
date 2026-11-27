@@ -65,10 +65,12 @@ export interface PartitionedLibraryFavorites {
   readonly movies: readonly LibraryCardItem[];
 }
 
-/** Partitioned personal ratings for the `Likes` sub-tab. */
+/** Partitioned personal ratings for the `Likes` sub-tab (2x2 split: Likes top, Dislikes bottom). */
 export interface PartitionedLibraryRatings {
-  readonly liked: readonly LibraryCardItem[];
-  readonly disliked: readonly LibraryCardItem[];
+  readonly likedMovies: readonly LibraryCardItem[];
+  readonly likedSeries: readonly LibraryCardItem[];
+  readonly dislikedMovies: readonly LibraryCardItem[];
+  readonly dislikedSeries: readonly LibraryCardItem[];
 }
 
 /** Partitioned offline downloads for the `Downloads` sub-tab. */
@@ -180,12 +182,14 @@ export function partitionFavoritesForLibrary(
   return { live, series, movies };
 }
 
-/** Partitions personal ratings into `Liked` and `Disliked` Movies & Series rails. */
+/** Partitions personal ratings into 4 rails: Liked Movies/Series and Disliked Movies/Series. */
 export function partitionRatingsForLibrary(
   ratings: readonly RatingRow[],
 ): PartitionedLibraryRatings {
-  const liked: LibraryCardItem[] = [];
-  const disliked: LibraryCardItem[] = [];
+  const likedMovies: LibraryCardItem[] = [];
+  const likedSeries: LibraryCardItem[] = [];
+  const dislikedMovies: LibraryCardItem[] = [];
+  const dislikedSeries: LibraryCardItem[] = [];
 
   for (const row of ratings) {
     const meta = formatVodMeta(row.year, row.rating);
@@ -201,11 +205,17 @@ export function partitionRatingsForLibrary(
       ratingValue: row.value,
       ...(meta ? { subtitle: meta } : {}),
     };
-    if (row.value === 'like') liked.push(card);
-    else disliked.push(card);
+    if (row.value === 'like') {
+      if (row.kind === 'movie') likedMovies.push(card);
+      else likedSeries.push(card);
+    } else if (row.kind === 'movie') {
+      dislikedMovies.push(card);
+    } else {
+      dislikedSeries.push(card);
+    }
   }
 
-  return { liked, disliked };
+  return { likedMovies, likedSeries, dislikedMovies, dislikedSeries };
 }
 
 /** Maps `catalog.listWatched` rows into deduplicated Library poster cards. */
@@ -529,10 +539,14 @@ export function resolveLibrarySeeAllItems(input: {
       return input.favPartition.series;
     case 'movies':
       return input.favPartition.movies;
-    case 'liked':
-      return input.ratingPartition.liked;
-    case 'disliked':
-      return input.ratingPartition.disliked;
+    case 'liked-movies':
+      return input.ratingPartition.likedMovies;
+    case 'liked-series':
+      return input.ratingPartition.likedSeries;
+    case 'disliked-movies':
+      return input.ratingPartition.dislikedMovies;
+    case 'disliked-series':
+      return input.ratingPartition.dislikedSeries;
     case 'watched-movies':
       return input.watchedMovieCards;
     case 'watched-series':

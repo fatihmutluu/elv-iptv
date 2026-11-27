@@ -22,6 +22,8 @@ import {
 } from '@elv/sync';
 import {
   type ActivePairSession,
+  approveAndFetchResponderPayload,
+  deriveHostKeysIfNeeded,
   expiredUnknownSnapshot,
   type HostSessionState,
   httpErrorCode,
@@ -137,6 +139,42 @@ export function createMobileBidirectionalPairingController(
     return { ok: true, snap };
   };
 
+  const approveAndAdoptResponderTransfer = async (
+    baseUrl: string,
+    session: HostSessionState,
+  ): Promise<
+    | { readonly ok: true; readonly snap: BidirectionalPairingSnapshot }
+    | { readonly ok: false; readonly errorCode: string }
+  > => {
+    if (session.keys === null) return { ok: false, errorCode: 'pairing_not_ready' };
+    const fetched = await approveAndFetchResponderPayload(
+      deps.http,
+      baseUrl,
+      session.pairingId,
+      session.pollToken,
+    );
+    if (fetched.kind === 'error') {
+      cleanupSession(session.pairingId);
+      return { ok: false, errorCode: fetched.errorCode };
+    }
+    if (fetched.kind === 'payload') {
+      return decryptAndAdopt(
+        baseUrl,
+        session,
+        session.keys.responderToHostKey,
+        session.keys.aad,
+        fetched.ciphertext,
+        fetched.iv,
+        'responder_to_host',
+      );
+    }
+    session.localStatus = 'waiting_approval';
+    return {
+      ok: true,
+      snap: toSnapshot(session, 'waiting_approval', { direction: 'responder_to_host' }),
+    };
+  };
+
   const handleHostPoll = async (
     baseUrl: string,
     session: HostSessionState,
@@ -149,26 +187,7 @@ export function createMobileBidirectionalPairingController(
     }
 
     if (!session.localSasConfirmed) {
-      if (
-        session.keys === null &&
-        session.privateKey !== null &&
-        typeof body.responderPublicKey === 'string'
-      ) {
-        const responderPub = base64UrlDecode(body.responderPublicKey);
-        let shared: Uint8Array | null = null;
-        try {
-          shared = x25519(session.privateKey, responderPub);
-          session.keys = derivePairingSessionKeys(shared, {
-            code: session.code,
-            hostPublicKey: session.hostPublicKey,
-            responderPublicKey: responderPub,
-          });
-        } finally {
-          zeroBytes(shared);
-          zeroBytes(session.privateKey);
-          session.privateKey = null;
-        }
-      }
+      deriveHostKeysIfNeeded(session, body.responderPublicKey);
       session.peerMaskedEmail =
         typeof body.responderMaskedEmail === 'string' ? body.responderMaskedEmail : null;
       session.direction = resolvePairingDirection(
@@ -198,6 +217,22 @@ export function createMobileBidirectionalPairingController(
         const snap = toSnapshot(session, 'completed', { sas });
         recordCompleted(pairingId, snap);
         return snap;
+      }
+      if (session.direction === 'responder_to_host') {
+        if (body.status === 'responder_transferred') {
+          session.localSasConfirmed = true;
+          session.localChosenDirection = 'responder_to_host';
+          const adopted = await approveAndAdoptResponderTransfer(baseUrl, session);
+          return adopted.ok
+            ? adopted.snap
+            : toSnapshot(session, 'rejected', {
+                sas: null,
+                direction: 'responder_to_host',
+                errorCode: adopted.errorCode,
+              });
+        }
+        session.localStatus = 'waiting_approval';
+        return toSnapshot(session, 'waiting_approval');
       }
       session.localStatus = 'awaiting_sas';
       return toSnapshot(session, 'awaiting_sas');
@@ -255,8 +290,10 @@ export function createMobileBidirectionalPairingController(
     const finalDir =
       typeof body.direction === 'string' ? (body.direction as PairingDirection) : session.direction;
 
-    // Never decrypt or adopt a host payload before Responder locally confirms SAS!
-    if (!session.localSasConfirmed) {
+    // Signed-out receiver (`host_to_responder`) waits on SAS screen until signed-in Host confirms & uploads payload;
+    // `different_accounts` strictly requires local SAS confirmation before decrypting or adopting!
+    const isSignedOutReceiver = session.direction === 'host_to_responder';
+    if (!session.localSasConfirmed && !isSignedOutReceiver) {
       if (typeof body.encryptedPayload === 'string' && typeof body.iv === 'string') {
         session.bufferedReturnPayload = { ciphertext: body.encryptedPayload, iv: body.iv };
       }
@@ -498,7 +535,7 @@ export function createMobileBidirectionalPairingController(
         keys,
         localSasConfirmed: false,
         localChosenDirection: null,
-        localStatus: 'awaiting_sas',
+        localStatus: direction === 'host_to_responder' ? 'waiting_approval' : 'awaiting_sas',
         bufferedReturnPayload: null,
         transferred: false,
       };
@@ -515,7 +552,7 @@ export function createMobileBidirectionalPairingController(
         return toSnapshot(state, 'awaiting_sas', { sas: null, errorCode: 'neither_signed_in' });
       }
       sessions.set(state.pairingId, state);
-      return toSnapshot(state, 'awaiting_sas');
+      return toSnapshot(state, state.localStatus);
     },
 
     async pollBidirectionalPairing(pairingId: string): Promise<BidirectionalPairingSnapshot> {
@@ -716,59 +753,8 @@ export function createMobileBidirectionalPairingController(
         return { ok: true };
       }
 
-      let approveRes: { readonly status: number; readonly bodyText: string };
-      try {
-        approveRes = await postApprove(baseUrl, session.pollToken, {
-          pairingId,
-          direction: 'responder_to_host',
-        });
-      } catch {
-        cleanupSession(pairingId);
-        return { ok: false, errorCode: 'network_error' };
-      }
-      const approveBody = parseJsonBody(approveRes.bodyText);
-      if (approveRes.status < 200 || approveRes.status >= 300) {
-        cleanupSession(pairingId);
-        return { ok: false, errorCode: httpErrorCode(approveBody, approveRes.status) };
-      }
-
-      if (approveBody?.status === 'completed') {
-        let burnRes: { readonly status: number; readonly bodyText: string };
-        try {
-          burnRes = await deps.http.request({
-            method: 'GET',
-            url: `${baseUrl}/v1/pair/poll/${encodeURIComponent(pairingId)}`,
-            headers: { Accept: 'application/json', 'X-Pair-Poll-Token': session.pollToken },
-          });
-        } catch {
-          cleanupSession(pairingId);
-          return { ok: false, errorCode: 'network_error' };
-        }
-        const burnBody = parseJsonBody(burnRes.bodyText);
-        if (
-          burnRes.status < 200 ||
-          burnRes.status >= 300 ||
-          burnBody === null ||
-          typeof burnBody.encryptedPayload !== 'string' ||
-          typeof burnBody.iv !== 'string'
-        ) {
-          cleanupSession(pairingId);
-          return { ok: false, errorCode: 'pair_payload_missing' };
-        }
-        const resAdopt = await decryptAndAdopt(
-          baseUrl,
-          session,
-          session.keys.responderToHostKey,
-          session.keys.aad,
-          burnBody.encryptedPayload,
-          burnBody.iv,
-          'responder_to_host',
-        );
-        return resAdopt.ok ? { ok: true } : { ok: false, errorCode: resAdopt.errorCode };
-      }
-
-      session.localStatus = 'waiting_approval';
-      return { ok: true };
+      const approved = await approveAndAdoptResponderTransfer(baseUrl, session);
+      return approved.ok ? { ok: true } : { ok: false, errorCode: approved.errorCode };
     },
 
     async cancelBidirectionalPairing(pairingId: string): Promise<void> {

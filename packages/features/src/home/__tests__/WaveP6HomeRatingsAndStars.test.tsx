@@ -1,8 +1,16 @@
 import type { CatalogService, CategoryRow, ItemRow, RatingValue, SourceRow } from '@elv/data';
 import { ok } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
-import { I18nProvider, ThemeProvider, ViewportProvider } from '@elv/ui-kit';
+import {
+  I18nProvider,
+  ICON_PATHS,
+  ThemeProvider,
+  UiAdaptersProvider,
+  ViewportProvider,
+} from '@elv/ui-kit';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { View } from 'react-native';
+import { HomeHero } from '../HomeHero';
 import { HomeScreen } from '../HomeScreen';
 import { buildHomeCardContextMenuItems } from '../home-context-menu';
 import type { HomeRailEntry } from '../home-model';
@@ -70,7 +78,26 @@ describe('Wave P6 HomeScreen — Star unification & Like/Dislike context menus',
       currentRating: 'like',
       t: t as never,
       onPlay: jest.fn(),
+      onToggleFavorite: jest.fn(),
       onToggleRating,
+    });
+    expect(movieActions.find((a) => a.id === 'mylist')).toMatchObject({
+      icon: 'plus',
+    });
+    const movieFavActions = buildHomeCardContextMenuItems({
+      railId: 'movies',
+      entry: movieEntry,
+      index: 0,
+      isFavorite: true,
+      isWatched: false,
+      currentRating: 'like',
+      t: t as never,
+      onPlay: jest.fn(),
+      onToggleFavorite: jest.fn(),
+      onToggleRating,
+    });
+    expect(movieFavActions.find((a) => a.id === 'mylist')).toMatchObject({
+      icon: 'check',
     });
     expect(movieActions.find((a) => a.id === 'like')).toMatchObject({
       icon: 'likeFilled',
@@ -89,12 +116,87 @@ describe('Wave P6 HomeScreen — Star unification & Like/Dislike context menus',
       isWatched: false,
       t: t as never,
       onPlay: jest.fn(),
+      onToggleFavorite: jest.fn(),
       onToggleRating,
     });
     expect(liveActions.some((a) => a.id === 'like' || a.id === 'dislike')).toBe(false);
+    expect(liveActions.find((a) => a.id === 'favorite')).toMatchObject({ icon: 'star' });
   });
 
-  it('HomeScreen renders HomeHero star button and dispatches setRating from Movie context menu only', async () => {
+  it('HomeHero uses plus/check for VOD My List and preserves star for Live slides', async () => {
+    const renderedIcons: unknown[] = [];
+    const slide: HomeRailEntry = {
+      itemKey: 'x:src-1:movie:1',
+      sourceId: 'src-1',
+      kind: 'movie',
+      title: 'Blade Runner',
+      subtitle: null,
+      posterUri: null,
+      backdropUri: null,
+      year: 1982,
+      rating: 8.1,
+      positionMs: 0,
+      durationMs: 0,
+      watched: false,
+    };
+    const wrapHero = (inMyList: boolean, kind: 'movie' | 'live' = 'movie') => (
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <ThemeProvider preset="obsidianCrimson">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <UiAdaptersProvider
+              adapters={{
+                renderSvg: ({ spec }) => {
+                  renderedIcons.push(spec);
+                  return <View />;
+                },
+              }}
+            >
+              <HomeHero
+                slides={[{ ...slide, kind, isContinueWatching: false }]}
+                activeIndex={0}
+                onSelectIndex={jest.fn()}
+                inMyList={inMyList}
+                onPlaySlide={jest.fn()}
+                onToggleMyList={jest.fn()}
+                onToggleWatched={jest.fn()}
+                isTv={false}
+                isTouch={false}
+                isPortrait={false}
+                topClearance={64}
+                minHeight={420}
+                padX={32}
+                focusedAction={null}
+              />
+            </UiAdaptersProvider>
+          </I18nProvider>
+        </ThemeProvider>
+      </ViewportProvider>
+    );
+
+    const view = await render(wrapHero(false, 'movie'));
+    expect(renderedIcons).toContain(ICON_PATHS.plus);
+    expect(renderedIcons).not.toContain(ICON_PATHS.star);
+
+    renderedIcons.length = 0;
+    await view.rerender(wrapHero(true, 'movie'));
+    expect(renderedIcons).toContain(ICON_PATHS.check);
+    expect(renderedIcons).not.toContain(ICON_PATHS.starFilled);
+
+    renderedIcons.length = 0;
+    await view.rerender(wrapHero(false, 'live'));
+    expect(renderedIcons).toContain(ICON_PATHS.star);
+    await view.unmount();
+  });
+
+  it('HomeScreen renders HomeHero mylist button and dispatches setRating from Movie context menu only', async () => {
     const setRating = jest.fn(async (_input: unknown, next: RatingValue | null) => ok(next));
     const liveCat: CategoryRow = {
       id: 'cat-live',

@@ -115,7 +115,7 @@ describe('AccountBidirectionalPairingPanel security, lifecycle & TV focus regres
     jest.restoreAllMocks();
   });
 
-  it('P0-1: deep-link pendingPairUri runs Phase 1 only (SAS + masked email + Confirm/Cancel) and NEVER auto-confirms', async () => {
+  it('P0-1 & #16A: signed-out deep-link responder shows SAS + waiting message ONLY (NO confirm button) and NEVER auto-confirms, while signed-in responder requires explicit Confirm', async () => {
     const onHandled = jest.fn();
     const syncAccount = createMockSyncAccount({
       joinBidirectionalPairing: jest.fn(async () =>
@@ -146,22 +146,51 @@ describe('AccountBidirectionalPairingPanel security, lifecycle & TV focus regres
       expect(onHandled).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('pair-sas-card')).toBeTruthy();
       expect(screen.getByTestId('pair-sas-code')).toHaveTextContent('6194');
-      expect(screen.getByTestId('pair-sas-confirm')).toBeTruthy();
+      expect(screen.getByTestId('pair-waiting-approval')).toBeTruthy();
       expect(screen.getByTestId('pair-sas-cancel')).toBeTruthy();
     });
 
-    // Zero 1-click auto-transfer: confirmBidirectionalPairing MUST NOT have been called yet
+    // Signed-out receiving device MUST NOT show Confirm button or auto-confirm
+    expect(screen.queryByTestId('pair-sas-confirm')).toBeNull();
     expect(syncAccount.confirmBidirectionalPairing).not.toHaveBeenCalled();
+    await view.unmount();
 
-    // Only explicit Confirm triggers Phase 2
+    // Signed-in sender responder joining a signed-out host MUST require explicit Confirm (never auto-confirm)
+    const senderHandled = jest.fn();
+    const senderSync = createMockSyncAccount({
+      joinBidirectionalPairing: jest.fn(async () =>
+        makeSnapshot({
+          pairingId: 'dl-resp-sender',
+          role: 'responder',
+          status: 'responder_joined',
+          sas: '7319',
+          direction: 'responder_to_host',
+          localMaskedEmail: 'r***@example.com',
+          peerMaskedEmail: null,
+        }),
+      ),
+    });
+    const senderView = await renderPanel(
+      <AccountBidirectionalPairingPanel
+        syncAccount={senderSync}
+        pendingPairUri="elviptv://pair?c=87654321&pk=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        onPairUriHandled={senderHandled}
+      />,
+    );
+    await waitFor(() => {
+      expect(senderHandled).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('pair-sas-code')).toHaveTextContent('7319');
+      expect(screen.getByTestId('pair-sas-confirm')).toBeTruthy();
+    });
+    expect(senderSync.confirmBidirectionalPairing).not.toHaveBeenCalled();
     await fireEvent.press(screen.getByTestId('pair-sas-confirm'));
     await waitFor(() => {
-      expect(syncAccount.confirmBidirectionalPairing).toHaveBeenCalledWith(
-        'dl-resp-1',
-        'host_to_responder',
+      expect(senderSync.confirmBidirectionalPairing).toHaveBeenCalledWith(
+        'dl-resp-sender',
+        'responder_to_host',
       );
     });
-    await view.unmount();
+    await senderView.unmount();
   });
 
   it('P1-8: cancels prior active host session on handleJoin and cancels active non-terminal session on unmount', async () => {
@@ -237,46 +266,74 @@ describe('AccountBidirectionalPairingPanel security, lifecycle & TV focus regres
     await view.unmount();
   });
 
-  it('P0-1 & P1-10: renders SAS card for host & responder across awaiting_sas, responder_joined, responder_transferred, and responder approved with hasTVPreferredFocus on TV', async () => {
+  it('P0-1, P1-10 & #16A: shows Confirm ONLY on local authorizing sender (or dual-choice for different_accounts) and Waiting ONLY on signed-out receiver with hasTVPreferredFocus on TV', async () => {
     const cases: readonly {
       readonly snapshot: BidirectionalPairingSnapshot;
       readonly expectedSas: string;
       readonly expectedPreferredTestId: string;
+      readonly expectConfirmVisible: boolean;
+      readonly expectWaitingVisible: boolean;
+      readonly expectDualChoice?: boolean;
     }[] = [
       {
         snapshot: makeSnapshot({
-          pairingId: 's-joined',
+          pairingId: 's-host-sender',
           role: 'host',
           status: 'responder_joined',
           sas: '1122',
           direction: 'host_to_responder',
+          localMaskedEmail: 'h***@example.com',
+          peerMaskedEmail: null,
         }),
         expectedSas: '1122',
         expectedPreferredTestId: 'pair-sas-confirm',
+        expectConfirmVisible: true,
+        expectWaitingVisible: false,
       },
       {
         snapshot: makeSnapshot({
-          pairingId: 's-transferred',
-          role: 'host',
-          status: 'responder_transferred' as BidirectionalPairingSnapshot['status'],
-          sas: '3344',
-          direction: 'responder_to_host',
-          peerMaskedEmail: 'r***@example.com',
-        }),
-        expectedSas: '3344',
-        expectedPreferredTestId: 'pair-sas-confirm',
-      },
-      {
-        snapshot: makeSnapshot({
-          pairingId: 's-resp-approved',
+          pairingId: 's-resp-receiver',
           role: 'responder',
           status: 'approved',
           sas: '5566',
           direction: 'host_to_responder',
+          localMaskedEmail: null,
           peerMaskedEmail: 'h***@example.com',
         }),
         expectedSas: '5566',
+        expectedPreferredTestId: 'pair-sas-cancel',
+        expectConfirmVisible: false,
+        expectWaitingVisible: true,
+      },
+      {
+        snapshot: makeSnapshot({
+          pairingId: 's-host-receiver',
+          role: 'host',
+          status: 'responder_transferred' as BidirectionalPairingSnapshot['status'],
+          sas: '3344',
+          direction: 'responder_to_host',
+          localMaskedEmail: null,
+          peerMaskedEmail: 'r***@example.com',
+        }),
+        expectedSas: '3344',
+        expectedPreferredTestId: 'pair-sas-cancel',
+        expectConfirmVisible: false,
+        expectWaitingVisible: true,
+      },
+      {
+        snapshot: makeSnapshot({
+          pairingId: 's-resp-sender',
+          role: 'responder',
+          status: 'awaiting_sas',
+          sas: '4455',
+          direction: 'responder_to_host',
+          localMaskedEmail: 'r***@example.com',
+          peerMaskedEmail: null,
+        }),
+        expectedSas: '4455',
         expectedPreferredTestId: 'pair-sas-confirm',
+        expectConfirmVisible: true,
+        expectWaitingVisible: false,
       },
       {
         snapshot: makeSnapshot({
@@ -290,6 +347,9 @@ describe('AccountBidirectionalPairingPanel security, lifecycle & TV focus regres
         }),
         expectedSas: '7788',
         expectedPreferredTestId: 'pair-choose-this',
+        expectConfirmVisible: false,
+        expectWaitingVisible: false,
+        expectDualChoice: true,
       },
     ];
 
@@ -307,6 +367,20 @@ describe('AccountBidirectionalPairingPanel security, lifecycle & TV focus regres
         expect(screen.getByTestId('pair-sas-card')).toBeTruthy();
         expect(screen.getByTestId('pair-sas-code')).toHaveTextContent(c.expectedSas);
       });
+      if (c.expectConfirmVisible) {
+        expect(screen.getByTestId('pair-sas-confirm')).toBeTruthy();
+      } else {
+        expect(screen.queryByTestId('pair-sas-confirm')).toBeNull();
+      }
+      if (c.expectWaitingVisible) {
+        expect(screen.getByTestId('pair-waiting-approval')).toBeTruthy();
+      } else {
+        expect(screen.queryByTestId('pair-waiting-approval')).toBeNull();
+      }
+      if (c.expectDualChoice) {
+        expect(screen.getByTestId('pair-choose-this')).toBeTruthy();
+        expect(screen.getByTestId('pair-choose-other')).toBeTruthy();
+      }
       expect(screen.getByTestId(c.expectedPreferredTestId).props.hasTVPreferredFocus).toBe(true);
       await view.unmount();
     }
@@ -347,5 +421,66 @@ describe('AccountBidirectionalPairingPanel security, lifecycle & TV focus regres
     });
     expect(screen.getByTestId('pair-regenerate-btn').props.hasTVPreferredFocus).toBe(true);
     await expiredView.unmount();
+  });
+
+  it('Blocker regression: different_accounts receiver confirming first transitions to waiting_approval and waits for polled completed before firing onPaired', async () => {
+    const onPaired = jest.fn();
+    let pollCalls = 0;
+    const syncAccount = createMockSyncAccount({
+      startBidirectionalPairing: jest.fn(async () =>
+        makeSnapshot({
+          pairingId: 'diff-recv-1',
+          role: 'responder',
+          status: 'awaiting_sas',
+          sas: '8241',
+          direction: 'different_accounts',
+          localMaskedEmail: 'b***@example.com',
+          peerMaskedEmail: 'a***@example.com',
+        }),
+      ),
+      confirmBidirectionalPairing: jest.fn(async () => ({ ok: true })),
+      pollBidirectionalPairing: jest.fn(async () => {
+        pollCalls += 1;
+        return makeSnapshot({
+          pairingId: 'diff-recv-1',
+          role: 'responder',
+          status: pollCalls === 1 ? 'waiting_approval' : 'completed',
+          sas: '8241',
+          direction: 'different_accounts',
+          localMaskedEmail: 'b***@example.com',
+          peerMaskedEmail: 'a***@example.com',
+        });
+      }),
+    });
+
+    const view = await renderPanel(
+      <AccountBidirectionalPairingPanel
+        syncAccount={syncAccount}
+        pollIntervalMs={20}
+        onPaired={onPaired}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pair-choose-other')).toBeTruthy();
+    });
+
+    // Responder picks peer's account ('host_to_responder') before host has confirmed
+    await fireEvent.press(screen.getByTestId('pair-choose-other'));
+    await waitFor(() => {
+      expect(syncAccount.confirmBidirectionalPairing).toHaveBeenCalledWith(
+        'diff-recv-1',
+        'host_to_responder',
+      );
+      expect(screen.getByTestId('pair-waiting-approval')).toBeTruthy();
+    });
+    // Must NOT prematurely complete on first poll ('waiting_approval')
+    expect(onPaired).not.toHaveBeenCalled();
+
+    // Subsequent poll returns 'completed' after sender confirms -> fires onPaired exactly once
+    await waitFor(() => {
+      expect(onPaired).toHaveBeenCalledTimes(1);
+    });
+    await view.unmount();
   });
 });

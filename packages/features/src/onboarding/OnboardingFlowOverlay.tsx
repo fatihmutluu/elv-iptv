@@ -1,4 +1,4 @@
-import type { CatalogService, ProfileAvatarToken, ProfileRecord } from '@elv/data';
+import type { CatalogService, ProfileAvatarToken, ProfileRecord, SourceRow } from '@elv/data';
 import type { PreferencesPatch, PreferencesSnapshot } from '@elv/domain';
 import {
   TextEntryBoundary,
@@ -50,6 +50,8 @@ export interface OnboardingFlowOverlayProps {
   readonly onCommitConsent: (diagnosticsOptIn: boolean) => void;
   readonly onPrepareFreshProfile: () => void;
   readonly onRefreshProfiles: () => Promise<void>;
+  /** Optional Stage-3 prewarm hook invoked after post-pair restored source hydration finishes. */
+  readonly onPrewarmReady?: ((sources: readonly SourceRow[]) => Promise<void>) | undefined;
   readonly onComplete: (result: { readonly restoredSources: boolean }) => void;
   readonly renderTransferPanel?:
     | ((slot: OnboardingTransferSlotProps) => ReactElement | null)
@@ -90,6 +92,7 @@ export function OnboardingFlowOverlay({
   onCommitConsent,
   onPrepareFreshProfile,
   onRefreshProfiles,
+  onPrewarmReady,
   onComplete,
   renderTransferPanel,
   renderAvatarPreview,
@@ -337,6 +340,7 @@ export function OnboardingFlowOverlay({
                   catalog={catalog}
                   syncAccount={syncAccount}
                   onRefreshProfiles={onRefreshProfiles}
+                  onPrewarmReady={onPrewarmReady}
                   onSyncComplete={handleSyncComplete}
                 />
               ) : step === 'source' ? (

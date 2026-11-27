@@ -116,7 +116,7 @@ export function LibraryEditorialTabs({
       return (
         <LibraryEmptyNotice
           testID="library-empty-following"
-          icon="star"
+          icon="plus"
           title={i18n.t('library.emptyFollowingTitle')}
           body={i18n.t('library.emptyFollowingBody')}
           padX={padX}
@@ -277,8 +277,11 @@ export function LibraryEditorialTabs({
   }
 
   if (activeTab === 'likes') {
-    const hasLikes = ratingPartition.liked.length > 0 || ratingPartition.disliked.length > 0;
-    if (!hasLikes) {
+    const hasLiked =
+      ratingPartition.likedMovies.length > 0 || ratingPartition.likedSeries.length > 0;
+    const hasDisliked =
+      ratingPartition.dislikedMovies.length > 0 || ratingPartition.dislikedSeries.length > 0;
+    if (!hasLiked && !hasDisliked) {
       return (
         <LibraryEmptyNotice
           testID="library-empty-likes"
@@ -291,36 +294,121 @@ export function LibraryEditorialTabs({
     }
     return (
       <View testID="library-likes-content" style={styles.railsStack}>
-        <LibraryRailSection
-          railId="liked"
-          title={i18n.t('library.railLiked')}
-          items={ratingPartition.liked}
-          variant="poster"
-          cardWidth={posterWidth}
-          padX={padX}
-          isTv={isTv}
-          focusedCardIndex={focusedColFor('liked')}
-          onPressItem={onPressCard}
-          onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor)}
-          onSeeAll={() =>
-            onSeeAll({ railId: 'liked', title: i18n.t('library.railLiked'), kind: 'poster' })
-          }
-        />
-        <LibraryRailSection
-          railId="disliked"
-          title={i18n.t('library.railDisliked')}
-          items={ratingPartition.disliked}
-          variant="poster"
-          cardWidth={posterWidth}
-          padX={padX}
-          isTv={isTv}
-          focusedCardIndex={focusedColFor('disliked')}
-          onPressItem={onPressCard}
-          onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor)}
-          onSeeAll={() =>
-            onSeeAll({ railId: 'disliked', title: i18n.t('library.railDisliked'), kind: 'poster' })
-          }
-        />
+        {hasLiked ? (
+          <View testID="library-likes-group-liked" style={styles.ratingGroup}>
+            <Text
+              accessibilityRole="header"
+              style={[
+                theme.typography.title,
+                { paddingHorizontal: padX, color: theme.colors.textSecondary },
+              ]}
+            >
+              {i18n.t('library.railLiked')}
+            </Text>
+            <LibraryRailSection
+              railId="liked-movies"
+              title={i18n.t('library.railLikedMovies')}
+              items={ratingPartition.likedMovies}
+              variant="poster"
+              cardWidth={posterWidth}
+              padX={padX}
+              isTv={isTv}
+              focusedCardIndex={focusedColFor('liked-movies')}
+              onPressItem={onPressCard}
+              onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor)}
+              onSeeAll={() =>
+                onSeeAll({
+                  railId: 'liked-movies',
+                  title: i18n.t('library.railLikedMovies'),
+                  kind: 'poster',
+                })
+              }
+            />
+            <LibraryRailSection
+              railId="liked-series"
+              title={i18n.t('library.railLikedSeries')}
+              items={ratingPartition.likedSeries}
+              variant="poster"
+              cardWidth={posterWidth}
+              padX={padX}
+              isTv={isTv}
+              focusedCardIndex={focusedColFor('liked-series')}
+              onPressItem={onPressCard}
+              onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor)}
+              onSeeAll={() =>
+                onSeeAll({
+                  railId: 'liked-series',
+                  title: i18n.t('library.railLikedSeries'),
+                  kind: 'poster',
+                })
+              }
+            />
+          </View>
+        ) : null}
+
+        {hasDisliked ? (
+          <View
+            testID="library-likes-group-disliked"
+            style={[
+              styles.ratingGroup,
+              hasLiked
+                ? {
+                    borderTopWidth: 1,
+                    borderTopColor: theme.colors.surfaceBorder,
+                    paddingTop: 18,
+                  }
+                : null,
+            ]}
+          >
+            <Text
+              accessibilityRole="header"
+              style={[
+                theme.typography.title,
+                { paddingHorizontal: padX, color: theme.colors.textSecondary },
+              ]}
+            >
+              {i18n.t('library.railDisliked')}
+            </Text>
+            <LibraryRailSection
+              railId="disliked-movies"
+              title={i18n.t('library.railDislikedMovies')}
+              items={ratingPartition.dislikedMovies}
+              variant="poster"
+              cardWidth={posterWidth}
+              padX={padX}
+              isTv={isTv}
+              focusedCardIndex={focusedColFor('disliked-movies')}
+              onPressItem={onPressCard}
+              onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor)}
+              onSeeAll={() =>
+                onSeeAll({
+                  railId: 'disliked-movies',
+                  title: i18n.t('library.railDislikedMovies'),
+                  kind: 'poster',
+                })
+              }
+            />
+            <LibraryRailSection
+              railId="disliked-series"
+              title={i18n.t('library.railDislikedSeries')}
+              items={ratingPartition.dislikedSeries}
+              variant="poster"
+              cardWidth={posterWidth}
+              padX={padX}
+              isTv={isTv}
+              focusedCardIndex={focusedColFor('disliked-series')}
+              onPressItem={onPressCard}
+              onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor)}
+              onSeeAll={() =>
+                onSeeAll({
+                  railId: 'disliked-series',
+                  title: i18n.t('library.railDislikedSeries'),
+                  kind: 'poster',
+                })
+              }
+            />
+          </View>
+        ) : null}
       </View>
     );
   }
@@ -390,7 +478,7 @@ function LibraryEmptyNotice({
   padX,
 }: {
   readonly testID: string;
-  readonly icon: 'star' | 'like' | 'check';
+  readonly icon: 'plus' | 'like' | 'check';
   readonly title: string;
   readonly body: string;
   readonly padX: number;
@@ -420,6 +508,7 @@ function LibraryEmptyNotice({
 
 const styles = StyleSheet.create({
   railsStack: { gap: 22 },
+  ratingGroup: { gap: 14 },
   emptyBox: {
     borderWidth: 1,
     alignItems: 'flex-start',

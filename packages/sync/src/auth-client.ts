@@ -32,7 +32,7 @@ export interface AuthProviderAdapter {
 }
 
 /** Minimum required password length for sync account creation. */
-export const MIN_SYNC_PASSWORD_LENGTH = 10;
+export const MIN_SYNC_PASSWORD_LENGTH = 6;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 

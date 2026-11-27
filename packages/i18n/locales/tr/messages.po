@@ -3116,7 +3116,7 @@ msgid "account.passwordLabel"
 msgstr "Şifre"
 
 msgid "account.passwordPlaceholder"
-msgstr "En az 10 karakter"
+msgstr "En az 6 karakter"
 
 msgid "account.confirmPasswordLabel"
 msgstr "Şifreyi onayla"
@@ -3209,7 +3209,7 @@ msgid "account.errorInvalidEmail"
 msgstr "Geçerli bir e-posta adresi girin."
 
 msgid "account.errorWeakPassword"
-msgstr "Şifre en az 10 karakter olmalıdır."
+msgstr "Şifre en az 6 karakter olmalıdır."
 
 msgid "account.errorPasswordMismatch"
 msgstr "Şifreler eşleşmiyor."
@@ -3627,7 +3627,7 @@ msgid "library.title"
 msgstr "Kitaplık"
 
 msgid "library.tabFollowing"
-msgstr "Takip Edilenler"
+msgstr "Listem"
 
 msgid "library.tabLikes"
 msgstr "Beğeniler"
@@ -3653,8 +3653,20 @@ msgstr "Koleksiyonlar"
 msgid "library.railLiked"
 msgstr "Beğendiklerim"
 
+msgid "library.railLikedMovies"
+msgstr "Beğendiğim Filmler"
+
+msgid "library.railLikedSeries"
+msgstr "Beğendiğim Diziler"
+
 msgid "library.railDisliked"
 msgstr "Beğenmediklerim"
+
+msgid "library.railDislikedMovies"
+msgstr "Beğenmediğim Filmler"
+
+msgid "library.railDislikedSeries"
+msgstr "Beğenmediğim Diziler"
 
 msgid "library.railWatchedMovies"
 msgstr "İzlenen filmler"
@@ -3681,10 +3693,10 @@ msgid "library.backToTab"
 msgstr "Geri"
 
 msgid "library.emptyFollowingTitle"
-msgstr "Henüz takip edilen içerik yok"
+msgstr "Listeniz henüz boş"
 
 msgid "library.emptyFollowingBody"
-msgstr "Canlı kanalları, dizileri veya filmleri yıldızlayarak burada toplayabilirsiniz."
+msgstr "Canlı kanalları, dizileri veya filmleri listenize ekleyerek burada toplayabilirsiniz."
 
 msgid "library.emptyLikesTitle"
 msgstr "Henüz beğeni veya beğenmeme yok"
@@ -4104,7 +4116,7 @@ msgid "catalog.elvPicks.emptyTitle"
 msgstr "Kişisel önerilerin hazırlanıyor"
 
 msgid "catalog.elvPicks.emptyBody"
-msgstr "Birkaç yapımı beğen, yıldızla veya izle; ELV Mode kütüphanenden sana özel öneriler çıkarsın."
+msgstr "Birkaç yapımı beğen, listene ekle veya izle; ELV Mode kütüphanenden sana özel öneriler çıkarsın."
 
 msgid "elv.reason.moreLikeThis"
 msgstr "Beğendiklerine benzer"
@@ -4257,7 +4269,7 @@ msgid "elv.preview.badgeRaw"
 msgstr "Ham IPTV Listesi"
 
 msgid "elv.preview.captionAllOn"
-msgstr "Temiz afişler, IMDb puanları, birleşik sürümler ve düzenli türler."
+msgstr "Akıllı kategoriler, kişiselleştirilmiş film ve dizi önerileri, temiz afişler ve birleşik sürümler."
 
 msgid "elv.preview.captionChaos"
 msgstr "Kopya filmleri, bozuk afişleri ve karmaşık klasörleri toparlamak için ELV Mode özelliklerini açın."
@@ -4379,6 +4391,33 @@ msgstr "Verileriniz eşitleniyor…"
 msgid "onboarding.syncing.subtitle"
 msgstr "Şifreli kasanız ve tercihleriniz indiriliyor."
 
+msgid "onboarding.syncing.stageAccount"
+msgstr "Hesap ve profiller eşitleniyor"
+
+msgid "onboarding.syncing.stageSources"
+msgstr "Kaynaklar ve katalog yükleniyor"
+
+msgid "onboarding.syncing.stagePreparing"
+msgstr "ELV Mode ve ana ekran hazırlanıyor"
+
+msgid "onboarding.syncing.sourceCounter"
+msgstr "Kaynak {index} / {total}: {name}"
+
+msgid "onboarding.syncing.itemsProgress"
+msgstr "{count} öğe yüklendi"
+
+msgid "onboarding.syncing.failedTitle"
+msgstr "Bazı kaynaklar yüklenemedi"
+
+msgid "onboarding.syncing.failedBody"
+msgstr "Hesabınız eşitlendi. Şimdi tekrar deneyin veya uygulamaya geçip daha sonra tamamlayın."
+
+msgid "onboarding.syncing.retryAction"
+msgstr "Tekrar Dene"
+
+msgid "onboarding.syncing.continueAction"
+msgstr "Uygulamaya Geç"
+
 msgid "onboarding.source.title"
 msgstr "İlk Kaynağınızı Ekleyin"
 
@@ -4398,7 +4437,7 @@ msgid "onboarding.elv.title"
 msgstr "ELV Mode ile Tanışın"
 
 msgid "onboarding.elv.subtitle"
-msgstr "Ham IPTV listelerini temiz afişler, puanlar, birleştirilmiş kopyalar ve düzenli türlerle sinema kalitesinde bir kütüphaneye dönüştürün."
+msgstr "Karmaşık listeleri akıllı kategorilerle düzenleyin, kişiselleştirilmiş film ve dizi önerileri alın, temiz afiş ve puanlarla kopya sürümleri birleştirin."
 
 msgid "onboarding.elv.masterToggle"
 msgstr "ELV Mode"
@@ -4410,7 +4449,10 @@ msgid "onboarding.elv.postersToggle"
 msgstr "Afişleri ve puanları zenginleştir"
 
 msgid "onboarding.elv.categoriesToggle"
-msgstr "Kategorileri türlere göre düzenle"
+msgstr "Akıllı kategori düzenleme"
+
+msgid "onboarding.elv.recommendationsToggle"
+msgstr "Kişiselleştirilmiş film ve dizi önerileri"
 
 msgid "onboarding.import.loading"
 msgstr "Kütüphaneniz içe aktarılıyor…"

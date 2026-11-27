@@ -268,6 +268,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       gridData.hydrateProgressRange(tvWindowStart, tvWindowEnd);
     } else {
       const { startRow, endRow } = visibleWindowRef.current;
+      gridData.pagedSource.prefetch(Math.max(0, startRow) * cols, (endRow + 3) * cols);
       gridData.hydrateProgressRange(startRow, endRow);
     }
   }, [

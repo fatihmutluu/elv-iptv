@@ -5,7 +5,8 @@ export const trWaveE3Messages: Readonly<Record<keyof typeof enWaveE3Messages, st
   // Shared Interactive ELV Mode Preview
   'elv.preview.badgeClean': 'ELV Mode Aktif',
   'elv.preview.badgeRaw': 'Ham IPTV Listesi',
-  'elv.preview.captionAllOn': 'Temiz afişler, IMDb puanları, birleşik sürümler ve düzenli türler.',
+  'elv.preview.captionAllOn':
+    'Akıllı kategoriler, kişiselleştirilmiş film ve dizi önerileri, temiz afişler ve birleşik sürümler.',
   'elv.preview.captionChaos':
     'Kopya filmleri, bozuk afişleri ve karmaşık klasörleri toparlamak için ELV Mode özelliklerini açın.',
   'elv.preview.genre.scifi': 'Bilim Kurgu',
@@ -60,6 +61,16 @@ export const trWaveE3Messages: Readonly<Record<keyof typeof enWaveE3Messages, st
   // Onboarding Syncing Step
   'onboarding.syncing.title': 'Verileriniz eşitleniyor…',
   'onboarding.syncing.subtitle': 'Şifreli kasanız ve tercihleriniz indiriliyor.',
+  'onboarding.syncing.stageAccount': 'Hesap ve profiller eşitleniyor',
+  'onboarding.syncing.stageSources': 'Kaynaklar ve katalog yükleniyor',
+  'onboarding.syncing.stagePreparing': 'ELV Mode ve ana ekran hazırlanıyor',
+  'onboarding.syncing.sourceCounter': 'Kaynak {index} / {total}: {name}',
+  'onboarding.syncing.itemsProgress': '{count} öğe yüklendi',
+  'onboarding.syncing.failedTitle': 'Bazı kaynaklar yüklenemedi',
+  'onboarding.syncing.failedBody':
+    'Hesabınız eşitlendi. Şimdi tekrar deneyin veya uygulamaya geçip daha sonra tamamlayın.',
+  'onboarding.syncing.retryAction': 'Tekrar Dene',
+  'onboarding.syncing.continueAction': 'Uygulamaya Geç',
 
   // Onboarding Screen 2 — Add First Source
   'onboarding.source.title': 'İlk Kaynağınızı Ekleyin',
@@ -72,11 +83,12 @@ export const trWaveE3Messages: Readonly<Record<keyof typeof enWaveE3Messages, st
   // Onboarding Screen 3 — ELV Mode
   'onboarding.elv.title': 'ELV Mode ile Tanışın',
   'onboarding.elv.subtitle':
-    'Ham IPTV listelerini temiz afişler, puanlar, birleştirilmiş kopyalar ve düzenli türlerle sinema kalitesinde bir kütüphaneye dönüştürün.',
+    'Karmaşık listeleri akıllı kategorilerle düzenleyin, kişiselleştirilmiş film ve dizi önerileri alın, temiz afiş ve puanlarla kopya sürümleri birleştirin.',
   'onboarding.elv.masterToggle': 'ELV Mode',
   'onboarding.elv.mergeToggle': 'Film ve dizi sürümlerini birleştir',
   'onboarding.elv.postersToggle': 'Afişleri ve puanları zenginleştir',
-  'onboarding.elv.categoriesToggle': 'Kategorileri türlere göre düzenle',
+  'onboarding.elv.categoriesToggle': 'Akıllı kategori düzenleme',
+  'onboarding.elv.recommendationsToggle': 'Kişiselleştirilmiş film ve dizi önerileri',
 
   // Onboarding Top Import Bar & Dynamic CTA
   'onboarding.import.loading': 'Kütüphaneniz içe aktarılıyor…',

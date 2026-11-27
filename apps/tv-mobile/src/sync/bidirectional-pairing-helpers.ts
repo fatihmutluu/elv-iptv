@@ -1,4 +1,11 @@
-import type { PairingDirection, PairingSessionKeys, SyncHttpPort } from '@elv/sync';
+import {
+  base64UrlDecode,
+  derivePairingSessionKeys,
+  type PairingDirection,
+  type PairingSessionKeys,
+  type SyncHttpPort,
+  x25519,
+} from '@elv/sync';
 import type { BidirectionalPairingSnapshot, BidirectionalPairingStatus } from './sync-helpers';
 
 export type TransferDirection = 'host_to_responder' | 'responder_to_host';
@@ -177,4 +184,74 @@ export function postPairJson(
 
 export function httpErrorCode(body: Record<string, unknown> | null, status: number): string {
   return typeof body?.error === 'string' ? body.error : `http-${status}`;
+}
+
+export function deriveHostKeysIfNeeded(session: HostSessionState, responderPubB64: unknown): void {
+  if (session.keys !== null || session.privateKey === null || typeof responderPubB64 !== 'string') {
+    return;
+  }
+  const responderPub = base64UrlDecode(responderPubB64);
+  let shared: Uint8Array | null = null;
+  try {
+    shared = x25519(session.privateKey, responderPub);
+    session.keys = derivePairingSessionKeys(shared, {
+      code: session.code,
+      hostPublicKey: session.hostPublicKey,
+      responderPublicKey: responderPub,
+    });
+  } finally {
+    zeroBytes(shared);
+    zeroBytes(session.privateKey);
+    session.privateKey = null;
+  }
+}
+
+export async function approveAndFetchResponderPayload(
+  http: SyncHttpPort,
+  baseUrl: string,
+  pairingId: string,
+  pollToken: string,
+): Promise<
+  | { readonly kind: 'waiting' }
+  | { readonly kind: 'payload'; readonly ciphertext: string; readonly iv: string }
+  | { readonly kind: 'error'; readonly errorCode: string }
+> {
+  let approveRes: { readonly status: number; readonly bodyText: string };
+  try {
+    approveRes = await postPairJson(
+      http,
+      `${baseUrl}/v1/pair/approve`,
+      { pairingId, direction: 'responder_to_host' },
+      { 'X-Pair-Poll-Token': pollToken },
+    );
+  } catch {
+    return { kind: 'error', errorCode: 'network_error' };
+  }
+  const approveBody = parseJsonBody(approveRes.bodyText);
+  if (approveRes.status < 200 || approveRes.status >= 300) {
+    return { kind: 'error', errorCode: httpErrorCode(approveBody, approveRes.status) };
+  }
+  if (approveBody?.status !== 'completed') return { kind: 'waiting' };
+
+  let burnRes: { readonly status: number; readonly bodyText: string };
+  try {
+    burnRes = await http.request({
+      method: 'GET',
+      url: `${baseUrl}/v1/pair/poll/${encodeURIComponent(pairingId)}`,
+      headers: { Accept: 'application/json', 'X-Pair-Poll-Token': pollToken },
+    });
+  } catch {
+    return { kind: 'error', errorCode: 'network_error' };
+  }
+  const burnBody = parseJsonBody(burnRes.bodyText);
+  if (
+    burnRes.status < 200 ||
+    burnRes.status >= 300 ||
+    burnBody === null ||
+    typeof burnBody.encryptedPayload !== 'string' ||
+    typeof burnBody.iv !== 'string'
+  ) {
+    return { kind: 'error', errorCode: 'pair_payload_missing' };
+  }
+  return { kind: 'payload', ciphertext: burnBody.encryptedPayload, iv: burnBody.iv };
 }

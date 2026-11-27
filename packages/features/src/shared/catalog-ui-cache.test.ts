@@ -1,5 +1,6 @@
 import type {
   CategoryRow,
+  ElvItemEnrichment,
   EpisodeRow,
   FavoriteRow,
   ItemRow,
@@ -18,6 +19,7 @@ import {
   MAX_CATALOG_RAIL_CATEGORIES,
   MAX_CATALOG_RAIL_ITEMS,
   MAX_DETAIL_ENTRIES,
+  MAX_ELV_ENRICHMENT_ENTRIES,
   MAX_GRID_FIRST_PAGES,
   MAX_LIVE_CHANNEL_CATEGORIES,
 } from './catalog-ui-cache';
@@ -439,5 +441,117 @@ describe('createCatalogUiCache', () => {
     cache.setRevision(1, 'en', 'default:0', 'elv:1:11:original:imdb');
     expect(cache.getElvKey?.()).toBe('elv:1:11:original:imdb');
     expect(cache.getCatalog('movie')).toBeNull();
+  });
+
+  it('retains a bounded 1,500-entry LRU ELV enrichment store across revision bumps and clears on locale/source/clear', () => {
+    const cache = createCatalogUiCache({ revision: 1, locale: 'en' });
+    const makeEnrichment = (
+      sourceId: string,
+      itemKey: string,
+      title: string,
+    ): ElvItemEnrichment => ({
+      itemKey,
+      sourceId,
+      mediaType: 'movie',
+      imdbId: 'tt1375666',
+      confidence: 0.95,
+      manualLock: false,
+      title: {
+        imdbId: 'tt1375666',
+        mediaType: 'movie',
+        originalTitle: title,
+        englishTitle: title,
+        localizedTitles: {},
+        year: 2010,
+        rating: 8.8,
+        votes: 2_000_000,
+        runtimeMin: 148,
+        genres: ['Sci-Fi'],
+        posterUrl: 'https://imdb.example/poster.jpg',
+        backdropUrl: null,
+        trailerStreamUrl: null,
+        trailerYoutubeId: null,
+        director: null,
+        cast: [],
+        mltImdbIds: [],
+        franchiseKey: null,
+        franchiseName: null,
+        franchiseOrder: null,
+        synopses: {},
+        detailFetchedAt: 1,
+        updatedAt: 1,
+      },
+    });
+
+    const e1 = makeEnrichment('src-1', 'x:src-1:movie:1', 'Inception');
+    const e2 = makeEnrichment('src-2', 'x:src-2:movie:2', 'Interstellar');
+    cache.setElvEnrichmentBatch?.(
+      new Map([
+        ['x:src-1:movie:1', e1],
+        ['x:src-2:movie:2', e2],
+      ]),
+      ['x:src-1:movie:1', 'x:src-2:movie:2', 'x:src-1:movie:unmatched'],
+    );
+
+    const snap = cache.getElvEnrichmentSnapshot?.([
+      'x:src-1:movie:1',
+      'x:src-1:movie:unmatched',
+      'x:src-1:movie:missing',
+    ]);
+    expect(snap?.enrichmentByKey.get('x:src-1:movie:1')).toBe(e1);
+    expect(snap?.enrichmentByKey.has('x:src-1:movie:unmatched')).toBe(false);
+    expect(snap?.resolvedKeys.has('x:src-1:movie:1')).toBe(true);
+    expect(snap?.resolvedKeys.has('x:src-1:movie:unmatched')).toBe(true);
+    expect(snap?.resolvedKeys.has('x:src-1:movie:missing')).toBe(false);
+
+    // Revision bump with identical locale keeps ELV enrichment warm for stale-while-revalidate
+    cache.setRevision(2, 'en');
+    expect(
+      cache.getElvEnrichmentSnapshot?.(['x:src-1:movie:1']).resolvedKeys.has('x:src-1:movie:1'),
+    ).toBe(true);
+
+    // invalidateSource drops only the removed source
+    cache.invalidateSource('src-1');
+    const afterSource = cache.getElvEnrichmentSnapshot?.([
+      'x:src-1:movie:1',
+      'x:src-1:movie:unmatched',
+      'x:src-2:movie:2',
+    ]);
+    expect(afterSource?.resolvedKeys.has('x:src-1:movie:1')).toBe(false);
+    expect(afterSource?.resolvedKeys.has('x:src-1:movie:unmatched')).toBe(false);
+    expect(afterSource?.enrichmentByKey.get('x:src-2:movie:2')).toBe(e2);
+
+    // Locale change clears ELV enrichment cleanly
+    cache.setRevision(2, 'tr');
+    expect(cache.getElvEnrichmentSnapshot?.(['x:src-2:movie:2']).resolvedKeys.size).toBe(0);
+
+    // Enforce bounded LRU ceiling (MAX_ELV_ENRICHMENT_ENTRIES = 1,500)
+    expect(MAX_ELV_ENRICHMENT_ENTRIES).toBe(1_500);
+    const bulkMap = new Map<string, ElvItemEnrichment>();
+    const bulkKeys: string[] = [];
+    for (let i = 0; i < MAX_ELV_ENRICHMENT_ENTRIES + 5; i++) {
+      const key = `x:src-1:movie:bulk-${i}`;
+      bulkKeys.push(key);
+      bulkMap.set(key, makeEnrichment('src-1', key, `Bulk ${i}`));
+    }
+    cache.setElvEnrichmentBatch?.(bulkMap, bulkKeys);
+    const bulkSnap = cache.getElvEnrichmentSnapshot?.([
+      'x:src-1:movie:bulk-0',
+      'x:src-1:movie:bulk-4',
+      'x:src-1:movie:bulk-5',
+      `x:src-1:movie:bulk-${MAX_ELV_ENRICHMENT_ENTRIES + 4}`,
+    ]);
+    expect(bulkSnap?.resolvedKeys.has('x:src-1:movie:bulk-0')).toBe(false);
+    expect(bulkSnap?.resolvedKeys.has('x:src-1:movie:bulk-4')).toBe(false);
+    expect(bulkSnap?.resolvedKeys.has('x:src-1:movie:bulk-5')).toBe(true);
+    expect(bulkSnap?.resolvedKeys.has(`x:src-1:movie:bulk-${MAX_ELV_ENRICHMENT_ENTRIES + 4}`)).toBe(
+      true,
+    );
+
+    cache.clear();
+    expect(
+      cache.getElvEnrichmentSnapshot?.([`x:src-1:movie:bulk-${MAX_ELV_ENRICHMENT_ENTRIES + 4}`])
+        .resolvedKeys.size,
+    ).toBe(0);
   });
 });

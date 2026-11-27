@@ -7,7 +7,7 @@ import type {
 } from '../ports/wave-f9-ports';
 
 /** Minimum password length enforced during sync account registration (`#26`). */
-export const MIN_SYNC_PASSWORD_LENGTH = 10;
+export const MIN_SYNC_PASSWORD_LENGTH = 6;
 
 /** Polling interval (ms) for checking universal QR device pairing completion (`#26`). */
 export const QR_POLL_INTERVAL_MS = 2_000;
@@ -30,7 +30,7 @@ export function validateSignInFields(email: string, password: string): MessageId
   return null;
 }
 
-/** Validates email, password (>= 10 chars), and confirm password for Create Account. */
+/** Validates email, password (>= 6 chars), and confirm password for Create Account. */
 export function validateSignUpFields(
   email: string,
   password: string,

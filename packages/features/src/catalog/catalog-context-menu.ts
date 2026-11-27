@@ -73,7 +73,8 @@ export function buildCatalogPosterContextMenuItems({
     items.push({
       id: 'favorite',
       label: i18n.t(isFavorite ? 'context.removeFromMyList' : 'context.addToMyList'),
-      icon: isFavorite ? 'starFilled' : 'star',
+      icon:
+        item.kind === 'live' ? (isFavorite ? 'starFilled' : 'star') : isFavorite ? 'check' : 'plus',
       testID: 'context-menu-favorite',
       onSelect: () => onQuickToggleFavorite(item),
     });
