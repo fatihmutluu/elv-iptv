@@ -14,6 +14,11 @@ export * from './catalog';
 export type { CatalogChannelOpsMethods } from './catalog-channel-ops';
 export type { CatalogCollectionsOpsMethods } from './catalog-collections-ops';
 export type { CatalogDownloadsOpsMethods } from './catalog-downloads-ops';
+export type {
+  CatalogElvOpsMethods,
+  GetElvTitleDetailOptions,
+  SearchElvItemKeysByAliasOptions,
+} from './catalog-elv-ops';
 export type { CatalogEpgOpsMethods } from './catalog-epg-ops';
 export type { CatalogFailoverOpsMethods } from './catalog-failover-ops';
 export type { CatalogNewEpisodesOpsMethods } from './catalog-new-episodes-ops';
@@ -25,6 +30,12 @@ export * from './custom-groups-repo';
 export * from './discover-categories';
 export * from './downloads-repo';
 export * from './driver';
+export * from './elv-enrichment-repo';
+export * from './elv-enrichment-schema';
+export * from './elv-live-epg';
+export * from './elv-matcher';
+export * from './elv-merge';
+export * from './elv-quality-memory';
 export * from './failover-groups-repo';
 export * from './fold';
 export * from './guide-match';

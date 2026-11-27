@@ -315,4 +315,190 @@ describe('per-profile source visibility filtering (Wave P7)', () => {
     expect(ch?.sourceId).toBe('src-b');
     expect(ch?.name).toBe('Allowed Ch 5');
   });
+
+  it('forwards Wave E1 ELV Mode methods and filters excluded sources out of listMergedVodVersions and listLiveVariants', async () => {
+    const getElvEnrichmentForKeys = vi.fn(async () => new Map());
+    const getElvTitleDetail = vi.fn(async () => null);
+    const listMergedVodVersions = vi.fn(async () => [
+      {
+        itemKey: 'x:src-a:movie:1',
+        sourceId: 'src-a',
+        sourceName: 'Excluded Source',
+        rawTitle: 'Dune 4K',
+        versionLabel: '4K',
+        verifiedResolution: '4K',
+        actualVideoCodec: 'hevc',
+        actualAudioCodec: 'aac',
+        isFake4k: false,
+        failCount: 0,
+        qualityRank: 40,
+        score: 1005,
+      },
+      {
+        itemKey: 'x:src-b:movie:2',
+        sourceId: 'src-b',
+        sourceName: 'Allowed Source',
+        rawTitle: 'Dune 1080p',
+        versionLabel: '1080p',
+        verifiedResolution: '1080p',
+        actualVideoCodec: 'h264',
+        actualAudioCodec: 'aac',
+        isFake4k: false,
+        failCount: 0,
+        qualityRank: 30,
+        score: 800,
+      },
+    ]);
+    const listLiveVariants = vi.fn(async () => [
+      {
+        key: 'x:src-a:live:1',
+        title: 'CNN 4K',
+        qualityLabel: '4K',
+        qualityRank: 40,
+        sourceId: 'src-a',
+      },
+      {
+        key: 'x:src-b:live:2',
+        title: 'CNN HD',
+        qualityLabel: 'HD',
+        qualityRank: 20,
+        sourceId: 'src-b',
+      },
+    ]);
+    const enrichElvPriorityKeys = vi.fn(async () => ({
+      scanned: 1,
+      layer1Matched: 1,
+      remoteMatched: 0,
+      skipped: 0,
+      aborted: false,
+    }));
+    const runElvBackgroundMatching = vi.fn(async () => ({
+      scanned: 2,
+      layer1Matched: 1,
+      remoteMatched: 1,
+      skipped: 0,
+      aborted: false,
+    }));
+    const recordPlaybackQuality = vi.fn(async () => null);
+    const recordPlaybackVariantFailure = vi.fn(async () => null);
+    const setElvManualMatch = vi.fn(async () => undefined);
+    const wipeElvEnrichment = vi.fn(async () => undefined);
+    const searchElvItemKeysByAlias = vi.fn(async () => ['x:src-a:movie:1', 'x:src-b:movie:2']);
+    const findGuideChannelByCleanName = vi.fn(
+      async (_src: string, _name: string, _opts?: unknown) =>
+        null as {
+          sourceId: string;
+          guideChannelId: string;
+          displayName: string;
+          confidence: number;
+        } | null,
+    );
+
+    const base = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => [
+        { id: 'src-a', excludedProfileIds: ['kids'] },
+        { id: 'src-b', excludedProfileIds: [] },
+      ]),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      seasons: vi.fn(async () => ok([])),
+      episodes: vi.fn(async () => []),
+      resolveStream: vi.fn(),
+      close: vi.fn(async () => undefined),
+      getElvEnrichmentForKeys,
+      getElvTitleDetail,
+      listMergedVodVersions,
+      enrichElvPriorityKeys,
+      runElvBackgroundMatching,
+      recordPlaybackQuality,
+      recordPlaybackVariantFailure,
+      setElvManualMatch,
+      wipeElvEnrichment,
+      searchElvItemKeysByAlias,
+      listLiveVariants,
+      findGuideChannelByCleanName,
+    } as unknown as CatalogService;
+
+    const scoped = createProfileScopedCatalog(base, () => ({
+      profileId: 'kids',
+      parentalUnlocked: false,
+      excludedSourceIds: new Set(['src-a']),
+    }));
+
+    // Seed from allowed source returns ONLY variants from non-excluded sources
+    const merged = await scoped.listMergedVodVersions?.('x:src-b:movie:2');
+    expect(merged?.map((v) => v.sourceId)).toEqual(['src-b']);
+    expect(listMergedVodVersions).toHaveBeenCalledWith('x:src-b:movie:2', {
+      profileId: 'kids',
+      parentalUnlocked: false,
+    });
+
+    // Seed from excluded source returns empty immediately
+    expect(await scoped.listMergedVodVersions?.('x:src-a:movie:1')).toEqual([]);
+
+    // listLiveVariants also filters excluded sources
+    const liveVars = await scoped.listLiveVariants?.('x:src-b:live:2', undefined, {
+      crossCategory: true,
+    });
+    expect(liveVars?.map((v) => v.key)).toEqual(['x:src-b:live:2']);
+
+    // Excluded source lookup for findGuideChannelByCleanName returns null without leaking
+    expect(await scoped.findGuideChannelByCleanName?.('src-a', 'CNN')).toBeNull();
+    expect(findGuideChannelByCleanName).not.toHaveBeenCalled();
+    await scoped.findGuideChannelByCleanName?.('src-b', 'CNN', { crossSource: true });
+    expect(findGuideChannelByCleanName).toHaveBeenCalledWith('src-b', 'CNN', {
+      crossSource: true,
+      excludedSourceIds: ['src-a'],
+    });
+    // Even if inner returns a cross-source match from an excluded source, wrapper blocks it (P1-8)
+    findGuideChannelByCleanName.mockResolvedValueOnce({
+      sourceId: 'src-a',
+      guideChannelId: 'cnn.adult',
+      displayName: 'CNN',
+      confidence: 1,
+    });
+    expect(
+      await scoped.findGuideChannelByCleanName?.('src-b', 'CNN', { crossSource: true }),
+    ).toBeNull();
+
+    // searchElvItemKeysByAlias passes excludedSourceIds and filters any excluded-source keys (P1-8)
+    const aliasKeys = await scoped.searchElvItemKeysByAlias?.('Dune', { kind: 'movie', limit: 40 });
+    expect(searchElvItemKeysByAlias).toHaveBeenCalledWith('Dune', {
+      kind: 'movie',
+      limit: 40,
+      excludedSourceIds: ['src-a'],
+    });
+    expect(aliasKeys).toEqual(['x:src-b:movie:2']);
+
+    // Remaining Wave E1 methods forward cleanly
+    await scoped.getElvEnrichmentForKeys?.(['x:src-b:movie:2']);
+    expect(getElvEnrichmentForKeys).toHaveBeenCalledWith(['x:src-b:movie:2']);
+    await scoped.getElvTitleDetail?.('tt1160419', { lang: 'tr' });
+    expect(getElvTitleDetail).toHaveBeenCalledWith('tt1160419', { lang: 'tr' });
+    await scoped.enrichElvPriorityKeys?.(['x:src-b:movie:2'], { lang: 'en' });
+    expect(enrichElvPriorityKeys).toHaveBeenCalledWith(['x:src-b:movie:2'], { lang: 'en' });
+    await scoped.runElvBackgroundMatching?.({ lang: 'en' });
+    expect(runElvBackgroundMatching).toHaveBeenCalledWith({ lang: 'en' });
+    await scoped.recordPlaybackQuality?.({
+      itemKey: 'x:src-b:movie:2',
+      actualWidth: 1920,
+      actualHeight: 1080,
+    });
+    expect(recordPlaybackQuality).toHaveBeenCalled();
+    await scoped.recordPlaybackVariantFailure?.('x:src-b:movie:2');
+    expect(recordPlaybackVariantFailure).toHaveBeenCalledWith('x:src-b:movie:2');
+    await scoped.setElvManualMatch?.('x:src-b:movie:2', 'src-b', 'movie', 'tt1160419');
+    expect(setElvManualMatch).toHaveBeenCalledWith(
+      'x:src-b:movie:2',
+      'src-b',
+      'movie',
+      'tt1160419',
+    );
+    await scoped.wipeElvEnrichment?.();
+    expect(wipeElvEnrichment).toHaveBeenCalled();
+  });
 });

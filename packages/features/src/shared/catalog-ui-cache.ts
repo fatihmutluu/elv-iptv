@@ -149,6 +149,7 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
   let revision = opts.revision ?? 0;
   let locale = opts.locale ?? 'en';
   let profileKey = opts.profileKey ?? 'default:0';
+  let elvKey = opts.elvKey ?? 'elv:0';
   let hits = 0;
   let misses = 0;
   const recordLookup = (hit: boolean): void => {
@@ -200,6 +201,7 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
     getRevision: () => revision,
     getLocale: () => locale,
     getProfileKey: () => profileKey,
+    getElvKey: () => elvKey,
     getMetrics(): CatalogUiCacheMetrics {
       const total = hits + misses;
       return {
@@ -209,14 +211,21 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
       };
     },
 
-    setRevision(nextRevision, nextLocale, nextProfileKey) {
+    setRevision(nextRevision, nextLocale, nextProfileKey, nextElvKey) {
       const resolvedProfileKey = nextProfileKey ?? profileKey;
-      if (nextRevision === revision && nextLocale === locale && resolvedProfileKey === profileKey) {
+      const resolvedElvKey = nextElvKey ?? elvKey;
+      if (
+        nextRevision === revision &&
+        nextLocale === locale &&
+        resolvedProfileKey === profileKey &&
+        resolvedElvKey === elvKey
+      ) {
         return;
       }
       revision = nextRevision;
       locale = nextLocale;
       profileKey = resolvedProfileKey;
+      elvKey = resolvedElvKey;
       clearAll();
     },
 

@@ -39,7 +39,7 @@ import type {
 import { ProfilesAndParentalPanel } from './profiles';
 import { SearchScreen } from './search';
 import { SettingsScreen, type SettingsSection } from './settings';
-import { type DetailTarget, DownloadsProvider, useDownloads } from './shared';
+import { type DetailTarget, DownloadsProvider, isElvFeatureActive, useDownloads } from './shared';
 import {
   type BrowseFocusMemory,
   BrowseFocusMemoryProvider,
@@ -201,6 +201,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         preferredAudioLang={p.preferences.preferences.preferredAudioLang}
         preferredSubtitleLang={p.preferences.preferences.preferredSubtitleLang}
         vodEnrichmentEnabled={false}
+        elvPreferences={p.preferences.preferences}
         onSearchPerson={p.onSearchPerson}
         onBack={p.onPopDetail}
         onPlay={handleStagePlay}
@@ -274,6 +275,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         onScopeChange={p.onSearchScopeChange}
         recentSearches={p.recentSearches}
         onRecentSearchesChange={p.onRecentSearchesChange}
+        elvPreferences={p.preferences.preferences}
         onPlay={handleStagePlay}
         onOpenDetail={p.onOpenDetail}
         {...stageProps}
@@ -326,6 +328,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         sources={p.sources}
         userStateVersion={p.effectiveUserStateVersion}
         groupVersions={p.activeTab === 'movie' ? p.preferences.preferences.groupVodVersions : false}
+        elvPreferences={p.preferences.preferences}
         memory={p.catalogMemoryByTab[p.activeTab]}
         onMemoryChange={p.activeTab === 'movie' ? p.onMovieMemoryChange : p.onSeriesMemoryChange}
         onPlay={handleStagePlay}
@@ -336,6 +339,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
     );
   }
 
+  const elvLiveActive = isElvFeatureActive(p.preferences.preferences, 'elvLiveEnhance');
   return (
     <LiveScreen
       key={p.contentIsolationKey}
@@ -353,8 +357,8 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
       logoBackdropMode="off"
       showSourceBadges={true}
       liveOkTwoStepPreview={false}
-      cleanChannelTitles={false}
-      collapseVariants={false}
+      cleanChannelTitles={elvLiveActive}
+      collapseVariants={elvLiveActive}
       onEmbeddedPlaybackActiveChange={p.onEmbeddedPlaybackActiveChange}
       {...(p.onRegisterStopPreview !== undefined
         ? { onRegisterStopPreview: p.onRegisterStopPreview }

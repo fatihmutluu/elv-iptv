@@ -516,11 +516,15 @@ function createSharedSecretStore(): SecretStore {
   });
 }
 
-function startCatalog(secrets: SecretStore): CatalogCoordinator<MessagePortMain> {
+function startCatalog(
+  secrets: SecretStore,
+  elvServerUrl?: string,
+): CatalogCoordinator<MessagePortMain> {
   const userData = app.getPath('userData');
   const coordinator = createCatalogCoordinator<MessagePortMain>({
     dbPath: join(userData, 'catalog.db'),
     workerPath: join(__dirname, '..', 'utility', 'catalog-worker.js'),
+    ...(elvServerUrl !== undefined && elvServerUrl.length > 0 ? { elvServerUrl } : {}),
     secrets,
     fork: (workerPath) => utilityProcess.fork(workerPath, [], { serviceName: 'ELV Catalog' }),
     createChannel: () => new MessageChannelMain(),
@@ -729,7 +733,7 @@ if (hasLock) {
     if (gateQuery === null) {
       void desktopDownloadManager.hydrate();
     }
-    catalogCoordinator = startCatalog(sharedSecrets);
+    catalogCoordinator = startCatalog(sharedSecrets, initialSyncServerUrl);
     await startPlayer();
     createWindow();
     appInitialized = true;

@@ -441,6 +441,43 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     getVodEnrichment: async (itemKey, nowMs) =>
       (await open()).getVodEnrichment?.(itemKey, nowMs) ?? null,
     enrichVodItem: async (itemKey, opts) => (await open()).enrichVodItem?.(itemKey, opts) ?? null,
+    getElvEnrichmentForKeys: async (itemKeys) =>
+      (await open()).getElvEnrichmentForKeys?.(itemKeys) ?? new Map(),
+    getElvTitleDetail: async (imdbId, opts) =>
+      (await open()).getElvTitleDetail?.(imdbId, opts) ?? null,
+    listMergedVodVersions: async (itemKey, opts) =>
+      (await open()).listMergedVodVersions?.(itemKey, opts) ?? [],
+    enrichElvPriorityKeys: async (itemKeys, opts) =>
+      (await open()).enrichElvPriorityKeys?.(itemKeys, opts) ?? {
+        scanned: 0,
+        layer1Matched: 0,
+        remoteMatched: 0,
+        skipped: 0,
+        aborted: false,
+      },
+    runElvBackgroundMatching: async (opts) =>
+      (await open()).runElvBackgroundMatching?.(opts) ?? {
+        scanned: 0,
+        layer1Matched: 0,
+        remoteMatched: 0,
+        skipped: 0,
+        aborted: false,
+      },
+    recordPlaybackQuality: async (input) => (await open()).recordPlaybackQuality?.(input) ?? null,
+    recordPlaybackVariantFailure: async (itemKey) =>
+      (await open()).recordPlaybackVariantFailure?.(itemKey) ?? null,
+    setElvManualMatch: async (itemKey, sourceId, mediaType, imdbId) => {
+      await (await open()).setElvManualMatch?.(itemKey, sourceId, mediaType, imdbId);
+    },
+    wipeElvEnrichment: async () => {
+      await (await open()).wipeElvEnrichment?.();
+    },
+    searchElvItemKeysByAlias: async (query, opts) =>
+      (await open()).searchElvItemKeysByAlias?.(query, opts) ?? [],
+    listLiveVariants: async (itemKey, categoryId, opts) =>
+      (await open()).listLiveVariants?.(itemKey, categoryId, opts) ?? [],
+    findGuideChannelByCleanName: async (sourceId, channelName, opts) =>
+      (await open()).findGuideChannelByCleanName?.(sourceId, channelName, opts) ?? null,
     listCollections: async (profileId, opts) =>
       (await open()).listCollections?.(profileId, opts) ?? [],
     createCollection: (input) =>

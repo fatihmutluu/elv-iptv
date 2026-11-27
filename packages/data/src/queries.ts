@@ -80,6 +80,10 @@ export interface ItemDetailRow extends ItemRow {
   readonly cast?: string | null;
   /** Director metadata (`movies.director_text` / `series.director_text`) when present (`#397`). */
   readonly director?: string | null;
+  /** Provider-supplied IMDb ID (`tt...`) persisted in catalog v24 when present (`#511`). */
+  readonly providerImdbId?: string | null;
+  /** Provider-supplied numeric TMDB ID persisted in catalog v24 when present (`#511`). */
+  readonly providerTmdbId?: string | null;
 }
 
 /** One season of a series with the episodes stored for it. */
@@ -530,6 +534,8 @@ export async function queryItemDetail(
       plot: string | null;
       cast_text: string | null;
       director_text: string | null;
+      provider_imdb_id: string | null;
+      provider_tmdb_id: string | null;
     }
   >(
     `SELECT live.id, live.key, 'live' AS kind, live.source_id, live.provider_id,
@@ -537,15 +543,15 @@ export async function queryItemDetail(
             CASE WHEN NULLIF(co.custom_name, '') IS NOT NULL THEN live.name ELSE NULL END AS original_name,
             COALESCE(co.is_hidden, 0) AS co_is_hidden,
             co.sort_order AS co_sort_order,
-            live.logo, NULL AS rating, NULL AS year, live.num, live.catchup_days, NULL AS plot, NULL AS cast_text, NULL AS director_text
+            live.logo, NULL AS rating, NULL AS year, live.num, live.catchup_days, NULL AS plot, NULL AS cast_text, NULL AS director_text, NULL AS provider_imdb_id, NULL AS provider_tmdb_id
        FROM live
        LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = live.key
       WHERE live.source_id = ? AND live.key = ?
      UNION ALL
-     SELECT id, key, 'movie', source_id, provider_id, name, NULL, 0, NULL, logo, rating, year, NULL, NULL, NULL, cast_text, director_text
+     SELECT id, key, 'movie', source_id, provider_id, name, NULL, 0, NULL, logo, rating, year, NULL, NULL, NULL, cast_text, director_text, provider_imdb_id, provider_tmdb_id
        FROM movies WHERE source_id = ? AND key = ?
      UNION ALL
-     SELECT id, key, 'series', source_id, provider_id, name, NULL, 0, NULL, cover, rating, year, NULL, NULL, plot, cast_text, director_text
+     SELECT id, key, 'series', source_id, provider_id, name, NULL, 0, NULL, cover, rating, year, NULL, NULL, plot, cast_text, director_text, provider_imdb_id, provider_tmdb_id
        FROM series WHERE source_id = ? AND key = ?
      LIMIT 1`,
     [profileId, sourceId, itemKey, sourceId, itemKey, sourceId, itemKey],
@@ -558,6 +564,8 @@ export async function queryItemDetail(
         plot: r.plot,
         ...(r.cast_text !== null ? { cast: r.cast_text } : {}),
         ...(r.director_text !== null ? { director: r.director_text } : {}),
+        ...(r.provider_imdb_id !== null ? { providerImdbId: r.provider_imdb_id } : {}),
+        ...(r.provider_tmdb_id !== null ? { providerTmdbId: r.provider_tmdb_id } : {}),
       };
 }
 

@@ -40,6 +40,8 @@ export interface XtreamMovie {
   year?: number;
   cast?: string;
   director?: string;
+  providerImdbId?: string;
+  providerTmdbId?: string;
   extension: string;
   added?: number;
 }
@@ -55,6 +57,8 @@ export interface XtreamSeries {
   year?: number;
   cast?: string;
   director?: string;
+  providerImdbId?: string;
+  providerTmdbId?: string;
   lastModified?: number;
 }
 
@@ -83,6 +87,8 @@ export interface XtreamVodInfo {
   year?: number;
   cast?: string;
   director?: string;
+  providerImdbId?: string;
+  providerTmdbId?: string;
   extension: string;
 }
 

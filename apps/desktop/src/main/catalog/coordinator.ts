@@ -20,6 +20,7 @@ interface PortPairLike<TPort = unknown> {
 export interface CatalogCoordinatorDeps<TPort = unknown> {
   dbPath: string;
   workerPath: string;
+  readonly elvServerUrl?: string;
   secrets: SecretStore;
   fork: (workerPath: string) => UtilityChildLike<TPort>;
   createChannel: () => PortPairLike<TPort>;
@@ -152,7 +153,13 @@ export function createCatalogCoordinator<TPort = unknown>(
       }
     });
 
-    child.postMessage({ type: 'init', dbPath });
+    child.postMessage({
+      type: 'init',
+      dbPath,
+      ...(deps.elvServerUrl !== undefined && deps.elvServerUrl.length > 0
+        ? { elvServerUrl: deps.elvServerUrl }
+        : {}),
+    });
     return ready;
   };
 

@@ -1,4 +1,5 @@
 import type { CatalogService, ItemRow, RatingValue, SourceRow, WatchProgressRow } from '@elv/data';
+import { DEFAULT_ELV_MODE_PREFERENCES, type ElvModePreferences } from '@elv/domain';
 import { useContextMenu, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -14,8 +15,11 @@ import {
   computeCatalogLayout,
   type DetailTarget,
   detailTargetFromItem,
+  isElvFeatureActive,
+  presentElvCatalogItems,
   useCardQuickActionsState,
   useCatalogUiCache,
+  useElvEnrichmentForKeys,
 } from '../shared';
 import { AmbientBackdrop } from '../shared/AmbientBackdrop';
 import {
@@ -60,6 +64,8 @@ export interface CatalogDiscoveryScreenProps {
   readonly groupVersions?: boolean;
   /** Opt-in ELV Mode quick filter tab slot (`#508`, defaults to `false` until Wave E1/E2). */
   readonly showElvPicks?: boolean;
+  /** Active ELV Mode display & merging preferences (`#511`). */
+  readonly elvPreferences?: ElvModePreferences;
 }
 
 /**
@@ -83,7 +89,12 @@ export function CatalogDiscoveryScreen({
   isActiveScope = true,
   groupVersions = false,
   showElvPicks = false,
+  elvPreferences,
 }: CatalogDiscoveryScreenProps): ReactElement {
+  const elvPrefs = elvPreferences ?? DEFAULT_ELV_MODE_PREFERENCES;
+  const elvNeedsEnrichment =
+    isElvFeatureActive(elvPrefs, 'elvEnrichMetadata') ||
+    isElvFeatureActive(elvPrefs, 'elvMergeVersions');
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
@@ -324,16 +335,56 @@ export function CatalogDiscoveryScreen({
   const isQuickFilterGridMode = selectedCategory === null && quickFilter !== 'all';
   const isGridMode = isCategoryGridMode || isQuickFilterGridMode;
 
+  const visibleRailKeys = useMemo(() => {
+    if (!elvNeedsEnrichment) return [] as string[];
+    const keys: string[] = [];
+    for (const cat of discovery.visibleCategories) {
+      const rows = discovery.railItemsByCategoryId.get(cat.row.id);
+      if (!rows) continue;
+      for (const item of rows) keys.push(item.key);
+    }
+    return keys;
+  }, [discovery.railItemsByCategoryId, discovery.visibleCategories, elvNeedsEnrichment]);
+
+  const elvEnrichment = useElvEnrichmentForKeys(catalog, visibleRailKeys, {
+    enabled: elvNeedsEnrichment,
+    lang: i18n.locale,
+    catalogRevision: refreshToken,
+  });
+
+  const presentedRailItemsByCategoryId = useMemo<ReadonlyMap<string, readonly ItemRow[]>>(() => {
+    if (!elvNeedsEnrichment) {
+      return discovery.railItemsByCategoryId;
+    }
+    const next = new Map<string, readonly ItemRow[]>();
+    for (const [catId, rows] of discovery.railItemsByCategoryId) {
+      next.set(
+        catId,
+        presentElvCatalogItems(rows, elvEnrichment.enrichmentByKey, elvPrefs, i18n.locale, {
+          isKeyLookupPending: elvEnrichment.isKeyLookupPending,
+        }),
+      );
+    }
+    return next;
+  }, [
+    discovery.railItemsByCategoryId,
+    elvEnrichment.enrichmentByKey,
+    elvEnrichment.isKeyLookupPending,
+    elvNeedsEnrichment,
+    elvPrefs,
+    i18n.locale,
+  ]);
+
   const railEntries = useMemo<CatalogRailNavEntry[]>(() => {
     const entries: CatalogRailNavEntry[] = [];
     for (let i = 0; i < discovery.visibleCategories.length; i++) {
       const cat = discovery.visibleCategories[i];
       if (!cat) continue;
-      const items = discovery.railItemsByCategoryId.get(cat.row.id) ?? [];
+      const items = presentedRailItemsByCategoryId.get(cat.row.id) ?? [];
       if (items.length > 0) entries.push({ catIndex: i, count: items.length + 1 });
     }
     return entries;
-  }, [discovery.railItemsByCategoryId, discovery.visibleCategories]);
+  }, [discovery.visibleCategories, presentedRailItemsByCategoryId]);
 
   const [gridMeta, setGridMeta] = useState<CategoryGridMeta>({ itemCount: 0 });
   const gridAccessRef = useRef<CategoryGridAccess>({
@@ -412,7 +463,7 @@ export function CatalogDiscoveryScreen({
       if (rowId.startsWith('rail-')) {
         const cat = discovery.visibleCategories[Number(rowId.slice(5))];
         if (!cat) return;
-        const items = discovery.railItemsByCategoryId.get(cat.row.id) ?? [];
+        const items = presentedRailItemsByCategoryId.get(cat.row.id) ?? [];
         if (colIndex === items.length) return handleSelectCategory(cat.row.id);
         const item = items[colIndex];
         if (!item) return;
@@ -428,6 +479,7 @@ export function CatalogDiscoveryScreen({
       kind,
       onOpenDetail,
       onOpenSources,
+      presentedRailItemsByCategoryId,
       quickChipCount,
       showElvPicks,
     ],
@@ -516,19 +568,19 @@ export function CatalogDiscoveryScreen({
     if (tvNav.focusedRowId?.startsWith('rail-') && tvNav.focusedCol !== null) {
       const cat = discovery.visibleCategories[Number(tvNav.focusedRowId.slice(5))];
       if (!cat) return null;
-      const items = discovery.railItemsByCategoryId.get(cat.row.id);
+      const items = presentedRailItemsByCategoryId.get(cat.row.id);
       const item = items?.[tvNav.focusedCol];
       if (item) return { key: item.key, uri: item.logo, title: item.name };
     }
     return null;
   }, [
     discovery.continueItems,
-    discovery.railItemsByCategoryId,
     discovery.visibleCategories,
     gridMeta.itemCount,
     isGridMode,
     layout.gridColumns,
     layout.isTv,
+    presentedRailItemsByCategoryId,
     tvNav.focusedCol,
     tvNav.focusedGridPos,
     tvNav.focusedRowId,
@@ -599,6 +651,7 @@ export function CatalogDiscoveryScreen({
               focusedAlphabetLetter={tvNav.focusedAlphabetLetter}
               sortBy={sortBy}
               groupVersions={groupVersions}
+              elvPreferences={elvPrefs}
               onToggleSort={handleToggleSort}
               onBack={handleSelectAllCategories}
               onOpenDetail={onOpenDetail}
@@ -644,7 +697,7 @@ export function CatalogDiscoveryScreen({
               safeBottomInset={viewport.safeArea.bottom}
               continueItems={discovery.continueItems}
               visibleCategories={discovery.visibleCategories}
-              loadedRailItems={discovery.railItemsByCategoryId}
+              loadedRailItems={presentedRailItemsByCategoryId}
               loadingRailIds={discovery.loadingRailIds}
               progressByKey={discovery.progressByKey}
               favoriteKeys={quickActionsState.favoriteKeys}

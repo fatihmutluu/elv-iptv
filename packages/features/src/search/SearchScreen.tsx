@@ -4,8 +4,10 @@ import type {
   RatingValue,
   SearchEpisodeHit,
   SearchProgrammeHit,
+  SearchResults,
   SearchScope,
 } from '@elv/data';
+import { DEFAULT_ELV_MODE_PREFERENCES, type ElvModePreferences } from '@elv/domain';
 import { TextEntryBoundary, useContextMenu, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -21,7 +23,11 @@ import {
   computeCatalogLayout,
   type DetailTarget,
   detailTargetFromItem,
+  isElvFeatureActive,
+  matchesElvSearchAliases,
+  presentElvCatalogItems,
   useCardQuickActionsState,
+  useElvEnrichmentForKeys,
 } from '../shared';
 import { createImeSubmitGuard } from '../shared/ime-guard';
 import {
@@ -45,6 +51,7 @@ import {
   sanitizeSearchQuery,
 } from './search-model';
 import { useCatalogSearch } from './useCatalogSearch';
+import { useElvAliasSearch } from './useElvAliasSearch';
 import { useTvSearchNavigation } from './useTvSearchNavigation';
 
 /** Props of {@link SearchScreen}. */
@@ -62,6 +69,8 @@ export interface SearchScreenProps {
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onFocusTopNav?: () => void;
   readonly isActiveScope?: boolean;
+  /** Active ELV Mode display & merging preferences (`#511`). */
+  readonly elvPreferences?: ElvModePreferences;
 }
 
 function SearchScreenBody({
@@ -78,7 +87,9 @@ function SearchScreenBody({
   onOpenDetail,
   onFocusTopNav,
   isActiveScope = true,
+  elvPreferences,
 }: SearchScreenProps): ReactElement {
+  const elvPrefs = elvPreferences ?? DEFAULT_ELV_MODE_PREFERENCES;
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
@@ -222,9 +233,102 @@ function SearchScreenBody({
 
   const sanitizedQuery = sanitizeSearchQuery(search.query);
   const hasQuery = sanitizedQuery.length > 0;
+  const elvEnrichActive = isElvFeatureActive(elvPrefs, 'elvEnrichMetadata');
+  const existingCatalogVodKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const m of search.results.movies) keys.add(m.key);
+    for (const s of search.results.series) keys.add(s.key);
+    return keys;
+  }, [search.results.movies, search.results.series]);
+  const aliasSearch = useElvAliasSearch({
+    catalog,
+    query: search.query,
+    scope: search.scope,
+    enabled: elvEnrichActive,
+    refreshToken,
+    existingKeys: existingCatalogVodKeys,
+  });
+  const mergedBaseResults = useMemo<SearchResults>(() => {
+    if (aliasSearch.movies.length === 0 && aliasSearch.series.length === 0) {
+      return search.results;
+    }
+    const mergeUnique = (base: readonly ItemRow[], extra: readonly ItemRow[]): ItemRow[] => {
+      if (extra.length === 0) return [...base];
+      const seen = new Set(base.map((item) => item.key));
+      const out = [...base];
+      for (const item of extra) {
+        if (!seen.has(item.key)) {
+          seen.add(item.key);
+          out.push(item);
+        }
+      }
+      return out;
+    };
+    return {
+      ...search.results,
+      movies: mergeUnique(search.results.movies, aliasSearch.movies),
+      series: mergeUnique(search.results.series, aliasSearch.series),
+    };
+  }, [aliasSearch.movies, aliasSearch.series, search.results]);
+  const searchVodKeys = useMemo(() => {
+    if (!elvPrefs.elvModeEnabled) return [] as string[];
+    return [
+      ...mergedBaseResults.movies.map((m) => m.key),
+      ...mergedBaseResults.series.map((s) => s.key),
+    ];
+  }, [elvPrefs.elvModeEnabled, mergedBaseResults.movies, mergedBaseResults.series]);
+  const elvEnrichment = useElvEnrichmentForKeys(catalog, searchVodKeys, {
+    enabled: elvPrefs.elvModeEnabled,
+    lang: i18n.locale,
+    catalogRevision: refreshToken,
+  });
+  const presentedResults = useMemo<SearchResults>(() => {
+    if (!elvPrefs.elvModeEnabled) return mergedBaseResults;
+    const rankByAlias = <T extends ItemRow>(rows: readonly T[]): T[] => {
+      const presented = presentElvCatalogItems(
+        rows,
+        elvEnrichment.enrichmentByKey,
+        elvPrefs,
+        i18n.locale,
+        { isKeyLookupPending: elvEnrichment.isKeyLookupPending },
+      );
+      if (sanitizedQuery === '' || elvEnrichment.enrichmentByKey.size === 0) return [...presented];
+      const matched: T[] = [];
+      const rest: T[] = [];
+      for (const item of presented) {
+        if (
+          matchesElvSearchAliases(
+            sanitizedQuery,
+            elvEnrichment.enrichmentByKey.get(item.key),
+            item.name,
+            i18n.locale,
+          )
+        ) {
+          matched.push(item);
+        } else {
+          rest.push(item);
+        }
+      }
+      return [...matched, ...rest];
+    };
+    return {
+      ...mergedBaseResults,
+      movies: rankByAlias(mergedBaseResults.movies),
+      series: rankByAlias(mergedBaseResults.series),
+    };
+  }, [
+    elvEnrichment.enrichmentByKey,
+    elvEnrichment.isKeyLookupPending,
+    elvPrefs,
+    i18n.locale,
+    mergedBaseResults,
+    sanitizedQuery,
+  ]);
+  const effectiveSearching = search.searching || aliasSearch.searching;
+
   const totalVisibleHits = useMemo(
-    () => countScopeResults(search.results, search.scope),
-    [search.results, search.scope],
+    () => countScopeResults(presentedResults, search.scope),
+    [presentedResults, search.scope],
   );
 
   const navRows = useMemo(
@@ -235,31 +339,31 @@ function SearchScreenBody({
         scope: search.scope,
         recentCount: search.recentSearches.length,
         suggestionCount: search.suggestions.length,
-        liveCount: search.results.live.length,
-        epgCount: search.results.epg.length,
-        movieCount: search.results.movies.length,
-        seriesCount: search.results.series.length,
-        episodeCount: search.results.episodes.length,
+        liveCount: presentedResults.live.length,
+        epgCount: presentedResults.epg.length,
+        movieCount: presentedResults.movies.length,
+        seriesCount: presentedResults.series.length,
+        episodeCount: presentedResults.episodes.length,
         liveColumns: wideColumns,
         epgColumns: wideColumns,
         vodColumns: layout.gridColumns,
         episodeColumns: wideColumns,
-        searching: search.searching,
+        searching: effectiveSearching,
         hasSearched: search.hasSearched,
       }),
     [
+      effectiveSearching,
       hasQuery,
       layout.gridColumns,
+      presentedResults.epg.length,
+      presentedResults.episodes.length,
+      presentedResults.live.length,
+      presentedResults.movies.length,
+      presentedResults.series.length,
       search.hasSearched,
       search.query.length,
       search.recentSearches.length,
-      search.results.epg.length,
-      search.results.episodes.length,
-      search.results.live.length,
-      search.results.movies.length,
-      search.results.series.length,
       search.scope,
-      search.searching,
       search.suggestions.length,
       wideColumns,
     ],
@@ -301,19 +405,19 @@ function SearchScreenBody({
         return;
       }
       if (rowId === 'movies') {
-        const item = search.results.movies[col];
+        const item = presentedResults.movies[col];
         const target = item ? detailTargetFromItem(item) : undefined;
         if (target) onOpenDetail(target);
         return;
       }
       if (rowId === 'series') {
-        const item = search.results.series[col];
+        const item = presentedResults.series[col];
         const target = item ? detailTargetFromItem(item) : undefined;
         if (target) onOpenDetail(target);
         return;
       }
       if (rowId === 'episodes') {
-        const hit = search.results.episodes[col];
+        const hit = presentedResults.episodes[col];
         if (hit) handleSelectEpisode(hit);
         return;
       }
@@ -321,7 +425,7 @@ function SearchScreenBody({
         search.clearSearch();
       }
     },
-    [handlePlayLive, handleSelectEpg, handleSelectEpisode, onOpenDetail, search],
+    [handlePlayLive, handleSelectEpg, handleSelectEpisode, onOpenDetail, presentedResults, search],
   );
 
   const handleFocusPosition = useCallback(
@@ -412,27 +516,27 @@ function SearchScreenBody({
         ? `${i18n.t('search.scopeEpg')} (${search.results.epg.length})`
         : i18n.t('search.scopeEpg'),
       movie: search.hasSearched
-        ? i18n.t('search.scope.movies', { count: search.results.movies.length })
+        ? i18n.t('search.scope.movies', { count: presentedResults.movies.length })
         : i18n.t('nav.movies'),
       series: search.hasSearched
-        ? i18n.t('search.scope.series', { count: search.results.series.length })
+        ? i18n.t('search.scope.series', { count: presentedResults.series.length })
         : i18n.t('nav.series'),
       episode: search.hasSearched
-        ? `${i18n.t('search.scopeEpisodes')} (${search.results.episodes.length})`
+        ? `${i18n.t('search.scopeEpisodes')} (${presentedResults.episodes.length})`
         : i18n.t('search.scopeEpisodes'),
     }),
     [
       i18n,
+      presentedResults.episodes.length,
+      presentedResults.movies.length,
+      presentedResults.series.length,
       search.hasSearched,
       search.results.epg.length,
-      search.results.episodes.length,
       search.results.live.length,
-      search.results.movies.length,
-      search.results.series.length,
     ],
   );
 
-  const isEmptySettled = hasQuery && totalVisibleHits === 0 && !search.searching;
+  const isEmptySettled = hasQuery && totalVisibleHits === 0 && !effectiveSearching;
   const bottomPad = Math.max(
     theme.spacing.xl,
     viewport.safeArea.bottom + (layout.isPortrait ? 72 : 24),
@@ -461,7 +565,7 @@ function SearchScreenBody({
           scopeLabels={scopeLabels}
           hasQuery={hasQuery}
           hasSearched={search.hasSearched}
-          searching={search.searching}
+          searching={effectiveSearching}
           totalVisibleHits={totalVisibleHits}
           padX={layout.padX}
           isTv={layout.isTv}
@@ -505,13 +609,13 @@ function SearchScreenBody({
           />
         ) : (
           <SearchResultsSection
-            results={search.results}
+            results={presentedResults}
             scope={search.scope}
             progressByKey={search.progressByKey}
             favoriteKeys={quickActionsState.favoriteKeys}
             watchedOverrides={quickActionsState.watchedOverrides}
             ratingByKey={quickActionsState.ratingByKey}
-            searching={search.searching}
+            searching={effectiveSearching}
             hasSearched={search.hasSearched}
             padX={layout.padX}
             gridGap={layout.gridGap}

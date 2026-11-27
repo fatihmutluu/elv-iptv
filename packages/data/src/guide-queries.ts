@@ -1,5 +1,12 @@
 import type { SqlDriver } from '@elv/domain';
 import type { EpgGenre } from '@elv/sources';
+import {
+  type CleanNameGuideMatch,
+  type FindGuideChannelByCleanNameInput,
+  type FindGuideChannelByCleanNameOptions,
+  findGuideChannelByCleanName,
+  normalizeLiveEpgTitle,
+} from './elv-live-epg';
 import { bucketProgrammesByLocalDay, localDayKey } from './guide-queries-day';
 import { queryChannelByNumber } from './guide-queries-number';
 import {
@@ -19,10 +26,15 @@ import type { SourceSettings } from './sources';
 
 export {
   bucketProgrammesByLocalDay,
+  type CleanNameGuideMatch,
   type CrossChannelProgrammeRow,
   DEFAULT_EPG_SLICE_LIMIT,
+  type FindGuideChannelByCleanNameInput,
+  type FindGuideChannelByCleanNameOptions,
+  findGuideChannelByCleanName,
   localDayKey,
   MAX_EPG_SLICE_LIMIT,
+  normalizeLiveEpgTitle,
   queryChannelByNumber,
   queryCrossChannelEpgSlice,
 };

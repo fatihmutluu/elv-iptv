@@ -13,6 +13,7 @@ import { Platform } from 'react-native';
 /** Navigable category sections inside {@link SettingsScreen}. */
 export type SettingsSection =
   | 'appearance'
+  | 'elvMode'
   | 'playback'
   | 'liveTv'
   | 'remote'
@@ -23,11 +24,12 @@ export type SettingsSection =
   | 'licenses';
 
 /** Preference sections navigated row-by-row directly via {@link useTvSettingsNavigation}. */
-export type PreferenceSettingsSection = 'appearance' | 'playback' | 'liveTv';
+export type PreferenceSettingsSection = 'appearance' | 'elvMode' | 'playback' | 'liveTv';
 
 /** Ordered Settings sidebar sections (on non-TV platforms, `'remote'` is filtered out at render time). */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'appearance',
+  'elvMode',
   'playback',
   'liveTv',
   'remote',
@@ -37,6 +39,18 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   'feedback',
   'licenses',
 ];
+
+/** Focusable control identifiers inside the ELV Mode settings panel (`#511`). */
+export type ElvModeFocusId =
+  | 'elv-master'
+  | 'elv-merge-versions'
+  | 'elv-enrich-metadata'
+  | 'elv-title-format-dropdown'
+  | 'elv-category-source-dropdown'
+  | 'elv-smart-recs'
+  | 'elv-xray'
+  | 'elv-live-enhance'
+  | 'elv-verify-quality';
 
 /** Focusable control identifiers inside the Appearance settings panel. */
 export type AppearanceFocusId =
@@ -236,8 +250,23 @@ const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
   ['channel-switch-instant', 'channel-switch-preview'],
 ];
 
+const ELV_MODE_ROWS_COLLAPSED: readonly (readonly ElvModeFocusId[])[] = [['elv-master']];
+
+const ELV_MODE_ROWS: readonly (readonly ElvModeFocusId[])[] = [
+  ['elv-master'],
+  ['elv-merge-versions'],
+  ['elv-enrich-metadata'],
+  ['elv-title-format-dropdown'],
+  ['elv-category-source-dropdown'],
+  ['elv-smart-recs'],
+  ['elv-xray'],
+  ['elv-live-enhance'],
+  ['elv-verify-quality'],
+];
+
 const PREFERENCE_SECTIONS: readonly PreferenceSettingsSection[] = [
   'appearance',
+  'elvMode',
   'playback',
   'liveTv',
 ];
@@ -248,11 +277,13 @@ function getSectionRows(
   showExternalPlayer: boolean,
   includeTvDisplayRows: boolean,
   showConfirmExitOnBack: boolean,
+  elvModeEnabled: boolean,
   homeLayout?: readonly HomeLayoutSectionPref[],
 ): Readonly<Record<PreferenceSettingsSection, readonly (readonly string[])[]>> {
   const playbackKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}`;
   return {
     appearance: buildAppearanceRows(includeTvDisplayRows, showConfirmExitOnBack, homeLayout),
+    elvMode: elvModeEnabled ? ELV_MODE_ROWS : ELV_MODE_ROWS_COLLAPSED,
     playback: PLAYBACK_ROWS_CACHE[playbackKey] ?? PLAYBACK_ROWS_DEFAULT,
     liveTv: LIVE_TV_ROWS,
   };
@@ -260,7 +291,12 @@ function getSectionRows(
 
 /** Whether `section` uses generalized row-by-row preference D-pad traversal. */
 function isPreferenceSection(section: SettingsSection): section is PreferenceSettingsSection {
-  return section === 'appearance' || section === 'playback' || section === 'liveTv';
+  return (
+    section === 'appearance' ||
+    section === 'elvMode' ||
+    section === 'playback' ||
+    section === 'liveTv'
+  );
 }
 
 const rowListId = (section: PreferenceSettingsSection, rowIndex: number): string =>
@@ -273,6 +309,7 @@ function createSettingsFocusStore(
   showExternalPlayer: boolean,
   includeTvDisplayRows: boolean,
   showConfirmExitOnBack: boolean,
+  elvModeEnabled: boolean,
   homeLayout?: readonly HomeLayoutSectionPref[],
 ): FocusStore {
   const initialIdx = Math.max(0, SETTINGS_SECTIONS.indexOf(initialSection));
@@ -282,6 +319,7 @@ function createSettingsFocusStore(
     showExternalPlayer,
     includeTvDisplayRows,
     showConfirmExitOnBack,
+    elvModeEnabled,
     homeLayout,
   );
   const sectionLists = PREFERENCE_SECTIONS.flatMap((sec) =>
@@ -313,6 +351,7 @@ type SectionCoords = Readonly<Record<PreferenceSettingsSection, { row: number; c
 
 const INITIAL_COORDS: SectionCoords = {
   appearance: { row: 0, col: 0 },
+  elvMode: { row: 0, col: 0 },
   playback: { row: 0, col: 0 },
   liveTv: { row: 0, col: 0 },
 };
@@ -345,6 +384,8 @@ export interface UseTvSettingsNavigationOptions {
   readonly preservePaneOnBlur?: boolean;
   /** Current Home screen section order/visibility so TV Appearance focus matches the rendered `HomeLayoutEditor` order. */
   readonly homeLayout?: readonly HomeLayoutSectionPref[];
+  /** Whether ELV Mode master switch is enabled; collapses ELV Mode focus rows to `[['elv-master']]` when `false` (`#511`). */
+  readonly elvModeEnabled?: boolean;
 }
 
 /** Return value of {@link useTvSettingsNavigation}. */
@@ -379,6 +420,7 @@ export function useTvSettingsNavigation({
   showConfirmExitOnBack = Platform.OS === 'android',
   preservePaneOnBlur = false,
   homeLayout,
+  elvModeEnabled = false,
 }: UseTvSettingsNavigationOptions): TvSettingsNavigationState {
   const [pane, setPane] = useState<'nav' | 'content'>(() =>
     isActiveScope && section === 'sources' ? 'content' : 'nav',
@@ -393,12 +435,13 @@ export function useTvSettingsNavigation({
     showExternalPlayer,
     isTv,
     showConfirmExitOnBack,
+    elvModeEnabled,
     normalizedHomeLayout,
   );
   const sectionRowsRef = useRef(sectionRows);
   sectionRowsRef.current = sectionRows;
   const storeRef = useRef<FocusStore | null>(null);
-  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}:${isTv ? '1' : '0'}:${showConfirmExitOnBack ? '1' : '0'}:${isHomeLayoutCustomized ? '1' : '0'}`;
+  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}:${isTv ? '1' : '0'}:${showConfirmExitOnBack ? '1' : '0'}:${elvModeEnabled ? '1' : '0'}:${isHomeLayoutCustomized ? '1' : '0'}`;
   const storeConfigKeyRef = useRef(storeConfigKey);
   if (storeRef.current === null || storeConfigKeyRef.current !== storeConfigKey) {
     storeConfigKeyRef.current = storeConfigKey;
@@ -409,6 +452,7 @@ export function useTvSettingsNavigation({
       showExternalPlayer,
       isTv,
       showConfirmExitOnBack,
+      elvModeEnabled,
       normalizedHomeLayout,
     );
   }
@@ -422,6 +466,15 @@ export function useTvSettingsNavigation({
       return { ...prev, appearance: { row: maxRow, col: 0 } };
     });
   }, [appearanceRowCount]);
+
+  const elvModeRowCount = sectionRows.elvMode.length;
+  useEffect(() => {
+    setCoords((prev) => {
+      const maxRow = Math.max(0, elvModeRowCount - 1);
+      if (prev.elvMode.row <= maxRow) return prev;
+      return { ...prev, elvMode: { row: maxRow, col: 0 } };
+    });
+  }, [elvModeRowCount]);
 
   const paneRef = useRef(pane);
   paneRef.current = pane;

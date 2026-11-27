@@ -30,8 +30,8 @@ import { buildPlayerOverlayNodes } from './PlayerScreenSheets';
 import { type PlayerScreenProps, PlayerScreenStage } from './PlayerScreenStage';
 import { buildPlayerOsdProps } from './player-osd-props';
 import { buildTouchHoverProps } from './touch-hover-guard';
+import { usePlayerLiveVariantsAndElvQuality } from './useElvQualityReporting';
 import { useGaplessEpisodeQueue } from './useGaplessEpisodeQueue';
-import { useLiveQualityVariants } from './useLiveQualityVariants';
 import { useNextEpisodeResolver } from './useNextEpisodeResolver';
 import { usePlayerCinemaExtras } from './usePlayerCinemaExtras';
 import { usePlayerControls } from './usePlayerControls';
@@ -212,10 +212,14 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     enabled: activeTarget.kind === 'live' && !inPip && !isMini,
     wallClock,
   });
-  const quality = useLiveQualityVariants({
+  const quality = usePlayerLiveVariantsAndElvQuality({
     catalog,
     activeTarget,
-    onSelect: handoff.selectQualityVariant,
+    status,
+    videoInfo,
+    verifyRealQuality: props.elvVerifyRealQuality,
+    elvLiveEnhance: props.elvLiveEnhance,
+    onSelectVariant: handoff.selectQualityVariant,
   });
 
   const [nextEpisodeDismissed, setNextEpisodeDismissed] = useState(false);

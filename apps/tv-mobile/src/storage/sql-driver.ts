@@ -64,6 +64,7 @@ const COPY_STAGED_PROGRAMMES_SQL =
 const OPEN_MAX_ATTEMPTS = 3;
 const OPEN_BACKOFF_MS: readonly number[] = [100, 250];
 const TRANSIENT_SQLITE_LOCK_RE = /sqlite_busy|sqlite_locked|database(?:\s+table)?\s+is\s+locked/i;
+const SAFE_ATTACH_ALIAS_RE = /^[a-z_][a-z0-9_]{0,31}$/;
 
 /** Default threshold in ms above which `onSlowQuery` fires (`#509`). */
 const DEFAULT_SLOW_SQL_THRESHOLD_MS = 250;
@@ -280,6 +281,12 @@ export interface OpSqliteDriver extends SqlDriver {
    * forbids `ATTACH DATABASE` inside a transaction).
    */
   attachAndCopyProgrammes(stageDbPath: string): Promise<void>;
+  /**
+   * Attaches a sibling SQLite database (`filePath`) as `alias` on BOTH `writer` and `reader`
+   * connections so cross-DB `INNER JOIN` queries (e.g. `elv-enrichment.db`) see the attached schema
+   * identically on reads and writes (`#511`).
+   */
+  attachReadOnly?(filePath: string, alias: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -460,6 +467,36 @@ export async function createOpSqliteDriver(
           if (failed) throw copyError;
         }),
       ),
+    attachReadOnly: async (filePath: string, alias: string): Promise<void> => {
+      if (!SAFE_ATTACH_ALIAS_RE.test(alias)) {
+        throw new Error(`Invalid SQLite ATTACH alias: ${alias}`);
+      }
+      if (typeof filePath !== 'string' || filePath.trim() === '' || filePath.includes('\0')) {
+        throw new Error('Invalid SQLite ATTACH filePath');
+      }
+      const attachSql = `ATTACH DATABASE ? AS "${alias}"`;
+      await writes(() =>
+        writeGuard(async () => {
+          await writer.execute(attachSql, [filePath]);
+        }),
+      );
+      try {
+        await reads(() =>
+          readGuard(async () => {
+            await reader.execute(attachSql, [filePath]);
+          }),
+        );
+      } catch (error) {
+        await writes(async () => {
+          try {
+            await writer.execute(`DETACH DATABASE "${alias}"`);
+          } catch {
+            // Preserve the reader attach error if writer detach also fails.
+          }
+        });
+        throw error;
+      }
+    },
     exec: (sql) =>
       writes(() =>
         timeOp(extractSafeSqlOpToken(sql), () =>

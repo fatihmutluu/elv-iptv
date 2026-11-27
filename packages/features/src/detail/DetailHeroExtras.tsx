@@ -1,7 +1,7 @@
-import type { VodVersionOption } from '@elv/data';
 import {
   AdaptiveSheet,
   CtaButton,
+  hexToRgba,
   Icon,
   Tooltip,
   useI18n,
@@ -12,10 +12,11 @@ import {
 } from '@elv/ui-kit';
 import { type ComponentRef, memo, type ReactElement, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { DetailVersionOption } from './detail-data-helpers';
 
 /** Props of {@link DetailVersionDropdown}. */
 export interface DetailVersionDropdownProps {
-  readonly versions: readonly VodVersionOption[];
+  readonly versions: readonly DetailVersionOption[];
   readonly activeVersionKey: string;
   readonly activeVersionLabel: string;
   readonly open: boolean;
@@ -240,19 +241,87 @@ export const DetailVersionDropdown = memo(function DetailVersionDropdownInner({
                   },
                 ]}
               >
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    theme.typography.caption,
-                    styles.menuOptionLabel,
-                    {
-                      color: isSelected ? theme.colors.textPrimary : theme.colors.textSecondary,
-                      fontWeight: isSelected ? '600' : '500',
-                    },
-                  ]}
-                >
-                  {label}
-                </Text>
+                <View style={styles.menuOptionContent}>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      theme.typography.caption,
+                      styles.menuOptionLabel,
+                      {
+                        color: isSelected ? theme.colors.textPrimary : theme.colors.textSecondary,
+                        fontWeight: isSelected ? '600' : '500',
+                      },
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                  {option.sourceName !== undefined && option.sourceName.trim() !== '' ? (
+                    <Text
+                      testID={`detail-preplay-version-source-${idx}`}
+                      numberOfLines={1}
+                      style={[theme.typography.caption, { color: theme.colors.textMuted }]}
+                    >
+                      {i18n.t('elv.source.from', { source: option.sourceName })}
+                    </Text>
+                  ) : null}
+                  {option.isFake4k === true ||
+                  (option.verifiedResolution !== null && option.verifiedResolution !== undefined) ||
+                  option.isUnreliable === true ? (
+                    <View style={styles.versionBadgesRow}>
+                      {option.isFake4k === true && option.verifiedResolution ? (
+                        <Text
+                          testID={`detail-preplay-version-fake4k-${idx}`}
+                          style={[
+                            theme.typography.caption,
+                            styles.versionBadge,
+                            {
+                              borderRadius: theme.radius.pill,
+                              color: theme.colors.liveColor,
+                              backgroundColor: hexToRgba(theme.colors.liveColor, 0.14),
+                            },
+                          ]}
+                        >
+                          {i18n.t('elv.quality.fake4k', {
+                            resolution: option.verifiedResolution,
+                          })}
+                        </Text>
+                      ) : option.verifiedResolution ? (
+                        <Text
+                          testID={`detail-preplay-version-verified-${idx}`}
+                          style={[
+                            theme.typography.caption,
+                            styles.versionBadge,
+                            {
+                              borderRadius: theme.radius.pill,
+                              color: theme.colors.successColor,
+                              backgroundColor: hexToRgba(theme.colors.successColor, 0.14),
+                            },
+                          ]}
+                        >
+                          {i18n.t('elv.quality.verified', {
+                            resolution: option.verifiedResolution,
+                          })}
+                        </Text>
+                      ) : null}
+                      {option.isUnreliable === true ? (
+                        <Text
+                          testID={`detail-preplay-version-unreliable-${idx}`}
+                          style={[
+                            theme.typography.caption,
+                            styles.versionBadge,
+                            {
+                              borderRadius: theme.radius.pill,
+                              color: theme.colors.liveColor,
+                              backgroundColor: hexToRgba(theme.colors.liveColor, 0.14),
+                            },
+                          ]}
+                        >
+                          {i18n.t('elv.quality.unreliable')}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </View>
                 {isSelected ? (
                   <Icon
                     testID={`detail-preplay-version-check-${idx}`}
@@ -482,8 +551,25 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     minHeight: 34,
   },
-  menuOptionLabel: {
+  menuOptionContent: {
     flex: 1,
+    gap: 2,
+  },
+  menuOptionLabel: {
+    flexShrink: 1,
+  },
+  versionBadgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 2,
+  },
+  versionBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    fontSize: 11,
+    fontWeight: '600',
+    overflow: 'hidden',
   },
   optionFocusRing: {
     position: 'absolute',

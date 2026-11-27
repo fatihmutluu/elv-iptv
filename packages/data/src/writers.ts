@@ -26,6 +26,34 @@ export interface ItemWriter<T extends Listed> {
 const n = (v: number | undefined): SqlValue => v ?? null;
 const s = (v: string | undefined): SqlValue => v ?? null;
 
+const IMDB_ID_RE = /^tt\d{5,10}$/i;
+const TMDB_ID_RE = /^[1-9]\d{0,9}$/;
+
+/** Optional external metadata IDs parsed from Xtream or M3U provider records (`#511`). */
+export interface ProviderExternalIds {
+  readonly providerImdbId?: string | null | undefined;
+  readonly providerTmdbId?: string | null | undefined;
+}
+
+/** Normalizes a provider-supplied IMDb ID (`tt1234567`), returning `null` for malformed input. */
+export function normalizeCatalogImdbId(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return IMDB_ID_RE.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+/** Normalizes a provider-supplied positive numeric TMDB ID, returning `null` for `0` or malformed input. */
+export function normalizeCatalogTmdbId(raw: string | number | null | undefined): string | null {
+  if (typeof raw === 'number') {
+    if (!Number.isInteger(raw) || raw <= 0) return null;
+    const text = String(raw);
+    return TMDB_ID_RE.test(text) ? text : null;
+  }
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return TMDB_ID_RE.test(trimmed) ? trimmed : null;
+}
+
 export const liveWriter: ItemWriter<XtreamLive> = {
   sql: `INSERT INTO live_next (source_id, key, provider_id, num, name, name_fold, sort_title, variant_base_fold, quality_rank, logo, guide_id, catchup_days, catchup_mode, run_id, content_hash)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -70,9 +98,9 @@ export const liveWriter: ItemWriter<XtreamLive> = {
   },
 };
 
-export const movieWriter: ItemWriter<XtreamMovie> = {
-  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, cast_text, director_text, cast_fold, director_fold, run_id, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+export const movieWriter: ItemWriter<XtreamMovie & ProviderExternalIds> = {
+  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
           name_fold = excluded.name_fold, sort_title = excluded.sort_title,
           version_group_key = excluded.version_group_key, version_label = excluded.version_label,
@@ -80,6 +108,7 @@ export const movieWriter: ItemWriter<XtreamMovie> = {
           extension = excluded.extension, added = excluded.added,
           cast_text = excluded.cast_text, director_text = excluded.director_text,
           cast_fold = excluded.cast_fold, director_fold = excluded.director_fold,
+          provider_imdb_id = excluded.provider_imdb_id, provider_tmdb_id = excluded.provider_tmdb_id,
           run_id = excluded.run_id, content_hash = excluded.content_hash`,
   row: (sourceId, key, runId, i) => {
     const providerId = String(i.id);
@@ -89,6 +118,8 @@ export const movieWriter: ItemWriter<XtreamMovie> = {
     const versionLabel = version.versionLabel.length > 0 ? version.versionLabel : null;
     const castFold = i.cast !== undefined ? foldText(i.cast) : null;
     const directorFold = i.director !== undefined ? foldText(i.director) : null;
+    const providerImdbId = normalizeCatalogImdbId(i.providerImdbId);
+    const providerTmdbId = normalizeCatalogTmdbId(i.providerTmdbId);
     const contentHash = hashMovieRow({
       providerId,
       name: i.name,
@@ -100,6 +131,8 @@ export const movieWriter: ItemWriter<XtreamMovie> = {
       added: i.added,
       castText: i.cast,
       directorText: i.director,
+      providerImdbId,
+      providerTmdbId,
     });
     return [
       sourceId,
@@ -119,20 +152,23 @@ export const movieWriter: ItemWriter<XtreamMovie> = {
       s(i.director),
       castFold,
       directorFold,
+      providerImdbId,
+      providerTmdbId,
       runId,
       contentHash,
     ];
   },
 };
 
-export const seriesWriter: ItemWriter<XtreamSeries> = {
-  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, run_id, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+export const seriesWriter: ItemWriter<XtreamSeries & ProviderExternalIds> = {
+  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
           name_fold = excluded.name_fold, sort_title = excluded.sort_title, cover = excluded.cover, plot = excluded.plot, rating = excluded.rating,
           year = excluded.year, last_modified = excluded.last_modified,
           cast_text = excluded.cast_text, director_text = excluded.director_text,
           cast_fold = excluded.cast_fold, director_fold = excluded.director_fold,
+          provider_imdb_id = excluded.provider_imdb_id, provider_tmdb_id = excluded.provider_tmdb_id,
           run_id = excluded.run_id, content_hash = excluded.content_hash`,
   row: (sourceId, key, runId, i) => {
     const providerId = String(i.id);
@@ -140,6 +176,8 @@ export const seriesWriter: ItemWriter<XtreamSeries> = {
     const sortTitle = sortTitleKey(i.name);
     const castFold = i.cast !== undefined ? foldText(i.cast) : null;
     const directorFold = i.director !== undefined ? foldText(i.director) : null;
+    const providerImdbId = normalizeCatalogImdbId(i.providerImdbId);
+    const providerTmdbId = normalizeCatalogTmdbId(i.providerTmdbId);
     const contentHash = hashSeriesRow({
       providerId,
       name: i.name,
@@ -151,6 +189,8 @@ export const seriesWriter: ItemWriter<XtreamSeries> = {
       lastModified: i.lastModified,
       castText: i.cast,
       directorText: i.director,
+      providerImdbId,
+      providerTmdbId,
     });
     return [
       sourceId,
@@ -168,6 +208,8 @@ export const seriesWriter: ItemWriter<XtreamSeries> = {
       s(i.director),
       castFold,
       directorFold,
+      providerImdbId,
+      providerTmdbId,
       runId,
       contentHash,
     ];

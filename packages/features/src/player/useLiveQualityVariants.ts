@@ -6,16 +6,18 @@ import type { PlayTarget } from '../ports/play-target';
 export interface UseLiveQualityVariantsParams {
   readonly catalog: Partial<Pick<CatalogService, 'liveVariants'>>;
   readonly activeTarget: PlayTarget;
+  readonly crossCategory?: boolean | undefined;
   readonly onSelect: (itemKey: string, title?: string) => void;
 }
 
 /**
- * Loads selectable quality variants (`4K` / `FHD` / `HD` / `SD`) for the active live channel (`#218`).
+ * Loads selectable quality variants (`4K` / `FHD` / `HD` / `SD`) for the active live channel (`#218`, `#511`).
  * Returns an empty list for VOD playback or channels without sibling variants.
  */
 export function useLiveQualityVariants({
   catalog,
   activeTarget,
+  crossCategory = false,
   onSelect,
 }: UseLiveQualityVariantsParams) {
   const [variants, setVariants] = useState<readonly LiveVariantOption[]>([]);
@@ -29,8 +31,9 @@ export function useLiveQualityVariants({
       return undefined;
     }
     let alive = true;
+    const opts = crossCategory ? { crossCategory: true } : undefined;
     void catalog
-      .liveVariants(itemKey, categoryId)
+      .liveVariants(itemKey, categoryId, opts)
       .then((rows) => {
         if (alive) setVariants(rows.length > 1 ? rows : []);
       })
@@ -40,7 +43,7 @@ export function useLiveQualityVariants({
     return () => {
       alive = false;
     };
-  }, [catalog, categoryId, isLive, itemKey]);
+  }, [catalog, categoryId, crossCategory, isLive, itemKey]);
 
   const selectVariant = useCallback(
     (key: string) => {

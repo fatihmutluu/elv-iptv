@@ -3,8 +3,11 @@ import {
   type CategoryRow,
   DEFAULT_PROFILE_ID,
   type ItemRow,
+  type MergedVodVariant,
   type SeasonRow,
+  UNRELIABLE_FAIL_COUNT_THRESHOLD,
   type VodEnrichmentRecord,
+  type VodVersionOption,
   type WatchProgressRow,
 } from '@elv/data';
 import {
@@ -210,5 +213,32 @@ export function mergeVodEnrichment(
     plot: hasProviderPlot ? provider.plot : enrichedPlot,
     enriched,
     ratingSource: enrichedRating !== null ? enrichment.ratingSource : null,
+  };
+}
+
+/** Extended selectable Detail version option carrying ELV Mode source attribution and verified quality (`#511`). */
+export interface DetailVersionOption extends VodVersionOption {
+  readonly sourceId?: string;
+  readonly sourceName?: string;
+  readonly verifiedResolution?: string | null;
+  readonly isFake4k?: boolean;
+  readonly failCount?: number;
+  readonly isUnreliable?: boolean;
+}
+
+/** Maps a multi-source {@link MergedVodVariant} into a {@link DetailVersionOption} for Detail version picker. */
+export function mapMergedVodVariantToOption(variant: MergedVodVariant): DetailVersionOption {
+  return {
+    key: variant.itemKey,
+    sourceId: variant.sourceId,
+    sourceName: variant.sourceName,
+    title: variant.rawTitle,
+    versionLabel: variant.versionLabel,
+    year: null,
+    qualityRank: variant.qualityRank,
+    verifiedResolution: variant.verifiedResolution,
+    isFake4k: variant.isFake4k,
+    failCount: variant.failCount,
+    isUnreliable: variant.failCount >= UNRELIABLE_FAIL_COUNT_THRESHOLD,
   };
 }

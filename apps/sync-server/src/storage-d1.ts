@@ -1,3 +1,4 @@
+import { createD1ElvStorage } from './elv-storage-d1.ts';
 import type {
   AccountDeletionRequestRecord,
   FeedbackSubmissionRecord,
@@ -137,11 +138,13 @@ function mapFeedback(row: FeedbackRow): FeedbackSubmissionRecord {
   };
 }
 
-/** Creates a Cloudflare D1 `SyncServerStorage` adapter matching migrations `0001` and `0002`. */
+/** Creates a Cloudflare D1 `SyncServerStorage` adapter matching migrations `0001`, `0002`, and `0003`. */
 export function createD1Storage(db: D1Database): SyncServerStorage {
   const pairStorage = createD1PairStorage(db);
+  const elvStorage = createD1ElvStorage(db);
   return {
     ...pairStorage,
+    ...elvStorage,
     async createUser(user: UserRecord): Promise<{ readonly created: boolean }> {
       const res = await db
         .prepare(

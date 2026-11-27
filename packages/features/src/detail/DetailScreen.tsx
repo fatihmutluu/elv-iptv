@@ -1,5 +1,9 @@
 import type { CatalogService, EpisodeRow, ItemRow, RatingValue } from '@elv/data';
-import { computeDownloadProgressRatio, isPlayableDownload } from '@elv/domain';
+import {
+  computeDownloadProgressRatio,
+  type ElvModePreferences,
+  isPlayableDownload,
+} from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import {
   TvFocusAnchor,
@@ -59,6 +63,7 @@ export interface DetailScreenProps {
   readonly preferredAudioLang?: string;
   readonly preferredSubtitleLang?: string;
   readonly vodEnrichmentEnabled?: boolean;
+  readonly elvPreferences?: ElvModePreferences;
   readonly onBack: () => void;
   readonly onPlay: (target: PlayTarget) => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
@@ -91,6 +96,7 @@ export function DetailScreen({
   refreshToken,
   userStateVersion = 0,
   vodEnrichmentEnabled = false,
+  elvPreferences,
   onBack,
   onPlay,
   onOpenDetail,
@@ -108,18 +114,21 @@ export function DetailScreen({
   const { isTv, isPortrait, padX, railGap, heroTopClearance, posterRailWidth } =
     computeCatalogLayout(viewport, theme);
 
+  const [selectedVersionKey, setSelectedVersionKey] = useState<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset user version override on title change
+  useEffect(() => {
+    setSelectedVersionKey(null);
+  }, [target.itemKey]);
   const data = useDetailData({
     target,
     catalog,
     refreshToken,
     userStateVersion,
     vodEnrichmentEnabled,
+    ...(elvPreferences !== undefined ? { elvPreferences } : {}),
+    locale: i18n.locale,
+    selectedVersionKey: target.kind === 'series' ? selectedVersionKey : null,
   });
-  const [selectedVersionKey, setSelectedVersionKey] = useState<string | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset user version override on title change
-  useEffect(() => {
-    setSelectedVersionKey(null);
-  }, [target.itemKey]);
   const activeVersion = useMemo(() => {
     if (data.versions.length <= 1) return undefined;
     const picked =
@@ -136,6 +145,21 @@ export function DetailScreen({
   const handleSelectVersion = useCallback((key: string) => {
     setSelectedVersionKey(key);
   }, []);
+  const activeSeriesKey =
+    target.kind === 'series' ? (activeVersion?.key ?? target.itemKey) : target.itemKey;
+  const activeSeriesSourceId =
+    target.kind === 'series' ? (activeVersion?.sourceId ?? target.sourceId) : target.sourceId;
+  const effectivePlayTarget = useMemo<DetailTarget>(
+    () =>
+      activeSeriesKey === target.itemKey && activeSeriesSourceId === target.sourceId
+        ? target
+        : {
+            ...target,
+            itemKey: activeSeriesKey,
+            sourceId: activeSeriesSourceId,
+          },
+    [activeSeriesKey, activeSeriesSourceId, target],
+  );
   const relatedQuickActions = useCardQuickActionsState({
     catalog,
     refreshToken,
@@ -175,14 +199,21 @@ export function DetailScreen({
   const primaryAction = useMemo(
     () =>
       buildPrimaryPlayAction({
-        target,
+        target: effectivePlayTarget,
         resolvedTitle: data.title,
         movieProgress: data.movieProgress,
         episodes: data.episodes,
         episodeProgressByKey: data.episodeProgressByKey,
         t: i18n.t,
       }),
-    [data.episodeProgressByKey, data.episodes, data.movieProgress, data.title, i18n.t, target],
+    [
+      data.episodeProgressByKey,
+      data.episodes,
+      data.movieProgress,
+      data.title,
+      effectivePlayTarget,
+      i18n.t,
+    ],
   );
 
   const handlePlayPrimary = useCallback(() => {
@@ -191,6 +222,7 @@ export function DetailScreen({
       onPlay({
         ...primaryAction.target,
         itemKey: activeVersion.key,
+        sourceId: activeVersion.sourceId ?? primaryAction.target.sourceId,
         title: activeVersion.title,
       });
       return;
@@ -209,7 +241,7 @@ export function DetailScreen({
     (episode: EpisodeRow, index: number) => {
       onPlay(
         buildEpisodePlayTarget({
-          target,
+          target: effectivePlayTarget,
           episode,
           index,
           progress: data.episodeProgressByKey.get(episode.key),
@@ -219,7 +251,7 @@ export function DetailScreen({
         }),
       );
     },
-    [data.episodeProgressByKey, data.episodes, data.title, i18n.t, onPlay, target],
+    [data.episodeProgressByKey, data.episodes, data.title, effectivePlayTarget, i18n.t, onPlay],
   );
 
   const handlePressRelated = useCallback(
@@ -259,6 +291,7 @@ export function DetailScreen({
   const seasons = data.seasonsState.kind === 'ready' ? data.seasonsState.seasons : [];
   const showMovieDownload = target.kind === 'movie' && downloads.supported;
   const activeMovieKey = activeVersion?.key ?? target.itemKey;
+  const activeMovieSourceId = activeVersion?.sourceId ?? target.sourceId;
   const activeMovieTitle = activeVersion?.title ?? data.title;
   const movieDownloadRecord = showMovieDownload
     ? downloads.byItemKey.get(activeMovieKey)
@@ -302,7 +335,7 @@ export function DetailScreen({
             onSelect: () => {
               onPlay({
                 itemKey: activeMovieKey,
-                sourceId: target.sourceId,
+                sourceId: activeMovieSourceId,
                 title: activeMovieTitle,
                 kind: 'vod',
                 itemKind: 'movie',
@@ -335,7 +368,7 @@ export function DetailScreen({
       return;
     }
     void downloads.enqueue({
-      sourceId: target.sourceId,
+      sourceId: activeMovieSourceId,
       itemKey: activeMovieKey,
       kind: 'movie',
       title: activeMovieTitle,
@@ -343,6 +376,7 @@ export function DetailScreen({
     });
   }, [
     activeMovieKey,
+    activeMovieSourceId,
     activeMovieTitle,
     contextMenu,
     data.backdropUri,
@@ -351,7 +385,6 @@ export function DetailScreen({
     movieDownloadRecord,
     onPlay,
     showMovieDownload,
-    target.sourceId,
   ]);
 
   const handlePressEpisodeDownload = useCallback(
@@ -373,7 +406,7 @@ export function DetailScreen({
               onSelect: () => {
                 onPlay({
                   itemKey: episode.key,
-                  sourceId: target.sourceId,
+                  sourceId: activeSeriesSourceId,
                   title: epTitle,
                   kind: 'vod',
                   itemKind: 'episode',
@@ -409,7 +442,7 @@ export function DetailScreen({
         return;
       }
       void downloads.enqueue({
-        sourceId: target.sourceId,
+        sourceId: activeSeriesSourceId,
         itemKey: episode.key,
         kind: 'episode',
         title: epTitle,
@@ -419,7 +452,7 @@ export function DetailScreen({
         poster: data.backdropUri,
       });
     },
-    [contextMenu, data.backdropUri, data.title, downloads, i18n, onPlay, target.sourceId],
+    [activeSeriesSourceId, contextMenu, data.backdropUri, data.title, downloads, i18n, onPlay],
   );
 
   const heroActionSlots = useMemo<
@@ -443,7 +476,7 @@ export function DetailScreen({
     episodeIndexOffset,
     selectChunk: handleSelectChunk,
   } = useEpisodeChunks({
-    itemKey: target.itemKey,
+    itemKey: activeSeriesKey,
     selectedSeason: data.selectedSeason,
     episodes: data.episodes,
     episodeProgressByKey: data.episodeProgressByKey,

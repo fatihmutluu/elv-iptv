@@ -12,6 +12,7 @@ import {
   isCatalogPortMessage,
   isCatalogWorkerMessage,
 } from '../shared/catalog-ipc.ts';
+import { createCatalogBridgeWaveE1Ops } from './catalog-bridge-wave-e1.ts';
 
 /** Subset of the preload's `MessagePort` transferred from main; never crosses `contextBridge`. */
 export interface PreloadClientPortLike {
@@ -748,6 +749,7 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         method: 'listRatingMap',
         ...(profileId === undefined ? {} : { profileId }),
       }),
+    ...createCatalogBridgeWaveE1Ops(callValue),
     flushPendingWrites: () => callValue({ method: 'flushPendingWrites' }),
     onChanged(listener: () => void): () => void {
       changedListeners.add(listener);

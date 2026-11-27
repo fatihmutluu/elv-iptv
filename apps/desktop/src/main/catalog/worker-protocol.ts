@@ -2,7 +2,7 @@ import { isTelemetryRecordRequest, type TelemetryRecordRequest } from '../../sha
 
 /** Private control and secret-bridging messages from Electron `main` to the catalog `utilityProcess`. */
 export type MainToWorkerMessage =
-  | { type: 'init'; dbPath: string }
+  | { type: 'init'; dbPath: string; readonly elvServerUrl?: string }
   | { type: 'client-port'; clientId: number }
   | { type: 'client-disconnect'; clientId: number }
   | { type: 'secret-reply'; reqId: number; ok: true; value: string | null }
@@ -30,10 +30,20 @@ const isPositiveId = (x: unknown): x is number => Number.isSafeInteger(x) && (x 
 export function isMainToWorkerMessage(x: unknown): x is MainToWorkerMessage {
   if (!isRecord(x)) return false;
   switch (x['type']) {
-    case 'init':
+    case 'init': {
+      if (
+        typeof x['dbPath'] !== 'string' ||
+        x['dbPath'].length === 0 ||
+        x['dbPath'].length > 4096
+      ) {
+        return false;
+      }
+      const elvServerUrl = x['elvServerUrl'];
       return (
-        typeof x['dbPath'] === 'string' && x['dbPath'].length > 0 && x['dbPath'].length <= 4096
+        elvServerUrl === undefined ||
+        (typeof elvServerUrl === 'string' && elvServerUrl.length <= 512)
       );
+    }
     case 'client-port':
     case 'client-disconnect':
       return isPositiveId(x['clientId']);

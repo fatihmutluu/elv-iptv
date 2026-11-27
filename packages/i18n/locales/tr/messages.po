@@ -3988,3 +3988,108 @@ msgstr "Geçerli bir 8 haneli eşleştirme kodu girin."
 
 msgid "pair.errorRejected"
 msgstr "Eşleştirme diğer cihazda iptal edildi."
+
+msgid "settings.section.elvMode"
+msgstr "ELV Mode"
+
+msgid "settings.elvMode.subtitle"
+msgstr "Herhangi bir IPTV listesini performans kaybı olmadan sinema kalitesinde bir kataloğa dönüştürün."
+
+msgid "settings.elvMode.masterTitle"
+msgstr "ELV Mode"
+
+msgid "settings.elvMode.masterDescription"
+msgstr "IMDb verileri ve akıllı çoklu kaynak birleştirme ile tahribatsız iyileştirme. İstediğiniz an kapatıp ham sağlayıcı görünümüne dönebilirsiniz."
+
+msgid "settings.elvMode.mergeVersions"
+msgstr "Film ve dizi sürümlerini birleştir"
+
+msgid "settings.elvMode.mergeVersionsDesc"
+msgstr "Aynı yapımın farklı sürümlerini ve birden fazla kaynaktaki kopyalarını tek kartta toplayıp detaydan seçtirir."
+
+msgid "settings.elvMode.enrichMetadata"
+msgstr "Temiz posterler, puanlar ve zengin detay"
+
+msgid "settings.elvMode.enrichMetadataDesc"
+msgstr "Sağlayıcı görsellerini tekrar indirmeden doğrudan temiz IMDb posterlerini, puanlarını ve yerel dil özetlerini yükler."
+
+msgid "settings.elvMode.titleFormat"
+msgstr "Başlık gösterim formatı"
+
+msgid "settings.elvMode.titleFormatDesc"
+msgstr "Film ve dizi adlarının göz atma, detay ve aramada nasıl görüneceğini seçin."
+
+msgid "settings.elvMode.titleFormat.original"
+msgstr "Orijinal ad"
+
+msgid "settings.elvMode.titleFormat.system"
+msgstr "Sistem dili"
+
+msgid "settings.elvMode.titleFormat.english"
+msgstr "İngilizce"
+
+msgid "settings.elvMode.titleFormat.english_system"
+msgstr "İngilizce (Sistem)"
+
+msgid "settings.elvMode.titleFormat.original_system"
+msgstr "Orijinal (Sistem)"
+
+msgid "settings.elvMode.titleFormat.system_english"
+msgstr "Sistem (İngilizce)"
+
+msgid "settings.elvMode.titleFormat.system_original"
+msgstr "Sistem (Orijinal)"
+
+msgid "settings.elvMode.categorySource"
+msgstr "Kategori kaynağı"
+
+msgid "settings.elvMode.categorySourceDesc"
+msgstr "Filmler ve Diziler'de temiz IMDb türlerini veya IPTV sağlayıcınızın kendi klasörlerini kullanın."
+
+msgid "settings.elvMode.categorySource.imdb"
+msgstr "IMDb türleri"
+
+msgid "settings.elvMode.categorySource.provider"
+msgstr "Sağlayıcı klasörleri"
+
+msgid "settings.elvMode.smartRecommendations"
+msgstr "Akıllı öneriler ve ana sayfa gündem vitrini"
+
+msgid "settings.elvMode.smartRecommendationsDesc"
+msgstr "Kütüphanenizdeki yapımlardan ve IMDb gündem listelerinden kişisel öneriler sunar, beğenmediklerinizi gizler."
+
+msgid "settings.elvMode.xray"
+msgstr "Oynatıcı içi X-Ray (oyuncular ve bölüm bilgisi)"
+
+msgid "settings.elvMode.xrayDesc"
+msgstr "Oynatmayı duraklattığınızda tıklanabilir oyuncu kadrosu ve bölüm bilgilerini gösterir."
+
+msgid "settings.elvMode.liveEnhance"
+msgstr "Canlı TV temizleme, kalite gruplama ve otomatik yedek"
+
+msgid "settings.elvMode.liveEnhanceDesc"
+msgstr "Sağlayıcı etiketlerini temizler, kategoriler arası kalite kopyalarını birleştirir, kopunca yedeğe geçer ve bozuk yayınları alta alır."
+
+msgid "settings.elvMode.verifyRealQuality"
+msgstr "Gerçek kalite doğrulama ve bozuk sürüm hafızası"
+
+msgid "settings.elvMode.verifyRealQualityDesc"
+msgstr "Gerçek yayın çözünürlüğünü kaydedip sahte 4K etiketlerini düzeltir ve sürekli hata veren sürümleri alta iter."
+
+msgid "elv.quality.verified"
+msgstr "Doğrulanmış {resolution}"
+
+msgid "elv.quality.fake4k"
+msgstr "Gerçek {resolution} (4K etiketli)"
+
+msgid "elv.quality.unreliable"
+msgstr "Sorunlu"
+
+msgid "elv.source.from"
+msgstr "{source} kaynağından"
+
+msgid "elv.versions.title"
+msgstr "Kaynaklar ve sürümler ({count})"
+
+msgid "elv.matching.background"
+msgstr "Katalog arka planda zenginleştiriliyor…"

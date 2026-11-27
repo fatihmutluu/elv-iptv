@@ -173,6 +173,23 @@ describe('production CatalogService wrapper chain (listWatched & VOD collections
     expect(listedAfter[0]?.name).toBe('Cinema VOD');
     expect(listedAfter[0]?.excludedProfileIds).toEqual(['kids-99']);
 
+    // 4) Wave E1 ELV Mode methods propagate through full stack (lazy -> coalesced -> observed -> profile-scoped)
+    expect(stacked.getElvEnrichmentForKeys).toBeDefined();
+    expect(stacked.getElvTitleDetail).toBeDefined();
+    expect(stacked.listMergedVodVersions).toBeDefined();
+    expect(stacked.enrichElvPriorityKeys).toBeDefined();
+    expect(stacked.runElvBackgroundMatching).toBeDefined();
+    expect(stacked.recordPlaybackQuality).toBeDefined();
+    expect(stacked.recordPlaybackVariantFailure).toBeDefined();
+    expect(stacked.setElvManualMatch).toBeDefined();
+    expect(stacked.wipeElvEnrichment).toBeDefined();
+    expect(stacked.searchElvItemKeysByAlias).toBeDefined();
+    expect(stacked.listLiveVariants).toBeDefined();
+    expect(stacked.findGuideChannelByCleanName).toBeDefined();
+    expect((await stacked.getElvEnrichmentForKeys?.([movie.key]))?.size).toBe(0);
+    expect(await stacked.searchElvItemKeysByAlias?.('Dune')).toEqual([]);
+    expect(await stacked.listMergedVodVersions?.(movie.key)).toHaveLength(1);
+
     await stacked.close();
     handle.close();
   });
@@ -206,5 +223,33 @@ describe('production CatalogService wrapper chain (listWatched & VOD collections
     expect((await lazy.reorderCollectionItems?.('c1', ['m:1']))?.ok).toBe(false);
     expect((await lazy.renameSource?.('s1', 'Renamed'))?.ok).toBe(false);
     expect((await lazy.setSourceExcludedProfiles?.('s1', ['p2']))?.ok).toBe(false);
+
+    // Wave E1 ELV Mode fallbacks when omitted on underlying service
+    expect((await lazy.getElvEnrichmentForKeys?.(['m:1']))?.size).toBe(0);
+    expect(await lazy.getElvTitleDetail?.('tt1160419')).toBeNull();
+    expect(await lazy.listMergedVodVersions?.('m:1')).toEqual([]);
+    expect(await lazy.enrichElvPriorityKeys?.(['m:1'])).toEqual({
+      scanned: 0,
+      layer1Matched: 0,
+      remoteMatched: 0,
+      skipped: 0,
+      aborted: false,
+    });
+    expect(await lazy.runElvBackgroundMatching?.()).toEqual({
+      scanned: 0,
+      layer1Matched: 0,
+      remoteMatched: 0,
+      skipped: 0,
+      aborted: false,
+    });
+    expect(await lazy.recordPlaybackQuality?.({ itemKey: 'm:1' })).toBeNull();
+    expect(await lazy.recordPlaybackVariantFailure?.('m:1')).toBeNull();
+    await expect(
+      lazy.setElvManualMatch?.('m:1', 's1', 'movie', 'tt1160419'),
+    ).resolves.toBeUndefined();
+    await expect(lazy.wipeElvEnrichment?.()).resolves.toBeUndefined();
+    expect(await lazy.searchElvItemKeysByAlias?.('Dune')).toEqual([]);
+    expect(await lazy.listLiveVariants?.('m:1')).toEqual([]);
+    expect(await lazy.findGuideChannelByCleanName?.('s1', 'CNN')).toBeNull();
   });
 });

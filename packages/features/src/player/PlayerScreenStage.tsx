@@ -65,6 +65,8 @@ export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
         | 'liveVariants'
         | 'resolveCatchupStream'
         | 'reportStreamOutcome'
+        | 'recordPlaybackQuality'
+        | 'recordPlaybackVariantFailure'
       >
     > & {
       readonly epgNowNext?: CatalogService['nowNext'];
@@ -160,6 +162,10 @@ export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
   onRegisterStopActivePlayer?: (stop: (() => Promise<void>) | null) => void;
   /** When `true`, suspends player remote/keyboard shortcuts while a root overlay is open. */
   externalOverlayOpen?: boolean;
+  /** When `true`, reports verified playback resolution and variant failures to ELV quality memory (`#511`). */
+  elvVerifyRealQuality?: boolean;
+  /** When `true`, enables cross-category live variant grouping and automatic healthy failover (`#511`). */
+  elvLiveEnhance?: boolean;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
 }

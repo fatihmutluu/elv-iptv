@@ -1,4 +1,4 @@
-import type { RatingValue, VodVersionOption } from '@elv/data';
+import type { RatingValue } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import {
   ArtworkImage,
@@ -20,6 +20,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { computeHeroHeight } from '../shared';
 import type { DetailTechnicalMeta } from '../shared/detail-target';
 import { DetailSynopsisBlock, DetailVersionDropdown } from './DetailHeroExtras';
+import type { DetailVersionOption } from './detail-data-helpers';
 import {
   buildTechnicalBadges,
   detailProgressRatio,
@@ -64,7 +65,7 @@ export interface DetailHeroProps {
   readonly userRating?: RatingValue | null;
   readonly watched: boolean;
   readonly primaryAction: PrimaryPlayAction;
-  readonly versions?: readonly VodVersionOption[];
+  readonly versions?: readonly DetailVersionOption[];
   readonly activeVersionKey?: string;
   readonly activeVersionLabel?: string;
   readonly versionMenuOpen?: boolean;

@@ -1,3 +1,4 @@
+import { createMemoryElvStorage } from './elv-storage-memory.ts';
 import { MAX_PAIR_ATTEMPTS } from './pair-validation.ts';
 import type {
   AccountDeletionRequestRecord,
@@ -37,6 +38,7 @@ export function createMemoryStorage(): SyncServerStorage {
   const telemetryEvents: TelemetryEventRecord[] = [];
   const feedbackSubmissions: FeedbackSubmissionRecord[] = [];
   const accountDeletionRequests: AccountDeletionRequestRecord[] = [];
+  const elvStorage = createMemoryElvStorage();
 
   function pruneExpiredRefreshTokens(referenceIso: string): void {
     for (const [id, token] of refreshTokensById) {
@@ -57,6 +59,7 @@ export function createMemoryStorage(): SyncServerStorage {
   }
 
   return {
+    ...elvStorage,
     async createUser(user: UserRecord): Promise<{ readonly created: boolean }> {
       if (userIdsByEmail.has(user.email)) {
         return { created: false };

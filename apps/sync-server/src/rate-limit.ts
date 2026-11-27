@@ -29,6 +29,10 @@ export interface RateLimitConfig {
   readonly feedback: RateLimitRule;
   readonly accountDeletion: RateLimitRule;
   readonly admin: RateLimitRule;
+  readonly elvMatch: RateLimitRule;
+  readonly elvDetail: RateLimitRule;
+  readonly elvFeeds: RateLimitRule;
+  readonly elvSearch: RateLimitRule;
 }
 
 /** Production default per-IP sliding-window limits. */
@@ -41,6 +45,10 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   feedback: { windowMs: 60_000, maxRequests: 15 },
   accountDeletion: { windowMs: 60_000, maxRequests: 10 },
   admin: { windowMs: 60_000, maxRequests: 30 },
+  elvMatch: { windowMs: 60_000, maxRequests: 120 },
+  elvDetail: { windowMs: 60_000, maxRequests: 180 },
+  elvFeeds: { windowMs: 60_000, maxRequests: 60 },
+  elvSearch: { windowMs: 60_000, maxRequests: 60 },
 };
 
 const DEFAULT_MAX_TRACKED_BUCKETS = 10_000;

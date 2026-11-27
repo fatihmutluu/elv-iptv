@@ -51,6 +51,7 @@ export {
   scanM3u,
 } from './m3u';
 export { parseM3uDrmProps } from './m3u-drm';
+export { normalizeProviderImdbId, normalizeProviderTmdbId } from './provider-ids';
 export { toElvError } from './scan-error';
 export {
   createStalkerClient,

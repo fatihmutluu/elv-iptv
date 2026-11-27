@@ -31,6 +31,7 @@ export interface RunningNodeSyncServer {
 function resolveNodeMaxBodyBytes(method: string, pathname: string): number {
   if (method === 'PUT' && pathname === '/v1/vault') return BODY_LIMITS.vault;
   if (method === 'POST' && pathname === '/v1/telemetry') return BODY_LIMITS.telemetry;
+  if (method === 'POST' && pathname === '/v1/elv/match-batch') return BODY_LIMITS.elvMatch;
   if (method === 'POST' && pathname === '/account-deletion') return BODY_LIMITS.accountDeletion;
   return BODY_LIMITS.auth;
 }

@@ -131,6 +131,7 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
   it('exposes canonical Settings sections, hiding Remote Keys on desktop and showing it on TV', async () => {
     expect(SETTINGS_SECTIONS).toEqual([
       'appearance',
+      'elvMode',
       'playback',
       'liveTv',
       'remote',
@@ -144,6 +145,7 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     const desktopView = await render(<Harness />);
 
     expect(screen.getByTestId('settings-tab-appearance')).toBeTruthy();
+    expect(screen.getByTestId('settings-tab-elvMode')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-playback')).toBeTruthy();
     expect(screen.getByTestId('settings-tab-liveTv')).toBeTruthy();
     expect(screen.queryByTestId('settings-tab-remote')).toBeNull();
@@ -303,7 +305,9 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
       />,
     );
 
-    // Move sidebar from appearance -> playback
+    // Move sidebar from appearance -> elvMode -> playback
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(screen.getByTestId('settings-tab-elvMode').props.accessibilityState.selected).toBe(true);
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(screen.getByTestId('settings-tab-playback').props.accessibilityState.selected).toBe(
       true,

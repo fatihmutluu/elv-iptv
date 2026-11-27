@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const platform = vi.hoisted(() => ({ OS: 'android' }));
 vi.mock('react-native', () => ({ Platform: platform }));
+vi.mock('expo-constants', () => ({ default: { expoConfig: { extra: {} } } }));
 
 const xmltvNative = vi.hoisted(() => ({
   isNativeXmltvStagerAvailable: vi.fn(() => false),
@@ -94,14 +95,15 @@ beforeEach(() => {
 });
 
 describe('createDeviceCatalog', () => {
-  it('opens catalog.db once in the default directory on Android, without a manifest', async () => {
+  it('opens catalog.db and isolated elv-enrichment.db once in the default directory on Android, without a manifest', async () => {
     platform.OS = 'android';
     const { createDeviceCatalog } = await import('./device');
     const first = await createDeviceCatalog();
     const second = await createDeviceCatalog();
     expect(first).toBe(second);
-    expect(createOpSqliteDriver).toHaveBeenCalledTimes(1);
+    expect(createOpSqliteDriver).toHaveBeenCalledTimes(2);
     expect(createOpSqliteDriver).toHaveBeenCalledWith('catalog.db', undefined);
+    expect(createOpSqliteDriver).toHaveBeenCalledWith('elv-enrichment.db', undefined);
     expect(createSettingsStore).not.toHaveBeenCalled();
     expect(typeof first.importSource).toBe('function');
   });
@@ -172,11 +174,11 @@ describe('createDeviceCatalog', () => {
     });
     const { createDeviceCatalog } = await import('./device');
     await expect(createDeviceCatalog()).rejects.toThrow('keystore unavailable');
-    expect(driver.close).toHaveBeenCalledTimes(1);
+    expect(driver.close).toHaveBeenCalledTimes(2);
 
     const recovered = await createDeviceCatalog();
     expect(recovered).toBeDefined();
-    expect(createOpSqliteDriver).toHaveBeenCalledTimes(2);
+    expect(createOpSqliteDriver).toHaveBeenCalledTimes(4);
   });
 
   it('preserves the original open error even if closing the partial handle also rejects', async () => {

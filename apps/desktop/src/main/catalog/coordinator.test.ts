@@ -267,4 +267,38 @@ describe('createCatalogCoordinator', () => {
     await coordinator.shutdown();
     expect(forceKilled).toBe(true);
   });
+
+  it('forwards optional elvServerUrl in the worker init message when configured (#511)', async () => {
+    const children: FakeChild[] = [];
+    const { store } = createMemorySecrets();
+
+    const coordinator = createCatalogCoordinator({
+      dbPath: '/tmp/user-data/catalog.db',
+      workerPath: '/app/worker.js',
+      elvServerUrl: 'https://elv-meta.example.test',
+      secrets: store,
+      fork: () => {
+        const c = new FakeChild();
+        children.push(c);
+        return c;
+      },
+      createChannel: () => ({ port1: 'p1', port2: 'p2' }),
+      log: () => undefined,
+    });
+
+    const p = coordinator.connectClient();
+    expect(children[0]?.received).toEqual([
+      {
+        message: {
+          type: 'init',
+          dbPath: '/tmp/user-data/catalog.db',
+          elvServerUrl: 'https://elv-meta.example.test',
+        },
+        transfer: [],
+      },
+    ]);
+    children[0]?.emitWorkerMessage({ type: 'ready' });
+    await p;
+    await coordinator.shutdown();
+  });
 });

@@ -4,6 +4,7 @@ import { enFailoverNetworkMessages } from './en-failover-network';
 import { enIssue502Messages } from './en-issue-502';
 import { enProfilesMessages } from './en-profiles';
 import { enSubtitlesSuiteMessages } from './en-subtitles-suite';
+import { enWaveE1Messages } from './en-wave-e1';
 import { enWaveF5bMessages } from './en-wave-f5b';
 import { enWaveF6Messages } from './en-wave-f6';
 import { enWaveF7aMessages } from './en-wave-f7a';
@@ -723,6 +724,7 @@ export const enMessages = {
   ...enWaveP7Messages,
   ...enWaveP8Messages,
   ...enWaveP9Messages,
+  ...enWaveE1Messages,
   ...enIssue502Messages,
 } as const;
 

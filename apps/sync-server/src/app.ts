@@ -18,6 +18,8 @@ import {
   verifyAuthVerifier,
 } from './crypto.ts';
 import { buildTelemetryDigest } from './digest.ts';
+import { createElvRouteHandlers } from './elv-routes.ts';
+import type { ElvUpstreamClient, WorkersAiBinding } from './elv-types.ts';
 import { createPairRouteHandlers } from './pair-routes.ts';
 import {
   createSlidingWindowRateLimiter,
@@ -55,6 +57,9 @@ export interface SyncAppConfig {
   readonly verifierHashIterations?: number;
   readonly rateLimiter?: SlidingWindowRateLimiter;
   readonly rateLimits?: Partial<RateLimitConfig>;
+  readonly ai?: WorkersAiBinding;
+  readonly elvUpstream?: ElvUpstreamClient;
+  readonly tmdbApiKey?: string;
 }
 
 /** Web-Standard Fetch handler interface shared across Cloudflare Workers and Node HTTP. */
@@ -92,6 +97,10 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     feedback: config.rateLimits?.feedback ?? DEFAULT_RATE_LIMITS.feedback,
     accountDeletion: config.rateLimits?.accountDeletion ?? DEFAULT_RATE_LIMITS.accountDeletion,
     admin: config.rateLimits?.admin ?? DEFAULT_RATE_LIMITS.admin,
+    elvMatch: config.rateLimits?.elvMatch ?? DEFAULT_RATE_LIMITS.elvMatch,
+    elvDetail: config.rateLimits?.elvDetail ?? DEFAULT_RATE_LIMITS.elvDetail,
+    elvFeeds: config.rateLimits?.elvFeeds ?? DEFAULT_RATE_LIMITS.elvFeeds,
+    elvSearch: config.rateLimits?.elvSearch ?? DEFAULT_RATE_LIMITS.elvSearch,
   };
 
   function corsHeaders(): Record<string, string> {
@@ -402,6 +411,16 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     jsonResponse,
   });
 
+  const elvRoutes = createElvRouteHandlers({
+    storage,
+    nowMs,
+    ai: config.ai,
+    upstream: config.elvUpstream,
+    tmdbApiKey: config.tmdbApiKey,
+    checkRateLimit,
+    jsonResponse,
+  });
+
   async function handleVaultGet(request: Request, clientIp?: string): Promise<Response> {
     const limited = checkRateLimit(request, 'vault', clientIp);
     if (limited) return limited;
@@ -684,6 +703,27 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
         }
         if (method === 'GET' && path === '/v1/admin/digest') {
           return await handleAdminDigest(request, url, clientIp);
+        }
+        if (method === 'POST' && path === '/v1/elv/match-batch') {
+          return await elvRoutes.handleElvMatchBatch(request, clientIp);
+        }
+        if (method === 'GET' && path.startsWith('/v1/elv/title/')) {
+          let imdbId: string;
+          try {
+            imdbId = decodeURIComponent(path.slice('/v1/elv/title/'.length));
+          } catch {
+            return jsonResponse(400, { error: 'invalid_imdb_id' });
+          }
+          if (!imdbId || imdbId.includes('/')) {
+            return jsonResponse(404, { error: 'not_found' });
+          }
+          return await elvRoutes.handleElvTitleDetail(request, imdbId, url, clientIp);
+        }
+        if (method === 'GET' && path === '/v1/elv/feeds') {
+          return await elvRoutes.handleElvFeeds(request, clientIp);
+        }
+        if (method === 'GET' && path === '/v1/elv/search') {
+          return await elvRoutes.handleElvSearch(request, url, clientIp);
         }
 
         return jsonResponse(404, { error: 'not_found' });

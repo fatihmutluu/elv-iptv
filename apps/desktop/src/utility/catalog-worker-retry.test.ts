@@ -116,24 +116,26 @@ describe('catalog worker SQLite open retry (#138)', () => {
 
     const h = createRetryHarness(
       (filePath) => {
-        attempts += 1;
-        if (attempts === 1) {
-          throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
-        }
-        if (attempts === 2) {
-          // Opened handle fails during openCatalog pragma/query with SQLITE_LOCKED; must be closed cleanly.
-          return {
-            exec: () => {
-              throw new Error('SQLITE_LOCKED: database table is locked');
-            },
-            prepare: () => ({
-              run: () => ({ changes: 0 }),
-              all: () => [{ user_version: 0 }],
-            }),
-            close: () => {
-              partialClosed += 1;
-            },
-          };
+        if (filePath.endsWith('catalog.db')) {
+          attempts += 1;
+          if (attempts === 1) {
+            throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
+          }
+          if (attempts === 2) {
+            // Opened handle fails during openCatalog pragma/query with SQLITE_LOCKED; must be closed cleanly.
+            return {
+              exec: () => {
+                throw new Error('SQLITE_LOCKED: database table is locked');
+              },
+              prepare: () => ({
+                run: () => ({ changes: 0 }),
+                all: () => [{ user_version: 0 }],
+              }),
+              close: () => {
+                partialClosed += 1;
+              },
+            };
+          }
         }
         mkdirSync(dirname(filePath), { recursive: true });
         return new Database(filePath);

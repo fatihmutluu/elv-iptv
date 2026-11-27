@@ -1,13 +1,18 @@
 import {
   type CatalogService,
   createCatalogService,
+  createElvHttpClient,
+  type ElvEnrichmentStore,
+  type ElvMetadataClient,
   type ManifestStore,
   openCatalog,
+  openElvEnrichmentStore,
   reconcileManifest,
   reconcileUserData,
   type UserDataStore,
 } from '@elv/data';
 import type { ElvError, SqlDriver } from '@elv/domain';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import {
   createAppleUserDataStore,
@@ -17,6 +22,7 @@ import {
   createSecureSecretStore,
   createSettingsStore,
   databaseLocation,
+  type OpSqliteDriver,
 } from '../storage';
 import { type TelemetryCatalogImport, wrapCatalogWithImportTelemetry } from './catalog-telemetry';
 import { createMobileLocalPlaylistStore } from './local-playlist-store';
@@ -28,6 +34,9 @@ import { createDeviceNativeGuideStager } from './native-guide-stager';
  * Apple copy; the source manifest and user-data store bring sources, favorites, and watch progress back (ADR 0014).
  */
 const DATABASE_NAME = 'catalog.db';
+
+/** Isolated ELV Mode enrichment database stored alongside `catalog.db` (`#511`). */
+const ELV_DATABASE_NAME = 'elv-enrichment.db';
 
 /** `Settings` key of the source manifest (Apple platforms). */
 const MANIFEST_KEY = 'elv.catalog.sources';
@@ -42,10 +51,35 @@ export class CatalogOpenError extends Error {
   }
 }
 
-/** Optional opt-in telemetry callbacks attached to the process-wide device catalog (`#509`). */
+/** Optional opt-in telemetry callbacks & ELV server URL attached to the process-wide device catalog (`#509`, `#511`). */
 export interface DeviceCatalogTelemetryOptions {
   readonly onSlowQuery?: (op: string, durationMs: number) => void;
   readonly recordCatalogImport?: (meta: TelemetryCatalogImport) => void;
+  readonly syncServerUrl?: string;
+}
+
+function resolveElvServerUrl(explicit?: string): string | undefined {
+  if (typeof explicit === 'string' && explicit.trim() !== '') {
+    return explicit.trim();
+  }
+  const extra = Constants?.expoConfig?.extra as Record<string, unknown> | undefined;
+  const fromExtra = extra?.syncServerUrl;
+  if (typeof fromExtra === 'string' && fromExtra.trim() !== '') {
+    return fromExtra.trim();
+  }
+  return undefined;
+}
+
+function createDeviceElvClient(rawUrl: string | undefined): ElvMetadataClient | undefined {
+  if (rawUrl === undefined || rawUrl === '') return undefined;
+  try {
+    return createElvHttpClient({
+      baseUrl: rawUrl,
+      allowInsecureLocalhost: Boolean(typeof process !== 'undefined' && process.env?.VITEST),
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 let instance: Promise<CatalogService> | undefined;
@@ -90,12 +124,14 @@ async function reconcileAppleUserData(db: SqlDriver, store: UserDataStore): Prom
 }
 
 async function open(telemetry?: DeviceCatalogTelemetryOptions): Promise<CatalogService> {
+  const location = databaseLocation(Platform.OS);
   const db =
     telemetry?.onSlowQuery !== undefined
-      ? await createOpSqliteDriver(DATABASE_NAME, databaseLocation(Platform.OS), {
+      ? await createOpSqliteDriver(DATABASE_NAME, location, {
           onSlowQuery: telemetry.onSlowQuery,
         })
-      : await createOpSqliteDriver(DATABASE_NAME, databaseLocation(Platform.OS));
+      : await createOpSqliteDriver(DATABASE_NAME, location);
+  let elvDb: OpSqliteDriver | undefined;
   try {
     const opened = await openCatalog(db);
     if (!opened.ok) {
@@ -107,9 +143,25 @@ async function open(telemetry?: DeviceCatalogTelemetryOptions): Promise<CatalogS
     if (manifest !== undefined) await reconcile(db, manifest);
     if (userData !== undefined) await reconcileAppleUserData(db, userData);
     const localPlaylistStore = createMobileLocalPlaylistStore(() =>
-      createOpSqliteDriver('local-playlists.db', databaseLocation(Platform.OS)),
+      createOpSqliteDriver('local-playlists.db', location),
     );
     const nativeGuideStager = createDeviceNativeGuideStager(db);
+    let enrichmentStore: ElvEnrichmentStore | undefined;
+    try {
+      elvDb = await createOpSqliteDriver(ELV_DATABASE_NAME, location);
+      enrichmentStore = await openElvEnrichmentStore(elvDb, { clock: Date.now });
+    } catch {
+      try {
+        await elvDb?.close?.();
+      } catch {
+        // Preserve graceful fallback even if closing the partial handle throws.
+      }
+      elvDb = undefined;
+      enrichmentStore = undefined;
+      // biome-ignore lint/suspicious/noConsole: a categorized warning without values; there is no logging port yet
+      console.warn('catalog: storage/elv-enrichment-failed');
+    }
+    const elvClient = createDeviceElvClient(resolveElvServerUrl(telemetry?.syncServerUrl));
     const baseService = createCatalogService({
       db,
       secrets: createSecureSecretStore(),
@@ -117,14 +169,35 @@ async function open(telemetry?: DeviceCatalogTelemetryOptions): Promise<CatalogS
       http: createDeviceHttpClient(),
       clock: Date.now,
       localPlaylistStore,
+      ...(enrichmentStore === undefined ? {} : { enrichmentStore }),
+      ...(elvClient === undefined ? {} : { elvClient }),
       ...(nativeGuideStager === undefined ? {} : { nativeGuideStager }),
       ...(manifest === undefined ? {} : { manifest }),
       ...(userData === undefined ? {} : { userData }),
     });
+    let closePromise: Promise<void> | undefined;
+    const service: CatalogService = {
+      ...baseService,
+      close() {
+        closePromise ??= (async () => {
+          try {
+            await baseService.close();
+          } finally {
+            await enrichmentStore?.close();
+          }
+        })();
+        return closePromise;
+      },
+    };
     return telemetry?.recordCatalogImport !== undefined
-      ? wrapCatalogWithImportTelemetry(baseService, telemetry.recordCatalogImport)
-      : baseService;
+      ? wrapCatalogWithImportTelemetry(service, telemetry.recordCatalogImport)
+      : service;
   } catch (error) {
+    try {
+      await elvDb?.close?.();
+    } catch {
+      // Preserve the original open error even if closing the partial handle throws or rejects.
+    }
     try {
       await db.close?.();
     } catch {
