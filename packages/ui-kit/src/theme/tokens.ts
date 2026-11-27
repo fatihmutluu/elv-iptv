@@ -48,6 +48,8 @@ export interface DerivedSurfaceColors {
   readonly focusFill: string;
   readonly accentTint: string;
   readonly subtleHighlight: string;
+  readonly dangerHoverBg: string;
+  readonly dangerPressedBg: string;
 }
 
 /** Complete resolved color table exposed on `theme.colors`. */
@@ -220,6 +222,8 @@ export function buildTheme(options: ThemeOptions = {}): Theme {
     focusFill: hexToRgba(palette.focusRingColor, highContrast ? 0.22 : 0.12),
     accentTint: hexToRgba(palette.accent, highContrast ? 0.24 : 0.16),
     subtleHighlight: hexToRgba(palette.textPrimary, highContrast ? 0.18 : 0.07),
+    dangerHoverBg: hexToRgba(palette.dangerBg, highContrast ? 0.88 : 0.85),
+    dangerPressedBg: hexToRgba(palette.dangerBg, highContrast ? 0.78 : 0.72),
   };
 
   return {

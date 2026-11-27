@@ -10,6 +10,7 @@ import {
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
 import type {
+  BidirectionalPairingSnapshot,
   SyncAccountPort,
   SyncAccountState,
   SyncQrPairingSession,
@@ -28,6 +29,7 @@ function createStatefulSyncAccount(initial: Partial<SyncAccountState> = {}): Sta
     lastSyncedAtIso: null,
     pendingRecoveryCode: null,
     errorCode: null,
+    autoSyncState: 'idle',
     ...initial,
   };
   const listeners = new Set<(s: SyncAccountState) => void>();
@@ -41,6 +43,18 @@ function createStatefulSyncAccount(initial: Partial<SyncAccountState> = {}): Sta
     qrUri: 'elviptv://pair?c=PAIR12345678&k=BBBBBBBBBBBBBBBBBBBBBB',
     expiresAtMs: Date.now() + 300_000,
     status: 'pending',
+  };
+  const bidirSession: BidirectionalPairingSnapshot = {
+    pairingId: 'bidir-settings-1',
+    role: 'host',
+    code: '12345678',
+    qrUri: 'elviptv://pair?c=12345678&pk=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+    expiresAtMs: Date.now() + 300_000,
+    status: 'pending',
+    sas: null,
+    direction: null,
+    localMaskedEmail: current.email ? 'v***@example.com' : null,
+    peerMaskedEmail: null,
   };
 
   const port: SyncAccountPort = {
@@ -58,6 +72,7 @@ function createStatefulSyncAccount(initial: Partial<SyncAccountState> = {}): Sta
         lastSyncedAtIso: '2026-11-25T12:00:00Z',
         pendingRecoveryCode: null,
         errorCode: null,
+        autoSyncState: 'idle',
       });
       return { ok: true };
     }),
@@ -68,6 +83,7 @@ function createStatefulSyncAccount(initial: Partial<SyncAccountState> = {}): Sta
         lastSyncedAtIso: null,
         pendingRecoveryCode: 'WXYZ-1234-ABCD-5678-EFGH-9012',
         errorCode: null,
+        autoSyncState: 'idle',
       });
       return { ok: true, recoveryCode: 'WXYZ-1234-ABCD-5678-EFGH-9012' };
     }),
@@ -82,6 +98,7 @@ function createStatefulSyncAccount(initial: Partial<SyncAccountState> = {}): Sta
         lastSyncedAtIso: null,
         pendingRecoveryCode: null,
         errorCode: null,
+        autoSyncState: 'idle',
       });
     }),
     deleteAccount: jest.fn(async (_password) => {
@@ -91,12 +108,26 @@ function createStatefulSyncAccount(initial: Partial<SyncAccountState> = {}): Sta
         lastSyncedAtIso: null,
         pendingRecoveryCode: null,
         errorCode: null,
+        autoSyncState: 'idle',
       });
       return { ok: true };
     }),
     createQrPairing: jest.fn(async () => session),
     pollQrPairing: jest.fn(async (_pairingId) => 'pending' as const),
     claimQrPairing: jest.fn(async (_codeOrUri) => ({ ok: true })),
+    startBidirectionalPairing: jest.fn(async () => bidirSession),
+    joinBidirectionalPairing: jest.fn(async () => ({
+      ...bidirSession,
+      role: 'responder' as const,
+      status: 'awaiting_sas' as const,
+      sas: '7319',
+      direction: 'responder_to_host' as const,
+      localMaskedEmail: 'v***@example.com',
+      peerMaskedEmail: null,
+    })),
+    pollBidirectionalPairing: jest.fn(async () => bidirSession),
+    confirmBidirectionalPairing: jest.fn(async () => ({ ok: true })),
+    cancelBidirectionalPairing: jest.fn(async () => undefined),
   };
 
   return { port, setState };
@@ -142,16 +173,9 @@ function renderPanel(
 }
 
 describe('AccountSettingsPanel', () => {
-  it('shows neutral auth guidance copy, validates optional sync server URL, renders live QR pairing, and auto-completes queued pairing code after sign in', async () => {
+  it('omits Sync Server URL input, renders bidirectional QR + 8-digit pairing on QR tab, and supports Sign In', async () => {
     const { port } = createStatefulSyncAccount();
-    const onSyncServerUrlChange = jest.fn();
-    await renderPanel(
-      <AccountSettingsPanel
-        syncAccount={port}
-        syncServerUrl=""
-        onSyncServerUrlChange={onSyncServerUrlChange}
-      />,
-    );
+    await renderPanel(<AccountSettingsPanel syncAccount={port} />);
 
     const authHint = screen.getByTestId('account-oauth-coming-soon');
     expect(authHint).toHaveTextContent(
@@ -159,39 +183,18 @@ describe('AccountSettingsPanel', () => {
     );
     expect(authHint).not.toHaveTextContent(/future store update/i);
 
-    // Optional sync server URL input validates via isValidSyncServerUrl and normalizes valid URLs
-    const serverInput = screen.getByTestId('account-server-url-input');
-    await fireEvent.changeText(serverInput, 'http://insecure.example.com');
-    expect(screen.getByTestId('account-server-url-error')).toHaveTextContent(
-      'The server or URL address is not valid.',
-    );
-    expect(onSyncServerUrlChange).not.toHaveBeenCalled();
+    // Sync Server URL input and legacy claim card MUST NOT be rendered
+    expect(screen.queryByTestId('account-server-url-input')).toBeNull();
+    expect(screen.queryByTestId('account-claim-card')).toBeNull();
 
-    await fireEvent.changeText(serverInput, 'https://sync.example.com/');
-    expect(screen.queryByTestId('account-server-url-error')).toBeNull();
-    expect(onSyncServerUrlChange).toHaveBeenCalledWith('https://sync.example.com');
-
-    await fireEvent.changeText(serverInput, 'http://127.0.0.1:8787');
-    expect(onSyncServerUrlChange).toHaveBeenLastCalledWith('http://127.0.0.1:8787');
-
-    // Try claiming a pairing code while signed out -> prompts sign-in first
-    await fireEvent.changeText(
-      screen.getByTestId('account-claim-input'),
-      'elviptv://pair?c=TV1234567890&k=CCCCCCCCCCCCCCCCCCCCCC',
-    );
-    await fireEvent.press(screen.getByTestId('account-claim-submit'));
-    expect(screen.getByTestId('account-claim-signin-first')).toHaveTextContent(
-      /Sign in or create an account first/,
-    );
-    expect(port.claimQrPairing).not.toHaveBeenCalled();
-
-    // Switch to QR tab -> renders live QR code
+    // Switch to QR tab -> renders live bidirectional QR + 8-digit code
     await fireEvent.press(screen.getByTestId('account-tab-qr'));
     await waitFor(() => {
-      expect(screen.getByTestId('account-qr-code')).toBeTruthy();
+      expect(screen.getByTestId('pair-qr-code')).toBeTruthy();
+      expect(screen.getByTestId('pair-host-code')).toHaveTextContent('1234 5678');
     });
 
-    // Switch back to Sign In and authenticate -> auto-claims queued pairing URI
+    // Switch back to Sign In and authenticate
     await fireEvent.press(screen.getByTestId('account-tab-signin'));
     await fireEvent.changeText(screen.getByTestId('account-email-input'), 'alice@example.com');
     await fireEvent.changeText(screen.getByTestId('account-password-input'), 'strongpassword123');
@@ -199,31 +202,25 @@ describe('AccountSettingsPanel', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('account-signed-in-email')).toHaveTextContent('alice@example.com');
-      expect(port.claimQrPairing).toHaveBeenCalledWith(
-        'elviptv://pair?c=TV1234567890&k=CCCCCCCCCCCCCCCCCCCCCC',
-      );
-      expect(screen.getByTestId('account-claim-success')).toHaveTextContent(
-        'Device paired securely.',
+      expect(screen.getByTestId('account-auto-sync-badge')).toHaveTextContent(
+        'Automatic sync active',
       );
     });
   });
 
-  it('supports recovery code banner, Sync Now, Approve Device Pairing (without inverted Show Pairing QR card), Sign Out, and permanent Delete Account confirmation', async () => {
+  it('supports recovery code banner, automatic sync status + manual Sync Now, bidirectional pairing, Sign Out, and destructive Delete Account confirmation', async () => {
     const { port } = createStatefulSyncAccount({
       status: 'signed_in',
       email: 'viewer@example.com',
       lastSyncedAtIso: '2026-11-25T10:30:00Z',
       pendingRecoveryCode: 'AAAA-BBBB-CCCC-DDDD-EEEE-FFFF',
+      autoSyncState: 'idle',
     });
 
-    await renderPanel(
-      <AccountSettingsPanel syncAccount={port} syncServerUrl="https://sync.example.com" />,
-    );
+    await renderPanel(<AccountSettingsPanel syncAccount={port} />);
 
-    // Inverted QR generator card MUST NOT be rendered when signed in
-    expect(screen.queryByTestId('account-qr-card')).toBeNull();
-    expect(screen.queryByTestId('account-show-qr-btn')).toBeNull();
-    expect(port.createQrPairing).not.toHaveBeenCalled();
+    // No Sync Server URL input
+    expect(screen.queryByTestId('account-server-url-input')).toBeNull();
 
     // Recovery code banner visible & acknowledgeable
     expect(screen.getByTestId('account-recovery-code')).toHaveTextContent(
@@ -233,23 +230,32 @@ describe('AccountSettingsPanel', () => {
     expect(port.acknowledgeRecoveryCode).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByTestId('account-recovery-banner')).toBeNull());
 
-    // Sync Now
+    // Automatic sync badge & manual Sync Now fallback
+    expect(screen.getByTestId('account-auto-sync-badge')).toHaveTextContent(
+      'Automatic sync active',
+    );
+    expect(screen.getByTestId('account-sync-status')).toHaveTextContent('All devices up to date');
     await fireEvent.press(screen.getByTestId('account-sync-now-btn'));
     expect(port.syncNow).toHaveBeenCalledTimes(1);
 
-    // Approve Device Pairing works cleanly while signed in
-    await fireEvent.changeText(
-      screen.getByTestId('account-claim-input'),
-      'elviptv://pair?c=TV9999888877&k=DDDDDDDDDDDDDDDDDDDDDD',
-    );
-    await fireEvent.press(screen.getByTestId('account-claim-submit'));
+    // Bidirectional pairing works cleanly while signed in
     await waitFor(() => {
-      expect(port.claimQrPairing).toHaveBeenCalledWith(
-        'elviptv://pair?c=TV9999888877&k=DDDDDDDDDDDDDDDDDDDDDD',
+      expect(screen.getByTestId('pair-qr-code')).toBeTruthy();
+      expect(screen.getByTestId('pair-code-input')).toBeTruthy();
+    });
+    await fireEvent.changeText(screen.getByTestId('pair-code-input'), '99998888');
+    await fireEvent.press(screen.getByTestId('pair-code-submit'));
+    await waitFor(() => {
+      expect(port.joinBidirectionalPairing).toHaveBeenCalledWith('99998888');
+      expect(screen.getByTestId('pair-sas-code')).toHaveTextContent('7319');
+    });
+    await fireEvent.press(screen.getByTestId('pair-sas-confirm'));
+    await waitFor(() => {
+      expect(port.confirmBidirectionalPairing).toHaveBeenCalledWith(
+        'bidir-settings-1',
+        'responder_to_host',
       );
-      expect(screen.getByTestId('account-claim-success')).toHaveTextContent(
-        'Device paired securely.',
-      );
+      expect(screen.getByTestId('pair-completed')).toBeTruthy();
     });
 
     // Mandatory permanent Delete Account double-confirmation

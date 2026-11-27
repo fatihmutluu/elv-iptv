@@ -414,4 +414,36 @@ describe('buildAppConfig', () => {
       guideUrl: 'http://127.0.0.1:7878/xmltv.xml',
     });
   });
+
+  it('bakes ELV_SYNC_SERVER_URL into extra.syncServerUrl and wires iOS associatedDomains + Android App Links for /pair (#510)', () => {
+    const config = build({ ELV_SYNC_SERVER_URL: 'https://sync.elviptv.example.com/' });
+    expect(config.extra?.syncServerUrl).toBe('https://sync.elviptv.example.com');
+    expect(config.ios?.associatedDomains).toEqual(['applinks:sync.elviptv.example.com']);
+    expect(config.android?.intentFilters).toContainEqual(
+      expect.objectContaining({
+        action: 'VIEW',
+        autoVerify: true,
+        data: [
+          expect.objectContaining({
+            scheme: 'https',
+            host: 'sync.elviptv.example.com',
+            pathPrefix: '/pair',
+          }),
+        ],
+      }),
+    );
+
+    // Localhost/HTTP sync URL must NOT emit Universal/App Links
+    const localConfig = build({ ELV_SYNC_SERVER_URL: 'http://127.0.0.1:8787' });
+    expect(localConfig.extra?.syncServerUrl).toBe('http://127.0.0.1:8787');
+    expect(localConfig.ios?.associatedDomains).toBeUndefined();
+    expect(localConfig.android?.intentFilters).toBeUndefined();
+
+    // Explicit ELV_APP_LINK_HOST overrides host cleanly
+    const hostConfig = build({
+      ELV_SYNC_SERVER_URL: 'https://api.example.com',
+      ELV_APP_LINK_HOST: 'pair.example.com',
+    });
+    expect(hostConfig.ios?.associatedDomains).toEqual(['applinks:pair.example.com']);
+  });
 });

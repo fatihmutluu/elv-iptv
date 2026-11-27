@@ -12,6 +12,8 @@ export interface XtreamLink {
 
 /** Input for {@link addSourceFromLink}. */
 export interface LinkSourceInput {
+  /** Optional explicit cross-device source ID (`<= 128` chars matching `SOURCE_ID`). */
+  readonly id?: string;
   name: string;
   url: string;
   /** Skip the Xtream conversion and add the link as a plain M3U source. */
@@ -75,6 +77,7 @@ export async function addSourceFromLink(
   if (link === undefined) {
     return addM3uSource(
       {
+        ...(input.id === undefined ? {} : { id: input.id }),
         name: input.name,
         playlistUrl: url,
         ...(input.guideUrl === undefined ? {} : { guideUrl: input.guideUrl }),
@@ -88,6 +91,7 @@ export async function addSourceFromLink(
     link.output === undefined ? input.transport : { ...input.transport, xtreamFormat: link.output };
   return addXtreamSource(
     {
+      ...(input.id === undefined ? {} : { id: input.id }),
       name: input.name,
       server: link.server,
       username: link.username,

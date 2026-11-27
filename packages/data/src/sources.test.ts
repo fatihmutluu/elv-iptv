@@ -8,6 +8,7 @@ import {
 } from './source-mutations';
 import {
   addM3uSource,
+  addStalkerSource,
   addXtreamSource,
   getSource,
   normalizeActiveConnections,
@@ -173,6 +174,115 @@ describe('getSource and updateSourceSettings', () => {
   });
 });
 
+const SOURCE_TEST_TABLES: Record<string, string> = {
+  import_runs: "(id, source_id, kind, started_at, status) VALUES (?, ?, 'catalog', 1, 'ok')",
+  categories:
+    "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
+  categories_next:
+    "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
+  live: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+  live_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+  movies: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+  movies_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+  series: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+  series_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+  episodes: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
+  episodes_next: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
+  placements:
+    "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
+  placements_next:
+    "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
+  guide_channels: "(source_id, guide_id, name, name_fold, run_id) VALUES (?, 'g', 'n', 'n', 1)",
+  channel_guide: "(source_id, channel_key, guide_id) VALUES (?, 'k', 'g')",
+  programmes: "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
+  programmes_fts:
+    "(source_id, guide_id, start, stop, title_fold, description_fold) VALUES (?, 'g', 1, 2, 't', '')",
+  programmes_next:
+    "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
+  watch_progress:
+    "(profile_id, source_id, item_key, kind, title, position_ms, duration_ms, watched, updated_at) VALUES ('default', ?, ?, 'movie', 't', 20000, 60000, 0, 1)",
+  favorites:
+    "(profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', ?, ?, 'movie', 't', 1)",
+  track_preferences:
+    "(profile_id, scope_key, source_id, audio_lang, updated_at) VALUES ('default', ?, ?, 'tr', 1)",
+  recent_channels: "(profile_id, source_id, item_key, watched_at) VALUES ('default', ?, ?, 1)",
+  parental_locks:
+    "(profile_id, source_id, target_kind, item_kind, target_key, created_at) VALUES ('default', ?, 'category', 'live', 'c', 1)",
+  channel_overrides:
+    "(profile_id, item_key, source_id, custom_name, is_hidden, sort_order, updated_at) VALUES ('default', ?, ?, 'Custom', 0, 1, 1)",
+  custom_group_items:
+    "(group_id, item_key, source_id, position, added_at) VALUES ('grp1', ?, ?, 0, 1)",
+  guide_sources:
+    "(id, source_id, priority, name, url_template, epg_shift_ms, enabled) VALUES (?, ?, 0, 'Primary', '{{g:gs1}}', 0, 1)",
+  channel_guide_overrides:
+    "(source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at) VALUES (?, 'k', 'gs1', 'g', 0, 1, 1)",
+  programme_reminders:
+    "(profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at) VALUES ('default', ?, ?, 'Ch', 'Show', 1000, 2000, 300000, 0, 1)",
+  failover_group_members: "(group_id, source_id, channel_key, position) VALUES ('fg1', ?, ?, 0)",
+  vod_enrichment:
+    "(item_key, source_id, clean_title, fetched_at, expires_at) VALUES (?, ?, 'Title', 1, 9999)",
+  vod_collection_items:
+    "(collection_id, item_key, source_id, kind, position, added_at) VALUES ('vc1', ?, ?, 'movie', 0, 1)",
+  item_drm_meta: "(source_id, item_key, scheme) VALUES (?, 'k', 'clearkey')",
+  downloads:
+    "(id, profile_id, source_id, item_key, kind, title, local_file_name) VALUES ('dl1', 'default', ?, ?, 'movie', 'Film', 'dl1.mp4')",
+  my_list_series_baselines:
+    "(profile_id, series_key, source_id, baseline_at, last_checked_at, known_keys_json) VALUES ('default', ?, ?, 1, 1, '[]')",
+  my_list_new_episodes:
+    "(profile_id, episode_key, series_key, source_id, series_title, episode_title, detected_at, dismissed) VALUES ('default', ?, 's1', ?, 'Show', 'Ep 1', 1, 0)",
+  continue_watching_dismissals:
+    "(profile_id, series_key, source_id, dismissed_at) VALUES ('default', ?, ?, 1)",
+  ratings:
+    "(profile_id, source_id, item_key, kind, value, title, updated_at) VALUES ('default', ?, ?, 'movie', 'like', 'Film', 1)",
+};
+
+const SOURCE_ID_FIRST_TABLES = new Set([
+  'watch_progress',
+  'favorites',
+  'recent_channels',
+  'programme_reminders',
+  'failover_group_members',
+  'downloads',
+  'ratings',
+]);
+
+const KEY_FIRST_TABLES = new Set([
+  'track_preferences',
+  'channel_overrides',
+  'custom_group_items',
+  'guide_sources',
+  'vod_enrichment',
+  'vod_collection_items',
+  'my_list_series_baselines',
+  'my_list_new_episodes',
+  'continue_watching_dismissals',
+]);
+
+async function seedSourceTables(
+  db: ReturnType<typeof testDb>['db'],
+  includeProgrammesNext: boolean,
+): Promise<string[]> {
+  let runId = 1;
+  const entries = Object.entries(SOURCE_TEST_TABLES).filter(
+    ([table]) => includeProgrammesNext || table !== 'programmes_next',
+  );
+  for (const id of ['src1', 'src2']) {
+    for (const [table, rest] of entries) {
+      if (table === 'import_runs') {
+        await db.run(`INSERT INTO import_runs ${rest}`, [runId, id]);
+        runId += 1;
+      } else if (SOURCE_ID_FIRST_TABLES.has(table)) {
+        await db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
+      } else if (KEY_FIRST_TABLES.has(table)) {
+        await db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
+      } else {
+        await db.run(`INSERT INTO ${table} ${rest}`, [id]);
+      }
+    }
+  }
+  return entries.map(([table]) => table);
+}
+
 describe('removeSource', () => {
   it('deletes the row, every catalog row of the source and all secrets', async () => {
     const s = await setup();
@@ -181,102 +291,10 @@ describe('removeSource', () => {
       s.deps,
     );
     await addM3uSource({ name: 'B', playlistUrl: 'https://h.example/a.m3u' }, s.deps);
-    const tables: Record<string, string> = {
-      import_runs: "(id, source_id, kind, started_at, status) VALUES (?, ?, 'catalog', 1, 'ok')",
-      categories:
-        "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
-      categories_next:
-        "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
-      live: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      live_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      movies: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      movies_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      series: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      series_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      episodes: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
-      episodes_next: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
-      placements:
-        "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
-      placements_next:
-        "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
-      guide_channels: "(source_id, guide_id, name, name_fold, run_id) VALUES (?, 'g', 'n', 'n', 1)",
-      channel_guide: "(source_id, channel_key, guide_id) VALUES (?, 'k', 'g')",
-      programmes: "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
-      programmes_fts:
-        "(source_id, guide_id, start, stop, title_fold, description_fold) VALUES (?, 'g', 1, 2, 't', '')",
-      watch_progress:
-        "(profile_id, source_id, item_key, kind, title, position_ms, duration_ms, watched, updated_at) VALUES ('default', ?, ?, 'movie', 't', 20000, 60000, 0, 1)",
-      favorites:
-        "(profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', ?, ?, 'movie', 't', 1)",
-      track_preferences:
-        "(profile_id, scope_key, source_id, audio_lang, updated_at) VALUES ('default', ?, ?, 'tr', 1)",
-      recent_channels: "(profile_id, source_id, item_key, watched_at) VALUES ('default', ?, ?, 1)",
-      parental_locks:
-        "(profile_id, source_id, target_kind, item_kind, target_key, created_at) VALUES ('default', ?, 'category', 'live', 'c', 1)",
-      channel_overrides:
-        "(profile_id, item_key, source_id, custom_name, is_hidden, sort_order, updated_at) VALUES ('default', ?, ?, 'Custom', 0, 1, 1)",
-      custom_group_items:
-        "(group_id, item_key, source_id, position, added_at) VALUES ('grp1', ?, ?, 0, 1)",
-      guide_sources:
-        "(id, source_id, priority, name, url_template, epg_shift_ms, enabled) VALUES (?, ?, 0, 'Primary', '{{g:gs1}}', 0, 1)",
-      channel_guide_overrides:
-        "(source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at) VALUES (?, 'k', 'gs1', 'g', 0, 1, 1)",
-      programme_reminders:
-        "(profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at) VALUES ('default', ?, ?, 'Ch', 'Show', 1000, 2000, 300000, 0, 1)",
-      failover_group_members:
-        "(group_id, source_id, channel_key, position) VALUES ('fg1', ?, ?, 0)",
-      vod_enrichment:
-        "(item_key, source_id, clean_title, fetched_at, expires_at) VALUES (?, ?, 'Title', 1, 9999)",
-      vod_collection_items:
-        "(collection_id, item_key, source_id, kind, position, added_at) VALUES ('vc1', ?, ?, 'movie', 0, 1)",
-      item_drm_meta: "(source_id, item_key, scheme) VALUES (?, 'k', 'clearkey')",
-      downloads:
-        "(id, profile_id, source_id, item_key, kind, title, local_file_name) VALUES ('dl1', 'default', ?, ?, 'movie', 'Film', 'dl1.mp4')",
-      my_list_series_baselines:
-        "(profile_id, series_key, source_id, baseline_at, last_checked_at, known_keys_json) VALUES ('default', ?, ?, 1, 1, '[]')",
-      my_list_new_episodes:
-        "(profile_id, episode_key, series_key, source_id, series_title, episode_title, detected_at, dismissed) VALUES ('default', ?, 's1', ?, 'Show', 'Ep 1', 1, 0)",
-      continue_watching_dismissals:
-        "(profile_id, series_key, source_id, dismissed_at) VALUES ('default', ?, ?, 1)",
-      ratings:
-        "(profile_id, source_id, item_key, kind, value, title, updated_at) VALUES ('default', ?, ?, 'movie', 'like', 'Film', 1)",
-    };
-    let runId = 1;
-    for (const id of ['src1', 'src2']) {
-      for (const [table, rest] of Object.entries(tables)) {
-        if (table === 'import_runs') {
-          await s.db.run(`INSERT INTO import_runs ${rest}`, [runId, id]);
-          runId += 1;
-        } else if (
-          table === 'watch_progress' ||
-          table === 'favorites' ||
-          table === 'recent_channels' ||
-          table === 'programme_reminders' ||
-          table === 'failover_group_members' ||
-          table === 'downloads' ||
-          table === 'ratings'
-        ) {
-          await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
-        } else if (
-          table === 'track_preferences' ||
-          table === 'channel_overrides' ||
-          table === 'custom_group_items' ||
-          table === 'guide_sources' ||
-          table === 'vod_enrichment' ||
-          table === 'vod_collection_items' ||
-          table === 'my_list_series_baselines' ||
-          table === 'my_list_new_episodes' ||
-          table === 'continue_watching_dismissals'
-        ) {
-          await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
-        } else {
-          await s.db.run(`INSERT INTO ${table} ${rest}`, [id]);
-        }
-      }
-    }
+    const seededTables = await seedSourceTables(s.db, false);
     await removeSource('src1', s.deps);
     expect(await getSource(s.db, 'src1')).toBeUndefined();
-    for (const table of Object.keys(tables)) {
+    for (const table of seededTables) {
       const rows = await s.db.all<{ source_id: string }>(`SELECT source_id FROM ${table}`);
       expect(rows.map((r) => r.source_id)).toEqual(['src2']);
     }
@@ -293,101 +311,7 @@ describe('removeSource', () => {
       s.deps,
     );
     await addM3uSource({ name: 'B', playlistUrl: 'https://h.example/a.m3u' }, s.deps);
-    const tables: Record<string, string> = {
-      import_runs: "(id, source_id, kind, started_at, status) VALUES (?, ?, 'catalog', 1, 'ok')",
-      categories:
-        "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
-      categories_next:
-        "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
-      live: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      live_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      movies: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      movies_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      series: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      series_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
-      episodes: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
-      episodes_next: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
-      placements:
-        "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
-      placements_next:
-        "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
-      guide_channels: "(source_id, guide_id, name, name_fold, run_id) VALUES (?, 'g', 'n', 'n', 1)",
-      channel_guide: "(source_id, channel_key, guide_id) VALUES (?, 'k', 'g')",
-      programmes: "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
-      programmes_fts:
-        "(source_id, guide_id, start, stop, title_fold, description_fold) VALUES (?, 'g', 1, 2, 't', '')",
-      programmes_next:
-        "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
-      watch_progress:
-        "(profile_id, source_id, item_key, kind, title, position_ms, duration_ms, watched, updated_at) VALUES ('default', ?, ?, 'movie', 't', 20000, 60000, 0, 1)",
-      favorites:
-        "(profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', ?, ?, 'movie', 't', 1)",
-      track_preferences:
-        "(profile_id, scope_key, source_id, audio_lang, updated_at) VALUES ('default', ?, ?, 'tr', 1)",
-      recent_channels: "(profile_id, source_id, item_key, watched_at) VALUES ('default', ?, ?, 1)",
-      parental_locks:
-        "(profile_id, source_id, target_kind, item_kind, target_key, created_at) VALUES ('default', ?, 'category', 'live', 'c', 1)",
-      channel_overrides:
-        "(profile_id, item_key, source_id, custom_name, is_hidden, sort_order, updated_at) VALUES ('default', ?, ?, 'Custom', 0, 1, 1)",
-      custom_group_items:
-        "(group_id, item_key, source_id, position, added_at) VALUES ('grp1', ?, ?, 0, 1)",
-      guide_sources:
-        "(id, source_id, priority, name, url_template, epg_shift_ms, enabled) VALUES (?, ?, 0, 'Primary', '{{g:gs1}}', 0, 1)",
-      channel_guide_overrides:
-        "(source_id, channel_key, guide_source_id, guide_id, epg_shift_ms, is_manual, updated_at) VALUES (?, 'k', 'gs1', 'g', 0, 1, 1)",
-      programme_reminders:
-        "(profile_id, source_id, channel_key, channel_name, programme_title, programme_start, programme_stop, lead_time_ms, fired, created_at) VALUES ('default', ?, ?, 'Ch', 'Show', 1000, 2000, 300000, 0, 1)",
-      failover_group_members:
-        "(group_id, source_id, channel_key, position) VALUES ('fg1', ?, ?, 0)",
-      vod_enrichment:
-        "(item_key, source_id, clean_title, fetched_at, expires_at) VALUES (?, ?, 'Title', 1, 9999)",
-      vod_collection_items:
-        "(collection_id, item_key, source_id, kind, position, added_at) VALUES ('vc1', ?, ?, 'movie', 0, 1)",
-      item_drm_meta: "(source_id, item_key, scheme) VALUES (?, 'k', 'clearkey')",
-      downloads:
-        "(id, profile_id, source_id, item_key, kind, title, local_file_name) VALUES ('dl1', 'default', ?, ?, 'movie', 'Film', 'dl1.mp4')",
-      my_list_series_baselines:
-        "(profile_id, series_key, source_id, baseline_at, last_checked_at, known_keys_json) VALUES ('default', ?, ?, 1, 1, '[]')",
-      my_list_new_episodes:
-        "(profile_id, episode_key, series_key, source_id, series_title, episode_title, detected_at, dismissed) VALUES ('default', ?, 's1', ?, 'Show', 'Ep 1', 1, 0)",
-      continue_watching_dismissals:
-        "(profile_id, series_key, source_id, dismissed_at) VALUES ('default', ?, ?, 1)",
-      ratings:
-        "(profile_id, source_id, item_key, kind, value, title, updated_at) VALUES ('default', ?, ?, 'movie', 'like', 'Film', 1)",
-    };
-    let runId = 1;
-    for (const id of ['src1', 'src2']) {
-      for (const [table, rest] of Object.entries(tables)) {
-        if (table === 'import_runs') {
-          await s.db.run(`INSERT INTO import_runs ${rest}`, [runId, id]);
-          runId += 1;
-        } else if (
-          table === 'watch_progress' ||
-          table === 'favorites' ||
-          table === 'recent_channels' ||
-          table === 'programme_reminders' ||
-          table === 'failover_group_members' ||
-          table === 'downloads' ||
-          table === 'ratings'
-        ) {
-          await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
-        } else if (
-          table === 'track_preferences' ||
-          table === 'channel_overrides' ||
-          table === 'custom_group_items' ||
-          table === 'guide_sources' ||
-          table === 'vod_enrichment' ||
-          table === 'vod_collection_items' ||
-          table === 'my_list_series_baselines' ||
-          table === 'my_list_new_episodes' ||
-          table === 'continue_watching_dismissals'
-        ) {
-          await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
-        } else {
-          await s.db.run(`INSERT INTO ${table} ${rest}`, [id]);
-        }
-      }
-    }
+    await seedSourceTables(s.db, true);
     const secretsBefore = { ...s.secrets.dump() };
     const failingDb = {
       ...s.db,
@@ -759,6 +683,63 @@ describe('renameSource and setSourceExcludedProfiles (Wave P7)', () => {
     expect(listed[0]?.name).toBe('Kids Filtered');
     expect(listed[0]?.excludedProfileIds).toEqual([]);
 
+    await catalog.close();
+  });
+});
+
+describe('cross-device explicit source id preservation (Wave P9)', () => {
+  it('preserves explicit id across Xtream, M3U, Stalker, and CatalogService.addSource and rejects invalid/duplicate ids', async () => {
+    const s = await setup();
+    const xt = await addXtreamSource(
+      { id: 'sync_xt.1-a', name: 'X', server: 'https://p.example', username: USER, password: PW },
+      s.deps,
+    );
+    const m3 = await addM3uSource(
+      { id: 'sync_m3u.2-b', name: 'M', playlistUrl: 'https://h.example/list.m3u' },
+      s.deps,
+    );
+    const st = await addStalkerSource(
+      {
+        id: 'sync_st.3-c',
+        name: 'S',
+        portalUrl: 'https://st.example/c/',
+        mac: '00:1A:79:11:22:33',
+      },
+      s.deps,
+    );
+    expect(xt.ok && xt.value.id).toBe('sync_xt.1-a');
+    expect(m3.ok && m3.value.id).toBe('sync_m3u.2-b');
+    expect(st.ok && st.value.id).toBe('sync_st.3-c');
+    expect(s.secrets.dump()[secretKey('sync_xt.1-a', 'xtream')]).toBeDefined();
+    expect(s.secrets.dump()[secretKey('sync_m3u.2-b', 'playlist')]).toBeDefined();
+    expect(s.secrets.dump()[secretKey('sync_st.3-c', 'stalker')]).toBeDefined();
+    for (const badId of ['', '   ', 'bad/id', 'bad:id', 'a'.repeat(129)]) {
+      expect(
+        await addM3uSource(
+          { id: badId, name: 'Bad', playlistUrl: 'https://h.example/a.m3u' },
+          s.deps,
+        ),
+      ).toEqual({ ok: false, error: { category: 'storage', code: 'invalid-source-id' } });
+    }
+    const dup = await addM3uSource(
+      { id: 'sync_m3u.2-b', name: 'Dup', playlistUrl: 'https://h.example/b.m3u' },
+      s.deps,
+    );
+    expect(dup).toEqual({ ok: false, error: { category: 'storage', code: 'source-write-failed' } });
+    const catalog = createCatalogService({
+      db: s.db,
+      secrets: s.secrets,
+      scheduler: countingScheduler(),
+      http: { get: async () => Promise.reject(new Error('unused')) },
+      clock: () => 9_000,
+    });
+    const viaCatalog = await catalog.addSource({
+      kind: 'm3u',
+      id: 'catalog_sync_4',
+      name: 'Synced',
+      playlistUrl: 'https://h.example/sync.m3u',
+    });
+    expect(viaCatalog.ok && viaCatalog.value.id).toBe('catalog_sync_4');
     await catalog.close();
   });
 });

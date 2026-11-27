@@ -2,7 +2,7 @@
 export const enWaveF9Messages = {
   // Settings tabs
   'settings.section.account': 'Account & Sync',
-  'settings.section.feedback': 'Feedback & Telemetry',
+  'settings.section.feedback': 'Feedback',
 
   // First-run Welcome Sign In / Create Account screen
   'welcome.title': 'Sync Across Every Screen',

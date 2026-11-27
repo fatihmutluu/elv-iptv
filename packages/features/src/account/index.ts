@@ -1,8 +1,9 @@
 export {
-  type AccountPreferencesSlice,
-  AccountSettingsPanel,
-  type AccountSettingsPanelProps,
-} from './AccountSettingsPanel';
+  AccountBidirectionalPairingPanel,
+  type AccountBidirectionalPairingPanelProps,
+  formatPairingCodeDisplay,
+} from './AccountBidirectionalPairingPanel';
+export { AccountSettingsPanel, type AccountSettingsPanelProps } from './AccountSettingsPanel';
 export {
   MIN_SYNC_PASSWORD_LENGTH,
   mapSyncErrorCodeToMessageId,
@@ -12,7 +13,4 @@ export {
   validateSignInFields,
   validateSignUpFields,
 } from './account-helpers';
-export {
-  WelcomeSyncOverlay,
-  type WelcomeSyncOverlayProps,
-} from './WelcomeSyncOverlay';
+export { WelcomeSyncOverlay, type WelcomeSyncOverlayProps } from './WelcomeSyncOverlay';

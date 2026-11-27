@@ -1,4 +1,5 @@
 export * from './auth-client';
+export * from './auto-sync-scheduler';
 export * from './encoding';
 export * from './feedback';
 export * from './ports';
@@ -7,3 +8,4 @@ export * from './qr-pairing';
 export * from './telemetry';
 export * from './vault-crypto';
 export * from './vault-merge';
+export * from './x25519';

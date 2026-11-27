@@ -163,6 +163,7 @@ describe('createTvMobileCatalogSnapshotBridge (HIGH #9)', () => {
         id: 'col-1',
         name: 'Weekend',
         itemKeys: ['x:src-x:movie:501'],
+        sortOrder: 0,
         updatedAt: 8000,
       },
     ]);
@@ -239,13 +240,13 @@ describe('createTvMobileCatalogSnapshotBridge (HIGH #9)', () => {
       ),
       addItemToCollection: vi.fn(async () => ok(undefined)),
       getProgress: vi.fn(async (key: string) =>
-        key === 'x:s1:movie:stale'
+        key === 'x:s1:movie:stale' || key === 'x:s1:movie:cleared'
           ? {
               profileId: 'default',
               sourceId: 's1',
               itemKey: key,
               kind: 'movie',
-              title: 'Stale',
+              title: key === 'x:s1:movie:stale' ? 'Stale' : 'Cleared',
               subtitle: null,
               logo: null,
               seriesKey: null,
@@ -254,7 +255,7 @@ describe('createTvMobileCatalogSnapshotBridge (HIGH #9)', () => {
               positionMs: 900_000,
               durationMs: 1_000_000,
               watched: false,
-              updatedAt: 9_000,
+              updatedAt: key === 'x:s1:movie:stale' ? 9_000 : 4_000,
             }
           : null,
       ),
@@ -337,6 +338,7 @@ describe('createTvMobileCatalogSnapshotBridge (HIGH #9)', () => {
 
     expect(addSource).toHaveBeenCalledTimes(1);
     expect(addSource).toHaveBeenCalledWith({
+      id: 'remote-x',
       kind: 'xtream',
       name: 'Synced Xtream',
       server: 'https://new.example.test',

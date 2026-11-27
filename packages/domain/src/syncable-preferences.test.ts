@@ -61,6 +61,9 @@ describe('syncable-preferences (Product Decision #40)', () => {
       minimizeToTray: true,
       syncServerUrl: 'https://sync.example.com',
       telemetryOptIn: true,
+      privacyConsentAnswered: true,
+      crashReportsOptIn: true,
+      crashReportsIncludeLogs: true,
       artworkCacheLimitMb: 256,
       autoEnterPip: false,
       playerVolume: 42,
@@ -87,6 +90,9 @@ describe('syncable-preferences (Product Decision #40)', () => {
       'minimizeToTray',
       'syncServerUrl',
       'telemetryOptIn',
+      'privacyConsentAnswered',
+      'crashReportsOptIn',
+      'crashReportsIncludeLogs',
       'artworkCacheLimitMb',
       'preferHevcOverDolbyVision',
       'audioPassthrough',
@@ -159,6 +165,9 @@ describe('syncable-preferences (Product Decision #40)', () => {
       androidDecoderMode: 'software',
       syncServerUrl: 'https://evil.example.com',
       telemetryOptIn: true,
+      privacyConsentAnswered: true,
+      crashReportsOptIn: true,
+      crashReportsIncludeLogs: true,
       playerVolume: 10,
       __proto__: { polluted: true },
     });
@@ -200,6 +209,10 @@ describe('syncable-preferences (Product Decision #40)', () => {
     expect(Object.hasOwn(patch, 'preferredSubtitleLang')).toBe(false);
     expect(Object.hasOwn(patch, 'overscanX')).toBe(false);
     expect(Object.hasOwn(patch, 'syncServerUrl')).toBe(false);
+    expect(Object.hasOwn(patch, 'telemetryOptIn')).toBe(false);
+    expect(Object.hasOwn(patch, 'privacyConsentAnswered')).toBe(false);
+    expect(Object.hasOwn(patch, 'crashReportsOptIn')).toBe(false);
+    expect(Object.hasOwn(patch, 'crashReportsIncludeLogs')).toBe(false);
   });
 
   it('drops completely invalid homeLayout or empty subtitleStyle in untrusted patches', () => {

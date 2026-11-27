@@ -322,4 +322,172 @@ describe('vault-crypto zero-knowledge lifecycle', () => {
       );
     }
   });
+
+  it('upgrades schemaVersion 1 snapshots cleanly into v2 on decrypt and validates all v2 fields strictly', async () => {
+    const crypto = createPureJsVaultCryptoPort(seededRandom(88));
+    const vaultKey = new Uint8Array(32).fill(0x66);
+
+    const legacyV1 = {
+      schemaVersion: 1,
+      updatedAt: 1_700_000_000_000,
+      sources: [
+        {
+          id: 'src-legacy',
+          kind: 'm3u',
+          name: 'Legacy List',
+          url: 'https://legacy.example.test/list.m3u',
+          updatedAt: 1_700_000_000_000,
+        },
+      ],
+      favorites: [{ key: 'ch-1', updatedAt: 1_700_000_000_000 }],
+      hiddenChannels: [],
+      pinnedChannels: [],
+      customGroups: [],
+      collections: [],
+      watchProgress: [],
+      watchedEpisodesBitfields: [],
+    };
+    const legacyBlob = await encryptVaultSnapshot(
+      crypto,
+      vaultKey,
+      'usr_legacy',
+      1,
+      legacyV1 as unknown as VaultSnapshot,
+    );
+    const upgraded = await decryptVaultSnapshot(crypto, vaultKey, 'usr_legacy', 1, legacyBlob);
+    expect(upgraded.schemaVersion).toBe(2);
+    expect(upgraded.sources).toEqual(legacyV1.sources);
+    expect(upgraded.favorites).toEqual(legacyV1.favorites);
+
+    const fullV2: VaultSnapshot = {
+      ...createEmptyVaultSnapshot(1_700_000_000_500),
+      sources: [
+        {
+          id: 'src-stalker',
+          kind: 'stalker',
+          name: 'Stalker Portal',
+          url: 'https://portal.example.test/c/',
+          portalUrl: 'https://portal.example.test/c/',
+          mac: '00:1A:79:AA:BB:CC',
+          serialNumber: 'SN999',
+          updatedAt: 1_700_000_000_500,
+          settings: {
+            excludedProfileIds: ['kids'],
+            epgShiftMs: -1_800_000,
+            xmltvTimezone: 'UTC',
+            categorySelectionJson: '{}',
+            transportJson: '{}',
+            backupServers: ['https://b.example.test'],
+          },
+        },
+      ],
+      favorites: [{ key: 'ch-1', sortOrder: 0, profileId: 'default', updatedAt: 100 }],
+      watchProgress: [
+        {
+          key: 'movie:1',
+          positionMs: 1000,
+          durationMs: 2000,
+          completed: true,
+          watched: true,
+          profileId: 'default',
+          updatedAt: 100,
+        },
+      ],
+      watchedEpisodesBitfields: [
+        {
+          seriesKey: 'ser-1',
+          profileId: 'default',
+          season: 1,
+          bitsB64: encodeEpisodeBitfield([0, 2]),
+          updatedAt: 100,
+        },
+      ],
+      continueWatchingDismissals: [
+        {
+          profileId: 'default',
+          seriesKey: 'ser-2',
+          sourceId: 'src-stalker',
+          dismissedAt: 200,
+          deleted: false,
+        },
+      ],
+      collections: [
+        {
+          id: 'col-1',
+          name: 'Favorites',
+          itemKeys: ['movie:1'],
+          profileId: 'default',
+          sortOrder: 0,
+          updatedAt: 100,
+        },
+      ],
+      profiles: [
+        {
+          id: 'default',
+          name: 'Main',
+          avatarToken: 'crimson',
+          isKids: false,
+          isDefault: true,
+          updatedAt: 100,
+          deleted: false,
+          pinHash: 'v1:abc:def',
+          parentalEnabled: true,
+          parentalMaxRating: 'PG-13',
+        },
+      ],
+    };
+    const v2Blob = await encryptVaultSnapshot(crypto, vaultKey, 'usr_v2', 2, fullV2);
+    expect(v2Blob.ciphertext).not.toContain('v1:abc:def');
+    expect(v2Blob.ciphertext).not.toContain('00:1A:79:AA:BB:CC');
+    expect(await decryptVaultSnapshot(crypto, vaultKey, 'usr_v2', 2, v2Blob)).toEqual(fullV2);
+
+    // Reject invalid v2 fields
+    const invalidV2Payloads: unknown[] = [
+      { ...fullV2, sources: [{ ...fullV2.sources[0], kind: 'ftp' }] },
+      { ...fullV2, sources: [{ ...fullV2.sources[0], settings: { epgShiftMs: 'bad' } }] },
+      { ...fullV2, favorites: [{ key: 'ch-1', sortOrder: Number.NaN, updatedAt: 1 }] },
+      {
+        ...fullV2,
+        watchedEpisodesBitfields: [{ seriesKey: 's1', bitsB64: '', season: -1, updatedAt: 1 }],
+      },
+      {
+        ...fullV2,
+        continueWatchingDismissals: [
+          {
+            profileId: 'default',
+            seriesKey: 's1',
+            sourceId: 'src-1',
+            dismissedAt: -5,
+            deleted: false,
+          },
+        ],
+      },
+      {
+        ...fullV2,
+        profiles: [
+          {
+            id: 'p1',
+            name: 'Main',
+            avatarToken: 'crimson',
+            isKids: 'no',
+            isDefault: true,
+            updatedAt: 1,
+            deleted: false,
+          },
+        ],
+      },
+    ];
+    for (const bad of invalidV2Payloads) {
+      const badBlob = await encryptVaultSnapshot(
+        crypto,
+        vaultKey,
+        'usr_v2',
+        3,
+        bad as VaultSnapshot,
+      );
+      await expect(decryptVaultSnapshot(crypto, vaultKey, 'usr_v2', 3, badBlob)).rejects.toThrow(
+        /Invalid vault snapshot structure/,
+      );
+    }
+  });
 });

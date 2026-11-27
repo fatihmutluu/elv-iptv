@@ -1,3 +1,5 @@
+import { isTelemetryRecordRequest, type TelemetryRecordRequest } from '../../shared/sync-ipc.ts';
+
 /** Private control and secret-bridging messages from Electron `main` to the catalog `utilityProcess`. */
 export type MainToWorkerMessage =
   | { type: 'init'; dbPath: string }
@@ -12,6 +14,7 @@ export type WorkerToMainMessage =
   | { type: 'ready' }
   | { type: 'secret-request'; reqId: number; op: 'get' | 'delete'; key: string }
   | { type: 'secret-request'; reqId: number; op: 'set'; key: string; value: string }
+  | { type: 'telemetry'; event: TelemetryRecordRequest }
   | { type: 'shutdown-complete' };
 
 /** Maximum characters allowed in a `secret-request` `set` payload (2x `@elv/data`'s 64 KiB `urlvars` cap). */
@@ -62,6 +65,8 @@ export function isWorkerToMainMessage(x: unknown): x is WorkerToMainMessage {
       }
       return false;
     }
+    case 'telemetry':
+      return isTelemetryRecordRequest(x['event']);
     default:
       return false;
   }

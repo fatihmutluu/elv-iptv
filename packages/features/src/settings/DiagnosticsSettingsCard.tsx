@@ -1,33 +1,28 @@
-import { CtaButton, Surface, useI18n, useTheme } from '@elv/ui-kit';
+import { Surface, useI18n, useTheme } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { SettingsDivider, SettingsToggleRow } from './SettingsRowParts';
+import { StyleSheet, Text } from 'react-native';
+import { SettingsToggleRow } from './SettingsRowParts';
 import type { AppearanceFocusId } from './useTvSettingsNavigation';
 
 /** Props of {@link DiagnosticsSettingsCard}. */
 export interface DiagnosticsSettingsCardProps {
-  readonly crashReportsOptIn: boolean;
-  readonly crashReportsIncludeLogs: boolean;
+  /** Unified opt-in flag covering anonymous diagnostics, crash reports, and performance metrics. */
+  readonly diagnosticsEnabled: boolean;
   readonly focusedControlId: AppearanceFocusId | null;
   readonly isTv: boolean;
-  readonly onToggleOptIn: () => void;
-  readonly onToggleIncludeLogs: () => void;
-  readonly onPreviewReport?: () => void;
+  readonly onToggleDiagnostics: () => void;
   readonly onLayoutBox?: (box: { readonly y: number; readonly height: number }) => void;
 }
 
 /**
- * Cinema Quietude opt-in Crash Diagnostics settings card (`#226`):
- * opt-in toggle, redacted log-tail toggle, and Preview Diagnostic Report button.
+ * Cinema Quietude unified Diagnostics & Performance Telemetry settings card (`#509`, `[1.6]`).
+ * Placed directly above Reset at the bottom of `Settings -> Appearance`.
  */
 export function DiagnosticsSettingsCard({
-  crashReportsOptIn,
-  crashReportsIncludeLogs,
+  diagnosticsEnabled,
   focusedControlId,
   isTv,
-  onToggleOptIn,
-  onToggleIncludeLogs,
-  onPreviewReport,
+  onToggleDiagnostics,
   onLayoutBox,
 }: DiagnosticsSettingsCardProps): ReactElement {
   const theme = useTheme();
@@ -51,47 +46,21 @@ export function DiagnosticsSettingsCard({
       }
     >
       <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
-        {i18n.t('settings.diagnostics.title')}
+        {i18n.t('settings.diagnostics.unifiedTitle')}
       </Text>
       <SettingsToggleRow
-        testID="settings-diagnostics-toggle-opt-in"
-        title={i18n.t('settings.diagnostics.optInLabel')}
-        description={i18n.t('settings.diagnostics.optInHint')}
-        checked={crashReportsOptIn}
+        testID="settings-diagnostics-unified-toggle"
+        title={i18n.t('settings.diagnostics.unifiedToggle')}
+        description={i18n.t('settings.diagnostics.unifiedDescription')}
+        checked={diagnosticsEnabled}
         focused={focusedControlId === 'toggle-crash-reports-opt-in'}
         isTv={isTv}
-        onToggle={onToggleOptIn}
+        onToggle={onToggleDiagnostics}
       />
-      <SettingsDivider />
-      <SettingsToggleRow
-        testID="settings-diagnostics-toggle-include-logs"
-        title={i18n.t('settings.diagnostics.includeLogsLabel')}
-        description={i18n.t('settings.diagnostics.includeLogsHint')}
-        checked={crashReportsIncludeLogs}
-        focused={focusedControlId === 'toggle-crash-reports-include-logs'}
-        isTv={isTv}
-        onToggle={onToggleIncludeLogs}
-      />
-      {onPreviewReport !== undefined ? (
-        <>
-          <SettingsDivider />
-          <View style={styles.actionRow}>
-            <CtaButton
-              testID="settings-diagnostics-preview"
-              variant="secondary"
-              label={i18n.t('settings.diagnostics.previewAction')}
-              focused={focusedControlId === 'preview-diagnostic-report'}
-              focusable={!isTv}
-              onPress={onPreviewReport}
-            />
-          </View>
-        </>
-      ) : null}
     </Surface>
   );
 }
 
 const styles = StyleSheet.create({
   sectionCard: { padding: 18, gap: 14 },
-  actionRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
 });

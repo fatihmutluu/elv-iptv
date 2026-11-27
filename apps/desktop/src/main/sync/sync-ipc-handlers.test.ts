@@ -66,6 +66,52 @@ function makeStubService() {
     })),
     pollQrPairing: vi.fn(async () => 'pending' as const),
     claimQrPairing: vi.fn(async () => ({ ok: true })),
+    markSyncDirty: vi.fn(),
+    notifySyncDirty: vi.fn(),
+    notifyPlaybackPause: vi.fn(),
+    notifyPlaybackExitOrSwitch: vi.fn(),
+    setViewingActive: vi.fn(),
+    notifyStartup: vi.fn(),
+    notifyForeground: vi.fn(),
+    notifyReconnect: vi.fn(),
+    flushBeforeBackground: vi.fn(async () => undefined),
+    startBidirectionalPairing: vi.fn(async () => ({
+      pairingId: 'bp-1',
+      role: 'host' as const,
+      code: '12345678',
+      qrUri: 'elviptv://pair?c=12345678&pk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      expiresAtMs: Date.now() + 300_000,
+      status: 'pending' as const,
+      sas: null,
+      direction: null,
+      localMaskedEmail: null,
+      peerMaskedEmail: null,
+      ...({ pollToken: 'LEAK' } as Record<string, unknown>),
+    })),
+    joinBidirectionalPairing: vi.fn(async () => ({
+      pairingId: 'bp-1',
+      role: 'responder' as const,
+      code: '12345678',
+      expiresAtMs: Date.now() + 300_000,
+      status: 'waiting_approval' as const,
+      sas: '1234',
+      direction: 'responder_to_host' as const,
+      localMaskedEmail: 'a***@b.co',
+      peerMaskedEmail: null,
+    })),
+    pollBidirectionalPairing: vi.fn(async () => ({
+      pairingId: 'bp-1',
+      role: 'host' as const,
+      code: '12345678',
+      expiresAtMs: Date.now() + 300_000,
+      status: 'awaiting_sas' as const,
+      sas: '1234',
+      direction: 'responder_to_host' as const,
+      localMaskedEmail: null,
+      peerMaskedEmail: 'a***@b.co',
+    })),
+    confirmBidirectionalPairing: vi.fn(async () => ({ ok: true })),
+    cancelBidirectionalPairing: vi.fn(async () => undefined),
     setTelemetryOptIn: vi.fn((enabled: boolean) => ({
       optedIn: enabled,
       queuedCount: 0,
@@ -233,9 +279,18 @@ describe('registerSyncIpc (#26, #458)', () => {
       }),
     ).toEqual({ ok: true, id: 'fb-1' });
 
-    // Dispose tears down all 17 handlers and service
+    // Wave P9 markSyncDirty channel forwards cleanly without triggering debounced mutation push
+    await ipc.invoke(SYNC_CHANNELS.markSyncDirty, trustedEvent);
+    expect(service.markSyncDirty).toHaveBeenCalledTimes(1);
+
+    // Wave P9 bidirectional pairing response projection strips pollToken leaks
+    const bp = (await ipc.invoke(SYNC_CHANNELS.pairStart, trustedEvent)) as Record<string, unknown>;
+    expect(bp.pairingId).toBe('bp-1');
+    expect(bp.pollToken).toBeUndefined();
+
+    // Dispose tears down all 29 handlers and service
     dispose();
-    expect(ipc.ipcMain.removeHandler).toHaveBeenCalledTimes(17);
+    expect(ipc.ipcMain.removeHandler).toHaveBeenCalledTimes(29);
     expect(service.dispose).toHaveBeenCalledTimes(1);
   });
 });

@@ -33,7 +33,7 @@ describe('vault-merge and episode bitfields', () => {
     expect(mergeVaultSnapshots(empty, empty)).toEqual(empty);
 
     const local: VaultSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: VAULT_SCHEMA_VERSION,
       updatedAt: 500,
       sources: [
         {
@@ -80,7 +80,7 @@ describe('vault-merge and episode bitfields', () => {
     };
 
     const remote: VaultSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: VAULT_SCHEMA_VERSION,
       updatedAt: 600,
       sources: [
         {
@@ -220,5 +220,289 @@ describe('vault-merge and episode bitfields', () => {
     };
     const mergedNonEmpty = mergeVaultSnapshots(withLike, withEmptyRatings);
     expect(mergedNonEmpty.ratings).toEqual(withLike.ratings);
+  });
+
+  it('supports full VaultSnapshot v2 (stalker sources, settings, per-profile flags/progress/bitfields/dismissals/collections/ratings, and encrypted profiles)', () => {
+    expect(VAULT_SCHEMA_VERSION).toBe(2);
+
+    const local: VaultSnapshot = {
+      ...createEmptyVaultSnapshot(1_000),
+      sources: [
+        {
+          id: 'src-stalker',
+          kind: 'stalker',
+          name: 'Portal A',
+          url: 'https://portal.example.test/c/',
+          portalUrl: 'https://portal.example.test/c/',
+          mac: '00:1A:79:11:22:33',
+          serialNumber: 'SN-123',
+          updatedAt: 500,
+          settings: {
+            excludedProfileIds: ['kids'],
+            epgShiftMs: 3_600_000,
+            xmltvTimezone: 'Europe/Istanbul',
+            categorySelectionJson: '{"live":["cat-1"]}',
+            transportJson: '{"timeoutMs":15000}',
+            backupServers: ['https://backup1.example.test'],
+          },
+        },
+      ],
+      favorites: [
+        { key: 'ch-1', sortOrder: 2, profileId: 'default', updatedAt: 400 },
+        { key: 'ch-1', sortOrder: 0, profileId: 'kids', updatedAt: 450 },
+      ],
+      watchProgress: [
+        {
+          key: 'movie:1',
+          positionMs: 7_200_000,
+          durationMs: 7_200_000,
+          completed: true,
+          watched: true,
+          profileId: 'default',
+          updatedAt: 600,
+        },
+        {
+          key: 'movie:1',
+          positionMs: 600_000,
+          durationMs: 7_200_000,
+          completed: false,
+          watched: false,
+          profileId: 'kids',
+          updatedAt: 550,
+        },
+      ],
+      watchedEpisodesBitfields: [
+        {
+          profileId: 'default',
+          seriesKey: 'ser-1',
+          season: 1,
+          bitsB64: encodeEpisodeBitfield([0, 1]),
+          updatedAt: 400,
+        },
+        {
+          profileId: 'kids',
+          seriesKey: 'ser-1',
+          season: 1,
+          bitsB64: encodeEpisodeBitfield([0]),
+          updatedAt: 420,
+        },
+        {
+          profileId: 'default',
+          seriesKey: 'ser-1',
+          season: 2,
+          bitsB64: encodeEpisodeBitfield([3]),
+          updatedAt: 410,
+        },
+      ],
+      continueWatchingDismissals: [
+        {
+          profileId: 'default',
+          seriesKey: 's1:series:10',
+          sourceId: 's1',
+          dismissedAt: 500,
+          deleted: false,
+        },
+        {
+          profileId: 'kids',
+          seriesKey: 's1:series:10',
+          sourceId: 's1',
+          dismissedAt: 300,
+          deleted: false,
+        },
+      ],
+      collections: [
+        {
+          id: 'col-a',
+          name: 'Action',
+          profileId: 'default',
+          sortOrder: 0,
+          itemKeys: ['vod-1', 'vod-2'],
+          updatedAt: 500,
+        },
+        {
+          id: 'col-b',
+          name: 'Sci-Fi',
+          profileId: 'default',
+          sortOrder: 1,
+          itemKeys: [],
+          updatedAt: 500,
+        },
+      ],
+      ratings: [
+        {
+          key: 'movie:1',
+          sourceId: 's1',
+          kind: 'movie',
+          value: 'like',
+          title: 'Dune',
+          profileId: 'default',
+          updatedAt: 500,
+        },
+        {
+          key: 'movie:1',
+          sourceId: 's1',
+          kind: 'movie',
+          value: 'dislike',
+          title: 'Dune',
+          profileId: 'kids',
+          updatedAt: 500,
+        },
+      ],
+      profiles: [
+        {
+          id: 'default',
+          name: 'Main',
+          avatarToken: 'crimson',
+          isKids: false,
+          isDefault: true,
+          updatedAt: 500,
+          deleted: false,
+          pinHash: 'v1:salt123:digest123',
+          parentalEnabled: false,
+          parentalMaxRating: null,
+        },
+        {
+          id: 'kids',
+          name: 'Kids',
+          avatarToken: 'amber',
+          isKids: true,
+          isDefault: false,
+          updatedAt: 400,
+          deleted: false,
+          pinHash: null,
+          parentalEnabled: true,
+          parentalMaxRating: 'PG',
+        },
+      ],
+    };
+
+    const remote: VaultSnapshot = {
+      ...createEmptyVaultSnapshot(1_100),
+      sources: [
+        {
+          id: 'src-stalker',
+          kind: 'stalker',
+          name: 'Portal A Renamed',
+          url: 'https://portal.example.test/c/',
+          portalUrl: 'https://portal.example.test/c/',
+          mac: '00:1A:79:11:22:33',
+          updatedAt: 900,
+          settings: {
+            excludedProfileIds: [],
+            epgShiftMs: 0,
+          },
+        },
+      ],
+      favorites: [
+        // Legacy undefined profileId collides cleanly with 'default' and wins when newer
+        { key: 'ch-1', sortOrder: 1, updatedAt: 700 },
+      ],
+      watchProgress: [],
+      watchedEpisodesBitfields: [
+        {
+          profileId: 'default',
+          seriesKey: 'ser-1',
+          season: 1,
+          bitsB64: encodeEpisodeBitfield([2, 4]),
+          updatedAt: 650,
+        },
+      ],
+      continueWatchingDismissals: [
+        {
+          profileId: 'default',
+          seriesKey: 's1:series:10',
+          sourceId: 's1',
+          dismissedAt: 800,
+          deleted: true,
+        },
+      ],
+      collections: [
+        // Folder move: vod-2 removed from col-a and added to col-b at newer timestamp
+        {
+          id: 'col-a',
+          name: 'Action',
+          profileId: 'default',
+          sortOrder: 0,
+          itemKeys: ['vod-1'],
+          updatedAt: 900,
+        },
+        {
+          id: 'col-b',
+          name: 'Sci-Fi',
+          profileId: 'default',
+          sortOrder: 1,
+          itemKeys: ['vod-2'],
+          updatedAt: 900,
+        },
+      ],
+      profiles: [
+        {
+          id: 'kids',
+          name: 'Junior',
+          avatarToken: 'emerald',
+          isKids: true,
+          isDefault: false,
+          updatedAt: 850,
+          deleted: false,
+          pinHash: null,
+          parentalEnabled: true,
+          parentalMaxRating: 'G',
+        },
+      ],
+    };
+
+    const lr = mergeVaultSnapshots(local, remote);
+    const rl = mergeVaultSnapshots(remote, local);
+    expect(lr).toEqual(rl);
+
+    // Stalker source LWW merge
+    expect(lr.sources).toHaveLength(1);
+    expect(lr.sources[0]?.name).toBe('Portal A Renamed');
+    expect(lr.sources[0]?.settings?.epgShiftMs).toBe(0);
+
+    // Favorites kept per-profile; default updated to sortOrder 1
+    expect(lr.favorites).toHaveLength(2);
+    expect(lr.favorites.find((f) => (f.profileId ?? 'default') === 'default')?.sortOrder).toBe(1);
+    expect(lr.favorites.find((f) => f.profileId === 'kids')?.sortOrder).toBe(0);
+
+    // Watch progress keeps watched flag independently per profile
+    expect(lr.watchProgress).toHaveLength(2);
+    expect(lr.watchProgress.find((w) => w.profileId === 'default')?.watched).toBe(true);
+    expect(lr.watchProgress.find((w) => w.profileId === 'kids')?.watched).toBe(false);
+
+    // Bitfields OR'd per (profileId, seriesKey, season)
+    const defS1 = lr.watchedEpisodesBitfields.find(
+      (b) => (b.profileId ?? 'default') === 'default' && b.seriesKey === 'ser-1' && b.season === 1,
+    );
+    expect(decodeEpisodeBitfield(defS1?.bitsB64 ?? '')).toEqual([0, 1, 2, 4]);
+    expect(defS1?.updatedAt).toBe(650);
+    const kidsS1 = lr.watchedEpisodesBitfields.find(
+      (b) => b.profileId === 'kids' && b.seriesKey === 'ser-1' && b.season === 1,
+    );
+    expect(decodeEpisodeBitfield(kidsS1?.bitsB64 ?? '')).toEqual([0]);
+    const defS2 = lr.watchedEpisodesBitfields.find(
+      (b) => (b.profileId ?? 'default') === 'default' && b.seriesKey === 'ser-1' && b.season === 2,
+    );
+    expect(decodeEpisodeBitfield(defS2?.bitsB64 ?? '')).toEqual([3]);
+
+    // Dismissals LWW by dismissedAt per profile
+    expect(lr.continueWatchingDismissals).toHaveLength(2);
+    expect(lr.continueWatchingDismissals?.find((d) => d.profileId === 'default')?.deleted).toBe(
+      true,
+    );
+    expect(lr.continueWatchingDismissals?.find((d) => d.profileId === 'kids')?.deleted).toBe(false);
+
+    // Collections deterministic LWW itemKeys replacement (folder move propagated!)
+    expect(lr.collections.find((c) => c.id === 'col-a')?.itemKeys).toEqual(['vod-1']);
+    expect(lr.collections.find((c) => c.id === 'col-b')?.itemKeys).toEqual(['vod-2']);
+
+    // Ratings isolated per profile
+    expect(lr.ratings).toHaveLength(2);
+
+    // Profiles LWW by updatedAt
+    expect(lr.profiles).toHaveLength(2);
+    expect(lr.profiles?.find((p) => p.id === 'kids')?.name).toBe('Junior');
+    expect(lr.profiles?.find((p) => p.id === 'kids')?.parentalMaxRating).toBe('G');
+    expect(lr.profiles?.find((p) => p.id === 'default')?.pinHash).toBe('v1:salt123:digest123');
   });
 });

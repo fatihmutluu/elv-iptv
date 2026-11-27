@@ -129,6 +129,10 @@ import {
 } from './sources';
 import { createPlaytimeResolverCache, type StreamRequest } from './stream-resolver';
 import {
+  type CatalogSyncStateOpsMethods,
+  createCatalogSyncStateOpsMethods,
+} from './sync-state-repo';
+import {
   clearTrackPreference,
   getTrackPreference,
   type PersistedTrackPreference,
@@ -214,7 +218,8 @@ export interface CatalogService
     Partial<CatalogDownloadsOpsMethods>,
     Partial<CatalogNewEpisodesOpsMethods>,
     Partial<CatalogRatingsOpsMethods>,
-    Partial<CatalogSourceMutationMethods> {
+    Partial<CatalogSourceMutationMethods>,
+    Partial<CatalogSyncStateOpsMethods> {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
@@ -461,6 +466,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     playtime,
   });
   const ratingsOpsMethods = createCatalogRatingsOpsMethods({ db, clock, playtime, syncUserData });
+  const syncStateOpsMethods = createCatalogSyncStateOpsMethods({ db, playtime, syncUserData });
 
   const listSources = () => querySourcesList(db);
   const sourceMutationMethods = createCatalogSourceMutationMethods({
@@ -761,6 +767,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...newEpisodesOpsMethods,
     ...ratingsOpsMethods,
     ...sourceMutationMethods,
+    ...syncStateOpsMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

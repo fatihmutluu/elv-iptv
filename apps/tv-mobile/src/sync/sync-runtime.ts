@@ -1,37 +1,43 @@
-import { normalizeSyncServerUrl, sanitizeInitialPreferencesPatch } from '@elv/domain';
+import {
+  elvError,
+  err,
+  normalizeSyncServerUrl,
+  ok,
+  type Result,
+  sanitizeInitialPreferencesPatch,
+} from '@elv/domain';
 import {
   base64UrlDecode,
   base64UrlEncode,
+  createAutoSyncScheduler,
   createEmptyVaultSnapshot,
   createPureJsVaultCryptoPort,
   createQrPairingClient,
   createSyncAuthClient,
-  createTelemetryQueue,
-  createTelemetryUploader,
   mergeVaultSnapshots,
   parsePairingQrUri,
+  type QrPairingPayload,
   type QrPairingSession,
   type SyncClockPort,
   type SyncSession,
-  submitFeedback,
-  type TelemetryUploader,
   type VaultSnapshot,
 } from '@elv/sync';
+import { createMobileBidirectionalPairingController } from './bidirectional-pairing';
+import { createMobileTelemetryAndFeedback } from './mobile-telemetry-feedback';
+import { reconcileLocalSnapshotWithBaseline } from './snapshot-tombstones';
 import {
+  type AutoSyncState,
   type CreateTvMobileSyncPortsOptions,
   createFetchHttpPort,
-  DEFAULT_FLUSH_INTERVAL_MS,
   defaultCsprngBytes,
   errorCodeFrom,
-  FEEDBACK_LOG_TAIL_LINES,
   type FeedbackPort,
-  type FeedbackSubmitInput,
-  generateSessionId,
   initialPrefsAppliedKey,
   isAuthTokenExpiredError,
+  loadVaultBaseline,
   type PersistedSessionRecord,
   parsePersistedSession,
-  redactDiagnosticsLine,
+  persistVaultBaseline,
   SESSION_SECRET_KEY,
   SIGNED_OUT_STATE,
   type SyncAccountPort,
@@ -39,9 +45,9 @@ import {
   type SyncActionResult,
   type SyncFetchFn,
   type SyncQrPairingSession,
-  type TelemetryMediaDecodeFailure,
   type TelemetryPort,
   type TvMobileSyncPorts,
+  VAULT_BASELINE_SECRET_KEY,
   VAULT_KEY_BYTES,
 } from './sync-helpers';
 
@@ -54,10 +60,15 @@ export type {
   TvMobileSyncPorts,
 };
 
+function mapSchedulerState(raw: 'idle' | 'syncing' | 'pending' | 'error'): AutoSyncState {
+  return raw === 'error' ? 'offline' : raw;
+}
+
 /**
- * Creates mobile & TV Wave F9 runtime ports (`SyncAccountPort`, `TelemetryPort`, `FeedbackPort`)
- * using `@elv/sync` pure-JS crypto (100% Hermes-compatible), encrypted `SecretStore` session
- * persistence, strict zero-traffic opt-out telemetry, and redacted diagnostics feedback (`#26`, `#458`).
+ * Creates mobile & TV Wave F9/P9 runtime ports (`SyncAccountPort`, `TelemetryPort`, `FeedbackPort`)
+ * using `@elv/sync` pure-JS crypto (100% Hermes-compatible), automatic background E2EE sync,
+ * bidirectional X25519 pairing, unified 13-kind telemetry with `DeviceTechnicalProfile`, and
+ * redacted feedback (`#26`, `#458`, `#509`, `#510`).
  */
 export function createTvMobileSyncPorts(
   options: CreateTvMobileSyncPortsOptions,
@@ -78,18 +89,21 @@ export function createTvMobileSyncPorts(
 
   const resolveBaseUrl = (): string => {
     const fromPref = options.getPreferences?.()?.syncServerUrl;
-    const raw =
+    const normalizedPref =
       typeof fromPref === 'string' && fromPref.trim().length > 0
-        ? fromPref
-        : options.getServerUrl();
-    return normalizeSyncServerUrl(raw, '');
+        ? normalizeSyncServerUrl(fromPref, '')
+        : '';
+    if (normalizedPref.length > 0) return normalizedPref;
+    return normalizeSyncServerUrl(options.getServerUrl(), '');
   };
 
+  let autoSyncState: AutoSyncState = 'idle';
   let state: SyncAccountState = SIGNED_OUT_STATE;
   const listeners = new Set<(next: SyncAccountState) => void>();
   let activeSession: SyncSession | null = null;
   let lastRevision = 0;
   let localSnapshot: VaultSnapshot = createEmptyVaultSnapshot(0);
+  let activeSyncRun: Promise<SyncActionResult> | null = null;
   const qrSessions = new Map<string, QrPairingSession>();
 
   const hasAppliedInitialPrefs = async (userId: string): Promise<boolean> => {
@@ -104,7 +118,10 @@ export function createTvMobileSyncPorts(
   };
 
   const setState = (next: SyncAccountState): void => {
-    state = Object.freeze({ ...next });
+    state = Object.freeze({
+      ...next,
+      autoSyncState: next.status === 'signed_out' ? 'idle' : (next.autoSyncState ?? autoSyncState),
+    });
     for (const listener of [...listeners]) {
       try {
         listener(state);
@@ -128,14 +145,6 @@ export function createTvMobileSyncPorts(
       lastRevision: revision,
     };
     await options.secretStore.set(SESSION_SECRET_KEY, JSON.stringify(record));
-  };
-
-  const clearLocalSession = async (): Promise<void> => {
-    activeSession = null;
-    lastRevision = 0;
-    qrSessions.clear();
-    await options.secretStore.delete(SESSION_SECRET_KEY).catch(() => undefined);
-    setState(SIGNED_OUT_STATE);
   };
 
   const makeAuthClient = (baseUrl: string) =>
@@ -184,6 +193,236 @@ export function createTvMobileSyncPorts(
     return { ok: true, session: updated };
   };
 
+  const adoptPairedSession = async (
+    baseUrl: string,
+    payload: QrPairingPayload,
+  ): Promise<Result<void>> => {
+    let vaultKey: Uint8Array;
+    try {
+      vaultKey = base64UrlDecode(payload.vaultKeyB64);
+    } catch {
+      return err(elvError('auth', 'invalid_vault_key'));
+    }
+    if (vaultKey.length !== VAULT_KEY_BYTES) {
+      return err(elvError('auth', 'invalid_vault_key'));
+    }
+    const refreshed = await makeAuthClient(baseUrl).refresh(payload.refreshToken);
+    if (!refreshed.ok) {
+      setState({ ...state, errorCode: errorCodeFrom(refreshed.error) });
+      return err(refreshed.error);
+    }
+    const refreshedUser = refreshed.value.user;
+    if (
+      refreshedUser === undefined ||
+      typeof refreshedUser.id !== 'string' ||
+      refreshedUser.id.trim().length === 0
+    ) {
+      setState({ ...state, errorCode: 'invalid_session' });
+      return err(elvError('auth', 'invalid_session'));
+    }
+    const pairedSession: SyncSession = {
+      user: {
+        id: refreshedUser.id,
+        email: refreshedUser.email.length > 0 ? refreshedUser.email : payload.email,
+      },
+      accessToken: refreshed.value.accessToken,
+      refreshToken: refreshed.value.refreshToken,
+      vaultKey,
+    };
+    activeSession = pairedSession;
+    lastRevision = 0;
+    localSnapshot = createEmptyVaultSnapshot(0);
+    await options.secretStore.delete(VAULT_BASELINE_SECRET_KEY).catch(() => undefined);
+    await persistSession(pairedSession, null, 0);
+    setState({
+      status: 'signed_in',
+      email: pairedSession.user.email,
+      lastSyncedAtIso: null,
+      pendingRecoveryCode: null,
+      errorCode: null,
+    });
+    return ok(undefined);
+  };
+
+  const mintPairTransferPayload = async (baseUrl: string): Promise<Result<QrPairingPayload>> => {
+    const tokenRes = await ensureAccessToken(baseUrl);
+    if (!tokenRes.ok) return err(elvError('auth', tokenRes.errorCode));
+    let session = tokenRes.session;
+    const authClient = makeAuthClient(baseUrl);
+    let pairTokenRes = await authClient.issuePairRefreshToken(session.accessToken);
+    if (!pairTokenRes.ok && isAuthTokenExpiredError(pairTokenRes.error)) {
+      const retryToken = await ensureAccessToken(baseUrl, true);
+      if (!retryToken.ok) return err(elvError('auth', retryToken.errorCode));
+      session = retryToken.session;
+      pairTokenRes = await authClient.issuePairRefreshToken(session.accessToken);
+    }
+    if (!pairTokenRes.ok) return pairTokenRes;
+    return ok({
+      email: session.user.email,
+      refreshToken: pairTokenRes.value.refreshToken,
+      vaultKeyB64: base64UrlEncode(session.vaultKey),
+    });
+  };
+
+  const executeSyncNowInternal = async (): Promise<SyncActionResult> => {
+    const baseUrl = resolveBaseUrl();
+    if (baseUrl.length === 0) return { ok: false, errorCode: 'server_not_configured' };
+    if (activeSession === null) return { ok: false, errorCode: 'not_signed_in' };
+
+    setState({ ...state, status: 'syncing', errorCode: null });
+    const client = makeAuthClient(baseUrl);
+    const tokenRes = await ensureAccessToken(baseUrl);
+    if (!tokenRes.ok) {
+      setState({ ...state, status: 'signed_in', errorCode: tokenRes.errorCode });
+      return { ok: false, errorCode: tokenRes.errorCode };
+    }
+    let session = tokenRes.session;
+
+    let pullRes = await client.pullVault(session);
+    if (!pullRes.ok && isAuthTokenExpiredError(pullRes.error)) {
+      const retryToken = await ensureAccessToken(baseUrl, true);
+      if (!retryToken.ok) {
+        setState({ ...state, status: 'signed_in', errorCode: retryToken.errorCode });
+        return { ok: false, errorCode: retryToken.errorCode };
+      }
+      session = retryToken.session;
+      pullRes = await client.pullVault(session);
+    }
+    if (!pullRes.ok) {
+      const code = errorCodeFrom(pullRes.error);
+      setState({ ...state, status: 'signed_in', errorCode: code });
+      return { ok: false, errorCode: code };
+    }
+
+    const alreadyAppliedInitialPrefs = await hasAppliedInitialPrefs(session.user.id);
+    let remoteInitialPrefs = pullRes.value.snapshot?.initialPreferences;
+    const shouldApplyRemoteInitial =
+      !alreadyAppliedInitialPrefs && remoteInitialPrefs !== undefined;
+
+    const freshLocal = options.getLocalSnapshot ? await options.getLocalSnapshot() : localSnapshot;
+    const baseLocal = options.getLocalSnapshot
+      ? reconcileLocalSnapshotWithBaseline(freshLocal, localSnapshot, clock.now())
+      : freshLocal;
+    const rawLocalSeed =
+      !shouldApplyRemoteInitial && options.getSyncablePreferences
+        ? options.getSyncablePreferences()
+        : undefined;
+    const sanitizedLocalSeed =
+      rawLocalSeed !== undefined
+        ? (sanitizeInitialPreferencesPatch(rawLocalSeed) as Record<string, unknown>)
+        : undefined;
+    const currentLocal: VaultSnapshot =
+      sanitizedLocalSeed !== undefined && Object.keys(sanitizedLocalSeed).length > 0
+        ? {
+            ...baseLocal,
+            initialPreferences: sanitizedLocalSeed,
+            initialPreferencesUpdatedAt: clock.now(),
+          }
+        : baseLocal;
+    let merged =
+      pullRes.value.snapshot !== null
+        ? mergeVaultSnapshots(currentLocal, pullRes.value.snapshot)
+        : currentLocal;
+    let pushRes = await client.pushVault(session, pullRes.value.revision, merged);
+
+    if (pushRes.ok && pushRes.value.status === 'conflict') {
+      const retryPull = await client.pullVault(session);
+      if (!retryPull.ok) {
+        const code = errorCodeFrom(retryPull.error);
+        setState({ ...state, status: 'signed_in', errorCode: code });
+        return { ok: false, errorCode: code };
+      }
+      if (remoteInitialPrefs === undefined && retryPull.value.snapshot?.initialPreferences) {
+        remoteInitialPrefs = retryPull.value.snapshot.initialPreferences;
+      }
+      merged =
+        retryPull.value.snapshot !== null
+          ? mergeVaultSnapshots(merged, retryPull.value.snapshot)
+          : merged;
+      pushRes = await client.pushVault(session, retryPull.value.revision, merged);
+    }
+
+    if (!pushRes.ok || pushRes.value.status !== 'ok') {
+      const code = pushRes.ok ? 'sync_conflict' : errorCodeFrom(pushRes.error);
+      setState({ ...state, status: 'signed_in', errorCode: code });
+      return { ok: false, errorCode: code };
+    }
+
+    localSnapshot = merged;
+    await options.applyMergedSnapshot?.(merged);
+    if (!alreadyAppliedInitialPrefs) {
+      if (remoteInitialPrefs !== undefined) {
+        const patch = sanitizeInitialPreferencesPatch(remoteInitialPrefs);
+        if (Object.keys(patch).length > 0) {
+          await options.applyInitialPreferences?.(patch);
+        }
+      }
+      await markInitialPrefsApplied(session.user.id);
+    }
+    lastRevision = pushRes.value.revision;
+    await persistVaultBaseline(options.secretStore, cryptoPort, session, lastRevision, merged);
+    const syncedIso = new Date(clock.now()).toISOString();
+    await persistSession(session, syncedIso, lastRevision);
+    setState({ ...state, status: 'signed_in', lastSyncedAtIso: syncedIso, errorCode: null });
+    return { ok: true };
+  };
+
+  const syncNow = (): Promise<SyncActionResult> => {
+    if (activeSyncRun !== null) return activeSyncRun;
+    const run = executeSyncNowInternal().finally(() => {
+      if (activeSyncRun === run) activeSyncRun = null;
+    });
+    activeSyncRun = run;
+    return run;
+  };
+
+  const autoSync = createAutoSyncScheduler({
+    syncPush: () => syncNow(),
+    syncPull: () => syncNow(),
+    isSignedIn: () => activeSession !== null && resolveBaseUrl().length > 0,
+    now: () => clock.now(),
+  });
+  const unsubAutoSync = autoSync.subscribe((status) => {
+    const mapped = mapSchedulerState(status.state);
+    if (mapped === autoSyncState) return;
+    autoSyncState = mapped;
+    if (state.status !== 'signed_out') {
+      setState({ ...state, autoSyncState: mapped });
+    }
+  });
+
+  const pairing = createMobileBidirectionalPairingController({
+    getBaseUrl: resolveBaseUrl,
+    http,
+    randomBytes,
+    clock,
+    getLocalAuth: () => ({
+      signedIn: activeSession !== null,
+      email: activeSession?.user.email ?? null,
+    }),
+    mintPairTransferPayload,
+    adoptPairedSession,
+    triggerImmediateSync: async () => {
+      await syncNow();
+    },
+    ...(options.linkOrigin !== undefined ? { linkOrigin: options.linkOrigin } : {}),
+  });
+
+  const clearLocalSession = async (): Promise<void> => {
+    pairing.dispose();
+    autoSync.reset();
+    activeSession = null;
+    lastRevision = 0;
+    localSnapshot = createEmptyVaultSnapshot(0);
+    qrSessions.clear();
+    await Promise.all([
+      options.secretStore.delete(SESSION_SECRET_KEY).catch(() => undefined),
+      options.secretStore.delete(VAULT_BASELINE_SECRET_KEY).catch(() => undefined),
+    ]);
+    autoSyncState = 'idle';
+    setState(SIGNED_OUT_STATE);
+  };
+
   let hydrated = false;
   const hydrate = async (): Promise<void> => {
     if (hydrated) return;
@@ -198,6 +437,7 @@ export function createTvMobileSyncPorts(
       vaultKey: base64UrlDecode(persisted.vaultKeyB64),
     };
     lastRevision = persisted.lastRevision;
+    localSnapshot = await loadVaultBaseline(options.secretStore, cryptoPort, activeSession);
     if (persisted.lastSyncedAtIso !== null || persisted.lastRevision > 0) {
       await markInitialPrefsApplied(persisted.userId);
     }
@@ -234,6 +474,8 @@ export function createTvMobileSyncPorts(
       }
       activeSession = res.value;
       lastRevision = 0;
+      localSnapshot = createEmptyVaultSnapshot(0);
+      await options.secretStore.delete(VAULT_BASELINE_SECRET_KEY).catch(() => undefined);
       await persistSession(res.value, null, 0);
       setState({
         status: 'signed_in',
@@ -260,6 +502,8 @@ export function createTvMobileSyncPorts(
       }
       activeSession = res.value.session;
       lastRevision = 0;
+      localSnapshot = createEmptyVaultSnapshot(0);
+      await options.secretStore.delete(VAULT_BASELINE_SECRET_KEY).catch(() => undefined);
       await persistSession(res.value.session, null, 0);
       await markInitialPrefsApplied(res.value.session.user.id);
       setState({
@@ -277,104 +521,7 @@ export function createTvMobileSyncPorts(
       setState({ ...state, pendingRecoveryCode: null });
     },
 
-    async syncNow(): Promise<SyncActionResult> {
-      const baseUrl = resolveBaseUrl();
-      if (baseUrl.length === 0) return { ok: false, errorCode: 'server_not_configured' };
-      if (activeSession === null) return { ok: false, errorCode: 'not_signed_in' };
-
-      setState({ ...state, status: 'syncing', errorCode: null });
-      const client = makeAuthClient(baseUrl);
-      const tokenRes = await ensureAccessToken(baseUrl);
-      if (!tokenRes.ok) {
-        setState({ ...state, status: 'signed_in', errorCode: tokenRes.errorCode });
-        return { ok: false, errorCode: tokenRes.errorCode };
-      }
-      let session = tokenRes.session;
-
-      let pullRes = await client.pullVault(session);
-      if (!pullRes.ok && isAuthTokenExpiredError(pullRes.error)) {
-        const retryToken = await ensureAccessToken(baseUrl, true);
-        if (!retryToken.ok) {
-          setState({ ...state, status: 'signed_in', errorCode: retryToken.errorCode });
-          return { ok: false, errorCode: retryToken.errorCode };
-        }
-        session = retryToken.session;
-        pullRes = await client.pullVault(session);
-      }
-      if (!pullRes.ok) {
-        const code = errorCodeFrom(pullRes.error);
-        setState({ ...state, status: 'signed_in', errorCode: code });
-        return { ok: false, errorCode: code };
-      }
-
-      const alreadyAppliedInitialPrefs = await hasAppliedInitialPrefs(session.user.id);
-      let remoteInitialPrefs = pullRes.value.snapshot?.initialPreferences;
-      const shouldApplyRemoteInitial =
-        !alreadyAppliedInitialPrefs && remoteInitialPrefs !== undefined;
-
-      const baseLocal = options.getLocalSnapshot ? await options.getLocalSnapshot() : localSnapshot;
-      const rawLocalSeed =
-        !shouldApplyRemoteInitial && options.getSyncablePreferences
-          ? options.getSyncablePreferences()
-          : undefined;
-      const sanitizedLocalSeed =
-        rawLocalSeed !== undefined
-          ? (sanitizeInitialPreferencesPatch(rawLocalSeed) as Record<string, unknown>)
-          : undefined;
-      const currentLocal: VaultSnapshot =
-        sanitizedLocalSeed !== undefined && Object.keys(sanitizedLocalSeed).length > 0
-          ? {
-              ...baseLocal,
-              initialPreferences: sanitizedLocalSeed,
-              initialPreferencesUpdatedAt: clock.now(),
-            }
-          : baseLocal;
-      let merged =
-        pullRes.value.snapshot !== null
-          ? mergeVaultSnapshots(currentLocal, pullRes.value.snapshot)
-          : currentLocal;
-      let pushRes = await client.pushVault(session, pullRes.value.revision, merged);
-
-      if (pushRes.ok && pushRes.value.status === 'conflict') {
-        const retryPull = await client.pullVault(session);
-        if (!retryPull.ok) {
-          const code = errorCodeFrom(retryPull.error);
-          setState({ ...state, status: 'signed_in', errorCode: code });
-          return { ok: false, errorCode: code };
-        }
-        if (remoteInitialPrefs === undefined && retryPull.value.snapshot?.initialPreferences) {
-          remoteInitialPrefs = retryPull.value.snapshot.initialPreferences;
-        }
-        merged =
-          retryPull.value.snapshot !== null
-            ? mergeVaultSnapshots(merged, retryPull.value.snapshot)
-            : merged;
-        pushRes = await client.pushVault(session, retryPull.value.revision, merged);
-      }
-
-      if (!pushRes.ok || pushRes.value.status !== 'ok') {
-        const code = pushRes.ok ? 'sync_conflict' : errorCodeFrom(pushRes.error);
-        setState({ ...state, status: 'signed_in', errorCode: code });
-        return { ok: false, errorCode: code };
-      }
-
-      localSnapshot = merged;
-      await options.applyMergedSnapshot?.(merged);
-      if (!alreadyAppliedInitialPrefs) {
-        if (remoteInitialPrefs !== undefined) {
-          const patch = sanitizeInitialPreferencesPatch(remoteInitialPrefs);
-          if (Object.keys(patch).length > 0) {
-            await options.applyInitialPreferences?.(patch);
-          }
-        }
-        await markInitialPrefsApplied(session.user.id);
-      }
-      lastRevision = pushRes.value.revision;
-      const syncedIso = new Date(clock.now()).toISOString();
-      await persistSession(session, syncedIso, lastRevision);
-      setState({ ...state, status: 'signed_in', lastSyncedAtIso: syncedIso, errorCode: null });
-      return { ok: true };
-    },
+    syncNow,
 
     async signOut(): Promise<void> {
       const baseUrl = resolveBaseUrl();
@@ -444,49 +591,8 @@ export function createTvMobileSyncPorts(
       if (!res.ok || res.value.status === 'pending') return 'pending';
       qrSessions.delete(pairingId);
       if (res.value.status === 'expired') return 'expired';
-
-      let vaultKey: Uint8Array;
-      try {
-        vaultKey = base64UrlDecode(res.value.payload.vaultKeyB64);
-      } catch {
-        return 'expired';
-      }
-      if (vaultKey.length !== VAULT_KEY_BYTES) return 'expired';
-
-      const refreshed = await makeAuthClient(baseUrl).refresh(res.value.payload.refreshToken);
-      if (!refreshed.ok) {
-        setState({ ...state, errorCode: errorCodeFrom(refreshed.error) });
-        return 'expired';
-      }
-      const refreshedUser = refreshed.value.user;
-      if (
-        refreshedUser === undefined ||
-        typeof refreshedUser.id !== 'string' ||
-        refreshedUser.id.trim().length === 0
-      ) {
-        setState({ ...state, errorCode: 'invalid_session' });
-        return 'expired';
-      }
-      const pairedSession: SyncSession = {
-        user: {
-          id: refreshedUser.id,
-          email: refreshedUser.email.length > 0 ? refreshedUser.email : res.value.payload.email,
-        },
-        accessToken: refreshed.value.accessToken,
-        refreshToken: refreshed.value.refreshToken,
-        vaultKey,
-      };
-      activeSession = pairedSession;
-      lastRevision = 0;
-      await persistSession(pairedSession, null, 0);
-      setState({
-        status: 'signed_in',
-        email: pairedSession.user.email,
-        lastSyncedAtIso: null,
-        pendingRecoveryCode: null,
-        errorCode: null,
-      });
-      return 'claimed';
+      const adopted = await adoptPairedSession(baseUrl, res.value.payload);
+      return adopted.ok ? 'claimed' : 'expired';
     },
 
     async claimQrPairing(codeOrUri): Promise<SyncActionResult> {
@@ -497,205 +603,76 @@ export function createTvMobileSyncPorts(
       const parsed = parsePairingQrUri(codeOrUri);
       if (!parsed.ok) return { ok: false, errorCode: errorCodeFrom(parsed.error) };
 
+      const payloadRes = await mintPairTransferPayload(baseUrl);
+      if (!payloadRes.ok) return { ok: false, errorCode: errorCodeFrom(payloadRes.error) };
+
       const tokenRes = await ensureAccessToken(baseUrl);
       if (!tokenRes.ok) return { ok: false, errorCode: tokenRes.errorCode };
-      let session = tokenRes.session;
-
-      const authClient = makeAuthClient(baseUrl);
-      let pairTokenRes = await authClient.issuePairRefreshToken(session.accessToken);
-      if (!pairTokenRes.ok && isAuthTokenExpiredError(pairTokenRes.error)) {
-        const retryToken = await ensureAccessToken(baseUrl, true);
-        if (!retryToken.ok) return { ok: false, errorCode: retryToken.errorCode };
-        session = retryToken.session;
-        pairTokenRes = await authClient.issuePairRefreshToken(session.accessToken);
-      }
-      if (!pairTokenRes.ok) {
-        return { ok: false, errorCode: errorCodeFrom(pairTokenRes.error) };
-      }
-
       const qrClient = makeQrClient(baseUrl);
-      const claimPayload = {
-        email: session.user.email,
-        refreshToken: pairTokenRes.value.refreshToken,
-        vaultKeyB64: base64UrlEncode(session.vaultKey),
-      };
-      let claimRes = await qrClient.claimSession({
-        accessToken: session.accessToken,
-        qrUriOrParams: parsed.value,
-        payload: claimPayload,
-      });
+      const runClaim = (token: string) =>
+        qrClient.claimSession({
+          accessToken: token,
+          qrUriOrParams: parsed.value,
+          payload: payloadRes.value,
+        });
+      let claimRes = await runClaim(tokenRes.session.accessToken);
       if (!claimRes.ok && isAuthTokenExpiredError(claimRes.error)) {
         const retryToken = await ensureAccessToken(baseUrl, true);
         if (!retryToken.ok) return { ok: false, errorCode: retryToken.errorCode };
-        session = retryToken.session;
-        claimRes = await qrClient.claimSession({
-          accessToken: session.accessToken,
-          qrUriOrParams: parsed.value,
-          payload: {
-            email: session.user.email,
-            refreshToken: pairTokenRes.value.refreshToken,
-            vaultKeyB64: base64UrlEncode(session.vaultKey),
-          },
-        });
+        claimRes = await runClaim(retryToken.session.accessToken);
       }
       return claimRes.ok ? { ok: true } : { ok: false, errorCode: errorCodeFrom(claimRes.error) };
     },
+
+    markSyncDirty: () => autoSync.markDirty(),
+    notifySyncDirty: () => autoSync.notifyMutation(),
+    notifyPlaybackPause: () => autoSync.notifyPlaybackPause(),
+    notifyPlaybackExitOrSwitch: () => autoSync.notifyPlaybackExitOrSwitch(),
+    setViewingActive: (active) => autoSync.setViewingActive(active),
+    startBidirectionalPairing: () => pairing.startBidirectionalPairing(),
+    joinBidirectionalPairing: (codeOrUri) => pairing.joinBidirectionalPairing(codeOrUri),
+    pollBidirectionalPairing: (pairingId) => pairing.pollBidirectionalPairing(pairingId),
+    confirmBidirectionalPairing: (pairingId, chosenDirection) =>
+      pairing.confirmBidirectionalPairing(pairingId, chosenDirection),
+    cancelBidirectionalPairing: (pairingId) => pairing.cancelBidirectionalPairing(pairingId),
   };
 
-  let telemetryOptIn = Boolean(options.getPreferences?.()?.telemetryOptIn);
-  let hasExplicitOptIn = false;
-  let sessionId = generateSessionId(randomBytes);
-  const telemetryQueue = createTelemetryQueue();
-  let cachedUploader: { baseUrl: string; sid: string; uploader: TelemetryUploader } | null = null;
+  const telemetryFeedback = createMobileTelemetryAndFeedback({
+    resolveBaseUrl,
+    http,
+    clock,
+    randomBytes,
+    options,
+  });
 
-  const isOptedIn = (): boolean => {
-    if (hasExplicitOptIn) return telemetryOptIn;
-    const pref = options.getPreferences?.()?.telemetryOptIn;
-    return typeof pref === 'boolean' ? pref : telemetryOptIn;
-  };
-
-  const getUploader = (): TelemetryUploader => {
-    const baseUrl = resolveBaseUrl();
-    const meta = options.getDeviceMeta();
-    if (
-      cachedUploader === null ||
-      cachedUploader.baseUrl !== baseUrl ||
-      cachedUploader.sid !== sessionId
-    ) {
-      cachedUploader = {
-        baseUrl,
-        sid: sessionId,
-        uploader: createTelemetryUploader({
-          baseUrl: baseUrl.length > 0 ? baseUrl : 'https://invalid.local',
-          http,
-          isOptedIn,
-          clock,
-          sessionId,
-          platform: meta.platform,
-          appVersion: meta.appVersion,
-          queue: telemetryQueue,
-        }),
-      };
-    }
-    return cachedUploader.uploader;
-  };
-
-  const telemetry: TelemetryPort = {
-    isOptedIn,
-    setOptIn(enabled: boolean): void {
-      const next = Boolean(enabled);
-      const prev = isOptedIn();
-      hasExplicitOptIn = true;
-      if (next && !prev) sessionId = generateSessionId(randomBytes);
-      telemetryOptIn = next;
-      if (!next) telemetryQueue.clear();
-      if (next !== prev) options.onTelemetryOptInChange?.(next);
-    },
-    queuedCount: () => telemetryQueue.size(),
-    getPayloadPreviewJson: () => getUploader().preview(),
-    recordScreenTransition(screen: string, durationMs: number): void {
-      if (!isOptedIn()) return;
-      getUploader().record({ kind: 'screen_transition', ts: clock.now(), screen, durationMs });
-    },
-    recordMediaDecodeFailure(meta: TelemetryMediaDecodeFailure): void {
-      if (!isOptedIn()) return;
-      getUploader().record({
-        kind: 'media_decode_failure',
-        ts: clock.now(),
-        engine: meta.engine,
-        container: meta.container ?? 'unknown',
-        videoCodec: meta.videoCodec ?? 'unknown',
-        audioCodec: meta.audioCodec ?? 'unknown',
-        errorCode: meta.errorCode,
-        ...(meta.hdrFormat !== undefined ? { hdrFormat: meta.hdrFormat } : {}),
-        isLive: Boolean(meta.isLive),
-      });
-    },
-    recordPlaybackError(meta): void {
-      if (!isOptedIn()) return;
-      getUploader().record({
-        kind: 'playback_error',
-        ts: clock.now(),
-        engine: meta.engine,
-        errorCode: meta.errorCode,
-        isLive: Boolean(meta.isLive),
-      });
-    },
-    async flush(): Promise<void> {
-      if (!isOptedIn() || resolveBaseUrl().length === 0) return;
-      await getUploader().flush();
-    },
-  };
-
-  const flushIntervalMs = options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS;
-  const intervalHandle =
-    flushIntervalMs > 0
-      ? setInterval(() => {
-          if (isOptedIn() && telemetryQueue.size() > 0) void telemetry.flush();
-        }, flushIntervalMs)
-      : undefined;
-  if (
-    intervalHandle !== undefined &&
-    typeof (intervalHandle as { unref?: () => void }).unref === 'function'
-  ) {
-    (intervalHandle as { unref: () => void }).unref();
-  }
-
+  let backgroundedAt: number | null = null;
   const unsubscribeAppState = options.subscribeAppState?.((nextState) => {
-    if ((nextState === 'background' || nextState === 'inactive') && isOptedIn()) {
-      void telemetry.flush();
+    if (nextState === 'background' || nextState === 'inactive') {
+      if (backgroundedAt === null) backgroundedAt = clock.now();
+      void autoSync.flushBeforeBackground(2_500);
+      telemetryFeedback.flushIfOptedIn();
+    } else if (nextState === 'active' && backgroundedAt !== null) {
+      const awayMs = Math.max(0, clock.now() - backgroundedAt);
+      backgroundedAt = null;
+      autoSync.notifyForeground(awayMs);
     }
   });
 
-  const feedback: FeedbackPort = {
-    async submit(input: FeedbackSubmitInput) {
-      const baseUrl = resolveBaseUrl();
-      if (baseUrl.length === 0) return { ok: false, errorCode: 'server_not_configured' };
-      const meta = options.getDeviceMeta();
-      let diagnostics: Record<string, string | number | boolean> | undefined;
-      if (input.includeDiagnostics) {
-        const rawLogs = options.getRecentLogs
-          ? await Promise.resolve(options.getRecentLogs(FEEDBACK_LOG_TAIL_LINES)).catch(
-              () => [] as readonly string[],
-            )
-          : [];
-        const logTail = rawLogs
-          .slice(-FEEDBACK_LOG_TAIL_LINES)
-          .map((line) => redactDiagnosticsLine(line))
-          .join('\n');
-        diagnostics = {
-          platform: meta.platform,
-          appVersion: meta.appVersion,
-          ...(meta.osVersion !== undefined ? { osVersion: meta.osVersion } : {}),
-          ...(logTail.length > 0 ? { logTail } : {}),
-        };
-      }
-      const res = await submitFeedback({
-        baseUrl,
-        http,
-        submission: {
-          category: input.category,
-          message: input.message,
-          platform: meta.platform,
-          appVersion: meta.appVersion,
-          ...(meta.locale !== undefined ? { locale: meta.locale } : {}),
-          ...(diagnostics !== undefined ? { diagnostics } : {}),
-        },
-      });
-      return res.ok
-        ? { ok: true, id: res.value.id }
-        : { ok: false, errorCode: errorCodeFrom(res.error) };
-    },
-  };
-
   return {
     syncAccount,
-    telemetry,
-    feedback,
+    telemetry: telemetryFeedback.telemetry,
+    feedback: telemetryFeedback.feedback,
     hydrate,
+    notifyStartup: () => autoSync.notifyStartup(),
+    notifyForeground: (awayMs) => autoSync.notifyForeground(awayMs),
+    notifyReconnect: () => autoSync.notifyReconnect(),
+    flushBeforeBackground: (timeoutMs = 2_500) => autoSync.flushBeforeBackground(timeoutMs),
     dispose() {
-      if (intervalHandle !== undefined) clearInterval(intervalHandle);
+      telemetryFeedback.dispose();
       unsubscribeAppState?.();
+      unsubAutoSync();
+      autoSync.dispose();
+      pairing.dispose();
       listeners.clear();
       qrSessions.clear();
     },

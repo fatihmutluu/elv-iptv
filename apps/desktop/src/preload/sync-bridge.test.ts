@@ -76,6 +76,8 @@ describe('createSyncBridges (#26, #458)', () => {
       ok: true,
     });
     await bridges.sync.setServerUrl('https://sync.example.test');
+    await bridges.sync.markSyncDirty?.();
+    expect(invoke).toHaveBeenCalledWith(SYNC_CHANNELS.markSyncDirty);
 
     // State change push listener ignores malformed events and delivers valid ones
     const observed: unknown[] = [];

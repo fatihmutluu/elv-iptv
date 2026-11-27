@@ -1,5 +1,6 @@
 import type { CatalogService, SearchScope, SourceRow } from '@elv/data';
-import type { DownloadManagerPort } from '@elv/domain';
+import type { DownloadManagerPort, KeymapStore, ProfilePreferencesManager } from '@elv/domain';
+import type { ConnectionTracker } from '@elv/playback';
 import {
   TvFocusAnchor,
   useI18n,
@@ -18,11 +19,23 @@ import { HomeScreen } from './home';
 import { LibraryScreen } from './library';
 import { LiveScreen, type LiveTabMemory } from './live';
 import { ThirdPartyNoticesScreen } from './notices';
+import type { AppLifecyclePort } from './ports/app-lifecycle';
+import type { DesktopWindowPort } from './ports/desktop-window-host';
 import type { LanPairingPort } from './ports/lan-pairing-host';
+import type { PlayDeepLinkTarget } from './ports/play-deep-link';
 import type { PlayTarget } from './ports/play-target';
 import type { PlaybackGuard } from './ports/playback-guard';
+import type { ReminderHostPort } from './ports/reminder-host';
 import type { PickedPlaylistFile, SourceImportHost } from './ports/source-import-host';
-import type { VideoHost } from './ports/video-host';
+import type { TvHomeChannelsPort } from './ports/tv-home-channels';
+import type { ThermalDevicePort, VideoHost } from './ports/video-host';
+import type { DiagnosticsPort, ExternalPlayerPort } from './ports/wave-f7b-ports';
+import type {
+  FeedbackPort,
+  QrScannerPort,
+  SyncAccountPort,
+  TelemetryPort,
+} from './ports/wave-f9-ports';
 import { ProfilesAndParentalPanel } from './profiles';
 import { SearchScreen } from './search';
 import { SettingsScreen, type SettingsSection } from './settings';
@@ -36,6 +49,56 @@ import {
   RouteActiveProvider,
 } from './shell';
 import { SourcesScreen } from './sources';
+
+/** Props of `AppShell`. */
+export interface AppShellProps {
+  catalog: CatalogService;
+  videoHost: VideoHost;
+  appLifecycle?: AppLifecyclePort;
+  /** Optional thermal and hardware Multi-View capability port (`#34`, `#232`). */
+  thermalDevice?: ThermalDevicePort;
+  /** Optional desktop tray and standalone popout window port (`#158`). */
+  desktopWindow?: DesktopWindowPort;
+  /** Optional multi-profile preferences manager (`#15`); falls back to `usePreferences().profilePreferences`. */
+  profilePreferences?: ProfilePreferencesManager;
+  externalRefreshToken?: number;
+  /** Optional shared per-account connection tracker for multi-surface pre-flight limits (`#87`). */
+  connectionTracker?: ConnectionTracker;
+  /** Optional platform clipboard & sandboxed local playlist picker port (`#51`). */
+  sourceImportHost?: SourceImportHost;
+  /** Optional platform local LAN QR pairing port (`#50`). */
+  lanPairing?: LanPairingPort;
+  /** Optional dedicated sparse remote keymap store (`#33`). */
+  keymapStore?: KeymapStore;
+  /** Optional Android TV Home Screen preview channels port (`#273`). */
+  tvHomeChannels?: TvHomeChannelsPort;
+  /** Optional OS notification host port for programme reminders (`#35`). */
+  reminderHost?: ReminderHostPort;
+  /** Optional incoming `elviptv://play?key=...` deep-link target (`#273`). */
+  pendingDeepLink?: PlayDeepLinkTarget | null;
+  /** Invoked once `pendingDeepLink` has been consumed by `AppShell` (`#273`). */
+  onDeepLinkHandled?: () => void;
+  /** Optional test/host hook notified with the active {@link PlaybackGuard}. */
+  onPlaybackGuardReady?: (guard: PlaybackGuard) => void;
+  /** Optional platform external player handoff port (`#406`). */
+  externalPlayer?: ExternalPlayerPort;
+  /** Optional platform opt-in redacted diagnostics port (`#226`). */
+  diagnostics?: DiagnosticsPort;
+  /** Optional E2EE sync account & bidirectional X25519 QR pairing port (`#26`, `#510`). */
+  readonly syncAccount?: SyncAccountPort;
+  /** Optional opt-in runtime performance & crash telemetry port (`#458`, `#509`). */
+  readonly telemetry?: TelemetryPort;
+  /** Optional Settings feedback & issue report submission port (`#458`). */
+  readonly feedback?: FeedbackPort;
+  /** Optional native camera QR scanner port for bidirectional pairing (`#510`). */
+  readonly qrScanner?: QrScannerPort;
+  /** Optional incoming `elviptv://pair?...` or Universal Link pairing URI (`#510`). */
+  readonly pendingPairUri?: string | null;
+  /** Invoked once `pendingPairUri` has been consumed by `AppShell` (`#510`). */
+  readonly onPairUriHandled?: () => void;
+  /** Optional cross-platform offline VOD download manager port (`Wave P5`). */
+  readonly downloadManager?: DownloadManagerPort;
+}
 
 /** Props of {@link AppShellStage}. */
 export interface AppShellStageProps {
@@ -86,7 +149,7 @@ export interface AppShellStageProps {
   readonly onOpenGuideManagement: (sourceId: string) => void;
   readonly onRefreshCatalogNow?: () => Promise<void> | void;
   readonly onRefreshGuideNow?: () => Promise<void> | void;
-  readonly onPreviewDiagnostics?: () => void;
+  readonly onTelemetryOptInChange?: (enabled: boolean) => void;
   readonly onRegisterStopPreview?: (stop: (() => Promise<void>) | null) => void;
   readonly suppressEmbeddedPreview?: boolean;
   readonly onChannelsMutated: () => void;
@@ -162,8 +225,8 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
           ? { onRefreshCatalogNow: p.onRefreshCatalogNow }
           : {})}
         {...(p.onRefreshGuideNow !== undefined ? { onRefreshGuideNow: p.onRefreshGuideNow } : {})}
-        {...(p.onPreviewDiagnostics !== undefined
-          ? { onPreviewDiagnostics: p.onPreviewDiagnostics }
+        {...(p.onTelemetryOptInChange !== undefined
+          ? { onTelemetryOptInChange: p.onTelemetryOptInChange }
           : {})}
         renderProfiles={(slot) => (
           <ProfilesAndParentalPanel

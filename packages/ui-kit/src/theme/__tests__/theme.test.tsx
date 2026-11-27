@@ -43,6 +43,7 @@ describe('theme color utilities & WCAG contrast invariants (#325)', () => {
       const p = THEME_PRESETS[id];
       expect(contrastRatio(p.textPrimary, p.bgCanvas)).toBeGreaterThanOrEqual(7);
       expect(contrastRatio(p.ctaFg, p.ctaBg)).toBeGreaterThanOrEqual(7);
+      expect(contrastRatio(p.dangerFg, p.dangerBg)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(p.textSecondary, p.bgCanvas)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(p.focusRingColor, p.bgCanvas)).toBeGreaterThanOrEqual(7);
     }
@@ -52,6 +53,7 @@ describe('theme color utilities & WCAG contrast invariants (#325)', () => {
     expect(contrastRatio(hc.textSecondary, hc.bgCanvas)).toBeGreaterThanOrEqual(7);
     expect(contrastRatio(hc.textMuted, hc.bgCanvas)).toBeGreaterThanOrEqual(7);
     expect(contrastRatio(hc.accent, hc.bgCanvas)).toBeGreaterThanOrEqual(7);
+    expect(contrastRatio(hc.dangerFg, hc.dangerBg)).toBeGreaterThanOrEqual(7);
     expect(contrastRatio(hc.focusRingColor, hc.bgCanvas)).toBeGreaterThanOrEqual(7);
     expect(isThemePresetId('unknown')).toBe(false);
     expect(isThemePresetId('constructor')).toBe(false);
@@ -73,6 +75,8 @@ describe('theme color utilities & WCAG contrast invariants (#325)', () => {
     expect(amber.colors.topBarScrimStart).toBe(hexToRgba(amber.colors.bgCanvas, 0.9));
     expect(amber.colors.topBarScrimMid).toBe(hexToRgba(amber.colors.bgCanvas, 0.42));
     expect(amber.colors.hoverRingBorder).toBe(hexToRgba(amber.colors.textPrimary, 0.38));
+    expect(amber.colors.dangerHoverBg).toBe(hexToRgba(amber.colors.dangerBg, 0.85));
+    expect(amber.colors.dangerPressedBg).toBe(hexToRgba(amber.colors.dangerBg, 0.72));
 
     expect(hc.colors.scrimStrong).toBe('rgba(0, 0, 0, 0.94)');
     expect(hc.colors.glassBg).toBe('rgba(0, 0, 0, 0.96)');

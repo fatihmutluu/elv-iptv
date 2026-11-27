@@ -8,11 +8,9 @@ import {
   assertValidJwtSecret,
   DEFAULT_VERIFIER_HASH_ITERATIONS,
   hashAuthVerifier,
-  PAIR_SESSION_TTL_SEC,
   REFRESH_TOKEN_TTL_SEC,
   randomBase64Url,
   randomId,
-  randomPairingCode,
   sha256Base64Url,
   signAccessToken,
   timingSafeEqualStrings,
@@ -20,6 +18,7 @@ import {
   verifyAuthVerifier,
 } from './crypto.ts';
 import { buildTelemetryDigest } from './digest.ts';
+import { createPairRouteHandlers } from './pair-routes.ts';
 import {
   createSlidingWindowRateLimiter,
   DEFAULT_RATE_LIMITS,
@@ -38,7 +37,6 @@ import {
   validateDeleteAccountInput,
   validateFeedbackInput,
   validateLoginInput,
-  validatePairClaimInput,
   validateRefreshTokenInput,
   validateRegisterInput,
   validateTelemetryBatch,
@@ -88,6 +86,7 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
   const limits: RateLimitConfig = {
     auth: config.rateLimits?.auth ?? DEFAULT_RATE_LIMITS.auth,
     pair: config.rateLimits?.pair ?? DEFAULT_RATE_LIMITS.pair,
+    pairLookup: config.rateLimits?.pairLookup ?? DEFAULT_RATE_LIMITS.pairLookup,
     vault: config.rateLimits?.vault ?? DEFAULT_RATE_LIMITS.vault,
     telemetry: config.rateLimits?.telemetry ?? DEFAULT_RATE_LIMITS.telemetry,
     feedback: config.rateLimits?.feedback ?? DEFAULT_RATE_LIMITS.feedback,
@@ -99,7 +98,8 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     return {
       'Access-Control-Allow-Origin': publicOrigin,
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Pair-Poll-Token',
+      'Access-Control-Allow-Headers':
+        'Content-Type, Authorization, X-Pair-Poll-Token, X-Pair-Responder-Token',
       'Access-Control-Max-Age': '86400',
     };
   }
@@ -394,99 +394,13 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
     return jsonResponse(200, { deleted: true });
   }
 
-  async function handlePairCreate(request: Request, clientIp?: string): Promise<Response> {
-    const limited = checkRateLimit(request, 'pair', clientIp);
-    if (limited) return limited;
-
-    const currentMs = nowMs();
-    const createdAt = new Date(currentMs).toISOString();
-    const expiresAt = new Date(currentMs + PAIR_SESSION_TTL_SEC * 1000).toISOString();
-    const pairingId = randomId();
-    const code = randomPairingCode();
-    const pollToken = randomBase64Url(32);
-    const pollTokenHash = await sha256Base64Url(pollToken);
-
-    await storage.createPairSession({
-      id: pairingId,
-      code,
-      pollTokenHash,
-      status: 'pending',
-      claimedByUserId: null,
-      encryptedPayload: null,
-      iv: null,
-      expiresAt,
-      createdAt,
-    });
-
-    return jsonResponse(201, { pairingId, code, pollToken, expiresAt });
-  }
-
-  async function handlePairClaim(request: Request, clientIp?: string): Promise<Response> {
-    const limited = checkRateLimit(request, 'pair', clientIp);
-    if (limited) return limited;
-
-    const user = await requireActiveUser(request);
-    if (!user) return jsonResponse(401, { error: 'unauthorized' });
-
-    const parsed = await readBoundedJson(request, BODY_LIMITS.pair);
-    if (!parsed.ok) return jsonResponse(400, { error: parsed.error });
-    const valid = validatePairClaimInput(parsed.value);
-    if (!valid.ok) return jsonResponse(400, { error: valid.error });
-
-    const result = await storage.claimPairSession(
-      valid.value.code,
-      user.id,
-      valid.value.encryptedPayload,
-      valid.value.iv,
-      new Date(nowMs()).toISOString(),
-    );
-
-    if (result.status === 'not_found') return jsonResponse(404, { error: 'pair_not_found' });
-    if (result.status === 'expired') return jsonResponse(410, { error: 'pair_expired' });
-    if (result.status === 'already_claimed') {
-      return jsonResponse(409, { error: 'pair_already_claimed' });
-    }
-    return jsonResponse(200, { claimed: true });
-  }
-
-  async function handlePairPoll(
-    request: Request,
-    pairingId: string,
-    clientIp?: string,
-  ): Promise<Response> {
-    const limited = checkRateLimit(request, 'pair', clientIp);
-    if (limited) return limited;
-
-    const pollToken = request.headers.get('x-pair-poll-token')?.trim();
-    if (!pollToken) return jsonResponse(401, { error: 'missing_poll_token' });
-
-    const session = await storage.findPairSessionById(pairingId);
-    if (!session) return jsonResponse(404, { error: 'pair_not_found' });
-
-    const providedHash = await sha256Base64Url(pollToken);
-    const tokenOk = await timingSafeEqualStrings(providedHash, session.pollTokenHash);
-    if (!tokenOk) return jsonResponse(403, { error: 'invalid_poll_token' });
-
-    const nowIso = new Date(nowMs()).toISOString();
-    if (session.expiresAt <= nowIso) {
-      await storage.deletePairSession(session.id);
-      return jsonResponse(410, { error: 'pair_expired' });
-    }
-
-    if (session.status === 'pending') {
-      return jsonResponse(200, { status: 'pending', expiresAt: session.expiresAt });
-    }
-
-    const consumed = await storage.consumeClaimedPairSession(session.id);
-    if (consumed.status !== 'consumed') {
-      return jsonResponse(404, { error: 'pair_not_found' });
-    }
-    return jsonResponse(200, {
-      status: 'claimed',
-      encryptedPayload: consumed.encryptedPayload,
-      iv: consumed.iv,
-    });
-  }
+  const pairRoutes = createPairRouteHandlers({
+    storage,
+    nowMs,
+    checkRateLimit,
+    requireActiveUser,
+    jsonResponse,
+  });
 
   async function handleVaultGet(request: Request, clientIp?: string): Promise<Response> {
     const limited = checkRateLimit(request, 'vault', clientIp);
@@ -564,6 +478,7 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
       osVersion: event.osVersion,
       formFactor: event.formFactor,
       payloadJson: JSON.stringify(event.payload),
+      deviceProfileJson: event.deviceProfileJson,
     }));
     await storage.insertTelemetryEvents(records);
     return jsonResponse(200, { accepted: records.length, disabled: false });
@@ -723,10 +638,25 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
           return await handleDeleteAccount(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/pair/create') {
-          return await handlePairCreate(request, clientIp);
+          return await pairRoutes.handlePairCreate(request, clientIp);
+        }
+        if (method === 'POST' && path === '/v1/pair/lookup') {
+          return await pairRoutes.handlePairLookup(request, clientIp);
+        }
+        if (method === 'POST' && path === '/v1/pair/respond') {
+          return await pairRoutes.handlePairRespond(request, clientIp);
+        }
+        if (method === 'POST' && path === '/v1/pair/transfer') {
+          return await pairRoutes.handlePairTransfer(request, clientIp);
+        }
+        if (method === 'POST' && path === '/v1/pair/approve') {
+          return await pairRoutes.handlePairApprove(request, clientIp);
+        }
+        if (method === 'POST' && path === '/v1/pair/cancel') {
+          return await pairRoutes.handlePairCancel(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/pair/claim') {
-          return await handlePairClaim(request, clientIp);
+          return await pairRoutes.handlePairClaim(request, clientIp);
         }
         if (method === 'GET' && path.startsWith('/v1/pair/poll/')) {
           let pairingId: string;
@@ -738,7 +668,7 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
           if (!pairingId || pairingId.includes('/')) {
             return jsonResponse(404, { error: 'not_found' });
           }
-          return await handlePairPoll(request, pairingId, clientIp);
+          return await pairRoutes.handlePairPoll(request, pairingId, clientIp);
         }
         if (method === 'GET' && path === '/v1/vault') {
           return await handleVaultGet(request, clientIp);

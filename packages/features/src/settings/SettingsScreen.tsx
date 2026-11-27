@@ -112,8 +112,8 @@ export interface SettingsScreenProps {
   readonly showNightModeDrc?: boolean;
   /** Overrides mobile External Player row visibility in Playback settings (`#406`). */
   readonly showExternalPlayer?: boolean;
-  /** Opens the opt-in redacted diagnostic report preview modal (`#226`). */
-  readonly onPreviewDiagnostics?: () => void;
+  /** Invoked whenever unified Diagnostics & Performance Telemetry opt-in changes (`#509`). */
+  readonly onTelemetryOptInChange?: (enabled: boolean) => void;
   /** Triggers an immediate catalog refresh from Live TV settings. */
   readonly onRefreshCatalogNow?: () => Promise<void> | void;
   /** Triggers an immediate TV guide refresh from Live TV settings. */
@@ -209,7 +209,7 @@ export function SettingsScreen({
   showAndroidDecoder = Platform.OS === 'android',
   showNightModeDrc = Platform.OS === 'android',
   showExternalPlayer = Platform.OS === 'android' || (Platform.OS === 'ios' && !Platform.isTV),
-  onPreviewDiagnostics,
+  onTelemetryOptInChange,
   onRefreshCatalogNow,
   onRefreshGuideNow,
 }: SettingsScreenProps): ReactElement {
@@ -375,7 +375,7 @@ export function SettingsScreen({
           onClearArtworkCache: () => {
             void handleClearArtworkCache();
           },
-          ...(onPreviewDiagnostics !== undefined ? { onPreviewDiagnostics } : {}),
+          ...(onTelemetryOptInChange !== undefined ? { onTelemetryOptInChange } : {}),
         });
         return;
       }
@@ -394,7 +394,7 @@ export function SettingsScreen({
       handleRefreshCatalogNow,
       handleRefreshGuideNow,
       handleSetArtworkCacheLimitMb,
-      onPreviewDiagnostics,
+      onTelemetryOptInChange,
       platformFormFactor,
       preferences,
       setOpenTvDropdownId,
@@ -459,7 +459,7 @@ export function SettingsScreen({
             : null
         }
         onOpenTvDropdownChange={(next) => setOpenTvDropdownId(next)}
-        {...(onPreviewDiagnostics !== undefined ? { onPreviewDiagnostics } : {})}
+        {...(onTelemetryOptInChange !== undefined ? { onTelemetryOptInChange } : {})}
       />
     ) : activeSection === 'playback' ? (
       <PlaybackSettingsPanel

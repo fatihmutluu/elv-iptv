@@ -134,26 +134,68 @@ describe('AppShell Wave F9 integration', () => {
         expect(screen.queryByTestId('welcome-sync-overlay')).toBeNull();
       });
 
-      // Navigate Settings -> Account & Sync and persist optional sync server URL to preferences
+      // Navigate Settings -> Account & Sync (Sync Server URL input removed in Wave P9)
       await fireEvent.press(screen.getByTestId('settings-tab-account'));
       await waitFor(() => {
         expect(screen.getByTestId('settings-panel-account')).toBeTruthy();
-        expect(screen.getByTestId('account-server-url-input')).toBeTruthy();
+        expect(screen.queryByTestId('account-server-url-input')).toBeNull();
       });
 
-      await fireEvent.changeText(
-        screen.getByTestId('account-server-url-input'),
-        'https://sync.selfhosted.example/',
-      );
-      await waitFor(async () => {
-        const snapshot = await prefsStore.load();
-        expect(snapshot.syncServerUrl).toBe('https://sync.selfhosted.example');
-      });
-
-      // Navigate Settings -> Feedback & Telemetry
+      // Navigate Settings -> Feedback
       await fireEvent.press(screen.getByTestId('settings-tab-feedback'));
       await waitFor(() => {
         expect(screen.getByTestId('settings-panel-feedback')).toBeTruthy();
+      });
+    } finally {
+      await view?.unmount();
+      await env.cleanup();
+    }
+  });
+
+  it('P1-2: forwards externalRefreshToken from AppShell into ProfileProvider so incoming synced profiles appear live without restart', async () => {
+    const env = await openTestShell();
+    const prefsStore = createMemoryPreferencesStore({
+      welcomeDismissed: true,
+      privacyConsentAnswered: true,
+    });
+
+    let view: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      view = await render(
+        <AppProviders preferencesStore={prefsStore}>
+          <FormFactorProvider value="desktop">
+            <I18nProvider i18n={createAppI18n('en')}>
+              <AppShell catalog={env.catalog} videoHost={env.videoHost} externalRefreshToken={0} />
+            </I18nProvider>
+          </FormFactorProvider>
+        </AppProviders>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('nav-tab-profile')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('nav-tab-profile'));
+
+      // Simulate incoming E2EE sync inserting a new profile directly in SQLite
+      const created = await env.catalog.createProfile?.({
+        name: 'SyncedGuest',
+        avatarToken: 'emerald',
+        isKids: false,
+      });
+      if (!created?.ok) throw new Error('createProfile failed');
+
+      await view.rerender(
+        <AppProviders preferencesStore={prefsStore}>
+          <FormFactorProvider value="desktop">
+            <I18nProvider i18n={createAppI18n('en')}>
+              <AppShell catalog={env.catalog} videoHost={env.videoHost} externalRefreshToken={1} />
+            </I18nProvider>
+          </FormFactorProvider>
+        </AppProviders>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('SyncedGuest')).toBeTruthy();
       });
     } finally {
       await view?.unmount();

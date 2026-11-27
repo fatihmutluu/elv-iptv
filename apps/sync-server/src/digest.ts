@@ -66,6 +66,41 @@ interface MediaDecodeFailureRow {
   readonly count: number;
 }
 
+/** Grouped crash or unhandled error signature with session impact. */
+interface CrashAndErrorRow {
+  readonly kind: 'app_crash' | 'unhandled_error';
+  readonly errorName: string;
+  readonly stackSig: string;
+  readonly screen: string | null;
+  readonly fatalCount: number;
+  readonly count: number;
+  readonly affectedSessions: number;
+}
+
+/** Aggregated catalog / EPG import performance breakdown by source kind. */
+interface CatalogImportRow {
+  readonly sourceKind: string;
+  readonly count: number;
+  readonly failureCount: number;
+  readonly failureRate: number;
+  readonly p50Ms: number | null;
+  readonly p95Ms: number | null;
+  readonly maxMs: number | null;
+}
+
+/** Aggregated sanitized device technical profile row. */
+interface DeviceProfileRow {
+  readonly platform: string;
+  readonly formFactor: string | null;
+  readonly arch: string | null;
+  readonly ramBucket: string | null;
+  readonly resolution: string | null;
+  readonly gpu: string | null;
+  readonly locale: string | null;
+  readonly sessions: number;
+  readonly events: number;
+}
+
 /** Summarized feedback item returned in the admin digest. */
 interface DigestFeedbackItem {
   readonly id: string;
@@ -93,6 +128,9 @@ export interface TelemetryDigestReport {
   readonly screenLatencies: readonly ScreenLatencyRow[];
   readonly stallAndJank: StallAndJankSummary;
   readonly mediaDecodeFailures: readonly MediaDecodeFailureRow[];
+  readonly crashesAndErrors: readonly CrashAndErrorRow[];
+  readonly catalogImports: readonly CatalogImportRow[];
+  readonly deviceProfiles: readonly DeviceProfileRow[];
   readonly feedbackByCategory: Readonly<Record<FeedbackCategory, number>>;
   readonly recentFeedback: readonly DigestFeedbackItem[];
 }
@@ -203,6 +241,44 @@ export function buildTelemetryDigest(
     }
   >();
 
+  const crashAcc = new Map<
+    string,
+    {
+      kind: 'app_crash' | 'unhandled_error';
+      errorName: string;
+      stackSig: string;
+      screen: string | null;
+      fatalCount: number;
+      count: number;
+      sessions: Set<string>;
+    }
+  >();
+
+  const importAcc = new Map<
+    string,
+    {
+      sourceKind: string;
+      count: number;
+      failureCount: number;
+      durations: number[];
+    }
+  >();
+
+  const profileAcc = new Map<
+    string,
+    {
+      platform: string;
+      formFactor: string | null;
+      arch: string | null;
+      ramBucket: string | null;
+      resolution: string | null;
+      gpu: string | null;
+      locale: string | null;
+      sessions: Set<string>;
+      events: number;
+    }
+  >();
+
   function getMatrixBucket(appVersion: string, platform: string) {
     const key = `${appVersion}\0${platform}`;
     let entry = matrixAcc.get(key);
@@ -229,6 +305,40 @@ export function buildTelemetryDigest(
 
     const payload = parsePayload(event.payloadJson);
     const duration = asNumber(payload.durationMs);
+
+    const rawProfile = event.deviceProfileJson ? parsePayload(event.deviceProfileJson) : {};
+    const profileFormFactor = event.formFactor ?? asNullableString(rawProfile.formFactor);
+    const profileArch = asNullableString(rawProfile.arch);
+    const profileRamBucket = asNullableString(rawProfile.ramBucket);
+    const profileResolution = asNullableString(rawProfile.resolution);
+    const profileGpu = asNullableString(rawProfile.gpu);
+    const profileLocale = asNullableString(rawProfile.locale);
+    const profileKey = [
+      event.platform,
+      profileFormFactor ?? '',
+      profileArch ?? '',
+      profileRamBucket ?? '',
+      profileResolution ?? '',
+      profileGpu ?? '',
+      profileLocale ?? '',
+    ].join('\0');
+    let profileEntry = profileAcc.get(profileKey);
+    if (!profileEntry) {
+      profileEntry = {
+        platform: event.platform,
+        formFactor: profileFormFactor,
+        arch: profileArch,
+        ramBucket: profileRamBucket,
+        resolution: profileResolution,
+        gpu: profileGpu,
+        locale: profileLocale,
+        sessions: new Set<string>(),
+        events: 0,
+      };
+      profileAcc.set(profileKey, profileEntry);
+    }
+    profileEntry.sessions.add(event.sessionId);
+    profileEntry.events += 1;
 
     switch (event.kind) {
       case 'startup':
@@ -325,6 +435,45 @@ export function buildTelemetryDigest(
       case 'sqlite_slow_op':
         if (duration !== null) slowSqliteDurations.push(duration);
         break;
+      case 'app_crash':
+      case 'unhandled_error': {
+        const errorName = asString(payload.errorName, 'unknown');
+        const stackSig = asString(payload.stackSig, 'none');
+        const screen = asNullableString(payload.screen);
+        const isFatal = event.kind === 'app_crash' && payload.fatal === true;
+        const key = `${event.kind}\0${errorName}\0${stackSig}`;
+        let entry = crashAcc.get(key);
+        if (!entry) {
+          entry = {
+            kind: event.kind,
+            errorName,
+            stackSig,
+            screen,
+            fatalCount: 0,
+            count: 0,
+            sessions: new Set<string>(),
+          };
+          crashAcc.set(key, entry);
+        } else if (entry.screen === null && screen !== null) {
+          entry.screen = screen;
+        }
+        entry.count += 1;
+        if (isFatal) entry.fatalCount += 1;
+        entry.sessions.add(event.sessionId);
+        break;
+      }
+      case 'catalog_import': {
+        const sourceKind = asString(payload.sourceKind, 'unknown');
+        let entry = importAcc.get(sourceKind);
+        if (!entry) {
+          entry = { sourceKind, count: 0, failureCount: 0, durations: [] };
+          importAcc.set(sourceKind, entry);
+        }
+        entry.count += 1;
+        if (payload.success === false) entry.failureCount += 1;
+        if (duration !== null) entry.durations.push(duration);
+        break;
+      }
       default:
         break;
     }
@@ -391,6 +540,56 @@ export function buildTelemetryDigest(
     (a, b) => b.count - a.count || a.platform.localeCompare(b.platform),
   );
 
+  const crashesAndErrors: CrashAndErrorRow[] = [...crashAcc.values()]
+    .map((entry) => ({
+      kind: entry.kind,
+      errorName: entry.errorName,
+      stackSig: entry.stackSig,
+      screen: entry.screen,
+      fatalCount: entry.fatalCount,
+      count: entry.count,
+      affectedSessions: entry.sessions.size,
+    }))
+    .sort(
+      (a, b) =>
+        b.count - a.count ||
+        b.affectedSessions - a.affectedSessions ||
+        a.errorName.localeCompare(b.errorName) ||
+        a.stackSig.localeCompare(b.stackSig),
+    );
+
+  const catalogImports: CatalogImportRow[] = [...importAcc.values()]
+    .map((entry) => {
+      const lat = summarizeLatencies(entry.durations);
+      return {
+        sourceKind: entry.sourceKind,
+        count: entry.count,
+        failureCount: entry.failureCount,
+        failureRate: roundRate(entry.failureCount, entry.count),
+        p50Ms: lat.p50Ms,
+        p95Ms: lat.p95Ms,
+        maxMs: lat.maxMs,
+      };
+    })
+    .sort((a, b) => b.count - a.count || a.sourceKind.localeCompare(b.sourceKind));
+
+  const deviceProfiles: DeviceProfileRow[] = [...profileAcc.values()]
+    .map((entry) => ({
+      platform: entry.platform,
+      formFactor: entry.formFactor,
+      arch: entry.arch,
+      ramBucket: entry.ramBucket,
+      resolution: entry.resolution,
+      gpu: entry.gpu,
+      locale: entry.locale,
+      sessions: entry.sessions.size,
+      events: entry.events,
+    }))
+    .sort(
+      (a, b) =>
+        b.sessions - a.sessions || b.events - a.events || a.platform.localeCompare(b.platform),
+    );
+
   const recentFeedback: DigestFeedbackItem[] = [...feedback]
     .sort((a, b) => (a.receivedAt < b.receivedAt ? 1 : -1))
     .slice(0, MAX_RECENT_FEEDBACK)
@@ -436,6 +635,9 @@ export function buildTelemetryDigest(
       hotspots,
     },
     mediaDecodeFailures,
+    crashesAndErrors,
+    catalogImports,
+    deviceProfiles,
     feedbackByCategory,
     recentFeedback,
   };

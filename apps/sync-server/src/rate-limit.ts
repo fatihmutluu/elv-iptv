@@ -23,6 +23,7 @@ export type TrustProxyMode = 'cloudflare' | 'none';
 export interface RateLimitConfig {
   readonly auth: RateLimitRule;
   readonly pair: RateLimitRule;
+  readonly pairLookup: RateLimitRule;
   readonly vault: RateLimitRule;
   readonly telemetry: RateLimitRule;
   readonly feedback: RateLimitRule;
@@ -34,6 +35,7 @@ export interface RateLimitConfig {
 export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   auth: { windowMs: 60_000, maxRequests: 30 },
   pair: { windowMs: 60_000, maxRequests: 60 },
+  pairLookup: { windowMs: 60_000, maxRequests: 20 },
   vault: { windowMs: 60_000, maxRequests: 60 },
   telemetry: { windowMs: 60_000, maxRequests: 120 },
   feedback: { windowMs: 60_000, maxRequests: 15 },

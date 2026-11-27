@@ -1,9 +1,18 @@
+import { MAX_PAIR_ATTEMPTS } from './pair-validation.ts';
 import type {
   AccountDeletionRequestRecord,
   FeedbackSubmissionRecord,
+  PairApproveParams,
+  PairApproveResult,
+  PairAttemptResult,
+  PairCancelResult,
   PairClaimResult,
   PairConsumeResult,
+  PairRespondParams,
+  PairRespondResult,
   PairSessionRecord,
+  PairTransferParams,
+  PairTransferResult,
   RefreshTokenRecord,
   SyncServerStorage,
   TelemetryEventRecord,
@@ -166,11 +175,20 @@ export function createMemoryStorage(): SyncServerStorage {
 
     async createPairSession(session: PairSessionRecord): Promise<void> {
       pruneExpiredPairSessions(session.createdAt);
+      if (pairSessionIdsByCode.has(session.code)) {
+        throw new Error('UNIQUE constraint failed: pair_sessions.code');
+      }
       pairSessionsById.set(session.id, session);
       pairSessionIdsByCode.set(session.code, session.id);
     },
 
     async findPairSessionById(id: string): Promise<PairSessionRecord | null> {
+      return pairSessionsById.get(id) ?? null;
+    },
+
+    async findPairSessionByCode(code: string): Promise<PairSessionRecord | null> {
+      const id = pairSessionIdsByCode.get(code);
+      if (!id) return null;
       return pairSessionsById.get(id) ?? null;
     },
 
@@ -184,11 +202,14 @@ export function createMemoryStorage(): SyncServerStorage {
       const id = pairSessionIdsByCode.get(code);
       if (!id) return { status: 'not_found' };
       const existing = pairSessionsById.get(id);
-      if (!existing) return { status: 'not_found' };
+      if (!existing || existing.hostPublicKey !== null) return { status: 'not_found' };
       if (existing.expiresAt <= nowIso) {
         pairSessionsById.delete(id);
         pairSessionIdsByCode.delete(code);
         return { status: 'expired' };
+      }
+      if (existing.status === 'locked' || existing.attempts >= MAX_PAIR_ATTEMPTS) {
+        return { status: 'locked' };
       }
       if (existing.status !== 'pending') {
         return { status: 'already_claimed' };
@@ -219,6 +240,247 @@ export function createMemoryStorage(): SyncServerStorage {
         encryptedPayload: existing.encryptedPayload,
         iv: existing.iv,
       };
+    },
+
+    async incrementPairAttempts(id: string, maxAttempts: number): Promise<PairAttemptResult> {
+      const existing = pairSessionsById.get(id);
+      if (!existing) return { status: 'not_found' };
+      const nextAttempts = existing.attempts + 1;
+      const shouldLock = nextAttempts >= maxAttempts || existing.status === 'locked';
+      pairSessionsById.set(id, {
+        ...existing,
+        attempts: nextAttempts,
+        status: shouldLock ? 'locked' : existing.status,
+        encryptedPayload: shouldLock ? null : existing.encryptedPayload,
+        iv: shouldLock ? null : existing.iv,
+        returnEncryptedPayload: shouldLock ? null : existing.returnEncryptedPayload,
+        returnIv: shouldLock ? null : existing.returnIv,
+      });
+      return shouldLock
+        ? { status: 'locked', attempts: nextAttempts }
+        : { status: 'incremented', attempts: nextAttempts };
+    },
+
+    async respondPairSession(params: PairRespondParams): Promise<PairRespondResult> {
+      const existing = pairSessionsById.get(params.id);
+      if (!existing) return { status: 'not_found' };
+      if (existing.expiresAt <= params.nowIso) {
+        pairSessionsById.delete(existing.id);
+        pairSessionIdsByCode.delete(existing.code);
+        return { status: 'expired' };
+      }
+      if (existing.status === 'locked' || existing.attempts >= params.maxAttempts) {
+        return { status: 'locked' };
+      }
+      if (
+        existing.hostPublicKey === null ||
+        existing.status !== 'pending' ||
+        existing.responderTokenHash !== null
+      ) {
+        return { status: 'already_responded' };
+      }
+      pairSessionsById.set(existing.id, {
+        ...existing,
+        status: 'responder_joined',
+        responderPublicKey: params.responderPublicKey,
+        responderAuthState: params.responderAuthState,
+        responderMaskedEmail: params.responderMaskedEmail,
+        responderEmailHash: params.responderEmailHash,
+        responderTokenHash: params.responderTokenHash,
+        direction: params.direction,
+      });
+      return { status: 'responder_joined' };
+    },
+
+    async transferPairSession(params: PairTransferParams): Promise<PairTransferResult> {
+      const existing = pairSessionsById.get(params.id);
+      if (!existing) return { status: 'not_found' };
+      if (existing.expiresAt <= params.nowIso) {
+        pairSessionsById.delete(existing.id);
+        pairSessionIdsByCode.delete(existing.code);
+        return { status: 'expired' };
+      }
+      if (existing.status === 'locked' || existing.attempts >= params.maxAttempts) {
+        return { status: 'locked' };
+      }
+      if (existing.status === 'responder_transferred' || existing.encryptedPayload !== null) {
+        return { status: 'already_transferred' };
+      }
+      const allowed =
+        existing.hostPublicKey !== null &&
+        existing.returnEncryptedPayload === null &&
+        (existing.status === 'responder_joined' ||
+          (existing.status === 'approved' && existing.direction === 'responder_to_host'));
+      if (!allowed) {
+        return { status: 'invalid_state' };
+      }
+      const nextStatus = existing.hostApprovedAt !== null ? 'completed' : 'responder_transferred';
+      pairSessionsById.set(existing.id, {
+        ...existing,
+        status: nextStatus,
+        direction: params.direction,
+        encryptedPayload: params.encryptedPayload,
+        iv: params.iv,
+      });
+      return { status: nextStatus };
+    },
+
+    async approvePairSession(params: PairApproveParams): Promise<PairApproveResult> {
+      const existing = pairSessionsById.get(params.id);
+      if (!existing) return { status: 'not_found' };
+      if (existing.expiresAt <= params.nowIso) {
+        pairSessionsById.delete(existing.id);
+        pairSessionIdsByCode.delete(existing.code);
+        return { status: 'expired' };
+      }
+      if (existing.status === 'locked' || existing.attempts >= MAX_PAIR_ATTEMPTS) {
+        return { status: 'locked' };
+      }
+      if (existing.hostPublicKey === null) return { status: 'invalid_state' };
+
+      if (params.reject) {
+        const rejectable =
+          existing.status === 'pending' ||
+          existing.status === 'responder_joined' ||
+          existing.status === 'approved' ||
+          existing.status === 'responder_transferred';
+        if (!rejectable) return { status: 'invalid_state' };
+        pairSessionsById.set(existing.id, {
+          ...existing,
+          status: 'rejected',
+          direction: params.direction ?? existing.direction,
+          hostApprovedAt: null,
+          encryptedPayload: null,
+          iv: null,
+          returnEncryptedPayload: null,
+          returnIv: null,
+        });
+        return { status: 'rejected' };
+      }
+
+      if (existing.status === 'pending') return { status: 'not_responded' };
+      if (existing.status !== 'responder_joined' && existing.status !== 'responder_transferred') {
+        return { status: 'invalid_state' };
+      }
+
+      const hasReturnPayload = params.returnEncryptedPayload !== null && params.returnIv !== null;
+      if (hasReturnPayload) {
+        pairSessionsById.set(existing.id, {
+          ...existing,
+          status: 'approved',
+          direction: params.direction,
+          hostApprovedAt: params.hostApprovedAt,
+          encryptedPayload: null,
+          iv: null,
+          returnEncryptedPayload: params.returnEncryptedPayload,
+          returnIv: params.returnIv,
+        });
+        return { status: 'approved' };
+      }
+
+      if (params.direction === 'responder_to_host') {
+        const hasResponderPayload =
+          existing.status === 'responder_transferred' &&
+          existing.encryptedPayload !== null &&
+          existing.iv !== null;
+        const nextStatus = hasResponderPayload ? 'completed' : 'approved';
+        pairSessionsById.set(existing.id, {
+          ...existing,
+          status: nextStatus,
+          direction: params.direction,
+          hostApprovedAt: params.hostApprovedAt,
+        });
+        return { status: nextStatus };
+      }
+
+      pairSessionsById.set(existing.id, {
+        ...existing,
+        status: 'approved',
+        direction: params.direction,
+        hostApprovedAt: params.hostApprovedAt,
+        encryptedPayload: null,
+        iv: null,
+        returnEncryptedPayload: null,
+        returnIv: null,
+      });
+      return { status: 'approved' };
+    },
+
+    async cancelPairSession(id: string, nowIso: string): Promise<PairCancelResult> {
+      const existing = pairSessionsById.get(id);
+      if (!existing) return { status: 'not_found' };
+      if (existing.expiresAt <= nowIso) {
+        pairSessionsById.delete(existing.id);
+        pairSessionIdsByCode.delete(existing.code);
+        return { status: 'expired' };
+      }
+      if (existing.status === 'locked' || existing.attempts >= MAX_PAIR_ATTEMPTS) {
+        return { status: 'locked' };
+      }
+      const cancellable =
+        existing.status === 'pending' ||
+        existing.status === 'responder_joined' ||
+        existing.status === 'approved' ||
+        existing.status === 'responder_transferred' ||
+        existing.status === 'rejected' ||
+        (existing.status === 'completed' &&
+          (existing.encryptedPayload !== null || existing.returnEncryptedPayload !== null));
+      if (!cancellable) return { status: 'invalid_state' };
+      pairSessionsById.set(existing.id, {
+        ...existing,
+        status: 'rejected',
+        hostApprovedAt: null,
+        encryptedPayload: null,
+        iv: null,
+        returnEncryptedPayload: null,
+        returnIv: null,
+      });
+      return { status: 'rejected' };
+    },
+
+    async consumeHostPairPayload(id: string): Promise<PairConsumeResult> {
+      const existing = pairSessionsById.get(id);
+      if (
+        !existing ||
+        existing.hostApprovedAt === null ||
+        (existing.status !== 'approved' &&
+          existing.status !== 'responder_transferred' &&
+          existing.status !== 'completed') ||
+        existing.encryptedPayload === null ||
+        existing.iv === null
+      ) {
+        return { status: 'not_claimed' };
+      }
+      const { encryptedPayload, iv } = existing;
+      pairSessionsById.set(id, {
+        ...existing,
+        status: 'completed',
+        encryptedPayload: null,
+        iv: null,
+      });
+      return { status: 'consumed', encryptedPayload, iv };
+    },
+
+    async consumeResponderPairPayload(id: string): Promise<PairConsumeResult> {
+      const existing = pairSessionsById.get(id);
+      if (
+        !existing ||
+        existing.hostApprovedAt === null ||
+        existing.status !== 'approved' ||
+        existing.returnEncryptedPayload === null ||
+        existing.returnIv === null
+      ) {
+        return { status: 'not_claimed' };
+      }
+      const encryptedPayload = existing.returnEncryptedPayload;
+      const iv = existing.returnIv;
+      pairSessionsById.set(id, {
+        ...existing,
+        status: 'completed',
+        returnEncryptedPayload: null,
+        returnIv: null,
+      });
+      return { status: 'consumed', encryptedPayload, iv };
     },
 
     async deletePairSession(id: string): Promise<void> {

@@ -1,12 +1,17 @@
 import {
+  type BidirectionalPairingSnapshotIpc,
   type FeedbackSubmitResultIpc,
   isFeedbackSubmitRequest,
   isSyncClaimQrRequest,
   isSyncDeleteAccountRequest,
+  isSyncPairConfirmRequest,
+  isSyncPairJoinRequest,
+  isSyncPairPollRequest,
   isSyncPollQrRequest,
   isSyncRegisterRequest,
   isSyncSetServerUrlRequest,
   isSyncSetSyncablePrefsRequest,
+  isSyncSetViewingActiveRequest,
   isSyncSignInRequest,
   isTelemetryRecordRequest,
   isTelemetrySetOptInRequest,
@@ -18,6 +23,7 @@ import {
   type TelemetryStatusIpc,
 } from '../../shared/sync-ipc.ts';
 import { isAllowedDevNavigation } from '../dev-server.ts';
+import type { PendingPairDeepLinkQueue } from '../pair-deep-link.ts';
 import { isAllowedAppNavigation } from '../security.ts';
 import type { DesktopSyncService } from './sync-service.ts';
 
@@ -49,6 +55,7 @@ interface SyncIpcMainLike {
 export interface RegisterSyncIpcDeps {
   readonly ipcMain: SyncIpcMainLike;
   readonly service: DesktopSyncService;
+  readonly pendingPairDeepLinks?: PendingPairDeepLinkQueue;
   readonly getBroadcastTargets?: () => readonly SenderWebContentsLike[];
   readonly devOrigin?: string | null;
   readonly log?: (line: string) => void;
@@ -78,6 +85,7 @@ function sanitizeStateForIpc(state: SyncAccountStateIpc): SyncAccountStateIpc {
     lastSyncedAtIso: state.lastSyncedAtIso,
     pendingRecoveryCode: state.pendingRecoveryCode,
     errorCode: state.errorCode,
+    ...(state.autoSyncState !== undefined ? { autoSyncState: state.autoSyncState } : {}),
   };
 }
 
@@ -99,6 +107,24 @@ function sanitizeQrSessionForIpc(session: SyncQrPairingSessionIpc): SyncQrPairin
   };
 }
 
+function sanitizeBidirectionalPairingForIpc(
+  snap: BidirectionalPairingSnapshotIpc,
+): BidirectionalPairingSnapshotIpc {
+  return {
+    pairingId: snap.pairingId,
+    role: snap.role,
+    code: snap.code,
+    ...(snap.qrUri !== undefined ? { qrUri: snap.qrUri } : {}),
+    expiresAtMs: snap.expiresAtMs,
+    status: snap.status,
+    sas: snap.sas,
+    direction: snap.direction,
+    localMaskedEmail: snap.localMaskedEmail,
+    peerMaskedEmail: snap.peerMaskedEmail,
+    ...(snap.errorCode !== undefined ? { errorCode: snap.errorCode } : {}),
+  };
+}
+
 function sanitizeFeedbackResultForIpc(res: FeedbackSubmitResultIpc): FeedbackSubmitResultIpc {
   return {
     ok: Boolean(res.ok),
@@ -108,12 +134,11 @@ function sanitizeFeedbackResultForIpc(res: FeedbackSubmitResultIpc): FeedbackSub
 }
 
 /**
- * Registers all Wave F9 sync, telemetry, and feedback IPC handlers on `ipcMain` (`#26`, `#458`).
- * Enforces sender frame/origin checks, strict runtime payload guards, and allowlisted response
- * projection so raw tokens and vault keys never cross IPC. Returns the disposer.
+ * Registers all Wave F9 & Wave P9 sync, auto-sync, bidirectional pairing, telemetry, and feedback
+ * IPC handlers on `ipcMain` (`#26`, `#458`, `#509`, `#510`).
  */
 export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
-  const { ipcMain, service, devOrigin, log } = deps;
+  const { ipcMain, service, pendingPairDeepLinks, devOrigin, log } = deps;
 
   const assertTrusted = (event: SyncIpcEventLike, channel: string): void => {
     if (!isTrustedSyncIpcEvent(event, devOrigin)) {
@@ -142,13 +167,14 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
     }
   };
 
-  const broadcastState = (state: SyncAccountStateIpc): void => {
+  const unsubscribeState = service.subscribe((state) => {
     broadcastToTrusted(SYNC_CHANNELS.stateChanged, sanitizeStateForIpc(state));
-  };
-
-  const unsubscribeState = service.subscribe(broadcastState);
+  });
   const unsubscribeInitialPrefs = service.subscribeInitialPreferences((patch) => {
     broadcastToTrusted(SYNC_CHANNELS.initialPrefsReceived, patch);
+  });
+  const unsubscribePairDeepLink = pendingPairDeepLinks?.subscribe((uri) => {
+    broadcastToTrusted(SYNC_CHANNELS.pairDeepLink, uri);
   });
 
   ipcMain.handle(SYNC_CHANNELS.getState, (event): SyncAccountStateIpc => {
@@ -241,6 +267,93 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
     service.setSyncablePreferences(raw.preferences);
   });
 
+  // Wave P9 auto-sync lifecycle channels
+  ipcMain.handle(SYNC_CHANNELS.markSyncDirty, (event): void => {
+    assertTrusted(event, SYNC_CHANNELS.markSyncDirty);
+    service.markSyncDirty();
+  });
+  ipcMain.handle(SYNC_CHANNELS.notifySyncDirty, (event): void => {
+    assertTrusted(event, SYNC_CHANNELS.notifySyncDirty);
+    service.notifySyncDirty();
+  });
+  ipcMain.handle(SYNC_CHANNELS.notifyPlaybackPause, (event): void => {
+    assertTrusted(event, SYNC_CHANNELS.notifyPlaybackPause);
+    service.notifyPlaybackPause();
+  });
+  ipcMain.handle(SYNC_CHANNELS.notifyPlaybackExitOrSwitch, (event): void => {
+    assertTrusted(event, SYNC_CHANNELS.notifyPlaybackExitOrSwitch);
+    service.notifyPlaybackExitOrSwitch();
+  });
+  ipcMain.handle(SYNC_CHANNELS.setViewingActive, (event, raw): void => {
+    assertTrusted(event, SYNC_CHANNELS.setViewingActive);
+    if (!isSyncSetViewingActiveRequest(raw)) {
+      log?.(`sync ipc: dropped invalid ${SYNC_CHANNELS.setViewingActive} payload`);
+      throw new Error(`invalid ${SYNC_CHANNELS.setViewingActive} payload`);
+    }
+    service.setViewingActive(raw.active);
+  });
+  ipcMain.handle(SYNC_CHANNELS.notifyReconnect, (event): void => {
+    assertTrusted(event, SYNC_CHANNELS.notifyReconnect);
+    service.notifyReconnect();
+  });
+
+  // Wave P9 bidirectional X25519 pairing + deep links
+  ipcMain.handle(
+    SYNC_CHANNELS.pairStart,
+    async (event): Promise<BidirectionalPairingSnapshotIpc> => {
+      assertTrusted(event, SYNC_CHANNELS.pairStart);
+      return sanitizeBidirectionalPairingForIpc(await service.startBidirectionalPairing());
+    },
+  );
+  ipcMain.handle(
+    SYNC_CHANNELS.pairJoin,
+    async (event, raw): Promise<BidirectionalPairingSnapshotIpc> => {
+      assertTrusted(event, SYNC_CHANNELS.pairJoin);
+      if (!isSyncPairJoinRequest(raw)) {
+        log?.(`sync ipc: dropped invalid ${SYNC_CHANNELS.pairJoin} payload`);
+        throw new Error(`invalid ${SYNC_CHANNELS.pairJoin} payload`);
+      }
+      return sanitizeBidirectionalPairingForIpc(
+        await service.joinBidirectionalPairing(raw.codeOrUri),
+      );
+    },
+  );
+  ipcMain.handle(
+    SYNC_CHANNELS.pairPoll,
+    async (event, raw): Promise<BidirectionalPairingSnapshotIpc> => {
+      assertTrusted(event, SYNC_CHANNELS.pairPoll);
+      if (!isSyncPairPollRequest(raw)) {
+        log?.(`sync ipc: dropped invalid ${SYNC_CHANNELS.pairPoll} payload`);
+        throw new Error(`invalid ${SYNC_CHANNELS.pairPoll} payload`);
+      }
+      return sanitizeBidirectionalPairingForIpc(
+        await service.pollBidirectionalPairing(raw.pairingId),
+      );
+    },
+  );
+  ipcMain.handle(SYNC_CHANNELS.pairConfirm, async (event, raw): Promise<SyncActionResultIpc> => {
+    assertTrusted(event, SYNC_CHANNELS.pairConfirm);
+    if (!isSyncPairConfirmRequest(raw)) {
+      log?.(`sync ipc: dropped invalid ${SYNC_CHANNELS.pairConfirm} payload`);
+      throw new Error(`invalid ${SYNC_CHANNELS.pairConfirm} payload`);
+    }
+    return sanitizeActionResultForIpc(
+      await service.confirmBidirectionalPairing(raw.pairingId, raw.chosenDirection),
+    );
+  });
+  ipcMain.handle(SYNC_CHANNELS.pairCancel, async (event, raw): Promise<void> => {
+    assertTrusted(event, SYNC_CHANNELS.pairCancel);
+    if (!isSyncPairPollRequest(raw)) {
+      log?.(`sync ipc: dropped invalid ${SYNC_CHANNELS.pairCancel} payload`);
+      throw new Error(`invalid ${SYNC_CHANNELS.pairCancel} payload`);
+    }
+    await service.cancelBidirectionalPairing(raw.pairingId);
+  });
+  ipcMain.handle(SYNC_CHANNELS.consumePendingPairUri, (event): string | null => {
+    assertTrusted(event, SYNC_CHANNELS.consumePendingPairUri);
+    return pendingPairDeepLinks?.consume() ?? null;
+  });
+
   ipcMain.handle(SYNC_CHANNELS.telemetrySetOptIn, (event, raw): TelemetryStatusIpc => {
     assertTrusted(event, SYNC_CHANNELS.telemetrySetOptIn);
     if (!isTelemetrySetOptInRequest(raw)) {
@@ -294,6 +407,18 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
     SYNC_CHANNELS.claimQr,
     SYNC_CHANNELS.setServerUrl,
     SYNC_CHANNELS.setSyncablePrefs,
+    SYNC_CHANNELS.markSyncDirty,
+    SYNC_CHANNELS.notifySyncDirty,
+    SYNC_CHANNELS.notifyPlaybackPause,
+    SYNC_CHANNELS.notifyPlaybackExitOrSwitch,
+    SYNC_CHANNELS.setViewingActive,
+    SYNC_CHANNELS.notifyReconnect,
+    SYNC_CHANNELS.pairStart,
+    SYNC_CHANNELS.pairJoin,
+    SYNC_CHANNELS.pairPoll,
+    SYNC_CHANNELS.pairConfirm,
+    SYNC_CHANNELS.pairCancel,
+    SYNC_CHANNELS.consumePendingPairUri,
     SYNC_CHANNELS.telemetrySetOptIn,
     SYNC_CHANNELS.telemetryGetStatus,
     SYNC_CHANNELS.telemetryRecord,
@@ -304,6 +429,7 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
   return () => {
     unsubscribeState();
     unsubscribeInitialPrefs();
+    unsubscribePairDeepLink?.();
     for (const channel of registeredChannels) {
       ipcMain.removeHandler(channel);
     }

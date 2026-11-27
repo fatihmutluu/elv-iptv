@@ -72,8 +72,8 @@ export interface AppearancePanelProps {
   readonly onClearArtworkCache?: () => Promise<void> | void;
   /** Optional controlled cleared-confirmation flag owned by `SettingsScreen`. */
   readonly artworkCacheCleared?: boolean;
-  /** Opens the opt-in redacted diagnostic report preview modal (`#226`). */
-  readonly onPreviewDiagnostics?: () => void;
+  /** Invoked whenever unified Diagnostics & Performance Telemetry opt-in changes (`#509`). */
+  readonly onTelemetryOptInChange?: (enabled: boolean) => void;
   /** Optional controlled TV dropdown modal id owned by `SettingsScreen`. */
   readonly openTvDropdownId?: 'lang-dropdown' | 'artwork-cache-dropdown' | null;
   /** Invoked when a TV dropdown modal opens or closes. */
@@ -94,7 +94,7 @@ export function AppearancePanel({
   focusedControlId = null,
   onClearArtworkCache,
   artworkCacheCleared: controlledCleared,
-  onPreviewDiagnostics,
+  onTelemetryOptInChange,
   openTvDropdownId = null,
   onOpenTvDropdownChange,
 }: AppearancePanelProps): ReactElement {
@@ -236,8 +236,10 @@ export function AppearancePanel({
         .then(() => refreshArtworkCacheStats())
         .catch(() => undefined);
     }
+    onTelemetryOptInChange?.(false);
   }, [
     adapters.artworkCache,
+    onTelemetryOptInChange,
     platformFormFactor,
     refreshArtworkCacheStats,
     suppliedPrefs,
@@ -572,17 +574,20 @@ export function AppearancePanel({
         </View>
       </Surface>
 
-      {/* 7. Diagnostics */}
+      {/* 7. Unified Diagnostics & Performance Telemetry (directly above Reset) */}
       <DiagnosticsSettingsCard
-        crashReportsOptIn={activePrefs.crashReportsOptIn}
-        crashReportsIncludeLogs={activePrefs.crashReportsIncludeLogs}
+        diagnosticsEnabled={activePrefs.telemetryOptIn || activePrefs.crashReportsOptIn}
         focusedControlId={focusedControlId}
         isTv={isTv}
-        onToggleOptIn={() => applyPatch({ crashReportsOptIn: !activePrefs.crashReportsOptIn })}
-        onToggleIncludeLogs={() =>
-          applyPatch({ crashReportsIncludeLogs: !activePrefs.crashReportsIncludeLogs })
-        }
-        {...(onPreviewDiagnostics !== undefined ? { onPreviewReport: onPreviewDiagnostics } : {})}
+        onToggleDiagnostics={() => {
+          const next = !(activePrefs.telemetryOptIn || activePrefs.crashReportsOptIn);
+          onTelemetryOptInChange?.(next);
+          applyPatch({
+            telemetryOptIn: next,
+            crashReportsOptIn: next,
+            privacyConsentAnswered: true,
+          });
+        }}
         onLayoutBox={(box) => {
           layoutsRef.current.diagnostics = box;
         }}

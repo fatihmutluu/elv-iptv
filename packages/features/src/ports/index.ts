@@ -1,7 +1,13 @@
 export type {
+  AutoSyncState,
+  BidirectionalPairingRole,
+  BidirectionalPairingSnapshot,
+  BidirectionalPairingStatus,
   FeedbackCategoryId,
   FeedbackPort,
   FeedbackSubmitInput,
+  PairingDirection,
+  QrScannerPort,
   SyncAccountPort,
   SyncAccountState,
   SyncAccountStatus,

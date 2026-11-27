@@ -498,4 +498,53 @@ describe('custom-groups-repo (#60)', () => {
       close();
     }
   });
+
+  it('preserves explicit cross-device custom group id (up to 128 chars, [A-Za-z0-9._:-]) and rejects invalid/duplicate ids', async () => {
+    const { db, close } = await setup();
+    try {
+      const explicitId = `sync:grp_sports.1-${'x'.repeat(100)}`;
+      expect(explicitId.length).toBe(118);
+
+      const created = await createCustomGroup(
+        db,
+        { id: `  ${explicitId}  `, name: 'Synced Sports' },
+        () => 5_000,
+        () => 'should-not-be-used',
+      );
+      expect(created.ok).toBe(true);
+      if (created.ok) {
+        expect(created.value.id).toBe(explicitId);
+        expect(parseCustomGroupCategoryId(customGroupCategoryId(created.value.id))).toBe(
+          explicitId,
+        );
+      }
+
+      // Duplicate explicit ID fails cleanly
+      expect(
+        await createCustomGroup(db, { id: explicitId, name: 'Duplicate' }, () => 5_100),
+      ).toMatchObject({
+        ok: false,
+        error: { category: 'storage', code: 'custom-group-write-failed' },
+      });
+
+      // Invalid explicit IDs rejected
+      for (const badId of ['', '   ', 'bad/id', 'bad id', 'g'.repeat(129)]) {
+        expect(await createCustomGroup(db, { id: badId, name: 'Invalid ID' }, () => 5_200)).toEqual(
+          {
+            ok: false,
+            error: { category: 'storage', code: 'invalid-custom-group-id' },
+          },
+        );
+      }
+
+      // Omitting id falls back to generated ID
+      const fallback = await createCustomGroup(db, { name: 'Generated' }, () => 5_300);
+      expect(fallback.ok).toBe(true);
+      if (fallback.ok) {
+        expect(fallback.value.id.startsWith('g_')).toBe(true);
+      }
+    } finally {
+      close();
+    }
+  });
 });

@@ -15,8 +15,8 @@ export const CUSTOM_GROUP_CATEGORY_PREFIX = '__custom:';
 /** Maximum trimmed character length of a custom group display name (`#60`). */
 export const MAX_CUSTOM_GROUP_NAME_LENGTH = 80;
 
-/** Strict safe identifier pattern for custom group IDs. */
-export const CUSTOM_GROUP_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+/** Strict safe identifier pattern for custom group IDs (`<= 128` chars). */
+export const CUSTOM_GROUP_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 
 const GROUP_ITEMS_BATCH_SIZE = 500;
 
@@ -33,6 +33,8 @@ export interface CustomGroupRecord {
 
 /** Input for {@link createCustomGroup}. */
 export interface CreateCustomGroupInput {
+  /** Optional explicit cross-device custom group ID (`<= 128` chars matching {@link CUSTOM_GROUP_ID_RE}). */
+  readonly id?: string;
   readonly profileId?: string;
   readonly name: string;
   readonly sortOrder?: number;
@@ -196,7 +198,12 @@ export async function createCustomGroup(
     explicitSortOrder = validated.value;
   }
 
-  const id = newId !== undefined ? newId() : defaultGroupId(clock);
+  const id =
+    input.id !== undefined
+      ? input.id.trim()
+      : newId !== undefined
+        ? newId()
+        : defaultGroupId(clock);
   if (!isValidCustomGroupId(id)) {
     return err(elvError('storage', 'invalid-custom-group-id'));
   }

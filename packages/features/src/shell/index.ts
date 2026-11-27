@@ -35,7 +35,12 @@ export {
   CrashRecoveryBoundary,
   type CrashRecoveryBoundaryProps,
   formatRedactedErrorCode,
+  sanitizeStackSignature,
 } from './CrashRecoveryBoundary';
+export {
+  PrivacyConsentOverlay,
+  type PrivacyConsentOverlayProps,
+} from './PrivacyConsentOverlay';
 export type { AdaptiveNavShellProps, NavDestination, NavUtility } from './types';
 export {
   type RunCatalogPrewarmOptions,

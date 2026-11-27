@@ -67,8 +67,6 @@ export type AppearanceFocusId =
   | 'artwork-cache-dropdown'
   | 'artwork-cache-clear'
   | 'toggle-crash-reports-opt-in'
-  | 'toggle-crash-reports-include-logs'
-  | 'preview-diagnostic-report'
   | 'reset-preferences';
 
 /** Focusable control identifiers inside the Playback settings panel. */
@@ -144,8 +142,6 @@ const APPEARANCE_ROWS_BOTTOM: readonly (readonly AppearanceFocusId[])[] = [
   ['artwork-cache-dropdown'],
   ['artwork-cache-clear'],
   ['toggle-crash-reports-opt-in'],
-  ['toggle-crash-reports-include-logs'],
-  ['preview-diagnostic-report'],
   ['reset-preferences'],
 ];
 

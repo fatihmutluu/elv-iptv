@@ -113,6 +113,45 @@ export function isNativeDebugConfigEmbed(argv: readonly string[]): boolean {
   return isGetAppConfig && isDebugConfigMode;
 }
 
+function normalizeBuildSyncServerUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  if (trimmed.length === 0) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    const isHttps = parsed.protocol === 'https:';
+    const isLocalHttp =
+      parsed.protocol === 'http:' &&
+      (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+    if (!isHttps && !isLocalHttp) return undefined;
+    return parsed.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveAppLinkHost(env: Env, syncServerUrl: string | undefined): string | undefined {
+  const explicit = (env.ELV_APP_LINK_HOST ?? '').trim().toLowerCase();
+  if (
+    explicit.length > 0 &&
+    /^[a-z0-9.-]+$/.test(explicit) &&
+    explicit !== 'localhost' &&
+    explicit !== '127.0.0.1'
+  ) {
+    return explicit;
+  }
+  if (syncServerUrl === undefined) return undefined;
+  try {
+    const u = new URL(syncServerUrl);
+    if (u.protocol !== 'https:' || u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+      return undefined;
+    }
+    return u.hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
 /** Builds the Expo config from the build environment; `extra.seed` is embedded only in native debug builds. */
 export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
   const development = env.APP_VARIANT === 'development';
@@ -120,6 +159,10 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
   const store = parseStore(env.STORE);
   const id = development ? `${APP_ID}.dev` : APP_ID;
   const seed = development && options.embedDevSeed === true ? parseDevSeedEnv(env) : undefined;
+  const syncServerUrl = normalizeBuildSyncServerUrl(
+    env.ELV_SYNC_SERVER_URL ?? env.EXPO_PUBLIC_SYNC_SERVER_URL,
+  );
+  const appLinkHost = resolveAppLinkHost(env, syncServerUrl);
   const androidPermissions = tv || store === 'amazon' ? [FIRE_OS_VOICE_PERMISSION] : undefined;
 
   const plugins: NonNullable<ExpoConfig['plugins']> = [
@@ -171,6 +214,18 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
     android: {
       package: id,
       ...(androidPermissions !== undefined ? { permissions: androidPermissions } : {}),
+      ...(appLinkHost !== undefined
+        ? {
+            intentFilters: [
+              {
+                action: 'VIEW',
+                autoVerify: true,
+                data: [{ scheme: 'https', host: appLinkHost, pathPrefix: '/pair' }],
+                category: ['BROWSABLE', 'DEFAULT'],
+              },
+            ],
+          }
+        : {}),
       blockedPermissions: [...BLOCKED_ANDROID_PERMISSIONS],
       predictiveBackGestureEnabled: false,
       adaptiveIcon: {
@@ -181,6 +236,7 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
     ios: {
       bundleIdentifier: id,
       supportsTablet: true,
+      ...(appLinkHost !== undefined ? { associatedDomains: [`applinks:${appLinkHost}`] } : {}),
       privacyManifests: {
         NSPrivacyTracking: false,
         NSPrivacyTrackingDomains: [],
@@ -231,6 +287,7 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
       },
       ...(development ? { gate: true } : {}),
       ...(seed !== undefined ? { seed } : {}),
+      ...(syncServerUrl !== undefined ? { syncServerUrl } : {}),
     },
   };
 }

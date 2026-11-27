@@ -9,9 +9,10 @@ import {
   serializePreferences,
 } from './index';
 
-describe('Wave F9 preferences (#26, #458)', () => {
+describe('Wave F9 / P9 preferences (#26, #458, #509, #510)', () => {
   it('exposes defaults and validates syncServerUrl safely', () => {
     expect(DEFAULT_PREFERENCES.telemetryOptIn).toBe(false);
+    expect(DEFAULT_PREFERENCES.privacyConsentAnswered).toBe(false);
     expect(DEFAULT_PREFERENCES.welcomeDismissed).toBe(false);
     expect(DEFAULT_PREFERENCES.syncServerUrl).toBe('');
 
@@ -60,6 +61,7 @@ describe('Wave F9 preferences (#26, #458)', () => {
     if (defaultEncoded.ok) {
       const rawDefault = JSON.parse(defaultEncoded.value) as Record<string, unknown>;
       expect(rawDefault.telemetryOptIn).toBeUndefined();
+      expect(rawDefault.privacyConsentAnswered).toBeUndefined();
       expect(rawDefault.welcomeDismissed).toBeUndefined();
       expect(rawDefault.syncServerUrl).toBeUndefined();
     }
@@ -67,6 +69,7 @@ describe('Wave F9 preferences (#26, #458)', () => {
     const encoded = serializePreferences({
       ...DEFAULT_PREFERENCES,
       telemetryOptIn: true,
+      privacyConsentAnswered: true,
       welcomeDismissed: true,
       syncServerUrl: 'https://Sync.Example.com/api/',
     });
@@ -76,8 +79,30 @@ describe('Wave F9 preferences (#26, #458)', () => {
 
     const parsed = parsePreferences(encoded.value);
     expect(parsed.telemetryOptIn).toBe(true);
+    expect(parsed.privacyConsentAnswered).toBe(true);
     expect(parsed.welcomeDismissed).toBe(true);
     expect(parsed.syncServerUrl).toBe('https://sync.example.com/api');
+  });
+
+  it('parses legacy JSON containing crashReportsOptIn, crashReportsIncludeLogs, and syncServerUrl without resetting other fields', () => {
+    const legacy = parsePreferences(
+      JSON.stringify({
+        version: 1,
+        locale: 'tr',
+        themePreset: 'midnightGold',
+        crashReportsOptIn: true,
+        crashReportsIncludeLogs: true,
+        telemetryOptIn: true,
+        syncServerUrl: 'https://legacy-sync.example.com/',
+      }),
+    );
+    expect(legacy.locale).toBe('tr');
+    expect(legacy.themePreset).toBe('midnightGold');
+    expect(legacy.crashReportsOptIn).toBe(true);
+    expect(legacy.crashReportsIncludeLogs).toBe(true);
+    expect(legacy.telemetryOptIn).toBe(true);
+    expect(legacy.privacyConsentAnswered).toBe(false);
+    expect(legacy.syncServerUrl).toBe('https://legacy-sync.example.com');
   });
 
   it('rejects invalid types and unsafe sync URLs on parse and store update', async () => {
@@ -85,11 +110,13 @@ describe('Wave F9 preferences (#26, #458)', () => {
       JSON.stringify({
         version: 1,
         telemetryOptIn: 'yes',
+        privacyConsentAnswered: 'yes',
         welcomeDismissed: 1,
         syncServerUrl: 'https://user:secret@evil.example.com',
       }),
     );
     expect(parsed.telemetryOptIn).toBe(false);
+    expect(parsed.privacyConsentAnswered).toBe(false);
     expect(parsed.welcomeDismissed).toBe(false);
     expect(parsed.syncServerUrl).toBe('');
 
@@ -97,12 +124,14 @@ describe('Wave F9 preferences (#26, #458)', () => {
     await store.load();
     const updated = await store.update({
       telemetryOptIn: true,
+      privacyConsentAnswered: true,
       welcomeDismissed: true,
       syncServerUrl: 'http://127.0.0.1:8787/',
     });
     expect(updated.ok).toBe(true);
     if (!updated.ok) return;
     expect(updated.value.telemetryOptIn).toBe(true);
+    expect(updated.value.privacyConsentAnswered).toBe(true);
     expect(updated.value.welcomeDismissed).toBe(true);
     expect(updated.value.syncServerUrl).toBe('http://127.0.0.1:8787');
 

@@ -22,11 +22,16 @@ import {
 } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { DiagnosticsPort } from '../ports/wave-f7b-ports';
+import type { TelemetryPort } from '../ports/wave-f9-ports';
 import { useRouteActive } from '../shared';
 import { CrashReportPreviewModal } from './CrashReportPreviewModal';
 
 const FALLBACK_ERROR_CODE = 'ERR_UNEXPECTED';
 const SAFE_CODE_TOKEN = /^[A-Za-z0-9_.-]{1,48}$/;
+const SAFE_TELEMETRY_ERROR_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const SENSITIVE_FRAME_RE =
+  /(password|passwd|secret|cookie|authorization|bearer|basic|token|api_key|apikey)/i;
+const MAX_STACK_SIG_LENGTH = 128;
 const WEB_INTERACTIVE_ROLES = new Set(['button', 'link', 'radio', 'adjustable', 'switch']);
 
 type WebActiveElement = { tagName?: unknown; getAttribute?: (n: string) => string | null };
@@ -61,6 +66,76 @@ export function formatRedactedErrorCode(error: unknown): string {
   return sanitizeToken(record.name) ?? FALLBACK_ERROR_CODE;
 }
 
+/**
+ * Formats a strictly redacted error name compatible with `@elv/sync` `SAFE_TOKEN_RE`,
+ * normalizing slash-delimited `ElvError` codes (`category/code` -> `category.code`).
+ */
+export function formatTelemetryErrorName(error: unknown): string {
+  const normalized = formatRedactedErrorCode(error).replace(/\//g, '.').slice(0, 64);
+  return SAFE_TELEMETRY_ERROR_NAME_RE.test(normalized) ? normalized : FALLBACK_ERROR_CODE;
+}
+
+function normalizeStackFrameToken(raw: string): string | null {
+  if (
+    raw.length === 0 ||
+    raw.includes('://') ||
+    raw.includes('/') ||
+    raw.includes('\\') ||
+    raw.includes('@') ||
+    /:\d+/.test(raw)
+  ) {
+    return null;
+  }
+  const cleaned = raw
+    .replace(/<anonymous>/gi, 'anonymous')
+    .replace(/\./g, ':')
+    .replace(/[^A-Za-z0-9_:-]+/g, '')
+    .replace(/:{2,}/g, ':')
+    .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+  if (cleaned.length === 0) return null;
+  const parts = cleaned.split(':').filter((p) => p.length > 0);
+  const bounded = (parts.length > 2 ? [parts[0], parts[parts.length - 1]] : parts).join(':');
+  if (bounded.length === 0 || !/^[A-Za-z0-9]/.test(bounded)) return null;
+  if (SENSITIVE_FRAME_RE.test(bounded)) return 'frame';
+  return bounded.slice(0, 48);
+}
+
+/**
+ * Produces a strictly redacted stack signature consisting solely of up to 5 function or React
+ * component frame names joined by `>` (with `:` member separators), stripping all file paths,
+ * user home directories, URLs, and credentials for `@elv/sync` `SAFE_STACK_SIG_RE` compatibility.
+ */
+export function sanitizeStackSignature(
+  stack: string | undefined,
+  componentStack?: string | undefined,
+): string {
+  const source = componentStack?.trim() || stack?.trim() || '';
+  if (source.length === 0) return 'unknown';
+  const frames: string[] = [];
+  let totalLen = 0;
+  for (const rawLine of source.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.length === 0) continue;
+    let rawToken: string | undefined;
+    const v8OrReact = /^(?:at|in)\s+(?:(?:async|new)\s+)?([^\s(]{1,128})(?:\s|\(|$)/.exec(line);
+    if (v8OrReact?.[1] !== undefined) {
+      rawToken = v8OrReact[1];
+    } else if (!line.startsWith('at ') && !line.startsWith('in ')) {
+      const jsc = /^([A-Za-z0-9_.$<>-]{1,64})@/.exec(line);
+      if (jsc?.[1] !== undefined) rawToken = jsc[1];
+    }
+    if (rawToken === undefined) continue;
+    const frame = normalizeStackFrameToken(rawToken);
+    if (frame === null) continue;
+    const addedLen = (frames.length > 0 ? 1 : 0) + frame.length;
+    if (totalLen + addedLen > MAX_STACK_SIG_LENGTH) break;
+    frames.push(frame);
+    totalLen += addedLen;
+    if (frames.length >= 5) break;
+  }
+  return frames.length > 0 ? frames.join('>') : 'anonymous';
+}
+
 /** Props of {@link CrashRecoveryBoundary}. */
 export interface CrashRecoveryBoundaryProps {
   /** Invoked when the user triggers **Reload** (`crash-reload`). */
@@ -83,6 +158,10 @@ export interface CrashRecoveryBoundaryProps {
   readonly crashReportsIncludeLogs?: boolean;
   /** Platform diagnostics port for reading redacted log tail and copying/exporting reports (`#226`). */
   readonly diagnostics?: DiagnosticsPort;
+  /** Optional opt-in runtime telemetry port for recording redacted render crashes (`#509`). */
+  readonly telemetry?: Pick<TelemetryPort, 'recordAppCrash'>;
+  /** Optional coarse screen identifier attached to redacted crash telemetry (`#509`). */
+  readonly screenName?: string;
   /** Invoked when the user toggles log inclusion inside the diagnostic preview modal (`#226`). */
   readonly onToggleIncludeLogs?: (next: boolean) => void;
   readonly children: ReactNode;
@@ -414,6 +493,19 @@ export class CrashRecoveryBoundary extends Component<
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     if (info.componentStack) {
       this.setState({ componentStack: info.componentStack });
+    }
+    const recordAppCrash = this.props.telemetry?.recordAppCrash;
+    if (recordAppCrash !== undefined) {
+      try {
+        recordAppCrash({
+          errorName: formatTelemetryErrorName(error),
+          stackSig: sanitizeStackSignature(error?.stack, info.componentStack ?? undefined),
+          ...(this.props.screenName !== undefined ? { screen: this.props.screenName } : {}),
+          fatal: true,
+        });
+      } catch {
+        // Isolate telemetry failures so crash recovery UI always renders.
+      }
     }
     this.props.onError?.(error, info);
   }

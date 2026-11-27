@@ -8,7 +8,7 @@ import { trWaveF9Messages } from './locales/tr-wave-f9';
 const EXPECTED_PAIRS: ReadonlyArray<readonly [MessageId, string, string]> = [
   // Settings tabs
   ['settings.section.account', 'Account & Sync', 'Hesap ve Eşitleme'],
-  ['settings.section.feedback', 'Feedback & Telemetry', 'Geri Bildirim ve Telemetri'],
+  ['settings.section.feedback', 'Feedback', 'Geri Bildirim'],
 
   // First-run Welcome Sign In / Create Account screen
   ['welcome.title', 'Sync Across Every Screen', 'Tüm Ekranlarınızda Eşitleyin'],

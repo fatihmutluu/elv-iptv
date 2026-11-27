@@ -17,9 +17,11 @@ Pure zero-knowledge E2EE vault crypto, deterministic tombstone sync merge, auth/
 - `encoding.ts`: hand-written UTF-8, base64url, hex, and constant-time byte comparison (`constantTimeEqual`).
 - `ports.ts`: `VaultCryptoPort`, `SyncHttpPort`, `SyncHttpResponse`, `SyncClockPort`.
 - `pure-crypto.ts`: pure-TS SHA-256, HMAC-SHA256, PBKDF2-SHA256, AES-256-GCM (`createPureJsVaultCryptoPort`) plus `createWebCryptoVaultPort`.
-- `vault-crypto.ts`: zero-knowledge auth verifier, vault key bundle + 24-char recovery code, password/recovery unlock, and AAD-bound snapshot encryption/decryption.
-- `vault-merge.ts`: `VaultSnapshot` (`schemaVersion: 1`), compact episode watched bitfields, and deterministic LWW + tombstone `mergeVaultSnapshots`.
+- `x25519.ts`: pure-TS constant-time RFC 7748 Curve25519 X25519 (16-limb `Float64Array` GF(2^255-19) with low-order point rejection) and RFC 5869 HKDF-SHA256 (`hkdfExtract`, `hkdfExpand`, `hkdfSha256`).
+- `vault-crypto.ts` & `vault-validate.ts`: zero-knowledge auth verifier, vault key bundle + 24-char recovery code, password/recovery unlock, AAD-bound snapshot encryption/decryption, and strict v1->v2 upgrade & validation.
+- `vault-merge.ts`: `VaultSnapshot` (`schemaVersion: 2`), per-profile flags/progress/bitfields/dismissals/collections/ratings, stalker + source settings, encrypted profiles, and deterministic LWW + tombstone `mergeVaultSnapshots`.
 - `auth-client.ts`: `AuthProviderId`, `AuthProviderAdapter` seam, `validateSignupInput`, and `createSyncAuthClient`.
-- `qr-pairing.ts`: `MAX_SYNC_QR_BYTES` (213), `buildPairingQrUri`/`parsePairingQrUri`, and E2EE `createQrPairingClient`.
-- `telemetry.ts`: allowlisted `TelemetryEvent` union (including `media_decode_failure` for `#70`), double-redacted `sanitizeTelemetryEvent`, bounded ring buffer queue, opt-in uploader with backoff & remote kill-switch, and payload preview.
+- `qr-pairing.ts` & `pairing-v2.ts`: `MAX_SYNC_QR_BYTES` (213), bidirectional 8-digit X25519 QR/code pairing (`encodeBidirectionalPairingQr`, `parsePairingQrOrCode`, `derivePairingSessionKeys`, `encryptPairingTransfer`, `decryptPairingTransfer`, `resolvePairingDirection`, `maskEmail`), plus legacy `buildPairingQrUri`/`parsePairingQrUri`/`createQrPairingClient`.
+- `telemetry.ts` & `telemetry-redact.ts`: 13 allowlisted `TelemetryEvent` kinds (including `media_decode_failure`, `app_crash`, `unhandled_error`, `catalog_import`), `DeviceTechnicalProfile`, `redactDiagnosticText`, double-redacted `sanitizeTelemetryEvent`, bounded ring buffer queue, opt-in uploader with backoff & remote kill-switch, and payload preview.
+- `auto-sync-scheduler.ts`: platform-agnostic `createAutoSyncScheduler` with single-flight queue, mutation/pause debouncing, viewing heartbeat, startup/foreground/reconnect pulls, bounded background flush, and capped exponential backoff retry.
 - `feedback.ts`: `FEEDBACK_CATEGORIES`, `sanitizeFeedbackSubmission`, and `submitFeedback`.

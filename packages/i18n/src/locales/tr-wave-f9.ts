@@ -4,7 +4,7 @@ import type { WaveF9MessageId } from './en-wave-f9';
 export const trWaveF9Messages: Readonly<Record<WaveF9MessageId, string>> = {
   // Settings tabs
   'settings.section.account': 'Hesap ve Eşitleme',
-  'settings.section.feedback': 'Geri Bildirim ve Telemetri',
+  'settings.section.feedback': 'Geri Bildirim',
 
   // First-run Welcome Sign In / Create Account screen
   'welcome.title': 'Tüm Ekranlarınızda Eşitleyin',

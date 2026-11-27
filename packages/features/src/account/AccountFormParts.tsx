@@ -1,4 +1,3 @@
-import { isValidSyncServerUrl, normalizeSyncServerUrl } from '@elv/domain';
 import {
   CtaButton,
   QrCodeView,
@@ -8,7 +7,7 @@ import {
   useTheme,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactElement, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import type { SyncQrPairingState } from './account-helpers';
 
@@ -80,83 +79,6 @@ export function AccountTextField({
           style={[theme.typography.body, styles.input, { color: theme.colors.textPrimary }]}
         />
       </View>
-    </View>
-  );
-}
-
-/** Props of {@link AccountServerUrlField}. */
-export interface AccountServerUrlFieldProps {
-  readonly value: string;
-  readonly onChangeValidUrl?: (normalizedUrl: string) => void;
-  readonly onValidityChange?: (valid: boolean) => void;
-  readonly onFocus?: () => void;
-  readonly editable?: boolean;
-  readonly testID?: string;
-}
-
-/** Optional custom sync server URL input validated via `isValidSyncServerUrl` (`#26`). */
-export function AccountServerUrlField({
-  value,
-  onChangeValidUrl,
-  onValidityChange,
-  onFocus,
-  editable = true,
-  testID = 'account-server-url-input',
-}: AccountServerUrlFieldProps): ReactElement {
-  const theme = useTheme();
-  const i18n = useI18n();
-  const [draft, setDraft] = useState(value);
-  const [invalid, setInvalid] = useState(false);
-  const lastCommittedRef = useRef(value);
-
-  useEffect(() => {
-    if (value !== lastCommittedRef.current) {
-      lastCommittedRef.current = value;
-      setDraft(value);
-      setInvalid(false);
-      onValidityChange?.(true);
-    }
-  }, [onValidityChange, value]);
-
-  const handleChangeText = useCallback(
-    (next: string) => {
-      setDraft(next);
-      if (isValidSyncServerUrl(next)) {
-        setInvalid(false);
-        onValidityChange?.(true);
-        const normalized = normalizeSyncServerUrl(next);
-        lastCommittedRef.current = normalized;
-        onChangeValidUrl?.(normalized);
-      } else {
-        setInvalid(true);
-        onValidityChange?.(false);
-      }
-    },
-    [onChangeValidUrl, onValidityChange],
-  );
-
-  return (
-    <View style={styles.field}>
-      <AccountTextField
-        testID={testID}
-        label={i18n.t('account.serverUrlLabel')}
-        value={draft}
-        onChangeText={handleChangeText}
-        placeholder="https://sync.example.com"
-        keyboardType="url"
-        autoComplete="off"
-        editable={editable}
-        {...(onFocus !== undefined ? { onFocus } : {})}
-      />
-      {invalid ? (
-        <Text
-          testID="account-server-url-error"
-          accessibilityLiveRegion="polite"
-          style={[theme.typography.caption, { color: theme.colors.liveColor }]}
-        >
-          {i18n.t('source.validation.invalidAddress')}
-        </Text>
-      ) : null}
     </View>
   );
 }

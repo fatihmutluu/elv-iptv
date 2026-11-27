@@ -3,13 +3,22 @@ import { generateLanPairingToken } from '@elv/lan-pairing';
 import {
   base64UrlDecode,
   base64UrlEncode,
+  createEmptyVaultSnapshot,
+  type DeviceTechnicalProfile,
+  decryptVaultSnapshot,
+  encryptVaultSnapshot,
+  type PairingDirection,
+  redactDiagnosticText,
   type SyncClockPort,
   type SyncHttpPort,
+  type SyncSession,
+  sanitizeDeviceProfile,
   type VaultCryptoPort,
   type VaultSnapshot,
 } from '@elv/sync';
 
 export const SESSION_SECRET_KEY = 'elv.sync.session.v1';
+export const VAULT_BASELINE_SECRET_KEY = 'sync.vault.baseline.v2';
 export const VAULT_KEY_BYTES = 32;
 export const DEFAULT_FLUSH_INTERVAL_MS = 60_000;
 export const FEEDBACK_LOG_TAIL_LINES = 25;
@@ -19,19 +28,23 @@ export function initialPrefsAppliedKey(userId: string): string {
   return `elv.sync.initprefs.v1.${userId.replace(/[^A-Za-z0-9._-]/g, '_')}`;
 }
 
-/** Lifecycle state of the optional E2EE sync account session (`#26`). */
+/** Lifecycle state of the optional E2EE sync account session (`#26`, `#510`). */
 type SyncAccountStatus = 'signed_out' | 'signing_in' | 'signed_in' | 'syncing';
 
-/** Read-only snapshot of the current E2EE sync account state (`#26`). */
+/** Background automatic sync indicator state (`#510`). */
+export type AutoSyncState = 'idle' | 'syncing' | 'pending' | 'offline';
+
+/** Read-only snapshot of the current E2EE sync account state (`#26`, `#510`). */
 export interface SyncAccountState {
   readonly status: SyncAccountStatus;
   readonly email: string | null;
   readonly lastSyncedAtIso: string | null;
   readonly pendingRecoveryCode: string | null;
   readonly errorCode: string | null;
+  readonly autoSyncState?: AutoSyncState;
 }
 
-/** Active universal QR device pairing session (`#26`, payload strictly <= 213 UTF-8 bytes). */
+/** Active legacy universal QR device pairing session (`#26`, payload strictly <= 213 UTF-8 bytes). */
 export interface SyncQrPairingSession {
   readonly pairingId: string;
   readonly code: string;
@@ -40,14 +53,44 @@ export interface SyncQrPairingSession {
   readonly status: 'pending' | 'claimed' | 'expired';
 }
 
-/** Result of an auth, sync, pairing, or permanent account deletion call (`#26`). */
+/** Role of the local device inside a bidirectional X25519 pairing handshake (`#510`). */
+type BidirectionalPairingRole = 'host' | 'responder';
+
+/** Lifecycle state of a bidirectional X25519 pairing session (`#510`). */
+export type BidirectionalPairingStatus =
+  | 'pending'
+  | 'responder_joined'
+  | 'awaiting_sas'
+  | 'waiting_approval'
+  | 'approved'
+  | 'completed'
+  | 'rejected'
+  | 'expired'
+  | 'locked';
+
+/** UI-ready snapshot of an active bidirectional X25519 pairing session (`#510`). */
+export interface BidirectionalPairingSnapshot {
+  readonly pairingId: string;
+  readonly role: BidirectionalPairingRole;
+  readonly code: string;
+  readonly qrUri?: string;
+  readonly expiresAtMs: number;
+  readonly status: BidirectionalPairingStatus;
+  readonly sas: string | null;
+  readonly direction: PairingDirection | null;
+  readonly localMaskedEmail: string | null;
+  readonly peerMaskedEmail: string | null;
+  readonly errorCode?: string | null;
+}
+
+/** Result of an auth, sync, pairing, or permanent account deletion call (`#26`, `#510`). */
 export interface SyncActionResult {
   readonly ok: boolean;
   readonly recoveryCode?: string;
   readonly errorCode?: string;
 }
 
-/** App-supplied E2EE sync, authentication, universal QR pairing, and permanent deletion port (`#26`). */
+/** App-supplied E2EE sync, authentication, auto-sync, and bidirectional X25519 pairing port (`#26`, `#510`). */
 export interface SyncAccountPort {
   getState(): SyncAccountState;
   subscribe(listener: (state: SyncAccountState) => void): () => void;
@@ -60,6 +103,19 @@ export interface SyncAccountPort {
   createQrPairing(): Promise<SyncQrPairingSession>;
   pollQrPairing(pairingId: string): Promise<'pending' | 'claimed' | 'expired'>;
   claimQrPairing(codeOrUri: string): Promise<SyncActionResult>;
+  markSyncDirty(): void;
+  notifySyncDirty(): void;
+  notifyPlaybackPause(): void;
+  notifyPlaybackExitOrSwitch(): void;
+  setViewingActive(active: boolean): void;
+  startBidirectionalPairing(): Promise<BidirectionalPairingSnapshot>;
+  joinBidirectionalPairing(codeOrUri: string): Promise<BidirectionalPairingSnapshot>;
+  pollBidirectionalPairing(pairingId: string): Promise<BidirectionalPairingSnapshot>;
+  confirmBidirectionalPairing(
+    pairingId: string,
+    chosenDirection?: 'host_to_responder' | 'responder_to_host',
+  ): Promise<SyncActionResult>;
+  cancelBidirectionalPairing(pairingId: string): Promise<void>;
 }
 
 /** Structured, strictly redacted media decode failure metadata for `#458` / `#70` telemetry. */
@@ -73,7 +129,7 @@ export interface TelemetryMediaDecodeFailure {
   readonly isLive: boolean;
 }
 
-/** App-supplied opt-in runtime performance, stability, and codec telemetry port (`#458`). */
+/** App-supplied unified opt-in runtime performance, crash, and codec telemetry port (`#458`, `#509`). */
 export interface TelemetryPort {
   isOptedIn(): boolean;
   setOptIn(enabled: boolean): void;
@@ -85,6 +141,51 @@ export interface TelemetryPort {
     readonly engine: string;
     readonly errorCode: string;
     readonly isLive: boolean;
+  }): void;
+  recordStartup(durationMs: number, coldStart: boolean): void;
+  recordPlaybackStart(meta: {
+    readonly engine: string;
+    readonly ttffMs: number;
+    readonly isLive: boolean;
+    readonly container?: string;
+    readonly videoCodec?: string;
+  }): void;
+  recordPlaybackRebuffer(meta: {
+    readonly engine: string;
+    readonly durationMs: number;
+    readonly isLive: boolean;
+  }): void;
+  recordCatalogImport(meta: {
+    readonly sourceKind: string;
+    readonly stage: string;
+    readonly durationMs: number;
+    readonly itemCount: number;
+    readonly success: boolean;
+    readonly errorCode?: string;
+  }): void;
+  recordSqliteSlowOp(meta: { readonly op: string; readonly durationMs: number }): void;
+  recordFrameJank(meta: {
+    readonly screen: string;
+    readonly droppedFrames: number;
+    readonly maxFrameMs: number;
+  }): void;
+  recordJsStall(meta: { readonly screen: string; readonly durationMs: number }): void;
+  recordMemoryPressure(meta: {
+    readonly level: 'moderate' | 'critical';
+    readonly usedMb?: number;
+  }): void;
+  recordAppCrash(meta: {
+    readonly errorName: string;
+    readonly stackSig: string;
+    readonly screen?: string;
+    readonly fatal: boolean;
+    readonly uptimeMs?: number;
+  }): void;
+  recordUnhandledError(meta: {
+    readonly errorName: string;
+    readonly stackSig: string;
+    readonly screen?: string;
+    readonly source?: string;
   }): void;
   flush(): Promise<void>;
 }
@@ -114,12 +215,17 @@ export interface FeedbackPort {
   }>;
 }
 
-/** Redacted device metadata attached to telemetry envelopes and opt-in feedback diagnostics. */
-interface TvMobileDeviceMeta {
+/** Redacted device metadata attached to telemetry envelopes and opt-in feedback diagnostics (`#509`). */
+export interface TvMobileDeviceMeta {
   readonly platform: string;
   readonly appVersion: string;
   readonly locale?: string;
   readonly osVersion?: string;
+  readonly formFactor?: string;
+  readonly arch?: string;
+  readonly ramBucket?: string;
+  readonly gpu?: string;
+  readonly resolution?: string;
 }
 
 /** Minimal preferences snapshot read by the tv-mobile sync runtime. */
@@ -147,6 +253,7 @@ export interface CreateTvMobileSyncPortsOptions {
   readonly secretStore: SecretStore;
   readonly fetchFn?: SyncFetchFn;
   readonly getServerUrl: () => string;
+  readonly linkOrigin?: string;
   readonly getDeviceMeta: () => TvMobileDeviceMeta;
   readonly getRecentLogs?: (maxLines?: number) => Promise<readonly string[]> | readonly string[];
   readonly getPreferences?: () => TvMobileSyncPreferences | undefined;
@@ -169,6 +276,10 @@ export interface TvMobileSyncPorts {
   readonly telemetry: TelemetryPort;
   readonly feedback: FeedbackPort;
   hydrate(): Promise<void>;
+  notifyStartup(): void;
+  notifyForeground(awayMs: number): void;
+  notifyReconnect(): void;
+  flushBeforeBackground(timeoutMs?: number): Promise<void>;
   dispose(): void;
 }
 
@@ -187,18 +298,148 @@ export const SIGNED_OUT_STATE: SyncAccountState = Object.freeze({
   lastSyncedAtIso: null,
   pendingRecoveryCode: null,
   errorCode: null,
+  autoSyncState: 'idle',
 });
+
+/** Builds a sanitized {@link DeviceTechnicalProfile} from {@link TvMobileDeviceMeta} (`#509`). */
+export function buildMobileDeviceProfile(
+  meta: TvMobileDeviceMeta,
+): DeviceTechnicalProfile | undefined {
+  return sanitizeDeviceProfile({
+    ...(meta.osVersion !== undefined ? { osVersion: meta.osVersion } : {}),
+    ...(meta.formFactor !== undefined ? { formFactor: meta.formFactor } : {}),
+    ...(meta.arch !== undefined ? { arch: meta.arch } : {}),
+    ...(meta.ramBucket !== undefined ? { ramBucket: meta.ramBucket } : {}),
+    ...(meta.gpu !== undefined ? { gpu: meta.gpu } : {}),
+    ...(meta.resolution !== undefined ? { resolution: meta.resolution } : {}),
+    ...(meta.locale !== undefined ? { locale: meta.locale } : {}),
+  });
+}
+
+const SAFE_MOBILE_CODE_FRAME_RE = /\b([A-Za-z0-9._-]+\.(?:js|mjs|cjs|ts|tsx|jsx|bundle|hbc)):(\d+)/;
+
+/**
+ * Extracts a privacy-safe `(errorName, stackSig)` pair strictly scrubbed via `redactDiagnosticText`
+ * BEFORE matching code-bundle frames so provider URLs and host:ports never leak (`#509`).
+ */
+export function extractSafeMobileErrorSignature(error: unknown): {
+  readonly errorName: string;
+  readonly stackSig: string;
+} {
+  const rawName = error instanceof Error ? error.name : 'Error';
+  const errorName =
+    redactDiagnosticText(rawName, 64)
+      .replace(/\//g, '.')
+      .replace(/[^A-Za-z0-9._-]/g, '_')
+      .replace(/^[^A-Za-z0-9]+/, '')
+      .slice(0, 64) || 'Error';
+  const rawStack = error instanceof Error && typeof error.stack === 'string' ? error.stack : '';
+  const lines = rawStack.split(/\r?\n/);
+  const scanLines = lines.length > 1 ? lines.slice(1) : lines;
+  let frameToken = '';
+  for (const line of scanLines) {
+    const redactedLine = redactDiagnosticText(line, 512);
+    const match = SAFE_MOBILE_CODE_FRAME_RE.exec(redactedLine);
+    if (match !== null) {
+      frameToken = `${match[1]}:${match[2]}`;
+      break;
+    }
+  }
+  const candidate = frameToken.length > 0 ? frameToken : errorName;
+  const stackSig =
+    redactDiagnosticText(candidate, 128)
+      .replace(/[^A-Za-z0-9._:/+-]/g, '_')
+      .replace(/^[^A-Za-z0-9]+/, '')
+      .slice(0, 128) || 'js:0';
+  return { errorName, stackSig };
+}
+
+/** Encrypts and persists the last-synced vault snapshot baseline in `SecretStore` (`#510`). */
+export async function persistVaultBaseline(
+  secretStore: SecretStore,
+  cryptoPort: VaultCryptoPort,
+  session: Pick<SyncSession, 'user' | 'vaultKey'>,
+  revision: number,
+  snapshot: VaultSnapshot,
+): Promise<void> {
+  try {
+    const safeRev = Number.isInteger(revision) && revision >= 0 ? revision : 0;
+    const blob = await encryptVaultSnapshot(
+      cryptoPort,
+      session.vaultKey,
+      session.user.id,
+      safeRev,
+      snapshot,
+    );
+    await secretStore.set(
+      VAULT_BASELINE_SECRET_KEY,
+      JSON.stringify({
+        userId: session.user.id,
+        revision: safeRev,
+        ciphertext: blob.ciphertext,
+        iv: blob.iv,
+      }),
+    );
+  } catch {
+    // Best-effort baseline persistence must never fail a committed vault sync.
+  }
+}
+
+/** Decrypts the persisted vault baseline from `SecretStore`, falling back safely to an empty snapshot. */
+export async function loadVaultBaseline(
+  secretStore: SecretStore,
+  cryptoPort: VaultCryptoPort,
+  session: Pick<SyncSession, 'user' | 'vaultKey'>,
+): Promise<VaultSnapshot> {
+  try {
+    const raw = await secretStore.get(VAULT_BASELINE_SECRET_KEY);
+    if (raw === undefined || raw.length === 0) return createEmptyVaultSnapshot(0);
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return createEmptyVaultSnapshot(0);
+    }
+    const rec = parsed as Record<string, unknown>;
+    if (
+      rec.userId !== session.user.id ||
+      typeof rec.revision !== 'number' ||
+      !Number.isInteger(rec.revision) ||
+      rec.revision < 0 ||
+      typeof rec.ciphertext !== 'string' ||
+      typeof rec.iv !== 'string'
+    ) {
+      return createEmptyVaultSnapshot(0);
+    }
+    return await decryptVaultSnapshot(cryptoPort, session.vaultKey, session.user.id, rec.revision, {
+      ciphertext: rec.ciphertext,
+      iv: rec.iv,
+    });
+  } catch {
+    return createEmptyVaultSnapshot(0);
+  }
+}
+
+/** Maps physical memory bytes to a strictly allowlisted telemetry RAM bucket token. */
+export function classifyMobileRamBucket(totalBytes: number | null | undefined): string | undefined {
+  if (
+    totalBytes === null ||
+    totalBytes === undefined ||
+    !Number.isFinite(totalBytes) ||
+    totalBytes <= 0
+  ) {
+    return undefined;
+  }
+  const gb = totalBytes / 1024 ** 3;
+  if (gb <= 2.5) return 'lte_2gb';
+  if (gb <= 5) return '4gb';
+  if (gb <= 10) return '8gb';
+  if (gb <= 20) return '16gb';
+  return '32gb_plus';
+}
 
 const LAN_TOKEN_HEX_RE = /^[0-9a-f]{48}$/i;
 const LAN_TOKEN_BYTES = 24;
 
-/**
- * Cryptographic byte generator for Hermes / React Native:
- * 1. Uses `globalThis.crypto.getRandomValues` when present.
- * 2. Falls back to `@elv/lan-pairing`'s native `generateLanPairingToken()` (`java.security.SecureRandom`
- *    on Android / `SecRandomCopyBytes` on Apple iOS/tvOS, 48 hex chars = 24 bytes per call).
- * 3. Throws fail-closed if neither CSPRNG is available.
- */
+/** Cryptographic byte generator for Hermes / React Native. */
 export function defaultCsprngBytes(length: number): Uint8Array {
   if (!Number.isInteger(length) || length < 0) {
     throw new RangeError(`Invalid CSPRNG byte length: ${String(length)}`);

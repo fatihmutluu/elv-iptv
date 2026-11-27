@@ -399,6 +399,96 @@ describe('createDesktopVideoHost (#34)', () => {
       });
       expect(telemetry.recordPlaybackError).toHaveBeenCalledTimes(1);
     });
+
+    it('records playback_start TTFF and playback_rebuffer duration when opted in (#509)', async () => {
+      const fake = fakePlayerBridge();
+      let now = 1_000;
+      let optedIn = true;
+      const telemetry = {
+        isOptedIn: vi.fn(() => optedIn),
+        recordMediaDecodeFailure: vi.fn(),
+        recordPlaybackError: vi.fn(),
+        recordPlaybackStart: vi.fn(),
+        recordPlaybackRebuffer: vi.fn(),
+      };
+      const host = createDesktopVideoHost({
+        playerBridge: fake.bridge,
+        windowBridge: fakeWindowBridge(),
+        presenterKind: 'canvas',
+        telemetry,
+        clock: () => now,
+      });
+
+      const opened = await host.open();
+      expect(opened).not.toBeNull();
+
+      opened?.engine.load({
+        attempt: 1,
+        kind: 'live',
+        url: 'http://sim.example.test/live.ts',
+        headers: {},
+      });
+      fake.emitEvent('engine-1', { attempt: 1, type: 'state', state: 'opening' });
+      fake.emitEvent('engine-1', {
+        attempt: 1,
+        type: 'clock',
+        anchor: { positionMs: 0, atMs: 1_050, rate: 1, isLiveTs: true },
+      });
+      fake.emitEvent('engine-1', {
+        attempt: 1,
+        type: 'mediaInfo',
+        info: { codec: 'video/h264' },
+      });
+      now = 1_420;
+      fake.emitEvent('engine-1', { attempt: 1, type: 'firstFrame', atMs: 1_420 });
+      fake.emitEvent('engine-1', { attempt: 1, type: 'state', state: 'playing' });
+
+      expect(telemetry.recordPlaybackStart).toHaveBeenCalledTimes(1);
+      expect(telemetry.recordPlaybackStart).toHaveBeenCalledWith({
+        engine: 'mpv',
+        ttffMs: 420,
+        isLive: true,
+        container: 'mpegts',
+        videoCodec: 'h264',
+      });
+
+      // Explicit stall start -> end emits playback_rebuffer
+      now = 5_000;
+      fake.emitEvent('engine-1', { attempt: 1, type: 'stall', phase: 'start', atMs: 5_000 });
+      now = 5_750;
+      fake.emitEvent('engine-1', { attempt: 1, type: 'stall', phase: 'end', atMs: 5_750 });
+      expect(telemetry.recordPlaybackRebuffer).toHaveBeenCalledWith({
+        engine: 'mpv',
+        durationMs: 750,
+        isLive: true,
+      });
+
+      // Mid-stream buffering -> playing fallback also emits playback_rebuffer
+      now = 8_000;
+      fake.emitEvent('engine-1', { attempt: 1, type: 'state', state: 'buffering' });
+      now = 8_300;
+      fake.emitEvent('engine-1', { attempt: 1, type: 'state', state: 'playing' });
+      expect(telemetry.recordPlaybackRebuffer).toHaveBeenCalledWith({
+        engine: 'mpv',
+        durationMs: 300,
+        isLive: true,
+      });
+
+      // Opted out -> suppresses new start & rebuffer events
+      optedIn = false;
+      now = 10_000;
+      opened?.engine.load({
+        attempt: 2,
+        kind: 'vod',
+        url: 'http://sim.example.test/movie.mp4',
+        headers: {},
+      });
+      now = 10_250;
+      fake.emitEvent('engine-1', { attempt: 2, type: 'firstFrame', atMs: 10_250 });
+      expect(telemetry.recordPlaybackStart).toHaveBeenCalledTimes(1);
+
+      opened?.engine.release();
+    });
   });
 
   describe('zero-reload parkForTransfer and adoptEngine (Wave P3)', () => {

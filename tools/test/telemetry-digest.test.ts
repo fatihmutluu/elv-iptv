@@ -90,6 +90,61 @@ const SAMPLE_REPORT: TelemetryDigestReport = {
       count: 1,
     },
   ],
+  crashesAndErrors: [
+    {
+      kind: 'app_crash',
+      errorName: 'SIGSEGV',
+      stackSig: 'libmpv_render_0x1a',
+      screen: 'player',
+      fatalCount: 2,
+      count: 2,
+      affectedSessions: 2,
+    },
+    {
+      kind: 'unhandled_error',
+      errorName: 'TypeError',
+      stackSig: 'epgGrid_render_112',
+      screen: 'epg-grid',
+      fatalCount: 0,
+      count: 1,
+      affectedSessions: 1,
+    },
+  ],
+  catalogImports: [
+    {
+      sourceKind: 'xtream',
+      count: 10,
+      failureCount: 1,
+      failureRate: 0.1,
+      p50Ms: 950,
+      p95Ms: 2800,
+      maxMs: 3100,
+    },
+  ],
+  deviceProfiles: [
+    {
+      platform: 'android-tv',
+      formFactor: 'tv',
+      arch: 'arm64',
+      ramBucket: '2gb',
+      resolution: '1920x1080',
+      gpu: 'Mali-G57',
+      locale: 'tr-TR',
+      sessions: 4,
+      events: 30,
+    },
+    {
+      platform: 'windows',
+      formFactor: 'desktop',
+      arch: 'x64',
+      ramBucket: '16gb',
+      resolution: '2560x1440',
+      gpu: 'NVIDIA RTX 4070',
+      locale: 'en-US',
+      sessions: 2,
+      events: 12,
+    },
+  ],
   feedbackByCategory: {
     playback_issue: 1,
     channel_epg: 0,
@@ -181,6 +236,14 @@ describe('telemetry-digest CLI', () => {
     expect(md).toContain(
       '## Media Decode Failure Matrix (Container / Video Codec / Audio Codec / Engine — #70 Signal)',
     );
+    expect(md).toContain('## Top Crashes & Unhandled Errors');
+    expect(md).toContain('| app_crash | SIGSEGV | libmpv_render_0x1a | player | 2 | 2 | 2 |');
+    expect(md).toContain('## Catalog & EPG Import Performance');
+    expect(md).toContain('| xtream | 10 | 1 | 10% | 950 ms | 2800 ms | 3100 ms |');
+    expect(md).toContain('## Device Technical Profiles');
+    expect(md).toContain(
+      '| android-tv | tv | arm64 | 2gb | 1920x1080 | Mali-G57 | tr-TR | 4 | 30 |',
+    );
     expect(md).toContain('## Categorized User Feedback');
     expect(md).toContain(
       '| android-tv | media3 | mpegts | hevc | ac3 | hdr10 | Live | DECODER_INIT_FAILED | 4 |',
@@ -214,6 +277,9 @@ describe('telemetry-digest CLI', () => {
         hotspots: [],
       },
       mediaDecodeFailures: [],
+      crashesAndErrors: [],
+      catalogImports: [],
+      deviceProfiles: [],
       feedbackByCategory: {
         playback_issue: 0,
         channel_epg: 0,
@@ -227,13 +293,22 @@ describe('telemetry-digest CLI', () => {
     const md = formatTelemetryDigestMarkdown(empty);
     expect(md).toContain('- **Pending Account Deletion Requests:** 0');
     expect(md).toContain('_No media decode failures recorded in this window._');
+    expect(md).toContain('_No crashes or unhandled errors recorded in this window._');
+    expect(md).toContain('_No catalog or EPG import metrics recorded in this window._');
+    expect(md).toContain('_No device technical profiles recorded in this window._');
     expect(md).toContain('_No recent user feedback submissions._');
   });
 
-  it('defaults legacy reports without pendingAccountDeletionRequests to 0 and rejects invalid types', async () => {
+  it('defaults legacy reports without pendingAccountDeletionRequests or Wave P9 fields and rejects invalid types', async () => {
     const dir = makeTempDir();
     const legacyPath = join(dir, 'legacy.json');
-    const { pendingAccountDeletionRequests: _omit, ...legacy } = SAMPLE_REPORT;
+    const {
+      pendingAccountDeletionRequests: _omit,
+      crashesAndErrors: _omitCrashes,
+      catalogImports: _omitImports,
+      deviceProfiles: _omitProfiles,
+      ...legacy
+    } = SAMPLE_REPORT;
     writeFileSync(legacyPath, JSON.stringify(legacy), 'utf8');
 
     const loaded = await loadTelemetryDigest(
@@ -241,6 +316,9 @@ describe('telemetry-digest CLI', () => {
       {},
     );
     expect(loaded.pendingAccountDeletionRequests).toBe(0);
+    expect(loaded.crashesAndErrors).toEqual([]);
+    expect(loaded.catalogImports).toEqual([]);
+    expect(loaded.deviceProfiles).toEqual([]);
 
     const invalidPath = join(dir, 'invalid.json');
     writeFileSync(

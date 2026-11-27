@@ -5,13 +5,15 @@ import {
   buildTelemetryPayloadPreview,
   createTelemetryQueue,
   createTelemetryUploader,
+  type DeviceTechnicalProfile,
+  redactDiagnosticText,
   sanitizeTelemetryEvent,
   TELEMETRY_EVENT_KINDS,
 } from './telemetry';
 
 describe('telemetry strict allowlist, redaction, queue, and opt-in uploader', () => {
-  it('accepts all 10 allowlisted event kinds and strips unknown extra fields', () => {
-    expect(TELEMETRY_EVENT_KINDS).toHaveLength(10);
+  it('accepts all 13 allowlisted event kinds and strips unknown extra fields', () => {
+    expect(TELEMETRY_EVENT_KINDS).toHaveLength(13);
 
     const validEvents = [
       { kind: 'startup', ts: 1000, durationMs: 420.5, coldStart: true, secretLeak: 'should-drop' },
@@ -63,6 +65,33 @@ describe('telemetry strict allowlist, redaction, queue, and opt-in uploader', ()
         operation: 'catalog_upsert',
         durationMs: 95,
         rowCount: 500,
+      },
+      {
+        kind: 'app_crash',
+        ts: 1011,
+        errorName: 'TypeError',
+        stackSig: 'PlayerScreen.tsx:142',
+        screen: 'player',
+        fatal: true,
+        uptimeMs: 64_200,
+        secretLeak: 'should-drop',
+      },
+      {
+        kind: 'unhandled_error',
+        ts: 1012,
+        errorName: 'AbortError',
+        stackSig: 'useCatalog:88',
+        screen: 'home',
+        source: 'unhandled_rejection',
+      },
+      {
+        kind: 'catalog_import',
+        ts: 1013,
+        sourceKind: 'xtream',
+        stage: 'complete',
+        durationMs: 1_840,
+        itemCount: 12_500,
+        success: true,
       },
     ];
 
@@ -368,5 +397,252 @@ describe('telemetry strict allowlist, redaction, queue, and opt-in uploader', ()
       expect(clean).not.toBeNull();
       expect(clean?.kind === 'playback_error' ? clean.errorCode : '').toBe(token);
     }
+  });
+
+  it('redacts Windows/POSIX home paths, URLs, credentials, emails, and IPs in redactDiagnosticText', () => {
+    const dirty = [
+      'Crash at C:\\Users\\Fatih\\Desktop\\IPTV\\src\\app.ts:42',
+      'from /Users/alice/Library/app.js and /home/bob/.config/list.m3u',
+      'url=https://user:supersecret@my-iptv.provider.example:8080/live/123.ts?token=xyz',
+      'cred=admin:p4ssw0rd@stream.internal',
+      'email=fatih.mutlu@example.com',
+      'ip=192.168.1.45 and 2001:db8::1',
+    ].join(' | ');
+
+    const clean = redactDiagnosticText(dirty, 512);
+    expect(clean).not.toContain('Fatih');
+    expect(clean).not.toContain('alice');
+    expect(clean).not.toContain('bob');
+    expect(clean).not.toContain('supersecret');
+    expect(clean).not.toContain('my-iptv.provider.example');
+    expect(clean).not.toContain('p4ssw0rd');
+    expect(clean).not.toContain('fatih.mutlu@example.com');
+    expect(clean).not.toContain('192.168.1.45');
+    expect(clean).not.toContain('2001:db8::1');
+    expect(clean).not.toContain('token=xyz');
+
+    expect(redactDiagnosticText('a'.repeat(300), 64).length).toBeLessThanOrEqual(64);
+
+    // New event kinds reject unredacted PII/paths/URLs/emails in stackSig/errorName/stage/sourceKind
+    expect(
+      sanitizeTelemetryEvent({
+        kind: 'app_crash',
+        ts: 1000,
+        errorName: 'TypeError',
+        stackSig: 'C:\\Users\\Fatih\\app.ts:10',
+      }),
+    ).toBeNull();
+    expect(
+      sanitizeTelemetryEvent({
+        kind: 'unhandled_error',
+        ts: 1000,
+        errorName: 'Error',
+        stackSig: 'fatih@example.com',
+      }),
+    ).toBeNull();
+    expect(
+      sanitizeTelemetryEvent({
+        kind: 'catalog_import',
+        ts: 1000,
+        sourceKind: 'https://provider.test',
+        stage: 'fetch',
+        durationMs: 100,
+        success: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('attaches sanitized DeviceTechnicalProfile to uploaded batches and previews while dropping unsafe fields', async () => {
+    const sentBodies: string[] = [];
+    const http: SyncHttpPort = {
+      async request(req) {
+        sentBodies.push(req.body ?? '');
+        return { status: 200, bodyText: JSON.stringify({ accepted: 1 }) };
+      },
+    };
+    const deviceProfile: DeviceTechnicalProfile = {
+      osVersion: 'Windows 11',
+      formFactor: 'desktop',
+      arch: 'x64',
+      ramBucket: '16gb',
+      gpu: 'NVIDIA GeForce RTX 4070',
+      resolution: '2560x1440',
+      locale: 'tr-TR',
+    };
+    const uploader = createTelemetryUploader({
+      baseUrl: 'https://sync.example.test',
+      http,
+      isOptedIn: () => true,
+      clock: { now: () => 20_000 },
+      sessionId: 'sess_profile',
+      platform: 'windows',
+      appVersion: '1.0.0',
+      deviceProfile,
+    });
+    uploader.record({
+      kind: 'catalog_import',
+      ts: 20_000,
+      sourceKind: 'm3u',
+      stage: 'complete',
+      durationMs: 450,
+      itemCount: 300,
+      success: true,
+    });
+
+    const preview = JSON.parse(uploader.preview()) as { deviceProfile?: DeviceTechnicalProfile };
+    expect(preview.deviceProfile).toEqual(deviceProfile);
+
+    await uploader.flush();
+    const sent = JSON.parse(sentBodies[0] ?? '{}') as { deviceProfile?: DeviceTechnicalProfile };
+    expect(sent.deviceProfile).toEqual(deviceProfile);
+
+    // Poisoned profile values are stripped rather than leaked
+    const poisonedPreview = buildTelemetryPayloadPreview({
+      sessionId: 'sess_1',
+      platform: 'android-tv',
+      appVersion: '1.0.0',
+      events: [],
+      deviceProfile: {
+        osVersion: 'https://leak.example.com',
+        gpu: 'C:\\Users\\Fatih\\gpu.dll',
+        resolution: '1920x1080',
+        locale: 'en-US',
+      },
+    });
+    const parsedPoisoned = JSON.parse(poisonedPreview) as {
+      deviceProfile?: DeviceTechnicalProfile;
+    };
+    expect(parsedPoisoned.deviceProfile).toEqual({
+      resolution: '1920x1080',
+      locale: 'en-US',
+    });
+  });
+
+  it('P1-5 & P2-2: allows 4-part OS versions, >/:/;/. stackSig, and slash-normalized errorName while rejecting URLs/paths/IPs', () => {
+    // 4-part OS versions pass deviceProfile.osVersion without tripping IPv4 redaction
+    for (const osVer of ['10.0.190.45', '6.8.0.45', '14.2.1.0', '10.0.22631.4460']) {
+      const preview = JSON.parse(
+        buildTelemetryPayloadPreview({
+          sessionId: 'sess_osver',
+          platform: 'windows',
+          appVersion: '1.4.0',
+          events: [],
+          deviceProfile: { osVersion: osVer, gpu: '192.168.1.10' },
+        }),
+      ) as { deviceProfile?: DeviceTechnicalProfile };
+      expect(preview.deviceProfile).toEqual({ osVersion: osVer });
+    }
+
+    // Non-quad IPv4 text in osVersion is still stripped
+    const badOsPreview = JSON.parse(
+      buildTelemetryPayloadPreview({
+        sessionId: 'sess_osver_bad',
+        platform: 'windows',
+        appVersion: '1.4.0',
+        events: [],
+        deviceProfile: { osVersion: 'host 192.168.1.10', arch: 'x64' },
+      }),
+    ) as { deviceProfile?: DeviceTechnicalProfile };
+    expect(badOsPreview.deviceProfile).toEqual({ arch: 'x64' });
+
+    // stackSig accepts '>', ':', ';', '.' and errorName normalizes '/' -> '.'
+    const crash = sanitizeTelemetryEvent({
+      kind: 'app_crash',
+      ts: 5000,
+      errorName: 'storage/schema-corrupt',
+      stackSig: 'CrashRecoveryBoundary>PlayerScreen.tsx:142;renderFrame:55',
+      fatal: true,
+      uptimeMs: 31_536_000_000,
+    });
+    expect(crash).toEqual({
+      kind: 'app_crash',
+      ts: 5000,
+      errorName: 'storage.schema-corrupt',
+      stackSig: 'CrashRecoveryBoundary>PlayerScreen.tsx:142;renderFrame:55',
+      fatal: true,
+      uptimeMs: 31_536_000_000,
+    });
+
+    const unhandled = sanitizeTelemetryEvent({
+      kind: 'unhandled_error',
+      ts: 5001,
+      errorName: 'playback/stream',
+      stackSig: 'App>CatalogGrid:22;useEffect:10',
+    });
+    expect(unhandled).toEqual({
+      kind: 'unhandled_error',
+      ts: 5001,
+      errorName: 'playback.stream',
+      stackSig: 'App>CatalogGrid:22;useEffect:10',
+    });
+
+    // Adversarial slash inputs MUST still be rejected in errorName
+    for (const badErr of [
+      'https://evil.test/foo',
+      '/Users/alice/bad',
+      '/etc/passwd',
+      'foo//bar',
+      '192/168/1/1',
+      'trailing/',
+      'evil.com/path',
+    ]) {
+      expect(
+        sanitizeTelemetryEvent({
+          kind: 'app_crash',
+          ts: 5002,
+          errorName: badErr,
+          stackSig: 'App>Main:1',
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it('P1-6: drops rejected telemetry batches on HTTP 400/413 while retaining and backing off on 429/5xx', async () => {
+    let nextStatus = 400;
+    let now = 100_000;
+    let calls = 0;
+    const http: SyncHttpPort = {
+      async request() {
+        calls += 1;
+        return { status: nextStatus, bodyText: JSON.stringify({ error: 'bad' }) };
+      },
+    };
+    const uploader = createTelemetryUploader({
+      baseUrl: 'https://sync.example.test',
+      http,
+      isOptedIn: () => true,
+      clock: { now: () => now },
+      sessionId: 'sess_drop400',
+      platform: 'windows',
+      appVersion: '1.4.0',
+      baseBackoffMs: 2_000,
+      maxBackoffMs: 16_000,
+    });
+
+    // 400 drains rejected batch immediately without poisoning subsequent healthy events
+    uploader.record({ kind: 'startup', ts: 1, durationMs: 100, coldStart: true });
+    expect(await uploader.flush()).toEqual({ sent: 0, skippedReason: 'rejected' });
+    expect(uploader.queue.size()).toBe(0);
+
+    // 413 drains oversized batch immediately without triggering backoff
+    nextStatus = 413;
+    uploader.record({ kind: 'startup', ts: 2, durationMs: 200, coldStart: false });
+    expect(await uploader.flush()).toEqual({ sent: 0, skippedReason: 'rejected' });
+    expect(uploader.queue.size()).toBe(0);
+
+    // Immediate next healthy batch flushes with zero backoff delay
+    nextStatus = 200;
+    uploader.record({ kind: 'startup', ts: 3, durationMs: 300, coldStart: false });
+    expect(await uploader.flush()).toEqual({ sent: 1 });
+    expect(uploader.queue.size()).toBe(0);
+
+    // 429 MUST NOT drop batch and MUST trigger backoff
+    nextStatus = 429;
+    uploader.record({ kind: 'startup', ts: 4, durationMs: 400, coldStart: false });
+    expect(await uploader.flush()).toEqual({ sent: 0, skippedReason: 'network_error' });
+    expect(uploader.queue.size()).toBe(1);
+    now += 500;
+    expect(await uploader.flush()).toEqual({ sent: 0, skippedReason: 'backoff' });
+    expect(calls).toBe(4);
   });
 });

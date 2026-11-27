@@ -584,11 +584,9 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 1008, animated: true });
 
-    // Diagnostics (3 rows) -> 1148
+    // Unified Diagnostics (1 row) -> 1148
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 1148, animated: true });
-    await pressKey(KEYCODE_DPAD_DOWN);
-    await pressKey(KEYCODE_DPAD_DOWN);
 
     // Reset (very bottom) -> 1308
     await pressKey(KEYCODE_DPAD_DOWN);

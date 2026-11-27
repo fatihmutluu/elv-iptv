@@ -25,8 +25,13 @@ export interface DesktopVideoHostDeps {
   readonly windowBridge?: WindowBridge | undefined;
   readonly presenterKind?: PresenterKind | undefined;
   readonly telemetry?:
-    | Pick<DesktopTelemetryPort, 'isOptedIn' | 'recordMediaDecodeFailure' | 'recordPlaybackError'>
+    | (Pick<
+        DesktopTelemetryPort,
+        'isOptedIn' | 'recordMediaDecodeFailure' | 'recordPlaybackError'
+      > &
+        Partial<Pick<DesktopTelemetryPort, 'recordPlaybackStart' | 'recordPlaybackRebuffer'>>)
     | undefined;
+  readonly clock?: (() => number) | undefined;
 }
 
 const SAFE_CODEC_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
@@ -56,26 +61,56 @@ function inferContainerFromDetail(detail: string | undefined, isLiveTs: boolean)
 
 function attachDesktopEngineTelemetryObserver(
   engine: Pick<PlayerEngine, 'subscribe'>,
-  telemetry: Pick<
-    DesktopTelemetryPort,
-    'isOptedIn' | 'recordMediaDecodeFailure' | 'recordPlaybackError'
-  >,
-): () => void {
+  telemetry: NonNullable<DesktopVideoHostDeps['telemetry']>,
+  nowMs: () => number,
+): { off: () => void; noteLoad: (attempt: number, live: boolean) => void } {
   let lastAttempt = -1;
   let isLive = true;
   let isLiveTs = false;
   let videoCodec = 'unknown';
   let audioCodec = 'unknown';
   let hdrFormat: string | undefined;
+  let attemptStartedAt: number | null = null;
+  let startRecorded = false;
+  let hasPlayed = false;
+  let stallStartEventMs: number | null = null;
+  let stallStartedClockMs: number | null = null;
+  let bufferingStartedClockMs: number | null = null;
 
-  return engine.subscribe((event: EngineEvent) => {
+  const resetAttempt = (attempt: number, live: boolean): void => {
+    lastAttempt = attempt;
+    isLive = live;
+    isLiveTs = false;
+    videoCodec = 'unknown';
+    audioCodec = 'unknown';
+    hdrFormat = undefined;
+    attemptStartedAt = nowMs();
+    startRecorded = false;
+    hasPlayed = false;
+    stallStartEventMs = null;
+    stallStartedClockMs = null;
+    bufferingStartedClockMs = null;
+  };
+
+  const emitStartIfNeeded = (): void => {
+    hasPlayed = true;
+    if (startRecorded) return;
+    startRecorded = true;
+    if (telemetry.isOptedIn() !== true) return;
+    const ttffMs =
+      attemptStartedAt === null ? 0 : Math.max(0, Math.round(nowMs() - attemptStartedAt));
+    telemetry.recordPlaybackStart?.({
+      engine: 'mpv',
+      ttffMs,
+      isLive,
+      ...(isLiveTs ? { container: 'mpegts' } : {}),
+      ...(videoCodec !== 'unknown' ? { videoCodec } : {}),
+    });
+  };
+
+  const off = engine.subscribe((event: EngineEvent) => {
     if (event.attempt !== lastAttempt) {
-      lastAttempt = event.attempt;
-      isLive = true;
-      isLiveTs = false;
-      videoCodec = 'unknown';
-      audioCodec = 'unknown';
-      hdrFormat = undefined;
+      resetAttempt(event.attempt, true);
     }
     if (event.type === 'clock') {
       if (event.anchor.isLiveTs === true) {
@@ -100,6 +135,49 @@ function attachDesktopEngineTelemetryObserver(
       if (selected?.codec !== undefined) audioCodec = sanitizeCodecToken(selected.codec);
       return;
     }
+    if (event.type === 'firstFrame') {
+      emitStartIfNeeded();
+      return;
+    }
+    if (event.type === 'stall') {
+      if (event.phase === 'start') {
+        stallStartEventMs = event.atMs;
+        stallStartedClockMs = nowMs();
+        bufferingStartedClockMs = null;
+      } else if (stallStartedClockMs !== null) {
+        const dur =
+          stallStartEventMs !== null && event.atMs >= stallStartEventMs
+            ? Math.round(event.atMs - stallStartEventMs)
+            : Math.max(0, Math.round(nowMs() - stallStartedClockMs));
+        stallStartEventMs = null;
+        stallStartedClockMs = null;
+        if (telemetry.isOptedIn() === true) {
+          telemetry.recordPlaybackRebuffer?.({ engine: 'mpv', durationMs: dur, isLive });
+        }
+      }
+      return;
+    }
+    if (event.type === 'state') {
+      if (event.state === 'opening' && attemptStartedAt === null) {
+        attemptStartedAt = nowMs();
+      } else if (event.state === 'buffering') {
+        if (hasPlayed && stallStartedClockMs === null && bufferingStartedClockMs === null) {
+          bufferingStartedClockMs = nowMs();
+        }
+      } else if (event.state === 'playing') {
+        emitStartIfNeeded();
+        if (bufferingStartedClockMs !== null) {
+          const dur = Math.max(0, Math.round(nowMs() - bufferingStartedClockMs));
+          bufferingStartedClockMs = null;
+          if (telemetry.isOptedIn() === true) {
+            telemetry.recordPlaybackRebuffer?.({ engine: 'mpv', durationMs: dur, isLive });
+          }
+        }
+      } else if (event.state === 'paused' || event.state === 'ended') {
+        bufferingStartedClockMs = null;
+      }
+      return;
+    }
     if (event.type === 'error') {
       if (telemetry.isOptedIn() !== true) return;
       const code = event.error.code;
@@ -122,6 +200,11 @@ function attachDesktopEngineTelemetryObserver(
       }
     }
   });
+
+  return {
+    off,
+    noteLoad: (attempt: number, live: boolean) => resetAttempt(attempt, live),
+  };
 }
 
 /**
@@ -150,15 +233,18 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
         ? undefined
         : window.elv?.presenter;
 
+  const nowMs = deps?.clock ?? (() => performance.now());
+
   const wrapDesktopEngine = async (
     rawEngine: DesktopEngine,
     playerBridge: PlayerBridge,
     initialPrimary: boolean,
   ): Promise<OpenVideoEngine> => {
-    const offTelemetry =
+    const telemetryObserver =
       deps?.telemetry !== undefined
-        ? attachDesktopEngineTelemetryObserver(rawEngine, deps.telemetry)
+        ? attachDesktopEngineTelemetryObserver(rawEngine, deps.telemetry, nowMs)
         : undefined;
+    const offTelemetry = telemetryObserver?.off;
     const mediaSession = createDesktopMediaSession();
     let activeHostKeyListener: ((key: DesktopHostKey) => void) | null = null;
     let overlayMode: 'floating' | 'docked' = 'floating';
@@ -223,6 +309,10 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
     };
     const engine = {
       ...boundEngine,
+      load(cmd: Parameters<PlayerEngine['load']>[0]) {
+        telemetryObserver?.noteLoad(cmd.attempt, cmd.kind === 'live');
+        boundEngine.load(cmd);
+      },
       setPrimary: promotePrimary,
       release() {
         cleanupLocal();

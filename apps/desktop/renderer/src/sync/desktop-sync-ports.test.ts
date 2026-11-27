@@ -6,7 +6,7 @@ import type {
   TelemetryBridge,
   TelemetryStatusIpc,
 } from '../../../src/shared/sync-ipc.ts';
-import { createDesktopSyncPorts } from './desktop-sync-ports.ts';
+import { createDesktopSyncPorts, extractSafeRendererErrorSignature } from './desktop-sync-ports.ts';
 
 describe('createDesktopSyncPorts (#26, #458)', () => {
   it('returns undefined ports when Electron preload bridges are absent', () => {
@@ -158,6 +158,28 @@ describe('createDesktopSyncPorts (#26, #458)', () => {
     expect(ports.telemetry?.isOptedIn()).toBe(true);
     ports.telemetry?.recordScreenTransition('live', 20);
     await vi.waitFor(() => expect(telemetryBridge.record).toHaveBeenCalledTimes(1));
+    ports.telemetry?.recordStartup(340, true);
+    ports.telemetry?.recordPlaybackStart({
+      engine: 'mpv',
+      ttffMs: 220,
+      isLive: true,
+      container: 'ts',
+    });
+    ports.telemetry?.recordPlaybackRebuffer({ engine: 'mpv', durationMs: 450, isLive: true });
+    ports.telemetry?.recordSqliteSlowOp({ op: 'SELECT', durationMs: 310 });
+    ports.telemetry?.recordCatalogImport({
+      sourceKind: 'm3u',
+      stage: 'catalog',
+      durationMs: 900,
+      itemCount: 150,
+      success: true,
+    });
+    ports.telemetry?.recordUnhandledError({
+      errorName: 'TypeError',
+      stackSig: 'App.tsx:42',
+      source: 'renderer',
+    });
+    await vi.waitFor(() => expect(telemetryBridge.record).toHaveBeenCalledTimes(7));
     await ports.telemetry?.flush();
     expect(telemetryBridge.flush).toHaveBeenCalledTimes(1);
 
@@ -172,6 +194,65 @@ describe('createDesktopSyncPorts (#26, #458)', () => {
 
     ports.dispose();
     expect(stateListener).toBeUndefined();
+  });
+
+  it('forwards markSyncDirty() over IPC and redacts provider URLs/host:ports BEFORE extracting renderer stack signatures (P1-3, P1-6)', () => {
+    const markSyncDirty = vi.fn(async () => undefined);
+    const notifySyncDirty = vi.fn(async () => undefined);
+    const ports = createDesktopSyncPorts({
+      sync: {
+        getState: vi.fn(async () => ({
+          status: 'signed_out' as const,
+          email: null,
+          lastSyncedAtIso: null,
+          pendingRecoveryCode: null,
+          errorCode: null,
+        })),
+        onStateChanged: vi.fn(() => () => undefined),
+        signIn: vi.fn(async () => ({ ok: true })),
+        register: vi.fn(async () => ({ ok: true })),
+        acknowledgeRecoveryCode: vi.fn(async () => undefined),
+        syncNow: vi.fn(async () => ({ ok: true })),
+        signOut: vi.fn(async () => undefined),
+        deleteAccount: vi.fn(async () => ({ ok: true })),
+        createQrPairing: vi.fn(async () => ({
+          pairingId: 'p1',
+          code: '123456',
+          qrUri: 'elviptv://pair?c=123456&k=AAAAAAAAAAAAAAAAAAAAAA',
+          expiresAtMs: Date.now() + 300_000,
+          status: 'pending' as const,
+        })),
+        pollQrPairing: vi.fn(async () => 'pending' as const),
+        claimQrPairing: vi.fn(async () => ({ ok: true })),
+        setServerUrl: vi.fn(async () => undefined),
+        markSyncDirty,
+        notifySyncDirty,
+      },
+    });
+    ports.syncAccount?.markSyncDirty();
+    expect(markSyncDirty).toHaveBeenCalledTimes(1);
+    expect(notifySyncDirty).not.toHaveBeenCalled();
+    ports.dispose();
+
+    const leaked = extractSafeRendererErrorSignature(
+      Object.assign(new TypeError('stream failed'), {
+        stack:
+          'TypeError: stream failed\n    at load (https://myprovider.de:8080/live/u/p/99.ts:12:4)\n    at myprovider.de:8080/playlist.m3u',
+      }),
+      'https://myprovider.de:8080/live/99.ts',
+      8080,
+    );
+    expect(leaked.errorName).toBe('TypeError');
+    expect(leaked.stackSig).not.toContain('myprovider');
+    expect(leaked.stackSig).not.toContain('8080');
+    expect(leaked.stackSig).not.toContain('99.ts');
+
+    const safeBundle = extractSafeRendererErrorSignature(
+      Object.assign(new Error('boom'), {
+        stack: 'Error: boom\n    at onPlay (App.tsx:77:3)',
+      }),
+    );
+    expect(safeBundle).toEqual({ errorName: 'Error', stackSig: 'App.tsx:77' });
   });
 
   it('guards hydrate() with a monotonic mutation counter so in-flight hydrate() never overwrites a newer setOptIn(true) and notifies onTelemetryStatusChanged after record/flush (MEDIUM #15)', async () => {

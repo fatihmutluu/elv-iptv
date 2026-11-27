@@ -6,13 +6,35 @@ import {
   utf8Decode,
   utf8Encode,
 } from './encoding';
+import { MAX_SYNC_QR_BYTES, type QrPairingPayload } from './pairing-v2';
 import type { SyncHttpPort, VaultCryptoPort } from './ports';
 
-/** Hard byte ceiling matching `@elv/ui-kit` QR encoder capacity (`MAX_QR_PAYLOAD_BYTES`). */
-export const MAX_SYNC_QR_BYTES = 213;
+export {
+  type BidirectionalPairingQrParams,
+  buildPairingTranscriptAad,
+  decryptPairingTransfer,
+  derivePairingSessionKeys,
+  type EncryptedPairingTransfer,
+  type EncryptPairingTransferOptions,
+  encodeBidirectionalPairingQr,
+  encryptPairingTransfer,
+  hashPairingEmail,
+  MAX_SYNC_QR_BYTES,
+  maskEmail,
+  normalizePairingCode,
+  PAIR_CODE_RE,
+  type PairingDirection,
+  type PairingParticipantAuth,
+  type PairingSessionKeys,
+  type PairingTranscript,
+  type ParsedPairingQrOrCode,
+  parsePairingQrOrCode,
+  type QrPairingPayload,
+  resolvePairingDirection,
+} from './pairing-v2';
 
 const QR_PREFIX = 'elviptv://pair?';
-const PAIR_CODE_RE = /^[A-Za-z0-9]{6,24}$/;
+const LEGACY_PAIR_CODE_RE = /^[A-Za-z0-9]{6,24}$/;
 const EPHEMERAL_KEY_BYTES = 16;
 const AES_GCM_IV_BYTES = 12;
 
@@ -21,13 +43,6 @@ export interface PairingQrParams {
   readonly code: string;
   readonly keyB64: string;
   readonly serverUrl?: string;
-}
-
-/** E2EE credential handoff payload encrypted under the target device's ephemeral key `k`. */
-export interface QrPairingPayload {
-  readonly email: string;
-  readonly refreshToken: string;
-  readonly vaultKeyB64: string;
 }
 
 /** Active pairing session owned by the target device waiting to be claimed. */
@@ -73,7 +88,7 @@ export interface QrPairingClient {
 }
 
 function validatePairingCode(code: string): boolean {
-  return PAIR_CODE_RE.test(code);
+  return LEGACY_PAIR_CODE_RE.test(code);
 }
 
 function decodeEphemeralKey(keyB64: string): Uint8Array | null {

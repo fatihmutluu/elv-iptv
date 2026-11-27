@@ -40,6 +40,10 @@ export interface WatchProgressSyncParams {
   catalogRef: MutableRefObject<WatchProgressCatalog>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
+  /** Optional automatic background sync callback invoked when playback pauses (`#510`). */
+  onPlaybackPause?: () => void;
+  /** Optional automatic background sync callback invoked on playback exit, completion, or item switch (`#510`). */
+  onPlaybackExitOrSwitch?: () => void;
 }
 
 /** Return handle of {@link useWatchProgressSync}. */
@@ -100,10 +104,16 @@ export function useWatchProgressSync({
   catalogRef,
   clockRef,
   timersRef,
+  onPlaybackPause,
+  onPlaybackExitOrSwitch,
 }: WatchProgressSyncParams): WatchProgressSyncHandle {
   const targetRef = useRef<PlayableEntry>(activeTarget);
   targetRef.current = activeTarget;
   const lastSavedRef = useRef<LastSavedSnapshot | null>(null);
+  const onPauseRef = useRef(onPlaybackPause);
+  onPauseRef.current = onPlaybackPause;
+  const onExitOrSwitchRef = useRef(onPlaybackExitOrSwitch);
+  onExitOrSwitchRef.current = onPlaybackExitOrSwitch;
 
   const persistSnapshot = useCallback(
     (entry: PlayableEntry, positionMs: number, durationMs: number, mode: FlushMode): void => {
@@ -225,6 +235,7 @@ export function useWatchProgressSync({
         ? Math.max(0, Math.round(positionAt(anchor, clockRef.current.now())))
         : 0;
     persistSnapshot(entry, durationMs > 0 ? durationMs : lastPos, durationMs, 'ended');
+    onExitOrSwitchRef.current?.();
   }, [catalogRef, clockRef, persistSnapshot, serviceRef]);
 
   const prevStatusRef = useRef<PlaybackStatus['kind']>(status.kind);
@@ -236,13 +247,19 @@ export function useWatchProgressSync({
     prevStatusRef.current = status.kind;
     prevItemKeyRef.current = activeTarget.itemKey;
 
-    if (activeTarget.kind !== 'vod' || activeTarget.catchup !== undefined) return;
+    if (prevKey !== activeTarget.itemKey) {
+      onExitOrSwitchRef.current?.();
+    }
+
     if (prevStatus === status.kind && prevKey === activeTarget.itemKey) return;
 
+    const isVod = activeTarget.kind === 'vod' && activeTarget.catchup === undefined;
     if (status.kind === 'paused') {
-      flush('immediate', undefined, activeTarget.itemKey);
+      if (isVod) flush('immediate', undefined, activeTarget.itemKey);
+      if (prevStatus !== 'paused') onPauseRef.current?.();
     } else if (status.kind === 'ended') {
-      flush('ended', undefined, activeTarget.itemKey);
+      if (isVod) flush('ended', undefined, activeTarget.itemKey);
+      if (prevStatus !== 'ended') onExitOrSwitchRef.current?.();
     }
   }, [activeTarget.catchup, activeTarget.itemKey, activeTarget.kind, flush, status.kind]);
 
@@ -292,6 +309,7 @@ export function useWatchProgressSync({
   useEffect(() => {
     return () => {
       flush('immediate');
+      onExitOrSwitchRef.current?.();
     };
   }, [flush]);
 

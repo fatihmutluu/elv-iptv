@@ -91,6 +91,7 @@ export {
 export * from './sources';
 export { stalkerKey } from './stalker-secret';
 export * from './stream-resolver';
+export * from './sync-state-repo';
 export * from './templates';
 export * from './title-clean';
 export {

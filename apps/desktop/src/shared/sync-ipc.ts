@@ -1,6 +1,34 @@
 import { isValidSyncServerUrl } from '@elv/domain';
+import {
+  type AutoSyncStateIpc,
+  type BidirectionalPairingSnapshotIpc,
+  type BidirectionalPairingStatusIpc,
+  isBidirectionalPairingSnapshot,
+  isPairDeepLinkUri,
+  isSyncPairConfirmRequest,
+  isSyncPairJoinRequest,
+  isSyncPairPollRequest,
+  isSyncSetViewingActiveRequest,
+  isTelemetryRecordRequest,
+  type TelemetryRecordRequest,
+  VALID_AUTO_SYNC_STATES,
+} from './sync-ipc-p9-guards.ts';
 
-/** Strictly allowlisted Electron IPC channels for Wave F9 E2EE sync, telemetry, and feedback (`#26`, `#458`). */
+export {
+  type AutoSyncStateIpc,
+  type BidirectionalPairingSnapshotIpc,
+  type BidirectionalPairingStatusIpc,
+  isBidirectionalPairingSnapshot,
+  isPairDeepLinkUri,
+  isSyncPairConfirmRequest,
+  isSyncPairJoinRequest,
+  isSyncPairPollRequest,
+  isSyncSetViewingActiveRequest,
+  isTelemetryRecordRequest,
+  type TelemetryRecordRequest,
+};
+
+/** Strictly allowlisted Electron IPC channels for Wave F9/P9 E2EE sync, pairing, telemetry, and feedback (`#26`, `#458`, `#509`, `#510`). */
 export const SYNC_CHANNELS = Object.freeze({
   getState: 'sync:getState',
   signIn: 'sync:signIn',
@@ -16,6 +44,19 @@ export const SYNC_CHANNELS = Object.freeze({
   setSyncablePrefs: 'sync:setSyncablePrefs',
   initialPrefsReceived: 'sync:initialPrefsReceived',
   stateChanged: 'sync:stateChanged',
+  markSyncDirty: 'sync:markSyncDirty',
+  notifySyncDirty: 'sync:notifySyncDirty',
+  notifyPlaybackPause: 'sync:notifyPlaybackPause',
+  notifyPlaybackExitOrSwitch: 'sync:notifyPlaybackExitOrSwitch',
+  setViewingActive: 'sync:setViewingActive',
+  notifyReconnect: 'sync:notifyReconnect',
+  pairStart: 'sync:pairStart',
+  pairJoin: 'sync:pairJoin',
+  pairPoll: 'sync:pairPoll',
+  pairConfirm: 'sync:pairConfirm',
+  pairCancel: 'sync:pairCancel',
+  consumePendingPairUri: 'sync:consumePendingPairUri',
+  pairDeepLink: 'sync:pairDeepLink',
   telemetrySetOptIn: 'telemetry:setOptIn',
   telemetryGetStatus: 'telemetry:getStatus',
   telemetryRecord: 'telemetry:record',
@@ -31,6 +72,7 @@ export interface SyncAccountStateIpc {
   readonly lastSyncedAtIso: string | null;
   readonly pendingRecoveryCode: string | null;
   readonly errorCode: string | null;
+  readonly autoSyncState?: AutoSyncStateIpc;
 }
 
 export interface SyncActionResultIpc {
@@ -84,29 +126,6 @@ export interface TelemetrySetOptInRequest {
   readonly enabled: boolean;
 }
 
-export type TelemetryRecordRequest =
-  | {
-      readonly kind: 'screen_transition';
-      readonly screen: string;
-      readonly durationMs: number;
-    }
-  | {
-      readonly kind: 'media_decode_failure';
-      readonly engine: string;
-      readonly container?: string;
-      readonly videoCodec?: string;
-      readonly audioCodec?: string;
-      readonly errorCode: string;
-      readonly hdrFormat?: string;
-      readonly isLive: boolean;
-    }
-  | {
-      readonly kind: 'playback_error';
-      readonly engine: string;
-      readonly errorCode: string;
-      readonly isLive: boolean;
-    };
-
 export interface TelemetryStatusIpc {
   readonly optedIn: boolean;
   readonly queuedCount: number;
@@ -133,7 +152,7 @@ export interface FeedbackSubmitResultIpc {
   readonly errorCode?: string;
 }
 
-/** Frozen `window.elv.sync` bridge exposed by the sandboxed Electron preload (`#26`). */
+/** Frozen `window.elv.sync` bridge exposed by the sandboxed Electron preload (`#26`, `#510`). */
 export interface SyncBridge {
   getState(): Promise<SyncAccountStateIpc>;
   onStateChanged(listener: (state: SyncAccountStateIpc) => void): () => void;
@@ -151,9 +170,25 @@ export interface SyncBridge {
   onInitialPreferencesReceived?(
     listener: (preferences: Readonly<Record<string, unknown>>) => void,
   ): () => void;
+  markSyncDirty?(): Promise<void>;
+  notifySyncDirty?(): Promise<void>;
+  notifyPlaybackPause?(): Promise<void>;
+  notifyPlaybackExitOrSwitch?(): Promise<void>;
+  setViewingActive?(active: boolean): Promise<void>;
+  notifyReconnect?(): Promise<void>;
+  startBidirectionalPairing?(): Promise<BidirectionalPairingSnapshotIpc>;
+  joinBidirectionalPairing?(codeOrUri: string): Promise<BidirectionalPairingSnapshotIpc>;
+  pollBidirectionalPairing?(pairingId: string): Promise<BidirectionalPairingSnapshotIpc>;
+  confirmBidirectionalPairing?(
+    pairingId: string,
+    chosenDirection?: 'host_to_responder' | 'responder_to_host',
+  ): Promise<SyncActionResultIpc>;
+  cancelBidirectionalPairing?(pairingId: string): Promise<void>;
+  consumePendingPairUri?(): Promise<string | null>;
+  onPairDeepLink?(listener: (uri: string) => void): () => void;
 }
 
-/** Frozen `window.elv.telemetry` bridge exposed by the sandboxed Electron preload (`#458`). */
+/** Frozen `window.elv.telemetry` bridge exposed by the sandboxed Electron preload (`#458`, `#509`). */
 export interface TelemetryBridge {
   setOptIn(enabled: boolean): Promise<TelemetryStatusIpc>;
   getStatus(): Promise<TelemetryStatusIpc>;
@@ -169,7 +204,6 @@ export interface FeedbackBridge {
 const MAX_EMAIL_LEN = 254;
 const MAX_SECRET_LEN = 512;
 const MAX_QR_URI_BYTES = 213;
-const MAX_TOKEN_LEN = 64;
 const MAX_FEEDBACK_MSG_LEN = 4000;
 const MAX_PREVIEW_BYTES = 262_144;
 const utf8Encoder = new TextEncoder();
@@ -267,16 +301,32 @@ export function isSyncSetSyncablePrefsRequest(x: unknown): x is SyncSetSyncableP
   );
 }
 
+const SYNC_ACCOUNT_STATE_KEYS = new Set([
+  'status',
+  'email',
+  'lastSyncedAtIso',
+  'pendingRecoveryCode',
+  'errorCode',
+  'autoSyncState',
+]);
+
 export function isSyncAccountState(x: unknown): x is SyncAccountStateIpc {
   return (
     isSafeRecord(x) &&
-    hasExactKeys(x, ['status', 'email', 'lastSyncedAtIso', 'pendingRecoveryCode', 'errorCode']) &&
+    hasSubsetKeys(x, SYNC_ACCOUNT_STATE_KEYS) &&
+    Object.hasOwn(x, 'status') &&
+    Object.hasOwn(x, 'email') &&
+    Object.hasOwn(x, 'lastSyncedAtIso') &&
+    Object.hasOwn(x, 'pendingRecoveryCode') &&
+    Object.hasOwn(x, 'errorCode') &&
     typeof x.status === 'string' &&
     VALID_STATUSES.has(x.status) &&
     isNullableBoundedString(x.email, MAX_EMAIL_LEN) &&
     isNullableBoundedString(x.lastSyncedAtIso, 64) &&
     isNullableBoundedString(x.pendingRecoveryCode, 64) &&
-    isNullableBoundedString(x.errorCode, 128)
+    isNullableBoundedString(x.errorCode, 128) &&
+    (x.autoSyncState === undefined ||
+      (typeof x.autoSyncState === 'string' && VALID_AUTO_SYNC_STATES.has(x.autoSyncState)))
   );
 }
 
@@ -313,51 +363,6 @@ export function isSyncQrPollStatus(x: unknown): x is SyncQrPollStatusIpc {
 
 export function isTelemetrySetOptInRequest(x: unknown): x is TelemetrySetOptInRequest {
   return isSafeRecord(x) && hasExactKeys(x, ['enabled']) && typeof x.enabled === 'boolean';
-}
-
-const DECODE_FAILURE_KEYS = new Set([
-  'kind',
-  'engine',
-  'container',
-  'videoCodec',
-  'audioCodec',
-  'errorCode',
-  'hdrFormat',
-  'isLive',
-]);
-
-export function isTelemetryRecordRequest(x: unknown): x is TelemetryRecordRequest {
-  if (!isSafeRecord(x) || typeof x.kind !== 'string') return false;
-  if (x.kind === 'screen_transition') {
-    return (
-      hasExactKeys(x, ['kind', 'screen', 'durationMs']) &&
-      isBoundedString(x.screen, MAX_TOKEN_LEN) &&
-      typeof x.durationMs === 'number' &&
-      Number.isFinite(x.durationMs) &&
-      x.durationMs >= 0
-    );
-  }
-  if (x.kind === 'media_decode_failure') {
-    return (
-      hasSubsetKeys(x, DECODE_FAILURE_KEYS) &&
-      isBoundedString(x.engine, MAX_TOKEN_LEN) &&
-      isOptionalBoundedString(x.container, MAX_TOKEN_LEN) &&
-      isOptionalBoundedString(x.videoCodec, MAX_TOKEN_LEN) &&
-      isOptionalBoundedString(x.audioCodec, MAX_TOKEN_LEN) &&
-      isBoundedString(x.errorCode, MAX_TOKEN_LEN) &&
-      isOptionalBoundedString(x.hdrFormat, MAX_TOKEN_LEN) &&
-      typeof x.isLive === 'boolean'
-    );
-  }
-  if (x.kind === 'playback_error') {
-    return (
-      hasExactKeys(x, ['kind', 'engine', 'errorCode', 'isLive']) &&
-      isBoundedString(x.engine, MAX_TOKEN_LEN) &&
-      isBoundedString(x.errorCode, MAX_TOKEN_LEN) &&
-      typeof x.isLive === 'boolean'
-    );
-  }
-  return false;
 }
 
 export function isTelemetryStatus(x: unknown): x is TelemetryStatusIpc {

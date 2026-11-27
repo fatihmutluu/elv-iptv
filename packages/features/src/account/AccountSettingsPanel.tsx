@@ -1,4 +1,3 @@
-import type { PreferencesPatch, PreferencesSnapshot } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import {
   Surface,
@@ -9,29 +8,23 @@ import {
   useTheme,
   useViewport,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useRef, useState } from 'react';
+import { type ReactElement, useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
-import type { SyncAccountPort } from '../ports/wave-f9-ports';
+import type { QrScannerPort, SyncAccountPort } from '../ports/wave-f9-ports';
 import { useRouteActive } from '../shared';
 import { AccountSignedInSection } from './AccountSignedInSection';
 import { AccountSignedOutSection } from './AccountSignedOutSection';
 import { useSyncAccountState } from './account-helpers';
 
-/** Structural preferences slice consumed by {@link AccountSettingsPanel}. */
-export interface AccountPreferencesSlice {
-  readonly preferences: Pick<PreferencesSnapshot, 'syncServerUrl'>;
-  readonly updatePreferences: (patch: PreferencesPatch) => unknown;
-}
-
 /** Props of {@link AccountSettingsPanel}. */
 export interface AccountSettingsPanelProps {
   readonly syncAccount?: SyncAccountPort;
-  /** Optional reactive preferences controller for reading/updating `syncServerUrl`. */
-  readonly preferences?: AccountPreferencesSlice;
-  /** Current custom sync server base URL (overrides `preferences.preferences.syncServerUrl` when set). */
-  readonly syncServerUrl?: string;
-  /** Invoked with a validated, normalized sync server base URL (or `''` when cleared). */
-  readonly onSyncServerUrlChange?: (nextUrl: string) => unknown;
+  /** Optional native camera QR scanner port for bidirectional pairing (`#510`). */
+  readonly qrScanner?: QrScannerPort;
+  /** Optional incoming `elviptv://pair?...` or Universal Link pairing URI (`#510`). */
+  readonly pendingPairUri?: string | null;
+  /** Invoked once `pendingPairUri` has been consumed. */
+  readonly onPairUriHandled?: () => void;
   /** Whether this Settings detail pane currently owns 10-foot TV remote focus. */
   readonly isActiveScope?: boolean;
   /** Returns TV focus from this panel back to the Settings sidebar. */
@@ -70,16 +63,16 @@ function AccountPanelTvBridge({
 }
 
 /**
- * Cinema Quietude v2 Settings Account & Sync panel (`#26`).
- * Supports E2EE Sign In / Create Account / Universal QR Pairing, custom Sync server URL configuration,
- * Recovery Code acknowledgment, Approve Device Pairing (including queued sign-in-first handoff),
- * Sync Now, Sign Out, and Apple 5.1.1(v) / Google Play permanent account deletion.
+ * Cinema Quietude v2 Settings Account & Sync panel (`#26`, `#510`).
+ * Supports E2EE Sign In / Create Account / Bidirectional X25519 QR & 8-Digit Pairing,
+ * automatic background sync status, Recovery Code acknowledgment, Sign Out,
+ * and Apple 5.1.1(v) / Google Play permanent account deletion.
  */
 export function AccountSettingsPanel({
   syncAccount,
-  preferences,
-  syncServerUrl,
-  onSyncServerUrlChange,
+  qrScanner,
+  pendingPairUri,
+  onPairUriHandled,
   isActiveScope = true,
   onBack,
   onFocusTopNav,
@@ -92,45 +85,14 @@ export function AccountSettingsPanel({
   const isTv = viewport.formFactor === 'tv' || viewport.inputModality === 'tv';
 
   const accountState = useSyncAccountState(syncAccount);
-  const [pendingClaimCode, setPendingClaimCode] = useState<string | null>(null);
-  const pendingClaimRef = useRef<string | null>(null);
-  pendingClaimRef.current = pendingClaimCode;
-  const [autoClaimStatus, setAutoClaimStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [deleteSuccessBanner, setDeleteSuccessBanner] = useState(false);
-
-  const effectiveSyncServerUrl = syncServerUrl ?? preferences?.preferences.syncServerUrl ?? '';
-  const handleSyncServerUrlChange = useCallback(
-    (nextUrl: string) => {
-      if (onSyncServerUrlChange !== undefined) {
-        onSyncServerUrlChange(nextUrl);
-      } else if (preferences !== undefined) {
-        void preferences.updatePreferences({ syncServerUrl: nextUrl });
-      }
-    },
-    [onSyncServerUrlChange, preferences],
-  );
-
-  const handleQueuePendingClaim = useCallback((codeOrUri: string) => {
-    setPendingClaimCode(codeOrUri);
-    setAutoClaimStatus('idle');
-  }, []);
 
   const handleAuthSucceeded = useCallback(async () => {
     setDeleteSuccessBanner(false);
-    const queued = pendingClaimRef.current;
-    if (!queued || !syncAccount) return;
-    setPendingClaimCode(null);
-    try {
-      const res = await syncAccount.claimQrPairing(queued);
-      setAutoClaimStatus(res.ok ? 'success' : 'error');
-    } catch {
-      setAutoClaimStatus('error');
-    }
-  }, [syncAccount]);
+  }, []);
 
   const handleDeleteSuccess = useCallback(() => {
     setDeleteSuccessBanner(true);
-    setAutoClaimStatus('idle');
   }, []);
 
   const isSignedIn = accountState.status === 'signed_in' || accountState.status === 'syncing';
@@ -177,22 +139,22 @@ export function AccountSettingsPanel({
               state={accountState}
               isTv={isTv}
               isActiveScope={isActiveScope}
-              autoClaimStatus={autoClaimStatus}
               onDeleteSuccess={handleDeleteSuccess}
-              syncServerUrl={effectiveSyncServerUrl}
-              onSyncServerUrlChange={handleSyncServerUrlChange}
+              {...(qrScanner !== undefined ? { qrScanner } : {})}
+              {...(pendingPairUri !== undefined ? { pendingPairUri } : {})}
+              {...(onPairUriHandled !== undefined ? { onPairUriHandled } : {})}
+              {...(qrPollIntervalMs !== undefined ? { qrPollIntervalMs } : {})}
             />
           ) : (
             <AccountSignedOutSection
               syncAccount={syncAccount}
               isTv={isTv}
               isActiveScope={isActiveScope}
-              pendingClaimCode={pendingClaimCode}
-              onQueuePendingClaim={handleQueuePendingClaim}
               onAuthSucceeded={handleAuthSucceeded}
               deleteSuccessBanner={deleteSuccessBanner}
-              syncServerUrl={effectiveSyncServerUrl}
-              onSyncServerUrlChange={handleSyncServerUrlChange}
+              {...(qrScanner !== undefined ? { qrScanner } : {})}
+              {...(pendingPairUri !== undefined ? { pendingPairUri } : {})}
+              {...(onPairUriHandled !== undefined ? { onPairUriHandled } : {})}
               {...(qrPollIntervalMs !== undefined ? { qrPollIntervalMs } : {})}
             />
           )}

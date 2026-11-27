@@ -10,6 +10,9 @@ const TELEMETRY_EVENT_KINDS = [
   'playback_error',
   'media_decode_failure',
   'sqlite_slow_op',
+  'app_crash',
+  'unhandled_error',
+  'catalog_import',
 ] as const;
 
 /** Union of allowlisted telemetry event kinds. */
@@ -81,6 +84,17 @@ export interface VaultPutInput {
   readonly iv: string;
 }
 
+/** Validated sanitized technical device profile attached to telemetry events. */
+interface ValidatedDeviceProfile {
+  readonly osVersion?: string;
+  readonly formFactor?: string;
+  readonly arch?: string;
+  readonly ramBucket?: string;
+  readonly gpu?: string;
+  readonly resolution?: string;
+  readonly locale?: string;
+}
+
 /** Validated sanitized telemetry event ready for storage. */
 export interface ValidatedTelemetryEvent {
   readonly eventTs: string;
@@ -91,6 +105,7 @@ export interface ValidatedTelemetryEvent {
   readonly osVersion: string | null;
   readonly formFactor: string | null;
   readonly payload: Readonly<Record<string, string | number | boolean>>;
+  readonly deviceProfileJson: string | null;
 }
 
 /** Validated feedback submission ready for storage. */
@@ -159,14 +174,19 @@ const SENSITIVE_PATTERNS: readonly { readonly label: string; readonly re: RegExp
     label: 'ipv6_address',
     re: IPV6_DETECT_RE,
   },
+  {
+    label: 'email_address',
+    re: /\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,128}\.[A-Za-z]{2,}\b/,
+  },
 ];
 
-/** Defense-in-depth server-side scrubber stripping URLs, credentials, paths, and IPs from feedback text. */
+/** Defense-in-depth server-side scrubber stripping URLs, credentials, paths, emails, and IPs from feedback text. */
 function redactFeedbackMessage(text: string): string {
   return text
     .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[redacted]')
     .replace(/\bfile:\S+/gi, '[redacted]')
     .replace(/(^|[\s"'(=])[^\s/:@]{1,128}:[^\s/:@]{1,128}@[^\s/:@]+/g, '$1[redacted]')
+    .replace(/\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,128}\.[A-Za-z]{2,}\b/g, '[redacted]')
     .replace(/\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, '[redacted]')
     .replace(/\bauthorization\s*[:=]\s*\S+(?:\s+\S+)?/gi, '[redacted]')
     .replace(
@@ -187,27 +207,38 @@ function redactFeedbackMessage(text: string): string {
     );
 }
 
+const FOUR_PART_OS_VERSION_RE = /^\d+\.\d+\.\d+\.\d+$/;
+const MAX_TELEMETRY_UPTIME_MS = 31_536_000_000;
+
 /** Recursively scans a value for URLs, credentials, authorization tokens, private file paths, or IPs. */
-function findSensitivePattern(value: unknown, depth = 0): string | null {
+function findSensitivePattern(
+  value: unknown,
+  depth = 0,
+  allowOsVersionQuad = false,
+  keyName?: string,
+): string | null {
   if (depth > 8) return 'nesting_too_deep';
   if (typeof value === 'string') {
+    const skipIpv4 =
+      allowOsVersionQuad && keyName === 'osVersion' && FOUR_PART_OS_VERSION_RE.test(value.trim());
     for (const pattern of SENSITIVE_PATTERNS) {
+      if (skipIpv4 && pattern.label === 'ipv4_address') continue;
       if (pattern.re.test(value)) return pattern.label;
     }
     return null;
   }
   if (Array.isArray(value)) {
     for (const item of value) {
-      const hit = findSensitivePattern(item, depth + 1);
+      const hit = findSensitivePattern(item, depth + 1, allowOsVersionQuad);
       if (hit) return hit;
     }
     return null;
   }
   if (value !== null && typeof value === 'object') {
     for (const [k, v] of Object.entries(value)) {
-      const keyHit = findSensitivePattern(k, depth + 1);
+      const keyHit = findSensitivePattern(k, depth + 1, allowOsVersionQuad);
       if (keyHit) return keyHit;
-      const valHit = findSensitivePattern(v, depth + 1);
+      const valHit = findSensitivePattern(v, depth + 1, allowOsVersionQuad, k);
       if (valHit) return valHit;
     }
   }
@@ -351,11 +382,11 @@ export function validateDeleteAccountInput(raw: unknown): ValidationResult<strin
   return { ok: true, value: authVerifier };
 }
 
-/** Validates `POST /v1/pair/claim` input. */
+/** Validates legacy `POST /v1/pair/claim` input (supports 8-digit and legacy 12-char codes). */
 export function validatePairClaimInput(raw: unknown): ValidationResult<PairClaimInput> {
   if (!isRecord(raw)) return { ok: false, error: 'invalid_body' };
-  const rawCode = nonEmptyString(raw.code, 12, 12);
-  if (!rawCode || !/^[A-Za-z0-9]{12}$/.test(rawCode)) {
+  const rawCode = nonEmptyString(raw.code, 8, 12);
+  if (!rawCode || !/^(?:\d{8}|[A-Za-z0-9]{12})$/.test(rawCode)) {
     return { ok: false, error: 'invalid_pair_code' };
   }
   const encryptedPayload = nonEmptyString(raw.encryptedPayload, 16, 32_768);
@@ -407,7 +438,20 @@ const ALLOWED_PAYLOAD_KEYS_BY_KIND: Readonly<Record<TelemetryEventKind, readonly
     'isLive',
   ],
   sqlite_slow_op: ['operation', 'durationMs', 'rowCount'],
+  app_crash: ['errorName', 'stackSig', 'screen', 'fatal', 'uptimeMs'],
+  unhandled_error: ['errorName', 'stackSig', 'screen', 'source'],
+  catalog_import: ['sourceKind', 'stage', 'durationMs', 'itemCount', 'success', 'errorCode'],
 };
+
+const ALLOWED_DEVICE_PROFILE_KEYS = new Set([
+  'osVersion',
+  'formFactor',
+  'arch',
+  'ramBucket',
+  'gpu',
+  'resolution',
+  'locale',
+]);
 
 const EVENT_ENVELOPE_KEYS = new Set([
   'kind',
@@ -418,8 +462,31 @@ const EVENT_ENVELOPE_KEYS = new Set([
   'platform',
   'osVersion',
   'formFactor',
+  'deviceProfile',
   'payload',
 ]);
+
+function sanitizeDeviceProfile(
+  rawProfile: unknown,
+): ValidationResult<ValidatedDeviceProfile | null> {
+  if (rawProfile === undefined || rawProfile === null) return { ok: true, value: null };
+  if (!isRecord(rawProfile)) return { ok: false, error: 'invalid_device_profile' };
+
+  const out: Record<string, string> = {};
+  for (const [key, val] of Object.entries(rawProfile)) {
+    if (!ALLOWED_DEVICE_PROFILE_KEYS.has(key)) {
+      return { ok: false, error: `disallowed_device_profile_field:${key}` };
+    }
+    if (val === undefined || val === null) continue;
+    const maxLen = key === 'gpu' ? 96 : 64;
+    const clean = nonEmptyString(val, 1, maxLen);
+    if (!clean) return { ok: false, error: `invalid_device_profile_field:${key}` };
+    const hit = findSensitivePattern(clean, 0, key === 'osVersion', key);
+    if (hit) return { ok: false, error: `sensitive_data:${hit}` };
+    out[key] = clean;
+  }
+  return { ok: true, value: Object.keys(out).length > 0 ? (out as ValidatedDeviceProfile) : null };
+}
 
 function sanitizeTelemetryPayload(
   kind: TelemetryEventKind,
@@ -442,7 +509,9 @@ function sanitizeTelemetryPayload(
       if (hit) return { ok: false, error: `sensitive_data:${hit}` };
       out[key] = trimmed;
     } else if (typeof val === 'number') {
-      const num = finiteNumber(val, -1_000_000, 10_000_000);
+      const minVal = key === 'uptimeMs' ? 0 : -1_000_000;
+      const maxVal = key === 'uptimeMs' ? MAX_TELEMETRY_UPTIME_MS : 10_000_000;
+      const num = finiteNumber(val, minVal, maxVal);
       if (num === null) return { ok: false, error: `invalid_number:${key}` };
       out[key] = num;
     } else if (typeof val === 'boolean') {
@@ -457,6 +526,16 @@ function sanitizeTelemetryPayload(
       if (typeof out[reqKey] !== 'string' || out[reqKey].length === 0) {
         return { ok: false, error: `missing_required_field:${reqKey}` };
       }
+    }
+  }
+  if (kind === 'app_crash' || kind === 'unhandled_error') {
+    if (typeof out.errorName !== 'string' || out.errorName.length === 0) {
+      return { ok: false, error: 'missing_required_field:errorName' };
+    }
+  }
+  if (kind === 'catalog_import') {
+    if (typeof out.sourceKind !== 'string' || out.sourceKind.length === 0) {
+      return { ok: false, error: 'missing_required_field:sourceKind' };
     }
   }
   return { ok: true, value: out };
@@ -474,16 +553,22 @@ export function validateTelemetryBatch(
     return { ok: false, error: 'invalid_events_count' };
   }
 
-  const rootSensitive = findSensitivePattern(raw);
+  const rootSensitive = findSensitivePattern(raw, 0, true);
   if (rootSensitive) {
     return { ok: false, error: `sensitive_data:${rootSensitive}` };
   }
 
+  const batchProfileRes = sanitizeDeviceProfile(raw.deviceProfile);
+  if (!batchProfileRes.ok) return batchProfileRes;
+  const batchProfile = batchProfileRes.value;
+  const defaultDeviceProfileJson = batchProfile ? JSON.stringify(batchProfile) : null;
+
   const defaultSessionId = nonEmptyString(raw.sessionId, 4, 128);
   const defaultAppVersion = nonEmptyString(raw.appVersion, 1, 64);
   const defaultPlatform = nonEmptyString(raw.platform, 1, 64);
-  const defaultOsVersion = nonEmptyString(raw.osVersion, 1, 64);
-  const defaultFormFactor = nonEmptyString(raw.formFactor, 1, 32);
+  const defaultOsVersion = nonEmptyString(raw.osVersion, 1, 64) ?? batchProfile?.osVersion ?? null;
+  const defaultFormFactor =
+    nonEmptyString(raw.formFactor, 1, 32) ?? batchProfile?.formFactor ?? null;
 
   const validated: ValidatedTelemetryEvent[] = [];
   for (const item of raw.events) {
@@ -492,14 +577,27 @@ export function validateTelemetryBatch(
       return { ok: false, error: 'disallowed_event_kind' };
     }
     const kind = item.kind as TelemetryEventKind;
+    const itemProfileRes = sanitizeDeviceProfile(item.deviceProfile);
+    if (!itemProfileRes.ok) return itemProfileRes;
+    const itemProfile = itemProfileRes.value;
+    const mergedProfile =
+      batchProfile && itemProfile
+        ? { ...batchProfile, ...itemProfile }
+        : (itemProfile ?? batchProfile);
+    const deviceProfileJson = mergedProfile
+      ? JSON.stringify(mergedProfile)
+      : defaultDeviceProfileJson;
+
     const sessionId = nonEmptyString(item.sessionId, 4, 128) ?? defaultSessionId;
     const appVersion = nonEmptyString(item.appVersion, 1, 64) ?? defaultAppVersion;
     const platform = nonEmptyString(item.platform, 1, 64) ?? defaultPlatform;
     if (!sessionId || !appVersion || !platform) {
       return { ok: false, error: 'missing_event_metadata' };
     }
-    const osVersion = nonEmptyString(item.osVersion, 1, 64) ?? defaultOsVersion;
-    const formFactor = nonEmptyString(item.formFactor, 1, 32) ?? defaultFormFactor;
+    const osVersion =
+      nonEmptyString(item.osVersion, 1, 64) ?? itemProfile?.osVersion ?? defaultOsVersion;
+    const formFactor =
+      nonEmptyString(item.formFactor, 1, 32) ?? itemProfile?.formFactor ?? defaultFormFactor;
     const rawTs = item.ts ?? item.timestamp;
     let eventTs = nowIso;
     if (rawTs !== undefined && rawTs !== null) {
@@ -531,6 +629,7 @@ export function validateTelemetryBatch(
       osVersion,
       formFactor,
       payload: payloadResult.value,
+      deviceProfileJson,
     });
   }
   return { ok: true, value: validated };

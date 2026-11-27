@@ -76,6 +76,41 @@ interface MediaDecodeFailureRow {
   readonly count: number;
 }
 
+/** Grouped crash or unhandled error signature with session impact. */
+interface CrashAndErrorRow {
+  readonly kind: 'app_crash' | 'unhandled_error';
+  readonly errorName: string;
+  readonly stackSig: string;
+  readonly screen: string | null;
+  readonly fatalCount: number;
+  readonly count: number;
+  readonly affectedSessions: number;
+}
+
+/** Aggregated catalog / EPG import performance breakdown by source kind. */
+interface CatalogImportRow {
+  readonly sourceKind: string;
+  readonly count: number;
+  readonly failureCount: number;
+  readonly failureRate: number;
+  readonly p50Ms: number | null;
+  readonly p95Ms: number | null;
+  readonly maxMs: number | null;
+}
+
+/** Aggregated sanitized device technical profile row. */
+interface DeviceProfileRow {
+  readonly platform: string;
+  readonly formFactor: string | null;
+  readonly arch: string | null;
+  readonly ramBucket: string | null;
+  readonly resolution: string | null;
+  readonly gpu: string | null;
+  readonly locale: string | null;
+  readonly sessions: number;
+  readonly events: number;
+}
+
 /** Recent feedback submission item in the digest. */
 interface DigestFeedbackItem {
   readonly id: string;
@@ -103,6 +138,9 @@ export interface TelemetryDigestReport {
   readonly screenLatencies: readonly ScreenLatencyRow[];
   readonly stallAndJank: StallAndJankSummary;
   readonly mediaDecodeFailures: readonly MediaDecodeFailureRow[];
+  readonly crashesAndErrors: readonly CrashAndErrorRow[];
+  readonly catalogImports: readonly CatalogImportRow[];
+  readonly deviceProfiles: readonly DeviceProfileRow[];
   readonly feedbackByCategory: Readonly<Record<DigestFeedbackCategory, number>>;
   readonly recentFeedback: readonly DigestFeedbackItem[];
 }
@@ -223,6 +261,9 @@ function assertTelemetryDigestReport(raw: unknown): TelemetryDigestReport {
     !Array.isArray(raw.screenLatencies) ||
     !isObjectRecord(raw.stallAndJank) ||
     !Array.isArray(raw.mediaDecodeFailures) ||
+    (raw.crashesAndErrors !== undefined && !Array.isArray(raw.crashesAndErrors)) ||
+    (raw.catalogImports !== undefined && !Array.isArray(raw.catalogImports)) ||
+    (raw.deviceProfiles !== undefined && !Array.isArray(raw.deviceProfiles)) ||
     !isObjectRecord(raw.feedbackByCategory) ||
     !Array.isArray(raw.recentFeedback)
   ) {
@@ -235,6 +276,15 @@ function assertTelemetryDigestReport(raw: unknown): TelemetryDigestReport {
       typeof raw.pendingAccountDeletionRequests === 'number'
         ? raw.pendingAccountDeletionRequests
         : 0,
+    crashesAndErrors: Array.isArray(raw.crashesAndErrors)
+      ? (raw.crashesAndErrors as CrashAndErrorRow[])
+      : [],
+    catalogImports: Array.isArray(raw.catalogImports)
+      ? (raw.catalogImports as CatalogImportRow[])
+      : [],
+    deviceProfiles: Array.isArray(raw.deviceProfiles)
+      ? (raw.deviceProfiles as DeviceProfileRow[])
+      : [],
   };
 }
 
@@ -298,6 +348,10 @@ function fmtLive(value: boolean | null): string {
   return value ? 'Live' : 'VOD';
 }
 
+function fmtPercent(rate: number): string {
+  return `${Math.round(rate * 1000) / 10}%`;
+}
+
 /** Formats a `TelemetryDigestReport` into a structured, AI-analyzable Markdown report. */
 export function formatTelemetryDigestMarkdown(report: TelemetryDigestReport): string {
   const lines: string[] = [];
@@ -328,6 +382,12 @@ export function formatTelemetryDigestMarkdown(report: TelemetryDigestReport): st
   if (topDecode) {
     lines.push(
       `- **Top Media Decode Failure (#70):** \`${escapeCell(topDecode.platform)}\` / \`${escapeCell(topDecode.engine)}\` — \`${escapeCell(topDecode.container)}\` (\`${escapeCell(topDecode.videoCodec)}\` + \`${escapeCell(topDecode.audioCodec)}\`) -> \`${escapeCell(topDecode.errorCode)}\` (${topDecode.count}x)`,
+    );
+  }
+  const topCrash = report.crashesAndErrors[0];
+  if (topCrash) {
+    lines.push(
+      `- **Top Crash / Error:** \`${topCrash.kind}\` — \`${escapeCell(topCrash.errorName)}\` (\`${escapeCell(topCrash.stackSig)}\`, ${topCrash.count}x across ${topCrash.affectedSessions} sessions)`,
     );
   }
   lines.push('');
@@ -409,6 +469,57 @@ export function formatTelemetryDigestMarkdown(report: TelemetryDigestReport): st
     for (const row of report.mediaDecodeFailures) {
       lines.push(
         `| ${escapeCell(row.platform)} | ${escapeCell(row.engine)} | ${escapeCell(row.container)} | ${escapeCell(row.videoCodec)} | ${escapeCell(row.audioCodec)} | ${escapeCell(row.hdrFormat ?? 'sdr')} | ${fmtLive(row.isLive)} | ${escapeCell(row.errorCode)} | ${row.count} |`,
+      );
+    }
+  }
+  lines.push('');
+
+  lines.push('## Top Crashes & Unhandled Errors');
+  lines.push('');
+  if (report.crashesAndErrors.length === 0) {
+    lines.push('_No crashes or unhandled errors recorded in this window._');
+  } else {
+    lines.push(
+      '| Kind | Error Name | Stack Signature | Screen | Fatal | Count | Affected Sessions |',
+    );
+    lines.push('| --- | --- | --- | --- | ---: | ---: | ---: |');
+    for (const row of report.crashesAndErrors) {
+      lines.push(
+        `| ${row.kind} | ${escapeCell(row.errorName)} | ${escapeCell(row.stackSig)} | ${escapeCell(row.screen ?? 'n/a')} | ${row.fatalCount} | ${row.count} | ${row.affectedSessions} |`,
+      );
+    }
+  }
+  lines.push('');
+
+  lines.push('## Catalog & EPG Import Performance');
+  lines.push('');
+  if (report.catalogImports.length === 0) {
+    lines.push('_No catalog or EPG import metrics recorded in this window._');
+  } else {
+    lines.push(
+      '| Source Kind | Imports | Failures | Failure Rate | p50 (ms) | p95 (ms) | Max (ms) |',
+    );
+    lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: |');
+    for (const row of report.catalogImports) {
+      lines.push(
+        `| ${escapeCell(row.sourceKind)} | ${row.count} | ${row.failureCount} | ${fmtPercent(row.failureRate)} | ${fmtMs(row.p50Ms)} | ${fmtMs(row.p95Ms)} | ${fmtMs(row.maxMs)} |`,
+      );
+    }
+  }
+  lines.push('');
+
+  lines.push('## Device Technical Profiles');
+  lines.push('');
+  if (report.deviceProfiles.length === 0) {
+    lines.push('_No device technical profiles recorded in this window._');
+  } else {
+    lines.push(
+      '| Platform | Form Factor | Arch | RAM | Resolution | GPU | Locale | Sessions | Events |',
+    );
+    lines.push('| --- | --- | --- | --- | --- | --- | --- | ---: | ---: |');
+    for (const row of report.deviceProfiles) {
+      lines.push(
+        `| ${escapeCell(row.platform)} | ${escapeCell(row.formFactor ?? 'n/a')} | ${escapeCell(row.arch ?? 'n/a')} | ${escapeCell(row.ramBucket ?? 'n/a')} | ${escapeCell(row.resolution ?? 'n/a')} | ${escapeCell(row.gpu ?? 'n/a')} | ${escapeCell(row.locale ?? 'n/a')} | ${row.sessions} | ${row.events} |`,
       );
     }
   }

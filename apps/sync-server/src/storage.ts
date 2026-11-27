@@ -1,3 +1,5 @@
+import type { PairAuthState, PairDirection } from './pair-validation.ts';
+
 /** Stored user account record (zero-knowledge: never holds raw password or vault key). */
 export interface UserRecord {
   readonly id: string;
@@ -39,30 +41,133 @@ export type VaultPutResult =
   | { readonly ok: true; readonly revision: number; readonly updatedAt: string }
   | { readonly ok: false; readonly conflict: true; readonly currentRevision: number };
 
-/** Stored ephemeral QR pairing session record. */
+/** Lifecycle states for legacy one-way and Wave P9 bidirectional pairing sessions. */
+export type PairSessionStatus =
+  | 'pending'
+  | 'claimed'
+  | 'responder_joined'
+  | 'responder_transferred'
+  | 'approved'
+  | 'completed'
+  | 'rejected'
+  | 'locked';
+
+/** Stored ephemeral QR / 8-digit pairing session record. */
 export interface PairSessionRecord {
   readonly id: string;
   readonly code: string;
   readonly pollTokenHash: string;
-  readonly status: 'pending' | 'claimed';
+  readonly status: PairSessionStatus;
+  readonly attempts: number;
   readonly claimedByUserId: string | null;
   readonly encryptedPayload: string | null;
   readonly iv: string | null;
+  readonly hostPublicKey: string | null;
+  readonly responderPublicKey: string | null;
+  readonly hostAuthState: PairAuthState;
+  readonly hostMaskedEmail: string | null;
+  readonly hostEmailHash: string | null;
+  readonly responderAuthState: PairAuthState | null;
+  readonly responderMaskedEmail: string | null;
+  readonly responderEmailHash: string | null;
+  readonly responderTokenHash: string | null;
+  readonly direction: PairDirection | null;
+  readonly hostApprovedAt: number | null;
+  readonly returnEncryptedPayload: string | null;
+  readonly returnIv: string | null;
   readonly expiresAt: string;
   readonly createdAt: string;
 }
 
-/** Result of claiming an active pairing session. */
+/** Result of legacy claiming of an active pairing session. */
 export type PairClaimResult =
   | { readonly status: 'claimed' }
   | { readonly status: 'not_found' }
   | { readonly status: 'expired' }
+  | { readonly status: 'locked' }
   | { readonly status: 'already_claimed' };
 
-/** Result of atomically consuming a claimed pairing session on poll. */
+/** Result of atomically consuming a pairing ciphertext payload (burn-after-read). */
 export type PairConsumeResult =
   | { readonly status: 'consumed'; readonly encryptedPayload: string; readonly iv: string }
   | { readonly status: 'not_claimed' };
+
+/** Result of incrementing invalid pairing attempts with automatic lockout at `maxAttempts`. */
+export type PairAttemptResult =
+  | { readonly status: 'incremented'; readonly attempts: number }
+  | { readonly status: 'locked'; readonly attempts: number }
+  | { readonly status: 'not_found' };
+
+/** Input to atomically record the single responder joining a v2 pairing session (Phase 1 only). */
+export interface PairRespondParams {
+  readonly id: string;
+  readonly responderPublicKey: string;
+  readonly responderAuthState: PairAuthState;
+  readonly responderMaskedEmail: string | null;
+  readonly responderEmailHash: string | null;
+  readonly responderTokenHash: string;
+  readonly direction: PairDirection;
+  readonly maxAttempts: number;
+  readonly nowIso: string;
+}
+
+/** Result of atomically claiming a v2 pairing session as the single responder. */
+export type PairRespondResult =
+  | { readonly status: 'responder_joined' }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'expired' }
+  | { readonly status: 'locked' }
+  | { readonly status: 'already_responded' };
+
+/** Input for post-SAS responder credential transfer (`POST /v1/pair/transfer`). */
+export interface PairTransferParams {
+  readonly id: string;
+  readonly direction: PairDirection;
+  readonly encryptedPayload: string;
+  readonly iv: string;
+  readonly maxAttempts: number;
+  readonly nowIso: string;
+}
+
+/** Result of post-SAS responder credential transfer transition. */
+export type PairTransferResult =
+  | { readonly status: 'responder_transferred' }
+  | { readonly status: 'completed' }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'expired' }
+  | { readonly status: 'locked' }
+  | { readonly status: 'already_transferred' }
+  | { readonly status: 'invalid_state' };
+
+/** Input for host approval or rejection of a v2 pairing session. */
+export interface PairApproveParams {
+  readonly id: string;
+  readonly direction: PairDirection | null;
+  readonly hostApprovedAt: number;
+  readonly returnEncryptedPayload: string | null;
+  readonly returnIv: string | null;
+  readonly reject: boolean;
+  readonly nowIso: string;
+}
+
+/** Result of host approval/rejection transition. */
+export type PairApproveResult =
+  | { readonly status: 'approved' }
+  | { readonly status: 'completed' }
+  | { readonly status: 'rejected' }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'expired' }
+  | { readonly status: 'locked' }
+  | { readonly status: 'not_responded' }
+  | { readonly status: 'invalid_state' };
+
+/** Result of cancelling a pairing session from either side (`POST /v1/pair/cancel`). */
+export type PairCancelResult =
+  | { readonly status: 'rejected' }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'expired' }
+  | { readonly status: 'locked' }
+  | { readonly status: 'invalid_state' };
 
 /** Stored strictly redacted opt-in telemetry event. */
 export interface TelemetryEventRecord {
@@ -76,6 +181,7 @@ export interface TelemetryEventRecord {
   readonly osVersion: string | null;
   readonly formFactor: string | null;
   readonly payloadJson: string;
+  readonly deviceProfileJson: string | null;
 }
 
 /** Stored user feedback submission. */
@@ -126,6 +232,7 @@ export interface SyncServerStorage {
 
   createPairSession(session: PairSessionRecord): Promise<void>;
   findPairSessionById(id: string): Promise<PairSessionRecord | null>;
+  findPairSessionByCode(code: string): Promise<PairSessionRecord | null>;
   claimPairSession(
     code: string,
     claimedByUserId: string,
@@ -134,6 +241,13 @@ export interface SyncServerStorage {
     nowIso: string,
   ): Promise<PairClaimResult>;
   consumeClaimedPairSession(id: string): Promise<PairConsumeResult>;
+  incrementPairAttempts(id: string, maxAttempts: number): Promise<PairAttemptResult>;
+  respondPairSession(params: PairRespondParams): Promise<PairRespondResult>;
+  transferPairSession(params: PairTransferParams): Promise<PairTransferResult>;
+  approvePairSession(params: PairApproveParams): Promise<PairApproveResult>;
+  cancelPairSession(id: string, nowIso: string): Promise<PairCancelResult>;
+  consumeHostPairPayload(id: string): Promise<PairConsumeResult>;
+  consumeResponderPairPayload(id: string): Promise<PairConsumeResult>;
   deletePairSession(id: string): Promise<void>;
 
   insertTelemetryEvents(events: readonly TelemetryEventRecord[]): Promise<void>;

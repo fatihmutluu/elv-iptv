@@ -5,7 +5,7 @@ import { useTheme, webBackdropBlur, webCursorPointer, webShadow, webTransition }
 import { useViewport } from '../viewport';
 
 /** Visual hierarchy tier of {@link CtaButton}. */
-export type CtaButtonVariant = 'primary' | 'secondary' | 'ghost';
+export type CtaButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive';
 
 /** Props of {@link CtaButton}. */
 export interface CtaButtonProps {
@@ -58,7 +58,12 @@ export function CtaButton({
   const handleHoverIn = useCallback(() => setHovered(true), []);
   const handleHoverOut = useCallback(() => setHovered(false), []);
 
-  const foreground = variant === 'primary' ? theme.colors.ctaFg : theme.colors.textPrimary;
+  const foreground =
+    variant === 'primary'
+      ? theme.colors.ctaFg
+      : variant === 'destructive'
+        ? theme.colors.dangerFg
+        : theme.colors.textPrimary;
   const secondaryBlur = variant === 'secondary' ? webBackdropBlur(12) : undefined;
   const transition = webTransition(
     theme,
@@ -88,19 +93,29 @@ export function CtaButton({
         const backgroundColor =
           variant === 'primary'
             ? theme.colors.ctaBg
-            : variant === 'secondary'
-              ? showTvFocus || (hovered && !disabled)
-                ? theme.colors.actionGlassHoverBg
-                : theme.colors.actionGlassBg
-              : showTvFocus
-                ? theme.colors.focusFill
-                : (hovered || state.pressed) && !disabled
-                  ? theme.colors.subtleHighlight
-                  : 'transparent';
+            : variant === 'destructive'
+              ? !disabled && state.pressed
+                ? theme.colors.dangerPressedBg
+                : !disabled && hovered
+                  ? theme.colors.dangerHoverBg
+                  : theme.colors.dangerBg
+              : variant === 'secondary'
+                ? showTvFocus || (hovered && !disabled)
+                  ? theme.colors.actionGlassHoverBg
+                  : theme.colors.actionGlassBg
+                : showTvFocus
+                  ? theme.colors.focusFill
+                  : (hovered || state.pressed) && !disabled
+                    ? theme.colors.subtleHighlight
+                    : 'transparent';
 
-        const borderWidth = variant === 'secondary' ? 1 : 0;
+        const borderWidth = variant === 'secondary' || variant === 'destructive' ? 1 : 0;
         const borderColor =
-          variant === 'secondary' ? theme.colors.actionGlassBorder : 'transparent';
+          variant === 'secondary'
+            ? theme.colors.actionGlassBorder
+            : variant === 'destructive'
+              ? theme.colors.dangerBorder
+              : 'transparent';
 
         const pressScale = theme.reduceMotion ? 1 : 0.98;
         const scale = disabled

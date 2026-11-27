@@ -18,6 +18,7 @@ import {
   createSettingsStore,
   databaseLocation,
 } from '../storage';
+import { type TelemetryCatalogImport, wrapCatalogWithImportTelemetry } from './catalog-telemetry';
 import { createMobileLocalPlaylistStore } from './local-playlist-store';
 import { createDeviceNativeGuideStager } from './native-guide-stager';
 
@@ -41,13 +42,21 @@ export class CatalogOpenError extends Error {
   }
 }
 
+/** Optional opt-in telemetry callbacks attached to the process-wide device catalog (`#509`). */
+export interface DeviceCatalogTelemetryOptions {
+  readonly onSlowQuery?: (op: string, durationMs: number) => void;
+  readonly recordCatalogImport?: (meta: TelemetryCatalogImport) => void;
+}
+
 let instance: Promise<CatalogService> | undefined;
 
 /**
  * The one catalog of this app process, created on first use. A failed open is not remembered, so the next call retries.
  */
-export function createDeviceCatalog(): Promise<CatalogService> {
-  instance ??= open().catch((e: unknown) => {
+export function createDeviceCatalog(
+  telemetry?: DeviceCatalogTelemetryOptions,
+): Promise<CatalogService> {
+  instance ??= open(telemetry).catch((e: unknown) => {
     instance = undefined;
     throw e;
   });
@@ -80,8 +89,13 @@ async function reconcileAppleUserData(db: SqlDriver, store: UserDataStore): Prom
   }
 }
 
-async function open(): Promise<CatalogService> {
-  const db = await createOpSqliteDriver(DATABASE_NAME, databaseLocation(Platform.OS));
+async function open(telemetry?: DeviceCatalogTelemetryOptions): Promise<CatalogService> {
+  const db =
+    telemetry?.onSlowQuery !== undefined
+      ? await createOpSqliteDriver(DATABASE_NAME, databaseLocation(Platform.OS), {
+          onSlowQuery: telemetry.onSlowQuery,
+        })
+      : await createOpSqliteDriver(DATABASE_NAME, databaseLocation(Platform.OS));
   try {
     const opened = await openCatalog(db);
     if (!opened.ok) {
@@ -96,7 +110,7 @@ async function open(): Promise<CatalogService> {
       createOpSqliteDriver('local-playlists.db', databaseLocation(Platform.OS)),
     );
     const nativeGuideStager = createDeviceNativeGuideStager(db);
-    return createCatalogService({
+    const baseService = createCatalogService({
       db,
       secrets: createSecureSecretStore(),
       scheduler: createMacrotaskScheduler(),
@@ -107,6 +121,9 @@ async function open(): Promise<CatalogService> {
       ...(manifest === undefined ? {} : { manifest }),
       ...(userData === undefined ? {} : { userData }),
     });
+    return telemetry?.recordCatalogImport !== undefined
+      ? wrapCatalogWithImportTelemetry(baseService, telemetry.recordCatalogImport)
+      : baseService;
   } catch (error) {
     try {
       await db.close?.();

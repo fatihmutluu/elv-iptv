@@ -390,7 +390,7 @@ describe('ELV Sync Server (@elv/sync-server)', () => {
       pollToken: string;
       expiresAt: string;
     };
-    expect(pair.code).toMatch(/^[A-Z0-9]{12}$/);
+    expect(pair.code).toMatch(/^\d{8}$/);
 
     // Missing & wrong poll token rejected
     expect(
@@ -405,7 +405,7 @@ describe('ELV Sync Server (@elv/sync-server)', () => {
           }),
         )
       ).status,
-    ).toBe(403);
+    ).toBe(401);
 
     // Pending poll
     const pendingRes = await app.fetch(

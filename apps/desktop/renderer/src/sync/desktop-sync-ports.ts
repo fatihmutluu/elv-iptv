@@ -1,5 +1,6 @@
-import { type PreferencesPatch, sanitizeInitialPreferencesPatch } from '@elv/domain';
+import { type PreferencesPatch, redactText, sanitizeInitialPreferencesPatch } from '@elv/domain';
 import type {
+  BidirectionalPairingSnapshotIpc,
   FeedbackBridge,
   FeedbackSubmitRequest,
   FeedbackSubmitResultIpc,
@@ -9,10 +10,11 @@ import type {
   SyncQrPairingSessionIpc,
   SyncQrPollStatusIpc,
   TelemetryBridge,
+  TelemetryRecordRequest,
   TelemetryStatusIpc,
 } from '../../../src/shared/sync-ipc.ts';
 
-/** Structural `SyncAccountPort` implemented by {@link createDesktopSyncPorts} (`#26`). */
+/** Structural `SyncAccountPort` implemented by {@link createDesktopSyncPorts} (`#26`, `#510`). */
 export interface DesktopSyncAccountPort {
   getState(): SyncAccountStateIpc;
   subscribe(listener: (state: SyncAccountStateIpc) => void): () => void;
@@ -25,6 +27,19 @@ export interface DesktopSyncAccountPort {
   createQrPairing(): Promise<SyncQrPairingSessionIpc>;
   pollQrPairing(pairingId: string): Promise<SyncQrPollStatusIpc>;
   claimQrPairing(codeOrUri: string): Promise<SyncActionResultIpc>;
+  markSyncDirty(): void;
+  notifySyncDirty(): void;
+  notifyPlaybackPause(): void;
+  notifyPlaybackExitOrSwitch(): void;
+  setViewingActive(active: boolean): void;
+  startBidirectionalPairing(): Promise<BidirectionalPairingSnapshotIpc>;
+  joinBidirectionalPairing(codeOrUri: string): Promise<BidirectionalPairingSnapshotIpc>;
+  pollBidirectionalPairing(pairingId: string): Promise<BidirectionalPairingSnapshotIpc>;
+  confirmBidirectionalPairing(
+    pairingId: string,
+    chosenDirection?: 'host_to_responder' | 'responder_to_host',
+  ): Promise<SyncActionResultIpc>;
+  cancelBidirectionalPairing(pairingId: string): Promise<void>;
 }
 
 /** Structural `TelemetryMediaDecodeFailure` payload (`#458`, `#70`). */
@@ -38,7 +53,7 @@ interface DesktopTelemetryMediaDecodeFailure {
   readonly isLive: boolean;
 }
 
-/** Structural `TelemetryPort` implemented by {@link createDesktopSyncPorts} (`#458`). */
+/** Structural `TelemetryPort` supporting all 13 event kinds (`#458`, `#509`). */
 export interface DesktopTelemetryPort {
   isOptedIn(): boolean;
   setOptIn(enabled: boolean): void;
@@ -51,6 +66,51 @@ export interface DesktopTelemetryPort {
     readonly engine: string;
     readonly errorCode: string;
     readonly isLive: boolean;
+  }): void;
+  recordStartup(durationMs: number, coldStart: boolean): void;
+  recordPlaybackStart(meta: {
+    readonly engine: string;
+    readonly ttffMs: number;
+    readonly isLive: boolean;
+    readonly container?: string;
+    readonly videoCodec?: string;
+  }): void;
+  recordPlaybackRebuffer(meta: {
+    readonly engine: string;
+    readonly durationMs: number;
+    readonly isLive: boolean;
+  }): void;
+  recordCatalogImport(meta: {
+    readonly sourceKind: string;
+    readonly stage: string;
+    readonly durationMs: number;
+    readonly itemCount: number;
+    readonly success: boolean;
+    readonly errorCode?: string;
+  }): void;
+  recordSqliteSlowOp(meta: { readonly op: string; readonly durationMs: number }): void;
+  recordFrameJank(meta: {
+    readonly screen: string;
+    readonly droppedFrames: number;
+    readonly maxFrameMs: number;
+  }): void;
+  recordJsStall(meta: { readonly screen: string; readonly durationMs: number }): void;
+  recordMemoryPressure(meta: {
+    readonly level: 'moderate' | 'critical';
+    readonly usedMb?: number;
+  }): void;
+  recordAppCrash(meta: {
+    readonly errorName: string;
+    readonly stackSig: string;
+    readonly screen?: string;
+    readonly fatal: boolean;
+    readonly uptimeMs?: number;
+  }): void;
+  recordUnhandledError(meta: {
+    readonly errorName: string;
+    readonly stackSig: string;
+    readonly screen?: string;
+    readonly source?: string;
   }): void;
   flush(): Promise<void>;
 }
@@ -67,13 +127,16 @@ export interface DesktopSyncBridgesInput {
   readonly feedback?: FeedbackBridge;
 }
 
-/** Renderer Wave F9 ports bundle returned by {@link createDesktopSyncPorts}. */
+/** Renderer Wave F9/P9 ports bundle returned by {@link createDesktopSyncPorts}. */
 export interface DesktopSyncPorts {
   readonly syncAccount?: DesktopSyncAccountPort;
   readonly telemetry?: DesktopTelemetryPort;
   readonly feedback?: DesktopFeedbackPort;
   onTelemetryStatusChanged(listener: (status: TelemetryStatusIpc) => void): () => void;
   onInitialPreferences(listener: (patch: PreferencesPatch) => void): () => void;
+  onPairDeepLink(listener: (uri: string) => void): () => void;
+  consumePendingPairUri(): Promise<string | null>;
+  notifyReconnect(): void;
   hydrate(): Promise<void>;
   setServerUrl(serverUrl: string): Promise<void>;
   setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): Promise<void>;
@@ -86,6 +149,7 @@ const INITIAL_SYNC_STATE: SyncAccountStateIpc = Object.freeze({
   lastSyncedAtIso: null,
   pendingRecoveryCode: null,
   errorCode: null,
+  autoSyncState: 'idle',
 });
 
 const INITIAL_PREVIEW_JSON = JSON.stringify(
@@ -103,8 +167,7 @@ const INITIAL_PREVIEW_JSON = JSON.stringify(
 
 /**
  * Adapts the sandboxed preload bridges (`window.elv.{sync,telemetry,feedback}`) into the
- * synchronous + async ports expected by `<AppShell>` (`#26`, `#458`). Secrets and tokens
- * remain strictly inside the Electron main process.
+ * synchronous + async ports expected by `<AppShell>` (`#26`, `#458`, `#509`, `#510`).
  */
 export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): DesktopSyncPorts {
   const syncBridge = bridges?.sync;
@@ -144,6 +207,24 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
     }
   });
 
+  const pairDeepLinkListeners = new Set<(uri: string) => void>();
+  const unsubscribeBridgePairDeepLink = syncBridge?.onPairDeepLink?.((uri) => {
+    if (disposed) return;
+    for (const listener of [...pairDeepLinkListeners]) {
+      try {
+        listener(uri);
+      } catch {
+        // Isolate subscriber failures.
+      }
+    }
+  });
+
+  const refreshSyncState = async (): Promise<void> => {
+    if (!syncBridge) return;
+    const next = await syncBridge.getState().catch(() => null);
+    if (next && !disposed) updateSyncState(next);
+  };
+
   const syncAccount: DesktopSyncAccountPort | undefined =
     syncBridge === undefined
       ? undefined
@@ -158,8 +239,7 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
           async signIn(email, password) {
             try {
               const res = await syncBridge.signIn(email, password);
-              const next = await syncBridge.getState().catch(() => null);
-              if (next && !disposed) updateSyncState(next);
+              await refreshSyncState();
               return res;
             } catch {
               return { ok: false, errorCode: 'ipc_failed' };
@@ -168,8 +248,7 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
           async register(email, password, confirmPassword) {
             try {
               const res = await syncBridge.register(email, password, confirmPassword);
-              const next = await syncBridge.getState().catch(() => null);
-              if (next && !disposed) updateSyncState(next);
+              await refreshSyncState();
               return res;
             } catch {
               return { ok: false, errorCode: 'ipc_failed' };
@@ -184,8 +263,7 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
           async syncNow() {
             try {
               const res = await syncBridge.syncNow();
-              const next = await syncBridge.getState().catch(() => null);
-              if (next && !disposed) updateSyncState(next);
+              await refreshSyncState();
               return res;
             } catch {
               return { ok: false, errorCode: 'ipc_failed' };
@@ -201,8 +279,7 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
           async deleteAccount(password) {
             try {
               const res = await syncBridge.deleteAccount(password);
-              const next = await syncBridge.getState().catch(() => null);
-              if (next && !disposed) updateSyncState(next);
+              await refreshSyncState();
               return res;
             } catch {
               return { ok: false, errorCode: 'ipc_failed' };
@@ -211,10 +288,7 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
           createQrPairing: () => syncBridge.createQrPairing(),
           pollQrPairing: async (pairingId) => {
             const status = await syncBridge.pollQrPairing(pairingId);
-            if (status === 'claimed') {
-              const next = await syncBridge.getState().catch(() => null);
-              if (next && !disposed) updateSyncState(next);
-            }
+            if (status === 'claimed') await refreshSyncState();
             return status;
           },
           async claimQrPairing(codeOrUri) {
@@ -223,6 +297,58 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
             } catch {
               return { ok: false, errorCode: 'ipc_failed' };
             }
+          },
+          markSyncDirty() {
+            void syncBridge.markSyncDirty?.().catch(() => undefined);
+          },
+          notifySyncDirty() {
+            void syncBridge.notifySyncDirty?.().catch(() => undefined);
+          },
+          notifyPlaybackPause() {
+            void syncBridge.notifyPlaybackPause?.().catch(() => undefined);
+          },
+          notifyPlaybackExitOrSwitch() {
+            void syncBridge.notifyPlaybackExitOrSwitch?.().catch(() => undefined);
+          },
+          setViewingActive(active: boolean) {
+            void syncBridge.setViewingActive?.(active).catch(() => undefined);
+          },
+          async startBidirectionalPairing() {
+            if (!syncBridge.startBidirectionalPairing) {
+              throw new Error('bidirectional_pairing_unsupported');
+            }
+            return syncBridge.startBidirectionalPairing();
+          },
+          async joinBidirectionalPairing(codeOrUri) {
+            if (!syncBridge.joinBidirectionalPairing) {
+              throw new Error('bidirectional_pairing_unsupported');
+            }
+            const snap = await syncBridge.joinBidirectionalPairing(codeOrUri);
+            if (snap.status === 'completed') await refreshSyncState();
+            return snap;
+          },
+          async pollBidirectionalPairing(pairingId) {
+            if (!syncBridge.pollBidirectionalPairing) {
+              throw new Error('bidirectional_pairing_unsupported');
+            }
+            const snap = await syncBridge.pollBidirectionalPairing(pairingId);
+            if (snap.status === 'completed') await refreshSyncState();
+            return snap;
+          },
+          async confirmBidirectionalPairing(pairingId, chosenDirection) {
+            if (!syncBridge.confirmBidirectionalPairing) {
+              return { ok: false, errorCode: 'bidirectional_pairing_unsupported' };
+            }
+            try {
+              const res = await syncBridge.confirmBidirectionalPairing(pairingId, chosenDirection);
+              await refreshSyncState();
+              return res;
+            } catch {
+              return { ok: false, errorCode: 'ipc_failed' };
+            }
+          },
+          async cancelBidirectionalPairing(pairingId) {
+            await syncBridge.cancelBidirectionalPairing?.(pairingId).catch(() => undefined);
           },
         };
 
@@ -271,6 +397,15 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
       .catch(() => undefined);
   };
 
+  const emitTelemetry = (req: TelemetryRecordRequest): void => {
+    if (!telemetryBridge || !telemetryStatus.optedIn) return;
+    const seq = telemetryMutationSeq;
+    void telemetryBridge
+      .record(req)
+      .then(() => refreshTelemetryStatus(seq))
+      .catch(() => undefined);
+  };
+
   const telemetry: DesktopTelemetryPort | undefined =
     telemetryBridge === undefined
       ? undefined
@@ -296,44 +431,88 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
           queuedCount: () => telemetryStatus.queuedCount,
           getPayloadPreviewJson: () => telemetryStatus.previewJson,
           subscribe: subscribeTelemetryStatus,
-          recordScreenTransition(screen: string, durationMs: number): void {
-            if (!telemetryStatus.optedIn) return;
-            const seq = telemetryMutationSeq;
-            void telemetryBridge
-              .record({ kind: 'screen_transition', screen, durationMs })
-              .then(() => refreshTelemetryStatus(seq))
-              .catch(() => undefined);
-          },
-          recordMediaDecodeFailure(meta: DesktopTelemetryMediaDecodeFailure): void {
-            if (!telemetryStatus.optedIn) return;
-            const seq = telemetryMutationSeq;
-            void telemetryBridge
-              .record({
-                kind: 'media_decode_failure',
-                engine: meta.engine,
-                ...(meta.container !== undefined ? { container: meta.container } : {}),
-                ...(meta.videoCodec !== undefined ? { videoCodec: meta.videoCodec } : {}),
-                ...(meta.audioCodec !== undefined ? { audioCodec: meta.audioCodec } : {}),
-                errorCode: meta.errorCode,
-                ...(meta.hdrFormat !== undefined ? { hdrFormat: meta.hdrFormat } : {}),
-                isLive: meta.isLive,
-              })
-              .then(() => refreshTelemetryStatus(seq))
-              .catch(() => undefined);
-          },
-          recordPlaybackError(meta): void {
-            if (!telemetryStatus.optedIn) return;
-            const seq = telemetryMutationSeq;
-            void telemetryBridge
-              .record({
-                kind: 'playback_error',
-                engine: meta.engine,
-                errorCode: meta.errorCode,
-                isLive: meta.isLive,
-              })
-              .then(() => refreshTelemetryStatus(seq))
-              .catch(() => undefined);
-          },
+          recordScreenTransition: (screen, durationMs) =>
+            emitTelemetry({ kind: 'screen_transition', screen, durationMs }),
+          recordMediaDecodeFailure: (meta) =>
+            emitTelemetry({
+              kind: 'media_decode_failure',
+              engine: meta.engine,
+              ...(meta.container !== undefined ? { container: meta.container } : {}),
+              ...(meta.videoCodec !== undefined ? { videoCodec: meta.videoCodec } : {}),
+              ...(meta.audioCodec !== undefined ? { audioCodec: meta.audioCodec } : {}),
+              errorCode: meta.errorCode,
+              ...(meta.hdrFormat !== undefined ? { hdrFormat: meta.hdrFormat } : {}),
+              isLive: meta.isLive,
+            }),
+          recordPlaybackError: (meta) =>
+            emitTelemetry({
+              kind: 'playback_error',
+              engine: meta.engine,
+              errorCode: meta.errorCode,
+              isLive: meta.isLive,
+            }),
+          recordStartup: (durationMs, coldStart) =>
+            emitTelemetry({ kind: 'startup', durationMs, coldStart }),
+          recordPlaybackStart: (meta) =>
+            emitTelemetry({
+              kind: 'playback_start',
+              engine: meta.engine,
+              ttffMs: meta.ttffMs,
+              isLive: meta.isLive,
+              ...(meta.container !== undefined ? { container: meta.container } : {}),
+              ...(meta.videoCodec !== undefined ? { videoCodec: meta.videoCodec } : {}),
+            }),
+          recordPlaybackRebuffer: (meta) =>
+            emitTelemetry({
+              kind: 'playback_rebuffer',
+              engine: meta.engine,
+              durationMs: meta.durationMs,
+              isLive: meta.isLive,
+            }),
+          recordCatalogImport: (meta) =>
+            emitTelemetry({
+              kind: 'catalog_import',
+              sourceKind: meta.sourceKind,
+              stage: meta.stage,
+              durationMs: meta.durationMs,
+              itemCount: meta.itemCount,
+              success: meta.success,
+              ...(meta.errorCode !== undefined ? { errorCode: meta.errorCode } : {}),
+            }),
+          recordSqliteSlowOp: (meta) =>
+            emitTelemetry({ kind: 'sqlite_slow_op', op: meta.op, durationMs: meta.durationMs }),
+          recordFrameJank: (meta) =>
+            emitTelemetry({
+              kind: 'frame_jank',
+              screen: meta.screen,
+              droppedFrames: meta.droppedFrames,
+              maxFrameMs: meta.maxFrameMs,
+            }),
+          recordJsStall: (meta) =>
+            emitTelemetry({ kind: 'js_stall', screen: meta.screen, durationMs: meta.durationMs }),
+          recordMemoryPressure: (meta) =>
+            emitTelemetry({
+              kind: 'memory_pressure',
+              level: meta.level,
+              ...(meta.usedMb !== undefined ? { usedMb: meta.usedMb } : {}),
+            }),
+          recordAppCrash: (meta) =>
+            emitTelemetry({
+              kind: 'app_crash',
+              errorName: meta.errorName,
+              stackSig: meta.stackSig,
+              ...(meta.screen !== undefined ? { screen: meta.screen } : {}),
+              fatal: meta.fatal,
+              ...(meta.uptimeMs !== undefined ? { uptimeMs: meta.uptimeMs } : {}),
+            }),
+          recordUnhandledError: (meta) =>
+            emitTelemetry({
+              kind: 'unhandled_error',
+              errorName: meta.errorName,
+              stackSig: meta.stackSig,
+              ...(meta.screen !== undefined ? { screen: meta.screen } : {}),
+              ...(meta.source !== undefined ? { source: meta.source } : {}),
+            }),
           async flush(): Promise<void> {
             if (!telemetryStatus.optedIn) return;
             const seq = telemetryMutationSeq;
@@ -373,6 +552,20 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
         initialPrefsListeners.delete(listener);
       };
     },
+    onPairDeepLink(listener: (uri: string) => void): () => void {
+      pairDeepLinkListeners.add(listener);
+      return () => {
+        pairDeepLinkListeners.delete(listener);
+      };
+    },
+    async consumePendingPairUri(): Promise<string | null> {
+      if (!syncBridge?.consumePendingPairUri || disposed) return null;
+      return syncBridge.consumePendingPairUri().catch(() => null);
+    },
+    notifyReconnect(): void {
+      if (disposed) return;
+      void syncBridge?.notifyReconnect?.().catch(() => undefined);
+    },
     async hydrate(): Promise<void> {
       if (disposed) return;
       if (syncBridge !== undefined) {
@@ -399,9 +592,91 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
       disposed = true;
       unsubscribeBridgeState?.();
       unsubscribeBridgeInitialPrefs?.();
+      unsubscribeBridgePairDeepLink?.();
       stateListeners.clear();
       initialPrefsListeners.clear();
+      pairDeepLinkListeners.clear();
       telemetryListeners.clear();
     },
   };
+}
+
+const RENDERER_CODE_FRAME_RE = /\b([A-Za-z0-9._-]+\.(?:js|mjs|cjs|ts|tsx|jsx|bundle|hbc)):(\d+)/;
+const RENDERER_CODE_FILE_RE = /\b([A-Za-z0-9._-]+\.(?:js|mjs|cjs|ts|tsx|jsx|bundle|hbc))\b/;
+const RENDERER_IPV4_RE =
+  /\b(?:(?:25[0-5]|2[0-4]\d|1?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|1?\d\d?)(?::\d{1,5})?\b/g;
+
+function redactRendererText(raw: string, maxLen: number): string {
+  const preStripped = raw
+    .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"<>)\]]+/gi, '[redacted-url]')
+    .replace(/\bfile:[^\s'"<>)\]]+/gi, '[redacted-path]')
+    .replace(/\b[A-Za-z]:[\\/]+Users[\\/]+[^\s'"<>)\]]+/gi, '[redacted-path]')
+    .replace(/\b[A-Za-z]:\\[^\s'"<>)\]]+/g, '[redacted-path]')
+    .replace(/\\\\[A-Za-z0-9_.-]+\\[^\s'"<>)\]]+/g, '[redacted-path]')
+    .replace(
+      /(^|[\s"'(=:|,])\/(?:Users|home|var|tmp|private|data|storage)\/[^\s'"<>)\]]+/g,
+      '$1[redacted-path]',
+    )
+    .replace(
+      /(^|[\s"'(=:|,])[^\s/:@]{1,128}:[^\s/:@]{1,128}@[^\s/:@"'<>)\]]+/g,
+      '$1[redacted-cred]',
+    )
+    .replace(/\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}\b/g, '[redacted-email]')
+    .replace(RENDERER_IPV4_RE, '[redacted-ip]');
+  return redactText(preStripped).replace(/\s+/g, ' ').trim().slice(0, maxLen);
+}
+
+/**
+ * Extracts a strictly redacted `(errorName, stackSig)` pair for renderer telemetry, redacting
+ * raw stack/filename text BEFORE matching code-bundle frames so provider URLs never leak (`#509`).
+ */
+export function extractSafeRendererErrorSignature(
+  error: unknown,
+  fallbackFilename?: string,
+  fallbackLineno?: number,
+): { readonly errorName: string; readonly stackSig: string } {
+  const errObj = error instanceof Error ? error : undefined;
+  const rawName = errObj ? errObj.name : 'Error';
+  const errorName =
+    redactRendererText(rawName, 64)
+      .replace(/\//g, '.')
+      .replace(/[^A-Za-z0-9._-]/g, '_')
+      .replace(/^[^A-Za-z0-9]+/, '')
+      .slice(0, 64) || 'Error';
+
+  let frameToken = '';
+  if (typeof errObj?.stack === 'string' && errObj.stack.length > 0) {
+    const lines = errObj.stack.split(/\r?\n/);
+    const scanLines = lines.length > 1 ? lines.slice(1) : lines;
+    for (const line of scanLines) {
+      const redactedLine = redactRendererText(line, 512);
+      const match = RENDERER_CODE_FRAME_RE.exec(redactedLine);
+      if (match !== null) {
+        frameToken = `${match[1]}:${match[2]}`;
+        break;
+      }
+    }
+  }
+  if (
+    frameToken.length === 0 &&
+    typeof fallbackFilename === 'string' &&
+    fallbackFilename.length > 0
+  ) {
+    const redactedFile = redactRendererText(fallbackFilename, 512);
+    const fileMatch = RENDERER_CODE_FILE_RE.exec(redactedFile);
+    if (fileMatch !== null) {
+      const lineNo =
+        typeof fallbackLineno === 'number' && Number.isFinite(fallbackLineno) && fallbackLineno > 0
+          ? Math.floor(fallbackLineno)
+          : 0;
+      frameToken = `${fileMatch[1]}:${lineNo}`;
+    }
+  }
+  const candidate = frameToken.length > 0 ? frameToken : errorName;
+  const stackSig =
+    redactRendererText(candidate, 128)
+      .replace(/[^A-Za-z0-9._:/+-]/g, '_')
+      .replace(/^[^A-Za-z0-9]+/, '')
+      .slice(0, 128) || 'renderer:0';
+  return { errorName, stackSig };
 }

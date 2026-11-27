@@ -35,12 +35,18 @@ import {
 import { executeChannelOpsRpcCall } from './catalog-worker-channel-ops.ts';
 import { executeEpgOpsRpcCall } from './catalog-worker-epg-ops.ts';
 import { executeFailoverOpsRpcCall } from './catalog-worker-failover-ops.ts';
+import {
+  buildCatalogImportTelemetryEvent,
+  sumImportCounts,
+  wrapSqlDriverWithSlowOpTelemetry,
+} from './catalog-worker-telemetry.ts';
 import { executeUserStateRpcCall } from './catalog-worker-user-state.ts';
 import {
   executeWaveF5bOpsRpcCall,
   isWaveF5bRpcCall,
   sanitizeStalkerSourceInput,
 } from './catalog-worker-wave-f5b-ops.ts';
+import { executeWaveP9OpsRpcCall, isWaveP9RpcCall } from './catalog-worker-wave-p9-ops.ts';
 import { createDesktopHttpClient } from './legacy-tls-http.ts';
 import { createLocalPlaylistStore } from './local-playlist-store.ts';
 import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.ts';
@@ -87,6 +93,7 @@ export interface CatalogWorkerRuntimeDeps {
   log?: (line: string) => void;
   onExit?: (code: number) => void;
   maxSecretValueChars?: number;
+  slowSqlThresholdMs?: number;
 }
 
 interface OpenedCatalog {
@@ -292,7 +299,21 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       async (): Promise<Result<OpenedCatalog>> => {
         let db: SqlDriver | undefined;
         try {
-          db = createSyncSqlDriver(openDatabase(dbPath));
+          db = wrapSqlDriverWithSlowOpTelemetry(
+            createSyncSqlDriver(openDatabase(dbPath)),
+            (op, durationMs) => {
+              parentPort.postMessage({
+                type: 'telemetry',
+                event: { kind: 'sqlite_slow_op', op, durationMs },
+              });
+            },
+            {
+              now: clock,
+              ...(deps.slowSqlThresholdMs !== undefined
+                ? { thresholdMs: deps.slowSqlThresholdMs }
+                : {}),
+            },
+          );
           const opened = await openCatalog(db, clock);
           if (!opened.ok) {
             await db.close?.().catch(() => undefined);
@@ -410,6 +431,9 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return res;
       }
       case 'importSource': {
+        const startedAt = clock();
+        const sources = await service.listSources().catch(() => []);
+        const sourceKind = sources.find((s) => s.id === call.id)?.kind;
         const res = await service.importSource(call.id, {
           ...(ctl === undefined ? {} : { signal: ctl.signal }),
           ...(call.batchSize === undefined ? {} : { batchSize: call.batchSize }),
@@ -420,15 +444,40 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
               }
             : {}),
         });
+        parentPort.postMessage({
+          type: 'telemetry',
+          event: buildCatalogImportTelemetryEvent({
+            sourceKind,
+            stage: 'catalog',
+            durationMs: clock() - startedAt,
+            itemCount: res.ok ? sumImportCounts(res.value.counts) : 0,
+            success: res.ok,
+            errorCode: res.ok ? undefined : res.error.code,
+          }),
+        });
         await checkpointWal(db);
         return res;
       }
       case 'importGuide': {
         if (!service.importGuide) return err(elvError('storage', 'unsupported'));
+        const startedAt = clock();
+        const sources = await service.listSources().catch(() => []);
+        const sourceKind = sources.find((s) => s.id === call.id)?.kind;
         const res = await service.importGuide(
           call.id,
           ctl === undefined ? undefined : { signal: ctl.signal },
         );
+        parentPort.postMessage({
+          type: 'telemetry',
+          event: buildCatalogImportTelemetryEvent({
+            sourceKind,
+            stage: 'guide',
+            durationMs: clock() - startedAt,
+            itemCount: res.ok ? sumImportCounts(res.value.counts) : 0,
+            success: res.ok,
+            errorCode: res.ok ? undefined : res.error.code,
+          }),
+        });
         await checkpointWal(db);
         return res;
       }
@@ -597,9 +646,11 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'reportStreamOutcome':
         return executeFailoverOpsRpcCall(service, call);
       default:
-        return isWaveF5bRpcCall(call)
-          ? executeWaveF5bOpsRpcCall(service, call)
-          : executeEpgOpsRpcCall(service, call);
+        return isWaveP9RpcCall(call)
+          ? executeWaveP9OpsRpcCall(service, call)
+          : isWaveF5bRpcCall(call)
+            ? executeWaveF5bOpsRpcCall(service, call)
+            : executeEpgOpsRpcCall(service, call);
     }
   };
 

@@ -232,6 +232,7 @@ export function AppShellPlayerHost(p: AppShellPlayerHostProps): ReactElement | n
     >
       <CrashRecoveryBoundary
         resetKey={`${p.playTarget.itemKey}:${modes.playerHandoffKey}`}
+        screenName="player"
         {...p.crashProps}
       >
         <AppShellPlayerView

@@ -14,11 +14,11 @@ import {
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import type { SyncAccountPort } from '../ports/wave-f9-ports';
-import { AccountQrPairingView, AccountRecoveryBanner, AccountTextField } from './AccountFormParts';
+import type { QrScannerPort, SyncAccountPort } from '../ports/wave-f9-ports';
+import { AccountBidirectionalPairingPanel } from './AccountBidirectionalPairingPanel';
+import { AccountRecoveryBanner, AccountTextField } from './AccountFormParts';
 import {
   mapSyncErrorCodeToMessageId,
-  useSyncQrPairing,
   validateSignInFields,
   validateSignUpFields,
 } from './account-helpers';
@@ -31,6 +31,16 @@ export interface WelcomeSyncOverlayProps {
   readonly syncAccount: SyncAccountPort;
   /** Dismisses the first-run welcome overlay and enters the full local app (`welcomeDismissed = true`). */
   readonly onContinueWithoutAccount: () => void;
+  /** Current unified diagnostics & performance telemetry opt-in state (defaults to `false`). */
+  readonly telemetryOptIn?: boolean;
+  /** Invoked when the user toggles anonymous diagnostics inside the first-run Privacy strip (`#509`). */
+  readonly onToggleTelemetryOptIn?: (next: boolean) => void;
+  /** Optional native camera QR scanner port for pairing (`#510`). */
+  readonly qrScanner?: QrScannerPort;
+  /** Optional incoming `elviptv://pair?...` deep link URI (`#510`). */
+  readonly pendingPairUri?: string | null;
+  /** Invoked once `pendingPairUri` has been consumed. */
+  readonly onPairUriHandled?: () => void;
   /** Optional polling interval override (ms) for deterministic unit tests. */
   readonly qrPollIntervalMs?: number;
 }
@@ -51,14 +61,20 @@ function WelcomeTvKeyBridge({ onBack }: { readonly onBack: (() => void) | undefi
 }
 
 /**
- * First-run Cinema Quietude v2 E2EE Sync Welcome overlay (`#26`).
+ * First-run Cinema Quietude v2 E2EE Sync & Privacy Consent Welcome overlay (`#26`, `#509`, `#510`).
  * Renders in-tree (never RN `<Modal>`) with calm obsidian glass framing, Sign In / Create Account /
- * Pair via QR tabs, recovery code acknowledgment, and a prominent "Continue without account" escape.
+ * Bidirectional QR + 8-Digit Pairing tabs, an opt-in Privacy & Diagnostics consent toggle defaulting OFF,
+ * recovery code acknowledgment, and a prominent "Continue without account" escape.
  */
 export function WelcomeSyncOverlay({
   visible,
   syncAccount,
   onContinueWithoutAccount,
+  telemetryOptIn: controlledTelemetryOptIn,
+  onToggleTelemetryOptIn,
+  qrScanner,
+  pendingPairUri,
+  onPairUriHandled,
   qrPollIntervalMs,
 }: WelcomeSyncOverlayProps): ReactElement | null {
   const theme = useTheme();
@@ -66,20 +82,24 @@ export function WelcomeSyncOverlay({
   const viewport = useViewport();
   const isTv = viewport.formFactor === 'tv' || viewport.inputModality === 'tv';
 
-  const [tab, setTab] = useState<WelcomeTabId>('signin');
+  const [tab, setTab] = useState<WelcomeTabId>(() =>
+    pendingPairUri && pendingPairUri.trim().length > 0 ? 'qr' : 'signin',
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorKey, setErrorKey] = useState<MessageId | null>(null);
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const [localTelemetryOptIn, setLocalTelemetryOptIn] = useState(false);
 
-  const pairing = useSyncQrPairing(
-    syncAccount,
-    visible && tab === 'qr' && recoveryCode === null,
-    onContinueWithoutAccount,
-    qrPollIntervalMs,
-  );
+  const telemetryOptIn = controlledTelemetryOptIn ?? localTelemetryOptIn;
+
+  useEffect(() => {
+    if (pendingPairUri && pendingPairUri.trim().length > 0) {
+      setTab('qr');
+    }
+  }, [pendingPairUri]);
 
   useEffect(() => {
     if (!visible || (Platform.OS as string) !== 'web') return undefined;
@@ -107,6 +127,15 @@ export function WelcomeSyncOverlay({
     setTab(next);
     setErrorKey(null);
   }, []);
+
+  const handleToggleTelemetry = useCallback(() => {
+    const next = !telemetryOptIn;
+    if (onToggleTelemetryOptIn !== undefined) {
+      onToggleTelemetryOptIn(next);
+    } else {
+      setLocalTelemetryOptIn(next);
+    }
+  }, [onToggleTelemetryOptIn, telemetryOptIn]);
 
   const handleSignIn = useCallback(async () => {
     const validationErr = validateSignInFields(email, password);
@@ -381,13 +410,88 @@ export function WelcomeSyncOverlay({
                     </View>
                   ) : (
                     <View testID="welcome-qr-pane" style={styles.form}>
-                      <AccountQrPairingView
-                        pairing={pairing}
-                        size={180}
-                        testIDPrefix="welcome-qr"
+                      <AccountBidirectionalPairingPanel
+                        syncAccount={syncAccount}
+                        active={visible && tab === 'qr' && recoveryCode === null}
+                        legacyTestIDPrefix="welcome-qr"
+                        onPaired={onContinueWithoutAccount}
+                        {...(qrScanner !== undefined ? { qrScanner } : {})}
+                        {...(pendingPairUri !== undefined ? { pendingPairUri } : {})}
+                        {...(onPairUriHandled !== undefined ? { onPairUriHandled } : {})}
+                        {...(qrPollIntervalMs !== undefined
+                          ? { pollIntervalMs: qrPollIntervalMs }
+                          : {})}
                       />
                     </View>
                   )}
+
+                  <View
+                    testID="welcome-privacy-consent-strip"
+                    style={[
+                      styles.privacyStrip,
+                      {
+                        borderColor: theme.colors.surfaceBorder,
+                        backgroundColor: theme.colors.bgCard,
+                        borderRadius: theme.radius.card,
+                      },
+                    ]}
+                  >
+                    <Pressable
+                      testID="privacy-consent-telemetry-toggle"
+                      accessibilityRole="switch"
+                      accessibilityLabel={i18n.t('privacy.consent.telemetryToggle')}
+                      accessibilityState={{ checked: telemetryOptIn }}
+                      aria-checked={telemetryOptIn}
+                      focusable
+                      onPress={handleToggleTelemetry}
+                      style={(state) => [
+                        styles.privacyToggleRow,
+                        cursorPointer,
+                        tabTransition,
+                        {
+                          borderRadius: theme.radius.button,
+                          backgroundColor: state.focused ? theme.colors.focusFill : 'transparent',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          theme.typography.caption,
+                          styles.flex1,
+                          { color: theme.colors.textPrimary },
+                        ]}
+                      >
+                        {i18n.t('privacy.consent.telemetryToggle')}
+                      </Text>
+                      <View
+                        style={[
+                          styles.switchTrack,
+                          {
+                            borderRadius: theme.radius.pill,
+                            backgroundColor: telemetryOptIn
+                              ? theme.colors.accent
+                              : theme.colors.bgSurface,
+                            borderColor: telemetryOptIn
+                              ? theme.colors.accent
+                              : theme.colors.chipBorder,
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.switchThumb,
+                            {
+                              borderRadius: theme.radius.pill,
+                              backgroundColor: telemetryOptIn
+                                ? theme.colors.accentContrast
+                                : theme.colors.textPrimary,
+                              alignSelf: telemetryOptIn ? 'flex-end' : 'flex-start',
+                            },
+                          ]}
+                        />
+                      </View>
+                    </Pressable>
+                  </View>
 
                   <View style={[styles.footer, { borderTopColor: theme.colors.surfaceBorder }]}>
                     <CtaButton
@@ -455,6 +559,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   form: { gap: 12 },
+  privacyStrip: {
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  privacyToggleRow: {
+    minHeight: 40,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  flex1: { flex: 1 },
+  switchTrack: {
+    width: 38,
+    height: 22,
+    borderWidth: 1,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  switchThumb: {
+    width: 16,
+    height: 16,
+  },
   footer: {
     marginTop: 4,
     paddingTop: 14,

@@ -65,7 +65,7 @@ import Constants from 'expo-constants';
 import { getLocales } from 'expo-localization';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Platform, StyleSheet, View } from 'react-native';
+import { AppState, Dimensions, Platform, StyleSheet, View } from 'react-native';
 import { createComposedAppLifecycle } from './android-lifecycle';
 import { createDeviceCatalog } from './catalog';
 import { waitForCatalogForeground } from './catalog/ios-prewarm-gate';
@@ -88,17 +88,30 @@ import {
 } from './storage';
 import { createMobileDiagnosticsPort } from './storage/diag-log';
 import { createTvMobileCatalogSnapshotBridge } from './sync/catalog-snapshot';
+import { createMobileQrScannerPort } from './sync/qr-scanner-port';
+import { classifyMobileRamBucket, extractSafeMobileErrorSignature } from './sync/sync-helpers';
 import {
   createTvMobileSyncPorts,
   type FeedbackPort,
   type SyncAccountPort,
   type TelemetryPort,
 } from './sync/sync-runtime';
+import { usePairDeepLink } from './sync/use-pair-deep-link';
 import { createMobileVideoHost } from './thermal-and-pip';
 import { createMobileThermalDevicePort } from './thermal-device-port';
 import { createTvHomeChannelsPort } from './tv-home-channels/adapter';
 import { usePlayDeepLink } from './tv-home-channels/use-play-deep-link';
 import { attachAppStateDeadHostReset, createMobileTvUiAdapters } from './ui/platform-adapters';
+
+const APP_MODULE_BOOT_MS = Date.now();
+
+function readBakedSyncServerUrl(): string {
+  const extra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
+  if (typeof extra?.syncServerUrl === 'string' && extra.syncServerUrl.trim().length > 0) {
+    return extra.syncServerUrl.trim();
+  }
+  return typeof process !== 'undefined' ? (process.env.EXPO_PUBLIC_SYNC_SERVER_URL ?? '') : '';
+}
 
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
@@ -125,11 +138,18 @@ function AppRoot() {
   const tvHomeChannelsPort = useMemo(() => createTvHomeChannelsPort(), []);
   const externalPlayerPort = useMemo(() => createMobileExternalPlayerPort(), []);
   const diagnosticsPort = useMemo(() => createMobileDiagnosticsPort(), []);
+  const telemetryRef = useRef<TelemetryPort | null>(null);
   const openSharedCatalog = useMemo(() => {
     let cached: Promise<CatalogService> | undefined;
     return () => {
       cached ??= waitForCatalogForeground(Platform.OS, AppState)
-        .then(() => createDeviceCatalog())
+        .then(() =>
+          createDeviceCatalog({
+            onSlowQuery: (op, durationMs) =>
+              telemetryRef.current?.recordSqliteSlowOp({ op, durationMs }),
+            recordCatalogImport: (meta) => telemetryRef.current?.recordCatalogImport(meta),
+          }),
+        )
         .catch((err: unknown) => {
           cached = undefined;
           throw err;
@@ -159,13 +179,12 @@ function AppRoot() {
     syncServerUrl: '',
   });
   const latestPrefsRef = useRef<PreferencesSnapshot>(DEFAULT_PREFERENCES);
+  const qrScannerPort = useMemo(() => createMobileQrScannerPort(), []);
   const syncPorts = useMemo(
     () =>
       createTvMobileSyncPorts({
         secretStore: syncSecretStore,
-        getServerUrl: () =>
-          syncPrefsRef.current.syncServerUrl.trim() ||
-          (typeof process !== 'undefined' ? (process.env.EXPO_PUBLIC_SYNC_SERVER_URL ?? '') : ''),
+        getServerUrl: () => readBakedSyncServerUrl(),
         getPreferences: () => syncPrefsRef.current,
         getSyncablePreferences: () => extractSyncablePreferences(latestPrefsRef.current),
         applyInitialPreferences: async (patch) => {
@@ -175,23 +194,48 @@ function AppRoot() {
         applyMergedSnapshot: catalogSnapshotBridge.applyMergedSnapshot,
         onTelemetryOptInChange: (enabled) => {
           syncPrefsRef.current = { ...syncPrefsRef.current, telemetryOptIn: enabled };
-          void preferencesStore.update({ telemetryOptIn: enabled }).catch(() => undefined);
+          void preferencesStore
+            .update({ telemetryOptIn: enabled, crashReportsOptIn: enabled })
+            .catch(() => undefined);
         },
-        getDeviceMeta: () => ({
-          platform:
+        getDeviceMeta: () => {
+          const dims = Dimensions.get('screen');
+          const resW = Math.round(dims.width * (dims.scale || 1));
+          const resH = Math.round(dims.height * (dims.scale || 1));
+          const resolution = resW > 0 && resH > 0 ? `${resW}x${resH}` : undefined;
+          const totalMemBytes =
             Platform.OS === 'android'
-              ? Platform.isTV
-                ? 'android-tv'
-                : 'android'
+              ? getAndroidDeviceMemoryInfo()?.totalMemBytes
               : Platform.OS === 'ios'
+                ? getApplePhysicalMemoryBytes()
+                : null;
+          const ramBucket = classifyMobileRamBucket(totalMemBytes);
+          const formFactor = Platform.isTV
+            ? 'tv'
+            : Math.min(dims.width, dims.height) >= 600
+              ? 'tablet'
+              : 'phone';
+          return {
+            platform:
+              Platform.OS === 'android'
                 ? Platform.isTV
-                  ? 'tvos'
-                  : 'ios'
-                : Platform.OS,
-          appVersion: Constants.expoConfig?.version ?? '0.0.0',
-          locale: systemLocale,
-          ...(Platform.Version !== undefined ? { osVersion: String(Platform.Version) } : {}),
-        }),
+                  ? 'android-tv'
+                  : 'android'
+                : Platform.OS === 'ios'
+                  ? Platform.isTV
+                    ? 'tvos'
+                    : 'ios'
+                  : Platform.OS,
+            appVersion: Constants.expoConfig?.version ?? '0.0.0',
+            locale: systemLocale,
+            formFactor,
+            ...(ramBucket !== undefined ? { ramBucket } : {}),
+            ...(resolution !== undefined ? { resolution } : {}),
+            ...(Platform.Version !== undefined
+              ? { osVersion: `${Platform.OS} ${String(Platform.Version)}` }
+              : {}),
+          };
+        },
         getRecentLogs: (maxLines) => diagnosticsPort.readLogTail(maxLines),
         subscribeAppState: (listener) => {
           const sub = AppState.addEventListener('change', listener);
@@ -201,11 +245,14 @@ function AppRoot() {
     [catalogSnapshotBridge, diagnosticsPort, preferencesStore, syncSecretStore, systemLocale],
   );
   const { pendingDeepLink, clearPendingDeepLink } = usePlayDeepLink();
+  const { pendingPairUri, clearPendingPairUri } = usePairDeepLink();
+  telemetryRef.current = syncPorts.telemetry;
   const uiAdapters = useMemo(() => createMobileTvUiAdapters(), []);
 
   useEffect(() => {
     let active = true;
     let receivedLivePrefUpdate = false;
+    let startupRecorded = false;
     const applyPrefs = (snap: PreferencesSnapshot, isLiveUpdate: boolean): void => {
       if (!active) return;
       if (isLiveUpdate) {
@@ -214,16 +261,68 @@ function AppRoot() {
         return;
       }
       latestPrefsRef.current = snap;
+      const effectiveTelemetryOptIn = Boolean(snap.telemetryOptIn || snap.crashReportsOptIn);
       syncPrefsRef.current = {
-        telemetryOptIn: snap.telemetryOptIn,
+        telemetryOptIn: effectiveTelemetryOptIn,
         syncServerUrl: snap.syncServerUrl,
       };
+      if (!startupRecorded && effectiveTelemetryOptIn) {
+        startupRecorded = true;
+        syncPorts.telemetry.recordStartup(Math.max(0, Date.now() - APP_MODULE_BOOT_MS), true);
+      }
     };
+    const onOnline = (): void => {
+      syncPorts.notifyReconnect();
+    };
+    const globalTarget = globalThis as {
+      addEventListener?: (event: string, listener: () => void) => void;
+      removeEventListener?: (event: string, listener: () => void) => void;
+    };
+    globalTarget.addEventListener?.('online', onOnline);
+    const reconnectAppStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && syncPorts.syncAccount.getState().autoSyncState === 'offline') {
+        syncPorts.notifyReconnect();
+      }
+    });
+    const errorUtils = (
+      globalThis as {
+        ErrorUtils?: {
+          getGlobalHandler?: () => ((error: unknown, isFatal?: boolean) => void) | undefined;
+          setGlobalHandler?: (handler: (error: unknown, isFatal?: boolean) => void) => void;
+        };
+      }
+    ).ErrorUtils;
+    const prevErrorHandler = errorUtils?.getGlobalHandler?.();
+    if (errorUtils?.setGlobalHandler) {
+      errorUtils.setGlobalHandler((error: unknown, isFatal?: boolean) => {
+        const sig = extractSafeMobileErrorSignature(error);
+        if (isFatal) {
+          syncPorts.telemetry.recordAppCrash({
+            errorName: sig.errorName,
+            stackSig: sig.stackSig,
+            fatal: true,
+            uptimeMs: Math.max(0, Date.now() - APP_MODULE_BOOT_MS),
+          });
+        } else {
+          syncPorts.telemetry.recordUnhandledError({
+            errorName: sig.errorName,
+            stackSig: sig.stackSig,
+            source: 'js',
+          });
+        }
+        prevErrorHandler?.(error, isFatal);
+      });
+    }
     const unsubPrefs = preferencesStore.subscribe((snap) => applyPrefs(snap, true));
     void preferencesStore.load().then((snap) => applyPrefs(snap, false));
-    void syncPorts.hydrate();
+    void syncPorts.hydrate().then(() => syncPorts.notifyStartup());
     return () => {
       active = false;
+      globalTarget.removeEventListener?.('online', onOnline);
+      reconnectAppStateSub.remove();
+      if (errorUtils?.setGlobalHandler && prevErrorHandler) {
+        errorUtils.setGlobalHandler(prevErrorHandler);
+      }
       unsubPrefs();
       syncPorts.dispose();
     };
@@ -393,6 +492,9 @@ function AppRoot() {
     syncAccount?: SyncAccountPort;
     telemetry?: TelemetryPort;
     feedback?: FeedbackPort;
+    pendingPairUri?: string | null;
+    onPairUriHandled?: () => void;
+    qrScanner?: ReturnType<typeof createMobileQrScannerPort>;
   } = {
     catalog,
     videoHost,
@@ -404,6 +506,9 @@ function AppRoot() {
     tvHomeChannels: tvHomeChannelsPort,
     pendingDeepLink,
     onDeepLinkHandled: clearPendingDeepLink,
+    pendingPairUri,
+    onPairUriHandled: clearPendingPairUri,
+    qrScanner: qrScannerPort,
     externalPlayer: externalPlayerPort,
     diagnostics: diagnosticsPort,
     syncAccount: syncPorts.syncAccount,

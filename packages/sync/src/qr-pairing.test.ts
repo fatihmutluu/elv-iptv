@@ -5,9 +5,20 @@ import { createPureJsVaultCryptoPort } from './pure-crypto';
 import {
   buildPairingQrUri,
   createQrPairingClient,
+  decryptPairingTransfer,
+  derivePairingSessionKeys,
+  encodeBidirectionalPairingQr,
+  encryptPairingTransfer,
+  hashPairingEmail,
   MAX_SYNC_QR_BYTES,
+  maskEmail,
+  normalizePairingCode,
+  PAIR_CODE_RE,
+  parsePairingQrOrCode,
   parsePairingQrUri,
+  resolvePairingDirection,
 } from './qr-pairing';
+import { generateX25519KeyPair, x25519 } from './x25519';
 
 function seededRandom(seed = 77): (len: number) => Uint8Array {
   let state = seed >>> 0;
@@ -356,5 +367,220 @@ describe('qr-pairing universal E2EE flow', () => {
       });
     }
     expect(decryptSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('qr-pairing bidirectional v2 (8-digit code, X25519 SAS, dual-direction AES-256-GCM)', () => {
+  it('validates 8-digit numeric codes, masks emails safely, and hashes normalized emails', () => {
+    expect(PAIR_CODE_RE.test('12345678')).toBe(true);
+    expect(PAIR_CODE_RE.test('00000000')).toBe(true);
+    expect(PAIR_CODE_RE.test('1234567')).toBe(false);
+    expect(PAIR_CODE_RE.test('123456789')).toBe(false);
+    expect(PAIR_CODE_RE.test('1234ABCD')).toBe(false);
+
+    expect(normalizePairingCode('1234 5678')).toBe('12345678');
+    expect(normalizePairingCode(' 1234-5678 ')).toBe('12345678');
+    expect(normalizePairingCode('0012 0034')).toBe('00120034');
+    expect(normalizePairingCode('1234567')).toBeNull();
+    expect(normalizePairingCode('1234abcd')).toBeNull();
+    expect(normalizePairingCode('')).toBeNull();
+
+    expect(maskEmail('fatih@example.com')).toBe('f***@example.com');
+    expect(maskEmail('  Fatih.Mutlu@Example.COM ')).toBe('f***@example.com');
+    expect(maskEmail('a@b.co')).toBe('*@b.co');
+    expect(maskEmail('ab@b.co')).toBe('a***@b.co');
+    expect(maskEmail('not-an-email')).toBe('***');
+    expect(maskEmail('@example.com')).toBe('***');
+
+    const h1 = hashPairingEmail('  Alice@Example.COM ');
+    const h2 = hashPairingEmail('alice@example.com');
+    expect(h1).toBe(h2);
+    expect(h1).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('encodes and parses elviptv://, https:// Universal Link, and raw 8-digit pairing inputs', () => {
+    const rng = seededRandom(808);
+    const hostKp = generateX25519KeyPair(rng);
+    const pkB64 = base64UrlEncode(hostKp.publicKey);
+
+    const schemeUri = encodeBidirectionalPairingQr({
+      code: '1234 5678',
+      hostPublicKeyB64Url: pkB64,
+    });
+    expect(schemeUri).toBe(`elviptv://pair?c=12345678&pk=${pkB64}`);
+    expect(utf8ByteLength(schemeUri)).toBeLessThanOrEqual(MAX_SYNC_QR_BYTES);
+    expect(parsePairingQrOrCode(schemeUri)).toEqual({
+      ok: true,
+      value: { kind: 'qr', code: '12345678', hostPublicKeyB64Url: pkB64 },
+    });
+
+    const httpsUri = encodeBidirectionalPairingQr({
+      code: '87654321',
+      hostPublicKeyB64Url: pkB64,
+      origin: 'https://Sync.ElvIptv.com/',
+    });
+    expect(httpsUri).toBe(`https://sync.elviptv.com/pair?c=87654321&pk=${pkB64}`);
+    expect(utf8ByteLength(httpsUri)).toBeLessThanOrEqual(MAX_SYNC_QR_BYTES);
+    expect(parsePairingQrOrCode(httpsUri)).toEqual({
+      ok: true,
+      value: {
+        kind: 'qr',
+        code: '87654321',
+        hostPublicKeyB64Url: pkB64,
+        origin: 'https://sync.elviptv.com',
+      },
+    });
+
+    // Raw 8-digit code with spaces or hyphens
+    expect(parsePairingQrOrCode('1234 5678')).toEqual({
+      ok: true,
+      value: { kind: 'code', code: '12345678' },
+    });
+    expect(parsePairingQrOrCode('9876-5432')).toEqual({
+      ok: true,
+      value: { kind: 'code', code: '98765432' },
+    });
+
+    // Reject insecure origins, oversized URIs, all-zero pubkeys, bad paths, bad codes
+    const zeroPk = base64UrlEncode(new Uint8Array(32));
+    expect(() =>
+      encodeBidirectionalPairingQr({ code: '12345678', hostPublicKeyB64Url: zeroPk }),
+    ).toThrow(/zero|public key/i);
+    expect(() =>
+      encodeBidirectionalPairingQr({
+        code: '12345678',
+        hostPublicKeyB64Url: pkB64,
+        origin: 'http://sync.example.com',
+      }),
+    ).toThrow(/https/i);
+    expect(() =>
+      encodeBidirectionalPairingQr({
+        code: '12345678',
+        hostPublicKeyB64Url: pkB64,
+        origin: `https://${'a'.repeat(180)}.example.com`,
+      }),
+    ).toThrow(/213/);
+
+    expect(parsePairingQrOrCode(`http://sync.elviptv.com/pair?c=12345678&pk=${pkB64}`).ok).toBe(
+      false,
+    );
+    expect(parsePairingQrOrCode(`https://sync.elviptv.com/other?c=12345678&pk=${pkB64}`).ok).toBe(
+      false,
+    );
+    expect(parsePairingQrOrCode(`elviptv://pair?c=12345678&pk=${zeroPk}`).ok).toBe(false);
+    expect(parsePairingQrOrCode(`elviptv://pair?c=1234ABCD&pk=${pkB64}`).ok).toBe(false);
+    expect(parsePairingQrOrCode('javascript:alert(1)').ok).toBe(false);
+    expect(parsePairingQrOrCode('').ok).toBe(false);
+  });
+
+  it('derives transcript-bound 4-digit SAS + distinct directional AES-256-GCM keys and authenticates transfers', () => {
+    const rng = seededRandom(909);
+    const hostKp = generateX25519KeyPair(rng);
+    const responderKp = generateX25519KeyPair(rng);
+
+    const sharedHost = x25519(hostKp.privateKey, responderKp.publicKey);
+    const sharedResponder = x25519(responderKp.privateKey, hostKp.publicKey);
+    expect(sharedHost).toEqual(sharedResponder);
+
+    const transcript = {
+      code: '48291037',
+      hostPublicKey: hostKp.publicKey,
+      responderPublicKey: responderKp.publicKey,
+    };
+    const hostKeys = derivePairingSessionKeys(sharedHost, transcript);
+    const responderKeys = derivePairingSessionKeys(sharedResponder, transcript);
+
+    expect(hostKeys.sas).toMatch(/^\d{4}$/);
+    expect(hostKeys.sas).toBe(responderKeys.sas);
+    expect(hostKeys.hostToResponderKey).toEqual(responderKeys.hostToResponderKey);
+    expect(hostKeys.responderToHostKey).toEqual(responderKeys.responderToHostKey);
+    expect(hostKeys.hostToResponderKey).toHaveLength(32);
+    expect(hostKeys.responderToHostKey).toHaveLength(32);
+    expect(hostKeys.hostToResponderKey).not.toEqual(hostKeys.responderToHostKey);
+
+    // Changing any transcript field rotates SAS & directional keys
+    const differentCodeKeys = derivePairingSessionKeys(sharedHost, {
+      ...transcript,
+      code: '48291038',
+    });
+    expect(differentCodeKeys.hostToResponderKey).not.toEqual(hostKeys.hostToResponderKey);
+
+    // Bidirectional transfer encryption + authentication
+    const payload = {
+      email: 'alice@example.test',
+      refreshToken: 'ref_bidirectional_secret',
+      vaultKeyB64: base64UrlEncode(new Uint8Array(32).fill(0x44)),
+    };
+    const encryptedH2R = encryptPairingTransfer(
+      hostKeys.hostToResponderKey,
+      hostKeys.aad,
+      payload,
+      { randomBytes: rng },
+    );
+    expect(encryptedH2R.ciphertext).not.toContain('ref_bidirectional_secret');
+    expect(encryptedH2R.ciphertext).not.toContain('alice@example.test');
+
+    const decryptedH2R = decryptPairingTransfer(
+      responderKeys.hostToResponderKey,
+      responderKeys.aad,
+      encryptedH2R.ciphertext,
+      encryptedH2R.iv,
+    );
+    expect(decryptedH2R).toEqual(payload);
+
+    // Reflection attack (wrong directional key) MUST fail!
+    expect(() =>
+      decryptPairingTransfer(
+        responderKeys.responderToHostKey,
+        responderKeys.aad,
+        encryptedH2R.ciphertext,
+        encryptedH2R.iv,
+      ),
+    ).toThrow();
+
+    // Tampered transcript AAD MUST fail!
+    expect(() =>
+      decryptPairingTransfer(
+        responderKeys.hostToResponderKey,
+        differentCodeKeys.aad,
+        encryptedH2R.ciphertext,
+        encryptedH2R.iv,
+      ),
+    ).toThrow();
+
+    // All-zero shared secret rejected
+    expect(() => derivePairingSessionKeys(new Uint8Array(32), transcript)).toThrow();
+  });
+
+  it('resolves all 5 pairing direction cases deterministically via normalized email hashes', () => {
+    const aliceHash = hashPairingEmail('alice@example.com');
+    const aliceHashUpper = aliceHash.toUpperCase();
+    const bobHash = hashPairingEmail('bob@example.com');
+
+    expect(resolvePairingDirection({ signedIn: false }, { signedIn: false })).toBe(
+      'neither_signed_in',
+    );
+    expect(
+      resolvePairingDirection({ signedIn: false }, { signedIn: true, emailHash: aliceHash }),
+    ).toBe('responder_to_host');
+    expect(
+      resolvePairingDirection({ signedIn: true, emailHash: aliceHash }, { signedIn: false }),
+    ).toBe('host_to_responder');
+    expect(
+      resolvePairingDirection(
+        { signedIn: true, emailHash: aliceHash },
+        { signedIn: true, emailHash: aliceHashUpper },
+      ),
+    ).toBe('same_account');
+    expect(
+      resolvePairingDirection(
+        { signedIn: true, emailHash: aliceHash },
+        { signedIn: true, emailHash: bobHash },
+      ),
+    ).toBe('different_accounts');
+    // Missing/malformed hash when both signed in fails safe to different_accounts
+    expect(
+      resolvePairingDirection({ signedIn: true, emailHash: 'not-a-hash' }, { signedIn: true }),
+    ).toBe('different_accounts');
   });
 });
