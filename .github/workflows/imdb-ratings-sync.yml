@@ -34,32 +34,15 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          D1_DATABASE_NAME: ${{ vars.ELV_D1_DATABASE_NAME || 'elv-sync-db' }}
-          D1_DATABASE_ID: ${{ secrets.ELV_D1_DATABASE_ID }}
+          ELV_D1_DATABASE_ID: ${{ secrets.ELV_D1_DATABASE_ID }}
           MIN_VOTES: ${{ inputs.min_votes || '500' }}
           ROW_LIMIT: ${{ inputs.limit || '' }}
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "Skipping IMDb ratings sync: CLOUDFLARE_API_TOKEN secret is not configured."
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$ELV_D1_DATABASE_ID" ]; then
+            echo "Skipping IMDb ratings sync: Cloudflare D1 API secrets are not fully configured."
             exit 0
           fi
-          wrangler_prefix="$RUNNER_TEMP/wrangler"
-          npm install --no-save --prefix "$wrangler_prefix" wrangler@4
-          export PATH="$wrangler_prefix/node_modules/.bin:$PATH"
-          wrangler_config="apps/sync-server/wrangler.toml"
-          if [ -n "$D1_DATABASE_ID" ]; then
-            wrangler_config="$RUNNER_TEMP/wrangler-d1.toml"
-            cat > "$wrangler_config" <<EOF
-          name = "elv-sync-server"
-          compatibility_date = "2026-01-01"
-
-          [[d1_databases]]
-          binding = "DB"
-          database_name = "$D1_DATABASE_NAME"
-          database_id = "$D1_DATABASE_ID"
-          EOF
-          fi
-          args=(--min-votes "$MIN_VOTES" --out-dir "$RUNNER_TEMP/imdb-sql" --apply-d1 "$D1_DATABASE_NAME" --config "$wrangler_config")
+          args=(--min-votes "$MIN_VOTES" --out-dir "$RUNNER_TEMP/imdb-sql" --apply-d1-api)
           if [ -n "$ROW_LIMIT" ]; then
             args+=(--limit "$ROW_LIMIT")
           fi

@@ -257,5 +257,33 @@ describe('IMDb official ratings TSV parser & SQL chunk generator', () => {
         1_764_212_100_000,
       ),
     ).toThrow(/Invalid votes/);
+
+    const apiCalls: Array<{ url: string; auth: string | null }> = [];
+    const apiFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('datasets.imdbws.com')) {
+        return new Response(new Uint8Array(gzBuffer), { status: 200 });
+      }
+      const headers = new Headers(init?.headers);
+      apiCalls.push({ url, auth: headers.get('authorization') });
+      return new Response(JSON.stringify({ success: true, result: [] }), { status: 200 });
+    });
+    const apiExit = await runSyncImdbRatingsCli(['--min-votes', '2000000', '--apply-d1-api'], {
+      fetchImpl: apiFetch as unknown as typeof fetch,
+      env: {
+        CLOUDFLARE_API_TOKEN: 'cf-test-token',
+        CLOUDFLARE_ACCOUNT_ID: '1234567890abcdef1234567890abcdef',
+        ELV_D1_DATABASE_ID: '11111111-2222-3333-4444-555555555555',
+      },
+      nowMs: () => 1_764_212_100_000,
+      stdout: () => {},
+      stderr: () => {},
+    });
+    expect(apiExit).toBe(0);
+    expect(apiCalls).toEqual([
+      {
+        url: 'https://api.cloudflare.com/client/v4/accounts/1234567890abcdef1234567890abcdef/d1/database/11111111-2222-3333-4444-555555555555/query',
+        auth: 'Bearer cf-test-token',
+      },
+    ]);
   });
 });

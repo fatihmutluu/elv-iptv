@@ -19,9 +19,10 @@ const DEFAULT_ROWS_PER_STATEMENT = 500;
 
 const IMDB_ID_RE = /^tt\d{5,10}$/;
 const D1_DB_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const CLOUDFLARE_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
 
 const SYNC_IMDB_RATINGS_USAGE = [
-  'usage: sync-imdb-ratings [--min-votes <N>] [--limit <N>] [--out-dir <dir>] [--apply-d1 <db-name>] [--config <wrangler.toml>] [--input <path>]',
+  'usage: sync-imdb-ratings [--min-votes <N>] [--limit <N>] [--out-dir <dir>] [--apply-d1 <db-name>] [--apply-d1-api] [--config <wrangler.toml>] [--input <path>]',
 ].join('\n');
 
 /** Parsed IMDb dataset rating entry ready for SQL batching. */
@@ -45,6 +46,7 @@ export interface SyncImdbRatingsOptions {
   readonly limit: number | null;
   readonly outDir: string | null;
   readonly applyD1: string | null;
+  readonly applyD1Api: boolean;
   readonly wranglerConfig: string | null;
   readonly inputPath: string | null;
 }
@@ -59,6 +61,7 @@ export interface SyncImdbRatingsIo {
     args: readonly string[],
     options: ExecFileSyncOptions,
   ) => unknown;
+  readonly env?: Readonly<Record<string, string | undefined>>;
   readonly nowMs?: () => number;
   readonly chunkSize?: number;
   readonly rowsPerStatement?: number;
@@ -85,6 +88,7 @@ export function parseImdbRatingsSyncArgs(argv: readonly string[]): SyncImdbRatin
       limit: { type: 'string' },
       'out-dir': { type: 'string' },
       'apply-d1': { type: 'string' },
+      'apply-d1-api': { type: 'boolean', default: false },
       config: { type: 'string' },
       input: { type: 'string' },
     },
@@ -97,6 +101,7 @@ export function parseImdbRatingsSyncArgs(argv: readonly string[]): SyncImdbRatin
       limit: null,
       outDir: null,
       applyD1: null,
+      applyD1Api: false,
       wranglerConfig: null,
       inputPath: null,
     };
@@ -110,17 +115,18 @@ export function parseImdbRatingsSyncArgs(argv: readonly string[]): SyncImdbRatin
     values.limit !== undefined ? parsePositiveIntFlag(values.limit, '--limit', false) : null;
   const outDir = values['out-dir']?.trim() ? values['out-dir'].trim() : null;
   const applyD1 = values['apply-d1']?.trim() ? values['apply-d1'].trim() : null;
+  const applyD1Api = Boolean(values['apply-d1-api']);
   const wranglerConfig = values.config?.trim() ? values.config.trim() : null;
   const inputPath = values.input?.trim() ? values.input.trim() : null;
 
   if (applyD1 !== null && !D1_DB_NAME_RE.test(applyD1)) {
     throw new Error('--apply-d1 must match ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$');
   }
-  if (!outDir && !applyD1) {
-    throw new Error('Specify at least --out-dir <dir> or --apply-d1 <db-name>');
+  if (!outDir && !applyD1 && !applyD1Api) {
+    throw new Error('Specify at least --out-dir <dir>, --apply-d1 <db-name>, or --apply-d1-api');
   }
 
-  return { help: false, minVotes, limit, outDir, applyD1, wranglerConfig, inputPath };
+  return { help: false, minVotes, limit, outDir, applyD1, applyD1Api, wranglerConfig, inputPath };
 }
 
 /** Parses one `tconst\taverageRating\tnumVotes` TSV line, returning `null` if invalid or below `minVotes`. */
@@ -270,6 +276,42 @@ async function openRatingsInputStream(
   return nodeStream.pipe(createGunzip());
 }
 
+async function applySqlChunksViaD1Api(
+  chunks: readonly ImdbRatingsSqlChunk[],
+  env: Readonly<Record<string, string | undefined>>,
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  const apiToken = (env.CLOUDFLARE_API_TOKEN ?? '').trim();
+  const accountId = (env.CLOUDFLARE_ACCOUNT_ID ?? '').trim();
+  const databaseId = (env.ELV_D1_DATABASE_ID ?? env.D1_DATABASE_ID ?? '').trim();
+  if (!apiToken) throw new Error('--apply-d1-api requires CLOUDFLARE_API_TOKEN');
+  if (!CLOUDFLARE_ID_RE.test(accountId)) {
+    throw new Error('--apply-d1-api requires a valid CLOUDFLARE_ACCOUNT_ID');
+  }
+  if (!CLOUDFLARE_ID_RE.test(databaseId)) {
+    throw new Error('--apply-d1-api requires a valid ELV_D1_DATABASE_ID (or D1_DATABASE_ID)');
+  }
+
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/d1/database/${encodeURIComponent(databaseId)}/query`;
+  for (const chunk of chunks) {
+    const res = await fetchImpl(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sql: chunk.sql }),
+    });
+    if (!res.ok) {
+      throw new Error(`Cloudflare D1 API failed on ${chunk.filename}: HTTP ${res.status}`);
+    }
+    const body = (await res.json()) as { readonly success?: boolean };
+    if (body.success === false) {
+      throw new Error(`Cloudflare D1 API rejected ${chunk.filename}`);
+    }
+  }
+}
+
 /** Executes the `sync-imdb-ratings` CLI end-to-end and returns process exit code. */
 export async function runSyncImdbRatingsCli(
   argv: readonly string[],
@@ -279,6 +321,7 @@ export async function runSyncImdbRatingsCli(
   const stderr = io.stderr ?? ((chunk: string) => process.stderr.write(chunk));
   const fetchImpl = io.fetchImpl ?? fetch;
   const execFile = io.execFileSyncImpl ?? execFileSync;
+  const env = io.env ?? process.env;
   const nowMs = io.nowMs ?? (() => Date.now());
   const wranglerBin = io.wranglerBin ?? 'wrangler';
 
@@ -346,6 +389,10 @@ export async function runSyncImdbRatingsCli(
       stdout(
         `sync-imdb-ratings: applied ${writtenPaths.length} chunk(s) to D1 database "${options.applyD1}"\n`,
       );
+    }
+    if (options.applyD1Api) {
+      await applySqlChunksViaD1Api(chunks, env, fetchImpl);
+      stdout(`sync-imdb-ratings: applied ${chunks.length} chunk(s) via Cloudflare D1 REST API\n`);
     }
     return 0;
   } catch (error) {
