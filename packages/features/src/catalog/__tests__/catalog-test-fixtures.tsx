@@ -162,6 +162,7 @@ export function renderCatalog(
     viewport?: ViewportOverride;
     preset?: 'obsidianCrimson' | 'highContrast';
     androidSource?: AndroidKeySource;
+    locale?: 'en' | 'tr';
   } = {},
 ) {
   const content = (
@@ -177,7 +178,7 @@ export function renderCatalog(
       }
     >
       <ThemeProvider preset={opts.preset ?? 'obsidianCrimson'}>
-        <I18nProvider i18n={createAppI18n('en')}>
+        <I18nProvider i18n={createAppI18n(opts.locale ?? 'en')}>
           <CatalogDiscoveryScreen
             kind={props.kind ?? 'movie'}
             catalog={props.catalog}
@@ -196,6 +197,9 @@ export function renderCatalog(
             {...(props.onFocusTopNav !== undefined ? { onFocusTopNav: props.onFocusTopNav } : {})}
             {...(props.isActiveScope !== undefined ? { isActiveScope: props.isActiveScope } : {})}
             {...(props.showElvPicks !== undefined ? { showElvPicks: props.showElvPicks } : {})}
+            {...(props.elvPreferences !== undefined
+              ? { elvPreferences: props.elvPreferences }
+              : {})}
           />
         </I18nProvider>
       </ThemeProvider>

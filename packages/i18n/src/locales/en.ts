@@ -5,6 +5,7 @@ import { enIssue502Messages } from './en-issue-502';
 import { enProfilesMessages } from './en-profiles';
 import { enSubtitlesSuiteMessages } from './en-subtitles-suite';
 import { enWaveE1Messages } from './en-wave-e1';
+import { enWaveE2Messages } from './en-wave-e2';
 import { enWaveF5bMessages } from './en-wave-f5b';
 import { enWaveF6Messages } from './en-wave-f6';
 import { enWaveF7aMessages } from './en-wave-f7a';
@@ -725,6 +726,7 @@ export const enMessages = {
   ...enWaveP8Messages,
   ...enWaveP9Messages,
   ...enWaveE1Messages,
+  ...enWaveE2Messages,
   ...enIssue502Messages,
 } as const;
 

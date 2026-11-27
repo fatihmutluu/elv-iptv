@@ -1,5 +1,7 @@
 import type {
   CatalogService,
+  ElvFranchiseLibraryItem,
+  ElvItemEnrichment,
   ElvTitleRecord,
   EpisodeRow,
   ItemDetailRow,
@@ -27,6 +29,7 @@ import {
   useElvEnrichmentForKeys,
   useSeriesUnplayedCounts,
 } from '../shared';
+import type { DetailRichCastMember } from './DetailCastStrip';
 import {
   type DetailSeasonsState,
   type DetailSnapshot,
@@ -57,10 +60,20 @@ export interface UseDetailDataOptions {
 /** Hydrated Detail screen dataset, series season controls, and optimistic user-state mutations. */
 export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly title: string;
+  readonly rawTitle: string;
   readonly posterUri: string | null;
   readonly backdropUri: string | null;
   readonly year: number | null;
   readonly rating: number | null;
+  readonly votes: number | null;
+  readonly runtimeMin: number | null;
+  readonly director: string | null;
+  readonly cast: readonly DetailRichCastMember[];
+  readonly trailerStreamUrl: string | null;
+  readonly trailerYoutubeId: string | null;
+  readonly imdbId: string | null;
+  readonly manualLock: boolean;
+  readonly franchiseItems: readonly ElvFranchiseLibraryItem[];
   readonly plot: string | null;
   readonly genres: readonly string[];
   readonly isEnriched: boolean;
@@ -72,6 +85,7 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly toggleMyList: () => Promise<void>;
   readonly toggleWatched: () => Promise<void>;
   readonly toggleRating: (next: RatingValue) => Promise<void>;
+  readonly applyFixMatchResult: (updated: ElvItemEnrichment) => void;
 }
 
 /**
@@ -110,6 +124,9 @@ export function useDetailData({
   const [versions, setVersions] = useState<readonly DetailVersionOption[]>([]);
   const [enrichment, setEnrichment] = useState<VodEnrichmentRecord | null>(null);
   const [elvTitleDetail, setElvTitleDetail] = useState<ElvTitleRecord | null>(null);
+  const [fixMatchOverride, setFixMatchOverride] = useState<ElvItemEnrichment | null>(null);
+  const [fixMatchToken, setFixMatchToken] = useState(0);
+  const [franchiseItems, setFranchiseItems] = useState<readonly ElvFranchiseLibraryItem[]>([]);
   const [userRating, setUserRatingState] = useState<RatingValue | null>(null);
 
   const mountedRef = useRef(true);
@@ -207,6 +224,8 @@ export function useDetailData({
       setVersions([]);
       setEnrichment(null);
       setElvTitleDetail(null);
+      setFixMatchOverride(null);
+      setFranchiseItems([]);
       userRatingRef.current = null;
       setUserRatingState(null);
       myListGenRef.current += 1;
@@ -446,6 +465,7 @@ export function useDetailData({
     catalog,
     effectiveSeriesKey,
     elvMergeActive,
+    fixMatchToken,
     loadSeasonEpisodes,
     refreshToken,
     seasonsRetryToken,
@@ -462,13 +482,19 @@ export function useDetailData({
   const elvEnrichment = useElvEnrichmentForKeys(catalog, elvTargetKeys, {
     enabled: elvEnrichActive,
     lang: locale,
-    catalogRevision: refreshToken,
+    catalogRevision: refreshToken + fixMatchToken,
   });
-  const elvItemEnrichment = elvEnrichment.enrichmentByKey.get(target.itemKey);
+  const elvItemEnrichment =
+    fixMatchOverride?.itemKey === target.itemKey
+      ? fixMatchOverride
+      : elvEnrichment.enrichmentByKey.get(target.itemKey);
   const elvPosterLookupPending =
-    elvEnrichActive && elvEnrichment.isKeyLookupPending(target.itemKey);
+    elvEnrichActive &&
+    fixMatchOverride?.itemKey !== target.itemKey &&
+    elvEnrichment.isKeyLookupPending(target.itemKey);
   const matchedImdbId = elvItemEnrichment?.imdbId ?? null;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fixMatchToken triggers fresh detail fetch after Fix Match
   useEffect(() => {
     if (!elvEnrichActive || matchedImdbId === null || catalog.getElvTitleDetail === undefined) {
       setElvTitleDetail(null);
@@ -486,7 +512,37 @@ export function useDetailData({
       cancelled = true;
       ac.abort();
     };
-  }, [catalog, elvEnrichActive, locale, matchedImdbId]);
+  }, [catalog, elvEnrichActive, fixMatchToken, locale, matchedImdbId]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fixMatchToken triggers fresh franchise fetch after Fix Match
+  useEffect(() => {
+    if (
+      !elvPrefs.elvModeEnabled ||
+      matchedImdbId === null ||
+      catalog.listElvFranchiseItems === undefined
+    ) {
+      setFranchiseItems([]);
+      return undefined;
+    }
+    let cancelled = false;
+    void catalog
+      .listElvFranchiseItems(matchedImdbId)
+      .then((rows) => {
+        if (!cancelled && mountedRef.current) setFranchiseItems(rows);
+      })
+      .catch(() => {
+        if (!cancelled && mountedRef.current) setFranchiseItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, elvPrefs.elvModeEnabled, fixMatchToken, matchedImdbId]);
+
+  const applyFixMatchResult = useCallback((updated: ElvItemEnrichment) => {
+    setFixMatchOverride(updated);
+    if (updated.title !== null) setElvTitleDetail(updated.title);
+    setFixMatchToken((n) => n + 1);
+  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken triggers opt-in enrichment refresh on source sync
   useEffect(() => {
@@ -572,36 +628,20 @@ export function useDetailData({
           format: elvPrefs.elvTitleFormat,
         })
       : rawTitle;
-  const posterUri =
-    activeElvTitle?.posterUrl !== null &&
-    activeElvTitle?.posterUrl !== undefined &&
-    activeElvTitle.posterUrl.trim() !== ''
-      ? activeElvTitle.posterUrl
-      : elvPosterLookupPending
-        ? null
-        : rawPosterUri;
-  const backdropUri =
-    activeElvTitle?.backdropUrl !== null &&
-    activeElvTitle?.backdropUrl !== undefined &&
-    activeElvTitle.backdropUrl.trim() !== ''
-      ? activeElvTitle.backdropUrl
-      : activeElvTitle?.posterUrl !== null &&
-          activeElvTitle?.posterUrl !== undefined &&
-          activeElvTitle.posterUrl.trim() !== ''
-        ? activeElvTitle.posterUrl
-        : elvPosterLookupPending
-          ? null
-          : rawBackdropUri;
+  const nonEmptyUrl = (v: string | null | undefined): string | null => {
+    const t = v?.trim();
+    return t && t.length > 0 ? t : null;
+  };
+  const elvPoster = nonEmptyUrl(activeElvTitle?.posterUrl);
+  const elvBackdrop = nonEmptyUrl(activeElvTitle?.backdropUrl);
+  const posterUri = elvPoster ?? (elvPosterLookupPending ? null : rawPosterUri);
+  const backdropUri = elvBackdrop ?? elvPoster ?? (elvPosterLookupPending ? null : rawBackdropUri);
   const year =
-    activeElvTitle?.year !== null &&
-    activeElvTitle?.year !== undefined &&
-    Number.isFinite(activeElvTitle.year)
+    activeElvTitle?.year != null && Number.isFinite(activeElvTitle.year)
       ? activeElvTitle.year
       : mergedMeta.year;
   const rating =
-    activeElvTitle?.rating !== null &&
-    activeElvTitle?.rating !== undefined &&
-    Number.isFinite(activeElvTitle.rating)
+    activeElvTitle?.rating != null && Number.isFinite(activeElvTitle.rating)
       ? activeElvTitle.rating
       : mergedMeta.rating;
   const elvSynopsis =
@@ -612,6 +652,29 @@ export function useDetailData({
       ? activeElvTitle.genres
       : mergedMeta.genres;
   const isEnriched = activeElvTitle !== null || mergedMeta.enriched;
+  const votes =
+    activeElvTitle?.votes != null && Number.isFinite(activeElvTitle.votes)
+      ? activeElvTitle.votes
+      : null;
+  const runtimeMin =
+    activeElvTitle?.runtimeMin != null && Number.isFinite(activeElvTitle.runtimeMin)
+      ? activeElvTitle.runtimeMin
+      : null;
+  const director = activeElvTitle?.director?.trim() || target.director?.trim() || null;
+  const cast = useMemo<readonly DetailRichCastMember[]>(() => {
+    if (activeElvTitle !== null && activeElvTitle.cast.length > 0) {
+      return activeElvTitle.cast.map((m) => ({
+        ...(m.personId ? { personId: m.personId } : {}),
+        name: m.name,
+        ...(m.character ? { role: m.character } : {}),
+        ...(m.portraitUrl ? { avatarUri: m.portraitUrl } : {}),
+      }));
+    }
+    return target.cast ?? [];
+  }, [activeElvTitle, target.cast]);
+  const trailerStreamUrl = activeElvTitle?.trailerStreamUrl ?? null;
+  const trailerYoutubeId = activeElvTitle?.trailerYoutubeId ?? null;
+  const manualLock = elvItemEnrichment?.manualLock === true;
 
   const mutationRefs = useMemo(
     () => ({
@@ -659,10 +722,20 @@ export function useDetailData({
     return {
       ...rest,
       title,
+      rawTitle,
       posterUri,
       backdropUri,
       year,
       rating,
+      votes,
+      runtimeMin,
+      director,
+      cast,
+      trailerStreamUrl,
+      trailerYoutubeId,
+      imdbId: matchedImdbId,
+      manualLock,
+      franchiseItems,
       plot,
       genres,
       isEnriched,
@@ -674,24 +747,36 @@ export function useDetailData({
       toggleMyList,
       toggleWatched,
       toggleRating,
+      applyFixMatchResult,
     };
   }, [
+    applyFixMatchResult,
     backdropUri,
+    cast,
+    director,
+    franchiseItems,
     genres,
     isEnriched,
+    manualLock,
+    matchedImdbId,
     plot,
     posterUri,
     rating,
+    rawTitle,
     relatedUnplayedBySeriesKey,
     retrySeasons,
+    runtimeMin,
     selectSeason,
     snap,
     title,
     toggleMyList,
     toggleRating,
     toggleWatched,
+    trailerStreamUrl,
+    trailerYoutubeId,
     userRating,
     versions,
+    votes,
     year,
   ]);
 }

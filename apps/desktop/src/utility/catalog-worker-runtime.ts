@@ -50,6 +50,7 @@ import {
   isWaveE1RpcCall,
   openWorkerElvContext,
 } from './catalog-worker-wave-e1-ops.ts';
+import { executeWaveE2OpsRpcCall, isWaveE2RpcCall } from './catalog-worker-wave-e2-ops.ts';
 import { executeWaveF5bOpsRpcCall, isWaveF5bRpcCall } from './catalog-worker-wave-f5b-ops.ts';
 import { executeWaveP9OpsRpcCall, isWaveP9RpcCall } from './catalog-worker-wave-p9-ops.ts';
 import { createDesktopHttpClient } from './legacy-tls-http.ts';
@@ -555,11 +556,13 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       default:
         return isWaveE1RpcCall(call)
           ? executeWaveE1OpsRpcCall(service, call)
-          : isWaveP9RpcCall(call)
-            ? executeWaveP9OpsRpcCall(service, call)
-            : isWaveF5bRpcCall(call)
-              ? executeWaveF5bOpsRpcCall(service, call)
-              : executeEpgOpsRpcCall(service, call);
+          : isWaveE2RpcCall(call)
+            ? executeWaveE2OpsRpcCall(service, call)
+            : isWaveP9RpcCall(call)
+              ? executeWaveP9OpsRpcCall(service, call)
+              : isWaveF5bRpcCall(call)
+                ? executeWaveF5bOpsRpcCall(service, call)
+                : executeEpgOpsRpcCall(service, call);
     }
   };
 

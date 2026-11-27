@@ -444,6 +444,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     scheduler: deps.scheduler,
     enrichmentStore: deps.enrichmentStore,
     elvClient: deps.elvClient,
+    resolveRowLogos: (rows) => playtime.resolveRowLogos(rows),
   });
   const newEpisodesOpsMethods = createCatalogNewEpisodesOpsMethods({
     db,

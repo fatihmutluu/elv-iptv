@@ -29,7 +29,7 @@ import type { AppLifecyclePort } from '../ports/app-lifecycle';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { AdoptedPlaybackSession, VideoHost, VideoResizeMode } from '../ports/video-host';
-import { useProfile } from '../shared';
+import { type DetailTarget, useProfile } from '../shared';
 import type { PlayerOsdProps } from './DesktopCinemaBar';
 import { ExternalDisplayCard } from './ExternalDisplayCard';
 import {
@@ -67,6 +67,9 @@ export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
         | 'reportStreamOutcome'
         | 'recordPlaybackQuality'
         | 'recordPlaybackVariantFailure'
+        | 'getElvEnrichmentForKeys'
+        | 'getElvTitleDetail'
+        | 'listElvPersonLibraryItems'
       >
     > & {
       readonly epgNowNext?: CatalogService['nowNext'];
@@ -166,6 +169,12 @@ export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
   elvVerifyRealQuality?: boolean;
   /** When `true`, enables cross-category live variant grouping and automatic healthy failover (`#511`). */
   elvLiveEnhance?: boolean;
+  /** When `true`, ELV Mode master switch is active for In-Player X-Ray (`#352`). */
+  elvModeEnabled?: boolean;
+  /** When `true` alongside {@link elvModeEnabled}, enables In-Player X-Ray cast & director strip on VOD (`#352`). */
+  elvXrayEnabled?: boolean;
+  /** Closes the player and navigates directly to another title's Detail screen from X-Ray (`#352`). */
+  onOpenDetail?: (target: DetailTarget) => void;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
 }
@@ -204,6 +213,8 @@ export interface PlayerScreenStageProps {
   readonly infoSheetNode: ReactElement;
   readonly channelDrawerNode: ReactElement;
   readonly settingsSheetNode: ReactElement;
+  readonly xrayStripNode?: ReactElement | null;
+  readonly xrayPersonModalNode?: ReactElement | null;
   readonly externalSubtitleOverlay?: Pick<
     ExternalSubtitleUrlOverlayProps,
     'visible' | 'onSubmit' | 'onClose'
@@ -434,6 +445,7 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
         >
           {!suppressChrome && p.useDockedDesktopLayout ? p.channelDrawerNode : null}
           {p.surfaceNode}
+          {!suppressChrome && p.useDockedDesktopLayout ? p.xrayPersonModalNode : null}
         </View>
         {isMini ? (
           <FloatingMiniPlayerChrome
@@ -538,6 +550,7 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
           {p.trackPickerNode}
           {p.infoSheetNode}
           {p.settingsSheetNode}
+          {p.xrayStripNode}
           {p.osdHidden ? null : osdNode}
         </>
       ) : p.locked ? (
@@ -570,10 +583,12 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
             {p.nextEpisodeNode}
           </View>
           {p.osdHidden ? null : osdNode}
+          {p.xrayStripNode}
           {p.channelDrawerNode}
           {p.trackPickerNode}
           {p.infoSheetNode}
           {p.settingsSheetNode}
+          {p.xrayPersonModalNode}
         </>
       )}
 

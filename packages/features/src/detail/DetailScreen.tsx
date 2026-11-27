@@ -1,18 +1,7 @@
 import type { CatalogService, EpisodeRow, ItemRow, RatingValue } from '@elv/data';
-import {
-  computeDownloadProgressRatio,
-  type ElvModePreferences,
-  isPlayableDownload,
-} from '@elv/domain';
+import type { ElvModePreferences } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
-import {
-  TvFocusAnchor,
-  useContextMenu,
-  useI18n,
-  useKeyInterpreter,
-  useTheme,
-  useViewport,
-} from '@elv/ui-kit';
+import { TvFocusAnchor, useI18n, useKeyInterpreter, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
   type ReactElement,
@@ -25,31 +14,44 @@ import {
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  Platform,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
+import type { TrailerExternalPort } from '../ports/trailer-port';
+import type { VideoHost } from '../ports/video-host';
 import {
   computeCatalogLayout,
   type DetailTarget,
   detailTargetFromItem,
+  type PersonLibraryModalPerson,
   useCardQuickActionsState,
-  useDownloads,
   useRouteActive,
 } from '../shared';
+import { PersonLibraryModal } from '../shared/PersonLibraryModal';
 import { DetailCastStrip } from './DetailCastStrip';
 import { DetailEpisodes } from './DetailEpisodes';
-import { DetailHero, type DetailHeroDownloadState, type DetailHeroFocusSlot } from './DetailHero';
+import { DetailFixMatchModal } from './DetailFixMatchModal';
+import { DetailFranchiseStrip } from './DetailFranchiseStrip';
+import { DetailHero, type DetailHeroFocusSlot } from './DetailHero';
 import { DetailSynopsisSheet } from './DetailHeroExtras';
 import { DetailRelatedRail } from './DetailRelatedRail';
+import { DetailTrailerModal } from './DetailTrailerModal';
 import {
   buildDetailNavRows,
   buildEpisodePlayTarget,
   buildPrimaryPlayAction,
   type DetailNavRowId,
 } from './detail-model';
+import {
+  isValidTrailerStreamUrl,
+  isValidYoutubeId,
+  resolveTrailerPlaybackStrategy,
+} from './detail-trailer-utils';
 import { useDetailData } from './useDetailData';
+import { useDetailDownloadActions } from './useDetailDownloadActions';
 import { useDetailExtrasState } from './useDetailExtrasState';
 import { useEpisodeChunks } from './useEpisodeChunks';
 import { useTvDetailNavigation } from './useTvDetailNavigation';
@@ -58,6 +60,8 @@ import { useTvDetailNavigation } from './useTvDetailNavigation';
 export interface DetailScreenProps {
   readonly target: DetailTarget;
   readonly catalog: CatalogService;
+  readonly videoHost?: VideoHost;
+  readonly trailerExternal?: TrailerExternalPort;
   readonly refreshToken: number;
   readonly userStateVersion?: number;
   readonly preferredAudioLang?: string;
@@ -86,13 +90,15 @@ function DetailTvKeyBridge({ onEvent }: { onEvent: TvKeyHandler }): ReactElement
 
 /**
  * Flagship Cinema Quietude 2-column Movie & Series Detail screen (`UI_UX_PHILOSOPHY.md` §1–§6).
- * Preserves exact vertical order: **Hero → Cast (when present) → Season Selector & Episodes →
- * More Like This**, with zero-jank memoized sections and 10-ft TV D-pad focus landing directly
- * on the primary Play / Resume CTA.
+ * Preserves exact vertical order: **Hero → Cast → Franchise (when `>= 2` library items) →
+ * Season Selector & Episodes → More Like This**, with rich ELV hydration, in-app trailers,
+ * clickable actor/director library modal, and Fix Match (`#14`, `#152`, `#512`).
  */
 export function DetailScreen({
   target,
   catalog,
+  videoHost,
+  trailerExternal,
   refreshToken,
   userStateVersion = 0,
   vodEnrichmentEnabled = false,
@@ -108,17 +114,22 @@ export function DetailScreen({
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
-  const downloads = useDownloads();
-  const contextMenu = useContextMenu();
-
   const { isTv, isPortrait, padX, railGap, heroTopClearance, posterRailWidth } =
     computeCatalogLayout(viewport, theme);
 
   const [selectedVersionKey, setSelectedVersionKey] = useState<string | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset user version override on title change
+  const [activePerson, setActivePerson] = useState<PersonLibraryModalPerson | null>(null);
+  const [trailerOpen, setTrailerOpen] = useState(false);
+  const [fixMatchOpen, setFixMatchOpen] = useState(false);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset modal & version state on title change
   useEffect(() => {
     setSelectedVersionKey(null);
+    setActivePerson(null);
+    setTrailerOpen(false);
+    setFixMatchOpen(false);
   }, [target.itemKey]);
+
   const data = useDetailData({
     target,
     catalog,
@@ -129,9 +140,10 @@ export function DetailScreen({
     locale: i18n.locale,
     selectedVersionKey: target.kind === 'series' ? selectedVersionKey : null,
   });
+
   const activeVersion = useMemo(() => {
     if (data.versions.length <= 1) return undefined;
-    const picked =
+    return (
       (selectedVersionKey !== null
         ? data.versions.find((v) => v.key === selectedVersionKey)
         : undefined) ??
@@ -139,12 +151,14 @@ export function DetailScreen({
         ? data.versions.find((v) => v.key === data.movieProgress?.preferredItemKey)
         : undefined) ??
       data.versions.find((v) => v.key === target.itemKey) ??
-      data.versions[0];
-    return picked;
+      data.versions[0]
+    );
   }, [data.movieProgress?.preferredItemKey, data.versions, selectedVersionKey, target.itemKey]);
+
   const handleSelectVersion = useCallback((key: string) => {
     setSelectedVersionKey(key);
   }, []);
+
   const activeSeriesKey =
     target.kind === 'series' ? (activeVersion?.key ?? target.itemKey) : target.itemKey;
   const activeSeriesSourceId =
@@ -153,28 +167,44 @@ export function DetailScreen({
     () =>
       activeSeriesKey === target.itemKey && activeSeriesSourceId === target.sourceId
         ? target
-        : {
-            ...target,
-            itemKey: activeSeriesKey,
-            sourceId: activeSeriesSourceId,
-          },
+        : { ...target, itemKey: activeSeriesKey, sourceId: activeSeriesSourceId },
     [activeSeriesKey, activeSeriesSourceId, target],
   );
+
   const relatedQuickActions = useCardQuickActionsState({
     catalog,
     refreshToken,
     userStateVersion,
   });
+  const elvModeEnabled = elvPreferences?.elvModeEnabled === true;
+  const hasTrailer =
+    isValidTrailerStreamUrl(data.trailerStreamUrl) || isValidYoutubeId(data.trailerYoutubeId);
+  const canFixMatch = elvModeEnabled && catalog.applyElvFixMatch !== undefined;
+
   const extras = useDetailExtrasState({
     target,
     plot: data.plot,
+    cast: data.cast,
+    director: data.director,
+    hasFixMatch: canFixMatch,
     versions: data.versions,
     ...(activeVersion !== undefined ? { activeVersionKey: activeVersion.key } : {}),
     onSelectVersion: handleSelectVersion,
   });
+
+  const dl = useDetailDownloadActions({
+    target,
+    activeVersion,
+    activeSeriesSourceId,
+    title: data.title,
+    backdropUri: data.backdropUri,
+    onPlay,
+  });
+
   const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const scrolledRef = useRef(false);
   const castYRef = useRef<number | null>(null);
+  const franchiseYRef = useRef<number | null>(null);
   const episodesYRef = useRef<number | null>(null);
   const relatedYRef = useRef<number | null>(null);
 
@@ -192,6 +222,7 @@ export function DetailScreen({
   useEffect(() => {
     scrolledRef.current = false;
     castYRef.current = null;
+    franchiseYRef.current = null;
     onScrollTopChange?.(false);
     scrollViewRef.current?.scrollTo({ y: 0, animated: false });
   }, [onScrollTopChange, target.itemKey]);
@@ -230,6 +261,50 @@ export function DetailScreen({
     onPlay(primaryAction.target);
   }, [activeVersion, onPlay, primaryAction]);
 
+  const handleOpenTrailer = useCallback(() => {
+    if (!hasTrailer) return;
+    const strategy = resolveTrailerPlaybackStrategy({
+      trailerStreamUrl: data.trailerStreamUrl,
+      trailerYoutubeId: data.trailerYoutubeId,
+      formFactor: viewport.formFactor,
+      platformOs: Platform.OS,
+      hasVideoHost: videoHost !== undefined,
+    });
+    if (strategy.kind === 'external-youtube' && trailerExternal !== undefined) {
+      void trailerExternal
+        .openExternalUrl(strategy.watchUrl)
+        .then((opened) => {
+          if (!opened) setTrailerOpen(true);
+        })
+        .catch(() => setTrailerOpen(true));
+      return;
+    }
+    setTrailerOpen(true);
+  }, [
+    data.trailerStreamUrl,
+    data.trailerYoutubeId,
+    hasTrailer,
+    trailerExternal,
+    videoHost,
+    viewport.formFactor,
+  ]);
+
+  const handleClosePerson = useCallback(() => setActivePerson(null), []);
+  const handleCloseTrailer = useCallback(() => setTrailerOpen(false), []);
+  const handleOpenFixMatch = useCallback(() => setFixMatchOpen(true), []);
+  const handleCloseFixMatch = useCallback(() => setFixMatchOpen(false), []);
+
+  const handleSelectPerson = useCallback(
+    (person: PersonLibraryModalPerson) => {
+      if (elvModeEnabled && catalog.listElvPersonLibraryItems !== undefined) {
+        setActivePerson(person);
+        return;
+      }
+      onSearchPerson?.(person.name);
+    },
+    [catalog.listElvPersonLibraryItems, elvModeEnabled, onSearchPerson],
+  );
+
   const handleToggleMyList = useCallback(() => void data.toggleMyList(), [data.toggleMyList]);
   const handleToggleWatched = useCallback(() => void data.toggleWatched(), [data.toggleWatched]);
   const handleToggleRating = useCallback(
@@ -261,6 +336,13 @@ export function DetailScreen({
     },
     [data.relatedCategoryId, onOpenDetail],
   );
+  const handlePressFranchise = useCallback(
+    (item: ItemRow) => {
+      const next = detailTargetFromItem(item);
+      if (next) onOpenDetail(next);
+    },
+    [onOpenDetail],
+  );
   const handleQuickPlayRelated = useCallback(
     (item: ItemRow) => {
       if (item.kind === 'movie') {
@@ -289,185 +371,20 @@ export function DetailScreen({
   );
 
   const seasons = data.seasonsState.kind === 'ready' ? data.seasonsState.seasons : [];
-  const showMovieDownload = target.kind === 'movie' && downloads.supported;
-  const activeMovieKey = activeVersion?.key ?? target.itemKey;
-  const activeMovieSourceId = activeVersion?.sourceId ?? target.sourceId;
-  const activeMovieTitle = activeVersion?.title ?? data.title;
-  const movieDownloadRecord = showMovieDownload
-    ? downloads.byItemKey.get(activeMovieKey)
-    : undefined;
-
-  const movieDownloadState = useMemo<DetailHeroDownloadState | undefined>(() => {
-    if (!showMovieDownload) return undefined;
-    if (isPlayableDownload(movieDownloadRecord)) {
-      return { icon: 'check', active: true, label: i18n.t('downloads.actionDownloaded') };
-    }
-    if (movieDownloadRecord?.status === 'downloading' || movieDownloadRecord?.status === 'queued') {
-      const pct = Math.round(
-        (computeDownloadProgressRatio(
-          movieDownloadRecord.bytesDownloaded,
-          movieDownloadRecord.totalBytes,
-        ) ?? 0) * 100,
-      );
-      return {
-        icon: 'pause',
-        active: true,
-        label: i18n.t('downloads.actionDownloading', { percent: pct }),
-      };
-    }
-    if (movieDownloadRecord?.status === 'paused' || movieDownloadRecord?.status === 'failed') {
-      return { icon: 'download', active: false, label: i18n.t('downloads.actionResume') };
-    }
-    return { icon: 'download', active: false, label: i18n.t('downloads.actionDownload') };
-  }, [i18n, movieDownloadRecord, showMovieDownload]);
-
-  const handlePressMovieDownload = useCallback(() => {
-    if (!showMovieDownload) return;
-    if (movieDownloadRecord && isPlayableDownload(movieDownloadRecord)) {
-      contextMenu.openContextMenu({
-        title: activeMovieTitle,
-        items: [
-          {
-            id: 'play-offline',
-            label: i18n.t('downloads.actionPlayOffline'),
-            icon: 'play',
-            testID: 'detail-download-play-offline',
-            onSelect: () => {
-              onPlay({
-                itemKey: activeMovieKey,
-                sourceId: activeMovieSourceId,
-                title: activeMovieTitle,
-                kind: 'vod',
-                itemKind: 'movie',
-                isLocalOffline: true,
-                localFileUri: movieDownloadRecord.localUri,
-                ...(data.backdropUri !== null ? { logo: data.backdropUri } : {}),
-              });
-            },
-          },
-          {
-            id: 'delete-download',
-            label: i18n.t('downloads.actionDelete'),
-            icon: 'trash',
-            destructive: true,
-            testID: 'detail-download-delete',
-            onSelect: () => {
-              void downloads.remove(activeMovieKey);
-            },
-          },
-        ],
-      });
-      return;
-    }
-    if (movieDownloadRecord?.status === 'downloading' || movieDownloadRecord?.status === 'queued') {
-      void downloads.pause(activeMovieKey);
-      return;
-    }
-    if (movieDownloadRecord?.status === 'paused' || movieDownloadRecord?.status === 'failed') {
-      void downloads.resume(activeMovieKey);
-      return;
-    }
-    void downloads.enqueue({
-      sourceId: activeMovieSourceId,
-      itemKey: activeMovieKey,
-      kind: 'movie',
-      title: activeMovieTitle,
-      poster: data.backdropUri,
-    });
-  }, [
-    activeMovieKey,
-    activeMovieSourceId,
-    activeMovieTitle,
-    contextMenu,
-    data.backdropUri,
-    downloads,
-    i18n,
-    movieDownloadRecord,
-    onPlay,
-    showMovieDownload,
-  ]);
-
-  const handlePressEpisodeDownload = useCallback(
-    (episode: EpisodeRow) => {
-      if (!downloads.supported) return;
-      const rec = downloads.byItemKey.get(episode.key);
-      const epTitle =
-        episode.title?.trim() ||
-        i18n.t('series.episodeUntitled', { episode: episode.episode ?? 1 });
-      if (rec && isPlayableDownload(rec)) {
-        contextMenu.openContextMenu({
-          title: epTitle,
-          items: [
-            {
-              id: 'play-offline',
-              label: i18n.t('downloads.actionPlayOffline'),
-              icon: 'play',
-              testID: 'detail-episode-download-play-offline',
-              onSelect: () => {
-                onPlay({
-                  itemKey: episode.key,
-                  sourceId: activeSeriesSourceId,
-                  title: epTitle,
-                  kind: 'vod',
-                  itemKind: 'episode',
-                  isLocalOffline: true,
-                  localFileUri: rec.localUri,
-                  subtitle: data.title,
-                  ...(episode.season !== null ? { season: episode.season } : {}),
-                  ...(episode.episode !== null ? { episode: episode.episode } : {}),
-                  ...(data.backdropUri !== null ? { logo: data.backdropUri } : {}),
-                });
-              },
-            },
-            {
-              id: 'delete-download',
-              label: i18n.t('downloads.actionDelete'),
-              icon: 'trash',
-              destructive: true,
-              testID: 'detail-episode-download-delete',
-              onSelect: () => {
-                void downloads.remove(episode.key);
-              },
-            },
-          ],
-        });
-        return;
-      }
-      if (rec?.status === 'downloading' || rec?.status === 'queued') {
-        void downloads.pause(episode.key);
-        return;
-      }
-      if (rec?.status === 'paused' || rec?.status === 'failed') {
-        void downloads.resume(episode.key);
-        return;
-      }
-      void downloads.enqueue({
-        sourceId: activeSeriesSourceId,
-        itemKey: episode.key,
-        kind: 'episode',
-        title: epTitle,
-        seriesTitle: data.title,
-        season: episode.season,
-        episodeNum: episode.episode,
-        poster: data.backdropUri,
-      });
-    },
-    [activeSeriesSourceId, contextMenu, data.backdropUri, data.title, downloads, i18n, onPlay],
-  );
 
   const heroActionSlots = useMemo<
-    readonly ('mylist' | 'like' | 'dislike' | 'watched' | 'download')[]
+    readonly ('mylist' | 'like' | 'dislike' | 'watched' | 'download' | 'trailer')[]
   >(
     () => [
       'mylist',
       'like',
       'dislike',
       ...(target.kind === 'movie' ? (['watched'] as const) : []),
-      ...(showMovieDownload ? (['download'] as const) : []),
+      ...(dl.showMovieDownload ? (['download'] as const) : []),
+      ...(hasTrailer ? (['trailer'] as const) : []),
     ],
-    [showMovieDownload, target.kind],
+    [dl.showMovieDownload, hasTrailer, target.kind],
   );
-  const heroActionCount = heroActionSlots.length;
 
   const {
     chunks: episodeChunks,
@@ -485,9 +402,10 @@ export function DetailScreen({
   const navRows = useMemo(
     () =>
       buildDetailNavRows({
-        heroActionCount,
+        heroActionCount: heroActionSlots.length,
         heroPlayCount: extras.heroPlaySlots.length,
         castCount: extras.castPeople.length,
+        franchiseCount: data.franchiseItems.length,
         seasonsCount: target.kind === 'series' ? seasons.length : 0,
         episodeChunksCount:
           target.kind === 'series' && !data.episodesLoading ? episodeChunks.length : 0,
@@ -498,12 +416,13 @@ export function DetailScreen({
       }),
     [
       data.episodesLoading,
+      data.franchiseItems.length,
       data.related.length,
       data.seasonsState.kind,
       episodeChunks.length,
       extras.castPeople.length,
       extras.heroPlaySlots.length,
-      heroActionCount,
+      heroActionSlots.length,
       seasons.length,
       target.kind,
       visibleEpisodes.length,
@@ -519,7 +438,8 @@ export function DetailScreen({
         else if (slot === 'like') void data.toggleRating('like');
         else if (slot === 'dislike') void data.toggleRating('dislike');
         else if (slot === 'watched') void data.toggleWatched();
-        else if (slot === 'download') handlePressMovieDownload();
+        else if (slot === 'download') dl.handlePressMovieDownload();
+        else if (slot === 'trailer') handleOpenTrailer();
         return;
       }
       if (rowId === 'hero-play') {
@@ -527,11 +447,17 @@ export function DetailScreen({
         if (slot === 'play') handlePlayPrimary();
         else if (slot === 'preplay-version') extras.toggleVersionMenu();
         else if (slot === 'synopsis') extras.toggleSynopsis();
+        else if (slot === 'fix-match') handleOpenFixMatch();
         return;
       }
       if (rowId === 'cast') {
         const person = extras.castPeople[colIndex];
-        if (person) onSearchPerson?.(person);
+        if (person) handleSelectPerson(person);
+        return;
+      }
+      if (rowId === 'franchise') {
+        const entry = data.franchiseItems[colIndex];
+        if (entry && entry.item.key !== target.itemKey) handlePressFranchise(entry.item);
         return;
       }
       if (rowId === 'seasons') {
@@ -555,24 +481,29 @@ export function DetailScreen({
       }
     },
     [
+      data.franchiseItems,
       data.related,
       data.retrySeasons,
       data.selectSeason,
       data.toggleMyList,
       data.toggleRating,
       data.toggleWatched,
+      dl,
       episodeChunks,
       episodeIndexOffset,
       extras,
+      handleOpenFixMatch,
+      handleOpenTrailer,
       handlePlayPrimary,
       handlePressEpisode,
-      handlePressMovieDownload,
+      handlePressFranchise,
       handlePressRelated,
       handleSelectChunk,
+      handleSelectPerson,
       heroActionSlots,
       onBack,
-      onSearchPerson,
       seasons,
+      target.itemKey,
       visibleEpisodes,
     ],
   );
@@ -586,6 +517,12 @@ export function DetailScreen({
       }
       if (rowId === 'cast' && castYRef.current !== null) {
         const targetY = Math.max(0, castYRef.current - heroTopClearance);
+        scrollViewRef.current?.scrollTo({ y: targetY, animated: !theme.reduceMotion });
+        reportScrolled(targetY > SCROLL_FROST_THRESHOLD);
+        return;
+      }
+      if (rowId === 'franchise' && franchiseYRef.current !== null) {
+        const targetY = Math.max(0, franchiseYRef.current - heroTopClearance);
         scrollViewRef.current?.scrollTo({ y: targetY, animated: !theme.reduceMotion });
         reportScrolled(targetY > SCROLL_FROST_THRESHOLD);
         return;
@@ -614,9 +551,10 @@ export function DetailScreen({
     [heroTopClearance, reportScrolled, theme.reduceMotion],
   );
 
+  const anyModalOpen = activePerson !== null || trailerOpen || fixMatchOpen;
   const tvNav = useTvDetailNavigation({
     isTv,
-    isActiveScope,
+    isActiveScope: isActiveScope && !anyModalOpen,
     targetKey: target.itemKey,
     rows: navRows,
     selectedChunkIndex,
@@ -635,6 +573,9 @@ export function DetailScreen({
 
   const recordCastY = useCallback((y: number) => {
     castYRef.current = y;
+  }, []);
+  const recordFranchiseY = useCallback((y: number) => {
+    franchiseYRef.current = y;
   }, []);
   const recordEpisodesY = useCallback((y: number) => {
     episodesYRef.current = y;
@@ -659,7 +600,7 @@ export function DetailScreen({
 
   return (
     <View testID="detail-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
-      {isTv && isActiveScope && !contextMenu.isOpen ? (
+      {isTv && isActiveScope && !dl.contextMenu.isOpen && !anyModalOpen ? (
         <DetailTvKeyBridge onEvent={handleTvKeyWithSheet} />
       ) : null}
 
@@ -680,15 +621,20 @@ export function DetailScreen({
           backdropUri={data.backdropUri}
           year={data.year}
           rating={data.rating}
+          votes={data.votes}
+          runtimeMin={data.runtimeMin}
+          manualLock={data.manualLock}
           plot={data.plot}
           genres={data.genres}
           isEnriched={data.isEnriched}
-          {...(movieDownloadState !== undefined
+          {...(dl.movieDownloadState !== undefined
             ? {
-                downloadState: movieDownloadState,
-                onPressDownload: handlePressMovieDownload,
+                downloadState: dl.movieDownloadState,
+                onPressDownload: dl.handlePressMovieDownload,
               }
             : {})}
+          {...(hasTrailer ? { onPressTrailer: handleOpenTrailer } : {})}
+          {...(canFixMatch ? { onPressFixMatch: handleOpenFixMatch } : {})}
           {...(target.technicalMeta !== undefined ? { technicalMeta: target.technicalMeta } : {})}
           seasonsCount={seasons.length}
           inMyList={data.inMyList}
@@ -723,13 +669,29 @@ export function DetailScreen({
 
         {extras.castPeople.length > 0 ? (
           <DetailCastStrip
-            cast={target.cast ?? []}
-            {...(target.director !== undefined ? { director: target.director } : {})}
+            cast={data.cast}
+            {...(data.director !== null ? { director: data.director } : {})}
             padX={padX}
             isTv={isTv}
             focusedIndex={tvNav.focusedRowId === 'cast' ? tvNav.focusedCol : null}
+            onSelectPerson={handleSelectPerson}
             {...(onSearchPerson !== undefined ? { onSearchPerson } : {})}
             onLayoutY={recordCastY}
+          />
+        ) : null}
+
+        {data.franchiseItems.length >= 2 ? (
+          <DetailFranchiseStrip
+            items={data.franchiseItems}
+            currentItemKey={target.itemKey}
+            {...(elvPreferences !== undefined ? { elvPreferences } : {})}
+            cardWidth={posterRailWidth}
+            gap={railGap}
+            padX={padX}
+            isTv={isTv}
+            focusedIndex={tvNav.focusedRowId === 'franchise' ? tvNav.focusedCol : null}
+            onPressItem={handlePressFranchise}
+            onLayoutY={recordFranchiseY}
           />
         ) : null}
 
@@ -757,9 +719,9 @@ export function DetailScreen({
             focusedEpisodeIndex={tvNav.focusedRowId === 'episodes' ? tvNav.focusedCol : null}
             focusedRetry={tvNav.focusedRowId === 'retry'}
             onLayoutY={recordEpisodesY}
-            downloadsSupported={downloads.supported}
-            downloadsByKey={downloads.byItemKey}
-            onPressEpisodeDownload={handlePressEpisodeDownload}
+            downloadsSupported={dl.downloads.supported}
+            downloadsByKey={dl.downloads.byItemKey}
+            onPressEpisodeDownload={dl.handlePressEpisodeDownload}
           />
         ) : null}
 
@@ -788,6 +750,36 @@ export function DetailScreen({
         synopsis={extras.trimmedPlot}
         isTv={isTv}
         onDismiss={extras.dismissSynopsis}
+      />
+
+      <PersonLibraryModal
+        visible={activePerson !== null}
+        person={activePerson}
+        catalog={catalog}
+        {...(elvPreferences !== undefined ? { elvPreferences } : {})}
+        onSelectItem={onOpenDetail}
+        onClose={handleClosePerson}
+      />
+
+      <DetailTrailerModal
+        visible={trailerOpen}
+        title={data.title}
+        trailerStreamUrl={data.trailerStreamUrl}
+        trailerYoutubeId={data.trailerYoutubeId}
+        {...(videoHost !== undefined ? { videoHost } : {})}
+        {...(trailerExternal !== undefined ? { trailerExternal } : {})}
+        onClose={handleCloseTrailer}
+      />
+
+      <DetailFixMatchModal
+        visible={fixMatchOpen}
+        itemKey={target.itemKey}
+        sourceId={target.sourceId}
+        mediaType={target.kind}
+        initialQuery={data.rawTitle}
+        catalog={catalog}
+        onApplied={data.applyFixMatchResult}
+        onClose={handleCloseFixMatch}
       />
     </View>
   );

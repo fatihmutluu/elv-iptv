@@ -27,6 +27,7 @@ import type { PlayTarget } from './ports/play-target';
 import type { PlaybackGuard } from './ports/playback-guard';
 import type { ReminderHostPort } from './ports/reminder-host';
 import type { PickedPlaylistFile, SourceImportHost } from './ports/source-import-host';
+import type { TrailerExternalPort } from './ports/trailer-port';
 import type { TvHomeChannelsPort } from './ports/tv-home-channels';
 import type { ThermalDevicePort, VideoHost } from './ports/video-host';
 import type { DiagnosticsPort, ExternalPlayerPort } from './ports/wave-f7b-ports';
@@ -98,6 +99,8 @@ export interface AppShellProps {
   readonly onPairUriHandled?: () => void;
   /** Optional cross-platform offline VOD download manager port (`Wave P5`). */
   readonly downloadManager?: DownloadManagerPort;
+  /** Optional platform external YouTube trailer handoff port (`#512`). */
+  readonly trailerExternal?: TrailerExternalPort;
 }
 
 /** Props of {@link AppShellStage}. */
@@ -124,6 +127,7 @@ export interface AppShellStageProps {
   readonly videoHost: VideoHost;
   readonly sourceImportHost?: SourceImportHost;
   readonly lanPairing?: LanPairingPort;
+  readonly trailerExternal?: TrailerExternalPort;
   readonly incomingLocalPlaylist: PickedPlaylistFile | null;
   readonly onConsumeIncomingLocalPlaylist: () => void;
   readonly searchQuery: string;
@@ -197,6 +201,8 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
       <DetailScreen
         key={`${p.activeDetail.itemKey}:${p.contentIsolationKey}`}
         target={p.activeDetail}
+        videoHost={p.videoHost}
+        {...(p.trailerExternal !== undefined ? { trailerExternal: p.trailerExternal } : {})}
         userStateVersion={p.effectiveUserStateVersion}
         preferredAudioLang={p.preferences.preferences.preferredAudioLang}
         preferredSubtitleLang={p.preferences.preferences.preferredSubtitleLang}
@@ -307,6 +313,7 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         sources={p.sources}
         userStateVersion={p.effectiveUserStateVersion}
         homeLayout={p.preferences.preferences.homeLayout}
+        elvPreferences={p.preferences.preferences}
         isPlaybackActive={p.suppressEmbeddedPreview === true}
         onPlay={handleStagePlay}
         {...(p.onOpenMultiView !== undefined ? { onOpenMultiView: p.onOpenMultiView } : {})}

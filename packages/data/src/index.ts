@@ -30,12 +30,27 @@ export * from './custom-groups-repo';
 export * from './discover-categories';
 export * from './downloads-repo';
 export * from './driver';
+export {
+  type ApplyElvFixMatchInput,
+  type CatalogElvDiscoveryOpsMethods,
+  ELV_FEEDS_TTL_MS,
+  ELV_IMDB_GENRE_ID_PREFIX,
+  type ElvFranchiseLibraryItem,
+  type ElvGenreBucket,
+  type ElvPersonLibraryItem,
+  type ListElvFranchiseItemsOptions,
+  type ListElvImdbGenresOptions,
+  type ListElvItemsByImdbGenreOptions,
+  type ListElvPersonLibraryItemsOptions,
+  type RefreshElvFeedsOptions,
+} from './elv-discovery-ops';
 export * from './elv-enrichment-repo';
 export * from './elv-enrichment-schema';
 export * from './elv-live-epg';
 export * from './elv-matcher';
 export * from './elv-merge';
 export * from './elv-quality-memory';
+export * from './elv-recommendations';
 export * from './failover-groups-repo';
 export * from './fold';
 export * from './guide-match';

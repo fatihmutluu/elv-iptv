@@ -4093,3 +4093,183 @@ msgstr "Kaynaklar ve sürümler ({count})"
 
 msgid "elv.matching.background"
 msgstr "Katalog arka planda zenginleştiriliyor…"
+
+msgid "home.section.elvShowcase"
+msgstr "Gündem ve Sana Özel"
+
+msgid "catalog.elvPicks.emptyTitle"
+msgstr "Kişisel önerilerin hazırlanıyor"
+
+msgid "catalog.elvPicks.emptyBody"
+msgstr "Birkaç yapımı beğen, yıldızla veya izle; ELV Mode kütüphanenden sana özel öneriler çıkarsın."
+
+msgid "elv.reason.moreLikeThis"
+msgstr "Beğendiklerine benzer"
+
+msgid "elv.reason.trending"
+msgstr "Gündemde"
+
+msgid "elv.reason.topPicks"
+msgstr "Öne çıkan"
+
+msgid "elv.reason.upcomingTv"
+msgstr "Güncel dizi"
+
+msgid "elv.reason.genreMatch"
+msgstr "Sevdiğin türde"
+
+msgid "elv.reason.castMatch"
+msgstr "Takip ettiğin kadro"
+
+msgid "elv.genre.Action"
+msgstr "Aksiyon"
+
+msgid "elv.genre.Adventure"
+msgstr "Macera"
+
+msgid "elv.genre.Animation"
+msgstr "Animasyon"
+
+msgid "elv.genre.Biography"
+msgstr "Biyografi"
+
+msgid "elv.genre.Comedy"
+msgstr "Komedi"
+
+msgid "elv.genre.Crime"
+msgstr "Suç"
+
+msgid "elv.genre.Documentary"
+msgstr "Belgesel"
+
+msgid "elv.genre.Drama"
+msgstr "Dram"
+
+msgid "elv.genre.Family"
+msgstr "Aile"
+
+msgid "elv.genre.Fantasy"
+msgstr "Fantastik"
+
+msgid "elv.genre.History"
+msgstr "Tarih"
+
+msgid "elv.genre.Horror"
+msgstr "Korku"
+
+msgid "elv.genre.Music"
+msgstr "Müzik"
+
+msgid "elv.genre.Mystery"
+msgstr "Gizem"
+
+msgid "elv.genre.Romance"
+msgstr "Romantik"
+
+msgid "elv.genre.SciFi"
+msgstr "Bilim Kurgu"
+
+msgid "elv.genre.Sport"
+msgstr "Spor"
+
+msgid "elv.genre.Thriller"
+msgstr "Gerilim"
+
+msgid "elv.genre.War"
+msgstr "Savaş"
+
+msgid "elv.genre.Western"
+msgstr "Vahşi Batı"
+
+msgid "detail.action.trailer"
+msgstr "Fragmanı izle"
+
+msgid "detail.votesCount"
+msgstr "{count} oy"
+
+msgid "detail.runtimeMin"
+msgstr "{minutes} dk"
+
+msgid "detail.directorLabel"
+msgstr "Yönetmen"
+
+msgid "detail.franchise.title"
+msgstr "Bu serinin kütüphanendeki diğer yapımları"
+
+msgid "detail.franchise.current"
+msgstr "Bu yapım"
+
+msgid "detail.trailer.title"
+msgstr "Fragman"
+
+msgid "detail.trailer.unavailable"
+msgstr "Bu yapım için fragman bulunamadı."
+
+msgid "detail.trailer.openExternal"
+msgstr "YouTube'da aç"
+
+msgid "detail.trailer.close"
+msgstr "Fragmanı kapat"
+
+msgid "person.alsoInLibrary"
+msgstr "Kütüphanendeki yapımları ({count})"
+
+msgid "person.emptyLibrary"
+msgstr "IPTV kütüphanende başka eşleşen yapım bulunamadı."
+
+msgid "person.role.director"
+msgstr "Yönetmen"
+
+msgid "person.role.cast"
+msgstr "Oyuncu"
+
+msgid "person.close"
+msgstr "Kapat"
+
+msgid "detail.fixMatch.action"
+msgstr "Eşleşmeyi düzelt"
+
+msgid "detail.fixMatch.title"
+msgstr "IMDb eşleşmesini düzelt"
+
+msgid "detail.fixMatch.subtitle"
+msgstr "Doğru yapımı arayıp kilitleyin. Sonraki katalog yenilemelerinde seçiminiz korunur."
+
+msgid "detail.fixMatch.placeholder"
+msgstr "Film veya dizi adı ara…"
+
+msgid "detail.fixMatch.search"
+msgstr "Ara"
+
+msgid "detail.fixMatch.searching"
+msgstr "IMDb'de aranıyor…"
+
+msgid "detail.fixMatch.noResults"
+msgstr "Eşleşen yapım bulunamadı."
+
+msgid "detail.fixMatch.lockedBadge"
+msgstr "Eşleşme kilitli"
+
+msgid "detail.fixMatch.error"
+msgstr "Eşleşme şu an güncellenemedi."
+
+msgid "player.xray.button"
+msgstr "X-Ray"
+
+msgid "player.xray.title"
+msgstr "X-Ray"
+
+msgid "player.xray.cast"
+msgstr "Oyuncular"
+
+msgid "player.xray.director"
+msgstr "Yönetmen"
+
+msgid "player.xray.episode"
+msgstr "Şu an oynatılıyor"
+
+msgid "player.xray.viewLibrary"
+msgstr "Kütüphanede gör"
+
+msgid "player.xray.empty"
+msgstr "Bu yapım için oyuncu bilgisi bulunamadı."

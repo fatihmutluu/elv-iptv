@@ -1,5 +1,11 @@
 import type { BrowseKind, CatalogService, ItemRow, RatingValue, SourceRow } from '@elv/data';
-import { DEFAULT_HOME_LAYOUT, type HomeLayoutSectionPref, normalizeHomeLayout } from '@elv/domain';
+import {
+  DEFAULT_ELV_MODE_PREFERENCES,
+  DEFAULT_HOME_LAYOUT,
+  type ElvModePreferences,
+  type HomeLayoutSectionPref,
+  normalizeHomeLayout,
+} from '@elv/domain';
 import {
   type ContextMenuAnchor,
   TvFocusAnchor,
@@ -38,13 +44,13 @@ import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero'
 import { HOME_HERO_AUTO_ROTATE_MS, useHomeHeroAutoRotate } from './HomeHeroBackdrop';
 import {
   buildHomeRailSpecs,
-  HomeCollectionsSection,
-  HomeRail,
   type HomeRailId,
   type HomeRailSpec,
+  HomeSectionsList,
 } from './HomeRail';
 import { computeHomeLayout, HomeEmptyState, HomeSkeleton } from './HomeSkeleton';
 import { buildHomeCardContextMenuItems } from './home-context-menu';
+import { buildElvShowcaseEntries, filterOutDislikedItems } from './home-elv-helpers';
 import {
   buildHeroSlides,
   buildHomeCollectionRails,
@@ -79,6 +85,8 @@ export interface HomeScreenProps {
   readonly isPlaybackActive?: boolean;
   /** User-configured Home section visibility and order from `PreferencesSnapshot.homeLayout`. */
   readonly homeLayout?: readonly HomeLayoutSectionPref[];
+  /** Active ELV Mode preferences driving the Home Showcase rail (`#512`). */
+  readonly elvPreferences?: ElvModePreferences;
 }
 
 export { HOME_HERO_AUTO_ROTATE_MS };
@@ -86,6 +94,7 @@ export { HOME_HERO_AUTO_ROTATE_MS };
 const SCROLL_FROST_THRESHOLD = 24;
 const RAIL_ORDER: readonly HomeRailKind[] = [
   'continue',
+  'elvShowcase',
   'newEpisodes',
   'live',
   'movies',
@@ -124,7 +133,9 @@ export function HomeScreen({
   isActiveScope = true,
   isPlaybackActive = false,
   homeLayout,
+  elvPreferences,
 }: HomeScreenProps): ReactElement {
+  const elvPrefs = elvPreferences ?? DEFAULT_ELV_MODE_PREFERENCES;
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
@@ -142,6 +153,7 @@ export function HomeScreen({
     userStateVersion,
     isPlaybackActive,
     routeActive,
+    elvPreferences: elvPrefs,
   });
   const [heroIndex, setHeroIndexState] = useState(() => uiCache?.getHome()?.heroIndex ?? 0);
   const [heroHovered, setHeroHovered] = useState(false);
@@ -157,15 +169,35 @@ export function HomeScreen({
   const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const railYRef = useRef(new Map<HomeNavRowId, number>());
 
+  const visibleMovies = useMemo(
+    () => filterOutDislikedItems(data.movies, data.ratingByKey),
+    [data.movies, data.ratingByKey],
+  );
+  const visibleSeries = useMemo(
+    () => filterOutDislikedItems(data.series, data.ratingByKey),
+    [data.series, data.ratingByKey],
+  );
+  const elvShowcaseEntries = useMemo(
+    () =>
+      buildElvShowcaseEntries(data.elvRecommendations, {
+        elvPrefs,
+        locale: i18n.locale,
+        t: i18n.t,
+        progressByKey: data.progressByKey,
+        ratingByKey: data.ratingByKey,
+      }),
+    [data.elvRecommendations, data.progressByKey, data.ratingByKey, elvPrefs, i18n],
+  );
+
   const heroSlides = useMemo(
     () =>
       buildHeroSlides({
         continueWatching: data.continueWatching,
-        movies: data.movies,
-        series: data.series,
+        movies: visibleMovies,
+        series: visibleSeries,
         progressByKey: data.progressByKey,
       }),
-    [data.continueWatching, data.movies, data.series, data.progressByKey],
+    [data.continueWatching, data.progressByKey, visibleMovies, visibleSeries],
   );
 
   useEffect(() => {
@@ -177,6 +209,7 @@ export function HomeScreen({
     () =>
       buildHomeRailSets({
         continueWatching: data.continueWatching,
+        elvShowcase: elvShowcaseEntries,
         newEpisodes: data.newEpisodes ?? [],
         newEpisodeBadgeLabel,
         recentChannels: data.recentChannels ?? [],
@@ -184,11 +217,11 @@ export function HomeScreen({
         liveCategoryName: data.liveCategory?.name ?? null,
         nowNextByKey: data.nowNextByKey,
         favorites: data.favorites,
-        movies: data.movies,
-        series: data.series,
+        movies: visibleMovies,
+        series: visibleSeries,
         progressByKey: data.progressByKey,
       }),
-    [data, newEpisodeBadgeLabel],
+    [data, elvShowcaseEntries, newEpisodeBadgeLabel, visibleMovies, visibleSeries],
   );
 
   const effectiveHomeLayout = useMemo(
@@ -235,6 +268,7 @@ export function HomeScreen({
         sectionOrder: visibleSectionOrder,
         railCounts: {
           continue: railSets.continue.length,
+          elvShowcase: railSets.elvShowcase.length,
           newEpisodes: railSets.newEpisodes.length,
           live: railSets.live.length,
           mylist: railSets.mylist.length,
@@ -426,7 +460,12 @@ export function HomeScreen({
       const railId = rowId as HomeRailKind;
       const entry = railSets[railId]?.[colIndex];
       if (!entry) return;
-      if (railId === 'mylist' || railId === 'movies' || railId === 'series') {
+      if (
+        railId === 'mylist' ||
+        railId === 'movies' ||
+        railId === 'series' ||
+        railId === 'elvShowcase'
+      ) {
         activatePosterEntry(entry, colIndex);
       } else {
         activateEntry(entry, colIndex);
@@ -684,70 +723,31 @@ export function HomeScreen({
             padX={padX}
             focusedAction={focusedHeroAction}
           />
-          {visibleSections.map((section) => {
-            if (section.id === 'collections') {
-              return (
-                <HomeCollectionsSection
-                  key="collections"
-                  collectionRails={collectionRails}
-                  cardWidth={layout.posterCardWidth}
-                  gap={railGap}
-                  padX={padX}
-                  isTv={isTv}
-                  isTouch={isTouch}
-                  focusedRowId={tvNav.focusedRowId}
-                  focusedCol={tvNav.focusedCol}
-                  favoriteKeys={data.favoriteKeys}
-                  watchedOverrides={data.watchedOverrides}
-                  unplayedBySeriesKey={data.unplayedBySeriesKey}
-                  onPressItem={activatePosterEntry}
-                  onContextMenuItem={openRailContextMenu}
-                  onQuickPlay={activateEntry}
-                  onQuickToggleFavorite={handleQuickToggleFavorite}
-                  onQuickToggleWatched={handleQuickToggleWatched}
-                  onLayoutY={recordRailY}
-                />
-              );
-            }
-            const spec = railSpecsById.get(section.id);
-            if (!spec) return null;
-            return (
-              <HomeRail
-                key={spec.id}
-                id={spec.id}
-                testID={`home-rail-${spec.id}`}
-                itemTestIdPrefix={`home-${spec.id}-item`}
-                title={spec.title}
-                {...(spec.actionLabel !== undefined ? { actionLabel: spec.actionLabel } : {})}
-                {...(spec.tab !== undefined
-                  ? { actionTab: spec.tab, onPressAction: onOpenTab }
-                  : {})}
-                variant={spec.variant}
-                items={railSets[spec.id]}
-                cardWidth={spec.variant === 'wide' ? layout.wideCardWidth : layout.posterCardWidth}
-                gap={railGap}
-                padX={padX}
-                isTv={isTv}
-                isTouch={isTouch}
-                focusedIndex={tvNav.focusedRowId === spec.id ? tvNav.focusedCol : null}
-                onPressItem={spec.variant === 'poster' ? activatePosterEntry : activateEntry}
-                onContextMenuItem={(entry, index, anchor) =>
-                  openRailContextMenu(spec.id, entry, index, anchor)
-                }
-                {...(spec.variant === 'poster'
-                  ? {
-                      favoriteKeys: data.favoriteKeys,
-                      watchedOverrides: data.watchedOverrides,
-                      unplayedBySeriesKey: data.unplayedBySeriesKey,
-                      onQuickPlay: activateEntry,
-                      onQuickToggleFavorite: handleQuickToggleFavorite,
-                      onQuickToggleWatched: handleQuickToggleWatched,
-                    }
-                  : {})}
-                onLayoutY={recordRailY}
-              />
-            );
-          })}
+          <HomeSectionsList
+            visibleSections={visibleSections}
+            railSpecsById={railSpecsById}
+            railSets={railSets}
+            collectionRails={collectionRails}
+            wideCardWidth={layout.wideCardWidth}
+            posterCardWidth={layout.posterCardWidth}
+            gap={railGap}
+            padX={padX}
+            isTv={isTv}
+            isTouch={isTouch}
+            focusedRowId={tvNav.focusedRowId}
+            focusedCol={tvNav.focusedCol}
+            favoriteKeys={data.favoriteKeys}
+            watchedOverrides={data.watchedOverrides}
+            unplayedBySeriesKey={data.unplayedBySeriesKey}
+            onOpenTab={onOpenTab}
+            onPressWideItem={activateEntry}
+            onPressPosterItem={activatePosterEntry}
+            onContextMenuItem={openRailContextMenu}
+            onQuickPlay={activateEntry}
+            onQuickToggleFavorite={handleQuickToggleFavorite}
+            onQuickToggleWatched={handleQuickToggleWatched}
+            onLayoutY={recordRailY}
+          />
         </ScrollView>
       )}
     </View>

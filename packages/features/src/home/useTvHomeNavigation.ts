@@ -23,6 +23,7 @@ const STATIC_HOME_ROW_IDS: readonly HomeNavRowId[] = [
   'empty',
   'hero',
   'continue',
+  'elvShowcase',
   'newEpisodes',
   'live',
   'movies',
@@ -88,12 +89,20 @@ export function buildHomeNavRows(input: {
   };
 
   if (input.sectionOrder !== undefined) {
+    const showcaseCount = input.railCounts.elvShowcase ?? 0;
+    const hasContinueSection = input.sectionOrder.includes('continue');
+    if (showcaseCount > 0 && !hasContinueSection) {
+      rows.push({ id: 'elvShowcase', count: showcaseCount });
+    }
     for (const sectionId of input.sectionOrder) {
       if (sectionId === 'collections') {
         pushCollections();
       } else {
         const count = input.railCounts[sectionId];
         if (count > 0) rows.push({ id: sectionId, count });
+        if (sectionId === 'continue' && showcaseCount > 0) {
+          rows.push({ id: 'elvShowcase', count: showcaseCount });
+        }
       }
     }
     return rows;

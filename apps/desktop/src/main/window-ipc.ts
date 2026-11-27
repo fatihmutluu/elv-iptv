@@ -1,4 +1,5 @@
 import {
+  isAllowedExternalTrailerUrl,
   isAlwaysOnTopFlag,
   isAspectRatioLockFlag,
   isMinimizeToTrayFlag,
@@ -61,6 +62,7 @@ export interface WindowIpcDeps {
   onClosePopout?(): Promise<void> | void;
   onGetPopoutPayload?(sender: unknown): PopoutLaunchPayload | null;
   onDockPopout?(sender: unknown, payload: PopoutDockPayload): Promise<void> | void;
+  onOpenExternalUrl?(url: string): Promise<boolean> | boolean;
   log?(line: string): void;
 }
 
@@ -192,6 +194,19 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     await deps.onDockPopout?.(sender, sanitizePopoutDockPayload(payload));
   });
 
+  ipcMain.handle(WINDOW_CHANNELS.openExternalUrl, async (_event, rawUrl) => {
+    if (!isAllowedExternalTrailerUrl(rawUrl)) {
+      log?.(`window ipc: blocked disallowed ${WINDOW_CHANNELS.openExternalUrl} payload`);
+      return false;
+    }
+    if (!deps.onOpenExternalUrl) return false;
+    try {
+      return Boolean(await deps.onOpenExternalUrl(rawUrl.trim()));
+    } catch {
+      return false;
+    }
+  });
+
   return () => {
     ipcMain.removeHandler(WINDOW_CHANNELS.getAlwaysOnTop);
     ipcMain.removeHandler(WINDOW_CHANNELS.setAlwaysOnTop);
@@ -201,6 +216,7 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     ipcMain.removeHandler(WINDOW_CHANNELS.closePopout);
     ipcMain.removeHandler(WINDOW_CHANNELS.getPopoutPayload);
     ipcMain.removeHandler(WINDOW_CHANNELS.dockPopout);
+    ipcMain.removeHandler(WINDOW_CHANNELS.openExternalUrl);
     for (const detach of detachListeners.splice(0)) detach();
   };
 }

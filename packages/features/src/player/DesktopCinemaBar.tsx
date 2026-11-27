@@ -180,6 +180,21 @@ export function PlayerOsdBottomBar(
               tvFocused={isFocused('prevChannel')}
             />
           ) : null}
+          {isVod && service !== null && p.hasXray === true && p.onToggleXray !== undefined ? (
+            <OsdButton
+              testID="player-xray-button"
+              variant="pill-cta"
+              icon="info"
+              iconSize={14}
+              compact
+              label={i18n.t('player.xray.button')}
+              accessibilityLabel={i18n.t('player.xray.button')}
+              active={p.xrayOpen === true}
+              onPress={p.onToggleXray}
+              isTv={isTv}
+              tvFocused={isFocused('xray')}
+            />
+          ) : null}
           {!isNarrow && hasChapters && p.onPrevChapter !== undefined ? (
             <OsdButton
               testID="player-prev-chapter"

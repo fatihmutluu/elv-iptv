@@ -608,6 +608,42 @@ export function createDesktopCatalogFromBridge(
       if (cleanName === '') return Promise.resolve(null);
       return bridge.findGuideChannelByCleanName(sourceId, cleanName, opts);
     },
+    listElvImdbGenres: (kind, opts) =>
+      bridge.listElvImdbGenres ? bridge.listElvImdbGenres(kind, opts) : Promise.resolve([]),
+    listElvItemsByImdbGenre: (kind, genre, opts) => {
+      if (!bridge.listElvItemsByImdbGenre) return Promise.resolve([]);
+      const cleanGenre = truncateDisplayText(genre, 80);
+      if (cleanGenre === '') return Promise.resolve([]);
+      return bridge.listElvItemsByImdbGenre(kind, cleanGenre, opts);
+    },
+    getElvRecommendations: (opts) =>
+      bridge.getElvRecommendations ? bridge.getElvRecommendations(opts) : Promise.resolve([]),
+    refreshElvFeeds: (opts) => {
+      if (opts?.signal?.aborted || !bridge.refreshElvFeeds) return Promise.resolve(false);
+      return bridge.refreshElvFeeds(opts?.force === undefined ? undefined : { force: opts.force });
+    },
+    listElvFranchiseItems: (imdbId, opts) =>
+      bridge.listElvFranchiseItems
+        ? bridge.listElvFranchiseItems(imdbId, opts)
+        : Promise.resolve([]),
+    listElvPersonLibraryItems: (person, opts) => {
+      if (!bridge.listElvPersonLibraryItems) return Promise.resolve([]);
+      const cleanName = truncateDisplayText(person.name, 160);
+      const cleanPerson = {
+        ...(person.personId !== undefined ? { personId: person.personId.trim() } : {}),
+        name: cleanName,
+      };
+      if (cleanName === '' && (cleanPerson.personId ?? '') === '') return Promise.resolve([]);
+      return bridge.listElvPersonLibraryItems(cleanPerson, opts);
+    },
+    searchElvMatchCandidates: (query, mediaType, opts) => {
+      if (opts?.signal?.aborted || !bridge.searchElvMatchCandidates) return Promise.resolve([]);
+      const cleanQuery = truncateDisplayText(query, MAX_IPC_TEXT_CHARS);
+      if (cleanQuery === '') return Promise.resolve([]);
+      return bridge.searchElvMatchCandidates(cleanQuery, mediaType);
+    },
+    applyElvFixMatch: (input) =>
+      bridge.applyElvFixMatch ? bridge.applyElvFixMatch(input) : Promise.resolve(null),
     flushPendingWrites: () =>
       bridge.flushPendingWrites ? bridge.flushPendingWrites() : Promise.resolve(),
     async close() {

@@ -128,6 +128,11 @@ import {
   type LiveVariantsIpcOptions,
 } from './catalog-ipc-wave-e1-guards.ts';
 import {
+  type CatalogBridgeWaveE2Ops,
+  type CatalogWaveE2OpsRpcCall,
+  isWaveE2OpsRpcCall,
+} from './catalog-ipc-wave-e2-guards.ts';
+import {
   type CatalogBridgeWaveF5bOps,
   type CatalogWaveF5bOpsRpcCall,
   isWaveF5bOpsRpcCall,
@@ -302,6 +307,7 @@ export type CatalogRpcMethodCall =
   | CatalogFailoverOpsRpcCall
   | CatalogRatingsOpsRpcCall
   | CatalogWaveE1OpsRpcCall
+  | CatalogWaveE2OpsRpcCall
   | CatalogWaveF5bOpsRpcCall
   | CatalogWaveP7OpsRpcCall
   | CatalogWaveP9OpsRpcCall;
@@ -337,6 +343,7 @@ export interface CatalogBridge
     CatalogBridgeFailoverOps,
     CatalogBridgeRatingsOps,
     CatalogBridgeWaveE1Ops,
+    CatalogBridgeWaveE2Ops,
     CatalogBridgeWaveF5bOps,
     CatalogBridgeWaveP7Ops {
   open(): Promise<Result<void>>;
@@ -711,6 +718,7 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isFailoverOpsRpcCall(x) ||
         isRatingsOpsRpcCall(x) ||
         isWaveE1OpsRpcCall(x) ||
+        isWaveE2OpsRpcCall(x) ||
         isWaveF5bOpsRpcCall(x) ||
         isWaveP7OpsRpcCall(x) ||
         isWaveP9OpsRpcCall(x)

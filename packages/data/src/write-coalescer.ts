@@ -236,6 +236,8 @@ export function createCoalescedCatalog(
     `progress:${normalizeProfile(profileId)}:${itemKey}`;
   const watchedKey = (itemKey: string, profileId?: string): string =>
     `watched:${normalizeProfile(profileId)}:${itemKey}`;
+  const ratingKey = (itemKey: string, profileId?: string): string =>
+    `rating:${normalizeProfile(profileId)}:${itemKey}`;
 
   const flushPendingWrites = async (): Promise<void> => {
     await coalescer.flush();
@@ -259,6 +261,10 @@ export function createCoalescedCatalog(
   const listMyListNewEpisodesFn = c.listMyListNewEpisodes?.bind(c);
   const dismissMyListNewEpisodeFn = c.dismissMyListNewEpisode?.bind(c);
   const refreshMyListNewEpisodesFn = c.refreshMyListNewEpisodes?.bind(c);
+  const setRatingFn = c.setRating?.bind(c);
+  const getRatingFn = c.getRating?.bind(c);
+  const listRatingsFn = c.listRatings?.bind(c);
+  const listRatingMapFn = c.listRatingMap?.bind(c);
 
   const deleteProfileFn = c.deleteProfile?.bind(c);
 
@@ -313,6 +319,7 @@ export function createCoalescedCatalog(
             await coalescer.flushPrefix(`fav:${p}:`);
             await coalescer.flushPrefix(`progress:${p}:`);
             await coalescer.flushPrefix(`watched:${p}:`);
+            await coalescer.flushPrefix(`rating:${p}:`);
             return deleteProfileFn(id);
           },
         }
@@ -405,10 +412,38 @@ export function createCoalescedCatalog(
     ...(c.reorderCollectionItems
       ? { reorderCollectionItems: c.reorderCollectionItems.bind(c) }
       : {}),
-    ...(c.setRating ? { setRating: c.setRating.bind(c) } : {}),
-    ...(c.getRating ? { getRating: c.getRating.bind(c) } : {}),
-    ...(c.listRatings ? { listRatings: c.listRatings.bind(c) } : {}),
-    ...(c.listRatingMap ? { listRatingMap: c.listRatingMap.bind(c) } : {}),
+    ...(setRatingFn
+      ? {
+          setRating: (input, value) =>
+            coalescer.schedule(ratingKey(input.itemKey, input.profileId), () =>
+              setRatingFn(input, value),
+            ),
+        }
+      : {}),
+    ...(getRatingFn
+      ? {
+          getRating: async (itemKey, profileId) => {
+            await coalescer.flushKey(ratingKey(itemKey, profileId));
+            return getRatingFn(itemKey, profileId);
+          },
+        }
+      : {}),
+    ...(listRatingsFn
+      ? {
+          listRatings: async (listOpts) => {
+            await coalescer.flushPrefix(`rating:${normalizeProfile(listOpts?.profileId)}:`);
+            return listRatingsFn(listOpts);
+          },
+        }
+      : {}),
+    ...(listRatingMapFn
+      ? {
+          listRatingMap: async (profileId) => {
+            await coalescer.flushPrefix(`rating:${normalizeProfile(profileId)}:`);
+            return listRatingMapFn(profileId);
+          },
+        }
+      : {}),
     ...(c.listDownloads ? { listDownloads: c.listDownloads.bind(c) } : {}),
     ...(c.getDownload ? { getDownload: c.getDownload.bind(c) } : {}),
     ...(c.upsertDownload ? { upsertDownload: c.upsertDownload.bind(c) } : {}),
@@ -435,6 +470,31 @@ export function createCoalescedCatalog(
     ...(c.findGuideChannelByCleanName
       ? { findGuideChannelByCleanName: c.findGuideChannelByCleanName.bind(c) }
       : {}),
+    ...(c.listElvImdbGenres ? { listElvImdbGenres: c.listElvImdbGenres.bind(c) } : {}),
+    ...(c.listElvItemsByImdbGenre
+      ? { listElvItemsByImdbGenre: c.listElvItemsByImdbGenre.bind(c) }
+      : {}),
+    ...(c.getElvRecommendations
+      ? {
+          getElvRecommendations: async (recOpts) => {
+            const p = normalizeProfile(recOpts.profileId);
+            await coalescer.flushPrefix(`fav:${p}:`);
+            await coalescer.flushPrefix(`progress:${p}:`);
+            await coalescer.flushPrefix(`watched:${p}:`);
+            await coalescer.flushPrefix(`rating:${p}:`);
+            return c.getElvRecommendations ? c.getElvRecommendations(recOpts) : [];
+          },
+        }
+      : {}),
+    ...(c.refreshElvFeeds ? { refreshElvFeeds: c.refreshElvFeeds.bind(c) } : {}),
+    ...(c.listElvFranchiseItems ? { listElvFranchiseItems: c.listElvFranchiseItems.bind(c) } : {}),
+    ...(c.listElvPersonLibraryItems
+      ? { listElvPersonLibraryItems: c.listElvPersonLibraryItems.bind(c) }
+      : {}),
+    ...(c.searchElvMatchCandidates
+      ? { searchElvMatchCandidates: c.searchElvMatchCandidates.bind(c) }
+      : {}),
+    ...(c.applyElvFixMatch ? { applyElvFixMatch: c.applyElvFixMatch.bind(c) } : {}),
     ...(queryNextEpisodeFn
       ? {
           queryNextEpisode: async (seriesKey, currentItemKey, profileId, nextOpts) => {

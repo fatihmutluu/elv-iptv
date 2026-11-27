@@ -453,4 +453,59 @@ describe('isolated local elv-enrichment.db store (#511)', () => {
     expect(await store.getQualityMemory('x:s21:movie:1')).not.toBeNull();
     expect(await store.getQualityMemory('x:s21:live:hd')).not.toBeNull();
   });
+
+  it('guards against prototype pollution keys (__proto__, constructor, prototype) in parseStringMap and mergeStringMap', async () => {
+    const { db } = testDb();
+    const store = await openElvEnrichmentStore(db, { clock: () => 1_000 });
+
+    const maliciousMap = JSON.parse(
+      '{"__proto__":"evil","constructor":"evil2","prototype":"evil3","tr":"Başlangıç"}',
+    ) as Record<string, string>;
+
+    await store.upsertTitles([
+      {
+        imdbId: 'tt1375666',
+        mediaType: 'movie',
+        originalTitle: 'Inception',
+        localizedTitles: maliciousMap,
+        synopses: maliciousMap,
+      },
+    ]);
+
+    // Also inject raw malicious JSON directly into SQLite to exercise parseStringMap
+    await db.run(
+      `UPDATE elv_titles
+          SET localized_titles_json = ?, synopses_json = ?
+        WHERE imdb_id = 'tt1375666'`,
+      [
+        '{"__proto__":"rawEvil","constructor":"rawCtor","prototype":"rawProto","en":"Inception"}',
+        '{"__proto__":"rawEvil","constructor":"rawCtor","prototype":"rawProto","en":"Dream heist."}',
+      ],
+    );
+
+    const loaded = await store.getTitleByImdbId('tt1375666');
+    expect(loaded).not.toBeNull();
+    expect(Object.keys(loaded?.localizedTitles ?? {})).toEqual(['en']);
+    expect(Object.keys(loaded?.synopses ?? {})).toEqual(['en']);
+    expect(Object.hasOwn(loaded?.localizedTitles ?? {}, '__proto__')).toBe(false);
+    expect(Object.hasOwn(loaded?.localizedTitles ?? {}, 'constructor')).toBe(false);
+    expect(Object.hasOwn(loaded?.localizedTitles ?? {}, 'prototype')).toBe(false);
+    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+
+    // Upsert merge must also strip dangerous keys while keeping valid ones
+    await store.upsertTitles([
+      {
+        imdbId: 'tt1375666',
+        mediaType: 'movie',
+        originalTitle: 'Inception',
+        localizedTitles: maliciousMap,
+        synopses: maliciousMap,
+      },
+    ]);
+    const merged = await store.getTitleByImdbId('tt1375666');
+    expect(merged?.localizedTitles).toEqual({ en: 'Inception', tr: 'Başlangıç' });
+    expect(merged?.synopses).toEqual({ en: 'Dream heist.', tr: 'Başlangıç' });
+    expect(Object.hasOwn(merged?.localizedTitles ?? {}, 'constructor')).toBe(false);
+    expect(Object.hasOwn(merged?.synopses ?? {}, 'prototype')).toBe(false);
+  });
 });

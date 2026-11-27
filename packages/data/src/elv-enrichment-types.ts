@@ -1,4 +1,5 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
+import type { ItemSortOrder } from './queries-shared';
 import { normalizeCatalogImdbId } from './writers';
 
 /** Media type supported by ELV Mode enrichment tables. */
@@ -153,7 +154,47 @@ export interface SearchMatchedItemKeysByAliasOptions {
   readonly excludedSourceIds?: readonly string[];
 }
 
-/** Repository API over the isolated local `elv-enrichment.db` SQLite database (`#511`). */
+/** Optional source inclusion/exclusion filter for matched `elv-enrichment.db` queries (`#512`). */
+export interface ElvSourceFilterOptions {
+  readonly allowedSourceIds?: readonly string[];
+  readonly excludedSourceIds?: readonly string[];
+}
+
+/** Options for {@link ElvEnrichmentStore.listTopRatedMatchedTitles} (`#512`). */
+export interface ListTopRatedMatchedTitlesOptions extends ElvSourceFilterOptions {
+  readonly mediaType?: ElvMediaType;
+  readonly limit?: number;
+}
+
+/** Options for {@link ElvEnrichmentStore.listMatchedTitlesByGenre} (`#512`). */
+export interface ListMatchedTitlesByGenreOptions extends ElvSourceFilterOptions {
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly sortBy?: ItemSortOrder;
+}
+
+/** Person query payload identifying an actor or director (`#512`). */
+export interface ElvPersonQuery {
+  readonly personId?: string;
+  readonly name: string;
+}
+
+/** Credit role matched for a person in the local library (`#512`). */
+export type ElvPersonRole = 'cast' | 'director' | 'both';
+
+/** Options for {@link ElvEnrichmentStore.listMatchedTitlesByPerson} (`#512`). */
+export interface ListMatchedTitlesByPersonOptions extends ElvSourceFilterOptions {
+  readonly limit?: number;
+}
+
+/** Matched IMDb title credited to a queried actor or director (`#512`). */
+export interface ElvMatchedPersonTitle {
+  readonly title: ElvTitleRecord;
+  readonly role: ElvPersonRole;
+  readonly character: string | null;
+}
+
+/** Repository API over the isolated local `elv-enrichment.db` SQLite database (`#511`, `#512`). */
 export interface ElvEnrichmentStore {
   readonly driver: SqlDriver;
   upsertMatches(matches: readonly UpsertElvMatchInput[]): Promise<number>;
@@ -175,20 +216,47 @@ export interface ElvEnrichmentStore {
   upsertTitles(titles: readonly UpsertElvTitleInput[]): Promise<void>;
   getEnrichmentForKeys(itemKeys: readonly string[]): Promise<Map<string, ElvItemEnrichment>>;
   getTitleByImdbId(imdbId: string): Promise<ElvTitleRecord | null>;
+  getTitlesByImdbIds(imdbIds: readonly string[]): Promise<Map<string, ElvTitleRecord>>;
   listImdbGenres(
     mediaType: ElvMediaType,
     allowedItemKeys?: readonly string[] | ReadonlySet<string>,
   ): Promise<ElvGenreSummary[]>;
+  listImdbGenreCounts(
+    mediaType: ElvMediaType,
+    opts?: ElvSourceFilterOptions,
+  ): Promise<ElvGenreSummary[]>;
+  listMatchedTitlesByGenre(
+    mediaType: ElvMediaType,
+    genre: string,
+    opts?: ListMatchedTitlesByGenreOptions,
+  ): Promise<readonly ElvTitleRecord[]>;
+  listTopRatedMatchedTitles(
+    opts?: ListTopRatedMatchedTitlesOptions,
+  ): Promise<readonly ElvTitleRecord[]>;
+  listTitlesByFranchise(
+    franchiseKey: string,
+    opts?: ElvSourceFilterOptions,
+  ): Promise<readonly ElvTitleRecord[]>;
+  listMatchedTitlesByPerson(
+    person: ElvPersonQuery,
+    opts?: ListMatchedTitlesByPersonOptions,
+  ): Promise<readonly ElvMatchedPersonTitle[]>;
   listMatchedItemKeysForImdbIds(
     imdbIds: readonly string[],
     mediaType?: ElvMediaType,
   ): Promise<Map<string, readonly string[]>>;
+  listMatchedMatchesForImdbIds(
+    imdbIds: readonly string[],
+    mediaType?: ElvMediaType,
+    opts?: ElvSourceFilterOptions,
+  ): Promise<Map<string, readonly ElvMatchRecord[]>>;
   searchMatchedItemKeysByAlias(
     query: string,
     opts?: SearchMatchedItemKeysByAliasOptions,
   ): Promise<readonly string[]>;
   upsertFeed(feedKey: string, items: readonly ElvFeedItem[], updatedAt?: number): Promise<void>;
   getFeed(feedKey: string): Promise<ElvFeedRecord | null>;
+  listFeeds(feedKeys?: readonly string[]): Promise<ElvFeedRecord[]>;
   getQualityMemory(itemKey: string): Promise<ElvQualityMemoryRecord | null>;
   getQualityMemoryForKeys(
     itemKeys: readonly string[],
@@ -278,6 +346,13 @@ export function clampConfidence(raw: number): number {
   return Math.max(0, Math.min(1, raw));
 }
 
+const FORBIDDEN_MAP_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function isSafeMapKey(key: string): boolean {
+  const lower = key.trim().toLowerCase();
+  return lower !== '' && !FORBIDDEN_MAP_KEYS.has(lower);
+}
+
 /** @internal */
 export function parseStringMap(raw: string | null | undefined): Record<string, string> {
   if (raw === null || raw === undefined || raw === '') return {};
@@ -286,6 +361,7 @@ export function parseStringMap(raw: string | null | undefined): Record<string, s
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!isSafeMapKey(k)) continue;
       if (typeof v === 'string' && v.trim() !== '') out[k] = v.trim();
     }
     return out;
@@ -337,12 +413,17 @@ function mergeStringMap(
   base: Readonly<Record<string, string>>,
   incoming: Readonly<Record<string, string>> | undefined,
 ): Record<string, string> {
-  const out: Record<string, string> = { ...base };
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(base)) {
+    const key = k.trim().toLowerCase();
+    const val = typeof v === 'string' ? v.trim() : '';
+    if (isSafeMapKey(key) && val !== '') out[key] = val;
+  }
   if (incoming === undefined) return out;
   for (const [k, v] of Object.entries(incoming)) {
     const key = k.trim().toLowerCase();
     const val = typeof v === 'string' ? v.trim() : '';
-    if (key !== '' && val !== '') out[key] = val;
+    if (isSafeMapKey(key) && val !== '') out[key] = val;
   }
   return out;
 }

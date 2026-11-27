@@ -8,15 +8,22 @@ import {
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback } from 'react';
 import { type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
-import type { DetailCastMember } from '../shared';
+import type { DetailCastMember, PersonLibraryModalPerson } from '../shared';
+import { splitDirectorNames } from '../shared/PersonLibraryModal';
+
+/** Cast credit entry carrying optional IMDb person identifier for {@link PersonLibraryModal} (`#512`). */
+export interface DetailRichCastMember extends DetailCastMember {
+  readonly personId?: string | null;
+}
 
 /** Props of {@link DetailCastStrip}. */
 export interface DetailCastStripProps {
-  readonly cast: readonly DetailCastMember[];
+  readonly cast: readonly DetailRichCastMember[];
   readonly director?: string | null;
   readonly padX: number;
   readonly isTv?: boolean;
   readonly focusedIndex?: number | null;
+  readonly onSelectPerson?: (person: PersonLibraryModalPerson) => void;
   readonly onSearchPerson?: (name: string) => void;
   readonly onLayoutY?: (y: number) => void;
 }
@@ -27,6 +34,7 @@ function DetailCastStripInner({
   padX,
   isTv = false,
   focusedIndex = null,
+  onSelectPerson,
   onSearchPerson,
   onLayoutY,
 }: DetailCastStripProps): ReactElement | null {
@@ -38,14 +46,13 @@ function DetailCastStripInner({
     },
     [onLayoutY],
   );
-  const trimmedDirector = director?.trim() ?? '';
-  const hasDirector = trimmedDirector.length > 0;
+  const directors = splitDirectorNames(director);
+  const hasDirector = directors.length > 0;
   if (cast.length === 0 && !hasDirector) return null;
 
   const cursor = webCursorPointer();
   const transition = webTransition(theme, 'transform, opacity, background-color');
-  const directorFocused = isTv && hasDirector && focusedIndex === 0;
-  const castOffset = hasDirector ? 1 : 0;
+  const castOffset = directors.length;
 
   return (
     <View
@@ -73,49 +80,59 @@ function DetailCastStripInner({
           style={[styles.directorRow, { paddingHorizontal: padX, marginBottom: theme.spacing.sm }]}
         >
           <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]}>
-            {`${i18n.t('detail.director')}:`}
+            {`${i18n.t('detail.directorLabel')}:`}
           </Text>
-          <Pressable
-            testID="detail-director-link"
-            accessibilityRole="button"
-            accessibilityLabel={i18n.t('detail.searchPerson', { name: trimmedDirector })}
-            focusable={!isTv}
-            onPress={() => onSearchPerson?.(trimmedDirector)}
-            style={({ pressed }) => [
-              styles.directorLink,
-              cursor,
-              transition,
-              {
-                borderRadius: theme.radius.button,
-                backgroundColor: directorFocused ? theme.colors.focusFill : 'transparent',
-                opacity: pressed ? 0.75 : 1,
-              },
-            ]}
-          >
-            <Text
-              numberOfLines={1}
-              style={[
-                theme.typography.caption,
-                { color: theme.colors.textPrimary, fontWeight: '600' },
-              ]}
-            >
-              {trimmedDirector}
-            </Text>
-            {directorFocused ? (
-              <View
-                pointerEvents="none"
-                testID="detail-director-link-focus-ring"
-                style={[
-                  styles.inlineFocusRing,
+          {directors.map((dirName, dirIdx) => {
+            const directorFocused = isTv && focusedIndex === dirIdx;
+            const testId = dirIdx === 0 ? 'detail-director-link' : `detail-director-link-${dirIdx}`;
+            return (
+              <Pressable
+                key={dirName}
+                testID={testId}
+                accessibilityRole="button"
+                accessibilityLabel={i18n.t('detail.searchPerson', { name: dirName })}
+                focusable={!isTv}
+                onPress={() => {
+                  if (onSelectPerson) onSelectPerson({ name: dirName });
+                  else onSearchPerson?.(dirName);
+                }}
+                style={({ pressed }) => [
+                  styles.directorLink,
+                  cursor,
+                  transition,
                   {
                     borderRadius: theme.radius.button,
-                    borderWidth: theme.focus.ringWidth,
-                    borderColor: theme.colors.focusRingColor,
+                    backgroundColor: directorFocused ? theme.colors.focusFill : 'transparent',
+                    opacity: pressed ? 0.75 : 1,
                   },
                 ]}
-              />
-            ) : null}
-          </Pressable>
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    theme.typography.caption,
+                    { color: theme.colors.textPrimary, fontWeight: '600' },
+                  ]}
+                >
+                  {dirName}
+                </Text>
+                {directorFocused ? (
+                  <View
+                    pointerEvents="none"
+                    testID={`${testId}-focus-ring`}
+                    style={[
+                      styles.inlineFocusRing,
+                      {
+                        borderRadius: theme.radius.button,
+                        borderWidth: theme.focus.ringWidth,
+                        borderColor: theme.colors.focusRingColor,
+                      },
+                    ]}
+                  />
+                ) : null}
+              </Pressable>
+            );
+          })}
         </View>
       ) : null}
 
@@ -142,7 +159,17 @@ function DetailCastStripInner({
                 accessibilityRole="button"
                 accessibilityLabel={i18n.t('detail.searchPerson', { name: member.name })}
                 focusable={!isTv}
-                onPress={() => onSearchPerson?.(member.name)}
+                onPress={() => {
+                  if (onSelectPerson) {
+                    onSelectPerson({
+                      ...(member.personId ? { personId: member.personId } : {}),
+                      name: member.name,
+                      ...(member.avatarUri ? { portraitUrl: member.avatarUri } : {}),
+                    });
+                  } else {
+                    onSearchPerson?.(member.name);
+                  }
+                }}
                 style={({ pressed }) => [
                   styles.card,
                   cursor,

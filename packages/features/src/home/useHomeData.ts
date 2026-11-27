@@ -1,5 +1,6 @@
 import type {
   CatalogService,
+  ElvRecommendedItem,
   FavoriteRow,
   ItemRow,
   MyListNewEpisodeRow,
@@ -10,6 +11,7 @@ import type {
   UserItemKind,
   WatchProgressRow,
 } from '@elv/data';
+import { DEFAULT_ELV_MODE_PREFERENCES, type ElvModePreferences } from '@elv/domain';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   batchLoadProgressByKeys,
@@ -35,6 +37,7 @@ import {
   releaseInFlightKey,
 } from './home-data-helpers';
 import type { HomeRailEntry } from './home-model';
+import { useHomeElvShowcase } from './useHomeElvShowcase';
 
 const HOME_CONTINUE_LIMIT = 16;
 const HOME_NEW_EPISODES_LIMIT = 24;
@@ -52,6 +55,7 @@ export interface UseHomeDataOptions {
   readonly userStateVersion?: number;
   readonly isPlaybackActive?: boolean;
   readonly routeActive?: boolean;
+  readonly elvPreferences?: ElvModePreferences;
 }
 
 interface ToggleMyListTarget {
@@ -81,6 +85,7 @@ export interface HomeDataState extends HomeSnapshot {
   readonly loading: boolean;
   readonly hasLoaded: boolean;
   readonly collections: readonly HydratedVodCollection[];
+  readonly elvRecommendations: readonly ElvRecommendedItem[];
   readonly nowNextByKey: ReadonlyMap<string, NowNextEntry>;
   readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
@@ -105,7 +110,9 @@ export function useHomeData({
   userStateVersion = 0,
   isPlaybackActive = false,
   routeActive = true,
+  elvPreferences,
 }: UseHomeDataOptions): HomeDataState {
+  const elvPrefs = elvPreferences ?? DEFAULT_ELV_MODE_PREFERENCES;
   const uiCache = useCatalogUiCache();
   const { activeProfileId } = useProfile();
   const activeProfileIdRef = useRef(activeProfileId);
@@ -123,6 +130,7 @@ export function useHomeData({
     () => new Map(),
   );
   const [unplayedTick, setUnplayedTick] = useState(0);
+  const [elvRecsTick, setElvRecsTick] = useState(0);
 
   const mountedRef = useRef(true);
   const hasLoadedRef = useRef(initialCached !== null);
@@ -438,6 +446,7 @@ export function useHomeData({
             inList: res.value,
             row: res.value ? addedRow : undefined,
           });
+          setElvRecsTick((t) => t + 1);
         } else if (favGenByKeyRef.current.get(key) === gen) {
           const base = committedFavRef.current.get(key);
           applyFavState(key, base?.inList ?? false, base?.row);
@@ -560,6 +569,7 @@ export function useHomeData({
             override: nextWatched,
           });
           if (target.kind === 'series') setUnplayedTick((t) => t + 1);
+          setElvRecsTick((t) => t + 1);
         } else if (watchedGenByKeyRef.current.get(key) === gen) {
           const base = committedWatchedRef.current.get(key);
           applyWatchedState(key, base?.row, base?.cwRow);
@@ -716,12 +726,30 @@ export function useHomeData({
     homeSeriesKeys,
     refreshToken + userStateVersion + unplayedTick,
   );
-  const { ratingByKey, toggleRating } = useRatingMapState({
+  const elvRecommendations = useHomeElvShowcase({
+    catalog,
+    sourcesCount: sources.length,
+    refreshToken,
+    userStateVersion,
+    localRefreshTick: elvRecsTick,
+    activeProfileId,
+    elvPrefs,
+  });
+
+  const { ratingByKey, toggleRating: rawToggleRating } = useRatingMapState({
     catalog,
     refreshToken,
     userStateVersion,
     profileKey: activeProfileId,
   });
+  const toggleRating = useCallback(
+    async (target: RatingToggleTarget, next: RatingValue): Promise<boolean> => {
+      const ok = await rawToggleRating(target, next);
+      if (ok) setElvRecsTick((t) => t + 1);
+      return ok;
+    },
+    [rawToggleRating],
+  );
 
   return useMemo<HomeDataState>(
     () => ({
@@ -729,6 +757,7 @@ export function useHomeData({
       hasLoaded,
       ...snap,
       collections,
+      elvRecommendations,
       nowNextByKey,
       unplayedBySeriesKey,
       watchedOverrides,
@@ -743,6 +772,7 @@ export function useHomeData({
     [
       collections,
       dismissNewEpisode,
+      elvRecommendations,
       hasLoaded,
       loading,
       markNewEpisodeWatched,

@@ -70,7 +70,14 @@ export interface HomeRailEntry {
 }
 
 /** Semantic identifier of each Home horizontal rail. */
-export type HomeRailKind = 'continue' | 'newEpisodes' | 'live' | 'mylist' | 'movies' | 'series';
+export type HomeRailKind =
+  | 'continue'
+  | 'elvShowcase'
+  | 'newEpisodes'
+  | 'live'
+  | 'mylist'
+  | 'movies'
+  | 'series';
 
 /** Maximum number of cards shown in the unified Home Live TV rail. */
 export const HOME_LIVE_RAIL_LIMIT = 12;
@@ -462,6 +469,7 @@ export function formatContinueEpisodeSubtitle(
 /** Input for {@link buildHomeRailSets}. */
 export interface BuildHomeRailSetsInput {
   readonly continueWatching: readonly WatchProgressRow[];
+  readonly elvShowcase?: readonly HomeRailEntry[];
   readonly newEpisodes?: readonly MyListNewEpisodeRow[];
   readonly newEpisodeBadgeLabel?: string;
   readonly recentChannels?: readonly ItemRow[];
@@ -525,6 +533,7 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
       ...(row.season !== null ? { season: row.season } : {}),
       ...(row.episode !== null ? { episode: row.episode } : {}),
     })),
+    elvShowcase: input.elvShowcase ?? [],
     newEpisodes: (input.newEpisodes ?? []).map((row) => ({
       itemKey: row.episodeKey,
       sourceId: row.sourceId,

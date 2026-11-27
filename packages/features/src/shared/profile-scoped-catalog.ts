@@ -31,6 +31,14 @@ function filterAndSliceBySourceId<T extends { readonly sourceId: string }>(
   return filtered.slice(0, safeLimit);
 }
 
+function mergeExcludedSources(
+  callerExcluded: readonly string[] | undefined,
+  profileExcluded: ReadonlySet<string>,
+): readonly string[] | undefined {
+  if (profileExcluded.size === 0) return callerExcluded;
+  return Array.from(new Set([...(callerExcluded ?? []), ...profileExcluded]));
+}
+
 /**
  * Wraps a {@link CatalogService} so every catalog read, stream resolution, and user-state
  * read/write automatically inherits the active profile ID, temporary parental-unlock state,
@@ -91,6 +99,11 @@ export function createProfileScopedCatalog(
   const listRatings = c.listRatings?.bind(c);
   const listRatingMap = c.listRatingMap?.bind(c);
   const searchElvItemKeysByAlias = c.searchElvItemKeysByAlias?.bind(c);
+  const listElvImdbGenres = c.listElvImdbGenres?.bind(c);
+  const listElvItemsByImdbGenre = c.listElvItemsByImdbGenre?.bind(c);
+  const getElvRecommendations = c.getElvRecommendations?.bind(c);
+  const listElvFranchiseItems = c.listElvFranchiseItems?.bind(c);
+  const listElvPersonLibraryItems = c.listElvPersonLibraryItems?.bind(c);
   const excludedFor = (effectivePid: string, scope: ProfileCatalogScope) =>
     resolveExcludedSourceIds(c, effectivePid, scope);
 
@@ -454,10 +467,7 @@ export function createProfileScopedCatalog(
           searchElvItemKeysByAlias: async (query, opts) => {
             const scope = getScope();
             const excluded = await excludedFor(scope.profileId, scope);
-            const mergedExcluded =
-              excluded.size > 0
-                ? Array.from(new Set([...(opts?.excludedSourceIds ?? []), ...excluded]))
-                : opts?.excludedSourceIds;
+            const mergedExcluded = mergeExcludedSources(opts?.excludedSourceIds, excluded);
             const nextOpts =
               mergedExcluded !== undefined ? { ...opts, excludedSourceIds: mergedExcluded } : opts;
             const keys = await searchElvItemKeysByAlias(query, nextOpts);
@@ -467,6 +477,95 @@ export function createProfileScopedCatalog(
           },
         }
       : {}),
+    ...(listElvImdbGenres
+      ? {
+          listElvImdbGenres: async (kind, opts) => {
+            const scope = getScope();
+            const merged = mergeParentalOpts(opts, scope);
+            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
+            const mergedExcluded = mergeExcludedSources(opts?.excludedSourceIds, excluded);
+            const nextOpts =
+              mergedExcluded !== undefined
+                ? { ...merged, excludedSourceIds: mergedExcluded }
+                : merged;
+            return listElvImdbGenres(kind, nextOpts);
+          },
+        }
+      : {}),
+    ...(listElvItemsByImdbGenre
+      ? {
+          listElvItemsByImdbGenre: async (kind, genre, opts) => {
+            const scope = getScope();
+            const merged = mergeParentalOpts(opts, scope);
+            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
+            const mergedExcluded = mergeExcludedSources(opts?.excludedSourceIds, excluded);
+            const nextOpts =
+              mergedExcluded !== undefined
+                ? { ...merged, excludedSourceIds: mergedExcluded }
+                : merged;
+            return filterBySourceId(await listElvItemsByImdbGenre(kind, genre, nextOpts), excluded);
+          },
+        }
+      : {}),
+    ...(getElvRecommendations
+      ? {
+          getElvRecommendations: async (opts) => {
+            const scope = getScope();
+            const merged = mergeParentalOpts(opts, scope);
+            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
+            const mergedExcluded = mergeExcludedSources(opts.excludedSourceIds, excluded);
+            const nextOpts =
+              mergedExcluded !== undefined
+                ? { ...merged, excludedSourceIds: mergedExcluded }
+                : merged;
+            const entries = await getElvRecommendations(nextOpts);
+            return excluded.size === 0
+              ? entries
+              : entries.filter((entry) => !excluded.has(entry.item.sourceId));
+          },
+        }
+      : {}),
+    ...(c.refreshElvFeeds ? { refreshElvFeeds: c.refreshElvFeeds.bind(c) } : {}),
+    ...(listElvFranchiseItems
+      ? {
+          listElvFranchiseItems: async (imdbId, opts) => {
+            const scope = getScope();
+            const merged = mergeParentalOpts(opts, scope);
+            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
+            const mergedExcluded = mergeExcludedSources(opts?.excludedSourceIds, excluded);
+            const nextOpts =
+              mergedExcluded !== undefined
+                ? { ...merged, excludedSourceIds: mergedExcluded }
+                : merged;
+            const entries = await listElvFranchiseItems(imdbId, nextOpts);
+            return excluded.size === 0
+              ? entries
+              : entries.filter((entry) => !excluded.has(entry.item.sourceId));
+          },
+        }
+      : {}),
+    ...(listElvPersonLibraryItems
+      ? {
+          listElvPersonLibraryItems: async (person, opts) => {
+            const scope = getScope();
+            const merged = mergeParentalOpts(opts, scope);
+            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
+            const mergedExcluded = mergeExcludedSources(opts?.excludedSourceIds, excluded);
+            const nextOpts =
+              mergedExcluded !== undefined
+                ? { ...merged, excludedSourceIds: mergedExcluded }
+                : merged;
+            const entries = await listElvPersonLibraryItems(person, nextOpts);
+            return excluded.size === 0
+              ? entries
+              : entries.filter((entry) => !excluded.has(entry.item.sourceId));
+          },
+        }
+      : {}),
+    ...(c.searchElvMatchCandidates
+      ? { searchElvMatchCandidates: c.searchElvMatchCandidates.bind(c) }
+      : {}),
+    ...(c.applyElvFixMatch ? { applyElvFixMatch: c.applyElvFixMatch.bind(c) } : {}),
     ...(listCollections
       ? {
           listCollections: (profileId, opts) => {

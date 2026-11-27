@@ -4093,3 +4093,183 @@ msgstr "Sources & versions ({count})"
 
 msgid "elv.matching.background"
 msgstr "Enhancing catalog in background…"
+
+msgid "home.section.elvShowcase"
+msgstr "Trending & Picks for You"
+
+msgid "catalog.elvPicks.emptyTitle"
+msgstr "Building your personal picks"
+
+msgid "catalog.elvPicks.emptyBody"
+msgstr "Like, star, or watch a few titles and ELV Mode will tailor picks from your library."
+
+msgid "elv.reason.moreLikeThis"
+msgstr "Because of your likes"
+
+msgid "elv.reason.trending"
+msgstr "Trending now"
+
+msgid "elv.reason.topPicks"
+msgstr "Top pick"
+
+msgid "elv.reason.upcomingTv"
+msgstr "Current & upcoming"
+
+msgid "elv.reason.genreMatch"
+msgstr "Your favorite genre"
+
+msgid "elv.reason.castMatch"
+msgstr "Cast you follow"
+
+msgid "elv.genre.Action"
+msgstr "Action"
+
+msgid "elv.genre.Adventure"
+msgstr "Adventure"
+
+msgid "elv.genre.Animation"
+msgstr "Animation"
+
+msgid "elv.genre.Biography"
+msgstr "Biography"
+
+msgid "elv.genre.Comedy"
+msgstr "Comedy"
+
+msgid "elv.genre.Crime"
+msgstr "Crime"
+
+msgid "elv.genre.Documentary"
+msgstr "Documentary"
+
+msgid "elv.genre.Drama"
+msgstr "Drama"
+
+msgid "elv.genre.Family"
+msgstr "Family"
+
+msgid "elv.genre.Fantasy"
+msgstr "Fantasy"
+
+msgid "elv.genre.History"
+msgstr "History"
+
+msgid "elv.genre.Horror"
+msgstr "Horror"
+
+msgid "elv.genre.Music"
+msgstr "Music"
+
+msgid "elv.genre.Mystery"
+msgstr "Mystery"
+
+msgid "elv.genre.Romance"
+msgstr "Romance"
+
+msgid "elv.genre.SciFi"
+msgstr "Sci-Fi"
+
+msgid "elv.genre.Sport"
+msgstr "Sport"
+
+msgid "elv.genre.Thriller"
+msgstr "Thriller"
+
+msgid "elv.genre.War"
+msgstr "War"
+
+msgid "elv.genre.Western"
+msgstr "Western"
+
+msgid "detail.action.trailer"
+msgstr "Watch trailer"
+
+msgid "detail.votesCount"
+msgstr "{count} votes"
+
+msgid "detail.runtimeMin"
+msgstr "{minutes} min"
+
+msgid "detail.directorLabel"
+msgstr "Director"
+
+msgid "detail.franchise.title"
+msgstr "More in this series in your library"
+
+msgid "detail.franchise.current"
+msgstr "Current"
+
+msgid "detail.trailer.title"
+msgstr "Trailer"
+
+msgid "detail.trailer.unavailable"
+msgstr "Trailer unavailable for this title."
+
+msgid "detail.trailer.openExternal"
+msgstr "Open in YouTube"
+
+msgid "detail.trailer.close"
+msgstr "Close trailer"
+
+msgid "person.alsoInLibrary"
+msgstr "In your library ({count})"
+
+msgid "person.emptyLibrary"
+msgstr "No other matching titles found in your IPTV library."
+
+msgid "person.role.director"
+msgstr "Director"
+
+msgid "person.role.cast"
+msgstr "Cast"
+
+msgid "person.close"
+msgstr "Close"
+
+msgid "detail.fixMatch.action"
+msgstr "Fix match"
+
+msgid "detail.fixMatch.title"
+msgstr "Fix IMDb match"
+
+msgid "detail.fixMatch.subtitle"
+msgstr "Search and lock the exact title. Future catalog refreshes will keep your choice."
+
+msgid "detail.fixMatch.placeholder"
+msgstr "Search movie or series title…"
+
+msgid "detail.fixMatch.search"
+msgstr "Search"
+
+msgid "detail.fixMatch.searching"
+msgstr "Searching IMDb…"
+
+msgid "detail.fixMatch.noResults"
+msgstr "No matching titles found."
+
+msgid "detail.fixMatch.lockedBadge"
+msgstr "Match locked"
+
+msgid "detail.fixMatch.error"
+msgstr "Could not update match right now."
+
+msgid "player.xray.button"
+msgstr "X-Ray"
+
+msgid "player.xray.title"
+msgstr "X-Ray"
+
+msgid "player.xray.cast"
+msgstr "Cast"
+
+msgid "player.xray.director"
+msgstr "Director"
+
+msgid "player.xray.episode"
+msgstr "Now playing"
+
+msgid "player.xray.viewLibrary"
+msgstr "View in library"
+
+msgid "player.xray.empty"
+msgstr "No cast metadata available for this title."

@@ -630,7 +630,12 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const stageOptionalProps = {
     ...(props.sourceImportHost !== undefined ? { sourceImportHost: props.sourceImportHost } : {}),
     ...(props.lanPairing !== undefined ? { lanPairing: props.lanPairing } : {}),
+    ...(props.trailerExternal !== undefined ? { trailerExternal: props.trailerExternal } : {}),
     onTelemetryOptInChange: waveF9.onTelemetryOptInChange,
+  };
+  const onOpenDetailFromPlayer = (target: DetailTarget) => {
+    onPlayerExit();
+    openDetail(target);
   };
 
   return (
@@ -748,6 +753,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
           onPlaybackActiveChange={setPlayerPlaybackActive}
           onRegisterStopActivePlayer={handleRegisterStopActivePlayer}
           onTargetChange={onPlayerTargetChange}
+          onOpenDetail={onOpenDetailFromPlayer}
           onExit={onPlayerExit}
         />
         <AppShellRootOverlays

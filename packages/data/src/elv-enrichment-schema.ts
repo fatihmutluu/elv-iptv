@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS elv_titles (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_elv_titles_franchise ON elv_titles (franchise_key);
+CREATE INDEX IF NOT EXISTS idx_elv_titles_type_rating ON elv_titles (media_type, rating DESC, votes DESC);
 
 CREATE TABLE IF NOT EXISTS elv_feeds (
   feed_key TEXT PRIMARY KEY,

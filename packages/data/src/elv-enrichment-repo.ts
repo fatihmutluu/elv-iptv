@@ -1,5 +1,15 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
 import {
+  getTitlesByImdbIds,
+  listFeeds,
+  listImdbGenreCounts,
+  listMatchedMatchesForImdbIds,
+  listMatchedTitlesByGenre,
+  listMatchedTitlesByPerson,
+  listTitlesByFranchise,
+  listTopRatedMatchedTitles,
+} from './elv-enrichment-discovery-queries';
+import {
   ELV_ENRICHMENT_OPEN_PRAGMAS,
   ELV_ENRICHMENT_SCHEMA_SQL,
   ELV_ENRICHMENT_SCHEMA_VERSION,
@@ -34,10 +44,17 @@ export type {
   ElvFeedRecord,
   ElvGenreSummary,
   ElvItemEnrichment,
+  ElvMatchedPersonTitle,
   ElvMatchRecord,
   ElvMediaType,
+  ElvPersonQuery,
+  ElvPersonRole,
   ElvQualityMemoryRecord,
+  ElvSourceFilterOptions,
   ElvTitleRecord,
+  ListMatchedTitlesByGenreOptions,
+  ListMatchedTitlesByPersonOptions,
+  ListTopRatedMatchedTitlesOptions,
   OpenElvEnrichmentStoreOptions,
   SearchMatchedItemKeysByAliasOptions,
   UpsertElvMatchInput,
@@ -347,6 +364,27 @@ export async function openElvEnrichmentStore(
       const row = rows[0];
       return row === undefined ? null : mapTitleRow(row);
     },
+
+    getTitlesByImdbIds: (imdbIds) => getTitlesByImdbIds(driver, imdbIds),
+
+    listImdbGenreCounts: (mediaType, filterOpts) =>
+      listImdbGenreCounts(driver, mediaType, filterOpts),
+
+    listMatchedTitlesByGenre: (mediaType, genre, genreOpts) =>
+      listMatchedTitlesByGenre(driver, mediaType, genre, genreOpts),
+
+    listTopRatedMatchedTitles: (topOpts) => listTopRatedMatchedTitles(driver, topOpts),
+
+    listTitlesByFranchise: (franchiseKey, filterOpts) =>
+      listTitlesByFranchise(driver, franchiseKey, filterOpts),
+
+    listMatchedTitlesByPerson: (person, personOpts) =>
+      listMatchedTitlesByPerson(driver, person, personOpts),
+
+    listMatchedMatchesForImdbIds: (imdbIds, mediaType, filterOpts) =>
+      listMatchedMatchesForImdbIds(driver, imdbIds, mediaType, filterOpts),
+
+    listFeeds: (feedKeys) => listFeeds(driver, feedKeys),
 
     async listImdbGenres(mediaType, allowedItemKeys) {
       const counts = new Map<string, number>();
