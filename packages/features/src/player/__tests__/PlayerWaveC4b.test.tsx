@@ -311,7 +311,6 @@ describe('Player Wave C4B (#62, #163, #133, #416)', () => {
               isTv
               label="Seek"
               timeDisplayMode="remaining"
-              playbackSpeed={2}
               i18n={i18n}
               onCycleTimeDisplayMode={jest.fn()}
               onSeekRatio={jest.fn()}
@@ -345,7 +344,7 @@ describe('Player Wave C4B (#62, #163, #133, #416)', () => {
       </ViewportProvider>,
     );
 
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('-0:00');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('0:00');
     expect(screen.getByTestId('player-progress-time-end').props.accessibilityLabel).toBe(
       '0:00 remaining',
     );

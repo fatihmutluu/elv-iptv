@@ -16,7 +16,7 @@ import {
   type ViewportOverride,
   ViewportProvider,
 } from '@elv/ui-kit';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, render, screen, waitFor } from '@testing-library/react-native';
 import { Platform } from 'react-native';
 import type { DetailTarget } from '../../shared';
 import { DetailScreen } from '../DetailScreen';
@@ -24,7 +24,6 @@ import { DetailScreen } from '../DetailScreen';
 const KEYCODE_DPAD_UP = 19;
 const KEYCODE_DPAD_DOWN = 20;
 const KEYCODE_DPAD_RIGHT = 22;
-const KEYCODE_DPAD_CENTER = 23;
 const KEYCODE_BACK = 4;
 
 function jsonResponse(payload: unknown): HttpResponse {
@@ -163,7 +162,7 @@ function renderDetail(
   return render(content);
 }
 
-describe('Wave F5B DetailScreen: Key-Free VOD Enrichment (#215) & Collection Picker (#403)', () => {
+describe('Wave F5B / Wave P8 DetailScreen: Key-Free VOD Enrichment (#215) & Minimalist Action Row (#508)', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
@@ -239,7 +238,7 @@ describe('Wave F5B DetailScreen: Key-Free VOD Enrichment (#215) & Collection Pic
     }
   });
 
-  it('opens inline CollectionPickerOverlay (zero Modal), creates & toggles collections, and supports TV D-pad + Back', async () => {
+  it('omits collection button & picker on DetailScreen and keeps circular icon row cleanly above Play CTA on TV D-pad (#508)', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
 
@@ -266,7 +265,6 @@ describe('Wave F5B DetailScreen: Key-Free VOD Enrichment (#215) & Collection Pic
     try {
       const created = await env.catalog.createCollection?.({ name: 'Favorites Mix' });
       expect(created?.ok).toBe(true);
-      if (!created?.ok) return;
 
       const view = await renderDetail(
         {
@@ -298,111 +296,31 @@ describe('Wave F5B DetailScreen: Key-Free VOD Enrichment (#215) & Collection Pic
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('detail-collections')).toBeTruthy();
+        expect(screen.getByTestId('detail-hero-icon-row')).toBeTruthy();
+        expect(screen.getByTestId('detail-play')).toBeTruthy();
       });
 
-      // Navigate TV D-pad: hero-play -> Up (mylist) -> Right (like) -> Right (dislike) -> Right (watched) -> Right (collections) -> Select
-      await pressKey(KEYCODE_DPAD_UP);
-      await pressKey(KEYCODE_DPAD_RIGHT);
-      await pressKey(KEYCODE_DPAD_RIGHT);
-      await pressKey(KEYCODE_DPAD_RIGHT);
-      await pressKey(KEYCODE_DPAD_RIGHT);
-      expect(screen.getByTestId('detail-collections-focus-ring')).toBeTruthy();
-      await pressKey(KEYCODE_DPAD_CENTER);
-
-      await waitFor(() => {
-        expect(screen.getByTestId('collection-picker-overlay')).toBeTruthy();
-        expect(screen.getByTestId(`collection-picker-row-${created.value.id}`)).toBeTruthy();
-      });
-
-      // Zero React Native <Modal> used
+      // Collection button and picker overlay are completely absent from DetailScreen (Wave P8)
+      expect(screen.queryByTestId('detail-collections')).toBeNull();
+      expect(screen.queryByTestId('collection-picker-overlay')).toBeNull();
       expect(JSON.stringify(view.toJSON())).not.toContain('"type":"Modal"');
 
-      // Select toggles membership ON in Favorites Mix
-      await pressKey(KEYCODE_DPAD_CENTER);
-      await waitFor(() => {
-        expect(
-          screen.getByTestId(`collection-picker-row-${created.value.id}`).props.accessibilityState
-            ?.checked,
-        ).toBe(true);
-      });
+      // TV D-pad: hero-play -> Up (mylist) -> Right (like) -> Right (dislike) -> Right (watched) -> extra Right stays clamped on watched
+      await pressKey(KEYCODE_DPAD_UP);
+      expect(screen.getByTestId('detail-mylist-focus-ring')).toBeTruthy();
+      await pressKey(KEYCODE_DPAD_RIGHT);
+      expect(screen.getByTestId('detail-like-focus-ring')).toBeTruthy();
+      await pressKey(KEYCODE_DPAD_RIGHT);
+      expect(screen.getByTestId('detail-dislike-focus-ring')).toBeTruthy();
+      await pressKey(KEYCODE_DPAD_RIGHT);
+      expect(screen.getByTestId('detail-watched-focus-ring')).toBeTruthy();
+      await pressKey(KEYCODE_DPAD_RIGHT);
+      expect(screen.getByTestId('detail-watched-focus-ring')).toBeTruthy();
 
-      // Also create a new collection inline -> auto-adds current movie
-      await fireEvent.changeText(screen.getByTestId('collection-picker-new-input'), 'Mind Benders');
-      await fireEvent.press(screen.getByTestId('collection-picker-create-btn'));
-      await waitFor(() => {
-        expect(screen.getByText('Mind Benders')).toBeTruthy();
-      });
-
-      // Back closes picker WITHOUT popping DetailScreen, and badge shows count 2
-      await pressKey(KEYCODE_BACK);
-      await waitFor(() => {
-        expect(screen.queryByTestId('collection-picker-overlay')).toBeNull();
-        expect(screen.getByTestId('detail-collections-count')).toHaveTextContent('2');
-      });
-      expect(onBack).not.toHaveBeenCalled();
-
-      // Down/Back now goes back to DetailScreen cleanly
+      // Down returns cleanly to detail-play and Back pops DetailScreen
       await pressKey(KEYCODE_DPAD_DOWN);
       await pressKey(KEYCODE_BACK);
       expect(onBack).toHaveBeenCalledTimes(1);
-
-      await view.unmount();
-    } finally {
-      await env.cleanup();
-    }
-  });
-
-  it('does not mark a newly created collection as member when addItemToCollection fails in CollectionPickerOverlay', async () => {
-    const env = await openFixtureCatalog();
-    try {
-      const failingCatalog: CatalogService = {
-        ...env.catalog,
-        addItemToCollection: async () => err(elvError('storage', 'collection-write-failed')),
-      };
-
-      const view = await renderDetail({
-        target: {
-          itemKey: env.movie.key,
-          sourceId: env.sourceId,
-          kind: 'movie',
-          title: env.movie.name,
-          posterUri: null,
-          backdropUri: null,
-          year: 2010,
-          rating: 8.8,
-          catalogId: env.movie.id,
-        },
-        catalog: failingCatalog,
-      });
-
-      await waitFor(() => {
-        expect(screen.getByTestId('detail-collections')).toBeTruthy();
-      });
-      await fireEvent.press(screen.getByTestId('detail-collections'));
-      await waitFor(() => {
-        expect(screen.getByTestId('collection-picker-overlay')).toBeTruthy();
-      });
-
-      await fireEvent.changeText(screen.getByTestId('collection-picker-new-input'), 'Empty List');
-      await fireEvent.press(screen.getByTestId('collection-picker-create-btn'));
-
-      const listed = await env.catalog.listCollections?.();
-      const createdId = listed?.find((c) => c.name === 'Empty List')?.id;
-      expect(createdId).toBeDefined();
-
-      await waitFor(() => {
-        expect(screen.getByText('Empty List')).toBeTruthy();
-        const row = screen.getByTestId(`collection-picker-row-${createdId}`);
-        expect(row.props.accessibilityState?.checked).toBe(false);
-        expect(row).toHaveTextContent(/0 titles/);
-      });
-
-      await fireEvent.press(screen.getByTestId('collection-picker-close'));
-      await waitFor(() => {
-        expect(screen.queryByTestId('collection-picker-overlay')).toBeNull();
-      });
-      expect(screen.queryByTestId('detail-collections-count')).toBeNull();
 
       await view.unmount();
     } finally {

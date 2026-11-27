@@ -95,9 +95,6 @@ export type PlaybackFocusId =
   | 'night-drc-night'
   | 'toggle-auto-enter-pip'
   | 'toggle-background-audio'
-  | 'osd-time-total'
-  | 'osd-time-remaining'
-  | 'osd-time-endsAt'
   | 'toggle-auto-play-next'
   | 'external-player-off'
   | 'external-player-ask'
@@ -199,10 +196,7 @@ const PLAYBACK_NIGHT_DRC_ROW: readonly PlaybackFocusId[] = [
   'night-drc-night',
 ];
 
-const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
-  ['osd-time-total', 'osd-time-remaining', 'osd-time-endsAt'],
-  ['toggle-auto-play-next'],
-];
+const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [['toggle-auto-play-next']];
 
 const PLAYBACK_EXTERNAL_PLAYER_ROW: readonly PlaybackFocusId[] = [
   'external-player-off',

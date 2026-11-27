@@ -24,6 +24,10 @@ export interface UseLiveTwoStepPreviewOptions {
   readonly live: Pick<LiveCatalogState, 'tuneChannel' | 'buildPlayTarget'>;
   readonly memoryRef: MutableRefObject<LiveTabMemory>;
   readonly onPlay: (target: PlayTarget) => void;
+  readonly onOpenMultiView?: (target: PlayTarget) => void;
+  readonly onOpenPopout?: (target: PlayTarget) => void;
+  /** Default overlay mode when `videoHost` does not declare one (`'docked'` on desktop for HWND safety). */
+  readonly defaultOverlayMode?: 'floating' | 'docked';
   /** Suppresses embedded live previews (e.g. while Floating Mini-Player owns the active stream). */
   readonly suppressEmbeddedPreview?: boolean;
   readonly videoHost?: VideoHost;
@@ -32,16 +36,19 @@ export interface UseLiveTwoStepPreviewOptions {
 
 /**
  * Coordinates single-connection-safe embedded live previews across `Favorites` stage and optional
- * `liveOkTwoStepPreview` in `Channels` / `TV Guide`, releasing the preview engine before fullscreen
- * `onPlay` handoff (`#145`).
+ * `liveOkTwoStepPreview` in `Channels` / `TV Guide`, releasing the preview engine before fullscreen,
+ * Multi-View, or Popout handoff (`#145`, `#507`).
  */
 export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
   readonly preview: LiveEmbeddedPreviewState;
   readonly previewedChannel: TwoStepPreviewEntry | null;
   readonly twoStepPreviewActive: boolean;
   readonly clearTwoStepPreview: () => void;
+  readonly releasePreviewAndDispatch: (dispatch: () => void) => void;
   readonly handleWatchAndPlay: (channel: ItemRow, index: number) => void;
   readonly handleWatchFromFavorites: (channel: ItemRow, index: number) => void;
+  readonly handleMultiViewFromFavorites: (channel: ItemRow, index: number) => void;
+  readonly handlePopoutFromFavorites: (channel: ItemRow, index: number) => void;
 } {
   const {
     mode,
@@ -52,6 +59,9 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
     live,
     memoryRef,
     onPlay,
+    onOpenMultiView,
+    onOpenPopout,
+    defaultOverlayMode = 'floating',
     suppressEmbeddedPreview = false,
     videoHost,
     playbackGuard,
@@ -116,10 +126,61 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
     activeChannel: previewChannel,
     sources: readySources,
     catalog,
+    defaultOverlayMode,
     sessionResetKey: previewResetSeq,
     ...(videoHost !== undefined ? { videoHost } : {}),
     ...(playbackGuard !== undefined ? { playbackGuard } : {}),
   });
+
+  const releasePreviewAndDispatch = useCallback(
+    (dispatch: () => void) => {
+      if (handoffInFlightRef.current) return;
+      const isTwoStepActiveNow =
+        !suppressEmbeddedPreview &&
+        liveOkTwoStepPreview &&
+        (modeRef.current === 'channels' || modeRef.current === 'epg') &&
+        previewedRef.current !== null;
+      const needsRelease =
+        videoHost !== undefined && (modeRef.current === 'favorites' || isTwoStepActiveNow);
+      if (!needsRelease) {
+        if (previewedRef.current !== null) clearTwoStepPreview();
+        dispatch();
+        return;
+      }
+      const capturedMode = modeRef.current;
+      const capturedCategoryId = memoryRef.current.categoryId;
+      handoffInFlightRef.current = true;
+      void (async () => {
+        let releasedOk = false;
+        try {
+          await preview.stopAndRelease();
+          releasedOk = true;
+        } catch {
+          releasedOk = false;
+        } finally {
+          handoffInFlightRef.current = false;
+        }
+        const sameContext =
+          capturedMode === 'favorites'
+            ? modeRef.current === 'favorites' && memoryRef.current.mode === 'favorites'
+            : modeRef.current === capturedMode &&
+              memoryRef.current.mode === capturedMode &&
+              memoryRef.current.categoryId === capturedCategoryId;
+        if (releasedOk && mountedRef.current && sameContext) {
+          clearTwoStepPreview();
+          dispatch();
+        }
+      })();
+    },
+    [
+      clearTwoStepPreview,
+      liveOkTwoStepPreview,
+      memoryRef,
+      preview.stopAndRelease,
+      suppressEmbeddedPreview,
+      videoHost,
+    ],
+  );
 
   const handleWatchAndPlay = useCallback(
     (ch: ItemRow, idx: number) => {
@@ -138,71 +199,40 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
       }
       live.tuneChannel(ch, idx);
       const target = live.buildPlayTarget(ch, idx, 'category');
-      if (videoHost === undefined) {
-        clearTwoStepPreview();
-        onPlay(target);
-        return;
-      }
-      const capturedMode = modeRef.current;
-      const capturedCategoryId = memoryRef.current.categoryId;
-      handoffInFlightRef.current = true;
-      void (async () => {
-        let releasedOk = false;
-        try {
-          await preview.stopAndRelease();
-          releasedOk = true;
-        } catch {
-          releasedOk = false;
-        } finally {
-          handoffInFlightRef.current = false;
-        }
-        if (
-          releasedOk &&
-          mountedRef.current &&
-          modeRef.current === capturedMode &&
-          memoryRef.current.mode === capturedMode &&
-          memoryRef.current.categoryId === capturedCategoryId
-        ) {
-          clearTwoStepPreview();
-          onPlay(target);
-        }
-      })();
+      releasePreviewAndDispatch(() => onPlay(target));
     },
     [
-      clearTwoStepPreview,
       live.buildPlayTarget,
       live.tuneChannel,
       liveOkTwoStepPreview,
-      memoryRef,
       onPlay,
-      preview.stopAndRelease,
-      videoHost,
+      releasePreviewAndDispatch,
     ],
   );
 
-  const handleWatchFromFavorites = useCallback(
-    (ch: ItemRow, idx: number) => {
-      if (handoffInFlightRef.current) return;
+  const handoffFromFavorites = useCallback(
+    (ch: ItemRow, idx: number, dispatch: ((target: PlayTarget) => void) | undefined) => {
+      if (dispatch === undefined || handoffInFlightRef.current) return;
       live.tuneChannel(ch, idx);
       const target = live.buildPlayTarget(ch, idx, 'favorites');
-      if (videoHost === undefined) return onPlay(target);
-      handoffInFlightRef.current = true;
-      void (async () => {
-        let releasedOk = false;
-        try {
-          await preview.stopAndRelease();
-          releasedOk = true;
-        } catch {
-          releasedOk = false;
-        } finally {
-          handoffInFlightRef.current = false;
-        }
-        if (releasedOk && mountedRef.current && memoryRef.current.mode === 'favorites') {
-          onPlay(target);
-        }
-      })();
+      releasePreviewAndDispatch(() => dispatch(target));
     },
-    [live.buildPlayTarget, live.tuneChannel, memoryRef, onPlay, preview.stopAndRelease, videoHost],
+    [live.buildPlayTarget, live.tuneChannel, releasePreviewAndDispatch],
+  );
+
+  const handleWatchFromFavorites = useCallback(
+    (ch: ItemRow, idx: number) => handoffFromFavorites(ch, idx, onPlay),
+    [handoffFromFavorites, onPlay],
+  );
+
+  const handleMultiViewFromFavorites = useCallback(
+    (ch: ItemRow, idx: number) => handoffFromFavorites(ch, idx, onOpenMultiView),
+    [handoffFromFavorites, onOpenMultiView],
+  );
+
+  const handlePopoutFromFavorites = useCallback(
+    (ch: ItemRow, idx: number) => handoffFromFavorites(ch, idx, onOpenPopout),
+    [handoffFromFavorites, onOpenPopout],
   );
 
   return {
@@ -210,7 +240,10 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
     previewedChannel,
     twoStepPreviewActive,
     clearTwoStepPreview,
+    releasePreviewAndDispatch,
     handleWatchAndPlay,
     handleWatchFromFavorites,
+    handleMultiViewFromFavorites,
+    handlePopoutFromFavorites,
   };
 }

@@ -1,4 +1,3 @@
-import type { OsdTimeDisplayMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { ChapterInfo, PlaybackClock, PlaybackService } from '@elv/playback';
 import {
@@ -25,6 +24,7 @@ import {
   readTrackRect,
   sameProgressSnapshot,
   type TouchScrubSensitivityTier,
+  type VodEndTimeDisplayMode,
 } from './vod-progress-helpers';
 
 export { formatPlaybackPosition };
@@ -40,9 +40,7 @@ export interface VodProgressBarProps {
   readonly previewPositionMs?: number | undefined;
   readonly dimmed?: boolean;
   readonly chapters?: readonly ChapterInfo[] | undefined;
-  readonly timeDisplayMode?: OsdTimeDisplayMode | undefined;
-  readonly playbackSpeed?: number | undefined;
-  readonly wallClock?: (() => number) | undefined;
+  readonly timeDisplayMode?: VodEndTimeDisplayMode | undefined;
   readonly i18n?: AppI18n | undefined;
   readonly onCycleTimeDisplayMode?: (() => void) | undefined;
   readonly onFineScrubHaptic?: ((kind: 'tier' | 'origin') => void) | undefined;
@@ -52,7 +50,7 @@ export interface VodProgressBarProps {
 
 /**
  * Flagship Minimalist Cinema VOD scrubber (`3px` resting -> `5px` hover/drag/TV-focus) flanked by
- * split left/right tabular timestamps (`Total` / `-Remaining` / `Ends at` `#160`), crisp chapter
+ * split left/right tabular timestamps (elapsed left, remaining/total right `#507`), crisp chapter
  * marker dots (`#118`), floating timecode + chapter pill, and touch fine-scrubbing zoom (`#355`).
  */
 export function VodProgressBar({
@@ -65,9 +63,7 @@ export function VodProgressBar({
   previewPositionMs,
   dimmed = false,
   chapters,
-  timeDisplayMode = 'total',
-  playbackSpeed = 1,
-  wallClock = Date.now,
+  timeDisplayMode = 'remaining',
   i18n,
   onCycleTimeDisplayMode,
   onFineScrubHaptic,
@@ -198,28 +194,17 @@ export function VodProgressBar({
   const hoverPillLeftPct =
     pillRatio !== null ? Math.max(8, Math.min(92, Math.round(pillRatio * 1000) / 10)) : 50;
 
-  const nowWallMs = wallClock();
-  const endTimestampText =
-    i18n !== undefined
-      ? formatVodEndTimestamp(
-          snapshot.positionMs,
-          snapshot.durationMs,
-          playbackSpeed,
-          timeDisplayMode,
-          nowWallMs,
-          i18n,
-        )
-      : snapshot.hasDuration && snapshot.durationMs !== undefined
-        ? formatPlaybackPosition(snapshot.durationMs)
-        : '--:--';
+  const endTimestampText = formatVodEndTimestamp(
+    snapshot.positionMs,
+    snapshot.durationMs,
+    timeDisplayMode,
+  );
   const endTimestampA11yLabel =
     i18n !== undefined
       ? formatVodEndAccessibilityLabel(
           snapshot.positionMs,
           snapshot.durationMs,
-          playbackSpeed,
           timeDisplayMode,
-          nowWallMs,
           i18n,
         )
       : endTimestampText;
@@ -500,7 +485,7 @@ export function VodProgressBar({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  row: { flexDirection: 'row', direction: 'ltr', alignItems: 'center', gap: 12 },
   trackHitBox: {
     position: 'relative',
     flex: 1,

@@ -1,5 +1,5 @@
 import type { LiveVariantOption, NowNextEntry } from '@elv/data';
-import type { AndroidDecoderMode, DeinterlaceMode, OsdTimeDisplayMode } from '@elv/domain';
+import type { AndroidDecoderMode, DeinterlaceMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type {
   ChapterInfo,
@@ -22,6 +22,7 @@ import { PlayerSettingsSheet, type PlayerSettingsSheetProps } from './PlayerSett
 import type { SleepTimerSnapshot } from './sleep-timer';
 import { TrackPickerModal } from './TrackPickerModal';
 import type { usePlayerControls } from './usePlayerControls';
+import type { VodEndTimeDisplayMode } from './vod-progress-math';
 
 /** Inputs for {@link buildPlayerOverlayNodes}. */
 export interface BuildPlayerOverlayNodesInput {
@@ -62,7 +63,7 @@ export interface BuildPlayerOverlayNodesInput {
   readonly togglePitchLock: (() => void) | undefined;
   readonly activeAudioNorm: boolean;
   readonly toggleAudioNormalization: (() => void) | undefined;
-  readonly timeDisplayMode: OsdTimeDisplayMode;
+  readonly timeDisplayMode: VodEndTimeDisplayMode;
   readonly handleCycleTimeDisplayMode: () => void;
   readonly handleSelectChapter: (startMs: number) => void;
   readonly sleepTimer: SleepTimerSnapshot;

@@ -258,7 +258,7 @@ describe('Player ergonomics (#296, #297, #212)', () => {
       // Left/Right traps horizontally into scrub preview and commits on key-up (never jumps to OSD buttons)
       await act(async () => tv.keys.down(KEY_RIGHT));
       expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('0:50');
-      expect(screen.getByTestId('player-progress-time')).toHaveTextContent('3:20');
+      expect(screen.getByTestId('player-progress-time')).toHaveTextContent('2:30');
       expect(tv.engine.commands.some((c) => c.name === 'seek')).toBe(false);
       await act(async () => tv.keys.up(KEY_RIGHT));
       expect(tv.engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(50_000);
@@ -634,7 +634,7 @@ describe('Player ergonomics (#296, #297, #212)', () => {
     // Start scrub preview (key down without release) -> autoHideOsdMs (500ms) must NOT hide OSD while scrubbing
     await act(async () => tv.keys.down(KEY_RIGHT));
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('0:50');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('3:20');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('2:30');
     await act(async () => tv.manual.advance(600));
     expect(screen.getByTestId('player-osd')).toBeTruthy();
 

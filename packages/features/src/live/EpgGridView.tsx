@@ -535,6 +535,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
         jumpHighlighted={!epgData.isAtLiveWindow}
         showClock={epgShowClock}
         nowMs={activeNowMs}
+        nowLineRatio={nowLineRatio}
         focusedButton={rulerFocusedButton}
         onPanEarlier={cursor.handlePanEarlier}
         onJumpToLive={cursor.handleJumpToLive}

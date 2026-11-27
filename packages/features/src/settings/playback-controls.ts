@@ -8,7 +8,6 @@ import {
   type ExternalPlayerMode,
   type NightModeDrcPreset,
   normalizeAudioPassthroughCodecs,
-  type OsdTimeDisplayMode,
   type SeekStepSecPref,
 } from '@elv/domain';
 import type { AppI18n, MessageId } from '@elv/i18n';
@@ -174,20 +173,6 @@ const AUDIO_CHANNEL_LAYOUT_OPTIONS: ReadonlyArray<{
   },
 ];
 
-const OSD_TIME_MODE_OPTIONS: ReadonlyArray<{
-  readonly value: OsdTimeDisplayMode;
-  readonly focusId: PlaybackFocusId;
-  readonly testID: string;
-}> = [
-  { value: 'total', focusId: 'osd-time-total', testID: 'settings-playback-osd-time-total' },
-  {
-    value: 'remaining',
-    focusId: 'osd-time-remaining',
-    testID: 'settings-playback-osd-time-remaining',
-  },
-  { value: 'endsAt', focusId: 'osd-time-endsAt', testID: 'settings-playback-osd-time-endsAt' },
-];
-
 const EXTERNAL_PLAYER_MODE_OPTIONS: ReadonlyArray<{
   readonly value: ExternalPlayerMode;
   readonly focusId: PlaybackFocusId;
@@ -251,17 +236,6 @@ export function buildPlaybackChipOptions(i18n: AppI18n) {
     nightModeDrcOptions: mapLabeled(NIGHT_MODE_DRC_OPTIONS),
     externalPlayerModeOptions: mapLabeled(EXTERNAL_PLAYER_MODE_OPTIONS),
     audioChannelLayoutOptions,
-    osdTimeOptions: OSD_TIME_MODE_OPTIONS.map((opt) => ({
-      value: opt.value,
-      label:
-        opt.value === 'total'
-          ? i18n.t('player.totalDuration')
-          : opt.value === 'remaining'
-            ? i18n.t('player.remainingTime')
-            : i18n.t('player.endsAt', { time: 'HH:MM' }),
-      focusId: opt.focusId,
-      testID: opt.testID,
-    })),
   };
 }
 
@@ -294,11 +268,6 @@ export function activatePlaybackControl(
   const drcOpt = NIGHT_MODE_DRC_OPTIONS.find((o) => o.focusId === controlId);
   if (drcOpt) {
     void preferences.updatePreferences({ nightModeDrc: drcOpt.value });
-    return;
-  }
-  const osdTimeOpt = OSD_TIME_MODE_OPTIONS.find((o) => o.focusId === controlId);
-  if (osdTimeOpt) {
-    void preferences.updatePreferences({ osdTimeDisplayMode: osdTimeOpt.value });
     return;
   }
   if (controlId === 'toggle-auto-play-next') {

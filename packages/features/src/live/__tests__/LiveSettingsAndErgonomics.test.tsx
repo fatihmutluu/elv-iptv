@@ -272,6 +272,7 @@ describe('Live TV Settings Wiring, Multi-Source Badges, Two-Step Preview & Clean
       expect(screen.getByTestId('live-epg-view')).toBeTruthy();
       expect(screen.getByTestId('epg-tick-11')).toBeTruthy();
     });
+    expect(screen.getByTestId('epg-live-clock-badge')).toBeTruthy();
     expect(screen.getByTestId('epg-live-clock')).toHaveTextContent(formatClockTime(NOW_MS));
 
     // Slot 1 on row 0 is upcoming ("Premier League Football") -> sports genre tint (successColor)
@@ -294,6 +295,7 @@ describe('Live TV Settings Wiring, Multi-Source Badges, Two-Step Preview & Clean
       expect(screen.getByTestId('epg-cell-0-1')).toBeTruthy();
     });
     expect(screen.queryByTestId('epg-tick-4')).toBeNull();
+    expect(screen.queryByTestId('epg-live-clock-badge')).toBeNull();
     expect(screen.queryByTestId('epg-live-clock')).toBeNull();
     const plainStyle = StyleSheet.flatten(screen.getByTestId('epg-cell-0-1').props.style);
     expect(plainStyle.borderLeftColor).not.toBe(theme.colors.successColor);

@@ -79,9 +79,6 @@ export type DeinterlaceMode = (typeof DEINTERLACE_MODES)[number];
 /** User-selectable default subtitle activation mode (`#393`, `#401`). */
 export type SubtitleModePref = 'default' | 'smart' | 'onlyForced' | 'always' | 'off';
 
-/** User-selectable OSD end-timestamp display mode (`#160`). */
-export type OsdTimeDisplayMode = 'total' | 'remaining' | 'endsAt';
-
 /** User-selectable sleep timer expiration action (`#160`). */
 export type SleepTimerAction = 'stop' | 'pause';
 
@@ -149,7 +146,6 @@ export interface ExtendedPreferencesFields
   readonly subtitleMode: SubtitleModePref;
   readonly seekStepSec: SeekStepSecPref;
   readonly defaultResizeMode: DefaultResizeModePref;
-  readonly osdTimeDisplayMode: OsdTimeDisplayMode;
   readonly oledScreensaverTimeoutMin: number;
   readonly stillWatchingTimeoutMin: number;
   readonly sleepTimerDefaultAction: SleepTimerAction;
@@ -201,7 +197,6 @@ const SUBTITLE_MODES: readonly SubtitleModePref[] = [
   'always',
   'off',
 ];
-const OSD_TIME_DISPLAY_MODES: readonly OsdTimeDisplayMode[] = ['total', 'remaining', 'endsAt'];
 const SLEEP_TIMER_ACTIONS: readonly SleepTimerAction[] = ['stop', 'pause'];
 const SEEK_STEP_SECS: readonly SeekStepSecPref[] = [5, 10, 15, 30];
 const DEFAULT_RESIZE_MODES: readonly DefaultResizeModePref[] = ['fit', 'fill', 'stretch'];
@@ -289,10 +284,6 @@ function normalizeSubtitleModePref(value: unknown, fallback: SubtitleModePref): 
   return typeof value === 'string' && (SUBTITLE_MODES as readonly string[]).includes(value)
     ? (value as SubtitleModePref)
     : fallback;
-}
-
-function isOsdTimeDisplayMode(value: unknown): value is OsdTimeDisplayMode {
-  return typeof value === 'string' && (OSD_TIME_DISPLAY_MODES as readonly string[]).includes(value);
 }
 
 function isSleepTimerAction(value: unknown): value is SleepTimerAction {
@@ -417,9 +408,6 @@ export function parseExtendedPreferences(
     defaultResizeMode: isDefaultResizeModePref(parsed.defaultResizeMode)
       ? parsed.defaultResizeMode
       : defaults.defaultResizeMode,
-    osdTimeDisplayMode: isOsdTimeDisplayMode(parsed.osdTimeDisplayMode)
-      ? parsed.osdTimeDisplayMode
-      : defaults.osdTimeDisplayMode,
     oledScreensaverTimeoutMin: clampTimeoutMin(
       parsed.oledScreensaverTimeoutMin,
       MAX_OLED_SCREENSAVER_MIN,
@@ -537,9 +525,6 @@ export function serializeExtendedPreferences(
     defaultResizeMode: isDefaultResizeModePref(snapshot.defaultResizeMode)
       ? snapshot.defaultResizeMode
       : defaults.defaultResizeMode,
-    osdTimeDisplayMode: isOsdTimeDisplayMode(snapshot.osdTimeDisplayMode)
-      ? snapshot.osdTimeDisplayMode
-      : defaults.osdTimeDisplayMode,
     oledScreensaverTimeoutMin: clampTimeoutMin(
       snapshot.oledScreensaverTimeoutMin,
       MAX_OLED_SCREENSAVER_MIN,
@@ -655,9 +640,6 @@ export function mergeExtendedPreferences(
     defaultResizeMode: isDefaultResizeModePref(patch.defaultResizeMode)
       ? patch.defaultResizeMode
       : base.defaultResizeMode,
-    osdTimeDisplayMode: isOsdTimeDisplayMode(patch.osdTimeDisplayMode)
-      ? patch.osdTimeDisplayMode
-      : base.osdTimeDisplayMode,
     oledScreensaverTimeoutMin: clampTimeoutMin(
       patch.oledScreensaverTimeoutMin,
       MAX_OLED_SCREENSAVER_MIN,

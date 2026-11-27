@@ -34,7 +34,6 @@ import {
   useDownloads,
   useRouteActive,
 } from '../shared';
-import { CollectionPickerOverlay } from '../shared/CollectionPickerOverlay';
 import { DetailCastStrip } from './DetailCastStrip';
 import { DetailEpisodes } from './DetailEpisodes';
 import { DetailHero, type DetailHeroDownloadState, type DetailHeroFocusSlot } from './DetailHero';
@@ -117,11 +116,9 @@ export function DetailScreen({
     vodEnrichmentEnabled,
   });
   const [selectedVersionKey, setSelectedVersionKey] = useState<string | null>(null);
-  const [collectionPickerOpen, setCollectionPickerOpen] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset user version override and collection picker on title change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset user version override on title change
   useEffect(() => {
     setSelectedVersionKey(null);
-    setCollectionPickerOpen(false);
   }, [target.itemKey]);
   const activeVersion = useMemo(() => {
     if (data.versions.length <= 1) return undefined;
@@ -260,7 +257,6 @@ export function DetailScreen({
   );
 
   const seasons = data.seasonsState.kind === 'ready' ? data.seasonsState.seasons : [];
-  const hasCollections = typeof catalog.listCollections === 'function';
   const showMovieDownload = target.kind === 'movie' && downloads.supported;
   const activeMovieKey = activeVersion?.key ?? target.itemKey;
   const activeMovieTitle = activeVersion?.title ?? data.title;
@@ -427,7 +423,7 @@ export function DetailScreen({
   );
 
   const heroActionSlots = useMemo<
-    readonly ('mylist' | 'like' | 'dislike' | 'watched' | 'download' | 'collections')[]
+    readonly ('mylist' | 'like' | 'dislike' | 'watched' | 'download')[]
   >(
     () => [
       'mylist',
@@ -435,13 +431,10 @@ export function DetailScreen({
       'dislike',
       ...(target.kind === 'movie' ? (['watched'] as const) : []),
       ...(showMovieDownload ? (['download'] as const) : []),
-      ...(hasCollections ? (['collections'] as const) : []),
     ],
-    [hasCollections, showMovieDownload, target.kind],
+    [showMovieDownload, target.kind],
   );
   const heroActionCount = heroActionSlots.length;
-  const handleOpenCollections = useCallback(() => setCollectionPickerOpen(true), []);
-  const handleCloseCollections = useCallback(() => setCollectionPickerOpen(false), []);
 
   const {
     chunks: episodeChunks,
@@ -494,7 +487,6 @@ export function DetailScreen({
         else if (slot === 'dislike') void data.toggleRating('dislike');
         else if (slot === 'watched') void data.toggleWatched();
         else if (slot === 'download') handlePressMovieDownload();
-        else if (slot === 'collections') setCollectionPickerOpen(true);
         return;
       }
       if (rowId === 'hero-play') {
@@ -634,7 +626,7 @@ export function DetailScreen({
 
   return (
     <View testID="detail-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
-      {isTv && isActiveScope && !collectionPickerOpen && !contextMenu.isOpen ? (
+      {isTv && isActiveScope && !contextMenu.isOpen ? (
         <DetailTvKeyBridge onEvent={handleTvKeyWithSheet} />
       ) : null}
 
@@ -658,8 +650,6 @@ export function DetailScreen({
           plot={data.plot}
           genres={data.genres}
           isEnriched={data.isEnriched}
-          collectionCount={data.collectionIds.length}
-          {...(hasCollections ? { onOpenCollections: handleOpenCollections } : {})}
           {...(movieDownloadState !== undefined
             ? {
                 downloadState: movieDownloadState,
@@ -765,16 +755,6 @@ export function DetailScreen({
         synopsis={extras.trimmedPlot}
         isTv={isTv}
         onDismiss={extras.dismissSynopsis}
-      />
-
-      <CollectionPickerOverlay
-        visible={collectionPickerOpen}
-        catalog={catalog}
-        itemKey={target.itemKey}
-        itemKind={target.kind}
-        itemTitle={data.title}
-        onMutated={data.setCollectionIds}
-        onClose={handleCloseCollections}
       />
     </View>
   );

@@ -2,21 +2,10 @@ import { type CatalogService, createCatalogService, openCatalog } from '@elv/dat
 import { countingScheduler, memorySecrets, testDb } from '@elv/data/testing';
 import { elvError, err, type HttpClient, type HttpResponse, ok } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
-import {
-  type AndroidKeyEvent,
-  type AndroidKeySource,
-  I18nProvider,
-  RemoteKeysProvider,
-  ThemeProvider,
-  type ViewportOverride,
-  ViewportProvider,
-} from '@elv/ui-kit';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Platform } from 'react-native';
+import { I18nProvider, ThemeProvider, type ViewportOverride, ViewportProvider } from '@elv/ui-kit';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { DetailTarget } from '../../shared';
 import { HomeScreen } from '../HomeScreen';
-
-const KEYCODE_BACK = 4;
 
 function jsonResponse(payload: unknown): HttpResponse {
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
@@ -113,10 +102,9 @@ function renderHome(
   },
   opts: {
     viewport?: ViewportOverride;
-    androidSource?: AndroidKeySource;
   } = {},
 ) {
-  const content = (
+  return render(
     <ViewportProvider
       value={
         opts.viewport ?? {
@@ -141,20 +129,16 @@ function renderHome(
           />
         </I18nProvider>
       </ThemeProvider>
-    </ViewportProvider>
+    </ViewportProvider>,
   );
-  if (opts.androidSource) {
-    return render(<RemoteKeysProvider android={opts.androidSource}>{content}</RemoteKeysProvider>);
-  }
-  return render(content);
 }
 
-describe('Wave F5B HomeScreen Collections & CollectionManagerOverlay (#403)', () => {
+describe('Wave F5B / Wave P8 HomeScreen Collections (#403, #508)', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('renders custom collection rails on Home and manages create, rename, reorder, inspect, item reorder/remove, open detail, and delete inline (zero Modal)', async () => {
+  it('renders non-empty custom collection rails on Home, hides empty collections, and omits Manage collections button (#508)', async () => {
     const env = await openCatalogWithMovies();
     const onOpenDetail = jest.fn();
     try {
@@ -185,90 +169,14 @@ describe('Wave F5B HomeScreen Collections & CollectionManagerOverlay (#403)', ()
       });
       expect(screen.queryByTestId(`home-rail-collection-${c2.value.id}`)).toBeNull();
 
+      // Home "Manage collections" button and overlay are completely removed (curation lives in Library)
+      expect(screen.queryByTestId('home-collections-manage-btn')).toBeNull();
+      expect(screen.queryByTestId('home-collections-header')).toBeNull();
+      expect(screen.queryByTestId('collection-manager-overlay')).toBeNull();
+
       // Clicking a collection rail poster opens DetailScreen
       await fireEvent.press(screen.getByTestId(`home-collection-${c1.value.id}-item-0`));
       expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ itemKey: m1.key }));
-
-      // Open CollectionManagerOverlay inline (zero RN <Modal>)
-      await fireEvent.press(screen.getByTestId('home-collections-manage-btn'));
-      await waitFor(() => {
-        expect(screen.getByTestId('collection-manager-overlay')).toBeTruthy();
-        expect(screen.getByTestId(`collection-manager-row-${c1.value.id}`)).toBeTruthy();
-        expect(screen.getByTestId(`collection-manager-row-${c2.value.id}`)).toBeTruthy();
-      });
-      expect(JSON.stringify(view.toJSON())).not.toContain('"type":"Modal"');
-
-      // Rename c1 inline
-      await fireEvent.press(screen.getByTestId(`collection-manager-rename-${c1.value.id}`));
-      await fireEvent.changeText(
-        screen.getByTestId(`collection-manager-rename-input-${c1.value.id}`),
-        'Sci-Fi Vault',
-      );
-      await fireEvent.press(screen.getByTestId(`collection-manager-save-${c1.value.id}`));
-      await waitFor(() => {
-        expect(screen.getByTestId(`collection-manager-expand-${c1.value.id}`)).toHaveTextContent(
-          /Sci-Fi Vault/,
-        );
-      });
-
-      // Reorder c2 up above c1
-      await fireEvent.press(screen.getByTestId(`collection-manager-move-up-${c2.value.id}`));
-      await waitFor(async () => {
-        const listed = await env.catalog.listCollections?.();
-        expect(listed?.map((c) => c.id)).toEqual([c2.value.id, c1.value.id]);
-      });
-
-      // Expand c1, reorder items (move m2 up), remove m1
-      await fireEvent.press(screen.getByTestId(`collection-manager-expand-${c1.value.id}`));
-      await waitFor(() => {
-        expect(screen.getByTestId(`collection-manager-item-${c1.value.id}-${m1.key}`)).toBeTruthy();
-        expect(screen.getByTestId(`collection-manager-item-${c1.value.id}-${m2.key}`)).toBeTruthy();
-      });
-      await fireEvent.press(
-        screen.getByTestId(`collection-manager-item-up-${c1.value.id}-${m2.key}`),
-      );
-      await waitFor(async () => {
-        const items = await env.catalog.listCollectionItems?.(c1.value.id);
-        expect(items?.map((i) => i.key)).toEqual([m2.key, m1.key]);
-      });
-
-      await fireEvent.press(
-        screen.getByTestId(`collection-manager-item-remove-${c1.value.id}-${m1.key}`),
-      );
-      await waitFor(() => {
-        expect(screen.queryByTestId(`collection-manager-item-${c1.value.id}-${m1.key}`)).toBeNull();
-      });
-
-      // Open remaining item m2 from manager -> closes overlay and opens Detail
-      onOpenDetail.mockClear();
-      await fireEvent.press(
-        screen.getByTestId(`collection-manager-open-item-${c1.value.id}-${m2.key}`),
-      );
-      expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ itemKey: m2.key }));
-      await waitFor(() => {
-        expect(screen.queryByTestId('collection-manager-overlay')).toBeNull();
-      });
-
-      // Re-open manager, create a collection, then delete c2
-      await fireEvent.press(screen.getByTestId('home-collections-manage-btn'));
-      await waitFor(() => {
-        expect(screen.getByTestId('collection-manager-overlay')).toBeTruthy();
-      });
-      await fireEvent.changeText(screen.getByTestId('collection-manager-new-input'), 'Classics');
-      await fireEvent.press(screen.getByTestId('collection-manager-create-btn'));
-      await waitFor(() => {
-        expect(screen.getByText('Classics')).toBeTruthy();
-      });
-
-      await fireEvent.press(screen.getByTestId(`collection-manager-delete-${c2.value.id}`));
-      await waitFor(() => {
-        expect(screen.queryByTestId(`collection-manager-row-${c2.value.id}`)).toBeNull();
-      });
-
-      await fireEvent.press(screen.getByTestId('collection-manager-close'));
-      await waitFor(() => {
-        expect(screen.queryByTestId('collection-manager-overlay')).toBeNull();
-      });
 
       await view.unmount();
     } finally {
@@ -276,53 +184,19 @@ describe('Wave F5B HomeScreen Collections & CollectionManagerOverlay (#403)', ()
     }
   });
 
-  it('closes CollectionManagerOverlay cleanly on TV Back without crashing when collections are empty', async () => {
-    jest.replaceProperty(Platform, 'OS', 'android');
-    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
-
-    let keyListener: ((e: AndroidKeyEvent) => void) | undefined;
-    const androidSource: AndroidKeySource = {
-      addListener: (l) => {
-        keyListener = l;
-        return {
-          remove: () => {
-            keyListener = undefined;
-          },
-        };
-      },
-    };
+  it('renders nothing for Collections section when no non-empty collections exist (#508)', async () => {
     const env = await openCatalogWithMovies();
     try {
-      const view = await renderHome(
-        { catalog: env.catalog, sources: env.sources },
-        {
-          viewport: {
-            formFactor: 'tv',
-            orientation: 'landscape',
-            inputModality: 'tv',
-            width: 1920,
-            height: 1080,
-          },
-          androidSource,
-        },
-      );
-
-      await waitFor(() => {
-        expect(screen.getByTestId('home-collections-manage-btn')).toBeTruthy();
-      });
-      await fireEvent.press(screen.getByTestId('home-collections-manage-btn'));
-      await waitFor(() => {
-        expect(screen.getByTestId('collection-manager-overlay')).toBeTruthy();
-      });
-
-      await act(async () => {
-        keyListener?.({ action: 'down', keyCode: KEYCODE_BACK, canceled: false, ageMs: 0 });
-        keyListener?.({ action: 'up', keyCode: KEYCODE_BACK, canceled: false, ageMs: 10 });
+      const view = await renderHome({
+        catalog: env.catalog,
+        sources: env.sources,
       });
 
       await waitFor(() => {
-        expect(screen.queryByTestId('collection-manager-overlay')).toBeNull();
+        expect(screen.getByTestId('home-rail-movies')).toBeTruthy();
       });
+      expect(screen.queryByTestId('home-collections-manage-btn')).toBeNull();
+      expect(screen.queryByTestId('home-collections-header')).toBeNull();
       await view.unmount();
     } finally {
       await env.cleanup();

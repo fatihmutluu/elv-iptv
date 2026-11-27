@@ -195,6 +195,7 @@ export function renderCatalog(
               : {})}
             {...(props.onFocusTopNav !== undefined ? { onFocusTopNav: props.onFocusTopNav } : {})}
             {...(props.isActiveScope !== undefined ? { isActiveScope: props.isActiveScope } : {})}
+            {...(props.showElvPicks !== undefined ? { showElvPicks: props.showElvPicks } : {})}
           />
         </I18nProvider>
       </ThemeProvider>

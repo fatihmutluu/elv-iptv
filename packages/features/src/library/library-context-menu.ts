@@ -49,6 +49,12 @@ export function buildLibraryLiveMenuItems(params: {
   return items;
 }
 
+/** Minimal collection descriptor passed to {@link buildLibraryVodMenuItems}. */
+export interface LibraryMenuCollectionOption {
+  readonly id: string;
+  readonly name: string;
+}
+
 /** Builds right-click / long-press context menu actions for a Movie or Series card in Library. */
 export function buildLibraryVodMenuItems(params: {
   readonly t: AppI18n['t'];
@@ -57,6 +63,8 @@ export function buildLibraryVodMenuItems(params: {
   readonly ratingValue: RatingValue | null;
   readonly isWatched: boolean;
   readonly canDownload?: boolean;
+  readonly collections?: readonly LibraryMenuCollectionOption[];
+  readonly currentCollectionId?: string | null;
   readonly onPlay?: (() => void) | undefined;
   readonly onOpenDetail: () => void;
   readonly onToggleFavorite: () => void;
@@ -64,6 +72,8 @@ export function buildLibraryVodMenuItems(params: {
   readonly onToggleDislike: () => void;
   readonly onToggleWatched?: (() => void) | undefined;
   readonly onDownload?: (() => void) | undefined;
+  readonly onMoveToCollection?: ((targetCollectionId: string) => void) | undefined;
+  readonly onRemoveFromCollection?: ((collectionId: string) => void) | undefined;
 }): ContextMenuItem[] {
   const {
     t,
@@ -72,6 +82,8 @@ export function buildLibraryVodMenuItems(params: {
     ratingValue,
     isWatched,
     canDownload,
+    collections,
+    currentCollectionId,
     onPlay,
     onOpenDetail,
     onToggleFavorite,
@@ -79,6 +91,8 @@ export function buildLibraryVodMenuItems(params: {
     onToggleDislike,
     onToggleWatched,
     onDownload,
+    onMoveToCollection,
+    onRemoveFromCollection,
   } = params;
 
   const items: ContextMenuItem[] = [];
@@ -137,6 +151,33 @@ export function buildLibraryVodMenuItems(params: {
       icon: 'download',
       testID: 'library-context-download',
       onSelect: onDownload,
+    });
+  }
+  if (collections !== undefined && onMoveToCollection !== undefined) {
+    for (const col of collections) {
+      if (col.id === currentCollectionId) continue;
+      items.push({
+        id: `move-to-collection-${col.id}`,
+        label: t('library.collections.moveToNamed', { name: col.name }),
+        icon: 'list',
+        testID: `library-context-move-collection-${col.id}`,
+        onSelect: () => onMoveToCollection(col.id),
+      });
+    }
+  }
+  if (
+    currentCollectionId !== undefined &&
+    currentCollectionId !== null &&
+    currentCollectionId.length > 0 &&
+    onRemoveFromCollection !== undefined
+  ) {
+    items.push({
+      id: 'remove-from-collection',
+      label: t('library.collections.removeFrom'),
+      icon: 'close',
+      destructive: true,
+      testID: 'library-context-remove-collection',
+      onSelect: () => onRemoveFromCollection(currentCollectionId),
     });
   }
   return items;

@@ -317,4 +317,117 @@ describe('Wave P4 HomeScreen: unified Live TV rail, custom layout & context menu
       ).toBeNull();
     });
   });
+
+  it('excludes Live TV favorites from Home My List and renders default section order ending with My List -> Collections (#508)', async () => {
+    const seriesCat: CategoryRow = {
+      id: 'cat-series',
+      sourceId: 'src-1',
+      kind: 'series',
+      name: 'Series',
+      itemCount: 1,
+      position: 0,
+    };
+    const favRows: FavoriteRow[] = [
+      {
+        profileId: 'default',
+        sourceId: 'src-1',
+        itemKey: 'x:src-1:live:fav-1',
+        kind: 'live',
+        title: 'Fav Channel',
+        logo: null,
+        year: null,
+        rating: null,
+        addedAt: 200,
+      },
+      {
+        profileId: 'default',
+        sourceId: 'src-1',
+        itemKey: 'x:src-1:movie:fav-2',
+        kind: 'movie',
+        title: 'Fav Movie',
+        logo: null,
+        year: 2024,
+        rating: 8.5,
+        addedAt: 100,
+      },
+    ];
+    const base = makeCatalog();
+    const catalog = makeCatalog({
+      categories: jest.fn(async (srcId, kind) => {
+        if (kind === 'series') return [seriesCat];
+        return base.categories(srcId, kind);
+      }),
+      items: jest.fn(async (catId, offset, limit, opts) => {
+        if (catId === 'cat-series') {
+          return [
+            makeItem({ id: 9, key: 'x:src-1:series:s-1', kind: 'series', name: 'Series One' }),
+          ];
+        }
+        return base.items(catId, offset, limit, opts);
+      }),
+      listFavorites: jest.fn(async () => favRows),
+      listFavoriteKeys: jest.fn(async () => favRows.map((f) => f.itemKey)),
+      listCollections: jest.fn(async () => [
+        {
+          id: 'c1',
+          profileId: 'default',
+          name: 'Curated',
+          sortOrder: 0,
+          itemCount: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ]),
+      listCollectionItems: jest.fn(async () => [
+        makeItem({ id: 2, key: 'x:src-1:movie:m-1', kind: 'movie', name: 'Movie One' }),
+      ]),
+    });
+
+    const view = await render(
+      <I18nProvider i18n={createAppI18n('en')}>
+        <ThemeProvider reduceMotion>
+          <ViewportProvider value={{ width: 1280, height: 720, formFactor: 'desktop' }}>
+            <HomeScreen
+              catalog={catalog}
+              sources={[SOURCE]}
+              refreshToken={0}
+              onPlay={jest.fn()}
+              onOpenTab={jest.fn()}
+              onOpenSources={jest.fn()}
+            />
+          </ViewportProvider>
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('home-rail-continue')).toBeTruthy();
+      expect(screen.getByTestId('home-rail-live')).toBeTruthy();
+      expect(screen.getByTestId('home-rail-movies')).toBeTruthy();
+      expect(screen.getByTestId('home-rail-series')).toBeTruthy();
+      expect(screen.getByTestId('home-rail-mylist')).toBeTruthy();
+      expect(screen.getByTestId('home-rail-collection-c1')).toBeTruthy();
+    });
+
+    // Live TV favorite is excluded from Home My List (only Fav Movie appears)
+    expect(screen.getByTestId('home-mylist-item-0').props.accessibilityLabel).toContain(
+      'Fav Movie',
+    );
+    expect(screen.queryByTestId('home-mylist-item-1')).toBeNull();
+    expect(screen.queryByTestId('home-collections-manage-btn')).toBeNull();
+
+    // Default render order: continue -> live -> movies -> series -> mylist -> collection-c1
+    const serialized = JSON.stringify(view.toJSON());
+    const idxContinue = serialized.indexOf('"home-rail-continue"');
+    const idxLive = serialized.indexOf('"home-rail-live"');
+    const idxMovies = serialized.indexOf('"home-rail-movies"');
+    const idxSeries = serialized.indexOf('"home-rail-series"');
+    const idxMyList = serialized.indexOf('"home-rail-mylist"');
+    const idxCollection = serialized.indexOf('"home-rail-collection-c1"');
+    expect(idxContinue).toBeLessThan(idxLive);
+    expect(idxLive).toBeLessThan(idxMovies);
+    expect(idxMovies).toBeLessThan(idxSeries);
+    expect(idxSeries).toBeLessThan(idxMyList);
+    expect(idxMyList).toBeLessThan(idxCollection);
+  });
 });

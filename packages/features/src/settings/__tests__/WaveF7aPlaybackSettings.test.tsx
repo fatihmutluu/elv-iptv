@@ -226,7 +226,7 @@ describe('Wave F7A / P7 Playback Settings UI (#115, #213)', () => {
       });
     };
 
-    // showNightModeDrc=false: row 7 should be osd-time-* (skipping Night-Mode DRC)
+    // showNightModeDrc=false: row 7 should be toggle-auto-play-next (skipping Night-Mode DRC)
     const storeOff = createMemoryPreferencesStore();
     const viewOff = await render(
       <Harness
@@ -240,16 +240,15 @@ describe('Wave F7A / P7 Playback Settings UI (#115, #213)', () => {
 
     expect(screen.queryByTestId('settings-playback-night-drc-off')).toBeNull();
     await pressKey(KEYCODE_DPAD_RIGHT);
-    // Rows 0..2: seek, aspect, buffer; Rows 3..6: filterSdh, preferHevcDv, pitchLock, audioNorm -> Row 7: osd-time-*
+    // Rows 0..2: seek, aspect, buffer; Rows 3..6: filterSdh, preferHevcDv, pitchLock, audioNorm -> Row 7: toggle-auto-play-next
     for (let i = 0; i < 7; i += 1) {
       await pressKey(KEYCODE_DPAD_DOWN);
     }
-    await pressKey(KEYCODE_DPAD_RIGHT);
     await pressKey(KEYCODE_DPAD_CENTER);
     await waitFor(async () => {
       const loaded = await storeOff.load();
       expect(loaded.nightModeDrc).toBe('off');
-      expect(loaded.osdTimeDisplayMode).toBe('remaining');
+      expect(loaded.autoPlayNextEpisode).toBe(false);
     });
     await viewOff.unmount();
 

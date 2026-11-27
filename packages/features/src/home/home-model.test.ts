@@ -720,4 +720,60 @@ describe('home-model', () => {
     expect(inProgressMenu[0]?.label).toBe('Resume');
     expect(inProgressMenu.map((m) => m.id)).toEqual(['resume', 'details']);
   });
+
+  it('excludes Live TV channels from Home My List before applying the 24-item slice (#508)', () => {
+    const liveFavorites: FavoriteRow[] = Array.from({ length: 26 }, (_, i) => ({
+      profileId: 'default',
+      sourceId: 'src-1',
+      itemKey: `x:src-1:live:${i + 1}`,
+      kind: 'live',
+      title: `Live Channel ${i + 1}`,
+      logo: null,
+      year: null,
+      rating: null,
+      addedAt: 2000 + i,
+      sortOrder: i,
+    }));
+    const vodFavorites: FavoriteRow[] = [
+      {
+        profileId: 'default',
+        sourceId: 'src-1',
+        itemKey: 'x:src-1:movie:77',
+        kind: 'movie',
+        title: 'Dune',
+        logo: null,
+        year: 2021,
+        rating: 8.1,
+        addedAt: 100,
+      },
+      {
+        profileId: 'default',
+        sourceId: 'src-1',
+        itemKey: 'x:src-1:series:88',
+        kind: 'series',
+        title: 'Arcane',
+        logo: null,
+        year: 2021,
+        rating: 9.0,
+        addedAt: 90,
+      },
+    ];
+
+    const sets = buildHomeRailSets({
+      continueWatching: [],
+      liveItems: [],
+      liveCategoryName: null,
+      favorites: [...liveFavorites, ...vodFavorites],
+      movies: [],
+      series: [],
+      progressByKey: new Map(),
+    });
+
+    expect(sets.mylist.map((entry) => entry.itemKey)).toEqual([
+      'x:src-1:movie:77',
+      'x:src-1:series:88',
+    ]);
+    expect(sets.mylist.some((entry) => entry.kind === 'live')).toBe(false);
+    expect(sets.live).toHaveLength(HOME_LIVE_RAIL_LIMIT);
+  });
 });

@@ -40,7 +40,6 @@ import { CatalogEmptyState } from './CatalogChrome';
 import type { CategoryGridAccess, CategoryGridMeta } from './CategoryGridView';
 import { buildCatalogPosterContextMenuItems } from './catalog-context-menu';
 import {
-  collectWatchedCatalogItems,
   computeProgressRatio,
   filterFavoritesForCatalog,
   type GridFocusPosition,
@@ -48,27 +47,16 @@ import {
 } from './catalog-model';
 
 const MY_LIST_LIMIT = 250;
-const WATCHED_LIST_LIMIT = 250;
-const WATCHED_SCAN_LIMIT = 200;
-
-type CatalogWithListWatched = CatalogService & {
-  listWatched?(
-    limit?: number,
-    profileId?: string,
-    opts?: { readonly kind?: 'movie' | 'series'; readonly parentalUnlocked?: boolean },
-  ): Promise<WatchProgressRow[]>;
-};
 
 /** Props of {@link CatalogQuickFilterGrid}. */
 export interface CatalogQuickFilterGridProps {
   readonly kind: 'movie' | 'series';
-  readonly filter: 'mylist' | 'watched';
+  readonly filter: 'mylist' | 'elvPicks';
   readonly catalog: CatalogService;
   readonly refreshToken: number;
   readonly userStateVersion: number;
   readonly layout: CatalogLayoutMetrics;
   readonly safeBottomInset: number;
-  readonly railItemsByCategoryId: ReadonlyMap<string, readonly ItemRow[]>;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
   readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly favoriteKeys: ReadonlySet<string>;
@@ -269,7 +257,8 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
 
 /**
  * Responsive poster grid rendered when the Movies or Series quick filter tab is set to
- * `My List` (`mylist`) or `Watched` (`watched`), with reactive mutation updates and clean empty states.
+ * `My List` (`mylist`) or opt-in `ELV Picks` (`elvPicks`), with reactive mutation updates and
+ * clean empty states (`#508`).
  */
 export function CatalogQuickFilterGrid({
   kind,
@@ -279,7 +268,6 @@ export function CatalogQuickFilterGrid({
   userStateVersion,
   layout,
   safeBottomInset,
-  railItemsByCategoryId,
   progressByKey,
   unplayedBySeriesKey,
   favoriteKeys,
@@ -303,14 +291,9 @@ export function CatalogQuickFilterGrid({
   const [optimisticRemovedFavKeys, setOptimisticRemovedFavKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [watchedRows, setWatchedRows] = useState<readonly WatchProgressRow[] | undefined>(
-    undefined,
-  );
-  const [extraItems, setExtraItems] = useState<readonly ItemRow[]>([]);
   const [extraProgress, setExtraProgress] = useState<ReadonlyMap<string, WatchProgressRow>>(
     () => new Map(),
   );
-  const [watchedLoaded, setWatchedLoaded] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion reload My List on external changes
   useEffect(() => {
@@ -341,67 +324,6 @@ export function CatalogQuickFilterGrid({
         if (!cancelled) {
           setFavoriteRows([]);
           setFavoriteLoaded(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [catalog, filter, kind, refreshToken, userStateVersion]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion reload watched catalog items
-  useEffect(() => {
-    if (filter !== 'watched') return undefined;
-    let cancelled = false;
-    const listWatched = (catalog as CatalogWithListWatched).listWatched;
-    if (typeof listWatched === 'function') {
-      void listWatched
-        .call(catalog, WATCHED_LIST_LIMIT, undefined, { kind })
-        .then((rows) => {
-          if (cancelled) return;
-          setWatchedRows(rows);
-          const prog = new Map<string, WatchProgressRow>();
-          for (const row of rows) {
-            const key = kind === 'series' ? (row.seriesKey ?? row.itemKey) : row.itemKey;
-            if (!prog.has(key)) prog.set(key, row);
-          }
-          setExtraProgress(prog);
-          setWatchedLoaded(true);
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setWatchedRows([]);
-            setWatchedLoaded(true);
-          }
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    setWatchedRows(undefined);
-    if (!catalog.allSourcesItems) {
-      setExtraItems([]);
-      setWatchedLoaded(true);
-      return undefined;
-    }
-    void catalog
-      .allSourcesItems(kind, 0, WATCHED_SCAN_LIMIT)
-      .then(async (rows) => {
-        if (cancelled) return;
-        setExtraItems(rows);
-        const keys = rows.map((r) => r.key);
-        if (keys.length > 0) {
-          const prog = await batchLoadProgressByKeys(catalog, keys).catch(
-            () => new Map<string, WatchProgressRow>(),
-          );
-          if (!cancelled) setExtraProgress(prog);
-        }
-        if (!cancelled) setWatchedLoaded(true);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setExtraItems([]);
-          setWatchedLoaded(true);
         }
       });
     return () => {
@@ -462,27 +384,8 @@ export function CatalogQuickFilterGrid({
         .filter((row) => !optimisticRemovedFavKeys.has(row.itemKey))
         .map((row) => itemRowFromFavorite(row, kind));
     }
-    return collectWatchedCatalogItems({
-      kind,
-      railItemsByCategoryId,
-      ...(watchedRows !== undefined ? { watchedRows } : {}),
-      extraItems,
-      progressByKey: mergedProgress,
-      watchedOverrides,
-      ...(unplayedBySeriesKey !== undefined ? { unplayedBySeriesKey } : {}),
-    });
-  }, [
-    extraItems,
-    favoriteRows,
-    filter,
-    kind,
-    mergedProgress,
-    optimisticRemovedFavKeys,
-    railItemsByCategoryId,
-    unplayedBySeriesKey,
-    watchedOverrides,
-    watchedRows,
-  ]);
+    return [];
+  }, [favoriteRows, filter, kind, optimisticRemovedFavKeys]);
 
   if (gridAccessRef !== undefined) {
     gridAccessRef.current = {
@@ -511,16 +414,14 @@ export function CatalogQuickFilterGrid({
     [i18n],
   );
 
-  const isSettled = filter === 'mylist' ? favoriteLoaded : watchedLoaded;
+  const isSettled = filter === 'mylist' ? favoriteLoaded : true;
   if (isSettled && items.length === 0) {
     return (
       <CatalogEmptyState
-        testID={filter === 'mylist' ? 'catalog-empty-mylist' : 'catalog-empty-watched'}
-        title={i18n.t(
-          filter === 'mylist' ? 'catalog.emptyMyListTitle' : 'catalog.emptyWatchedTitle',
-        )}
+        testID={filter === 'mylist' ? 'catalog-empty-mylist' : 'catalog-empty-elv-picks'}
+        title={i18n.t(filter === 'mylist' ? 'catalog.emptyMyListTitle' : 'catalog.filter.elvPicks')}
         description={i18n.t(
-          filter === 'mylist' ? 'catalog.emptyMyListBody' : 'catalog.emptyWatchedBody',
+          filter === 'mylist' ? 'catalog.emptyMyListBody' : 'browse.emptyCategories',
         )}
         layout={layout}
       />

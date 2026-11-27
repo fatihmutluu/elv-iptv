@@ -38,7 +38,7 @@ describe('CatalogDiscoveryScreen — Quick Filter Tabs & Universal Context Menus
     jest.restoreAllMocks();
   });
 
-  it('switches between All, My List, and Watched tabs and updates reactively on removal', async () => {
+  it('renders All | My List (omitting Watched & hiding ELV Picks unless enabled) and updates My List reactively on removal (#508)', async () => {
     const cat0 = makeCategory(0, { name: 'Sci-Fi', itemCount: 2 });
     const item0 = makeItem(0, 0);
     const item1 = makeItem(0, 1);
@@ -48,13 +48,9 @@ describe('CatalogDiscoveryScreen — Quick Filter Tabs & Universal Context Menus
     const { catalog: baseCatalog } = createMockCatalog({
       categories: [cat0],
       itemsByCategory: new Map([[cat0.id, [item0, item1]]]),
-      progressByKey: new Map([
-        [item1.key, makeProgress(item1.key, { title: item1.name, watched: true })],
-      ]),
     });
 
     const setFavorite = jest.fn(async () => ({ ok: true as const, value: false }));
-    const setWatched = jest.fn(async () => ({ ok: true as const, value: undefined }));
     const listFavorites = jest.fn(async () => [favMovie, favSeries]);
     const listFavoriteKeys = jest.fn(async () => [favMovie.itemKey, favSeries.itemKey]);
     const catalog = {
@@ -62,7 +58,6 @@ describe('CatalogDiscoveryScreen — Quick Filter Tabs & Universal Context Menus
       listFavorites,
       listFavoriteKeys,
       setFavorite,
-      setWatched,
     } as unknown as CatalogService;
 
     const onOpenDetail = jest.fn<void, [DetailTarget]>();
@@ -75,9 +70,10 @@ describe('CatalogDiscoveryScreen — Quick Filter Tabs & Universal Context Menus
     await waitFor(() => {
       expect(screen.getByTestId('catalog-cat-chip-all')).toBeTruthy();
       expect(screen.getByTestId('catalog-filter-mylist')).toBeTruthy();
-      expect(screen.getByTestId('catalog-filter-watched')).toBeTruthy();
       expect(screen.getByTestId('catalog-rail-0-item-0')).toBeTruthy();
     });
+    expect(screen.queryByTestId('catalog-filter-watched')).toBeNull();
+    expect(screen.queryByTestId('catalog-filter-elv-picks')).toBeNull();
 
     // Switch to My List -> shows only movie favorites (excludes series)
     await fireEvent.press(screen.getByTestId('catalog-filter-mylist'));
@@ -103,33 +99,29 @@ describe('CatalogDiscoveryScreen — Quick Filter Tabs & Universal Context Menus
       expect(screen.getByTestId('catalog-empty-mylist')).toBeTruthy();
     });
 
-    // Switch to Watched -> shows item1 (watched=true)
-    await fireEvent.press(screen.getByTestId('catalog-filter-watched'));
-    await waitFor(() => {
-      expect(screen.getByTestId('catalog-quick-filter-grid-watched')).toBeTruthy();
-      expect(screen.getByTestId('catalog-quick-filter-item-0')).toBeTruthy();
-    });
-    expect(screen.getByText(item1.name)).toBeTruthy();
-
-    // Long-press on Watched card -> Mark as unwatched removes it immediately to empty state
-    await fireEvent(screen.getByTestId('catalog-quick-filter-item-0'), 'longPress');
-    await waitFor(() => {
-      expect(screen.getByTestId('context-menu-watched')).toBeTruthy();
-    });
-    await fireEvent.press(screen.getByTestId('context-menu-watched'));
-
-    await waitFor(() => {
-      expect(setWatched).toHaveBeenCalledWith(item1.key, false);
-      expect(screen.getByTestId('catalog-empty-watched')).toBeTruthy();
-    });
-
     // Return to All -> Discovery rails visible again
     await fireEvent.press(screen.getByTestId('catalog-cat-chip-all'));
     await waitFor(() => {
       expect(screen.getByTestId('catalog-rail-0-item-0')).toBeTruthy();
     });
-
     await view.unmount();
+
+    // When showElvPicks is enabled (ELV Mode), ELV Picks tab appears right after My List
+    const elvView = await renderCatalog({
+      catalog,
+      sources: [makeSource()],
+      onOpenDetail,
+      showElvPicks: true,
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('catalog-filter-elv-picks')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('catalog-filter-watched')).toBeNull();
+    await fireEvent.press(screen.getByTestId('catalog-filter-elv-picks'));
+    await waitFor(() => {
+      expect(screen.getByTestId('catalog-empty-elv-picks')).toBeTruthy();
+    });
+    await elvView.unmount();
   });
 
   it('opens Continue Watching context menu to Resume, Remove from Continue Watching, or Mark Watched', async () => {
@@ -264,31 +256,24 @@ describe('CatalogDiscoveryScreen — Quick Filter Tabs & Universal Context Menus
     await view.unmount();
   });
 
-  it('uses catalog.listWatched for Watched tab (P0-3) and supports 2D TV D-pad navigation in quick filter grids (P0-4)', async () => {
+  it('supports 2D TV D-pad navigation in My List quick filter grid and suspends key bridge during context menu (P0-4/P0-5)', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
 
     const cat0 = makeCategory(0, { name: 'Sci-Fi', itemCount: 1 });
     const item0 = makeItem(0, 0);
-    const deepWatched0 = makeProgress('movie:deep-1', {
-      kind: 'movie',
-      title: 'Archive Classic 1',
-      watched: true,
-    });
-    const deepWatched1 = makeProgress('movie:deep-2', {
-      kind: 'movie',
-      title: 'Archive Classic 2',
-      watched: true,
-    });
+    const fav0 = makeFavorite('movie:fav-1', { title: 'Archive Classic 1', kind: 'movie' });
+    const fav1 = makeFavorite('movie:fav-2', { title: 'Archive Classic 2', kind: 'movie' });
 
     const { catalog: baseCatalog } = createMockCatalog({
       categories: [cat0],
       itemsByCategory: new Map([[cat0.id, [item0]]]),
     });
-    const listWatched = jest.fn(async () => [deepWatched0, deepWatched1]);
+    const listFavorites = jest.fn(async () => [fav0, fav1]);
     const catalog = {
       ...baseCatalog,
-      listWatched,
+      listFavorites,
+      listFavoriteKeys: jest.fn(async () => [fav0.itemKey, fav1.itemKey]),
     } as unknown as CatalogService;
 
     const { source: androidSource, sendKey } = createAndroidSource();
@@ -307,19 +292,18 @@ describe('CatalogDiscoveryScreen — Quick Filter Tabs & Universal Context Menus
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('catalog-filter-watched')).toBeTruthy();
+      expect(screen.getByTestId('catalog-filter-mylist')).toBeTruthy();
       expect(
         screen.getByTestId('catalog-tv-focus-anchor-movie', { includeHiddenElements: true }),
       ).toBeTruthy();
     });
 
-    // Navigate catChips: 0 (All) -> 1 (My List) -> 2 (Watched) -> Select
-    await sendKey(KEYCODE_DPAD_RIGHT);
+    // Navigate catChips: 0 (All) -> 1 (My List) -> Select
     await sendKey(KEYCODE_DPAD_RIGHT);
     await sendKey(KEYCODE_DPAD_CENTER);
 
     await waitFor(() => {
-      expect(listWatched).toHaveBeenCalledWith(250, undefined, { kind: 'movie' });
+      expect(listFavorites).toHaveBeenCalledWith(250);
       expect(screen.getByTestId('catalog-quick-filter-item-0')).toBeTruthy();
       expect(screen.getByTestId('catalog-quick-filter-item-1')).toBeTruthy();
     });
@@ -330,13 +314,13 @@ describe('CatalogDiscoveryScreen — Quick Filter Tabs & Universal Context Menus
     await sendKey(KEYCODE_DPAD_CENTER);
 
     expect(onOpenDetail).toHaveBeenCalledWith(
-      expect.objectContaining({ itemKey: 'movie:deep-2', title: 'Archive Classic 2' }),
+      expect.objectContaining({ itemKey: 'movie:fav-2', title: 'Archive Classic 2' }),
     );
 
     // Opening ContextMenu suspends CatalogTvKeyBridge on TV (P0-5)
     await fireEvent(screen.getByTestId('catalog-quick-filter-item-0'), 'longPress');
     await waitFor(() => {
-      expect(screen.getByTestId('context-menu-watched')).toBeTruthy();
+      expect(screen.getByTestId('context-menu-favorite')).toBeTruthy();
       expect(
         screen.queryByTestId('catalog-tv-focus-anchor-movie', { includeHiddenElements: true }),
       ).toBeNull();

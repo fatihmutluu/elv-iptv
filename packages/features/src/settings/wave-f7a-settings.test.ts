@@ -13,7 +13,7 @@ describe('Wave F7A / P7 playback pure helpers (#115, #213)', () => {
     expect(toggleAudioPassthroughCodec(['ac3', 'eac3', 'dts'], 'eac3')).toEqual(['ac3', 'dts']);
   });
 
-  it('activates Night-Mode DRC, seek step, aspect, buffer, decoder, OSD time, and external player controls', () => {
+  it('activates Night-Mode DRC, seek step, aspect, buffer, decoder, and external player controls', () => {
     const patches: PreferencesPatch[] = [];
     let current = { ...DEFAULT_PREFERENCES };
     const controller = {
@@ -37,7 +37,7 @@ describe('Wave F7A / P7 playback pure helpers (#115, #213)', () => {
     activatePlaybackControl('buffer-large', controller);
     activatePlaybackControl('video-decoder-hardware', controller);
     activatePlaybackControl('night-drc-night', controller);
-    activatePlaybackControl('osd-time-endsAt', controller);
+    activatePlaybackControl('toggle-auto-play-next', controller);
     activatePlaybackControl('external-player-ask', controller);
 
     expect(patches).toEqual([
@@ -46,7 +46,7 @@ describe('Wave F7A / P7 playback pure helpers (#115, #213)', () => {
       { bufferPreset: 'large' },
       { androidDecoderMode: 'hardware' },
       { nightModeDrc: 'night' },
-      { osdTimeDisplayMode: 'endsAt' },
+      { autoPlayNextEpisode: false },
       { externalPlayerMode: 'ask' },
     ]);
   });

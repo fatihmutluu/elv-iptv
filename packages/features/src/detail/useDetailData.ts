@@ -41,8 +41,6 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly plot: string | null;
   readonly genres: readonly string[];
   readonly isEnriched: boolean;
-  readonly collectionIds: readonly string[];
-  readonly setCollectionIds: (ids: readonly string[]) => void;
   readonly relatedUnplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly versions: readonly VodVersionOption[];
   readonly userRating: RatingValue | null;
@@ -78,7 +76,6 @@ export function useDetailData({
   const [seasonsRetryToken, setSeasonsRetryToken] = useState(0);
   const [versions, setVersions] = useState<readonly VodVersionOption[]>([]);
   const [enrichment, setEnrichment] = useState<VodEnrichmentRecord | null>(null);
-  const [collectionIds, setCollectionIds] = useState<readonly string[]>([]);
   const [userRating, setUserRatingState] = useState<RatingValue | null>(null);
 
   const mountedRef = useRef(true);
@@ -163,7 +160,6 @@ export function useDetailData({
     if (itemChanged) {
       setVersions([]);
       setEnrichment(null);
-      setCollectionIds([]);
       userRatingRef.current = null;
       setUserRatingState(null);
       myListGenRef.current += 1;
@@ -365,24 +361,6 @@ export function useDetailData({
     };
   }, [catalog, refreshToken, target.itemKey, target.kind, vodEnrichmentEnabled]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion refresh collection badges cleanly
-  useEffect(() => {
-    if (typeof catalog.listCollectionsForItem !== 'function') {
-      setCollectionIds([]);
-      return undefined;
-    }
-    let cancelled = false;
-    void catalog
-      .listCollectionsForItem(target.itemKey)
-      .then((ids) => {
-        if (!cancelled && mountedRef.current) setCollectionIds(ids);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [catalog, refreshToken, target.itemKey, userStateVersion]);
-
   const selectSeason = useCallback(
     (season: number) => {
       if (snapRef.current.selectedSeason === season) return;
@@ -489,8 +467,6 @@ export function useDetailData({
       plot,
       genres,
       isEnriched,
-      collectionIds,
-      setCollectionIds,
       relatedUnplayedBySeriesKey,
       versions,
       userRating,
@@ -502,7 +478,6 @@ export function useDetailData({
     };
   }, [
     backdropUri,
-    collectionIds,
     genres,
     isEnriched,
     plot,

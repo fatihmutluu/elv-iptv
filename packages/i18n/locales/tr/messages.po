@@ -1554,9 +1554,6 @@ msgstr "SDH altyazı açıklamalarını filtrele"
 msgid "settings.playback.filterSdhDesc"
 msgstr "Metin altyazılardaki [ses efekti], (açıklama) ve KONUŞMACI: etiketlerini gizle"
 
-msgid "settings.playback.osdTimeMode"
-msgstr "Oynatıcı süre gösterimi"
-
 msgid "settings.liveTv.catalogRefreshInterval"
 msgstr "Katalog otomatik yenileme"
 
@@ -3811,3 +3808,57 @@ msgstr "Bu kaynaktaki kanal ve katalog içeriklerini hangi profillerin görebile
 
 msgid "sources.advanced.allProfilesShared"
 msgstr "Tüm profillerle paylaşılıyor"
+
+msgid "library.collections.create"
+msgstr "Koleksiyon oluştur"
+
+msgid "library.collections.createTitle"
+msgstr "Yeni koleksiyon"
+
+msgid "library.collections.rename"
+msgstr "Yeniden adlandır"
+
+msgid "library.collections.renameTitle"
+msgstr "Koleksiyonu yeniden adlandır"
+
+msgid "library.collections.delete"
+msgstr "Koleksiyonu sil"
+
+msgid "library.collections.deleteConfirmTitle"
+msgstr "Koleksiyon silinsin mi?"
+
+msgid "library.collections.deleteConfirmBody"
+msgstr "İçerikler Listem'de kalır ve genel Filmler ile Diziler satırlarına geri döner."
+
+msgid "library.collections.emptySection"
+msgstr "Boş koleksiyon — içerikleri menüden taşıyabilir veya buraya sürükleyebilirsiniz."
+
+msgid "library.collections.moveTo"
+msgstr "Koleksiyona taşı"
+
+msgid "library.collections.moveToNamed"
+msgstr "{name} koleksiyonuna taşı"
+
+msgid "library.collections.removeFrom"
+msgstr "Koleksiyondan çıkar"
+
+msgid "library.collections.dropHere"
+msgstr "Taşımak için buraya bırakın"
+
+msgid "library.collections.namePlaceholder"
+msgstr "Koleksiyon adı"
+
+msgid "catalog.filter.elvPicks"
+msgstr "ELV Öneri"
+
+msgid "live.stage.fullscreen"
+msgstr "Tam ekran"
+
+msgid "live.stage.doubleClickHint"
+msgstr "Tam ekran için videoya çift tıklayın"
+
+msgid "live.zap.favoriteAdd"
+msgstr "Favorilere ekle"
+
+msgid "live.zap.favoriteRemove"
+msgstr "Favorilerden çıkar"

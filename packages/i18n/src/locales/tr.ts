@@ -15,6 +15,7 @@ import { trWaveP4Messages } from './tr-wave-p4';
 import { trWaveP5Messages } from './tr-wave-p5';
 import { trWaveP6Messages } from './tr-wave-p6';
 import { trWaveP7Messages } from './tr-wave-p7';
+import { trWaveP8Messages } from './tr-wave-p8';
 
 /** Turkish (`tr`) message catalog. */
 export const trMessages: Readonly<Record<MessageId, string>> = {
@@ -583,7 +584,6 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'settings.playback.filterSdh': 'SDH altyazı açıklamalarını filtrele',
   'settings.playback.filterSdhDesc':
     'Metin altyazılardaki [ses efekti], (açıklama) ve KONUŞMACI: etiketlerini gizle',
-  'settings.playback.osdTimeMode': 'Oynatıcı süre gösterimi',
   'settings.liveTv.catalogRefreshInterval': 'Katalog otomatik yenileme',
   'settings.liveTv.catalogRefreshIntervalDesc':
     'Kanalları, filmleri ve dizileri arka planda otomatik yenile',
@@ -735,5 +735,6 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trWaveP5Messages,
   ...trWaveP6Messages,
   ...trWaveP7Messages,
+  ...trWaveP8Messages,
   ...trIssue502Messages,
 };

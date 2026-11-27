@@ -185,4 +185,55 @@ describe('useLiveTwoStepPreview handoff resilience (#145)', () => {
 
     await unmount();
   });
+
+  it('guards releasePreviewAndDispatch against double-invocation and unmount during async stopAndRelease', async () => {
+    let resolveRelease!: () => void;
+    mockStopAndRelease.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRelease = resolve;
+        }),
+    );
+
+    const onCatchup = jest.fn();
+    const live = makeLivePort();
+    const memoryRef: { current: LiveTabMemory } = {
+      current: {
+        mode: 'favorites',
+        categoryId: null,
+        activeChannelKey: CHANNEL.key,
+        previousChannelKey: null,
+        zapDrawerOpen: true,
+      },
+    };
+
+    const { result, unmount } = await renderHook(() =>
+      useLiveTwoStepPreview({
+        mode: 'favorites',
+        liveOkTwoStepPreview: false,
+        activeFavoriteChannel: CHANNEL,
+        readySources: SOURCES,
+        catalog: MOCK_CATALOG,
+        live,
+        memoryRef,
+        onPlay: jest.fn(),
+        videoHost: MOCK_VIDEO_HOST,
+      }),
+    );
+
+    // Double-invocation only triggers stopAndRelease once while in flight
+    await act(async () => {
+      result.current.releasePreviewAndDispatch(onCatchup);
+      result.current.releasePreviewAndDispatch(onCatchup);
+    });
+    expect(mockStopAndRelease).toHaveBeenCalledTimes(1);
+
+    // Unmounting before stopAndRelease resolves suppresses dispatch completely
+    await unmount();
+    await act(async () => {
+      resolveRelease();
+      await Promise.resolve();
+    });
+    expect(onCatchup).not.toHaveBeenCalled();
+  });
 });

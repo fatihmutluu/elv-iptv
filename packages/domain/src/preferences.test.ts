@@ -47,7 +47,6 @@ describe('preferences codec', () => {
       subtitleMode: 'smart',
       seekStepSec: 10,
       defaultResizeMode: 'fit',
-      osdTimeDisplayMode: 'total',
       oledScreensaverTimeoutMin: 0,
       stillWatchingTimeoutMin: 0,
       sleepTimerDefaultAction: 'stop',
@@ -109,9 +108,9 @@ describe('preferences codec', () => {
         { id: 'continue', visible: true },
         { id: 'newEpisodes', visible: true },
         { id: 'live', visible: true },
-        { id: 'mylist', visible: true },
         { id: 'movies', visible: true },
         { id: 'series', visible: true },
+        { id: 'mylist', visible: true },
         { id: 'collections', visible: true },
       ],
     });
@@ -149,6 +148,23 @@ describe('preferences codec', () => {
       fontScale: 1.1,
       reduceMotion: true,
     });
+
+    const withLegacyOsdTimeMode = parsePreferences(
+      JSON.stringify({
+        version: 1,
+        themePreset: 'abyssalSapphire',
+        locale: 'tr',
+        seekStepSec: 15,
+        osdTimeDisplayMode: 'endsAt',
+      }),
+    );
+    expect(withLegacyOsdTimeMode).toEqual({
+      ...DEFAULT_PREFERENCES,
+      themePreset: 'abyssalSapphire',
+      locale: 'tr',
+      seekStepSec: 15,
+    });
+    expect(Object.hasOwn(withLegacyOsdTimeMode, 'osdTimeDisplayMode')).toBe(false);
 
     const withPlaybackFields = parsePreferences(
       JSON.stringify({

@@ -58,6 +58,8 @@ export interface CatalogDiscoveryScreenProps {
   readonly onFocusTopNav?: () => void;
   readonly isActiveScope?: boolean;
   readonly groupVersions?: boolean;
+  /** Opt-in ELV Mode quick filter tab slot (`#508`, defaults to `false` until Wave E1/E2). */
+  readonly showElvPicks?: boolean;
 }
 
 /**
@@ -80,6 +82,7 @@ export function CatalogDiscoveryScreen({
   onFocusTopNav,
   isActiveScope = true,
   groupVersions = false,
+  showElvPicks = false,
 }: CatalogDiscoveryScreenProps): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
@@ -92,7 +95,14 @@ export function CatalogDiscoveryScreen({
   );
 
   const { memory: activeMemory, updateMemory } = useCatalogTabMemory(memory, onMemoryChange);
-  const quickFilter: CatalogQuickFilter = activeMemory.quickFilter ?? 'all';
+  const rawQuickFilter = activeMemory.quickFilter ?? 'all';
+  const quickFilter: CatalogQuickFilter =
+    rawQuickFilter === 'mylist'
+      ? 'mylist'
+      : showElvPicks && rawQuickFilter === 'elvPicks'
+        ? 'elvPicks'
+        : 'all';
+  const quickChipCount = showElvPicks ? 3 : 2;
 
   const handleSelectCategory = useCallback(
     (categoryId: string | null) =>
@@ -357,7 +367,7 @@ export function CatalogDiscoveryScreen({
         isLoading: isInitialLoading,
         hasSources,
         hasCategories,
-        categoryChipCount: hasCategories ? discovery.categories.length + 3 : 0,
+        categoryChipCount: hasCategories ? discovery.categories.length + quickChipCount : 0,
         continueCount: !isGridMode && quickFilter === 'all' ? discovery.continueItems.length : 0,
         railEntries: quickFilter === 'all' ? railEntries : [],
         hasLoadMore: !isGridMode && quickFilter === 'all' && discovery.hasMoreCategories,
@@ -373,6 +383,7 @@ export function CatalogDiscoveryScreen({
       isCategoryGridMode,
       isGridMode,
       isInitialLoading,
+      quickChipCount,
       quickFilter,
       railEntries,
     ],
@@ -388,8 +399,8 @@ export function CatalogDiscoveryScreen({
       if (rowId === 'catChips') {
         if (colIndex === 0) return handleSelectQuickFilter('all');
         if (colIndex === 1) return handleSelectQuickFilter('mylist');
-        if (colIndex === 2) return handleSelectQuickFilter('watched');
-        const cat = discovery.categories[colIndex - 3];
+        if (showElvPicks && colIndex === 2) return handleSelectQuickFilter('elvPicks');
+        const cat = discovery.categories[colIndex - quickChipCount];
         if (cat) handleSelectCategory(cat.row.id);
         return;
       }
@@ -417,6 +428,8 @@ export function CatalogDiscoveryScreen({
       kind,
       onOpenDetail,
       onOpenSources,
+      quickChipCount,
+      showElvPicks,
     ],
   );
 
@@ -566,6 +579,7 @@ export function CatalogDiscoveryScreen({
             categories={discovery.categories}
             selectedCategoryId={selectedCategory?.row.id ?? null}
             quickFilter={quickFilter}
+            showElvPicks={showElvPicks}
             focusedCatChipIndex={tvNav.focusedRowId === 'catChips' ? tvNav.focusedCol : null}
             onSelectCategory={handleSelectCategory}
             onSelectQuickFilter={handleSelectQuickFilter}
@@ -608,7 +622,6 @@ export function CatalogDiscoveryScreen({
               userStateVersion={userStateVersion}
               layout={layout}
               safeBottomInset={viewport.safeArea.bottom}
-              railItemsByCategoryId={discovery.railItemsByCategoryId}
               progressByKey={discovery.progressByKey}
               unplayedBySeriesKey={discovery.unplayedBySeriesKey}
               favoriteKeys={quickActionsState.favoriteKeys}

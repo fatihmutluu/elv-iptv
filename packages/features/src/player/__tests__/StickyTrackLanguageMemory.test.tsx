@@ -251,7 +251,6 @@ describe('Sticky Smart Audio & Subtitle Language Memory', () => {
           flushProgressRef,
           onExitRef,
           filterSdhSubtitles: false,
-          osdTimeDisplayMode: 'total',
           sleepTimerDefaultAction: 'stop',
           stillWatchingTimeoutMin: 0,
           preferredAudioLanguages: [],

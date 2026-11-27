@@ -34,6 +34,7 @@ import {
 } from './LiveChrome';
 import { LiveContextMenu } from './LiveContextMenu';
 import { LivePreviewBanner } from './LivePreviewBanner';
+import type { LiveSplitOverlayKind } from './LiveSplitPlayerControls';
 import { LiveWatchStage } from './LiveWatchStage';
 import type { LiveMode, LiveTabMemory } from './live-model';
 import { buildSourceBadgeMap } from './source-badge';
@@ -96,29 +97,17 @@ export interface LiveScreenProps {
  */
 export function LiveScreen(props: LiveScreenProps): ReactElement {
   const { catalog, sources, refreshToken, userStateVersion = 0, memory, onMemoryChange } = props;
+  const { onPlay, onOpenMultiView, onOpenPopout, onOpenSources, onOpenSearch, onOpenHome } = props;
+  const { onChannelsMutated, onFavoritesMutated, onFocusTopNav, isActiveScope = true } = props;
+  const { videoHost, playbackGuard, nowMs, defaultLiveMode, epgTimeSpanHours } = props;
+  const { epgRowDensity, epgGenreTints = true, epgShowClock = true } = props;
   const {
-    onPlay,
-    onOpenMultiView,
-    onOpenPopout,
-    onOpenSources,
-    onOpenSearch,
-    onOpenHome,
-    onChannelsMutated,
-    onFavoritesMutated,
-    onFocusTopNav,
-    isActiveScope = true,
-    videoHost,
-  } = props;
-  const { playbackGuard, nowMs, defaultLiveMode, epgTimeSpanHours, epgRowDensity } = props;
-  const {
-    epgGenreTints = true,
-    epgShowClock = true,
     logoBackdropMode = 'plate',
     showSourceBadges = true,
     liveOkTwoStepPreview = false,
-    cleanChannelTitles = false,
-    collapseVariants = false,
-    reminderVersion = 0,
+  } = props;
+  const { cleanChannelTitles = false, collapseVariants = false, reminderVersion = 0 } = props;
+  const {
     onReminderChanged,
     onEmbeddedPlaybackActiveChange,
     onRegisterStopPreview,
@@ -137,6 +126,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   const { memory: activeMemory, memoryRef, updateMemory } = tabMem;
   const [guideRefreshTick, setGuideRefreshTick] = useState(0);
   const [channelManagerOpen, setChannelManagerOpen] = useState(false);
+  const [splitOverlay, setSplitOverlay] = useState<LiveSplitOverlayKind>(null);
   const [contextMenu, setContextMenu] = useState<{
     readonly channel: ItemRow;
     readonly index: number;
@@ -213,8 +203,11 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     previewedChannel,
     twoStepPreviewActive,
     clearTwoStepPreview,
+    releasePreviewAndDispatch,
     handleWatchAndPlay,
     handleWatchFromFavorites,
+    handleMultiViewFromFavorites,
+    handlePopoutFromFavorites,
   } = useLiveTwoStepPreview({
     mode,
     liveOkTwoStepPreview,
@@ -224,6 +217,9 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     live,
     memoryRef,
     onPlay,
+    ...(onOpenMultiView !== undefined ? { onOpenMultiView } : {}),
+    ...(onOpenPopout !== undefined ? { onOpenPopout } : {}),
+    defaultOverlayMode: viewport.formFactor === 'desktop' ? 'docked' : 'floating',
     suppressEmbeddedPreview,
     ...(videoHost !== undefined ? { videoHost } : {}),
     ...(playbackGuard !== undefined ? { playbackGuard } : {}),
@@ -256,6 +252,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
       idleProbeController.abortAll('navigation');
       numpad.close();
       clearTwoStepPreview();
+      setSplitOverlay(null);
       setContextMenu(null);
       setDetailModal(null);
       updateMemory({ mode: nextMode });
@@ -289,17 +286,9 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
         liveTarget,
         ...(hasArchive !== undefined ? { hasArchive } : {}),
       });
-      if ((mode === 'favorites' || twoStepPreviewActive) && videoHost !== undefined) {
-        clearTwoStepPreview();
-        void preview
-          .stopAndRelease()
-          .catch(() => undefined)
-          .finally(() => onPlay(target));
-        return;
-      }
-      onPlay(target);
+      releasePreviewAndDispatch(() => onPlay(target));
     },
-    [clearTwoStepPreview, live, mode, onPlay, preview, twoStepPreviewActive, videoHost],
+    [live, mode, onPlay, releasePreviewAndDispatch],
   );
   const previousChannel = live.previousChannel;
   const handleJumpPreviousChannel = useCallback(() => {
@@ -330,10 +319,6 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     onJumpPreviousChannel: handleJumpPreviousChannel,
   });
   const handleBrowseChannels = useCallback(() => handleSelectMode('channels'), [handleSelectMode]);
-  const handleToggleZapDrawer = useCallback(
-    () => updateMemory({ zapDrawerOpen: !memoryRef.current.zapDrawerOpen }),
-    [memoryRef, updateMemory],
-  );
   const handleReorderFavorite = useCallback(
     (fromIdx: number, toIdx: number) => void live.reorderFavorite(fromIdx, toIdx),
     [live.reorderFavorite],
@@ -351,12 +336,29 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   );
   const targetScope = mode === 'favorites' ? 'favorites' : 'category';
   const handleContextMultiView = useCallback(
-    (ch: ItemRow, idx: number) => onOpenMultiView?.(live.buildPlayTarget(ch, idx, targetScope)),
-    [live, onOpenMultiView, targetScope],
+    (ch: ItemRow, idx: number) => {
+      if (mode === 'favorites') return handleMultiViewFromFavorites(ch, idx);
+      if (onOpenMultiView === undefined) return;
+      const target = live.buildPlayTarget(ch, idx, targetScope);
+      releasePreviewAndDispatch(() => onOpenMultiView(target));
+    },
+    [
+      handleMultiViewFromFavorites,
+      live,
+      mode,
+      onOpenMultiView,
+      releasePreviewAndDispatch,
+      targetScope,
+    ],
   );
   const handleContextPopout = useCallback(
-    (ch: ItemRow, idx: number) => onOpenPopout?.(live.buildPlayTarget(ch, idx, targetScope)),
-    [live, onOpenPopout, targetScope],
+    (ch: ItemRow, idx: number) => {
+      if (mode === 'favorites') return handlePopoutFromFavorites(ch, idx);
+      if (onOpenPopout === undefined) return;
+      const target = live.buildPlayTarget(ch, idx, targetScope);
+      releasePreviewAndDispatch(() => onOpenPopout(target));
+    },
+    [handlePopoutFromFavorites, live, mode, onOpenPopout, releasePreviewAndDispatch, targetScope],
   );
   const handleToggleFavorite = useCallback(
     (ch: ItemRow) => void live.toggleFavorite(ch),
@@ -407,10 +409,20 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
       setChannelManagerOpen(false);
     }
   }, [channelManagerOpen, profile.hasGuardPin, profile.parentalUnlocked]);
+  const hideChannelProps = useMemo(
+    () =>
+      catalog.setChannelOverride !== undefined
+        ? { onHideChannel: handleHideChannel, onManageChannels: handleOpenChannelManager }
+        : {},
+    [catalog.setChannelOverride, handleHideChannel, handleOpenChannelManager],
+  );
   const handleToggleActiveFavorite = useCallback(() => {
-    const ch = live.activeChannel ?? activeFavoriteChannel;
+    const ch =
+      mode === 'favorites'
+        ? (activeFavoriteChannel ?? live.activeChannel)
+        : (live.activeChannel ?? activeFavoriteChannel);
     if (ch !== null) handleToggleFavorite(ch);
-  }, [activeFavoriteChannel, handleToggleFavorite, live.activeChannel]);
+  }, [activeFavoriteChannel, handleToggleFavorite, live.activeChannel, mode]);
   const handleGuideRefreshed = useCallback(() => setGuideRefreshTick((n) => n + 1), []);
   const handleSelectCategoryIndex = useCallback(
     (idx: number) => {
@@ -422,10 +434,12 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   const handleActivateWatchControl = useCallback(
     (ctrl: LiveWatchControl) => {
       if (ctrl === 'browse') return handleBrowseChannels();
-      if (ctrl === 'miniguide') return handleToggleZapDrawer();
       if (!activeFavoriteChannel) return;
-      if (ctrl === 'favorite') handleToggleFavorite(activeFavoriteChannel);
-      else if (ctrl === 'watch') {
+      if (ctrl === 'play-pause') preview.togglePlayPause();
+      else if (ctrl === 'tracks') setSplitOverlay((cur) => (cur === 'tracks' ? null : 'tracks'));
+      else if (ctrl === 'overflow')
+        setSplitOverlay((cur) => (cur === 'overflow' ? null : 'overflow'));
+      else if (ctrl === 'fullscreen') {
         handleWatchFromFavorites(activeFavoriteChannel, Math.max(0, activeFavoriteIdx));
       }
     },
@@ -433,9 +447,8 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
       activeFavoriteChannel,
       activeFavoriteIdx,
       handleBrowseChannels,
-      handleToggleFavorite,
-      handleToggleZapDrawer,
       handleWatchFromFavorites,
+      preview.togglePlayPause,
     ],
   );
   const handleSelectZapIndex = useCallback(
@@ -672,12 +685,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                   {...(onReminderChanged !== undefined ? { onReminderChanged } : {})}
                   onToggleFavorite={handleToggleFavorite}
                   onJumpPreviousChannel={handleJumpPreviousChannel}
-                  {...(catalog.setChannelOverride !== undefined
-                    ? {
-                        onHideChannel: handleHideChannel,
-                        onManageChannels: handleOpenChannelManager,
-                      }
-                    : {})}
+                  {...hideChannelProps}
                   onGuideRefreshed={handleGuideRefreshed}
                   onEdgeTop={tvNav.handleChildEdgeTop}
                   isActiveScope={bodyActiveScope}
@@ -694,9 +702,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                 nowNextByKey={live.nowNextByKey}
                 nowNextVersion={live.nowNextVersion}
                 zapDrawerOpen={activeMemory.zapDrawerOpen}
-                isFavorite={
-                  activeFavoriteChannel !== null && live.favoriteKeys.has(activeFavoriteChannel.key)
-                }
+                favoriteKeys={live.favoriteKeys}
                 isDesktop={viewport.formFactor === 'desktop'}
                 preview={preview}
                 layout={layout}
@@ -704,13 +710,19 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                 sourceBadges={sourceBadges}
                 cleanChannelTitles={cleanChannelTitles}
                 hydrateNowNext={live.hydrateNowNext}
-                onToggleZapDrawer={handleToggleZapDrawer}
                 onToggleFavorite={handleToggleFavorite}
                 onBrowseChannels={handleBrowseChannels}
                 onSelectChannel={live.tuneChannel}
                 onReorderFavorite={handleReorderFavorite}
                 onOpenContextMenu={handleOpenContextMenu}
                 onWatchFullscreen={handleWatchFromFavorites}
+                {...(onOpenMultiView !== undefined
+                  ? { onOpenMultiView: handleMultiViewFromFavorites }
+                  : {})}
+                {...(onOpenPopout !== undefined ? { onOpenPopout: handlePopoutFromFavorites } : {})}
+                activeOverlay={splitOverlay}
+                onActiveOverlayChange={setSplitOverlay}
+                keyboardShortcutsEnabled={mode === 'favorites' && !anyOverlayOpen && isActiveScope}
                 focusedControl={tvNav.focusedWatchControl}
                 focusedZapIndex={tvNav.focusedZapIndex}
                 {...(clockFn !== undefined ? { now: clockFn } : {})}
@@ -736,12 +748,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
         canMoveDown={contextFavIndex >= 0 && contextFavIndex < live.favoriteChannels.length - 1}
         onMoveFavorite={handleMoveContextFavorite}
         onShowProgrammeDetails={handleShowProgrammeDetails}
-        {...(catalog.setChannelOverride !== undefined
-          ? {
-              onHideChannel: handleHideChannel,
-              onManageChannels: handleOpenChannelManager,
-            }
-          : {})}
+        {...hideChannelProps}
         onClose={() => setContextMenu(null)}
       />
 
@@ -782,11 +789,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingBottom: 6,
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   body: { flex: 1, position: 'relative' },
   numpadAnchor: { position: 'absolute', top: 8, zIndex: 8 },
 });

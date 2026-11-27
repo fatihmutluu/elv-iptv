@@ -103,7 +103,6 @@ describe('@elv/i18n Wave C1 cinema player, sleep timer, screensaver, scrub & tra
         'Hide [sound effects], (descriptions), and SPEAKER: labels in text subtitles',
         'Metin altyazılardaki [ses efekti], (açıklama) ve KONUŞMACI: etiketlerini gizle',
       ],
-      ['settings.playback.osdTimeMode', 'Player time display', 'Oynatıcı süre gösterimi'],
     ];
 
     for (const [id, expectedEn, expectedTr] of cases) {

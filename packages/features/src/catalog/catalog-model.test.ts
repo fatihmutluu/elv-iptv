@@ -9,7 +9,6 @@ import {
   CATEGORY_LOAD_BATCH,
   chunkRowItems,
   clampGridFocus,
-  collectWatchedCatalogItems,
   computeProgressRatio,
   computeRowCount,
   detailTargetFromFavorite,
@@ -22,7 +21,6 @@ import {
   GRID_PAGE_SIZE,
   INITIAL_VISIBLE_CATEGORIES,
   itemRowFromFavorite,
-  itemRowFromWatchProgress,
   MAX_CONCURRENT_RAIL_QUERIES,
   RAIL_ITEM_LIMIT,
   resolveActiveAlphabetLetter,
@@ -388,7 +386,7 @@ describe('resolveActiveAlphabetLetter & stepAlphabetRailLetter (#407)', () => {
   });
 });
 
-describe('quick filter helpers (My List & Watched)', () => {
+describe('quick filter helpers (My List)', () => {
   it('filters favorites by kind and converts to ItemRow and DetailTarget', () => {
     const favMovie: FavoriteRow = {
       profileId: 'default',
@@ -435,60 +433,7 @@ describe('quick filter helpers (My List & Watched)', () => {
     });
   });
 
-  it('collects deduplicated watched catalog items honoring watchedOverrides', () => {
-    const m0 = makeItem(0, 'movie');
-    const m1 = makeItem(1, 'movie');
-    const m2 = makeItem(2, 'movie');
-    const s0 = makeItem(0, 'series');
-
-    const watched = collectWatchedCatalogItems({
-      kind: 'movie',
-      railItemsByCategoryId: new Map([['cat-0', [m0, m1]]]),
-      extraItems: [m1, m2, s0],
-      progressByKey: new Map([
-        [m0.key, makeProgress(m0.key, { watched: true })],
-        [m1.key, makeProgress(m1.key, { watched: true })],
-      ]),
-      watchedOverrides: new Map([
-        [m1.key, false],
-        [m2.key, true],
-      ]),
-    });
-
-    expect(watched.map((i) => i.key)).toEqual([m0.key, m2.key]);
-  });
-
-  it('prefers full-catalog watchedRows, enriches rail metadata, honors watchedOverrides, and omits gridBack when gridHeaderCount is 0', () => {
-    const mRail = makeItem(0, 'movie');
-    const mOpt = makeItem(1, 'movie');
-    const deepWatched = makeProgress('movie:deep-50000', {
-      title: 'Deep Archive Film',
-      watched: true,
-    });
-    const railWatched = makeProgress(mRail.key, { title: mRail.name, watched: true });
-    const unmarked = makeProgress('movie:unmarked', { title: 'Unmarked Film', watched: true });
-
-    expect(itemRowFromWatchProgress(deepWatched, 'movie')).toMatchObject({
-      key: 'movie:deep-50000',
-      kind: 'movie',
-      name: 'Deep Archive Film',
-    });
-
-    const watched = collectWatchedCatalogItems({
-      kind: 'movie',
-      railItemsByCategoryId: new Map([['cat-0', [mRail, mOpt]]]),
-      watchedRows: [deepWatched, railWatched, unmarked],
-      progressByKey: new Map(),
-      watchedOverrides: new Map([
-        [unmarked.itemKey, false],
-        [mOpt.key, true],
-      ]),
-    });
-
-    expect(watched.map((i) => i.key)).toEqual(['movie:deep-50000', mRail.key, mOpt.key]);
-    expect(watched[1]?.year).toBe(mRail.year);
-    expect(watched[1]?.rating).toBe(mRail.rating);
-
+  it('omits gridBack when gridHeaderCount is 0 in quick-filter grid mode', () => {
     expect(
       buildCatalogNavRows({
         isLoading: false,

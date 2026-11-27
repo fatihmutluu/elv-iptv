@@ -252,6 +252,11 @@ describe('EpgGridView time-overlap vertical navigation (#112) and RTL-safe timel
     const rulerTrackStyle = StyleSheet.flatten(screen.getByTestId('epg-ruler-track').props.style);
     expect(rulerTrackStyle.direction).toBe('ltr');
 
+    const clockBadgeStyle = StyleSheet.flatten(
+      screen.getByTestId('epg-live-clock-badge').props.style,
+    );
+    expect(clockBadgeStyle.direction).toBe('ltr');
+
     const rowTrackStyle = StyleSheet.flatten(screen.getByTestId('epg-row-track-0').props.style);
     expect(rowTrackStyle.direction).toBe('ltr');
 

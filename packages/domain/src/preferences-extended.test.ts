@@ -13,7 +13,6 @@ import {
   isAndroidDecoderMode,
   type LogoBackdropModePref,
   MAX_PREFERENCES_BYTES,
-  type OsdTimeDisplayMode,
   type PreferencesKvBackend,
   type PreferencesSnapshot,
   parsePreferences,
@@ -219,7 +218,6 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       subtitleMode: 'always',
       seekStepSec: 30,
       defaultResizeMode: 'stretch',
-      osdTimeDisplayMode: 'endsAt',
       oledScreensaverTimeoutMin: 15,
       stillWatchingTimeoutMin: 180,
       sleepTimerDefaultAction: 'pause',
@@ -485,7 +483,6 @@ describe('Wave P4 ergonomics preferences (#55, #408)', () => {
       subtitleMode: 'always',
       seekStepSec: 30,
       defaultResizeMode: 'stretch',
-      osdTimeDisplayMode: 'endsAt',
       oledScreensaverTimeoutMin: 15,
       stillWatchingTimeoutMin: 180,
       sleepTimerDefaultAction: 'pause',
@@ -618,7 +615,6 @@ describe('Wave C1 cinema player preferences (#124, #393, #310, #160, #118)', () 
     expect(DEFAULT_PREFERENCES.preferDefaultAudioTrack).toBe(true);
     expect(DEFAULT_PREFERENCES.preferHevcOverDolbyVision).toBe(false);
     expect(DEFAULT_PREFERENCES.filterSdhSubtitles).toBe(false);
-    expect(DEFAULT_PREFERENCES.osdTimeDisplayMode).toBe('total');
     expect(DEFAULT_PREFERENCES.oledScreensaverTimeoutMin).toBe(0);
     expect(DEFAULT_PREFERENCES.stillWatchingTimeoutMin).toBe(0);
     expect(DEFAULT_PREFERENCES.sleepTimerDefaultAction).toBe('stop');
@@ -697,13 +693,17 @@ describe('Wave C1 cinema player preferences (#124, #393, #310, #160, #118)', () 
     expect(u3.ok && u3.value.preferredAudioLanguages).toEqual([]);
   });
 
-  it('validates and clamps osdTimeDisplayMode, sleepTimerDefaultAction, timeouts, and booleans', async () => {
-    const osdModes: readonly OsdTimeDisplayMode[] = ['total', 'remaining', 'endsAt'];
-    for (const osdTimeDisplayMode of osdModes) {
-      expect(
-        parsePreferences(JSON.stringify({ version: 1, osdTimeDisplayMode })).osdTimeDisplayMode,
-      ).toBe(osdTimeDisplayMode);
-    }
+  it('validates and clamps sleepTimerDefaultAction, timeouts, and booleans while ignoring legacy osdTimeDisplayMode', async () => {
+    const legacyParsed = parsePreferences(
+      JSON.stringify({
+        version: 1,
+        osdTimeDisplayMode: 'endsAt',
+        sleepTimerDefaultAction: 'pause',
+      }),
+    );
+    expect(legacyParsed.sleepTimerDefaultAction).toBe('pause');
+    expect(Object.hasOwn(legacyParsed, 'osdTimeDisplayMode')).toBe(false);
+
     const actions: readonly SleepTimerAction[] = ['stop', 'pause'];
     for (const sleepTimerDefaultAction of actions) {
       expect(
@@ -750,7 +750,6 @@ describe('Wave C1 cinema player preferences (#124, #393, #310, #160, #118)', () 
 
     const store = createMemoryPreferencesStore();
     const u = await store.update({
-      osdTimeDisplayMode: 'remaining',
       sleepTimerDefaultAction: 'pause',
       oledScreensaverTimeoutMin: 10.4,
       stillWatchingTimeoutMin: 120.6,
@@ -760,7 +759,6 @@ describe('Wave C1 cinema player preferences (#124, #393, #310, #160, #118)', () 
     });
     expect(u.ok).toBe(true);
     if (u.ok) {
-      expect(u.value.osdTimeDisplayMode).toBe('remaining');
       expect(u.value.sleepTimerDefaultAction).toBe('pause');
       expect(u.value.oledScreensaverTimeoutMin).toBe(10);
       expect(u.value.stillWatchingTimeoutMin).toBe(121);

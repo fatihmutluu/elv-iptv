@@ -16,7 +16,6 @@ describe('syncable-preferences (Product Decision #40)', () => {
       reduceMotion: true,
       locale: 'tr',
       defaultResizeMode: 'fill',
-      osdTimeDisplayMode: 'remaining',
       epgTimeSpanHours: 6,
       epgRowDensity: 'compact',
       epgGenreTints: false,
@@ -106,6 +105,7 @@ describe('syncable-preferences (Product Decision #40)', () => {
       'cleanChannelTitles',
       'collapseLiveVariants',
       'autoSubtitlesOnSkipBack',
+      'osdTimeDisplayMode',
     ];
     for (const key of forbiddenKeys) {
       expect(Object.hasOwn(extracted, key)).toBe(false);
@@ -169,7 +169,6 @@ describe('syncable-preferences (Product Decision #40)', () => {
       reduceMotion: true,
       locale: 'de',
       defaultResizeMode: 'stretch',
-      osdTimeDisplayMode: 'endsAt',
       epgTimeSpanHours: 6,
       epgRowDensity: 'cinematic',
       epgShowClock: true,
@@ -191,11 +190,12 @@ describe('syncable-preferences (Product Decision #40)', () => {
         { id: 'movies', visible: false },
         { id: 'continue', visible: true },
         { id: 'newEpisodes', visible: true },
-        { id: 'mylist', visible: true },
         { id: 'series', visible: true },
+        { id: 'mylist', visible: true },
         { id: 'collections', visible: true },
       ],
     });
+    expect(Object.hasOwn(patch, 'osdTimeDisplayMode')).toBe(false);
     expect(Object.hasOwn(patch, 'subtitleFontFamily')).toBe(false);
     expect(Object.hasOwn(patch, 'preferredSubtitleLang')).toBe(false);
     expect(Object.hasOwn(patch, 'overscanX')).toBe(false);

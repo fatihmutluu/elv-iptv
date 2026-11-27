@@ -151,9 +151,9 @@ describe('Wave P4 HomeLayoutEditor & Sync initialPrefsHint', () => {
       'home-layout-newEpisodes',
       'home-layout-continue',
       'home-layout-live',
-      'home-layout-mylist',
       'home-layout-movies',
       'home-layout-series',
+      'home-layout-mylist',
       'home-layout-collections',
       'home-layout-reset',
     ]);
@@ -184,7 +184,7 @@ describe('Wave P4 HomeLayoutEditor & Sync initialPrefsHint', () => {
       (s: { id: string }) => s.id,
     );
     expect(savedOrder?.[5]).toBe('collections');
-    expect(savedOrder?.[6]).toBe('series');
+    expect(savedOrder?.[6]).toBe('mylist');
 
     await customHook.unmount();
   });

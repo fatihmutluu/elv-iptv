@@ -9,7 +9,6 @@ import {
   isEpgRowDensity,
   isRecord,
   isValidShortString,
-  type OsdTimeDisplayMode,
   type SeekStepSecPref,
   type SubtitleModePref,
 } from './preferences-validators';
@@ -33,7 +32,6 @@ export const SYNCABLE_PREFERENCE_KEYS = [
   'reduceMotion',
   'locale',
   'defaultResizeMode',
-  'osdTimeDisplayMode',
   'epgTimeSpanHours',
   'epgRowDensity',
   'epgShowClock',
@@ -56,7 +54,6 @@ export const SYNCABLE_PREFERENCE_KEYS = [
 export type SyncablePreferenceKey = (typeof SYNCABLE_PREFERENCE_KEYS)[number];
 
 const DEFAULT_RESIZE_MODES: ReadonlySet<string> = new Set(['fit', 'fill', 'stretch']);
-const OSD_TIME_DISPLAY_MODES: ReadonlySet<string> = new Set(['total', 'remaining', 'endsAt']);
 const EPG_TIME_SPAN_HOURS: ReadonlySet<number> = new Set([2, 3, 6]);
 const DEFAULT_LIVE_MODES: ReadonlySet<string> = new Set(['favorites', 'channels', 'epg']);
 const SUBTITLE_MODES: ReadonlySet<string> = new Set([
@@ -137,7 +134,6 @@ export function extractSyncablePreferences(
     reduceMotion: snapshot.reduceMotion,
     locale: snapshot.locale,
     defaultResizeMode: snapshot.defaultResizeMode,
-    osdTimeDisplayMode: snapshot.osdTimeDisplayMode,
     epgTimeSpanHours: snapshot.epgTimeSpanHours,
     epgRowDensity: snapshot.epgRowDensity,
     epgShowClock: snapshot.epgShowClock,
@@ -177,12 +173,6 @@ export function sanitizeInitialPreferencesPatch(raw: unknown): PreferencesPatch 
     DEFAULT_RESIZE_MODES.has(raw.defaultResizeMode)
   ) {
     patch.defaultResizeMode = raw.defaultResizeMode as DefaultResizeModePref;
-  }
-  if (
-    typeof raw.osdTimeDisplayMode === 'string' &&
-    OSD_TIME_DISPLAY_MODES.has(raw.osdTimeDisplayMode)
-  ) {
-    patch.osdTimeDisplayMode = raw.osdTimeDisplayMode as OsdTimeDisplayMode;
   }
   if (typeof raw.epgTimeSpanHours === 'number' && EPG_TIME_SPAN_HOURS.has(raw.epgTimeSpanHours)) {
     patch.epgTimeSpanHours = raw.epgTimeSpanHours as EpgTimeSpanHoursPref;

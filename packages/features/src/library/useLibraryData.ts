@@ -1,6 +1,7 @@
 import type {
   CatalogService,
   FavoriteRow,
+  ItemRow,
   RatingRow,
   RatingValue,
   SeriesUnplayedSummary,
@@ -10,6 +11,7 @@ import type { DownloadRecord } from '@elv/domain';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HydratedVodCollection } from '../shared';
 import {
+  collectItemKeysFromCollections,
   type DownloadedSeriesGroup,
   deriveSeriesKeyFromEpisodeRecord,
   groupDownloadedSeries,
@@ -34,6 +36,7 @@ export interface LibraryDataState {
   readonly watchedMovies: readonly WatchProgressRow[];
   readonly watchedSeries: readonly WatchProgressRow[];
   readonly collections: readonly HydratedVodCollection[];
+  readonly collectedItemKeys: ReadonlySet<string>;
   readonly favoriteKeys: ReadonlySet<string>;
   readonly ratingMap: ReadonlyMap<string, RatingValue>;
   readonly watchedKeys: ReadonlySet<string>;
@@ -41,6 +44,14 @@ export interface LibraryDataState {
   readonly toggleFavorite: (item: LibraryCardItem) => Promise<void>;
   readonly setRating: (item: LibraryCardItem, value: RatingValue | null) => Promise<void>;
   readonly toggleWatched: (item: LibraryCardItem, currentWatched: boolean) => Promise<void>;
+  readonly createCollection: (name: string) => Promise<boolean>;
+  readonly renameCollection: (id: string, name: string) => Promise<boolean>;
+  readonly deleteCollection: (id: string) => Promise<boolean>;
+  readonly moveItemToCollection: (
+    item: LibraryCardItem,
+    targetCollectionId: string,
+  ) => Promise<boolean>;
+  readonly removeItemFromCollection: (collectionId: string, itemKey: string) => Promise<boolean>;
 }
 
 const EMPTY_SET: ReadonlySet<string> = new Set();
@@ -65,6 +76,7 @@ export function useLibraryData({
     useState<ReadonlyMap<string, SeriesUnplayedSummary>>(EMPTY_UNPLAYED);
 
   const mountedRef = useRef(true);
+  const collectionsSyncGenRef = useRef(0);
   const refreshedExtraSeriesKeysRef = useRef<Set<string>>(new Set());
   const prevCatalogRef = useRef(catalog);
   if (prevCatalogRef.current !== catalog) {
@@ -79,9 +91,33 @@ export function useLibraryData({
     };
   }, []);
 
+  const reloadCollections = useCallback(async (): Promise<void> => {
+    if (!catalog.listCollections) return;
+    const gen = ++collectionsSyncGenRef.current;
+    const rawCols = await catalog.listCollections().catch(() => null);
+    if (rawCols === null || !mountedRef.current || gen !== collectionsSyncGenRef.current) return;
+    if (rawCols.length === 0) {
+      setCollections([]);
+      return;
+    }
+    if (!catalog.listCollectionItems) {
+      setCollections(rawCols.map((collection) => ({ collection, items: [] })));
+      return;
+    }
+    const hydrated = await Promise.all(
+      rawCols.map(async (collection) => {
+        const items = (await catalog.listCollectionItems?.(collection.id).catch(() => [])) ?? [];
+        return { collection, items };
+      }),
+    );
+    if (!mountedRef.current || gen !== collectionsSyncGenRef.current) return;
+    setCollections(hydrated);
+  }, [catalog]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion trigger fresh catalog reads
   useEffect(() => {
     let cancelled = false;
+    const collectionsGen = ++collectionsSyncGenRef.current;
 
     const loadAll = async (): Promise<void> => {
       const [favs, rats, wMovies, wSeries, newEps, rawCols] = await Promise.all([
@@ -102,8 +138,14 @@ export function useLibraryData({
       setWatchedSeries(wSeries);
       setNewEpisodeSeriesKeys(new Set(newEps.map((r) => r.seriesKey)));
 
-      if (rawCols.length === 0 || !catalog.listCollectionItems) {
+      if (collectionsGen !== collectionsSyncGenRef.current) return;
+      if (rawCols.length === 0) {
         setCollections([]);
+        return;
+      }
+
+      if (!catalog.listCollectionItems) {
+        setCollections(rawCols.map((collection) => ({ collection, items: [] })));
         return;
       }
 
@@ -113,8 +155,10 @@ export function useLibraryData({
           return { collection, items };
         }),
       );
-      if (cancelled || !mountedRef.current) return;
-      setCollections(hydrated.filter((h) => h.items.length > 0));
+      if (cancelled || !mountedRef.current || collectionsGen !== collectionsSyncGenRef.current) {
+        return;
+      }
+      setCollections(hydrated);
     };
 
     void loadAll();
@@ -231,6 +275,10 @@ export function useLibraryData({
   );
 
   const favoriteKeys = useMemo(() => new Set(favorites.map((f) => f.itemKey)), [favorites]);
+  const collectedItemKeys = useMemo(
+    () => collectItemKeysFromCollections(collections),
+    [collections],
+  );
 
   const ratingMap = useMemo(() => {
     const map = new Map<string, RatingValue>();
@@ -417,12 +465,186 @@ export function useLibraryData({
     [catalog],
   );
 
+  const createCollection = useCallback(
+    async (name: string): Promise<boolean> => {
+      if (!catalog.createCollection) return false;
+      try {
+        const res = await catalog.createCollection({ name });
+        if (!res.ok || !mountedRef.current) return false;
+        setCollections((prev) =>
+          prev.some((entry) => entry.collection.id === res.value.id)
+            ? prev
+            : [...prev, { collection: res.value, items: [] }],
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [catalog],
+  );
+
+  const renameCollection = useCallback(
+    async (id: string, name: string): Promise<boolean> => {
+      setCollections((prev) =>
+        prev.map((entry) =>
+          entry.collection.id === id
+            ? { ...entry, collection: { ...entry.collection, name } }
+            : entry,
+        ),
+      );
+      if (!catalog.renameCollection) return true;
+      try {
+        const res = await catalog.renameCollection(id, name);
+        if (!res.ok) {
+          await reloadCollections();
+          return false;
+        }
+        if (mountedRef.current) {
+          setCollections((prev) =>
+            prev.map((entry) =>
+              entry.collection.id === id ? { ...entry, collection: res.value } : entry,
+            ),
+          );
+        }
+        return true;
+      } catch {
+        await reloadCollections();
+        return false;
+      }
+    },
+    [catalog, reloadCollections],
+  );
+
+  const deleteCollection = useCallback(
+    async (id: string): Promise<boolean> => {
+      setCollections((prev) => prev.filter((entry) => entry.collection.id !== id));
+      if (!catalog.deleteCollection) return true;
+      try {
+        const res = await catalog.deleteCollection(id);
+        if (!res.ok) {
+          await reloadCollections();
+          return false;
+        }
+        if (mountedRef.current) {
+          setCollections((prev) => prev.filter((entry) => entry.collection.id !== id));
+        }
+        return true;
+      } catch {
+        await reloadCollections();
+        return false;
+      }
+    },
+    [catalog, reloadCollections],
+  );
+
+  const moveItemToCollection = useCallback(
+    async (item: LibraryCardItem, targetCollectionId: string): Promise<boolean> => {
+      if (item.kind !== 'movie' && item.kind !== 'series') return false;
+      const syntheticItem: ItemRow = {
+        id: 0,
+        key: item.itemKey,
+        sourceId: item.sourceId,
+        providerId: null,
+        kind: item.kind,
+        name: item.title,
+        logo: item.imageUri,
+        num: null,
+        year: item.year ?? null,
+        rating: item.rating ?? null,
+      };
+      const applyMove = (
+        prev: readonly HydratedVodCollection[],
+      ): readonly HydratedVodCollection[] => {
+        let existingRow: ItemRow | undefined;
+        for (const entry of prev) {
+          const found = entry.items.find((row) => row.key === item.itemKey);
+          if (found) {
+            existingRow = found;
+            break;
+          }
+        }
+        const rowToAdd = existingRow ?? syntheticItem;
+        return prev.map((entry) => {
+          if (entry.collection.id === targetCollectionId) {
+            if (entry.items.some((r) => r.key === item.itemKey)) return entry;
+            const items = [...entry.items, rowToAdd];
+            return {
+              collection: { ...entry.collection, itemCount: items.length },
+              items,
+            };
+          }
+          if (entry.items.some((r) => r.key === item.itemKey)) {
+            const items = entry.items.filter((r) => r.key !== item.itemKey);
+            return {
+              collection: { ...entry.collection, itemCount: items.length },
+              items,
+            };
+          }
+          return entry;
+        });
+      };
+      setCollections(applyMove);
+
+      if (!catalog.addItemToCollection) return true;
+      try {
+        const res = await catalog.addItemToCollection(targetCollectionId, item.itemKey, item.kind);
+        if (!res.ok) {
+          await reloadCollections();
+          return false;
+        }
+        if (mountedRef.current) {
+          setCollections(applyMove);
+        }
+        return true;
+      } catch {
+        await reloadCollections();
+        return false;
+      }
+    },
+    [catalog, reloadCollections],
+  );
+
+  const removeItemFromCollection = useCallback(
+    async (collectionId: string, itemKey: string): Promise<boolean> => {
+      const applyRemove = (
+        prev: readonly HydratedVodCollection[],
+      ): readonly HydratedVodCollection[] =>
+        prev.map((entry) => {
+          if (entry.collection.id !== collectionId) return entry;
+          const items = entry.items.filter((r) => r.key !== itemKey);
+          return {
+            collection: { ...entry.collection, itemCount: items.length },
+            items,
+          };
+        });
+      setCollections(applyRemove);
+      if (!catalog.removeItemFromCollection) return true;
+      try {
+        const res = await catalog.removeItemFromCollection(collectionId, itemKey);
+        if (!res.ok) {
+          await reloadCollections();
+          return false;
+        }
+        if (mountedRef.current) {
+          setCollections(applyRemove);
+        }
+        return true;
+      } catch {
+        await reloadCollections();
+        return false;
+      }
+    },
+    [catalog, reloadCollections],
+  );
+
   return {
     favorites,
     ratings,
     watchedMovies,
     watchedSeries,
     collections,
+    collectedItemKeys,
     favoriteKeys,
     ratingMap,
     watchedKeys,
@@ -430,5 +652,10 @@ export function useLibraryData({
     toggleFavorite,
     setRating,
     toggleWatched,
+    createCollection,
+    renameCollection,
+    deleteCollection,
+    moveItemToCollection,
+    removeItemFromCollection,
   };
 }

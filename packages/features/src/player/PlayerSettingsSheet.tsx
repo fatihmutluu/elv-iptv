@@ -3,7 +3,6 @@ import {
   type AndroidDecoderMode,
   DEFAULT_SUBTITLE_STYLE,
   type DeinterlaceMode,
-  type OsdTimeDisplayMode,
   type SubtitleStyleConfig,
 } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
@@ -29,6 +28,7 @@ import {
 } from './settings-menu-nav';
 import { buildSettingsNavRows, buildSettingsRadioItems } from './settings-sheet-items';
 import type { SleepTimerSnapshot } from './sleep-timer';
+import type { VodEndTimeDisplayMode } from './vod-progress-math';
 
 const APPROX_ROW_PITCH = 50;
 
@@ -41,7 +41,7 @@ export interface PlayerSettingsSheetProps {
   readonly isVod?: boolean;
   readonly playbackSpeed?: number;
   readonly resizeMode?: VideoResizeMode;
-  readonly timeDisplayMode?: OsdTimeDisplayMode;
+  readonly timeDisplayMode?: VodEndTimeDisplayMode;
   readonly alwaysOnTop?: boolean;
   readonly deinterlace?: boolean;
   readonly deinterlaceMode?: DeinterlaceMode;
@@ -250,20 +250,16 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
       });
     }
     if (isVod && props.onCycleTimeDisplayMode !== undefined) {
-      const tm = props.timeDisplayMode ?? 'total';
+      const tm = props.timeDisplayMode ?? 'remaining';
       const tmLabel =
-        tm === 'remaining'
-          ? i18n.t('player.remainingTime')
-          : tm === 'endsAt'
-            ? i18n.t('player.endsAt', { time: 'HH:MM' })
-            : i18n.t('player.totalDuration');
+        tm === 'remaining' ? i18n.t('player.remainingTime') : i18n.t('player.totalDuration');
       toggles.push({
         testID: 'player-time-display-toggle',
         icon: 'speed',
         label: i18n.t('player.timeDisplayMode'),
         description: i18n.t('player.settings.desc.timeDisplay'),
         pillLabel: tmLabel,
-        active: tm !== 'total',
+        active: tm !== 'remaining',
         role: 'button',
         accessibilityLabel: `${i18n.t('player.timeDisplayMode')}: ${tmLabel}`,
         onPress: props.onCycleTimeDisplayMode,

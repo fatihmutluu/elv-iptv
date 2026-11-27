@@ -95,7 +95,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
       });
     });
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('0:05');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:40');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:35');
 
     // Extrapolate 3s forward while playing -> OK pauses and freezes at 0:08
     await act(async () => {
@@ -110,7 +110,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
     });
     expect(screen.getByTestId('osd-status')).toHaveTextContent('Paused');
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('0:08');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:40');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:32');
 
     // Left tap (-10s) clamps at 0:00
     await act(async () => {
@@ -126,7 +126,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
     });
     expect(engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(10_000);
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('0:10');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:40');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:30');
 
     // Hold Right: key-down only previews (+10s -> 0:20) without seeking; release commits one seek (+30s repeat -> 50s)
     await act(async () => {
@@ -134,7 +134,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
     });
     expect(engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(10_000);
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('0:20');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:40');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:20');
 
     await act(async () => {
       jest.advanceTimersByTime(650);
@@ -144,7 +144,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
     });
     expect(engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(50_000);
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('0:50');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:40');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('0:50');
 
     // OK resumes playback
     await act(async () => {
@@ -350,7 +350,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
     );
     expect(engine.commands.filter((c) => c.name === 'load')).toHaveLength(1);
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('0:25');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('2:00');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:35');
 
     // Move Right to Subtitles column -> Down to Turkish subtitle (s:1) -> select
     await act(async () => {

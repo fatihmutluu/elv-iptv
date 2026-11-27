@@ -207,7 +207,9 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     await fireEvent.press(screen.getByTestId('settings-playback-toggle-filter-sdh'));
     await fireEvent.press(screen.getByTestId('settings-playback-toggle-pitch-lock'));
     await fireEvent.press(screen.getByTestId('settings-playback-toggle-audio-normalization'));
-    await fireEvent.press(screen.getByTestId('settings-playback-osd-time-endsAt'));
+    expect(screen.queryByTestId('settings-playback-osd-time-total')).toBeNull();
+    expect(screen.queryByTestId('settings-playback-osd-time-remaining')).toBeNull();
+    expect(screen.queryByTestId('settings-playback-osd-time-endsAt')).toBeNull();
     await fireEvent.press(screen.getByTestId('settings-playback-toggle-auto-play-next'));
 
     await waitFor(async () => {
@@ -218,7 +220,6 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
       expect(loaded.filterSdhSubtitles).toBe(true);
       expect(loaded.pitchLock).toBe(false);
       expect(loaded.audioNormalization).toBe(true);
-      expect(loaded.osdTimeDisplayMode).toBe('endsAt');
       expect(loaded.autoPlayNextEpisode).toBe(false);
     });
   });

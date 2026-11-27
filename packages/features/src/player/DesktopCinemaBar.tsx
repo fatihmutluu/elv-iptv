@@ -29,7 +29,6 @@ export function PlayerOsdBottomBar(
     settingsOpen = false,
     infoOpen = false,
     channelListOpen = false,
-    playbackSpeed = 1,
   } = p;
   const isDesktop = p.isDesktop ?? viewport.formFactor === 'desktop';
   const isPortrait = !isTv && viewport.orientation === 'portrait';
@@ -121,8 +120,6 @@ export function PlayerOsdBottomBar(
           dimmed={isPortrait && anySheetOpen}
           chapters={p.chapters}
           timeDisplayMode={p.timeDisplayMode}
-          playbackSpeed={playbackSpeed}
-          wallClock={p.wallClock}
           i18n={i18n}
           onCycleTimeDisplayMode={p.onCycleTimeDisplayMode}
           onFineScrubHaptic={p.onFineScrubHaptic}
@@ -131,12 +128,7 @@ export function PlayerOsdBottomBar(
         />
       ) : (
         <>
-          <LiveNowNextStrip
-            nowNext={p.nowNext}
-            nowMs={p.nowMs ?? Date.now()}
-            i18n={i18n}
-            timeDisplayMode={p.timeDisplayMode}
-          />
+          <LiveNowNextStrip nowNext={p.nowNext} nowMs={p.nowMs ?? Date.now()} i18n={i18n} />
           {p.liveTimeShiftSupported === true ? (
             <LiveTimeShiftBar
               service={service}

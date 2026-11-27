@@ -139,7 +139,6 @@ vi.mock('@elv/features', () => ({
       subtitleFontFamily: 'system',
       subtitleStyle: { fontScale: 1 },
       tvClockMode: 'always',
-      osdTimeDisplayMode: 'total',
       sleepTimerDefaultAction: 'stop',
       stillWatchingTimeoutMin: 0,
       preferredAudioDevice: 'auto',
@@ -293,6 +292,8 @@ describe('PopoutApp (Wave P3 full PlayerScreen + zero-reload handoff)', () => {
     });
     expect(player.props.onPopoutPlayer).toBeUndefined();
     expect(player.props.onEnterMultiView).toBeUndefined();
+    expect(player.props.osdTimeDisplayMode).toBeUndefined();
+    expect(player.props.onPersistOsdTimeDisplayMode).toBeUndefined();
 
     // Zapping inside Popout updates target in-place without changing session key
     const firstKey = player.key;

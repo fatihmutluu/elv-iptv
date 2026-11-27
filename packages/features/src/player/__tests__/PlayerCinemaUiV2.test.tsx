@@ -141,7 +141,7 @@ describe('VodProgressBar Cinema Quietude v2 scrubber', () => {
 
       await web.emit('pointermove', { clientX: 250 });
       expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('1:30');
-      expect(screen.getByTestId('player-progress-time')).toHaveTextContent('2:00');
+      expect(screen.getByTestId('player-progress-time')).toHaveTextContent('0:30');
       expect(screen.getByTestId('player-progress-hover-time')).toHaveTextContent('1:30');
       expect(onSeekRatio).not.toHaveBeenCalled();
 

@@ -85,7 +85,6 @@ export interface HomeDataState extends HomeSnapshot {
   readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
   readonly ratingByKey: ReadonlyMap<string, RatingValue>;
-  readonly refreshCollections: () => Promise<void>;
   readonly toggleMyList: (target: ToggleMyListTarget) => Promise<void>;
   readonly toggleWatched: (target: ToggleWatchedTarget, nextWatched: boolean) => Promise<void>;
   readonly toggleRating: (target: RatingToggleTarget, next: RatingValue) => Promise<boolean>;
@@ -170,14 +169,6 @@ export function useHomeData({
       setCollections([]);
     }
   }, [activeProfileId]);
-
-  const refreshCollections = useCallback(async () => {
-    const fetched = await fetchHydratedCollections(catalog);
-    if (!mountedRef.current) return;
-    const next = mergeHydratedCollections(fetched, collectionsRef.current);
-    collectionsRef.current = next;
-    setCollections(next);
-  }, [catalog]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken, userStateVersion, and activeProfileId intentionally trigger fresh bounded reads
   useEffect(() => {
@@ -742,7 +733,6 @@ export function useHomeData({
       unplayedBySeriesKey,
       watchedOverrides,
       ratingByKey,
-      refreshCollections,
       toggleMyList,
       toggleWatched,
       toggleRating,
@@ -758,7 +748,6 @@ export function useHomeData({
       markNewEpisodeWatched,
       nowNextByKey,
       ratingByKey,
-      refreshCollections,
       removeFromContinueWatching,
       snap,
       toggleMyList,

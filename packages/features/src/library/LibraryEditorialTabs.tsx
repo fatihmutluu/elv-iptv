@@ -1,6 +1,6 @@
-import { type ContextMenuAnchor, Icon, useI18n, useTheme } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { type ContextMenuAnchor, Icon, MicroPill, useI18n, useTheme } from '@elv/ui-kit';
+import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
+import { type LayoutChangeEvent, Platform, StyleSheet, Text, View } from 'react-native';
 import { LibraryRailSection } from './LibraryRailSection';
 import type {
   LibraryCardItem,
@@ -8,10 +8,16 @@ import type {
   PartitionedLibraryFavorites,
   PartitionedLibraryRatings,
 } from './library-model';
+import {
+  GENERAL_LIBRARY_DROP_TARGET_ID,
+  type LibraryDropRect,
+  type LibraryFolderDragController,
+} from './useLibraryFolderDrag';
 
 /** One hydrated custom collection rail entry. */
-interface LibraryCollectionRail {
+export interface LibraryCollectionRail {
   readonly railId: string;
+  readonly collectionId: string;
   readonly title: string;
   readonly items: readonly LibraryCardItem[];
 }
@@ -29,10 +35,22 @@ export interface LibraryEditorialTabsProps {
   readonly padX: number;
   readonly isTv: boolean;
   readonly focusedColFor: (railId: string) => number | null;
+  readonly focusedCollectionActionFor?: (collectionId: string) => 'rename' | 'delete' | null;
+  readonly dragController?: LibraryFolderDragController;
+  readonly onRenameCollection?: (collectionId: string, currentName: string) => void;
+  readonly onDeleteCollection?: (collectionId: string, name: string) => void;
   readonly onPressCard: (item: LibraryCardItem) => void;
   readonly onContextMenuLive: (item: LibraryCardItem, anchor?: ContextMenuAnchor) => void;
-  readonly onContextMenuVod: (item: LibraryCardItem, anchor?: ContextMenuAnchor) => void;
+  readonly onContextMenuVod: (
+    item: LibraryCardItem,
+    anchor?: ContextMenuAnchor,
+    currentCollectionId?: string | null,
+  ) => void;
   readonly onSeeAll: (state: LibrarySeeAllState) => void;
+}
+
+interface WebMeasureableNode {
+  getBoundingClientRect?: () => { left: number; top: number; width: number; height: number };
 }
 
 /** Renders the `Following`, `Likes`, and `Watched` editorial sub-tabs inside {@link LibraryScreen}. */
@@ -48,12 +66,45 @@ export function LibraryEditorialTabs({
   padX,
   isTv,
   focusedColFor,
+  focusedCollectionActionFor,
+  dragController,
+  onRenameCollection,
+  onDeleteCollection,
   onPressCard,
   onContextMenuLive,
   onContextMenuVod,
   onSeeAll,
 }: LibraryEditorialTabsProps): ReactElement {
   const i18n = useI18n();
+  const theme = useTheme();
+
+  const draggingCollected =
+    activeTab === 'following' &&
+    dragController?.activeDrag !== null &&
+    dragController?.activeDrag !== undefined &&
+    dragController.activeDrag.sourceCollectionId !== null;
+  const generalVodEmpty = favPartition.movies.length === 0 && favPartition.series.length === 0;
+  const showGeneralFallbackDropZone = draggingCollected && generalVodEmpty;
+  const generalFallbackRef = useRef<ComponentRef<typeof View> | null>(null);
+  const generalFallbackRectRef = useRef<LibraryDropRect | null>(null);
+
+  useEffect(() => {
+    if (!showGeneralFallbackDropZone || !dragController) return undefined;
+    const resolveRect = (): LibraryDropRect | null => {
+      const node = generalFallbackRef.current as unknown as WebMeasureableNode | null;
+      if (Platform.OS === 'web' && typeof node?.getBoundingClientRect === 'function') {
+        const b = node.getBoundingClientRect();
+        if (b.width > 0 || b.height > 0) {
+          return { x: b.left, y: b.top, width: b.width, height: b.height };
+        }
+      }
+      return generalFallbackRectRef.current;
+    };
+    dragController.registerDropZone(GENERAL_LIBRARY_DROP_TARGET_ID, resolveRect);
+    return () => {
+      dragController.registerDropZone(GENERAL_LIBRARY_DROP_TARGET_ID, null);
+    };
+  }, [dragController, showGeneralFallbackDropZone]);
 
   if (activeTab === 'following') {
     const hasFollowing =
@@ -72,6 +123,15 @@ export function LibraryEditorialTabs({
         />
       );
     }
+
+    const generalSeriesDropId = `${GENERAL_LIBRARY_DROP_TARGET_ID}:series`;
+    const generalMoviesDropId = `${GENERAL_LIBRARY_DROP_TARGET_ID}:movies`;
+    const generalHovered = dragController?.hoveredTargetId === GENERAL_LIBRARY_DROP_TARGET_ID;
+    const generalSeriesHovered = dragController?.hoveredTargetId === generalSeriesDropId;
+    const generalMoviesHovered = dragController?.hoveredTargetId === generalMoviesDropId;
+    const registerGeneralOnSeries = favPartition.series.length > 0;
+    const registerGeneralOnMovies = favPartition.movies.length > 0;
+
     return (
       <View testID="library-following-content" style={styles.railsStack}>
         <LibraryRailSection
@@ -98,8 +158,21 @@ export function LibraryEditorialTabs({
           padX={padX}
           isTv={isTv}
           focusedCardIndex={focusedColFor('series')}
+          {...(registerGeneralOnSeries && dragController
+            ? {
+                dropZoneTargetId: generalSeriesDropId,
+                isDropTargetHovered: generalSeriesHovered,
+                onRegisterDropZone: dragController.registerDropZone,
+              }
+            : {})}
+          {...(dragController
+            ? {
+                onStartCardDrag: dragController.startCardDrag,
+                wasRecentlyDragging: dragController.wasRecentlyDragging,
+              }
+            : {})}
           onPressItem={onPressCard}
-          onContextMenuItem={onContextMenuVod}
+          onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor, null)}
           onSeeAll={() =>
             onSeeAll({ railId: 'series', title: i18n.t('library.railSeries'), kind: 'poster' })
           }
@@ -113,12 +186,58 @@ export function LibraryEditorialTabs({
           padX={padX}
           isTv={isTv}
           focusedCardIndex={focusedColFor('movies')}
+          {...(registerGeneralOnMovies && dragController
+            ? {
+                dropZoneTargetId: generalMoviesDropId,
+                isDropTargetHovered: generalMoviesHovered,
+                onRegisterDropZone: dragController.registerDropZone,
+              }
+            : {})}
+          {...(dragController
+            ? {
+                onStartCardDrag: dragController.startCardDrag,
+                wasRecentlyDragging: dragController.wasRecentlyDragging,
+              }
+            : {})}
           onPressItem={onPressCard}
-          onContextMenuItem={onContextMenuVod}
+          onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor, null)}
           onSeeAll={() =>
             onSeeAll({ railId: 'movies', title: i18n.t('library.railMovies'), kind: 'poster' })
           }
         />
+
+        {showGeneralFallbackDropZone ? (
+          <View
+            ref={generalFallbackRef}
+            testID="library-dropzone-general"
+            onLayout={(e: LayoutChangeEvent) => {
+              const { x, y, width, height } = e.nativeEvent.layout;
+              generalFallbackRectRef.current = { x, y, width, height };
+            }}
+            style={[
+              styles.generalDropZone,
+              {
+                marginHorizontal: padX,
+                borderRadius: theme.radius.card,
+                borderColor: generalHovered ? theme.colors.accent : theme.colors.surfaceBorder,
+                backgroundColor: generalHovered ? theme.colors.accentTint : theme.colors.bgCard,
+                padding: theme.spacing.md,
+              },
+            ]}
+          >
+            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+              {i18n.t('library.collections.removeFrom')}
+            </Text>
+            {generalHovered ? (
+              <MicroPill
+                testID="library-drop-badge-general"
+                label={i18n.t('library.collections.dropHere')}
+                tone="accent"
+              />
+            ) : null}
+          </View>
+        ) : null}
+
         {collectionRails.map((col) => (
           <LibraryRailSection
             key={col.railId}
@@ -129,9 +248,27 @@ export function LibraryEditorialTabs({
             cardWidth={posterWidth}
             padX={padX}
             isTv={isTv}
+            isCollection
+            collectionId={col.collectionId}
             focusedCardIndex={focusedColFor(col.railId)}
+            focusedHeaderAction={focusedCollectionActionFor?.(col.collectionId) ?? null}
+            {...(onRenameCollection
+              ? { onRenameCollection: () => onRenameCollection(col.collectionId, col.title) }
+              : {})}
+            {...(onDeleteCollection
+              ? { onDeleteCollection: () => onDeleteCollection(col.collectionId, col.title) }
+              : {})}
+            {...(dragController
+              ? {
+                  dropZoneTargetId: col.collectionId,
+                  isDropTargetHovered: dragController.hoveredTargetId === col.collectionId,
+                  onRegisterDropZone: dragController.registerDropZone,
+                  onStartCardDrag: dragController.startCardDrag,
+                  wasRecentlyDragging: dragController.wasRecentlyDragging,
+                }
+              : {})}
             onPressItem={onPressCard}
-            onContextMenuItem={onContextMenuVod}
+            onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor, col.collectionId)}
             onSeeAll={() => onSeeAll({ railId: col.railId, title: col.title, kind: 'poster' })}
           />
         ))}
@@ -164,7 +301,7 @@ export function LibraryEditorialTabs({
           isTv={isTv}
           focusedCardIndex={focusedColFor('liked')}
           onPressItem={onPressCard}
-          onContextMenuItem={onContextMenuVod}
+          onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor)}
           onSeeAll={() =>
             onSeeAll({ railId: 'liked', title: i18n.t('library.railLiked'), kind: 'poster' })
           }
@@ -179,7 +316,7 @@ export function LibraryEditorialTabs({
           isTv={isTv}
           focusedCardIndex={focusedColFor('disliked')}
           onPressItem={onPressCard}
-          onContextMenuItem={onContextMenuVod}
+          onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor)}
           onSeeAll={() =>
             onSeeAll({ railId: 'disliked', title: i18n.t('library.railDisliked'), kind: 'poster' })
           }
@@ -213,7 +350,7 @@ export function LibraryEditorialTabs({
         isTv={isTv}
         focusedCardIndex={focusedColFor('watched-movies')}
         onPressItem={onPressCard}
-        onContextMenuItem={onContextMenuVod}
+        onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor)}
         onSeeAll={() =>
           onSeeAll({
             railId: 'watched-movies',
@@ -232,7 +369,7 @@ export function LibraryEditorialTabs({
         isTv={isTv}
         focusedCardIndex={focusedColFor('watched-series')}
         onPressItem={onPressCard}
-        onContextMenuItem={onContextMenuVod}
+        onContextMenuItem={(item, anchor) => onContextMenuVod(item, anchor)}
         onSeeAll={() =>
           onSeeAll({
             railId: 'watched-series',
@@ -286,5 +423,13 @@ const styles = StyleSheet.create({
   emptyBox: {
     borderWidth: 1,
     alignItems: 'flex-start',
+  },
+  generalDropZone: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
   },
 });

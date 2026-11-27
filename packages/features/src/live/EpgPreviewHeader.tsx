@@ -8,12 +8,20 @@ import {
   TABULAR_NUMS_STYLE,
   useI18n,
   useTheme,
+  useViewport,
   webCursorPointer,
 } from '@elv/ui-kit';
-import { memo, type ReactElement, useCallback } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { memo, type ReactElement, useCallback, useMemo, useState } from 'react';
+import {
+  type LayoutChangeEvent,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import type { EpgDateTab } from './epg-date-tabs';
-import { formatClockTime } from './live-model';
+import { computeEpgClockPillLayout, formatClockTime } from './live-model';
 import {
   formatChannelDisplayName,
   type ProgrammeBadgeKind,
@@ -325,6 +333,7 @@ export interface EpgTimeRulerProps {
   readonly jumpHighlighted: boolean;
   readonly showClock?: boolean;
   readonly nowMs?: number;
+  readonly nowLineRatio?: number | null;
   readonly focusedButton?: 'earlier' | 'jump' | 'later' | null;
   readonly onPanEarlier: () => void;
   readonly onJumpToLive: () => void;
@@ -337,13 +346,44 @@ export interface EpgTimeRulerProps {
  */
 export const EpgTimeRuler = memo(function EpgTimeRulerInner(p: EpgTimeRulerProps): ReactElement {
   const { categoryLabel, rulerTicks, channelColWidth, isTv, isPortrait, jumpHighlighted } = p;
-  const { showClock = true, nowMs, focusedButton = null } = p;
+  const { showClock = true, nowMs, nowLineRatio = null, focusedButton = null } = p;
   const { onPanEarlier, onJumpToLive, onPanLater } = p;
   const theme = useTheme();
   const i18n = useI18n();
+  const viewport = useViewport();
   const cursor = webCursorPointer();
   const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
   const rulerHeight = Math.round(32 * safeFontScale);
+  const pillWidth = Math.round(52 * safeFontScale);
+  const pillHeight = Math.round(22 * safeFontScale);
+  const tickLabelWidth = Math.round(44 * safeFontScale);
+  const tickLabelOffset = 8;
+  const pillGap = Math.round(6 * safeFontScale);
+
+  const [measuredTrackWidth, setMeasuredTrackWidth] = useState(0);
+  const viewportWidth = viewport.width > 0 ? viewport.width : 1280;
+  const fallbackTrackWidth = Math.max(160, viewportWidth - channelColWidth);
+  const effectiveTrackWidth = measuredTrackWidth > 0 ? measuredTrackWidth : fallbackTrackWidth;
+  const handleTrackLayout = useCallback((event: LayoutChangeEvent) => {
+    const width = event.nativeEvent.layout.width;
+    if (Number.isFinite(width) && width > 0) setMeasuredTrackWidth(width);
+  }, []);
+
+  const activeNowRatio = showClock && nowMs !== undefined ? nowLineRatio : null;
+  const clockLayout = useMemo(
+    () =>
+      computeEpgClockPillLayout({
+        trackWidth: effectiveTrackWidth,
+        nowLineRatio: activeNowRatio,
+        tickCount: rulerTicks.length,
+        pillWidth,
+        tickLabelWidth,
+        tickLabelOffset,
+        gap: pillGap,
+      }),
+    [effectiveTrackWidth, activeNowRatio, rulerTicks.length, pillWidth, tickLabelWidth, pillGap],
+  );
+  const liveClockText = nowMs !== undefined ? formatClockTime(nowMs) : '';
 
   const navButtons = [
     ['earlier', 'epg-pan-earlier', i18n.t('epg.earlier'), false, onPanEarlier],
@@ -354,6 +394,7 @@ export const EpgTimeRuler = memo(function EpgTimeRulerInner(p: EpgTimeRulerProps
   return (
     <>
       <View
+        testID="epg-time-nav-bar"
         style={[
           styles.timeNavBar,
           {
@@ -363,19 +404,6 @@ export const EpgTimeRuler = memo(function EpgTimeRulerInner(p: EpgTimeRulerProps
           },
         ]}
       >
-        {showClock && nowMs !== undefined ? (
-          <Text
-            testID="epg-live-clock"
-            style={[
-              theme.typography.caption,
-              TABULAR_NUMS_STYLE,
-              styles.liveClock,
-              { color: theme.colors.textSecondary },
-            ]}
-          >
-            {formatClockTime(nowMs)}
-          </Text>
-        ) : null}
         {navButtons.map(([id, testID, label, highlighted, onPress]) => {
           const isFocused = focusedButton === id;
           const bg = isFocused
@@ -448,25 +476,61 @@ export const EpgTimeRuler = memo(function EpgTimeRulerInner(p: EpgTimeRulerProps
             {categoryLabel}
           </Text>
         </View>
-        <View testID="epg-ruler-track" style={styles.rulerTrack}>
-          {rulerTicks.map((tickMs, idx) => (
+        <View testID="epg-ruler-track" style={styles.rulerTrack} onLayout={handleTrackLayout}>
+          {rulerTicks.map((tickMs, idx) => {
+            const hidden = clockLayout.hiddenTickIndices.has(idx);
+            return (
+              <View
+                key={tickMs}
+                style={[styles.rulerTickCell, { borderLeftColor: theme.colors.surfaceBorder }]}
+              >
+                <Text
+                  testID={`epg-tick-${idx}`}
+                  numberOfLines={1}
+                  accessibilityElementsHidden={hidden}
+                  importantForAccessibility={hidden ? 'no' : 'auto'}
+                  style={[
+                    theme.typography.caption,
+                    TABULAR_NUMS_STYLE,
+                    { color: theme.colors.textSecondary },
+                    hidden ? styles.hiddenTickText : null,
+                  ]}
+                >
+                  {formatClockTime(tickMs)}
+                </Text>
+              </View>
+            );
+          })}
+          {showClock && clockLayout.visible ? (
             <View
-              key={tickMs}
-              style={[styles.rulerTickCell, { borderLeftColor: theme.colors.surfaceBorder }]}
+              testID="epg-live-clock-badge"
+              pointerEvents="none"
+              style={[
+                styles.clockPill,
+                {
+                  left: clockLayout.pillLeftPx,
+                  top: Math.max(0, Math.round((rulerHeight - pillHeight) / 2)),
+                  width: pillWidth,
+                  height: pillHeight,
+                  backgroundColor: theme.colors.accent,
+                  borderRadius: theme.radius.pill,
+                },
+              ]}
             >
               <Text
-                testID={`epg-tick-${idx}`}
+                testID="epg-live-clock"
                 numberOfLines={1}
                 style={[
-                  theme.typography.caption,
+                  theme.typography.micro,
                   TABULAR_NUMS_STYLE,
-                  { color: theme.colors.textSecondary },
+                  styles.clockPillText,
+                  { color: theme.colors.accentContrast },
                 ]}
               >
-                {formatClockTime(tickMs)}
+                {liveClockText}
               </Text>
             </View>
-          ))}
+          ) : null}
         </View>
       </View>
     </>
@@ -509,11 +573,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    paddingVertical: 6,
+    paddingVertical: 4,
     gap: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  liveClock: { marginRight: 'auto', fontWeight: '600' },
   navBtn: {
     minWidth: 40,
     minHeight: 40,
@@ -534,11 +597,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRightWidth: StyleSheet.hairlineWidth,
   },
-  rulerTrack: { flex: 1, flexDirection: 'row', direction: 'ltr', height: '100%' },
+  rulerTrack: {
+    position: 'relative',
+    flex: 1,
+    flexDirection: 'row',
+    direction: 'ltr',
+    height: '100%',
+  },
   rulerTickCell: {
     flex: 1,
     justifyContent: 'center',
     paddingLeft: 8,
     borderLeftWidth: StyleSheet.hairlineWidth,
   },
+  hiddenTickText: { opacity: 0 },
+  clockPill: {
+    position: 'absolute',
+    direction: 'ltr',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    zIndex: 4,
+  },
+  clockPillText: { fontWeight: '700' },
 });

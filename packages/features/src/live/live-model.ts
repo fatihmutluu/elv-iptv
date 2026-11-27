@@ -265,6 +265,71 @@ export function computeNowLineRatio(
   return (nowMs - windowStartMs) / spanMs;
 }
 
+/** Input parameters for {@link computeEpgClockPillLayout}. */
+export interface EpgClockPillLayoutInput {
+  readonly trackWidth: number;
+  readonly nowLineRatio: number | null;
+  readonly tickCount: number;
+  readonly pillWidth: number;
+  readonly tickLabelWidth: number;
+  readonly tickLabelOffset?: number;
+  readonly gap?: number;
+}
+
+/** Computed horizontal anchor and colliding tick indices for the EPG ruler live clock pill (`#507`). */
+export interface EpgClockPillLayout {
+  readonly visible: boolean;
+  readonly pillLeftPx: number;
+  readonly hiddenTickIndices: ReadonlySet<number>;
+}
+
+/**
+ * Computes the edge-clamped pixel offset of the live clock pill centered on `nowLineRatio` over
+ * `epg-ruler-track` and returns the set of half-hour tick indices whose label boxes overlap it (`#507`).
+ */
+export function computeEpgClockPillLayout(input: EpgClockPillLayoutInput): EpgClockPillLayout {
+  const { trackWidth, nowLineRatio, tickCount, pillWidth, tickLabelWidth } = input;
+  const visible =
+    nowLineRatio !== null &&
+    Number.isFinite(nowLineRatio) &&
+    nowLineRatio >= 0 &&
+    nowLineRatio <= 1 &&
+    Number.isFinite(trackWidth) &&
+    trackWidth > 0;
+  if (!visible) {
+    return { visible: false, pillLeftPx: 0, hiddenTickIndices: new Set<number>() };
+  }
+
+  const safePillWidth = Number.isFinite(pillWidth) && pillWidth > 0 ? pillWidth : 0;
+  const safeTickWidth = Number.isFinite(tickLabelWidth) && tickLabelWidth > 0 ? tickLabelWidth : 0;
+  const safeTickOffset =
+    input.tickLabelOffset !== undefined &&
+    Number.isFinite(input.tickLabelOffset) &&
+    input.tickLabelOffset > 0
+      ? input.tickLabelOffset
+      : 0;
+  const safeGap =
+    input.gap !== undefined && Number.isFinite(input.gap) && input.gap > 0 ? input.gap : 0;
+
+  const centerX = nowLineRatio * trackWidth;
+  const maxLeft = Math.max(0, trackWidth - safePillWidth);
+  const pillLeftPx = Math.max(0, Math.min(maxLeft, centerX - safePillWidth / 2));
+  const pillStart = pillLeftPx - safeGap;
+  const pillEnd = pillLeftPx + safePillWidth + safeGap;
+
+  const hidden = new Set<number>();
+  if (Number.isInteger(tickCount) && tickCount > 0) {
+    for (let i = 0; i < tickCount; i += 1) {
+      const tickLeft = (i / tickCount) * trackWidth + safeTickOffset;
+      const tickRight = tickLeft + safeTickWidth;
+      if (tickLeft < pillEnd && tickRight > pillStart) {
+        hidden.add(i);
+      }
+    }
+  }
+  return { visible: true, pillLeftPx, hiddenTickIndices: hidden };
+}
+
 /**
  * Finds the programme index spanning `anchorTimeMs` so D-pad Up/Down navigation across virtualized
  * channels keeps focus cleanly aligned under the user's time cursor (`#6`). Falls back to the

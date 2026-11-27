@@ -380,8 +380,11 @@ export async function listCollectionsForItem(
 }
 
 /**
- * Adds a movie or series to `collectionId` (verifying `profileId` ownership), deriving `source_id`
- * safely from `itemKey` and appending at `MAX(position) + 1`. Idempotent when already present.
+ * Adds a movie or series to `collectionId` (verifying `profileId` ownership), enforcing folder
+ * semantics (at most one collection per item per profile): if `itemKey` is already in another
+ * collection belonging to the same profile, it is atomically removed from that collection and both
+ * collections have `updated_at` bumped so LWW sync propagates the move. Idempotent when already in
+ * `collectionId`.
  */
 export async function addItemToCollection(
   db: SqlDriver,
@@ -412,6 +415,23 @@ export async function addItemToCollection(
       [collectionId, itemKey],
     );
     if (exists.length > 0) return true;
+    const siblingCols = await tx.all<{ collection_id: string }>(
+      `SELECT ci.collection_id
+         FROM vod_collection_items ci
+         JOIN vod_collections c ON c.id = ci.collection_id
+        WHERE ci.item_key = ? AND c.profile_id = ? AND ci.collection_id != ?`,
+      [itemKey, pid, collectionId],
+    );
+    for (const sibling of siblingCols) {
+      await tx.run('DELETE FROM vod_collection_items WHERE collection_id = ? AND item_key = ?', [
+        sibling.collection_id,
+        itemKey,
+      ]);
+      await tx.run('UPDATE vod_collections SET updated_at = ? WHERE id = ?', [
+        now,
+        sibling.collection_id,
+      ]);
+    }
     const posRow = await tx.all<{ next_pos: number }>(
       'SELECT COALESCE(MAX(position) + 1, 0) AS next_pos FROM vod_collection_items WHERE collection_id = ?',
       [collectionId],

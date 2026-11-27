@@ -215,18 +215,16 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
       expect(screen.getByTestId('live-stage-channel-title')).toBeTruthy();
     });
 
-    // Initial active channel is #101; zero prev-channel or numpad clutter in Favorites stage
+    // Initial active channel is #101; zero top actionBar, prev-channel, or numpad clutter in Favorites stage
     expect(screen.getByTestId('live-stage-channel-title').props.children).toContain('101');
+    expect(screen.queryByTestId('live-stage-actions')).toBeNull();
+    expect(screen.queryByTestId('live-toggle-miniguide')).toBeNull();
+    expect(screen.queryByTestId('live-stage-favorite')).toBeNull();
     expect(screen.queryByTestId('live-prev-channel')).toBeNull();
     expect(screen.queryByTestId('live-toggle-numpad')).toBeNull();
-
-    // Toggle Mini-Guide off and back on
-    await fireEvent.press(screen.getByTestId('live-toggle-miniguide'));
-    expect(screen.queryByTestId('live-zap-drawer')).toBeNull();
-    await fireEvent.press(screen.getByTestId('live-toggle-miniguide'));
     expect(screen.getByTestId('live-zap-drawer')).toBeTruthy();
 
-    // Watch live CTA launches fullscreen playback for active channel #101
+    // Fullscreen button in split player controls launches fullscreen playback for active channel #101
     await fireEvent.press(screen.getByTestId('live-watch-fullscreen'));
     expect(onWatchChannel).toHaveBeenCalledWith(
       expect.objectContaining({ key: 'live:src-1:ch-0', num: 101 }),
@@ -352,12 +350,17 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
     expect(modeFavStyle.minHeight).toBeGreaterThanOrEqual(40);
     expect(modeFavStyle.minWidth).toBeGreaterThanOrEqual(40);
 
-    // Top overlay action buttons >= 40x40
-    const miniGuideStyle = StyleSheet.flatten(
-      screen.getByTestId('live-toggle-miniguide').props.style,
+    // Split player controls touch targets >= 40x40
+    const fullscreenStyle = StyleSheet.flatten(
+      screen.getByTestId('live-watch-fullscreen').props.style,
     );
-    expect(miniGuideStyle.minHeight).toBeGreaterThanOrEqual(40);
-    expect(miniGuideStyle.minWidth).toBeGreaterThanOrEqual(40);
+    expect(fullscreenStyle.minHeight).toBeGreaterThanOrEqual(40);
+    expect(fullscreenStyle.minWidth).toBeGreaterThanOrEqual(40);
+    const playPauseStyle = StyleSheet.flatten(
+      screen.getByTestId('live-split-play-pause').props.style,
+    );
+    expect(playPauseStyle.minHeight).toBeGreaterThanOrEqual(40);
+    expect(playPauseStyle.minWidth).toBeGreaterThanOrEqual(40);
 
     // Switch to Channels mode via LiveModeSwitcher and verify single-column grid + numpad >= 40x40
     await fireEvent.press(screen.getByTestId('live-mode-channels'));
