@@ -134,6 +134,7 @@ import {
   type CatalogWaveP7OpsRpcCall,
   isWaveP7OpsRpcCall,
 } from './catalog-ipc-wave-p7-guards.ts';
+import { type CatalogWaveP9OpsRpcCall, isWaveP9OpsRpcCall } from './catalog-ipc-wave-p9-guards.ts';
 
 /** IPC channels used to establish and fence a renderer's catalog `MessagePort`. */
 export const CATALOG_CHANNELS = Object.freeze({
@@ -321,7 +322,8 @@ export type CatalogRpcMethodCall =
   | CatalogFailoverOpsRpcCall
   | CatalogRatingsOpsRpcCall
   | CatalogWaveF5bOpsRpcCall
-  | CatalogWaveP7OpsRpcCall;
+  | CatalogWaveP7OpsRpcCall
+  | CatalogWaveP9OpsRpcCall;
 
 /** Preload to utility process over `MessagePort`. */
 export type CatalogClientMessage =
@@ -754,7 +756,8 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isFailoverOpsRpcCall(x) ||
         isRatingsOpsRpcCall(x) ||
         isWaveF5bOpsRpcCall(x) ||
-        isWaveP7OpsRpcCall(x)
+        isWaveP7OpsRpcCall(x) ||
+        isWaveP9OpsRpcCall(x)
       );
   }
 }

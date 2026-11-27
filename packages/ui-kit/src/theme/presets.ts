@@ -28,6 +28,9 @@ export interface ThemePalette {
   readonly successColor: string;
   readonly ctaBg: string;
   readonly ctaFg: string;
+  readonly dangerBg: string;
+  readonly dangerFg: string;
+  readonly dangerBorder: string;
 }
 
 /** Default Cinema Quietude theme preset. */
@@ -64,6 +67,9 @@ export const THEME_PRESETS: Readonly<Record<ThemePresetId, ThemePalette>> = {
     successColor: '#22C55E',
     ctaBg: '#FFFFFF',
     ctaFg: '#09090B',
+    dangerBg: '#B91C1C',
+    dangerFg: '#FFFFFF',
+    dangerBorder: '#EF4444',
   },
   abyssalSapphire: {
     label: 'Abyssal Sapphire',
@@ -84,6 +90,9 @@ export const THEME_PRESETS: Readonly<Record<ThemePresetId, ThemePalette>> = {
     successColor: '#10B981',
     ctaBg: '#FFFFFF',
     ctaFg: '#070A12',
+    dangerBg: '#B91C1C',
+    dangerFg: '#FFFFFF',
+    dangerBorder: '#EF4444',
   },
   theaterAmber: {
     label: 'Theater Amber',
@@ -104,6 +113,9 @@ export const THEME_PRESETS: Readonly<Record<ThemePresetId, ThemePalette>> = {
     successColor: '#22C55E',
     ctaBg: '#FFFFFF',
     ctaFg: '#0A0908',
+    dangerBg: '#B91C1C',
+    dangerFg: '#FFFFFF',
+    dangerBorder: '#EF4444',
   },
   velvetViolet: {
     label: 'Velvet Violet',
@@ -124,6 +136,9 @@ export const THEME_PRESETS: Readonly<Record<ThemePresetId, ThemePalette>> = {
     successColor: '#34D399',
     ctaBg: '#FFFFFF',
     ctaFg: '#09080E',
+    dangerBg: '#B91C1C',
+    dangerFg: '#FFFFFF',
+    dangerBorder: '#FB7185',
   },
   pitchEmerald: {
     label: 'Pitch Emerald',
@@ -144,6 +159,9 @@ export const THEME_PRESETS: Readonly<Record<ThemePresetId, ThemePalette>> = {
     successColor: '#22C55E',
     ctaBg: '#FFFFFF',
     ctaFg: '#070B0A',
+    dangerBg: '#B91C1C',
+    dangerFg: '#FFFFFF',
+    dangerBorder: '#EF4444',
   },
   highContrast: {
     label: 'High Contrast (AAA)',
@@ -165,6 +183,9 @@ export const THEME_PRESETS: Readonly<Record<ThemePresetId, ThemePalette>> = {
     successColor: '#4ADE80',
     ctaBg: '#FFFFFF',
     ctaFg: '#000000',
+    dangerBg: '#991B1B',
+    dangerFg: '#FFFFFF',
+    dangerBorder: '#FCA5A5',
   },
 };
 

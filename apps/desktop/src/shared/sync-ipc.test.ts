@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isBidirectionalPairingSnapshot,
   isFeedbackSubmitRequest,
   isFeedbackSubmitResult,
   isSyncAccountState,
   isSyncActionResult,
   isSyncClaimQrRequest,
   isSyncDeleteAccountRequest,
+  isSyncPairConfirmRequest,
+  isSyncPairJoinRequest,
   isSyncPollQrRequest,
   isSyncQrPairingSession,
   isSyncQrPollStatus,
   isSyncRegisterRequest,
   isSyncSetServerUrlRequest,
+  isSyncSetViewingActiveRequest,
   isSyncSignInRequest,
   isTelemetryRecordRequest,
   isTelemetrySetOptInRequest,
@@ -36,6 +40,19 @@ describe('sync-ipc guards (#26, #458)', () => {
       setSyncablePrefs: 'sync:setSyncablePrefs',
       initialPrefsReceived: 'sync:initialPrefsReceived',
       stateChanged: 'sync:stateChanged',
+      markSyncDirty: 'sync:markSyncDirty',
+      notifySyncDirty: 'sync:notifySyncDirty',
+      notifyPlaybackPause: 'sync:notifyPlaybackPause',
+      notifyPlaybackExitOrSwitch: 'sync:notifyPlaybackExitOrSwitch',
+      setViewingActive: 'sync:setViewingActive',
+      notifyReconnect: 'sync:notifyReconnect',
+      pairStart: 'sync:pairStart',
+      pairJoin: 'sync:pairJoin',
+      pairPoll: 'sync:pairPoll',
+      pairConfirm: 'sync:pairConfirm',
+      pairCancel: 'sync:pairCancel',
+      consumePendingPairUri: 'sync:consumePendingPairUri',
+      pairDeepLink: 'sync:pairDeepLink',
       telemetrySetOptIn: 'telemetry:setOptIn',
       telemetryGetStatus: 'telemetry:getStatus',
       telemetryRecord: 'telemetry:record',
@@ -162,5 +179,75 @@ describe('sync-ipc guards (#26, #458)', () => {
     expect(isFeedbackSubmitResult({ ok: true, id: 'fb-1' })).toBe(true);
     expect(isFeedbackSubmitResult({ ok: false, errorCode: 'network' })).toBe(true);
     expect(isFeedbackSubmitResult({ ok: true, extra: 1 })).toBe(false);
+  });
+
+  it('validates Wave P9 auto-sync, bidirectional pairing, and all 13 telemetry event kinds', () => {
+    expect(
+      isSyncAccountState({
+        status: 'signed_in',
+        email: 'a@b.co',
+        lastSyncedAtIso: null,
+        pendingRecoveryCode: null,
+        errorCode: null,
+        autoSyncState: 'pending',
+      }),
+    ).toBe(true);
+    expect(isSyncSetViewingActiveRequest({ active: true })).toBe(true);
+    expect(isSyncSetViewingActiveRequest({ active: 'yes' })).toBe(false);
+    expect(isSyncPairJoinRequest({ codeOrUri: '12345678' })).toBe(true);
+    expect(
+      isSyncPairConfirmRequest({ pairingId: 'p-1', chosenDirection: 'host_to_responder' }),
+    ).toBe(true);
+    expect(isSyncPairConfirmRequest({ pairingId: 'p-1', chosenDirection: 'bad' })).toBe(false);
+    expect(
+      isBidirectionalPairingSnapshot({
+        pairingId: 'p-1',
+        role: 'host',
+        code: '12345678',
+        expiresAtMs: 999999,
+        status: 'awaiting_sas',
+        sas: '0421',
+        direction: 'responder_to_host',
+        localMaskedEmail: null,
+        peerMaskedEmail: 'a***@b.co',
+      }),
+    ).toBe(true);
+    expect(
+      isBidirectionalPairingSnapshot({
+        pairingId: 'p-1',
+        role: 'host',
+        code: '12345678',
+        expiresAtMs: 999999,
+        status: 'pending',
+        sas: null,
+        direction: null,
+        localMaskedEmail: null,
+        peerMaskedEmail: null,
+        pollToken: 'SECRET_LEAK',
+      }),
+    ).toBe(false);
+
+    const p9Events = [
+      { kind: 'startup', durationMs: 300, coldStart: true },
+      { kind: 'frame_jank', screen: 'guide', droppedFrames: 3, maxFrameMs: 55 },
+      { kind: 'js_stall', screen: 'home', durationMs: 210 },
+      { kind: 'memory_pressure', level: 'critical', usedMb: 700 },
+      { kind: 'playback_start', engine: 'mpv', ttffMs: 250, isLive: false, container: 'mp4' },
+      { kind: 'playback_rebuffer', engine: 'mpv', durationMs: 800, isLive: true },
+      { kind: 'sqlite_slow_op', op: 'SELECT', durationMs: 280 },
+      { kind: 'app_crash', errorName: 'Error', stackSig: 'App.tsx:10', fatal: true },
+      { kind: 'unhandled_error', errorName: 'TypeError', stackSig: 'Main:12', source: 'main' },
+      {
+        kind: 'catalog_import',
+        sourceKind: 'm3u',
+        stage: 'guide',
+        durationMs: 900,
+        itemCount: 400,
+        success: true,
+      },
+    ];
+    for (const ev of p9Events) {
+      expect(isTelemetryRecordRequest(ev)).toBe(true);
+    }
   });
 });

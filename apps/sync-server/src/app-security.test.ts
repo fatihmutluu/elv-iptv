@@ -528,6 +528,7 @@ describe('ELV Sync Server security & hardening regressions', () => {
       osVersion: null,
       formFactor: null,
       payloadJson: '{"durationMs":100}',
+      deviceProfileJson: null,
     }));
     await storage.insertTelemetryEvents(batch);
     const storedTel = await storage.listTelemetryEvents(null);
@@ -551,6 +552,22 @@ describe('ELV Sync Server security & hardening regressions', () => {
     expect(await storage.listFeedbackSubmissions(null)).toHaveLength(500);
 
     // Expired pair sessions & refresh tokens pruned when new ones are inserted
+    const emptyV2Fields = {
+      attempts: 0,
+      hostPublicKey: null,
+      responderPublicKey: null,
+      hostAuthState: 'signed_out' as const,
+      hostMaskedEmail: null,
+      hostEmailHash: null,
+      responderAuthState: null,
+      responderMaskedEmail: null,
+      responderEmailHash: null,
+      responderTokenHash: null,
+      direction: null,
+      hostApprovedAt: null,
+      returnEncryptedPayload: null,
+      returnIv: null,
+    };
     await storage.createPairSession({
       id: 'p-old',
       code: 'OLDPAIR12345',
@@ -559,6 +576,7 @@ describe('ELV Sync Server security & hardening regressions', () => {
       claimedByUserId: null,
       encryptedPayload: null,
       iv: null,
+      ...emptyV2Fields,
       expiresAt: '2026-11-25T12:05:00.000Z',
       createdAt: '2026-11-25T12:00:00.000Z',
     });
@@ -570,6 +588,7 @@ describe('ELV Sync Server security & hardening regressions', () => {
       claimedByUserId: null,
       encryptedPayload: null,
       iv: null,
+      ...emptyV2Fields,
       expiresAt: '2026-11-25T12:15:00.000Z',
       createdAt: '2026-11-25T12:10:00.000Z',
     });
@@ -672,5 +691,52 @@ describe('ELV Sync Server security & hardening regressions', () => {
     } finally {
       await running.close();
     }
+  });
+
+  it('#14 (Wave P9): blocks raw pairing code storage at rest and direction-tampering lockout', async () => {
+    const { app, storage } = makeApp();
+    const hostPk = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE';
+    const responderPk = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI';
+
+    const createdRes = await app.fetch(
+      jsonReq('/v1/pair/create', 'POST', {
+        hostPublicKey: hostPk,
+        hostAuthState: 'signed_out',
+      }),
+    );
+    expect(createdRes.status).toBe(201);
+    const created = (await createdRes.json()) as {
+      pairingId: string;
+      code: string;
+      pollToken: string;
+    };
+
+    // Stored record MUST hash code and pollToken (never plaintext at rest!)
+    const stored = await storage.findPairSessionById(created.pairingId);
+    expect(stored?.code).not.toBe(created.code);
+    expect(stored?.code).toMatch(/^[0-9a-f]{64}$/);
+    expect(stored?.pollTokenHash).not.toBe(created.pollToken);
+
+    // Tampered direction inconsistent with auth states increments attempts & locks at 3
+    for (let i = 0; i < 2; i += 1) {
+      const bad = await app.fetch(
+        jsonReq('/v1/pair/respond', 'POST', {
+          code: created.code,
+          responderPublicKey: responderPk,
+          responderAuthState: 'signed_out',
+          direction: 'host_to_responder',
+        }),
+      );
+      expect(bad.status).toBe(400);
+    }
+    const third = await app.fetch(
+      jsonReq('/v1/pair/respond', 'POST', {
+        code: created.code,
+        responderPublicKey: responderPk,
+        responderAuthState: 'signed_out',
+        direction: 'host_to_responder',
+      }),
+    );
+    expect(third.status).toBe(423);
   });
 });

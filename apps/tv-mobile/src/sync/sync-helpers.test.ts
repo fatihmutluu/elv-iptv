@@ -8,7 +8,11 @@ vi.mock('@elv/lan-pairing', () => ({
   generateLanPairingToken: () => mocks.generateLanPairingToken(),
 }));
 
-import { defaultCsprngBytes, redactDiagnosticsLine } from './sync-helpers';
+import {
+  defaultCsprngBytes,
+  extractSafeMobileErrorSignature,
+  redactDiagnosticsLine,
+} from './sync-helpers';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -99,5 +103,45 @@ describe('redactDiagnosticsLine (HIGH #8)', () => {
       expect(cleaned).not.toContain('supersecret');
       expect(cleaned).not.toContain('eyJhbGciOiJIUzI1NiJ9');
     }
+  });
+});
+
+describe('extractSafeMobileErrorSignature (P1-6)', () => {
+  it('redacts provider URLs BEFORE frame extraction so host:port and stream paths never leak into stackSig', () => {
+    const err = Object.assign(
+      new Error('Failed loading https://user:pass@myprovider.de:8080/live/u/p/123.ts'),
+      {
+        stack: [
+          'Error: Failed loading https://user:pass@myprovider.de:8080/live/u/p/123.ts',
+          '    at fetchStream (https://myprovider.de:8080/live/user/pass/123.ts:1:1)',
+          '    at parse (myprovider.de:8080/playlist.m3u:4:2)',
+          '    at render (index.android.bundle:512:4)',
+        ].join('\n'),
+      },
+    );
+    const sig = extractSafeMobileErrorSignature(err);
+    expect(sig.errorName).toBe('Error');
+    expect(sig.stackSig).not.toContain('myprovider');
+    expect(sig.stackSig).not.toContain('8080');
+    expect(sig.stackSig).not.toContain('123.ts');
+    expect(sig.stackSig).not.toContain('playlist.m3u');
+    expect(sig.stackSig).toBe('index.android.bundle:512');
+  });
+
+  it('extracts legitimate mobile bundle and TypeScript frames cleanly', () => {
+    const tsErr = Object.assign(new TypeError('null ref'), {
+      stack: 'TypeError: null ref\n    at Player (PlayerScreen.tsx:88:12)',
+    });
+    expect(extractSafeMobileErrorSignature(tsErr)).toEqual({
+      errorName: 'TypeError',
+      stackSig: 'PlayerScreen.tsx:88',
+    });
+    const hbcErr = Object.assign(new RangeError('bounds'), {
+      stack: 'RangeError: bounds\n    at eval (app.hbc:14:2)',
+    });
+    expect(extractSafeMobileErrorSignature(hbcErr)).toEqual({
+      errorName: 'RangeError',
+      stackSig: 'app.hbc:14',
+    });
   });
 });

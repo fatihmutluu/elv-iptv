@@ -16,6 +16,7 @@ import { trWaveP5Messages } from './tr-wave-p5';
 import { trWaveP6Messages } from './tr-wave-p6';
 import { trWaveP7Messages } from './tr-wave-p7';
 import { trWaveP8Messages } from './tr-wave-p8';
+import { trWaveP9Messages } from './tr-wave-p9';
 
 /** Turkish (`tr`) message catalog. */
 export const trMessages: Readonly<Record<MessageId, string>> = {
@@ -736,5 +737,6 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trWaveP6Messages,
   ...trWaveP7Messages,
   ...trWaveP8Messages,
+  ...trWaveP9Messages,
   ...trIssue502Messages,
 };

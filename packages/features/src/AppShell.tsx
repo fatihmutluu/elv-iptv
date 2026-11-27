@@ -1,6 +1,4 @@
-import type { CatalogService, SearchScope } from '@elv/data';
-import type { DownloadManagerPort, KeymapStore, ProfilePreferencesManager } from '@elv/domain';
-import type { ConnectionTracker } from '@elv/playback';
+import type { SearchScope } from '@elv/data';
 import { useI18n, useViewport } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -17,6 +15,7 @@ import { AppShellPlayerHost } from './app-shell-player';
 import { useProgrammeReminders } from './app-shell-reminders';
 import {
   AppShellContextProviders,
+  type AppShellProps,
   AppShellStage,
   useShellArtworkCacheLimit,
   useShellIncomingLocalPlaylist,
@@ -35,23 +34,14 @@ import {
   type PrimaryNavTab,
   pushDetailStack,
 } from './app-shell-state';
+import { useSyncDirtyCatalog } from './app-shell-sync-hooks';
 import { useTvHomeChannelsSync } from './app-shell-tv-channels';
 import { AppShellRootOverlays, useAppShellWaveF7b } from './app-shell-wave-f7b';
 import { useWaveF9Controller } from './app-shell-wave-f9';
 import type { CatalogTabMemory } from './catalog';
 import { EMPTY_LIVE_MEMORY, type LiveTabMemory, recordChannelTune } from './live';
-import type { AppLifecyclePort } from './ports/app-lifecycle';
-import type { DesktopWindowPort } from './ports/desktop-window-host';
-import type { LanPairingPort } from './ports/lan-pairing-host';
-import type { PlayDeepLinkTarget } from './ports/play-deep-link';
 import type { PlayTarget } from './ports/play-target';
-import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
-import type { ReminderHostPort } from './ports/reminder-host';
-import type { SourceImportHost } from './ports/source-import-host';
-import type { TvHomeChannelsPort } from './ports/tv-home-channels';
-import type { ThermalDevicePort, VideoHost } from './ports/video-host';
-import type { DiagnosticsPort, ExternalPlayerPort } from './ports/wave-f7b-ports';
-import type { FeedbackPort, SyncAccountPort, TelemetryPort } from './ports/wave-f9-ports';
+import { createPlaybackGuard } from './ports/playback-guard';
 import { useOledScreensaver } from './screensaver';
 import type { SettingsSection } from './settings';
 import { type DetailTarget, KeymapProvider, ProfileProvider, useProfile } from './shared';
@@ -71,66 +61,25 @@ import {
 } from './shell';
 import { CachedCatalogStrip } from './sources/CachedCatalogStrip';
 
-export type { AppTab };
-
-/** Props of {@link AppShell}. */
-export interface AppShellProps {
-  catalog: CatalogService;
-  videoHost: VideoHost;
-  appLifecycle?: AppLifecyclePort;
-  /** Optional thermal and hardware Multi-View capability port (`#34`, `#232`). */
-  thermalDevice?: ThermalDevicePort;
-  /** Optional desktop tray and standalone popout window port (`#158`). */
-  desktopWindow?: DesktopWindowPort;
-  /** Optional multi-profile preferences manager (`#15`); falls back to `usePreferences().profilePreferences`. */
-  profilePreferences?: ProfilePreferencesManager;
-  externalRefreshToken?: number;
-  /** Optional shared per-account connection tracker for multi-surface pre-flight limits (`#87`). */
-  connectionTracker?: ConnectionTracker;
-  /** Optional platform clipboard & sandboxed local playlist picker port (`#51`). */
-  sourceImportHost?: SourceImportHost;
-  /** Optional platform local LAN QR pairing port (`#50`). */
-  lanPairing?: LanPairingPort;
-  /** Optional dedicated sparse remote keymap store (`#33`). */
-  keymapStore?: KeymapStore;
-  /** Optional Android TV Home Screen preview channels port (`#273`). */
-  tvHomeChannels?: TvHomeChannelsPort;
-  /** Optional OS notification host port for programme reminders (`#35`). */
-  reminderHost?: ReminderHostPort;
-  /** Optional incoming `elviptv://play?key=...` deep-link target (`#273`). */
-  pendingDeepLink?: PlayDeepLinkTarget | null;
-  /** Invoked once `pendingDeepLink` has been consumed by `AppShell` (`#273`). */
-  onDeepLinkHandled?: () => void;
-  /** Optional test/host hook notified with the active {@link PlaybackGuard}. */
-  onPlaybackGuardReady?: (guard: PlaybackGuard) => void;
-  /** Optional platform external player handoff port (`#406`). */
-  externalPlayer?: ExternalPlayerPort;
-  /** Optional platform opt-in redacted diagnostics port (`#226`). */
-  diagnostics?: DiagnosticsPort;
-  /** Optional E2EE sync account & universal QR pairing port (`#26`). */
-  readonly syncAccount?: SyncAccountPort;
-  /** Optional opt-in runtime performance & codec telemetry port (`#458`). */
-  readonly telemetry?: TelemetryPort;
-  /** Optional Settings feedback & issue report submission port (`#458`). */
-  readonly feedback?: FeedbackPort;
-  /** Optional cross-platform offline VOD download manager port (`Wave P5`). */
-  readonly downloadManager?: DownloadManagerPort;
-}
+export type { AppShellProps, AppTab };
 
 /** Top-level Cinema Quietude shell (`Home`, `Live`, `Movies`, `Series` + `Search`, `Settings`, `DetailScreen`, `PlayerScreen`). */
 export function AppShell(props: AppShellProps): ReactElement {
   const preferences = usePreferences();
+  const syncCatalog = useSyncDirtyCatalog(props.catalog, props.syncAccount);
   const effectiveProfilePreferences = props.profilePreferences ?? preferences.profilePreferences;
   const effectiveKeymapStore = props.keymapStore ?? preferences.keymapStore;
+  const externalRefreshToken = props.externalRefreshToken;
   return (
     <ProfileProvider
-      catalog={props.catalog}
+      catalog={syncCatalog}
+      {...(externalRefreshToken !== undefined ? { externalRefreshToken } : {})}
       {...(effectiveProfilePreferences !== undefined
         ? { profilePreferences: effectiveProfilePreferences }
         : {})}
       {...(effectiveKeymapStore !== undefined ? { keymapStore: effectiveKeymapStore } : {})}
     >
-      <AppShellWithKeymap {...props} />
+      <AppShellWithKeymap {...props} catalog={syncCatalog} />
     </ProfileProvider>
   );
 }
@@ -566,11 +515,17 @@ function AppShellContent(props: AppShellProps): ReactElement {
     setPlayTarget(null);
     openSources();
   }, [openSources]);
+  const openAccountSettings = useCallback(() => {
+    userPickedSettingsSectionRef.current = true;
+    setSettingsSection('account');
+    selectTab('settings', true);
+  }, [selectTab]);
   const waveF7b = useAppShellWaveF7b({
     catalog: observedCatalog,
     preferences,
     ...(props.externalPlayer !== undefined ? { externalPlayer: props.externalPlayer } : {}),
     ...(props.diagnostics !== undefined ? { diagnostics: props.diagnostics } : {}),
+    ...(props.telemetry !== undefined ? { telemetry: props.telemetry } : {}),
     stopEmbeddedPreviewRef,
     stopActivePlayerRef,
     onOpenIntegrated: openPlayTarget,
@@ -581,13 +536,20 @@ function AppShellContent(props: AppShellProps): ReactElement {
     clearCaches: clearAllCaches,
     switchSource: switchSourceOnCrash,
   });
-  const waveF9 = useWaveF9Controller({ preferences, activeTab, ports: props });
+  const waveF9 = useWaveF9Controller({
+    preferences,
+    activeTab,
+    ports: props,
+    isViewingActive: playerPlaybackActive || liveEmbeddedPlaybackActive,
+    hasPlayerTarget: playTarget !== null,
+    onOpenAccountSettings: openAccountSettings,
+  });
   interceptOpenPlayTargetRef.current = waveF7b.externalHandoff.interceptPlayTarget;
   const hasRootOverlay =
     hasProfileOverlay ||
     mgmtOverlays.anyOpen ||
     waveF7b.anyOverlayOpen ||
-    waveF9.isWelcomeVisible ||
+    waveF9.hasOverlay ||
     (isTv && reminders.activeBanner !== null);
   const crashProps = waveF7b.crashProps;
   const isResolvingInitialSources =
@@ -618,7 +580,13 @@ function AppShellContent(props: AppShellProps): ReactElement {
       ? { onDeepLinkHandled: props.onDeepLinkHandled }
       : {}),
   });
-  const onPlayerTargetChange = connectionGuard.replaceActiveTarget;
+  const onPlayerTargetChange = useCallback(
+    (next: PlayTarget) => {
+      connectionGuard.replaceActiveTarget(next);
+      waveF9.notifyPlaybackExitOrSwitch();
+    },
+    [connectionGuard, waveF9],
+  );
   const onPlayerExit = () => {
     const exiting = playTargetRef.current;
     if (exiting?.kind === 'live') {
@@ -634,6 +602,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
     modes.resetToFullMode(true);
     setHeroScrolled(false);
     setUserStateVersion((v) => v + 1);
+    waveF9.notifyPlaybackExitOrSwitch();
   };
   const showCachedStrip =
     !isResolvingInitialSources &&
@@ -643,9 +612,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
   const stageOptionalProps = {
     ...(props.sourceImportHost !== undefined ? { sourceImportHost: props.sourceImportHost } : {}),
     ...(props.lanPairing !== undefined ? { lanPairing: props.lanPairing } : {}),
-    ...(waveF7b.openDiagnosticsPreview !== undefined
-      ? { onPreviewDiagnostics: waveF7b.openDiagnosticsPreview }
-      : {}),
+    onTelemetryOptInChange: waveF9.onTelemetryOptInChange,
   };
 
   return (
@@ -676,6 +643,7 @@ function AppShellContent(props: AppShellProps): ReactElement {
           >
             <CrashRecoveryBoundary
               resetKey={`${activeTab}:${activeDetail?.itemKey ?? ''}:${contentIsolationKey}`}
+              screenName={activeTab}
               {...crashProps}
             >
               {showCachedStrip ? (
@@ -775,8 +743,6 @@ function AppShellContent(props: AppShellProps): ReactElement {
           oledScreensaver={oledScreensaver}
           wave={waveF7b}
           waveF9={waveF9}
-          {...(props.diagnostics !== undefined ? { diagnostics: props.diagnostics } : {})}
-          includeLogs={preferences.preferences.crashReportsIncludeLogs}
         />
       </View>
     </AppShellContextProviders>

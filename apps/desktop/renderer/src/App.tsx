@@ -50,6 +50,7 @@ import {
   type DesktopFeedbackPort,
   type DesktopSyncAccountPort,
   type DesktopTelemetryPort,
+  extractSafeRendererErrorSignature,
 } from './sync/desktop-sync-ports.ts';
 import { attachDeadHostOnlineReset, createDesktopUiAdapters } from './ui/desktop-adapters.tsx';
 import { shouldMountWorkbench } from './workbench/presets.ts';
@@ -80,6 +81,7 @@ function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [catalogDisconnected, setCatalogDisconnected] = useState(false);
   const [reconnectingCatalog, setReconnectingCatalog] = useState(false);
+  const [pendingPairUri, setPendingPairUri] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const reconnectingRef = useRef(false);
 
@@ -260,17 +262,25 @@ function AppRoot() {
     let lastServerUrl: string | undefined;
     let lastTelemetryOptIn: boolean | undefined;
     let lastSyncableJson: string | undefined;
+    let startupRecorded = false;
     const syncPrefs = (snap: PreferencesSnapshot): void => {
       if (!active) return;
-      if (lastServerUrl !== snap.syncServerUrl) {
-        lastServerUrl = snap.syncServerUrl;
-        void desktopSync.setServerUrl(snap.syncServerUrl);
+      // Never clobber baked __ELV_SYNC_SERVER_URL__ with an empty preference override (#510).
+      const trimmedUrl = snap.syncServerUrl.trim();
+      if (trimmedUrl.length > 0 && lastServerUrl !== trimmedUrl) {
+        lastServerUrl = trimmedUrl;
+        void desktopSync.setServerUrl(trimmedUrl);
       }
-      if (lastTelemetryOptIn !== snap.telemetryOptIn) {
-        lastTelemetryOptIn = snap.telemetryOptIn;
-        if (desktopSync.telemetry?.isOptedIn() !== snap.telemetryOptIn) {
-          desktopSync.telemetry?.setOptIn(snap.telemetryOptIn);
+      const effectiveTelemetryOptIn = Boolean(snap.telemetryOptIn || snap.crashReportsOptIn);
+      if (lastTelemetryOptIn !== effectiveTelemetryOptIn) {
+        lastTelemetryOptIn = effectiveTelemetryOptIn;
+        if (desktopSync.telemetry?.isOptedIn() !== effectiveTelemetryOptIn) {
+          desktopSync.telemetry?.setOptIn(effectiveTelemetryOptIn);
         }
+      }
+      if (!startupRecorded && effectiveTelemetryOptIn && typeof performance !== 'undefined') {
+        startupRecorded = true;
+        desktopSync.telemetry?.recordStartup(Math.max(0, Math.round(performance.now())), true);
       }
       const syncable = extractSyncablePreferences(snap);
       const syncableJson = JSON.stringify(syncable);
@@ -283,16 +293,60 @@ function AppRoot() {
       if (!active) return;
       void preferencesStore.update(patch);
     });
-    void desktopSync.hydrate();
+    const unsubPairDeepLink = desktopSync.onPairDeepLink((uri) => {
+      if (active) setPendingPairUri(uri);
+    });
+    const onOnline = (): void => {
+      desktopSync.notifyReconnect();
+    };
+    const onWinError = (ev: ErrorEvent): void => {
+      const sig = extractSafeRendererErrorSignature(ev.error, ev.filename, ev.lineno);
+      desktopSync.telemetry?.recordUnhandledError({
+        errorName: sig.errorName,
+        stackSig: sig.stackSig,
+        source: 'renderer',
+      });
+    };
+    const onRejection = (ev: PromiseRejectionEvent): void => {
+      const sig =
+        ev.reason instanceof Error
+          ? extractSafeRendererErrorSignature(ev.reason)
+          : { errorName: 'UnhandledRejection', stackSig: 'UnhandledRejection' };
+      desktopSync.telemetry?.recordUnhandledError({
+        errorName: sig.errorName,
+        stackSig: sig.stackSig,
+        source: 'renderer',
+      });
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', onOnline);
+      window.addEventListener('error', onWinError);
+      window.addEventListener('unhandledrejection', onRejection);
+    }
+    void desktopSync.hydrate().then(() =>
+      desktopSync.consumePendingPairUri().then((uri) => {
+        if (active && uri !== null) setPendingPairUri(uri);
+      }),
+    );
     void preferencesStore.load().then(syncPrefs);
     const unsubPrefs = preferencesStore.subscribe(syncPrefs);
     return () => {
       active = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', onOnline);
+        window.removeEventListener('error', onWinError);
+        window.removeEventListener('unhandledrejection', onRejection);
+      }
       unsubInitialPrefs();
+      unsubPairDeepLink();
       unsubPrefs();
       desktopSync.dispose();
     };
   }, [desktopSync, preferencesStore]);
+
+  const handlePairUriHandled = useCallback(() => {
+    setPendingPairUri(null);
+  }, []);
 
   const shellProps: AppShellProps & {
     sourceImportHost?: SourceImportHost;
@@ -301,6 +355,8 @@ function AppRoot() {
     syncAccount?: DesktopSyncAccountPort;
     telemetry?: DesktopTelemetryPort;
     feedback?: DesktopFeedbackPort;
+    pendingPairUri?: string | null;
+    onPairUriHandled?: () => void;
   } = {
     catalog,
     videoHost,
@@ -311,6 +367,8 @@ function AppRoot() {
     diagnostics,
     downloadManager,
     externalRefreshToken: refreshToken,
+    pendingPairUri,
+    onPairUriHandled: handlePairUriHandled,
     ...(desktopWindow === undefined ? {} : { desktopWindow }),
     ...(sourceImportHost === undefined ? {} : { sourceImportHost }),
     ...(lanPairing === undefined ? {} : { lanPairing }),

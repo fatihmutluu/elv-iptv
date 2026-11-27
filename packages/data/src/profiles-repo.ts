@@ -40,6 +40,7 @@ export interface ProfileRecord {
 
 /** Input for {@link createProfile}. */
 export interface CreateProfileInput {
+  readonly id?: string;
   readonly name: string;
   readonly avatarToken?: ProfileAvatarToken;
   readonly isKids?: boolean;
@@ -141,7 +142,12 @@ export async function createProfile(
   }
   const avatarToken: ProfileAvatarToken = input.avatarToken ?? 'crimson';
   const isKids = input.isKids === true;
-  const id = newId !== undefined ? newId() : defaultProfileId(clock);
+  const id =
+    input.id !== undefined
+      ? input.id.trim()
+      : newId !== undefined
+        ? newId()
+        : defaultProfileId(clock);
   if (!isValidProfileId(id)) {
     return err(elvError('storage', 'invalid-profile-id'));
   }

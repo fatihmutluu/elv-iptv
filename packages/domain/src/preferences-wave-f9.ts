@@ -5,16 +5,18 @@ export const MAX_SYNC_SERVER_URL_LENGTH = 256;
 
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '::1']);
 
-/** Wave F9 E2EE sync, first-run welcome, and opt-in telemetry preference fields (`#26`, `#458`). */
+/** Wave F9 / P9 E2EE sync, privacy consent, first-run welcome, and opt-in telemetry preference fields (`#26`, `#458`, `#509`, `#510`). */
 export interface WaveF9PreferencesFields {
   readonly telemetryOptIn: boolean;
+  readonly privacyConsentAnswered: boolean;
   readonly welcomeDismissed: boolean;
   readonly syncServerUrl: string;
 }
 
-/** Default values for all Wave F9 preference fields. */
+/** Default values for all Wave F9 / P9 preference fields. */
 export const DEFAULT_WAVE_F9_PREFERENCES: WaveF9PreferencesFields = Object.freeze({
   telemetryOptIn: false,
+  privacyConsentAnswered: false,
   welcomeDismissed: false,
   syncServerUrl: '',
 });
@@ -84,6 +86,7 @@ export function parseWaveF9Preferences(
 ): WaveF9PreferencesFields {
   return {
     telemetryOptIn: boolOr(parsed.telemetryOptIn, defaults.telemetryOptIn),
+    privacyConsentAnswered: boolOr(parsed.privacyConsentAnswered, defaults.privacyConsentAnswered),
     welcomeDismissed: boolOr(parsed.welcomeDismissed, defaults.welcomeDismissed),
     syncServerUrl: normalizeSyncServerUrl(parsed.syncServerUrl, defaults.syncServerUrl),
   };
@@ -94,10 +97,14 @@ export function serializeWaveF9Preferences(
   defaults: WaveF9PreferencesFields,
 ): Partial<WaveF9PreferencesFields> {
   const telemetryOptIn = Boolean(snapshot.telemetryOptIn);
+  const privacyConsentAnswered = Boolean(snapshot.privacyConsentAnswered);
   const welcomeDismissed = Boolean(snapshot.welcomeDismissed);
   const syncServerUrl = normalizeSyncServerUrl(snapshot.syncServerUrl, defaults.syncServerUrl);
   return {
     ...(telemetryOptIn === defaults.telemetryOptIn ? {} : { telemetryOptIn }),
+    ...(privacyConsentAnswered === defaults.privacyConsentAnswered
+      ? {}
+      : { privacyConsentAnswered }),
     ...(welcomeDismissed === defaults.welcomeDismissed ? {} : { welcomeDismissed }),
     ...(syncServerUrl === defaults.syncServerUrl ? {} : { syncServerUrl }),
   };
@@ -109,6 +116,7 @@ export function mergeWaveF9Preferences(
 ): WaveF9PreferencesFields {
   return {
     telemetryOptIn: boolOr(patch.telemetryOptIn, base.telemetryOptIn),
+    privacyConsentAnswered: boolOr(patch.privacyConsentAnswered, base.privacyConsentAnswered),
     welcomeDismissed: boolOr(patch.welcomeDismissed, base.welcomeDismissed),
     syncServerUrl:
       patch.syncServerUrl !== undefined

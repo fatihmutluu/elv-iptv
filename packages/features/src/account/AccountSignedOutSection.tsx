@@ -7,13 +7,13 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useState } from 'react';
+import { type ReactElement, useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { SyncAccountPort } from '../ports/wave-f9-ports';
-import { AccountQrPairingView, AccountServerUrlField, AccountTextField } from './AccountFormParts';
+import type { QrScannerPort, SyncAccountPort } from '../ports/wave-f9-ports';
+import { AccountBidirectionalPairingPanel } from './AccountBidirectionalPairingPanel';
+import { AccountTextField } from './AccountFormParts';
 import {
   mapSyncErrorCodeToMessageId,
-  useSyncQrPairing,
   validateSignInFields,
   validateSignUpFields,
 } from './account-helpers';
@@ -25,40 +25,42 @@ export interface AccountSignedOutSectionProps {
   readonly syncAccount: SyncAccountPort;
   readonly isTv: boolean;
   readonly isActiveScope: boolean;
-  readonly pendingClaimCode: string | null;
-  readonly onQueuePendingClaim: (codeOrUri: string) => void;
   readonly onAuthSucceeded: () => Promise<void>;
   readonly deleteSuccessBanner: boolean;
-  readonly syncServerUrl: string;
-  readonly onSyncServerUrlChange?: (nextUrl: string) => void;
+  readonly qrScanner?: QrScannerPort;
+  readonly pendingPairUri?: string | null;
+  readonly onPairUriHandled?: () => void;
   readonly qrPollIntervalMs?: number;
 }
 
-/** Signed-out Settings card offering Sign In, Create Account, Pair via QR, custom Sync server URL, and queued QR claim. */
+/** Signed-out Settings card offering Sign In, Create Account, and unified Bidirectional QR + 8-Digit Pairing. */
 export function AccountSignedOutSection({
   syncAccount,
   isTv,
   isActiveScope,
-  pendingClaimCode,
-  onQueuePendingClaim,
   onAuthSucceeded,
   deleteSuccessBanner,
-  syncServerUrl,
-  onSyncServerUrlChange,
+  qrScanner,
+  pendingPairUri,
+  onPairUriHandled,
   qrPollIntervalMs,
 }: AccountSignedOutSectionProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
-  const [tab, setTab] = useState<AuthTabId>('signin');
+  const [tab, setTab] = useState<AuthTabId>(() =>
+    pendingPairUri && pendingPairUri.trim().length > 0 ? 'qr' : 'signin',
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [claimInput, setClaimInput] = useState(pendingClaimCode ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [errorKey, setErrorKey] = useState<MessageId | null>(null);
-  const [serverUrlValid, setServerUrlValid] = useState(true);
 
-  const pairing = useSyncQrPairing(syncAccount, tab === 'qr', undefined, qrPollIntervalMs);
+  useEffect(() => {
+    if (pendingPairUri && pendingPairUri.trim().length > 0) {
+      setTab('qr');
+    }
+  }, [pendingPairUri]);
 
   const handleSelectTab = useCallback((next: AuthTabId) => {
     setTab(next);
@@ -66,10 +68,6 @@ export function AccountSignedOutSection({
   }, []);
 
   const handleSignIn = useCallback(async () => {
-    if (!serverUrlValid) {
-      setErrorKey('source.validation.invalidAddress');
-      return;
-    }
     const errKey = validateSignInFields(email, password);
     if (errKey !== null) {
       setErrorKey(errKey);
@@ -89,13 +87,9 @@ export function AccountSignedOutSection({
     } finally {
       setSubmitting(false);
     }
-  }, [email, onAuthSucceeded, password, serverUrlValid, syncAccount]);
+  }, [email, onAuthSucceeded, password, syncAccount]);
 
   const handleSignUp = useCallback(async () => {
-    if (!serverUrlValid) {
-      setErrorKey('source.validation.invalidAddress');
-      return;
-    }
     const errKey = validateSignUpFields(email, password, confirmPassword);
     if (errKey !== null) {
       setErrorKey(errKey);
@@ -115,13 +109,7 @@ export function AccountSignedOutSection({
     } finally {
       setSubmitting(false);
     }
-  }, [confirmPassword, email, onAuthSucceeded, password, serverUrlValid, syncAccount]);
-
-  const handleQueueClaim = useCallback(() => {
-    const trimmed = claimInput.trim();
-    if (trimmed.length === 0) return;
-    onQueuePendingClaim(trimmed);
-  }, [claimInput, onQueuePendingClaim]);
+  }, [confirmPassword, email, onAuthSucceeded, password, syncAccount]);
 
   const cursorPointer = webCursorPointer();
   const tabTransition = webTransition(theme, 'color, border-color, background-color');
@@ -310,17 +298,16 @@ export function AccountSignedOutSection({
             />
           </View>
         ) : (
-          <AccountQrPairingView pairing={pairing} size={180} testIDPrefix="account-qr" />
+          <AccountBidirectionalPairingPanel
+            syncAccount={syncAccount}
+            active={tab === 'qr'}
+            legacyTestIDPrefix="account-qr"
+            {...(qrScanner !== undefined ? { qrScanner } : {})}
+            {...(pendingPairUri !== undefined ? { pendingPairUri } : {})}
+            {...(onPairUriHandled !== undefined ? { onPairUriHandled } : {})}
+            {...(qrPollIntervalMs !== undefined ? { pollIntervalMs: qrPollIntervalMs } : {})}
+          />
         )}
-
-        <AccountServerUrlField
-          value={syncServerUrl}
-          {...(onSyncServerUrlChange !== undefined
-            ? { onChangeValidUrl: onSyncServerUrlChange }
-            : {})}
-          onValidityChange={setServerUrlValid}
-          editable={!submitting}
-        />
 
         <Text
           testID="account-oauth-coming-soon"
@@ -328,41 +315,6 @@ export function AccountSignedOutSection({
         >
           {i18n.t('account.oauthComingSoon')}
         </Text>
-      </Surface>
-
-      <Surface
-        testID="account-claim-card"
-        tone="surface"
-        bordered
-        rounded="modal"
-        style={styles.card}
-      >
-        <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
-          {i18n.t('account.qrClaimTitle')}
-        </Text>
-        <AccountTextField
-          testID="account-claim-input"
-          label={i18n.t('account.qrClaimInputLabel')}
-          value={claimInput}
-          onChangeText={setClaimInput}
-          placeholder="elviptv://pair?..."
-        />
-        {pendingClaimCode !== null ? (
-          <Text
-            testID="account-claim-signin-first"
-            accessibilityLiveRegion="polite"
-            style={[theme.typography.caption, { color: theme.colors.accent }]}
-          >
-            {i18n.t('account.qrClaimSignInFirst')}
-          </Text>
-        ) : null}
-        <CtaButton
-          testID="account-claim-submit"
-          variant="secondary"
-          label={i18n.t('account.qrClaimAction')}
-          disabled={claimInput.trim().length === 0}
-          onPress={handleQueueClaim}
-        />
       </Surface>
     </>
   );

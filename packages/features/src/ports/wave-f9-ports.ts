@@ -1,22 +1,27 @@
 /**
- * Wave F9 feature ports for E2EE Sync Account & Universal QR Pairing (`#26`),
- * opt-in runtime telemetry (`#458`), and Settings feedback submission (`#458`).
+ * Wave F9 & Wave P9 feature ports for E2EE Sync Account, Automatic Background Sync,
+ * Bidirectional X25519 QR/8-Digit Pairing (`#26`, `#510`), Unified Diagnostics &
+ * Performance Telemetry (`#458`, `#509`), and Settings feedback submission (`#458`).
  * Structural types keep `@elv/features` decoupled from app-specific crypto/storage adapters.
  */
 
-/** Lifecycle state of the optional E2EE sync account session (`#26`). */
+/** Lifecycle state of the optional E2EE sync account session (`#26`, `#510`). */
 export type SyncAccountStatus = 'signed_out' | 'signing_in' | 'signed_in' | 'syncing';
 
-/** Read-only snapshot of the current E2EE sync account state (`#26`). */
+/** Background automatic sync indicator state (`#510`). */
+export type AutoSyncState = 'idle' | 'syncing' | 'pending' | 'offline';
+
+/** Read-only snapshot of the current E2EE sync account state (`#26`, `#510`). */
 export interface SyncAccountState {
   readonly status: SyncAccountStatus;
   readonly email: string | null;
   readonly lastSyncedAtIso: string | null;
   readonly pendingRecoveryCode: string | null;
   readonly errorCode: string | null;
+  readonly autoSyncState?: AutoSyncState;
 }
 
-/** Active universal QR device pairing session (`#26`, payload strictly <= 213 UTF-8 bytes). */
+/** Active legacy universal QR device pairing session (`#26`, payload strictly <= 213 UTF-8 bytes). */
 export interface SyncQrPairingSession {
   readonly pairingId: string;
   readonly code: string;
@@ -25,14 +30,58 @@ export interface SyncQrPairingSession {
   readonly status: 'pending' | 'claimed' | 'expired';
 }
 
-/** Result of an auth, sync, pairing, or permanent account deletion call (`#26`). */
+/** Resolved 5-case bidirectional account transfer direction (`#510`). */
+export type PairingDirection =
+  | 'neither_signed_in'
+  | 'responder_to_host'
+  | 'host_to_responder'
+  | 'same_account'
+  | 'different_accounts';
+
+/** Role of the local device inside a bidirectional X25519 pairing handshake (`#510`). */
+export type BidirectionalPairingRole = 'host' | 'responder';
+
+/** Lifecycle state of a bidirectional X25519 pairing session (`#510`). */
+export type BidirectionalPairingStatus =
+  | 'pending'
+  | 'responder_joined'
+  | 'awaiting_sas'
+  | 'waiting_approval'
+  | 'approved'
+  | 'completed'
+  | 'rejected'
+  | 'expired'
+  | 'locked';
+
+/** UI-ready snapshot of an active bidirectional X25519 pairing session (`#510`). */
+export interface BidirectionalPairingSnapshot {
+  readonly pairingId: string;
+  readonly role: BidirectionalPairingRole;
+  readonly code: string;
+  readonly qrUri?: string;
+  readonly expiresAtMs: number;
+  readonly status: BidirectionalPairingStatus;
+  readonly sas: string | null;
+  readonly direction: PairingDirection | null;
+  readonly localMaskedEmail: string | null;
+  readonly peerMaskedEmail: string | null;
+  readonly errorCode?: string | null;
+}
+
+/** Result of an auth, sync, pairing, or permanent account deletion call (`#26`, `#510`). */
 export interface SyncActionResult {
   readonly ok: boolean;
   readonly recoveryCode?: string;
   readonly errorCode?: string;
 }
 
-/** App-supplied E2EE sync, authentication, universal QR pairing, and permanent deletion port (`#26`). */
+/** Pluggable native camera QR scanner port for mobile/tablet pairing (`#510`). */
+export interface QrScannerPort {
+  isSupported(): boolean;
+  scanQrCode(): Promise<string | null>;
+}
+
+/** App-supplied E2EE sync, authentication, bidirectional X25519 pairing, and deletion port (`#26`, `#510`). */
 export interface SyncAccountPort {
   getState(): SyncAccountState;
   subscribe(listener: (state: SyncAccountState) => void): () => void;
@@ -46,9 +95,25 @@ export interface SyncAccountPort {
   createQrPairing(): Promise<SyncQrPairingSession>;
   pollQrPairing(pairingId: string): Promise<'pending' | 'claimed' | 'expired'>;
   claimQrPairing(codeOrUri: string): Promise<SyncActionResult>;
+  /** Automatic background sync lifecycle hooks (`#510`, `[1.44]`). */
+  /** Marks vault state dirty for the 3-minute heartbeat and pause/exit flush without triggering a 3s debounce push. */
+  markSyncDirty?(): void;
+  notifySyncDirty?(): void;
+  notifyPlaybackPause?(): void;
+  notifyPlaybackExitOrSwitch?(): void;
+  setViewingActive?(active: boolean): void;
+  /** Bidirectional X25519 + 8-digit code pairing hooks (`#510`, `[1.45]`). */
+  startBidirectionalPairing?(): Promise<BidirectionalPairingSnapshot>;
+  joinBidirectionalPairing?(codeOrUri: string): Promise<BidirectionalPairingSnapshot>;
+  pollBidirectionalPairing?(pairingId: string): Promise<BidirectionalPairingSnapshot>;
+  confirmBidirectionalPairing?(
+    pairingId: string,
+    chosenDirection?: 'host_to_responder' | 'responder_to_host',
+  ): Promise<SyncActionResult>;
+  cancelBidirectionalPairing?(pairingId: string): Promise<void>;
 }
 
-/** Structured, strictly redacted media decode failure metadata for `#458` / `#70` telemetry. */
+/** Structured, strictly redacted media decode failure metadata for `#458` / `#509` telemetry. */
 export interface TelemetryMediaDecodeFailure {
   readonly engine: string;
   readonly container?: string;
@@ -59,7 +124,7 @@ export interface TelemetryMediaDecodeFailure {
   readonly isLive: boolean;
 }
 
-/** App-supplied opt-in runtime performance, stability, and codec telemetry port (`#458`). */
+/** App-supplied unified opt-in diagnostics, crash, and performance telemetry port (`#458`, `#509`). */
 export interface TelemetryPort {
   isOptedIn(): boolean;
   setOptIn(enabled: boolean): void;
@@ -71,6 +136,51 @@ export interface TelemetryPort {
     readonly engine: string;
     readonly errorCode: string;
     readonly isLive: boolean;
+  }): void;
+  recordStartup?(durationMs: number, coldStart: boolean): void;
+  recordPlaybackStart?(meta: {
+    readonly engine: string;
+    readonly ttffMs: number;
+    readonly isLive: boolean;
+    readonly container?: string;
+    readonly videoCodec?: string;
+  }): void;
+  recordPlaybackRebuffer?(meta: {
+    readonly engine: string;
+    readonly durationMs: number;
+    readonly isLive: boolean;
+  }): void;
+  recordCatalogImport?(meta: {
+    readonly sourceKind: string;
+    readonly stage: string;
+    readonly durationMs: number;
+    readonly itemCount: number;
+    readonly success: boolean;
+    readonly errorCode?: string;
+  }): void;
+  recordSqliteSlowOp?(meta: { readonly op: string; readonly durationMs: number }): void;
+  recordFrameJank?(meta: {
+    readonly screen: string;
+    readonly droppedFrames: number;
+    readonly maxFrameMs: number;
+  }): void;
+  recordJsStall?(meta: { readonly screen: string; readonly durationMs: number }): void;
+  recordMemoryPressure?(meta: {
+    readonly level: 'moderate' | 'critical';
+    readonly usedMb?: number;
+  }): void;
+  recordAppCrash?(meta: {
+    readonly errorName: string;
+    readonly stackSig: string;
+    readonly screen?: string;
+    readonly fatal: boolean;
+    readonly uptimeMs?: number;
+  }): void;
+  recordUnhandledError?(meta: {
+    readonly errorName: string;
+    readonly stackSig: string;
+    readonly screen?: string;
+    readonly source?: string;
   }): void;
   flush(): Promise<void>;
 }

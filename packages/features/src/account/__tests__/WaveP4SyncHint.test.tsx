@@ -32,9 +32,7 @@ describe('Wave P4 AccountSignedInSection initialPrefsHint', () => {
               state={syncState}
               isTv={false}
               isActiveScope
-              autoClaimStatus="idle"
               onDeleteSuccess={jest.fn()}
-              syncServerUrl="https://sync.example.test"
             />
           </ViewportProvider>
         </ThemeProvider>

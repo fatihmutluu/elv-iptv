@@ -373,7 +373,9 @@ const MAX_BACKUP_SERVERS = 16;
 const MAX_BACKUP_SERVER_CHARS = 2_048;
 const MAX_STALKER_PORTAL_URL_CHARS = 2_048;
 const MAX_STALKER_SERIAL_CHARS = 128;
+const SAFE_EXPLICIT_SOURCE_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const STALKER_SOURCE_INPUT_KEYS = new Set([
+  'id',
   'kind',
   'name',
   'portalUrl',
@@ -383,6 +385,8 @@ const STALKER_SOURCE_INPUT_KEYS = new Set([
   'guideUrl',
   'xmltvTimezone',
 ]);
+const isOptionalExplicitSourceId = (x: unknown): boolean =>
+  x === undefined || (typeof x === 'string' && SAFE_EXPLICIT_SOURCE_ID_RE.test(x.trim()));
 const NON_HTTP_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:(?!\/\/)(?!\d+(?:[/?#]|$))/;
 
 /** Validates a bounded Stalker/Ministra portal URL (`http(s)://` or `host[:port]/path`, no credentials or control chars). */
@@ -531,6 +535,7 @@ export function isSourceSettingsPatch(x: unknown): x is Partial<SourceSettings> 
 
 export function isLocalM3uSourceInput(x: unknown): x is LocalM3uSourceInput {
   if (!isRecord(x) || !isBoundedString(x['name'])) return false;
+  if (!isOptionalExplicitSourceId(x['id'])) return false;
   const bytes = x['bytes'];
   if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_PICKED_PLAYLIST_BYTES) return false;
   if (!isOptionalTrimmedCleanString(x['guideUrl'])) return false;
@@ -541,6 +546,7 @@ export function isLocalM3uSourceInput(x: unknown): x is LocalM3uSourceInput {
 
 export function isAddSourceInput(x: unknown): x is AddSourceInput {
   if (!isRecord(x) || !isBoundedString(x['name'])) return false;
+  if (!isOptionalExplicitSourceId(x['id'])) return false;
   if (x['transport'] !== undefined && !isTransportSettings(x['transport'])) return false;
   if (!isOptionalTrimmedCleanString(x['guideUrl'])) return false;
   if (!isOptionalTimezoneString(x['xmltvTimezone'])) return false;
@@ -573,6 +579,7 @@ export function isAddSourceInput(x: unknown): x is AddSourceInput {
 
 export function isLinkSourceInput(x: unknown): x is LinkSourceInput {
   if (!isRecord(x)) return false;
+  if (!isOptionalExplicitSourceId(x['id'])) return false;
   if (!isBoundedString(x['name']) || !isTrimmedCleanString(x['url'])) {
     return false;
   }
@@ -641,7 +648,8 @@ const MAX_PROFILE_NAME_INPUT_CHARS = 128;
 const MAX_PIN_INPUT_CHARS = 32;
 const MAX_RATING_AGE = 21;
 const MAX_UNLOCK_TIMEOUT_MIN = 1_440;
-const CREATE_PROFILE_KEYS = new Set(['name', 'avatarToken', 'isKids']);
+const CREATE_PROFILE_KEYS = new Set(['id', 'name', 'avatarToken', 'isKids']);
+const UPDATE_PROFILE_KEYS = new Set(['name', 'avatarToken', 'isKids']);
 const UPDATE_PARENTAL_SETTINGS_KEYS = new Set([
   'enabled',
   'blockAdultKeywords',
@@ -701,13 +709,14 @@ export function isListWatchedOptions(
 
 export function isCreateProfileInput(x: unknown): x is CreateProfileInput {
   if (!isRecord(x) || !hasOnlyKeys(x, CREATE_PROFILE_KEYS)) return false;
+  if (!isOptionalStrictProfileId(x['id'])) return false;
   if (!isCleanKey(x['name'], MAX_PROFILE_NAME_INPUT_CHARS)) return false;
   if (x['avatarToken'] !== undefined && !isProfileAvatarToken(x['avatarToken'])) return false;
   return x['isKids'] === undefined || typeof x['isKids'] === 'boolean';
 }
 
 export function isUpdateProfilePatch(x: unknown): x is UpdateProfilePatch {
-  if (!isRecord(x) || !hasOnlyKeys(x, CREATE_PROFILE_KEYS)) return false;
+  if (!isRecord(x) || !hasOnlyKeys(x, UPDATE_PROFILE_KEYS)) return false;
   if (x['name'] !== undefined && !isCleanKey(x['name'], MAX_PROFILE_NAME_INPUT_CHARS)) return false;
   if (x['avatarToken'] !== undefined && !isProfileAvatarToken(x['avatarToken'])) return false;
   return x['isKids'] === undefined || typeof x['isKids'] === 'boolean';

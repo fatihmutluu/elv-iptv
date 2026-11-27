@@ -113,6 +113,97 @@ describe('CtaButton & IconButton', () => {
     await fireEvent.press(screen.getByTestId('icon-btn'));
     expect(onIconPress).toHaveBeenCalledTimes(1);
   });
+
+  it('styles destructive CtaButton with danger tokens, hover darkening, disabled state, TV focus ring, and accessibility', async () => {
+    const onDelete = jest.fn();
+    const onDisabledPress = jest.fn();
+
+    const desktopView = await render(
+      <ThemeProvider>
+        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+          <CtaButton
+            label="Delete Account Permanently"
+            variant="destructive"
+            icon="trash"
+            onPress={onDelete}
+            testID="destructive-btn"
+          />
+          <CtaButton
+            label="Disabled Delete"
+            variant="destructive"
+            disabled
+            onPress={onDisabledPress}
+            testID="destructive-disabled"
+          />
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+
+    const btn = screen.getByTestId('destructive-btn');
+    const style = flat(btn.props.style);
+    expect(style.backgroundColor).toBe(defaultTheme.colors.dangerBg);
+    expect(style.borderWidth).toBe(1);
+    expect(style.borderColor).toBe(defaultTheme.colors.dangerBorder);
+    expect(style.opacity).toBe(1);
+    expect(btn.props.accessibilityRole).toBe('button');
+    expect(btn.props.accessibilityLabel).toBe('Delete Account Permanently');
+    expect(btn.props.accessibilityState).toEqual({ disabled: false });
+    expect(flat(screen.getByText('Delete Account Permanently').props.style).color).toBe(
+      defaultTheme.colors.dangerFg,
+    );
+    expect(screen.getByTestId('destructive-btn-icon')).toBeTruthy();
+
+    await fireEvent(btn, 'hoverIn');
+    expect(flat(screen.getByTestId('destructive-btn').props.style).backgroundColor).toBe(
+      defaultTheme.colors.dangerHoverBg,
+    );
+    await fireEvent(btn, 'hoverOut');
+    expect(flat(screen.getByTestId('destructive-btn').props.style).backgroundColor).toBe(
+      defaultTheme.colors.dangerBg,
+    );
+
+    await fireEvent.press(btn);
+    expect(onDelete).toHaveBeenCalledTimes(1);
+
+    const disabledBtn = screen.getByTestId('destructive-disabled');
+    const disabledStyle = flat(disabledBtn.props.style);
+    expect(disabledStyle.opacity).toBe(0.45);
+    expect(disabledStyle.backgroundColor).toBe(defaultTheme.colors.dangerBg);
+    expect(disabledBtn.props.accessibilityState).toEqual({ disabled: true });
+    await fireEvent(disabledBtn, 'hoverIn');
+    expect(flat(screen.getByTestId('destructive-disabled').props.style).backgroundColor).toBe(
+      defaultTheme.colors.dangerBg,
+    );
+    await fireEvent.press(disabledBtn);
+    expect(onDisabledPress).not.toHaveBeenCalled();
+
+    await desktopView.unmount();
+
+    await render(
+      <ThemeProvider preset="highContrast">
+        <ViewportProvider value={{ formFactor: 'tv', width: 1920, height: 1080 }}>
+          <CtaButton
+            label="Confirm Permanent Deletion"
+            variant="destructive"
+            focused
+            testID="destructive-tv"
+          />
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+
+    const tvBtn = screen.getByTestId('destructive-tv');
+    const tvStyle = flat(tvBtn.props.style);
+    expect(tvStyle.backgroundColor).toBe(hcTheme.colors.dangerBg);
+    expect(tvStyle.borderColor).toBe(hcTheme.colors.dangerBorder);
+    expect(tvStyle.transform).toEqual([{ scale: hcTheme.focus.buttonScale }]);
+    expect(flat(screen.getByText('Confirm Permanent Deletion').props.style).color).toBe(
+      hcTheme.colors.dangerFg,
+    );
+    const tvRing = flat(screen.getByTestId('destructive-tv-focus-ring').props.style);
+    expect(tvRing.borderColor).toBe(hcTheme.colors.focusRingColor);
+    expect(tvRing.borderWidth).toBe(hcTheme.focus.ringWidth);
+  });
 });
 
 describe('MicroPill & FilterChip', () => {

@@ -24,7 +24,7 @@ import {
 /**
  * Strictly allowlisted visual, editorial, language, and playback-style preference keys synced
  * as an initial-only seed on first device sign-in or QR pairing (Product Decision #40).
- * Hardware, display, audio-device, cache, tray, telemetry, and server-URL keys are excluded.
+ * Hardware, display, audio-device, cache, tray, privacy-consent, telemetry, and server-URL keys are excluded.
  */
 export const SYNCABLE_PREFERENCE_KEYS = [
   'themePreset',

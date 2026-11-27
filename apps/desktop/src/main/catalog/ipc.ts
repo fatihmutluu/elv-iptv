@@ -159,31 +159,42 @@ export interface QuitAppLike {
 }
 
 /**
- * Registers an idempotent `before-quit` hook that blocks re-entrant `app.quit()` calls while the
- * catalog `utilityProcess` flushes in-flight rollbacks and closes SQLite, then triggers the final quit.
+ * Registers an idempotent `before-quit` hook that awaits optional `beforeShutdown` (e.g. bounded
+ * background E2EE sync flush) strictly BEFORE the catalog `utilityProcess` flushes in-flight
+ * rollbacks and closes SQLite, then triggers the final quit.
  */
 export function registerCatalogQuitHandler(deps: {
   app: QuitAppLike;
   getCoordinator: () => CatalogCoordinator<unknown> | undefined;
+  beforeShutdown?: () => Promise<void>;
   quit: () => void;
 }): void {
-  const { app, getCoordinator, quit } = deps;
+  const { app, getCoordinator, beforeShutdown, quit } = deps;
   let shuttingDown = false;
   let shutDownComplete = false;
 
   app.on('before-quit', (event) => {
     if (shutDownComplete) return;
     const coordinator = getCoordinator();
-    if (!shuttingDown && !coordinator?.isRunning) {
+    if (!shuttingDown && !coordinator?.isRunning && beforeShutdown === undefined) {
       shutDownComplete = true;
       return;
     }
     event.preventDefault();
     if (shuttingDown) return;
     shuttingDown = true;
-    void (coordinator?.shutdown() ?? Promise.resolve()).finally(() => {
+    const finish = (): void => {
       shutDownComplete = true;
       quit();
-    });
+    };
+    if (beforeShutdown === undefined) {
+      void (coordinator?.shutdown() ?? Promise.resolve()).finally(finish);
+      return;
+    }
+    void Promise.resolve()
+      .then(() => beforeShutdown())
+      .catch(() => undefined)
+      .then(() => (coordinator?.isRunning ? coordinator.shutdown() : undefined))
+      .finally(finish);
   });
 }

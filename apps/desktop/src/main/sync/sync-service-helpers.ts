@@ -1,17 +1,121 @@
 import { webcrypto } from 'node:crypto';
-import { redactText } from '@elv/domain';
+import { redactText, type SecretStore } from '@elv/domain';
 import {
   base64UrlDecode,
+  base64UrlEncode,
+  createEmptyVaultSnapshot,
   createWebCryptoVaultPort,
+  decryptVaultSnapshot,
+  encryptVaultSnapshot,
   type SyncHttpPort,
+  type SyncSession,
+  submitFeedback,
   type VaultCryptoPort,
+  type VaultSnapshot,
 } from '@elv/sync';
-import type { SyncAccountStateIpc } from '../../shared/sync-ipc.ts';
+import type { AutoSyncStateIpc, SyncAccountStateIpc } from '../../shared/sync-ipc.ts';
 
 export const SESSION_SECRET_KEY = 'elv.sync.session.v1';
+export const VAULT_BASELINE_SECRET_KEY = 'sync.vault.baseline.v2';
 export const VAULT_KEY_BYTES = 32;
 export const DEFAULT_FLUSH_INTERVAL_MS = 60_000;
-export const FEEDBACK_LOG_TAIL_LINES = 25;
+const FEEDBACK_LOG_TAIL_LINES = 25;
+
+/** Maps `@elv/sync` scheduler states onto the IPC auto-sync indicator state. */
+export function mapSchedulerState(raw: 'idle' | 'syncing' | 'pending' | 'error'): AutoSyncStateIpc {
+  return raw === 'error' ? 'offline' : raw;
+}
+
+/** Persists an authenticated sync session record strictly inside `SecretStore` (zero accessToken). */
+export async function persistSessionRecord(
+  secretStore: SecretStore,
+  session: Pick<SyncSession, 'user' | 'refreshToken' | 'vaultKey'>,
+  lastSyncedAtIso: string | null,
+  revision: number,
+): Promise<void> {
+  const record: PersistedSessionRecord = {
+    userId: session.user.id,
+    email: session.user.email,
+    refreshToken: session.refreshToken,
+    vaultKeyB64: base64UrlEncode(session.vaultKey),
+    lastSyncedAtIso,
+    lastRevision: revision,
+  };
+  await secretStore.set(SESSION_SECRET_KEY, JSON.stringify(record));
+}
+
+/** Default Fetch adapter wrapping global `fetch` for Desktop main sync requests. */
+export const defaultDesktopFetchFn: DesktopSyncFetchFn = (input, init) =>
+  globalThis.fetch(input, {
+    ...(init?.method !== undefined ? { method: init.method } : {}),
+    ...(init?.headers !== undefined ? { headers: { ...init.headers } } : {}),
+    ...(init?.body !== undefined ? { body: init.body } : {}),
+    ...(init?.signal !== undefined ? { signal: init.signal } : {}),
+  });
+
+/** Encrypts and persists the last-synced vault snapshot baseline in `SecretStore` (`#510`). */
+export async function persistVaultBaseline(
+  secretStore: SecretStore,
+  cryptoPort: VaultCryptoPort,
+  session: Pick<SyncSession, 'user' | 'vaultKey'>,
+  revision: number,
+  snapshot: VaultSnapshot,
+): Promise<void> {
+  try {
+    const safeRev = Number.isInteger(revision) && revision >= 0 ? revision : 0;
+    const blob = await encryptVaultSnapshot(
+      cryptoPort,
+      session.vaultKey,
+      session.user.id,
+      safeRev,
+      snapshot,
+    );
+    await secretStore.set(
+      VAULT_BASELINE_SECRET_KEY,
+      JSON.stringify({
+        userId: session.user.id,
+        revision: safeRev,
+        ciphertext: blob.ciphertext,
+        iv: blob.iv,
+      }),
+    );
+  } catch {
+    // Best-effort baseline persistence must never fail a committed vault sync.
+  }
+}
+
+/** Decrypts the persisted vault baseline from `SecretStore`, falling back safely to an empty snapshot. */
+export async function loadVaultBaseline(
+  secretStore: SecretStore,
+  cryptoPort: VaultCryptoPort,
+  session: Pick<SyncSession, 'user' | 'vaultKey'>,
+): Promise<VaultSnapshot> {
+  try {
+    const raw = await secretStore.get(VAULT_BASELINE_SECRET_KEY);
+    if (raw === undefined || raw.length === 0) return createEmptyVaultSnapshot(0);
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return createEmptyVaultSnapshot(0);
+    }
+    const rec = parsed as Record<string, unknown>;
+    if (
+      rec.userId !== session.user.id ||
+      typeof rec.revision !== 'number' ||
+      !Number.isInteger(rec.revision) ||
+      rec.revision < 0 ||
+      typeof rec.ciphertext !== 'string' ||
+      typeof rec.iv !== 'string'
+    ) {
+      return createEmptyVaultSnapshot(0);
+    }
+    return await decryptVaultSnapshot(cryptoPort, session.vaultKey, session.user.id, rec.revision, {
+      ciphertext: rec.ciphertext,
+      iv: rec.iv,
+    });
+  } catch {
+    return createEmptyVaultSnapshot(0);
+  }
+}
 
 /** Builds a storage-safe per-account key recording whether initial preferences were applied once. */
 export function initialPrefsAppliedKey(userId: string): string {
@@ -174,4 +278,56 @@ export function redactDiagnosticsLine(line: string): string {
     .replace(IPV6_BARE_RE, '$1[redacted]')
     .replace(IPV4_RE, '[redacted]');
   return redactText(preStripped);
+}
+
+/** Builds a redacted diagnostics payload and submits user feedback (`#458`). */
+export async function submitDesktopFeedbackRequest(deps: {
+  readonly serverUrl: string;
+  readonly http: SyncHttpPort;
+  readonly platform: string;
+  readonly appVersion: string;
+  readonly mpvVersion?: string;
+  readonly readLogTail?: (maxLines: number) => Promise<readonly string[]>;
+  readonly input: {
+    readonly category:
+      | 'playback_issue'
+      | 'channel_epg'
+      | 'ui_remote'
+      | 'sync_account'
+      | 'feature_request'
+      | 'other';
+    readonly message: string;
+    readonly includeDiagnostics: boolean;
+  };
+}): Promise<{ readonly ok: boolean; readonly id?: string; readonly errorCode?: string }> {
+  if (deps.serverUrl.length === 0) return { ok: false, errorCode: 'server_not_configured' };
+  let diagnostics: Record<string, string | number | boolean> | undefined;
+  if (deps.input.includeDiagnostics) {
+    const rawLogs = deps.readLogTail
+      ? await deps.readLogTail(FEEDBACK_LOG_TAIL_LINES).catch(() => [] as readonly string[])
+      : [];
+    const logTail = rawLogs
+      .slice(-FEEDBACK_LOG_TAIL_LINES)
+      .map((line) => redactDiagnosticsLine(line))
+      .join('\n');
+    diagnostics = {
+      platform: deps.platform,
+      appVersion: deps.appVersion,
+      ...(deps.mpvVersion !== undefined ? { mpvVersion: deps.mpvVersion } : {}),
+      ...(logTail.length > 0 ? { logTail } : {}),
+    };
+  }
+  const res = await submitFeedback({
+    baseUrl: deps.serverUrl,
+    http: deps.http,
+    submission: {
+      category: deps.input.category,
+      message: deps.input.message,
+      platform: deps.platform,
+      appVersion: deps.appVersion,
+      ...(diagnostics !== undefined ? { diagnostics } : {}),
+    },
+  });
+  if (!res.ok) return { ok: false, errorCode: errorCodeFrom(res.error) };
+  return { ok: true, id: res.value.id };
 }

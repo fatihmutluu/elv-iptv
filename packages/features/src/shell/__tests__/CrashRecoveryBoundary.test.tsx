@@ -1,3 +1,4 @@
+import { elvError } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import {
   type AndroidKeyEvent,
@@ -10,7 +11,12 @@ import {
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { Platform, StyleSheet, Text, type ViewStyle } from 'react-native';
-import { CrashRecoveryBoundary, formatRedactedErrorCode } from '../CrashRecoveryBoundary';
+import {
+  CrashRecoveryBoundary,
+  formatRedactedErrorCode,
+  formatTelemetryErrorName,
+  sanitizeStackSignature,
+} from '../CrashRecoveryBoundary';
 
 function flattenStyle(style: unknown): ViewStyle {
   return (StyleSheet.flatten(style as ViewStyle) ?? {}) as ViewStyle;
@@ -449,5 +455,76 @@ describe('CrashRecoveryBoundary (#159)', () => {
       </CrashRecoveryBoundary>,
     );
     expect(screen.getByTestId('healthy-child')).toBeTruthy();
+  });
+
+  it('P1-5: emits telemetry-safe errorName (normalizing ElvError "/" to ".") and multi-frame stackSig compatible with @elv/sync SAFE_TOKEN_RE and SAFE_STACK_SIG_RE', async () => {
+    const SAFE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+    const SAFE_STACK_SIG_RE = /^[A-Za-z0-9][A-Za-z0-9._:/+>;-]{0,127}$/;
+    const FORBIDDEN_RE = /(:\/\/|@|\\|\/Users\/|\/home\/|password|secret|token=)/i;
+
+    // 1. Multi-frame Error with Windows/POSIX paths, URLs, credentials, Object.<anonymous>, async, and leading underscore
+    const multiFrameErr = new TypeError(
+      'Failed loading https://user:secretpass@provider.example.com/live/1.m3u8',
+    );
+    multiFrameErr.stack = [
+      'TypeError: secret',
+      '    at ExplodingChild (C:\\Users\\Fatih\\Desktop\\IPTV\\src\\App.tsx:10:5)',
+      '    at Object.<anonymous> (https://user:secretpass@provider.example.com/bundle.js:1:2)',
+      '    at async AppShellStage (/Users/alice/app/Stage.tsx:42:3)',
+      '    at _renderTree (file:///data/app/render.js:9:1)',
+      '    at RootFrame (C:\\Users\\bob\\Root.tsx:1:1)',
+    ].join('\n');
+
+    const multiSig = sanitizeStackSignature(multiFrameErr.stack);
+    expect(multiSig).toBe('ExplodingChild>Object:anonymous>AppShellStage>renderTree>RootFrame');
+    expect(SAFE_STACK_SIG_RE.test(multiSig)).toBe(true);
+    expect(FORBIDDEN_RE.test(multiSig)).toBe(false);
+
+    const recordAppCrash = jest.fn();
+    await render(
+      <CrashRecoveryBoundary telemetry={{ recordAppCrash }} screenName="live">
+        <Bomb error={multiFrameErr} />
+      </CrashRecoveryBoundary>,
+    );
+
+    expect(recordAppCrash).toHaveBeenCalledTimes(1);
+    const firstPayload = recordAppCrash.mock.calls[0]?.[0] as {
+      errorName: string;
+      stackSig: string;
+      screen?: string;
+      fatal: boolean;
+    };
+    expect(firstPayload.errorName).toBe('TypeError');
+    expect(SAFE_TOKEN_RE.test(firstPayload.errorName)).toBe(true);
+    expect(SAFE_STACK_SIG_RE.test(firstPayload.stackSig)).toBe(true);
+    expect(FORBIDDEN_RE.test(firstPayload.stackSig)).toBe(false);
+
+    // 2. ElvError ('network/timeout') normalizes '/' -> '.' so SAFE_TOKEN_RE accepts it cleanly
+    const elvCrash = Object.assign(
+      new Error('Request failed for https://u:p@stream.example.com/epg.xml'),
+      elvError('network', 'timeout'),
+    );
+    elvCrash.stack =
+      'Error: timeout\n    at FetchEpg (C:\\Users\\Fatih\\epg.ts:22:4)\n    at EpgGrid (/Users/alice/EpgGrid.tsx:18:2)';
+    expect(formatTelemetryErrorName(elvCrash)).toBe('network.timeout');
+
+    const elvCrashRecorder = jest.fn();
+    await render(
+      <CrashRecoveryBoundary telemetry={{ recordAppCrash: elvCrashRecorder }} screenName="home">
+        <Bomb error={elvCrash} />
+      </CrashRecoveryBoundary>,
+    );
+
+    expect(elvCrashRecorder).toHaveBeenCalledTimes(1);
+    const secondPayload = elvCrashRecorder.mock.calls[0]?.[0] as {
+      errorName: string;
+      stackSig: string;
+      screen?: string;
+      fatal: boolean;
+    };
+    expect(secondPayload.errorName).toBe('network.timeout');
+    expect(SAFE_TOKEN_RE.test(secondPayload.errorName)).toBe(true);
+    expect(SAFE_STACK_SIG_RE.test(secondPayload.stackSig)).toBe(true);
+    expect(FORBIDDEN_RE.test(secondPayload.stackSig)).toBe(false);
   });
 });

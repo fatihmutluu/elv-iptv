@@ -243,6 +243,7 @@ describe('createDesktopCatalogSnapshotBridge (HIGH #9)', () => {
     expect(fake.calls).toContainEqual({
       method: 'addSource',
       input: {
+        id: 'r-m3u',
         kind: 'm3u',
         name: 'Remote M3U',
         playlistUrl: 'https://remote.example.test/list.m3u',

@@ -1,4 +1,5 @@
 import type { SecretStore } from '@elv/domain';
+import type { TelemetryRecordRequest } from '../../shared/sync-ipc.ts';
 import { isWorkerToMainMessage, type MainToWorkerMessage } from './worker-protocol.ts';
 
 /** Subset of Electron's `UtilityProcess` required by {@link createCatalogCoordinator}. */
@@ -24,6 +25,8 @@ export interface CatalogCoordinatorDeps<TPort = unknown> {
   createChannel: () => PortPairLike<TPort>;
   log?: (line: string) => void;
   shutdownTimeoutMs?: number;
+  /** Optional opt-in telemetry sink for SQLite slow ops & catalog/EPG import metrics (`#509`). */
+  onTelemetry?: (event: TelemetryRecordRequest) => void;
 }
 
 /** Main-process lifecycle manager for the catalog `utilityProcess`. */
@@ -127,6 +130,10 @@ export function createCatalogCoordinator<TPort = unknown>(
       }
       if (raw.type === 'secret-request') {
         void handleSecretRequest(child, raw);
+        return;
+      }
+      if (raw.type === 'telemetry') {
+        deps.onTelemetry?.(raw.event);
       }
     });
 

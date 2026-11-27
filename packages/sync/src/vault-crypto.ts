@@ -7,7 +7,8 @@ import {
   utf8Encode,
 } from './encoding';
 import type { VaultCryptoPort } from './ports';
-import { VAULT_SCHEMA_VERSION, type VaultSnapshot } from './vault-merge';
+import type { VaultSnapshot } from './vault-merge';
+import { validateAndUpgradeVaultSnapshot } from './vault-validate';
 
 /** Default PBKDF2-HMAC-SHA256 iteration count for client-side auth verifier and vault KEK. */
 export const DEFAULT_KDF_ITERATIONS = 210_000;
@@ -274,73 +275,7 @@ export async function encryptVaultSnapshot(
   };
 }
 
-const MAX_INITIAL_PREFERENCES_KEYS = 64;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isValidOptionalInitialPreferences(value: unknown): boolean {
-  if (value === undefined) return true;
-  if (!isPlainObject(value)) return false;
-  if (
-    Object.hasOwn(value, '__proto__') ||
-    Object.hasOwn(value, 'constructor') ||
-    Object.hasOwn(value, 'prototype')
-  ) {
-    return false;
-  }
-  return Object.keys(value).length <= MAX_INITIAL_PREFERENCES_KEYS;
-}
-
-function isValidOptionalTimestamp(value: unknown): boolean {
-  return value === undefined || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
-}
-
-function isTombstoneItemArray(value: unknown, keyField: 'id' | 'key' | 'seriesKey'): boolean {
-  if (!Array.isArray(value)) return false;
-  for (const item of value) {
-    if (!isPlainObject(item)) return false;
-    if (typeof item[keyField] !== 'string') return false;
-    if (typeof item.updatedAt !== 'number' || !Number.isFinite(item.updatedAt)) return false;
-    if (keyField === 'seriesKey' && typeof item.bitsB64 !== 'string') return false;
-  }
-  return true;
-}
-
-function isValidOptionalRatings(value: unknown): boolean {
-  if (value === undefined) return true;
-  if (!Array.isArray(value)) return false;
-  for (const item of value) {
-    if (!isPlainObject(item)) return false;
-    if (typeof item.key !== 'string' || typeof item.sourceId !== 'string') return false;
-    if (item.kind !== 'movie' && item.kind !== 'series') return false;
-    if (item.value !== 'like' && item.value !== 'dislike') return false;
-    if (typeof item.title !== 'string') return false;
-    if (typeof item.updatedAt !== 'number' || !Number.isFinite(item.updatedAt)) return false;
-    if (item.deleted !== undefined && typeof item.deleted !== 'boolean') return false;
-    if (item.logo !== undefined && item.logo !== null && typeof item.logo !== 'string') {
-      return false;
-    }
-    if (
-      item.year !== undefined &&
-      item.year !== null &&
-      (typeof item.year !== 'number' || !Number.isFinite(item.year))
-    ) {
-      return false;
-    }
-    if (
-      item.rating !== undefined &&
-      item.rating !== null &&
-      (typeof item.rating !== 'number' || !Number.isFinite(item.rating))
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/** Decrypts and authenticates an {@link EncryptedVaultBlob} bound to `(userId, revision)`. */
+/** Decrypts and authenticates an {@link EncryptedVaultBlob} bound to `(userId, revision)`, upgrading v1 snapshots to v2 cleanly. */
 export async function decryptVaultSnapshot(
   crypto: VaultCryptoPort,
   vaultKey: Uint8Array,
@@ -359,25 +294,5 @@ export async function decryptVaultSnapshot(
   const aad = buildVaultBlobAad(userId, revision);
   const plaintext = await crypto.decryptAesGcm(vaultKey, iv, ciphertext, aad);
   const parsed: unknown = JSON.parse(utf8Decode(plaintext));
-  if (!isPlainObject(parsed) || parsed.schemaVersion !== VAULT_SCHEMA_VERSION) {
-    throw new Error('Invalid vault snapshot schemaVersion');
-  }
-  if (
-    typeof parsed.updatedAt !== 'number' ||
-    !Number.isFinite(parsed.updatedAt) ||
-    !isTombstoneItemArray(parsed.sources, 'id') ||
-    !isTombstoneItemArray(parsed.favorites, 'key') ||
-    !isTombstoneItemArray(parsed.hiddenChannels, 'key') ||
-    !isTombstoneItemArray(parsed.pinnedChannels, 'key') ||
-    !isTombstoneItemArray(parsed.customGroups, 'id') ||
-    !isTombstoneItemArray(parsed.collections, 'id') ||
-    !isTombstoneItemArray(parsed.watchProgress, 'key') ||
-    !isTombstoneItemArray(parsed.watchedEpisodesBitfields, 'seriesKey') ||
-    !isValidOptionalRatings(parsed.ratings) ||
-    !isValidOptionalInitialPreferences(parsed.initialPreferences) ||
-    !isValidOptionalTimestamp(parsed.initialPreferencesUpdatedAt)
-  ) {
-    throw new Error('Invalid vault snapshot structure');
-  }
-  return parsed as unknown as VaultSnapshot;
+  return validateAndUpgradeVaultSnapshot(parsed);
 }

@@ -95,6 +95,7 @@ describe('preferences codec', () => {
       externalPlayerMode: 'off',
       externalPlayerCustomScheme: '',
       telemetryOptIn: false,
+      privacyConsentAnswered: false,
       welcomeDismissed: false,
       syncServerUrl: '',
       subtitleStyle: {

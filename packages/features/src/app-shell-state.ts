@@ -10,6 +10,7 @@ import { EMPTY_LIVE_MEMORY, type LiveTabMemory } from './live';
 import type { LiveChannelPlaylist, PlayableEntry, PlayTarget } from './ports/play-target';
 import type { PlaybackGuard } from './ports/playback-guard';
 import type { DiagnosticsPort } from './ports/wave-f7b-ports';
+import type { TelemetryPort } from './ports/wave-f9-ports';
 import type { DetailTarget } from './shared';
 import type { NavDestination, NavUtility } from './shell';
 
@@ -237,6 +238,7 @@ export function buildShellCrashProps(input: {
   readonly crashReportsOptIn?: boolean;
   readonly crashReportsIncludeLogs?: boolean;
   readonly diagnostics?: DiagnosticsPort;
+  readonly telemetry?: Pick<TelemetryPort, 'recordAppCrash'>;
   readonly onToggleIncludeLogs?: (next: boolean) => void;
 }) {
   return {
@@ -257,6 +259,7 @@ export function buildShellCrashProps(input: {
       ? { crashReportsIncludeLogs: input.crashReportsIncludeLogs }
       : {}),
     ...(input.diagnostics !== undefined ? { diagnostics: input.diagnostics } : {}),
+    ...(input.telemetry !== undefined ? { telemetry: input.telemetry } : {}),
     ...(input.onToggleIncludeLogs !== undefined
       ? { onToggleIncludeLogs: input.onToggleIncludeLogs }
       : {}),

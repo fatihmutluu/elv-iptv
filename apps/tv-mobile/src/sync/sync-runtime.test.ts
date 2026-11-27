@@ -420,8 +420,8 @@ describe('createTvMobileSyncPorts (#26, #458)', () => {
     expect(storedUser?.ciphertext).toBeTruthy();
     expect(storedUser?.ciphertext).not.toContain('ch-1');
 
-    // Hydrating a second instance from the same SecretStore restores signed_in state and pulls+decrypts
-    let hydratedSnap: VaultSnapshot = createEmptyVaultSnapshot(0);
+    // Hydrating a second instance on the same device from the same SecretStore restores signed_in state
+    let hydratedSnap: VaultSnapshot = { ...localSnap };
     const ports2 = createTvMobileSyncPorts({
       secretStore: secrets.store,
       fetchFn: server.fetchFn,

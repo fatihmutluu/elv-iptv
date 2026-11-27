@@ -65,7 +65,39 @@ const OPEN_MAX_ATTEMPTS = 3;
 const OPEN_BACKOFF_MS: readonly number[] = [100, 250];
 const TRANSIENT_SQLITE_LOCK_RE = /sqlite_busy|sqlite_locked|database(?:\s+table)?\s+is\s+locked/i;
 
-/** Options for {@link createOpSqliteDriver} open-retry behavior (`#138`). */
+/** Default threshold in ms above which `onSlowQuery` fires (`#509`). */
+const DEFAULT_SLOW_SQL_THRESHOLD_MS = 250;
+
+const ALLOWED_SQL_VERBS = new Set([
+  'SELECT',
+  'INSERT',
+  'UPDATE',
+  'DELETE',
+  'REPLACE',
+  'PRAGMA',
+  'CREATE',
+  'DROP',
+  'ALTER',
+  'ATTACH',
+  'DETACH',
+  'VACUUM',
+  'REINDEX',
+  'ANALYZE',
+  'BEGIN',
+  'COMMIT',
+  'ROLLBACK',
+  'WITH',
+]);
+
+/** Extracts a safe uppercase SQL verb token (`SELECT`, `INSERT`, etc.) without leaking SQL text (`#509`). */
+function extractSafeSqlOpToken(sql: string): string {
+  const stripped = sql.replace(/^(?:\s|--[^\n]*\n|\/\*[\s\S]*?\*\/)+/g, '');
+  const match = /^([A-Za-z]+)/.exec(stripped);
+  const verb = match?.[1]?.toUpperCase();
+  return verb !== undefined && ALLOWED_SQL_VERBS.has(verb) ? verb : 'EXEC';
+}
+
+/** Options for {@link createOpSqliteDriver} open-retry and slow-query telemetry behavior (`#138`, `#509`). */
 export interface OpSqliteOpenOptions {
   /** Maximum open attempts on transient busy/locked errors (default `3`). */
   maxAttempts?: number;
@@ -73,6 +105,12 @@ export interface OpSqliteOpenOptions {
   backoffMs?: readonly number[];
   /** Injectable delay function for deterministic unit tests. */
   sleep?: (ms: number) => Promise<void>;
+  /** Optional slow-query callback fired when any operation exceeds `slowQueryThresholdMs` (`#509`). */
+  onSlowQuery?: (op: string, durationMs: number) => void;
+  /** Threshold in milliseconds above which `onSlowQuery` fires (default `250`). */
+  slowQueryThresholdMs?: number;
+  /** Injectable clock for deterministic slow-query unit tests. */
+  now?: () => number;
 }
 
 function isTransientSqliteOpenError(error: unknown): boolean {
@@ -330,33 +368,62 @@ export async function createOpSqliteDriver(
   const writes = queue();
   const reads = queue();
 
+  const onSlowQuery = openOptions?.onSlowQuery;
+  const slowThresholdMs = openOptions?.slowQueryThresholdMs ?? DEFAULT_SLOW_SQL_THRESHOLD_MS;
+  const now = openOptions?.now ?? Date.now;
+  const timeOp = async <T>(op: string, work: () => Promise<T>): Promise<T> => {
+    if (onSlowQuery === undefined) return work();
+    const startedAt = now();
+    try {
+      return await work();
+    } finally {
+      const elapsed = Math.max(0, Math.round(now() - startedAt));
+      if (elapsed > slowThresholdMs) {
+        try {
+          onSlowQuery(op, elapsed);
+        } catch {
+          // Telemetry callbacks must never fail SQLite operations.
+        }
+      }
+    }
+  };
+
   const statements = async (exec: OpConnection['execute'], sql: string): Promise<void> => {
     for (const statement of splitSqlStatements(sql)) await exec(statement);
   };
   const changes = (r: OpResult): SqlRunResult => ({ changes: r.rowsAffected });
 
   const inTransaction = (tx: OpTx): SqlDriver => ({
-    exec: (sql) => writeGuard(() => statements((s) => tx.execute(s), sql)),
+    exec: (sql) =>
+      timeOp(extractSafeSqlOpToken(sql), () =>
+        writeGuard(() => statements((s) => tx.execute(s), sql)),
+      ),
     run: (sql, params) =>
-      writeGuard(async () => changes(await tx.execute(sql, [...(params ?? [])]))),
+      timeOp(extractSafeSqlOpToken(sql), () =>
+        writeGuard(async () => changes(await tx.execute(sql, [...(params ?? [])]))),
+      ),
     all: <T>(sql: string, params?: readonly SqlValue[]) =>
-      writeGuard(async () => (await tx.execute(sql, [...(params ?? [])])).rows as T[]),
+      timeOp(extractSafeSqlOpToken(sql), () =>
+        writeGuard(async () => (await tx.execute(sql, [...(params ?? [])])).rows as T[]),
+      ),
     batch: (sql, rows) =>
-      writeGuard(async () => {
-        if (rows.length === 0) return;
-        const packed = packInsertBatch(sql, rows);
-        if (packed !== undefined) {
-          for (const [cmdSql, params] of packed) {
-            await tx.execute(cmdSql, params);
+      timeOp('BATCH', () =>
+        writeGuard(async () => {
+          if (rows.length === 0) return;
+          const packed = packInsertBatch(sql, rows);
+          if (packed !== undefined) {
+            for (const [cmdSql, params] of packed) {
+              await tx.execute(cmdSql, params);
+            }
+            return;
           }
-          return;
-        }
-        const statement = writer.prepareStatement(sql);
-        for (const row of rows) {
-          await statement.bind([...row]);
-          await statement.execute();
-        }
-      }),
+          const statement = writer.prepareStatement(sql);
+          for (const row of rows) {
+            await statement.bind([...row]);
+            await statement.execute();
+          }
+        }),
+      ),
     transaction: async () => {
       throw new Error(NESTED);
     },
@@ -393,40 +460,55 @@ export async function createOpSqliteDriver(
           if (failed) throw copyError;
         }),
       ),
-    exec: (sql) => writes(() => writeGuard(() => statements((s) => writer.execute(s), sql))),
+    exec: (sql) =>
+      writes(() =>
+        timeOp(extractSafeSqlOpToken(sql), () =>
+          writeGuard(() => statements((s) => writer.execute(s), sql)),
+        ),
+      ),
     run: (sql, params) =>
-      writes(() => writeGuard(async () => changes(await writer.execute(sql, [...(params ?? [])])))),
+      writes(() =>
+        timeOp(extractSafeSqlOpToken(sql), () =>
+          writeGuard(async () => changes(await writer.execute(sql, [...(params ?? [])]))),
+        ),
+      ),
     all: <T>(sql: string, params?: readonly SqlValue[]) =>
       reads(() =>
-        readGuard(async () => (await reader.execute(sql, [...(params ?? [])])).rows as T[]),
+        timeOp(extractSafeSqlOpToken(sql), () =>
+          readGuard(async () => (await reader.execute(sql, [...(params ?? [])])).rows as T[]),
+        ),
       ),
     batch: (sql, rows) =>
       writes(() =>
-        writeGuard(async () => {
-          if (rows.length === 0) return;
-          const packed = packInsertBatch(sql, rows);
-          await writer.executeBatch(packed ?? rows.map((row) => [sql, [...row]]));
-        }),
+        timeOp('BATCH', () =>
+          writeGuard(async () => {
+            if (rows.length === 0) return;
+            const packed = packInsertBatch(sql, rows);
+            await writer.executeBatch(packed ?? rows.map((row) => [sql, [...row]]));
+          }),
+        ),
       ),
     transaction: <T>(fn: (tx: SqlDriver) => Promise<T>) =>
-      writes(async () => {
-        // Use async BEGIN/COMMIT/ROLLBACK on op-sqlite's worker thread instead of `writer.transaction()`,
-        // which calls `executeSync("COMMIT;")` synchronously on the Hermes JS thread and stalls the UI
-        // during large WAL checkpoints (`#478`).
-        await writeGuard(() => writer.execute('BEGIN IMMEDIATE;'));
-        try {
-          const value = await fn(inTransaction(writer));
-          await writeGuard(() => writer.execute('COMMIT;'));
-          return value;
-        } catch (error) {
+      writes(() =>
+        timeOp('TX', async () => {
+          // Use async BEGIN/COMMIT/ROLLBACK on op-sqlite's worker thread instead of `writer.transaction()`,
+          // which calls `executeSync("COMMIT;")` synchronously on the Hermes JS thread and stalls the UI
+          // during large WAL checkpoints (`#478`).
+          await writeGuard(() => writer.execute('BEGIN IMMEDIATE;'));
           try {
-            await writer.execute('ROLLBACK;');
-          } catch {
-            // SQLite may already have rolled back automatically on interrupt or constraint failure.
+            const value = await fn(inTransaction(writer));
+            await writeGuard(() => writer.execute('COMMIT;'));
+            return value;
+          } catch (error) {
+            try {
+              await writer.execute('ROLLBACK;');
+            } catch {
+              // SQLite may already have rolled back automatically on interrupt or constraint failure.
+            }
+            throw error;
           }
-          throw error;
-        }
-      }),
+        }),
+      ),
     close() {
       if (closePromise !== undefined) return closePromise;
       signal?.removeEventListener('abort', onAbort);

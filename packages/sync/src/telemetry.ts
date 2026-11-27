@@ -1,8 +1,18 @@
-import { redactText } from '@elv/domain';
 import { utf8ByteLength } from './encoding';
 import type { SyncClockPort, SyncHttpPort } from './ports';
+import {
+  type DeviceTechnicalProfile,
+  redactDiagnosticText,
+  sanitizeDeviceProfile,
+  sanitizeErrorName,
+  sanitizeOptionalToken,
+  sanitizeStackSig,
+  sanitizeToken,
+} from './telemetry-redact';
 
-/** Strictly allowlisted runtime telemetry event kinds (`#458`, `#70`). */
+export { type DeviceTechnicalProfile, redactDiagnosticText, sanitizeDeviceProfile };
+
+/** Strictly allowlisted runtime telemetry event kinds (`#458`, `#70`, `#509`). */
 export const TELEMETRY_EVENT_KINDS = [
   'startup',
   'screen_transition',
@@ -14,6 +24,9 @@ export const TELEMETRY_EVENT_KINDS = [
   'playback_error',
   'media_decode_failure',
   'sqlite_slow_op',
+  'app_crash',
+  'unhandled_error',
+  'catalog_import',
 ] as const;
 
 /** Union of all allowlisted telemetry event kind discriminants. */
@@ -98,6 +111,33 @@ export type TelemetryEvent =
       readonly operation: string;
       readonly durationMs: number;
       readonly rowCount?: number;
+    }
+  | {
+      readonly kind: 'app_crash';
+      readonly ts: number;
+      readonly errorName: string;
+      readonly stackSig: string;
+      readonly screen?: string;
+      readonly fatal?: boolean;
+      readonly uptimeMs?: number;
+    }
+  | {
+      readonly kind: 'unhandled_error';
+      readonly ts: number;
+      readonly errorName: string;
+      readonly stackSig: string;
+      readonly screen?: string;
+      readonly source?: string;
+    }
+  | {
+      readonly kind: 'catalog_import';
+      readonly ts: number;
+      readonly sourceKind: string;
+      readonly stage: string;
+      readonly durationMs: number;
+      readonly itemCount?: number;
+      readonly success: boolean;
+      readonly errorCode?: string;
     };
 
 /** Default FIFO ring buffer entry ceiling. */
@@ -106,37 +146,7 @@ export const DEFAULT_TELEMETRY_MAX_ENTRIES = 256;
 /** Default FIFO ring buffer serialized UTF-8 byte ceiling (128 KiB). */
 export const DEFAULT_TELEMETRY_MAX_BYTES = 131_072;
 
-const SAFE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const IPV4_RE = /(?:^|[^0-9])(?:\d{1,3}\.){3}\d{1,3}(?:$|[^0-9])/;
-const MULTI_LABEL_HOSTNAME_RE = /[a-z0-9-]+\.[a-z0-9-]+\.[a-z]{2,}/i;
-const COMMON_TLD_HOSTNAME_RE = /[a-z0-9-]+\.(?:com|net|org|tv|io|xyz|me|cc|live|stream|example)\b/i;
-const FORBIDDEN_PATTERNS_RE =
-  /(:\/\/|@|\\|\/Users\/|\/home\/|\/data\/|\/etc\/|\/var\/|bearer\s|basic\s|authorization|cookie|passwd|password|secret|token=|api_key|apikey)/i;
 const MAX_SAFE_DURATION_MS = 86_400_000;
-
-function sanitizeToken(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.length > 64) return null;
-  if (
-    FORBIDDEN_PATTERNS_RE.test(trimmed) ||
-    IPV4_RE.test(trimmed) ||
-    MULTI_LABEL_HOSTNAME_RE.test(trimmed) ||
-    COMMON_TLD_HOSTNAME_RE.test(trimmed)
-  ) {
-    return null;
-  }
-  const firstRedacted = redactText(trimmed);
-  const secondRedacted = redactText(firstRedacted);
-  if (firstRedacted !== trimmed || secondRedacted !== trimmed) return null;
-  if (!SAFE_TOKEN_RE.test(trimmed)) return null;
-  return trimmed;
-}
-
-function sanitizeOptionalToken(value: unknown): string | undefined | null {
-  if (value === undefined) return undefined;
-  return sanitizeToken(value);
-}
 
 function sanitizeNonNegNumber(value: unknown, max = MAX_SAFE_DURATION_MS): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > max) {
@@ -342,6 +352,74 @@ export function sanitizeTelemetryEvent(raw: unknown): TelemetryEvent | null {
         ...(rowCount !== undefined ? { rowCount: Math.trunc(rowCount) } : {}),
       };
     }
+    case 'app_crash': {
+      const errorName = sanitizeErrorName(rec.errorName);
+      const stackSig = sanitizeStackSig(rec.stackSig);
+      const screen = sanitizeOptionalToken(rec.screen);
+      const uptimeMs = sanitizeOptionalNonNegNumber(rec.uptimeMs, 365 * MAX_SAFE_DURATION_MS);
+      if (
+        errorName === null ||
+        stackSig === null ||
+        screen === null ||
+        uptimeMs === null ||
+        (rec.fatal !== undefined && typeof rec.fatal !== 'boolean')
+      ) {
+        return null;
+      }
+      return {
+        kind: 'app_crash',
+        ts,
+        errorName,
+        stackSig,
+        ...(screen !== undefined ? { screen } : {}),
+        ...(rec.fatal !== undefined ? { fatal: rec.fatal } : {}),
+        ...(uptimeMs !== undefined ? { uptimeMs } : {}),
+      };
+    }
+    case 'unhandled_error': {
+      const errorName = sanitizeErrorName(rec.errorName);
+      const stackSig = sanitizeStackSig(rec.stackSig);
+      const screen = sanitizeOptionalToken(rec.screen);
+      const source = sanitizeOptionalToken(rec.source);
+      if (errorName === null || stackSig === null || screen === null || source === null) {
+        return null;
+      }
+      return {
+        kind: 'unhandled_error',
+        ts,
+        errorName,
+        stackSig,
+        ...(screen !== undefined ? { screen } : {}),
+        ...(source !== undefined ? { source } : {}),
+      };
+    }
+    case 'catalog_import': {
+      const sourceKind = sanitizeToken(rec.sourceKind);
+      const stage = sanitizeToken(rec.stage);
+      const durationMs = sanitizeNonNegNumber(rec.durationMs);
+      const itemCount = sanitizeOptionalNonNegNumber(rec.itemCount, 10_000_000);
+      const errorCode = sanitizeOptionalToken(rec.errorCode);
+      if (
+        sourceKind === null ||
+        stage === null ||
+        durationMs === null ||
+        itemCount === null ||
+        errorCode === null ||
+        typeof rec.success !== 'boolean'
+      ) {
+        return null;
+      }
+      return {
+        kind: 'catalog_import',
+        ts,
+        sourceKind,
+        stage,
+        durationMs,
+        success: rec.success,
+        ...(itemCount !== undefined ? { itemCount: Math.trunc(itemCount) } : {}),
+        ...(errorCode !== undefined ? { errorCode } : {}),
+      };
+    }
     default:
       return null;
   }
@@ -461,6 +539,7 @@ export interface TelemetryBatchPayload {
   readonly platform: string;
   readonly appVersion: string;
   readonly sentAt: number;
+  readonly deviceProfile?: DeviceTechnicalProfile;
   readonly events: readonly TelemetryEvent[];
 }
 
@@ -471,6 +550,7 @@ export interface TelemetryPreviewInput {
   readonly appVersion: string;
   readonly events: readonly unknown[];
   readonly sentAt?: number;
+  readonly deviceProfile?: DeviceTechnicalProfile;
 }
 
 /** Builds a human-readable, strictly sanitized JSON preview of the exact telemetry payload. */
@@ -480,12 +560,14 @@ export function buildTelemetryPayloadPreview(input: TelemetryPreviewInput): stri
     const clean = sanitizeTelemetryEvent(raw);
     if (clean !== null) sanitizedEvents.push(clean);
   }
+  const cleanProfile = sanitizeDeviceProfile(input.deviceProfile);
   const payload: TelemetryBatchPayload = {
     schemaVersion: 1,
     sessionId: sanitizeToken(input.sessionId) ?? 'anonymous',
     platform: sanitizeToken(input.platform) ?? 'unknown',
     appVersion: sanitizeToken(input.appVersion) ?? '0.0.0',
     sentAt: sanitizeTimestamp(input.sentAt) ?? 0,
+    ...(cleanProfile !== undefined ? { deviceProfile: cleanProfile } : {}),
     events: sanitizedEvents,
   };
   return JSON.stringify(payload, null, 2);
@@ -494,7 +576,13 @@ export function buildTelemetryPayloadPreview(input: TelemetryPreviewInput): stri
 /** Result returned by {@link TelemetryUploader.flush}. */
 export interface TelemetryFlushResult {
   readonly sent: number;
-  readonly skippedReason?: 'opted_out' | 'kill_switch' | 'backoff' | 'empty' | 'network_error';
+  readonly skippedReason?:
+    | 'opted_out'
+    | 'kill_switch'
+    | 'backoff'
+    | 'empty'
+    | 'network_error'
+    | 'rejected';
 }
 
 /** Options for {@link createTelemetryUploader}. */
@@ -506,6 +594,7 @@ export interface TelemetryUploaderOptions {
   readonly sessionId: string;
   readonly platform: string;
   readonly appVersion: string;
+  readonly deviceProfile?: DeviceTechnicalProfile;
   readonly queue?: TelemetryQueue;
   readonly maxBatchSize?: number;
   readonly baseBackoffMs?: number;
@@ -532,6 +621,7 @@ export function createTelemetryUploader(options: TelemetryUploaderOptions): Tele
   const safeSessionId = sanitizeToken(options.sessionId) ?? 'anonymous';
   const safePlatform = sanitizeToken(options.platform) ?? 'unknown';
   const safeAppVersion = sanitizeToken(options.appVersion) ?? '0.0.0';
+  const safeDeviceProfile = sanitizeDeviceProfile(options.deviceProfile);
 
   let disabled = false;
   let consecutiveFailures = 0;
@@ -579,6 +669,7 @@ export function createTelemetryUploader(options: TelemetryUploaderOptions): Tele
         platform: safePlatform,
         appVersion: safeAppVersion,
         sentAt: now,
+        ...(safeDeviceProfile !== undefined ? { deviceProfile: safeDeviceProfile } : {}),
         events: batch,
       };
 
@@ -613,6 +704,16 @@ export function createTelemetryUploader(options: TelemetryUploaderOptions): Tele
             nextAllowedAt = 0;
             return { sent: batch.length };
           }
+          if (res.status === 400 || res.status === 413) {
+            if (sentIds !== null && queue.drainByIds) {
+              queue.drainByIds(sentIds);
+            } else {
+              queue.drain(batch.length);
+            }
+            consecutiveFailures = 0;
+            nextAllowedAt = 0;
+            return { sent: 0, skippedReason: 'rejected' };
+          }
           scheduleBackoff(now);
           return { sent: 0, skippedReason: 'network_error' };
         } catch {
@@ -640,6 +741,7 @@ export function createTelemetryUploader(options: TelemetryUploaderOptions): Tele
         sessionId: safeSessionId,
         platform: safePlatform,
         appVersion: safeAppVersion,
+        ...(safeDeviceProfile !== undefined ? { deviceProfile: safeDeviceProfile } : {}),
         events: queue.peek(maxBatchSize),
         sentAt: options.clock.now(),
       });

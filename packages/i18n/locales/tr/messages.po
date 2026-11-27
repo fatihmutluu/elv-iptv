@@ -3074,7 +3074,7 @@ msgid "settings.section.account"
 msgstr "Hesap ve Eşitleme"
 
 msgid "settings.section.feedback"
-msgstr "Geri Bildirim ve Telemetri"
+msgstr "Geri Bildirim"
 
 msgid "welcome.title"
 msgstr "Tüm Ekranlarınızda Eşitleyin"
@@ -3862,3 +3862,129 @@ msgstr "Favorilere ekle"
 
 msgid "live.zap.favoriteRemove"
 msgstr "Favorilerden çıkar"
+
+msgid "settings.diagnostics.unifiedTitle"
+msgstr "Tanılama ve performans"
+
+msgid "settings.diagnostics.unifiedToggle"
+msgstr "Anonim tanılama ve performans verisi paylaş"
+
+msgid "settings.diagnostics.unifiedDescription"
+msgstr "Çökmeleri, yavaş yüklemeleri ve oynatma hatalarını hızla düzeltmemize yardımcı olur. Çalma listeleri, izleme geçmişi veya kişisel veriler asla gönderilmez."
+
+msgid "privacy.consent.title"
+msgstr "Gizlilik ve Tanılama"
+
+msgid "privacy.consent.body"
+msgstr "ELV IPTV çalma listelerinizi ve izleme geçmişinizi cihazınızda gizli tutar (giriş yaptığınızda uçtan uca şifrelenir). Kararlılığı iyileştirmek için isteğe bağlı olarak anonim çökme ve performans verisi paylaşabilirsiniz."
+
+msgid "privacy.consent.telemetryToggle"
+msgstr "Anonim tanılama verisiyle ELV IPTV'yi geliştirmeye yardımcı ol"
+
+msgid "privacy.consent.continue"
+msgstr "Devam et"
+
+msgid "account.sync.autoBadge"
+msgstr "Otomatik eşitleme etkin"
+
+msgid "account.sync.statusSyncing"
+msgstr "Şifreli kasa eşitleniyor…"
+
+msgid "account.sync.statusUpToDate"
+msgstr "Tüm cihazlar güncel"
+
+msgid "account.sync.statusPending"
+msgstr "Değişiklikler eşitleme kuyruğunda"
+
+msgid "account.sync.statusOffline"
+msgstr "Çevrimdışı — bağlantı kurulduğunda otomatik eşitlenecek"
+
+msgid "account.sync.lastSynced"
+msgstr "Son eşitleme: {time}"
+
+msgid "account.sync.manualFallback"
+msgstr "Şimdi eşitle"
+
+msgid "pair.title"
+msgstr "Başka cihazla eşleştir"
+
+msgid "pair.subtitle"
+msgstr "Bu QR kodu tarayın veya 8 haneli kodu diğer cihazınızda girin. Aktarım yönü otomatik algılanır."
+
+msgid "pair.codeLabel"
+msgstr "8 haneli eşleştirme kodu"
+
+msgid "pair.enterCodeLabel"
+msgstr "Veya başka cihazdaki kodu girin"
+
+msgid "pair.enterCodePlaceholder"
+msgstr "0000 0000"
+
+msgid "pair.connectButton"
+msgstr "Bağlan"
+
+msgid "pair.scanQrButton"
+msgstr "QR kod tara"
+
+msgid "pair.cameraUnavailable"
+msgstr "Bu cihazda kamera taraması kullanılamıyor — 8 haneli kodu girebilirsiniz."
+
+msgid "pair.sasTitle"
+msgstr "Güvenlik kodunu doğrula"
+
+msgid "pair.sasBody"
+msgstr "Şifreli hesabınızı aktarmadan önce her iki cihazda da aynı 4 haneli güvenlik kodunun göründüğünü doğrulayın:"
+
+msgid "pair.sasConfirm"
+msgstr "Kodlar eşleşiyor — onayla"
+
+msgid "pair.sasCancel"
+msgstr "İptal"
+
+msgid "pair.caseNeitherTitle"
+msgstr "Önce bir cihazda giriş yapın"
+
+msgid "pair.caseNeitherBody"
+msgstr "Henüz iki cihazda da oturum açık değil. Cihazlardan birinde giriş yapın veya hesap oluşturun, ardından tekrar eşleştirin."
+
+msgid "pair.caseSameAccountTitle"
+msgstr "Zaten aynı hesaptasınız"
+
+msgid "pair.caseSameAccountBody"
+msgstr "Her iki cihaz da {email} hesabında açık. Şimdi anlık eşitleme başlatılıyor."
+
+msgid "pair.caseTransferToOther"
+msgstr "Diğer cihazda {email} hesabıyla oturum açılsın mı?"
+
+msgid "pair.caseReceiveFromOther"
+msgstr "Bu cihazda {email} hesabıyla oturum açılsın mı?"
+
+msgid "pair.caseDifferentTitle"
+msgstr "İki farklı hesap algılandı"
+
+msgid "pair.caseDifferentBody"
+msgstr "Her iki cihazın hangi hesabı kullanacağını seçin. Değiştirilen cihaz seçili hesaba geçecektir."
+
+msgid "pair.useThisAccount"
+msgstr "Bu cihazın hesabını kullan ({email})"
+
+msgid "pair.useOtherAccount"
+msgstr "Diğer cihazın hesabına geç ({email})"
+
+msgid "pair.waitingApproval"
+msgstr "Diğer cihazdan onay bekleniyor…"
+
+msgid "pair.success"
+msgstr "Cihazlar eşleştirildi ve eşitlendi!"
+
+msgid "pair.errorExpired"
+msgstr "Eşleştirme kodunun süresi doldu. Tekrar denemek için yeni kod oluşturun."
+
+msgid "pair.errorLocked"
+msgstr "Çok fazla hatalı deneme. Kod güvenlik için kilitlendi — yeni kod oluşturun."
+
+msgid "pair.errorInvalidCode"
+msgstr "Geçerli bir 8 haneli eşleştirme kodu girin."
+
+msgid "pair.errorRejected"
+msgstr "Eşleştirme diğer cihazda iptal edildi."

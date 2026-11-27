@@ -84,7 +84,9 @@ export interface MobileVideoHostDeps {
   readonly telemetry?: Pick<
     TelemetryPort,
     'isOptedIn' | 'recordMediaDecodeFailure' | 'recordPlaybackError'
-  >;
+  > &
+    Partial<Pick<TelemetryPort, 'recordPlaybackStart' | 'recordPlaybackRebuffer'>>;
+  readonly clock?: () => number;
 }
 
 function toMedia3EngineOptions(
@@ -140,7 +142,8 @@ function inferContainerFromDetail(detail: string | undefined, isLiveTs: boolean)
 function attachEngineTelemetryObserver(
   engine: PlayerEngine,
   engineName: string,
-  telemetry: Pick<TelemetryPort, 'isOptedIn' | 'recordMediaDecodeFailure' | 'recordPlaybackError'>,
+  telemetry: NonNullable<MobileVideoHostDeps['telemetry']>,
+  nowMs: () => number,
 ): void {
   if (typeof engine.subscribe !== 'function') return;
   let lastAttempt = -1;
@@ -149,6 +152,28 @@ function attachEngineTelemetryObserver(
   let videoCodec = 'unknown';
   let audioCodec = 'unknown';
   let hdrFormat: string | undefined;
+  let attemptStartedAt: number | null = null;
+  let startRecorded = false;
+  let hasPlayed = false;
+  let stallStartEventMs: number | null = null;
+  let stallStartedClockMs: number | null = null;
+  let bufferingStartedClockMs: number | null = null;
+
+  const emitStartIfNeeded = (): void => {
+    hasPlayed = true;
+    if (startRecorded) return;
+    startRecorded = true;
+    if (!telemetry.isOptedIn()) return;
+    const ttffMs =
+      attemptStartedAt === null ? 0 : Math.max(0, Math.round(nowMs() - attemptStartedAt));
+    telemetry.recordPlaybackStart?.({
+      engine: engineName,
+      ttffMs,
+      isLive,
+      ...(isLiveTs ? { container: 'mpegts' } : {}),
+      ...(videoCodec !== 'unknown' ? { videoCodec } : {}),
+    });
+  };
 
   engine.subscribe((event: EngineEvent) => {
     if (event.attempt !== lastAttempt) {
@@ -158,6 +183,12 @@ function attachEngineTelemetryObserver(
       videoCodec = 'unknown';
       audioCodec = 'unknown';
       hdrFormat = undefined;
+      attemptStartedAt = nowMs();
+      startRecorded = false;
+      hasPlayed = false;
+      stallStartEventMs = null;
+      stallStartedClockMs = null;
+      bufferingStartedClockMs = null;
     }
     if (event.type === 'clock') {
       if (event.anchor.isLiveTs === true) {
@@ -180,6 +211,49 @@ function attachEngineTelemetryObserver(
         event.tracks.audio.find((t) => t.id === event.tracks.selectedAudioId) ??
         event.tracks.audio[0];
       if (selected?.codec !== undefined) audioCodec = sanitizeCodecToken(selected.codec);
+      return;
+    }
+    if (event.type === 'firstFrame') {
+      emitStartIfNeeded();
+      return;
+    }
+    if (event.type === 'stall') {
+      if (event.phase === 'start') {
+        stallStartEventMs = event.atMs;
+        stallStartedClockMs = nowMs();
+        bufferingStartedClockMs = null;
+      } else if (stallStartedClockMs !== null) {
+        const dur =
+          stallStartEventMs !== null && event.atMs >= stallStartEventMs
+            ? Math.round(event.atMs - stallStartEventMs)
+            : Math.max(0, Math.round(nowMs() - stallStartedClockMs));
+        stallStartEventMs = null;
+        stallStartedClockMs = null;
+        if (telemetry.isOptedIn()) {
+          telemetry.recordPlaybackRebuffer?.({ engine: engineName, durationMs: dur, isLive });
+        }
+      }
+      return;
+    }
+    if (event.type === 'state') {
+      if (event.state === 'opening' && attemptStartedAt === null) {
+        attemptStartedAt = nowMs();
+      } else if (event.state === 'buffering') {
+        if (hasPlayed && stallStartedClockMs === null && bufferingStartedClockMs === null) {
+          bufferingStartedClockMs = nowMs();
+        }
+      } else if (event.state === 'playing') {
+        emitStartIfNeeded();
+        if (bufferingStartedClockMs !== null) {
+          const dur = Math.max(0, Math.round(nowMs() - bufferingStartedClockMs));
+          bufferingStartedClockMs = null;
+          if (telemetry.isOptedIn()) {
+            telemetry.recordPlaybackRebuffer?.({ engine: engineName, durationMs: dur, isLive });
+          }
+        }
+      } else if (event.state === 'paused' || event.state === 'ended') {
+        bufferingStartedClockMs = null;
+      }
       return;
     }
     if (event.type === 'error') {
@@ -234,6 +308,7 @@ export function createMobileVideoHost(deps: MobileVideoHostDeps): MobileVideoHos
           engine,
           isAndroid ? 'media3' : isApple ? 'aether' : deps.os,
           deps.telemetry,
+          deps.clock ?? Date.now,
         );
       }
 

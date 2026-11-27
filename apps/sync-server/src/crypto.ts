@@ -28,8 +28,10 @@ export function assertValidJwtSecret(secret: string): void {
   }
 }
 
-const PAIRING_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const PAIRING_CODE_LENGTH = 12;
+const PAIRING_CODE_MODULO = 100_000_000;
+const PAIRING_CODE_REJECTION_LIMIT =
+  Math.floor(0x1_0000_0000 / PAIRING_CODE_MODULO) * PAIRING_CODE_MODULO;
+const HEX_RE = /^[0-9a-fA-F]+$/;
 
 /** Verified claims extracted from an HS256 JWT access token. */
 export interface AccessTokenClaims {
@@ -49,7 +51,7 @@ function base64UrlEncode(bytes: Uint8Array): string {
 }
 
 /** Decodes a strict unpadded base64url string into bytes, returning null on invalid input. */
-function base64UrlDecode(input: string): Uint8Array | null {
+export function base64UrlDecode(input: string): Uint8Array | null {
   if (input.length === 0 || input.length % 4 === 1) return null;
   if (!/^[A-Za-z0-9_-]+$/.test(input)) return null;
   const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
@@ -101,21 +103,16 @@ export function randomId(): string {
   return crypto.randomUUID();
 }
 
-/** Generates a 12-character unambiguous uppercase alphanumeric pairing code with uniform distribution. */
+/** Generates an 8-digit numeric pairing code ("00000000"-"99999999") with rejection-sampled zero modulo bias. */
 export function randomPairingCode(): string {
-  const alphabetLen = PAIRING_ALPHABET.length;
-  const maxByte = Math.floor(256 / alphabetLen) * alphabetLen;
-  let code = '';
-  while (code.length < PAIRING_CODE_LENGTH) {
-    const chunk = randomBytes(16);
-    for (let i = 0; i < chunk.length && code.length < PAIRING_CODE_LENGTH; i += 1) {
-      const byte = chunk[i] ?? 0;
-      if (byte < maxByte) {
-        code += PAIRING_ALPHABET[byte % alphabetLen] ?? '';
-      }
+  const buf = new Uint32Array(1);
+  while (true) {
+    crypto.getRandomValues(buf);
+    const value = buf[0] ?? 0;
+    if (value < PAIRING_CODE_REJECTION_LIMIT) {
+      return String(value % PAIRING_CODE_MODULO).padStart(8, '0');
     }
   }
-  return code;
 }
 
 /** Constant-time byte array equality check. */
@@ -132,6 +129,29 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 async function sha256Bytes(input: string): Promise<Uint8Array> {
   const digest = await crypto.subtle.digest('SHA-256', encoder.encode(input));
   return new Uint8Array(digest);
+}
+
+/** Computes SHA-256 of UTF-8 input and returns 64-char lowercase hex. */
+export async function sha256Hex(input: string): Promise<string> {
+  const bytes = await sha256Bytes(input);
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    out += (bytes[i] ?? 0).toString(16).padStart(2, '0');
+  }
+  return out;
+}
+
+/** Constant-time equality comparison for non-empty hexadecimal strings. */
+export function timingSafeEqualHex(a: string, b: string): boolean {
+  const normA = a.toLowerCase();
+  const normB = b.toLowerCase();
+  const validHex = normA.length > 0 && normB.length > 0 && HEX_RE.test(normA) && HEX_RE.test(normB);
+  const maxLen = Math.max(normA.length, normB.length);
+  let diff = normA.length ^ normB.length;
+  for (let i = 0; i < maxLen; i += 1) {
+    diff |= (normA.charCodeAt(i) || 0) ^ (normB.charCodeAt(i) || 0);
+  }
+  return validHex && diff === 0;
 }
 
 /** Computes SHA-256 of UTF-8 input and returns unpadded base64url. */

@@ -102,4 +102,33 @@ describe('CrashRecoveryBoundary opt-in crash diagnostics (#226)', () => {
     await fireEvent.press(view.getByTestId('crash-report-close'));
     expect(view.queryByTestId('crash-report-preview-modal')).toBeNull();
   });
+
+  it('records strictly redacted errorName and path-free stackSig to telemetry.recordAppCrash on render crash (#509)', async () => {
+    const recordAppCrash = jest.fn();
+    await render(
+      <ThemeProvider>
+        <ViewportProvider>
+          <I18nProvider i18n={i18n}>
+            <CrashRecoveryBoundary telemetry={{ recordAppCrash }} screenName="live">
+              <ExplodingChild />
+            </CrashRecoveryBoundary>
+          </I18nProvider>
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+
+    expect(recordAppCrash).toHaveBeenCalledTimes(1);
+    const meta = recordAppCrash.mock.calls[0]?.[0] as {
+      errorName: string;
+      stackSig: string;
+      screen?: string;
+      fatal: boolean;
+    };
+    expect(meta.errorName).toBe('Error');
+    expect(meta.screen).toBe('live');
+    expect(meta.fatal).toBe(true);
+    expect(meta.stackSig).not.toContain('secretpass');
+    expect(meta.stackSig).not.toContain('iptv.example.test');
+    expect(meta.stackSig).not.toMatch(/[A-Za-z]:\\/);
+  });
 });

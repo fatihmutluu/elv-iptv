@@ -152,6 +152,8 @@ export interface SourceRecord {
 
 /** Input for {@link addXtreamSource}. */
 export interface XtreamSourceInput {
+  /** Optional explicit cross-device source ID (`<= 128` chars matching {@link SOURCE_ID}). */
+  readonly id?: string;
   name: string;
   server: string;
   /** Optional ordered failover mirror URLs stored strictly in SecretStore (`#317`). */
@@ -167,6 +169,8 @@ export interface XtreamSourceInput {
 
 /** Input for {@link addM3uSource}. */
 export interface M3uSourceInput {
+  /** Optional explicit cross-device source ID (`<= 128` chars matching {@link SOURCE_ID}). */
+  readonly id?: string;
   name: string;
   playlistUrl: string;
   guideUrl?: string;
@@ -178,6 +182,8 @@ export interface M3uSourceInput {
 
 /** Input for {@link addLocalM3uSource} (`#51`). */
 export interface LocalM3uSourceInput {
+  /** Optional explicit cross-device source ID (`<= 128` chars matching {@link SOURCE_ID}). */
+  readonly id?: string;
   name: string;
   bytes: Uint8Array;
   guideUrl?: string;
@@ -189,6 +195,8 @@ export interface LocalM3uSourceInput {
 
 /** Input for {@link addStalkerSource} (`#29`). */
 export interface StalkerSourceInput {
+  /** Optional explicit cross-device source ID (`<= 128` chars matching {@link SOURCE_ID}). */
+  readonly id?: string;
   name: string;
   portalUrl: string;
   mac: string;
@@ -291,6 +299,20 @@ const NON_SHARDED_PARTS = ['xtream', 'playlist', 'stalker'] as const;
 /** Characters a source id may use: the set every platform secret store accepts in a key. */
 export const SOURCE_ID = /^[A-Za-z0-9._-]+$/;
 
+const MAX_SOURCE_ID_LENGTH = 128;
+
+function resolveSourceId(inputId: string | undefined, newId: () => string): Result<string> {
+  const candidate = inputId !== undefined ? inputId.trim() : newId();
+  if (
+    candidate.length === 0 ||
+    candidate.length > MAX_SOURCE_ID_LENGTH ||
+    !SOURCE_ID.test(candidate)
+  ) {
+    return err(elvError('storage', 'invalid-source-id'));
+  }
+  return ok(candidate);
+}
+
 /**
  * Secret keys: `source.<id>.xtream` (JSON server, username, password), `.playlist`, `.urlvars` (JSON
  * {@link UrlVars}), `.stalker` (JSON portalUrl, mac, optional serialNumber), `.stalker_cmds` (JSON
@@ -351,7 +373,13 @@ async function persist(
   record: SourceRecord,
   secrets: readonly (readonly [string, string])[],
 ): Promise<Result<SourceRecord>> {
-  if (!SOURCE_ID.test(record.id)) return err(elvError('storage', 'invalid-source-id'));
+  if (
+    record.id.length === 0 ||
+    record.id.length > MAX_SOURCE_ID_LENGTH ||
+    !SOURCE_ID.test(record.id)
+  ) {
+    return err(elvError('storage', 'invalid-source-id'));
+  }
   const written: string[] = [];
   const rollback = async (error: ElvError): Promise<Result<never>> => {
     for (const key of written) await deps.secrets.delete(key).catch(() => undefined);
@@ -389,7 +417,9 @@ export async function addXtreamSource(
   }
   const transportRes = sanitizeTransportSettings(input.transport);
   if (!transportRes.ok) return transportRes;
-  const id = deps.newId();
+  const idRes = resolveSourceId(input.id, deps.newId);
+  if (!idRes.ok) return idRes;
+  const id = idRes.value;
   const settings: SourceSettings =
     transportRes.value === undefined ? {} : { transport: transportRes.value };
   if (typeof input.xmltvTimezone === 'string' && input.xmltvTimezone.trim() !== '') {
@@ -438,7 +468,9 @@ export async function addM3uSource(
   if (input.name.trim() === '' || input.playlistUrl.trim() === '') return invalid();
   const transportRes = sanitizeTransportSettings(input.transport);
   if (!transportRes.ok) return transportRes;
-  const id = deps.newId();
+  const idRes = resolveSourceId(input.id, deps.newId);
+  if (!idRes.ok) return idRes;
+  const id = idRes.value;
   const settings: SourceSettings = {};
   const vars: UrlVars = {};
   if (transportRes.value !== undefined) settings.transport = transportRes.value;
@@ -478,8 +510,9 @@ export async function addLocalM3uSource(
   }
   const transportRes = sanitizeTransportSettings(input.transport);
   if (!transportRes.ok) return transportRes;
-  const id = deps.newId();
-  if (!SOURCE_ID.test(id)) return err(elvError('storage', 'invalid-source-id'));
+  const idRes = resolveSourceId(input.id, deps.newId);
+  if (!idRes.ok) return idRes;
+  const id = idRes.value;
   const settings: SourceSettings = { isLocalPlaylist: true };
   const vars: UrlVars = {};
   if (transportRes.value !== undefined) settings.transport = transportRes.value;
@@ -528,7 +561,9 @@ export async function addStalkerSource(
   const transportRes = sanitizeTransportSettings(input.transport);
   if (!transportRes.ok) return transportRes;
 
-  const id = deps.newId();
+  const idRes = resolveSourceId(input.id, deps.newId);
+  if (!idRes.ok) return idRes;
+  const id = idRes.value;
   const fingerprint = fingerprintStalkerCredentials(portalRes.value.endpoint, macRes.value);
   const settings: SourceSettings = {
     ...(transportRes.value === undefined ? {} : { transport: transportRes.value }),

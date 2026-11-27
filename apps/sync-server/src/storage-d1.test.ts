@@ -1,34 +1,30 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import {
-  createD1Storage,
-  type D1Database,
-  type D1PreparedStatement,
-  type D1Result,
-} from './storage-d1.ts';
+import { createD1Storage } from './storage-d1.ts';
+import type { D1Database, D1PreparedStatement, D1Result } from './storage-d1-types.ts';
 import worker from './worker.ts';
 
-const MIGRATION_PATH = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  'migrations',
-  '0001_init.sql',
-);
+const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
+const MIGRATION_0001_PATH = join(MIGRATIONS_DIR, '0001_init.sql');
+const MIGRATION_0002_PATH = join(MIGRATIONS_DIR, '0002_wave_p9_pairing_telemetry.sql');
 
 interface SchemaMap {
   readonly tables: Map<string, Set<string>>;
 }
 
-function parseMigrationSchema(sql: string): SchemaMap {
+function parseMigrationSchema(sqlFiles: readonly string[]): SchemaMap {
   const tables = new Map<string, Set<string>>();
+  const combined = sqlFiles.join('\n');
+
   const createRe = /CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(([\s\S]*?)\);/gi;
-  let match = createRe.exec(sql);
+  let match = createRe.exec(combined);
   while (match !== null) {
     const tableName = match[1] ?? '';
     const body = match[2] ?? '';
-    const cols = new Set<string>();
+    const cols = tables.get(tableName) ?? new Set<string>();
     for (const rawLine of body.split('\n')) {
       const line = rawLine.trim();
       if (!line || line.startsWith('--')) continue;
@@ -36,8 +32,19 @@ function parseMigrationSchema(sql: string): SchemaMap {
       if (colMatch?.[1]) cols.add(colMatch[1]);
     }
     tables.set(tableName, cols);
-    match = createRe.exec(sql);
+    match = createRe.exec(combined);
   }
+
+  const alterRe = /ALTER TABLE\s+(\w+)\s+ADD COLUMN\s+(\w+)\s+(?:TEXT|INTEGER|REAL|BLOB)/gi;
+  let alterMatch = alterRe.exec(combined);
+  while (alterMatch !== null) {
+    const tableName = alterMatch[1] ?? '';
+    const colName = alterMatch[2] ?? '';
+    const cols = tables.get(tableName);
+    if (cols && colName) cols.add(colName);
+    alterMatch = alterRe.exec(combined);
+  }
+
   return { tables };
 }
 
@@ -50,7 +57,6 @@ function assertSqlMatchesSchema(sql: string, schema: SchemaMap): void {
   expect(columns, `Unknown table "${tableName}" in SQL: ${normalized}`).toBeDefined();
   if (!columns) return;
 
-  // Verify explicit INSERT column lists
   const insertCols = /INSERT(?:\s+OR\s+IGNORE)?\s+INTO\s+\w+\s*\(([^)]+)\)/i.exec(normalized);
   if (insertCols?.[1]) {
     for (const col of insertCols[1].split(',').map((c) => c.trim())) {
@@ -58,7 +64,6 @@ function assertSqlMatchesSchema(sql: string, schema: SchemaMap): void {
     }
   }
 
-  // Verify SELECT column lists
   const selectCols = /^SELECT\s+(.+?)\s+FROM\s+\w+/i.exec(normalized);
   if (selectCols?.[1] && selectCols[1] !== '*') {
     for (const col of selectCols[1].split(',').map((c) => c.trim())) {
@@ -67,7 +72,6 @@ function assertSqlMatchesSchema(sql: string, schema: SchemaMap): void {
     }
   }
 
-  // Verify RETURNING column lists
   const returningCols = /RETURNING\s+(.+)$/i.exec(normalized);
   if (returningCols?.[1]) {
     for (const col of returningCols[1].split(',').map((c) => c.trim())) {
@@ -76,308 +80,51 @@ function assertSqlMatchesSchema(sql: string, schema: SchemaMap): void {
   }
 }
 
-interface MockD1State {
-  users: Record<string, Record<string, unknown>>;
-  refresh_tokens: Record<string, Record<string, unknown>>;
-  vaults: Record<string, Record<string, unknown>>;
-  pair_sessions: Record<string, Record<string, unknown>>;
-  telemetry_events: Record<string, unknown>[];
-  feedback_submissions: Record<string, unknown>[];
-  account_deletion_requests: Record<string, unknown>[];
-  executedSql: string[];
-}
+function createSqliteBackedD1(
+  migrationSqlFiles: readonly string[],
+  schema: SchemaMap,
+): { db: D1Database; sqlite: DatabaseSync; executedSql: string[] } {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec('PRAGMA foreign_keys = ON;');
+  for (const sql of migrationSqlFiles) {
+    sqlite.exec(sql);
+  }
+  const executedSql: string[] = [];
 
-function createMockD1(schema: SchemaMap): { db: D1Database; state: MockD1State } {
-  const state: MockD1State = {
-    users: {},
-    refresh_tokens: {},
-    vaults: {},
-    pair_sessions: {},
-    telemetry_events: [],
-    feedback_submissions: [],
-    account_deletion_requests: [],
-    executedSql: [],
-  };
-
-  function execute(
-    sql: string,
-    params: unknown[],
-  ): { rows: Record<string, unknown>[]; changes: number } {
-    assertSqlMatchesSchema(sql, schema);
-    const norm = sql.replace(/\s+/g, ' ').trim();
-    state.executedSql.push(norm);
-
-    if (norm.startsWith('INSERT OR IGNORE INTO users')) {
-      const email = String(params[1]);
-      if (Object.values(state.users).some((u) => u.email === email)) {
-        return { rows: [], changes: 0 };
-      }
-      const id = String(params[0]);
-      state.users[id] = {
-        id,
-        email,
-        verifier_hash: params[2],
-        verifier_salt: params[3],
-        verifier_iterations: params[4],
-        kdf_salt: params[5],
-        kdf_iterations: params[6],
-        wrapped_vault_key: params[7],
-        recovery_wrapped_vault_key: params[8],
-        created_at: params[9],
-        updated_at: params[10],
-      };
-      return { rows: [], changes: 1 };
-    }
-    if (norm.startsWith('SELECT') && norm.includes('FROM users WHERE email = ?')) {
-      const found = Object.values(state.users).find((u) => u.email === params[0]);
-      return { rows: found ? [found] : [], changes: 0 };
-    }
-    if (norm.startsWith('SELECT') && norm.includes('FROM users WHERE id = ?')) {
-      const found = state.users[String(params[0])];
-      return { rows: found ? [found] : [], changes: 0 };
-    }
-    if (norm === 'DELETE FROM refresh_tokens WHERE user_id = ?') {
-      let changes = 0;
-      for (const [id, row] of Object.entries(state.refresh_tokens)) {
-        if (row.user_id === params[0]) {
-          delete state.refresh_tokens[id];
-          changes += 1;
-        }
-      }
-      return { rows: [], changes };
-    }
-    if (norm === 'DELETE FROM vaults WHERE user_id = ?') {
-      const existed = String(params[0]) in state.vaults;
-      delete state.vaults[String(params[0])];
-      return { rows: [], changes: existed ? 1 : 0 };
-    }
-    if (norm === 'DELETE FROM pair_sessions WHERE claimed_by_user_id = ?') {
-      let changes = 0;
-      for (const [id, row] of Object.entries(state.pair_sessions)) {
-        if (row.claimed_by_user_id === params[0]) {
-          delete state.pair_sessions[id];
-          changes += 1;
-        }
-      }
-      return { rows: [], changes };
-    }
-    if (norm === 'DELETE FROM users WHERE id = ?') {
-      const existed = String(params[0]) in state.users;
-      delete state.users[String(params[0])];
-      return { rows: [], changes: existed ? 1 : 0 };
-    }
-    if (norm.startsWith('INSERT INTO refresh_tokens')) {
-      const id = String(params[0]);
-      state.refresh_tokens[id] = {
-        id,
-        user_id: params[1],
-        family_id: params[2],
-        token_hash: params[3],
-        replaced_by_id: params[4],
-        revoked_at: params[5],
-        expires_at: params[6],
-        created_at: params[7],
-      };
-      return { rows: [], changes: 1 };
-    }
-    if (norm.includes('FROM refresh_tokens WHERE token_hash = ?')) {
-      const found = Object.values(state.refresh_tokens).find((r) => r.token_hash === params[0]);
-      return { rows: found ? [found] : [], changes: 0 };
-    }
-    if (norm.startsWith('UPDATE refresh_tokens SET replaced_by_id = ?')) {
-      const row = state.refresh_tokens[String(params[2])];
-      if (!row || row.replaced_by_id !== null || row.revoked_at !== null) {
-        return { rows: [], changes: 0 };
-      }
-      row.replaced_by_id = params[0];
-      row.revoked_at = params[1];
-      return { rows: [], changes: 1 };
-    }
-    if (norm.includes('UPDATE refresh_tokens SET revoked_at = ? WHERE token_hash = ?')) {
-      let changes = 0;
-      for (const row of Object.values(state.refresh_tokens)) {
-        if (row.token_hash === params[1] && row.revoked_at === null) {
-          row.revoked_at = params[0];
-          changes += 1;
-        }
-      }
-      return { rows: [], changes };
-    }
-    if (norm.includes('UPDATE refresh_tokens SET revoked_at = ? WHERE family_id = ?')) {
-      let changes = 0;
-      for (const row of Object.values(state.refresh_tokens)) {
-        if (row.family_id === params[1] && row.revoked_at === null) {
-          row.revoked_at = params[0];
-          changes += 1;
-        }
-      }
-      return { rows: [], changes };
-    }
-    if (norm.startsWith('SELECT') && norm.includes('FROM vaults WHERE user_id = ?')) {
-      const row = state.vaults[String(params[0])];
-      return { rows: row ? [row] : [], changes: 0 };
-    }
-    if (norm.startsWith('INSERT OR IGNORE INTO vaults')) {
-      const uid = String(params[0]);
-      if (uid in state.vaults) return { rows: [], changes: 0 };
-      state.vaults[uid] = {
-        user_id: uid,
-        revision: 1,
-        ciphertext: params[1],
-        iv: params[2],
-        updated_at: params[3],
-      };
-      return { rows: [], changes: 1 };
-    }
-    if (norm.startsWith('UPDATE vaults SET revision = ?')) {
-      const uid = String(params[4]);
-      const row = state.vaults[uid];
-      if (!row || row.revision !== params[5]) return { rows: [], changes: 0 };
-      row.revision = params[0];
-      row.ciphertext = params[1];
-      row.iv = params[2];
-      row.updated_at = params[3];
-      return { rows: [], changes: 1 };
-    }
-    if (norm.startsWith('INSERT INTO pair_sessions')) {
-      const id = String(params[0]);
-      state.pair_sessions[id] = {
-        id,
-        code: params[1],
-        poll_token_hash: params[2],
-        status: params[3],
-        claimed_by_user_id: params[4],
-        encrypted_payload: params[5],
-        iv: params[6],
-        expires_at: params[7],
-        created_at: params[8],
-      };
-      return { rows: [], changes: 1 };
-    }
-    if (norm.startsWith('SELECT') && norm.includes('FROM pair_sessions WHERE id = ?')) {
-      const row = state.pair_sessions[String(params[0])];
-      return { rows: row ? [row] : [], changes: 0 };
-    }
-    if (norm.startsWith('SELECT') && norm.includes('FROM pair_sessions WHERE code = ?')) {
-      const row = Object.values(state.pair_sessions).find((p) => p.code === params[0]);
-      return { rows: row ? [row] : [], changes: 0 };
-    }
-    if (norm.startsWith("UPDATE pair_sessions SET status = 'claimed'")) {
-      const row = state.pair_sessions[String(params[3])];
-      if (row?.status !== 'pending' || String(row.expires_at) <= String(params[4])) {
-        return { rows: [], changes: 0 };
-      }
-      row.status = 'claimed';
-      row.claimed_by_user_id = params[0];
-      row.encrypted_payload = params[1];
-      row.iv = params[2];
-      return { rows: [], changes: 1 };
-    }
-    if (norm.includes("DELETE FROM pair_sessions WHERE id = ? AND status = 'claimed' RETURNING")) {
-      const id = String(params[0]);
-      const row = state.pair_sessions[id];
-      if (row?.status !== 'claimed') return { rows: [], changes: 0 };
-      delete state.pair_sessions[id];
-      return {
-        rows: [{ encrypted_payload: row.encrypted_payload, iv: row.iv }],
-        changes: 1,
-      };
-    }
-    if (norm === 'DELETE FROM pair_sessions WHERE id = ?') {
-      const id = String(params[0]);
-      const existed = id in state.pair_sessions;
-      delete state.pair_sessions[id];
-      return { rows: [], changes: existed ? 1 : 0 };
-    }
-    if (norm.startsWith('INSERT INTO telemetry_events')) {
-      state.telemetry_events.push({
-        id: params[0],
-        received_at: params[1],
-        event_ts: params[2],
-        session_id: params[3],
-        kind: params[4],
-        app_version: params[5],
-        platform: params[6],
-        os_version: params[7],
-        form_factor: params[8],
-        payload_json: params[9],
-      });
-      return { rows: [], changes: 1 };
-    }
-    if (norm.includes('FROM telemetry_events')) {
-      const since = params[0] ? String(params[0]) : null;
-      const limitMatch = /\bLIMIT\s+(\d+)\b/i.exec(norm);
-      const limit = limitMatch?.[1] ? Number(limitMatch[1]) : Number.POSITIVE_INFINITY;
-      const rows = (
-        since
-          ? state.telemetry_events.filter((e) => String(e.received_at) >= since)
-          : [...state.telemetry_events]
-      ).slice(0, limit);
-      return { rows, changes: 0 };
-    }
-    if (norm.startsWith('INSERT INTO feedback_submissions')) {
-      state.feedback_submissions.push({
-        id: params[0],
-        received_at: params[1],
-        category: params[2],
-        message: params[3],
-        app_version: params[4],
-        platform: params[5],
-        locale: params[6],
-        diagnostics_json: params[7],
-      });
-      return { rows: [], changes: 1 };
-    }
-    if (norm.includes('FROM feedback_submissions')) {
-      const since = params[0] ? String(params[0]) : null;
-      const limitMatch = /\bLIMIT\s+(\d+)\b/i.exec(norm);
-      const limit = limitMatch?.[1] ? Number(limitMatch[1]) : Number.POSITIVE_INFINITY;
-      const rows = (
-        since
-          ? state.feedback_submissions.filter((f) => String(f.received_at) >= since)
-          : [...state.feedback_submissions]
-      ).slice(0, limit);
-      return { rows, changes: 0 };
-    }
-    if (norm.startsWith('INSERT INTO account_deletion_requests')) {
-      state.account_deletion_requests.push({
-        id: params[0],
-        email_hash: params[1],
-        note: params[2],
-        created_at_ms: params[3],
-      });
-      return { rows: [], changes: 1 };
-    }
-    if (norm.includes('FROM account_deletion_requests')) {
-      return { rows: [{ count: state.account_deletion_requests.length }], changes: 0 };
-    }
-    throw new Error(`Unhandled mock D1 SQL: ${norm}`);
+  function toSqlParams(values: readonly unknown[]): SQLInputValue[] {
+    return values.map((v) => {
+      if (v === undefined || v === null) return null;
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'bigint') return v;
+      if (v instanceof Uint8Array) return v;
+      return String(v);
+    });
   }
 
-  function makeStatement(
-    query: string,
-    bound: unknown[] = [],
-  ): D1PreparedStatement & {
-    readonly _runSync: () => { rows: Record<string, unknown>[]; changes: number };
-  } {
+  function makeStatement(query: string, bound: unknown[] = []): D1PreparedStatement {
     return {
       bind(...values: unknown[]) {
         return makeStatement(query, values);
       },
       async first<T>() {
-        const res = execute(query, bound);
-        return (res.rows[0] as T | undefined) ?? null;
+        assertSqlMatchesSchema(query, schema);
+        executedSql.push(query.replace(/\s+/g, ' ').trim());
+        const stmt = sqlite.prepare(query);
+        const row = stmt.get(...toSqlParams(bound));
+        return (row ? { ...row } : null) as T | null;
       },
       async all<T>() {
-        const res = execute(query, bound);
-        return { success: true, results: res.rows as T[], meta: { changes: res.changes } };
+        assertSqlMatchesSchema(query, schema);
+        executedSql.push(query.replace(/\s+/g, ' ').trim());
+        const stmt = sqlite.prepare(query);
+        const rows = stmt.all(...toSqlParams(bound)).map((r) => ({ ...r })) as T[];
+        return { success: true, results: rows, meta: { changes: 0 } };
       },
       async run() {
-        const res = execute(query, bound);
-        return { success: true, meta: { changes: res.changes } };
-      },
-      _runSync() {
-        return execute(query, bound);
+        assertSqlMatchesSchema(query, schema);
+        executedSql.push(query.replace(/\s+/g, ' ').trim());
+        const stmt = sqlite.prepare(query);
+        const res = stmt.run(...toSqlParams(bound));
+        return { success: true, meta: { changes: Number(res.changes) } };
       },
     };
   }
@@ -396,14 +143,33 @@ function createMockD1(schema: SchemaMap): { db: D1Database; state: MockD1State }
     },
   };
 
-  return { db, state };
+  return { db, sqlite, executedSql };
 }
 
-describe('Cloudflare D1 storage adapter & worker entry', () => {
-  const migrationSql = readFileSync(MIGRATION_PATH, 'utf8');
-  const schema = parseMigrationSchema(migrationSql);
+const EMPTY_V2_PAIR_FIELDS = {
+  attempts: 0,
+  hostPublicKey: null,
+  responderPublicKey: null,
+  hostAuthState: 'signed_out' as const,
+  hostMaskedEmail: null,
+  hostEmailHash: null,
+  responderAuthState: null,
+  responderMaskedEmail: null,
+  responderEmailHash: null,
+  responderTokenHash: null,
+  direction: null,
+  hostApprovedAt: null,
+  returnEncryptedPayload: null,
+  returnIv: null,
+};
 
-  it('defines all seven required tables in migrations/0001_init.sql', () => {
+describe('Cloudflare D1 storage adapter & worker entry (migrations 0001 + 0002)', () => {
+  const migration0001 = readFileSync(MIGRATION_0001_PATH, 'utf8');
+  const migration0002 = readFileSync(MIGRATION_0002_PATH, 'utf8');
+  const migrationFiles = [migration0001, migration0002];
+  const schema = parseMigrationSchema(migrationFiles);
+
+  it('applies both 0001_init.sql and 0002_wave_p9_pairing_telemetry.sql cleanly on SQLite', () => {
     expect([...schema.tables.keys()].sort()).toEqual([
       'account_deletion_requests',
       'feedback_submissions',
@@ -413,10 +179,40 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
       'users',
       'vaults',
     ]);
+
+    const { sqlite } = createSqliteBackedD1(migrationFiles, schema);
+    const pairCols = (
+      sqlite.prepare('PRAGMA table_info(pair_sessions)').all() as Array<{ name: string }>
+    ).map((r) => r.name);
+    for (const col of [
+      'status',
+      'attempts',
+      'host_public_key',
+      'responder_public_key',
+      'host_auth_state',
+      'host_masked_email',
+      'host_email_hash',
+      'responder_auth_state',
+      'responder_masked_email',
+      'responder_email_hash',
+      'responder_token_hash',
+      'direction',
+      'host_approved_at',
+      'return_encrypted_payload',
+      'return_iv',
+    ]) {
+      expect(pairCols).toContain(col);
+    }
+
+    const telemetryCols = (
+      sqlite.prepare('PRAGMA table_info(telemetry_events)').all() as Array<{ name: string }>
+    ).map((r) => r.name);
+    expect(telemetryCols).toContain('device_profile_json');
+    sqlite.close();
   });
 
-  it('executes every D1 storage operation matching migrations/0001_init.sql', async () => {
-    const { db, state } = createMockD1(schema);
+  it('executes all legacy and Wave P9 D1 storage operations cleanly against real SQLite', async () => {
+    const { db, sqlite, executedSql } = createSqliteBackedD1(migrationFiles, schema);
     const storage = createD1Storage(db);
 
     const user = {
@@ -478,19 +274,21 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
     });
     expect((await storage.getVault('user-1'))?.ciphertext).toBe('ct2');
 
-    // Pair sessions: create, find, claim, already_claimed, consume, replay, expired, delete
+    // Legacy pair sessions: create, find, claim, already_claimed, consume, replay, expired, delete
     await storage.createPairSession({
       id: 'pair-1',
-      code: 'ABCDEFGH2345',
+      code: 'legacy-code-hash-1',
       pollTokenHash: 'pth-1',
       status: 'pending',
       claimedByUserId: null,
       encryptedPayload: null,
       iv: null,
+      ...EMPTY_V2_PAIR_FIELDS,
       expiresAt: '2026-11-25T10:15:00.000Z',
       createdAt: '2026-11-25T10:10:00.000Z',
     });
-    expect((await storage.findPairSessionById('pair-1'))?.code).toBe('ABCDEFGH2345');
+    expect((await storage.findPairSessionById('pair-1'))?.code).toBe('legacy-code-hash-1');
+    expect((await storage.findPairSessionByCode('legacy-code-hash-1'))?.id).toBe('pair-1');
     expect(
       await storage.claimPairSession(
         'NONEXISTENT1',
@@ -502,7 +300,7 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
     ).toEqual({ status: 'not_found' });
     expect(
       await storage.claimPairSession(
-        'ABCDEFGH2345',
+        'legacy-code-hash-1',
         'user-1',
         'enc-payload',
         'iv-pair',
@@ -511,7 +309,7 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
     ).toEqual({ status: 'claimed' });
     expect(
       await storage.claimPairSession(
-        'ABCDEFGH2345',
+        'legacy-code-hash-1',
         'user-1',
         'enc-payload',
         'iv-pair',
@@ -525,6 +323,216 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
     });
     expect(await storage.consumeClaimedPairSession('pair-1')).toEqual({ status: 'not_claimed' });
 
+    // Wave P9 bidirectional pairing D1 operations: respond, anti-hijack, approve, burn-after-read, lockout
+    await storage.createPairSession({
+      id: 'pair-v2-r2h',
+      code: 'v2-hash-r2h',
+      pollTokenHash: 'pth-v2-1',
+      status: 'pending',
+      claimedByUserId: null,
+      encryptedPayload: null,
+      iv: null,
+      ...EMPTY_V2_PAIR_FIELDS,
+      hostPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE',
+      hostAuthState: 'signed_out',
+      expiresAt: '2026-11-25T10:20:00.000Z',
+      createdAt: '2026-11-25T10:15:00.000Z',
+    });
+
+    // Legacy claimPairSession MUST NOT hijack a v2 session (host_public_key IS NOT NULL)
+    expect(
+      await storage.claimPairSession(
+        'v2-hash-r2h',
+        'user-1',
+        'hijack-enc',
+        'hijack-iv',
+        '2026-11-25T10:16:00.000Z',
+      ),
+    ).toEqual({ status: 'not_found' });
+
+    // Approve before responder joins -> not_responded
+    expect(
+      await storage.approvePairSession({
+        id: 'pair-v2-r2h',
+        direction: 'responder_to_host',
+        hostApprovedAt: 1_764_065_760_000,
+        returnEncryptedPayload: null,
+        returnIv: null,
+        reject: false,
+        nowIso: '2026-11-25T10:16:00.000Z',
+      }),
+    ).toEqual({ status: 'not_responded' });
+
+    // Phase 1: First responder joins atomically (no payload pre-SAS)
+    expect(
+      await storage.respondPairSession({
+        id: 'pair-v2-r2h',
+        responderPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI',
+        responderAuthState: 'signed_in',
+        responderMaskedEmail: 'b***@example.com',
+        responderEmailHash: 'b'.repeat(64),
+        responderTokenHash: 'rth-1',
+        direction: 'responder_to_host',
+        maxAttempts: 3,
+        nowIso: '2026-11-25T10:16:00.000Z',
+      }),
+    ).toEqual({ status: 'responder_joined' });
+
+    // Second responder rejected atomically
+    expect(
+      await storage.respondPairSession({
+        id: 'pair-v2-r2h',
+        responderPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM',
+        responderAuthState: 'signed_in',
+        responderMaskedEmail: 'e***@evil.test',
+        responderEmailHash: 'e'.repeat(64),
+        responderTokenHash: 'rth-evil',
+        direction: 'responder_to_host',
+        maxAttempts: 3,
+        nowIso: '2026-11-25T10:16:01.000Z',
+      }),
+    ).toEqual({ status: 'already_responded' });
+
+    // Phase 2: Responder transfers ciphertext post-SAS -> responder_transferred
+    expect(
+      await storage.transferPairSession({
+        id: 'pair-v2-r2h',
+        direction: 'responder_to_host',
+        encryptedPayload: 'd1-r2h-ciphertext-0123456',
+        iv: 'd1-r2h-iv-123456',
+        maxAttempts: 3,
+        nowIso: '2026-11-25T10:16:05.000Z',
+      }),
+    ).toEqual({ status: 'responder_transferred' });
+
+    // Host cannot consume before approving SAS
+    expect(await storage.consumeHostPairPayload('pair-v2-r2h')).toEqual({ status: 'not_claimed' });
+
+    // Host approves -> status becomes completed, atomic burn-after-read delivers once and wipes
+    expect(
+      await storage.approvePairSession({
+        id: 'pair-v2-r2h',
+        direction: 'responder_to_host',
+        hostApprovedAt: 1_764_065_770_000,
+        returnEncryptedPayload: null,
+        returnIv: null,
+        reject: false,
+        nowIso: '2026-11-25T10:16:10.000Z',
+      }),
+    ).toEqual({ status: 'completed' });
+    expect(await storage.consumeHostPairPayload('pair-v2-r2h')).toEqual({
+      status: 'consumed',
+      encryptedPayload: 'd1-r2h-ciphertext-0123456',
+      iv: 'd1-r2h-iv-123456',
+    });
+    expect(await storage.consumeHostPairPayload('pair-v2-r2h')).toEqual({ status: 'not_claimed' });
+
+    // Wave P9 host_to_responder return payload burn-after-read
+    await storage.createPairSession({
+      id: 'pair-v2-h2r',
+      code: 'v2-hash-h2r',
+      pollTokenHash: 'pth-v2-2',
+      status: 'pending',
+      claimedByUserId: null,
+      encryptedPayload: null,
+      iv: null,
+      ...EMPTY_V2_PAIR_FIELDS,
+      hostPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE',
+      hostAuthState: 'signed_in',
+      hostMaskedEmail: 'a***@example.com',
+      hostEmailHash: 'a'.repeat(64),
+      expiresAt: '2026-11-25T10:20:00.000Z',
+      createdAt: '2026-11-25T10:15:00.000Z',
+    });
+    expect(
+      await storage.respondPairSession({
+        id: 'pair-v2-h2r',
+        responderPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI',
+        responderAuthState: 'signed_out',
+        responderMaskedEmail: null,
+        responderEmailHash: null,
+        responderTokenHash: 'rth-2',
+        direction: 'host_to_responder',
+        maxAttempts: 3,
+        nowIso: '2026-11-25T10:16:00.000Z',
+      }),
+    ).toEqual({ status: 'responder_joined' });
+    expect(
+      await storage.approvePairSession({
+        id: 'pair-v2-h2r',
+        direction: 'host_to_responder',
+        hostApprovedAt: 1_764_065_780_000,
+        returnEncryptedPayload: 'd1-h2r-return-ct-0123456',
+        returnIv: 'd1-h2r-iv-123456',
+        reject: false,
+        nowIso: '2026-11-25T10:16:20.000Z',
+      }),
+    ).toEqual({ status: 'approved' });
+    expect(await storage.consumeResponderPairPayload('pair-v2-h2r')).toEqual({
+      status: 'consumed',
+      encryptedPayload: 'd1-h2r-return-ct-0123456',
+      iv: 'd1-h2r-iv-123456',
+    });
+    expect(await storage.consumeResponderPairPayload('pair-v2-h2r')).toEqual({
+      status: 'not_claimed',
+    });
+
+    // Cancel wipes payloads in D1
+    await storage.createPairSession({
+      id: 'pair-v2-cancel',
+      code: 'v2-hash-cancel',
+      pollTokenHash: 'pth-v2-cancel',
+      status: 'pending',
+      claimedByUserId: null,
+      encryptedPayload: null,
+      iv: null,
+      ...EMPTY_V2_PAIR_FIELDS,
+      hostPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE',
+      expiresAt: '2026-11-25T10:20:00.000Z',
+      createdAt: '2026-11-25T10:15:00.000Z',
+    });
+    expect(await storage.cancelPairSession('pair-v2-cancel', '2026-11-25T10:16:00.000Z')).toEqual({
+      status: 'rejected',
+    });
+    expect((await storage.findPairSessionById('pair-v2-cancel'))?.status).toBe('rejected');
+
+    // 3-attempt lockout in D1 (legacy session returns locked on claim; v2 session returns locked on respond)
+    await storage.createPairSession({
+      id: 'pair-legacy-lock',
+      code: 'legacy-hash-lock',
+      pollTokenHash: 'pth-legacy-3',
+      status: 'pending',
+      claimedByUserId: null,
+      encryptedPayload: null,
+      iv: null,
+      ...EMPTY_V2_PAIR_FIELDS,
+      expiresAt: '2026-11-25T10:20:00.000Z',
+      createdAt: '2026-11-25T10:15:00.000Z',
+    });
+    expect(await storage.incrementPairAttempts('pair-legacy-lock', 3)).toEqual({
+      status: 'incremented',
+      attempts: 1,
+    });
+    expect(await storage.incrementPairAttempts('pair-legacy-lock', 3)).toEqual({
+      status: 'incremented',
+      attempts: 2,
+    });
+    expect(await storage.incrementPairAttempts('pair-legacy-lock', 3)).toEqual({
+      status: 'locked',
+      attempts: 3,
+    });
+    expect((await storage.findPairSessionById('pair-legacy-lock'))?.status).toBe('locked');
+    expect(
+      await storage.claimPairSession(
+        'legacy-hash-lock',
+        'user-1',
+        'enc',
+        'iv',
+        '2026-11-25T10:16:00.000Z',
+      ),
+    ).toEqual({ status: 'locked' });
+
+    // Expired session & opportunistic prune on createPairSession
     await storage.createPairSession({
       id: 'pair-exp',
       code: 'EXPIRED12345',
@@ -533,6 +541,7 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
       claimedByUserId: null,
       encryptedPayload: null,
       iv: null,
+      ...EMPTY_V2_PAIR_FIELDS,
       expiresAt: '2026-11-25T10:00:00.000Z',
       createdAt: '2026-11-25T09:55:00.000Z',
     });
@@ -545,9 +554,42 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
         '2026-11-25T10:05:00.000Z',
       ),
     ).toEqual({ status: 'expired' });
-    await storage.deletePairSession('pair-exp');
+    await storage.createPairSession({
+      id: 'pair-exp-prune',
+      code: 'EXPIRED_PRUNE',
+      pollTokenHash: 'pth-exp2',
+      status: 'pending',
+      claimedByUserId: null,
+      encryptedPayload: null,
+      iv: null,
+      ...EMPTY_V2_PAIR_FIELDS,
+      expiresAt: '2026-11-25T10:18:00.000Z',
+      createdAt: '2026-11-25T10:13:00.000Z',
+    });
+    await storage.createPairSession({
+      id: 'pair-fresh',
+      code: 'FRESH_12345',
+      pollTokenHash: 'pth-fresh',
+      status: 'pending',
+      claimedByUserId: null,
+      encryptedPayload: null,
+      iv: null,
+      ...EMPTY_V2_PAIR_FIELDS,
+      expiresAt: '2026-11-25T10:25:00.000Z',
+      createdAt: '2026-11-25T10:20:00.000Z',
+    });
+    expect(await storage.findPairSessionById('pair-exp-prune')).toBeNull();
+    expect(await storage.findPairSessionById('pair-fresh')).not.toBeNull();
+    await storage.deletePairSession('pair-fresh');
 
-    // Telemetry & feedback
+    // Telemetry (with device_profile_json) & feedback
+    const profileJson = JSON.stringify({
+      arch: 'arm64',
+      ramBucket: '2gb',
+      gpu: 'Apple A15',
+      resolution: '3840x2160',
+      locale: 'en-US',
+    });
     await storage.insertTelemetryEvents([
       {
         id: 'tel-1',
@@ -555,14 +597,17 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
         eventTs: '2026-11-25T10:59:55.000Z',
         sessionId: 'sess-d1',
         kind: 'startup',
-        appVersion: '1.0.0',
+        appVersion: '1.4.0',
         platform: 'tvos',
         osVersion: '18.1',
         formFactor: 'tv',
         payloadJson: '{"durationMs":300}',
+        deviceProfileJson: profileJson,
       },
     ]);
-    expect(await storage.listTelemetryEvents(null)).toHaveLength(1);
+    const loadedEvents = await storage.listTelemetryEvents(null);
+    expect(loadedEvents).toHaveLength(1);
+    expect(loadedEvents[0]?.deviceProfileJson).toBe(profileJson);
     expect(await storage.listTelemetryEvents('2026-11-25T12:00:00.000Z')).toHaveLength(0);
 
     await storage.insertFeedbackSubmission({
@@ -570,7 +615,7 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
       receivedAt: '2026-11-25T11:05:00.000Z',
       category: 'ui_remote',
       message: 'D-pad focus jumps cleanly',
-      appVersion: '1.0.0',
+      appVersion: '1.4.0',
       platform: 'tvos',
       locale: 'en',
       diagnosticsJson: null,
@@ -580,14 +625,10 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
 
     // Verify explicit D1 query LIMIT clauses
     expect(
-      state.executedSql.some(
-        (s) => s.includes('FROM telemetry_events') && s.includes('LIMIT 5000'),
-      ),
+      executedSql.some((s) => s.includes('FROM telemetry_events') && s.includes('LIMIT 5000')),
     ).toBe(true);
     expect(
-      state.executedSql.some(
-        (s) => s.includes('FROM feedback_submissions') && s.includes('LIMIT 500'),
-      ),
+      executedSql.some((s) => s.includes('FROM feedback_submissions') && s.includes('LIMIT 500')),
     ).toBe(true);
 
     // Account deletion requests persistence & counting
@@ -604,12 +645,12 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
     expect(await storage.deleteUserAccount('user-1')).toBe(true);
     expect(await storage.findUserById('user-1')).toBeNull();
     expect(await storage.getVault('user-1')).toBeNull();
-    expect(Object.keys(state.refresh_tokens)).toHaveLength(0);
-    expect(state.executedSql.length).toBeGreaterThan(20);
+    expect(executedSql.length).toBeGreaterThan(25);
+    sqlite.close();
   });
 
   it('wires Cloudflare Worker entry fetch() cleanly and fails closed if JWT_SECRET is missing', async () => {
-    const { db } = createMockD1(schema);
+    const { db, sqlite } = createSqliteBackedD1(migrationFiles, schema);
 
     const misconfigured = await worker.fetch(new Request('https://sync.example.test/health'), {
       DB: db,
@@ -626,5 +667,6 @@ describe('Cloudflare D1 storage adapter & worker entry', () => {
     });
     expect(ok.status).toBe(200);
     expect(ok.headers.get('access-control-allow-origin')).toBe('https://elviptv.example');
+    sqlite.close();
   });
 });

@@ -1,5 +1,5 @@
 import type { CatalogService } from '@elv/data';
-import { type MutableRefObject, type ReactElement, useCallback, useMemo, useState } from 'react';
+import { type MutableRefObject, type ReactElement, useCallback, useMemo } from 'react';
 import { AppShellProfileOverlays, type useShellManagementOverlays } from './app-shell-overlays';
 import type { useProgrammeReminders } from './app-shell-reminders';
 import { AppShellExitToast } from './app-shell-sections';
@@ -13,10 +13,10 @@ import {
 import { useExternalPlayerHandoff } from './player/useExternalPlayerHandoff';
 import type { PlayTarget } from './ports/play-target';
 import type { DiagnosticsPort, ExternalPlayerPort } from './ports/wave-f7b-ports';
+import type { TelemetryPort } from './ports/wave-f9-ports';
 import { ReminderToastBanner } from './reminders';
 import { OledScreensaverOverlay, type useOledScreensaver } from './screensaver';
 import type { PreferencesContextValue, useConnectionLimitGuard } from './shell';
-import { CrashReportPreviewModal } from './shell/CrashReportPreviewModal';
 import { GuideManagementOverlay } from './sources/GuideManagementOverlay';
 
 /** Options for {@link useAppShellWaveF7b}. */
@@ -25,6 +25,7 @@ export interface UseAppShellWaveF7bOptions {
   readonly preferences: PreferencesContextValue;
   readonly externalPlayer?: ExternalPlayerPort;
   readonly diagnostics?: DiagnosticsPort;
+  readonly telemetry?: TelemetryPort;
   readonly stopEmbeddedPreviewRef: MutableRefObject<(() => Promise<void>) | null>;
   readonly stopActivePlayerRef: MutableRefObject<(() => Promise<void>) | null>;
   readonly onOpenIntegrated: (target: PlayTarget) => void;
@@ -38,11 +39,9 @@ export interface UseAppShellWaveF7bOptions {
 
 /**
  * Coordinates Wave F7B root-level features for `AppShell` (`#406` External Player handoff
- * and `#226` Settings Diagnostic Report preview + crash props) while keeping `AppShell.tsx` under 800 lines.
+ * and `#226`/`#509` crash boundary telemetry + diagnostics props) while keeping `AppShell.tsx` under 800 lines.
  */
 export function useAppShellWaveF7b(opts: UseAppShellWaveF7bOptions) {
-  const [diagnosticsPreviewOpen, setDiagnosticsPreviewOpen] = useState(false);
-
   const externalHandoff = useExternalPlayerHandoff({
     mode: opts.preferences.preferences.externalPlayerMode,
     customScheme: opts.preferences.preferences.externalPlayerCustomScheme,
@@ -55,14 +54,6 @@ export function useAppShellWaveF7b(opts: UseAppShellWaveF7bOptions) {
     onProgressSaved: opts.onProgressSaved,
   });
 
-  const openDiagnosticsPreview = useCallback(() => {
-    setDiagnosticsPreviewOpen(true);
-  }, []);
-
-  const closeDiagnosticsPreview = useCallback(() => {
-    setDiagnosticsPreviewOpen(false);
-  }, []);
-
   const toggleIncludeLogs = useCallback(
     (next: boolean) => {
       void opts.preferences.updatePreferences({ crashReportsIncludeLogs: next });
@@ -70,8 +61,10 @@ export function useAppShellWaveF7b(opts: UseAppShellWaveF7bOptions) {
     [opts.preferences],
   );
 
-  const { stageKey, bumpStageKey, clearCaches, switchSource, diagnostics } = opts;
-  const { crashReportsOptIn, crashReportsIncludeLogs } = opts.preferences.preferences;
+  const { stageKey, bumpStageKey, clearCaches, switchSource, diagnostics, telemetry } = opts;
+  const { crashReportsOptIn, crashReportsIncludeLogs, telemetryOptIn } =
+    opts.preferences.preferences;
+  const effectiveCrashReportsOptIn = crashReportsOptIn || telemetryOptIn;
 
   const crashProps = useMemo(
     () =>
@@ -80,9 +73,10 @@ export function useAppShellWaveF7b(opts: UseAppShellWaveF7bOptions) {
         bumpStageKey,
         clearCaches,
         switchSource,
-        crashReportsOptIn,
+        crashReportsOptIn: effectiveCrashReportsOptIn,
         crashReportsIncludeLogs,
         ...(diagnostics !== undefined ? { diagnostics } : {}),
+        ...(telemetry !== undefined ? { telemetry } : {}),
         onToggleIncludeLogs: toggleIncludeLogs,
       }),
     [
@@ -90,9 +84,10 @@ export function useAppShellWaveF7b(opts: UseAppShellWaveF7bOptions) {
       bumpStageKey,
       clearCaches,
       switchSource,
-      crashReportsOptIn,
+      effectiveCrashReportsOptIn,
       crashReportsIncludeLogs,
       diagnostics,
+      telemetry,
       toggleIncludeLogs,
     ],
   );
@@ -100,15 +95,11 @@ export function useAppShellWaveF7b(opts: UseAppShellWaveF7bOptions) {
   return {
     externalHandoff,
     crashProps,
-    diagnosticsPreviewOpen,
-    openDiagnosticsPreview: opts.diagnostics !== undefined ? openDiagnosticsPreview : undefined,
-    closeDiagnosticsPreview,
-    toggleIncludeLogs,
-    anyOverlayOpen: externalHandoff.promptTarget !== null || diagnosticsPreviewOpen,
+    anyOverlayOpen: externalHandoff.promptTarget !== null,
   };
 }
 
-/** Renders all `AppShell` root-level overlays (toasts, dialogs, drawers, Wave F7B modals, screensaver). */
+/** Renders all `AppShell` root-level overlays (toasts, dialogs, drawers, Wave F7B/F9/P9 overlays, screensaver). */
 export function AppShellRootOverlays(props: {
   readonly exitToastVisible: boolean;
   readonly connectionGuard: ReturnType<typeof useConnectionLimitGuard>;
@@ -120,8 +111,6 @@ export function AppShellRootOverlays(props: {
   readonly oledScreensaver: ReturnType<typeof useOledScreensaver>;
   readonly wave: ReturnType<typeof useAppShellWaveF7b>;
   readonly waveF9?: WaveF9Controller;
-  readonly diagnostics?: DiagnosticsPort;
-  readonly includeLogs: boolean;
 }): ReactElement {
   const {
     exitToastVisible,
@@ -134,8 +123,6 @@ export function AppShellRootOverlays(props: {
     oledScreensaver,
     wave,
     waveF9,
-    diagnostics,
-    includeLogs,
   } = props;
   return (
     <>
@@ -169,16 +156,6 @@ export function AppShellRootOverlays(props: {
         onCancel={wave.externalHandoff.cancelPrompt}
       />
       <ExternalHandoffErrorToast visible={wave.externalHandoff.handoffErrorVisible} />
-      {diagnostics !== undefined ? (
-        <CrashReportPreviewModal
-          visible={wave.diagnosticsPreviewOpen}
-          diagnostics={diagnostics}
-          errorCode="DIAGNOSTIC_PREVIEW"
-          includeLogs={includeLogs}
-          onToggleIncludeLogs={wave.toggleIncludeLogs}
-          onClose={wave.closeDiagnosticsPreview}
-        />
-      ) : null}
       <AppShellWaveF9Overlays waveF9={waveF9} />
       <OledScreensaverOverlay state={oledScreensaver.state} onWake={oledScreensaver.wake} />
     </>

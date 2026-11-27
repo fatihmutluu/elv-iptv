@@ -1,6 +1,7 @@
 import { createSyncApp } from './app.ts';
 import { createSlidingWindowRateLimiter } from './rate-limit.ts';
-import { createD1Storage, type D1Database } from './storage-d1.ts';
+import { createD1Storage } from './storage-d1.ts';
+import type { D1Database } from './storage-d1-types.ts';
 
 /** Cloudflare Workers environment bindings defined in `wrangler.toml` and secrets. */
 export interface WorkerEnv {

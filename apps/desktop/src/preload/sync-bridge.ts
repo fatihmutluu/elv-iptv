@@ -1,20 +1,27 @@
 import {
+  type BidirectionalPairingSnapshotIpc,
   type FeedbackBridge,
   type FeedbackSubmitRequest,
   type FeedbackSubmitResultIpc,
+  isBidirectionalPairingSnapshot,
   isFeedbackSubmitRequest,
   isFeedbackSubmitResult,
+  isPairDeepLinkUri,
   isSyncAccountState,
   isSyncActionResult,
   isSyncClaimQrRequest,
   isSyncDeleteAccountRequest,
   isSyncInitialPrefsPayload,
+  isSyncPairConfirmRequest,
+  isSyncPairJoinRequest,
+  isSyncPairPollRequest,
   isSyncPollQrRequest,
   isSyncQrPairingSession,
   isSyncQrPollStatus,
   isSyncRegisterRequest,
   isSyncSetServerUrlRequest,
   isSyncSetSyncablePrefsRequest,
+  isSyncSetViewingActiveRequest,
   isSyncSignInRequest,
   isTelemetryRecordRequest,
   isTelemetrySetOptInRequest,
@@ -37,7 +44,7 @@ export interface SyncIpcRendererLike {
   removeListener(channel: string, listener: (event: unknown, ...args: unknown[]) => void): unknown;
 }
 
-/** Frozen preload bridges exposed as `window.elv.{sync,telemetry,feedback}` (`#26`, `#458`). */
+/** Frozen preload bridges exposed as `window.elv.{sync,telemetry,feedback}` (`#26`, `#458`, `#509`, `#510`). */
 export interface DesktopSyncPreloadBridges {
   readonly sync: SyncBridge;
   readonly telemetry: TelemetryBridge;
@@ -46,7 +53,7 @@ export interface DesktopSyncPreloadBridges {
 
 /**
  * Builds frozen `window.elv.sync`, `window.elv.telemetry`, and `window.elv.feedback` bridges
- * inside the sandboxed Electron preload (`#26`, `#458`). Validates every request and reply.
+ * inside the sandboxed Electron preload. Validates every request and reply.
  */
 export function createSyncBridges(ipc: SyncIpcRendererLike): DesktopSyncPreloadBridges {
   const sync: SyncBridge = Object.freeze({
@@ -191,6 +198,111 @@ export function createSyncBridges(ipc: SyncIpcRendererLike): DesktopSyncPreloadB
       ipc.on(SYNC_CHANNELS.initialPrefsReceived, wrapped);
       return () => {
         ipc.removeListener(SYNC_CHANNELS.initialPrefsReceived, wrapped);
+      };
+    },
+
+    async markSyncDirty(): Promise<void> {
+      await ipc.invoke(SYNC_CHANNELS.markSyncDirty);
+    },
+
+    async notifySyncDirty(): Promise<void> {
+      await ipc.invoke(SYNC_CHANNELS.notifySyncDirty);
+    },
+
+    async notifyPlaybackPause(): Promise<void> {
+      await ipc.invoke(SYNC_CHANNELS.notifyPlaybackPause);
+    },
+
+    async notifyPlaybackExitOrSwitch(): Promise<void> {
+      await ipc.invoke(SYNC_CHANNELS.notifyPlaybackExitOrSwitch);
+    },
+
+    async setViewingActive(active: boolean): Promise<void> {
+      const payload = { active };
+      if (!isSyncSetViewingActiveRequest(payload)) {
+        throw new Error(`${SYNC_CHANNELS.setViewingActive} received invalid active flag`);
+      }
+      await ipc.invoke(SYNC_CHANNELS.setViewingActive, payload);
+    },
+
+    async notifyReconnect(): Promise<void> {
+      await ipc.invoke(SYNC_CHANNELS.notifyReconnect);
+    },
+
+    async startBidirectionalPairing(): Promise<BidirectionalPairingSnapshotIpc> {
+      const reply = await ipc.invoke(SYNC_CHANNELS.pairStart);
+      if (!isBidirectionalPairingSnapshot(reply)) {
+        throw new Error(`${SYNC_CHANNELS.pairStart} returned an unexpected reply`);
+      }
+      return reply;
+    },
+
+    async joinBidirectionalPairing(codeOrUri: string): Promise<BidirectionalPairingSnapshotIpc> {
+      const payload = { codeOrUri };
+      if (!isSyncPairJoinRequest(payload)) {
+        throw new Error(`${SYNC_CHANNELS.pairJoin} received invalid codeOrUri`);
+      }
+      const reply = await ipc.invoke(SYNC_CHANNELS.pairJoin, payload);
+      if (!isBidirectionalPairingSnapshot(reply)) {
+        throw new Error(`${SYNC_CHANNELS.pairJoin} returned an unexpected reply`);
+      }
+      return reply;
+    },
+
+    async pollBidirectionalPairing(pairingId: string): Promise<BidirectionalPairingSnapshotIpc> {
+      const payload = { pairingId };
+      if (!isSyncPairPollRequest(payload)) {
+        throw new Error(`${SYNC_CHANNELS.pairPoll} received invalid pairingId`);
+      }
+      const reply = await ipc.invoke(SYNC_CHANNELS.pairPoll, payload);
+      if (!isBidirectionalPairingSnapshot(reply)) {
+        throw new Error(`${SYNC_CHANNELS.pairPoll} returned an unexpected reply`);
+      }
+      return reply;
+    },
+
+    async confirmBidirectionalPairing(
+      pairingId: string,
+      chosenDirection?: 'host_to_responder' | 'responder_to_host',
+    ): Promise<SyncActionResultIpc> {
+      const payload =
+        chosenDirection !== undefined ? { pairingId, chosenDirection } : { pairingId };
+      if (!isSyncPairConfirmRequest(payload)) {
+        throw new Error(`${SYNC_CHANNELS.pairConfirm} received invalid payload`);
+      }
+      const reply = await ipc.invoke(SYNC_CHANNELS.pairConfirm, payload);
+      if (!isSyncActionResult(reply)) {
+        throw new Error(`${SYNC_CHANNELS.pairConfirm} returned an unexpected reply`);
+      }
+      return reply;
+    },
+
+    async cancelBidirectionalPairing(pairingId: string): Promise<void> {
+      const payload = { pairingId };
+      if (!isSyncPairPollRequest(payload)) {
+        throw new Error(`${SYNC_CHANNELS.pairCancel} received invalid pairingId`);
+      }
+      await ipc.invoke(SYNC_CHANNELS.pairCancel, payload);
+    },
+
+    async consumePendingPairUri(): Promise<string | null> {
+      const reply = await ipc.invoke(SYNC_CHANNELS.consumePendingPairUri);
+      if (reply === null) return null;
+      return isPairDeepLinkUri(reply) ? reply : null;
+    },
+
+    onPairDeepLink(listener: (uri: string) => void): () => void {
+      const wrapped = (_event: unknown, payload: unknown): void => {
+        if (!isPairDeepLinkUri(payload)) return;
+        try {
+          listener(payload);
+        } catch {
+          // Isolate renderer listener failures.
+        }
+      };
+      ipc.on(SYNC_CHANNELS.pairDeepLink, wrapped);
+      return () => {
+        ipc.removeListener(SYNC_CHANNELS.pairDeepLink, wrapped);
       };
     },
   });

@@ -71,6 +71,7 @@ import {
 } from './macos-media.ts';
 import type { DesktopMediaBridge } from './media-bridge.ts';
 import { createMprisBridge } from './mpris/mpris-bridge.ts';
+import { createPendingPairDeepLinkQueue, extractPairDeepLinkFromArgv } from './pair-deep-link.ts';
 import { createDesktopDisplayRefreshController } from './player/display-refresh.ts';
 import type { MpvEngine } from './player/engine.ts';
 import { createEngineFor } from './player/factory.ts';
@@ -98,8 +99,13 @@ import { createShellPrefsController, type ShellPrefsController } from './shell-p
 import { focusWindow, startSingleInstance } from './single-instance.ts';
 import { registerSourcesIpc } from './sources-ipc.ts';
 import { createDesktopCatalogSnapshotBridge } from './sync/desktop-catalog-snapshot.ts';
+import {
+  attachMainErrorTelemetry,
+  attachWindowSyncLifecycle,
+  collectDesktopDeviceProfile,
+} from './sync/main-lifecycle.ts';
 import { registerSyncIpc } from './sync/sync-ipc-handlers.ts';
-import { createDesktopSyncService } from './sync/sync-service.ts';
+import { createDesktopSyncService, type DesktopSyncService } from './sync/sync-service.ts';
 import {
   createTaskbarController,
   createTaskbarIconPngs,
@@ -133,6 +139,7 @@ if (process.platform === 'linux') {
 
 const gateQuery = parseGateFlag(process.argv, app.isPackaged);
 const pendingPlaylists = createPendingPlaylistQueue();
+const pendingPairDeepLinks = createPendingPairDeepLinkQueue();
 let hasLock = false;
 let appInitialized = false;
 let isQuitting = false;
@@ -180,6 +187,11 @@ app.on('open-file', (event, filePath) => {
   if (!hasLock || gateQuery !== null) return;
   enqueuePlaylistPaths([filePath]);
   if (app.isReady()) focusOrCreateWindow();
+});
+app.on('open-url', (event, rawUrl) => {
+  event.preventDefault();
+  if (!hasLock || gateQuery !== null) return;
+  if (pendingPairDeepLinks.enqueue(rawUrl) && app.isReady()) focusOrCreateWindow();
 });
 const devServerOrigin =
   gateQuery !== null
@@ -296,10 +308,12 @@ function createWindow(): void {
       if (!window.webContents.isDestroyed()) {
         window.webContents.send(WINDOW_CHANNELS.hiddenToTray);
       }
+      void activeSyncService?.flushBeforeBackground(2_500);
       window.hide();
       trayController?.ensureShown();
     }
   });
+  attachWindowSyncLifecycle(window, () => activeSyncService);
   window.on('restore', () => {
     if (!window.webContents.isDestroyed()) {
       window.webContents.send(WINDOW_CHANNELS.windowRestored);
@@ -342,6 +356,20 @@ function createWindow(): void {
   window.on('page-title-updated', (event) => event.preventDefault());
   window.setTitle(WINDOW_TITLE);
   void window.loadURL(targetUrl);
+}
+
+function showOpenDialogFor(
+  win: BrowserWindow | undefined,
+  options: {
+    readonly properties: readonly string[];
+    readonly filters: readonly { readonly name: string; readonly extensions: readonly string[] }[];
+  },
+) {
+  const opts = {
+    properties: [...options.properties] as Electron.OpenDialogOptions['properties'],
+    filters: options.filters.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
+  };
+  return win && !win.isDestroyed() ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts);
 }
 
 let mediaBridge: DesktopMediaBridge | undefined;
@@ -398,22 +426,7 @@ async function startPlayer(): Promise<void> {
     downloadsRoot: getManagedDownloadsDir(app.getPath('userData')),
     pickSubtitleFile: createSubtitleFilePicker<BrowserWindow>({
       getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
-      showOpenDialog: (win, options) =>
-        win && !win.isDestroyed()
-          ? dialog.showOpenDialog(win, {
-              properties: [...options.properties],
-              filters: options.filters.map((f) => ({
-                name: f.name,
-                extensions: [...f.extensions],
-              })),
-            })
-          : dialog.showOpenDialog({
-              properties: [...options.properties],
-              filters: options.filters.map((f) => ({
-                name: f.name,
-                extensions: [...f.extensions],
-              })),
-            }),
+      showOpenDialog: showOpenDialogFor,
     }),
     createTaskbarController: (owner, onAction) => {
       if (process.platform !== 'win32') return undefined;
@@ -512,6 +525,7 @@ function startCatalog(secrets: SecretStore): CatalogCoordinator<MessagePortMain>
     fork: (workerPath) => utilityProcess.fork(workerPath, [], { serviceName: 'ELV Catalog' }),
     createChannel: () => new MessageChannelMain(),
     log: logger.log,
+    onTelemetry: (event) => activeSyncService?.recordTelemetry(event),
   });
   registerCatalogIpc({
     ipcMain,
@@ -543,6 +557,8 @@ hasLock = startSingleInstance(app, {
     focusOrCreateWindow();
     if (gateQuery === null) {
       enqueuePlaylistPaths(extractPlaylistPathsFromArgv(argv.slice(1), cwd));
+      const pairUri = extractPairDeepLinkFromArgv(argv.slice(1));
+      if (pairUri !== null) pendingPairDeepLinks.enqueue(pairUri);
     }
   },
 });
@@ -553,12 +569,15 @@ let lanPairingIpc: LanPairingIpcHandle | undefined;
 let disposePlayerIpc: (() => void) | undefined;
 let disposeDiagnosticsIpc: (() => void) | undefined;
 let disposeSyncIpc: (() => void) | undefined;
+let activeSyncService: DesktopSyncService | undefined;
+let disposeErrorTelemetry: (() => void) | undefined;
 let desktopDownloadManager: DesktopDownloadManager | undefined;
 let disposeDownloadsIpc: (() => void) | undefined;
 
 registerCatalogQuitHandler({
   app,
   getCoordinator: () => catalogCoordinator,
+  beforeShutdown: () => activeSyncService?.flushBeforeBackground(2_500) ?? Promise.resolve(),
   quit: () => app.quit(),
 });
 
@@ -567,6 +586,9 @@ if (hasLock) {
     enqueuePlaylistPaths(
       extractPlaylistPathsFromArgv(process.argv.slice(app.isPackaged ? 1 : 2), process.cwd()),
     );
+    const startupPairUri = extractPairDeepLinkFromArgv(process.argv.slice(1));
+    if (startupPairUri !== null) pendingPairDeepLinks.enqueue(startupPairUri);
+    if (app.isPackaged) app.setAsDefaultProtocolClient('elviptv');
   }
   void app.whenReady().then(async () => {
     if (app.isPackaged) Menu.setApplicationMenu(null);
@@ -630,44 +652,22 @@ if (hasLock) {
       getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
       pendingPlaylists,
       readClipboardText: () => clipboard.readText(),
-      showOpenDialog: (win, options) =>
-        win && !win.isDestroyed()
-          ? dialog.showOpenDialog(win, {
-              properties: [...options.properties],
-              filters: options.filters.map((f) => ({
-                name: f.name,
-                extensions: [...f.extensions],
-              })),
-            })
-          : dialog.showOpenDialog({
-              properties: [...options.properties],
-              filters: options.filters.map((f) => ({
-                name: f.name,
-                extensions: [...f.extensions],
-              })),
-            }),
+      showOpenDialog: showOpenDialogFor,
     });
     lanPairingIpc = registerLanPairingIpc({ ipcMain });
     disposeDiagnosticsIpc = registerDiagnosticsIpc<BrowserWindow>({
       ipcMain,
       getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
       readLogTail: (maxLines) => logger.readRedactedTail(maxLines),
-      showSaveDialog: (win, options) =>
-        win && !win.isDestroyed()
-          ? dialog.showSaveDialog(win, {
-              defaultPath: options.defaultPath,
-              filters: options.filters.map((f) => ({
-                name: f.name,
-                extensions: [...f.extensions],
-              })),
-            })
-          : dialog.showSaveDialog({
-              defaultPath: options.defaultPath,
-              filters: options.filters.map((f) => ({
-                name: f.name,
-                extensions: [...f.extensions],
-              })),
-            }),
+      showSaveDialog: (win, options) => {
+        const opts = {
+          defaultPath: options.defaultPath,
+          filters: options.filters.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
+        };
+        return win && !win.isDestroyed()
+          ? dialog.showSaveDialog(win, opts)
+          : dialog.showSaveDialog(opts);
+      },
       writeClipboardText: (text) => clipboard.writeText(text),
       log: logger.log,
     });
@@ -694,19 +694,26 @@ if (hasLock) {
       platform: `desktop-${process.platform}`,
       appVersion: app.getVersion(),
       mpvVersion: '0.42.0',
+      deviceProfile: collectDesktopDeviceProfile({
+        screen,
+        getLocale: () => app.getLocale(),
+      }),
       readLogTail: (maxLines) => logger.readRedactedTail(maxLines),
       getLocalSnapshot: catalogSnapshotBridge.getLocalSnapshot,
       applyMergedSnapshot: catalogSnapshotBridge.applyMergedSnapshot,
     });
+    activeSyncService = syncService;
+    disposeErrorTelemetry = attachMainErrorTelemetry(() => activeSyncService);
     disposeSyncIpc = registerSyncIpc({
       ipcMain,
       service: syncService,
+      pendingPairDeepLinks,
       devOrigin: devServerOrigin,
       getBroadcastTargets: () => BrowserWindow.getAllWindows().map((w) => w.webContents),
       log: logger.log,
     });
     if (gateQuery === null) {
-      void syncService.hydrate();
+      void syncService.hydrate().then(() => syncService.notifyStartup());
     }
     desktopDownloadManager = createDesktopDownloadManager({
       downloadsDir: getManagedDownloadsDir(app.getPath('userData')),
@@ -756,6 +763,9 @@ app.on('will-quit', () => {
   lanPairingIpc = undefined;
   disposeDiagnosticsIpc?.();
   disposeDiagnosticsIpc = undefined;
+  disposeErrorTelemetry?.();
+  disposeErrorTelemetry = undefined;
+  activeSyncService = undefined;
   disposeSyncIpc?.();
   disposeSyncIpc = undefined;
   disposeDownloadsIpc?.();

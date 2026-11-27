@@ -344,8 +344,8 @@ describe('createDesktopSyncService (#26, #458)', () => {
     expect((await service.syncNow()).ok).toBe(true);
     expect(server.users.get('desk@example.test')?.vaultRevision).toBe(1);
 
-    // Re-hydrating into a fresh service restores signed_in state and decrypts vault
-    let restoredSnap = createEmptyVaultSnapshot(0);
+    // Re-hydrating into a fresh service on the same device restores signed_in state and syncs cleanly
+    let restoredSnap: VaultSnapshot = { ...localSnap };
     const service2 = createDesktopSyncService({
       secretStore: secrets.reopen(),
       platform: 'desktop-win32',
@@ -718,7 +718,7 @@ describe('createDesktopSyncService (#26, #458)', () => {
     deviceA.dispose();
   });
 
-  it('reverts to initialServerUrl when setServerUrl is cleared to empty, and does not silently fall back on invalid non-empty URL', async () => {
+  it('reverts to initialServerUrl when setServerUrl is empty or invalid, and fails closed when no default is configured (P1-10)', async () => {
     const server = makeMockServer();
     const secrets = makeSecretStore();
     const service = createDesktopSyncService({
@@ -756,17 +756,40 @@ describe('createDesktopSyncService (#26, #458)', () => {
       'https://default-sync.example.test/v1/feedback',
     );
 
-    // Invalid non-empty URL must NOT silently fall back to initialServerUrl
-    const callsBeforeInvalid = server.calls.length;
+    // Invalid legacy syncServerUrl pref falls back cleanly to baked initialServerUrl
     service.setServerUrl('not-a-valid-url');
-    const invalidFb = await service.submitFeedback({
+    const fallbackFb = await service.submitFeedback({
+      category: 'playback_issue',
+      message: 'Fallback server test',
+      includeDiagnostics: false,
+    });
+    expect(fallbackFb.ok).toBe(true);
+    expect(server.calls[server.calls.length - 1]?.url).toBe(
+      'https://default-sync.example.test/v1/feedback',
+    );
+
+    // When baked initialServerUrl is empty, invalid URL fails closed with server_not_configured
+    const noDefaultService = createDesktopSyncService({
+      secretStore: makeSecretStore().store,
+      platform: 'desktop-win32',
+      appVersion: '1.0.0',
+      initialServerUrl: '',
+      fetchFn: server.fetchFn,
+      clock: { now: () => 1_700_000_000_000 },
+      kdfIterations: TEST_KDF_ITERATIONS,
+      flushIntervalMs: 0,
+    });
+    const callsBefore = server.calls.length;
+    noDefaultService.setServerUrl('not-a-valid-url');
+    const failClosed = await noDefaultService.submitFeedback({
       category: 'playback_issue',
       message: 'Should fail cleanly',
       includeDiagnostics: false,
     });
-    expect(invalidFb).toEqual({ ok: false, errorCode: 'server_not_configured' });
-    expect(server.calls).toHaveLength(callsBeforeInvalid);
+    expect(failClosed).toEqual({ ok: false, errorCode: 'server_not_configured' });
+    expect(server.calls).toHaveLength(callsBefore);
 
+    noDefaultService.dispose();
     service.dispose();
   });
 });

@@ -1,9 +1,6 @@
 import type {
   AccountDeletionRequestRecord,
   FeedbackSubmissionRecord,
-  PairClaimResult,
-  PairConsumeResult,
-  PairSessionRecord,
   RefreshTokenRecord,
   SyncServerStorage,
   TelemetryEventRecord,
@@ -11,27 +8,8 @@ import type {
   VaultPutResult,
   VaultRecord,
 } from './storage.ts';
-
-/** Minimal Cloudflare D1 result shape (avoids third-party runtime/type dependencies). */
-export interface D1Result<T = unknown> {
-  readonly results?: readonly T[];
-  readonly success: boolean;
-  readonly meta?: { readonly changes?: number };
-}
-
-/** Minimal Cloudflare D1 prepared statement interface. */
-export interface D1PreparedStatement {
-  bind(...values: unknown[]): D1PreparedStatement;
-  first<T = Record<string, unknown>>(): Promise<T | null>;
-  all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
-  run(): Promise<D1Result>;
-}
-
-/** Minimal Cloudflare D1 database binding interface. */
-export interface D1Database {
-  prepare(query: string): D1PreparedStatement;
-  batch<T = unknown>(statements: readonly D1PreparedStatement[]): Promise<D1Result<T>[]>;
-}
+import { createD1PairStorage } from './storage-d1-pair.ts';
+import type { D1Database } from './storage-d1-types.ts';
 
 interface UserRow {
   readonly id: string;
@@ -66,18 +44,6 @@ interface VaultRow {
   readonly updated_at: string;
 }
 
-interface PairSessionRow {
-  readonly id: string;
-  readonly code: string;
-  readonly poll_token_hash: string;
-  readonly status: 'pending' | 'claimed';
-  readonly claimed_by_user_id: string | null;
-  readonly encrypted_payload: string | null;
-  readonly iv: string | null;
-  readonly expires_at: string;
-  readonly created_at: string;
-}
-
 interface TelemetryEventRow {
   readonly id: string;
   readonly received_at: string;
@@ -89,6 +55,7 @@ interface TelemetryEventRow {
   readonly os_version: string | null;
   readonly form_factor: string | null;
   readonly payload_json: string;
+  readonly device_profile_json: string | null;
 }
 
 interface FeedbackRow {
@@ -141,20 +108,6 @@ function mapVault(row: VaultRow): VaultRecord {
   };
 }
 
-function mapPairSession(row: PairSessionRow): PairSessionRecord {
-  return {
-    id: row.id,
-    code: row.code,
-    pollTokenHash: row.poll_token_hash,
-    status: row.status,
-    claimedByUserId: row.claimed_by_user_id,
-    encryptedPayload: row.encrypted_payload,
-    iv: row.iv,
-    expiresAt: row.expires_at,
-    createdAt: row.created_at,
-  };
-}
-
 function mapTelemetryEvent(row: TelemetryEventRow): TelemetryEventRecord {
   return {
     id: row.id,
@@ -167,6 +120,7 @@ function mapTelemetryEvent(row: TelemetryEventRow): TelemetryEventRecord {
     osVersion: row.os_version,
     formFactor: row.form_factor,
     payloadJson: row.payload_json,
+    deviceProfileJson: row.device_profile_json ?? null,
   };
 }
 
@@ -183,9 +137,11 @@ function mapFeedback(row: FeedbackRow): FeedbackSubmissionRecord {
   };
 }
 
-/** Creates a Cloudflare D1 `SyncServerStorage` adapter matching `migrations/0001_init.sql`. */
+/** Creates a Cloudflare D1 `SyncServerStorage` adapter matching migrations `0001` and `0002`. */
 export function createD1Storage(db: D1Database): SyncServerStorage {
+  const pairStorage = createD1PairStorage(db);
   return {
+    ...pairStorage,
     async createUser(user: UserRecord): Promise<{ readonly created: boolean }> {
       const res = await db
         .prepare(
@@ -381,94 +337,6 @@ export function createD1Storage(db: D1Database): SyncServerStorage {
       return { ok: false, conflict: true, currentRevision: current?.revision ?? 0 };
     },
 
-    async createPairSession(session: PairSessionRecord): Promise<void> {
-      await db
-        .prepare(
-          `INSERT INTO pair_sessions (
-            id, code, poll_token_hash, status, claimed_by_user_id,
-            encrypted_payload, iv, expires_at, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          session.id,
-          session.code,
-          session.pollTokenHash,
-          session.status,
-          session.claimedByUserId,
-          session.encryptedPayload,
-          session.iv,
-          session.expiresAt,
-          session.createdAt,
-        )
-        .run();
-    },
-
-    async findPairSessionById(id: string): Promise<PairSessionRecord | null> {
-      const row = await db
-        .prepare(
-          `SELECT id, code, poll_token_hash, status, claimed_by_user_id,
-                  encrypted_payload, iv, expires_at, created_at
-           FROM pair_sessions WHERE id = ?`,
-        )
-        .bind(id)
-        .first<PairSessionRow>();
-      return row ? mapPairSession(row) : null;
-    },
-
-    async claimPairSession(
-      code: string,
-      claimedByUserId: string,
-      encryptedPayload: string,
-      iv: string,
-      nowIso: string,
-    ): Promise<PairClaimResult> {
-      const row = await db
-        .prepare('SELECT id, status, expires_at FROM pair_sessions WHERE code = ?')
-        .bind(code)
-        .first<{ readonly id: string; readonly status: string; readonly expires_at: string }>();
-      if (!row) return { status: 'not_found' };
-      if (row.expires_at <= nowIso) {
-        await db.prepare('DELETE FROM pair_sessions WHERE id = ?').bind(row.id).run();
-        return { status: 'expired' };
-      }
-      if (row.status !== 'pending') return { status: 'already_claimed' };
-
-      const updateRes = await db
-        .prepare(
-          `UPDATE pair_sessions
-           SET status = 'claimed', claimed_by_user_id = ?, encrypted_payload = ?, iv = ?
-           WHERE id = ? AND status = 'pending' AND expires_at > ?`,
-        )
-        .bind(claimedByUserId, encryptedPayload, iv, row.id, nowIso)
-        .run();
-      return (updateRes.meta?.changes ?? 0) === 1
-        ? { status: 'claimed' }
-        : { status: 'already_claimed' };
-    },
-
-    async consumeClaimedPairSession(id: string): Promise<PairConsumeResult> {
-      const row = await db
-        .prepare(
-          `DELETE FROM pair_sessions
-           WHERE id = ? AND status = 'claimed'
-           RETURNING encrypted_payload, iv`,
-        )
-        .bind(id)
-        .first<{ readonly encrypted_payload: string | null; readonly iv: string | null }>();
-      if (!row || row.encrypted_payload === null || row.iv === null) {
-        return { status: 'not_claimed' };
-      }
-      return {
-        status: 'consumed',
-        encryptedPayload: row.encrypted_payload,
-        iv: row.iv,
-      };
-    },
-
-    async deletePairSession(id: string): Promise<void> {
-      await db.prepare('DELETE FROM pair_sessions WHERE id = ?').bind(id).run();
-    },
-
     async insertTelemetryEvents(events: readonly TelemetryEventRecord[]): Promise<void> {
       if (events.length === 0) return;
       const statements = events.map((event) =>
@@ -476,8 +344,8 @@ export function createD1Storage(db: D1Database): SyncServerStorage {
           .prepare(
             `INSERT INTO telemetry_events (
               id, received_at, event_ts, session_id, kind,
-              app_version, platform, os_version, form_factor, payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              app_version, platform, os_version, form_factor, payload_json, device_profile_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             event.id,
@@ -490,6 +358,7 @@ export function createD1Storage(db: D1Database): SyncServerStorage {
             event.osVersion,
             event.formFactor,
             event.payloadJson,
+            event.deviceProfileJson,
           ),
       );
       await db.batch(statements);
@@ -500,7 +369,7 @@ export function createD1Storage(db: D1Database): SyncServerStorage {
         ? await db
             .prepare(
               `SELECT id, received_at, event_ts, session_id, kind,
-                      app_version, platform, os_version, form_factor, payload_json
+                      app_version, platform, os_version, form_factor, payload_json, device_profile_json
                FROM telemetry_events
                WHERE received_at >= ?
                ORDER BY received_at ASC
@@ -511,7 +380,7 @@ export function createD1Storage(db: D1Database): SyncServerStorage {
         : await db
             .prepare(
               `SELECT id, received_at, event_ts, session_id, kind,
-                      app_version, platform, os_version, form_factor, payload_json
+                      app_version, platform, os_version, form_factor, payload_json, device_profile_json
                FROM telemetry_events
                ORDER BY received_at ASC
                LIMIT 5000`,

@@ -3074,7 +3074,7 @@ msgid "settings.section.account"
 msgstr "Account & Sync"
 
 msgid "settings.section.feedback"
-msgstr "Feedback & Telemetry"
+msgstr "Feedback"
 
 msgid "welcome.title"
 msgstr "Sync Across Every Screen"
@@ -3862,3 +3862,129 @@ msgstr "Add to Favorites"
 
 msgid "live.zap.favoriteRemove"
 msgstr "Remove from Favorites"
+
+msgid "settings.diagnostics.unifiedTitle"
+msgstr "Diagnostics & performance"
+
+msgid "settings.diagnostics.unifiedToggle"
+msgstr "Share anonymous diagnostics & performance data"
+
+msgid "settings.diagnostics.unifiedDescription"
+msgstr "Helps us catch crashes, slow loads, and playback errors faster. Zero playlists, watch history, or personal info are ever sent."
+
+msgid "privacy.consent.title"
+msgstr "Privacy & Diagnostics"
+
+msgid "privacy.consent.body"
+msgstr "ELV IPTV keeps your playlists and watch history private on your device (or end-to-end encrypted when you sign in). You can optionally share anonymous crash and performance metrics to help improve stability."
+
+msgid "privacy.consent.telemetryToggle"
+msgstr "Help improve ELV IPTV with anonymous diagnostics"
+
+msgid "privacy.consent.continue"
+msgstr "Continue"
+
+msgid "account.sync.autoBadge"
+msgstr "Automatic sync active"
+
+msgid "account.sync.statusSyncing"
+msgstr "Syncing encrypted vault…"
+
+msgid "account.sync.statusUpToDate"
+msgstr "All devices up to date"
+
+msgid "account.sync.statusPending"
+msgstr "Changes queued for sync"
+
+msgid "account.sync.statusOffline"
+msgstr "Offline — will sync automatically when connected"
+
+msgid "account.sync.lastSynced"
+msgstr "Last synced: {time}"
+
+msgid "account.sync.manualFallback"
+msgstr "Sync now"
+
+msgid "pair.title"
+msgstr "Pair another device"
+
+msgid "pair.subtitle"
+msgstr "Scan this QR code or enter the 8-digit code on your other device. Account direction is detected automatically."
+
+msgid "pair.codeLabel"
+msgstr "8-digit pairing code"
+
+msgid "pair.enterCodeLabel"
+msgstr "Or enter a code from another device"
+
+msgid "pair.enterCodePlaceholder"
+msgstr "0000 0000"
+
+msgid "pair.connectButton"
+msgstr "Connect"
+
+msgid "pair.scanQrButton"
+msgstr "Scan QR code"
+
+msgid "pair.cameraUnavailable"
+msgstr "Camera scanning is unavailable on this device — enter the 8-digit code instead."
+
+msgid "pair.sasTitle"
+msgstr "Verify security code"
+
+msgid "pair.sasBody"
+msgstr "Confirm both devices show the same 4-digit security code before transferring your encrypted account:"
+
+msgid "pair.sasConfirm"
+msgstr "Codes match — confirm"
+
+msgid "pair.sasCancel"
+msgstr "Cancel"
+
+msgid "pair.caseNeitherTitle"
+msgstr "Sign in on one device first"
+
+msgid "pair.caseNeitherBody"
+msgstr "Neither device is signed in yet. Sign in or create an account on either device, then pair again."
+
+msgid "pair.caseSameAccountTitle"
+msgstr "Already on the same account"
+
+msgid "pair.caseSameAccountBody"
+msgstr "Both devices are signed in to {email}. Triggering an immediate sync now."
+
+msgid "pair.caseTransferToOther"
+msgstr "Sign in the other device as {email}?"
+
+msgid "pair.caseReceiveFromOther"
+msgstr "Sign in this device as {email}?"
+
+msgid "pair.caseDifferentTitle"
+msgstr "Two different accounts detected"
+
+msgid "pair.caseDifferentBody"
+msgstr "Choose which account both devices should use. The replaced device will switch to the selected account."
+
+msgid "pair.useThisAccount"
+msgstr "Keep this device's account ({email})"
+
+msgid "pair.useOtherAccount"
+msgstr "Switch to other device's account ({email})"
+
+msgid "pair.waitingApproval"
+msgstr "Waiting for confirmation on the other device…"
+
+msgid "pair.success"
+msgstr "Devices paired and synced!"
+
+msgid "pair.errorExpired"
+msgstr "Pairing code expired. Generate a new code to try again."
+
+msgid "pair.errorLocked"
+msgstr "Too many failed attempts. Code locked for security — generate a new one."
+
+msgid "pair.errorInvalidCode"
+msgstr "Enter a valid 8-digit pairing code."
+
+msgid "pair.errorRejected"
+msgstr "Pairing was cancelled on the other device."

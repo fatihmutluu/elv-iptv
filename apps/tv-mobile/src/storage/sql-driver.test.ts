@@ -473,4 +473,41 @@ describe('createOpSqliteDriver', () => {
     writer.execute = origExecute;
     expect(await db.run('UPDATE c SET x = 1')).toEqual({ changes: 1 });
   });
+
+  it('reports slow SQL operations (> 250ms) with safe uppercase SQL verb tokens only (#509)', async () => {
+    let now = 10_000;
+    const f = createFakeOpSqlite();
+    fake.current = f;
+    const slowOps: Array<{ op: string; durationMs: number }> = [];
+    const db = await createOpSqliteDriver('catalog.db', undefined, {
+      now: () => now,
+      slowQueryThresholdMs: 250,
+      onSlowQuery: (op, durationMs) => {
+        slowOps.push({ op, durationMs });
+      },
+    });
+    const [writer, reader] = f.conns;
+    if (!writer || !reader) throw new Error('expected two connections');
+
+    const origRead = reader.execute;
+    reader.execute = async (sql, params) => {
+      now += 320;
+      return origRead(sql, params);
+    };
+    const origWrite = writer.execute;
+    writer.execute = async (sql, params) => {
+      now += sql.startsWith('DELETE') ? 410 : 80;
+      return origWrite(sql, params);
+    };
+
+    await db.all('SELECT * FROM private_channels WHERE name = ?', ['Secret']);
+    await db.run('UPDATE private_channels SET name = ?', ['Fast']);
+    await db.run('DELETE FROM private_channels WHERE id = ?', [42]);
+
+    expect(slowOps).toEqual([
+      { op: 'SELECT', durationMs: 320 },
+      { op: 'DELETE', durationMs: 410 },
+    ]);
+    await db.close();
+  });
 });

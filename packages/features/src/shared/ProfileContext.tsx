@@ -153,6 +153,8 @@ const ProfileContext = createContext<ProfileContextValue>(DEFAULT_PROFILE_CONTEX
 /** Props of {@link ProfileProvider}. */
 export interface ProfileProviderProps {
   readonly catalog: CatalogService;
+  /** Monotonic external refresh token (e.g. incoming E2EE sync) triggering live profile & parental reload. */
+  readonly externalRefreshToken?: number;
   readonly profilePreferences?: ProfilePreferencesManager;
   readonly keymapStore?: KeymapStore;
   readonly onProfileDeleted?: (profileId: string) => void | Promise<void>;
@@ -200,6 +202,7 @@ function buildGuardPinCandidates(
  */
 export function ProfileProvider({
   catalog,
+  externalRefreshToken,
   profilePreferences,
   keymapStore,
   onProfileDeleted,
@@ -304,6 +307,45 @@ export function ProfileProvider({
     [fetchParentalSnapshot],
   );
 
+  const switchProfileInternal = useCallback(
+    async (nextProfileId: string, overrideList?: readonly ProfileRecord[]): Promise<void> => {
+      const targetId = nextProfileId.trim() || DEFAULT_PROFILE_ID;
+      const seq = ++switchSeqRef.current;
+      setProfilePickerOpen(false);
+
+      if (profilePreferences) {
+        await profilePreferences.switchProfile(targetId).catch(() => undefined);
+        if (!mountedRef.current || switchSeqRef.current !== seq) return;
+        await profilePreferences.saveActiveProfileId(targetId).catch(() => undefined);
+        if (!mountedRef.current || switchSeqRef.current !== seq) return;
+      }
+
+      const snapshot = await fetchParentalSnapshot(targetId, overrideList ?? profilesRef.current);
+      if (!mountedRef.current || switchSeqRef.current !== seq) return;
+
+      // Atomic batched commit: zero double cache clear, zero double prewarm, zero stale window.
+      clearRelockTimer();
+      activeProfileIdRef.current = targetId;
+      parentalSettingsRef.current = snapshot.settings;
+      parentalUnlockedRef.current = false;
+      guardPinProfileIdRef.current = snapshot.guardPinProfileId;
+      setActiveProfileId(targetId);
+      setParentalSettings(snapshot.settings);
+      setParentalLocks(snapshot.locks);
+      setHasParentalPin(snapshot.hasPin);
+      setGuardPinProfileId(snapshot.guardPinProfileId);
+      setParentalUnlocked(false);
+      setParentalUnlockExpiresAt(null);
+      setProfileRevision((r) => r + 1);
+      onChangeRef.current?.({
+        activeProfileId: targetId,
+        parentalUnlocked: false,
+        reason: 'profile-switch',
+      });
+    },
+    [clearRelockTimer, fetchParentalSnapshot, profilePreferences],
+  );
+
   const refreshProfiles = useCallback(async (): Promise<void> => {
     const loaded = catalog.listProfiles
       ? await catalog.listProfiles().catch(() => [DEFAULT_PROFILE_RECORD])
@@ -312,10 +354,27 @@ export function ProfileProvider({
     const safeList = loaded.length > 0 ? loaded : [DEFAULT_PROFILE_RECORD];
     profilesRef.current = safeList;
     setProfiles(safeList);
-    await loadParentalStateFor(activeProfileIdRef.current, safeList);
+    const currentActiveId = activeProfileIdRef.current;
+    if (!safeList.some((p) => p.id === currentActiveId)) {
+      const defaultProfile =
+        safeList.find((p) => p.isDefault || p.id === DEFAULT_PROFILE_ID) ?? safeList[0];
+      await switchProfileInternal(defaultProfile?.id ?? DEFAULT_PROFILE_ID, safeList);
+      if (!mountedRef.current) return;
+      setProfilesReady(true);
+      return;
+    }
+    await loadParentalStateFor(currentActiveId, safeList);
     if (!mountedRef.current) return;
     setProfilesReady(true);
-  }, [catalog, loadParentalStateFor]);
+  }, [catalog, loadParentalStateFor, switchProfileInternal]);
+
+  const prevExternalRefreshTokenRef = useRef<number>(externalRefreshToken ?? 0);
+  useEffect(() => {
+    const nextToken = externalRefreshToken ?? 0;
+    if (nextToken <= 0 || nextToken === prevExternalRefreshTokenRef.current) return;
+    prevExternalRefreshTokenRef.current = nextToken;
+    void refreshProfiles();
+  }, [externalRefreshToken, refreshProfiles]);
 
   // Initial hydration: resolve profiles, persisted active profile ID, preferences, and parental
   // state BEFORE committing `profilesReady = true` so frame 1 never leaks Adult content for Kids.
@@ -390,45 +449,6 @@ export function ProfileProvider({
       });
     }
   }, [clearRelockTimer]);
-
-  const switchProfileInternal = useCallback(
-    async (nextProfileId: string, overrideList?: readonly ProfileRecord[]): Promise<void> => {
-      const targetId = nextProfileId.trim() || DEFAULT_PROFILE_ID;
-      const seq = ++switchSeqRef.current;
-      setProfilePickerOpen(false);
-
-      if (profilePreferences) {
-        await profilePreferences.switchProfile(targetId).catch(() => undefined);
-        if (!mountedRef.current || switchSeqRef.current !== seq) return;
-        await profilePreferences.saveActiveProfileId(targetId).catch(() => undefined);
-        if (!mountedRef.current || switchSeqRef.current !== seq) return;
-      }
-
-      const snapshot = await fetchParentalSnapshot(targetId, overrideList ?? profilesRef.current);
-      if (!mountedRef.current || switchSeqRef.current !== seq) return;
-
-      // Atomic batched commit: zero double cache clear, zero double prewarm, zero stale window.
-      clearRelockTimer();
-      activeProfileIdRef.current = targetId;
-      parentalSettingsRef.current = snapshot.settings;
-      parentalUnlockedRef.current = false;
-      guardPinProfileIdRef.current = snapshot.guardPinProfileId;
-      setActiveProfileId(targetId);
-      setParentalSettings(snapshot.settings);
-      setParentalLocks(snapshot.locks);
-      setHasParentalPin(snapshot.hasPin);
-      setGuardPinProfileId(snapshot.guardPinProfileId);
-      setParentalUnlocked(false);
-      setParentalUnlockExpiresAt(null);
-      setProfileRevision((r) => r + 1);
-      onChangeRef.current?.({
-        activeProfileId: targetId,
-        parentalUnlocked: false,
-        reason: 'profile-switch',
-      });
-    },
-    [clearRelockTimer, fetchParentalSnapshot, profilePreferences],
-  );
 
   const switchProfile = useCallback(
     async (nextProfileId: string): Promise<void> => switchProfileInternal(nextProfileId),

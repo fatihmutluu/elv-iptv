@@ -161,6 +161,7 @@ export function buildAppearanceResetPatch(formFactor: ArtworkCacheFormFactor): {
       overscanY: 0,
       tvClockMode: 'never',
       artworkCacheLimitMb: platformDefaultMb,
+      telemetryOptIn: false,
       crashReportsOptIn: false,
       crashReportsIncludeLogs: false,
       homeLayout: DEFAULT_HOME_LAYOUT,
@@ -219,11 +220,7 @@ export function computeAppearanceScrollY(
   if (controlId === 'artwork-cache-dropdown' || controlId === 'artwork-cache-clear') {
     return layouts.artworkCache ? Math.max(0, layouts.artworkCache.y - 12) : undefined;
   }
-  if (
-    controlId === 'toggle-crash-reports-opt-in' ||
-    controlId === 'toggle-crash-reports-include-logs' ||
-    controlId === 'preview-diagnostic-report'
-  ) {
+  if (controlId === 'toggle-crash-reports-opt-in') {
     return layouts.diagnostics ? Math.max(0, layouts.diagnostics.y - 12) : undefined;
   }
   if (controlId === 'reset-preferences') {
@@ -246,7 +243,7 @@ export function activateAppearanceControl(
     onOpenDropdown?: (dropdownId: 'lang-dropdown' | 'artwork-cache-dropdown') => void;
     onSetArtworkCacheLimitMb?: (mb: ArtworkCacheLimitMbPref) => void;
     onClearArtworkCache?: () => void;
-    onPreviewDiagnostics?: () => void;
+    onTelemetryOptInChange?: (enabled: boolean) => void;
   },
 ): void {
   const { preferences } = deps;
@@ -333,26 +330,21 @@ export function activateAppearanceControl(
       deps.setUiFontFamily?.('system');
     }
     deps.onSetArtworkCacheLimitMb?.(platformDefaultMb);
+    deps.onTelemetryOptInChange?.(false);
     return;
   }
   if (controlId === 'toggle-crash-reports-opt-in') {
     if (preferences) {
+      const next = !(
+        preferences.preferences.telemetryOptIn || preferences.preferences.crashReportsOptIn
+      );
+      deps.onTelemetryOptInChange?.(next);
       void preferences.updatePreferences({
-        crashReportsOptIn: !preferences.preferences.crashReportsOptIn,
+        telemetryOptIn: next,
+        crashReportsOptIn: next,
+        privacyConsentAnswered: true,
       });
     }
-    return;
-  }
-  if (controlId === 'toggle-crash-reports-include-logs') {
-    if (preferences) {
-      void preferences.updatePreferences({
-        crashReportsIncludeLogs: !preferences.preferences.crashReportsIncludeLogs,
-      });
-    }
-    return;
-  }
-  if (controlId === 'preview-diagnostic-report') {
-    deps.onPreviewDiagnostics?.();
     return;
   }
   if (controlId === 'home-layout-reset') {

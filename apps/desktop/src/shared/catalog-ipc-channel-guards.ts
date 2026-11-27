@@ -32,7 +32,7 @@ const SET_CHANNEL_OVERRIDE_KEYS = new Set([
   'isHidden',
   'sortOrder',
 ]);
-const CREATE_CUSTOM_GROUP_KEYS = new Set(['profileId', 'name', 'sortOrder', 'isHidden']);
+const CREATE_CUSTOM_GROUP_KEYS = new Set(['id', 'profileId', 'name', 'sortOrder', 'isHidden']);
 const UPDATE_CUSTOM_GROUP_KEYS = new Set(['name', 'sortOrder', 'isHidden']);
 const CUSTOM_GROUP_ITEM_KEYS = new Set(['itemKey', 'sourceId']);
 
@@ -94,6 +94,9 @@ function isReorderChannelKeyList(x: unknown): x is readonly string[] {
 /** Validates a {@link CreateCustomGroupInput} IPC payload (`#60`). */
 function isCreateCustomGroupInput(x: unknown): x is CreateCustomGroupInput {
   if (!isRecord(x) || !hasOnlyKeys(x, CREATE_CUSTOM_GROUP_KEYS)) return false;
+  if (x['id'] !== undefined) {
+    if (typeof x['id'] !== 'string' || !isValidCustomGroupId(x['id'].trim())) return false;
+  }
   if (!isOptionalStrictProfileId(x['profileId'])) return false;
   const name = x['name'];
   if (

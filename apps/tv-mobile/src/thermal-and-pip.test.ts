@@ -299,4 +299,70 @@ describe('createMobileVideoHost (#34, #221, #232)', () => {
       isLive: true,
     });
   });
+
+  it('records playback_start TTFF and playback_rebuffer on media3 and aether only when opted in (#509)', () => {
+    let now = 2_000;
+    const listeners: Array<(event: unknown) => void> = [];
+    const engine = {
+      subscribe: (listener: (event: unknown) => void) => {
+        listeners.push(listener);
+        return () => {};
+      },
+    } as unknown as PlayerEngine;
+    const recordPlaybackStart = vi.fn();
+    const recordPlaybackRebuffer = vi.fn();
+
+    const host = createMobileVideoHost(
+      makeDeps({
+        os: 'ios',
+        isTV: true,
+        createEngine: vi.fn(() => engine),
+        clock: () => now,
+        telemetry: {
+          isOptedIn: () => true,
+          recordMediaDecodeFailure: vi.fn(),
+          recordPlaybackError: vi.fn(),
+          recordPlaybackStart,
+          recordPlaybackRebuffer,
+        },
+      }),
+    );
+    host.open();
+
+    for (const l of listeners) {
+      l({ attempt: 1, type: 'state', state: 'opening' });
+      l({
+        attempt: 1,
+        type: 'clock',
+        anchor: { positionMs: 0, durationMs: 3_600_000, atMs: 2_050, rate: 1 },
+      });
+      l({ attempt: 1, type: 'mediaInfo', info: { codec: 'video/hevc' } });
+    }
+    now = 2_380;
+    for (const l of listeners) {
+      l({ attempt: 1, type: 'firstFrame', atMs: 2_380 });
+      l({ attempt: 1, type: 'state', state: 'playing' });
+    }
+    expect(recordPlaybackStart).toHaveBeenCalledTimes(1);
+    expect(recordPlaybackStart).toHaveBeenCalledWith({
+      engine: 'aether',
+      ttffMs: 380,
+      isLive: false,
+      videoCodec: 'hevc',
+    });
+
+    now = 6_000;
+    for (const l of listeners) {
+      l({ attempt: 1, type: 'stall', phase: 'start', atMs: 6_000 });
+    }
+    now = 6_640;
+    for (const l of listeners) {
+      l({ attempt: 1, type: 'stall', phase: 'end', atMs: 6_640 });
+    }
+    expect(recordPlaybackRebuffer).toHaveBeenCalledWith({
+      engine: 'aether',
+      durationMs: 640,
+      isLive: false,
+    });
+  });
 });
