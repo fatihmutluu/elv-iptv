@@ -266,7 +266,8 @@ const RailCardItem = memo(function RailCardItemInner({
         title={entry.title}
         {...(subtitle !== undefined ? { subtitle } : {})}
         {...(entry.badgeLabel ? { badge: entry.badgeLabel } : {})}
-        imageUri={entry.backdropUri}
+        imageUri={entry.backdropUri ?? entry.posterUri}
+        portraitFallback={!isLive && !entry.backdropUri && Boolean(entry.posterUri)}
         live={isLive}
         logoBackdrop={isLive}
         showPlayBadge={!isLive}

@@ -92,6 +92,7 @@ interface RawSearchRow {
   cast_fold: string | null;
   director_fold: string | null;
   logo: string | null;
+  backdrop?: string | null;
   rating: number | null;
   year: number | null;
   num: number | null;
@@ -112,7 +113,7 @@ const SEARCH_SPEC: Record<
   live: {
     table: 'live',
     fts: 'live_fts',
-    cols: 't.logo AS logo, NULL AS rating, NULL AS year, t.num AS num, t.catchup_days AS catchup_days',
+    cols: 't.logo AS logo, NULL AS backdrop, NULL AS rating, NULL AS year, t.num AS num, t.catchup_days AS catchup_days',
     foldCols: 't.name_fold AS name_fold, NULL AS cast_fold, NULL AS director_fold',
     bm25Expr: 'bm25(live_fts)',
     hasCredits: false,
@@ -120,7 +121,7 @@ const SEARCH_SPEC: Record<
   movie: {
     table: 'movies',
     fts: 'movies_fts',
-    cols: 't.logo AS logo, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
+    cols: 't.logo AS logo, t.backdrop AS backdrop, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
     foldCols:
       't.name_fold AS name_fold, t.cast_fold AS cast_fold, t.director_fold AS director_fold',
     bm25Expr: 'bm25(movies_fts, 4.0, 1.5, 1.5)',
@@ -129,7 +130,7 @@ const SEARCH_SPEC: Record<
   series: {
     table: 'series',
     fts: 'series_fts',
-    cols: 't.cover AS logo, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
+    cols: 't.cover AS logo, t.backdrop AS backdrop, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
     foldCols:
       't.name_fold AS name_fold, t.cast_fold AS cast_fold, t.director_fold AS director_fold',
     bm25Expr: 'bm25(series_fts, 4.0, 1.5, 1.5)',
@@ -211,6 +212,7 @@ function mapSearchRow(
       : {}),
     ...(typeof r.co_sort_order === 'number' ? { customSortOrder: r.co_sort_order } : {}),
     logo: r.logo,
+    ...(typeof r.backdrop === 'string' && r.backdrop !== '' ? { backdrop: r.backdrop } : {}),
     rating: r.rating,
     year: r.year,
     num: r.num,

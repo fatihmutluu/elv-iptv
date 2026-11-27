@@ -14,6 +14,7 @@ const TEST_JWT_SECRET = 'wave-e1-test-jwt-secret-at-least-32-chars-long';
 function makeTitleRecord(overrides: Partial<ElvTitleRecord> = {}): ElvTitleRecord {
   return {
     imdbId: 'tt1375666',
+    tmdbId: '27205',
     mediaType: 'movie',
     originalTitle: 'Inception',
     englishTitle: 'Inception',
@@ -364,13 +365,13 @@ describe('Wave E1 /v1/elv/* Cloudflare Worker routes', () => {
     });
   });
 
-  describe('GET /v1/elv/title/:imdbId (Workers AI permanent translation cache)', () => {
-    it('translates once per (imdb_id, lang) across 5 requests, calls AI 0x for lang=en, and sets edge Cache-Control', async () => {
+  describe('GET /v1/elv/title/:imdbId (Option 2A native localization, zero Workers AI)', () => {
+    it('serves English synopsis with 0 Workers AI calls, uses cached native TMDB synopsis, and sets edge Cache-Control', async () => {
       const run = vi.fn<WorkersAiBinding['run']>(async () => ({
-        response: 'Kurumsal sırları rüyalar aracılığıyla çalan yetenekli bir hırsızın hikayesi.',
+        response: 'Should never be called',
       }));
       const ai: WorkersAiBinding = { run };
-      const { app, spies } = createTestApp({ ai });
+      const { app, storage, spies } = createTestApp({ ai });
 
       // English request -> 0 AI calls, 1 upstream detail fetch
       const enRes = await app.fetch(
@@ -379,11 +380,13 @@ describe('Wave E1 /v1/elv/* Cloudflare Worker routes', () => {
       expect(enRes.status).toBe(200);
       expect(enRes.headers.get('cache-control')).toBe('public, max-age=86400');
       const enBody = (await enRes.json()) as {
+        tmdbId: string | null;
         synopsis: string;
         synopsisSource: string;
         synopsisLang: string;
         cast: unknown[];
       };
+      expect(enBody.tmdbId).toBe('27205');
       expect(enBody.synopsis).toContain('dream-sharing technology');
       expect(enBody.synopsisSource).toBe('original');
       expect(enBody.synopsisLang).toBe('en');
@@ -391,59 +394,55 @@ describe('Wave E1 /v1/elv/* Cloudflare Worker routes', () => {
       expect(run).toHaveBeenCalledTimes(0);
       expect(spies.fetchTitleDetail).toHaveBeenCalledTimes(1);
 
-      // 5 consecutive Turkish requests -> AI called ONCE ever, upstream detail called 0 extra times!
-      for (let i = 0; i < 5; i += 1) {
+      // Native TMDB Turkish synopsis in cache -> 0 AI calls across repeated requests
+      await storage.upsertElvLocalizedSynopsis({
+        imdbId: 'tt1375666',
+        lang: 'tr',
+        localizedTitle: 'Başlangıç',
+        synopsis: 'Kurumsal sırları rüyalar aracılığıyla çalan yetenekli bir hırsızın hikayesi.',
+        source: 'tmdb',
+        updatedAt: 1_764_212_100_000,
+      });
+      for (let i = 0; i < 3; i += 1) {
         const trRes = await app.fetch(
           new Request('https://sync.example.test/v1/elv/title/tt1375666?lang=tr'),
         );
         expect(trRes.status).toBe(200);
         const trBody = (await trRes.json()) as {
+          localizedTitle: string | null;
           synopsis: string;
           synopsisSource: string;
           synopsisLang: string;
         };
+        expect(trBody.localizedTitle).toBe('Başlangıç');
         expect(trBody.synopsis).toBe(
           'Kurumsal sırları rüyalar aracılığıyla çalan yetenekli bir hırsızın hikayesi.',
         );
-        expect(trBody.synopsisSource).toBe('workers_ai');
+        expect(trBody.synopsisSource).toBe('tmdb');
         expect(trBody.synopsisLang).toBe('tr');
       }
-      expect(run).toHaveBeenCalledTimes(1);
+      expect(run).toHaveBeenCalledTimes(0);
       expect(spies.fetchTitleDetail).toHaveBeenCalledTimes(1);
     });
 
-    it('falls back gracefully to English synopsis when Workers AI fails and retries cleanly once recovered', async () => {
-      let shouldFail = true;
-      const run = vi.fn<WorkersAiBinding['run']>(async () => {
-        if (shouldFail) throw new Error('AI outage');
-        return { response: 'Başarılı Türkçe özet metni.' };
-      });
+    it('falls back directly to English synopsis with synopsisSource=fallback_en when localized overview is missing (0 AI calls)', async () => {
+      const run = vi.fn<WorkersAiBinding['run']>(async () => ({
+        response: 'Should never be called',
+      }));
       const { app } = createTestApp({ ai: { run } });
 
       const fallbackRes = await app.fetch(
         new Request('https://sync.example.test/v1/elv/title/tt1375666?lang=tr'),
       );
       expect(fallbackRes.status).toBe(200);
+      expect(fallbackRes.headers.get('cache-control')).toBe('public, max-age=300');
       const fallbackBody = (await fallbackRes.json()) as {
         synopsis: string;
         synopsisSource: string;
       };
       expect(fallbackBody.synopsis).toContain('dream-sharing technology');
       expect(fallbackBody.synopsisSource).toBe('fallback_en');
-
-      // Once AI recovers, next request translates and permanently caches!
-      shouldFail = false;
-      const recoveredRes = await app.fetch(
-        new Request('https://sync.example.test/v1/elv/title/tt1375666?lang=tr'),
-      );
-      expect(recoveredRes.status).toBe(200);
-      const recoveredBody = (await recoveredRes.json()) as {
-        synopsis: string;
-        synopsisSource: string;
-      };
-      expect(recoveredBody.synopsis).toBe('Başarılı Türkçe özet metni.');
-      expect(recoveredBody.synopsisSource).toBe('workers_ai');
-      expect(run).toHaveBeenCalledTimes(2);
+      expect(run).not.toHaveBeenCalled();
     });
 
     it('strictly validates imdbId and lang parameters and returns 404 for unknown titles', async () => {
@@ -679,6 +678,95 @@ describe('Wave E1 /v1/elv/* Cloudflare Worker routes', () => {
         (await app.fetch(new Request('https://sync.example.test/v1/elv/title/tt1375666/nested')))
           .status,
       ).toBe(404);
+    });
+
+    it('defers budget-exhausted batch items to pendingKeys (never unmatchedKeys), falls back to IMDb suggestions on TMDB miss, and negative-caches missing non-English translations', async () => {
+      const fetchRichTitleByImdbId = vi.fn(async (imdbId: string) => {
+        if (imdbId === 'tt1375666') {
+          return {
+            payload: {
+              record: makeTitleRecord(),
+              localizedTitle: null,
+              localizedSynopsis: null,
+              recommendedTmdbIds: [],
+            },
+            subrequestsUsed: 1,
+          };
+        }
+        return { payload: null, subrequestsUsed: 1 };
+      });
+      const searchRichMatch = vi.fn(async () => ({
+        match: null,
+        subrequestsUsed: 2,
+        budgetExhausted: true,
+      }));
+      const { client: baseClient, spies } = makeMockUpstream({
+        searchSuggestions: async (query) =>
+          query === 'tt0099999'
+            ? [
+                {
+                  imdbId: 'tt0099999',
+                  title: 'IMDb Only Classic',
+                  year: 1991,
+                  mediaType: 'movie',
+                  qid: 'movie',
+                  stars: null,
+                  posterUrl: null,
+                },
+              ]
+            : [],
+      });
+      const richClient: ElvUpstreamClient = {
+        ...baseClient,
+        isTmdbEnabled: true,
+        searchRichMatch,
+        fetchRichTitleByTmdbId: async () => ({
+          payload: null,
+          subrequestsUsed: 0,
+          budgetExhausted: true,
+        }),
+        fetchRichTitleByImdbId,
+      };
+      const { app } = createTestApp({ elvUpstream: richClient, tmdbApiKey: 'test-tmdb-key' });
+
+      // 1) Budget-exhausted rich search -> pendingKeys, NOT unmatchedKeys
+      const batchRes = await app.fetch(
+        new Request('https://sync.example.test/v1/elv/match-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: [{ key: 'm:budget', cleanTitle: 'Some Movie', year: 2024, mediaType: 'movie' }],
+          }),
+        }),
+      );
+      expect(batchRes.status).toBe(200);
+      const batchBody = (await batchRes.json()) as {
+        unmatchedKeys: string[];
+        pendingKeys: string[];
+      };
+      expect(batchBody.unmatchedKeys).toEqual([]);
+      expect(batchBody.pendingKeys).toEqual(['m:budget']);
+
+      // 2) TMDB 404 on /v1/elv/title/:imdbId falls back to IMDb suggestion exact match
+      const fallbackRes = await app.fetch(
+        new Request('https://sync.example.test/v1/elv/title/tt0099999?lang=en'),
+      );
+      expect(fallbackRes.status).toBe(200);
+      const fallbackBody = (await fallbackRes.json()) as { originalTitle: string };
+      expect(fallbackBody.originalTitle).toBe('IMDb Only Classic');
+      expect(spies.searchSuggestions).toHaveBeenCalledWith('tt0099999');
+
+      // 3) Missing non-English translation negative-cached as fallback_en (no repeated TMDB calls)
+      fetchRichTitleByImdbId.mockClear();
+      const tr1 = await app.fetch(
+        new Request('https://sync.example.test/v1/elv/title/tt1375666?lang=tr'),
+      );
+      const tr2 = await app.fetch(
+        new Request('https://sync.example.test/v1/elv/title/tt1375666?lang=tr'),
+      );
+      expect(tr1.status).toBe(200);
+      expect(tr2.status).toBe(200);
+      expect(fetchRichTitleByImdbId).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -328,3 +328,9 @@ export function buildMatchLookupKey(
   if (folded.length === 0) return null;
   return `${mediaType}:${folded}:${year ?? ''}`;
 }
+
+/** Returns true when `lang` is English (`en` or `en-*`). */
+export function isEnglishLang(lang: string): boolean {
+  const lower = lang.trim().toLowerCase();
+  return lower === 'en' || lower.startsWith('en-');
+}

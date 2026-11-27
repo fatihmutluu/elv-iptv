@@ -669,6 +669,7 @@ export function HomeScreen({
           testID="home-ambient-backdrop"
           backdropKey={focusedAmbientEntry?.itemKey ?? null}
           uri={focusedAmbientEntry?.backdropUri ?? focusedAmbientEntry?.posterUri ?? null}
+          portrait={!focusedAmbientEntry?.backdropUri && Boolean(focusedAmbientEntry?.posterUri)}
           title={focusedAmbientEntry?.title ?? ''}
         />
       ) : null}

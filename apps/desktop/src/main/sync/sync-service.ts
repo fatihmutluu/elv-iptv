@@ -45,16 +45,19 @@ import { createBidirectionalPairingController } from './bidirectional-pairing.ts
 import { mapDesktopTelemetryRequestToEvent } from './device-profile.ts';
 import { reconcileLocalSnapshotWithBaseline } from './snapshot-tombstones.ts';
 import {
+  broadcastToListeners,
   createFetchHttpPort,
   createNodeWebCryptoPort,
+  createServerUrlController,
   DEFAULT_FLUSH_INTERVAL_MS,
   type DesktopSyncFetchFn,
   defaultDesktopFetchFn,
   errorCodeFrom,
-  initialPrefsAppliedKey,
+  hasAppliedInitialPrefs,
   isAuthTokenExpiredError,
   loadVaultBaseline,
   mapSchedulerState,
+  markInitialPrefsApplied,
   parsePersistedSession,
   persistSessionRecord,
   persistVaultBaseline,
@@ -86,6 +89,7 @@ export interface DesktopSyncServiceOptions {
   readonly getLocalSnapshot?: () => Promise<VaultSnapshot> | VaultSnapshot;
   readonly applyMergedSnapshot?: (snapshot: VaultSnapshot) => Promise<void> | void;
   readonly onInitialPreferences?: (patch: PreferencesPatch) => Promise<void> | void;
+  readonly onServerUrlChange?: (serverUrl: string) => void;
 }
 
 /** Electron main-process E2EE sync, bidirectional pairing, telemetry, and feedback service (`#26`, `#458`, `#509`, `#510`). */
@@ -94,6 +98,7 @@ export interface DesktopSyncService {
   getState(): SyncAccountStateIpc;
   subscribe(listener: (state: SyncAccountStateIpc) => void): () => void;
   subscribeInitialPreferences(listener: (patch: PreferencesPatch) => void): () => void;
+  subscribeServerUrl?(listener: (serverUrl: string) => void): () => void;
   setServerUrl(serverUrl: string): void;
   setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): void;
   checkEmail(email: string): Promise<SyncEmailCheckStatusIpc>;
@@ -142,6 +147,11 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
 
   const defaultServerUrl = normalizeSyncServerUrl(options.initialServerUrl ?? '', '');
   let serverUrl = defaultServerUrl;
+  const urlCtl = createServerUrlController(
+    options.secretStore,
+    defaultServerUrl,
+    options.onServerUrlChange,
+  );
   let autoSyncState: AutoSyncStateIpc = 'idle';
   let state: SyncAccountStateIpc = Object.freeze({ ...SIGNED_OUT_STATE, autoSyncState: 'idle' });
   const listeners = new Set<(next: SyncAccountStateIpc) => void>();
@@ -153,26 +163,9 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
   let activeSyncRun: Promise<SyncActionResultIpc> | null = null;
   const qrSessions = new Map<string, QrPairingSession>();
 
-  const hasAppliedInitialPrefs = async (userId: string): Promise<boolean> => {
-    const val = await options.secretStore
-      .get(initialPrefsAppliedKey(userId))
-      .catch(() => undefined);
-    return val === '1';
-  };
-
-  const markInitialPrefsApplied = async (userId: string): Promise<void> => {
-    await options.secretStore.set(initialPrefsAppliedKey(userId), '1').catch(() => undefined);
-  };
-
   const emitInitialPreferences = async (patch: PreferencesPatch): Promise<void> => {
     await options.onInitialPreferences?.(patch);
-    for (const listener of [...initialPrefsListeners]) {
-      try {
-        listener(patch);
-      } catch {
-        // Isolate subscriber errors.
-      }
-    }
+    broadcastToListeners(initialPrefsListeners, patch);
   };
 
   const setState = (next: SyncAccountStateIpc): void => {
@@ -184,13 +177,7 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       errorCode: next.errorCode,
       autoSyncState: next.status === 'signed_out' ? 'idle' : (next.autoSyncState ?? autoSyncState),
     });
-    for (const listener of [...listeners]) {
-      try {
-        listener(state);
-      } catch {
-        // Isolate subscriber errors.
-      }
-    }
+    broadcastToListeners(listeners, state);
   };
 
   const persistSession = (
@@ -345,7 +332,10 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       return { ok: false, errorCode };
     }
 
-    const alreadyAppliedInitialPrefs = await hasAppliedInitialPrefs(session.user.id);
+    const alreadyAppliedInitialPrefs = await hasAppliedInitialPrefs(
+      options.secretStore,
+      session.user.id,
+    );
     let remoteInitialPrefs = pullRes.value.snapshot?.initialPreferences;
     const shouldApplyRemoteInitial =
       !alreadyAppliedInitialPrefs && remoteInitialPrefs !== undefined;
@@ -400,7 +390,7 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
           await emitInitialPreferences(patch);
         }
       }
-      await markInitialPrefsApplied(session.user.id);
+      await markInitialPrefsApplied(options.secretStore, session.user.id);
     }
     lastRevision = pushRes.value.revision;
     await persistVaultBaseline(options.secretStore, cryptoPort, session, lastRevision, merged);
@@ -528,6 +518,7 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
     async hydrate(): Promise<void> {
       if (hydrated) return;
       hydrated = true;
+      serverUrl = await urlCtl.hydrate();
       const raw = await options.secretStore.get(SESSION_SECRET_KEY).catch(() => undefined);
       const persisted = parsePersistedSession(raw);
       if (persisted === null || activeSession !== null) return;
@@ -540,7 +531,7 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       lastRevision = persisted.lastRevision;
       localSnapshot = await loadVaultBaseline(options.secretStore, cryptoPort, activeSession);
       if (persisted.lastSyncedAtIso !== null || persisted.lastRevision > 0) {
-        await markInitialPrefsApplied(persisted.userId);
+        await markInitialPrefsApplied(options.secretStore, persisted.userId);
       }
       setState({
         status: 'signed_in',
@@ -552,22 +543,21 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
     },
 
     getState: () => state,
-    subscribe(listener) {
+    subscribe: (listener) => {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
     },
-    subscribeInitialPreferences(listener) {
+    subscribeInitialPreferences: (listener) => {
       initialPrefsListeners.add(listener);
       return () => {
         initialPrefsListeners.delete(listener);
       };
     },
-    setServerUrl(nextUrl: string): void {
-      const trimmed = nextUrl.trim();
-      const normalized = trimmed.length > 0 ? normalizeSyncServerUrl(trimmed, '') : '';
-      serverUrl = normalized.length > 0 ? normalized : defaultServerUrl;
+    subscribeServerUrl: (listener) => urlCtl.subscribe(listener),
+    setServerUrl: (nextUrl) => {
+      serverUrl = urlCtl.set(nextUrl);
     },
     setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): void {
       const sanitized = sanitizeInitialPreferencesPatch(preferences) as Record<string, unknown>;
@@ -624,7 +614,7 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       localSnapshot = createEmptyVaultSnapshot(0);
       await options.secretStore.delete(VAULT_BASELINE_SECRET_KEY).catch(() => undefined);
       await persistSession(res.value.session, null, 0);
-      await markInitialPrefsApplied(res.value.session.user.id);
+      await markInitialPrefsApplied(options.secretStore, res.value.session.user.id);
       setState({
         status: 'signed_in',
         email: res.value.session.user.email,
@@ -794,6 +784,7 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
       qrSessions.clear();
       listeners.clear();
       initialPrefsListeners.clear();
+      urlCtl.clearListeners();
     },
   };
 }

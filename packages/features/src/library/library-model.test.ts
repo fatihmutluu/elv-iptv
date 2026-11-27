@@ -470,7 +470,13 @@ describe('library-model', () => {
         year: 2021,
         rating: 8.1,
       }),
-    ).toMatchObject({ itemKey: 'movie:s1:1', kind: 'movie', title: 'Dune' });
+    ).toMatchObject({
+      itemKey: 'movie:s1:1',
+      kind: 'movie',
+      title: 'Dune',
+      posterUri: 'https://img/dune.jpg',
+      backdropUri: null,
+    });
   });
 
   it('formats download status keys and progress metadata', () => {

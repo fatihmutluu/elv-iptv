@@ -1,19 +1,16 @@
-import { isEnglishLang, translateSynopsisWithWorkersAi } from './elv-ai-translate.ts';
-import { createImdbUpstreamClient, selectBestImdbMatch } from './elv-imdb-client.ts';
+import { buildStubTitleFromSuggestion, overlayFeedImdbRatings } from './elv-batch-helpers.ts';
+import { executeElvMatchBatch } from './elv-batch-hydrate.ts';
+import { createImdbUpstreamClient } from './elv-imdb-client.ts';
 import type {
-  ElvBatchMatchEntry,
   ElvFeedItem,
   ElvFeedKey,
-  ElvMatchBatchItemInput,
-  ElvMatchIndexRecord,
+  ElvMediaType,
   ElvTitleRecord,
-  ElvTitleSummary,
   ElvUpstreamClient,
-  ImdbSuggestionCandidate,
   WorkersAiBinding,
 } from './elv-types.ts';
 import {
-  buildMatchLookupKey,
+  isEnglishLang,
   validateElvLang,
   validateElvMatchBatchInput,
   validateElvSearchParams,
@@ -23,19 +20,33 @@ import type { RateLimitConfig } from './rate-limit.ts';
 import type { SyncServerStorage } from './storage.ts';
 import { BODY_LIMITS, readBoundedJson } from './validation.ts';
 
-const TITLE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** 180-day cache TTL for catalog movies released >= 2 years ago. */
+export const OLD_TITLE_CACHE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
+/** 14-day cache TTL for recent movies (< 2 years) and all series. */
+export const RECENT_TITLE_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const FEEDS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const MAX_UPSTREAM_LOOKUPS_PER_BATCH = 25;
-const BATCH_UPSTREAM_CONCURRENCY = 5;
-const MAX_SEARCH_RESULTS = 12;
+const FALLBACK_LOCALE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+const MAX_SEARCH_RESULTS = 12;
 const CACHE_CONTROL_TITLE = 'public, max-age=86400';
 const CACHE_CONTROL_TITLE_FALLBACK = 'public, max-age=300';
 const CACHE_CONTROL_FEEDS = 'public, max-age=3600, stale-while-revalidate=86400';
 const CACHE_CONTROL_SEARCH = 'public, max-age=300';
 const CACHE_CONTROL_MATCH_BATCH = 'private, max-age=60';
 
-/** Dependencies injected by `createSyncApp` into Wave E1 `/v1/elv/*` route handlers. */
+/** Computes tiered D1 cache TTL based on media type and release year. */
+export function computeTitleCacheTtlMs(
+  title: Pick<ElvTitleRecord, 'mediaType' | 'year'>,
+  nowMs: number,
+): number {
+  const currentYear = new Date(nowMs).getUTCFullYear();
+  if (title.mediaType === 'movie' && title.year !== null && title.year <= currentYear - 2) {
+    return OLD_TITLE_CACHE_TTL_MS;
+  }
+  return RECENT_TITLE_CACHE_TTL_MS;
+}
+
+/** Dependencies injected by `createSyncApp` into `/v1/elv/*` route handlers. */
 export interface ElvRoutesContext {
   readonly storage: SyncServerStorage;
   readonly nowMs: () => number;
@@ -77,99 +88,9 @@ function isDetailComplete(record: ElvTitleRecord): boolean {
   );
 }
 
-function toTitleSummary(
-  imdbId: string,
-  fallbackItem: ElvMatchBatchItemInput,
-  record: ElvTitleRecord | undefined,
-  localizedTitle: string | null,
-): ElvTitleSummary {
-  if (!record) {
-    return {
-      imdbId,
-      mediaType: fallbackItem.mediaType,
-      originalTitle: fallbackItem.cleanTitle,
-      englishTitle: fallbackItem.cleanTitle,
-      localizedTitle,
-      year: fallbackItem.year,
-      rating: null,
-      votes: null,
-      runtimeMin: null,
-      genres: [],
-      posterUrl: null,
-      backdropUrl: null,
-      franchiseKey: null,
-      franchiseName: null,
-      franchiseOrder: null,
-    };
-  }
-  return {
-    imdbId: record.imdbId,
-    mediaType: record.mediaType,
-    originalTitle: record.originalTitle,
-    englishTitle: record.englishTitle,
-    localizedTitle,
-    year: record.year,
-    rating: record.rating,
-    votes: record.votes,
-    runtimeMin: record.runtimeMin,
-    genres: record.genres,
-    posterUrl: record.posterUrl,
-    backdropUrl: record.backdropUrl,
-    franchiseKey: record.franchiseKey,
-    franchiseName: record.franchiseName,
-    franchiseOrder: record.franchiseOrder,
-  };
-}
-
-function buildStubTitleFromSuggestion(
-  candidate: ImdbSuggestionCandidate,
-  nowMs: number,
-): ElvTitleRecord {
-  return {
-    imdbId: candidate.imdbId,
-    mediaType: candidate.mediaType === 'series' ? 'series' : 'movie',
-    originalTitle: candidate.title,
-    englishTitle: candidate.title,
-    year: candidate.year,
-    rating: null,
-    votes: null,
-    runtimeMin: null,
-    genres: [],
-    posterUrl: candidate.posterUrl,
-    backdropUrl: null,
-    trailerStreamUrl: null,
-    trailerYoutubeId: null,
-    director: null,
-    cast: [],
-    mltImdbIds: [],
-    franchiseKey: null,
-    franchiseName: null,
-    franchiseOrder: null,
-    originalSynopsis: null,
-    updatedAt: nowMs,
-  };
-}
-
-async function runWithConcurrency<T>(
-  tasks: readonly (() => Promise<T>)[],
-  concurrency: number,
-): Promise<void> {
-  let cursor = 0;
-  async function worker(): Promise<void> {
-    while (cursor < tasks.length) {
-      const idx = cursor;
-      cursor += 1;
-      const task = tasks[idx];
-      if (task) await task();
-    }
-  }
-  const workerCount = Math.min(concurrency, tasks.length);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-}
-
-/** Creates handlers for Wave E1 IMDb-first metadata enrichment endpoints (`/v1/elv/*`). */
+/** Creates handlers for Wave Q1 hybrid IMDb+TMDB metadata endpoints (`/v1/elv/*`). */
 export function createElvRouteHandlers(ctx: ElvRoutesContext): ElvRouteHandlers {
-  const { storage, nowMs, ai, checkRateLimit, jsonResponse } = ctx;
+  const { storage, nowMs, checkRateLimit, jsonResponse } = ctx;
   const hasTmdbApiKey = Boolean(ctx.tmdbApiKey && ctx.tmdbApiKey.trim().length > 0);
   const upstream: ElvUpstreamClient =
     ctx.upstream ??
@@ -188,239 +109,14 @@ export function createElvRouteHandlers(ctx: ElvRoutesContext): ElvRouteHandlers 
       const valid = validateElvMatchBatchInput(parsed.value);
       if (!valid.ok) return jsonResponse(400, { error: valid.error });
 
-      const { items, lang } = valid.value;
-      const currentMs = nowMs();
-
-      // Step 1: Compute canonical lookup keys (null when folded title is empty)
-      const lookupKeysByItemKey = new Map<string, string | null>();
-      const keysToLookupInCache: string[] = [];
-      for (const item of items) {
-        const lookupKey = buildMatchLookupKey(item.cleanTitle, item.mediaType, item.year);
-        lookupKeysByItemKey.set(item.key, lookupKey);
-        if (!item.providerImdbId && lookupKey !== null) {
-          keysToLookupInCache.push(lookupKey);
-        }
-      }
-
-      // Step 2: Collective D1 match cache lookup (0 upstream calls for cached titles; skip empty folds)
-      const cachedMatches =
-        keysToLookupInCache.length > 0
-          ? await storage.getElvMatchesByKeys(keysToLookupInCache)
-          : new Map<string, ElvMatchIndexRecord>();
-
-      // Step 3: Resolve immediate hits (providerImdbId or collective D1 cache) and group misses
-      const resolvedByKey = new Map<
-        string,
-        { readonly imdbId: string; readonly confidence: number }
-      >();
-      const unresolvedGroups = new Map<
-        string,
-        { readonly persistLookupKey: string | null; readonly items: ElvMatchBatchItemInput[] }
-      >();
-      const unmatchedKeys: string[] = [];
-
-      for (const item of items) {
-        if (item.providerImdbId) {
-          resolvedByKey.set(item.key, { imdbId: item.providerImdbId, confidence: 1 });
-          continue;
-        }
-        const lookupKey = lookupKeysByItemKey.get(item.key) ?? null;
-        const cached = lookupKey !== null ? cachedMatches.get(lookupKey) : undefined;
-        if (cached) {
-          resolvedByKey.set(item.key, { imdbId: cached.imdbId, confidence: cached.confidence });
-          continue;
-        }
-        if (lookupKey === null && !(hasTmdbApiKey && item.providerTmdbId)) {
-          unmatchedKeys.push(item.key);
-          continue;
-        }
-        const groupKey =
-          lookupKey ?? `__tmdb__:${item.mediaType}:${item.providerTmdbId ?? item.key}`;
-        const existingGroup = unresolvedGroups.get(groupKey);
-        if (existingGroup) {
-          existingGroup.items.push(item);
-        } else {
-          unresolvedGroups.set(groupKey, { persistLookupKey: lookupKey, items: [item] });
-        }
-      }
-
-      // Step 4: Bounded upstream lookups (strictly <= 25 subrequests total, concurrency = 5)
-      const unresolvedEntries = [...unresolvedGroups.values()];
-      const activeEntries = unresolvedEntries.slice(0, MAX_UPSTREAM_LOOKUPS_PER_BATCH);
-      const overflowEntries = unresolvedEntries.slice(MAX_UPSTREAM_LOOKUPS_PER_BATCH);
-
-      const pendingKeys: string[] = [];
-      for (const entry of overflowEntries) {
-        for (const item of entry.items) pendingKeys.push(item.key);
-      }
-
-      const newMatchRecords: ElvMatchIndexRecord[] = [];
-      const newTitleStubsById = new Map<string, ElvTitleRecord>();
-      let remainingSubrequests = MAX_UPSTREAM_LOOKUPS_PER_BATCH;
-
-      const lookupTasks = activeEntries.map(({ persistLookupKey, items: group }) => async () => {
-        const representative = group[0];
-        if (!representative) return;
-
-        let matchedImdbId: string | null = null;
-        let matchedConfidence = 0;
-        let matchedCandidate: ImdbSuggestionCandidate | null = null;
-
-        if (hasTmdbApiKey && representative.providerTmdbId && remainingSubrequests > 0) {
-          remainingSubrequests -= 1;
-          const resolvedImdb = await upstream.resolveTmdbToImdb(
-            representative.providerTmdbId,
-            representative.mediaType,
-          );
-          if (resolvedImdb) {
-            matchedImdbId = resolvedImdb;
-            matchedConfidence = 0.98;
-          }
-        }
-
-        if (!matchedImdbId && persistLookupKey !== null) {
-          if (remainingSubrequests > 0) {
-            remainingSubrequests -= 1;
-            const candidates = await upstream.searchSuggestions(representative.cleanTitle);
-            const best = selectBestImdbMatch(
-              {
-                cleanTitle: representative.cleanTitle,
-                year: representative.year,
-                mediaType: representative.mediaType,
-              },
-              candidates,
-            );
-            if (best) {
-              matchedImdbId = best.candidate.imdbId;
-              matchedConfidence = best.confidence;
-              matchedCandidate = best.candidate;
-            }
-          } else {
-            for (const item of group) pendingKeys.push(item.key);
-            return;
-          }
-        }
-
-        if (!matchedImdbId) {
-          for (const item of group) unmatchedKeys.push(item.key);
-          return;
-        }
-
-        if (persistLookupKey !== null) {
-          newMatchRecords.push({
-            lookupKey: persistLookupKey,
-            mediaType: representative.mediaType,
-            year: representative.year,
-            imdbId: matchedImdbId,
-            confidence: matchedConfidence,
-            updatedAt: currentMs,
-          });
-        }
-        if (matchedCandidate && !newTitleStubsById.has(matchedImdbId)) {
-          newTitleStubsById.set(
-            matchedImdbId,
-            buildStubTitleFromSuggestion(matchedCandidate, currentMs),
-          );
-        }
-        for (const item of group) {
-          resolvedByKey.set(item.key, { imdbId: matchedImdbId, confidence: matchedConfidence });
-        }
+      const result = await executeElvMatchBatch({
+        input: valid.value,
+        storage,
+        upstream,
+        hasTmdbApiKey,
+        currentMs: nowMs(),
       });
-
-      await runWithConcurrency(lookupTasks, BATCH_UPSTREAM_CONCURRENCY);
-
-      // Step 5: Hydrate elv_title_cache and fetch missing IMDb summaries for provider/cache hits within remaining budget
-      const orderedImdbIds: string[] = [];
-      const seenImdbIds = new Set<string>();
-      for (const item of items) {
-        const hit = resolvedByKey.get(item.key);
-        if (hit && !seenImdbIds.has(hit.imdbId)) {
-          seenImdbIds.add(hit.imdbId);
-          orderedImdbIds.push(hit.imdbId);
-        }
-      }
-
-      const titlesById =
-        orderedImdbIds.length > 0
-          ? await storage.getElvTitlesByIds(orderedImdbIds)
-          : new Map<string, ElvTitleRecord>();
-      for (const [imdbId, stub] of newTitleStubsById) {
-        if (!titlesById.has(imdbId)) {
-          titlesById.set(imdbId, stub);
-        }
-      }
-
-      const missingImdbIds = orderedImdbIds.filter((imdbId) => !titlesById.has(imdbId));
-      const deferredMissingImdbIds = new Set<string>();
-      if (missingImdbIds.length > 0) {
-        const hydrationTasks = missingImdbIds.map((imdbId) => async () => {
-          if (remainingSubrequests <= 0) {
-            deferredMissingImdbIds.add(imdbId);
-            return;
-          }
-          remainingSubrequests -= 1;
-          const suggestions = await upstream.searchSuggestions(imdbId);
-          const exact = suggestions.find((c) => c.imdbId === imdbId);
-          let hydrated: ElvTitleRecord | null = exact
-            ? buildStubTitleFromSuggestion(exact, currentMs)
-            : null;
-          if (!hydrated && remainingSubrequests > 0) {
-            remainingSubrequests -= 1;
-            hydrated = await upstream.fetchTitleDetail(imdbId);
-          }
-          if (hydrated) {
-            newTitleStubsById.set(imdbId, hydrated);
-            titlesById.set(imdbId, hydrated);
-          }
-        });
-        await runWithConcurrency(hydrationTasks, BATCH_UPSTREAM_CONCURRENCY);
-      }
-
-      if (deferredMissingImdbIds.size > 0) {
-        for (const item of items) {
-          const hit = resolvedByKey.get(item.key);
-          if (hit && deferredMissingImdbIds.has(hit.imdbId)) {
-            resolvedByKey.delete(item.key);
-            pendingKeys.push(item.key);
-          }
-        }
-      }
-
-      // Step 6: Batch-persist newly discovered matches & title summaries to collective D1 cache
-      if (newMatchRecords.length > 0) {
-        await storage.upsertElvMatches(newMatchRecords);
-      }
-      if (newTitleStubsById.size > 0) {
-        await storage.upsertElvTitlesBatch([...newTitleStubsById.values()]);
-      }
-
-      // Step 7: Batch-hydrate localized titles and assemble final match response
-      const finalImdbIds = [...new Set([...resolvedByKey.values()].map((r) => r.imdbId))];
-      const localizedById =
-        isEnglishLang(lang) || finalImdbIds.length === 0
-          ? new Map()
-          : await storage.getElvLocalizedSynopsesByIds(finalImdbIds, lang);
-
-      const matches: Record<string, ElvBatchMatchEntry> = {};
-      for (const item of items) {
-        const hit = resolvedByKey.get(item.key);
-        if (!hit) continue;
-        const record = titlesById.get(hit.imdbId);
-        const localizedTitle = localizedById.get(hit.imdbId)?.localizedTitle ?? null;
-        matches[item.key] = {
-          key: item.key,
-          imdbId: hit.imdbId,
-          confidence: hit.confidence,
-          mediaType: record?.mediaType ?? item.mediaType,
-          title: toTitleSummary(hit.imdbId, item, record, localizedTitle),
-        };
-      }
-
-      return jsonResponse(
-        200,
-        { matches, unmatchedKeys, pendingKeys },
-        { 'Cache-Control': CACHE_CONTROL_MATCH_BATCH },
-      );
+      return jsonResponse(200, result, { 'Cache-Control': CACHE_CONTROL_MATCH_BATCH });
     },
 
     async handleElvTitleDetail(
@@ -442,14 +138,95 @@ export function createElvRouteHandlers(ctx: ElvRoutesContext): ElvRouteHandlers 
       const currentMs = nowMs();
 
       let title = await storage.getElvTitle(cleanId);
-      const needsFetch =
-        !title || !isDetailComplete(title) || currentMs - title.updatedAt >= TITLE_CACHE_TTL_MS;
+      const isExpired =
+        title !== null && currentMs - title.updatedAt >= computeTitleCacheTtlMs(title, currentMs);
+      const needsFetch = !title || !isDetailComplete(title) || isExpired;
 
-      if (needsFetch) {
-        const fetched = await upstream.fetchTitleDetail(cleanId);
-        if (fetched) {
-          await storage.upsertElvTitle(fetched);
-          title = (await storage.getElvTitle(cleanId)) ?? fetched;
+      let cachedLocalized = !isEnglishLang(lang)
+        ? await storage.getElvLocalizedSynopsis(cleanId, lang)
+        : null;
+
+      const isLocaleCacheFresh =
+        cachedLocalized !== null &&
+        (cachedLocalized.synopsis.trim().length > 0 ||
+          (cachedLocalized.source === 'fallback_en' &&
+            currentMs - cachedLocalized.updatedAt < FALLBACK_LOCALE_CACHE_TTL_MS));
+
+      const needsLocaleFetch =
+        !needsFetch &&
+        !isEnglishLang(lang) &&
+        !isLocaleCacheFresh &&
+        Boolean(upstream.fetchRichTitleByImdbId);
+
+      if (needsFetch || needsLocaleFetch) {
+        let resolvedViaRich = false;
+        if (upstream.fetchRichTitleByImdbId) {
+          const richRes = await upstream.fetchRichTitleByImdbId(
+            cleanId,
+            lang,
+            title?.tmdbId ?? null,
+            title?.mediaType ?? null,
+          );
+          if (richRes.payload) {
+            resolvedViaRich = true;
+            let recordToSave = richRes.payload.record;
+            if (
+              recordToSave.mltImdbIds.length === 0 &&
+              richRes.payload.recommendedTmdbIds.length > 0
+            ) {
+              const cachedRecs = await storage.getElvTitlesByTmdbIds(
+                richRes.payload.recommendedTmdbIds,
+                recordToSave.mediaType,
+              );
+              const resolvedMlt = richRes.payload.recommendedTmdbIds
+                .map((id) => cachedRecs.get(id)?.imdbId)
+                .filter((id): id is string => Boolean(id));
+              if (resolvedMlt.length > 0) {
+                recordToSave = { ...recordToSave, mltImdbIds: resolvedMlt };
+              }
+            }
+            if (needsFetch) {
+              await storage.upsertElvTitle(recordToSave);
+              title = (await storage.getElvTitle(cleanId)) ?? recordToSave;
+            }
+            if (!isEnglishLang(lang)) {
+              const locRecord = {
+                imdbId: cleanId,
+                lang,
+                localizedTitle: richRes.payload.localizedTitle,
+                synopsis: richRes.payload.localizedSynopsis ?? '',
+                source: richRes.payload.localizedSynopsis ? 'tmdb' : 'fallback_en',
+                updatedAt: currentMs,
+              };
+              await storage.upsertElvLocalizedSynopsis(locRecord);
+              cachedLocalized = locRecord;
+            }
+          } else if (needsLocaleFetch && !isEnglishLang(lang)) {
+            const locRecord = {
+              imdbId: cleanId,
+              lang,
+              localizedTitle: cachedLocalized?.localizedTitle ?? null,
+              synopsis: '',
+              source: 'fallback_en',
+              updatedAt: currentMs,
+            };
+            await storage.upsertElvLocalizedSynopsis(locRecord);
+            cachedLocalized = locRecord;
+          }
+        }
+        if (!resolvedViaRich && needsFetch) {
+          let fetched: ElvTitleRecord | null = null;
+          if (upstream.fetchRichTitleByImdbId) {
+            const suggestions = await upstream.searchSuggestions(cleanId);
+            const exact = suggestions.find((c) => c.imdbId === cleanId);
+            fetched = exact ? buildStubTitleFromSuggestion(exact, currentMs) : null;
+          } else {
+            fetched = await upstream.fetchTitleDetail(cleanId, lang);
+          }
+          if (fetched) {
+            await storage.upsertElvTitle(fetched);
+            title = (await storage.getElvTitle(cleanId)) ?? fetched;
+          }
         }
       }
 
@@ -457,35 +234,21 @@ export function createElvRouteHandlers(ctx: ElvRoutesContext): ElvRouteHandlers 
         return jsonResponse(404, { error: 'title_not_found' });
       }
 
+      const authoritativeRating = (await storage.getImdbRatingsByIds([cleanId])).get(cleanId);
+
+      // Option 2A: Native TMDB localized title/synopsis only (0 Workers AI calls); fallback cleanly to EN
       let synopsis: string | null = title.originalSynopsis;
       let localizedTitle: string | null = null;
-      let synopsisSource: string = 'original';
+      let synopsisSource = 'original';
 
       if (!isEnglishLang(lang)) {
-        const cachedLocalized = await storage.getElvLocalizedSynopsis(cleanId, lang);
-        if (cachedLocalized) {
+        localizedTitle = cachedLocalized?.localizedTitle ?? null;
+        if (cachedLocalized && cachedLocalized.synopsis.trim().length > 0) {
           synopsis = cachedLocalized.synopsis;
-          localizedTitle = cachedLocalized.localizedTitle;
           synopsisSource = cachedLocalized.source;
-        } else if (title.originalSynopsis && title.originalSynopsis.trim().length > 0) {
-          const translated = await translateSynopsisWithWorkersAi({
-            ai,
-            title: title.englishTitle ?? title.originalTitle,
-            originalSynopsis: title.originalSynopsis,
-            targetLang: lang,
-          });
-          synopsis = translated.synopsis;
-          synopsisSource = translated.source;
-          if (translated.translated) {
-            await storage.upsertElvLocalizedSynopsis({
-              imdbId: cleanId,
-              lang,
-              localizedTitle: null,
-              synopsis: translated.synopsis,
-              source: 'workers_ai',
-              updatedAt: currentMs,
-            });
-          }
+        } else {
+          synopsis = title.originalSynopsis;
+          synopsisSource = 'fallback_en';
         }
       }
 
@@ -498,13 +261,14 @@ export function createElvRouteHandlers(ctx: ElvRoutesContext): ElvRouteHandlers 
         200,
         {
           imdbId: title.imdbId,
+          tmdbId: title.tmdbId,
           mediaType: title.mediaType,
           originalTitle: title.originalTitle,
           englishTitle: title.englishTitle,
           localizedTitle,
           year: title.year,
-          rating: title.rating,
-          votes: title.votes,
+          rating: authoritativeRating ? authoritativeRating.rating : title.rating,
+          votes: authoritativeRating ? authoritativeRating.votes : title.votes,
           runtimeMin: title.runtimeMin,
           genres: title.genres,
           posterUrl: title.posterUrl,
@@ -557,20 +321,30 @@ export function createElvRouteHandlers(ctx: ElvRoutesContext): ElvRouteHandlers 
           cachedTvMeter.updatedAt,
           cachedUpcomingTv.updatedAt,
         );
+        const overlaid = await overlayFeedImdbRatings(storage, {
+          topPicks: cachedTopPicks.items,
+          movieMeter: cachedMovieMeter.items,
+          tvMeter: cachedTvMeter.items,
+          currentUpcomingTv: cachedUpcomingTv.items,
+        });
         return jsonResponse(
           200,
-          {
-            topPicks: cachedTopPicks.items,
-            movieMeter: cachedMovieMeter.items,
-            tvMeter: cachedTvMeter.items,
-            currentUpcomingTv: cachedUpcomingTv.items,
-            updatedAt,
-          },
+          { ...overlaid, updatedAt },
           { 'Cache-Control': CACHE_CONTROL_FEEDS },
         );
       }
 
-      const fetched = await upstream.fetchFeeds();
+      const resolveCachedTmdb = async (
+        tmdbIds: readonly string[],
+        mediaType: ElvMediaType,
+      ): Promise<ReadonlyMap<string, string>> => {
+        const map = await storage.getElvTitlesByTmdbIds(tmdbIds, mediaType);
+        const out = new Map<string, string>();
+        for (const [tmdbId, record] of map) out.set(tmdbId, record.imdbId);
+        return out;
+      };
+
+      const fetched = await upstream.fetchFeeds(resolveCachedTmdb);
 
       async function resolveFeed(
         key: ElvFeedKey,
@@ -591,9 +365,15 @@ export function createElvRouteHandlers(ctx: ElvRoutesContext): ElvRouteHandlers 
         resolveFeed('current_upcoming_tv', fetched.currentUpcomingTv, cachedUpcomingTv?.items),
       ]);
 
+      const overlaid = await overlayFeedImdbRatings(storage, {
+        topPicks,
+        movieMeter,
+        tvMeter,
+        currentUpcomingTv,
+      });
       return jsonResponse(
         200,
-        { topPicks, movieMeter, tvMeter, currentUpcomingTv, updatedAt: currentMs },
+        { ...overlaid, updatedAt: currentMs },
         { 'Cache-Control': CACHE_CONTROL_FEEDS },
       );
     },

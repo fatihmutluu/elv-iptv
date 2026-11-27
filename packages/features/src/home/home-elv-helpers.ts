@@ -75,7 +75,10 @@ export function buildElvShowcaseEntries(
       kind: presented.kind,
       title: presented.name,
       subtitle: prog?.subtitle ?? null,
-      backdropUri: rec.enrichment.title?.backdropUrl ?? presented.logo,
+      backdropUri:
+        rec.enrichment.title?.backdropUrl ??
+        (presented as { backdrop?: string | null }).backdrop ??
+        null,
       posterUri: presented.logo,
       year: presented.year,
       rating: presented.rating,

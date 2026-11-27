@@ -202,8 +202,13 @@ function mapWireTitle(
   const synopsis = asString(rec.synopsis);
   if (synopsis !== null) synopses[langKey] = synopsis;
 
+  const tmdbId = normalizeCatalogTmdbId(
+    typeof rec.tmdbId === 'string' || typeof rec.tmdbId === 'number' ? rec.tmdbId : null,
+  );
+
   return {
     imdbId,
+    tmdbId,
     mediaType: asMediaType(rec.mediaType, fallbackMediaType),
     originalTitle,
     englishTitle: asString(rec.englishTitle),

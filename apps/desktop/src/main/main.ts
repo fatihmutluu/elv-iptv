@@ -102,6 +102,7 @@ import { createDesktopCatalogSnapshotBridge } from './sync/desktop-catalog-snaps
 import {
   attachMainErrorTelemetry,
   attachWindowSyncLifecycle,
+  bindSyncServerUrlToCatalogCoordinator,
   collectDesktopDeviceProfile,
 } from './sync/main-lifecycle.ts';
 import { registerSyncIpc } from './sync/sync-ipc-handlers.ts';
@@ -517,6 +518,14 @@ function createSharedSecretStore(): SecretStore {
   });
 }
 
+function broadcastCatalogChanged(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send(CATALOG_CHANNELS.changed);
+    }
+  }
+}
+
 function startCatalog(
   secrets: SecretStore,
   elvServerUrl?: string,
@@ -544,13 +553,7 @@ function startCatalog(
         seed,
         coordinator,
         secrets,
-        onChanged: () => {
-          for (const win of BrowserWindow.getAllWindows()) {
-            if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
-              win.webContents.send(CATALOG_CHANNELS.changed);
-            }
-          }
-        },
+        onChanged: broadcastCatalogChanged,
       }).catch(() => undefined);
     }
   }
@@ -685,13 +688,7 @@ if (hasLock) {
     const catalogSnapshotBridge = createDesktopCatalogSnapshotBridge({
       getCoordinator: () => catalogCoordinator,
       secretStore: sharedSecrets,
-      onApplied: () => {
-        for (const win of BrowserWindow.getAllWindows()) {
-          if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
-            win.webContents.send(CATALOG_CHANNELS.changed);
-          }
-        }
-      },
+      onApplied: broadcastCatalogChanged,
     });
     const initialSyncServerUrl =
       typeof __ELV_SYNC_SERVER_URL__ === 'string' && __ELV_SYNC_SERVER_URL__.length > 0
@@ -721,9 +718,12 @@ if (hasLock) {
       getBroadcastTargets: () => BrowserWindow.getAllWindows().map((w) => w.webContents),
       log: logger.log,
     });
-    if (gateQuery === null) {
-      void syncService.hydrate().then(() => syncService.notifyStartup());
-    }
+    catalogCoordinator = startCatalog(sharedSecrets, initialSyncServerUrl);
+    bindSyncServerUrlToCatalogCoordinator(
+      syncService,
+      () => catalogCoordinator,
+      gateQuery === null,
+    );
     desktopDownloadManager = createDesktopDownloadManager({
       downloadsDir: getManagedDownloadsDir(app.getPath('userData')),
       log: logger.log,
@@ -738,7 +738,6 @@ if (hasLock) {
     if (gateQuery === null) {
       void desktopDownloadManager.hydrate();
     }
-    catalogCoordinator = startCatalog(sharedSecrets, initialSyncServerUrl);
     await startPlayer();
     createWindow();
     appInitialized = true;

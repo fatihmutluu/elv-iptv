@@ -431,7 +431,7 @@ export function buildLibraryDetailTarget(
     kind: item.kind,
     title: item.title,
     posterUri: item.imageUri,
-    backdropUri: item.imageUri,
+    backdropUri: (item as { backdrop?: string | null }).backdrop ?? null,
     year: item.year ?? null,
     rating: item.rating ?? null,
   };

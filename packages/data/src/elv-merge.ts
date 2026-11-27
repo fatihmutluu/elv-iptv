@@ -1,18 +1,19 @@
-import type { SqlDriver } from '@elv/domain';
+import type { SqlDriver, SqlValue } from '@elv/domain';
 import type {
   ElvEnrichmentStore,
   ElvItemEnrichment,
   ElvQualityMemoryRecord,
 } from './elv-enrichment-repo';
+import { escapeLikePattern } from './elv-enrichment-search';
 import { formatVerifiedResolution, scoreMergedVariant } from './elv-quality-memory';
 import { isAdultKeywordMatch, type ParentalQueryOptions } from './parental-policy';
 import {
+  type ActiveParentalFilter,
   findRestrictedItemKeys,
   isItemRestricted,
   loadActiveParentalFilter,
 } from './parental-repo';
 import { type ItemRow, resolveQueryProfileId, sourceOfKey } from './queries-shared';
-import { queryItemVersions } from './queries-variants';
 import { parseVodVersion } from './vod-versions';
 
 /** Minimum match confidence required before merging copies under the same IMDb ID (`#511`). */
@@ -57,6 +58,146 @@ interface RawCatalogVariantRow {
   readonly name: string;
   readonly year: number | null;
   readonly version_label: string | null;
+  readonly version_group_key?: string | null;
+}
+
+const MAX_OFFLINE_CANDIDATES = 250;
+
+function selectFoldTokens(groupKey: string): string[] {
+  const base = groupKey.split('::')[0]?.trim() ?? '';
+  if (base === '') return [];
+  const words = base.split(/\s+/g).filter(Boolean);
+  const longWords = words.filter((w) => w.length >= 3).sort((a, b) => b.length - a.length);
+  if (longWords.length > 0) return longWords.slice(0, 2);
+  return words.slice(0, 2);
+}
+
+async function filterVisibleVariantRows<T extends { readonly key: string; readonly name: string }>(
+  catalogDb: SqlDriver,
+  filter: ActiveParentalFilter | null,
+  rows: readonly T[],
+): Promise<T[]> {
+  if (filter === null || rows.length === 0) return [...rows];
+  const restricted = await findRestrictedItemKeys(
+    catalogDb,
+    filter,
+    rows.map((r) => ({ itemKey: r.key })),
+  );
+  return rows.filter(
+    (r) => !restricted.has(r.key) && !(filter.blockAdultKeywords && isAdultKeywordMatch(r.name)),
+  );
+}
+
+async function buildSortedMergedVariants(
+  rows: readonly RawCatalogVariantRow[],
+  enrichmentStore: ElvEnrichmentStore | undefined,
+): Promise<MergedVodVariant[]> {
+  if (rows.length === 0) return [];
+  const qualityMap =
+    enrichmentStore === undefined
+      ? new Map<string, ElvQualityMemoryRecord>()
+      : await enrichmentStore.getQualityMemoryForKeys(rows.map((r) => r.key));
+  return sortMergedVariants(
+    rows.map((r) =>
+      toMergedVariant(
+        {
+          itemKey: r.key,
+          sourceId: r.source_id,
+          sourceName: r.source_name,
+          rawTitle: r.name,
+          year: r.year,
+          storedVersionLabel: r.version_label,
+        },
+        qualityMap.get(r.key),
+      ),
+    ),
+  );
+}
+
+async function queryOfflineCrossSourceRows(
+  catalogDb: SqlDriver,
+  seedSourceId: string,
+  itemKey: string,
+): Promise<RawCatalogVariantRow[]> {
+  const movieSeed = (
+    await catalogDb.all<{
+      name: string;
+      year: number | null;
+      version_group_key: string | null;
+    }>(
+      'SELECT name, year, version_group_key FROM movies WHERE source_id = ? AND key = ? AND is_hidden = 0 LIMIT 1',
+      [seedSourceId, itemKey],
+    )
+  )[0];
+
+  if (movieSeed !== undefined) {
+    const parsedSeed = parseVodVersion(movieSeed.name, movieSeed.year);
+    const seedGroupKey = parsedSeed.groupKey;
+    const storedGroup = movieSeed.version_group_key?.trim() ?? '';
+    const tokens = selectFoldTokens(seedGroupKey);
+
+    const clauses: string[] = ['t.key = ?'];
+    const params: SqlValue[] = [itemKey];
+    if (storedGroup !== '') {
+      clauses.push('(t.source_id = ? AND t.version_group_key = ?)');
+      params.push(seedSourceId, storedGroup);
+    }
+    if (seedGroupKey !== '' && tokens.length > 0) {
+      const tokenClause = tokens.map(() => "t.name_fold LIKE ? ESCAPE '\\'").join(' AND ');
+      clauses.push(`(${tokenClause})`);
+      for (const tok of tokens) params.push(`%${escapeLikePattern(tok)}%`);
+    }
+
+    const candidates = await catalogDb.all<RawCatalogVariantRow>(
+      `SELECT t.key, t.source_id, s.name AS source_name, t.name, t.year, t.version_label, t.version_group_key
+         FROM movies t
+         JOIN sources s ON s.id = t.source_id AND s.deleting = 0
+        WHERE t.is_hidden = 0 AND (${clauses.join(' OR ')})
+        LIMIT ?`,
+      [...params, MAX_OFFLINE_CANDIDATES],
+    );
+
+    return candidates.filter(
+      (r) =>
+        r.key === itemKey ||
+        (storedGroup !== '' &&
+          r.source_id === seedSourceId &&
+          r.version_group_key === storedGroup) ||
+        (seedGroupKey !== '' && parseVodVersion(r.name, r.year).groupKey === seedGroupKey),
+    );
+  }
+
+  const seriesSeed = (
+    await catalogDb.all<{ name: string; year: number | null }>(
+      'SELECT name, year FROM series WHERE source_id = ? AND key = ? AND is_hidden = 0 LIMIT 1',
+      [seedSourceId, itemKey],
+    )
+  )[0];
+  if (seriesSeed === undefined) return [];
+
+  const seedGroupKey = parseVodVersion(seriesSeed.name, seriesSeed.year).groupKey;
+  const tokens = selectFoldTokens(seedGroupKey);
+  const clauses: string[] = ['t.key = ?'];
+  const params: SqlValue[] = [itemKey];
+  if (seedGroupKey !== '' && tokens.length > 0) {
+    const tokenClause = tokens.map(() => "t.name_fold LIKE ? ESCAPE '\\'").join(' AND ');
+    clauses.push(`(${tokenClause})`);
+    for (const tok of tokens) params.push(`%${escapeLikePattern(tok)}%`);
+  }
+
+  const candidates = await catalogDb.all<RawCatalogVariantRow>(
+    `SELECT t.key, t.source_id, s.name AS source_name, t.name, t.year, NULL AS version_label
+       FROM series t
+       JOIN sources s ON s.id = t.source_id AND s.deleting = 0
+      WHERE t.is_hidden = 0 AND (${clauses.join(' OR ')})
+      LIMIT ?`,
+    [...params, MAX_OFFLINE_CANDIDATES],
+  );
+  return candidates.filter(
+    (r) =>
+      r.key === itemKey ||
+      (seedGroupKey !== '' && parseVodVersion(r.name, r.year).groupKey === seedGroupKey),
+  );
 }
 
 function placeholders(count: number): string {
@@ -165,108 +306,41 @@ export async function queryMergedVodVersions(
         keys,
       );
 
-      let visibleRows = rows;
-      if (filter !== null && visibleRows.length > 0) {
-        const restricted = await findRestrictedItemKeys(
-          catalogDb,
-          filter,
-          visibleRows.map((r) => ({ itemKey: r.key })),
-        );
-        visibleRows = visibleRows.filter(
-          (r) =>
-            !restricted.has(r.key) && !(filter.blockAdultKeywords && isAdultKeywordMatch(r.name)),
-        );
+      const visibleImdb = await filterVisibleVariantRows(catalogDb, filter, rows);
+      const offlineRows = await queryOfflineCrossSourceRows(catalogDb, seedSourceId, itemKey);
+      const visibleOffline = await filterVisibleVariantRows(catalogDb, filter, offlineRows);
+      const seenKeys = new Set(visibleImdb.map((r) => r.key));
+      const extraKeys = visibleOffline.filter((r) => !seenKeys.has(r.key)).map((r) => r.key);
+      if (extraKeys.length > 0) {
+        const extraMatches = await enrichmentStore.getEnrichmentForKeys(extraKeys);
+        for (const r of visibleOffline) {
+          if (seenKeys.has(r.key)) continue;
+          const m = extraMatches.get(r.key);
+          if (m !== undefined && isMergeEligible(m) && m.imdbId !== seedMatch.imdbId) {
+            continue;
+          }
+          seenKeys.add(r.key);
+          visibleImdb.push(r);
+        }
       }
-
-      if (visibleRows.length > 0) {
-        const qualityMap = await enrichmentStore.getQualityMemoryForKeys(
-          visibleRows.map((r) => r.key),
-        );
-        return sortMergedVariants(
-          visibleRows.map((r) =>
-            toMergedVariant(
-              {
-                itemKey: r.key,
-                sourceId: r.source_id,
-                sourceName: r.source_name,
-                rawTitle: r.name,
-                year: r.year,
-                storedVersionLabel: r.version_label,
-              },
-              qualityMap.get(r.key),
-            ),
-          ),
-        );
+      if (visibleImdb.length > 0) {
+        return buildSortedMergedVariants(visibleImdb, enrichmentStore);
       }
     }
   }
 
-  // Fallback: single-source version grouping via queryItemVersions (movies) or single series row
-  const singleSourceVersions = await queryItemVersions(catalogDb, itemKey, opts);
-  const srcRow = (
-    await catalogDb.all<{ name: string }>(
-      'SELECT name FROM sources WHERE id = ? AND deleting = 0 LIMIT 1',
-      [seedSourceId],
-    )
-  )[0];
-  const sourceName = srcRow?.name ?? seedSourceId;
-
-  if (singleSourceVersions.length > 0) {
-    const qualityMap =
-      enrichmentStore === undefined
-        ? new Map<string, ElvQualityMemoryRecord>()
-        : await enrichmentStore.getQualityMemoryForKeys(singleSourceVersions.map((v) => v.key));
-    return sortMergedVariants(
-      singleSourceVersions.map((v) =>
-        toMergedVariant(
-          {
-            itemKey: v.key,
-            sourceId: seedSourceId,
-            sourceName,
-            rawTitle: v.title,
-            year: v.year,
-            storedVersionLabel: v.versionLabel,
-          },
-          qualityMap.get(v.key),
-        ),
-      ),
-    );
-  }
-
-  // Fallback for unmatched series item
-  const seriesRows = await catalogDb.all<{ key: string; name: string; year: number | null }>(
-    `SELECT sr.key, sr.name, sr.year
-       FROM series sr
-       JOIN sources s ON s.id = sr.source_id AND s.deleting = 0
-      WHERE sr.source_id = ? AND sr.key = ? AND sr.is_hidden = 0 LIMIT 1`,
-    [seedSourceId, itemKey],
-  );
-  const sr = seriesRows[0];
-  if (sr === undefined) return [];
-  const quality =
-    enrichmentStore === undefined
-      ? undefined
-      : ((await enrichmentStore.getQualityMemory(sr.key)) ?? undefined);
-  return [
-    toMergedVariant(
-      {
-        itemKey: sr.key,
-        sourceId: seedSourceId,
-        sourceName,
-        rawTitle: sr.name,
-        year: sr.year,
-        storedVersionLabel: null,
-      },
-      quality,
-    ),
-  ];
+  // Offline fallback: merge matching clean-title copies across ALL active sources for movies & series
+  const offlineRows = await queryOfflineCrossSourceRows(catalogDb, seedSourceId, itemKey);
+  const visibleOffline = await filterVisibleVariantRows(catalogDb, filter, offlineRows);
+  return buildSortedMergedVariants(visibleOffline, enrichmentStore);
 }
 
 /**
  * Collapses duplicate catalog cards sharing the same verified `imdb_id` (`confidence >= 0.78` or
  * `manual_lock = 1`) on a page into one canonical representative card (selecting the highest-ranked
  * healthy variant, exposing `mergedCount`, and substituting the IMDb `posterUrl` directly so zero
- * IPTV poster is fetched). Unmatched items pass through unchanged (`#511`).
+ * IPTV poster is fetched). Unmatched VOD/series cards fall back cleanly to grouping by
+ * `parseVodVersion(name, year).groupKey` when non-empty so duplicates merge offline too (`#511`).
  */
 export function deduplicateCatalogPageByImdb<T extends ItemRow>(
   items: readonly T[],
@@ -283,10 +357,26 @@ export function deduplicateCatalogPageByImdb<T extends ItemRow>(
 
   const buckets: GroupBucket[] = [];
   const byImdbGroup = new Map<string, GroupBucket>();
+  const byOfflineGroup = new Map<string, GroupBucket>();
 
   for (const item of items) {
     const enrich = enrichmentByKey.get(item.key);
     if (enrich === undefined || !isMergeEligible(enrich)) {
+      if (item.kind === 'movie' || item.kind === 'series') {
+        const parsed = parseVodVersion(item.name, item.year);
+        if (parsed.groupKey.length > 0) {
+          const fallbackKey = `${item.kind}:${parsed.groupKey}`;
+          const existingOffline = byOfflineGroup.get(fallbackKey);
+          if (existingOffline !== undefined) {
+            existingOffline.members.push(item);
+          } else {
+            const created: GroupBucket = { imdbId: null, posterUrl: null, members: [item] };
+            byOfflineGroup.set(fallbackKey, created);
+            buckets.push(created);
+          }
+          continue;
+        }
+      }
       buckets.push({ imdbId: null, posterUrl: null, members: [item] });
       continue;
     }
@@ -309,7 +399,7 @@ export function deduplicateCatalogPageByImdb<T extends ItemRow>(
 
   const out: DeduplicatedCatalogItem<T>[] = [];
   for (const bucket of buckets) {
-    if (bucket.imdbId === null) {
+    if (bucket.members.length === 1 && bucket.imdbId === null) {
       const only = bucket.members[0];
       if (only !== undefined) out.push(only);
       continue;
@@ -339,7 +429,7 @@ export function deduplicateCatalogPageByImdb<T extends ItemRow>(
     out.push({
       ...best,
       ...(replacePoster && bucket.posterUrl !== null ? { logo: bucket.posterUrl } : {}),
-      imdbId: bucket.imdbId,
+      ...(bucket.imdbId !== null ? { imdbId: bucket.imdbId } : {}),
       ...(bucket.members.length > 1
         ? {
             mergedCount: bucket.members.length,

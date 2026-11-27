@@ -154,7 +154,7 @@ export async function hydrateBestPlayableMatches(deps: {
     for (let i = 0; i < keys.length; i += IN_CHUNK_SIZE) {
       const chunk = keys.slice(i, i + IN_CHUNK_SIZE);
       const rows = await catalogDb.all<RawItemRow>(
-        `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${logoCol},
+        `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${logoCol}, t.backdrop AS backdrop,
                 t.rating, t.year, NULL AS num, NULL AS catchup_days
            FROM ${table} t
            JOIN sources s ON s.id = t.source_id AND s.deleting = 0

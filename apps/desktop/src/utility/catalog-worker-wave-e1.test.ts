@@ -186,7 +186,7 @@ function createElvWorkerHarness(opts?: {
   }
   activeShutdowns.push(shutdown);
 
-  return { dir, dbPath, elvDbPath, openedDbs, init, connectClient, shutdown };
+  return { dir, dbPath, elvDbPath, openedDbs, init, sendToWorker, connectClient, shutdown };
 }
 
 describe('catalog worker Wave E1 isolated elv-enrichment.db & ELV RPC ops (#511)', () => {
@@ -500,5 +500,130 @@ describe('catalog worker Wave E1 isolated elv-enrichment.db & ELV RPC ops (#511)
       if (prevNodeEnv === undefined) delete process.env['NODE_ENV'];
       else process.env['NODE_ENV'] = prevNodeEnv;
     }
+  });
+
+  it('activates and clears ELV client dynamically via set-elv-server-url without restart and preserves ItemRow.backdrop + tmdbId over IPC', async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.includes('/v1/elv/match-batch')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            matches: [
+              {
+                key: 'm:s1:movie:1',
+                imdbId: 'tt1375666',
+                confidence: 0.97,
+                mediaType: 'movie',
+                title: {
+                  imdbId: 'tt1375666',
+                  tmdbId: '27205',
+                  mediaType: 'movie',
+                  originalTitle: 'Inception',
+                  year: 2010,
+                },
+              },
+            ],
+            unmatchedKeys: [],
+            pendingKeys: [],
+          }),
+        };
+      }
+      if (input.includes('/v1/elv/title/tt1375666')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            imdbId: 'tt1375666',
+            tmdbId: '27205',
+            mediaType: 'movie',
+            originalTitle: 'Inception',
+            director: 'Christopher Nolan',
+            synopsis: 'Dream heist.',
+            synopsisLang: 'en',
+          }),
+        };
+      }
+      if (input.includes('/v1/elv/feeds')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            topPicks: [{ imdbId: 'tt1375666', title: 'Inception', mediaType: 'movie', rank: 1 }],
+            movieMeter: [],
+            tvMeter: [],
+            currentUpcomingTv: [],
+            updatedAt: 1_700_000_000_000,
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+
+    const h = createElvWorkerHarness({ fetchImpl: fetchMock as unknown as FetchLike });
+    await h.init(); // Boot with NO elvServerUrl configured!
+
+    const catalogRaw = h.openedDbs[0]?.db;
+    catalogRaw?.exec(`
+      INSERT INTO sources (id, kind, name, created_at, settings_json, deleting) VALUES ('s1', 'm3u', 'Main', 1, '{}', 0);
+      INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, run_id)
+        VALUES ('s1', 'movie', 'cat1', 'Movies', 'movies', 0, 1);
+      INSERT INTO movies (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, logo, backdrop, year, is_hidden, run_id)
+        VALUES ('s1', 'm:s1:movie:1', '1', 'Inception (2010)', 'inception 2010', 'inception', 'inception|2010', 'https://cdn.example/poster.jpg', 'https://cdn.example/backdrop.jpg', 2010, 0, 1);
+      INSERT INTO placements (source_id, kind, item_key, category_id, position, run_id)
+        VALUES ('s1', 'movie', 'm:s1:movie:1', 'cat1', 0, 1);
+    `);
+
+    const client = h.connectClient();
+
+    // Backdrop passes cleanly across IPC on browse & itemDetail even while offline
+    const pageItems = await client.call<Array<{ key: string; backdrop?: string | null }>>({
+      method: 'items',
+      categoryId: 's1|movie|cat1',
+      offset: 0,
+      limit: 10,
+    });
+    expect(pageItems[0]?.backdrop).toBe('https://cdn.example/backdrop.jpg');
+
+    const itemDetail = await client.call<{ key: string; backdrop?: string | null } | null>({
+      method: 'itemDetail',
+      itemKey: 'm:s1:movie:1',
+    });
+    expect(itemDetail?.backdrop).toBe('https://cdn.example/backdrop.jpg');
+
+    // Before set-elv-server-url, remote feeds do nothing (0 network calls)
+    expect(await client.call<boolean>({ method: 'refreshElvFeeds' })).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Dynamically push set-elv-server-url -> ELV Mode activates immediately on live worker!
+    h.sendToWorker({ type: 'set-elv-server-url', elvServerUrl: 'https://elv-meta.example.test' });
+
+    const prio = await client.call<ElvMatchingSummary>({
+      method: 'enrichElvPriorityKeys',
+      itemKeys: ['m:s1:movie:1'],
+      opts: { lang: 'en' },
+    });
+    expect(prio.remoteMatched).toBe(1);
+
+    const detail = await client.call<ElvTitleRecord | null>({
+      method: 'getElvTitleDetail',
+      imdbId: 'tt1375666',
+      opts: { lang: 'en' },
+    });
+    expect(detail?.tmdbId).toBe('27205');
+    expect(detail?.director).toBe('Christopher Nolan');
+    expect(await client.call<boolean>({ method: 'refreshElvFeeds', opts: { force: true } })).toBe(
+      true,
+    );
+
+    // Clearing server URL dynamically disables remote ELV network calls again
+    const callsBeforeClear = fetchMock.mock.calls.length;
+    h.sendToWorker({ type: 'set-elv-server-url', elvServerUrl: '' });
+    expect(await client.call<boolean>({ method: 'refreshElvFeeds', opts: { force: true } })).toBe(
+      false,
+    );
+    expect(fetchMock.mock.calls.length).toBe(callsBeforeClear);
+
+    await h.shutdown();
   });
 });

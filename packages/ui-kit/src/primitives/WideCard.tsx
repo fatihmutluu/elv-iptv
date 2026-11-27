@@ -1,5 +1,7 @@
 import { memo, type ReactElement, useCallback, useState } from 'react';
 import {
+  Image,
+  type ImageStyle,
   Platform,
   Pressable,
   type StyleProp,
@@ -20,15 +22,24 @@ import {
 } from '../theme';
 import { useViewport } from '../viewport';
 import { ArtworkImage, type LogoBackdropMode } from './ArtworkImage';
-import type { DeadHostRegistry } from './dead-host-registry';
+import { type DeadHostRegistry, defaultDeadHostRegistry } from './dead-host-registry';
 import { MicroPill } from './MicroPill';
 import { Scrim } from './Scrim';
+
+const WEB_PORTRAIT_AMBIENT_FILTER = {
+  filter: 'blur(20px) saturate(1.15) brightness(0.42)',
+} as unknown as ImageStyle;
 
 /** Props of {@link WideCard}. */
 export interface WideCardProps {
   title: string;
   subtitle?: string;
   imageUri?: string | null;
+  /**
+   * True when `imageUri` is a vertical `2:3` poster fallback inside a `16:9` card: renders a
+   * dark blurred ambient backing with crisp `contain` poster framing so vertical artwork never stretches.
+   */
+  portraitFallback?: boolean;
   live?: boolean;
   liveLabel?: string;
   progress?: number;
@@ -106,6 +117,7 @@ function WideCardInner({
   title,
   subtitle,
   imageUri,
+  portraitFallback = false,
   live = false,
   liveLabel,
   progress,
@@ -130,6 +142,10 @@ function WideCardInner({
   const resolvedLiveLabel = liveLabel ?? i18n.t('ui.liveBadge');
   const [nativeFocused, setNativeFocused] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const trimmedImageUri = imageUri?.trim() ?? '';
+  const activeDeadHosts = deadHosts ?? defaultDeadHostRegistry;
+  const showPortraitAmbient =
+    portraitFallback && trimmedImageUri.length > 0 && !activeDeadHosts.isDead(trimmedImageUri);
 
   const handleFocus = useCallback(() => {
     setNativeFocused(true);
@@ -238,10 +254,36 @@ function WideCardInner({
               ]}
             >
               <View style={[styles.artworkClip, { borderRadius: theme.radius.card }]}>
+                {showPortraitAmbient ? (
+                  <View
+                    testID={testID ? `${testID}-ambient` : undefined}
+                    pointerEvents="none"
+                    accessible={false}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no"
+                    style={StyleSheet.absoluteFill}
+                  >
+                    <Image
+                      source={{ uri: trimmedImageUri }}
+                      resizeMode="cover"
+                      fadeDuration={0}
+                      accessible={false}
+                      {...(Platform.OS !== 'web' ? { blurRadius: 20 } : {})}
+                      style={[
+                        StyleSheet.absoluteFill,
+                        styles.portraitAmbientScale,
+                        Platform.OS === 'web'
+                          ? WEB_PORTRAIT_AMBIENT_FILTER
+                          : styles.portraitAmbientDim,
+                      ]}
+                    />
+                  </View>
+                ) : null}
                 <ArtworkImage
                   uri={imageUri}
                   label={title}
                   aspectRatio={16 / 9}
+                  resizeMode={portraitFallback ? 'contain' : 'cover'}
                   maxDecodePx={maxDecodePx}
                   borderRadius={0}
                   logoBackdrop={logoBackdrop}
@@ -401,6 +443,8 @@ WideCard.displayName = 'WideCard';
 const styles = StyleSheet.create({
   artworkShadow: { position: 'relative' },
   artworkClip: { overflow: 'hidden', position: 'relative' },
+  portraitAmbientScale: { transform: [{ scale: 1.15 }] },
+  portraitAmbientDim: { opacity: 0.45 },
   outerRing: { position: 'absolute' },
   bottomScrim: { top: '35%' },
   pillCluster: { position: 'absolute', flexDirection: 'row', alignItems: 'center' },

@@ -741,6 +741,9 @@ msgstr "Proprietary · LGPL media engines"
 msgid "settings.about.statement"
 msgstr "ELV IPTV is a 100% free, ad-free, independent IPTV player built with care for every screen. It ships no media content — bring your own Xtream, M3U, or Stalker source. Provider credentials stay encrypted on your device and never enter the catalog database."
 
+msgid "settings.about.tmdbAttribution"
+msgstr "This product uses the TMDB API but is not endorsed or certified by TMDB."
+
 msgid "home.title"
 msgstr "Home"
 
@@ -4225,33 +4228,6 @@ msgstr "Cast"
 
 msgid "person.close"
 msgstr "Close"
-
-msgid "detail.fixMatch.action"
-msgstr "Fix match"
-
-msgid "detail.fixMatch.title"
-msgstr "Fix IMDb match"
-
-msgid "detail.fixMatch.subtitle"
-msgstr "Search and lock the exact title. Future catalog refreshes will keep your choice."
-
-msgid "detail.fixMatch.placeholder"
-msgstr "Search movie or series title…"
-
-msgid "detail.fixMatch.search"
-msgstr "Search"
-
-msgid "detail.fixMatch.searching"
-msgstr "Searching IMDb…"
-
-msgid "detail.fixMatch.noResults"
-msgstr "No matching titles found."
-
-msgid "detail.fixMatch.lockedBadge"
-msgstr "Match locked"
-
-msgid "detail.fixMatch.error"
-msgstr "Could not update match right now."
 
 msgid "player.xray.button"
 msgstr "X-Ray"

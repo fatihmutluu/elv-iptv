@@ -242,7 +242,7 @@ describe('filterContinueWatchingForCatalog & detailTargetFromProgress', () => {
       kind: 'movie',
       title: 'Solaris',
       posterUri: 'https://img.test/m.jpg',
-      backdropUri: 'https://img.test/m.jpg',
+      backdropUri: null,
       year: null,
       rating: null,
     });
@@ -259,7 +259,7 @@ describe('filterContinueWatchingForCatalog & detailTargetFromProgress', () => {
       kind: 'series',
       title: 'Dark Sky',
       posterUri: 'https://img.test/s.jpg',
-      backdropUri: 'https://img.test/s.jpg',
+      backdropUri: null,
       year: null,
       rating: null,
     });
@@ -418,6 +418,16 @@ describe('quick filter helpers (My List)', () => {
       key: 'movie:fav-1',
       kind: 'movie',
       name: 'Blade Runner',
+      year: 1982,
+      rating: 8.1,
+    });
+    expect(detailTargetFromFavorite(favMovie, 'movie')).toEqual({
+      itemKey: 'movie:fav-1',
+      sourceId: 'src-1',
+      kind: 'movie',
+      title: 'Blade Runner',
+      posterUri: 'https://img.test/br.jpg',
+      backdropUri: null,
       year: 1982,
       rating: 8.1,
     });

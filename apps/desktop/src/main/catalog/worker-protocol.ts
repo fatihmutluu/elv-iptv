@@ -3,6 +3,7 @@ import { isTelemetryRecordRequest, type TelemetryRecordRequest } from '../../sha
 /** Private control and secret-bridging messages from Electron `main` to the catalog `utilityProcess`. */
 export type MainToWorkerMessage =
   | { type: 'init'; dbPath: string; readonly elvServerUrl?: string }
+  | { type: 'set-elv-server-url'; readonly elvServerUrl: string }
   | { type: 'client-port'; clientId: number }
   | { type: 'client-disconnect'; clientId: number }
   | { type: 'secret-reply'; reqId: number; ok: true; value: string | null }
@@ -43,6 +44,10 @@ export function isMainToWorkerMessage(x: unknown): x is MainToWorkerMessage {
         elvServerUrl === undefined ||
         (typeof elvServerUrl === 'string' && elvServerUrl.length <= 512)
       );
+    }
+    case 'set-elv-server-url': {
+      const elvServerUrl = x['elvServerUrl'];
+      return typeof elvServerUrl === 'string' && elvServerUrl.length <= 512;
     }
     case 'client-port':
     case 'client-disconnect':

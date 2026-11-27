@@ -88,3 +88,22 @@ export function attachMainErrorTelemetry(
     process.off('unhandledRejection', onRejection);
   };
 }
+
+/** Subscribes configured server URL updates to the catalog coordinator and starts sync hydration (`#511`). */
+export function bindSyncServerUrlToCatalogCoordinator(
+  syncService: Pick<DesktopSyncService, 'hydrate' | 'notifyStartup' | 'subscribeServerUrl'>,
+  getCoordinator: () => { setElvServerUrl(url: string): void } | undefined,
+  shouldHydrate: boolean,
+): () => void {
+  const unsub =
+    syncService.subscribeServerUrl?.((url) => {
+      getCoordinator()?.setElvServerUrl(url);
+    }) ?? (() => undefined);
+  if (shouldHydrate) {
+    void syncService
+      .hydrate()
+      .then(() => syncService.notifyStartup())
+      .catch(() => undefined);
+  }
+  return unsub;
+}

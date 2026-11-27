@@ -495,6 +495,7 @@ export function createCoalescedCatalog(
       ? { searchElvMatchCandidates: c.searchElvMatchCandidates.bind(c) }
       : {}),
     ...(c.applyElvFixMatch ? { applyElvFixMatch: c.applyElvFixMatch.bind(c) } : {}),
+    ...(c.setElvClient ? { setElvClient: c.setElvClient.bind(c) } : {}),
     ...(queryNextEpisodeFn
       ? {
           queryNextEpisode: async (seriesKey, currentItemKey, profileId, nextOpts) => {

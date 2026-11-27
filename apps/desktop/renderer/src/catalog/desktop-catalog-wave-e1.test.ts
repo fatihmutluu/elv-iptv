@@ -71,6 +71,7 @@ describe('desktop CatalogService Wave E1 ELV bridge adapter (#511)', () => {
     };
     const titleDetail: ElvTitleRecord = {
       imdbId: 'tt1375666',
+      tmdbId: '27205',
       mediaType: 'movie',
       originalTitle: 'Inception',
       englishTitle: 'Inception',
@@ -370,5 +371,39 @@ describe('desktop CatalogService Wave E1 ELV bridge adapter (#511)', () => {
     expect(await legacy.searchElvItemKeysByAlias?.('Inception')).toEqual([]);
     expect(await legacy.listLiveVariants?.('m:s1:live:1')).toEqual([]);
     expect(await legacy.findGuideChannelByCleanName?.('s1', 'News One')).toBeNull();
+  });
+
+  it('preserves optional ItemRow.backdrop and ElvTitleRecord.tmdbId across bridge delegation', async () => {
+    const sampleItem = {
+      id: 1,
+      key: 'x:s1:movie:1',
+      kind: 'movie' as const,
+      sourceId: 's1',
+      providerId: '1',
+      name: 'Inception (2010)',
+      logo: 'https://cdn.example/p.jpg',
+      backdrop: 'https://cdn.example/b.jpg',
+      rating: 8.8,
+      year: 2010,
+      num: null,
+    };
+    const bridge = makeMinimalBridge({
+      items: async () => [sampleItem],
+      itemDetail: async () => ({
+        ...sampleItem,
+        plot: 'Dream heist.',
+        cast: null,
+        director: null,
+        genre: 'Sci-Fi',
+        trailerYoutubeId: null,
+        durationSec: null,
+        extension: 'mp4',
+      }),
+    });
+    const service = createDesktopCatalogFromBridge(bridge);
+    const items = await service.items('s1|movie|1', 0, 10);
+    expect(items[0]?.backdrop).toBe('https://cdn.example/b.jpg');
+    const detail = await service.itemDetail?.('x:s1:movie:1');
+    expect(detail?.backdrop).toBe('https://cdn.example/b.jpg');
   });
 });

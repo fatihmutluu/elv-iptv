@@ -150,6 +150,13 @@ export interface BuildHeroSlidesInput {
   readonly maxSlides?: number;
 }
 
+const HOME_HERO_FALLBACK_NULL = null;
+
+function readBackdropUrl(row: unknown): string | null {
+  const value = (row as { backdrop?: string | null } | undefined)?.backdrop;
+  return typeof value === 'string' && value.trim().length > 0 ? value : HOME_HERO_FALLBACK_NULL;
+}
+
 /**
  * Builds up to `maxSlides` (default 5) deduplicated Hero spotlight slides, prioritizing active
  * Continue Watching entries first, then Featured Movies, then Featured Series.
@@ -178,7 +185,7 @@ export function buildHeroSlides({
       kind: row.kind,
       title: row.title,
       subtitle: row.subtitle,
-      backdropUri: row.logo ?? matched?.logo ?? null,
+      backdropUri: readBackdropUrl(row) ?? readBackdropUrl(matched) ?? null,
       posterUri: matched?.logo ?? row.logo ?? null,
       year: matched?.year ?? null,
       rating: matched?.rating ?? null,
@@ -200,7 +207,7 @@ export function buildHeroSlides({
       kind: item.kind,
       title: item.name,
       subtitle: prog?.subtitle ?? null,
-      backdropUri: item.logo,
+      backdropUri: readBackdropUrl(item),
       posterUri: item.logo,
       year: item.year,
       rating: item.rating,
@@ -501,7 +508,7 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
         kind,
         title: item.name,
         subtitle: prog?.subtitle ?? null,
-        backdropUri: item.logo,
+        backdropUri: readBackdropUrl(item),
         posterUri: item.logo,
         year: item.year,
         rating: item.rating,
@@ -522,7 +529,7 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
         row.kind === 'episode'
           ? formatContinueEpisodeSubtitle(row.season, row.episode, row.subtitle)
           : row.subtitle,
-      backdropUri: row.logo,
+      backdropUri: readBackdropUrl(row),
       posterUri: row.logo,
       year: null,
       rating: null,
@@ -540,7 +547,7 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
       kind: 'episode' as const,
       title: row.seriesTitle,
       subtitle: formatNewEpisodeSubtitle(row.season, row.episode, row.episodeTitle),
-      backdropUri: row.seriesLogo,
+      backdropUri: (row as { seriesBackdrop?: string | null }).seriesBackdrop ?? null,
       posterUri: row.seriesLogo,
       year: null,
       rating: null,
@@ -571,7 +578,7 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
           kind: fav.kind,
           title: fav.title,
           subtitle: prog?.subtitle ?? null,
-          backdropUri: fav.logo,
+          backdropUri: readBackdropUrl(fav) ?? readBackdropUrl(matchedSeries) ?? null,
           posterUri: fav.logo,
           year: fav.year,
           rating: fav.rating,
@@ -635,7 +642,7 @@ export function buildHomeCollectionRails(
         kind: item.kind,
         title: item.name,
         subtitle: prog?.subtitle ?? null,
-        backdropUri: item.logo,
+        backdropUri: readBackdropUrl(item),
         posterUri: item.logo,
         year: item.year,
         rating: item.rating,

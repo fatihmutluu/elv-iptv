@@ -4,7 +4,8 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { createSyncApp } from './app.ts';
-import { parseImdbTitleHtml, scoreImdbCandidate, selectBestImdbMatch } from './elv-imdb-parser.ts';
+import { scoreImdbCandidate, selectBestImdbMatch } from './elv-imdb-parser.ts';
+import { buildTmdbImageUrl, mapTmdbDetailToRichPayload } from './elv-tmdb-mapper.ts';
 import type {
   ElvTitleRecord,
   ElvUpstreamClient,
@@ -27,6 +28,7 @@ const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migr
 function makeTitle(overrides: Partial<ElvTitleRecord> = {}): ElvTitleRecord {
   return {
     imdbId: 'tt6751668',
+    tmdbId: '496243',
     mediaType: 'movie',
     originalTitle: 'Gisaengchung',
     englishTitle: 'Parasite',
@@ -61,6 +63,7 @@ function makeTitle(overrides: Partial<ElvTitleRecord> = {}): ElvTitleRecord {
 function makeStubTitle(overrides: Partial<ElvTitleRecord> = {}): ElvTitleRecord {
   return {
     imdbId: 'tt6751668',
+    tmdbId: null,
     mediaType: 'movie',
     originalTitle: 'Parasite',
     englishTitle: 'Parasite',
@@ -105,6 +108,7 @@ function createInstrumentedD1() {
     '0001_init.sql',
     '0002_wave_p9_pairing_telemetry.sql',
     '0003_wave_e1_elv_metadata.sql',
+    '0004_wave_q1_dual_id_imdb_ratings.sql',
   ]) {
     sqlite.exec(readFileSync(join(MIGRATIONS_DIR, name), 'utf8'));
   }
@@ -343,6 +347,7 @@ describe('Wave E1 Fix Pass Stage 1: sync-server hardening regressions', () => {
           mediaType: 'movie',
           year: 2022,
           imdbId: 'tt0000098',
+          tmdbId: null,
           confidence: 0.95,
           updatedAt: 1_764_212_100_000,
         },
@@ -640,35 +645,45 @@ describe('Wave E1 Fix Pass Stage 1: sync-server hardening regressions', () => {
     });
   });
 
-  describe('P2 hardening: HTML entity surrogate safety, trailer port rejection & fallback Cache-Control', () => {
-    it('safely handles surrogate and out-of-range numeric HTML entities and rejects trailer URLs with explicit ports', () => {
-      const html = `<html><head><script type="application/ld+json">${JSON.stringify({
-        '@type': 'Movie',
-        name: 'Safe &#x27;Title&#x27; &#xD800; &#x110000; &#999999999;',
-        datePublished: '2024-01-01',
-        description: 'Valid &#8217; quote and surrogate &#55296; check.',
-        trailer: {
-          contentUrl: 'https://imdb-video.media-imdb.com:8443/vi123/hls.m3u8',
-        },
-      })}</script></head></html>`;
+  describe('P2 hardening: TMDB path safety, YouTube key rejection & fallback Cache-Control', () => {
+    it('rejects traversal image paths and unsafe YouTube keys when mapping TMDB detail payloads', () => {
+      expect(buildTmdbImageUrl('/../etc/passwd', 'w342')).toBeNull();
+      expect(buildTmdbImageUrl('https://evil.example/x.jpg', 'w342')).toBeNull();
+      expect(buildTmdbImageUrl('/validPoster_1.jpg', 'w342')).toBe(
+        'https://image.tmdb.org/t/p/w342/validPoster_1.jpg',
+      );
 
-      const parsed = parseImdbTitleHtml('tt1234567', html, 1_764_212_100_000);
-      expect(parsed).not.toBeNull();
-      expect(parsed?.originalTitle).toBe("Safe 'Title' &#xD800; &#x110000; &#999999999;");
-      expect(parsed?.originalSynopsis).toBe('Valid ’ quote and surrogate &#55296; check.');
-      expect(parsed?.trailerStreamUrl).toBeNull();
+      const mapped = mapTmdbDetailToRichPayload(
+        {
+          id: 496243,
+          original_title: 'Gisaengchung',
+          title: 'Parasite',
+          release_date: '2019-05-30',
+          poster_path: '/../evil.jpg',
+          backdrop_path: '/okBackdrop.jpg',
+          external_ids: { imdb_id: 'tt6751668' },
+          videos: {
+            results: [{ site: 'YouTube', type: 'Trailer', official: true, key: 'bad/key?x=1' }],
+          },
+          translations: { translations: [] },
+        },
+        'movie',
+        'en',
+        1_764_212_100_000,
+      );
+      expect(mapped?.record.posterUrl).toBeNull();
+      expect(mapped?.record.backdropUrl).toBe('https://image.tmdb.org/t/p/w1280/okBackdrop.jpg');
+      expect(mapped?.record.trailerYoutubeId).toBeNull();
     });
 
-    it('sets Cache-Control: public, max-age=300 on fallback_en synopses and stub detail fallbacks', async () => {
-      const failingAi: WorkersAiBinding = {
-        run: async () => {
-          throw new Error('AI unavailable');
-        },
+    it('sets Cache-Control: public, max-age=300 on fallback_en synopses and stub detail fallbacks without calling Workers AI', async () => {
+      const unusedAi: WorkersAiBinding = {
+        run: vi.fn(async () => ({ response: 'Should never be invoked' })),
       };
       const app = createSyncApp({
         storage: createMemoryStorage(),
         jwtSecret: TEST_JWT_SECRET,
-        ai: failingAi,
+        ai: unusedAi,
         elvUpstream: {
           searchSuggestions: async () => [],
           fetchTitleDetail: async (imdbId) => {
@@ -691,6 +706,7 @@ describe('Wave E1 Fix Pass Stage 1: sync-server hardening regressions', () => {
       );
       expect(aiFallbackRes.status).toBe(200);
       expect(aiFallbackRes.headers.get('cache-control')).toBe('public, max-age=300');
+      expect(unusedAi.run).not.toHaveBeenCalled();
 
       const stubFallbackRes = await app.fetch(
         new Request('https://sync.example.test/v1/elv/title/tt0000403?lang=en'),

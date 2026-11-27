@@ -1,6 +1,7 @@
 import { ArtworkImage, Scrim, useTheme } from '@elv/ui-kit';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { Animated, Platform, StyleSheet } from 'react-native';
+import { BlurredAmbientBackdrop } from '../shared/BlurredAmbientBackdrop';
 
 /** Crossfade duration in milliseconds when transitioning between Home Hero spotlight slides (`#399`). */
 const HOME_HERO_CROSSFADE_MS = 320;
@@ -12,31 +13,96 @@ export const HOME_HERO_AUTO_ROTATE_MS = 7_500;
 export interface HomeHeroBackdropProps {
   readonly slideKey: string;
   readonly uri: string | null;
+  readonly posterUri?: string | null;
+  readonly isPortraitFallback?: boolean;
   readonly title: string;
+}
+
+interface BackdropSlideSnapshot {
+  readonly key: string;
+  readonly uri: string | null;
+  readonly posterUri: string | null;
+  readonly isPortraitFallback: boolean;
+  readonly title: string;
+}
+
+function normalizeUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? '';
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function renderSlideBackdrop(
+  slide: BackdropSlideSnapshot,
+  testIdPrefix: 'home-hero-backdrop' | 'home-hero-backdrop-prev',
+): ReactElement {
+  const portraitAmbientUri = slide.isPortraitFallback
+    ? (slide.posterUri ?? slide.uri)
+    : slide.uri === null
+      ? slide.posterUri
+      : null;
+
+  if (portraitAmbientUri !== null) {
+    return (
+      <BlurredAmbientBackdrop
+        testID={
+          testIdPrefix === 'home-hero-backdrop'
+            ? 'home-hero-backdrop-ambient'
+            : `${testIdPrefix}-ambient`
+        }
+        uri={portraitAmbientUri}
+      />
+    );
+  }
+
+  return (
+    <ArtworkImage
+      testID={testIdPrefix}
+      uri={slide.uri}
+      label={slide.title}
+      maxDecodePx={960}
+      borderRadius={0}
+      decorative
+      style={StyleSheet.absoluteFill}
+    />
+  );
 }
 
 /**
  * Full-bleed crossfading Hero backdrop (`#399`).
- * Fades incoming slides smoothly over 320 ms while keeping the outgoing backdrop visible behind
- * them, switching instantaneously with `opacity: 1` whenever `theme.reduceMotion` is enabled.
+ * Renders genuine landscape backdrops cleanly with `cover`, or switches to a heavily blurred dark
+ * ambient backdrop when only a vertical `2:3` poster is available so vertical artwork never stretches.
  */
-export function HomeHeroBackdrop({ slideKey, uri, title }: HomeHeroBackdropProps): ReactElement {
+export function HomeHeroBackdrop({
+  slideKey,
+  uri,
+  posterUri = null,
+  isPortraitFallback = false,
+  title,
+}: HomeHeroBackdropProps): ReactElement {
   const theme = useTheme();
-  const [prevBackdrop, setPrevBackdrop] = useState<{
-    readonly key: string;
-    readonly uri: string | null;
-    readonly title: string;
-  } | null>(null);
-  const lastSlideRef = useRef<{
-    readonly key: string;
-    readonly uri: string | null;
-    readonly title: string;
-  }>({ key: slideKey, uri, title });
+  const normalizedUri = normalizeUrl(uri);
+  const normalizedPoster = normalizeUrl(posterUri);
+  const currentSlide: BackdropSlideSnapshot = {
+    key: slideKey,
+    uri: normalizedUri,
+    posterUri: normalizedPoster,
+    isPortraitFallback,
+    title,
+  };
+
+  const [prevBackdrop, setPrevBackdrop] = useState<BackdropSlideSnapshot | null>(null);
+  const lastSlideRef = useRef<BackdropSlideSnapshot>(currentSlide);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     const prev = lastSlideRef.current;
-    const next = { key: slideKey, uri, title };
+    const next: BackdropSlideSnapshot = {
+      key: slideKey,
+      uri: normalizedUri,
+      posterUri: normalizedPoster,
+      isPortraitFallback,
+      title,
+    };
     lastSlideRef.current = next;
 
     if (theme.reduceMotion || prev.key === next.key) {
@@ -58,35 +124,27 @@ export function HomeHeroBackdrop({ slideKey, uri, title }: HomeHeroBackdropProps
     return () => {
       anim.stop();
     };
-  }, [fadeAnim, slideKey, theme.reduceMotion, title, uri]);
+  }, [
+    fadeAnim,
+    isPortraitFallback,
+    normalizedPoster,
+    normalizedUri,
+    slideKey,
+    theme.reduceMotion,
+    title,
+  ]);
 
   return (
     <>
-      {prevBackdrop !== null && !theme.reduceMotion ? (
-        <ArtworkImage
-          testID="home-hero-backdrop-prev"
-          uri={prevBackdrop.uri}
-          label={prevBackdrop.title}
-          maxDecodePx={960}
-          borderRadius={0}
-          decorative
-          style={StyleSheet.absoluteFill}
-        />
-      ) : null}
+      {prevBackdrop !== null && !theme.reduceMotion
+        ? renderSlideBackdrop(prevBackdrop, 'home-hero-backdrop-prev')
+        : null}
       <Animated.View
         pointerEvents="none"
         testID="home-hero-backdrop-layer"
         style={[StyleSheet.absoluteFill, { opacity: theme.reduceMotion ? 1 : fadeAnim }]}
       >
-        <ArtworkImage
-          testID="home-hero-backdrop"
-          uri={uri}
-          label={title}
-          maxDecodePx={960}
-          borderRadius={0}
-          decorative
-          style={StyleSheet.absoluteFill}
-        />
+        {renderSlideBackdrop(currentSlide, 'home-hero-backdrop')}
       </Animated.View>
       <Scrim direction="bottom" intensity="strong" testID="home-hero-scrim-bottom" />
       <Scrim direction="left" intensity="strong" testID="home-hero-scrim-left" />

@@ -147,8 +147,25 @@ describe('home-model', () => {
     ]);
     expect(slides[0]?.isContinueWatching).toBe(true);
     expect(slides[0]?.year).toBe(2025);
+    expect(slides[0]?.posterUri).toBe('https://art.example.test/glass.jpg');
+    expect(slides[0]?.backdropUri).toBeNull();
+    expect(slides[2]?.posterUri).toBe('https://art.example.test/glass.jpg');
+    expect(slides[2]?.backdropUri).toBeNull();
     expect(slides[2]?.watched).toBe(true);
     expect(slides[4]?.catalogItem?.key).toBe('x:src-1:series:10');
+
+    const withLandscapeBackdrop = buildHeroSlides({
+      continueWatching: [],
+      movies: [
+        {
+          ...makeItem({ id: 20, key: 'x:src-1:movie:20', name: 'Horizon' }),
+          backdrop: 'https://art.example.test/horizon-16x9.jpg',
+        } as ItemRow,
+      ],
+      series: [],
+    });
+    expect(withLandscapeBackdrop[0]?.posterUri).toBe('https://art.example.test/glass.jpg');
+    expect(withLandscapeBackdrop[0]?.backdropUri).toBe('https://art.example.test/horizon-16x9.jpg');
   });
 
   it('applies 5-second smart rewind on buildVodPlayTarget and resets watched items to 0', () => {

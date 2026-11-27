@@ -30,6 +30,25 @@ export interface WorkerElvContext {
   readonly elvClient?: ElvMetadataClient;
 }
 
+/** Builds a validated ELV metadata HTTP client when `elvServerUrl` is configured, else returns `undefined`. */
+export function createWorkerElvClient(deps: {
+  readonly elvServerUrl?: string;
+  readonly fetchImpl: FetchLike;
+}): ElvMetadataClient | undefined {
+  const rawUrl = deps.elvServerUrl?.trim() ?? '';
+  if (rawUrl === '') return undefined;
+  try {
+    return createElvHttpClient({
+      baseUrl: rawUrl,
+      fetchFn: deps.fetchImpl as unknown as typeof globalThis.fetch,
+      allowInsecureLocalhost:
+        process.env['VITEST'] === 'true' || process.env['NODE_ENV'] !== 'production',
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Opens the isolated `elv-enrichment.db` SQLite database beside `catalog.db` and constructs an
  * optional strict HTTPS (or loopback in non-production/Vitest) `/v1/elv/*` client when `elvServerUrl` is valid.
@@ -58,20 +77,10 @@ export async function openWorkerElvContext(deps: {
     enrichmentStore = undefined;
   }
 
-  const rawUrl = deps.elvServerUrl?.trim() ?? '';
-  let elvClient: ElvMetadataClient | undefined;
-  if (rawUrl !== '') {
-    try {
-      elvClient = createElvHttpClient({
-        baseUrl: rawUrl,
-        fetchFn: deps.fetchImpl as unknown as typeof globalThis.fetch,
-        allowInsecureLocalhost:
-          process.env['VITEST'] === 'true' || process.env['NODE_ENV'] !== 'production',
-      });
-    } catch {
-      elvClient = undefined;
-    }
-  }
+  const elvClient = createWorkerElvClient({
+    fetchImpl: deps.fetchImpl,
+    ...(deps.elvServerUrl === undefined ? {} : { elvServerUrl: deps.elvServerUrl }),
+  });
   return {
     ...(enrichmentStore !== undefined ? { enrichmentStore } : {}),
     ...(elvClient !== undefined ? { elvClient } : {}),

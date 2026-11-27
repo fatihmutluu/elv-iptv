@@ -218,7 +218,7 @@ describe('Wave F5B / Wave P8 DetailScreen: Key-Free VOD Enrichment (#215) & Mini
       expect(screen.queryByTestId('detail-enrichment-badge')).toBeNull();
       await disabledView.unmount();
 
-      // Enabled -> calls enrichVodItem({ enabled: true }), fills missing fields, displays badge
+      // Enabled -> calls enrichVodItem({ enabled: true }), fills missing fields, without showing clutter badge
       const enabledView = await renderDetail({
         target,
         catalog: wrappedCatalog,
@@ -226,7 +226,7 @@ describe('Wave F5B / Wave P8 DetailScreen: Key-Free VOD Enrichment (#215) & Mini
       });
       await waitFor(() => {
         expect(enrichSpy).toHaveBeenCalledWith(env.movie.key, { enabled: true });
-        expect(screen.getByTestId('detail-enrichment-badge')).toHaveTextContent('Enriched');
+        expect(screen.queryByTestId('detail-enrichment-badge')).toBeNull();
         expect(screen.getByTestId('detail-rating')).toHaveTextContent(/8\.8/);
         expect(screen.getByTestId('detail-year')).toHaveTextContent('2010');
         expect(screen.getByTestId('detail-genres')).toHaveTextContent('Sci-Fi · Thriller');

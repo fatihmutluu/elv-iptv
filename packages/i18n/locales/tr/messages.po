@@ -741,6 +741,9 @@ msgstr "Tescilli · LGPL medya motorları"
 msgid "settings.about.statement"
 msgstr "ELV IPTV, her ekran için özenle geliştirilmiş %100 ücretsiz, reklamsız ve bağımsız bir IPTV oynatıcısıdır. Hiçbir medya içeriği sunmaz — kendi Xtream, M3U veya Stalker kaynağınızı ekleyin. Sağlayıcı bilgileriniz cihazınızda şifreli saklanır ve katalog veritabanına yazılmaz."
 
+msgid "settings.about.tmdbAttribution"
+msgstr "Bu ürün TMDB API'sini kullanır ancak TMDB tarafından onaylanmamış veya sertifikalandırılmamıştır."
+
 msgid "home.title"
 msgstr "Ana Sayfa"
 
@@ -4225,33 +4228,6 @@ msgstr "Oyuncu"
 
 msgid "person.close"
 msgstr "Kapat"
-
-msgid "detail.fixMatch.action"
-msgstr "Eşleşmeyi düzelt"
-
-msgid "detail.fixMatch.title"
-msgstr "IMDb eşleşmesini düzelt"
-
-msgid "detail.fixMatch.subtitle"
-msgstr "Doğru yapımı arayıp kilitleyin. Sonraki katalog yenilemelerinde seçiminiz korunur."
-
-msgid "detail.fixMatch.placeholder"
-msgstr "Film veya dizi adı ara…"
-
-msgid "detail.fixMatch.search"
-msgstr "Ara"
-
-msgid "detail.fixMatch.searching"
-msgstr "IMDb'de aranıyor…"
-
-msgid "detail.fixMatch.noResults"
-msgstr "Eşleşen yapım bulunamadı."
-
-msgid "detail.fixMatch.lockedBadge"
-msgstr "Eşleşme kilitli"
-
-msgid "detail.fixMatch.error"
-msgstr "Eşleşme şu an güncellenemedi."
 
 msgid "player.xray.button"
 msgstr "X-Ray"

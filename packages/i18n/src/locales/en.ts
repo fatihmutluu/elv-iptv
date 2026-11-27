@@ -298,6 +298,8 @@ export const enMessages = {
   'settings.about.licenseBadge': 'Proprietary · LGPL media engines',
   'settings.about.statement':
     'ELV IPTV is a 100% free, ad-free, independent IPTV player built with care for every screen. It ships no media content — bring your own Xtream, M3U, or Stalker source. Provider credentials stay encrypted on your device and never enter the catalog database.',
+  'settings.about.tmdbAttribution':
+    'This product uses the TMDB API but is not endorsed or certified by TMDB.',
   'home.title': 'Home',
   'home.continueWatching': 'Continue watching',
   'home.onAirNow': 'On air now',

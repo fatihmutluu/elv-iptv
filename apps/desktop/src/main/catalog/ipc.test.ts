@@ -113,6 +113,7 @@ describe('registerCatalogIpc', () => {
       disconnectClient(clientId) {
         disconnectedClients.push(clientId);
       },
+      setElvServerUrl() {},
       onUnexpectedExit(listener) {
         exitListeners.add(listener);
         return () => exitListeners.delete(listener);
@@ -200,6 +201,7 @@ describe('registerCatalogIpc', () => {
       disconnectClient(clientId) {
         disconnectedClients.push(clientId);
       },
+      setElvServerUrl() {},
       onUnexpectedExit: () => () => undefined,
       async shutdown() {},
     };
@@ -243,6 +245,7 @@ describe('registerCatalogIpc', () => {
         return { clientId: 1, rendererPort: makePort(1) };
       },
       disconnectClient() {},
+      setElvServerUrl() {},
       onUnexpectedExit: () => () => undefined,
       shutdown() {
         shutdownCalls += 1;

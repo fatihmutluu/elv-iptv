@@ -269,4 +269,99 @@ describe('CatalogService ELV Mode integration (#511)', () => {
     await svc.close();
     await enrichmentStore.close();
   });
+
+  it('runs offline Layer 1 matching when elvClient is initially undefined and dynamically activates remote ELV calls via setElvClient', async () => {
+    const { db } = testDb();
+    expect((await openCatalog(db)).ok).toBe(true);
+    await db.batch(
+      'INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES (?, ?, ?, ?, ?)',
+      [
+        ['s1', 'xtream', 'Alpha', 1, '{}'],
+        ['s2', 'xtream', 'Beta', 2, '{}'],
+      ],
+    );
+    await db.batch(
+      `INSERT INTO movies (source_id, key, name, name_fold, year, provider_imdb_id, run_id)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`,
+      [
+        ['s1', 'x:s1:movie:1', 'Inception (2010) [4K]', 'inception 2010 4k', 2010, 'tt1375666'],
+        ['s2', 'x:s2:movie:2', 'TR: Inception (2010) [FHD]', 'tr inception 2010 fhd', 2010, null],
+      ],
+    );
+
+    const enrichment = testDb();
+    const enrichmentStore = await openElvEnrichmentStore(enrichment.db, { clock: () => 20_000 });
+    const rawSvc = createCatalogService({
+      db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: noopHttp,
+      clock: () => 20_000,
+      enrichmentStore,
+    });
+    const svc = createCoalescedCatalog(rawSvc, { windowMs: 0 });
+
+    // Offline Layer 1 still matches x:s1:movie:1 via provider_imdb_id even without elvClient
+    const prioOffline = await svc.enrichElvPriorityKeys?.(['x:s1:movie:1', 'x:s2:movie:2']);
+    expect(prioOffline?.layer1Matched).toBe(1);
+    expect(prioOffline?.remoteMatched).toBe(0);
+    expect((await enrichmentStore.getMatchForKey('x:s1:movie:1'))?.imdbId).toBe('tt1375666');
+
+    // Offline multi-source version merge combines s1 + s2 without needing remote matches!
+    const offlineMerged = await svc.listMergedVodVersions?.('x:s1:movie:1');
+    expect(offlineMerged?.map((v) => v.itemKey)).toEqual(['x:s1:movie:1', 'x:s2:movie:2']);
+
+    // Remote detail/feeds fail closed offline
+    expect(await svc.refreshElvFeeds?.()).toBe(false);
+
+    // Dynamically configure elvClient via setElvClient -> immediately enables remote matching & discovery
+    const elvClient: ElvMetadataClient = {
+      matchBatch: vi.fn(async (items: readonly ElvMatchBatchRequestItem[]) => ({
+        matches: items.map((item) => ({
+          key: item.key,
+          imdbId: 'tt1375666',
+          confidence: 0.95,
+          mediaType: item.mediaType,
+          title: {
+            imdbId: 'tt1375666',
+            tmdbId: '27205',
+            mediaType: 'movie' as const,
+            originalTitle: 'Inception',
+            year: 2010,
+          },
+        })),
+        unmatchedKeys: [],
+        pendingKeys: [],
+      })),
+      fetchTitleDetail: vi.fn(async () => ({
+        imdbId: 'tt1375666',
+        tmdbId: '27205',
+        mediaType: 'movie' as const,
+        originalTitle: 'Inception',
+        director: 'Christopher Nolan',
+        detailFetchedAt: 20_000,
+      })),
+      fetchFeeds: vi.fn(async () => ({
+        topPicks: [
+          { imdbId: 'tt1375666', title: 'Inception', mediaType: 'movie' as const, rank: 1 },
+        ],
+        movieMeter: [],
+        tvMeter: [],
+        currentUpcomingTv: [],
+        updatedAt: 20_000,
+      })),
+      searchTitles: vi.fn(async () => []),
+    };
+
+    svc.setElvClient?.(elvClient);
+    const bgOnline = await svc.runElvBackgroundMatching?.();
+    expect(bgOnline?.remoteMatched).toBe(1);
+    expect(await svc.refreshElvFeeds?.()).toBe(true);
+    const detail = await svc.getElvTitleDetail?.('tt1375666');
+    expect(detail?.tmdbId).toBe('27205');
+    expect(detail?.director).toBe('Christopher Nolan');
+
+    await svc.close();
+    await enrichmentStore.close();
+  });
 });

@@ -1,6 +1,6 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
 import type { ItemSortOrder } from './queries-shared';
-import { normalizeCatalogImdbId } from './writers';
+import { normalizeCatalogImdbId, normalizeCatalogTmdbId } from './writers';
 
 /** Media type supported by ELV Mode enrichment tables. */
 export type ElvMediaType = 'movie' | 'series';
@@ -38,6 +38,7 @@ export interface UpsertElvMatchInput {
 /** Enriched IMDb title record persisted in `elv_titles`. */
 export interface ElvTitleRecord {
   readonly imdbId: string;
+  readonly tmdbId?: string | null;
   readonly mediaType: ElvMediaType;
   readonly originalTitle: string;
   readonly englishTitle: string | null;
@@ -65,6 +66,7 @@ export interface ElvTitleRecord {
 /** Input row for {@link ElvEnrichmentStore.upsertTitles}; maps merge non-destructively. */
 export interface UpsertElvTitleInput {
   readonly imdbId: string;
+  readonly tmdbId?: string | null;
   readonly mediaType: ElvMediaType;
   readonly originalTitle: string;
   readonly englishTitle?: string | null;
@@ -217,6 +219,10 @@ export interface ElvEnrichmentStore {
   getEnrichmentForKeys(itemKeys: readonly string[]): Promise<Map<string, ElvItemEnrichment>>;
   getTitleByImdbId(imdbId: string): Promise<ElvTitleRecord | null>;
   getTitlesByImdbIds(imdbIds: readonly string[]): Promise<Map<string, ElvTitleRecord>>;
+  getTitlesByTmdbIds?(
+    tmdbIds: readonly string[],
+    mediaType?: ElvMediaType,
+  ): Promise<Map<string, ElvTitleRecord>>;
   listImdbGenres(
     mediaType: ElvMediaType,
     allowedItemKeys?: readonly string[] | ReadonlySet<string>,
@@ -280,6 +286,7 @@ export interface RawMatchRow {
 /** @internal Raw SQL row from `elv_titles`. */
 export interface RawTitleRow {
   imdb_id: string;
+  tmdb_id?: string | null;
   media_type: string;
   original_title: string;
   english_title: string | null;
@@ -451,6 +458,7 @@ export function mapMatchRow(r: RawMatchRow): ElvMatchRecord {
 export function mapTitleRow(r: RawTitleRow): ElvTitleRecord {
   return {
     imdbId: r.imdb_id,
+    tmdbId: normalizeCatalogTmdbId(r.tmdb_id) ?? null,
     mediaType: toMediaType(r.media_type),
     originalTitle: r.original_title,
     englishTitle: r.english_title,
@@ -522,6 +530,8 @@ export function mergeElvTitle(
 
   return {
     imdbId,
+    tmdbId:
+      normalizeCatalogTmdbId(incoming.tmdbId) ?? normalizeCatalogTmdbId(existing?.tmdbId) ?? null,
     mediaType: incoming.mediaType,
     originalTitle,
     englishTitle: nonEmptyString(incoming.englishTitle) ?? existing?.englishTitle ?? null,
@@ -553,6 +563,7 @@ export function mergeElvTitle(
 export function titleToParams(t: ElvTitleRecord): SqlValue[] {
   return [
     t.imdbId,
+    t.tmdbId ?? null,
     t.mediaType,
     t.originalTitle,
     t.englishTitle,

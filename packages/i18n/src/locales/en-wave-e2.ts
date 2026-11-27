@@ -1,4 +1,4 @@
-/** English messages for Wave E2 ELV Mode Discovery, Rich Detail, Trailers, Fix Match & In-Player X-Ray (`#512`, `#352`, `#459`). */
+/** English messages for Wave E2 ELV Mode Discovery, Rich Detail, Trailers & In-Player X-Ray (`#512`, `#352`, `#459`). */
 export const enWaveE2Messages = {
   'home.section.elvShowcase': 'Trending & Picks for You',
   'catalog.elvPicks.emptyTitle': 'Building your personal picks',
@@ -45,16 +45,6 @@ export const enWaveE2Messages = {
   'person.role.director': 'Director',
   'person.role.cast': 'Cast',
   'person.close': 'Close',
-  'detail.fixMatch.action': 'Fix match',
-  'detail.fixMatch.title': 'Fix IMDb match',
-  'detail.fixMatch.subtitle':
-    'Search and lock the exact title. Future catalog refreshes will keep your choice.',
-  'detail.fixMatch.placeholder': 'Search movie or series title…',
-  'detail.fixMatch.search': 'Search',
-  'detail.fixMatch.searching': 'Searching IMDb…',
-  'detail.fixMatch.noResults': 'No matching titles found.',
-  'detail.fixMatch.lockedBadge': 'Match locked',
-  'detail.fixMatch.error': 'Could not update match right now.',
   'player.xray.button': 'X-Ray',
   'player.xray.title': 'X-Ray',
   'player.xray.cast': 'Cast',

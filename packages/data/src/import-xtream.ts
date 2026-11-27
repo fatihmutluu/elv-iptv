@@ -487,7 +487,7 @@ export async function loadSeriesEpisodes(
       if (!(await sourceExists(tx, sourceId))) return 'no-source';
       const current = (await lookup(tx))[0];
       if (current?.provider_id == null) return 'no-series';
-      if (info.cast !== undefined || info.director !== undefined) {
+      if (info.cast !== undefined || info.director !== undefined || info.backdrop !== undefined) {
         const castFold = info.cast !== undefined ? foldText(info.cast) : null;
         const directorFold = info.director !== undefined ? foldText(info.director) : null;
         await tx.run(
@@ -495,9 +495,18 @@ export async function loadSeriesEpisodes(
               SET cast_text = COALESCE(?, cast_text),
                   director_text = COALESCE(?, director_text),
                   cast_fold = COALESCE(?, cast_fold),
-                  director_fold = COALESCE(?, director_fold)
+                  director_fold = COALESCE(?, director_fold),
+                  backdrop = COALESCE(?, backdrop)
             WHERE source_id = ? AND key = ?`,
-          [info.cast ?? null, info.director ?? null, castFold, directorFold, sourceId, seriesKey],
+          [
+            info.cast ?? null,
+            info.director ?? null,
+            castFold,
+            directorFold,
+            info.backdrop ?? null,
+            sourceId,
+            seriesKey,
+          ],
         );
       }
       const previous = await tx.all<{ key: string }>(

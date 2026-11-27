@@ -62,6 +62,28 @@ function artworkUrl(value: unknown): string | undefined {
   return text === undefined ? undefined : sanitizeArtworkUrl(text).url;
 }
 
+const HTTP_BACKDROP_RE = /^https?:\/\//i;
+
+function httpBackdropValue(value: unknown): string | undefined {
+  const url = artworkUrl(value);
+  return url !== undefined && HTTP_BACKDROP_RE.test(url) ? url : undefined;
+}
+
+function backdropUrl(...candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      for (const entry of candidate) {
+        const hit = httpBackdropValue(entry);
+        if (hit !== undefined) return hit;
+      }
+      continue;
+    }
+    const hit = httpBackdropValue(candidate);
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
 const MAX_CAST_CHARS = 512;
 const MAX_DIRECTOR_CHARS = 256;
 
@@ -153,6 +175,7 @@ export function toMovies(rows: Raw[]): XtreamMovie[] {
       extension: toText(r.container_extension) ?? 'mp4',
     };
     put(movie, 'icon', artworkUrl(r.stream_icon));
+    put(movie, 'backdrop', backdropUrl(r.backdrop_path, r.backdrop));
     put(movie, 'rating', toNumber(r.rating));
     put(movie, 'year', yearOf(r.year));
     put(movie, 'cast', creditText(MAX_CAST_CHARS, r.cast, r.actors));
@@ -173,6 +196,7 @@ export function toSeries(rows: Raw[]): XtreamSeries[] {
     if (id === undefined) continue;
     const series: XtreamSeries = { id, name: toText(r.name) ?? '', categoryIds: categoryIds(r) };
     put(series, 'cover', artworkUrl(r.cover));
+    put(series, 'backdrop', backdropUrl(r.backdrop_path, r.backdrop));
     put(series, 'plot', toText(r.plot));
     put(series, 'rating', toNumber(r.rating));
     put(series, 'year', yearOf(r.year, r.release_date, r.releaseDate));
@@ -246,6 +270,11 @@ export function toSeriesInfo(raw: Raw): XtreamSeriesInfo {
   const seriesInfo: XtreamSeriesInfo = { seasons: [...seasons].sort((a, b) => a - b), episodes };
   put(seriesInfo, 'cast', creditText(MAX_CAST_CHARS, info.cast, info.actors, raw.cast, raw.actors));
   put(seriesInfo, 'director', creditText(MAX_DIRECTOR_CHARS, info.director, raw.director));
+  put(
+    seriesInfo,
+    'backdrop',
+    backdropUrl(info.backdrop_path, info.backdrop, raw.backdrop_path, raw.backdrop),
+  );
   return seriesInfo;
 }
 
@@ -279,6 +308,18 @@ export function toVodInfo(raw: Raw): XtreamVodInfo {
   );
   put(vod, 'providerImdbId', firstProviderImdbId(info.imdb_id, info.imdb));
   put(vod, 'providerTmdbId', firstProviderTmdbId(info.tmdb_id, info.tmdb));
+  put(
+    vod,
+    'backdrop',
+    backdropUrl(
+      info.backdrop_path,
+      info.backdrop,
+      movieData.backdrop_path,
+      movieData.backdrop,
+      raw.backdrop_path,
+      raw.backdrop,
+    ),
+  );
   return vod;
 }
 

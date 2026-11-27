@@ -160,6 +160,32 @@ describe('elv-presentation (Wave E1 #511)', () => {
     expect(settledUnmatchedPage[0]?.logo).toBe(SAMPLE_ITEM.logo);
   });
 
+  it('cleans raw noisy titles locally via cleanVodTitle even when enrichment is absent/offline (Wave Q1)', () => {
+    const noisyItem: ItemRow = {
+      ...SAMPLE_ITEM,
+      name: 'TR : INCEPTION [2010 - HEVC] 4K DUAL',
+      year: null,
+    };
+
+    const offlinePending = applyElvCardPresentation(noisyItem, undefined, ELV_ON, 'tr', {
+      pendingLookup: true,
+    });
+    expect(offlinePending.name).toBe('INCEPTION');
+    expect(offlinePending.year).toBe(2010);
+    expect(offlinePending.logo).toBeNull();
+
+    const offlineSettled = applyElvCardPresentation(noisyItem, undefined, ELV_ON, 'tr', {
+      pendingLookup: false,
+    });
+    expect(offlineSettled.name).toBe('INCEPTION');
+    expect(offlineSettled.year).toBe(2010);
+    expect(offlineSettled.logo).toBe(noisyItem.logo);
+
+    const offlinePage = presentElvCatalogItems([noisyItem], new Map(), ELV_ON, 'tr');
+    expect(offlinePage[0]?.name).toBe('INCEPTION');
+    expect(offlinePage[0]?.year).toBe(2010);
+  });
+
   it('matches search queries against original, English, and localized title aliases', () => {
     expect(matchesElvSearchAliases('baslangic', SAMPLE_ENRICHMENT, SAMPLE_ITEM.name, 'tr')).toBe(
       true,

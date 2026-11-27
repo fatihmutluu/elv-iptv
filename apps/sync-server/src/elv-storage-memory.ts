@@ -2,8 +2,10 @@ import type {
   ElvFeedCacheRecord,
   ElvFeedItem,
   ElvFeedKey,
+  ElvImdbRatingRecord,
   ElvLocalizedSynopsisRecord,
   ElvMatchIndexRecord,
+  ElvMediaType,
   ElvMetadataStorage,
   ElvTitleRecord,
 } from './elv-types.ts';
@@ -32,6 +34,7 @@ function mergeTitleRecords(
       : incoming.originalTitle;
   return {
     imdbId: incoming.imdbId,
+    tmdbId: incoming.tmdbId ?? existing.tmdbId,
     mediaType: incoming.mediaType,
     originalTitle,
     englishTitle: incoming.englishTitle ?? existing.englishTitle,
@@ -55,11 +58,12 @@ function mergeTitleRecords(
   };
 }
 
-/** Creates an in-memory `ElvMetadataStorage` matching Cloudflare D1 Wave E1 semantics. */
+/** Creates an in-memory `ElvMetadataStorage` matching Cloudflare D1 collective metadata semantics. */
 export function createMemoryElvStorage(): ElvMetadataStorage {
   const titlesByImdbId = new Map<string, ElvTitleRecord>();
   const matchesByLookupKey = new Map<string, ElvMatchIndexRecord>();
   const synopsesByKey = new Map<string, ElvLocalizedSynopsisRecord>();
+  const ratingsByImdbId = new Map<string, ElvImdbRatingRecord>();
   const feedsByKey = new Map<ElvFeedKey, ElvFeedCacheRecord>();
 
   return {
@@ -67,11 +71,40 @@ export function createMemoryElvStorage(): ElvMetadataStorage {
       return titlesByImdbId.get(imdbId) ?? null;
     },
 
+    async getElvTitleByTmdbId(
+      tmdbId: string,
+      mediaType?: ElvMediaType,
+    ): Promise<ElvTitleRecord | null> {
+      let best: ElvTitleRecord | null = null;
+      for (const record of titlesByImdbId.values()) {
+        if (record.tmdbId !== tmdbId) continue;
+        if (mediaType && record.mediaType !== mediaType) continue;
+        if (!best || record.updatedAt > best.updatedAt) {
+          best = record;
+        }
+      }
+      return best;
+    },
+
     async getElvTitlesByIds(imdbIds: readonly string[]): Promise<Map<string, ElvTitleRecord>> {
       const result = new Map<string, ElvTitleRecord>();
       for (const imdbId of imdbIds) {
         const record = titlesByImdbId.get(imdbId);
         if (record) result.set(imdbId, record);
+      }
+      return result;
+    },
+
+    async getElvTitlesByTmdbIds(
+      tmdbIds: readonly string[],
+      mediaType?: ElvMediaType,
+    ): Promise<Map<string, ElvTitleRecord>> {
+      const wanted = new Set(tmdbIds);
+      const result = new Map<string, ElvTitleRecord>();
+      for (const record of titlesByImdbId.values()) {
+        if (!record.tmdbId || !wanted.has(record.tmdbId)) continue;
+        if (mediaType && record.mediaType !== mediaType) continue;
+        result.set(record.tmdbId, record);
       }
       return result;
     },
@@ -101,7 +134,11 @@ export function createMemoryElvStorage(): ElvMetadataStorage {
 
     async upsertElvMatches(matches: readonly ElvMatchIndexRecord[]): Promise<void> {
       for (const entry of matches) {
-        matchesByLookupKey.set(entry.lookupKey, entry);
+        const existing = matchesByLookupKey.get(entry.lookupKey);
+        matchesByLookupKey.set(entry.lookupKey, {
+          ...entry,
+          tmdbId: entry.tmdbId ?? existing?.tmdbId ?? null,
+        });
       }
     },
 
@@ -127,10 +164,50 @@ export function createMemoryElvStorage(): ElvMetadataStorage {
     async upsertElvLocalizedSynopsis(record: ElvLocalizedSynopsisRecord): Promise<void> {
       const key = `${record.imdbId}:${record.lang}`;
       const existing = synopsesByKey.get(key);
+      const hasSynopsis = record.synopsis.length > 0;
       synopsesByKey.set(key, {
-        ...record,
+        imdbId: record.imdbId,
+        lang: record.lang,
         localizedTitle: record.localizedTitle ?? existing?.localizedTitle ?? null,
+        synopsis: hasSynopsis ? record.synopsis : (existing?.synopsis ?? ''),
+        source: hasSynopsis ? record.source : (existing?.source ?? record.source),
+        updatedAt: record.updatedAt,
       });
+    },
+
+    async upsertElvLocalizedSynopsesBatch(
+      records: readonly ElvLocalizedSynopsisRecord[],
+    ): Promise<void> {
+      for (const record of records) {
+        const key = `${record.imdbId}:${record.lang}`;
+        const existing = synopsesByKey.get(key);
+        const hasSynopsis = record.synopsis.length > 0;
+        synopsesByKey.set(key, {
+          imdbId: record.imdbId,
+          lang: record.lang,
+          localizedTitle: record.localizedTitle ?? existing?.localizedTitle ?? null,
+          synopsis: hasSynopsis ? record.synopsis : (existing?.synopsis ?? ''),
+          source: hasSynopsis ? record.source : (existing?.source ?? record.source),
+          updatedAt: record.updatedAt,
+        });
+      }
+    },
+
+    async getImdbRatingsByIds(
+      imdbIds: readonly string[],
+    ): Promise<Map<string, ElvImdbRatingRecord>> {
+      const result = new Map<string, ElvImdbRatingRecord>();
+      for (const imdbId of imdbIds) {
+        const row = ratingsByImdbId.get(imdbId);
+        if (row) result.set(imdbId, row);
+      }
+      return result;
+    },
+
+    async upsertImdbRatingsBatch(ratings: readonly ElvImdbRatingRecord[]): Promise<void> {
+      for (const row of ratings) {
+        ratingsByImdbId.set(row.imdbId, row);
+      }
     },
 
     async getElvFeed(feedKey: ElvFeedKey): Promise<ElvFeedCacheRecord | null> {

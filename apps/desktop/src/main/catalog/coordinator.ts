@@ -35,6 +35,7 @@ export interface CatalogCoordinator<TPort = unknown> {
   readonly isRunning: boolean;
   connectClient(): Promise<{ clientId: number; rendererPort: TPort }>;
   disconnectClient(clientId: number): void;
+  setElvServerUrl(url: string): void;
   onUnexpectedExit(listener: (code: number) => void): () => void;
   shutdown(): Promise<void>;
 }
@@ -62,6 +63,7 @@ export function createCatalogCoordinator<TPort = unknown>(
 
   let active: ActiveWorker<TPort> | undefined;
   let nextClientId = 0;
+  let currentElvServerUrl = deps.elvServerUrl?.trim() ?? '';
   const exitListeners = new Set<(code: number) => void>();
 
   const handleSecretRequest = async (
@@ -156,9 +158,7 @@ export function createCatalogCoordinator<TPort = unknown>(
     child.postMessage({
       type: 'init',
       dbPath,
-      ...(deps.elvServerUrl !== undefined && deps.elvServerUrl.length > 0
-        ? { elvServerUrl: deps.elvServerUrl }
-        : {}),
+      ...(currentElvServerUrl.length > 0 ? { elvServerUrl: currentElvServerUrl } : {}),
     });
     return ready;
   };
@@ -182,6 +182,18 @@ export function createCatalogCoordinator<TPort = unknown>(
         active.child.postMessage({ type: 'client-disconnect', clientId });
       } catch {
         // worker already exited
+      }
+    },
+
+    setElvServerUrl(url: string): void {
+      const nextUrl = url.trim();
+      if (nextUrl === currentElvServerUrl) return;
+      currentElvServerUrl = nextUrl;
+      if (!active || active.closing) return;
+      try {
+        active.child.postMessage({ type: 'set-elv-server-url', elvServerUrl: nextUrl });
+      } catch {
+        // worker already exited; next ensureWorker() init will receive currentElvServerUrl
       }
     },
 

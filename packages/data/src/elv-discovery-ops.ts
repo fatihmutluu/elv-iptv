@@ -145,6 +145,7 @@ export function createCatalogElvDiscoveryOpsMethods(deps: {
   readonly clock: () => number;
   readonly enrichmentStore?: ElvEnrichmentStore | undefined;
   readonly elvClient?: ElvMetadataClient | undefined;
+  readonly getElvClient?: (() => ElvMetadataClient | undefined) | undefined;
   readonly resolveRowLogos?: RowLogoResolver | undefined;
   readonly getElvTitleDetail: (
     imdbId: string,
@@ -155,7 +156,9 @@ export function createCatalogElvDiscoveryOpsMethods(deps: {
     },
   ) => Promise<ElvTitleRecord | null>;
 }): CatalogElvDiscoveryOpsMethods {
-  const { db, clock, enrichmentStore, elvClient, resolveRowLogos, getElvTitleDetail } = deps;
+  const { db, clock, enrichmentStore, resolveRowLogos, getElvTitleDetail } = deps;
+  const resolveElvClient = (): ElvMetadataClient | undefined =>
+    deps.getElvClient?.() ?? deps.elvClient;
 
   return {
     async listElvImdbGenres(kind, opts) {
@@ -266,7 +269,8 @@ export function createCatalogElvDiscoveryOpsMethods(deps: {
     },
 
     async refreshElvFeeds(opts) {
-      if (enrichmentStore === undefined || elvClient === undefined) return false;
+      const client = resolveElvClient();
+      if (enrichmentStore === undefined || client === undefined) return false;
       const nowMs = clock();
       if (opts?.force !== true) {
         const existing = await enrichmentStore.listFeeds(ELV_FEED_KEYS);
@@ -280,7 +284,7 @@ export function createCatalogElvDiscoveryOpsMethods(deps: {
           }
         }
       }
-      const payload = await elvClient.fetchFeeds(opts?.signal);
+      const payload = await client.fetchFeeds(opts?.signal);
       if (payload === null) return false;
       const persistedAt = clock();
       await Promise.all([
@@ -415,10 +419,11 @@ export function createCatalogElvDiscoveryOpsMethods(deps: {
     },
 
     async searchElvMatchCandidates(query, mediaType, opts) {
-      if (elvClient === undefined) return [];
+      const client = resolveElvClient();
+      if (client === undefined) return [];
       const cleaned = query.trim();
       if (cleaned === '') return [];
-      return elvClient.searchTitles(cleaned, mediaType, opts?.signal);
+      return client.searchTitles(cleaned, mediaType, opts?.signal);
     },
 
     async applyElvFixMatch(input) {

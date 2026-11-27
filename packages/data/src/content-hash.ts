@@ -115,6 +115,7 @@ export interface MovieHashInput {
   readonly name: string;
   readonly nameFold: string;
   readonly logo?: string | null | undefined;
+  readonly backdrop?: string | null | undefined;
   readonly rating?: number | null | undefined;
   readonly year?: number | null | undefined;
   readonly extension?: string | null | undefined;
@@ -134,6 +135,7 @@ export interface SeriesHashInput {
   readonly name: string;
   readonly nameFold: string;
   readonly cover?: string | null | undefined;
+  readonly backdrop?: string | null | undefined;
   readonly plot?: string | null | undefined;
   readonly rating?: number | null | undefined;
   readonly year?: number | null | undefined;
@@ -175,6 +177,7 @@ export function hashMovieRow(row: MovieHashInput): string {
     row.name,
     row.nameFold,
     row.logo,
+    row.backdrop,
     row.rating,
     row.year,
     row.extension,
@@ -196,6 +199,7 @@ export function hashSeriesRow(row: SeriesHashInput): string {
     row.name,
     row.nameFold,
     row.cover,
+    row.backdrop,
     row.plot,
     row.rating,
     row.year,

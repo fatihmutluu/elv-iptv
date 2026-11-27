@@ -1,0 +1,49 @@
+name: IMDb Ratings Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_votes:
+        description: Minimum IMDb vote count threshold
+        required: false
+        default: "500"
+      limit:
+        description: Optional max row limit (empty for all qualifying rows)
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync-ratings:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Sync IMDb official ratings dataset to Cloudflare D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ELV_D1_DATABASE_ID: ${{ secrets.ELV_D1_DATABASE_ID }}
+          MIN_VOTES: ${{ inputs.min_votes || '500' }}
+          ROW_LIMIT: ${{ inputs.limit || '' }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$ELV_D1_DATABASE_ID" ]; then
+            echo "Skipping IMDb ratings sync: Cloudflare D1 API secrets are not fully configured."
+            exit 0
+          fi
+          args=(--min-votes "$MIN_VOTES" --out-dir "$RUNNER_TEMP/imdb-sql" --apply-d1-api)
+          if [ -n "$ROW_LIMIT" ]; then
+            args+=(--limit "$ROW_LIMIT")
+          fi
+          node tools/bin/sync-imdb-ratings.ts "${args[@]}"

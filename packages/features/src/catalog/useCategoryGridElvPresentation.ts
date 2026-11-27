@@ -87,13 +87,7 @@ export function useCategoryGridElvPresentation({
   // so merged IMDb copies compact without gaps and counts reflect deduplicated titles.
   // biome-ignore lint/correctness/useExhaustiveDependencies: pageVersion refreshes loaded page items
   const singlePageDeduped = useMemo<readonly ItemRow[] | null>(() => {
-    if (
-      !elvMergeActive ||
-      elvEnrichment.enrichmentByKey.size === 0 ||
-      !pagedSource ||
-      rawItemCount <= 0 ||
-      rawItemCount > GRID_PAGE_SIZE
-    ) {
+    if (!elvMergeActive || !pagedSource || rawItemCount <= 0 || rawItemCount > GRID_PAGE_SIZE) {
       return null;
     }
     const loaded: ItemRow[] = [];
@@ -143,7 +137,6 @@ export function useCategoryGridElvPresentation({
     if (
       singlePageDeduped !== null ||
       !elvMergeActive ||
-      elvEnrichment.enrichmentByKey.size === 0 ||
       !pagedSource ||
       rawItemCount <= GRID_PAGE_SIZE
     ) {

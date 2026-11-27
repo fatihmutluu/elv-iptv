@@ -18,6 +18,7 @@ export interface NodeSyncServerOptions {
   readonly storage?: SyncAppConfig['storage'];
   readonly verifierHashIterations?: number;
   readonly rateLimits?: SyncAppConfig['rateLimits'];
+  readonly tmdbApiKey?: string;
 }
 
 /** Running Node HTTP sync server handle. */
@@ -128,6 +129,11 @@ export async function startNodeSyncServer(
       ? { verifierHashIterations: options.verifierHashIterations }
       : {}),
     ...(options.rateLimits !== undefined ? { rateLimits: options.rateLimits } : {}),
+    ...(options.tmdbApiKey !== undefined
+      ? { tmdbApiKey: options.tmdbApiKey }
+      : process.env.TMDB_API_KEY !== undefined
+        ? { tmdbApiKey: process.env.TMDB_API_KEY }
+        : {}),
   });
 
   const server = createServer((req, res) => {

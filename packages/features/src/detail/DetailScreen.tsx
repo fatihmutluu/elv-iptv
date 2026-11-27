@@ -33,7 +33,6 @@ import {
 import { PersonLibraryModal } from '../shared/PersonLibraryModal';
 import { DetailCastStrip } from './DetailCastStrip';
 import { DetailEpisodes } from './DetailEpisodes';
-import { DetailFixMatchModal } from './DetailFixMatchModal';
 import { DetailFranchiseStrip } from './DetailFranchiseStrip';
 import { DetailHero, type DetailHeroFocusSlot } from './DetailHero';
 import { DetailSynopsisSheet } from './DetailHeroExtras';
@@ -92,7 +91,7 @@ function DetailTvKeyBridge({ onEvent }: { onEvent: TvKeyHandler }): ReactElement
  * Flagship Cinema Quietude 2-column Movie & Series Detail screen (`UI_UX_PHILOSOPHY.md` §1–§6).
  * Preserves exact vertical order: **Hero → Cast → Franchise (when `>= 2` library items) →
  * Season Selector & Episodes → More Like This**, with rich ELV hydration, in-app trailers,
- * clickable actor/director library modal, and Fix Match (`#14`, `#152`, `#512`).
+ * and clickable actor/director library modal (`#14`, `#152`, `#512`).
  */
 export function DetailScreen({
   target,
@@ -120,14 +119,12 @@ export function DetailScreen({
   const [selectedVersionKey, setSelectedVersionKey] = useState<string | null>(null);
   const [activePerson, setActivePerson] = useState<PersonLibraryModalPerson | null>(null);
   const [trailerOpen, setTrailerOpen] = useState(false);
-  const [fixMatchOpen, setFixMatchOpen] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset modal & version state on title change
   useEffect(() => {
     setSelectedVersionKey(null);
     setActivePerson(null);
     setTrailerOpen(false);
-    setFixMatchOpen(false);
   }, [target.itemKey]);
 
   const data = useDetailData({
@@ -179,14 +176,12 @@ export function DetailScreen({
   const elvModeEnabled = elvPreferences?.elvModeEnabled === true;
   const hasTrailer =
     isValidTrailerStreamUrl(data.trailerStreamUrl) || isValidYoutubeId(data.trailerYoutubeId);
-  const canFixMatch = elvModeEnabled && catalog.applyElvFixMatch !== undefined;
 
   const extras = useDetailExtrasState({
     target,
     plot: data.plot,
     cast: data.cast,
     director: data.director,
-    hasFixMatch: canFixMatch,
     versions: data.versions,
     ...(activeVersion !== undefined ? { activeVersionKey: activeVersion.key } : {}),
     onSelectVersion: handleSelectVersion,
@@ -197,7 +192,7 @@ export function DetailScreen({
     activeVersion,
     activeSeriesSourceId,
     title: data.title,
-    backdropUri: data.backdropUri,
+    backdropUri: data.posterUri ?? data.backdropUri,
     onPlay,
   });
 
@@ -291,8 +286,6 @@ export function DetailScreen({
 
   const handleClosePerson = useCallback(() => setActivePerson(null), []);
   const handleCloseTrailer = useCallback(() => setTrailerOpen(false), []);
-  const handleOpenFixMatch = useCallback(() => setFixMatchOpen(true), []);
-  const handleCloseFixMatch = useCallback(() => setFixMatchOpen(false), []);
 
   const handleSelectPerson = useCallback(
     (person: PersonLibraryModalPerson) => {
@@ -447,7 +440,6 @@ export function DetailScreen({
         if (slot === 'play') handlePlayPrimary();
         else if (slot === 'preplay-version') extras.toggleVersionMenu();
         else if (slot === 'synopsis') extras.toggleSynopsis();
-        else if (slot === 'fix-match') handleOpenFixMatch();
         return;
       }
       if (rowId === 'cast') {
@@ -492,7 +484,6 @@ export function DetailScreen({
       episodeChunks,
       episodeIndexOffset,
       extras,
-      handleOpenFixMatch,
       handleOpenTrailer,
       handlePlayPrimary,
       handlePressEpisode,
@@ -551,7 +542,7 @@ export function DetailScreen({
     [heroTopClearance, reportScrolled, theme.reduceMotion],
   );
 
-  const anyModalOpen = activePerson !== null || trailerOpen || fixMatchOpen;
+  const anyModalOpen = activePerson !== null || trailerOpen;
   const tvNav = useTvDetailNavigation({
     isTv,
     isActiveScope: isActiveScope && !anyModalOpen,
@@ -619,14 +610,13 @@ export function DetailScreen({
           kind={target.kind}
           title={data.title}
           backdropUri={data.backdropUri}
+          posterUri={data.posterUri}
           year={data.year}
           rating={data.rating}
           votes={data.votes}
           runtimeMin={data.runtimeMin}
-          manualLock={data.manualLock}
           plot={data.plot}
           genres={data.genres}
-          isEnriched={data.isEnriched}
           {...(dl.movieDownloadState !== undefined
             ? {
                 downloadState: dl.movieDownloadState,
@@ -634,7 +624,6 @@ export function DetailScreen({
               }
             : {})}
           {...(hasTrailer ? { onPressTrailer: handleOpenTrailer } : {})}
-          {...(canFixMatch ? { onPressFixMatch: handleOpenFixMatch } : {})}
           {...(target.technicalMeta !== undefined ? { technicalMeta: target.technicalMeta } : {})}
           seasonsCount={seasons.length}
           inMyList={data.inMyList}
@@ -769,17 +758,6 @@ export function DetailScreen({
         {...(videoHost !== undefined ? { videoHost } : {})}
         {...(trailerExternal !== undefined ? { trailerExternal } : {})}
         onClose={handleCloseTrailer}
-      />
-
-      <DetailFixMatchModal
-        visible={fixMatchOpen}
-        itemKey={target.itemKey}
-        sourceId={target.sourceId}
-        mediaType={target.kind}
-        initialQuery={data.rawTitle}
-        catalog={catalog}
-        onApplied={data.applyFixMatchResult}
-        onClose={handleCloseFixMatch}
       />
     </View>
   );

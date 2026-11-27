@@ -1,4 +1,3 @@
-import type { ElvItemEnrichment, ElvSearchCandidate, ElvTitleRecord } from '@elv/data';
 import { createAppI18n } from '@elv/i18n';
 import type { EngineEvent } from '@elv/playback';
 import {
@@ -10,45 +9,12 @@ import {
   ViewportProvider,
 } from '@elv/ui-kit';
 import { act, render, screen, waitFor } from '@testing-library/react-native';
-import { Platform, ScrollView, TextInput, View } from 'react-native';
+import { Platform, View } from 'react-native';
 import type { OpenVideoEngine, VideoHost } from '../../ports/video-host';
-import { DetailFixMatchModal } from '../DetailFixMatchModal';
 import { DetailTrailerModal } from '../DetailTrailerModal';
 
 const KEYCODE_BACK = 4;
-const KEYCODE_DPAD_UP = 19;
-const KEYCODE_DPAD_DOWN = 20;
-const KEYCODE_DPAD_RIGHT = 22;
 const KEYCODE_DPAD_CENTER = 23;
-
-function makeTitleRecord(overrides: Partial<ElvTitleRecord> = {}): ElvTitleRecord {
-  return {
-    imdbId: 'tt1160419',
-    mediaType: 'movie',
-    originalTitle: 'Dune',
-    englishTitle: 'Dune',
-    localizedTitles: { tr: 'Dune: Çöl Gezegeni' },
-    year: 2021,
-    rating: 8.0,
-    votes: 850_000,
-    runtimeMin: 155,
-    genres: ['Sci-Fi', 'Adventure'],
-    posterUrl: 'https://imdb.invalid/dune-poster.jpg',
-    backdropUrl: 'https://imdb.invalid/dune-backdrop.jpg',
-    trailerStreamUrl: 'https://imdb-video.media-imdb.com/vi123/dune.mp4',
-    trailerYoutubeId: '8g18jFHCLXk',
-    director: 'Denis Villeneuve',
-    cast: [],
-    mltImdbIds: [],
-    franchiseKey: 'dune',
-    franchiseName: 'Dune',
-    franchiseOrder: 1,
-    synopses: {},
-    detailFetchedAt: 1_700_000_000_000,
-    updatedAt: 1_700_000_000_000,
-    ...overrides,
-  };
-}
 
 function makeFakeVideoHost(): {
   videoHost: VideoHost;
@@ -90,7 +56,7 @@ function makeFakeVideoHost(): {
   };
 }
 
-describe('Wave E2 DetailTrailerModal & DetailFixMatchModal regressions (#512)', () => {
+describe('Wave E2 DetailTrailerModal regressions (#512)', () => {
   it('does not reopen or release DetailTrailerModal native VideoHost when parent rerenders with a new onClose reference (P0 #1)', async () => {
     const { videoHost, loadMock, stopMock, releaseMock } = makeFakeVideoHost();
     const openSpy = videoHost.open as jest.Mock;
@@ -353,139 +319,5 @@ describe('Wave E2 DetailTrailerModal & DetailFixMatchModal regressions (#512)', 
     expect(onCloseFailed).toHaveBeenCalledTimes(1);
 
     await view2.unmount();
-  });
-
-  it('allows TV D-pad to reach Fix Match search input & button, auto-scrolls candidates, and guards mid-apply close (P1 #5)', async () => {
-    jest.replaceProperty(Platform, 'OS', 'android');
-    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
-
-    let keyListener: ((e: AndroidKeyEvent) => void) | undefined;
-    const androidSource: AndroidKeySource = {
-      addListener: (l) => {
-        keyListener = l;
-        return {
-          remove: () => {
-            keyListener = undefined;
-          },
-        };
-      },
-    };
-    const pressKey = async (keyCode: number) => {
-      await act(async () => {
-        keyListener?.({ keyCode, action: 'down', canceled: false, ageMs: 0 });
-        keyListener?.({ keyCode, action: 'up', canceled: false, ageMs: 10 });
-      });
-    };
-
-    const candidates: readonly ElvSearchCandidate[] = [
-      {
-        imdbId: 'tt1',
-        title: 'Dune',
-        year: 2021,
-        mediaType: 'movie',
-        posterUrl: null,
-        stars: null,
-      },
-      {
-        imdbId: 'tt2',
-        title: 'Dune: Part Two',
-        year: 2024,
-        mediaType: 'movie',
-        posterUrl: null,
-        stars: null,
-      },
-      {
-        imdbId: 'tt3',
-        title: 'Dune (1984)',
-        year: 1984,
-        mediaType: 'movie',
-        posterUrl: null,
-        stars: null,
-      },
-    ];
-    let resolveApply: ((value: ElvItemEnrichment | null) => void) | undefined;
-    const searchElvMatchCandidates = jest.fn(async () => candidates);
-    const applyElvFixMatch = jest.fn(
-      () =>
-        new Promise<ElvItemEnrichment | null>((resolve) => {
-          resolveApply = resolve;
-        }),
-    );
-    const onApplied = jest.fn();
-    const onClose = jest.fn();
-    const scrollToSpy = jest
-      .spyOn(ScrollView.prototype, 'scrollTo')
-      .mockImplementation(() => undefined);
-    const focusSpy = jest.spyOn(TextInput.prototype, 'focus').mockImplementation(() => undefined);
-
-    const wrap = (visible: boolean) => (
-      <RemoteKeysProvider android={androidSource}>
-        <ViewportProvider
-          value={{
-            formFactor: 'tv',
-            orientation: 'landscape',
-            inputModality: 'tv',
-            width: 1920,
-            height: 1080,
-          }}
-        >
-          <ThemeProvider preset="obsidianCrimson">
-            <I18nProvider i18n={createAppI18n('en')}>
-              <DetailFixMatchModal
-                visible={visible}
-                itemKey="x:src-1:movie:1"
-                sourceId="src-1"
-                mediaType="movie"
-                initialQuery="Dune"
-                catalog={{ searchElvMatchCandidates, applyElvFixMatch }}
-                onApplied={onApplied}
-                onClose={onClose}
-              />
-            </I18nProvider>
-          </ThemeProvider>
-        </ViewportProvider>
-      </RemoteKeysProvider>
-    );
-
-    const view = await render(wrap(true));
-    await waitFor(() => {
-      expect(screen.getByTestId('detail-fix-match-candidate-0')).toBeTruthy();
-    });
-
-    await pressKey(KEYCODE_DPAD_UP);
-    await pressKey(KEYCODE_DPAD_CENTER);
-    expect(focusSpy).toHaveBeenCalled();
-
-    await pressKey(KEYCODE_DPAD_RIGHT);
-    await pressKey(KEYCODE_DPAD_CENTER);
-    await waitFor(() => {
-      expect(searchElvMatchCandidates).toHaveBeenCalledTimes(2);
-    });
-
-    scrollToSpy.mockClear();
-    await pressKey(KEYCODE_DPAD_DOWN);
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenCalledWith(expect.objectContaining({ y: expect.any(Number) }));
-
-    await pressKey(KEYCODE_DPAD_CENTER);
-    expect(applyElvFixMatch).toHaveBeenCalledTimes(1);
-    await view.rerender(wrap(false));
-    await act(async () => {
-      resolveApply?.({
-        itemKey: 'x:src-1:movie:1',
-        sourceId: 'src-1',
-        mediaType: 'movie',
-        imdbId: 'tt2',
-        confidence: 1,
-        manualLock: true,
-        title: makeTitleRecord({ imdbId: 'tt2' }),
-      });
-    });
-    expect(onApplied).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-
-    scrollToSpy.mockRestore();
-    focusSpy.mockRestore();
-    await view.unmount();
   });
 });

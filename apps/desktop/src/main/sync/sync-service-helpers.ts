@@ -1,5 +1,5 @@
 import { webcrypto } from 'node:crypto';
-import { redactText, type SecretStore } from '@elv/domain';
+import { normalizeSyncServerUrl, redactText, type SecretStore } from '@elv/domain';
 import {
   base64UrlDecode,
   base64UrlEncode,
@@ -16,10 +16,99 @@ import {
 import type { AutoSyncStateIpc, SyncAccountStateIpc } from '../../shared/sync-ipc.ts';
 
 export const SESSION_SECRET_KEY = 'elv.sync.session.v1';
+const SERVER_URL_SECRET_KEY = 'elv.sync.server_url.v1';
 export const VAULT_BASELINE_SECRET_KEY = 'sync.vault.baseline.v2';
 export const VAULT_KEY_BYTES = 32;
 export const DEFAULT_FLUSH_INTERVAL_MS = 60_000;
 const FEEDBACK_LOG_TAIL_LINES = 25;
+
+/** Safely invokes each listener in a snapshot of `listeners`, isolating subscriber exceptions. */
+export function broadcastToListeners<T>(
+  listeners: ReadonlySet<(value: T) => void>,
+  value: T,
+): void {
+  for (const listener of [...listeners]) {
+    try {
+      listener(value);
+    } catch {
+      // Isolate subscriber callback errors.
+    }
+  }
+}
+
+/** Manages normalized sync/ELV server URL state, `SecretStore` persistence, and change subscribers (`#511`). */
+export interface ServerUrlController {
+  get(): string;
+  hydrate(): Promise<string>;
+  set(nextUrl: string): string;
+  subscribe(listener: (url: string) => void): () => void;
+  clearListeners(): void;
+}
+
+/** Creates a {@link ServerUrlController} that persists non-default custom URLs safely in `SecretStore`. */
+export function createServerUrlController(
+  secretStore: SecretStore,
+  defaultServerUrl: string,
+  onChange?: (serverUrl: string) => void,
+): ServerUrlController {
+  let current = defaultServerUrl;
+  let explicitlySet = false;
+  let persistChain: Promise<void> = Promise.resolve();
+  const listeners = new Set<(url: string) => void>();
+
+  const enqueuePersist = (op: () => Promise<void>): void => {
+    persistChain = persistChain.then(op, op).catch(() => undefined);
+  };
+
+  const emit = (url: string): void => {
+    try {
+      onChange?.(url);
+    } catch {
+      // Isolate observer callback errors.
+    }
+    broadcastToListeners(listeners, url);
+  };
+
+  return {
+    get: () => current,
+    async hydrate(): Promise<string> {
+      const raw = await secretStore.get(SERVER_URL_SECRET_KEY).catch(() => undefined);
+      if (explicitlySet) return current;
+      const trimmed = raw?.trim() ?? '';
+      const normalized = trimmed.length > 0 ? normalizeSyncServerUrl(trimmed, '') : '';
+      const next = normalized.length > 0 ? normalized : defaultServerUrl;
+      if (next !== current) {
+        current = next;
+        emit(next);
+      }
+      return current;
+    },
+    set(rawUrl: string): string {
+      explicitlySet = true;
+      const trimmed = rawUrl.trim();
+      const normalized = trimmed.length > 0 ? normalizeSyncServerUrl(trimmed, '') : '';
+      const next = normalized.length > 0 ? normalized : defaultServerUrl;
+      const changed = next !== current;
+      current = next;
+      if (normalized.length > 0 && normalized !== defaultServerUrl) {
+        enqueuePersist(() => secretStore.set(SERVER_URL_SECRET_KEY, normalized));
+      } else {
+        enqueuePersist(() => secretStore.delete(SERVER_URL_SECRET_KEY));
+      }
+      if (changed) emit(next);
+      return next;
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    clearListeners(): void {
+      listeners.clear();
+    },
+  };
+}
 
 /** Maps `@elv/sync` scheduler states onto the IPC auto-sync indicator state. */
 export function mapSchedulerState(raw: 'idle' | 'syncing' | 'pending' | 'error'): AutoSyncStateIpc {
@@ -120,6 +209,23 @@ export async function loadVaultBaseline(
 /** Builds a storage-safe per-account key recording whether initial preferences were applied once. */
 export function initialPrefsAppliedKey(userId: string): string {
   return `elv.sync.initprefs.v1.${userId.replace(/[^A-Za-z0-9._-]/g, '_')}`;
+}
+
+/** Returns `true` when one-time initial preferences bootstrap was already applied for `userId`. */
+export async function hasAppliedInitialPrefs(
+  secretStore: SecretStore,
+  userId: string,
+): Promise<boolean> {
+  const val = await secretStore.get(initialPrefsAppliedKey(userId)).catch(() => undefined);
+  return val === '1';
+}
+
+/** Records that initial preferences bootstrap has been completed or skipped for `userId`. */
+export async function markInitialPrefsApplied(
+  secretStore: SecretStore,
+  userId: string,
+): Promise<void> {
+  await secretStore.set(initialPrefsAppliedKey(userId), '1').catch(() => undefined);
 }
 
 /** Minimal Fetch signature accepted by `createDesktopSyncService`. */

@@ -51,7 +51,7 @@ export function detailTargetFromItem(item: ItemRow, categoryId?: string): Detail
     kind: item.kind,
     title: item.name,
     posterUri: item.logo,
-    backdropUri: item.logo,
+    backdropUri: (item as { backdrop?: string | null }).backdrop ?? null,
     year: item.year,
     rating: item.rating,
     catalogId: item.id,
