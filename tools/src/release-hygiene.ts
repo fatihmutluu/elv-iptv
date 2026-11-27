@@ -99,7 +99,7 @@ export function checkAndroidManifest(
   return errors;
 }
 
-/** Checks Apple release `Info.plist` XML for `#12` ATS settings and `.dev` bundle IDs. */
+/** Checks Apple release `Info.plist` XML for `#12` ATS settings, Expo SceneDelegate integrity, and `.dev` bundle IDs. */
 export function checkAppleInfoPlist(plistXml: string): string[] {
   const errors: string[] = [];
   const stripped = plistXml.replace(/<!--[\s\S]*?-->/g, '');
@@ -114,6 +114,29 @@ export function checkAppleInfoPlist(plistXml: string): string[] {
   }
   if (!/<key>NSAllowsArbitraryLoads<\/key>\s*<true\s*\/>/.test(stripped)) {
     errors.push('Info.plist must declare NSAllowsArbitraryLoads = true (#12)');
+  }
+
+  const primarySceneRoleMatch =
+    /<key>UIWindowSceneSessionRoleApplication<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(stripped);
+  if (primarySceneRoleMatch !== null) {
+    const roleBody = primarySceneRoleMatch[1] ?? '';
+    const delegateMatches = [
+      ...roleBody.matchAll(/<key>UISceneDelegateClassName<\/key>\s*<string>([^<]+)<\/string>/g),
+    ];
+    const hasExpoSceneDelegate = delegateMatches.some((match) => {
+      const cls = match[1]?.trim() ?? '';
+      return cls === 'SceneDelegate' || cls.endsWith('.SceneDelegate');
+    });
+    if (!hasExpoSceneDelegate) {
+      errors.push(
+        'Info.plist UIWindowSceneSessionRoleApplication must declare Expo SceneDelegate ($(PRODUCT_MODULE_NAME).SceneDelegate)',
+      );
+    }
+  }
+  if (stripped.includes('AetherPrimaryWindowSceneDelegate')) {
+    errors.push(
+      'Info.plist must not reference obsolete AetherPrimaryWindowSceneDelegate (breaks Expo SDK 58 SceneDelegate launch)',
+    );
   }
 
   return errors;

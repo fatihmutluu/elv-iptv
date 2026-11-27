@@ -220,6 +220,47 @@ describe('checkAppleInfoPlist (#12)', () => {
     expect(checkAppleInfoPlist(disabled).join('\n')).toContain('NSAllowsArbitraryLoads');
     expect(checkAppleInfoPlist(devId).join('\n')).toContain('.dev');
   });
+
+  it('accepts Expo SceneDelegate and rejects AetherPrimaryWindowSceneDelegate in UIWindowSceneSessionRoleApplication', () => {
+    const validScenePlist = CLEAN_INFO_PLIST.replace(
+      '</dict>\n</plist>',
+      `  <key>UIApplicationSceneManifest</key>
+  <dict>
+    <key>UIApplicationSupportsMultipleScenes</key>
+    <false/>
+    <key>UISceneConfigurations</key>
+    <dict>
+      <key>UIWindowSceneSessionRoleApplication</key>
+      <array>
+        <dict>
+          <key>UISceneConfigurationName</key>
+          <string>Default Configuration</string>
+          <key>UISceneDelegateClassName</key>
+          <string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+        </dict>
+      </array>
+      <key>UIWindowSceneSessionRoleExternalDisplayNonInteractive</key>
+      <array>
+        <dict>
+          <key>UISceneConfigurationName</key>
+          <string>External Display Configuration</string>
+          <key>UISceneDelegateClassName</key>
+          <string>AetherExternalDisplaySceneDelegate</string>
+        </dict>
+      </array>
+    </dict>
+  </dict>
+</dict>
+</plist>`,
+    );
+    expect(checkAppleInfoPlist(validScenePlist)).toEqual([]);
+
+    const brokenPrimary = validScenePlist.replace(
+      '$(PRODUCT_MODULE_NAME).SceneDelegate',
+      'AetherPrimaryWindowSceneDelegate',
+    );
+    expect(checkAppleInfoPlist(brokenPrimary).join('\n')).toContain('SceneDelegate');
+  });
 });
 
 describe('checkApplePrivacyManifest (#486)', () => {
