@@ -491,7 +491,7 @@ describe('Player OSD recovery, input guards, subtitles, aspect, orientation & to
     });
     expect(screen.getByTestId('player-progress-hover-time')).toHaveTextContent('1:30');
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('1:30');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('2:00');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('0:30');
     expect(onSeekRatio).not.toHaveBeenCalled();
 
     // Drag past right edge (x=280) -> clamps cleanly to 1.0 (2:00)

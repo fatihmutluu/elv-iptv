@@ -1,5 +1,4 @@
 import type { NowNextEntry } from '@elv/data';
-import type { OsdTimeDisplayMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import {
   type ChapterInfo,
@@ -17,7 +16,7 @@ import { computeProgrammeProgress } from './PlayerInfoSheet';
 import { formatStreamBadges } from './player-overlay-model';
 import { formatPlaybackSpeed } from './settings-menu-nav';
 import { VodProgressBar } from './VodProgressBar';
-import { formatWallClockHm } from './vod-progress-math';
+import { formatWallClockHm, type VodEndTimeDisplayMode } from './vod-progress-math';
 
 /** Shared Cinema Quietude error hint + redacted diagnosis evidence box. */
 export function PlayerFailureBanner({
@@ -101,18 +100,16 @@ export function StreamBadgePills({
   );
 }
 
-/** Sleek Live Now & Next programme progress strip for TV / mobile / desktop / peek overlays (`#58`, `#160`). */
+/** Sleek Live Now & Next programme progress strip for TV / mobile / desktop / peek overlays (`#58`, `#507`). */
 export function LiveNowNextStrip({
   nowNext,
   nowMs,
   i18n,
-  timeDisplayMode = 'total',
   compact = false,
 }: {
   readonly nowNext: NowNextEntry | null | undefined;
   readonly nowMs: number;
   readonly i18n: AppI18n;
-  readonly timeDisplayMode?: OsdTimeDisplayMode | undefined;
   readonly compact?: boolean;
 }): ReactElement | null {
   const theme = useTheme();
@@ -120,8 +117,11 @@ export function LiveNowNextStrip({
   const nextProg = nowNext?.next ?? null;
   if (nowProg === null) return null;
   const progressPct = computeProgrammeProgress(nowProg.start, nowProg.stop, nowMs);
-  const showEndsAt =
-    timeDisplayMode === 'endsAt' && Number.isFinite(nowProg.stop) && nowProg.stop > 0;
+  const showTimeRange =
+    Number.isFinite(nowProg.start) &&
+    Number.isFinite(nowProg.stop) &&
+    nowProg.start > 0 &&
+    nowProg.stop > nowProg.start;
 
   return (
     <View testID="player-live-now-next" style={compact ? styles.nowNextCompact : styles.nowNextBox}>
@@ -138,9 +138,9 @@ export function LiveNowNextStrip({
           {`${i18n.t('player.nowPlaying')} · ${nowProg.title}`}
         </Text>
         <View style={styles.peekRight}>
-          {showEndsAt ? (
+          {showTimeRange ? (
             <Text
-              testID="osd-live-ends-at"
+              testID="osd-live-time-range"
               numberOfLines={1}
               style={[
                 theme.typography.caption,
@@ -148,7 +148,7 @@ export function LiveNowNextStrip({
                 { color: theme.colors.textSecondary },
               ]}
             >
-              {i18n.t('player.endsAt', { time: formatWallClockHm(nowProg.stop) })}
+              {`${formatWallClockHm(nowProg.start)} – ${formatWallClockHm(nowProg.stop)}`}
             </Text>
           ) : null}
           {!compact && nextProg !== null ? (
@@ -194,7 +194,7 @@ export interface PeekBarProps {
   readonly volume: number;
   readonly playbackSpeed: number;
   readonly chapters?: readonly ChapterInfo[] | undefined;
-  readonly timeDisplayMode?: OsdTimeDisplayMode | undefined;
+  readonly timeDisplayMode?: VodEndTimeDisplayMode | undefined;
   readonly wallClock?: (() => number) | undefined;
   readonly nowNext?: NowNextEntry | null | undefined;
   readonly nowMs?: number | undefined;
@@ -226,8 +226,6 @@ export function DesktopPeekStrip(p: PeekBarProps): ReactElement {
             previewPositionMs={p.previewPositionMs}
             chapters={p.chapters}
             timeDisplayMode={p.timeDisplayMode}
-            playbackSpeed={p.playbackSpeed}
-            wallClock={p.wallClock}
             i18n={p.i18n}
             onCycleTimeDisplayMode={p.onCycleTimeDisplayMode}
             onSeekRatio={p.onSeekRatio}
@@ -365,8 +363,6 @@ export function FloatingPeekOsd(
               previewPositionMs={p.previewPositionMs}
               chapters={p.chapters}
               timeDisplayMode={p.timeDisplayMode}
-              playbackSpeed={p.playbackSpeed}
-              wallClock={p.wallClock}
               i18n={p.i18n}
               onCycleTimeDisplayMode={p.onCycleTimeDisplayMode}
               onSeekRatio={p.onSeekRatio}
@@ -394,12 +390,7 @@ export function FloatingPeekOsd(
                 <MicroPill testID="player-channel-digits" label={p.channelDigits} tone="accent" />
               ) : null}
             </View>
-            <LiveNowNextStrip
-              nowNext={p.nowNext}
-              nowMs={p.nowMs ?? Date.now()}
-              i18n={p.i18n}
-              timeDisplayMode={p.timeDisplayMode}
-            />
+            <LiveNowNextStrip nowNext={p.nowNext} nowMs={p.nowMs ?? Date.now()} i18n={p.i18n} />
           </View>
         )}
       </View>

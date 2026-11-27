@@ -96,6 +96,9 @@ describe('Wave P6 DetailHero & DetailScreen — Star unification and Like/Dislik
     const myListBtn = screen.getByTestId('detail-mylist');
     expect(myListBtn.props.accessibilityState?.selected).toBe(false);
     expect(screen.getByTestId('detail-mylist-icon')).toBeTruthy();
+    expect(screen.getByTestId('detail-hero-icon-row')).toBeTruthy();
+    expect(screen.getByTestId('detail-play')).toBeTruthy();
+    expect(screen.queryByTestId('detail-collections')).toBeNull();
     await view.unmount();
   });
 

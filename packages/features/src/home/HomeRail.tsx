@@ -2,7 +2,6 @@ import type { BrowseKind, SeriesUnplayedSummary } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import {
   type ContextMenuAnchor,
-  CtaButton,
   HorizontalRailScroll,
   Icon,
   PosterCard,
@@ -64,7 +63,6 @@ export function buildHomeRailSpecs(t: AppI18n['t']): readonly HomeRailSpec[] {
       actionLabel: t('home.channels'),
       tab: 'live',
     },
-    { id: 'mylist', title: t('home.myList'), variant: 'poster' },
     {
       id: 'movies',
       title: t('home.featuredMovies'),
@@ -79,6 +77,7 @@ export function buildHomeRailSpecs(t: AppI18n['t']): readonly HomeRailSpec[] {
       actionLabel: t('home.seeAll'),
       tab: 'series',
     },
+    { id: 'mylist', title: t('home.myList'), variant: 'poster' },
   ];
 }
 
@@ -471,7 +470,6 @@ HomeRail.displayName = 'HomeRail';
 
 /** Props of {@link HomeCollectionsSection}. */
 export interface HomeCollectionsSectionProps {
-  readonly showHeader: boolean;
   readonly collectionRails: readonly HomeCollectionRail[];
   readonly cardWidth: number;
   readonly gap: number;
@@ -483,8 +481,6 @@ export interface HomeCollectionsSectionProps {
   readonly favoriteKeys: ReadonlySet<string>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
   readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
-  readonly onOpenManager: () => void;
-  readonly onHeaderLayoutY: (y: number) => void;
   readonly onPressItem: (entry: HomeRailEntry, index: number) => void;
   readonly onContextMenuItem: (
     railId: HomeRailId,
@@ -498,38 +494,11 @@ export interface HomeCollectionsSectionProps {
   readonly onLayoutY: (id: HomeRailId, y: number) => void;
 }
 
-/** Renders the custom VOD Collections header and its hydrated horizontal poster rails on Home. */
-export function HomeCollectionsSection(p: HomeCollectionsSectionProps): ReactElement {
-  const theme = useTheme();
-  const i18n = useI18n();
+/** Renders non-empty hydrated custom VOD collection horizontal poster rails on Home (`#508`). */
+export function HomeCollectionsSection(p: HomeCollectionsSectionProps): ReactElement | null {
+  if (p.collectionRails.length === 0) return null;
   return (
     <Fragment>
-      {p.showHeader ? (
-        <View
-          testID="home-collections-header"
-          onLayout={(e) => p.onHeaderLayoutY(e.nativeEvent.layout.y)}
-          style={[styles.collectionsHeader, { paddingHorizontal: p.padX }]}
-        >
-          <View style={styles.collectionsTitleWrap}>
-            <Text style={[theme.typography.h2, { color: theme.colors.textPrimary }]}>
-              {i18n.t('collections.title')}
-            </Text>
-            {p.collectionRails.length === 0 ? (
-              <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-                {i18n.t('collections.subtitle')}
-              </Text>
-            ) : null}
-          </View>
-          <CtaButton
-            testID="home-collections-manage-btn"
-            variant="secondary"
-            label={i18n.t('collections.manageTitle')}
-            focusable={!p.isTv}
-            focused={p.isTv && p.focusedRowId === 'collections-manage'}
-            onPress={p.onOpenManager}
-          />
-        </View>
-      ) : null}
       {p.collectionRails.map((colRail) => (
         <HomeRail
           key={colRail.id}
@@ -581,13 +550,4 @@ const styles = StyleSheet.create({
   },
   touchAction: { minHeight: 40, minWidth: 40, justifyContent: 'center' },
   stripContent: { alignItems: 'flex-start' },
-  collectionsHeader: {
-    marginTop: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    flexWrap: 'wrap',
-  },
-  collectionsTitleWrap: { flexShrink: 1, gap: 2 },
 });

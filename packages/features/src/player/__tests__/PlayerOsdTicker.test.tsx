@@ -107,7 +107,7 @@ describe('VodProgressBar and OsdClock gated ticking', () => {
     });
     expect(raf).not.toHaveBeenCalled();
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('0:30');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('2:00');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:30');
 
     await act(async () => {
       fake.setAnchor(PLAYING);
@@ -137,7 +137,7 @@ describe('VodProgressBar and OsdClock gated ticking', () => {
       />,
     );
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('1:30');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('2:00');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('0:30');
     expect(screen.getByTestId('player-progress-fill').props.style).toEqual(
       expect.arrayContaining([expect.objectContaining({ width: '75%' })]),
     );

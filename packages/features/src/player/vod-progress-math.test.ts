@@ -15,52 +15,50 @@ import {
 const i18nEn = createAppI18n('en');
 const i18nTr = createAppI18n('tr');
 
-describe('vod-progress-math (#160, #355)', () => {
-  it('cycles total -> remaining -> endsAt -> total', () => {
+describe('vod-progress-math (#160, #355, #507)', () => {
+  it('toggles strictly between remaining and total (2-mode cycle)', () => {
+    expect(cycleOsdTimeDisplayMode('remaining')).toBe('total');
     expect(cycleOsdTimeDisplayMode('total')).toBe('remaining');
-    expect(cycleOsdTimeDisplayMode('remaining')).toBe('endsAt');
-    expect(cycleOsdTimeDisplayMode('endsAt')).toBe('total');
   });
 
-  it('formats total, -remaining, and speed-adjusted Ends at HH:MM timestamps (#160)', () => {
+  it('formats elapsed/remaining (no minus sign) and total timestamps (#507)', () => {
     expect(formatPlaybackPosition(31_000)).toBe('0:31');
     expect(formatPlaybackPosition(Number.NaN)).toBe('0:00');
-    expect(formatVodEndTimestamp(31_000, undefined, 1, 'total', 0, i18nEn)).toBe('--:--');
+    expect(formatVodEndTimestamp(31_000, undefined, 'remaining')).toBe('--:--');
+    expect(formatVodEndTimestamp(31_000, undefined, 'total')).toBe('--:--');
 
-    const total = formatVodEndTimestamp(31_000, 1_252_000, 1, 'total', 0, i18nEn);
-    expect(total).toBe('20:52');
+    // Wave P8 canonical example: 20:09 elapsed out of 44:58 total -> 24:49 remaining (no leading minus)
+    const elapsedMs = (20 * 60 + 9) * 1000;
+    const totalMs = (44 * 60 + 58) * 1000;
+    expect(formatPlaybackPosition(elapsedMs)).toBe('20:09');
+    expect(formatVodEndTimestamp(elapsedMs, totalMs)).toBe('24:49');
+    expect(formatVodEndTimestamp(elapsedMs, totalMs, 'remaining')).toBe('24:49');
+    expect(formatVodEndTimestamp(elapsedMs, totalMs, 'total')).toBe('44:58');
 
-    const rem = formatVodEndTimestamp(31_000, 1_252_000, 1, 'remaining', 0, i18nEn);
-    expect(rem).toBe('-20:21');
-
-    // Local 20:00 + 60m remaining at 2x speed = 20:30
     const baseWall = new Date(2026, 10, 22, 20, 0, 0).getTime();
     expect(formatWallClockHm(baseWall)).toBe('20:00');
-    const endsAt2x = formatVodEndTimestamp(0, 3_600_000, 2, 'endsAt', baseWall, i18nEn);
-    expect(endsAt2x).toBe('Ends at 20:30');
-
-    const endsAt1x = formatVodEndTimestamp(0, 3_600_000, 1, 'endsAt', baseWall, i18nEn);
-    expect(endsAt1x).toBe('Ends at 21:00');
+    expect(formatWallClockHm(Number.NaN)).toBe('--:--');
   });
 
-  it('clamps remaining time >= 0 on overshoot, scales by playback speed, and formats non-negative accessibility labels (#133)', () => {
-    // 60m remaining at 2x speed -> -30:00 wall remaining & "30:00 remaining" announcement
-    expect(formatVodEndTimestamp(0, 3_600_000, 2, 'remaining', 0, i18nEn)).toBe('-30:00');
-    expect(formatVodEndAccessibilityLabel(0, 3_600_000, 2, 'remaining', 0, i18nEn)).toBe(
-      '30:00 remaining',
+  it('clamps remaining time >= 0 on overshoot and formats accessible labels for remaining & total (#133, #507)', () => {
+    const elapsedMs = (20 * 60 + 9) * 1000;
+    const totalMs = (44 * 60 + 58) * 1000;
+    expect(formatVodEndAccessibilityLabel(elapsedMs, totalMs, 'remaining', i18nEn)).toBe(
+      '24:49 remaining',
     );
-    expect(formatVodEndAccessibilityLabel(0, 3_600_000, 2, 'remaining', 0, i18nTr)).toBe(
-      '30:00 kaldı',
+    expect(formatVodEndAccessibilityLabel(elapsedMs, totalMs, 'remaining', i18nTr)).toBe(
+      '24:49 kaldı',
+    );
+    expect(formatVodEndAccessibilityLabel(elapsedMs, totalMs, 'total', i18nEn)).toBe(
+      `${i18nEn.t('player.totalDuration')}: 44:58`,
     );
 
     // Overshoot (positionMs > durationMs) strictly clamps to 0:00, never negative
-    expect(formatVodEndTimestamp(5_000_000, 1_252_000, 1, 'remaining', 0, i18nEn)).toBe('-0:00');
-    expect(formatVodEndAccessibilityLabel(5_000_000, 1_252_000, 1, 'remaining', 0, i18nEn)).toBe(
+    expect(formatVodEndTimestamp(5_000_000, 1_252_000, 'remaining')).toBe('0:00');
+    expect(formatVodEndAccessibilityLabel(5_000_000, 1_252_000, 'remaining', i18nEn)).toBe(
       '0:00 remaining',
     );
-    expect(formatVodEndAccessibilityLabel(10_000, undefined, 1, 'remaining', 0, i18nEn)).toBe(
-      '--:--',
-    );
+    expect(formatVodEndAccessibilityLabel(10_000, undefined, 'remaining', i18nEn)).toBe('--:--');
   });
 
   it('resolves fine-scrub tiers and integrates incrementally with zero jump across tier boundaries (#355)', () => {

@@ -18,10 +18,14 @@ import {
   buildLibraryDetailTarget,
   buildLibraryPlayTarget,
   buildOfflineEpisodePlayTarget,
+  collectItemKeysFromCollections,
   deriveSeriesKeyFromEpisodeRecord,
+  findDropTargetAtPoint,
   formatDownloadedSeriesSubtitle,
   formatLibraryDownloadProgressMeta,
+  GENERAL_LIBRARY_DROP_TARGET_ID,
   groupDownloadedSeries,
+  isGeneralLibraryDropTarget,
   LIBRARY_SUB_TABS,
   mapCollectionItemsToLibraryCards,
   mapWatchedRowsToLibraryCards,
@@ -114,6 +118,103 @@ describe('library-model', () => {
     expect(res.live.map((c) => c.itemKey)).toEqual(['live:s1:2', 'live:s1:1']);
     expect(res.series.map((c) => c.itemKey)).toEqual(['series:s1:10']);
     expect(res.movies.map((c) => c.itemKey)).toEqual(['movie:s1:5']);
+
+    // Folder semantics (#508): collected movies & series are excluded from general rails while live stays untouched
+    const collectedKeys = collectItemKeysFromCollections([
+      {
+        collection: {
+          id: 'c1',
+          profileId: 'default',
+          name: 'Sci-Fi',
+          sortOrder: 0,
+          itemCount: 2,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        items: [
+          {
+            id: 1,
+            key: 'movie:s1:5',
+            sourceId: 's1',
+            providerId: '5',
+            kind: 'movie',
+            name: 'Dune',
+            logo: null,
+            num: null,
+            year: 2021,
+            rating: 8.1,
+          },
+          {
+            id: 2,
+            key: 'series:s1:10',
+            sourceId: 's1',
+            providerId: '10',
+            kind: 'series',
+            name: 'Arcane',
+            logo: null,
+            num: null,
+            year: 2021,
+            rating: 9.0,
+          },
+        ],
+      },
+    ]);
+    const folderPartition = partitionFavoritesForLibrary(favorites, collectedKeys);
+    expect(folderPartition.live.map((c) => c.itemKey)).toEqual(['live:s1:2', 'live:s1:1']);
+    expect(folderPartition.movies).toEqual([]);
+    expect(folderPartition.series).toEqual([]);
+  });
+
+  it('adds Move to collection and Remove from collection context actions and hit-tests drop rects (#508)', () => {
+    const i18n = createAppI18n('en');
+    const onMove = vi.fn();
+    const onRemove = vi.fn();
+    const items = buildLibraryVodMenuItems({
+      t: i18n.t,
+      kind: 'movie',
+      isFavorite: true,
+      ratingValue: null,
+      isWatched: false,
+      collections: [
+        { id: 'c1', name: 'Sci-Fi' },
+        { id: 'c2', name: 'Weekend' },
+      ],
+      currentCollectionId: 'c1',
+      onOpenDetail: vi.fn(),
+      onToggleFavorite: vi.fn(),
+      onToggleLike: vi.fn(),
+      onToggleDislike: vi.fn(),
+      onMoveToCollection: onMove,
+      onRemoveFromCollection: onRemove,
+    });
+
+    // Excludes current collection c1, includes sibling c2 + Remove from collection
+    expect(items.find((i) => i.id === 'move-to-collection-c1')).toBeUndefined();
+    const moveC2 = items.find((i) => i.id === 'move-to-collection-c2');
+    expect(moveC2?.label).toBe('Move to Weekend');
+    moveC2?.onSelect();
+    expect(onMove).toHaveBeenCalledWith('c2');
+
+    const removeAction = items.find((i) => i.id === 'remove-from-collection');
+    expect(removeAction?.label).toBe('Remove from collection');
+    expect(removeAction?.destructive).toBe(true);
+    removeAction?.onSelect();
+    expect(onRemove).toHaveBeenCalledWith('c1');
+
+    const rects = new Map([
+      ['c1', { x: 0, y: 100, width: 400, height: 120 }],
+      ['c2', { x: 0, y: 260, width: 400, height: 120 }],
+    ]);
+    expect(findDropTargetAtPoint(rects, 50, 150)).toBe('c1');
+    expect(findDropTargetAtPoint(rects, 50, 300)).toBe('c2');
+    expect(findDropTargetAtPoint(rects, 50, 230)).toBeNull();
+
+    expect(isGeneralLibraryDropTarget(GENERAL_LIBRARY_DROP_TARGET_ID)).toBe(true);
+    expect(isGeneralLibraryDropTarget(`${GENERAL_LIBRARY_DROP_TARGET_ID}:series`)).toBe(true);
+    expect(isGeneralLibraryDropTarget(`${GENERAL_LIBRARY_DROP_TARGET_ID}:movies`)).toBe(true);
+    expect(isGeneralLibraryDropTarget(`${GENERAL_LIBRARY_DROP_TARGET_ID}other`)).toBe(false);
+    expect(isGeneralLibraryDropTarget('c1')).toBe(false);
+    expect(isGeneralLibraryDropTarget(null)).toBe(false);
   });
 
   it('partitions ratings into liked and disliked rails', () => {

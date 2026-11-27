@@ -43,10 +43,15 @@ export type LiveTvZone = 'header' | 'body';
 /** Header sub-row when `LiveScreen` owns TV focus. */
 export type LiveTvHeaderRow = 'modes' | 'categories';
 /** Focusable action controls inside `LiveWatchStage` (`Favorites` stage). */
-export type LiveWatchControl = 'miniguide' | 'favorite' | 'watch' | 'browse';
+export type LiveWatchControl = 'play-pause' | 'fullscreen' | 'tracks' | 'overflow' | 'browse';
 
 const MODE_ORDER: readonly LiveMode[] = ['favorites', 'channels', 'epg'];
-const WATCH_CONTROLS: readonly LiveWatchControl[] = ['miniguide', 'favorite', 'watch'];
+const WATCH_CONTROLS: readonly LiveWatchControl[] = [
+  'play-pause',
+  'tracks',
+  'fullscreen',
+  'overflow',
+];
 const NUMPAD_GRID: readonly (readonly string[])[] = [
   ['1', '2', '3'],
   ['4', '5', '6'],
@@ -187,6 +192,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
       const nextHeaderRow =
         !hasCategoryBar && prev.headerRow === 'categories' ? 'modes' : prev.headerRow;
       const nextZapIdx = channelCount > 0 ? Math.min(prev.zapIdx, channelCount - 1) : 0;
+      const nextWatchControlIdx = Math.min(prev.watchControlIdx, WATCH_CONTROLS.length - 1);
       const nextWatchZone = !zapDrawerOpen || channelCount === 0 ? 'controls' : prev.watchZone;
       let nextZone = !hasBody && prev.zone === 'body' ? 'header' : prev.zone;
       if (hasBody && pendingBodyRestoreRef.current) {
@@ -198,6 +204,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         nextCatCol === prev.catCol &&
         nextHeaderRow === prev.headerRow &&
         nextZapIdx === prev.zapIdx &&
+        nextWatchControlIdx === prev.watchControlIdx &&
         nextWatchZone === prev.watchZone &&
         nextZone === prev.zone
       ) {
@@ -210,6 +217,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         modeCol: nextModeCol,
         catCol: nextCatCol,
         watchZone: nextWatchZone,
+        watchControlIdx: nextWatchControlIdx,
         zapIdx: nextZapIdx,
       };
     });
@@ -254,8 +262,8 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
       if (event.kind === 'press' && event.key === 'back') {
         if (cur.zone === 'body' && o.mode === 'favorites') {
           updateNav((p) =>
-            cur.watchZone === 'zap'
-              ? { ...p, watchZone: 'controls' }
+            cur.watchZone === 'controls' && o.zapDrawerOpen && o.channelCount > 0
+              ? { ...p, watchZone: 'zap' }
               : { ...p, zone: 'header', headerRow: 'modes' },
           );
           return true;
@@ -366,7 +374,14 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
             updateNav((p) => ({ ...p, modeCol: Math.min(maxCol, p.modeCol + 1) }));
           else if (event.key === 'down') {
             if (showCats) updateNav((p) => ({ ...p, headerRow: 'categories' }));
-            else if (o.hasBody) updateNav((p) => ({ ...p, zone: 'body', watchZone: 'controls' }));
+            else if (o.hasBody) {
+              const enterZap = o.mode === 'favorites' && o.zapDrawerOpen && o.channelCount > 0;
+              updateNav((p) => ({
+                ...p,
+                zone: 'body',
+                watchZone: enterZap ? 'zap' : 'controls',
+              }));
+            }
           } else if (event.key === 'select' && event.kind === 'press') {
             if (cur.modeCol === 3 && o.mode === 'channels') o.onToggleNumpad();
             else {
@@ -410,17 +425,17 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
 
       if (cur.watchZone === 'controls') {
         if (event.key === 'up') updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
-        else if (event.key === 'left' || event.key === 'right') {
-          const delta = event.key === 'left' ? -1 : 1;
+        else if (event.key === 'left') {
+          if (cur.watchControlIdx <= 0 && o.zapDrawerOpen && o.channelCount > 0) {
+            updateNav((p) => ({ ...p, watchZone: 'zap' }));
+          } else {
+            updateNav((p) => ({ ...p, watchControlIdx: Math.max(0, p.watchControlIdx - 1) }));
+          }
+        } else if (event.key === 'right') {
           updateNav((p) => ({
             ...p,
-            watchControlIdx: Math.max(
-              0,
-              Math.min(WATCH_CONTROLS.length - 1, p.watchControlIdx + delta),
-            ),
+            watchControlIdx: Math.min(WATCH_CONTROLS.length - 1, p.watchControlIdx + 1),
           }));
-        } else if (event.key === 'down') {
-          if (o.zapDrawerOpen && o.channelCount > 0) updateNav((p) => ({ ...p, watchZone: 'zap' }));
         } else if (event.key === 'select' && event.kind === 'press') {
           const ctrl = WATCH_CONTROLS[cur.watchControlIdx];
           if (ctrl) o.onActivateWatchControl(ctrl);
@@ -430,14 +445,17 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
 
       if (event.key === 'up')
         updateNav((p) =>
-          cur.zapIdx <= 0 ? { ...p, watchZone: 'controls' } : { ...p, zapIdx: p.zapIdx - 1 },
+          cur.zapIdx <= 0
+            ? { ...p, zone: 'header', headerRow: 'modes' }
+            : { ...p, zapIdx: p.zapIdx - 1 },
         );
       else if (event.key === 'down')
         updateNav((p) => ({
           ...p,
           zapIdx: Math.min(Math.max(0, o.channelCount - 1), p.zapIdx + 1),
         }));
-      else if (event.key === 'right') updateNav((p) => ({ ...p, watchZone: 'controls' }));
+      else if (event.key === 'right')
+        updateNav((p) => ({ ...p, watchZone: 'controls', watchControlIdx: 0 }));
       else if (
         (event.key === 'select' && event.kind === 'long') ||
         (event.key === 'menu' && event.kind === 'press')

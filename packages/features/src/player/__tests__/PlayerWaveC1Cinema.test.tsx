@@ -221,14 +221,13 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
     await phoneView.unmount();
   });
 
-  it('#160: cycles VOD right timestamp (Total -> -Remaining -> speed-adjusted Ends At), renders Live EPG Ends At, and shows Diagnostics metrics in PlayerStatsHud', async () => {
+  it('#507/#160: defaults VOD right timestamp to remaining (no minus), toggles locally remaining <-> total, renders Live EPG start-end range, and shows Diagnostics metrics in PlayerStatsHud', async () => {
     const manual = createManualClock();
     const engine = createFakePlayerEngine({
       now: manual.now,
       schedule: manual.schedule,
       cancel: manual.cancel,
     });
-    const onPersistTimeDisplayMode = jest.fn();
 
     const view = await render(
       <ThemeProvider preset="obsidianCrimson">
@@ -247,8 +246,6 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
                 clock={{ now: manual.now }}
                 wallClock={() => EPOCH_BASE}
                 timers={{ setTimeout: manual.schedule, clearTimeout: manual.cancel }}
-                osdTimeDisplayMode="total"
-                onPersistOsdTimeDisplayMode={onPersistTimeDisplayMode}
                 onExit={jest.fn()}
               />
             </I18nProvider>
@@ -259,7 +256,7 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
 
     await waitFor(() => expect(engine.commands.some((c) => c.name === 'load')).toBe(true));
     const att = engine.commands.find((c) => c.name === 'load')?.attempt ?? 1;
-    // 10 min into a 40 min video (30 min remaining) at 20:00 -> Ends at 20:30 at 1x
+    // 10 min into a 40 min video -> 30:00 remaining by default
     await act(async () => {
       manual.advance(350);
       engine.emit({
@@ -270,25 +267,18 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
     });
 
     expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('10:00');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('30:00');
+
+    // Press end timestamp -> silently toggles to total duration ('40:00')
+    await fireEvent.press(screen.getByTestId('player-progress-time-end'));
     expect(screen.getByTestId('player-progress-time')).toHaveTextContent('40:00');
 
-    // Press end timestamp -> cycles to '-30:00' and persists 'remaining'
+    // Press again -> silently toggles back to clean remaining ('30:00')
     await fireEvent.press(screen.getByTestId('player-progress-time-end'));
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('-30:00');
-    expect(onPersistTimeDisplayMode).toHaveBeenLastCalledWith('remaining');
-
-    // Press again -> cycles to 'Ends at 20:30' and persists 'endsAt'
-    await fireEvent.press(screen.getByTestId('player-progress-time-end'));
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('Ends at 20:30');
-    expect(onPersistTimeDisplayMode).toHaveBeenLastCalledWith('endsAt');
-
-    // Change speed to 2x -> 30 min remaining / 2 = 15 min -> 'Ends at 20:15'
-    await fireEvent.press(screen.getByTestId('player-speed-button'));
-    await fireEvent.press(screen.getByTestId('player-settings-speed-2'));
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('Ends at 20:15');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('30:00');
     await view.unmount();
 
-    // Live EPG Ends At display when osdTimeDisplayMode === 'endsAt'
+    // Live EPG strip displays clean start – end schedule range
     const liveEngine = createFakePlayerEngine({
       now: manual.now,
       schedule: manual.schedule,
@@ -336,7 +326,6 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
                 clock={{ now: manual.now }}
                 wallClock={() => EPOCH_BASE}
                 timers={{ setTimeout: manual.schedule, clearTimeout: manual.cancel }}
-                osdTimeDisplayMode="endsAt"
                 onExit={jest.fn()}
               />
             </I18nProvider>
@@ -345,7 +334,7 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
       </ThemeProvider>,
     );
     await waitFor(() => {
-      expect(screen.getByTestId('osd-live-ends-at')).toHaveTextContent('Ends at 20:45');
+      expect(screen.getByTestId('osd-live-time-range')).toHaveTextContent('19:45 – 20:45');
     });
     expect(screen.getByTestId('player-channel-list-button')).toHaveTextContent('Channels');
     await liveView.unmount();

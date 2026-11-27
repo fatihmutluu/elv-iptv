@@ -228,7 +228,6 @@ describe('CatalogDiscoveryScreen — grid hydration, touch, and TV focus', () =>
     await sendKey(KEYCODE_DPAD_RIGHT);
     await sendKey(KEYCODE_DPAD_RIGHT);
     await sendKey(KEYCODE_DPAD_RIGHT);
-    await sendKey(KEYCODE_DPAD_RIGHT);
     expect(scrollToSpy).toHaveBeenCalled();
 
     scrollToEndSpy.mockClear();

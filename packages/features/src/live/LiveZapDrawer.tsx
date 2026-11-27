@@ -50,6 +50,7 @@ export interface LiveZapDrawerProps {
   readonly nowNextByKey: ReadonlyMap<string, NowNextEntry>;
   readonly nowNextVersion: number;
   readonly activeChannelKey: string | null;
+  readonly favoriteKeys?: ReadonlySet<string>;
   readonly focusedZapIndex: number | null;
   readonly layout: CatalogLayoutMetrics;
   /** When `true`, renders in flex flow on the left (HWND-safe on desktop) instead of `position: 'absolute'`. */
@@ -59,6 +60,7 @@ export interface LiveZapDrawerProps {
   readonly cleanChannelTitles?: boolean;
   readonly hydrateNowNext: (channelKeys: readonly string[]) => void;
   readonly onSelectChannel: (channel: ItemRow, index: number) => void;
+  readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onReorderFavorite?: (fromIndex: number, toIndex: number) => void;
   readonly onOpenContextMenu?: (
     channel: ItemRow,
@@ -83,6 +85,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     nowNextByKey,
     nowNextVersion,
     activeChannelKey,
+    favoriteKeys,
     focusedZapIndex,
     layout,
     docked = false,
@@ -91,6 +94,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     cleanChannelTitles = false,
     hydrateNowNext,
     onSelectChannel,
+    onToggleFavorite,
     onReorderFavorite,
     onOpenContextMenu,
   } = p;
@@ -243,6 +247,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
             noProgramLabel={noProgramLabel}
             rowHeight={zapRowHeight}
             isActive={row !== undefined && row.key === activeChannelKey}
+            isFavorite={row !== undefined && (favoriteKeys ? favoriteKeys.has(row.key) : true)}
             isTv={layout.isTv}
             isTouch={layout.isTouch}
             focused={isFocused}
@@ -257,6 +262,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
             onMoveUp={handleMoveUp}
             onMoveDown={handleMoveDown}
             onSelectChannel={onSelectChannel}
+            {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
             {...(onOpenContextMenu !== undefined ? { onOpenContextMenu } : {})}
           />
         </View>
@@ -266,6 +272,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
       activeChannelKey,
       cleanChannelTitles,
       dragState,
+      favoriteKeys,
       focusedZapIndex,
       handleMoveDown,
       handleMoveUp,
@@ -278,6 +285,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
       nowNextByKey,
       onOpenContextMenu,
       onSelectChannel,
+      onToggleFavorite,
       reorderable,
       sourceBadges,
       zapRowHeight,
@@ -303,6 +311,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
       sourceVersion,
       nowNextVersion,
       activeChannelKey,
+      favoriteKeys,
       focusedZapIndex,
       logoBackdropMode,
       sourceBadges,
@@ -314,6 +323,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
       activeChannelKey,
       cleanChannelTitles,
       dragState,
+      favoriteKeys,
       focusedZapIndex,
       logoBackdropMode,
       nowNextVersion,
@@ -391,7 +401,7 @@ const styles = StyleSheet.create({
   drawerDocked: { width: ZAP_DRAWER_WIDTH, borderRightWidth: 1, overflow: 'hidden' },
   drawerLandscape: {
     position: 'absolute',
-    top: 64,
+    top: 12,
     bottom: 18,
     width: ZAP_DRAWER_WIDTH,
     borderWidth: 1,

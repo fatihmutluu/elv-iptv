@@ -34,7 +34,6 @@ import {
   useRouteActive,
 } from '../shared';
 import { AmbientBackdrop } from '../shared/AmbientBackdrop';
-import { CollectionManagerOverlay } from '../shared/CollectionManagerOverlay';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
 import { HOME_HERO_AUTO_ROTATE_MS, useHomeHeroAutoRotate } from './HomeHeroBackdrop';
 import {
@@ -89,9 +88,9 @@ const RAIL_ORDER: readonly HomeRailKind[] = [
   'continue',
   'newEpisodes',
   'live',
-  'mylist',
   'movies',
   'series',
+  'mylist',
 ];
 
 type TvKeyHandler = Parameters<typeof useKeyInterpreter>[0];
@@ -147,7 +146,6 @@ export function HomeScreen({
   const [heroIndex, setHeroIndexState] = useState(() => uiCache?.getHome()?.heroIndex ?? 0);
   const [heroHovered, setHeroHovered] = useState(false);
   const [heroKeyboardFocused, setHeroKeyboardFocused] = useState(false);
-  const [collectionManagerOpen, setCollectionManagerOpen] = useState(false);
   const setHeroIndex = useCallback(
     (idx: number) => {
       setHeroIndexState(idx);
@@ -205,16 +203,11 @@ export function HomeScreen({
     () => visibleSections.map((section) => section.id),
     [visibleSections],
   );
-  const collectionsVisible = useMemo(
-    () => visibleSections.some((section) => section.id === 'collections'),
-    [visibleSections],
-  );
 
   const collectionRails = useMemo(
     () => buildHomeCollectionRails(data.collections, data.progressByKey),
     [data.collections, data.progressByKey],
   );
-  const hasCollectionsSupport = typeof catalog.listCollections === 'function';
   const collectionRailById = useMemo(
     () => new Map(collectionRails.map((rail) => [rail.id, rail])),
     [collectionRails],
@@ -231,7 +224,6 @@ export function HomeScreen({
     RAIL_ORDER.some((railId) => railSets[railId].length > 0) ||
     collectionRails.length > 0;
   const isLoadingInitial = data.loading && !data.hasLoaded;
-  const showCollectionsSection = hasContent && hasCollectionsSupport && collectionsVisible;
 
   const navRows = useMemo(
     () =>
@@ -249,7 +241,6 @@ export function HomeScreen({
           movies: railSets.movies.length,
           series: railSets.series.length,
         },
-        showCollectionsManage: showCollectionsSection,
         collectionRails: collectionRails.map((r) => ({ id: r.id, count: r.items.length })),
       }),
     [
@@ -258,7 +249,6 @@ export function HomeScreen({
       heroActionIds.length,
       isLoadingInitial,
       railSets,
-      showCollectionsSection,
       visibleSectionOrder,
     ],
   );
@@ -415,10 +405,6 @@ export function HomeScreen({
         onOpenSources();
         return;
       }
-      if (rowId === 'collections-manage') {
-        setCollectionManagerOpen(true);
-        return;
-      }
       if (rowId === 'hero' && activeSlide) {
         const action = heroActionIds[colIndex];
         if (action === 'play') openVodOrSeries(activeSlide);
@@ -533,12 +519,6 @@ export function HomeScreen({
   const recordRailY = useCallback((id: HomeRailId, y: number) => {
     railYRef.current.set(id, y);
   }, []);
-  const handleOpenCollectionManager = useCallback(() => setCollectionManagerOpen(true), []);
-  const handleCloseCollectionManager = useCallback(() => setCollectionManagerOpen(false), []);
-  const handleCollectionsMutated = useCallback(
-    () => void data.refreshCollections(),
-    [data.refreshCollections],
-  );
   const railSpecsById = useMemo(() => {
     const map = new Map<HomeRailKind, HomeRailSpec>();
     for (const spec of buildHomeRailSpecs(i18n.t)) map.set(spec.id, spec);
@@ -629,7 +609,6 @@ export function HomeScreen({
       tvNav.focusedRowId === null ||
       tvNav.focusedRowId === 'hero' ||
       tvNav.focusedRowId === 'empty' ||
-      tvNav.focusedRowId === 'collections-manage' ||
       tvNav.focusedCol === null
     ) {
       return null;
@@ -654,7 +633,7 @@ export function HomeScreen({
           title={focusedAmbientEntry?.title ?? ''}
         />
       ) : null}
-      {isTv && isActiveScope && !collectionManagerOpen && !contextMenu.isOpen ? (
+      {isTv && isActiveScope && !contextMenu.isOpen ? (
         <HomeTvKeyBridge onEvent={tvNav.handleTvKey} />
       ) : null}
 
@@ -710,7 +689,6 @@ export function HomeScreen({
               return (
                 <HomeCollectionsSection
                   key="collections"
-                  showHeader={showCollectionsSection}
                   collectionRails={collectionRails}
                   cardWidth={layout.posterCardWidth}
                   gap={railGap}
@@ -722,8 +700,6 @@ export function HomeScreen({
                   favoriteKeys={data.favoriteKeys}
                   watchedOverrides={data.watchedOverrides}
                   unplayedBySeriesKey={data.unplayedBySeriesKey}
-                  onOpenManager={handleOpenCollectionManager}
-                  onHeaderLayoutY={(y) => railYRef.current.set('collections-manage', y)}
                   onPressItem={activatePosterEntry}
                   onContextMenuItem={openRailContextMenu}
                   onQuickPlay={activateEntry}
@@ -774,13 +750,6 @@ export function HomeScreen({
           })}
         </ScrollView>
       )}
-      <CollectionManagerOverlay
-        visible={collectionManagerOpen}
-        catalog={catalog}
-        onMutated={handleCollectionsMutated}
-        {...(onOpenDetail !== undefined ? { onOpenDetail } : {})}
-        onClose={handleCloseCollectionManager}
-      />
     </View>
   );
 }

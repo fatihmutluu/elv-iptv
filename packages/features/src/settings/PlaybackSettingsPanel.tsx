@@ -36,7 +36,7 @@ type ScrollViewHandle = ComponentRef<typeof ScrollView>;
  * Cinema Quietude Playback preferences panel:
  * skip interval, default aspect ratio, buffer preset, Android video decoder, SDH filtering,
  * non-desktop HEVC over Dolby Vision, pitch lock, loudness normalization, mobile PiP / background audio,
- * non-desktop Night-Mode DRC, OSD time display, auto-play next episode, desktop collapsible Advanced audio,
+ * non-desktop Night-Mode DRC, auto-play next episode, desktop collapsible Advanced audio,
  * and non-desktop External Player handoff.
  */
 export function PlaybackSettingsPanel({
@@ -82,8 +82,7 @@ export function PlaybackSettingsPanel({
       focusedControlId === 'toggle-prefer-hevc-dv' ||
       focusedControlId === 'toggle-pitch-lock' ||
       focusedControlId === 'toggle-audio-normalization' ||
-      focusedControlId.startsWith('night-drc-') ||
-      focusedControlId.startsWith('osd-time-')
+      focusedControlId.startsWith('night-drc-')
     ) {
       const y = cardYRef.current.cinema;
       if (y !== undefined) targetY = Math.max(0, y - 12);
@@ -263,15 +262,6 @@ export function PlaybackSettingsPanel({
             />
           </>
         ) : null}
-        <SettingsDivider />
-        <SettingsOptionRow
-          title={i18n.t('settings.playback.osdTimeMode')}
-          options={opts.osdTimeOptions}
-          selectedValue={activePrefs.osdTimeDisplayMode}
-          focusedControlId={focusedControlId}
-          isTv={isTv}
-          onSelect={(osdTimeDisplayMode) => applyPatch({ osdTimeDisplayMode })}
-        />
       </Surface>
 
       <Surface

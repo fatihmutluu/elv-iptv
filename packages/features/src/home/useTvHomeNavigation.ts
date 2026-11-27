@@ -11,12 +11,7 @@ interface HomeFocusSnapshot {
 }
 
 /** Navigable vertical row identifier inside {@link HomeScreen}. */
-export type HomeNavRowId =
-  | 'empty'
-  | 'hero'
-  | HomeRailKind
-  | 'collections-manage'
-  | HomeCollectionRailId;
+export type HomeNavRowId = 'empty' | 'hero' | HomeRailKind | HomeCollectionRailId;
 
 /** Descriptor of one currently visible focusable row on Home. */
 export interface HomeNavRowDescriptor {
@@ -30,10 +25,9 @@ const STATIC_HOME_ROW_IDS: readonly HomeNavRowId[] = [
   'continue',
   'newEpisodes',
   'live',
-  'mylist',
   'movies',
   'series',
-  'collections-manage',
+  'mylist',
 ];
 
 function collectRowIds(rows: readonly HomeNavRowDescriptor[]): HomeNavRowId[] {
@@ -77,7 +71,6 @@ export function buildHomeNavRows(input: {
   readonly railOrder: readonly HomeRailKind[];
   readonly railCounts: Readonly<Record<HomeRailKind, number>>;
   readonly sectionOrder?: readonly HomeLayoutSectionId[];
-  readonly showCollectionsManage?: boolean;
   readonly collectionRails?: readonly {
     readonly id: HomeCollectionRailId;
     readonly count: number;
@@ -89,9 +82,6 @@ export function buildHomeNavRows(input: {
   if (input.heroActionCount > 0) rows.push({ id: 'hero', count: input.heroActionCount });
 
   const pushCollections = (): void => {
-    if (input.showCollectionsManage) {
-      rows.push({ id: 'collections-manage', count: 1 });
-    }
     for (const col of input.collectionRails ?? []) {
       if (col.count > 0) rows.push({ id: col.id, count: col.count });
     }

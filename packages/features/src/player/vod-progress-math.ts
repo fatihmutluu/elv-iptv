@@ -1,5 +1,7 @@
-import type { OsdTimeDisplayMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
+
+/** Local VOD seek-bar right-hand timestamp display mode (`Wave P8`, `#507`). */
+export type VodEndTimeDisplayMode = 'remaining' | 'total';
 
 /** Touch fine-scrubbing sensitivity tiers (`#355`). */
 export type TouchScrubSensitivityTier = 'normal' | 'quarter' | 'fine';
@@ -29,73 +31,51 @@ export function formatWallClockHm(epochMs: number): string {
   return `${hh}:${mm}`;
 }
 
-/** Cycles the OSD right-hand timestamp mode: `total -> remaining -> endsAt -> total` (`#160`). */
-export function cycleOsdTimeDisplayMode(mode: OsdTimeDisplayMode): OsdTimeDisplayMode {
-  if (mode === 'total') return 'remaining';
-  if (mode === 'remaining') return 'endsAt';
-  return 'total';
+/** Toggles the local VOD right-hand timestamp display strictly between `'remaining'` and `'total'` (`#507`). */
+export function cycleOsdTimeDisplayMode(mode: VodEndTimeDisplayMode): VodEndTimeDisplayMode {
+  return mode === 'remaining' ? 'total' : 'remaining';
 }
 
-/** Computes speed-adjusted remaining playback duration clamped strictly `>= 0` (`#133`). */
-function computeScaledRemainingMs(
-  positionMs: number,
-  durationMs: number,
-  playbackSpeed: number,
-): number {
+/** Computes clamped non-negative remaining VOD playback duration in milliseconds (`#507`). */
+function computeRemainingMs(positionMs: number, durationMs: number): number {
   const safePos = Number.isFinite(positionMs) ? Math.min(Math.max(0, positionMs), durationMs) : 0;
-  const rawRemainingMs = Math.max(0, durationMs - safePos);
-  const speed =
-    Number.isFinite(playbackSpeed) && playbackSpeed > 0 ? Math.max(0.25, playbackSpeed) : 1;
-  return Math.max(0, Math.round(rawRemainingMs / speed));
+  return Math.max(0, durationMs - safePos);
 }
 
 /**
- * Formats the VOD right-hand timestamp according to {@link OsdTimeDisplayMode} (`#160`, `#133`):
- * - `'total'`: total duration (e.g. `20:52`)
- * - `'remaining'`: speed-adjusted negated remaining duration clamped `>= 0` (e.g. `-20:21`)
- * - `'endsAt'`: speed-adjusted projected wall-clock end time (e.g. `Ends at 21:14`)
+ * Formats the VOD right-hand timestamp according to {@link VodEndTimeDisplayMode} (`#507`):
+ * - `'remaining'` (default): clean remaining duration without a leading minus sign (e.g. `24:49`)
+ * - `'total'`: total duration (e.g. `44:58`)
  */
 export function formatVodEndTimestamp(
   positionMs: number,
   durationMs: number | undefined,
-  playbackSpeed: number,
-  mode: OsdTimeDisplayMode,
-  wallClockMs: number,
-  i18n: Pick<AppI18n, 't'>,
+  mode: VodEndTimeDisplayMode = 'remaining',
 ): string {
   if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs <= 0) {
     return '--:--';
   }
   if (mode === 'total') return formatPlaybackPosition(durationMs);
-  const scaledRemainingMs = computeScaledRemainingMs(positionMs, durationMs, playbackSpeed);
-  if (mode === 'remaining') return `-${formatPlaybackPosition(scaledRemainingMs)}`;
-  const endEpochMs = wallClockMs + scaledRemainingMs;
-  return i18n.t('player.endsAt', { time: formatWallClockHm(endEpochMs) });
+  return formatPlaybackPosition(computeRemainingMs(positionMs, durationMs));
 }
 
 /**
- * Formats the screen-reader accessibility label for the VOD end timestamp control (`#133`).
- * In `'remaining'` mode, announces a clamped non-negative duration (`player.remainingTimeAnnouncement`)
- * so TalkBack/VoiceOver never reads a negative sign.
+ * Formats the screen-reader accessibility label for the VOD end timestamp control (`#133`, `#507`).
  */
 export function formatVodEndAccessibilityLabel(
   positionMs: number,
   durationMs: number | undefined,
-  playbackSpeed: number,
-  mode: OsdTimeDisplayMode,
-  wallClockMs: number,
+  mode: VodEndTimeDisplayMode,
   i18n: Pick<AppI18n, 't'>,
 ): string {
   if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs <= 0) {
     return '--:--';
   }
+  const formatted = formatVodEndTimestamp(positionMs, durationMs, mode);
   if (mode === 'remaining') {
-    const scaledRemainingMs = computeScaledRemainingMs(positionMs, durationMs, playbackSpeed);
-    return i18n.t('player.remainingTimeAnnouncement', {
-      time: formatPlaybackPosition(scaledRemainingMs),
-    });
+    return i18n.t('player.remainingTimeAnnouncement', { time: formatted });
   }
-  return formatVodEndTimestamp(positionMs, durationMs, playbackSpeed, mode, wallClockMs, i18n);
+  return `${i18n.t('player.totalDuration')}: ${formatted}`;
 }
 
 /** Resolves the touch fine-scrubbing tier and horizontal multiplier from vertical displacement `|dy|` (`#355`). */

@@ -550,25 +550,28 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
       liveCategoryName: input.liveCategoryName,
       ...(input.nowNextByKey !== undefined ? { nowNextByKey: input.nowNextByKey } : {}),
     }),
-    mylist: input.favorites.slice(0, HOME_MYLIST_LIMIT).map((fav) => {
-      const prog = input.progressByKey.get(fav.itemKey);
-      const matchedSeries = fav.kind === 'series' ? seriesByKey.get(fav.itemKey) : undefined;
-      return {
-        itemKey: fav.itemKey,
-        sourceId: fav.sourceId,
-        kind: fav.kind,
-        title: fav.title,
-        subtitle: prog?.subtitle ?? null,
-        backdropUri: fav.logo,
-        posterUri: fav.logo,
-        year: fav.year,
-        rating: fav.rating,
-        durationMs: prog?.durationMs ?? 0,
-        positionMs: prog?.positionMs ?? 0,
-        watched: prog?.watched ?? false,
-        ...(matchedSeries !== undefined ? { catalogItem: matchedSeries } : {}),
-      };
-    }),
+    mylist: input.favorites
+      .filter((fav) => fav.kind === 'movie' || fav.kind === 'series')
+      .slice(0, HOME_MYLIST_LIMIT)
+      .map((fav) => {
+        const prog = input.progressByKey.get(fav.itemKey);
+        const matchedSeries = fav.kind === 'series' ? seriesByKey.get(fav.itemKey) : undefined;
+        return {
+          itemKey: fav.itemKey,
+          sourceId: fav.sourceId,
+          kind: fav.kind,
+          title: fav.title,
+          subtitle: prog?.subtitle ?? null,
+          backdropUri: fav.logo,
+          posterUri: fav.logo,
+          year: fav.year,
+          rating: fav.rating,
+          durationMs: prog?.durationMs ?? 0,
+          positionMs: prog?.positionMs ?? 0,
+          watched: prog?.watched ?? false,
+          ...(matchedSeries !== undefined ? { catalogItem: matchedSeries } : {}),
+        };
+      }),
     movies: mapCatalog(input.movies, 'movie'),
     series: mapCatalog(input.series, 'series'),
   };

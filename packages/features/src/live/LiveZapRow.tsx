@@ -2,6 +2,7 @@ import type { ItemRow, ProgrammeRow } from '@elv/data';
 import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
+  Icon,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
   type Theme,
@@ -26,13 +27,12 @@ import { formatLiveTitle } from './live-model';
 import { SourceBadgePill } from './SourceBadgePill';
 import { formatChannelDisplayName, type SourceBadgeInfo } from './source-badge';
 
-function zapRowStyle(
+function zapRowContainerStyle(
   theme: Theme,
   rowHeight: number,
   isTouch: boolean,
   isActive: boolean,
   focused: boolean,
-  pressed: boolean,
   isDragging: boolean,
 ): ViewStyle {
   return {
@@ -49,7 +49,7 @@ function zapRowStyle(
     borderLeftColor: isActive ? theme.colors.accent : 'transparent',
     borderWidth: focused ? theme.focus.ringWidth : 0,
     borderColor: focused ? theme.colors.focusRingColor : 'transparent',
-    opacity: isDragging ? 0.55 : pressed ? 0.84 : 1,
+    opacity: isDragging ? 0.55 : 1,
   };
 }
 
@@ -72,7 +72,7 @@ function GripDots({ color }: { readonly color: string }): ReactElement {
   );
 }
 
-/** Single row inside {@link LiveZapDrawer} showing channel logo, number, name, and active programme. */
+/** Single row inside {@link LiveZapDrawer} showing channel logo, number, name, active programme, and right-edge favorite toggle. */
 export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
   readonly index: number;
   readonly item: ItemRow | undefined;
@@ -81,6 +81,7 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
   readonly noProgramLabel: string;
   readonly rowHeight: number;
   readonly isActive: boolean;
+  readonly isFavorite?: boolean;
   readonly isTv: boolean;
   readonly isTouch: boolean;
   readonly focused: boolean;
@@ -95,6 +96,7 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
   readonly onMoveUp?: (index: number) => void;
   readonly onMoveDown?: (index: number) => void;
   readonly onSelectChannel: (channel: ItemRow, index: number) => void;
+  readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onOpenContextMenu?: (
     channel: ItemRow,
     index: number,
@@ -116,9 +118,17 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
   const handleLongPress = useCallback(() => {
     if (p.item) p.onOpenContextMenu?.(p.item, p.index, p.nowProgramme ?? null);
   }, [p.index, p.item, p.nowProgramme, p.onOpenContextMenu]);
+  const handleToggleFavorite = useCallback(
+    (e?: { stopPropagation?: () => void }) => {
+      e?.stopPropagation?.();
+      if (p.item) p.onToggleFavorite?.(p.item);
+    },
+    [p.item, p.onToggleFavorite],
+  );
   const isWeb = (Platform.OS as string) === 'web';
   const reorderable = p.reorderable === true;
   const isDragging = p.isDragging === true;
+  const isFavorite = p.isFavorite ?? true;
   const canMoveUp = reorderable && p.index > 0;
   const canMoveDown = reorderable && p.totalCount !== undefined && p.index < p.totalCount - 1;
 
@@ -185,9 +195,20 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
         } as Record<string, unknown>)
       : undefined;
 
+  const favStopProps = isWeb
+    ? ({
+        onPointerDown: (e?: { stopPropagation?: () => void }) => {
+          e?.stopPropagation?.();
+        },
+        onClick: (e?: { stopPropagation?: () => void }) => {
+          e?.stopPropagation?.();
+        },
+      } as Record<string, unknown>)
+    : undefined;
+
   if (!p.item) {
     return (
-      <View style={[styles.zapRow, { height: p.rowHeight }]}>
+      <View style={[styles.zapRowContainer, { height: p.rowHeight, paddingHorizontal: 10 }]}>
         <SkeletonBox width={34} height={34} borderRadius={theme.radius.button} />
         <View style={styles.zapRowText}>
           <SkeletonBox width="70%" height={12} borderRadius={theme.radius.button} />
@@ -198,6 +219,7 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
   }
 
   const displayName = formatChannelDisplayName(p.item.name, p.cleanChannelTitles ?? false);
+  const favLabel = i18n.t(isFavorite ? 'live.zap.favoriteRemove' : 'live.zap.favoriteAdd');
   const accessibilityActions = reorderable
     ? [
         ...(canMoveUp ? [{ name: 'moveUp', label: i18n.t('live.moveFavoriteUp') }] : []),
@@ -214,88 +236,123 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
           style={[styles.dropLine, styles.dropLineTop, { backgroundColor: theme.colors.accent }]}
         />
       ) : null}
-      <Pressable
-        testID={`live-zap-row-${p.index}`}
-        accessibilityRole="button"
-        accessibilityLabel={formatLiveTitle({ num: p.item.num, name: displayName })}
-        accessibilityState={{ selected: p.isActive }}
-        {...(accessibilityActions !== undefined && accessibilityActions.length > 0
-          ? { accessibilityActions, onAccessibilityAction: handleAccessibilityAction }
-          : {})}
-        focusable={!p.isTv}
-        onPress={handlePress}
-        {...(p.onOpenContextMenu !== undefined
-          ? { onLongPress: handleLongPress, delayLongPress: 450 }
-          : {})}
-        {...webEventProps}
-        style={({ pressed }) => [
-          styles.zapRow,
-          zapRowStyle(theme, p.rowHeight, p.isTouch, p.isActive, p.focused, pressed, isDragging),
-          cursor,
+      <View
+        style={[
+          styles.zapRowContainer,
+          zapRowContainerStyle(theme, p.rowHeight, p.isTouch, p.isActive, p.focused, isDragging),
           transition,
         ]}
       >
-        {isWeb && reorderable ? (
-          <Tooltip content={i18n.t('live.reorderHint')} placement="right">
-            <View
-              testID={`live-zap-drag-handle-${p.index}`}
-              accessibilityLabel={i18n.t('live.reorderHint')}
-              style={[
-                styles.gripHandle,
-                { cursor: isDragging ? 'grabbing' : 'grab' } as unknown as ViewStyle,
-              ]}
-              {...gripPointerProps}
-            >
-              <GripDots color={theme.colors.textMuted} />
-            </View>
-          </Tooltip>
-        ) : null}
-        <ArtworkImage
-          uri={p.item.logo}
-          label={displayName}
-          maxDecodePx={96}
-          resizeMode="contain"
-          logoBackdropMode={p.logoBackdropMode ?? 'plate'}
-          borderRadius={theme.radius.button}
-          style={styles.zapLogo}
-        />
-        <View style={styles.zapRowText}>
-          <View style={styles.zapTitleRow}>
-            {p.item.num !== null && p.item.num !== undefined ? (
+        <Pressable
+          testID={`live-zap-row-${p.index}`}
+          accessibilityRole="button"
+          accessibilityLabel={formatLiveTitle({ num: p.item.num, name: displayName })}
+          accessibilityState={{ selected: p.isActive }}
+          {...(accessibilityActions !== undefined && accessibilityActions.length > 0
+            ? { accessibilityActions, onAccessibilityAction: handleAccessibilityAction }
+            : {})}
+          focusable={!p.isTv}
+          onPress={handlePress}
+          {...(p.onOpenContextMenu !== undefined
+            ? { onLongPress: handleLongPress, delayLongPress: 450 }
+            : {})}
+          {...webEventProps}
+          style={({ pressed }) => [styles.zapRowBody, { opacity: pressed ? 0.84 : 1 }, cursor]}
+        >
+          {isWeb && reorderable ? (
+            <Tooltip content={i18n.t('live.reorderHint')} placement="right">
+              <View
+                testID={`live-zap-drag-handle-${p.index}`}
+                accessibilityLabel={i18n.t('live.reorderHint')}
+                style={[
+                  styles.gripHandle,
+                  { cursor: isDragging ? 'grabbing' : 'grab' } as unknown as ViewStyle,
+                ]}
+                {...gripPointerProps}
+              >
+                <GripDots color={theme.colors.textMuted} />
+              </View>
+            </Tooltip>
+          ) : null}
+          <ArtworkImage
+            uri={p.item.logo}
+            label={displayName}
+            maxDecodePx={96}
+            resizeMode="contain"
+            logoBackdropMode={p.logoBackdropMode ?? 'plate'}
+            borderRadius={theme.radius.button}
+            style={styles.zapLogo}
+          />
+          <View style={styles.zapRowText}>
+            <View style={styles.zapTitleRow}>
+              {p.item.num !== null && p.item.num !== undefined ? (
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    theme.typography.caption,
+                    TABULAR_NUMS_STYLE,
+                    {
+                      color: p.isActive ? theme.colors.textPrimary : theme.colors.textMuted,
+                      fontWeight: '700',
+                    },
+                  ]}
+                >
+                  {p.item.num}
+                </Text>
+              ) : null}
               <Text
                 numberOfLines={1}
-                style={[
-                  theme.typography.caption,
-                  TABULAR_NUMS_STYLE,
-                  {
-                    color: p.isActive ? theme.colors.textPrimary : theme.colors.textMuted,
-                    fontWeight: '700',
-                  },
-                ]}
+                style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
               >
-                {p.item.num}
+                {displayName}
               </Text>
-            ) : null}
+              <SourceBadgePill badge={p.sourceBadge} testID={`live-zap-source-badge-${p.index}`} />
+              <LiveHealthBadge channelKey={p.item.key} testID={`live-zap-health-${p.index}`} />
+            </View>
             <Text
               numberOfLines={1}
-              style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
+              style={[
+                theme.typography.caption,
+                { color: p.nowTitle ? theme.colors.textSecondary : theme.colors.textMuted },
+              ]}
             >
-              {displayName}
+              {p.nowTitle ?? p.noProgramLabel}
             </Text>
-            <SourceBadgePill badge={p.sourceBadge} testID={`live-zap-source-badge-${p.index}`} />
-            <LiveHealthBadge channelKey={p.item.key} testID={`live-zap-health-${p.index}`} />
           </View>
-          <Text
-            numberOfLines={1}
-            style={[
-              theme.typography.caption,
-              { color: p.nowTitle ? theme.colors.textSecondary : theme.colors.textMuted },
-            ]}
-          >
-            {p.nowTitle ?? p.noProgramLabel}
-          </Text>
-        </View>
-      </Pressable>
+        </Pressable>
+        {p.onToggleFavorite !== undefined ? (
+          <View style={styles.favSlot}>
+            <Tooltip content={favLabel} placement="left">
+              <Pressable
+                testID={`live-zap-favorite-${p.item.key}`}
+                accessibilityRole="button"
+                accessibilityLabel={favLabel}
+                accessibilityState={{ selected: isFavorite }}
+                focusable={!p.isTv}
+                onPress={handleToggleFavorite}
+                {...favStopProps}
+                style={({ pressed }) => [
+                  styles.favButton,
+                  p.isTouch ? styles.favButtonTouch : styles.favButtonCompact,
+                  {
+                    borderRadius: theme.radius.pill,
+                    backgroundColor: isFavorite ? theme.colors.accentTint : 'transparent',
+                    opacity: pressed ? 0.78 : 1,
+                  },
+                  cursor,
+                  transition,
+                ]}
+              >
+                <Icon
+                  name={isFavorite ? 'starFilled' : 'star'}
+                  size={15}
+                  color={isFavorite ? theme.colors.accent : theme.colors.textMuted}
+                />
+              </Pressable>
+            </Tooltip>
+          </View>
+        ) : null}
+      </View>
       {p.dropIndicator === 'below' ? (
         <View
           testID={`live-zap-drop-below-${p.index}`}
@@ -310,10 +367,24 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
   rowWrap: { position: 'relative' },
-  zapRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, gap: 10 },
+  zapRowContainer: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  zapRowBody: {
+    flex: 1,
+    height: '100%',
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 10,
+    paddingRight: 4,
+    gap: 10,
+  },
   zapLogo: { width: 34, height: 34, flexShrink: 0 },
-  zapRowText: { flex: 1, gap: 2 },
+  zapRowText: { flex: 1, minWidth: 0, gap: 2 },
   zapTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  favSlot: { paddingRight: 8, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  favButton: { alignItems: 'center', justifyContent: 'center' },
+  favButtonCompact: { width: 30, height: 30 },
+  favButtonTouch: { width: 40, height: 40, minWidth: 40, minHeight: 40 },
   gripHandle: {
     width: 18,
     height: 28,

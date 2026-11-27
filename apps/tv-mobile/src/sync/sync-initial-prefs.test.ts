@@ -280,9 +280,9 @@ describe('createTvMobileSyncPorts initial-only preferences sync (Product Decisio
         { id: 'live', visible: true },
         { id: 'continue', visible: true },
         { id: 'newEpisodes', visible: true },
-        { id: 'mylist', visible: true },
         { id: 'movies', visible: true },
         { id: 'series', visible: true },
+        { id: 'mylist', visible: true },
         { id: 'collections', visible: true },
       ],
     });

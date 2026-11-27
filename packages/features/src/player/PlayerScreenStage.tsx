@@ -6,7 +6,6 @@ import type {
   DefaultResizeModePref,
   DeinterlaceMode,
   LiveChannelSwitchModePref,
-  OsdTimeDisplayMode,
   PreferencesPatch,
   SeekStepSecPref,
   SleepTimerAction,
@@ -106,8 +105,6 @@ export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
   subtitleStyle?: SubtitleStyleConfig;
   onPersistSubtitleStyle?: (style: SubtitleStyleConfig) => void;
   tvClockMode?: TvClockMode;
-  osdTimeDisplayMode?: OsdTimeDisplayMode;
-  onPersistOsdTimeDisplayMode?: (mode: OsdTimeDisplayMode) => void;
   sleepTimerDefaultAction?: SleepTimerAction;
   onPersistSleepTimerAction?: (action: SleepTimerAction) => void;
   stillWatchingTimeoutMin?: number;

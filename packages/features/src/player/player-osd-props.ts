@@ -1,5 +1,5 @@
 import type { NowNextEntry } from '@elv/data';
-import type { OsdTimeDisplayMode, TvClockMode } from '@elv/domain';
+import type { TvClockMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type {
   ChapterInfo,
@@ -13,6 +13,7 @@ import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { PlayerOsdProps } from './DesktopCinemaBar';
 import type { DescribedPlaybackFailure } from './errors';
 import type { usePlayerControls } from './usePlayerControls';
+import type { VodEndTimeDisplayMode } from './vod-progress-math';
 
 /** Inputs for {@link buildPlayerOsdProps}. */
 export interface BuildPlayerOsdPropsInput {
@@ -36,7 +37,7 @@ export interface BuildPlayerOsdPropsInput {
   readonly isFullscreen: boolean;
   readonly alwaysOnTop: boolean;
   readonly chapters: readonly ChapterInfo[] | undefined;
-  readonly timeDisplayMode: OsdTimeDisplayMode;
+  readonly timeDisplayMode: VodEndTimeDisplayMode;
   readonly videoInfo: StreamVideoInfo | undefined;
   readonly tracks: MediaTracks;
   readonly nowNext: NowNextEntry | null;

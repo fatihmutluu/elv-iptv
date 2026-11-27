@@ -1,11 +1,11 @@
-/** Canonical Home screen section identifiers in default order (Wave P4, `#502`). */
+/** Canonical Home screen section identifiers in default order (Wave P8, `#508`). */
 export const HOME_LAYOUT_SECTION_IDS = [
   'continue',
   'newEpisodes',
   'live',
-  'mylist',
   'movies',
   'series',
+  'mylist',
   'collections',
 ] as const;
 

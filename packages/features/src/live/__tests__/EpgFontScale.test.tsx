@@ -19,6 +19,8 @@ describe('EPG fontScale scaling (#62)', () => {
               isTv
               isPortrait={false}
               jumpHighlighted={false}
+              nowMs={900_000}
+              nowLineRatio={0.25}
               onPanEarlier={jest.fn()}
               onJumpToLive={jest.fn()}
               onPanLater={jest.fn()}
@@ -31,6 +33,11 @@ describe('EPG fontScale scaling (#62)', () => {
     const rulerStyle = (StyleSheet.flatten(screen.getByTestId('epg-time-ruler').props.style) ??
       {}) as ViewStyle;
     expect(rulerStyle.height).toBe(Math.round(32 * 1.2));
+    const badgeStyle = (StyleSheet.flatten(
+      screen.getByTestId('epg-live-clock-badge').props.style,
+    ) ?? {}) as ViewStyle;
+    expect(badgeStyle.width).toBe(Math.round(52 * 1.2));
+    expect(badgeStyle.height).toBe(Math.round(22 * 1.2));
     await view.unmount();
   });
 });

@@ -14,7 +14,7 @@ import {
 } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { PlayTarget } from '../ports/play-target';
-import { type DetailTarget, formatVodMeta } from '../shared';
+import { type DetailTarget, formatVodMeta, type HydratedVodCollection } from '../shared';
 
 /** Canonical sub-tabs inside the unified Cinema Quietude `Library` hub. */
 export type LibrarySubTab = 'following' | 'likes' | 'watched' | 'downloads';
@@ -101,9 +101,27 @@ function recordSizeBytes(record: DownloadRecord): number {
     : Math.max(0, record.bytesDownloaded);
 }
 
-/** Partitions `favorites` into Live TV (preserving custom `sortOrder`), Series, and Movies. */
+/** Returns the union of all VOD item keys assigned to any custom collection. */
+export function collectItemKeysFromCollections(
+  collections: readonly HydratedVodCollection[],
+): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const entry of collections) {
+    for (const item of entry.items) {
+      keys.add(item.key);
+    }
+  }
+  return keys;
+}
+
+/**
+ * Partitions `favorites` into Live TV (preserving custom `sortOrder`), Series, and Movies.
+ * When `collectedItemKeys` is provided, any Movie or Series already filed in a folder collection
+ * is excluded from the general `movies` and `series` rails (folder semantics, `#508`).
+ */
 export function partitionFavoritesForLibrary(
   favorites: readonly FavoriteRow[],
+  collectedItemKeys?: ReadonlySet<string>,
 ): PartitionedLibraryFavorites {
   const liveRows: FavoriteRow[] = [];
   const series: LibraryCardItem[] = [];
@@ -113,6 +131,7 @@ export function partitionFavoritesForLibrary(
     if (fav.kind === 'live') {
       liveRows.push(fav);
     } else if (fav.kind === 'series') {
+      if (collectedItemKeys?.has(fav.itemKey)) continue;
       const meta = formatVodMeta(fav.year, fav.rating);
       series.push({
         id: fav.itemKey,
@@ -126,6 +145,7 @@ export function partitionFavoritesForLibrary(
         ...(meta ? { subtitle: meta } : {}),
       });
     } else if (fav.kind === 'movie') {
+      if (collectedItemKeys?.has(fav.itemKey)) continue;
       const meta = formatVodMeta(fav.year, fav.rating);
       movies.push({
         id: fav.itemKey,
@@ -483,6 +503,96 @@ export function resolveLibraryDownloadStatusKey(record: DownloadRecord): Library
     default:
       return 'downloads.statusQueued';
   }
+}
+
+/** Resolves the card items rendered inside an active Library `See all` drill-down grid. */
+export function resolveLibrarySeeAllItems(input: {
+  readonly seeAll: LibrarySeeAllState | null;
+  readonly favPartition: PartitionedLibraryFavorites;
+  readonly ratingPartition: PartitionedLibraryRatings;
+  readonly watchedMovieCards: readonly LibraryCardItem[];
+  readonly watchedSeriesCards: readonly LibraryCardItem[];
+  readonly completedMovieCards: readonly LibraryCardItem[];
+  readonly downloadedSeriesGroups: readonly DownloadedSeriesGroup[];
+  readonly collectionRails: readonly {
+    readonly railId: string;
+    readonly items: readonly LibraryCardItem[];
+  }[];
+  readonly t: AppI18n['t'];
+}): readonly LibraryCardItem[] {
+  const { seeAll } = input;
+  if (!seeAll) return [];
+  switch (seeAll.railId) {
+    case 'live':
+      return input.favPartition.live;
+    case 'series':
+      return input.favPartition.series;
+    case 'movies':
+      return input.favPartition.movies;
+    case 'liked':
+      return input.ratingPartition.liked;
+    case 'disliked':
+      return input.ratingPartition.disliked;
+    case 'watched-movies':
+      return input.watchedMovieCards;
+    case 'watched-series':
+      return input.watchedSeriesCards;
+    case 'downloaded-movies':
+      return input.completedMovieCards;
+    case 'downloaded-series':
+      return input.downloadedSeriesGroups.map((group) => ({
+        id: group.groupId,
+        itemKey: group.seriesKey ?? group.groupId,
+        sourceId: group.sourceId,
+        kind: 'series' as const,
+        title: group.seriesTitle,
+        imageUri: group.posterUri,
+        subtitle: formatDownloadedSeriesSubtitle(group, input.t),
+        ...(group.hasNewEpisodes ? { badge: 'NEW' } : {}),
+      }));
+    default: {
+      const col = input.collectionRails.find((c) => c.railId === seeAll.railId);
+      return col ? col.items : [];
+    }
+  }
+}
+
+/** Drop-zone identifier representing the general `Movies` / `Series` area (removes item from collection). */
+export const GENERAL_LIBRARY_DROP_TARGET_ID = '__general__';
+
+/** Returns `true` when `targetId` represents the general `Movies` / `Series` drop area. */
+export function isGeneralLibraryDropTarget(targetId: string | null): boolean {
+  return (
+    targetId === GENERAL_LIBRARY_DROP_TARGET_ID ||
+    (targetId?.startsWith(`${GENERAL_LIBRARY_DROP_TARGET_ID}:`) ?? false)
+  );
+}
+
+/** Bounding rectangle for a drop target in client viewport coordinates. */
+export interface LibraryDropRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Pure hit-test returning the drop target ID containing `(clientX, clientY)`, or `null`. */
+export function findDropTargetAtPoint(
+  rects: ReadonlyMap<string, LibraryDropRect>,
+  clientX: number,
+  clientY: number,
+): string | null {
+  for (const [id, rect] of rects) {
+    if (
+      clientX >= rect.x &&
+      clientX <= rect.x + rect.width &&
+      clientY >= rect.y &&
+      clientY <= rect.y + rect.height
+    ) {
+      return id;
+    }
+  }
+  return null;
 }
 
 /** Formats `bytesDownloaded / totalBytes · pct%` for active download strip rows. */

@@ -4,6 +4,7 @@ import {
   appendNumberDigit,
   buildEpgRulerTicks,
   buildLiveHubPlayTarget,
+  computeEpgClockPillLayout,
   computeNowLineRatio,
   computeProgramProgress,
   createBoundedTtlCache,
@@ -76,6 +77,92 @@ describe('live-model pure helpers', () => {
     expect(computeNowLineRatio(BASE, 2 * HOUR, BASE + HOUR)).toBeCloseTo(0.5);
     expect(computeNowLineRatio(BASE, 2 * HOUR, BASE - 1)).toBeNull();
     expect(computeNowLineRatio(BASE, 2 * HOUR, BASE + 3 * HOUR)).toBeNull();
+  });
+
+  it('computes edge-clamped EPG ruler live clock pill anchor and colliding tick indices (#507)', () => {
+    // Hidden when off-live or trackWidth <= 0
+    expect(
+      computeEpgClockPillLayout({
+        trackWidth: 600,
+        nowLineRatio: null,
+        tickCount: 6,
+        pillWidth: 52,
+        tickLabelWidth: 44,
+        gap: 6,
+      }),
+    ).toEqual({ visible: false, pillLeftPx: 0, hiddenTickIndices: new Set() });
+    expect(
+      computeEpgClockPillLayout({
+        trackWidth: 0,
+        nowLineRatio: 0.5,
+        tickCount: 6,
+        pillWidth: 52,
+        tickLabelWidth: 44,
+        gap: 6,
+      }),
+    ).toEqual({ visible: false, pillLeftPx: 0, hiddenTickIndices: new Set() });
+
+    // Clamps to 0% left edge and hides tick 0
+    const leftEdge = computeEpgClockPillLayout({
+      trackWidth: 600,
+      nowLineRatio: 0,
+      tickCount: 6,
+      pillWidth: 52,
+      tickLabelWidth: 44,
+      gap: 6,
+    });
+    expect(leftEdge.visible).toBe(true);
+    expect(leftEdge.pillLeftPx).toBe(0);
+    expect(Array.from(leftEdge.hiddenTickIndices)).toEqual([0]);
+
+    // Centered at tick 1 (ratio 1/6 on 600px -> x=100, pill [74..126]) hides tick 1 ([100..144])
+    const onTick1 = computeEpgClockPillLayout({
+      trackWidth: 600,
+      nowLineRatio: 1 / 6,
+      tickCount: 6,
+      pillWidth: 52,
+      tickLabelWidth: 44,
+      gap: 6,
+    });
+    expect(onTick1.pillLeftPx).toBeCloseTo(74, 4);
+    expect(Array.from(onTick1.hiddenTickIndices)).toEqual([1]);
+
+    // Clamps to 100% right edge without overflowing trackWidth (pill [548..600] + 6px gap collides with tick 5 [500..544])
+    const rightEdge = computeEpgClockPillLayout({
+      trackWidth: 600,
+      nowLineRatio: 1,
+      tickCount: 6,
+      pillWidth: 52,
+      tickLabelWidth: 44,
+      gap: 6,
+    });
+    expect(rightEdge.pillLeftPx).toBe(548);
+    expect(Array.from(rightEdge.hiddenTickIndices)).toEqual([5]);
+
+    // Wider track (900px) at 100% right edge (pill [848..900] + 6px gap = 842) leaves tick 5 [750..794] visible
+    const rightEdgeWide = computeEpgClockPillLayout({
+      trackWidth: 900,
+      nowLineRatio: 1,
+      tickCount: 6,
+      pillWidth: 52,
+      tickLabelWidth: 44,
+      gap: 6,
+    });
+    expect(rightEdgeWide.pillLeftPx).toBe(848);
+    expect(rightEdgeWide.hiddenTickIndices.size).toBe(0);
+
+    // 8px left padding offset accounts for actual tick text box [cellLeft + 8 .. cellLeft + 52]
+    const withPadding = computeEpgClockPillLayout({
+      trackWidth: 600,
+      nowLineRatio: 80 / 600,
+      tickCount: 6,
+      pillWidth: 52,
+      tickLabelWidth: 44,
+      tickLabelOffset: 8,
+      gap: 6,
+    });
+    // Pill is [54..106] with 6px gap -> [48..112]; tick 0 text [8..52] collides (52 > 48), tick 1 text [108..152] collides (108 < 112)
+    expect(Array.from(withPadding.hiddenTickIndices)).toEqual([0, 1]);
   });
 
   it('clips and lays out EPG slots across window boundaries and synthesizes >= 5 min gap cells', () => {

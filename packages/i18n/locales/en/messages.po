@@ -1554,9 +1554,6 @@ msgstr "Filter SDH subtitle cues"
 msgid "settings.playback.filterSdhDesc"
 msgstr "Hide [sound effects], (descriptions), and SPEAKER: labels in text subtitles"
 
-msgid "settings.playback.osdTimeMode"
-msgstr "Player time display"
-
 msgid "settings.liveTv.catalogRefreshInterval"
 msgstr "Catalog auto-refresh"
 
@@ -3811,3 +3808,57 @@ msgstr "Choose which profiles can view channels and catalog items from this sour
 
 msgid "sources.advanced.allProfilesShared"
 msgstr "Shared with all profiles"
+
+msgid "library.collections.create"
+msgstr "Create collection"
+
+msgid "library.collections.createTitle"
+msgstr "New collection"
+
+msgid "library.collections.rename"
+msgstr "Rename"
+
+msgid "library.collections.renameTitle"
+msgstr "Rename collection"
+
+msgid "library.collections.delete"
+msgstr "Delete collection"
+
+msgid "library.collections.deleteConfirmTitle"
+msgstr "Delete collection?"
+
+msgid "library.collections.deleteConfirmBody"
+msgstr "Items stay in My List and return to your general Movies and Series rows."
+
+msgid "library.collections.emptySection"
+msgstr "Empty collection — move items here from the menu or drag them in."
+
+msgid "library.collections.moveTo"
+msgstr "Move to collection"
+
+msgid "library.collections.moveToNamed"
+msgstr "Move to {name}"
+
+msgid "library.collections.removeFrom"
+msgstr "Remove from collection"
+
+msgid "library.collections.dropHere"
+msgstr "Drop to move here"
+
+msgid "library.collections.namePlaceholder"
+msgstr "Collection name"
+
+msgid "catalog.filter.elvPicks"
+msgstr "ELV Picks"
+
+msgid "live.stage.fullscreen"
+msgstr "Fullscreen"
+
+msgid "live.stage.doubleClickHint"
+msgstr "Double-click video for fullscreen"
+
+msgid "live.zap.favoriteAdd"
+msgstr "Add to Favorites"
+
+msgid "live.zap.favoriteRemove"
+msgstr "Remove from Favorites"

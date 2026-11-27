@@ -282,18 +282,20 @@ describe('Live Favorites, Editorial Categories & Embedded Live Preview', () => {
       expect.objectContaining({ itemKey: 'x:src-1:live:101', kind: 'live' }),
     );
 
-    // Switching to Favorites now shows channel 0 with no prev/numpad clutter
+    // Switching to Favorites now shows channel 0 with row star button and no top actionBar / prev / numpad clutter
     await fireEvent.press(screen.getByTestId('live-mode-favorites'));
     await waitFor(() => {
       expect(screen.getByTestId('live-watch-stage')).toBeTruthy();
       expect(screen.getByTestId('live-stage-channel-title')).toHaveTextContent('101 · Channel 101');
-      expect(screen.getByTestId('live-stage-favorite')).toBeTruthy();
+      expect(screen.getByTestId('live-zap-favorite-x:src-1:live:101')).toBeTruthy();
     });
+    expect(screen.queryByTestId('live-stage-actions')).toBeNull();
+    expect(screen.queryByTestId('live-stage-favorite')).toBeNull();
     expect(screen.queryByTestId('live-prev-channel')).toBeNull();
     expect(screen.queryByTestId('live-toggle-numpad')).toBeNull();
 
-    // Unstarring the only favorite returns to empty state
-    await fireEvent.press(screen.getByTestId('live-stage-favorite'));
+    // Unstarring the only favorite from the zap row returns to empty state
+    await fireEvent.press(screen.getByTestId('live-zap-favorite-x:src-1:live:101'));
     await waitFor(() => {
       expect(screen.getByTestId('live-favorites-empty')).toBeTruthy();
     });

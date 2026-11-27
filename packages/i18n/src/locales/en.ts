@@ -14,6 +14,7 @@ import { enWaveP4Messages } from './en-wave-p4';
 import { enWaveP5Messages } from './en-wave-p5';
 import { enWaveP6Messages } from './en-wave-p6';
 import { enWaveP7Messages } from './en-wave-p7';
+import { enWaveP8Messages } from './en-wave-p8';
 
 /** English (source) message catalog. Every other locale must define the exact same keys. */
 export const enMessages = {
@@ -570,7 +571,6 @@ export const enMessages = {
   'settings.playback.filterSdh': 'Filter SDH subtitle cues',
   'settings.playback.filterSdhDesc':
     'Hide [sound effects], (descriptions), and SPEAKER: labels in text subtitles',
-  'settings.playback.osdTimeMode': 'Player time display',
   'settings.liveTv.catalogRefreshInterval': 'Catalog auto-refresh',
   'settings.liveTv.catalogRefreshIntervalDesc':
     'Automatically refresh channels, movies, and series in the background',
@@ -720,6 +720,7 @@ export const enMessages = {
   ...enWaveP5Messages,
   ...enWaveP6Messages,
   ...enWaveP7Messages,
+  ...enWaveP8Messages,
   ...enIssue502Messages,
 } as const;
 

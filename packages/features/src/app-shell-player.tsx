@@ -109,10 +109,6 @@ function AppShellPlayerView({
         void preferences.updatePreferences({ subtitleStyle });
       }}
       tvClockMode={prefs.tvClockMode}
-      osdTimeDisplayMode={prefs.osdTimeDisplayMode}
-      onPersistOsdTimeDisplayMode={(osdTimeDisplayMode) => {
-        void preferences.updatePreferences({ osdTimeDisplayMode });
-      }}
       sleepTimerDefaultAction={prefs.sleepTimerDefaultAction}
       onPersistSleepTimerAction={(sleepTimerDefaultAction) => {
         void preferences.updatePreferences({ sleepTimerDefaultAction });

@@ -506,8 +506,7 @@ describe('LiveScreen', () => {
       expect(screen.getByTestId('live-zap-row-0')).toBeTruthy();
     });
 
-    // Down into Favorites controls -> Down into Zap Drawer -> Down -> Select tunes favorite channel 1
-    await watchRemote.sendKey(KEYCODE_DPAD_DOWN);
+    // Down enters Zap Drawer row 0 -> Down to row 1 -> Select tunes favorite channel 1
     await watchRemote.sendKey(KEYCODE_DPAD_DOWN);
     await watchRemote.sendKey(KEYCODE_DPAD_DOWN);
     await watchRemote.sendKey(KEYCODE_DPAD_CENTER);
@@ -515,7 +514,7 @@ describe('LiveScreen', () => {
       expect(screen.getByTestId('live-stage-channel-title')).toHaveTextContent('102 · Channel 102');
     });
 
-    // Right returns to Favorites controls -> Right x2 reaches Watch live CTA (miniguide -> favorite -> watch) -> Select calls onPlay
+    // Right enters split player controls ('play-pause') -> Right ('tracks') -> Right ('fullscreen') -> Select calls onPlay
     await watchRemote.sendKey(KEYCODE_DPAD_RIGHT);
     await watchRemote.sendKey(KEYCODE_DPAD_RIGHT);
     await watchRemote.sendKey(KEYCODE_DPAD_RIGHT);

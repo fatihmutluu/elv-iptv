@@ -15,7 +15,7 @@ import type { CatalogQuickFilter } from './catalog-model';
 
 const ALL_CATEGORIES_ID = '__all__';
 const MY_LIST_FILTER_ID = '__mylist__';
-const WATCHED_FILTER_ID = '__watched__';
+const ELV_PICKS_FILTER_ID = '__elv_picks__';
 
 /** TV key interpreter bridge mounted only when the Catalog tab is the active 10-ft focus scope. */
 export function CatalogTvKeyBridge({
@@ -150,6 +150,7 @@ export interface CatalogFilterHeaderProps {
   readonly categories: readonly DisplayCategory[];
   readonly selectedCategoryId: string | null;
   readonly quickFilter?: CatalogQuickFilter;
+  readonly showElvPicks?: boolean;
   readonly focusedCatChipIndex: number | null;
   readonly onSelectCategory: (categoryId: string | null) => void;
   readonly onSelectQuickFilter?: (filter: CatalogQuickFilter) => void;
@@ -162,6 +163,7 @@ export const CatalogFilterHeader = memo(function CatalogFilterHeaderInner({
   categories,
   selectedCategoryId,
   quickFilter = 'all',
+  showElvPicks = false,
   focusedCatChipIndex,
   onSelectCategory,
   onSelectQuickFilter,
@@ -181,18 +183,22 @@ export const CatalogFilterHeader = memo(function CatalogFilterHeaderInner({
         label: i18n.t('catalog.filterMyList'),
         testID: 'catalog-filter-mylist',
       },
-      {
-        id: WATCHED_FILTER_ID,
-        label: i18n.t('catalog.filterWatched'),
-        testID: 'catalog-filter-watched',
-      },
+      ...(showElvPicks
+        ? [
+            {
+              id: ELV_PICKS_FILTER_ID,
+              label: i18n.t('catalog.filter.elvPicks'),
+              testID: 'catalog-filter-elv-picks',
+            },
+          ]
+        : []),
       ...categories.map((cat, index) => ({
         id: cat.row.id,
         label: cat.label,
         testID: `catalog-cat-chip-${index}`,
       })),
     ],
-    [categories, i18n],
+    [categories, i18n, showElvPicks],
   );
 
   const handleSelect = useCallback(
@@ -203,8 +209,8 @@ export const CatalogFilterHeader = memo(function CatalogFilterHeaderInner({
       } else if (id === MY_LIST_FILTER_ID) {
         onSelectQuickFilter?.('mylist');
         onSelectCategory(null);
-      } else if (id === WATCHED_FILTER_ID) {
-        onSelectQuickFilter?.('watched');
+      } else if (id === ELV_PICKS_FILTER_ID) {
+        onSelectQuickFilter?.('elvPicks');
         onSelectCategory(null);
       } else {
         onSelectQuickFilter?.('all');
@@ -219,8 +225,8 @@ export const CatalogFilterHeader = memo(function CatalogFilterHeaderInner({
       ? selectedCategoryId
       : quickFilter === 'mylist'
         ? MY_LIST_FILTER_ID
-        : quickFilter === 'watched'
-          ? WATCHED_FILTER_ID
+        : showElvPicks && quickFilter === 'elvPicks'
+          ? ELV_PICKS_FILTER_ID
           : ALL_CATEGORIES_ID;
 
   return (

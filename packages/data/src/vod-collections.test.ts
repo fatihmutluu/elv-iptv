@@ -7,6 +7,7 @@ import { setParentalLock, updateParentalSettings } from './parental-repo';
 import { createProfile } from './profiles-repo';
 import { removeSource } from './sources';
 import { testDb } from './test-db';
+import { listFavorites, setFavorite } from './user-state';
 import {
   addItemToCollection,
   createCollection,
@@ -97,10 +98,11 @@ describe('Custom User VOD Collections (#403)', () => {
       (await addItemToCollection(db, 'col-1', 'x:s1:movie:2', 'movie', undefined, 303)).ok,
     ).toBe(true);
     expect(
-      (await addItemToCollection(db, 'col-2', 'x:s1:movie:1', 'movie', undefined, 304)).ok,
+      (await addItemToCollection(db, 'col-2', 's:s2:movie:3', 'movie', undefined, 304)).ok,
     ).toBe(true);
 
-    expect(await listCollectionsForItem(db, 'x:s1:movie:1')).toEqual(['col-1', 'col-2']);
+    expect(await listCollectionsForItem(db, 'x:s1:movie:1')).toEqual(['col-1']);
+    expect(await listCollectionsForItem(db, 's:s2:movie:3')).toEqual(['col-2']);
     expect((await listCollectionItems(db, 'col-1')).map((i) => i.key)).toEqual([
       'x:s1:movie:1',
       'x:s1:series:10',
@@ -274,5 +276,86 @@ describe('Custom User VOD Collections (#403)', () => {
     expect(await service.getVodEnrichment?.('x:s1:movie:1')).toEqual(enriched);
 
     await service.close();
+  });
+
+  it('enforces folder semantics (max 1 collection per item per profile), bumps updatedAt on move, isolates profiles, and preserves favorites on delete (Wave P8, #508)', async () => {
+    const { db } = testDb();
+    await seedCatalog(db);
+    await createProfile(
+      db,
+      { name: 'Profile B', isKids: false },
+      () => 100,
+      () => 'prof-b',
+    );
+
+    await createCollection(db, { id: 'a-col-1', profileId: 'default', name: 'Sci-Fi' }, 100);
+    await createCollection(db, { id: 'a-col-2', profileId: 'default', name: 'Classics' }, 110);
+    await createCollection(db, { id: 'b-col-1', profileId: 'prof-b', name: 'B List' }, 120);
+
+    // Star Solaris in My List (favorites)
+    const favRes = await setFavorite(
+      db,
+      {
+        sourceId: 's1',
+        itemKey: 'x:s1:movie:1',
+        kind: 'movie',
+        title: 'Solaris',
+        profileId: 'default',
+      },
+      true,
+      () => 150,
+    );
+    expect(favRes.ok).toBe(true);
+
+    // Add movie:1 to both profile A (a-col-1) and profile B (b-col-1)
+    expect(
+      (await addItemToCollection(db, 'a-col-1', 'x:s1:movie:1', 'movie', 'default', 200)).ok,
+    ).toBe(true);
+    expect(
+      (await addItemToCollection(db, 'a-col-1', 'x:s1:movie:2', 'movie', 'default', 205)).ok,
+    ).toBe(true);
+    expect(
+      (await addItemToCollection(db, 'b-col-1', 'x:s1:movie:1', 'movie', 'prof-b', 210)).ok,
+    ).toBe(true);
+
+    // Re-adding to the SAME collection is idempotent (no duplicate row, preserves item order)
+    expect(
+      (await addItemToCollection(db, 'a-col-1', 'x:s1:movie:1', 'movie', 'default', 220)).ok,
+    ).toBe(true);
+    expect(
+      (await listCollectionItems(db, 'a-col-1', { profileId: 'default' })).map((i) => i.key),
+    ).toEqual(['x:s1:movie:1', 'x:s1:movie:2']);
+
+    // Move movie:1 from a-col-1 -> a-col-2 at timestamp 500
+    expect(
+      (await addItemToCollection(db, 'a-col-2', 'x:s1:movie:1', 'movie', 'default', 500)).ok,
+    ).toBe(true);
+
+    // Item belongs ONLY to a-col-2 in profile A; removed from a-col-1
+    expect(await listCollectionsForItem(db, 'x:s1:movie:1', 'default')).toEqual(['a-col-2']);
+    expect(
+      (await listCollectionItems(db, 'a-col-1', { profileId: 'default' })).map((i) => i.key),
+    ).toEqual(['x:s1:movie:2']);
+    expect(
+      (await listCollectionItems(db, 'a-col-2', { profileId: 'default' })).map((i) => i.key),
+    ).toEqual(['x:s1:movie:1']);
+
+    // Both source (a-col-1) and target (a-col-2) had updatedAt bumped to 500 for LWW sync propagation
+    const defaultCols = await listCollections(db, 'default');
+    const aCol1 = defaultCols.find((c) => c.id === 'a-col-1');
+    const aCol2 = defaultCols.find((c) => c.id === 'a-col-2');
+    expect(aCol1?.updatedAt).toBe(500);
+    expect(aCol2?.updatedAt).toBe(500);
+
+    // Profile B's collection is completely untouched
+    expect(await listCollectionsForItem(db, 'x:s1:movie:1', 'prof-b')).toEqual(['b-col-1']);
+    const profBCols = await listCollections(db, 'prof-b');
+    expect(profBCols[0]?.updatedAt).toBe(210);
+
+    // Deleting a-col-2 deletes the collection but preserves the item in `favorites` (My List)
+    expect((await deleteCollection(db, 'a-col-2', 'default')).ok).toBe(true);
+    expect(await listCollectionsForItem(db, 'x:s1:movie:1', 'default')).toEqual([]);
+    const favs = await listFavorites(db, 50, 'default');
+    expect(favs.map((f) => f.itemKey)).toContain('x:s1:movie:1');
   });
 });

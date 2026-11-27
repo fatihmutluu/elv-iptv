@@ -1,7 +1,6 @@
 import type { CatalogService } from '@elv/data';
 import type {
   DeinterlaceMode,
-  OsdTimeDisplayMode,
   PreferencesPatch,
   SleepTimerAction,
   SubtitleModePref,
@@ -27,7 +26,7 @@ import {
 } from './track-preferences';
 import { useSleepTimer } from './useSleepTimer';
 import { useStillWatching } from './useStillWatching';
-import { cycleOsdTimeDisplayMode } from './vod-progress-math';
+import { cycleOsdTimeDisplayMode, type VodEndTimeDisplayMode } from './vod-progress-math';
 
 const MAX_IPC_TRACK_LANG = 16;
 const MAX_IPC_TRACK_LABEL = 128;
@@ -75,8 +74,6 @@ export function usePlayerCinemaExtras(params: {
   readonly flushProgressRef: MutableRefObject<(overridePosMs?: number) => void>;
   readonly onExitRef: MutableRefObject<() => void>;
   readonly filterSdhSubtitles: boolean;
-  readonly osdTimeDisplayMode: OsdTimeDisplayMode;
-  readonly onPersistOsdTimeDisplayMode?: ((mode: OsdTimeDisplayMode) => void) | undefined;
   readonly onPersistResizeMode?: ((mode: VideoResizeMode) => void) | undefined;
   readonly sleepTimerDefaultAction: SleepTimerAction;
   readonly onPersistSleepTimerAction?: ((action: SleepTimerAction) => void) | undefined;
@@ -111,8 +108,6 @@ export function usePlayerCinemaExtras(params: {
     flushProgressRef,
     onExitRef,
     filterSdhSubtitles,
-    osdTimeDisplayMode: initialTimeMode,
-    onPersistOsdTimeDisplayMode,
     onPersistResizeMode,
     sleepTimerDefaultAction,
     onPersistSleepTimerAction,
@@ -142,8 +137,6 @@ export function usePlayerCinemaExtras(params: {
   chaptersRef.current = chapters;
   const openedEngineRef = useRef(openedEngine);
   openedEngineRef.current = openedEngine;
-  const onPersistTimeModeRef = useRef(onPersistOsdTimeDisplayMode);
-  onPersistTimeModeRef.current = onPersistOsdTimeDisplayMode;
   const onPersistResizeModeRef = useRef(onPersistResizeMode);
   onPersistResizeModeRef.current = onPersistResizeMode;
   const onPersistTrackLanguagePatchRef = useRef(onPersistTrackLanguagePatch);
@@ -166,10 +159,7 @@ export function usePlayerCinemaExtras(params: {
     lastSelectedAudioTrackRef.current = undefined;
   }, [activeTarget.itemKey]);
 
-  const [timeDisplayMode, setTimeDisplayMode] = useState<OsdTimeDisplayMode>(initialTimeMode);
-  useEffect(() => {
-    setTimeDisplayMode(initialTimeMode);
-  }, [initialTimeMode]);
+  const [timeDisplayMode, setTimeDisplayMode] = useState<VodEndTimeDisplayMode>('remaining');
 
   const [activeDeinterlaceMode, setActiveDeinterlaceMode] = useState<DeinterlaceMode>(
     deinterlaceMode ?? 'off',
@@ -220,11 +210,7 @@ export function usePlayerCinemaExtras(params: {
       : undefined;
 
   const handleCycleTimeDisplayMode = useCallback((): void => {
-    setTimeDisplayMode((prev) => {
-      const next = cycleOsdTimeDisplayMode(prev);
-      onPersistTimeModeRef.current?.(next);
-      return next;
-    });
+    setTimeDisplayMode((prev) => cycleOsdTimeDisplayMode(prev));
   }, []);
 
   // Forward live SDH filter changes to engine host (#310)

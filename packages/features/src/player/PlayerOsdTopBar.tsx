@@ -1,5 +1,5 @@
 import type { NowNextEntry } from '@elv/data';
-import type { OsdTimeDisplayMode, TvClockMode } from '@elv/domain';
+import type { TvClockMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type {
   ChapterInfo,
@@ -20,6 +20,7 @@ import { StreamBadgePills } from './PlayerOsdChrome';
 import type { OsdTier } from './player-overlay-model';
 import { formatPlaybackSpeed, type SettingsMenuView } from './settings-menu-nav';
 import type { TvOsdAction } from './usePlayerControls';
+import type { VodEndTimeDisplayMode } from './vod-progress-math';
 
 /** Props shared by {@link PlayerOsd}, {@link PlayerOsdTopBar}, {@link PlayerOsdBottomBar}, and {@link DesktopCinemaBar}. */
 export interface PlayerOsdProps {
@@ -52,7 +53,7 @@ export interface PlayerOsdProps {
   alwaysOnTop?: boolean;
   playbackSpeed?: number;
   chapters?: readonly ChapterInfo[] | undefined;
-  timeDisplayMode?: OsdTimeDisplayMode | undefined;
+  timeDisplayMode?: VodEndTimeDisplayMode | undefined;
   videoInfo?: StreamVideoInfo | undefined;
   tracks?: MediaTracks;
   nowNext?: NowNextEntry | null | undefined;

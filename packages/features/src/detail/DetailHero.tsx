@@ -35,7 +35,6 @@ export type DetailHeroFocusSlot =
   | 'dislike'
   | 'watched'
   | 'download'
-  | 'collections'
   | 'play'
   | 'preplay-version'
   | 'synopsis';
@@ -57,8 +56,6 @@ export interface DetailHeroProps {
   readonly plot: string | null;
   readonly genres?: readonly string[];
   readonly isEnriched?: boolean;
-  readonly collectionCount?: number;
-  readonly onOpenCollections?: () => void;
   readonly downloadState?: DetailHeroDownloadState;
   readonly onPressDownload?: () => void;
   readonly technicalMeta?: DetailTechnicalMeta;
@@ -109,8 +106,6 @@ function DetailHeroInner({
   plot,
   genres,
   isEnriched = false,
-  collectionCount = 0,
-  onOpenCollections,
   downloadState,
   onPressDownload,
   technicalMeta,
@@ -162,7 +157,6 @@ function DetailHeroInner({
   const technicalBadges = buildTechnicalBadges(technicalMeta);
   const kindLabel = i18n.t(kind === 'movie' ? 'home.kind.movie' : 'home.kind.series');
   const backFocused = isTv && focusedSlot === 'back';
-  const collectionsFocused = isTv && focusedSlot === 'collections';
   const synopsisFocused = isTv && focusedSlot === 'synopsis';
   const versionFocused = focusedSlot === 'preplay-version';
   const backLabel = i18n.t('detail.back');
@@ -284,7 +278,7 @@ function DetailHeroInner({
             testID="detail-hero-actions"
             style={[styles.actionsCol, { width: isPortrait ? '100%' : 230, gap: theme.spacing.sm }]}
           >
-            <View style={[styles.iconRow, { gap: theme.spacing.sm }]}>
+            <View testID="detail-hero-icon-row" style={[styles.iconRow, { gap: theme.spacing.sm }]}>
               <IconButton
                 testID="detail-mylist"
                 icon={inMyList ? 'starFilled' : 'star'}
@@ -345,81 +339,6 @@ function DetailHeroInner({
                   focused={isTv && focusedSlot === 'download'}
                   onPress={onPressDownload}
                 />
-              ) : null}
-              {onOpenCollections !== undefined ? (
-                <Pressable
-                  testID="detail-collections"
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    collectionCount > 0
-                      ? `${i18n.t('collections.inCollections')} (${collectionCount})`
-                      : i18n.t('collections.addToCollection')
-                  }
-                  focusable={!isTv}
-                  onPress={onOpenCollections}
-                  style={({ pressed }) => [
-                    styles.collectionsButton,
-                    glassBlur,
-                    transition,
-                    cursor,
-                    {
-                      borderRadius: theme.radius.button,
-                      backgroundColor: collectionsFocused
-                        ? theme.colors.focusFill
-                        : collectionCount > 0
-                          ? theme.colors.accentTint
-                          : theme.colors.actionGlassBg,
-                      borderColor:
-                        collectionCount > 0 ? theme.colors.accent : theme.colors.actionGlassBorder,
-                      opacity: pressed ? 0.85 : 1,
-                      transform: [
-                        {
-                          scale: pressed
-                            ? theme.reduceMotion
-                              ? 1
-                              : 0.98
-                            : collectionsFocused
-                              ? theme.focus.buttonScale
-                              : 1,
-                        },
-                      ],
-                    },
-                  ]}
-                >
-                  <Icon name="list" size={15} color={theme.colors.textPrimary} />
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      theme.typography.caption,
-                      { color: theme.colors.textPrimary, fontWeight: '600' },
-                    ]}
-                  >
-                    {collectionCount > 0
-                      ? i18n.t('collections.inCollections')
-                      : i18n.t('collections.addToCollection')}
-                  </Text>
-                  {collectionCount > 0 ? (
-                    <MicroPill
-                      testID="detail-collections-count"
-                      label={String(collectionCount)}
-                      tone="accent"
-                    />
-                  ) : null}
-                  {collectionsFocused ? (
-                    <View
-                      pointerEvents="none"
-                      testID="detail-collections-focus-ring"
-                      style={[
-                        styles.collectionsFocusRing,
-                        {
-                          borderRadius: theme.radius.button,
-                          borderWidth: theme.focus.ringWidth,
-                          borderColor: theme.colors.focusRingColor,
-                        },
-                      ]}
-                    />
-                  ) : null}
-                </Pressable>
               ) : null}
             </View>
 
@@ -598,17 +517,6 @@ const styles = StyleSheet.create({
   heroBottom: { width: '100%' },
   actionsCol: { flexShrink: 0 },
   iconRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
-  collectionsButton: {
-    position: 'relative',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    minHeight: 40,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-  },
-  collectionsFocusRing: { position: 'absolute', top: -3, bottom: -3, left: -3, right: -3 },
   ctaWrap: { width: '100%' },
   playCta: { width: '100%', alignSelf: 'stretch' },
   progressTrack: { height: 3, width: '100%', overflow: 'hidden', marginTop: 6 },

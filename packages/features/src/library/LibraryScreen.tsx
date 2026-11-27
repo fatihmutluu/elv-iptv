@@ -2,6 +2,7 @@ import type { BrowseKind, CatalogService, SourceRow } from '@elv/data';
 import type { DownloadRecord } from '@elv/domain';
 import {
   type ContextMenuAnchor,
+  CtaButton,
   EditorialCategoryBar,
   type EditorialCategoryItem,
   TvFocusAnchor,
@@ -21,9 +22,13 @@ import {
   useDownloads,
   useRouteActive,
 } from '../shared';
+import {
+  type LibraryCollectionModalState,
+  LibraryCollectionModals,
+} from './LibraryCollectionModals';
 import { LibraryDownloadedSeriesView } from './LibraryDownloadedSeriesView';
 import { LibraryDownloadsTab } from './LibraryDownloadsTab';
-import { LibraryEditorialTabs } from './LibraryEditorialTabs';
+import { type LibraryCollectionRail, LibraryEditorialTabs } from './LibraryEditorialTabs';
 import { LibrarySeeAllGrid } from './LibrarySeeAllGrid';
 import {
   buildActiveDownloadMenuItems,
@@ -36,7 +41,6 @@ import {
   buildLibraryPlayTarget,
   buildOfflineEpisodePlayTarget,
   deriveSeriesKeyFromEpisodeRecord,
-  formatDownloadedSeriesSubtitle,
   LIBRARY_SUB_TABS,
   type LibraryCardItem,
   type LibrarySeeAllState,
@@ -46,9 +50,11 @@ import {
   partitionFavoritesForLibrary,
   partitionLibraryDownloads,
   partitionRatingsForLibrary,
+  resolveLibrarySeeAllItems,
 } from './library-model';
 import { useLibraryData } from './useLibraryData';
-import { type LibraryNavRailDescriptor, useTvLibraryNavigation } from './useTvLibraryNavigation';
+import { useLibraryFolderDrag } from './useLibraryFolderDrag';
+import { buildLibraryNavRails, useTvLibraryNavigation } from './useTvLibraryNavigation';
 
 /** Props of {@link LibraryScreen}. */
 export interface LibraryScreenProps {
@@ -101,6 +107,7 @@ export function LibraryScreen({
   const [activeTab, setActiveTab] = useState<LibrarySubTab>('following');
   const [seeAll, setSeeAll] = useState<LibrarySeeAllState | null>(null);
   const [selectedSeriesGroupId, setSelectedSeriesGroupId] = useState<string | null>(null);
+  const [collectionModal, setCollectionModal] = useState<LibraryCollectionModalState | null>(null);
 
   const dlPartition = useMemo(
     () => partitionLibraryDownloads(downloads.records),
@@ -117,8 +124,8 @@ export function LibraryScreen({
   });
 
   const favPartition = useMemo(
-    () => partitionFavoritesForLibrary(data.favorites),
-    [data.favorites],
+    () => partitionFavoritesForLibrary(data.favorites, data.collectedItemKeys),
+    [data.collectedItemKeys, data.favorites],
   );
   const ratingPartition = useMemo(() => partitionRatingsForLibrary(data.ratings), [data.ratings]);
   const watchedMovieCards = useMemo(
@@ -145,15 +152,52 @@ export function LibraryScreen({
     [dlPartition.completedMovies, i18n],
   );
 
-  const collectionRails = useMemo(
+  const collectionRails = useMemo<readonly LibraryCollectionRail[]>(
     () =>
       data.collections.map((c) => ({
         railId: `collection-${c.collection.id}`,
+        collectionId: c.collection.id,
         title: c.collection.name,
         items: mapCollectionItemsToLibraryCards(c.items),
       })),
     [data.collections],
   );
+  const collectionMenuOptions = useMemo(
+    () => data.collections.map((c) => ({ id: c.collection.id, name: c.collection.name })),
+    [data.collections],
+  );
+  const canCreateCollection = typeof catalog.createCollection === 'function';
+
+  const handleMoveItemToCollection = useCallback(
+    (item: LibraryCardItem, targetCollectionId: string) => {
+      void data.moveItemToCollection(item, targetCollectionId);
+    },
+    [data.moveItemToCollection],
+  );
+  const handleRemoveItemFromCollection = useCallback(
+    (collectionId: string, itemKey: string) => {
+      void data.removeItemFromCollection(collectionId, itemKey);
+    },
+    [data.removeItemFromCollection],
+  );
+  const dragController = useLibraryFolderDrag({
+    enabled:
+      !isTv && activeTab === 'following' && seeAll === null && selectedSeriesGroupId === null,
+    onMoveToCollection: handleMoveItemToCollection,
+    onRemoveFromCollection: handleRemoveItemFromCollection,
+  });
+  const handleOpenCreateCollection = useCallback(() => {
+    setCollectionModal({ mode: 'create' });
+  }, []);
+  const handleOpenRenameCollection = useCallback((collectionId: string, currentName: string) => {
+    setCollectionModal({ mode: 'rename', collectionId, currentName });
+  }, []);
+  const handleOpenDeleteCollection = useCallback((collectionId: string, name: string) => {
+    setCollectionModal({ mode: 'delete', collectionId, name });
+  }, []);
+  const handleCloseCollectionModal = useCallback(() => {
+    setCollectionModal(null);
+  }, []);
 
   const selectedSeriesGroup = useMemo(
     () =>
@@ -227,7 +271,7 @@ export function LibraryScreen({
   );
 
   const openVodContextMenu = useCallback(
-    (item: LibraryCardItem, anchor?: ContextMenuAnchor) => {
+    (item: LibraryCardItem, anchor?: ContextMenuAnchor, currentCollectionId?: string | null) => {
       if (item.kind !== 'movie' && item.kind !== 'series') return;
       const detail = buildLibraryDetailTarget(item);
       const isFav = data.favoriteKeys.has(item.itemKey);
@@ -236,6 +280,11 @@ export function LibraryScreen({
       const existingDl = downloads.byItemKey.get(item.itemKey);
       const canDownload =
         item.kind === 'movie' && downloads.supported && !hasManagedDownload(existingDl);
+      const resolvedCollectionId =
+        currentCollectionId !== undefined
+          ? currentCollectionId
+          : (data.collections.find((c) => c.items.some((i) => i.key === item.itemKey))?.collection
+              .id ?? null);
 
       contextMenu.openContextMenu({
         title: item.title,
@@ -247,6 +296,8 @@ export function LibraryScreen({
           ratingValue: currentRating,
           isWatched,
           canDownload,
+          collections: collectionMenuOptions,
+          currentCollectionId: resolvedCollectionId,
           ...(item.kind === 'movie' ? { onPlay: () => onPlay(buildLibraryPlayTarget(item)) } : {}),
           onOpenDetail: () => {
             if (detail) onOpenDetail(detail);
@@ -262,6 +313,12 @@ export function LibraryScreen({
           },
           onToggleWatched: () => {
             void data.toggleWatched(item, isWatched);
+          },
+          onMoveToCollection: (targetCollectionId) => {
+            void data.moveItemToCollection(item, targetCollectionId);
+          },
+          onRemoveFromCollection: (colId) => {
+            void data.removeItemFromCollection(colId, item.itemKey);
           },
           ...(canDownload
             ? {
@@ -279,7 +336,7 @@ export function LibraryScreen({
         }),
       });
     },
-    [contextMenu, data, downloads, i18n.t, onOpenDetail, onPlay],
+    [collectionMenuOptions, contextMenu, data, downloads, i18n.t, onOpenDetail, onPlay],
   );
 
   const openDownloadedContextMenu = useCallback(
@@ -353,115 +410,57 @@ export function LibraryScreen({
     [contextMenu, handleCancelActive, handleTogglePauseResume, i18n.t],
   );
 
-  const navRails = useMemo<readonly LibraryNavRailDescriptor[]>(() => {
-    if (activeTab === 'following') {
-      const out: LibraryNavRailDescriptor[] = [];
-      if (favPartition.live.length > 0)
-        out.push({ id: 'live', kind: 'live', items: favPartition.live });
-      if (favPartition.series.length > 0)
-        out.push({ id: 'series', kind: 'vod', items: favPartition.series });
-      if (favPartition.movies.length > 0)
-        out.push({ id: 'movies', kind: 'vod', items: favPartition.movies });
-      for (const col of collectionRails) {
-        if (col.items.length > 0) out.push({ id: col.railId, kind: 'vod', items: col.items });
-      }
-      return out;
-    }
-    if (activeTab === 'likes') {
-      const out: LibraryNavRailDescriptor[] = [];
-      if (ratingPartition.liked.length > 0)
-        out.push({ id: 'liked', kind: 'vod', items: ratingPartition.liked });
-      if (ratingPartition.disliked.length > 0)
-        out.push({ id: 'disliked', kind: 'vod', items: ratingPartition.disliked });
-      return out;
-    }
-    if (activeTab === 'watched') {
-      const out: LibraryNavRailDescriptor[] = [];
-      if (watchedMovieCards.length > 0)
-        out.push({ id: 'watched-movies', kind: 'vod', items: watchedMovieCards });
-      if (watchedSeriesCards.length > 0)
-        out.push({ id: 'watched-series', kind: 'vod', items: watchedSeriesCards });
-      return out;
-    }
-    const out: LibraryNavRailDescriptor[] = [];
-    for (const rec of dlPartition.active) {
-      out.push({ id: `active-${rec.id}`, kind: 'active-download', activeRecord: rec });
-    }
-    if (completedMovieCards.length > 0) {
-      out.push({ id: 'downloaded-movies', kind: 'downloaded-movie', items: completedMovieCards });
-    }
-    if (data.downloadedSeriesGroups.length > 0) {
-      out.push({
-        id: 'downloaded-series',
-        kind: 'downloaded-series',
-        seriesGroups: data.downloadedSeriesGroups,
-      });
-    }
-    return out;
-  }, [
-    activeTab,
-    collectionRails,
-    completedMovieCards,
-    data.downloadedSeriesGroups,
-    dlPartition.active,
-    favPartition.live,
-    favPartition.movies,
-    favPartition.series,
-    ratingPartition.disliked,
-    ratingPartition.liked,
-    watchedMovieCards,
-    watchedSeriesCards,
-  ]);
+  const navRails = useMemo(
+    () =>
+      buildLibraryNavRails({
+        activeTab,
+        favPartition,
+        collectionRails,
+        ratingPartition,
+        watchedMovieCards,
+        watchedSeriesCards,
+        activeDownloads: dlPartition.active,
+        completedMovieCards,
+        downloadedSeriesGroups: data.downloadedSeriesGroups,
+      }),
+    [
+      activeTab,
+      collectionRails,
+      completedMovieCards,
+      data.downloadedSeriesGroups,
+      dlPartition.active,
+      favPartition,
+      ratingPartition,
+      watchedMovieCards,
+      watchedSeriesCards,
+    ],
+  );
 
-  const seeAllItems = useMemo<readonly LibraryCardItem[]>(() => {
-    if (!seeAll) return [];
-    switch (seeAll.railId) {
-      case 'live':
-        return favPartition.live;
-      case 'series':
-        return favPartition.series;
-      case 'movies':
-        return favPartition.movies;
-      case 'liked':
-        return ratingPartition.liked;
-      case 'disliked':
-        return ratingPartition.disliked;
-      case 'watched-movies':
-        return watchedMovieCards;
-      case 'watched-series':
-        return watchedSeriesCards;
-      case 'downloaded-movies':
-        return completedMovieCards;
-      case 'downloaded-series':
-        return data.downloadedSeriesGroups.map((group) => ({
-          id: group.groupId,
-          itemKey: group.seriesKey ?? group.groupId,
-          sourceId: group.sourceId,
-          kind: 'series' as const,
-          title: group.seriesTitle,
-          imageUri: group.posterUri,
-          subtitle: formatDownloadedSeriesSubtitle(group, i18n.t),
-          ...(group.hasNewEpisodes ? { badge: 'NEW' } : {}),
-        }));
-      default: {
-        const col = collectionRails.find((c) => c.railId === seeAll.railId);
-        return col ? col.items : [];
-      }
-    }
-  }, [
-    collectionRails,
-    completedMovieCards,
-    data.downloadedSeriesGroups,
-    favPartition.live,
-    favPartition.movies,
-    favPartition.series,
-    i18n.t,
-    ratingPartition.disliked,
-    ratingPartition.liked,
-    seeAll,
-    watchedMovieCards,
-    watchedSeriesCards,
-  ]);
+  const seeAllItems = useMemo(
+    () =>
+      resolveLibrarySeeAllItems({
+        seeAll,
+        favPartition,
+        ratingPartition,
+        watchedMovieCards,
+        watchedSeriesCards,
+        completedMovieCards,
+        downloadedSeriesGroups: data.downloadedSeriesGroups,
+        collectionRails,
+        t: i18n.t,
+      }),
+    [
+      collectionRails,
+      completedMovieCards,
+      data.downloadedSeriesGroups,
+      favPartition,
+      i18n.t,
+      ratingPartition,
+      seeAll,
+      watchedMovieCards,
+      watchedSeriesCards,
+    ],
+  );
 
   const selectSubTab = useCallback((next: LibrarySubTab) => {
     setActiveTab(next);
@@ -475,6 +474,10 @@ export function LibraryScreen({
     seeAll,
     seeAllItems,
     selectedSeriesGroup,
+    canCreateCollection,
+    onOpenCreateCollection: handleOpenCreateCollection,
+    onRenameCollection: handleOpenRenameCollection,
+    onDeleteCollection: handleOpenDeleteCollection,
     onSelectTab: selectSubTab,
     onCloseSeeAll: () => setSeeAll(null),
     onSelectSeriesGroup: setSelectedSeriesGroupId,
@@ -482,7 +485,7 @@ export function LibraryScreen({
     onPlayOfflineEpisode: (rec) => onPlay(buildOfflineEpisodePlayTarget(rec)),
     onTogglePauseResume: handleTogglePauseResume,
     onOpenLiveMenu: openLiveContextMenu,
-    onOpenVodMenu: openVodContextMenu,
+    onOpenVodMenu: (item, colId) => openVodContextMenu(item, undefined, colId),
     onOpenDownloadedMenu: openDownloadedContextMenu,
     onOpenActiveMenu: openActiveDownloadContextMenu,
     onFocusTopNav,
@@ -514,6 +517,15 @@ export function LibraryScreen({
       : null;
   const focusedColFor = (railId: string): number | null =>
     focusedRailId === railId ? tv.tvColIdx : null;
+  const focusedCollectionActionFor = (collectionId: string): 'rename' | 'delete' | null => {
+    if (focusedRailId !== `collection-actions-${collectionId}`) return null;
+    return tv.tvColIdx === 0 ? 'rename' : 'delete';
+  };
+  const showCreateCollectionCta =
+    activeTab === 'following' &&
+    seeAll === null &&
+    selectedSeriesGroup === null &&
+    canCreateCollection;
   const focusedActiveIdx =
     isTv &&
     isActiveScope &&
@@ -524,7 +536,7 @@ export function LibraryScreen({
 
   return (
     <View testID="library-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
-      {isTv && isActiveScope && !contextMenu.isOpen ? (
+      {isTv && isActiveScope && !contextMenu.isOpen && collectionModal === null ? (
         <LibraryTvKeyBridge onEvent={tv.handleTvKey} />
       ) : null}
 
@@ -539,14 +551,22 @@ export function LibraryScreen({
         }}
       >
         <View style={styles.headerBlock}>
-          <Text
-            style={[
-              theme.typography.h1,
-              { color: theme.colors.textPrimary, paddingHorizontal: padX },
-            ]}
-          >
-            {i18n.t('library.title')}
-          </Text>
+          <View style={[styles.headerTitleRow, { paddingHorizontal: padX }]}>
+            <Text style={[theme.typography.h1, { color: theme.colors.textPrimary }]}>
+              {i18n.t('library.title')}
+            </Text>
+            {showCreateCollectionCta ? (
+              <CtaButton
+                testID="library-create-collection-btn"
+                variant="secondary"
+                icon="plus"
+                label={i18n.t('library.collections.create')}
+                focusable={!isTv}
+                focused={isTv && isActiveScope && tv.tvZone === 'create-collection'}
+                onPress={handleOpenCreateCollection}
+              />
+            ) : null}
+          </View>
           <EditorialCategoryBar
             testID="library-subtabs"
             items={tabItems}
@@ -674,6 +694,10 @@ export function LibraryScreen({
             padX={padX}
             isTv={isTv}
             focusedColFor={focusedColFor}
+            focusedCollectionActionFor={focusedCollectionActionFor}
+            dragController={dragController}
+            onRenameCollection={handleOpenRenameCollection}
+            onDeleteCollection={handleOpenDeleteCollection}
             onPressCard={handlePressCard}
             onContextMenuLive={openLiveContextMenu}
             onContextMenuVod={openVodContextMenu}
@@ -681,6 +705,15 @@ export function LibraryScreen({
           />
         )}
       </ScrollView>
+
+      <LibraryCollectionModals
+        modal={collectionModal}
+        isTv={isTv}
+        onClose={handleCloseCollectionModal}
+        onCreate={data.createCollection}
+        onRename={data.renameCollection}
+        onDelete={data.deleteCollection}
+      />
     </View>
   );
 }
@@ -688,4 +721,11 @@ export function LibraryScreen({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   headerBlock: { width: '100%', gap: 8 },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
 });

@@ -7,6 +7,7 @@ import {
   formatVodEndTimestamp,
   integrateFineScrubStep,
   type TouchScrubSensitivityTier,
+  type VodEndTimeDisplayMode,
 } from './vod-progress-math';
 
 export {
@@ -14,6 +15,7 @@ export {
   formatVodEndAccessibilityLabel,
   formatVodEndTimestamp,
   type TouchScrubSensitivityTier,
+  type VodEndTimeDisplayMode,
 };
 
 export interface ProgressSnapshot {
