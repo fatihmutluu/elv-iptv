@@ -1,3 +1,4 @@
+import { isElvCategorySource, isElvTitleFormat } from './elv-mode';
 import { isHomeLayoutSectionId, normalizeHomeLayout } from './home-layout';
 import type { PreferencesPatch, PreferencesSnapshot } from './preferences';
 import {
@@ -48,6 +49,15 @@ export const SYNCABLE_PREFERENCE_KEYS = [
   'autoPlayNextEpisode',
   'seekStepSec',
   'homeLayout',
+  'elvModeEnabled',
+  'elvMergeVersions',
+  'elvEnrichMetadata',
+  'elvTitleFormat',
+  'elvCategorySource',
+  'elvSmartRecommendations',
+  'elvXrayEnabled',
+  'elvLiveEnhance',
+  'elvVerifyRealQuality',
 ] as const;
 
 /** Union of preference keys eligible for initial-only device seeding (Product Decision #40). */
@@ -150,6 +160,15 @@ export function extractSyncablePreferences(
     autoPlayNextEpisode: snapshot.autoPlayNextEpisode,
     seekStepSec: snapshot.seekStepSec,
     homeLayout: snapshot.homeLayout.map((s) => ({ id: s.id, visible: s.visible })),
+    elvModeEnabled: snapshot.elvModeEnabled,
+    elvMergeVersions: snapshot.elvMergeVersions,
+    elvEnrichMetadata: snapshot.elvEnrichMetadata,
+    elvTitleFormat: snapshot.elvTitleFormat,
+    elvCategorySource: snapshot.elvCategorySource,
+    elvSmartRecommendations: snapshot.elvSmartRecommendations,
+    elvXrayEnabled: snapshot.elvXrayEnabled,
+    elvLiveEnhance: snapshot.elvLiveEnhance,
+    elvVerifyRealQuality: snapshot.elvVerifyRealQuality,
   };
 }
 
@@ -217,6 +236,19 @@ export function sanitizeInitialPreferencesPatch(raw: unknown): PreferencesPatch 
     raw.homeLayout.some((e) => isRecord(e) && isHomeLayoutSectionId(e.id))
   ) {
     patch.homeLayout = normalizeHomeLayout(raw.homeLayout);
+  }
+  if (typeof raw.elvModeEnabled === 'boolean') patch.elvModeEnabled = raw.elvModeEnabled;
+  if (typeof raw.elvMergeVersions === 'boolean') patch.elvMergeVersions = raw.elvMergeVersions;
+  if (typeof raw.elvEnrichMetadata === 'boolean') patch.elvEnrichMetadata = raw.elvEnrichMetadata;
+  if (isElvTitleFormat(raw.elvTitleFormat)) patch.elvTitleFormat = raw.elvTitleFormat;
+  if (isElvCategorySource(raw.elvCategorySource)) patch.elvCategorySource = raw.elvCategorySource;
+  if (typeof raw.elvSmartRecommendations === 'boolean') {
+    patch.elvSmartRecommendations = raw.elvSmartRecommendations;
+  }
+  if (typeof raw.elvXrayEnabled === 'boolean') patch.elvXrayEnabled = raw.elvXrayEnabled;
+  if (typeof raw.elvLiveEnhance === 'boolean') patch.elvLiveEnhance = raw.elvLiveEnhance;
+  if (typeof raw.elvVerifyRealQuality === 'boolean') {
+    patch.elvVerifyRealQuality = raw.elvVerifyRealQuality;
   }
 
   return patch as PreferencesPatch;

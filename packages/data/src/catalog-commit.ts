@@ -52,8 +52,8 @@ const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, n
      OR live.catchup_mode IS NOT excluded.catchup_mode
      OR live.catchup_source_template IS NOT excluded.catchup_source_template`;
 
-const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, cast_text, director_text, cast_fold, director_fold, run_id, content_hash)
-  SELECT source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, cast_text, director_text, cast_fold, director_fold, run_id, content_hash
+const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
+  SELECT source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash
   FROM movies_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
@@ -75,6 +75,8 @@ const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, na
     director_text = COALESCE(excluded.director_text, movies.director_text),
     cast_fold = COALESCE(excluded.cast_fold, movies.cast_fold),
     director_fold = COALESCE(excluded.director_fold, movies.director_fold),
+    provider_imdb_id = COALESCE(excluded.provider_imdb_id, movies.provider_imdb_id),
+    provider_tmdb_id = COALESCE(excluded.provider_tmdb_id, movies.provider_tmdb_id),
     run_id = excluded.run_id,
     content_hash = excluded.content_hash
   WHERE movies.content_hash IS NULL
@@ -84,10 +86,12 @@ const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, na
      OR movies.version_group_key != excluded.version_group_key
      OR movies.version_label IS NOT excluded.version_label
      OR (excluded.cast_fold IS NOT NULL AND movies.cast_fold IS NOT excluded.cast_fold)
-     OR (excluded.director_fold IS NOT NULL AND movies.director_fold IS NOT excluded.director_fold)`;
+     OR (excluded.director_fold IS NOT NULL AND movies.director_fold IS NOT excluded.director_fold)
+     OR (excluded.provider_imdb_id IS NOT NULL AND movies.provider_imdb_id IS NOT excluded.provider_imdb_id)
+     OR (excluded.provider_tmdb_id IS NOT NULL AND movies.provider_tmdb_id IS NOT excluded.provider_tmdb_id)`;
 
-const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, run_id, content_hash)
-  SELECT source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, run_id, content_hash
+const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
+  SELECT source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash
   FROM series_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
@@ -104,6 +108,8 @@ const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, na
     director_text = COALESCE(excluded.director_text, series.director_text),
     cast_fold = COALESCE(excluded.cast_fold, series.cast_fold),
     director_fold = COALESCE(excluded.director_fold, series.director_fold),
+    provider_imdb_id = COALESCE(excluded.provider_imdb_id, series.provider_imdb_id),
+    provider_tmdb_id = COALESCE(excluded.provider_tmdb_id, series.provider_tmdb_id),
     run_id = excluded.run_id,
     content_hash = excluded.content_hash
   WHERE series.content_hash IS NULL
@@ -111,7 +117,9 @@ const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, na
      OR series.content_hash != excluded.content_hash
      OR series.sort_title != excluded.sort_title
      OR (excluded.cast_fold IS NOT NULL AND series.cast_fold IS NOT excluded.cast_fold)
-     OR (excluded.director_fold IS NOT NULL AND series.director_fold IS NOT excluded.director_fold)`;
+     OR (excluded.director_fold IS NOT NULL AND series.director_fold IS NOT excluded.director_fold)
+     OR (excluded.provider_imdb_id IS NOT NULL AND series.provider_imdb_id IS NOT excluded.provider_imdb_id)
+     OR (excluded.provider_tmdb_id IS NOT NULL AND series.provider_tmdb_id IS NOT excluded.provider_tmdb_id)`;
 
 const UPSERT_EPISODES = `INSERT INTO episodes (source_id, key, provider_id, series_key, season, episode, title, title_fold, extension, duration_sec, url_template, headers_json, backup_urls_json, run_id)
   SELECT source_id, key, provider_id, series_key, season, episode, title, title_fold, extension, duration_sec, url_template, headers_json, backup_urls_json, run_id

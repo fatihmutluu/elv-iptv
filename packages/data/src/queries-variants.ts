@@ -1,5 +1,7 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
 import { CUSTOM_GROUP_CATEGORY_PREFIX, parseCustomGroupCategoryId } from './custom-groups-repo';
+import type { ElvEnrichmentStore, ElvQualityMemoryRecord } from './elv-enrichment-repo';
+import { UNRELIABLE_FAIL_COUNT_THRESHOLD } from './elv-quality-memory';
 import { parseLiveVariant } from './live-variants';
 import { isAdultKeywordMatch, type ParentalQueryOptions } from './parental-policy';
 import {
@@ -13,12 +15,28 @@ import { parseCategoryId, sourceOfKey } from './queries';
 import { resolveQueryProfileId } from './queries-shared';
 import { parseVodVersion } from './vod-versions';
 
-/** One selectable quality variant of a live channel (`#218`). */
+/** One selectable quality variant of a live channel (`#218`, `#511`). */
 export interface LiveVariantOption {
   readonly key: string;
   readonly title: string;
   readonly qualityLabel: string;
   readonly qualityRank: number;
+  readonly sourceId?: string;
+  readonly sourceName?: string;
+  readonly failCount?: number;
+  readonly isUnreliable?: boolean;
+}
+
+/** Options for {@link queryLiveVariants} extending parental filtering with Live TV ELV Mode (`#511`). */
+export interface QueryLiveVariantsOptions extends ParentalQueryOptions {
+  /** When `true`, collapses identical `variant_base_fold` channels across ALL categories (default `false`). */
+  readonly crossCategory?: boolean;
+  /** When `true` alongside `crossCategory`, includes matching variants from other active sources. */
+  readonly crossSource?: boolean;
+  /** Optional quality/failure map (`elv_quality_memory`) ranking healthy variants ahead of failed ones. */
+  readonly qualityByKey?: ReadonlyMap<string, ElvQualityMemoryRecord>;
+  /** Optional isolated ELV enrichment store used to load failure counts when `qualityByKey` is omitted. */
+  readonly enrichmentStore?: ElvEnrichmentStore;
 }
 
 /** One selectable version of a multi-version VOD movie (`#404`). */
@@ -30,17 +48,29 @@ export interface VodVersionOption {
   readonly qualityRank: number;
 }
 
+interface RawLiveVariantRow {
+  readonly id?: number;
+  readonly key: string;
+  readonly source_id?: string;
+  readonly source_name?: string;
+  readonly display_name: string;
+  readonly raw_name: string;
+  readonly quality_rank: number;
+}
+
 /**
- * Lists all visible quality variants of a live channel sharing its `variant_base_fold` (`#218`).
- * When `categoryId` is a custom group (`__custom:<groupId>`), restricts matches to visible members of
- * that profile's custom group; when `categoryId` is an encoded `sourceId|live|providerId` or raw category
- * provider id, restricts matches strictly to `(source_id, category_id)`. Ordered highest `quality_rank` first.
+ * Lists all visible quality variants of a live channel sharing its `variant_base_fold` (`#218`, `#511`).
+ * - Default (`opts.crossCategory !== true`): strictly scopes to `categoryId` (custom group or provider
+ *   category within the same source), ordered highest `quality_rank` first.
+ * - Live TV ELV Mode (`opts.crossCategory === true`): collapses identical `variant_base_fold` variants
+ *   across ALL categories (and across all active sources when `opts.crossSource === true`), ranking
+ *   healthy variants strictly ahead of unreliable/failing ones (`failCount >= 2`) for clean failover.
  */
 export async function queryLiveVariants(
   db: SqlDriver,
   itemKey: string,
   categoryId?: string,
-  opts?: ParentalQueryOptions,
+  opts?: QueryLiveVariantsOptions,
 ): Promise<LiveVariantOption[]> {
   const sourceId = sourceOfKey(itemKey);
   if (sourceId === undefined) return [];
@@ -52,9 +82,12 @@ export async function queryLiveVariants(
   )[0];
   if (seed === undefined || seed.variant_base_fold === '') return [];
 
+  const crossCategory = opts?.crossCategory === true;
+  const crossSource = crossCategory && opts?.crossSource === true;
+
   let customGroupId: string | undefined;
   let providerCategoryId: string | undefined;
-  if (categoryId !== undefined && categoryId !== '') {
+  if (!crossCategory && categoryId !== undefined && categoryId !== '') {
     if (categoryId.startsWith(CUSTOM_GROUP_CATEGORY_PREFIX)) {
       customGroupId = parseCustomGroupCategoryId(categoryId);
       if (customGroupId === undefined) return [];
@@ -81,12 +114,41 @@ export async function queryLiveVariants(
   const restrict =
     filter === null
       ? { clause: '', params: [] as readonly SqlValue[] }
-      : buildSqlItemRestrictionClause(filter, 'live', 'l.source_id', 'l.key', sourceId);
+      : buildSqlItemRestrictionClause(
+          filter,
+          'live',
+          'l.source_id',
+          'l.key',
+          crossSource ? undefined : sourceId,
+        );
   const adultExcl = buildSqlAdultKeywordExclusionClause(filter, 'l.name', 'l.name_fold');
 
-  const rows =
-    customGroupId !== undefined
-      ? await db.all<{ key: string; display_name: string; raw_name: string; quality_rank: number }>(
+  const rows: RawLiveVariantRow[] = crossCategory
+    ? crossSource
+      ? await db.all<RawLiveVariantRow>(
+          `SELECT l.id, l.key, l.source_id, s.name AS source_name,
+                  COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name,
+                  l.name AS raw_name, l.quality_rank
+             FROM live l
+             JOIN sources s ON s.id = l.source_id AND s.deleting = 0
+             LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
+            WHERE l.is_hidden = 0 AND COALESCE(co.is_hidden, 0) = 0 AND l.variant_base_fold = ?${restrict.clause}${adultExcl}
+            ORDER BY l.quality_rank DESC, l.id ASC`,
+          [profileId, seed.variant_base_fold, ...restrict.params],
+        )
+      : await db.all<RawLiveVariantRow>(
+          `SELECT l.id, l.key, l.source_id, s.name AS source_name,
+                  COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name,
+                  l.name AS raw_name, l.quality_rank
+             FROM live l
+             JOIN sources s ON s.id = l.source_id AND s.deleting = 0
+             LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
+            WHERE l.source_id = ? AND l.is_hidden = 0 AND COALESCE(co.is_hidden, 0) = 0 AND l.variant_base_fold = ?${restrict.clause}${adultExcl}
+            ORDER BY l.quality_rank DESC, l.id ASC`,
+          [profileId, sourceId, seed.variant_base_fold, ...restrict.params],
+        )
+    : customGroupId !== undefined
+      ? await db.all<RawLiveVariantRow>(
           `SELECT l.key, COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name, l.name AS raw_name, l.quality_rank
              FROM custom_group_items cgi
              JOIN custom_groups g ON g.id = cgi.group_id
@@ -100,12 +162,7 @@ export async function queryLiveVariants(
           [customGroupId, profileId, sourceId, seed.variant_base_fold, ...restrict.params],
         )
       : providerCategoryId !== undefined
-        ? await db.all<{
-            key: string;
-            display_name: string;
-            raw_name: string;
-            quality_rank: number;
-          }>(
+        ? await db.all<RawLiveVariantRow>(
             `SELECT l.key, COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name, l.name AS raw_name, l.quality_rank
                FROM live l
                JOIN placements p
@@ -117,12 +174,7 @@ export async function queryLiveVariants(
               ORDER BY l.quality_rank DESC, p.position ASC, l.id ASC`,
             [profileId, sourceId, seed.variant_base_fold, providerCategoryId, ...restrict.params],
           )
-        : await db.all<{
-            key: string;
-            display_name: string;
-            raw_name: string;
-            quality_rank: number;
-          }>(
+        : await db.all<RawLiveVariantRow>(
             `SELECT l.key, COALESCE(NULLIF(co.custom_name, ''), l.name) AS display_name, l.name AS raw_name, l.quality_rank
                FROM live l
                LEFT JOIN channel_overrides co ON co.profile_id = ? AND co.item_key = l.key
@@ -137,15 +189,57 @@ export async function queryLiveVariants(
       ? rows.filter((r) => !isAdultKeywordMatch(r.raw_name) && !isAdultKeywordMatch(r.display_name))
       : rows;
 
-  return allowed.map((r) => {
-    const parsed = parseLiveVariant(r.raw_name);
-    return {
-      key: r.key,
-      title: r.display_name,
-      qualityLabel: parsed.qualityLabel,
-      qualityRank: r.quality_rank,
-    };
-  });
+  const qualityByKey: ReadonlyMap<string, ElvQualityMemoryRecord> | undefined =
+    opts?.qualityByKey ??
+    (opts?.enrichmentStore !== undefined && allowed.length > 0
+      ? await opts.enrichmentStore.getQualityMemoryForKeys(allowed.map((r) => r.key))
+      : undefined);
+
+  if (!crossCategory && qualityByKey === undefined) {
+    return allowed.map((r) => {
+      const parsed = parseLiveVariant(r.raw_name);
+      return {
+        key: r.key,
+        title: r.display_name,
+        qualityLabel: parsed.qualityLabel,
+        qualityRank: r.quality_rank,
+      };
+    });
+  }
+
+  return allowed
+    .map((r, index) => {
+      const parsed = parseLiveVariant(r.raw_name);
+      const failCount = qualityByKey?.get(r.key)?.failCount ?? 0;
+      const isUnreliable = failCount >= UNRELIABLE_FAIL_COUNT_THRESHOLD;
+      return {
+        index,
+        rowSourceId: r.source_id ?? sourceId,
+        failCount,
+        isUnreliable,
+        option: {
+          key: r.key,
+          title: r.display_name,
+          qualityLabel: parsed.qualityLabel,
+          qualityRank: r.quality_rank,
+          ...(r.source_id !== undefined ? { sourceId: r.source_id } : {}),
+          ...(r.source_name !== undefined ? { sourceName: r.source_name } : {}),
+          ...(qualityByKey !== undefined ? { failCount, isUnreliable } : {}),
+        } satisfies LiveVariantOption,
+      };
+    })
+    .sort((a, b) => {
+      if (a.isUnreliable !== b.isUnreliable) return a.isUnreliable ? 1 : -1;
+      if (a.failCount !== b.failCount) return a.failCount - b.failCount;
+      if (b.option.qualityRank !== a.option.qualityRank) {
+        return b.option.qualityRank - a.option.qualityRank;
+      }
+      const aSame = a.rowSourceId === sourceId ? 0 : 1;
+      const bSame = b.rowSourceId === sourceId ? 0 : 1;
+      if (aSame !== bSame) return aSame - bSame;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.option);
 }
 
 /**

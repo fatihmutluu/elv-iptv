@@ -10,6 +10,7 @@ import worker from './worker.ts';
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
 const MIGRATION_0001_PATH = join(MIGRATIONS_DIR, '0001_init.sql');
 const MIGRATION_0002_PATH = join(MIGRATIONS_DIR, '0002_wave_p9_pairing_telemetry.sql');
+const MIGRATION_0003_PATH = join(MIGRATIONS_DIR, '0003_wave_e1_elv_metadata.sql');
 
 interface SchemaMap {
   readonly tables: Map<string, Set<string>>;
@@ -100,33 +101,37 @@ function createSqliteBackedD1(
     });
   }
 
+  const stmtIsSelect = new WeakMap<D1PreparedStatement, boolean>();
+
   function makeStatement(query: string, bound: unknown[] = []): D1PreparedStatement {
-    return {
+    const stmt: D1PreparedStatement = {
       bind(...values: unknown[]) {
         return makeStatement(query, values);
       },
       async first<T>() {
         assertSqlMatchesSchema(query, schema);
         executedSql.push(query.replace(/\s+/g, ' ').trim());
-        const stmt = sqlite.prepare(query);
-        const row = stmt.get(...toSqlParams(bound));
+        const compiled = sqlite.prepare(query);
+        const row = compiled.get(...toSqlParams(bound));
         return (row ? { ...row } : null) as T | null;
       },
       async all<T>() {
         assertSqlMatchesSchema(query, schema);
         executedSql.push(query.replace(/\s+/g, ' ').trim());
-        const stmt = sqlite.prepare(query);
-        const rows = stmt.all(...toSqlParams(bound)).map((r) => ({ ...r })) as T[];
+        const compiled = sqlite.prepare(query);
+        const rows = compiled.all(...toSqlParams(bound)).map((r) => ({ ...r })) as T[];
         return { success: true, results: rows, meta: { changes: 0 } };
       },
       async run() {
         assertSqlMatchesSchema(query, schema);
         executedSql.push(query.replace(/\s+/g, ' ').trim());
-        const stmt = sqlite.prepare(query);
-        const res = stmt.run(...toSqlParams(bound));
+        const compiled = sqlite.prepare(query);
+        const res = compiled.run(...toSqlParams(bound));
         return { success: true, meta: { changes: Number(res.changes) } };
       },
     };
+    stmtIsSelect.set(stmt, /^\s*SELECT\b/i.test(query));
+    return stmt;
   }
 
   const db: D1Database = {
@@ -136,7 +141,7 @@ function createSqliteBackedD1(
     async batch<T>(statements: readonly D1PreparedStatement[]): Promise<D1Result<T>[]> {
       const results: D1Result<T>[] = [];
       for (const stmt of statements) {
-        const res = await stmt.run();
+        const res = stmtIsSelect.get(stmt) ? await stmt.all<T>() : await stmt.run();
         results.push(res as D1Result<T>);
       }
       return results;
@@ -163,15 +168,20 @@ const EMPTY_V2_PAIR_FIELDS = {
   returnIv: null,
 };
 
-describe('Cloudflare D1 storage adapter & worker entry (migrations 0001 + 0002)', () => {
+describe('Cloudflare D1 storage adapter & worker entry (migrations 0001 + 0002 + 0003)', () => {
   const migration0001 = readFileSync(MIGRATION_0001_PATH, 'utf8');
   const migration0002 = readFileSync(MIGRATION_0002_PATH, 'utf8');
-  const migrationFiles = [migration0001, migration0002];
+  const migration0003 = readFileSync(MIGRATION_0003_PATH, 'utf8');
+  const migrationFiles = [migration0001, migration0002, migration0003];
   const schema = parseMigrationSchema(migrationFiles);
 
-  it('applies both 0001_init.sql and 0002_wave_p9_pairing_telemetry.sql cleanly on SQLite', () => {
+  it('applies 0001, 0002, and 0003_wave_e1_elv_metadata.sql cleanly on SQLite', () => {
     expect([...schema.tables.keys()].sort()).toEqual([
       'account_deletion_requests',
+      'elv_feeds_cache',
+      'elv_localized_synopses',
+      'elv_title_cache',
+      'elv_title_match_index',
       'feedback_submissions',
       'pair_sessions',
       'refresh_tokens',
@@ -667,6 +677,100 @@ describe('Cloudflare D1 storage adapter & worker entry (migrations 0001 + 0002)'
     });
     expect(ok.status).toBe(200);
     expect(ok.headers.get('access-control-allow-origin')).toBe('https://elviptv.example');
+
+    // Wave E1 D1 ELV metadata round-trip + Workers AI binding integration
+    const storage = createD1Storage(db);
+    await storage.upsertElvTitle({
+      imdbId: 'tt1375666',
+      mediaType: 'movie',
+      originalTitle: 'Inception',
+      englishTitle: 'Inception',
+      year: 2010,
+      rating: 8.8,
+      votes: 2_500_000,
+      runtimeMin: 148,
+      genres: ['Action', 'Sci-Fi'],
+      posterUrl: 'https://m.media-amazon.com/images/M/MV5INC._V1_QL75_UX300_.jpg',
+      backdropUrl: 'https://m.media-amazon.com/images/M/MV5INCBG._V1_QL75_UX1280_.jpg',
+      trailerStreamUrl: null,
+      trailerYoutubeId: null,
+      director: 'Christopher Nolan',
+      cast: [
+        { personId: 'nm0000138', name: 'Leonardo DiCaprio', character: 'Cobb', portraitUrl: null },
+      ],
+      mltImdbIds: ['tt0816692'],
+      franchiseKey: null,
+      franchiseName: null,
+      franchiseOrder: null,
+      originalSynopsis: 'A thief steals secrets through shared dreaming.',
+      updatedAt: Date.now(),
+    });
+    expect((await storage.getElvTitle('tt1375666'))?.originalTitle).toBe('Inception');
+    expect((await storage.getElvTitlesByIds(['tt1375666'])).size).toBe(1);
+
+    const bulkMatches = Array.from({ length: 65 }, (_, i) => ({
+      lookupKey: `movie:film ${i}:2020`,
+      mediaType: 'movie' as const,
+      year: 2020,
+      imdbId: `tt${String(1000000 + i)}`,
+      confidence: 0.95,
+      updatedAt: 1_764_212_100_000,
+    }));
+    await storage.upsertElvMatches(bulkMatches);
+    const loadedMatches = await storage.getElvMatchesByKeys(bulkMatches.map((m) => m.lookupKey));
+    expect(loadedMatches.size).toBe(65);
+
+    await storage.upsertElvLocalizedSynopsis({
+      imdbId: 'tt1375666',
+      lang: 'tr',
+      localizedTitle: 'Başlangıç',
+      synopsis: 'Rüyalardan sır çalan bir hırsızın hikayesi.',
+      source: 'workers_ai',
+      updatedAt: 1_764_212_100_000,
+    });
+    expect((await storage.getElvLocalizedSynopsis('tt1375666', 'tr'))?.localizedTitle).toBe(
+      'Başlangıç',
+    );
+    expect((await storage.getElvLocalizedSynopsesByIds(['tt1375666'], 'tr')).size).toBe(1);
+
+    await storage.upsertElvFeed(
+      'moviemeter',
+      [
+        {
+          imdbId: 'tt1375666',
+          title: 'Inception',
+          mediaType: 'movie',
+          year: 2010,
+          rating: 8.8,
+          posterUrl: null,
+          genres: ['Sci-Fi'],
+          rank: 1,
+        },
+      ],
+      1_764_212_100_000,
+    );
+    expect((await storage.getElvFeed('moviemeter'))?.items).toHaveLength(1);
+
+    // Worker entry passes AI binding cleanly to /v1/elv/title/:imdbId
+    let aiCalls = 0;
+    const trWorkerRes = await worker.fetch(
+      new Request('https://sync.example.test/v1/elv/title/tt1375666?lang=de'),
+      {
+        DB: db,
+        JWT_SECRET: 'worker-secret-key-at-least-32-chars-long',
+        AI: {
+          run: async () => {
+            aiCalls += 1;
+            return { response: 'Ein Dieb stiehlt Geheimnisse durch gemeinsame Träume.' };
+          },
+        },
+      },
+    );
+    expect(trWorkerRes.status).toBe(200);
+    expect(aiCalls).toBe(1);
+    const deBody = (await trWorkerRes.json()) as { synopsis: string; synopsisSource: string };
+    expect(deBody.synopsis).toBe('Ein Dieb stiehlt Geheimnisse durch gemeinsame Träume.');
+    expect(deBody.synopsisSource).toBe('workers_ai');
     sqlite.close();
   });
 });

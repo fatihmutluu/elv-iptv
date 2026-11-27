@@ -42,6 +42,7 @@ export const BODY_LIMITS = {
   telemetry: 256 * 1024,
   feedback: 64 * 1024,
   accountDeletion: 16 * 1024,
+  elvMatch: 256 * 1024,
 } as const;
 
 /** Error thrown when an incoming HTTP body exceeds its route cap. */

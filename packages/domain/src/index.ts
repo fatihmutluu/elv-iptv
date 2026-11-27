@@ -5,6 +5,20 @@ export * from './crash-report';
 export * from './downloads';
 export * from './drm';
 export {
+  collectElvSearchAliases,
+  DEFAULT_ELV_MODE_PREFERENCES,
+  ELV_CATEGORY_SOURCES,
+  ELV_TITLE_FORMATS,
+  type ElvCategorySource,
+  type ElvDisplayTitleInput,
+  type ElvModePreferences,
+  type ElvSearchAliasesInput,
+  type ElvTitleFormat,
+  formatElvDisplayTitle,
+  isElvCategorySource,
+  isElvTitleFormat,
+} from './elv-mode';
+export {
   hasCredentialHeaders,
   hostnameOf,
   originOf,

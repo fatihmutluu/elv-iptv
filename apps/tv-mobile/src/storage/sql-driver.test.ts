@@ -510,4 +510,38 @@ describe('createOpSqliteDriver', () => {
     ]);
     await db.close();
   });
+
+  it('attachReadOnly binds filePath via ? parameter on BOTH writer and reader, rejects invalid aliases, and detaches writer if reader fails (#511)', async () => {
+    const { db, writer, reader } = await setup();
+    const enrichmentPath = "/data/user's/elv-enrichment.db";
+    await db.attachReadOnly?.(enrichmentPath, 'elv_enrich');
+    const expectedSql = `execute:ATTACH DATABASE ? AS "elv_enrich"|${JSON.stringify([enrichmentPath])}`;
+    expect(writer.log).toEqual([expectedSql]);
+    expect(reader.log).toEqual([expectedSql]);
+
+    await expect(db.attachReadOnly?.('/tmp/a.db', 'BadAlias')).rejects.toThrow(/alias/i);
+    await expect(db.attachReadOnly?.('/tmp/a.db', '1bad')).rejects.toThrow(/alias/i);
+    await expect(db.attachReadOnly?.('/tmp/a.db', 'a; DROP TABLE x')).rejects.toThrow(/alias/i);
+    await expect(db.attachReadOnly?.('', 'elv_enrich')).rejects.toThrow(/filePath/i);
+    await expect(db.attachReadOnly?.('/tmp/bad\0.db', 'elv_enrich')).rejects.toThrow(/filePath/i);
+
+    // If reader ATTACH fails, writer is cleanly detached
+    writer.log.length = 0;
+    reader.log.length = 0;
+    const origReaderExec = reader.execute;
+    reader.execute = async () => {
+      throw new Error('reader attach failed');
+    };
+    await expect(db.attachReadOnly?.('/tmp/elv.db', 'elv_enrich')).rejects.toMatchObject({
+      category: 'storage',
+      code: 'sql-failed',
+      detail: 'reader attach failed',
+    });
+    expect(writer.log).toEqual([
+      `execute:ATTACH DATABASE ? AS "elv_enrich"|${JSON.stringify(['/tmp/elv.db'])}`,
+      'execute:DETACH DATABASE "elv_enrich"',
+    ]);
+    reader.execute = origReaderExec;
+    await db.close();
+  });
 });

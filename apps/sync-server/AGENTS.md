@@ -3,9 +3,9 @@
 Self-hostable zero-knowledge E2EE sync, universal QR pairing, and opt-in redacted telemetry/feedback backend.
 
 ## Runtimes
-- **Cloudflare Workers + D1**: `src/worker.ts` + `wrangler.toml` + `migrations/0001_init.sql`, `migrations/0002_wave_p9_pairing_telemetry.sql`.
+- **Cloudflare Workers + D1 + Workers AI**: `src/worker.ts` + `wrangler.toml` + `migrations/0001_init.sql`, `migrations/0002_wave_p9_pairing_telemetry.sql`, `migrations/0003_wave_e1_elv_metadata.sql`.
 - **Node 24 HTTP**: `pnpm --filter @elv/sync-server start` (`src/node-server.ts`, in-memory storage).
-- Zero third-party runtime dependencies; uses Web Standard `Request`/`Response`/`crypto.subtle` and `node:http` (Node entry only).
+- Zero third-party runtime dependencies; uses Web Standard `Request`/`Response`/`crypto.subtle` and `node:http` (Node entry only), with structural `D1Database` and `WorkersAiBinding` interfaces.
 
 ## Routes
 - `GET /health` — liveness probe.
@@ -15,6 +15,7 @@ Self-hostable zero-knowledge E2EE sync, universal QR pairing, and opt-in redacte
 - `GET /v1/vault`, `PUT /v1/vault` (optimistic concurrency via `expectedRevision`, opaque ciphertext only).
 - `POST /v1/telemetry`, `POST /v1/feedback` (strict 13-kind allowlist + sanitized `deviceProfile` + secret/URL/path/email rejection + remote kill-switch).
 - `GET /v1/admin/digest` (constant-time `Bearer <ADMIN_TOKEN>`; includes crashes/errors, catalog imports, and device technical profiles).
+- `POST /v1/elv/match-batch`, `GET /v1/elv/title/:imdbId`, `GET /v1/elv/feeds`, `GET /v1/elv/search` (Wave E1 IMDb-first collective metadata enrichment with D1 caching, Workers AI permanent one-time synopsis localization, strict privacy validation rejecting provider URLs/credentials, edge `Cache-Control`, and <= 25 upstream subrequests per batch).
 
 ## Commands & Rules
 - `pnpm --filter @elv/sync-server test` — Vitest + v8 coverage (`>= 90%` lines).

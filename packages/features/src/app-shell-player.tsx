@@ -8,6 +8,7 @@ import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
 import type { PlaybackGuard } from './ports/playback-guard';
 import type { AdoptedPlaybackSession, ThermalDevicePort, VideoHost } from './ports/video-host';
+import { isElvFeatureActive } from './shared';
 import { CrashRecoveryBoundary, type PreferencesContextValue } from './shell';
 
 const EMPTY_AUDIO_DELAY_BY_REFRESH_RATE = Object.freeze({});
@@ -165,6 +166,8 @@ function AppShellPlayerView({
       {...(onRegisterHandoffSession !== undefined ? { onRegisterHandoffSession } : {})}
       {...(onRegisterStopActivePlayer !== undefined ? { onRegisterStopActivePlayer } : {})}
       liveChannelSwitchMode={prefs.liveChannelSwitchMode}
+      elvVerifyRealQuality={isElvFeatureActive(prefs, 'elvVerifyRealQuality')}
+      elvLiveEnhance={isElvFeatureActive(prefs, 'elvLiveEnhance')}
       onTargetChange={onTargetChange}
       onExit={onExit}
     />

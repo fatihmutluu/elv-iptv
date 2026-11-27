@@ -5,6 +5,7 @@ import { trFailoverNetworkMessages } from './tr-failover-network';
 import { trIssue502Messages } from './tr-issue-502';
 import { trProfilesMessages } from './tr-profiles';
 import { trSubtitlesSuiteMessages } from './tr-subtitles-suite';
+import { trWaveE1Messages } from './tr-wave-e1';
 import { trWaveF5bMessages } from './tr-wave-f5b';
 import { trWaveF6Messages } from './tr-wave-f6';
 import { trWaveF7aMessages } from './tr-wave-f7a';
@@ -738,5 +739,6 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trWaveP7Messages,
   ...trWaveP8Messages,
   ...trWaveP9Messages,
+  ...trWaveE1Messages,
   ...trIssue502Messages,
 };

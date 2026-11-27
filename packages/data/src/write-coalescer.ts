@@ -413,6 +413,28 @@ export function createCoalescedCatalog(
     ...(c.getDownload ? { getDownload: c.getDownload.bind(c) } : {}),
     ...(c.upsertDownload ? { upsertDownload: c.upsertDownload.bind(c) } : {}),
     ...(c.deleteDownload ? { deleteDownload: c.deleteDownload.bind(c) } : {}),
+    ...(c.getElvEnrichmentForKeys
+      ? { getElvEnrichmentForKeys: c.getElvEnrichmentForKeys.bind(c) }
+      : {}),
+    ...(c.getElvTitleDetail ? { getElvTitleDetail: c.getElvTitleDetail.bind(c) } : {}),
+    ...(c.listMergedVodVersions ? { listMergedVodVersions: c.listMergedVodVersions.bind(c) } : {}),
+    ...(c.enrichElvPriorityKeys ? { enrichElvPriorityKeys: c.enrichElvPriorityKeys.bind(c) } : {}),
+    ...(c.runElvBackgroundMatching
+      ? { runElvBackgroundMatching: c.runElvBackgroundMatching.bind(c) }
+      : {}),
+    ...(c.recordPlaybackQuality ? { recordPlaybackQuality: c.recordPlaybackQuality.bind(c) } : {}),
+    ...(c.recordPlaybackVariantFailure
+      ? { recordPlaybackVariantFailure: c.recordPlaybackVariantFailure.bind(c) }
+      : {}),
+    ...(c.setElvManualMatch ? { setElvManualMatch: c.setElvManualMatch.bind(c) } : {}),
+    ...(c.wipeElvEnrichment ? { wipeElvEnrichment: c.wipeElvEnrichment.bind(c) } : {}),
+    ...(c.searchElvItemKeysByAlias
+      ? { searchElvItemKeysByAlias: c.searchElvItemKeysByAlias.bind(c) }
+      : {}),
+    ...(c.listLiveVariants ? { listLiveVariants: c.listLiveVariants.bind(c) } : {}),
+    ...(c.findGuideChannelByCleanName
+      ? { findGuideChannelByCleanName: c.findGuideChannelByCleanName.bind(c) }
+      : {}),
     ...(queryNextEpisodeFn
       ? {
           queryNextEpisode: async (seriesKey, currentItemKey, profileId, nextOpts) => {

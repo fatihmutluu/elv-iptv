@@ -124,6 +124,8 @@ export interface MovieHashInput {
   readonly backupUrlsJson?: string | null | undefined;
   readonly castText?: string | null | undefined;
   readonly directorText?: string | null | undefined;
+  readonly providerImdbId?: string | null | undefined;
+  readonly providerTmdbId?: string | null | undefined;
 }
 
 /** Persisted mutable columns of a `series` row. */
@@ -138,6 +140,8 @@ export interface SeriesHashInput {
   readonly lastModified?: number | null | undefined;
   readonly castText?: string | null | undefined;
   readonly directorText?: string | null | undefined;
+  readonly providerImdbId?: string | null | undefined;
+  readonly providerTmdbId?: string | null | undefined;
 }
 
 /** Computes the deterministic content hash for a `categories` row. */
@@ -180,6 +184,8 @@ export function hashMovieRow(row: MovieHashInput): string {
     row.backupUrlsJson,
     row.castText,
     row.directorText,
+    row.providerImdbId,
+    row.providerTmdbId,
   ]);
 }
 
@@ -196,5 +202,7 @@ export function hashSeriesRow(row: SeriesHashInput): string {
     row.lastModified,
     row.castText,
     row.directorText,
+    row.providerImdbId,
+    row.providerTmdbId,
   ]);
 }

@@ -90,6 +90,7 @@ export function createProfileScopedCatalog(
   const getRating = c.getRating?.bind(c);
   const listRatings = c.listRatings?.bind(c);
   const listRatingMap = c.listRatingMap?.bind(c);
+  const searchElvItemKeysByAlias = c.searchElvItemKeysByAlias?.bind(c);
   const excludedFor = (effectivePid: string, scope: ProfileCatalogScope) =>
     resolveExcludedSourceIds(c, effectivePid, scope);
 
@@ -434,6 +435,38 @@ export function createProfileScopedCatalog(
       : {}),
     ...(c.getVodEnrichment ? { getVodEnrichment: c.getVodEnrichment.bind(c) } : {}),
     ...(c.enrichVodItem ? { enrichVodItem: c.enrichVodItem.bind(c) } : {}),
+    ...(c.getElvEnrichmentForKeys
+      ? { getElvEnrichmentForKeys: c.getElvEnrichmentForKeys.bind(c) }
+      : {}),
+    ...(c.getElvTitleDetail ? { getElvTitleDetail: c.getElvTitleDetail.bind(c) } : {}),
+    ...(c.enrichElvPriorityKeys ? { enrichElvPriorityKeys: c.enrichElvPriorityKeys.bind(c) } : {}),
+    ...(c.runElvBackgroundMatching
+      ? { runElvBackgroundMatching: c.runElvBackgroundMatching.bind(c) }
+      : {}),
+    ...(c.recordPlaybackQuality ? { recordPlaybackQuality: c.recordPlaybackQuality.bind(c) } : {}),
+    ...(c.recordPlaybackVariantFailure
+      ? { recordPlaybackVariantFailure: c.recordPlaybackVariantFailure.bind(c) }
+      : {}),
+    ...(c.setElvManualMatch ? { setElvManualMatch: c.setElvManualMatch.bind(c) } : {}),
+    ...(c.wipeElvEnrichment ? { wipeElvEnrichment: c.wipeElvEnrichment.bind(c) } : {}),
+    ...(searchElvItemKeysByAlias
+      ? {
+          searchElvItemKeysByAlias: async (query, opts) => {
+            const scope = getScope();
+            const excluded = await excludedFor(scope.profileId, scope);
+            const mergedExcluded =
+              excluded.size > 0
+                ? Array.from(new Set([...(opts?.excludedSourceIds ?? []), ...excluded]))
+                : opts?.excludedSourceIds;
+            const nextOpts =
+              mergedExcluded !== undefined ? { ...opts, excludedSourceIds: mergedExcluded } : opts;
+            const keys = await searchElvItemKeysByAlias(query, nextOpts);
+            return excluded.size === 0
+              ? keys
+              : keys.filter((k) => !isKeyFromExcludedSource(k, excluded));
+          },
+        }
+      : {}),
     ...(listCollections
       ? {
           listCollections: (profileId, opts) => {

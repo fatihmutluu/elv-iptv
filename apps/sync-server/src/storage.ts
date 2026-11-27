@@ -1,3 +1,4 @@
+import type { ElvMetadataStorage } from './elv-types.ts';
 import type { PairAuthState, PairDirection } from './pair-validation.ts';
 
 /** Stored user account record (zero-knowledge: never holds raw password or vault key). */
@@ -205,7 +206,7 @@ export interface AccountDeletionRequestRecord {
 }
 
 /** Persistence port implemented by both in-memory (Node/tests) and Cloudflare D1 backends. */
-export interface SyncServerStorage {
+export interface SyncServerStorage extends ElvMetadataStorage {
   createUser(user: UserRecord): Promise<{ readonly created: boolean }>;
   findUserByEmail(email: string): Promise<UserRecord | null>;
   findUserById(id: string): Promise<UserRecord | null>;

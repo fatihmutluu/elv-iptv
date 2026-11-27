@@ -5,6 +5,10 @@ export {
   type SettingsPreferencesController,
 } from './AppearancePanel';
 export {
+  ElvModeSettingsPanel,
+  type ElvModeSettingsPanelProps,
+} from './ElvModeSettingsPanel';
+export {
   HOME_SECTION_LABEL_KEYS,
   HomeLayoutEditor,
   type HomeLayoutEditorProps,
@@ -25,6 +29,7 @@ export {
 } from './SettingsScreen';
 export {
   type AppearanceFocusId,
+  type ElvModeFocusId,
   type LiveTvFocusId,
   type PlaybackFocusId,
   type PreferenceSettingsSection,

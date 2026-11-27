@@ -1,5 +1,6 @@
 import { MAX_INLINE_LOGO_BYTES, sanitizeArtworkUrl } from './artwork-url';
 import type { M3uEntry } from './m3u-types';
+import { normalizeProviderImdbId, normalizeProviderTmdbId } from './provider-ids';
 
 export { MAX_INLINE_LOGO_BYTES };
 
@@ -249,6 +250,23 @@ function applyAttr(
     case 'tvg-rec':
       setNum(e, 'recordDays', num(value));
       return;
+    case 'tvg-imdb':
+    case 'imdb-id':
+    case 'imdb_id': {
+      if (e.providerImdbId === undefined) {
+        const id = normalizeProviderImdbId(value);
+        if (id !== null) e.providerImdbId = id;
+      }
+      return;
+    }
+    case 'tmdb-id':
+    case 'tmdb_id': {
+      if (e.providerTmdbId === undefined) {
+        const id = normalizeProviderTmdbId(value);
+        if (id !== null) e.providerTmdbId = id;
+      }
+      return;
+    }
     default:
       e.extra[key] = value;
   }

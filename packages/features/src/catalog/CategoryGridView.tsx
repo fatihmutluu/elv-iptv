@@ -5,6 +5,7 @@ import type {
   ItemSortOrder,
   RatingValue,
 } from '@elv/data';
+import { DEFAULT_ELV_MODE_PREFERENCES, type ElvModePreferences } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import {
   AlphabetJumpRail,
@@ -42,7 +43,6 @@ import {
 import { GridHeaderBar, GridRowView } from './CategoryGridRow';
 import {
   ALPHABET_RAIL_MIN_ITEMS,
-  chunkRowItems,
   clampGridFocus,
   computeRowCount,
   type GridFocusPosition,
@@ -50,6 +50,7 @@ import {
   stepAlphabetRailLetter,
 } from './catalog-model';
 import { useCategoryGridData } from './useCategoryGridData';
+import { useCategoryGridElvPresentation } from './useCategoryGridElvPresentation';
 import {
   computeVirtualGridRowFromOffset,
   computeVirtualGridScrollOffset,
@@ -112,6 +113,7 @@ export interface CategoryGridViewProps {
   /** Optional sort order (`'default'` or `'alpha'` via `sort_title`). */
   readonly sortBy?: ItemSortOrder;
   readonly groupVersions?: boolean;
+  readonly elvPreferences?: ElvModePreferences;
   readonly onToggleSort?: () => void;
   /** Optional top padding applied to the virtualized list content container. */
   readonly contentPaddingTop?: number;
@@ -228,10 +230,32 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
     listRef.current?.scrollToOffset?.({ offset, animated: false });
   }, [borderTopWidth, contentPaddingTop, focusedGridPos, layout.gridRowHeight, layout.isTv]);
 
-  const rowCount = computeRowCount(gridData.itemCount, cols);
+  const rawRowCount = computeRowCount(gridData.itemCount, cols);
   const maxMountedRows = layout.visibleGridRows + 2;
   const tvAnchorPos = isStandaloneTv ? standaloneGridPos : focusedGridPos;
   const tvFocusRow = tvAnchorPos?.row ?? 0;
+  const rawTvWindowStart =
+    rawRowCount <= maxMountedRows
+      ? 0
+      : Math.max(0, Math.min(rawRowCount - maxMountedRows, tvFocusRow));
+  const rawTvWindowEnd = Math.min(rawRowCount - 1, rawTvWindowStart + maxMountedRows - 1);
+
+  const elvPrefs = props.elvPreferences ?? DEFAULT_ELV_MODE_PREFERENCES;
+  const elvGrid = useCategoryGridElvPresentation({
+    catalog,
+    pagedSource: gridData.pagedSource,
+    rawItemCount: gridData.itemCount,
+    pageVersion: gridData.pageVersion,
+    cols,
+    startRow: layout.isTv ? rawTvWindowStart : topVisibleRow,
+    endRow: layout.isTv ? rawTvWindowEnd : topVisibleRow + layout.visibleGridRows + 2,
+    refreshToken,
+    elvPrefs,
+    locale: i18n.locale,
+  });
+
+  const effectiveItemCount = elvGrid.effectiveItemCount;
+  const rowCount = computeRowCount(effectiveItemCount, cols);
   const tvWindowStart =
     rowCount <= maxMountedRows ? 0 : Math.max(0, Math.min(rowCount - maxMountedRows, tvFocusRow));
   const tvWindowEnd = Math.min(rowCount - 1, tvWindowStart + maxMountedRows - 1);
@@ -323,16 +347,16 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
 
   if (gridAccessRef) {
     gridAccessRef.current = {
-      itemCount: gridData.itemCount,
+      itemCount: effectiveItemCount,
       alphabetBuckets: availableBuckets,
-      getItem: gridData.getItemAt,
+      getItem: elvGrid.getPresentedItemAt,
       selectLetter: handleSelectLetter,
     };
   }
 
   useEffect(() => {
-    onGridMetaChange?.({ itemCount: gridData.itemCount, alphabetBuckets: availableBuckets });
-  }, [availableBuckets, gridData.itemCount, onGridMetaChange]);
+    onGridMetaChange?.({ itemCount: effectiveItemCount, alphabetBuckets: availableBuckets });
+  }, [availableBuckets, effectiveItemCount, onGridMetaChange]);
 
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -481,16 +505,15 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
 
   const watchedLabel = i18n.t('home.watchedBadge');
   const backLabel = i18n.t(kind === 'movie' ? 'catalog.backToMovies' : 'catalog.backToSeries');
-  const countLabel = i18n.t('catalog.itemsCount', { count: gridData.itemCount });
+  const countLabel = i18n.t('catalog.itemsCount', { count: effectiveItemCount });
 
   const getItemCount = useCallback(() => rowCount, [rowCount]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pageVersion refreshes chunked row items when LRU pages arrive
   const getRowData = useCallback(
     (_data: unknown, rowIndex: number): VirtualGridRowItem => ({
       rowIndex,
-      items: gridData.pagedSource ? chunkRowItems(gridData.pagedSource, rowIndex, cols) : [],
+      items: elvGrid.getPresentedRowItems(rowIndex),
     }),
-    [cols, gridData.pageVersion, gridData.pagedSource],
+    [elvGrid],
   );
   const keyExtractor = useCallback(
     (row: unknown, index: number) =>
@@ -576,9 +599,13 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       favoriteKeys: props.favoriteKeys,
       watchedOverrides: props.watchedOverrides,
       ratingByKey: props.ratingByKey,
+      elvEnrichmentByKey: elvGrid.enrichmentByKey,
+      elvResolvedKeys: elvGrid.resolvedKeys,
     }),
     [
       cols,
+      elvGrid.enrichmentByKey,
+      elvGrid.resolvedKeys,
       gridData.pageVersion,
       gridData.progressByKey,
       gridData.unplayedBySeriesKey,
@@ -588,26 +615,17 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
     ],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pageVersion refreshes memoized TV row slices when LRU pages arrive
   const tvWindowRows = useMemo<readonly VirtualGridRowItem[]>(() => {
     if (!layout.isTv || rowCount <= 0) return [];
     const out: VirtualGridRowItem[] = [];
     for (let r = tvWindowStart; r <= tvWindowEnd; r++) {
       out.push({
         rowIndex: r,
-        items: gridData.pagedSource ? chunkRowItems(gridData.pagedSource, r, cols) : [],
+        items: elvGrid.getPresentedRowItems(r),
       });
     }
     return out;
-  }, [
-    cols,
-    gridData.pageVersion,
-    gridData.pagedSource,
-    layout.isTv,
-    rowCount,
-    tvWindowEnd,
-    tvWindowStart,
-  ]);
+  }, [elvGrid, layout.isTv, rowCount, tvWindowEnd, tvWindowStart]);
 
   return (
     <View testID="catalog-grid" style={styles.root}>

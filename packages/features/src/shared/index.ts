@@ -43,6 +43,15 @@ export {
 } from './collections-model';
 export { DownloadsProvider, hasManagedDownload, useDownloads } from './DownloadsContext';
 export { type DetailCastMember, type DetailTarget, detailTargetFromItem } from './detail-target';
+export {
+  applyElvCardPresentation,
+  buildElvCacheFingerprint,
+  isElvFeatureActive,
+  matchesElvSearchAliases,
+  presentElvCatalogItems,
+  resolveElvLocalizedSynopsis,
+  resolveElvLocalizedValue,
+} from './elv-presentation';
 export { computeHeroHeight } from './hero-layout';
 export {
   type KeymapContextValue,
@@ -83,6 +92,7 @@ export {
   useStreamHealth,
 } from './stream-health-context';
 export { useCardQuickActionsState } from './useCardQuickActionsState';
+export { useElvBackgroundMatcher, useElvEnrichmentForKeys } from './useElvModeEnrichment';
 export {
   RouteActiveProvider,
   type RouteActiveProviderProps,

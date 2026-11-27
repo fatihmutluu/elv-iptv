@@ -114,6 +114,7 @@ export interface CatalogUiCacheOptions {
   readonly revision?: number;
   readonly locale?: string;
   readonly profileKey?: string;
+  readonly elvKey?: string;
 }
 
 /** Lightweight diagnostic hit/miss counters for {@link CatalogUiCache} (`#160`). */
@@ -131,7 +132,8 @@ export interface CatalogUiCache {
   getRevision(): number;
   getLocale(): string;
   getProfileKey?(): string;
-  setRevision(revision: number, locale: string, profileKey?: string): void;
+  getElvKey?(): string;
+  setRevision(revision: number, locale: string, profileKey?: string, elvKey?: string): void;
   getMetrics?(): CatalogUiCacheMetrics;
   getHome(): CachedHomeEntry | null;
   setHome(snapshot: CachedHomeSnapshot): void;

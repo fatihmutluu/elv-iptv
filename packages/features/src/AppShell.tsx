@@ -44,7 +44,15 @@ import type { PlayTarget } from './ports/play-target';
 import { createPlaybackGuard } from './ports/playback-guard';
 import { useOledScreensaver } from './screensaver';
 import type { SettingsSection } from './settings';
-import { type DetailTarget, KeymapProvider, ProfileProvider, useProfile } from './shared';
+import {
+  buildElvCacheFingerprint,
+  type DetailTarget,
+  isElvFeatureActive,
+  KeymapProvider,
+  ProfileProvider,
+  useElvBackgroundMatcher,
+  useProfile,
+} from './shared';
 import {
   AdaptiveNavShell,
   CrashRecoveryBoundary,
@@ -205,7 +213,8 @@ function AppShellContent(props: AppShellProps): ReactElement {
     });
   const mgmtOverlays = useShellManagementOverlays(profile, sources);
   const profileScopeKey = `${profile.activeProfileId}:${profile.parentalUnlocked ? '1' : '0'}:${profile.profileRevision}`;
-  uiCache.setRevision(catalogRevision, locale, profileScopeKey);
+  const elvCacheKey = buildElvCacheFingerprint(preferences.preferences);
+  uiCache.setRevision(catalogRevision, locale, profileScopeKey, elvCacheKey);
   const openPlayTarget = useCallback((enriched: PlayTarget) => {
     exitBackGuardRef.current?.reset();
     resetToFullModeRef.current();
@@ -336,10 +345,19 @@ function AppShellContent(props: AppShellProps): ReactElement {
     catalogRevision,
     locale,
     profileKey: profileScopeKey,
+    elvKey: elvCacheKey,
     uiCache,
     activeTab,
     enabled: profile.profilesReady,
     groupVodVersions: preferences.preferences.groupVodVersions,
+  });
+  useElvBackgroundMatcher(observedCatalog, {
+    enabled:
+      profile.profilesReady &&
+      visibleSources.length > 0 &&
+      isElvFeatureActive(preferences.preferences, 'elvEnrichMetadata'),
+    lang: locale,
+    catalogRevision,
   });
   const handleGuideRefreshed = useCallback(
     () => void shell.syncSourcesAndBump(),

@@ -1,6 +1,8 @@
 import {
+  type ChannelOverrideRecord,
   type CreateCustomGroupInput,
   type CustomGroupItemInput,
+  type CustomGroupRecord,
   isSafeChannelKey,
   isValidCustomGroupId,
   MAX_CHANNEL_SORT_ORDER,
@@ -9,6 +11,7 @@ import {
   type SetChannelOverrideInput,
   type UpdateCustomGroupPatch,
 } from '@elv/data';
+import type { Result } from '@elv/domain';
 import {
   hasControlChar,
   hasOnlyKeys,
@@ -22,6 +25,65 @@ import {
 
 const MAX_REORDER_CHANNEL_KEYS = 10_000;
 const MAX_CUSTOM_GROUP_ITEMS = 10_000;
+
+/** Discriminated union of Wave F2 channel override and custom group RPC calls (`#60`). */
+export type CatalogChannelOpsRpcCall =
+  | { method: 'listChannelOverrides'; profileId?: string }
+  | { method: 'setChannelOverride'; input: SetChannelOverrideInput }
+  | { method: 'clearChannelOverride'; itemKey: string; profileId?: string }
+  | {
+      method: 'reorderChannels';
+      itemKeys: readonly string[];
+      sourceId: string;
+      profileId?: string;
+    }
+  | {
+      method: 'listCustomGroups';
+      profileId?: string;
+      opts?: { readonly includeHidden?: boolean; readonly parentalUnlocked?: boolean };
+    }
+  | { method: 'createCustomGroup'; input: CreateCustomGroupInput }
+  | { method: 'updateCustomGroup'; groupId: string; patch: UpdateCustomGroupPatch }
+  | { method: 'deleteCustomGroup'; groupId: string }
+  | {
+      method: 'setCustomGroupItems';
+      groupId: string;
+      items: readonly CustomGroupItemInput[];
+    }
+  | { method: 'addChannelToCustomGroup'; groupId: string; itemKey: string; sourceId: string }
+  | { method: 'removeChannelFromCustomGroup'; groupId: string; itemKey: string };
+
+/** Preload bridge methods for Wave F2 channel overrides and custom groups (`#60`). */
+export interface CatalogBridgeChannelOps {
+  listChannelOverrides?(profileId?: string): Promise<ChannelOverrideRecord[]>;
+  setChannelOverride?(input: SetChannelOverrideInput): Promise<Result<ChannelOverrideRecord>>;
+  clearChannelOverride?(itemKey: string, profileId?: string): Promise<Result<void>>;
+  reorderChannels?(
+    itemKeys: readonly string[],
+    sourceId: string,
+    profileId?: string,
+  ): Promise<Result<void>>;
+  listCustomGroups?(
+    profileId?: string,
+    opts?: { readonly includeHidden?: boolean; readonly parentalUnlocked?: boolean },
+  ): Promise<CustomGroupRecord[]>;
+  createCustomGroup?(input: CreateCustomGroupInput): Promise<Result<CustomGroupRecord>>;
+  updateCustomGroup?(
+    groupId: string,
+    patch: UpdateCustomGroupPatch,
+  ): Promise<Result<CustomGroupRecord>>;
+  deleteCustomGroup?(groupId: string): Promise<Result<void>>;
+  setCustomGroupItems?(
+    groupId: string,
+    items: readonly CustomGroupItemInput[],
+  ): Promise<Result<void>>;
+  addChannelToCustomGroup?(
+    groupId: string,
+    itemKey: string,
+    sourceId: string,
+  ): Promise<Result<void>>;
+  removeChannelFromCustomGroup?(groupId: string, itemKey: string): Promise<Result<void>>;
+}
 
 const INCLUDE_HIDDEN_PARENTAL_OPT_KEYS = new Set(['includeHidden', 'parentalUnlocked']);
 const SET_CHANNEL_OVERRIDE_KEYS = new Set([

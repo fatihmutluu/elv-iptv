@@ -171,7 +171,10 @@ export function createProfileScopedBrowseMethods(
   | 'categories'
   | 'items'
   | 'liveVariants'
+  | 'listLiveVariants'
   | 'itemVersions'
+  | 'listMergedVodVersions'
+  | 'findGuideChannelByCleanName'
   | 'allSourcesItems'
   | 'itemDetail'
   | 'search'
@@ -189,7 +192,10 @@ export function createProfileScopedBrowseMethods(
   | 'fetchChannelArchiveEpg'
 > {
   const liveVariants = c.liveVariants?.bind(c);
+  const listLiveVariants = c.listLiveVariants?.bind(c);
   const itemVersions = c.itemVersions?.bind(c);
+  const listMergedVodVersions = c.listMergedVodVersions?.bind(c);
+  const findGuideChannelByCleanName = c.findGuideChannelByCleanName?.bind(c);
   const allSourcesItems = c.allSourcesItems?.bind(c);
   const itemDetail = c.itemDetail?.bind(c);
   const search = c.search?.bind(c);
@@ -230,6 +236,17 @@ export function createProfileScopedBrowseMethods(
           },
         }
       : {}),
+    ...(listLiveVariants
+      ? {
+          listLiveVariants: async (itemKey, categoryId, opts) => {
+            const scope = getScope();
+            const merged = mergeParentalOpts(opts, scope);
+            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
+            if (isKeyFromExcludedSource(itemKey, excluded)) return [];
+            return filterByKey(await listLiveVariants(itemKey, categoryId, merged), excluded);
+          },
+        }
+      : {}),
     ...(itemVersions
       ? {
           itemVersions: async (itemKey, opts) => {
@@ -238,6 +255,35 @@ export function createProfileScopedBrowseMethods(
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (isKeyFromExcludedSource(itemKey, excluded)) return [];
             return filterByKey(await itemVersions(itemKey, merged), excluded);
+          },
+        }
+      : {}),
+    ...(listMergedVodVersions
+      ? {
+          listMergedVodVersions: async (itemKey, opts) => {
+            const scope = getScope();
+            const merged = mergeParentalOpts(opts, scope);
+            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
+            if (isKeyFromExcludedSource(itemKey, excluded)) return [];
+            return filterBySourceId(await listMergedVodVersions(itemKey, merged), excluded);
+          },
+        }
+      : {}),
+    ...(findGuideChannelByCleanName
+      ? {
+          findGuideChannelByCleanName: async (sourceId, channelName, opts) => {
+            const scope = getScope();
+            const excluded = await excludedFor(scope.profileId, scope);
+            if (excluded.has(sourceId)) return null;
+            const mergedExcluded =
+              excluded.size > 0
+                ? Array.from(new Set([...(opts?.excludedSourceIds ?? []), ...excluded]))
+                : opts?.excludedSourceIds;
+            const nextOpts =
+              mergedExcluded !== undefined ? { ...opts, excludedSourceIds: mergedExcluded } : opts;
+            const match = await findGuideChannelByCleanName(sourceId, channelName, nextOpts);
+            if (match !== null && excluded.has(match.sourceId)) return null;
+            return match;
           },
         }
       : {}),

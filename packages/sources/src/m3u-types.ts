@@ -32,6 +32,10 @@ export interface M3uEntry {
   kodiProps: Record<string, string>;
   /** Validated DRM configuration parsed from `#KODIPROP:inputstream.adaptive.license_*` (`#272`). */
   readonly drm?: DrmConfig;
+  /** Optional validated provider IMDb title ID (`tvg-imdb` / `imdb-id` / `imdb_id`, `#511`). */
+  providerImdbId?: string;
+  /** Optional validated provider TMDB ID (`tmdb-id` / `tmdb_id`, `#511`). */
+  providerTmdbId?: string;
   extra: Record<string, string>;
   kindHint: KindHint;
   nonHttp: boolean;

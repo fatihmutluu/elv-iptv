@@ -357,3 +357,33 @@ describe('scanM3u raw quotes inside attribute values', () => {
     expect(r.stats?.warnings).toEqual([]);
   });
 });
+
+describe('scanM3u provider imdb_id & tmdb_id attributes (#511)', () => {
+  it('extracts valid tvg-imdb, imdb-id, imdb_id, tmdb-id, and tmdb_id attributes', async () => {
+    const a = await one(
+      '#EXTINF:-1 tvg-imdb="TT1375666" tmdb-id="27205",Inception\nhttp://h.example/movie/1.mp4\n',
+    );
+    expect(a.providerImdbId).toBe('tt1375666');
+    expect(a.providerTmdbId).toBe('27205');
+
+    const b = await one(
+      '#EXTINF:-1 imdb-id="tt0133093" tmdb_id="603",The Matrix\nhttp://h.example/movie/2.mkv\n',
+    );
+    expect(b.providerImdbId).toBe('tt0133093');
+    expect(b.providerTmdbId).toBe('603');
+
+    const c = await one(
+      '#EXTINF:-1 imdb_id="tt0903747",Breaking Bad\nhttp://h.example/series/1.mp4\n',
+    );
+    expect(c.providerImdbId).toBe('tt0903747');
+    expect(c.providerTmdbId).toBeUndefined();
+  });
+
+  it('rejects malformed, zero, or SQL-injection provider IDs cleanly', async () => {
+    const bad = await one(
+      '#EXTINF:-1 tvg-imdb="tt12; DROP TABLE" tmdb-id="0",Bad\nhttp://h.example/movie/3.mp4\n',
+    );
+    expect(bad.providerImdbId).toBeUndefined();
+    expect(bad.providerTmdbId).toBeUndefined();
+  });
+});

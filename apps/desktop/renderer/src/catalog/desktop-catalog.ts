@@ -1,6 +1,14 @@
-import type { CatalogService, DeviceImportOptions, ParentalQueryOptions } from '@elv/data';
+import type {
+  CatalogService,
+  DeviceImportOptions,
+  ElvItemEnrichment,
+  ElvMatchingSummary,
+  ParentalQueryOptions,
+  QueryLiveVariantsOptions,
+} from '@elv/data';
 import { type ElvError, elvError, err, originOf } from '@elv/domain';
 import type { CatalogBridge } from '../../../src/shared/catalog-ipc.ts';
+import type { LiveVariantsIpcOptions } from '../../../src/shared/catalog-ipc-wave-e1-guards.ts';
 
 /** The catalog utility process could not open or migrate SQLite; `error` carries the typed cause (no secrets). */
 export class CatalogOpenError extends Error {
@@ -12,6 +20,8 @@ export class CatalogOpenError extends Error {
 let instance: Promise<CatalogService> | undefined;
 
 const MAX_IPC_TEXT_CHARS = 256;
+const MAX_ELV_ENRICHMENT_KEYS = 500;
+const MAX_CLAIMED_LABEL_CHARS = 128;
 
 function sanitizeDisplayText(text: string): string {
   let out = '';
@@ -38,6 +48,31 @@ function truncateDisplayText(text: string, maxChars: number): string {
   const last = clean.charCodeAt(end - 1);
   if (last >= 0xd800 && last <= 0xdbff) end -= 1;
   return clean.slice(0, end).trimEnd();
+}
+
+const EMPTY_ELV_MATCHING_SUMMARY: ElvMatchingSummary = {
+  scanned: 0,
+  layer1Matched: 0,
+  remoteMatched: 0,
+  skipped: 0,
+  aborted: false,
+};
+
+function toLiveVariantsIpcOptions(
+  opts: QueryLiveVariantsOptions | undefined,
+): LiveVariantsIpcOptions | undefined {
+  if (opts === undefined) return undefined;
+  const clean: {
+    profileId?: string;
+    parentalUnlocked?: boolean;
+    crossCategory?: boolean;
+    crossSource?: boolean;
+  } = {};
+  if (opts.profileId !== undefined) clean.profileId = opts.profileId;
+  if (opts.parentalUnlocked !== undefined) clean.parentalUnlocked = opts.parentalUnlocked;
+  if (opts.crossCategory !== undefined) clean.crossCategory = opts.crossCategory;
+  if (opts.crossSource !== undefined) clean.crossSource = opts.crossSource;
+  return Object.keys(clean).length > 0 ? clean : undefined;
 }
 
 /**
@@ -115,8 +150,10 @@ export function createDesktopCatalogFromBridge(
         : bridge.importGuide(id),
     categories: (sourceId, kind, opts) => bridge.categories(sourceId, kind, opts),
     items: (categoryId, offset, limit, opts) => bridge.items(categoryId, offset, limit, opts),
-    liveVariants: (itemKey, categoryId, opts?: ParentalQueryOptions) =>
-      bridge.liveVariants ? bridge.liveVariants(itemKey, categoryId, opts) : Promise.resolve([]),
+    liveVariants: (itemKey, categoryId, opts?: QueryLiveVariantsOptions) =>
+      bridge.liveVariants
+        ? bridge.liveVariants(itemKey, categoryId, toLiveVariantsIpcOptions(opts))
+        : Promise.resolve([]),
     itemVersions: (itemKey, opts?: ParentalQueryOptions) =>
       bridge.itemVersions ? bridge.itemVersions(itemKey, opts) : Promise.resolve([]),
     allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
@@ -484,6 +521,93 @@ export function createDesktopCatalogFromBridge(
     listRatings: (opts) => (bridge.listRatings ? bridge.listRatings(opts) : Promise.resolve([])),
     listRatingMap: (profileId) =>
       bridge.listRatingMap ? bridge.listRatingMap(profileId) : Promise.resolve({}),
+    getElvEnrichmentForKeys: async (itemKeys) => {
+      if (!bridge.getElvEnrichmentForKeys || itemKeys.length === 0) {
+        return new Map<string, ElvItemEnrichment>();
+      }
+      const merged = new Map<string, ElvItemEnrichment>();
+      for (let i = 0; i < itemKeys.length; i += MAX_ELV_ENRICHMENT_KEYS) {
+        const batch = itemKeys.slice(i, i + MAX_ELV_ENRICHMENT_KEYS);
+        const raw = await bridge.getElvEnrichmentForKeys(batch);
+        if (raw instanceof Map) {
+          for (const [k, v] of raw) merged.set(k, v);
+        } else {
+          for (const [k, v] of Object.entries(raw)) merged.set(k, v);
+        }
+      }
+      return merged;
+    },
+    getElvTitleDetail: (imdbId, opts) => {
+      if (opts?.signal?.aborted || !bridge.getElvTitleDetail) return Promise.resolve(null);
+      const cleanOpts: { lang?: string; forceRefresh?: boolean } = {};
+      if (opts?.lang !== undefined) cleanOpts.lang = opts.lang;
+      if (opts?.forceRefresh !== undefined) cleanOpts.forceRefresh = opts.forceRefresh;
+      return bridge.getElvTitleDetail(
+        imdbId,
+        Object.keys(cleanOpts).length > 0 ? cleanOpts : undefined,
+      );
+    },
+    listMergedVodVersions: (itemKey, opts) =>
+      bridge.listMergedVodVersions
+        ? bridge.listMergedVodVersions(itemKey, opts)
+        : Promise.resolve([]),
+    enrichElvPriorityKeys: (itemKeys, opts) => {
+      if (opts?.signal?.aborted) {
+        return Promise.resolve({ ...EMPTY_ELV_MATCHING_SUMMARY, aborted: true });
+      }
+      if (!bridge.enrichElvPriorityKeys) return Promise.resolve(EMPTY_ELV_MATCHING_SUMMARY);
+      return bridge.enrichElvPriorityKeys(
+        itemKeys,
+        opts?.lang === undefined ? undefined : { lang: opts.lang },
+      );
+    },
+    runElvBackgroundMatching: (opts) => {
+      if (opts?.signal?.aborted) {
+        return Promise.resolve({ ...EMPTY_ELV_MATCHING_SUMMARY, aborted: true });
+      }
+      if (!bridge.runElvBackgroundMatching) return Promise.resolve(EMPTY_ELV_MATCHING_SUMMARY);
+      const cleanOpts: { lang?: string; batchSize?: number } = {};
+      if (opts?.lang !== undefined) cleanOpts.lang = opts.lang;
+      if (opts?.batchSize !== undefined) cleanOpts.batchSize = opts.batchSize;
+      return bridge.runElvBackgroundMatching(
+        Object.keys(cleanOpts).length > 0 ? cleanOpts : undefined,
+      );
+    },
+    recordPlaybackQuality: (input) =>
+      bridge.recordPlaybackQuality
+        ? bridge.recordPlaybackQuality({
+            ...input,
+            ...(typeof input.claimedLabel === 'string'
+              ? { claimedLabel: truncateDisplayText(input.claimedLabel, MAX_CLAIMED_LABEL_CHARS) }
+              : {}),
+          })
+        : Promise.resolve(null),
+    recordPlaybackVariantFailure: (itemKey) =>
+      bridge.recordPlaybackVariantFailure
+        ? bridge.recordPlaybackVariantFailure(itemKey)
+        : Promise.resolve(null),
+    setElvManualMatch: (itemKey, sourceId, mediaType, imdbId) =>
+      bridge.setElvManualMatch
+        ? bridge.setElvManualMatch(itemKey, sourceId, mediaType, imdbId)
+        : Promise.resolve(),
+    wipeElvEnrichment: () =>
+      bridge.wipeElvEnrichment ? bridge.wipeElvEnrichment() : Promise.resolve(),
+    searchElvItemKeysByAlias: (query, opts) =>
+      bridge.searchElvItemKeysByAlias
+        ? bridge.searchElvItemKeysByAlias(truncateDisplayText(query, MAX_IPC_TEXT_CHARS), opts)
+        : Promise.resolve([]),
+    listLiveVariants: (itemKey, categoryId, opts) => {
+      const cleanOpts = toLiveVariantsIpcOptions(opts);
+      if (bridge.listLiveVariants) return bridge.listLiveVariants(itemKey, categoryId, cleanOpts);
+      if (bridge.liveVariants) return bridge.liveVariants(itemKey, categoryId, cleanOpts);
+      return Promise.resolve([]);
+    },
+    findGuideChannelByCleanName: (sourceId, channelName, opts) => {
+      if (!bridge.findGuideChannelByCleanName) return Promise.resolve(null);
+      const cleanName = truncateDisplayText(channelName, MAX_IPC_TEXT_CHARS);
+      if (cleanName === '') return Promise.resolve(null);
+      return bridge.findGuideChannelByCleanName(sourceId, cleanName, opts);
+    },
     flushPendingWrites: () =>
       bridge.flushPendingWrites ? bridge.flushPendingWrites() : Promise.resolve(),
     async close() {

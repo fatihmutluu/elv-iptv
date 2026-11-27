@@ -361,7 +361,9 @@ describe('SettingsScreen', () => {
     // Left returns to sidebar
     await pressKey(KEYCODE_DPAD_LEFT);
 
-    // Traverse all 9 sidebar tabs on TV (including Remote Keys) down to Licenses
+    // Traverse all 10 sidebar tabs on TV (including ELV Mode and Remote Keys) down to Licenses
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(screen.getByTestId('settings-tab-elvMode').props.accessibilityState.selected).toBe(true);
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(screen.getByTestId('settings-tab-playback').props.accessibilityState.selected).toBe(
       true,

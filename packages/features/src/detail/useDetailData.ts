@@ -1,20 +1,39 @@
 import type {
   CatalogService,
+  ElvTitleRecord,
   EpisodeRow,
+  ItemDetailRow,
   RatingValue,
+  SeasonRow,
   SeriesUnplayedSummary,
   VodEnrichmentRecord,
   VodVersionOption,
   WatchProgressRow,
 } from '@elv/data';
-import { elvError } from '@elv/domain';
+import {
+  DEFAULT_ELV_MODE_PREFERENCES,
+  type ElvModePreferences,
+  elvError,
+  formatElvDisplayTitle,
+  type Result,
+} from '@elv/domain';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type DetailTarget, useCatalogUiCache, useSeriesUnplayedCounts } from '../shared';
+import {
+  type DetailTarget,
+  isElvFeatureActive,
+  resolveElvLocalizedSynopsis,
+  resolveElvLocalizedValue,
+  useCatalogUiCache,
+  useElvEnrichmentForKeys,
+  useSeriesUnplayedCounts,
+} from '../shared';
 import {
   type DetailSeasonsState,
   type DetailSnapshot,
+  type DetailVersionOption,
   emptyDetailSnapshot,
   fetchRelatedDetailItems,
+  mapMergedVodVariantToOption,
   mergeVodEnrichment,
 } from './detail-data-helpers';
 import { useDetailMutations } from './useDetailMutations';
@@ -29,6 +48,10 @@ export interface UseDetailDataOptions {
   readonly refreshToken: number;
   readonly userStateVersion?: number;
   readonly vodEnrichmentEnabled?: boolean;
+  readonly elvPreferences?: ElvModePreferences;
+  readonly locale?: string;
+  /** Optional user-selected version `itemKey` for multi-source series season/episode reload (`#511`). */
+  readonly selectedVersionKey?: string | null;
 }
 
 /** Hydrated Detail screen dataset, series season controls, and optimistic user-state mutations. */
@@ -42,7 +65,7 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly genres: readonly string[];
   readonly isEnriched: boolean;
   readonly relatedUnplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
-  readonly versions: readonly VodVersionOption[];
+  readonly versions: readonly DetailVersionOption[];
   readonly userRating: RatingValue | null;
   readonly selectSeason: (season: number) => void;
   readonly retrySeasons: () => void;
@@ -62,7 +85,17 @@ export function useDetailData({
   refreshToken,
   userStateVersion = 0,
   vodEnrichmentEnabled = false,
+  elvPreferences,
+  locale = 'en',
+  selectedVersionKey = null,
 }: UseDetailDataOptions): DetailDataState {
+  const elvPrefs = elvPreferences ?? DEFAULT_ELV_MODE_PREFERENCES;
+  const elvMergeActive = isElvFeatureActive(elvPrefs, 'elvMergeVersions');
+  const elvEnrichActive = isElvFeatureActive(elvPrefs, 'elvEnrichMetadata');
+  const effectiveSeriesKey =
+    target.kind === 'series' && selectedVersionKey !== null && selectedVersionKey !== ''
+      ? selectedVersionKey
+      : target.itemKey;
   const uiCache = useCatalogUiCache();
   const uiCacheRef = useRef(uiCache);
   uiCacheRef.current = uiCache;
@@ -74,8 +107,9 @@ export function useDetailData({
       : emptyDetailSnapshot(target.kind, target.categoryId),
   );
   const [seasonsRetryToken, setSeasonsRetryToken] = useState(0);
-  const [versions, setVersions] = useState<readonly VodVersionOption[]>([]);
+  const [versions, setVersions] = useState<readonly DetailVersionOption[]>([]);
   const [enrichment, setEnrichment] = useState<VodEnrichmentRecord | null>(null);
+  const [elvTitleDetail, setElvTitleDetail] = useState<ElvTitleRecord | null>(null);
   const [userRating, setUserRatingState] = useState<RatingValue | null>(null);
 
   const mountedRef = useRef(true);
@@ -83,7 +117,15 @@ export function useDetailData({
   const activeItemKeyRef = useRef(target.itemKey);
   const activeSourceIdRef = useRef(target.sourceId);
   activeSourceIdRef.current = target.sourceId;
+  const activeSeriesKeyRef = useRef(effectiveSeriesKey);
+  const selectedSeriesVersion =
+    target.kind === 'series' && effectiveSeriesKey !== target.itemKey
+      ? versions.find((v) => v.key === effectiveSeriesKey)
+      : undefined;
+  const activeSeriesSourceIdRef = useRef(selectedSeriesVersion?.sourceId ?? target.sourceId);
+  activeSeriesSourceIdRef.current = selectedSeriesVersion?.sourceId ?? target.sourceId;
   const prevItemKeyRef = useRef(target.itemKey);
+  const prevSeriesKeyRef = useRef(effectiveSeriesKey);
   const seriesIdRef = useRef<number | undefined>(
     target.catalogId ?? initialCached?.snap.detailRow?.id,
   );
@@ -135,8 +177,8 @@ export function useDetailData({
     catalog,
     mountedRef,
     snapRef,
-    activeItemKeyRef,
-    activeSourceIdRef,
+    activeItemKeyRef: activeSeriesKeyRef,
+    activeSourceIdRef: activeSeriesSourceIdRef,
     episodesBySeasonRef,
     persistToCache,
     updateSnap,
@@ -154,12 +196,17 @@ export function useDetailData({
   useEffect(() => {
     const gen = ++hydrationGenRef.current;
     const itemChanged = prevItemKeyRef.current !== target.itemKey;
+    const seriesVersionChanged =
+      !itemChanged && target.kind === 'series' && prevSeriesKeyRef.current !== effectiveSeriesKey;
     prevItemKeyRef.current = target.itemKey;
+    prevSeriesKeyRef.current = effectiveSeriesKey;
     activeItemKeyRef.current = target.itemKey;
+    activeSeriesKeyRef.current = effectiveSeriesKey;
 
     if (itemChanged) {
       setVersions([]);
       setEnrichment(null);
+      setElvTitleDetail(null);
       userRatingRef.current = null;
       setUserRatingState(null);
       myListGenRef.current += 1;
@@ -187,14 +234,144 @@ export function useDetailData({
         episodesBySeasonRef.current = new Map();
         updateSnap(() => emptyDetailSnapshot(target.kind, target.categoryId), false);
       }
+    } else if (seriesVersionChanged) {
+      cancelPrewarm();
+      seriesIdRef.current = effectiveSeriesKey === target.itemKey ? target.catalogId : undefined;
+      episodesBySeasonRef.current = new Map();
+      updateSnap(
+        (prev) => ({
+          ...prev,
+          seasonsState: { kind: 'loading' },
+          selectedSeason: null,
+          episodes: [],
+          episodeProgressByKey: new Map(),
+          episodesLoading: true,
+          episodesRefreshing: false,
+        }),
+        false,
+      );
     }
 
     let cancelled = false;
     const isStale = () => cancelled || !mountedRef.current || gen !== hydrationGenRef.current;
 
+    const loadSeriesSeasonsAndEpisodes = async (
+      seriesDetail: ItemDetailRow | null,
+      eagerSeasons: Promise<Result<SeasonRow[]> | null> | null,
+      resetSelection: boolean,
+    ) => {
+      const resolvedSeriesId =
+        effectiveSeriesKey === target.itemKey
+          ? (target.catalogId ?? seriesDetail?.id ?? seriesIdRef.current)
+          : (seriesDetail?.id ?? seriesIdRef.current);
+      seriesIdRef.current = resolvedSeriesId;
+      if (resolvedSeriesId === undefined) {
+        updateSnap(
+          (prev) => ({
+            ...prev,
+            seasonsState: { kind: 'ready', seasons: [] },
+            episodes: [],
+            episodesLoading: false,
+            episodesRefreshing: false,
+          }),
+          effectiveSeriesKey === target.itemKey,
+        );
+        return;
+      }
+
+      const seasonsRes =
+        eagerSeasons !== null
+          ? await eagerSeasons
+          : await catalog.seasons(resolvedSeriesId).catch(() => null);
+      if (isStale()) return;
+
+      if (seasonsRes === null || !seasonsRes.ok) {
+        if (
+          !resetSelection &&
+          snapRef.current.seasonsState.kind === 'ready' &&
+          snapRef.current.seasonsState.seasons.length > 0
+        ) {
+          return;
+        }
+        const error =
+          seasonsRes === null ? elvError('storage', 'seasons-failed') : seasonsRes.error;
+        updateSnap(
+          (prev) => ({
+            ...prev,
+            seasonsState: { kind: 'error', error },
+            episodes: [],
+            episodesLoading: false,
+            episodesRefreshing: false,
+          }),
+          effectiveSeriesKey === target.itemKey,
+        );
+        return;
+      }
+
+      const seasons = seasonsRes.value;
+      if (seasons.length === 0) {
+        updateSnap(
+          (prev) => ({
+            ...prev,
+            seasonsState: { kind: 'ready', seasons: [] },
+            selectedSeason: null,
+            episodes: [],
+            episodeProgressByKey: new Map(),
+            episodesLoading: false,
+            episodesRefreshing: false,
+          }),
+          effectiveSeriesKey === target.itemKey,
+        );
+        return;
+      }
+
+      const curSelected = resetSelection ? null : snapRef.current.selectedSeason;
+      const nextSeason =
+        curSelected !== null && seasons.some((s) => s.season === curSelected)
+          ? curSelected
+          : (seasons[0]?.season ?? null);
+
+      updateSnap(
+        (prev) => ({
+          ...prev,
+          seasonsState: { kind: 'ready', seasons },
+          selectedSeason: nextSeason,
+        }),
+        effectiveSeriesKey === target.itemKey,
+      );
+      if (nextSeason !== null) {
+        const alreadyVisible =
+          !resetSelection &&
+          snapRef.current.episodes.length > 0 &&
+          snapRef.current.selectedSeason === nextSeason;
+        await loadSeasonEpisodes(resolvedSeriesId, nextSeason, effectiveSeriesKey, {
+          backgroundRefresh: alreadyVisible,
+          seasons,
+        });
+      } else {
+        updateSnap(
+          (prev) => ({ ...prev, episodesLoading: false, episodesRefreshing: false }),
+          effectiveSeriesKey === target.itemKey,
+        );
+      }
+    };
+
     const run = async () => {
+      if (seriesVersionChanged) {
+        const seriesDetail =
+          effectiveSeriesKey === target.itemKey && target.catalogId !== undefined
+            ? null
+            : catalog.itemDetail
+              ? await catalog.itemDetail(effectiveSeriesKey).catch(() => null)
+              : null;
+        if (isStale()) return;
+        await loadSeriesSeasonsAndEpisodes(seriesDetail, null, true);
+        return;
+      }
+
+      const useTargetSeriesDirectly = effectiveSeriesKey === target.itemKey;
       const eagerSeasons =
-        target.kind === 'series' && target.catalogId !== undefined
+        target.kind === 'series' && useTargetSeriesDirectly && target.catalogId !== undefined
           ? catalog.seasons(target.catalogId).catch(() => null)
           : null;
       const [
@@ -204,17 +381,26 @@ export function useDetailData({
         fetchedVersions,
         relatedResult,
         fetchedRating,
+        altSeriesDetail,
       ] = await Promise.all([
         catalog.itemDetail ? catalog.itemDetail(target.itemKey).catch(() => null) : null,
         catalog.listFavoriteKeys ? catalog.listFavoriteKeys().catch(() => [] as string[]) : [],
         target.kind === 'movie' && catalog.getProgress
           ? catalog.getProgress(target.itemKey).catch(() => null)
           : null,
-        target.kind === 'movie' && catalog.itemVersions
-          ? catalog.itemVersions(target.itemKey).catch(() => [] as readonly VodVersionOption[])
-          : ([] as readonly VodVersionOption[]),
+        elvMergeActive && catalog.listMergedVodVersions
+          ? catalog
+              .listMergedVodVersions(target.itemKey)
+              .then((rows) => rows.map(mapMergedVodVariantToOption))
+              .catch(() => [] as readonly DetailVersionOption[])
+          : target.kind === 'movie' && catalog.itemVersions
+            ? catalog.itemVersions(target.itemKey).catch(() => [] as readonly VodVersionOption[])
+            : ([] as readonly DetailVersionOption[]),
         fetchRelatedDetailItems(catalog, target),
         catalog.getRating ? catalog.getRating(target.itemKey).catch(() => null) : null,
+        target.kind === 'series' && !useTargetSeriesDirectly && catalog.itemDetail
+          ? catalog.itemDetail(effectiveSeriesKey).catch(() => null)
+          : null,
       ]);
       if (isStale()) return;
 
@@ -244,82 +430,11 @@ export function useDetailData({
       }));
       if (target.kind !== 'series') return;
 
-      const resolvedSeriesId = target.catalogId ?? hydratedDetail?.id ?? seriesIdRef.current;
-      seriesIdRef.current = resolvedSeriesId;
-      if (resolvedSeriesId === undefined) {
-        updateSnap((prev) => ({
-          ...prev,
-          seasonsState: { kind: 'ready', seasons: [] },
-          episodes: [],
-          episodesLoading: false,
-          episodesRefreshing: false,
-        }));
-        return;
-      }
-
-      const seasonsRes =
-        eagerSeasons !== null
-          ? await eagerSeasons
-          : await catalog.seasons(resolvedSeriesId).catch(() => null);
-      if (isStale()) return;
-
-      if (seasonsRes === null || !seasonsRes.ok) {
-        if (
-          !itemChanged &&
-          snapRef.current.seasonsState.kind === 'ready' &&
-          snapRef.current.seasonsState.seasons.length > 0
-        ) {
-          return;
-        }
-        const error =
-          seasonsRes === null ? elvError('storage', 'seasons-failed') : seasonsRes.error;
-        updateSnap((prev) => ({
-          ...prev,
-          seasonsState: { kind: 'error', error },
-          episodes: [],
-          episodesLoading: false,
-          episodesRefreshing: false,
-        }));
-        return;
-      }
-
-      const seasons = seasonsRes.value;
-      if (seasons.length === 0) {
-        updateSnap((prev) => ({
-          ...prev,
-          seasonsState: { kind: 'ready', seasons: [] },
-          selectedSeason: null,
-          episodes: [],
-          episodeProgressByKey: new Map(),
-          episodesLoading: false,
-          episodesRefreshing: false,
-        }));
-        return;
-      }
-
-      const curSelected = snapRef.current.selectedSeason;
-      const nextSeason =
-        curSelected !== null && seasons.some((s) => s.season === curSelected)
-          ? curSelected
-          : (seasons[0]?.season ?? null);
-
-      updateSnap((prev) => ({
-        ...prev,
-        seasonsState: { kind: 'ready', seasons },
-        selectedSeason: nextSeason,
-      }));
-      if (nextSeason !== null) {
-        const alreadyVisible =
-          !itemChanged &&
-          snapRef.current.episodes.length > 0 &&
-          snapRef.current.selectedSeason === nextSeason;
-        await loadSeasonEpisodes(resolvedSeriesId, nextSeason, target.itemKey, {
-          backgroundRefresh: alreadyVisible,
-          seasons,
-        });
-      } else {
-        updateSnap((prev) => ({ ...prev, episodesLoading: false, episodesRefreshing: false }));
-      }
+      await loadSeriesSeasonsAndEpisodes(
+        useTargetSeriesDirectly ? hydratedDetail : altSeriesDetail,
+        eagerSeasons,
+        itemChanged,
+      );
     };
 
     void run();
@@ -329,6 +444,8 @@ export function useDetailData({
   }, [
     cancelPrewarm,
     catalog,
+    effectiveSeriesKey,
+    elvMergeActive,
     loadSeasonEpisodes,
     refreshToken,
     seasonsRetryToken,
@@ -340,6 +457,36 @@ export function useDetailData({
     updateSnap,
     userStateVersion,
   ]);
+
+  const elvTargetKeys = useMemo(() => [target.itemKey], [target.itemKey]);
+  const elvEnrichment = useElvEnrichmentForKeys(catalog, elvTargetKeys, {
+    enabled: elvEnrichActive,
+    lang: locale,
+    catalogRevision: refreshToken,
+  });
+  const elvItemEnrichment = elvEnrichment.enrichmentByKey.get(target.itemKey);
+  const elvPosterLookupPending =
+    elvEnrichActive && elvEnrichment.isKeyLookupPending(target.itemKey);
+  const matchedImdbId = elvItemEnrichment?.imdbId ?? null;
+
+  useEffect(() => {
+    if (!elvEnrichActive || matchedImdbId === null || catalog.getElvTitleDetail === undefined) {
+      setElvTitleDetail(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const ac = new AbortController();
+    void catalog
+      .getElvTitleDetail(matchedImdbId, { lang: locale, signal: ac.signal })
+      .then((rec) => {
+        if (!cancelled && mountedRef.current && rec !== null) setElvTitleDetail(rec);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [catalog, elvEnrichActive, locale, matchedImdbId]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken triggers opt-in enrichment refresh on source sync
   useEffect(() => {
@@ -370,7 +517,7 @@ export function useDetailData({
           snapRef.current.seasonsState.kind === 'ready'
             ? snapRef.current.seasonsState.seasons
             : undefined;
-        void loadSeasonEpisodes(seriesId, season, activeItemKeyRef.current, {
+        void loadSeasonEpisodes(seriesId, season, activeSeriesKeyRef.current, {
           ...(seasons !== undefined ? { seasons } : {}),
         });
       }
@@ -391,9 +538,9 @@ export function useDetailData({
     setSeasonsRetryToken((n) => n + 1);
   }, [updateSnap]);
 
-  const title = snap.detailRow?.name ?? target.title;
-  const posterUri = target.posterUri ?? snap.detailRow?.logo ?? null;
-  const backdropUri = target.backdropUri ?? snap.detailRow?.logo ?? target.posterUri ?? null;
+  const rawTitle = snap.detailRow?.name ?? target.title;
+  const rawPosterUri = target.posterUri ?? snap.detailRow?.logo ?? null;
+  const rawBackdropUri = target.backdropUri ?? snap.detailRow?.logo ?? target.posterUri ?? null;
   const providerYear = target.year ?? snap.detailRow?.year ?? null;
   const providerRating = target.rating ?? snap.detailRow?.rating ?? null;
   const providerPlot = snap.detailRow?.plot ?? target.overview ?? null;
@@ -412,7 +559,59 @@ export function useDetailData({
       ),
     [enrichment, providerGenres, providerPlot, providerRating, providerYear, vodEnrichmentEnabled],
   );
-  const { year, rating, plot, genres, enriched: isEnriched } = mergedMeta;
+  const activeElvTitle = elvEnrichActive
+    ? (elvTitleDetail ?? elvItemEnrichment?.title ?? null)
+    : null;
+  const title =
+    activeElvTitle !== null
+      ? formatElvDisplayTitle({
+          originalTitle: activeElvTitle.originalTitle,
+          englishTitle: activeElvTitle.englishTitle,
+          localizedTitle: resolveElvLocalizedValue(activeElvTitle.localizedTitles, locale),
+          fallbackTitle: rawTitle,
+          format: elvPrefs.elvTitleFormat,
+        })
+      : rawTitle;
+  const posterUri =
+    activeElvTitle?.posterUrl !== null &&
+    activeElvTitle?.posterUrl !== undefined &&
+    activeElvTitle.posterUrl.trim() !== ''
+      ? activeElvTitle.posterUrl
+      : elvPosterLookupPending
+        ? null
+        : rawPosterUri;
+  const backdropUri =
+    activeElvTitle?.backdropUrl !== null &&
+    activeElvTitle?.backdropUrl !== undefined &&
+    activeElvTitle.backdropUrl.trim() !== ''
+      ? activeElvTitle.backdropUrl
+      : activeElvTitle?.posterUrl !== null &&
+          activeElvTitle?.posterUrl !== undefined &&
+          activeElvTitle.posterUrl.trim() !== ''
+        ? activeElvTitle.posterUrl
+        : elvPosterLookupPending
+          ? null
+          : rawBackdropUri;
+  const year =
+    activeElvTitle?.year !== null &&
+    activeElvTitle?.year !== undefined &&
+    Number.isFinite(activeElvTitle.year)
+      ? activeElvTitle.year
+      : mergedMeta.year;
+  const rating =
+    activeElvTitle?.rating !== null &&
+    activeElvTitle?.rating !== undefined &&
+    Number.isFinite(activeElvTitle.rating)
+      ? activeElvTitle.rating
+      : mergedMeta.rating;
+  const elvSynopsis =
+    activeElvTitle !== null ? resolveElvLocalizedSynopsis(activeElvTitle.synopses, locale) : null;
+  const plot = elvSynopsis ?? mergedMeta.plot;
+  const genres =
+    activeElvTitle !== null && activeElvTitle.genres.length > 0
+      ? activeElvTitle.genres
+      : mergedMeta.genres;
+  const isEnriched = activeElvTitle !== null || mergedMeta.enriched;
 
   const mutationRefs = useMemo(
     () => ({

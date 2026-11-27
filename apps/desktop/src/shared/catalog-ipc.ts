@@ -5,12 +5,8 @@ import type {
   BrowseKind,
   CategoryQueryOptions,
   CategoryRow,
-  ChannelOverrideRecord,
-  CreateCustomGroupInput,
   CreateProfileInput,
   CrossChannelProgrammeRow,
-  CustomGroupItemInput,
-  CustomGroupRecord,
   DiscoveredCategory,
   EpisodeRow,
   FavoriteRow,
@@ -43,13 +39,11 @@ import type {
   SearchSuggestionsOptions,
   SeasonRow,
   SeriesUnplayedSummary,
-  SetChannelOverrideInput,
   SetParentalLockInput,
   SourceRow,
   SourceSettings,
   StreamRequest,
   ToggleFavoriteInput,
-  UpdateCustomGroupPatch,
   UpdateParentalSettingsPatch,
   UpdateProfilePatch,
   VodVersionOption,
@@ -57,6 +51,8 @@ import type {
 } from '@elv/data';
 import type { ElvError, Result } from '@elv/domain';
 import {
+  type CatalogBridgeChannelOps,
+  type CatalogChannelOpsRpcCall,
   isChannelOpsRpcCall,
   isIncludeHiddenParentalOptions,
 } from './catalog-ipc-channel-guards.ts';
@@ -125,6 +121,13 @@ import {
   isRefreshMyListNewEpisodesOptions,
 } from './catalog-ipc-ratings-guards.ts';
 import {
+  type CatalogBridgeWaveE1Ops,
+  type CatalogWaveE1OpsRpcCall,
+  isLiveVariantsIpcOptions,
+  isWaveE1OpsRpcCall,
+  type LiveVariantsIpcOptions,
+} from './catalog-ipc-wave-e1-guards.ts';
+import {
   type CatalogBridgeWaveF5bOps,
   type CatalogWaveF5bOpsRpcCall,
   isWaveF5bOpsRpcCall,
@@ -185,7 +188,7 @@ export type CatalogRpcMethodCall =
       limit: number;
       opts?: ListItemsOptions;
     }
-  | { method: 'liveVariants'; itemKey: string; categoryId?: string; opts?: ParentalQueryOptions }
+  | { method: 'liveVariants'; itemKey: string; categoryId?: string; opts?: LiveVariantsIpcOptions }
   | { method: 'itemVersions'; itemKey: string; opts?: ParentalQueryOptions }
   | {
       method: 'allSourcesItems';
@@ -293,34 +296,12 @@ export type CatalogRpcMethodCall =
   | { method: 'setParentalPin'; pin: string; profileId?: string; currentPin?: string }
   | { method: 'verifyParentalPin'; pin: string; profileId?: string }
   | { method: 'clearParentalPin'; currentPin: string; profileId?: string }
-  | { method: 'listChannelOverrides'; profileId?: string }
-  | { method: 'setChannelOverride'; input: SetChannelOverrideInput }
-  | { method: 'clearChannelOverride'; itemKey: string; profileId?: string }
-  | {
-      method: 'reorderChannels';
-      itemKeys: readonly string[];
-      sourceId: string;
-      profileId?: string;
-    }
-  | {
-      method: 'listCustomGroups';
-      profileId?: string;
-      opts?: { readonly includeHidden?: boolean; readonly parentalUnlocked?: boolean };
-    }
-  | { method: 'createCustomGroup'; input: CreateCustomGroupInput }
-  | { method: 'updateCustomGroup'; groupId: string; patch: UpdateCustomGroupPatch }
-  | { method: 'deleteCustomGroup'; groupId: string }
-  | {
-      method: 'setCustomGroupItems';
-      groupId: string;
-      items: readonly CustomGroupItemInput[];
-    }
-  | { method: 'addChannelToCustomGroup'; groupId: string; itemKey: string; sourceId: string }
-  | { method: 'removeChannelFromCustomGroup'; groupId: string; itemKey: string }
   | { method: 'flushPendingWrites' }
+  | CatalogChannelOpsRpcCall
   | CatalogEpgOpsRpcCall
   | CatalogFailoverOpsRpcCall
   | CatalogRatingsOpsRpcCall
+  | CatalogWaveE1OpsRpcCall
   | CatalogWaveF5bOpsRpcCall
   | CatalogWaveP7OpsRpcCall
   | CatalogWaveP9OpsRpcCall;
@@ -351,9 +332,11 @@ export interface CatalogImportHandle {
 
 /** Frozen `window.elv.catalog` surface exposed by the preload; raw `MessagePort` never crosses `contextBridge`. */
 export interface CatalogBridge
-  extends CatalogBridgeEpgOps,
+  extends CatalogBridgeChannelOps,
+    CatalogBridgeEpgOps,
     CatalogBridgeFailoverOps,
     CatalogBridgeRatingsOps,
+    CatalogBridgeWaveE1Ops,
     CatalogBridgeWaveF5bOps,
     CatalogBridgeWaveP7Ops {
   open(): Promise<Result<void>>;
@@ -381,7 +364,7 @@ export interface CatalogBridge
   liveVariants?(
     itemKey: string,
     categoryId?: string,
-    opts?: ParentalQueryOptions,
+    opts?: LiveVariantsIpcOptions,
   ): Promise<readonly LiveVariantOption[]>;
   itemVersions?(itemKey: string, opts?: ParentalQueryOptions): Promise<readonly VodVersionOption[]>;
   allSourcesItems?(
@@ -495,34 +478,6 @@ export interface CatalogBridge
   setParentalPin?(pin: string, profileId?: string, currentPin?: string): Promise<Result<void>>;
   verifyParentalPin?(pin: string, profileId?: string): Promise<PinVerifyResult>;
   clearParentalPin?(currentPin: string, profileId?: string): Promise<Result<void>>;
-  listChannelOverrides?(profileId?: string): Promise<ChannelOverrideRecord[]>;
-  setChannelOverride?(input: SetChannelOverrideInput): Promise<Result<ChannelOverrideRecord>>;
-  clearChannelOverride?(itemKey: string, profileId?: string): Promise<Result<void>>;
-  reorderChannels?(
-    itemKeys: readonly string[],
-    sourceId: string,
-    profileId?: string,
-  ): Promise<Result<void>>;
-  listCustomGroups?(
-    profileId?: string,
-    opts?: { readonly includeHidden?: boolean; readonly parentalUnlocked?: boolean },
-  ): Promise<CustomGroupRecord[]>;
-  createCustomGroup?(input: CreateCustomGroupInput): Promise<Result<CustomGroupRecord>>;
-  updateCustomGroup?(
-    groupId: string,
-    patch: UpdateCustomGroupPatch,
-  ): Promise<Result<CustomGroupRecord>>;
-  deleteCustomGroup?(groupId: string): Promise<Result<void>>;
-  setCustomGroupItems?(
-    groupId: string,
-    items: readonly CustomGroupItemInput[],
-  ): Promise<Result<void>>;
-  addChannelToCustomGroup?(
-    groupId: string,
-    itemKey: string,
-    sourceId: string,
-  ): Promise<Result<void>>;
-  removeChannelFromCustomGroup?(groupId: string, itemKey: string): Promise<Result<void>>;
   flushPendingWrites?(): Promise<void>;
   onChanged(listener: () => void): () => void;
   /** Subscribes to unexpected `catalog-worker` disconnect notifications (`#435`). */
@@ -576,7 +531,7 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return (
         isCleanKey(x['itemKey']) &&
         (x['categoryId'] === undefined || isCleanKey(x['categoryId'], 512)) &&
-        (x['opts'] === undefined || isParentalQueryOptions(x['opts']))
+        (x['opts'] === undefined || isLiveVariantsIpcOptions(x['opts']))
       );
     case 'itemVersions':
       return (
@@ -755,6 +710,7 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isEpgOpsRpcCall(x) ||
         isFailoverOpsRpcCall(x) ||
         isRatingsOpsRpcCall(x) ||
+        isWaveE1OpsRpcCall(x) ||
         isWaveF5bOpsRpcCall(x) ||
         isWaveP7OpsRpcCall(x) ||
         isWaveP9OpsRpcCall(x)

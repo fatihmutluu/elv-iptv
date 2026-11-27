@@ -19,6 +19,7 @@ import {
 import {
   type ComponentRef,
   type ReactElement,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -34,6 +35,8 @@ import {
   adjustAppearanceControl,
   type SettingsPreferencesController,
 } from './AppearancePanel';
+import { ElvModeSettingsPanel } from './ElvModeSettingsPanel';
+import { activateElvModeControl } from './elv-mode-controls';
 import { LiveTvSettingsPanel } from './LiveTvSettingsPanel';
 import { activateLiveTvControl } from './live-tv-controls';
 import { PlaybackSettingsPanel } from './PlaybackSettingsPanel';
@@ -42,6 +45,7 @@ import { RemoteKeysSettingsPanel } from './RemoteKeysSettingsPanel';
 import { SettingsOverlayOutlet, SettingsOverlayProvider } from './SettingsOverlayPortal';
 import {
   type AppearanceFocusId,
+  type ElvModeFocusId,
   type LiveTvFocusId,
   type PlaybackFocusId,
   type PreferenceSettingsSection,
@@ -55,6 +59,8 @@ const REFRESHED_FEEDBACK_MS = 2_500;
 type TvDropdownId =
   | 'lang-dropdown'
   | 'artwork-cache-dropdown'
+  | 'elv-title-format-dropdown'
+  | 'elv-category-source-dropdown'
   | 'catalog-refresh-dropdown'
   | 'guide-refresh-dropdown';
 
@@ -122,6 +128,8 @@ export interface SettingsScreenProps {
   readonly onOpenChannelManagement?: () => void;
   /** Opens the Multi-Guide & Channel Mapper overlay lifted to `AppShell` root (`#30`). */
   readonly onOpenGuideManagement?: (sourceId: string) => void;
+  /** Optional interactive preview slot rendered at the top of Settings -> ELV Mode (Wave E3 seam). */
+  readonly elvPreviewSlot?: ReactNode;
 }
 
 interface NavSectionMeta {
@@ -137,6 +145,12 @@ const SECTION_META: readonly NavSectionMeta[] = [
     icon: 'layers',
     labelKey: 'settings.section.appearance',
     testID: 'settings-tab-appearance',
+  },
+  {
+    id: 'elvMode',
+    icon: 'star',
+    labelKey: 'settings.section.elvMode',
+    testID: 'settings-tab-elvMode',
   },
   {
     id: 'playback',
@@ -212,6 +226,7 @@ export function SettingsScreen({
   onTelemetryOptInChange,
   onRefreshCatalogNow,
   onRefreshGuideNow,
+  elvPreviewSlot,
 }: SettingsScreenProps): ReactElement {
   const theme = useTheme();
   const themeCtrl = useThemeController();
@@ -379,6 +394,12 @@ export function SettingsScreen({
         });
         return;
       }
+      if (sec === 'elvMode') {
+        activateElvModeControl(controlId as ElvModeFocusId, preferences, {
+          onOpenDropdown: (id) => setOpenTvDropdownId(id),
+        });
+        return;
+      }
       if (sec === 'playback') {
         activatePlaybackControl(controlId as PlaybackFocusId, preferences);
         return;
@@ -412,6 +433,18 @@ export function SettingsScreen({
     [preferences],
   );
 
+  const elvModeEnabled = preferences?.preferences.elvModeEnabled ?? false;
+
+  useEffect(() => {
+    if (
+      !elvModeEnabled &&
+      (openTvDropdown?.id === 'elv-title-format-dropdown' ||
+        openTvDropdown?.id === 'elv-category-source-dropdown')
+    ) {
+      setOpenTvDropdown(null);
+    }
+  }, [elvModeEnabled, openTvDropdown?.id]);
+
   const tv = useTvSettingsNavigation({
     isTv,
     isActiveScope,
@@ -424,6 +457,7 @@ export function SettingsScreen({
     showExternalPlayer,
     showConfirmExitOnBack,
     preservePaneOnBlur: hasTransientOverlay,
+    elvModeEnabled,
     ...(preferences !== undefined ? { homeLayout: preferences.preferences.homeLayout } : {}),
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
@@ -460,6 +494,21 @@ export function SettingsScreen({
         }
         onOpenTvDropdownChange={(next) => setOpenTvDropdownId(next)}
         {...(onTelemetryOptInChange !== undefined ? { onTelemetryOptInChange } : {})}
+      />
+    ) : activeSection === 'elvMode' ? (
+      <ElvModeSettingsPanel
+        {...(preferences !== undefined ? { preferences } : {})}
+        focusedControlId={
+          activeSection === 'elvMode' ? (tv.focusedControlId as ElvModeFocusId | null) : null
+        }
+        openTvDropdownId={
+          openTvDropdownId === 'elv-title-format-dropdown' ||
+          openTvDropdownId === 'elv-category-source-dropdown'
+            ? openTvDropdownId
+            : null
+        }
+        onOpenTvDropdownChange={(next) => setOpenTvDropdownId(next)}
+        {...(elvPreviewSlot !== undefined ? { previewSlot: elvPreviewSlot } : {})}
       />
     ) : activeSection === 'playback' ? (
       <PlaybackSettingsPanel

@@ -1,5 +1,6 @@
 import { sanitizeArtworkUrl } from './artwork-url';
 import { decodeLegacyCodepage } from './codepages';
+import { firstProviderImdbId, firstProviderTmdbId } from './provider-ids';
 import { decodeUtf8 } from './utf8';
 import { mergeById, toNumber, toStrictInt, toText } from './xtream-normalize';
 import type {
@@ -156,6 +157,8 @@ export function toMovies(rows: Raw[]): XtreamMovie[] {
     put(movie, 'year', yearOf(r.year));
     put(movie, 'cast', creditText(MAX_CAST_CHARS, r.cast, r.actors));
     put(movie, 'director', creditText(MAX_DIRECTOR_CHARS, r.director));
+    put(movie, 'providerImdbId', firstProviderImdbId(r.imdb_id, r.imdb));
+    put(movie, 'providerTmdbId', firstProviderTmdbId(r.tmdb, r.tmdb_id));
     put(movie, 'added', ms(r.added));
     out.push(movie);
   }
@@ -175,6 +178,8 @@ export function toSeries(rows: Raw[]): XtreamSeries[] {
     put(series, 'year', yearOf(r.year, r.release_date, r.releaseDate));
     put(series, 'cast', creditText(MAX_CAST_CHARS, r.cast, r.actors));
     put(series, 'director', creditText(MAX_DIRECTOR_CHARS, r.director));
+    put(series, 'providerImdbId', firstProviderImdbId(r.imdb_id, r.imdb));
+    put(series, 'providerTmdbId', firstProviderTmdbId(r.tmdb, r.tmdb_id));
     put(series, 'lastModified', ms(r.last_modified));
     out.push(series);
   }
@@ -272,6 +277,8 @@ export function toVodInfo(raw: Raw): XtreamVodInfo {
     'director',
     creditText(MAX_DIRECTOR_CHARS, info.director, movieData.director, raw.director),
   );
+  put(vod, 'providerImdbId', firstProviderImdbId(info.imdb_id, info.imdb));
+  put(vod, 'providerTmdbId', firstProviderTmdbId(info.tmdb_id, info.tmdb));
   return vod;
 }
 

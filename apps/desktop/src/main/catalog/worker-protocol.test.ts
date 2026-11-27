@@ -5,6 +5,8 @@ describe('isMainToWorkerMessage', () => {
   it('accepts valid lifecycle, client port, and secret reply messages', () => {
     const valid: unknown[] = [
       { type: 'init', dbPath: '/tmp/catalog.db' },
+      { type: 'init', dbPath: '/tmp/catalog.db', elvServerUrl: 'https://elv.example.test' },
+      { type: 'init', dbPath: '/tmp/catalog.db', elvServerUrl: '' },
       { type: 'client-port', clientId: 1 },
       { type: 'client-disconnect', clientId: 1 },
       { type: 'secret-reply', reqId: 7, ok: true, value: 'secret-payload' },
@@ -22,6 +24,8 @@ describe('isMainToWorkerMessage', () => {
       null,
       'shutdown',
       { type: 'init', dbPath: '' },
+      { type: 'init', dbPath: '/tmp/catalog.db', elvServerUrl: 42 },
+      { type: 'init', dbPath: '/tmp/catalog.db', elvServerUrl: 'a'.repeat(513) },
       { type: 'client-port', clientId: 0 },
       { type: 'client-disconnect', clientId: -3 },
       { type: 'secret-reply', reqId: 1, ok: true, value: 42 },

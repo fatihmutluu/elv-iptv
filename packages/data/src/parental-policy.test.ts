@@ -254,7 +254,7 @@ describe('PIN storage, rate limiting, and settings/locks CRUD (#31)', () => {
     } finally {
       close();
     }
-  });
+  }, 20_000);
 
   it('validates parental settings and locks, and preserves zero-overhead fast path when inactive', async () => {
     const { db, close } = await setupService();

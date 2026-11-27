@@ -70,12 +70,22 @@ const NOISE_ATOMS: ReadonlySet<string> = new Set([
   'AAC',
   'AC3',
   'DTS',
+  'NF',
+  'AMZN',
+  'DSNP',
+  'ATVP',
+  'IMAX',
+  'EXTENDED',
+  'REMASTERED',
+  'UNCUT',
+  'UNRATED',
 ]);
 
 const COUNTRY_CODE_RE = /^[A-Z]{2}$/;
 const YEAR_RE = /^(19|20)\d{2}$/;
 const BRACKET_GROUP_RE = /[[(]([^[\]()]{1,32})[\])]/g;
 const LEADING_PAREN_TAG_RE = /^\(([^()]{1,24})\)\s*(?:[-–—:|/•·]\s*)?/;
+const LEADING_DELIMITED_NOISE_RE = /^([A-Za-z0-9.]{2,12})\s*(?:[|:]\s*|\s+[-–—]\s+|[-–—]\s+)/;
 const TRAILING_SEP_RE = /[\s\-–—:|/•·]+$/;
 const LEADING_SEP_RE = /^[\s\-–—:|/•·]+/;
 
@@ -115,11 +125,19 @@ export function cleanVodTitle(rawTitle: string, existingYear?: number | null): C
   let current = cleanDisplayTitle(trimmed);
   let extractedYear: number | null = null;
 
-  // Strip leading parenthesized tags like "(UHD) Title" or "(TR) Title"
+  // Strip leading parenthesized tags like "(UHD) Title" or "(TR) Title" and uppercase delimited noise prefixes like "AMZN | Title"
   for (;;) {
     const m = LEADING_PAREN_TAG_RE.exec(current);
     if (m !== null && isNoiseGroup(m[1] ?? '')) {
       const rest = current.slice(m[0].length).trim();
+      if (rest === '') break;
+      current = rest;
+      continue;
+    }
+    const delim = LEADING_DELIMITED_NOISE_RE.exec(current);
+    const token = delim?.[1] ?? '';
+    if (delim !== null && token !== '' && token === token.toUpperCase() && NOISE_ATOMS.has(token)) {
+      const rest = current.slice(delim[0].length).trim();
       if (rest === '') break;
       current = rest;
       continue;

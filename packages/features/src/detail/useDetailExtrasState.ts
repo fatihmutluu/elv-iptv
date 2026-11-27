@@ -1,15 +1,15 @@
-import type { VodVersionOption } from '@elv/data';
 import type { KeyEvent } from '@elv/focus-core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DetailTarget } from '../shared';
 import type { DetailHeroFocusSlot } from './DetailHero';
+import type { DetailVersionOption } from './detail-data-helpers';
 import { SYNOPSIS_EXPAND_THRESHOLD } from './detail-preplay';
 
 /** Options for {@link useDetailExtrasState}. */
 export interface UseDetailExtrasStateOptions {
   readonly target: DetailTarget;
   readonly plot: string | null;
-  readonly versions?: readonly VodVersionOption[];
+  readonly versions?: readonly DetailVersionOption[];
   readonly activeVersionKey?: string;
   readonly onSelectVersion?: (key: string) => void;
 }

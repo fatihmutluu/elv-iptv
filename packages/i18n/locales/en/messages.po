@@ -3988,3 +3988,108 @@ msgstr "Enter a valid 8-digit pairing code."
 
 msgid "pair.errorRejected"
 msgstr "Pairing was cancelled on the other device."
+
+msgid "settings.section.elvMode"
+msgstr "ELV Mode"
+
+msgid "settings.elvMode.subtitle"
+msgstr "Transform any IPTV list into a cinema-grade catalog with zero performance overhead."
+
+msgid "settings.elvMode.masterTitle"
+msgstr "ELV Mode"
+
+msgid "settings.elvMode.masterDescription"
+msgstr "Non-destructive enhancement powered by IMDb metadata and smart multi-source merging. Turn off anytime to return to raw provider data."
+
+msgid "settings.elvMode.mergeVersions"
+msgstr "Merge movie & series versions"
+
+msgid "settings.elvMode.mergeVersionsDesc"
+msgstr "Combine duplicates and multi-source copies under one clean card with a source/quality picker."
+
+msgid "settings.elvMode.enrichMetadata"
+msgstr "Clean posters, ratings & rich details"
+
+msgid "settings.elvMode.enrichMetadataDesc"
+msgstr "Load crisp IMDb posters, ratings, and localized synopses directly without double-fetching provider art."
+
+msgid "settings.elvMode.titleFormat"
+msgstr "Title display format"
+
+msgid "settings.elvMode.titleFormatDesc"
+msgstr "Choose how movie and series titles appear across browse, detail, and search."
+
+msgid "settings.elvMode.titleFormat.original"
+msgstr "Original title"
+
+msgid "settings.elvMode.titleFormat.system"
+msgstr "System language"
+
+msgid "settings.elvMode.titleFormat.english"
+msgstr "English"
+
+msgid "settings.elvMode.titleFormat.english_system"
+msgstr "English (System)"
+
+msgid "settings.elvMode.titleFormat.original_system"
+msgstr "Original (System)"
+
+msgid "settings.elvMode.titleFormat.system_english"
+msgstr "System (English)"
+
+msgid "settings.elvMode.titleFormat.system_original"
+msgstr "System (Original)"
+
+msgid "settings.elvMode.categorySource"
+msgstr "Category source"
+
+msgid "settings.elvMode.categorySourceDesc"
+msgstr "Browse Movies and Series by clean IMDb genres or keep your IPTV provider's folders."
+
+msgid "settings.elvMode.categorySource.imdb"
+msgstr "IMDb genres"
+
+msgid "settings.elvMode.categorySource.provider"
+msgstr "Provider folders"
+
+msgid "settings.elvMode.smartRecommendations"
+msgstr "Smart recommendations & trending showcase"
+
+msgid "settings.elvMode.smartRecommendationsDesc"
+msgstr "Personalize picks from your library and trending IMDb lists, automatically hiding disliked items."
+
+msgid "settings.elvMode.xray"
+msgstr "In-player X-Ray (cast & episode info)"
+
+msgid "settings.elvMode.xrayDesc"
+msgstr "Show clickable cast portraits and episode details when you pause playback."
+
+msgid "settings.elvMode.liveEnhance"
+msgstr "Live TV cleanup, quality grouping & failover"
+
+msgid "settings.elvMode.liveEnhanceDesc"
+msgstr "Strip provider tags, group HD/FHD/4K copies across categories, auto-switch on drop, and demote dead streams."
+
+msgid "settings.elvMode.verifyRealQuality"
+msgstr "Real quality verification & broken-version memory"
+
+msgid "settings.elvMode.verifyRealQualityDesc"
+msgstr "Remember true stream resolution to correct mislabeled 4K streams and deprioritize failing copies."
+
+msgid "elv.quality.verified"
+msgstr "Verified {resolution}"
+
+msgid "elv.quality.fake4k"
+msgstr "Actual {resolution} (labeled 4K)"
+
+msgid "elv.quality.unreliable"
+msgstr "Unreliable"
+
+msgid "elv.source.from"
+msgstr "from {source}"
+
+msgid "elv.versions.title"
+msgstr "Sources & versions ({count})"
+
+msgid "elv.matching.background"
+msgstr "Enhancing catalog in background…"

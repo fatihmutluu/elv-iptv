@@ -1,5 +1,6 @@
 import { elvError, type HttpClient, ok } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
+import { normalizeProviderImdbId, normalizeProviderTmdbId } from './index';
 import { createXtreamClient } from './xtream';
 import { action, client, expectErr, PASS, USER, value } from './xtream-test-helpers';
 
@@ -487,5 +488,131 @@ describe('simpleEpg (#306)', () => {
     ]);
     expect(requests).toHaveLength(2);
     expect(requests[1]?.url).toContain('http://backup.example:8080/player_api.php');
+  });
+});
+
+describe('provider imdb_id & tmdb_id extraction (#511)', () => {
+  it('validates and normalizes provider IMDb and TMDB IDs while rejecting garbage and injection', () => {
+    expect(normalizeProviderImdbId('tt1375666')).toBe('tt1375666');
+    expect(normalizeProviderImdbId('  TT0133093  ')).toBe('tt0133093');
+    expect(normalizeProviderImdbId('tt12345')).toBe('tt12345');
+    expect(normalizeProviderImdbId('tt1234567890')).toBe('tt1234567890');
+    expect(normalizeProviderImdbId('tt1234')).toBeNull();
+    expect(normalizeProviderImdbId('tt12345678901')).toBeNull();
+    expect(normalizeProviderImdbId('nm1234567')).toBeNull();
+    expect(normalizeProviderImdbId("tt1375666'; DROP TABLE items;--")).toBeNull();
+    expect(normalizeProviderImdbId(1375666)).toBeNull();
+    expect(normalizeProviderImdbId(null)).toBeNull();
+    expect(normalizeProviderImdbId('')).toBeNull();
+
+    expect(normalizeProviderTmdbId(27205)).toBe('27205');
+    expect(normalizeProviderTmdbId('27205')).toBe('27205');
+    expect(normalizeProviderTmdbId('  603  ')).toBe('603');
+    expect(normalizeProviderTmdbId(0)).toBeNull();
+    expect(normalizeProviderTmdbId('0')).toBeNull();
+    expect(normalizeProviderTmdbId('0000')).toBeNull();
+    expect(normalizeProviderTmdbId(-42)).toBeNull();
+    expect(normalizeProviderTmdbId(12.5)).toBeNull();
+    expect(normalizeProviderTmdbId('12345678901')).toBeNull();
+    expect(normalizeProviderTmdbId('27205 OR 1=1')).toBeNull();
+    expect(normalizeProviderTmdbId('abc')).toBeNull();
+    expect(normalizeProviderTmdbId(null)).toBeNull();
+  });
+
+  it('extracts providerImdbId and providerTmdbId on Xtream movies, series, and vodInfo', async () => {
+    const movies = value(
+      await client(() => ({
+        json: [
+          {
+            stream_id: 1,
+            name: 'Inception',
+            category_id: '1',
+            imdb_id: 'TT1375666',
+            tmdb: 27205,
+          },
+          {
+            stream_id: 2,
+            name: 'Matrix',
+            category_id: '1',
+            imdb: 'tt0133093',
+            tmdb_id: '603',
+          },
+          {
+            stream_id: 3,
+            name: 'Garbage IDs',
+            category_id: '1',
+            imdb_id: "tt123'; DROP TABLE--",
+            tmdb: 0,
+          },
+        ],
+      })).c.vodStreams(),
+    );
+    expect(movies[0]?.providerImdbId).toBe('tt1375666');
+    expect(movies[0]?.providerTmdbId).toBe('27205');
+    expect(movies[1]?.providerImdbId).toBe('tt0133093');
+    expect(movies[1]?.providerTmdbId).toBe('603');
+    expect(movies[2]?.providerImdbId).toBeUndefined();
+    expect(movies[2]?.providerTmdbId).toBeUndefined();
+
+    const series = value(
+      await client(() => ({
+        json: [
+          {
+            series_id: 10,
+            name: 'Breaking Bad',
+            category_id: '1',
+            imdb_id: 'tt0903747',
+            tmdb: 1396,
+          },
+          {
+            series_id: 11,
+            name: 'Dark',
+            category_id: '1',
+            imdb: 'TT5753856',
+            tmdb_id: '70523',
+          },
+          {
+            series_id: 12,
+            name: 'Invalid',
+            category_id: '1',
+            imdb_id: 'not-an-id',
+            tmdb_id: '0',
+          },
+        ],
+      })).c.series(),
+    );
+    expect(series[0]?.providerImdbId).toBe('tt0903747');
+    expect(series[0]?.providerTmdbId).toBe('1396');
+    expect(series[1]?.providerImdbId).toBe('tt5753856');
+    expect(series[1]?.providerTmdbId).toBe('70523');
+    expect(series[2]?.providerImdbId).toBeUndefined();
+    expect(series[2]?.providerTmdbId).toBeUndefined();
+
+    const vodInfo = value(
+      await client(() => ({
+        json: {
+          info: {
+            imdb_id: 'tt0468569',
+            tmdb_id: 155,
+          },
+          movie_data: { container_extension: 'mkv' },
+        },
+      })).c.vodInfo(1),
+    );
+    expect(vodInfo.providerImdbId).toBe('tt0468569');
+    expect(vodInfo.providerTmdbId).toBe('155');
+
+    const vodInfoAlt = value(
+      await client(() => ({
+        json: {
+          info: {
+            tmdb: '157336',
+          },
+          movie_data: { container_extension: 'mp4' },
+        },
+      })).c.vodInfo(2),
+    );
+    expect(vodInfoAlt.providerImdbId).toBeUndefined();
+    expect(vodInfoAlt.providerTmdbId).toBe('157336');
   });
 });

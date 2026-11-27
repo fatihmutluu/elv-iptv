@@ -1,3 +1,10 @@
+import {
+  DEFAULT_ELV_MODE_PREFERENCES,
+  type ElvModePreferences,
+  mergeElvModePreferences,
+  parseElvModePreferences,
+  serializeElvModePreferences,
+} from './elv-mode';
 import { DEFAULT_HOME_LAYOUT } from './home-layout';
 import {
   type ArtworkCacheLimitMbPref,
@@ -126,7 +133,10 @@ export const MAX_PREFERENCES_BYTES = 4096;
 const DEFAULT_PREFERENCES_KEY = 'elv.preferences.v1';
 
 /** Immutable snapshot of user-configurable app preferences. */
-export interface PreferencesSnapshot extends ExtendedPreferencesFields, WaveF9PreferencesFields {
+export interface PreferencesSnapshot
+  extends ExtendedPreferencesFields,
+    WaveF9PreferencesFields,
+    ElvModePreferences {
   readonly version: typeof PREFERENCES_SCHEMA_VERSION;
   readonly themePreset: string;
   readonly locale: string;
@@ -198,6 +208,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   ...DEFAULT_WAVE_F7A_PREFERENCES,
   ...DEFAULT_WAVE_F7B_PREFERENCES,
   ...DEFAULT_WAVE_F9_PREFERENCES,
+  ...DEFAULT_ELV_MODE_PREFERENCES,
   subtitleStyle: DEFAULT_SUBTITLE_STYLE,
   homeLayout: DEFAULT_HOME_LAYOUT,
 });
@@ -301,6 +312,7 @@ export function parsePreferences(
     playerVolume,
     ...parseExtendedPreferences(parsed, defaults),
     ...parseWaveF9Preferences(parsed, defaults),
+    ...parseElvModePreferences(parsed, defaults),
   });
 }
 
@@ -329,6 +341,7 @@ export function serializePreferences(snapshot: PreferencesSnapshot): Result<stri
         : DEFAULT_PREFERENCES.playerVolume,
     ...serializeExtendedPreferences(snapshot, DEFAULT_PREFERENCES),
     ...serializeWaveF9Preferences(snapshot, DEFAULT_PREFERENCES),
+    ...serializeElvModePreferences(snapshot, DEFAULT_PREFERENCES),
   });
   if (utf8ByteLength(payload) > MAX_PREFERENCES_BYTES) {
     return err(elvError('storage', 'preferences-too-large'));
@@ -373,6 +386,7 @@ function mergeCandidate(base: PreferencesSnapshot, patch: PreferencesPatch): Pre
     playerVolume,
     ...mergeExtendedPreferences(base, patch),
     ...mergeWaveF9Preferences(base, patch),
+    ...mergeElvModePreferences(base, patch),
   });
 }
 
@@ -412,6 +426,7 @@ function mergeRawCandidate(
         : base.playerVolume,
     ...mergeExtendedPreferences(base, patch),
     ...mergeWaveF9Preferences(base, patch),
+    ...mergeElvModePreferences(base, patch),
   };
 }
 

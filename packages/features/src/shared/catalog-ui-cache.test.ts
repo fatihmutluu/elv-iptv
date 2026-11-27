@@ -413,4 +413,31 @@ describe('createCatalogUiCache', () => {
     expect(cache.getGridFirstPage('movie', cat.row.id, { groupVersions: true })).toBeUndefined();
     expect(cache.getGridFirstPage('movie', cat.row.id, { groupVersions: false })).toBeUndefined();
   });
+
+  it('invalidates cached slices cleanly when elvKey changes (Wave E1 #511)', () => {
+    const cache = createCatalogUiCache({
+      revision: 1,
+      locale: 'en',
+      profileKey: 'default:0',
+      elvKey: 'elv:0',
+    });
+    const cat = makeCategory('src-1', 'movie', 0);
+    cache.setCatalog('movie', {
+      categories: [cat],
+      continueItems: [],
+      railItemsByCategoryId: new Map([[cat.row.id, [makeItem('src-1', 'movie', 1)]]]),
+      progressByKey: new Map(),
+    });
+    expect(cache.getCatalog('movie')).not.toBeNull();
+    expect(cache.getElvKey?.()).toBe('elv:0');
+
+    // Same elvKey keeps warm cache
+    cache.setRevision(1, 'en', 'default:0', 'elv:0');
+    expect(cache.getCatalog('movie')).not.toBeNull();
+
+    // Toggling ELV Mode or title format invalidates cache cleanly
+    cache.setRevision(1, 'en', 'default:0', 'elv:1:11:original:imdb');
+    expect(cache.getElvKey?.()).toBe('elv:1:11:original:imdb');
+    expect(cache.getCatalog('movie')).toBeNull();
+  });
 });

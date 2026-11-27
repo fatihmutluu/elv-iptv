@@ -634,4 +634,61 @@ describe('createCatalogBridge', () => {
     }
     await Promise.all(calls);
   });
+
+  it('forwards all Wave E1 ELV Mode RPC calls over MessagePort (#511)', async () => {
+    const h = createFakeIpcRenderer();
+    const bridge = createCatalogBridge(h.ipc);
+
+    const openP = bridge.open();
+    const port = new FakeRendererPort();
+    h.deliverPort(1, port);
+    await Promise.resolve();
+    port.deliver({ type: 'result', reqId: 1, value: ok(undefined) });
+    await openP;
+
+    const calls: Promise<unknown>[] = [
+      bridge.getElvEnrichmentForKeys?.(['x:s1:movie:1']) ?? Promise.resolve({}),
+      bridge.getElvTitleDetail?.('tt1375666', { lang: 'tr', forceRefresh: true }) ??
+        Promise.resolve(null),
+      bridge.listMergedVodVersions?.('x:s1:movie:1', { profileId: 'p_main' }) ??
+        Promise.resolve([]),
+      bridge.enrichElvPriorityKeys?.(['x:s1:movie:1'], { lang: 'en' }) ?? Promise.resolve(null),
+      bridge.runElvBackgroundMatching?.({ lang: 'en', batchSize: 100 }) ?? Promise.resolve(null),
+      bridge.recordPlaybackQuality?.({
+        itemKey: 'x:s1:movie:1',
+        actualWidth: 3840,
+        actualHeight: 2160,
+      }) ?? Promise.resolve(null),
+      bridge.recordPlaybackVariantFailure?.('x:s1:live:1') ?? Promise.resolve(null),
+      bridge.setElvManualMatch?.('x:s1:movie:1', 's1', 'movie', 'tt1375666') ?? Promise.resolve(),
+      bridge.wipeElvEnrichment?.() ?? Promise.resolve(),
+      bridge.listLiveVariants?.('x:s1:live:1', 's1|live|1', {
+        crossCategory: true,
+        crossSource: true,
+      }) ?? Promise.resolve([]),
+      bridge.findGuideChannelByCleanName?.('s1', 'TR: News One 4K', { crossSource: true }) ??
+        Promise.resolve(null),
+    ];
+    await Promise.resolve();
+
+    const sentMethods = port.sent.slice(1).map((m) => (m.type === 'call' ? m.call.method : ''));
+    expect(sentMethods).toEqual([
+      'getElvEnrichmentForKeys',
+      'getElvTitleDetail',
+      'listMergedVodVersions',
+      'enrichElvPriorityKeys',
+      'runElvBackgroundMatching',
+      'recordPlaybackQuality',
+      'recordPlaybackVariantFailure',
+      'setElvManualMatch',
+      'wipeElvEnrichment',
+      'listLiveVariants',
+      'findGuideChannelByCleanName',
+    ]);
+
+    for (let i = 2; i < 2 + calls.length; i += 1) {
+      port.deliver({ type: 'result', reqId: i, value: null });
+    }
+    await Promise.all(calls);
+  });
 });

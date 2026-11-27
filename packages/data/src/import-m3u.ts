@@ -64,7 +64,7 @@ import {
 } from './sources';
 import { keyTemplate, type UrlVars } from './templates';
 import { deleteUrlVars, partitionUrlVars, readUrlVars, writeUrlVars } from './urlvars-store';
-import { writeCategories, writePlacements } from './writers';
+import { type ProviderExternalIds, writeCategories, writePlacements } from './writers';
 import {
   type M3uLiveRow,
   type M3uRow,
@@ -222,6 +222,7 @@ async function processBatch(
       entry.backupUrls !== undefined && entry.backupUrls.length > 0
         ? JSON.stringify(entry.backupUrls.map((b) => templated(st, b)))
         : null;
+    const externalIds = entry as M3uEntry & ProviderExternalIds;
     const row: M3uRow = {
       key: stableM3uKey(st, c.sourceId, kind, entry, legacyKey),
       legacyKey,
@@ -230,6 +231,12 @@ async function processBatch(
       template,
       headersJson: entryHeaders(st, entry),
       backupUrlsJson,
+      ...(externalIds.providerImdbId !== undefined
+        ? { providerImdbId: externalIds.providerImdbId }
+        : {}),
+      ...(externalIds.providerTmdbId !== undefined
+        ? { providerTmdbId: externalIds.providerTmdbId }
+        : {}),
     };
     if (st.book.byteLength > MAX_URLVARS_BYTES) {
       throw new Stop(elvError('source-format', 'urlvars-too-large'));

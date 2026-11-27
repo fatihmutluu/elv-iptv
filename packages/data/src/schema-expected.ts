@@ -130,6 +130,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'director_text', alterDefinition: 'TEXT' },
     { name: 'cast_fold', alterDefinition: 'TEXT' },
     { name: 'director_fold', alterDefinition: 'TEXT' },
+    { name: 'provider_imdb_id', alterDefinition: 'TEXT' },
+    { name: 'provider_tmdb_id', alterDefinition: 'TEXT' },
   ],
   movies_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -155,6 +157,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'director_text', alterDefinition: 'TEXT' },
     { name: 'cast_fold', alterDefinition: 'TEXT' },
     { name: 'director_fold', alterDefinition: 'TEXT' },
+    { name: 'provider_imdb_id', alterDefinition: 'TEXT' },
+    { name: 'provider_tmdb_id', alterDefinition: 'TEXT' },
   ],
   series: [
     { name: 'id', alterDefinition: 'INTEGER' },
@@ -176,6 +180,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'director_text', alterDefinition: 'TEXT' },
     { name: 'cast_fold', alterDefinition: 'TEXT' },
     { name: 'director_fold', alterDefinition: 'TEXT' },
+    { name: 'provider_imdb_id', alterDefinition: 'TEXT' },
+    { name: 'provider_tmdb_id', alterDefinition: 'TEXT' },
   ],
   series_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -195,6 +201,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'director_text', alterDefinition: 'TEXT' },
     { name: 'cast_fold', alterDefinition: 'TEXT' },
     { name: 'director_fold', alterDefinition: 'TEXT' },
+    { name: 'provider_imdb_id', alterDefinition: 'TEXT' },
+    { name: 'provider_tmdb_id', alterDefinition: 'TEXT' },
   ],
   episodes: [
     { name: 'id', alterDefinition: 'INTEGER' },

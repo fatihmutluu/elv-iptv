@@ -1,11 +1,9 @@
 import { dirname } from 'node:path';
 import {
-  type AddSourceInput,
   type CatalogService,
   createCatalogService,
   createSyncSqlDriver,
-  type LinkSourceInput,
-  type LocalM3uSourceInput,
+  type ElvEnrichmentStore,
   type LocalPlaylistStore,
   openCatalog,
   type SyncDatabase,
@@ -36,23 +34,29 @@ import { executeChannelOpsRpcCall } from './catalog-worker-channel-ops.ts';
 import { executeEpgOpsRpcCall } from './catalog-worker-epg-ops.ts';
 import { executeFailoverOpsRpcCall } from './catalog-worker-failover-ops.ts';
 import {
+  sanitizeAddSourceInput,
+  sanitizeDisplayText,
+  sanitizeLinkSourceInput,
+  sanitizeLocalM3uInput,
+} from './catalog-worker-sanitize.ts';
+import {
   buildCatalogImportTelemetryEvent,
   sumImportCounts,
   wrapSqlDriverWithSlowOpTelemetry,
 } from './catalog-worker-telemetry.ts';
 import { executeUserStateRpcCall } from './catalog-worker-user-state.ts';
 import {
-  executeWaveF5bOpsRpcCall,
-  isWaveF5bRpcCall,
-  sanitizeStalkerSourceInput,
-} from './catalog-worker-wave-f5b-ops.ts';
+  executeWaveE1OpsRpcCall,
+  isWaveE1RpcCall,
+  openWorkerElvContext,
+} from './catalog-worker-wave-e1-ops.ts';
+import { executeWaveF5bOpsRpcCall, isWaveF5bRpcCall } from './catalog-worker-wave-f5b-ops.ts';
 import { executeWaveP9OpsRpcCall, isWaveP9RpcCall } from './catalog-worker-wave-p9-ops.ts';
 import { createDesktopHttpClient } from './legacy-tls-http.ts';
 import { createLocalPlaylistStore } from './local-playlist-store.ts';
 import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.ts';
 
 const SAFE_SOURCE_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
-const NON_HOST_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:(?!\/\/)(?!\d+(?:[/?#]|$))/;
 /** Desktop streams Xtream JSON incrementally in `O(batchSize)` memory, matching `xtream.ts` `DEFAULT_MAX_BODY`. */
 const DESKTOP_MAX_BODY_BYTES = 128 * 1024 * 1024;
 
@@ -98,6 +102,7 @@ export interface CatalogWorkerRuntimeDeps {
 
 interface OpenedCatalog {
   db: SqlDriver;
+  enrichmentStore?: ElvEnrichmentStore;
   service: CatalogService;
 }
 
@@ -105,124 +110,6 @@ interface ClientSession {
   readonly port: WorkerClientPortLike;
   readonly controllers: Map<number, AbortController>;
   closed: boolean;
-}
-
-function hasControlChar(text: string): boolean {
-  for (let i = 0; i < text.length; i += 1) {
-    const code = text.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return true;
-  }
-  return false;
-}
-
-function sanitizeDisplayText(text: string): string {
-  if (!hasControlChar(text)) return text;
-  let out = '';
-  let lastSpace = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const code = text.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) {
-      if (!lastSpace) {
-        out += ' ';
-        lastSpace = true;
-      }
-    } else {
-      out += text[i];
-      lastSpace = code === 0x20;
-    }
-  }
-  return out.trim();
-}
-
-function isHttpUrl(raw: string): boolean {
-  if (raw === '' || hasControlChar(raw)) return false;
-  try {
-    const parsed = new URL(raw);
-    return (
-      (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
-    );
-  } catch {
-    return false;
-  }
-}
-
-function isValidXtreamServer(raw: string): boolean {
-  const trimmed = raw.trim();
-  if (trimmed === '' || hasControlChar(trimmed)) return false;
-  if (!trimmed.startsWith('[') && NON_HOST_SCHEME_RE.test(trimmed)) return false;
-  const normalized = (trimmed.includes('://') ? trimmed : `http://${trimmed}`)
-    .replace(/[?#].*$/s, '')
-    .replace(/\/+$/, '')
-    .replace(/\/(?:player_api|get|xmltv)\.php$/i, '')
-    .replace(/\/+$/, '');
-  return isHttpUrl(normalized);
-}
-
-function sanitizeGuideUrl(guideUrl: string | undefined): Result<string | undefined> {
-  if (guideUrl === undefined) return ok(undefined);
-  const trimmed = guideUrl.trim();
-  if (trimmed === '') return ok(undefined);
-  if (!isHttpUrl(trimmed)) return err(elvError('source-format', 'invalid-source'));
-  return ok(trimmed);
-}
-
-function sanitizeAddSourceInput(input: AddSourceInput): Result<AddSourceInput> {
-  const guide = sanitizeGuideUrl(input.guideUrl);
-  if (!guide.ok) return guide;
-  if (input.kind === 'm3u') {
-    const playlistUrl = input.playlistUrl.trim();
-    if (!isHttpUrl(playlistUrl)) return err(elvError('source-format', 'invalid-source'));
-    const { guideUrl: _prevGuide, ...rest } = input;
-    return ok({
-      ...rest,
-      playlistUrl,
-      ...(guide.value === undefined ? {} : { guideUrl: guide.value }),
-    });
-  }
-  if (input.kind === 'stalker') return sanitizeStalkerSourceInput(input, guide.value);
-  const server = input.server.trim();
-  if (!isValidXtreamServer(server)) return err(elvError('source-format', 'invalid-source'));
-  let backupServers: string[] | undefined;
-  if (input.backupServers !== undefined) {
-    backupServers = [];
-    for (const rawBackup of input.backupServers) {
-      const trimmedBackup = rawBackup.trim();
-      if (!isValidXtreamServer(trimmedBackup)) {
-        return err(elvError('source-format', 'invalid-source'));
-      }
-      backupServers.push(trimmedBackup);
-    }
-  }
-  const { guideUrl: _prevGuide, backupServers: _prevBackups, ...rest } = input;
-  return ok({
-    ...rest,
-    server,
-    ...(backupServers === undefined ? {} : { backupServers }),
-    ...(guide.value === undefined ? {} : { guideUrl: guide.value }),
-  });
-}
-
-function sanitizeLinkSourceInput(input: LinkSourceInput): Result<LinkSourceInput> {
-  const url = input.url.trim();
-  if (!isHttpUrl(url)) return err(elvError('source-format', 'invalid-source'));
-  const guide = sanitizeGuideUrl(input.guideUrl);
-  if (!guide.ok) return guide;
-  const { guideUrl: _prevGuide, ...rest } = input;
-  return ok({
-    ...rest,
-    url,
-    ...(guide.value === undefined ? {} : { guideUrl: guide.value }),
-  });
-}
-
-function sanitizeLocalM3uInput(input: LocalM3uSourceInput): Result<LocalM3uSourceInput> {
-  const guide = sanitizeGuideUrl(input.guideUrl);
-  if (!guide.ok) return guide;
-  const { guideUrl: _prevGuide, ...rest } = input;
-  return ok({
-    ...rest,
-    ...(guide.value === undefined ? {} : { guideUrl: guide.value }),
-  });
 }
 
 /**
@@ -240,6 +127,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
   );
 
   let configuredDbPath: string | undefined;
+  let configuredElvServerUrl: string | undefined;
   let openState: Promise<Result<OpenedCatalog>> | undefined;
   let acceptingCalls = true;
   let secretsClosed = false;
@@ -298,6 +186,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
     return openSqliteWithRetry(
       async (): Promise<Result<OpenedCatalog>> => {
         let db: SqlDriver | undefined;
+        let enrichmentStore: ElvEnrichmentStore | undefined;
         try {
           db = wrapSqlDriverWithSlowOpTelemetry(
             createSyncSqlDriver(openDatabase(dbPath)),
@@ -319,6 +208,17 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
             await db.close?.().catch(() => undefined);
             return opened;
           }
+          const elvContext = await openWorkerElvContext({
+            dbPath,
+            openDatabase,
+            fetchImpl,
+            clock,
+            log,
+            ...(configuredElvServerUrl === undefined
+              ? {}
+              : { elvServerUrl: configuredElvServerUrl }),
+          });
+          enrichmentStore = elvContext.enrichmentStore;
           const localPlaylistStore =
             deps.localPlaylistStore ?? createLocalPlaylistStore(dirname(dbPath));
           const service = createCatalogService({
@@ -329,10 +229,17 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
             localPlaylistStore,
             maxBodyBytes: DESKTOP_MAX_BODY_BYTES,
             clock,
+            ...(enrichmentStore === undefined ? {} : { enrichmentStore }),
+            ...(elvContext.elvClient === undefined ? {} : { elvClient: elvContext.elvClient }),
             ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
           });
-          return ok({ db, service });
+          return ok({
+            db,
+            ...(enrichmentStore === undefined ? {} : { enrichmentStore }),
+            service,
+          });
         } catch (error) {
+          await enrichmentStore?.close().catch(() => undefined);
           await db?.close?.().catch(() => undefined);
           return err(elvError('storage', 'migration-failed', formatSqliteOpenError(error)));
         }
@@ -646,11 +553,13 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'reportStreamOutcome':
         return executeFailoverOpsRpcCall(service, call);
       default:
-        return isWaveP9RpcCall(call)
-          ? executeWaveP9OpsRpcCall(service, call)
-          : isWaveF5bRpcCall(call)
-            ? executeWaveF5bOpsRpcCall(service, call)
-            : executeEpgOpsRpcCall(service, call);
+        return isWaveE1RpcCall(call)
+          ? executeWaveE1OpsRpcCall(service, call)
+          : isWaveP9RpcCall(call)
+            ? executeWaveP9OpsRpcCall(service, call)
+            : isWaveF5bRpcCall(call)
+              ? executeWaveF5bOpsRpcCall(service, call)
+              : executeEpgOpsRpcCall(service, call);
     }
   };
 
@@ -739,7 +648,10 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
     openState = undefined;
     if (current !== undefined) {
       const res = await current;
-      if (res.ok) await res.value.service.close().catch(() => undefined);
+      if (res.ok) {
+        await res.value.service.close().catch(() => undefined);
+        await res.value.enrichmentStore?.close().catch(() => undefined);
+      }
     }
     secretsClosed = true;
     for (const pending of pendingSecrets.values()) {
@@ -763,6 +675,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
     switch (msg.type) {
       case 'init':
         configuredDbPath = msg.dbPath;
+        configuredElvServerUrl = msg.elvServerUrl;
         void ensureService().then(() => {
           parentPort.postMessage({ type: 'ready' });
         });

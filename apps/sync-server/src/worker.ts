@@ -1,4 +1,5 @@
 import { createSyncApp } from './app.ts';
+import type { WorkersAiBinding } from './elv-types.ts';
 import { createSlidingWindowRateLimiter } from './rate-limit.ts';
 import { createD1Storage } from './storage-d1.ts';
 import type { D1Database } from './storage-d1-types.ts';
@@ -6,10 +7,12 @@ import type { D1Database } from './storage-d1-types.ts';
 /** Cloudflare Workers environment bindings defined in `wrangler.toml` and secrets. */
 export interface WorkerEnv {
   readonly DB: D1Database;
+  readonly AI?: WorkersAiBinding;
   readonly JWT_SECRET: string;
   readonly ADMIN_TOKEN?: string;
   readonly TELEMETRY_DISABLED?: string;
   readonly PUBLIC_ORIGIN?: string;
+  readonly TMDB_API_KEY?: string;
 }
 
 const isolateRateLimiter = createSlidingWindowRateLimiter();
@@ -35,6 +38,8 @@ const worker = {
       publicOrigin: env.PUBLIC_ORIGIN ?? '*',
       trustProxy: 'cloudflare',
       rateLimiter: isolateRateLimiter,
+      ...(env.AI !== undefined ? { ai: env.AI } : {}),
+      ...(env.TMDB_API_KEY !== undefined ? { tmdbApiKey: env.TMDB_API_KEY } : {}),
     });
     return app.fetch(request);
   },

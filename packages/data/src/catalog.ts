@@ -10,7 +10,10 @@ import {
   type SqlDriver,
 } from '@elv/domain';
 import { type AlphabetBucket, type AlphabetIndexInput, queryAlphabetIndex } from './alphabet-index';
-import { createCatalogChannelOpsMethods } from './catalog-channel-ops';
+import {
+  type CatalogChannelOpsMethods,
+  createCatalogChannelOpsMethods,
+} from './catalog-channel-ops';
 import {
   type CatalogCollectionsOpsMethods,
   createCatalogCollectionsOpsMethods,
@@ -19,6 +22,12 @@ import {
   type CatalogDownloadsOpsMethods,
   createCatalogDownloadsOpsMethods,
 } from './catalog-downloads-ops';
+import {
+  type CatalogElvOpsMethods,
+  createCatalogElvOpsMethods,
+  type ElvEnrichmentStore,
+  type ElvMetadataClient,
+} from './catalog-elv-ops';
 import { type CatalogEpgOpsMethods, createCatalogEpgOpsMethods } from './catalog-epg-ops';
 import {
   type CatalogFailoverOpsMethods,
@@ -35,14 +44,7 @@ import {
   querySourcesList,
   type SourceRow,
 } from './catalog-source-meta';
-import type { ChannelOverrideRecord, SetChannelOverrideInput } from './channel-overrides-repo';
-import {
-  type CreateCustomGroupInput,
-  type CustomGroupItemInput,
-  type CustomGroupRecord,
-  parseCustomGroupCategoryId,
-  type UpdateCustomGroupPatch,
-} from './custom-groups-repo';
+import { parseCustomGroupCategoryId } from './custom-groups-repo';
 import { type DiscoveredCategory, discoverSourceCategories } from './discover-categories';
 import {
   type CrossChannelProgrammeRow,
@@ -91,8 +93,8 @@ import {
 } from './queries';
 import {
   type LiveVariantOption,
+  type QueryLiveVariantsOptions,
   queryItemVersions,
-  queryLiveVariants,
   type VodVersionOption,
 } from './queries-variants';
 import { type CatalogRatingsOpsMethods, createCatalogRatingsOpsMethods } from './ratings-repo';
@@ -202,6 +204,10 @@ export interface CatalogDeps {
   localPlaylistStore?: LocalPlaylistStore;
   /** Optional hook resolving a completed managed local download URI for offline VOD playback. */
   resolveLocalDownload?: (itemKey: string, profileId?: string) => Promise<string | null>;
+  /** Optional isolated local `elv-enrichment.db` store for ELV Mode (`#511`). */
+  enrichmentStore?: ElvEnrichmentStore;
+  /** Optional metadata worker client (`/v1/elv/*`) for ELV Mode (`#511`). */
+  elvClient?: ElvMetadataClient;
 }
 
 /** Input of {@link CatalogService.addSource}. */
@@ -212,10 +218,12 @@ export type AddSourceInput =
 
 /** Local catalog of the user's sources: add, import, browse in pages, resolve a stream, close. */
 export interface CatalogService
-  extends Partial<CatalogEpgOpsMethods>,
+  extends Partial<CatalogChannelOpsMethods>,
+    Partial<CatalogEpgOpsMethods>,
     Partial<CatalogFailoverOpsMethods>,
     Partial<CatalogCollectionsOpsMethods>,
     Partial<CatalogDownloadsOpsMethods>,
+    Partial<CatalogElvOpsMethods>,
     Partial<CatalogNewEpisodesOpsMethods>,
     Partial<CatalogRatingsOpsMethods>,
     Partial<CatalogSourceMutationMethods>,
@@ -251,11 +259,11 @@ export interface CatalogService
     limit: number,
     opts?: ListItemsOptions,
   ): Promise<ItemRow[]>;
-  /** Lists selectable quality variants of a live channel (`#218`). */
+  /** Lists selectable quality variants of a live channel (`#218`, `#511`). */
   liveVariants?(
     itemKey: string,
     categoryId?: string,
-    opts?: ParentalQueryOptions,
+    opts?: QueryLiveVariantsOptions,
   ): Promise<readonly LiveVariantOption[]>;
   /** Lists selectable versions of a multi-version VOD movie (`#404`). */
   itemVersions?(itemKey: string, opts?: ParentalQueryOptions): Promise<readonly VodVersionOption[]>;
@@ -362,34 +370,6 @@ export interface CatalogService
   setParentalPin?(pin: string, profileId?: string, currentPin?: string): Promise<Result<void>>;
   verifyParentalPin?(pin: string, profileId?: string): Promise<PinVerifyResult>;
   clearParentalPin?(currentPin: string, profileId?: string): Promise<Result<void>>;
-  listChannelOverrides?(profileId?: string): Promise<ChannelOverrideRecord[]>;
-  setChannelOverride?(input: SetChannelOverrideInput): Promise<Result<ChannelOverrideRecord>>;
-  clearChannelOverride?(itemKey: string, profileId?: string): Promise<Result<void>>;
-  reorderChannels?(
-    itemKeys: readonly string[],
-    sourceId: string,
-    profileId?: string,
-  ): Promise<Result<void>>;
-  listCustomGroups?(
-    profileId?: string,
-    opts?: { readonly includeHidden?: boolean; readonly parentalUnlocked?: boolean },
-  ): Promise<CustomGroupRecord[]>;
-  createCustomGroup?(input: CreateCustomGroupInput): Promise<Result<CustomGroupRecord>>;
-  updateCustomGroup?(
-    groupId: string,
-    patch: UpdateCustomGroupPatch,
-  ): Promise<Result<CustomGroupRecord>>;
-  deleteCustomGroup?(groupId: string): Promise<Result<void>>;
-  setCustomGroupItems?(
-    groupId: string,
-    items: readonly CustomGroupItemInput[],
-  ): Promise<Result<void>>;
-  addChannelToCustomGroup?(
-    groupId: string,
-    itemKey: string,
-    sourceId: string,
-  ): Promise<Result<void>>;
-  removeChannelFromCustomGroup?(groupId: string, itemKey: string): Promise<Result<void>>;
   flushPendingWrites?(): Promise<void>;
   close(): Promise<void>;
 }
@@ -458,6 +438,13 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
   const failoverOpsMethods = createCatalogFailoverOpsMethods({ db, clock, playtime });
   const collectionsOpsMethods = createCatalogCollectionsOpsMethods({ db, clock, playtime });
   const downloadsOpsMethods = createCatalogDownloadsOpsMethods({ db, clock });
+  const elvOpsMethods = createCatalogElvOpsMethods({
+    db,
+    clock,
+    scheduler: deps.scheduler,
+    enrichmentStore: deps.enrichmentStore,
+    elvClient: deps.elvClient,
+  });
   const newEpisodesOpsMethods = createCatalogNewEpisodesOpsMethods({
     db,
     clock,
@@ -527,6 +514,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
             : { localPlaylistStore: deps.localPlaylistStore }),
         });
         playtime.evict(id);
+        await deps.enrichmentStore?.clearSourceMatches(id);
         await syncManifest();
         await syncUserData();
         return removed;
@@ -586,7 +574,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       return playtime.resolveLogos(await queryItems(db, ref, offset, limit, opts), ref.sourceId);
     },
 
-    liveVariants: (itemKey, categoryId, opts) => queryLiveVariants(db, itemKey, categoryId, opts),
+    liveVariants: (itemKey, categoryId, opts) =>
+      elvOpsMethods.listLiveVariants(itemKey, categoryId, opts),
     itemVersions: (itemKey, opts) => queryItemVersions(db, itemKey, opts),
 
     allSourcesItems: async (kind, offset, limit, sourceIds, opts) =>
@@ -764,6 +753,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...failoverOpsMethods,
     ...collectionsOpsMethods,
     ...downloadsOpsMethods,
+    ...elvOpsMethods,
     ...newEpisodesOpsMethods,
     ...ratingsOpsMethods,
     ...sourceMutationMethods,
