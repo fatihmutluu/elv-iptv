@@ -9,7 +9,7 @@ import {
 } from './with-ios-external-display.ts';
 
 describe('withIosExternalDisplay (#258)', () => {
-  it('injects UIApplicationSceneManifest with both primary and external display scene roles when isTv=false', () => {
+  it('injects UIApplicationSceneManifest with Expo SceneDelegate fallback and external display role when manifest is absent', () => {
     const plist: InfoPlist = {
       ITSAppUsesNonExemptEncryption: false,
     };
@@ -35,11 +35,11 @@ describe('withIosExternalDisplay (#258)', () => {
         ],
       },
     });
-    expect(IOS_PRIMARY_SCENE_DELEGATE_CLASS).toBe('AetherPrimaryWindowSceneDelegate');
+    expect(IOS_PRIMARY_SCENE_DELEGATE_CLASS).toBe('$(PRODUCT_MODULE_NAME).SceneDelegate');
     expect(IOS_EXTERNAL_DISPLAY_SCENE_DELEGATE_CLASS).toBe('AetherExternalDisplaySceneDelegate');
   });
 
-  it('preserves unrelated scene manifest entries without duplicating ELV scene configurations', () => {
+  it('preserves Expo SDK 58 SceneDelegate and unrelated scene manifest entries without overwriting primary scene', () => {
     const plist: InfoPlist = {
       UIApplicationSceneManifest: {
         UIApplicationSupportsMultipleScenes: true,
@@ -53,7 +53,7 @@ describe('withIosExternalDisplay (#258)', () => {
           UIWindowSceneSessionRoleApplication: [
             {
               UISceneConfigurationName: 'Default Configuration',
-              UISceneDelegateClassName: 'LegacySceneDelegate',
+              UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).SceneDelegate',
             },
           ],
         },
@@ -74,13 +74,61 @@ describe('withIosExternalDisplay (#258)', () => {
     expect(configs.UIWindowSceneSessionRoleApplication).toEqual([
       {
         UISceneConfigurationName: 'Default Configuration',
-        UISceneDelegateClassName: 'AetherPrimaryWindowSceneDelegate',
+        UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).SceneDelegate',
       },
     ]);
     expect(configs.UIWindowSceneSessionRoleExternalDisplayNonInteractive).toEqual([
       {
         UISceneConfigurationName: 'External Display Configuration',
         UISceneDelegateClassName: 'AetherExternalDisplaySceneDelegate',
+      },
+    ]);
+  });
+
+  it('preserves custom primary scene delegates while repairing legacy AetherPrimaryWindowSceneDelegate entries', () => {
+    const customPlist: InfoPlist = {
+      UIApplicationSceneManifest: {
+        UIApplicationSupportsMultipleScenes: false,
+        UISceneConfigurations: {
+          UIWindowSceneSessionRoleApplication: [
+            {
+              UISceneConfigurationName: 'Custom Main',
+              UISceneDelegateClassName: 'CustomAppSceneDelegate',
+            },
+          ],
+        },
+      },
+    };
+    applyIosExternalDisplayInfoPlist(customPlist, false);
+    const customConfigs = (customPlist.UIApplicationSceneManifest as Record<string, unknown>)
+      .UISceneConfigurations as Record<string, unknown[]>;
+    expect(customConfigs.UIWindowSceneSessionRoleApplication).toEqual([
+      {
+        UISceneConfigurationName: 'Custom Main',
+        UISceneDelegateClassName: 'CustomAppSceneDelegate',
+      },
+    ]);
+
+    const legacyPlist: InfoPlist = {
+      UIApplicationSceneManifest: {
+        UIApplicationSupportsMultipleScenes: false,
+        UISceneConfigurations: {
+          UIWindowSceneSessionRoleApplication: [
+            {
+              UISceneConfigurationName: 'Default Configuration',
+              UISceneDelegateClassName: 'AetherPrimaryWindowSceneDelegate',
+            },
+          ],
+        },
+      },
+    };
+    applyIosExternalDisplayInfoPlist(legacyPlist, false);
+    const legacyConfigs = (legacyPlist.UIApplicationSceneManifest as Record<string, unknown>)
+      .UISceneConfigurations as Record<string, unknown[]>;
+    expect(legacyConfigs.UIWindowSceneSessionRoleApplication).toEqual([
+      {
+        UISceneConfigurationName: 'Default Configuration',
+        UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).SceneDelegate',
       },
     ]);
   });

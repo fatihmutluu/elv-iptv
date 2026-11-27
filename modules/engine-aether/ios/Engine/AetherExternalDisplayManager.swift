@@ -18,8 +18,44 @@ final class AetherExternalDisplayManager {
   private weak var hostedPlayerView: UIView?
   private weak var hostedSubtitleView: UIView?
   private weak var hostedShutterView: UIView?
+  private var lifecycleObservers: [NSObjectProtocol] = []
 
-  private init() {}
+  private init() {
+    installLifecycleObservers()
+  }
+
+  private func installLifecycleObservers() {
+    _ = policy.setAppInBackground(UIApplication.shared.applicationState == .background)
+    let center = NotificationCenter.default
+    let backgroundToken = center.addObserver(
+      forName: UIApplication.didEnterBackgroundNotification,
+      object: nil,
+      queue: nil
+    ) { [weak self] _ in
+      AetherBackend.onMainActor {
+        self?.handleAppBackgroundChanged(true)
+      }
+    }
+    let foregroundToken = center.addObserver(
+      forName: UIApplication.willEnterForegroundNotification,
+      object: nil,
+      queue: nil
+    ) { [weak self] _ in
+      AetherBackend.onMainActor {
+        self?.handleAppBackgroundChanged(false)
+      }
+    }
+    let activeToken = center.addObserver(
+      forName: UIApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: nil
+    ) { [weak self] _ in
+      AetherBackend.onMainActor {
+        self?.handleAppBackgroundChanged(false)
+      }
+    }
+    lifecycleObservers = [backgroundToken, foregroundToken, activeToken]
+  }
 
   /// Registers a connected external non-interactive `UIWindowScene` container view.
   func registerExternalScene(id: String, containerView: UIView) {
