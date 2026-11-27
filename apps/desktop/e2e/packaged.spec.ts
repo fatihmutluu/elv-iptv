@@ -206,7 +206,7 @@ test('packaged desktop binary boots from app.asar, opens engine and catalog util
 
     await test.step('boots from app.asar with production fuses enabled', async () => {
       await expect(page).toHaveTitle('ELV IPTV');
-      await expect(page.getByText('ELV IPTV')).toBeVisible();
+      await expect(page.getByText('ELV IPTV', { exact: true })).toBeVisible();
       expect(page.url().toLowerCase()).toBe('app://elv/');
 
       const hasNodeRequire = await page.evaluate(
