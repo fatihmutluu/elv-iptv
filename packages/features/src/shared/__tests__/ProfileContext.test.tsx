@@ -41,6 +41,8 @@ function ProfileInspector() {
       <Text testID="profile-names">{profile.profiles.map((p) => p.name).join(',')}</Text>
       <Text testID="parental-enabled">{String(profile.parentalSettings.enabled)}</Text>
       <Text testID="has-parental-pin">{String(profile.hasParentalPin)}</Text>
+      <Text testID="picker-open">{String(profile.profilePickerOpen)}</Text>
+      <Pressable testID="close-picker" onPress={profile.closeProfilePicker} />
       {profile.profiles.map((p) => (
         <Pressable
           key={p.id}
@@ -138,6 +140,70 @@ describe('ProfileProvider live externalRefreshToken sync (P1-2)', () => {
     } finally {
       await view?.unmount();
       await env.cleanup();
+    }
+  });
+
+  it('opens Who is Watching once on startup for 2+ profiles after suppressAutoProfilePicker clears, and never for 1 profile (#513)', async () => {
+    const singleEnv = await openTestCatalog();
+    let singleView: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      singleView = await render(
+        <ProfileProvider catalog={singleEnv.catalog} suppressAutoProfilePicker={false}>
+          <ProfileInspector />
+        </ProfileProvider>,
+      );
+      await waitFor(() => {
+        expect(screen.getByTestId('profiles-ready')).toHaveTextContent('true');
+      });
+      expect(screen.getByTestId('picker-open')).toHaveTextContent('false');
+    } finally {
+      await singleView?.unmount();
+      await singleEnv.cleanup();
+    }
+
+    const multiEnv = await openTestCatalog();
+    const added = await multiEnv.catalog.createProfile?.({
+      name: 'Guest',
+      avatarToken: 'sapphire',
+      isKids: false,
+    });
+    if (!added?.ok) throw new Error('createProfile failed');
+
+    let multiView: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      multiView = await render(
+        <ProfileProvider catalog={multiEnv.catalog} suppressAutoProfilePicker>
+          <ProfileInspector />
+        </ProfileProvider>,
+      );
+      await waitFor(() => {
+        expect(screen.getByTestId('profiles-ready')).toHaveTextContent('true');
+      });
+      // Suppressed while onboarding or startup refresh is active
+      expect(screen.getByTestId('picker-open')).toHaveTextContent('false');
+
+      // Releasing suppression opens profile picker automatically once
+      await multiView.rerender(
+        <ProfileProvider catalog={multiEnv.catalog} suppressAutoProfilePicker={false}>
+          <ProfileInspector />
+        </ProfileProvider>,
+      );
+      await waitFor(() => {
+        expect(screen.getByTestId('picker-open')).toHaveTextContent('true');
+      });
+
+      // Closing it keeps it closed even on subsequent rerenders
+      await fireEvent.press(screen.getByTestId('close-picker'));
+      expect(screen.getByTestId('picker-open')).toHaveTextContent('false');
+      await multiView.rerender(
+        <ProfileProvider catalog={multiEnv.catalog} suppressAutoProfilePicker={false}>
+          <ProfileInspector />
+        </ProfileProvider>,
+      );
+      expect(screen.getByTestId('picker-open')).toHaveTextContent('false');
+    } finally {
+      await multiView?.unmount();
+      await multiEnv.cleanup();
     }
   });
 });

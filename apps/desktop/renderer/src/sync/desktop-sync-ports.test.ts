@@ -328,4 +328,54 @@ describe('createDesktopSyncPorts (#26, #458)', () => {
     unsub();
     ports.dispose();
   });
+
+  it('exposes empty supportedOAuthProviders and forwards checkEmail with graceful unknown fallback (#513)', async () => {
+    const baseBridge: SyncBridge = {
+      getState: vi.fn(async () => ({
+        status: 'signed_out' as const,
+        email: null,
+        lastSyncedAtIso: null,
+        pendingRecoveryCode: null,
+        errorCode: null,
+      })),
+      onStateChanged: vi.fn(() => () => undefined),
+      signIn: vi.fn(async () => ({ ok: true })),
+      register: vi.fn(async () => ({ ok: true })),
+      acknowledgeRecoveryCode: vi.fn(async () => undefined),
+      syncNow: vi.fn(async () => ({ ok: true })),
+      signOut: vi.fn(async () => undefined),
+      deleteAccount: vi.fn(async () => ({ ok: true })),
+      createQrPairing: vi.fn(async () => ({
+        pairingId: 'p1',
+        code: '123456',
+        qrUri: 'elviptv://pair?c=123456&k=AAAAAAAAAAAAAAAAAAAAAA',
+        expiresAtMs: Date.now() + 300_000,
+        status: 'pending' as const,
+      })),
+      pollQrPairing: vi.fn(async () => 'pending' as const),
+      claimQrPairing: vi.fn(async () => ({ ok: true })),
+      setServerUrl: vi.fn(async () => undefined),
+    };
+
+    // Without preload checkEmail method -> falls back gracefully to 'unknown'
+    const portsWithoutCheck = createDesktopSyncPorts({ sync: baseBridge });
+    expect(portsWithoutCheck.syncAccount?.supportedOAuthProviders).toEqual([]);
+    expect(await portsWithoutCheck.syncAccount?.checkEmail('alice@example.com')).toBe('unknown');
+    portsWithoutCheck.dispose();
+
+    // With preload checkEmail -> forwards exists / not_found and swallows IPC errors
+    const checkEmailMock = vi
+      .fn<(email: string) => Promise<'exists' | 'not_found' | 'unknown'>>()
+      .mockResolvedValueOnce('exists')
+      .mockResolvedValueOnce('not_found')
+      .mockRejectedValueOnce(new Error('ipc timeout'));
+
+    const portsWithCheck = createDesktopSyncPorts({
+      sync: Object.assign({}, baseBridge, { checkEmail: checkEmailMock }),
+    });
+    expect(await portsWithCheck.syncAccount?.checkEmail('alice@example.com')).toBe('exists');
+    expect(await portsWithCheck.syncAccount?.checkEmail('new@example.com')).toBe('not_found');
+    expect(await portsWithCheck.syncAccount?.checkEmail('offline@example.com')).toBe('unknown');
+    portsWithCheck.dispose();
+  });
 });

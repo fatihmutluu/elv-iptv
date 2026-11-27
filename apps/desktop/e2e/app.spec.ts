@@ -14,6 +14,9 @@ test('opens a window titled ELV IPTV that mounts SourcesScreen on desktop', asyn
     await expect(window.getByTestId('welcome-sync-overlay')).toBeVisible();
     await window.getByTestId('welcome-continue-without-account').click();
     await expect(window.getByTestId('welcome-sync-overlay')).toHaveCount(0);
+    await expect(window.getByTestId('onboarding-source-step')).toBeVisible();
+    await window.getByTestId('onboarding-browse-without-source').click();
+    await expect(window.getByTestId('onboarding-flow-overlay')).toHaveCount(0);
     await expect(window.getByText('ELV IPTV', { exact: true })).toBeVisible();
     await expect(window.getByTestId('sources-screen')).toBeVisible();
     await expect(window.getByTestId('sources-layout-desktop')).toBeVisible();

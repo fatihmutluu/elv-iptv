@@ -157,6 +157,8 @@ export interface ProfileProviderProps {
   readonly externalRefreshToken?: number;
   readonly profilePreferences?: ProfilePreferencesManager;
   readonly keymapStore?: KeymapStore;
+  /** Suppresses automatic startup opening of the `"Who's Watching?"` picker while startup overlays are active (`#513`). */
+  readonly suppressAutoProfilePicker?: boolean;
   readonly onProfileDeleted?: (profileId: string) => void | Promise<void>;
   readonly onProfileOrLockChange?: (next: {
     readonly activeProfileId: string;
@@ -205,6 +207,7 @@ export function ProfileProvider({
   externalRefreshToken,
   profilePreferences,
   keymapStore,
+  suppressAutoProfilePicker = false,
   onProfileDeleted,
   onProfileOrLockChange,
   children,
@@ -246,6 +249,7 @@ export function ProfileProvider({
   const guardPinProfileIdRef = useRef<string | null>(guardPinProfileId);
   guardPinProfileIdRef.current = guardPinProfileId;
   const switchSeqRef = useRef(0);
+  const autoPickerEvaluatedRef = useRef(false);
   const relockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onProfileOrLockChange);
   onChangeRef.current = onProfileOrLockChange;
@@ -433,6 +437,12 @@ export function ProfileProvider({
       cancelled = true;
     };
   }, [catalog, fetchParentalSnapshot, hasAsyncHydration, profilePreferences]);
+
+  useEffect(() => {
+    if (!profilesReady || suppressAutoProfilePicker || autoPickerEvaluatedRef.current) return;
+    autoPickerEvaluatedRef.current = true;
+    if (profiles.length >= 2) setProfilePickerOpen(true);
+  }, [profiles.length, profilesReady, suppressAutoProfilePicker]);
 
   const lockParentalNow = useCallback(() => {
     clearRelockTimer();

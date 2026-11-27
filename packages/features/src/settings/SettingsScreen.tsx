@@ -1,4 +1,8 @@
-import type { ArtworkCacheFormFactor, ArtworkCacheLimitMbPref } from '@elv/domain';
+import {
+  type ArtworkCacheFormFactor,
+  type ArtworkCacheLimitMbPref,
+  DEFAULT_PREFERENCES,
+} from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
 import {
   defaultLoadedArtworkUris,
@@ -28,6 +32,7 @@ import {
 } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouteActive } from '../shared';
+import { ElvModeInteractivePreview } from '../shared/ElvModeInteractivePreview';
 import { AboutLicensesPanel } from './AboutLicensesPanel';
 import {
   AppearancePanel,
@@ -433,7 +438,8 @@ export function SettingsScreen({
     [preferences],
   );
 
-  const elvModeEnabled = preferences?.preferences.elvModeEnabled ?? false;
+  const activePrefs = preferences?.preferences ?? DEFAULT_PREFERENCES;
+  const elvModeEnabled = activePrefs.elvModeEnabled;
 
   useEffect(() => {
     if (
@@ -508,7 +514,19 @@ export function SettingsScreen({
             : null
         }
         onOpenTvDropdownChange={(next) => setOpenTvDropdownId(next)}
-        {...(elvPreviewSlot !== undefined ? { previewSlot: elvPreviewSlot } : {})}
+        previewSlot={
+          elvPreviewSlot !== undefined ? (
+            elvPreviewSlot
+          ) : (
+            <ElvModeInteractivePreview
+              elvModeEnabled={activePrefs.elvModeEnabled}
+              mergeVersions={activePrefs.elvMergeVersions}
+              enrichMetadata={activePrefs.elvEnrichMetadata}
+              imdbCategories={activePrefs.elvCategorySource === 'imdb'}
+              compact
+            />
+          )
+        }
       />
     ) : activeSection === 'playback' ? (
       <PlaybackSettingsPanel

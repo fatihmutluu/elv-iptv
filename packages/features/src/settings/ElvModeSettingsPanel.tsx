@@ -17,6 +17,7 @@ import {
   useState,
 } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ElvModeInteractivePreview } from '../shared/ElvModeInteractivePreview';
 import type { SettingsPreferencesController } from './appearance-controls';
 import { ELV_CATEGORY_SOURCE_OPTIONS, ELV_TITLE_FORMAT_OPTIONS } from './elv-mode-controls';
 import { type SettingsDropdownOption, SettingsDropdownRow } from './SettingsDropdownRow';
@@ -140,7 +141,17 @@ export function ElvModeSettingsPanel({
         </Text>
       </View>
 
-      {previewSlot ?? null}
+      {previewSlot !== undefined ? (
+        previewSlot
+      ) : (
+        <ElvModeInteractivePreview
+          elvModeEnabled={activePrefs.elvModeEnabled}
+          mergeVersions={activePrefs.elvMergeVersions}
+          enrichMetadata={activePrefs.elvEnrichMetadata}
+          imdbCategories={activePrefs.elvCategorySource === 'imdb'}
+          compact
+        />
+      )}
 
       <Surface tone="surface" bordered rounded="modal" style={styles.sectionCard}>
         <SettingsToggleRow

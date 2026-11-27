@@ -555,6 +555,8 @@ describe('App', () => {
     const view = await render(<App />);
     const continueBtn = screen.queryByTestId('welcome-continue-without-account');
     if (continueBtn) await fireEvent.press(continueBtn);
+    const privacyContinueBtn = screen.queryByTestId('privacy-consent-continue-btn');
+    if (privacyContinueBtn) await fireEvent.press(privacyContinueBtn);
     await screen.findByTestId('home-live-item-0');
 
     await fireEvent.press(screen.getByTestId('nav-tab-live'));

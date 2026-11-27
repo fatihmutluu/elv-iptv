@@ -33,6 +33,10 @@ export interface UseWaveF9ControllerOptions {
   readonly isViewingActive?: boolean | undefined;
   readonly hasPlayerTarget?: boolean | undefined;
   readonly onOpenAccountSettings?: (() => void) | undefined;
+  /** Suppresses legacy `WelcomeSyncOverlay` when Wave E3 `OnboardingFlowOverlay` owns first-run auth (`#513`). */
+  readonly suppressWelcomeOverlay?: boolean | undefined;
+  /** Suppresses standalone `PrivacyConsentOverlay` while startup gate or Wave E3 onboarding is active (`#513`). */
+  readonly suppressFirstRunOverlays?: boolean | undefined;
 }
 
 /** Controller returned by {@link useWaveF9Controller} for `AppShell` Wave F9 / P9 wiring. */
@@ -74,6 +78,8 @@ export function useWaveF9Controller({
   isViewingActive = false,
   hasPlayerTarget = false,
   onOpenAccountSettings,
+  suppressWelcomeOverlay = false,
+  suppressFirstRunOverlays = false,
 }: UseWaveF9ControllerOptions): WaveF9Controller {
   const syncAccount = directSyncAccount ?? ports?.syncAccount;
   const telemetry = directTelemetry ?? ports?.telemetry;
@@ -153,6 +159,9 @@ export function useWaveF9Controller({
   }, [syncAccount]);
 
   const isWelcomeVisible =
+    !suppressWelcomeOverlay &&
+    !suppressFirstRunOverlays &&
+    !preferences.preferences.onboardingCompleted &&
     syncAccount !== undefined &&
     !welcomeDismissed &&
     (accountState.status === 'signed_out' ||
@@ -160,7 +169,11 @@ export function useWaveF9Controller({
       accountState.pendingRecoveryCode !== null);
 
   const isPrivacyConsentVisible =
-    preferences.ready && !privacyConsentAnswered && telemetry !== undefined && !isWelcomeVisible;
+    !suppressFirstRunOverlays &&
+    preferences.ready &&
+    !privacyConsentAnswered &&
+    telemetry !== undefined &&
+    !isWelcomeVisible;
 
   const lastRoutedPairUriRef = useRef<string | null>(null);
   const onOpenAccountRef = useRef(onOpenAccountSettings);
@@ -170,11 +183,11 @@ export function useWaveF9Controller({
       lastRoutedPairUriRef.current = null;
       return;
     }
-    if (isWelcomeVisible) return;
+    if (isWelcomeVisible || suppressFirstRunOverlays) return;
     if (lastRoutedPairUriRef.current === pendingPairUri) return;
     lastRoutedPairUriRef.current = pendingPairUri;
     onOpenAccountRef.current?.();
-  }, [isWelcomeVisible, pendingPairUri]);
+  }, [isWelcomeVisible, pendingPairUri, suppressFirstRunOverlays]);
 
   const renderAccount = useCallback(
     (slot: SettingsPaneSlotProps): ReactElement => (

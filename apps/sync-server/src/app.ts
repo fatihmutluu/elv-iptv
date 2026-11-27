@@ -36,6 +36,7 @@ import {
   readBoundedJson,
   readBoundedText,
   validateAccountDeletionInput,
+  validateCheckEmailInput,
   validateDeleteAccountInput,
   validateFeedbackInput,
   validateLoginInput,
@@ -90,6 +91,7 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
   const limiter = config.rateLimiter ?? createSlidingWindowRateLimiter(nowMs);
   const limits: RateLimitConfig = {
     auth: config.rateLimits?.auth ?? DEFAULT_RATE_LIMITS.auth,
+    authCheckEmail: config.rateLimits?.authCheckEmail ?? DEFAULT_RATE_LIMITS.authCheckEmail,
     pair: config.rateLimits?.pair ?? DEFAULT_RATE_LIMITS.pair,
     pairLookup: config.rateLimits?.pairLookup ?? DEFAULT_RATE_LIMITS.pairLookup,
     vault: config.rateLimits?.vault ?? DEFAULT_RATE_LIMITS.vault,
@@ -204,6 +206,23 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
 
   function publicUser(user: UserRecord) {
     return { id: user.id, email: user.email, createdAt: user.createdAt };
+  }
+
+  async function handleCheckEmail(request: Request, clientIp?: string): Promise<Response> {
+    const limited = checkRateLimit(request, 'authCheckEmail', clientIp);
+    if (limited) return limited;
+
+    const parsed = await readBoundedJson(request, BODY_LIMITS.auth);
+    if (!parsed.ok) return jsonResponse(400, { error: parsed.error });
+    const valid = validateCheckEmailInput(parsed.value);
+    if (!valid.ok) return jsonResponse(400, { error: valid.error });
+
+    try {
+      const user = await storage.findUserByEmail(valid.value);
+      return jsonResponse(200, { exists: user !== null });
+    } catch {
+      return jsonResponse(503, { error: 'service_unavailable' });
+    }
   }
 
   async function handleRegister(request: Request, clientIp?: string): Promise<Response> {
@@ -637,6 +656,9 @@ export function createSyncApp(config: SyncAppConfig): SyncApp {
         }
         if (method === 'POST' && path === '/account-deletion') {
           return await handleAccountDeletionPost(request, clientIp);
+        }
+        if (method === 'POST' && path === '/v1/auth/check-email') {
+          return await handleCheckEmail(request, clientIp);
         }
         if (method === 'POST' && path === '/v1/auth/register') {
           return await handleRegister(request, clientIp);

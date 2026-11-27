@@ -47,6 +47,9 @@ function makeStubService() {
     subscribeInitialPreferences: vi.fn(() => () => undefined),
     setServerUrl: vi.fn(),
     setSyncablePreferences: vi.fn(),
+    checkEmail: vi.fn(async (email: string) =>
+      email === 'viewer@example.test' ? ('exists' as const) : ('not_found' as const),
+    ),
     signIn: vi.fn(async () => ({
       ok: true,
       ...({ refreshToken: 'RAW_REFRESH' } as Record<string, unknown>),
@@ -288,9 +291,24 @@ describe('registerSyncIpc (#26, #458)', () => {
     expect(bp.pairingId).toBe('bp-1');
     expect(bp.pollToken).toBeUndefined();
 
-    // Dispose tears down all 29 handlers and service
+    // Wave E3 checkEmail channel validates string <= 320 chars and returns 'unknown' on invalid payloads
+    expect(await ipc.invoke(SYNC_CHANNELS.checkEmail, trustedEvent, 'viewer@example.test')).toBe(
+      'exists',
+    );
+    expect(await ipc.invoke(SYNC_CHANNELS.checkEmail, trustedEvent, 'new@example.test')).toBe(
+      'not_found',
+    );
+    expect(await ipc.invoke(SYNC_CHANNELS.checkEmail, trustedEvent, 12345)).toBe('unknown');
+    expect(await ipc.invoke(SYNC_CHANNELS.checkEmail, trustedEvent, null)).toBe('unknown');
+    expect(await ipc.invoke(SYNC_CHANNELS.checkEmail, trustedEvent, 'a'.repeat(321))).toBe(
+      'unknown',
+    );
+    expect(service.checkEmail).toHaveBeenCalledTimes(2);
+
+    // Dispose tears down all 30 handlers and service
     dispose();
-    expect(ipc.ipcMain.removeHandler).toHaveBeenCalledTimes(29);
+    expect(ipc.ipcMain.removeHandler).toHaveBeenCalledTimes(30);
+    expect(ipc.ipcMain.removeHandler).toHaveBeenCalledWith(SYNC_CHANNELS.checkEmail);
     expect(service.dispose).toHaveBeenCalledTimes(1);
   });
 });

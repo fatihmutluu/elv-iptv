@@ -30,11 +30,13 @@ import {
   type CreateTvMobileSyncPortsOptions,
   createFetchHttpPort,
   defaultCsprngBytes,
+  type EmailCheckStatus,
   errorCodeFrom,
   type FeedbackPort,
   initialPrefsAppliedKey,
   isAuthTokenExpiredError,
   loadVaultBaseline,
+  type OAuthProviderId,
   type PersistedSessionRecord,
   parsePersistedSession,
   persistVaultBaseline,
@@ -450,6 +452,8 @@ export function createTvMobileSyncPorts(
     });
   };
 
+  const emptyOAuthProviders: readonly OAuthProviderId[] = Object.freeze([]);
+
   const syncAccount: SyncAccountPort = {
     getState: () => state,
     subscribe(listener) {
@@ -457,6 +461,14 @@ export function createTvMobileSyncPorts(
       return () => {
         listeners.delete(listener);
       };
+    },
+
+    supportedOAuthProviders: emptyOAuthProviders,
+
+    async checkEmail(email): Promise<EmailCheckStatus> {
+      const baseUrl = resolveBaseUrl();
+      if (baseUrl.length === 0) return 'unknown';
+      return makeAuthClient(baseUrl).checkEmail(email);
     },
 
     async signIn(email, password): Promise<SyncActionResult> {

@@ -363,4 +363,56 @@ describe('auth-client zero-knowledge flow', () => {
       expect(deriveSpy).toHaveBeenCalledTimes(1);
     }
   });
+
+  it('checkEmail returns exists/not_found and gracefully degrades to unknown on errors, 429, 404, or non-JSON (#513)', async () => {
+    const crypto = createFastTestWebCrypto(77);
+    const seenBodies: string[] = [];
+    let responder: (req: SyncHttpRequest) => Promise<SyncHttpResponse> = async () => ({
+      status: 200,
+      bodyText: JSON.stringify({ exists: true }),
+    });
+    const http: SyncHttpPort = {
+      async request(req) {
+        if (req.body) seenBodies.push(req.body);
+        return responder(req);
+      },
+    };
+    const client = createSyncAuthClient({
+      baseUrl: 'https://sync.example.test',
+      http,
+      crypto,
+      kdfIterations: TEST_ITERATIONS,
+    });
+
+    // Exists
+    expect(await client.checkEmail('  Alice@Example.COM ')).toBe('exists');
+    expect(seenBodies[0]).toBe(JSON.stringify({ email: 'alice@example.com' }));
+
+    // Not found
+    responder = async () => ({ status: 200, bodyText: JSON.stringify({ exists: false }) });
+    expect(await client.checkEmail('new@example.com')).toBe('not_found');
+
+    // Invalid email short-circuits without network call
+    const beforeCalls = seenBodies.length;
+    expect(await client.checkEmail('not-an-email')).toBe('unknown');
+    expect(seenBodies.length).toBe(beforeCalls);
+
+    // Rate limited (429), missing endpoint (404), non-JSON, malformed shape, and thrown network error all return 'unknown'
+    responder = async () => ({ status: 429, bodyText: JSON.stringify({ error: 'rate_limited' }) });
+    expect(await client.checkEmail('alice@example.com')).toBe('unknown');
+
+    responder = async () => ({ status: 404, bodyText: JSON.stringify({ error: 'not_found' }) });
+    expect(await client.checkEmail('alice@example.com')).toBe('unknown');
+
+    responder = async () => ({ status: 200, bodyText: '<html>ok</html>' });
+    expect(await client.checkEmail('alice@example.com')).toBe('unknown');
+
+    responder = async () => ({ status: 200, bodyText: JSON.stringify({ exists: 'yes' }) });
+    expect(await client.checkEmail('alice@example.com')).toBe('unknown');
+
+    responder = async () => {
+      throw new Error('offline');
+    };
+    expect(await client.checkEmail('alice@example.com')).toBe('unknown');
+  });
 });

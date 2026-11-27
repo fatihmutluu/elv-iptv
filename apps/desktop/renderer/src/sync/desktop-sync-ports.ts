@@ -14,10 +14,24 @@ import type {
   TelemetryStatusIpc,
 } from '../../../src/shared/sync-ipc.ts';
 
-/** Structural `SyncAccountPort` implemented by {@link createDesktopSyncPorts} (`#26`, `#510`). */
+/** Supported third-party OAuth providers when store credentials are configured (`#513`). */
+type DesktopOAuthProviderId = 'google' | 'apple';
+
+/** Result of checking whether an email already has a sync account (`#513`). */
+type DesktopEmailCheckStatus = 'exists' | 'not_found' | 'unknown';
+
+type DesktopSyncBridgeWithCheckEmail = SyncBridge & {
+  checkEmail?(email: string): Promise<DesktopEmailCheckStatus>;
+};
+
+const EMPTY_OAUTH_PROVIDERS: readonly DesktopOAuthProviderId[] = Object.freeze([]);
+
+/** Structural `SyncAccountPort` implemented by {@link createDesktopSyncPorts} (`#26`, `#510`, `#513`). */
 export interface DesktopSyncAccountPort {
   getState(): SyncAccountStateIpc;
   subscribe(listener: (state: SyncAccountStateIpc) => void): () => void;
+  checkEmail(email: string): Promise<DesktopEmailCheckStatus>;
+  readonly supportedOAuthProviders: readonly DesktopOAuthProviderId[];
   signIn(email: string, password: string): Promise<SyncActionResultIpc>;
   register(email: string, password: string, confirmPassword: string): Promise<SyncActionResultIpc>;
   acknowledgeRecoveryCode(): void;
@@ -170,7 +184,7 @@ const INITIAL_PREVIEW_JSON = JSON.stringify(
  * synchronous + async ports expected by `<AppShell>` (`#26`, `#458`, `#509`, `#510`).
  */
 export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): DesktopSyncPorts {
-  const syncBridge = bridges?.sync;
+  const syncBridge: DesktopSyncBridgeWithCheckEmail | undefined = bridges?.sync;
   const telemetryBridge = bridges?.telemetry;
   const feedbackBridge = bridges?.feedback;
 
@@ -235,6 +249,16 @@ export function createDesktopSyncPorts(bridges?: DesktopSyncBridgesInput): Deskt
             return () => {
               stateListeners.delete(listener);
             };
+          },
+          supportedOAuthProviders: EMPTY_OAUTH_PROVIDERS,
+          async checkEmail(email) {
+            if (!syncBridge.checkEmail) return 'unknown';
+            try {
+              const status = await syncBridge.checkEmail(email);
+              return status === 'exists' || status === 'not_found' ? status : 'unknown';
+            } catch {
+              return 'unknown';
+            }
           },
           async signIn(email, password) {
             try {

@@ -7,6 +7,7 @@ import { trProfilesMessages } from './tr-profiles';
 import { trSubtitlesSuiteMessages } from './tr-subtitles-suite';
 import { trWaveE1Messages } from './tr-wave-e1';
 import { trWaveE2Messages } from './tr-wave-e2';
+import { trWaveE3Messages } from './tr-wave-e3';
 import { trWaveF5bMessages } from './tr-wave-f5b';
 import { trWaveF6Messages } from './tr-wave-f6';
 import { trWaveF7aMessages } from './tr-wave-f7a';
@@ -742,5 +743,6 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trWaveP9Messages,
   ...trWaveE1Messages,
   ...trWaveE2Messages,
+  ...trWaveE3Messages,
   ...trIssue502Messages,
 };

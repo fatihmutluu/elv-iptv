@@ -343,4 +343,44 @@ describe('Settings -> ELV Mode Panel (Wave E1 #511)', () => {
     expect(screen.getByTestId('standalone-preview')).toBeTruthy();
     expect(screen.getByTestId('settings-elv-master-toggle')).toBeTruthy();
   });
+
+  it('mounts the live 4-card ElvModeInteractivePreview by default and updates immediately when toggling master, merge, posters, or categories', async () => {
+    const store = createMemoryPreferencesStore({ elvModeEnabled: false });
+    await render(<ElvSettingsHarness store={store} />);
+
+    // Default master OFF -> raw chaos posters & duplicate filenames
+    expect(screen.getByTestId('elv-preview-root')).toBeTruthy();
+    expect(screen.getByTestId('elv-preview-chaos-poster-0')).toBeTruthy();
+    expect(screen.getByText('[TR] VELVET MERIDIAN 4K UHD HEVC')).toBeTruthy();
+
+    // Enable master ELV Mode -> all 4 cards turn clean immediately
+    await fireEvent.press(screen.getByTestId('settings-elv-master-toggle'));
+    await waitFor(() => {
+      expect(screen.getByTestId('elv-preview-clean-poster-0')).toBeTruthy();
+      expect(screen.queryByTestId('elv-preview-chaos-poster-0')).toBeNull();
+      expect(screen.getByText('Velvet Meridian')).toBeTruthy();
+    });
+
+    // Toggle Merge Versions OFF -> splits into 4 duplicate filenames while keeping clean posters
+    await fireEvent.press(screen.getByTestId('settings-elv-merge-versions'));
+    await waitFor(() => {
+      expect(screen.getByTestId('elv-preview-clean-poster-0')).toBeTruthy();
+      expect(screen.getByText('[TR] VELVET MERIDIAN 4K UHD HEVC')).toBeTruthy();
+      expect(screen.getByText('VELVET_MERIDIAN_CAM_v2')).toBeTruthy();
+    });
+
+    // Toggle Enrich Metadata OFF -> switches to chaotic broken raw posters
+    await fireEvent.press(screen.getByTestId('settings-elv-enrich-metadata'));
+    await waitFor(() => {
+      expect(screen.getByTestId('elv-preview-chaos-poster-0')).toBeTruthy();
+      expect(screen.queryByTestId('elv-preview-clean-poster-0')).toBeNull();
+    });
+
+    // Switch Category Source to 'provider' -> shows chaotic raw IPTV folder names
+    await fireEvent.press(screen.getByTestId('settings-elv-category-source'));
+    await fireEvent.press(screen.getByTestId('settings-elv-category-source-provider'));
+    await waitFor(() => {
+      expect(screen.getByText('### === VIP VOD 2026 === ###')).toBeTruthy();
+    });
+  });
 });

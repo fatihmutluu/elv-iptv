@@ -54,6 +54,9 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await expect(window.getByTestId('welcome-sync-overlay')).toBeVisible();
     await window.getByTestId('welcome-continue-without-account').click();
     await expect(window.getByTestId('welcome-sync-overlay')).toHaveCount(0);
+    await expect(window.getByTestId('onboarding-source-step')).toBeVisible();
+    await window.getByTestId('onboarding-browse-without-source').click();
+    await expect(window.getByTestId('onboarding-flow-overlay')).toHaveCount(0);
     await expect(window.getByTestId('sources-screen')).toBeVisible();
 
     await window.getByTestId('sources-mode-xtream').click();
@@ -259,6 +262,9 @@ test('plays corpus Two audio tracks and subtitles (MKV) movie, pauses, seeks +10
     await expect(window.getByTestId('welcome-sync-overlay')).toBeVisible();
     await window.getByTestId('welcome-continue-without-account').click();
     await expect(window.getByTestId('welcome-sync-overlay')).toHaveCount(0);
+    await expect(window.getByTestId('onboarding-source-step')).toBeVisible();
+    await window.getByTestId('onboarding-browse-without-source').click();
+    await expect(window.getByTestId('onboarding-flow-overlay')).toHaveCount(0);
     await expect(window.getByTestId('sources-screen')).toBeVisible();
 
     await window.getByTestId('sources-mode-xtream').click();

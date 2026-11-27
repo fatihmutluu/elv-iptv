@@ -128,10 +128,17 @@ describe('AppShell Wave F9 integration', () => {
       });
       expect(telemetry.setOptIn).toHaveBeenCalledWith(false);
 
-      // Clicking Continue without account persists welcomeDismissed and hides overlay
+      // Clicking Continue without account persists welcomeDismissed and advances to Screen 2 (Source)
       await fireEvent.press(screen.getByTestId('welcome-continue-without-account'));
       await waitFor(() => {
         expect(screen.queryByTestId('welcome-sync-overlay')).toBeNull();
+        expect(screen.getByTestId('onboarding-source-step')).toBeTruthy();
+      });
+
+      // Clicking Browse without a source exits onboarding cleanly into Settings
+      await fireEvent.press(screen.getByTestId('onboarding-browse-without-source'));
+      await waitFor(() => {
+        expect(screen.queryByTestId('onboarding-flow-overlay')).toBeNull();
       });
 
       // Navigate Settings -> Account & Sync (Sync Server URL input removed in Wave P9)

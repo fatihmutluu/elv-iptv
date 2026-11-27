@@ -9,8 +9,10 @@ import {
   isPairDeepLinkUri,
   isSyncAccountState,
   isSyncActionResult,
+  isSyncCheckEmailPayload,
   isSyncClaimQrRequest,
   isSyncDeleteAccountRequest,
+  isSyncEmailCheckStatus,
   isSyncInitialPrefsPayload,
   isSyncPairConfirmRequest,
   isSyncPairJoinRequest,
@@ -30,6 +32,7 @@ import {
   type SyncAccountStateIpc,
   type SyncActionResultIpc,
   type SyncBridge,
+  type SyncEmailCheckStatusIpc,
   type SyncQrPairingSessionIpc,
   type SyncQrPollStatusIpc,
   type TelemetryBridge,
@@ -78,6 +81,12 @@ export function createSyncBridges(ipc: SyncIpcRendererLike): DesktopSyncPreloadB
       return () => {
         ipc.removeListener(SYNC_CHANNELS.stateChanged, wrapped);
       };
+    },
+
+    async checkEmail(email: string): Promise<SyncEmailCheckStatusIpc> {
+      if (!isSyncCheckEmailPayload(email)) return 'unknown';
+      const reply = await ipc.invoke(SYNC_CHANNELS.checkEmail, email);
+      return isSyncEmailCheckStatus(reply) ? reply : 'unknown';
     },
 
     async signIn(email: string, password: string): Promise<SyncActionResultIpc> {

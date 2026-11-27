@@ -367,6 +367,14 @@ export function validateLoginInput(raw: unknown): ValidationResult<LoginInput> {
   return { ok: true, value: { email, authVerifier } };
 }
 
+/** Validates `POST /v1/auth/check-email` input and normalizes the email address. */
+export function validateCheckEmailInput(raw: unknown): ValidationResult<string> {
+  if (!isRecord(raw)) return { ok: false, error: 'invalid_body' };
+  const email = normalizeEmail(raw.email);
+  if (!email) return { ok: false, error: 'invalid_email' };
+  return { ok: true, value: email };
+}
+
 /** Validates `POST /v1/auth/refresh` and `POST /v1/auth/logout` input. */
 export function validateRefreshTokenInput(raw: unknown): ValidationResult<string> {
   if (!isRecord(raw)) return { ok: false, error: 'invalid_body' };

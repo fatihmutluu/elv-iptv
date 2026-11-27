@@ -97,6 +97,7 @@ describe('preferences codec', () => {
       telemetryOptIn: false,
       privacyConsentAnswered: false,
       welcomeDismissed: false,
+      onboardingCompleted: false,
       syncServerUrl: '',
       elvModeEnabled: false,
       elvMergeVersions: true,

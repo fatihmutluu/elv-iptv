@@ -64,6 +64,11 @@ export {
   formatRemoteKeyLabel,
   mapWebKeyToRemoteKey,
 } from './keymap-routing';
+export {
+  isUntouchedDefaultProfile,
+  ONBOARDING_PROFILE_NAMES_EN,
+  pickRandomOnboardingProfile,
+} from './onboarding-random-profile';
 export type { PersonLibraryModalPerson } from './PersonLibraryModal';
 export {
   DEFAULT_PROFILE_RECORD,

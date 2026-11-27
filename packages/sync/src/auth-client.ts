@@ -15,8 +15,14 @@ import {
 } from './vault-crypto';
 import type { VaultSnapshot } from './vault-merge';
 
+/** Supported third-party OAuth providers when store credentials are configured (`#513`). */
+export type OAuthProviderId = 'google' | 'apple';
+
 /** Supported authentication provider identifiers (Apple Guideline 4.8 OAuth-ready seam). */
-export type AuthProviderId = 'email-password' | 'apple' | 'google';
+export type AuthProviderId = 'email-password' | OAuthProviderId;
+
+/** Result of checking whether an email already has a sync account (`#513`). */
+export type EmailCheckResult = 'exists' | 'not_found' | 'unknown';
 
 /** Pluggable auth provider adapter seam for future Apple/Google OAuth alongside email+password. */
 export interface AuthProviderAdapter {
@@ -88,6 +94,7 @@ export interface SyncAuthClientOptions {
 
 /** Zero-knowledge sync authentication and encrypted vault HTTP client. */
 export interface SyncAuthClient {
+  checkEmail(email: string, signal?: AbortSignal): Promise<EmailCheckResult>;
   register(
     email: string,
     password: string,
@@ -228,6 +235,30 @@ export function createSyncAuthClient(options: SyncAuthClientOptions): SyncAuthCl
   };
 
   return {
+    async checkEmail(email, signal) {
+      const normalizedEmail = normalizeSyncEmail(email);
+      if (
+        normalizedEmail.length === 0 ||
+        normalizedEmail.length > 254 ||
+        !EMAIL_RE.test(normalizedEmail)
+      ) {
+        return 'unknown';
+      }
+      const res = await jsonRequest(
+        'POST',
+        '/v1/auth/check-email',
+        { email: normalizedEmail },
+        undefined,
+        signal,
+      );
+      if (!res.ok) return 'unknown';
+      const { status, body } = res.value;
+      if (status !== 200 || body === null || typeof body.exists !== 'boolean') {
+        return 'unknown';
+      }
+      return body.exists ? 'exists' : 'not_found';
+    },
+
     async register(email, password, confirmPassword, signal) {
       const valid = validateSignupInput(email, password, confirmPassword);
       if (!valid.ok) return err(elvError('auth', valid.error));

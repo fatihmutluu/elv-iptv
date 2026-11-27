@@ -81,10 +81,19 @@ export interface QrScannerPort {
   scanQrCode(): Promise<string | null>;
 }
 
-/** App-supplied E2EE sync, authentication, bidirectional X25519 pairing, and deletion port (`#26`, `#510`). */
+/** Supported third-party OAuth providers when store credentials are configured (`#513`). */
+export type OAuthProviderId = 'google' | 'apple';
+
+/** App-supplied E2EE sync, authentication, bidirectional X25519 pairing, and deletion port (`#26`, `#510`, `#513`). */
 export interface SyncAccountPort {
   getState(): SyncAccountState;
   subscribe(listener: (state: SyncAccountState) => void): () => void;
+  /** Checks whether an account already exists for `email`, gracefully returning `'unknown'` on failure. */
+  checkEmail?(email: string): Promise<'exists' | 'not_found' | 'unknown'>;
+  /** Configured OAuth providers available on this build (empty until store OAuth keys are enabled). */
+  readonly supportedOAuthProviders?: readonly OAuthProviderId[];
+  /** Starts OAuth sign-in for a configured provider (`#513`). */
+  signInWithOAuth?(provider: OAuthProviderId): Promise<SyncActionResult>;
   signIn(email: string, password: string): Promise<SyncActionResult>;
   register(email: string, password: string, confirmPassword: string): Promise<SyncActionResult>;
   acknowledgeRecoveryCode(): void;

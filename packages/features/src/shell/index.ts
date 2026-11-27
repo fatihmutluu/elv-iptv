@@ -63,9 +63,24 @@ export {
   type UseImportHealthOptions,
   useImportHealth,
 } from './useImportHealth';
+export {
+  type OnboardingImportCoordinator,
+  type OnboardingImportState,
+  type OnboardingImportStatus,
+  type UseOnboardingImportCoordinatorOptions,
+  useOnboardingImportCoordinator,
+} from './useOnboardingImportCoordinator';
 export { type UseShellFlushOptions, useShellFlush } from './useShellFlush';
 export {
   type ShellSourcesState,
   type UseShellSourcesOptions,
   useShellSources,
 } from './useShellSources';
+export {
+  computeDueStartupRefreshTasks,
+  type StartupRefreshCoordinator,
+  type StartupRefreshState,
+  type StartupRefreshTask,
+  type UseStartupRefreshCoordinatorOptions,
+  useStartupRefreshCoordinator,
+} from './useStartupRefreshCoordinator';
