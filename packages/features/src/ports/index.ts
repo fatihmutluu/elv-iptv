@@ -1,3 +1,4 @@
+export type { TrailerExternalPort } from './trailer-port';
 export type {
   AutoSyncState,
   BidirectionalPairingRole,

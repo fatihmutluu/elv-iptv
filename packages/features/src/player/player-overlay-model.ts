@@ -151,6 +151,7 @@ export interface PlayerOverlayStateParams {
   hasSettings: boolean;
   hasInfo?: boolean | undefined;
   hasChannelList?: boolean | undefined;
+  hasXray?: boolean | undefined;
   hasPitchLock?: boolean | undefined;
   hasAudioNormalization?: boolean | undefined;
   hasAutoSubtitlesOnSkipBack?: boolean | undefined;

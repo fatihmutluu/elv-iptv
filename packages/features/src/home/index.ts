@@ -4,6 +4,12 @@ export {
   buildHomeCardContextMenuItems,
 } from './home-context-menu';
 export {
+  type BuildElvShowcaseEntriesOptions,
+  buildElvShowcaseEntries,
+  filterOutDislikedItems,
+  formatHomeElvReason,
+} from './home-elv-helpers';
+export {
   type BuildUnifiedLiveRailInput,
   buildHeroSlides,
   buildHomeLivePlayTarget,

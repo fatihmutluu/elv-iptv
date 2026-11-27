@@ -52,6 +52,7 @@ import {
   type DesktopTelemetryPort,
   extractSafeRendererErrorSignature,
 } from './sync/desktop-sync-ports.ts';
+import { createDesktopTrailerExternalPort } from './trailer-external-port.ts';
 import { attachDeadHostOnlineReset, createDesktopUiAdapters } from './ui/desktop-adapters.tsx';
 import { shouldMountWorkbench } from './workbench/presets.ts';
 
@@ -256,6 +257,7 @@ function AppRoot() {
   );
 
   const downloadManager = useMemo(() => createDesktopDownloadsPort(window.elv?.downloads), []);
+  const trailerExternal = useMemo(() => createDesktopTrailerExternalPort(window.elv?.window), []);
 
   useEffect(() => {
     let active = true;
@@ -366,6 +368,7 @@ function AppRoot() {
     reminderHost,
     diagnostics,
     downloadManager,
+    trailerExternal,
     externalRefreshToken: refreshToken,
     pendingPairUri,
     onPairUriHandled: handlePairUriHandled,

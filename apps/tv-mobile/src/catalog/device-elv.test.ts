@@ -124,11 +124,22 @@ describe('createDeviceCatalog Wave E1 isolated elv-enrichment.db wiring (#511)',
     expect(typeof catalog.searchElvItemKeysByAlias).toBe('function');
     expect(typeof catalog.listLiveVariants).toBe('function');
     expect(typeof catalog.findGuideChannelByCleanName).toBe('function');
+    // Every Wave E2 ELV discovery/recommendation method is forwarded through wrapCatalogWithImportTelemetry
+    expect(typeof catalog.listElvImdbGenres).toBe('function');
+    expect(typeof catalog.listElvItemsByImdbGenre).toBe('function');
+    expect(typeof catalog.getElvRecommendations).toBe('function');
+    expect(typeof catalog.refreshElvFeeds).toBe('function');
+    expect(typeof catalog.listElvFranchiseItems).toBe('function');
+    expect(typeof catalog.listElvPersonLibraryItems).toBe('function');
+    expect(typeof catalog.searchElvMatchCandidates).toBe('function');
+    expect(typeof catalog.applyElvFixMatch).toBe('function');
 
     const map = await catalog.getElvEnrichmentForKeys?.(['x:s1:movie:1']);
     expect(map).toBeInstanceOf(Map);
     expect(map?.size).toBe(0);
     expect(await catalog.searchElvItemKeysByAlias?.('Inception')).toEqual([]);
+    expect(await catalog.listElvImdbGenres?.('movie')).toEqual([]);
+    expect(await catalog.getElvRecommendations?.({ profile: 'home' })).toEqual([]);
 
     await catalog.close();
     expect(openedDrivers.get('catalog.db')?.close).toHaveBeenCalledTimes(1);

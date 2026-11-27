@@ -132,4 +132,107 @@ describe('createLazyCatalog Wave E1 ELV Mode forwarding (#511)', () => {
     expect(await lazyMin.listLiveVariants?.('k:live')).toEqual([]);
     expect(await lazyMin.findGuideChannelByCleanName?.('s1', 'CNN')).toBeNull();
   });
+
+  it('forwards all 8 Wave E2 ELV discovery methods when implemented and falls back cleanly when omitted (#512)', async () => {
+    const listElvImdbGenres = vi.fn(async () => [
+      { id: 'imdb-genre:Action', name: 'Action', count: 5 },
+    ]);
+    const listElvItemsByImdbGenre = vi.fn(async () => []);
+    const getElvRecommendations = vi.fn(async () => []);
+    const refreshElvFeeds = vi.fn(async () => true);
+    const listElvFranchiseItems = vi.fn(async () => []);
+    const listElvPersonLibraryItems = vi.fn(async () => []);
+    const searchElvMatchCandidates = vi.fn(async () => []);
+    const applyElvFixMatch = vi.fn(async () => null);
+
+    const full = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      seasons: vi.fn(async () => ok([])),
+      episodes: vi.fn(async () => []),
+      resolveStream: vi.fn(),
+      close: vi.fn(async () => undefined),
+      listElvImdbGenres,
+      listElvItemsByImdbGenre,
+      getElvRecommendations,
+      refreshElvFeeds,
+      listElvFranchiseItems,
+      listElvPersonLibraryItems,
+      searchElvMatchCandidates,
+      applyElvFixMatch,
+    } as unknown as CatalogService;
+
+    const lazyFull = createLazyCatalog(async () => full);
+    expect(await lazyFull.listElvImdbGenres?.('movie', { excludedSourceIds: ['s9'] })).toHaveLength(
+      1,
+    );
+    await lazyFull.listElvItemsByImdbGenre?.('movie', 'imdb-genre:Action', {
+      offset: 0,
+      limit: 20,
+    });
+    await lazyFull.getElvRecommendations?.({ profile: 'home', limit: 24 });
+    expect(await lazyFull.refreshElvFeeds?.({ force: true })).toBe(true);
+    await lazyFull.listElvFranchiseItems?.('tt1375666', { profileId: 'p1' });
+    await lazyFull.listElvPersonLibraryItems?.({ name: 'Nolan' }, { limit: 15 });
+    await lazyFull.searchElvMatchCandidates?.('Inception', 'movie');
+    await lazyFull.applyElvFixMatch?.({
+      itemKey: 'x:s1:movie:1',
+      sourceId: 's1',
+      mediaType: 'movie',
+      imdbId: 'tt1375666',
+    });
+
+    expect(listElvImdbGenres).toHaveBeenCalledWith('movie', { excludedSourceIds: ['s9'] });
+    expect(listElvItemsByImdbGenre).toHaveBeenCalledWith('movie', 'imdb-genre:Action', {
+      offset: 0,
+      limit: 20,
+    });
+    expect(getElvRecommendations).toHaveBeenCalledWith({ profile: 'home', limit: 24 });
+    expect(refreshElvFeeds).toHaveBeenCalledWith({ force: true });
+    expect(listElvFranchiseItems).toHaveBeenCalledWith('tt1375666', { profileId: 'p1' });
+    expect(listElvPersonLibraryItems).toHaveBeenCalledWith({ name: 'Nolan' }, { limit: 15 });
+    expect(searchElvMatchCandidates).toHaveBeenCalledWith('Inception', 'movie', undefined);
+    expect(applyElvFixMatch).toHaveBeenCalledWith({
+      itemKey: 'x:s1:movie:1',
+      sourceId: 's1',
+      mediaType: 'movie',
+      imdbId: 'tt1375666',
+    });
+
+    const minimal = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      seasons: vi.fn(async () => ok([])),
+      episodes: vi.fn(async () => []),
+      resolveStream: vi.fn(),
+      close: vi.fn(async () => undefined),
+    } as unknown as CatalogService;
+
+    const lazyMin = createLazyCatalog(async () => minimal);
+    expect(await lazyMin.listElvImdbGenres?.('movie')).toEqual([]);
+    expect(await lazyMin.listElvItemsByImdbGenre?.('movie', 'Action')).toEqual([]);
+    expect(await lazyMin.getElvRecommendations?.({ profile: 'home' })).toEqual([]);
+    expect(await lazyMin.refreshElvFeeds?.()).toBe(false);
+    expect(await lazyMin.listElvFranchiseItems?.('tt1375666')).toEqual([]);
+    expect(await lazyMin.listElvPersonLibraryItems?.({ name: 'Nolan' })).toEqual([]);
+    expect(await lazyMin.searchElvMatchCandidates?.('Inception', 'movie')).toEqual([]);
+    expect(
+      await lazyMin.applyElvFixMatch?.({
+        itemKey: 'x:s1:movie:1',
+        sourceId: 's1',
+        mediaType: 'movie',
+        imdbId: 'tt1375666',
+      }),
+    ).toBeNull();
+  });
 });

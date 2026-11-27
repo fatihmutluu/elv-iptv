@@ -88,10 +88,13 @@ export function CatalogDiscoveryScreen({
   onFocusTopNav,
   isActiveScope = true,
   groupVersions = false,
-  showElvPicks = false,
+  showElvPicks,
   elvPreferences,
 }: CatalogDiscoveryScreenProps): ReactElement {
   const elvPrefs = elvPreferences ?? DEFAULT_ELV_MODE_PREFERENCES;
+  const effectiveShowElvPicks =
+    showElvPicks ?? isElvFeatureActive(elvPrefs, 'elvSmartRecommendations');
+  const useImdbGenres = elvPrefs.elvModeEnabled && elvPrefs.elvCategorySource === 'imdb';
   const elvNeedsEnrichment =
     isElvFeatureActive(elvPrefs, 'elvEnrichMetadata') ||
     isElvFeatureActive(elvPrefs, 'elvMergeVersions');
@@ -110,10 +113,10 @@ export function CatalogDiscoveryScreen({
   const quickFilter: CatalogQuickFilter =
     rawQuickFilter === 'mylist'
       ? 'mylist'
-      : showElvPicks && rawQuickFilter === 'elvPicks'
+      : effectiveShowElvPicks && rawQuickFilter === 'elvPicks'
         ? 'elvPicks'
         : 'all';
-  const quickChipCount = showElvPicks ? 3 : 2;
+  const quickChipCount = effectiveShowElvPicks ? 3 : 2;
 
   const handleSelectCategory = useCallback(
     (categoryId: string | null) =>
@@ -152,6 +155,9 @@ export function CatalogDiscoveryScreen({
     visibleCategoryCount: activeMemory.visibleCategoryCount,
     sortBy,
     groupVersions,
+    useImdbGenres,
+    translate: i18n.t,
+    locale: i18n.locale,
     onVisibleCategoryCountChange: handleVisibleCategoryCountChange,
     onClearStaleCategory: handleSelectAllCategories,
   });
@@ -189,18 +195,20 @@ export function CatalogDiscoveryScreen({
     [quickActionsState.toggleFavorite, uiCache],
   );
   const handleQuickToggleWatched = useCallback(
-    (item: ItemRow, currentWatched: boolean) => {
-      void quickActionsState.toggleWatched(item, currentWatched).then((ok) => {
-        if (ok) uiCache?.clearHome?.();
-      });
+    async (item: ItemRow, currentWatched: boolean): Promise<boolean> => {
+      const ok = await quickActionsState.toggleWatched(item, currentWatched);
+      if (ok) uiCache?.clearHome?.();
+      return ok;
     },
     [quickActionsState.toggleWatched, uiCache],
   );
   const handleQuickToggleRating = useCallback(
-    (item: ItemRow, next: RatingValue) => {
-      void quickActionsState.toggleRating(item, next);
+    async (item: ItemRow, next: RatingValue): Promise<boolean> => {
+      const ok = await quickActionsState.toggleRating(item, next);
+      if (ok) uiCache?.clearHome?.();
+      return ok;
     },
-    [quickActionsState.toggleRating],
+    [quickActionsState.toggleRating, uiCache],
   );
   const handleResumeContinue = useCallback(
     (row: WatchProgressRow) => {
@@ -450,7 +458,7 @@ export function CatalogDiscoveryScreen({
       if (rowId === 'catChips') {
         if (colIndex === 0) return handleSelectQuickFilter('all');
         if (colIndex === 1) return handleSelectQuickFilter('mylist');
-        if (showElvPicks && colIndex === 2) return handleSelectQuickFilter('elvPicks');
+        if (effectiveShowElvPicks && colIndex === 2) return handleSelectQuickFilter('elvPicks');
         const cat = discovery.categories[colIndex - quickChipCount];
         if (cat) handleSelectCategory(cat.row.id);
         return;
@@ -481,7 +489,7 @@ export function CatalogDiscoveryScreen({
       onOpenSources,
       presentedRailItemsByCategoryId,
       quickChipCount,
-      showElvPicks,
+      effectiveShowElvPicks,
     ],
   );
 
@@ -631,7 +639,7 @@ export function CatalogDiscoveryScreen({
             categories={discovery.categories}
             selectedCategoryId={selectedCategory?.row.id ?? null}
             quickFilter={quickFilter}
-            showElvPicks={showElvPicks}
+            showElvPicks={effectiveShowElvPicks}
             focusedCatChipIndex={tvNav.focusedRowId === 'catChips' ? tvNav.focusedCol : null}
             onSelectCategory={handleSelectCategory}
             onSelectQuickFilter={handleSelectQuickFilter}
@@ -673,6 +681,7 @@ export function CatalogDiscoveryScreen({
               catalog={catalog}
               refreshToken={refreshToken}
               userStateVersion={userStateVersion}
+              elvPreferences={elvPrefs}
               layout={layout}
               safeBottomInset={viewport.safeArea.bottom}
               progressByKey={discovery.progressByKey}

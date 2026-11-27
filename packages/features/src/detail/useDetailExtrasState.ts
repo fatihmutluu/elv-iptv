@@ -1,6 +1,8 @@
 import type { KeyEvent } from '@elv/focus-core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { DetailTarget } from '../shared';
+import type { DetailTarget, PersonLibraryModalPerson } from '../shared';
+import { splitDirectorNames } from '../shared/PersonLibraryModal';
+import type { DetailRichCastMember } from './DetailCastStrip';
 import type { DetailHeroFocusSlot } from './DetailHero';
 import type { DetailVersionOption } from './detail-data-helpers';
 import { SYNOPSIS_EXPAND_THRESHOLD } from './detail-preplay';
@@ -9,6 +11,9 @@ import { SYNOPSIS_EXPAND_THRESHOLD } from './detail-preplay';
 export interface UseDetailExtrasStateOptions {
   readonly target: DetailTarget;
   readonly plot: string | null;
+  readonly cast?: readonly DetailRichCastMember[];
+  readonly director?: string | null;
+  readonly hasFixMatch?: boolean;
   readonly versions?: readonly DetailVersionOption[];
   readonly activeVersionKey?: string;
   readonly onSelectVersion?: (key: string) => void;
@@ -22,7 +27,7 @@ export interface DetailExtrasState {
   readonly trimmedPlot: string;
   readonly canExpandSynopsis: boolean;
   readonly heroPlaySlots: readonly DetailHeroFocusSlot[];
-  readonly castPeople: readonly string[];
+  readonly castPeople: readonly PersonLibraryModalPerson[];
   readonly toggleVersionMenu: () => void;
   readonly closeVersionMenu: () => void;
   readonly toggleSynopsis: () => void;
@@ -37,6 +42,9 @@ export interface DetailExtrasState {
 export function useDetailExtrasState({
   target,
   plot,
+  cast,
+  director,
+  hasFixMatch = false,
   versions = [],
   activeVersionKey,
   onSelectVersion,
@@ -74,24 +82,34 @@ export function useDetailExtrasState({
   const trimmedPlot = plot?.trim() ?? '';
   const canExpandSynopsis = trimmedPlot.length >= SYNOPSIS_EXPAND_THRESHOLD;
 
+  const resolvedDirector = director !== undefined ? director : (target.director ?? null);
+  const resolvedCast: readonly DetailRichCastMember[] =
+    cast !== undefined ? cast : (target.cast ?? []);
+
   const heroPlaySlots = useMemo<readonly DetailHeroFocusSlot[]>(
     () => [
       'play',
       ...(hasVersions ? (['preplay-version'] as const) : []),
       ...(canExpandSynopsis ? (['synopsis'] as const) : []),
+      ...(hasFixMatch ? (['fix-match'] as const) : []),
     ],
-    [canExpandSynopsis, hasVersions],
+    [canExpandSynopsis, hasFixMatch, hasVersions],
   );
 
-  const castPeople = useMemo<readonly string[]>(() => {
-    const out: string[] = [];
-    const dir = target.director?.trim();
-    if (dir) out.push(dir);
-    if (target.cast) {
-      for (const m of target.cast) out.push(m.name);
+  const castPeople = useMemo<readonly PersonLibraryModalPerson[]>(() => {
+    const out: PersonLibraryModalPerson[] = [];
+    for (const dir of splitDirectorNames(resolvedDirector)) {
+      out.push({ name: dir });
+    }
+    for (const m of resolvedCast) {
+      out.push({
+        ...(m.personId ? { personId: m.personId } : {}),
+        name: m.name,
+        ...(m.avatarUri ? { portraitUrl: m.avatarUri } : {}),
+      });
     }
     return out;
-  }, [target.cast, target.director]);
+  }, [resolvedCast, resolvedDirector]);
 
   const interceptTvKey = useCallback(
     (event: KeyEvent, fallback: (ev: KeyEvent) => boolean): boolean => {

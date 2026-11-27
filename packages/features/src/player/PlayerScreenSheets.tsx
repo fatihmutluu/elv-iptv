@@ -1,5 +1,5 @@
 import type { LiveVariantOption, NowNextEntry } from '@elv/data';
-import type { AndroidDecoderMode, DeinterlaceMode } from '@elv/domain';
+import type { AndroidDecoderMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type {
   ChapterInfo,
@@ -14,15 +14,17 @@ import type { FormFactor } from '@elv/ui-kit';
 import type { ComponentProps, MutableRefObject, ReactElement } from 'react';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { AudioDeviceInfo } from '../ports/video-host';
+import { PersonLibraryModal } from '../shared/PersonLibraryModal';
 import { NextEpisodeBanner } from './NextEpisodeBanner';
 import { type ChannelDrawerNavHandle, PlayerChannelDrawer } from './PlayerChannelDrawer';
 import { PlayerInfoSheet } from './PlayerInfoSheet';
 import { buildSettingsSheetOptionalProps } from './PlayerScreenParts';
 import { PlayerSettingsSheet, type PlayerSettingsSheetProps } from './PlayerSettingsSheet';
-import type { SleepTimerSnapshot } from './sleep-timer';
+import { PlayerXRayStrip } from './PlayerXRayStrip';
 import { TrackPickerModal } from './TrackPickerModal';
+import type { usePlayerCinemaExtras } from './usePlayerCinemaExtras';
 import type { usePlayerControls } from './usePlayerControls';
-import type { VodEndTimeDisplayMode } from './vod-progress-math';
+import type { PlayerXRayCatalog, PlayerXRayState } from './usePlayerXRay';
 
 /** Inputs for {@link buildPlayerOverlayNodes}. */
 export interface BuildPlayerOverlayNodesInput {
@@ -57,20 +59,8 @@ export interface BuildPlayerOverlayNodesInput {
   readonly autoPlayNextEpisode: boolean | undefined;
   readonly onToggleAutoPlayNextEpisode: (() => void) | undefined;
   readonly reduceMotion: boolean | undefined;
-  readonly activeDeinterlaceMode: DeinterlaceMode;
-  readonly cycleDeinterlaceMode: (() => void) | undefined;
-  readonly activePitchLock: boolean;
-  readonly togglePitchLock: (() => void) | undefined;
-  readonly activeAudioNorm: boolean;
-  readonly toggleAudioNormalization: (() => void) | undefined;
-  readonly timeDisplayMode: VodEndTimeDisplayMode;
-  readonly handleCycleTimeDisplayMode: () => void;
-  readonly handleSelectChapter: (startMs: number) => void;
-  readonly sleepTimer: SleepTimerSnapshot;
-  readonly selectSleepTimer: (minutes: number) => void;
-  readonly toggleSleepTimerAction: () => void;
-  readonly fetchChannelNowNext: (itemKey: string) => Promise<NowNextEntry | null>;
-  readonly fetchRecentChannels: (() => Promise<readonly PlayableEntry[]>) | undefined;
+  readonly extras: ReturnType<typeof usePlayerCinemaExtras>;
+  readonly hasRecentChannels: boolean;
   readonly channelDrawerNavRef: MutableRefObject<ChannelDrawerNavHandle | null>;
   readonly controls: ReturnType<typeof usePlayerControls>;
   readonly qualitySheetProps: {
@@ -90,6 +80,8 @@ export interface BuildPlayerOverlayNodesInput {
   readonly onEnterPip: (() => void) | undefined;
   readonly onEnterMultiView: (() => void) | undefined;
   readonly onPopoutPlayer: (() => void) | undefined;
+  readonly xray?: PlayerXRayState;
+  readonly xrayCatalog?: PlayerXRayCatalog;
 }
 
 /** Builds the auxiliary overlay/sheet React nodes consumed by `PlayerScreenStage`. */
@@ -99,6 +91,8 @@ export function buildPlayerOverlayNodes(p: BuildPlayerOverlayNodesInput): {
   readonly infoSheetNode: ReactElement;
   readonly channelDrawerNode: ReactElement;
   readonly settingsSheetNode: ReactElement;
+  readonly xrayStripNode: ReactElement | null;
+  readonly xrayPersonModalNode: ReactElement | null;
 } {
   const { controls } = p;
 
@@ -170,13 +164,11 @@ export function buildPlayerOverlayNodes(p: BuildPlayerOverlayNodesInput): {
       formFactor={p.formFactor}
       isTv={p.isTv}
       i18n={p.i18n}
-      fetchNowNext={p.fetchChannelNowNext}
-      {...(p.fetchRecentChannels !== undefined
-        ? { fetchRecentChannels: p.fetchRecentChannels }
-        : {})}
+      fetchNowNext={p.extras.fetchChannelNowNext}
+      {...(p.hasRecentChannels ? { fetchRecentChannels: p.extras.fetchRecentChannels } : {})}
       navigationRef={p.channelDrawerNavRef}
       onSelectChannel={(entry, index) => {
-        p.onRecordUserActivity();
+        p.extras.stillWatching.recordUserActivity();
         p.onSelectChannel(entry, index);
         controls.closeChannelList();
       }}
@@ -194,21 +186,21 @@ export function buildPlayerOverlayNodes(p: BuildPlayerOverlayNodesInput): {
       playbackSpeed={controls.playbackSpeed}
       resizeMode={controls.resizeMode}
       onToggleResizeMode={controls.toggleResizeMode}
-      timeDisplayMode={p.timeDisplayMode}
-      onCycleTimeDisplayMode={p.handleCycleTimeDisplayMode}
+      timeDisplayMode={p.extras.timeDisplayMode}
+      onCycleTimeDisplayMode={p.extras.handleCycleTimeDisplayMode}
       onToggleInfo={controls.toggleInfo}
       {...buildSettingsSheetOptionalProps({
         alwaysOnTop: p.alwaysOnTop,
         hostToggleAlwaysOnTop: p.hostToggleAlwaysOnTop,
-        activeDeinterlaceMode: p.activeDeinterlaceMode,
-        cycleDeinterlaceMode: p.cycleDeinterlaceMode,
+        activeDeinterlaceMode: p.extras.activeDeinterlaceMode,
+        cycleDeinterlaceMode: p.extras.cycleDeinterlaceMode,
         hostSetDeinterlace: p.hostSetDeinterlace,
         deinterlace: controls.deinterlace,
         toggleDeinterlace: controls.toggleDeinterlace,
-        activePitchLock: p.activePitchLock,
-        togglePitchLock: p.togglePitchLock,
-        activeAudioNorm: p.activeAudioNorm,
-        toggleAudioNormalization: p.toggleAudioNormalization,
+        activePitchLock: p.extras.activePitchLock,
+        togglePitchLock: p.extras.togglePitchLock,
+        activeAudioNorm: p.extras.activeAudioNorm,
+        toggleAudioNormalization: p.extras.toggleAudioNormalization,
         autoPlayNextEpisode: p.autoPlayNextEpisode,
         onToggleAutoPlayNextEpisode: p.onToggleAutoPlayNextEpisode,
         hostSetAudioDevice: p.hostSetAudioDevice,
@@ -224,10 +216,10 @@ export function buildPlayerOverlayNodes(p: BuildPlayerOverlayNodesInput): {
         onPopoutPlayer: p.onPopoutPlayer,
       })}
       chapters={p.chapters}
-      onSelectChapter={p.handleSelectChapter}
-      sleepTimer={p.sleepTimer}
-      onSelectSleepTimer={p.selectSleepTimer}
-      onToggleSleepTimerAction={p.toggleSleepTimerAction}
+      onSelectChapter={p.extras.handleSelectChapter}
+      sleepTimer={p.extras.sleepTimer}
+      onSelectSleepTimer={p.extras.selectSleepTimer}
+      onToggleSleepTimerAction={p.extras.toggleSleepTimerAction}
       statsVisible={controls.statsVisible}
       {...p.qualitySheetProps}
       {...p.syncAndQualitySheetProps}
@@ -244,11 +236,42 @@ export function buildPlayerOverlayNodes(p: BuildPlayerOverlayNodesInput): {
     />
   );
 
+  const xrayStripNode =
+    p.xray !== undefined ? (
+      <PlayerXRayStrip
+        visible={p.xray.stripVisible}
+        docked={p.useDockedDesktopLayout}
+        isTv={p.isTv}
+        title={p.activeTarget.title}
+        {...(p.activeTarget.subtitle !== undefined ? { subtitle: p.activeTarget.subtitle } : {})}
+        director={p.xray.titleDetail?.director ?? null}
+        cast={p.xray.titleDetail?.cast ?? []}
+        i18n={p.i18n}
+        onSelectPerson={p.xray.selectPerson}
+        onTogglePlayPause={controls.togglePlayPause}
+        onClose={p.xray.dismissStrip}
+      />
+    ) : null;
+
+  const xrayPersonModalNode =
+    p.xray !== undefined && p.xrayCatalog !== undefined ? (
+      <PersonLibraryModal
+        visible={p.xray.selectedPerson !== null}
+        person={p.xray.selectedPerson}
+        catalog={p.xrayCatalog}
+        docked={p.useDockedDesktopLayout}
+        onSelectItem={p.xray.selectLibraryItem}
+        onClose={p.xray.closePersonModal}
+      />
+    ) : null;
+
   return {
     nextEpisodeNode,
     trackPickerNode,
     infoSheetNode,
     channelDrawerNode,
     settingsSheetNode,
+    xrayStripNode,
+    xrayPersonModalNode,
   };
 }

@@ -107,6 +107,8 @@ describe('production CatalogService wrapper chain (listWatched & VOD collections
     await Promise.all([pSave, pWatch]);
     expect(watched?.map((r) => r.itemKey)).toEqual([movie.key]);
     expect(watched?.[0]?.profileId).toBe('p1');
+    expect(onUserStateMutated).toHaveBeenCalledTimes(1);
+    onUserStateMutated.mockClear();
 
     // 2) Full VOD collection lifecycle preserved across lazy -> coalesced -> observed -> profile-scoped
     expect(stacked.createCollection).toBeDefined();
@@ -190,8 +192,81 @@ describe('production CatalogService wrapper chain (listWatched & VOD collections
     expect(await stacked.searchElvItemKeysByAlias?.('Dune')).toEqual([]);
     expect(await stacked.listMergedVodVersions?.(movie.key)).toHaveLength(1);
 
+    // 5) Wave E2 ELV discovery methods propagate through full stack (lazy -> coalesced -> observed -> profile-scoped)
+    expect(stacked.listElvImdbGenres).toBeDefined();
+    expect(stacked.listElvItemsByImdbGenre).toBeDefined();
+    expect(stacked.getElvRecommendations).toBeDefined();
+    expect(stacked.refreshElvFeeds).toBeDefined();
+    expect(stacked.listElvFranchiseItems).toBeDefined();
+    expect(stacked.listElvPersonLibraryItems).toBeDefined();
+    expect(stacked.searchElvMatchCandidates).toBeDefined();
+    expect(stacked.applyElvFixMatch).toBeDefined();
+    expect(await stacked.listElvImdbGenres?.('movie')).toEqual([]);
+    expect(await stacked.listElvItemsByImdbGenre?.('movie', 'imdb-genre:Sci-Fi')).toEqual([]);
+    expect(await stacked.getElvRecommendations?.({ profile: 'home' })).toEqual([]);
+    expect(await stacked.refreshElvFeeds?.()).toBe(false);
+    expect(await stacked.listElvFranchiseItems?.('tt1160419')).toEqual([]);
+    expect(await stacked.listElvPersonLibraryItems?.({ name: 'Denis Villeneuve' })).toEqual([]);
+    expect(await stacked.searchElvMatchCandidates?.('Dune', 'movie')).toEqual([]);
+    expect(
+      await stacked.applyElvFixMatch?.({
+        itemKey: movie.key,
+        sourceId: movie.sourceId,
+        mediaType: 'movie',
+        imdbId: 'tt1160419',
+      }),
+    ).toBeNull();
+
     await stacked.close();
     handle.close();
+  });
+
+  it('notifies catalog observation callbacks when applyElvFixMatch updates a match (#512)', async () => {
+    const updatedEnrichment = {
+      itemKey: 'x:s1:movie:1',
+      sourceId: 's1',
+      mediaType: 'movie' as const,
+      imdbId: 'tt1160419',
+      confidence: 1,
+      manualLock: true,
+      title: null,
+    };
+    const applyElvFixMatch = jest.fn(async () => updatedEnrichment);
+    const underlying = {
+      addSource: jest.fn(),
+      addSourceFromLink: jest.fn(),
+      removeSource: jest.fn(),
+      importSource: jest.fn(),
+      listSources: jest.fn(async () => []),
+      categories: jest.fn(async () => []),
+      items: jest.fn(async () => []),
+      seasons: jest.fn(async () => ok([])),
+      episodes: jest.fn(async () => []),
+      resolveStream: jest.fn(),
+      close: jest.fn(async () => undefined),
+      applyElvFixMatch,
+    } as unknown as CatalogService;
+
+    const playbackGuard = createPlaybackGuard(() => undefined);
+    const syncSourcesAndBump = jest.fn(async () => undefined);
+    const onUserStateMutated = jest.fn();
+
+    const observed = createObservedCatalog(
+      underlying,
+      playbackGuard,
+      syncSourcesAndBump,
+      onUserStateMutated,
+    );
+
+    const res = await observed.applyElvFixMatch?.({
+      itemKey: 'x:s1:movie:1',
+      sourceId: 's1',
+      mediaType: 'movie',
+      imdbId: 'tt1160419',
+    });
+    expect(res).toEqual(updatedEnrichment);
+    expect(syncSourcesAndBump).toHaveBeenCalledTimes(1);
+    expect(onUserStateMutated).toHaveBeenCalledTimes(1);
   });
 
   it('falls back cleanly in createLazyCatalog when underlying service omits listWatched and collection methods', async () => {

@@ -81,6 +81,7 @@ import { createMobileLanPairingPort } from './lan-pairing/adapter';
 import { createMobileExternalPlayerPort } from './playback/external-player';
 import { PlayerSurface } from './playback/PlayerSurface';
 import { createPlatformEngine } from './playback/platform-engine';
+import { createMobileTrailerExternalPort } from './playback/trailer-external';
 import {
   createDeviceKeymapStore,
   createDevicePreferencesStore,
@@ -137,6 +138,7 @@ function AppRoot() {
   const lanPairingPort = useMemo(() => createMobileLanPairingPort(), []);
   const tvHomeChannelsPort = useMemo(() => createTvHomeChannelsPort(), []);
   const externalPlayerPort = useMemo(() => createMobileExternalPlayerPort(), []);
+  const trailerExternalPort = useMemo(() => createMobileTrailerExternalPort(), []);
   const diagnosticsPort = useMemo(() => createMobileDiagnosticsPort(), []);
   const telemetryRef = useRef<TelemetryPort | null>(null);
   const openSharedCatalog = useMemo(() => {
@@ -510,6 +512,7 @@ function AppRoot() {
     onPairUriHandled: clearPendingPairUri,
     qrScanner: qrScannerPort,
     externalPlayer: externalPlayerPort,
+    trailerExternal: trailerExternalPort,
     diagnostics: diagnosticsPort,
     syncAccount: syncPorts.syncAccount,
     telemetry: syncPorts.telemetry,

@@ -111,6 +111,7 @@ import {
   createTaskbarIconPngs,
   type TaskbarIcons,
 } from './taskbar-controls.ts';
+import { createTrailerWindowController } from './trailer-window.ts';
 import {
   createTrayController,
   createTrayIconPng,
@@ -649,6 +650,10 @@ if (hasLock) {
       onClosePopout: () => popoutController?.close(),
       onGetPopoutPayload: (sender) => popoutController?.getPayloadForSender(sender) ?? null,
       onDockPopout: (sender, payload) => popoutController?.dock(sender, payload),
+      onOpenExternalUrl: createTrailerWindowController({
+        createWindow: (options) => new BrowserWindow(options),
+        getParent: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined),
+      }).open,
       log: logger.log,
     });
     registerSourcesIpc<BrowserWindow>({

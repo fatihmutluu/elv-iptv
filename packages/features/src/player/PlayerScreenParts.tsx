@@ -2,9 +2,12 @@ import type { ItemRow } from '@elv/data';
 import type {
   AccessibilityFontFamily,
   AndroidDecoderMode,
+  BufferPreset,
   DeinterlaceMode,
+  LiveChannelSwitchModePref,
   SubtitleStyleConfig,
 } from '@elv/domain';
+import { DEFAULT_SUBTITLE_STYLE } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import {
   type PlaybackClock,
@@ -16,8 +19,13 @@ import {
 import { Scrim, useTheme, useViewport } from '@elv/ui-kit';
 import { type ReactElement, type RefObject, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View, type ViewStyle } from 'react-native';
-import type { PlayableEntry } from '../ports/play-target';
-import type { AudioDeviceInfo, OpenVideoEngine, VideoResizeMode } from '../ports/video-host';
+import type { PlayableEntry, PlayTarget } from '../ports/play-target';
+import type {
+  AudioDeviceInfo,
+  HostKey,
+  OpenVideoEngine,
+  VideoResizeMode,
+} from '../ports/video-host';
 import {
   DesktopCinemaBar,
   DesktopDockedTopBar,
@@ -26,9 +34,14 @@ import {
   PlayerOsdTopBar,
 } from './DesktopCinemaBar';
 import { describePlaybackFailure } from './errors';
+import type { ChannelDrawerNavHandle } from './PlayerChannelDrawer';
 import { PlayerLockedOverlay } from './PlayerOsdButton';
 import { FloatingPeekOsd } from './PlayerOsdChrome';
 import { MIN_BRIGHTNESS } from './PlayerTouchGestures';
+import {
+  buildWaveF7aLoadOptions,
+  type WaveF7aPlayerPreferences,
+} from './usePlayerDisplayAndAudioSync';
 
 export { DesktopDockedTopBar, PlayerLockedOverlay, type PlayerOsdProps };
 
@@ -333,6 +346,136 @@ export function useLatestRef<T>(value: T) {
   const ref = useRef(value);
   ref.current = value;
   return ref;
+}
+
+/** Stable mutable refs shared across `PlayerScreen` playback, handoff, and session hooks. */
+export function usePlayerScreenRefs<TCatalog>(opts: {
+  readonly props: WaveF7aPlayerPreferences & {
+    readonly catalog: TCatalog;
+    readonly onTargetChange?: ((next: PlayTarget) => void) | undefined;
+    readonly onExit: () => void;
+    readonly subtitleStyle?: SubtitleStyleConfig | undefined;
+  };
+  readonly clock: PlaybackClock;
+  readonly wallClock: () => number;
+  readonly timers: PlaybackTimers;
+  readonly bufferPreset: BufferPreset;
+  readonly preferHevcOverDolbyVision: boolean;
+  readonly filterSdhSubtitles: boolean;
+  readonly liveChannelSwitchMode: LiveChannelSwitchModePref;
+  readonly effectiveBackgroundAudio: boolean;
+}) {
+  const { props } = opts;
+  const serviceRef = useRef<PlaybackService | null>(null);
+  const handoffModeRef = useRef<'none' | 'session' | 'parked'>('none');
+  const flushProgressRef = useRef<(overridePosMs?: number) => void>(() => undefined);
+  const flushEndedProgressRef = useRef<() => void>(() => undefined);
+  const cancelScrubRef = useRef<() => void>(() => undefined);
+  const resolvedNextEpisodeRef = useRef<PlayableEntry | undefined>(undefined);
+  const catalogRef = useLatestRef(props.catalog);
+  const clockRef = useLatestRef(opts.clock);
+  const wallClockRef = useLatestRef(opts.wallClock);
+  const channelDrawerNavRef = useRef<ChannelDrawerNavHandle | null>(null);
+  const timersRef = useLatestRef(opts.timers);
+  const onTargetChangeRef = useLatestRef(props.onTargetChange);
+  const onExitRef = useLatestRef(props.onExit);
+  const bufferPresetRef = useLatestRef<BufferPreset>(opts.bufferPreset);
+  const preferHevcRef = useLatestRef<boolean>(opts.preferHevcOverDolbyVision);
+  const filterSdhRef = useLatestRef<boolean>(opts.filterSdhSubtitles);
+  const subtitleStyleRef = useRef<SubtitleStyleConfig>(
+    props.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE,
+  );
+  const switchModeRef = useLatestRef<LiveChannelSwitchModePref>(opts.liveChannelSwitchMode);
+  const backgroundAudioRef = useLatestRef<boolean>(opts.effectiveBackgroundAudio);
+  const waveF7aLoadOptionsRef = useLatestRef(buildWaveF7aLoadOptions(props));
+  const reloadActiveTargetRef = useRef<() => void>(() => undefined);
+  const hostKeyRef = useRef<(key: HostKey) => void>((key) => {
+    if (key === 'back') onExitRef.current();
+  });
+
+  return {
+    serviceRef,
+    handoffModeRef,
+    flushProgressRef,
+    flushEndedProgressRef,
+    cancelScrubRef,
+    resolvedNextEpisodeRef,
+    catalogRef,
+    clockRef,
+    wallClockRef,
+    channelDrawerNavRef,
+    timersRef,
+    onTargetChangeRef,
+    onExitRef,
+    bufferPresetRef,
+    preferHevcRef,
+    filterSdhRef,
+    subtitleStyleRef,
+    switchModeRef,
+    backgroundAudioRef,
+    waveF7aLoadOptionsRef,
+    reloadActiveTargetRef,
+    hostKeyRef,
+  };
+}
+
+/** Builds touch/gesture/mini-player callback props for {@link PlayerScreenStage}. */
+export function buildPlayerStageCallbacks(opts: {
+  readonly recordUserActivity: () => void;
+  readonly handleTouchActivity: () => void;
+  readonly toggleOsdByTouch: () => void;
+  readonly seekStepBack: () => void;
+  readonly seekStepForward: () => void;
+  readonly setTouchScrubDeltaMs: (deltaMs: number | undefined) => void;
+  readonly handleTouchScrubCommit: (deltaMs: number) => void;
+  readonly startHoldSpeed: () => void;
+  readonly endHoldSpeed: () => void;
+  readonly setVolume: (volume: number) => void;
+  readonly handleBrightnessChange: (level: number) => void;
+  readonly unlockControls: () => void;
+  readonly onExpandMiniPlayer: (() => void) | undefined;
+  readonly onExit: () => void;
+  readonly onPinchMinimize: (() => void) | undefined;
+}) {
+  return {
+    onTouchActivity: () => {
+      opts.recordUserActivity();
+      opts.handleTouchActivity();
+    },
+    onSingleTap: () => {
+      opts.recordUserActivity();
+      opts.toggleOsdByTouch();
+    },
+    onDoubleTapSeek: (d: number) => {
+      opts.recordUserActivity();
+      if (d < 0) opts.seekStepBack();
+      else opts.seekStepForward();
+    },
+    onScrubPreview: opts.setTouchScrubDeltaMs,
+    onScrubCommit: opts.handleTouchScrubCommit,
+    onHoldSpeedStart: opts.startHoldSpeed,
+    onHoldSpeedEnd: opts.endHoldSpeed,
+    onVolumeChange: opts.setVolume,
+    onBrightnessChange: opts.handleBrightnessChange,
+    onUnlock: opts.unlockControls,
+    onExpandMiniPlayer: opts.onExpandMiniPlayer,
+    onCloseMiniPlayer: opts.onExit,
+    onPinchMinimize: opts.onPinchMinimize,
+  };
+}
+
+/** Derives stable target capability flags from the active {@link PlayTarget}. */
+export function resolveTargetCapabilities(activeTarget: PlayTarget) {
+  const canZap =
+    activeTarget.kind === 'live' &&
+    activeTarget.playlist !== undefined &&
+    activeTarget.playlist.count > 1;
+  const hasPreviousChannel =
+    activeTarget.kind === 'live' &&
+    activeTarget.previousChannel !== undefined &&
+    activeTarget.previousChannel.itemKey !== activeTarget.itemKey;
+  const isCatchup = activeTarget.catchup !== undefined;
+  return { canZap, hasPreviousChannel, isCatchup };
 }
 
 /** Syncs native resizeMode on target/status transitions and keeps preview OSD visible (`#432`). */

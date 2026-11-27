@@ -120,6 +120,39 @@ describe('availableTvOsdActions', () => {
       }),
     ).toEqual(['back', 'seekBack', 'playPause', 'seekForward', 'info', 'settings']);
   });
+
+  it('includes xray action only on VOD when hasXray and hasService are true (#352)', () => {
+    expect(
+      availableTvOsdActions({
+        isVod: true,
+        hasService: true,
+        hasTracks: true,
+        showRetry: false,
+        hasXray: true,
+        hasSettings: true,
+      }),
+    ).toEqual(['back', 'seekBack', 'playPause', 'seekForward', 'xray', 'tracks', 'settings']);
+
+    expect(
+      availableTvOsdActions({
+        isVod: false,
+        hasService: true,
+        hasTracks: true,
+        showRetry: false,
+        hasXray: true,
+      }),
+    ).toEqual(['back', 'tracks']);
+
+    expect(
+      availableTvOsdActions({
+        isVod: true,
+        hasService: false,
+        hasTracks: true,
+        showRetry: false,
+        hasXray: true,
+      }),
+    ).toEqual(['back']);
+  });
 });
 
 describe('initialTvOsdAction', () => {

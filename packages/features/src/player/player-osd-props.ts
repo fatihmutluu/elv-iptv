@@ -28,6 +28,8 @@ export interface BuildPlayerOsdPropsInput {
   readonly liveTimeShiftSupported: boolean;
   readonly canZap: boolean;
   readonly hasTracks: boolean;
+  readonly hasXray?: boolean;
+  readonly xrayOpen?: boolean;
   readonly hasPreviousChannel: boolean;
   readonly nextEpisode: PlayableEntry | undefined;
   readonly nextEpisodeVisible: boolean;
@@ -57,6 +59,7 @@ export interface BuildPlayerOsdPropsInput {
   readonly onPopoutPlayer?: (() => void) | undefined;
   readonly onDockPopout?: (() => void) | undefined;
   readonly onExit: () => void;
+  readonly onToggleXray?: (() => void) | undefined;
   readonly onCycleTimeDisplayMode: () => void;
   readonly onFineScrubHaptic: ((kind: 'tier' | 'origin') => void) | undefined;
   readonly onPlayNextEpisode: () => void;
@@ -90,6 +93,7 @@ export function buildPlayerOsdProps(p: BuildPlayerOsdPropsInput): PlayerOsdProps
     isPausedOrEnded: controls.isPausedOrEnded,
     canZap: p.canZap,
     hasTracks: p.hasTracks,
+    ...(p.hasXray === true ? { hasXray: true, xrayOpen: p.xrayOpen === true } : {}),
     hasPreviousChannel: p.hasPreviousChannel,
     hasNextEpisodeAction:
       activeTarget.kind === 'vod' && !p.isCatchup && p.nextEpisode !== undefined,
@@ -141,6 +145,7 @@ export function buildPlayerOsdProps(p: BuildPlayerOsdPropsInput): PlayerOsdProps
     onToggleResizeMode: controls.toggleResizeMode,
     onToggleInfo: controls.toggleInfo,
     ...(p.canZap ? { onToggleChannelList: controls.toggleChannelList } : {}),
+    ...(p.hasXray === true && p.onToggleXray !== undefined ? { onToggleXray: p.onToggleXray } : {}),
     onPlayNextEpisode: p.onPlayNextEpisode,
     ...((p.chapters?.length ?? 0) > 0
       ? { onPrevChapter: p.onPrevChapter, onNextChapter: p.onNextChapter }

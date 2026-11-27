@@ -14,6 +14,7 @@ const ALL_DETAIL_ROW_IDS: readonly DetailNavRowId[] = [
   'hero-actions',
   'hero-play',
   'cast',
+  'franchise',
   'seasons',
   'episode-chunks',
   'episodes',

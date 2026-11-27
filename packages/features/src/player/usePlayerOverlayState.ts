@@ -178,6 +178,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasSettings,
     hasInfo: false,
     hasChannelList: params.hasChannelList === true,
+    ...(params.hasXray === true ? { hasXray: true } : {}),
     hasNextEpisode,
     hasPreviousChannel,
     ...(params.hasBackToLive === true ? { hasBackToLive: true } : {}),

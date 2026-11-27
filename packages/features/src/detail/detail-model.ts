@@ -53,6 +53,7 @@ export type DetailNavRowId =
   | 'hero-actions'
   | 'hero-play'
   | 'cast'
+  | 'franchise'
   | 'seasons'
   | 'episode-chunks'
   | 'episodes'
@@ -105,6 +106,7 @@ export interface BuildDetailNavRowsInput {
   readonly heroActionCount: number;
   readonly heroPlayCount?: number;
   readonly castCount?: number;
+  readonly franchiseCount?: number;
   readonly seasonsCount: number;
   readonly episodeChunksCount?: number;
   readonly episodesCount: number;
@@ -388,6 +390,9 @@ export function buildDetailNavRows(input: BuildDetailNavRowsInput): DetailNavRow
   });
   if ((input.castCount ?? 0) > 0) {
     rows.push({ id: 'cast', count: input.castCount ?? 0, orientation: 'horizontal' });
+  }
+  if ((input.franchiseCount ?? 0) >= 2) {
+    rows.push({ id: 'franchise', count: input.franchiseCount ?? 0, orientation: 'horizontal' });
   }
   if (input.seasonsCount > 0) {
     rows.push({ id: 'seasons', count: input.seasonsCount, orientation: 'horizontal' });

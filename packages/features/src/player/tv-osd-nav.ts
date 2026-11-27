@@ -11,6 +11,7 @@ export type TvOsdAction =
   | 'backToLive'
   | 'prevChannel'
   | 'channelList'
+  | 'xray'
   | 'info'
   | 'tracks'
   | 'settings'
@@ -26,6 +27,7 @@ export interface TvOsdAvailability {
   readonly hasSettings?: boolean;
   readonly hasInfo?: boolean;
   readonly hasChannelList?: boolean;
+  readonly hasXray?: boolean;
   readonly hasNextEpisode?: boolean;
   readonly hasPreviousChannel?: boolean;
   readonly hasBackToLive?: boolean;
@@ -42,6 +44,7 @@ const ORDER: readonly TvOsdAction[] = [
   'backToLive',
   'prevChannel',
   'channelList',
+  'xray',
   'info',
   'tracks',
   'settings',
@@ -64,6 +67,8 @@ export function availableTvOsdActions(a: TvOsdAvailability): TvOsdAction[] {
         return !a.isVod && a.hasService && a.hasPreviousChannel === true;
       case 'channelList':
         return !a.isVod && a.hasService && a.hasChannelList === true;
+      case 'xray':
+        return a.isVod && a.hasService && a.hasXray === true;
       case 'info':
         return a.hasService && a.hasInfo === true;
       case 'tracks':

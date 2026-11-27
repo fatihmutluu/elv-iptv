@@ -220,6 +220,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasSettings: params.hasSettings ?? false,
     hasInfo: params.hasInfo,
     hasChannelList: params.hasChannelList,
+    ...(params.hasXray === true ? { hasXray: true } : {}),
     hasPitchLock: params.onTogglePitchLock !== undefined,
     hasAudioNormalization: params.onToggleAudioNormalization !== undefined,
     hasAutoSubtitlesOnSkipBack:
@@ -453,7 +454,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
     else if (act === 'settings') overlay.openSettings();
     else if (act === 'info') overlay.toggleInfo();
     else if (act === 'channelList') overlay.toggleChannelList();
-    else if (act === 'retry') retry();
+    else if (act === 'xray') {
+      overlay.blurTvOsd();
+      cbRef.current.onToggleXray?.();
+    } else if (act === 'retry') retry();
     else if (act === 'prevChannel') {
       overlay.blurTvOsd();
       cbRef.current.onJumpPreviousChannel?.();

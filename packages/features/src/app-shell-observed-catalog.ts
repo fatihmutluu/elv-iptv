@@ -62,6 +62,10 @@ export function createObservedCatalog(
   const addItemToCollection = wrapUserStateMutation(c.addItemToCollection);
   const removeItemFromCollection = wrapUserStateMutation(c.removeItemFromCollection);
   const reorderCollectionItems = wrapUserStateMutation(c.reorderCollectionItems);
+  const setWatched = wrapUserStateMutation(c.setWatched);
+  const toggleFavorite = wrapUserStateMutation(c.toggleFavorite);
+  const setFavorite = wrapUserStateMutation(c.setFavorite);
+  const setRating = wrapUserStateMutation(c.setRating);
   return {
     addSource: async (input) => {
       const res = await c.addSource(input);
@@ -223,7 +227,7 @@ export function createObservedCatalog(
     ...(c.pruneExpiredReminders ? { pruneExpiredReminders: c.pruneExpiredReminders.bind(c) } : {}),
     ...(c.itemDetail ? { itemDetail: c.itemDetail.bind(c) } : {}),
     ...(c.saveProgress ? { saveProgress: c.saveProgress.bind(c) } : {}),
-    ...(c.setWatched ? { setWatched: c.setWatched.bind(c) } : {}),
+    ...(setWatched ? { setWatched } : {}),
     ...(c.getProgress ? { getProgress: c.getProgress.bind(c) } : {}),
     ...(c.listContinueWatching ? { listContinueWatching: c.listContinueWatching.bind(c) } : {}),
     ...(c.listWatched ? { listWatched: c.listWatched.bind(c) } : {}),
@@ -239,8 +243,8 @@ export function createObservedCatalog(
       ? { refreshMyListNewEpisodes: c.refreshMyListNewEpisodes.bind(c) }
       : {}),
     ...(c.clearProgress ? { clearProgress: c.clearProgress.bind(c) } : {}),
-    ...(c.toggleFavorite ? { toggleFavorite: c.toggleFavorite.bind(c) } : {}),
-    ...(c.setFavorite ? { setFavorite: c.setFavorite.bind(c) } : {}),
+    ...(toggleFavorite ? { toggleFavorite } : {}),
+    ...(setFavorite ? { setFavorite } : {}),
     ...(c.reorderFavorites ? { reorderFavorites: c.reorderFavorites.bind(c) } : {}),
     ...(c.listFavorites ? { listFavorites: c.listFavorites.bind(c) } : {}),
     ...(c.listFavoriteKeys ? { listFavoriteKeys: c.listFavoriteKeys.bind(c) } : {}),
@@ -433,6 +437,35 @@ export function createObservedCatalog(
     ...(c.searchElvItemKeysByAlias
       ? { searchElvItemKeysByAlias: c.searchElvItemKeysByAlias.bind(c) }
       : {}),
+    ...(c.listElvImdbGenres ? { listElvImdbGenres: c.listElvImdbGenres.bind(c) } : {}),
+    ...(c.listElvItemsByImdbGenre
+      ? { listElvItemsByImdbGenre: c.listElvItemsByImdbGenre.bind(c) }
+      : {}),
+    ...(c.getElvRecommendations ? { getElvRecommendations: c.getElvRecommendations.bind(c) } : {}),
+    ...(c.refreshElvFeeds ? { refreshElvFeeds: c.refreshElvFeeds.bind(c) } : {}),
+    ...(c.listElvFranchiseItems ? { listElvFranchiseItems: c.listElvFranchiseItems.bind(c) } : {}),
+    ...(c.listElvPersonLibraryItems
+      ? { listElvPersonLibraryItems: c.listElvPersonLibraryItems.bind(c) }
+      : {}),
+    ...(c.searchElvMatchCandidates
+      ? { searchElvMatchCandidates: c.searchElvMatchCandidates.bind(c) }
+      : {}),
+    ...(c.applyElvFixMatch
+      ? {
+          applyElvFixMatch: async (
+            input: Parameters<NonNullable<CatalogService['applyElvFixMatch']>>[0],
+          ) => {
+            const fn = c.applyElvFixMatch;
+            if (fn === undefined) return null;
+            const updated = await fn.call(c, input);
+            if (updated !== null) {
+              await syncSourcesAndBump();
+              onUserStateMutated?.();
+            }
+            return updated;
+          },
+        }
+      : {}),
     ...(c.findGuideChannelByCleanName
       ? { findGuideChannelByCleanName: c.findGuideChannelByCleanName.bind(c) }
       : {}),
@@ -452,7 +485,7 @@ export function createObservedCatalog(
     ...(c.getDownload ? { getDownload: c.getDownload.bind(c) } : {}),
     ...(c.upsertDownload ? { upsertDownload: c.upsertDownload.bind(c) } : {}),
     ...(c.deleteDownload ? { deleteDownload: c.deleteDownload.bind(c) } : {}),
-    ...(c.setRating ? { setRating: c.setRating.bind(c) } : {}),
+    ...(setRating ? { setRating } : {}),
     ...(c.getRating ? { getRating: c.getRating.bind(c) } : {}),
     ...(c.listRatings ? { listRatings: c.listRatings.bind(c) } : {}),
     ...(c.listRatingMap ? { listRatingMap: c.listRatingMap.bind(c) } : {}),

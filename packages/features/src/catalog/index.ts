@@ -42,6 +42,14 @@ export {
   RAIL_ITEM_LIMIT,
 } from './catalog-model';
 export {
+  buildImdbGenreDisplayCategories,
+  formatElvGenreLabel,
+  formatElvRecommendationReason,
+  isElvImdbGenreCategoryId,
+  resolveElvGenreMessageId,
+  resolveElvRecommendationReasonMessageId,
+} from './elv-genre-label';
+export {
   type CatalogDiscoveryState,
   type UseCatalogDiscoveryOptions,
   useCatalogDiscovery,

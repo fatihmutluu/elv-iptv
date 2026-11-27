@@ -8,7 +8,7 @@ import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
 import type { PlaybackGuard } from './ports/playback-guard';
 import type { AdoptedPlaybackSession, ThermalDevicePort, VideoHost } from './ports/video-host';
-import { isElvFeatureActive } from './shared';
+import { type DetailTarget, isElvFeatureActive } from './shared';
 import { CrashRecoveryBoundary, type PreferencesContextValue } from './shell';
 
 const EMPTY_AUDIO_DELAY_BY_REFRESH_RATE = Object.freeze({});
@@ -42,6 +42,7 @@ interface AppShellPlayerViewProps {
   readonly onPlaybackActiveChange: (active: boolean) => void;
   readonly onRegisterStopActivePlayer?: (stop: (() => Promise<void>) | null) => void;
   readonly onTargetChange: (next: PlayTarget) => void;
+  readonly onOpenDetail?: (target: DetailTarget) => void;
   readonly onExit: () => void;
 }
 
@@ -68,6 +69,7 @@ function AppShellPlayerView({
   onRegisterStopActivePlayer,
   onPlaybackActiveChange,
   onTargetChange,
+  onOpenDetail,
   onExit,
 }: AppShellPlayerViewProps): ReactElement {
   const prefs = preferences.preferences;
@@ -168,6 +170,9 @@ function AppShellPlayerView({
       liveChannelSwitchMode={prefs.liveChannelSwitchMode}
       elvVerifyRealQuality={isElvFeatureActive(prefs, 'elvVerifyRealQuality')}
       elvLiveEnhance={isElvFeatureActive(prefs, 'elvLiveEnhance')}
+      elvModeEnabled={prefs.elvModeEnabled}
+      elvXrayEnabled={prefs.elvXrayEnabled}
+      {...(onOpenDetail !== undefined ? { onOpenDetail } : {})}
       onTargetChange={onTargetChange}
       onExit={onExit}
     />
@@ -191,6 +196,7 @@ export interface AppShellPlayerHostProps {
   readonly onPlaybackActiveChange: (active: boolean) => void;
   readonly onRegisterStopActivePlayer?: (stop: (() => Promise<void>) | null) => void;
   readonly onTargetChange: (next: PlayTarget) => void;
+  readonly onOpenDetail?: (target: DetailTarget) => void;
   readonly onExit: () => void;
 }
 
@@ -267,6 +273,7 @@ export function AppShellPlayerHost(p: AppShellPlayerHostProps): ReactElement | n
             : {})}
           onPlaybackActiveChange={p.onPlaybackActiveChange}
           onTargetChange={p.onTargetChange}
+          {...(p.onOpenDetail !== undefined ? { onOpenDetail: p.onOpenDetail } : {})}
           onExit={p.onExit}
         />
       </CrashRecoveryBoundary>

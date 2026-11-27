@@ -1,4 +1,9 @@
 import type { Scheduler, SqlDriver } from '@elv/domain';
+import type { RowLogoResolver } from './elv-discovery-helpers';
+import {
+  type CatalogElvDiscoveryOpsMethods,
+  createCatalogElvDiscoveryOpsMethods,
+} from './elv-discovery-ops';
 import type {
   ElvEnrichmentStore,
   ElvItemEnrichment,
@@ -49,8 +54,8 @@ export interface SearchElvItemKeysByAliasOptions {
   readonly excludedSourceIds?: readonly string[];
 }
 
-/** ELV Mode enrichment, matching, merging, quality memory, and Live TV methods exposed on `CatalogService` (`#511`). */
-export interface CatalogElvOpsMethods {
+/** ELV Mode enrichment, matching, merging, quality memory, discovery, and Live TV methods exposed on `CatalogService` (`#511`, `#512`). */
+export interface CatalogElvOpsMethods extends CatalogElvDiscoveryOpsMethods {
   getElvEnrichmentForKeys(itemKeys: readonly string[]): Promise<Map<string, ElvItemEnrichment>>;
   getElvTitleDetail(
     imdbId: string,
@@ -144,8 +149,9 @@ export function createCatalogElvOpsMethods(deps: {
   readonly scheduler: Scheduler;
   readonly enrichmentStore?: ElvEnrichmentStore | undefined;
   readonly elvClient?: ElvMetadataClient | undefined;
+  readonly resolveRowLogos?: RowLogoResolver | undefined;
 }): CatalogElvOpsMethods {
-  const { db, clock, scheduler, enrichmentStore, elvClient } = deps;
+  const { db, clock, scheduler, enrichmentStore, elvClient, resolveRowLogos } = deps;
   const matcher =
     enrichmentStore !== undefined && elvClient !== undefined
       ? createElvCatalogMatcher({
@@ -157,58 +163,69 @@ export function createCatalogElvOpsMethods(deps: {
         })
       : undefined;
 
+  const getElvTitleDetail: CatalogElvOpsMethods['getElvTitleDetail'] = async (imdbId, opts) => {
+    const cached =
+      enrichmentStore === undefined ? null : await enrichmentStore.getTitleByImdbId(imdbId);
+    const langKey = opts?.lang?.trim().toLowerCase();
+    const hasRequestedLang =
+      langKey === undefined || langKey === '' || cached?.synopses[langKey] !== undefined;
+    if (
+      cached !== null &&
+      cached.detailFetchedAt !== null &&
+      opts?.forceRefresh !== true &&
+      (hasRequestedLang || elvClient === undefined)
+    ) {
+      return cached;
+    }
+    if (elvClient === undefined) return cached;
+    const fetched = await elvClient.fetchTitleDetail(imdbId, opts?.lang, opts?.signal);
+    if (fetched === null) return cached;
+    if (enrichmentStore !== undefined) {
+      await enrichmentStore.upsertTitles([fetched]);
+      return enrichmentStore.getTitleByImdbId(imdbId);
+    }
+    const nowMs = clock();
+    return {
+      imdbId: fetched.imdbId,
+      mediaType: fetched.mediaType,
+      originalTitle: fetched.originalTitle,
+      englishTitle: fetched.englishTitle ?? null,
+      localizedTitles: fetched.localizedTitles ?? {},
+      year: fetched.year ?? null,
+      rating: fetched.rating ?? null,
+      votes: fetched.votes ?? null,
+      runtimeMin: fetched.runtimeMin ?? null,
+      genres: fetched.genres ?? [],
+      posterUrl: fetched.posterUrl ?? null,
+      backdropUrl: fetched.backdropUrl ?? null,
+      trailerStreamUrl: fetched.trailerStreamUrl ?? null,
+      trailerYoutubeId: fetched.trailerYoutubeId ?? null,
+      director: fetched.director ?? null,
+      cast: fetched.cast ?? [],
+      mltImdbIds: fetched.mltImdbIds ?? [],
+      franchiseKey: fetched.franchiseKey ?? null,
+      franchiseName: fetched.franchiseName ?? null,
+      franchiseOrder: fetched.franchiseOrder ?? null,
+      synopses: fetched.synopses ?? {},
+      detailFetchedAt: fetched.detailFetchedAt ?? nowMs,
+      updatedAt: fetched.updatedAt ?? nowMs,
+    };
+  };
+
+  const discoveryOps = createCatalogElvDiscoveryOpsMethods({
+    db,
+    clock,
+    enrichmentStore,
+    elvClient,
+    resolveRowLogos,
+    getElvTitleDetail,
+  });
+
   return {
     getElvEnrichmentForKeys: async (itemKeys) =>
       enrichmentStore === undefined ? new Map() : enrichmentStore.getEnrichmentForKeys(itemKeys),
 
-    async getElvTitleDetail(imdbId, opts) {
-      const cached =
-        enrichmentStore === undefined ? null : await enrichmentStore.getTitleByImdbId(imdbId);
-      const langKey = opts?.lang?.trim().toLowerCase();
-      const hasRequestedLang =
-        langKey === undefined || langKey === '' || cached?.synopses[langKey] !== undefined;
-      if (
-        cached !== null &&
-        cached.detailFetchedAt !== null &&
-        opts?.forceRefresh !== true &&
-        (hasRequestedLang || elvClient === undefined)
-      ) {
-        return cached;
-      }
-      if (elvClient === undefined) return cached;
-      const fetched = await elvClient.fetchTitleDetail(imdbId, opts?.lang, opts?.signal);
-      if (fetched === null) return cached;
-      if (enrichmentStore !== undefined) {
-        await enrichmentStore.upsertTitles([fetched]);
-        return enrichmentStore.getTitleByImdbId(imdbId);
-      }
-      const nowMs = clock();
-      return {
-        imdbId: fetched.imdbId,
-        mediaType: fetched.mediaType,
-        originalTitle: fetched.originalTitle,
-        englishTitle: fetched.englishTitle ?? null,
-        localizedTitles: fetched.localizedTitles ?? {},
-        year: fetched.year ?? null,
-        rating: fetched.rating ?? null,
-        votes: fetched.votes ?? null,
-        runtimeMin: fetched.runtimeMin ?? null,
-        genres: fetched.genres ?? [],
-        posterUrl: fetched.posterUrl ?? null,
-        backdropUrl: fetched.backdropUrl ?? null,
-        trailerStreamUrl: fetched.trailerStreamUrl ?? null,
-        trailerYoutubeId: fetched.trailerYoutubeId ?? null,
-        director: fetched.director ?? null,
-        cast: fetched.cast ?? [],
-        mltImdbIds: fetched.mltImdbIds ?? [],
-        franchiseKey: fetched.franchiseKey ?? null,
-        franchiseName: fetched.franchiseName ?? null,
-        franchiseOrder: fetched.franchiseOrder ?? null,
-        synopses: fetched.synopses ?? {},
-        detailFetchedAt: fetched.detailFetchedAt ?? nowMs,
-        updatedAt: fetched.updatedAt ?? nowMs,
-      };
-    },
+    getElvTitleDetail,
 
     listMergedVodVersions: (itemKey, opts) =>
       queryMergedVodVersions(db, enrichmentStore, itemKey, opts),
@@ -283,5 +300,7 @@ export function createCatalogElvOpsMethods(deps: {
           ? { excludedSourceIds: opts.excludedSourceIds }
           : {}),
       }),
+
+    ...discoveryOps,
   };
 }

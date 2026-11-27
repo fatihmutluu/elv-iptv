@@ -19,7 +19,7 @@ export const CONTENT_SECURITY_POLICY = [
   "media-src 'self' blob: https: http:",
   "connect-src 'self' https: http:",
   "worker-src 'self'",
-  "frame-src 'none'",
+  'frame-src https://www.youtube-nocookie.com',
   "form-action 'none'",
   "object-src 'none'",
   "base-uri 'none'",

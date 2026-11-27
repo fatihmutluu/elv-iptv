@@ -1,4 +1,5 @@
 import type { BrowseKind, SeriesUnplayedSummary } from '@elv/data';
+import type { HomeLayoutSectionPref } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import {
   type ContextMenuAnchor,
@@ -39,6 +40,7 @@ import {
   type HomeCollectionRailId,
   type HomeRailEntry,
   type HomeRailKind,
+  type HomeRailSets,
   progressRatio,
 } from './home-model';
 
@@ -55,6 +57,7 @@ export interface HomeRailSpec {
 export function buildHomeRailSpecs(t: AppI18n['t']): readonly HomeRailSpec[] {
   return [
     { id: 'continue', title: t('home.continueWatching'), variant: 'wide' },
+    { id: 'elvShowcase', title: t('home.section.elvShowcase'), variant: 'poster' },
     { id: 'newEpisodes', title: t('home.newEpisodes'), variant: 'wide' },
     {
       id: 'live',
@@ -85,7 +88,7 @@ export function buildHomeRailSpecs(t: AppI18n['t']): readonly HomeRailSpec[] {
 export type HomeRailId = HomeRailKind | HomeCollectionRailId;
 
 /** Props of {@link HomeRail}. */
-export interface HomeRailProps {
+interface HomeRailProps {
   readonly id: HomeRailId;
   readonly title: string;
   readonly actionLabel?: string;
@@ -290,7 +293,7 @@ const RailCardItem = memo(function RailCardItemInner({
         watchedOverride,
       })
     : {};
-  const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
+  const badge = entry.badgeLabel ?? (!isSeries && effectiveWatched ? watchedLabel : undefined);
 
   return (
     <PosterCard
@@ -465,11 +468,11 @@ function HomeRailInner({
  * Reusable Cinema Quietude horizontal rail (`16:9` `WideCard` or `2:3` `PosterCard`) with
  * memoized cards, decode-capped artwork, optional section shortcut, and TV auto-scroll.
  */
-export const HomeRail = memo(HomeRailInner);
+const HomeRail = memo(HomeRailInner);
 HomeRail.displayName = 'HomeRail';
 
 /** Props of {@link HomeCollectionsSection}. */
-export interface HomeCollectionsSectionProps {
+interface HomeCollectionsSectionProps {
   readonly collectionRails: readonly HomeCollectionRail[];
   readonly cardWidth: number;
   readonly gap: number;
@@ -495,7 +498,7 @@ export interface HomeCollectionsSectionProps {
 }
 
 /** Renders non-empty hydrated custom VOD collection horizontal poster rails on Home (`#508`). */
-export function HomeCollectionsSection(p: HomeCollectionsSectionProps): ReactElement | null {
+function HomeCollectionsSection(p: HomeCollectionsSectionProps): ReactElement | null {
   if (p.collectionRails.length === 0) return null;
   return (
     <Fragment>
@@ -527,6 +530,155 @@ export function HomeCollectionsSection(p: HomeCollectionsSectionProps): ReactEle
           onLayoutY={p.onLayoutY}
         />
       ))}
+    </Fragment>
+  );
+}
+
+/** Props of {@link HomeSectionsList}. */
+export interface HomeSectionsListProps {
+  readonly visibleSections: readonly HomeLayoutSectionPref[];
+  readonly railSpecsById: ReadonlyMap<HomeRailKind, HomeRailSpec>;
+  readonly railSets: HomeRailSets;
+  readonly collectionRails: readonly HomeCollectionRail[];
+  readonly wideCardWidth: number;
+  readonly posterCardWidth: number;
+  readonly gap: number;
+  readonly padX: number;
+  readonly isTv: boolean;
+  readonly isTouch: boolean;
+  readonly focusedRowId: string | null;
+  readonly focusedCol: number | null;
+  readonly favoriteKeys: ReadonlySet<string>;
+  readonly watchedOverrides: ReadonlyMap<string, boolean>;
+  readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
+  readonly onOpenTab: (tab: BrowseKind) => void;
+  readonly onPressWideItem: (entry: HomeRailEntry, index: number) => void;
+  readonly onPressPosterItem: (entry: HomeRailEntry, index: number) => void;
+  readonly onContextMenuItem: (
+    railId: HomeRailId,
+    entry: HomeRailEntry,
+    index: number,
+    anchor?: ContextMenuAnchor,
+  ) => void;
+  readonly onQuickPlay: (entry: HomeRailEntry, index: number) => void;
+  readonly onQuickToggleFavorite: (entry: HomeRailEntry) => void;
+  readonly onQuickToggleWatched: (entry: HomeRailEntry, currentWatched: boolean) => void;
+  readonly onLayoutY: (id: HomeRailId, y: number) => void;
+}
+
+/**
+ * Renders the ordered Home horizontal rails including the mixed Movies + Series ELV Showcase
+ * (`home-rail-elv-showcase`) right after Continue Watching (or at top when hidden) (`#512`).
+ */
+export function HomeSectionsList(p: HomeSectionsListProps): ReactElement {
+  const hasContinueSection = p.visibleSections.some((section) => section.id === 'continue');
+  const elvShowcaseSpec = p.railSpecsById.get('elvShowcase');
+  const renderElvShowcase = (): ReactElement | null => {
+    if (!elvShowcaseSpec || p.railSets.elvShowcase.length === 0) return null;
+    return (
+      <HomeRail
+        key="elvShowcase"
+        id="elvShowcase"
+        testID="home-rail-elv-showcase"
+        itemTestIdPrefix="home-elv-showcase-item"
+        title={elvShowcaseSpec.title}
+        variant="poster"
+        items={p.railSets.elvShowcase}
+        cardWidth={p.posterCardWidth}
+        gap={p.gap}
+        padX={p.padX}
+        isTv={p.isTv}
+        isTouch={p.isTouch}
+        focusedIndex={p.focusedRowId === 'elvShowcase' ? p.focusedCol : null}
+        onPressItem={p.onPressPosterItem}
+        onContextMenuItem={(entry, index, anchor) =>
+          p.onContextMenuItem('elvShowcase', entry, index, anchor)
+        }
+        favoriteKeys={p.favoriteKeys}
+        watchedOverrides={p.watchedOverrides}
+        unplayedBySeriesKey={p.unplayedBySeriesKey}
+        onQuickPlay={p.onQuickPlay}
+        onQuickToggleFavorite={p.onQuickToggleFavorite}
+        onQuickToggleWatched={p.onQuickToggleWatched}
+        onLayoutY={p.onLayoutY}
+      />
+    );
+  };
+
+  return (
+    <Fragment>
+      {!hasContinueSection ? renderElvShowcase() : null}
+      {p.visibleSections.map((section) => {
+        if (section.id === 'collections') {
+          return (
+            <HomeCollectionsSection
+              key="collections"
+              collectionRails={p.collectionRails}
+              cardWidth={p.posterCardWidth}
+              gap={p.gap}
+              padX={p.padX}
+              isTv={p.isTv}
+              isTouch={p.isTouch}
+              focusedRowId={p.focusedRowId}
+              focusedCol={p.focusedCol}
+              favoriteKeys={p.favoriteKeys}
+              watchedOverrides={p.watchedOverrides}
+              unplayedBySeriesKey={p.unplayedBySeriesKey}
+              onPressItem={p.onPressPosterItem}
+              onContextMenuItem={p.onContextMenuItem}
+              onQuickPlay={p.onQuickPlay}
+              onQuickToggleFavorite={p.onQuickToggleFavorite}
+              onQuickToggleWatched={p.onQuickToggleWatched}
+              onLayoutY={p.onLayoutY}
+            />
+          );
+        }
+        const spec = p.railSpecsById.get(section.id);
+        if (!spec) return null;
+        const railNode = (
+          <HomeRail
+            key={spec.id}
+            id={spec.id}
+            testID={`home-rail-${spec.id}`}
+            itemTestIdPrefix={`home-${spec.id}-item`}
+            title={spec.title}
+            {...(spec.actionLabel !== undefined ? { actionLabel: spec.actionLabel } : {})}
+            {...(spec.tab !== undefined ? { actionTab: spec.tab, onPressAction: p.onOpenTab } : {})}
+            variant={spec.variant}
+            items={p.railSets[spec.id]}
+            cardWidth={spec.variant === 'wide' ? p.wideCardWidth : p.posterCardWidth}
+            gap={p.gap}
+            padX={p.padX}
+            isTv={p.isTv}
+            isTouch={p.isTouch}
+            focusedIndex={p.focusedRowId === spec.id ? p.focusedCol : null}
+            onPressItem={spec.variant === 'poster' ? p.onPressPosterItem : p.onPressWideItem}
+            onContextMenuItem={(entry, index, anchor) =>
+              p.onContextMenuItem(spec.id, entry, index, anchor)
+            }
+            {...(spec.variant === 'poster'
+              ? {
+                  favoriteKeys: p.favoriteKeys,
+                  watchedOverrides: p.watchedOverrides,
+                  unplayedBySeriesKey: p.unplayedBySeriesKey,
+                  onQuickPlay: p.onQuickPlay,
+                  onQuickToggleFavorite: p.onQuickToggleFavorite,
+                  onQuickToggleWatched: p.onQuickToggleWatched,
+                }
+              : {})}
+            onLayoutY={p.onLayoutY}
+          />
+        );
+        if (section.id === 'continue') {
+          return (
+            <Fragment key="continue-group">
+              {railNode}
+              {renderElvShowcase()}
+            </Fragment>
+          );
+        }
+        return railNode;
+      })}
     </Fragment>
   );
 }

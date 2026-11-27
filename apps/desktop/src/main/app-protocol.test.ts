@@ -9,7 +9,7 @@ const root = resolve('/srv/renderer');
 describe('CONTENT_SECURITY_POLICY', () => {
   it('locks down frames, workers, and form submissions while allowing elv-art cached images', () => {
     const directives = CONTENT_SECURITY_POLICY.split('; ');
-    expect(directives).toContain("frame-src 'none'");
+    expect(directives).toContain('frame-src https://www.youtube-nocookie.com');
     expect(directives).toContain("worker-src 'self'");
     expect(directives).toContain("form-action 'none'");
     expect(directives).toContain("img-src 'self' data: blob: elv-art: https: http:");

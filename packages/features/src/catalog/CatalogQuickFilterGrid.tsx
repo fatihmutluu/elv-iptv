@@ -6,6 +6,7 @@ import type {
   SeriesUnplayedSummary,
   WatchProgressRow,
 } from '@elv/data';
+import { DEFAULT_ELV_MODE_PREFERENCES, type ElvModePreferences } from '@elv/domain';
 import {
   type ContextMenuAnchor,
   PosterCard,
@@ -45,6 +46,7 @@ import {
   type GridFocusPosition,
   itemRowFromFavorite,
 } from './catalog-model';
+import { useElvPicksData } from './useElvPicksData';
 
 const MY_LIST_LIMIT = 250;
 
@@ -55,6 +57,7 @@ export interface CatalogQuickFilterGridProps {
   readonly catalog: CatalogService;
   readonly refreshToken: number;
   readonly userStateVersion: number;
+  readonly elvPreferences?: ElvModePreferences;
   readonly layout: CatalogLayoutMetrics;
   readonly safeBottomInset: number;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
@@ -68,13 +71,14 @@ export interface CatalogQuickFilterGridProps {
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
   readonly onQuickToggleFavorite?: (item: ItemRow) => unknown;
-  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
-  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
+  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => unknown;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => unknown;
 }
 
 interface QuickFilterPosterItemProps {
   readonly item: ItemRow;
   readonly index: number;
+  readonly reasonBadge?: string;
   readonly progress: WatchProgressRow | undefined;
   readonly isFavorite: boolean;
   readonly watchedOverride: boolean | undefined;
@@ -99,6 +103,7 @@ interface QuickFilterPosterItemProps {
 const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
   item,
   index,
+  reasonBadge,
   progress,
   isFavorite,
   watchedOverride,
@@ -233,7 +238,7 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
         watchedOverride,
       })
     : {};
-  const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
+  const badge = reasonBadge ?? (!isSeries && effectiveWatched ? watchedLabel : undefined);
 
   return (
     <PosterCard
@@ -266,6 +271,7 @@ export function CatalogQuickFilterGrid({
   catalog,
   refreshToken,
   userStateVersion,
+  elvPreferences,
   layout,
   safeBottomInset,
   progressByKey,
@@ -285,15 +291,36 @@ export function CatalogQuickFilterGrid({
   const theme = useTheme();
   const i18n = useI18n();
   const scrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
+  const mountedRef = useRef(true);
+  const elvPrefs = elvPreferences ?? DEFAULT_ELV_MODE_PREFERENCES;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const [favoriteRows, setFavoriteRows] = useState<readonly FavoriteRow[]>([]);
   const [favoriteLoaded, setFavoriteLoaded] = useState(false);
+  const [picksRefreshTick, setPicksRefreshTick] = useState(0);
   const [optimisticRemovedFavKeys, setOptimisticRemovedFavKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const [extraProgress, setExtraProgress] = useState<ReadonlyMap<string, WatchProgressRow>>(
     () => new Map(),
   );
+
+  const elvPicksData = useElvPicksData({
+    enabled: filter === 'elvPicks',
+    kind,
+    catalog,
+    refreshToken,
+    userStateVersion,
+    localRefreshTick: picksRefreshTick,
+    elvPrefs,
+    i18n,
+  });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion reload My List on external changes
   useEffect(() => {
@@ -332,11 +359,12 @@ export function CatalogQuickFilterGrid({
   }, [catalog, filter, kind, refreshToken, userStateVersion]);
 
   const mergedProgress = useMemo<ReadonlyMap<string, WatchProgressRow>>(() => {
-    if (extraProgress.size === 0) return progressByKey;
+    const sourceProgress = filter === 'elvPicks' ? elvPicksData.progressByKey : extraProgress;
+    if (sourceProgress.size === 0) return progressByKey;
     const merged = new Map(progressByKey);
-    for (const [k, v] of extraProgress) merged.set(k, v);
+    for (const [k, v] of sourceProgress) merged.set(k, v);
     return merged;
-  }, [extraProgress, progressByKey]);
+  }, [elvPicksData.progressByKey, extraProgress, filter, progressByKey]);
 
   const restoreRemovedFavKey = useCallback((itemKey: string) => {
     setOptimisticRemovedFavKeys((prev) => {
@@ -346,6 +374,10 @@ export function CatalogQuickFilterGrid({
       return next;
     });
   }, []);
+
+  const bumpPicksIfActive = useCallback(() => {
+    if (mountedRef.current && filter === 'elvPicks') setPicksRefreshTick((t) => t + 1);
+  }, [filter]);
 
   const handleToggleFavorite = useCallback(
     (item: ItemRow) => {
@@ -358,25 +390,72 @@ export function CatalogQuickFilterGrid({
       }
       try {
         const result = onQuickToggleFavorite?.(item);
-        if (
-          filter === 'mylist' &&
-          result !== undefined &&
-          typeof (result as PromiseLike<unknown>).then === 'function'
-        ) {
+        if (result !== undefined && typeof (result as PromiseLike<unknown>).then === 'function') {
           void Promise.resolve(result)
             .then((ok) => {
-              if (ok === false) restoreRemovedFavKey(item.key);
+              if (!mountedRef.current) return;
+              if (filter === 'mylist' && ok === false) restoreRemovedFavKey(item.key);
+              if (filter === 'elvPicks' && ok !== false) bumpPicksIfActive();
             })
             .catch(() => {
-              restoreRemovedFavKey(item.key);
+              if (mountedRef.current && filter === 'mylist') restoreRemovedFavKey(item.key);
             });
+        } else {
+          bumpPicksIfActive();
         }
       } catch {
         if (filter === 'mylist') restoreRemovedFavKey(item.key);
       }
     },
-    [filter, onQuickToggleFavorite, restoreRemovedFavKey],
+    [bumpPicksIfActive, filter, onQuickToggleFavorite, restoreRemovedFavKey],
   );
+
+  const handleToggleWatched = useCallback(
+    (item: ItemRow, currentWatched: boolean) => {
+      try {
+        const result = onQuickToggleWatched?.(item, currentWatched);
+        if (result !== undefined && typeof (result as PromiseLike<unknown>).then === 'function') {
+          void Promise.resolve(result)
+            .then((ok) => {
+              if (mountedRef.current && ok !== false) bumpPicksIfActive();
+            })
+            .catch(() => undefined);
+        } else {
+          bumpPicksIfActive();
+        }
+      } catch {
+        // Ignore synchronous callback errors; keep current picks intact.
+      }
+    },
+    [bumpPicksIfActive, onQuickToggleWatched],
+  );
+
+  const handleToggleRating = useCallback(
+    (item: ItemRow, next: RatingValue) => {
+      try {
+        const result = onQuickToggleRating?.(item, next);
+        if (result !== undefined && typeof (result as PromiseLike<unknown>).then === 'function') {
+          void Promise.resolve(result)
+            .then((ok) => {
+              if (mountedRef.current && ok !== false) bumpPicksIfActive();
+            })
+            .catch(() => undefined);
+        } else {
+          bumpPicksIfActive();
+        }
+      } catch {
+        // Ignore synchronous callback errors; keep current picks intact.
+      }
+    },
+    [bumpPicksIfActive, onQuickToggleRating],
+  );
+
+  const reasonByKey = useMemo<ReadonlyMap<string, string>>(() => {
+    if (filter !== 'elvPicks' || elvPicksData.picks.length === 0) return new Map();
+    const map = new Map<string, string>();
+    for (const pick of elvPicksData.picks) map.set(pick.item.key, pick.reasonLabel);
+    return map;
+  }, [elvPicksData.picks, filter]);
 
   const items = useMemo<readonly ItemRow[]>(() => {
     if (filter === 'mylist') {
@@ -384,8 +463,8 @@ export function CatalogQuickFilterGrid({
         .filter((row) => !optimisticRemovedFavKeys.has(row.itemKey))
         .map((row) => itemRowFromFavorite(row, kind));
     }
-    return [];
-  }, [favoriteRows, filter, kind, optimisticRemovedFavKeys]);
+    return elvPicksData.picks.map((pick) => pick.item);
+  }, [elvPicksData.picks, favoriteRows, filter, kind, optimisticRemovedFavKeys]);
 
   if (gridAccessRef !== undefined) {
     gridAccessRef.current = {
@@ -414,14 +493,16 @@ export function CatalogQuickFilterGrid({
     [i18n],
   );
 
-  const isSettled = filter === 'mylist' ? favoriteLoaded : true;
+  const isSettled = filter === 'mylist' ? favoriteLoaded : elvPicksData.loaded;
   if (isSettled && items.length === 0) {
     return (
       <CatalogEmptyState
         testID={filter === 'mylist' ? 'catalog-empty-mylist' : 'catalog-empty-elv-picks'}
-        title={i18n.t(filter === 'mylist' ? 'catalog.emptyMyListTitle' : 'catalog.filter.elvPicks')}
+        title={i18n.t(
+          filter === 'mylist' ? 'catalog.emptyMyListTitle' : 'catalog.elvPicks.emptyTitle',
+        )}
         description={i18n.t(
-          filter === 'mylist' ? 'catalog.emptyMyListBody' : 'browse.emptyCategories',
+          filter === 'mylist' ? 'catalog.emptyMyListBody' : 'catalog.elvPicks.emptyBody',
         )}
         layout={layout}
       />
@@ -449,34 +530,42 @@ export function CatalogQuickFilterGrid({
         },
       ]}
     >
-      {items.map((item, index) => (
-        <QuickFilterPosterItem
-          key={item.key}
-          item={item}
-          index={index}
-          progress={mergedProgress.get(item.key)}
-          isFavorite={filter === 'mylist' ? true : favoriteKeys.has(item.key)}
-          watchedOverride={watchedOverrides.get(item.key)}
-          currentRating={ratingByKey?.get(item.key) ?? null}
-          unplayedSummary={unplayedBySeriesKey?.get(item.key)}
-          watchedLabel={watchedLabel}
-          formatQuickPlay={formatQuickPlay}
-          addToListLabel={addToListLabel}
-          inMyListLabel={inMyListLabel}
-          markWatchedLabel={markWatchedLabel}
-          markUnwatchedLabel={markUnwatchedLabel}
-          cardWidth={layout.gridCardWidth}
-          isTv={layout.isTv}
-          focused={index === focusedIndex}
-          onOpenDetail={onOpenDetail}
-          {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
-          {...(onQuickToggleFavorite !== undefined
-            ? { onQuickToggleFavorite: handleToggleFavorite }
-            : {})}
-          {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
-          {...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {})}
-        />
-      ))}
+      {items.map((item, index) => {
+        const reasonBadge = reasonByKey.get(item.key);
+        return (
+          <QuickFilterPosterItem
+            key={item.key}
+            item={item}
+            index={index}
+            {...(reasonBadge !== undefined ? { reasonBadge } : {})}
+            progress={mergedProgress.get(item.key)}
+            isFavorite={filter === 'mylist' ? true : favoriteKeys.has(item.key)}
+            watchedOverride={watchedOverrides.get(item.key)}
+            currentRating={ratingByKey?.get(item.key) ?? null}
+            unplayedSummary={unplayedBySeriesKey?.get(item.key)}
+            watchedLabel={watchedLabel}
+            formatQuickPlay={formatQuickPlay}
+            addToListLabel={addToListLabel}
+            inMyListLabel={inMyListLabel}
+            markWatchedLabel={markWatchedLabel}
+            markUnwatchedLabel={markUnwatchedLabel}
+            cardWidth={layout.gridCardWidth}
+            isTv={layout.isTv}
+            focused={index === focusedIndex}
+            onOpenDetail={onOpenDetail}
+            {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
+            {...(onQuickToggleFavorite !== undefined
+              ? { onQuickToggleFavorite: handleToggleFavorite }
+              : {})}
+            {...(onQuickToggleWatched !== undefined
+              ? { onQuickToggleWatched: handleToggleWatched }
+              : {})}
+            {...(onQuickToggleRating !== undefined
+              ? { onQuickToggleRating: handleToggleRating }
+              : {})}
+          />
+        );
+      })}
     </ScrollView>
   );
 }

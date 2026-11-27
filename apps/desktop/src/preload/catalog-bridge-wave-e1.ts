@@ -1,10 +1,11 @@
 import type { CatalogRpcMethodCall } from '../shared/catalog-ipc.ts';
 import type { CatalogBridgeWaveE1Ops } from '../shared/catalog-ipc-wave-e1-guards.ts';
+import type { CatalogBridgeWaveE2Ops } from '../shared/catalog-ipc-wave-e2-guards.ts';
 
-/** Builds the preload bridge delegates for all Wave E1 ELV Mode RPC methods (`#511`). */
+/** Builds the preload bridge delegates for all Wave E1 & Wave E2 ELV Mode RPC methods (`#511`, `#512`). */
 export function createCatalogBridgeWaveE1Ops(
   callValue: <T>(call: CatalogRpcMethodCall) => Promise<T>,
-): Required<CatalogBridgeWaveE1Ops> {
+): Required<CatalogBridgeWaveE1Ops & CatalogBridgeWaveE2Ops> {
   return {
     getElvEnrichmentForKeys: (itemKeys) =>
       callValue({ method: 'getElvEnrichmentForKeys', itemKeys }),
@@ -57,5 +58,39 @@ export function createCatalogBridgeWaveE1Ops(
         channelName,
         ...(opts === undefined ? {} : { opts }),
       }),
+    listElvImdbGenres: (kind, opts) =>
+      callValue({
+        method: 'listElvImdbGenres',
+        kind,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    listElvItemsByImdbGenre: (kind, genre, opts) =>
+      callValue({
+        method: 'listElvItemsByImdbGenre',
+        kind,
+        genre,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    getElvRecommendations: (opts) => callValue({ method: 'getElvRecommendations', opts }),
+    refreshElvFeeds: (opts) =>
+      callValue({
+        method: 'refreshElvFeeds',
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    listElvFranchiseItems: (imdbId, opts) =>
+      callValue({
+        method: 'listElvFranchiseItems',
+        imdbId,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    listElvPersonLibraryItems: (person, opts) =>
+      callValue({
+        method: 'listElvPersonLibraryItems',
+        person,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    searchElvMatchCandidates: (query, mediaType) =>
+      callValue({ method: 'searchElvMatchCandidates', query, mediaType }),
+    applyElvFixMatch: (input) => callValue({ method: 'applyElvFixMatch', input }),
   };
 }

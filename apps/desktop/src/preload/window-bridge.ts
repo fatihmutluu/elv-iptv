@@ -118,6 +118,10 @@ export function createWindowBridge(ipc: WindowIpcRendererLike): WindowBridge {
         ipc.removeListener(WINDOW_CHANNELS.hiddenToTray, wrapped);
       };
     },
+    async openExternalUrl(url: string): Promise<boolean> {
+      const reply = await ipc.invoke(WINDOW_CHANNELS.openExternalUrl, url);
+      return reply === true;
+    },
   };
   return Object.freeze(bridge);
 }

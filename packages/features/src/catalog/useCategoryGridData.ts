@@ -16,6 +16,7 @@ import {
   useSeriesUnplayedCounts,
 } from '../shared';
 import { ALPHABET_RAIL_MIN_ITEMS, GRID_MAX_PAGES, GRID_PAGE_SIZE } from './catalog-model';
+import { isElvImdbGenreCategoryId } from './elv-genre-label';
 
 const EMPTY_BUCKETS: readonly AlphabetBucket[] = [];
 
@@ -67,6 +68,35 @@ export function useCategoryGridData({
   const uiCacheRef = useRef(uiCache);
   uiCacheRef.current = uiCache;
 
+  const loadCategoryPage = useCallback(
+    async (
+      catId: string,
+      offset: number,
+      limit: number,
+      activeSortBy: ItemSortOrder,
+    ): Promise<readonly ItemRow[]> => {
+      if (
+        isElvImdbGenreCategoryId(catId) &&
+        typeof catalog.listElvItemsByImdbGenre === 'function'
+      ) {
+        return catalog.listElvItemsByImdbGenre(kind, catId, {
+          offset,
+          limit,
+          ...(activeSortBy === 'alpha' ? { sortBy: 'alpha' as const } : {}),
+        });
+      }
+      const itemOpts =
+        activeSortBy === 'alpha' || effectiveGroupVersions
+          ? {
+              ...(activeSortBy === 'alpha' ? { sortBy: 'alpha' as const } : {}),
+              ...(effectiveGroupVersions ? { groupVersions: true } : {}),
+            }
+          : undefined;
+      return catalog.items(catId, offset, limit, itemOpts);
+    },
+    [catalog, effectiveGroupVersions, kind],
+  );
+
   const buildSource = useCallback(
     (
       catId: string,
@@ -80,14 +110,7 @@ export function useCategoryGridData({
         maxPages: GRID_MAX_PAGES,
         ...(initialPage0 !== undefined ? { initialPage0 } : {}),
         loadPage: async (offset, limit) => {
-          const itemOpts =
-            activeSortBy === 'alpha' || effectiveGroupVersions
-              ? {
-                  ...(activeSortBy === 'alpha' ? { sortBy: 'alpha' as const } : {}),
-                  ...(effectiveGroupVersions ? { groupVersions: true } : {}),
-                }
-              : undefined;
-          const rows = await catalog.items(catId, offset, limit, itemOpts);
+          const rows = await loadCategoryPage(catId, offset, limit, activeSortBy);
           if (offset === 0 && rows.length > 0 && activeSortBy === 'default') {
             uiCacheRef.current?.setGridFirstPage(kind, catId, rows, {
               groupVersions: effectiveGroupVersions,
@@ -96,7 +119,7 @@ export function useCategoryGridData({
           return rows;
         },
       }),
-    [catalog, effectiveGroupVersions, kind],
+    [effectiveGroupVersions, kind, loadCategoryPage],
   );
 
   const initialSourceRef = useRef<{
@@ -175,7 +198,12 @@ export function useCategoryGridData({
     const count = category.row.itemCount;
     const cacheKey = `${catId}|${effectiveGroupVersions ? 'gv' : 'raw'}`;
 
-    if (sortBy !== 'alpha' || count < ALPHABET_RAIL_MIN_ITEMS || !catalog.alphabetIndex) {
+    if (
+      sortBy !== 'alpha' ||
+      count < ALPHABET_RAIL_MIN_ITEMS ||
+      !catalog.alphabetIndex ||
+      isElvImdbGenreCategoryId(catId)
+    ) {
       setAlphabetBuckets(EMPTY_BUCKETS);
       return;
     }
@@ -289,15 +317,7 @@ export function useCategoryGridData({
     }
 
     // Keep previously rendered rows visible while fetching fresh page 0 of the target category.
-    const page0Opts =
-      sortBy === 'alpha' || effectiveGroupVersions
-        ? {
-            ...(sortBy === 'alpha' ? { sortBy: 'alpha' as const } : {}),
-            ...(effectiveGroupVersions ? { groupVersions: true } : {}),
-          }
-        : undefined;
-    void catalog
-      .items(catId, 0, Math.min(GRID_PAGE_SIZE, count), page0Opts)
+    void loadCategoryPage(catId, 0, Math.min(GRID_PAGE_SIZE, count), sortBy)
       .then((rows) => {
         if (!alive) return;
         if (rows.length > 0 && sortBy === 'default') {
@@ -322,6 +342,7 @@ export function useCategoryGridData({
     cols,
     effectiveGroupVersions,
     kind,
+    loadCategoryPage,
     refreshToken,
     sortBy,
     visibleGridRows,

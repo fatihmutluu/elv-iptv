@@ -113,6 +113,7 @@ describe('window-ipc (#408)', () => {
       popoutPayload: 'window:popout-payload',
       dockPopout: 'window:dock-popout',
       popoutDocked: 'window:popout-docked',
+      openExternalUrl: 'window:open-external-url',
     });
     expect(isAlwaysOnTopFlag(true)).toBe(true);
     expect(isAlwaysOnTopFlag(false)).toBe(true);

@@ -27,6 +27,7 @@ import {
   type PrimaryPlayAction,
   SYNOPSIS_EXPAND_THRESHOLD,
 } from './detail-model';
+import { formatCompactVotes } from './detail-trailer-utils';
 
 /** Focusable interactive slot identifiers inside {@link DetailHero}. */
 export type DetailHeroFocusSlot =
@@ -36,9 +37,11 @@ export type DetailHeroFocusSlot =
   | 'dislike'
   | 'watched'
   | 'download'
+  | 'trailer'
   | 'play'
   | 'preplay-version'
-  | 'synopsis';
+  | 'synopsis'
+  | 'fix-match';
 
 /** Visual state for the movie offline download icon button in {@link DetailHero}. */
 export interface DetailHeroDownloadState {
@@ -54,11 +57,16 @@ export interface DetailHeroProps {
   readonly backdropUri: string | null;
   readonly year: number | null;
   readonly rating: number | null;
+  readonly votes?: number | null;
+  readonly runtimeMin?: number | null;
+  readonly manualLock?: boolean;
   readonly plot: string | null;
   readonly genres?: readonly string[];
   readonly isEnriched?: boolean;
   readonly downloadState?: DetailHeroDownloadState;
   readonly onPressDownload?: () => void;
+  readonly onPressTrailer?: () => void;
+  readonly onPressFixMatch?: () => void;
   readonly technicalMeta?: DetailTechnicalMeta;
   readonly seasonsCount: number;
   readonly inMyList: boolean;
@@ -104,11 +112,16 @@ function DetailHeroInner({
   backdropUri,
   year,
   rating,
+  votes = null,
+  runtimeMin = null,
+  manualLock = false,
   plot,
   genres,
   isEnriched = false,
   downloadState,
   onPressDownload,
+  onPressTrailer,
+  onPressFixMatch,
   technicalMeta,
   seasonsCount,
   inMyList,
@@ -341,6 +354,16 @@ function DetailHeroInner({
                   onPress={onPressDownload}
                 />
               ) : null}
+              {onPressTrailer !== undefined ? (
+                <IconButton
+                  testID="detail-trailer"
+                  icon="film"
+                  accessibilityLabel={i18n.t('detail.action.trailer')}
+                  focusable={!isTv}
+                  focused={isTv && focusedSlot === 'trailer'}
+                  onPress={onPressTrailer}
+                />
+              ) : null}
             </View>
 
             <View style={styles.ctaWrap}>
@@ -398,6 +421,21 @@ function DetailHeroInner({
                   {`★ ${rating.toFixed(1)}`}
                 </Text>
               ) : null}
+              {(() => {
+                const formattedVotes = formatCompactVotes(votes);
+                return formattedVotes !== null ? (
+                  <Text
+                    testID="detail-votes"
+                    style={[
+                      theme.typography.caption,
+                      TABULAR_NUMS_STYLE,
+                      { color: theme.colors.textMuted },
+                    ]}
+                  >
+                    {i18n.t('detail.votesCount', { count: formattedVotes })}
+                  </Text>
+                ) : null;
+              })()}
               {year !== null && Number.isFinite(year) ? (
                 <Text
                   testID="detail-year"
@@ -408,6 +446,18 @@ function DetailHeroInner({
                   ]}
                 >
                   {String(year)}
+                </Text>
+              ) : null}
+              {runtimeMin !== null && Number.isFinite(runtimeMin) && runtimeMin > 0 ? (
+                <Text
+                  testID="detail-runtime"
+                  style={[
+                    theme.typography.caption,
+                    TABULAR_NUMS_STYLE,
+                    { color: theme.colors.textSecondary },
+                  ]}
+                >
+                  {i18n.t('detail.runtimeMin', { minutes: Math.round(runtimeMin) })}
                 </Text>
               ) : null}
               <MicroPill label={kindLabel} testID="detail-kind-pill" />
@@ -446,6 +496,13 @@ function DetailHeroInner({
                   testID="detail-enrichment-badge"
                 />
               ) : null}
+              {manualLock ? (
+                <MicroPill
+                  label={i18n.t('detail.fixMatch.lockedBadge')}
+                  tone="accent"
+                  testID="detail-fix-match-locked"
+                />
+              ) : null}
               {technicalBadges.map((badge) => (
                 <MicroPill
                   key={badge.key}
@@ -454,6 +511,40 @@ function DetailHeroInner({
                 />
               ))}
             </View>
+
+            {onPressFixMatch !== undefined ? (
+              <View style={styles.secondaryMetaRow}>
+                <Pressable
+                  testID="detail-fix-match-btn"
+                  accessibilityRole="button"
+                  accessibilityLabel={i18n.t('detail.fixMatch.action')}
+                  focusable={!isTv}
+                  onPress={onPressFixMatch}
+                  style={({ pressed }) => [
+                    styles.quietPillBtn,
+                    cursor,
+                    transition,
+                    {
+                      borderRadius: theme.radius.button,
+                      backgroundColor:
+                        isTv && focusedSlot === 'fix-match'
+                          ? theme.colors.focusFill
+                          : 'transparent',
+                      borderColor:
+                        isTv && focusedSlot === 'fix-match'
+                          ? theme.colors.focusRingColor
+                          : theme.colors.actionGlassBorder,
+                      borderWidth: isTv && focusedSlot === 'fix-match' ? theme.focus.ringWidth : 1,
+                      opacity: pressed ? 0.78 : 1,
+                    },
+                  ]}
+                >
+                  <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+                    {i18n.t('detail.fixMatch.action')}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             <DetailSynopsisBlock
               synopsis={synopsis}
@@ -525,4 +616,15 @@ const styles = StyleSheet.create({
   metaCol: { minWidth: 0 },
   metaColFlex: { flex: 1 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
+  secondaryMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  quietPillBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
 });

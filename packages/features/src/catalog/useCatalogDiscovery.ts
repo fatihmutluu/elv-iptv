@@ -1,12 +1,14 @@
 import type {
   CatalogService,
   CategoryRow,
+  ElvGenreBucket,
   ItemRow,
   ItemSortOrder,
   SeriesUnplayedSummary,
   SourceRow,
   WatchProgressRow,
 } from '@elv/data';
+import type { AppI18n } from '@elv/i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   batchLoadProgressByKeys,
@@ -22,6 +24,7 @@ import {
   MAX_CONCURRENT_RAIL_QUERIES,
   RAIL_ITEM_LIMIT,
 } from './catalog-model';
+import { buildImdbGenreDisplayCategories, isElvImdbGenreCategoryId } from './elv-genre-label';
 
 export { useCatalogTabMemory } from './useCatalogTabMemory';
 
@@ -36,6 +39,12 @@ export interface UseCatalogDiscoveryOptions {
   readonly visibleCategoryCount: number;
   readonly sortBy?: ItemSortOrder;
   readonly groupVersions?: boolean;
+  /** When `true`, derives category rails from matched IMDb genres with graceful provider fallback (`#512`). */
+  readonly useImdbGenres?: boolean;
+  /** Translator used to localize IMDb genre labels when `useImdbGenres` is enabled. */
+  readonly translate?: AppI18n['t'];
+  /** Active UI locale tag so live language switches re-translate IMDb genre labels immediately. */
+  readonly locale?: string;
   readonly onVisibleCategoryCountChange: (nextCount: number) => void;
   readonly onClearStaleCategory?: () => void;
 }
@@ -78,6 +87,9 @@ export function useCatalogDiscovery({
   visibleCategoryCount,
   sortBy = 'default',
   groupVersions = false,
+  useImdbGenres = false,
+  translate,
+  locale,
   onVisibleCategoryCountChange,
   onClearStaleCategory,
 }: UseCatalogDiscoveryOptions): CatalogDiscoveryState {
@@ -115,8 +127,11 @@ export function useCatalogDiscovery({
   const lastRefreshTokenRef = useRef(refreshToken);
   const lastSortByRef = useRef<ItemSortOrder>(sortBy);
   const lastGroupVersionsRef = useRef<boolean>(effectiveGroupVersions);
+  const lastUseImdbGenresRef = useRef<boolean>(useImdbGenres);
   const uiCacheRef = useRef(uiCache);
   uiCacheRef.current = uiCache;
+  const translateRef = useRef(translate);
+  translateRef.current = translate;
 
   const categoriesRef = useRef(categories);
   categoriesRef.current = categories;
@@ -190,6 +205,7 @@ export function useCatalogDiscovery({
     userStateVersion,
   ]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: locale re-translates IMDb genre labels on live language switch
   useEffect(() => {
     catGenRef.current += 1;
     const gen = catGenRef.current;
@@ -215,9 +231,11 @@ export function useCatalogDiscovery({
 
     const tokenBumped =
       lastRefreshTokenRef.current !== refreshToken ||
-      lastGroupVersionsRef.current !== effectiveGroupVersions;
+      lastGroupVersionsRef.current !== effectiveGroupVersions ||
+      lastUseImdbGenresRef.current !== useImdbGenres;
     lastRefreshTokenRef.current = refreshToken;
     lastGroupVersionsRef.current = effectiveGroupVersions;
+    lastUseImdbGenresRef.current = useImdbGenres;
 
     // Only show skeleton on cold start; keep previous categories & rails visible during refresh.
     if (!hasLoadedRef.current) {
@@ -229,18 +247,32 @@ export function useCatalogDiscovery({
 
     const loadCategories = async () => {
       try {
-        const catOpts = effectiveGroupVersions ? { groupVersions: true } : undefined;
-        const perSource = await Promise.all(
-          activeSources.map(async (source) => {
-            const rows = await catalog
-              .categories(source.id, kind, catOpts)
-              .catch(() => [] as CategoryRow[]);
-            return [source.id, rows] as const;
-          }),
-        );
-        if (catGenRef.current !== gen) return;
-        const bySource = new Map<string, readonly CategoryRow[]>(perSource);
-        const nextCategories = buildSharedDisplayCategories(activeSources, bySource);
+        let nextCategories: DisplayCategory[] = [];
+        if (useImdbGenres && typeof catalog.listElvImdbGenres === 'function') {
+          const buckets = await catalog
+            .listElvImdbGenres(kind)
+            .catch(() => [] as readonly ElvGenreBucket[]);
+          if (catGenRef.current !== gen) return;
+          if (buckets.length > 0) {
+            const tFn: AppI18n['t'] =
+              translateRef.current ?? (((id: string) => id) as unknown as AppI18n['t']);
+            nextCategories = buildImdbGenreDisplayCategories(buckets, kind, tFn);
+          }
+        }
+        if (nextCategories.length === 0) {
+          const catOpts = effectiveGroupVersions ? { groupVersions: true } : undefined;
+          const perSource = await Promise.all(
+            activeSources.map(async (source) => {
+              const rows = await catalog
+                .categories(source.id, kind, catOpts)
+                .catch(() => [] as CategoryRow[]);
+              return [source.id, rows] as const;
+            }),
+          );
+          if (catGenRef.current !== gen) return;
+          const bySource = new Map<string, readonly CategoryRow[]>(perSource);
+          nextCategories = buildSharedDisplayCategories(activeSources, bySource);
+        }
         const validIds = new Set(nextCategories.map((c) => c.row.id));
 
         const prunedRails = new Map<string, readonly ItemRow[]>();
@@ -276,7 +308,16 @@ export function useCatalogDiscovery({
     return () => {
       catGenRef.current += 1;
     };
-  }, [catalog, effectiveGroupVersions, kind, refreshToken, sources, syncCache]);
+  }, [
+    catalog,
+    effectiveGroupVersions,
+    kind,
+    locale,
+    refreshToken,
+    sources,
+    syncCache,
+    useImdbGenres,
+  ]);
 
   const visibleCategories = useMemo(
     () => categories.slice(0, Math.max(0, visibleCategoryCount)),
@@ -331,9 +372,19 @@ export function useCatalogDiscovery({
                     ...(effectiveGroupVersions ? { groupVersions: true } : {}),
                   }
                 : undefined;
-            const rows = await catalog
-              .items(target.row.id, 0, RAIL_ITEM_LIMIT, itemOpts)
-              .catch(() => [] as ItemRow[]);
+            const rows =
+              isElvImdbGenreCategoryId(target.row.id) &&
+              typeof catalog.listElvItemsByImdbGenre === 'function'
+                ? await catalog
+                    .listElvItemsByImdbGenre(kind, target.row.id, {
+                      offset: 0,
+                      limit: RAIL_ITEM_LIMIT,
+                      ...(sortBy === 'alpha' ? { sortBy: 'alpha' as const } : {}),
+                    })
+                    .catch(() => [] as ItemRow[])
+                : await catalog
+                    .items(target.row.id, 0, RAIL_ITEM_LIMIT, itemOpts)
+                    .catch(() => [] as ItemRow[]);
             if (railGenRef.current !== gen) return;
             fetched.set(target.row.id, rows);
           }

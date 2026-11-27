@@ -24,6 +24,7 @@ export const WINDOW_CHANNELS = Object.freeze({
   popoutPayload: 'window:popout-payload',
   dockPopout: 'window:dock-popout',
   popoutDocked: 'window:popout-docked',
+  openExternalUrl: 'window:open-external-url',
 } as const);
 
 /** Localized context menu labels for the desktop system tray (`#158`). */
@@ -73,6 +74,34 @@ export interface WindowBridge {
   onPopoutDocked(listener: (payload: PopoutDockPayload) => void): () => void;
   onWindowRestored(listener: () => void): () => void;
   onHiddenToTray(listener: () => void): () => void;
+  openExternalUrl?(url: string): Promise<boolean>;
+}
+
+const ALLOWED_EXTERNAL_TRAILER_HOSTS = new Set([
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'youtu.be',
+  'www.youtube-nocookie.com',
+]);
+
+/** Validates that a requested external URL is a clean HTTPS YouTube URL without credentials or custom ports (`#512`). */
+export function isAllowedExternalTrailerUrl(x: unknown): x is string {
+  if (typeof x !== 'string') return false;
+  const trimmed = x.trim();
+  if (trimmed.length === 0 || trimmed.length > 512 || /[\s\0]/.test(trimmed)) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return (
+      parsed.protocol === 'https:' &&
+      parsed.username === '' &&
+      parsed.password === '' &&
+      parsed.port === '' &&
+      ALLOWED_EXTERNAL_TRAILER_HOSTS.has(parsed.hostname.toLowerCase())
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Validates the boolean payload sent over `window:set-always-on-top` and `window:always-on-top-changed`. */

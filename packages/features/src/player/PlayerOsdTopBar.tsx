@@ -43,6 +43,8 @@ export interface PlayerOsdProps {
   hasPreviousChannel?: boolean;
   isChannelPreview?: boolean;
   hasNextEpisodeAction?: boolean;
+  hasXray?: boolean;
+  xrayOpen?: boolean;
   canLock?: boolean;
   showRetry: boolean;
   isTv: boolean;
@@ -90,6 +92,7 @@ export interface PlayerOsdProps {
   onToggleResizeMode?: () => void;
   onToggleInfo?: () => void;
   onToggleChannelList?: () => void;
+  onToggleXray?: () => void;
   onPlayNextEpisode?: () => void;
   onPrevChapter?: () => void;
   onNextChapter?: () => void;

@@ -474,6 +474,18 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     },
     searchElvItemKeysByAlias: async (query, opts) =>
       (await open()).searchElvItemKeysByAlias?.(query, opts) ?? [],
+    listElvImdbGenres: async (kind, opts) => (await open()).listElvImdbGenres?.(kind, opts) ?? [],
+    listElvItemsByImdbGenre: async (kind, genre, opts) =>
+      (await open()).listElvItemsByImdbGenre?.(kind, genre, opts) ?? [],
+    getElvRecommendations: async (opts) => (await open()).getElvRecommendations?.(opts) ?? [],
+    refreshElvFeeds: async (opts) => (await open()).refreshElvFeeds?.(opts) ?? false,
+    listElvFranchiseItems: async (imdbId, opts) =>
+      (await open()).listElvFranchiseItems?.(imdbId, opts) ?? [],
+    listElvPersonLibraryItems: async (person, opts) =>
+      (await open()).listElvPersonLibraryItems?.(person, opts) ?? [],
+    searchElvMatchCandidates: async (query, mediaType, opts) =>
+      (await open()).searchElvMatchCandidates?.(query, mediaType, opts) ?? [],
+    applyElvFixMatch: async (input) => (await open()).applyElvFixMatch?.(input) ?? null,
     listLiveVariants: async (itemKey, categoryId, opts) =>
       (await open()).listLiveVariants?.(itemKey, categoryId, opts) ?? [],
     findGuideChannelByCleanName: async (sourceId, channelName, opts) =>

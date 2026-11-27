@@ -39,6 +39,7 @@ export interface PlayerControlsParams {
   hasSettings?: boolean;
   hasInfo?: boolean;
   hasChannelList?: boolean;
+  hasXray?: boolean;
   hasNextEpisode?: boolean;
   hasPreviousChannel?: boolean;
   hasBackToLive?: boolean;
@@ -119,6 +120,7 @@ export interface PlayerControlsParams {
   onEnterPip?: (() => void) | undefined;
   onEnterMultiView?: (() => void) | undefined;
   onPopoutPlayer?: (() => void) | undefined;
+  onToggleXray?: (() => void) | undefined;
   tvBackMinimizesLive?: boolean | undefined;
   /** When `true`, suspends player remote/keyboard shortcuts while a root overlay is open. */
   externalOverlayOpen?: boolean | undefined;

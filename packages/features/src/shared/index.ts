@@ -64,6 +64,7 @@ export {
   formatRemoteKeyLabel,
   mapWebKeyToRemoteKey,
 } from './keymap-routing';
+export type { PersonLibraryModalPerson } from './PersonLibraryModal';
 export {
   DEFAULT_PROFILE_RECORD,
   defaultParentalSettings,
