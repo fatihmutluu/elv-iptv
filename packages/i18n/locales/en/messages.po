@@ -4273,3 +4273,282 @@ msgstr "View in library"
 
 msgid "player.xray.empty"
 msgstr "No cast metadata available for this title."
+
+msgid "elv.preview.badgeClean"
+msgstr "ELV Mode Active"
+
+msgid "elv.preview.badgeRaw"
+msgstr "Raw IPTV Feed"
+
+msgid "elv.preview.captionAllOn"
+msgstr "Clean posters, IMDb ratings, merged copies, and curated genres."
+
+msgid "elv.preview.captionChaos"
+msgstr "Toggle ELV Mode features on to tame duplicates, broken art, and messy folders."
+
+msgid "elv.preview.genre.scifi"
+msgstr "Sci-Fi"
+
+msgid "elv.preview.genre.drama"
+msgstr "Drama"
+
+msgid "elv.preview.genre.thriller"
+msgstr "Thriller"
+
+msgid "elv.preview.genre.mystery"
+msgstr "Mystery"
+
+msgid "elv.preview.rawCat1"
+msgstr "### === VIP VOD 2026 === ###"
+
+msgid "elv.preview.rawCat2"
+msgstr "*** 4K_NEW_MIX_2025 ***"
+
+msgid "elv.preview.rawCat3"
+msgstr "HD | MOVIES | BACKUP 2"
+
+msgid "elv.preview.film1.title"
+msgstr "Velvet Meridian"
+
+msgid "elv.preview.film2.title"
+msgstr "Solar Drift"
+
+msgid "elv.preview.film3.title"
+msgstr "Glass Harbor"
+
+msgid "elv.preview.film4.title"
+msgstr "Cinder Waltz"
+
+msgid "elv.preview.rawNoPoster"
+msgstr "NO_IMG_404.jpg"
+
+msgid "elv.preview.rawNoRating"
+msgstr "???"
+
+msgid "elv.preview.duplicateTag"
+msgstr "4x duplicates"
+
+msgid "onboarding.welcome.title"
+msgstr "Welcome to ELV IPTV"
+
+msgid "onboarding.welcome.subtitle"
+msgstr "Sign in to sync your encrypted library across every screen, or start locally right away."
+
+msgid "onboarding.welcome.emailOption"
+msgstr "Continue with email"
+
+msgid "onboarding.welcome.emailContinue"
+msgstr "Continue"
+
+msgid "onboarding.welcome.checkingEmail"
+msgstr "Checking account…"
+
+msgid "onboarding.welcome.existingAccountHint"
+msgstr "Welcome back — enter your password to unlock your encrypted vault."
+
+msgid "onboarding.welcome.notFoundPrompt"
+msgstr "No account found for this email — would you like to create one?"
+
+msgid "onboarding.welcome.createWithEmailAction"
+msgstr "Create account with this email"
+
+msgid "onboarding.welcome.backToEmail"
+msgstr "Use a different email"
+
+msgid "onboarding.welcome.guestAction"
+msgstr "Continue without account"
+
+msgid "onboarding.welcome.transferAction"
+msgstr "Transfer from another device"
+
+msgid "onboarding.welcome.privacyStripPrefix"
+msgstr "By continuing, you agree to our"
+
+msgid "onboarding.welcome.privacyPolicyLink"
+msgstr "Privacy Policy"
+
+msgid "onboarding.welcome.diagnosticsLabel"
+msgstr "Share anonymous playback & crash diagnostics"
+
+msgid "onboarding.privacy.title"
+msgstr "Privacy & Data Notice"
+
+msgid "onboarding.privacy.summary"
+msgstr "ELV IPTV is designed for privacy first. Your playlists, provider credentials, and watch history stay encrypted and under your control."
+
+msgid "onboarding.privacy.sectionDataTitle"
+msgstr "Zero-Knowledge Sync & Local Storage"
+
+msgid "onboarding.privacy.sectionDataBody"
+msgstr "Without an account, all playlists and credentials remain strictly on your device. If you sign in, sync data is encrypted end-to-end on your device before upload — we can never read your URLs, passwords, or viewing history."
+
+msgid "onboarding.privacy.sectionDiagnosticsTitle"
+msgstr "Optional Anonymous Diagnostics"
+
+msgid "onboarding.privacy.sectionDiagnosticsBody"
+msgstr "When enabled, anonymous performance metrics and codec error codes help improve playback stability. Provider URLs, credentials, IP addresses, and media titles are never collected. You can change this anytime in Settings."
+
+msgid "onboarding.privacy.sectionRightsTitle"
+msgstr "Your Rights (KVKK & GDPR)"
+
+msgid "onboarding.privacy.sectionRightsBody"
+msgstr "You may review or permanently erase your sync account and encrypted vault at any time from Settings > Account & Sync."
+
+msgid "onboarding.privacy.close"
+msgstr "Close"
+
+msgid "onboarding.syncing.title"
+msgstr "Syncing your data…"
+
+msgid "onboarding.syncing.subtitle"
+msgstr "Downloading your encrypted vault and preferences."
+
+msgid "onboarding.source.title"
+msgstr "Add Your First Source"
+
+msgid "onboarding.source.subtitle"
+msgstr "Bring your own M3U playlist, Xtream Codes account, or Stalker portal. ELV IPTV ships no content."
+
+msgid "onboarding.source.continueAction"
+msgstr "Add & Continue"
+
+msgid "onboarding.source.browseWithoutSource"
+msgstr "Browse without a source for now"
+
+msgid "onboarding.source.pairPhoneAction"
+msgstr "Send playlist from your phone"
+
+msgid "onboarding.elv.title"
+msgstr "Meet ELV Mode"
+
+msgid "onboarding.elv.subtitle"
+msgstr "Transform raw IPTV lists into a cinema-grade library with clean posters, ratings, merged duplicates, and curated genres."
+
+msgid "onboarding.elv.masterToggle"
+msgstr "ELV Mode"
+
+msgid "onboarding.elv.mergeToggle"
+msgstr "Merge movie & series versions"
+
+msgid "onboarding.elv.postersToggle"
+msgstr "Enhance posters & ratings"
+
+msgid "onboarding.elv.categoriesToggle"
+msgstr "Organize categories by genre"
+
+msgid "onboarding.import.loading"
+msgstr "Importing your library…"
+
+msgid "onboarding.import.ready"
+msgstr "Your library is ready!"
+
+msgid "onboarding.import.failed"
+msgstr "Could not import your source."
+
+msgid "onboarding.import.providerWaitHint"
+msgstr "Waiting on your provider — this is not on our end. Feel free to keep personalizing while it finishes."
+
+msgid "onboarding.import.continueAction"
+msgstr "Continue"
+
+msgid "onboarding.import.enterAppAction"
+msgstr "Enter App"
+
+msgid "onboarding.import.continueCustomizing"
+msgstr "Continue customizing"
+
+msgid "onboarding.import.retryAction"
+msgstr "Retry"
+
+msgid "onboarding.import.editSourceAction"
+msgstr "Edit source details"
+
+msgid "onboarding.personalize.stepCounter"
+msgstr "Step {step} of {total}"
+
+msgid "onboarding.personalize.profileTitle"
+msgstr "Make Your Profile Yours"
+
+msgid "onboarding.personalize.profileSubtitle"
+msgstr "Pick a name and avatar for this viewer profile. You can add more profiles anytime."
+
+msgid "onboarding.personalize.profileNameLabel"
+msgstr "Profile name"
+
+msgid "onboarding.personalize.avatarLabel"
+msgstr "Avatar"
+
+msgid "onboarding.personalize.themeTitle"
+msgstr "Choose Your Cinema Palette"
+
+msgid "onboarding.personalize.themeSubtitle"
+msgstr "Crafted for dark rooms and crisp readability across every display."
+
+msgid "onboarding.personalize.layoutTitle"
+msgstr "Home Screen Layout"
+
+msgid "onboarding.personalize.layoutSubtitle"
+msgstr "Choose how your home rows and spotlight are arranged."
+
+msgid "onboarding.personalize.layoutPreviewLabel"
+msgstr "Live layout preview"
+
+msgid "onboarding.personalize.tipsTitle"
+msgstr "Quick Tips for Your Screen"
+
+msgid "onboarding.personalize.tipsSubtitle"
+msgstr "A couple of handy shortcuts to get the most out of ELV IPTV."
+
+msgid "onboarding.personalize.tipDesktop1"
+msgstr "Use Space to pause, F for fullscreen, and arrow keys to scrub or jump between rows."
+
+msgid "onboarding.personalize.tipDesktop2"
+msgstr "Right-click any channel or title for quick favorites, version switching, and audio or subtitle options."
+
+msgid "onboarding.personalize.tipMobile1"
+msgstr "Swipe up or down on the left side for brightness and the right side for volume during playback."
+
+msgid "onboarding.personalize.tipMobile2"
+msgstr "Long-press the video for 2× speed, or slide up while scrubbing for frame-accurate control."
+
+msgid "onboarding.personalize.tipTv1"
+msgstr "Press OK twice on a live channel for fullscreen, and use CH+/CH- or number keys to zap instantly."
+
+msgid "onboarding.personalize.tipTv2"
+msgstr "Long-press OK on any channel or movie card for quick options, and press Back to return smoothly."
+
+msgid "onboarding.waiting.title"
+msgstr "Finishing Your Library Import"
+
+msgid "onboarding.waiting.subtitle"
+msgstr "Your setup is saved. We will open your screening room the moment your provider finishes responding."
+
+msgid "startup.refresh.title"
+msgstr "Refreshing Your Library"
+
+msgid "startup.refresh.subtitle"
+msgstr "Checking your sources for the latest channels, movies, series, and TV guide."
+
+msgid "startup.refresh.cancelContinue"
+msgstr "Cancel / Continue with old data"
+
+msgid "startup.refresh.backgroundNote"
+msgstr "Refresh will continue quietly in the background."
+
+msgid "onboarding.quote.1"
+msgstr "Dim the lights — great stories deserve a quiet room and a crisp picture."
+
+msgid "onboarding.quote.2"
+msgstr "Every memorable evening begins with the right film and zero distractions."
+
+msgid "onboarding.quote.3"
+msgstr "Cinema is at its best when the player steps back and lets the frame breathe."
+
+msgid "onboarding.quote.4"
+msgstr "Take a breath, settle in, and let tonight bring a story worth staying up for."
+
+msgid "onboarding.quote.5"
+msgstr "Your library, your pace — curated cleanly so you spend less time scrolling and more time watching."
+
+msgid "onboarding.quote.6"
+msgstr "The best seat in the theater is always the one waiting right in your living room."

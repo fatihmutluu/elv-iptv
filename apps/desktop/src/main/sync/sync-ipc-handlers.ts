@@ -2,8 +2,10 @@ import {
   type BidirectionalPairingSnapshotIpc,
   type FeedbackSubmitResultIpc,
   isFeedbackSubmitRequest,
+  isSyncCheckEmailPayload,
   isSyncClaimQrRequest,
   isSyncDeleteAccountRequest,
+  isSyncEmailCheckStatus,
   isSyncPairConfirmRequest,
   isSyncPairJoinRequest,
   isSyncPairPollRequest,
@@ -18,6 +20,7 @@ import {
   SYNC_CHANNELS,
   type SyncAccountStateIpc,
   type SyncActionResultIpc,
+  type SyncEmailCheckStatusIpc,
   type SyncQrPairingSessionIpc,
   type SyncQrPollStatusIpc,
   type TelemetryStatusIpc,
@@ -180,6 +183,16 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
   ipcMain.handle(SYNC_CHANNELS.getState, (event): SyncAccountStateIpc => {
     assertTrusted(event, SYNC_CHANNELS.getState);
     return sanitizeStateForIpc(service.getState());
+  });
+
+  ipcMain.handle(SYNC_CHANNELS.checkEmail, async (event, raw): Promise<SyncEmailCheckStatusIpc> => {
+    assertTrusted(event, SYNC_CHANNELS.checkEmail);
+    if (!isSyncCheckEmailPayload(raw)) {
+      log?.(`sync ipc: dropped invalid ${SYNC_CHANNELS.checkEmail} payload`);
+      return 'unknown';
+    }
+    const res = await service.checkEmail(raw);
+    return isSyncEmailCheckStatus(res) ? res : 'unknown';
   });
 
   ipcMain.handle(SYNC_CHANNELS.signIn, async (event, raw): Promise<SyncActionResultIpc> => {
@@ -396,6 +409,7 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
 
   const registeredChannels: readonly string[] = [
     SYNC_CHANNELS.getState,
+    SYNC_CHANNELS.checkEmail,
     SYNC_CHANNELS.signIn,
     SYNC_CHANNELS.register,
     SYNC_CHANNELS.ackRecovery,

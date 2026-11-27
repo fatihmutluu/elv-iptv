@@ -9,15 +9,30 @@ import {
   useViewport,
   webBackdropBlur,
 } from '@elv/ui-kit';
-import { type ReactElement, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type Dispatch,
+  type ReactElement,
+  type ReactNode,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import type { AppTab, CatalogMemoryMap } from './app-shell-state';
+import {
+  type AppTab,
+  type CatalogMemoryMap,
+  createExitBackConfirmGuard,
+  DEFAULT_EXIT_BACK_CONFIRM_MS,
+  type ExitBackConfirmGuard,
+} from './app-shell-state';
 import type { WaveF9Controller } from './app-shell-wave-f9';
 import { CatalogDiscoveryScreen, type CatalogTabMemory } from './catalog';
 import { DetailScreen } from './detail';
 import { HomeScreen } from './home';
 import { LibraryScreen } from './library';
-import { LiveScreen, type LiveTabMemory } from './live';
+import { EMPTY_LIVE_MEMORY, LiveScreen, type LiveTabMemory } from './live';
 import { ThirdPartyNoticesScreen } from './notices';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { DesktopWindowPort } from './ports/desktop-window-host';
@@ -384,6 +399,79 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
       {...stageProps}
     />
   );
+}
+
+/** Manages the 2-step root Back-to-exit confirmation guard and toast visibility (`#55`). */
+export function useShellExitBackGuard(
+  confirmExitOnBack: boolean,
+  active: boolean,
+): {
+  readonly exitToastVisible: boolean;
+  readonly resetExitGuard: () => void;
+  readonly onRootHomeBack: () => boolean;
+} {
+  const confirmRef = useRef(confirmExitOnBack);
+  confirmRef.current = confirmExitOnBack;
+  const [exitToastVisible, setExitToastVisible] = useState(false);
+  const guardRef = useRef<ExitBackConfirmGuard | null>(null);
+  guardRef.current ??= createExitBackConfirmGuard(DEFAULT_EXIT_BACK_CONFIRM_MS, {
+    onVisibleChange: setExitToastVisible,
+  });
+  useEffect(() => () => guardRef.current?.dispose(), []);
+  useEffect(() => {
+    if (!confirmExitOnBack || !active) guardRef.current?.reset();
+  }, [active, confirmExitOnBack]);
+  const resetExitGuard = useCallback(() => {
+    guardRef.current?.reset();
+  }, []);
+  const onRootHomeBack = useCallback(
+    () => guardRef.current?.onRootBack(confirmRef.current) ?? false,
+    [],
+  );
+  return { exitToastVisible, resetExitGuard, onRootHomeBack };
+}
+
+/** Keeps the Live tab's default view mode synchronized with preferences until overridden by the user. */
+export function useShellLiveTabMemory(
+  defaultLiveMode: LiveTabMemory['mode'],
+  activeTab: AppTab,
+): {
+  readonly liveMemory: LiveTabMemory;
+  readonly setLiveMemory: Dispatch<SetStateAction<LiveTabMemory>>;
+  readonly handleLiveMemoryChange: (next: LiveTabMemory) => void;
+  readonly resetLiveMemory: () => void;
+} {
+  const userPickedRef = useRef(false);
+  const prevDefaultRef = useRef(defaultLiveMode);
+  const defaultRef = useRef(defaultLiveMode);
+  defaultRef.current = defaultLiveMode;
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const [liveMemory, setLiveMemory] = useState<LiveTabMemory>(() => ({
+    ...EMPTY_LIVE_MEMORY,
+    mode: defaultLiveMode,
+  }));
+  useEffect(() => {
+    if (prevDefaultRef.current === defaultLiveMode) return;
+    prevDefaultRef.current = defaultLiveMode;
+    if (!userPickedRef.current || activeTabRef.current !== 'live') {
+      userPickedRef.current = false;
+      setLiveMemory((prev) =>
+        prev.mode === defaultLiveMode ? prev : { ...prev, mode: defaultLiveMode },
+      );
+    }
+  }, [defaultLiveMode]);
+  const handleLiveMemoryChange = useCallback((next: LiveTabMemory) => {
+    setLiveMemory((prev) => {
+      if (next.mode !== prev.mode) userPickedRef.current = true;
+      return next;
+    });
+  }, []);
+  const resetLiveMemory = useCallback(() => {
+    userPickedRef.current = false;
+    setLiveMemory({ ...EMPTY_LIVE_MEMORY, mode: defaultRef.current });
+  }, []);
+  return { liveMemory, setLiveMemory, handleLiveMemoryChange, resetLiveMemory };
 }
 
 /** Syncs the persisted artwork cache byte cap preference into the active platform UI adapter (`#405`). */

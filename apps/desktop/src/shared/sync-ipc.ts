@@ -31,6 +31,7 @@ export {
 /** Strictly allowlisted Electron IPC channels for Wave F9/P9 E2EE sync, pairing, telemetry, and feedback (`#26`, `#458`, `#509`, `#510`). */
 export const SYNC_CHANNELS = Object.freeze({
   getState: 'sync:getState',
+  checkEmail: 'sync:check-email',
   signIn: 'sync:signIn',
   register: 'sync:register',
   ackRecovery: 'sync:ackRecovery',
@@ -90,6 +91,9 @@ export interface SyncQrPairingSessionIpc {
 }
 
 export type SyncQrPollStatusIpc = 'pending' | 'claimed' | 'expired';
+
+/** Result of checking whether an email already has a sync account (`#513`). */
+export type SyncEmailCheckStatusIpc = 'exists' | 'not_found' | 'unknown';
 
 export interface SyncSignInRequest {
   readonly email: string;
@@ -156,6 +160,7 @@ export interface FeedbackSubmitResultIpc {
 export interface SyncBridge {
   getState(): Promise<SyncAccountStateIpc>;
   onStateChanged(listener: (state: SyncAccountStateIpc) => void): () => void;
+  checkEmail?(email: string): Promise<SyncEmailCheckStatusIpc>;
   signIn(email: string, password: string): Promise<SyncActionResultIpc>;
   register(email: string, password: string, confirmPassword: string): Promise<SyncActionResultIpc>;
   acknowledgeRecoveryCode(): Promise<void>;
@@ -202,6 +207,7 @@ export interface FeedbackBridge {
 }
 
 const MAX_EMAIL_LEN = 254;
+const MAX_CHECK_EMAIL_LEN = 320;
 const MAX_SECRET_LEN = 512;
 const MAX_QR_URI_BYTES = 213;
 const MAX_FEEDBACK_MSG_LEN = 4000;
@@ -209,6 +215,7 @@ const MAX_PREVIEW_BYTES = 262_144;
 const utf8Encoder = new TextEncoder();
 
 const VALID_STATUSES = new Set<string>(['signed_out', 'signing_in', 'signed_in', 'syncing']);
+const VALID_EMAIL_CHECK_STATUSES = new Set<string>(['exists', 'not_found', 'unknown']);
 const VALID_QR_STATUSES = new Set<string>(['pending', 'claimed', 'expired']);
 const VALID_FEEDBACK_CATEGORIES = new Set<string>([
   'playback_issue',
@@ -250,6 +257,14 @@ function isOptionalBoundedString(x: unknown, maxLen: number): boolean {
 
 function isNullableBoundedString(x: unknown, maxLen: number): boolean {
   return x === null || isBoundedString(x, maxLen);
+}
+
+export function isSyncCheckEmailPayload(x: unknown): x is string {
+  return typeof x === 'string' && x.length <= MAX_CHECK_EMAIL_LEN;
+}
+
+export function isSyncEmailCheckStatus(x: unknown): x is SyncEmailCheckStatusIpc {
+  return typeof x === 'string' && VALID_EMAIL_CHECK_STATUSES.has(x);
 }
 
 export function isSyncSignInRequest(x: unknown): x is SyncSignInRequest {

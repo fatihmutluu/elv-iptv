@@ -321,12 +321,15 @@ describe('Wave P9 Unified Diagnostics, Privacy Consent, Auto-Sync & Bidirectiona
         expect(screen.getByTestId('privacy-consent-telemetry-toggle')).toBeTruthy();
       });
 
-      // Defaults OFF
+      // Zero pre-consent telemetry before user proceeds past Screen 1
+      expect(telemetry.setOptIn).toHaveBeenCalledWith(false);
+      expect((await freshStore.load()).telemetryOptIn).toBe(false);
+
+      // Wave E3 fresh onboarding toggle starts ON locally; toggling OFF before continuing persists false
       expect(
         screen.getByTestId('privacy-consent-telemetry-toggle').props.accessibilityState.checked,
-      ).toBe(false);
+      ).toBe(true);
 
-      // Opting in inside Welcome and continuing marks both welcomeDismissed & privacyConsentAnswered
       await fireEvent.press(screen.getByTestId('privacy-consent-telemetry-toggle'));
       await fireEvent.press(screen.getByTestId('welcome-continue-without-account'));
 
@@ -336,8 +339,8 @@ describe('Wave P9 Unified Diagnostics, Privacy Consent, Auto-Sync & Bidirectiona
         const snap = await freshStore.load();
         expect(snap.welcomeDismissed).toBe(true);
         expect(snap.privacyConsentAnswered).toBe(true);
-        expect(snap.telemetryOptIn).toBe(true);
-        expect(snap.crashReportsOptIn).toBe(true);
+        expect(snap.telemetryOptIn).toBe(false);
+        expect(snap.crashReportsOptIn).toBe(false);
       });
     } finally {
       await view?.unmount();

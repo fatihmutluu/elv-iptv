@@ -14,6 +14,7 @@ describe('Wave F9 / P9 preferences (#26, #458, #509, #510)', () => {
     expect(DEFAULT_PREFERENCES.telemetryOptIn).toBe(false);
     expect(DEFAULT_PREFERENCES.privacyConsentAnswered).toBe(false);
     expect(DEFAULT_PREFERENCES.welcomeDismissed).toBe(false);
+    expect(DEFAULT_PREFERENCES.onboardingCompleted).toBe(false);
     expect(DEFAULT_PREFERENCES.syncServerUrl).toBe('');
 
     expect(isValidSyncServerUrl('')).toBe(true);
@@ -63,6 +64,7 @@ describe('Wave F9 / P9 preferences (#26, #458, #509, #510)', () => {
       expect(rawDefault.telemetryOptIn).toBeUndefined();
       expect(rawDefault.privacyConsentAnswered).toBeUndefined();
       expect(rawDefault.welcomeDismissed).toBeUndefined();
+      expect(rawDefault.onboardingCompleted).toBeUndefined();
       expect(rawDefault.syncServerUrl).toBeUndefined();
     }
 
@@ -71,6 +73,7 @@ describe('Wave F9 / P9 preferences (#26, #458, #509, #510)', () => {
       telemetryOptIn: true,
       privacyConsentAnswered: true,
       welcomeDismissed: true,
+      onboardingCompleted: true,
       syncServerUrl: 'https://Sync.Example.com/api/',
     });
     expect(encoded.ok).toBe(true);
@@ -81,6 +84,7 @@ describe('Wave F9 / P9 preferences (#26, #458, #509, #510)', () => {
     expect(parsed.telemetryOptIn).toBe(true);
     expect(parsed.privacyConsentAnswered).toBe(true);
     expect(parsed.welcomeDismissed).toBe(true);
+    expect(parsed.onboardingCompleted).toBe(true);
     expect(parsed.syncServerUrl).toBe('https://sync.example.com/api');
   });
 
@@ -112,12 +116,14 @@ describe('Wave F9 / P9 preferences (#26, #458, #509, #510)', () => {
         telemetryOptIn: 'yes',
         privacyConsentAnswered: 'yes',
         welcomeDismissed: 1,
+        onboardingCompleted: 'true',
         syncServerUrl: 'https://user:secret@evil.example.com',
       }),
     );
     expect(parsed.telemetryOptIn).toBe(false);
     expect(parsed.privacyConsentAnswered).toBe(false);
     expect(parsed.welcomeDismissed).toBe(false);
+    expect(parsed.onboardingCompleted).toBe(false);
     expect(parsed.syncServerUrl).toBe('');
 
     const store = createMemoryPreferencesStore();
@@ -126,6 +132,7 @@ describe('Wave F9 / P9 preferences (#26, #458, #509, #510)', () => {
       telemetryOptIn: true,
       privacyConsentAnswered: true,
       welcomeDismissed: true,
+      onboardingCompleted: true,
       syncServerUrl: 'http://127.0.0.1:8787/',
     });
     expect(updated.ok).toBe(true);
@@ -133,6 +140,7 @@ describe('Wave F9 / P9 preferences (#26, #458, #509, #510)', () => {
     expect(updated.value.telemetryOptIn).toBe(true);
     expect(updated.value.privacyConsentAnswered).toBe(true);
     expect(updated.value.welcomeDismissed).toBe(true);
+    expect(updated.value.onboardingCompleted).toBe(true);
     expect(updated.value.syncServerUrl).toBe('http://127.0.0.1:8787');
 
     // Invalid URL update keeps previous valid value

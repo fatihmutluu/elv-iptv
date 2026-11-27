@@ -5,8 +5,10 @@ import {
   isFeedbackSubmitResult,
   isSyncAccountState,
   isSyncActionResult,
+  isSyncCheckEmailPayload,
   isSyncClaimQrRequest,
   isSyncDeleteAccountRequest,
+  isSyncEmailCheckStatus,
   isSyncPairConfirmRequest,
   isSyncPairJoinRequest,
   isSyncPollQrRequest,
@@ -27,6 +29,7 @@ describe('sync-ipc guards (#26, #458)', () => {
     expect(Object.isFrozen(SYNC_CHANNELS)).toBe(true);
     expect(SYNC_CHANNELS).toEqual({
       getState: 'sync:getState',
+      checkEmail: 'sync:check-email',
       signIn: 'sync:signIn',
       register: 'sync:register',
       ackRecovery: 'sync:ackRecovery',
@@ -63,6 +66,14 @@ describe('sync-ipc guards (#26, #458)', () => {
 
   it('validates sync auth/account requests and rejects extra keys or prototype pollution', () => {
     expect(isSyncSignInRequest({ email: 'a@b.co', password: 'secret' })).toBe(true);
+    expect(isSyncCheckEmailPayload('a@b.co')).toBe(true);
+    expect(isSyncCheckEmailPayload('a'.repeat(320))).toBe(true);
+    expect(isSyncCheckEmailPayload('a'.repeat(321))).toBe(false);
+    expect(isSyncCheckEmailPayload(42)).toBe(false);
+    expect(isSyncEmailCheckStatus('exists')).toBe(true);
+    expect(isSyncEmailCheckStatus('not_found')).toBe(true);
+    expect(isSyncEmailCheckStatus('unknown')).toBe(true);
+    expect(isSyncEmailCheckStatus('other')).toBe(false);
     expect(isSyncSignInRequest({ email: '', password: 'secret' })).toBe(false);
     expect(isSyncSignInRequest({ email: 'a@b.co', password: 'secret', extra: 1 })).toBe(false);
     expect(

@@ -4273,3 +4273,282 @@ msgstr "Kütüphanede gör"
 
 msgid "player.xray.empty"
 msgstr "Bu yapım için oyuncu bilgisi bulunamadı."
+
+msgid "elv.preview.badgeClean"
+msgstr "ELV Mode Aktif"
+
+msgid "elv.preview.badgeRaw"
+msgstr "Ham IPTV Listesi"
+
+msgid "elv.preview.captionAllOn"
+msgstr "Temiz afişler, IMDb puanları, birleşik sürümler ve düzenli türler."
+
+msgid "elv.preview.captionChaos"
+msgstr "Kopya filmleri, bozuk afişleri ve karmaşık klasörleri toparlamak için ELV Mode özelliklerini açın."
+
+msgid "elv.preview.genre.scifi"
+msgstr "Bilim Kurgu"
+
+msgid "elv.preview.genre.drama"
+msgstr "Dram"
+
+msgid "elv.preview.genre.thriller"
+msgstr "Gerilim"
+
+msgid "elv.preview.genre.mystery"
+msgstr "Gizem"
+
+msgid "elv.preview.rawCat1"
+msgstr "### === TR VIP FILM 2026 === ###"
+
+msgid "elv.preview.rawCat2"
+msgstr "*** 4K_YENI_KARISIK_2025 ***"
+
+msgid "elv.preview.rawCat3"
+msgstr "TR | FILMLER | YEDEK 2"
+
+msgid "elv.preview.film1.title"
+msgstr "Kadife Meridyen"
+
+msgid "elv.preview.film2.title"
+msgstr "Güneş Sürüklenişi"
+
+msgid "elv.preview.film3.title"
+msgstr "Cam Liman"
+
+msgid "elv.preview.film4.title"
+msgstr "Kül Valsi"
+
+msgid "elv.preview.rawNoPoster"
+msgstr "AFIS_YOK_404.jpg"
+
+msgid "elv.preview.rawNoRating"
+msgstr "???"
+
+msgid "elv.preview.duplicateTag"
+msgstr "4 kopya"
+
+msgid "onboarding.welcome.title"
+msgstr "ELV IPTV'ye Hoş Geldiniz"
+
+msgid "onboarding.welcome.subtitle"
+msgstr "Şifreli kütüphanenizi tüm ekranlarınızda eşitlemek için giriş yapın veya doğrudan yerel olarak başlayın."
+
+msgid "onboarding.welcome.emailOption"
+msgstr "E-posta ile devam et"
+
+msgid "onboarding.welcome.emailContinue"
+msgstr "Devam Et"
+
+msgid "onboarding.welcome.checkingEmail"
+msgstr "Hesap kontrol ediliyor…"
+
+msgid "onboarding.welcome.existingAccountHint"
+msgstr "Tekrar hoş geldiniz — şifreli kasanızı açmak için parolanızı girin."
+
+msgid "onboarding.welcome.notFoundPrompt"
+msgstr "Bu e-posta ile kayıtlı hesap bulunamadı — yeni hesap oluşturmak ister misiniz?"
+
+msgid "onboarding.welcome.createWithEmailAction"
+msgstr "Bu e-posta ile hesap oluştur"
+
+msgid "onboarding.welcome.backToEmail"
+msgstr "Farklı bir e-posta kullan"
+
+msgid "onboarding.welcome.guestAction"
+msgstr "Hesapsız devam et"
+
+msgid "onboarding.welcome.transferAction"
+msgstr "Başka cihazdan aktar"
+
+msgid "onboarding.welcome.privacyStripPrefix"
+msgstr "Devam ederek şunu kabul etmiş olursunuz:"
+
+msgid "onboarding.welcome.privacyPolicyLink"
+msgstr "Gizlilik Politikası"
+
+msgid "onboarding.welcome.diagnosticsLabel"
+msgstr "Anonim oynatma ve çökme tanılamalarını paylaş"
+
+msgid "onboarding.privacy.title"
+msgstr "Gizlilik ve Veri Bildirimi"
+
+msgid "onboarding.privacy.summary"
+msgstr "ELV IPTV gizlilik odaklı tasarlanmıştır. Çalma listeleriniz, sağlayıcı bilgileriniz ve izleme geçmişiniz şifreli olarak ve tamamen sizin kontrolünüzde kalır."
+
+msgid "onboarding.privacy.sectionDataTitle"
+msgstr "Sıfır Bilgili Eşitleme ve Yerel Depolama"
+
+msgid "onboarding.privacy.sectionDataBody"
+msgstr "Hesap olmadan tüm listeleriniz ve kimlik bilgileriniz yalnızca cihazınızda kalır. Giriş yaptığınızda eşitleme verileri yüklenmeden önce cihazınızda uçtan uca şifrelenir; bağlantılarınızı, parolalarınızı veya izleme geçmişinizi asla okuyamayız."
+
+msgid "onboarding.privacy.sectionDiagnosticsTitle"
+msgstr "İsteğe Bağlı Anonim Tanılama"
+
+msgid "onboarding.privacy.sectionDiagnosticsBody"
+msgstr "Etkinleştirildiğinde anonim performans ölçümleri ve çözücü hata kodları oynatma kararlılığını iyileştirmeye yardımcı olur. Sağlayıcı adresleri, kimlik bilgileri, IP adresleri ve içerik adları asla toplanmaz. Bu tercihi Ayarlar bölümünden istediğiniz zaman değiştirebilirsiniz."
+
+msgid "onboarding.privacy.sectionRightsTitle"
+msgstr "Haklarınız (KVKK ve GDPR)"
+
+msgid "onboarding.privacy.sectionRightsBody"
+msgstr "Eşitleme hesabınızı ve şifreli kasanızı istediğiniz zaman Ayarlar > Hesap ve Eşitleme bölümünden inceleyebilir veya kalıcı olarak silebilirsiniz."
+
+msgid "onboarding.privacy.close"
+msgstr "Kapat"
+
+msgid "onboarding.syncing.title"
+msgstr "Verileriniz eşitleniyor…"
+
+msgid "onboarding.syncing.subtitle"
+msgstr "Şifreli kasanız ve tercihleriniz indiriliyor."
+
+msgid "onboarding.source.title"
+msgstr "İlk Kaynağınızı Ekleyin"
+
+msgid "onboarding.source.subtitle"
+msgstr "Kendi M3U listenizi, Xtream Codes hesabınızı veya Stalker portalınızı ekleyin. ELV IPTV içerik sunmaz."
+
+msgid "onboarding.source.continueAction"
+msgstr "Ekle ve Devam Et"
+
+msgid "onboarding.source.browseWithoutSource"
+msgstr "Şimdilik kaynak eklemeden göz at"
+
+msgid "onboarding.source.pairPhoneAction"
+msgstr "Telefondan liste gönder"
+
+msgid "onboarding.elv.title"
+msgstr "ELV Mode ile Tanışın"
+
+msgid "onboarding.elv.subtitle"
+msgstr "Ham IPTV listelerini temiz afişler, puanlar, birleştirilmiş kopyalar ve düzenli türlerle sinema kalitesinde bir kütüphaneye dönüştürün."
+
+msgid "onboarding.elv.masterToggle"
+msgstr "ELV Mode"
+
+msgid "onboarding.elv.mergeToggle"
+msgstr "Film ve dizi sürümlerini birleştir"
+
+msgid "onboarding.elv.postersToggle"
+msgstr "Afişleri ve puanları zenginleştir"
+
+msgid "onboarding.elv.categoriesToggle"
+msgstr "Kategorileri türlere göre düzenle"
+
+msgid "onboarding.import.loading"
+msgstr "Kütüphaneniz içe aktarılıyor…"
+
+msgid "onboarding.import.ready"
+msgstr "Kütüphaneniz hazır!"
+
+msgid "onboarding.import.failed"
+msgstr "Kaynağınız içe aktarılamadı."
+
+msgid "onboarding.import.providerWaitHint"
+msgstr "Sağlayıcınız bekleniyor, sorun bizden kaynaklı değil — beklerken kişiselleştirmeye devam edebilirsiniz."
+
+msgid "onboarding.import.continueAction"
+msgstr "Devam Et"
+
+msgid "onboarding.import.enterAppAction"
+msgstr "Uygulamaya Geç"
+
+msgid "onboarding.import.continueCustomizing"
+msgstr "Kişiselleştirmeye devam et"
+
+msgid "onboarding.import.retryAction"
+msgstr "Tekrar Dene"
+
+msgid "onboarding.import.editSourceAction"
+msgstr "Bilgileri Düzenle"
+
+msgid "onboarding.personalize.stepCounter"
+msgstr "Adım {step} / {total}"
+
+msgid "onboarding.personalize.profileTitle"
+msgstr "Profilinizi Kişiselleştirin"
+
+msgid "onboarding.personalize.profileSubtitle"
+msgstr "Bu izleyici profili için bir ad ve avatar seçin. İstediğiniz zaman yeni profiller ekleyebilirsiniz."
+
+msgid "onboarding.personalize.profileNameLabel"
+msgstr "Profil adı"
+
+msgid "onboarding.personalize.avatarLabel"
+msgstr "Avatar"
+
+msgid "onboarding.personalize.themeTitle"
+msgstr "Sinema Temanızı Seçin"
+
+msgid "onboarding.personalize.themeSubtitle"
+msgstr "Karanlık odalar ve her ekranda net okunabilirlik için tasarlandı."
+
+msgid "onboarding.personalize.layoutTitle"
+msgstr "Ana Ekran Düzeni"
+
+msgid "onboarding.personalize.layoutSubtitle"
+msgstr "Ana ekran satırlarınızın ve öne çıkan alanın nasıl düzenleneceğini seçin."
+
+msgid "onboarding.personalize.layoutPreviewLabel"
+msgstr "Canlı düzen önizlemesi"
+
+msgid "onboarding.personalize.tipsTitle"
+msgstr "Ekranınız İçin Hızlı İpuçları"
+
+msgid "onboarding.personalize.tipsSubtitle"
+msgstr "ELV IPTV'den en iyi şekilde yararlanmak için birkaç pratik ipucu."
+
+msgid "onboarding.personalize.tipDesktop1"
+msgstr "Duraklatmak için Boşluk, tam ekran için F ve satırlar arasında gezinmek için yön tuşlarını kullanın."
+
+msgid "onboarding.personalize.tipDesktop2"
+msgstr "Hızlı favori ekleme, sürüm seçimi ve ses veya altyazı ayarları için herhangi bir kanal veya yapıma sağ tıklayın."
+
+msgid "onboarding.personalize.tipMobile1"
+msgstr "Oynatma sırasında parlaklık için sol kenarda, ses seviyesi için sağ kenarda yukarı veya aşağı kaydırın."
+
+msgid "onboarding.personalize.tipMobile2"
+msgstr "2× hız için videoya basılı tutun veya hassas sarma için çubukta yukarı doğru kaydırın."
+
+msgid "onboarding.personalize.tipTv1"
+msgstr "Tam ekran için canlı kanalda OK tuşuna iki kez basın; anında geçiş için CH+/CH- veya rakam tuşlarını kullanın."
+
+msgid "onboarding.personalize.tipTv2"
+msgstr "Hızlı seçenekler için herhangi bir kanal veya film kartında OK tuşuna basılı tutun; kolayca dönmek için Geri tuşunu kullanın."
+
+msgid "onboarding.waiting.title"
+msgstr "Kütüphane İçe Aktarımı Tamamlanıyor"
+
+msgid "onboarding.waiting.subtitle"
+msgstr "Ayarlarınız kaydedildi. Sağlayıcınız yanıt vermeyi bitirdiği anda izleme odanız açılacak."
+
+msgid "startup.refresh.title"
+msgstr "Kütüphaneniz Güncelleniyor"
+
+msgid "startup.refresh.subtitle"
+msgstr "En güncel kanallar, filmler, diziler ve TV rehberi için kaynaklarınız kontrol ediliyor."
+
+msgid "startup.refresh.cancelContinue"
+msgstr "İptal et / Eski verilerle devam et"
+
+msgid "startup.refresh.backgroundNote"
+msgstr "Yenileme arka planda sessizce devam edecektir."
+
+msgid "onboarding.quote.1"
+msgstr "Işıkları kısın — güzel hikâyeler sakin bir odayı ve net bir görüntüyü hak eder."
+
+msgid "onboarding.quote.2"
+msgstr "Unutulmaz her akşam, doğru film ve sıfır dikkat dağınıklığıyla başlar."
+
+msgid "onboarding.quote.3"
+msgstr "Sinema, oynatıcının geri çekilip görüntünün nefes almasına izin verdiği an en güzel hâlindedir."
+
+msgid "onboarding.quote.4"
+msgstr "Derin bir nefes alın, yerinize yerleşin; bu gece uykusuz kalmaya değer bir hikâye getirsin."
+
+msgid "onboarding.quote.5"
+msgstr "Sizin kütüphaneniz, sizin ritminiz — daha az kaydırıp daha çok izlemeniz için özenle düzenlendi."
+
+msgid "onboarding.quote.6"
+msgstr "Sinemanın en iyi koltuğu her zaman tam da oturma odanızda sizi bekleyendir."

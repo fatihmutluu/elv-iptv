@@ -20,6 +20,8 @@ export interface UseGuideAutoRefreshOptions {
   readonly enabled: boolean;
   /** Optional set of source IDs already auto-imported in this session (avoids immediate duplicate re-import under clock skew). */
   readonly sessionImportedIdsRef?: { readonly current: ReadonlySet<string> };
+  /** Optional shared failure-backoff map (`${sourceId}\u0000${kind}` -> ms epoch) populated by startup refresh (`#513`). */
+  readonly sharedFailureAtRef?: { readonly current: Map<string, number> };
   /** Invoked after one or more ready sources finish a background catalog or guide refresh. */
   readonly onGuideRefreshed?: () => void;
   /** Optional clock provider (ms epoch) for deterministic tests (defaults to `Date.now`). */
@@ -60,6 +62,7 @@ export function useGuideAutoRefresh({
   guideRefreshHours,
   enabled,
   sessionImportedIdsRef,
+  sharedFailureAtRef,
   onGuideRefreshed,
   now = Date.now,
   checkIntervalMs = DEFAULT_CHECK_INTERVAL_MS,
@@ -68,7 +71,8 @@ export function useGuideAutoRefresh({
   clearTimeoutFn = (handle) => globalThis.clearTimeout(handle),
 }: UseGuideAutoRefreshOptions): void {
   const lastRefreshAtRef = useRef<Map<string, number>>(new Map());
-  const lastFailureAtRef = useRef<Map<string, number>>(new Map());
+  const ownFailureAtRef = useRef<Map<string, number>>(new Map());
+  const lastFailureAtRef = sharedFailureAtRef ?? ownFailureAtRef;
   const pendingImportIdsRef = useRef<Set<string>>(new Set());
   const callbacksRef = useRef({ onGuideRefreshed, now, setTimeoutFn, clearTimeoutFn });
   callbacksRef.current = { onGuideRefreshed, now, setTimeoutFn, clearTimeoutFn };

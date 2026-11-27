@@ -90,10 +90,18 @@ export interface SyncActionResult {
   readonly errorCode?: string;
 }
 
-/** App-supplied E2EE sync, authentication, auto-sync, and bidirectional X25519 pairing port (`#26`, `#510`). */
+/** Supported third-party OAuth providers when store credentials are configured (`#513`). */
+export type OAuthProviderId = 'google' | 'apple';
+
+/** Result of checking whether an email already has a sync account (`#513`). */
+export type EmailCheckStatus = 'exists' | 'not_found' | 'unknown';
+
+/** App-supplied E2EE sync, authentication, auto-sync, and bidirectional X25519 pairing port (`#26`, `#510`, `#513`). */
 export interface SyncAccountPort {
   getState(): SyncAccountState;
   subscribe(listener: (state: SyncAccountState) => void): () => void;
+  checkEmail(email: string): Promise<EmailCheckStatus>;
+  readonly supportedOAuthProviders: readonly OAuthProviderId[];
   signIn(email: string, password: string): Promise<SyncActionResult>;
   register(email: string, password: string, confirmPassword: string): Promise<SyncActionResult>;
   acknowledgeRecoveryCode(): void;

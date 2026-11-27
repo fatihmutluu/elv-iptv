@@ -35,6 +35,7 @@ import type {
   FeedbackSubmitResultIpc,
   SyncAccountStateIpc,
   SyncActionResultIpc,
+  SyncEmailCheckStatusIpc,
   SyncQrPairingSessionIpc,
   SyncQrPollStatusIpc,
   TelemetryRecordRequest,
@@ -95,6 +96,7 @@ export interface DesktopSyncService {
   subscribeInitialPreferences(listener: (patch: PreferencesPatch) => void): () => void;
   setServerUrl(serverUrl: string): void;
   setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): void;
+  checkEmail(email: string): Promise<SyncEmailCheckStatusIpc>;
   signIn(email: string, password: string): Promise<SyncActionResultIpc>;
   register(email: string, password: string, confirmPassword: string): Promise<SyncActionResultIpc>;
   acknowledgeRecoveryCode(): void;
@@ -550,30 +552,32 @@ export function createDesktopSyncService(options: DesktopSyncServiceOptions): De
     },
 
     getState: () => state,
-
     subscribe(listener) {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
     },
-
     subscribeInitialPreferences(listener) {
       initialPrefsListeners.add(listener);
       return () => {
         initialPrefsListeners.delete(listener);
       };
     },
-
     setServerUrl(nextUrl: string): void {
       const trimmed = nextUrl.trim();
       const normalized = trimmed.length > 0 ? normalizeSyncServerUrl(trimmed, '') : '';
       serverUrl = normalized.length > 0 ? normalized : defaultServerUrl;
     },
-
     setSyncablePreferences(preferences: Readonly<Record<string, unknown>>): void {
       const sanitized = sanitizeInitialPreferencesPatch(preferences) as Record<string, unknown>;
       localSyncablePrefs = Object.keys(sanitized).length > 0 ? sanitized : undefined;
+    },
+    async checkEmail(email): Promise<SyncEmailCheckStatusIpc> {
+      if (serverUrl.length === 0) return 'unknown';
+      return makeAuthClient(serverUrl)
+        .checkEmail(email)
+        .catch(() => 'unknown');
     },
 
     async signIn(email, password): Promise<SyncActionResultIpc> {

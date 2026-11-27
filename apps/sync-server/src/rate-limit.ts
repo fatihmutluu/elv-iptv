@@ -22,6 +22,7 @@ export type TrustProxyMode = 'cloudflare' | 'none';
 /** Default per-IP rate limits by route group. */
 export interface RateLimitConfig {
   readonly auth: RateLimitRule;
+  readonly authCheckEmail: RateLimitRule;
   readonly pair: RateLimitRule;
   readonly pairLookup: RateLimitRule;
   readonly vault: RateLimitRule;
@@ -38,6 +39,7 @@ export interface RateLimitConfig {
 /** Production default per-IP sliding-window limits. */
 export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   auth: { windowMs: 60_000, maxRequests: 30 },
+  authCheckEmail: { windowMs: 60_000, maxRequests: 20 },
   pair: { windowMs: 60_000, maxRequests: 60 },
   pairLookup: { windowMs: 60_000, maxRequests: 20 },
   vault: { windowMs: 60_000, maxRequests: 60 },

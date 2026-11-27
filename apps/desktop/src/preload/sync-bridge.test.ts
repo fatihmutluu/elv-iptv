@@ -32,6 +32,8 @@ describe('createSyncBridges (#26, #458)', () => {
           };
         case SYNC_CHANNELS.pollQr:
           return 'pending';
+        case SYNC_CHANNELS.checkEmail:
+          return 'exists';
         case SYNC_CHANNELS.telemetrySetOptIn:
         case SYNC_CHANNELS.telemetryGetStatus:
           return { optedIn: true, queuedCount: 1, previewJson: '{"events":[]}' };
@@ -76,6 +78,8 @@ describe('createSyncBridges (#26, #458)', () => {
       ok: true,
     });
     await bridges.sync.setServerUrl('https://sync.example.test');
+    expect(await bridges.sync.checkEmail?.('a@b.co')).toBe('exists');
+    expect(invoke).toHaveBeenCalledWith(SYNC_CHANNELS.checkEmail, 'a@b.co');
     await bridges.sync.markSyncDirty?.();
     expect(invoke).toHaveBeenCalledWith(SYNC_CHANNELS.markSyncDirty);
 
@@ -144,6 +148,8 @@ describe('createSyncBridges (#26, #458)', () => {
     expect(invoke).not.toHaveBeenCalled();
 
     await expect(bridges.sync.getState()).rejects.toThrow(/unexpected/i);
+    expect(await bridges.sync.checkEmail?.('a@b.co')).toBe('unknown');
+    expect(await bridges.sync.checkEmail?.('x'.repeat(321))).toBe('unknown');
     await expect(bridges.sync.signIn('a@b.co', 'StrongPass123!')).rejects.toThrow(/unexpected/i);
     await expect(bridges.sync.createQrPairing()).rejects.toThrow(/unexpected/i);
     await expect(bridges.telemetry.getStatus()).rejects.toThrow(/unexpected/i);
