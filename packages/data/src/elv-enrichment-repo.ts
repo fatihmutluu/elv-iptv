@@ -13,6 +13,7 @@ import {
   ELV_ENRICHMENT_OPEN_PRAGMAS,
   ELV_ENRICHMENT_SCHEMA_SQL,
   ELV_ENRICHMENT_SCHEMA_VERSION,
+  ELV_ENRICHMENT_TITLES_TMDB_INDEX_SQL,
 } from './elv-enrichment-schema';
 import { escapeLikePattern, searchMatchedItemKeysByAlias } from './elv-enrichment-search';
 import {
@@ -35,7 +36,7 @@ import {
   type UpsertElvTitleInput,
   uniqueNonEmpty,
 } from './elv-enrichment-types';
-import { normalizeCatalogImdbId } from './writers';
+import { normalizeCatalogImdbId, normalizeCatalogTmdbId } from './writers';
 
 export type {
   ElvCastMember,
@@ -63,6 +64,7 @@ export type {
 
 interface RawJoinedRow extends RawMatchRow {
   t_imdb_id: string | null;
+  tmdb_id: string | null;
   t_media_type: string | null;
   original_title: string | null;
   english_title: string | null;
@@ -106,13 +108,13 @@ const UPSERT_MATCH_FORCE_SQL = `INSERT INTO elv_item_matches (
     manual_lock = 1, updated_at = excluded.updated_at`;
 
 const UPSERT_TITLE_SQL = `INSERT INTO elv_titles (
-    imdb_id, media_type, original_title, english_title, localized_titles_json,
+    imdb_id, tmdb_id, media_type, original_title, english_title, localized_titles_json,
     year, rating, votes, runtime_min, genres_json, poster_url, backdrop_url,
     trailer_stream_url, trailer_youtube_id, director, cast_json, mlt_imdb_ids_json,
     franchise_key, franchise_name, franchise_order, synopses_json, detail_fetched_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(imdb_id) DO UPDATE SET
-    media_type = excluded.media_type, original_title = excluded.original_title,
+    tmdb_id = excluded.tmdb_id, media_type = excluded.media_type, original_title = excluded.original_title,
     english_title = excluded.english_title, localized_titles_json = excluded.localized_titles_json,
     year = excluded.year, rating = excluded.rating, votes = excluded.votes,
     runtime_min = excluded.runtime_min, genres_json = excluded.genres_json,
@@ -145,6 +147,7 @@ function mapJoinedTitle(r: RawJoinedRow): ElvTitleRecord | null {
   if (r.t_imdb_id === null || r.original_title === null) return null;
   return mapTitleRow({
     imdb_id: r.t_imdb_id,
+    tmdb_id: r.tmdb_id,
     media_type: r.t_media_type ?? r.media_type,
     original_title: r.original_title,
     english_title: r.english_title,
@@ -184,10 +187,16 @@ export async function openElvEnrichmentStore(
   }
   await driver.transaction(async (tx) => {
     await tx.exec(ELV_ENRICHMENT_SCHEMA_SQL);
-    await tx.run('INSERT OR IGNORE INTO elv_meta (key, value) VALUES (?, ?)', [
-      'schema_version',
-      ELV_ENRICHMENT_SCHEMA_VERSION,
-    ]);
+    const titleCols = await tx.all<{ name: string }>('PRAGMA table_info(elv_titles)');
+    if (!titleCols.some((c) => c.name === 'tmdb_id')) {
+      await tx.exec('ALTER TABLE elv_titles ADD COLUMN tmdb_id TEXT');
+    }
+    await tx.exec(ELV_ENRICHMENT_TITLES_TMDB_INDEX_SQL);
+    await tx.run(
+      `INSERT INTO elv_meta (key, value) VALUES ('schema_version', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [ELV_ENRICHMENT_SCHEMA_VERSION],
+    );
   });
 
   return {
@@ -329,7 +338,7 @@ export async function openElvEnrichmentStore(
         const chunk = unique.slice(i, i + IN_CHUNK_SIZE);
         const rows = await driver.all<RawJoinedRow>(
           `SELECT m.item_key, m.source_id, m.media_type, m.imdb_id, m.confidence, m.manual_lock, m.updated_at,
-                  t.imdb_id AS t_imdb_id, t.media_type AS t_media_type, t.original_title, t.english_title,
+                  t.imdb_id AS t_imdb_id, t.tmdb_id, t.media_type AS t_media_type, t.original_title, t.english_title,
                   t.localized_titles_json, t.year, t.rating, t.votes, t.runtime_min, t.genres_json,
                   t.poster_url, t.backdrop_url, t.trailer_stream_url, t.trailer_youtube_id, t.director,
                   t.cast_json, t.mlt_imdb_ids_json, t.franchise_key, t.franchise_name, t.franchise_order,
@@ -366,6 +375,30 @@ export async function openElvEnrichmentStore(
     },
 
     getTitlesByImdbIds: (imdbIds) => getTitlesByImdbIds(driver, imdbIds),
+
+    async getTitlesByTmdbIds(tmdbIds, mediaType) {
+      const out = new Map<string, ElvTitleRecord>();
+      const unique = uniqueNonEmpty(
+        tmdbIds.map((id) => normalizeCatalogTmdbId(id)).filter((id): id is string => id !== null),
+      );
+      if (unique.length === 0) return out;
+      const typeClause = mediaType === undefined ? '' : ' AND media_type = ?';
+      for (let i = 0; i < unique.length; i += IN_CHUNK_SIZE) {
+        const chunk = unique.slice(i, i + IN_CHUNK_SIZE);
+        const params: SqlValue[] = mediaType === undefined ? chunk : [...chunk, mediaType];
+        const rows = await driver.all<RawTitleRow>(
+          `SELECT * FROM elv_titles WHERE tmdb_id IN (${placeholders(chunk.length)})${typeClause} ORDER BY updated_at DESC`,
+          params,
+        );
+        for (const r of rows) {
+          const mapped = mapTitleRow(r);
+          if (mapped.tmdbId !== null && mapped.tmdbId !== undefined && !out.has(mapped.tmdbId)) {
+            out.set(mapped.tmdbId, mapped);
+          }
+        }
+      }
+      return out;
+    },
 
     listImdbGenreCounts: (mediaType, filterOpts) =>
       listImdbGenreCounts(driver, mediaType, filterOpts),

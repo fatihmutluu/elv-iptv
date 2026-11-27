@@ -29,6 +29,7 @@ describe('3-Layer Zero-Wait ELV Catalog Matcher & HTTP Client (#511)', () => {
                 mediaType: 'movie',
                 title: {
                   imdbId: 'tt1375666',
+                  tmdbId: 27205,
                   mediaType: 'movie',
                   originalTitle: 'Inception',
                   englishTitle: 'Inception',
@@ -78,6 +79,7 @@ describe('3-Layer Zero-Wait ELV Catalog Matcher & HTTP Client (#511)', () => {
       expect(sentBody).not.toContain('secret-provider');
       expect(res.matches).toHaveLength(1);
       expect(res.matches[0]?.imdbId).toBe('tt1375666');
+      expect(res.matches[0]?.title?.tmdbId).toBe('27205');
       expect(res.matches[0]?.title?.localizedTitles).toEqual({ tr: 'Başlangıç' });
     });
 
@@ -88,6 +90,7 @@ describe('3-Layer Zero-Wait ELV Catalog Matcher & HTTP Client (#511)', () => {
           return new Response(
             JSON.stringify({
               imdbId: 'tt1375666',
+              tmdbId: '27205',
               mediaType: 'movie',
               originalTitle: 'Inception',
               englishTitle: 'Inception',
@@ -151,6 +154,7 @@ describe('3-Layer Zero-Wait ELV Catalog Matcher & HTTP Client (#511)', () => {
       const client = createElvHttpClient({ baseUrl: 'https://sync.elv-iptv.example', fetchFn });
       expect(await client.fetchTitleDetail('bad-id', 'tr')).toBeNull();
       const detail = await client.fetchTitleDetail('tt1375666', 'tr');
+      expect(detail?.tmdbId).toBe('27205');
       expect(detail?.director).toBe('Christopher Nolan');
       expect(detail?.synopses).toEqual({ tr: 'Rüya hırsızı Cobb...' });
       expect(detail?.localizedTitles).toEqual({ tr: 'Başlangıç' });
@@ -507,6 +511,67 @@ describe('3-Layer Zero-Wait ELV Catalog Matcher & HTTP Client (#511)', () => {
       const res = await matcher.runBackgroundMatching({ signal: ac.signal });
       expect(res.aborted).toBe(true);
       expect(client.matchBatch).not.toHaveBeenCalled();
+    });
+
+    it('runs offline Layer 1 matching (provider_imdb_id + cached tmdb_id) when client is undefined and supports dynamic getClient activation', async () => {
+      const { catalogDb, store } = await seedCatalog();
+      // Cache Interstellar in local elv_titles with tmdbId so Layer 1 can match x:s1:movie:2 offline via tmdb_id!
+      await store.upsertTitles([
+        {
+          imdbId: 'tt0816692',
+          tmdbId: '157336',
+          mediaType: 'movie',
+          originalTitle: 'Interstellar',
+          year: 2014,
+        },
+      ]);
+
+      let activeClient: ElvMetadataClient | undefined;
+      const matcher = createElvCatalogMatcher({
+        catalogDb,
+        enrichmentStore: store,
+        getClient: () => activeClient,
+        now: () => 80_000,
+      });
+
+      // Offline priority matching: x:s1:movie:1 via provider_imdb_id, x:s1:movie:2 via cached tmdb_id
+      const offlinePrio = await matcher.enrichPriorityKeys(['x:s1:movie:1', 'x:s1:movie:2']);
+      expect(offlinePrio.layer1Matched).toBe(2);
+      expect(offlinePrio.remoteMatched).toBe(0);
+      expect((await store.getMatchForKey('x:s1:movie:1'))?.imdbId).toBe('tt1375666');
+      expect((await store.getMatchForKey('x:s1:movie:2'))?.imdbId).toBe('tt0816692');
+
+      // Offline background matching still matches series:1 via provider_imdb_id without network
+      const offlineBg = await matcher.runBackgroundMatching({ batchSize: 10 });
+      expect(offlineBg.layer1Matched).toBe(1);
+      expect(offlineBg.remoteMatched).toBe(0);
+      expect((await store.getMatchForKey('x:s1:series:1'))?.imdbId).toBe('tt5753856');
+
+      // Now configure server URL dynamically -> background matching resolves remaining x:s1:movie:3 remotely
+      activeClient = {
+        matchBatch: vi.fn(async (items: readonly ElvMatchBatchRequestItem[]) => ({
+          matches: items.map((item) => ({
+            key: item.key,
+            imdbId: item.providerImdbId ?? 'tt0133093',
+            confidence: 0.94,
+            mediaType: item.mediaType,
+            title: {
+              imdbId: item.providerImdbId ?? 'tt0133093',
+              mediaType: item.mediaType,
+              originalTitle: item.cleanTitle,
+            },
+          })),
+          unmatchedKeys: [],
+          pendingKeys: [],
+        })),
+        fetchTitleDetail: vi.fn(async () => null),
+        fetchFeeds: vi.fn(async () => null),
+        searchTitles: vi.fn(async () => []),
+      };
+
+      const onlineBg = await matcher.runBackgroundMatching({ batchSize: 10 });
+      expect(onlineBg.remoteMatched).toBe(1);
+      expect((await store.getMatchForKey('x:s1:movie:3'))?.imdbId).toBe('tt0133093');
     });
   });
 });

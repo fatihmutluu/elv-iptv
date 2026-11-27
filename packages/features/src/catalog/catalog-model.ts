@@ -154,7 +154,7 @@ export function detailTargetFromProgress(
     kind: tabKind,
     title: row.title,
     posterUri: row.logo,
-    backdropUri: row.logo,
+    backdropUri: (row as { backdrop?: string | null }).backdrop ?? null,
     year: null,
     rating: null,
   };
@@ -192,7 +192,7 @@ export function detailTargetFromFavorite(row: FavoriteRow, kind: 'movie' | 'seri
     kind,
     title: row.title,
     posterUri: row.logo,
-    backdropUri: row.logo,
+    backdropUri: (row as { backdrop?: string | null }).backdrop ?? null,
     year: row.year,
     rating: row.rating,
   };

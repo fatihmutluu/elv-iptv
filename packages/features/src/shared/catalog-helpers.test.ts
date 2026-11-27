@@ -67,11 +67,20 @@ describe('shared catalog helpers', () => {
       kind: 'movie',
       title: 'Silent Horizon',
       posterUri: 'https://img.invalid/poster.jpg',
-      backdropUri: 'https://img.invalid/poster.jpg',
+      backdropUri: null,
       year: 2026,
       rating: 8.6,
       catalogId: 42,
       categoryId: 's1|movie|scifi',
+    });
+
+    const movieWithBackdrop = {
+      ...movie,
+      backdrop: 'https://img.invalid/backdrop-16x9.jpg',
+    } as ItemRow;
+    expect(detailTargetFromItem(movieWithBackdrop)).toMatchObject({
+      posterUri: 'https://img.invalid/poster.jpg',
+      backdropUri: 'https://img.invalid/backdrop-16x9.jpg',
     });
 
     const live: ItemRow = { ...movie, kind: 'live', num: 1 };

@@ -3,7 +3,6 @@ import type {
   ElvFranchiseLibraryItem,
   ElvItemEnrichment,
   ElvPersonLibraryItem,
-  ElvSearchCandidate,
   ElvTitleRecord,
 } from '@elv/data';
 import { DEFAULT_ELV_MODE_PREFERENCES, type ElvModePreferences } from '@elv/domain';
@@ -357,50 +356,8 @@ describe('Wave E2 Rich Detail, Trailers, Cast Modal, Franchise Strip & Fix Match
     await view.unmount();
   });
 
-  it('opens Fix Match modal, searches IMDb candidates, applies manual lock, and immediately refreshes Detail', async () => {
-    const initialTitle = makeTitleRecord({
-      imdbId: 'tt0087182',
-      originalTitle: 'Dune (1984)',
-      year: 1984,
-      rating: 6.3,
-    });
-    const fixedTitle = makeTitleRecord({
-      imdbId: 'tt1160419',
-      originalTitle: 'Dune',
-      year: 2021,
-      rating: 8.0,
-    });
-    const initialEnrichment: ElvItemEnrichment = {
-      itemKey: MOVIE_TARGET.itemKey,
-      sourceId: MOVIE_TARGET.sourceId,
-      mediaType: 'movie',
-      imdbId: 'tt0087182',
-      confidence: 0.72,
-      manualLock: false,
-      title: initialTitle,
-    };
-    const fixedEnrichment: ElvItemEnrichment = {
-      itemKey: MOVIE_TARGET.itemKey,
-      sourceId: MOVIE_TARGET.sourceId,
-      mediaType: 'movie',
-      imdbId: 'tt1160419',
-      confidence: 1,
-      manualLock: true,
-      title: fixedTitle,
-    };
-    const candidates: readonly ElvSearchCandidate[] = [
-      {
-        imdbId: 'tt1160419',
-        title: 'Dune',
-        year: 2021,
-        mediaType: 'movie',
-        posterUrl: fixedTitle.posterUrl,
-        stars: 'Timothée Chalamet, Rebecca Ferguson',
-      },
-    ];
-    const searchElvMatchCandidates = jest.fn(async () => candidates);
-    const applyElvFixMatch = jest.fn(async () => fixedEnrichment);
-
+  it('declutters Detail hero (omits Fix Match, Enriched badge, and movie kind pill) and cleans unmatched titles locally offline', async () => {
+    const applyElvFixMatch = jest.fn();
     const catalog = {
       itemDetail: jest.fn(async () => null),
       listFavoriteKeys: jest.fn(async () => []),
@@ -411,14 +368,8 @@ describe('Wave E2 Rich Detail, Trailers, Cast Modal, Franchise Strip & Fix Match
       items: jest.fn(async () => []),
       listProgressByKeys: jest.fn(async () => []),
       getRating: jest.fn(async () => null),
-      getElvEnrichmentForKeys: jest.fn(
-        async () => new Map<string, ElvItemEnrichment>([[MOVIE_TARGET.itemKey, initialEnrichment]]),
-      ),
-      getElvTitleDetail: jest.fn(async (imdbId: string) =>
-        imdbId === 'tt1160419' ? fixedTitle : initialTitle,
-      ),
+      getElvEnrichmentForKeys: jest.fn(async () => new Map<string, ElvItemEnrichment>()),
       listElvFranchiseItems: jest.fn(async () => []),
-      searchElvMatchCandidates,
       applyElvFixMatch,
     } as unknown as CatalogService;
 
@@ -435,7 +386,13 @@ describe('Wave E2 Rich Detail, Trailers, Cast Modal, Franchise Strip & Fix Match
         <ThemeProvider preset="obsidianCrimson">
           <I18nProvider i18n={createAppI18n('en')}>
             <DetailScreen
-              target={MOVIE_TARGET}
+              target={{
+                ...MOVIE_TARGET,
+                title: 'TR : INCEPTION [2010 - HEVC] 4K',
+                posterUri: 'https://provider.invalid/poster.jpg',
+                backdropUri: null,
+                year: null,
+              }}
               catalog={catalog}
               refreshToken={1}
               elvPreferences={ELV_ON}
@@ -449,27 +406,22 @@ describe('Wave E2 Rich Detail, Trailers, Cast Modal, Franchise Strip & Fix Match
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('detail-fix-match-btn')).toBeTruthy();
+      expect(screen.getByTestId('detail-title')).toHaveTextContent('INCEPTION');
+      expect(screen.getByTestId('detail-year')).toHaveTextContent('2010');
     });
+
+    expect(screen.queryByTestId('detail-fix-match-btn')).toBeNull();
     expect(screen.queryByTestId('detail-fix-match-locked')).toBeNull();
-
-    await fireEvent.press(screen.getByTestId('detail-fix-match-btn'));
-    await waitFor(() => {
-      expect(screen.getByTestId('detail-fix-match-candidate-0')).toBeTruthy();
-    });
-
-    await fireEvent.press(screen.getByTestId('detail-fix-match-candidate-0'));
-    await waitFor(() => {
-      expect(applyElvFixMatch).toHaveBeenCalledWith({
-        itemKey: MOVIE_TARGET.itemKey,
-        sourceId: MOVIE_TARGET.sourceId,
-        mediaType: 'movie',
-        imdbId: 'tt1160419',
-        lang: 'en',
-      });
-      expect(screen.getByTestId('detail-fix-match-locked')).toBeTruthy();
-    });
-    expect(screen.getByTestId('detail-title').props.children).toBe('Dune');
+    expect(screen.queryByTestId('detail-fix-match-modal')).toBeNull();
+    expect(screen.queryByTestId('detail-enrichment-badge')).toBeNull();
+    expect(screen.queryByTestId('detail-kind-pill')).toBeNull();
+    expect(
+      screen.getByTestId('detail-hero-backdrop-ambient', { includeHiddenElements: true }),
+    ).toBeTruthy();
+    expect(screen.getByTestId('detail-hero-poster')).toBeTruthy();
+    expect(
+      screen.queryByTestId('detail-hero-backdrop', { includeHiddenElements: true }),
+    ).toBeNull();
 
     await view.unmount();
   });

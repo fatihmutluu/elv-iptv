@@ -95,6 +95,8 @@ export interface ItemRow {
   name: string;
   /** Logo or cover as stored (an M3U template is resolved by the service). */
   logo: string | null;
+  /** Landscape backdrop artwork URL when supplied by provider metadata (movies/series). */
+  readonly backdrop?: string | null;
   rating: number | null;
   year: number | null;
   /** Channel number (live only). */
@@ -121,6 +123,7 @@ export interface RawItemRow {
   provider_id: string | null;
   name: string;
   logo: string | null;
+  backdrop?: string | null;
   rating: number | null;
   year: number | null;
   num: number | null;
@@ -134,9 +137,11 @@ export interface RawItemRow {
 
 /** @internal Columns per kind; fixed strings, never built from data. */
 export const ITEM_COLS: Record<BrowseKind, string> = {
-  live: 't.logo AS logo, NULL AS rating, NULL AS year, t.num AS num, t.catchup_days AS catchup_days',
-  movie: 't.logo AS logo, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
-  series: 't.cover AS logo, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
+  live: 't.logo AS logo, NULL AS backdrop, NULL AS rating, NULL AS year, t.num AS num, t.catchup_days AS catchup_days',
+  movie:
+    't.logo AS logo, t.backdrop AS backdrop, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
+  series:
+    't.cover AS logo, t.backdrop AS backdrop, t.rating AS rating, t.year AS year, NULL AS num, NULL AS catchup_days',
 };
 
 /** @internal Backing catalog table per kind; fixed strings, never built from data. */
@@ -192,6 +197,7 @@ export function mapItemRow(kind: BrowseKind, sourceId: string, r: RawItemRow): I
     providerId: r.provider_id,
     name: r.name,
     logo: r.logo,
+    ...(typeof r.backdrop === 'string' && r.backdrop !== '' ? { backdrop: r.backdrop } : {}),
     rating: r.rating,
     year: r.year,
     num: r.num,

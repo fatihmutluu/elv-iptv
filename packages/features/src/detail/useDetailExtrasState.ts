@@ -13,7 +13,6 @@ export interface UseDetailExtrasStateOptions {
   readonly plot: string | null;
   readonly cast?: readonly DetailRichCastMember[];
   readonly director?: string | null;
-  readonly hasFixMatch?: boolean;
   readonly versions?: readonly DetailVersionOption[];
   readonly activeVersionKey?: string;
   readonly onSelectVersion?: (key: string) => void;
@@ -44,7 +43,6 @@ export function useDetailExtrasState({
   plot,
   cast,
   director,
-  hasFixMatch = false,
   versions = [],
   activeVersionKey,
   onSelectVersion,
@@ -91,9 +89,8 @@ export function useDetailExtrasState({
       'play',
       ...(hasVersions ? (['preplay-version'] as const) : []),
       ...(canExpandSynopsis ? (['synopsis'] as const) : []),
-      ...(hasFixMatch ? (['fix-match'] as const) : []),
     ],
-    [canExpandSynopsis, hasFixMatch, hasVersions],
+    [canExpandSynopsis, hasVersions],
   );
 
   const castPeople = useMemo<readonly PersonLibraryModalPerson[]>(() => {

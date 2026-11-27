@@ -1,6 +1,7 @@
 import { ArtworkImage, Scrim, useTheme, useUiAdapters } from '@elv/ui-kit';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { Animated, Platform, StyleSheet, View } from 'react-native';
+import { BlurredAmbientBackdrop } from './BlurredAmbientBackdrop';
 
 /** Debounce window (ms) before committing a newly focused card's ambient backdrop (`#414`). */
 export const AMBIENT_BACKDROP_DEBOUNCE_MS = 500;
@@ -16,6 +17,7 @@ interface BackdropEntry {
   readonly key: string;
   readonly uri: string;
   readonly title: string;
+  readonly portrait: boolean;
 }
 
 /** Props of {@link AmbientBackdrop}. */
@@ -26,6 +28,8 @@ export interface AmbientBackdropProps {
   readonly uri: string | null;
   /** Optional accessible title passed to decorative `ArtworkImage`. */
   readonly title?: string;
+  /** True when `uri` is a vertical portrait poster rather than a 16:9 landscape backdrop. */
+  readonly portrait?: boolean;
   /** Enables single-layer low-decode mode (640 px, no dual-layer crossfade) for 3 GB Apple TV tier (`#414`). */
   readonly lowPowerTier?: boolean;
   readonly testID?: string;
@@ -41,6 +45,7 @@ export function AmbientBackdrop({
   backdropKey,
   uri,
   title = '',
+  portrait = false,
   lowPowerTier,
   testID = 'ambient-backdrop',
 }: AmbientBackdropProps): ReactElement | null {
@@ -103,9 +108,14 @@ export function AmbientBackdrop({
       return stopActiveAnim;
     }
 
-    const nextEntry: BackdropEntry = { key: backdropKey, uri: normalizedUri, title };
+    const nextEntry: BackdropEntry = { key: backdropKey, uri: normalizedUri, title, portrait };
     const current = committedRef.current;
-    if (current !== null && current.key === nextEntry.key && current.uri === nextEntry.uri) {
+    if (
+      current !== null &&
+      current.key === nextEntry.key &&
+      current.uri === nextEntry.uri &&
+      current.portrait === nextEntry.portrait
+    ) {
       stopActiveAnim();
       visibilityAnim.setValue(1);
       return undefined;
@@ -144,7 +154,16 @@ export function AmbientBackdrop({
     return () => {
       clearTimeout(timer);
     };
-  }, [backdropKey, fadeAnim, hasTarget, normalizedUri, singleLayer, title, visibilityAnim]);
+  }, [
+    backdropKey,
+    fadeAnim,
+    hasTarget,
+    normalizedUri,
+    portrait,
+    singleLayer,
+    title,
+    visibilityAnim,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -169,30 +188,38 @@ export function AmbientBackdrop({
       ]}
     >
       {prevBackdrop !== null && !singleLayer ? (
-        <ArtworkImage
-          testID={`${testID}-prev`}
-          uri={prevBackdrop.uri}
-          label={prevBackdrop.title}
-          maxDecodePx={decodePx}
-          borderRadius={0}
-          decorative
-          style={StyleSheet.absoluteFill}
-        />
+        prevBackdrop.portrait ? (
+          <BlurredAmbientBackdrop uri={prevBackdrop.uri} testID={`${testID}-prev`} />
+        ) : (
+          <ArtworkImage
+            testID={`${testID}-prev`}
+            uri={prevBackdrop.uri}
+            label={prevBackdrop.title}
+            maxDecodePx={decodePx}
+            borderRadius={0}
+            decorative
+            style={StyleSheet.absoluteFill}
+          />
+        )
       ) : null}
       <Animated.View
         pointerEvents="none"
         testID={`${testID}-layer`}
         style={[StyleSheet.absoluteFill, { opacity: singleLayer ? 1 : fadeAnim }]}
       >
-        <ArtworkImage
-          testID={`${testID}-image`}
-          uri={committed.uri}
-          label={committed.title}
-          maxDecodePx={decodePx}
-          borderRadius={0}
-          decorative
-          style={StyleSheet.absoluteFill}
-        />
+        {committed.portrait ? (
+          <BlurredAmbientBackdrop uri={committed.uri} testID={`${testID}-image`} />
+        ) : (
+          <ArtworkImage
+            testID={`${testID}-image`}
+            uri={committed.uri}
+            label={committed.title}
+            maxDecodePx={decodePx}
+            borderRadius={0}
+            decorative
+            style={StyleSheet.absoluteFill}
+          />
+        )}
       </Animated.View>
       <View
         pointerEvents="none"

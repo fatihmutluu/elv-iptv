@@ -301,4 +301,60 @@ describe('createCatalogCoordinator', () => {
     await p;
     await coordinator.shutdown();
   });
+
+  it('updates elvServerUrl dynamically on running worker and preserves it across pre-fork and crash respawns', async () => {
+    const children: FakeChild[] = [];
+    const { store } = createMemorySecrets();
+
+    const coordinator = createCatalogCoordinator({
+      dbPath: '/tmp/user-data/catalog.db',
+      workerPath: '/app/worker.js',
+      secrets: store,
+      fork: () => {
+        const c = new FakeChild();
+        children.push(c);
+        return c;
+      },
+      createChannel: () => ({ port1: 'p1', port2: 'p2' }),
+      log: () => undefined,
+    });
+
+    // Update URL BEFORE worker is forked -> init receives updated URL
+    coordinator.setElvServerUrl('  https://pre-fork.example.test  ');
+    const first = coordinator.connectClient();
+    expect(children[0]?.received[0]?.message).toEqual({
+      type: 'init',
+      dbPath: '/tmp/user-data/catalog.db',
+      elvServerUrl: 'https://pre-fork.example.test',
+    });
+    children[0]?.emitWorkerMessage({ type: 'ready' });
+    await first;
+
+    // Update URL WHILE worker is running -> posts set-elv-server-url immediately
+    coordinator.setElvServerUrl('https://runtime.example.test');
+    expect(children[0]?.received.at(-1)?.message).toEqual({
+      type: 'set-elv-server-url',
+      elvServerUrl: 'https://runtime.example.test',
+    });
+
+    // Simulate crash & respawn -> fresh worker boots with the latest updated URL
+    children[0]?.emitExit(1);
+    const second = coordinator.connectClient();
+    expect(children[1]?.received[0]?.message).toEqual({
+      type: 'init',
+      dbPath: '/tmp/user-data/catalog.db',
+      elvServerUrl: 'https://runtime.example.test',
+    });
+    children[1]?.emitWorkerMessage({ type: 'ready' });
+    await second;
+
+    // Clearing URL notifies running worker and omits elvServerUrl on subsequent respawns
+    coordinator.setElvServerUrl('   ');
+    expect(children[1]?.received.at(-1)?.message).toEqual({
+      type: 'set-elv-server-url',
+      elvServerUrl: '',
+    });
+
+    await coordinator.shutdown();
+  });
 });

@@ -73,4 +73,59 @@ describe('parseVodVersion (#404)', () => {
     expect(parseVodVersion('Part (IV) [4K]').groupKey).toBe('part iv');
     expect(parseVodVersion('Rocky (VI) (2006) [1080p]').groupKey).toBe('rocky vi::2006');
   });
+
+  it('merges multilingual noisy prefixes, mixed year+noise brackets, bare trailing years, and trailing quality suffixes', () => {
+    expect(parseVodVersion('Dune Part Two 2024 4K').groupKey).toBe('dune part two::2024');
+    expect(parseVodVersion('Dune Part Two (2024) FHD').groupKey).toBe('dune part two::2024');
+    expect(parseVodVersion('Dune Part Two 2024 4K', 2024).groupKey).toBe('dune part two::2024');
+    expect(parseVodVersion('TR | FHD | Dune Part Two [2024 - Altyazılı]').groupKey).toBe(
+      'dune part two::2024',
+    );
+    expect(parseVodVersion('TUR | 4K - Dune Part Two (2024 Türkçe Dublaj)').groupKey).toBe(
+      'dune part two::2024',
+    );
+    expect(parseVodVersion('[FR] Dune Part Two (2024 FR 4K) VOSTFR').groupKey).toBe(
+      'dune part two::2024',
+    );
+    expect(parseVodVersion('Dune Part Two [4K 2024 DUAL] DDP5.1').groupKey).toBe(
+      'dune part two::2024',
+    );
+    expect(parseVodVersion('(PT-BR) Dune Part Two (2024 - VOSTFR)').groupKey).toBe(
+      'dune part two::2024',
+    );
+
+    expect(parseVodVersion('Movie Title - 4K').groupKey).toBe('movie title');
+    expect(parseVodVersion('Movie Title - Türkçe Dublaj').groupKey).toBe('movie title');
+    expect(parseVodVersion('Movie Title - Dual Audio').groupKey).toBe('movie title');
+    expect(parseVodVersion('Movie Title - VOSTFR').groupKey).toBe('movie title');
+    expect(parseVodVersion('The Matrix - Reloaded (2003) [4K]').groupKey).toBe(
+      'the matrix reloaded::2003',
+    );
+
+    expect(parseVodVersion('The Boys (2019) AMZN WEB-DL 1080p').groupKey).toBe('the boys::2019');
+    expect(parseVodVersion('The Boys (2019) [NF] [1080p]').groupKey).toBe('the boys::2019');
+  });
+
+  it('preserves short English titles, sequel numbers, Roman numerals, and numeric titles in multilingual mode', () => {
+    expect(parseVodVersion('It (2017) [4K]').groupKey).toBe('it::2017');
+    expect(parseVodVersion('IT (2017) [1080p]').groupKey).toBe('it::2017');
+    expect(parseVodVersion('Up (2009) [FHD]').groupKey).toBe('up::2009');
+    expect(parseVodVersion('Us (2019) [HEVC]').groupKey).toBe('us::2019');
+    expect(parseVodVersion('Her (2013) WEB-DL').groupKey).toBe('her::2013');
+    expect(parseVodVersion('Top Gun (1986) [4K]').groupKey).toBe('top gun::1986');
+    expect(parseVodVersion('New York (2009) [1080p]').groupKey).toBe('new york::2009');
+    expect(parseVodVersion('Original Sin (2001) [FHD]').groupKey).toBe('original sin::2001');
+    expect(parseVodVersion('In Time (2011) [4K]').groupKey).toBe('in time::2011');
+    expect(parseVodVersion('300 (2006) [4K]').groupKey).toBe('300::2006');
+    expect(parseVodVersion('Dune 2 (2024) [4K]').groupKey).toBe('dune 2::2024');
+    expect(parseVodVersion('Spider-Man: Part 2 (2024) [1080p]').groupKey).toBe(
+      'spider man part 2::2024',
+    );
+    expect(parseVodVersion('Title - It').groupKey).toBe('title it');
+    expect(parseVodVersion('Title - Us').groupKey).toBe('title us');
+    expect(parseVodVersion('Blade Runner 2049').groupKey).toBe('blade runner 2049');
+    expect(parseVodVersion('Blade Runner 2049 (2017) [4K]').groupKey).toBe(
+      'blade runner 2049::2017',
+    );
+  });
 });

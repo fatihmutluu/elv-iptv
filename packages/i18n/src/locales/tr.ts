@@ -308,6 +308,8 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'settings.about.licenseBadge': 'Tescilli · LGPL medya motorları',
   'settings.about.statement':
     'ELV IPTV, her ekran için özenle geliştirilmiş %100 ücretsiz, reklamsız ve bağımsız bir IPTV oynatıcısıdır. Hiçbir medya içeriği sunmaz — kendi Xtream, M3U veya Stalker kaynağınızı ekleyin. Sağlayıcı bilgileriniz cihazınızda şifreli saklanır ve katalog veritabanına yazılmaz.',
+  'settings.about.tmdbAttribution':
+    "Bu ürün TMDB API'sini kullanır ancak TMDB tarafından onaylanmamış veya sertifikalandırılmamıştır.",
   'home.title': 'Ana Sayfa',
   'home.continueWatching': 'İzlemeye devam et',
   'home.onAirNow': 'Şu an yayında',

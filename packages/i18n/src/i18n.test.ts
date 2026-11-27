@@ -300,6 +300,11 @@ describe('@elv/i18n', () => {
         'ELV IPTV is a 100% free, ad-free, independent IPTV player built with care for every screen. It ships no media content — bring your own Xtream, M3U, or Stalker source. Provider credentials stay encrypted on your device and never enter the catalog database.',
         'ELV IPTV, her ekran için özenle geliştirilmiş %100 ücretsiz, reklamsız ve bağımsız bir IPTV oynatıcısıdır. Hiçbir medya içeriği sunmaz — kendi Xtream, M3U veya Stalker kaynağınızı ekleyin. Sağlayıcı bilgileriniz cihazınızda şifreli saklanır ve katalog veritabanına yazılmaz.',
       ],
+      [
+        'settings.about.tmdbAttribution',
+        'This product uses the TMDB API but is not endorsed or certified by TMDB.',
+        "Bu ürün TMDB API'sini kullanır ancak TMDB tarafından onaylanmamış veya sertifikalandırılmamıştır.",
+      ],
     ];
     for (const [id, expectedEn, expectedTr] of cases) {
       expect(en.t(id)).toBe(expectedEn);

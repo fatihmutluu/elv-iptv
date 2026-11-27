@@ -1,5 +1,5 @@
 /** Schema version recorded in `elv_meta.schema_version` for isolated `elv-enrichment.db`. */
-export const ELV_ENRICHMENT_SCHEMA_VERSION = '1';
+export const ELV_ENRICHMENT_SCHEMA_VERSION = '2';
 
 /** SQLite pragmas applied when opening `elv-enrichment.db` on its own isolated `SqlDriver`. */
 export const ELV_ENRICHMENT_OPEN_PRAGMAS: readonly string[] = [
@@ -8,6 +8,10 @@ export const ELV_ENRICHMENT_OPEN_PRAGMAS: readonly string[] = [
   'PRAGMA synchronous = NORMAL',
   'PRAGMA temp_store = MEMORY',
 ];
+
+/** Created after checking/applying `ALTER TABLE elv_titles ADD COLUMN tmdb_id TEXT` on legacy v1 stores. */
+export const ELV_ENRICHMENT_TITLES_TMDB_INDEX_SQL =
+  'CREATE INDEX IF NOT EXISTS idx_elv_titles_tmdb_id ON elv_titles (tmdb_id);';
 
 /** Idempotent DDL creating all isolated ELV Mode enrichment tables and indexes (`#511`). */
 export const ELV_ENRICHMENT_SCHEMA_SQL = `
@@ -30,6 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_elv_matches_source ON elv_item_matches (source_id
 
 CREATE TABLE IF NOT EXISTS elv_titles (
   imdb_id TEXT PRIMARY KEY,
+  tmdb_id TEXT,
   media_type TEXT NOT NULL,
   original_title TEXT NOT NULL,
   english_title TEXT,

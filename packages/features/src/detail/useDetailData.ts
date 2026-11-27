@@ -1,16 +1,16 @@
-import type {
-  CatalogService,
-  ElvFranchiseLibraryItem,
-  ElvItemEnrichment,
-  ElvTitleRecord,
-  EpisodeRow,
-  ItemDetailRow,
-  RatingValue,
-  SeasonRow,
-  SeriesUnplayedSummary,
-  VodEnrichmentRecord,
-  VodVersionOption,
-  WatchProgressRow,
+import {
+  type CatalogService,
+  cleanVodTitle,
+  type ElvFranchiseLibraryItem,
+  type ElvTitleRecord,
+  type EpisodeRow,
+  type ItemDetailRow,
+  type RatingValue,
+  type SeasonRow,
+  type SeriesUnplayedSummary,
+  type VodEnrichmentRecord,
+  type VodVersionOption,
+  type WatchProgressRow,
 } from '@elv/data';
 import {
   DEFAULT_ELV_MODE_PREFERENCES,
@@ -72,11 +72,9 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly trailerStreamUrl: string | null;
   readonly trailerYoutubeId: string | null;
   readonly imdbId: string | null;
-  readonly manualLock: boolean;
   readonly franchiseItems: readonly ElvFranchiseLibraryItem[];
   readonly plot: string | null;
   readonly genres: readonly string[];
-  readonly isEnriched: boolean;
   readonly relatedUnplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly versions: readonly DetailVersionOption[];
   readonly userRating: RatingValue | null;
@@ -85,7 +83,6 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly toggleMyList: () => Promise<void>;
   readonly toggleWatched: () => Promise<void>;
   readonly toggleRating: (next: RatingValue) => Promise<void>;
-  readonly applyFixMatchResult: (updated: ElvItemEnrichment) => void;
 }
 
 /**
@@ -124,8 +121,6 @@ export function useDetailData({
   const [versions, setVersions] = useState<readonly DetailVersionOption[]>([]);
   const [enrichment, setEnrichment] = useState<VodEnrichmentRecord | null>(null);
   const [elvTitleDetail, setElvTitleDetail] = useState<ElvTitleRecord | null>(null);
-  const [fixMatchOverride, setFixMatchOverride] = useState<ElvItemEnrichment | null>(null);
-  const [fixMatchToken, setFixMatchToken] = useState(0);
   const [franchiseItems, setFranchiseItems] = useState<readonly ElvFranchiseLibraryItem[]>([]);
   const [userRating, setUserRatingState] = useState<RatingValue | null>(null);
 
@@ -224,7 +219,6 @@ export function useDetailData({
       setVersions([]);
       setEnrichment(null);
       setElvTitleDetail(null);
-      setFixMatchOverride(null);
       setFranchiseItems([]);
       userRatingRef.current = null;
       setUserRatingState(null);
@@ -465,7 +459,6 @@ export function useDetailData({
     catalog,
     effectiveSeriesKey,
     elvMergeActive,
-    fixMatchToken,
     loadSeasonEpisodes,
     refreshToken,
     seasonsRetryToken,
@@ -482,19 +475,13 @@ export function useDetailData({
   const elvEnrichment = useElvEnrichmentForKeys(catalog, elvTargetKeys, {
     enabled: elvEnrichActive,
     lang: locale,
-    catalogRevision: refreshToken + fixMatchToken,
+    catalogRevision: refreshToken,
   });
-  const elvItemEnrichment =
-    fixMatchOverride?.itemKey === target.itemKey
-      ? fixMatchOverride
-      : elvEnrichment.enrichmentByKey.get(target.itemKey);
+  const elvItemEnrichment = elvEnrichment.enrichmentByKey.get(target.itemKey);
   const elvPosterLookupPending =
-    elvEnrichActive &&
-    fixMatchOverride?.itemKey !== target.itemKey &&
-    elvEnrichment.isKeyLookupPending(target.itemKey);
+    elvEnrichActive && elvEnrichment.isKeyLookupPending(target.itemKey);
   const matchedImdbId = elvItemEnrichment?.imdbId ?? null;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fixMatchToken triggers fresh detail fetch after Fix Match
   useEffect(() => {
     if (!elvEnrichActive || matchedImdbId === null || catalog.getElvTitleDetail === undefined) {
       setElvTitleDetail(null);
@@ -512,9 +499,8 @@ export function useDetailData({
       cancelled = true;
       ac.abort();
     };
-  }, [catalog, elvEnrichActive, fixMatchToken, locale, matchedImdbId]);
+  }, [catalog, elvEnrichActive, locale, matchedImdbId]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fixMatchToken triggers fresh franchise fetch after Fix Match
   useEffect(() => {
     if (
       !elvPrefs.elvModeEnabled ||
@@ -536,13 +522,7 @@ export function useDetailData({
     return () => {
       cancelled = true;
     };
-  }, [catalog, elvPrefs.elvModeEnabled, fixMatchToken, matchedImdbId]);
-
-  const applyFixMatchResult = useCallback((updated: ElvItemEnrichment) => {
-    setFixMatchOverride(updated);
-    if (updated.title !== null) setElvTitleDetail(updated.title);
-    setFixMatchToken((n) => n + 1);
-  }, []);
+  }, [catalog, elvPrefs.elvModeEnabled, matchedImdbId]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken triggers opt-in enrichment refresh on source sync
   useEffect(() => {
@@ -594,9 +574,12 @@ export function useDetailData({
     setSeasonsRetryToken((n) => n + 1);
   }, [updateSnap]);
 
+  const nonEmptyUrl = (v: string | null | undefined): string | null => {
+    const t = v?.trim();
+    return t && t.length > 0 ? t : null;
+  };
   const rawTitle = snap.detailRow?.name ?? target.title;
-  const rawPosterUri = target.posterUri ?? snap.detailRow?.logo ?? null;
-  const rawBackdropUri = target.backdropUri ?? snap.detailRow?.logo ?? target.posterUri ?? null;
+  const rawPosterUri = nonEmptyUrl(target.posterUri) ?? nonEmptyUrl(snap.detailRow?.logo);
   const providerYear = target.year ?? snap.detailRow?.year ?? null;
   const providerRating = target.rating ?? snap.detailRow?.rating ?? null;
   const providerPlot = snap.detailRow?.plot ?? target.overview ?? null;
@@ -618,6 +601,11 @@ export function useDetailData({
   const activeElvTitle = elvEnrichActive
     ? (elvTitleDetail ?? elvItemEnrichment?.title ?? null)
     : null;
+  const localCleanedTitle = useMemo(
+    () =>
+      elvEnrichActive && activeElvTitle === null ? cleanVodTitle(rawTitle, providerYear) : null,
+    [activeElvTitle, elvEnrichActive, providerYear, rawTitle],
+  );
   const title =
     activeElvTitle !== null
       ? formatElvDisplayTitle({
@@ -627,19 +615,20 @@ export function useDetailData({
           fallbackTitle: rawTitle,
           format: elvPrefs.elvTitleFormat,
         })
-      : rawTitle;
-  const nonEmptyUrl = (v: string | null | undefined): string | null => {
-    const t = v?.trim();
-    return t && t.length > 0 ? t : null;
-  };
+      : localCleanedTitle !== null && localCleanedTitle.cleanTitle.length > 0
+        ? localCleanedTitle.cleanTitle
+        : rawTitle;
   const elvPoster = nonEmptyUrl(activeElvTitle?.posterUrl);
   const elvBackdrop = nonEmptyUrl(activeElvTitle?.backdropUrl);
   const posterUri = elvPoster ?? (elvPosterLookupPending ? null : rawPosterUri);
-  const backdropUri = elvBackdrop ?? elvPoster ?? (elvPosterLookupPending ? null : rawBackdropUri);
+  const backdropUri =
+    elvBackdrop ??
+    nonEmptyUrl(target.backdropUri) ??
+    nonEmptyUrl((snap.detailRow as { backdrop?: string | null } | null)?.backdrop);
   const year =
     activeElvTitle?.year != null && Number.isFinite(activeElvTitle.year)
       ? activeElvTitle.year
-      : mergedMeta.year;
+      : (mergedMeta.year ?? localCleanedTitle?.releaseYear ?? null);
   const rating =
     activeElvTitle?.rating != null && Number.isFinite(activeElvTitle.rating)
       ? activeElvTitle.rating
@@ -651,7 +640,6 @@ export function useDetailData({
     activeElvTitle !== null && activeElvTitle.genres.length > 0
       ? activeElvTitle.genres
       : mergedMeta.genres;
-  const isEnriched = activeElvTitle !== null || mergedMeta.enriched;
   const votes =
     activeElvTitle?.votes != null && Number.isFinite(activeElvTitle.votes)
       ? activeElvTitle.votes
@@ -674,7 +662,6 @@ export function useDetailData({
   }, [activeElvTitle, target.cast]);
   const trailerStreamUrl = activeElvTitle?.trailerStreamUrl ?? null;
   const trailerYoutubeId = activeElvTitle?.trailerYoutubeId ?? null;
-  const manualLock = elvItemEnrichment?.manualLock === true;
 
   const mutationRefs = useMemo(
     () => ({
@@ -734,11 +721,9 @@ export function useDetailData({
       trailerStreamUrl,
       trailerYoutubeId,
       imdbId: matchedImdbId,
-      manualLock,
       franchiseItems,
       plot,
       genres,
-      isEnriched,
       relatedUnplayedBySeriesKey,
       versions,
       userRating,
@@ -747,17 +732,13 @@ export function useDetailData({
       toggleMyList,
       toggleWatched,
       toggleRating,
-      applyFixMatchResult,
     };
   }, [
-    applyFixMatchResult,
     backdropUri,
     cast,
     director,
     franchiseItems,
     genres,
-    isEnriched,
-    manualLock,
     matchedImdbId,
     plot,
     posterUri,

@@ -5,7 +5,7 @@ import { openCatalog } from './migrate';
 import { testDb } from './test-db';
 
 describe('isolated local elv-enrichment.db store (#511)', () => {
-  it('opens idempotently on its own SqlDriver with all tables, indexes, and schema_version = 1 without touching catalog.db', async () => {
+  it('opens idempotently on its own SqlDriver with all tables, indexes, and current schema_version without touching catalog.db', async () => {
     const catalog = testDb();
     expect((await openCatalog(catalog.db)).ok).toBe(true);
 
@@ -507,5 +507,160 @@ describe('isolated local elv-enrichment.db store (#511)', () => {
     expect(merged?.synopses).toEqual({ en: 'Dream heist.', tr: 'Başlangıç' });
     expect(Object.hasOwn(merged?.localizedTitles ?? {}, 'constructor')).toBe(false);
     expect(Object.hasOwn(merged?.synopses ?? {}, 'prototype')).toBe(false);
+  });
+
+  it('safely migrates a v1 elv-enrichment.db lacking tmdb_id, creates idx_elv_titles_tmdb_id, and merges tmdbId non-destructively', async () => {
+    const { db } = testDb();
+    // Simulate a legacy v1 elv-enrichment.db before tmdb_id existed
+    await db.exec(`
+      CREATE TABLE elv_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO elv_meta (key, value) VALUES ('schema_version', '1');
+      CREATE TABLE elv_item_matches (
+        item_key TEXT PRIMARY KEY, source_id TEXT NOT NULL, media_type TEXT NOT NULL,
+        imdb_id TEXT NOT NULL, confidence REAL NOT NULL, manual_lock INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE elv_titles (
+        imdb_id TEXT PRIMARY KEY, media_type TEXT NOT NULL, original_title TEXT NOT NULL,
+        english_title TEXT, localized_titles_json TEXT NOT NULL DEFAULT '{}', year INTEGER,
+        rating REAL, votes INTEGER, runtime_min INTEGER, genres_json TEXT NOT NULL DEFAULT '[]',
+        poster_url TEXT, backdrop_url TEXT, trailer_stream_url TEXT, trailer_youtube_id TEXT,
+        director TEXT, cast_json TEXT NOT NULL DEFAULT '[]', mlt_imdb_ids_json TEXT NOT NULL DEFAULT '[]',
+        franchise_key TEXT, franchise_name TEXT, franchise_order INTEGER,
+        synopses_json TEXT NOT NULL DEFAULT '{}', detail_fetched_at INTEGER, updated_at INTEGER NOT NULL
+      );
+      INSERT INTO elv_titles (imdb_id, media_type, original_title, updated_at)
+        VALUES ('tt1375666', 'movie', 'Inception', 1000);
+      INSERT INTO elv_item_matches (item_key, source_id, media_type, imdb_id, confidence, manual_lock, updated_at)
+        VALUES ('x:s1:movie:1', 's1', 'movie', 'tt1375666', 1, 0, 1000);
+    `);
+
+    const store = await openElvEnrichmentStore(db, { clock: () => 20_000 });
+    const cols = await db.all<{ name: string }>('PRAGMA table_info(elv_titles)');
+    expect(cols.some((c) => c.name === 'tmdb_id')).toBe(true);
+
+    const indexes = await db.all<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'elv_titles'",
+    );
+    expect(indexes.some((i) => i.name === 'idx_elv_titles_tmdb_id')).toBe(true);
+
+    const meta = await db.all<{ value: string }>(
+      "SELECT value FROM elv_meta WHERE key = 'schema_version'",
+    );
+    expect(meta).toEqual([{ value: ELV_ENRICHMENT_SCHEMA_VERSION }]);
+
+    // Existing row survived cleanly with tmdbId = null
+    expect((await store.getTitleByImdbId('tt1375666'))?.tmdbId).toBeNull();
+
+    // Upsert attaches tmdbId and preserves it when later upsert omits tmdbId
+    await store.upsertTitles([
+      {
+        imdbId: 'tt1375666',
+        mediaType: 'movie',
+        originalTitle: 'Inception',
+        tmdbId: '27205',
+      },
+    ]);
+    await store.upsertTitles([
+      {
+        imdbId: 'tt1375666',
+        mediaType: 'movie',
+        originalTitle: 'Inception',
+        year: 2010,
+      },
+    ]);
+
+    const updated = await store.getTitleByImdbId('tt1375666');
+    expect(updated?.tmdbId).toBe('27205');
+    expect(updated?.year).toBe(2010);
+
+    const enrich = await store.getEnrichmentForKeys(['x:s1:movie:1']);
+    expect(enrich.get('x:s1:movie:1')?.title?.tmdbId).toBe('27205');
+
+    const byTmdb = await store.getTitlesByTmdbIds?.(['27205', 'invalid', '0', '999999']);
+    expect(byTmdb?.get('27205')?.imdbId).toBe('tt1375666');
+    expect(byTmdb?.size).toBe(1);
+
+    await store.close();
+  });
+
+  it('listTopRatedMatchedTitles rewards audience consensus (votes >= 500, m = 5000), keeps classics eligible, and falls back gracefully on low-vote fixtures', async () => {
+    const { db } = testDb();
+    const store = await openElvEnrichmentStore(db, { clock: () => 10_000 });
+
+    await store.upsertTitles([
+      {
+        imdbId: 'tt0068646',
+        mediaType: 'movie',
+        originalTitle: 'Classic Masterpiece',
+        year: 1972,
+        rating: 9.2,
+        votes: 2_000_000,
+      },
+      {
+        imdbId: 'tt8880001',
+        mediaType: 'movie',
+        originalTitle: 'Obscure Spike',
+        year: 2021,
+        rating: 9.9,
+        votes: 250,
+      },
+      {
+        imdbId: 'tt8880002',
+        mediaType: 'movie',
+        originalTitle: 'Niche Cult',
+        year: 2020,
+        rating: 9.2,
+        votes: 1_500,
+      },
+      {
+        imdbId: 'tt8880003',
+        mediaType: 'movie',
+        originalTitle: 'Widely Acclaimed Hit',
+        year: 2019,
+        rating: 8.0,
+        votes: 500_000,
+      },
+    ]);
+    await store.upsertMatches([
+      {
+        itemKey: 'x:s1:movie:classic',
+        sourceId: 's1',
+        mediaType: 'movie',
+        imdbId: 'tt0068646',
+        confidence: 0.99,
+      },
+      {
+        itemKey: 'x:s1:movie:obscure',
+        sourceId: 's1',
+        mediaType: 'movie',
+        imdbId: 'tt8880001',
+        confidence: 0.99,
+      },
+      {
+        itemKey: 'x:s1:movie:lowcult',
+        sourceId: 's1',
+        mediaType: 'movie',
+        imdbId: 'tt8880002',
+        confidence: 0.99,
+      },
+      {
+        itemKey: 'x:s1:movie:popular',
+        sourceId: 's1',
+        mediaType: 'movie',
+        imdbId: 'tt8880003',
+        confidence: 0.99,
+      },
+    ]);
+
+    const ranked = await store.listTopRatedMatchedTitles({ mediaType: 'movie', limit: 10 });
+    expect(ranked.map((t) => t.imdbId)).toEqual([
+      'tt0068646', // 1972 classic with 2M votes stays #1 (no year cutoff!)
+      'tt8880003', // 8.0 w/ 500k votes beats 9.2 w/ 1500 votes under m=5000!
+      'tt8880002', // 1500 votes (>= 500) still beats < 500 obscure spike
+      'tt8880001', // < 500 votes still returned gracefully when limit > 3
+    ]);
+
+    await store.close();
   });
 });

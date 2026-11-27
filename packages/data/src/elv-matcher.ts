@@ -64,7 +64,8 @@ export interface ElvBackgroundMatchOptions {
 export interface ElvCatalogMatcherDeps {
   readonly catalogDb: SqlDriver;
   readonly enrichmentStore: ElvEnrichmentStore;
-  readonly client: ElvMetadataClient;
+  readonly client?: ElvMetadataClient | undefined;
+  readonly getClient?: (() => ElvMetadataClient | undefined) | undefined;
   readonly now?: () => number;
   readonly scheduler?: Scheduler;
 }
@@ -105,16 +106,51 @@ function placeholders(count: number): string {
  * - Layer 3: incremental skipping of every `item_key` already in `elv_item_matches` (or `manual_lock = 1`).
  */
 export function createElvCatalogMatcher(deps: ElvCatalogMatcherDeps): ElvCatalogMatcher {
-  const { catalogDb, enrichmentStore, client } = deps;
+  const { catalogDb, enrichmentStore } = deps;
   const clock = deps.now ?? Date.now;
   const yieldNow = () => deps.scheduler?.yieldNow() ?? Promise.resolve();
+  const resolveClient = (): ElvMetadataClient | undefined => deps.getClient?.() ?? deps.client;
+
+  async function lookupLocalImdbByTmdb(
+    rows: readonly {
+      readonly mediaType: ElvMediaType;
+      readonly provider_tmdb_id: string | null;
+    }[],
+  ): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (enrichmentStore.getTitlesByTmdbIds === undefined) return out;
+    const movieTmdbIds: string[] = [];
+    const seriesTmdbIds: string[] = [];
+    for (const row of rows) {
+      const normalized = normalizeCatalogTmdbId(row.provider_tmdb_id);
+      if (normalized === null) continue;
+      if (row.mediaType === 'series') seriesTmdbIds.push(normalized);
+      else movieTmdbIds.push(normalized);
+    }
+    const [movieTitles, seriesTitles] = await Promise.all([
+      movieTmdbIds.length > 0
+        ? enrichmentStore.getTitlesByTmdbIds(movieTmdbIds, 'movie')
+        : Promise.resolve(new Map()),
+      seriesTmdbIds.length > 0
+        ? enrichmentStore.getTitlesByTmdbIds(seriesTmdbIds, 'series')
+        : Promise.resolve(new Map()),
+    ]);
+    for (const [tmdbId, title] of movieTitles) {
+      out.set(`movie:${tmdbId}`, title.imdbId);
+    }
+    for (const [tmdbId, title] of seriesTitles) {
+      out.set(`series:${tmdbId}`, title.imdbId);
+    }
+    return out;
+  }
 
   async function persistRemoteBatch(
     candidates: readonly RemoteCandidateRow[],
     lang: string | undefined,
     signal: AbortSignal | undefined,
   ): Promise<number> {
-    if (candidates.length === 0) return 0;
+    const activeClient = resolveClient();
+    if (activeClient === undefined || candidates.length === 0) return 0;
     const byKey = new Map<string, RemoteCandidateRow>();
     const requestItems: ElvMatchBatchRequestItem[] = [];
 
@@ -147,7 +183,7 @@ export function createElvCatalogMatcher(deps: ElvCatalogMatcherDeps): ElvCatalog
 
     for (let round = 0; round < maxRounds && remainingItems.length > 0; round += 1) {
       if (signal?.aborted) break;
-      const response = await client.matchBatch(remainingItems, lang, signal);
+      const response = await activeClient.matchBatch(remainingItems, lang, signal);
       const nowMs = clock();
       const matchInputs: UpsertElvMatchInput[] = [];
       const titleInputs: UpsertElvTitleInput[] = [];
@@ -265,6 +301,10 @@ export function createElvCatalogMatcher(deps: ElvCatalogMatcherDeps): ElvCatalog
       const priorHydrationCandidates: RemoteCandidateRow[] = [];
       const remoteCandidates: RemoteCandidateRow[] = [];
 
+      const localImdbByTmdb = await lookupLocalImdbByTmdb(
+        rows.filter((r) => existingEnrich.get(r.key) === undefined && r.provider_imdb_id === null),
+      );
+
       for (const row of rows) {
         const existing = existingEnrich.get(row.key);
         if (existing !== undefined) {
@@ -276,17 +316,21 @@ export function createElvCatalogMatcher(deps: ElvCatalogMatcherDeps): ElvCatalog
           });
           continue;
         }
-        const imdbId = normalizeCatalogImdbId(row.provider_imdb_id);
-        if (imdbId !== null) {
+        const directImdbId = normalizeCatalogImdbId(row.provider_imdb_id);
+        const tmdbId = directImdbId === null ? normalizeCatalogTmdbId(row.provider_tmdb_id) : null;
+        const localTmdbMatch =
+          tmdbId !== null ? localImdbByTmdb.get(`${row.mediaType}:${tmdbId}`) : undefined;
+        const matchedImdbId = directImdbId ?? localTmdbMatch ?? null;
+        if (matchedImdbId !== null) {
           layer1Inputs.push({
             itemKey: row.key,
             sourceId: row.source_id,
             mediaType: row.mediaType,
-            imdbId,
-            confidence: 1,
+            imdbId: matchedImdbId,
+            confidence: directImdbId !== null ? 1 : 0.98,
             updatedAt: nowMs,
           });
-          layer1Candidates.push(row);
+          layer1Candidates.push({ ...row, provider_imdb_id: matchedImdbId });
         } else {
           remoteCandidates.push(row);
         }
@@ -363,8 +407,10 @@ export function createElvCatalogMatcher(deps: ElvCatalogMatcherDeps): ElvCatalog
         { table: 'movies', mediaType: 'movie' },
         { table: 'series', mediaType: 'series' },
       ];
+      let layer1Scanned = 0;
+      let layer1Skipped = 0;
 
-      // Layer 1: 0 ms pass over rows with provider_imdb_id (keyset paginated)
+      // Layer 1: 0 ms pass over rows with provider_imdb_id or cached local tmdb_id (keyset paginated)
       for (const { table, mediaType } of tables) {
         let lastId = 0;
         for (;;) {
@@ -375,11 +421,13 @@ export function createElvCatalogMatcher(deps: ElvCatalogMatcherDeps): ElvCatalog
             id: number;
             source_id: string;
             key: string;
-            provider_imdb_id: string;
+            provider_imdb_id: string | null;
+            provider_tmdb_id: string | null;
           }>(
-            `SELECT t.id, t.source_id, t.key, t.provider_imdb_id
+            `SELECT t.id, t.source_id, t.key, t.provider_imdb_id, t.provider_tmdb_id
                FROM ${table} t
-              WHERE t.id > ? AND t.is_hidden = 0 AND t.provider_imdb_id IS NOT NULL
+              WHERE t.id > ? AND t.is_hidden = 0
+                AND (t.provider_imdb_id IS NOT NULL OR t.provider_tmdb_id IS NOT NULL)
                 AND EXISTS (SELECT 1 FROM sources s WHERE s.id = t.source_id AND s.deleting = 0)
               ORDER BY t.id ASC
               LIMIT ?`,
@@ -387,20 +435,34 @@ export function createElvCatalogMatcher(deps: ElvCatalogMatcherDeps): ElvCatalog
           );
           if (page.length === 0) break;
           lastId = (page[page.length - 1] as { id: number }).id;
+          layer1Scanned += page.length;
 
           const existing = await enrichmentStore.listMatchedKeysForSet(page.map((r) => r.key));
+          const unmatchedRows = page.filter((r) => !existing.has(r.key));
+          layer1Skipped += page.length - unmatchedRows.length;
+          const localImdbByTmdb = await lookupLocalImdbByTmdb(
+            unmatchedRows
+              .filter((r) => r.provider_imdb_id === null)
+              .map((r) => ({ mediaType, provider_tmdb_id: r.provider_tmdb_id })),
+          );
+
           const nowMs = clock();
           const toInsert: UpsertElvMatchInput[] = [];
-          for (const row of page) {
-            if (existing.has(row.key)) continue;
-            const imdbId = normalizeCatalogImdbId(row.provider_imdb_id);
-            if (imdbId === null) continue;
+          for (const row of unmatchedRows) {
+            const directImdb = normalizeCatalogImdbId(row.provider_imdb_id);
+            const tmdbId =
+              directImdb === null ? normalizeCatalogTmdbId(row.provider_tmdb_id) : null;
+            const resolvedImdb =
+              directImdb ??
+              (tmdbId !== null ? localImdbByTmdb.get(`${mediaType}:${tmdbId}`) : undefined) ??
+              null;
+            if (resolvedImdb === null) continue;
             toInsert.push({
               itemKey: row.key,
               sourceId: row.source_id,
               mediaType,
-              imdbId,
-              confidence: 1,
+              imdbId: resolvedImdb,
+              confidence: directImdb !== null ? 1 : 0.98,
               updatedAt: nowMs,
             });
           }
@@ -410,6 +472,13 @@ export function createElvCatalogMatcher(deps: ElvCatalogMatcherDeps): ElvCatalog
           }
           await yieldNow();
         }
+      }
+
+      if (resolveClient() === undefined) {
+        scanned = layer1Scanned;
+        skipped = layer1Skipped;
+        emit(true);
+        return { scanned, layer1Matched, remoteMatched: 0, skipped, aborted: false };
       }
 
       // Layer 2 + Layer 3: keyset-paginated scan of unmatched rows and unhydrated Layer 1 titles

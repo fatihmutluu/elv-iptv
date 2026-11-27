@@ -1,4 +1,5 @@
 import {
+  cleanVodTitle,
   deduplicateCatalogPageByImdb,
   type ElvItemEnrichment,
   foldText,
@@ -95,10 +96,19 @@ export function applyElvCardPresentation<T extends ItemRow>(
   if (!isElvFeatureActive(prefs, 'elvEnrichMetadata')) return item;
   const titleRec = enrichment?.title;
   if (titleRec === null || titleRec === undefined) {
-    if (opts?.pendingLookup === true && item.logo !== null) {
-      return { ...item, logo: null };
+    const cleaned = cleanVodTitle(item.name, item.year);
+    const cleanName = cleaned.cleanTitle.length > 0 ? cleaned.cleanTitle : item.name;
+    const cleanYear = item.year ?? cleaned.releaseYear;
+    const cleanLogo = opts?.pendingLookup === true ? null : item.logo;
+    if (cleanName === item.name && cleanLogo === item.logo && cleanYear === item.year) {
+      return item;
     }
-    return item;
+    return {
+      ...item,
+      name: cleanName,
+      logo: cleanLogo,
+      year: cleanYear,
+    };
   }
 
   const localizedTitle = resolveElvLocalizedValue(titleRec.localizedTitles, locale);
@@ -150,16 +160,13 @@ export function presentElvCatalogItems<T extends ItemRow>(
   if (!prefs.elvModeEnabled || items.length === 0) return items;
   const enrichActive = isElvFeatureActive(prefs, 'elvEnrichMetadata');
   const mergeActive = isElvFeatureActive(prefs, 'elvMergeVersions');
-  const checkPending =
-    enrichActive && (opts?.isKeyLookupPending !== undefined || opts?.resolvedKeys !== undefined);
-  if (enrichmentByKey.size === 0 && !checkPending) return items;
+  if (!enrichActive && !mergeActive) return items;
 
-  const merged: readonly T[] =
-    mergeActive && enrichmentByKey.size > 0
-      ? deduplicateCatalogPageByImdb(items, enrichmentByKey, undefined, {
-          replacePoster: enrichActive,
-        })
-      : items;
+  const merged: readonly T[] = mergeActive
+    ? deduplicateCatalogPageByImdb(items, enrichmentByKey, undefined, {
+        replacePoster: enrichActive,
+      })
+    : items;
   if (!enrichActive) return merged;
   return merged.map((item) => {
     const pendingLookup =

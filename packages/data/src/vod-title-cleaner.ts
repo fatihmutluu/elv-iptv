@@ -1,5 +1,15 @@
 import { foldText } from './fold';
 import { cleanDisplayTitle } from './title-clean';
+import {
+  classifyLeadingDelimitedPrefix,
+  classifyTrailingDelimitedNoise,
+  classifyVodBracketGroup,
+  isSafeUnbracketedNoiseToken,
+  isValidVodYear,
+  MULTI_WORD_TAGS,
+  maxBareVodTrailingYear,
+  parseVodYearToken,
+} from './vod-tags';
 
 /** Normalized VOD/series title and extracted release year used for metadata enrichment (`#215`). */
 export interface CleanedVodTitle {
@@ -11,175 +21,110 @@ export interface CleanedVodTitle {
 const YEAR_MIN = 1900;
 const YEAR_MAX = 2099;
 
-const NOISE_ATOMS: ReadonlySet<string> = new Set([
-  '4K',
-  '8K',
-  'UHD',
-  'FHD',
-  'HD',
-  'SD',
-  '2160P',
-  '1080P',
-  '720P',
-  '576P',
-  '480P',
-  'HEVC',
-  'X265',
-  'X264',
-  'H265',
-  'H264',
-  'H.265',
-  'H.264',
-  'HDR',
-  'HDR10',
-  'HDR10+',
-  'DV',
-  'DOLBY',
-  'ATMOS',
-  'BLURAY',
-  'BLU-RAY',
-  'BDRIP',
-  'BRRIP',
-  'WEBRIP',
-  'WEB-DL',
-  'WEBDL',
-  'HDTV',
-  'DVDRIP',
-  'CAM',
-  'TS',
-  'REMUX',
-  'MULTI',
-  'DUAL',
-  'TR-DUB',
-  'TRDUB',
-  'EN-DUB',
-  'TR-SUB',
-  'ENG-SUB',
-  'ALT',
-  'SUB',
-  'DUB',
-  'SUBBED',
-  'DUBBED',
-  'DUBLAJ',
-  'ALTYAZI',
-  'RAW',
-  'VIP',
-  '60FPS',
-  '50FPS',
-  '10BIT',
-  'AAC',
-  'AC3',
-  'DTS',
-  'NF',
-  'AMZN',
-  'DSNP',
-  'ATVP',
-  'IMAX',
-  'EXTENDED',
-  'REMASTERED',
-  'UNCUT',
-  'UNRATED',
-]);
-
-const COUNTRY_CODE_RE = /^[A-Z]{2}$/;
-const YEAR_RE = /^(19|20)\d{2}$/;
-const BRACKET_GROUP_RE = /[[(]([^[\]()]{1,32})[\])]/g;
-const LEADING_PAREN_TAG_RE = /^\(([^()]{1,24})\)\s*(?:[-–—:|/•·]\s*)?/;
-const LEADING_DELIMITED_NOISE_RE = /^([A-Za-z0-9.]{2,12})\s*(?:[|:]\s*|\s+[-–—]\s+|[-–—]\s+)/;
+const LEADING_BRACKET_RE = /^[[(]([^[\]()]{1,64})[\])]\s*(?:[-–—:|/•·]\s*)?/;
+const LEADING_DELIMITED_NOISE_RE =
+  /^([\p{L}\p{N}.+_-]{2,18})\s*(?:([|:])\s*|\s+[-–—]\s+|[-–—]\s+)/u;
+const BRACKET_GROUP_RE = /[[(]([^[\]()]{1,64})[\])]/g;
+const TRAILING_DELIMITED_RE = /^(.+?)(?:\s+[-–—•·]\s+|\s*\|\s*)([^|[\]()]+)$/;
 const TRAILING_SEP_RE = /[\s\-–—:|/•·]+$/;
 const LEADING_SEP_RE = /^[\s\-–—:|/•·]+/;
 
-function isValidYear(y: number | null | undefined): y is number {
-  return typeof y === 'number' && Number.isInteger(y) && y >= YEAR_MIN && y <= YEAR_MAX;
-}
-
-function isNoiseAtom(atom: string): boolean {
-  const upper = atom.toUpperCase();
-  if (NOISE_ATOMS.has(upper)) return true;
-  if (COUNTRY_CODE_RE.test(atom)) return true;
-  return false;
-}
-
-function isNoiseGroup(inner: string): boolean {
-  const atoms = inner
-    .trim()
-    .split(/[\s/+._|,-]+/)
-    .filter(Boolean);
-  if (atoms.length === 0) return false;
-  return atoms.every(isNoiseAtom);
-}
-
 /**
- * Strips noisy IPTV prefixes/suffixes (`TR:`, `US |`, `[4K]`, `(UHD)`, `[FHD]`, `1080p`, `HEVC`,
- * `x265`, `H.264`, `HDR`, `BLURAY`, `WEB-DL`, `MULTI`, `TR-DUB`, `ALT`, `SUB`, `DUB`) and extracts
- * `(YYYY)` / `[YYYY]` / trailing `YYYY` (`1900..2099`) into `releaseYear` while preserving sequel
- * numbers (`2`, `3`, `II`, `Part 2`) and leading numeric titles (`2001: A Space Odyssey`).
+ * Strips noisy IPTV prefixes/suffixes (`TR:`, `TUR |`, `FR |`, `[4K]`, `(UHD)`, `[FHD]`, `1080p`,
+ * `HEVC`, `x265`, `H.264`, `HDR`, `BLURAY`, `WEB-DL`, `MULTI`, `TR-DUB`, `VOSTFR`, `ALTYAZILI`, etc.)
+ * and extracts `(YYYY)` / `[YYYY]` / mixed `[2024 - Altyazılı]` / trailing `YYYY` (`1900..2099`)
+ * into `releaseYear` while preserving sequel numbers (`2`, `3`, `II`, `Part 2`), protected short
+ * words (`It`, `Up`, `Us`, `Her`, `Top Gun`), and numeric titles (`2001: A Space Odyssey`, `1917`).
  */
 export function cleanVodTitle(rawTitle: string, existingYear?: number | null): CleanedVodTitle {
-  const fallbackYear = isValidYear(existingYear) ? existingYear : null;
+  const fallbackYear = isValidVodYear(existingYear, YEAR_MIN, YEAR_MAX) ? existingYear : null;
   const trimmed = rawTitle.trim().replace(/\s+/g, ' ');
   if (trimmed === '') {
     return { cleanTitle: '', releaseYear: fallbackYear, foldedTitle: '' };
   }
 
-  let current = cleanDisplayTitle(trimmed);
+  let current = trimmed;
   let extractedYear: number | null = null;
 
-  // Strip leading parenthesized tags like "(UHD) Title" or "(TR) Title" and uppercase delimited noise prefixes like "AMZN | Title"
+  // 1. Strip stacked leading brackets & delimited multilingual/quality prefixes in a loop
   for (;;) {
-    const m = LEADING_PAREN_TAG_RE.exec(current);
-    if (m !== null && isNoiseGroup(m[1] ?? '')) {
-      const rest = current.slice(m[0].length).trim();
-      if (rest === '') break;
-      current = rest;
-      continue;
+    const bracketMatch = LEADING_BRACKET_RE.exec(current);
+    if (bracketMatch !== null) {
+      const classified = classifyVodBracketGroup(bracketMatch[1] ?? '', true, YEAR_MIN, YEAR_MAX);
+      if (classified !== null) {
+        const rest = current.slice(bracketMatch[0].length).trim();
+        if (rest !== '') {
+          if (classified.extractedYear !== null) extractedYear = classified.extractedYear;
+          current = rest;
+          continue;
+        }
+      }
     }
-    const delim = LEADING_DELIMITED_NOISE_RE.exec(current);
-    const token = delim?.[1] ?? '';
-    if (delim !== null && token !== '' && token === token.toUpperCase() && NOISE_ATOMS.has(token)) {
-      const rest = current.slice(delim[0].length).trim();
-      if (rest === '') break;
-      current = rest;
-      continue;
+
+    const delimMatch = LEADING_DELIMITED_NOISE_RE.exec(current);
+    if (delimMatch !== null) {
+      const classified = classifyLeadingDelimitedPrefix(delimMatch[1] ?? '');
+      if (classified !== null) {
+        const rest = current.slice(delimMatch[0].length).trim();
+        if (rest !== '') {
+          current = rest;
+          continue;
+        }
+      }
     }
     break;
   }
 
-  // Extract bracketed/parenthesized years and remove bracketed noise groups
+  // 2. Replace bracketed/parenthesized years and pure/mixed noise groups while never emptying title
   const afterBrackets = current.replace(BRACKET_GROUP_RE, (full, inner: string) => {
-    const innerTrim = inner.trim();
-    if (YEAR_RE.test(innerTrim)) {
-      const parsed = Number(innerTrim);
-      if (isValidYear(parsed)) {
-        extractedYear = parsed;
-        return ' ';
-      }
-    }
-    // Handle combined bracket like "(2024 4K)" or "[TR 1080p]"
-    const tokens = innerTrim.split(/[\s/+|,-]+/).filter(Boolean);
-    if (tokens.length > 0) {
-      let groupYear: number | null = null;
-      const allNoiseOrYear = tokens.every((tok) => {
-        if (YEAR_RE.test(tok)) {
-          const parsed = Number(tok);
-          if (isValidYear(parsed)) {
-            groupYear = parsed;
-            return true;
-          }
-        }
-        return isNoiseAtom(tok);
-      });
-      if (allNoiseOrYear) {
-        if (groupYear !== null) extractedYear = groupYear;
-        return ' ';
-      }
-    }
-    return full;
+    const classified = classifyVodBracketGroup(inner, true, YEAR_MIN, YEAR_MAX);
+    if (classified === null) return full;
+    if (classified.extractedYear !== null) extractedYear = classified.extractedYear;
+    return ' ';
   });
 
-  current = afterBrackets.replace(/\s+/g, ' ').replace(TRAILING_SEP_RE, '').trim();
+  const nonEmptyAfterBrackets = afterBrackets
+    .replace(/\s+/g, ' ')
+    .replace(TRAILING_SEP_RE, '')
+    .trim();
+  if (nonEmptyAfterBrackets !== '') {
+    current = nonEmptyAfterBrackets;
+  }
 
-  // Strip unbracketed trailing noise tokens (and trailing bare YYYY if not the only token)
+  // 3. Strip trailing ` - <noise>` / ` | <noise>` segments and multi-word/unbracketed trailing noise
+  for (;;) {
+    const delim = TRAILING_DELIMITED_RE.exec(current);
+    if (delim !== null) {
+      const before = (delim[1] ?? '').trim();
+      const seg = (delim[2] ?? '').trim();
+      if (before !== '' && classifyTrailingDelimitedNoise(seg) !== null) {
+        current = before;
+        continue;
+      }
+    }
+
+    let strippedMultiWord = false;
+    for (const [re] of MULTI_WORD_TAGS) {
+      re.lastIndex = 0;
+      if (re.test(current)) {
+        const next = current
+          .replace(re, ' ')
+          .replace(/\s+/g, ' ')
+          .replace(TRAILING_SEP_RE, '')
+          .trim();
+        if (next !== '' && next !== current) {
+          current = next;
+          strippedMultiWord = true;
+          break;
+        }
+      }
+    }
+    if (strippedMultiWord) continue;
+
+    break;
+  }
+
+  // 4. Strip unbracketed trailing noise tokens (and bare trailing YYYY when no bracket year was found)
   const words = current.split(/\s+/).filter(Boolean);
   while (words.length > 1) {
     const last = words[words.length - 1] as string;
@@ -188,15 +133,14 @@ export function cleanVodTitle(rawTitle: string, existingYear?: number | null): C
       words.pop();
       continue;
     }
-    if (NOISE_ATOMS.has(strippedPunct.toUpperCase())) {
+    if (isSafeUnbracketedNoiseToken(strippedPunct) !== undefined) {
       words.pop();
       continue;
     }
-    // Bare trailing release year (e.g., "Big Buck Bunny 2008 1080p") ONLY when no bracketed year was already found
-    if (extractedYear === null && YEAR_RE.test(strippedPunct)) {
-      const parsed = Number(strippedPunct);
-      if (isValidYear(parsed)) {
-        extractedYear = parsed;
+    if (extractedYear === null) {
+      const bareYear = parseVodYearToken(strippedPunct, YEAR_MIN, maxBareVodTrailingYear());
+      if (bareYear !== null && (fallbackYear === null || Math.abs(bareYear - fallbackYear) <= 1)) {
+        extractedYear = bareYear;
         words.pop();
         continue;
       }
@@ -204,10 +148,22 @@ export function cleanVodTitle(rawTitle: string, existingYear?: number | null): C
     break;
   }
 
-  // Re-run cleanDisplayTitle once more in case stripping bracketed tags exposed a delimited prefix
   current = words.join(' ').replace(LEADING_SEP_RE, '').replace(TRAILING_SEP_RE, '').trim();
   if (current !== '') {
     current = cleanDisplayTitle(current).replace(TRAILING_SEP_RE, '').trim();
+  }
+
+  // Re-run trailing delimited check if bracket removal or cleanDisplayTitle exposed a trailing noise tag
+  for (;;) {
+    const delim = TRAILING_DELIMITED_RE.exec(current);
+    if (delim === null) break;
+    const before = (delim[1] ?? '').trim();
+    const seg = (delim[2] ?? '').trim();
+    if (before !== '' && classifyTrailingDelimitedNoise(seg) !== null) {
+      current = before;
+      continue;
+    }
+    break;
   }
 
   const cleanTitle = current === '' ? trimmed : current;

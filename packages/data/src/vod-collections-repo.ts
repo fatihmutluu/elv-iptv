@@ -333,6 +333,7 @@ export async function listCollectionItems(
             COALESCE(m.provider_id, sr.provider_id) AS provider_id,
             COALESCE(m.name, sr.name) AS name,
             COALESCE(m.logo, sr.cover) AS logo,
+            COALESCE(m.backdrop, sr.backdrop) AS backdrop,
             COALESCE(m.rating, sr.rating) AS rating,
             COALESCE(m.year, sr.year) AS year,
             NULL AS num

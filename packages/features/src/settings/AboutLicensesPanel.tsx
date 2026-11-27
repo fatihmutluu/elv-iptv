@@ -48,6 +48,12 @@ export function AboutLicensesPanel({ children }: AboutLicensesPanelProps): React
         >
           {i18n.t('settings.about.statement')}
         </Text>
+        <Text
+          testID="settings-tmdb-attribution"
+          style={[theme.typography.caption, styles.statement, { color: theme.colors.textMuted }]}
+        >
+          {i18n.t('settings.about.tmdbAttribution')}
+        </Text>
       </Surface>
 
       <View style={styles.noticesWrap}>{children}</View>

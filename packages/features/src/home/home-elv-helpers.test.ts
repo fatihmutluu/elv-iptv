@@ -118,10 +118,40 @@ describe('home-elv-helpers (#512)', () => {
       kind: 'movie',
       title: 'Inception',
       posterUri: 'https://imdb.example.test/inception.jpg',
+      backdropUri: 'https://imdb.example.test/backdrop.jpg',
       rating: 8.8,
       year: 2010,
       badgeLabel: 'Trending now',
     });
+    const noBackdropEnrichment = makeEnrichment(
+      series,
+      'Dark',
+      'https://imdb.example.test/dark.jpg',
+    );
+    const entriesNoBackdrop = buildElvShowcaseEntries(
+      [
+        {
+          item: series,
+          enrichment: {
+            ...noBackdropEnrichment,
+            title: noBackdropEnrichment.title
+              ? { ...noBackdropEnrichment.title, backdropUrl: null }
+              : null,
+          },
+          score: 0.9,
+          reason: 'upcoming_tv',
+        },
+      ],
+      {
+        elvPrefs: prefs,
+        locale: 'en',
+        t: en.t,
+        progressByKey: new Map(),
+        ratingByKey: new Map(),
+      },
+    );
+    expect(entriesNoBackdrop[0]?.posterUri).toBe('https://imdb.example.test/dark.jpg');
+    expect(entriesNoBackdrop[0]?.backdropUri).toBeNull();
     expect(entries[1]).toMatchObject({
       itemKey: 's:1',
       kind: 'series',

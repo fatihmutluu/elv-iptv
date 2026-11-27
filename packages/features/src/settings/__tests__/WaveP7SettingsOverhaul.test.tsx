@@ -335,11 +335,24 @@ describe('Wave P7 Settings Overhaul', () => {
     expect(screen.getByTestId('settings-livetv-channel-switch-instant')).toBeTruthy();
   });
 
-  it('omits the license badge pill from AboutLicensesPanel while preserving notices', async () => {
-    await render(<Harness initialSection="licenses" />);
+  it('omits the license badge pill from AboutLicensesPanel while preserving notices and renders TMDB attribution in EN and TR', async () => {
+    const enView = await render(<Harness initialSection="licenses" />);
     expect(screen.getByTestId('settings-about-card')).toBeTruthy();
     expect(screen.queryByTestId('settings-about-license-badge')).toBeNull();
     expect(screen.getByTestId('mock-licenses-pane')).toBeTruthy();
+    expect(screen.getByTestId('settings-tmdb-attribution')).toHaveTextContent(
+      'This product uses the TMDB API but is not endorsed or certified by TMDB.',
+    );
+    await enView.unmount();
+
+    const trStore = createMemoryPreferencesStore({ locale: 'tr' });
+    const trView = await render(<Harness store={trStore} initialSection="licenses" />);
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-tmdb-attribution')).toHaveTextContent(
+        "Bu ürün TMDB API'sini kullanır ancak TMDB tarafından onaylanmamış veya sertifikalandırılmamıştır.",
+      );
+    });
+    await trView.unmount();
   });
 
   it('builds scoped Appearance reset patches with platform-specific artwork cache defaults (tv=128, mobile=256, desktop=512)', () => {

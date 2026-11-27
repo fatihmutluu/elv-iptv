@@ -1,12 +1,10 @@
 import type { RatingValue } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import {
-  ArtworkImage,
   CtaButton,
   Icon,
   IconButton,
   MicroPill,
-  Scrim,
   TABULAR_NUMS_STYLE,
   useI18n,
   useTheme,
@@ -19,6 +17,7 @@ import { memo, type ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { computeHeroHeight } from '../shared';
 import type { DetailTechnicalMeta } from '../shared/detail-target';
+import { DetailHeroBackdrop, DetailHeroPosterCard } from './DetailHeroBackdrop';
 import { DetailSynopsisBlock, DetailVersionDropdown } from './DetailHeroExtras';
 import type { DetailVersionOption } from './detail-data-helpers';
 import {
@@ -40,8 +39,7 @@ export type DetailHeroFocusSlot =
   | 'trailer'
   | 'play'
   | 'preplay-version'
-  | 'synopsis'
-  | 'fix-match';
+  | 'synopsis';
 
 /** Visual state for the movie offline download icon button in {@link DetailHero}. */
 export interface DetailHeroDownloadState {
@@ -55,18 +53,16 @@ export interface DetailHeroProps {
   readonly kind: 'movie' | 'series';
   readonly title: string;
   readonly backdropUri: string | null;
+  readonly posterUri?: string | null;
   readonly year: number | null;
   readonly rating: number | null;
   readonly votes?: number | null;
   readonly runtimeMin?: number | null;
-  readonly manualLock?: boolean;
   readonly plot: string | null;
   readonly genres?: readonly string[];
-  readonly isEnriched?: boolean;
   readonly downloadState?: DetailHeroDownloadState;
   readonly onPressDownload?: () => void;
   readonly onPressTrailer?: () => void;
-  readonly onPressFixMatch?: () => void;
   readonly technicalMeta?: DetailTechnicalMeta;
   readonly seasonsCount: number;
   readonly inMyList: boolean;
@@ -110,18 +106,16 @@ function DetailHeroInner({
   kind,
   title,
   backdropUri,
+  posterUri = null,
   year,
   rating,
   votes = null,
   runtimeMin = null,
-  manualLock = false,
   plot,
   genres,
-  isEnriched = false,
   downloadState,
   onPressDownload,
   onPressTrailer,
-  onPressFixMatch,
   technicalMeta,
   seasonsCount,
   inMyList,
@@ -169,7 +163,9 @@ function DetailHeroInner({
   const canExpandSynopsis =
     onToggleSynopsis !== undefined && trimmedPlot.length >= SYNOPSIS_EXPAND_THRESHOLD;
   const technicalBadges = buildTechnicalBadges(technicalMeta);
-  const kindLabel = i18n.t(kind === 'movie' ? 'home.kind.movie' : 'home.kind.series');
+  const trimmedBackdrop = backdropUri?.trim() || null;
+  const trimmedPoster = posterUri?.trim() || null;
+  const isPortraitFallback = trimmedBackdrop === null && trimmedPoster !== null;
   const backFocused = isTv && focusedSlot === 'back';
   const synopsisFocused = isTv && focusedSlot === 'synopsis';
   const versionFocused = focusedSlot === 'preplay-version';
@@ -192,19 +188,12 @@ function DetailHeroInner({
         },
       ]}
     >
-      <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.backdropClip]}>
-        <ArtworkImage
-          testID="detail-hero-backdrop"
-          uri={backdropUri}
-          label={title}
-          maxDecodePx={960}
-          borderRadius={0}
-          decorative
-          style={StyleSheet.absoluteFill}
-        />
-        <Scrim direction="bottom" intensity="strong" testID="detail-hero-scrim-bottom" />
-        <Scrim direction="left" intensity="strong" testID="detail-hero-scrim-left" />
-      </View>
+      <DetailHeroBackdrop
+        title={title}
+        backdropUri={trimmedBackdrop}
+        posterUri={trimmedPoster}
+        isPortraitFallback={isPortraitFallback}
+      />
 
       <View style={styles.foreground}>
         <Pressable
@@ -264,7 +253,23 @@ function DetailHeroInner({
           ) : null}
         </Pressable>
 
-        <View style={styles.spacer} />
+        <View
+          style={[
+            styles.spacer,
+            isPortraitFallback && isPortrait ? { minHeight: theme.spacing.md } : undefined,
+          ]}
+        />
+
+        {isPortraitFallback && isPortrait && trimmedPoster !== null ? (
+          <View style={{ marginBottom: theme.spacing.sm }}>
+            <DetailHeroPosterCard
+              posterUri={trimmedPoster}
+              title={title}
+              isPortrait={isPortrait}
+              isTv={isTv}
+            />
+          </View>
+        ) : null}
 
         <Text
           testID="detail-title"
@@ -460,7 +465,9 @@ function DetailHeroInner({
                   {i18n.t('detail.runtimeMin', { minutes: Math.round(runtimeMin) })}
                 </Text>
               ) : null}
-              <MicroPill label={kindLabel} testID="detail-kind-pill" />
+              {kind === 'series' ? (
+                <MicroPill label={i18n.t('home.kind.series')} testID="detail-kind-pill" />
+              ) : null}
               {kind === 'series' && seasonsCount > 0 ? (
                 <Text
                   testID="detail-seasons-count"
@@ -489,20 +496,6 @@ function DetailHeroInner({
                   {genres.join(' · ')}
                 </Text>
               ) : null}
-              {isEnriched ? (
-                <MicroPill
-                  label={i18n.t('detail.enrichment.badge')}
-                  tone="accent"
-                  testID="detail-enrichment-badge"
-                />
-              ) : null}
-              {manualLock ? (
-                <MicroPill
-                  label={i18n.t('detail.fixMatch.lockedBadge')}
-                  tone="accent"
-                  testID="detail-fix-match-locked"
-                />
-              ) : null}
               {technicalBadges.map((badge) => (
                 <MicroPill
                   key={badge.key}
@@ -511,40 +504,6 @@ function DetailHeroInner({
                 />
               ))}
             </View>
-
-            {onPressFixMatch !== undefined ? (
-              <View style={styles.secondaryMetaRow}>
-                <Pressable
-                  testID="detail-fix-match-btn"
-                  accessibilityRole="button"
-                  accessibilityLabel={i18n.t('detail.fixMatch.action')}
-                  focusable={!isTv}
-                  onPress={onPressFixMatch}
-                  style={({ pressed }) => [
-                    styles.quietPillBtn,
-                    cursor,
-                    transition,
-                    {
-                      borderRadius: theme.radius.button,
-                      backgroundColor:
-                        isTv && focusedSlot === 'fix-match'
-                          ? theme.colors.focusFill
-                          : 'transparent',
-                      borderColor:
-                        isTv && focusedSlot === 'fix-match'
-                          ? theme.colors.focusRingColor
-                          : theme.colors.actionGlassBorder,
-                      borderWidth: isTv && focusedSlot === 'fix-match' ? theme.focus.ringWidth : 1,
-                      opacity: pressed ? 0.78 : 1,
-                    },
-                  ]}
-                >
-                  <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-                    {i18n.t('detail.fixMatch.action')}
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null}
 
             <DetailSynopsisBlock
               synopsis={synopsis}
@@ -576,6 +535,15 @@ function DetailHeroInner({
               />
             ) : null}
           </View>
+
+          {isPortraitFallback && !isPortrait && trimmedPoster !== null ? (
+            <DetailHeroPosterCard
+              posterUri={trimmedPoster}
+              title={title}
+              isPortrait={isPortrait}
+              isTv={isTv}
+            />
+          ) : null}
         </View>
       </View>
     </View>
@@ -592,7 +560,6 @@ DetailHero.displayName = 'DetailHero';
 
 const styles = StyleSheet.create({
   container: { position: 'relative', zIndex: 10 },
-  backdropClip: { overflow: 'hidden' },
   foreground: { position: 'relative', zIndex: 2, flex: 1, justifyContent: 'space-between' },
   backButton: {
     position: 'relative',
@@ -616,15 +583,4 @@ const styles = StyleSheet.create({
   metaCol: { minWidth: 0 },
   metaColFlex: { flex: 1 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
-  secondaryMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-  },
-  quietPillBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
 });

@@ -377,6 +377,72 @@ describe('lists', () => {
       'http://cdn.example/cover.png',
     ]);
   });
+
+  it('extracts backdrop from backdrop_path (string or string[]) or explicit backdrop on movies and series without vertical cover fallback', async () => {
+    const movies = value(
+      await client(() => ({
+        json: [
+          {
+            stream_id: 1,
+            name: 'Movie Array BG',
+            category_id: '1',
+            stream_icon: 'https://cdn.example/vertical1.jpg',
+            backdrop_path: [
+              '',
+              'javascript:bad()',
+              'https://cdn.example/m1-bg.jpg',
+              'https://cdn.example/m1-bg2.jpg',
+            ],
+          },
+          {
+            stream_id: 2,
+            name: 'Movie String BG',
+            category_id: '1',
+            backdrop: 'https://cdn.example/m2-bg.jpg',
+          },
+          {
+            stream_id: 3,
+            name: 'Movie No BG',
+            category_id: '1',
+            stream_icon: 'https://cdn.example/vertical3.jpg',
+            movie_image: 'https://cdn.example/vertical3b.jpg',
+          },
+        ],
+      })).c.vodStreams(),
+    );
+    expect(movies[0]?.backdrop).toBe('https://cdn.example/m1-bg.jpg');
+    expect(movies[1]?.backdrop).toBe('https://cdn.example/m2-bg.jpg');
+    expect(movies[2]?.backdrop).toBeUndefined();
+
+    const seriesList = value(
+      await client(() => ({
+        json: [
+          {
+            series_id: 10,
+            name: 'Series String BG',
+            category_id: '2',
+            cover: 'https://cdn.example/s10-cover.jpg',
+            backdrop_path: 'https://cdn.example/s10-bg.jpg',
+          },
+          {
+            series_id: 11,
+            name: 'Series Array BG',
+            category_id: '2',
+            backdrop_path: ['ftp://bad.example/bg.jpg', 'http://cdn.example/s11-bg.jpg'],
+          },
+          {
+            series_id: 12,
+            name: 'Series Cover Only',
+            category_id: '2',
+            cover: 'https://cdn.example/s12-cover.jpg',
+          },
+        ],
+      })).c.series(),
+    );
+    expect(seriesList[0]?.backdrop).toBe('https://cdn.example/s10-bg.jpg');
+    expect(seriesList[1]?.backdrop).toBe('http://cdn.example/s11-bg.jpg');
+    expect(seriesList[2]?.backdrop).toBeUndefined();
+  });
 });
 
 describe('empty objects as empty lists', () => {

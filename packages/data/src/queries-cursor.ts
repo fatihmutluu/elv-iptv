@@ -110,7 +110,7 @@ async function fetchRawCursorBatch(
           WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0${liveHidden}
             AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}${adultExcl}
        )
-       SELECT id, key, provider_id, name${metaSelect}, logo, rating, year, num, catchup_days, ${dedup.countCol}, group_pos AS _pos
+       SELECT id, key, provider_id, name${metaSelect}, logo, backdrop, rating, year, num, catchup_days, ${dedup.countCol}, group_pos AS _pos
          FROM ranked
         WHERE rn = 1${cursorClause}
         ORDER BY group_pos ASC, key ASC
@@ -145,7 +145,7 @@ async function fetchRawCursorBatch(
           WHERE p.source_id = ? AND p.kind = 'live' AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0${liveHidden}
             AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}${restrict.clause}${adultExcl}
        )
-       SELECT id, key, provider_id, name, original_name, co_is_hidden, co_sort_order, logo, rating, year, num, catchup_days, _pos
+       SELECT id, key, provider_id, name, original_name, co_is_hidden, co_sort_order, logo, backdrop, rating, year, num, catchup_days, _pos
          FROM projected${cursorClause}
         ORDER BY _pos ASC, key ASC
         LIMIT ?`,

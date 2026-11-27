@@ -46,6 +46,7 @@ import {
 } from './catalog-worker-telemetry.ts';
 import { executeUserStateRpcCall } from './catalog-worker-user-state.ts';
 import {
+  createWorkerElvClient,
   executeWaveE1OpsRpcCall,
   isWaveE1RpcCall,
   openWorkerElvContext,
@@ -683,6 +684,26 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
           parentPort.postMessage({ type: 'ready' });
         });
         break;
+      case 'set-elv-server-url': {
+        const trimmed = msg.elvServerUrl.trim();
+        configuredElvServerUrl = trimmed === '' ? undefined : trimmed;
+        const targetOpen = openState;
+        if (targetOpen !== undefined) {
+          void targetOpen.then((opened) => {
+            if (opened.ok && acceptingCalls) {
+              opened.value.service.setElvClient?.(
+                createWorkerElvClient({
+                  fetchImpl,
+                  ...(configuredElvServerUrl === undefined
+                    ? {}
+                    : { elvServerUrl: configuredElvServerUrl }),
+                }),
+              );
+            }
+          });
+        }
+        break;
+      }
       case 'client-port': {
         const port = ev.ports?.[0];
         if (port) attachClient(msg.clientId, port);

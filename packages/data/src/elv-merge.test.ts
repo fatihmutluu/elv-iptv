@@ -243,4 +243,159 @@ describe('multi-source VOD/Series merging & catalog page deduplication (#511)', 
       logo: 'http://iptv-b/9.jpg',
     });
   });
+
+  it('merges unmatched multi-source VOD and series copies offline via parseVodVersion groupKey in deduplicateCatalogPageByImdb and queryMergedVodVersions', async () => {
+    const { catalogDb, store } = await seedMultiSource();
+    await catalogDb.batch(
+      `INSERT INTO movies (source_id, key, name, name_fold, year, logo, run_id)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`,
+      [
+        [
+          's1',
+          'x:s1:movie:dune4k',
+          'TR: Dune Part Two 2024 4K',
+          'tr dune part two 2024 4k',
+          2024,
+          'http://a/dune4k.jpg',
+        ],
+        [
+          's2',
+          'x:s2:movie:dune1080',
+          'EN | Dune: Part Two (2024) [FHD]',
+          'en dune part two 2024 fhd',
+          2024,
+          'http://b/dune1080.jpg',
+        ],
+        [
+          's2',
+          'x:s2:movie:dune_remake',
+          'Dune (2021) [1080p]',
+          'dune 2021 1080p',
+          2021,
+          'http://b/dune2021.jpg',
+        ],
+      ],
+    );
+    await catalogDb.batch(
+      `INSERT INTO series (source_id, key, name, name_fold, year, cover, run_id)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`,
+      [
+        [
+          's1',
+          'x:s1:series:dark4k',
+          'TR - Dark (2017) [4K]',
+          'tr dark 2017 4k',
+          2017,
+          'http://a/dark4k.jpg',
+        ],
+        [
+          's2',
+          'x:s2:series:darkfhd',
+          '[DE] Dark 2017 FHD MULTI',
+          'de dark 2017 fhd multi',
+          2017,
+          'http://b/darkfhd.jpg',
+        ],
+      ],
+    );
+
+    // Quality memory flags s1 4K as fake-4K and prefers s2 FHD
+    await recordPlaybackQuality(store, {
+      itemKey: 'x:s1:movie:dune4k',
+      actualWidth: 1280,
+      actualHeight: 720,
+      claimedLabel: '4K',
+    });
+    await recordPlaybackQuality(store, {
+      itemKey: 'x:s2:movie:dune1080',
+      actualWidth: 1920,
+      actualHeight: 1080,
+      claimedLabel: 'FHD',
+    });
+
+    const pageItems: ItemRow[] = [
+      {
+        id: 101,
+        key: 'x:s1:movie:dune4k',
+        kind: 'movie',
+        sourceId: 's1',
+        providerId: '101',
+        name: 'TR: Dune Part Two 2024 4K',
+        logo: 'http://a/dune4k.jpg',
+        rating: 8,
+        year: 2024,
+        num: null,
+      },
+      {
+        id: 102,
+        key: 'x:s2:movie:dune1080',
+        kind: 'movie',
+        sourceId: 's2',
+        providerId: '102',
+        name: 'EN | Dune: Part Two (2024) [FHD]',
+        logo: 'http://b/dune1080.jpg',
+        rating: 8,
+        year: 2024,
+        num: null,
+      },
+      {
+        id: 103,
+        key: 'x:s2:movie:dune_remake',
+        kind: 'movie',
+        sourceId: 's2',
+        providerId: '103',
+        name: 'Dune (2021) [1080p]',
+        logo: 'http://b/dune2021.jpg',
+        rating: 8,
+        year: 2021,
+        num: null,
+      },
+    ];
+
+    const qualityMap = await store.getQualityMemoryForKeys(pageItems.map((i) => i.key));
+    const offlineDeduped = deduplicateCatalogPageByImdb(pageItems, new Map(), qualityMap);
+    expect(offlineDeduped).toHaveLength(2);
+    expect(offlineDeduped[0]).toMatchObject({
+      key: 'x:s2:movie:dune1080',
+      mergedCount: 2,
+      mergedItemKeys: ['x:s1:movie:dune4k', 'x:s2:movie:dune1080'],
+      logo: 'http://b/dune1080.jpg',
+    });
+    expect(offlineDeduped[0]?.imdbId).toBeUndefined();
+    expect(offlineDeduped[1]).toMatchObject({
+      key: 'x:s2:movie:dune_remake',
+    });
+    expect(offlineDeduped[1]?.mergedCount).toBeUndefined();
+
+    // Cross-source queryMergedVodVersions works offline (even when enrichmentStore is undefined, and with quality memory)
+    const mergedOfflineMovie = await queryMergedVodVersions(
+      catalogDb,
+      undefined,
+      'x:s1:movie:dune4k',
+    );
+    expect(mergedOfflineMovie.map((v) => v.itemKey)).toEqual([
+      'x:s1:movie:dune4k',
+      'x:s2:movie:dune1080',
+    ]);
+
+    const mergedWithQualityMovie = await queryMergedVodVersions(
+      catalogDb,
+      store,
+      'x:s1:movie:dune4k',
+    );
+    expect(mergedWithQualityMovie.map((v) => v.itemKey)).toEqual([
+      'x:s2:movie:dune1080',
+      'x:s1:movie:dune4k',
+    ]);
+
+    const mergedOfflineSeries = await queryMergedVodVersions(
+      catalogDb,
+      undefined,
+      'x:s1:series:dark4k',
+    );
+    expect(mergedOfflineSeries.map((v) => v.itemKey)).toEqual([
+      'x:s1:series:dark4k',
+      'x:s2:series:darkfhd',
+    ]);
+  });
 });

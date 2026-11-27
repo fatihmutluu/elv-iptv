@@ -129,6 +129,50 @@ describe('seriesInfo', () => {
     expect(info2.cast).toBe('Ali Atay, Serkan Keskin');
     expect(info2.director).toBe('Onur Ünlü');
   });
+
+  it('extracts optional backdrop from backdrop_path (string or string[]) or explicit backdrop without falling back to cover', async () => {
+    const withArray = value(
+      await client(() => ({
+        json: {
+          info: {
+            cover: 'https://img.example/vertical-cover.jpg',
+            backdrop_path: [
+              'javascript:alert(1)',
+              '',
+              'https://img.example/series-bg-1.jpg',
+              'https://img.example/series-bg-2.jpg',
+            ],
+          },
+          episodes: {},
+        },
+      })).c.seriesInfo(12),
+    );
+    expect(withArray.backdrop).toBe('https://img.example/series-bg-1.jpg');
+
+    const withFallback = value(
+      await client(() => ({
+        json: {
+          info: { cover: 'https://img.example/vertical-cover.jpg' },
+          backdrop: 'https://img.example/series-explicit-bg.jpg',
+          episodes: {},
+        },
+      })).c.seriesInfo(13),
+    );
+    expect(withFallback.backdrop).toBe('https://img.example/series-explicit-bg.jpg');
+
+    const withoutBackdrop = value(
+      await client(() => ({
+        json: {
+          info: {
+            cover: 'https://img.example/vertical-cover.jpg',
+            movie_image: 'https://img.example/poster.jpg',
+          },
+          episodes: {},
+        },
+      })).c.seriesInfo(14),
+    );
+    expect(withoutBackdrop.backdrop).toBeUndefined();
+  });
 });
 
 describe('vodInfo', () => {
@@ -160,6 +204,51 @@ describe('vodInfo', () => {
     expect(value(await c.vodInfo(1))).toEqual({ year: 1999, extension: 'mp4' });
     expect(value(await client(() => ({ json: {} })).c.vodInfo(1))).toEqual({ extension: 'mp4' });
     expect(value(await client(() => ({ json: [] })).c.vodInfo(1))).toEqual({ extension: 'mp4' });
+  });
+
+  it('extracts optional backdrop from backdrop_path (string or string[]) or explicit backdrop without falling back to vertical cover/movie_image', async () => {
+    const fromArray = value(
+      await client(() => ({
+        json: {
+          info: {
+            movie_image: 'https://img.example/vertical-poster.jpg',
+            cover_big: 'https://img.example/vertical-cover.jpg',
+            backdrop_path: ['   ', 'ftp://bad.example/bg.jpg', 'https://img.example/vod-bg-1.jpg'],
+          },
+          movie_data: { container_extension: 'mp4' },
+        },
+      })).c.vodInfo(20),
+    );
+    expect(fromArray.backdrop).toBe('https://img.example/vod-bg-1.jpg');
+
+    const fromMovieData = value(
+      await client(() => ({
+        json: {
+          info: {
+            stream_icon: 'https://img.example/icon.jpg',
+            movie_image: 'https://img.example/poster.jpg',
+          },
+          movie_data: {
+            container_extension: 'mkv',
+            backdrop_path: 'https://img.example/vod-bg-2.jpg',
+          },
+        },
+      })).c.vodInfo(21),
+    );
+    expect(fromMovieData.backdrop).toBe('https://img.example/vod-bg-2.jpg');
+
+    const noBackdrop = value(
+      await client(() => ({
+        json: {
+          info: {
+            stream_icon: 'https://img.example/icon.jpg',
+            cover: 'https://img.example/cover.jpg',
+            movie_image: 'https://img.example/poster.jpg',
+          },
+        },
+      })).c.vodInfo(22),
+    );
+    expect(noBackdrop.backdrop).toBeUndefined();
   });
 });
 

@@ -26,7 +26,7 @@ export const ELV_RECOMMENDATION_MAX_LIMIT = 100;
 /** Feed keys stored in `elv_feeds` and intersected into Pool C (`#512`). */
 export const ELV_FEED_KEYS = ['top_picks', 'moviemeter', 'tvmeter', 'current_upcoming_tv'] as const;
 
-/** Recommendation ranking profile (`'home'` favors feeds ~65/35; `'elv_picks'` favors taste ~70/30). */
+/** Recommendation ranking profile (`'home'` favors feeds ~78/22 when live feeds exist; `'elv_picks'` favors taste ~70/30). */
 export type ElvRecommendationProfile = 'home' | 'elv_picks';
 
 /** Primary explainability badge for a recommended title (`#512`). */
@@ -66,10 +66,13 @@ export interface ElvRecommendedItem {
 }
 
 const BAYESIAN_PRIOR_VOTES = 1_000;
+const DISCOVERY_CONSENSUS_PRIOR_VOTES = 5_000;
+const MIN_CONSENSUS_VOTES = 500;
 const BAYESIAN_PRIOR_MEAN = 6.8;
 const MAX_SIGNAL_ROWS = 500;
 const POOL_B_CANDIDATE_LIMIT = 150;
 const MAX_SIGNAL_CAST_PER_TITLE = 6;
+const MAX_PER_FRANCHISE = 2;
 
 interface FeedSignal {
   score: number;
@@ -82,6 +85,28 @@ interface ScoredCandidate {
   readonly score: number;
   readonly bayesian: number;
   readonly reason: ElvRecommendationReason;
+  readonly franchiseKey: string | null;
+}
+
+function computeConsensusQualityNorm(
+  rating: number | null | undefined,
+  votes: number | null | undefined,
+): number {
+  const r =
+    typeof rating === 'number' && Number.isFinite(rating) && rating > 0
+      ? rating
+      : BAYESIAN_PRIOR_MEAN;
+  const v =
+    typeof votes === 'number' && Number.isFinite(votes) && votes > 0 ? Math.floor(votes) : 0;
+  const consensusBayesian =
+    (v / (v + DISCOVERY_CONSENSUS_PRIOR_VOTES)) * r +
+    (DISCOVERY_CONSENSUS_PRIOR_VOTES / (v + DISCOVERY_CONSENSUS_PRIOR_VOTES)) * BAYESIAN_PRIOR_MEAN;
+  const baseQuality = clamp((consensusBayesian - 5.0) / 4.2, 0, 1);
+  const voteFactor =
+    v >= MIN_CONSENSUS_VOTES
+      ? clamp(0.65 + 0.35 * (Math.log10(v + 1) / 6.3), 0.65, 1)
+      : clamp(0.35 * (v / MIN_CONSENSUS_VOTES), 0.1, 0.35);
+  return baseQuality * voteFactor;
 }
 
 /**
@@ -393,8 +418,8 @@ export async function computeElvRecommendations(
     for (const [id, t] of fetchedTitles) titleByImdb.set(id, t);
   }
 
-  const feedWeight = profile === 'home' ? 0.65 : 0.3;
-  const personalWeight = profile === 'home' ? 0.35 : 0.7;
+  const feedWeight = profile === 'home' ? (feedSignals.size > 0 ? 0.78 : 0.65) : 0.3;
+  const personalWeight = 1 - feedWeight;
 
   const scored: ScoredCandidate[] = [];
   for (const imdbId of matchesByImdb.keys()) {
@@ -427,7 +452,7 @@ export async function computeElvRecommendations(
     const cappedPersonRaw = clamp(personRaw, -4, 8);
 
     const bayesian = computeBayesianRating(title.rating, title.votes);
-    const bayesianNorm = clamp((bayesian - 5.0) / 4.2, 0, 1);
+    const qualityNorm = computeConsensusQualityNorm(title.rating, title.votes);
 
     let poolBNorm: number;
     if (hasPositiveSignals) {
@@ -436,10 +461,10 @@ export async function computeElvRecommendations(
       const personalAffinity = Math.max(0, genreNorm * 0.6 + castNorm * 0.4);
       poolBNorm =
         personalAffinity > 0
-          ? clamp(personalAffinity * 0.75 + bayesianNorm * 0.25, 0, 1)
-          : bayesianNorm * 0.12;
+          ? clamp(personalAffinity * 0.75 + qualityNorm * 0.25, 0, 1)
+          : qualityNorm * 0.12;
     } else {
-      poolBNorm = bayesianNorm * 0.55;
+      poolBNorm = qualityNorm * 0.55;
     }
 
     const dislikePenalty =
@@ -455,7 +480,7 @@ export async function computeElvRecommendations(
     const feedSig = feedSignals.get(imdbId);
     const poolCNorm = feedSig?.score ?? 0;
     const combined = feedWeight * poolCNorm + personalWeight * personalScore;
-    if (combined <= 0 && !hasPositiveSignals && poolCNorm === 0 && bayesianNorm === 0) continue;
+    if (combined <= 0 && !hasPositiveSignals && poolCNorm === 0 && qualityNorm === 0) continue;
 
     let reason: ElvRecommendationReason;
     if (profile === 'home') {
@@ -467,8 +492,12 @@ export async function computeElvRecommendations(
         reason = 'cast_match';
       } else if (feedSig !== undefined && genreRaw <= 0) {
         reason = feedSig.reason;
-      } else {
+      } else if (hasPositiveSignals && genreRaw > 0) {
         reason = 'genre_match';
+      } else if (feedSig !== undefined) {
+        reason = feedSig.reason;
+      } else {
+        reason = 'top_picks';
       }
     } else {
       if (poolANorm > 0 && personalWeight * poolANorm >= feedWeight * poolCNorm) {
@@ -487,16 +516,20 @@ export async function computeElvRecommendations(
         reason = 'more_like_this';
       } else if (cappedPersonRaw > 0) {
         reason = 'cast_match';
-      } else {
+      } else if (hasPositiveSignals && genreRaw > 0) {
         reason = 'genre_match';
+      } else {
+        reason = 'top_picks';
       }
     }
 
+    const franchiseKey = title.franchiseKey?.trim().toLowerCase() ?? '';
     scored.push({
       imdbId,
       score: Math.round(combined * 10_000) / 10_000,
       bayesian,
       reason,
+      franchiseKey: franchiseKey === '' ? null : franchiseKey,
     });
   }
 
@@ -506,7 +539,19 @@ export async function computeElvRecommendations(
     (a, b) => b.score - a.score || b.bayesian - a.bayesian || a.imdbId.localeCompare(b.imdbId),
   );
 
-  const hydrateWindow = scored.slice(0, Math.max(limit * 3, 60));
+  const windowTarget = Math.max(limit * 3, 60);
+  const hydrateWindow: ScoredCandidate[] = [];
+  const windowFranchiseCounts = new Map<string, number>();
+  for (const candidate of scored) {
+    if (candidate.franchiseKey !== null) {
+      const count = windowFranchiseCounts.get(candidate.franchiseKey) ?? 0;
+      if (count >= MAX_PER_FRANCHISE * 2) continue;
+      windowFranchiseCounts.set(candidate.franchiseKey, count + 1);
+    }
+    hydrateWindow.push(candidate);
+    if (hydrateWindow.length >= windowTarget) break;
+  }
+
   const excludedSourceSet = new Set(uniqueNonEmpty(input.excludedSourceIds ?? []));
   const hydratedByImdb = await hydrateBestPlayableMatches({
     catalogDb,
@@ -527,9 +572,15 @@ export async function computeElvRecommendations(
     score: number;
     reason: ElvRecommendationReason;
   }[] = [];
+  const selectedFranchiseCounts = new Map<string, number>();
   for (const candidate of hydrateWindow) {
     const match = hydratedByImdb.get(candidate.imdbId);
     if (match === undefined) continue;
+    if (candidate.franchiseKey !== null) {
+      const seenCount = selectedFranchiseCounts.get(candidate.franchiseKey) ?? 0;
+      if (seenCount >= MAX_PER_FRANCHISE) continue;
+      selectedFranchiseCounts.set(candidate.franchiseKey, seenCount + 1);
+    }
     selected.push({
       item: match.item,
       enrichment: match.enrichment,

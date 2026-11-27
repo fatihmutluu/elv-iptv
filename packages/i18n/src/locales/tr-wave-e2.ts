@@ -1,6 +1,6 @@
 import type { enWaveE2Messages } from './en-wave-e2';
 
-/** Turkish (`tr`) messages for Wave E2 ELV Mode Discovery, Rich Detail, Trailers, Fix Match & In-Player X-Ray (`#512`, `#352`, `#459`). */
+/** Turkish (`tr`) messages for Wave E2 ELV Mode Discovery, Rich Detail, Trailers & In-Player X-Ray (`#512`, `#352`, `#459`). */
 export const trWaveE2Messages: Readonly<Record<keyof typeof enWaveE2Messages, string>> = {
   'home.section.elvShowcase': 'Gündem ve Sana Özel',
   'catalog.elvPicks.emptyTitle': 'Kişisel önerilerin hazırlanıyor',
@@ -47,16 +47,6 @@ export const trWaveE2Messages: Readonly<Record<keyof typeof enWaveE2Messages, st
   'person.role.director': 'Yönetmen',
   'person.role.cast': 'Oyuncu',
   'person.close': 'Kapat',
-  'detail.fixMatch.action': 'Eşleşmeyi düzelt',
-  'detail.fixMatch.title': 'IMDb eşleşmesini düzelt',
-  'detail.fixMatch.subtitle':
-    'Doğru yapımı arayıp kilitleyin. Sonraki katalog yenilemelerinde seçiminiz korunur.',
-  'detail.fixMatch.placeholder': 'Film veya dizi adı ara…',
-  'detail.fixMatch.search': 'Ara',
-  'detail.fixMatch.searching': "IMDb'de aranıyor…",
-  'detail.fixMatch.noResults': 'Eşleşen yapım bulunamadı.',
-  'detail.fixMatch.lockedBadge': 'Eşleşme kilitli',
-  'detail.fixMatch.error': 'Eşleşme şu an güncellenemedi.',
   'player.xray.button': 'X-Ray',
   'player.xray.title': 'X-Ray',
   'player.xray.cast': 'Oyuncular',

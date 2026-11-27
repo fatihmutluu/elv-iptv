@@ -52,8 +52,8 @@ const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, n
      OR live.catchup_mode IS NOT excluded.catchup_mode
      OR live.catchup_source_template IS NOT excluded.catchup_source_template`;
 
-const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
-  SELECT source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash
+const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, backdrop, rating, year, extension, added, url_template, headers_json, backup_urls_json, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
+  SELECT source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, backdrop, rating, year, extension, added, url_template, headers_json, backup_urls_json, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash
   FROM movies_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
@@ -64,6 +64,7 @@ const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, na
     version_group_key = excluded.version_group_key,
     version_label = excluded.version_label,
     logo = excluded.logo,
+    backdrop = COALESCE(excluded.backdrop, movies.backdrop),
     rating = excluded.rating,
     year = excluded.year,
     extension = excluded.extension,
@@ -85,13 +86,14 @@ const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, na
      OR movies.sort_title != excluded.sort_title
      OR movies.version_group_key != excluded.version_group_key
      OR movies.version_label IS NOT excluded.version_label
+     OR (excluded.backdrop IS NOT NULL AND movies.backdrop IS NOT excluded.backdrop)
      OR (excluded.cast_fold IS NOT NULL AND movies.cast_fold IS NOT excluded.cast_fold)
      OR (excluded.director_fold IS NOT NULL AND movies.director_fold IS NOT excluded.director_fold)
      OR (excluded.provider_imdb_id IS NOT NULL AND movies.provider_imdb_id IS NOT excluded.provider_imdb_id)
      OR (excluded.provider_tmdb_id IS NOT NULL AND movies.provider_tmdb_id IS NOT excluded.provider_tmdb_id)`;
 
-const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
-  SELECT source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash
+const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, name_fold, sort_title, cover, backdrop, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
+  SELECT source_id, key, provider_id, name, name_fold, sort_title, cover, backdrop, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash
   FROM series_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
@@ -100,6 +102,7 @@ const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, na
     name_fold = excluded.name_fold,
     sort_title = excluded.sort_title,
     cover = excluded.cover,
+    backdrop = COALESCE(excluded.backdrop, series.backdrop),
     plot = excluded.plot,
     rating = excluded.rating,
     year = excluded.year,
@@ -116,6 +119,7 @@ const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, na
      OR excluded.content_hash IS NULL
      OR series.content_hash != excluded.content_hash
      OR series.sort_title != excluded.sort_title
+     OR (excluded.backdrop IS NOT NULL AND series.backdrop IS NOT excluded.backdrop)
      OR (excluded.cast_fold IS NOT NULL AND series.cast_fold IS NOT excluded.cast_fold)
      OR (excluded.director_fold IS NOT NULL AND series.director_fold IS NOT excluded.director_fold)
      OR (excluded.provider_imdb_id IS NOT NULL AND series.provider_imdb_id IS NOT excluded.provider_imdb_id)

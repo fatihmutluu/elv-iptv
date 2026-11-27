@@ -99,12 +99,12 @@ export const liveWriter: ItemWriter<XtreamLive> = {
 };
 
 export const movieWriter: ItemWriter<XtreamMovie & ProviderExternalIds> = {
-  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, backdrop, rating, year, extension, added, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
           name_fold = excluded.name_fold, sort_title = excluded.sort_title,
           version_group_key = excluded.version_group_key, version_label = excluded.version_label,
-          logo = excluded.logo, rating = excluded.rating, year = excluded.year,
+          logo = excluded.logo, backdrop = excluded.backdrop, rating = excluded.rating, year = excluded.year,
           extension = excluded.extension, added = excluded.added,
           cast_text = excluded.cast_text, director_text = excluded.director_text,
           cast_fold = excluded.cast_fold, director_fold = excluded.director_fold,
@@ -125,6 +125,7 @@ export const movieWriter: ItemWriter<XtreamMovie & ProviderExternalIds> = {
       name: i.name,
       nameFold,
       logo: i.icon,
+      backdrop: i.backdrop,
       rating: i.rating,
       year: i.year,
       extension: i.extension,
@@ -144,6 +145,7 @@ export const movieWriter: ItemWriter<XtreamMovie & ProviderExternalIds> = {
       version.groupKey,
       versionLabel,
       s(i.icon),
+      s(i.backdrop),
       n(i.rating),
       n(i.year),
       i.extension,
@@ -161,10 +163,10 @@ export const movieWriter: ItemWriter<XtreamMovie & ProviderExternalIds> = {
 };
 
 export const seriesWriter: ItemWriter<XtreamSeries & ProviderExternalIds> = {
-  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, sort_title, cover, backdrop, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, provider_imdb_id, provider_tmdb_id, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
-          name_fold = excluded.name_fold, sort_title = excluded.sort_title, cover = excluded.cover, plot = excluded.plot, rating = excluded.rating,
+          name_fold = excluded.name_fold, sort_title = excluded.sort_title, cover = excluded.cover, backdrop = excluded.backdrop, plot = excluded.plot, rating = excluded.rating,
           year = excluded.year, last_modified = excluded.last_modified,
           cast_text = excluded.cast_text, director_text = excluded.director_text,
           cast_fold = excluded.cast_fold, director_fold = excluded.director_fold,
@@ -183,6 +185,7 @@ export const seriesWriter: ItemWriter<XtreamSeries & ProviderExternalIds> = {
       name: i.name,
       nameFold,
       cover: i.cover,
+      backdrop: i.backdrop,
       plot: i.plot,
       rating: i.rating,
       year: i.year,
@@ -200,6 +203,7 @@ export const seriesWriter: ItemWriter<XtreamSeries & ProviderExternalIds> = {
       nameFold,
       sortTitle,
       s(i.cover),
+      s(i.backdrop),
       s(i.plot),
       n(i.rating),
       n(i.year),

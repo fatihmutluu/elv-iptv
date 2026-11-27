@@ -36,6 +36,7 @@ export interface XtreamMovie {
   name: string;
   categoryIds: string[];
   icon?: string;
+  backdrop?: string;
   rating?: number;
   year?: number;
   cast?: string;
@@ -52,6 +53,7 @@ export interface XtreamSeries {
   name: string;
   categoryIds: string[];
   cover?: string;
+  backdrop?: string;
   plot?: string;
   rating?: number;
   year?: number;
@@ -78,6 +80,7 @@ export interface XtreamSeriesInfo {
   episodes: XtreamEpisode[];
   cast?: string;
   director?: string;
+  backdrop?: string;
 }
 
 /** Details of one movie. */
@@ -89,6 +92,7 @@ export interface XtreamVodInfo {
   director?: string;
   providerImdbId?: string;
   providerTmdbId?: string;
+  backdrop?: string;
   extension: string;
 }
 

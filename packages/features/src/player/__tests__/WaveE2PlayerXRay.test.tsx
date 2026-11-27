@@ -166,12 +166,17 @@ const PERSON_LIBRARY_ITEMS: readonly ElvPersonLibraryItem[] = [
   },
 ];
 
-function makeCatalog() {
-  const getElvEnrichmentForKeys = jest.fn(
-    async () => new Map<string, ElvItemEnrichment>([[ENRICHMENT.itemKey, ENRICHMENT]]),
-  );
-  const getElvTitleDetail = jest.fn(async () => TITLE_RECORD);
-  const listElvPersonLibraryItems = jest.fn(async () => PERSON_LIBRARY_ITEMS);
+function makeCatalog(overrides?: {
+  readonly getElvEnrichmentForKeys?: CatalogService['getElvEnrichmentForKeys'];
+  readonly getElvTitleDetail?: CatalogService['getElvTitleDetail'];
+  readonly listElvPersonLibraryItems?: CatalogService['listElvPersonLibraryItems'];
+}) {
+  const getElvEnrichmentForKeys =
+    overrides?.getElvEnrichmentForKeys ??
+    jest.fn(async () => new Map<string, ElvItemEnrichment>([[ENRICHMENT.itemKey, ENRICHMENT]]));
+  const getElvTitleDetail = overrides?.getElvTitleDetail ?? jest.fn(async () => TITLE_RECORD);
+  const listElvPersonLibraryItems =
+    overrides?.listElvPersonLibraryItems ?? jest.fn(async () => PERSON_LIBRARY_ITEMS);
   const catalog = {
     resolveStream: jest.fn(async () =>
       ok({ url: 'https://stream.invalid/dark-s1e1.mp4', headers: {} }),
@@ -583,5 +588,157 @@ describe('Wave E2 In-Player X-Ray (#352)', () => {
     expect(getElvTitleDetail).toHaveBeenCalledTimes(1);
 
     await view.unmount();
+  });
+
+  it('hides player-xray-button completely when title has zero cast (even if director exists) and shows it when cast exists', async () => {
+    const { videoHost, emitState } = makeControllableVideoHost('floating');
+    const noCastRecord: ElvTitleRecord = {
+      ...TITLE_RECORD,
+      cast: [],
+      director: 'Baran bo Odar',
+    };
+    const withCastTarget: PlayTarget = {
+      itemKey: 'x:src-1:movie:88',
+      sourceId: 'src-1',
+      kind: 'vod',
+      itemKind: 'movie',
+      title: 'Dark II',
+    };
+    const withCastEnrichment: ElvItemEnrichment = {
+      ...ENRICHMENT,
+      itemKey: withCastTarget.itemKey,
+      mediaType: 'movie',
+      title: TITLE_RECORD,
+    };
+    const noCastEnrichment: ElvItemEnrichment = {
+      ...ENRICHMENT,
+      title: noCastRecord,
+    };
+    const getElvEnrichmentForKeys = jest.fn(async (keys: readonly string[]) => {
+      if (keys.includes(withCastTarget.itemKey)) {
+        return new Map<string, ElvItemEnrichment>([[withCastTarget.itemKey, withCastEnrichment]]);
+      }
+      return new Map<string, ElvItemEnrichment>([[ENRICHMENT.itemKey, noCastEnrichment]]);
+    });
+    const getElvTitleDetail = jest.fn(async (_imdbId: string) => TITLE_RECORD);
+    const { catalog } = makeCatalog({
+      getElvEnrichmentForKeys,
+      getElvTitleDetail: jest.fn(async () => noCastRecord),
+    });
+    const { catalog: tvNoCastCatalog } = makeCatalog({
+      getElvEnrichmentForKeys,
+      getElvTitleDetail: jest.fn(async () => noCastRecord),
+    });
+
+    const movieTarget: PlayTarget = {
+      itemKey: 'x:src-1:series:7',
+      sourceId: 'src-1',
+      kind: 'vod',
+      itemKind: 'movie',
+      title: 'Dark',
+    };
+
+    const view = await render(
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <ThemeProvider preset="obsidianCrimson">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <PlayerScreen
+              catalog={catalog}
+              videoHost={videoHost}
+              target={movieTarget}
+              elvModeEnabled
+              elvXrayEnabled
+              onOpenDetail={jest.fn()}
+              onExit={jest.fn()}
+            />
+          </I18nProvider>
+        </ThemeProvider>
+      </ViewportProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getElvEnrichmentForKeys).toHaveBeenCalledWith(['x:src-1:series:7']);
+    });
+
+    expect(screen.queryByTestId('player-xray-button')).toBeNull();
+    await act(async () => {
+      emitState('paused');
+    });
+    expect(screen.queryByTestId('player-xray-strip')).toBeNull();
+    await view.unmount();
+
+    // Verify 10-ft TV hides player-xray-button cleanly when cast is empty, and shows it once cast loads
+    const { catalog: castCatalog } = makeCatalog({
+      getElvEnrichmentForKeys,
+      getElvTitleDetail,
+    });
+    const tvEmptyView = await render(
+      <ViewportProvider
+        value={{
+          formFactor: 'tv',
+          orientation: 'landscape',
+          inputModality: 'tv',
+          width: 1920,
+          height: 1080,
+        }}
+      >
+        <ThemeProvider preset="obsidianCrimson">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <PlayerScreen
+              catalog={tvNoCastCatalog}
+              videoHost={videoHost}
+              target={movieTarget}
+              elvModeEnabled
+              elvXrayEnabled
+              onOpenDetail={jest.fn()}
+              onExit={jest.fn()}
+            />
+          </I18nProvider>
+        </ThemeProvider>
+      </ViewportProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('player-screen')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('player-xray-button')).toBeNull();
+    await tvEmptyView.unmount();
+
+    const castView = await render(
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <ThemeProvider preset="obsidianCrimson">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <PlayerScreen
+              catalog={castCatalog}
+              videoHost={videoHost}
+              target={withCastTarget}
+              elvModeEnabled
+              elvXrayEnabled
+              onOpenDetail={jest.fn()}
+              onExit={jest.fn()}
+            />
+          </I18nProvider>
+        </ThemeProvider>
+      </ViewportProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('player-xray-button')).toBeTruthy();
+    });
+    await castView.unmount();
   });
 });

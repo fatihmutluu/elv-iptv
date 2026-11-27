@@ -36,6 +36,9 @@ const MAX_NON_ASCII_PERSON_FALLBACK_ROWS = 2_000;
 const BAYESIAN_SQL_EXPR =
   '((COALESCE(t.votes, 0) / (COALESCE(t.votes, 0) + 1000.0)) * COALESCE(t.rating, 6.8) + (1000.0 / (COALESCE(t.votes, 0) + 1000.0)) * 6.8)';
 
+const DISCOVERY_CONSENSUS_SQL_EXPR =
+  '((COALESCE(t.votes, 0) / (COALESCE(t.votes, 0) + 5000.0)) * COALESCE(t.rating, 6.8) + (5000.0 / (COALESCE(t.votes, 0) + 5000.0)) * 6.8)';
+
 const EFFECTIVE_LOWER_TITLE_SQL =
   "LOWER(COALESCE(NULLIF(TRIM(t.english_title), ''), t.original_title))";
 
@@ -182,7 +185,10 @@ export async function listTopRatedMatchedTitles(
               SELECT 1 FROM elv_item_matches m
                WHERE m.imdb_id = t.imdb_id${mediaClause}${srcFilter.clause}
             )
-      ORDER BY ${BAYESIAN_SQL_EXPR} DESC, COALESCE(t.votes, 0) DESC, t.imdb_id ASC
+      ORDER BY CASE WHEN COALESCE(t.votes, 0) >= 500 THEN 0 ELSE 1 END ASC,
+               ${DISCOVERY_CONSENSUS_SQL_EXPR} DESC,
+               COALESCE(t.votes, 0) DESC,
+               t.imdb_id ASC
       LIMIT ?`,
     params,
   );

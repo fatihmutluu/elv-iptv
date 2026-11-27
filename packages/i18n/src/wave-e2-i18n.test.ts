@@ -78,21 +78,6 @@ const EXPECTED_PAIRS: ReadonlyArray<readonly [MessageId, string, string]> = [
   ['person.role.cast', 'Cast', 'Oyuncu'],
   ['person.close', 'Close', 'Kapat'],
 
-  // Fix Match (9)
-  ['detail.fixMatch.action', 'Fix match', 'Eşleşmeyi düzelt'],
-  ['detail.fixMatch.title', 'Fix IMDb match', 'IMDb eşleşmesini düzelt'],
-  [
-    'detail.fixMatch.subtitle',
-    'Search and lock the exact title. Future catalog refreshes will keep your choice.',
-    'Doğru yapımı arayıp kilitleyin. Sonraki katalog yenilemelerinde seçiminiz korunur.',
-  ],
-  ['detail.fixMatch.placeholder', 'Search movie or series title…', 'Film veya dizi adı ara…'],
-  ['detail.fixMatch.search', 'Search', 'Ara'],
-  ['detail.fixMatch.searching', 'Searching IMDb…', "IMDb'de aranıyor…"],
-  ['detail.fixMatch.noResults', 'No matching titles found.', 'Eşleşen yapım bulunamadı.'],
-  ['detail.fixMatch.lockedBadge', 'Match locked', 'Eşleşme kilitli'],
-  ['detail.fixMatch.error', 'Could not update match right now.', 'Eşleşme şu an güncellenemedi.'],
-
   // In-Player X-Ray (#352) (7)
   ['player.xray.button', 'X-Ray', 'X-Ray'],
   ['player.xray.title', 'X-Ray', 'X-Ray'],
@@ -145,8 +130,8 @@ function parsePoEntries(raw: string): Record<string, string> {
 }
 
 describe('Wave E2 ELV Mode Discovery & X-Ray i18n (#512, #352, #459)', () => {
-  it('defines all 60 EN and TR keys with strict parity, .po sync, and clean copy', () => {
-    expect(WAVE_E2_KEYS).toHaveLength(60);
+  it('defines all 51 EN and TR keys with strict parity, .po sync, and clean copy', () => {
+    expect(WAVE_E2_KEYS).toHaveLength(51);
     expect(Object.keys(enWaveE2Messages).sort()).toEqual([...WAVE_E2_KEYS].sort());
     expect(Object.keys(trWaveE2Messages).sort()).toEqual([...WAVE_E2_KEYS].sort());
 

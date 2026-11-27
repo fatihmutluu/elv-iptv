@@ -37,6 +37,7 @@ import {
   type QueryLiveVariantsOptions,
   queryLiveVariants,
 } from './queries-variants';
+import { normalizeCatalogTmdbId } from './writers';
 
 export type { ElvEnrichmentStore, ElvMetadataClient };
 
@@ -90,6 +91,7 @@ export interface CatalogElvOpsMethods extends CatalogElvDiscoveryOpsMethods {
     channelName: string,
     opts?: FindGuideChannelByCleanNameOptions,
   ): Promise<CleanNameGuideMatch | null>;
+  setElvClient?(client: ElvMetadataClient | undefined): void;
 }
 
 interface RawClaimedLabelRow {
@@ -151,13 +153,14 @@ export function createCatalogElvOpsMethods(deps: {
   readonly elvClient?: ElvMetadataClient | undefined;
   readonly resolveRowLogos?: RowLogoResolver | undefined;
 }): CatalogElvOpsMethods {
-  const { db, clock, scheduler, enrichmentStore, elvClient, resolveRowLogos } = deps;
+  const { db, clock, scheduler, enrichmentStore, resolveRowLogos } = deps;
+  let currentElvClient = deps.elvClient;
   const matcher =
-    enrichmentStore !== undefined && elvClient !== undefined
+    enrichmentStore !== undefined
       ? createElvCatalogMatcher({
           catalogDb: db,
           enrichmentStore,
-          client: elvClient,
+          getClient: () => currentElvClient,
           now: clock,
           scheduler,
         })
@@ -173,12 +176,12 @@ export function createCatalogElvOpsMethods(deps: {
       cached !== null &&
       cached.detailFetchedAt !== null &&
       opts?.forceRefresh !== true &&
-      (hasRequestedLang || elvClient === undefined)
+      (hasRequestedLang || currentElvClient === undefined)
     ) {
       return cached;
     }
-    if (elvClient === undefined) return cached;
-    const fetched = await elvClient.fetchTitleDetail(imdbId, opts?.lang, opts?.signal);
+    if (currentElvClient === undefined) return cached;
+    const fetched = await currentElvClient.fetchTitleDetail(imdbId, opts?.lang, opts?.signal);
     if (fetched === null) return cached;
     if (enrichmentStore !== undefined) {
       await enrichmentStore.upsertTitles([fetched]);
@@ -187,6 +190,7 @@ export function createCatalogElvOpsMethods(deps: {
     const nowMs = clock();
     return {
       imdbId: fetched.imdbId,
+      tmdbId: normalizeCatalogTmdbId(fetched.tmdbId) ?? null,
       mediaType: fetched.mediaType,
       originalTitle: fetched.originalTitle,
       englishTitle: fetched.englishTitle ?? null,
@@ -216,7 +220,7 @@ export function createCatalogElvOpsMethods(deps: {
     db,
     clock,
     enrichmentStore,
-    elvClient,
+    getElvClient: () => currentElvClient,
     resolveRowLogos,
     getElvTitleDetail,
   });
@@ -300,6 +304,10 @@ export function createCatalogElvOpsMethods(deps: {
           ? { excludedSourceIds: opts.excludedSourceIds }
           : {}),
       }),
+
+    setElvClient: (client) => {
+      currentElvClient = client;
+    },
 
     ...discoveryOps,
   };

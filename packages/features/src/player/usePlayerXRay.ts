@@ -33,6 +33,8 @@ export interface UsePlayerXRayOptions {
 /** State and actions returned by {@link usePlayerXRay}. */
 export interface PlayerXRayState {
   readonly eligible: boolean;
+  readonly hasCast: boolean;
+  readonly hasButton: boolean;
   readonly stripVisible: boolean;
   readonly titleDetail: ElvTitleRecord | null;
   readonly selectedPerson: PersonLibraryModalPerson | null;
@@ -146,10 +148,8 @@ export function usePlayerXRay({
     };
   }, [baseItemKey, catalog.getElvEnrichmentForKeys, catalog.getElvTitleDetail, eligible, locale]);
 
-  const hasMetadata =
-    titleDetail !== null &&
-    (titleDetail.cast.length > 0 ||
-      (titleDetail.director !== null && titleDetail.director.trim().length > 0));
+  const hasCast = titleDetail !== null && titleDetail.cast.length > 0;
+  const hasButton = eligible && hasCast;
 
   const stripVisible = shouldShowXrayStrip({
     eligible,
@@ -157,14 +157,14 @@ export function usePlayerXRay({
     statusKind,
     userPinnedOpen,
     dismissedOnPause,
-    hasMetadata,
+    hasMetadata: hasCast,
   });
 
   const stripVisibleRef = useRef(stripVisible);
   stripVisibleRef.current = stripVisible;
 
   const toggleStrip = useCallback(() => {
-    if (!eligible) return;
+    if (!eligible || !hasCast) return;
     if (stripVisibleRef.current) {
       setUserPinnedOpen(false);
       if (statusKindRef.current === 'paused') setDismissedOnPause(true);
@@ -172,7 +172,7 @@ export function usePlayerXRay({
       setDismissedOnPause(false);
       setUserPinnedOpen(true);
     }
-  }, [eligible]);
+  }, [eligible, hasCast]);
 
   const dismissStrip = useCallback(() => {
     setUserPinnedOpen(false);
@@ -197,6 +197,8 @@ export function usePlayerXRay({
 
   return {
     eligible,
+    hasCast,
+    hasButton,
     stripVisible,
     titleDetail,
     selectedPerson,

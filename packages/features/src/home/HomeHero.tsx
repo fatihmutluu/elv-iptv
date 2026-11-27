@@ -155,7 +155,12 @@ export function HomeHero({
         },
       ]}
     >
-      <HomeHeroBackdrop slideKey={slide.itemKey} uri={slide.backdropUri} title={slide.title} />
+      <HomeHeroBackdrop
+        slideKey={slide.itemKey}
+        uri={slide.backdropUri}
+        posterUri={slide.posterUri}
+        title={slide.title}
+      />
 
       <View style={styles.content}>
         <View style={styles.statusRow}>
