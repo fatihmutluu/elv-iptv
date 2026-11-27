@@ -28,6 +28,6 @@
     "@elv/config": "workspace:*",
     "@types/react": "catalog:",
     "@vitest/coverage-v8": "catalog:",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   }
 }
