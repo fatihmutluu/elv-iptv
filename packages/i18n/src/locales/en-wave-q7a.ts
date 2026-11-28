@@ -25,7 +25,6 @@ export const enWaveQ7aMessages = {
   'desktop.shortcuts.item.fullscreen': 'Toggle fullscreen',
   'desktop.shortcuts.item.mute': 'Mute / Unmute',
   'desktop.shortcuts.item.tracks': 'Audio & subtitles',
-  'desktop.shortcuts.item.alwaysOnTop': 'Pin window on top',
   'desktop.shortcuts.item.channels': 'Toggle channel list',
   'desktop.shortcuts.item.prevChannel': 'Previous channel',
   'desktop.shortcuts.item.infoStats': 'Stream info / stats',

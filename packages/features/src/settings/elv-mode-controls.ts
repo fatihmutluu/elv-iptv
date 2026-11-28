@@ -101,10 +101,6 @@ export function activateElvModeControl(
     });
     return;
   }
-  if (controlId === 'elv-xray') {
-    void preferences.updatePreferences({ elvXrayEnabled: !current.elvXrayEnabled });
-    return;
-  }
   if (controlId === 'elv-live-enhance') {
     void preferences.updatePreferences({ elvLiveEnhance: !current.elvLiveEnhance });
     return;

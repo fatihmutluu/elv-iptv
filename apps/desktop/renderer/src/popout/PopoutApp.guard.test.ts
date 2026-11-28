@@ -254,9 +254,6 @@ function makeWindowBridge(
   closePopout: () => Promise<void>,
 ): WindowBridge {
   return {
-    setAlwaysOnTop: vi.fn(async (flag: boolean) => flag),
-    getAlwaysOnTop: vi.fn(async () => false),
-    onAlwaysOnTopChanged: () => () => undefined,
     setAspectRatioLock: vi.fn(async (f) => f),
     setMinimizeToTray: vi.fn(async (f) => f),
     openPopout: vi.fn(async () => true),

@@ -166,11 +166,11 @@ describe('Wave F6 regressions: Live preview suppression (HIGH #3) & cache/detail
 
       // Start live playback -> 1st videoHost.open()
       await fireEvent.press(screen.getByTestId('home-live-item-0'));
-      await waitFor(() => expect(screen.getByTestId('player-minimize-button')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-button')).toBeTruthy());
       expect(openEngineSpy).toHaveBeenCalledTimes(1);
 
-      // Minimize to Floating Mini-Player -> still 1 engine open
-      await fireEvent.press(screen.getByTestId('player-minimize-button'));
+      // Minimize to Floating Mini-Player (direct click when only minimize exists) -> still 1 engine open
+      await fireEvent.press(screen.getByTestId('player-window-mode-button'));
       await waitFor(() => expect(screen.getByTestId('floating-mini-player')).toBeTruthy());
       expect(openEngineSpy).toHaveBeenCalledTimes(1);
 
@@ -254,10 +254,12 @@ describe('Wave F6 regressions: Live preview suppression (HIGH #3) & cache/detail
 
       // Play movie from DetailScreen
       await fireEvent.press(screen.getByTestId('detail-play'));
-      await waitFor(() => expect(screen.getByTestId('player-popout-button')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-button')).toBeTruthy());
 
-      // Pop out player -> must stop active player before opening popout AND preserve detailStack!
-      await fireEvent.press(screen.getByTestId('player-popout-button'));
+      // Pop out player via Window Mode popover -> must stop active player before opening popout AND preserve detailStack!
+      await fireEvent.press(screen.getByTestId('player-window-mode-button'));
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-popout')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-window-mode-popout'));
       await waitFor(() => expect(openPopout).toHaveBeenCalledTimes(1));
 
       expect(stopCalledBeforePopout).toBe(true);
@@ -319,9 +321,11 @@ describe('Wave F6 regressions: Live preview suppression (HIGH #3) & cache/detail
 
       await waitFor(() => expect(screen.getByTestId('home-live-item-0')).toBeTruthy());
       await fireEvent.press(screen.getByTestId('home-live-item-0'));
-      await waitFor(() => expect(screen.getByTestId('player-multiview-button')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('player-settings-button')).toBeTruthy());
 
-      await fireEvent.press(screen.getByTestId('player-multiview-button'));
+      await fireEvent.press(screen.getByTestId('player-settings-button'));
+      await waitFor(() => expect(screen.getByTestId('player-settings-multiview')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-settings-multiview'));
       await waitFor(() => expect(screen.getByTestId('multiview-stage')).toBeTruthy());
 
       expect(openEngineSpy).toHaveBeenCalledTimes(1);

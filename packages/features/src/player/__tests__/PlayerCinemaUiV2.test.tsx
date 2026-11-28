@@ -106,7 +106,7 @@ describe('VodProgressBar Cinema Quietude v2 scrubber', () => {
         </ThemeProvider>,
       );
 
-      expect(flatStyle('player-progress-rail')?.height).toBe(3);
+      expect(flatStyle('player-progress-rail')?.height).toBe(5);
       expect(screen.queryByTestId('player-progress-hover-time')).toBeNull();
 
       const bar = screen.getByTestId('player-progress-bar');
@@ -121,22 +121,22 @@ describe('VodProgressBar Cinema Quietude v2 scrubber', () => {
         nativeEvent: { clientX: 200 },
         currentTarget: mockTarget,
       });
-      expect(flatStyle('player-progress-rail')?.height).toBe(5);
+      expect(flatStyle('player-progress-rail')?.height).toBe(8);
       const pill = screen.getByTestId('player-progress-hover-time');
       expect(pill).toHaveTextContent('1:00');
       expect(flatStyle('player-progress-hover-time')?.fontVariant).toEqual(['tabular-nums']);
 
-      // Hover out hides preview pill and returns to 3px
+      // Hover out hides preview pill and returns to 5px
       await fireEvent(bar, 'hoverOut');
       expect(screen.queryByTestId('player-progress-hover-time')).toBeNull();
-      expect(flatStyle('player-progress-rail')?.height).toBe(3);
+      expect(flatStyle('player-progress-rail')?.height).toBe(5);
 
       // Pointer drag: down at 25% -> move to 75% (live preview 1:30) -> up commits 0.75
       await fireEvent(bar, 'pointerDown', {
         nativeEvent: { clientX: 150 },
         currentTarget: mockTarget,
       });
-      expect(flatStyle('player-progress-rail')?.height).toBe(5);
+      expect(flatStyle('player-progress-rail')?.height).toBe(8);
       expect(web.listenerCount('pointermove')).toBe(1);
 
       await web.emit('pointermove', { clientX: 250 });
@@ -414,7 +414,7 @@ describe('PlayerScreen Cinema Bar (Desktop) & Floating 3-Zone OSD (TV/Mobile)', 
     expect(screen.queryByTestId('player-center-transport')).toBeNull();
     expect(screen.getByTestId('player-bottom-transport')).toBeTruthy();
     expect(screen.getByTestId('player-osd-bottom')).toBeTruthy();
-    expect(flatStyle('player-play-pause')?.width).toBe(54);
+    expect(flatStyle('player-play-pause')?.width).toBe(80);
     await tv.view.unmount();
 
     const phone = await mountPlayer('phone');
@@ -422,7 +422,7 @@ describe('PlayerScreen Cinema Bar (Desktop) & Floating 3-Zone OSD (TV/Mobile)', 
     expect(screen.queryByTestId('player-center-transport')).toBeNull();
     expect(screen.getByTestId('player-bottom-transport')).toBeTruthy();
     expect(screen.getByTestId('player-osd-bottom')).toBeTruthy();
-    expect(flatStyle('player-play-pause')?.width).toBe(48);
+    expect(flatStyle('player-play-pause')?.width).toBe(60);
     await phone.view.unmount();
   });
 });

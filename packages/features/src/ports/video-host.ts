@@ -69,7 +69,6 @@ export type HostKey =
   | 'prev-channel'
   | 'info'
   | 'channel-list'
-  | 'always-on-top'
   | 'aspect'
   | 'volume-up'
   | 'volume-down';
@@ -147,12 +146,6 @@ export interface OpenVideoEngine {
   setDeinterlace?: (enabled: boolean) => void;
   /** Optional typed media metadata sink for OS media session integrations (`#435`). */
   setMediaMetadata?: (metadata: MediaSessionMetadata | null) => void;
-  /** Optional desktop window always-on-top pin toggle (`#408`). */
-  toggleAlwaysOnTop?: () => void;
-  /** Optional current desktop always-on-top state reader (`#408`). */
-  isAlwaysOnTop?: () => boolean;
-  /** Optional desktop always-on-top transition subscription (`#408`). */
-  onAlwaysOnTopChange?: (listener: (pinned: boolean) => void) => () => void;
   /** Optional available output audio devices list (`#408`). */
   getAudioDevices?: () => readonly AudioDeviceInfo[];
   /** Optional active output audio device identifier (`'auto'` for system default, `#408`). */

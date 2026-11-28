@@ -54,7 +54,7 @@ describe('Wave C5A player settings menu & episode detection (#243, #205)', () =>
     ).toBe(false);
   });
 
-  it('routes pitchLock and audioNormalization root rows in PlayerSettingsSheet via D-pad (#243)', () => {
+  it('routes pitchLock and audioNormalization in Wave R4 2-level Player Settings via D-pad (#243)', () => {
     const opts = {
       isVod: true,
       hasAspect: true,
@@ -62,13 +62,23 @@ describe('Wave C5A player settings menu & episode detection (#243, #205)', () =>
       hasPitchLock: true,
       hasAudioNormalization: true,
     };
-    // Root rows: subtitles (0), audio (1), speed (2), aspect (3), deinterlace (4), pitchLock (5), audioNormalization (6), stats (7)
-    expect(settingsRowCount('root', TRACKS, opts)).toBe(8);
+    // Root rows: subtitles (0), audio (1), speed (2), aspect (3), stats (4), advanced (5)
+    expect(settingsRowCount('root', TRACKS, opts)).toBe(6);
+
+    // Selecting 'advanced' (5) opens 'advanced' with [deinterlace (0), audioNormalization (1), pitchLock (2)]
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 5 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'advanced', index: 0 } });
 
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 4 },
+        { view: 'advanced', index: 0 },
         TRACKS,
         opts,
       ),
@@ -77,16 +87,7 @@ describe('Wave C5A player settings menu & episode detection (#243, #205)', () =>
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 5 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'togglePitchLock' });
-
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 6 },
+        { view: 'advanced', index: 1 },
         TRACKS,
         opts,
       ),
@@ -95,7 +96,16 @@ describe('Wave C5A player settings menu & episode detection (#243, #205)', () =>
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 7 },
+        { view: 'advanced', index: 2 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'togglePitchLock' });
+
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 4 },
         TRACKS,
         opts,
       ),

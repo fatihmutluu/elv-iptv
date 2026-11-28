@@ -5,20 +5,17 @@ import type {
   SleepTimerAction,
   SubtitleModePref,
 } from '@elv/domain';
-import {
-  type ChapterInfo,
-  type MediaTracks,
-  type PlaybackClock,
-  type PlaybackService,
-  type PlaybackStatus,
-  type PlaybackTimers,
-  positionAt,
-  type TrackInfo,
+import type {
+  MediaTracks,
+  PlaybackClock,
+  PlaybackService,
+  PlaybackStatus,
+  PlaybackTimers,
+  TrackInfo,
 } from '@elv/playback';
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { PlayTarget } from '../ports/play-target';
 import type { OpenVideoEngine, VideoResizeMode } from '../ports/video-host';
-import { resolveChapterJumpTarget } from './chapters';
 import { mapRecentChannelRows } from './PlayerScreenParts';
 import {
   computeGlobalTrackLanguagePatch,
@@ -52,7 +49,7 @@ export function sanitizeTrackMetaForIpc(
 }
 
 /**
- * Bundles Wave C1 player extras (`#118` sleep timer, chapters, still-watching prompt,
+ * Bundles Wave C1 player extras (`#118` sleep timer, still-watching prompt,
  * `#160` OSD time-display toggle, `#208` per-item track/aspect persistence, `#124`/`#310`
  * live host sync) so `PlayerScreen` stays focused on composition.
  */
@@ -60,7 +57,6 @@ export function usePlayerCinemaExtras(params: {
   readonly activeTarget: PlayTarget;
   readonly status: PlaybackStatus;
   readonly tracks: MediaTracks;
-  readonly chapters: readonly ChapterInfo[] | undefined;
   readonly openedEngine: OpenVideoEngine | undefined;
   readonly catalogRef: MutableRefObject<
     Partial<Pick<CatalogService, 'saveTrackPreference' | 'nowNext' | 'listRecentChannels'>> & {
@@ -98,7 +94,6 @@ export function usePlayerCinemaExtras(params: {
     activeTarget,
     status,
     tracks,
-    chapters,
     openedEngine,
     catalogRef,
     wallClockRef,
@@ -133,8 +128,6 @@ export function usePlayerCinemaExtras(params: {
   activeTargetRef.current = activeTarget;
   const tracksRef = useRef(tracks);
   tracksRef.current = tracks;
-  const chaptersRef = useRef(chapters);
-  chaptersRef.current = chapters;
   const openedEngineRef = useRef(openedEngine);
   openedEngineRef.current = openedEngine;
   const onPersistResizeModeRef = useRef(onPersistResizeMode);
@@ -416,34 +409,6 @@ export function usePlayerCinemaExtras(params: {
     [catalogRef],
   );
 
-  const handleSelectChapter = useCallback(
-    (startMs: number): void => {
-      const svc = serviceRef.current;
-      if (svc === null || activeTargetRef.current.kind !== 'vod') return;
-      svc.seek(startMs);
-      flushProgressRef.current(startMs);
-    },
-    [flushProgressRef, serviceRef],
-  );
-
-  const stepChapter = useCallback(
-    (direction: 'prev' | 'next'): void => {
-      const list = chaptersRef.current;
-      const svc = serviceRef.current;
-      if (!list || list.length === 0 || svc === null || activeTargetRef.current.kind !== 'vod') {
-        return;
-      }
-      const anchor = svc.getState().anchor;
-      const posMs = anchor !== undefined ? positionAt(anchor, clockRef.current.now()) : 0;
-      const targetMs = resolveChapterJumpTarget(list, posMs, direction);
-      if (targetMs !== undefined) handleSelectChapter(targetMs);
-    },
-    [clockRef, handleSelectChapter, serviceRef],
-  );
-
-  const handlePrevChapter = useCallback((): void => stepChapter('prev'), [stepChapter]);
-  const handleNextChapter = useCallback((): void => stepChapter('next'), [stepChapter]);
-
   const fetchChannelNowNext = useCallback(
     async (itemKey: string) => {
       const query = catalogRef.current.nowNext ?? catalogRef.current.epgNowNext;
@@ -477,9 +442,6 @@ export function usePlayerCinemaExtras(params: {
     handleAudioTrackSelected,
     handleSubtitleTrackSelected,
     handleResizeModeChange,
-    handleSelectChapter,
-    handlePrevChapter,
-    handleNextChapter,
     fetchChannelNowNext,
     fetchRecentChannels,
   };

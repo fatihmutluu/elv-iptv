@@ -119,20 +119,24 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
         );
       }
 
-      await window.keyboard.press('i');
-      const infoDialog = window.getByTestId('player-info-desktop-dialog');
-      await expect(infoDialog).toBeVisible();
+      await window.getByTestId('player-settings-button').click();
+      const settingsDialog = window.getByTestId('player-settings-desktop-dialog');
+      await expect(settingsDialog).toBeVisible();
       if (!isFloatingOsd) {
         const infoAreaBox = await window.getByTestId('player-area').boundingBox();
-        const infoBox = await infoDialog.boundingBox();
+        const panelBox = await window.getByTestId('player-settings-panel').boundingBox();
         expect(infoAreaBox).not.toBeNull();
-        expect(infoBox).not.toBeNull();
+        expect(panelBox).not.toBeNull();
         expect((infoAreaBox?.y ?? 0) + (infoAreaBox?.height ?? 0)).toBeLessThanOrEqual(
-          (infoBox?.y ?? 0) + 1,
+          (panelBox?.y ?? 0) + 1,
         );
       }
+      await window.getByTestId('player-stats-toggle').click();
+      await expect(window.getByTestId('player-stats-hud')).toBeVisible();
+      await window.getByTestId('player-stats-toggle').click();
+      await expect(window.getByTestId('player-stats-hud')).toHaveCount(0);
       await window.keyboard.press('Escape');
-      await expect(infoDialog).toHaveCount(0);
+      await expect(settingsDialog).toHaveCount(0);
       await expect(window.getByTestId('player-osd')).toBeVisible();
 
       await window.getByTestId('player-channel-list-button').click();
@@ -309,16 +313,17 @@ test('plays corpus Two audio tracks and subtitles (MKV) movie, pauses, seeks +10
     await window.getByTestId('player-play-pause').click();
     await expectPlayingQuietly(window, 10_000);
 
-    await expect(window.getByTestId('player-tracks-button')).toBeVisible({ timeout: 10_000 });
-    await window.getByTestId('player-tracks-button').click();
-    await expect(window.getByTestId('player-tracks-panel')).toBeVisible();
+    await expect(window.getByTestId('player-settings-button')).toBeVisible({ timeout: 10_000 });
+    await window.getByTestId('player-settings-button').click();
+    const settingsDialog = window.getByTestId('player-settings-desktop-dialog');
+    await expect(settingsDialog).toBeVisible();
 
     const isFloatingOsd = await window
       .getByTestId('player-osd')
       .evaluate((el) => getComputedStyle(el).position === 'absolute');
     if (!isFloatingOsd) {
       const areaBox = await window.getByTestId('player-area').boundingBox();
-      const panelBox = await window.getByTestId('player-tracks-panel').boundingBox();
+      const panelBox = await window.getByTestId('player-settings-panel').boundingBox();
       expect(areaBox).not.toBeNull();
       expect(panelBox).not.toBeNull();
       expect((areaBox?.y ?? 0) + (areaBox?.height ?? 0)).toBeLessThanOrEqual(
@@ -326,23 +331,29 @@ test('plays corpus Two audio tracks and subtitles (MKV) movie, pauses, seeks +10
       );
     }
 
-    await window.getByTestId('player-audio-track-a:2').click();
-    await expect(window.getByTestId('player-audio-track-a:2')).toHaveAttribute(
+    await window.getByTestId('player-settings-row-audio').click();
+    await window.getByTestId('player-settings-audio-a:2').click();
+    await expect(window.getByTestId('player-settings-audio-a:2')).toHaveAttribute(
       'aria-checked',
       'true',
     );
 
-    await window.getByTestId('player-subtitle-track-s:1').click();
-    await expect(window.getByTestId('player-subtitle-track-s:1')).toHaveAttribute(
+    await window.getByTestId('player-settings-back').click();
+    await window.getByTestId('player-settings-row-subtitles').click();
+    await window.getByTestId('player-settings-sub-s:1').click();
+    await expect(window.getByTestId('player-settings-sub-s:1')).toHaveAttribute(
       'aria-checked',
       'true',
     );
 
-    await window.getByTestId('player-subtitle-off').click();
-    await expect(window.getByTestId('player-subtitle-off')).toHaveAttribute('aria-checked', 'true');
+    await window.getByTestId('player-settings-sub-off').click();
+    await expect(window.getByTestId('player-settings-sub-off')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
 
-    await window.keyboard.press('Escape');
-    await expect(window.getByTestId('player-tracks-panel')).toHaveCount(0);
+    await window.getByTestId('player-settings-close').click();
+    await expect(settingsDialog).toHaveCount(0);
     await expect(window.getByTestId('player-osd')).toBeVisible();
 
     await expect

@@ -46,8 +46,6 @@ export interface PopoutBrowserWindowLike
     CrashRecoverableWindow {
   setMenuBarVisibility(visible: boolean): void;
   setTitle(title: string): void;
-  setAlwaysOnTop(flag: boolean, level?: 'normal' | 'floating'): void;
-  isAlwaysOnTop(): boolean;
   show(): void;
   restore(): void;
   focus(): void;
@@ -104,7 +102,6 @@ export function buildPopoutWindowOptions(
   preloadPath: string,
   opts: {
     readonly bounds?: Rect;
-    readonly pinned?: boolean;
     readonly presenter?: PresenterKind;
   } = {},
 ): BrowserWindowConstructorOptions {
@@ -123,7 +120,6 @@ export function buildPopoutWindowOptions(
     maximizable: true,
     fullscreenable: true,
     autoHideMenuBar: true,
-    alwaysOnTop: opts.pinned ?? false,
   };
 }
 
@@ -161,9 +157,6 @@ export function createPopoutWindowController(
       currentPayload = clean;
 
       if (popoutWindow && !popoutWindow.isDestroyed()) {
-        if (clean.pinned !== undefined) {
-          popoutWindow.setAlwaysOnTop(clean.pinned, 'floating');
-        }
         if (!popoutWindow.webContents.isDestroyed()) {
           popoutWindow.webContents.send(WINDOW_CHANNELS.popoutPayload, clean);
         }
@@ -178,7 +171,6 @@ export function createPopoutWindowController(
         orderedDisplays(deps.screen),
         POPOUT_BOUNDS_DEFAULTS,
       );
-      const pinned = clean.pinned ?? false;
       const options = buildPopoutWindowOptions(deps.preloadPath, {
         bounds: {
           x: saved.x,
@@ -186,14 +178,12 @@ export function createPopoutWindowController(
           width: saved.width,
           height: saved.height,
         },
-        pinned,
         ...(deps.presenter === undefined ? {} : { presenter: deps.presenter }),
       });
 
       const win = deps.createWindow(options);
       popoutWindow = win;
       win.setMenuBarVisibility(false);
-      win.setAlwaysOnTop(pinned, 'floating');
       lockDownWebContents(
         win.webContents,
         deps.devOrigin ? { devOrigin: deps.devOrigin } : undefined,

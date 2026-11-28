@@ -11,7 +11,6 @@ export interface PopoutLaunchPayload {
   readonly logo?: string;
   readonly sourceId?: string;
   readonly resumePositionMs?: number;
-  readonly pinned?: boolean;
   readonly transferEngineId?: string;
   readonly isLocalOffline?: boolean;
   readonly localFileUri?: string;
@@ -49,7 +48,6 @@ const POPOUT_LAUNCH_KEYS: ReadonlySet<string> = new Set([
   'logo',
   'sourceId',
   'resumePositionMs',
-  'pinned',
   'transferEngineId',
   'isLocalOffline',
   'localFileUri',
@@ -132,7 +130,6 @@ export function isPopoutLaunchPayload(x: unknown): x is PopoutLaunchPayload {
     isOptionalLogo(x['logo']) &&
     isBoundedText(x['sourceId'], MAX_SOURCE_ID_CHARS, false) &&
     isOptionalPositionMs(x['resumePositionMs']) &&
-    (x['pinned'] === undefined || typeof x['pinned'] === 'boolean') &&
     isOptionalTransferEngineId(x['transferEngineId']) &&
     (x['isLocalOffline'] === undefined || typeof x['isLocalOffline'] === 'boolean') &&
     isOptionalLocalFileUri(x['localFileUri'], x['kind'])
@@ -176,7 +173,6 @@ export function sanitizePopoutLaunchPayload(payload: PopoutLaunchPayload): Popou
     ...(payload.resumePositionMs !== undefined
       ? { resumePositionMs: Math.round(payload.resumePositionMs) }
       : {}),
-    ...(payload.pinned !== undefined ? { pinned: payload.pinned } : {}),
     ...(transferEngineId && isEngineId(transferEngineId) ? { transferEngineId } : {}),
     ...(payload.isLocalOffline === true && payload.kind !== 'live' ? { isLocalOffline: true } : {}),
     ...(safeLocalUri ? { localFileUri: safeLocalUri } : {}),

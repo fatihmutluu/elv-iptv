@@ -142,7 +142,8 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
     expect(screen.queryByTestId('player-center-transport')).toBeNull();
     expect(screen.getByTestId('player-bottom-transport')).toBeTruthy();
     expect(screen.getByTestId('player-back')).toBeTruthy();
-    expect(screen.getByTestId('player-tracks-button')).toBeTruthy();
+    expect(screen.getByTestId('player-subtitles-button')).toBeTruthy();
+    expect(screen.getByTestId('player-audio-button')).toBeTruthy();
     expect(screen.getByTestId('player-mute-button')).toBeTruthy();
     expect(screen.getByTestId('player-aspect-button')).toBeTruthy();
     expect(screen.getByTestId('player-speed-button')).toBeTruthy();
@@ -213,7 +214,8 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
       manual.advance(350);
       phoneEngine.emit({ attempt: pAtt, type: 'tracks', tracks: TRACKS });
     });
-    expect(screen.getByTestId('player-tracks-button')).toBeTruthy();
+    expect(screen.getByTestId('player-subtitles-button')).toBeTruthy();
+    expect(screen.getByTestId('player-audio-button')).toBeTruthy();
     expect(screen.getByTestId('player-lock-button')).toBeTruthy();
     expect(screen.getByTestId('player-settings-button')).toBeTruthy();
     expect(screen.queryByTestId('player-aspect-button')).toBeNull();
@@ -544,8 +546,8 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
     });
 
     // Manual audio switch persists to series scopeKey
-    await fireEvent.press(screen.getByTestId('player-tracks-button'));
-    await fireEvent.press(screen.getByTestId('player-audio-track-a:1'));
+    await fireEvent.press(screen.getByTestId('player-audio-button'));
+    await fireEvent.press(screen.getByTestId('player-settings-audio-a:1'));
     expect(saveTrackPreference).toHaveBeenCalledWith(
       expect.objectContaining({
         scopeKey: 'x:src-1:series:55',
@@ -554,7 +556,7 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
     );
 
     // Manual aspect change persists resizeMode to series scopeKey
-    await fireEvent.press(screen.getByTestId('player-tracks-close'));
+    await fireEvent.press(screen.getByTestId('player-settings-close'));
     await fireEvent.press(screen.getByTestId('player-aspect-button'));
     expect(savedPrefs.at(-1)).toMatchObject({
       scopeKey: 'x:src-1:series:55',

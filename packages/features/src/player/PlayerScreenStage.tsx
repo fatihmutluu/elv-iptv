@@ -1,4 +1,4 @@
-import type { CatalogService } from '@elv/data';
+import type { CatalogService, NowNextEntry } from '@elv/data';
 import type {
   AccessibilityFontFamily,
   AndroidDecoderMode,
@@ -24,12 +24,12 @@ import {
   webBackdropBlur,
 } from '@elv/ui-kit';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { AppLifecyclePort } from '../ports/app-lifecycle';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { AdoptedPlaybackSession, VideoHost, VideoResizeMode } from '../ports/video-host';
-import { type DetailTarget, useProfile } from '../shared';
+import { useProfile } from '../shared';
 import type { PlayerOsdProps } from './DesktopCinemaBar';
 import { ExternalDisplayCard } from './ExternalDisplayCard';
 import {
@@ -68,8 +68,6 @@ export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
         | 'recordPlaybackQuality'
         | 'recordPlaybackVariantFailure'
         | 'getElvEnrichmentForKeys'
-        | 'getElvTitleDetail'
-        | 'listElvPersonLibraryItems'
       >
     > & {
       readonly epgNowNext?: CatalogService['nowNext'];
@@ -169,12 +167,6 @@ export interface PlayerScreenProps extends WaveF7aPlayerPreferences {
   elvVerifyRealQuality?: boolean;
   /** When `true`, enables cross-category live variant grouping and automatic healthy failover (`#511`). */
   elvLiveEnhance?: boolean;
-  /** When `true`, ELV Mode master switch is active for In-Player X-Ray (`#352`). */
-  elvModeEnabled?: boolean;
-  /** When `true` alongside {@link elvModeEnabled}, enables In-Player X-Ray cast & director strip on VOD (`#352`). */
-  elvXrayEnabled?: boolean;
-  /** Closes the player and navigates directly to another title's Detail screen from X-Ray (`#352`). */
-  onOpenDetail?: (target: DetailTarget) => void;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
 }
@@ -187,6 +179,10 @@ export interface PlayerScreenStageProps {
   readonly isMini?: boolean;
   readonly externalPlaybackActive?: boolean;
   readonly isVod: boolean;
+  readonly title: string;
+  readonly subtitle?: string | null | undefined;
+  readonly nowNext?: NowNextEntry | null | undefined;
+  readonly nowMs?: number | undefined;
   readonly useDockedDesktopLayout: boolean;
   readonly hideDesktopCursor: boolean;
   readonly anySheetOpen: boolean;
@@ -209,12 +205,10 @@ export interface PlayerScreenStageProps {
   readonly desktopWebProps: Record<string, unknown> | undefined;
   readonly surfaceNode: ReactElement | null;
   readonly nextEpisodeNode: ReactElement;
-  readonly trackPickerNode: ReactElement | null;
-  readonly infoSheetNode: ReactElement;
   readonly channelDrawerNode: ReactElement;
   readonly settingsSheetNode: ReactElement;
-  readonly xrayStripNode?: ReactElement | null;
-  readonly xrayPersonModalNode?: ReactElement | null;
+  readonly windowModePopoverNode?: ReactElement | null;
+  readonly onDismissOpenSheets?: (() => void) | undefined;
   readonly externalSubtitleOverlay?: Pick<
     ExternalSubtitleUrlOverlayProps,
     'visible' | 'onSubmit' | 'onClose'
@@ -443,9 +437,20 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
             p.useDockedDesktopLayout && !isMini ? playerStyles.desktopStageRow : playerStyles.flex1
           }
         >
-          {!suppressChrome && p.useDockedDesktopLayout ? p.channelDrawerNode : null}
           {p.surfaceNode}
-          {!suppressChrome && p.useDockedDesktopLayout ? p.xrayPersonModalNode : null}
+          {!suppressChrome &&
+          p.useDockedDesktopLayout &&
+          p.anySheetOpen &&
+          p.onDismissOpenSheets !== undefined ? (
+            <Pressable
+              testID="player-docked-stage-backdrop"
+              accessible={false}
+              focusable={false}
+              onPress={p.onDismissOpenSheets}
+              style={StyleSheet.absoluteFill}
+            />
+          ) : null}
+          {!suppressChrome && p.useDockedDesktopLayout ? p.channelDrawerNode : null}
         </View>
         {isMini ? (
           <FloatingMiniPlayerChrome
@@ -542,15 +547,18 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
         i18n={p.i18n}
         isDesktop={p.isDesktop}
         docked={p.useDockedDesktopLayout}
+        title={p.title}
+        subtitle={p.subtitle}
+        isVod={p.isVod}
+        nowNext={p.nowNext}
+        nowMs={p.nowMs}
       />
 
       {suppressChrome ? null : p.useDockedDesktopLayout ? (
         <>
           {p.nextEpisodeNode}
-          {p.trackPickerNode}
-          {p.infoSheetNode}
           {p.settingsSheetNode}
-          {p.xrayStripNode}
+          {p.windowModePopoverNode ?? null}
           {p.osdHidden ? null : osdNode}
         </>
       ) : p.locked ? (
@@ -583,12 +591,9 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
             {p.nextEpisodeNode}
           </View>
           {p.osdHidden ? null : osdNode}
-          {p.xrayStripNode}
           {p.channelDrawerNode}
-          {p.trackPickerNode}
-          {p.infoSheetNode}
           {p.settingsSheetNode}
-          {p.xrayPersonModalNode}
+          {p.windowModePopoverNode ?? null}
         </>
       )}
 

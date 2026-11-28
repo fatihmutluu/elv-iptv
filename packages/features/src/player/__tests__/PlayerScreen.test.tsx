@@ -163,8 +163,8 @@ describe('PlayerScreen lifecycle', () => {
         },
       });
     });
-    await fireEvent.press(screen.getByTestId('player-tracks-button'));
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('player-subtitles-button'));
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
     expect(screen.getByTestId('player-surface-layer').props.style).toEqual({ flex: 1 });
     await desktopView.unmount();
 

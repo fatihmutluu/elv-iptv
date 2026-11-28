@@ -48,7 +48,6 @@ export type ElvModeFocusId =
   | 'elv-title-format-dropdown'
   | 'elv-category-source-dropdown'
   | 'elv-smart-recs'
-  | 'elv-xray'
   | 'elv-live-enhance'
   | 'elv-verify-quality';
 
@@ -274,7 +273,6 @@ const ELV_MODE_ROWS: readonly (readonly ElvModeFocusId[])[] = [
   ['elv-title-format-dropdown'],
   ['elv-category-source-dropdown'],
   ['elv-smart-recs'],
-  ['elv-xray'],
   ['elv-live-enhance'],
   ['elv-verify-quality'],
 ];

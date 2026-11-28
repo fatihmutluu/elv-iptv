@@ -29,8 +29,7 @@ export const PLAYER_KEY_SHORTCUTS = {
   seekForward: 'ArrowRight l',
   mute: 'm',
   fullscreen: 'f',
-  alwaysOnTop: 't',
-  tracks: 'c',
+  subtitles: 'c',
   info: 'i',
   channelList: 'g',
   back: 'Escape',
@@ -292,7 +291,11 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
         style={[
           styles.button,
           p.compact === true ? styles.compactButton : null,
-          isPillCta ? styles.pillCtaButton : null,
+          isPillCta
+            ? p.compact === true
+              ? styles.pillCtaButtonCompact
+              : styles.pillCtaButton
+            : null,
           isBare && hasLabel ? styles.bareLabelButton : null,
           isIconOnly ? styles.iconButton : isPrimary ? styles.primaryButton : null,
           isIconOnly
@@ -394,7 +397,7 @@ export function PlayerLockedOverlay({
 }
 
 const styles = StyleSheet.create({
-  clock: { fontWeight: '600' },
+  clock: { fontWeight: '600', fontSize: 14, lineHeight: 20 },
   button: {
     position: 'relative',
     flexDirection: 'row',
@@ -408,7 +411,8 @@ const styles = StyleSheet.create({
   primaryButton: { paddingHorizontal: 18 },
   compactButton: { minHeight: 34, paddingHorizontal: 10, paddingVertical: 5 },
   bareLabelButton: { minHeight: 36, paddingHorizontal: 10, paddingVertical: 6 },
-  pillCtaButton: { minHeight: 36, paddingHorizontal: 16, paddingVertical: 9 },
+  pillCtaButton: { minHeight: 46, paddingHorizontal: 18, paddingVertical: 10 },
+  pillCtaButtonCompact: { minHeight: 38, paddingHorizontal: 14, paddingVertical: 8 },
   primaryFocusRing: {
     position: 'absolute',
     top: -4,

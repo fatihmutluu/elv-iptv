@@ -242,7 +242,6 @@ describe('Sticky Smart Audio & Subtitle Language Memory', () => {
           activeTarget: vodTarget,
           status,
           tracks: MOVIE_A_TRACKS,
-          chapters: undefined,
           openedEngine: undefined,
           catalogRef,
           serviceRef,

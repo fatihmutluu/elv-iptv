@@ -1,5 +1,5 @@
 import type { AppI18n } from '@elv/i18n';
-import type { ChapterInfo, PlaybackClock, PlaybackService } from '@elv/playback';
+import type { PlaybackClock, PlaybackService } from '@elv/playback';
 import {
   TABULAR_NUMS_STYLE,
   useTheme,
@@ -7,9 +7,8 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { computeChapterMarkerDots, findChapterAtPosition, normalizeChapters } from './chapters';
 import { usePlaybackTicker } from './usePlaybackTicker';
 import {
   attachWebProgressDrag,
@@ -39,7 +38,6 @@ export interface VodProgressBarProps {
   readonly label: string;
   readonly previewPositionMs?: number | undefined;
   readonly dimmed?: boolean;
-  readonly chapters?: readonly ChapterInfo[] | undefined;
   readonly timeDisplayMode?: VodEndTimeDisplayMode | undefined;
   readonly i18n?: AppI18n | undefined;
   readonly onCycleTimeDisplayMode?: (() => void) | undefined;
@@ -49,9 +47,9 @@ export interface VodProgressBarProps {
 }
 
 /**
- * Flagship Minimalist Cinema VOD scrubber (`3px` resting -> `5px` hover/drag/TV-focus) flanked by
- * split left/right tabular timestamps (elapsed left, remaining/total right `#507`), crisp chapter
- * marker dots (`#118`), floating timecode + chapter pill, and touch fine-scrubbing zoom (`#355`).
+ * Cinema Quietude VOD scrubber (`5px` resting -> `8px` hover/drag/TV-focus) flanked by
+ * split left/right `14px` tabular timestamps (elapsed left, remaining/total right `#507`),
+ * floating timecode pill, and touch fine-scrubbing zoom (`#355`).
  */
 export function VodProgressBar({
   service,
@@ -62,7 +60,6 @@ export function VodProgressBar({
   label,
   previewPositionMs,
   dimmed = false,
-  chapters,
   timeDisplayMode = 'remaining',
   i18n,
   onCycleTimeDisplayMode,
@@ -159,15 +156,6 @@ export function VodProgressBar({
   const snapshot =
     effectivePreviewMs === undefined ? live : previewProgressSnapshot(live, effectivePreviewMs);
 
-  const sortedChapters = useMemo(
-    () => normalizeChapters(chapters, live.durationMs),
-    [chapters, live.durationMs],
-  );
-  const chapterDots = useMemo(
-    () => computeChapterMarkerDots(sortedChapters, live.durationMs),
-    [sortedChapters, live.durationMs],
-  );
-
   const pillRatio = dragRatio ?? (hovered ? hoverRatio : null);
   const showHoverPill =
     !isTv &&
@@ -178,13 +166,7 @@ export function VodProgressBar({
     showHoverPill && pillRatio !== null && live.durationMs !== undefined
       ? Math.round(pillRatio * live.durationMs)
       : null;
-  const pillChapter = pillMs !== null ? findChapterAtPosition(sortedChapters, pillMs) : undefined;
-  const hoverTimeText =
-    pillMs !== null
-      ? pillChapter?.title
-        ? `${formatPlaybackPosition(pillMs)} · ${pillChapter.title}`
-        : formatPlaybackPosition(pillMs)
-      : null;
+  const hoverTimeText = pillMs !== null ? formatPlaybackPosition(pillMs) : null;
   const scrubTierLabel =
     isDragging && !isWeb && scrubTier !== 'normal'
       ? scrubTier === 'fine'
@@ -388,7 +370,7 @@ export function VodProgressBar({
           style={[
             styles.trackRail,
             {
-              height: isActive ? 5 : 3,
+              height: isActive ? 8 : 5,
               backgroundColor: theme.colors.actionGlassBorder,
             },
             webTransition(theme, 'height', theme.motion.fastMs),
@@ -417,21 +399,6 @@ export function VodProgressBar({
             ]}
           />
         </View>
-        {chapterDots.map((dot) => (
-          <View
-            key={dot.id}
-            testID={`player-chapter-dot-${dot.id}`}
-            pointerEvents="none"
-            style={[
-              styles.chapterDot,
-              {
-                left: `${dot.leftPct}%`,
-                backgroundColor: theme.colors.textPrimary,
-                borderColor: theme.colors.bgCanvas,
-              },
-            ]}
-          />
-        ))}
         <View
           testID="player-progress-thumb"
           pointerEvents="none"
@@ -512,7 +479,7 @@ const styles = StyleSheet.create({
   focusRing: { position: 'absolute', left: -4, right: -4, top: 3, bottom: 3 },
   trackRail: {
     position: 'relative',
-    height: 3,
+    height: 5,
     borderRadius: 999,
     overflow: 'hidden',
     direction: 'ltr',
@@ -525,26 +492,17 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   trackFill: { position: 'relative', height: '100%' },
-  chapterDot: {
-    position: 'absolute',
-    width: 6,
-    height: 6,
-    marginLeft: -3,
-    borderRadius: 3,
-    borderWidth: 1,
-    zIndex: 2,
-  },
   trackThumb: {
     position: 'absolute',
-    width: 12,
-    height: 12,
-    marginLeft: -6,
-    borderRadius: 6,
+    width: 16,
+    height: 16,
+    marginLeft: -8,
+    borderRadius: 8,
     borderWidth: 1.5,
     zIndex: 3,
   },
-  trackThumbActive: { width: 14, height: 14, marginLeft: -7, borderRadius: 7 },
-  trackThumbFocused: { width: 18, height: 18, marginLeft: -9, borderRadius: 9, borderWidth: 2 },
-  currentTimeText: { fontWeight: '700', minWidth: 38 },
-  endTimeText: { fontWeight: '600', textAlign: 'right' },
+  trackThumbActive: { width: 18, height: 18, marginLeft: -9, borderRadius: 9 },
+  trackThumbFocused: { width: 20, height: 20, marginLeft: -10, borderRadius: 10, borderWidth: 2 },
+  currentTimeText: { fontWeight: '700', fontSize: 14, minWidth: 42 },
+  endTimeText: { fontWeight: '600', fontSize: 14, textAlign: 'right' },
 });

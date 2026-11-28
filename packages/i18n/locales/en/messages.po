@@ -1362,12 +1362,6 @@ msgstr "Sort alphabetically"
 msgid "catalog.sortDefaultLabel"
 msgstr "Default order"
 
-msgid "player.alwaysOnTop"
-msgstr "Pin window on top"
-
-msgid "player.exitAlwaysOnTop"
-msgstr "Unpin window"
-
 msgid "player.audioDevice"
 msgstr "Audio output"
 
@@ -1422,9 +1416,6 @@ msgstr "Remaining"
 msgid "player.totalDuration"
 msgstr "Total duration"
 
-msgid "player.timeDisplayMode"
-msgstr "Time display"
-
 msgid "player.timeDisplayToggleHint"
 msgstr "Tap time to switch between total, remaining, and end time"
 
@@ -1451,18 +1442,6 @@ msgstr "Pause playback"
 
 msgid "player.sleepTimerEnded"
 msgstr "Playback stopped by sleep timer"
-
-msgid "player.chapters"
-msgstr "Chapters"
-
-msgid "player.prevChapter"
-msgstr "Previous chapter"
-
-msgid "player.nextChapter"
-msgstr "Next chapter"
-
-msgid "player.chapterCount"
-msgstr "{count} chapters"
 
 msgid "player.stillWatchingTitle"
 msgstr "Are you still watching?"
@@ -2866,12 +2845,6 @@ msgstr "Pop out player"
 msgid "player.popout.dock"
 msgstr "Return to main window"
 
-msgid "player.popout.pin"
-msgstr "Always on top"
-
-msgid "player.popout.unpin"
-msgstr "Unpin window"
-
 msgid "player.popout.close"
 msgstr "Close popout"
 
@@ -3331,9 +3304,6 @@ msgstr "Switch between alternate channel stream qualities"
 msgid "player.settings.desc.speed"
 msgstr "Change playback speed multiplier"
 
-msgid "player.settings.desc.chapters"
-msgstr "Jump directly to a chapter marker"
-
 msgid "player.settings.desc.sleepTimer"
 msgstr "Automatically stop or pause playback after a timer"
 
@@ -3342,15 +3312,6 @@ msgstr "Choose hardware or software video decoding"
 
 msgid "player.settings.desc.resizeMode"
 msgstr "Cycle aspect ratio between Fit, Fill, and Stretch"
-
-msgid "player.settings.desc.timeDisplay"
-msgstr "Switch between total, remaining, and end time"
-
-msgid "player.settings.desc.info"
-msgstr "Show stream metadata, codec, and programme details"
-
-msgid "player.settings.desc.alwaysOnTop"
-msgstr "Keep the player window floating above other windows"
 
 msgid "player.settings.desc.deinterlace"
 msgstr "Smooth interlaced broadcast video frames"
@@ -4241,27 +4202,6 @@ msgstr "Cast"
 msgid "person.close"
 msgstr "Close"
 
-msgid "player.xray.button"
-msgstr "X-Ray"
-
-msgid "player.xray.title"
-msgstr "X-Ray"
-
-msgid "player.xray.cast"
-msgstr "Cast"
-
-msgid "player.xray.director"
-msgstr "Director"
-
-msgid "player.xray.episode"
-msgstr "Now playing"
-
-msgid "player.xray.viewLibrary"
-msgstr "View in library"
-
-msgid "player.xray.empty"
-msgstr "No cast metadata available for this title."
-
 msgid "elv.preview.badgeClean"
 msgstr "ELV Mode Active"
 
@@ -4730,9 +4670,6 @@ msgstr "Mute / Unmute"
 msgid "desktop.shortcuts.item.tracks"
 msgstr "Audio & subtitles"
 
-msgid "desktop.shortcuts.item.alwaysOnTop"
-msgstr "Pin window on top"
-
 msgid "desktop.shortcuts.item.channels"
 msgstr "Toggle channel list"
 
@@ -4954,3 +4891,26 @@ msgstr "Trailer"
 
 msgid "card.hoverUnavailable"
 msgstr "No trailer"
+
+
+msgid "player.subtitleSettings"
+msgstr "Subtitle settings"
+
+msgid "player.audioSettings"
+msgstr "Audio settings"
+
+msgid "player.advancedSettings"
+msgstr "Advanced settings"
+
+msgid "player.settings.desc.advanced"
+msgstr "Decoder, deinterlace and playback options"
+
+msgid "player.windowMode"
+msgstr "Window mode"
+
+msgid "player.windowMode.mini"
+msgstr "Mini player"
+
+msgid "player.windowMode.popout"
+msgstr "Separate window"
+

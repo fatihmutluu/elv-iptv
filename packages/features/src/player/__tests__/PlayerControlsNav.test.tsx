@@ -12,102 +12,104 @@ import {
 
 const FAILED = { kind: 'failed', error: { category: 'network', code: 'http' } } as never;
 
-describe('usePlayerControls track picker and TV OSD navigation', () => {
+describe('usePlayerControls settings track picker and TV OSD navigation', () => {
   beforeEach(() => mockAndroidTvRuntime());
   afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
-  it('toggles the picker with Menu and keeps the index on Left in audio / Right in subtitles', async () => {
+  it('toggles Subtitles view with Menu, navigates Audio via root, and toggles closed cleanly', async () => {
     const svc = createFakeService({ kind: 'playing' }, pausedAnchor(1_000, 60_000));
     const { keys, hook } = await renderControls(svc, { tracks: MULTI_TRACKS });
 
     await act(async () => keys.tap(KEY.menu));
-    expect(hook.result.current.tracksOpen).toBe(true);
-    expect(hook.result.current.pickerCursor).toEqual({ column: 'audio', index: 0 });
+    expect(hook.result.current.settingsOpen).toBe(true);
+    expect(hook.result.current.settingsMenu).toEqual({ view: 'subtitles', index: 0 });
 
     await act(async () => keys.tap(KEY.down));
-    await act(async () => keys.tap(KEY.down));
-    await act(async () => keys.tap(KEY.left));
-    expect(hook.result.current.pickerCursor).toEqual({ column: 'audio', index: 2 });
-
-    await act(async () => keys.tap(KEY.right));
-    await act(async () => keys.tap(KEY.down));
-    await act(async () => keys.tap(KEY.right));
-    expect(hook.result.current.pickerCursor).toEqual({ column: 'subtitles', index: 1 });
+    expect(hook.result.current.settingsMenu).toEqual({ view: 'subtitles', index: 1 });
     await act(async () => keys.tap(KEY.select));
     expect(svc.fake.selectSubtitleTrack).toHaveBeenLastCalledWith('s:1');
 
-    await act(async () => keys.tap(KEY.left));
+    // Step back to root, open Audio row, and pick second audio track (a:2)
+    await act(async () => keys.tap(KEY.back));
+    expect(hook.result.current.settingsMenu).toEqual({ view: 'root', index: 0 });
+    await act(async () => keys.tap(KEY.down));
+    await act(async () => keys.tap(KEY.right));
+    expect(hook.result.current.settingsMenu).toEqual({ view: 'audio', index: 0 });
+    await act(async () => keys.tap(KEY.down));
     await act(async () => keys.tap(KEY.select));
-    expect(svc.fake.selectAudioTrack).toHaveBeenLastCalledWith('a:1');
+    expect(svc.fake.selectAudioTrack).toHaveBeenLastCalledWith('a:2');
 
     await act(async () => keys.tap(KEY.menu));
-    expect(hook.result.current.tracksOpen).toBe(false);
+    expect(hook.result.current.settingsOpen).toBe(false);
     expect(svc.fake.seek).not.toHaveBeenCalled();
     await hook.unmount();
   });
 
-  it('clamps the cursor when the audio column disappears while open', async () => {
+  it('clamps the menu index when subtitle tracks shrink while open', async () => {
     const svc = createFakeService({ kind: 'playing' }, pausedAnchor(1_000, 60_000));
     const { keys, hook } = await renderControls(svc, { tracks: MULTI_TRACKS });
 
     await act(async () => keys.tap(KEY.menu));
     await act(async () => keys.tap(KEY.down));
     await act(async () => keys.tap(KEY.down));
-    const subtitlesOnly: MediaTracks = {
+    expect(hook.result.current.settingsMenu).toEqual({ view: 'subtitles', index: 2 });
+    const subtitlesReduced: MediaTracks = {
       ...MULTI_TRACKS,
-      audio: [],
-      selectedAudioId: null,
-      selectedSubtitleId: 's:2',
+      subtitles: [{ id: 's:1', language: 'tur' }],
+      selectedSubtitleId: null,
     };
-    await hook.rerender({ tracks: subtitlesOnly });
-    expect(hook.result.current.pickerCursor).toEqual({ column: 'subtitles', index: 2 });
+    await hook.rerender({ tracks: subtitlesReduced });
+    expect(hook.result.current.settingsMenu).toEqual({ view: 'subtitles', index: 1 });
 
-    await act(async () => keys.tap(KEY.up));
     await act(async () => keys.tap(KEY.select));
     expect(svc.fake.selectSubtitleTrack).toHaveBeenLastCalledWith('s:1');
-    expect(svc.fake.selectAudioTrack).not.toHaveBeenCalled();
     await hook.unmount();
   });
 
-  it('closes the picker when every track disappears', async () => {
+  it('closes Settings when the playback service disappears', async () => {
     const svc = createFakeService({ kind: 'playing' }, pausedAnchor(1_000, 60_000));
     const { keys, hook } = await renderControls(svc, { tracks: MULTI_TRACKS });
 
     await act(async () => keys.tap(KEY.menu));
-    await hook.rerender({ tracks: EMPTY_TRACKS });
-    expect(hook.result.current.tracksOpen).toBe(false);
-    await hook.rerender({ tracks: MULTI_TRACKS });
-    expect(hook.result.current.tracksOpen).toBe(false);
+    expect(hook.result.current.settingsOpen).toBe(true);
+    await hook.rerender({ hasService: false, tracks: EMPTY_TRACKS });
+    expect(hook.result.current.settingsOpen).toBe(false);
+    await hook.rerender({ hasService: true, tracks: MULTI_TRACKS });
+    expect(hook.result.current.settingsOpen).toBe(false);
     await hook.unmount();
   });
 
-  it('closes the picker on Back before exiting, and on retune', async () => {
+  it('closes Settings on Back before exiting, and on retune', async () => {
     const svc = createFakeService({ kind: 'playing' }, pausedAnchor(1_000, 60_000));
     const { keys, refs, hook } = await renderControls(svc, { tracks: MULTI_TRACKS });
 
     await act(async () => keys.tap(KEY.menu));
-    await act(async () => keys.tap(KEY.back));
-    expect(hook.result.current.tracksOpen).toBe(false);
+    expect(hook.result.current.settingsOpen).toBe(true);
+    await act(async () => keys.tap(KEY.back)); // subtitles -> root
+    expect(hook.result.current.settingsOpen).toBe(true);
+    await act(async () => keys.tap(KEY.back)); // root -> closed
+    expect(hook.result.current.settingsOpen).toBe(false);
     expect(refs.onExitRef.current).not.toHaveBeenCalled();
 
     await act(async () => keys.tap(KEY.menu));
     await hook.rerender({ tracks: MULTI_TRACKS, itemKey: 'x:src-1:vod:2' });
-    expect(hook.result.current.tracksOpen).toBe(false);
+    expect(hook.result.current.settingsOpen).toBe(false);
 
     await act(async () => keys.tap(KEY.back));
     expect(refs.onExitRef.current).toHaveBeenCalledTimes(1);
     await hook.unmount();
   });
 
-  it('opens the picker with Left on live TV when tracks exist', async () => {
+  it('opens Subtitles picker with Left on live TV when tracks exist', async () => {
     const svc = createFakeService({ kind: 'playing' });
     const { keys, hook } = await renderControls(svc, { kind: 'live', tracks: MULTI_TRACKS });
 
     await act(async () => keys.tap(KEY.left));
-    expect(hook.result.current.tracksOpen).toBe(true);
+    expect(hook.result.current.settingsOpen).toBe(true);
+    expect(hook.result.current.settingsMenu.view).toBe('subtitles');
     await hook.unmount();
   });
 
@@ -117,10 +119,12 @@ describe('usePlayerControls track picker and TV OSD navigation', () => {
 
     await act(async () => keys.tap(KEY.down));
     expect(hook.result.current.tvOsdFocused).toBe(true);
-    expect(hook.result.current.tvOsdAction).toBe('tracks');
+    expect(hook.result.current.tvOsdAction).toBe('subtitles');
 
     await act(async () => keys.tap(KEY.right));
-    expect(hook.result.current.tvOsdAction).toBe('tracks');
+    expect(hook.result.current.tvOsdAction).toBe('audio');
+    await act(async () => keys.tap(KEY.left));
+    expect(hook.result.current.tvOsdAction).toBe('subtitles');
     await act(async () => keys.tap(KEY.left));
     expect(hook.result.current.tvOsdAction).toBe('seekForward');
     await act(async () => keys.tap(KEY.select));
@@ -138,8 +142,10 @@ describe('usePlayerControls track picker and TV OSD navigation', () => {
     await act(async () => keys.tap(KEY.right));
     await act(async () => keys.tap(KEY.right));
     await act(async () => keys.tap(KEY.select));
-    expect(hook.result.current.tracksOpen).toBe(true);
+    expect(hook.result.current.settingsOpen).toBe(true);
+    expect(hook.result.current.settingsMenu.view).toBe('subtitles');
     expect(hook.result.current.tvOsdFocused).toBe(false);
+    await act(async () => keys.tap(KEY.back));
     await act(async () => keys.tap(KEY.back));
 
     await act(async () => keys.tap(KEY.down));

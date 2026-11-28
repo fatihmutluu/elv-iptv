@@ -284,20 +284,6 @@ export function ElvModeSettingsPanel({
         <SettingsDivider />
 
         <SettingsToggleRow
-          testID="settings-elv-xray"
-          title={i18n.t('settings.elvMode.xray')}
-          description={i18n.t('settings.elvMode.xrayDesc')}
-          checked={activePrefs.elvXrayEnabled}
-          disabled={!elvEnabled}
-          focused={focusedControlId === 'elv-xray'}
-          isTv={isTv}
-          onToggle={() => applyPatch({ elvXrayEnabled: !activePrefs.elvXrayEnabled })}
-          onLayoutY={recordRowY('elv-xray')}
-        />
-
-        <SettingsDivider />
-
-        <SettingsToggleRow
           testID="settings-elv-live-enhance"
           title={i18n.t('settings.elvMode.liveEnhance')}
           description={i18n.t('settings.elvMode.liveEnhanceDesc')}

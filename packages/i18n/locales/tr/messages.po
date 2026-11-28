@@ -1362,12 +1362,6 @@ msgstr "Alfabetik sırala"
 msgid "catalog.sortDefaultLabel"
 msgstr "Varsayılan sıralama"
 
-msgid "player.alwaysOnTop"
-msgstr "Pencereyi üstte tut"
-
-msgid "player.exitAlwaysOnTop"
-msgstr "Sabitlemeyi kaldır"
-
 msgid "player.audioDevice"
 msgstr "Ses çıkışı"
 
@@ -1422,9 +1416,6 @@ msgstr "Kalan süre"
 msgid "player.totalDuration"
 msgstr "Toplam süre"
 
-msgid "player.timeDisplayMode"
-msgstr "Süre gösterimi"
-
 msgid "player.timeDisplayToggleHint"
 msgstr "Toplam, kalan ve bitiş saati arasında geçmek için süreye dokun"
 
@@ -1451,18 +1442,6 @@ msgstr "Duraklat"
 
 msgid "player.sleepTimerEnded"
 msgstr "Uyku zamanlayıcı oynatmayı durdurdu"
-
-msgid "player.chapters"
-msgstr "Bölümler"
-
-msgid "player.prevChapter"
-msgstr "Önceki bölüm"
-
-msgid "player.nextChapter"
-msgstr "Sonraki bölüm"
-
-msgid "player.chapterCount"
-msgstr "{count} bölüm"
 
 msgid "player.stillWatchingTitle"
 msgstr "Hâlâ izliyor musunuz?"
@@ -2866,12 +2845,6 @@ msgstr "Ayrı pencerede aç"
 msgid "player.popout.dock"
 msgstr "Ana pencereye dön"
 
-msgid "player.popout.pin"
-msgstr "Her zaman üstte"
-
-msgid "player.popout.unpin"
-msgstr "Sabitlemeyi kaldır"
-
 msgid "player.popout.close"
 msgstr "Pencereyi kapat"
 
@@ -3331,9 +3304,6 @@ msgstr "Alternatif kanal yayın kaliteleri arasında geçiş yapın"
 msgid "player.settings.desc.speed"
 msgstr "Oynatma hızı çarpanını değiştirin"
 
-msgid "player.settings.desc.chapters"
-msgstr "Doğrudan bir bölüm işaretine atlayın"
-
 msgid "player.settings.desc.sleepTimer"
 msgstr "Belirli bir süre sonra oynatmayı otomatik durdurun veya duraklatın"
 
@@ -3342,15 +3312,6 @@ msgstr "Donanım veya yazılım video çözücüsünü seçin"
 
 msgid "player.settings.desc.resizeMode"
 msgstr "En-boy oranını Sığdır, Doldur ve Uzat arasında değiştirin"
-
-msgid "player.settings.desc.timeDisplay"
-msgstr "Toplam, kalan ve bitiş süresi arasında geçiş yapın"
-
-msgid "player.settings.desc.info"
-msgstr "Yayın üst verilerini, kodek ve program ayrıntılarını gösterin"
-
-msgid "player.settings.desc.alwaysOnTop"
-msgstr "Oynatıcı penceresini diğer pencerelerin üstünde tutun"
 
 msgid "player.settings.desc.deinterlace"
 msgstr "Taramalı yayın video karelerini yumuşatın"
@@ -4241,27 +4202,6 @@ msgstr "Oyuncu"
 msgid "person.close"
 msgstr "Kapat"
 
-msgid "player.xray.button"
-msgstr "X-Ray"
-
-msgid "player.xray.title"
-msgstr "X-Ray"
-
-msgid "player.xray.cast"
-msgstr "Oyuncular"
-
-msgid "player.xray.director"
-msgstr "Yönetmen"
-
-msgid "player.xray.episode"
-msgstr "Şu an oynatılıyor"
-
-msgid "player.xray.viewLibrary"
-msgstr "Kütüphanede gör"
-
-msgid "player.xray.empty"
-msgstr "Bu yapım için oyuncu bilgisi bulunamadı."
-
 msgid "elv.preview.badgeClean"
 msgstr "ELV Mode Aktif"
 
@@ -4730,9 +4670,6 @@ msgstr "Sesi kapat / aç"
 msgid "desktop.shortcuts.item.tracks"
 msgstr "Ses ve altyazılar"
 
-msgid "desktop.shortcuts.item.alwaysOnTop"
-msgstr "Pencereyi üstte sabitle"
-
 msgid "desktop.shortcuts.item.channels"
 msgstr "Kanal listesini aç/kapat"
 
@@ -4954,3 +4891,26 @@ msgstr "Fragman"
 
 msgid "card.hoverUnavailable"
 msgstr "Fragman yok"
+
+
+msgid "player.subtitleSettings"
+msgstr "Altyazı ayarları"
+
+msgid "player.audioSettings"
+msgstr "Ses ayarları"
+
+msgid "player.advancedSettings"
+msgstr "Gelişmiş ayarlar"
+
+msgid "player.settings.desc.advanced"
+msgstr "Çözücü, taramasızlaştırma ve gelişmiş seçenekler"
+
+msgid "player.windowMode"
+msgstr "Pencere modu"
+
+msgid "player.windowMode.mini"
+msgstr "Mini oynatıcı"
+
+msgid "player.windowMode.popout"
+msgstr "Ayrı pencere"
+

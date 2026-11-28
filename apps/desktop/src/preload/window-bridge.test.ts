@@ -34,48 +34,20 @@ function fakeIpcRenderer() {
   };
 }
 
-describe('createWindowBridge (#408)', () => {
-  it('exposes a frozen bridge forwarding set/get always-on-top and change notifications', async () => {
+describe('createWindowBridge (#332, #158)', () => {
+  it('exposes a frozen bridge forwarding aspect-ratio lock', async () => {
     const fake = fakeIpcRenderer();
     const bridge = createWindowBridge(fake.ipc);
     expect(Object.isFrozen(bridge)).toBe(true);
 
     fake.invoke.mockResolvedValueOnce(true);
-    expect(await bridge.setAlwaysOnTop(true)).toBe(true);
-    expect(fake.invoke).toHaveBeenCalledWith(WINDOW_CHANNELS.setAlwaysOnTop, true);
-
-    fake.invoke.mockResolvedValueOnce(false);
-    expect(await bridge.getAlwaysOnTop()).toBe(false);
-    expect(fake.invoke).toHaveBeenCalledWith(WINDOW_CHANNELS.getAlwaysOnTop);
-
-    fake.invoke.mockResolvedValueOnce(true);
     expect(await bridge.setAspectRatioLock(true)).toBe(true);
     expect(fake.invoke).toHaveBeenCalledWith(WINDOW_CHANNELS.setAspectRatioLock, true);
-
-    const received: boolean[] = [];
-    const off = bridge.onAlwaysOnTopChanged((enabled) => received.push(enabled));
-    expect(fake.listenerCount(WINDOW_CHANNELS.alwaysOnTopChanged)).toBe(1);
-
-    fake.emit(WINDOW_CHANNELS.alwaysOnTopChanged, true);
-    fake.emit(WINDOW_CHANNELS.alwaysOnTopChanged, 'bogus');
-    fake.emit(WINDOW_CHANNELS.alwaysOnTopChanged, false);
-    expect(received).toEqual([true, false]);
-
-    off();
-    expect(fake.listenerCount(WINDOW_CHANNELS.alwaysOnTopChanged)).toBe(0);
-    fake.emit(WINDOW_CHANNELS.alwaysOnTopChanged, true);
-    expect(received).toEqual([true, false]);
   });
 
   it('rejects non-boolean IPC replies cleanly', async () => {
     const fake = fakeIpcRenderer();
     const bridge = createWindowBridge(fake.ipc);
-
-    fake.invoke.mockResolvedValueOnce('invalid');
-    await expect(bridge.getAlwaysOnTop()).rejects.toThrow('unexpected reply');
-
-    fake.invoke.mockResolvedValueOnce(123);
-    await expect(bridge.setAlwaysOnTop(true)).rejects.toThrow('unexpected reply');
 
     fake.invoke.mockResolvedValueOnce('nope');
     await expect(bridge.setAspectRatioLock(false)).rejects.toThrow('unexpected reply');

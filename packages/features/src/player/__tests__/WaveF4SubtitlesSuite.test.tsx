@@ -90,7 +90,7 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     const manual = createManualClock();
     const keys = createFakeAndroidKeys();
-    const engine = createFakePlayerEngine({
+    const { setSubtitleDelay: _dropDelay, ...engine } = createFakePlayerEngine({
       now: manual.now,
       schedule: manual.schedule,
       cancel: manual.cancel,
@@ -146,37 +146,36 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
       engine.emit({ attempt: 1, type: 'tracks', tracks: DUAL_TRACKS });
     });
 
-    // Open TrackPickerModal directly via button press
-    await fireEvent.press(view.getByTestId('player-tracks-button'));
+    // Open Settings -> Subtitles directly via top-bar Subtitles button
+    await fireEvent.press(view.getByTestId('player-subtitles-button'));
 
     // External badge rendered beside external track
-    expect(view.getByTestId('player-subtitle-external-badge-ext:1')).toHaveTextContent('External');
+    expect(view.getByTestId('player-settings-sub-ext:1')).toHaveTextContent(/External/);
 
-    // Secondary subtitle section renders right below primary subtitles
-    expect(view.getByTestId('player-secondary-subtitle-header')).toHaveTextContent(
-      'Secondary subtitle',
-    );
+    // Enter second-level Subtitle settings sub-view
+    await fireEvent.press(view.getByTestId('player-settings-open-subtitle-settings'));
+
+    // Secondary subtitle section renders inside Subtitle settings
+    expect(view.getByText('Secondary subtitle')).toBeTruthy();
     // Primary track s:1 is disabled in secondary list with 'Active as primary' hint
     expect(
-      view.getByTestId('player-secondary-subtitle-track-s:1').props.accessibilityState,
+      view.getByTestId('player-settings-secondary-sub-s:1').props.accessibilityState,
     ).toMatchObject({
       disabled: true,
     });
-    expect(view.getByTestId('player-secondary-subtitle-primary-hint-s:1')).toHaveTextContent(
-      'Active as primary',
+    expect(view.getByTestId('player-settings-secondary-sub-s:1')).toHaveTextContent(
+      /Active as primary/,
     );
 
     // Pressing disabled s:1 does NOT call selectSecondarySubtitleTrack
-    await fireEvent.press(view.getByTestId('player-secondary-subtitle-track-s:1'));
+    await fireEvent.press(view.getByTestId('player-settings-secondary-sub-s:1'));
     expect(engine.commands.filter((c) => c.name === 'selectSecondarySubtitleTrack')).toHaveLength(
       0,
     );
 
-    // Navigate via TV D-pad: Right into subtitles column (lands on selected s:1 at index 1),
-    // Down x5 -> index 6 (secondary track s:2 Turkish), Select -> selects s:2!
+    // Navigate via TV D-pad inside Subtitle settings: index 0..5 (style fields + reset), 6 (Secondary Off), 7 (s:1), 8 (s:2 Turkish)
     await act(async () => {
-      keys.tap(KEY_RIGHT);
-      for (let i = 0; i < 5; i += 1) keys.tap(KEY_DOWN);
+      for (let i = 0; i < 8; i += 1) keys.tap(KEY_DOWN);
       manual.advance(300);
       keys.tap(KEY_SELECT);
     });
@@ -186,7 +185,7 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
     ).toMatchObject({ trackId: 's:2' });
 
     // Clear secondary subtitle by pressing Secondary Off
-    await fireEvent.press(view.getByTestId('player-secondary-subtitle-off'));
+    await fireEvent.press(view.getByTestId('player-settings-secondary-sub-off'));
     expect(
       engine.commands.filter((c) => c.name === 'selectSecondarySubtitleTrack').at(-1),
     ).toMatchObject({ trackId: null });
@@ -241,12 +240,13 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
       engine.emit({ attempt: 1, type: 'tracks', tracks: DUAL_TRACKS });
     });
 
-    // Open TrackPickerModal -> Choose subtitle file triggers pickSubtitleFile() and attaches track
-    await fireEvent.press(view.getByTestId('player-tracks-button'));
-    expect(view.getByTestId('player-external-subtitle-pick-file')).toBeTruthy();
-    expect(view.getByTestId('player-external-subtitle-from-url')).toBeTruthy();
+    // Open Subtitles -> Subtitle settings -> Choose subtitle file triggers pickSubtitleFile() and attaches track
+    await fireEvent.press(view.getByTestId('player-subtitles-button'));
+    await fireEvent.press(view.getByTestId('player-settings-open-subtitle-settings'));
+    expect(view.getByTestId('player-settings-external-sub-pick')).toBeTruthy();
+    expect(view.getByTestId('player-settings-external-sub-url')).toBeTruthy();
 
-    await fireEvent.press(view.getByTestId('player-external-subtitle-pick-file'));
+    await fireEvent.press(view.getByTestId('player-settings-external-sub-pick'));
     await waitFor(() => {
       expect(pickSubtitleFile).toHaveBeenCalledTimes(1);
       expect(
@@ -279,7 +279,7 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
     );
 
     // Open "Load from URL" in-tree overlay
-    await fireEvent.press(view.getByTestId('player-external-subtitle-from-url'));
+    await fireEvent.press(view.getByTestId('player-settings-external-sub-url'));
     expect(view.getByTestId('external-subtitle-url-overlay')).toBeTruthy();
 
     // Reject javascript: URI
@@ -349,7 +349,7 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
     );
 
     // Timeout failure: submit a URL whose async download/parse never produces a track (e.g. HTTP 404)
-    await fireEvent.press(view.getByTestId('player-external-subtitle-from-url'));
+    await fireEvent.press(view.getByTestId('player-settings-external-sub-url'));
     await fireEvent.changeText(
       view.getByTestId('external-subtitle-url-input'),
       'https://example.invalid/captions/missing-404.srt',
@@ -367,7 +367,7 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
 
     // Immediate failure when picker rejects
     pickSubtitleFile.mockRejectedValueOnce(new Error('invalid file'));
-    await fireEvent.press(view.getByTestId('player-external-subtitle-pick-file'));
+    await fireEvent.press(view.getByTestId('player-settings-external-sub-pick'));
     await waitFor(() => {
       expect(view.getByTestId('player-external-subtitle-feedback')).toHaveTextContent(
         'Could not load external subtitle.',
@@ -383,7 +383,7 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
     const keys = createFakeAndroidKeys();
     const prefStore = createMemoryPreferencesStore();
     const surfacePropsHistory: VideoSurfaceProps[] = [];
-    const engine = createFakePlayerEngine({
+    const { setSubtitleDelay: _dropDelay, ...engine } = createFakePlayerEngine({
       now: manual.now,
       schedule: manual.schedule,
       cancel: manual.cancel,
@@ -445,9 +445,10 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
       engine.emit({ attempt: 1, type: 'tracks', tracks: DUAL_TRACKS });
     });
 
-    // Open PlayerSettingsSheet -> Subtitle style sub-view
+    // Open PlayerSettingsSheet -> Subtitles -> Subtitle settings sub-view
     await fireEvent.press(view.getByTestId('player-settings-button'));
-    await fireEvent.press(await view.findByTestId('player-settings-row-subtitle-style'));
+    await fireEvent.press(await view.findByTestId('player-settings-row-subtitles'));
+    await fireEvent.press(await view.findByTestId('player-settings-open-subtitle-settings'));
     expect(view.getByTestId('player-subtitle-style-section')).toBeTruthy();
 
     // Update Size -> Large, Text color -> Yellow, Background -> Solid, Edge -> Shadow, Position -> Top
@@ -499,11 +500,15 @@ describe('Wave F4 Subtitles Suite UI (#32, #402)', () => {
     });
     expect(engine.commands.filter((c) => c.name === 'load')).toHaveLength(initialLoadCount);
 
-    // TV Back returns cleanly from subtitleStyle to root
+    // TV Back returns from subtitleSettings -> subtitles -> root cleanly
     await act(async () => {
       keys.tap(KEY_BACK);
     });
-    expect(view.getByTestId('player-settings-row-subtitle-style')).toBeTruthy();
+    expect(view.getByTestId('player-settings-open-subtitle-settings')).toBeTruthy();
+    await act(async () => {
+      keys.tap(KEY_BACK);
+    });
+    expect(view.getByTestId('player-settings-row-subtitles')).toBeTruthy();
 
     await view.unmount();
   });

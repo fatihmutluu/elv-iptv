@@ -2,7 +2,6 @@ import type { NowNextEntry } from '@elv/data';
 import type { TvClockMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type {
-  ChapterInfo,
   MediaTracks,
   PlaybackClock,
   PlaybackService,
@@ -28,8 +27,6 @@ export interface BuildPlayerOsdPropsInput {
   readonly liveTimeShiftSupported: boolean;
   readonly canZap: boolean;
   readonly hasTracks: boolean;
-  readonly hasXray?: boolean;
-  readonly xrayOpen?: boolean;
   readonly hasPreviousChannel: boolean;
   readonly nextEpisode: PlayableEntry | undefined;
   readonly nextEpisodeVisible: boolean;
@@ -37,8 +34,6 @@ export interface BuildPlayerOsdPropsInput {
   readonly isTv: boolean;
   readonly isDesktop: boolean;
   readonly isFullscreen: boolean;
-  readonly alwaysOnTop: boolean;
-  readonly chapters: readonly ChapterInfo[] | undefined;
   readonly timeDisplayMode: VodEndTimeDisplayMode;
   readonly videoInfo: StreamVideoInfo | undefined;
   readonly tracks: MediaTracks;
@@ -52,19 +47,14 @@ export interface BuildPlayerOsdPropsInput {
   readonly controls: ReturnType<typeof usePlayerControls>;
   readonly hostToggleMute: (() => void) | undefined;
   readonly hostToggleFullscreen: (() => void) | undefined;
-  readonly hostToggleAlwaysOnTop: (() => void) | undefined;
   readonly onMinimizeToMiniPlayer?: (() => void) | undefined;
   readonly onEnterPip?: (() => void) | undefined;
-  readonly onEnterMultiView?: (() => void) | undefined;
   readonly onPopoutPlayer?: (() => void) | undefined;
   readonly onDockPopout?: (() => void) | undefined;
   readonly onExit: () => void;
-  readonly onToggleXray?: (() => void) | undefined;
   readonly onCycleTimeDisplayMode: () => void;
   readonly onFineScrubHaptic: ((kind: 'tier' | 'origin') => void) | undefined;
   readonly onPlayNextEpisode: () => void;
-  readonly onPrevChapter: () => void;
-  readonly onNextChapter: () => void;
   readonly onJumpPreviousChannel: () => void;
   readonly onBackToLive: () => void;
   readonly onPrev: () => void;
@@ -75,6 +65,14 @@ export interface BuildPlayerOsdPropsInput {
 /** Assembles {@link PlayerOsdProps} from `PlayerScreen` hook outputs. */
 export function buildPlayerOsdProps(p: BuildPlayerOsdPropsInput): PlayerOsdProps {
   const { activeTarget, previewTarget, controls, status } = p;
+  const hasAudio =
+    p.hasTracks &&
+    (p.tracks.audio.length > 0 ||
+      (p.tracks.programs?.length ?? 0) > 1 ||
+      p.tracks.subtitles.length === 0);
+  const hasWindowPopover =
+    p.onMinimizeToMiniPlayer !== undefined && p.isDesktop && p.onPopoutPlayer !== undefined;
+
   return {
     title: previewTarget?.title ?? activeTarget.title,
     subtitle: previewTarget !== null ? previewTarget.subtitle : activeTarget.subtitle,
@@ -93,7 +91,8 @@ export function buildPlayerOsdProps(p: BuildPlayerOsdPropsInput): PlayerOsdProps
     isPausedOrEnded: controls.isPausedOrEnded,
     canZap: p.canZap,
     hasTracks: p.hasTracks,
-    ...(p.hasXray === true ? { hasXray: true, xrayOpen: p.xrayOpen === true } : {}),
+    hasSubtitles: p.hasTracks,
+    hasAudio,
     hasPreviousChannel: p.hasPreviousChannel,
     hasNextEpisodeAction:
       activeTarget.kind === 'vod' && !p.isCatchup && p.nextEpisode !== undefined,
@@ -105,9 +104,7 @@ export function buildPlayerOsdProps(p: BuildPlayerOsdPropsInput): PlayerOsdProps
     muted: controls.muted,
     volume: controls.volume,
     isFullscreen: p.isFullscreen,
-    alwaysOnTop: p.alwaysOnTop,
     playbackSpeed: controls.playbackSpeed,
-    chapters: p.chapters,
     timeDisplayMode: p.timeDisplayMode,
     videoInfo: p.videoInfo,
     tracks: p.tracks,
@@ -118,10 +115,9 @@ export function buildPlayerOsdProps(p: BuildPlayerOsdPropsInput): PlayerOsdProps
     tvOsdFocused: controls.tvOsdFocused,
     tvScrubberFocused: controls.tvScrubberFocused,
     tvOsdAction: controls.tvOsdAction,
-    tracksOpen: controls.tracksOpen,
     settingsOpen: controls.settingsOpen,
     settingsView: controls.settingsMenu.view,
-    infoOpen: controls.infoOpen,
+    windowModeOpen: controls.windowModeOpen,
     channelListOpen: controls.channelListOpen,
     previewPositionMs: p.effectivePreviewMs,
     i18n: p.i18n,
@@ -135,7 +131,17 @@ export function buildPlayerOsdProps(p: BuildPlayerOsdPropsInput): PlayerOsdProps
     onScrubbingChange: controls.setBarScrubbing,
     onCycleTimeDisplayMode: p.onCycleTimeDisplayMode,
     ...(p.onFineScrubHaptic !== undefined ? { onFineScrubHaptic: p.onFineScrubHaptic } : {}),
-    onOpenTracks: controls.openTracks,
+    onOpenSubtitles: () =>
+      controls.settingsOpen &&
+      (controls.settingsMenu.view === 'subtitles' ||
+        controls.settingsMenu.view === 'subtitleSettings')
+        ? controls.closeSettings()
+        : controls.openSettings('subtitles'),
+    onOpenAudio: () =>
+      controls.settingsOpen &&
+      (controls.settingsMenu.view === 'audio' || controls.settingsMenu.view === 'audioSettings')
+        ? controls.closeSettings()
+        : controls.openSettings('audio'),
     onOpenSettings: () =>
       controls.settingsOpen ? controls.closeSettings() : controls.openSettings(),
     onOpenSpeed: () =>
@@ -143,26 +149,18 @@ export function buildPlayerOsdProps(p: BuildPlayerOsdPropsInput): PlayerOsdProps
         ? controls.closeSettings()
         : controls.openSettings('speed'),
     onToggleResizeMode: controls.toggleResizeMode,
-    onToggleInfo: controls.toggleInfo,
+    ...(hasWindowPopover ? { onToggleWindowMode: controls.toggleWindowMode } : {}),
     ...(p.canZap ? { onToggleChannelList: controls.toggleChannelList } : {}),
-    ...(p.hasXray === true && p.onToggleXray !== undefined ? { onToggleXray: p.onToggleXray } : {}),
     onPlayNextEpisode: p.onPlayNextEpisode,
-    ...((p.chapters?.length ?? 0) > 0
-      ? { onPrevChapter: p.onPrevChapter, onNextChapter: p.onNextChapter }
-      : {}),
     ...(p.hostToggleMute !== undefined ? { onToggleMute: controls.toggleMute } : {}),
     onSetVolume: controls.setVolume,
     ...(p.hostToggleFullscreen !== undefined
       ? { onToggleFullscreen: controls.toggleFullscreen }
       : {}),
-    ...(p.hostToggleAlwaysOnTop !== undefined
-      ? { onToggleAlwaysOnTop: p.hostToggleAlwaysOnTop }
-      : {}),
     ...(p.onMinimizeToMiniPlayer !== undefined
       ? { onMinimizeToMiniPlayer: p.onMinimizeToMiniPlayer }
       : {}),
     ...(p.onEnterPip !== undefined ? { onEnterPip: p.onEnterPip } : {}),
-    ...(p.onEnterMultiView !== undefined ? { onEnterMultiView: p.onEnterMultiView } : {}),
     ...(p.onPopoutPlayer !== undefined ? { onPopoutPlayer: p.onPopoutPlayer } : {}),
     ...(p.onDockPopout !== undefined ? { onDockPopout: p.onDockPopout } : {}),
     onLock: controls.lockControls,

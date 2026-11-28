@@ -1,6 +1,5 @@
 import {
   clampZoomLevel,
-  isAlwaysOnTopFlag,
   isAspectRatioLockFlag,
   isMinimizeToTrayFlag,
   isPopoutDockPayload,
@@ -80,35 +79,12 @@ export function syncInitialZoomLevel(
   };
 }
 
-/** Builds the frozen `window.elv.window` bridge inside the sandboxed Electron preload (`#408`, `#332`, `#158`). */
+/** Builds the frozen `window.elv.window` bridge inside the sandboxed Electron preload (`#332`, `#158`). */
 export function createWindowBridge(
   ipc: WindowIpcRendererLike,
   webFrame?: WindowWebFrameLike,
 ): WindowBridge {
   const bridge: WindowBridge = {
-    async setAlwaysOnTop(enabled: boolean): Promise<boolean> {
-      const reply = await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, enabled);
-      if (!isAlwaysOnTopFlag(reply)) {
-        throw new Error('window:set-always-on-top returned an unexpected reply');
-      }
-      return reply;
-    },
-    async getAlwaysOnTop(): Promise<boolean> {
-      const reply = await ipc.invoke(WINDOW_CHANNELS.getAlwaysOnTop);
-      if (!isAlwaysOnTopFlag(reply)) {
-        throw new Error('window:get-always-on-top returned an unexpected reply');
-      }
-      return reply;
-    },
-    onAlwaysOnTopChanged(listener: (enabled: boolean) => void): () => void {
-      const wrapped = (_event: unknown, enabled: unknown): void => {
-        if (isAlwaysOnTopFlag(enabled)) listener(enabled);
-      };
-      ipc.on(WINDOW_CHANNELS.alwaysOnTopChanged, wrapped);
-      return () => {
-        ipc.removeListener(WINDOW_CHANNELS.alwaysOnTopChanged, wrapped);
-      };
-    },
     async setAspectRatioLock(enabled: boolean): Promise<boolean> {
       const reply = await ipc.invoke(WINDOW_CHANNELS.setAspectRatioLock, enabled);
       if (!isAspectRatioLockFlag(reply)) {

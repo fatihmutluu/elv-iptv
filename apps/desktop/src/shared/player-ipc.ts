@@ -119,8 +119,7 @@ export type PlayerUiKey =
   | 'tracks'
   | 'prev-channel'
   | 'info'
-  | 'channel-list'
-  | 'always-on-top';
+  | 'channel-list';
 
 /** Presentation events outside the port, main to renderer (`player:ui`). */
 export type PlayerUiEvent =

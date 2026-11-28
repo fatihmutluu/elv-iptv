@@ -1,7 +1,6 @@
 import type { NowNextEntry } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import {
-  type ChapterInfo,
   EMPTY_TRACKS,
   type MediaTracks,
   type PlaybackClock,
@@ -12,7 +11,7 @@ import { Icon, MicroPill, Scrim, TABULAR_NUMS_STYLE, useTheme } from '@elv/ui-ki
 import type { ReactElement } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { DescribedPlaybackFailure } from './errors';
-import { computeProgrammeProgress } from './PlayerInfoSheet';
+import { computeProgrammeProgress } from './player-info-model';
 import { formatStreamBadges } from './player-overlay-model';
 import { formatPlaybackSpeed } from './settings-menu-nav';
 import { VodProgressBar } from './VodProgressBar';
@@ -193,7 +192,6 @@ export interface PeekBarProps {
   readonly muted: boolean;
   readonly volume: number;
   readonly playbackSpeed: number;
-  readonly chapters?: readonly ChapterInfo[] | undefined;
   readonly timeDisplayMode?: VodEndTimeDisplayMode | undefined;
   readonly wallClock?: (() => number) | undefined;
   readonly nowNext?: NowNextEntry | null | undefined;
@@ -224,7 +222,6 @@ export function DesktopPeekStrip(p: PeekBarProps): ReactElement {
             docked
             label={p.i18n.t('player.progressLabel')}
             previewPositionMs={p.previewPositionMs}
-            chapters={p.chapters}
             timeDisplayMode={p.timeDisplayMode}
             i18n={p.i18n}
             onCycleTimeDisplayMode={p.onCycleTimeDisplayMode}
@@ -361,7 +358,6 @@ export function FloatingPeekOsd(
               isTv={p.isTv}
               label={p.i18n.t('player.progressLabel')}
               previewPositionMs={p.previewPositionMs}
-              chapters={p.chapters}
               timeDisplayMode={p.timeDisplayMode}
               i18n={p.i18n}
               onCycleTimeDisplayMode={p.onCycleTimeDisplayMode}

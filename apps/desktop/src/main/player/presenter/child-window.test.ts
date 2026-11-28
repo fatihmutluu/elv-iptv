@@ -215,17 +215,15 @@ describe('createChildWindowPresenter', () => {
     expect(events).toEqual([{ type: 'surface', change: 'created' }]);
   });
 
-  it('toggleFullscreen toggles the app window and restores maximized + alwaysOnTop (#257)', async () => {
+  it('toggleFullscreen toggles the app window and restores maximized (#257)', async () => {
     const { app, presenter } = setup();
     await presenter.prepare();
     app.state.maximized = true;
-    app.state.alwaysOnTop = true;
     presenter.toggleFullscreen();
     expect(app.state.fullscreen).toBe(true);
     presenter.toggleFullscreen();
     expect(app.state.fullscreen).toBe(false);
     expect(app.state.maximized).toBe(true);
-    expect(app.state.alwaysOnTop).toBe(true);
     expect(app.state.fullscreenCalls).toEqual([true, false]);
   });
 
@@ -288,25 +286,5 @@ describe('createChildWindowPresenter', () => {
     expect(video().listenerCount('focus')).toBe(0);
     video().emit('focus');
     expect(app.state.focusCalls).toBe(1);
-  });
-
-  it('keeps child video HWND above an always-on-top parent and resets cleanly when unpinned (#408)', async () => {
-    const { app, presenter, video } = setup();
-    await presenter.prepare();
-    presenter.setArea(AREA);
-    video().state.alwaysOnTopCalls.length = 0;
-    video().state.moveTopCalls = 0;
-
-    app.state.alwaysOnTop = true;
-    app.emit('always-on-top-changed');
-    expect(video().state.alwaysOnTopCalls).toEqual([[true, 'floating', 1]]);
-    expect(video().state.moveTopCalls).toBeGreaterThanOrEqual(1);
-
-    app.state.alwaysOnTop = false;
-    app.emit('always-on-top-changed');
-    expect(video().state.alwaysOnTopCalls).toEqual([
-      [true, 'floating', 1],
-      [false, 'normal', undefined],
-    ]);
   });
 });

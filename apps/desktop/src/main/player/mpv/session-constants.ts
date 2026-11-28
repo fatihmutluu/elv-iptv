@@ -69,7 +69,6 @@ const UI_KEYS: ReadonlySet<string> = new Set<UiKey>([
   'prev-channel',
   'info',
   'channel-list',
-  'always-on-top',
 ]);
 
 /** Type guard for `elv-key` client messages forwarded to the renderer. */

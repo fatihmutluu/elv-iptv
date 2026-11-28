@@ -1,6 +1,5 @@
 import { ok } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
-import type { ChapterInfo } from '@elv/playback';
 import { createFakePlayerEngine } from '@elv/playback/testing';
 import { FormFactorProvider, I18nProvider, ThemeProvider, TvRemoteProvider } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -8,12 +7,6 @@ import { View } from 'react-native';
 import type { PlayTarget } from '../../ports/play-target';
 import { PlayerScreen } from '../PlayerScreen';
 import { createManualClock } from './player-test-harness';
-
-const CHAPTERS: readonly ChapterInfo[] = [
-  { id: 'c:0', title: 'Prologue', startMs: 0, endMs: 60_000 },
-  { id: 'c:1', title: 'The Journey Begins', startMs: 60_000, endMs: 180_000 },
-  { id: 'c:2', title: 'Finale', startMs: 180_000, endMs: 300_000 },
-];
 
 const VOD_TARGET: PlayTarget = {
   itemKey: 'x:src-1:vod:777',
@@ -23,7 +16,7 @@ const VOD_TARGET: PlayTarget = {
   sourceId: 'src-1',
 };
 
-describe('Wave C1 #118 — Sleep Timer, Chapter Markers & Still-Watching Prompt', () => {
+describe('Wave C1 #118 — Sleep Timer & Still-Watching Prompt (Chapters removed in Wave R4)', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
@@ -92,7 +85,7 @@ describe('Wave C1 #118 — Sleep Timer, Chapter Markers & Still-Watching Prompt'
     await view.unmount();
   });
 
-  it('renders chapter dots on VodProgressBar, jumps prev/next chapter with 3s restart threshold, and opens Chapters sub-view', async () => {
+  it('omits chapters UI from VodProgressBar and PlayerSettingsSheet in Wave R4', async () => {
     const manual = createManualClock();
     const engine = createFakePlayerEngine({
       now: manual.now,
@@ -125,38 +118,10 @@ describe('Wave C1 #118 — Sleep Timer, Chapter Markers & Still-Watching Prompt'
     );
 
     await waitFor(() => expect(engine.commands.some((c) => c.name === 'load')).toBe(true));
-    const att = engine.commands.find((c) => c.name === 'load')?.attempt ?? 1;
-    await act(async () => {
-      manual.advance(350);
-      engine.emit({
-        attempt: att,
-        type: 'clock',
-        anchor: { positionMs: 70_000, atMs: manual.now(), rate: 0, durationMs: 300_000 },
-      });
-      engine.emit({ attempt: att, type: 'chapters', chapters: CHAPTERS });
-    });
-
-    // Chapter dots rendered on scrubber rail (excluding startMs === 0)
-    expect(screen.getByTestId('player-chapter-dot-c:1')).toBeTruthy();
-    expect(screen.getByTestId('player-chapter-dot-c:2')).toBeTruthy();
-
-    // At 70s (> 3s into chapter c:1 starting at 60s): Prev chapter restarts chapter c:1 (60_000ms)
-    await fireEvent.press(screen.getByTestId('player-prev-chapter'));
-    expect(engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(60_000);
-
-    // Next chapter from 60s jumps to Finale (180_000ms)
-    await fireEvent.press(screen.getByTestId('player-next-chapter'));
-    expect(engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(180_000);
-
-    // Chapters sub-view inside Settings lists all chapters and seeks on press
+    expect(screen.queryByTestId('player-prev-chapter')).toBeNull();
+    expect(screen.queryByTestId('player-next-chapter')).toBeNull();
     await fireEvent.press(screen.getByTestId('player-settings-button'));
-    await fireEvent.press(screen.getByTestId('player-settings-row-chapters'));
-    expect(screen.getByTestId('player-settings-chapter-c:0')).toHaveTextContent(/Prologue/);
-    expect(screen.getByTestId('player-settings-chapter-c:1')).toHaveTextContent(
-      /The Journey Begins/,
-    );
-    await fireEvent.press(screen.getByTestId('player-settings-chapter-c:0'));
-    expect(engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(0);
+    expect(screen.queryByTestId('player-settings-row-chapters')).toBeNull();
 
     await view.unmount();
   });

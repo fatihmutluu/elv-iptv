@@ -1,6 +1,6 @@
 import type { enWaveE2Messages } from './en-wave-e2';
 
-/** Turkish (`tr`) messages for Wave E2 ELV Mode Discovery, Rich Detail, Trailers & In-Player X-Ray (`#512`, `#352`, `#459`). */
+/** Turkish (`tr`) messages for Wave E2 ELV Mode Discovery, Rich Detail & Trailers (`#512`, `#459`). */
 export const trWaveE2Messages: Readonly<Record<keyof typeof enWaveE2Messages, string>> = {
   'home.section.elvShowcase': 'Gündem ve Sana Özel',
   'catalog.elvPicks.emptyTitle': 'Kişisel önerilerin hazırlanıyor',
@@ -47,11 +47,4 @@ export const trWaveE2Messages: Readonly<Record<keyof typeof enWaveE2Messages, st
   'person.role.director': 'Yönetmen',
   'person.role.cast': 'Oyuncu',
   'person.close': 'Kapat',
-  'player.xray.button': 'X-Ray',
-  'player.xray.title': 'X-Ray',
-  'player.xray.cast': 'Oyuncular',
-  'player.xray.director': 'Yönetmen',
-  'player.xray.episode': 'Şu an oynatılıyor',
-  'player.xray.viewLibrary': 'Kütüphanede gör',
-  'player.xray.empty': 'Bu yapım için oyuncu bilgisi bulunamadı.',
 };

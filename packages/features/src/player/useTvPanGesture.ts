@@ -60,10 +60,10 @@ export function usePlayerTvPan(params: {
   readonly controls: {
     readonly locked: boolean;
     readonly osdHidden: boolean;
-    readonly infoOpen: boolean;
+    readonly statsVisible: boolean;
     readonly channelListOpen: boolean;
     readonly showProgressOsd: () => void;
-    readonly toggleInfo: () => void;
+    readonly toggleStats: () => void;
     readonly toggleChannelList: () => void;
   };
   readonly recordActivity: () => void;
@@ -93,7 +93,7 @@ export function usePlayerTvPan(params: {
     onScrubCancel: () => params.setScrubDeltaMs(undefined),
     onOpenInfo: () => {
       params.recordActivity();
-      if (!controls.infoOpen) controls.toggleInfo();
+      controls.toggleStats();
     },
     onOpenChannelList: () => {
       params.recordActivity();

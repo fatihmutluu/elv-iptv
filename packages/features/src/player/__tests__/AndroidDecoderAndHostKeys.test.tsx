@@ -165,8 +165,10 @@ describe('Wave P5 host keys (#415) and Android video decoder quick switch (#411)
       });
     });
 
-    // Open PlayerSettingsSheet -> Video decoder submenu -> select Software
+    // Open PlayerSettingsSheet -> Advanced settings -> Video decoder submenu -> select Software
     await fireEvent.press(screen.getByTestId('player-settings-button'));
+    await waitFor(() => expect(screen.getByTestId('player-settings-row-advanced')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('player-settings-row-advanced'));
     await waitFor(() =>
       expect(screen.getByTestId('player-settings-row-video-decoder')).toBeTruthy(),
     );
@@ -234,6 +236,7 @@ describe('Wave P5 host keys (#415) and Android video decoder quick switch (#411)
 
     await waitFor(() => expect(loads).toHaveLength(1));
     await fireEvent.press(screen.getByTestId('player-settings-button'));
+    await fireEvent.press(screen.getByTestId('player-settings-row-advanced'));
     await fireEvent.press(screen.getByTestId('player-settings-row-video-decoder'));
     await fireEvent.press(screen.getByTestId('player-settings-decoder-hardware'));
 

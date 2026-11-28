@@ -46,7 +46,7 @@ export function usePlayerSyncAndQuality(params: {
     engine?.capabilities.audioDelay === true || engine?.setAudioDelay !== undefined;
   const supportsSubtitleDelay =
     engine?.capabilities.subtitleDelay === true || engine?.setSubtitleDelay !== undefined;
-  const supportsVideoQuality = (tracks.videoQualities?.length ?? 0) > 0;
+  const supportsVideoQuality = (tracks.videoQualities?.length ?? 0) > 1;
 
   const handleAdjustAudioDelay = useCallback(
     (deltaMs: number, reset = false): void => {

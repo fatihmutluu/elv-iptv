@@ -73,8 +73,8 @@ interface PopoutSessionState {
  * Full-featured standalone Desktop Popout player stage (`#158`, Wave P3):
  * mounts the complete `<PlayerScreen>` with zero-reload live engine adoption (`adoptEngineId`),
  * full user preferences, volume slider, timeshift/cache seek, tracks, subtitles, `⋮` overflow
- * menu (including Always-on-Top), channel drawer, zero-reload Dock-back handoff, and cross-window
- * parental relock, profile-switch, and source-deletion teardown.
+ * menu, channel drawer, zero-reload Dock-back handoff, and cross-window parental relock,
+ * profile-switch, and source-deletion teardown.
  */
 export function PopoutPlayerStage({
   catalog,

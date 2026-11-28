@@ -279,14 +279,16 @@ describe('Wave P3 review regression fixes', () => {
         });
       });
 
-      await waitFor(() => expect(screen.getByTestId('player-multiview-button')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('player-settings-button')).toBeTruthy());
       expect(screen.queryByTestId('connection-limit-dialog')).toBeNull();
       expect(launchExternal).not.toHaveBeenCalled();
       expect(adoptEngine).toHaveBeenCalledWith('eng-dock-1');
       expect(openSpy).not.toHaveBeenCalled();
 
       // Player -> Multi-View with providerActiveCons = 1, maxConnections = 1: must adopt Tile 1 cleanly!
-      await fireEvent.press(screen.getByTestId('player-multiview-button'));
+      await fireEvent.press(screen.getByTestId('player-settings-button'));
+      await waitFor(() => expect(screen.getByTestId('player-settings-multiview')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-settings-multiview'));
       await waitFor(() => expect(screen.getByTestId('multiview-stage')).toBeTruthy());
       await waitFor(() => expect(screen.getByTestId('multiview-tile-0')).toBeTruthy());
       expect(screen.queryByTestId('multiview-banner-connection-limit')).toBeNull();
@@ -294,14 +296,16 @@ describe('Wave P3 review regression fixes', () => {
 
       // Multi-View -> Player exit: must bypass ConnectionLimitDialog & externalPlayer!
       await fireEvent.press(screen.getByTestId('multiview-exit-button'));
-      await waitFor(() => expect(screen.getByTestId('player-popout-button')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-button')).toBeTruthy());
       expect(screen.queryByTestId('connection-limit-dialog')).toBeNull();
       expect(launchExternal).not.toHaveBeenCalled();
       expect(eng1.releaseSpy).not.toHaveBeenCalled();
 
       // Popout detach when openPopout returns false: fallback re-adopts transferEngineId with NO dialog!
       popoutShouldSucceed = false;
-      await fireEvent.press(screen.getByTestId('player-popout-button'));
+      await fireEvent.press(screen.getByTestId('player-window-mode-button'));
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-popout')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-window-mode-popout'));
       await waitFor(() => expect(openPopout).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(adoptEngine).toHaveBeenCalledTimes(2));
       await waitFor(() => expect(screen.getByTestId('player-osd')).toBeTruthy());
@@ -489,10 +493,10 @@ describe('Wave P3 review regression fixes', () => {
       </FormFactorProvider>,
     );
 
-    await waitFor(() => expect(screen.getByTestId('player-popout-button')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('player-window-mode-button')).toBeTruthy());
     expect(activeTimers.size).toBeGreaterThan(0);
 
-    await fireEvent.press(screen.getByTestId('player-popout-button'));
+    await fireEvent.press(screen.getByTestId('player-window-mode-button'));
     await waitFor(() => expect(onPopoutPlayer).toHaveBeenCalledTimes(1));
     expect(onPopoutPlayer.mock.calls[0]?.[2]).toBe('eng-park-6');
 
@@ -553,11 +557,11 @@ describe('Wave P3 review regression fixes', () => {
       </FormFactorProvider>,
     );
 
-    await waitFor(() => expect(screen.getByTestId('player-popout-button')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('player-window-mode-button')).toBeTruthy());
 
     // Rapid double-click while parkForTransfer() is still pending
-    await fireEvent.press(screen.getByTestId('player-popout-button'));
-    await fireEvent.press(screen.getByTestId('player-popout-button'));
+    await fireEvent.press(screen.getByTestId('player-window-mode-button'));
+    await fireEvent.press(screen.getByTestId('player-window-mode-button'));
     expect(tracked.parkForTransfer).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -566,7 +570,7 @@ describe('Wave P3 review regression fixes', () => {
     });
 
     // Clicking a 3rd time right after resolve before unmount is also ignored
-    await fireEvent.press(screen.getByTestId('player-popout-button'));
+    await fireEvent.press(screen.getByTestId('player-window-mode-button'));
     expect(tracked.parkForTransfer).toHaveBeenCalledTimes(1);
     expect(onPopoutPlayer).toHaveBeenCalledTimes(1);
     await view.unmount();

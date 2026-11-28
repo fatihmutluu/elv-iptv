@@ -84,7 +84,7 @@ async function mountTvPlayer(opts: {
   };
   const target = opts.target ?? VOD_TARGET;
 
-  const view = await render(
+  const renderTree = (nextTarget: PlayTarget) => (
     <ThemeProvider preset={opts.preset ?? 'obsidianCrimson'}>
       <RemoteKeysProvider android={keys.source}>
         <FormFactorProvider value="tv">
@@ -92,7 +92,7 @@ async function mountTvPlayer(opts: {
             <PlayerScreen
               catalog={catalog}
               videoHost={{ open: () => ({ engine, renderSurface: () => <View /> }) }}
-              target={target}
+              target={nextTarget}
               clock={{ now: manual.now }}
               timers={{ setTimeout: manual.schedule, clearTimeout: manual.cancel }}
               initialOsdHidden={opts.initialOsdHidden}
@@ -102,8 +102,10 @@ async function mountTvPlayer(opts: {
           </I18nProvider>
         </FormFactorProvider>
       </RemoteKeysProvider>
-    </ThemeProvider>,
+    </ThemeProvider>
   );
+
+  const view = await render(renderTree(target));
 
   await waitFor(() => {
     expect(engine.commands.some((c) => c.name === 'load')).toBe(true);
@@ -125,7 +127,16 @@ async function mountTvPlayer(opts: {
     }
   });
 
-  return { view, keys, manual, engine, onExit, catalog, attempt };
+  return {
+    view,
+    keys,
+    manual,
+    engine,
+    onExit,
+    catalog,
+    attempt,
+    rerenderTarget: (next: PlayTarget) => view.rerender(renderTree(next)),
+  };
 }
 
 describe('Player ergonomics (#296, #297, #212)', () => {
@@ -240,7 +251,7 @@ describe('Player ergonomics (#296, #297, #212)', () => {
     async (preset) => {
       const tv = await mountTvPlayer({ preset, withTracks: true });
       expect(screen.queryByTestId('player-progress-focus-ring')).toBeNull();
-      expect(flatStyle('player-progress-thumb')?.width).toBe(12);
+      expect(flatStyle('player-progress-thumb')?.width).toBe(16);
 
       // Down enters OSD action bar -> Up moves focus to VodProgressBar scrubber
       await act(async () => tv.keys.tap(KEY_DOWN));
@@ -249,8 +260,8 @@ describe('Player ergonomics (#296, #297, #212)', () => {
       const ringStyle = flatStyle('player-progress-focus-ring');
       expect(ringStyle?.borderColor).toBe(THEME_PRESETS[preset].focusRingColor);
       expect(flatStyle('player-progress-thumb')).toMatchObject({
-        width: 18,
-        height: 18,
+        width: 20,
+        height: 20,
         borderWidth: 2,
         borderColor: THEME_PRESETS[preset].bgCanvas,
       });
@@ -660,35 +671,18 @@ describe('Player ergonomics (#296, #297, #212)', () => {
 
     // Switch VOD -> Live with same itemKey: scrubber focus clears immediately so Up zaps instead of trapping
     const onChangeIndex = jest.fn();
-    await tv.view.rerender(
-      <ThemeProvider preset="obsidianCrimson">
-        <RemoteKeysProvider android={tv.keys.source}>
-          <FormFactorProvider value="tv">
-            <I18nProvider i18n={createAppI18n('en')}>
-              <PlayerScreen
-                catalog={tv.catalog}
-                videoHost={{ open: () => ({ engine: tv.engine, renderSurface: () => <View /> }) }}
-                target={{
-                  itemKey: VOD_TARGET.itemKey,
-                  sourceId: 'src-1',
-                  title: 'Live Switch',
-                  kind: 'live',
-                  playlist: {
-                    count: 2,
-                    currentIndex: 0,
-                    onChangeIndex,
-                    getAt: async (i) => LIVE_ENTRIES[i],
-                  },
-                }}
-                clock={{ now: tv.manual.now }}
-                timers={{ setTimeout: tv.manual.schedule, clearTimeout: tv.manual.cancel }}
-                onExit={tv.onExit}
-              />
-            </I18nProvider>
-          </FormFactorProvider>
-        </RemoteKeysProvider>
-      </ThemeProvider>,
-    );
+    await tv.rerenderTarget({
+      itemKey: VOD_TARGET.itemKey,
+      sourceId: 'src-1',
+      title: 'Live Switch',
+      kind: 'live',
+      playlist: {
+        count: 2,
+        currentIndex: 0,
+        onChangeIndex,
+        getAt: async (i) => LIVE_ENTRIES[i],
+      },
+    });
     await act(async () => tv.keys.tap(KEY_UP));
     await waitFor(() => {
       expect(onChangeIndex).toHaveBeenCalledWith(1);
@@ -726,44 +720,30 @@ describe('Player ergonomics (#296, #297, #212)', () => {
       </ThemeProvider>,
     );
 
-    await waitFor(() => {
-      expect(engine.commands.some((c) => c.name === 'load')).toBe(true);
-    });
-    await act(async () => {
-      manual.advance(350);
-    });
+    await waitFor(() => expect(engine.commands.some((c) => c.name === 'load')).toBe(true));
+    await act(async () => manual.advance(350));
     expect(screen.getByTestId('player-osd')).toBeTruthy();
 
     // Tap at +1500ms, then synthetic mouseMove + pointerMove(touch) within 500ms must NOT reset auto-hide
-    await act(async () => {
-      manual.advance(1_500);
-    });
+    await act(async () => manual.advance(1_500));
     const root = screen.getByTestId('player-screen');
     await fireEvent(root, 'touchStart');
-    await act(async () => {
-      manual.advance(100);
-    });
+    await act(async () => manual.advance(100));
     await fireEvent(root, 'mouseMove');
     await fireEvent(root, 'pointerMove', { nativeEvent: { pointerType: 'touch' } });
 
     // Remaining 400ms elapses -> OSD auto-hides right on schedule!
-    await act(async () => {
-      manual.advance(400);
-    });
+    await act(async () => manual.advance(400));
     expect(screen.queryByTestId('player-osd')).toBeNull();
 
     // Another synthetic mouseMove within 500ms of touch does NOT wake hidden OSD
     await fireEvent(root, 'touchStart');
-    await act(async () => {
-      manual.advance(499);
-    });
+    await act(async () => manual.advance(499));
     await fireEvent(root, 'mouseMove');
     expect(screen.queryByTestId('player-osd')).toBeNull();
 
     // Genuine mouse hover after 500ms DOES wake OSD
-    await act(async () => {
-      manual.advance(1);
-    });
+    await act(async () => manual.advance(1));
     await fireEvent(root, 'pointerMove', { nativeEvent: { pointerType: 'mouse' } });
     expect(screen.getByTestId('player-osd')).toBeTruthy();
 

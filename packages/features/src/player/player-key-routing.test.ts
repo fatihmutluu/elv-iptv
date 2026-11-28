@@ -21,9 +21,9 @@ function makeHostDeps(overrides: Partial<HostKeyRouteDeps> = {}): HostKeyRouteDe
     isVod: true,
     state: {
       locked: false,
-      tracksOpen: false,
       settingsOpen: false,
-      infoOpen: false,
+      settingsMenu: { view: 'root', index: 0 },
+      windowModeOpen: false,
       channelListOpen: false,
     },
     handleBack: vi.fn(),
@@ -33,32 +33,51 @@ function makeHostDeps(overrides: Partial<HostKeyRouteDeps> = {}): HostKeyRouteDe
     seekBy: vi.fn(),
     stepVolumeBy: vi.fn(),
     toggleMute: vi.fn(),
-    openTracks: vi.fn(),
-    closeTracks: vi.fn(),
+    openSubtitles: vi.fn(),
+    closeSettings: vi.fn(),
+    toggleStats: vi.fn(),
     zapBy: vi.fn(),
     ...overrides,
   };
 }
 
-describe('routeHostKey Wave P5 shortcuts (#415)', () => {
-  it('routes aspect, volume-up, and volume-down when shortcuts are allowed', () => {
+describe('routeHostKey Wave P5 & Wave R4 shortcuts (#415)', () => {
+  it('routes aspect, volume-up, volume-down, tracks, and info when shortcuts are allowed', () => {
     const deps = makeHostDeps();
     routeHostKey('aspect', deps);
     routeHostKey('volume-up', deps);
     routeHostKey('volume-down', deps);
+    routeHostKey('tracks', deps);
+    routeHostKey('info', deps);
 
     expect(deps.toggleResizeMode).toHaveBeenCalledTimes(1);
     expect(deps.stepVolumeBy).toHaveBeenNthCalledWith(1, 5);
     expect(deps.stepVolumeBy).toHaveBeenNthCalledWith(2, -5);
+    expect(deps.openSubtitles).toHaveBeenCalledTimes(1);
+    expect(deps.toggleStats).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores aspect and volume host keys when locked or a sheet is open', () => {
+  it('toggles subtitles sheet closed when host key tracks fires on subtitle view', () => {
+    const deps = makeHostDeps({
+      state: {
+        locked: false,
+        settingsOpen: true,
+        settingsMenu: { view: 'subtitles', index: 0 },
+        windowModeOpen: false,
+        channelListOpen: false,
+      },
+    });
+    routeHostKey('tracks', deps);
+    expect(deps.closeSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores aspect and volume host keys when locked or a sheet/popover is open', () => {
     const lockedDeps = makeHostDeps({
       state: {
         locked: true,
-        tracksOpen: false,
         settingsOpen: false,
-        infoOpen: false,
+        settingsMenu: { view: 'root', index: 0 },
+        windowModeOpen: false,
         channelListOpen: false,
       },
     });
@@ -71,9 +90,9 @@ describe('routeHostKey Wave P5 shortcuts (#415)', () => {
     const sheetDeps = makeHostDeps({
       state: {
         locked: false,
-        tracksOpen: false,
-        settingsOpen: true,
-        infoOpen: false,
+        settingsOpen: false,
+        settingsMenu: { view: 'root', index: 0 },
+        windowModeOpen: true,
         channelListOpen: false,
       },
     });
@@ -89,9 +108,9 @@ describe('routeHostKey Wave P5 shortcuts (#415)', () => {
     const lockedSheetDeps = makeHostDeps({
       state: {
         locked: true,
-        tracksOpen: false,
         settingsOpen: true,
-        infoOpen: false,
+        settingsMenu: { view: 'root', index: 0 },
+        windowModeOpen: false,
         channelListOpen: false,
       },
       onStop,
@@ -101,17 +120,14 @@ describe('routeHostKey Wave P5 shortcuts (#415)', () => {
   });
 });
 
-describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
+describe('routeOverlayAndMediaKey submenus & Wave R4 controls', () => {
   it('routes select inside videoDecoder settings view to selectAndroidDecoderMode', () => {
     const selectAndroidDecoderMode = vi.fn();
     const state: PlayerOverlayLive = {
-      tracksOpen: false,
-      pickerCursor: { column: 'audio', index: 0 },
       settingsOpen: true,
       settingsMenu: { view: 'videoDecoder', index: 2 },
-      infoOpen: false,
+      windowModeOpen: false,
       channelListOpen: false,
-      canOpenInfo: true,
       canOpenChannelList: false,
       locked: false,
       osdTier: 'controls',
@@ -147,11 +163,8 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
       toggleStats: vi.fn(),
       toggleResizeMode: vi.fn(),
       togglePlayPause: vi.fn(),
-      openTracks: vi.fn(),
-      closeTracks: vi.fn(),
       closeSettings: vi.fn(),
       updateSettingsMenu: vi.fn(),
-      updatePickerCursor: vi.fn(),
       focusTvOsd: vi.fn(),
       blurTvOsd: vi.fn(),
       focusTvScrubber: vi.fn(),
@@ -167,7 +180,7 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
     expect(selectAndroidDecoderMode).toHaveBeenCalledWith('software');
   });
 
-  it('aligns default menu (channel drawer), colorBlue (settings), and colorYellow (mute) with DEFAULT_KEY_BINDINGS (#33, #133)', () => {
+  it('aligns default menu, colorRed/colorGreen (subtitles/audio in Settings), colorBlue, colorYellow, and info', () => {
     const order: string[] = [];
     const cancel = vi.fn(() => {
       order.push('cancel');
@@ -177,14 +190,12 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
     });
     const openSettings = vi.fn();
     const toggleMute = vi.fn();
+    const toggleStats = vi.fn();
     const state: PlayerOverlayLive = {
-      tracksOpen: false,
-      pickerCursor: { column: 'audio', index: 0 },
       settingsOpen: false,
       settingsMenu: { view: 'root', index: 0 },
-      infoOpen: false,
+      windowModeOpen: false,
       channelListOpen: false,
-      canOpenInfo: true,
       canOpenChannelList: true,
       locked: false,
       osdTier: 'controls',
@@ -194,7 +205,7 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
       tvOsdAction: 'settings',
       availableOsd: ['settings'],
       tracks: EMPTY_TRACKS,
-      hasTracks: false,
+      hasTracks: true,
       hasService: true,
       isVod: false,
       playbackSpeed: 1,
@@ -215,17 +226,14 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
       digitBuf: { push: vi.fn(), cancel, value: '12' },
       allowTvSelect: () => true,
       showOsd: vi.fn(),
-      toggleStats: vi.fn(),
+      toggleStats,
       toggleResizeMode: vi.fn(),
       togglePlayPause: vi.fn(),
-      openTracks: vi.fn(),
-      closeTracks: vi.fn(),
       openSettings,
       closeSettings: vi.fn(),
       toggleChannelList,
       toggleMute,
       updateSettingsMenu: vi.fn(),
-      updatePickerCursor: vi.fn(),
       focusTvOsd: vi.fn(),
       blurTvOsd: vi.fn(),
       focusTvScrubber: vi.fn(),
@@ -235,20 +243,28 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
       onExit: vi.fn(),
     };
 
-    // Menu cancels pending digit buffer before opening channel drawer (player.openChannelDrawer)
     expect(routeOverlayAndMediaKey({ key: 'menu', kind: 'press', time: 200 }, deps)).toBe(true);
     expect(order).toEqual(['cancel', 'toggleChannelList']);
 
-    // Color Blue opens player settings (player.openSettings)
+    expect(routeOverlayAndMediaKey({ key: 'colorRed', kind: 'press', time: 205 }, deps)).toBe(true);
+    expect(openSettings).toHaveBeenLastCalledWith('subtitles');
+
+    expect(routeOverlayAndMediaKey({ key: 'colorGreen', kind: 'press', time: 206 }, deps)).toBe(
+      true,
+    );
+    expect(openSettings).toHaveBeenLastCalledWith('audio');
+
     expect(routeOverlayAndMediaKey({ key: 'colorBlue', kind: 'press', time: 210 }, deps)).toBe(
       true,
     );
-    expect(openSettings).toHaveBeenCalledTimes(1);
+    expect(openSettings).toHaveBeenCalledTimes(3);
 
-    // Color Yellow toggles mute (player.toggleMute)
     expect(routeOverlayAndMediaKey({ key: 'colorYellow', kind: 'press', time: 220 }, deps)).toBe(
       true,
     );
     expect(toggleMute).toHaveBeenCalledTimes(1);
+
+    expect(routeOverlayAndMediaKey({ key: 'info', kind: 'press', time: 230 }, deps)).toBe(true);
+    expect(toggleStats).toHaveBeenCalledTimes(1);
   });
 });

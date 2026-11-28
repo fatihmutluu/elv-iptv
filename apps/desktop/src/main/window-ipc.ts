@@ -1,7 +1,6 @@
 import {
   clampZoomLevel,
   isAllowedExternalTrailerUrl,
-  isAlwaysOnTopFlag,
   isAspectRatioLockFlag,
   isMinimizeToTrayFlag,
   isPopoutDockPayload,
@@ -28,28 +27,9 @@ export interface WindowIpcMainLike {
   removeHandler(channel: string): void;
 }
 
-/** Minimal child window surface used to keep child presenter HWNDs above an always-on-top parent (`#408`). */
-export interface ChildZOrderWindowLike {
-  isDestroyed(): boolean;
-  isVisible?(): boolean;
-  setAlwaysOnTop?(flag: boolean, level?: 'normal' | 'floating', relativeLevel?: number): void;
-  moveTop?(): void;
-}
-
 /** Minimal `BrowserWindow` surface used by {@link registerWindowIpc}. */
-export interface AlwaysOnTopWindowLike {
+export interface WindowIpcWindowLike {
   isDestroyed(): boolean;
-  isAlwaysOnTop(): boolean;
-  setAlwaysOnTop(flag: boolean, level?: 'normal' | 'floating'): void;
-  getChildWindows?(): readonly ChildZOrderWindowLike[];
-  on?(
-    event: 'always-on-top-changed',
-    listener: (event: unknown, isAlwaysOnTop: boolean) => void,
-  ): unknown;
-  removeListener?(
-    event: 'always-on-top-changed',
-    listener: (event: unknown, isAlwaysOnTop: boolean) => void,
-  ): unknown;
   readonly webContents: {
     isDestroyed(): boolean;
     send(channel: string, ...args: unknown[]): void;
@@ -60,8 +40,8 @@ export interface AlwaysOnTopWindowLike {
 /** Collaborators injected into {@link registerWindowIpc}. */
 export interface WindowIpcDeps {
   ipcMain: WindowIpcMainLike;
-  getWindowFromSender(sender: unknown): AlwaysOnTopWindowLike | null | undefined;
-  onSetAspectRatioLock?(win: AlwaysOnTopWindowLike, enabled: boolean): void;
+  getWindowFromSender(sender: unknown): WindowIpcWindowLike | null | undefined;
+  onSetAspectRatioLock?(win: WindowIpcWindowLike, enabled: boolean): void;
   onSetMinimizeToTray?(enabled: boolean, labels?: TrayLabels): boolean;
   getMinimizeToTray?(): boolean;
   getZoomLevel?(): number;
@@ -75,20 +55,6 @@ export interface WindowIpcDeps {
   log?(line: string): void;
 }
 
-function syncChildWindowZOrder(win: AlwaysOnTopWindowLike, enabled: boolean): void {
-  const children = win.getChildWindows?.();
-  if (!children) return;
-  for (const child of children) {
-    if (child.isDestroyed()) continue;
-    if (enabled) {
-      child.setAlwaysOnTop?.(true, 'floating', 1);
-      if (child.isVisible?.()) child.moveTop?.();
-    } else {
-      child.setAlwaysOnTop?.(false, 'normal');
-    }
-  }
-}
-
 /**
  * Registers typed window control, minimize-to-tray (`#158`), and popout window (`#158`) IPC
  * handlers on `ipcMain`. Every payload is strictly validated; invalid payloads are dropped and
@@ -96,65 +62,11 @@ function syncChildWindowZOrder(win: AlwaysOnTopWindowLike, enabled: boolean): vo
  */
 export function registerWindowIpc(deps: WindowIpcDeps): () => void {
   const { ipcMain, getWindowFromSender, onSetAspectRatioLock, log } = deps;
-  const lastNotified = new WeakMap<AlwaysOnTopWindowLike, boolean>();
-  const aspectRatioLocked = new WeakMap<AlwaysOnTopWindowLike, boolean>();
-  const watched = new WeakSet<AlwaysOnTopWindowLike>();
-  const detachListeners: Array<() => void> = [];
-
-  const notifyIfChanged = (win: AlwaysOnTopWindowLike, enabled: boolean): void => {
-    if (lastNotified.get(win) === enabled) return;
-    lastNotified.set(win, enabled);
-    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
-      win.webContents.send(WINDOW_CHANNELS.alwaysOnTopChanged, enabled);
-    }
-  };
-
-  const watchWindow = (win: AlwaysOnTopWindowLike): void => {
-    if (watched.has(win) || typeof win.on !== 'function') return;
-    watched.add(win);
-    const onAlwaysOnTopChanged = (_event: unknown, isAlwaysOnTop: boolean): void => {
-      if (win.isDestroyed()) return;
-      const actual = typeof isAlwaysOnTop === 'boolean' ? isAlwaysOnTop : win.isAlwaysOnTop();
-      syncChildWindowZOrder(win, actual);
-      notifyIfChanged(win, actual);
-    };
-    win.on('always-on-top-changed', onAlwaysOnTopChanged);
-    detachListeners.push(() => {
-      if (!win.isDestroyed()) {
-        win.removeListener?.('always-on-top-changed', onAlwaysOnTopChanged);
-      }
-    });
-  };
+  const aspectRatioLocked = new WeakMap<WindowIpcWindowLike, boolean>();
 
   const assertTrusted = (event: TrustedSenderEventLike, channel: string): void => {
     assertTrustedSenderFrame(event, channel, deps.devOrigin, log);
   };
-
-  ipcMain.handle(WINDOW_CHANNELS.getAlwaysOnTop, async (event) => {
-    assertTrusted(event, WINDOW_CHANNELS.getAlwaysOnTop);
-    const win = getWindowFromSender(event.sender);
-    if (!win || win.isDestroyed()) return false;
-    watchWindow(win);
-    return win.isAlwaysOnTop();
-  });
-
-  ipcMain.handle(WINDOW_CHANNELS.setAlwaysOnTop, async (event, enabled) => {
-    assertTrusted(event, WINDOW_CHANNELS.setAlwaysOnTop);
-    const win = getWindowFromSender(event.sender);
-    if (!isAlwaysOnTopFlag(enabled)) {
-      log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.setAlwaysOnTop} payload`);
-      return win && !win.isDestroyed() ? win.isAlwaysOnTop() : false;
-    }
-    if (!win || win.isDestroyed()) return false;
-    watchWindow(win);
-    if (win.isAlwaysOnTop() !== enabled) {
-      win.setAlwaysOnTop(enabled, 'floating');
-    }
-    const actual = win.isAlwaysOnTop();
-    syncChildWindowZOrder(win, actual);
-    notifyIfChanged(win, actual);
-    return actual;
-  });
 
   ipcMain.handle(WINDOW_CHANNELS.setAspectRatioLock, async (event, enabled) => {
     assertTrusted(event, WINDOW_CHANNELS.setAspectRatioLock);
@@ -251,8 +163,6 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
   });
 
   return () => {
-    ipcMain.removeHandler(WINDOW_CHANNELS.getAlwaysOnTop);
-    ipcMain.removeHandler(WINDOW_CHANNELS.setAlwaysOnTop);
     ipcMain.removeHandler(WINDOW_CHANNELS.setAspectRatioLock);
     ipcMain.removeHandler(WINDOW_CHANNELS.setMinimizeToTray);
     ipcMain.removeHandler(WINDOW_CHANNELS.openPopout);
@@ -262,6 +172,5 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     ipcMain.removeHandler(WINDOW_CHANNELS.openExternalUrl);
     ipcMain.removeHandler(WINDOW_CHANNELS.getZoomLevel);
     ipcMain.removeHandler(WINDOW_CHANNELS.setZoomLevel);
-    for (const detach of detachListeners.splice(0)) detach();
   };
 }

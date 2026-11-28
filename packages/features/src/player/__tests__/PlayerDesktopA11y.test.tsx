@@ -225,7 +225,7 @@ describe('Desktop Player A11y, Shortcuts, Fullscreen Guard & Pool Key (#283, #26
       expect(screen.getByTestId('player-mute-button').props['aria-keyshortcuts']).toBe('m');
       expect(screen.getByTestId('player-mute-button').props.accessibilityLabel).toBe('Mute');
       expect(screen.getByTestId('player-fullscreen-button').props['aria-keyshortcuts']).toBe('f');
-      expect(screen.getByTestId('player-tracks-button').props['aria-keyshortcuts']).toBe('c');
+      expect(screen.getByTestId('player-subtitles-button').props['aria-keyshortcuts']).toBe('c');
       expect(screen.getByTestId('player-back').props['aria-keyshortcuts']).toBe('Escape');
 
       await desktop.view.unmount();
@@ -268,7 +268,7 @@ describe('Desktop Player A11y, Shortcuts, Fullscreen Guard & Pool Key (#283, #26
     await nativeView.unmount();
   });
 
-  it('#283: supports c/m/f desktop shortcuts, sets dialog semantics on TrackPickerModal & PlayerSettingsSheet, and suppresses editable input hotkeys', async () => {
+  it('#283: supports c/m/f desktop shortcuts, sets dialog semantics on PlayerSettingsSheet across views, and suppresses editable input hotkeys', async () => {
     const webEnv = installMockWebWindow();
     try {
       const desktop = await mountDesktopWebPlayer({});
@@ -292,20 +292,21 @@ describe('Desktop Player A11y, Shortcuts, Fullscreen Guard & Pool Key (#283, #26
       expect(desktop.engine.commands.some((c) => c.name === 'seek')).toBe(false);
       expect(desktop.toggleMute).not.toHaveBeenCalled();
       expect(desktop.toggleFullscreen).not.toHaveBeenCalled();
-      expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+      expect(screen.queryByTestId('player-settings-desktop-dialog')).toBeNull();
 
-      // 'm' toggles mute, 'c' opens TrackPickerModal with dialog ARIA semantics
+      // 'm' toggles mute, 'c' opens PlayerSettingsSheet directly on Subtitles with dialog ARIA semantics
       await webEnv.emitKey('keydown', { key: 'm' });
       expect(desktop.toggleMute).toHaveBeenCalledTimes(1);
 
       await webEnv.emitKey('keydown', { key: 'c' });
-      const tracksPanel = screen.getByTestId('player-tracks-panel');
-      expect(tracksPanel.props.role).toBe('dialog');
-      expect(tracksPanel.props['aria-modal']).toBe(true);
+      const subtitlesDialog = screen.getByTestId('player-settings-desktop-dialog');
+      expect(subtitlesDialog.props.role).toBe('dialog');
+      expect(subtitlesDialog.props['aria-modal']).toBe(true);
+      expect(screen.getByTestId('player-settings-sub-s:1')).toBeTruthy();
 
-      // 'c' again closes TrackPickerModal cleanly
+      // 'c' again closes Subtitles dialog cleanly
       await webEnv.emitKey('keydown', { key: 'c' });
-      expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+      expect(screen.queryByTestId('player-settings-desktop-dialog')).toBeNull();
 
       // Opening settings renders dialog ARIA semantics in desktop flex flow
       await fireEvent.press(screen.getByTestId('player-settings-button'));
@@ -319,7 +320,7 @@ describe('Desktop Player A11y, Shortcuts, Fullscreen Guard & Pool Key (#283, #26
     }
   });
 
-  it('#283: collapses open TrackPickerModal and PlayerSettingsSheet BEFORE invoking toggleFullscreen via keyboard "f" or OSD button', async () => {
+  it('#283: collapses open Subtitles and PlayerSettingsSheet BEFORE invoking toggleFullscreen via keyboard "f" or OSD button', async () => {
     const webEnv = installMockWebWindow();
     const events: string[] = [];
     try {
@@ -329,15 +330,15 @@ describe('Desktop Player A11y, Shortcuts, Fullscreen Guard & Pool Key (#283, #26
         },
       });
 
-      // 1. TrackPickerModal open -> 'f' closes tracks FIRST, then invokes toggleFullscreen
-      await fireEvent.press(screen.getByTestId('player-tracks-button'));
-      expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+      // 1. Subtitles settings open -> 'f' closes panel FIRST, then invokes toggleFullscreen
+      await fireEvent.press(screen.getByTestId('player-subtitles-button'));
+      expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
 
       await webEnv.emitKey('keydown', { key: 'f' });
-      expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+      expect(screen.queryByTestId('player-settings-panel')).toBeNull();
       expect(events).toEqual(['toggleFullscreen']);
 
-      // 2. PlayerSettingsSheet open -> 'f' closes settings FIRST, then invokes toggleFullscreen
+      // 2. PlayerSettingsSheet root open -> 'f' closes settings FIRST, then invokes toggleFullscreen
       await fireEvent.press(screen.getByTestId('player-settings-button'));
       expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
 
@@ -345,16 +346,16 @@ describe('Desktop Player A11y, Shortcuts, Fullscreen Guard & Pool Key (#283, #26
       expect(screen.queryByTestId('player-settings-panel')).toBeNull();
       expect(events).toEqual(['toggleFullscreen', 'toggleFullscreen']);
 
-      // 3. OSD Fullscreen button while TrackPickerModal is open closes tracks FIRST, then invokes toggleFullscreen
-      await fireEvent.press(screen.getByTestId('player-tracks-button'));
-      expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+      // 3. OSD Fullscreen button while Subtitles view is open closes panel FIRST, then invokes toggleFullscreen
+      await fireEvent.press(screen.getByTestId('player-subtitles-button'));
+      expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
       // aria-modal isolates background OSD from accessibility queries while dialog is open
       expect(screen.queryByTestId('player-fullscreen-button')).toBeNull();
 
       await fireEvent.press(
         screen.getByTestId('player-fullscreen-button', { includeHiddenElements: true }),
       );
-      expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+      expect(screen.queryByTestId('player-settings-panel')).toBeNull();
       expect(events).toEqual(['toggleFullscreen', 'toggleFullscreen', 'toggleFullscreen']);
 
       // 4. OSD Fullscreen button while PlayerSettingsSheet is open closes settings FIRST, then invokes toggleFullscreen
@@ -369,10 +370,10 @@ describe('Desktop Player A11y, Shortcuts, Fullscreen Guard & Pool Key (#283, #26
       expect(events).toHaveLength(4);
 
       // 5. Host out-of-DOM mpv 'fullscreen' key while popovers are open collapses them BEFORE toggling fullscreen
-      await fireEvent.press(screen.getByTestId('player-tracks-button'));
-      expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+      await fireEvent.press(screen.getByTestId('player-subtitles-button'));
+      expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
       await desktop.emitHostKey('fullscreen');
-      expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+      expect(screen.queryByTestId('player-settings-panel')).toBeNull();
       expect(events).toHaveLength(5);
 
       await fireEvent.press(screen.getByTestId('player-settings-button'));
@@ -504,9 +505,11 @@ describe('Desktop Player A11y, Shortcuts, Fullscreen Guard & Pool Key (#283, #26
       expect(surfaceStyle?.flex).toBe(1);
       expect(surfaceStyle?.position).toBeUndefined();
 
-      await fireEvent.press(screen.getByTestId('player-tracks-button'));
-      const tracksStyle = StyleSheet.flatten(screen.getByTestId('player-tracks-panel').props.style);
-      expect(tracksStyle?.position).toBeUndefined();
+      await fireEvent.press(screen.getByTestId('player-subtitles-button'));
+      const subtitlesDialogStyle = StyleSheet.flatten(
+        screen.getByTestId('player-settings-desktop-dialog').props.style,
+      );
+      expect(subtitlesDialogStyle?.position).toBeUndefined();
       await webEnv.emitKey('keydown', { key: 'c' });
 
       await fireEvent.press(screen.getByTestId('player-settings-button'));

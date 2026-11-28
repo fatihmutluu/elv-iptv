@@ -192,7 +192,8 @@ describe('live-timeshift-model & catch-up player helpers', () => {
     const catchupActions = availableTvOsdActions({
       isVod: true,
       hasService: true,
-      hasTracks: false,
+      hasSubtitles: false,
+      hasAudio: false,
       showRetry: false,
       hasBackToLive: true,
     });
@@ -203,7 +204,8 @@ describe('live-timeshift-model & catch-up player helpers', () => {
     const liveTsActions = availableTvOsdActions({
       isVod: false,
       hasService: true,
-      hasTracks: false,
+      hasSubtitles: false,
+      hasAudio: false,
       showRetry: false,
       liveTimeShiftSupported: true,
       hasJumpToLive: true,
@@ -227,9 +229,9 @@ describe('live-timeshift-model & catch-up player helpers', () => {
     const seekBy = vi.fn();
     const baseState = {
       locked: false,
-      tracksOpen: false,
       settingsOpen: false,
-      infoOpen: false,
+      settingsMenu: { view: 'root' as const, index: 0 },
+      windowModeOpen: false,
       channelListOpen: false,
     };
     const hostDeps = {
@@ -241,8 +243,8 @@ describe('live-timeshift-model & catch-up player helpers', () => {
       togglePlayPause: vi.fn(),
       seekBy,
       stepSeekMs: 10_000,
-      openTracks: vi.fn(),
-      closeTracks: vi.fn(),
+      openSubtitles: vi.fn(),
+      closeSettings: vi.fn(),
       zapBy: vi.fn(),
     };
     routeHostKey('seek-back', hostDeps);
@@ -258,13 +260,10 @@ describe('live-timeshift-model & catch-up player helpers', () => {
     const focusTvScrubber = vi.fn();
     const liveSeek = vi.fn();
     const overlayState: PlayerOverlayLive = {
-      tracksOpen: false,
-      pickerCursor: { column: 'audio', index: 0 },
       settingsOpen: false,
       settingsMenu: { view: 'root', index: 0 },
-      infoOpen: false,
+      windowModeOpen: false,
       channelListOpen: false,
-      canOpenInfo: false,
       canOpenChannelList: false,
       locked: false,
       osdTier: 'controls',
@@ -299,11 +298,9 @@ describe('live-timeshift-model & catch-up player helpers', () => {
       toggleStats: vi.fn(),
       toggleResizeMode: vi.fn(),
       togglePlayPause: vi.fn(),
-      openTracks: vi.fn(),
-      closeTracks: vi.fn(),
+      openSettings: vi.fn(),
       closeSettings: vi.fn(),
       updateSettingsMenu: vi.fn(),
-      updatePickerCursor: vi.fn(),
       focusTvOsd: vi.fn(),
       blurTvOsd: vi.fn(),
       focusTvScrubber,

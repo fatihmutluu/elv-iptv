@@ -149,18 +149,17 @@ describe('Wave F0B PlayerScreen audio/subtitle delay persistence & adaptive vide
       });
     });
 
-    // Open PlayerSettingsSheet
+    // Open PlayerSettingsSheet -> Audio -> Audio settings -> step +100 ms -> 250 ms, then Reset -> 0 ms
     await fireEvent.press(view.getByTestId('player-settings-button'));
-
-    // Open Audio delay sub-view and step +50 ms -> 200 ms, then Reset -> 0 ms
-    await fireEvent.press(await view.findByTestId('player-settings-row-audio-delay'));
-    await fireEvent.press(await view.findByTestId('player-settings-audio-delay-plus-50'));
+    await fireEvent.press(await view.findByTestId('player-settings-row-audio'));
+    await fireEvent.press(await view.findByTestId('player-settings-open-audio-settings'));
+    await fireEvent.press(await view.findByTestId('player-settings-audio-delay-plus-100'));
     await waitFor(() => {
-      expect(engine.commands).toContainEqual({ name: 'setAudioDelay', attempt: 1, delayMs: 200 });
+      expect(engine.commands).toContainEqual({ name: 'setAudioDelay', attempt: 1, delayMs: 250 });
       expect(saveTrackPreference).toHaveBeenCalledWith({
         scopeKey: LIVE_TARGET.itemKey,
         sourceId: LIVE_TARGET.sourceId,
-        audioDelayMs: 200,
+        audioDelayMs: 250,
       });
     });
     await fireEvent.press(view.getByTestId('player-settings-audio-delay-reset'));
@@ -173,24 +172,27 @@ describe('Wave F0B PlayerScreen audio/subtitle delay persistence & adaptive vide
       });
     });
 
-    // Back to root -> Subtitle delay -> step -250 ms -> -350 ms
+    // Back twice -> Subtitles -> Subtitle settings -> step -100 ms -> -200 ms
     await fireEvent.press(view.getByTestId('player-settings-back'));
-    await fireEvent.press(await view.findByTestId('player-settings-row-subtitle-delay'));
-    await fireEvent.press(await view.findByTestId('player-settings-subtitle-delay-minus-250'));
+    await fireEvent.press(view.getByTestId('player-settings-back'));
+    await fireEvent.press(await view.findByTestId('player-settings-row-subtitles'));
+    await fireEvent.press(await view.findByTestId('player-settings-open-subtitle-settings'));
+    await fireEvent.press(await view.findByTestId('player-settings-subtitle-delay-minus-100'));
     await waitFor(() => {
       expect(engine.commands).toContainEqual({
         name: 'setSubtitleDelay',
         attempt: 1,
-        delayMs: -350,
+        delayMs: -200,
       });
       expect(saveTrackPreference).toHaveBeenCalledWith({
         scopeKey: LIVE_TARGET.itemKey,
         sourceId: LIVE_TARGET.sourceId,
-        subDelayMs: -350,
+        subDelayMs: -200,
       });
     });
 
-    // Back to root -> Video quality -> select 1080p then Auto
+    // Back twice to root -> Video quality -> select 1080p then Auto
+    await fireEvent.press(view.getByTestId('player-settings-back'));
     await fireEvent.press(view.getByTestId('player-settings-back'));
     await fireEvent.press(await view.findByTestId('player-settings-row-video-quality'));
     await fireEvent.press(await view.findByTestId('player-settings-video-quality-v:1080'));

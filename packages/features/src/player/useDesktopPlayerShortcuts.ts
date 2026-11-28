@@ -20,10 +20,8 @@ export interface DesktopShortcutGuard {
   readonly isSuspended?: () => boolean;
   readonly canJumpPreviousChannel: () => boolean;
   readonly onJumpPreviousChannel: () => void;
-  readonly canToggleTracks: () => boolean;
-  readonly onToggleTracks: () => void;
-  readonly canToggleInfo?: () => boolean;
-  readonly onToggleInfo?: () => void;
+  readonly canToggleSubtitles: () => boolean;
+  readonly onToggleSubtitles: () => void;
   readonly canToggleStats?: () => boolean;
   readonly onToggleStats?: () => void;
   readonly canToggleChannelList?: () => boolean;
@@ -32,8 +30,6 @@ export interface DesktopShortcutGuard {
   readonly onToggleMute: () => void;
   readonly canToggleFullscreen: () => boolean;
   readonly onToggleFullscreen: () => void;
-  readonly canToggleAlwaysOnTop?: () => boolean;
-  readonly onToggleAlwaysOnTop?: () => void;
   readonly isVod: () => boolean;
   readonly liveTimeShiftSupported?: () => boolean;
   readonly canUseShortcuts: () => boolean;
@@ -41,8 +37,6 @@ export interface DesktopShortcutGuard {
   readonly onSeekBy: (deltaMs: number) => void;
   readonly onSeekToRatio: (ratio: number) => void;
   readonly onSeekToEnd: () => void;
-  readonly onPrevChapter?: () => void;
-  readonly onNextChapter?: () => void;
   readonly onTogglePlayPause: () => void;
   readonly onKeyEvent: (event: KeyEvent) => void;
 }
@@ -106,19 +100,9 @@ function dispatchVodShortcut(
 ): boolean {
   if (typeof e.key !== 'string' || hasControlModifier(e)) return false;
 
-  if (
-    (e.key === 'i' || e.key === 'I') &&
-    e.shiftKey === true &&
-    e.repeat !== true &&
-    guard.canToggleStats?.()
-  ) {
+  if ((e.key === 'i' || e.key === 'I') && e.repeat !== true && guard.canToggleStats?.()) {
     e.preventDefault?.();
     guard.onToggleStats?.();
-    return true;
-  }
-  if (isPlainLetter(e, 'i', 'I') && guard.canToggleInfo?.()) {
-    e.preventDefault?.();
-    guard.onToggleInfo?.();
     return true;
   }
   if (isPlainLetter(e, 'g', 'G') && guard.canToggleChannelList?.()) {
@@ -131,14 +115,9 @@ function dispatchVodShortcut(
     guard.onToggleFullscreen();
     return true;
   }
-  if (isPlainLetter(e, 't', 'T') && guard.canToggleAlwaysOnTop?.()) {
+  if (isPlainLetter(e, 'c', 'C') && guard.canToggleSubtitles()) {
     e.preventDefault?.();
-    guard.onToggleAlwaysOnTop?.();
-    return true;
-  }
-  if (isPlainLetter(e, 'c', 'C') && guard.canToggleTracks()) {
-    e.preventDefault?.();
-    guard.onToggleTracks();
+    guard.onToggleSubtitles();
     return true;
   }
   if (isPlainLetter(e, 'm', 'M') && guard.canToggleMute()) {
@@ -213,16 +192,6 @@ function dispatchVodShortcut(
   if (e.key === 'End') {
     e.preventDefault?.();
     if (!repeat) guard.onSeekToEnd();
-    return true;
-  }
-  if ((e.key === '[' || e.key === 'PageUp') && guard.onPrevChapter !== undefined) {
-    e.preventDefault?.();
-    if (!repeat) guard.onPrevChapter();
-    return true;
-  }
-  if ((e.key === ']' || e.key === 'PageDown') && guard.onNextChapter !== undefined) {
-    e.preventDefault?.();
-    if (!repeat) guard.onNextChapter();
     return true;
   }
 

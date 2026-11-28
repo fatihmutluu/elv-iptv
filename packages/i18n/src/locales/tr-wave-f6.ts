@@ -39,8 +39,6 @@ export const trWaveF6Messages: Readonly<Record<WaveF6MessageId, string>> = {
   // #158 Desktop Popout Player Window & System Tray
   'player.popout.open': 'Ayrı pencerede aç',
   'player.popout.dock': 'Ana pencereye dön',
-  'player.popout.pin': 'Her zaman üstte',
-  'player.popout.unpin': 'Sabitlemeyi kaldır',
   'player.popout.close': 'Pencereyi kapat',
   'settings.desktop.minimizeToTrayTitle': 'Sistem tepsisine küçült',
   'settings.desktop.minimizeToTrayDescription':

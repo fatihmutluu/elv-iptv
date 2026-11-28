@@ -6,29 +6,26 @@ import {
   type SubtitleStyleConfig,
 } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
-import type { ChapterInfo, MediaTracks } from '@elv/playback';
-import {
-  AdaptiveSheet,
-  type FormFactor,
-  IconButton,
-  type IconName,
-  useTheme,
-  webBackdropBlur,
-} from '@elv/ui-kit';
+import type { MediaTracks } from '@elv/playback';
+import { AdaptiveSheet, type FormFactor, IconButton, useTheme, webBackdropBlur } from '@elv/ui-kit';
 import { type ComponentRef, Fragment, type ReactElement, useEffect, useRef } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { AudioDeviceInfo, VideoResizeMode } from '../ports/video-host';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
+import { PlayerAudioSettingsView } from './PlayerAudioSettingsView';
 import { SettingsRadioRow, SettingsRow, SettingsToggleRow } from './PlayerSettingsRows';
-import { SubtitleStyleSection } from './SubtitleStyleSection';
+import { PlayerSubtitleSettingsView } from './PlayerSubtitleSettingsView';
 import {
-  formatSyncDelayMs,
+  getParentSettingsView,
   type SettingsMenuState,
   type SettingsMenuView,
 } from './settings-menu-nav';
-import { buildSettingsNavRows, buildSettingsRadioItems } from './settings-sheet-items';
+import {
+  buildOrderedAdvancedEntries,
+  buildOrderedRootSettingsEntries,
+  buildSettingsRadioItems,
+} from './settings-sheet-items';
 import type { SleepTimerSnapshot } from './sleep-timer';
-import type { VodEndTimeDisplayMode } from './vod-progress-math';
 
 const APPROX_ROW_PITCH = 50;
 
@@ -41,15 +38,12 @@ export interface PlayerSettingsSheetProps {
   readonly isVod?: boolean;
   readonly playbackSpeed?: number;
   readonly resizeMode?: VideoResizeMode;
-  readonly timeDisplayMode?: VodEndTimeDisplayMode;
-  readonly alwaysOnTop?: boolean;
   readonly deinterlace?: boolean;
   readonly deinterlaceMode?: DeinterlaceMode;
   readonly pitchLock?: boolean;
   readonly audioNormalization?: boolean;
   readonly autoPlayNextEpisode?: boolean;
   readonly statsVisible: boolean;
-  readonly chapters?: readonly ChapterInfo[] | undefined;
   readonly sleepTimer?: SleepTimerSnapshot | undefined;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
@@ -65,6 +59,7 @@ export interface PlayerSettingsSheetProps {
   readonly formFactor: FormFactor;
   readonly i18n: AppI18n;
   readonly onOpenView: (view: SettingsMenuView) => void;
+  readonly onSelectProgram?: (id: string) => void;
   readonly onSelectAudio: (id: string) => void;
   readonly onSelectAudioDevice?: (name: string) => void;
   readonly onAdjustAudioDelay?: (deltaMs: number, reset?: boolean) => void;
@@ -77,79 +72,53 @@ export interface PlayerSettingsSheetProps {
   readonly onLoadSubtitleUrl?: () => void;
   readonly onChangeSubtitleStyle?: (next: SubtitleStyleConfig) => void;
   readonly onSelectSpeed?: (rate: number) => void;
-  readonly onSelectChapter?: (startMs: number) => void;
   readonly onSelectSleepTimer?: (minutes: number) => void;
   readonly onToggleSleepTimerAction?: () => void;
   readonly onSelectAndroidDecoderMode?: (mode: AndroidDecoderMode) => void;
   readonly onToggleResizeMode?: () => void;
-  readonly onCycleTimeDisplayMode?: () => void;
-  readonly onToggleInfo?: () => void;
-  readonly onToggleAlwaysOnTop?: () => void;
   readonly onToggleDeinterlace?: () => void;
   readonly onCycleDeinterlaceMode?: () => void;
   readonly onTogglePitchLock?: () => void;
   readonly onToggleAudioNormalization?: () => void;
   readonly onToggleAutoPlayNextEpisode?: () => void;
-  readonly onMinimizeToMiniPlayer?: () => void;
   readonly onEnterPip?: () => void;
   readonly onEnterMultiView?: () => void;
-  readonly onPopoutPlayer?: () => void;
   readonly onToggleStats: () => void;
   readonly onClose: () => void;
 }
 
-interface ToggleDescriptor {
-  readonly testID: string;
-  readonly icon: IconName;
-  readonly label: string;
-  readonly description: string;
-  readonly pillLabel: string;
-  readonly active: boolean;
-  readonly role: 'button' | 'switch';
-  readonly accessibilityLabel: string;
-  readonly onPress: () => void;
-}
-
-function resolveViewTitle(
-  view: SettingsMenuView,
-  i18n: AppI18n,
-  audioDelayMs: number,
-  subtitleDelayMs: number,
-): string {
+function resolveViewTitle(view: SettingsMenuView, i18n: AppI18n): string {
   switch (view) {
     case 'root':
       return i18n.t('player.settings');
     case 'subtitles':
       return i18n.t('player.subtitleTracks');
-    case 'audioDelay':
-      return `${i18n.t('player.audioDelay')} · ${formatSyncDelayMs(audioDelayMs)}`;
-    case 'subtitleDelay':
-      return `${i18n.t('player.subtitleDelay')} · ${formatSyncDelayMs(subtitleDelayMs)}`;
-    case 'subtitleStyle':
-      return i18n.t('player.subtitleStyle.section');
-    case 'audioDevice':
-      return i18n.t('player.audioDevice');
+    case 'subtitleSettings':
+      return i18n.t('player.subtitleSettings');
+    case 'audio':
+      return i18n.t('player.audioTracks');
+    case 'audioSettings':
+      return i18n.t('player.audioSettings');
     case 'videoQuality':
       return i18n.t('player.videoQuality');
     case 'quality':
       return i18n.t('player.qualityVariant');
     case 'speed':
       return i18n.t('player.speed');
-    case 'chapters':
-      return i18n.t('player.chapters');
     case 'sleepTimer':
       return i18n.t('player.sleepTimer');
+    case 'advanced':
+      return i18n.t('player.advancedSettings');
     case 'videoDecoder':
       return i18n.t('player.videoDecoder');
-    case 'audio':
-      return i18n.t('player.audioTracks');
   }
 }
 
 /**
- * Adaptive 2-level Cinema Quietude Player Settings popover / portrait bottom sheet
- * (`Subtitles`, `Audio`, `Speed`, `Chapters`, `Sleep timer`, `Aspect`, `Time display`,
- * `Programme info`, `Always on top`, `Deinterlace`, `Stats HUD`).
+ * Adaptive 2-level Cinema Quietude Player Settings popover / bottom sheet (`Wave R4`):
+ * streamlined root list (`Subtitles`, `Audio`, `Speed`, `Quality`, `Aspect`, `Multi-View`,
+ * `Sleep timer`, `Stats HUD`, `Advanced settings`), plus second-level sub-views for
+ * Subtitle Settings, Audio Settings, and Advanced Settings with click-outside backdrop on desktop.
  */
 export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactElement | null {
   const { visible, menuState, tracks, statsVisible, isTv, formFactor, i18n } = props;
@@ -159,14 +128,17 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
   const rowPitch = Math.round(APPROX_ROW_PITCH * safeFontScale);
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
+  const dockedMode = props.docked ?? true;
   const showCursor = isTv || formFactor === 'desktop';
   const desktopPanelRef = useRef<ComponentRef<typeof View> | null>(null);
   const listScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
+  const parentView = getParentSettingsView(menuState.view);
 
   useDesktopDialogTrap(
     desktopPanelRef,
     visible && isWebDesktop,
-    menuState.view === 'root' ? props.onClose : () => props.onOpenView('root'),
+    parentView === null ? props.onClose : () => props.onOpenView(parentView),
+    { modal: !dockedMode },
   );
 
   useEffect(() => {
@@ -189,311 +161,104 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   const showSubtitleStyle = props.onChangeSubtitleStyle !== undefined;
   const activeSubtitleStyle = props.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
   const showVideoQuality =
-    (tracks.videoQualities?.length ?? 0) > 0 && props.onSelectVideoQuality !== undefined;
-  const showVideoDecoder =
-    props.androidDecoderMode !== undefined && props.onSelectAndroidDecoderMode !== undefined;
-  const androidDecoderMode = props.androidDecoderMode ?? 'auto';
+    (tracks.videoQualities?.length ?? 0) > 1 && props.onSelectVideoQuality !== undefined;
   const showSleepTimer = props.onSelectSleepTimer !== undefined;
   const isRoot = menuState.view === 'root';
-  const title = resolveViewTitle(menuState.view, i18n, audioDelayMs, subtitleDelayMs);
+  const title = resolveViewTitle(menuState.view, i18n);
 
-  const navRows = isRoot
-    ? buildSettingsNavRows(
+  const advancedEntries = buildOrderedAdvancedEntries({
+    isVod,
+    deinterlace: props.deinterlace,
+    deinterlaceMode: props.deinterlaceMode,
+    pitchLock: props.pitchLock,
+    audioNormalization: props.audioNormalization,
+    autoPlayNextEpisode: props.autoPlayNextEpisode,
+    androidDecoderMode: props.androidDecoderMode,
+    i18n,
+    onToggleDeinterlace: props.onToggleDeinterlace,
+    onCycleDeinterlaceMode: props.onCycleDeinterlaceMode,
+    onSelectAndroidDecoderMode: props.onSelectAndroidDecoderMode,
+    onToggleAudioNormalization: props.onToggleAudioNormalization,
+    onTogglePitchLock: props.onTogglePitchLock,
+    onToggleAutoPlayNextEpisode: props.onToggleAutoPlayNextEpisode,
+    onEnterPip: props.onEnterPip,
+    onClose: props.onClose,
+  });
+
+  const rootEntries = isRoot
+    ? buildOrderedRootSettingsEntries({
         tracks,
         isVod,
         playbackSpeed,
+        resizeMode: props.resizeMode ?? 'fit',
+        statsVisible,
+        sleepTimer: props.sleepTimer,
+        qualityVariants: props.qualityVariants,
+        activeQualityKey: props.activeQualityKey,
+        showVideoQuality,
+        selectedVideoQualityId: props.selectedVideoQualityId,
+        showSleepTimer,
+        hasAdvanced: advancedEntries.length > 0,
         i18n,
-        {
-          show: showAudioDevice,
-          devices: props.audioDevices ?? [],
-          activeDevice: activeAudioDevice,
-        },
-        { show: showVideoDecoder, mode: androidDecoderMode },
-        {
-          chapters: props.chapters,
-          showSleepTimer,
-          sleepTimer: props.sleepTimer,
-          qualityVariants: props.qualityVariants,
-          activeQualityKey: props.activeQualityKey,
-          showAudioDelay,
-          audioDelayMs,
-          showSubtitleDelay,
-          subtitleDelayMs,
-          showSubtitleStyle,
-          subtitleStyle: activeSubtitleStyle,
-          showVideoQuality,
-          selectedVideoQualityId: props.selectedVideoQualityId,
-        },
-      )
+        onToggleResizeMode: props.onToggleResizeMode,
+        onEnterMultiView: props.onEnterMultiView,
+        onToggleStats: props.onToggleStats,
+        onClose: props.onClose,
+      })
     : [];
 
-  const toggles: ToggleDescriptor[] = [];
-  if (isRoot) {
-    if (props.onToggleResizeMode !== undefined) {
-      const rm = props.resizeMode ?? 'fit';
-      const rmLabel =
-        rm === 'fill'
-          ? i18n.t('player.aspect.fill')
-          : rm === 'stretch'
-            ? i18n.t('player.aspect.stretch')
-            : i18n.t('player.aspect.fit');
-      toggles.push({
-        testID: 'player-resize-mode-toggle',
-        icon: 'aspect',
-        label: i18n.t('player.aspect'),
-        description: i18n.t('player.settings.desc.resizeMode'),
-        pillLabel: rmLabel,
-        active: rm !== 'fit',
-        role: 'button',
-        accessibilityLabel: `${i18n.t('player.aspect')}: ${rmLabel}`,
-        onPress: props.onToggleResizeMode,
-      });
-    }
-    if (isVod && props.onCycleTimeDisplayMode !== undefined) {
-      const tm = props.timeDisplayMode ?? 'remaining';
-      const tmLabel =
-        tm === 'remaining' ? i18n.t('player.remainingTime') : i18n.t('player.totalDuration');
-      toggles.push({
-        testID: 'player-time-display-toggle',
-        icon: 'speed',
-        label: i18n.t('player.timeDisplayMode'),
-        description: i18n.t('player.settings.desc.timeDisplay'),
-        pillLabel: tmLabel,
-        active: tm !== 'remaining',
-        role: 'button',
-        accessibilityLabel: `${i18n.t('player.timeDisplayMode')}: ${tmLabel}`,
-        onPress: props.onCycleTimeDisplayMode,
-      });
-    }
-    if (props.onToggleInfo !== undefined) {
-      toggles.push({
-        testID: 'player-info-button',
-        icon: 'info',
-        label: i18n.t('player.info'),
-        description: i18n.t('player.settings.desc.info'),
-        pillLabel: i18n.t('home.details'),
-        active: false,
-        role: 'button',
-        accessibilityLabel: i18n.t('player.info'),
-        onPress: props.onToggleInfo,
-      });
-    }
-    if (props.onToggleAlwaysOnTop !== undefined) {
-      const pinned = props.alwaysOnTop === true;
-      toggles.push({
-        testID: 'player-always-on-top-button',
-        icon: 'pin',
-        label: pinned ? i18n.t('player.exitAlwaysOnTop') : i18n.t('player.alwaysOnTop'),
-        description: i18n.t('player.settings.desc.alwaysOnTop'),
-        pillLabel: pinned ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
-        active: pinned,
-        role: 'switch',
-        accessibilityLabel: pinned
-          ? i18n.t('player.exitAlwaysOnTop')
-          : i18n.t('player.alwaysOnTop'),
-        onPress: props.onToggleAlwaysOnTop,
-      });
-    }
-    if (props.onCycleDeinterlaceMode !== undefined) {
-      const mode: DeinterlaceMode =
-        props.deinterlaceMode ?? (props.deinterlace === true ? 'auto' : 'off');
-      const modeLabel =
-        mode === 'bwdif'
-          ? i18n.t('settings.deinterlaceBwdif')
-          : mode === 'auto'
-            ? i18n.t('settings.deinterlaceAuto')
-            : i18n.t('settings.deinterlaceOff');
-      toggles.push({
-        testID: 'player-deinterlace-toggle',
-        icon: 'layers',
-        label: i18n.t('player.deinterlace'),
-        description: i18n.t('player.settings.desc.deinterlace'),
-        pillLabel: modeLabel,
-        active: mode !== 'off',
-        role: 'button',
-        accessibilityLabel: `${i18n.t('player.deinterlace')}: ${modeLabel}`,
-        onPress: props.onCycleDeinterlaceMode,
-      });
-    } else if (props.onToggleDeinterlace !== undefined) {
-      const on = props.deinterlace === true;
-      toggles.push({
-        testID: 'player-deinterlace-toggle',
-        icon: 'layers',
-        label: i18n.t('player.deinterlace'),
-        description: i18n.t('player.settings.desc.deinterlace'),
-        pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
-        active: on,
-        role: 'switch',
-        accessibilityLabel: i18n.t('player.deinterlace'),
-        onPress: props.onToggleDeinterlace,
-      });
-    }
-    if (isVod && props.onTogglePitchLock !== undefined) {
-      const on = props.pitchLock !== false;
-      toggles.push({
-        testID: 'player-pitch-lock-toggle',
-        icon: 'speed',
-        label: i18n.t('settings.pitchLock'),
-        description: i18n.t('player.settings.desc.pitchLock'),
-        pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
-        active: on,
-        role: 'switch',
-        accessibilityLabel: i18n.t('settings.pitchLock'),
-        onPress: props.onTogglePitchLock,
-      });
-    }
-    if (props.onToggleAudioNormalization !== undefined) {
-      const on = props.audioNormalization === true;
-      toggles.push({
-        testID: 'player-audio-normalization-toggle',
-        icon: 'audio',
-        label: i18n.t('settings.audioNormalization'),
-        description: i18n.t('player.settings.desc.audioNormalization'),
-        pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
-        active: on,
-        role: 'switch',
-        accessibilityLabel: i18n.t('settings.audioNormalization'),
-        onPress: props.onToggleAudioNormalization,
-      });
-    }
-    if (isVod && props.onToggleAutoPlayNextEpisode !== undefined) {
-      const on = props.autoPlayNextEpisode !== false;
-      toggles.push({
-        testID: 'player-auto-play-next-toggle',
-        icon: 'play',
-        label: i18n.t('player.autoPlayNextEpisode'),
-        description: i18n.t('player.settings.desc.autoPlayNextEpisode'),
-        pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
-        active: on,
-        role: 'switch',
-        accessibilityLabel: i18n.t('player.autoPlayNextEpisode'),
-        onPress: props.onToggleAutoPlayNextEpisode,
-      });
-    }
-    if (props.onMinimizeToMiniPlayer !== undefined) {
-      toggles.push({
-        testID: 'player-settings-miniplayer',
-        icon: 'miniplayer',
-        label: i18n.t('player.miniPlayer.minimize'),
-        description: i18n.t('player.settings.desc.miniPlayer'),
-        pillLabel: i18n.t('player.miniPlayer.minimize'),
-        active: false,
-        role: 'button',
-        accessibilityLabel: i18n.t('player.miniPlayer.minimize'),
-        onPress: () => {
-          props.onClose();
-          props.onMinimizeToMiniPlayer?.();
-        },
-      });
-    }
-    if (props.onEnterPip !== undefined) {
-      toggles.push({
-        testID: 'player-settings-pip',
-        icon: 'pip',
-        label: i18n.t('player.pip.enter'),
-        description: i18n.t('player.settings.desc.pip'),
-        pillLabel: i18n.t('player.pip.enter'),
-        active: false,
-        role: 'button',
-        accessibilityLabel: i18n.t('player.pip.enter'),
-        onPress: () => {
-          props.onClose();
-          props.onEnterPip?.();
-        },
-      });
-    }
-    if (props.onEnterMultiView !== undefined) {
-      toggles.push({
-        testID: 'player-settings-multiview',
-        icon: 'multiview',
-        label: i18n.t('player.multiView.enter'),
-        description: i18n.t('player.settings.desc.multiView'),
-        pillLabel: i18n.t('player.multiView.title'),
-        active: false,
-        role: 'button',
-        accessibilityLabel: i18n.t('player.multiView.enter'),
-        onPress: () => {
-          props.onClose();
-          props.onEnterMultiView?.();
-        },
-      });
-    }
-    if (props.onPopoutPlayer !== undefined) {
-      toggles.push({
-        testID: 'player-settings-popout',
-        icon: 'popout',
-        label: i18n.t('player.popout.open'),
-        description: i18n.t('player.settings.desc.popout'),
-        pillLabel: i18n.t('player.popout.open'),
-        active: false,
-        role: 'button',
-        accessibilityLabel: i18n.t('player.popout.open'),
-        onPress: () => {
-          props.onClose();
-          props.onPopoutPlayer?.();
-        },
-      });
-    }
-    toggles.push({
-      testID: 'player-stats-toggle',
-      icon: 'info',
-      label: i18n.t('player.statsHud'),
-      description: i18n.t('player.settings.desc.stats'),
-      pillLabel: statsVisible ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
-      active: statsVisible,
-      role: 'switch',
-      accessibilityLabel: i18n.t('player.statsHud'),
-      onPress: props.onToggleStats,
-    });
-  }
+  const isStandardRadioView =
+    !isRoot &&
+    menuState.view !== 'subtitleSettings' &&
+    menuState.view !== 'audioSettings' &&
+    menuState.view !== 'advanced';
 
-  const radioItems = isRoot
-    ? []
-    : buildSettingsRadioItems({
+  const radioItems = isStandardRadioView
+    ? buildSettingsRadioItems({
         view: menuState.view,
         tracks,
         isVod,
         playbackSpeed,
-        audioDevices: props.audioDevices,
-        activeAudioDevice,
-        audioDelayMs,
-        subtitleDelayMs,
-        selectedVideoQualityId: props.selectedVideoQualityId,
+        androidDecoderMode: props.androidDecoderMode,
         qualityVariants: props.qualityVariants,
         activeQualityKey: props.activeQualityKey,
-        androidDecoderMode,
-        chapters: props.chapters,
+        selectedVideoQualityId: props.selectedVideoQualityId,
         sleepTimer: props.sleepTimer,
         i18n,
+        onSelectProgram: props.onSelectProgram,
         onSelectAudio: props.onSelectAudio,
-        onSelectAudioDevice: props.onSelectAudioDevice,
-        onAdjustAudioDelay: props.onAdjustAudioDelay,
-        onAdjustSubtitleDelay: props.onAdjustSubtitleDelay,
         onSelectVideoQuality: props.onSelectVideoQuality,
         onSelectQualityVariant: props.onSelectQualityVariant,
         onSelectSubtitle: props.onSelectSubtitle,
+        hasSubtitleDelay: showSubtitleDelay,
+        hasSubtitleStyle: showSubtitleStyle,
         dualSubtitles: props.dualSubtitles,
         onSelectSecondarySubtitle: props.onSelectSecondarySubtitle,
         onPickSubtitleFile: props.onPickSubtitleFile,
         onLoadSubtitleUrl: props.onLoadSubtitleUrl,
+        hasAudioDelay: showAudioDelay,
+        hasAudioDevice: showAudioDevice,
+        hasAudioNormalization: props.onToggleAudioNormalization !== undefined,
+        hasPitchLock: isVod && props.onTogglePitchLock !== undefined,
+        onOpenView: props.onOpenView,
         onSelectSpeed: props.onSelectSpeed,
-        onSelectChapter: props.onSelectChapter,
         onSelectSleepTimer: props.onSelectSleepTimer,
         onToggleSleepTimerAction: props.onToggleSleepTimerAction,
         onSelectAndroidDecoderMode: props.onSelectAndroidDecoderMode,
-      });
+      })
+    : [];
 
   const content = (
     <View testID="player-settings-panel" style={styles.inner}>
       <View style={[styles.header, { borderBottomColor: theme.colors.surfaceBorder }]}>
-        {!isRoot ? (
+        {parentView !== null ? (
           <IconButton
             testID="player-settings-back"
             icon="back"
             size={36}
             accessibilityLabel={i18n.t('player.settingsBack')}
             focusable={!isTv}
-            onPress={() => props.onOpenView('root')}
+            onPress={() => props.onOpenView(parentView)}
           />
         ) : null}
         <Text
@@ -518,46 +283,117 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
           style={styles.rootList}
           contentContainerStyle={styles.listGap}
         >
-          {navRows.map(([testID, icon, label, summary, targetView, tabular, description], idx) => (
-            <SettingsRow
-              key={testID}
-              testID={testID}
-              icon={icon}
-              label={label}
-              summary={summary}
-              description={description}
-              tabular={tabular}
-              focused={showCursor && menuState.index === idx}
-              isTv={isTv}
-              theme={theme}
-              onPress={() => props.onOpenView(targetView)}
-            />
-          ))}
-          {toggles.map((item, idx) => (
-            <SettingsToggleRow
-              key={item.testID}
-              {...item}
-              focused={showCursor && menuState.index === navRows.length + idx}
-              isTv={isTv}
-              theme={theme}
-            />
-          ))}
+          {rootEntries.map((entry, idx) =>
+            entry.kind === 'nav' ? (
+              <SettingsRow
+                key={entry.row[0]}
+                testID={entry.row[0]}
+                icon={entry.row[1]}
+                label={entry.row[2]}
+                summary={entry.row[3]}
+                description={entry.row[6]}
+                tabular={entry.row[5]}
+                focused={showCursor && menuState.index === idx}
+                isTv={isTv}
+                theme={theme}
+                onPress={() => props.onOpenView(entry.row[4])}
+              />
+            ) : (
+              <SettingsToggleRow
+                key={entry.toggle.testID}
+                {...entry.toggle}
+                focused={showCursor && menuState.index === idx}
+                isTv={isTv}
+                theme={theme}
+              />
+            ),
+          )}
         </ScrollView>
-      ) : menuState.view === 'subtitleStyle' ? (
+      ) : menuState.view === 'subtitleSettings' ? (
         <ScrollView
           ref={listScrollRef}
           focusable={!isTv}
           style={styles.subList}
           contentContainerStyle={styles.listGap}
         >
-          <SubtitleStyleSection
-            style={activeSubtitleStyle}
+          <PlayerSubtitleSettingsView
+            tracks={tracks}
+            showSubtitleDelay={showSubtitleDelay}
+            subtitleDelayMs={subtitleDelayMs}
+            showSubtitleStyle={showSubtitleStyle}
+            subtitleStyle={activeSubtitleStyle}
+            dualSubtitles={props.dualSubtitles === true}
             focusedIndex={menuState.index}
             showCursor={showCursor}
             isTv={isTv}
+            theme={theme}
             i18n={i18n}
-            onChange={(next) => props.onChangeSubtitleStyle?.(next)}
+            onAdjustSubtitleDelay={props.onAdjustSubtitleDelay}
+            onChangeSubtitleStyle={props.onChangeSubtitleStyle}
+            onSelectSecondarySubtitle={props.onSelectSecondarySubtitle}
+            onPickSubtitleFile={props.onPickSubtitleFile}
+            onLoadSubtitleUrl={props.onLoadSubtitleUrl}
           />
+        </ScrollView>
+      ) : menuState.view === 'audioSettings' ? (
+        <ScrollView
+          ref={listScrollRef}
+          focusable={!isTv}
+          style={styles.subList}
+          contentContainerStyle={styles.listGap}
+        >
+          <PlayerAudioSettingsView
+            isVod={isVod}
+            showAudioDelay={showAudioDelay}
+            audioDelayMs={audioDelayMs}
+            showAudioDevice={showAudioDevice}
+            audioDevices={props.audioDevices ?? []}
+            activeAudioDevice={activeAudioDevice}
+            audioNormalization={props.audioNormalization}
+            pitchLock={props.pitchLock}
+            focusedIndex={menuState.index}
+            showCursor={showCursor}
+            isTv={isTv}
+            theme={theme}
+            i18n={i18n}
+            onAdjustAudioDelay={props.onAdjustAudioDelay}
+            onSelectAudioDevice={props.onSelectAudioDevice}
+            onToggleAudioNormalization={props.onToggleAudioNormalization}
+            onTogglePitchLock={props.onTogglePitchLock}
+          />
+        </ScrollView>
+      ) : menuState.view === 'advanced' ? (
+        <ScrollView
+          ref={listScrollRef}
+          focusable={!isTv}
+          style={styles.subList}
+          contentContainerStyle={styles.listGap}
+        >
+          {advancedEntries.map((entry, idx) =>
+            entry.kind === 'nav' ? (
+              <SettingsRow
+                key={entry.row[0]}
+                testID={entry.row[0]}
+                icon={entry.row[1]}
+                label={entry.row[2]}
+                summary={entry.row[3]}
+                description={entry.row[6]}
+                tabular={entry.row[5]}
+                focused={showCursor && menuState.index === idx}
+                isTv={isTv}
+                theme={theme}
+                onPress={() => props.onOpenView(entry.row[4])}
+              />
+            ) : (
+              <SettingsToggleRow
+                key={entry.toggle.testID}
+                {...entry.toggle}
+                focused={showCursor && menuState.index === idx}
+                isTv={isTv}
+                theme={theme}
+              />
+            ),
+          )}
         </ScrollView>
       ) : (
         <ScrollView
@@ -604,18 +440,54 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
     const dialogA11yProps = isWebDesktop
       ? ({ role: 'dialog', 'aria-modal': true, 'aria-label': title } as Record<string, unknown>)
       : undefined;
-    const dockedMode = props.docked ?? true;
+    if (!dockedMode) {
+      const backdropWebProps = isWebDesktop
+        ? ({ tabIndex: -1 } as Record<string, unknown>)
+        : undefined;
+      return (
+        <View
+          ref={desktopPanelRef}
+          testID="player-settings-desktop-overlay"
+          pointerEvents="box-none"
+          style={styles.floatingOverlayRoot}
+        >
+          <Pressable
+            testID="player-settings-backdrop"
+            accessible={false}
+            aria-hidden
+            focusable={false}
+            {...backdropWebProps}
+            onPress={props.onClose}
+            style={StyleSheet.absoluteFill}
+          />
+          <View
+            testID="player-settings-desktop-dialog"
+            {...dialogA11yProps}
+            style={[
+              styles.desktopPanelFloating,
+              {
+                backgroundColor: theme.colors.glassBg,
+                borderColor: theme.colors.glassBorder,
+                borderRadius: theme.radius.modal,
+              },
+              webBackdropBlur(20),
+            ]}
+          >
+            {content}
+          </View>
+        </View>
+      );
+    }
     return (
       <View
         ref={desktopPanelRef}
         testID="player-settings-desktop-dialog"
         {...dialogA11yProps}
         style={[
-          dockedMode ? styles.desktopPanelDocked : styles.desktopPanelFloating,
+          styles.desktopPanelDocked,
           {
             backgroundColor: theme.colors.glassBg,
             borderColor: theme.colors.glassBorder,
-            ...(dockedMode ? {} : { borderRadius: theme.radius.modal }),
           },
           webBackdropBlur(20),
         ]}
@@ -630,7 +502,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
       visible={visible}
       onDismiss={props.onClose}
       testID="player-settings-sheet"
-      popoverWidth={310}
+      popoverWidth={330}
     >
       {content}
     </AdaptiveSheet>
@@ -638,17 +510,25 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
 }
 
 const styles = StyleSheet.create({
+  floatingOverlayRoot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 35,
+  },
   desktopPanelDocked: { borderTopWidth: 1, paddingHorizontal: 18, paddingVertical: 12 },
   desktopPanelFloating: {
     position: 'absolute',
-    top: 68,
+    top: 76,
     right: 24,
-    width: 320,
-    maxHeight: 520,
+    width: 340,
+    maxHeight: 540,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    zIndex: 35,
+    zIndex: 1,
   },
   inner: { gap: 8 },
   header: {
@@ -660,8 +540,8 @@ const styles = StyleSheet.create({
   },
   flex1: { flex: 1 },
   listGap: { gap: 2 },
-  rootList: { maxHeight: 440 },
-  subList: { maxHeight: 280 },
+  rootList: { maxHeight: 460 },
+  subList: { maxHeight: 360 },
   sectionHeader: { paddingTop: 8, paddingBottom: 2, paddingHorizontal: 10 },
   empty: { paddingVertical: 12, paddingHorizontal: 4 },
 });

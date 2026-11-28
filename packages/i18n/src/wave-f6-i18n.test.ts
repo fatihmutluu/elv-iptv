@@ -80,8 +80,6 @@ const EXPECTED_PAIRS: ReadonlyArray<readonly [MessageId, string, string]> = [
   // #158 Desktop Popout Player Window & System Tray
   ['player.popout.open', 'Pop out player', 'Ayrı pencerede aç'],
   ['player.popout.dock', 'Return to main window', 'Ana pencereye dön'],
-  ['player.popout.pin', 'Always on top', 'Her zaman üstte'],
-  ['player.popout.unpin', 'Unpin window', 'Sabitlemeyi kaldır'],
   ['player.popout.close', 'Close popout', 'Pencereyi kapat'],
   ['settings.desktop.minimizeToTrayTitle', 'Minimize to system tray', 'Sistem tepsisine küçült'],
   [
@@ -131,8 +129,8 @@ function parsePoEntries(raw: string): Record<string, string> {
 }
 
 describe('Wave F6 PiP, Multi-View, Mini-Player & Desktop Tray/Popout i18n (#34, #158, #221, #232, #233)', () => {
-  it('defines all 34 EN and TR keys with strict parity, .po sync, clean copy, and placeholder formatting', () => {
-    expect(WAVE_F6_KEYS).toHaveLength(34);
+  it('defines all 32 EN and TR keys with strict parity, .po sync, clean copy, and placeholder formatting', () => {
+    expect(WAVE_F6_KEYS).toHaveLength(32);
     expect(Object.keys(enWaveF6Messages).sort()).toEqual([...WAVE_F6_KEYS].sort());
     expect(Object.keys(trWaveF6Messages).sort()).toEqual([...WAVE_F6_KEYS].sort());
 

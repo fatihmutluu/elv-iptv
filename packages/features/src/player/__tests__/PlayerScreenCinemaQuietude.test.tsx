@@ -158,12 +158,14 @@ describe('PlayerScreen Cinema Quietude OSD, 2-level Settings, Touch Lock, Next E
     expect(screen.queryByTestId('player-settings-panel')).toBeNull();
     expect(screen.queryByTestId('player-stats-hud')).toBeNull();
 
-    // Open Settings -> closes any open track picker and shows root rows
-    await fireEvent.press(screen.getByTestId('player-tracks-button'));
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+    // Top-bar Subtitles button opens Settings directly on Subtitles level; Settings gear opens root
+    await fireEvent.press(screen.getByTestId('player-subtitles-button'));
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-sub-s:1')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('player-settings-close'));
+    expect(screen.queryByTestId('player-settings-panel')).toBeNull();
 
     await fireEvent.press(screen.getByTestId('player-settings-button'));
-    expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
     expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
 
     // Level 2: Subtitles -> select s:1 -> back to root
@@ -573,9 +575,12 @@ describe('PlayerScreen Cinema Quietude OSD, 2-level Settings, Touch Lock, Next E
       buildTheme({ preset: 'highContrast' }).colors.actionGlassBg,
     );
 
-    // D-pad Down -> focuses 'tracks', Right -> focuses 'settings' with AAA #FACC15 focus ring
+    // D-pad Down -> focuses 'subtitles', Right x2 -> focuses 'settings' with AAA #FACC15 focus ring
     await act(async () => {
       keys.tap(KEY_DOWN);
+    });
+    await act(async () => {
+      keys.tap(KEY_RIGHT);
     });
     await act(async () => {
       keys.tap(KEY_RIGHT);
@@ -613,8 +618,8 @@ describe('PlayerScreen Cinema Quietude OSD, 2-level Settings, Touch Lock, Next E
     expect(screen.getByTestId('player-settings-row-subtitles')).toBeTruthy();
     expect(onExit).not.toHaveBeenCalled();
 
-    // Down x7 (audio -> audioDelay -> subtitleDelay -> subtitleStyle -> speed -> sleepTimer -> aspect) -> Select toggles Fit/Fill -> Down x3 to stats -> Select toggles Stats HUD on -> Up back
-    for (let i = 0; i < 7; i += 1) {
+    // Down x3 (audio -> speed -> aspect) -> Select toggles Fit/Fill -> Down x2 (sleepTimer -> stats) -> Select toggles Stats HUD on -> Up back
+    for (let i = 0; i < 3; i += 1) {
       await act(async () => {
         keys.tap(KEY_DOWN);
       });
@@ -625,7 +630,7 @@ describe('PlayerScreen Cinema Quietude OSD, 2-level Settings, Touch Lock, Next E
     expect(
       screen.getByTestId('player-resize-mode-toggle', { includeHiddenElements: true }),
     ).toHaveTextContent(/Fill/);
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 2; i += 1) {
       await act(async () => {
         keys.tap(KEY_DOWN);
       });

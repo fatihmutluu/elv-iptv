@@ -16,7 +16,7 @@ import {
   isHiddenOsdPassthroughKey,
 } from './channel-digit-entry';
 import { targetIdentityKey } from './live-timeshift-model';
-import { buildDesktopShortcutGuard } from './player-desktop-guard';
+import { buildDesktopShortcutGuard, buildOverlayKeyRouteDeps } from './player-desktop-guard';
 import {
   type PlayerControlsParams,
   readSettingsMenuOptionsFromControls,
@@ -25,7 +25,7 @@ import {
 } from './player-key-routing';
 import { clampVolume, stepVolume } from './player-overlay-model';
 import { canPauseStatus, digitKeyToRatio, isScrubKey, STEP_SEEK_MS } from './scrub-controller';
-import { rootIndexForSettingsViewOptions } from './settings-menu-nav';
+import { parentStateForSettingsView } from './settings-menu-nav';
 import {
   createSkipBackSubtitlesController,
   type SkipBackSubtitlesController,
@@ -42,7 +42,7 @@ export type { PlayerControlsParams };
 /**
  * Coordinates VOD & Live transport, decoupled preview-seek (`#292`), hidden-OSD passthrough (`#439`),
  * 3-tier OSD (`#391`), volume/wheel (`#394`), skip-back subtitles & hold-to-2× (`#114`),
- * Info & Channel drawers (`#58`, `#57`), TV OSD bar focus, Select debounce (`#130`), and touch lock.
+ * Channel & Settings sheets (`#57`), TV OSD bar focus, Select debounce (`#130`), and touch lock.
  */
 export function usePlayerControls(params: PlayerControlsParams) {
   const { formFactor, activeTarget, status, tracks, hasTracks, showRetry, hasService } = params;
@@ -206,6 +206,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
     };
   }, [serviceRef]);
 
+  const hasWindowModeMenu =
+    params.onMinimizeToMiniPlayer !== undefined && params.onPopoutPlayer !== undefined;
+
   const overlay = usePlayerOverlayState({
     formFactor,
     itemKey: activeTarget.itemKey,
@@ -218,13 +221,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasService,
     showRetry,
     hasSettings: params.hasSettings ?? false,
-    hasInfo: params.hasInfo,
     hasChannelList: params.hasChannelList,
-    ...(params.hasXray === true ? { hasXray: true } : {}),
     hasPitchLock: params.onTogglePitchLock !== undefined,
     hasAudioNormalization: params.onToggleAudioNormalization !== undefined,
-    hasAutoSubtitlesOnSkipBack:
-      activeTarget.kind === 'vod' && params.onToggleAutoSubtitlesOnSkipBack !== undefined,
     hasAutoPlayNextEpisode:
       activeTarget.kind === 'vod' && params.onToggleAutoPlayNextEpisode !== undefined,
     hasAudioDevice:
@@ -240,21 +239,17 @@ export function usePlayerControls(params: PlayerControlsParams) {
     canPickSubtitleFile: params.canPickSubtitleFile,
     canLoadSubtitleUrl: params.canLoadSubtitleUrl,
     hasVideoQuality:
-      (tracks.videoQualities?.length ?? 0) > 0 && params.onSelectVideoQuality !== undefined,
+      (tracks.videoQualities?.length ?? 0) > 1 && params.onSelectVideoQuality !== undefined,
     selectedVideoQualityId: params.selectedVideoQualityId,
     qualityVariants: params.qualityVariants,
     hasVideoDecoder:
       params.androidDecoderMode !== undefined && params.onSelectAndroidDecoderMode !== undefined,
     androidDecoderMode: params.androidDecoderMode,
-    chapters: params.chapters,
     hasSleepTimer: params.onSelectSleepTimer !== undefined,
     sleepTimerMinutes: params.sleepTimerMinutes,
-    hasTimeDisplay: params.onCycleTimeDisplayMode !== undefined,
-    hasAlwaysOnTop: params.onToggleAlwaysOnTop !== undefined,
-    hasMiniPlayer: params.onMinimizeToMiniPlayer !== undefined,
     hasPip: params.onEnterPip !== undefined,
     hasMultiView: params.onEnterMultiView !== undefined,
-    hasPopout: params.onPopoutPlayer !== undefined,
+    hasWindowModeMenu,
     hasNextEpisode: params.hasNextEpisode ?? false,
     hasPreviousChannel,
     ...(params.hasBackToLive === true ? { hasBackToLive: true } : {}),
@@ -376,7 +371,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
 
   const handleWheelVolume = (deltaY: number): boolean => {
     const s = overlay.liveRef.current;
-    if (s.locked || s.tracksOpen || s.settingsOpen || s.infoOpen || s.channelListOpen) {
+    if (s.locked || s.settingsOpen || s.windowModeOpen || s.channelListOpen) {
       return false;
     }
     if (!Number.isFinite(deltaY) || deltaY === 0) return false;
@@ -407,19 +402,16 @@ export function usePlayerControls(params: PlayerControlsParams) {
       return;
     }
     if (s.locked) overlay.unlockControls();
+    else if (s.windowModeOpen) overlay.closeWindowMode();
     else if (s.settingsOpen) {
-      if (s.settingsMenu.view !== 'root') {
-        overlay.updateSettingsMenu({
-          view: 'root',
-          index: rootIndexForSettingsViewOptions(
-            s.settingsMenu.view,
-            readSettingsMenuOptionsFromControls(cbRef.current, s.canOpenInfo),
-          ),
-        });
-      } else overlay.closeSettings();
-    } else if (s.tracksOpen) overlay.closeTracks();
-    else if (s.infoOpen) overlay.closeInfo();
-    else if (s.channelListOpen) overlay.closeChannelList();
+      const parent = parentStateForSettingsView(
+        s.settingsMenu.view,
+        s.tracks,
+        readSettingsMenuOptionsFromControls(cbRef.current),
+      );
+      if (parent !== null) overlay.updateSettingsMenu(parent);
+      else overlay.closeSettings();
+    } else if (s.channelListOpen) overlay.closeChannelList();
     else if (isTv && s.tvScrubberFocused) overlay.blurTvScrubber();
     else if (isTv && s.tvOsdFocused) overlay.blurTvOsd();
     else if (s.osdTier === 'progress') overlay.hideOsd();
@@ -450,14 +442,11 @@ export function usePlayerControls(params: PlayerControlsParams) {
     else if (act === 'backToLive') {
       overlay.blurTvOsd();
       cbRef.current.onBackToLive?.();
-    } else if (act === 'tracks') overlay.openTracks();
-    else if (act === 'settings') overlay.openSettings();
-    else if (act === 'info') overlay.toggleInfo();
+    } else if (act === 'subtitles') overlay.openSettings('subtitles', 'subtitles');
+    else if (act === 'audio') overlay.openSettings('audio', 'audio');
+    else if (act === 'settings') overlay.openSettings('root', 'settings');
     else if (act === 'channelList') overlay.toggleChannelList();
-    else if (act === 'xray') {
-      overlay.blurTvOsd();
-      cbRef.current.onToggleXray?.();
-    } else if (act === 'retry') retry();
+    else if (act === 'retry') retry();
     else if (act === 'prevChannel') {
       overlay.blurTvOsd();
       cbRef.current.onJumpPreviousChannel?.();
@@ -516,7 +505,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     if (isTv) overlay.notifyOsdActivity();
     if (event.kind === 'press' && event.key === 'select' && isWebButtonActive()) return true;
 
-    const anySheetOpen = s.settingsOpen || s.tracksOpen || s.channelListOpen || s.infoOpen;
+    const anySheetOpen = s.settingsOpen || s.windowModeOpen || s.channelListOpen;
     if (
       cbRef.current.previewChannelActive &&
       !anySheetOpen &&
@@ -529,73 +518,32 @@ export function usePlayerControls(params: PlayerControlsParams) {
 
     const isVodTarget = cbRef.current.activeTarget.kind === 'vod';
     if (
-      routeOverlayAndMediaKey(event, {
-        isTv,
-        liveTimeShiftSupported: cbRef.current.liveTimeShiftSupported === true,
-        ...readSettingsMenuOptionsFromControls(cbRef.current, s.canOpenInfo),
-        playbackSpeed: playbackSpeedRef.current,
-        state: s,
-        service: serviceRef.current,
-        scrub,
-        digitBuf,
-        allowTvSelect,
-        showOsd: overlay.showOsd,
-        toggleStats: overlay.toggleStats,
-        toggleInfo: overlay.toggleInfo,
-        toggleAlwaysOnTop: cbRef.current.onToggleAlwaysOnTop,
-        toggleTimeDisplayMode: cbRef.current.onCycleTimeDisplayMode,
-        toggleChannelList: overlay.toggleChannelList,
-        toggleResizeMode: overlay.toggleResizeMode,
-        toggleDeinterlace: cbRef.current.onCycleDeinterlaceMode ?? overlay.toggleDeinterlace,
-        togglePitchLock: cbRef.current.onTogglePitchLock,
-        toggleAudioNormalization: cbRef.current.onToggleAudioNormalization,
-        toggleAutoSubtitlesOnSkipBack: cbRef.current.onToggleAutoSubtitlesOnSkipBack,
-        toggleAutoPlayNextEpisode: cbRef.current.onToggleAutoPlayNextEpisode,
-        onMinimizeToMiniPlayer: cbRef.current.onMinimizeToMiniPlayer,
-        onEnterPip: cbRef.current.onEnterPip,
-        onEnterMultiView: cbRef.current.onEnterMultiView,
-        onPopoutPlayer: cbRef.current.onPopoutPlayer,
-        onChannelListMove: cbRef.current.onChannelListMove,
-        onChannelListSwitchTab: cbRef.current.onChannelListSwitchTab,
-        onChannelListSelect: cbRef.current.onChannelListSelect,
-        togglePlayPause,
-        openTracks: overlay.openTracks,
-        closeTracks: overlay.closeTracks,
-        closeSettings: overlay.closeSettings,
-        updateSettingsMenu: overlay.updateSettingsMenu,
-        updatePickerCursor: overlay.updatePickerCursor,
-        focusTvOsd: overlay.focusTvOsd,
-        blurTvOsd: overlay.blurTvOsd,
-        focusTvScrubber: overlay.focusTvScrubber,
-        blurTvScrubber: overlay.blurTvScrubber,
-        activateTvOsd,
-        selectSpeed,
-        selectProgram,
-        selectAudio,
-        selectSubtitle,
-        selectSecondarySubtitle: cbRef.current.onSelectSecondarySubtitle,
-        pickSubtitleFile: cbRef.current.onPickSubtitleFile,
-        loadSubtitleUrl: cbRef.current.onLoadSubtitleUrl,
-        stepSubtitleStyle: cbRef.current.onStepSubtitleStyle,
-        resetSubtitleStyle: cbRef.current.onResetSubtitleStyle,
-        selectChapter: cbRef.current.onSelectChapter,
-        selectSleepTimer: cbRef.current.onSelectSleepTimer,
-        toggleSleepTimerAction: cbRef.current.onToggleSleepTimerAction,
-        selectAudioDevice: cbRef.current.onSelectAudioDevice,
-        adjustAudioDelay: cbRef.current.onAdjustAudioDelay,
-        adjustSubtitleDelay: cbRef.current.onAdjustSubtitleDelay,
-        selectVideoQuality: cbRef.current.onSelectVideoQuality,
-        selectQualityVariant: cbRef.current.onSelectQualityVariant,
-        selectAndroidDecoderMode: cbRef.current.onSelectAndroidDecoderMode,
-        onExit: () => onExitRef.current(),
-        onJumpPreviousChannel: cbRef.current.onJumpPreviousChannel,
-        keymapOverrides: keymapOverridesRef.current,
-        openSettings: overlay.openSettings,
-        seekBy,
-        stepSeekMs: getStepSeekMs(),
-        zapBy: (delta) => zapByRef.current(delta, false),
-        toggleMute: cbRef.current.onToggleMute !== undefined ? toggleMute : undefined,
-      })
+      routeOverlayAndMediaKey(
+        event,
+        buildOverlayKeyRouteDeps({
+          isTv,
+          playbackSpeed: playbackSpeedRef.current,
+          state: s,
+          service: serviceRef.current,
+          scrub,
+          digitBuf,
+          allowTvSelect,
+          params: cbRef.current,
+          overlay,
+          togglePlayPause,
+          activateTvOsd,
+          selectSpeed,
+          selectProgram,
+          selectAudio,
+          selectSubtitle,
+          onExit: () => onExitRef.current(),
+          keymapOverrides: keymapOverridesRef.current,
+          seekBy,
+          stepSeekMs: getStepSeekMs(),
+          zapBy: (delta) => zapByRef.current(delta, false),
+          toggleMute,
+        }),
+      )
     ) {
       return true;
     }
@@ -648,7 +596,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     else if (event.kind === 'press' && event.key === 'previous') zapByRef.current(-1, false);
     else if (isTv && event.kind === 'press' && event.key === 'left') {
       if (s.canOpenChannelList) overlay.openChannelList();
-      else if (s.hasTracks) overlay.openTracks();
+      else if (s.hasTracks) overlay.openSettings('subtitles', 'subtitles');
     } else if (
       isTv &&
       event.kind === 'press' &&
@@ -684,9 +632,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
   });
 
   const toggleFullscreen = (): void => {
-    if (overlay.liveRef.current.tracksOpen) overlay.closeTracks();
     if (overlay.liveRef.current.settingsOpen) overlay.closeSettings();
-    if (overlay.liveRef.current.infoOpen) overlay.closeInfo();
+    if (overlay.liveRef.current.windowModeOpen) overlay.closeWindowMode();
     if (overlay.liveRef.current.channelListOpen) overlay.closeChannelList();
     cbRef.current.onToggleFullscreen?.();
   };
@@ -721,15 +668,14 @@ export function usePlayerControls(params: PlayerControlsParams) {
       onStop: handleStop,
       toggleFullscreen,
       toggleResizeMode: overlay.toggleResizeMode,
-      toggleAlwaysOnTop: cbRef.current.onToggleAlwaysOnTop,
       togglePlayPause,
       seekBy,
       stepSeekMs: getStepSeekMs(),
       stepVolumeBy,
       toggleMute: cbRef.current.onToggleMute !== undefined ? toggleMute : undefined,
-      openTracks: overlay.openTracks,
-      closeTracks: overlay.closeTracks,
-      toggleInfo: overlay.toggleInfo,
+      openSubtitles: () => overlay.openSettings('subtitles', 'subtitles'),
+      closeSettings: overlay.closeSettings,
+      toggleStats: overlay.toggleStats,
       toggleChannelList: overlay.toggleChannelList,
       zapBy: (delta) => zapByRef.current(delta),
       onJumpPreviousChannel: cbRef.current.onJumpPreviousChannel,
@@ -743,9 +689,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
       cbRef,
       externalOverlayOpenRef,
       overlayLiveRef: overlay.liveRef,
-      openTracks: overlay.openTracks,
-      closeTracks: overlay.closeTracks,
-      toggleInfo: overlay.toggleInfo,
+      openSettings: overlay.openSettings,
+      closeSettings: overlay.closeSettings,
       toggleStats: overlay.toggleStats,
       toggleChannelList: overlay.toggleChannelList,
       toggleMute,

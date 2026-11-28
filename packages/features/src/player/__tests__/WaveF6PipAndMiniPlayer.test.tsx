@@ -180,17 +180,18 @@ describe('Wave F6 OS Picture-in-Picture (#34) & Floating Corner Mini-Player (#23
     expect(setAutoEnterPip).toHaveBeenLastCalledWith(false, 1920, 1080);
   });
 
-  it('respects portrait phone 3-icon cap in OSD while keeping Mini-Player & PiP in Settings sheet, and supports tablet pinch-out (#34, #233)', async () => {
+  it('respects portrait phone OSD cap while keeping PiP reachable inside Advanced settings, and supports tablet pinch-out (#34, #233)', async () => {
     const engine = createFakePlayerEngine({
       now: () => performance.now(),
       schedule: (fn, ms) => setTimeout(fn, ms),
       cancel: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
     });
+    const enterPictureInPicture = jest.fn(() => true);
     const videoHost: VideoHost = {
       open: () => ({
         engine,
         renderSurface: ({ testID }) => <View testID={testID ?? 'player-surface'} />,
-        enterPictureInPicture: () => true,
+        enterPictureInPicture,
       }),
     };
     const onMinimize = jest.fn();
@@ -216,18 +217,17 @@ describe('Wave F6 OS Picture-in-Picture (#34) & Floating Corner Mini-Player (#23
     );
 
     await waitFor(() => expect(screen.getByTestId('player-settings-button')).toBeTruthy());
-    // Portrait phone caps top-right cluster: none of the extra Wave F6 icons render in top bar
-    expect(screen.queryByTestId('player-minimize-button')).toBeNull();
+    // Portrait phone hides desktop/landscape window-mode, PiP, and removed Multi-View buttons from top bar
+    expect(screen.queryByTestId('player-window-mode-button')).toBeNull();
     expect(screen.queryByTestId('player-pip-button')).toBeNull();
     expect(screen.queryByTestId('player-multiview-button')).toBeNull();
-    expect(screen.queryByTestId('player-popout-button')).toBeNull();
 
-    // Open Settings sheet -> Mini-Player & PiP actions are reachable there
+    // Open Settings -> Advanced settings -> PiP action triggers native PiP cleanly
     await fireEvent.press(screen.getByTestId('player-settings-button'));
-    expect(screen.getByTestId('player-settings-miniplayer')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('player-settings-row-advanced'));
     expect(screen.getByTestId('player-settings-pip')).toBeTruthy();
-    await fireEvent.press(screen.getByTestId('player-settings-miniplayer'));
-    expect(onMinimize).toHaveBeenCalledTimes(1);
+    await fireEvent.press(screen.getByTestId('player-settings-pip'));
+    expect(enterPictureInPicture).toHaveBeenCalledTimes(1);
     await phoneView.unmount();
 
     // Tablet pinch-out (< 1.0x) triggers onMinimizeToMiniPlayer
