@@ -246,6 +246,8 @@ export function createCoalescedCatalog(
 
   const saveProgressFn = c.saveProgress?.bind(c);
   const setWatchedFn = c.setWatched?.bind(c);
+  const setSeasonWatchedFn = c.setSeasonWatched?.bind(c);
+  const setSeriesWatchedFn = c.setSeriesWatched?.bind(c);
   const getProgressFn = c.getProgress?.bind(c);
   const queryNextEpisodeFn = c.queryNextEpisode?.bind(c);
   const listContinueWatchingFn = c.listContinueWatching?.bind(c);
@@ -637,6 +639,26 @@ export function createCoalescedCatalog(
               if (prevProgress !== undefined) await prevProgress;
               return setWatchedFn(itemKey, watched, profileId);
             });
+          },
+        }
+      : {}),
+    ...(setSeasonWatchedFn
+      ? {
+          setSeasonWatched: async (seriesKey, season, watched, profileId) => {
+            const p = normalizeProfile(profileId);
+            await coalescer.flushPrefix(`progress:${p}:`);
+            await coalescer.flushPrefix(`watched:${p}:`);
+            return setSeasonWatchedFn(seriesKey, season, watched, profileId);
+          },
+        }
+      : {}),
+    ...(setSeriesWatchedFn
+      ? {
+          setSeriesWatched: async (seriesKey, watched, profileId) => {
+            const p = normalizeProfile(profileId);
+            await coalescer.flushPrefix(`progress:${p}:`);
+            await coalescer.flushPrefix(`watched:${p}:`);
+            return setSeriesWatchedFn(seriesKey, watched, profileId);
           },
         }
       : {}),

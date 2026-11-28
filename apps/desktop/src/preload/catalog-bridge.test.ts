@@ -726,4 +726,58 @@ describe('createCatalogBridge', () => {
     off();
     await bridge.close();
   });
+
+  it('routes setSeasonWatched and setSeriesWatched via callResult and does NOT fire onChanged listeners', async () => {
+    const h = createFakeIpcRenderer();
+    const bridge = createCatalogBridge(h.ipc);
+
+    const openP = bridge.open();
+    const port = new FakeRendererPort();
+    h.deliverPort(1, port);
+    await Promise.resolve();
+    port.deliver({ type: 'result', reqId: 1, value: ok(undefined) });
+    await openP;
+
+    let changedCount = 0;
+    const off = bridge.onChanged(() => {
+      changedCount += 1;
+    });
+
+    const seasonP = bridge.setSeasonWatched?.('x:s1:series:42', 1, true, 'default');
+    const seriesP = bridge.setSeriesWatched?.('x:s1:series:42', false);
+    await Promise.resolve();
+
+    expect(port.sent.slice(1)).toEqual([
+      {
+        type: 'call',
+        reqId: 2,
+        call: {
+          method: 'setSeasonWatched',
+          seriesKey: 'x:s1:series:42',
+          season: 1,
+          watched: true,
+          profileId: 'default',
+        },
+      },
+      {
+        type: 'call',
+        reqId: 3,
+        call: {
+          method: 'setSeriesWatched',
+          seriesKey: 'x:s1:series:42',
+          watched: false,
+        },
+      },
+    ]);
+
+    port.deliver({ type: 'result', reqId: 2, value: ok(4) });
+    port.deliver({ type: 'result', reqId: 3, value: ok(8) });
+
+    expect(await seasonP).toEqual({ ok: true, value: 4 });
+    expect(await seriesP).toEqual({ ok: true, value: 8 });
+    expect(changedCount).toBe(0);
+
+    off();
+    await bridge.close();
+  });
 });

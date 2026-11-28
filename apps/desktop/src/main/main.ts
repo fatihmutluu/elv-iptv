@@ -47,6 +47,7 @@ import {
 } from './catalog/secret-store.ts';
 import { parseDevServerUrl } from './dev-server.ts';
 import { registerDiagnosticsIpc } from './diagnostics-ipc.ts';
+import { createDesktopDownloadDeps } from './downloads/desktop-download-deps.ts';
 import {
   createDesktopDownloadManager,
   type DesktopDownloadManager,
@@ -727,6 +728,7 @@ if (hasLock) {
     desktopDownloadManager = createDesktopDownloadManager({
       downloadsDir: getManagedDownloadsDir(app.getPath('userData')),
       log: logger.log,
+      ...createDesktopDownloadDeps({ getCoordinator: () => catalogCoordinator, log: logger.log }),
     });
     disposeDownloadsIpc = registerDownloadsIpc({
       ipcMain,
@@ -735,9 +737,7 @@ if (hasLock) {
       getBroadcastTargets: () => BrowserWindow.getAllWindows().map((w) => w.webContents),
       log: logger.log,
     });
-    if (gateQuery === null) {
-      void desktopDownloadManager.hydrate();
-    }
+    if (gateQuery === null) void desktopDownloadManager.hydrate();
     await startPlayer();
     createWindow();
     appInitialized = true;

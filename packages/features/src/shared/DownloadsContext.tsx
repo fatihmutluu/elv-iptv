@@ -32,6 +32,9 @@ export interface DownloadsContextValue {
   readonly byItemKey: ReadonlyMap<string, DownloadRecord>;
   readonly completed: readonly DownloadRecord[];
   readonly enqueue: (input: DownloadEnqueueInput) => Promise<Result<DownloadRecord>>;
+  readonly enqueueBatch: (
+    inputs: readonly DownloadEnqueueInput[],
+  ) => Promise<Result<readonly DownloadRecord[]>>;
   readonly pause: (itemKey: string) => Promise<Result<void>>;
   readonly resume: (itemKey: string) => Promise<Result<void>>;
   readonly cancel: (itemKey: string) => Promise<Result<void>>;
@@ -41,6 +44,7 @@ export interface DownloadsContextValue {
 }
 
 const UNSUPPORTED_RESULT = err(elvError('storage', 'unsupported'));
+const MAX_ENQUEUE_BATCH_CHUNK = 500;
 
 const DEFAULT_VALUE: DownloadsContextValue = {
   supported: false,
@@ -48,6 +52,7 @@ const DEFAULT_VALUE: DownloadsContextValue = {
   byItemKey: new Map(),
   completed: [],
   enqueue: async () => UNSUPPORTED_RESULT,
+  enqueueBatch: async () => UNSUPPORTED_RESULT,
   pause: async () => UNSUPPORTED_RESULT,
   resume: async () => UNSUPPORTED_RESULT,
   cancel: async () => UNSUPPORTED_RESULT,
@@ -120,14 +125,73 @@ export function DownloadsProvider({
         resolvedUrl = res.value.url;
         resolvedHeaders = res.value.headers;
       }
+      const effectiveProfileId = input.profileId ?? profileId;
       return manager.enqueue({
         ...input,
-        profileId: input.profileId ?? profileId,
+        ...(effectiveProfileId !== undefined ? { profileId: effectiveProfileId } : {}),
         ...(resolvedUrl !== undefined ? { streamUrl: resolvedUrl } : {}),
         ...(resolvedHeaders !== undefined ? { headers: resolvedHeaders } : {}),
       });
     },
     [catalog, manager, profileId],
+  );
+
+  const enqueueBatch = useCallback(
+    async (inputs: readonly DownloadEnqueueInput[]): Promise<Result<readonly DownloadRecord[]>> => {
+      if (!manager?.supported) return UNSUPPORTED_RESULT;
+      if (inputs.length === 0) return ok([]);
+
+      const normalized = inputs.map((input) => {
+        const effectiveProfileId = input.profileId ?? profileId;
+        return effectiveProfileId !== undefined
+          ? { ...input, profileId: effectiveProfileId }
+          : { ...input };
+      });
+
+      const enqueueSequentially = async (
+        items: readonly DownloadEnqueueInput[],
+        alreadyEnqueued: DownloadRecord[],
+      ): Promise<Result<readonly DownloadRecord[]>> => {
+        const out = [...alreadyEnqueued];
+        for (const item of items) {
+          const existing = byItemKey.get(item.itemKey);
+          if (
+            existing &&
+            (existing.status === 'queued' ||
+              existing.status === 'downloading' ||
+              isPlayableDownload(existing))
+          ) {
+            continue;
+          }
+          const res = await enqueue(item);
+          if (!res.ok) {
+            return out.length > 0 ? ok(out) : res;
+          }
+          out.push(res.value);
+        }
+        return ok(out);
+      };
+
+      if (typeof manager.enqueueBatch === 'function') {
+        const collected: DownloadRecord[] = [];
+        for (let offset = 0; offset < normalized.length; offset += MAX_ENQUEUE_BATCH_CHUNK) {
+          const chunk = normalized.slice(offset, offset + MAX_ENQUEUE_BATCH_CHUNK);
+          const res = await manager.enqueueBatch(chunk);
+          if (res.ok) {
+            collected.push(...res.value);
+            continue;
+          }
+          if (res.error.code === 'invalid-download-url' && catalog?.resolveStream) {
+            return enqueueSequentially(normalized.slice(offset), collected);
+          }
+          return res;
+        }
+        return ok(collected);
+      }
+
+      return enqueueSequentially(normalized, []);
+    },
+    [byItemKey, catalog, enqueue, manager, profileId],
   );
 
   const pause = useCallback(
@@ -151,6 +215,7 @@ export function DownloadsProvider({
           itemKey: record.itemKey,
           kind: record.kind,
           title: record.title,
+          ...(record.seriesKey !== undefined ? { seriesKey: record.seriesKey } : {}),
           ...(record.seriesTitle !== undefined ? { seriesTitle: record.seriesTitle } : {}),
           ...(record.season !== undefined ? { season: record.season } : {}),
           ...(record.episodeNum !== undefined ? { episodeNum: record.episodeNum } : {}),
@@ -200,6 +265,7 @@ export function DownloadsProvider({
       byItemKey,
       completed,
       enqueue,
+      enqueueBatch,
       pause,
       resume,
       cancel,
@@ -212,6 +278,7 @@ export function DownloadsProvider({
       cancel,
       completed,
       enqueue,
+      enqueueBatch,
       getOfflineUri,
       manager?.supported,
       notifyOnlinePlaybackActive,

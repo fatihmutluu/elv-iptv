@@ -1,6 +1,7 @@
 import type { DownloadRecord, Result } from '@elv/domain';
 import {
   DOWNLOADS_CHANNELS,
+  isDownloadEnqueueBatchRequest,
   isDownloadEnqueueRequest,
   isDownloadKeyRequest,
   isDownloadListRequest,
@@ -132,6 +133,18 @@ export function registerDownloadsIpc(deps: RegisterDownloadsIpcDeps): () => void
     },
   );
 
+  ipcMain.handle(
+    DOWNLOADS_CHANNELS.enqueueBatch,
+    async (event, raw): Promise<Result<readonly DownloadRecord[]>> => {
+      assertTrusted(event, DOWNLOADS_CHANNELS.enqueueBatch);
+      if (!isDownloadEnqueueBatchRequest(raw)) {
+        log?.(`downloads ipc: dropped invalid ${DOWNLOADS_CHANNELS.enqueueBatch} payload`);
+        throw new Error(`invalid ${DOWNLOADS_CHANNELS.enqueueBatch} payload`);
+      }
+      return manager.enqueueBatch(raw);
+    },
+  );
+
   ipcMain.handle(DOWNLOADS_CHANNELS.pause, async (event, raw): Promise<Result<void>> => {
     assertTrusted(event, DOWNLOADS_CHANNELS.pause);
     if (!isDownloadKeyRequest(raw)) {
@@ -181,6 +194,7 @@ export function registerDownloadsIpc(deps: RegisterDownloadsIpcDeps): () => void
     DOWNLOADS_CHANNELS.list,
     DOWNLOADS_CHANNELS.get,
     DOWNLOADS_CHANNELS.enqueue,
+    DOWNLOADS_CHANNELS.enqueueBatch,
     DOWNLOADS_CHANNELS.pause,
     DOWNLOADS_CHANNELS.resume,
     DOWNLOADS_CHANNELS.cancel,

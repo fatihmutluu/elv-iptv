@@ -1,7 +1,4 @@
-import { createWriteStream, type WriteStream } from 'node:fs';
-import { mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import {
   type DownloadEnqueueInput,
   type DownloadManagerPort,
@@ -12,44 +9,49 @@ import {
   ok,
   type Result,
 } from '@elv/domain';
-import { isHttpDownloadSourceUrl } from '../../shared/downloads-ipc.ts';
+import { isHttpDownloadSourceUrl, MAX_DOWNLOAD_RECORDS } from '../../shared/downloads-ipc.ts';
 import {
-  buildRequestHeaders,
-  closeWriteStream,
+  defaultCheckFreeSpace,
   INDEX_FILE_NAME,
   inferExtensionFromUrl,
   normalizeProfileId,
-  parseContentLength,
-  parseContentRange,
+  normalizeSeriesKey,
   readPartFileSize,
   reconcileDownloadsIndex,
   recordKey,
   safeUnlink,
-  writeChunk,
   writeIndexAtomically,
 } from './download-io.ts';
+import {
+  type ActiveDownloadJob,
+  type DownloadAbortReason,
+  type DownloadSourceSpec,
+  type ResolvedDownloadStream,
+  runDownloadTransfer,
+} from './download-runner.ts';
 import { sanitizeDownloadFileName, validateManagedDownloadPath } from './managed-path.ts';
 
+export type { ResolvedDownloadStream };
+
 const DEFAULT_PROGRESS_THROTTLE_MS = 250;
-
-type AbortReason = 'pause' | 'playback-pause' | 'cancel' | 'remove' | 'dispose';
-
-interface DownloadSourceSpec {
-  readonly streamUrl: string;
-  readonly headers: Readonly<Record<string, string>>;
-}
-
-interface ActiveJob {
-  readonly key: string;
-  readonly controller: AbortController;
-  reason?: AbortReason;
-  done: Promise<void>;
-}
+const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 
 /** Collaborators and options for {@link createDesktopDownloadManager}. */
 export interface DesktopDownloadManagerOptions {
   readonly downloadsDir: string;
   readonly fetch?: typeof globalThis.fetch;
+  readonly fetchForSource?: (sourceId: string, url: string, init: RequestInit) => Promise<Response>;
+  readonly resolveStream?: (
+    itemKey: string,
+    sourceId: string,
+    signal?: AbortSignal,
+  ) => Promise<Result<ResolvedDownloadStream>>;
+  readonly acquireConnection?: (
+    sourceId: string,
+    signal?: AbortSignal,
+  ) => Promise<{ release(): void } | null> | { release(): void } | null;
+  readonly checkFreeSpace?: (dirPath: string) => Promise<number | null>;
+  readonly idleTimeoutMs?: number;
   readonly now?: () => number;
   readonly progressThrottleMs?: number;
   readonly log?: (line: string) => void;
@@ -58,6 +60,7 @@ export interface DesktopDownloadManagerOptions {
 
 /** Desktop main-process offline VOD download runner implementing {@link DownloadManagerPort}. */
 export interface DesktopDownloadManager extends DownloadManagerPort {
+  enqueueBatch(inputs: readonly DownloadEnqueueInput[]): Promise<Result<readonly DownloadRecord[]>>;
   hydrate(): Promise<void>;
   notifyOnlinePlaybackActive(active: boolean): Promise<void>;
   dispose(): Promise<void>;
@@ -66,20 +69,28 @@ export interface DesktopDownloadManager extends DownloadManagerPort {
 /**
  * Creates the Electron main-process streaming offline VOD download manager.
  * Strictly allows `'movie' | 'episode'` kinds over `http:`/`https:`, writes `.part` files with
- * atomic rename on completion, supports HTTP `206` Range resume, persists metadata atomically in
- * `<downloadsDir>/index.json` without credentials, and auto-pauses during online playback.
+ * atomic rename on completion, supports HTTP `206` Range resume, lazy play-time stream resolution,
+ * disk-space and stall-timeout guards, per-source transport/connection hooks, and atomic index
+ * persistence in `<downloadsDir>/index.json` without credentials.
  */
 export function createDesktopDownloadManager(
   options: DesktopDownloadManagerOptions,
 ): DesktopDownloadManager {
-  const { downloadsDir, log } = options;
+  const { downloadsDir, log, resolveStream, fetchForSource, acquireConnection } = options;
   const fetchImpl = options.fetch ?? globalThis.fetch;
+  const checkFreeSpace = options.checkFreeSpace ?? defaultCheckFreeSpace;
   const now = options.now ?? (() => Date.now());
   const validatePath = options.validatePath ?? validateManagedDownloadPath;
   const progressThrottleMs = Math.max(
     0,
     options.progressThrottleMs ?? DEFAULT_PROGRESS_THROTTLE_MS,
   );
+  const idleTimeoutMs =
+    typeof options.idleTimeoutMs === 'number' &&
+    Number.isFinite(options.idleTimeoutMs) &&
+    options.idleTimeoutMs > 0
+      ? options.idleTimeoutMs
+      : DEFAULT_IDLE_TIMEOUT_MS;
   const indexPath = path.join(downloadsDir, INDEX_FILE_NAME);
 
   const records = new Map<string, DownloadRecord>();
@@ -88,10 +99,20 @@ export function createDesktopDownloadManager(
 
   let readyPromise: Promise<void> | null = null;
   let persistChain: Promise<void> = Promise.resolve();
+  let enqueueChain: Promise<void> = Promise.resolve();
   let persistSeq = 0;
-  let activeJob: ActiveJob | null = null;
+  let activeJob: ActiveDownloadJob | null = null;
   let onlinePlaybackActive = false;
   let disposed = false;
+
+  const withEnqueueLock = <T>(fn: () => Promise<T>): Promise<T> => {
+    const next = enqueueChain.then(fn, fn);
+    enqueueChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
 
   const snapshot = (profileId?: string): readonly DownloadRecord[] => {
     const all = [...records.values()].sort((a, b) => b.createdAt - a.createdAt);
@@ -132,7 +153,7 @@ export function createDesktopDownloadManager(
     return readyPromise;
   };
 
-  const abortActiveJob = async (reason: AbortReason): Promise<void> => {
+  const abortActiveJob = async (reason: DownloadAbortReason): Promise<void> => {
     const job = activeJob;
     if (job === null) return;
     if (job.reason === undefined) job.reason = reason;
@@ -140,277 +161,98 @@ export function createDesktopDownloadManager(
     await job.done.catch(() => undefined);
   };
 
-  const runDownload = async (job: ActiveJob, source: DownloadSourceSpec): Promise<void> => {
-    const current = records.get(job.key);
-    if (!current) return;
+  const markFailed = async (
+    key: string,
+    errorCode: string,
+    patch?: Partial<DownloadRecord>,
+  ): Promise<void> => {
+    const rec = records.get(key);
+    if (!rec) return;
+    if (resolveStream !== undefined) sources.delete(key);
+    records.set(key, {
+      ...rec,
+      ...patch,
+      status: 'failed',
+      pausedForPlayback: false,
+      errorCode,
+      updatedAt: now(),
+    });
+    log?.(`downloads: download failed (${errorCode})`);
+    await persistIndex();
+    emitChange();
+  };
 
-    const finalPath = path.join(downloadsDir, current.localFileName);
-    const partPath = `${finalPath}.part`;
-    let writeStream: WriteStream | null = null;
-    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-
-    try {
-      await mkdir(downloadsDir, { recursive: true });
-      const existingOffset = await readPartFileSize(partPath);
-      const response = await fetchImpl(source.streamUrl, {
-        method: 'GET',
-        headers: buildRequestHeaders(source.headers, existingOffset),
-        signal: job.controller.signal,
-        redirect: 'follow',
+  const failForInsufficientDiskSpace = async (key: string): Promise<void> => {
+    const ts = now();
+    const rec = records.get(key);
+    if (resolveStream !== undefined) sources.delete(key);
+    if (rec) {
+      records.set(key, {
+        ...rec,
+        status: 'failed',
+        pausedForPlayback: false,
+        errorCode: 'insufficient-disk-space',
+        updatedAt: ts,
       });
-
-      if (response.url && !isHttpDownloadSourceUrl(response.url)) {
-        await response.body?.cancel().catch(() => undefined);
-        throw new Error('disallowed-redirect-scheme');
-      }
-
-      const appendMode = existingOffset > 0 && response.status === 206;
-      if (response.status !== 200 && response.status !== 206) {
-        await response.body?.cancel().catch(() => undefined);
-        const failRecord = records.get(job.key);
-        if (failRecord && job.reason === undefined) {
-          records.set(job.key, {
-            ...failRecord,
-            status: 'failed',
-            pausedForPlayback: false,
-            errorCode: `http-${response.status}`,
-            updatedAt: now(),
-          });
-          log?.(`downloads: download failed with http-${response.status}`);
-          await persistIndex();
-          emitChange();
-        }
-        return;
-      }
-
-      const contentRange =
-        response.status === 206 ? parseContentRange(response.headers.get('content-range')) : null;
-      if (
-        response.status === 206 &&
-        (contentRange === null || contentRange.start !== existingOffset)
-      ) {
-        await response.body?.cancel().catch(() => undefined);
-        const failRecord = records.get(job.key);
-        if (failRecord && job.reason === undefined) {
-          records.set(job.key, {
-            ...failRecord,
-            status: 'failed',
-            pausedForPlayback: false,
-            errorCode: 'download-range-mismatch',
-            updatedAt: now(),
-          });
-          log?.('downloads: download failed (download-range-mismatch)');
-          await persistIndex();
-          emitChange();
-        }
-        return;
-      }
-
-      const contentLength = parseContentLength(response.headers.get('content-length'));
-      const totalFromRange = contentRange?.total ?? null;
-      const totalBytes =
-        totalFromRange ??
-        (contentLength !== null
-          ? appendMode
-            ? existingOffset + contentLength
-            : contentLength
-          : null);
-
-      let bytesDownloaded = appendMode ? existingOffset : 0;
-      const startRecord = records.get(job.key);
-      if (startRecord) {
-        records.set(job.key, {
-          ...startRecord,
-          bytesDownloaded,
-          totalBytes: totalBytes ?? startRecord.totalBytes,
-          updatedAt: now(),
-        });
-        emitChange();
-      }
-
-      writeStream = createWriteStream(partPath, { flags: appendMode ? 'a' : 'w' });
-      let lastBroadcastMs = now();
-
-      if (response.body && typeof response.body.getReader === 'function') {
-        reader = response.body.getReader();
-        for (;;) {
-          if (job.controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-          const step = await reader.read();
-          if (step.done) break;
-          if (step.value && step.value.byteLength > 0) {
-            await writeChunk(writeStream, step.value);
-            bytesDownloaded += step.value.byteLength;
-            const currentTs = now();
-            const liveRec = records.get(job.key);
-            if (liveRec) {
-              records.set(job.key, {
-                ...liveRec,
-                bytesDownloaded,
-                totalBytes: totalBytes ?? liveRec.totalBytes,
-                updatedAt: currentTs,
-              });
-            }
-            if (currentTs - lastBroadcastMs >= progressThrottleMs) {
-              lastBroadcastMs = currentTs;
-              emitChange();
-            }
-          }
-        }
-      } else {
-        const buf = new Uint8Array(await response.arrayBuffer());
-        if (job.controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-        if (buf.byteLength > 0) {
-          await writeChunk(writeStream, buf);
-          bytesDownloaded += buf.byteLength;
-        }
-      }
-
-      if (job.controller.signal.aborted || job.reason !== undefined) {
-        throw new DOMException('Aborted', 'AbortError');
-      }
-
-      await closeWriteStream(writeStream, false);
-      writeStream = null;
-      reader = null;
-
-      if (bytesDownloaded <= 0 || (totalBytes !== null && bytesDownloaded !== totalBytes)) {
-        const errorCode = bytesDownloaded <= 0 ? 'download-empty' : 'download-truncated';
-        const failRec = records.get(job.key);
-        if (failRec) {
-          records.set(job.key, {
-            ...failRec,
-            status: 'failed',
-            localUri: null,
-            bytesDownloaded,
-            totalBytes: totalBytes ?? failRec.totalBytes,
-            pausedForPlayback: false,
-            errorCode,
-            updatedAt: now(),
-            completedAt: null,
-          });
-          log?.(`downloads: download failed (${errorCode})`);
-          await persistIndex();
-          emitChange();
-        }
-        return;
-      }
-
-      await rename(partPath, finalPath);
-      const verified = await validatePath(downloadsDir, finalPath);
-      if (verified === null) {
-        await safeUnlink(finalPath);
-        const failRec = records.get(job.key);
-        if (failRec) {
-          records.set(job.key, {
-            ...failRec,
-            status: 'failed',
-            localUri: null,
-            bytesDownloaded,
-            totalBytes: totalBytes ?? failRec.totalBytes,
-            pausedForPlayback: false,
-            errorCode: 'download-path-invalid',
-            updatedAt: now(),
-            completedAt: null,
-          });
-          log?.('downloads: download failed (download-path-invalid)');
-          await persistIndex();
-          emitChange();
-        }
-        return;
-      }
-      const completedAt = now();
-      const completedRec = records.get(job.key);
-      if (completedRec) {
-        records.set(job.key, {
-          ...completedRec,
-          status: 'completed',
-          localUri: pathToFileURL(verified).toString(),
-          bytesDownloaded,
-          totalBytes: bytesDownloaded,
+    }
+    for (const [otherKey, other] of records) {
+      if (otherKey !== key && other.status === 'queued') {
+        records.set(otherKey, {
+          ...other,
+          status: 'paused',
           pausedForPlayback: false,
-          errorCode: null,
-          updatedAt: completedAt,
-          completedAt,
+          updatedAt: ts,
         });
-        await persistIndex();
-        emitChange();
-      }
-    } catch (error) {
-      if (reader !== null) {
-        await reader.cancel().catch(() => undefined);
-        reader = null;
-      }
-      const reason = job.reason;
-      if (writeStream !== null) {
-        const discard = reason === 'cancel' || reason === 'remove';
-        await closeWriteStream(writeStream, discard);
-        writeStream = null;
-      }
-
-      if (reason === 'remove') {
-        await safeUnlink(partPath);
-        await safeUnlink(finalPath);
-        records.delete(job.key);
-        sources.delete(job.key);
-        await persistIndex();
-        emitChange();
-        return;
-      }
-      if (reason === 'cancel') {
-        await safeUnlink(partPath);
-        const rec = records.get(job.key);
-        if (rec) {
-          records.set(job.key, {
-            ...rec,
-            status: 'canceled',
-            bytesDownloaded: 0,
-            pausedForPlayback: false,
-            errorCode: null,
-            updatedAt: now(),
-          });
-          await persistIndex();
-          emitChange();
-        }
-        return;
-      }
-      if (reason === 'pause' || reason === 'playback-pause' || reason === 'dispose') {
-        const partBytes = await readPartFileSize(partPath);
-        const rec = records.get(job.key);
-        if (rec) {
-          const resumeImmediately =
-            reason === 'playback-pause' && !onlinePlaybackActive && !disposed;
-          records.set(job.key, {
-            ...rec,
-            status: resumeImmediately ? 'queued' : 'paused',
-            bytesDownloaded: partBytes,
-            pausedForPlayback: reason === 'playback-pause' && !resumeImmediately,
-            errorCode: null,
-            updatedAt: now(),
-          });
-          await persistIndex();
-          if (reason !== 'dispose') emitChange();
-        }
-        return;
-      }
-
-      const rec = records.get(job.key);
-      if (rec) {
-        const errorCode =
-          error instanceof Error && error.message === 'disallowed-redirect-scheme'
-            ? 'invalid-download-url'
-            : 'download-network-error';
-        records.set(job.key, {
-          ...rec,
-          status: 'failed',
-          pausedForPlayback: false,
-          errorCode,
-          updatedAt: now(),
-        });
-        log?.(`downloads: download failed (${errorCode})`);
-        await persistIndex();
-        emitChange();
       }
     }
+    log?.('downloads: insufficient disk space, pausing remaining queued items');
+    await persistIndex();
+    emitChange();
+  };
+
+  const validateEnqueueInput = (input: DownloadEnqueueInput): Result<void> => {
+    if (!isDownloadMediaKind(input.kind)) {
+      return err(
+        elvError(
+          'playback',
+          'download-kind-not-allowed',
+          'only movie and episode items can be downloaded offline',
+        ),
+      );
+    }
+    if (input.streamUrl !== undefined) {
+      if (!isHttpDownloadSourceUrl(input.streamUrl)) {
+        return err(
+          elvError('playback', 'invalid-download-url', 'only http and https URLs are allowed'),
+        );
+      }
+    } else if (resolveStream === undefined) {
+      return err(
+        elvError('playback', 'invalid-download-url', 'only http and https URLs are allowed'),
+      );
+    }
+    return ok(undefined);
+  };
+
+  const runnerContext = {
+    downloadsDir,
+    records,
+    sources,
+    fetchImpl,
+    fetchForSource,
+    resolveStream,
+    acquireConnection,
+    checkFreeSpace,
+    validatePath,
+    idleTimeoutMs,
+    progressThrottleMs,
+    now,
+    isDisposed: () => disposed,
+    isOnlinePlaybackActive: () => onlinePlaybackActive,
+    persistIndex,
+    emitChange,
+    markFailed,
+    failForInsufficientDiskSpace,
   };
 
   const pumpQueue = (): void => {
@@ -421,7 +263,7 @@ export function createDesktopDownloadManager(
 
     for (const [key, rec] of queued) {
       const source = sources.get(key);
-      if (!source) continue;
+      if (source === undefined && resolveStream === undefined) continue;
       records.set(key, {
         ...rec,
         status: 'downloading',
@@ -432,17 +274,63 @@ export function createDesktopDownloadManager(
       void persistIndex();
       emitChange();
 
-      const job: ActiveJob = {
+      const job: ActiveDownloadJob = {
         key,
         controller: new AbortController(),
         done: Promise.resolve(),
       };
       activeJob = job;
-      job.done = runDownload(job, source).finally(() => {
+      job.done = runDownloadTransfer(runnerContext, job, source).finally(() => {
         if (activeJob === job) activeJob = null;
         if (!disposed && !onlinePlaybackActive) pumpQueue();
       });
       return;
+    }
+  };
+
+  const buildQueuedRecord = (
+    input: DownloadEnqueueInput,
+    profileId: string,
+    key: string,
+    existing: DownloadRecord | undefined,
+    localFileName: string,
+    preservedBytes: number,
+    ts: number,
+  ): DownloadRecord => ({
+    id: existing?.id ?? key,
+    profileId,
+    sourceId: input.sourceId,
+    itemKey: input.itemKey,
+    kind: input.kind,
+    title: input.title,
+    seriesKey:
+      input.seriesKey === undefined
+        ? (existing?.seriesKey ?? null)
+        : normalizeSeriesKey(input.seriesKey),
+    seriesTitle: input.seriesTitle ?? null,
+    season: input.season ?? null,
+    episodeNum: input.episodeNum ?? null,
+    poster: input.poster ?? null,
+    localFileName,
+    localUri: null,
+    bytesDownloaded: preservedBytes,
+    totalBytes: existing?.status === 'paused' ? existing.totalBytes : null,
+    status: 'queued',
+    pausedForPlayback: false,
+    errorCode: null,
+    createdAt: existing?.createdAt ?? ts,
+    updatedAt: ts,
+    completedAt: null,
+  });
+
+  const applySourceSpec = (key: string, input: DownloadEnqueueInput): void => {
+    if (input.streamUrl !== undefined) {
+      sources.set(key, {
+        streamUrl: input.streamUrl,
+        headers: input.headers ? { ...input.headers } : {},
+      });
+    } else {
+      sources.delete(key);
     }
   };
 
@@ -464,88 +352,205 @@ export function createDesktopDownloadManager(
       return found ? Object.freeze({ ...found }) : null;
     },
 
-    async enqueue(input: DownloadEnqueueInput): Promise<Result<DownloadRecord>> {
-      await ensureReady();
-      if (disposed) {
-        return err(elvError('storage', 'downloads-disposed', 'download manager is disposed'));
-      }
-      if (!isDownloadMediaKind(input.kind)) {
-        return err(
-          elvError(
-            'playback',
-            'download-kind-not-allowed',
-            'only movie and episode items can be downloaded offline',
-          ),
+    enqueue(input: DownloadEnqueueInput): Promise<Result<DownloadRecord>> {
+      return withEnqueueLock(async () => {
+        await ensureReady();
+        if (disposed) {
+          return err(elvError('storage', 'downloads-disposed', 'download manager is disposed'));
+        }
+        const valid = validateEnqueueInput(input);
+        if (!valid.ok) return valid;
+
+        const profileId = normalizeProfileId(input.profileId);
+        const key = recordKey(profileId, input.itemKey);
+        const existing = records.get(key);
+        if (existing && (existing.status === 'downloading' || existing.status === 'queued')) {
+          return ok(Object.freeze({ ...existing }));
+        }
+        if (existing && existing.status === 'completed') {
+          const verified = await validatePath(
+            downloadsDir,
+            path.join(downloadsDir, existing.localFileName),
+          );
+          if (verified !== null) return ok(Object.freeze({ ...existing }));
+        }
+        if (disposed) {
+          return err(elvError('storage', 'downloads-disposed', 'download manager is disposed'));
+        }
+        if (!records.has(key) && records.size >= MAX_DOWNLOAD_RECORDS) {
+          return err(elvError('storage', 'download-queue-full', 'download queue limit reached'));
+        }
+
+        const ext =
+          input.containerExtension ??
+          (input.streamUrl !== undefined ? inferExtensionFromUrl(input.streamUrl) : null);
+        const localFileName =
+          existing?.localFileName ?? sanitizeDownloadFileName(`${profileId}_${input.itemKey}`, ext);
+        const partPath = path.join(downloadsDir, `${localFileName}.part`);
+        if (existing && existing.status !== 'paused') {
+          await safeUnlink(partPath);
+        }
+
+        const preservedBytes =
+          existing && existing.status === 'paused' ? await readPartFileSize(partPath) : 0;
+        if (disposed) {
+          return err(elvError('storage', 'downloads-disposed', 'download manager is disposed'));
+        }
+        const latest = records.get(key);
+        if (latest && (latest.status === 'downloading' || latest.status === 'queued')) {
+          return ok(Object.freeze({ ...latest }));
+        }
+        if (!records.has(key) && records.size >= MAX_DOWNLOAD_RECORDS) {
+          return err(elvError('storage', 'download-queue-full', 'download queue limit reached'));
+        }
+        const nextRecord = buildQueuedRecord(
+          input,
+          profileId,
+          key,
+          latest ?? existing,
+          localFileName,
+          preservedBytes,
+          now(),
         );
-      }
-      if (!isHttpDownloadSourceUrl(input.streamUrl)) {
-        return err(
-          elvError('playback', 'invalid-download-url', 'only http and https URLs are allowed'),
-        );
-      }
 
-      const profileId = normalizeProfileId(input.profileId);
-      const key = recordKey(profileId, input.itemKey);
-      const existing = records.get(key);
-      if (existing && (existing.status === 'downloading' || existing.status === 'queued')) {
-        return ok(Object.freeze({ ...existing }));
-      }
-      if (existing && existing.status === 'completed') {
-        const verified = await validatePath(
-          downloadsDir,
-          path.join(downloadsDir, existing.localFileName),
-        );
-        if (verified !== null) return ok(Object.freeze({ ...existing }));
-      }
-
-      const ext = input.containerExtension ?? inferExtensionFromUrl(input.streamUrl);
-      const localFileName =
-        existing?.localFileName ?? sanitizeDownloadFileName(`${profileId}_${input.itemKey}`, ext);
-      const partPath = path.join(downloadsDir, `${localFileName}.part`);
-      if (existing && existing.status !== 'paused') {
-        await safeUnlink(partPath);
-      }
-
-      const preservedBytes =
-        existing && existing.status === 'paused' ? await readPartFileSize(partPath) : 0;
-      const latest = records.get(key);
-      if (latest && (latest.status === 'downloading' || latest.status === 'queued')) {
-        return ok(Object.freeze({ ...latest }));
-      }
-      const ts = now();
-
-      const nextRecord: DownloadRecord = {
-        id: existing?.id ?? key,
-        profileId,
-        sourceId: input.sourceId,
-        itemKey: input.itemKey,
-        kind: input.kind,
-        title: input.title,
-        seriesTitle: input.seriesTitle ?? null,
-        season: input.season ?? null,
-        episodeNum: input.episodeNum ?? null,
-        poster: input.poster ?? null,
-        localFileName,
-        localUri: null,
-        bytesDownloaded: preservedBytes,
-        totalBytes: existing?.status === 'paused' ? existing.totalBytes : null,
-        status: 'queued',
-        pausedForPlayback: false,
-        errorCode: null,
-        createdAt: existing?.createdAt ?? ts,
-        updatedAt: ts,
-        completedAt: null,
-      };
-
-      sources.set(key, {
-        streamUrl: input.streamUrl,
-        headers: input.headers ? { ...input.headers } : {},
+        applySourceSpec(key, input);
+        records.set(key, nextRecord);
+        await persistIndex();
+        emitChange();
+        pumpQueue();
+        return ok(Object.freeze({ ...(records.get(key) ?? nextRecord) }));
       });
-      records.set(key, nextRecord);
-      await persistIndex();
-      emitChange();
-      pumpQueue();
-      return ok(Object.freeze({ ...(records.get(key) ?? nextRecord) }));
+    },
+
+    enqueueBatch(
+      inputs: readonly DownloadEnqueueInput[],
+    ): Promise<Result<readonly DownloadRecord[]>> {
+      return withEnqueueLock(async () => {
+        await ensureReady();
+        if (disposed) {
+          return err(elvError('storage', 'downloads-disposed', 'download manager is disposed'));
+        }
+        if (inputs.length === 0) return ok([]);
+
+        const deduped: Array<{
+          readonly input: DownloadEnqueueInput;
+          readonly profileId: string;
+          readonly key: string;
+        }> = [];
+        const seenKeys = new Set<string>();
+        for (const input of inputs) {
+          const valid = validateEnqueueInput(input);
+          if (!valid.ok) return valid;
+          const profileId = normalizeProfileId(input.profileId);
+          const key = recordKey(profileId, input.itemKey);
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          deduped.push({ input, profileId, key });
+        }
+
+        const candidates: Array<{
+          readonly input: DownloadEnqueueInput;
+          readonly profileId: string;
+          readonly key: string;
+        }> = [];
+        for (const item of deduped) {
+          const existing = records.get(item.key);
+          if (existing && (existing.status === 'downloading' || existing.status === 'queued')) {
+            continue;
+          }
+          if (existing && existing.status === 'completed') {
+            const verified = await validatePath(
+              downloadsDir,
+              path.join(downloadsDir, existing.localFileName),
+            );
+            if (verified !== null) continue;
+          }
+          candidates.push(item);
+        }
+
+        if (disposed) {
+          return err(elvError('storage', 'downloads-disposed', 'download manager is disposed'));
+        }
+        const eligible = candidates.filter(({ key }) => {
+          const latest = records.get(key);
+          return !(latest && (latest.status === 'downloading' || latest.status === 'queued'));
+        });
+        if (eligible.length === 0) return ok([]);
+
+        const preNewlyAdded = eligible.reduce(
+          (acc, { key }) => acc + (records.has(key) ? 0 : 1),
+          0,
+        );
+        if (records.size + preNewlyAdded > MAX_DOWNLOAD_RECORDS) {
+          return err(elvError('storage', 'download-queue-full', 'download queue limit reached'));
+        }
+
+        const prepared: Array<{
+          readonly input: DownloadEnqueueInput;
+          readonly profileId: string;
+          readonly key: string;
+          readonly localFileName: string;
+          readonly preservedBytes: number;
+        }> = [];
+        for (const { input, profileId, key } of eligible) {
+          const existing = records.get(key);
+          const ext =
+            input.containerExtension ??
+            (input.streamUrl !== undefined ? inferExtensionFromUrl(input.streamUrl) : null);
+          const localFileName =
+            existing?.localFileName ??
+            sanitizeDownloadFileName(`${profileId}_${input.itemKey}`, ext);
+          const partPath = path.join(downloadsDir, `${localFileName}.part`);
+          if (existing && existing.status !== 'paused') {
+            await safeUnlink(partPath);
+          }
+          const preservedBytes =
+            existing && existing.status === 'paused' ? await readPartFileSize(partPath) : 0;
+          prepared.push({ input, profileId, key, localFileName, preservedBytes });
+        }
+
+        // Synchronous atomic gate: zero awaits between capacity check and records/sources commit.
+        if (disposed) {
+          return err(elvError('storage', 'downloads-disposed', 'download manager is disposed'));
+        }
+        const finalItems = prepared.filter(({ key }) => {
+          const latest = records.get(key);
+          return !(latest && (latest.status === 'downloading' || latest.status === 'queued'));
+        });
+        if (finalItems.length === 0) return ok([]);
+
+        const finalNewlyAdded = finalItems.reduce(
+          (acc, { key }) => acc + (records.has(key) ? 0 : 1),
+          0,
+        );
+        if (records.size + finalNewlyAdded > MAX_DOWNLOAD_RECORDS) {
+          return err(elvError('storage', 'download-queue-full', 'download queue limit reached'));
+        }
+
+        const ts = now();
+        const created: Array<{ readonly key: string; readonly record: DownloadRecord }> = [];
+        for (const { input, profileId, key, localFileName, preservedBytes } of finalItems) {
+          const nextRecord = buildQueuedRecord(
+            input,
+            profileId,
+            key,
+            records.get(key),
+            localFileName,
+            preservedBytes,
+            ts,
+          );
+          applySourceSpec(key, input);
+          records.set(key, nextRecord);
+          created.push({ key, record: nextRecord });
+        }
+
+        await persistIndex();
+        emitChange();
+        pumpQueue();
+        return ok(
+          created.map(({ key, record }) => Object.freeze({ ...(records.get(key) ?? record) })),
+        );
+      });
     },
 
     async pause(itemKey: string, profileId?: string): Promise<Result<void>> {
@@ -571,7 +576,7 @@ export function createDesktopDownloadManager(
       const rec = records.get(key);
       if (!rec) return err(elvError('storage', 'download-not-found'));
       if (rec.status === 'completed') return ok(undefined);
-      if (!sources.has(key)) {
+      if (!sources.has(key) && resolveStream === undefined) {
         return err(
           elvError(
             'playback',
@@ -672,6 +677,7 @@ export function createDesktopDownloadManager(
     async dispose(): Promise<void> {
       disposed = true;
       await abortActiveJob('dispose');
+      await enqueueChain;
       await persistChain;
       listeners.clear();
       sources.clear();

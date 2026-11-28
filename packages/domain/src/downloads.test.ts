@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   ALLOWED_DOWNLOAD_EXTENSIONS,
   computeDownloadProgressRatio,
+  type DownloadEnqueueInput,
+  type DownloadManagerPort,
   type DownloadRecord,
   formatDownloadBytes,
   isActiveDownloadStatus,
@@ -10,6 +12,7 @@ import {
   isPlayableDownload,
   isValidManagedDownloadFileName,
 } from './downloads';
+import { ok } from './result';
 
 describe('downloads domain contracts and helpers', () => {
   it('exposes frozen allowlisted container extensions', () => {
@@ -111,5 +114,54 @@ describe('downloads domain contracts and helpers', () => {
     expect(isActiveDownloadStatus('completed')).toBe(false);
     expect(isActiveDownloadStatus('failed')).toBe(false);
     expect(isActiveDownloadStatus('canceled')).toBe(false);
+  });
+
+  it('supports explicit seriesKey on DownloadRecord/DownloadEnqueueInput and optional enqueueBatch on DownloadManagerPort', async () => {
+    const input: DownloadEnqueueInput = {
+      sourceId: 's1',
+      itemKey: 'x:s1:episode:555',
+      kind: 'episode',
+      title: 'Episode 1',
+      seriesKey: 'x:s1:series:42',
+      seriesTitle: 'Remake',
+      season: 1,
+      episodeNum: 1,
+    };
+    const record: DownloadRecord = {
+      id: 'default::x:s1:episode:555',
+      profileId: 'default',
+      sourceId: input.sourceId,
+      itemKey: input.itemKey,
+      kind: input.kind,
+      title: input.title,
+      seriesKey: input.seriesKey ?? null,
+      seriesTitle: input.seriesTitle ?? null,
+      season: input.season ?? null,
+      episodeNum: input.episodeNum ?? null,
+      localFileName: 'ep-555.mp4',
+      localUri: null,
+      bytesDownloaded: 0,
+      totalBytes: null,
+      status: 'queued',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const port: DownloadManagerPort = {
+      supported: true,
+      list: async () => [record],
+      get: async () => record,
+      enqueue: async () => ok(record),
+      enqueueBatch: async (items) => ok(items.map(() => record)),
+      pause: async () => ok(undefined),
+      resume: async () => ok(undefined),
+      cancel: async () => ok(undefined),
+      remove: async () => ok(undefined),
+      subscribe: () => () => undefined,
+    };
+    const res = await port.enqueueBatch?.([input]);
+    expect(res?.ok).toBe(true);
+    if (res?.ok) {
+      expect(res.value[0]?.seriesKey).toBe('x:s1:series:42');
+    }
   });
 });

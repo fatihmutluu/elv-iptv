@@ -14,7 +14,12 @@ import {
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { detailProgressRatio, formatEpisodeDuration } from './detail-model';
+import {
+  computeEpisodeRowMetrics,
+  type DetailEpisodeFocusAction,
+  detailProgressRatio,
+  formatEpisodeDuration,
+} from './detail-model';
 
 /** Props of {@link DetailEpisodeRow}. */
 export interface DetailEpisodeRowProps {
@@ -25,8 +30,11 @@ export interface DetailEpisodeRowProps {
   readonly isTv: boolean;
   readonly isPortrait: boolean;
   readonly focused: boolean;
+  readonly focusedAction?: DetailEpisodeFocusAction | null;
+  readonly rowHeight?: number;
   readonly watchedLabel: string;
   readonly onPressEpisode: (episode: EpisodeRow, index: number) => void;
+  readonly onToggleWatched?: (episode: EpisodeRow) => void;
   readonly downloadsSupported?: boolean;
   readonly downloadRecord?: DownloadRecord | undefined;
   readonly onPressDownload?: (episode: EpisodeRow) => void;
@@ -40,8 +48,11 @@ function DetailEpisodeRowInner({
   isTv,
   isPortrait,
   focused,
+  focusedAction,
+  rowHeight,
   watchedLabel,
   onPressEpisode,
+  onToggleWatched,
   downloadsSupported = false,
   downloadRecord,
   onPressDownload,
@@ -52,6 +63,14 @@ function DetailEpisodeRowInner({
   const handlePress = useCallback(() => {
     onPressEpisode(episode, index);
   }, [episode, index, onPressEpisode]);
+
+  const handleWatchedPress = useCallback(
+    (e?: { stopPropagation?: () => void }) => {
+      e?.stopPropagation?.();
+      onToggleWatched?.(episode);
+    },
+    [episode, onToggleWatched],
+  );
 
   const handleDownloadPress = useCallback(
     (e?: { stopPropagation?: () => void }) => {
@@ -115,9 +134,14 @@ function DetailEpisodeRowInner({
       : undefined;
 
   const thumbWidth = isPortrait ? 124 : 168;
+  const resolvedHeight = rowHeight ?? computeEpisodeRowMetrics(isPortrait, isTv).rowHeight;
   const cursor = webCursorPointer();
   const transition = webTransition(theme, 'transform, background-color, border-color, opacity');
   const testID = `detail-episode-${index}`;
+  const isRowFocused =
+    focused && (focusedAction === undefined || focusedAction === null || focusedAction === 'play');
+  const isWatchedFocused = isTv && focused && focusedAction === 'watched';
+  const isDownloadFocused = isTv && focused && focusedAction === 'download';
 
   return (
     <Pressable
@@ -131,13 +155,14 @@ function DetailEpisodeRowInner({
         cursor,
         transition,
         {
+          height: resolvedHeight,
           borderRadius: theme.radius.card,
-          backgroundColor: focused
+          backgroundColor: isRowFocused
             ? theme.colors.focusFill
             : pressed
               ? theme.colors.subtleHighlight
               : theme.colors.bgCard,
-          borderColor: focused ? theme.colors.focusRingColor : theme.colors.surfaceBorder,
+          borderColor: isRowFocused ? theme.colors.focusRingColor : theme.colors.surfaceBorder,
           padding: isPortrait ? theme.spacing.xs : theme.spacing.sm,
           gap: isPortrait ? theme.spacing.sm : theme.spacing.md,
           transform: [
@@ -146,7 +171,7 @@ function DetailEpisodeRowInner({
                 ? theme.reduceMotion
                   ? 1
                   : 0.98
-                : focused
+                : isRowFocused
                   ? theme.focus.buttonScale
                   : 1,
             },
@@ -238,18 +263,36 @@ function DetailEpisodeRowInner({
         ) : null}
       </View>
 
-      {downloadButtonMeta !== null ? (
-        <IconButton
-          testID={`${testID}-download`}
-          icon={downloadButtonMeta.icon}
-          active={downloadButtonMeta.active}
-          accessibilityLabel={downloadButtonMeta.label}
-          focusable={!isTv}
-          onPress={handleDownloadPress as () => void}
-        />
+      {onToggleWatched !== undefined || downloadButtonMeta !== null ? (
+        <View style={[styles.rowActions, { gap: theme.spacing.xs }]}>
+          {onToggleWatched !== undefined ? (
+            <IconButton
+              testID={`${testID}-watched-toggle`}
+              icon="check"
+              active={isWatched}
+              accessibilityLabel={
+                isWatched ? i18n.t('home.markUnwatched') : i18n.t('home.markWatched')
+              }
+              focusable={!isTv}
+              focused={isWatchedFocused}
+              onPress={handleWatchedPress as () => void}
+            />
+          ) : null}
+          {downloadButtonMeta !== null ? (
+            <IconButton
+              testID={`${testID}-download`}
+              icon={downloadButtonMeta.icon}
+              active={downloadButtonMeta.active}
+              accessibilityLabel={downloadButtonMeta.label}
+              focusable={!isTv}
+              focused={isDownloadFocused}
+              onPress={handleDownloadPress as () => void}
+            />
+          ) : null}
+        </View>
       ) : null}
 
-      {focused ? (
+      {isRowFocused ? (
         <View
           pointerEvents="none"
           testID={`${testID}-focus-ring`}
@@ -267,7 +310,10 @@ function DetailEpisodeRowInner({
   );
 }
 
-/** Memoized Cinema Quietude `16:9` episode list row with progress bar, watched pill, and TV focus. */
+/**
+ * Memoized Cinema Quietude `16:9` episode list row with progress bar, watched pill, interactive
+ * per-episode watched toggle, optional offline download CTA, and TV focus sub-slots.
+ */
 export const DetailEpisodeRow = memo(DetailEpisodeRowInner);
 DetailEpisodeRow.displayName = 'DetailEpisodeRow';
 
@@ -343,6 +389,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   epTitle: { flex: 1, minWidth: 0 },
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
   epFocusRing: { position: 'absolute', top: -3, bottom: -3, left: -3, right: -3 },
   skeletonList: { width: '100%' },
   skeletonRow: { flexDirection: 'row', alignItems: 'center' },

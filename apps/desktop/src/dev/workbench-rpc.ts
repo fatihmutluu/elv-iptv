@@ -54,6 +54,8 @@ export const ALLOWED_RPC_METHODS: ReadonlySet<string> = new Set([
   'resolveStream',
   'saveProgress',
   'setWatched',
+  'setSeasonWatched',
+  'setSeriesWatched',
   'getProgress',
   'listContinueWatching',
   'listProgressByKeys',
@@ -237,6 +239,25 @@ export async function dispatchWorkbenchRpc(
     case 'setWatched':
       return (
         service.setWatched?.(String(args[0] ?? ''), Boolean(args[1]), optStr(args[2])) ??
+        err(elvError('storage', 'unsupported'))
+      );
+    case 'setSeasonWatched': {
+      const season = args[1];
+      if (typeof season !== 'number' || !Number.isSafeInteger(season) || season < 0) {
+        return err(elvError('source-format', 'invalid-series-watched'));
+      }
+      return (
+        service.setSeasonWatched?.(
+          String(args[0] ?? ''),
+          season,
+          Boolean(args[2]),
+          optStr(args[3]),
+        ) ?? err(elvError('storage', 'unsupported'))
+      );
+    }
+    case 'setSeriesWatched':
+      return (
+        service.setSeriesWatched?.(String(args[0] ?? ''), Boolean(args[1]), optStr(args[2])) ??
         err(elvError('storage', 'unsupported'))
       );
     case 'getProgress':

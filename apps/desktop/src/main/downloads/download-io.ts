@@ -1,5 +1,5 @@
 import type { WriteStream } from 'node:fs';
-import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, statfs, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -10,7 +10,94 @@ import {
 import { validateManagedDownloadPath } from './managed-path.ts';
 
 const DEFAULT_PROFILE_ID = 'default';
+const MAX_SERIES_KEY_CHARS = 512;
 export const INDEX_FILE_NAME = 'index.json';
+
+/** Sanitizes an optional `seriesKey` (bounded <= 512 chars, zero control chars), returning `null` if invalid/empty. */
+export function normalizeSeriesKey(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_SERIES_KEY_CHARS) return null;
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const code = trimmed.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return null;
+  }
+  return trimmed;
+}
+
+/**
+ * Queries available free disk bytes for `dirPath` via `fs/promises.statfs`, returning `null`
+ * gracefully when `statfs` is unsupported or fails on the current OS/filesystem.
+ */
+export async function defaultCheckFreeSpace(dirPath: string): Promise<number | null> {
+  if (typeof statfs !== 'function') return null;
+  try {
+    await mkdir(dirPath, { recursive: true });
+    const stats = await statfs(dirPath);
+    const free = Number(stats.bavail) * Number(stats.bsize);
+    return Number.isFinite(free) && free >= 0 ? free : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Runs an async network step (`fetch`, `resolveStream`, or `reader.read`) under a resettable stall
+ * timeout. Invokes `onTimeout` and rejects with `AbortError` if silence exceeds `timeoutMs` or
+ * `signal` aborts. If `op` resolves AFTER timeout/abort, `onLateResolve` is invoked for cleanup.
+ */
+export async function runWithStallTimeout<T>(
+  signal: AbortSignal,
+  timeoutMs: number,
+  onTimeout: () => void,
+  op: () => Promise<T>,
+  onLateResolve?: (value: T) => void,
+): Promise<T> {
+  if (signal.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+  let settled = false;
+  let timedOutOrAborted = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+
+  const opPromise = op().then(
+    (value) => {
+      if (timedOutOrAborted) {
+        onLateResolve?.(value);
+      }
+      settled = true;
+      return value;
+    },
+    (error) => {
+      settled = true;
+      throw error;
+    },
+  );
+  opPromise.catch(() => undefined);
+
+  const racePromise = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      if (!settled) timedOutOrAborted = true;
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    timer = setTimeout(() => {
+      if (!settled) timedOutOrAborted = true;
+      onTimeout();
+      reject(new DOMException('Stall timeout', 'AbortError'));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([opPromise, racePromise]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (onAbort !== undefined) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  }
+}
 
 /** Builds the composite `(profileId, itemKey)` map key for a download record. */
 export function recordKey(profileId: string, itemKey: string): string {
@@ -264,6 +351,7 @@ export async function reconcileDownloadsIndex(
       itemKey: candidate.itemKey,
       kind: candidate.kind,
       title: candidate.title,
+      seriesKey: normalizeSeriesKey(candidate.seriesKey),
       seriesTitle: candidate.seriesTitle ?? null,
       season: candidate.season ?? null,
       episodeNum: candidate.episodeNum ?? null,

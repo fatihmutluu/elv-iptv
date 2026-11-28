@@ -55,10 +55,26 @@ export type DetailNavRowId =
   | 'cast'
   | 'franchise'
   | 'seasons'
-  | 'episode-chunks'
   | 'episodes'
   | 'retry'
   | 'related';
+
+/** Horizontal sub-action slot focused inside a TV episode row. */
+export type DetailEpisodeFocusAction = 'play' | 'watched' | 'download';
+
+/** Deterministic fixed vertical geometry for virtualized `DetailEpisodeRow` items. */
+export interface EpisodeRowMetrics {
+  readonly rowHeight: number;
+  readonly gap: number;
+  readonly itemStride: number;
+}
+
+/** Computes exact rendered height + vertical gap for virtualized `FlatList` `getItemLayout`. */
+export function computeEpisodeRowMetrics(isPortrait: boolean, isTv: boolean): EpisodeRowMetrics {
+  if (isPortrait) return { rowHeight: 86, gap: 6, itemStride: 92 };
+  if (isTv) return { rowHeight: 118, gap: 10, itemStride: 128 };
+  return { rowHeight: 118, gap: 6, itemStride: 124 };
+}
 
 /** Descriptor of one currently visible focusable row inside `DetailScreen`. */
 export interface DetailNavRowDescriptor {
@@ -108,7 +124,6 @@ export interface BuildDetailNavRowsInput {
   readonly castCount?: number;
   readonly franchiseCount?: number;
   readonly seasonsCount: number;
-  readonly episodeChunksCount?: number;
   readonly episodesCount: number;
   readonly hasSeasonsError: boolean;
   readonly relatedCount: number;
@@ -396,10 +411,6 @@ export function buildDetailNavRows(input: BuildDetailNavRowsInput): DetailNavRow
   }
   if (input.seasonsCount > 0) {
     rows.push({ id: 'seasons', count: input.seasonsCount, orientation: 'horizontal' });
-  }
-  const chunksCount = input.episodeChunksCount ?? 0;
-  if (chunksCount > 0 && !input.hasSeasonsError) {
-    rows.push({ id: 'episode-chunks', count: chunksCount, orientation: 'horizontal' });
   }
   if (input.hasSeasonsError) {
     rows.push({ id: 'retry', count: 1, orientation: 'horizontal' });

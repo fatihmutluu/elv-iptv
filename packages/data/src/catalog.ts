@@ -162,6 +162,7 @@ import {
   type WatchProgressRow,
 } from './user-state';
 import { saveUserDataSnapshot, type UserDataStore } from './user-state-backup';
+import { createCatalogSeriesWatchedOpsMethods } from './user-state-series';
 
 export type { SourceRow, StreamRequest };
 
@@ -314,6 +315,19 @@ export interface CatalogService
   resolveStream(itemKey: string, opts?: ParentalQueryOptions): Promise<Result<StreamRequest>>;
   saveProgress?(input: SaveProgressInput): Promise<Result<WatchProgressRow>>;
   setWatched?(itemKey: string, watched: boolean, profileId?: string): Promise<Result<void>>;
+  /** Transactionally marks every episode in a season watched or unwatched (hydrating lazy sources first). */
+  setSeasonWatched?(
+    seriesKey: string,
+    season: number,
+    watched: boolean,
+    profileId?: string,
+  ): Promise<Result<number>>;
+  /** Transactionally marks an entire series and all of its episodes watched or unwatched (hydrating lazy sources first). */
+  setSeriesWatched?(
+    seriesKey: string,
+    watched: boolean,
+    profileId?: string,
+  ): Promise<Result<number>>;
   getProgress?(itemKey: string, profileId?: string): Promise<WatchProgressRow | null>;
   listContinueWatching?(
     limit?: number,
@@ -455,6 +469,13 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
   });
   const ratingsOpsMethods = createCatalogRatingsOpsMethods({ db, clock, playtime, syncUserData });
   const syncStateOpsMethods = createCatalogSyncStateOpsMethods({ db, playtime, syncUserData });
+  const seriesWatchedOpsMethods = createCatalogSeriesWatchedOpsMethods({
+    db,
+    clock,
+    importDeps,
+    queue,
+    syncUserData,
+  });
 
   const listSources = () => querySourcesList(db);
   const sourceMutationMethods = createCatalogSourceMutationMethods({
@@ -759,6 +780,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...ratingsOpsMethods,
     ...sourceMutationMethods,
     ...syncStateOpsMethods,
+    ...seriesWatchedOpsMethods,
 
     close() {
       if (closePromise !== undefined) return closePromise;

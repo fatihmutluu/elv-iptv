@@ -4570,3 +4570,51 @@ msgstr "Sizin kütüphaneniz, sizin ritminiz — daha az kaydırıp daha çok iz
 
 msgid "onboarding.quote.6"
 msgstr "Sinemanın en iyi koltuğu her zaman tam da oturma odanızda sizi bekleyendir."
+
+msgid "detail.scopePicker.watchedAction"
+msgstr "İzlendi seçenekleri"
+
+msgid "detail.scopePicker.watchedTitle"
+msgstr "İzlendi işaretle"
+
+msgid "detail.scopePicker.downloadAction"
+msgstr "İndirme seçenekleri"
+
+msgid "detail.scopePicker.downloadActionActive"
+msgstr "İndiriliyor ({count})"
+
+msgid "detail.scopePicker.downloadActionCompleted"
+msgstr "{count} indirildi"
+
+msgid "detail.scopePicker.downloadTitle"
+msgstr "Bölümleri indir"
+
+msgid "detail.scopePicker.entireSeries"
+msgstr "Tüm dizi"
+
+msgid "detail.scopePicker.season"
+msgstr "Sezon"
+
+msgid "detail.scopePicker.chooseSeason"
+msgstr "Sezon seç"
+
+msgid "detail.scopePicker.markEntireSeriesWatched"
+msgstr "Tüm diziyi izlendi işaretle"
+
+msgid "detail.scopePicker.markEntireSeriesUnwatched"
+msgstr "Tüm diziyi izlenmedi işaretle"
+
+msgid "detail.scopePicker.markSeasonWatched"
+msgstr "{season}. Sezonu izlendi işaretle"
+
+msgid "detail.scopePicker.markSeasonUnwatched"
+msgstr "{season}. Sezonu izlenmedi işaretle"
+
+msgid "detail.scopePicker.downloadEntireSeries"
+msgstr "Tüm diziyi indir"
+
+msgid "detail.scopePicker.downloadSeason"
+msgstr "{season}. Sezonu indir"
+
+msgid "detail.scopePicker.seasonEpisodesCount"
+msgstr "{count} bölüm"

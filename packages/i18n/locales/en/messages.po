@@ -4570,3 +4570,51 @@ msgstr "Your library, your pace — curated cleanly so you spend less time scrol
 
 msgid "onboarding.quote.6"
 msgstr "The best seat in the theater is always the one waiting right in your living room."
+
+msgid "detail.scopePicker.watchedAction"
+msgstr "Watched options"
+
+msgid "detail.scopePicker.watchedTitle"
+msgstr "Mark watched"
+
+msgid "detail.scopePicker.downloadAction"
+msgstr "Download options"
+
+msgid "detail.scopePicker.downloadActionActive"
+msgstr "Downloading ({count})"
+
+msgid "detail.scopePicker.downloadActionCompleted"
+msgstr "{count} downloaded"
+
+msgid "detail.scopePicker.downloadTitle"
+msgstr "Download episodes"
+
+msgid "detail.scopePicker.entireSeries"
+msgstr "Entire series"
+
+msgid "detail.scopePicker.season"
+msgstr "Season"
+
+msgid "detail.scopePicker.chooseSeason"
+msgstr "Choose season"
+
+msgid "detail.scopePicker.markEntireSeriesWatched"
+msgstr "Mark entire series watched"
+
+msgid "detail.scopePicker.markEntireSeriesUnwatched"
+msgstr "Mark entire series unwatched"
+
+msgid "detail.scopePicker.markSeasonWatched"
+msgstr "Mark Season {season} watched"
+
+msgid "detail.scopePicker.markSeasonUnwatched"
+msgstr "Mark Season {season} unwatched"
+
+msgid "detail.scopePicker.downloadEntireSeries"
+msgstr "Download entire series"
+
+msgid "detail.scopePicker.downloadSeason"
+msgstr "Download Season {season}"
+
+msgid "detail.scopePicker.seasonEpisodesCount"
+msgstr "{count} episodes"

@@ -310,6 +310,10 @@ export function createWorkbenchRemoteCatalog(
     saveProgress: (input) => rpcResult('saveProgress', [input]),
     setWatched: (itemKey, watched, profileId) =>
       rpcResult('setWatched', [itemKey, watched, profileId]),
+    setSeasonWatched: (seriesKey, season, watched, profileId) =>
+      rpcResult('setSeasonWatched', [seriesKey, season, watched, profileId]),
+    setSeriesWatched: (seriesKey, watched, profileId) =>
+      rpcResult('setSeriesWatched', [seriesKey, watched, profileId]),
     getProgress: (itemKey, profileId) => rpcQuery('getProgress', [itemKey, profileId]),
     listContinueWatching: (limit, profileId) =>
       rpcQuery('listContinueWatching', [limit, profileId]),

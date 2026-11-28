@@ -288,13 +288,19 @@ export function partitionLibraryDownloads(
 }
 
 /**
- * Derives the parent `seriesKey` for a downloaded episode record using an optional
- * `(sourceId|title) -> seriesKey` lookup map or canonical M3U / Xtream key formats.
+ * Derives the parent `seriesKey` for a downloaded episode record: prefers an explicit persisted
+ * `record.seriesKey` first, then falls back to an optional `(sourceId|title) -> seriesKey` map
+ * or canonical M3U / Xtream key formats.
  */
 export function deriveSeriesKeyFromEpisodeRecord(
-  record: Pick<DownloadRecord, 'sourceId' | 'itemKey' | 'seriesTitle'>,
+  record: Pick<DownloadRecord, 'sourceId' | 'itemKey' | 'seriesKey' | 'seriesTitle'>,
   knownSeriesByTitle?: ReadonlyMap<string, string>,
 ): string | null {
+  const explicitKey = record.seriesKey?.trim();
+  if (explicitKey && explicitKey.length > 0) {
+    return explicitKey;
+  }
+
   const titleNorm = record.seriesTitle?.trim().toLowerCase();
   if (titleNorm && knownSeriesByTitle) {
     const matched = knownSeriesByTitle.get(`${record.sourceId}|${titleNorm}`);

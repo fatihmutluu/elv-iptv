@@ -1,7 +1,11 @@
 import { createFocusStore, type FocusStore, findList, type KeyEvent } from '@elv/focus-core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useBrowseFocusMemory } from '../shared';
-import type { DetailNavRowDescriptor, DetailNavRowId } from './detail-model';
+import type {
+  DetailEpisodeFocusAction,
+  DetailNavRowDescriptor,
+  DetailNavRowId,
+} from './detail-model';
 
 interface DetailFocusSnapshot {
   readonly rowId: DetailNavRowId;
@@ -16,7 +20,6 @@ const ALL_DETAIL_ROW_IDS: readonly DetailNavRowId[] = [
   'cast',
   'franchise',
   'seasons',
-  'episode-chunks',
   'episodes',
   'retry',
   'related',
@@ -42,8 +45,13 @@ export interface UseTvDetailNavigationOptions {
   readonly isActiveScope: boolean;
   readonly targetKey: string;
   readonly rows: readonly DetailNavRowDescriptor[];
-  readonly selectedChunkIndex?: number;
-  readonly onActivate: (rowId: DetailNavRowId, colIndex: number) => void;
+  /** Enables the trailing `'download'` horizontal sub-slot on `'episodes'` rows when true. */
+  readonly episodeDownloadEnabled?: boolean;
+  readonly onActivate: (
+    rowId: DetailNavRowId,
+    colIndex: number,
+    episodeAction?: DetailEpisodeFocusAction,
+  ) => void;
   readonly onBack: () => void;
   readonly onFocusRow?: (rowId: DetailNavRowId, colIndex: number) => void;
   readonly onFocusTopNav?: () => void;
@@ -53,13 +61,15 @@ export interface UseTvDetailNavigationOptions {
 export interface TvDetailNavigationState {
   readonly focusedRowId: DetailNavRowId | null;
   readonly focusedCol: number | null;
+  readonly focusedEpisodeAction: DetailEpisodeFocusAction | null;
   readonly handleTvKey: (event: KeyEvent) => boolean;
 }
 
 /**
  * Manages 10-ft TV D-pad focus across DetailScreen sections via `@elv/focus-core`.
  * Initial focus lands directly on `hero-play` (`detail-play`) so Select plays immediately,
- * vertical `episodes` traverse Up/Down seamlessly into adjacent horizontal rows, `Up` from `back`
+ * vertical `episodes` traverse Up/Down seamlessly into adjacent horizontal rows while supporting
+ * Left/Right horizontal sub-slots (`play` -> `watched` -> optional `download`), `Up` from `back`
  * yields to Top Nav, and `Back` anywhere calls `onBack` immediately.
  */
 export function useTvDetailNavigation({
@@ -67,7 +77,7 @@ export function useTvDetailNavigation({
   isActiveScope,
   targetKey,
   rows,
-  selectedChunkIndex,
+  episodeDownloadEnabled = false,
   onActivate,
   onBack,
   onFocusRow,
@@ -122,6 +132,24 @@ export function useTvDetailNavigation({
     }
     return 0;
   });
+  const [episodeAction, setEpisodeAction] = useState<DetailEpisodeFocusAction>('play');
+  const episodeActionRef = useRef<DetailEpisodeFocusAction>('play');
+  const episodeDownloadEnabledRef = useRef(episodeDownloadEnabled);
+  episodeDownloadEnabledRef.current = episodeDownloadEnabled;
+
+  const resetEpisodeAction = useCallback(() => {
+    if (episodeActionRef.current !== 'play') {
+      episodeActionRef.current = 'play';
+      setEpisodeAction('play');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!episodeDownloadEnabled && episodeActionRef.current === 'download') {
+      episodeActionRef.current = 'watched';
+      setEpisodeAction('watched');
+    }
+  }, [episodeDownloadEnabled]);
 
   const persistDetailFocus = useCallback(
     (rowId: DetailNavRowId, col: number) => {
@@ -155,6 +183,7 @@ export function useTvDetailNavigation({
   useEffect(() => {
     if (prevTargetKeyRef.current === targetKey) return;
     prevTargetKeyRef.current = targetKey;
+    resetEpisodeAction();
     const saved = focusMemoryRef.current?.get<DetailFocusSnapshot>(`detail:${targetKey}`) ?? null;
     pendingRestoreRef.current = saved;
     if (saved !== null) {
@@ -174,7 +203,7 @@ export function useTvDetailNavigation({
     activeRowIdRef.current = 'hero-play';
     setActiveRowId('hero-play');
     setActiveCol(0);
-  }, [store, targetKey]);
+  }, [resetEpisodeAction, store, targetKey]);
 
   const rowSignature = rows.map((r) => `${r.id}:${r.count}`).join('|');
 
@@ -202,6 +231,7 @@ export function useTvDetailNavigation({
         activeRowIdRef.current = matched.id;
         setActiveRowId(matched.id);
         setActiveCol(clamped);
+        resetEpisodeAction();
         return;
       }
     }
@@ -214,24 +244,16 @@ export function useTvDetailNavigation({
 
     store.activate(nextId);
     const found = findList(store.getState().scopes, nextId)?.list;
+    if (nextId !== 'episodes') resetEpisodeAction();
     activeRowIdRef.current = nextId;
     setActiveRowId(nextId);
     setActiveCol(found?.index ?? 0);
-  }, [rowSignature, store]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: align inactive episode-chunks focus memory with auto-selected chunk after row counts sync
-  useEffect(() => {
-    if (selectedChunkIndex === undefined || activeRowIdRef.current === 'episode-chunks') return;
-    const chunkList = findList(store.getState().scopes, 'episode-chunks')?.list;
-    if (!chunkList || chunkList.count <= 0) return;
-    const currentActive = activeRowIdRef.current;
-    store.focus('episode-chunks', selectedChunkIndex);
-    store.activate(currentActive);
-  }, [rowSignature, selectedChunkIndex, store]);
+  }, [resetEpisodeAction, rowSignature, store]);
 
   const moveToRow = useCallback(
     (nextRow: DetailNavRowDescriptor) => {
       pendingRestoreRef.current = null;
+      resetEpisodeAction();
       store.activate(nextRow.id);
       const found = findList(store.getState().scopes, nextRow.id)?.list;
       const col = found?.index ?? 0;
@@ -241,7 +263,7 @@ export function useTvDetailNavigation({
       persistDetailFocus(nextRow.id, col);
       onFocusRowRef.current?.(nextRow.id, col);
     },
-    [persistDetailFocus, store],
+    [persistDetailFocus, resetEpisodeAction, store],
   );
 
   const handleTvKey = useCallback(
@@ -279,6 +301,7 @@ export function useTvDetailNavigation({
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'up') {
         if (currentRow.orientation === 'vertical' && currentCol > 0) {
           pendingRestoreRef.current = null;
+          resetEpisodeAction();
           store.dispatch(event);
           const updated = findList(store.getState().scopes, currentRow.id)?.list;
           const nextCol = updated?.index ?? 0;
@@ -299,6 +322,7 @@ export function useTvDetailNavigation({
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'down') {
         if (currentRow.orientation === 'vertical' && currentCol < currentRow.count - 1) {
           pendingRestoreRef.current = null;
+          resetEpisodeAction();
           store.dispatch(event);
           const updated = findList(store.getState().scopes, currentRow.id)?.list;
           const nextCol = updated?.index ?? 0;
@@ -310,6 +334,23 @@ export function useTvDetailNavigation({
         if (currentIdx >= currentRows.length - 1) return false;
         const nextRow = currentRows[currentIdx + 1];
         if (nextRow) moveToRow(nextRow);
+        return true;
+      }
+
+      if (currentRow.id === 'episodes' && (event.key === 'left' || event.key === 'right')) {
+        if (event.kind === 'press' || event.kind === 'repeat') {
+          const slots: readonly DetailEpisodeFocusAction[] = episodeDownloadEnabledRef.current
+            ? ['play', 'watched', 'download']
+            : ['play', 'watched'];
+          const curSlotIdx = Math.max(0, slots.indexOf(episodeActionRef.current));
+          const nextSlotIdx =
+            event.key === 'right'
+              ? Math.min(slots.length - 1, curSlotIdx + 1)
+              : Math.max(0, curSlotIdx - 1);
+          const nextSlot = slots[nextSlotIdx] ?? 'play';
+          episodeActionRef.current = nextSlot;
+          setEpisodeAction(nextSlot);
+        }
         return true;
       }
 
@@ -332,19 +373,24 @@ export function useTvDetailNavigation({
           return true;
         }
         if (intent.kind === 'select') {
-          onActivateRef.current(currentRow.id, col);
+          onActivateRef.current(
+            currentRow.id,
+            col,
+            currentRow.id === 'episodes' ? episodeActionRef.current : undefined,
+          );
           return true;
         }
       }
       return event.key === 'left' || event.key === 'right';
     },
-    [moveToRow, persistDetailFocus, store],
+    [moveToRow, persistDetailFocus, resetEpisodeAction, store],
   );
 
   const visibleFocus = isTv && isActiveScope;
   return {
     focusedRowId: visibleFocus ? activeRowId : null,
     focusedCol: visibleFocus ? activeCol : null,
+    focusedEpisodeAction: visibleFocus && activeRowId === 'episodes' ? episodeAction : null,
     handleTvKey,
   };
 }

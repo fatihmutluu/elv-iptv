@@ -30,6 +30,7 @@ export interface DownloadRecord {
   readonly itemKey: string;
   readonly kind: DownloadMediaKind;
   readonly title: string;
+  readonly seriesKey?: string | null;
   readonly seriesTitle?: string | null;
   readonly season?: number | null;
   readonly episodeNum?: number | null;
@@ -53,6 +54,7 @@ export interface DownloadEnqueueInput {
   readonly itemKey: string;
   readonly kind: DownloadMediaKind;
   readonly title: string;
+  readonly seriesKey?: string | null;
   readonly seriesTitle?: string | null;
   readonly season?: number | null;
   readonly episodeNum?: number | null;
@@ -79,6 +81,9 @@ export interface DownloadManagerPort {
   list(profileId?: string): Promise<readonly DownloadRecord[]>;
   get(itemKey: string, profileId?: string): Promise<DownloadRecord | null>;
   enqueue(input: DownloadEnqueueInput): Promise<Result<DownloadRecord>>;
+  enqueueBatch?(
+    inputs: readonly DownloadEnqueueInput[],
+  ): Promise<Result<readonly DownloadRecord[]>>;
   pause(itemKey: string, profileId?: string): Promise<Result<void>>;
   resume(itemKey: string, profileId?: string): Promise<Result<void>>;
   cancel(itemKey: string, profileId?: string): Promise<Result<void>>;

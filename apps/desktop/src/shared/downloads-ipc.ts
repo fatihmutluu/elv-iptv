@@ -15,6 +15,7 @@ export const DOWNLOADS_CHANNELS = Object.freeze({
   list: 'downloads:list',
   get: 'downloads:get',
   enqueue: 'downloads:enqueue',
+  enqueueBatch: 'downloads:enqueue-batch',
   pause: 'downloads:pause',
   resume: 'downloads:resume',
   cancel: 'downloads:cancel',
@@ -44,6 +45,7 @@ export interface DownloadsBridge {
   list(profileId?: string): Promise<readonly DownloadRecord[]>;
   get(itemKey: string, profileId?: string): Promise<DownloadRecord | null>;
   enqueue(input: DownloadEnqueueInput): Promise<Result<DownloadRecord>>;
+  enqueueBatch(inputs: readonly DownloadEnqueueInput[]): Promise<Result<readonly DownloadRecord[]>>;
   pause(itemKey: string, profileId?: string): Promise<Result<void>>;
   resume(itemKey: string, profileId?: string): Promise<Result<void>>;
   cancel(itemKey: string, profileId?: string): Promise<Result<void>>;
@@ -62,7 +64,9 @@ const MAX_HEADER_COUNT = 64;
 const MAX_HEADER_NAME_CHARS = 256;
 const MAX_HEADER_VALUE_CHARS = 8 * 1024;
 const MAX_HEADERS_TOTAL_CHARS = 32 * 1024;
-const MAX_DOWNLOAD_RECORDS = 5_000;
+const MAX_ENQUEUE_BATCH_ITEMS = 500;
+/** Hard upper bound on persisted download records shared across IPC and manager enforcement. */
+export const MAX_DOWNLOAD_RECORDS = 5_000;
 const HEADER_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
 const VALID_ERROR_CATEGORIES: ReadonlySet<ErrorCategory> = new Set<ErrorCategory>([
@@ -228,6 +232,7 @@ const ENQUEUE_REQUEST_KEYS = new Set([
   'itemKey',
   'kind',
   'title',
+  'seriesKey',
   'seriesTitle',
   'season',
   'episodeNum',
@@ -243,6 +248,7 @@ const RECORD_KEYS = new Set([
   'itemKey',
   'kind',
   'title',
+  'seriesKey',
   'seriesTitle',
   'season',
   'episodeNum',
@@ -283,7 +289,7 @@ export function isDownloadOnlinePlaybackRequest(x: unknown): x is DownloadOnline
   );
 }
 
-/** Runtime guard for `downloads:enqueue` payload: strictly VOD (`'movie' | 'episode'`) and `http(s)` URL. */
+/** Runtime guard for `downloads:enqueue` payload: strictly VOD (`'movie' | 'episode'`) and optional `http(s)` URL. */
 export function isDownloadEnqueueRequest(x: unknown): x is DownloadEnqueueInput {
   if (!isSafeRecord(x) || !hasOnlyKeys(x, ENQUEUE_REQUEST_KEYS)) return false;
   if (x['profileId'] !== undefined && !isBoundedNonEmptyString(x['profileId'], MAX_ID_CHARS)) {
@@ -293,14 +299,25 @@ export function isDownloadEnqueueRequest(x: unknown): x is DownloadEnqueueInput 
   if (!isBoundedNonEmptyString(x['itemKey'], MAX_ITEM_KEY_CHARS)) return false;
   if (!isDownloadMediaKind(x['kind'])) return false;
   if (!isBoundedNonEmptyString(x['title'], MAX_TITLE_CHARS)) return false;
+  if (!isOptionalNullableBoundedString(x['seriesKey'], MAX_ITEM_KEY_CHARS)) return false;
   if (!isOptionalNullableBoundedString(x['seriesTitle'], MAX_TITLE_CHARS)) return false;
   if (!isOptionalNullableFiniteInt(x['season'])) return false;
   if (!isOptionalNullableFiniteInt(x['episodeNum'])) return false;
   if (!isOptionalNullableBoundedString(x['poster'], MAX_STREAM_URL_CHARS)) return false;
-  if (!isHttpDownloadSourceUrl(x['streamUrl'])) return false;
+  if (x['streamUrl'] !== undefined && !isHttpDownloadSourceUrl(x['streamUrl'])) return false;
   if (x['headers'] !== undefined && !isDownloadHeaders(x['headers'])) return false;
   if (!isOptionalNullableBoundedString(x['containerExtension'], MAX_EXT_CHARS)) return false;
   return true;
+}
+
+/** Runtime guard for `downloads:enqueue-batch` payload (1..500 valid VOD download enqueue entries). */
+export function isDownloadEnqueueBatchRequest(x: unknown): x is readonly DownloadEnqueueInput[] {
+  return (
+    Array.isArray(x) &&
+    x.length >= 1 &&
+    x.length <= MAX_ENQUEUE_BATCH_ITEMS &&
+    x.every(isDownloadEnqueueRequest)
+  );
 }
 
 /** Runtime guard for one {@link DownloadRecord} crossing IPC. */
@@ -313,6 +330,7 @@ export function isDownloadRecord(x: unknown): x is DownloadRecord {
     !isBoundedNonEmptyString(x['itemKey'], MAX_ITEM_KEY_CHARS) ||
     !isDownloadMediaKind(x['kind']) ||
     !isBoundedNonEmptyString(x['title'], MAX_TITLE_CHARS) ||
+    !isOptionalNullableBoundedString(x['seriesKey'], MAX_ITEM_KEY_CHARS) ||
     !isOptionalNullableBoundedString(x['seriesTitle'], MAX_TITLE_CHARS) ||
     !isOptionalNullableFiniteInt(x['season']) ||
     !isOptionalNullableFiniteInt(x['episodeNum']) ||
@@ -377,6 +395,12 @@ function isElvError(x: unknown): x is ElvError {
 export function isDownloadRecordResult(x: unknown): x is Result<DownloadRecord> {
   if (!isSafeRecord(x) || typeof x['ok'] !== 'boolean') return false;
   return x['ok'] ? isDownloadRecord(x['value']) : isElvError(x['error']);
+}
+
+/** Runtime guard for `Result<readonly DownloadRecord[]>` IPC replies. */
+export function isDownloadRecordListResult(x: unknown): x is Result<readonly DownloadRecord[]> {
+  if (!isSafeRecord(x) || typeof x['ok'] !== 'boolean') return false;
+  return x['ok'] ? isDownloadRecordList(x['value']) : isElvError(x['error']);
 }
 
 /** Runtime guard for `Result<void>` IPC replies. */

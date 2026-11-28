@@ -396,6 +396,21 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         watched,
         ...(profileId === undefined ? {} : { profileId }),
       }),
+    setSeasonWatched: (seriesKey, season, watched, profileId) =>
+      callResult({
+        method: 'setSeasonWatched',
+        seriesKey,
+        season,
+        watched,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    setSeriesWatched: (seriesKey, watched, profileId) =>
+      callResult({
+        method: 'setSeriesWatched',
+        seriesKey,
+        watched,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
     getProgress: (itemKey, profileId) =>
       callValue({
         method: 'getProgress',

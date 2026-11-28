@@ -425,7 +425,7 @@ describe('AccountBidirectionalPairingPanel security, lifecycle & TV focus regres
 
   it('Blocker regression: different_accounts receiver confirming first transitions to waiting_approval and waits for polled completed before firing onPaired', async () => {
     const onPaired = jest.fn();
-    let pollCalls = 0;
+    let allowComplete = false;
     const syncAccount = createMockSyncAccount({
       startBidirectionalPairing: jest.fn(async () =>
         makeSnapshot({
@@ -439,18 +439,17 @@ describe('AccountBidirectionalPairingPanel security, lifecycle & TV focus regres
         }),
       ),
       confirmBidirectionalPairing: jest.fn(async () => ({ ok: true })),
-      pollBidirectionalPairing: jest.fn(async () => {
-        pollCalls += 1;
-        return makeSnapshot({
+      pollBidirectionalPairing: jest.fn(async () =>
+        makeSnapshot({
           pairingId: 'diff-recv-1',
           role: 'responder',
-          status: pollCalls === 1 ? 'waiting_approval' : 'completed',
+          status: allowComplete ? 'completed' : 'waiting_approval',
           sas: '8241',
           direction: 'different_accounts',
           localMaskedEmail: 'b***@example.com',
           peerMaskedEmail: 'a***@example.com',
-        });
-      }),
+        }),
+      ),
     });
 
     const view = await renderPanel(
@@ -474,10 +473,11 @@ describe('AccountBidirectionalPairingPanel security, lifecycle & TV focus regres
       );
       expect(screen.getByTestId('pair-waiting-approval')).toBeTruthy();
     });
-    // Must NOT prematurely complete on first poll ('waiting_approval')
+    // Must NOT prematurely complete while sender has not confirmed yet ('waiting_approval')
     expect(onPaired).not.toHaveBeenCalled();
 
-    // Subsequent poll returns 'completed' after sender confirms -> fires onPaired exactly once
+    // Sender confirms -> subsequent poll returns 'completed' -> fires onPaired exactly once
+    allowComplete = true;
     await waitFor(() => {
       expect(onPaired).toHaveBeenCalledTimes(1);
     });

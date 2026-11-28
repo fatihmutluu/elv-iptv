@@ -29,6 +29,7 @@ export function createDesktopDownloadsPort(bridgeOverride?: DownloadsBridge): Do
       list: async () => [],
       get: async () => null,
       enqueue: async () => unsupportedError(),
+      enqueueBatch: async () => unsupportedError(),
       pause: async () => unsupportedError(),
       resume: async () => unsupportedError(),
       cancel: async () => unsupportedError(),
@@ -60,6 +61,16 @@ export function createDesktopDownloadsPort(bridgeOverride?: DownloadsBridge): Do
     async enqueue(input: DownloadEnqueueInput): Promise<Result<DownloadRecord>> {
       try {
         return await bridge.enqueue(input);
+      } catch {
+        return err(elvError('storage', 'downloads-ipc-failed'));
+      }
+    },
+
+    async enqueueBatch(
+      inputs: readonly DownloadEnqueueInput[],
+    ): Promise<Result<readonly DownloadRecord[]>> {
+      try {
+        return await bridge.enqueueBatch(inputs);
       } catch {
         return err(elvError('storage', 'downloads-ipc-failed'));
       }
