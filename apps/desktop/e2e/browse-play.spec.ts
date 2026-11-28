@@ -202,9 +202,12 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await expect(window.getByTestId('detail-screen')).toBeVisible();
     await expect(window.getByTestId('detail-episode-0')).toBeVisible();
 
-    await window.getByTestId('nav-tab-search').click();
+    await window.getByTestId('nav-utility-search').click();
+    await expect(window.getByTestId('search-popup-overlay')).toBeVisible();
+    await window.getByTestId('search-popup-input').fill('Movie 0001');
+    await expect(window.getByTestId('search-popup-movie-0')).toBeVisible({ timeout: 10_000 });
+    await window.getByTestId('search-popup-view-all').click();
     await expect(window.getByTestId('search-screen')).toBeVisible();
-    await window.getByTestId('search-input').fill('Movie 0001');
     const searchMovie0 = window.getByTestId('search-movie-item-0');
     await expect(searchMovie0).toBeVisible({ timeout: 10_000 });
     await searchMovie0.click();
@@ -212,7 +215,8 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await window.getByTestId('detail-back').click();
     await expect(window.getByTestId('search-screen')).toBeVisible();
 
-    await window.getByTestId('nav-tab-settings').click();
+    await window.getByTestId('nav-utility-profile').click();
+    await window.getByTestId('profile-menu-settings').click();
     await expect(window.getByTestId('settings-screen')).toBeVisible();
     await window.getByTestId('settings-tab-appearance').click();
     await window.getByTestId('settings-language-dropdown').click();

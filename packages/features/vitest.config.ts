@@ -14,6 +14,7 @@ export default defineConfig({
         'src/catalog/virtual-grid-math.ts',
         'src/detail/detail-model.ts',
         'src/search/search-model.ts',
+        'src/search/search-popup-model.ts',
         'src/browse/browse-model.ts',
         'src/player/errors.ts',
         'src/player/player-overlay-model.ts',

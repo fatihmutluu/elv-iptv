@@ -42,6 +42,8 @@ export interface UseWaveF9ControllerOptions {
 /** Controller returned by {@link useWaveF9Controller} for `AppShell` Wave F9 / P9 wiring. */
 export interface WaveF9Controller {
   readonly syncAccount: SyncAccountPort | undefined;
+  readonly isAccountSignedIn: boolean;
+  readonly signOutAccount: () => Promise<void>;
   readonly isWelcomeVisible: boolean;
   readonly isPrivacyConsentVisible: boolean;
   readonly hasOverlay: boolean;
@@ -209,8 +211,16 @@ export function useWaveF9Controller({
     [feedback],
   );
 
+  const isAccountSignedIn =
+    accountState.status === 'signed_in' || accountState.status === 'syncing';
+  const signOutAccount = useCallback(async () => {
+    await syncAccount?.signOut();
+  }, [syncAccount]);
+
   return {
     syncAccount,
+    isAccountSignedIn,
+    signOutAccount,
     isWelcomeVisible,
     isPrivacyConsentVisible,
     hasOverlay: isWelcomeVisible || isPrivacyConsentVisible,

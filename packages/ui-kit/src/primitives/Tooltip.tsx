@@ -158,8 +158,10 @@ export function Tooltip({
   const trimmedDescription = description?.trim() ?? '';
   const isTv = viewport.inputModality === 'tv' || viewport.formFactor === 'tv';
   const isTouch = viewport.inputModality === 'touch';
-  const isActive =
-    Platform.OS === 'web' && !isTv && !isTouch && !disabled && trimmedContent.length > 0;
+  const isPointerPlatform = Platform.OS === 'web' && !isTv && !isTouch;
+  const hasContent = trimmedContent.length > 0;
+  const canPreserveAnchor = isPointerPlatform && hasContent;
+  const isActive = canPreserveAnchor && !disabled;
 
   const [inlineVisible, setInlineVisible] = useState(false);
   const [inlineCoords, setInlineCoords] = useState<FixedCoords | null>(null);
@@ -223,7 +225,7 @@ export function Tooltip({
     };
   }, [clearPendingTimer, host, tooltipId]);
 
-  if (!isActive) {
+  if (!canPreserveAnchor) {
     return children;
   }
 
@@ -242,9 +244,14 @@ export function Tooltip({
   };
 
   return (
-    <View ref={anchorRef} testID={testID} style={styles.anchor} {...pointerHandlers}>
+    <View
+      ref={anchorRef}
+      testID={isActive ? testID : undefined}
+      style={styles.anchor}
+      {...(isActive ? pointerHandlers : {})}
+    >
       {children}
-      {host === null && inlineVisible ? (
+      {isActive && host === null && inlineVisible ? (
         <TooltipBubble
           theme={theme}
           content={trimmedContent}

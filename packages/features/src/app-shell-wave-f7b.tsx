@@ -108,6 +108,8 @@ export function AppShellRootOverlays(props: {
   readonly catalog: CatalogService;
   readonly onChannelsMutated: () => void;
   readonly onOpenProfilesSettings: () => void;
+  readonly profileStartInAdd?: boolean;
+  readonly onConsumeProfileStartInAdd?: () => void;
   readonly reminders: ReturnType<typeof useProgrammeReminders>;
   readonly oledScreensaver: ReturnType<typeof useOledScreensaver>;
   readonly wave: ReturnType<typeof useAppShellWaveF7b>;
@@ -121,6 +123,8 @@ export function AppShellRootOverlays(props: {
     catalog,
     onChannelsMutated,
     onOpenProfilesSettings,
+    profileStartInAdd,
+    onConsumeProfileStartInAdd,
     reminders,
     oledScreensaver,
     wave,
@@ -145,7 +149,13 @@ export function AppShellRootOverlays(props: {
         onMutated={onChannelsMutated}
         onClose={mgmtOverlays.closeGuideManager}
       />
-      <AppShellProfileOverlays onOpenProfilesSettings={onOpenProfilesSettings} />
+      <AppShellProfileOverlays
+        onOpenProfilesSettings={onOpenProfilesSettings}
+        {...(profileStartInAdd !== undefined ? { startInAdd: profileStartInAdd } : {})}
+        {...(onConsumeProfileStartInAdd !== undefined
+          ? { onConsumeStartInAdd: onConsumeProfileStartInAdd }
+          : {})}
+      />
       <ReminderToastBanner
         banner={reminders.activeBanner}
         onTune={reminders.tuneActiveBanner}

@@ -1,9 +1,42 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
+import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { buildTheme, ThemeProvider } from '../../theme';
 import { ViewportProvider } from '../../viewport';
 import { IconButton } from '../IconButton';
 import { Tooltip } from '../Tooltip';
+
+function TrackedChild({ counters }: { readonly counters: { mounts: number; unmounts: number } }) {
+  useEffect(() => {
+    counters.mounts += 1;
+    return () => {
+      counters.unmounts += 1;
+    };
+  }, [counters]);
+  return <View testID="stable-child" />;
+}
+
+function TooltipToggleHarness({
+  counters,
+}: {
+  readonly counters: { mounts: number; unmounts: number };
+}) {
+  const [disabled, setDisabled] = useState(false);
+  return (
+    <ThemeProvider>
+      <ViewportProvider
+        value={{ formFactor: 'desktop', inputModality: 'pointer', orientation: 'landscape' }}
+      >
+        <Tooltip content="Profile" delayMs={0} disabled={disabled} testID="toggle-tip">
+          <TrackedChild counters={counters} />
+        </Tooltip>
+        <Text testID="toggle-disabled" onPress={() => setDisabled((d) => !d)}>
+          {disabled ? 'off' : 'on'}
+        </Text>
+      </ViewportProvider>
+    </ThemeProvider>
+  );
+}
 
 const defaultTheme = buildTheme();
 const flat = StyleSheet.flatten;
@@ -204,5 +237,29 @@ describe('Tooltip & IconButton integration', () => {
     await fireEvent(screen.getByTestId('inline-tip'), 'pointerEnter');
     expect(within(screen.getByTestId('inline-tip')).getByTestId('inline-tip-bubble')).toBeTruthy();
     expect(screen.getByText('Standalone')).toBeTruthy();
+  });
+
+  it('keeps child instance mounted without unmount/remount when disabled toggles dynamically on desktop web', async () => {
+    jest.replaceProperty(Platform, 'OS', 'web');
+    const counters = { mounts: 0, unmounts: 0 };
+
+    await render(<TooltipToggleHarness counters={counters} />);
+    expect(counters.mounts).toBe(1);
+    expect(counters.unmounts).toBe(0);
+
+    await fireEvent(screen.getByTestId('toggle-tip'), 'pointerEnter');
+    expect(screen.getByTestId('toggle-tip-bubble')).toBeTruthy();
+
+    // Flipping disabled true -> false must preserve child identity and suppress bubble while disabled
+    await fireEvent.press(screen.getByTestId('toggle-disabled'));
+    expect(screen.queryByTestId('toggle-tip-bubble')).toBeNull();
+    expect(counters.mounts).toBe(1);
+    expect(counters.unmounts).toBe(0);
+
+    await fireEvent.press(screen.getByTestId('toggle-disabled'));
+    expect(counters.mounts).toBe(1);
+    expect(counters.unmounts).toBe(0);
+    await fireEvent(screen.getByTestId('toggle-tip'), 'pointerEnter');
+    expect(screen.getByTestId('toggle-tip-bubble')).toBeTruthy();
   });
 });

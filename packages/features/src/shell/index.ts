@@ -53,6 +53,10 @@ export {
   PrivacyConsentOverlay,
   type PrivacyConsentOverlayProps,
 } from './PrivacyConsentOverlay';
+export {
+  ProfileDropdownMenu,
+  type ProfileDropdownMenuProps,
+} from './ProfileDropdownMenu';
 export type { AdaptiveNavShellProps, NavDestination, NavUtility } from './types';
 export {
   type RunCatalogPrewarmOptions,

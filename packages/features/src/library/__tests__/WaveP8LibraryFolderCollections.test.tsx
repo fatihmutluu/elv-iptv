@@ -3,6 +3,7 @@ import { countingScheduler, memorySecrets, testDb } from '@elv/data/testing';
 import { elvError, err, type HttpClient, type HttpResponse, ok } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import {
+  buildTheme,
   createTvRemoteDispatcher,
   I18nProvider,
   ThemeProvider,
@@ -10,7 +11,7 @@ import {
   ViewportProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Platform } from 'react-native';
+import { Platform, ScrollView, StyleSheet } from 'react-native';
 import { DownloadsProvider } from '../../shared';
 import { LibraryScreen } from '../LibraryScreen';
 
@@ -100,6 +101,7 @@ async function renderLibrary(
   opts?: {
     readonly isTv?: boolean;
     readonly dispatcher?: ReturnType<typeof createTvRemoteDispatcher>;
+    readonly onFocusTopNav?: () => void;
   },
 ) {
   const isTv = opts?.isTv ?? false;
@@ -121,6 +123,7 @@ async function renderLibrary(
               refreshToken={0}
               onPlay={jest.fn()}
               onOpenDetail={jest.fn()}
+              {...(opts?.onFocusTopNav !== undefined ? { onFocusTopNav: opts.onFocusTopNav } : {})}
             />
           </DownloadsProvider>
         </I18nProvider>
@@ -141,7 +144,7 @@ describe('Wave P8 Library -> Following Folder-Style Collections (#508)', () => {
     jest.restoreAllMocks();
   });
 
-  it('creates an empty collection via top-right CTA (zero Modal), moves starred movie via context menu (excluding it from general Movies), renames, and restores movie to general Movies on delete', async () => {
+  it('creates an empty collection via restrained bottom trigger (zero Modal), moves starred movie via context menu (excluding it from general Movies), renames, and restores movie to general Movies on delete', async () => {
     const env = await openRealCatalog();
     try {
       const m1 = env.movies[0];
@@ -169,6 +172,12 @@ describe('Wave P8 Library -> Following Folder-Style Collections (#508)', () => {
         expect(screen.getByTestId(`library-card-movies-${m1.key}`)).toBeTruthy();
       });
 
+      // Trigger renders at the very bottom of Following content (strictly after rails), NOT in header
+      const serializedBefore = JSON.stringify(view.toJSON());
+      expect(serializedBefore.indexOf('"library-rail-movies"')).toBeLessThan(
+        serializedBefore.indexOf('"library-create-collection-btn"'),
+      );
+
       // Create empty collection via inline Cinema Quietude modal (zero RN <Modal>)
       await fireEvent.press(screen.getByTestId('library-create-collection-btn'));
       await waitFor(() => {
@@ -184,7 +193,7 @@ describe('Wave P8 Library -> Following Folder-Style Collections (#508)', () => {
       expect(col).toBeDefined();
       if (!col) return;
 
-      // Empty collection renders visibly with empty hint, Rename, and Delete controls
+      // Empty collection renders visibly with empty hint, Rename, and Delete controls, and Create trigger sits BELOW it
       await waitFor(() => {
         expect(screen.queryByTestId('library-collection-modal')).toBeNull();
         expect(screen.getByTestId(`library-rail-collection-${col.id}`)).toBeTruthy();
@@ -192,6 +201,10 @@ describe('Wave P8 Library -> Following Folder-Style Collections (#508)', () => {
         expect(screen.getByTestId(`library-collection-rename-${col.id}`)).toBeTruthy();
         expect(screen.getByTestId(`library-collection-delete-${col.id}`)).toBeTruthy();
       });
+      const serializedAfterCreate = JSON.stringify(view.toJSON());
+      expect(serializedAfterCreate.indexOf(`"library-rail-collection-${col.id}"`)).toBeLessThan(
+        serializedAfterCreate.indexOf('"library-create-collection-btn"'),
+      );
 
       // Move starred movie into Sci-Fi via context menu -> disappears from general Movies rail (which hides when empty)
       await fireEvent(screen.getByTestId(`library-card-movies-${m1.key}`), 'longPress');
@@ -371,7 +384,7 @@ describe('Wave P8 Library -> Following Folder-Style Collections (#508)', () => {
     }
   });
 
-  it('navigates top-right Create collection CTA and empty collection Rename/Delete controls via 10-ft TV D-pad', async () => {
+  it('navigates bottom Create collection trigger and empty collection Rename/Delete controls via 10-ft TV D-pad', async () => {
     const env = await openRealCatalog();
     try {
       const created = await env.catalog.createCollection?.({ name: 'Empty Shelf' });
@@ -379,17 +392,28 @@ describe('Wave P8 Library -> Following Folder-Style Collections (#508)', () => {
       if (!created?.ok) return;
 
       const dispatcher = createTvRemoteDispatcher();
-      const view = await renderLibrary(env.catalog, { isTv: true, dispatcher });
+      const onFocusTopNav = jest.fn();
+      const view = await renderLibrary(env.catalog, { isTv: true, dispatcher, onFocusTopNav });
 
       await waitFor(() => {
         expect(screen.getByTestId('library-create-collection-btn')).toBeTruthy();
         expect(screen.getByTestId(`library-collection-empty-${created.value.id}`)).toBeTruthy();
       });
 
-      // Up from tabs reaches Create collection CTA -> Select opens inline modal -> Back closes it
+      // Up from tabs focuses top nav (Create collection is at the bottom, not above tabs)
       await act(async () => {
-        dispatcher.dispatch({ key: 'up', action: 'press', time: 10 }, false);
+        dispatcher.dispatch({ key: 'up', action: 'press', time: 5 }, false);
       });
+      expect(onFocusTopNav).toHaveBeenCalledTimes(1);
+
+      // Down from tabs enters empty collection header (Rename col 0), Down again enters bottom Create collection trigger -> Select opens modal -> Back closes it
+      await act(async () => {
+        dispatcher.dispatch({ key: 'down', action: 'press', time: 10 }, false);
+      });
+      await act(async () => {
+        dispatcher.dispatch({ key: 'down', action: 'press', time: 15 }, false);
+      });
+      expect(screen.getByTestId('library-create-collection-btn-focus-ring')).toBeTruthy();
       await act(async () => {
         dispatcher.dispatch({ key: 'select', action: 'press', time: 20 }, false);
       });
@@ -403,12 +427,9 @@ describe('Wave P8 Library -> Following Folder-Style Collections (#508)', () => {
         expect(screen.queryByTestId('library-collection-modal')).toBeNull();
       });
 
-      // Down from Create CTA returns to tabs -> Down enters empty collection header (Rename col 0) -> Right moves to Delete (col 1) -> Select opens Delete confirmation
+      // Up from Create trigger returns to last rail (empty collection header Rename col 0) -> Right moves to Delete (col 1) -> Select opens Delete confirmation
       await act(async () => {
-        dispatcher.dispatch({ key: 'down', action: 'press', time: 40 }, false);
-      });
-      await act(async () => {
-        dispatcher.dispatch({ key: 'down', action: 'press', time: 50 }, false);
+        dispatcher.dispatch({ key: 'up', action: 'press', time: 40 }, false);
       });
       await act(async () => {
         dispatcher.dispatch({ key: 'right', action: 'press', time: 60 }, false);
@@ -425,6 +446,108 @@ describe('Wave P8 Library -> Following Folder-Style Collections (#508)', () => {
       await waitFor(() => {
         expect(screen.queryByTestId('library-collection-delete-modal')).toBeNull();
       });
+
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it('traverses movies + populated collection rails down to bottom Create collection trigger, up back to last rail, and hides trigger on other tabs', async () => {
+    const scrollEndSpy = jest
+      .spyOn(ScrollView.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    const env = await openRealCatalog();
+    try {
+      const m1 = env.movies[0];
+      const m2 = env.movies[1];
+      expect(m1 && m2).toBeTruthy();
+      if (!m1 || !m2) return;
+
+      await env.catalog.setFavorite?.(
+        {
+          sourceId: env.sourceId,
+          itemKey: m1.key,
+          kind: 'movie',
+          title: m1.name,
+          logo: m1.logo,
+          year: m1.year,
+          rating: m1.rating,
+        },
+        true,
+      );
+      await env.catalog.setFavorite?.(
+        {
+          sourceId: env.sourceId,
+          itemKey: m2.key,
+          kind: 'movie',
+          title: m2.name,
+          logo: m2.logo,
+          year: m2.year,
+          rating: m2.rating,
+        },
+        true,
+      );
+      const col = await env.catalog.createCollection?.({ name: 'Favorites Shelf' });
+      expect(col?.ok).toBe(true);
+      if (!col?.ok) return;
+      await env.catalog.addItemToCollection?.(col.value.id, m2.key, 'movie');
+
+      const dispatcher = createTvRemoteDispatcher();
+      const view = await renderLibrary(env.catalog, { isTv: true, dispatcher });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('library-rail-movies')).toBeTruthy();
+        expect(screen.getByTestId(`library-rail-collection-${col.value.id}`)).toBeTruthy();
+        expect(screen.getByTestId('library-create-collection-btn')).toBeTruthy();
+      });
+
+      scrollEndSpy.mockClear();
+
+      // Row order in Following: 0=movies, 1=collection-actions, 2=collection items -> bottom Create collection
+      await act(async () => {
+        dispatcher.dispatch({ key: 'down', action: 'press', time: 10 }, false);
+        dispatcher.dispatch({ key: 'down', action: 'press', time: 20 }, false);
+        dispatcher.dispatch({ key: 'down', action: 'press', time: 30 }, false);
+      });
+      expect(scrollEndSpy).not.toHaveBeenCalled();
+
+      await act(async () => {
+        dispatcher.dispatch({ key: 'down', action: 'press', time: 40 }, false);
+      });
+
+      const theme = buildTheme();
+      const outerRing = screen.getByTestId('library-create-collection-btn-focus-ring');
+      expect(outerRing).toBeTruthy();
+      expect(StyleSheet.flatten(outerRing.props.style)).toMatchObject({
+        borderWidth: theme.focus.ringWidth,
+        borderColor: theme.colors.focusRingColor,
+      });
+      // Inner button keeps subtle 1px border (zero double concentric focus ring)
+      const innerBtnStyle = StyleSheet.flatten(
+        screen.getByTestId('library-create-collection-btn').props.style,
+      );
+      expect(innerBtnStyle.borderWidth).toBe(1);
+      expect(innerBtnStyle.borderColor).toBe(theme.colors.surfaceBorder);
+      // Entering bottom Create collection scrolls library-scroll into view
+      expect(scrollEndSpy).toHaveBeenCalledWith({ animated: false });
+
+      // Up returns directly to the last collection rail card
+      await act(async () => {
+        dispatcher.dispatch({ key: 'up', action: 'press', time: 50 }, false);
+      });
+      expect(screen.queryByTestId('library-create-collection-btn-focus-ring')).toBeNull();
+      expect(
+        screen.getByTestId(`library-card-collection-${col.value.id}-${m2.key}-focus-ring`),
+      ).toBeTruthy();
+
+      // Switching away to Likes / Watched / Downloads hides library-create-collection-btn completely
+      await fireEvent.press(screen.getByTestId('library-tab-likes'));
+      expect(screen.queryByTestId('library-create-collection-btn')).toBeNull();
+      await fireEvent.press(screen.getByTestId('library-tab-watched'));
+      expect(screen.queryByTestId('library-create-collection-btn')).toBeNull();
+      await fireEvent.press(screen.getByTestId('library-tab-downloads'));
+      expect(screen.queryByTestId('library-create-collection-btn')).toBeNull();
 
       await view.unmount();
     } finally {

@@ -199,12 +199,17 @@ describe('Wave P8 Library Fix Pass regressions', () => {
       const view = await renderLibrary(env.catalog, { isTv: true, dispatcher });
 
       await waitFor(() => {
+        expect(screen.getByTestId('library-empty-following')).toBeTruthy();
         expect(screen.getByTestId('library-create-collection-btn')).toBeTruthy();
       });
+      const serializedEmpty = JSON.stringify(view.toJSON());
+      expect(serializedEmpty.indexOf('"library-empty-following"')).toBeLessThan(
+        serializedEmpty.indexOf('"library-create-collection-btn"'),
+      );
 
-      // Up from tabs -> Create collection CTA -> Select opens Create modal with input slot focused
+      // Down from empty Following tabs -> bottom Create collection trigger -> Select opens Create modal with input slot focused
       await act(async () => {
-        dispatcher.dispatch({ key: 'up', action: 'press', time: 10 }, false);
+        dispatcher.dispatch({ key: 'down', action: 'press', time: 10 }, false);
       });
       await act(async () => {
         dispatcher.dispatch({ key: 'select', action: 'press', time: 20 }, false);
@@ -238,12 +243,9 @@ describe('Wave P8 Library Fix Pass regressions', () => {
       expect(created).toBeDefined();
       if (!created) return;
 
-      // Down to tabs -> Down to collection actions (Rename col 0) -> Select opens Rename modal
+      // Up from bottom Create collection trigger returns directly to TV Shelf collection actions (Rename col 0) -> Select opens Rename modal
       await act(async () => {
-        dispatcher.dispatch({ key: 'down', action: 'press', time: 60 }, false);
-      });
-      await act(async () => {
-        dispatcher.dispatch({ key: 'down', action: 'press', time: 70 }, false);
+        dispatcher.dispatch({ key: 'up', action: 'press', time: 60 }, false);
       });
       await act(async () => {
         dispatcher.dispatch({ key: 'select', action: 'press', time: 80 }, false);

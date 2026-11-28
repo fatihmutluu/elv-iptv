@@ -216,10 +216,15 @@ describe('AppShell zero-blink prewarm, startup anti-flash & background/unmount f
     );
 
     await waitFor(() => expect(screen.getByTestId('home-screen')).toBeTruthy());
-    await fireEvent.press(screen.getByTestId('nav-tab-search'));
-    await fireEvent.changeText(screen.getByTestId('search-input'), 'Warm Movie');
+    await fireEvent.press(screen.getByTestId('nav-utility-search'));
+    await fireEvent.changeText(screen.getByTestId('search-popup-input'), 'Warm Movie');
+    await waitFor(() => {
+      expect(screen.getByTestId('search-popup-view-all')).toBeTruthy();
+    });
+    await fireEvent.press(screen.getByTestId('search-popup-view-all'));
 
     await waitFor(() => {
+      expect(screen.getByTestId('search-screen')).toBeTruthy();
       expect(screen.getByTestId('search-movie-item-0')).toBeTruthy();
     });
     expect(searchMock).toHaveBeenCalledTimes(1);

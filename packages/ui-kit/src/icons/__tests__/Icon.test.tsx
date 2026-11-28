@@ -17,6 +17,9 @@ const WAVE_C1_ICONS: readonly IconName[] = [
   'miniplayer',
   'popout',
   'dock',
+  'bookmark',
+  'bookmarkFilled',
+  'ban',
 ];
 
 describe('Icon rendering for Wave C1 cinema player icons', () => {

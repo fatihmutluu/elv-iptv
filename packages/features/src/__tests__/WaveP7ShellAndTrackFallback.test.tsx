@@ -138,6 +138,11 @@ describe('Wave P7 AppProviders platform defaults, AppShell per-profile source fi
 
       // Adult (default) profile sees Source A on Home and BOTH sources' categories in Live -> Channels
       await waitFor(() => {
+        expect(screen.getByTestId('profile-picker-close')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('profile-picker-close'));
+
+      await waitFor(() => {
         expect(screen.getByText('Source A News')).toBeTruthy();
       });
       await fireEvent.press(screen.getByTestId('nav-tab-live'));
@@ -148,12 +153,12 @@ describe('Wave P7 AppProviders platform defaults, AppShell per-profile source fi
         expect(screen.getByText(/Kids Cartoons/)).toBeTruthy();
       });
 
-      // Switch to Kids profile via top-right avatar utility
-      await fireEvent.press(screen.getByTestId('nav-tab-profile'));
+      // Switch to Kids profile via top-right avatar utility menu
+      await fireEvent.press(screen.getByTestId('nav-utility-profile'));
       await waitFor(() =>
-        expect(screen.getByTestId(`profile-picker-card-${kids.value.id}`)).toBeTruthy(),
+        expect(screen.getByTestId(`profile-menu-item-${kids.value.id}`)).toBeTruthy(),
       );
-      await fireEvent.press(screen.getByTestId(`profile-picker-card-${kids.value.id}`));
+      await fireEvent.press(screen.getByTestId(`profile-menu-item-${kids.value.id}`));
 
       // Kids profile resets live sub-mode on switch; opening Channels hides Source A while keeping Source B visible
       await waitFor(() => expect(screen.getByTestId('live-mode-channels')).toBeTruthy());
@@ -170,7 +175,8 @@ describe('Wave P7 AppProviders platform defaults, AppShell per-profile source fi
       });
 
       // Settings -> Sources STILL lists BOTH Source A and Source B so adults can manage sharing
-      await fireEvent.press(screen.getByTestId('nav-tab-settings'));
+      await fireEvent.press(screen.getByTestId('nav-utility-profile'));
+      await fireEvent.press(screen.getByTestId('profile-menu-settings'));
       await waitFor(() => expect(screen.getByTestId('settings-tab-sources')).toBeTruthy());
       await fireEvent.press(screen.getByTestId('settings-tab-sources'));
       await waitFor(() => {

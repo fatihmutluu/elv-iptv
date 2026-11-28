@@ -1,6 +1,6 @@
 import type { TvClockMode } from '@elv/domain';
 import type { IconName } from '@elv/ui-kit';
-import type { ReactElement, ReactNode } from 'react';
+import type { ReactElement, ReactNode, RefObject } from 'react';
 
 /** One primary navigation destination rendered in the top bar (Landscape) or bottom tab bar (Portrait). */
 export interface NavDestination<TId extends string = string> {
@@ -23,7 +23,15 @@ export interface NavUtility<TId extends string = string> {
   }) => ReactElement;
   readonly active?: boolean;
   readonly showLabel?: boolean;
+  /** When `true`, TV D-pad Left/Right moves focus highlight without triggering `onPress` until `Select` (`#Wave R1`). */
+  readonly activateOnSelectOnly?: boolean;
   readonly testID?: string;
+  readonly disableTooltip?: boolean;
+  readonly triggerRef?: RefObject<unknown>;
+  readonly onHoverIn?: (event?: unknown) => void;
+  readonly onHoverOut?: (event?: unknown) => void;
+  readonly onPointerEnter?: (event?: unknown) => void;
+  readonly onPointerLeave?: (event?: unknown) => void;
   readonly onPress: () => void;
 }
 

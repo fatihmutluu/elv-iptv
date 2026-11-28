@@ -4909,3 +4909,24 @@ msgstr "Güncelleme doğrulaması başarısız oldu. Sürüm sayfasından doğru
 
 msgid "settings.updates.installing"
 msgstr "Güncelleme hazırlanıyor…"
+
+msgid "profile.menu.profiles"
+msgstr "Profiller"
+
+msgid "profile.menu.addNew"
+msgstr "Yeni ekle"
+
+msgid "profile.menu.editProfiles"
+msgstr "Profilleri düzenle"
+
+msgid "profile.menu.signOut"
+msgstr "Çıkış yap"
+
+msgid "search.viewAll"
+msgstr "Hepsini görüntüle"
+
+msgid "search.popup.title"
+msgstr "Hızlı arama"
+
+msgid "search.popup.suggestions"
+msgstr "Öneriler"

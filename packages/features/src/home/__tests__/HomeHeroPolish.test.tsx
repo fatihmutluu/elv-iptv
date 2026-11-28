@@ -6,13 +6,15 @@ import {
   type AndroidKeyEvent,
   type AndroidKeySource,
   I18nProvider,
+  ICON_PATHS,
   RemoteKeysProvider,
   ThemeProvider,
+  UiAdaptersProvider,
   type ViewportOverride,
   ViewportProvider,
 } from '@elv/ui-kit';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Platform, StyleSheet } from 'react-native';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { RouteActiveProvider } from '../../shared';
 import { buildHeroActionIds, HomeHero } from '../HomeHero';
 import { HOME_HERO_AUTO_ROTATE_MS, HomeScreen } from '../HomeScreen';
@@ -175,9 +177,10 @@ describe('HomeHero crossfade, Details CTA & auto-rotation (#399) + Watched clean
     ]);
   });
 
-  it('renders Details CTA for movies/series, fires hover callbacks, and crossfades backdrops safely', async () => {
+  it('renders circular info IconButton first next to Play with desktop hover tooltip, fires hover callbacks, and crossfades backdrops safely', async () => {
     const onOpenDetails = jest.fn();
     const onHoverChange = jest.fn();
+    const renderedIcons: unknown[] = [];
     const slides = [
       makeSlide({ itemKey: 'm1', title: 'Neon Horizon', backdropUri: 'https://img.example/1.jpg' }),
       makeSlide({
@@ -188,33 +191,74 @@ describe('HomeHero crossfade, Details CTA & auto-rotation (#399) + Watched clean
     ];
 
     const renderHero = (activeIndex: number, reduceMotion: boolean) => (
-      <I18nProvider i18n={createAppI18n('en')}>
-        <ThemeProvider reduceMotion={reduceMotion}>
-          <HomeHero
-            slides={slides}
-            activeIndex={activeIndex}
-            onSelectIndex={jest.fn()}
-            inMyList={false}
-            onPlaySlide={jest.fn()}
-            onOpenDetails={onOpenDetails}
-            onToggleMyList={jest.fn()}
-            onToggleWatched={jest.fn()}
-            onHoverChange={onHoverChange}
-            isTv={false}
-            isTouch={false}
-            isPortrait={false}
-            topClearance={64}
-            minHeight={420}
-            padX={48}
-            focusedAction={null}
-          />
-        </ThemeProvider>
-      </I18nProvider>
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <I18nProvider i18n={createAppI18n('en')}>
+          <ThemeProvider reduceMotion={reduceMotion}>
+            <UiAdaptersProvider
+              adapters={{
+                renderSvg: ({ spec }) => {
+                  renderedIcons.push(spec);
+                  return <View />;
+                },
+              }}
+            >
+              <HomeHero
+                slides={slides}
+                activeIndex={activeIndex}
+                onSelectIndex={jest.fn()}
+                inMyList={false}
+                onPlaySlide={jest.fn()}
+                onOpenDetails={onOpenDetails}
+                onToggleMyList={jest.fn()}
+                onToggleWatched={jest.fn()}
+                onHoverChange={onHoverChange}
+                isTv={false}
+                isTouch={false}
+                isPortrait={false}
+                topClearance={64}
+                minHeight={420}
+                padX={48}
+                focusedAction={null}
+              />
+            </UiAdaptersProvider>
+          </ThemeProvider>
+        </I18nProvider>
+      </ViewportProvider>
     );
 
     const view = await render(renderHero(0, false));
     const detailsBtn = screen.getByTestId('home-hero-details');
-    expect(detailsBtn).toHaveTextContent('Details');
+    expect(detailsBtn.props.accessibilityRole).toBe('button');
+    expect(detailsBtn.props.accessibilityLabel).toBe('Details');
+    // Circular IconButton (zero rectangular "Details" label text inside)
+    expect(within(detailsBtn).queryByText('Details')).toBeNull();
+    expect(renderedIcons).toContain(ICON_PATHS.info);
+
+    const detailsStyle = StyleSheet.flatten(detailsBtn.props.style);
+    const myListStyle = StyleSheet.flatten(screen.getByTestId('home-hero-mylist').props.style);
+    expect(detailsStyle.width).toBe(myListStyle.width);
+    expect(detailsStyle.height).toBe(myListStyle.height);
+    expect(detailsStyle.borderRadius).toBe(myListStyle.borderRadius);
+    expect(detailsStyle.borderRadius).toBeGreaterThanOrEqual(999);
+
+    // Order must be [Play] -> (i) Details -> (+) My List -> (v) Watched
+    const serialized = JSON.stringify(view.toJSON());
+    const idxPlay = serialized.indexOf('"home-hero-play"');
+    const idxDetails = serialized.indexOf('"home-hero-details"');
+    const idxMyList = serialized.indexOf('"home-hero-mylist"');
+    const idxWatched = serialized.indexOf('"home-hero-watched"');
+    expect(idxPlay).toBeLessThan(idxDetails);
+    expect(idxDetails).toBeLessThan(idxMyList);
+    expect(idxMyList).toBeLessThan(idxWatched);
+
     const dotsFooterStyle = StyleSheet.flatten(screen.getByTestId('home-hero-dots').props.style);
     expect(dotsFooterStyle).toMatchObject({
       width: '100%',
@@ -498,5 +542,54 @@ describe('HomeHero crossfade, Details CTA & auto-rotation (#399) + Watched clean
     } finally {
       await env.cleanup();
     }
+  });
+
+  it('reveals desktop hover Tooltip for circular Details IconButton using i18n home.details label', async () => {
+    jest.replaceProperty(Platform, 'OS', 'web');
+    jest.useFakeTimers();
+
+    const view = await render(
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <ThemeProvider>
+          <I18nProvider i18n={createAppI18n('en')}>
+            <HomeHero
+              slides={[makeSlide({ kind: 'movie' })]}
+              activeIndex={0}
+              onSelectIndex={jest.fn()}
+              inMyList={false}
+              onPlaySlide={jest.fn()}
+              onOpenDetails={jest.fn()}
+              onToggleMyList={jest.fn()}
+              onToggleWatched={jest.fn()}
+              isTv={false}
+              isTouch={false}
+              isPortrait={false}
+              topClearance={64}
+              minHeight={420}
+              padX={48}
+              focusedAction={null}
+            />
+          </I18nProvider>
+        </ThemeProvider>
+      </ViewportProvider>,
+    );
+
+    await fireEvent(screen.getByTestId('home-hero-details-tooltip'), 'pointerEnter');
+    await act(async () => {
+      jest.advanceTimersByTime(330);
+    });
+    expect(screen.getByTestId('home-hero-details-tooltip-bubble')).toHaveTextContent('Details');
+
+    await fireEvent(screen.getByTestId('home-hero-details-tooltip'), 'pointerLeave');
+    expect(screen.queryByTestId('home-hero-details-tooltip-bubble')).toBeNull();
+    await view.unmount();
   });
 });
