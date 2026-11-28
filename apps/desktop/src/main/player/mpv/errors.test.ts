@@ -58,11 +58,138 @@ describe('classifyEnd rules', () => {
   const run = (logs: MpvLogLine[], fileError = 'loading failed') =>
     err(classifyEnd({ reason: 'error', fileError, logs, mediaKind: 'vod' }));
 
-  it('eof on vod is ended', () => {
+  it('eof on vod is ended when near duration or when timing is unavailable', () => {
     expect(classifyEnd({ reason: 'eof', logs: [], mediaKind: 'vod' })).toEqual({ kind: 'ended' });
     expect(classifyEnd({ reason: 'eof', logs: [], mediaKind: 'vod', played: true })).toEqual({
       kind: 'ended',
     });
+    // Short VOD (5 min -> 10s threshold): 290s of 300s is normal ended
+    expect(
+      classifyEnd({
+        reason: 'eof',
+        logs: [],
+        mediaKind: 'vod',
+        played: true,
+        positionMs: 290_000,
+        durationMs: 300_000,
+      }),
+    ).toEqual({ kind: 'ended' });
+    // Long VOD (2h -> 1% = 72s threshold): 7128s of 7200s is normal ended
+    expect(
+      classifyEnd({
+        reason: 'eof',
+        logs: [],
+        mediaKind: 'vod',
+        played: true,
+        positionMs: 7_128_000,
+        durationMs: 7_200_000,
+      }),
+    ).toEqual({ kind: 'ended' });
+    // Zero or non-finite position/duration falls back to normal ended
+    expect(
+      classifyEnd({
+        reason: 'eof',
+        logs: [],
+        mediaKind: 'vod',
+        played: true,
+        positionMs: 0,
+        durationMs: 600_000,
+      }),
+    ).toEqual({ kind: 'ended' });
+    expect(
+      classifyEnd({
+        reason: 'eof',
+        logs: [],
+        mediaKind: 'vod',
+        played: true,
+        positionMs: Number.NaN,
+        durationMs: 600_000,
+      }),
+    ).toEqual({ kind: 'ended' });
+  });
+
+  it('mid-movie VOD eof classifies recent HTTP/network/decoder logs first, else vod-premature-eof', () => {
+    // 10s floor on short 5-minute clip
+    expect(
+      err(
+        classifyEnd({
+          reason: 'eof',
+          logs: [],
+          mediaKind: 'vod',
+          played: true,
+          positionMs: 289_999,
+          durationMs: 300_000,
+        }),
+      ),
+    ).toEqual({ code: 'network', detail: 'vod-premature-eof' });
+
+    // 1% threshold on 2-hour movie (72s)
+    expect(
+      err(
+        classifyEnd({
+          reason: 'eof',
+          logs: [],
+          mediaKind: 'vod',
+          played: true,
+          positionMs: 7_127_999,
+          durationMs: 7_200_000,
+        }),
+      ),
+    ).toEqual({ code: 'network', detail: 'vod-premature-eof' });
+
+    // Inspects recent HTTP, network, and decoder logs before falling back to vod-premature-eof
+    expect(
+      err(
+        classifyEnd({
+          reason: 'eof',
+          logs: [line('HTTP error 403 Forbidden')],
+          mediaKind: 'vod',
+          played: true,
+          positionMs: 600_000,
+          durationMs: 3_600_000,
+        }),
+      ),
+    ).toMatchObject({ code: 'http-403', httpStatus: 403 });
+
+    expect(
+      err(
+        classifyEnd({
+          reason: 'eof',
+          logs: [line('tcp: Connection reset by peer')],
+          mediaKind: 'vod',
+          played: true,
+          positionMs: 600_000,
+          durationMs: 3_600_000,
+        }),
+      ),
+    ).toEqual({ code: 'network', detail: 'tcp: Connection reset by peer' });
+
+    expect(
+      err(
+        classifyEnd({
+          reason: 'eof',
+          logs: [line('Failed to initialize a decoder')],
+          mediaKind: 'vod',
+          played: true,
+          positionMs: 600_000,
+          durationMs: 3_600_000,
+        }),
+      ),
+    ).toMatchObject({ code: 'decoder' });
+
+    // Sidecar subtitle text MIME log must not misclassify a mid-movie drop as connection-limit
+    expect(
+      err(
+        classifyEnd({
+          reason: 'eof',
+          logs: [line("Mime-type: 'text/vtt'")],
+          mediaKind: 'vod',
+          played: true,
+          positionMs: 600_000,
+          durationMs: 3_600_000,
+        }),
+      ),
+    ).toEqual({ code: 'network', detail: 'vod-premature-eof' });
   });
   it('eof on a vod or live stream that never played checks HTTP, TLS and decoder logs before empty-eof', () => {
     expect(err(classifyEnd({ reason: 'eof', logs: [], mediaKind: 'vod', played: false }))).toEqual({

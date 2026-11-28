@@ -139,6 +139,7 @@ export const PLAYER_CHANNELS = Object.freeze({
   park: 'player:park',
   adopt: 'player:adopt',
   setPrimary: 'player:set-primary',
+  setScrubbing: 'player:set-scrubbing',
   command: 'player:command',
   event: 'player:event',
   area: 'player:area',
@@ -225,6 +226,13 @@ export interface PlayerCommandMessage {
   command: BridgeCommand;
 }
 
+/** Renderer-to-main request toggling VOD scrubbing mode (`hr-seek=no` during seekbar drags). */
+export interface SetScrubbingRequest {
+  readonly engineId: string;
+  readonly attempt: number;
+  readonly scrubbing: boolean;
+}
+
 /** Main to renderer (`player:event`); `atMs` fields are on the main clock and the proxy maps them. */
 export interface PlayerEventMessage {
   engineId: string;
@@ -259,6 +267,8 @@ export interface PlayerBridge {
   adopt?(engineId: string): Promise<PlayerOpenReply | null>;
   /** Promotes an existing Multi-View engine to primary (OS media, taskbar, aspect lock, `#34`). */
   setPrimary?(engineId: string): Promise<void>;
+  /** Toggles VOD scrubbing mode (`hr-seek=no` during drags) for `engineId`. */
+  setScrubbing?(request: SetScrubbingRequest): Promise<void>;
   send(message: PlayerCommandMessage): void;
   setArea(message: PlayerAreaMessage): void;
   /** Returns the unsubscribe function. */
@@ -303,10 +313,26 @@ const isExtent = (x: unknown): x is number => isCoordinate(x) && x >= 0;
 const isMs = (x: unknown): x is number => isNumber(x) && x >= 0 && x <= MAX_DURATION_MS;
 const PLAYER_OPEN_OPTIONS_KEYS: ReadonlySet<string> = new Set(['replaceExisting', 'primary']);
 const SET_MUTED_CMD_KEYS: ReadonlySet<string> = new Set(['name', 'muted']);
+const SET_SCRUBBING_REQUEST_KEYS: ReadonlySet<string> = new Set([
+  'engineId',
+  'attempt',
+  'scrubbing',
+]);
 
 /** Main-side check of a player engine identifier string. */
 export const isEngineId = (x: unknown): x is string =>
   typeof x === 'string' && x.length > 0 && x.length <= 64;
+
+/** Main-side check of a `player:set-scrubbing` request payload. */
+export function isSetScrubbingRequest(x: unknown): x is SetScrubbingRequest {
+  return (
+    isRecord(x) &&
+    hasOnlyKeys(x, SET_SCRUBBING_REQUEST_KEYS) &&
+    isEngineId(x['engineId']) &&
+    isAttempt(x['attempt']) &&
+    typeof x['scrubbing'] === 'boolean'
+  );
+}
 
 /** Main-side check of optional `player:open` options (`#34`). */
 export function isPlayerOpenOptions(x: unknown): x is PlayerOpenOptions {

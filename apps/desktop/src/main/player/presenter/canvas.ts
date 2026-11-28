@@ -1,5 +1,6 @@
 import type { PlayerArea } from '../../../shared/player-ipc.ts';
 import type { MpvClient } from '../mpv/client.ts';
+import { roundEdges } from './bounds.ts';
 import {
   type CanvasEndpoint,
   type IoSurfaceResolver,
@@ -179,8 +180,14 @@ export function createCanvasPresenter<
       return;
     }
     const factor = positiveOrOne(rawZoom) * positiveOrOne(deps.getScaleFactor(currentWindow));
-    const width = clampDim(area.width * factor);
-    const height = clampDim(area.height * factor);
+    const px = roundEdges(
+      area.x * factor,
+      area.y * factor,
+      (area.x + area.width) * factor,
+      (area.y + area.height) * factor,
+    );
+    const width = clampDim(px.width);
+    const height = clampDim(px.height);
     if (!activeSocket || (width === sent.w && height === sent.h)) return;
     sent = { w: width, h: height };
     writeLine(activeSocket, `R ${width} ${height}\n`);

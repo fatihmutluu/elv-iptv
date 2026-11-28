@@ -150,6 +150,7 @@ export function useInitialTrackSelection(params: {
     });
 
     const resolved = resolveInitialTrackSelection(tracks, {
+      mediaKind: activeTarget.kind,
       ...(targetAudioId !== undefined || targetSubOverride !== undefined
         ? {
             targetOverride: {
@@ -212,6 +213,7 @@ export function useInitialTrackSelection(params: {
   }, [
     activeService,
     activeTarget.itemKey,
+    activeTarget.kind,
     effectiveAudioLangs,
     effectiveSubLangs,
     fallbackLocale,

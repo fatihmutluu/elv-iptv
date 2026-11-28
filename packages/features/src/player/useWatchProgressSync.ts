@@ -7,6 +7,7 @@ import {
   type UserItemKind,
 } from '@elv/data';
 import {
+  isUnexpectedVodEarlyEof,
   type PlaybackClock,
   type PlaybackService,
   type PlaybackStatus,
@@ -21,7 +22,7 @@ export const PROGRESS_SAVE_INTERVAL_MS = 10_000;
 
 const MIN_SAVE_DELTA_MS = 1_000;
 
-type FlushMode = 'periodic' | 'immediate' | 'ended';
+type FlushMode = 'periodic' | 'immediate' | 'ended' | 'early-eof';
 
 interface LastSavedSnapshot {
   readonly itemKey: string;
@@ -133,9 +134,10 @@ export function useWatchProgressSync({
 
       const pos = Number.isFinite(positionMs) ? Math.max(0, Math.round(positionMs)) : 0;
       const dur = Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : 0;
-      if (mode !== 'ended' && pos < MIN_RESUME_POSITION_MS) return;
+      if (mode !== 'ended' && mode !== 'early-eof' && pos < MIN_RESUME_POSITION_MS) return;
 
-      const effectiveWatched = mode === 'ended' ? true : isCompletedProgress(pos, dur);
+      const effectiveWatched =
+        mode === 'ended' ? true : mode === 'early-eof' ? false : isCompletedProgress(pos, dur);
       const last = lastSavedRef.current;
       if (last !== null && last.itemKey === itemKey) {
         if (mode === 'periodic') {
@@ -163,7 +165,7 @@ export function useWatchProgressSync({
         episode,
         positionMs: pos,
         durationMs: dur,
-        ...(mode === 'ended' ? { watched: true } : {}),
+        ...(mode === 'ended' ? { watched: true } : mode === 'early-eof' ? { watched: false } : {}),
       };
       try {
         void Promise.resolve(saveProgress(payload)).catch(() => undefined);
@@ -196,6 +198,10 @@ export function useWatchProgressSync({
           anchor !== undefined
             ? Math.max(0, Math.round(positionAt(anchor, clockRef.current.now())))
             : 0;
+        if (durationMs > 0 && lastPos > 0 && isUnexpectedVodEarlyEof(lastPos, durationMs)) {
+          persistSnapshot(entry, lastPos, durationMs, 'early-eof');
+          return;
+        }
         persistSnapshot(entry, durationMs > 0 ? durationMs : lastPos, durationMs, 'ended');
         return;
       }

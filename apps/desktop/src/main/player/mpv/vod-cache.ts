@@ -183,6 +183,8 @@ export interface VodMpvLoadOptionsInput {
   readonly multiViewTileCount?: number;
   readonly throttleBackoffLevel?: number;
   readonly cacheDir?: string;
+  /** Prefer RAM-only VOD caching on >= 8 GiB desktops for non-`large` presets (defaults to `true`). */
+  readonly preferRamOnHighRam?: boolean;
 }
 
 /**
@@ -193,6 +195,7 @@ export function buildVodMpvLoadOptions(input: VodMpvLoadOptionsInput): Record<st
   if (input.kind === 'live') {
     return { ...LIVE_DEFAULT_CACHE_OPTIONS };
   }
+  const preferRamOnHighRam = input.preferRamOnHighRam !== false;
   const budget = computeVodBufferBudget({
     kind: 'vod',
     ...(input.bufferPreset === undefined ? {} : { bufferPreset: input.bufferPreset }),
@@ -204,6 +207,7 @@ export function buildVodMpvLoadOptions(input: VodMpvLoadOptionsInput): Record<st
     ...(input.throttleBackoffLevel === undefined
       ? {}
       : { throttleBackoffLevel: input.throttleBackoffLevel }),
+    preferRamOnHighRam,
   });
 
   const useDisk =
@@ -345,9 +349,12 @@ export function createVodCacheCoordinator(opts: {
   readFreeDiskBytes?: (dir: string) => number | undefined;
   getMultiViewTileCount?: () => number;
   removeDir?: (dir: string) => void;
+  /** Prefer RAM-only VOD caching on >= 8 GiB desktops for non-`large` presets (defaults to `true`). */
+  preferRamOnHighRam?: boolean;
 }): VodCacheCoordinator {
   const getRam = opts.getDeviceRamBytes ?? totalmem;
   const getFreeDisk = opts.readFreeDiskBytes ?? readFreeDiskBytes;
+  const preferRamOnHighRam = opts.preferRamOnHighRam !== false;
   const removeDir =
     opts.removeDir ?? ((dir: string) => rmSync(dir, { recursive: true, force: true }));
   const throttle = createVodThrottleTracker();
@@ -414,6 +421,7 @@ export function createVodCacheCoordinator(opts: {
       ...(freeDiskBytes === undefined ? {} : { freeDiskBytes }),
       ...(multiViewTileCount === undefined ? {} : { multiViewTileCount }),
       throttleBackoffLevel,
+      preferRamOnHighRam,
     });
     const session = createVodCacheSession({ cacheRoot: opts.cacheRoot, budget });
     const options = buildVodMpvLoadOptions({
@@ -423,6 +431,7 @@ export function createVodCacheCoordinator(opts: {
       ...(freeDiskBytes === undefined ? {} : { freeDiskBytes }),
       ...(multiViewTileCount === undefined ? {} : { multiViewTileCount }),
       throttleBackoffLevel,
+      preferRamOnHighRam,
       ...(session ? { cacheDir: session.dir } : {}),
     });
     return { session, options };

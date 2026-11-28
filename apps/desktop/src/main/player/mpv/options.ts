@@ -98,7 +98,7 @@ export const LAUNCH_OPTIONS: readonly string[] = [
   '--prefetch-playlist=no',
   '--audio-pitch-correction=yes',
   '--tls-verify=yes',
-  '--stream-lavf-o=icy=0,reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5',
+  '--stream-lavf-o=icy=0,reconnect=1,reconnect_on_network_error=1,reconnect_delay_max=5',
   '--reset-on-next-file=aid,sid,secondary-sid,secondary-sub-pos,vid,program,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
   '--network-timeout=10',
   '--curl-enabled=no',
@@ -120,11 +120,37 @@ function hwdecFlags(hwdec: HwdecProfile, platform?: string): string[] {
   return [`--hwdec=${hwdec}`];
 }
 
+const SOFTWARE_GL_DRIVER_PATTERN = /llvmpipe|softpipe|swrast|lavapipe/i;
+const SOFTWARE_GL_RENDERER_PATTERN =
+  /llvmpipe|softpipe|swrast|lavapipe|swiftshader|microsoft basic render driver/i;
+
+/**
+ * Returns whether environment variables or a GL renderer string indicate software rasterization
+ * (`llvmpipe`, `softpipe`, `swrast`, `lavapipe`, `swiftshader`, or Microsoft Basic Render Driver).
+ */
+export function isSoftwareGlEnvironment(
+  env?: Readonly<Record<string, string | undefined>>,
+  glRenderer?: string,
+): boolean {
+  if (env) {
+    const alwaysSw = env['LIBGL_ALWAYS_SOFTWARE']?.trim().toLowerCase();
+    if (alwaysSw === '1' || alwaysSw === 'true' || alwaysSw === 'yes') return true;
+    const driver = env['MESA_LOADER_DRIVER_OVERRIDE']?.trim();
+    if (driver !== undefined && driver.length > 0 && SOFTWARE_GL_DRIVER_PATTERN.test(driver)) {
+      return true;
+    }
+  }
+  if (glRenderer !== undefined && SOFTWARE_GL_RENDERER_PATTERN.test(glRenderer)) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Builds the full argv. Stream URLs and headers never appear here; they travel over IPC.
  * Our macOS runtime is built without libcurl, so `--curl-enabled` does not exist there.
- * Linux adds `--pulse-buffer=50` (#269); render-context mode (#210, #95) switches to
- * `--force-window=no`, `--vo=libmpv`, and `--video-timing-offset=0`.
+ * Linux adds `--pulse-buffer=50` (#269) and bilinear scaler guards under software GL; render-context
+ * mode (#210, #95) switches to `--force-window=no`, `--vo=libmpv`, and `--video-timing-offset=0`.
  */
 export function launchArgs(p: {
   inputConf: string;
@@ -134,6 +160,7 @@ export function launchArgs(p: {
   hwdec?: HwdecProfile;
   renderContext?: boolean;
   fontsDir?: string;
+  softwareGl?: boolean;
 }): string[] {
   const profile = p.hwdec ?? 'auto-safe';
   const base = LAUNCH_OPTIONS.flatMap((opt) => {
@@ -145,7 +172,17 @@ export function launchArgs(p: {
     return [opt];
   });
   const extra: string[] = [];
-  if (p.platform === 'linux') extra.push('--pulse-buffer=50');
+  if (p.platform === 'linux') {
+    extra.push('--pulse-buffer=50');
+    if (p.softwareGl === true) {
+      extra.push(
+        '--scale=bilinear',
+        '--cscale=bilinear',
+        '--dscale=bilinear',
+        '--sigmoid-upscaling=no',
+      );
+    }
+  }
   if (p.renderContext === true) extra.push('--vo=libmpv', '--video-timing-offset=0');
   if (p.fontsDir !== undefined && p.fontsDir.length > 0) {
     extra.push(`--sub-fonts-dir=${p.fontsDir}`);
@@ -218,7 +255,12 @@ export function loadfileCommand(
       ? {}
       : subtitleStyleLoadOptions(r.subtitleStyle, r.secondarySubtitleActive === true)),
   };
-  if (r.startMs !== undefined) options['start'] = (r.startMs / 1000).toFixed(3);
+  if (r.startMs !== undefined) {
+    options['start'] = (r.startMs / 1000).toFixed(3);
+    if (r.kind === 'vod' && r.startMs >= 30_000) {
+      options['hr-seek'] = 'no';
+    }
+  }
   if (r.filterSdhSubtitles !== undefined) {
     options['sub-filter-sdh'] = r.filterSdhSubtitles ? 'yes' : 'no';
   }

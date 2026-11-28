@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path';
 import type { BrowserWindow } from 'electron';
 import type { HwdecProfile, PlayerUiEvent, PresenterKind } from '../../shared/player-ipc.ts';
 import { createMpvEngine, type LoadMode, type MpvEngine } from './engine.ts';
-import { launchArgs } from './mpv/options.ts';
+import { isSoftwareGlEnvironment, launchArgs } from './mpv/options.ts';
 import { spawnMpv } from './mpv/process.ts';
 import {
   createFileReadaheadPersistence,
@@ -84,6 +84,7 @@ export async function createEngineFor(
       ? deps.runtime.canvasExecutable
       : deps.runtime.executable;
   const renderContext = deps.renderContext ?? presenter.kind === 'canvas';
+  const softwareGl = deps.platform === 'linux' && isSoftwareGlEnvironment(process.env);
   const readaheadStore =
     deps.readaheadStore ??
     createReadaheadTierStore({
@@ -109,6 +110,7 @@ export async function createEngineFor(
       platform: deps.platform,
       ...(deps.hwdec === undefined ? {} : { hwdec: deps.hwdec }),
       ...(deps.runtime.fontsDir === undefined ? {} : { fontsDir: deps.runtime.fontsDir }),
+      ...(softwareGl ? { softwareGl: true } : {}),
       renderContext,
     }),
     loadMode: deps.loadMode,

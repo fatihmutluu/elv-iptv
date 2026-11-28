@@ -291,6 +291,9 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
             if (deps.currentRequest()?.kind === 'live' && hooks.onLiveEnded?.() === true) {
               return;
             }
+            if (deps.currentRequest()?.kind === 'vod' && hooks.onVodEnded?.() === true) {
+              return;
+            }
             deps.onEnded?.();
             store.update({ status: { kind: 'ended' } });
           } else {

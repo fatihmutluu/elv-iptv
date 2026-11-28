@@ -43,6 +43,9 @@ export interface SpawnDeps {
 }
 
 const POST_KILL_WAIT_MS = 500;
+const INITIAL_CONNECT_RETRY_MS = 10;
+const ESCALATED_CONNECT_RETRY_MS = 25;
+const FAST_CONNECT_RETRIES = 5;
 const realDeps: SpawnDeps = { spawn, connect: (path) => connect(path) };
 
 /** The launcher arguments that open the IPC endpoint (and, on Windows, bind the launcher to its parent). */
@@ -228,8 +231,8 @@ export async function spawnMpv(
   };
 
   let stream: Duplex | undefined;
+  let retryCount = 0;
   const deadline = performance.now() + (opts.connectTimeoutMs ?? 5000);
-  const retryMs = deps.retryDelayMs ?? 25;
   while (!stream) {
     if (opts.signal?.aborted) {
       await killAndClean();
@@ -250,6 +253,12 @@ export async function spawnMpv(
         await killAndClean();
         throw abortError();
       }
+      retryCount += 1;
+      const retryMs =
+        deps.retryDelayMs ??
+        (retryCount <= FAST_CONNECT_RETRIES
+          ? INITIAL_CONNECT_RETRY_MS
+          : ESCALATED_CONNECT_RETRY_MS);
       await abortableSleep(retryMs, opts.signal);
     }
   }

@@ -278,4 +278,72 @@ describe('resolveInitialTrackSelection (#393, #208)', () => {
       }).subtitleId,
     ).toBe('s-en');
   });
+
+  it('defaults Live TV initial subtitles to null across all profile rules while honoring explicit per-channel overrides (Wave Q4)', () => {
+    for (const subtitleMode of ['smart', 'default', 'always', 'onlyForced', 'off'] as const) {
+      const liveResolved = resolveInitialTrackSelection(SAMPLE_TRACKS, {
+        mediaKind: 'live',
+        profileRules: {
+          preferredAudioLanguages: ['tr'],
+          preferredSubtitleLanguages: ['en', 'tr'],
+          subtitleMode,
+          fallbackLocale: 'en-US',
+        },
+      });
+      expect(liveResolved).toEqual({ audioId: 'a-tr', subtitleId: null });
+    }
+
+    // Audio-only persisted pref on live still keeps subtitles off
+    expect(
+      resolveInitialTrackSelection(SAMPLE_TRACKS, {
+        mediaKind: 'live',
+        persistedItemPref: { audioLang: 'de', audioLabel: 'Deutsch AC3' },
+        profileRules: {
+          preferredSubtitleLanguages: ['tr'],
+          subtitleMode: 'always',
+        },
+      }),
+    ).toEqual({ audioId: 'a-de', subtitleId: null });
+
+    // Explicit per-channel persisted subtitle preference IS honored on live
+    expect(
+      resolveInitialTrackSelection(SAMPLE_TRACKS, {
+        mediaKind: 'live',
+        persistedItemPref: { subLang: 'tr', subLabel: 'Turkish Full' },
+        profileRules: {
+          preferredAudioLanguages: ['en'],
+          subtitleMode: 'always',
+        },
+      }),
+    ).toEqual({ audioId: 'a-en', subtitleId: 's-tr' });
+
+    // Explicit targetOverride and sessionOverride ARE honored on live
+    expect(
+      resolveInitialTrackSelection(SAMPLE_TRACKS, {
+        mediaKind: 'live',
+        targetOverride: { subtitleId: 's-en' },
+        profileRules: { subtitleMode: 'smart' },
+      }).subtitleId,
+    ).toBe('s-en');
+
+    expect(
+      resolveInitialTrackSelection(SAMPLE_TRACKS, {
+        mediaKind: 'live',
+        sessionOverride: { subtitleId: 's-de' },
+        profileRules: { subtitleMode: 'smart' },
+      }).subtitleId,
+    ).toBe('s-de');
+
+    // VOD with mediaKind: 'vod' keeps profile-rule subtitle selection untouched
+    expect(
+      resolveInitialTrackSelection(SAMPLE_TRACKS, {
+        mediaKind: 'vod',
+        profileRules: {
+          preferredAudioLanguages: ['de'],
+          preferredSubtitleLanguages: ['tr'],
+          subtitleMode: 'smart',
+        },
+      }),
+    ).toEqual({ audioId: 'a-de', subtitleId: 's-tr' });
+  });
 });

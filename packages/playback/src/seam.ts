@@ -64,6 +64,8 @@ export interface ServiceControl {
   load(overrides?: LoadOverrides): boolean;
   /** Sends `stop` for the open media and marks it unloaded. */
   stopMedia(): void;
+  /** Clears any gapless queued next-episode slot before premature-EOF recovery reloads the current item. */
+  clearQueuedNext?(): void;
   /** Sets `failed` and stops the engine. */
   fail(error: ElvError): void;
   armStartTimeout(ms: number): void;
@@ -86,6 +88,8 @@ export interface RecoveryHooks {
   onState?(state: EngineState): void;
   /** Intercepts an unexpected live `ended` event; returns `true` when recovery initiated a reconnect. */
   onLiveEnded?(): boolean;
+  /** Intercepts an unexpected mid-media VOD `ended` event; returns `true` when recovery initiated a reconnect. */
+  onVodEnded?(): boolean;
   onClock?(anchor: ClockAnchor): void;
   onError?(error: EngineError): void;
   onStall?(phase: 'start' | 'end'): void;

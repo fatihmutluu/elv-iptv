@@ -342,15 +342,15 @@ describe('createCanvasPresenter', () => {
     t.presenter.setArea({ x: 10, y: 20, width: 800, height: 450, visible: true });
     const sock = fakePipeSocket();
     t.pipe.connect(sock.socket);
-    expect(sock.written).toEqual(['R 1500 844\n']);
+    expect(sock.written).toEqual(['R 1500 843\n']);
 
-    // Same dimensions do not resend R
-    t.presenter.setArea({ x: 30, y: 40, width: 800, height: 450, visible: true });
-    expect(sock.written).toEqual(['R 1500 844\n']);
+    // Same edge-rounded dimensions do not resend R
+    t.presenter.setArea({ x: 30, y: 28, width: 800, height: 450, visible: true });
+    expect(sock.written).toEqual(['R 1500 843\n']);
 
     // Clamp minimum to 16 and maximum to 4096
     t.presenter.setArea({ x: 0, y: 0, width: 4, height: 5000, visible: true });
-    expect(sock.written).toEqual(['R 1500 844\n', 'R 16 4096\n']);
+    expect(sock.written).toEqual(['R 1500 843\n', 'R 16 4096\n']);
 
     // Display scale change pushes updated R
     t.presenter.setArea({ x: 0, y: 0, width: 640, height: 360, visible: true });

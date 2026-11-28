@@ -359,4 +359,248 @@ describe('PlayerCanvas', () => {
 
     hookState.unmount();
   });
+
+  it('preserves previous frame via reusable scratch canvas if a resize frame fails drawImage and releases scratch on unmount', () => {
+    const { engine, deliver } = createFakeEngine();
+    const createdScratchCanvases: Array<{
+      width: number;
+      height: number;
+      getContext: ReturnType<typeof vi.fn>;
+      drawImage: ReturnType<typeof vi.fn>;
+    }> = [];
+    const origDocument = globalThis.document;
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      writable: true,
+      value: {
+        createElement: vi.fn((tag: string) => {
+          expect(tag).toBe('canvas');
+          const drawImage = vi.fn();
+          const scratchCtx = { drawImage };
+          const scratch = {
+            width: 0,
+            height: 0,
+            drawImage,
+            getContext: vi.fn(() => scratchCtx),
+          };
+          createdScratchCanvases.push(scratch);
+          return scratch;
+        }),
+      },
+    });
+
+    try {
+      let failNextFrame = false;
+      const drawCalls: unknown[][] = [];
+      const drawImage = vi.fn((...args: unknown[]) => {
+        drawCalls.push(args);
+        if (failNextFrame) {
+          failNextFrame = false;
+          throw new Error('transient resize GPU failure');
+        }
+      });
+      const fillRect = vi.fn();
+      const ctx = { drawImage, fillRect, fillStyle: '' };
+      const canvas = {
+        width: 0,
+        height: 0,
+        getContext: vi.fn(() => ctx),
+      };
+
+      renderCanvas(
+        { engine, visible: true },
+        canvas as unknown as ReturnType<typeof createFakeCanvas>['canvas'],
+      );
+
+      // Frame 1 paints cleanly at 1920x1080
+      const f1 = createFrame(1920, 1080);
+      deliver(f1);
+      expect(canvas.width).toBe(1920);
+      expect(canvas.height).toBe(1080);
+      expect(createdScratchCanvases).toHaveLength(0);
+      expect(f1.close).toHaveBeenCalledTimes(1);
+
+      // Frame 2 resizes to 1280x720 and throws on drawImage -> snapshot previous frame & repaint it scaled!
+      failNextFrame = true;
+      const f2 = createFrame(1280, 720);
+      deliver(f2);
+      expect(f2.close).toHaveBeenCalledTimes(1);
+      expect(canvas.width).toBe(1280);
+      expect(canvas.height).toBe(720);
+      expect(createdScratchCanvases).toHaveLength(1);
+      const scratch = createdScratchCanvases[0];
+      expect(scratch?.width).toBe(1920);
+      expect(scratch?.height).toBe(1080);
+      expect(scratch?.drawImage).toHaveBeenCalledWith(canvas, 0, 0, 1920, 1080);
+      // Fallback repaint drew the scratch snapshot onto the resized canvas instead of leaving black
+      expect(drawCalls.at(-1)).toEqual([scratch, 0, 0, 1280, 720]);
+      // Context was acquired once and reused
+      expect(canvas.getContext).toHaveBeenCalledTimes(1);
+
+      // Frame 3 resizes again to 640x360 and succeeds -> reuses existing scratch canvas (no leak!)
+      const f3 = createFrame(640, 360);
+      deliver(f3);
+      expect(createdScratchCanvases).toHaveLength(1);
+      expect(scratch?.width).toBe(1280);
+      expect(scratch?.height).toBe(720);
+      expect(drawCalls.at(-1)).toEqual([f3, 0, 0, 640, 360]);
+      expect(f3.close).toHaveBeenCalledTimes(1);
+
+      // Frame 4 is steady-state (!needsResize) -> zeroes scratch backing dimensions to release VRAM while retaining element for reuse
+      const f4 = createFrame(640, 360);
+      deliver(f4);
+      expect(scratch?.width).toBe(0);
+      expect(scratch?.height).toBe(0);
+      expect(f4.close).toHaveBeenCalledTimes(1);
+
+      // Frame 5 resizes again -> reuses the same scratch canvas element (still only 1 created)
+      const f5 = createFrame(800, 450);
+      deliver(f5);
+      expect(createdScratchCanvases).toHaveLength(1);
+      expect(scratch?.width).toBe(640);
+      expect(scratch?.height).toBe(360);
+      expect(f5.close).toHaveBeenCalledTimes(1);
+
+      // Unmount releases scratch canvas backing store (width = 0, height = 0)
+      hookState.unmount();
+      expect(scratch?.width).toBe(0);
+      expect(scratch?.height).toBe(0);
+    } finally {
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        writable: true,
+        value: origDocument,
+      });
+    }
+  });
+
+  it('resets hasPaintedFrame when resize drawImage fails and fallback repaint also fails', () => {
+    const { engine, deliver } = createFakeEngine();
+    const scratchDraws: unknown[][] = [];
+    const origDocument = globalThis.document;
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      writable: true,
+      value: {
+        createElement: vi.fn(() => {
+          const drawImage = vi.fn((...args: unknown[]) => scratchDraws.push(args));
+          return { width: 0, height: 0, getContext: vi.fn(() => ({ drawImage })) };
+        }),
+      },
+    });
+
+    try {
+      let throwAll = false;
+      const drawImage = vi.fn(() => {
+        if (throwAll) throw new Error('gpu lost');
+      });
+      const canvas = {
+        width: 0,
+        height: 0,
+        getContext: vi.fn(() => ({ drawImage, fillRect: vi.fn(), fillStyle: '' })),
+      };
+      renderCanvas(
+        { engine, visible: true },
+        canvas as unknown as ReturnType<typeof createFakeCanvas>['canvas'],
+      );
+
+      // Frame 1 paints cleanly
+      deliver(createFrame(1920, 1080));
+      expect(scratchDraws).toHaveLength(0);
+
+      // Frame 2 resizes and BOTH frame draw and fallback draw throw -> hasPaintedFrame resets to false
+      throwAll = true;
+      deliver(createFrame(1280, 720));
+      expect(scratchDraws).toHaveLength(1);
+
+      // Frame 3 resizes again while canvas is blank -> must NOT snapshot blank canvas again
+      deliver(createFrame(640, 360));
+      expect(scratchDraws).toHaveLength(1);
+
+      hookState.unmount();
+    } finally {
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        writable: true,
+        value: origDocument,
+      });
+    }
+  });
+
+  it('releases scratch canvas and does not resurrect pre-hide frame after visible toggles false -> true', () => {
+    const { engine, deliver } = createFakeEngine();
+    const createdScratchCanvases: Array<{
+      width: number;
+      height: number;
+      drawImage: ReturnType<typeof vi.fn>;
+    }> = [];
+    const origDocument = globalThis.document;
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      writable: true,
+      value: {
+        createElement: vi.fn(() => {
+          const drawImage = vi.fn();
+          const scratch = {
+            width: 0,
+            height: 0,
+            drawImage,
+            getContext: vi.fn(() => ({ drawImage })),
+          };
+          createdScratchCanvases.push(scratch);
+          return scratch;
+        }),
+      },
+    });
+
+    try {
+      let failDraw = false;
+      const drawImage = vi.fn(() => {
+        if (failDraw) throw new Error('draw failed');
+      });
+      const fillRect = vi.fn();
+      const canvas = {
+        width: 0,
+        height: 0,
+        getContext: vi.fn(() => ({ drawImage, fillRect, fillStyle: '' })),
+      };
+
+      renderCanvas(
+        { engine, visible: true },
+        canvas as unknown as ReturnType<typeof createFakeCanvas>['canvas'],
+      );
+      deliver(createFrame(1920, 1080));
+      deliver(createFrame(1280, 720));
+      expect(createdScratchCanvases).toHaveLength(1);
+
+      // Hiding releases scratch canvas and clears painted flag
+      renderCanvas(
+        { engine, visible: false },
+        canvas as unknown as ReturnType<typeof createFakeCanvas>['canvas'],
+      );
+      expect(createdScratchCanvases[0]?.width).toBe(0);
+      expect(createdScratchCanvases[0]?.height).toBe(0);
+
+      // Showing again + failing resize frame must NOT resurrect old pre-hide frame
+      renderCanvas(
+        { engine, visible: true },
+        canvas as unknown as ReturnType<typeof createFakeCanvas>['canvas'],
+      );
+      failDraw = true;
+      const callsBefore = drawImage.mock.calls.length;
+      const f = createFrame(640, 360);
+      deliver(f);
+      expect(f.close).toHaveBeenCalledTimes(1);
+      expect(drawImage.mock.calls.length).toBe(callsBefore + 1);
+      expect(createdScratchCanvases).toHaveLength(1);
+
+      hookState.unmount();
+    } finally {
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        writable: true,
+        value: origDocument,
+      });
+    }
+  });
 });

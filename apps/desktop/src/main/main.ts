@@ -76,7 +76,7 @@ import { createPendingPairDeepLinkQueue, extractPairDeepLinkFromArgv } from './p
 import { createDesktopDisplayRefreshController } from './player/display-refresh.ts';
 import type { MpvEngine } from './player/engine.ts';
 import { createEngineFor } from './player/factory.ts';
-import { registerPlayerIpc } from './player/ipc.ts';
+import { registerPlayerIpc, type WebContentsLike } from './player/ipc.ts';
 import { sweepLeftovers, systemSweepDeps } from './player/mpv/pid-sweep.ts';
 import { purgeOrphanedVodCacheDirs, resolveVodCacheRoot } from './player/mpv/vod-cache.ts';
 import { createPowerBlocker } from './player/power-blocker.ts';
@@ -84,6 +84,10 @@ import { choosePresenter, parsePresenterOverride } from './player/presenter/choo
 import { sampleArea } from './player/presenter/visible.ts';
 import { mpvRuntimePaths, resolveMacMediaAddonPath } from './player/runtime-path.ts';
 import { createSubtitleFilePicker } from './player/subtitle-fetch.ts';
+import {
+  createPlayerWindowHostHooks,
+  schedulePostPaintMpvWarmUp,
+} from './player/window-lifecycle.ts';
 import {
   createPendingPlaylistQueue,
   extractPlaylistPathsFromArgv,
@@ -165,6 +169,7 @@ const resolveActivePresenterKind = (): PresenterKind => {
     parsePresenterOverride(process.env.ELV_DESKTOP_PRESENTER),
   );
   if (process.platform === 'darwin' && requested === 'canvas') {
+    if ((process as NodeJS.Process & { mas?: boolean }).mas) return 'own-window';
     const runtime = mpvRuntimePaths({
       isPackaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
@@ -288,20 +293,14 @@ function createWindow(): void {
   const targetUrl = isGate ? `${APP_ORIGIN}/?${gateQuery}` : appEntryUrl;
   const statePath = join(app.getPath('userData'), 'window-state.json');
   const saved = isGate ? undefined : loadWindowState(statePath, orderedDisplays(screen));
+  const activePresenter = resolveActivePresenterKind();
   const window = new BrowserWindow(
     buildWindowOptions(join(__dirname, '..', 'preload', 'preload.js'), {
       gate: isGate,
-      presenter: resolveActivePresenterKind(),
+      presenter: activePresenter,
       ...(saved === undefined
         ? {}
-        : {
-            bounds: {
-              x: saved.x,
-              y: saved.y,
-              width: saved.width,
-              height: saved.height,
-            },
-          }),
+        : { bounds: { x: saved.x, y: saved.y, width: saved.width, height: saved.height } }),
     }),
   );
   mainWindow = window;
@@ -358,6 +357,11 @@ function createWindow(): void {
   });
   window.on('page-title-updated', (event) => event.preventDefault());
   window.setTitle(WINDOW_TITLE);
+  schedulePostPaintMpvWarmUp(window, {
+    gate: isGate,
+    presenter: activePresenter,
+    onWarmUp: (wc) => warmUpPlayerOwner?.(wc as WebContentsLike),
+  });
   void window.loadURL(targetUrl);
 }
 
@@ -414,44 +418,38 @@ async function startPlayer(): Promise<void> {
           : undefined;
   }
   disposePlayerIpc?.();
+  warmUpPlayerOwner = undefined;
+  const winOf = (owner: WebContentsLike) => BrowserWindow.fromWebContents(owner as WebContents);
   disposePlayerIpc = registerPlayerIpc({
     ipcMain,
     now: () => performance.now(),
     log: logger.log,
     powerBlocker,
-    displayRefreshController,
-    getDisplayId: (owner) => {
-      const win = BrowserWindow.fromWebContents(owner as WebContents);
-      if (!win || win.isDestroyed()) return undefined;
-      return String(screen.getDisplayMatching(win.getBounds()).id);
+    bindWarmUp: (fn) => {
+      warmUpPlayerOwner = fn;
     },
+    displayRefreshController,
+    ...createPlayerWindowHostHooks({
+      getWindow: winOf,
+      getDisplayId: (win) => String(screen.getDisplayMatching(win.getBounds()).id),
+      onAspectRatio: (win, ratio) => aspectRatioLockControllers.get(win)?.setAspectRatio(ratio),
+    }),
     ...(mediaBridge ? { mediaBridge } : {}),
     downloadsRoot: getManagedDownloadsDir(app.getPath('userData')),
     pickSubtitleFile: createSubtitleFilePicker<BrowserWindow>({
-      getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      getWindowFromSender: (sender) => winOf(sender as WebContentsLike),
       showOpenDialog: showOpenDialogFor,
     }),
     createTaskbarController: (owner, onAction) => {
-      if (process.platform !== 'win32') return undefined;
-      const window = BrowserWindow.fromWebContents(owner as WebContents);
-      if (!window || window.isDestroyed()) return undefined;
-      return createTaskbarController({
-        window,
-        platform: process.platform,
-        icons: getTaskbarIcons(),
-        onAction,
-      });
-    },
-    onVideoAspectRatioChange: (owner, aspectRatio) => {
-      const window = BrowserWindow.fromWebContents(owner as WebContents);
-      if (window && !window.isDestroyed()) {
-        aspectRatioLockControllers.get(window)?.setAspectRatio(aspectRatio);
-      }
-    },
-    retargetOwner: (engine, nextOwner) => {
-      const window = BrowserWindow.fromWebContents(nextOwner as WebContents);
-      if (!window || window.isDestroyed()) return false;
-      return engine.retargetWindow?.(window) === true;
+      const window = process.platform === 'win32' ? winOf(owner) : null;
+      return window && !window.isDestroyed()
+        ? createTaskbarController({
+            window,
+            platform: process.platform,
+            icons: getTaskbarIcons(),
+            onAction,
+          })
+        : undefined;
     },
     gateReport: app.isPackaged ? undefined : (line, engine) => void printGateLine(line, engine),
     createEngine: async (owner, onUi, engineId, getMultiViewTileCount) => {
@@ -576,6 +574,7 @@ let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
 let artworkCache: DesktopArtworkCache | undefined;
 let lanPairingIpc: LanPairingIpcHandle | undefined;
 let disposePlayerIpc: (() => void) | undefined;
+let warmUpPlayerOwner: ((owner: WebContentsLike) => void) | undefined;
 let disposeDiagnosticsIpc: (() => void) | undefined;
 let disposeSyncIpc: (() => void) | undefined;
 let activeSyncService: DesktopSyncService | undefined;
@@ -753,6 +752,7 @@ if (hasLock) {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  warmUpPlayerOwner = undefined;
   disposePlayerIpc?.();
   disposePlayerIpc = undefined;
   trayController?.destroy();
@@ -761,6 +761,7 @@ app.on('before-quit', () => {
 });
 
 app.on('will-quit', () => {
+  warmUpPlayerOwner = undefined;
   disposePlayerIpc?.();
   disposePlayerIpc = undefined;
   trayController?.destroy();

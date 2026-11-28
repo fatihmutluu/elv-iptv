@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   headerFields,
   headerOptions,
+  isSoftwareGlEnvironment,
   LAUNCH_OPTIONS,
   launchArgs,
   loadfileCommand,
@@ -41,7 +42,7 @@ describe('launchArgs', () => {
       '--prefetch-playlist=no',
       '--audio-pitch-correction=yes',
       '--tls-verify=yes',
-      '--stream-lavf-o=icy=0,reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5',
+      '--stream-lavf-o=icy=0,reconnect=1,reconnect_on_network_error=1,reconnect_delay_max=5',
       '--reset-on-next-file=aid,sid,secondary-sid,secondary-sub-pos,vid,program,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
       '--network-timeout=10',
       '--curl-enabled=no',
@@ -49,6 +50,10 @@ describe('launchArgs', () => {
       '--osd-level=0',
       '--input-default-bindings=no',
     ]);
+    expect(LAUNCH_OPTIONS.some((o) => o.includes('reconnect_streamed=1'))).toBe(false);
+    expect(LAUNCH_OPTIONS).toContain(
+      '--stream-lavf-o=icy=0,reconnect=1,reconnect_on_network_error=1,reconnect_delay_max=5',
+    );
     expect(LAUNCH_OPTIONS).not.toContain('--script-opts=osc-idlescreen=no');
     expect(LAUNCH_OPTIONS).not.toContain('--input-vo-keyboard=no');
     expect(LAUNCH_OPTIONS.some((o) => o.startsWith('--tls-ca-file'))).toBe(false);
@@ -154,6 +159,55 @@ describe('launchArgs', () => {
     ).toBe(false);
     expect(launchArgs(base).some((a) => a.startsWith('--sub-fonts-dir='))).toBe(false);
   });
+
+  it('appends bilinear scaler flags only on linux when softwareGl is true', () => {
+    const base = {
+      inputConf: '/r/mpv-input.conf',
+      presenterArgs: [],
+      transportArgs: [],
+    };
+    const linuxSw = launchArgs({ ...base, platform: 'linux', softwareGl: true });
+    expect(linuxSw).toContain('--scale=bilinear');
+    expect(linuxSw).toContain('--cscale=bilinear');
+    expect(linuxSw).toContain('--dscale=bilinear');
+    expect(linuxSw).toContain('--sigmoid-upscaling=no');
+
+    for (const args of [
+      launchArgs({ ...base, platform: 'linux' }),
+      launchArgs({ ...base, platform: 'linux', softwareGl: false }),
+      launchArgs({ ...base, platform: 'win32', softwareGl: true }),
+      launchArgs({ ...base, platform: 'darwin', softwareGl: true }),
+    ]) {
+      expect(args).not.toContain('--scale=bilinear');
+      expect(args).not.toContain('--cscale=bilinear');
+      expect(args).not.toContain('--dscale=bilinear');
+      expect(args).not.toContain('--sigmoid-upscaling=no');
+    }
+  });
+});
+
+describe('isSoftwareGlEnvironment', () => {
+  it('detects LIBGL_ALWAYS_SOFTWARE, Mesa software driver overrides, and software GL renderers', () => {
+    expect(isSoftwareGlEnvironment({ LIBGL_ALWAYS_SOFTWARE: '1' })).toBe(true);
+    expect(isSoftwareGlEnvironment({ LIBGL_ALWAYS_SOFTWARE: 'true' })).toBe(true);
+    expect(isSoftwareGlEnvironment({ LIBGL_ALWAYS_SOFTWARE: '0' })).toBe(false);
+    for (const driver of ['llvmpipe', 'softpipe', 'swrast', 'kms_swrast', 'lavapipe']) {
+      expect(isSoftwareGlEnvironment({ MESA_LOADER_DRIVER_OVERRIDE: driver })).toBe(true);
+    }
+    expect(isSoftwareGlEnvironment({ MESA_LOADER_DRIVER_OVERRIDE: 'iris' })).toBe(false);
+    for (const renderer of [
+      'llvmpipe (LLVM 17.0.6, 256 bits)',
+      'softpipe',
+      'Mesa/X.org swrast',
+      'lavapipe',
+      'Google SwiftShader',
+      'Microsoft Basic Render Driver',
+    ]) {
+      expect(isSoftwareGlEnvironment({}, renderer)).toBe(true);
+    }
+    expect(isSoftwareGlEnvironment({}, 'Mesa Intel(R) Graphics (ADL GT2)')).toBe(false);
+    expect(isSoftwareGlEnvironment(undefined, undefined)).toBe(false);
+  });
 });
 
 describe('headerOptions and headerFields', () => {
@@ -210,12 +264,41 @@ describe('loadfileCommand', () => {
     expect(Object.values(opts).every((v) => typeof v === 'string')).toBe(true);
     expect(opts).not.toHaveProperty('async');
   });
-  it('startMs 12345 becomes start=12.345', () => {
-    const opts = loadfileCommand({ ...base, kind: 'vod', startMs: 12345 })[4] as Record<
+  it('startMs 12345 becomes start=12.345 without hr-seek override, while VOD startMs >= 30s sets hr-seek=no', () => {
+    const shortOpts = loadfileCommand({ ...base, kind: 'vod', startMs: 12345 })[4] as Record<
       string,
       string
     >;
-    expect(opts['start']).toBe('12.345');
+    expect(shortOpts['start']).toBe('12.345');
+    expect(shortOpts).not.toHaveProperty('hr-seek');
+
+    const borderOpts = loadfileCommand({ ...base, kind: 'vod', startMs: 29_999 })[4] as Record<
+      string,
+      string
+    >;
+    expect(borderOpts['start']).toBe('29.999');
+    expect(borderOpts).not.toHaveProperty('hr-seek');
+
+    const resumeAt30s = loadfileCommand({ ...base, kind: 'vod', startMs: 30_000 })[4] as Record<
+      string,
+      string
+    >;
+    expect(resumeAt30s['start']).toBe('30.000');
+    expect(resumeAt30s['hr-seek']).toBe('no');
+
+    const resumeDeep = loadfileCommand({ ...base, kind: 'vod', startMs: 2_400_000 })[4] as Record<
+      string,
+      string
+    >;
+    expect(resumeDeep['start']).toBe('2400.000');
+    expect(resumeDeep['hr-seek']).toBe('no');
+
+    const liveOpts = loadfileCommand({ ...base, kind: 'live', startMs: 60_000 })[4] as Record<
+      string,
+      string
+    >;
+    expect(liveOpts['start']).toBe('60.000');
+    expect(liveOpts).not.toHaveProperty('hr-seek');
   });
   it('omits start when absent', () => {
     expect(loadfileCommand({ ...base, kind: 'vod' })[4]).not.toHaveProperty('start');

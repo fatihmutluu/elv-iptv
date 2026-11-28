@@ -317,6 +317,11 @@ async function bindDesktopEngine(
     play: (attempt) => send({ name: 'play', attempt }),
     pause: (attempt) => send({ name: 'pause', attempt }),
     seek: (attempt, positionMs) => send({ name: 'seek', attempt, positionMs }),
+    setScrubbing: (attempt, scrubbing) => {
+      if (!released) {
+        void bridge.setScrubbing?.({ engineId: id, attempt, scrubbing }).catch(() => undefined);
+      }
+    },
     jumpToLiveEdge: (attempt) => send({ name: 'jumpToLiveEdge', attempt }),
     setSpeed: (attempt, rate) => send({ name: 'setSpeed', attempt, rate }),
     selectAudioTrack: (attempt, trackId) =>
@@ -396,6 +401,7 @@ async function bindDesktopEngine(
     },
     queueNext: (request) => send({ name: 'queueNext', request }),
     clearQueue: () => send({ name: 'clearQueue' }),
+    clearQueuedNext: () => send({ name: 'clearQueue' }),
     onQueueAdvanced(listener) {
       if (released) return () => undefined;
       queueAdvancedListeners.add(listener);

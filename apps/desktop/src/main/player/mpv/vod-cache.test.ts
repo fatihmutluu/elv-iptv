@@ -242,6 +242,60 @@ describe('buildVodMpvLoadOptions', () => {
     expect(throttled['cache-on-disk']).toBe('no');
     expect(throttled).not.toHaveProperty('demuxer-cache-dir');
   });
+
+  it('defaults to RAM-first caching (160-192 MiB) on >= 8 GiB desktops unless bufferPreset is large or preferRamOnHighRam is false', () => {
+    const cacheDir = join(makeTempDir(), 's-ram-first');
+    const autoHighRam = buildVodMpvLoadOptions({
+      kind: 'vod',
+      bufferPreset: 'auto',
+      deviceRamBytes: 8 * GIB,
+      freeDiskBytes: 20 * GIB,
+      cacheDir,
+    });
+    expect(autoHighRam['cache-on-disk']).toBe('no');
+    expect(autoHighRam).not.toHaveProperty('demuxer-cache-dir');
+    expect(
+      parseMpvBytes(autoHighRam['demuxer-max-bytes']) +
+        parseMpvBytes(autoHighRam['demuxer-max-back-bytes']),
+    ).toBe(160 * MIB);
+
+    const balancedHighRam = buildVodMpvLoadOptions({
+      kind: 'vod',
+      bufferPreset: 'balanced',
+      deviceRamBytes: 16 * GIB,
+      freeDiskBytes: 20 * GIB,
+      cacheDir,
+    });
+    expect(balancedHighRam['cache-on-disk']).toBe('no');
+    expect(balancedHighRam).not.toHaveProperty('demuxer-cache-dir');
+    expect(
+      parseMpvBytes(balancedHighRam['demuxer-max-bytes']) +
+        parseMpvBytes(balancedHighRam['demuxer-max-back-bytes']),
+    ).toBe(192 * MIB);
+
+    // Explicit preferRamOnHighRam: false still allows disk caching for auto/balanced
+    const diskOptIn = buildVodMpvLoadOptions({
+      kind: 'vod',
+      bufferPreset: 'balanced',
+      deviceRamBytes: 8 * GIB,
+      freeDiskBytes: 20 * GIB,
+      cacheDir,
+      preferRamOnHighRam: false,
+    });
+    expect(diskOptIn['cache-on-disk']).toBe('yes');
+    expect(diskOptIn['demuxer-cache-dir']).toBe(cacheDir);
+
+    // Hosts under 8 GiB still use disk cache with default preferRamOnHighRam
+    const midRam = buildVodMpvLoadOptions({
+      kind: 'vod',
+      bufferPreset: 'balanced',
+      deviceRamBytes: 4 * GIB,
+      freeDiskBytes: 20 * GIB,
+      cacheDir,
+    });
+    expect(midRam['cache-on-disk']).toBe('yes');
+    expect(midRam['demuxer-cache-dir']).toBe(cacheDir);
+  });
 });
 
 describe('createVodThrottleTracker', () => {
@@ -291,11 +345,71 @@ describe('createVodThrottleTracker', () => {
 });
 
 describe('createVodCacheCoordinator', () => {
-  it('manages session dir lifecycle across VOD/live loads, deduplicates per-attempt throttle errors, and disables disk cache at level >= 2', () => {
+  it('avoids temp disk dirs on >= 8 GiB desktops for auto/balanced by default, while allowing large preset or preferRamOnHighRam: false', () => {
     const cacheRoot = resolveVodCacheRoot(makeTempDir());
     const coord = createVodCacheCoordinator({
       cacheRoot,
       getDeviceRamBytes: () => 8 * GIB,
+      readFreeDiskBytes: () => 20 * GIB,
+    });
+
+    const autoOpts = coord.prepareLoad({
+      url: 'https://vod.example/ram-auto.mp4',
+      kind: 'vod',
+      bufferPreset: 'auto',
+    });
+    expect(autoOpts['cache-on-disk']).toBe('no');
+    expect(autoOpts).not.toHaveProperty('demuxer-cache-dir');
+    expect(existsSync(cacheRoot)).toBe(false);
+    expect(
+      parseMpvBytes(autoOpts['demuxer-max-bytes']) +
+        parseMpvBytes(autoOpts['demuxer-max-back-bytes']),
+    ).toBe(160 * MIB);
+
+    const balancedOpts = coord.prepareLoad({
+      url: 'https://vod.example/ram-balanced.mp4',
+      kind: 'vod',
+      bufferPreset: 'balanced',
+    });
+    expect(balancedOpts['cache-on-disk']).toBe('no');
+    expect(balancedOpts).not.toHaveProperty('demuxer-cache-dir');
+    expect(existsSync(cacheRoot)).toBe(false);
+    expect(
+      parseMpvBytes(balancedOpts['demuxer-max-bytes']) +
+        parseMpvBytes(balancedOpts['demuxer-max-back-bytes']),
+    ).toBe(192 * MIB);
+
+    const largeOpts = coord.prepareLoad({
+      url: 'https://vod.example/disk-large.mp4',
+      kind: 'vod',
+      bufferPreset: 'large',
+    });
+    expect(largeOpts['cache-on-disk']).toBe('yes');
+    expect(largeOpts['demuxer-cache-dir']).toBeTruthy();
+    coord.dispose();
+
+    const optOutRoot = resolveVodCacheRoot(makeTempDir());
+    const optOutCoord = createVodCacheCoordinator({
+      cacheRoot: optOutRoot,
+      getDeviceRamBytes: () => 8 * GIB,
+      readFreeDiskBytes: () => 20 * GIB,
+      preferRamOnHighRam: false,
+    });
+    const optOutOpts = optOutCoord.prepareLoad({
+      url: 'https://vod.example/disk-balanced.mp4',
+      kind: 'vod',
+      bufferPreset: 'balanced',
+    });
+    expect(optOutOpts['cache-on-disk']).toBe('yes');
+    expect(optOutOpts['demuxer-cache-dir']).toBeTruthy();
+    optOutCoord.dispose();
+  });
+
+  it('manages session dir lifecycle across VOD/live loads, deduplicates per-attempt throttle errors, and disables disk cache at level >= 2', () => {
+    const cacheRoot = resolveVodCacheRoot(makeTempDir());
+    const coord = createVodCacheCoordinator({
+      cacheRoot,
+      getDeviceRamBytes: () => 4 * GIB,
       readFreeDiskBytes: () => 20 * GIB,
     });
 
@@ -364,7 +478,11 @@ describe('createVodCacheCoordinator', () => {
       },
     });
 
-    const opts = coord.prepareLoad({ url: 'https://vod.example/ebusy.mp4', kind: 'vod' });
+    const opts = coord.prepareLoad({
+      url: 'https://vod.example/ebusy.mp4',
+      kind: 'vod',
+      bufferPreset: 'large',
+    });
     const dir = opts['demuxer-cache-dir'];
     if (!dir) throw new Error('expected dir');
     coord.retireActiveSession();
@@ -415,7 +533,7 @@ describe('createVodCacheCoordinator', () => {
     const ep3 = coord.prepareQueuedLoad({
       url: 'https://vod.example/ep3.mp4',
       kind: 'vod',
-      bufferPreset: 'balanced',
+      bufferPreset: 'large',
     });
     const dir3 = ep3['demuxer-cache-dir'];
     if (!dir3) throw new Error('expected dir3');
@@ -483,7 +601,9 @@ describe('createVodCacheCoordinator', () => {
     coord.recordThrottleForAttempt(1, vodUrl, 'vod', 429);
     coord.recordThrottleForAttempt(2, vodUrl, 'vod', 509);
     expect(coord.getBackoffLevel(vodUrl)).toBe(2);
-    expect(coord.prepareLoad({ url: vodUrl, kind: 'vod' })['cache-on-disk']).toBe('no');
+    expect(
+      coord.prepareLoad({ url: vodUrl, kind: 'vod', bufferPreset: 'large' })['cache-on-disk'],
+    ).toBe('no');
 
     // Feed 1s healthy clock ticks for 120s -> backoff decays 2 -> 1 (disk cache re-enabled!)
     for (let sec = 0; sec <= 120; sec += 1) {
@@ -496,7 +616,7 @@ describe('createVodCacheCoordinator', () => {
       ]);
     }
     expect(coord.getBackoffLevel(vodUrl)).toBe(1);
-    const recovered = coord.prepareLoad({ url: vodUrl, kind: 'vod' });
+    const recovered = coord.prepareLoad({ url: vodUrl, kind: 'vod', bufferPreset: 'large' });
     expect(recovered['cache-on-disk']).toBe('yes');
 
     // Paused (rate 0) and stalled playback must NOT advance healthy decay
