@@ -18,7 +18,7 @@ const EP1_EOF: FakeMpvScript = [
   { afterMs: 3, event: 'file-loaded' },
   { afterMs: 4, property: 'duration', value: 1200 },
   { afterMs: 5, property: 'video-params', value: { w: 1920, h: 1080 } },
-  { afterMs: 6, property: 'time-pos', value: 0.5 },
+  { afterMs: 6, property: 'time-pos', value: 1199 },
   { afterMs: 7, event: 'playback-restart' },
   { afterMs: 45, event: 'end-file', reason: 'eof' },
 ];
@@ -401,7 +401,7 @@ describe('Wave C5A #205: gapless series auto-advance via mpv append-play', () =>
       { afterMs: 3, event: 'file-loaded' },
       { afterMs: 4, property: 'duration', value: 1200 },
       { afterMs: 5, property: 'video-params', value: { w: 1920, h: 1080 } },
-      { afterMs: 6, property: 'time-pos', value: 0.5 },
+      { afterMs: 6, property: 'time-pos', value: 1199 },
       { afterMs: 7, event: 'playback-restart' },
       { afterMs: 35, event: 'end-file', reason: 'eof' },
     ];
@@ -410,7 +410,7 @@ describe('Wave C5A #205: gapless series auto-advance via mpv append-play', () =>
       { afterMs: 25, event: 'file-loaded' },
       { afterMs: 28, property: 'duration', value: 1400 },
       { afterMs: 30, property: 'video-params', value: { w: 1920, h: 1080 } },
-      { afterMs: 32, property: 'time-pos', value: 2.5 },
+      { afterMs: 32, property: 'time-pos', value: 1399 },
       { afterMs: 35, event: 'playback-restart' },
       { afterMs: 50, event: 'end-file', reason: 'eof' },
     ];

@@ -323,6 +323,7 @@ export function createPlaybackServiceWith(
       return sendLoad(overrides);
     },
     stopMedia: stopEngine,
+    clearQueuedNext: () => engine.clearQueuedNext?.(),
     fail,
     armStartTimeout,
     clearStartTimeout,

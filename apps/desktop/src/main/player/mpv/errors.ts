@@ -69,12 +69,29 @@ function classifyHttp(http: { status: number; text: string }): EndOutcome | unde
   return undefined;
 }
 
+function isPrematureVodEof(
+  positionMs: number | undefined,
+  durationMs: number | undefined,
+): boolean {
+  return (
+    durationMs !== undefined &&
+    Number.isFinite(durationMs) &&
+    durationMs > 0 &&
+    positionMs !== undefined &&
+    Number.isFinite(positionMs) &&
+    positionMs > 0 &&
+    durationMs - positionMs > Math.max(10_000, durationMs * 0.01)
+  );
+}
+
 /**
  * Maps an mpv `end-file` event and the media's recent log lines to an engine outcome.
  * A provider's plain-text notice (`Mime-type: 'text/*'` then an unrecognized format) is the
  * connection-limit signal, since providers answer over-limit requests with a text page.
  * `played: false` (playback never restarted) inspects HTTP, notice, network/TLS and decoder logs
  * before falling back to `empty-vod-eof` or `live-eof`. Omitted means played.
+ * For played VOD `eof`, a premature stop well before `durationMs` inspects HTTP, network, and
+ * decoder logs before falling back to `vod-premature-eof`.
  */
 export function classifyEnd(p: {
   reason: string;
@@ -82,15 +99,26 @@ export function classifyEnd(p: {
   logs: readonly MpvLogLine[];
   mediaKind: MediaKind;
   played?: boolean;
+  positionMs?: number;
+  durationMs?: number;
 }): EndOutcome {
   if (p.reason === 'stop' || p.reason === 'quit' || p.reason === 'redirect') {
     return { kind: 'stopped' };
   }
   if (p.reason === 'eof') {
     if (p.played !== false) {
-      return p.mediaKind === 'vod'
-        ? { kind: 'ended' }
-        : error({ code: 'network', detail: 'live-eof' });
+      if (p.mediaKind !== 'vod') return error({ code: 'network', detail: 'live-eof' });
+      if (isPrematureVodEof(p.positionMs, p.durationMs)) {
+        const http = lastHttpLine(p.logs);
+        const httpOutcome = http ? classifyHttp(http) : undefined;
+        if (httpOutcome) return httpOutcome;
+        const network = findLine(p.logs, NETWORK_PATTERN);
+        if (network) return withDetail('network', network.text);
+        const decoder = findLine(p.logs, DECODER_PATTERN);
+        if (decoder) return withDetail('decoder', decoder.text);
+        return error({ code: 'network', detail: 'vod-premature-eof' });
+      }
+      return { kind: 'ended' };
     }
     const http = lastHttpLine(p.logs);
     const httpOutcome = http ? classifyHttp(http) : undefined;

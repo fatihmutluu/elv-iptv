@@ -79,6 +79,7 @@ describe('createPlayerBridge', () => {
         'send',
         'setArea',
         'setPrimary',
+        'setScrubbing',
       ].sort(),
     );
     for (const value of Object.values(bridge)) expect(typeof value).toBe('function');
@@ -141,6 +142,12 @@ describe('createPlayerBridge', () => {
     });
     await bridge.setPrimary?.('e2');
     expect(ipc.invoke).toHaveBeenLastCalledWith(PLAYER_CHANNELS.setPrimary, 'e2');
+    await bridge.setScrubbing?.({ engineId: 'e2', attempt: 3, scrubbing: true });
+    expect(ipc.invoke).toHaveBeenLastCalledWith(PLAYER_CHANNELS.setScrubbing, {
+      engineId: 'e2',
+      attempt: 3,
+      scrubbing: true,
+    });
     ipc.invoke.mockResolvedValueOnce({ engineId: 7 });
     await expect(bridge.open()).rejects.toThrow(/reply/);
     ipc.invoke.mockResolvedValueOnce(null);

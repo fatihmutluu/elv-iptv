@@ -90,7 +90,7 @@ export {
   type NativeLoadCommand,
 } from './native-bridge';
 export { filterTracksByProgram, hasMultiplePrograms } from './programs';
-export { nextLimitDelay } from './recovery';
+export { isUnexpectedVodEarlyEof, nextLimitDelay } from './recovery';
 export { stripSdhAnnotations } from './sdh-filter';
 export { createPlaybackService, type PlaybackServiceDeps } from './service';
 export {

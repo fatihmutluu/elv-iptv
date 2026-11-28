@@ -21,6 +21,14 @@ import {
   isSpdifPassthroughValue,
   trackAppliedControlCommand,
 } from './engine-controls.ts';
+import {
+  buildLoadMediaRequest,
+  buildQueuedMediaSlot,
+  buildSubAddCommand,
+  resolveSeekMode,
+  sameHeaderFields,
+  withStart,
+} from './engine-helpers.ts';
 import { createEngineQueue, type QueuedOp } from './engine-queue.ts';
 import type { MpvCommand } from './mpv/codec.ts';
 import {
@@ -68,6 +76,9 @@ export interface MpvEngine extends PlayerEngine {
   readonly loadMode: LoadMode;
   readonly presenterKind: PresenterKind;
   start(): void;
+  /** Pre-warms the idle mpv process asynchronously when `deferStart` was set, isolating spawn errors. */
+  warmUp?(): void;
+  setScrubbing?(attempt: AttemptToken, scrubbing: boolean): void;
   setArea(area: PlayerArea): void;
   readonly lastArea: PlayerArea | undefined;
   toggleFullscreen(): void;
@@ -96,31 +107,6 @@ export interface MpvEngine extends PlayerEngine {
 
 const QUIT_GRACE_MS = 500;
 const CLOCK_INTERVAL_MS = 1000;
-
-const sameHeaderFields = (a: readonly string[], b: readonly string[]): boolean => {
-  if (a.length !== b.length) return false;
-  if (a.length === 0) return true;
-  const sa = [...a].sort();
-  const sb = [...b].sort();
-  return sa.every((v, i) => v === sb[i]);
-};
-
-const withStart = (request: MediaRequest, startMs: number | undefined): MediaRequest => {
-  const { startMs: _old, ...rest } = request;
-  return startMs === undefined ? rest : { ...rest, startMs };
-};
-
-const buildSubAddCommand = (
-  localPath: string,
-  track: ExternalSubtitleTrack,
-  flags: 'select' | 'auto',
-): MpvCommand => {
-  const label = track.label ?? '';
-  const lang = track.language ?? '';
-  if (lang.length > 0) return ['sub-add', localPath, flags, label, lang];
-  if (label.length > 0) return ['sub-add', localPath, flags, label];
-  return ['sub-add', localPath, flags];
-};
 
 /** Drives one mpv process as a `PlayerEngine` with zap coalescing, entry-id binding and serialized IPC. */
 export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
@@ -151,6 +137,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   let desiredAudioDelayMs = 0;
   let desiredSubtitleDelayMs = 0;
   let desiredVideoQualityId: string | null = null;
+  let isScrubbing = false;
 
   const resetPerMediaOverrides = (): void => {
     desiredAudioDelayMs = 0;
@@ -204,6 +191,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     controls.cancelRamp(false);
     controls.reset();
     if (media) media.entryId = undefined;
+    isScrubbing = false;
+    L.hrSeekDisabled = false;
+    L.pendingResumeHrSeekRestore = false;
+    L.abortedQueuedEntryIds.clear();
     queuedSlot = undefined;
     L.hasQueuedPlaylist = false;
     L.queuedEntryId = undefined;
@@ -237,8 +228,13 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     },
     promoteQueued: (slot) => {
       resetPerMediaOverrides();
+      isScrubbing = false;
       media = slot;
       queuedSlot = undefined;
+      if (live?.hrSeekDisabled) {
+        live.hrSeekDisabled = false;
+        queue.enqueueCommand(['set_property', 'hr-seek', 'yes'], slot);
+      }
     },
     detach,
     emit,
@@ -265,6 +261,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     getDesiredAudioDelayMs: () => desiredAudioDelayMs,
     getDesiredSubtitleDelayMs: () => desiredSubtitleDelayMs,
     getDesiredVideoQualityId: () => desiredVideoQualityId,
+    isScrubbing: () => isScrubbing,
     isSpdifPassthroughActive: () => controls.isSpdifPassthroughActive(),
     isAudioNormalizationSuppressed: () => controls.isAudioNormalizationSuppressed(),
     onMpvLog: (entry) => {
@@ -347,6 +344,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
             const propReply = await session.send(L, ['set_property', 'http-header-fields', []]);
             if (propReply?.error === 'success') L.hasCustomHeaders = false;
           }
+          if (L.hrSeekDisabled) {
+            await session.send(L, ['set_property', 'hr-seek', 'yes']);
+            L.hrSeekDisabled = false;
+          }
           vodCache.discardQueuedSession();
           vodCache.retireActiveSession();
           if (L.entries.current()) {
@@ -378,6 +379,9 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
               const target = live;
               await session.send(target, op.command);
               if (live === target) {
+                if (op.command[0] === 'set_property' && op.command[1] === 'hr-seek') {
+                  target.hrSeekDisabled = op.command[2] === 'no';
+                }
                 trackAppliedControlCommand(target, op.command, controls);
               }
             }
@@ -446,6 +450,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
 
   const startMedia = (token: AttemptToken, request: MediaRequest): void => {
     note(token);
+    isScrubbing = false;
     controls.reset();
     queuedSlot = undefined;
     media = { token, request };
@@ -492,6 +497,24 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     presenterKind: presenter.kind,
     start: () => {
       if (!released) void ensureProcess();
+    },
+    warmUp: () => {
+      if (released || live || spawning) return;
+      void ensureProcess().catch(() => undefined);
+    },
+    setScrubbing(attempt, scrubbing) {
+      if (released || !media || attempt < media.token) return;
+      if (media.request.kind !== 'vod') {
+        if (!scrubbing && isScrubbing) {
+          isScrubbing = false;
+          command(attempt, ['set_property', 'hr-seek', 'yes']);
+        }
+        return;
+      }
+      const next = Boolean(scrubbing);
+      if (next === isScrubbing) return;
+      isScrubbing = next;
+      command(attempt, ['set_property', 'hr-seek', next ? 'no' : 'yes']);
     },
     setArea(area) {
       if (released) return;
@@ -553,26 +576,8 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         if (queuedSlot !== undefined || live?.hasQueuedPlaylist) clearQueue();
         return;
       }
-      const nextReq: MediaRequest = {
-        url: request.stream.url,
-        headers: request.stream.headers,
-        kind: 'vod',
-        ...(media.request.bufferPreset === undefined
-          ? {}
-          : { bufferPreset: media.request.bufferPreset }),
-        ...(request.preferHevcOverDolbyVision === undefined
-          ? {}
-          : { preferHevcOverDolbyVision: request.preferHevcOverDolbyVision }),
-        ...(request.filterSdhSubtitles === undefined
-          ? {}
-          : { filterSdhSubtitles: request.filterSdhSubtitles }),
-      };
-      const nextSlot: QueuedMediaSlot = {
-        itemKey: request.itemKey,
-        token: media.token,
-        request: nextReq,
-      };
       const ownerSlot = media;
+      const nextSlot = buildQueuedMediaSlot(ownerSlot, request);
       queuedSlot = nextSlot;
       queue.enqueueTask(async () => {
         const L = live;
@@ -580,6 +585,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       }, ownerSlot);
     },
     clearQueue,
+    clearQueuedNext: clearQueue,
     onQueueAdvanced(listener) {
       if (released) return () => undefined;
       queueAdvancedListeners.add(listener);
@@ -616,42 +622,16 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       subtitleFetcher.cleanup();
       resetPerMediaOverrides();
       tracks.onLoad(cmd.options);
-      const { url, headers, kind, options } = cmd;
+      const { options } = cmd;
       if (options?.displaySync !== undefined) controls.rememberDisplaySync(options.displaySync);
       if (options?.desktopAudioOutput !== undefined) {
         controls.rememberDesktopAudioOutput(options.desktopAudioOutput);
       }
       const effectiveStyle =
-        options?.subtitleStyle !== undefined
-          ? controls.rememberSubtitleStyle(options.subtitleStyle)
+        cmd.options?.subtitleStyle !== undefined
+          ? controls.rememberSubtitleStyle(cmd.options.subtitleStyle)
           : controls.getDesiredSubtitleStyle();
-      const externalSubtitles =
-        options?.externalSubtitles === undefined
-          ? undefined
-          : options.externalSubtitles
-              .map((t) => normalizeExternalSubtitleTrack(t))
-              .filter((t): t is ExternalSubtitleTrack => t !== null);
-      // Desktop mpv inherits OS TLS with `--tls-verify=yes` (never disabled; mpv/FFmpeg has no
-      // safe per-file legacy-TLS-min-version flag), while Node `legacy-tls-http.ts` handles
-      // opt-in legacy TLS for catalog and XMLTV fetches (`#182`).
-      const req: MediaRequest = {
-        url,
-        headers,
-        kind,
-        ...(options?.preferHevcOverDolbyVision === undefined
-          ? {}
-          : { preferHevcOverDolbyVision: options.preferHevcOverDolbyVision }),
-        ...(options?.filterSdhSubtitles === undefined
-          ? {}
-          : { filterSdhSubtitles: options.filterSdhSubtitles }),
-        ...(effectiveStyle === undefined ? {} : { subtitleStyle: effectiveStyle }),
-        ...(externalSubtitles === undefined || externalSubtitles.length === 0
-          ? {}
-          : { externalSubtitles }),
-        ...(options?.programId === undefined ? {} : { programId: options.programId }),
-        ...(options?.bufferPreset === undefined ? {} : { bufferPreset: options.bufferPreset }),
-      };
-      startMedia(cmd.attempt, withStart(req, cmd.startMs));
+      startMedia(cmd.attempt, buildLoadMediaRequest(cmd, effectiveStyle));
     },
     retry(attempt) {
       if (released || !media) return;
@@ -671,8 +651,14 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
           targetMs = Math.min(win.endMs, Math.max(win.startMs, targetMs));
         }
       }
+      const mode = resolveSeekMode(
+        media?.request.kind,
+        isScrubbing,
+        media?.lastPositionMs,
+        targetMs,
+      );
       controls.onSeekQueued();
-      command(attempt, ['seek', targetMs / 1000, 'absolute']);
+      command(attempt, ['seek', targetMs / 1000, mode]);
     },
     jumpToLiveEdge(attempt) {
       if (released || !media || media.request.kind !== 'live') return;
@@ -721,6 +707,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     stop(attempt) {
       if (released) return;
       adopt(attempt);
+      isScrubbing = false;
       subtitleFetcher.cleanup();
       resetPerMediaOverrides();
       controls.reset();
@@ -735,6 +722,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     recreate(attempt) {
       if (released) return;
       adopt(attempt);
+      isScrubbing = false;
       controls.cancelRamp(false);
       controls.reset();
       tracks.onRetryOrRecreate();
@@ -745,6 +733,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       if (released) return;
       controls.cancelRamp(true, true);
       released = true;
+      isScrubbing = false;
       subtitleFetcher.cleanup();
       resetPerMediaOverrides();
       controls.reset();
@@ -759,6 +748,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       offSurface();
       const L = live;
       if (L) {
+        if (L.hrSeekDisabled) {
+          L.hrSeekDisabled = false;
+          void L.proc.client.command(['set_property', 'hr-seek', 'yes']).catch(() => undefined);
+        }
         detach(L);
         void L.proc
           .quit(QUIT_GRACE_MS)

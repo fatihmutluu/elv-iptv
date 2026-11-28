@@ -5,9 +5,9 @@ import {
   isPlayerAreaMessage,
   isPlayerCommandMessage,
   isPlayerOpenOptions,
+  isSetScrubbingRequest,
   MAX_ENGINES_PER_WINDOW,
   PLAYER_CHANNELS,
-  type PlayerEventMessage,
   type PlayerOpenOptions,
   type PlayerOpenReply,
   type PlayerUiEvent,
@@ -18,13 +18,13 @@ import type { TaskbarAction, TaskbarController } from '../taskbar-controls.ts';
 import type { DesktopDisplayRefreshController } from './display-refresh.ts';
 import type { MpvEngine } from './engine.ts';
 import { dispatchPlayerBridgeCommand } from './ipc-commands.ts';
+import { handlePlayerEngineEvent, replayClaimedStandby } from './ipc-events.ts';
 import {
   DEFAULT_PARKED_ORPHAN_MS,
   type EntrySnapshots,
   type HandoffEntry,
   handleAdoptEngine,
   handleParkEngine,
-  recordEntryEventSnapshot,
   recordEntryUiSnapshot,
   syncPrimaryOwnerEffects,
 } from './ipc-handoff.ts';
@@ -34,6 +34,11 @@ import {
   stoppedMediaState,
   type TaskbarState,
 } from './ipc-media.ts';
+import {
+  createPlayerPowerBlockerController,
+  type PowerBlockerTimers,
+} from './ipc-power-blocker.ts';
+import { createPlayerWarmUpController, type StandbyClaim } from './ipc-warmup.ts';
 import type { PowerBlocker } from './power-blocker.ts';
 
 /** The part of Electron's `WebContents` the player IPC uses. */
@@ -59,12 +64,6 @@ export interface IpcMainLike {
   removeListener(channel: string, listener: IpcListener): unknown;
 }
 
-/** Optional timer primitives used by `registerPlayerIpc` for buffering stall grace release. */
-interface PlayerIpcTimers {
-  setTimeout(fn: () => void, ms: number): unknown;
-  clearTimeout(handle: unknown): void;
-}
-
 /** What `registerPlayerIpc` needs from the app. */
 export interface PlayerIpcDeps {
   ipcMain: IpcMainLike;
@@ -83,8 +82,21 @@ export interface PlayerIpcDeps {
   powerBlocker?: PowerBlocker;
   /** Grace period (ms) before releasing `powerBlocker` during a continuous `'buffering'` stall (default `30_000`). */
   bufferingReleaseMs?: number;
-  /** Optional timer primitives for testing the buffering stall grace timeout. */
-  timers?: PlayerIpcTimers;
+  /** Grace period (ms) before releasing `powerBlocker` when a `'playing'` engine's clock freezes (default `60_000`). */
+  frozenClockReleaseMs?: number;
+  /** Optional query returning whether the owning window is currently minimized or hidden. */
+  isWindowMinimized?(owner: WebContentsLike): boolean;
+  /** Optional subscription notified when the owning window minimizes/hides (`true`) or restores/shows (`false`). */
+  onWindowVisibilityChange?(
+    owner: WebContentsLike,
+    listener: (minimized: boolean) => void,
+  ): () => void;
+  /** Optional hook receiving a callback to pre-warm a standby `'canvas'` engine after first paint. */
+  bindWarmUp?(warmUp: (owner: WebContentsLike) => void): void;
+  /** Idle TTL (ms) before an unclaimed pre-warmed engine is auto-released (default `180_000`). */
+  warmUpIdleTtlMs?: number;
+  /** Optional timer primitives for testing power-blocker, warm-up, and parked-engine timeouts. */
+  timers?: PowerBlockerTimers;
   /** Optional Windows taskbar progress & thumbar controller factory (`#410`). */
   createTaskbarController?(
     owner: WebContentsLike,
@@ -112,8 +124,6 @@ export interface PlayerIpcDeps {
    */
   gateReport?(line: string, engine: MpvEngine | undefined): void;
 }
-
-const DEFAULT_BUFFERING_RELEASE_MS = 30_000;
 
 interface Entry {
   owner: WebContentsLike;
@@ -143,14 +153,26 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   const { ipcMain, log, powerBlocker, mediaBridge, displayRefreshController } = deps;
   const resolveDisplayId = (owner: WebContentsLike): string | undefined =>
     deps.getDisplayId?.(owner);
-  const bufferingReleaseMs = Math.max(0, deps.bufferingReleaseMs ?? DEFAULT_BUFFERING_RELEASE_MS);
   const parkedOrphanMs = Math.max(0, deps.parkedOrphanMs ?? DEFAULT_PARKED_ORPHAN_MS);
-  const timers: PlayerIpcTimers = deps.timers ?? {
+  const timers: PowerBlockerTimers = deps.timers ?? {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   };
+  const powerCtl = createPlayerPowerBlockerController<WebContentsLike>({
+    ...(powerBlocker === undefined ? {} : { powerBlocker }),
+    ...(deps.bufferingReleaseMs === undefined
+      ? {}
+      : { bufferingReleaseMs: deps.bufferingReleaseMs }),
+    ...(deps.frozenClockReleaseMs === undefined
+      ? {}
+      : { frozenClockReleaseMs: deps.frozenClockReleaseMs }),
+    ...(deps.isWindowMinimized === undefined ? {} : { isWindowMinimized: deps.isWindowMinimized }),
+    ...(deps.onWindowVisibilityChange === undefined
+      ? {}
+      : { onWindowVisibilityChange: deps.onWindowVisibilityChange }),
+    timers,
+  });
   const entries = new Map<string, Entry>();
-  const bufferingTimers = new Map<string, unknown>();
   const parkedTimers = new Map<string, unknown>();
   const watched = new Set<number>();
   const ownerGenerations = new Map<number, number>();
@@ -190,25 +212,8 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     return lastPrimary;
   };
 
-  const clearBufferingTimer = (id: string): void => {
-    const handle = bufferingTimers.get(id);
-    if (handle === undefined) return;
-    bufferingTimers.delete(id);
-    timers.clearTimeout(handle);
-  };
-
-  const armBufferingTimer = (id: string): void => {
-    if (!powerBlocker || bufferingTimers.has(id)) return;
-    const handle = timers.setTimeout(() => {
-      bufferingTimers.delete(id);
-      powerBlocker.release(id);
-    }, bufferingReleaseMs);
-    bufferingTimers.set(id, handle);
-  };
-
   const releasePowerBlocker = (id: string): void => {
-    clearBufferingTimer(id);
-    powerBlocker?.release(id);
+    powerCtl.release(id);
   };
 
   const bumpOwnerGeneration = (ownerId: number): number => {
@@ -269,7 +274,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
 
   const release = (id: string): void => {
     clearParkedTimer(id);
-    releasePowerBlocker(id);
+    powerCtl.unregisterEngine(id);
     displayRefreshController?.restoreForEngine(id);
     const entry = entries.get(id);
     if (!entry) return;
@@ -297,6 +302,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
 
   const invalidateOwner = (owner: WebContentsLike): void => {
     bumpOwnerGeneration(owner.id);
+    warmUpCtl.discardOwner(owner.id);
     releaseOwnedBy(owner);
   };
 
@@ -314,6 +320,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     watched.add(owner.id);
     owner.once('destroyed', () => {
       watched.delete(owner.id);
+      powerCtl.unwatchOwner(owner.id);
       invalidateOwner(owner);
       ownerGenerations.delete(owner.id);
     });
@@ -322,6 +329,26 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     });
     owner.on('render-process-gone', () => invalidateOwner(owner));
   };
+
+  const warmUpCtl = createPlayerWarmUpController<WebContentsLike>({
+    createEngine: deps.createEngine,
+    nextEngineId: () => {
+      counter += 1;
+      return `engine-${counter}`;
+    },
+    getOwnerGeneration: (ownerId) => ownerGenerations.get(ownerId) ?? 0,
+    hasActiveOrPendingEngine: (ownerId) =>
+      countOwnedBy(ownerId) > 0 || (pendingOpens.get(ownerId)?.size ?? 0) > 0,
+    getMultiViewTileCountForEngine: (engineId, fallbackOwnerId) => {
+      const ownerId = entries.get(engineId)?.owner.id ?? fallbackOwnerId;
+      return Math.max(1, countOwnedBy(ownerId) + (pendingOpens.get(ownerId)?.size ?? 0));
+    },
+    watchOwner: watch,
+    ...(deps.isWindowMinimized === undefined ? {} : { isWindowMinimized: deps.isWindowMinimized }),
+    isDisposed: () => disposed,
+    timers,
+    ...(deps.warmUpIdleTtlMs === undefined ? {} : { idleTtlMs: deps.warmUpIdleTtlMs }),
+  });
 
   const onOpen: IpcListener = async ({ sender }, rawOptions): Promise<PlayerOpenReply> => {
     if (disposed || sender.isDestroyed()) {
@@ -342,7 +369,10 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     watch(sender);
 
     let gen: number;
+    let standby: StandbyClaim<WebContentsLike> | undefined;
     if (replaceExisting) {
+      if (primary && countOwnedBy(sender.id) === 0) standby = warmUpCtl.take(sender.id);
+      else warmUpCtl.discardOwner(sender.id);
       gen = bumpOwnerGeneration(sender.id);
       releaseOwnedBy(sender);
     } else {
@@ -353,10 +383,14 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
           `maximum concurrent player engines (${MAX_ENGINES_PER_WINDOW}) reached for this window`,
         );
       }
+      if (primary && countOwnedBy(sender.id) === 0 && inFlight === 0) {
+        standby = warmUpCtl.take(sender.id);
+      } else {
+        warmUpCtl.discardOwner(sender.id);
+      }
     }
 
-    counter += 1;
-    const engineId = `engine-${counter}`;
+    let engineId = standby?.engineId ?? `engine-${++counter}`;
     let pendingSet = pendingOpens.get(sender.id);
     if (!pendingSet) {
       pendingSet = new Set<string>();
@@ -366,7 +400,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
 
     let registered = false;
     let initialFullscreen = false;
-    const preSnapshots: EntrySnapshots = {};
+    let preSnapshots: EntrySnapshots = {};
     const isCurrent = (): boolean => {
       if (disposed) return false;
       if (!registered) {
@@ -403,13 +437,30 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       sendTo(targetOwner, PLAYER_CHANNELS.ui, message);
     };
 
-    let engine: MpvEngine;
+    let engine: MpvEngine | undefined;
+    let claimedStandby: StandbyClaim<WebContentsLike> | undefined;
     const getMultiViewTileCount = (): number => {
       const ownerId = entries.get(engineId)?.owner.id ?? sender.id;
       return Math.max(1, countOwnedBy(ownerId) + (pendingOpens.get(ownerId)?.size ?? 0));
     };
     try {
-      engine = await deps.createEngine(sender, emitUi, engineId, getMultiViewTileCount);
+      if (standby) {
+        const ready = await standby.waitReady();
+        if (ready) {
+          engine = ready;
+          claimedStandby = standby;
+          preSnapshots = standby.snapshots;
+          initialFullscreen = standby.initialFullscreen;
+        }
+      }
+      if (!engine && isCurrent()) {
+        if (standby) {
+          pendingSet.delete(engineId);
+          engineId = `engine-${++counter}`;
+          pendingSet.add(engineId);
+        }
+        engine = await deps.createEngine(sender, emitUi, engineId, getMultiViewTileCount);
+      }
     } finally {
       if (pendingOpens.get(sender.id) === pendingSet) {
         pendingSet.delete(engineId);
@@ -417,8 +468,8 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       }
     }
 
-    if (!isCurrent()) {
-      engine.release();
+    if (!engine || !isCurrent()) {
+      engine?.release();
       throw new Error('the player open was superseded or the window closed while starting');
     }
 
@@ -465,134 +516,26 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       mediaState,
     };
 
-    entry.unsubscribe = engine.subscribe((event) => {
-      recordEntryEventSnapshot(entry.snapshots, event);
-      const activePrimary = entry.isPrimary && !entry.parked;
-      if (event.type === 'state') {
-        if (event.state === 'playing') {
-          clearBufferingTimer(engineId);
-          powerBlocker?.acquire(engineId);
-          taskbarState.active = true;
-          taskbarState.paused = false;
-          if (activePrimary) {
-            syncTaskbar(entry.taskbar, taskbarState);
-            displayRefreshController?.setPlaybackActive(
-              engineId,
-              true,
-              resolveDisplayId(entry.owner),
-            );
-          }
-          mediaState.status = 'Playing';
-          mediaState.isNavigating = false;
-          pushMediaState(engineId, entry.isPrimary);
-        } else if (event.state === 'buffering') {
-          armBufferingTimer(engineId);
-        } else if (
-          event.state === 'paused' ||
-          event.state === 'ended' ||
-          event.state === 'opening'
-        ) {
-          releasePowerBlocker(engineId);
-          if (event.state === 'paused') {
-            taskbarState.active = true;
-            taskbarState.paused = true;
-            if (activePrimary) syncTaskbar(entry.taskbar, taskbarState);
-            mediaState.status = 'Paused';
-            mediaState.isNavigating = false;
-            pushMediaState(engineId, entry.isPrimary);
-          } else if (event.state === 'ended') {
-            taskbarState.active = false;
-            taskbarState.paused = false;
-            entry.lastAspectRatio = undefined;
-            entry.lastFps = undefined;
-            if (activePrimary) {
-              entry.taskbar?.clear();
-              deps.onVideoAspectRatioChange?.(entry.owner, undefined);
-              displayRefreshController?.setPlaybackActive(
-                engineId,
-                false,
-                resolveDisplayId(entry.owner),
-              );
-            }
-            mediaState.status = 'Stopped';
-            mediaState.isNavigating = false;
-            mediaState.positionUs = 0;
-            mediaState.durationUs = 0;
-            pushMediaState(engineId);
-          } else if (event.state === 'opening') {
-            mediaState.isNavigating = true;
-            pushMediaState(engineId);
-          }
-        } else {
-          clearBufferingTimer(engineId);
-        }
-      } else if (event.type === 'clock') {
-        taskbarState.positionMs = event.anchor.positionMs;
-        if (event.anchor.durationMs !== undefined) {
-          taskbarState.durationMs = event.anchor.durationMs;
-        }
-        if (activePrimary && taskbarState.active) syncTaskbar(entry.taskbar, taskbarState);
-        mediaState.positionUs = Math.max(0, Math.round(event.anchor.positionMs * 1000));
-        if (event.anchor.durationMs !== undefined) {
-          mediaState.durationUs = Math.max(0, Math.round(event.anchor.durationMs * 1000));
-        }
-        if (Number.isFinite(event.anchor.rate) && event.anchor.rate > 0) {
-          mediaState.rate = event.anchor.rate;
-        }
-        pushMediaState(engineId);
-      } else if (event.type === 'mediaInfo') {
-        if (
-          typeof event.info.aspectRatio === 'number' &&
-          Number.isFinite(event.info.aspectRatio) &&
-          event.info.aspectRatio > 0
-        ) {
-          entry.lastAspectRatio = event.info.aspectRatio;
-          if (activePrimary) {
-            deps.onVideoAspectRatioChange?.(entry.owner, event.info.aspectRatio);
-          }
-        }
-        if (
-          typeof event.info.fps === 'number' &&
-          Number.isFinite(event.info.fps) &&
-          event.info.fps > 0
-        ) {
-          entry.lastFps = event.info.fps;
-          if (activePrimary) {
-            displayRefreshController?.setContentFps(
-              engineId,
-              event.info.fps,
-              resolveDisplayId(entry.owner),
-            );
-          }
-        }
-      } else if (event.type === 'error') {
-        releasePowerBlocker(engineId);
-        taskbarState.active = false;
-        taskbarState.paused = false;
-        entry.lastAspectRatio = undefined;
-        entry.lastFps = undefined;
-        if (activePrimary) {
-          entry.taskbar?.clear();
-          deps.onVideoAspectRatioChange?.(entry.owner, undefined);
-          displayRefreshController?.setPlaybackActive(
-            engineId,
-            false,
-            resolveDisplayId(entry.owner),
-          );
-        }
-        mediaState.status = 'Stopped';
-        mediaState.isNavigating = false;
-        pushMediaState(engineId);
-      }
-      if (!entry.parked) {
-        const message: PlayerEventMessage = { engineId, event };
-        sendTo(entry.owner, PLAYER_CHANNELS.event, message);
-      }
-    });
+    powerCtl.registerEngine(engineId, sender);
+    claimedStandby?.detachStandbySubscription();
+    entry.unsubscribe = engine.subscribe((event) =>
+      handlePlayerEngineEvent(engineId, entry, event, {
+        powerCtl,
+        ...(displayRefreshController === undefined ? {} : { displayRefreshController }),
+        resolveDisplayId,
+        ...(deps.onVideoAspectRatioChange === undefined
+          ? {}
+          : { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }),
+        syncTaskbar,
+        pushMediaState,
+        sendTo,
+      }),
+    );
 
     entries.set(engineId, entry);
     if (primary) activeMediaEngineId = engineId;
     registered = true;
+    if (claimedStandby) replayClaimedStandby(engineId, sender, claimedStandby, emitUi, sendTo);
     engine.start();
     return { engineId, mainNowMs: (arrivedAtMs + deps.now()) / 2 };
   };
@@ -626,8 +569,8 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     if (typeof engineId === 'string' && ownedEntry(sender, engineId)) release(engineId);
   };
 
-  const onPark: IpcListener = ({ sender }, engineId): boolean =>
-    handleParkEngine(sender, engineId, {
+  const onPark: IpcListener = ({ sender }, engineId): boolean => {
+    const ok = handleParkEngine(sender, engineId, {
       disposed,
       hasRetargetOwner: deps.retargetOwner !== undefined,
       log,
@@ -638,9 +581,12 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       ...(displayRefreshController ? { displayRefreshController } : {}),
       armParkedTimer,
     });
+    if (ok && typeof engineId === 'string') powerCtl.setParked(engineId, true);
+    return ok;
+  };
 
-  const onAdopt: IpcListener = ({ sender }, engineId): PlayerOpenReply | null =>
-    handleAdoptEngine(sender, engineId, {
+  const onAdopt: IpcListener = ({ sender }, engineId): PlayerOpenReply | null => {
+    const reply = handleAdoptEngine(sender, engineId, {
       disposed,
       now: deps.now,
       log,
@@ -653,6 +599,12 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       syncPrimary,
       sendTo,
     });
+    if (reply) {
+      warmUpCtl.discardOwner(sender.id);
+      powerCtl.setOwner(reply.engineId, sender);
+    }
+    return reply;
+  };
 
   const onSetPrimary: IpcListener = ({ sender }, engineId) => {
     if (!isEngineId(engineId)) {
@@ -669,6 +621,25 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     demoteOwnerPrimaries(sender.id, engineId);
     entry.isPrimary = true;
     syncPrimary(engineId, entry);
+  };
+
+  const onSetScrubbing: IpcListener = ({ sender }, rawRequest) => {
+    if (disposed || sender.isDestroyed()) return;
+    if (!isSetScrubbingRequest(rawRequest)) {
+      log(`player ipc: dropped an invalid ${PLAYER_CHANNELS.setScrubbing} message`);
+      return;
+    }
+    const entry = ownedEntry(sender, rawRequest.engineId);
+    if (!entry) {
+      log(
+        `player ipc: dropped a ${PLAYER_CHANNELS.setScrubbing} message for an engine the sender does not own`,
+      );
+      return;
+    }
+    if (rawRequest.attempt > entry.attempt) entry.attempt = rawRequest.attempt;
+    guarded(PLAYER_CHANNELS.setScrubbing, () =>
+      entry.engine.setScrubbing?.(rawRequest.attempt, rawRequest.scrubbing),
+    );
   };
 
   const onPickSubtitleFile: IpcListener = async ({ sender }) => {
@@ -765,12 +736,14 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   };
 
   const offMediaCommand = mediaBridge?.onCommand(handleMediaCommand);
+  deps.bindWarmUp?.((owner) => warmUpCtl.warmUp(owner));
 
   ipcMain.handle(PLAYER_CHANNELS.open, onOpen);
   ipcMain.handle(PLAYER_CHANNELS.close, onClose);
   ipcMain.handle(PLAYER_CHANNELS.park, onPark);
   ipcMain.handle(PLAYER_CHANNELS.adopt, onAdopt);
   ipcMain.handle(PLAYER_CHANNELS.setPrimary, onSetPrimary);
+  ipcMain.handle(PLAYER_CHANNELS.setScrubbing, onSetScrubbing);
   ipcMain.handle(PLAYER_CHANNELS.pickSubtitleFile, onPickSubtitleFile);
   ipcMain.on(PLAYER_CHANNELS.command, onCommand);
   ipcMain.on(PLAYER_CHANNELS.area, onArea);
@@ -779,19 +752,20 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   return () => {
     disposed = true;
     offMediaCommand?.();
+    warmUpCtl.dispose();
     ipcMain.removeHandler(PLAYER_CHANNELS.open);
     ipcMain.removeHandler(PLAYER_CHANNELS.close);
     ipcMain.removeHandler(PLAYER_CHANNELS.park);
     ipcMain.removeHandler(PLAYER_CHANNELS.adopt);
     ipcMain.removeHandler(PLAYER_CHANNELS.setPrimary);
+    ipcMain.removeHandler(PLAYER_CHANNELS.setScrubbing);
     ipcMain.removeHandler(PLAYER_CHANNELS.pickSubtitleFile);
     ipcMain.removeListener(PLAYER_CHANNELS.command, onCommand);
     ipcMain.removeListener(PLAYER_CHANNELS.area, onArea);
     ipcMain.removeListener(PLAYER_CHANNELS.gateReport, onGate);
     for (const id of [...parkedTimers.keys()]) clearParkedTimer(id);
-    for (const id of [...bufferingTimers.keys()]) clearBufferingTimer(id);
     for (const id of [...entries.keys()]) release(id);
     displayRefreshController?.restoreAll();
-    powerBlocker?.releaseAll();
+    powerCtl.dispose();
   };
 }

@@ -1,32 +1,17 @@
 import type { BufferPreset, SubtitleStyleConfig } from '@elv/domain';
-import type {
-  AttemptToken,
-  DesktopAudioOutputConfig,
-  DisplaySyncPolicy,
-  EngineEvent,
-  ExternalSubtitleTrack,
-  MediaKind,
-} from '@elv/playback';
-import type { DeinterlaceMode, PlayerUiEvent } from '../../../shared/player-ipc.ts';
+import type { AttemptToken, EngineEvent, ExternalSubtitleTrack, MediaKind } from '@elv/playback';
+import type { PlayerUiEvent } from '../../../shared/player-ipc.ts';
 import type { VideoPresenter } from '../presenter/types.ts';
 import { type AudioDeviceTracker, createAudioDeviceTracker } from './audio-devices.ts';
 import { type AudioHotplug, createAudioHotplug } from './audio-hotplug.ts';
-import { desktopAudioOutputCommands, sameDesktopAudioOutputConfig } from './audio-output.ts';
 import { MpvWedgedError } from './client.ts';
 import type { MpvCommand, MpvEvent, MpvReply } from './codec.ts';
 import { createDeriver, type Deriver, isLiveMpegTsUrl } from './derive.ts';
 import { createEntryTable, type EntryTable } from './entries.ts';
+import type { MpvLogLine } from './errors.ts';
 import { createInputRepeatGate, type InputRepeatGate } from './input-repeat-gate.ts';
 import type { OpeningGate } from './opening-gate.ts';
-import {
-  audioNormalizationCommand,
-  deinterlaceCommands,
-  headerFields,
-  loadfileCommand,
-  pitchLockCommand,
-  videoSyncCommand,
-  videoSyncModeFor,
-} from './options.ts';
+import { headerFields, loadfileCommand } from './options.ts';
 import type { MpvProcess } from './process.ts';
 import {
   createReadaheadController,
@@ -42,7 +27,17 @@ import {
   replyEntryId,
   TRACK_PROPERTIES,
 } from './session-constants.ts';
-import { subtitleStyleCommands } from './subtitle-style.ts';
+import {
+  type MediaTimingState,
+  reclassifyPrematureVodEof,
+  updateMediaTimingFromProperty,
+} from './session-eof.ts';
+import {
+  applySessionInitialSettings,
+  type SessionAppliedSettings,
+  type SessionSettingsHooks,
+  syncSlotDesiredSettings,
+} from './session-settings.ts';
 import { parseMpvDelayMs } from './track-snapshot.ts';
 import type { TrackTracker } from './tracks.ts';
 import type { VodCacheCoordinator } from './vod-cache.ts';
@@ -75,7 +70,7 @@ export interface QueuedMediaSlot extends MediaSlot {
 }
 
 /** Connected mpv process and all per-process state (entry ids restart per process). */
-export interface LiveSession {
+export interface LiveSession extends SessionAppliedSettings, MediaTimingState {
   readonly proc: MpvProcess;
   readonly entries: EntryTable;
   readonly deriver: Deriver;
@@ -87,29 +82,27 @@ export interface LiveSession {
   userQuit: boolean;
   hasCustomHeaders: boolean;
   hasQueuedPlaylist: boolean;
+  hrSeekDisabled: boolean;
+  pendingResumeHrSeekRestore: boolean;
   queuedEntryId?: number;
-  appliedAudioDevice?: string;
-  appliedSubtitleFont?: string;
-  appliedDeinterlaceMode?: DeinterlaceMode;
-  appliedPitchLock?: boolean;
-  appliedAudioNormalization?: boolean;
-  appliedVideoSync?: 'audio' | 'display-resample';
-  appliedDesktopAudioOutput?: DesktopAudioOutputConfig;
   audioDelayMs?: number;
   subtitleDelayMs?: number;
+  recentLogs: MpvLogLine[];
+  readonly abortedQueuedEntryIds: Map<number, AttemptToken>;
   inFlight?: MediaSlot;
   inFlightQueued?: QueuedMediaSlot;
   readonly endWaiters: Set<{ id: number; done(ended: boolean): void }>;
 }
 
 const LOG_LEVEL = 'v';
+const MAX_RECENT_LOGS = 50;
 const OPEN_WAIT_MS = 1000;
 const START_TIMEOUT_MS = 3000;
 const END_TIMEOUT_MS = 3000;
 const CLOCK_INTERVAL_MS = 1000;
 
 /** Hooks connecting one `LiveSession` to `createMpvEngine`. */
-export interface LiveSessionHooks {
+export interface LiveSessionHooks extends SessionSettingsHooks {
   presenter: VideoPresenter;
   tracks: TrackTracker;
   opening: OpeningGate<MediaSlot>;
@@ -129,22 +122,12 @@ export interface LiveSessionHooks {
   enqueueCommand(cmd: MpvCommand, slot?: MediaSlot): void;
   onAudioProperty?(name: 'volume' | 'mute', value: unknown): void;
   onAudioSpdifProperty?(value: unknown): void;
-  getDesiredAudioDevice?(): string | undefined;
-  getDesiredSubtitleFont?(): string | undefined;
-  getDesiredSubtitleStyle?(): SubtitleStyleConfig | undefined;
-  isSecondarySubtitleActive?(): boolean;
   onSecondarySubtitlePositionSync?(secondaryActive: boolean): void;
   onFileLoadedExternalSubtitles?(slot: MediaSlot): void;
-  getDesiredDeinterlaceMode?(): DeinterlaceMode | undefined;
-  getDesiredPitchLock?(): boolean | undefined;
-  getDesiredAudioNormalization?(): boolean | undefined;
-  getDesiredDisplaySync?(): DisplaySyncPolicy | undefined;
-  getDesiredDesktopAudioOutput?(): DesktopAudioOutputConfig | undefined;
   getDesiredAudioDelayMs?(): number;
   getDesiredSubtitleDelayMs?(): number;
   getDesiredVideoQualityId?(): string | null;
-  isSpdifPassthroughActive?(): boolean;
-  isAudioNormalizationSuppressed?(): boolean;
+  isScrubbing?(): boolean;
   onMpvLog?(entry: {
     readonly prefix: string;
     readonly level: string;
@@ -213,7 +196,22 @@ export function createSessionController(hooks: LiveSessionHooks) {
     }
   };
 
+  const resetMediaDiagnostics = (L: LiveSession): void => {
+    L.recentLogs = [];
+    L.lastPositionMs = undefined;
+    L.lastDurationMs = undefined;
+    L.hasPlaybackTime = false;
+  };
+
   const onStartFile = (L: LiveSession, entryId: number): void => {
+    const abortedToken = L.abortedQueuedEntryIds.get(entryId);
+    if (abortedToken !== undefined) {
+      L.abortedQueuedEntryIds.delete(entryId);
+      if (!L.inFlight && hooks.getMedia()?.token === abortedToken) {
+        void send(L, ['stop']);
+      }
+      return;
+    }
     const queued = hooks.getQueued?.();
     const isQueuedAdvance =
       queued !== undefined &&
@@ -231,6 +229,8 @@ export function createSessionController(hooks: LiveSessionHooks) {
       L.entries.started(entryId);
       const current = L.entries.current();
       if (current?.entryId !== entryId) return;
+      L.pendingResumeHrSeekRestore = false;
+      resetMediaDiagnostics(L);
       tracks.beginMedia(current.token);
       const events = L.deriver.begin(current.token, current.kind, false);
       if (L.paused) events.push(...L.deriver.property('pause', true));
@@ -247,6 +247,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
     L.entries.started(entryId);
     const current = L.entries.current();
     if (current?.entryId !== entryId) return;
+    resetMediaDiagnostics(L);
     tracks.beginMedia(current.token);
     const activeMedia = hooks.getMedia();
     const slotUrl =
@@ -277,19 +278,53 @@ export function createSessionController(hooks: LiveSessionHooks) {
     const entryId = entryIdOf(e['playlist_entry_id']);
     if (e['reason'] === 'quit') L.userQuit = true;
     const active = isActive(L, entryId);
-    const isCurrent = entryId !== undefined && L.entries.current()?.entryId === entryId;
+    const current = L.entries.current();
+    const isCurrent = entryId !== undefined && current?.entryId === entryId;
+    const endedSlot = active ? hooks.getMedia() : undefined;
     const rawEvents = isCurrent ? L.deriver.fileEvent(e) : [];
-    const suppressEnded = active && e['reason'] === 'eof' && hooks.getQueued?.() !== undefined;
+    const positionMs = L.lastPositionMs ?? endedSlot?.lastPositionMs;
+    const { events: classifiedEvents, prematureVodEof } =
+      isCurrent && current
+        ? reclassifyPrematureVodEof(rawEvents, {
+            mediaKind: current.kind,
+            reason: e['reason'],
+            logs: L.recentLogs,
+            ...(positionMs === undefined ? {} : { positionMs }),
+            ...(L.lastDurationMs === undefined ? {} : { durationMs: L.lastDurationMs }),
+          })
+        : { events: rawEvents, prematureVodEof: false };
+    const hadQueued =
+      hooks.getQueued?.() !== undefined || L.hasQueuedPlaylist || L.queuedEntryId !== undefined;
+    if (prematureVodEof && active && hadQueued) {
+      const queuedEntryId = L.queuedEntryId ?? hooks.getQueued?.()?.entryId;
+      if (queuedEntryId !== undefined && endedSlot) {
+        L.abortedQueuedEntryIds.set(queuedEntryId, endedSlot.token);
+      }
+      hooks.setQueued?.(undefined);
+      if (L.queuedEntryId !== undefined) {
+        L.entries.unbind(L.queuedEntryId);
+        L.queuedEntryId = undefined;
+      }
+      L.inFlightQueued = undefined;
+      L.hasQueuedPlaylist = false;
+      hooks.vodCache?.discardQueuedSession();
+      void send(L, ['playlist-clear']);
+    }
+    const suppressEnded =
+      !prematureVodEof && active && e['reason'] === 'eof' && hooks.getQueued?.() !== undefined;
     const events = suppressEnded
-      ? rawEvents.filter((ev) => !(ev.type === 'state' && ev.state === 'ended'))
-      : rawEvents;
-    if (isCurrent) tracks.onRetryOrRecreate();
+      ? classifiedEvents.filter((ev) => !(ev.type === 'state' && ev.state === 'ended'))
+      : classifiedEvents;
+    if (isCurrent) {
+      tracks.onRetryOrRecreate();
+      L.pendingResumeHrSeekRestore = false;
+      resetMediaDiagnostics(L);
+    }
     if (entryId !== undefined) {
       L.entries.ended(entryId);
       opening.onEnded(entryId);
     }
     for (const waiter of [...L.endWaiters]) if (waiter.id === entryId) waiter.done(true);
-    const endedSlot = active ? hooks.getMedia() : undefined;
     if (endedSlot) {
       hooks.vodCache?.onEndFile(
         endedSlot.token,
@@ -346,8 +381,15 @@ export function createSessionController(hooks: LiveSessionHooks) {
         return;
       case 'playback-restart': {
         const current = L.entries.current();
-        if (current?.kind === 'live' && isActive(L, current.entryId)) {
-          L.readahead.onPlaybackRestart();
+        if (current && isActive(L, current.entryId)) {
+          if (current.kind === 'live') {
+            L.readahead.onPlaybackRestart();
+          } else if (L.pendingResumeHrSeekRestore) {
+            L.pendingResumeHrSeekRestore = false;
+            if (!L.hrSeekDisabled && !hooks.isScrubbing?.()) {
+              hooks.enqueueCommand(['set_property', 'hr-seek', 'yes'], hooks.getMedia());
+            }
+          }
         }
         fromCurrent(L, L.deriver.fileEvent(e));
         return;
@@ -391,6 +433,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
           fromCurrent(L, tracks.property(name, e['data']));
         }
         if (OBSERVED_PROPERTY_NAMES.has(name)) {
+          updateMediaTimingFromProperty(L, name, e['data']);
           fromCurrent(L, L.deriver.property(name, e['data']));
           const current = L.entries.current();
           if (current?.kind === 'live' && isActive(L, current.entryId)) {
@@ -404,7 +447,12 @@ export function createSessionController(hooks: LiveSessionHooks) {
         const level = String(e['level']);
         const text = String(e['text'] ?? '').trimEnd();
         hooks.onMpvLog?.({ prefix, level, text });
-        if (keepMpvLog(level, text)) L.deriver.log({ prefix, level, text });
+        if (keepMpvLog(level, text)) {
+          const line: MpvLogLine = { prefix, level, text };
+          L.deriver.log(line);
+          L.recentLogs.push(line);
+          if (L.recentLogs.length > MAX_RECENT_LOGS) L.recentLogs.shift();
+        }
         return;
       }
       case 'client-message': {
@@ -516,6 +564,11 @@ export function createSessionController(hooks: LiveSessionHooks) {
         userQuit: false,
         hasCustomHeaders: false,
         hasQueuedPlaylist: false,
+        hrSeekDisabled: false,
+        pendingResumeHrSeekRestore: false,
+        recentLogs: [],
+        hasPlaybackTime: false,
+        abortedQueuedEntryIds: new Map(),
         endWaiters: new Set(),
       };
       hooks.setLive(L);
@@ -526,55 +579,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
       presenter.attach(proc.client);
       for (const name of OBSERVED_PROPERTIES) proc.client.observe(name);
       void send(L, ['request_log_messages', LOG_LEVEL]);
-      const desiredAudio = hooks.getDesiredAudioDevice?.();
-      if (desiredAudio !== undefined) {
-        L.appliedAudioDevice = desiredAudio;
-        void send(L, ['set_property', 'audio-device', desiredAudio]);
-      }
-      const desiredSubFont = hooks.getDesiredSubtitleFont?.();
-      if (desiredSubFont !== undefined) {
-        L.appliedSubtitleFont = desiredSubFont;
-        void send(L, ['set_property', 'sub-font', desiredSubFont]);
-      }
-      const desiredSubStyle = hooks.getDesiredSubtitleStyle?.();
-      if (desiredSubStyle !== undefined) {
-        for (const cmd of subtitleStyleCommands(
-          desiredSubStyle,
-          hooks.isSecondarySubtitleActive?.() === true,
-        )) {
-          void send(L, cmd);
-        }
-      }
-      const desiredDeinterlace = hooks.getDesiredDeinterlaceMode?.();
-      if (desiredDeinterlace !== undefined) {
-        L.appliedDeinterlaceMode = desiredDeinterlace;
-        for (const cmd of deinterlaceCommands(desiredDeinterlace)) void send(L, cmd);
-      }
-      const desiredPitchLock = hooks.getDesiredPitchLock?.();
-      if (desiredPitchLock !== undefined) {
-        L.appliedPitchLock = desiredPitchLock;
-        void send(L, pitchLockCommand(desiredPitchLock));
-      }
-      const desiredDisplaySync = hooks.getDesiredDisplaySync?.();
-      if (desiredDisplaySync !== undefined) {
-        L.appliedVideoSync = videoSyncModeFor(desiredDisplaySync);
-        void send(L, videoSyncCommand(desiredDisplaySync));
-      }
-      const desiredDesktopAudio = hooks.getDesiredDesktopAudioOutput?.();
-      if (desiredDesktopAudio !== undefined) {
-        L.appliedDesktopAudioOutput = desiredDesktopAudio;
-        for (const cmd of desktopAudioOutputCommands(desiredDesktopAudio)) void send(L, cmd);
-      }
-      const desiredNorm = hooks.getDesiredAudioNormalization?.();
-      if (desiredNorm !== undefined) {
-        const suppressed =
-          hooks.isAudioNormalizationSuppressed?.() ?? hooks.isSpdifPassthroughActive?.() ?? false;
-        const effectiveNorm = desiredNorm && !suppressed;
-        L.appliedAudioNormalization = effectiveNorm;
-        if (effectiveNorm || !desiredNorm) {
-          void send(L, audioNormalizationCommand(effectiveNorm));
-        }
-      }
+      applySessionInitialSettings(L, hooks, (cmd) => send(L, cmd));
       return L;
     },
     async clearQueuedPlaylist(L: LiveSession): Promise<void> {
@@ -639,7 +644,29 @@ export function createSessionController(hooks: LiveSessionHooks) {
       if (hooks.getLive() !== L) return;
       if (hooks.getMedia() === queued) return;
       if (hooks.getQueued?.() !== queued) {
-        if (entryId !== undefined) L.entries.unbind(entryId);
+        if (entryId !== undefined) {
+          L.entries.unbind(entryId);
+          L.abortedQueuedEntryIds.set(entryId, ownerSlot.token);
+        }
+        L.hasQueuedPlaylist = false;
+        hooks.vodCache?.discardQueuedSession();
+        await send(L, ['playlist-clear']);
+        if (
+          entryId !== undefined &&
+          hooks.getLive() === L &&
+          !L.inFlight &&
+          hooks.getMedia() === ownerSlot
+        ) {
+          const activeId = entryIdOf((await send(L, ['get_property', 'playlist/0/id']))?.data);
+          if (
+            activeId === entryId &&
+            hooks.getLive() === L &&
+            !L.inFlight &&
+            hooks.getMedia() === ownerSlot
+          ) {
+            await send(L, ['stop']);
+          }
+        }
         return;
       }
       if (entryId !== undefined) {
@@ -663,65 +690,17 @@ export function createSessionController(hooks: LiveSessionHooks) {
         if (!(await stopCurrent(L))) return;
       }
       if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
-      const desiredAudio = hooks.getDesiredAudioDevice?.();
-      if (desiredAudio !== undefined && L.appliedAudioDevice !== desiredAudio) {
-        L.appliedAudioDevice = desiredAudio;
-        await send(L, ['set_property', 'audio-device', desiredAudio]);
+      const synced = await syncSlotDesiredSettings(
+        L,
+        hooks,
+        (cmd) => send(L, cmd),
+        () => slot === hooks.getMedia() && hooks.getLive() === L,
+      );
+      if (!synced) return;
+      if (L.hrSeekDisabled) {
+        await send(L, ['set_property', 'hr-seek', 'yes']);
+        L.hrSeekDisabled = false;
         if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
-      }
-      const desiredSubFont = hooks.getDesiredSubtitleFont?.();
-      if (desiredSubFont !== undefined && L.appliedSubtitleFont !== desiredSubFont) {
-        L.appliedSubtitleFont = desiredSubFont;
-        await send(L, ['set_property', 'sub-font', desiredSubFont]);
-        if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
-      }
-      const desiredDeinterlace = hooks.getDesiredDeinterlaceMode?.();
-      if (
-        desiredDeinterlace !== undefined &&
-        (L.appliedDeinterlaceMode !== desiredDeinterlace || desiredDeinterlace !== 'off')
-      ) {
-        L.appliedDeinterlaceMode = desiredDeinterlace;
-        for (const cmd of deinterlaceCommands(desiredDeinterlace)) {
-          await send(L, cmd);
-          if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
-        }
-      }
-      const desiredPitchLock = hooks.getDesiredPitchLock?.();
-      if (desiredPitchLock !== undefined && L.appliedPitchLock !== desiredPitchLock) {
-        L.appliedPitchLock = desiredPitchLock;
-        await send(L, pitchLockCommand(desiredPitchLock));
-        if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
-      }
-      const desiredDisplaySync = hooks.getDesiredDisplaySync?.();
-      if (desiredDisplaySync !== undefined) {
-        const targetSync = videoSyncModeFor(desiredDisplaySync);
-        if (L.appliedVideoSync !== targetSync) {
-          L.appliedVideoSync = targetSync;
-          await send(L, videoSyncCommand(desiredDisplaySync));
-          if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
-        }
-      }
-      const desiredDesktopAudio = hooks.getDesiredDesktopAudioOutput?.();
-      if (
-        desiredDesktopAudio !== undefined &&
-        !sameDesktopAudioOutputConfig(L.appliedDesktopAudioOutput, desiredDesktopAudio)
-      ) {
-        L.appliedDesktopAudioOutput = desiredDesktopAudio;
-        for (const cmd of desktopAudioOutputCommands(desiredDesktopAudio)) {
-          await send(L, cmd);
-          if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
-        }
-      }
-      const desiredNorm = hooks.getDesiredAudioNormalization?.();
-      if (desiredNorm !== undefined) {
-        const suppressed =
-          hooks.isAudioNormalizationSuppressed?.() ?? hooks.isSpdifPassthroughActive?.() ?? false;
-        const effectiveNorm = desiredNorm && !suppressed;
-        if (L.appliedAudioNormalization !== effectiveNorm) {
-          L.appliedAudioNormalization = effectiveNorm;
-          await send(L, audioNormalizationCommand(effectiveNorm));
-          if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
-        }
       }
       const fields = headerFields(slot.request.headers);
       if (fields.length > 0 || L.hasCustomHeaders) {
@@ -744,6 +723,8 @@ export function createSessionController(hooks: LiveSessionHooks) {
         if (slot !== hooks.getMedia()) return;
       }
       L.inFlight = slot;
+      L.pendingResumeHrSeekRestore =
+        slot.request.kind === 'vod' && (slot.request.startMs ?? 0) >= 30_000;
       opening.begin(slot);
       const effectiveStyle = hooks.getDesiredSubtitleStyle?.() ?? slot.request.subtitleStyle;
       const vodCacheOptions = hooks.vodCache?.prepareLoad(slot.request);
@@ -759,6 +740,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
       if (!reply || hooks.getLive() !== L) return;
       if (reply.error !== 'success') {
         L.inFlight = undefined;
+        L.pendingResumeHrSeekRestore = false;
         opening.finish();
         hooks.vodCache?.retireActiveSession();
         if (slot === hooks.getMedia()) {

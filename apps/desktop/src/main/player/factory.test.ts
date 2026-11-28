@@ -456,4 +456,66 @@ describe('createEngineFor', () => {
     expect(ownerB.listeners.get('enter-full-screen')?.size).toBe(0);
     expect(ownerB.listeners.get('leave-full-screen')?.size).toBe(0);
   });
+
+  it('passes softwareGl bilinear scaler flags on linux when LIBGL_ALWAYS_SOFTWARE or Mesa software driver is set', async () => {
+    const prevAlwaysSw = process.env['LIBGL_ALWAYS_SOFTWARE'];
+    const prevDriver = process.env['MESA_LOADER_DRIVER_OVERRIDE'];
+    try {
+      delete process.env['LIBGL_ALWAYS_SOFTWARE'];
+      delete process.env['MESA_LOADER_DRIVER_OVERRIDE'];
+
+      await createEngineFor(fakeOwner, {
+        runtime,
+        platform: 'linux',
+        loadMode: 'replace',
+        pidFile: '/tmp/mpv-pids.json',
+        readaheadStore: stubReadaheadStore,
+        onUi: () => undefined,
+      });
+      expect(mocks.engineDeps[0]?.baseArgs).not.toContain('--scale=bilinear');
+
+      process.env['LIBGL_ALWAYS_SOFTWARE'] = '1';
+      await createEngineFor(fakeOwner, {
+        runtime,
+        platform: 'linux',
+        loadMode: 'replace',
+        pidFile: '/tmp/mpv-pids.json',
+        readaheadStore: stubReadaheadStore,
+        onUi: () => undefined,
+      });
+      const linuxSwArgs = mocks.engineDeps[1]?.baseArgs ?? [];
+      expect(linuxSwArgs).toContain('--scale=bilinear');
+      expect(linuxSwArgs).toContain('--cscale=bilinear');
+      expect(linuxSwArgs).toContain('--dscale=bilinear');
+      expect(linuxSwArgs).toContain('--sigmoid-upscaling=no');
+
+      // Non-linux platforms never receive Linux software-GL bilinear flags
+      await createEngineFor(fakeOwner, {
+        runtime,
+        platform: 'win32',
+        loadMode: 'replace',
+        pidFile: 'C:\\tmp\\mpv-pids.json',
+        readaheadStore: stubReadaheadStore,
+        onUi: () => undefined,
+      });
+      expect(mocks.engineDeps[2]?.baseArgs).not.toContain('--scale=bilinear');
+
+      delete process.env['LIBGL_ALWAYS_SOFTWARE'];
+      process.env['MESA_LOADER_DRIVER_OVERRIDE'] = 'llvmpipe';
+      await createEngineFor(fakeOwner, {
+        runtime,
+        platform: 'linux',
+        loadMode: 'replace',
+        pidFile: '/tmp/mpv-pids.json',
+        readaheadStore: stubReadaheadStore,
+        onUi: () => undefined,
+      });
+      expect(mocks.engineDeps[3]?.baseArgs).toContain('--scale=bilinear');
+    } finally {
+      if (prevAlwaysSw === undefined) delete process.env['LIBGL_ALWAYS_SOFTWARE'];
+      else process.env['LIBGL_ALWAYS_SOFTWARE'] = prevAlwaysSw;
+      if (prevDriver === undefined) delete process.env['MESA_LOADER_DRIVER_OVERRIDE'];
+      else process.env['MESA_LOADER_DRIVER_OVERRIDE'] = prevDriver;
+    }
+  });
 });

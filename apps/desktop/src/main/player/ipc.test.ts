@@ -684,7 +684,7 @@ describe('registerPlayerIpc powerBlocker buffering stall timeout (#435)', () => 
       expect(pb.active.size).toBe(1);
 
       engine.emit({ attempt: 1, type: 'state', state: 'playing' });
-      vi.advanceTimersByTime(60_000);
+      vi.advanceTimersByTime(45_000);
       expect(pb.active.size).toBe(1);
       expect(pb.stops).toHaveLength(0);
     } finally {

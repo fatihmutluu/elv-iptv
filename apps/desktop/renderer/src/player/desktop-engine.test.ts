@@ -645,4 +645,46 @@ describe('createDesktopEngine', () => {
       },
     });
   });
+
+  it('forwards setScrubbing via bridge.setScrubbing, ignores post-release calls, and isolates rejections', async () => {
+    const f = fakeBridge();
+    const setScrubbing = vi.fn(async () => undefined);
+    f.bridge.setScrubbing = setScrubbing;
+
+    const engine = await createDesktopEngine(f.bridge, () => 0);
+    engine.setScrubbing?.(3, true);
+    engine.setScrubbing?.(3, false);
+    expect(setScrubbing).toHaveBeenNthCalledWith(1, {
+      engineId: 'e1',
+      attempt: 3,
+      scrubbing: true,
+    });
+    expect(setScrubbing).toHaveBeenNthCalledWith(2, {
+      engineId: 'e1',
+      attempt: 3,
+      scrubbing: false,
+    });
+
+    setScrubbing.mockRejectedValueOnce(new Error('ipc closed'));
+    expect(() => engine.setScrubbing?.(4, true)).not.toThrow();
+    await Promise.resolve();
+
+    engine.release();
+    engine.setScrubbing?.(5, true);
+    expect(setScrubbing).toHaveBeenCalledTimes(3);
+  });
+
+  it('exposes clearQueuedNext alias forwarding clearQueue over IPC and no-oping after release', async () => {
+    const f = fakeBridge();
+    const engine = await createDesktopEngine(f.bridge, () => 0);
+
+    expect(typeof engine.clearQueuedNext).toBe('function');
+    engine.clearQueuedNext?.();
+    expect(f.sent).toEqual([{ engineId: 'e1', command: { name: 'clearQueue' } }]);
+    expect(isPlayerCommandMessage(f.sent[0])).toBe(true);
+
+    engine.release();
+    engine.clearQueuedNext?.();
+    expect(f.sent.filter((m) => m.command.name === 'clearQueue')).toHaveLength(1);
+  });
 });

@@ -366,6 +366,184 @@ describe('vod-buffer-policy (#350)', () => {
     expect(decayThrottleBackoffLevel(2, -120)).toBe(2);
     expect(decayThrottleBackoffLevel(2, Number.NaN)).toBe(2);
   });
+
+  it('uses RAM-first high-RAM desktop policy on >= 8 GiB non-multi-view non-large presets with throttle scaling (Wave Q4)', () => {
+    const autoHighRam = computeVodBufferBudget({
+      kind: 'vod',
+      bufferPreset: 'auto',
+      deviceRamBytes: 8 * GIB,
+      freeDiskBytes: 50 * GIB,
+      preferRamOnHighRam: true,
+    });
+    expect(autoHighRam.allowDiskCache).toBe(false);
+    expect(autoHighRam.maxDiskBytes).toBe(0);
+    expect(autoHighRam.maxMemoryBytes).toBe(160 * MIB);
+
+    // Omitted bufferPreset defaults to 'auto' -> 160 MiB RAM-only
+    const omittedPresetHighRam = computeVodBufferBudget({
+      kind: 'vod',
+      deviceRamBytes: 16 * GIB,
+      freeDiskBytes: 50 * GIB,
+      preferRamOnHighRam: true,
+    });
+    expect(omittedPresetHighRam.allowDiskCache).toBe(false);
+    expect(omittedPresetHighRam.maxDiskBytes).toBe(0);
+    expect(omittedPresetHighRam.maxMemoryBytes).toBe(160 * MIB);
+
+    const balancedHighRam = computeVodBufferBudget({
+      kind: 'vod',
+      bufferPreset: 'balanced',
+      deviceRamBytes: 16 * GIB,
+      freeDiskBytes: 50 * GIB,
+      preferRamOnHighRam: true,
+    });
+    expect(balancedHighRam.allowDiskCache).toBe(false);
+    expect(balancedHighRam.maxDiskBytes).toBe(0);
+    expect(balancedHighRam.maxMemoryBytes).toBe(192 * MIB);
+
+    // Throttle backoff scales boosted RAM budget by 1 << level, floored at 32 MiB
+    expect(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'auto',
+        deviceRamBytes: 16 * GIB,
+        freeDiskBytes: 50 * GIB,
+        preferRamOnHighRam: true,
+        throttleBackoffLevel: 1,
+      }).maxMemoryBytes,
+    ).toBe(80 * MIB);
+    expect(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'auto',
+        deviceRamBytes: 16 * GIB,
+        freeDiskBytes: 50 * GIB,
+        preferRamOnHighRam: true,
+        throttleBackoffLevel: 2,
+      }).maxMemoryBytes,
+    ).toBe(40 * MIB);
+    expect(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'auto',
+        deviceRamBytes: 16 * GIB,
+        freeDiskBytes: 50 * GIB,
+        preferRamOnHighRam: true,
+        throttleBackoffLevel: 3,
+      }).maxMemoryBytes,
+    ).toBe(32 * MIB);
+    expect(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'balanced',
+        deviceRamBytes: 16 * GIB,
+        freeDiskBytes: 50 * GIB,
+        preferRamOnHighRam: true,
+        throttleBackoffLevel: 1,
+      }).maxMemoryBytes,
+    ).toBe(96 * MIB);
+    expect(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'balanced',
+        deviceRamBytes: 16 * GIB,
+        freeDiskBytes: 50 * GIB,
+        preferRamOnHighRam: true,
+        throttleBackoffLevel: 2,
+      }).maxMemoryBytes,
+    ).toBe(48 * MIB);
+    expect(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'balanced',
+        deviceRamBytes: 16 * GIB,
+        freeDiskBytes: 50 * GIB,
+        preferRamOnHighRam: true,
+        throttleBackoffLevel: 3,
+      }).maxMemoryBytes,
+    ).toBe(32 * MIB);
+
+    // Unchanged when bufferPreset === 'large'
+    const largeExplicit = computeVodBufferBudget({
+      kind: 'vod',
+      bufferPreset: 'large',
+      deviceRamBytes: 16 * GIB,
+      freeDiskBytes: 50 * GIB,
+      preferRamOnHighRam: true,
+    });
+    const largeDefault = computeVodBufferBudget({
+      kind: 'vod',
+      bufferPreset: 'large',
+      deviceRamBytes: 16 * GIB,
+      freeDiskBytes: 50 * GIB,
+    });
+    expect(largeExplicit).toEqual(largeDefault);
+    expect(largeExplicit.allowDiskCache).toBe(true);
+    expect(largeExplicit.maxDiskBytes).toBe(VOD_MAX_DISK_BYTES);
+
+    // Unchanged when deviceRamBytes < 8 GiB, isLowRamDevice, multiView, or preferRamOnHighRam false
+    expect(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'auto',
+        deviceRamBytes: 8 * GIB - 1,
+        freeDiskBytes: 50 * GIB,
+        preferRamOnHighRam: true,
+      }),
+    ).toEqual(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'auto',
+        deviceRamBytes: 8 * GIB - 1,
+        freeDiskBytes: 50 * GIB,
+      }),
+    );
+    expect(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'balanced',
+        deviceRamBytes: 16 * GIB,
+        isLowRamDevice: true,
+        freeDiskBytes: 50 * GIB,
+        preferRamOnHighRam: true,
+      }).maxMemoryBytes,
+    ).toBe(VOD_LOW_RAM_MAX_MEMORY_BYTES);
+    expect(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'balanced',
+        deviceRamBytes: 16 * GIB,
+        freeDiskBytes: 50 * GIB,
+        multiViewTileCount: 2,
+        preferRamOnHighRam: true,
+      }),
+    ).toEqual(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'balanced',
+        deviceRamBytes: 16 * GIB,
+        freeDiskBytes: 50 * GIB,
+        multiViewTileCount: 2,
+      }),
+    );
+    expect(
+      computeVodBufferBudget({
+        kind: 'vod',
+        bufferPreset: 'auto',
+        deviceRamBytes: 16 * GIB,
+        freeDiskBytes: 50 * GIB,
+        preferRamOnHighRam: false,
+      }).allowDiskCache,
+    ).toBe(true);
+    expect(
+      computeVodBufferBudget({
+        kind: 'live',
+        deviceRamBytes: 16 * GIB,
+        freeDiskBytes: 50 * GIB,
+        preferRamOnHighRam: true,
+      }).enabled,
+    ).toBe(false);
+  });
 });
 
 describe('PlaybackService ClockAnchor.bufferHealth propagation (#350)', () => {

@@ -159,6 +159,9 @@ export function createPlayerBridge(
     async setPrimary(engineId) {
       await ipc.invoke(PLAYER_CHANNELS.setPrimary, engineId);
     },
+    async setScrubbing(request) {
+      await ipc.invoke(PLAYER_CHANNELS.setScrubbing, request);
+    },
     send(message) {
       ipc.send(PLAYER_CHANNELS.command, message);
     },

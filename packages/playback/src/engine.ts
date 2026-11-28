@@ -331,6 +331,8 @@ export interface PlayerEngine {
   selectVideoQuality?(attempt: AttemptToken, id: string | null): void;
   /** Selects a service/program inside a multi-program MPEG-TS stream (`#304`). */
   selectProgram?(attempt: AttemptToken, id: string): void;
+  /** Clears any gapless queued next-episode slot so premature-EOF recovery reloads the current item. */
+  clearQueuedNext?(): void;
   stop(attempt: AttemptToken): void;
   /**
    * Releases and rebuilds the native player instance, keeping the view and the surface. The new

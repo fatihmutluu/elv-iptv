@@ -1,4 +1,5 @@
 import { createPositionTracker, isBudgetUsed, nextLimitDelay } from './backoff';
+import { positionAt } from './clock';
 import { classifyError, toPlaybackError } from './errors';
 import { createLadderRunner, STALLED } from './ladder';
 import type { RecoveryHooks, ServiceControl } from './seam';
@@ -6,11 +7,30 @@ import { createStallWatchdog } from './stall-watchdog';
 
 export { nextLimitDelay };
 
+const VOD_EARLY_EOF_MIN_REMAINING_MS = 10_000;
+const VOD_EARLY_EOF_REMAINING_RATIO = 0.01;
+const VOD_EARLY_EOF_COOLDOWN_MS = 5_000;
+const VOD_EARLY_EOF_POS_TOLERANCE_MS = 5_000;
+const VOD_EARLY_EOF_ADVANCE_RESET_MS = 10_000;
+
+/**
+ * Returns `true` when a VOD `ended` event arrives with more than `max(10_000 ms, 1% of duration)`
+ * remaining, indicating an unexpected mid-media stream disconnect rather than genuine completion.
+ */
+export function isUnexpectedVodEarlyEof(positionMs: number, durationMs: number): boolean {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return false;
+  if (!Number.isFinite(positionMs) || positionMs <= 0) return false;
+  return (
+    durationMs - positionMs >
+    Math.max(VOD_EARLY_EOF_MIN_REMAINING_MS, durationMs * VOD_EARLY_EOF_REMAINING_RATIO)
+  );
+}
+
 /**
  * @internal Builds the recovery ladder (spec section 5.4), bounded stall & frame-silence watchdog
- * (`#108`, `#148`), single-attempt live clean-end reconnect (`#148`), live stale-pause reload
- * (`#190`), pre-playback `.ts <-> .m3u8` fallback (`#200`), paused `surface-lost` parking (`#280`),
- * and provider connection-limit backoff (section 5.5).
+ * (`#108`, `#148`), single-attempt live clean-end reconnect (`#148`), mid-media VOD premature-EOF
+ * reconnect, live stale-pause reload (`#190`), pre-playback `.ts <-> .m3u8` fallback (`#200`),
+ * paused `surface-lost` parking (`#280`), and provider connection-limit backoff (section 5.5).
  */
 export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   const { config } = ctl;
@@ -23,6 +43,9 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   let errorWhilePaused = false;
   let liveCleanEndRetried = false;
   let liveFrozenResetTried = false;
+  let vodEarlyEofAtMs: number | undefined;
+  let vodEarlyEofPosMs: number | undefined;
+  let hasConfirmedVodDurationClock = false;
   let externalPlayback = false;
 
   const inBatch = <T>(fn: () => T): T => (ctl.batch !== undefined ? ctl.batch(fn) : fn());
@@ -52,6 +75,8 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       ladder.resetBudgetAndLimit();
       liveCleanEndRetried = false;
       liveFrozenResetTried = false;
+      vodEarlyEofAtMs = undefined;
+      vodEarlyEofPosMs = undefined;
     },
     () => {
       if (ctl.request()?.kind === 'live' && !liveFrozenResetTried && hasStream()) {
@@ -90,6 +115,9 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     errorWhilePaused = false;
     liveCleanEndRetried = false;
     liveFrozenResetTried = false;
+    vodEarlyEofAtMs = undefined;
+    vodEarlyEofPosMs = undefined;
+    hasConfirmedVodDurationClock = false;
     externalPlayback = false;
   };
 
@@ -139,6 +167,13 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
         positions.onSeek(clamped);
         return;
       }
+      if (
+        vodEarlyEofPosMs !== undefined &&
+        Math.abs(clamped - vodEarlyEofPosMs) >= VOD_EARLY_EOF_ADVANCE_RESET_MS
+      ) {
+        vodEarlyEofAtMs = undefined;
+        vodEarlyEofPosMs = undefined;
+      }
       const budget = ladder.getBudget();
       const kind = ctl.getState().status.kind;
       const shouldReload =
@@ -153,6 +188,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       }
       cancelSteps();
       ladder.resetItem();
+      hasConfirmedVodDurationClock = false;
       inBatch(() => {
         ctl.nextAttempt();
         ctl.setStatus({ kind: 'tuning' });
@@ -226,7 +262,8 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       watchdog.onPlaying(
         isBudgetUsed(ladder.getBudget(), ladder.getLimit()) ||
           liveCleanEndRetried ||
-          liveFrozenResetTried,
+          liveFrozenResetTried ||
+          vodEarlyEofAtMs !== undefined,
       );
     },
     onLiveEnded() {
@@ -249,7 +286,63 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       liveCleanEndRetried = true;
       return true;
     },
+    onVodEnded() {
+      const statusKind = ctl.getState().status.kind;
+      if (
+        ctl.request()?.kind !== 'vod' ||
+        paused ||
+        awaitingSurface ||
+        statusKind === 'idle' ||
+        statusKind === 'ended' ||
+        statusKind === 'failed' ||
+        statusKind === 'limited' ||
+        !hasStream()
+      ) {
+        return false;
+      }
+      if (statusKind === 'recovering' && ladder.hasStepTimer()) {
+        return true;
+      }
+      const anchor = ctl.getState().anchor;
+      const durationMs = anchor?.durationMs;
+      if (!hasConfirmedVodDurationClock || anchor === undefined || durationMs === undefined) {
+        return false;
+      }
+      const now = ctl.now();
+      const posMs = positionAt(anchor, now);
+      if (!isUnexpectedVodEarlyEof(posMs, durationMs)) return false;
+      if (
+        vodEarlyEofAtMs !== undefined &&
+        vodEarlyEofPosMs !== undefined &&
+        (now - vodEarlyEofAtMs < VOD_EARLY_EOF_COOLDOWN_MS ||
+          Math.abs(posMs - vodEarlyEofPosMs) <= VOD_EARLY_EOF_POS_TOLERANCE_MS)
+      ) {
+        return false;
+      }
+      vodEarlyEofAtMs = now;
+      vodEarlyEofPosMs = posMs;
+      cancelSteps();
+      ctl.clearQueuedNext?.();
+      positions.freeze(true);
+      ladder.reconnectVod({ code: 'network', detail: 'vod-premature-eof' });
+      return true;
+    },
     onClock(anchor) {
+      if (
+        anchor.durationMs !== undefined &&
+        Number.isFinite(anchor.durationMs) &&
+        anchor.durationMs > 0
+      ) {
+        hasConfirmedVodDurationClock = true;
+      }
+      if (
+        vodEarlyEofPosMs !== undefined &&
+        ctl.getState().status.kind === 'playing' &&
+        positionAt(anchor, ctl.now()) >= vodEarlyEofPosMs + VOD_EARLY_EOF_ADVANCE_RESET_MS
+      ) {
+        vodEarlyEofAtMs = undefined;
+        vodEarlyEofPosMs = undefined;
+      }
       watchdog.onClock(anchor, canWatchStall());
       positions.onClock(anchor);
     },
@@ -279,6 +372,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       } else if (kind === 'not-found') {
         ladder.onNotFound(error);
       } else if (error.code === 'network' && isVod()) {
+        ctl.clearQueuedNext?.();
         ladder.reconnectVod(error);
       } else {
         ladder.escalate(error);

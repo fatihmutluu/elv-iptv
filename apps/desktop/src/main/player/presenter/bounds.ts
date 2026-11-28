@@ -18,7 +18,7 @@ export interface DisplayBounds {
 }
 
 /** Rounds edges, not sizes, so neighbouring rects stay flush; `+ 0` turns `-0` into `0`. */
-function roundEdges(left: number, top: number, right: number, bottom: number): Rect {
+export function roundEdges(left: number, top: number, right: number, bottom: number): Rect {
   const x = Math.round(left) + 0;
   const y = Math.round(top) + 0;
   return {

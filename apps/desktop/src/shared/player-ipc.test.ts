@@ -4,6 +4,7 @@ import {
   isGateReport,
   isPlayerAreaMessage,
   isPlayerCommandMessage,
+  isSetScrubbingRequest,
   PLAYER_CHANNELS,
   sanitizeDesktopArtworkUrl,
   sanitizeDesktopMediaMetadata,
@@ -25,6 +26,7 @@ describe('PLAYER_CHANNELS', () => {
       park: 'player:park',
       adopt: 'player:adopt',
       setPrimary: 'player:set-primary',
+      setScrubbing: 'player:set-scrubbing',
       command: 'player:command',
       event: 'player:event',
       area: 'player:area',
@@ -573,5 +575,35 @@ describe('Wave F10 bufferPreset IPC validation (#350)', () => {
         ),
       ).toBe(false);
     }
+  });
+});
+
+describe('isSetScrubbingRequest', () => {
+  it('accepts valid payloads and rejects malformed, extra-key, or prototype-polluting shapes', () => {
+    expect(isSetScrubbingRequest({ engineId: 'e1', attempt: 0, scrubbing: true })).toBe(true);
+    expect(isSetScrubbingRequest({ engineId: 'engine-42', attempt: 7, scrubbing: false })).toBe(
+      true,
+    );
+
+    const protoPolluted = JSON.parse(
+      '{"engineId":"e1","attempt":1,"scrubbing":true,"__proto__":{"x":1}}',
+    );
+    const bad: unknown[] = [
+      null,
+      undefined,
+      'e1',
+      {},
+      { engineId: '', attempt: 1, scrubbing: true },
+      { engineId: 'a'.repeat(65), attempt: 1, scrubbing: true },
+      { engineId: 'e1', attempt: -1, scrubbing: true },
+      { engineId: 'e1', attempt: 1.5, scrubbing: true },
+      { engineId: 'e1', attempt: Number.NaN, scrubbing: true },
+      { engineId: 'e1', attempt: '1', scrubbing: true },
+      { engineId: 'e1', attempt: 1, scrubbing: 'yes' },
+      { engineId: 'e1', attempt: 1 },
+      { engineId: 'e1', attempt: 1, scrubbing: true, extra: 1 },
+      protoPolluted,
+    ];
+    for (const item of bad) expect(isSetScrubbingRequest(item)).toBe(false);
   });
 });

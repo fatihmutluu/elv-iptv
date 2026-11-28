@@ -119,7 +119,7 @@ describe('Wave F10 desktop mpv VOD cache & throttle integration (#350)', () => {
       url: URL_VOD_2,
       headers: {},
       kind: 'vod',
-      options: { bufferPreset: 'auto' },
+      options: { bufferPreset: 'large' },
     });
     await playing(events, 2);
     const vodLoad2 = loadOptsAt(fake, 1);
@@ -137,7 +137,13 @@ describe('Wave F10 desktop mpv VOD cache & throttle integration (#350)', () => {
     expect(liveLoad).not.toHaveProperty('demuxer-cache-dir');
 
     // Reload VOD then stop -> session dir purged
-    engine.load({ attempt: 4, url: URL_VOD_2, headers: {}, kind: 'vod' });
+    engine.load({
+      attempt: 4,
+      url: URL_VOD_2,
+      headers: {},
+      kind: 'vod',
+      options: { bufferPreset: 'large' },
+    });
     await playing(events, 4);
     const dir3 = requireDir(loadOptsAt(fake, 3)['demuxer-cache-dir'], 'dir3');
     expect(existsSync(dir3)).toBe(true);
@@ -146,7 +152,13 @@ describe('Wave F10 desktop mpv VOD cache & throttle integration (#350)', () => {
     await vi.waitFor(() => expect(existsSync(dir3)).toBe(false), { interval: 5 });
 
     // Reload VOD then recreate -> session dir purged
-    engine.load({ attempt: 6, url: URL_VOD_2, headers: {}, kind: 'vod' });
+    engine.load({
+      attempt: 6,
+      url: URL_VOD_2,
+      headers: {},
+      kind: 'vod',
+      options: { bufferPreset: 'large' },
+    });
     await playing(events, 6);
     const dir4 = requireDir(loadOptsAt(fake, 4)['demuxer-cache-dir'], 'dir4');
     expect(existsSync(dir4)).toBe(true);
@@ -155,7 +167,13 @@ describe('Wave F10 desktop mpv VOD cache & throttle integration (#350)', () => {
     await vi.waitFor(() => expect(existsSync(dir4)).toBe(false), { interval: 5 });
 
     // Reload VOD then release -> session dir purged
-    engine.load({ attempt: 8, url: URL_VOD_2, headers: {}, kind: 'vod' });
+    engine.load({
+      attempt: 8,
+      url: URL_VOD_2,
+      headers: {},
+      kind: 'vod',
+      options: { bufferPreset: 'large' },
+    });
     await playing(events, 8);
     const dir5 = requireDir(loadOptsAt(fake, 5)['demuxer-cache-dir'], 'dir5');
     expect(existsSync(dir5)).toBe(true);
@@ -170,7 +188,7 @@ describe('Wave F10 desktop mpv VOD cache & throttle integration (#350)', () => {
     const { engine, fake, events } = await setup({
       scripts: { [URL_VOD_THROTTLE]: fakeHttpError(429, 'Too Many Requests') },
       vodCacheRoot,
-      getDeviceRamBytes: () => 8 * GIB,
+      getDeviceRamBytes: () => 4 * GIB,
       readFreeDiskBytes: () => 20 * GIB,
     });
 
@@ -207,7 +225,7 @@ describe('Wave F10 desktop mpv VOD cache & throttle integration (#350)', () => {
     const { engine, fake, events } = await setup({
       scripts: { [URL_VOD]: VOD_WITH_CACHE, [URL_VOD_2]: VOD },
       vodCacheRoot,
-      getDeviceRamBytes: () => 8 * GIB,
+      getDeviceRamBytes: () => 4 * GIB,
       readFreeDiskBytes: () => 20 * GIB,
     });
 
@@ -246,7 +264,7 @@ describe('Wave F10 desktop mpv VOD cache & throttle integration (#350)', () => {
       { afterMs: 3, event: 'file-loaded' },
       { afterMs: 4, property: 'duration', value: 600 },
       { afterMs: 5, property: 'video-params', value: { w: 1280, h: 720 } },
-      { afterMs: 6, property: 'time-pos', value: 12.5 },
+      { afterMs: 6, property: 'time-pos', value: 599 },
       { afterMs: 6, event: 'playback-restart' },
       { afterMs: 40, event: 'end-file', reason: 'eof' },
     ];
@@ -379,7 +397,13 @@ describe('Wave F10 desktop mpv VOD cache & throttle integration (#350)', () => {
     );
 
     // Next load on the same stream sees decayed backoff (level 1) -> disk cache re-enabled!
-    engine.load({ attempt: 4, url: urlRecovered, headers: {}, kind: 'vod' });
+    engine.load({
+      attempt: 4,
+      url: urlRecovered,
+      headers: {},
+      kind: 'vod',
+      options: { bufferPreset: 'large' },
+    });
     await playing(events, 4);
     expect(loadOptsAt(fake, 3)['cache-on-disk']).toBe('yes');
     expect(loadOptsAt(fake, 3)['demuxer-cache-dir']).toBeTruthy();

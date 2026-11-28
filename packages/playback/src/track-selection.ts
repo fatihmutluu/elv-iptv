@@ -3,7 +3,7 @@ import {
   normalizeLanguageCode,
   type SubtitleModePref,
 } from '@elv/domain';
-import type { MediaTracks, TrackInfo } from './engine';
+import type { MediaKind, MediaTracks, TrackInfo } from './engine';
 
 /** Explicit track override by track ID (for session or target overrides). */
 export interface TrackSelectionOverride {
@@ -32,6 +32,8 @@ export interface ProfileTrackRules {
 
 /** Combined rule hierarchy for {@link resolveInitialTrackSelection}. */
 export interface TrackSelectionRules {
+  /** Optional media kind; live streams default subtitles off unless explicitly overridden per channel. */
+  readonly mediaKind?: MediaKind;
   readonly sessionOverride?: TrackSelectionOverride;
   readonly targetOverride?: TrackSelectionOverride;
   readonly persistedItemPref?: PersistedTrackSelectionPref | null;
@@ -180,6 +182,8 @@ function resolveSubtitleTrack(
     );
     if (persistedMatch) return persistedMatch.id;
   }
+
+  if (rules.mediaKind === 'live') return null;
 
   const profile = rules.profileRules;
   const mode: SubtitleModePref = profile?.subtitleMode ?? 'smart';

@@ -3,6 +3,10 @@ import type { MediaKind } from './engine';
 
 const MIB = 1024 * 1024;
 const RAM_SCALE_CEILING_BYTES = 8 * 1024 * MIB;
+const HIGH_RAM_PREFER_THRESHOLD_BYTES = 8 * 1024 * MIB;
+const HIGH_RAM_AUTO_MEMORY_BYTES = 160 * MIB;
+const HIGH_RAM_BALANCED_MEMORY_BYTES = 192 * MIB;
+const HIGH_RAM_THROTTLE_MEMORY_FLOOR_BYTES = 32 * MIB;
 const MIN_FORWARD_FLOOR_MS = 15_000;
 const MIN_BACK_FLOOR_MS = 2_000;
 const LOW_RAM_DISK_CAP_BYTES = 32 * MIB;
@@ -36,6 +40,8 @@ export interface VodBufferBudgetInput {
   readonly multiViewTileCount?: number;
   readonly throttleBackoffLevel?: number;
   readonly estimatedBitrateBps?: number;
+  /** Prefer RAM-only VOD caching on >= 8 GiB hosts for non-`large` single-view presets. */
+  readonly preferRamOnHighRam?: boolean;
 }
 
 /** Deterministic read-ahead, back-buffer, RAM, and disk budget for one VOD playback session (`#350`). */
@@ -234,6 +240,32 @@ export function computeVodBufferBudget(input: VodBufferBudgetInput): VodBufferBu
         maxDiskBytes = 0;
       }
     }
+  }
+
+  const effectivePreset: BufferPreset =
+    input.bufferPreset === 'balanced' || input.bufferPreset === 'large'
+      ? input.bufferPreset
+      : 'auto';
+  if (
+    input.preferRamOnHighRam === true &&
+    !isLowRam &&
+    input.deviceRamBytes >= HIGH_RAM_PREFER_THRESHOLD_BYTES &&
+    !isMultiView &&
+    effectivePreset !== 'large'
+  ) {
+    allowDiskCache = false;
+    maxDiskBytes = 0;
+    const boostedMemoryBytes = Math.max(
+      maxMemoryBytes,
+      effectivePreset === 'balanced' ? HIGH_RAM_BALANCED_MEMORY_BYTES : HIGH_RAM_AUTO_MEMORY_BYTES,
+    );
+    maxMemoryBytes =
+      throttleBackoffLevel > 0
+        ? Math.max(
+            HIGH_RAM_THROTTLE_MEMORY_FLOOR_BYTES,
+            Math.floor(boostedMemoryBytes / (1 << throttleBackoffLevel)),
+          )
+        : boostedMemoryBytes;
   }
 
   let bitrateConstrained = false;
