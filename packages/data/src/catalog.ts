@@ -34,6 +34,10 @@ import {
   createCatalogFailoverOpsMethods,
 } from './catalog-failover-ops';
 import {
+  type CatalogLiveFoldersOpsMethods,
+  createCatalogLiveFoldersOpsMethods,
+} from './catalog-live-folders-ops';
+import {
   type CatalogNewEpisodesOpsMethods,
   createCatalogNewEpisodesOpsMethods,
 } from './catalog-new-episodes-ops';
@@ -228,7 +232,8 @@ export interface CatalogService
     Partial<CatalogNewEpisodesOpsMethods>,
     Partial<CatalogRatingsOpsMethods>,
     Partial<CatalogSourceMutationMethods>,
-    Partial<CatalogSyncStateOpsMethods> {
+    Partial<CatalogSyncStateOpsMethods>,
+    Partial<CatalogLiveFoldersOpsMethods> {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
@@ -471,6 +476,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     playtime,
   });
   const ratingsOpsMethods = createCatalogRatingsOpsMethods({ db, clock, playtime, syncUserData });
+  const liveFoldersOpsMethods = createCatalogLiveFoldersOpsMethods({ db, clock, syncUserData });
   const syncStateOpsMethods = createCatalogSyncStateOpsMethods({ db, playtime, syncUserData });
   const seriesWatchedOpsMethods = createCatalogSeriesWatchedOpsMethods({
     db,
@@ -757,6 +763,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...elvOpsMethods,
     ...newEpisodesOpsMethods,
     ...ratingsOpsMethods,
+    ...liveFoldersOpsMethods,
     ...sourceMutationMethods,
     ...syncStateOpsMethods,
     ...seriesWatchedOpsMethods,

@@ -43,6 +43,8 @@ export interface LiveTvSettingsPanelProps {
   readonly onRefreshCatalogNow?: () => Promise<void> | void;
   /** Triggers an immediate TV guide (EPG) refresh across active sources. */
   readonly onRefreshGuideNow?: () => Promise<void> | void;
+  /** Clears recently watched Live TV channels for the active profile (`Wave Q7-B`). */
+  readonly onClearRecentChannels?: () => Promise<void> | void;
   /** Optional controlled TV dropdown modal id owned by `SettingsScreen`. */
   readonly openTvDropdownId?: 'catalog-refresh-dropdown' | 'guide-refresh-dropdown' | null;
   /** Invoked when a TV dropdown modal opens or closes. */
@@ -53,6 +55,8 @@ export interface LiveTvSettingsPanelProps {
   readonly catalogRefreshStatus?: RefreshStatus;
   /** Optional controlled guide refresh status owned by `SettingsScreen` (for TV D-pad trigger). */
   readonly guideRefreshStatus?: RefreshStatus;
+  /** Optional controlled clear-recent status owned by `SettingsScreen` (for TV D-pad trigger). */
+  readonly clearRecentStatus?: 'idle' | 'clearing' | 'cleared';
 }
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
@@ -68,10 +72,12 @@ export function LiveTvSettingsPanel({
   focusedControlId = null,
   onRefreshCatalogNow,
   onRefreshGuideNow,
+  onClearRecentChannels,
   openTvDropdownId = null,
   onOpenTvDropdownChange,
   catalogRefreshStatus: controlledCatalogStatus,
   guideRefreshStatus: controlledGuideStatus,
+  clearRecentStatus: controlledClearRecentStatus,
 }: LiveTvSettingsPanelProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -79,17 +85,22 @@ export function LiveTvSettingsPanel({
   const isTv = viewport.formFactor === 'tv';
 
   const scrollRef = useRef<ScrollViewHandle | null>(null);
-  const cardYRef = useRef<Partial<Record<'guide' | 'tvRemote', number>>>({});
+  const cardYRef = useRef<Partial<Record<'guide' | 'tvRemote' | 'clearRecentRow', number>>>({});
   const mountedRef = useRef(true);
   const catalogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const guideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearRecentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [localCatalogStatus, setLocalCatalogStatus] = useState<RefreshStatus>('idle');
   const [localGuideStatus, setLocalGuideStatus] = useState<RefreshStatus>('idle');
+  const [localClearRecentStatus, setLocalClearRecentStatus] = useState<
+    'idle' | 'clearing' | 'cleared'
+  >('idle');
   const [openPopover, setOpenPopover] = useState<'catalog' | 'guide' | null>(null);
 
   const catalogStatus = controlledCatalogStatus ?? localCatalogStatus;
   const guideStatus = controlledGuideStatus ?? localGuideStatus;
+  const clearRecentStatus = controlledClearRecentStatus ?? localClearRecentStatus;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -97,6 +108,7 @@ export function LiveTvSettingsPanel({
       mountedRef.current = false;
       if (catalogTimerRef.current !== null) clearTimeout(catalogTimerRef.current);
       if (guideTimerRef.current !== null) clearTimeout(guideTimerRef.current);
+      if (clearRecentTimerRef.current !== null) clearTimeout(clearRecentTimerRef.current);
     };
   }, []);
 
@@ -155,11 +167,45 @@ export function LiveTvSettingsPanel({
       });
   }, [controlledGuideStatus, guideStatus, onRefreshGuideNow]);
 
+  const handleClearRecentChannels = useCallback(() => {
+    if (!onClearRecentChannels || clearRecentStatus === 'clearing') return;
+    if (controlledClearRecentStatus !== undefined) {
+      void onClearRecentChannels();
+      return;
+    }
+    setLocalClearRecentStatus('clearing');
+    if (clearRecentTimerRef.current !== null) {
+      clearTimeout(clearRecentTimerRef.current);
+      clearRecentTimerRef.current = null;
+    }
+    void Promise.resolve(onClearRecentChannels())
+      .then(() => {
+        if (!mountedRef.current) return;
+        setLocalClearRecentStatus('cleared');
+        clearRecentTimerRef.current = setTimeout(() => {
+          clearRecentTimerRef.current = null;
+          if (mountedRef.current) setLocalClearRecentStatus('idle');
+        }, REFRESHED_FEEDBACK_MS);
+      })
+      .catch(() => {
+        if (mountedRef.current) setLocalClearRecentStatus('idle');
+      });
+  }, [clearRecentStatus, controlledClearRecentStatus, onClearRecentChannels]);
+
   useEffect(() => {
     if (!isTv || !focusedControlId) return;
     let targetY: number | undefined;
     if (focusedControlId.startsWith('live-mode-')) {
       targetY = 0;
+    } else if (focusedControlId === 'clear-recent-channels') {
+      if (cardYRef.current.clearRecentRow !== undefined) {
+        targetY = Math.max(
+          0,
+          (cardYRef.current.guide ?? 0) + cardYRef.current.clearRecentRow - 120,
+        );
+      } else if (cardYRef.current.guide !== undefined) {
+        targetY = Math.max(0, cardYRef.current.guide - 12);
+      }
     } else if (focusedControlId.startsWith('channel-switch-')) {
       if (cardYRef.current.tvRemote !== undefined) {
         targetY = Math.max(0, cardYRef.current.tvRemote - 12);
@@ -393,6 +439,46 @@ export function LiveTvSettingsPanel({
             />
           }
         />
+
+        {onClearRecentChannels ? (
+          <>
+            <SettingsDivider />
+            <View
+              style={styles.actionRow}
+              onLayout={(e) => {
+                cardYRef.current.clearRecentRow = e.nativeEvent.layout.y;
+              }}
+            >
+              <View style={styles.actionCopy}>
+                <Text style={[theme.typography.body, { color: theme.colors.textPrimary }]}>
+                  {i18n.t('settings.liveTv.clearRecentChannels')}
+                </Text>
+                <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+                  {i18n.t('settings.liveTv.clearRecentChannelsDesc')}
+                </Text>
+              </View>
+              <View style={styles.actionControls}>
+                {clearRecentStatus === 'cleared' ? (
+                  <Text
+                    testID="settings-livetv-clear-recent-channels-feedback"
+                    style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+                  >
+                    {i18n.t('settings.liveTv.clearRecentChannelsCleared')}
+                  </Text>
+                ) : null}
+                <CtaButton
+                  testID="settings-livetv-clear-recent-channels"
+                  variant="secondary"
+                  label={i18n.t('settings.liveTv.clearRecentChannelsAction')}
+                  disabled={clearRecentStatus === 'clearing'}
+                  focused={focusedControlId === 'clear-recent-channels'}
+                  focusable={!isTv}
+                  onPress={handleClearRecentChannels}
+                />
+              </View>
+            </View>
+          </>
+        ) : null}
       </Surface>
 
       {isTv ? (
@@ -426,4 +512,13 @@ const styles = StyleSheet.create({
   headerBlock: { gap: 4 },
   sectionCard: { padding: 18, gap: 14 },
   elevatedCard: { zIndex: 40 },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+    flexWrap: 'wrap',
+  },
+  actionCopy: { flex: 1, minWidth: 200, gap: 3 },
+  actionControls: { flexDirection: 'row', alignItems: 'center', gap: 12 },
 });

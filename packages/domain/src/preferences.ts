@@ -205,6 +205,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   vodEnrichmentEnabled: false,
   minimizeToTray: true,
   autoEnterPip: true,
+  autoReplaceSingleConnection: false,
   ...DEFAULT_WAVE_F7A_PREFERENCES,
   ...DEFAULT_WAVE_F7B_PREFERENCES,
   ...DEFAULT_WAVE_F9_PREFERENCES,

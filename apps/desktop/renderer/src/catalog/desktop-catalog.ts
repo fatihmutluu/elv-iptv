@@ -652,6 +652,36 @@ export function createDesktopCatalogFromBridge(
     },
     applyElvFixMatch: (input) =>
       bridge.applyElvFixMatch ? bridge.applyElvFixMatch(input) : Promise.resolve(null),
+    removeRecentChannel: (itemKey, profileId) =>
+      bridge.removeRecentChannel
+        ? bridge.removeRecentChannel(itemKey, profileId)
+        : Promise.resolve(false),
+    clearRecentChannels: (profileId) =>
+      bridge.clearRecentChannels ? bridge.clearRecentChannels(profileId) : Promise.resolve(0),
+    listLiveFavoriteFolders: (profileId, opts) =>
+      bridge.listLiveFavoriteFolders
+        ? bridge.listLiveFavoriteFolders(profileId, opts)
+        : Promise.resolve([]),
+    createLiveFavoriteFolder: (input) =>
+      bridge.createLiveFavoriteFolder
+        ? bridge.createLiveFavoriteFolder(input)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    renameLiveFavoriteFolder: (id, name, profileId) =>
+      bridge.renameLiveFavoriteFolder
+        ? bridge.renameLiveFavoriteFolder(id, name, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    deleteLiveFavoriteFolder: (id, profileId) =>
+      bridge.deleteLiveFavoriteFolder
+        ? bridge.deleteLiveFavoriteFolder(id, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    assignLiveFavoriteFolder: (input) =>
+      bridge.assignLiveFavoriteFolder
+        ? bridge.assignLiveFavoriteFolder(input)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    listLiveFavoriteFolderAssignments: (profileId) =>
+      bridge.listLiveFavoriteFolderAssignments
+        ? bridge.listLiveFavoriteFolderAssignments(profileId)
+        : Promise.resolve([]),
     flushPendingWrites: () =>
       bridge.flushPendingWrites ? bridge.flushPendingWrites() : Promise.resolve(),
     async close() {

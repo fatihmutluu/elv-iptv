@@ -97,6 +97,12 @@ export interface LiveWatchStageProps {
   readonly logoBackdropMode?: LogoBackdropModePref;
   readonly sourceBadges?: ReadonlyMap<string, SourceBadgeInfo>;
   readonly cleanChannelTitles?: boolean;
+  /** Optional header element rendered strictly inside `LiveZapDrawer` (e.g. `LiveFavoriteFolderStrip`). */
+  readonly drawerHeader?: ReactElement | null;
+  /** Optional quiet inline empty message displayed inside `LiveZapDrawer` when a filtered folder is empty. */
+  readonly emptyDrawerMessage?: string | null;
+  /** True when the profile has at least one favorite channel overall (keeps drawer visible when filtering empty folders). */
+  readonly hasAnyFavorites?: boolean;
   /** Injectable epoch clock in milliseconds for live progress bars (defaults to `() => Date.now()`). */
   readonly now?: () => number;
 }
@@ -269,7 +275,8 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
   // biome-ignore lint/correctness/useExhaustiveDependencies: refresh clock snapshot alongside schedule updates
   const nowMs = useMemo(() => (now ? now() : Date.now()), [now, nowNextVersion, sourceVersion]);
 
-  const hasFavorites = (channelSource?.count() ?? 0) > 0 || activeChannel !== null;
+  const hasFavorites =
+    p.hasAnyFavorites ?? ((channelSource?.count() ?? 0) > 0 || activeChannel !== null);
   if (!hasFavorites) {
     return (
       <View
@@ -353,6 +360,8 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
       {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
       {...(p.onReorderFavorite !== undefined ? { onReorderFavorite: p.onReorderFavorite } : {})}
       {...(p.onOpenContextMenu !== undefined ? { onOpenContextMenu: p.onOpenContextMenu } : {})}
+      {...(p.drawerHeader !== undefined ? { header: p.drawerHeader } : {})}
+      {...(p.emptyDrawerMessage !== undefined ? { emptyMessage: p.emptyDrawerMessage } : {})}
     />
   ) : null;
 

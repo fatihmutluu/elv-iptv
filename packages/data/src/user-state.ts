@@ -4,6 +4,7 @@ import {
   queryContinueWatchingWithNextUp,
   recordContinueWatchingDismissal,
 } from './continue-watching-next-up';
+import { removeLiveFavoriteFolderAssignmentInTx } from './live-favorite-folders-repo';
 import { captureMyListSeriesBaseline, clearMyListSeriesTracking } from './my-list-new-episodes';
 import { findRestrictedItemKeys, loadActiveParentalFilter } from './parental-repo';
 import { resolveSafeStorageLogo, sourceOfKey } from './queries';
@@ -586,6 +587,31 @@ ON CONFLICT(profile_id, item_key) DO UPDATE SET
   added_at = excluded.added_at,
   sort_order = CASE WHEN favorites.sort_order > 0 THEN favorites.sort_order ELSE excluded.sort_order END`;
 
+async function deleteFavoriteInTx(
+  tx: SqlDriver,
+  profileId: string,
+  itemKey: string,
+  kind: UserItemKind,
+  nowMs: number,
+): Promise<void> {
+  await tx.run('DELETE FROM favorites WHERE profile_id = ? AND item_key = ?', [profileId, itemKey]);
+  await clearMyListSeriesTracking(tx, profileId, itemKey);
+  if (kind === 'live') await removeLiveFavoriteFolderAssignmentInTx(tx, profileId, itemKey, nowMs);
+}
+
+const favUpsertParams = (pid: string, i: ToggleFavoriteInput, logo: string | null, ts: number) => [
+  pid,
+  i.sourceId,
+  i.itemKey,
+  i.kind,
+  i.title,
+  logo,
+  optInt(i.year),
+  optFloat(i.rating),
+  ts,
+  pid,
+];
+
 /**
  * Idempotently sets My List favorite state for `(profileId, itemKey)`:
  * upserts when `active` is `true`, deletes when `active` is `false`.
@@ -598,27 +624,13 @@ export async function setFavorite(
 ): Promise<Result<boolean>> {
   const profileId = normalizeProfileId(input.profileId);
   if (!active) {
-    await db.run('DELETE FROM favorites WHERE profile_id = ? AND item_key = ?', [
-      profileId,
-      input.itemKey,
-    ]);
-    await clearMyListSeriesTracking(db, profileId, input.itemKey);
+    const now = Math.round(clock());
+    await db.transaction((tx) => deleteFavoriteInTx(tx, profileId, input.itemKey, input.kind, now));
     return ok(false);
   }
   if (!hasValidMeta(input)) return err(elvError('source-format', 'invalid-favorite'));
   const safeLogo = await resolveSafeStorageLogo(db, input);
-  await db.run(UPSERT_FAVORITE, [
-    profileId,
-    input.sourceId,
-    input.itemKey,
-    input.kind,
-    input.title,
-    safeLogo,
-    optInt(input.year),
-    optFloat(input.rating),
-    Math.round(clock()),
-    profileId,
-  ]);
+  await db.run(UPSERT_FAVORITE, favUpsertParams(profileId, input, safeLogo, Math.round(clock())));
   if (input.kind === 'series') {
     await captureMyListSeriesBaseline(db, profileId, input.itemKey, input.sourceId, clock);
   }
@@ -641,25 +653,10 @@ export async function toggleFavorite(
       [profileId, input.itemKey],
     );
     if (existing.length > 0) {
-      await tx.run('DELETE FROM favorites WHERE profile_id = ? AND item_key = ?', [
-        profileId,
-        input.itemKey,
-      ]);
-      await clearMyListSeriesTracking(tx, profileId, input.itemKey);
+      await deleteFavoriteInTx(tx, profileId, input.itemKey, input.kind, addedAt);
       return false;
     }
-    await tx.run(UPSERT_FAVORITE, [
-      profileId,
-      input.sourceId,
-      input.itemKey,
-      input.kind,
-      input.title,
-      safeLogo,
-      optInt(input.year),
-      optFloat(input.rating),
-      addedAt,
-      profileId,
-    ]);
+    await tx.run(UPSERT_FAVORITE, favUpsertParams(profileId, input, safeLogo, addedAt));
     if (input.kind === 'series') {
       await captureMyListSeriesBaseline(tx, profileId, input.itemKey, input.sourceId, clock);
     }

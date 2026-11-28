@@ -13,6 +13,7 @@ import {
   isCatalogWorkerMessage,
 } from '../shared/catalog-ipc.ts';
 import { createCatalogBridgeWaveE1Ops } from './catalog-bridge-wave-e1.ts';
+import { createCatalogBridgeWaveQ7Ops } from './catalog-bridge-wave-q7.ts';
 
 /** Subset of the preload's `MessagePort` transferred from main; never crosses `contextBridge`. */
 export interface PreloadClientPortLike {
@@ -760,27 +761,19 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
     listRatings: (opts) =>
       callValue({ method: 'listRatings', ...(opts === undefined ? {} : { opts }) }),
     listRatingMap: (profileId) =>
-      callValue({
-        method: 'listRatingMap',
-        ...(profileId === undefined ? {} : { profileId }),
-      }),
+      callValue({ method: 'listRatingMap', ...(profileId === undefined ? {} : { profileId }) }),
     ...createCatalogBridgeWaveE1Ops(callValue),
+    ...createCatalogBridgeWaveQ7Ops(callResult, callValue, notifyOnOk, emitChanged),
     flushPendingWrites: () => callValue({ method: 'flushPendingWrites' }),
-    onChanged(listener: () => void): () => void {
+    onChanged: (listener) => {
       changedListeners.add(listener);
-      return () => {
-        changedListeners.delete(listener);
-      };
+      return () => void changedListeners.delete(listener);
     },
-    onDisconnected(listener: (message: CatalogDisconnectedMessage) => void): () => void {
+    onDisconnected: (listener) => {
       disconnectedListeners.add(listener);
-      return () => {
-        disconnectedListeners.delete(listener);
-      };
+      return () => void disconnectedListeners.delete(listener);
     },
-    async close(): Promise<void> {
-      dropActivePort(elvError('storage', 'closed'));
-    },
+    close: async () => dropActivePort(elvError('storage', 'closed')),
   };
 
   return Object.freeze(bridge);

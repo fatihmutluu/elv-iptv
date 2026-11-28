@@ -21,6 +21,7 @@ export type {
 } from './catalog-elv-ops';
 export type { CatalogEpgOpsMethods } from './catalog-epg-ops';
 export type { CatalogFailoverOpsMethods } from './catalog-failover-ops';
+export type { CatalogLiveFoldersOpsMethods } from './catalog-live-folders-ops';
 export type { CatalogNewEpisodesOpsMethods } from './catalog-new-episodes-ops';
 export * from './category-selection';
 export * from './channel-overrides-repo';
@@ -59,6 +60,7 @@ export * from './guide-sources-repo';
 export { importGuide } from './import-guide';
 export * from './import-types';
 export { importCatalog, loadSeriesEpisodes } from './import-xtream';
+export * from './live-favorite-folders-repo';
 export * from './live-variants';
 export * from './manifest';
 export * from './migrate';
@@ -86,12 +88,14 @@ export {
   setItemRating,
 } from './ratings-repo';
 export {
+  clearRecentChannels,
   DEFAULT_RECENT_CHANNELS_LIMIT,
   isSafeRecentChannelKey,
   listRecentChannels,
   MAX_RECENT_CHANNELS_PER_PROFILE,
   type RecentChannelRow,
   recordRecentChannel,
+  removeRecentChannel,
 } from './recent-channels-repo';
 export * from './reminders-repo';
 export {

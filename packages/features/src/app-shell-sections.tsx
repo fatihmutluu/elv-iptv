@@ -44,6 +44,7 @@ import type { ReminderHostPort } from './ports/reminder-host';
 import type { PickedPlaylistFile, SourceImportHost } from './ports/source-import-host';
 import type { TrailerExternalPort } from './ports/trailer-port';
 import type { TvHomeChannelsPort } from './ports/tv-home-channels';
+import type { DesktopUpdaterPort } from './ports/updater-port';
 import type { ThermalDevicePort, VideoHost } from './ports/video-host';
 import type { DiagnosticsPort, ExternalPlayerPort } from './ports/wave-f7b-ports';
 import type {
@@ -116,6 +117,8 @@ export interface AppShellProps {
   readonly downloadManager?: DownloadManagerPort;
   /** Optional platform external YouTube trailer handoff port (`#512`). */
   readonly trailerExternal?: TrailerExternalPort;
+  /** Optional store-gated desktop auto-updater port (`Wave Q7`). */
+  readonly updater?: DesktopUpdaterPort;
 }
 
 /** Props of {@link AppShellStage}. */
@@ -168,6 +171,8 @@ export interface AppShellStageProps {
   readonly onOpenGuideManagement: (sourceId: string) => void;
   readonly onRefreshCatalogNow?: () => Promise<void> | void;
   readonly onRefreshGuideNow?: () => Promise<void> | void;
+  readonly onClearRecentChannels?: () => Promise<void> | void;
+  readonly updater?: DesktopUpdaterPort;
   readonly onTelemetryOptInChange?: (enabled: boolean) => void;
   readonly onRegisterStopPreview?: (stop: (() => Promise<void>) | null) => void;
   readonly suppressEmbeddedPreview?: boolean;
@@ -247,6 +252,10 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
           ? { onRefreshCatalogNow: p.onRefreshCatalogNow }
           : {})}
         {...(p.onRefreshGuideNow !== undefined ? { onRefreshGuideNow: p.onRefreshGuideNow } : {})}
+        {...(p.onClearRecentChannels !== undefined
+          ? { onClearRecentChannels: p.onClearRecentChannels }
+          : {})}
+        {...(p.updater !== undefined ? { updater: p.updater } : {})}
         {...(p.onTelemetryOptInChange !== undefined
           ? { onTelemetryOptInChange: p.onTelemetryOptInChange }
           : {})}
@@ -498,15 +507,36 @@ export function useShellIncomingLocalPlaylist(params: {
   );
   const onIncomingRef = useRef(onIncomingFile);
   onIncomingRef.current = onIncomingFile;
+  const incomingRef = useRef<PickedPlaylistFile | null>(null);
+  incomingRef.current = incomingLocalPlaylist;
+  const ackRef = useRef(sourceImportHost?.ackPlaylistFile);
+  ackRef.current = sourceImportHost?.ackPlaylistFile;
+
+  const ackDelivery = useCallback((file: PickedPlaylistFile | null | undefined) => {
+    const id = file?.deliveryId;
+    if (typeof id === 'string' && id.length > 0) {
+      void Promise.resolve(ackRef.current?.(id)).catch(() => undefined);
+    }
+  }, []);
 
   const consumeIncomingLocalPlaylist = useCallback(() => {
+    const current = incomingRef.current;
+    incomingRef.current = null;
     setIncomingLocalPlaylist(null);
-  }, []);
+    ackDelivery(current);
+  }, [ackDelivery]);
 
-  const handleFile = useCallback((file: PickedPlaylistFile) => {
-    onIncomingRef.current();
-    setIncomingLocalPlaylist(file);
-  }, []);
+  const handleFile = useCallback(
+    (file: PickedPlaylistFile) => {
+      if (incomingRef.current && incomingRef.current.deliveryId !== file.deliveryId) {
+        ackDelivery(incomingRef.current);
+      }
+      onIncomingRef.current();
+      incomingRef.current = file;
+      setIncomingLocalPlaylist(file);
+    },
+    [ackDelivery],
+  );
 
   useEffect(() => {
     let active = true;
@@ -518,6 +548,9 @@ export function useShellIncomingLocalPlaylist(params: {
       void Promise.resolve(consumePending())
         .then((pending) => {
           if (!active || pending.length === 0) return;
+          for (let i = 0; i < pending.length - 1; i += 1) {
+            ackDelivery(pending[i]);
+          }
           const latest = pending[pending.length - 1];
           if (latest !== undefined) handleFile(latest);
         })
@@ -527,7 +560,7 @@ export function useShellIncomingLocalPlaylist(params: {
       active = false;
       unsubscribe?.();
     };
-  }, [handleFile, sourceImportHost]);
+  }, [ackDelivery, handleFile, sourceImportHost]);
 
   return { incomingLocalPlaylist, consumeIncomingLocalPlaylist };
 }

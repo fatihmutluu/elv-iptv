@@ -104,13 +104,15 @@ async function queryEpisodesForWatched(
   conditions.push('e.series_key = ?');
   params.push(seriesKey);
   if (season !== undefined) {
-    conditions.push('COALESCE(e.season, 0) = ?');
-    params.push(season);
+    if (season === 0) {
+      conditions.push('(e.season = 0 OR e.season IS NULL)');
+    } else {
+      conditions.push('e.season = ?');
+      params.push(season);
+    }
   }
   const orderBy =
-    season !== undefined
-      ? 'COALESCE(e.episode, 0) ASC, e.id ASC'
-      : 'COALESCE(e.season, 0) ASC, COALESCE(e.episode, 0) ASC, e.id ASC';
+    season !== undefined ? 'e.episode ASC, e.id ASC' : 'e.season ASC, e.episode ASC, e.id ASC';
   return tx.all<RawSeriesEpisodeRow>(
     `SELECT e.source_id, e.key, e.series_key, COALESCE(e.season, 0) AS season, e.episode,
             e.title, e.duration_sec, s.name AS series_name, s.cover AS series_cover
@@ -223,21 +225,28 @@ export async function setSeasonWatchedInDb(
   }
 
   const updatedCount = await db.transaction(async (tx) => {
+    const seasonExpr = season === 0 ? '(season = 0 OR season IS NULL)' : 'season = ?';
     const subWhere =
       hintedSource !== undefined
-        ? 'source_id = ? AND series_key = ? AND COALESCE(season, 0) = ?'
-        : 'series_key = ? AND COALESCE(season, 0) = ?';
+        ? `source_id = ? AND series_key = ? AND ${seasonExpr}`
+        : `series_key = ? AND ${seasonExpr}`;
     const subParams: SqlValue[] =
-      hintedSource !== undefined ? [hintedSource, trimmedKey, season] : [trimmedKey, season];
+      hintedSource !== undefined
+        ? season === 0
+          ? [hintedSource, trimmedKey]
+          : [hintedSource, trimmedKey, season]
+        : season === 0
+          ? [trimmedKey]
+          : [trimmedKey, season];
     const epRes = await tx.run(
       `UPDATE watch_progress
           SET watched = 0, position_ms = 0, updated_at = ?
         WHERE profile_id = ?
           AND (
-            (series_key = ? AND COALESCE(season, 0) = ?)
+            (series_key = ? AND ${seasonExpr})
             OR item_key IN (SELECT key FROM episodes WHERE ${subWhere})
           )`,
-      [updatedAt, normalizedProfile, trimmedKey, season, ...subParams],
+      [updatedAt, normalizedProfile, trimmedKey, ...(season === 0 ? [] : [season]), ...subParams],
     );
     await tx.run(
       `UPDATE watch_progress

@@ -86,6 +86,10 @@ export function wrapCatalogForSyncDirty(
   const setCustomGroupItems = wrap(catalog.setCustomGroupItems);
   const addChannelToCustomGroup = wrap(catalog.addChannelToCustomGroup);
   const removeChannelFromCustomGroup = wrap(catalog.removeChannelFromCustomGroup);
+  const createLiveFavoriteFolder = wrap(catalog.createLiveFavoriteFolder);
+  const renameLiveFavoriteFolder = wrap(catalog.renameLiveFavoriteFolder);
+  const deleteLiveFavoriteFolder = wrap(catalog.deleteLiveFavoriteFolder);
+  const assignLiveFavoriteFolder = wrap(catalog.assignLiveFavoriteFolder);
 
   return {
     ...catalog,
@@ -127,6 +131,10 @@ export function wrapCatalogForSyncDirty(
     ...(setCustomGroupItems ? { setCustomGroupItems } : {}),
     ...(addChannelToCustomGroup ? { addChannelToCustomGroup } : {}),
     ...(removeChannelFromCustomGroup ? { removeChannelFromCustomGroup } : {}),
+    ...(createLiveFavoriteFolder ? { createLiveFavoriteFolder } : {}),
+    ...(renameLiveFavoriteFolder ? { renameLiveFavoriteFolder } : {}),
+    ...(deleteLiveFavoriteFolder ? { deleteLiveFavoriteFolder } : {}),
+    ...(assignLiveFavoriteFolder ? { assignLiveFavoriteFolder } : {}),
   };
 }
 

@@ -68,6 +68,10 @@ export function createObservedCatalog(
   const toggleFavorite = wrapUserStateMutation(c.toggleFavorite);
   const setFavorite = wrapUserStateMutation(c.setFavorite);
   const setRating = wrapUserStateMutation(c.setRating);
+  const createLiveFavoriteFolder = wrapUserStateMutation(c.createLiveFavoriteFolder);
+  const renameLiveFavoriteFolder = wrapUserStateMutation(c.renameLiveFavoriteFolder);
+  const deleteLiveFavoriteFolder = wrapUserStateMutation(c.deleteLiveFavoriteFolder);
+  const assignLiveFavoriteFolder = wrapUserStateMutation(c.assignLiveFavoriteFolder);
   return {
     addSource: async (input) => {
       const res = await c.addSource(input);
@@ -493,6 +497,34 @@ export function createObservedCatalog(
     ...(c.getRating ? { getRating: c.getRating.bind(c) } : {}),
     ...(c.listRatings ? { listRatings: c.listRatings.bind(c) } : {}),
     ...(c.listRatingMap ? { listRatingMap: c.listRatingMap.bind(c) } : {}),
+    ...(c.removeRecentChannel
+      ? {
+          removeRecentChannel: async (itemKey, profileId) => {
+            const removed = await c.removeRecentChannel?.(itemKey, profileId);
+            if (removed) onUserStateMutated?.();
+            return Boolean(removed);
+          },
+        }
+      : {}),
+    ...(c.clearRecentChannels
+      ? {
+          clearRecentChannels: async (profileId) => {
+            const count = (await c.clearRecentChannels?.(profileId)) ?? 0;
+            if (count > 0) onUserStateMutated?.();
+            return count;
+          },
+        }
+      : {}),
+    ...(c.listLiveFavoriteFolders
+      ? { listLiveFavoriteFolders: c.listLiveFavoriteFolders.bind(c) }
+      : {}),
+    ...(createLiveFavoriteFolder ? { createLiveFavoriteFolder } : {}),
+    ...(renameLiveFavoriteFolder ? { renameLiveFavoriteFolder } : {}),
+    ...(deleteLiveFavoriteFolder ? { deleteLiveFavoriteFolder } : {}),
+    ...(assignLiveFavoriteFolder ? { assignLiveFavoriteFolder } : {}),
+    ...(c.listLiveFavoriteFolderAssignments
+      ? { listLiveFavoriteFolderAssignments: c.listLiveFavoriteFolderAssignments.bind(c) }
+      : {}),
     close: () => c.close(),
   };
 }

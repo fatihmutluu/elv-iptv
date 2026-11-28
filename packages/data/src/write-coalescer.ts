@@ -592,6 +592,52 @@ export function createCoalescedCatalog(
           },
         }
       : {}),
+    ...(c.removeRecentChannel ? { removeRecentChannel: c.removeRecentChannel.bind(c) } : {}),
+    ...(c.clearRecentChannels ? { clearRecentChannels: c.clearRecentChannels.bind(c) } : {}),
+    ...(c.listLiveFavoriteFolders
+      ? {
+          listLiveFavoriteFolders: async (profileId, listOpts) => {
+            await coalescer.flushPrefix(`fav:${normalizeProfile(profileId)}:`);
+            return c.listLiveFavoriteFolders ? c.listLiveFavoriteFolders(profileId, listOpts) : [];
+          },
+        }
+      : {}),
+    ...(c.createLiveFavoriteFolder
+      ? { createLiveFavoriteFolder: c.createLiveFavoriteFolder.bind(c) }
+      : {}),
+    ...(c.renameLiveFavoriteFolder
+      ? { renameLiveFavoriteFolder: c.renameLiveFavoriteFolder.bind(c) }
+      : {}),
+    ...(c.deleteLiveFavoriteFolder
+      ? {
+          deleteLiveFavoriteFolder: async (id, profileId) => {
+            await coalescer.flushPrefix(`fav:${normalizeProfile(profileId)}:`);
+            return c.deleteLiveFavoriteFolder
+              ? c.deleteLiveFavoriteFolder(id, profileId)
+              : { ok: true, value: undefined };
+          },
+        }
+      : {}),
+    ...(c.assignLiveFavoriteFolder
+      ? {
+          assignLiveFavoriteFolder: async (input) => {
+            await coalescer.flushPrefix(`fav:${normalizeProfile(input.profileId)}:`);
+            return c.assignLiveFavoriteFolder
+              ? c.assignLiveFavoriteFolder(input)
+              : { ok: true, value: undefined };
+          },
+        }
+      : {}),
+    ...(c.listLiveFavoriteFolderAssignments
+      ? {
+          listLiveFavoriteFolderAssignments: async (profileId) => {
+            await coalescer.flushPrefix(`fav:${normalizeProfile(profileId)}:`);
+            return c.listLiveFavoriteFolderAssignments
+              ? c.listLiveFavoriteFolderAssignments(profileId)
+              : [];
+          },
+        }
+      : {}),
     ...(listMyListNewEpisodesFn
       ? {
           listMyListNewEpisodes: async (limit, profileId, listOpts) => {

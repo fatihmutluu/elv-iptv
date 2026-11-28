@@ -5,6 +5,7 @@ import type {
   FavoriteRow,
   ItemDetailRow,
   ItemRow,
+  LiveFavoriteFolderRecord,
   MyListNewEpisodeRow,
   NowNextEntry,
   ProgrammeRow,
@@ -53,6 +54,9 @@ export interface CachedLiveState {
   readonly favoriteChannels: readonly ItemRow[];
   readonly hasLoadedCategories: boolean;
   readonly hasLoadedFavorites: boolean;
+  readonly favoriteFolders?: readonly LiveFavoriteFolderRecord[];
+  readonly favoriteFolderAssignments?: ReadonlyMap<string, string>;
+  readonly hasLoadedFavoriteFolders?: boolean;
 }
 
 /** Cached EPG channel-window programme slice with timestamp for stale-while-revalidate checks. */
@@ -165,6 +169,10 @@ export interface CatalogUiCache {
   getLive(): CachedLiveState | null;
   setLiveCategories(categories: readonly DisplayCategory[]): void;
   setLiveFavorites(favoriteKeys: ReadonlySet<string>, favoriteChannels: readonly ItemRow[]): void;
+  setLiveFavoriteFolders?(
+    folders: readonly LiveFavoriteFolderRecord[],
+    assignments: ReadonlyMap<string, string>,
+  ): void;
   getLiveFirstChannels(categoryId: string): readonly ItemRow[] | undefined;
   setLiveFirstChannels(categoryId: string, rows: readonly ItemRow[]): void;
   readonly nowNext: BoundedTtlMap<NowNextEntry>;

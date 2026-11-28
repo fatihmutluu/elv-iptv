@@ -281,6 +281,20 @@ export function PlaybackSettingsPanel({
           isTv={isTv}
           onToggle={() => applyPatch({ autoPlayNextEpisode: !activePrefs.autoPlayNextEpisode })}
         />
+        <SettingsDivider />
+        <SettingsToggleRow
+          testID="settings-playback-toggle-auto-replace-single-connection"
+          title={i18n.t('settings.playback.autoReplaceSingleConnection')}
+          description={i18n.t('settings.playback.autoReplaceSingleConnectionDesc')}
+          checked={activePrefs.autoReplaceSingleConnection}
+          focused={focusedControlId === 'toggle-auto-replace-single-connection'}
+          isTv={isTv}
+          onToggle={() =>
+            applyPatch({
+              autoReplaceSingleConnection: !activePrefs.autoReplaceSingleConnection,
+            })
+          }
+        />
       </Surface>
 
       {isDesktop ? (

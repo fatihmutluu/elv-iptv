@@ -25,6 +25,8 @@ export interface UseConnectionLimitGuardOptions {
   readonly onAdoptTarget?: (target: PlayTarget) => void;
   readonly onReplaceTarget: (target: PlayTarget) => void;
   readonly onStopOtherStream?: (streamId: string) => void;
+  /** Opt-in: automatically stop the active local stream on `maxConnections === 1` accounts instead of prompting (`Wave Q7-B`). */
+  readonly autoReplaceSingleConnection?: boolean;
 }
 
 /** Pre-flight connection tracker state and play/zap/exit handlers for `AppShell` (`#87`). */
@@ -79,6 +81,7 @@ export function useConnectionLimitGuard({
   onAdoptTarget,
   onReplaceTarget,
   onStopOtherStream,
+  autoReplaceSingleConnection = false,
 }: UseConnectionLimitGuardOptions): ConnectionLimitGuard {
   const defaultTracker = useMemo(() => createConnectionTracker(), []);
   const tracker = connectionTracker ?? defaultTracker;
@@ -143,13 +146,27 @@ export function useConnectionLimitGuard({
           : {}),
       });
       if (check.exceeds) {
+        if (
+          autoReplaceSingleConnection === true &&
+          info.maxConnections === 1 &&
+          check.stoppableStreamId !== undefined &&
+          (check.providerActiveCons === undefined ||
+            check.providerActiveCons <= check.ownActiveCount)
+        ) {
+          tracker.release(check.stoppableStreamId);
+          onStopOtherStream?.(check.stoppableStreamId);
+          pendingRef.current = null;
+          setPending(null);
+          commitPlay(info.enriched, info.accountKey, 'open');
+          return;
+        }
         setPending({ target: info.enriched, accountKey: info.accountKey, check });
         return;
       }
       setPending(null);
       commitPlay(info.enriched, info.accountKey, 'open');
     },
-    [commitPlay, enrichTarget, sourcesRef, tracker],
+    [autoReplaceSingleConnection, commitPlay, enrichTarget, onStopOtherStream, sourcesRef, tracker],
   );
 
   const adoptPlay = useCallback(

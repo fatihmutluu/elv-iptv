@@ -431,18 +431,25 @@ export async function querySeasons(
 ): Promise<SeasonRow[]> {
   const filter = await loadActiveParentalFilter(db, opts?.profileId, opts?.parentalUnlocked);
   if (filter === null) {
-    const rows = await db.all<{ season: number; n: number }>(
-      `SELECT COALESCE(season, 0) AS season, COUNT(*) AS n FROM episodes
-        WHERE source_id = ? AND series_key = ? GROUP BY COALESCE(season, 0) ORDER BY season`,
+    const rows = await db.all<{ season: number | null; n: number }>(
+      `SELECT season, COUNT(*) AS n FROM episodes
+        WHERE source_id = ? AND series_key = ? GROUP BY season ORDER BY season`,
       [series.sourceId, series.key],
     );
-    return rows.map((r) => ({ season: r.season, episodeCount: r.n }));
+    const merged = new Map<number, number>();
+    for (const r of rows) {
+      const s = r.season ?? 0;
+      merged.set(s, (merged.get(s) ?? 0) + r.n);
+    }
+    return [...merged.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([season, episodeCount]) => ({ season, episodeCount }));
   }
   if (await isItemRestricted(db, filter, series.key)) {
     return [];
   }
-  const rows = await db.all<{ season: number; key: string; title: string | null }>(
-    `SELECT COALESCE(season, 0) AS season, key, title FROM episodes
+  const rows = await db.all<{ season: number | null; key: string; title: string | null }>(
+    `SELECT season, key, title FROM episodes
       WHERE source_id = ? AND series_key = ?
       ORDER BY season`,
     [series.sourceId, series.key],
@@ -451,7 +458,8 @@ export async function querySeasons(
   for (const r of rows) {
     if (filter.lockedItemKeys.has(r.key)) continue;
     if (filter.blockAdultKeywords && r.title !== null && isAdultKeywordMatch(r.title)) continue;
-    counts.set(r.season, (counts.get(r.season) ?? 0) + 1);
+    const s = r.season ?? 0;
+    counts.set(s, (counts.get(s) ?? 0) + 1);
   }
   return [...counts.entries()]
     .sort((a, b) => a[0] - b[0])
@@ -469,6 +477,9 @@ export async function queryEpisodes(
   if (filter !== null && (await isItemRestricted(db, filter, series.key))) {
     return [];
   }
+  const seasonPredicate = season === 0 ? '(season = 0 OR season IS NULL)' : 'season = ?';
+  const params: SqlValue[] =
+    season === 0 ? [series.sourceId, series.key] : [series.sourceId, series.key, season];
   const rows = await db.all<{
     id: number;
     key: string;
@@ -478,9 +489,9 @@ export async function queryEpisodes(
     duration_sec: number | null;
   }>(
     `SELECT id, key, COALESCE(season, 0) AS season, episode, title, duration_sec FROM episodes
-      WHERE source_id = ? AND series_key = ? AND COALESCE(season, 0) = ?
+      WHERE source_id = ? AND series_key = ? AND ${seasonPredicate}
       ORDER BY episode, id`,
-    [series.sourceId, series.key, season],
+    params,
   );
   const filtered =
     filter === null

@@ -553,4 +553,21 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'rating', alterDefinition: 'REAL' },
     { name: 'updated_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
+  live_favorite_folders: [
+    { name: 'id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
+    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'sort_order', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'created_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'updated_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  live_favorite_folder_items: [
+    { name: 'folder_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'position', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'added_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
 };

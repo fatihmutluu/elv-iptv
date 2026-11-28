@@ -15,7 +15,6 @@ import {
   Menu,
   MessageChannelMain,
   type MessagePortMain,
-  type NativeImage,
   nativeImage,
   net,
   powerSaveBlocker,
@@ -52,7 +51,6 @@ import { getManagedDownloadsDir } from './downloads/managed-path.ts';
 import {
   createVideoSampler,
   GATE_PLAYING_LINE,
-  mergeGateLine,
   onFirstPlaying,
   parseGateFlag,
   sampleRect,
@@ -65,6 +63,12 @@ import {
   loadMacOsMediaAddon,
   queryMacScreensHaveSeparateSpaces,
 } from './macos-media.ts';
+import {
+  cloneDialogFilters,
+  getTaskbarIcons,
+  printGateLine,
+  showOpenDialogFor,
+} from './main-helpers.ts';
 import { createMprisBridge } from './mpris/mpris-bridge.ts';
 import { createPendingPairDeepLinkQueue, extractPairDeepLinkFromArgv } from './pair-deep-link.ts';
 import { createDesktopDisplayRefreshController } from './player/display-refresh.ts';
@@ -107,11 +111,7 @@ import {
 } from './sync/main-lifecycle.ts';
 import { registerSyncIpc } from './sync/sync-ipc-handlers.ts';
 import { createDesktopSyncService, type DesktopSyncService } from './sync/sync-service.ts';
-import {
-  createTaskbarController,
-  createTaskbarIconPngs,
-  type TaskbarIcons,
-} from './taskbar-controls.ts';
+import { createTaskbarController } from './taskbar-controls.ts';
 import { createTrailerWindowController } from './trailer-window.ts';
 import {
   createTrayController,
@@ -119,6 +119,7 @@ import {
   restoreWindowFromTray,
   type TrayController,
 } from './tray.ts';
+import { startDesktopUpdater } from './updater/main-updater.ts';
 import {
   createWindowAspectRatioLockController,
   createWindowBoundsController,
@@ -129,6 +130,7 @@ import {
 } from './window-bounds.ts';
 import { registerWindowIpc } from './window-ipc.ts';
 import { attachRendererCrashRecovery, buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
+import { attachWindowZoomAndReloadGuard } from './window-zoom.ts';
 
 declare const __ELV_DEV_SEED__: boolean;
 declare const __ELV_SYNC_SERVER_URL__: string;
@@ -229,20 +231,6 @@ const aspectRatioLockControllers = new Map<BrowserWindow, WindowAspectRatioLockC
 let aspectRatioLockEnabled = false;
 const powerBlocker = createPowerBlocker(powerSaveBlocker);
 const displayRefreshController = createDesktopDisplayRefreshController();
-let cachedTaskbarIcons: TaskbarIcons<NativeImage> | undefined;
-
-function getTaskbarIcons(): TaskbarIcons<NativeImage> {
-  if (!cachedTaskbarIcons) {
-    const pngs = createTaskbarIconPngs();
-    cachedTaskbarIcons = {
-      previous: nativeImage.createFromBuffer(pngs.previous),
-      play: nativeImage.createFromBuffer(pngs.play),
-      pause: nativeImage.createFromBuffer(pngs.pause),
-      next: nativeImage.createFromBuffer(pngs.next),
-    };
-  }
-  return cachedTaskbarIcons;
-}
 const logger = createDesktopLogger({
   logPath: join(app.getPath('userData'), 'logs', 'elv-desktop.log'),
   mirrorStderr: true,
@@ -261,29 +249,6 @@ const teardownDeps: QuitTeardownDeps = {
   },
 };
 const quitTeardown = createQuitTeardown(teardownDeps);
-
-/** Prints the gate line with main's measurements and quits: a gate run is one line long. */
-async function printGateLine(line: string, engine: MpvEngine | undefined): Promise<void> {
-  const sampler = engine ? samplers.get(engine) : undefined;
-  if (!engine || !sampler) {
-    process.stderr.write('gate: no engine or sampler for the sender of the report\n');
-    app.quit();
-    return;
-  }
-  const sample = await sampler.result();
-  const merged = mergeGateLine(line, {
-    mpvSpawns: engine.spawns,
-    loadMode: engine.loadMode,
-    presenter: engine.presenterKind,
-    videoVisible: sample.videoVisible,
-    distinct: sample.distinct,
-    coalesceMaxMs: Math.round(engine.maxHoldMs),
-  });
-  if (merged === null)
-    process.stderr.write('gate: the report line was refused (malformed or carries an address)\n');
-  else process.stdout.write(`${merged}\n`);
-  app.quit();
-}
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -354,7 +319,14 @@ function createWindow(): void {
     initialEnabled: aspectRatioLockEnabled,
   });
   aspectRatioLockControllers.set(window, aspectLockController);
+  const disposeZoomGuard = attachWindowZoomAndReloadGuard(window, {
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    getZoomLevel: () => shellPrefs?.getZoomLevel() ?? 0,
+    onSetZoomLevel: (next) => shellPrefs?.setZoomLevel(next) ?? next,
+  });
   window.on('closed', () => {
+    disposeZoomGuard();
     if (mainWindow === window) mainWindow = undefined;
     if (boundsController) {
       boundsController.dispose();
@@ -378,24 +350,6 @@ function createWindow(): void {
     onWarmUp: (wc) => warmUpPlayerOwner?.(wc as WebContentsLike),
   });
   void window.loadURL(targetUrl);
-}
-
-const cloneFilters = (
-  filters: readonly { readonly name: string; readonly extensions: readonly string[] }[],
-) => filters.map((f) => ({ name: f.name, extensions: [...f.extensions] }));
-
-function showOpenDialogFor(
-  win: BrowserWindow | undefined,
-  options: {
-    readonly properties: readonly string[];
-    readonly filters: readonly { readonly name: string; readonly extensions: readonly string[] }[];
-  },
-) {
-  const opts = {
-    properties: [...options.properties] as Electron.OpenDialogOptions['properties'],
-    filters: cloneFilters(options.filters),
-  };
-  return win && !win.isDestroyed() ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts);
 }
 
 /** Kills mpv launchers a crashed run left behind, then serves the player IPC. */
@@ -461,7 +415,9 @@ async function startPlayer(): Promise<void> {
           })
         : undefined;
     },
-    gateReport: app.isPackaged ? undefined : (line, engine) => void printGateLine(line, engine),
+    gateReport: app.isPackaged
+      ? undefined
+      : (line, engine) => void printGateLine(line, engine, samplers),
     createEngine: async (owner, onUi, engineId, getMultiViewTileCount) => {
       const window = BrowserWindow.fromWebContents(owner as WebContents);
       if (!window) throw new Error('the player needs an app window');
@@ -633,6 +589,9 @@ if (hasLock) {
       popoutStatePath: join(app.getPath('userData'), POPOUT_STATE_FILENAME),
       screen,
       devOrigin: devServerOrigin,
+      isPackaged: app.isPackaged,
+      getZoomLevel: () => shellPrefs?.getZoomLevel() ?? 0,
+      onSetZoomLevel: (level) => shellPrefs?.setZoomLevel(level) ?? level,
       presenter: activePresenter,
       getMainWindow: () => mainWindow,
       createWindow: (options) => new BrowserWindow(options),
@@ -652,6 +611,8 @@ if (hasLock) {
         if (labels) trayController?.setLabels(labels);
         return shellPrefs?.setMinimizeToTray(enabled) ?? false;
       },
+      getZoomLevel: () => shellPrefs?.getZoomLevel() ?? 0,
+      onSetZoomLevel: (level) => shellPrefs?.setZoomLevel(level) ?? level,
       onOpenPopout: (payload) =>
         gateQuery === null ? (popoutController?.open(payload) ?? false) : false,
       onClosePopout: () => popoutController?.close(),
@@ -685,7 +646,7 @@ if (hasLock) {
       showSaveDialog: (win, options) => {
         const opts = {
           defaultPath: options.defaultPath,
-          filters: cloneFilters(options.filters),
+          filters: cloneDialogFilters(options.filters),
         };
         return win && !win.isDestroyed()
           ? dialog.showSaveDialog(win, opts)
@@ -744,6 +705,29 @@ if (hasLock) {
       devOrigin: devServerOrigin,
       getBroadcastTargets: allWebContents,
       log: logger.log,
+    });
+    teardownDeps.updaterIpc = startDesktopUpdater({
+      ipcMain,
+      currentVersion: app.getVersion(),
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      devOrigin: devServerOrigin,
+      getBroadcastTargets: allWebContents,
+      createWindow: (options) => new BrowserWindow(options),
+      getParent: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined),
+      log: logger.log,
+      beforeShutdown: () =>
+        quitTeardown.flushBeforeQuit(
+          [() => activeSyncService?.flushBeforeBackground(2_500)],
+          2_500,
+        ),
+      shutdownCatalog: async () => {
+        if (catalogCoordinator?.isRunning) await catalogCoordinator.shutdown();
+      },
+      quitAndInstall: () => {
+        isQuitting = true;
+        app.quit();
+      },
     });
     if (gateQuery === null) void desktopDownloadManager.hydrate();
     await startPlayer();

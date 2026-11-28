@@ -6,6 +6,8 @@ import {
   DEFAULT_PROFILE_ID,
   type FavoriteRow,
   type ItemRow,
+  type LiveFavoriteFolderAssignment,
+  type LiveFavoriteFolderRecord,
   type ProfileRecord,
   pinSecretKey,
   type RatingRow,
@@ -21,6 +23,7 @@ import {
   type SyncCustomGroup,
   type SyncEpisodeBitfield,
   type SyncKeyedFlag,
+  type SyncLiveFavoriteFolder,
   type SyncProfileRecord,
   type SyncRatingRecord,
   type SyncWatchProgress,
@@ -184,6 +187,7 @@ export function createDesktopCatalogSnapshotBridge(
         const watchedEpisodesBitfields: SyncEpisodeBitfield[] = [];
         const continueWatchingDismissals: SyncContinueWatchingDismissal[] = [];
         const ratings: SyncRatingRecord[] = [];
+        const liveFavoriteFolders: SyncLiveFavoriteFolder[] = [];
         const seenGroupIds = new Set<string>();
 
         for (const pid of profileIds) {
@@ -197,6 +201,8 @@ export function createDesktopCatalogSnapshotBridge(
             collectionRows,
             ratingRows,
             dismissalRows,
+            liveFolderRows,
+            liveFolderAssignments,
           ] = await Promise.all([
             call<unknown>({
               method: 'listFavorites',
@@ -249,6 +255,19 @@ export function createDesktopCatalogSnapshotBridge(
             })
               .then((r) => asArray<ContinueWatchingDismissalRow>(r))
               .catch(() => [] as ContinueWatchingDismissalRow[]),
+            call<unknown>({
+              method: 'listLiveFavoriteFolders',
+              ...(isDefault ? {} : { profileId: pid }),
+              opts: { parentalUnlocked: true },
+            })
+              .then((r) => asArray<LiveFavoriteFolderRecord>(r))
+              .catch(() => [] as LiveFavoriteFolderRecord[]),
+            call<unknown>({
+              method: 'listLiveFavoriteFolderAssignments',
+              ...(isDefault ? {} : { profileId: pid }),
+            })
+              .then((r) => asArray<LiveFavoriteFolderAssignment>(r))
+              .catch(() => [] as LiveFavoriteFolderAssignment[]),
           ]);
 
           const progressRows =
@@ -400,6 +419,25 @@ export function createDesktopCatalogSnapshotBridge(
               updatedAt: row.updatedAt,
             });
           }
+
+          if (liveFolderRows.length > 0) {
+            const keysByFolder = new Map<string, string[]>();
+            for (const a of liveFolderAssignments) {
+              const bucket = keysByFolder.get(a.folderId);
+              if (bucket === undefined) keysByFolder.set(a.folderId, [a.itemKey]);
+              else bucket.push(a.itemKey);
+            }
+            for (const folder of liveFolderRows) {
+              liveFavoriteFolders.push({
+                id: folder.id,
+                name: folder.name,
+                channelKeys: keysByFolder.get(folder.id) ?? [],
+                sortOrder: folder.sortOrder,
+                ...pidOpt,
+                updatedAt: folder.updatedAt,
+              });
+            }
+          }
         }
 
         return {
@@ -416,6 +454,7 @@ export function createDesktopCatalogSnapshotBridge(
           ...(continueWatchingDismissals.length > 0 ? { continueWatchingDismissals } : {}),
           ...(ratings.length > 0 ? { ratings } : {}),
           ...(profiles.length > 0 ? { profiles } : {}),
+          ...(liveFavoriteFolders.length > 0 ? { liveFavoriteFolders } : {}),
         } satisfies VaultSnapshot;
       });
 

@@ -1,4 +1,5 @@
 import {
+  clampZoomLevel,
   isAllowedExternalTrailerUrl,
   isAlwaysOnTopFlag,
   isAspectRatioLockFlag,
@@ -52,6 +53,7 @@ export interface AlwaysOnTopWindowLike {
   readonly webContents: {
     isDestroyed(): boolean;
     send(channel: string, ...args: unknown[]): void;
+    setZoomLevel?(level: number): void;
   };
 }
 
@@ -62,6 +64,8 @@ export interface WindowIpcDeps {
   onSetAspectRatioLock?(win: AlwaysOnTopWindowLike, enabled: boolean): void;
   onSetMinimizeToTray?(enabled: boolean, labels?: TrayLabels): boolean;
   getMinimizeToTray?(): boolean;
+  getZoomLevel?(): number;
+  onSetZoomLevel?(level: number): number;
   onOpenPopout?(payload: PopoutLaunchPayload): Promise<boolean> | boolean;
   onClosePopout?(): Promise<void> | void;
   onGetPopoutPayload?(sender: unknown): PopoutLaunchPayload | null;
@@ -225,6 +229,27 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     }
   });
 
+  ipcMain.handle(WINDOW_CHANNELS.getZoomLevel, async (event) => {
+    assertTrusted(event, WINDOW_CHANNELS.getZoomLevel);
+    return clampZoomLevel(deps.getZoomLevel?.() ?? 0);
+  });
+
+  ipcMain.handle(WINDOW_CHANNELS.setZoomLevel, async (event, rawLevel) => {
+    assertTrusted(event, WINDOW_CHANNELS.setZoomLevel);
+    if (typeof rawLevel !== 'number' || !Number.isFinite(rawLevel)) {
+      log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.setZoomLevel} payload`);
+      return clampZoomLevel(deps.getZoomLevel?.() ?? 0);
+    }
+    const clamped = clampZoomLevel(rawLevel);
+    const persisted = deps.onSetZoomLevel ? clampZoomLevel(deps.onSetZoomLevel(clamped)) : clamped;
+    const win = getWindowFromSender(event.sender);
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.setZoomLevel?.(persisted);
+      win.webContents.send(WINDOW_CHANNELS.zoomLevelChanged, persisted);
+    }
+    return persisted;
+  });
+
   return () => {
     ipcMain.removeHandler(WINDOW_CHANNELS.getAlwaysOnTop);
     ipcMain.removeHandler(WINDOW_CHANNELS.setAlwaysOnTop);
@@ -235,6 +260,8 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     ipcMain.removeHandler(WINDOW_CHANNELS.getPopoutPayload);
     ipcMain.removeHandler(WINDOW_CHANNELS.dockPopout);
     ipcMain.removeHandler(WINDOW_CHANNELS.openExternalUrl);
+    ipcMain.removeHandler(WINDOW_CHANNELS.getZoomLevel);
+    ipcMain.removeHandler(WINDOW_CHANNELS.setZoomLevel);
     for (const detach of detachListeners.splice(0)) detach();
   };
 }

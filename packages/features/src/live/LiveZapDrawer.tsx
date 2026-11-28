@@ -7,6 +7,7 @@ import {
   type NativeSyntheticEvent,
   Platform,
   StyleSheet,
+  Text,
   View,
   VirtualizedList,
 } from 'react-native';
@@ -67,6 +68,10 @@ export interface LiveZapDrawerProps {
     index: number,
     programme: ProgrammeRow | null,
   ) => void;
+  /** Optional header slot rendered inside the drawer above the virtualized channel list (`Wave Q7-B`). */
+  readonly header?: ReactElement | null;
+  /** Optional quiet inline empty message shown inside the drawer when `itemCount === 0` (`Wave Q7-B`). */
+  readonly emptyMessage?: string | null;
 }
 
 interface DragPointerState {
@@ -97,6 +102,8 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     onToggleFavorite,
     onReorderFavorite,
     onOpenContextMenu,
+    header = null,
+    emptyMessage = null,
   } = p;
   const theme = useTheme();
   const i18n = useI18n();
@@ -358,7 +365,20 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
           <View style={[styles.grabHandle, { backgroundColor: theme.colors.glassBorder }]} />
         </View>
       ) : null}
-      {layout.isTv ? (
+      {header}
+      {itemCount === 0 && emptyMessage !== null ? (
+        <View testID="live-zap-drawer-empty" style={styles.emptyDrawerWrap}>
+          <Text
+            style={[
+              theme.typography.caption,
+              styles.emptyDrawerText,
+              { color: theme.colors.textSecondary },
+            ]}
+          >
+            {emptyMessage}
+          </Text>
+        </View>
+      ) : layout.isTv ? (
         <View testID="live-zap-tv-viewport" style={styles.tvViewport}>
           {tvSlots.map(renderSlot)}
           <View pointerEvents="none" style={styles.edgeFadeLayer}>
@@ -418,4 +438,6 @@ const styles = StyleSheet.create({
   },
   grabWrap: { alignItems: 'center', paddingVertical: 6 },
   grabHandle: { width: 36, height: 4, borderRadius: 999 },
+  emptyDrawerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
+  emptyDrawerText: { textAlign: 'center' },
 });

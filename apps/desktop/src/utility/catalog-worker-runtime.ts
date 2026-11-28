@@ -57,6 +57,7 @@ import {
 import { executeWaveE2OpsRpcCall, isWaveE2RpcCall } from './catalog-worker-wave-e2-ops.ts';
 import { executeWaveF5bOpsRpcCall, isWaveF5bRpcCall } from './catalog-worker-wave-f5b-ops.ts';
 import { executeWaveP9OpsRpcCall, isWaveP9RpcCall } from './catalog-worker-wave-p9-ops.ts';
+import { executeWaveQ7OpsRpcCall, isWaveQ7RpcCall } from './catalog-worker-wave-q7-ops.ts';
 import { createDesktopHttpClient } from './legacy-tls-http.ts';
 import { createLocalPlaylistStore } from './local-playlist-store.ts';
 import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.ts';
@@ -589,9 +590,11 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
             ? executeWaveE2OpsRpcCall(service, call)
             : isWaveP9RpcCall(call)
               ? executeWaveP9OpsRpcCall(service, call)
-              : isWaveF5bRpcCall(call)
-                ? executeWaveF5bOpsRpcCall(service, call)
-                : executeEpgOpsRpcCall(service, call);
+              : isWaveQ7RpcCall(call)
+                ? executeWaveQ7OpsRpcCall(service, call)
+                : isWaveF5bRpcCall(call)
+                  ? executeWaveF5bOpsRpcCall(service, call)
+                  : executeEpgOpsRpcCall(service, call);
     }
   };
 

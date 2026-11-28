@@ -249,6 +249,22 @@ function isValidOptionalProfiles(value: unknown): boolean {
   return true;
 }
 
+function isValidOptionalLiveFavoriteFolders(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value)) return false;
+  for (const item of value) {
+    if (!isPlainObject(item) || hasUnsafeKeys(item)) return false;
+    if (!isBoundedString(item.id, MAX_ID_LEN, false)) return false;
+    if (!isBoundedString(item.name, MAX_NAME_LEN, true)) return false;
+    if (!isStringArray(item.channelKeys, 50_000, MAX_KEY_LEN)) return false;
+    if (!isFiniteNumber(item.sortOrder)) return false;
+    if (!isFiniteNumber(item.updatedAt)) return false;
+    if (!isOptionalBool(item.deleted)) return false;
+    if (!isOptionalBoundedString(item.profileId, MAX_PROFILE_ID_LEN, false)) return false;
+  }
+  return true;
+}
+
 function isValidOptionalInitialPreferences(value: unknown): boolean {
   if (value === undefined) return true;
   if (!isPlainObject(value) || hasUnsafeKeys(value)) return false;
@@ -283,6 +299,7 @@ export function validateAndUpgradeVaultSnapshot(parsed: unknown): VaultSnapshot 
     !isValidOptionalDismissals(parsed.continueWatchingDismissals) ||
     !isValidOptionalRatings(parsed.ratings) ||
     !isValidOptionalProfiles(parsed.profiles) ||
+    !isValidOptionalLiveFavoriteFolders(parsed.liveFavoriteFolders) ||
     !isValidOptionalInitialPreferences(parsed.initialPreferences) ||
     !isValidOptionalTimestamp(parsed.initialPreferencesUpdatedAt)
   ) {

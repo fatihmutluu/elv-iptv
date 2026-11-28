@@ -108,6 +108,7 @@ export type PlaybackFocusId =
   | 'toggle-auto-enter-pip'
   | 'toggle-background-audio'
   | 'toggle-auto-play-next'
+  | 'toggle-auto-replace-single-connection'
   | 'external-player-off'
   | 'external-player-ask'
   | 'external-player-always';
@@ -128,6 +129,7 @@ export type LiveTvFocusId =
   | 'catalog-refresh-now'
   | 'guide-refresh-dropdown'
   | 'guide-refresh-now'
+  | 'clear-recent-channels'
   | 'channel-switch-instant'
   | 'channel-switch-preview';
 
@@ -206,7 +208,10 @@ const PLAYBACK_NIGHT_DRC_ROW: readonly PlaybackFocusId[] = [
   'night-drc-night',
 ];
 
-const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [['toggle-auto-play-next']];
+const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
+  ['toggle-auto-play-next'],
+  ['toggle-auto-replace-single-connection'],
+];
 
 const PLAYBACK_EXTERNAL_PLAYER_ROW: readonly PlaybackFocusId[] = [
   'external-player-off',
@@ -240,13 +245,23 @@ const PLAYBACK_ROWS_CACHE: Readonly<Record<string, readonly (readonly PlaybackFo
   '1:1:1': buildPlaybackRows(true, true, true),
 };
 
-const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
+const LIVE_TV_ROWS_HEAD: readonly (readonly LiveTvFocusId[])[] = [
   ['live-mode-favorites', 'live-mode-channels', 'live-mode-epg'],
   ['epg-span-2', 'epg-span-3', 'epg-span-6'],
   ['epg-density-compact', 'epg-density-comfortable', 'epg-density-cinematic'],
   ['toggle-epg-show-clock'],
   ['catalog-refresh-dropdown', 'catalog-refresh-now'],
   ['guide-refresh-dropdown', 'guide-refresh-now'],
+];
+
+const LIVE_TV_ROWS_DEFAULT: readonly (readonly LiveTvFocusId[])[] = [
+  ...LIVE_TV_ROWS_HEAD,
+  ['channel-switch-instant', 'channel-switch-preview'],
+];
+
+const LIVE_TV_ROWS_WITH_CLEAR: readonly (readonly LiveTvFocusId[])[] = [
+  ...LIVE_TV_ROWS_HEAD,
+  ['clear-recent-channels'],
   ['channel-switch-instant', 'channel-switch-preview'],
 ];
 
@@ -278,6 +293,7 @@ function getSectionRows(
   includeTvDisplayRows: boolean,
   showConfirmExitOnBack: boolean,
   elvModeEnabled: boolean,
+  showClearRecentChannels: boolean,
   homeLayout?: readonly HomeLayoutSectionPref[],
 ): Readonly<Record<PreferenceSettingsSection, readonly (readonly string[])[]>> {
   const playbackKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}`;
@@ -285,7 +301,7 @@ function getSectionRows(
     appearance: buildAppearanceRows(includeTvDisplayRows, showConfirmExitOnBack, homeLayout),
     elvMode: elvModeEnabled ? ELV_MODE_ROWS : ELV_MODE_ROWS_COLLAPSED,
     playback: PLAYBACK_ROWS_CACHE[playbackKey] ?? PLAYBACK_ROWS_DEFAULT,
-    liveTv: LIVE_TV_ROWS,
+    liveTv: showClearRecentChannels ? LIVE_TV_ROWS_WITH_CLEAR : LIVE_TV_ROWS_DEFAULT,
   };
 }
 
@@ -310,6 +326,7 @@ function createSettingsFocusStore(
   includeTvDisplayRows: boolean,
   showConfirmExitOnBack: boolean,
   elvModeEnabled: boolean,
+  showClearRecentChannels: boolean,
   homeLayout?: readonly HomeLayoutSectionPref[],
 ): FocusStore {
   const initialIdx = Math.max(0, SETTINGS_SECTIONS.indexOf(initialSection));
@@ -320,6 +337,7 @@ function createSettingsFocusStore(
     includeTvDisplayRows,
     showConfirmExitOnBack,
     elvModeEnabled,
+    showClearRecentChannels,
     homeLayout,
   );
   const sectionLists = PREFERENCE_SECTIONS.flatMap((sec) =>
@@ -386,6 +404,8 @@ export interface UseTvSettingsNavigationOptions {
   readonly homeLayout?: readonly HomeLayoutSectionPref[];
   /** Whether ELV Mode master switch is enabled; collapses ELV Mode focus rows to `[['elv-master']]` when `false` (`#511`). */
   readonly elvModeEnabled?: boolean;
+  /** Whether the Live TV "Clear recent channels" action row is rendered (`Wave Q7-B`). */
+  readonly showClearRecentChannels?: boolean;
 }
 
 /** Return value of {@link useTvSettingsNavigation}. */
@@ -421,6 +441,7 @@ export function useTvSettingsNavigation({
   preservePaneOnBlur = false,
   homeLayout,
   elvModeEnabled = false,
+  showClearRecentChannels = false,
 }: UseTvSettingsNavigationOptions): TvSettingsNavigationState {
   const [pane, setPane] = useState<'nav' | 'content'>(() =>
     isActiveScope && section === 'sources' ? 'content' : 'nav',
@@ -436,12 +457,13 @@ export function useTvSettingsNavigation({
     isTv,
     showConfirmExitOnBack,
     elvModeEnabled,
+    showClearRecentChannels,
     normalizedHomeLayout,
   );
   const sectionRowsRef = useRef(sectionRows);
   sectionRowsRef.current = sectionRows;
   const storeRef = useRef<FocusStore | null>(null);
-  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}:${isTv ? '1' : '0'}:${showConfirmExitOnBack ? '1' : '0'}:${elvModeEnabled ? '1' : '0'}:${isHomeLayoutCustomized ? '1' : '0'}`;
+  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${showNightModeDrc ? '1' : '0'}:${showExternalPlayer ? '1' : '0'}:${isTv ? '1' : '0'}:${showConfirmExitOnBack ? '1' : '0'}:${elvModeEnabled ? '1' : '0'}:${showClearRecentChannels ? '1' : '0'}:${isHomeLayoutCustomized ? '1' : '0'}`;
   const storeConfigKeyRef = useRef(storeConfigKey);
   if (storeRef.current === null || storeConfigKeyRef.current !== storeConfigKey) {
     storeConfigKeyRef.current = storeConfigKey;
@@ -453,6 +475,7 @@ export function useTvSettingsNavigation({
       isTv,
       showConfirmExitOnBack,
       elvModeEnabled,
+      showClearRecentChannels,
       normalizedHomeLayout,
     );
   }
@@ -475,6 +498,15 @@ export function useTvSettingsNavigation({
       return { ...prev, elvMode: { row: maxRow, col: 0 } };
     });
   }, [elvModeRowCount]);
+
+  const liveTvRowCount = sectionRows.liveTv.length;
+  useEffect(() => {
+    setCoords((prev) => {
+      const maxRow = Math.max(0, liveTvRowCount - 1);
+      if (prev.liveTv.row <= maxRow) return prev;
+      return { ...prev, liveTv: { row: maxRow, col: 0 } };
+    });
+  }, [liveTvRowCount]);
 
   const paneRef = useRef(pane);
   paneRef.current = pane;

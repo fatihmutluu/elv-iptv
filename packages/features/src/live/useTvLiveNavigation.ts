@@ -76,6 +76,11 @@ export interface UseTvLiveNavigationOptions {
   readonly hasBody: boolean;
   readonly zapDrawerOpen: boolean;
   readonly numpadOpen: boolean;
+  /** Number of focusable slots in `LiveFavoriteFolderStrip` (`0` when folders unsupported). */
+  readonly folderSlotCount?: number;
+  /** True when the profile has at least one favorite channel overall (keeps folder strip reachable even when active folder is empty). */
+  readonly hasAnyFavorites?: boolean;
+  readonly onActivateFolderSlot?: (index: number) => void;
   readonly onSelectMode: (mode: LiveMode) => void;
   readonly onSelectCategoryIndex: (index: number) => void;
   readonly onToggleSort?: () => void;
@@ -105,6 +110,7 @@ export interface TvLiveNavigationState {
   readonly focusedEmptyCta: boolean;
   readonly focusedWatchControl: LiveWatchControl | null;
   readonly focusedZapIndex: number | null;
+  readonly focusedFolderIndex: number | null;
   readonly focusedNumpadKey: string | null;
   readonly handleTvKey: (event: KeyEvent) => boolean;
   readonly handleChildEdgeTop: () => void;
@@ -115,9 +121,10 @@ interface NavSnapshot {
   readonly headerRow: LiveTvHeaderRow;
   readonly modeCol: number;
   readonly catCol: number;
-  readonly watchZone: 'controls' | 'zap';
+  readonly watchZone: 'controls' | 'zap' | 'folders';
   readonly watchControlIdx: number;
   readonly zapIdx: number;
+  readonly folderIdx: number;
   readonly numpadRow: number;
   readonly numpadCol: number;
 }
@@ -130,6 +137,8 @@ interface NavSnapshot {
 export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNavigationState {
   const { isTv, isActiveScope, isEmpty, hasOpenSourcesCta, mode, categoryCount } = opts;
   const { channelCount, hasBody, zapDrawerOpen, numpadOpen, onToggleSort } = opts;
+  const folderSlotCount = opts.folderSlotCount ?? 0;
+  const hasAnyFavorites = opts.hasAnyFavorites ?? channelCount > 0;
   const hasCategoryBar = (mode === 'channels' || mode === 'epg') && categoryCount > 0;
   const hasSortSlot = mode === 'channels' && onToggleSort !== undefined;
 
@@ -142,20 +151,24 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
   }
   const pendingBodyRestoreRef = useRef(savedOnMountRef.current?.zone === 'body');
 
-  const [nav, setNav] = useState<NavSnapshot>(
-    () =>
-      savedOnMountRef.current ?? {
-        zone: 'header',
-        headerRow: 'modes',
-        modeCol: modeToIndex(mode),
-        catCol: 0,
-        watchZone: 'controls',
-        watchControlIdx: 0,
-        zapIdx: 0,
-        numpadRow: 0,
-        numpadCol: 0,
-      },
-  );
+  const [nav, setNav] = useState<NavSnapshot>(() => {
+    const saved = savedOnMountRef.current;
+    if (saved !== null && saved !== undefined) {
+      return { ...saved, folderIdx: saved.folderIdx ?? 0 };
+    }
+    return {
+      zone: 'header',
+      headerRow: 'modes',
+      modeCol: modeToIndex(mode),
+      catCol: 0,
+      watchZone: 'controls',
+      watchControlIdx: 0,
+      zapIdx: 0,
+      folderIdx: 0,
+      numpadRow: 0,
+      numpadCol: 0,
+    };
+  });
 
   const navRef = useRef(nav);
   navRef.current = nav;
@@ -192,8 +205,17 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
       const nextHeaderRow =
         !hasCategoryBar && prev.headerRow === 'categories' ? 'modes' : prev.headerRow;
       const nextZapIdx = channelCount > 0 ? Math.min(prev.zapIdx, channelCount - 1) : 0;
+      const nextFolderIdx = folderSlotCount > 0 ? Math.min(prev.folderIdx, folderSlotCount - 1) : 0;
       const nextWatchControlIdx = Math.min(prev.watchControlIdx, WATCH_CONTROLS.length - 1);
-      const nextWatchZone = !zapDrawerOpen || channelCount === 0 ? 'controls' : prev.watchZone;
+      const hasFolderBar = zapDrawerOpen && folderSlotCount > 0 && hasAnyFavorites;
+      let nextWatchZone = prev.watchZone;
+      if (!zapDrawerOpen) {
+        nextWatchZone = 'controls';
+      } else if (prev.watchZone === 'folders' && !hasFolderBar) {
+        nextWatchZone = channelCount > 0 ? 'zap' : 'controls';
+      } else if (prev.watchZone === 'zap' && channelCount === 0) {
+        nextWatchZone = hasFolderBar ? 'folders' : 'controls';
+      }
       let nextZone = !hasBody && prev.zone === 'body' ? 'header' : prev.zone;
       if (hasBody && pendingBodyRestoreRef.current) {
         pendingBodyRestoreRef.current = false;
@@ -204,6 +226,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         nextCatCol === prev.catCol &&
         nextHeaderRow === prev.headerRow &&
         nextZapIdx === prev.zapIdx &&
+        nextFolderIdx === prev.folderIdx &&
         nextWatchControlIdx === prev.watchControlIdx &&
         nextWatchZone === prev.watchZone &&
         nextZone === prev.zone
@@ -219,9 +242,20 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         watchZone: nextWatchZone,
         watchControlIdx: nextWatchControlIdx,
         zapIdx: nextZapIdx,
+        folderIdx: nextFolderIdx,
       };
     });
-  }, [categoryCount, channelCount, hasBody, hasCategoryBar, hasSortSlot, mode, zapDrawerOpen]);
+  }, [
+    categoryCount,
+    channelCount,
+    folderSlotCount,
+    hasAnyFavorites,
+    hasBody,
+    hasCategoryBar,
+    hasSortSlot,
+    mode,
+    zapDrawerOpen,
+  ]);
 
   const handleChildEdgeTop = useCallback(() => {
     const showCats =
@@ -261,11 +295,16 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
 
       if (event.kind === 'press' && event.key === 'back') {
         if (cur.zone === 'body' && o.mode === 'favorites') {
-          updateNav((p) =>
-            cur.watchZone === 'controls' && o.zapDrawerOpen && o.channelCount > 0
-              ? { ...p, watchZone: 'zap' }
-              : { ...p, zone: 'header', headerRow: 'modes' },
-          );
+          const folderSlots = o.folderSlotCount ?? 0;
+          const hasAnyFavs = o.hasAnyFavorites ?? o.channelCount > 0;
+          const hasFolders = o.zapDrawerOpen && folderSlots > 0 && hasAnyFavs;
+          updateNav((p) => {
+            if (cur.watchZone === 'controls' && o.zapDrawerOpen) {
+              if (o.channelCount > 0) return { ...p, watchZone: 'zap' };
+              if (hasFolders) return { ...p, watchZone: 'folders' };
+            }
+            return { ...p, zone: 'header', headerRow: 'modes' };
+          });
           return true;
         }
         o.onFocusTopNav?.();
@@ -375,11 +414,20 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
           else if (event.key === 'down') {
             if (showCats) updateNav((p) => ({ ...p, headerRow: 'categories' }));
             else if (o.hasBody) {
-              const enterZap = o.mode === 'favorites' && o.zapDrawerOpen && o.channelCount > 0;
+              const folderSlots = o.folderSlotCount ?? 0;
+              const hasAnyFavs = o.hasAnyFavorites ?? o.channelCount > 0;
+              const nextWatchZone =
+                o.mode === 'favorites' && o.zapDrawerOpen
+                  ? o.channelCount > 0
+                    ? 'zap'
+                    : folderSlots > 0 && hasAnyFavs
+                      ? 'folders'
+                      : 'controls'
+                  : 'controls';
               updateNav((p) => ({
                 ...p,
                 zone: 'body',
-                watchZone: enterZap ? 'zap' : 'controls',
+                watchZone: nextWatchZone,
               }));
             }
           } else if (event.key === 'select' && event.kind === 'press') {
@@ -415,7 +463,11 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
 
       if (o.mode !== 'favorites') return false;
 
-      if (o.channelCount === 0) {
+      const folderSlots = o.folderSlotCount ?? 0;
+      const hasAnyFavs = o.hasAnyFavorites ?? o.channelCount > 0;
+      const hasFolders = o.zapDrawerOpen && folderSlots > 0 && hasAnyFavs;
+
+      if (!hasAnyFavs) {
         if (event.key === 'up') updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
         else if (event.key === 'select' && event.kind === 'press')
           o.onActivateWatchControl('browse');
@@ -423,11 +475,32 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         return true;
       }
 
+      if (cur.watchZone === 'folders') {
+        if (event.key === 'up') {
+          updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
+        } else if (event.key === 'down') {
+          if (o.channelCount > 0) updateNav((p) => ({ ...p, watchZone: 'zap', zapIdx: 0 }));
+        } else if (event.key === 'left') {
+          updateNav((p) => ({ ...p, folderIdx: Math.max(0, p.folderIdx - 1) }));
+        } else if (event.key === 'right') {
+          if (cur.folderIdx < folderSlots - 1) {
+            updateNav((p) => ({ ...p, folderIdx: Math.min(folderSlots - 1, p.folderIdx + 1) }));
+          } else {
+            updateNav((p) => ({ ...p, watchZone: 'controls', watchControlIdx: 0 }));
+          }
+        } else if (event.key === 'select' && event.kind === 'press') {
+          o.onActivateFolderSlot?.(cur.folderIdx);
+        } else return false;
+        return true;
+      }
+
       if (cur.watchZone === 'controls') {
         if (event.key === 'up') updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
         else if (event.key === 'left') {
-          if (cur.watchControlIdx <= 0 && o.zapDrawerOpen && o.channelCount > 0) {
-            updateNav((p) => ({ ...p, watchZone: 'zap' }));
+          if (cur.watchControlIdx <= 0 && o.zapDrawerOpen) {
+            if (o.channelCount > 0) updateNav((p) => ({ ...p, watchZone: 'zap' }));
+            else if (hasFolders) updateNav((p) => ({ ...p, watchZone: 'folders' }));
+            else updateNav((p) => ({ ...p, watchControlIdx: Math.max(0, p.watchControlIdx - 1) }));
           } else {
             updateNav((p) => ({ ...p, watchControlIdx: Math.max(0, p.watchControlIdx - 1) }));
           }
@@ -446,7 +519,9 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
       if (event.key === 'up')
         updateNav((p) =>
           cur.zapIdx <= 0
-            ? { ...p, zone: 'header', headerRow: 'modes' }
+            ? hasFolders
+              ? { ...p, watchZone: 'folders' }
+              : { ...p, zone: 'header', headerRow: 'modes' }
             : { ...p, zapIdx: p.zapIdx - 1 },
         );
       else if (event.key === 'down')
@@ -473,8 +548,9 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
   const inHeader = activeTv && !numpadOpen && !isEmpty && nav.zone === 'header';
   const inFavBody =
     activeTv && !numpadOpen && !isEmpty && nav.zone === 'body' && mode === 'favorites';
-  const watchCtrl: LiveWatchControl | null =
-    channelCount === 0 ? 'browse' : (WATCH_CONTROLS[nav.watchControlIdx] ?? null);
+  const watchCtrl: LiveWatchControl | null = !hasAnyFavorites
+    ? 'browse'
+    : (WATCH_CONTROLS[nav.watchControlIdx] ?? null);
   const isSortColFocused =
     inHeader &&
     nav.headerRow === 'categories' &&
@@ -495,6 +571,8 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
       focusedEmptyCta: activeTv && !numpadOpen && isEmpty && hasOpenSourcesCta,
       focusedWatchControl: inFavBody && nav.watchZone === 'controls' ? watchCtrl : null,
       focusedZapIndex: inFavBody && channelCount > 0 && nav.watchZone === 'zap' ? nav.zapIdx : null,
+      focusedFolderIndex:
+        inFavBody && folderSlotCount > 0 && nav.watchZone === 'folders' ? nav.folderIdx : null,
       focusedNumpadKey: numpadFocused ? (NUMPAD_GRID[nav.numpadRow]?.[nav.numpadCol] ?? '1') : null,
       handleTvKey,
       handleChildEdgeTop,
@@ -502,6 +580,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
     [
       activeTv,
       channelCount,
+      folderSlotCount,
       handleChildEdgeTop,
       handleTvKey,
       hasOpenSourcesCta,
@@ -511,6 +590,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
       isSortColFocused,
       mode,
       nav.catCol,
+      nav.folderIdx,
       nav.headerRow,
       nav.modeCol,
       nav.numpadCol,

@@ -33,6 +33,7 @@ function fakePopoutWindow() {
   const sent: Array<{ channel: string; args: unknown[] }> = [];
   const loadedUrls: string[] = [];
   const calls: string[] = [];
+  const zoomCalls: number[] = [];
   const winListeners = new Map<string, Set<(...args: unknown[]) => void>>();
   const wcListeners = new Map<string, Set<(...args: unknown[]) => void>>();
   let windowOpenHandler: (() => { action: 'deny' }) | undefined;
@@ -42,6 +43,9 @@ function fakePopoutWindow() {
     send: (channel: string, ...args: unknown[]) => {
       sent.push({ channel, args });
     },
+    setZoomLevel: (level: number) => {
+      zoomCalls.push(level);
+    },
     sendInputEvent: () => undefined,
     setWindowOpenHandler: (handler: () => { action: 'deny' }) => {
       windowOpenHandler = handler;
@@ -50,6 +54,9 @@ function fakePopoutWindow() {
       const set = wcListeners.get(event) ?? new Set();
       set.add(listener);
       wcListeners.set(event, set);
+    },
+    removeListener: (event: string, listener: (...args: unknown[]) => void) => {
+      wcListeners.get(event)?.delete(listener);
     },
   } as unknown as PopoutBrowserWindowLike['webContents'];
 
@@ -104,6 +111,7 @@ function fakePopoutWindow() {
     sent,
     loadedUrls,
     calls,
+    zoomCalls,
     getWindowOpenHandler: () => windowOpenHandler,
     wcListeners,
     resizeTo: (next: typeof bounds) => {
@@ -301,5 +309,64 @@ describe('popout-window (#158)', () => {
     controller.close();
     expect(controller.isOpen()).toBe(false);
     expect(mainWin.sent).toEqual([]);
+  });
+
+  it('suppresses packaged reload shortcuts and applies persisted zoom on popout windows, cleaning up on close (MINOR-15)', () => {
+    const dir = makeTempDir();
+    const mainWin = fakeMainWindow();
+    const created: Array<ReturnType<typeof fakePopoutWindow>> = [];
+    let zoom = 1;
+    const controller = createPopoutWindowController({
+      preloadPath: '/app/preload.js',
+      appBaseUrl: 'app://elv/',
+      popoutStatePath: join(dir, 'popout-window-state.json'),
+      screen: {
+        getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }],
+      },
+      devOrigin: null,
+      platform: 'win32',
+      getZoomLevel: () => zoom,
+      onSetZoomLevel: (next) => {
+        zoom = next;
+        return zoom;
+      },
+      getMainWindow: () => mainWin.win,
+      createWindow: () => {
+        const fw = fakePopoutWindow();
+        created.push(fw);
+        return fw.win;
+      },
+    });
+
+    controller.open({ itemKey: 'live:s1:1', kind: 'live', title: 'Ch 1' });
+    const pop = created[0];
+    if (!pop) throw new Error('expected popout window');
+
+    // Initial zoom applied on dom-ready
+    for (const fn of [...(pop.wcListeners.get('dom-ready') ?? [])]) fn();
+    expect(pop.zoomCalls).toContain(1);
+
+    // Packaged reload shortcuts (Ctrl+R, F5) are prevented so active stream is never killed
+    const preventCtrlR = vi.fn();
+    for (const fn of [...(pop.wcListeners.get('before-input-event') ?? [])]) {
+      fn({ preventDefault: preventCtrlR }, { type: 'keyDown', key: 'r', control: true });
+    }
+    expect(preventCtrlR).toHaveBeenCalledTimes(1);
+
+    const preventF5 = vi.fn();
+    for (const fn of [...(pop.wcListeners.get('before-input-event') ?? [])]) {
+      fn({ preventDefault: preventF5 }, { type: 'keyDown', key: 'F5' });
+    }
+    expect(preventF5).toHaveBeenCalledTimes(1);
+
+    // Zoom shortcut updates persisted zoom
+    const preventZoom = vi.fn();
+    for (const fn of [...(pop.wcListeners.get('before-input-event') ?? [])]) {
+      fn({ preventDefault: preventZoom }, { type: 'keyDown', key: '=', control: true });
+    }
+    expect(preventZoom).toHaveBeenCalledTimes(1);
+    expect(zoom).toBe(1.5);
+
+    controller.close();
   });
 });

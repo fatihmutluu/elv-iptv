@@ -1,20 +1,25 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { clampZoomLevel } from '../shared/window-ipc.ts';
 
 /** Main-process shell preferences persisted synchronously in `userData/shell-prefs.json` (`#158`). */
 export interface ShellPrefs {
   readonly minimizeToTray: boolean;
+  readonly zoomLevel: number;
 }
 
 /** Default main-process shell preferences. */
 export const DEFAULT_SHELL_PREFS: ShellPrefs = Object.freeze({
   minimizeToTray: true,
+  zoomLevel: 0,
 });
 
 /** Controller providing race-free synchronous reads of main-process shell preferences (`#158`). */
 export interface ShellPrefsController {
   getMinimizeToTray(): boolean;
   setMinimizeToTray(enabled: boolean): boolean;
+  getZoomLevel(): number;
+  setZoomLevel(level: number): number;
 }
 
 const MAX_PREFS_BYTES = 4096;
@@ -29,11 +34,16 @@ export function loadShellPrefs(filePath: string): ShellPrefs {
       return DEFAULT_SHELL_PREFS;
     }
     const rec = parsed as Record<string, unknown>;
+    const rawZoom = rec['zoomLevel'];
     return {
       minimizeToTray:
         typeof rec['minimizeToTray'] === 'boolean'
           ? rec['minimizeToTray']
           : DEFAULT_SHELL_PREFS.minimizeToTray,
+      zoomLevel:
+        typeof rawZoom === 'number' && Number.isFinite(rawZoom)
+          ? clampZoomLevel(rawZoom)
+          : DEFAULT_SHELL_PREFS.zoomLevel,
     };
   } catch {
     return DEFAULT_SHELL_PREFS;
@@ -47,7 +57,10 @@ export function saveShellPrefs(filePath: string, prefs: ShellPrefs): void {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(
       tmpPath,
-      JSON.stringify({ minimizeToTray: Boolean(prefs.minimizeToTray) }),
+      JSON.stringify({
+        minimizeToTray: Boolean(prefs.minimizeToTray),
+        zoomLevel: clampZoomLevel(prefs.zoomLevel),
+      }),
       'utf8',
     );
     renameSync(tmpPath, filePath);
@@ -60,18 +73,29 @@ export function saveShellPrefs(filePath: string, prefs: ShellPrefs): void {
   }
 }
 
-/** Creates an in-memory + disk-backed controller so `BrowserWindow.on('close')` reads synchronously. */
+/** Creates an in-memory + disk-backed controller so `BrowserWindow.on('close')` and zoom shortcuts read synchronously. */
 export function createShellPrefsController(filePath: string): ShellPrefsController {
-  let minimizeToTray = loadShellPrefs(filePath).minimizeToTray;
+  const initial = loadShellPrefs(filePath);
+  let minimizeToTray = initial.minimizeToTray;
+  let zoomLevel = initial.zoomLevel;
   return {
     getMinimizeToTray: () => minimizeToTray,
     setMinimizeToTray(enabled: boolean): boolean {
       const next = Boolean(enabled);
       if (next !== minimizeToTray) {
         minimizeToTray = next;
-        saveShellPrefs(filePath, { minimizeToTray });
+        saveShellPrefs(filePath, { minimizeToTray, zoomLevel });
       }
       return minimizeToTray;
+    },
+    getZoomLevel: () => zoomLevel,
+    setZoomLevel(level: number): number {
+      const next = clampZoomLevel(level);
+      if (next !== zoomLevel) {
+        zoomLevel = next;
+        saveShellPrefs(filePath, { minimizeToTray, zoomLevel });
+      }
+      return zoomLevel;
     },
   };
 }

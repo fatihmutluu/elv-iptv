@@ -81,6 +81,7 @@ describe('preferences codec', () => {
       vodEnrichmentEnabled: false,
       minimizeToTray: true,
       autoEnterPip: true,
+      autoReplaceSingleConnection: false,
       autoFrameRate: 'seamless',
       autoDynamicRange: true,
       nightModeDrc: 'off',
@@ -340,6 +341,7 @@ describe('preferences codec', () => {
       useTextureView: true,
       autoSubtitlesOnSkipBack: true,
       autoPlayNextEpisode: false,
+      autoReplaceSingleConnection: true,
       playerVolume: 73,
     });
     expect(encoded.ok).toBe(true);
@@ -355,6 +357,7 @@ describe('preferences codec', () => {
         useTextureView: true,
         autoSubtitlesOnSkipBack: true,
         autoPlayNextEpisode: false,
+        autoReplaceSingleConnection: true,
         playerVolume: 73,
       });
     }

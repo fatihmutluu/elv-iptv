@@ -180,6 +180,7 @@ export interface ExtendedPreferencesFields
   readonly vodEnrichmentEnabled?: boolean;
   readonly minimizeToTray: boolean;
   readonly autoEnterPip: boolean;
+  readonly autoReplaceSingleConnection: boolean;
   readonly subtitleStyle: SubtitleStyleConfig;
   readonly homeLayout: readonly HomeLayoutSectionPref[];
 }
@@ -482,6 +483,10 @@ export function parseExtendedPreferences(
     ),
     minimizeToTray: boolOr(parsed.minimizeToTray, defaults.minimizeToTray),
     autoEnterPip: boolOr(parsed.autoEnterPip, defaults.autoEnterPip),
+    autoReplaceSingleConnection: boolOr(
+      parsed.autoReplaceSingleConnection,
+      defaults.autoReplaceSingleConnection,
+    ),
     ...parseWaveF7aPreferences(parsed, defaults),
     ...parseWaveF7bPreferences(parsed, defaults),
     subtitleStyle: normalizeSubtitleStyle(parsed.subtitleStyle),
@@ -593,6 +598,7 @@ export function serializeExtendedPreferences(
     vodEnrichmentEnabled: Boolean(snapshot.vodEnrichmentEnabled),
     minimizeToTray: Boolean(snapshot.minimizeToTray),
     autoEnterPip: Boolean(snapshot.autoEnterPip),
+    autoReplaceSingleConnection: Boolean(snapshot.autoReplaceSingleConnection),
     ...serializeWaveF7aPreferences(snapshot, defaults),
     ...serializeWaveF7bPreferences(snapshot, defaults),
     ...(subtitleStyleEquals(subtitleStyle, DEFAULT_SUBTITLE_STYLE) ? {} : { subtitleStyle }),
@@ -724,6 +730,10 @@ export function mergeExtendedPreferences(
     vodEnrichmentEnabled: boolOr(patch.vodEnrichmentEnabled, base.vodEnrichmentEnabled ?? false),
     minimizeToTray: boolOr(patch.minimizeToTray, base.minimizeToTray),
     autoEnterPip: boolOr(patch.autoEnterPip, base.autoEnterPip),
+    autoReplaceSingleConnection: boolOr(
+      patch.autoReplaceSingleConnection,
+      base.autoReplaceSingleConnection,
+    ),
     ...mergeWaveF7aPreferences(base, patch),
     ...mergeWaveF7bPreferences(base, patch),
     subtitleStyle: mergeSubtitleStyle(base.subtitleStyle, patch.subtitleStyle),
