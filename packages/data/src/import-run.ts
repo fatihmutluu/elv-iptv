@@ -221,6 +221,11 @@ export async function performRun(
     return err(elvError('storage', 'secret-write-failed'));
   }
   try {
+    await deps.db.exec('PRAGMA optimize');
+  } catch {
+    // Advisory: planner statistics refresh is bounded by analysis_limit and never fails an import.
+  }
+  try {
     await deps.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   } catch {
     // Advisory: a busy reader only delays WAL truncation until the next import.

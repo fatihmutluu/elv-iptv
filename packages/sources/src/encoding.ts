@@ -1,23 +1,38 @@
 import { openAsyncIterator } from '@elv/domain';
+import { decodeCodepageSlice, type SingleByteCodepage } from './codepages';
 import { decodeUtf8 } from './utf8';
 
-/** CP1252 / Windows-1254 shared 0x80–0x9F table (undefined bytes map to U+FFFD). */
-const C1_TABLE: readonly number[] = [
-  0x20ac, 0xfffd, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039,
-  0x0152, 0xfffd, 0x017d, 0xfffd, 0xfffd, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
-  0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0xfffd, 0x017e, 0x0178,
-];
-
-const WIN1254_OVERRIDES = new Map<number, number>([
-  [0x8e, 0xfffd],
-  [0x9e, 0xfffd],
-  [0xd0, 0x011e], // Ğ
-  [0xdd, 0x0130], // İ
-  [0xde, 0x015e], // Ş
-  [0xf0, 0x011f], // ğ
-  [0xfd, 0x0131], // ı
-  [0xfe, 0x015f], // ş
+const ARABIC_COMMON_HIGH = new Set([0xe1, 0xe3, 0xe4, 0xe5, 0xe6, 0xec, 0xed]);
+const ARABIC_NON_LETTER_HIGH = new Set([
+  0xd7, 0xe0, 0xe2, 0xe7, 0xe8, 0xe9, 0xea, 0xeb, 0xee, 0xef, 0xf4, 0xf7, 0xf9, 0xfb, 0xfc,
 ]);
+const ARABIC_SPECIFIC_BYTES = new Set([0x81, 0x8d, 0x8e, 0x90, 0x98]);
+const CYRILLIC_UPPER_VOWELS = new Set([0xc0, 0xc5, 0xc8, 0xce, 0xd3, 0xdf]);
+const CYRILLIC_COMMON_VOWELS = new Set([
+  0xa8, 0xaa, 0xaf, 0xb2, 0xb3, 0xb8, 0xba, 0xbf, 0xc0, 0xc5, 0xc8, 0xce, 0xd3, 0xdb, 0xdf, 0xe0,
+  0xe5, 0xe8, 0xee, 0xf3, 0xfb, 0xff,
+]);
+const CYRILLIC_RARE_EY = new Set([0xdd, 0xde, 0xfd, 0xfe]);
+const CYRILLIC_NO_START = new Set([0xda, 0xdc, 0xfa, 0xfc]);
+const CYRILLIC_SPECIFIC_BYTES = new Set([0xa8, 0xaa, 0xaf, 0xb2, 0xb3, 0xb8]);
+const SHARED_EXTRA_BYTES = new Set([0xba, 0xbf]);
+
+function isAsciiLetter(b: number): boolean {
+  return (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a);
+}
+
+function isScriptRunByte(b: number): boolean {
+  return (
+    b >= 0xc0 ||
+    CYRILLIC_SPECIFIC_BYTES.has(b) ||
+    ARABIC_SPECIFIC_BYTES.has(b) ||
+    SHARED_EXTRA_BYTES.has(b)
+  );
+}
+
+function isTurkishSpecificByte(b: number): boolean {
+  return b === 0xd0 || b === 0xdd || b === 0xde || b === 0xf0 || b === 0xfd || b === 0xfe;
+}
 
 function isValidUtf8(bytes: Uint8Array, start: number, end: number): boolean {
   let i = start;
@@ -56,36 +71,139 @@ function isValidUtf8(bytes: Uint8Array, start: number, end: number): boolean {
   return true;
 }
 
-function prefersWindows1254(bytes: Uint8Array, start: number, end: number): boolean {
+function detectSingleByteCodepage(
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+): SingleByteCodepage {
   let turkishHits = 0;
-  for (let i = start; i < end; i++) {
-    const b = bytes[i] as number;
-    if (b === 0xd0 || b === 0xdd || b === 0xde || b === 0xf0 || b === 0xfd || b === 0xfe) {
-      turkishHits++;
-    }
-  }
-  return turkishHits > 0;
-}
+  let attachedLatinHighBytes = 0;
+  let unattachedCoreBytes = 0;
+  let maxUnattachedCoreRun = 0;
+  let arabicCommonHighHits = 0;
+  let arabicSpecificHits = 0;
+  let cp1251Score = 0;
+  let cp1256Score = 0;
 
-function decodeSingleByte(bytes: Uint8Array, start: number, end: number, turkish: boolean): string {
-  const units: number[] = [];
-  let out = '';
-  for (let i = start; i < end; i++) {
+  let i = start;
+  while (i < end) {
     const b = bytes[i] as number;
-    let cp = b;
-    if (b >= 0x80 && b <= 0x9f) {
-      cp = (turkish ? WIN1254_OVERRIDES.get(b) : undefined) ?? C1_TABLE[b - 0x80] ?? 0xfffd;
-    } else if (turkish) {
-      cp = WIN1254_OVERRIDES.get(b) ?? b;
+    if (isTurkishSpecificByte(b)) turkishHits++;
+    if (!isScriptRunByte(b)) {
+      i++;
+      continue;
     }
-    units.push(cp);
-    if (units.length >= 4096) {
-      out += String.fromCharCode(...units);
-      units.length = 0;
+    const runStart = i;
+    const touchedBefore = runStart > start && isAsciiLetter(bytes[runStart - 1] as number);
+    let coreBytes = 0;
+    while (i < end && isScriptRunByte(bytes[i] as number)) {
+      const cur = bytes[i] as number;
+      if (i > runStart && isTurkishSpecificByte(cur)) turkishHits++;
+      if (cur >= 0xc0) coreBytes++;
+      i++;
+    }
+    const runEnd = i;
+    const touchedAfter = runEnd < end && isAsciiLetter(bytes[runEnd] as number);
+    if (touchedBefore || touchedAfter) {
+      attachedLatinHighBytes += coreBytes;
+      continue;
+    }
+
+    // Require >= 3 core (>= 0xC0) bytes so punctuation runs like "¿¿¿" or "ººº" never flip codepages.
+    if (coreBytes < 3) continue;
+    unattachedCoreBytes += coreBytes;
+    if (coreBytes > maxUnattachedCoreRun) maxUnattachedCoreRun = coreBytes;
+
+    const runLen = runEnd - runStart;
+    let commonCyrillicVowels = 0;
+    let rareCyrillicEyCount = 0;
+    const firstByte = bytes[runStart] as number;
+    if (CYRILLIC_NO_START.has(firstByte)) cp1251Score -= 12;
+    if (
+      runLen >= 2 &&
+      firstByte >= 0xc0 &&
+      firstByte <= 0xdf &&
+      (bytes[runStart + 1] as number) >= 0xe0
+    ) {
+      cp1251Score += 6;
+    }
+
+    for (let k = runStart; k < runEnd; k++) {
+      const cur = bytes[k] as number;
+      const prev = k > runStart ? (bytes[k - 1] as number) : -1;
+      const next = k + 1 < runEnd ? (bytes[k + 1] as number) : -1;
+
+      if (CYRILLIC_COMMON_VOWELS.has(cur)) commonCyrillicVowels++;
+      if (CYRILLIC_RARE_EY.has(cur)) rareCyrillicEyCount++;
+
+      if (cur >= 0xc0) {
+        cp1251Score += CYRILLIC_RARE_EY.has(cur) ? 1 : 3;
+        if (cur <= 0xdf) {
+          if (CYRILLIC_UPPER_VOWELS.has(cur)) cp1251Score += 2;
+          if (prev >= 0xe0 && prev <= 0xff) cp1251Score -= 10;
+          else if (prev >= 0xc0 && prev <= 0xdf && next >= 0xe0 && next <= 0xff) cp1251Score -= 4;
+        } else if (prev >= 0xe0 && prev <= 0xff) {
+          cp1251Score += 2;
+        }
+      } else if (CYRILLIC_SPECIFIC_BYTES.has(cur)) {
+        cp1251Score += 4;
+      } else if (SHARED_EXTRA_BYTES.has(cur)) {
+        cp1251Score += 1;
+      } else if (cur === 0x98) {
+        cp1251Score -= 20;
+      }
+
+      if (cur >= 0xc1 && cur <= 0xdf && cur !== 0xd7) {
+        cp1256Score += 2;
+      } else if (ARABIC_COMMON_HIGH.has(cur)) {
+        arabicCommonHighHits++;
+        cp1256Score += 5;
+      } else if (ARABIC_NON_LETTER_HIGH.has(cur)) {
+        cp1256Score -= 8;
+      } else if (ARABIC_SPECIFIC_BYTES.has(cur)) {
+        arabicSpecificHits++;
+        cp1256Score += 6;
+      } else if (CYRILLIC_SPECIFIC_BYTES.has(cur)) {
+        cp1256Score -= 6;
+      } else if (cur === 0xfd || cur === 0xfe) {
+        cp1256Score -= 4;
+      } else if (
+        cur === 0xc0 ||
+        (cur >= 0xf0 && cur <= 0xf6) ||
+        cur === 0xf8 ||
+        cur === 0xfa ||
+        cur === 0xff
+      ) {
+        cp1256Score += 1;
+      }
+
+      if ((prev === 0xc7 && cur === 0xe1) || (prev === 0xe1 && cur === 0xc7)) {
+        cp1256Score += 6;
+      }
+    }
+
+    if (rareCyrillicEyCount >= 2 && rareCyrillicEyCount * 2 >= runLen) {
+      cp1251Score -= 15;
+    }
+    if (runLen <= 3 && commonCyrillicVowels === 0) {
+      cp1251Score -= 10;
     }
   }
-  if (units.length > 0) out += String.fromCharCode(...units);
-  return out;
+
+  if (arabicCommonHighHits === 0 && arabicSpecificHits === 0 && unattachedCoreBytes < 8) {
+    cp1256Score = Math.min(cp1256Score, 0);
+  }
+  const latinPenalty = attachedLatinHighBytes * 6;
+  cp1251Score -= latinPenalty;
+  cp1256Score -= latinPenalty;
+
+  const hasEnoughUnattached =
+    maxUnattachedCoreRun >= 3 &&
+    (attachedLatinHighBytes === 0 || unattachedCoreBytes >= attachedLatinHighBytes * 2);
+  if (hasEnoughUnattached && Math.max(cp1251Score, cp1256Score) >= 8) {
+    return cp1256Score > cp1251Score ? 'windows-1256' : 'windows-1251';
+  }
+  return turkishHits > 0 ? 'windows-1254' : 'windows-1252';
 }
 
 function decodeUtf16Units(bytes: Uint8Array, start: number, end: number, le: boolean): string {
@@ -140,7 +258,8 @@ function decodeUtf32Units(bytes: Uint8Array, start: number, end: number, le: boo
 
 /**
  * Pure text decoder supporting UTF-8 (with BOM strip), UTF-16LE/BE BOM, UTF-32LE/BE BOM,
- * and automatic Turkish `Windows-1254` / Western `CP1252` fallback when invalid UTF-8 bytes appear.
+ * and automatic legacy `Windows-1251`, `Windows-1256`, `Windows-1254`, and `CP1252` fallback
+ * when invalid UTF-8 bytes appear.
  */
 export function detectAndDecodeText(
   bytes: Uint8Array,
@@ -185,7 +304,12 @@ export function detectAndDecodeText(
   if (isValidUtf8(bytes, bodyStart, end)) {
     return decodeUtf8(bytes, bodyStart, end);
   }
-  return decodeSingleByte(bytes, bodyStart, end, prefersWindows1254(bytes, bodyStart, end));
+  return decodeCodepageSlice(
+    bytes,
+    bodyStart,
+    end,
+    detectSingleByteCodepage(bytes, bodyStart, end),
+  );
 }
 
 function encodeStringToUtf8(text: string): Uint8Array {

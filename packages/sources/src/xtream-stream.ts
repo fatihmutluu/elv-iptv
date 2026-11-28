@@ -2,8 +2,8 @@ import { type ElvError, elvError, err, ok, openAsyncIterator, type Result } from
 import { normalizeBomChunks } from './encoding';
 import { toElvError } from './scan-error';
 import { ByteBuffer } from './utf8';
-import { accountFailure, parseXtreamElementBytes } from './xtream-json';
-import { isRaw, type Raw } from './xtream-records';
+import { parseXtreamElementBytes } from './xtream-json';
+import { classifyAccountFailure, isRaw, type Raw } from './xtream-records';
 
 const DEFAULT_BATCH_SIZE = 500;
 const MAX_SCALAR_BYTES = 64 * 1024;
@@ -365,7 +365,7 @@ class XtreamJsonStreamParser {
         this.batch.push(val);
       }
     } else if (this.currentKey === 'user_info') {
-      const failure = isRaw(val) ? accountFailure(val) : undefined;
+      const failure = isRaw(val) ? classifyAccountFailure(val) : undefined;
       if (failure !== undefined) {
         this.error = failure;
         return;

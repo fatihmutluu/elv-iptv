@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isValidMacAddress, normalizeMacAddress, type SourceKind, transportHeaders } from './index';
+import {
+  isValidMacAddress,
+  normalizeMacAddress,
+  type SourceKind,
+  streamTransportHeaders,
+  transportHeaders,
+} from './index';
 
 describe('Stalker MAC address validation and normalization (#29)', () => {
   it('normalizes valid colon-separated MAC addresses to uppercase', () => {
@@ -44,23 +50,40 @@ describe('Stalker MAC address validation and normalization (#29)', () => {
     }
   });
 
-  it('rejects invalid length, mixed or unsupported separators, non-hex, and control chars', () => {
+  it('normalizes bare 12-hex, Cisco dotted, pair-dotted, and space-separated MAC addresses', () => {
+    expect(normalizeMacAddress('001A79010203')).toEqual({
+      ok: true,
+      value: '00:1A:79:01:02:03',
+    });
+    expect(normalizeMacAddress('001a.79ab.cdef')).toEqual({
+      ok: true,
+      value: '00:1A:79:AB:CD:EF',
+    });
+    expect(normalizeMacAddress('00.1A.79.01.02.03')).toEqual({
+      ok: true,
+      value: '00:1A:79:01:02:03',
+    });
+    expect(normalizeMacAddress('00 1A 79 01 02 03')).toEqual({
+      ok: true,
+      value: '00:1A:79:01:02:03',
+    });
+  });
+
+  it('rejects invalid length, mixed separators, non-hex, and control chars', () => {
     const invalidCases = [
       '',
       '   ',
       '00:1A:79:01:02',
       '00:1A:79:01:02:03:04',
-      '001A79010203',
       '00:1A-79:01:02:03',
       '00-1A:79-01-02-03',
-      '00.1A.79.01.02.03',
-      '00 1A 79 01 02 03',
       '00:1G:79:01:02:03',
       'ZZ:BB:CC:DD:EE:FF',
       '00:1A:79:01:02:0\n',
       '00:1A\x00:79:01:02:03',
       '00:1A:79:01:02:\r3',
       '0:1A:79:01:02:030',
+      '001A79010203\n',
     ];
 
     for (const raw of invalidCases) {
@@ -85,6 +108,24 @@ describe('Stalker MAC address validation and normalization (#29)', () => {
     ).toEqual({
       'user-agent': 'ELV/1.0',
       referer: 'http://portal.example.test/',
+    });
+    expect(
+      streamTransportHeaders({
+        userAgent: 'FeedUA/1.0',
+        streamUserAgent: 'StreamUA/2.0',
+        referer: 'http://portal.example.test/',
+      }),
+    ).toEqual({
+      'user-agent': 'StreamUA/2.0',
+      referer: 'http://portal.example.test/',
+    });
+    expect(
+      streamTransportHeaders({
+        userAgent: 'FeedUA/1.0',
+        streamUserAgent: '   ',
+      }),
+    ).toEqual({
+      'user-agent': 'FeedUA/1.0',
     });
   });
 });

@@ -253,30 +253,22 @@ export function isSearchSuggestionsOptions(x: unknown): x is SearchSuggestionsOp
   );
 }
 
+const isOptionalBoolean = (x: unknown): boolean => x === undefined || typeof x === 'boolean';
+
 export function isAlphabetIndexInput(x: unknown): x is AlphabetIndexInput {
   if (!isRecord(x) || !hasOnlyKeys(x, ALPHABET_INDEX_INPUT_KEYS)) return false;
   const kind = x['kind'];
-  if (typeof kind !== 'string' || !CONTENT_KINDS.has(kind as ContentKind)) {
-    return false;
-  }
+  if (typeof kind !== 'string' || !CONTENT_KINDS.has(kind as ContentKind)) return false;
   if (!isOptionalSourceId(x['sourceId'])) return false;
   if (x['categoryId'] !== undefined && !isCleanKey(x['categoryId'], 512)) return false;
-  if (x['collapseVariants'] !== undefined && typeof x['collapseVariants'] !== 'boolean') {
-    return false;
-  }
-  if (x['groupVersions'] !== undefined && typeof x['groupVersions'] !== 'boolean') {
-    return false;
-  }
-  if (x['excludeWatched'] !== undefined && typeof x['excludeWatched'] !== 'boolean') {
-    return false;
-  }
-  if (x['includeHidden'] !== undefined && typeof x['includeHidden'] !== 'boolean') {
-    return false;
-  }
-  if (x['parentalUnlocked'] !== undefined && typeof x['parentalUnlocked'] !== 'boolean') {
-    return false;
-  }
-  return isOptionalStrictProfileId(x['profileId']);
+  return (
+    isOptionalBoolean(x['collapseVariants']) &&
+    isOptionalBoolean(x['groupVersions']) &&
+    isOptionalBoolean(x['excludeWatched']) &&
+    isOptionalBoolean(x['includeHidden']) &&
+    isOptionalBoolean(x['parentalUnlocked']) &&
+    isOptionalStrictProfileId(x['profileId'])
+  );
 }
 
 export function isSaveProgressInput(x: unknown): x is SaveProgressInput {
@@ -363,6 +355,7 @@ export const isOrderedFavoriteKeys = (x: unknown): x is readonly string[] =>
 
 const TRANSPORT_SETTINGS_KEYS = new Set<keyof TransportSettings>([
   'userAgent',
+  'streamUserAgent',
   'referer',
   'xtreamFormat',
   'allowLegacyTls',
@@ -449,8 +442,14 @@ function isOptionalBackupServers(x: unknown): boolean {
 
 function isTransportSettings(x: unknown): x is TransportSettings {
   if (!isRecord(x) || !hasOnlyKeys(x, TRANSPORT_SETTINGS_KEYS)) return false;
-  if (!isOptionalCleanString(x['userAgent']) || !isOptionalCleanString(x['referer'])) return false;
-  if (x['allowLegacyTls'] !== undefined && typeof x['allowLegacyTls'] !== 'boolean') return false;
+  if (
+    !isOptionalCleanString(x['userAgent']) ||
+    !isOptionalCleanString(x['streamUserAgent']) ||
+    !isOptionalCleanString(x['referer']) ||
+    !isOptionalBoolean(x['allowLegacyTls'])
+  ) {
+    return false;
+  }
   const fmt = x['xtreamFormat'];
   if (fmt !== undefined && fmt !== 'ts' && fmt !== 'm3u8') return false;
   const dnsFamily = x['dnsFamily'];
@@ -523,13 +522,9 @@ export function isSourceSettingsPatch(x: unknown): x is Partial<SourceSettings> 
   }
   if (x['transport'] !== undefined && !isTransportSettings(x['transport'])) return false;
   if (x['epgShiftMs'] !== undefined && !isFiniteNumber(x['epgShiftMs'])) return false;
-  if (
-    x['includePlaceholderChannels'] !== undefined &&
-    typeof x['includePlaceholderChannels'] !== 'boolean'
-  ) {
+  if (!isOptionalBoolean(x['includePlaceholderChannels']) || !isOptionalBoolean(x['vodPlaylist'])) {
     return false;
   }
-  if (x['vodPlaylist'] !== undefined && typeof x['vodPlaylist'] !== 'boolean') return false;
   return true;
 }
 
@@ -538,9 +533,13 @@ export function isLocalM3uSourceInput(x: unknown): x is LocalM3uSourceInput {
   if (!isOptionalExplicitSourceId(x['id'])) return false;
   const bytes = x['bytes'];
   if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_PICKED_PLAYLIST_BYTES) return false;
-  if (!isOptionalTrimmedCleanString(x['guideUrl'])) return false;
-  if (!isOptionalTimezoneString(x['xmltvTimezone'])) return false;
-  if (x['vodPlaylist'] !== undefined && typeof x['vodPlaylist'] !== 'boolean') return false;
+  if (
+    !isOptionalTrimmedCleanString(x['guideUrl']) ||
+    !isOptionalTimezoneString(x['xmltvTimezone'])
+  ) {
+    return false;
+  }
+  if (!isOptionalBoolean(x['vodPlaylist'])) return false;
   return x['transport'] === undefined || isTransportSettings(x['transport']);
 }
 
@@ -548,8 +547,12 @@ export function isAddSourceInput(x: unknown): x is AddSourceInput {
   if (!isRecord(x) || !isBoundedString(x['name'])) return false;
   if (!isOptionalExplicitSourceId(x['id'])) return false;
   if (x['transport'] !== undefined && !isTransportSettings(x['transport'])) return false;
-  if (!isOptionalTrimmedCleanString(x['guideUrl'])) return false;
-  if (!isOptionalTimezoneString(x['xmltvTimezone'])) return false;
+  if (
+    !isOptionalTrimmedCleanString(x['guideUrl']) ||
+    !isOptionalTimezoneString(x['xmltvTimezone'])
+  ) {
+    return false;
+  }
   if (x['kind'] === 'xtream') {
     return (
       isTrimmedCleanString(x['server']) &&
@@ -559,10 +562,7 @@ export function isAddSourceInput(x: unknown): x is AddSourceInput {
     );
   }
   if (x['kind'] === 'm3u') {
-    return (
-      isTrimmedCleanString(x['playlistUrl']) &&
-      (x['vodPlaylist'] === undefined || typeof x['vodPlaylist'] === 'boolean')
-    );
+    return isTrimmedCleanString(x['playlistUrl']) && isOptionalBoolean(x['vodPlaylist']);
   }
   if (x['kind'] === 'stalker') {
     return (
@@ -580,16 +580,9 @@ export function isAddSourceInput(x: unknown): x is AddSourceInput {
 export function isLinkSourceInput(x: unknown): x is LinkSourceInput {
   if (!isRecord(x)) return false;
   if (!isOptionalExplicitSourceId(x['id'])) return false;
-  if (!isBoundedString(x['name']) || !isTrimmedCleanString(x['url'])) {
-    return false;
-  }
-  if (x['keepAsM3u'] !== undefined && typeof x['keepAsM3u'] !== 'boolean') return false;
+  if (!isBoundedString(x['name']) || !isTrimmedCleanString(x['url'])) return false;
+  if (!isOptionalBoolean(x['keepAsM3u']) || !isOptionalBoolean(x['vodPlaylist'])) return false;
   if (!isOptionalTrimmedCleanString(x['guideUrl'])) return false;
-  if (x['vodPlaylist'] !== undefined && typeof x['vodPlaylist'] === 'boolean') {
-    // valid boolean
-  } else if (x['vodPlaylist'] !== undefined) {
-    return false;
-  }
   return x['transport'] === undefined || isTransportSettings(x['transport']);
 }
 
@@ -605,17 +598,15 @@ export function isElvError(x: unknown): x is ElvError {
 
 export function isCategoryQueryOptions(x: unknown): x is CategoryQueryOptions {
   if (!isRecord(x) || !hasOnlyKeys(x, CATEGORY_QUERY_OPT_KEYS)) return false;
-  if (x['collapseVariants'] !== undefined && typeof x['collapseVariants'] !== 'boolean') {
+  if (
+    !isOptionalBoolean(x['collapseVariants']) ||
+    !isOptionalBoolean(x['groupVersions']) ||
+    !isOptionalBoolean(x['includeHidden']) ||
+    !isOptionalStrictProfileId(x['profileId'])
+  ) {
     return false;
   }
-  if (x['groupVersions'] !== undefined && typeof x['groupVersions'] !== 'boolean') {
-    return false;
-  }
-  if (x['includeHidden'] !== undefined && typeof x['includeHidden'] !== 'boolean') {
-    return false;
-  }
-  if (!isOptionalStrictProfileId(x['profileId'])) return false;
-  return x['parentalUnlocked'] === undefined || typeof x['parentalUnlocked'] === 'boolean';
+  return isOptionalBoolean(x['parentalUnlocked']);
 }
 
 export function isListItemsOptions(x: unknown): x is ListItemsOptions {

@@ -1,6 +1,10 @@
+import { createAppI18n } from '@elv/i18n';
 import { describe, expect, it } from 'vitest';
 import {
   EXPIRING_SOON_WINDOW_MS,
+  formatAccountExpiryDate,
+  formatSourceAccountHealthCaption,
+  resolveSourceAccountHealth,
   resolveSourceAccountWarning,
   type SourceAccountWarning,
 } from './account-warning';
@@ -90,5 +94,60 @@ describe('resolveSourceAccountWarning (#170)', () => {
         kind: 'trial',
       });
     }
+  });
+});
+
+describe('resolveSourceAccountHealth & formatSourceAccountHealthCaption (Wave Q6)', () => {
+  it('resolves healthy expiry beyond 7d window and connection quota cleanly', () => {
+    const healthyExpiry = Date.UTC(2027, 0, 15, 0, 0, 0);
+    expect(resolveSourceAccountHealth(undefined, NOW)).toBeNull();
+    expect(resolveSourceAccountHealth({ isTrial: false }, NOW)).toBeNull();
+    // Expired or <= 7d expiry is handled by SourceAccountWarningPill, not duplicated in health expiry
+    expect(resolveSourceAccountHealth({ expiresAt: NOW + 3 * DAY_MS }, NOW)).toBeNull();
+    expect(resolveSourceAccountHealth({ expiresAt: NOW - DAY_MS }, NOW)).toBeNull();
+    // Connection quota still surfaces even when expiry is expiring-soon or unlimited
+    expect(
+      resolveSourceAccountHealth(
+        { expiresAt: NOW + 3 * DAY_MS, maxConnections: 2, activeConnections: 1 },
+        NOW,
+      ),
+    ).toEqual({ maxConnections: 2, activeConnections: 1 });
+    expect(
+      resolveSourceAccountHealth(
+        { expiresAt: healthyExpiry, maxConnections: 3, activeConnections: 1 },
+        NOW,
+      ),
+    ).toEqual({ healthyExpiresAt: healthyExpiry, maxConnections: 3, activeConnections: 1 });
+  });
+
+  it('formats localized EN and TR secondary captions using Intl.DateTimeFormat', () => {
+    const healthyExpiry = Date.UTC(2027, 0, 15, 0, 0, 0);
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+
+    const enDate = formatAccountExpiryDate(healthyExpiry, 'en');
+    const trDate = formatAccountExpiryDate(healthyExpiry, 'tr');
+    expect(enDate).toContain('2027');
+    expect(trDate).toContain('2027');
+
+    expect(
+      formatSourceAccountHealthCaption(
+        { expiresAt: healthyExpiry, maxConnections: 3, activeConnections: 1 },
+        NOW,
+        en,
+      ),
+    ).toBe(`Expires ${enDate} · 1/3 connections`);
+
+    expect(
+      formatSourceAccountHealthCaption(
+        { expiresAt: healthyExpiry, maxConnections: 3, activeConnections: 1 },
+        NOW,
+        tr,
+      ),
+    ).toBe(`Bitiş ${trDate} · 1/3 bağlantı`);
+
+    expect(formatSourceAccountHealthCaption({ maxConnections: 2 }, NOW, en)).toBe('2 connections');
+    expect(formatSourceAccountHealthCaption({ maxConnections: 1 }, NOW, tr)).toBe('1 bağlantı');
+    expect(formatSourceAccountHealthCaption({}, NOW, en)).toBeNull();
   });
 });

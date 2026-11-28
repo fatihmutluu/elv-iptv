@@ -4,8 +4,21 @@ import { isSecretKeyRotatedError } from './secret-errors';
 const utf8 = new TextEncoder();
 const PROTO_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
-/** @internal Opaque per-item Stalker `cmd` strings stored strictly in `SecretStore`. */
+/** @internal Opaque per-item Stalker `cmd` strings and secret metadata stored strictly in `SecretStore`. */
 export type StalkerCmdMap = Record<string, string>;
+
+/** @internal Metadata stored strictly in `SecretStore` for VOD-backed or embedded Stalker series. */
+interface StalkerVodSeriesMeta {
+  readonly contentType: 'vod' | 'series';
+  readonly cmd?: string;
+  readonly seriesEpisodeNumbers?: readonly number[];
+}
+
+/** @internal Metadata stored strictly in `SecretStore` for lazy-loaded Stalker episodes. */
+export interface StalkerEpisodeMeta {
+  readonly linkKind: 'movie' | 'series';
+  readonly episodeNumber?: number;
+}
 
 /** Maximum UTF-8 byte length of a single serialized `stalker_cmds` shard (below 64 KiB keychain and 128 KiB Desktop ceilings). */
 const STALKER_CMDS_CHUNK_BYTES = 60_000;
@@ -22,6 +35,91 @@ export interface StalkerCmdsStoreOptions {
 const cmdsRootKey = (sourceId: string): string => `source.${sourceId}.stalker_cmds`;
 const cmdsShardKey = (sourceId: string, index: number): string =>
   `source.${sourceId}.stalker_cmds.${index}`;
+
+/** Lookup key inside `stalker_cmds` marking a live/VOD item eligible for static direct playback. */
+export function stalkerStaticFlagKey(kind: 'live' | 'movie', providerId: string): string {
+  return `static:${kind}:${providerId}`;
+}
+
+/** Lookup key inside `stalker_cmds` storing VOD-backed / embedded series origin metadata. */
+export function stalkerVodSeriesMetaKey(providerId: string): string {
+  return `vodseries:${providerId}`;
+}
+
+/** Lookup key inside `stalker_cmds` storing episode `create_link` routing metadata. */
+export function stalkerEpisodeMetaKey(providerId: string): string {
+  return `epmeta:${providerId}`;
+}
+
+/** Serializes {@link StalkerVodSeriesMeta} into a compact JSON string for `SecretStore`. */
+export function encodeVodSeriesMeta(meta: StalkerVodSeriesMeta): string {
+  const payload: { t: 'vod' | 'series'; c?: string; e?: readonly number[] } = {
+    t: meta.contentType,
+  };
+  if (meta.cmd !== undefined && meta.cmd !== '') payload.c = meta.cmd;
+  if (meta.seriesEpisodeNumbers !== undefined && meta.seriesEpisodeNumbers.length > 0) {
+    payload.e = meta.seriesEpisodeNumbers;
+  }
+  return JSON.stringify(payload);
+}
+
+/** Parses serialized {@link StalkerVodSeriesMeta}; returns `undefined` if absent or malformed. */
+export function parseVodSeriesMeta(raw: string | undefined): StalkerVodSeriesMeta | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPlainObject(parsed)) return undefined;
+    const t = parsed.t;
+    if (t !== 'vod' && t !== 'series') return undefined;
+    const cmd =
+      typeof parsed.c === 'string' && parsed.c.trim() !== '' ? parsed.c.trim() : undefined;
+    let eps: number[] | undefined;
+    if (Array.isArray(parsed.e)) {
+      const clean = parsed.e.filter(
+        (n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0,
+      );
+      if (clean.length > 0) eps = clean;
+    }
+    return {
+      contentType: t,
+      ...(cmd !== undefined ? { cmd } : {}),
+      ...(eps !== undefined ? { seriesEpisodeNumbers: eps } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Serializes {@link StalkerEpisodeMeta} into a compact JSON string for `SecretStore`. */
+export function encodeEpisodeMeta(meta: StalkerEpisodeMeta): string {
+  const payload: { k: 'movie' | 'series'; n?: number } = { k: meta.linkKind };
+  if (
+    meta.episodeNumber !== undefined &&
+    Number.isInteger(meta.episodeNumber) &&
+    meta.episodeNumber > 0
+  ) {
+    payload.n = meta.episodeNumber;
+  }
+  return JSON.stringify(payload);
+}
+
+/** Parses serialized {@link StalkerEpisodeMeta}; returns `undefined` if absent or malformed. */
+export function parseEpisodeMeta(raw: string | undefined): StalkerEpisodeMeta | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPlainObject(parsed)) return undefined;
+    const k = parsed.k;
+    if (k !== 'movie' && k !== 'series') return undefined;
+    const n =
+      typeof parsed.n === 'number' && Number.isInteger(parsed.n) && parsed.n > 0
+        ? parsed.n
+        : undefined;
+    return { linkKind: k, ...(n !== undefined ? { episodeNumber: n } : {}) };
+  } catch {
+    return undefined;
+  }
+}
 
 function utf8Bytes(text: string): number {
   return utf8.encode(text).byteLength;

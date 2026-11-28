@@ -8,17 +8,34 @@ const VOD_EXTENSIONS = new Set([
   'avi',
   'mov',
   'm4v',
+  'm2ts',
+  'rm',
+  'rmvb',
+  'vob',
+  'divx',
+  'asf',
   'webm',
   'flv',
   'wmv',
   'mpg',
   'mpeg',
 ]);
-const LIVE_EXTENSIONS = new Set(['ts', 'm3u8']);
+const LIVE_EXTENSIONS = new Set(['ts', 'm3u8', 'hls', 'mpd']);
+const SCRIPT_EXTENSIONS = new Set(['php', 'cgi', 'asp', 'aspx', 'jsp']);
+const FORBIDDEN_STREAM_HEADERS = new Set([
+  'host',
+  'content-length',
+  'transfer-encoding',
+  'connection',
+  'te',
+  'upgrade',
+]);
 const LAUNCHER_PREFIX_RE = /^(?:ffmpeg|ffrt\d*|auto|solution)\s+/i;
 const BACKUP_URL_SPLIT_RE = /#(?=(?:https?|rtmps?|rtsps?|udp|rtp):\/\/)/i;
 const MULTICAST_AT_RE = /^(udp|rtp):\/\/@(?=[^:/?#\s])/i;
-const EPISODIC_RE = /\b(?:s\d{1,2}\s*e\d{1,3}|\d{1,2}x\d{2})\b/i;
+const EPISODIC_RE =
+  /(?:^|[^\p{L}\p{N}_])(?:s\d{1,2}\s*e\d{1,3}|\d{1,2}x\d{2}|(?:episode|episodio|folge|серия|эпизод|bölüm|odcinek|aflevering)\s*\.?\s*\d{1,4})(?=$|[^\p{L}\p{N}_])/iu;
+const QUERY_EXT_RE = /(?:^\?|&)(?:format|ext|extension)=([^&#]+)/;
 const SATIP_CHNO_PREFIX_RE = /^(\d{1,5})\.\s+(\S.*)$/;
 const STREAM_HEADERS_PROPS = new Set([
   'inputstream.adaptive.stream_headers',
@@ -79,7 +96,7 @@ function safeDecodeComponent(raw: string): string {
 
 function applySanitizedHeader(e: M3uEntry, rawKey: string, rawValue: string): void {
   const name = sanitizeHeaderName(rawKey.toLowerCase());
-  if (name === undefined) return;
+  if (name === undefined || FORBIDDEN_STREAM_HEADERS.has(name)) return;
   const value = sanitizeHeaderValue(rawValue);
   if (value.length === 0) return;
   if (name === 'user-agent') e.headers.userAgent = value;
@@ -166,14 +183,23 @@ function kindOf(url: string, schemeLen: number, entryName: string): KindHint {
   ) {
     return isEpisodic ? 'episode' : 'movie';
   }
-  if (queryStart >= 0) {
-    const query = url.slice(queryStart).toLowerCase();
-    if (/(?:^\?|&)channel=/.test(query)) return 'live';
-  }
+  const query = queryStart >= 0 ? url.slice(queryStart).toLowerCase() : '';
+  if (query !== '' && /(?:^\?|&)channel=/.test(query)) return 'live';
   const dot = path.lastIndexOf('.');
-  const ext = dot > path.lastIndexOf('/') ? path.slice(dot + 1) : '';
-  if (LIVE_EXTENSIONS.has(ext)) return 'live';
-  if (VOD_EXTENSIONS.has(ext)) return isEpisodic ? 'episode' : 'movie';
+  const pathExt = dot > path.lastIndexOf('/') ? path.slice(dot + 1) : '';
+  if (pathExt !== '' && !SCRIPT_EXTENSIONS.has(pathExt)) {
+    if (LIVE_EXTENSIONS.has(pathExt)) return 'live';
+    if (VOD_EXTENSIONS.has(pathExt)) return isEpisodic ? 'episode' : 'movie';
+  } else if (query !== '') {
+    const qMatch = QUERY_EXT_RE.exec(query);
+    if (qMatch?.[1] !== undefined) {
+      const qExt = safeDecodeComponent(qMatch[1]).trim().replace(/^\.+/, '');
+      if (qExt !== '' && !SCRIPT_EXTENSIONS.has(qExt)) {
+        if (LIVE_EXTENSIONS.has(qExt)) return 'live';
+        if (VOD_EXTENSIONS.has(qExt)) return isEpisodic ? 'episode' : 'movie';
+      }
+    }
+  }
   if (isEpisodic) return 'episode';
   return 'live';
 }
@@ -226,6 +252,12 @@ export function applyVlcOpt(e: M3uEntry, payload: string): void {
   if (key === 'http-user-agent') applySanitizedHeader(e, 'user-agent', rawValue);
   else if (key === 'http-referrer' || key === 'http-referer') {
     applySanitizedHeader(e, 'referer', rawValue);
+  } else if (key === 'http-origin') {
+    applySanitizedHeader(e, 'origin', rawValue);
+  } else if (key === 'http-cookie') {
+    applySanitizedHeader(e, 'cookie', rawValue);
+  } else if (key === 'http-x-forwarded-for') {
+    applySanitizedHeader(e, 'x-forwarded-for', rawValue);
   } else if (key === 'http-reconnect') {
     const clean = sanitizeHeaderValue(rawValue);
     if (clean.length > 0) e.extra['http-reconnect'] = clean;

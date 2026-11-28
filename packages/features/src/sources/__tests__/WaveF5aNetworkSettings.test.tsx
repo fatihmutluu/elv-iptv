@@ -274,8 +274,10 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
         remote.tap(KEYCODE_DPAD_CENTER);
       });
 
-      // Down -> host input -> Down -> Save button -> Select
+      // Down -> host -> userAgent -> streamUserAgent -> Save button -> Select
       await act(async () => {
+        remote.tap(KEYCODE_DPAD_DOWN);
+        remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
       });
@@ -448,6 +450,69 @@ describe('Wave F5A Advanced Network Settings & Backup Servers (#172, #317)', () 
       await view.unmount();
     } finally {
       errorSpy.mockRestore();
+      await env.cleanup();
+    }
+  });
+
+  it('exposes optional Stream User-Agent below User-Agent in Add Source and Saved Source Network Editor with full persistence (Wave Q6)', async () => {
+    const env = await openTestCatalog();
+    try {
+      const view = await render(
+        <FormFactorProvider value="desktop">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <SourcesScreen catalog={env.catalog} />
+          </I18nProvider>
+        </FormFactorProvider>,
+      );
+
+      await fireEvent.press(screen.getByTestId('sources-mode-xtream'));
+      await fireEvent.changeText(
+        screen.getByTestId('sources-input-server'),
+        'http://sim.example.test:7878',
+      );
+      await fireEvent.changeText(screen.getByTestId('sources-input-username'), 'demo');
+      await fireEvent.changeText(screen.getByTestId('sources-input-password'), 'demo');
+      await fireEvent.press(screen.getByTestId('sources-toggle-advanced'));
+      await fireEvent.changeText(screen.getByTestId('sources-input-user-agent'), 'FeedAgent/1.0');
+      await fireEvent.changeText(
+        screen.getByTestId('sources-input-stream-user-agent'),
+        'PlayerAgent/2.0',
+      );
+      await fireEvent.press(screen.getByTestId('sources-submit'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('source-advanced-src-1')).toBeTruthy();
+      });
+
+      const initialSources = await env.catalog.listSources();
+      expect(initialSources[0]?.userAgent).toBe('FeedAgent/1.0');
+      expect(initialSources[0]?.streamUserAgent).toBe('PlayerAgent/2.0');
+
+      await fireEvent.press(screen.getByTestId('source-advanced-src-1'));
+      await fireEvent.press(screen.getByTestId('source-network-src-1'));
+      expect(screen.getByTestId('source-network-user-agent-src-1').props.value).toBe(
+        'FeedAgent/1.0',
+      );
+      expect(screen.getByTestId('source-network-stream-user-agent-src-1').props.value).toBe(
+        'PlayerAgent/2.0',
+      );
+      expect(screen.getByTestId('source-network-stream-ua-hint-src-1')).toBeTruthy();
+
+      await fireEvent.changeText(
+        screen.getByTestId('source-network-stream-user-agent-src-1'),
+        'VLC/3.0.21',
+      );
+      await fireEvent.press(screen.getByTestId('source-network-save-src-1'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('source-network-saved-src-1')).toBeTruthy();
+      });
+
+      const updatedSources = await env.catalog.listSources();
+      expect(updatedSources[0]?.userAgent).toBe('FeedAgent/1.0');
+      expect(updatedSources[0]?.streamUserAgent).toBe('VLC/3.0.21');
+      await view.unmount();
+    } finally {
       await env.cleanup();
     }
   });

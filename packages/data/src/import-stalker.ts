@@ -1,10 +1,7 @@
-import { elvError, err, ok, type Result, type SqlDriver, type SqlValue } from '@elv/domain';
+import { elvError, type Result, type SqlDriver, type SqlValue } from '@elv/domain';
 import type {
-  StalkerCategory,
   StalkerChannel,
   StalkerClient,
-  StalkerEpisode,
-  StalkerPage,
   StalkerProfile,
   StalkerSeriesItem,
   StalkerVodItem,
@@ -15,15 +12,15 @@ import { foldText, sortTitleKey } from './fold';
 import { createMonotonicProgressMeter, wrapCleanupProgress } from './import-progress';
 import { checkAbort, notify, performRun, type RunCtx, Stop, unwrap } from './import-run';
 import {
-  DEFAULT_BATCH_SIZE,
-  type ImportDeps,
-  type ImportOptions,
-  type ImportSummary,
-} from './import-types';
+  discoverStalkerCategories,
+  fetchAllStalkerPages,
+  filterRealStalkerCategories,
+  loadStalkerSeriesEpisodes,
+} from './import-stalker-series';
+import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import { parseLiveVariant } from './live-variants';
 import { isPlaceholderLiveChannel } from './placeholder-filter';
 import type { BrowseKind } from './queries';
-import { sourceExists } from './runs';
 import {
   getSource,
   normalizeMaxConnections,
@@ -34,22 +31,26 @@ import {
 } from './sources';
 import {
   deleteStalkerCmdMap,
+  encodeVodSeriesMeta,
   loadStalkerCmdMap,
-  mergeStalkerCmdMap,
   openStalkerClient,
   type StalkerCmdMap,
   safeStalkerProviderId,
   sanitizeStalkerImageUrl,
   saveStalkerCmdMap,
+  saveStalkerDiscovery,
   stalkerCmdKey,
   stalkerKey,
   stalkerPortalHost,
+  stalkerStaticFlagKey,
+  stalkerVodSeriesMetaKey,
 } from './stalker-secret';
 import { parseVodVersion } from './vod-versions';
 import { writeCategories, writePlacements } from './writers';
 
+export { discoverStalkerCategories, loadStalkerSeriesEpisodes };
+
 const UNCATEGORIZED = 'Uncategorized';
-const MAX_STALKER_PAGES = 500;
 
 const LIVE_SQL = `INSERT INTO live_next (source_id, key, provider_id, num, name, name_fold, sort_title, variant_base_fold, quality_rank, logo, guide_id, catchup_days, catchup_mode, url_template, run_id, content_hash)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
@@ -79,46 +80,6 @@ const SERIES_SQL = `INSERT INTO series_next (source_id, key, provider_id, name, 
     cast_fold = excluded.cast_fold, director_fold = excluded.director_fold,
     run_id = excluded.run_id, content_hash = excluded.content_hash`;
 
-const EPISODE_SQL = `INSERT INTO episodes (source_id, key, provider_id, series_key, season, episode, title, title_fold, extension, duration_sec, url_template, run_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?)
-  ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, series_key = excluded.series_key,
-    season = excluded.season, episode = excluded.episode, title = excluded.title, title_fold = excluded.title_fold,
-    extension = NULL, duration_sec = excluded.duration_sec, url_template = NULL, run_id = excluded.run_id`;
-
-function filterRealCategories(cats: readonly StalkerCategory[]): { id: string; name: string }[] {
-  const seen = new Set<string>();
-  const out: { id: string; name: string }[] = [];
-  for (const c of cats) {
-    const id = c.id.trim();
-    if (id === '' || id === '*' || seen.has(id)) continue;
-    seen.add(id);
-    out.push({ id, name: c.title.trim() || id });
-  }
-  return out;
-}
-
-async function fetchAllPages<T>(
-  fetchPage: (page: number) => Promise<Result<StalkerPage<T>>>,
-  signal: AbortSignal | undefined,
-  onBatch?: (items: readonly T[]) => Promise<void>,
-): Promise<T[]> {
-  const all: T[] = [];
-  let page = 1;
-  let totalPages = 1;
-  while (page <= totalPages && page <= MAX_STALKER_PAGES) {
-    checkAbort({ signal });
-    const res = unwrap(await fetchPage(page));
-    if (res.items.length === 0) break;
-    all.push(...res.items);
-    if (onBatch !== undefined) await onBatch(res.items);
-    const perPage = Math.max(1, res.maxPageItems > 0 ? res.maxPageItems : res.items.length);
-    totalPages = Math.max(1, Math.ceil(res.totalItems / perPage));
-    if (res.totalItems <= all.length) break;
-    page += 1;
-  }
-  return all;
-}
-
 async function fetchLiveChannels(
   client: StalkerClient,
   signal: AbortSignal | undefined,
@@ -129,7 +90,7 @@ async function fetchLiveChannels(
   if (allRes.error.code === 'aborted' || allRes.error.category === 'auth') {
     throw new Stop(allRes.error);
   }
-  return fetchAllPages(
+  return fetchAllStalkerPages(
     (page) => client.liveChannels({ page, ...(signal === undefined ? {} : { signal }) }),
     signal,
   );
@@ -149,9 +110,70 @@ async function flushBatches(
   }
 }
 
+function buildSeriesRow(
+  c: RunCtx,
+  s: {
+    id: string;
+    name: string;
+    cover?: string;
+    plot?: string;
+    rating?: number;
+    year?: number;
+    addedAt?: number;
+    cast?: string;
+    director?: string;
+  },
+  portalHost: string | undefined,
+  mac: string,
+): { providerId: string; key: string; row: SqlValue[] } {
+  const providerId = safeStalkerProviderId(s.id);
+  const key = stalkerKey(c.sourceId, 'series', providerId);
+  const nameFold = foldText(s.name);
+  const sortTitle = sortTitleKey(s.name);
+  const cover = sanitizeStalkerImageUrl(s.cover, portalHost, mac);
+  const castFold = s.cast !== undefined ? foldText(s.cast) : null;
+  const directorFold = s.director !== undefined ? foldText(s.director) : null;
+  const contentHash = hashSeriesRow({
+    providerId,
+    name: s.name,
+    nameFold,
+    cover,
+    plot: s.plot,
+    rating: s.rating,
+    year: s.year,
+    lastModified: s.addedAt,
+    castText: s.cast,
+    directorText: s.director,
+  });
+  return {
+    providerId,
+    key,
+    row: [
+      c.sourceId,
+      key,
+      providerId,
+      s.name,
+      nameFold,
+      sortTitle,
+      cover ?? null,
+      s.plot ?? null,
+      s.rating ?? null,
+      s.year ?? null,
+      s.addedAt ?? null,
+      s.cast ?? null,
+      s.director ?? null,
+      castFold,
+      directorFold,
+      c.runId,
+      contentHash,
+    ],
+  };
+}
+
 /**
- * Atomically imports live channels, VOD movies, and series from a Stalker/Ministra MAC portal into
- * the staged `*_next` catalog tables and swaps them inside `performRun` (`#29`, ADR 0015).
+ * Atomically imports live channels, VOD movies, and series (including Ministra VOD-backed
+ * `is_series=1` and embedded `series[]` items) from a Stalker/Ministra MAC portal into the staged
+ * `*_next` catalog tables and swaps them inside `performRun` (`#29`, ADR 0015).
  * Zero portal URLs, MACs, tokens, or raw `cmd` strings enter SQLite.
  */
 export async function importStalker(
@@ -205,10 +227,11 @@ export async function importStalker(
         client.seriesCategories(call).then((r) => (r.ok ? r.value : [])),
       ]);
       const rawCats: Record<BrowseKind, { id: string; name: string }[]> = {
-        live: filterRealCategories(rawGenres),
-        movie: filterRealCategories(rawVodCats),
-        series: filterRealCategories(rawSeriesCats),
+        live: filterRealStalkerCategories(rawGenres),
+        movie: filterRealStalkerCategories(rawVodCats),
+        series: filterRealStalkerCategories(rawSeriesCats),
       };
+      const vodCatNameById = new Map<string, string>(rawCats.movie.map((x) => [x.id, x.name]));
       discoveredIds = {
         live: rawCats.live.map((x) => x.id),
         movie: rawCats.movie.map((x) => x.id),
@@ -279,6 +302,9 @@ export async function importStalker(
           seenKeys.add(key);
           if (catId === UNCATEGORIZED) needUncat = true;
           if (ch.cmd.trim() !== '') stagedCmds[stalkerCmdKey('live', providerId)] = ch.cmd.trim();
+          if (ch.useHttpTmpLink === false && ch.useLoadBalancing === false) {
+            stagedCmds[stalkerStaticFlagKey('live', providerId)] = '1';
+          }
 
           const nameFold = foldText(ch.name);
           const sortTitle = sortTitleKey(ch.name);
@@ -350,9 +376,15 @@ export async function importStalker(
         meter.markComplete('live');
       }
 
-      // 2. VOD movies
-      if (allowlists.movie === undefined || allowlists.movie.size > 0) {
-        const vodItems: StalkerVodItem[] = await fetchAllPages(
+      // 2. VOD movies (collecting Ministra VOD-backed series instead of discarding them!)
+      const vodSeriesItems: StalkerVodItem[] = [];
+      const shouldFetchVod =
+        allowlists.movie === undefined ||
+        allowlists.movie.size > 0 ||
+        (rawCats.series.length === 0 &&
+          (allowlists.series === undefined || allowlists.series.size > 0));
+      if (shouldFetchVod) {
+        const vodItems: StalkerVodItem[] = await fetchAllStalkerPages(
           (page) =>
             client.vodItems({
               page,
@@ -365,9 +397,17 @@ export async function importStalker(
         const posByCat = new Map<string, number>();
         const seenKeys = new Set<string>();
         let needUncat = false;
+        const ingestMovies = allowlists.movie === undefined || allowlists.movie.size > 0;
 
         for (const vod of vodItems) {
-          if (vod.isSeries === true) continue;
+          const isVodSeries =
+            vod.isSeries === true ||
+            (vod.seriesEpisodeNumbers !== undefined && vod.seriesEpisodeNumbers.length > 0);
+          if (isVodSeries) {
+            vodSeriesItems.push(vod);
+            continue;
+          }
+          if (!ingestMovies) continue;
           const catId = vod.categoryId && vod.categoryId !== '*' ? vod.categoryId : UNCATEGORIZED;
           if (allowlists.movie !== undefined && !allowlists.movie.has(catId)) continue;
           const providerId = safeStalkerProviderId(vod.id);
@@ -377,6 +417,9 @@ export async function importStalker(
           if (catId === UNCATEGORIZED) needUncat = true;
           if (vod.cmd.trim() !== '') {
             stagedCmds[stalkerCmdKey('movie', providerId)] = vod.cmd.trim();
+          }
+          if (vod.useHttpTmpLink === false && vod.useLoadBalancing === false) {
+            stagedCmds[stalkerStaticFlagKey('movie', providerId)] = '1';
           }
 
           const nameFold = foldText(vod.name);
@@ -453,72 +496,100 @@ export async function importStalker(
         meter.markComplete('movies');
       }
 
-      // 3. Series
+      // 3. Series (combining type=series AND Ministra VOD-backed series)
       if (allowlists.series === undefined || allowlists.series.size > 0) {
-        const seriesItems: StalkerSeriesItem[] = await fetchAllPages(
-          (page) =>
-            client.seriesItems({
-              page,
-              ...(c.signal === undefined ? {} : { signal: c.signal }),
-            }),
-          c.signal,
-        );
+        let seriesItems: StalkerSeriesItem[] = [];
+        try {
+          seriesItems = await fetchAllStalkerPages(
+            (page) =>
+              client.seriesItems({
+                page,
+                ...(c.signal === undefined ? {} : { signal: c.signal }),
+              }),
+            c.signal,
+          );
+        } catch (e) {
+          const isFatal =
+            e instanceof Stop && (e.error.code === 'aborted' || e.error.category === 'auth');
+          if (isFatal || (vodSeriesItems.length === 0 && rawCats.series.length > 0)) throw e;
+          seriesItems = [];
+        }
+
         const seriesRows: SqlValue[][] = [];
         const seriesLinks: [string, string, number][] = [];
         const posByCat = new Map<string, number>();
         const seenKeys = new Set<string>();
+        const writtenSeriesCatIds = new Set(filteredCats.series.map((x) => x.id));
+        const extraSeriesCats: { id: string; name: string }[] = [];
         let needUncat = false;
 
         for (const s of seriesItems) {
           const catId = s.categoryId && s.categoryId !== '*' ? s.categoryId : UNCATEGORIZED;
           if (allowlists.series !== undefined && !allowlists.series.has(catId)) continue;
-          const providerId = safeStalkerProviderId(s.id);
-          const key = stalkerKey(c.sourceId, 'series', providerId);
-          if (seenKeys.has(key)) continue;
-          seenKeys.add(key);
+          const built = buildSeriesRow(c, s, portalHost, secret.mac);
+          if (seenKeys.has(built.key)) continue;
+          seenKeys.add(built.key);
           if (catId === UNCATEGORIZED) needUncat = true;
-
-          const nameFold = foldText(s.name);
-          const sortTitle = sortTitleKey(s.name);
-          const cover = sanitizeStalkerImageUrl(s.cover, portalHost, secret.mac);
-          const castFold = s.cast !== undefined ? foldText(s.cast) : null;
-          const directorFold = s.director !== undefined ? foldText(s.director) : null;
-          const contentHash = hashSeriesRow({
-            providerId,
-            name: s.name,
-            nameFold,
-            cover,
-            plot: s.plot,
-            rating: s.rating,
-            year: s.year,
-            lastModified: s.addedAt,
-            castText: s.cast,
-            directorText: s.director,
-          });
-          seriesRows.push([
-            c.sourceId,
-            key,
-            providerId,
-            s.name,
-            nameFold,
-            sortTitle,
-            cover ?? null,
-            s.plot ?? null,
-            s.rating ?? null,
-            s.year ?? null,
-            s.addedAt ?? null,
-            s.cast ?? null,
-            s.director ?? null,
-            castFold,
-            directorFold,
-            c.runId,
-            contentHash,
-          ]);
+          if (
+            (s.cmd !== undefined && s.cmd.trim() !== '') ||
+            (s.seriesEpisodeNumbers !== undefined && s.seriesEpisodeNumbers.length > 0)
+          ) {
+            stagedCmds[stalkerVodSeriesMetaKey(built.providerId)] = encodeVodSeriesMeta({
+              contentType: 'series',
+              ...(s.cmd !== undefined && s.cmd.trim() !== '' ? { cmd: s.cmd.trim() } : {}),
+              ...(s.seriesEpisodeNumbers !== undefined && s.seriesEpisodeNumbers.length > 0
+                ? { seriesEpisodeNumbers: s.seriesEpisodeNumbers }
+                : {}),
+            });
+          }
+          seriesRows.push(built.row);
           const pos = posByCat.get(catId) ?? 0;
           posByCat.set(catId, pos + 1);
-          seriesLinks.push([key, catId, pos]);
+          seriesLinks.push([built.key, catId, pos]);
         }
 
+        for (const vod of vodSeriesItems) {
+          const catId = vod.categoryId && vod.categoryId !== '*' ? vod.categoryId : UNCATEGORIZED;
+          if (
+            allowlists.series !== undefined &&
+            !allowlists.series.has(catId) &&
+            !(allowlists.movie?.has(catId) ?? false)
+          ) {
+            continue;
+          }
+          const built = buildSeriesRow(c, vod, portalHost, secret.mac);
+          if (seenKeys.has(built.key)) continue;
+          seenKeys.add(built.key);
+          if (catId === UNCATEGORIZED) {
+            needUncat = true;
+          } else if (!writtenSeriesCatIds.has(catId)) {
+            writtenSeriesCatIds.add(catId);
+            extraSeriesCats.push({ id: catId, name: vodCatNameById.get(catId) ?? catId });
+          }
+          stagedCmds[stalkerVodSeriesMetaKey(built.providerId)] = encodeVodSeriesMeta({
+            contentType: 'vod',
+            ...(vod.cmd.trim() !== '' ? { cmd: vod.cmd.trim() } : {}),
+            ...(vod.seriesEpisodeNumbers !== undefined && vod.seriesEpisodeNumbers.length > 0
+              ? { seriesEpisodeNumbers: vod.seriesEpisodeNumbers }
+              : {}),
+          });
+          seriesRows.push(built.row);
+          const pos = posByCat.get(catId) ?? 0;
+          posByCat.set(catId, pos + 1);
+          seriesLinks.push([built.key, catId, pos]);
+        }
+
+        if (extraSeriesCats.length > 0) {
+          await writeCategories(
+            c.db,
+            c.sourceId,
+            'series',
+            c.runId,
+            extraSeriesCats,
+            filteredCats.series.length,
+          );
+          c.counts.categories = (c.counts.categories ?? 0) + extraSeriesCats.length;
+        }
         if (needUncat) {
           await writeCategories(
             c.db,
@@ -526,7 +597,7 @@ export async function importStalker(
             'series',
             c.runId,
             [{ id: UNCATEGORIZED, name: UNCATEGORIZED }],
-            filteredCats.series.length,
+            filteredCats.series.length + extraSeriesCats.length,
           );
           c.counts.categories = (c.counts.categories ?? 0) + 1;
         }
@@ -551,20 +622,33 @@ export async function importStalker(
       }
     },
 
-    beforeCommit: async () => {
+    beforeCommit: async (c) => {
       const hadPrevious =
         (await deps.secrets.get(secretKey(source.id, 'stalker_cmds')).catch(() => undefined)) !==
         undefined;
       previousCmds = hadPrevious ? await loadStalkerCmdMap(deps.secrets, source.id) : undefined;
       const merged: StalkerCmdMap = {};
+      const keepLiveCmds = (c.counts.live ?? 0) === 0 && !c.intentionallyEmptyKinds.has('live');
+      const keepMovieCmds = (c.counts.movies ?? 0) === 0 && !c.intentionallyEmptyKinds.has('movie');
+      const keepSeriesCmds =
+        (c.counts.series ?? 0) === 0 && !c.intentionallyEmptyKinds.has('series');
       if (previousCmds !== undefined) {
         for (const [k, v] of Object.entries(previousCmds)) {
-          if (k.startsWith('series:')) merged[k] = v;
+          if (
+            k.startsWith('series:') ||
+            k.startsWith('epmeta:') ||
+            (keepLiveCmds && (k.startsWith('live:') || k.startsWith('static:live:'))) ||
+            (keepMovieCmds && (k.startsWith('movie:') || k.startsWith('static:movie:'))) ||
+            (keepSeriesCmds && k.startsWith('vodseries:'))
+          ) {
+            merged[k] = v;
+          }
         }
       }
       Object.assign(merged, stagedCmds);
       unwrap(await saveStalkerCmdMap(deps.secrets, source.id, merged));
       wroteCmds = true;
+      await saveStalkerDiscovery(deps.secrets, source.id, secret, client.discoveredPortal());
     },
 
     beforeCleanup: async (tx) => {
@@ -593,148 +677,4 @@ export async function importStalker(
       }
     },
   });
-}
-
-/** Lazily loads seasons and episodes for one Stalker series into SQLite (cmds stay strictly in `SecretStore`). */
-export async function loadStalkerSeriesEpisodes(
-  source: SourceRecord,
-  seriesKey: string,
-  deps: ImportDeps,
-  opts: ImportOptions = {},
-): Promise<Result<number>> {
-  const opened = await openStalkerClient(source, deps);
-  if (!opened.ok) return opened;
-  const { client } = opened.value;
-
-  try {
-    const query = 'SELECT provider_id, run_id FROM series WHERE source_id = ? AND key = ?';
-    const lookup = (db: ImportDeps['db']) =>
-      db.all<{ provider_id: string | null; run_id: number }>(query, [source.id, seriesKey]);
-    const row = (await lookup(deps.db))[0];
-    if (row?.provider_id == null) return err(elvError('source-format', 'unknown-series'));
-
-    const call = opts.signal === undefined ? undefined : { signal: opts.signal };
-    checkAbort({ signal: opts.signal });
-    unwrap(await client.handshake(call));
-    const seasons = unwrap(await client.seriesSeasons(row.provider_id, call));
-
-    const episodeEntries: {
-      key: string;
-      providerId: string;
-      season: number;
-      ep: StalkerEpisode;
-    }[] = [];
-    const epCmds: StalkerCmdMap = {};
-    for (const season of seasons) {
-      checkAbort({ signal: opts.signal });
-      const episodes = await fetchAllPages(
-        (page) => client.seasonEpisodes(row.provider_id as string, season.id, page, call),
-        opts.signal,
-      );
-      for (const ep of episodes) {
-        const providerId = safeStalkerProviderId(ep.id);
-        const key = stalkerKey(source.id, 'episode', providerId);
-        const cmd = ep.cmd.trim() || season.cmd?.trim() || '';
-        if (cmd !== '') epCmds[stalkerCmdKey('series', providerId)] = cmd;
-        episodeEntries.push({ key, providerId, season: season.seasonNumber, ep });
-      }
-      await deps.scheduler.yieldNow();
-    }
-
-    if (!(await sourceExists(deps.db, source.id))) {
-      return err(elvError('storage', 'source-not-found'));
-    }
-    unwrap(await mergeStalkerCmdMap(deps.secrets, source.id, epCmds));
-
-    const stored = await deps.db.transaction<'ok' | 'no-source' | 'no-series'>(async (tx) => {
-      if (!(await sourceExists(tx, source.id))) return 'no-source';
-      const current = (await lookup(tx))[0];
-      if (current?.provider_id == null) return 'no-series';
-      const previous = await tx.all<{ key: string }>(
-        'SELECT key FROM episodes WHERE source_id = ? AND series_key = ?',
-        [source.id, seriesKey],
-      );
-      const batchSize = Math.max(1, opts.batchSize ?? DEFAULT_BATCH_SIZE);
-      for (let i = 0; i < episodeEntries.length; i += batchSize) {
-        checkAbort({ signal: opts.signal });
-        const slice = episodeEntries.slice(i, i + batchSize);
-        await tx.batch(
-          EPISODE_SQL,
-          slice.map(({ key, providerId, season, ep }) => [
-            source.id,
-            key,
-            providerId,
-            seriesKey,
-            season,
-            ep.episodeNumber,
-            ep.title,
-            foldText(ep.title),
-            ep.durationSec ?? null,
-            current.run_id,
-          ]),
-        );
-      }
-      const keep = new Set(episodeEntries.map((e) => e.key));
-      const stale = previous.filter((p) => !keep.has(p.key)).map((p) => [source.id, p.key]);
-      for (let i = 0; i < stale.length; i += batchSize) {
-        checkAbort({ signal: opts.signal });
-        await tx.batch(
-          'DELETE FROM episodes WHERE source_id = ? AND key = ?',
-          stale.slice(i, i + batchSize),
-        );
-      }
-      return 'ok';
-    });
-
-    if (stored === 'no-source') {
-      await deleteStalkerCmdMap(deps.secrets, source.id).catch(() => undefined);
-      return err(elvError('storage', 'source-not-found'));
-    }
-    if (stored === 'no-series') return err(elvError('source-format', 'unknown-series'));
-    notify(opts, {
-      phase: 'episodes',
-      done: episodeEntries.length,
-      total: episodeEntries.length,
-      fraction: 1,
-      percent: 100,
-    });
-    await deps.scheduler.yieldNow();
-    return ok(episodeEntries.length);
-  } catch (e) {
-    return err(e instanceof Stop ? e.error : elvError('storage', 'import-failed'));
-  }
-}
-
-/** Discovers live genres, VOD categories, and series categories for a Stalker portal without writing to SQLite (`#39`). */
-export async function discoverStalkerCategories(
-  source: SourceRecord,
-  deps: ImportDeps,
-  signal: AbortSignal | undefined,
-): Promise<Result<readonly { id: string; name: string; kind: BrowseKind; itemCount: number }[]>> {
-  const opened = await openStalkerClient(source, deps);
-  if (!opened.ok) return opened;
-  const { client } = opened.value;
-  const call = signal === undefined ? undefined : { signal };
-  try {
-    unwrap(await client.handshake(call));
-    const [genres, vodCats, seriesCats] = await Promise.all([
-      client.genres(call).then(unwrap),
-      client.vodCategories(call).then((r) => (r.ok ? r.value : [])),
-      client.seriesCategories(call).then((r) => (r.ok ? r.value : [])),
-    ]);
-    const out: { id: string; name: string; kind: BrowseKind; itemCount: number }[] = [];
-    for (const c of filterRealCategories(genres)) {
-      out.push({ id: c.id, name: c.name, kind: 'live', itemCount: 0 });
-    }
-    for (const c of filterRealCategories(vodCats)) {
-      out.push({ id: c.id, name: c.name, kind: 'movie', itemCount: 0 });
-    }
-    for (const c of filterRealCategories(seriesCats)) {
-      out.push({ id: c.id, name: c.name, kind: 'series', itemCount: 0 });
-    }
-    return ok(out);
-  } catch (e) {
-    if (signal?.aborted) return err(elvError('network', 'aborted'));
-    return err(e instanceof Stop ? e.error : elvError('storage', 'import-failed'));
-  }
 }

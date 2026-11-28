@@ -93,7 +93,8 @@ export interface XtreamVodInfo {
   providerImdbId?: string;
   providerTmdbId?: string;
   backdrop?: string;
-  extension: string;
+  extension?: string;
+  directSource?: string;
 }
 
 /** An EPG entry (from `get_short_epg` or `get_simple_data_table`) with epoch-millisecond times. */

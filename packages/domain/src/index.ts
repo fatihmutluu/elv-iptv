@@ -29,6 +29,14 @@ export {
   scopeCredentialHeaders,
   setSafeHeader,
 } from './headers';
+export {
+  createHostConnectivityGuard,
+  type HostConnectivityGuard,
+  type HostConnectivityGuardOptions,
+  type HostFailureReportOptions,
+  type HostGuardAdmission,
+  type HostGuardTicket,
+} from './host-connectivity-guard';
 export * from './http';
 export * from './keymap-store';
 export * from './languages';

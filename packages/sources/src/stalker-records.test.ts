@@ -20,42 +20,92 @@ describe('normalizeStalkerPortalUrl', () => {
       ok: true,
       value: {
         endpoint: 'http://portal.example:8080/portal.php',
-        fallbackEndpoint: 'http://portal.example:8080/stalker_portal/server/load.php',
+        fallbackEndpoint: 'http://portal.example:8080/server/load.php',
+        candidates: [
+          'http://portal.example:8080/portal.php',
+          'http://portal.example:8080/server/load.php',
+          'http://portal.example:8080/stalker_portal/server/load.php',
+        ],
       },
     });
     expect(normalizeStalkerPortalUrl('portal.example:8080/c/')).toEqual({
       ok: true,
       value: {
         endpoint: 'http://portal.example:8080/portal.php',
-        fallbackEndpoint: 'http://portal.example:8080/stalker_portal/server/load.php',
+        fallbackEndpoint: 'http://portal.example:8080/server/load.php',
+        candidates: [
+          'http://portal.example:8080/portal.php',
+          'http://portal.example:8080/server/load.php',
+          'http://portal.example:8080/stalker_portal/server/load.php',
+          'http://portal.example:8080/c/portal.php',
+          'http://portal.example:8080/c/server/load.php',
+          'http://portal.example:8080/c/stalker_portal/server/load.php',
+        ],
       },
     });
     expect(normalizeStalkerPortalUrl('https://portal.example/')).toEqual({
       ok: true,
       value: {
         endpoint: 'https://portal.example/portal.php',
-        fallbackEndpoint: 'https://portal.example/stalker_portal/server/load.php',
+        fallbackEndpoint: 'https://portal.example/server/load.php',
+        candidates: [
+          'https://portal.example/portal.php',
+          'https://portal.example/server/load.php',
+          'https://portal.example/stalker_portal/server/load.php',
+        ],
       },
     });
     expect(normalizeStalkerPortalUrl('http://portal.example/stalker_portal/c/')).toEqual({
       ok: true,
-      value: { endpoint: 'http://portal.example/stalker_portal/server/load.php' },
+      value: {
+        endpoint: 'http://portal.example/stalker_portal/server/load.php',
+        fallbackEndpoint: 'http://portal.example/stalker_portal/portal.php',
+        candidates: [
+          'http://portal.example/stalker_portal/server/load.php',
+          'http://portal.example/stalker_portal/portal.php',
+          'http://portal.example/stalker_portal/c/portal.php',
+          'http://portal.example/stalker_portal/c/server/load.php',
+          'http://portal.example/portal.php',
+          'http://portal.example/server/load.php',
+        ],
+      },
     });
     expect(normalizeStalkerPortalUrl('http://portal.example/portal.php?foo=1#x')).toEqual({
       ok: true,
-      value: { endpoint: 'http://portal.example/portal.php' },
+      value: {
+        endpoint: 'http://portal.example/portal.php',
+        fallbackEndpoint: 'http://portal.example/server/load.php',
+        candidates: [
+          'http://portal.example/portal.php',
+          'http://portal.example/server/load.php',
+          'http://portal.example/stalker_portal/server/load.php',
+        ],
+      },
     });
     expect(
       normalizeStalkerPortalUrl('https://portal.example/stalker_portal/server/load.php'),
     ).toEqual({
       ok: true,
-      value: { endpoint: 'https://portal.example/stalker_portal/server/load.php' },
+      value: {
+        endpoint: 'https://portal.example/stalker_portal/server/load.php',
+        fallbackEndpoint: 'https://portal.example/stalker_portal/portal.php',
+        candidates: [
+          'https://portal.example/stalker_portal/server/load.php',
+          'https://portal.example/stalker_portal/portal.php',
+          'https://portal.example/portal.php',
+          'https://portal.example/server/load.php',
+        ],
+      },
     });
     expect(normalizeStalkerPortalUrl('http://portal.example/stalker_portal/')).toEqual({
       ok: true,
       value: {
         endpoint: 'http://portal.example/stalker_portal/server/load.php',
         fallbackEndpoint: 'http://portal.example/stalker_portal/portal.php',
+        candidates: [
+          'http://portal.example/stalker_portal/server/load.php',
+          'http://portal.example/stalker_portal/portal.php',
+        ],
       },
     });
   });

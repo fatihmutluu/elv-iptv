@@ -7,14 +7,15 @@ export const DEFAULT_MAX_DECOMPRESSED_BYTES = 256 * 1024 * 1024;
 
 /** Options for {@link decodeMaybeGzip}. */
 export interface GzipStreamOptions {
-  /** Platform gzip decompressor; required when the stream starts with gzip magic bytes `1f 8b`. */
+  /** Platform decompressor; `gunzip` handles gzip (`1f 8b`) and optional `unxz` handles XZ (`fd 37 7a 58 5a 00`). */
   decompressor?: Decompressor;
-  /** Maximum decompressed byte count allowed across all gzip members (default 256 MiB). */
+  /** Maximum decompressed byte count allowed across all members/streams (default 256 MiB). */
   maxDecompressedBytes?: number;
 }
 
 const GZIP_0 = 0x1f;
 const GZIP_1 = 0x8b;
+const XZ_MAGIC = [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00] as const;
 
 async function closeQuietly(it: AsyncIterator<Uint8Array> | undefined): Promise<void> {
   if (!it) return;
@@ -41,11 +42,19 @@ function peekQueueByte(queue: readonly Uint8Array[], index: number): number | un
   return undefined;
 }
 
+function matchesXzPrefix(queue: readonly Uint8Array[], count: number): boolean {
+  const limit = Math.min(count, XZ_MAGIC.length);
+  for (let i = 0; i < limit; i++) {
+    if (peekQueueByte(queue, i) !== XZ_MAGIC[i]) return false;
+  }
+  return true;
+}
+
 /**
- * Sniffs the first two bytes of `chunks` for gzip magic (`1f 8b`). Non-gzip streams are replayed unchanged
- * with zero extra copies. Gzip streams are framed per RFC 1952 + RFC 1951 member boundary in O(1) memory so
- * each member closes cleanly before the next member begins, supporting single-member `DecompressionStream('gzip')`
- * without trailing-junk races while enforcing `maxDecompressedBytes` (default 256 MiB) across all members.
+ * Sniffs up to the first 6 bytes of `chunks` for gzip (`1f 8b`) or XZ (`fd 37 7a 58 5a 00`) magic.
+ * Non-compressed streams (including files shorter than 6 bytes) are replayed unchanged with zero extra copies.
+ * Gzip streams are framed per RFC 1952 + RFC 1951 member boundary in O(1) memory; XZ streams delegate to
+ * `opts.decompressor.unxz`. Both enforce `maxDecompressedBytes` (default 256 MiB) with early upstream cancel.
  */
 export async function* decodeMaybeGzip(
   chunks: AsyncIterable<Uint8Array>,
@@ -68,7 +77,16 @@ export async function* decodeMaybeGzip(
     }
   };
 
-  while (heldBytes < 2) {
+  while (heldBytes < XZ_MAGIC.length) {
+    if (heldBytes >= 2 && peekQueueByte(held, 0) === GZIP_0 && peekQueueByte(held, 1) === GZIP_1) {
+      break;
+    }
+    if (heldBytes >= 1) {
+      const b0 = peekQueueByte(held, 0);
+      if (b0 !== GZIP_0 && b0 !== XZ_MAGIC[0]) break;
+      if (b0 === GZIP_0 && heldBytes >= 2) break;
+      if (b0 === XZ_MAGIC[0] && !matchesXzPrefix(held, heldBytes)) break;
+    }
     let r: IteratorResult<Uint8Array>;
     try {
       r = await pull();
@@ -85,11 +103,11 @@ export async function* decodeMaybeGzip(
     }
   }
 
-  const first = held[0];
-  const second = (first && first.length > 1 ? first[1] : held[1]?.[0]) as number | undefined;
-  const gzip = first?.[0] === GZIP_0 && second === GZIP_1;
+  const isGzip =
+    heldBytes >= 2 && peekQueueByte(held, 0) === GZIP_0 && peekQueueByte(held, 1) === GZIP_1;
+  const isXz = !isGzip && heldBytes >= XZ_MAGIC.length && matchesXzPrefix(held, XZ_MAGIC.length);
 
-  if (!gzip) {
+  if (!isGzip && !isXz) {
     try {
       for (const h of held) yield h;
       while (!upstreamEnded) {
@@ -107,6 +125,73 @@ export async function* decodeMaybeGzip(
       }
       return ok(undefined);
     } finally {
+      if (!upstreamEnded) await closeQuietly(it);
+    }
+  }
+
+  if (isXz) {
+    const unxz = opts.decompressor?.unxz;
+    if (!unxz) {
+      if (!upstreamEnded) await closeQuietly(it);
+      return err(elvError('source-format', 'xz-unsupported'));
+    }
+    const maxBytes = opts.maxDecompressedBytes ?? DEFAULT_MAX_DECOMPRESSED_BYTES;
+    let totalDecompressed = 0;
+    let activeReader: AsyncIterator<Uint8Array> | undefined;
+
+    async function* xzInput(): AsyncGenerator<Uint8Array> {
+      for (const h of held) yield h;
+      while (!upstreamEnded) {
+        const r = await pull();
+        if (r.done) {
+          upstreamEnded = true;
+          return;
+        }
+        if (r.value.length > 0) yield r.value;
+      }
+    }
+
+    try {
+      let reader: AsyncIterator<Uint8Array>;
+      try {
+        reader = openAsyncIterator(unxz(xzInput()));
+      } catch {
+        const initErr = readSourceError();
+        if (initErr) return err(toElvError(initErr.error));
+        return err(elvError('source-format', 'xz-corrupt'));
+      }
+      activeReader = reader;
+
+      for (;;) {
+        let r: IteratorResult<Uint8Array>;
+        try {
+          r = await reader.next();
+        } catch {
+          activeReader = undefined;
+          await closeQuietly(reader);
+          const upstreamErr = readSourceError();
+          if (upstreamErr) return err(toElvError(upstreamErr.error));
+          return err(elvError('source-format', 'xz-corrupt'));
+        }
+        if (r.done) {
+          activeReader = undefined;
+          const upstreamErr = readSourceError();
+          if (upstreamErr) return err(toElvError(upstreamErr.error));
+          return ok(undefined);
+        }
+        const chunk = r.value;
+        totalDecompressed += chunk.length;
+        if (totalDecompressed > maxBytes) {
+          activeReader = undefined;
+          await closeQuietly(reader);
+          return err(elvError('source-format', 'too-large'));
+        }
+        yield chunk;
+      }
+    } finally {
+      const reader = activeReader;
+      activeReader = undefined;
+      await closeQuietly(reader);
       if (!upstreamEnded) await closeQuietly(it);
     }
   }

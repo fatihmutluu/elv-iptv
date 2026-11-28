@@ -116,7 +116,8 @@ export function originOf(url: string): string | undefined {
     if (portPart.length > 0 && !portPart.startsWith(':')) return undefined;
   } else {
     const colonIdx = hostPort.indexOf(':');
-    host = (colonIdx === -1 ? hostPort : hostPort.slice(0, colonIdx)).toLowerCase();
+    const rawHost = (colonIdx === -1 ? hostPort : hostPort.slice(0, colonIdx)).toLowerCase();
+    host = rawHost.replace(/\.+$/, '');
     if (host.length === 0 || host.includes('[') || host.includes(']')) return undefined;
     portPart = colonIdx === -1 ? '' : hostPort.slice(colonIdx);
   }
@@ -174,17 +175,32 @@ export function hasCredentialHeaders(
   return false;
 }
 
+function isCredentialSafeTransition(fromUrl: string, toUrl: string): boolean {
+  const fromOrigin = originOf(fromUrl);
+  const toOrigin = originOf(toUrl);
+  if (fromOrigin === undefined || toOrigin === undefined) return false;
+  if (hostnameOf(fromUrl) !== hostnameOf(toUrl)) return false;
+  if (fromOrigin.startsWith('https://') && toOrigin.startsWith('http://')) return false;
+  return true;
+}
+
 /**
- * Returns sanitized headers for `targetUrl`, stripping `Authorization`, `Proxy-Authorization`,
- * `Cookie`, `X-Api-Key`, and `X-Auth-Token` whenever `targetUrl` is not exact-origin with `initialUrl`.
+ * Returns sanitized headers for `targetUrl`, preserving `Authorization`, `Proxy-Authorization`,
+ * `Cookie`, `X-Api-Key`, and `X-Auth-Token` when `targetUrl` shares the same normalized hostname
+ * without downgrading from `https:` to `http:` (evaluated against both `initialUrl` and optional
+ * `previousUrl`). Strips credential headers strictly on any hostname change or `https:` -> `http:` downgrade.
  */
 export function scopeCredentialHeaders(
   headers: Readonly<Record<string, string>> | undefined,
   initialUrl: string,
   targetUrl: string,
+  previousUrl?: string,
 ): Record<string, string> {
   const sanitized = sanitizeHeaders(headers);
-  if (sameOrigin(initialUrl, targetUrl)) return sanitized;
+  const preserve =
+    isCredentialSafeTransition(initialUrl, targetUrl) &&
+    (previousUrl === undefined || isCredentialSafeTransition(previousUrl, targetUrl));
+  if (preserve) return sanitized;
   const scoped: Record<string, string> = {};
   for (const key of Object.keys(sanitized)) {
     if (CREDENTIAL_HEADER_NAMES.has(key.toLowerCase())) continue;

@@ -19,7 +19,7 @@ export function stripXtreamTail(url: string): string {
   return url
     .replace(/[?#].*$/s, '')
     .replace(/\/+$/, '')
-    .replace(/\/(?:player_api|get|xmltv)\.php$/i, '')
+    .replace(/\/(?:player_api|panel_api|get|xmltv)\.php$/i, '')
     .replace(/\/+$/, '');
 }
 

@@ -1,9 +1,8 @@
 import { elvError, err, ok, type Result } from '@elv/domain';
+import { type CalendarParts, utcMsToCalendarParts } from './timezone-offset';
 
 const DAY_MS = 86_400_000;
-const MAX_TZ_CACHE = 64;
 const MAX_CATCHUP_URL_LENGTH = 4_096;
-const TZ_FORMATTERS = new Map<string, Intl.DateTimeFormat | null>();
 const TEMPLATE_TOKEN_RE =
   /\$\{(start|timestamp|end|duration|offset)\}|\{(utc|start|end|utcend|duration|offset|lutc|Y|m|d|H|M|S)\}/g;
 
@@ -21,6 +20,8 @@ export interface CatchupProgrammeWindow {
 export type BuildCatchupUrlInput =
   | {
       readonly mode: 'xc';
+      /** Optional Xtream timeshift endpoint scheme (`'rest'` default, or `'legacy'` `/streaming/timeshift.php`). */
+      readonly xcScheme?: 'rest' | 'legacy';
       readonly server: string;
       readonly username: string;
       readonly password: string;
@@ -57,74 +58,8 @@ export type CatchupWindowCheck =
       readonly reason: 'catchup-unavailable' | 'catchup-expired' | 'catchup-future';
     };
 
-interface CalendarParts {
-  readonly year: string;
-  readonly month: string;
-  readonly day: string;
-  readonly hour: string;
-  readonly minute: string;
-  readonly second: string;
-}
-
-const pad2 = (n: number): string => String(n).padStart(2, '0');
-const pad4 = (n: number): string => String(n).padStart(4, '0');
-
-function getTzFormatter(timeZone: string): Intl.DateTimeFormat | null {
-  if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') return null;
-  const cached = TZ_FORMATTERS.get(timeZone);
-  if (cached !== undefined) return cached;
-  let fmt: Intl.DateTimeFormat | null = null;
-  try {
-    fmt = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hourCycle: 'h23',
-    });
-  } catch {
-    fmt = null;
-  }
-  if (TZ_FORMATTERS.size >= MAX_TZ_CACHE) TZ_FORMATTERS.clear();
-  TZ_FORMATTERS.set(timeZone, fmt);
-  return fmt;
-}
-
 function extractCalendarParts(epochMs: number, serverTimezone?: string): CalendarParts {
-  const date = new Date(epochMs);
-  const zone = serverTimezone?.trim();
-  if (zone) {
-    const fmt = getTzFormatter(zone);
-    if (fmt !== null) {
-      let year = '';
-      let month = '';
-      let day = '';
-      let hour = '';
-      let minute = '';
-      let second = '';
-      for (const part of fmt.formatToParts(date)) {
-        if (part.type === 'year') year = part.value.padStart(4, '0');
-        else if (part.type === 'month') month = part.value.padStart(2, '0');
-        else if (part.type === 'day') day = part.value.padStart(2, '0');
-        else if (part.type === 'hour') {
-          hour = part.value === '24' ? '00' : part.value.padStart(2, '0');
-        } else if (part.type === 'minute') minute = part.value.padStart(2, '0');
-        else if (part.type === 'second') second = part.value.padStart(2, '0');
-      }
-      return { year, month, day, hour, minute, second };
-    }
-  }
-  return {
-    year: pad4(date.getUTCFullYear()),
-    month: pad2(date.getUTCMonth() + 1),
-    day: pad2(date.getUTCDate()),
-    hour: pad2(date.getUTCHours()),
-    minute: pad2(date.getUTCMinutes()),
-    second: pad2(date.getUTCSeconds()),
-  };
+  return utcMsToCalendarParts(epochMs, serverTimezone);
 }
 
 function hasWhitespaceOrControlChar(value: string): boolean {
@@ -171,7 +106,7 @@ function normalizeXcCatchupServer(rawServer: string): string | null {
   }
   const cleanPath = parsed.pathname
     .replace(/\/+$/, '')
-    .replace(/\/(?:player_api|get|xmltv)\.php$/i, '')
+    .replace(/\/(?:player_api|panel_api|get|xmltv)\.php$/i, '')
     .replace(/\/+$/, '');
   const base = `${parsed.origin}${cleanPath}`;
   return base.length <= MAX_CATCHUP_URL_LENGTH ? base : null;
@@ -378,7 +313,14 @@ export function buildCatchupUrl(input: BuildCatchupUrlInput): Result<string> {
     }
     const durationMin = Math.max(1, Math.ceil((stopMs - startMs) / 60_000));
     const startFormatted = formatXtreamTimeshiftStart(startMs, input.serverTimezone);
-    url = `${cleanServer}/timeshift/${encodeURIComponent(input.username)}/${encodeURIComponent(input.password)}/${durationMin}/${startFormatted}/${encodeURIComponent(streamIdStr)}.${encodeURIComponent(ext)}`;
+    const encUser = encodeURIComponent(input.username);
+    const encPass = encodeURIComponent(input.password);
+    const encStream = encodeURIComponent(streamIdStr);
+    const encExt = encodeURIComponent(ext);
+    url =
+      input.xcScheme === 'legacy'
+        ? `${cleanServer}/streaming/timeshift.php?username=${encUser}&password=${encPass}&stream=${encStream}&start=${startFormatted}&duration=${durationMin}&extension=${encExt}`
+        : `${cleanServer}/timeshift/${encUser}/${encPass}/${durationMin}/${startFormatted}/${encStream}.${encExt}`;
   } else {
     const liveUrl = input.liveUrl.trim();
     const templateParams: CatchupTemplateParams = {

@@ -9,9 +9,12 @@ import {
 
 const LICENSE_TYPE_KEY = 'inputstream.adaptive.license_type';
 const LICENSE_KEY_KEY = 'inputstream.adaptive.license_key';
+const DRM_LEGACY_KEY = 'inputstream.adaptive.drm_legacy';
 const HTTP_URL_RE = /^https?:\/\//i;
 const HEX_32_RE = /^[0-9a-fA-F]{32}$/;
-const B64URL_TOKEN_RE = /^(?:[A-Za-z0-9_-]{22,24}|[A-Za-z0-9_-]{22}==|[A-Za-z0-9_-]{23}=)$/;
+const UUID_HEX_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const B64URL_16_RE = /^[A-Za-z0-9_-]{22}(?:==)?$/;
+const B64STD_16_RE = /^[A-Za-z0-9+/]{22}(?:==)?$/;
 const PROTO_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 const utf8 = new TextEncoder();
 
@@ -53,8 +56,27 @@ function hasControlOrSpace(value: string): boolean {
   return false;
 }
 
-function isValidClearKeyToken(token: string): boolean {
-  return HEX_32_RE.test(token) || B64URL_TOKEN_RE.test(token);
+function decodeBase64ByteLength(stdB64: string): number {
+  try {
+    const padded = stdB64.endsWith('==') ? stdB64 : `${stdB64}==`;
+    return atob(padded).length;
+  } catch {
+    return -1;
+  }
+}
+
+function normalizeClearKeyToken(token: string): string | undefined {
+  if (HEX_32_RE.test(token)) return token;
+  if (UUID_HEX_RE.test(token)) return token.replace(/-/g, '').toLowerCase();
+  if (B64URL_16_RE.test(token)) {
+    const std = token.replace(/-/g, '+').replace(/_/g, '/');
+    return decodeBase64ByteLength(std) === 16 ? token.replace(/=+$/, '') : undefined;
+  }
+  if (B64STD_16_RE.test(token)) {
+    if (decodeBase64ByteLength(token) !== 16) return undefined;
+    return token.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  return undefined;
 }
 
 function isValidLicenseUrl(url: string): boolean {
@@ -104,7 +126,7 @@ function parsePipeHeaders(rawHeaders: string | undefined): Record<string, string
   return count > 0 ? bounded : undefined;
 }
 
-function parseClearKeyJwk(raw: string): readonly DrmClearKeyPair[] | undefined {
+function parseClearKeyJson(raw: string): readonly DrmClearKeyPair[] | undefined {
   if (utf8.encode(raw).byteLength > MAX_CLEARKEY_JWK_BYTES) return undefined;
   let parsed: unknown;
   try {
@@ -113,23 +135,39 @@ function parseClearKeyJwk(raw: string): readonly DrmClearKeyPair[] | undefined {
     return undefined;
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
-  const keys = (parsed as { keys?: unknown }).keys;
-  if (!Array.isArray(keys) || keys.length === 0) return undefined;
-  const pairs: DrmClearKeyPair[] = [];
-  for (const entry of keys) {
-    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return undefined;
-    const record = entry as { kty?: unknown; kid?: unknown; k?: unknown };
-    if (
-      record.kty !== 'oct' ||
-      typeof record.kid !== 'string' ||
-      typeof record.k !== 'string' ||
-      !isValidClearKeyToken(record.kid) ||
-      !isValidClearKeyToken(record.k)
-    ) {
-      return undefined;
+  const obj = parsed as Record<string, unknown>;
+  if (Object.hasOwn(obj, 'keys')) {
+    const keys = obj.keys;
+    if (!Array.isArray(keys) || keys.length === 0) return undefined;
+    const pairs: DrmClearKeyPair[] = [];
+    for (const entry of keys) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return undefined;
+      const record = entry as { kty?: unknown; kid?: unknown; k?: unknown };
+      if (record.kty !== 'oct' || typeof record.kid !== 'string' || typeof record.k !== 'string') {
+        return undefined;
+      }
+      const kid = normalizeClearKeyToken(record.kid);
+      const key = normalizeClearKeyToken(record.k);
+      if (kid === undefined || key === undefined) return undefined;
+      if (pairs.length < MAX_CLEARKEY_PAIRS) {
+        pairs.push({ kid, key });
+      }
     }
+    return pairs.length > 0 ? pairs : undefined;
+  }
+
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return undefined;
+  const pairs: DrmClearKeyPair[] = [];
+  for (const rawKid of keys) {
+    if (PROTO_KEYS.has(rawKid.toLowerCase())) return undefined;
+    const rawVal = obj[rawKid];
+    if (typeof rawVal !== 'string') return undefined;
+    const kid = normalizeClearKeyToken(rawKid.trim());
+    const key = normalizeClearKeyToken(rawVal.trim());
+    if (kid === undefined || key === undefined) return undefined;
     if (pairs.length < MAX_CLEARKEY_PAIRS) {
-      pairs.push({ kid: record.kid, key: record.k });
+      pairs.push({ kid, key });
     }
   }
   return pairs.length > 0 ? pairs : undefined;
@@ -144,9 +182,9 @@ function parseClearKeyPairs(raw: string): readonly DrmClearKeyPair[] | undefined
     if (trimmed.length === 0) return undefined;
     const colon = trimmed.indexOf(':');
     if (colon <= 0 || trimmed.indexOf(':', colon + 1) !== -1) return undefined;
-    const kid = trimmed.slice(0, colon).trim();
-    const key = trimmed.slice(colon + 1).trim();
-    if (!isValidClearKeyToken(kid) || !isValidClearKeyToken(key)) return undefined;
+    const kid = normalizeClearKeyToken(trimmed.slice(0, colon).trim());
+    const key = normalizeClearKeyToken(trimmed.slice(colon + 1).trim());
+    if (kid === undefined || key === undefined) return undefined;
     if (pairs.length < MAX_CLEARKEY_PAIRS) {
       pairs.push({ kid, key });
     }
@@ -173,29 +211,47 @@ function parseRemoteLicense(scheme: DrmScheme, raw: string): DrmConfig | undefin
 }
 
 /**
- * Parses Kodi `#KODIPROP:inputstream.adaptive.license_type` and `license_key` directives into a
- * validated play-time {@link DrmConfig} (`#272`). Returns `undefined` when DRM tags are absent,
- * unsupported, or fail strict URL / ClearKey validation.
+ * Parses Kodi `#KODIPROP:inputstream.adaptive.license_type`, `license_key`, and `drm_legacy`
+ * directives into a validated play-time {@link DrmConfig} (`#272`). Returns `undefined` when DRM
+ * tags are absent, unsupported, or fail strict URL / 128-bit ClearKey validation.
  */
 export function parseM3uDrmProps(
   kodiProps: Readonly<Record<string, string>>,
 ): DrmConfig | undefined {
   let rawType: string | undefined;
   let rawKey: string | undefined;
+  let rawLegacy: string | undefined;
   for (const key of Object.keys(kodiProps)) {
     const lower = key.toLowerCase();
     if (lower === LICENSE_TYPE_KEY) rawType = kodiProps[key];
     else if (lower === LICENSE_KEY_KEY) rawKey = kodiProps[key];
+    else if (lower === DRM_LEGACY_KEY) rawLegacy = kodiProps[key];
   }
-  if (rawType === undefined || rawKey === undefined) return undefined;
-  const scheme = SCHEME_MAP[rawType.trim().toLowerCase()];
-  if (scheme === undefined) return undefined;
+  if (rawType === undefined && rawKey === undefined && rawLegacy !== undefined) {
+    const pipe = rawLegacy.indexOf('|');
+    if (pipe > 0) {
+      rawType = rawLegacy.slice(0, pipe);
+      rawKey = rawLegacy.slice(pipe + 1);
+    }
+  }
+  if (rawKey === undefined) return undefined;
   const keyTrimmed = rawKey.trim();
   if (keyTrimmed.length === 0) return undefined;
 
+  if (rawType === undefined) {
+    if (HTTP_URL_RE.test(keyTrimmed) || keyTrimmed.includes('://')) return undefined;
+    const clearKeys = keyTrimmed.startsWith('{')
+      ? parseClearKeyJson(keyTrimmed)
+      : parseClearKeyPairs(keyTrimmed);
+    return clearKeys === undefined ? undefined : { scheme: 'clearkey', clearKeys };
+  }
+
+  const scheme = SCHEME_MAP[rawType.trim().toLowerCase()];
+  if (scheme === undefined) return undefined;
+
   if (keyTrimmed.startsWith('{')) {
     if (scheme !== 'clearkey') return undefined;
-    const clearKeys = parseClearKeyJwk(keyTrimmed);
+    const clearKeys = parseClearKeyJson(keyTrimmed);
     return clearKeys === undefined ? undefined : { scheme, clearKeys };
   }
 

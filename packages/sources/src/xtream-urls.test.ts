@@ -44,6 +44,12 @@ describe('requests', () => {
     expect(u.searchParams.get('username')).toBe(USER);
     expect(u.searchParams.get('password')).toBe(PASS);
   });
+
+  it('sends a default IPTV player User-Agent when transport.userAgent is omitted (XC-4)', async () => {
+    const { c, requests } = client(() => ({ json: [] }));
+    await c.liveStreams();
+    expect(requests[0]?.headers?.['user-agent']).toBe('VLC/3.0.18 LibVLC/3.0.18');
+  });
 });
 
 describe('never leaks credentials in errors', () => {
@@ -81,6 +87,8 @@ describe('pasted server URLs', () => {
   const forms = [
     'http://h.example/player_api.php',
     `http://h.example/player_api.php?${pasted}`,
+    'http://h.example/panel_api.php',
+    `http://h.example/panel_api.php?${pasted}`,
     `http://h.example/get.php?${pasted}&type=m3u_plus&output=ts`,
     `http://h.example/xmltv.php?${pasted}#frag`,
     'http://h.example/xmltv.php/',

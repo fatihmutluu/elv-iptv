@@ -7,6 +7,7 @@ import type { StalkerResolverState } from './stream-resolver-stalker';
 import type {
   CatchupProgrammeInput,
   SourceStreamMeta,
+  StreamAlternate,
   StreamRequest,
   StreamResolver,
   XtreamSecret,
@@ -102,8 +103,8 @@ export async function resolveCatchupStreamInternal(
     if (row.provider_id === null || !Number.isFinite(streamId)) return notFound();
     const ext = deps.effectiveXtreamTransport(source)?.xtreamFormat ?? 'ts';
     const server = resolveXtreamBaseUrl(creds.server, deps.http);
-    const built = buildCatchupUrl({
-      mode: 'xc',
+    const xcBaseInput = {
+      mode: 'xc' as const,
       server,
       username: creds.username,
       password: creds.password,
@@ -113,18 +114,43 @@ export async function resolveCatchupStreamInternal(
       programme,
       catchupDays: row.catchup_days,
       nowMs: effectiveNow,
-    });
+    };
+    const built = buildCatchupUrl(xcBaseInput);
     if (!built.ok) return built;
     if (!deps.isAllowedPlaybackUrl(built.value)) {
       return err(elvError('playback', 'unsupported-scheme'));
     }
+    const primaryUrl = deps.normalizeMulticastUrl(built.value.trim());
+    const legacy = buildCatchupUrl({ ...xcBaseInput, xcScheme: 'legacy' });
+    const alternates: StreamAlternate[] = [];
+    if (legacy.ok && deps.isAllowedPlaybackUrl(legacy.value)) {
+      const legacyUrl = deps.normalizeMulticastUrl(legacy.value.trim());
+      if (legacyUrl !== primaryUrl) {
+        alternates.push({
+          url: legacyUrl,
+          headers: { ...headers },
+          accountKey,
+          maxConnections: connectionMeta.maxConnections,
+          sourceId: row.source_id,
+          channelKey: itemKey,
+          ...(connectionMeta.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
+          ...(connectionMeta.dnsFamily !== undefined
+            ? { dnsFamily: connectionMeta.dnsFamily }
+            : {}),
+          ...(connectionMeta.hostOverride !== undefined
+            ? { hostOverride: connectionMeta.hostOverride }
+            : {}),
+        });
+      }
+    }
     return ok({
-      url: deps.normalizeMulticastUrl(built.value.trim()),
+      url: primaryUrl,
       headers,
       accountKey,
       sourceId: row.source_id,
       channelKey: itemKey,
       ...connectionMeta,
+      ...(alternates.length > 0 ? { alternates } : {}),
     });
   }
 
@@ -155,11 +181,12 @@ export async function resolveCatchupStreamInternal(
   }
   const mode = normalizeCatchupMode(row.catchup_mode) ?? 'default';
   let built: Result<string>;
+  let legacyAltUrl: string | undefined;
   if (mode === 'xc') {
     const match = XTREAM_LIVE_URL_RE.exec(liveUrl.trim());
     if (match !== null) {
-      built = buildCatchupUrl({
-        mode: 'xc',
+      const xcInput = {
+        mode: 'xc' as const,
         server: match[1] as string,
         username: decodeSafe(match[2] as string),
         password: decodeSafe(match[3] as string),
@@ -169,7 +196,12 @@ export async function resolveCatchupStreamInternal(
         programme,
         catchupDays: row.catchup_days,
         nowMs: effectiveNow,
-      });
+      };
+      built = buildCatchupUrl(xcInput);
+      const legacy = buildCatchupUrl({ ...xcInput, xcScheme: 'legacy' });
+      if (legacy.ok && deps.isAllowedPlaybackUrl(legacy.value)) {
+        legacyAltUrl = deps.normalizeMulticastUrl(legacy.value.trim());
+      }
     } else {
       built = buildCatchupUrl({
         mode: 'default',
@@ -196,12 +228,30 @@ export async function resolveCatchupStreamInternal(
   if (!deps.isAllowedPlaybackUrl(built.value)) {
     return err(elvError('playback', 'unsupported-scheme'));
   }
+  const primaryUrl = deps.normalizeMulticastUrl(built.value.trim());
+  const alternates: StreamAlternate[] = [];
+  if (legacyAltUrl !== undefined && legacyAltUrl !== primaryUrl) {
+    alternates.push({
+      url: legacyAltUrl,
+      headers: { ...headers },
+      accountKey,
+      maxConnections: connectionMeta.maxConnections,
+      sourceId: row.source_id,
+      channelKey: itemKey,
+      ...(connectionMeta.allowLegacyTls === true ? { allowLegacyTls: true } : {}),
+      ...(connectionMeta.dnsFamily !== undefined ? { dnsFamily: connectionMeta.dnsFamily } : {}),
+      ...(connectionMeta.hostOverride !== undefined
+        ? { hostOverride: connectionMeta.hostOverride }
+        : {}),
+    });
+  }
   return ok({
-    url: deps.normalizeMulticastUrl(built.value.trim()),
+    url: primaryUrl,
     headers,
     accountKey,
     sourceId: row.source_id,
     channelKey: itemKey,
     ...connectionMeta,
+    ...(alternates.length > 0 ? { alternates } : {}),
   });
 }

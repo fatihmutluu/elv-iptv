@@ -1,17 +1,34 @@
 import type { HttpClient, Result, TransportSettings } from '@elv/domain';
 
-/** Normalized Stalker/Ministra portal API endpoint with optional 404 fallback endpoint. */
+/** Observed authentication mode of a Stalker/Ministra portal endpoint. */
+export type StalkerPortalMode = 'simple' | 'full';
+
+/** Discovered active endpoint and authentication mode for a Stalker/Ministra portal. */
+export interface StalkerDiscoveredPortal {
+  readonly endpoint: string;
+  readonly mode: StalkerPortalMode;
+}
+
+/** Normalized Stalker/Ministra portal API endpoint with ordered candidate endpoints. */
 export interface StalkerPortalEndpoint {
-  /** Primary API load endpoint (`.../portal.php` or `.../server/load.php`). */
+  /** Primary API load endpoint (`.../portal.php`, `.../server/load.php`, or explicit `.php`). */
   endpoint: string;
-  /** Optional fallback endpoint probed once on HTTP 404 during handshake. */
+  /** Optional second candidate endpoint probed after primary. */
   fallbackEndpoint?: string;
+  /** Deduplicated ordered list of candidate API endpoints derived from the user's portal URL. */
+  readonly candidates?: readonly string[];
 }
 
 /** Per-call options accepted by every {@link StalkerClient} method. */
 export interface StalkerCallOptions {
   /** Aborting ends the call with `network` / `aborted`. */
   signal?: AbortSignal;
+}
+
+/** Options for series season and episode listing calls (supports `type=vod` Ministra series). */
+export interface StalkerSeriesCallOptions extends StalkerCallOptions {
+  /** Portal content type for series endpoints (default `'series'`; use `'vod'` for VOD-backed series). */
+  contentType?: 'series' | 'vod';
 }
 
 /** Options for paginated live channel listings. */
@@ -31,7 +48,7 @@ export type StalkerLinkKind = 'live' | 'movie' | 'series';
 
 /** Options for play-time `create_link` resolution. */
 export interface StalkerCreateLinkOptions extends StalkerCallOptions {
-  /** 1-based episode number required by some portals for series `create_link`. */
+  /** 1-based episode number required by portals for embedded series `create_link`. */
   episodeNumber?: number;
 }
 
@@ -44,7 +61,21 @@ export interface StalkerClientOptions {
   mac: string;
   /** Optional device serial number (`sn`), kept strictly inside the client closure. */
   serialNumber?: string;
-  /** Optional IANA timezone for the `Cookie` header and EPG fallback (default `'UTC'`). */
+  /** Optional STB `device_id` sent on `get_profile` / `do_auth` (never auto-invented). */
+  deviceId?: string;
+  /** Optional STB `device_id2` sent on `get_profile` / `do_auth` (never auto-invented). */
+  deviceId2?: string;
+  /** Optional STB `signature` sent on `get_profile`. */
+  signature?: string;
+  /** Optional portal account login for `status=2` second-step `do_auth`. */
+  login?: string;
+  /** Optional portal account password for `status=2` second-step `do_auth`. */
+  password?: string;
+  /** Previously discovered API endpoint to use directly before falling back to discovery. */
+  discoveredEndpoint?: string;
+  /** Previously discovered authentication mode (`'simple'` token-free or `'full'` bearer token). */
+  portalMode?: StalkerPortalMode;
+  /** Optional IANA or fixed-offset timezone for the `Cookie` header and EPG fallback (default `'UTC'`). */
   timezone?: string;
   /** Optional STB language for the `Cookie` header (default `'en'`). */
   language?: string;
@@ -62,7 +93,15 @@ export interface StalkerProfile {
   expiresAt?: number;
   maxConnections?: number;
   timezone?: string;
+  /** Portal watchdog polling interval in seconds (`watchdog_timeout`), when reported. */
+  watchdogTimeoutSec?: number;
   blocked: boolean;
+}
+
+/** Keepalive response returned by `type=watchdog&action=get_events`. */
+export interface StalkerWatchdogEventResult {
+  event?: string;
+  watchdogTimeoutSec?: number;
 }
 
 /** A live genre, VOD category, or series category. */
@@ -92,9 +131,13 @@ export interface StalkerChannel {
   epgId?: string;
   catchupDays: number;
   censored?: boolean;
+  /** Raw `use_http_tmp_link` flag when explicitly reported by the portal. */
+  useHttpTmpLink?: boolean;
+  /** Raw `use_load_balancing` flag when explicitly reported by the portal. */
+  useLoadBalancing?: boolean;
 }
 
-/** A VOD movie item from a Stalker/Ministra portal. */
+/** A VOD movie or VOD-backed series item from a Stalker/Ministra portal. */
 export interface StalkerVodItem {
   id: string;
   name: string;
@@ -109,7 +152,13 @@ export interface StalkerVodItem {
   durationSec?: number;
   addedAt?: number;
   isSeries?: boolean;
+  /** Embedded 1-based episode numbers (`series: [1, 2, ...]`) when directly attached to a VOD row. */
+  seriesEpisodeNumbers?: readonly number[];
   censored?: boolean;
+  /** Raw `use_http_tmp_link` flag when explicitly reported by the portal. */
+  useHttpTmpLink?: boolean;
+  /** Raw `use_load_balancing` flag when explicitly reported by the portal. */
+  useLoadBalancing?: boolean;
 }
 
 /** A series item from a Stalker/Ministra portal. */
@@ -117,6 +166,8 @@ export interface StalkerSeriesItem {
   id: string;
   name: string;
   categoryId?: string;
+  cmd?: string;
+  seriesEpisodeNumbers?: readonly number[];
   cover?: string;
   rating?: number;
   year?: number;
@@ -146,6 +197,19 @@ export interface StalkerEpisode {
   title: string;
   cmd: string;
   durationSec?: number;
+  protocol?: string;
+  isFile?: boolean;
+  fileType?: string;
+}
+
+/** A Ministra media file entry returned by `type=vod&action=get_ordered_list&movie_id=...&season_id=...&episode_id=...`. */
+export interface StalkerEpisodeFile {
+  id: string;
+  cmd?: string;
+  protocol?: string;
+  isFile?: boolean;
+  fileType?: string;
+  name?: string;
 }
 
 /** A portal EPG programme entry with epoch-millisecond timestamps. */
@@ -161,8 +225,17 @@ export interface StalkerEpgEntry {
  * Portal URL, MAC address, serial number, and bearer tokens stay strictly inside the closure.
  */
 export interface StalkerClient {
+  /** Returns the discovered active API endpoint and auth mode once resolved. */
+  discoveredPortal(): StalkerDiscoveredPortal | undefined;
+  /**
+   * Builds lower-case playback headers for `streamUrl`. Applies `streamTransportHeaders` and
+   * attaches portal session headers (`cookie`, `authorization`, `user-agent`, `x-user-agent`, `sn`)
+   * only when `streamUrl` targets the same normalized host with no `https -> http` downgrade.
+   */
+  playbackHeadersFor(streamUrl: string): Record<string, string>;
   handshake(options?: StalkerCallOptions): Promise<Result<void>>;
   profile(options?: StalkerCallOptions): Promise<Result<StalkerProfile>>;
+  watchdogEvents(options?: StalkerCallOptions): Promise<Result<StalkerWatchdogEventResult>>;
   genres(options?: StalkerCallOptions): Promise<Result<StalkerCategory[]>>;
   vodCategories(options?: StalkerCallOptions): Promise<Result<StalkerCategory[]>>;
   seriesCategories(options?: StalkerCallOptions): Promise<Result<StalkerCategory[]>>;
@@ -172,13 +245,22 @@ export interface StalkerClient {
   seriesItems(
     options?: StalkerCategoryListOptions,
   ): Promise<Result<StalkerPage<StalkerSeriesItem>>>;
-  seriesSeasons(seriesId: string, options?: StalkerCallOptions): Promise<Result<StalkerSeason[]>>;
+  seriesSeasons(
+    seriesId: string,
+    options?: StalkerSeriesCallOptions,
+  ): Promise<Result<StalkerSeason[]>>;
   seasonEpisodes(
     seriesId: string,
     seasonId: string,
     page?: number,
-    options?: StalkerCallOptions,
+    options?: StalkerSeriesCallOptions,
   ): Promise<Result<StalkerPage<StalkerEpisode>>>;
+  vodEpisodeFiles(
+    seriesId: string,
+    seasonId: string,
+    episodeId: string,
+    options?: StalkerCallOptions,
+  ): Promise<Result<StalkerEpisodeFile[]>>;
   shortEpg(
     channelId: string,
     size?: number,

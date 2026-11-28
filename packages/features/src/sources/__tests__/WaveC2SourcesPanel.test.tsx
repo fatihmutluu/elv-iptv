@@ -72,4 +72,64 @@ describe('Wave C2 / Wave P7 SavedSourcesPanel (#68)', () => {
     await fireEvent.press(screen.getByTestId('source-advanced-s1'));
     expect(onOpenAdvanced).toHaveBeenCalledWith(readySource);
   });
+
+  it('renders quiet tabular-nums account health caption for healthy expiry and connection quota without adding extra warning pills (Wave Q6)', async () => {
+    const nowMs = Date.UTC(2026, 10, 28, 12, 0, 0);
+    const healthySource: SourceRow = {
+      id: 's-healthy',
+      kind: 'xtream',
+      name: 'Healthy IPTV',
+      createdAt: nowMs - 86_400_000,
+      needsImport: false,
+      lastCatalogSyncAt: nowMs - 3_600_000,
+      lastGuideSyncAt: null,
+      accountMeta: {
+        isTrial: false,
+        expiresAt: Date.UTC(2027, 2, 20, 0, 0, 0),
+        maxConnections: 3,
+        activeConnections: 1,
+      },
+    };
+    const ctrl = {
+      sources: [healthySource],
+      statusById: {},
+      canRefreshGuide: true,
+      runImport: jest.fn(async () => undefined),
+      runGuideRefresh: jest.fn(async () => undefined),
+      cancelImport: jest.fn(),
+      remove: jest.fn(async () => undefined),
+    } as unknown as SourcesController;
+
+    await render(
+      <ThemeProvider preset="obsidianCrimson">
+        <I18nProvider i18n={createAppI18n('en')}>
+          <FormFactorProvider value="desktop">
+            <ViewportProvider
+              value={{
+                formFactor: 'desktop',
+                orientation: 'landscape',
+                inputModality: 'pointer',
+                width: 1280,
+                height: 720,
+              }}
+            >
+              <SavedSourcesPanel
+                ctrl={ctrl}
+                i18n={createAppI18n('en')}
+                twoColumn={false}
+                tvFocusId={undefined}
+                nowMs={nowMs}
+              />
+            </ViewportProvider>
+          </FormFactorProvider>
+        </I18nProvider>
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByTestId('source-account-warning-s-healthy')).toBeNull();
+    const healthCaption = screen.getByTestId('source-account-health-s-healthy');
+    expect(healthCaption.props.children).toContain('Expires');
+    expect(healthCaption.props.children).toContain('2027');
+    expect(healthCaption.props.children).toContain('1/3 connections');
+  });
 });

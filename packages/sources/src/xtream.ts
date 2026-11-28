@@ -1,5 +1,6 @@
 import {
   type ContentKind,
+  type ElvError,
   elvError,
   err,
   hostnameOf,
@@ -10,13 +11,7 @@ import {
   transportHeaders,
 } from '@elv/domain';
 import { detectAndDecodeText } from './encoding';
-import {
-  accountFailure,
-  acquireXtreamToken,
-  parseXtreamJson,
-  readXtreamBody,
-  resolveNowFn,
-} from './xtream-json';
+import { acquireXtreamToken, parseXtreamJson, readXtreamBody, resolveNowFn } from './xtream-json';
 import {
   accountCooldownKey,
   buildServerEntries,
@@ -29,6 +24,7 @@ import {
   type XtreamServerEntry,
 } from './xtream-mirrors';
 import {
+  classifyAccountFailure,
   isRaw,
   type Raw,
   toAccount,
@@ -63,6 +59,9 @@ const TIMEOUT_MS = 60_000;
 const HTTPS_PROBE_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_BODY = 128 * 1024 * 1024;
 const DEFAULT_PRIMARY_COOLDOWN_MS = 300_000;
+const DEFAULT_XTREAM_USER_AGENT = 'VLC/3.0.18 LibVLC/3.0.18';
+const ACCOUNT_QUERIES = ['', '&action=get_account_info', '&action=get_profile'] as const;
+const HTTP_4XX_5XX_RE = /^http-[45]\d\d$/;
 const NUMERIC_KEY_RE = /^\d+$/;
 const shape = () => elvError('source-format', 'unexpected-shape');
 
@@ -76,7 +75,7 @@ async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
 
 /**
  * Normalizes a pasted Xtream `server`: trims, prepends `http://` when there is no scheme, drops query, fragment,
- * trailing slashes and a trailing `/player_api.php`, `/get.php` or `/xmltv.php`.
+ * trailing slashes and a trailing `/player_api.php`, `/panel_api.php`, `/get.php` or `/xmltv.php`.
  */
 export function normalizeXtreamServer(server: string): string {
   const trimmed = server.trim();
@@ -100,8 +99,12 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const credentials = `username=${user}&password=${pass}`;
   const liveFormat = transport?.xtreamFormat ?? 'ts';
   const hostOverride = transport?.hostOverride || undefined;
+  const requestHeaders = transportHeaders(transport);
+  if (requestHeaders['user-agent'] === undefined) {
+    requestHeaders['user-agent'] = DEFAULT_XTREAM_USER_AGENT;
+  }
   const baseReqOpts = {
-    headers: transportHeaders(transport),
+    headers: requestHeaders,
     ...(transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
     ...(transport?.dnsFamily !== undefined ? { dnsFamily: transport.dnsFamily } : {}),
   };
@@ -313,7 +316,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       const keys = Object.keys(r.value);
       if (keys.length === 0) return ok([]);
       if (isRaw(r.value.user_info)) {
-        const failure = accountFailure(r.value.user_info);
+        const failure = classifyAccountFailure(r.value.user_info);
         if (failure) return err(failure);
       }
       if (keys.every((k) => NUMERIC_KEY_RE.test(k))) {
@@ -342,17 +345,41 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
 
   return {
     async account(call) {
-      const r = await object('', call);
-      if (!r.ok) return r;
-      const info = r.value.user_info;
-      if (!isRaw(info)) return err(shape());
-      const failure = accountFailure(info);
-      if (failure) return err(failure);
-      const status =
-        typeof info.status === 'string' && info.status.trim() ? info.status.trim() : 'Active';
-      const acc = toAccount(info, isRaw(r.value.server_info) ? r.value.server_info : {}, status);
-      if (acc.serverTimezone !== undefined) activeTimezone = acc.serverTimezone;
-      return ok(acc);
+      let firstError: ElvError | undefined;
+      for (const query of ACCOUNT_QUERIES) {
+        const r = await object(query, call);
+        if (!r.ok) {
+          if (r.error.code === 'aborted' || r.error.code === 'http-429') return r;
+          const isHttp4xx5xx = HTTP_4XX_5XX_RE.test(r.error.code);
+          const isShape =
+            r.error.category === 'source-format' && r.error.code === 'unexpected-shape';
+          if (!isHttp4xx5xx && !isShape) return r;
+          if (
+            firstError === undefined ||
+            (firstError.category !== 'auth' && r.error.category === 'auth')
+          ) {
+            firstError = r.error;
+          }
+          continue;
+        }
+        const info = r.value.user_info;
+        if (!isRaw(info)) {
+          firstError ??= shape();
+          continue;
+        }
+        const nowWall = Date.now();
+        const failure = classifyAccountFailure(info, nowWall);
+        if (failure) return err(failure);
+        const acc = toAccount(
+          info,
+          isRaw(r.value.server_info) ? r.value.server_info : {},
+          undefined,
+          nowWall,
+        );
+        if (acc.serverTimezone !== undefined) activeTimezone = acc.serverTimezone;
+        return ok(acc);
+      }
+      return err(firstError ?? shape());
     },
     categories: (kind, call) =>
       rows(`&action=get_${kind === 'movie' ? 'vod' : kind}_categories`, toCategories, call),
@@ -370,12 +397,28 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
         (v) => toEpg(v, activeTimezone),
         call,
       ),
-    simpleEpg: (id, call) =>
-      mapObj(
-        `&action=get_simple_data_table&stream_id=${id}`,
-        (v) => toEpg(v, activeTimezone),
-        call,
-      ),
+    async simpleEpg(id, call) {
+      const primary = await object(`&action=get_simple_data_table&stream_id=${id}`, call);
+      if (primary.ok) {
+        const entries = toEpg(primary.value, activeTimezone);
+        if (entries.length > 0) return ok(entries);
+        const fallback = await object(`&action=get_simple_date_table&stream_id=${id}`, call);
+        if (fallback.ok) return ok(toEpg(fallback.value, activeTimezone));
+        if (fallback.error.code === 'aborted' || fallback.error.code === 'http-429') {
+          return fallback;
+        }
+        return ok(entries);
+      }
+      const code = primary.error.code;
+      if (code === 'http-404' || code === 'http-405' || code === 'http-501') {
+        const fallback = await object(`&action=get_simple_date_table&stream_id=${id}`, call);
+        if (fallback.ok) return ok(toEpg(fallback.value, activeTimezone));
+        if (fallback.error.code === 'aborted' || fallback.error.code === 'http-429') {
+          return fallback;
+        }
+      }
+      return primary;
+    },
     playlistUrl: () =>
       `${activeApiBase()}/get.php?${credentials}&type=m3u_plus&output=${liveFormat}`,
     guideUrl: () => `${activeApiBase()}/xmltv.php?${credentials}`,

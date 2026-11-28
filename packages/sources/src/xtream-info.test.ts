@@ -199,11 +199,18 @@ describe('vodInfo', () => {
     });
     expect(requests[0]?.url).toContain('action=get_vod_info&vod_id=8');
   });
-  it('defaults the extension and prefers year', async () => {
+  it('preserves omitted extension as undefined, prefers year, and extracts valid direct_source (XC-4)', async () => {
     const { c } = client(() => ({ json: { info: { year: '1999', releasedate: '2020-01-01' } } }));
-    expect(value(await c.vodInfo(1))).toEqual({ year: 1999, extension: 'mp4' });
-    expect(value(await client(() => ({ json: {} })).c.vodInfo(1))).toEqual({ extension: 'mp4' });
-    expect(value(await client(() => ({ json: [] })).c.vodInfo(1))).toEqual({ extension: 'mp4' });
+    expect(value(await c.vodInfo(1))).toEqual({ year: 1999 });
+    expect(value(await client(() => ({ json: {} })).c.vodInfo(1))).toEqual({});
+    expect(value(await client(() => ({ json: [] })).c.vodInfo(1))).toEqual({});
+    expect(
+      value(
+        await client(() => ({
+          json: { movie_data: { direct_source: 'http://cdn.example/movie/42.mp4' } },
+        })).c.vodInfo(42),
+      ),
+    ).toEqual({ directSource: 'http://cdn.example/movie/42.mp4' });
   });
 
   it('extracts optional backdrop from backdrop_path (string or string[]) or explicit backdrop without falling back to vertical cover/movie_image', async () => {

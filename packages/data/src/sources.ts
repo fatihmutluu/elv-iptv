@@ -10,6 +10,7 @@ import {
   type SecretStore,
   type SourceKind,
   type SqlDriver,
+  sanitizeHeaderValue,
   type TransportSettings,
   validateHostOverride,
 } from '@elv/domain';
@@ -150,62 +151,43 @@ export interface SourceRecord {
   settings: SourceSettings;
 }
 
-/** Input for {@link addXtreamSource}. */
-export interface XtreamSourceInput {
+interface BaseSourceInput {
   /** Optional explicit cross-device source ID (`<= 128` chars matching {@link SOURCE_ID}). */
   readonly id?: string;
   name: string;
-  server: string;
-  /** Optional ordered failover mirror URLs stored strictly in SecretStore (`#317`). */
-  readonly backupServers?: readonly string[];
-  username: string;
-  password: string;
-  transport?: TransportSettings;
-  /** User guide override, stored whole as a secret like an M3U guide URL. */
-  guideUrl?: string;
-  /** Optional default IANA timezone for offset-less XMLTV timestamps (`#182`). */
-  readonly xmltvTimezone?: string;
-}
-
-/** Input for {@link addM3uSource}. */
-export interface M3uSourceInput {
-  /** Optional explicit cross-device source ID (`<= 128` chars matching {@link SOURCE_ID}). */
-  readonly id?: string;
-  name: string;
-  playlistUrl: string;
-  guideUrl?: string;
-  vodPlaylist?: boolean;
-  transport?: TransportSettings;
-  /** Optional default IANA timezone for offset-less XMLTV timestamps (`#182`). */
-  readonly xmltvTimezone?: string;
-}
-
-/** Input for {@link addLocalM3uSource} (`#51`). */
-export interface LocalM3uSourceInput {
-  /** Optional explicit cross-device source ID (`<= 128` chars matching {@link SOURCE_ID}). */
-  readonly id?: string;
-  name: string;
-  bytes: Uint8Array;
-  guideUrl?: string;
-  vodPlaylist?: boolean;
-  transport?: TransportSettings;
-  /** Optional default IANA timezone for offset-less XMLTV timestamps (`#182`). */
-  readonly xmltvTimezone?: string;
-}
-
-/** Input for {@link addStalkerSource} (`#29`). */
-export interface StalkerSourceInput {
-  /** Optional explicit cross-device source ID (`<= 128` chars matching {@link SOURCE_ID}). */
-  readonly id?: string;
-  name: string;
-  portalUrl: string;
-  mac: string;
-  serialNumber?: string;
   transport?: TransportSettings;
   /** Optional custom XMLTV guide URL override stored strictly in `SecretStore`. */
   guideUrl?: string;
   /** Optional default IANA timezone for offset-less XMLTV timestamps (`#182`). */
   readonly xmltvTimezone?: string;
+}
+
+/** Input for {@link addXtreamSource}. */
+export interface XtreamSourceInput extends BaseSourceInput {
+  server: string;
+  /** Optional ordered failover mirror URLs stored strictly in SecretStore (`#317`). */
+  readonly backupServers?: readonly string[];
+  username: string;
+  password: string;
+}
+
+/** Input for {@link addM3uSource}. */
+export interface M3uSourceInput extends BaseSourceInput {
+  playlistUrl: string;
+  vodPlaylist?: boolean;
+}
+
+/** Input for {@link addLocalM3uSource} (`#51`). */
+export interface LocalM3uSourceInput extends BaseSourceInput {
+  bytes: Uint8Array;
+  vodPlaylist?: boolean;
+}
+
+/** Input for {@link addStalkerSource} (`#29`). */
+export interface StalkerSourceInput extends BaseSourceInput {
+  portalUrl: string;
+  mac: string;
+  serialNumber?: string;
 }
 
 /** Collaborators for adding a source; `newId` and `clock` are injected so tests stay deterministic. */
@@ -271,10 +253,7 @@ const BULK_DELETE_SPECS: readonly BulkDeleteSpec[] = [
   }),
 ];
 
-/** Every table with a `source_id` column; {@link removeSource} clears them all (no foreign keys). */
-export const TABLES_BY_SOURCE: readonly string[] = [
-  ...ROWID_DELETE_TABLES,
-  ...WITHOUT_ROWID_DELETE_SPECS.map(([table]) => table),
+const FINAL_DELETE_TABLES = [
   'programmes_fts',
   'watch_progress',
   'favorites',
@@ -285,7 +264,6 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'custom_group_items',
   'guide_sources',
   'programme_reminders',
-  'failover_group_members',
   'vod_enrichment',
   'vod_collection_items',
   'downloads',
@@ -293,6 +271,14 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'my_list_new_episodes',
   'continue_watching_dismissals',
   'ratings',
+] as const;
+
+/** Every table with a `source_id` column; {@link removeSource} clears them all (no foreign keys). */
+export const TABLES_BY_SOURCE: readonly string[] = [
+  ...ROWID_DELETE_TABLES,
+  ...WITHOUT_ROWID_DELETE_SPECS.map(([table]) => table),
+  ...FINAL_DELETE_TABLES,
+  'failover_group_members',
 ];
 const NON_SHARDED_PARTS = ['xtream', 'playlist', 'stalker'] as const;
 
@@ -337,13 +323,21 @@ function sanitizeTransportSettings(
   const dnsFamily = normalizeDnsFamily(transport.dnsFamily);
   const cleaned: {
     userAgent?: string;
+    streamUserAgent?: string;
     referer?: string;
     xtreamFormat?: 'ts' | 'm3u8';
     allowLegacyTls?: boolean;
     dnsFamily?: ReturnType<typeof normalizeDnsFamily>;
     hostOverride?: string;
   } = {};
-  if (transport.userAgent !== undefined) cleaned.userAgent = transport.userAgent;
+  if (transport.userAgent !== undefined) {
+    const ua = sanitizeHeaderValue(transport.userAgent);
+    if (ua.length > 0) cleaned.userAgent = ua;
+  }
+  if (transport.streamUserAgent !== undefined) {
+    const streamUa = sanitizeHeaderValue(transport.streamUserAgent);
+    if (streamUa.length > 0) cleaned.streamUserAgent = streamUa;
+  }
   if (transport.referer !== undefined) cleaned.referer = transport.referer;
   if (transport.xtreamFormat !== undefined) cleaned.xtreamFormat = transport.xtreamFormat;
   if (typeof transport.allowLegacyTls === 'boolean') {
@@ -731,23 +725,9 @@ export async function finishDeletingSource(
     }
   }
   await db.transaction(async (tx) => {
-    await tx.run('DELETE FROM programmes_fts WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM watch_progress WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM favorites WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM track_preferences WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM recent_channels WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM parental_locks WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM channel_overrides WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM custom_group_items WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM guide_sources WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM programme_reminders WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM vod_enrichment WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM vod_collection_items WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM downloads WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM continue_watching_dismissals WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM my_list_series_baselines WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM my_list_new_episodes WHERE source_id = ?', [id]);
-    await tx.run('DELETE FROM ratings WHERE source_id = ?', [id]);
+    for (const table of FINAL_DELETE_TABLES) {
+      await tx.run(`DELETE FROM ${table} WHERE source_id = ?`, [id]);
+    }
     await pruneSourceFailoverMembersInTx(tx, id);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });

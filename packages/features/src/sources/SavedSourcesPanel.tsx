@@ -10,7 +10,7 @@ import {
 } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { Text, View } from 'react-native';
-import { resolveSourceAccountWarning } from './account-warning';
+import { formatSourceAccountHealthCaption, resolveSourceAccountWarning } from './account-warning';
 import { countPendingCategories } from './category-selection-model';
 import { SourceNetworkBadge } from './SourceNetworkEditor';
 import { ActionButton, SourceAccountWarningPill } from './SourcesScreenParts';
@@ -169,6 +169,11 @@ export function SavedSourcesPanel({
                 : i18n.t('sources.kind.m3u');
           const statusPill = resolveStatusPill(source, runtime, i18n);
           const accountWarning = resolveSourceAccountWarning(source.accountMeta, nowMs);
+          const accountHealthCaption = formatSourceAccountHealthCaption(
+            source.accountMeta,
+            nowMs,
+            i18n,
+          );
           const progressPct = importProgressPercent(runtime);
 
           return (
@@ -229,6 +234,18 @@ export function SavedSourcesPanel({
                 >
                   {resolveLastSyncedText(source, i18n, nowMs)}
                 </Text>
+                {accountHealthCaption !== null ? (
+                  <Text
+                    testID={`source-account-health-${source.id}`}
+                    style={[
+                      theme.typography.caption,
+                      TABULAR_NUMS_STYLE,
+                      { color: theme.colors.textMuted },
+                    ]}
+                  >
+                    {accountHealthCaption}
+                  </Text>
+                ) : null}
               </View>
               {isImporting ? (
                 <View

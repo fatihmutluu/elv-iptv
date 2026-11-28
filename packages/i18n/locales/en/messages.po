@@ -4636,3 +4636,21 @@ msgstr "Saved source credentials could not be unlocked after a system key change
 
 msgid "source.hint.secretKeyRotated"
 msgstr "Re-enter your source credentials in Sources to restore access."
+
+msgid "sources.field.streamUserAgent"
+msgstr "Stream User-Agent (optional)"
+
+msgid "sources.placeholder.streamUserAgent"
+msgstr "Defaults to User-Agent above"
+
+msgid "sources.hint.streamUserAgent"
+msgstr "Used only for stream playback and downloads when your provider expects a different player User-Agent."
+
+msgid "sources.account.expiresOn"
+msgstr "Expires {date}"
+
+msgid "sources.account.connectionsActive"
+msgstr "{active}/{max} {max, plural, one {connection} other {connections}}"
+
+msgid "sources.account.connectionsMax"
+msgstr "{max, plural, one {# connection} other {# connections}}"

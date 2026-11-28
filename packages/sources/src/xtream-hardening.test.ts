@@ -410,27 +410,22 @@ describe('Xtream account-scoped 429 cooldown and mirror failover (#173)', () => 
     expectErr(await c.account(), 'auth', 'http-403');
     nextStatus = 404;
     expectErr(await c.account(), 'network', 'http-404');
-    expect(hosts).toEqual(['primary.example', 'primary.example', 'primary.example']);
+    expect(hosts).toHaveLength(9);
+    expect(hosts.every((h) => h === 'primary.example')).toBe(true);
 
     const ctl = new AbortController();
     ctl.abort();
     expectErr(await c.account({ signal: ctl.signal }), 'network', 'aborted');
-    expect(hosts).toHaveLength(3);
+    expect(hosts).toHaveLength(9);
 
     // Primary 502 -> fails over to backup1 -> backup1 returns 429 (clamped to min 1000ms) -> must NOT try backup2!
     nextStatus = 502;
     expectErr(await c.liveStreams(), 'network', 'http-429');
-    expect(hosts).toEqual([
-      'primary.example',
-      'primary.example',
-      'primary.example',
-      'primary.example',
-      'backup1.example',
-    ]);
+    expect(hosts.slice(9)).toEqual(['primary.example', 'backup1.example']);
     // Still cooling down for 1000ms minimum
     monoNow += 500;
     expectErr(await c.liveStreams(), 'network', 'http-429');
-    expect(hosts).toHaveLength(5);
+    expect(hosts).toHaveLength(11);
   });
 
   it('clamps huge Retry-After values and falls back to cooldown429Ms on unparseable headers, and recovers primary as last resort when backups fail', async () => {

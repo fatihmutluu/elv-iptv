@@ -162,6 +162,7 @@ function buildSourcesFocusItems(
     items.push(
       { id: 'input-guide-url', kind: 'input' },
       { id: 'input-user-agent', kind: 'input' },
+      { id: 'input-stream-user-agent', kind: 'input' },
       { id: 'input-referer', kind: 'input' },
       { id: 'input-xmltv-timezone', kind: 'input' },
       {

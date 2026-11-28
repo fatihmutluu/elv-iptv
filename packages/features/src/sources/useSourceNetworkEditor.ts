@@ -1,6 +1,7 @@
 import type { CatalogService, SourceRow } from '@elv/data';
 import {
   type DnsFamilyPreference,
+  sanitizeHeaderValue,
   type TransportSettings,
   validateHostOverride,
 } from '@elv/domain';
@@ -12,6 +13,8 @@ export interface SourceNetworkEditorState {
   readonly openSourceId: string | null;
   readonly dnsFamily: DnsFamilyPreference;
   readonly hostOverride: string;
+  readonly userAgent: string;
+  readonly streamUserAgent: string;
   readonly validationError: MessageId | null;
   readonly saving: boolean;
   readonly savedSourceId: string | null;
@@ -19,13 +22,15 @@ export interface SourceNetworkEditorState {
   openSource(source: SourceRow): void;
   setDnsFamily(family: DnsFamilyPreference): void;
   setHostOverride(raw: string): void;
+  setUserAgent(raw: string): void;
+  setStreamUserAgent(raw: string): void;
   save(source: SourceRow): Promise<void>;
   close(): void;
 }
 
 const SAVED_NOTICE_MS = 3_000;
 
-/** Manages inline per-source DNS preference and host IP override editing for {@link SavedSourcesPanel}. */
+/** Manages inline per-source DNS preference, host IP override, and User-Agent editing for {@link SavedSourcesPanel}. */
 export function useSourceNetworkEditor({
   catalog,
   refreshSources,
@@ -36,6 +41,8 @@ export function useSourceNetworkEditor({
   const [openSourceId, setOpenSourceId] = useState<string | null>(null);
   const [dnsFamily, setDnsFamilyState] = useState<DnsFamilyPreference>('system');
   const [hostOverride, setHostOverrideState] = useState('');
+  const [userAgent, setUserAgentState] = useState('');
+  const [streamUserAgent, setStreamUserAgentState] = useState('');
   const [validationError, setValidationError] = useState<MessageId | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedSourceId, setSavedSourceId] = useState<string | null>(null);
@@ -47,6 +54,10 @@ export function useSourceNetworkEditor({
   dnsFamilyRef.current = dnsFamily;
   const hostOverrideRef = useRef(hostOverride);
   hostOverrideRef.current = hostOverride;
+  const userAgentRef = useRef(userAgent);
+  userAgentRef.current = userAgent;
+  const streamUserAgentRef = useRef(streamUserAgent);
+  streamUserAgentRef.current = streamUserAgent;
   const savingRef = useRef(false);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -81,12 +92,18 @@ export function useSourceNetworkEditor({
       clearSavedNotice();
       const initialDns = source.dnsFamily ?? 'system';
       const initialHost = source.hostOverride ?? '';
+      const initialUa = source.userAgent ?? '';
+      const initialStreamUa = source.streamUserAgent ?? '';
       openSourceIdRef.current = source.id;
       dnsFamilyRef.current = initialDns;
       hostOverrideRef.current = initialHost;
+      userAgentRef.current = initialUa;
+      streamUserAgentRef.current = initialStreamUa;
       setOpenSourceId(source.id);
       setDnsFamilyState(initialDns);
       setHostOverrideState(initialHost);
+      setUserAgentState(initialUa);
+      setStreamUserAgentState(initialStreamUa);
       setValidationError(null);
     },
     [clearSavedNotice],
@@ -126,6 +143,24 @@ export function useSourceNetworkEditor({
     [clearSavedNotice],
   );
 
+  const setUserAgent = useCallback(
+    (raw: string) => {
+      userAgentRef.current = raw;
+      setUserAgentState(raw);
+      clearSavedNotice();
+    },
+    [clearSavedNotice],
+  );
+
+  const setStreamUserAgent = useCallback(
+    (raw: string) => {
+      streamUserAgentRef.current = raw;
+      setStreamUserAgentState(raw);
+      clearSavedNotice();
+    },
+    [clearSavedNotice],
+  );
+
   const save = useCallback(
     async (source: SourceRow): Promise<void> => {
       if (savingRef.current || catalog.updateSourceSettings === undefined) return;
@@ -140,10 +175,17 @@ export function useSourceNetworkEditor({
       setValidationError(null);
       clearSavedNotice();
       try {
+        const normalizedUa = sanitizeHeaderValue(userAgentRef.current);
+        const normalizedStreamUa = sanitizeHeaderValue(streamUserAgentRef.current);
+        const shouldSendUa = normalizedUa.length > 0 || (source.userAgent ?? '').length > 0;
+        const shouldSendStreamUa =
+          normalizedStreamUa.length > 0 || (source.streamUserAgent ?? '').length > 0;
         const transport: TransportSettings = {
           ...(source.allowLegacyTls !== undefined ? { allowLegacyTls: source.allowLegacyTls } : {}),
           dnsFamily: dnsFamilyRef.current,
           hostOverride: checked.value ?? '',
+          ...(shouldSendUa ? { userAgent: normalizedUa } : {}),
+          ...(shouldSendStreamUa ? { streamUserAgent: normalizedStreamUa } : {}),
         };
         const result = await catalog.updateSourceSettings(source.id, { transport });
         if (!mountedRef.current) return;
@@ -154,6 +196,10 @@ export function useSourceNetworkEditor({
         const normalizedHost = checked.value ?? '';
         hostOverrideRef.current = normalizedHost;
         setHostOverrideState(normalizedHost);
+        userAgentRef.current = normalizedUa;
+        setUserAgentState(normalizedUa);
+        streamUserAgentRef.current = normalizedStreamUa;
+        setStreamUserAgentState(normalizedStreamUa);
         await refreshSources();
         if (!mountedRef.current) return;
         setSavedSourceId(source.id);
@@ -173,6 +219,8 @@ export function useSourceNetworkEditor({
     openSourceId,
     dnsFamily,
     hostOverride,
+    userAgent,
+    streamUserAgent,
     validationError,
     saving,
     savedSourceId,
@@ -180,6 +228,8 @@ export function useSourceNetworkEditor({
     openSource,
     setDnsFamily,
     setHostOverride,
+    setUserAgent,
+    setStreamUserAgent,
     save,
     close,
   };

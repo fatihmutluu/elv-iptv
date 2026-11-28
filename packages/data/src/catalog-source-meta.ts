@@ -2,6 +2,7 @@ import {
   type DnsFamilyPreference,
   normalizeDnsFamily,
   type SqlDriver,
+  sanitizeHeaderValue,
   type TransportSettings,
   validateHostOverride,
 } from '@elv/domain';
@@ -34,6 +35,8 @@ export interface SourceRow {
   readonly allowLegacyTls?: boolean;
   readonly dnsFamily?: DnsFamilyPreference;
   readonly hostOverride?: string;
+  readonly userAgent?: string;
+  readonly streamUserAgent?: string;
   readonly excludedProfileIds?: readonly string[];
 }
 
@@ -139,6 +142,21 @@ export function mergeSourceSettings(
             delete mergedTransport.hostOverride;
           }
         }
+        if ('userAgent' in value) {
+          const rawUa = (value as Record<string, unknown>).userAgent;
+          if (rawUa === undefined || (typeof rawUa === 'string' && rawUa.trim() === '')) {
+            delete mergedTransport.userAgent;
+          }
+        }
+        if ('streamUserAgent' in value) {
+          const rawStreamUa = (value as Record<string, unknown>).streamUserAgent;
+          if (
+            rawStreamUa === undefined ||
+            (typeof rawStreamUa === 'string' && rawStreamUa.trim() === '')
+          ) {
+            delete mergedTransport.streamUserAgent;
+          }
+        }
         next.transport = mergedTransport as TransportSettings;
       }
       continue;
@@ -183,8 +201,16 @@ type ParsedSourceMeta = Pick<
   | 'allowLegacyTls'
   | 'dnsFamily'
   | 'hostOverride'
+  | 'userAgent'
+  | 'streamUserAgent'
   | 'excludedProfileIds'
 >;
+
+function cleanTransportHeader(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const cleaned = sanitizeHeaderValue(raw);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
 
 function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
   try {
@@ -199,6 +225,8 @@ function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
       allowLegacyTls?: boolean;
       dnsFamily?: DnsFamilyPreference;
       hostOverride?: string;
+      userAgent?: string;
+      streamUserAgent?: string;
       excludedProfileIds: readonly string[];
     } = {
       excludedProfileIds: sanitizeExcludedProfileIds(parsed.excludedProfileIds),
@@ -222,6 +250,14 @@ function parseSourceMeta(settingsJson: string): ParsedSourceMeta {
     const hostOverride = validateHostOverride(parsed.transport?.hostOverride);
     if (hostOverride.ok && hostOverride.value !== undefined) {
       out.hostOverride = hostOverride.value;
+    }
+    const userAgent = cleanTransportHeader(parsed.transport?.userAgent);
+    if (userAgent !== undefined) {
+      out.userAgent = userAgent;
+    }
+    const streamUserAgent = cleanTransportHeader(parsed.transport?.streamUserAgent);
+    if (streamUserAgent !== undefined) {
+      out.streamUserAgent = streamUserAgent;
     }
     if (parsed.categorySelection !== undefined) {
       const sanitized = sanitizeCategorySelection(parsed.categorySelection);
@@ -288,6 +324,14 @@ export const mapNewSourceRow = (r: SourceRecord): SourceRow => ({
   ...(() => {
     const validated = validateHostOverride(r.settings.transport?.hostOverride);
     return validated.ok && validated.value !== undefined ? { hostOverride: validated.value } : {};
+  })(),
+  ...(() => {
+    const ua = cleanTransportHeader(r.settings.transport?.userAgent);
+    return ua !== undefined ? { userAgent: ua } : {};
+  })(),
+  ...(() => {
+    const streamUa = cleanTransportHeader(r.settings.transport?.streamUserAgent);
+    return streamUa !== undefined ? { streamUserAgent: streamUa } : {};
   })(),
 });
 

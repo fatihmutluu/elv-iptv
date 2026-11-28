@@ -364,4 +364,45 @@ describe('normalizeMulticastUrl (#267)', () => {
       expect(xRes.error.code).toBe('secret-key-rotated');
     }
   });
+
+  it('prefers streamUserAgent over feed userAgent for playback while letting per-channel M3U headers and http-origin take precedence', async () => {
+    const playlist = [
+      '#EXTM3U',
+      '#EXTINF:-1 group-title="Live",Source UA Channel',
+      '#EXTVLCOPT:http-origin=https://origin.example',
+      'http://cdn.example/live/ch1.m3u8',
+      '#EXTINF:-1 group-title="Live",Channel Override UA',
+      '#EXTVLCOPT:http-user-agent=PerChannelUA/9.9',
+      'http://cdn.example/live/ch2.m3u8',
+      '',
+    ].join('\n');
+    const e = await setupM3u(playlist, {
+      transport: { userAgent: 'FeedAgent/1.0', streamUserAgent: 'StreamPlayer/2.0' },
+    });
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+
+    const rows = await e.db.all<{ key: string; name: string }>(
+      'SELECT key, name FROM live ORDER BY id',
+    );
+    const ch1 = rows.find((r) => r.name === 'Source UA Channel');
+    const ch2 = rows.find((r) => r.name === 'Channel Override UA');
+    const cache = createPlaytimeResolverCache({
+      db: e.db,
+      secrets: e.secrets,
+      http: e.deps.http,
+    });
+
+    const r1 = await cache.resolveStream(ch1?.key ?? '');
+    expect(r1.ok).toBe(true);
+    if (r1.ok) {
+      expect(r1.value.headers['user-agent']).toBe('StreamPlayer/2.0');
+      expect(r1.value.headers.origin).toBe('https://origin.example');
+    }
+
+    const r2 = await cache.resolveStream(ch2?.key ?? '');
+    expect(r2.ok).toBe(true);
+    if (r2.ok) {
+      expect(r2.value.headers['user-agent']).toBe('PerChannelUA/9.9');
+    }
+  });
 });

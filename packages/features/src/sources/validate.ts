@@ -35,6 +35,8 @@ export interface SourceFormState {
   serialNumber: string;
   guideUrl: string;
   userAgent: string;
+  /** Optional separate User-Agent applied strictly to stream playback and offline downloads. */
+  streamUserAgent?: string;
   referer: string;
   /** Optional local playlist file selected via platform picker (`#51`). */
   localFile?: PickedPlaylistFile | null;
@@ -202,12 +204,13 @@ function normalizeServerBase(serverUrl: string): string {
   return serverUrl
     .replace(/[?#].*$/s, '')
     .replace(/\/+$/, '')
-    .replace(/\/(?:player_api|get|xmltv)\.php$/i, '')
+    .replace(/\/(?:player_api|panel_api|get|xmltv)\.php$/i, '')
     .replace(/\/+$/, '');
 }
 
 function buildTransport(
   userAgent: string,
+  streamUserAgent: string,
   referer: string,
   xtreamFormat: 'ts' | 'm3u8' | undefined,
   allowLegacyTls: boolean,
@@ -216,6 +219,7 @@ function buildTransport(
 ): TransportSettings | undefined {
   const transport: TransportSettings = {
     ...(userAgent !== '' ? { userAgent } : {}),
+    ...(streamUserAgent !== '' ? { streamUserAgent } : {}),
     ...(referer !== '' ? { referer } : {}),
     ...(xtreamFormat !== undefined ? { xtreamFormat } : {}),
     ...(allowLegacyTls ? { allowLegacyTls: true } : {}),
@@ -274,6 +278,7 @@ export function createInitialSourceForm(): SourceFormState {
     serialNumber: '',
     guideUrl: '',
     userAgent: '',
+    streamUserAgent: '',
     referer: '',
     localFile: null,
     xmltvTimezone: '',
@@ -309,6 +314,7 @@ export function validateSourceForm(
     form.serialNumber,
     form.guideUrl,
     form.userAgent,
+    form.streamUserAgent ?? '',
     form.referer,
     form.xmltvTimezone ?? '',
     form.hostOverride ?? '',
@@ -343,6 +349,7 @@ export function validateSourceForm(
   }
 
   const userAgent = form.userAgent.trim();
+  const streamUserAgent = (form.streamUserAgent ?? '').trim();
   const explicitFormat = form.xtreamFormat === 'default' ? undefined : form.xtreamFormat;
 
   if (form.mode === 'xtream') {
@@ -362,6 +369,7 @@ export function validateSourceForm(
       const format = explicitFormat ?? pasted.output;
       const transport = buildTransport(
         userAgent,
+        streamUserAgent,
         refererRaw,
         format,
         allowLegacyTls,
@@ -399,6 +407,7 @@ export function validateSourceForm(
     const name = form.name.trim() || new URL(normalizedServer).host;
     const transport = buildTransport(
       userAgent,
+      streamUserAgent,
       refererRaw,
       explicitFormat,
       allowLegacyTls,
@@ -443,6 +452,7 @@ export function validateSourceForm(
     const name = form.name.trim() || parsedPortal.value.host;
     const transport = buildTransport(
       userAgent,
+      streamUserAgent,
       refererRaw,
       undefined,
       allowLegacyTls,
@@ -470,6 +480,7 @@ export function validateSourceForm(
     const name = form.name.trim() || strippedFileName || fallbackName;
     const transport = buildTransport(
       userAgent,
+      streamUserAgent,
       refererRaw,
       explicitFormat,
       allowLegacyTls,
@@ -497,6 +508,7 @@ export function validateSourceForm(
   const name = form.name.trim() || parsedPlaylist.value.host;
   const transport = buildTransport(
     userAgent,
+    streamUserAgent,
     refererRaw,
     explicitFormat,
     allowLegacyTls,

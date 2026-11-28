@@ -10,11 +10,13 @@ import {
   type SyncDatabase,
 } from '@elv/data';
 import {
+  createHostConnectivityGuard,
   type Decompressor,
   type ElvError,
   elvError,
   err,
   type FetchLike,
+  type HostConnectivityGuard,
   ok,
   type Result,
   type SecretStore,
@@ -115,6 +117,7 @@ export interface CatalogWorkerRuntimeDeps {
   openDatabase: (filePath: string) => SyncDatabase;
   fetchImpl: FetchLike;
   legacyFetchImpl?: FetchLike;
+  connectivityGuard?: HostConnectivityGuard;
   localPlaylistStore?: LocalPlaylistStore;
   decompressor?: Decompressor;
   clock?: () => number;
@@ -147,10 +150,11 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
   const clock = deps.clock ?? Date.now;
   const yieldNow = deps.yieldNow ?? (() => new Promise<void>((resolve) => setImmediate(resolve)));
   const log = deps.log ?? ((line: string) => process.stderr.write(`${line}\n`));
-  const desktopHttp = createDesktopHttpClient(
-    fetchImpl,
-    deps.legacyFetchImpl === undefined ? undefined : { legacyFetchImpl: deps.legacyFetchImpl },
-  );
+  const connectivityGuard = deps.connectivityGuard ?? createHostConnectivityGuard({ now: clock });
+  const desktopHttp = createDesktopHttpClient(fetchImpl, {
+    connectivityGuard,
+    ...(deps.legacyFetchImpl === undefined ? {} : { legacyFetchImpl: deps.legacyFetchImpl }),
+  });
 
   let configuredDbPath: string | undefined;
   let configuredElvServerUrl: string | undefined;

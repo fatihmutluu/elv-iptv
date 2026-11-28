@@ -10,15 +10,39 @@ import { createNodeGzipDecompressor } from './node-gzip-decompressor.ts';
 /** Raised Happy Eyeballs timeout (ms) so VPN / blackholed IPv6 links fall back cleanly to IPv4. */
 export const CATALOG_WORKER_AUTO_SELECT_FAMILY_TIMEOUT_MS = 2_500;
 
+/** Best-effort SQLite memory-mapped I/O window on 64-bit desktop builds (256 MiB). */
+export const CATALOG_DB_MMAP_SIZE_BYTES = 268_435_456;
+
 /** Injectable Node runtime hooks used by {@link configureCatalogWorkerRuntime}. */
 export interface CatalogWorkerRuntimeHooks {
   readonly enableCompileCache?: () => unknown;
   readonly setDefaultAutoSelectFamilyAttemptTimeout?: (value: number) => void;
+  readonly execArgv?: readonly string[];
+  readonly nodeOptions?: string;
+}
+
+const AUTO_SELECT_TIMEOUT_FLAG = '--network-family-autoselection-attempt-timeout';
+const AUTO_SELECT_TIMEOUT_NODE_OPTS_RE =
+  /(?:^|\s)--network-family-autoselection-attempt-timeout(?:=|\s|$)/;
+
+function hasExplicitAutoSelectFamilyTimeout(
+  execArgv: readonly string[],
+  nodeOptions: string,
+): boolean {
+  if (
+    execArgv.some(
+      (arg) => arg === AUTO_SELECT_TIMEOUT_FLAG || arg.startsWith(`${AUTO_SELECT_TIMEOUT_FLAG}=`),
+    )
+  ) {
+    return true;
+  }
+  return AUTO_SELECT_TIMEOUT_NODE_OPTS_RE.test(nodeOptions);
 }
 
 /**
  * Enables Node's V8 bytecode compile cache and raises `net.setDefaultAutoSelectFamilyAttemptTimeout`
- * to 2,500 ms inside the catalog utility worker isolate.
+ * to 2,500 ms inside the catalog utility worker isolate unless an explicit CLI or `NODE_OPTIONS`
+ * timeout override is already configured.
  */
 export function configureCatalogWorkerRuntime(
   hooks: CatalogWorkerRuntimeHooks = {
@@ -31,6 +55,9 @@ export function configureCatalogWorkerRuntime(
   } catch {
     // Compile cache is optional on runtimes without support.
   }
+  const execArgv = hooks.execArgv ?? process.execArgv;
+  const nodeOptions = hooks.nodeOptions ?? process.env.NODE_OPTIONS ?? '';
+  if (hasExplicitAutoSelectFamilyTimeout(execArgv, nodeOptions)) return;
   try {
     hooks.setDefaultAutoSelectFamilyAttemptTimeout?.(CATALOG_WORKER_AUTO_SELECT_FAMILY_TIMEOUT_MS);
   } catch {
@@ -66,6 +93,11 @@ export function openHardenedCatalogDatabase(
 
   mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
   const db = openDb(filePath);
+  try {
+    db.pragma?.(`mmap_size = ${CATALOG_DB_MMAP_SIZE_BYTES}`);
+  } catch {
+    // Best-effort 256 MiB memory-mapped I/O on desktop SQLite connections.
+  }
   if (platform !== 'win32') {
     for (const candidate of [filePath, `${filePath}-wal`, `${filePath}-shm`]) {
       try {

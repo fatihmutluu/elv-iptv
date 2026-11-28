@@ -120,6 +120,8 @@ describe('formatXtreamTimeshiftStart (#220)', () => {
       '2026-06-02:00-00',
     );
     expect(formatXtreamTimeshiftStart(winterUtc, 'Not/A_Real_Zone')).toBe('2026-01-15:02-05');
+    expect(formatXtreamTimeshiftStart(winterUtc, 'UTC+3')).toBe('2026-01-15:05-05');
+    expect(formatXtreamTimeshiftStart(winterUtc, 'GMT-05:30')).toBe('2026-01-14:20-35');
   });
 });
 
@@ -255,6 +257,56 @@ describe('buildCatchupUrl (#220)', () => {
         '2026-06-01:18-00',
         '404.ts',
       ].join('/'),
+    });
+
+    const withPanelApi = buildCatchupUrl({
+      mode: 'xc',
+      server: 'http://panel.example/sub/panel_api.php?u=1',
+      username: 'u3',
+      password: 'p3',
+      streamId: 505,
+      serverTimezone: 'UTC+3',
+      programme: { startMs, stopMs },
+      catchupDays: 7,
+      nowMs,
+    });
+    expect(withPanelApi).toEqual({
+      ok: true,
+      value: [
+        'http://panel.example/sub',
+        'timeshift',
+        'u3',
+        'p3',
+        '90',
+        '2026-06-01:21-00',
+        '505.ts',
+      ].join('/'),
+    });
+
+    const legacyXc = buildCatchupUrl({
+      mode: 'xc',
+      xcScheme: 'legacy',
+      server: 'https://panel.example:8443/panel_api.php',
+      username: 'user name',
+      password: 'p@ss/word',
+      streamId: 606,
+      ext: 'm3u8',
+      serverTimezone: 'UTC+3',
+      programme: { startMs, stopMs },
+      catchupDays: 7,
+      nowMs,
+    });
+    const expectedQuery = [
+      'username=user%20name',
+      'password=p%40ss%2Fword',
+      'stream=606',
+      'start=2026-06-01:21-00',
+      'duration=90',
+      'extension=m3u8',
+    ].join('&');
+    expect(legacyXc).toEqual({
+      ok: true,
+      value: `https://panel.example:8443/streaming/timeshift.php?${expectedQuery}`,
     });
   });
 
