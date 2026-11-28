@@ -4939,3 +4939,18 @@ msgstr "Mute preview"
 
 msgid "detail.trailer.unmute"
 msgstr "Unmute preview"
+
+msgid "card.dontRecommend"
+msgstr "Don't recommend again"
+
+msgid "card.dontRecommendDone"
+msgstr "Hidden from recommendations"
+
+msgid "card.hoverPlay"
+msgstr "Play"
+
+msgid "card.hoverTrailer"
+msgstr "Trailer"
+
+msgid "card.hoverUnavailable"
+msgstr "No trailer"

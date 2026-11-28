@@ -4,7 +4,6 @@ import {
   HorizontalRailScroll,
   Icon,
   PosterCard,
-  type PosterCardQuickActions,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
   useContextMenu,
@@ -13,15 +12,7 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import {
-  type ComponentRef,
-  memo,
-  type ReactElement,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-} from 'react';
+import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, useRef } from 'react';
 import {
   type LayoutChangeEvent,
   Pressable,
@@ -39,6 +30,7 @@ import {
   resolveSeriesBadgeProps,
   useDownloads,
 } from '../shared';
+import { useItemRowPosterHoverPreview } from '../shared/PosterHoverPreviewContext';
 import { buildCatalogPosterContextMenuItems } from './catalog-context-menu';
 import { computeProgressRatio } from './catalog-model';
 
@@ -64,6 +56,7 @@ export interface CatalogCategoryRailProps {
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
+  readonly onDismissRecommendation?: (item: ItemRow) => void;
   readonly onSeeAll: (categoryId: string) => void;
   readonly onLayoutY?: (catIndex: number, y: number) => void;
 }
@@ -79,11 +72,6 @@ interface CatalogPosterCardItemProps {
   readonly currentRating: RatingValue | null;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly watchedLabel: string;
-  readonly formatQuickPlay: (title: string) => string;
-  readonly addToListLabel: string;
-  readonly inMyListLabel: string;
-  readonly markWatchedLabel: string;
-  readonly markUnwatchedLabel: string;
   readonly cardWidth: number;
   readonly isTv: boolean;
   readonly focused: boolean;
@@ -93,6 +81,7 @@ interface CatalogPosterCardItemProps {
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
+  readonly onDismissRecommendation?: (item: ItemRow) => void;
 }
 
 const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
@@ -104,11 +93,6 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
   currentRating,
   unplayedSummary,
   watchedLabel,
-  formatQuickPlay,
-  addToListLabel,
-  inMyListLabel,
-  markWatchedLabel,
-  markUnwatchedLabel,
   cardWidth,
   isTv,
   focused,
@@ -118,6 +102,7 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
   onQuickToggleFavorite,
   onQuickToggleWatched,
   onQuickToggleRating,
+  onDismissRecommendation,
 }: CatalogPosterCardItemProps): ReactElement {
   const handlePress = useCallback(() => {
     const target = detailTargetFromItem(item, categoryId);
@@ -151,6 +136,7 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
           ...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {}),
           ...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {}),
           ...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {}),
+          ...(onDismissRecommendation !== undefined ? { onDismissRecommendation } : {}),
           ...(canDownloadMovie
             ? {
                 onDownload: (it: ItemRow) => {
@@ -178,6 +164,7 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
       i18n,
       isFavorite,
       item,
+      onDismissRecommendation,
       onOpenDetail,
       onQuickPlay,
       onQuickToggleFavorite,
@@ -187,44 +174,25 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
     ],
   );
 
-  const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
-    if (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched) return undefined;
-    return {
-      ...(onQuickPlay !== undefined
-        ? {
-            onPlay: () => onQuickPlay(item, categoryId),
-            playLabel: formatQuickPlay(item.name),
-          }
-        : {}),
-      ...(onQuickToggleFavorite !== undefined
-        ? {
-            isFavorite,
-            onToggleFavorite: () => onQuickToggleFavorite(item),
-            favoriteLabel: isFavorite ? inMyListLabel : addToListLabel,
-          }
-        : {}),
-      ...(onQuickToggleWatched !== undefined
-        ? {
-            isWatched: effectiveWatched,
-            onToggleWatched: () => onQuickToggleWatched(item, effectiveWatched),
-            watchedLabel: effectiveWatched ? markUnwatchedLabel : markWatchedLabel,
-          }
-        : {}),
-    };
-  }, [
-    addToListLabel,
-    categoryId,
-    effectiveWatched,
-    formatQuickPlay,
-    inMyListLabel,
-    isFavorite,
+  const handleHoverPlay = useCallback(() => {
+    if (onQuickPlay) onQuickPlay(item, categoryId);
+    else handlePress();
+  }, [categoryId, handlePress, item, onQuickPlay]);
+
+  const hoverHandlers = useItemRowPosterHoverPreview({
     item,
-    markUnwatchedLabel,
-    markWatchedLabel,
-    onQuickPlay,
-    onQuickToggleFavorite,
-    onQuickToggleWatched,
-  ]);
+    categoryId,
+    cardWidth,
+    isFavorite,
+    watched: effectiveWatched,
+    userRating: currentRating,
+    onPlay: handleHoverPlay,
+    onOpenDetail: handlePress,
+    ...(onQuickToggleFavorite !== undefined ? { onToggleFavorite: onQuickToggleFavorite } : {}),
+    ...(onQuickToggleWatched !== undefined ? { onToggleWatched: onQuickToggleWatched } : {}),
+    ...(onQuickToggleRating !== undefined ? { onToggleRating: onQuickToggleRating } : {}),
+    ...(onDismissRecommendation !== undefined ? { onDismissRecommendation } : {}),
+  });
 
   const meta = formatVodMeta(item.year, item.rating);
   const ratio = !effectiveWatched ? computeProgressRatio(progress) : undefined;
@@ -250,7 +218,7 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
       {...(ratio !== undefined ? { progress: ratio } : {})}
       {...(badge !== undefined ? { badge } : {})}
       {...seriesBadge}
-      {...(quickActions !== undefined ? { quickActions } : {})}
+      {...hoverHandlers}
       width={cardWidth}
       maxDecodePx={320}
       focusable={!isTv}
@@ -282,6 +250,7 @@ function CatalogCategoryRailInner({
   onQuickToggleFavorite,
   onQuickToggleWatched,
   onQuickToggleRating,
+  onDismissRecommendation,
   onSeeAll,
   onLayoutY,
 }: CatalogCategoryRailProps): ReactElement | null {
@@ -306,20 +275,11 @@ function CatalogCategoryRailInner({
     onSeeAll(category.row.id);
   }, [category.row.id, onSeeAll]);
 
-  const formatQuickPlay = useCallback(
-    (title: string) => i18n.t('card.quickPlay', { title }),
-    [i18n],
-  );
-
   if (!loading && items.length === 0) return null;
 
   const cursor = webCursorPointer();
   const linkTransition = webTransition(theme, 'color, opacity, background-color, transform');
   const watchedLabel = i18n.t('home.watchedBadge');
-  const addToListLabel = i18n.t('home.addToList');
-  const inMyListLabel = i18n.t('home.inMyList');
-  const markWatchedLabel = i18n.t('home.markWatched');
-  const markUnwatchedLabel = i18n.t('home.markUnwatched');
   const seeAllLabel = i18n.t('catalog.seeAll');
   const countLabel = i18n.t('catalog.itemsCount', { count: category.row.itemCount });
   const seeAllFocused = isTv && focusedIndex === items.length;
@@ -429,11 +389,6 @@ function CatalogCategoryRailInner({
                 currentRating={ratingByKey?.get(item.key) ?? null}
                 unplayedSummary={unplayedBySeriesKey?.get(item.key)}
                 watchedLabel={watchedLabel}
-                formatQuickPlay={formatQuickPlay}
-                addToListLabel={addToListLabel}
-                inMyListLabel={inMyListLabel}
-                markWatchedLabel={markWatchedLabel}
-                markUnwatchedLabel={markUnwatchedLabel}
                 cardWidth={cardWidth}
                 isTv={isTv}
                 focused={isTv && focusedIndex === itemIdx}
@@ -443,6 +398,7 @@ function CatalogCategoryRailInner({
                 {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
                 {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
                 {...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {})}
+                {...(onDismissRecommendation !== undefined ? { onDismissRecommendation } : {})}
               />
             ))}
       </HorizontalRailScroll>

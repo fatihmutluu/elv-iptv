@@ -107,6 +107,7 @@ export interface CategoryGridViewProps {
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
+  readonly onDismissRecommendation?: (item: ItemRow) => void;
   readonly onGridMetaChange?: (meta: CategoryGridMeta) => void;
   readonly gridAccessRef?: MutableRefObject<CategoryGridAccess>;
   readonly onJumpToGridPos?: (pos: GridFocusPosition) => void;
@@ -557,6 +558,9 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       ...(props.onQuickToggleRating !== undefined
         ? { onQuickToggleRating: props.onQuickToggleRating }
         : {}),
+      ...(props.onDismissRecommendation !== undefined
+        ? { onDismissRecommendation: props.onDismissRecommendation }
+        : {}),
     }),
     [
       category.row.id,
@@ -566,6 +570,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       layout,
       onOpenDetail,
       props.favoriteKeys,
+      props.onDismissRecommendation,
       props.onQuickPlay,
       props.onQuickToggleFavorite,
       props.onQuickToggleRating,

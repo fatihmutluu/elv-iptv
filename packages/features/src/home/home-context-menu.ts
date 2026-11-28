@@ -1,60 +1,9 @@
-import type { CatalogService, ItemRow, RatingValue } from '@elv/data';
+import type { RatingValue } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import type { ContextMenuItem } from '@elv/ui-kit';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CatalogUiCache } from '../shared';
+import { translateHoverCardWithFn } from '../shared/poster-hover-preview-model';
 import type { HomeRailId } from './HomeRail';
 import type { HomeRailEntry } from './home-model';
-
-/**
- * Optimistic recent-channel removal state for `HomeScreen`'s unified Live TV rail (`Wave Q7-B`).
- */
-export function useHomeRecentChannels(
-  recentChannels: readonly ItemRow[] | undefined,
-  catalog: CatalogService,
-  uiCache: CatalogUiCache | null | undefined,
-): {
-  readonly visibleRecentChannels: readonly ItemRow[];
-  readonly recentChannelKeys: ReadonlySet<string>;
-  readonly handleRemoveFromRecent: (entry: HomeRailEntry) => void;
-} {
-  const [removedKeys, setRemovedKeys] = useState<ReadonlySet<string>>(() => new Set());
-  const prevRecentRef = useRef(recentChannels);
-  useEffect(() => {
-    if (prevRecentRef.current === recentChannels) return;
-    prevRecentRef.current = recentChannels;
-    setRemovedKeys((prev) => (prev.size === 0 ? prev : new Set()));
-  }, [recentChannels]);
-
-  const visibleRecentChannels = useMemo(
-    () => (recentChannels ?? []).filter((ch) => !removedKeys.has(ch.key)),
-    [recentChannels, removedKeys],
-  );
-  const recentChannelKeys = useMemo(
-    () => new Set(visibleRecentChannels.map((ch) => ch.key)),
-    [visibleRecentChannels],
-  );
-
-  const handleRemoveFromRecent = useCallback(
-    (entry: HomeRailEntry) => {
-      if (!catalog.removeRecentChannel) return;
-      setRemovedKeys((prev) => new Set(prev).add(entry.itemKey));
-      const revert = () =>
-        setRemovedKeys((prev) => {
-          const next = new Set(prev);
-          next.delete(entry.itemKey);
-          return next;
-        });
-      void catalog.removeRecentChannel(entry.itemKey).then((removed) => {
-        if (removed) uiCache?.clearHome?.();
-        else revert();
-      }, revert);
-    },
-    [catalog, uiCache],
-  );
-
-  return { visibleRecentChannels, recentChannelKeys, handleRemoveFromRecent };
-}
 
 /** Input for {@link buildHomeCardContextMenuItems}. */
 export interface BuildHomeCardContextMenuInput {
@@ -76,6 +25,7 @@ export interface BuildHomeCardContextMenuInput {
   readonly onToggleFavorite?: (entry: HomeRailEntry) => void;
   readonly onToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
   readonly onToggleRating?: (entry: HomeRailEntry, next: RatingValue) => void;
+  readonly onDismissRecommendation?: (entry: HomeRailEntry) => void;
   readonly onOpenMultiView?: (entry: HomeRailEntry, index: number) => void;
   readonly onOpenPopout?: (entry: HomeRailEntry, index: number) => void;
   readonly onDownload?: (entry: HomeRailEntry) => void;
@@ -105,6 +55,7 @@ export function buildHomeCardContextMenuItems({
   onToggleFavorite,
   onToggleWatched,
   onToggleRating,
+  onDismissRecommendation,
   onOpenMultiView,
   onOpenPopout,
   onDownload,
@@ -321,5 +272,18 @@ export function buildHomeCardContextMenuItems({
     });
   }
   pushDownloadAction();
+  if (
+    onDismissRecommendation &&
+    (entry.kind === 'movie' || entry.kind === 'series') &&
+    (railId === 'movies' || railId === 'series' || railId === 'elvShowcase')
+  ) {
+    items.push({
+      id: 'dontRecommend',
+      label: translateHoverCardWithFn(t, 'card.dontRecommend'),
+      icon: 'ban',
+      testID: 'home-context-dont-recommend',
+      onSelect: () => onDismissRecommendation(entry),
+    });
+  }
   return items;
 }

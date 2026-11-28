@@ -570,4 +570,10 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'position', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'added_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
+  recommendation_dismissals: [
+    { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
+    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT 'movie'" },
+    { name: 'dismissed_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
 };

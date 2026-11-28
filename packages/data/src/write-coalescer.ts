@@ -594,6 +594,11 @@ export function createCoalescedCatalog(
       : {}),
     ...(c.removeRecentChannel ? { removeRecentChannel: c.removeRecentChannel.bind(c) } : {}),
     ...(c.clearRecentChannels ? { clearRecentChannels: c.clearRecentChannels.bind(c) } : {}),
+    ...(c.dismissRecommendation ? { dismissRecommendation: c.dismissRecommendation.bind(c) } : {}),
+    ...(c.restoreRecommendation ? { restoreRecommendation: c.restoreRecommendation.bind(c) } : {}),
+    ...(c.listDismissedRecommendationKeys
+      ? { listDismissedRecommendationKeys: c.listDismissedRecommendationKeys.bind(c) }
+      : {}),
     ...(c.listLiveFavoriteFolders
       ? {
           listLiveFavoriteFolders: async (profileId, listOpts) => {

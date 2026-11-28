@@ -217,6 +217,15 @@ describe('production CatalogService wrapper chain (listWatched & VOD collections
       }),
     ).toBeNull();
 
+    // 6) Wave R3 recommendation dismissals propagate through lazy -> coalesced -> observed -> profile-scoped
+    const beforeDismissMut = onUserStateMutated.mock.calls.length;
+    await stacked.dismissRecommendation?.(movie.key, 'movie');
+    expect(onUserStateMutated.mock.calls.length).toBe(beforeDismissMut + 1);
+    expect(await stacked.listDismissedRecommendationKeys?.()).toEqual([movie.key]);
+    await stacked.restoreRecommendation?.(movie.key);
+    expect(onUserStateMutated.mock.calls.length).toBe(beforeDismissMut + 2);
+    expect(await stacked.listDismissedRecommendationKeys?.()).toEqual([]);
+
     await stacked.close();
     handle.close();
   });

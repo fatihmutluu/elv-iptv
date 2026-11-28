@@ -75,7 +75,30 @@ describe('buildCatalogPosterContextMenuItems — Like/Dislike ratings', () => {
       i18n,
       onOpenDetail: vi.fn(),
       onQuickToggleRating: vi.fn(),
+      onDismissRecommendation: vi.fn(),
     });
-    expect(liveItems.some((a) => a.id === 'like' || a.id === 'dislike')).toBe(false);
+    expect(
+      liveItems.some((a) => a.id === 'like' || a.id === 'dislike' || a.id === 'dontRecommend'),
+    ).toBe(false);
+  });
+
+  it("exposes Don't recommend again on Movie and Series cards when callback is provided", () => {
+    const onDismiss = vi.fn();
+    const movieItems = buildCatalogPosterContextMenuItems({
+      item: makeItem('movie'),
+      isFavorite: false,
+      isWatched: false,
+      i18n,
+      onOpenDetail: vi.fn(),
+      onDismissRecommendation: onDismiss,
+    });
+    const dismissAction = movieItems.find((a) => a.id === 'dontRecommend');
+    expect(dismissAction).toMatchObject({
+      icon: 'ban',
+      label: 'card.dontRecommend',
+      testID: 'context-menu-dont-recommend',
+    });
+    dismissAction?.onSelect();
+    expect(onDismiss).toHaveBeenCalledWith(expect.objectContaining({ kind: 'movie' }));
   });
 });

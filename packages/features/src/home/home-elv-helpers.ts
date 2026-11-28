@@ -23,21 +23,25 @@ export function formatHomeElvReason(reason: ElvRecommendationReason, t: AppI18n[
   return t(HOME_ELV_REASON_KEYS[reason]);
 }
 
-/** Excludes items the active profile has rated as `'dislike'` (`👎`) from Home discovery rails. */
+/** Excludes items the active profile has disliked (`👎`) or dismissed via "Don't recommend again" from discovery rails. */
 export function filterOutDislikedItems<T extends { readonly key: string }>(
   items: readonly T[],
   ratingByKey: ReadonlyMap<string, RatingValue>,
+  dismissedKeys?: ReadonlySet<string>,
 ): readonly T[] {
-  if (items.length === 0 || ratingByKey.size === 0) return items;
-  let hasDisliked = false;
+  const hasDismissed = dismissedKeys !== undefined && dismissedKeys.size > 0;
+  if (items.length === 0 || (ratingByKey.size === 0 && !hasDismissed)) return items;
+  let hasHidden = false;
   for (const item of items) {
-    if (ratingByKey.get(item.key) === 'dislike') {
-      hasDisliked = true;
+    if (ratingByKey.get(item.key) === 'dislike' || dismissedKeys?.has(item.key) === true) {
+      hasHidden = true;
       break;
     }
   }
-  if (!hasDisliked) return items;
-  return items.filter((item) => ratingByKey.get(item.key) !== 'dislike');
+  if (!hasHidden) return items;
+  return items.filter(
+    (item) => ratingByKey.get(item.key) !== 'dislike' && dismissedKeys?.has(item.key) !== true,
+  );
 }
 
 /** Options for {@link buildElvShowcaseEntries}. */
@@ -47,11 +51,12 @@ export interface BuildElvShowcaseEntriesOptions {
   readonly t: AppI18n['t'];
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
   readonly ratingByKey: ReadonlyMap<string, RatingValue>;
+  readonly dismissedKeys?: ReadonlySet<string>;
 }
 
 /**
  * Maps mixed Movies + Series Wave E2 recommendations into Cinema Quietude {@link HomeRailEntry}
- * poster cards with ELV titles/posters/ratings, localized reason badges, and instant dislike filtering.
+ * poster cards with ELV titles/posters/ratings, localized reason badges, and instant dislike/dismissal filtering.
  */
 export function buildElvShowcaseEntries(
   recommendations: readonly ElvRecommendedItem[],
@@ -61,7 +66,12 @@ export function buildElvShowcaseEntries(
   const entries: HomeRailEntry[] = [];
   for (const rec of recommendations) {
     if (rec.item.kind !== 'movie' && rec.item.kind !== 'series') continue;
-    if (opts.ratingByKey.get(rec.item.key) === 'dislike') continue;
+    if (
+      opts.ratingByKey.get(rec.item.key) === 'dislike' ||
+      opts.dismissedKeys?.has(rec.item.key) === true
+    ) {
+      continue;
+    }
     const presented = applyElvCardPresentation(
       rec.item,
       rec.enrichment,

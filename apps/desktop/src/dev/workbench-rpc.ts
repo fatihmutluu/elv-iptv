@@ -24,6 +24,7 @@ import {
   isSourceIdList,
   isSourceSettingsPatch,
 } from '../shared/catalog-ipc-guards.ts';
+import { isDismissalKind, isNonBlankDismissalKey } from '../shared/catalog-ipc-wave-r3-guards.ts';
 
 const PREVIEW_STREAM_URL = 'https://workbench.invalid/preview.m3u8';
 
@@ -64,6 +65,9 @@ export const ALLOWED_RPC_METHODS: ReadonlySet<string> = new Set([
   'toggleFavorite',
   'listFavorites',
   'listFavoriteKeys',
+  'dismissRecommendation',
+  'restoreRecommendation',
+  'listDismissedRecommendationKeys',
 ]);
 
 /** Collaborators used by {@link dispatchWorkbenchRpc}. */
@@ -284,6 +288,33 @@ export async function dispatchWorkbenchRpc(
       return service.listFavorites?.(optNum(args[0]), optStr(args[1])) ?? [];
     case 'listFavoriteKeys':
       return service.listFavoriteKeys?.(optStr(args[0])) ?? [];
+    case 'dismissRecommendation': {
+      const rawKey = args[0];
+      const kind = args[1];
+      if (
+        !isNonBlankDismissalKey(rawKey) ||
+        !isDismissalKind(kind) ||
+        !isOptionalProfileId(args[2])
+      ) {
+        throw new Error('dismissRecommendation: invalid arguments');
+      }
+      await service.dismissRecommendation?.(rawKey.trim(), kind, optStr(args[2]));
+      await checkpointWal();
+      return null;
+    }
+    case 'restoreRecommendation': {
+      const rawKey = args[0];
+      if (!isNonBlankDismissalKey(rawKey) || !isOptionalProfileId(args[1])) {
+        throw new Error('restoreRecommendation: invalid arguments');
+      }
+      await service.restoreRecommendation?.(rawKey.trim(), optStr(args[1]));
+      await checkpointWal();
+      return null;
+    }
+    case 'listDismissedRecommendationKeys': {
+      if (!isOptionalProfileId(args[0])) return [];
+      return service.listDismissedRecommendationKeys?.(optStr(args[0])) ?? [];
+    }
     default:
       return err(elvError('storage', 'unknown-method'));
   }

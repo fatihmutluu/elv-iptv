@@ -312,6 +312,7 @@ export async function deleteProfile(
     await tx.run('DELETE FROM ratings WHERE profile_id = ?', [id]);
     await tx.run('DELETE FROM live_favorite_folder_items WHERE profile_id = ?', [id]);
     await tx.run('DELETE FROM live_favorite_folders WHERE profile_id = ?', [id]);
+    await tx.run('DELETE FROM recommendation_dismissals WHERE profile_id = ?', [id]);
 
     if (target.is_default !== 0) {
       const nextDefault = allProfiles.find((p) => p.id !== id);

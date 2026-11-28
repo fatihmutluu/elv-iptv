@@ -60,13 +60,14 @@ function makeEnrichment(item: ItemRow, cleanTitle: string, posterUrl: string): E
 }
 
 describe('home-elv-helpers (#512)', () => {
-  it('filters out disliked items while preserving liked and unrated items', () => {
-    const items = [makeItem('m:1'), makeItem('m:2'), makeItem('m:3')];
+  it('filters out disliked and dismissed items while preserving liked and unrated items', () => {
+    const items = [makeItem('m:1'), makeItem('m:2'), makeItem('m:3'), makeItem('m:4')];
     const ratingByKey = new Map<string, RatingValue>([
       ['m:1', 'like'],
       ['m:2', 'dislike'],
     ]);
-    const filtered = filterOutDislikedItems(items, ratingByKey);
+    const dismissedKeys = new Set(['m:4']);
+    const filtered = filterOutDislikedItems(items, ratingByKey, dismissedKeys);
     expect(filtered.map((i) => i.key)).toEqual(['m:1', 'm:3']);
   });
 

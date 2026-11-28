@@ -11,6 +11,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 const EMPTY_FAV_SET: ReadonlySet<string> = new Set();
 const EMPTY_WATCHED_MAP: ReadonlyMap<string, boolean> = new Map();
 const EMPTY_RATING_MAP: ReadonlyMap<string, RatingValue> = new Map();
+const EMPTY_DISMISSED_SET: ReadonlySet<string> = new Set();
+
+/** Optional recommendation dismissal methods added by Wave R3-A on `CatalogService`. */
+export interface CatalogRecommendationDismissalMethods {
+  dismissRecommendation?(
+    itemKey: string,
+    kind: 'movie' | 'series',
+    profileId?: string,
+  ): Promise<void>;
+  restoreRecommendation?(itemKey: string, profileId?: string): Promise<void>;
+  listDismissedRecommendationKeys?(profileId?: string): Promise<readonly string[]>;
+}
 
 /** Target payload for {@link useRatingMapState} optimistic Like/Dislike mutations. */
 export interface RatingToggleTarget {
@@ -30,14 +42,17 @@ export interface UseCardQuickActionsStateOptions {
   readonly userStateVersion?: number;
 }
 
-/** Optimistic favorite, watched & rating mutation controller for poster cards (`#409`). */
+/** Optimistic favorite, watched, rating & recommendation-dismissal controller (`#409`, Wave R3). */
 export interface CardQuickActionsState {
   readonly favoriteKeys: ReadonlySet<string>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
   readonly ratingByKey: ReadonlyMap<string, RatingValue>;
+  readonly dismissedKeys: ReadonlySet<string>;
   readonly toggleFavorite: (item: ItemRow) => Promise<boolean>;
   readonly toggleWatched: (item: ItemRow, currentWatched: boolean) => Promise<boolean>;
   readonly toggleRating: (item: ItemRow, next: RatingValue) => Promise<boolean>;
+  readonly dismissRecommendation: (item: Pick<ItemRow, 'key' | 'kind'>) => Promise<boolean>;
+  readonly restoreRecommendation: (itemKey: string) => Promise<void>;
 }
 
 function releaseCount(map: Map<string, number>, key: string): void {
@@ -173,6 +188,153 @@ export function useRatingMapState(opts: {
   );
 
   return useMemo(() => ({ ratingByKey, toggleRating }), [ratingByKey, toggleRating]);
+}
+
+/**
+ * Loads `dismissedKeys` via `catalog.listDismissedRecommendationKeys?.()` and exposes optimistic
+ * generation-tracked `dismissRecommendation` / `restoreRecommendation` for Movies & Series ONLY.
+ */
+export function useDismissedRecommendationsState(opts: {
+  readonly catalog: CatalogService;
+  readonly refreshToken: number;
+  readonly userStateVersion?: number;
+  readonly profileKey?: string;
+}): {
+  readonly dismissedKeys: ReadonlySet<string>;
+  readonly dismissRecommendation: (item: Pick<ItemRow, 'key' | 'kind'>) => Promise<boolean>;
+  readonly restoreRecommendation: (itemKey: string) => Promise<void>;
+} {
+  const { catalog, refreshToken, userStateVersion = 0, profileKey = '' } = opts;
+  const dismissalCatalog = catalog as CatalogService & CatalogRecommendationDismissalMethods;
+  const [dismissedKeys, setDismissedKeys] = useState<ReadonlySet<string>>(EMPTY_DISMISSED_SET);
+
+  const mountedRef = useRef(true);
+  const dismissedKeysRef = useRef(dismissedKeys);
+  dismissedKeysRef.current = dismissedKeys;
+  const genRef = useRef(new Map<string, number>());
+  const inFlightRef = useRef(new Map<string, number>());
+  const committedRef = useRef(new Map<string, boolean>());
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken, userStateVersion, and profileKey trigger fresh dismissed-key reads
+  useEffect(() => {
+    let cancelled = false;
+    if (!dismissalCatalog.listDismissedRecommendationKeys) {
+      setDismissedKeys(EMPTY_DISMISSED_SET);
+      return undefined;
+    }
+    void dismissalCatalog
+      .listDismissedRecommendationKeys()
+      .then((keys) => {
+        if (cancelled || !mountedRef.current) return;
+        setDismissedKeys((prev) => {
+          const next = new Set(keys);
+          for (const [key, count] of inFlightRef.current) {
+            if (count <= 0) continue;
+            if (prev.has(key)) next.add(key);
+            else next.delete(key);
+          }
+          dismissedKeysRef.current = next;
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, profileKey, refreshToken, userStateVersion]);
+
+  const setDismissedForKey = useCallback((key: string, dismissed: boolean) => {
+    setDismissedKeys((prev) => {
+      if (prev.has(key) === dismissed) return prev;
+      const next = new Set(prev);
+      if (dismissed) next.add(key);
+      else next.delete(key);
+      dismissedKeysRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const dismissRecommendation = useCallback(
+    async (item: Pick<ItemRow, 'key' | 'kind'>): Promise<boolean> => {
+      if (item.kind !== 'movie' && item.kind !== 'series') return false;
+      const key = item.key;
+      const gen = (genRef.current.get(key) ?? 0) + 1;
+      genRef.current.set(key, gen);
+      const inFlight = inFlightRef.current.get(key) ?? 0;
+      if (inFlight === 0) {
+        committedRef.current.set(key, dismissedKeysRef.current.has(key));
+      }
+      inFlightRef.current.set(key, inFlight + 1);
+      setDismissedForKey(key, true);
+
+      if (!dismissalCatalog.dismissRecommendation) {
+        committedRef.current.set(key, true);
+        releaseCount(inFlightRef.current, key);
+        return true;
+      }
+
+      try {
+        await dismissalCatalog.dismissRecommendation(key, item.kind);
+        if (mountedRef.current) {
+          committedRef.current.set(key, true);
+        }
+        return true;
+      } catch {
+        if (mountedRef.current && genRef.current.get(key) === gen) {
+          setDismissedForKey(key, committedRef.current.get(key) ?? false);
+        }
+        return false;
+      } finally {
+        releaseCount(inFlightRef.current, key);
+      }
+    },
+    [dismissalCatalog, setDismissedForKey],
+  );
+
+  const restoreRecommendation = useCallback(
+    async (itemKey: string): Promise<void> => {
+      const gen = (genRef.current.get(itemKey) ?? 0) + 1;
+      genRef.current.set(itemKey, gen);
+      const inFlight = inFlightRef.current.get(itemKey) ?? 0;
+      if (inFlight === 0) {
+        committedRef.current.set(itemKey, dismissedKeysRef.current.has(itemKey));
+      }
+      inFlightRef.current.set(itemKey, inFlight + 1);
+      setDismissedForKey(itemKey, false);
+
+      if (!dismissalCatalog.restoreRecommendation) {
+        committedRef.current.set(itemKey, false);
+        releaseCount(inFlightRef.current, itemKey);
+        return;
+      }
+
+      try {
+        await dismissalCatalog.restoreRecommendation(itemKey);
+        if (mountedRef.current) {
+          committedRef.current.set(itemKey, false);
+        }
+      } catch {
+        if (mountedRef.current && genRef.current.get(itemKey) === gen) {
+          setDismissedForKey(itemKey, committedRef.current.get(itemKey) ?? false);
+        }
+      } finally {
+        releaseCount(inFlightRef.current, itemKey);
+      }
+    },
+    [dismissalCatalog, setDismissedForKey],
+  );
+
+  return useMemo(
+    () => ({ dismissedKeys, dismissRecommendation, restoreRecommendation }),
+    [dismissRecommendation, dismissedKeys, restoreRecommendation],
+  );
 }
 
 /**
@@ -397,15 +559,35 @@ export function useCardQuickActionsState({
     [toggleRatingEntry],
   );
 
+  const { dismissedKeys, dismissRecommendation, restoreRecommendation } =
+    useDismissedRecommendationsState({
+      catalog,
+      refreshToken,
+      userStateVersion,
+    });
+
   return useMemo<CardQuickActionsState>(
     () => ({
       favoriteKeys,
       watchedOverrides,
       ratingByKey,
+      dismissedKeys,
       toggleFavorite,
       toggleWatched,
       toggleRating,
+      dismissRecommendation,
+      restoreRecommendation,
     }),
-    [favoriteKeys, ratingByKey, toggleFavorite, toggleRating, toggleWatched, watchedOverrides],
+    [
+      dismissRecommendation,
+      dismissedKeys,
+      favoriteKeys,
+      ratingByKey,
+      restoreRecommendation,
+      toggleFavorite,
+      toggleRating,
+      toggleWatched,
+      watchedOverrides,
+    ],
   );
 }

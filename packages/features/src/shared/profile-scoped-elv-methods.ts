@@ -26,6 +26,9 @@ export function createProfileScopedElvMethods(
   const getElvRecommendations = c.getElvRecommendations?.bind(c);
   const listElvFranchiseItems = c.listElvFranchiseItems?.bind(c);
   const listElvPersonLibraryItems = c.listElvPersonLibraryItems?.bind(c);
+  const dismissRecommendation = c.dismissRecommendation?.bind(c);
+  const restoreRecommendation = c.restoreRecommendation?.bind(c);
+  const listDismissedRecommendationKeys = c.listDismissedRecommendationKeys?.bind(c);
   const excludedFor = (effectivePid: string, scope: ProfileCatalogScope) =>
     resolveExcludedSourceIds(c, effectivePid, scope);
 
@@ -156,5 +159,33 @@ export function createProfileScopedElvMethods(
       ? { searchElvMatchCandidates: c.searchElvMatchCandidates.bind(c) }
       : {}),
     ...(c.applyElvFixMatch ? { applyElvFixMatch: c.applyElvFixMatch.bind(c) } : {}),
+    ...(dismissRecommendation
+      ? {
+          dismissRecommendation: (itemKey, kind, profileId) =>
+            dismissRecommendation(itemKey, kind, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(restoreRecommendation
+      ? {
+          restoreRecommendation: (itemKey, profileId) =>
+            restoreRecommendation(itemKey, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(listDismissedRecommendationKeys
+      ? {
+          listDismissedRecommendationKeys: async (profileId) => {
+            const scope = getScope();
+            if (scope.parentalLoadError) return [];
+            const pid = profileId ?? scope.profileId;
+            const [excluded, keys] = await Promise.all([
+              excludedFor(pid, scope),
+              listDismissedRecommendationKeys(pid),
+            ]);
+            return excluded.size === 0
+              ? keys
+              : keys.filter((k) => !isKeyFromExcludedSource(k, excluded));
+          },
+        }
+      : {}),
   };
 }

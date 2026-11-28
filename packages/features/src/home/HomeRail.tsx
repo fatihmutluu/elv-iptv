@@ -1,4 +1,4 @@
-import type { BrowseKind, SeriesUnplayedSummary } from '@elv/data';
+import type { BrowseKind, RatingValue, SeriesUnplayedSummary } from '@elv/data';
 import type { HomeLayoutSectionPref } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import {
@@ -6,7 +6,6 @@ import {
   HorizontalRailScroll,
   Icon,
   PosterCard,
-  type PosterCardQuickActions,
   TvFocusGuideRegion,
   useI18n,
   useTheme,
@@ -33,6 +32,8 @@ import {
   View,
 } from 'react-native';
 import { resolveSeriesBadgeProps, useRouteActive } from '../shared';
+import { useCardPosterHoverPreview } from '../shared/PosterHoverPreviewContext';
+import type { PosterHoverPreviewEntry } from '../shared/poster-hover-preview-model';
 import {
   formatContinueEpisodeSubtitle,
   formatRemainingMinutes,
@@ -110,10 +111,14 @@ interface HomeRailProps {
   ) => void;
   readonly favoriteKeys?: ReadonlySet<string>;
   readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
   readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
+  readonly onOpenDetail?: (entry: HomeRailEntry) => void;
   readonly onQuickPlay?: (entry: HomeRailEntry, index: number) => void;
-  readonly onQuickToggleFavorite?: (entry: HomeRailEntry) => void;
-  readonly onQuickToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
+  readonly onQuickToggleFavorite?: (entry: HomeRailEntry) => unknown;
+  readonly onQuickToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => unknown;
+  readonly onQuickToggleRating?: (entry: HomeRailEntry, next: RatingValue) => unknown;
+  readonly onDismissRecommendation?: (entry: HomeRailEntry) => unknown;
   readonly onLayoutY?: (id: HomeRailId, y: number) => void;
   readonly testID: string;
   readonly itemTestIdPrefix: string;
@@ -138,22 +143,22 @@ interface RailCardItemProps {
   readonly watchedLabel: string;
   readonly isFavorite: boolean;
   readonly watchedOverride: boolean | undefined;
+  readonly currentRating: RatingValue | null;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly formatRemMin: (minutes: number) => string;
-  readonly formatQuickPlay: (title: string) => string;
-  readonly addToListLabel: string;
-  readonly inMyListLabel: string;
-  readonly markWatchedLabel: string;
-  readonly markUnwatchedLabel: string;
   readonly onPressItem: (entry: HomeRailEntry, index: number) => void;
   readonly onContextMenuItem?: (
     entry: HomeRailEntry,
     index: number,
     anchor?: ContextMenuAnchor,
   ) => void;
+  readonly onOpenDetail?: (entry: HomeRailEntry) => void;
   readonly onQuickPlay?: (entry: HomeRailEntry, index: number) => void;
-  readonly onQuickToggleFavorite?: (entry: HomeRailEntry) => void;
-  readonly onQuickToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
+  readonly allowDismissRecommendation?: boolean;
+  readonly onQuickToggleFavorite?: (entry: HomeRailEntry) => unknown;
+  readonly onQuickToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => unknown;
+  readonly onQuickToggleRating?: (entry: HomeRailEntry, next: RatingValue) => unknown;
+  readonly onDismissRecommendation?: (entry: HomeRailEntry) => unknown;
 }
 
 const RailCardItem = memo(function RailCardItemInner({
@@ -168,18 +173,18 @@ const RailCardItem = memo(function RailCardItemInner({
   watchedLabel,
   isFavorite,
   watchedOverride,
+  currentRating,
   unplayedSummary,
   formatRemMin,
-  formatQuickPlay,
-  addToListLabel,
-  inMyListLabel,
-  markWatchedLabel,
-  markUnwatchedLabel,
   onPressItem,
   onContextMenuItem,
+  onOpenDetail,
   onQuickPlay,
+  allowDismissRecommendation = true,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onQuickToggleRating,
+  onDismissRecommendation,
 }: RailCardItemProps): ReactElement {
   const handlePress = useCallback(() => {
     onPressItem(entry, index);
@@ -195,47 +200,62 @@ const RailCardItem = memo(function RailCardItemInner({
   const effectiveWatched =
     watchedOverride ?? (entry.watched || (isSeries && unplayedSummary?.watched === true));
 
-  const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
-    if (variant !== 'poster' || (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched)) {
-      return undefined;
-    }
-    return {
-      ...(onQuickPlay !== undefined
+  const hoverEntry = useMemo<PosterHoverPreviewEntry | null>(
+    () =>
+      variant === 'poster' && (entry.kind === 'movie' || entry.kind === 'series')
         ? {
-            onPlay: () => onQuickPlay(entry, index),
-            playLabel: formatQuickPlay(entry.title),
-          }
-        : {}),
-      ...(onQuickToggleFavorite !== undefined
-        ? {
+            itemKey: entry.itemKey,
+            sourceId: entry.sourceId,
+            kind: entry.kind,
+            title: entry.title,
+            posterUri: entry.posterUri,
+            backdropUri: entry.backdropUri,
+            year: entry.year,
+            rating: entry.rating,
+            overview: entry.overview ?? null,
+            positionMs: entry.positionMs,
+            watched: effectiveWatched,
             isFavorite,
-            onToggleFavorite: () => onQuickToggleFavorite(entry),
-            favoriteLabel: isFavorite ? inMyListLabel : addToListLabel,
+            userRating: currentRating,
+            ...(allowDismissRecommendation === false ? { allowDismissRecommendation: false } : {}),
+            onPlay: () => (onQuickPlay ? onQuickPlay(entry, index) : onPressItem(entry, index)),
+            onOpenDetail: () => (onOpenDetail ? onOpenDetail(entry) : onPressItem(entry, index)),
+            ...(onQuickToggleFavorite !== undefined
+              ? { onToggleFavorite: () => onQuickToggleFavorite(entry) }
+              : {}),
+            ...(onQuickToggleWatched !== undefined
+              ? { onToggleWatched: (cur: boolean) => onQuickToggleWatched(entry, cur) }
+              : {}),
+            ...(onQuickToggleRating !== undefined
+              ? { onToggleRating: (next: RatingValue) => onQuickToggleRating(entry, next) }
+              : {}),
+            ...(allowDismissRecommendation && onDismissRecommendation !== undefined
+              ? { onDismissRecommendation: () => onDismissRecommendation(entry) }
+              : {}),
           }
-        : {}),
-      ...(onQuickToggleWatched !== undefined
-        ? {
-            isWatched: effectiveWatched,
-            onToggleWatched: () => onQuickToggleWatched(entry, effectiveWatched),
-            watchedLabel: effectiveWatched ? markUnwatchedLabel : markWatchedLabel,
-          }
-        : {}),
-    };
-  }, [
-    addToListLabel,
-    effectiveWatched,
-    entry,
-    formatQuickPlay,
-    inMyListLabel,
-    index,
-    isFavorite,
-    markUnwatchedLabel,
-    markWatchedLabel,
-    onQuickPlay,
-    onQuickToggleFavorite,
-    onQuickToggleWatched,
-    variant,
-  ]);
+        : null,
+    [
+      allowDismissRecommendation,
+      currentRating,
+      effectiveWatched,
+      entry,
+      index,
+      isFavorite,
+      onDismissRecommendation,
+      onOpenDetail,
+      onPressItem,
+      onQuickPlay,
+      onQuickToggleFavorite,
+      onQuickToggleRating,
+      onQuickToggleWatched,
+      variant,
+    ],
+  );
+  const hoverHandlers = useCardPosterHoverPreview({
+    enabled: variant === 'poster' && hoverEntry !== null,
+    entry: hoverEntry,
+    cardWidth,
+  });
 
   if (variant === 'wide') {
     const isLive = Boolean(entry.live || entry.kind === 'live');
@@ -305,7 +325,7 @@ const RailCardItem = memo(function RailCardItemInner({
       {...(ratio !== undefined ? { progress: ratio } : {})}
       {...(badge !== undefined ? { badge } : {})}
       {...seriesBadge}
-      {...(quickActions !== undefined ? { quickActions } : {})}
+      {...hoverHandlers}
       width={cardWidth}
       maxDecodePx={320}
       focusable={!isTv}
@@ -334,10 +354,14 @@ function HomeRailInner({
   onContextMenuItem,
   favoriteKeys,
   watchedOverrides,
+  ratingByKey,
   unplayedBySeriesKey,
+  onOpenDetail,
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onQuickToggleRating,
+  onDismissRecommendation,
   onLayoutY,
   testID,
   itemTestIdPrefix,
@@ -368,10 +392,6 @@ function HomeRailInner({
     (minutes: number) => i18n.t('home.remainingMin', { minutes }),
     [i18n],
   );
-  const formatQuickPlay = useCallback(
-    (cardTitle: string) => i18n.t('card.quickPlay', { title: cardTitle }),
-    [i18n],
-  );
 
   if (items.length === 0) return null;
 
@@ -379,10 +399,7 @@ function HomeRailInner({
   const linkTransition = webTransition(theme, 'color, opacity');
   const liveKindLabel = i18n.t('home.kind.live');
   const watchedLabel = i18n.t('home.watchedBadge');
-  const addToListLabel = i18n.t('home.addToList');
-  const inMyListLabel = i18n.t('home.inMyList');
-  const markWatchedLabel = i18n.t('home.markWatched');
-  const markUnwatchedLabel = i18n.t('home.markUnwatched');
+  const isDiscoveryDismissible = id !== 'mylist' && !id.startsWith('collection:');
 
   return (
     <View testID={testID} onLayout={onLayoutY ? handleLayout : undefined} style={styles.section}>
@@ -445,18 +462,20 @@ function HomeRailInner({
               watchedLabel={watchedLabel}
               isFavorite={favoriteKeys?.has(entry.itemKey) ?? false}
               watchedOverride={watchedOverrides?.get(entry.itemKey)}
+              currentRating={ratingByKey?.get(entry.itemKey) ?? null}
               unplayedSummary={unplayedBySeriesKey?.get(entry.itemKey)}
               formatRemMin={formatRemMin}
-              formatQuickPlay={formatQuickPlay}
-              addToListLabel={addToListLabel}
-              inMyListLabel={inMyListLabel}
-              markWatchedLabel={markWatchedLabel}
-              markUnwatchedLabel={markUnwatchedLabel}
               onPressItem={onPressItem}
               {...(onContextMenuItem !== undefined ? { onContextMenuItem } : {})}
+              {...(onOpenDetail !== undefined ? { onOpenDetail } : {})}
               {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
               {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
               {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
+              {...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {})}
+              allowDismissRecommendation={isDiscoveryDismissible}
+              {...(isDiscoveryDismissible && onDismissRecommendation !== undefined
+                ? { onDismissRecommendation }
+                : {})}
             />
           ))}
         </HorizontalRailScroll>
@@ -484,6 +503,7 @@ interface HomeCollectionsSectionProps {
   readonly focusedCol: number | null;
   readonly favoriteKeys: ReadonlySet<string>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
+  readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
   readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly onPressItem: (entry: HomeRailEntry, index: number) => void;
   readonly onContextMenuItem: (
@@ -492,9 +512,12 @@ interface HomeCollectionsSectionProps {
     index: number,
     anchor?: ContextMenuAnchor,
   ) => void;
+  readonly onOpenDetail?: (entry: HomeRailEntry) => void;
   readonly onQuickPlay: (entry: HomeRailEntry, index: number) => void;
-  readonly onQuickToggleFavorite: (entry: HomeRailEntry) => void;
-  readonly onQuickToggleWatched: (entry: HomeRailEntry, currentWatched: boolean) => void;
+  readonly onQuickToggleFavorite: (entry: HomeRailEntry) => unknown;
+  readonly onQuickToggleWatched: (entry: HomeRailEntry, currentWatched: boolean) => unknown;
+  readonly onQuickToggleRating?: (entry: HomeRailEntry, next: RatingValue) => unknown;
+  readonly onDismissRecommendation?: (entry: HomeRailEntry) => unknown;
   readonly onLayoutY: (id: HomeRailId, y: number) => void;
 }
 
@@ -524,10 +547,15 @@ function HomeCollectionsSection(p: HomeCollectionsSectionProps): ReactElement | 
           }
           favoriteKeys={p.favoriteKeys}
           watchedOverrides={p.watchedOverrides}
+          {...(p.ratingByKey !== undefined ? { ratingByKey: p.ratingByKey } : {})}
           unplayedBySeriesKey={p.unplayedBySeriesKey}
+          {...(p.onOpenDetail !== undefined ? { onOpenDetail: p.onOpenDetail } : {})}
           onQuickPlay={p.onQuickPlay}
           onQuickToggleFavorite={p.onQuickToggleFavorite}
           onQuickToggleWatched={p.onQuickToggleWatched}
+          {...(p.onQuickToggleRating !== undefined
+            ? { onQuickToggleRating: p.onQuickToggleRating }
+            : {})}
           onLayoutY={p.onLayoutY}
         />
       ))}
@@ -551,6 +579,7 @@ export interface HomeSectionsListProps {
   readonly focusedCol: number | null;
   readonly favoriteKeys: ReadonlySet<string>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
+  readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
   readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly onOpenTab: (tab: BrowseKind) => void;
   readonly onPressWideItem: (entry: HomeRailEntry, index: number) => void;
@@ -561,9 +590,12 @@ export interface HomeSectionsListProps {
     index: number,
     anchor?: ContextMenuAnchor,
   ) => void;
+  readonly onOpenDetail?: (entry: HomeRailEntry) => void;
   readonly onQuickPlay: (entry: HomeRailEntry, index: number) => void;
-  readonly onQuickToggleFavorite: (entry: HomeRailEntry) => void;
-  readonly onQuickToggleWatched: (entry: HomeRailEntry, currentWatched: boolean) => void;
+  readonly onQuickToggleFavorite: (entry: HomeRailEntry) => unknown;
+  readonly onQuickToggleWatched: (entry: HomeRailEntry, currentWatched: boolean) => unknown;
+  readonly onQuickToggleRating?: (entry: HomeRailEntry, next: RatingValue) => unknown;
+  readonly onDismissRecommendation?: (entry: HomeRailEntry) => unknown;
   readonly onLayoutY: (id: HomeRailId, y: number) => void;
 }
 
@@ -574,6 +606,20 @@ export interface HomeSectionsListProps {
 export function HomeSectionsList(p: HomeSectionsListProps): ReactElement {
   const hasContinueSection = p.visibleSections.some((section) => section.id === 'continue');
   const elvShowcaseSpec = p.railSpecsById.get('elvShowcase');
+  const posterCardExtras = {
+    favoriteKeys: p.favoriteKeys,
+    watchedOverrides: p.watchedOverrides,
+    ...(p.ratingByKey !== undefined ? { ratingByKey: p.ratingByKey } : {}),
+    unplayedBySeriesKey: p.unplayedBySeriesKey,
+    ...(p.onOpenDetail !== undefined ? { onOpenDetail: p.onOpenDetail } : {}),
+    onQuickPlay: p.onQuickPlay,
+    onQuickToggleFavorite: p.onQuickToggleFavorite,
+    onQuickToggleWatched: p.onQuickToggleWatched,
+    ...(p.onQuickToggleRating !== undefined ? { onQuickToggleRating: p.onQuickToggleRating } : {}),
+    ...(p.onDismissRecommendation !== undefined
+      ? { onDismissRecommendation: p.onDismissRecommendation }
+      : {}),
+  };
   const renderElvShowcase = (): ReactElement | null => {
     if (!elvShowcaseSpec || p.railSets.elvShowcase.length === 0) return null;
     return (
@@ -595,12 +641,7 @@ export function HomeSectionsList(p: HomeSectionsListProps): ReactElement {
         onContextMenuItem={(entry, index, anchor) =>
           p.onContextMenuItem('elvShowcase', entry, index, anchor)
         }
-        favoriteKeys={p.favoriteKeys}
-        watchedOverrides={p.watchedOverrides}
-        unplayedBySeriesKey={p.unplayedBySeriesKey}
-        onQuickPlay={p.onQuickPlay}
-        onQuickToggleFavorite={p.onQuickToggleFavorite}
-        onQuickToggleWatched={p.onQuickToggleWatched}
+        {...posterCardExtras}
         onLayoutY={p.onLayoutY}
       />
     );
@@ -622,14 +663,9 @@ export function HomeSectionsList(p: HomeSectionsListProps): ReactElement {
               isTouch={p.isTouch}
               focusedRowId={p.focusedRowId}
               focusedCol={p.focusedCol}
-              favoriteKeys={p.favoriteKeys}
-              watchedOverrides={p.watchedOverrides}
-              unplayedBySeriesKey={p.unplayedBySeriesKey}
               onPressItem={p.onPressPosterItem}
               onContextMenuItem={p.onContextMenuItem}
-              onQuickPlay={p.onQuickPlay}
-              onQuickToggleFavorite={p.onQuickToggleFavorite}
-              onQuickToggleWatched={p.onQuickToggleWatched}
+              {...posterCardExtras}
               onLayoutY={p.onLayoutY}
             />
           );
@@ -657,16 +693,7 @@ export function HomeSectionsList(p: HomeSectionsListProps): ReactElement {
             onContextMenuItem={(entry, index, anchor) =>
               p.onContextMenuItem(spec.id, entry, index, anchor)
             }
-            {...(spec.variant === 'poster'
-              ? {
-                  favoriteKeys: p.favoriteKeys,
-                  watchedOverrides: p.watchedOverrides,
-                  unplayedBySeriesKey: p.unplayedBySeriesKey,
-                  onQuickPlay: p.onQuickPlay,
-                  onQuickToggleFavorite: p.onQuickToggleFavorite,
-                  onQuickToggleWatched: p.onQuickToggleWatched,
-                }
-              : {})}
+            {...(spec.variant === 'poster' ? posterCardExtras : {})}
             onLayoutY={p.onLayoutY}
           />
         );

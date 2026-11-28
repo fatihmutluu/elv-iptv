@@ -16,6 +16,7 @@ import { uniqueNonEmpty } from './elv-enrichment-types';
 import { foldText } from './fold';
 import { loadActiveParentalFilter } from './parental-repo';
 import { type ItemRow, resolveQueryProfileId } from './queries-shared';
+import { listDismissedRecommendationKeys } from './recommendation-dismissals-repo';
 
 /** Default recommendation page size returned by {@link computeElvRecommendations}. */
 export const ELV_RECOMMENDATION_DEFAULT_LIMIT = 24;
@@ -231,6 +232,7 @@ export async function computeElvRecommendations(
     favoriteRows,
     watchedRows,
     episodeWatchedSeriesRows,
+    dismissedKeys,
     feeds,
   ] = await Promise.all([
     loadActiveSourceIds(catalogDb, input.excludedSourceIds),
@@ -265,6 +267,7 @@ export async function computeElvRecommendations(
         LIMIT ?`,
       [profileId, MAX_SIGNAL_ROWS],
     ),
+    listDismissedRecommendationKeys(catalogDb, profileId),
     enrichmentStore.listFeeds(ELV_FEED_KEYS),
   ]);
 
@@ -294,6 +297,7 @@ export async function computeElvRecommendations(
     ...dislikedKeys,
     ...favoriteKeys,
     ...watchedKeys,
+    ...dismissedKeys,
   ]);
   const allSignalKeys = [...new Set<string>([...excludedItemKeys, ...episodeWatchedSeriesKeys])];
 
@@ -348,6 +352,10 @@ export async function computeElvRecommendations(
   for (const k of watchedKeys) registerSignal(k, 'watched', true);
   for (const k of episodeWatchedSeriesKeys) registerSignal(k, 'watched', false);
   for (const k of dislikedKeys) registerSignal(k, 'disliked', true);
+  for (const k of dismissedKeys) {
+    const enrich = signalEnrich.get(k);
+    if (enrich !== undefined) excludedImdbIds.add(enrich.imdbId);
+  }
 
   let hasPositiveSignals = false;
   for (const sig of signalsByImdb.values()) {

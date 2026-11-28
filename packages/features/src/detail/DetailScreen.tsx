@@ -394,13 +394,28 @@ export function DetailScreen({
     [handlePressRelated, onPlay],
   );
   const handleQuickToggleRelatedFavorite = useCallback(
-    (item: ItemRow) => void relatedQuickActions.toggleFavorite(item),
+    (item: ItemRow) => relatedQuickActions.toggleFavorite(item),
     [relatedQuickActions.toggleFavorite],
   );
   const handleQuickToggleRelatedWatched = useCallback(
     (item: ItemRow, currentWatched: boolean) =>
-      void relatedQuickActions.toggleWatched(item, currentWatched),
+      relatedQuickActions.toggleWatched(item, currentWatched),
     [relatedQuickActions.toggleWatched],
+  );
+  const handleQuickToggleRelatedRating = useCallback(
+    (item: ItemRow, next: RatingValue) => relatedQuickActions.toggleRating(item, next),
+    [relatedQuickActions.toggleRating],
+  );
+  const handleDismissRelatedRecommendation = useCallback(
+    (item: ItemRow) => relatedQuickActions.dismissRecommendation(item),
+    [relatedQuickActions.dismissRecommendation],
+  );
+  const visibleRelatedItems = useMemo(
+    () =>
+      relatedQuickActions.dismissedKeys.size === 0
+        ? data.related
+        : data.related.filter((item) => !relatedQuickActions.dismissedKeys.has(item.key)),
+    [data.related, relatedQuickActions.dismissedKeys],
   );
 
   const anyModalOpen = activePerson !== null || trailerOpen || scopePickerMode !== null;
@@ -561,8 +576,10 @@ export function DetailScreen({
       },
       footer: {
         data,
+        relatedItems: visibleRelatedItems,
         favoriteKeys: relatedQuickActions.favoriteKeys,
         watchedOverrides: relatedQuickActions.watchedOverrides,
+        ratingByKey: relatedQuickActions.ratingByKey,
         cardWidth: posterRailWidth,
         gap: railGap,
         padX,
@@ -572,6 +589,8 @@ export function DetailScreen({
         onQuickPlay: handleQuickPlayRelated,
         onQuickToggleFavorite: handleQuickToggleRelatedFavorite,
         onQuickToggleWatched: handleQuickToggleRelatedWatched,
+        onQuickToggleRating: handleQuickToggleRelatedRating,
+        onDismissRecommendation: handleDismissRelatedRecommendation,
       },
     }),
     [
@@ -582,6 +601,7 @@ export function DetailScreen({
       elvPreferences,
       extras,
       focusedHeroSlot,
+      handleDismissRelatedRecommendation,
       handleHeaderHeightChange,
       handleOpenTrailer,
       handlePlayPrimary,
@@ -591,6 +611,7 @@ export function DetailScreen({
       handlePressRelated,
       handleQuickPlayRelated,
       handleQuickToggleRelatedFavorite,
+      handleQuickToggleRelatedRating,
       handleQuickToggleRelatedWatched,
       handleSelectPerson,
       handleSelectVersion,
@@ -612,12 +633,14 @@ export function DetailScreen({
       recordEpisodesY,
       recordFranchiseY,
       relatedQuickActions.favoriteKeys,
+      relatedQuickActions.ratingByKey,
       relatedQuickActions.watchedOverrides,
       seasons.length,
       target,
       trailerPreviewActive,
       tvNav.focusedCol,
       tvNav.focusedRowId,
+      visibleRelatedItems,
     ],
   );
 

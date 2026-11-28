@@ -12,9 +12,11 @@ import {
   type ListItemsOptions,
   type LiveVariantOption,
   type LocalM3uSourceInput,
+  MAX_RECOMMENDATION_DISMISSAL_KEY_CHARS,
   MIN_RESUME_POSITION_MS,
   parseLiveVariant,
   parseVodVersion,
+  type RecommendationDismissalKind,
   type SaveProgressInput,
   type SearchOptions,
   type SearchResults,
@@ -120,6 +122,15 @@ export function createWorkbenchCatalog(): CatalogService {
       },
     ],
   ]);
+  const dismissedRecommendations = new Map<
+    string,
+    {
+      profileId: string;
+      itemKey: string;
+      kind: RecommendationDismissalKind;
+      dismissedAt: number;
+    }
+  >();
 
   return {
     async addSource(input: AddSourceInput) {
@@ -503,6 +514,44 @@ export function createWorkbenchCatalog(): CatalogService {
         }
       }
       return out;
+    },
+    async dismissRecommendation(
+      itemKey: string,
+      kind: RecommendationDismissalKind,
+      profileId?: string,
+    ) {
+      const trimmed = typeof itemKey === 'string' ? itemKey.trim() : '';
+      if (trimmed.length === 0 || trimmed.length > MAX_RECOMMENDATION_DISMISSAL_KEY_CHARS) {
+        throw new Error('dismissRecommendation: itemKey must be a non-empty string');
+      }
+      for (let i = 0; i < trimmed.length; i += 1) {
+        const code = trimmed.charCodeAt(i);
+        if (code <= 0x1f || code === 0x7f) {
+          throw new Error('dismissRecommendation: itemKey contains invalid characters');
+        }
+      }
+      if (kind !== 'movie' && kind !== 'series') {
+        throw new Error('dismissRecommendation: kind must be "movie" or "series"');
+      }
+      const pid = normProfile(profileId);
+      dismissedRecommendations.set(pKey(pid, trimmed), {
+        profileId: pid,
+        itemKey: trimmed,
+        kind,
+        dismissedAt: nextTick(),
+      });
+    },
+    async restoreRecommendation(itemKey: string, profileId?: string) {
+      const trimmed = typeof itemKey === 'string' ? itemKey.trim() : '';
+      if (trimmed.length === 0) return;
+      dismissedRecommendations.delete(pKey(normProfile(profileId), trimmed));
+    },
+    async listDismissedRecommendationKeys(profileId?: string) {
+      const pid = normProfile(profileId);
+      return [...dismissedRecommendations.values()]
+        .filter((r) => r.profileId === pid)
+        .sort((a, b) => b.dismissedAt - a.dismissedAt || a.itemKey.localeCompare(b.itemKey))
+        .map((r) => r.itemKey);
     },
     close: async () => undefined,
   };

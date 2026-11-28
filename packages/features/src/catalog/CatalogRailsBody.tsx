@@ -37,6 +37,7 @@ export interface CatalogRailsBodyProps {
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
+  readonly onDismissRecommendation?: (item: ItemRow) => void;
   readonly onSeeAll: (categoryId: string) => void;
   readonly onLoadMore: () => void;
   readonly onLayoutContinueY?: (y: number) => void;
@@ -69,6 +70,7 @@ export function CatalogRailsBody({
   onQuickToggleFavorite,
   onQuickToggleWatched,
   onQuickToggleRating,
+  onDismissRecommendation,
   onSeeAll,
   onLoadMore,
   onLayoutContinueY,
@@ -147,6 +149,7 @@ export function CatalogRailsBody({
                 {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
                 {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
                 {...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {})}
+                {...(onDismissRecommendation !== undefined ? { onDismissRecommendation } : {})}
                 onSeeAll={onSeeAll}
               />
             </TvFocusGuideRegion>

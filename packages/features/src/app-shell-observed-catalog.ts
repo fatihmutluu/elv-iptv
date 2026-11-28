@@ -515,6 +515,25 @@ export function createObservedCatalog(
           },
         }
       : {}),
+    ...(c.dismissRecommendation
+      ? {
+          dismissRecommendation: async (itemKey, kind, profileId) => {
+            await c.dismissRecommendation?.(itemKey, kind, profileId);
+            onUserStateMutated?.();
+          },
+        }
+      : {}),
+    ...(c.restoreRecommendation
+      ? {
+          restoreRecommendation: async (itemKey, profileId) => {
+            await c.restoreRecommendation?.(itemKey, profileId);
+            onUserStateMutated?.();
+          },
+        }
+      : {}),
+    ...(c.listDismissedRecommendationKeys
+      ? { listDismissedRecommendationKeys: c.listDismissedRecommendationKeys.bind(c) }
+      : {}),
     ...(c.listLiveFavoriteFolders
       ? { listLiveFavoriteFolders: c.listLiveFavoriteFolders.bind(c) }
       : {}),

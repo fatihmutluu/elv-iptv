@@ -1,7 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { Platform, StyleSheet, View } from 'react-native';
-import { UiAdaptersProvider } from '../../adapters';
-import { ICON_PATHS } from '../../icons';
+import { Platform, StyleSheet } from 'react-native';
 import { buildTheme, TABULAR_NUMS_STYLE, ThemeProvider } from '../../theme';
 import { ViewportProvider } from '../../viewport';
 import { CtaButton } from '../CtaButton';
@@ -396,184 +394,119 @@ describe('PosterCard & WideCard (Cinema Quietude compliance)', () => {
     expect(screen.queryByTestId('series-none-watched-badge')).toBeNull();
   });
 
-  it('renders pointer-only hover quick-actions that stop propagation and never render on touch or TV (#409)', async () => {
+  it('never renders legacy quick-actions overlay and emits pointer-only desktop web hover preview rect callbacks (Wave R3)', async () => {
+    const osReplacer = jest.replaceProperty(Platform, 'OS', 'web');
+    const onHoverPreviewStart = jest.fn();
+    const onHoverPreviewEnd = jest.fn();
     const onPress = jest.fn();
-    const onPlay = jest.fn();
-    const onToggleFavorite = jest.fn();
-    const onToggleWatched = jest.fn();
 
-    const desktopView = await render(
-      <ThemeProvider>
-        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
-          <PosterCard
-            title="Dune"
-            onPress={onPress}
-            quickActions={{
-              onPlay,
-              playLabel: 'Play Dune',
-              isFavorite: false,
-              onToggleFavorite,
-              favoriteLabel: 'Add to My list',
-              isWatched: true,
-              onToggleWatched,
-              watchedLabel: 'Mark unwatched',
-            }}
-            testID="qa-poster"
-          />
-        </ViewportProvider>
-      </ThemeProvider>,
-    );
-
-    expect(screen.queryByTestId('qa-poster-quick-play')).toBeNull();
-    expect(screen.queryByTestId('qa-poster-quick-favorite')).toBeNull();
-    expect(screen.queryByTestId('qa-poster-quick-watched')).toBeNull();
-
-    await fireEvent(screen.getByTestId('qa-poster'), 'hoverIn');
-    const playBtn = screen.getByTestId('qa-poster-quick-play');
-    const favBtn = screen.getByTestId('qa-poster-quick-favorite');
-    const watchedBtn = screen.getByTestId('qa-poster-quick-watched');
-
-    const playEvt = { stopPropagation: jest.fn(), preventDefault: jest.fn() };
-    await fireEvent.press(playBtn, playEvt);
-    expect(playEvt.stopPropagation).toHaveBeenCalledTimes(1);
-    expect(playEvt.preventDefault).toHaveBeenCalledTimes(1);
-    expect(onPlay).toHaveBeenCalledTimes(1);
-    expect(onPress).not.toHaveBeenCalled();
-
-    const favEvt = { stopPropagation: jest.fn(), preventDefault: jest.fn() };
-    await fireEvent.press(favBtn, favEvt);
-    expect(favEvt.stopPropagation).toHaveBeenCalledTimes(1);
-    expect(onToggleFavorite).toHaveBeenCalledTimes(1);
-    expect(onPress).not.toHaveBeenCalled();
-
-    const watchedEvt = { stopPropagation: jest.fn(), preventDefault: jest.fn() };
-    await fireEvent.press(watchedBtn, watchedEvt);
-    expect(watchedEvt.stopPropagation).toHaveBeenCalledTimes(1);
-    expect(onToggleWatched).toHaveBeenCalledTimes(1);
-    expect(onPress).not.toHaveBeenCalled();
-
-    await fireEvent(screen.getByTestId('qa-poster'), 'hoverOut');
-    expect(screen.queryByTestId('qa-poster-quick-play')).toBeNull();
-    await desktopView.unmount();
-
-    // Regression: entering nested quick-action Pressables triggers parent Pressable hoverOut on web
-    // (react-gui:hover:lock), which must NOT collapse the quick-actions overlay while pointer stays
-    // inside the outer hover container.
-    const nestedHoverView = await render(
-      <ThemeProvider>
-        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
-          <PosterCard
-            title="Arrival"
-            quickActions={{
-              onPlay,
-              playLabel: 'Play Arrival',
-              isFavorite: false,
-              onToggleFavorite,
-              favoriteLabel: 'Add to My list',
-              isWatched: false,
-              onToggleWatched,
-              watchedLabel: 'Mark watched',
-            }}
-            testID="nested-poster"
-          />
-        </ViewportProvider>
-      </ThemeProvider>,
-    );
-    await fireEvent(screen.getByTestId('nested-poster-hover-container'), 'pointerEnter');
-    expect(screen.getByTestId('nested-poster-quick-favorite')).toBeTruthy();
-
-    // Simulated react-native-web nested Pressable hover lock cancelling parent Pressable hover
-    await fireEvent(screen.getByTestId('nested-poster'), 'hoverOut');
-    expect(screen.getByTestId('nested-poster-quick-favorite')).toBeTruthy();
-    expect(screen.getByTestId('nested-poster-quick-play')).toBeTruthy();
-    expect(screen.getByTestId('nested-poster-quick-watched')).toBeTruthy();
-
-    // Leaving the outer hover container cleanly unmounts the overlay
-    await fireEvent(screen.getByTestId('nested-poster-hover-container'), 'pointerLeave');
-    expect(screen.queryByTestId('nested-poster-quick-favorite')).toBeNull();
-    await nestedHoverView.unmount();
-
-    // Quick-favorite uses plus (when not saved) and check (when saved) — never star
-    const svgSpecs: unknown[] = [];
-    const iconCheckView = await render(
-      <ThemeProvider>
-        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
-          <UiAdaptersProvider
-            adapters={{
-              renderSvg: ({ spec }) => {
-                svgSpecs.push(spec);
-                return <View />;
-              },
-            }}
-          >
-            <PosterCard
-              title="Arrival"
-              quickActions={{
-                onToggleFavorite,
-                isFavorite: false,
-                favoriteLabel: 'Add to My list',
-              }}
-              testID="qa-icon-poster"
-            />
-          </UiAdaptersProvider>
-        </ViewportProvider>
-      </ThemeProvider>,
-    );
-    await fireEvent(screen.getByTestId('qa-icon-poster'), 'hoverIn');
-    expect(svgSpecs).toContain(ICON_PATHS.plus);
-    expect(svgSpecs).not.toContain(ICON_PATHS.star);
-
-    svgSpecs.length = 0;
-    await iconCheckView.rerender(
-      <ThemeProvider>
-        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
-          <UiAdaptersProvider
-            adapters={{
-              renderSvg: ({ spec }) => {
-                svgSpecs.push(spec);
-                return <View />;
-              },
-            }}
-          >
-            <PosterCard
-              title="Arrival"
-              quickActions={{
-                onToggleFavorite,
-                isFavorite: true,
-                favoriteLabel: 'In My list',
-              }}
-              testID="qa-icon-poster"
-            />
-          </UiAdaptersProvider>
-        </ViewportProvider>
-      </ThemeProvider>,
-    );
-    expect(svgSpecs).toContain(ICON_PATHS.check);
-    expect(svgSpecs).not.toContain(ICON_PATHS.starFilled);
-    await iconCheckView.unmount();
-
-    // Never renders on touch or TV even if hoverIn fires.
-    for (const vp of [
-      { formFactor: 'phone' as const, orientation: 'portrait' as const },
-      { formFactor: 'tv' as const, width: 1920, height: 1080 },
-    ]) {
-      const view = await render(
+    try {
+      const desktopView = await render(
         <ThemeProvider>
-          <ViewportProvider value={vp}>
+          <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
             <PosterCard
               title="Dune"
-              quickActions={{ onPlay, onToggleFavorite, onToggleWatched }}
-              testID="non-pointer-poster"
+              width={168}
+              onPress={onPress}
+              onHoverPreviewStart={onHoverPreviewStart}
+              onHoverPreviewEnd={onHoverPreviewEnd}
+              testID="hover-poster"
             />
           </ViewportProvider>
         </ThemeProvider>,
       );
-      await fireEvent(screen.getByTestId('non-pointer-poster'), 'hoverIn');
-      expect(screen.queryByTestId('non-pointer-poster-quick-play')).toBeNull();
-      expect(screen.queryByTestId('non-pointer-poster-quick-favorite')).toBeNull();
-      expect(screen.queryByTestId('non-pointer-poster-quick-watched')).toBeNull();
-      await view.unmount();
+
+      await fireEvent(screen.getByTestId('hover-poster'), 'hoverIn', {
+        currentTarget: {
+          getBoundingClientRect: () => ({ left: 120, top: 240, width: 168, height: 252 }),
+        },
+      });
+      expect(screen.queryByTestId('hover-poster-quick-play')).toBeNull();
+      expect(screen.queryByTestId('hover-poster-quick-favorite')).toBeNull();
+      expect(screen.queryByTestId('hover-poster-quick-watched')).toBeNull();
+      expect(onHoverPreviewStart).toHaveBeenCalledTimes(1);
+      expect(onHoverPreviewStart).toHaveBeenCalledWith({
+        x: 120,
+        y: 240,
+        width: 168,
+        height: 252,
+      });
+
+      // Redundant pointerEnter while already active does not duplicate start callbacks
+      await fireEvent(screen.getByTestId('hover-poster-hover-container'), 'pointerEnter');
+      expect(onHoverPreviewStart).toHaveBeenCalledTimes(1);
+
+      // Leaving calls onHoverPreviewEnd
+      await fireEvent(screen.getByTestId('hover-poster-hover-container'), 'pointerLeave');
+      expect(onHoverPreviewEnd).toHaveBeenCalledTimes(1);
+
+      // Re-entering then pressing immediately ends hover preview before invoking onPress
+      await fireEvent(screen.getByTestId('hover-poster-hover-container'), 'pointerEnter', {
+        currentTarget: {
+          getBoundingClientRect: () => ({ left: 80, top: 140, width: 168, height: 252 }),
+        },
+      });
+      expect(onHoverPreviewStart).toHaveBeenCalledTimes(2);
+      await fireEvent.press(screen.getByTestId('hover-poster'));
+      expect(onHoverPreviewEnd).toHaveBeenCalledTimes(2);
+      expect(onPress).toHaveBeenCalledTimes(1);
+
+      // Unmounting while active also notifies onHoverPreviewEnd
+      await fireEvent(screen.getByTestId('hover-poster'), 'hoverIn', {
+        currentTarget: {
+          getBoundingClientRect: () => ({ left: 40, top: 90, width: 168, height: 252 }),
+        },
+      });
+      await desktopView.unmount();
+      expect(onHoverPreviewEnd).toHaveBeenCalledTimes(3);
+
+      // Never emits hover preview callbacks on TV or Touch viewports
+      for (const vp of [
+        { formFactor: 'phone' as const, orientation: 'portrait' as const },
+        { formFactor: 'tv' as const, width: 1920, height: 1080 },
+      ]) {
+        const startSpy = jest.fn();
+        const endSpy = jest.fn();
+        const view = await render(
+          <ThemeProvider>
+            <ViewportProvider value={vp}>
+              <PosterCard
+                title="Dune"
+                width={168}
+                onHoverPreviewStart={startSpy}
+                onHoverPreviewEnd={endSpy}
+                testID="non-pointer-poster"
+              />
+            </ViewportProvider>
+          </ThemeProvider>,
+        );
+        await fireEvent(screen.getByTestId('non-pointer-poster'), 'hoverIn');
+        await fireEvent(screen.getByTestId('non-pointer-poster-hover-container'), 'pointerEnter');
+        expect(startSpy).not.toHaveBeenCalled();
+        expect(endSpy).not.toHaveBeenCalled();
+        await view.unmount();
+      }
+    } finally {
+      osReplacer.restore();
     }
+
+    // Never emits hover preview callbacks on native (non-web) targets even with desktop override
+    const nativeStartSpy = jest.fn();
+    const nativeView = await render(
+      <ThemeProvider>
+        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+          <PosterCard
+            title="Native Dune"
+            width={168}
+            onHoverPreviewStart={nativeStartSpy}
+            testID="native-poster"
+          />
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+    await fireEvent(screen.getByTestId('native-poster'), 'hoverIn');
+    expect(nativeStartSpy).not.toHaveBeenCalled();
+    await nativeView.unmount();
   });
 
   it('renders 16:9 WideCard with LIVE pill, scrim, optional circular play badge, and reduceMotion', async () => {

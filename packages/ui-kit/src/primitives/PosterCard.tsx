@@ -1,6 +1,13 @@
-import { memo, type ReactElement, useCallback, useRef, useState } from 'react';
 import {
-  type GestureResponderEvent,
+  type ComponentRef,
+  memo,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import {
   Platform,
   Pressable,
   type StyleProp,
@@ -9,7 +16,6 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
-import { Icon } from '../icons';
 import {
   type ContextMenuAnchor,
   TABULAR_NUMS_STYLE,
@@ -22,18 +28,13 @@ import { useViewport } from '../viewport';
 import { ArtworkImage } from './ArtworkImage';
 import type { DeadHostRegistry } from './dead-host-registry';
 import { MicroPill } from './MicroPill';
-import { Tooltip } from './Tooltip';
 
-/** Desktop pointer-only hover quick-action handlers for {@link PosterCard} (`#409`). */
-export interface PosterCardQuickActions {
-  readonly onPlay?: () => void;
-  readonly playLabel?: string;
-  readonly isFavorite?: boolean;
-  readonly onToggleFavorite?: () => void;
-  readonly favoriteLabel?: string;
-  readonly isWatched?: boolean;
-  readonly onToggleWatched?: () => void;
-  readonly watchedLabel?: string;
+/** Viewport-relative bounding rect emitted by {@link PosterCard} on Desktop web hover. */
+export interface PosterCardHoverRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
 }
 
 /** Props of {@link PosterCard}. */
@@ -46,8 +47,10 @@ export interface PosterCardProps {
   badge?: string;
   /** Shows a restrained watched checkmark pill when `true` (`#409`, `#502`). */
   readonly allWatched?: boolean;
-  /** Pointer-only hover quick-actions (`#409`). Never rendered on touch or TV. */
-  readonly quickActions?: PosterCardQuickActions;
+  /** Desktop pointer-only hover preview entry callback with measured viewport rect (Wave R3). */
+  readonly onHoverPreviewStart?: (rect: PosterCardHoverRect) => void;
+  /** Desktop pointer-only hover preview exit callback fired on leave, press, or unmount (Wave R3). */
+  readonly onHoverPreviewEnd?: () => void;
   onPress?: () => void;
   /** Invoked on desktop web right-click (with pointer anchor) or touch/TV long-press (centered). */
   readonly onContextMenu?: (anchor?: ContextMenuAnchor) => void;
@@ -70,6 +73,8 @@ const NATIVE_SHADOW_REST: ViewStyle = {
   elevation: 6,
 };
 
+const DEFAULT_FALLBACK_CARD_WIDTH = 168;
+
 function clampProgress(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -79,10 +84,53 @@ function scaleFont(size: number, fontScale: number): number {
   return Math.round(size * fontScale * 2) / 2;
 }
 
-function stopQuickActionEvent(event: GestureResponderEvent | undefined): void {
-  const evt = event as { stopPropagation?: () => void; preventDefault?: () => void } | undefined;
-  evt?.stopPropagation?.();
-  evt?.preventDefault?.();
+function extractDomRect(candidate: unknown): PosterCardHoverRect | null {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const node = candidate as { getBoundingClientRect?: () => Record<string, unknown> };
+  if (typeof node.getBoundingClientRect !== 'function') return null;
+  const rect = node.getBoundingClientRect();
+  const x =
+    typeof rect.left === 'number' && Number.isFinite(rect.left)
+      ? rect.left
+      : typeof rect.x === 'number' && Number.isFinite(rect.x)
+        ? rect.x
+        : null;
+  const y =
+    typeof rect.top === 'number' && Number.isFinite(rect.top)
+      ? rect.top
+      : typeof rect.y === 'number' && Number.isFinite(rect.y)
+        ? rect.y
+        : null;
+  const w = typeof rect.width === 'number' && Number.isFinite(rect.width) ? rect.width : null;
+  const h = typeof rect.height === 'number' && Number.isFinite(rect.height) ? rect.height : null;
+  if (x === null || y === null || w === null || h === null || w <= 0 || h <= 0) return null;
+  return { x, y, width: w, height: h };
+}
+
+function readCardBoundingRect(
+  containerNode: unknown,
+  event: unknown,
+  fallbackWidth: number | undefined,
+  aspectRatio: number,
+): PosterCardHoverRect {
+  const fromNode = extractDomRect(containerNode);
+  if (fromNode !== null) return fromNode;
+  const evt = event as { currentTarget?: unknown; target?: unknown } | undefined;
+  const fromCurrentTarget = extractDomRect(evt?.currentTarget);
+  if (fromCurrentTarget !== null) return fromCurrentTarget;
+  const fromTarget = extractDomRect(evt?.target);
+  if (fromTarget !== null) return fromTarget;
+  const safeWidth =
+    typeof fallbackWidth === 'number' && Number.isFinite(fallbackWidth) && fallbackWidth > 0
+      ? fallbackWidth
+      : DEFAULT_FALLBACK_CARD_WIDTH;
+  const safeRatio = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 2 / 3;
+  return {
+    x: 0,
+    y: 0,
+    width: safeWidth,
+    height: Math.round(safeWidth / safeRatio),
+  };
 }
 
 interface WebContextMenuEventLike {
@@ -112,7 +160,8 @@ function PosterCardInner({
   progress,
   badge,
   allWatched,
-  quickActions,
+  onHoverPreviewStart,
+  onHoverPreviewEnd,
   onPress,
   onContextMenu,
   onFocus,
@@ -128,26 +177,83 @@ function PosterCardInner({
   const viewport = useViewport();
   const [nativeFocused, setNativeFocused] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const containerRef = useRef<ComponentRef<typeof View>>(null);
   const pointerHoverActiveRef = useRef(false);
+  const hoverPreviewActiveRef = useRef(false);
+  const onHoverPreviewStartRef = useRef(onHoverPreviewStart);
+  const onHoverPreviewEndRef = useRef(onHoverPreviewEnd);
+  onHoverPreviewStartRef.current = onHoverPreviewStart;
+  onHoverPreviewEndRef.current = onHoverPreviewEnd;
+
+  const canHoverPreview =
+    Platform.OS === 'web' &&
+    viewport.formFactor === 'desktop' &&
+    viewport.inputModality === 'pointer' &&
+    onHoverPreviewStart !== undefined;
+
+  const startHoverPreview = useCallback(
+    (event?: unknown) => {
+      if (!canHoverPreview || onHoverPreviewStartRef.current === undefined) return;
+      if (hoverPreviewActiveRef.current) return;
+      hoverPreviewActiveRef.current = true;
+      const rect = readCardBoundingRect(containerRef.current, event, width, aspectRatio);
+      onHoverPreviewStartRef.current(rect);
+    },
+    [aspectRatio, canHoverPreview, width],
+  );
+
+  const endHoverPreview = useCallback(() => {
+    if (!hoverPreviewActiveRef.current) return;
+    hoverPreviewActiveRef.current = false;
+    onHoverPreviewEndRef.current?.();
+  }, []);
+
+  useEffect(() => {
+    if (!canHoverPreview) {
+      endHoverPreview();
+    }
+  }, [canHoverPreview, endHoverPreview]);
+
+  useEffect(() => {
+    return () => {
+      endHoverPreview();
+    };
+  }, [endHoverPreview]);
 
   const handleFocus = useCallback(() => {
     setNativeFocused(true);
     onFocus?.();
   }, [onFocus]);
   const handleBlur = useCallback(() => setNativeFocused(false), []);
-  const handlePointerEnter = useCallback(() => {
-    pointerHoverActiveRef.current = true;
-    setHovered(true);
-  }, []);
+  const handlePointerEnter = useCallback(
+    (event?: unknown) => {
+      pointerHoverActiveRef.current = true;
+      setHovered(true);
+      startHoverPreview(event);
+    },
+    [startHoverPreview],
+  );
   const handlePointerLeave = useCallback(() => {
     pointerHoverActiveRef.current = false;
     setHovered(false);
-  }, []);
-  const handleHoverIn = useCallback(() => setHovered(true), []);
+    endHoverPreview();
+  }, [endHoverPreview]);
+  const handleHoverIn = useCallback(
+    (event?: unknown) => {
+      setHovered(true);
+      startHoverPreview(event);
+    },
+    [startHoverPreview],
+  );
   const handleHoverOut = useCallback(() => {
     if (pointerHoverActiveRef.current) return;
     setHovered(false);
-  }, []);
+    endHoverPreview();
+  }, [endHoverPreview]);
+  const handlePress = useCallback(() => {
+    endHoverPreview();
+    onPress?.();
+  }, [endHoverPreview, onPress]);
   const handleLongPress = useCallback(() => {
     onContextMenu?.();
   }, [onContextMenu]);
@@ -171,11 +277,6 @@ function PosterCardInner({
 
   const trimmedBadge = badge?.trim() ?? '';
   const showAllWatched = allWatched === true;
-  const hasQuickActions =
-    quickActions !== undefined &&
-    (quickActions.onPlay !== undefined ||
-      quickActions.onToggleFavorite !== undefined ||
-      quickActions.onToggleWatched !== undefined);
   const clamped = progress !== undefined ? clampProgress(progress) : undefined;
   const cardTransition = webTransition(theme, 'transform, opacity');
   const restShadow = webShadow('0 8px 22px rgba(0, 0, 0, 0.44)');
@@ -187,6 +288,7 @@ function PosterCardInner({
 
   return (
     <View
+      ref={containerRef}
       testID={testID ? `${testID}-hover-container` : undefined}
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
@@ -197,7 +299,7 @@ function PosterCardInner({
         accessibilityRole="button"
         accessibilityLabel={meta ? `${title}, ${meta}` : title}
         focusable={focusable}
-        onPress={onPress}
+        onPress={onPress !== undefined ? handlePress : undefined}
         {...(onContextMenu !== undefined
           ? { onLongPress: handleLongPress, delayLongPress: 450 }
           : {})}
@@ -274,140 +376,6 @@ function PosterCardInner({
                         tone="success"
                         testID={testID ? `${testID}-watched-badge` : undefined}
                       />
-                    </View>
-                  ) : null}
-                  {showPointerHover && hasQuickActions && quickActions !== undefined ? (
-                    <View
-                      pointerEvents="box-none"
-                      style={[
-                        styles.quickActionsOverlay,
-                        { backgroundColor: theme.colors.scrimSoft },
-                      ]}
-                    >
-                      {quickActions.onPlay !== undefined ? (
-                        <Tooltip
-                          content={quickActions.playLabel ?? title}
-                          testID={testID ? `${testID}-quick-play-tooltip` : undefined}
-                        >
-                          <Pressable
-                            testID={testID ? `${testID}-quick-play` : undefined}
-                            accessibilityRole="button"
-                            accessibilityLabel={quickActions.playLabel ?? title}
-                            focusable={false}
-                            onPress={(e) => {
-                              stopQuickActionEvent(e);
-                              quickActions.onPlay?.();
-                            }}
-                            style={({ pressed }) => [
-                              styles.quickPlayButton,
-                              {
-                                borderRadius: theme.radius.pill,
-                                backgroundColor: theme.colors.ctaBg,
-                                opacity: pressed ? 0.88 : 1,
-                              },
-                              cursor,
-                            ]}
-                          >
-                            <Icon name="play" size={18} color={theme.colors.ctaFg} />
-                          </Pressable>
-                        </Tooltip>
-                      ) : null}
-                      {quickActions.onToggleFavorite !== undefined ||
-                      quickActions.onToggleWatched !== undefined ? (
-                        <View
-                          pointerEvents="box-none"
-                          style={[
-                            styles.quickCornerRow,
-                            {
-                              bottom: theme.spacing.xs + (clamped !== undefined ? 4 : 0),
-                              right: theme.spacing.xs,
-                            },
-                          ]}
-                        >
-                          {quickActions.onToggleFavorite !== undefined ? (
-                            <Tooltip
-                              content={quickActions.favoriteLabel}
-                              testID={testID ? `${testID}-quick-favorite-tooltip` : undefined}
-                            >
-                              <Pressable
-                                testID={testID ? `${testID}-quick-favorite` : undefined}
-                                accessibilityRole="button"
-                                accessibilityLabel={quickActions.favoriteLabel}
-                                accessibilityState={{ selected: Boolean(quickActions.isFavorite) }}
-                                focusable={false}
-                                onPress={(e) => {
-                                  stopQuickActionEvent(e);
-                                  quickActions.onToggleFavorite?.();
-                                }}
-                                style={({ pressed }) => [
-                                  styles.quickCornerButton,
-                                  {
-                                    borderRadius: theme.radius.pill,
-                                    backgroundColor: quickActions.isFavorite
-                                      ? theme.colors.accentTint
-                                      : theme.colors.scrimStrong,
-                                    borderColor: quickActions.isFavorite
-                                      ? theme.colors.accent
-                                      : theme.colors.actionGlassBorder,
-                                    opacity: pressed ? 0.85 : 1,
-                                  },
-                                  cursor,
-                                ]}
-                              >
-                                <Icon
-                                  name={quickActions.isFavorite ? 'check' : 'plus'}
-                                  size={13}
-                                  color={
-                                    quickActions.isFavorite
-                                      ? theme.colors.accent
-                                      : theme.colors.textPrimary
-                                  }
-                                />
-                              </Pressable>
-                            </Tooltip>
-                          ) : null}
-                          {quickActions.onToggleWatched !== undefined ? (
-                            <Tooltip
-                              content={quickActions.watchedLabel}
-                              testID={testID ? `${testID}-quick-watched-tooltip` : undefined}
-                            >
-                              <Pressable
-                                testID={testID ? `${testID}-quick-watched` : undefined}
-                                accessibilityRole="button"
-                                accessibilityLabel={quickActions.watchedLabel}
-                                accessibilityState={{ selected: Boolean(quickActions.isWatched) }}
-                                focusable={false}
-                                onPress={(e) => {
-                                  stopQuickActionEvent(e);
-                                  quickActions.onToggleWatched?.();
-                                }}
-                                style={({ pressed }) => [
-                                  styles.quickCornerButton,
-                                  {
-                                    borderRadius: theme.radius.pill,
-                                    backgroundColor: theme.colors.scrimStrong,
-                                    borderColor: quickActions.isWatched
-                                      ? theme.colors.successColor
-                                      : theme.colors.actionGlassBorder,
-                                    opacity: pressed ? 0.85 : 1,
-                                  },
-                                  cursor,
-                                ]}
-                              >
-                                <Icon
-                                  name="check"
-                                  size={13}
-                                  color={
-                                    quickActions.isWatched
-                                      ? theme.colors.successColor
-                                      : theme.colors.textPrimary
-                                  }
-                                />
-                              </Pressable>
-                            </Tooltip>
-                          ) : null}
-                        </View>
-                      ) : null}
                     </View>
                   ) : null}
                   {clamped !== undefined ? (
@@ -526,34 +494,6 @@ const styles = StyleSheet.create({
   },
   badgeSlot: {
     position: 'absolute',
-  },
-  quickActionsOverlay: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickPlayButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickCornerRow: {
-    position: 'absolute',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  quickCornerButton: {
-    width: 28,
-    height: 28,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   progressTrack: {
     position: 'absolute',

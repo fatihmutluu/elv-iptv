@@ -257,4 +257,64 @@ describe('useCardQuickActionsState (#409)', () => {
       root.unmount();
     });
   });
+
+  it('hydrates dismissedKeys, optimistically dismisses VOD items, rolls back on rejection, and ignores live items', async () => {
+    const listDismissedRecommendationKeys = vi.fn(async () => ['x:s1:movie:already-dismissed']);
+    const dismissRecommendation = vi.fn(async () => undefined);
+    const restoreRecommendation = vi.fn(async () => undefined);
+    const catalog = {
+      listDismissedRecommendationKeys,
+      dismissRecommendation,
+      restoreRecommendation,
+    } as unknown as CatalogService;
+    const liveItem: ItemRow = { ...ITEM, key: 'x:s1:live:9', kind: 'live', name: 'News HD' };
+
+    let state!: CardQuickActionsState;
+    const root = createRoot();
+    await act(async () => {
+      root.render(
+        createElement(Probe, {
+          catalog,
+          onState: (s) => {
+            state = s;
+          },
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(state.dismissedKeys.has('x:s1:movie:already-dismissed')).toBe(true);
+    expect(state.dismissedKeys.has(ITEM.key)).toBe(false);
+
+    await act(async () => {
+      await state.dismissRecommendation(ITEM);
+    });
+    expect(dismissRecommendation).toHaveBeenCalledWith(ITEM.key, 'movie');
+    expect(state.dismissedKeys.has(ITEM.key)).toBe(true);
+
+    // Restoring removes it optimistically
+    await act(async () => {
+      await state.restoreRecommendation(ITEM.key);
+    });
+    expect(restoreRecommendation).toHaveBeenCalledWith(ITEM.key);
+    expect(state.dismissedKeys.has(ITEM.key)).toBe(false);
+
+    // Rejection rolls back optimistic dismiss
+    dismissRecommendation.mockRejectedValueOnce(new Error('sqlite-busy'));
+    await act(async () => {
+      await state.dismissRecommendation(ITEM);
+    });
+    expect(state.dismissedKeys.has(ITEM.key)).toBe(false);
+
+    // Live TV items are strictly ignored
+    await act(async () => {
+      await state.dismissRecommendation(liveItem);
+    });
+    expect(dismissRecommendation).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      root.unmount();
+    });
+  });
 });
