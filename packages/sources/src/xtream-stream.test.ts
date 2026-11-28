@@ -209,6 +209,37 @@ describe('streamXtreamRecords', () => {
       streamXtreamRecords(chunksOf(enc('{"user_info":{"auth":1,"status":"Active"}}'), [5])),
     );
     expectErr(activeEnvelope.result, 'source-format', 'unexpected-shape');
+
+    const disabledWithExtraMeta = await collectGen(
+      streamXtreamRecords(
+        chunksOf(
+          enc(
+            '{"server_info":{"url":"x"},"categories":[],"user_info":{"auth":"false","status":"Active"}}',
+          ),
+          [4],
+        ),
+      ),
+    );
+    expectErr(disabledWithExtraMeta.result, 'auth', 'invalid-credentials');
+
+    const bannedAfterServer = await collectGen(
+      streamXtreamRecords(
+        chunksOf(enc('{"server_info":{"url":"x"},"user_info":{"auth":1,"status":"banned"}}'), [4]),
+      ),
+    );
+    expectErr(bannedAfterServer.result, 'auth', 'account-disabled');
+
+    const expiredByDate = await collectGen(
+      streamXtreamRecords(
+        chunksOf(
+          enc(
+            '{"server_info":{"url":"x"},"user_info":{"auth":1,"status":"Active","exp_date":"1600000000"}}',
+          ),
+          [4],
+        ),
+      ),
+    );
+    expectErr(expiredByDate.result, 'auth', 'account-expired');
   });
 
   it('sniffs HTML captive-portal responses on chunk 1 and cancels remaining stream immediately', async () => {

@@ -20,6 +20,14 @@ export type { KindHint, M3uBatch, M3uCatchup, M3uEntry, M3uHeader } from './m3u-
 const SPACE = 32;
 const TAB = 9;
 const DEFAULT_BATCH = 500;
+const MAX_PRE_DIRECTIVES = 64;
+const HTTP_GUIDE_URL_RE = /^https?:\/\/[^/\s?#]+/i;
+
+interface QueuedDirective {
+  readonly d: number;
+  readonly payload: string;
+  readonly line: number;
+}
 
 const DIRECTIVES = [
   '#EXTINF:',
@@ -79,6 +87,7 @@ class M3uScanner {
   private readonly lines = new M3uLineAccumulator();
   private pending: M3uEntry | undefined;
   private pendingLine = 0;
+  private readonly preDirectives: QueuedDirective[] = [];
   private first = true;
   private sawFirstNonEmpty = false;
   private captiveHtml = false;
@@ -119,10 +128,12 @@ class M3uScanner {
     this.stats.lines++;
     this.stats.skipped++;
     this.pending = undefined;
+    this.preDirectives.length = 0;
     warn(this.stats, 'line-too-long', this.stats.lines);
   }
 
   finish(): void {
+    this.preDirectives.length = 0;
     if (this.pending) {
       this.stats.skipped++;
       warn(this.stats, 'extinf-without-url', this.pendingLine);
@@ -166,6 +177,7 @@ class M3uScanner {
         this.sawFirstNonEmpty = true;
         if (CAPTIVE_HTML_RE.test(raw)) {
           this.captiveHtml = true;
+          this.preDirectives.length = 0;
           this.stats.skipped++;
           warn(this.stats, 'not-a-url', this.stats.lines);
           return;
@@ -173,6 +185,7 @@ class M3uScanner {
       }
       if (looksLikeUrl(raw, this.baseUrl)) this.url(raw);
       else {
+        this.preDirectives.length = 0;
         this.stats.skipped++;
         warn(this.stats, 'not-a-url', this.stats.lines);
       }
@@ -181,6 +194,7 @@ class M3uScanner {
 
     this.sawFirstNonEmpty = true;
     if (isHlsManifestTag(bytes, start, end)) {
+      this.preDirectives.length = 0;
       this.hlsDetected = true;
       return;
     }
@@ -200,20 +214,32 @@ class M3uScanner {
       if (inlineLogoStripped || issues.inlineLogoStripped) {
         warn(this.stats, 'inline-logo-stripped', this.pendingLine);
       }
+      this.flushPreDirectives(this.pending);
     } else if (d === 1) {
+      this.preDirectives.length = 0;
       this.header ??= this.parseHeader(payload);
     } else if (this.pending) {
-      this.directive(this.pending, d, payload);
+      this.directive(this.pending, d, payload, this.stats.lines);
+    } else if (this.preDirectives.length < MAX_PRE_DIRECTIVES) {
+      this.preDirectives.push({ d, payload, line: this.stats.lines });
     }
   }
 
-  private directive(e: M3uEntry, d: number, payload: string): void {
+  private flushPreDirectives(e: M3uEntry): void {
+    if (this.preDirectives.length === 0) return;
+    for (const queued of this.preDirectives) {
+      this.directive(e, queued.d, queued.payload, queued.line);
+    }
+    this.preDirectives.length = 0;
+  }
+
+  private directive(e: M3uEntry, d: number, payload: string, line: number): void {
     if (d === 2) {
       if (e.groups.length === 0 && payload.trim()) e.groups.push(payload.trim());
     } else if (d === 3 || d === 4) {
       applyVlcOpt(e, payload);
     } else if (d === 5) {
-      if (!applyExtHttp(e, payload)) warn(this.stats, 'exthttp-malformed', this.stats.lines);
+      if (!applyExtHttp(e, payload)) warn(this.stats, 'exthttp-malformed', line);
     } else {
       applyKodiProp(e, payload);
     }
@@ -222,8 +248,10 @@ class M3uScanner {
   private parseHeader(payload: string): M3uHeader {
     const header: M3uHeader = { present: true, guideUrls: [], attrs: dict() };
     parseAttrs(payload, 0, (key, value) => {
-      if (key === 'url-tvg' || key === 'x-tvg-url') {
-        header.guideUrls.push(...splitGuideUrls(value));
+      if (key === 'url-tvg' || key === 'x-tvg-url' || key === 'tvg-url') {
+        for (const candidate of splitGuideUrls(value)) {
+          if (HTTP_GUIDE_URL_RE.test(candidate)) header.guideUrls.push(candidate);
+        }
       } else header.attrs[key] = value;
     });
     return header;
@@ -231,7 +259,10 @@ class M3uScanner {
 
   private url(raw: string): void {
     const e = this.pending ?? newEntry();
-    if (!this.pending) e.name = raw;
+    if (!this.pending) {
+      e.name = raw;
+      this.flushPreDirectives(e);
+    }
     this.pending = undefined;
     finishEntry(e, raw, this.baseUrl);
     if (e.name === raw) e.name = e.url;
@@ -242,8 +273,9 @@ class M3uScanner {
 
 /**
  * Streams an M3U/M3U8 playlist from byte chunks into typed entries in bounded memory.
- * Transparently decompresses gzip streams (`1f 8b`, including multi-member `.gz`) when `decompressor`
- * is provided and rejects HLS media/master manifests with `source-format` / `hls-manifest`.
+ * Transparently decompresses gzip (`1f 8b`, including multi-member `.gz`) and xz (`fd 37 7a 58 5a 00`,
+ * `.xz`) streams when `decompressor` is provided and rejects HLS media/master manifests with
+ * `source-format` / `hls-manifest`.
  */
 export async function* scanM3u(
   chunks: AsyncIterable<Uint8Array>,

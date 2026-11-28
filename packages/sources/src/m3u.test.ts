@@ -42,11 +42,16 @@ const one = async (text: string): Promise<M3uEntry> => {
 };
 
 describe('scanM3u header', () => {
-  it('collects guide urls from both attributes and keeps other attributes', async () => {
+  it('collects HTTP(S) guide urls from url-tvg, x-tvg-url, and tvg-url while rejecting unsafe schemes (M3U-4)', async () => {
     const r = await scan(
-      '#EXTM3U url-tvg="a,b" x-tvg-url="c" cache=500\n#EXTINF:-1,A\nhttp://h.example/1\n',
+      '#EXTM3U url-tvg="http://a.example/epg.xml,https://b.example/epg.xml.gz" x-tvg-url="https://c.example/epg.xml" tvg-url="http://d.example/guide.xml file:///etc/passwd javascript:alert(1) bare-token" cache=500\n#EXTINF:-1,A\nhttp://h.example/1\n',
     );
-    expect(r.header?.guideUrls).toEqual(['a', 'b', 'c']);
+    expect(r.header?.guideUrls).toEqual([
+      'http://a.example/epg.xml',
+      'https://b.example/epg.xml.gz',
+      'https://c.example/epg.xml',
+      'http://d.example/guide.xml',
+    ]);
     expect(r.header?.attrs).toEqual({ cache: '500' });
     expect(r.entries).toHaveLength(1);
   });

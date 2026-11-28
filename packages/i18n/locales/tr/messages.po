@@ -4636,3 +4636,21 @@ msgstr "Sistem anahtarı değişikliği sonrası kayıtlı kaynak kimlik bilgile
 
 msgid "source.hint.secretKeyRotated"
 msgstr "Erişimi geri yüklemek için Kaynaklar bölümünden giriş bilgilerinizi yeniden girin."
+
+msgid "sources.field.streamUserAgent"
+msgstr "Yayın User-Agent (isteğe bağlı)"
+
+msgid "sources.placeholder.streamUserAgent"
+msgstr "Varsayılan olarak yukarıdaki User-Agent kullanılır"
+
+msgid "sources.hint.streamUserAgent"
+msgstr "Sağlayıcınız farklı bir oynatıcı User-Agent beklediğinde yalnızca yayın oynatma ve indirmelerde kullanılır."
+
+msgid "sources.account.expiresOn"
+msgstr "Bitiş {date}"
+
+msgid "sources.account.connectionsActive"
+msgstr "{active}/{max} bağlantı"
+
+msgid "sources.account.connectionsMax"
+msgstr "{max} bağlantı"

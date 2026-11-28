@@ -14,7 +14,9 @@ import {
   normalizeStalkerPortalUrl,
   type StalkerClient,
   type StalkerClientOptions,
+  type StalkerDiscoveredPortal,
   type StalkerLinkKind,
+  type StalkerPortalMode,
 } from '@elv/sources';
 import { sha256Hex } from './credential-fingerprint';
 import { isSecretKeyRotatedError } from './secret-errors';
@@ -22,20 +24,39 @@ import { type SourceRecord, secretKey } from './sources';
 
 export {
   deleteStalkerCmdMap,
+  encodeEpisodeMeta,
+  encodeVodSeriesMeta,
   loadStalkerCmdMap,
   mergeStalkerCmdMap,
+  parseEpisodeMeta,
+  parseVodSeriesMeta,
   type StalkerCmdMap,
+  type StalkerEpisodeMeta,
   saveStalkerCmdMap,
+  stalkerEpisodeMetaKey,
+  stalkerStaticFlagKey,
+  stalkerVodSeriesMetaKey,
 } from './stalker-cmds-store';
 
-/** @internal Parsed Stalker portal credentials stored strictly in `SecretStore`. */
+/** @internal Parsed Stalker portal credentials and optional discovered endpoint/mode stored strictly in `SecretStore`. */
 export interface StalkerSecret {
   readonly portalUrl: string;
   readonly mac: string;
   readonly serialNumber?: string;
+  readonly discoveredEndpoint?: string;
+  readonly portalMode?: StalkerPortalMode;
+  readonly deviceId?: string;
+  readonly deviceId2?: string;
+  readonly signature?: string;
+  readonly login?: string;
+  readonly password?: string;
 }
 
 const UNSAFE_IMAGE_TOKEN_RE = /(?:^|[?&;])(?:mac|token|auth|password|pass|pwd)=/i;
+
+function optionalNonEmpty(raw: unknown): string | undefined {
+  return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined;
+}
 
 /** Stable catalog key for a Stalker/Ministra item (`s:<sourceId>:<kind>:<providerId>`). */
 export function stalkerKey(sourceId: string, kind: ContentKind, providerId: string): string {
@@ -72,6 +93,7 @@ export function sanitizeStalkerImageUrl(
   if (
     lower.includes(macLower) ||
     lower.includes(macLower.replace(/:/g, '-')) ||
+    lower.includes(macLower.replace(/:/g, '')) ||
     lower.includes(encodeURIComponent(macLower))
   ) {
     return undefined;
@@ -93,26 +115,74 @@ export async function loadStalkerSecret(
   }
   if (raw === undefined) return undefined;
   try {
-    const parsed = JSON.parse(raw) as {
-      portalUrl?: unknown;
-      mac?: unknown;
-      serialNumber?: unknown;
-    };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (typeof parsed.portalUrl !== 'string' || typeof parsed.mac !== 'string') return undefined;
     const macRes = normalizeMacAddress(parsed.mac);
     const portalRes = normalizeStalkerPortalUrl(parsed.portalUrl);
     if (!macRes.ok || !portalRes.ok) return undefined;
-    const sn =
-      typeof parsed.serialNumber === 'string' && parsed.serialNumber.trim() !== ''
-        ? parsed.serialNumber.trim()
+    const sn = optionalNonEmpty(parsed.serialNumber);
+    const rawDiscovered = optionalNonEmpty(parsed.discoveredEndpoint);
+    const discoveredEndpoint =
+      rawDiscovered !== undefined && normalizeStalkerPortalUrl(rawDiscovered).ok
+        ? rawDiscovered
         : undefined;
+    const portalMode: StalkerPortalMode | undefined =
+      parsed.portalMode === 'simple' || parsed.portalMode === 'full'
+        ? parsed.portalMode
+        : undefined;
+    const deviceId = optionalNonEmpty(parsed.deviceId);
+    const deviceId2 = optionalNonEmpty(parsed.deviceId2);
+    const signature = optionalNonEmpty(parsed.signature);
+    const login = optionalNonEmpty(parsed.login);
+    const password =
+      typeof parsed.password === 'string' && parsed.password !== '' ? parsed.password : undefined;
     return {
       portalUrl: parsed.portalUrl.trim(),
       mac: macRes.value,
       ...(sn === undefined ? {} : { serialNumber: sn }),
+      ...(discoveredEndpoint === undefined ? {} : { discoveredEndpoint }),
+      ...(portalMode === undefined ? {} : { portalMode }),
+      ...(deviceId === undefined ? {} : { deviceId }),
+      ...(deviceId2 === undefined ? {} : { deviceId2 }),
+      ...(signature === undefined ? {} : { signature }),
+      ...(login === undefined ? {} : { login }),
+      ...(password === undefined ? {} : { password }),
     };
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Best-effort persists discovered `endpoint` and `portalMode` back to `source.<id>.stalker` in
+ * `SecretStore` without altering user credentials or resurrecting deleted sources.
+ */
+export async function saveStalkerDiscovery(
+  secrets: SecretStore,
+  sourceId: string,
+  current: StalkerSecret,
+  discovered: StalkerDiscoveredPortal | undefined,
+): Promise<StalkerSecret> {
+  if (discovered === undefined) return current;
+  if (
+    current.discoveredEndpoint === discovered.endpoint &&
+    current.portalMode === discovered.mode
+  ) {
+    return current;
+  }
+  const key = secretKey(sourceId, 'stalker');
+  try {
+    const existingRaw = await secrets.get(key);
+    if (existingRaw === undefined) return current;
+    const updated: StalkerSecret = {
+      ...current,
+      discoveredEndpoint: discovered.endpoint,
+      portalMode: discovered.mode,
+    };
+    await secrets.set(key, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return current;
   }
 }
 
@@ -140,6 +210,15 @@ export async function openStalkerClient(
     portalUrl: secret.portalUrl,
     mac: secret.mac,
     ...(secret.serialNumber !== undefined ? { serialNumber: secret.serialNumber } : {}),
+    ...(secret.discoveredEndpoint !== undefined
+      ? { discoveredEndpoint: secret.discoveredEndpoint }
+      : {}),
+    ...(secret.portalMode !== undefined ? { portalMode: secret.portalMode } : {}),
+    ...(secret.deviceId !== undefined ? { deviceId: secret.deviceId } : {}),
+    ...(secret.deviceId2 !== undefined ? { deviceId2: secret.deviceId2 } : {}),
+    ...(secret.signature !== undefined ? { signature: secret.signature } : {}),
+    ...(secret.login !== undefined ? { login: secret.login } : {}),
+    ...(secret.password !== undefined ? { password: secret.password } : {}),
     ...(source.settings.serverTimezone ? { timezone: source.settings.serverTimezone } : {}),
     ...(source.settings.transport !== undefined ? { transport: source.settings.transport } : {}),
     ...(deps.maxBodyBytes !== undefined ? { maxBodyBytes: deps.maxBodyBytes } : {}),

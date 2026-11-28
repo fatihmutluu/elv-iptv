@@ -569,4 +569,173 @@ describe('decodeMaybeGzip', () => {
       delete asyncGenProto['@@asyncIterator'];
     }
   });
+
+  describe('XZ stream sniffing & decompression (EPG-1)', () => {
+    const XZ_MAGIC = new Uint8Array([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00]);
+
+    it('replays short plain files (< 6 bytes) and partial-magic files unchanged without invoking unxz', async () => {
+      for (const plain of [
+        utf8(''),
+        utf8('#EXT'),
+        new Uint8Array([0xfd, 0x37, 0x7a, 0x58, 0x5a]),
+      ]) {
+        let called = false;
+        const r = await collectDecoded(chunksOf(plain, [1]), {
+          decompressor: {
+            gunzip: () => {
+              throw new Error('unexpected gunzip');
+            },
+            unxz: async function* () {
+              called = true;
+              yield new Uint8Array(0);
+            },
+          },
+        });
+        expect(r.result).toEqual({ ok: true, value: undefined });
+        expect(r.bytes).toEqual(plain);
+        expect(called).toBe(false);
+      }
+    });
+
+    it('closes upstream and returns xz-unsupported when decompressor or unxz is absent', async () => {
+      const payload = concatBytes([XZ_MAGIC, utf8('rest')]);
+      let closed = false;
+      async function* src(): AsyncGenerator<Uint8Array> {
+        try {
+          for (let i = 0; i < payload.length; i++) yield payload.subarray(i, i + 1);
+        } finally {
+          closed = true;
+        }
+      }
+      const r = await collectDecoded(src(), { decompressor: gunzipper });
+      expect(r.chunks).toEqual([]);
+      expect(r.result).toEqual({
+        ok: false,
+        error: { category: 'source-format', code: 'xz-unsupported' },
+      });
+      expect(closed).toBe(true);
+    });
+
+    it('streams XZ payloads split across 1-byte chunks through unxz and enforces maxDecompressedBytes', async () => {
+      const expected = utf8(
+        '<tv><channel id="xz1"><display-name>XZ Guide</display-name></channel></tv>',
+      );
+      const wire = concatBytes([XZ_MAGIC, expected]);
+      const fakeXz: Decompressor = {
+        gunzip: gunzipper.gunzip,
+        async *unxz(chunks) {
+          let skipped = 0;
+          for await (const c of chunks) {
+            if (skipped < 6) {
+              const need = 6 - skipped;
+              if (c.length <= need) {
+                skipped += c.length;
+                continue;
+              }
+              skipped = 6;
+              yield c.subarray(need);
+            } else {
+              yield c;
+            }
+          }
+        },
+      };
+
+      const okRes = await collectDecoded(chunksOf(wire, [1, 2, 1, 3]), {
+        decompressor: fakeXz,
+      });
+      expect(okRes.result).toEqual({ ok: true, value: undefined });
+      expect(okRes.bytes).toEqual(expected);
+
+      // Enforces maxDecompressedBytes with early upstream and decompressor cancellation
+      let upstreamClosed = false;
+      let decompressorClosed = false;
+      async function* bombSource(): AsyncGenerator<Uint8Array> {
+        try {
+          yield XZ_MAGIC;
+          for (;;) yield new Uint8Array(64);
+        } finally {
+          upstreamClosed = true;
+        }
+      }
+      const bombDecompressor: Decompressor = {
+        gunzip: gunzipper.gunzip,
+        async *unxz(chunks) {
+          const it = chunks[Symbol.asyncIterator]();
+          try {
+            await it.next();
+            for (;;) yield new Uint8Array(400);
+          } finally {
+            decompressorClosed = true;
+          }
+        },
+      };
+      const bombRes = await collectDecoded(bombSource(), {
+        decompressor: bombDecompressor,
+        maxDecompressedBytes: 1000,
+      });
+      expect(bombRes.result).toEqual({
+        ok: false,
+        error: { category: 'source-format', code: 'too-large' },
+      });
+      expect(bombRes.bytes.length).toBe(800);
+      expect(decompressorClosed).toBe(true);
+      expect(upstreamClosed).toBe(true);
+    });
+
+    it('returns xz-corrupt on corrupt/truncated XZ streams and preserves upstream network error precedence', async () => {
+      const wire = concatBytes([XZ_MAGIC, new Uint8Array([0xff, 0xff, 0xff])]);
+      const corruptDecompressor: Decompressor = {
+        gunzip: gunzipper.gunzip,
+        unxz(chunks) {
+          return {
+            [Symbol.asyncIterator]: () => ({
+              async next() {
+                for await (const _ of chunks) {
+                  throw new Error('bad xz checksum');
+                }
+                return { done: true, value: undefined };
+              },
+            }),
+          };
+        },
+      };
+      const rCorrupt = await collectDecoded(chunksOf(wire, [2]), {
+        decompressor: corruptDecompressor,
+      });
+      expect(rCorrupt.result).toEqual({
+        ok: false,
+        error: { category: 'source-format', code: 'xz-corrupt' },
+      });
+
+      const syncThrowDecompressor: Decompressor = {
+        gunzip: gunzipper.gunzip,
+        unxz() {
+          throw new Error('sync init fail');
+        },
+      };
+      const rSync = await collectDecoded(chunksOf(wire, [6]), {
+        decompressor: syncThrowDecompressor,
+      });
+      expect(rSync.result).toEqual({
+        ok: false,
+        error: { category: 'source-format', code: 'xz-corrupt' },
+      });
+
+      const netErr = { category: 'network', code: 'aborted' };
+      async function* failingUpstream(): AsyncGenerator<Uint8Array> {
+        yield XZ_MAGIC;
+        throw netErr;
+      }
+      const rNet = await collectDecoded(failingUpstream(), {
+        decompressor: {
+          gunzip: gunzipper.gunzip,
+          async *unxz(chunks) {
+            for await (const c of chunks) yield c;
+          },
+        },
+      });
+      expect(rNet.result).toEqual({ ok: false, error: netErr });
+    });
+  });
 });

@@ -404,4 +404,26 @@ describe('validateSourceForm and detectPastedXtreamLink', () => {
     const maxSerial = validateSourceForm(stalkerForm({ serialNumber: 'S'.repeat(128) }));
     expect(maxSerial.ok).toBe(true);
   });
+
+  it('persists optional streamUserAgent separately from feed userAgent and strips /panel_api.php (Wave Q6)', () => {
+    const res = validateSourceForm(
+      xtreamForm({
+        server: 'https://panel.example.test/panel_api.php?foo=1',
+        userAgent: ' FeedUA/1.0 ',
+        streamUserAgent: ' StreamPlayer/2.0 ',
+      }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok && res.value.kind === 'xtream') {
+      expect(res.value.input.server).toBe('https://panel.example.test');
+      expect(res.value.input.transport).toEqual({
+        userAgent: 'FeedUA/1.0',
+        streamUserAgent: 'StreamPlayer/2.0',
+      });
+    }
+
+    const ctrlStreamUa = validateSourceForm(m3uForm({ streamUserAgent: 'Bad\r\nStreamUA' }));
+    expect(ctrlStreamUa.ok).toBe(false);
+    if (!ctrlStreamUa.ok) expect(ctrlStreamUa.error.code).toBe('invalid-characters');
+  });
 });

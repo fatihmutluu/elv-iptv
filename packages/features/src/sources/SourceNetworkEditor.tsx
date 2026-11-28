@@ -191,6 +191,8 @@ export function SourceNetworkEditor({
 }): ReactElement {
   const theme = useTheme();
   const hostFocusId = `source-network-host-${source.id}`;
+  const userAgentFocusId = `source-network-user-agent-${source.id}`;
+  const streamUserAgentFocusId = `source-network-stream-user-agent-${source.id}`;
   const saveFocusId = `source-network-save-${source.id}`;
   const isSaved = editor.savedSourceId === source.id;
 
@@ -243,6 +245,40 @@ export function SourceNetworkEditor({
           {i18n.t('sources.network.hostOverrideHint')}
         </Text>
       )}
+      <FieldInput
+        editingInputId={fieldShared.editingInputId}
+        onEndEditing={fieldShared.onEndEditing}
+        onSubmit={() => void editor.save(source)}
+        registerRef={fieldShared.registerRef}
+        recordLayout={fieldShared.recordLayout}
+        focusId={userAgentFocusId}
+        testID={userAgentFocusId}
+        label={i18n.t('sources.field.userAgent')}
+        placeholder={i18n.t('sources.placeholder.userAgent')}
+        value={editor.userAgent}
+        onChangeText={editor.setUserAgent}
+        tvFocused={tvFocusId === userAgentFocusId}
+      />
+      <FieldInput
+        editingInputId={fieldShared.editingInputId}
+        onEndEditing={fieldShared.onEndEditing}
+        onSubmit={() => void editor.save(source)}
+        registerRef={fieldShared.registerRef}
+        recordLayout={fieldShared.recordLayout}
+        focusId={streamUserAgentFocusId}
+        testID={streamUserAgentFocusId}
+        label={i18n.t('sources.field.streamUserAgent')}
+        placeholder={i18n.t('sources.placeholder.streamUserAgent')}
+        value={editor.streamUserAgent}
+        onChangeText={editor.setStreamUserAgent}
+        tvFocused={tvFocusId === streamUserAgentFocusId}
+      />
+      <Text
+        testID={`source-network-stream-ua-hint-${source.id}`}
+        style={[theme.typography.caption, { color: theme.colors.textMuted }]}
+      >
+        {i18n.t('sources.hint.streamUserAgent')}
+      </Text>
       <View style={sourcesStyles.row}>
         <ActionButton
           focusId={saveFocusId}

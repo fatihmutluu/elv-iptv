@@ -4,11 +4,13 @@ import type {
   StalkerChannel,
   StalkerEpgEntry,
   StalkerEpisode,
+  StalkerEpisodeFile,
   StalkerPage,
   StalkerProfile,
   StalkerSeason,
   StalkerSeriesItem,
   StalkerVodItem,
+  StalkerWatchdogEventResult,
 } from './stalker-types';
 import { parseStalkerTimestampMs } from './stalker-url';
 import { toNumber, toStrictInt, toText } from './xtream-normalize';
@@ -21,9 +23,24 @@ const MAX_DIRECTOR_CHARS = 256;
 const HMS_RE = /^(\d{1,3}):(\d{2})(?::(\d{2}))?$/;
 const SEASON_NUM_RE = /(?:season|s)\s*(\d+)/i;
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const PLACEHOLDER_TEXT = new Set(['n/a', 'na', '-', '--', 'null', 'none', 'undefined']);
 
 function put<T extends object>(target: T, key: string, value: unknown): void {
   if (value !== undefined) (target as Record<string, unknown>)[key] = value;
+}
+
+function cleanMetadataText(value: unknown): string | undefined {
+  const text = toText(value);
+  if (text === undefined) return undefined;
+  return PLACEHOLDER_TEXT.has(text.toLowerCase()) ? undefined : text;
+}
+
+function positiveRating(...candidates: unknown[]): number | undefined {
+  for (const c of candidates) {
+    const n = toNumber(c);
+    if (n !== undefined && n > 0) return n;
+  }
+  return undefined;
 }
 
 function toBool(value: unknown): boolean | undefined {
@@ -39,6 +56,20 @@ function toBool(value: unknown): boolean | undefined {
     if (trimmed === '0' || trimmed === 'false') return false;
   }
   return undefined;
+}
+
+function extractSeriesEpisodeNumbers(rawSeries: unknown): number[] | undefined {
+  if (!Array.isArray(rawSeries)) return undefined;
+  const seen = new Set<number>();
+  const nums: number[] = [];
+  for (const entry of rawSeries) {
+    const n = toStrictInt(entry);
+    if (n !== undefined && n > 0 && !seen.has(n)) {
+      seen.add(n);
+      nums.push(n);
+    }
+  }
+  return nums.length > 0 ? nums : undefined;
 }
 
 function artworkUrl(...candidates: unknown[]): string | undefined {
@@ -65,7 +96,7 @@ function yearOf(...candidates: unknown[]): number | undefined {
 
 function creditText(maxChars: number, ...candidates: unknown[]): string | undefined {
   for (const candidate of candidates) {
-    const text = toText(candidate);
+    const text = cleanMetadataText(candidate);
     if (text !== undefined) {
       return text.length > maxChars ? text.slice(0, maxChars).trimEnd() : text;
     }
@@ -125,13 +156,9 @@ function applyVodMetadata<T extends { categoryId?: string; cover?: string }>(
   const catId = toText(row.category_id);
   if (catId !== undefined && catId !== '*') target.categoryId = catId;
   put(target, 'cover', artworkUrl(row.screenshot_uri, row.cover, row.logo));
-  put(
-    target,
-    'rating',
-    toNumber(row.rating_imdb) ?? toNumber(row.rating_kinopoisk) ?? toNumber(row.rating),
-  );
+  put(target, 'rating', positiveRating(row.rating_imdb, row.rating_kinopoisk, row.rating));
   put(target, 'year', yearOf(row.year));
-  put(target, 'plot', toText(row.description) ?? toText(row.plot));
+  put(target, 'plot', cleanMetadataText(row.description) ?? cleanMetadataText(row.plot));
   put(target, 'cast', creditText(MAX_CAST_CHARS, row.actors, row.cast));
   put(target, 'director', creditText(MAX_DIRECTOR_CHARS, row.director));
   put(target, 'addedAt', parseStalkerTimestampMs(row.added, timeZone));
@@ -156,10 +183,26 @@ export function toStalkerProfile(raw: Raw): StalkerProfile {
     toStrictInt(raw.max_online) ??
     toStrictInt(raw.playback_limit) ??
     toStrictInt(raw.max_connections);
+  const watchdogTimeout = toStrictInt(raw.watchdog_timeout);
   put(profile, 'expiresAt', expiresAt);
   if (maxConn !== undefined && maxConn > 0) profile.maxConnections = maxConn;
   put(profile, 'timezone', timezone);
+  if (watchdogTimeout !== undefined && watchdogTimeout > 0) {
+    profile.watchdogTimeoutSec = watchdogTimeout;
+  }
   return profile;
+}
+
+/** Maps `type=watchdog&action=get_events` response `js` payload into {@link StalkerWatchdogEventResult}. */
+export function toStalkerWatchdogEvent(raw: unknown): StalkerWatchdogEventResult {
+  const out: StalkerWatchdogEventResult = {};
+  if (!isRaw(raw)) return out;
+  const data = isRaw(raw.data) ? raw.data : undefined;
+  const event = toText(data?.event) ?? toText(raw.event);
+  if (event !== undefined) out.event = event;
+  const timeout = toStrictInt(raw.watchdog_timeout) ?? toStrictInt(data?.watchdog_timeout);
+  if (timeout !== undefined && timeout > 0) out.watchdogTimeoutSec = timeout;
+  return out;
 }
 
 /** Maps Stalker genres or VOD/series categories, filtering synthetic `"*"` / `"All"` entries. */
@@ -183,7 +226,7 @@ export function toStalkerCategories(rows: unknown[]): StalkerCategory[] {
   return out;
 }
 
-/** Maps Stalker live channel rows with artwork URL validation. */
+/** Maps Stalker live channel rows with artwork URL validation and static-link flags. */
 export function toStalkerChannels(rows: unknown[]): StalkerChannel[] {
   const out: StalkerChannel[] = [];
   for (const row of rows) {
@@ -203,12 +246,14 @@ export function toStalkerChannels(rows: unknown[]): StalkerChannel[] {
     put(ch, 'logo', artworkUrl(row.logo));
     put(ch, 'epgId', toText(row.xmltv_id) ?? toText(row.epg_id));
     if (toBool(row.censored) === true) ch.censored = true;
+    put(ch, 'useHttpTmpLink', toBool(row.use_http_tmp_link));
+    put(ch, 'useLoadBalancing', toBool(row.use_load_balancing));
     out.push(ch);
   }
   return out;
 }
 
-/** Maps Stalker VOD movie rows with artwork URL validation. */
+/** Maps Stalker VOD movie or VOD-series rows with artwork URL validation and embedded `series[]` numbers. */
 export function toStalkerVodItems(rows: unknown[], timeZone?: string): StalkerVodItem[] {
   const out: StalkerVodItem[] = [];
   for (const row of rows) {
@@ -223,6 +268,9 @@ export function toStalkerVodItems(rows: unknown[], timeZone?: string): StalkerVo
     applyVodMetadata(item, row, timeZone);
     put(item, 'durationSec', parseDurationSec(row));
     if (toBool(row.is_series) === true) item.isSeries = true;
+    put(item, 'seriesEpisodeNumbers', extractSeriesEpisodeNumbers(row.series));
+    put(item, 'useHttpTmpLink', toBool(row.use_http_tmp_link));
+    put(item, 'useLoadBalancing', toBool(row.use_load_balancing));
     out.push(item);
   }
   return out;
@@ -240,6 +288,8 @@ export function toStalkerSeriesItems(rows: unknown[], timeZone?: string): Stalke
       name: toText(row.name) ?? toText(row.o_name) ?? '',
     };
     applyVodMetadata(item, row, timeZone);
+    put(item, 'cmd', toText(row.cmd));
+    put(item, 'seriesEpisodeNumbers', extractSeriesEpisodeNumbers(row.series));
     out.push(item);
   }
   return out;
@@ -260,12 +310,7 @@ export function toStalkerSeasons(seriesId: string, rows: unknown[]): StalkerSeas
       toStrictInt(row.season_number) ?? (fromName !== undefined ? Number(fromName) : idx);
     const season: StalkerSeason = { id, seriesId, seasonNumber, name };
     put(season, 'cmd', toText(row.cmd));
-    if (Array.isArray(row.series)) {
-      const nums = row.series
-        .map((n) => toStrictInt(n))
-        .filter((n): n is number => n !== undefined && n > 0);
-      if (nums.length > 0) season.seriesEpisodeNumbers = nums;
-    }
+    put(season, 'seriesEpisodeNumbers', extractSeriesEpisodeNumbers(row.series));
     out.push(season);
   }
   return out;
@@ -298,7 +343,28 @@ export function toStalkerEpisodes(
       cmd: toText(row.cmd) ?? '',
     };
     put(episode, 'durationSec', parseDurationSec(row));
+    put(episode, 'protocol', toText(row.protocol));
+    if (toBool(row.is_file) === true) episode.isFile = true;
+    put(episode, 'fileType', toText(row.file_type));
     out.push(episode);
+  }
+  return out;
+}
+
+/** Maps Ministra episode file rows (`type=vod&action=get_ordered_list&episode_id=...`). */
+export function toStalkerEpisodeFiles(rows: unknown[]): StalkerEpisodeFile[] {
+  const out: StalkerEpisodeFile[] = [];
+  for (const row of rows) {
+    if (!isRaw(row)) continue;
+    const id = toText(row.id);
+    if (id === undefined) continue;
+    const file: StalkerEpisodeFile = { id };
+    put(file, 'cmd', toText(row.cmd));
+    put(file, 'protocol', toText(row.protocol));
+    put(file, 'isFile', toBool(row.is_file));
+    put(file, 'fileType', toText(row.file_type));
+    put(file, 'name', toText(row.name));
+    out.push(file);
   }
   return out;
 }

@@ -132,13 +132,14 @@ describe('parseM3uDrmProps (#272)', () => {
     }
   });
 
-  it('parses multiple comma-separated ClearKey kid:key pairs in hex and 22-24 char base64url', () => {
+  it('parses multiple comma-separated ClearKey kid:key pairs in hex, hyphenated UUID, base64url, and standard base64 (M3U-2)', () => {
     const kid1 = ['0011223344556677', '8899aabbccddeeff'].join('');
     const key1 = ['aabbccddeeff0011', '2233445566778899'].join('');
-    const kid2 = ['ABCDEFGHIJK', 'LMNOPQRSTUV'].join(''); // 22 base64url chars
-    const key2 = ['abcdefghijk', 'lmnopqrstuv=='].join(''); // 24 padded base64url chars
-    const kid3 = ['0123456789-_', 'abcdefghijkl'].join(''); // 24 unpadded base64url chars
-    const key3 = ['9876543210_-', 'ABCDEFGHIJK='].join(''); // 24 single-pad base64url chars
+    const kid2 = ['ABCDEFGHIJK', 'LMNOPQRSTUV'].join(''); // 22 base64url chars (16 bytes)
+    const key2 = ['abcdefghijk', 'lmnopqrstuv=='].join(''); // 24 padded base64url chars (16 bytes) -> unpadded base64url
+    const kid3 = '00112233-4455-6677-8899-AABBCCDDEEFF'; // hyphenated UUID hex -> 32 lowercase hex
+    const key3 = ['AB+CD/EF0123', '456789abcd=='].join(''); // standard Base64 (+, /) -> unpadded base64url
+    const expectedKey3 = ['AB-CD_EF0123', '456789abcd'].join('');
 
     const result = parseM3uDrmProps({
       'inputstream.adaptive.license_type': 'clearkey',
@@ -148,10 +149,23 @@ describe('parseM3uDrmProps (#272)', () => {
       scheme: 'clearkey',
       clearKeys: [
         { kid: kid1, key: key1 },
-        { kid: kid2, key: key2 },
-        { kid: kid3, key: key3 },
+        { kid: kid2, key: 'abcdefghijklmnopqrstuv' },
+        { kid: '00112233445566778899aabbccddeeff', key: expectedKey3 },
       ],
     });
+
+    // Reject 17-byte (23+=) and 18-byte (24 unpadded) base64 tokens that are not 128-bit keys
+    for (const wrongLen of [
+      '0123456789-_abcdefghijkl:0123456789-_abcdefghijkl',
+      '9876543210_-ABCDEFGHIJK=:9876543210_-ABCDEFGHIJK=',
+    ]) {
+      expect(
+        parseM3uDrmProps({
+          'inputstream.adaptive.license_type': 'clearkey',
+          'inputstream.adaptive.license_key': wrongLen,
+        }),
+      ).toBeUndefined();
+    }
   });
 
   it('rejects malformed ClearKey kid:key strings and caps pairs at MAX_CLEARKEY_PAIRS', () => {
@@ -320,5 +334,98 @@ describe('parseM3uDrmProps (#272)', () => {
     });
     expect('drm' in (entries[2] ?? {})).toBe(false);
     expect('drm' in (entries[3] ?? {})).toBe(false);
+  });
+
+  it('supports flat ClearKey JSON maps, drm_legacy fallback, and implicit ClearKey inference (M3U-2)', () => {
+    const hexKid = '00112233445566778899aabbccddeeff';
+    const hexKey = 'ffeeddccbbaa99887766554433221100';
+    const uuidKid = '00112233-4455-6677-8899-aabbccddeeff';
+
+    const stdB64Kid = ['AB+CD/EF0123', '456789abcd=='].join('');
+    const urlB64Kid = ['AB-CD_EF0123', '456789abcd'].join('');
+    const seqHexKey = ['0123456789abcdef', '0123456789abcdef'].join('');
+
+    // Flat { "<kid>": "<key>" } JSON dictionary
+    expect(
+      parseM3uDrmProps({
+        'inputstream.adaptive.license_type': 'clearkey',
+        'inputstream.adaptive.license_key': JSON.stringify({
+          [uuidKid]: hexKey,
+          [stdB64Kid]: seqHexKey,
+        }),
+      }),
+    ).toEqual({
+      scheme: 'clearkey',
+      clearKeys: [
+        { kid: hexKid, key: hexKey },
+        { kid: urlB64Kid, key: seqHexKey },
+      ],
+    });
+
+    // Rejects prototype pollution keys inside flat ClearKey JSON
+    expect(
+      parseM3uDrmProps({
+        'inputstream.adaptive.license_type': 'clearkey',
+        'inputstream.adaptive.license_key': `{"__proto__":"${hexKey}","${hexKid}":"${hexKey}"}`,
+      }),
+    ).toBeUndefined();
+
+    // inputstream.adaptive.drm_legacy fallback preserving pipe headers on remote license URLs
+    expect(
+      parseM3uDrmProps({
+        'inputstream.adaptive.drm_legacy':
+          'com.widevine.alpha|https://lic.example.test/wv|X-Auth=tok1|R{SSM}',
+      }),
+    ).toEqual({
+      scheme: 'widevine',
+      licenseUrl: 'https://lic.example.test/wv',
+      licenseHeaders: { 'X-Auth': 'tok1' },
+    });
+
+    expect(
+      parseM3uDrmProps({
+        'inputstream.adaptive.drm_legacy': `org.w3.clearkey|${uuidKid}:${hexKey}`,
+      }),
+    ).toEqual({
+      scheme: 'clearkey',
+      clearKeys: [{ kid: hexKid, key: hexKey }],
+    });
+
+    // Explicit license_type/license_key take precedence over drm_legacy
+    expect(
+      parseM3uDrmProps({
+        'inputstream.adaptive.license_type': 'playready',
+        'inputstream.adaptive.license_key': 'https://pr.example.test/lic',
+        'inputstream.adaptive.drm_legacy': 'com.widevine.alpha|https://wv.example.test/lic',
+      }),
+    ).toEqual({
+      scheme: 'playready',
+      licenseUrl: 'https://pr.example.test/lic',
+    });
+
+    // Implicit ClearKey inference when license_type is omitted
+    expect(
+      parseM3uDrmProps({
+        'inputstream.adaptive.license_key': `${hexKid}:${hexKey}`,
+      }),
+    ).toEqual({
+      scheme: 'clearkey',
+      clearKeys: [{ kid: hexKid, key: hexKey }],
+    });
+    expect(
+      parseM3uDrmProps({
+        'inputstream.adaptive.license_key': JSON.stringify({ [hexKid]: hexKey }),
+      }),
+    ).toEqual({
+      scheme: 'clearkey',
+      clearKeys: [{ kid: hexKid, key: hexKey }],
+    });
+
+    // NEVER infer ClearKey for http(s):// license URLs when license_type is omitted
+    expect(
+      parseM3uDrmProps({
+        'inputstream.adaptive.license_key': 'https://lic.example.test/wv',
+      }),
+    ).toBeUndefined();
   });
 });

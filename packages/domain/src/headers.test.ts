@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   hasCredentialHeaders,
+  hostnameOf,
   originOf,
   sameOrigin,
   sanitizeHeaderName,
@@ -75,6 +76,10 @@ describe('exact-origin credential header scoping', () => {
     expect(originOf('https://[2001:DB8::1]:443/a')).toBe('https://[2001:db8::1]');
     expect(originOf('https://[2001:DB8::1]:8443/a')).toBe('https://[2001:db8::1]:8443');
     expect(originOf('http://evil.example\\@good.example/a')).toBe('http://evil.example');
+    expect(originOf('http://panel.example./path')).toBe('http://panel.example');
+    expect(originOf('https://Panel.Example.:443/a')).toBe('https://panel.example');
+    expect(originOf('http://panel.example..:8080/a')).toBe('http://panel.example:8080');
+    expect(hostnameOf('https://Panel.Example.:8443/x')).toBe('panel.example');
   });
 
   it.each([
@@ -90,6 +95,8 @@ describe('exact-origin credential header scoping', () => {
     'ws://example.com/socket',
     'http://',
     'http:///path',
+    'http://./path',
+    'http://.../path',
     'http://user:pass@/path',
     'http://:80/path',
     'http://example.com:99999/a',
@@ -106,6 +113,7 @@ describe('exact-origin credential header scoping', () => {
 
   it('compares origins accurately with sameOrigin', () => {
     expect(sameOrigin('HTTP://A.Example:80/one', 'http://user:pw@a.example/two?q=1#h')).toBe(true);
+    expect(sameOrigin('http://a.example./one', 'http://a.example/two')).toBe(true);
     expect(sameOrigin('https://a.example:443/x', 'https://a.example/y')).toBe(true);
     expect(sameOrigin('http://a.example/x', 'https://a.example/x')).toBe(false);
     expect(sameOrigin('http://a.example:8080/x', 'http://a.example:8081/x')).toBe(false);
@@ -134,7 +142,7 @@ describe('exact-origin credential header scoping', () => {
     expect(hasCredentialHeaders({ 'X-Api-Key': '\r\n  ' })).toBe(false);
   });
 
-  it('keeps sanitized credentials on same-origin requests and strips them cross-origin', () => {
+  it('keeps sanitized credentials on same-host upgrades, port changes, and trailing-dot equivalence, and strips them cross-host or on https->http downgrades', () => {
     const raw = {
       Authorization: 'Bearer secret\r\nX-Evil: 1',
       'Proxy-Authorization': 'Basic proxy',
@@ -144,34 +152,74 @@ describe('exact-origin credential header scoping', () => {
       'User-Agent': 'ELV/1.0\n',
       'Bad Header': 'dropped',
     };
-
-    expect(
-      scopeCredentialHeaders(raw, 'https://Origin.Example:443/a', 'https://origin.example/b'),
-    ).toEqual({
+    const expectedAll = {
       Authorization: 'Bearer secretX-Evil: 1',
       'Proxy-Authorization': 'Basic proxy',
       Cookie: 'sid=abc',
       'X-Api-Key': 'api-key-val',
       'X-Auth-Token': 'auth-tok-val',
       'User-Agent': 'ELV/1.0',
-    });
+    };
+    const expectedStripped = { 'User-Agent': 'ELV/1.0' };
 
     expect(
-      scopeCredentialHeaders(raw, 'https://origin.example/a', 'https://cdn.example/b'),
-    ).toEqual({
-      'User-Agent': 'ELV/1.0',
-    });
+      scopeCredentialHeaders(raw, 'https://Origin.Example:443/a', 'https://origin.example/b'),
+    ).toEqual(expectedAll);
 
+    // Same-host http -> https upgrade preserves credentials
     expect(
-      scopeCredentialHeaders(raw, 'https://origin.example/a', 'http://origin.example/b'),
-    ).toEqual({
-      'User-Agent': 'ELV/1.0',
-    });
+      scopeCredentialHeaders(raw, 'http://origin.example/a', 'https://origin.example/b'),
+    ).toEqual(expectedAll);
 
+    // Same-host port changes preserve credentials
+    expect(
+      scopeCredentialHeaders(raw, 'http://origin.example:80/a', 'http://origin.example:8080/b'),
+    ).toEqual(expectedAll);
     expect(
       scopeCredentialHeaders(raw, 'https://origin.example/a', 'https://origin.example:8443/b'),
-    ).toEqual({
-      'User-Agent': 'ELV/1.0',
-    });
+    ).toEqual(expectedAll);
+
+    // Trailing DNS root dot equivalence preserves credentials
+    expect(
+      scopeCredentialHeaders(raw, 'https://origin.example./a', 'https://origin.example/b'),
+    ).toEqual(expectedAll);
+
+    // Cross-host strips credentials
+    expect(
+      scopeCredentialHeaders(raw, 'https://origin.example/a', 'https://cdn.example/b'),
+    ).toEqual(expectedStripped);
+
+    // https -> http downgrade strips credentials
+    expect(
+      scopeCredentialHeaders(raw, 'https://origin.example/a', 'http://origin.example/b'),
+    ).toEqual(expectedStripped);
+    expect(
+      scopeCredentialHeaders(raw, 'https://origin.example:8443/a', 'http://origin.example:8080/b'),
+    ).toEqual(expectedStripped);
+
+    // Multi-hop http -> https -> http downgrade (via previousUrl) strips credentials
+    expect(
+      scopeCredentialHeaders(
+        raw,
+        'http://origin.example/a',
+        'http://origin.example/c',
+        'https://origin.example/b',
+      ),
+    ).toEqual(expectedStripped);
+
+    // Multi-hop bounce via cross-host previousUrl strips credentials
+    expect(
+      scopeCredentialHeaders(
+        raw,
+        'https://origin.example/a',
+        'https://origin.example/c',
+        'https://evil.example/b',
+      ),
+    ).toEqual(expectedStripped);
+
+    // Invalid URL strips credentials
+    expect(scopeCredentialHeaders(raw, 'file:///etc/passwd', 'https://origin.example/b')).toEqual(
+      expectedStripped,
+    );
   });
 });

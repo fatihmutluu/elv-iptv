@@ -101,6 +101,41 @@ describe('account', () => {
     });
     expectErr(await c.account(), 'network', 'stream-failed');
   });
+
+  it('falls back across empty action, get_account_info, and get_profile when earlier actions fail with 4xx/5xx or omit user_info (XC-2)', async () => {
+    const seen: (string | null)[] = [];
+    const { c } = client((url) => {
+      const act = action(url);
+      seen.push(act);
+      if (act === null) return { text: '', status: 404 };
+      if (act === 'get_account_info') return { json: { server_info: {} } };
+      return {
+        json: {
+          user_info: { auth: 1, status: 'active', exp_date: '0' },
+          server_info: { timezone: 'UTC+3' },
+        },
+      };
+    });
+    const acc = value(await c.account());
+    expect(seen).toEqual([null, 'get_account_info', 'get_profile']);
+    expect(acc).toEqual({
+      status: 'Active',
+      isTrial: false,
+      outputFormats: [],
+      serverTimezone: 'UTC+03:00',
+    });
+
+    // Rejects auth=false and expired exp_date immediately without probing later actions
+    const seenAuth: (string | null)[] = [];
+    const { c: expiredClient } = client((url) => {
+      seenAuth.push(action(url));
+      return {
+        json: { user_info: { auth: 1, status: 'Active', exp_date: '1600000000' } },
+      };
+    });
+    expectErr(await expiredClient.account(), 'auth', 'account-expired');
+    expect(seenAuth).toEqual([null]);
+  });
 });
 
 describe('categories', () => {
@@ -554,6 +589,50 @@ describe('simpleEpg (#306)', () => {
     ]);
     expect(requests).toHaveLength(2);
     expect(requests[1]?.url).toContain('http://backup.example:8080/player_api.php');
+  });
+
+  it('falls back once to get_simple_date_table on 404/405/501 or empty array without swallowing non-404 errors (XC-4)', async () => {
+    const actions1: (string | null)[] = [];
+    const { c: c404 } = client((url) => {
+      const act = action(url);
+      actions1.push(act);
+      if (act === 'get_simple_data_table') return { text: '', status: 404 };
+      return {
+        json: {
+          epg_listings: [{ title: b64('Typo Table'), start_timestamp: 100, stop_timestamp: 200 }],
+        },
+      };
+    });
+    expect(value(await c404.simpleEpg(12))).toEqual([
+      { start: 100_000, stop: 200_000, title: 'Typo Table' },
+    ]);
+    expect(actions1).toEqual(['get_simple_data_table', 'get_simple_date_table']);
+
+    const actions2: (string | null)[] = [];
+    const { c: cEmpty } = client((url) => {
+      const act = action(url);
+      actions2.push(act);
+      if (act === 'get_simple_data_table') return { json: { epg_listings: [] } };
+      return {
+        json: {
+          epg_listings: [
+            { title: b64('From Date Table'), start_timestamp: 300, stop_timestamp: 400 },
+          ],
+        },
+      };
+    });
+    expect(value(await cEmpty.simpleEpg(12))).toEqual([
+      { start: 300_000, stop: 400_000, title: 'From Date Table' },
+    ]);
+    expect(actions2).toEqual(['get_simple_data_table', 'get_simple_date_table']);
+
+    const actions3: (string | null)[] = [];
+    const { c: c500 } = client((url) => {
+      actions3.push(action(url));
+      return { text: '', status: 500 };
+    });
+    expectErr(await c500.simpleEpg(12), 'network', 'http-500');
+    expect(actions3).toEqual(['get_simple_data_table']);
   });
 });
 

@@ -1,12 +1,17 @@
 import { createGunzip } from 'node:zlib';
 import { type Decompressor, openAsyncIterator } from '@elv/domain';
+import { unxzStream } from './xz-stream.ts';
 
 /**
- * Streaming Node `zlib.createGunzip()` implementation of {@link Decompressor} with write backpressure
- * and immediate upstream cancellation on early consumer `.return()`.
+ * Streaming desktop implementation of {@link Decompressor}: Node `zlib.createGunzip()` with write
+ * backpressure for gzip and clean-room streaming XZ/LZMA2 (`unxzStream`) for `.xz`, both with
+ * immediate upstream cancellation on early consumer `.return()`.
  */
 export function createNodeGzipDecompressor(): Decompressor {
   return {
+    unxz(chunks: AsyncIterable<Uint8Array>): AsyncGenerator<Uint8Array> {
+      return unxzStream(chunks);
+    },
     async *gunzip(chunks: AsyncIterable<Uint8Array>): AsyncGenerator<Uint8Array> {
       const gunzip = createGunzip();
       const it = openAsyncIterator(chunks);

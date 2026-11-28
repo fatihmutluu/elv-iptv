@@ -403,9 +403,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     secrets,
     clock,
     newId,
-    ...(deps.localPlaylistStore === undefined
-      ? {}
-      : { localPlaylistStore: deps.localPlaylistStore }),
+    ...(deps.localPlaylistStore ? { localPlaylistStore: deps.localPlaylistStore } : {}),
   };
   const importDeps: ImportDeps = {
     db,
@@ -414,11 +412,9 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     scheduler: deps.scheduler,
     clock,
     maxBodyBytes: deps.maxBodyBytes ?? DEVICE_MAX_BODY_BYTES,
-    ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
-    ...(deps.nativeGuideStager === undefined ? {} : { nativeGuideStager: deps.nativeGuideStager }),
-    ...(deps.localPlaylistStore === undefined
-      ? {}
-      : { localPlaylistStore: deps.localPlaylistStore }),
+    ...(deps.decompressor ? { decompressor: deps.decompressor } : {}),
+    ...(deps.nativeGuideStager ? { nativeGuideStager: deps.nativeGuideStager } : {}),
+    ...(deps.localPlaylistStore ? { localPlaylistStore: deps.localPlaylistStore } : {}),
   };
   const queue = createSerializedImportQueue(db);
   const playtime = createPlaytimeResolverCache({
@@ -426,9 +422,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     secrets,
     http: deps.http,
     clock,
-    ...(deps.resolveLocalDownload === undefined
-      ? {}
-      : { resolveLocalDownload: deps.resolveLocalDownload }),
+    ...(deps.resolveLocalDownload ? { resolveLocalDownload: deps.resolveLocalDownload } : {}),
   });
   let closePromise: Promise<void> | undefined;
   const { manifest, userData } = deps;
@@ -439,6 +433,15 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     const next = userDataTail.then(() => saveUserDataSnapshot(db, userData));
     userDataTail = next.catch(() => undefined);
     return next;
+  };
+  const withUserSync = async <T extends Result<unknown>>(p: Promise<T>): Promise<T> => {
+    const r = await p;
+    if (r.ok) await syncUserData();
+    return r;
+  };
+  const voidUserSync = async (p: Promise<void>): Promise<void> => {
+    await p;
+    await syncUserData();
   };
   const profileMethods = createCatalogProfileMethods({ db, secrets, clock, syncUserData });
   const channelOpsMethods = createCatalogChannelOpsMethods({ db, clock, syncUserData });
@@ -711,11 +714,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       const [resolved] = await playtime.resolveRowLogos([saved.value]);
       return ok(resolved ?? saved.value);
     },
-    async setWatched(itemKey, watched, profileId) {
-      const updated = await setItemWatched(db, itemKey, watched, clock, profileId);
-      if (updated.ok) await syncUserData();
-      return updated;
-    },
+    setWatched: (itemKey, watched, profileId) =>
+      withUserSync(setItemWatched(db, itemKey, watched, clock, profileId)),
     async getProgress(itemKey, profileId) {
       const found = await getWatchProgress(db, itemKey, profileId);
       if (found === null) return null;
@@ -730,42 +730,21 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       playtime.resolveRowLogos(await listProgressByKeys(db, itemKeys, profileId)),
     listSeriesUnplayedCounts: (seriesKeys, profileId) =>
       listSeriesUnplayedCounts(db, seriesKeys, profileId),
-    async clearProgress(itemKey, profileId) {
-      const cleared = await clearWatchProgress(db, itemKey, profileId, clock);
-      if (cleared.ok) await syncUserData();
-      return cleared;
-    },
-    async toggleFavorite(input) {
-      const toggled = await toggleFavorite(db, input, clock);
-      if (toggled.ok) await syncUserData();
-      return toggled;
-    },
-    async setFavorite(input, active) {
-      const updated = await setFavorite(db, input, active, clock);
-      if (updated.ok) await syncUserData();
-      return updated;
-    },
-    async reorderFavorites(orderedItemKeys, profileId) {
-      const reordered = await reorderFavorites(db, orderedItemKeys, profileId);
-      if (reordered.ok) await syncUserData();
-      return reordered;
-    },
+    clearProgress: (itemKey, profileId) =>
+      withUserSync(clearWatchProgress(db, itemKey, profileId, clock)),
+    toggleFavorite: (input) => withUserSync(toggleFavorite(db, input, clock)),
+    setFavorite: (input, active) => withUserSync(setFavorite(db, input, active, clock)),
+    reorderFavorites: (orderedItemKeys, profileId) =>
+      withUserSync(reorderFavorites(db, orderedItemKeys, profileId)),
     listFavorites: async (limit, profileId, opts) =>
       playtime.resolveRowLogos(await listFavorites(db, limit, profileId, opts)),
     listFavoriteKeys: (profileId) => listFavoriteKeys(db, profileId),
     getTrackPreference: (scopeKey, profileId) => getTrackPreference(db, scopeKey, profileId),
-    async saveTrackPreference(input) {
-      await saveTrackPreference(db, input, clock);
-      await syncUserData();
-    },
-    async clearTrackPreference(scopeKey, profileId) {
-      await clearTrackPreference(db, scopeKey, profileId);
-      await syncUserData();
-    },
-    async recordRecentChannel(itemKey, sourceId, profileId) {
-      await recordRecentChannel(db, itemKey, sourceId, profileId, clock());
-      await syncUserData();
-    },
+    saveTrackPreference: (input) => voidUserSync(saveTrackPreference(db, input, clock)),
+    clearTrackPreference: (scopeKey, profileId) =>
+      voidUserSync(clearTrackPreference(db, scopeKey, profileId)),
+    recordRecentChannel: (itemKey, sourceId, profileId) =>
+      voidUserSync(recordRecentChannel(db, itemKey, sourceId, profileId, clock())),
     listRecentChannels: async (limit, profileId, opts) =>
       playtime.resolveRowLogos(await listRecentChannels(db, limit, profileId, opts)),
 
@@ -787,6 +766,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       closePromise = (async () => {
         await queue.close();
         playtime.clear();
+        await db.exec('PRAGMA optimize').catch(() => undefined);
         await db.close?.();
       })();
       return closePromise;

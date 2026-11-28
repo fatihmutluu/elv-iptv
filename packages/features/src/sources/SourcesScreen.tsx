@@ -472,25 +472,49 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
 
                 {ctrl.showAdvanced ? (
                   <View style={styles.advancedSection}>
-                    {(
-                      [
-                        ['guideUrl', 'guide-url', 'guideUrl'],
-                        ['userAgent', 'user-agent', 'userAgent'],
-                        ['referer', 'referer', 'referer'],
-                      ] as const
-                    ).map(([field, slug, key]) => (
-                      <FieldInput
-                        key={field}
-                        {...fieldShared}
-                        focusId={`input-${slug}`}
-                        testID={`sources-input-${slug}`}
-                        label={i18n.t(`sources.field.${key}`)}
-                        placeholder={i18n.t(`sources.placeholder.${key}`)}
-                        value={ctrl.form[field]}
-                        onChangeText={(v) => ctrl.updateField(field, v)}
-                        tvFocused={tv.tvFocusId === `input-${slug}`}
-                      />
-                    ))}
+                    <FieldInput
+                      {...fieldShared}
+                      focusId="input-guide-url"
+                      testID="sources-input-guide-url"
+                      label={i18n.t('sources.field.guideUrl')}
+                      placeholder={i18n.t('sources.placeholder.guideUrl')}
+                      value={ctrl.form.guideUrl}
+                      onChangeText={(v) => ctrl.updateField('guideUrl', v)}
+                      tvFocused={tv.tvFocusId === 'input-guide-url'}
+                    />
+                    <FieldInput
+                      {...fieldShared}
+                      focusId="input-user-agent"
+                      testID="sources-input-user-agent"
+                      label={i18n.t('sources.field.userAgent')}
+                      placeholder={i18n.t('sources.placeholder.userAgent')}
+                      value={ctrl.form.userAgent}
+                      onChangeText={(v) => ctrl.updateField('userAgent', v)}
+                      tvFocused={tv.tvFocusId === 'input-user-agent'}
+                    />
+                    <FieldInput
+                      {...fieldShared}
+                      focusId="input-stream-user-agent"
+                      testID="sources-input-stream-user-agent"
+                      label={i18n.t('sources.field.streamUserAgent')}
+                      placeholder={i18n.t('sources.placeholder.streamUserAgent')}
+                      value={ctrl.form.streamUserAgent ?? ''}
+                      onChangeText={(v) => ctrl.updateField('streamUserAgent', v)}
+                      tvFocused={tv.tvFocusId === 'input-stream-user-agent'}
+                    />
+                    <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]}>
+                      {i18n.t('sources.hint.streamUserAgent')}
+                    </Text>
+                    <FieldInput
+                      {...fieldShared}
+                      focusId="input-referer"
+                      testID="sources-input-referer"
+                      label={i18n.t('sources.field.referer')}
+                      placeholder={i18n.t('sources.placeholder.referer')}
+                      value={ctrl.form.referer}
+                      onChangeText={(v) => ctrl.updateField('referer', v)}
+                      tvFocused={tv.tvFocusId === 'input-referer'}
+                    />
                     <FieldInput
                       {...fieldShared}
                       focusId="input-xmltv-timezone"

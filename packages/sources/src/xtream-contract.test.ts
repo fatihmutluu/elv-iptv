@@ -69,7 +69,7 @@ describe('cancellation', () => {
     await c.seriesInfo(1, o);
     await c.vodInfo(1, o);
     await c.shortEpg(1, 2, o);
-    expect(signals).toHaveLength(7);
+    expect(signals).toHaveLength(9);
     expect(signals.every((s) => s === ctl.signal)).toBe(true);
   });
 

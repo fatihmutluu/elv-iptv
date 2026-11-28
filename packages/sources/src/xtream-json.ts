@@ -1,15 +1,6 @@
-import {
-  type ElvError,
-  elvError,
-  err,
-  type HttpClient,
-  ok,
-  openAsyncIterator,
-  type Result,
-} from '@elv/domain';
+import { elvError, err, type HttpClient, ok, openAsyncIterator, type Result } from '@elv/domain';
 import { detectAndDecodeText } from './encoding';
 import { toElvError } from './scan-error';
-import type { Raw } from './xtream-records';
 import type { XtreamRateLimitOptions } from './xtream-types';
 
 const HEX4_RE = /^[0-9a-fA-F]{4}$/;
@@ -295,18 +286,6 @@ export async function acquireXtreamToken(
   } catch {
     return err(elvError('network', 'aborted'));
   }
-}
-
-/** Classifies a `user_info` payload into an `auth/*` error when credentials or account status fail. */
-export function accountFailure(info: Raw): ElvError | undefined {
-  if (Number(info.auth) === 0) return elvError('auth', 'invalid-credentials');
-  const status = typeof info.status === 'string' ? info.status.trim() : '';
-  if (status === '' || status.toLowerCase() === 'active') return undefined;
-  const slug = status
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-  return elvError('auth', `account-${slug || 'unknown'}`);
 }
 
 const FIRST_BUFFER = 64 * 1024;

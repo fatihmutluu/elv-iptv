@@ -1,6 +1,13 @@
 import { isAsyncIterable, openAsyncIterator } from './async-iterable';
 import { createCookieJar, extractSetCookies, mergeCookieHeader } from './cookie-jar';
-import { originOf, resolveRedirectUrl, sanitizeHeaders, scopeCredentialHeaders } from './headers';
+import {
+  hostnameOf,
+  originOf,
+  resolveRedirectUrl,
+  sanitizeHeaders,
+  scopeCredentialHeaders,
+} from './headers';
+import type { HostConnectivityGuard } from './host-connectivity-guard';
 import type { DnsFamilyPreference } from './network-transport';
 import { type ElvError, elvError, err, ok, type Result } from './result';
 
@@ -29,6 +36,8 @@ export interface HttpRequestOptions {
   readonly dnsFamily?: DnsFamilyPreference;
   /** Optional validated literal IP override scoped strictly to the initial request host while keeping TLS SNI (`#172`). */
   readonly hostOverride?: string;
+  /** When `true`, bypasses any configured per-origin {@link HostConnectivityGuard} (for explicit retries and discovery probes). */
+  readonly skipGuard?: boolean;
 }
 
 /**
@@ -70,9 +79,10 @@ export type FetchLike = (
     | undefined;
 }>;
 
-/** Port for gzip decoding of a chunk stream. */
+/** Port for streaming gzip (and optional XZ) decoding of a chunk stream. */
 export interface Decompressor {
   gunzip(chunks: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>;
+  unxz?(chunks: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>;
 }
 
 const DEFAULT_IDLE_MS = 30_000;
@@ -281,7 +291,13 @@ export function httpStatusError(status: number): ElvError {
  */
 export function createFetchHttpClient(
   fetchImpl: FetchLike,
-  defaults?: { timeoutMs?: number; idleTimeoutMs?: number },
+  defaults?: {
+    timeoutMs?: number;
+    idleTimeoutMs?: number;
+    connectivityGuard?: HostConnectivityGuard;
+    /** When `false`, generic `timeoutMs` aborts without an explicit socket error code do not trip `connectivityGuard`. Defaults to `true`. */
+    trustTimeoutAsPreConnect?: boolean;
+  },
 ): HttpClient {
   return {
     async get(url, options) {
@@ -292,6 +308,12 @@ export function createFetchHttpClient(
       let timedOut = false;
       const caller = options?.signal;
       if (caller?.aborted) return err(elvError('network', 'aborted'));
+      const guard = options?.skipGuard === true ? undefined : defaults?.connectivityGuard;
+      const admission = guard?.acquire(url);
+      if (admission !== undefined && !admission.allowed) {
+        return err(elvError('network', 'host-unreachable'));
+      }
+      const guardTicket = admission?.ticket;
       const onCallerAbort = () => controller.abort();
       caller?.addEventListener('abort', onCallerAbort);
       const timer =
@@ -306,6 +328,7 @@ export function createFetchHttpClient(
       });
       aborted.catch(() => {});
       let handedOff = false;
+      let hops = 0;
       try {
         const sanitizedHeaders =
           options?.headers !== undefined ? sanitizeHeaders(options.headers) : undefined;
@@ -357,12 +380,14 @@ export function createFetchHttpClient(
 
         const cookieJar = createCookieJar();
         let currentUrl = url;
+        let seenHttps = originOf(url)?.startsWith('https://') === true;
         let callerHeaders = sanitizedHeaders;
-        let hops = 0;
         let res = await fetchOnce(currentUrl, callerHeaders);
+        guard?.reportSuccess(guardTicket);
         const initialUrl = await adoptResponseUrl(res, currentUrl);
         if (initialUrl === undefined) return err(elvError('network', 'fetch-failed'));
         currentUrl = initialUrl;
+        if (originOf(currentUrl)?.startsWith('https://') === true) seenHttps = true;
         let headers = collectHeaders(res.headers);
         while (followRedirects && REDIRECT_STATUSES.has(res.status)) {
           cookieJar.store(currentUrl, extractSetCookies(res.headers, headers));
@@ -372,17 +397,25 @@ export function createFetchHttpClient(
           if (hops >= MAX_REDIRECT_HOPS) return err(elvError('network', 'too-many-redirects'));
           const nextUrl = resolveRedirectUrl(currentUrl, location);
           if (nextUrl === undefined) return err(httpStatusError(res.status));
+          const rawHost = hostnameOf(currentUrl);
+          const formattedHost = rawHost?.includes(':') ? `[${rawHost}]` : (rawHost ?? '');
+          const prevRef =
+            seenHttps && originOf(nextUrl)?.startsWith('http://') === true
+              ? `https://${formattedHost}`
+              : currentUrl;
           callerHeaders =
             callerHeaders === undefined
               ? undefined
-              : scopeCredentialHeaders(callerHeaders, url, nextUrl);
+              : scopeCredentialHeaders(callerHeaders, url, nextUrl, prevRef);
           const hopHeaders = mergeCookieHeader(callerHeaders, cookieJar.headerFor(nextUrl));
           currentUrl = nextUrl;
+          if (originOf(currentUrl)?.startsWith('https://') === true) seenHttps = true;
           hops += 1;
           res = await fetchOnce(currentUrl, hopHeaders);
           const hopUrl = await adoptResponseUrl(res, currentUrl);
           if (hopUrl === undefined) return err(elvError('network', 'fetch-failed'));
           currentUrl = hopUrl;
+          if (originOf(currentUrl)?.startsWith('https://') === true) seenHttps = true;
           headers = collectHeaders(res.headers);
         }
         if ((res.status < 200 || res.status >= 300) && res.status !== 304) {
@@ -397,11 +430,23 @@ export function createFetchHttpClient(
           body: streamBody(res.body, controller, idleMs, dispose),
           finalUrl: currentUrl,
         });
-      } catch {
+      } catch (e) {
+        if (hops === 0) {
+          if (timedOut) {
+            guard?.reportFailure(guardTicket, e, {
+              timedOut: defaults?.trustTimeoutAsPreConnect !== false,
+            });
+          } else if (caller?.aborted) {
+            guard?.release(guardTicket);
+          } else {
+            guard?.reportFailure(guardTicket, e);
+          }
+        }
         if (timedOut) return err(elvError('network', 'timeout'));
         if (caller?.aborted) return err(elvError('network', 'aborted'));
         return err(elvError('network', 'fetch-failed'));
       } finally {
+        guard?.release(guardTicket);
         if (timer !== undefined) clearTimeout(timer);
         if (!handedOff) caller?.removeEventListener('abort', onCallerAbort);
       }

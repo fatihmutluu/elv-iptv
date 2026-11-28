@@ -137,4 +137,110 @@ describe('detectAndDecodeText (#282, #120)', () => {
       value: [{ id: 1, name: 'İstanbul', categoryIds: [], catchupDays: 0 }],
     });
   });
+
+  it('decodes legacy Cyrillic Windows-1251 and Arabic Windows-1256 slices and M3U lines without regressing CP1252/CP1254/UTF-8 (M3U-3)', async () => {
+    const encodeLegacy = (text: string, encoding: string): Uint8Array => {
+      const map = new Map<string, number>();
+      const td = new TextDecoder(encoding);
+      for (let b = 0x00; b <= 0xff; b++) {
+        const ch = td.decode(new Uint8Array([b]));
+        if (ch !== '\ufffd') map.set(ch, b);
+      }
+      const out = new Uint8Array(text.length);
+      for (let i = 0; i < text.length; i++) {
+        const b = map.get(text[i] as string);
+        if (b === undefined) throw new Error(`unencodable ${text[i]} in ${encoding}`);
+        out[i] = b;
+      }
+      return out;
+    };
+
+    const ruText = 'Первый канал — Новости Кино';
+    expect(detectAndDecodeText(encodeLegacy(ruText, 'windows-1251'))).toBe(ruText);
+
+    const ruCaps = 'НОВОСТИ СПОРТ';
+    expect(detectAndDecodeText(encodeLegacy(ruCaps, 'windows-1251'))).toBe(ruCaps);
+
+    const uaText = 'Україна Кіно HD';
+    expect(detectAndDecodeText(encodeLegacy(uaText, 'windows-1251'))).toBe(uaText);
+
+    const arText = 'قناة الأخبار مباشر';
+    expect(detectAndDecodeText(encodeLegacy(arText, 'windows-1256'))).toBe(arText);
+
+    const arNoAl = 'نشرة رياضية مسائية';
+    expect(detectAndDecodeText(encodeLegacy(arNoAl, 'windows-1256'))).toBe(arNoAl);
+
+    const ruM3u = encodeLegacy(
+      '#EXTM3U\n#EXTINF:-1 group-title="Кино",Первый канал\nhttp://h.example/ru.ts\n',
+      'windows-1251',
+    );
+    const ruEntries: { name: string; groups: string[] }[] = [];
+    for await (const b of scanM3u(chunksOf(ruM3u, [17, ruM3u.length]))) {
+      ruEntries.push(...b.entries.map((e) => ({ name: e.name, groups: e.groups })));
+    }
+    expect(ruEntries).toEqual([{ name: 'Первый канал', groups: ['Кино'] }]);
+
+    const arM3u = encodeLegacy(
+      '#EXTM3U\n#EXTINF:-1 group-title="أفلام عربية",قناة الأخبار\nhttp://h.example/ar.ts\n',
+      'windows-1256',
+    );
+    const arEntries: { name: string; groups: string[] }[] = [];
+    for await (const b of scanM3u(chunksOf(arM3u, [19, arM3u.length]))) {
+      arEntries.push(...b.entries.map((e) => ({ name: e.name, groups: e.groups })));
+    }
+    expect(arEntries).toEqual([{ name: 'قناة الأخبار', groups: ['أفلام عربية'] }]);
+
+    // Valid UTF-8 with emojis remains untouched
+    const utf8Emoji = 'Первый канал 🎬 قناة الأخبار';
+    expect(detectAndDecodeText(new TextEncoder().encode(utf8Emoji))).toBe(utf8Emoji);
+  });
+
+  it('preserves Turkish CP1254 and Western CP1252 lines containing 3+ consecutive high bytes or punctuation runs', () => {
+    const encodeLegacy = (text: string, encoding: string): Uint8Array => {
+      const map = new Map<string, number>();
+      const td = new TextDecoder(encoding);
+      for (let b = 0x00; b <= 0xff; b++) {
+        const ch = td.decode(new Uint8Array([b]));
+        if (ch !== '\ufffd') map.set(ch, b);
+      }
+      const out = new Uint8Array(text.length);
+      for (let i = 0; i < text.length; i++) {
+        const b = map.get(text[i] as string);
+        if (b === undefined) throw new Error(`unencodable ${text[i]} in ${encoding}`);
+        out[i] = b;
+      }
+      return out;
+    };
+
+    for (const trSample of [
+      '#EXTINF:-1 group-title="İŞÇİ",DÜĞÜN TV',
+      'ŞEHİR İÇİ',
+      'İŞÇİ',
+      'İÇİ',
+      'ŞİŞ',
+      'ÇİĞ',
+      'ÜÇÜ',
+      'işçi',
+      'içi',
+      'şiş',
+      'çiğ',
+      'üçü',
+    ]) {
+      expect(detectAndDecodeText(encodeLegacy(trSample, 'windows-1254')), trSample).toBe(trSample);
+    }
+
+    for (const westSample of ['¿¿¿', 'ººº', 'ÄÖÜ', 'äöü', '#EXTINF:-1,¿¿¿ ÄÖÜ ººº']) {
+      expect(detectAndDecodeText(encodeLegacy(westSample, 'windows-1252')), westSample).toBe(
+        westSample,
+      );
+    }
+
+    for (const ruSample of ['Мир', 'МИР', 'Кино', 'Первый канал', 'НОВОСТИ СПОРТ']) {
+      expect(detectAndDecodeText(encodeLegacy(ruSample, 'windows-1251')), ruSample).toBe(ruSample);
+    }
+
+    for (const arSample of ['أفلام', 'قناة الأخبار مباشر', 'نشرة رياضية مسائية']) {
+      expect(detectAndDecodeText(encodeLegacy(arSample, 'windows-1256')), arSample).toBe(arSample);
+    }
+  });
 });

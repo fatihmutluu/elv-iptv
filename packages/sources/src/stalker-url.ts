@@ -17,79 +17,218 @@ const HOST_PORT_RE = /^(?:[a-z0-9.-]+|\[[0-9a-f:]+\]):\d+(?:\/|[?#]|$)/i;
 const CMD_PREFIX_RE = /^(?:ffmpeg|ffrt\d*|auto)(?:\s+|$)/i;
 const DATETIME_RE =
   /^(\d{4})-(\d{2})-(\d{2})(?:[ Tt](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d{1,6})?(Z|z|[+-]\d{2}:?\d{2})?)?$/;
+const FIXED_TZ_OFFSET_RE = /^(?:(?:UTC|GMT)\s*)?([+-])(\d{1,2})(?::?(\d{2}))?$/i;
+const PHP_FILE_RE = /\.php$/i;
+const SERVER_LOAD_PHP_RE = /\/server\/load\.php$/i;
+const STALKER_PORTAL_TAIL_RE = /\/stalker_portal$/i;
+const STALKER_PORTAL_C_TAIL_RE = /\/stalker_portal\/c$/i;
+const C_TAIL_RE = /\/c$/i;
+const INDEX_TAIL_RE = /\/index\.(?:html?|php)$/i;
 
+const utf8Encoder = new TextEncoder();
 const TZ_FORMATTERS = new Map<string, Intl.DateTimeFormat | null>();
 
-/**
- * Normalizes a Stalker/Ministra portal URL into its API load endpoint (`portal.php` or
- * `server/load.php`) plus an optional 404 fallback endpoint probed during handshake.
- */
-export function normalizeStalkerPortalUrl(raw: string): Result<StalkerPortalEndpoint> {
-  const invalid = () => err(elvError('source-format', 'invalid-portal-url'));
-  if (typeof raw !== 'string') return invalid();
+function pushUniqueCandidate(out: string[], seen: Set<string>, url: string): void {
+  if (/\/stalker_portal\/stalker_portal(?:\/|$)/i.test(url)) return;
+  if (seen.has(url)) return;
+  seen.add(url);
+  out.push(url);
+}
+
+function appendDirectoryCandidates(
+  out: string[],
+  seen: Set<string>,
+  origin: string,
+  dirPath: string,
+): void {
+  const base = `${origin}${dirPath}`;
+  pushUniqueCandidate(out, seen, `${base}/portal.php`);
+  pushUniqueCandidate(out, seen, `${base}/server/load.php`);
+  if (!STALKER_PORTAL_TAIL_RE.test(dirPath)) {
+    pushUniqueCandidate(out, seen, `${base}/stalker_portal/server/load.php`);
+  }
+}
+
+function parseHttpPortalUrl(raw: string): URL | undefined {
+  if (typeof raw !== 'string') return undefined;
   const trimmed = raw.trim();
   if (
     trimmed.length === 0 ||
     trimmed.length > MAX_URL_LENGTH ||
-    CONTROL_OR_SPACE_RE.test(trimmed)
+    CONTROL_OR_SPACE_RE.test(trimmed) ||
+    trimmed.startsWith('/')
   ) {
-    return invalid();
+    return undefined;
   }
-  if (trimmed.startsWith('/')) return invalid();
-
   let candidate = trimmed;
   if (trimmed.includes('://')) {
-    if (!HTTP_SCHEME_RE.test(trimmed)) return invalid();
+    if (!HTTP_SCHEME_RE.test(trimmed)) return undefined;
   } else if (ANY_SCHEME_PREFIX_RE.test(trimmed) && !HOST_PORT_RE.test(trimmed)) {
-    return invalid();
+    return undefined;
   } else {
     candidate = `http://${trimmed}`;
   }
-
-  let parsed: URL;
   try {
-    parsed = new URL(candidate);
+    const parsed = new URL(candidate);
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      parsed.hostname.length === 0 ||
+      parsed.username.length > 0 ||
+      parsed.password.length > 0
+    ) {
+      return undefined;
+    }
+    return parsed;
   } catch {
-    return invalid();
+    return undefined;
   }
-  if (
-    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
-    parsed.hostname.length === 0 ||
-    parsed.username.length > 0 ||
-    parsed.password.length > 0
-  ) {
-    return invalid();
-  }
+}
+
+/**
+ * Normalizes a Stalker/Ministra portal URL into its primary API endpoint plus a full deduplicated
+ * candidate list for behavioral discovery (`portal.php`, `server/load.php`, `stalker_portal/server/load.php`,
+ * explicit `.php` siblings, and literal `/c/` paths).
+ */
+export function normalizeStalkerPortalUrl(raw: string): Result<StalkerPortalEndpoint> {
+  const parsed = parseHttpPortalUrl(raw);
+  if (parsed === undefined) return err(elvError('source-format', 'invalid-portal-url'));
 
   const origin = parsed.origin;
   const pathname = parsed.pathname.replace(/\/+$/, '');
+  const candidates: string[] = [];
+  const seen = new Set<string>();
 
-  if (/\/(?:portal\.php|server\/load\.php)$/i.test(pathname)) {
-    return ok({ endpoint: `${origin}${pathname}` });
-  }
-  if (/\/stalker_portal\/c$/i.test(pathname)) {
+  if (PHP_FILE_RE.test(pathname)) {
+    pushUniqueCandidate(candidates, seen, `${origin}${pathname}`);
+    if (SERVER_LOAD_PHP_RE.test(pathname)) {
+      const basePath = pathname.slice(0, -'/server/load.php'.length);
+      appendDirectoryCandidates(candidates, seen, origin, basePath);
+      if (STALKER_PORTAL_TAIL_RE.test(basePath)) {
+        const parentPath = basePath.slice(0, -'/stalker_portal'.length);
+        appendDirectoryCandidates(candidates, seen, origin, parentPath);
+      }
+    } else {
+      const slash = pathname.lastIndexOf('/');
+      const dirPath = slash <= 0 ? '' : pathname.slice(0, slash);
+      appendDirectoryCandidates(candidates, seen, origin, dirPath);
+      if (C_TAIL_RE.test(dirPath)) {
+        const parentPath = dirPath.slice(0, -2);
+        appendDirectoryCandidates(candidates, seen, origin, parentPath);
+      }
+    }
+  } else if (STALKER_PORTAL_C_TAIL_RE.test(pathname)) {
     const prefix = pathname.slice(0, -2);
-    return ok({ endpoint: `${origin}${prefix}/server/load.php` });
-  }
-  if (/\/c$/i.test(pathname)) {
-    const base = `${origin}${pathname.slice(0, -2)}`;
-    return ok({
-      endpoint: `${base}/portal.php`,
-      fallbackEndpoint: `${base}/stalker_portal/server/load.php`,
-    });
-  }
-  if (/\/stalker_portal$/i.test(pathname)) {
+    pushUniqueCandidate(candidates, seen, `${origin}${prefix}/server/load.php`);
+    pushUniqueCandidate(candidates, seen, `${origin}${prefix}/portal.php`);
+    pushUniqueCandidate(candidates, seen, `${origin}${pathname}/portal.php`);
+    pushUniqueCandidate(candidates, seen, `${origin}${pathname}/server/load.php`);
+    const parent = prefix.slice(0, -'/stalker_portal'.length);
+    appendDirectoryCandidates(candidates, seen, origin, parent);
+  } else if (C_TAIL_RE.test(pathname)) {
+    const parentPath = pathname.slice(0, -2);
+    appendDirectoryCandidates(candidates, seen, origin, parentPath);
+    appendDirectoryCandidates(candidates, seen, origin, pathname);
+  } else if (STALKER_PORTAL_TAIL_RE.test(pathname)) {
     const base = `${origin}${pathname}`;
-    return ok({
-      endpoint: `${base}/server/load.php`,
-      fallbackEndpoint: `${base}/portal.php`,
-    });
+    pushUniqueCandidate(candidates, seen, `${base}/server/load.php`);
+    pushUniqueCandidate(candidates, seen, `${base}/portal.php`);
+  } else {
+    appendDirectoryCandidates(candidates, seen, origin, pathname);
   }
-  const base = `${origin}${pathname}`;
+
+  const endpoint = candidates[0] as string;
+  const fallbackEndpoint = candidates[1];
   return ok({
-    endpoint: `${base}/portal.php`,
-    fallbackEndpoint: `${base}/stalker_portal/server/load.php`,
+    endpoint,
+    ...(fallbackEndpoint !== undefined ? { fallbackEndpoint } : {}),
+    candidates,
   });
+}
+
+function normalizeHostName(rawHost: string): string {
+  const unbracketed =
+    rawHost.startsWith('[') && rawHost.endsWith(']') ? rawHost.slice(1, -1) : rawHost;
+  return unbracketed.toLowerCase().replace(/\.+$/, '');
+}
+
+/**
+ * Returns `true` when `targetUrl` is a safe same-host portal URL relative to `portalUrl`
+ * (matching normalized hostname without trailing DNS dot, and strictly forbidding `https -> http`
+ * downgrade).
+ */
+export function isSameSafePortalHost(portalUrl: string, targetUrl: string): boolean {
+  const base = parseHttpPortalUrl(portalUrl);
+  if (base === undefined) return false;
+  let target: URL;
+  try {
+    target = new URL(targetUrl);
+  } catch {
+    return false;
+  }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') return false;
+  if (base.protocol === 'https:' && target.protocol !== 'https:') return false;
+  return normalizeHostName(base.hostname) === normalizeHostName(target.hostname);
+}
+
+/**
+ * Derives `../server/load.php` and sibling `/c` endpoint candidates when an API probe redirects to
+ * an HTML `/c/` landing page on the same normalized host with no `https -> http` downgrade
+ * (blocks cross-host credential exfiltration and off-host private-LAN/loopback SSRF).
+ */
+export function deriveStalkerRedirectCandidates(
+  initialEndpoint: string,
+  finalUrl: string,
+): string[] {
+  if (!isSameSafePortalHost(initialEndpoint, finalUrl)) return [];
+  const redirected = parseHttpPortalUrl(finalUrl);
+  if (redirected === undefined) return [];
+  const cleanPath = redirected.pathname.replace(INDEX_TAIL_RE, '').replace(/\/+$/, '');
+  if (!C_TAIL_RE.test(cleanPath)) return [];
+
+  const origin = redirected.origin;
+  const parentPath = cleanPath.slice(0, -2);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  pushUniqueCandidate(out, seen, `${origin}${parentPath}/server/load.php`);
+  pushUniqueCandidate(out, seen, `${origin}${parentPath}/portal.php`);
+  if (!STALKER_PORTAL_TAIL_RE.test(parentPath)) {
+    pushUniqueCandidate(out, seen, `${origin}${parentPath}/stalker_portal/server/load.php`);
+  }
+  pushUniqueCandidate(out, seen, `${origin}${cleanPath}/portal.php`);
+  pushUniqueCandidate(out, seen, `${origin}${cleanPath}/server/load.php`);
+  return out;
+}
+
+/**
+ * Encodes a Stalker `create_link` `cmd` query parameter using single-decode STB wire semantics:
+ * leaves `%` unescaped (preventing `%3A` -> `%253A` double-encoding) while percent-encoding `&`,
+ * `#`, `;`, `+`, whitespace, quotes, angle brackets, backticks, ASCII control characters, and
+ * non-ASCII UTF-8 bytes.
+ */
+export function encodeStalkerCmdQueryValue(cmd: string): string {
+  const bytes = utf8Encoder.encode(cmd);
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    const b = bytes[i] as number;
+    if (
+      b <= 0x20 ||
+      b >= 0x7f ||
+      b === 0x22 || // "
+      b === 0x23 || // #
+      b === 0x26 || // &
+      b === 0x27 || // '
+      b === 0x2b || // +
+      b === 0x3b || // ;
+      b === 0x3c || // <
+      b === 0x3e || // >
+      b === 0x60 // `
+    ) {
+      out += `%${b.toString(16).toUpperCase().padStart(2, '0')}`;
+    } else {
+      out += String.fromCharCode(b);
+    }
+  }
+  return out;
 }
 
 /** Strips leading Stalker playback command wrappers (`ffmpeg `, `ffrt `, `ffrt2 `, `ffrt3 `, `auto `). */
@@ -101,30 +240,103 @@ export function stripStalkerCommandPrefix(rawCmd: string): string {
   return out;
 }
 
-/** Strips command wrappers and validates that a `create_link` output is an `http(s)://` URL. */
-export function validateStalkerStreamUrl(rawCmd: string): Result<string> {
+function resolvePortalInstallBase(
+  portalEndpoint: string | undefined,
+): { origin: string; basePath: string; baseUrl: string } | undefined {
+  if (portalEndpoint === undefined) return undefined;
+  const parsed = parseHttpPortalUrl(portalEndpoint);
+  if (parsed === undefined) return undefined;
+  const pathname = parsed.pathname.replace(/\/+$/, '');
+  let basePath: string;
+  if (SERVER_LOAD_PHP_RE.test(pathname)) {
+    basePath = pathname.slice(0, -'/server/load.php'.length);
+  } else if (PHP_FILE_RE.test(pathname)) {
+    const slash = pathname.lastIndexOf('/');
+    basePath = slash <= 0 ? '' : pathname.slice(0, slash);
+  } else {
+    basePath = pathname;
+  }
+  return {
+    origin: parsed.origin,
+    basePath,
+    baseUrl: `${parsed.origin}${basePath}/`,
+  };
+}
+
+/**
+ * Strips command wrappers and validates that a `create_link` output is an `http(s)://` URL.
+ * When `portalEndpoint` is supplied, resolves relative `/media/...` and query-only `?token=...`
+ * outputs against the portal installation base path (preserving subpaths like `/stalker_portal/`).
+ */
+export function validateStalkerStreamUrl(rawCmd: string, portalEndpoint?: string): Result<string> {
   const url = stripStalkerCommandPrefix(rawCmd);
   if (url.length === 0) return err(elvError('playback', 'stream-unavailable'));
   if (url.length > MAX_STREAM_URL_LENGTH || CONTROL_OR_SPACE_RE.test(url)) {
     return err(elvError('playback', 'unsupported-scheme'));
   }
-  if (!HTTP_SCHEME_RE.test(url) || originOf(url) === undefined) {
+  if (url.startsWith('//')) {
+    return err(elvError('playback', 'unsupported-scheme'));
+  }
+
+  let resolved = url;
+  if (HTTP_SCHEME_RE.test(url)) {
+    if (originOf(url) === undefined) return err(elvError('playback', 'unsupported-scheme'));
+  } else if (ANY_SCHEME_PREFIX_RE.test(url)) {
+    return err(elvError('playback', 'unsupported-scheme'));
+  } else {
+    const base = resolvePortalInstallBase(portalEndpoint);
+    if (base === undefined) return err(elvError('playback', 'unsupported-scheme'));
+    try {
+      let target: URL;
+      if (url.startsWith('?')) {
+        target = new URL(url, base.baseUrl);
+      } else if (url.startsWith('/')) {
+        const lowerUrl = url.toLowerCase();
+        const lowerPrefix = `${base.basePath.toLowerCase()}/`;
+        if (base.basePath.length > 0 && !lowerUrl.startsWith(lowerPrefix)) {
+          target = new URL(url.slice(1), base.baseUrl);
+        } else {
+          target = new URL(url, base.origin);
+        }
+      } else {
+        target = new URL(url, base.baseUrl);
+      }
+      if (target.origin !== base.origin) return err(elvError('playback', 'unsupported-scheme'));
+      resolved = target.toString();
+    } catch {
+      return err(elvError('playback', 'unsupported-scheme'));
+    }
+  }
+
+  if (resolved.length > MAX_STREAM_URL_LENGTH || CONTROL_OR_SPACE_RE.test(resolved)) {
     return err(elvError('playback', 'unsupported-scheme'));
   }
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(resolved);
     if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.hostname === '') {
       return err(elvError('playback', 'unsupported-scheme'));
     }
   } catch {
     return err(elvError('playback', 'unsupported-scheme'));
   }
-  return ok(url);
+  return ok(resolved);
 }
 
 function daysInMonth(year: number, month: number): number {
   const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
   return month === 2 && leap ? 29 : (DAYS_IN_MONTH[month - 1] as number);
+}
+
+function parseFixedTimezoneOffsetMinutes(zone: string): number | undefined {
+  const upper = zone.toUpperCase();
+  if (upper === 'UTC' || upper === 'GMT' || upper === 'Z') return 0;
+  const m = FIXED_TZ_OFFSET_RE.exec(zone);
+  if (m === null) return undefined;
+  const sign = m[1] === '-' ? -1 : 1;
+  const hours = Number(m[2]);
+  const minutes = m[3] === undefined ? 0 : Number(m[3]);
+  if (hours > 14 || minutes > 59 || (hours === 14 && minutes > 0)) return undefined;
+  return sign * (hours * 60 + minutes);
 }
 
 function tzFormatter(timeZone: string): Intl.DateTimeFormat | null {
@@ -203,7 +415,9 @@ export function parseStalkerTimestampMs(value: unknown, timeZone?: string): numb
     return wallMs - sign * (offH * 60 + offM) * 60_000;
   }
   const zone = timeZone?.trim();
-  if (!zone || zone.toUpperCase() === 'UTC' || m[4] === undefined) return wallMs;
+  if (!zone || m[4] === undefined) return wallMs;
+  const fixedOffsetMin = parseFixedTimezoneOffsetMinutes(zone);
+  if (fixedOffsetMin !== undefined) return wallMs - fixedOffsetMin * 60_000;
   const fmt = tzFormatter(zone);
   if (fmt === null) return wallMs;
   const offset1 = tzWallAsUtcMs(fmt, wallMs) - wallMs;

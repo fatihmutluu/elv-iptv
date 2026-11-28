@@ -266,6 +266,8 @@ export function SourceAdvancedOverlay({
             `source-network-dns-ipv4-${source.id}`,
             `source-network-dns-ipv6-${source.id}`,
             `source-network-host-${source.id}`,
+            `source-network-user-agent-${source.id}`,
+            `source-network-stream-user-agent-${source.id}`,
             `source-network-save-${source.id}`,
           ],
     [source],
@@ -319,7 +321,7 @@ export function SourceAdvancedOverlay({
         }
         return;
       }
-      // view === 'network': indices 0..2 DNS, 3 host input, 4 save
+      // view === 'network': indices 0..2 DNS, 3 host, 4 userAgent, 5 streamUserAgent, 6 save
       const maxIdx = networkFocusIds.length - 1;
       if (input.key === 'right' && focusedIndex < 2) {
         setFocusedIndex((i) => i + 1);
@@ -333,11 +335,13 @@ export function SourceAdvancedOverlay({
         if (focusedIndex === 0) networkEditor.setDnsFamily('system');
         else if (focusedIndex === 1) networkEditor.setDnsFamily('ipv4');
         else if (focusedIndex === 2) networkEditor.setDnsFamily('ipv6');
-        else if (focusedIndex === 3) {
-          const hostId = `source-network-host-${source.id}`;
-          setEditingInputId(hostId);
-          inputRefs.current.get(hostId)?.focus();
-        } else if (focusedIndex === 4) {
+        else if (focusedIndex === 3 || focusedIndex === 4 || focusedIndex === 5) {
+          const fieldId = networkFocusIds[focusedIndex];
+          if (fieldId !== undefined) {
+            setEditingInputId(fieldId);
+            inputRefs.current.get(fieldId)?.focus();
+          }
+        } else if (focusedIndex === 6) {
           void networkEditor.save(source);
         }
       }
@@ -351,7 +355,7 @@ export function SourceAdvancedOverlay({
       handleToggleProfile,
       menuEntries,
       networkEditor,
-      networkFocusIds.length,
+      networkFocusIds,
       profiles,
       source,
       view,

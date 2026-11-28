@@ -12,8 +12,8 @@ import {
   sanitizeHeaderName,
   sanitizeHeaderValue,
   setSafeHeader,
+  streamTransportHeaders,
   type TransportSettings,
-  transportHeaders,
   validateHostOverride,
 } from '@elv/domain';
 import { createXtreamClient, resolveXtreamBaseUrl, type XtreamClient } from '@elv/sources';
@@ -276,7 +276,7 @@ function applyStoredHeadersJson(
 
 function buildSourceStreamMeta(source: SourceRecord): SourceStreamMeta {
   const transport = source.settings.transport;
-  const headers = transportHeaders(transport);
+  const headers = streamTransportHeaders(transport);
   const fp = source.settings.credentialFingerprint;
   const accountKey = resolveAccountPoolKey({
     id: source.id,
@@ -472,6 +472,11 @@ export function createPlaytimeResolverCache(deps: {
         if (!stalkerRes.ok) return stalkerRes;
         primaryUrl = stalkerRes.value.url;
         primaryHostOverride = stalkerRes.value.hostOverride;
+        if (stalkerRes.value.headers !== undefined) {
+          for (const [k, v] of Object.entries(stalkerRes.value.headers)) {
+            setSafeHeader(headers, k, v);
+          }
+        }
       } else if (play.urlTemplate === null) {
         const client = await xtreamClientFor(source);
         if (client === undefined) return err(elvError('storage', 'secret-missing'));

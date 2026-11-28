@@ -113,11 +113,20 @@ describe('createFetchHttpClient security invariants', () => {
     });
   });
 
-  it('strips all 5 credential headers on scheme downgrade and port changes', async () => {
-    for (const target of [
-      'http://origin.example/downgrade',
-      'https://origin.example:8443/alt-port',
-    ]) {
+  it('strips all 5 credential headers on scheme downgrade and cross-host redirects while preserving same-host port moves (NET-2)', async () => {
+    const reqHeaders = {
+      Authorization: 'Bearer tok',
+      'Proxy-Authorization': 'Basic p',
+      Cookie: 'a=b',
+      'X-Api-Key': 'k',
+      'X-Auth-Token': 't',
+      'User-Agent': 'ELV/1.0',
+    };
+    for (const [target, expected] of [
+      ['http://origin.example/downgrade', { 'User-Agent': 'ELV/1.0' }],
+      ['https://other.example/cross-host', { 'User-Agent': 'ELV/1.0' }],
+      ['https://origin.example:8443/alt-port', reqHeaders],
+    ] as const) {
       const seenHeaders: Array<Record<string, string> | undefined> = [];
       const fetchImpl: FetchLike = async (url, init) => {
         seenHeaders.push(init.headers ? { ...init.headers } : undefined);
@@ -131,18 +140,11 @@ describe('createFetchHttpClient security invariants', () => {
         return { status: 200, headers: headersOf({}), body: emptyBody() };
       };
       const res = await createFetchHttpClient(fetchImpl).get('https://origin.example/start', {
-        headers: {
-          Authorization: 'Bearer tok',
-          'Proxy-Authorization': 'Basic p',
-          Cookie: 'a=b',
-          'X-Api-Key': 'k',
-          'X-Auth-Token': 't',
-          'User-Agent': 'ELV/1.0',
-        },
+        headers: reqHeaders,
       });
       expect(res.ok).toBe(true);
       if (res.ok) await res.value.body[Symbol.asyncIterator]().return?.();
-      expect(seenHeaders[1]).toEqual({ 'User-Agent': 'ELV/1.0' });
+      expect(seenHeaders[1]).toEqual(expected);
     }
   });
 

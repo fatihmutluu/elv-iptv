@@ -539,8 +539,67 @@ describe('catch-up persistence, ItemRow.catchupDays, resolveCatchupStream, and f
           '901.ts',
         ].join('/'),
       );
+      expect(resolved.value.alternates).toEqual([
+        expect.objectContaining({
+          url: `https://panel.example:8443/portal/streaming/timeshift.php?username=${encodeURIComponent(xtUser)}&password=${encodeURIComponent(xtPass)}&stream=901&start=2026-11-24:10-00&duration=60&extension=ts`,
+        }),
+      ]);
     }
 
+    await svc.close();
+  });
+
+  it('applies streamUserAgent (over feed userAgent) on Xtream catch-up primary and legacy fallback alternate', async () => {
+    const { db } = testDb();
+    await openCatalog(db);
+    const secrets = memorySecrets();
+    const http = mockHttp({
+      'action=get_live_categories': JSON.stringify([{ category_id: '1', category_name: 'News' }]),
+      'action=get_vod_categories': '[]',
+      'action=get_series_categories': '[]',
+      'action=get_live_streams': JSON.stringify([
+        { stream_id: 42, name: 'News 1', category_id: '1', tv_archive: 1, tv_archive_duration: 3 },
+      ]),
+      'action=get_vod_streams': '[]',
+      'action=get_series': '[]',
+      'player_api.php': JSON.stringify({
+        user_info: { auth: 1, status: 'Active', allowed_output_formats: ['ts'] },
+        server_info: { timezone: 'UTC+3' },
+      }),
+    });
+    const svc = createCoalescedCatalog(
+      createCatalogService({
+        db,
+        secrets,
+        scheduler: immediateScheduler,
+        http,
+        clock: () => NOW,
+        newId: () => 'xt3',
+      }),
+    );
+    await svc.addSource({
+      kind: 'xtream',
+      name: 'Split UA Xtream',
+      server: 'https://panel.example/panel_api.php',
+      username: 'u1',
+      password: 'p1',
+      transport: { userAgent: 'FeedUA/1', streamUserAgent: 'CatchupPlayerUA/2' },
+    });
+    expect((await svc.importSource('xt3')).ok).toBe(true);
+    const res = await svc.resolveCatchupStream?.('x:xt3:live:42', {
+      startMs: START,
+      stopMs: STOP,
+    });
+    expect(res?.ok).toBe(true);
+    if (res?.ok) {
+      expect(res.value.headers['user-agent']).toBe('CatchupPlayerUA/2');
+      expect(res.value.url).toBe('https://panel.example/timeshift/u1/p1/60/2026-11-24:13-00/42.ts');
+      expect(res.value.alternates?.[0]?.url).toBe(
+        'https://panel.example/streaming/timeshift.php?username=u1&password=p1&stream=42&start=2026-11-24:13-00&duration=60&extension=ts',
+      );
+      expect(res.value.alternates?.[0]?.headers['user-agent']).toBe('CatchupPlayerUA/2');
+      expect(res.value.alternates?.[0]?.headers).not.toBe(res.value.headers);
+    }
     await svc.close();
   });
 });

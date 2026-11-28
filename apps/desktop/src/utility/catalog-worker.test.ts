@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CATALOG_DB_MMAP_SIZE_BYTES,
   CATALOG_WORKER_AUTO_SELECT_FAMILY_TIMEOUT_MS,
   configureCatalogWorkerRuntime,
   openHardenedCatalogDatabase,
@@ -19,6 +20,35 @@ describe('configureCatalogWorkerRuntime', () => {
     expect(CATALOG_WORKER_AUTO_SELECT_FAMILY_TIMEOUT_MS).toBe(2_500);
     expect(enableCompileCache).toHaveBeenCalledTimes(1);
     expect(setDefaultAutoSelectFamilyAttemptTimeout).toHaveBeenCalledWith(2_500);
+  });
+
+  it('respects an explicit --network-family-autoselection-attempt-timeout override in execArgv or NODE_OPTIONS (M5)', () => {
+    const setTimeout1 = vi.fn();
+    configureCatalogWorkerRuntime({
+      enableCompileCache: vi.fn(),
+      setDefaultAutoSelectFamilyAttemptTimeout: setTimeout1,
+      execArgv: ['--network-family-autoselection-attempt-timeout=750'],
+      nodeOptions: '',
+    });
+    expect(setTimeout1).not.toHaveBeenCalled();
+
+    const setTimeout2 = vi.fn();
+    configureCatalogWorkerRuntime({
+      enableCompileCache: vi.fn(),
+      setDefaultAutoSelectFamilyAttemptTimeout: setTimeout2,
+      execArgv: [],
+      nodeOptions: '--max-old-space-size=4096 --network-family-autoselection-attempt-timeout=1000',
+    });
+    expect(setTimeout2).not.toHaveBeenCalled();
+
+    const setTimeout3 = vi.fn();
+    configureCatalogWorkerRuntime({
+      enableCompileCache: vi.fn(),
+      setDefaultAutoSelectFamilyAttemptTimeout: setTimeout3,
+      execArgv: ['--network-family-autoselection-attempt-timeout', '500'],
+      nodeOptions: '',
+    });
+    expect(setTimeout3).not.toHaveBeenCalled();
   });
 
   it('swallows compile-cache or timeout errors safely on runtimes without support', () => {
@@ -87,5 +117,30 @@ describe('openHardenedCatalogDatabase', () => {
       }),
     ).not.toThrow();
     expect(chmod).toHaveBeenCalledTimes(3);
+  });
+
+  it('applies 256 MiB PRAGMA mmap_size on desktop database open and swallows errors best-effort', () => {
+    expect(CATALOG_DB_MMAP_SIZE_BYTES).toBe(268_435_456);
+    const pragma = vi.fn();
+    const fakeDb = { pragma } as unknown as Database.Database;
+    openHardenedCatalogDatabase('/tmp/elv-user-data/catalog.db', {
+      platform: 'win32',
+      mkdir: vi.fn() as unknown as typeof import('node:fs').mkdirSync,
+      openDb: () => fakeDb,
+    });
+    expect(pragma).toHaveBeenCalledWith('mmap_size = 268435456');
+
+    const throwingDb = {
+      pragma: () => {
+        throw new Error('unsupported');
+      },
+    } as unknown as Database.Database;
+    expect(() =>
+      openHardenedCatalogDatabase('/tmp/elv-user-data/catalog.db', {
+        platform: 'win32',
+        mkdir: vi.fn() as unknown as typeof import('node:fs').mkdirSync,
+        openDb: () => throwingDb,
+      }),
+    ).not.toThrow();
   });
 });

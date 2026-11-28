@@ -267,10 +267,17 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
       });
       await waitFor(() => expect(screen.getByTestId('sources-input-xmltv-timezone')).toBeTruthy());
 
-      // Down through guide-url, user-agent, referer -> input-xmltv-timezone -> toggle-legacy-tls
+      // Down through guide-url, user-agent, stream-user-agent, referer -> input-xmltv-timezone -> toggle-legacy-tls
       await act(async () => {
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
+        remote.tap(KEYCODE_DPAD_DOWN);
+      });
+      expect(
+        screen.getByTestId('sources-focus-input-stream-user-agent').props.accessibilityState
+          ?.selected,
+      ).toBe(true);
+      await act(async () => {
         remote.tap(KEYCODE_DPAD_DOWN);
         remote.tap(KEYCODE_DPAD_DOWN);
       });

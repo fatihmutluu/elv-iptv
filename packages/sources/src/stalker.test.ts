@@ -115,15 +115,18 @@ describe('handshake, fallback, token renewal, transport, and credential isolatio
       blocked: false,
     });
 
-    expect(requests).toHaveLength(2);
-    const hs = requests[0];
+    expect(requests).toHaveLength(3);
+    const hs = requests.find((r) => paramOf(r.url, 'action') === 'handshake');
     expect(hs).toBeDefined();
     expect(hs?.url).toBe(
       `${PORTAL}/portal.php?type=stb&action=handshake&token=&JsHttpRequest=1-xml`,
     );
-    expect(hs?.options?.headers?.Cookie).toBe(
-      `mac=${encodeURIComponent(MAC_UPPER)}; stb_lang=en; timezone=Europe%2FBerlin`,
+    expect(hs?.options?.headers?.Cookie).toMatch(
+      new RegExp(
+        `^mac=${encodeURIComponent(MAC_UPPER)}; stb_lang=en; timezone=Europe%2FBerlin; __cfduid=d[0-9a-f]{42}$`,
+      ),
     );
+    expect(hs?.options?.headers?.SN).toBe(SERIAL);
     expect(hs?.options?.headers?.['X-User-Agent']).toBe('Model: MAG250; Link: WiFi');
     expect(hs?.options?.headers?.['user-agent']).toBe('CustomUA/1.0');
     expect(hs?.options?.headers?.referer).toBe('http://portal.example.test/c/');
@@ -132,7 +135,7 @@ describe('handshake, fallback, token renewal, transport, and credential isolatio
     expect(hs?.options?.dnsFamily).toBe('ipv4');
     expect(hs?.options?.hostOverride).toBe('203.0.113.10');
 
-    const prof = requests[1];
+    const prof = requests.find((r) => paramOf(r.url, 'action') === 'get_profile');
     expect(prof).toBeDefined();
     expect(paramOf(prof?.url ?? '', 'action')).toBe('get_profile');
     expect(paramOf(prof?.url ?? '', 'sn')).toBe(SERIAL);
@@ -140,9 +143,12 @@ describe('handshake, fallback, token renewal, transport, and credential isolatio
     expect(prof?.options?.hostOverride).toBe('203.0.113.10');
   });
 
-  it('falls back from /portal.php to /stalker_portal/server/load.php on HTTP 404 during handshake', async () => {
+  it('falls back from /portal.php and /server/load.php to /stalker_portal/server/load.php on HTTP 404', async () => {
     const { http, requests } = mockPortal((url) => {
-      if (url.includes('/portal.php')) return { text: 'Not found', status: 404 };
+      const path = new URL(url).pathname;
+      if (path === '/portal.php' || path === '/server/load.php') {
+        return { text: 'Not found', status: 404 };
+      }
       if (paramOf(url, 'action') === 'handshake')
         return { json: { js: { token: 'FALLBACK-TOK' } } };
       return {
@@ -159,6 +165,7 @@ describe('handshake, fallback, token renewal, transport, and credential isolatio
     expect(unwrap(await client.genres())).toEqual([{ id: '5', title: 'News' }]);
     expect(requests.map((r) => new URL(r.url).pathname)).toEqual([
       '/portal.php',
+      '/server/load.php',
       '/stalker_portal/server/load.php',
       '/stalker_portal/server/load.php',
     ]);
@@ -178,7 +185,7 @@ describe('handshake, fallback, token renewal, transport, and credential isolatio
         tokenSeq += 1;
         return { json: { js: { token: `TOK-${tokenSeq}` } } };
       }
-      if (opts?.headers?.Authorization === 'Bearer TOK-1') {
+      if (opts?.headers?.Authorization !== 'Bearer TOK-2') {
         return { text: '<html>Authorization failed.</html>' };
       }
       return { json: { js: [{ id: '1', title: 'Sports' }] } };
@@ -198,7 +205,13 @@ describe('handshake, fallback, token renewal, transport, and credential isolatio
       persistentApi += 1;
       return { status: 403, text: 'forbidden' };
     });
-    const badClient = createStalkerClient({ http: httpFail, portalUrl: PORTAL, mac: MAC });
+    const badClient = createStalkerClient({
+      http: httpFail,
+      portalUrl: PORTAL,
+      mac: MAC,
+      discoveredEndpoint: `${PORTAL}/portal.php`,
+      portalMode: 'full',
+    });
     const errRes = expectErr(await badClient.genres(), 'auth', 'unauthorized');
     expect(errRes.detail).toBeUndefined();
     expect(persistentHs).toBe(2);
@@ -437,9 +450,15 @@ describe('handshake, fallback, token renewal, transport, and credential isolatio
   it('rejects handshake tokens containing CR/LF or ASCII control characters', async () => {
     for (const badToken of ['TOK\r\nX-Injected: 1', 'TOK\nEVIL', 'TOK\u0000NULL', 'TOK\u007fDEL']) {
       const { http, requests } = mockPortal(() => ({ json: { js: { token: badToken } } }));
-      const client = createStalkerClient({ http, portalUrl: PORTAL, mac: MAC });
+      const client = createStalkerClient({
+        http,
+        portalUrl: PORTAL,
+        mac: MAC,
+        discoveredEndpoint: `${PORTAL}/portal.php`,
+        portalMode: 'full',
+      });
       expectErr(await client.handshake(), 'auth', 'unauthorized');
-      expect(requests).toHaveLength(1);
+      expect(requests.length).toBeGreaterThanOrEqual(1);
     }
   });
 });

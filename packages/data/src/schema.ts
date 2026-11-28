@@ -28,6 +28,10 @@ export {
 
 /** Bytes a write-ahead log is truncated back to after a checkpoint (64 MiB). */
 const JOURNAL_SIZE_LIMIT = 67_108_864;
+/** SQLite page cache budget per connection (~64 MiB; negative values are KiB). */
+const CACHE_SIZE_KIB = -64_000;
+/** Row-sampling ceiling per index for bounded `ANALYZE` / `PRAGMA optimize`. */
+const ANALYSIS_LIMIT = 400;
 
 /** Pragmas applied on every open, before migrations. `journal_mode` reports `memory` for in-memory databases. */
 export const OPEN_PRAGMAS = [
@@ -37,6 +41,8 @@ export const OPEN_PRAGMAS = [
   'PRAGMA foreign_keys = ON',
   'PRAGMA temp_store = MEMORY',
   `PRAGMA journal_size_limit = ${JOURNAL_SIZE_LIMIT}`,
+  `PRAGMA cache_size = ${CACHE_SIZE_KIB}`,
+  `PRAGMA analysis_limit = ${ANALYSIS_LIMIT}`,
 ];
 
 /** Ordered migrations; entry `i` upgrades a database from `user_version` `i` to `i + 1`. */

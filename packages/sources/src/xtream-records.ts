@@ -1,6 +1,8 @@
+import { type ElvError, elvError } from '@elv/domain';
 import { sanitizeArtworkUrl } from './artwork-url';
 import { decodeLegacyCodepage } from './codepages';
 import { firstProviderImdbId, firstProviderTmdbId } from './provider-ids';
+import { daysInMonth, resolveServerTimezone, wallTimeToUtcMs } from './timezone-offset';
 import { decodeUtf8 } from './utf8';
 import { mergeById, toNumber, toStrictInt, toText } from './xtream-normalize';
 import type {
@@ -24,10 +26,168 @@ export function isRaw(v: unknown): v is Raw {
 }
 
 const asRaw = (v: unknown): Raw => (isRaw(v) ? v : {});
-const ms = (seconds: unknown): number | undefined => {
-  const n = toNumber(seconds);
-  return n === undefined ? undefined : n * 1000;
-};
+
+const MS_EPOCH_THRESHOLD = 1e11;
+const FUTURE_GRACE_MS = 24 * 60 * 60 * 1000;
+const STRICT_NUMERIC_TS_RE = /^[+-]?\d+(?:\.\d+)?$/;
+const ISO_DATETIME_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[ Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|z|[+-]\d{2}:?\d{2})?$/;
+const ISO_DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const PLACEHOLDER_META_RE = /^(?:n\/a|null|none|-+)$/i;
+
+function parseIsoUtcMs(value: string): number | undefined {
+  const trimmed = value.trim();
+  const dt = ISO_DATETIME_RE.exec(trimmed);
+  if (dt !== null) {
+    const year = Number(dt[1]);
+    const month = Number(dt[2]);
+    const day = Number(dt[3]);
+    const hour = Number(dt[4]);
+    const minute = Number(dt[5]);
+    const second = Number(dt[6]);
+    if (year < 1000 || month < 1 || month > 12) return undefined;
+    if (day < 1 || day > daysInMonth(year, month) || hour > 23 || minute > 59 || second > 59) {
+      return undefined;
+    }
+    const wallMs = Date.UTC(year, month - 1, day, hour, minute, second);
+    const tzPart = dt[7];
+    if (tzPart === undefined || tzPart === 'Z' || tzPart === 'z') return wallMs;
+    const sign = tzPart[0] === '-' ? -1 : 1;
+    const digits = tzPart.slice(1).replace(':', '');
+    const offH = Number(digits.slice(0, 2));
+    const offM = Number(digits.slice(2, 4));
+    if (offH > 23 || offM > 59) return undefined;
+    return wallMs - sign * (offH * 60 + offM) * 60_000;
+  }
+  const d = ISO_DATE_ONLY_RE.exec(trimmed);
+  if (d !== null) {
+    const year = Number(d[1]);
+    const month = Number(d[2]);
+    const day = Number(d[3]);
+    if (year < 1000 || month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) {
+      return undefined;
+    }
+    return Date.UTC(year, month - 1, day, 0, 0, 0);
+  }
+  return undefined;
+}
+
+/**
+ * Parses an Xtream timestamp (`exp_date`, `added`, `last_modified`, EPG epoch) into epoch ms:
+ * rejects `<= 0`, preserves 12–13 digit ms epochs without `* 1000`, multiplies seconds by `1000`,
+ * parses ISO date/datetime strings as UTC, and optionally drops distant-future values (`> nowMs + 24h`).
+ */
+export function parseXtreamTimestampMs(
+  value: unknown,
+  opts?: { nowMs?: number; rejectFuture?: boolean },
+): number | undefined {
+  let ts: number | undefined;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    ts = value >= MS_EPOCH_THRESHOLD ? Math.trunc(value) : Math.trunc(value * 1000);
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return undefined;
+    if (STRICT_NUMERIC_TS_RE.test(trimmed)) {
+      const n = Number(trimmed);
+      if (!Number.isFinite(n) || n <= 0) return undefined;
+      ts = n >= MS_EPOCH_THRESHOLD ? Math.trunc(n) : Math.trunc(n * 1000);
+    } else {
+      ts = parseIsoUtcMs(trimmed);
+    }
+  }
+  if (ts === undefined || !Number.isFinite(ts) || ts <= 0) return undefined;
+  if (opts?.rejectFuture) {
+    const nowMs = opts.nowMs ?? Date.now();
+    if (ts > nowMs + FUTURE_GRACE_MS) return undefined;
+  }
+  return ts;
+}
+
+/** Returns `true` when `user_info.auth` explicitly marks the account unauthorized/disabled (`0`, `'0'`, `false`, `'false'`). */
+function isXtreamAuthDisabled(auth: unknown): boolean {
+  if (auth === 0 || auth === false) return true;
+  if (typeof auth === 'string') {
+    const lower = auth.trim().toLowerCase();
+    return lower === '0' || lower === 'false';
+  }
+  return false;
+}
+
+function normalizeXtreamAccountStatus(
+  userInfo: Raw,
+  explicitStatus: string | undefined,
+  expiresAt: number | undefined,
+  nowMs: number,
+): string {
+  if (isXtreamAuthDisabled(userInfo.auth)) return 'Disabled';
+  const raw =
+    explicitStatus !== undefined
+      ? explicitStatus.trim()
+      : typeof userInfo.status === 'string'
+        ? userInfo.status.trim()
+        : '';
+  const lower = raw.toLowerCase();
+  if (lower === 'expired') return 'Expired';
+  if (lower === 'disabled' || lower === 'banned') return 'Disabled';
+  if (lower === '' || lower === 'active') {
+    return expiresAt !== undefined && expiresAt < nowMs ? 'Expired' : 'Active';
+  }
+  return raw;
+}
+
+/**
+ * Classifies an Xtream `user_info` payload into an `auth/*` error when credentials, status
+ * (`Expired`, `Disabled`, `Banned`, custom non-active), or a past positive `exp_date` fail.
+ */
+export function classifyAccountFailure(info: Raw, nowMs = Date.now()): ElvError | undefined {
+  if (isXtreamAuthDisabled(info.auth)) return elvError('auth', 'invalid-credentials');
+  const status = typeof info.status === 'string' ? info.status.trim() : '';
+  const lower = status.toLowerCase();
+  if (lower === 'expired') return elvError('auth', 'account-expired');
+  if (lower === 'disabled' || lower === 'banned') return elvError('auth', 'account-disabled');
+  if (lower !== '' && lower !== 'active') {
+    const slug = lower.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return elvError('auth', `account-${slug || 'unknown'}`);
+  }
+  const expiresAt = parseXtreamTimestampMs(info.exp_date);
+  if (expiresAt !== undefined && expiresAt < nowMs) return elvError('auth', 'account-expired');
+  return undefined;
+}
+
+function toMetaText(value: unknown): string | undefined {
+  const text = toText(value);
+  return text === undefined || PLACEHOLDER_META_RE.test(text) ? undefined : text;
+}
+
+function toRating(value: unknown): number | undefined {
+  const n = toNumber(value);
+  return n !== undefined && n > 0 ? n : undefined;
+}
+
+function hasWhitespaceOrControl(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code <= 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function httpDirectSource(value: unknown): string | undefined {
+  const text = toText(value);
+  if (text === undefined || !HTTP_BACKDROP_RE.test(text) || hasWhitespaceOrControl(text)) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(text);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      parsed.hostname.length > 0
+      ? text
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function yearOf(...candidates: unknown[]): number | undefined {
   for (const c of candidates) {
@@ -91,12 +251,12 @@ function creditText(maxChars: number, ...candidates: unknown[]): string | undefi
   for (const candidate of candidates) {
     let text: string | undefined;
     if (typeof candidate === 'string') {
-      text = toText(candidate);
+      text = toMetaText(candidate);
     } else if (Array.isArray(candidate)) {
       const parts: string[] = [];
       for (const item of candidate) {
         if (typeof item === 'string') {
-          const part = toText(item);
+          const part = toMetaText(item);
           if (part !== undefined) parts.push(part);
         }
       }
@@ -109,19 +269,29 @@ function creditText(maxChars: number, ...candidates: unknown[]): string | undefi
   return undefined;
 }
 
-/** Maps `user_info`/`server_info`; the caller has already checked `auth` and `status`. */
-export function toAccount(userInfo: Raw, serverInfo: Raw, status: string): XtreamAccount {
+/** Maps `user_info`/`server_info`; normalizes status, unlimited `exp_date <= 0`, and non-IANA timezones. */
+export function toAccount(
+  userInfo: Raw,
+  serverInfo: Raw,
+  status?: string,
+  nowMs = Date.now(),
+): XtreamAccount {
+  const expiresAt = parseXtreamTimestampMs(userInfo.exp_date);
   const account: XtreamAccount = {
-    status,
+    status: normalizeXtreamAccountStatus(userInfo, status, expiresAt, nowMs),
     isTrial: toNumber(userInfo.is_trial) === 1,
     outputFormats: Array.isArray(userInfo.allowed_output_formats)
       ? userInfo.allowed_output_formats.map((f) => toText(f)).filter((f) => f !== undefined)
       : [],
   };
-  put(account, 'expiresAt', ms(userInfo.exp_date));
+  put(account, 'expiresAt', expiresAt);
   put(account, 'maxConnections', toNumber(userInfo.max_connections));
   put(account, 'activeConnections', toNumber(userInfo.active_cons));
-  put(account, 'serverTimezone', toText(serverInfo.timezone));
+  put(
+    account,
+    'serverTimezone',
+    resolveServerTimezone(serverInfo.timezone, serverInfo.time_now, serverInfo.timestamp_now),
+  );
   return account;
 }
 
@@ -155,8 +325,8 @@ export function toLive(rows: Raw[]): XtreamLive[] {
     const num = toStrictInt(r.num);
     if (num !== undefined && num > 0) live.num = num;
     put(live, 'icon', artworkUrl(r.stream_icon));
-    put(live, 'epgId', toText(r.epg_channel_id));
-    put(live, 'added', ms(r.added));
+    put(live, 'epgId', toMetaText(r.epg_channel_id));
+    put(live, 'added', parseXtreamTimestampMs(r.added, { rejectFuture: true }));
     out.push(live);
   }
   return mergeById(out);
@@ -176,13 +346,13 @@ export function toMovies(rows: Raw[]): XtreamMovie[] {
     };
     put(movie, 'icon', artworkUrl(r.stream_icon));
     put(movie, 'backdrop', backdropUrl(r.backdrop_path, r.backdrop));
-    put(movie, 'rating', toNumber(r.rating));
+    put(movie, 'rating', toRating(r.rating));
     put(movie, 'year', yearOf(r.year));
     put(movie, 'cast', creditText(MAX_CAST_CHARS, r.cast, r.actors));
     put(movie, 'director', creditText(MAX_DIRECTOR_CHARS, r.director));
     put(movie, 'providerImdbId', firstProviderImdbId(r.imdb_id, r.imdb));
     put(movie, 'providerTmdbId', firstProviderTmdbId(r.tmdb, r.tmdb_id));
-    put(movie, 'added', ms(r.added));
+    put(movie, 'added', parseXtreamTimestampMs(r.added, { rejectFuture: true }));
     out.push(movie);
   }
   return mergeById(out);
@@ -197,14 +367,14 @@ export function toSeries(rows: Raw[]): XtreamSeries[] {
     const series: XtreamSeries = { id, name: toText(r.name) ?? '', categoryIds: categoryIds(r) };
     put(series, 'cover', artworkUrl(r.cover));
     put(series, 'backdrop', backdropUrl(r.backdrop_path, r.backdrop));
-    put(series, 'plot', toText(r.plot));
-    put(series, 'rating', toNumber(r.rating));
+    put(series, 'plot', toMetaText(r.plot));
+    put(series, 'rating', toRating(r.rating));
     put(series, 'year', yearOf(r.year, r.release_date, r.releaseDate));
     put(series, 'cast', creditText(MAX_CAST_CHARS, r.cast, r.actors));
     put(series, 'director', creditText(MAX_DIRECTOR_CHARS, r.director));
     put(series, 'providerImdbId', firstProviderImdbId(r.imdb_id, r.imdb));
     put(series, 'providerTmdbId', firstProviderTmdbId(r.tmdb, r.tmdb_id));
-    put(series, 'lastModified', ms(r.last_modified));
+    put(series, 'lastModified', parseXtreamTimestampMs(r.last_modified, { rejectFuture: true }));
     out.push(series);
   }
   return mergeById(out);
@@ -278,15 +448,15 @@ export function toSeriesInfo(raw: Raw): XtreamSeriesInfo {
   return seriesInfo;
 }
 
-/** Maps `get_vod_info`. */
+/** Maps `get_vod_info`, preserving omitted `container_extension` as `undefined` and extracting valid HTTP(S) `direct_source`. */
 export function toVodInfo(raw: Raw): XtreamVodInfo {
   const info = asRaw(raw.info);
   const movieData = asRaw(raw.movie_data);
-  const vod: XtreamVodInfo = {
-    extension: toText(movieData.container_extension) ?? 'mp4',
-  };
+  const vod: XtreamVodInfo = {};
+  put(vod, 'extension', toText(movieData.container_extension));
+  put(vod, 'directSource', httpDirectSource(movieData.direct_source));
   put(vod, 'durationSec', toNumber(info.duration_secs));
-  put(vod, 'plot', toText(info.plot));
+  put(vod, 'plot', toMetaText(info.plot));
   put(vod, 'year', yearOf(info.year, info.releasedate));
   put(
     vod,
@@ -326,62 +496,10 @@ export function toVodInfo(raw: Raw): XtreamVodInfo {
 // biome-ignore lint/suspicious/noControlCharactersInRegex: detects binary garbage
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/;
 const BASE64_COMPACT_RE = /^[A-Za-z0-9+/]+={0,2}$/;
-const EPG_DATETIME_RE =
-  /^(\d{4})-(\d{2})-(\d{2})[ Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|z|[+-]\d{2}:?\d{2})?$/;
-const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
-const MAX_TZ_CACHE = 64;
-const TZ_FORMATTERS = new Map<string, Intl.DateTimeFormat | null>();
-
-function daysInMonth(year: number, month: number): number {
-  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  return month === 2 && leap ? 29 : (DAYS_IN_MONTH[month - 1] as number);
-}
-
-function tzFormatter(timeZone: string): Intl.DateTimeFormat | null {
-  if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') return null;
-  const cached = TZ_FORMATTERS.get(timeZone);
-  if (cached !== undefined) return cached;
-  let fmt: Intl.DateTimeFormat | null = null;
-  try {
-    fmt = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hourCycle: 'h23',
-    });
-  } catch {
-    fmt = null;
-  }
-  if (TZ_FORMATTERS.size >= MAX_TZ_CACHE) TZ_FORMATTERS.clear();
-  TZ_FORMATTERS.set(timeZone, fmt);
-  return fmt;
-}
-
-function tzWallAsUtcMs(fmt: Intl.DateTimeFormat, epochMs: number): number {
-  let y = 0;
-  let mo = 1;
-  let d = 1;
-  let h = 0;
-  let mi = 0;
-  let s = 0;
-  for (const part of fmt.formatToParts(new Date(epochMs))) {
-    if (part.type === 'year') y = Number(part.value);
-    else if (part.type === 'month') mo = Number(part.value);
-    else if (part.type === 'day') d = Number(part.value);
-    else if (part.type === 'hour') h = Number(part.value) % 24;
-    else if (part.type === 'minute') mi = Number(part.value);
-    else if (part.type === 'second') s = Number(part.value);
-  }
-  return Date.UTC(y, mo - 1, d, h, mi, s);
-}
 
 function parseEpgDatetime(value: unknown, serverTimezone?: string): number | undefined {
   if (typeof value !== 'string') return undefined;
-  const m = EPG_DATETIME_RE.exec(value.trim());
+  const m = ISO_DATETIME_RE.exec(value.trim());
   if (!m) return undefined;
   const year = Number(m[1]);
   const month = Number(m[2]);
@@ -404,14 +522,7 @@ function parseEpgDatetime(value: unknown, serverTimezone?: string): number | und
     if (offH > 23 || offM > 59) return undefined;
     return wallMs - sign * (offH * 60 + offM) * 60_000;
   }
-  const zone = serverTimezone?.trim();
-  if (!zone) return wallMs;
-  const fmt = tzFormatter(zone);
-  if (fmt === null) return wallMs;
-  const offset1 = tzWallAsUtcMs(fmt, wallMs) - wallMs;
-  const candidate1 = wallMs - offset1;
-  const offset2 = tzWallAsUtcMs(fmt, candidate1) - candidate1;
-  return wallMs - offset2;
+  return wallTimeToUtcMs(wallMs, serverTimezone);
 }
 
 function hasControlByte(bytes: Uint8Array): boolean {
@@ -472,16 +583,10 @@ export function toEpg(raw: Raw, serverTimezone?: string): XtreamEpgEntry[] {
   const out: XtreamEpgEntry[] = [];
   for (const e of Array.isArray(raw.epg_listings) ? raw.epg_listings : []) {
     if (!isRaw(e)) continue;
-    const rawStartTs = ms(e.start_timestamp);
-    const rawStopTs = ms(e.stop_timestamp);
     const start =
-      (rawStartTs !== undefined && (rawStartTs > 0 || e.start === undefined)
-        ? rawStartTs
-        : undefined) ?? parseEpgDatetime(e.start, serverTimezone);
+      parseXtreamTimestampMs(e.start_timestamp) ?? parseEpgDatetime(e.start, serverTimezone);
     const stop =
-      (rawStopTs !== undefined && (rawStopTs > 0 || (e.end === undefined && e.stop === undefined))
-        ? rawStopTs
-        : undefined) ??
+      parseXtreamTimestampMs(e.stop_timestamp) ??
       parseEpgDatetime(e.end, serverTimezone) ??
       parseEpgDatetime(e.stop, serverTimezone);
     if (start === undefined || stop === undefined || stop <= start) continue;
