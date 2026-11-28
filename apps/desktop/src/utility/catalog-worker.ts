@@ -1,9 +1,44 @@
 import { chmodSync, existsSync, mkdirSync } from 'node:fs';
+import * as nodeModule from 'node:module';
+import * as nodeNet from 'node:net';
 import { dirname } from 'node:path';
 import type { FetchLike } from '@elv/domain';
 import Database from 'better-sqlite3';
 import { createCatalogWorkerRuntime, type WorkerParentPortLike } from './catalog-worker-runtime.ts';
 import { createNodeGzipDecompressor } from './node-gzip-decompressor.ts';
+
+/** Raised Happy Eyeballs timeout (ms) so VPN / blackholed IPv6 links fall back cleanly to IPv4. */
+export const CATALOG_WORKER_AUTO_SELECT_FAMILY_TIMEOUT_MS = 2_500;
+
+/** Injectable Node runtime hooks used by {@link configureCatalogWorkerRuntime}. */
+export interface CatalogWorkerRuntimeHooks {
+  readonly enableCompileCache?: () => unknown;
+  readonly setDefaultAutoSelectFamilyAttemptTimeout?: (value: number) => void;
+}
+
+/**
+ * Enables Node's V8 bytecode compile cache and raises `net.setDefaultAutoSelectFamilyAttemptTimeout`
+ * to 2,500 ms inside the catalog utility worker isolate.
+ */
+export function configureCatalogWorkerRuntime(
+  hooks: CatalogWorkerRuntimeHooks = {
+    enableCompileCache: nodeModule.enableCompileCache,
+    setDefaultAutoSelectFamilyAttemptTimeout: nodeNet.setDefaultAutoSelectFamilyAttemptTimeout,
+  },
+): void {
+  try {
+    hooks.enableCompileCache?.();
+  } catch {
+    // Compile cache is optional on runtimes without support.
+  }
+  try {
+    hooks.setDefaultAutoSelectFamilyAttemptTimeout?.(CATALOG_WORKER_AUTO_SELECT_FAMILY_TIMEOUT_MS);
+  } catch {
+    // Best-effort Happy Eyeballs timeout boost for VPN/dual-stack links.
+  }
+}
+
+configureCatalogWorkerRuntime();
 
 /** Collaborators for {@link openHardenedCatalogDatabase}, injectable for unit tests. */
 export interface HardenedCatalogDbDeps {

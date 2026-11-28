@@ -6,10 +6,20 @@ import type {
   DesktopMediaCommand,
   DesktopMediaStateSnapshot,
 } from '../media-bridge.ts';
+import type { TrustedSenderEventLike } from '../trusted-sender.ts';
 import type { MpvEngine } from './engine.ts';
 import { type IpcMainLike, registerPlayerIpc, type WebContentsLike } from './ipc.ts';
 
-type Listener = (event: { sender: WebContentsLike }, ...args: unknown[]) => unknown;
+type Listener = (
+  event: TrustedSenderEventLike & { sender: WebContentsLike },
+  ...args: unknown[]
+) => unknown;
+
+function trustedEvent(sender: WebContentsLike) {
+  const frame: { url: string; top?: unknown } = { url: 'app://elv/index.html' };
+  frame.top = frame;
+  return { sender, senderFrame: frame };
+}
 
 function fakeIpcMain() {
   const handlers = new Map<string, Listener>();
@@ -23,9 +33,9 @@ function fakeIpcMain() {
   return {
     ipcMain,
     invoke: (channel: string, sender: WebContentsLike, ...args: unknown[]) =>
-      Promise.resolve(handlers.get(channel)?.({ sender }, ...args)),
+      Promise.resolve(handlers.get(channel)?.(trustedEvent(sender), ...args)),
     emit: (channel: string, sender: WebContentsLike, ...args: unknown[]) =>
-      void listeners.get(channel)?.({ sender }, ...args),
+      void listeners.get(channel)?.(trustedEvent(sender), ...args),
   };
 }
 

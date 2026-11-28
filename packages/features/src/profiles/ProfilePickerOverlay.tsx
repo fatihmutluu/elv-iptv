@@ -1,28 +1,29 @@
 import type { ProfileRecord } from '@elv/data';
-import type { KeyEvent, KeyInput } from '@elv/focus-core';
+import type { KeyEvent } from '@elv/focus-core';
 import {
   Icon,
   IconButton,
   TextEntryBoundary,
-  TvFocusAnchor,
   TvFocusGuideRegion,
   useFormFactor,
   useI18n,
-  useKeyInterpreter,
   useTheme,
-  useTvKeyInterceptor,
-  useTvKeySource,
   useViewport,
   webBackdropBlur,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { useProfile } from '../shared';
 import { ProfileAvatarTile } from './ProfileAvatarTile';
 import { ProfileFormCard, type ProfileFormValues } from './ProfileFormCard';
 import { ProfileTypeStepCard } from './ProfileTypeStepCard';
+import {
+  PickerTvKeyBridge,
+  SubModalTvBackBridge,
+  profilePickerStyles as styles,
+} from './profile-picker-helpers';
 
 /** Props of {@link ProfilePickerOverlay}. */
 export interface ProfilePickerOverlayProps {
@@ -40,42 +41,6 @@ type SubModalState =
   | { readonly kind: 'add-type'; readonly selectedIsKids: boolean }
   | { readonly kind: 'add-details'; readonly isKids: boolean }
   | { readonly kind: 'edit'; readonly profileId: string };
-
-const NOOP_TV_SUBSCRIBER = (): boolean => false;
-
-function useExclusiveTvKeySource(
-  onInput: ((input: KeyInput) => boolean | undefined) | ((input: KeyInput) => void),
-): void {
-  useTvKeySource(NOOP_TV_SUBSCRIBER);
-  useTvKeyInterceptor((input) => {
-    onInput(input);
-    return true;
-  });
-}
-
-function PickerTvKeyBridge({
-  onEvent,
-}: {
-  readonly onEvent: (event: KeyEvent) => boolean;
-}): ReactElement {
-  useKeyInterpreter(onEvent, { keySource: useExclusiveTvKeySource });
-  return <TvFocusAnchor testID="profile-picker-tv-focus-anchor" hasTVPreferredFocus />;
-}
-
-function SubModalTvBackBridge({ onBack }: { readonly onBack: () => void }): ReactElement {
-  const handleKey = useCallback(
-    (event: KeyEvent): boolean => {
-      if (event.kind === 'press' && event.key === 'back') {
-        onBack();
-        return true;
-      }
-      return false;
-    },
-    [onBack],
-  );
-  useKeyInterpreter(handleKey, { keySource: useExclusiveTvKeySource });
-  return <TvFocusAnchor testID="profile-submodal-tv-focus-anchor" hasTVPreferredFocus />;
-}
 
 /**
  * Redesigned Cinema Quietude v2 "Who's Watching?" overlay (`#15`, `#506`).
@@ -103,6 +68,7 @@ export function ProfilePickerOverlay({
     hasParentalPin,
     guardPinProfileId,
     parentalUnlocked,
+    parentalLoadError,
     pinDialog,
     createProfile,
     updateProfile,
@@ -134,16 +100,37 @@ export function ProfilePickerOverlay({
   const editingProfileId = editingProfile?.id ?? null;
   const editingProfileIdRef = useRef<string | null>(editingProfileId);
   editingProfileIdRef.current = editingProfileId;
+  const reverifiedKidsOffProfileIdRef = useRef<string | null>(null);
+  const reverifiedDeleteProfileIdRef = useRef<string | null>(null);
 
   const runProtected = useCallback(
     (action: () => void) => {
+      if (parentalLoadError) return;
       if (hasGuardPin && !parentalUnlocked) {
         requestParentalUnlock(action);
         return;
       }
       action();
     },
-    [hasGuardPin, parentalUnlocked, requestParentalUnlock],
+    [hasGuardPin, parentalLoadError, parentalUnlocked, requestParentalUnlock],
+  );
+
+  const runReverified = useCallback(
+    (action: () => void) => {
+      if (parentalLoadError) return;
+      if (hasGuardPin) {
+        openPinDialog({
+          mode: 'verify',
+          title: i18n.t('parental.reverifyTitle'),
+          profileId: guardPinProfileId ?? activeProfileId,
+          verifyOnly: true,
+          onSuccess: action,
+        });
+        return;
+      }
+      action();
+    },
+    [activeProfileId, guardPinProfileId, hasGuardPin, i18n, openPinDialog, parentalLoadError],
   );
 
   const openAddFlow = useCallback(() => {
@@ -157,6 +144,8 @@ export function ProfilePickerOverlay({
   const openEditModal = useCallback(
     (profile: ProfileRecord) => {
       runProtected(() => {
+        reverifiedKidsOffProfileIdRef.current = null;
+        reverifiedDeleteProfileIdRef.current = null;
         setConfirmDelete(false);
         setEditingPinState(null);
         setSubModal({ kind: 'edit', profileId: profile.id });
@@ -166,6 +155,8 @@ export function ProfilePickerOverlay({
   );
 
   const closeSubModal = useCallback(() => {
+    reverifiedKidsOffProfileIdRef.current = null;
+    reverifiedDeleteProfileIdRef.current = null;
     setConfirmDelete(false);
     setCreateWithPin(false);
     setEditingPinState(null);
@@ -318,8 +309,19 @@ export function ProfilePickerOverlay({
     [onClose, onSelectProfile, openAddFlow, openEditModal, profiles],
   );
 
+  const getProfileHasPin = useCallback(
+    (targetProfileId: string): boolean =>
+      editingPinState?.profileId === targetProfileId
+        ? editingPinState.hasPin
+        : targetProfileId === activeProfileId
+          ? hasParentalPin
+          : targetProfileId === guardPinProfileId,
+    [activeProfileId, editingPinState, guardPinProfileId, hasParentalPin],
+  );
+
   const handleSubmitCreate = useCallback(
     async (values: ProfileFormValues) => {
+      if (parentalLoadError) return;
       const execute = async () => {
         setBusy(true);
         try {
@@ -352,6 +354,7 @@ export function ProfilePickerOverlay({
       createWithPin,
       hasGuardPin,
       openPinDialog,
+      parentalLoadError,
       parentalUnlocked,
       runProtected,
     ],
@@ -359,6 +362,7 @@ export function ProfilePickerOverlay({
 
   const handleSubmitEdit = useCallback(
     async (profileId: string, values: ProfileFormValues) => {
+      if (parentalLoadError) return;
       const execute = async () => {
         setBusy(true);
         try {
@@ -368,6 +372,19 @@ export function ProfilePickerOverlay({
           setBusy(false);
         }
       };
+      const targetProfile = profiles.find((p) => p.id === profileId);
+      if (
+        targetProfile?.isKids &&
+        !values.isKids &&
+        hasGuardPin &&
+        reverifiedKidsOffProfileIdRef.current !== profileId
+      ) {
+        runReverified(() => {
+          reverifiedKidsOffProfileIdRef.current = profileId;
+          void execute();
+        });
+        return;
+      }
       if (hasGuardPin && !parentalUnlocked) {
         runProtected(() => {
           void execute();
@@ -376,11 +393,21 @@ export function ProfilePickerOverlay({
       }
       await execute();
     },
-    [closeSubModal, hasGuardPin, parentalUnlocked, runProtected, updateProfile],
+    [
+      closeSubModal,
+      hasGuardPin,
+      parentalLoadError,
+      parentalUnlocked,
+      profiles,
+      runProtected,
+      runReverified,
+      updateProfile,
+    ],
   );
 
   const handleConfirmDelete = useCallback(
     async (profileId: string) => {
+      if (parentalLoadError) return;
       const execute = async () => {
         setBusy(true);
         try {
@@ -390,6 +417,19 @@ export function ProfilePickerOverlay({
           setBusy(false);
         }
       };
+      const targetProfile = profiles.find((p) => p.id === profileId);
+      const targetHasPin = getProfileHasPin(profileId);
+      if (
+        (targetProfile?.isKids || targetHasPin) &&
+        hasGuardPin &&
+        reverifiedDeleteProfileIdRef.current !== profileId
+      ) {
+        runReverified(() => {
+          reverifiedDeleteProfileIdRef.current = profileId;
+          void execute();
+        });
+        return;
+      }
       if (hasGuardPin && !parentalUnlocked) {
         runProtected(() => {
           void execute();
@@ -398,7 +438,17 @@ export function ProfilePickerOverlay({
       }
       await execute();
     },
-    [closeSubModal, deleteProfile, hasGuardPin, parentalUnlocked, runProtected],
+    [
+      closeSubModal,
+      deleteProfile,
+      getProfileHasPin,
+      hasGuardPin,
+      parentalLoadError,
+      parentalUnlocked,
+      profiles,
+      runProtected,
+      runReverified,
+    ],
   );
 
   const refreshEditingPinState = useCallback(
@@ -413,16 +463,11 @@ export function ProfilePickerOverlay({
   );
 
   const buildEditPinSection = (targetProfileId: string) => {
-    const profileHasPin =
-      editingPinState?.profileId === targetProfileId
-        ? editingPinState.hasPin
-        : targetProfileId === activeProfileId
-          ? hasParentalPin
-          : targetProfileId === guardPinProfileId;
+    const profileHasPin = getProfileHasPin(targetProfileId);
     return {
       hasPin: profileHasPin,
       onSetPin: () =>
-        runProtected(() =>
+        runReverified(() =>
           openPinDialog({
             mode: 'create',
             profileId: targetProfileId,
@@ -432,15 +477,18 @@ export function ProfilePickerOverlay({
             },
           }),
         ),
-      onChangePin: () =>
+      onChangePin: () => {
+        if (parentalLoadError) return;
         openPinDialog({
           mode: 'change',
           profileId: targetProfileId,
           onSuccess: () => {
             refreshEditingPinState(targetProfileId);
           },
-        }),
-      onRemovePin: () =>
+        });
+      },
+      onRemovePin: () => {
+        if (parentalLoadError) return;
         openPinDialog({
           mode: 'remove',
           profileId: targetProfileId,
@@ -448,7 +496,8 @@ export function ProfilePickerOverlay({
             setEditingPinState({ profileId: targetProfileId, hasPin: false });
             refreshEditingPinState(targetProfileId);
           },
-        }),
+        });
+      },
     };
   };
 
@@ -644,7 +693,15 @@ export function ProfilePickerOverlay({
                         isKids: editingProfile.isKids,
                       }}
                       showKidsToggle
-                      onBeforeToggleKids={(_nextIsKids, commit) => {
+                      onBeforeToggleKids={(nextIsKids, commit) => {
+                        if (parentalLoadError) return;
+                        if (editingProfile.isKids && !nextIsKids && hasGuardPin) {
+                          runReverified(() => {
+                            reverifiedKidsOffProfileIdRef.current = editingProfile.id;
+                            commit();
+                          });
+                          return;
+                        }
                         runProtected(commit);
                       }}
                       submitting={busy}
@@ -652,7 +709,20 @@ export function ProfilePickerOverlay({
                       deleteSection={{
                         canDelete: profiles.length > 1,
                         confirming: confirmDelete,
-                        onRequestDelete: () => runProtected(() => setConfirmDelete(true)),
+                        onRequestDelete: () => {
+                          if (parentalLoadError) return;
+                          if (
+                            (editingProfile.isKids || getProfileHasPin(editingProfile.id)) &&
+                            hasGuardPin
+                          ) {
+                            runReverified(() => {
+                              reverifiedDeleteProfileIdRef.current = editingProfile.id;
+                              setConfirmDelete(true);
+                            });
+                            return;
+                          }
+                          runProtected(() => setConfirmDelete(true));
+                        },
                         onConfirmDelete: () => {
                           void handleConfirmDelete(editingProfile.id);
                         },
@@ -673,80 +743,3 @@ export function ProfilePickerOverlay({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 50,
-  },
-  closeAnchor: {
-    position: 'absolute',
-    zIndex: 51,
-  },
-  scroll: {
-    flex: 1,
-  },
-  centerContent: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 32,
-    gap: 36,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    gap: 28,
-    maxWidth: 880,
-  },
-  gridTv: {
-    gap: 36,
-    maxWidth: 1020,
-  },
-  addWrap: {
-    width: 132,
-    alignItems: 'center',
-    gap: 10,
-  },
-  addCircle: {
-    width: 120,
-    height: 120,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addLabel: {
-    textAlign: 'center',
-    maxWidth: 132,
-  },
-  subModalBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 52,
-  },
-  subModalContainer: {
-    width: '100%',
-    maxWidth: 500,
-    maxHeight: '86%',
-  },
-  subModalScroll: {
-    width: '100%',
-    flexGrow: 0,
-  },
-  subModalScrollContent: {
-    flexGrow: 1,
-  },
-});

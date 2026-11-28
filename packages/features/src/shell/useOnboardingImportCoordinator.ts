@@ -70,6 +70,9 @@ function mapImportErrorToMessageId(error: ElvError): MessageId {
     case 'storage':
     case 'playback':
       if (error.code === 'import-in-progress') return 'source.error.importInProgress';
+      if (error.code === 'secret-key-rotated' || error.code === 'storage/secret-key-rotated') {
+        return 'source.error.secretKeyRotated';
+      }
       if (
         error.code === 'secret-store-failed' ||
         error.code === 'secret-write-failed' ||

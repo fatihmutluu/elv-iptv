@@ -23,11 +23,17 @@ afterEach(async () => {
 function createHarness(downloadsRoot?: string) {
   const handlers = new Map<
     string,
-    (e: { sender: WebContentsLike }, ...args: unknown[]) => unknown
+    (
+      e: { sender: WebContentsLike; senderFrame?: { url?: string; top?: unknown } | null },
+      ...args: unknown[]
+    ) => unknown
   >();
   const listeners = new Map<
     string,
-    (e: { sender: WebContentsLike }, ...args: unknown[]) => unknown
+    (
+      e: { sender: WebContentsLike; senderFrame?: { url?: string; top?: unknown } | null },
+      ...args: unknown[]
+    ) => unknown
   >();
   const ipcMain: IpcMainLike = {
     handle: (ch, fn) => void handlers.set(ch, fn),
@@ -71,13 +77,16 @@ function createHarness(downloadsRoot?: string) {
     ...(downloadsRoot !== undefined ? { downloadsRoot } : {}),
   });
 
+  const senderFrame: { url: string; top?: unknown } = { url: 'app://elv/index.html' };
+  senderFrame.top = senderFrame;
+
   return {
     open: () =>
-      Promise.resolve(handlers.get(PLAYER_CHANNELS.open)?.({ sender })) as Promise<{
+      Promise.resolve(handlers.get(PLAYER_CHANNELS.open)?.({ sender, senderFrame })) as Promise<{
         engineId: string;
       }>,
     sendCommand: (engineId: string, command: unknown) =>
-      listeners.get(PLAYER_CHANNELS.command)?.({ sender }, { engineId, command }),
+      listeners.get(PLAYER_CHANNELS.command)?.({ sender, senderFrame }, { engineId, command }),
     calls,
     sent,
     logs,

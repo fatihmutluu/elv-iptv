@@ -71,6 +71,7 @@ const DEFAULT_BOUNDS: WindowBoundsDefaults = {
 
 const DEFAULT_DEBOUNCE_MS = 500;
 const MAX_STATE_FILE_BYTES = 16 * 1024;
+const MIN_VISIBLE_OVERLAP_PX = 100;
 
 const isFiniteNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
@@ -86,10 +87,13 @@ const isValidWorkArea = (rect: Rect | undefined): rect is Rect =>
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
-function intersectionArea(a: Rect, b: Rect): number {
+function intersectionMetrics(
+  a: Rect,
+  b: Rect,
+): { readonly overlapX: number; readonly overlapY: number; readonly area: number } {
   const overlapX = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
   const overlapY = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
-  return overlapX * overlapY;
+  return { overlapX, overlapY, area: overlapX * overlapY };
 }
 
 function resolveDefaults(defaults?: Partial<WindowBoundsDefaults>): WindowBoundsDefaults {
@@ -161,14 +165,23 @@ export function clampWindowBounds(
     height: saved.height as number,
   };
 
-  let target = primary;
+  let target: DisplayWorkArea | undefined;
   let bestArea = 0;
   for (const display of validDisplays) {
-    const area = intersectionArea(savedRect, display.workArea);
+    const displayWa = display.workArea;
+    if (savedRect.y < displayWa.y) continue;
+    const minOverlapX = Math.min(MIN_VISIBLE_OVERLAP_PX, displayWa.width);
+    const minOverlapY = Math.min(MIN_VISIBLE_OVERLAP_PX, displayWa.height);
+    const { overlapX, overlapY, area } = intersectionMetrics(savedRect, displayWa);
+    if (overlapX < minOverlapX || overlapY < minOverlapY) continue;
     if (area > bestArea) {
       bestArea = area;
       target = display;
     }
+  }
+
+  if (target === undefined) {
+    return centerOnWorkArea(primary.workArea, defs, isMaximized);
   }
 
   const wa = target.workArea;

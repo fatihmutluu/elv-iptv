@@ -1,4 +1,5 @@
-import { open, stat } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { lstat, open } from 'node:fs/promises';
 import { basename } from 'node:path';
 import {
   MAX_PICKED_PLAYLIST_BYTES,
@@ -6,8 +7,12 @@ import {
   SOURCES_CHANNELS,
 } from '../shared/sources-ipc.ts';
 import type { PendingPlaylistQueue } from './playlist-open.ts';
+import { assertTrustedSenderFrame, type TrustedSenderEventLike } from './trusted-sender.ts';
 
-type IpcHandler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
+type IpcHandler = (
+  event: TrustedSenderEventLike & { sender: unknown },
+  ...args: unknown[]
+) => unknown;
 
 interface SourcesIpcMainLike {
   handle(channel: string, listener: IpcHandler): void;
@@ -36,21 +41,41 @@ export interface SourcesIpcDeps<TWindow = unknown> {
   pendingPlaylists?: PendingPlaylistQueue;
   maxPlaylistBytes?: number;
   maxClipboardChars?: number;
+  devOrigin?: string | null;
+  log?(line: string): void;
 }
 
 const DEFAULT_MAX_CLIPBOARD_CHARS = 64 * 1024;
 const READ_CHUNK_BYTES = 64 * 1024;
 
 async function readBoundedPlaylistFile(filePath: string, maxBytes: number): Promise<Uint8Array> {
-  const info = await stat(filePath);
+  const info = await lstat(filePath);
+  if (info.isSymbolicLink()) {
+    throw new Error('Selected playlist path cannot be a symbolic link');
+  }
   if (!info.isFile()) {
     throw new Error('Selected playlist path is not a regular file');
   }
   if (info.size > maxBytes) {
     throw new Error(`Selected playlist exceeds ${maxBytes} byte size limit`);
   }
-  const handle = await open(filePath, 'r');
+  const noFollow = typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0;
+  const handle = await open(filePath, fsConstants.O_RDONLY | noFollow);
   try {
+    const fdStat = await handle.stat({ bigint: true });
+    const linkStat = await lstat(filePath, { bigint: true });
+    if (
+      linkStat.isSymbolicLink() ||
+      !linkStat.isFile() ||
+      !fdStat.isFile() ||
+      fdStat.dev !== linkStat.dev ||
+      fdStat.ino !== linkStat.ino
+    ) {
+      throw new Error('Selected playlist path changed or is not a regular file');
+    }
+    if (fdStat.size > BigInt(maxBytes)) {
+      throw new Error(`Selected playlist exceeds ${maxBytes} byte size limit`);
+    }
     const chunks: Uint8Array[] = [];
     let total = 0;
     while (true) {
@@ -148,7 +173,8 @@ export function registerSourcesIpc<TWindow = unknown>(deps: SourcesIpcDeps<TWind
     });
   };
 
-  ipcMain.handle(SOURCES_CHANNELS.readClipboardText, async () => {
+  ipcMain.handle(SOURCES_CHANNELS.readClipboardText, async (event) => {
+    assertTrustedSenderFrame(event, SOURCES_CHANNELS.readClipboardText, deps.devOrigin, deps.log);
     try {
       const raw = await readClipboardText();
       if (typeof raw !== 'string') return null;
@@ -160,8 +186,9 @@ export function registerSourcesIpc<TWindow = unknown>(deps: SourcesIpcDeps<TWind
     }
   });
 
-  ipcMain.handle(SOURCES_CHANNELS.pickPlaylistFile, async ({ sender }) => {
-    const win = getWindowFromSender(sender);
+  ipcMain.handle(SOURCES_CHANNELS.pickPlaylistFile, async (event) => {
+    assertTrustedSenderFrame(event, SOURCES_CHANNELS.pickPlaylistFile, deps.devOrigin, deps.log);
+    const win = getWindowFromSender(event.sender);
     const result = await showOpenDialog(win, {
       properties: ['openFile'],
       filters: [{ name: 'M3U Playlists', extensions: ['m3u', 'm3u8', 'gz'] }],
@@ -175,8 +202,14 @@ export function registerSourcesIpc<TWindow = unknown>(deps: SourcesIpcDeps<TWind
     return picked;
   });
 
-  ipcMain.handle(SOURCES_CHANNELS.consumePendingPlaylists, async ({ sender }) => {
-    subscribePendingSender(sender);
+  ipcMain.handle(SOURCES_CHANNELS.consumePendingPlaylists, async (event) => {
+    assertTrustedSenderFrame(
+      event,
+      SOURCES_CHANNELS.consumePendingPlaylists,
+      deps.devOrigin,
+      deps.log,
+    );
+    subscribePendingSender(event.sender);
     return deps.pendingPlaylists?.consumePending() ?? [];
   });
 

@@ -7,6 +7,12 @@ import {
 } from '../shared/diagnostics-ipc.ts';
 import { registerDiagnosticsIpc } from './diagnostics-ipc.ts';
 
+function trustedFrame(url = 'app://elv/index.html') {
+  const frame: { url: string; top: unknown } = { url, top: undefined };
+  frame.top = frame;
+  return frame;
+}
+
 function fakeIpcMain() {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   return {
@@ -21,7 +27,12 @@ function fakeIpcMain() {
     invoke: (ch: string, sender: unknown, ...args: unknown[]) => {
       const fn = handlers.get(ch);
       if (!fn) throw new Error(`missing handler ${ch}`);
-      return Promise.resolve(fn({ sender }, ...args));
+      return Promise.resolve(fn({ sender, senderFrame: trustedFrame() }, ...args));
+    },
+    invokeRaw: (ch: string, event: unknown, ...args: unknown[]) => {
+      const fn = handlers.get(ch);
+      if (!fn) throw new Error(`missing handler ${ch}`);
+      return Promise.resolve(fn(event, ...args));
     },
   };
 }
@@ -192,5 +203,45 @@ describe('registerDiagnosticsIpc (#226)', () => {
       await expect(ipc.invoke(DIAGNOSTICS_CHANNELS.copyText, {}, bad)).rejects.toThrow();
     }
     expect(copied).toHaveLength(1);
+  });
+
+  it('rejects untrusted origins, missing senderFrame, and subframes on all diagnostics channels', async () => {
+    const ipc = fakeIpcMain();
+    const readLogTail = vi.fn(async () => ['line']);
+    const writeClipboardText = vi.fn();
+    const log = vi.fn();
+
+    const dispose = registerDiagnosticsIpc({
+      ipcMain: ipc.ipcMain,
+      getWindowFromSender: () => null,
+      readLogTail,
+      showSaveDialog: vi.fn(async () => ({ canceled: true })),
+      writeFile: vi.fn(async () => undefined),
+      writeClipboardText,
+      log,
+    });
+
+    const top = trustedFrame();
+    const badEvents = [
+      { sender: {} },
+      { sender: {}, senderFrame: null },
+      { sender: {}, senderFrame: { url: 'app://elv/index.html', top } },
+      { sender: {}, senderFrame: trustedFrame('https://evil.example/') },
+    ];
+    for (const ev of badEvents) {
+      await expect(ipc.invokeRaw(DIAGNOSTICS_CHANNELS.readLogTail, ev, 10)).rejects.toThrow(
+        /untrusted sender/i,
+      );
+      await expect(
+        ipc.invokeRaw(DIAGNOSTICS_CHANNELS.exportReport, ev, { markdown: '# ok' }),
+      ).rejects.toThrow(/untrusted sender/i);
+      await expect(
+        ipc.invokeRaw(DIAGNOSTICS_CHANNELS.copyText, ev, { text: 'ok' }),
+      ).rejects.toThrow(/untrusted sender/i);
+    }
+    expect(readLogTail).not.toHaveBeenCalled();
+    expect(writeClipboardText).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledTimes(badEvents.length * 3);
+    dispose();
   });
 });

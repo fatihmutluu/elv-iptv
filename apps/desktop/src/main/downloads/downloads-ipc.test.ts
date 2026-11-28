@@ -135,7 +135,8 @@ describe('downloads IPC, preload bridge, and desktop port', () => {
       getBroadcastTargets: () => [trustedWindow, untrustedWindow],
     });
 
-    const trustedFrame = { url: 'app://elv/' };
+    const trustedFrame: { url: string; top?: unknown } = { url: 'app://elv/' };
+    trustedFrame.top = trustedFrame;
     const ipcRenderer: DownloadsIpcRendererLike = {
       invoke: (channel, ...args) => {
         const handler = handlers.get(channel);
@@ -274,7 +275,8 @@ describe('downloads IPC, preload bridge, and desktop port', () => {
       Promise.resolve(batchHandler?.({ senderFrame: { url: 'https://evil.example/' } }, [lazyEp])),
     ).rejects.toThrow('untrusted sender');
 
-    const trustedFrame = { url: 'app://elv/' };
+    const trustedFrame: { url: string; top?: unknown } = { url: 'app://elv/' };
+    trustedFrame.top = trustedFrame;
     const ipcRenderer: DownloadsIpcRendererLike = {
       invoke: (channel, ...args) => {
         const handler = handlers.get(channel);

@@ -42,6 +42,11 @@ export const enProfilesMessages = {
   'parental.pinLockedOut': 'Too many attempts. Try again in {seconds}s.',
   'parental.unlockTitle': 'Unlock parental controls',
   'parental.unlockButton': 'Unlock',
+  'parental.reverifyTitle': 'Verify parental PIN',
+  'parental.verifyButton': 'Verify',
+  'parental.loadErrorMessage':
+    'Parental controls could not be loaded. Restricted content is withheld until settings can be verified.',
+  'parental.retryLoad': 'Retry',
   'parental.lockNow': 'Lock now',
   'parental.unlockedBadge': 'Unlocked',
   'parental.lockedBadge': 'Locked',

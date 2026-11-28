@@ -56,6 +56,7 @@ export interface MultiViewStageProps {
   readonly clock?: PlaybackClock;
   readonly timers?: PlaybackTimers;
   readonly onOnlineStreamActiveChange?: ((active: boolean) => void) | undefined;
+  readonly onActiveSourceIdsChange?: ((sourceIds: ReadonlySet<string>) => void) | undefined;
   readonly onExit: (
     resumeTarget: PlayTarget | null,
     adoptedSession?: AdoptedPlaybackSession | null,
@@ -92,6 +93,7 @@ export function MultiViewStage({
   clock,
   timers,
   onOnlineStreamActiveChange,
+  onActiveSourceIdsChange,
   onExit,
 }: MultiViewStageProps): ReactElement {
   const theme = useTheme();
@@ -175,6 +177,21 @@ export function MultiViewStage({
       onOnlineStreamActiveChange?.(false);
     };
   }, [onOnlineStreamActiveChange]);
+
+  useEffect(() => {
+    if (!onActiveSourceIdsChange) return;
+    const activeIds = new Set<string>();
+    for (const tile of state.tiles) {
+      if (tile.sourceId.length > 0) activeIds.add(tile.sourceId);
+    }
+    onActiveSourceIdsChange(activeIds);
+  }, [onActiveSourceIdsChange, state.tiles]);
+
+  useEffect(() => {
+    return () => {
+      onActiveSourceIdsChange?.(new Set());
+    };
+  }, [onActiveSourceIdsChange]);
 
   const grid = computeMultiViewGridLayout(
     state.tiles.length,

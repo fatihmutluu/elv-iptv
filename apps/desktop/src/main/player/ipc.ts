@@ -15,6 +15,11 @@ import {
 } from '../../shared/player-ipc.ts';
 import type { DesktopMediaBridge, DesktopMediaCommand } from '../media-bridge.ts';
 import type { TaskbarAction, TaskbarController } from '../taskbar-controls.ts';
+import {
+  assertTrustedSenderFrame,
+  isTrustedSenderFrame,
+  type TrustedSenderEventLike,
+} from '../trusted-sender.ts';
 import type { DesktopDisplayRefreshController } from './display-refresh.ts';
 import type { MpvEngine } from './engine.ts';
 import { dispatchPlayerBridgeCommand } from './ipc-commands.ts';
@@ -54,7 +59,10 @@ export interface WebContentsLike {
   on(event: 'render-process-gone', listener: () => void): unknown;
 }
 
-type IpcListener = (event: { sender: WebContentsLike }, ...args: unknown[]) => unknown;
+type IpcListener = (
+  event: TrustedSenderEventLike & { sender: WebContentsLike },
+  ...args: unknown[]
+) => unknown;
 
 /** The part of Electron's `ipcMain` the player IPC uses. */
 export interface IpcMainLike {
@@ -118,6 +126,8 @@ export interface PlayerIpcDeps {
   pickSubtitleFile?(owner: WebContentsLike): Promise<ExternalSubtitleTrack | null>;
   /** Optional app-private managed downloads directory for scoped `file://` playback allowlist. */
   downloadsRoot?: string;
+  /** Optional dev-server origin permitted when unpackaged Metro Fast Refresh is active. */
+  devOrigin?: string | null;
   /**
    * Dev gate only: receives each valid `gate:report` line and the sender's engine (`undefined` when it has none). The
    * channel is not registered without it.
@@ -151,6 +161,12 @@ interface Entry {
  */
 export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   const { ipcMain, log, powerBlocker, mediaBridge, displayRefreshController } = deps;
+  const baseHost = {
+    ...(deps.onVideoAspectRatioChange === undefined
+      ? {}
+      : { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }),
+    ...(displayRefreshController === undefined ? {} : { displayRefreshController }),
+  };
   const resolveDisplayId = (owner: WebContentsLike): string | undefined =>
     deps.getDisplayId?.(owner);
   const parkedOrphanMs = Math.max(0, deps.parkedOrphanMs ?? DEFAULT_PARKED_ORPHAN_MS);
@@ -159,18 +175,18 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   };
   const powerCtl = createPlayerPowerBlockerController<WebContentsLike>({
-    ...(powerBlocker === undefined ? {} : { powerBlocker }),
-    ...(deps.bufferingReleaseMs === undefined
-      ? {}
-      : { bufferingReleaseMs: deps.bufferingReleaseMs }),
-    ...(deps.frozenClockReleaseMs === undefined
-      ? {}
-      : { frozenClockReleaseMs: deps.frozenClockReleaseMs }),
-    ...(deps.isWindowMinimized === undefined ? {} : { isWindowMinimized: deps.isWindowMinimized }),
-    ...(deps.onWindowVisibilityChange === undefined
-      ? {}
-      : { onWindowVisibilityChange: deps.onWindowVisibilityChange }),
     timers,
+    ...(powerBlocker ? { powerBlocker } : {}),
+    ...(deps.bufferingReleaseMs !== undefined
+      ? { bufferingReleaseMs: deps.bufferingReleaseMs }
+      : {}),
+    ...(deps.frozenClockReleaseMs !== undefined
+      ? { frozenClockReleaseMs: deps.frozenClockReleaseMs }
+      : {}),
+    ...(deps.isWindowMinimized ? { isWindowMinimized: deps.isWindowMinimized } : {}),
+    ...(deps.onWindowVisibilityChange
+      ? { onWindowVisibilityChange: deps.onWindowVisibilityChange }
+      : {}),
   });
   const entries = new Map<string, Entry>();
   const parkedTimers = new Map<string, unknown>();
@@ -487,16 +503,6 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       positionMs: 0,
       durationMs: 0,
     };
-    const mediaState: MediaBridgeState = {
-      status: 'Stopped',
-      isNavigating: false,
-      kind: 'live',
-      positionUs: 0,
-      durationUs: 0,
-      rate: 1,
-      volume: 1,
-      metadata: null,
-    };
 
     const entry: Entry = {
       owner: sender,
@@ -513,7 +519,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       unsubscribe: () => undefined,
       ...(taskbar === undefined ? {} : { taskbar }),
       taskbarState,
-      mediaState,
+      mediaState: stoppedMediaState(),
     };
 
     powerCtl.registerEngine(engineId, sender);
@@ -521,11 +527,8 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     entry.unsubscribe = engine.subscribe((event) =>
       handlePlayerEngineEvent(engineId, entry, event, {
         powerCtl,
-        ...(displayRefreshController === undefined ? {} : { displayRefreshController }),
+        ...baseHost,
         resolveDisplayId,
-        ...(deps.onVideoAspectRatioChange === undefined
-          ? {}
-          : { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }),
         syncTaskbar,
         pushMediaState,
         sendTo,
@@ -554,10 +557,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         ? { createTaskbarController: deps.createTaskbarController }
         : {}),
       syncTaskbar,
-      ...(deps.onVideoAspectRatioChange
-        ? { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }
-        : {}),
-      ...(displayRefreshController ? { displayRefreshController } : {}),
+      ...baseHost,
       resolveDisplayId,
       promoteMedia: (id) => {
         activeMediaEngineId = id;
@@ -575,10 +575,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       hasRetargetOwner: deps.retargetOwner !== undefined,
       log,
       ownedEntry,
-      ...(deps.onVideoAspectRatioChange
-        ? { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }
-        : {}),
-      ...(displayRefreshController ? { displayRefreshController } : {}),
+      ...baseHost,
       armParkedTimer,
     });
     if (ok && typeof engineId === 'string') powerCtl.setParked(engineId, true);
@@ -670,12 +667,9 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     }
     dispatchPlayerBridgeCommand(engineId, entry, command, {
       ...(mediaBridge === undefined ? {} : { mediaBridge }),
-      ...(displayRefreshController === undefined ? {} : { displayRefreshController }),
+      ...baseHost,
       resolveDisplayId,
       releasePowerBlocker,
-      ...(deps.onVideoAspectRatioChange === undefined
-        ? {}
-        : { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }),
       pushMediaState,
       isActiveMediaEngine: (id) => activeMediaEngineId === id,
       releaseEngine: release,
@@ -727,9 +721,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     dispatchDesktopMediaCommand(cmd, active, {
       ...(mediaBridge === undefined ? {} : { mediaBridge }),
       releasePowerBlocker,
-      ...(deps.onVideoAspectRatioChange === undefined
-        ? {}
-        : { onVideoAspectRatioChange: deps.onVideoAspectRatioChange }),
+      ...baseHost,
       pushMediaState,
       sendTo,
     });
@@ -738,31 +730,42 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   const offMediaCommand = mediaBridge?.onCommand(handleMediaCommand);
   deps.bindWarmUp?.((owner) => warmUpCtl.warmUp(owner));
 
-  ipcMain.handle(PLAYER_CHANNELS.open, onOpen);
-  ipcMain.handle(PLAYER_CHANNELS.close, onClose);
-  ipcMain.handle(PLAYER_CHANNELS.park, onPark);
-  ipcMain.handle(PLAYER_CHANNELS.adopt, onAdopt);
-  ipcMain.handle(PLAYER_CHANNELS.setPrimary, onSetPrimary);
-  ipcMain.handle(PLAYER_CHANNELS.setScrubbing, onSetScrubbing);
-  ipcMain.handle(PLAYER_CHANNELS.pickSubtitleFile, onPickSubtitleFile);
-  ipcMain.on(PLAYER_CHANNELS.command, onCommand);
-  ipcMain.on(PLAYER_CHANNELS.area, onArea);
-  if (deps.gateReport) ipcMain.on(PLAYER_CHANNELS.gateReport, onGate);
+  const offIpc: Array<() => void> = [];
+  const handleTrusted = (ch: string, fn: IpcListener): void => {
+    ipcMain.handle(ch, async (event, ...args) => {
+      assertTrustedSenderFrame(event, ch, deps.devOrigin, log);
+      return await fn(event, ...args);
+    });
+    offIpc.push(() => ipcMain.removeHandler(ch));
+  };
+  const onTrusted = (ch: string, fn: IpcListener): void => {
+    const wrapped: IpcListener = (event, ...args) => {
+      if (!isTrustedSenderFrame(event, deps.devOrigin)) {
+        log(`player ipc: rejected untrusted sender on ${ch}`);
+        return;
+      }
+      fn(event, ...args);
+    };
+    ipcMain.on(ch, wrapped);
+    offIpc.push(() => ipcMain.removeListener(ch, wrapped));
+  };
+
+  handleTrusted(PLAYER_CHANNELS.open, onOpen);
+  handleTrusted(PLAYER_CHANNELS.close, onClose);
+  handleTrusted(PLAYER_CHANNELS.park, onPark);
+  handleTrusted(PLAYER_CHANNELS.adopt, onAdopt);
+  handleTrusted(PLAYER_CHANNELS.setPrimary, onSetPrimary);
+  handleTrusted(PLAYER_CHANNELS.setScrubbing, onSetScrubbing);
+  handleTrusted(PLAYER_CHANNELS.pickSubtitleFile, onPickSubtitleFile);
+  onTrusted(PLAYER_CHANNELS.command, onCommand);
+  onTrusted(PLAYER_CHANNELS.area, onArea);
+  if (deps.gateReport) onTrusted(PLAYER_CHANNELS.gateReport, onGate);
 
   return () => {
     disposed = true;
     offMediaCommand?.();
     warmUpCtl.dispose();
-    ipcMain.removeHandler(PLAYER_CHANNELS.open);
-    ipcMain.removeHandler(PLAYER_CHANNELS.close);
-    ipcMain.removeHandler(PLAYER_CHANNELS.park);
-    ipcMain.removeHandler(PLAYER_CHANNELS.adopt);
-    ipcMain.removeHandler(PLAYER_CHANNELS.setPrimary);
-    ipcMain.removeHandler(PLAYER_CHANNELS.setScrubbing);
-    ipcMain.removeHandler(PLAYER_CHANNELS.pickSubtitleFile);
-    ipcMain.removeListener(PLAYER_CHANNELS.command, onCommand);
-    ipcMain.removeListener(PLAYER_CHANNELS.area, onArea);
-    ipcMain.removeListener(PLAYER_CHANNELS.gateReport, onGate);
+    for (const off of offIpc.splice(0)) off();
     for (const id of [...parkedTimers.keys()]) clearParkedTimer(id);
     for (const id of [...entries.keys()]) release(id);
     displayRefreshController?.restoreAll();

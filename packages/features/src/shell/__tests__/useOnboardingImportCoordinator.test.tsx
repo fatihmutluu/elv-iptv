@@ -185,4 +185,23 @@ describe('useOnboardingImportCoordinator', () => {
     await view.unmount();
     expect(signal?.aborted).toBe(true);
   });
+
+  it('maps storage/secret-key-rotated to actionable secretKeyRotated localized message', async () => {
+    const importSource = jest
+      .fn()
+      .mockResolvedValueOnce(err(elvError('storage', 'secret-key-rotated')));
+    const catalog = { importSource } as unknown as CatalogService;
+
+    let ctrl!: OnboardingImportCoordinator;
+    const view = await render(<Probe catalog={catalog} onRef={(c) => (ctrl = c)} />);
+
+    await act(async () => {
+      ctrl.startImport('src-rot');
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('status')).toHaveTextContent('error');
+    expect(screen.getByTestId('error')).toHaveTextContent('source.error.secretKeyRotated');
+
+    await view.unmount();
+  });
 });

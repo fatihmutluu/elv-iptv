@@ -1,6 +1,7 @@
 import { elvError, err, type HttpClient, ok, type Result, type SqlDriver } from '@elv/domain';
 import { buildCatchupUrl, normalizeCatchupMode, resolveXtreamBaseUrl } from '@elv/sources';
 import { sourceOfKey } from './queries-shared';
+import { isSecretKeyRotatedError } from './secret-errors';
 import { getSource, type SourceRecord } from './sources';
 import type { StalkerResolverState } from './stream-resolver-stalker';
 import type {
@@ -89,7 +90,13 @@ export async function resolveCatchupStreamInternal(
   }
 
   if (row.url_template === null) {
-    const creds = await deps.xtreamSecretFor(row.source_id);
+    let creds: XtreamSecret | undefined;
+    try {
+      creds = await deps.xtreamSecretFor(row.source_id);
+    } catch (error) {
+      if (isSecretKeyRotatedError(error)) return err(elvError('storage', 'secret-key-rotated'));
+      throw error;
+    }
     if (creds === undefined) return err(elvError('storage', 'secret-missing'));
     const streamId = Number(row.provider_id);
     if (row.provider_id === null || !Number.isFinite(streamId)) return notFound();
@@ -121,7 +128,13 @@ export async function resolveCatchupStreamInternal(
     });
   }
 
-  const resolver = await deps.resolverFor(row.source_id);
+  let resolver: StreamResolver;
+  try {
+    resolver = await deps.resolverFor(row.source_id);
+  } catch (error) {
+    if (isSecretKeyRotatedError(error)) return err(elvError('storage', 'secret-key-rotated'));
+    throw error;
+  }
   const liveUrl = resolver.resolve(row.url_template);
   if (liveUrl === undefined) {
     deps.evictResolver(row.source_id);

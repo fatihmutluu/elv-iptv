@@ -12,6 +12,7 @@ import {
   isArtworkSetLimitBytes,
   isSafeArtworkUrl,
 } from '../shared/artwork-ipc.ts';
+import { assertTrustedSenderFrame, type TrustedSenderEventLike } from './trusted-sender.ts';
 
 const DEFAULT_MAX_ARTWORK_ENTRY_BYTES = 4 * 1024 * 1024;
 const DEFAULT_ARTWORK_FETCH_TIMEOUT_MS = 8_000;
@@ -405,7 +406,10 @@ export function createDesktopArtworkCache(
 
 /** Subset of Electron `ipcMain` used by {@link registerArtworkIpc}. */
 export interface ArtworkIpcMainLike {
-  handle(channel: string, listener: (event: unknown, ...args: unknown[]) => unknown): void;
+  handle(
+    channel: string,
+    listener: (event: TrustedSenderEventLike, ...args: unknown[]) => unknown,
+  ): void;
   removeHandler(channel: string): void;
 }
 
@@ -413,15 +417,18 @@ export interface ArtworkIpcMainLike {
 export function registerArtworkIpc(deps: {
   readonly ipcMain: ArtworkIpcMainLike;
   readonly cache: DesktopArtworkCache;
+  readonly devOrigin?: string | null;
   readonly log: (line: string) => void;
 }): () => void {
-  const { ipcMain, cache, log } = deps;
+  const { ipcMain, cache, devOrigin, log } = deps;
 
-  ipcMain.handle(ARTWORK_CHANNELS.clear, async () => {
+  ipcMain.handle(ARTWORK_CHANNELS.clear, async (event) => {
+    assertTrustedSenderFrame(event, ARTWORK_CHANNELS.clear, devOrigin, log);
     await cache.clear();
   });
 
-  ipcMain.handle(ARTWORK_CHANNELS.resolve, async (_event, uri) => {
+  ipcMain.handle(ARTWORK_CHANNELS.resolve, async (event, uri) => {
+    assertTrustedSenderFrame(event, ARTWORK_CHANNELS.resolve, devOrigin, log);
     if (typeof uri !== 'string' || uri.length === 0) {
       log(`artwork ipc: dropped invalid ${ARTWORK_CHANNELS.resolve} payload`);
       return null;
@@ -429,7 +436,8 @@ export function registerArtworkIpc(deps: {
     return cache.resolve(uri);
   });
 
-  ipcMain.handle(ARTWORK_CHANNELS.setLimit, async (_event, maxBytes) => {
+  ipcMain.handle(ARTWORK_CHANNELS.setLimit, async (event, maxBytes) => {
+    assertTrustedSenderFrame(event, ARTWORK_CHANNELS.setLimit, devOrigin, log);
     if (!isArtworkSetLimitBytes(maxBytes)) {
       log(`artwork ipc: dropped invalid ${ARTWORK_CHANNELS.setLimit} payload`);
       return;
@@ -437,7 +445,10 @@ export function registerArtworkIpc(deps: {
     await cache.setLimitBytes(clampArtworkCacheLimitBytes(maxBytes));
   });
 
-  ipcMain.handle(ARTWORK_CHANNELS.stats, () => cache.stats());
+  ipcMain.handle(ARTWORK_CHANNELS.stats, async (event) => {
+    assertTrustedSenderFrame(event, ARTWORK_CHANNELS.stats, devOrigin, log);
+    return cache.stats();
+  });
 
   return () => {
     ipcMain.removeHandler(ARTWORK_CHANNELS.clear);

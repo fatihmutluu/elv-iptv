@@ -1,6 +1,7 @@
 import type { EngineEvent, LoadCommand } from '@elv/playback';
 import { describe, expect, it, vi } from 'vitest';
 import { PLAYER_CHANNELS, type PlayerUiEvent } from '../../shared/player-ipc.ts';
+import type { TrustedSenderEventLike } from '../trusted-sender.ts';
 import type { MpvEngine } from './engine.ts';
 import {
   type IpcMainLike,
@@ -10,7 +11,16 @@ import {
 } from './ipc.ts';
 import { createPowerBlocker } from './power-blocker.ts';
 
-type Listener = (event: { sender: WebContentsLike }, ...args: unknown[]) => unknown;
+type Listener = (
+  event: TrustedSenderEventLike & { sender: WebContentsLike },
+  ...args: unknown[]
+) => unknown;
+
+function trustedEvent(sender: WebContentsLike) {
+  const frame: { url: string; top?: unknown } = { url: 'app://elv/index.html' };
+  frame.top = frame;
+  return { sender, senderFrame: frame };
+}
 
 function fakeIpcMain() {
   const handlers = new Map<string, Listener>();
@@ -26,9 +36,9 @@ function fakeIpcMain() {
     handlers,
     listeners,
     invoke: (channel: string, sender: WebContentsLike, ...args: unknown[]) =>
-      Promise.resolve(handlers.get(channel)?.({ sender }, ...args)),
+      Promise.resolve(handlers.get(channel)?.(trustedEvent(sender), ...args)),
     emit: (channel: string, sender: WebContentsLike, ...args: unknown[]) =>
-      void listeners.get(channel)?.({ sender }, ...args),
+      void listeners.get(channel)?.(trustedEvent(sender), ...args),
   };
 }
 
@@ -307,72 +317,29 @@ describe('registerPlayerIpc', () => {
     const b = fakeContents(2);
     const ra = await open(t, a);
     await open(t, b);
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'load', cmd: LOAD },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'retry', attempt: 2 },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'play', attempt: 2 },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'pause', attempt: 2 },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'seek', attempt: 2, positionMs: 900 },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'setSpeed', attempt: 2, rate: 1.5 },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'selectAudioTrack', attempt: 2, id: 'a:2' },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'selectSubtitleTrack', attempt: 2, id: null },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'setVolume', volume: 75 },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'setAudioDelay', delaySec: 0.25 },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'setSubtitleDelay', delaySec: -0.5 },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'setAudioDevice', device: 'wasapi/usb' },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'setDeinterlace', enabled: true },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'setHwdec', profile: 'darwin-compat' },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'stop', attempt: 3 },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, {
-      engineId: ra.engineId,
-      command: { name: 'recreate', attempt: 3 },
-    });
-    t.emit(PLAYER_CHANNELS.command, a, { engineId: ra.engineId, command: { name: 'fullscreen' } });
-    t.emit(PLAYER_CHANNELS.command, a, { engineId: ra.engineId, command: { name: 'mute' } });
+    const commands: unknown[] = [
+      { name: 'load', cmd: LOAD },
+      { name: 'retry', attempt: 2 },
+      { name: 'play', attempt: 2 },
+      { name: 'pause', attempt: 2 },
+      { name: 'seek', attempt: 2, positionMs: 900 },
+      { name: 'setSpeed', attempt: 2, rate: 1.5 },
+      { name: 'selectAudioTrack', attempt: 2, id: 'a:2' },
+      { name: 'selectSubtitleTrack', attempt: 2, id: null },
+      { name: 'setVolume', volume: 75 },
+      { name: 'setAudioDelay', delaySec: 0.25 },
+      { name: 'setSubtitleDelay', delaySec: -0.5 },
+      { name: 'setAudioDevice', device: 'wasapi/usb' },
+      { name: 'setDeinterlace', enabled: true },
+      { name: 'setHwdec', profile: 'darwin-compat' },
+      { name: 'stop', attempt: 3 },
+      { name: 'recreate', attempt: 3 },
+      { name: 'fullscreen' },
+      { name: 'mute' },
+    ];
+    for (const command of commands) {
+      t.emit(PLAYER_CHANNELS.command, a, { engineId: ra.engineId, command });
+    }
     expect(t.engines[0]?.calls).toEqual([
       ['load', LOAD],
       ['retry', 2],

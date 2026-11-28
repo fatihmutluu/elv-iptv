@@ -1,5 +1,7 @@
 import { rmSync } from 'node:fs';
 import { lstat, readFile, stat } from 'node:fs/promises';
+import * as nodeModule from 'node:module';
+import * as nodeNet from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { SecretStore } from '@elv/domain';
@@ -30,11 +32,7 @@ import { CATALOG_CHANNELS } from '../shared/catalog-ipc.ts';
 import type { PresenterKind } from '../shared/player-ipc.ts';
 import { WINDOW_CHANNELS } from '../shared/window-ipc.ts';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
-import {
-  createDesktopArtworkCache,
-  type DesktopArtworkCache,
-  registerArtworkIpc,
-} from './artwork-cache.ts';
+import { createDesktopArtworkCache, registerArtworkIpc } from './artwork-cache.ts';
 import { serveArtworkRequest } from './artwork-protocol.ts';
 import { attachBrowserBackGuard } from './browser-back.ts';
 import { type CatalogCoordinator, createCatalogCoordinator } from './catalog/coordinator.ts';
@@ -48,10 +46,7 @@ import {
 import { parseDevServerUrl } from './dev-server.ts';
 import { registerDiagnosticsIpc } from './diagnostics-ipc.ts';
 import { createDesktopDownloadDeps } from './downloads/desktop-download-deps.ts';
-import {
-  createDesktopDownloadManager,
-  type DesktopDownloadManager,
-} from './downloads/download-manager.ts';
+import { createDesktopDownloadManager } from './downloads/download-manager.ts';
 import { registerDownloadsIpc } from './downloads/ipc.ts';
 import { getManagedDownloadsDir } from './downloads/managed-path.ts';
 import {
@@ -63,14 +58,13 @@ import {
   sampleRect,
   type VideoSampler,
 } from './gate.ts';
-import { type LanPairingIpcHandle, registerLanPairingIpc } from './lan-pairing-ipc.ts';
+import { registerLanPairingIpc } from './lan-pairing-ipc.ts';
 import { createDesktopLogger } from './log.ts';
 import {
   createMacOsMediaBridge,
   loadMacOsMediaAddon,
   queryMacScreensHaveSeparateSpaces,
 } from './macos-media.ts';
-import type { DesktopMediaBridge } from './media-bridge.ts';
 import { createMprisBridge } from './mpris/mpris-bridge.ts';
 import { createPendingPairDeepLinkQueue, extractPairDeepLinkFromArgv } from './pair-deep-link.ts';
 import { createDesktopDisplayRefreshController } from './player/display-refresh.ts';
@@ -98,6 +92,7 @@ import {
   POPOUT_STATE_FILENAME,
   type PopoutWindowController,
 } from './popout-window.ts';
+import { createQuitTeardown, type QuitTeardownDeps } from './quit-teardown.ts';
 import { lockDownSession, lockDownWebContents } from './security.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { createShellPrefsController, type ShellPrefsController } from './shell-prefs.ts';
@@ -138,7 +133,25 @@ import { attachRendererCrashRecovery, buildWindowOptions, WINDOW_TITLE } from '.
 declare const __ELV_DEV_SEED__: boolean;
 declare const __ELV_SYNC_SERVER_URL__: string;
 
+try {
+  nodeModule.enableCompileCache?.();
+} catch {
+  // Compile cache is optional on runtimes without support.
+}
+try {
+  nodeNet.setDefaultAutoSelectFamilyAttemptTimeout?.(2_500);
+} catch {
+  // Best-effort Happy Eyeballs timeout boost for VPN/dual-stack links.
+}
+
 const rendererDir = join(__dirname, '..', 'renderer');
+const runtimeEnv = () => ({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appPath: app.getAppPath(),
+  platform: process.platform,
+  arch: process.arch,
+});
 
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('disable-features', 'MediaSessionService,HardwareMediaKeyHandling');
@@ -157,12 +170,13 @@ let popoutController: PopoutWindowController | undefined;
 const enqueuePlaylistPaths = (paths: readonly string[]): void => {
   for (const p of paths) {
     void readValidatedPlaylistFile(p)
-      .then((file) => {
-        if (file) pendingPlaylists.enqueue(file);
-      })
+      .then((file) => (file ? pendingPlaylists.enqueue(file) : undefined))
       .catch(() => undefined);
   }
 };
+const senderWindow = (sender: unknown): BrowserWindow | null =>
+  BrowserWindow.fromWebContents(sender as WebContents);
+const allWebContents = (): WebContents[] => BrowserWindow.getAllWindows().map((w) => w.webContents);
 const resolveActivePresenterKind = (): PresenterKind => {
   const requested = choosePresenter(
     process.platform,
@@ -170,18 +184,13 @@ const resolveActivePresenterKind = (): PresenterKind => {
   );
   if (process.platform === 'darwin' && requested === 'canvas') {
     if ((process as NodeJS.Process & { mas?: boolean }).mas) return 'own-window';
-    const runtime = mpvRuntimePaths({
-      isPackaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      appPath: app.getAppPath(),
-      platform: process.platform,
-      arch: process.arch,
-    });
+    const runtime = mpvRuntimePaths(runtimeEnv());
     if (!runtime?.canvasExecutable || !runtime.ioSurfaceAddon) return 'own-window';
   }
   return requested;
 };
 const focusOrCreateWindow = (): void => {
+  if (!quitTeardown.hasRun()) isQuitting = false;
   if (mainWindow && !mainWindow.isDestroyed()) {
     restoreWindowFromTray(mainWindow);
     return;
@@ -238,6 +247,20 @@ const logger = createDesktopLogger({
   logPath: join(app.getPath('userData'), 'logs', 'elv-desktop.log'),
   mirrorStderr: true,
 });
+const teardownDeps: QuitTeardownDeps = {
+  windowBoundsControllers,
+  aspectRatioLockControllers,
+  displayRefresh: displayRefreshController,
+  powerBlocker,
+  log: logger.log,
+  clearRefs: () => {
+    warmUpPlayerOwner = undefined;
+    activeSyncService = undefined;
+    trayController = undefined;
+    popoutController = undefined;
+  },
+};
+const quitTeardown = createQuitTeardown(teardownDeps);
 
 /** Prints the gate line with main's measurements and quits: a gate run is one line long. */
 async function printGateLine(line: string, engine: MpvEngine | undefined): Promise<void> {
@@ -278,11 +301,8 @@ function serveRenderer(): void {
 function serveArtwork(cacheDir: string): void {
   protocol.handle(ARTWORK_PROTOCOL_SCHEME, (request) =>
     serveArtworkRequest(cacheDir, request.url, {
-      isFile: async (path) => {
-        const info = await lstat(path);
-        return info.isFile() && !info.isSymbolicLink();
-      },
-      readFile: (path) => readFile(path),
+      isFile: (path) => lstat(path).then((info) => info.isFile() && !info.isSymbolicLink()),
+      readFile,
     }),
   );
 }
@@ -305,35 +325,29 @@ function createWindow(): void {
   );
   mainWindow = window;
   window.on('close', (event) => {
-    if (!isQuitting && !isGate && shellPrefs?.getMinimizeToTray()) {
+    if (
+      !isQuitting &&
+      !isGate &&
+      shellPrefs?.getMinimizeToTray() &&
+      trayController?.ensureShown() === true
+    ) {
       event.preventDefault();
-      if (!window.webContents.isDestroyed()) {
-        window.webContents.send(WINDOW_CHANNELS.hiddenToTray);
-      }
+      if (!window.webContents.isDestroyed()) window.webContents.send(WINDOW_CHANNELS.hiddenToTray);
       void activeSyncService?.flushBeforeBackground(2_500);
       window.hide();
-      trayController?.ensureShown();
     }
   });
   attachWindowSyncLifecycle(window, () => activeSyncService);
   window.on('restore', () => {
-    if (!window.webContents.isDestroyed()) {
-      window.webContents.send(WINDOW_CHANNELS.windowRestored);
-    }
+    if (!window.webContents.isDestroyed()) window.webContents.send(WINDOW_CHANNELS.windowRestored);
   });
-  window.on('closed', () => {
-    if (mainWindow === window) mainWindow = undefined;
-  });
+  let boundsController: WindowBoundsController | undefined;
   if (saved) {
     if (saved.isMaximized) window.maximize();
-    const boundsController = createWindowBoundsController(window, statePath, screen, {
+    boundsController = createWindowBoundsController(window, statePath, screen, {
       initialState: saved,
     });
     windowBoundsControllers.add(boundsController);
-    window.on('closed', () => {
-      boundsController.dispose();
-      windowBoundsControllers.delete(boundsController);
-    });
   }
   const aspectLockController = createWindowAspectRatioLockController(window, screen, {
     gate: isGate,
@@ -341,20 +355,21 @@ function createWindow(): void {
   });
   aspectRatioLockControllers.set(window, aspectLockController);
   window.on('closed', () => {
+    if (mainWindow === window) mainWindow = undefined;
+    if (boundsController) {
+      boundsController.dispose();
+      windowBoundsControllers.delete(boundsController);
+    }
     aspectLockController.dispose();
     aspectRatioLockControllers.delete(window);
   });
   window.setMenuBarVisibility(false);
   lockDownWebContents(
     window.webContents,
-    devServerOrigin !== null ? { devOrigin: devServerOrigin } : undefined,
+    devServerOrigin ? { devOrigin: devServerOrigin } : undefined,
   );
   attachBrowserBackGuard(window);
-  attachRendererCrashRecovery(window, {
-    gate: isGate,
-    reloadUrl: appEntryUrl,
-    log: logger.log,
-  });
+  attachRendererCrashRecovery(window, { gate: isGate, reloadUrl: appEntryUrl, log: logger.log });
   window.on('page-title-updated', (event) => event.preventDefault());
   window.setTitle(WINDOW_TITLE);
   schedulePostPaintMpvWarmUp(window, {
@@ -365,6 +380,10 @@ function createWindow(): void {
   void window.loadURL(targetUrl);
 }
 
+const cloneFilters = (
+  filters: readonly { readonly name: string; readonly extensions: readonly string[] }[],
+) => filters.map((f) => ({ name: f.name, extensions: [...f.extensions] }));
+
 function showOpenDialogFor(
   win: BrowserWindow | undefined,
   options: {
@@ -374,12 +393,10 @@ function showOpenDialogFor(
 ) {
   const opts = {
     properties: [...options.properties] as Electron.OpenDialogOptions['properties'],
-    filters: options.filters.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
+    filters: cloneFilters(options.filters),
   };
   return win && !win.isDestroyed() ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts);
 }
-
-let mediaBridge: DesktopMediaBridge | undefined;
 
 /** Kills mpv launchers a crashed run left behind, then serves the player IPC. */
 async function startPlayer(): Promise<void> {
@@ -389,21 +406,13 @@ async function startPlayer(): Promise<void> {
   purgeOrphanedVodCacheDirs(vodCacheRoot);
   const macMediaAddon =
     process.platform === 'darwin'
-      ? loadMacOsMediaAddon(
-          resolveMacMediaAddonPath({
-            isPackaged: app.isPackaged,
-            resourcesPath: process.resourcesPath,
-            appPath: app.getAppPath(),
-            platform: process.platform,
-            arch: process.arch,
-          }),
-        )
+      ? loadMacOsMediaAddon(resolveMacMediaAddonPath(runtimeEnv()))
       : undefined;
   const screensHaveSeparateSpaces = (): boolean =>
     queryMacScreensHaveSeparateSpaces(macMediaAddon, process.platform);
-  if (gateQuery === null) {
-    mediaBridge =
-      process.platform === 'linux'
+  const mediaBridge =
+    gateQuery === null
+      ? process.platform === 'linux'
         ? createMprisBridge({
             onRaise: () => focusWindow(BrowserWindow.getAllWindows()[0]),
             onQuit: () => app.quit(),
@@ -415,13 +424,14 @@ async function startPlayer(): Promise<void> {
               globalShortcut,
               log: logger.log,
             })
-          : undefined;
-  }
-  disposePlayerIpc?.();
+          : undefined
+      : undefined;
+  teardownDeps.mediaBridge = mediaBridge;
+  teardownDeps.playerIpc?.();
   warmUpPlayerOwner = undefined;
-  const winOf = (owner: WebContentsLike) => BrowserWindow.fromWebContents(owner as WebContents);
-  disposePlayerIpc = registerPlayerIpc({
+  teardownDeps.playerIpc = registerPlayerIpc({
     ipcMain,
+    devOrigin: devServerOrigin,
     now: () => performance.now(),
     log: logger.log,
     powerBlocker,
@@ -430,18 +440,18 @@ async function startPlayer(): Promise<void> {
     },
     displayRefreshController,
     ...createPlayerWindowHostHooks({
-      getWindow: winOf,
+      getWindow: senderWindow,
       getDisplayId: (win) => String(screen.getDisplayMatching(win.getBounds()).id),
       onAspectRatio: (win, ratio) => aspectRatioLockControllers.get(win)?.setAspectRatio(ratio),
     }),
     ...(mediaBridge ? { mediaBridge } : {}),
     downloadsRoot: getManagedDownloadsDir(app.getPath('userData')),
     pickSubtitleFile: createSubtitleFilePicker<BrowserWindow>({
-      getWindowFromSender: (sender) => winOf(sender as WebContentsLike),
+      getWindowFromSender: senderWindow,
       showOpenDialog: showOpenDialogFor,
     }),
     createTaskbarController: (owner, onAction) => {
-      const window = process.platform === 'win32' ? winOf(owner) : null;
+      const window = process.platform === 'win32' ? senderWindow(owner) : null;
       return window && !window.isDestroyed()
         ? createTaskbarController({
             window,
@@ -455,13 +465,7 @@ async function startPlayer(): Promise<void> {
     createEngine: async (owner, onUi, engineId, getMultiViewTileCount) => {
       const window = BrowserWindow.fromWebContents(owner as WebContents);
       if (!window) throw new Error('the player needs an app window');
-      const runtime = mpvRuntimePaths({
-        isPackaged: app.isPackaged,
-        resourcesPath: process.resourcesPath,
-        appPath: app.getAppPath(),
-        platform: process.platform,
-        arch: process.arch,
-      });
+      const runtime = mpvRuntimePaths(runtimeEnv());
       if (!runtime) throw new Error('mpv runtime missing; run pnpm mpv fetch');
       const presenterOverride = parsePresenterOverride(process.env.ELV_DESKTOP_PRESENTER);
       const engine = await createEngineFor(window, {
@@ -485,16 +489,17 @@ async function startPlayer(): Promise<void> {
           engine,
           createVideoSampler({
             subscribe: (listener) => engine.subscribe(listener),
-            sample: () =>
-              window.isDestroyed() || window.webContents.isDestroyed()
-                ? Promise.resolve({ distinct: 0 })
-                : sampleArea(
-                    sampleRect(
-                      window.getContentBounds(),
-                      engine.lastArea,
-                      window.webContents.getZoomFactor(),
-                    ),
-                  ),
+            sample: () => {
+              if (window.isDestroyed() || window.webContents.isDestroyed()) {
+                return Promise.resolve({ distinct: 0 });
+              }
+              const rect = sampleRect(
+                window.getContentBounds(),
+                engine.lastArea,
+                window.webContents.getZoomFactor(),
+              );
+              return sampleArea(rect);
+            },
             setTimeout: (fn, ms) => setTimeout(fn, ms),
             delayMs: 1000,
           }),
@@ -507,21 +512,21 @@ async function startPlayer(): Promise<void> {
 
 function createSharedSecretStore(): SecretStore {
   const userData = app.getPath('userData');
-  const useTestCipher = !app.isPackaged && process.argv.includes('--elv-test-cipher');
-  const cipher = useTestCipher
-    ? createAesGcmTestCipher()
-    : createSafeStorageCipher(safeStorage, process.platform);
+  const cipher =
+    !app.isPackaged && process.argv.includes('--elv-test-cipher')
+      ? createAesGcmTestCipher()
+      : createSafeStorageCipher(safeStorage, process.platform);
   return createEncryptedFileSecretStore({
     filePath: join(userData, 'secrets.json'),
     cipher,
+    localStatePath: join(userData, 'Local State'),
+    log: logger.log,
   });
 }
 
 function broadcastCatalogChanged(): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
-      win.webContents.send(CATALOG_CHANNELS.changed);
-    }
+  for (const wc of allWebContents()) {
+    if (!wc.isDestroyed()) wc.send(CATALOG_CHANNELS.changed);
   }
 }
 
@@ -529,9 +534,8 @@ function startCatalog(
   secrets: SecretStore,
   elvServerUrl?: string,
 ): CatalogCoordinator<MessagePortMain> {
-  const userData = app.getPath('userData');
   const coordinator = createCatalogCoordinator<MessagePortMain>({
-    dbPath: join(userData, 'catalog.db'),
+    dbPath: join(app.getPath('userData'), 'catalog.db'),
     workerPath: join(__dirname, '..', 'utility', 'catalog-worker.js'),
     ...(elvServerUrl !== undefined && elvServerUrl.length > 0 ? { elvServerUrl } : {}),
     secrets,
@@ -540,9 +544,10 @@ function startCatalog(
     log: logger.log,
     onTelemetry: (event) => activeSyncService?.recordTelemetry(event),
   });
-  registerCatalogIpc({
+  teardownDeps.catalogIpc = registerCatalogIpc({
     ipcMain,
     coordinator,
+    devOrigin: devServerOrigin,
     log: logger.log,
   });
   if (__ELV_DEV_SEED__ && !app.isPackaged && gateQuery === null) {
@@ -571,21 +576,14 @@ hasLock = startSingleInstance(app, {
 });
 
 let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
-let artworkCache: DesktopArtworkCache | undefined;
-let lanPairingIpc: LanPairingIpcHandle | undefined;
-let disposePlayerIpc: (() => void) | undefined;
 let warmUpPlayerOwner: ((owner: WebContentsLike) => void) | undefined;
-let disposeDiagnosticsIpc: (() => void) | undefined;
-let disposeSyncIpc: (() => void) | undefined;
 let activeSyncService: DesktopSyncService | undefined;
-let disposeErrorTelemetry: (() => void) | undefined;
-let desktopDownloadManager: DesktopDownloadManager | undefined;
-let disposeDownloadsIpc: (() => void) | undefined;
 
 registerCatalogQuitHandler({
   app,
   getCoordinator: () => catalogCoordinator,
-  beforeShutdown: () => activeSyncService?.flushBeforeBackground(2_500) ?? Promise.resolve(),
+  beforeShutdown: () =>
+    quitTeardown.flushBeforeQuit([() => activeSyncService?.flushBeforeBackground(2_500)], 2_500),
   quit: () => app.quit(),
 });
 
@@ -601,15 +599,17 @@ if (hasLock) {
   void app.whenReady().then(async () => {
     if (app.isPackaged) Menu.setApplicationMenu(null);
     lockDownSession(session.defaultSession);
-    artworkCache = createDesktopArtworkCache({
+    const artworkCache = createDesktopArtworkCache({
       userDataDir: app.getPath('userData'),
       maxBytes: 512 * 1024 * 1024,
       onClear: () => session.defaultSession.clearCache(),
     });
+    teardownDeps.artworkCache = artworkCache;
     serveArtwork(artworkCache.dir);
-    registerArtworkIpc({
+    teardownDeps.artworkIpc = registerArtworkIpc({
       ipcMain,
       cache: artworkCache,
+      devOrigin: devServerOrigin,
       log: logger.log,
     });
     shellPrefs = createShellPrefsController(join(app.getPath('userData'), 'shell-prefs.json'));
@@ -619,12 +619,14 @@ if (hasLock) {
       icon: nativeImage.createFromBuffer(createTrayIconPng(32)),
       createTray: (icon) => new Tray(icon),
       buildMenu: (template) => Menu.buildFromTemplate(template),
-      onRestore: () => focusOrCreateWindow(),
+      onRestore: focusOrCreateWindow,
       onQuit: () => {
         isQuitting = true;
         app.quit();
       },
+      log: logger.log,
     });
+    teardownDeps.tray = trayController;
     popoutController = createPopoutWindowController({
       preloadPath: join(__dirname, '..', 'preload', 'preload.js'),
       appBaseUrl,
@@ -636,9 +638,11 @@ if (hasLock) {
       createWindow: (options) => new BrowserWindow(options),
       log: logger.log,
     });
-    registerWindowIpc({
+    teardownDeps.popout = popoutController;
+    teardownDeps.windowIpc = registerWindowIpc({
       ipcMain,
-      getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      devOrigin: devServerOrigin,
+      getWindowFromSender: senderWindow,
       onSetAspectRatioLock: (win, enabled) => {
         aspectRatioLockEnabled = enabled;
         aspectRatioLockControllers.get(win as BrowserWindow)?.setEnabled(enabled);
@@ -659,22 +663,29 @@ if (hasLock) {
       }).open,
       log: logger.log,
     });
-    registerSourcesIpc<BrowserWindow>({
+    teardownDeps.sourcesIpc = registerSourcesIpc<BrowserWindow>({
       ipcMain,
-      getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      devOrigin: devServerOrigin,
+      getWindowFromSender: senderWindow,
       pendingPlaylists,
       readClipboardText: () => clipboard.readText(),
       showOpenDialog: showOpenDialogFor,
+      log: logger.log,
     });
-    lanPairingIpc = registerLanPairingIpc({ ipcMain });
-    disposeDiagnosticsIpc = registerDiagnosticsIpc<BrowserWindow>({
+    teardownDeps.lanPairing = registerLanPairingIpc({
       ipcMain,
-      getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      devOrigin: devServerOrigin,
+      log: logger.log,
+    });
+    teardownDeps.diagnosticsIpc = registerDiagnosticsIpc<BrowserWindow>({
+      ipcMain,
+      devOrigin: devServerOrigin,
+      getWindowFromSender: senderWindow,
       readLogTail: (maxLines) => logger.readRedactedTail(maxLines),
       showSaveDialog: (win, options) => {
         const opts = {
           defaultPath: options.defaultPath,
-          filters: options.filters.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
+          filters: cloneFilters(options.filters),
         };
         return win && !win.isDestroyed()
           ? dialog.showSaveDialog(win, opts)
@@ -700,22 +711,19 @@ if (hasLock) {
       platform: `desktop-${process.platform}`,
       appVersion: app.getVersion(),
       mpvVersion: '0.42.0',
-      deviceProfile: collectDesktopDeviceProfile({
-        screen,
-        getLocale: () => app.getLocale(),
-      }),
+      deviceProfile: collectDesktopDeviceProfile({ screen, getLocale: () => app.getLocale() }),
       readLogTail: (maxLines) => logger.readRedactedTail(maxLines),
       getLocalSnapshot: catalogSnapshotBridge.getLocalSnapshot,
       applyMergedSnapshot: catalogSnapshotBridge.applyMergedSnapshot,
     });
     activeSyncService = syncService;
-    disposeErrorTelemetry = attachMainErrorTelemetry(() => activeSyncService);
-    disposeSyncIpc = registerSyncIpc({
+    teardownDeps.errorTelemetry = attachMainErrorTelemetry(() => activeSyncService);
+    teardownDeps.syncIpc = registerSyncIpc({
       ipcMain,
       service: syncService,
       pendingPairDeepLinks,
       devOrigin: devServerOrigin,
-      getBroadcastTargets: () => BrowserWindow.getAllWindows().map((w) => w.webContents),
+      getBroadcastTargets: allWebContents,
       log: logger.log,
     });
     catalogCoordinator = startCatalog(sharedSecrets, initialSyncServerUrl);
@@ -724,16 +732,17 @@ if (hasLock) {
       () => catalogCoordinator,
       gateQuery === null,
     );
-    desktopDownloadManager = createDesktopDownloadManager({
+    const desktopDownloadManager = createDesktopDownloadManager({
       downloadsDir: getManagedDownloadsDir(app.getPath('userData')),
       log: logger.log,
       ...createDesktopDownloadDeps({ getCoordinator: () => catalogCoordinator, log: logger.log }),
     });
-    disposeDownloadsIpc = registerDownloadsIpc({
+    teardownDeps.downloadManager = desktopDownloadManager;
+    teardownDeps.downloadsIpc = registerDownloadsIpc({
       ipcMain,
       manager: desktopDownloadManager,
       devOrigin: devServerOrigin,
-      getBroadcastTargets: () => BrowserWindow.getAllWindows().map((w) => w.webContents),
+      getBroadcastTargets: allWebContents,
       log: logger.log,
     });
     if (gateQuery === null) void desktopDownloadManager.hydrate();
@@ -741,55 +750,20 @@ if (hasLock) {
     createWindow();
     appInitialized = true;
     app.on('activate', () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        restoreWindowFromTray(mainWindow);
-      } else if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow();
-      }
+      if (!quitTeardown.hasRun()) isQuitting = false;
+      if (mainWindow && !mainWindow.isDestroyed()) restoreWindowFromTray(mainWindow);
+      else if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
   });
 }
 
+// before-quit fires ahead of window.on('close') on Cmd+Q/Alt+F4 so close-to-tray must allow close.
 app.on('before-quit', () => {
   isQuitting = true;
-  warmUpPlayerOwner = undefined;
-  disposePlayerIpc?.();
-  disposePlayerIpc = undefined;
-  trayController?.destroy();
-  popoutController?.dispose();
-  void lanPairingIpc?.stop();
 });
-
 app.on('will-quit', () => {
-  warmUpPlayerOwner = undefined;
-  disposePlayerIpc?.();
-  disposePlayerIpc = undefined;
-  trayController?.destroy();
-  trayController = undefined;
-  popoutController?.dispose();
-  popoutController = undefined;
-  void lanPairingIpc?.dispose();
-  lanPairingIpc = undefined;
-  disposeDiagnosticsIpc?.();
-  disposeDiagnosticsIpc = undefined;
-  disposeErrorTelemetry?.();
-  disposeErrorTelemetry = undefined;
-  activeSyncService = undefined;
-  disposeSyncIpc?.();
-  disposeSyncIpc = undefined;
-  disposeDownloadsIpc?.();
-  disposeDownloadsIpc = undefined;
-  void desktopDownloadManager?.dispose();
-  desktopDownloadManager = undefined;
-  mediaBridge?.dispose();
-  mediaBridge = undefined;
-  for (const ctl of [...windowBoundsControllers]) ctl.dispose();
-  windowBoundsControllers.clear();
-  for (const ctl of [...aspectRatioLockControllers.values()]) ctl.dispose();
-  aspectRatioLockControllers.clear();
-  void artworkCache?.dispose();
-  displayRefreshController.restoreAll();
-  powerBlocker.releaseAll();
+  isQuitting = true;
+  quitTeardown.run();
 });
 
 app.on('window-all-closed', () => {

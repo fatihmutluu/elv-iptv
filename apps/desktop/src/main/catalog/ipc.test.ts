@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { CATALOG_CHANNELS } from '../../shared/catalog-ipc.ts';
+import type { TrustedSenderEventLike } from '../trusted-sender.ts';
 import type { CatalogCoordinator } from './coordinator.ts';
 import {
   type CatalogIpcMainLike,
@@ -8,6 +9,12 @@ import {
   registerCatalogIpc,
   registerCatalogQuitHandler,
 } from './ipc.ts';
+
+function trustedFrame(url = 'app://elv/index.html') {
+  const frame: { url: string; top: unknown } = { url, top: undefined };
+  frame.top = frame;
+  return frame;
+}
 
 class FakeWebContents implements CatalogWebContentsLike<FakePort> {
   readonly id: number;
@@ -68,7 +75,12 @@ function makePort(id: number): FakePort {
 function createFakeIpcMain() {
   const listeners = new Map<
     string,
-    Set<(event: { sender: CatalogWebContentsLike<FakePort> }, ...args: unknown[]) => unknown>
+    Set<
+      (
+        event: TrustedSenderEventLike & { sender: CatalogWebContentsLike<FakePort> },
+        ...args: unknown[]
+      ) => unknown
+    >
   >();
   const ipcMain: CatalogIpcMainLike<FakePort> = {
     on(channel, listener) {
@@ -90,7 +102,16 @@ function createFakeIpcMain() {
     },
     emit(sender: FakeWebContents, channel: string, ...args: unknown[]): void {
       for (const fn of listeners.get(channel) ?? []) {
-        fn({ sender }, ...args);
+        fn({ sender, senderFrame: trustedFrame() }, ...args);
+      }
+    },
+    emitRaw(
+      event: TrustedSenderEventLike & { sender: CatalogWebContentsLike<FakePort> },
+      channel: string,
+      ...args: unknown[]
+    ): void {
+      for (const fn of listeners.get(channel) ?? []) {
+        fn(event, ...args);
       }
     },
   };
@@ -308,5 +329,40 @@ describe('registerCatalogIpc', () => {
       },
     });
     expect(defaultPrevented).toBe(false);
+  });
+
+  it('drops and logs catalog:connect from missing senderFrame, subframes, and untrusted origins without throwing', () => {
+    const { ipcMain, emitRaw } = createFakeIpcMain();
+    const connectClient = vi.fn(async () => ({ clientId: 1, rendererPort: makePort(1) }));
+    const logs: string[] = [];
+
+    const dispose = registerCatalogIpc({
+      ipcMain,
+      coordinator: {
+        isRunning: true,
+        connectClient,
+        disconnectClient: () => undefined,
+        setElvServerUrl: () => undefined,
+        onUnexpectedExit: () => () => undefined,
+        shutdown: async () => undefined,
+      },
+      log: (line) => logs.push(line),
+    });
+
+    const wc = new FakeWebContents(7);
+    const top = trustedFrame();
+    const badEvents = [
+      { sender: wc },
+      { sender: wc, senderFrame: null },
+      { sender: wc, senderFrame: { url: 'app://elv/index.html', top } },
+      { sender: wc, senderFrame: trustedFrame('https://evil.example/') },
+    ];
+    for (const ev of badEvents) {
+      expect(() => emitRaw(ev, CATALOG_CHANNELS.connect, { connectId: 1 })).not.toThrow();
+    }
+    expect(connectClient).not.toHaveBeenCalled();
+    expect(wc.posted).toHaveLength(0);
+    expect(logs).toHaveLength(badEvents.length);
+    dispose();
   });
 });

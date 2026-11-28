@@ -540,16 +540,16 @@ describe('#32 Live subtitle styling & sandboxed native file picker', () => {
 
     const openFn = handlers.get(PLAYER_CHANNELS.open);
     if (!openFn) throw new Error('expected open handler');
-    const { engineId } = (await openFn({ sender: owner })) as { engineId: string };
+    const tf: { url: string; top?: unknown } = { url: 'app://elv/index.html' };
+    tf.top = tf;
+    const ev = { sender: owner, senderFrame: tf };
+    const { engineId } = (await openFn(ev)) as { engineId: string };
     const cmdFn = listeners.get(PLAYER_CHANNELS.command);
-    cmdFn?.(
-      { sender: owner },
-      { engineId, command: { name: 'addExternalSubtitle', attempt: 1, track: validTrack } },
-    );
-    cmdFn?.(
-      { sender: owner },
-      { engineId, command: { name: 'setSubtitleStyle', style: DEFAULT_SUBTITLE_STYLE } },
-    );
+    cmdFn?.(ev, {
+      engineId,
+      command: { name: 'addExternalSubtitle', attempt: 1, track: validTrack },
+    });
+    cmdFn?.(ev, { engineId, command: { name: 'setSubtitleStyle', style: DEFAULT_SUBTITLE_STYLE } });
     expect(calls).toEqual([
       ['addExternalSubtitle', 1, validTrack],
       ['setSubtitleStyle', DEFAULT_SUBTITLE_STYLE],
@@ -557,7 +557,7 @@ describe('#32 Live subtitle styling & sandboxed native file picker', () => {
 
     const pickHandler = handlers.get(PLAYER_CHANNELS.pickSubtitleFile);
     expect(pickHandler).toBeDefined();
-    const picked = (await pickHandler?.({ sender: owner })) as ExternalSubtitleTrack | null;
+    const picked = (await pickHandler?.(ev)) as ExternalSubtitleTrack | null;
     expect(picked).not.toBeNull();
     expect(picked?.uri).toBe(pathToFileURL(subFile).href);
     expect(picked?.label).toBe('episode.ass');

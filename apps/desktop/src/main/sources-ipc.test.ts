@@ -1,10 +1,20 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SOURCES_CHANNELS } from '../shared/sources-ipc.ts';
 import { createPendingPlaylistQueue } from './playlist-open.ts';
 import { registerSourcesIpc } from './sources-ipc.ts';
+
+function trustedFrame(url = 'app://elv/index.html') {
+  const frame: { url: string; top: unknown } = { url, top: undefined };
+  frame.top = frame;
+  return frame;
+}
+
+function trustedEvent(sender: unknown = {}) {
+  return { sender, senderFrame: trustedFrame() };
+}
 
 const dirs: string[] = [];
 
@@ -39,10 +49,10 @@ describe('registerSourcesIpc (#51)', () => {
 
     const readHandler = handlers.get(SOURCES_CHANNELS.readClipboardText);
     expect(readHandler).toBeDefined();
-    expect(await readHandler?.({ sender: {} })).toBe('https://example.test/list.m3u');
+    expect(await readHandler?.(trustedEvent())).toBe('https://example.test/list.m3u');
 
     readClipboardText.mockReturnValueOnce('   ');
-    expect(await readHandler?.({ sender: {} })).toBeNull();
+    expect(await readHandler?.(trustedEvent())).toBeNull();
 
     dispose();
     expect(ipcMain.removeHandler).toHaveBeenCalledWith(SOURCES_CHANNELS.readClipboardText);
@@ -112,9 +122,9 @@ describe('registerSourcesIpc (#51)', () => {
     const webContents = makeSender();
 
     // First consume drains buffered cold-start files and attaches a live subscription
-    expect(await consumeHandler?.({ sender: webContents.sender })).toEqual([payload]);
+    expect(await consumeHandler?.(trustedEvent(webContents.sender))).toEqual([payload]);
     // Calling consume a second time does not create duplicate subscriptions
-    expect(await consumeHandler?.({ sender: webContents.sender })).toEqual([]);
+    expect(await consumeHandler?.(trustedEvent(webContents.sender))).toEqual([]);
     expect(webContents.listenerCount('did-start-navigation')).toBe(1);
 
     // Live file arrives and is forwarded exactly once
@@ -136,17 +146,17 @@ describe('registerSourcesIpc (#51)', () => {
     expect(pendingPlaylists.pendingCount).toBe(1);
 
     // Re-attaching drains buffered file and detaches on render-process-gone / destroyed
-    expect(await consumeHandler?.({ sender: webContents.sender })).toEqual([afterNavPayload]);
+    expect(await consumeHandler?.(trustedEvent(webContents.sender))).toEqual([afterNavPayload]);
     webContents.emit('render-process-gone');
     expect(webContents.listenerCount('render-process-gone')).toBe(0);
 
-    expect(await consumeHandler?.({ sender: webContents.sender })).toEqual([]);
+    expect(await consumeHandler?.(trustedEvent(webContents.sender))).toEqual([]);
     webContents.destroy();
     expect(webContents.listenerCount('destroyed')).toBe(0);
 
     // Disposed registerSourcesIpc cleans up active subscriptions
     const webContents2 = makeSender();
-    expect(await consumeHandler?.({ sender: webContents2.sender })).toEqual([]);
+    expect(await consumeHandler?.(trustedEvent(webContents2.sender))).toEqual([]);
     dispose();
     expect(webContents2.listenerCount('did-start-navigation')).toBe(0);
   });
@@ -174,7 +184,7 @@ describe('registerSourcesIpc (#51)', () => {
     });
 
     const pickHandler = handlers.get(SOURCES_CHANNELS.pickPlaylistFile);
-    const picked = (await pickHandler?.({ sender: {} })) as {
+    const picked = (await pickHandler?.(trustedEvent())) as {
       name: string;
       bytes: Uint8Array;
     } | null;
@@ -193,10 +203,79 @@ describe('registerSourcesIpc (#51)', () => {
     const bigPath = join(dir, 'huge.m3u');
     writeFileSync(bigPath, new Uint8Array(1025));
     showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [bigPath] });
-    await expect(pickHandler?.({ sender: {} })).rejects.toThrow(/size|limit/i);
+    await expect(pickHandler?.(trustedEvent())).rejects.toThrow(/size|limit/i);
 
     // Cancelled dialog returns null
     showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] });
-    expect(await pickHandler?.({ sender: {} })).toBeNull();
+    expect(await pickHandler?.(trustedEvent())).toBeNull();
+
+    // Non-regular directory and symlinks are rejected cleanly without following links
+    const folderPath = join(dir, 'not-a-file.m3u');
+    mkdirSync(folderPath);
+    showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [folderPath] });
+    await expect(pickHandler?.(trustedEvent())).rejects.toThrow(/regular file|symlink/i);
+
+    const symPath = join(dir, 'linked.m3u');
+    let linkCreated = false;
+    try {
+      symlinkSync(playlistPath, symPath);
+      linkCreated = true;
+    } catch {
+      if (process.platform === 'win32') {
+        try {
+          symlinkSync(folderPath, symPath, 'junction');
+          linkCreated = true;
+        } catch {
+          linkCreated = false;
+        }
+      }
+    }
+    if (linkCreated) {
+      showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [symPath] });
+      await expect(pickHandler?.(trustedEvent())).rejects.toThrow(/symbolic link/i);
+    }
+  });
+
+  it('rejects untrusted senderFrame, missing senderFrame, and subframes on all sources IPC channels', async () => {
+    const handlers = new Map<string, (...args: unknown[]) => unknown>();
+    const ipcMain = {
+      handle: vi.fn((ch: string, fn: (...args: unknown[]) => unknown) => {
+        handlers.set(ch, fn);
+      }),
+      removeHandler: vi.fn(),
+    };
+    const readClipboardText = vi.fn(() => 'secret');
+    const showOpenDialog = vi.fn(async () => ({ canceled: true, filePaths: [] }));
+    const log = vi.fn();
+
+    const dispose = registerSourcesIpc({
+      ipcMain,
+      getWindowFromSender: () => null,
+      readClipboardText,
+      showOpenDialog,
+      log,
+    });
+
+    const top = trustedFrame();
+    const badEvents = [
+      { sender: {} },
+      { sender: {}, senderFrame: null },
+      { sender: {}, senderFrame: { url: 'app://elv/index.html', top } },
+      { sender: {}, senderFrame: trustedFrame('https://evil.example/') },
+    ];
+    for (const ch of [
+      SOURCES_CHANNELS.readClipboardText,
+      SOURCES_CHANNELS.pickPlaylistFile,
+      SOURCES_CHANNELS.consumePendingPlaylists,
+    ]) {
+      const fn = handlers.get(ch);
+      for (const ev of badEvents) {
+        await expect(fn?.(ev)).rejects.toThrow(/untrusted sender/i);
+      }
+    }
+    expect(readClipboardText).not.toHaveBeenCalled();
+    expect(showOpenDialog).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledTimes(badEvents.length * 3);
+    dispose();
   });
 });

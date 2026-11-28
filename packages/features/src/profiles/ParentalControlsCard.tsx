@@ -4,6 +4,7 @@ import {
   type CategoryRow,
   parseCategoryId,
   type SourceRow,
+  type UpdateParentalSettingsPatch,
 } from '@elv/data';
 import {
   CtaButton,
@@ -21,6 +22,7 @@ import {
 import { type ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useParental } from '../shared';
+import { isRelaxingParentalPatch } from '../shared/profile-context-helpers';
 
 const AGE_RATING_OPTIONS: readonly (number | null)[] = [null, 7, 12, 14, 16, 18];
 const UNLOCK_TIMEOUT_OPTIONS: readonly number[] = [5, 15, 30, 60, 0];
@@ -37,6 +39,33 @@ interface LockableCategoryEntry {
   readonly sourceName: string;
   readonly kind: BrowseKind;
   readonly row: CategoryRow;
+}
+
+function SwitchPill({ checked }: { readonly checked: boolean }): ReactElement {
+  const theme = useTheme();
+  return (
+    <View
+      style={[
+        styles.switchTrack,
+        {
+          borderRadius: theme.radius.pill,
+          backgroundColor: checked ? theme.colors.accent : theme.colors.bgCard,
+          borderColor: checked ? theme.colors.accent : theme.colors.chipBorder,
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.switchThumb,
+          {
+            borderRadius: theme.radius.pill,
+            backgroundColor: checked ? theme.colors.accentContrast : theme.colors.textPrimary,
+            alignSelf: checked ? 'flex-end' : 'flex-start',
+          },
+        ]}
+      />
+    </View>
+  );
 }
 
 /**
@@ -63,9 +92,11 @@ export function ParentalControlsCard({
     hasGuardPin,
     guardPinProfileId,
     parentalUnlocked,
+    parentalLoadError,
     lockParentalNow,
     updateParentalSettings,
     setParentalLock,
+    retryParentalLoad,
     requestParentalUnlock,
     openPinDialog,
   } = parental;
@@ -83,7 +114,13 @@ export function ParentalControlsCard({
 
   useEffect(() => {
     let cancelled = false;
-    if (!isEnabled || readySources.length === 0 || !profilesReady || needsPinGate) {
+    if (
+      !isEnabled ||
+      parentalLoadError ||
+      readySources.length === 0 ||
+      !profilesReady ||
+      needsPinGate
+    ) {
       setCategories([]);
       return undefined;
     }
@@ -104,9 +141,7 @@ export function ParentalControlsCard({
         }));
       }),
     ).then((nested) => {
-      if (!cancelled) {
-        setCategories(nested.flat());
-      }
+      if (!cancelled) setCategories(nested.flat());
     });
     return () => {
       cancelled = true;
@@ -117,6 +152,7 @@ export function ParentalControlsCard({
     categoryKind,
     isEnabled,
     needsPinGate,
+    parentalLoadError,
     profilesReady,
     readySources,
   ]);
@@ -134,16 +170,52 @@ export function ParentalControlsCard({
   /** Gates restricted mutations behind PIN verification whenever a guard PIN is set and currently locked. */
   const runProtected = useCallback(
     (action: () => void) => {
+      if (parentalLoadError) return;
       if (hasGuardPin && !parentalUnlocked) {
         requestParentalUnlock(action);
         return;
       }
       action();
     },
-    [hasGuardPin, parentalUnlocked, requestParentalUnlock],
+    [hasGuardPin, parentalLoadError, parentalUnlocked, requestParentalUnlock],
+  );
+
+  /** Always re-verifies the current guard PIN before relaxing or disabling any parental protection. */
+  const runReverified = useCallback(
+    (action: () => void) => {
+      if (parentalLoadError) return;
+      if (hasGuardPin) {
+        openPinDialog({
+          mode: 'verify',
+          title: i18n.t('parental.reverifyTitle'),
+          profileId: effectiveGuardPinProfileId,
+          verifyOnly: true,
+          onSuccess: action,
+        });
+        return;
+      }
+      action();
+    },
+    [effectiveGuardPinProfileId, hasGuardPin, i18n, openPinDialog, parentalLoadError],
+  );
+
+  const applySettingsPatch = useCallback(
+    (patch: UpdateParentalSettingsPatch) => {
+      if (parentalLoadError) return;
+      const run = () => {
+        void updateParentalSettings(patch);
+      };
+      if (isRelaxingParentalPatch(parentalSettings, patch)) {
+        runReverified(run);
+        return;
+      }
+      runProtected(run);
+    },
+    [parentalLoadError, parentalSettings, runProtected, runReverified, updateParentalSettings],
   );
 
   const handleToggleKidsMode = useCallback(() => {
+    if (parentalLoadError) return;
     if (!isEnabled) {
       if (!hasGuardPin) {
         openPinDialog({
@@ -160,7 +232,7 @@ export function ParentalControlsCard({
       });
       return;
     }
-    runProtected(() => {
+    runReverified(() => {
       void updateParentalSettings({ enabled: false });
     });
   }, [
@@ -168,7 +240,9 @@ export function ParentalControlsCard({
     hasGuardPin,
     isEnabled,
     openPinDialog,
+    parentalLoadError,
     runProtected,
+    runReverified,
     updateParentalSettings,
   ]);
 
@@ -185,6 +259,22 @@ export function ParentalControlsCard({
 
   const cursorPointer = webCursorPointer();
   const transition = webTransition(theme, 'background-color, border-color');
+  const buildToggleStyle = (
+    baseStyle: typeof styles.masterRow | typeof styles.toggleRow,
+    focused: boolean,
+    dimmed = false,
+  ) => [
+    baseStyle,
+    cursorPointer,
+    transition,
+    {
+      borderRadius: theme.radius.card,
+      borderWidth: focused ? theme.focus.ringWidth : 1,
+      borderColor: focused ? theme.colors.focusRingColor : 'transparent',
+      backgroundColor: focused ? theme.colors.focusFill : 'transparent',
+      ...(dimmed ? { opacity: 0.55 } : {}),
+    },
+  ];
 
   return (
     <Surface
@@ -196,29 +286,23 @@ export function ParentalControlsCard({
     >
       <Pressable
         testID="parental-toggle-enabled"
+        disabled={parentalLoadError}
         accessibilityRole="switch"
         accessibilityLabel={i18n.t('parental.title')}
-        accessibilityState={{ checked: isEnabled }}
+        accessibilityState={{ checked: isEnabled, disabled: parentalLoadError }}
         aria-checked={isEnabled}
-        focusable
-        hasTVPreferredFocus={isTv && isActiveScope}
+        focusable={!parentalLoadError}
+        hasTVPreferredFocus={isTv && isActiveScope && !parentalLoadError}
         onFocus={() => setFocusedToggle('enabled')}
         onBlur={() => setFocusedToggle((prev) => (prev === 'enabled' ? null : prev))}
         onPress={handleToggleKidsMode}
-        style={(state) => {
-          const focused = focusedToggle === 'enabled' || Boolean(state.focused);
-          return [
+        style={(state) =>
+          buildToggleStyle(
             styles.masterRow,
-            cursorPointer,
-            transition,
-            {
-              borderRadius: theme.radius.card,
-              borderWidth: focused ? theme.focus.ringWidth : 1,
-              borderColor: focused ? theme.colors.focusRingColor : 'transparent',
-              backgroundColor: focused ? theme.colors.focusFill : 'transparent',
-            },
-          ];
-        }}
+            focusedToggle === 'enabled' || Boolean(state.focused),
+            parentalLoadError,
+          )
+        }
       >
         <View style={styles.headerText}>
           <View style={styles.titleLine}>
@@ -241,30 +325,45 @@ export function ParentalControlsCard({
             {i18n.t('parental.modeDescription')}
           </Text>
         </View>
+        <SwitchPill checked={isEnabled} />
+      </Pressable>
+
+      {parentalLoadError ? (
         <View
+          testID="parental-load-error"
           style={[
-            styles.switchTrack,
+            styles.lockedCategoriesBox,
             {
-              borderRadius: theme.radius.pill,
-              backgroundColor: isEnabled ? theme.colors.accent : theme.colors.bgCard,
-              borderColor: isEnabled ? theme.colors.accent : theme.colors.chipBorder,
+              borderRadius: theme.radius.card,
+              backgroundColor: theme.colors.bgCard,
+              borderColor: theme.colors.liveColor,
             },
           ]}
         >
-          <View
-            style={[
-              styles.switchThumb,
-              {
-                borderRadius: theme.radius.pill,
-                backgroundColor: isEnabled ? theme.colors.accentContrast : theme.colors.textPrimary,
-                alignSelf: isEnabled ? 'flex-end' : 'flex-start',
-              },
-            ]}
+          <View style={styles.lockedCategoriesInfo}>
+            <Icon name="warning" size={16} color={theme.colors.liveColor} />
+            <Text
+              style={[
+                theme.typography.caption,
+                styles.lockedCategoriesText,
+                { color: theme.colors.textSecondary },
+              ]}
+            >
+              {i18n.t('parental.loadErrorMessage')}
+            </Text>
+          </View>
+          <CtaButton
+            testID="parental-retry-load"
+            variant="primary"
+            label={i18n.t('parental.retryLoad')}
+            onPress={() => {
+              void retryParentalLoad();
+            }}
           />
         </View>
-      </Pressable>
+      ) : null}
 
-      {isEnabled ? (
+      {isEnabled && !parentalLoadError ? (
         <>
           <View style={[styles.divider, { backgroundColor: theme.colors.surfaceBorder }]} />
 
@@ -307,7 +406,7 @@ export function ParentalControlsCard({
                   variant={hasGuardPin ? 'secondary' : 'primary'}
                   label={i18n.t('parental.setPin')}
                   onPress={() =>
-                    runProtected(() =>
+                    runReverified(() =>
                       openPinDialog({ mode: 'create', profileId: activeProfileId }),
                     )
                   }
@@ -344,26 +443,14 @@ export function ParentalControlsCard({
             onFocus={() => setFocusedToggle('adult')}
             onBlur={() => setFocusedToggle((prev) => (prev === 'adult' ? null : prev))}
             onPress={() =>
-              runProtected(() => {
-                void updateParentalSettings({
-                  blockAdultKeywords: !parentalSettings.blockAdultKeywords,
-                });
-              })
+              applySettingsPatch({ blockAdultKeywords: !parentalSettings.blockAdultKeywords })
             }
-            style={(state) => {
-              const focused = focusedToggle === 'adult' || Boolean(state.focused);
-              return [
+            style={(state) =>
+              buildToggleStyle(
                 styles.toggleRow,
-                cursorPointer,
-                transition,
-                {
-                  borderRadius: theme.radius.card,
-                  borderWidth: focused ? theme.focus.ringWidth : 1,
-                  borderColor: focused ? theme.colors.focusRingColor : 'transparent',
-                  backgroundColor: focused ? theme.colors.focusFill : 'transparent',
-                },
-              ];
-            }}
+                focusedToggle === 'adult' || Boolean(state.focused),
+              )
+            }
           >
             <View style={styles.rowText}>
               <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
@@ -373,33 +460,7 @@ export function ParentalControlsCard({
                 {i18n.t('parental.adultKeywordsHint')}
               </Text>
             </View>
-            <View
-              style={[
-                styles.switchTrack,
-                {
-                  borderRadius: theme.radius.pill,
-                  backgroundColor: parentalSettings.blockAdultKeywords
-                    ? theme.colors.accent
-                    : theme.colors.bgCard,
-                  borderColor: parentalSettings.blockAdultKeywords
-                    ? theme.colors.accent
-                    : theme.colors.chipBorder,
-                },
-              ]}
-            >
-              <View
-                style={[
-                  styles.switchThumb,
-                  {
-                    borderRadius: theme.radius.pill,
-                    backgroundColor: parentalSettings.blockAdultKeywords
-                      ? theme.colors.accentContrast
-                      : theme.colors.textPrimary,
-                    alignSelf: parentalSettings.blockAdultKeywords ? 'flex-end' : 'flex-start',
-                  },
-                ]}
-              />
-            </View>
+            <SwitchPill checked={parentalSettings.blockAdultKeywords} />
           </Pressable>
 
           <View style={[styles.divider, { backgroundColor: theme.colors.surfaceBorder }]} />
@@ -418,26 +479,22 @@ export function ParentalControlsCard({
               </Text>
             </View>
             <View style={[styles.chipRow, { gap: theme.spacing.xs }]}>
-              {AGE_RATING_OPTIONS.map((age) => {
-                const label =
-                  age === null
-                    ? i18n.t('parental.maxAgeOff')
-                    : i18n.t('parental.maxAgeOption', { age });
-                const key = age === null ? 'off' : String(age);
-                return (
-                  <FilterChip
-                    key={key}
-                    testID={`parental-max-age-${key}`}
-                    label={label}
-                    selected={parentalSettings.maxRatingAge === age}
-                    onPress={() =>
-                      runProtected(() => {
-                        void updateParentalSettings({ maxRatingAge: age });
-                      })
-                    }
-                  />
-                );
-              })}
+              {AGE_RATING_OPTIONS.map((age) => (
+                <FilterChip
+                  key={age === null ? 'off' : String(age)}
+                  testID={`parental-max-age-${age === null ? 'off' : String(age)}`}
+                  label={
+                    age === null
+                      ? i18n.t('parental.maxAgeOff')
+                      : i18n.t('parental.maxAgeOption', { age })
+                  }
+                  selected={parentalSettings.maxRatingAge === age}
+                  onPress={() => {
+                    if (parentalSettings.maxRatingAge === age) return;
+                    applySettingsPatch({ maxRatingAge: age });
+                  }}
+                />
+              ))}
             </View>
           </View>
 
@@ -457,25 +514,22 @@ export function ParentalControlsCard({
               </Text>
             </View>
             <View style={[styles.chipRow, { gap: theme.spacing.xs }]}>
-              {UNLOCK_TIMEOUT_OPTIONS.map((minutes) => {
-                const label =
-                  minutes === 0
-                    ? i18n.t('parental.timeoutSession')
-                    : i18n.t('parental.timeoutMinutes', { minutes });
-                return (
-                  <FilterChip
-                    key={String(minutes)}
-                    testID={`parental-timeout-${minutes}`}
-                    label={label}
-                    selected={parentalSettings.unlockTimeoutMin === minutes}
-                    onPress={() =>
-                      runProtected(() => {
-                        void updateParentalSettings({ unlockTimeoutMin: minutes });
-                      })
-                    }
-                  />
-                );
-              })}
+              {UNLOCK_TIMEOUT_OPTIONS.map((minutes) => (
+                <FilterChip
+                  key={String(minutes)}
+                  testID={`parental-timeout-${minutes}`}
+                  label={
+                    minutes === 0
+                      ? i18n.t('parental.timeoutSession')
+                      : i18n.t('parental.timeoutMinutes', { minutes })
+                  }
+                  selected={parentalSettings.unlockTimeoutMin === minutes}
+                  onPress={() => {
+                    if (parentalSettings.unlockTimeoutMin === minutes) return;
+                    applySettingsPatch({ unlockTimeoutMin: minutes });
+                  }}
+                />
+              ))}
             </View>
           </View>
 
@@ -563,7 +617,8 @@ export function ParentalControlsCard({
                           onFocus={() => setFocusedCatId(rowKey)}
                           onBlur={() => setFocusedCatId((prev) => (prev === rowKey ? null : prev))}
                           onPress={() => {
-                            runProtected(() => {
+                            const nextLocked = !isLocked;
+                            const mutate = () => {
                               void setParentalLock(
                                 {
                                   sourceId: entry.sourceId,
@@ -571,9 +626,11 @@ export function ParentalControlsCard({
                                   itemKind: entry.kind,
                                   targetKey,
                                 },
-                                !isLocked,
+                                nextLocked,
                               );
-                            });
+                            };
+                            if (!nextLocked) runReverified(mutate);
+                            else runProtected(mutate);
                           }}
                           style={(state) => {
                             const focused = focusedCatId === rowKey || Boolean(state.focused);
@@ -658,12 +715,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   headerText: { flex: 1, gap: 4 },
-  titleLine: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 10,
-  },
+  titleLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 },
   divider: { height: 1, width: '100%' },
   rowHeader: {
     flexDirection: 'row',

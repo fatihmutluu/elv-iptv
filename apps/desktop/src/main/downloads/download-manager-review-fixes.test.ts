@@ -155,6 +155,7 @@ describe('Track Q3-B whole-branch review regression tests', () => {
       downloadsDir,
       idleTimeoutMs: 60,
       progressThrottleMs: 0,
+      lookup: async () => ['93.184.216.34'],
       resolveStream: async (itemKey, _sourceId, signal) => {
         if (itemKey === 'ep:wedged') {
           return new Promise(() => {
@@ -375,6 +376,7 @@ describe('Track Q3-B whole-branch review regression tests', () => {
     const diskMgr = createDesktopDownloadManager({
       downloadsDir,
       progressThrottleMs: 0,
+      lookup: async () => ['93.184.216.34'],
       checkFreeSpace: async () => freeBytes,
       resolveStream: async () => {
         resolveCalls += 1;
@@ -421,6 +423,7 @@ describe('Track Q3-B whole-branch review regression tests', () => {
       downloadsDir: lateDir,
       idleTimeoutMs: 40,
       progressThrottleMs: 0,
+      lookup: async () => ['93.184.216.34'],
       fetch: async () =>
         new Promise<Response>((resolve) => {
           resolveLateFetch = resolve;

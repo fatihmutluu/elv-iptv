@@ -139,11 +139,19 @@ describe('Desktop libmpv bounded live time-shift (#28)', () => {
   it('propagates ClockAnchor time-shift fields and jumpToLiveEdge across preload and player IPC', async () => {
     const handlers = new Map<
       string,
-      (ev: { sender: WebContentsLike }, ...args: unknown[]) => unknown
+      (
+        ev: { sender: WebContentsLike; senderFrame?: { url?: string; top?: unknown } | null },
+        ...args: unknown[]
+      ) => unknown
     >();
     const mainListeners = new Map<
       string,
-      Set<(ev: { sender: WebContentsLike }, ...args: unknown[]) => unknown>
+      Set<
+        (
+          ev: { sender: WebContentsLike; senderFrame?: { url?: string; top?: unknown } | null },
+          ...args: unknown[]
+        ) => unknown
+      >
     >();
     const rendererListeners = new Map<string, Set<(ev: unknown, ...args: unknown[]) => void>>();
 
@@ -171,14 +179,18 @@ describe('Desktop libmpv bounded live time-shift (#28)', () => {
       on: () => undefined,
     };
 
+    const senderFrame: { url: string; top?: unknown } = { url: 'app://elv/index.html' };
+    senderFrame.top = senderFrame;
     const ipcRenderer: IpcRendererLike = {
       invoke: async (ch, ...args) => {
         const fn = handlers.get(ch);
         if (!fn) throw new Error(`missing handler ${ch}`);
-        return fn({ sender: webContents }, ...args);
+        return fn({ sender: webContents, senderFrame }, ...args);
       },
       send: (ch, ...args) => {
-        for (const fn of [...(mainListeners.get(ch) ?? [])]) fn({ sender: webContents }, ...args);
+        for (const fn of [...(mainListeners.get(ch) ?? [])]) {
+          fn({ sender: webContents, senderFrame }, ...args);
+        }
       },
       on: (ch, fn) => {
         let set = rendererListeners.get(ch);

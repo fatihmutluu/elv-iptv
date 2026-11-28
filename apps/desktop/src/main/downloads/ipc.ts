@@ -9,12 +9,8 @@ import {
 } from '../../shared/downloads-ipc.ts';
 import { isAllowedDevNavigation } from '../dev-server.ts';
 import { isAllowedAppNavigation } from '../security.ts';
+import { assertTrustedSenderFrame, type TrustedSenderEventLike } from '../trusted-sender.ts';
 import type { DesktopDownloadManager } from './download-manager.ts';
-
-interface SenderFrameLike {
-  readonly url?: string;
-  readonly top?: unknown;
-}
 
 interface SenderWebContentsLike {
   isDestroyed?(): boolean;
@@ -22,9 +18,8 @@ interface SenderWebContentsLike {
   send?(channel: string, ...args: unknown[]): void;
 }
 
-interface DownloadsIpcEventLike {
+interface DownloadsIpcEventLike extends TrustedSenderEventLike {
   readonly sender?: SenderWebContentsLike;
-  readonly senderFrame?: SenderFrameLike | null;
 }
 
 type DownloadsIpcHandler = (event: DownloadsIpcEventLike, ...args: unknown[]) => unknown;
@@ -45,26 +40,6 @@ export interface RegisterDownloadsIpcDeps {
 }
 
 /**
- * Verifies an IPC event originated from the top-level trusted `app://elv` (or dev) frame.
- * Fails closed when `event.senderFrame` is missing or `null`.
- */
-function isTrustedDownloadsIpcEvent(
-  event: DownloadsIpcEventLike,
-  devOrigin?: string | null,
-): boolean {
-  const frame = event.senderFrame;
-  if (frame === null || frame === undefined) return false;
-  if (frame.top !== undefined && frame.top !== frame) return false;
-  const url = typeof frame.url === 'string' ? frame.url : '';
-  if (url.length === 0) return false;
-  if (isAllowedAppNavigation(url)) return true;
-  if (devOrigin !== null && devOrigin !== undefined && devOrigin.length > 0) {
-    return isAllowedDevNavigation(url, devOrigin);
-  }
-  return false;
-}
-
-/**
  * Registers Electron IPC handlers for the offline VOD download manager and broadcasts
  * throttled state/progress snapshots to trusted app windows. Returns the disposer.
  */
@@ -72,10 +47,7 @@ export function registerDownloadsIpc(deps: RegisterDownloadsIpcDeps): () => void
   const { ipcMain, manager, devOrigin, log } = deps;
 
   const assertTrusted = (event: DownloadsIpcEventLike, channel: string): void => {
-    if (!isTrustedDownloadsIpcEvent(event, devOrigin)) {
-      log?.(`downloads ipc: rejected untrusted sender on ${channel}`);
-      throw new Error(`untrusted sender for ${channel}`);
-    }
+    assertTrustedSenderFrame(event, channel, devOrigin, log);
   };
 
   const broadcastChanged = (records: readonly DownloadRecord[]): void => {

@@ -41,11 +41,13 @@ export interface TrayControllerDeps<TIcon = unknown> {
   readonly buildMenu: (template: TrayMenuItemTemplate[]) => unknown;
   readonly onRestore: () => void;
   readonly onQuit: () => void;
+  readonly log?: (line: string) => void;
 }
 
 /** Handle returned by {@link createTrayController} (`#158`). */
 export interface TrayController {
-  ensureShown(): void;
+  /** Ensures the tray icon exists and returns `true` when active, or `false` if tray is unavailable. */
+  ensureShown(): boolean;
   isShown(): boolean;
   setLabels(labels: TrayLabels): void;
   destroy(): void;
@@ -53,12 +55,14 @@ export interface TrayController {
 
 /**
  * Pure testable system tray controller wrapping Electron `Tray` + `Menu` (`Restore`, `Quit`) (`#158`).
- * Ensures idempotent show/destroy so no zombie tray icon remains on Windows exit.
+ * Ensures idempotent show/destroy so no zombie tray icon remains on Windows exit, and guards tray
+ * construction so headless/Wayland Linux environments without a StatusNotifier host fail cleanly.
  */
 export function createTrayController<TIcon = unknown>(
   deps: TrayControllerDeps<TIcon>,
 ): TrayController {
   let tray: TrayLike | undefined;
+  let unavailable = false;
   let labels: TrayLabels = deps.labels ?? {
     restore: `Restore ${WINDOW_TITLE}`,
     quit: 'Quit',
@@ -74,13 +78,33 @@ export function createTrayController<TIcon = unknown>(
 
   return {
     ensureShown() {
-      if (tray && !tray.isDestroyed()) return;
-      const instance = deps.createTray(deps.icon);
-      instance.setToolTip(tooltip);
-      instance.setContextMenu(buildContextMenu());
-      instance.on('click', () => deps.onRestore());
-      instance.on('double-click', () => deps.onRestore());
-      tray = instance;
+      if (unavailable) return false;
+      if (tray && !tray.isDestroyed()) return true;
+      let instance: TrayLike | undefined;
+      try {
+        instance = deps.createTray(deps.icon);
+        instance.setToolTip(tooltip);
+        instance.setContextMenu(buildContextMenu());
+        instance.on('click', () => deps.onRestore());
+        instance.on('double-click', () => deps.onRestore());
+        tray = instance;
+        return true;
+      } catch (err) {
+        unavailable = true;
+        if (instance && !instance.isDestroyed()) {
+          try {
+            instance.destroy();
+          } catch {
+            // Best-effort cleanup of partially initialized tray instance.
+          }
+        }
+        tray = undefined;
+        const reason = err instanceof Error ? err.message : String(err);
+        deps.log?.(
+          `tray: system tray unavailable (${reason}); disabling close-to-tray for this session`,
+        );
+        return false;
+      }
     },
     isShown() {
       return tray !== undefined && !tray.isDestroyed();
@@ -88,12 +112,20 @@ export function createTrayController<TIcon = unknown>(
     setLabels(nextLabels: TrayLabels) {
       labels = nextLabels;
       if (tray && !tray.isDestroyed()) {
-        tray.setContextMenu(buildContextMenu());
+        try {
+          tray.setContextMenu(buildContextMenu());
+        } catch {
+          // Ignore menu update failures on transient tray teardowns.
+        }
       }
     },
     destroy() {
       if (tray && !tray.isDestroyed()) {
-        tray.destroy();
+        try {
+          tray.destroy();
+        } catch {
+          // Best-effort tray disposal.
+        }
       }
       tray = undefined;
     },

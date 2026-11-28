@@ -1,5 +1,6 @@
+import { type CatalogService, resolveAccountPoolKey, type SourceRow } from '@elv/data';
 import type { DownloadManagerPort } from '@elv/domain';
-import { resolveHardwareMultiViewCap } from '@elv/playback';
+import { type ConnectionTracker, resolveHardwareMultiViewCap } from '@elv/playback';
 import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { resolveMultiViewCapabilities } from './player';
 import type {
@@ -83,6 +84,15 @@ export interface UseShellPlaybackModesOptions {
   readonly desktopWindow?: DesktopWindowPort | undefined;
   readonly thermalDevice?: ThermalDevicePort | undefined;
   readonly downloadManager?: DownloadManagerPort | undefined;
+  readonly catalog?: Pick<CatalogService, 'resolveStream' | 'resolveCatchupStream'> | undefined;
+  readonly getDockPolicy?:
+    | (() => {
+        readonly parentalUnlocked: boolean;
+        readonly parentalLoadError?: boolean;
+        readonly parentalRestricted?: boolean;
+        readonly excludedSourceIds?: ReadonlySet<string>;
+      })
+    | undefined;
   readonly videoHost: VideoHost;
   readonly stopActivePlayerRef: MutableRefObject<(() => Promise<void>) | null>;
   readonly stopEmbeddedPreviewRef?: MutableRefObject<(() => Promise<void>) | null> | undefined;
@@ -121,6 +131,8 @@ export function useShellPlaybackModes({
   desktopWindow,
   thermalDevice,
   downloadManager,
+  catalog,
+  getDockPolicy,
   videoHost,
   stopActivePlayerRef,
   stopEmbeddedPreviewRef,
@@ -144,6 +156,16 @@ export function useShellPlaybackModes({
   const [playerHandoffKey, setPlayerHandoffKey] = useState(0);
   const [restoreCursorToken, setRestoreCursorToken] = useState(0);
   const lastPopoutTargetRef = useRef<PlayTarget | null>(null);
+  const activeMultiViewSourceIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const dockSeqRef = useRef(0);
+  const catalogRef = useRef(catalog);
+  catalogRef.current = catalog;
+  const dockPolicyRef = useRef(getDockPolicy);
+  dockPolicyRef.current = getDockPolicy;
+
+  const onMultiViewActiveSourceIdsChange = useCallback((sourceIds: ReadonlySet<string>) => {
+    activeMultiViewSourceIdsRef.current = sourceIds;
+  }, []);
 
   const consumedAdoptedRef = useRef(new WeakSet<AdoptedPlaybackSession>());
   const markAdoptedSessionConsumed = useCallback((session: AdoptedPlaybackSession) => {
@@ -190,7 +212,10 @@ export function useShellPlaybackModes({
   );
 
   useEffect(() => {
-    if (multiViewSeed === null) setMultiViewHasOnlineStream(null);
+    if (multiViewSeed === null) {
+      setMultiViewHasOnlineStream(null);
+      activeMultiViewSourceIdsRef.current = new Set();
+    }
   }, [multiViewSeed]);
 
   useShellOnlinePlaybackSync({
@@ -240,15 +265,14 @@ export function useShellPlaybackModes({
   useEffect(() => {
     const sub = desktopWindow?.onPopoutDocked;
     if (sub === undefined) return;
-    return sub((payload) => {
+    let mounted = true;
+    const unsub = sub((payload) => {
+      const dockSeq = ++dockSeqRef.current;
       setMultiViewAdoptedSession(null);
       setMultiViewSeed(null);
       setPendingAdoptedSession(null);
       const hasTransfer =
         payload.transferEngineId !== undefined && payload.transferEngineId.length > 0;
-      setPendingAdoptEngineId(hasTransfer ? payload.transferEngineId : undefined);
-      setPlayerHandoffKey((k) => k + 1);
-      setPlayerViewMode('full');
       const rawTarget = buildPlayTargetFromPopoutDock(payload);
       const prevPopout = lastPopoutTargetRef.current;
       const target: PlayTarget =
@@ -264,12 +288,76 @@ export function useShellPlaybackModes({
             }
           : rawTarget;
       lastPopoutTargetRef.current = null;
-      if (hasTransfer) {
-        adoptPlayRef.current(target);
-      } else {
-        requestPlayRef.current(target);
+
+      const commitDock = (allowTransfer: boolean) => {
+        setPendingAdoptEngineId(
+          allowTransfer && hasTransfer ? payload.transferEngineId : undefined,
+        );
+        setPlayerHandoffKey((k) => k + 1);
+        setPlayerViewMode('full');
+        if (allowTransfer && hasTransfer) {
+          adoptPlayRef.current(target);
+        } else {
+          requestPlayRef.current(target);
+        }
+      };
+
+      const policy = dockPolicyRef.current?.();
+      if (
+        policy?.parentalLoadError === true ||
+        (target.sourceId.length > 0 && policy?.excludedSourceIds?.has(target.sourceId) === true)
+      ) {
+        setPendingAdoptEngineId(undefined);
+        return;
       }
+      if (
+        hasTransfer &&
+        policy !== undefined &&
+        !policy.parentalUnlocked &&
+        policy.parentalRestricted !== false
+      ) {
+        const cat = catalogRef.current;
+        const checkPromise =
+          target.catchup !== undefined && typeof cat?.resolveCatchupStream === 'function'
+            ? cat.resolveCatchupStream(target.itemKey, {
+                startMs: target.catchup.startMs,
+                stopMs: target.catchup.stopMs,
+                ...(target.catchup.hasArchive !== undefined
+                  ? { hasArchive: target.catchup.hasArchive }
+                  : {}),
+                title: target.catchup.programmeTitle,
+              })
+            : typeof cat?.resolveStream === 'function'
+              ? cat.resolveStream(target.itemKey)
+              : null;
+        if (checkPromise !== null) {
+          void checkPromise
+            .then((res) => {
+              if (!mounted || dockSeqRef.current !== dockSeq) return;
+              const latestPolicy = dockPolicyRef.current?.();
+              if (latestPolicy?.parentalLoadError === true || !res.ok) {
+                setPendingAdoptEngineId(undefined);
+                return;
+              }
+              commitDock(true);
+            })
+            .catch(() => {
+              if (mounted && dockSeqRef.current === dockSeq) {
+                setPendingAdoptEngineId(undefined);
+              }
+            });
+          return;
+        }
+        commitDock(false);
+        return;
+      }
+      commitDock(true);
     });
+    return () => {
+      mounted = false;
+      dockSeqRef.current += 1;
+      unsub();
+    };
   }, [desktopWindow]);
 
   const minimizeToMiniPlayer = useCallback(() => {
@@ -312,8 +400,37 @@ export function useShellPlaybackModes({
     [multiViewSupported, stopActivePlayerRef],
   );
 
+  const closeMultiView = useCallback(() => {
+    if (multiViewSeedRef.current === null) return;
+    multiViewSeedRef.current = null;
+    activeMultiViewSourceIdsRef.current = new Set();
+    setMultiViewAdoptedSession(null);
+    setMultiViewSeed(null);
+    setPlayerViewMode('full');
+    setPendingAdoptEngineId(undefined);
+  }, []);
+
+  const closeMultiViewForSource = useCallback(
+    (sourceId: string, sources: readonly SourceRow[], tracker: ConnectionTracker) => {
+      const mvSeed = multiViewSeedRef.current;
+      if (mvSeed === null) return;
+      const src = sources.find((s) => s.id === sourceId);
+      const acctKey = src ? resolveAccountPoolKey(src) : sourceId;
+      if (
+        mvSeed.sourceId === sourceId ||
+        activeMultiViewSourceIdsRef.current.has(sourceId) ||
+        tracker.activeCount(acctKey) > 0 ||
+        tracker.activeCount(sourceId) > 0
+      ) {
+        closeMultiView();
+      }
+    },
+    [closeMultiView],
+  );
+
   const exitMultiView = useCallback(
     (resumeTarget: PlayTarget | null, adoptedSession?: AdoptedPlaybackSession | null) => {
+      activeMultiViewSourceIdsRef.current = new Set();
       setMultiViewAdoptedSession(null);
       setMultiViewSeed(null);
       setPlayerViewMode('full');
@@ -422,6 +539,7 @@ export function useShellPlaybackModes({
   return {
     playerViewMode,
     multiViewSeed,
+    multiViewSeedRef,
     multiViewAdoptedSession,
     pendingAdoptedSession,
     pendingAdoptEngineId,
@@ -434,8 +552,11 @@ export function useShellPlaybackModes({
     expandMiniPlayer,
     resetToFullMode,
     enterMultiView,
+    closeMultiView,
+    closeMultiViewForSource,
     exitMultiView,
     onMultiViewOnlineStreamChange: setMultiViewHasOnlineStream,
+    onMultiViewActiveSourceIdsChange,
     popoutPlayer,
     browseStageActions,
     tuneFromReminder,

@@ -4,8 +4,12 @@ import {
   type LanPairingSessionReply,
 } from '../shared/lan-pairing-ipc.ts';
 import { createLanPairingServer, type LanPairingServer } from './lan-pairing-server.ts';
+import { assertTrustedSenderFrame, type TrustedSenderEventLike } from './trusted-sender.ts';
 
-type IpcHandler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
+type IpcHandler = (
+  event: TrustedSenderEventLike & { sender: unknown },
+  ...args: unknown[]
+) => unknown;
 
 /** Subset of Electron's `ipcMain` needed by {@link registerLanPairingIpc}. */
 interface LanPairingIpcMainLike {
@@ -29,6 +33,8 @@ interface PairingSenderLike {
 export interface LanPairingIpcDeps {
   readonly ipcMain: LanPairingIpcMainLike;
   readonly server?: LanPairingServer;
+  readonly devOrigin?: string | null;
+  readonly log?: (line: string) => void;
 }
 
 /** Handle returned by {@link registerLanPairingIpc} for lifecycle teardown (`before-quit`). */
@@ -96,11 +102,12 @@ export function registerLanPairingIpc(deps: LanPairingIpcDeps): LanPairingIpcHan
 
   ipcMain.handle(
     LAN_PAIRING_CHANNELS.start,
-    async ({ sender }, rawOpts): Promise<LanPairingSessionReply> => {
+    async (event, rawOpts): Promise<LanPairingSessionReply> => {
+      assertTrustedSenderFrame(event, LAN_PAIRING_CHANNELS.start, deps.devOrigin, deps.log);
       if (!isLanPairingStartOptions(rawOpts)) {
         throw new Error('lan-pairing:start received invalid options');
       }
-      attachSender(sender);
+      attachSender(event.sender);
       try {
         return await server.start(rawOpts);
       } catch (error) {
@@ -110,7 +117,8 @@ export function registerLanPairingIpc(deps: LanPairingIpcDeps): LanPairingIpcHan
     },
   );
 
-  ipcMain.handle(LAN_PAIRING_CHANNELS.stop, async (): Promise<void> => {
+  ipcMain.handle(LAN_PAIRING_CHANNELS.stop, async (event): Promise<void> => {
+    assertTrustedSenderFrame(event, LAN_PAIRING_CHANNELS.stop, deps.devOrigin, deps.log);
     clearActiveSender();
     await server.stop();
   });

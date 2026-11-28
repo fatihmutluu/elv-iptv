@@ -1,12 +1,15 @@
-import { createWriteStream, type WriteStream } from 'node:fs';
+import type { WriteStream } from 'node:fs';
 import { mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DownloadRecord, Result } from '@elv/domain';
 import { isHttpDownloadSourceUrl } from '../../shared/downloads-ipc.ts';
 import {
+  assertSafeBeforeDownloadRename,
   buildRequestHeaders,
   closeWriteStream,
+  openSafePartWriteStream,
+  PartFileUnsafeError,
   parseContentLength,
   parseContentRange,
   readPartFileSize,
@@ -14,6 +17,11 @@ import {
   safeUnlink,
   writeChunk,
 } from './download-io.ts';
+import {
+  type DownloadDnsLookup,
+  DownloadRedirectError,
+  fetchDownloadWithManualRedirects,
+} from './download-redirect.ts';
 import type { validateManagedDownloadPath } from './managed-path.ts';
 
 const MIN_FREE_BYTES = 256 * 1024 * 1024;
@@ -55,8 +63,14 @@ export interface DownloadRunnerContext {
   readonly sources: Map<string, DownloadSourceSpec>;
   readonly fetchImpl: typeof globalThis.fetch;
   readonly fetchForSource?:
-    | ((sourceId: string, url: string, init: RequestInit) => Promise<Response>)
+    | ((
+        sourceId: string,
+        url: string,
+        init: RequestInit,
+        initialHost?: string,
+      ) => Promise<Response>)
     | undefined;
+  readonly lookup?: DownloadDnsLookup | undefined;
   readonly resolveStream?:
     | ((
         itemKey: string,
@@ -181,32 +195,27 @@ export async function runDownloadTransfer(
 
     await mkdir(ctx.downloadsDir, { recursive: true });
     const existingOffset = await readPartFileSize(partPath);
-    const requestInit: RequestInit = {
-      method: 'GET',
-      headers: buildRequestHeaders(source.headers, existingOffset),
-      signal: job.controller.signal,
-      redirect: 'follow',
-    };
     const resolvedSource = source;
-    const response = await runWithStallTimeout(
-      job.controller.signal,
-      ctx.idleTimeoutMs,
-      triggerStall,
-      () =>
-        ctx.fetchForSource !== undefined
-          ? ctx.fetchForSource(current.sourceId, resolvedSource.streamUrl, requestInit)
-          : ctx.fetchImpl(resolvedSource.streamUrl, requestInit),
-      (lateResponse) => {
-        void lateResponse.body?.cancel().catch(() => undefined);
-      },
-    );
+    const response = await fetchDownloadWithManualRedirects({
+      initialUrl: resolvedSource.streamUrl,
+      headers: buildRequestHeaders(resolvedSource.headers, existingOffset),
+      signal: job.controller.signal,
+      ...(ctx.lookup !== undefined ? { lookup: ctx.lookup } : {}),
+      fetchHop: (hopUrl, hopInit, initialHost) =>
+        runWithStallTimeout(
+          job.controller.signal,
+          ctx.idleTimeoutMs,
+          triggerStall,
+          () =>
+            ctx.fetchForSource !== undefined
+              ? ctx.fetchForSource(current.sourceId, hopUrl, hopInit, initialHost)
+              : ctx.fetchImpl(hopUrl, hopInit),
+          (lateResponse) => {
+            void lateResponse.body?.cancel().catch(() => undefined);
+          },
+        ),
+    });
     responseBody = response.body;
-
-    if (response.url && !isHttpDownloadSourceUrl(response.url)) {
-      await responseBody?.cancel().catch(() => undefined);
-      responseBody = null;
-      throw new Error('disallowed-redirect-scheme');
-    }
 
     const appendMode = existingOffset > 0 && response.status === 206;
     if (response.status !== 200 && response.status !== 206) {
@@ -262,7 +271,7 @@ export async function runDownloadTransfer(
       ctx.emitChange();
     }
 
-    writeStream = createWriteStream(partPath, { flags: appendMode ? 'a' : 'w' });
+    writeStream = await openSafePartWriteStream(partPath, appendMode);
     let lastBroadcastMs = ctx.now();
 
     if (response.body && typeof response.body.getReader === 'function') {
@@ -328,6 +337,7 @@ export async function runDownloadTransfer(
       return;
     }
 
+    await assertSafeBeforeDownloadRename(partPath, finalPath);
     await rename(partPath, finalPath);
     const verified = await ctx.validatePath(ctx.downloadsDir, finalPath);
     if (verified === null) {
@@ -399,7 +409,7 @@ export async function runDownloadTransfer(
       return;
     }
     if (reason === 'pause' || reason === 'playback-pause' || reason === 'dispose') {
-      const partBytes = await readPartFileSize(partPath);
+      const partBytes = await readPartFileSize(partPath).catch(() => 0);
       const rec = ctx.records.get(job.key);
       if (rec) {
         const resumeImmediately =
@@ -418,7 +428,7 @@ export async function runDownloadTransfer(
       return;
     }
     if (reason === 'stall-timeout') {
-      const partBytes = await readPartFileSize(partPath);
+      const partBytes = await readPartFileSize(partPath).catch(() => 0);
       const rec = ctx.records.get(job.key);
       if (rec) {
         await ctx.markFailed(job.key, 'download-stall-timeout', {
@@ -429,9 +439,15 @@ export async function runDownloadTransfer(
     }
 
     const errorCode =
-      error instanceof Error && error.message === 'disallowed-redirect-scheme'
-        ? 'invalid-download-url'
-        : 'download-network-error';
+      error instanceof PartFileUnsafeError
+        ? 'download-path-invalid'
+        : error instanceof DownloadRedirectError
+          ? error.reason === 'dns-lookup-failed'
+            ? 'download-network-error'
+            : 'invalid-download-url'
+          : error instanceof Error && error.message === 'disallowed-redirect-scheme'
+            ? 'invalid-download-url'
+            : 'download-network-error';
     await ctx.markFailed(job.key, errorCode);
   } finally {
     if (connectionLease !== null) {

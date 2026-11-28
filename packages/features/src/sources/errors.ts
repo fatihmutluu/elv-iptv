@@ -71,6 +71,13 @@ export function describeSourceFailure(error: ElvError): DescribedSourceFailure {
           httpStatus,
         );
       }
+      if (error.code === 'secret-key-rotated' || error.code === 'storage/secret-key-rotated') {
+        return withStatus(
+          'source.error.secretKeyRotated',
+          'source.hint.secretKeyRotated',
+          httpStatus,
+        );
+      }
       if (
         error.code === 'secret-store-failed' ||
         error.code === 'secret-write-failed' ||

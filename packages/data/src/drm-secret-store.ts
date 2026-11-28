@@ -9,6 +9,7 @@ import {
   type SecretStore,
   setSafeHeader,
 } from '@elv/domain';
+import { isSecretKeyRotatedError } from './secret-errors';
 
 const utf8 = new TextEncoder();
 const PROTO_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
@@ -114,10 +115,15 @@ function parseManifest(parsed: Record<string, unknown>): { isManifest: boolean; 
   return { isManifest: true, count: n };
 }
 
-async function safeGet(secrets: SecretStore, key: string): Promise<string | undefined> {
+async function safeGet(
+  secrets: SecretStore,
+  key: string,
+  propagateKeyRotated: boolean,
+): Promise<string | undefined> {
   try {
     return await secrets.get(key);
-  } catch {
+  } catch (error) {
+    if (propagateKeyRotated && isSecretKeyRotatedError(error)) throw error;
     return undefined;
   }
 }
@@ -131,7 +137,7 @@ async function safeDelete(secrets: SecretStore, key: string): Promise<void> {
 }
 
 async function readChunkCount(secrets: SecretStore, sourceId: string): Promise<number> {
-  const raw = await safeGet(secrets, drmRootKey(sourceId));
+  const raw = await safeGet(secrets, drmRootKey(sourceId), false);
   if (raw === undefined) return 0;
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -183,7 +189,7 @@ export function partitionDrmSpecs(
  * and sharded manifest entries (`source.<id>.drm_specs.0..N-1`).
  */
 export async function loadDrmSpecs(secrets: SecretStore, sourceId: string): Promise<DrmSpecMap> {
-  const raw = await safeGet(secrets, drmRootKey(sourceId));
+  const raw = await safeGet(secrets, drmRootKey(sourceId), true);
   if (raw === undefined) return {};
   let parsed: unknown;
   try {
@@ -200,7 +206,9 @@ export async function loadDrmSpecs(secrets: SecretStore, sourceId: string): Prom
   }
   if (manifest.count === undefined) return {};
   const shards = await Promise.all(
-    Array.from({ length: manifest.count }, (_, i) => safeGet(secrets, drmShardKey(sourceId, i))),
+    Array.from({ length: manifest.count }, (_, i) =>
+      safeGet(secrets, drmShardKey(sourceId, i), true),
+    ),
   );
   for (const shard of shards) {
     if (shard === undefined) continue;

@@ -33,13 +33,13 @@ describe('buildWindowOptions', () => {
 describe('buildWindowOptions player baseline', () => {
   const options = buildWindowOptions('/app/dist/preload/preload.js');
 
-  it('backgroundThrottling is false and the security baseline holds', () => {
+  it('enables backgroundThrottling and preserves the security baseline', () => {
     expect(options.webPreferences).toEqual({
       preload: '/app/dist/preload/preload.js',
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
     });
   });
 });

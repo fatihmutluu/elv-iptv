@@ -46,6 +46,11 @@ export const trProfilesMessages: Readonly<Record<ProfilesMessageId, string>> = {
   'parental.pinLockedOut': 'Çok fazla deneme. {seconds} sn sonra tekrar deneyin.',
   'parental.unlockTitle': 'Ebeveyn kilidini aç',
   'parental.unlockButton': 'Kilidi aç',
+  'parental.reverifyTitle': "Ebeveyn PIN'ini doğrula",
+  'parental.verifyButton': 'Doğrula',
+  'parental.loadErrorMessage':
+    'Ebeveyn denetimleri yüklenemedi. Ayarlar doğrulanana kadar kısıtlı içerikler gizlenir.',
+  'parental.retryLoad': 'Tekrar dene',
   'parental.lockNow': 'Şimdi kilitle',
   'parental.unlockedBadge': 'Kilit açık',
   'parental.lockedBadge': 'Kilitli',

@@ -1,6 +1,40 @@
 import type Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
-import { openHardenedCatalogDatabase } from './catalog-worker.ts';
+import {
+  CATALOG_WORKER_AUTO_SELECT_FAMILY_TIMEOUT_MS,
+  configureCatalogWorkerRuntime,
+  openHardenedCatalogDatabase,
+} from './catalog-worker.ts';
+
+describe('configureCatalogWorkerRuntime', () => {
+  it('enables V8 compile cache and raises Node Happy Eyeballs timeout to 2500ms', () => {
+    const enableCompileCache = vi.fn();
+    const setDefaultAutoSelectFamilyAttemptTimeout = vi.fn();
+
+    configureCatalogWorkerRuntime({
+      enableCompileCache,
+      setDefaultAutoSelectFamilyAttemptTimeout,
+    });
+
+    expect(CATALOG_WORKER_AUTO_SELECT_FAMILY_TIMEOUT_MS).toBe(2_500);
+    expect(enableCompileCache).toHaveBeenCalledTimes(1);
+    expect(setDefaultAutoSelectFamilyAttemptTimeout).toHaveBeenCalledWith(2_500);
+  });
+
+  it('swallows compile-cache or timeout errors safely on runtimes without support', () => {
+    expect(() =>
+      configureCatalogWorkerRuntime({
+        enableCompileCache: () => {
+          throw new Error('unsupported');
+        },
+        setDefaultAutoSelectFamilyAttemptTimeout: () => {
+          throw new Error('unsupported');
+        },
+      }),
+    ).not.toThrow();
+    expect(() => configureCatalogWorkerRuntime({})).not.toThrow();
+  });
+});
 
 describe('openHardenedCatalogDatabase', () => {
   it('creates parent directory with mode 0o700 and hardens db/wal/shm to 0o600 on POSIX', () => {

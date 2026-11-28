@@ -268,6 +268,86 @@ function createNodeTransportFetch(cfg: NodeTransportConfig): FetchLike {
     });
 }
 
+/** Single-hop request descriptor for {@link createDesktopSingleHopTransport}. */
+interface SingleHopTransportRequest {
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly signal?: AbortSignal;
+  readonly allowLegacyTls?: boolean;
+  readonly dnsFamily?: DnsFamilyPreference;
+  readonly hostOverride?: string;
+  readonly initialHost?: string;
+}
+
+/** Single-hop raw HTTP/HTTPS transport preserving 3xx status codes and `Location` headers. */
+export interface DesktopSingleHopTransport {
+  fetchHop(req: SingleHopTransportRequest): ReturnType<FetchLike>;
+}
+
+/**
+ * Creates a single-hop Node HTTP/HTTPS transport that supports opt-in legacy TLS, `dnsFamily`,
+ * and initial-host-scoped `hostOverride` WITHOUT following 3xx redirects internally so callers
+ * can drive manual hop-by-hop SSRF validation.
+ */
+export function createDesktopSingleHopTransport(
+  opts?: DesktopHttpClientOptions,
+): DesktopSingleHopTransport {
+  let legacyAgent: https.Agent | undefined;
+  let modernAgent: https.Agent | undefined;
+
+  const getLegacyAgent = (): https.Agent => {
+    legacyAgent ??= createLegacyTlsAgent();
+    return legacyAgent;
+  };
+  const getModernAgent = (): https.Agent => {
+    modernAgent ??= createModernHttpsAgent();
+    return modernAgent;
+  };
+
+  return {
+    async fetchHop(req: SingleHopTransportRequest) {
+      const hostRes = validateHostOverride(req.hostOverride);
+      if (!hostRes.ok) {
+        throw new Error(hostRes.error.code);
+      }
+      if (!isHttpUrl(req.url)) {
+        throw new TypeError('unsupported URL protocol');
+      }
+      const hostOverride = hostRes.value;
+      const dnsFamily: DnsFamilyPreference = normalizeDnsFamily(req.dnsFamily) ?? 'system';
+      const allowLegacyTls = req.allowLegacyTls === true;
+      const hasCustomNetwork = dnsFamily !== 'system' || hostOverride !== undefined;
+      const hopInit = {
+        headers: req.headers,
+        ...(req.signal !== undefined ? { signal: req.signal } : {}),
+        redirect: 'manual' as const,
+      };
+
+      if (allowLegacyTls && !hasCustomNetwork && opts?.legacyFetchImpl !== undefined) {
+        return opts.legacyFetchImpl(req.url, hopInit);
+      }
+
+      const hopHost = stripBrackets(new URL(req.url).hostname).toLowerCase();
+      const scopedInitialHost =
+        req.initialHost !== undefined && req.initialHost.trim().length > 0
+          ? stripBrackets(req.initialHost.trim()).toLowerCase()
+          : hopHost;
+      const overrideFamily = hostOverride !== undefined ? ipLiteralFamily(hostOverride) : undefined;
+      const transportFetch = createNodeTransportFetch({
+        agent: allowLegacyTls ? getLegacyAgent() : getModernAgent(),
+        dnsFamily,
+        hostOverride,
+        overrideFamily,
+        initialHost: scopedInitialHost,
+        dnsLookup: opts?.dnsLookup ?? dns.lookup,
+        httpRequest: opts?.httpRequest ?? http.request,
+        httpsRequest: opts?.httpsRequest ?? https.request,
+      });
+      return transportFetch(req.url, hopInit);
+    },
+  };
+}
+
 /**
  * Desktop catalog {@link HttpClient}: routes default requests strictly through the standard
  * modern-TLS `fetchImpl`, and routes requests specifying `allowLegacyTls`, `dnsFamily: 'ipv4' | 'ipv6'`,

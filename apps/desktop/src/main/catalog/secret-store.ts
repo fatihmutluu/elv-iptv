@@ -16,6 +16,102 @@ export class SecretStoreUnavailableError extends Error {
   }
 }
 
+/**
+ * Thrown when an existing ciphertext in `secrets.json` cannot be decrypted (e.g. OS key rotated
+ * or lost after a crash before Chromium flushed `Local State`).
+ */
+export class SecretDecryptError extends Error {
+  readonly code = 'storage/secret-key-rotated' as const;
+  readonly key: string;
+
+  constructor(key: string) {
+    super('Stored secret could not be decrypted after OS encryption key change');
+    this.name = 'SecretDecryptError';
+    this.key = key;
+  }
+}
+
+/** Options for {@link createWindowsLocalStateDurabilityCheck}. */
+export interface WindowsLocalStateDurabilityOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly maxWaitMs?: number;
+  readonly initialDelayMs?: number;
+  readonly sleep?: (ms: number) => Promise<void>;
+  readonly log?: (line: string) => void;
+}
+
+type LocalStateKeyStatus = 'ok' | 'missing' | 'corrupt' | 'no-key';
+
+const BASE64_KEY_RE = /^[A-Za-z0-9+/=]+$/;
+
+async function inspectPersistedOsCryptKey(localStatePath: string): Promise<LocalStateKeyStatus> {
+  let raw: string;
+  try {
+    raw = await readFile(localStatePath, 'utf8');
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? 'missing' : 'corrupt';
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return 'corrupt';
+  }
+  if (typeof parsed !== 'object' || parsed === null) return 'corrupt';
+  const osCrypt = (parsed as Record<string, unknown>)['os_crypt'];
+  if (typeof osCrypt !== 'object' || osCrypt === null) return 'no-key';
+  const encryptedKey = (osCrypt as Record<string, unknown>)['encrypted_key'];
+  if (typeof encryptedKey !== 'string') return 'no-key';
+  const trimmed = encryptedKey.trim();
+  return trimmed.length > 0 && BASE64_KEY_RE.test(trimmed) ? 'ok' : 'no-key';
+}
+
+/**
+ * Returns a memoized durability hook verifying that Chromium's `<userData>/Local State` parses
+ * cleanly and contains a persisted `os_crypt.encrypted_key` on Windows (`win32`) with bounded
+ * adaptive backoff (default 2000 ms). Immediate no-op on non-Windows platforms.
+ */
+export function createWindowsLocalStateDurabilityCheck(
+  localStatePath: string,
+  opts?: WindowsLocalStateDurabilityOptions,
+): () => Promise<void> {
+  const platform = opts?.platform ?? process.platform;
+  const maxWaitMs = Math.max(0, Math.floor(opts?.maxWaitMs ?? 2_000));
+  const initialDelayMs = Math.max(1, Math.floor(opts?.initialDelayMs ?? 25));
+  const sleep =
+    opts?.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let confirmed = false;
+
+  return async (): Promise<void> => {
+    if (platform !== 'win32' || confirmed) return;
+    let status = await inspectPersistedOsCryptKey(localStatePath);
+    if (status === 'ok') {
+      confirmed = true;
+      return;
+    }
+    let elapsed = 0;
+    let delay = initialDelayMs;
+    while (elapsed < maxWaitMs) {
+      const waitMs = Math.min(delay, maxWaitMs - elapsed);
+      await sleep(waitMs);
+      elapsed += waitMs;
+      status = await inspectPersistedOsCryptKey(localStatePath);
+      if (status === 'ok') {
+        confirmed = true;
+        return;
+      }
+      delay = Math.min(delay * 2, maxWaitMs);
+    }
+    const reason =
+      status === 'corrupt'
+        ? 'Local State JSON corrupt or truncated'
+        : status === 'missing'
+          ? 'Local State file not yet created'
+          : 'os_crypt.encrypted_key not yet persisted';
+    opts?.log?.(`secret-store: Windows ${reason}`);
+  };
+}
+
 /** Encryption primitive injected into {@link createEncryptedFileSecretStore}. */
 export interface CipherPort {
   isAvailable(): Promise<boolean>;
@@ -152,8 +248,19 @@ async function writeEntriesAtomically(
 export function createEncryptedFileSecretStore(opts: {
   filePath: string;
   cipher: CipherPort;
+  localStatePath?: string;
+  ensureOsKeyDurable?: () => Promise<void>;
+  log?: (line: string) => void;
 }): SecretStore {
   const { filePath, cipher } = opts;
+  const ensureOsKeyDurable =
+    opts.ensureOsKeyDurable ??
+    (opts.localStatePath !== undefined
+      ? createWindowsLocalStateDurabilityCheck(
+          opts.localStatePath,
+          opts.log ? { log: opts.log } : undefined,
+        )
+      : undefined);
   let tail: Promise<unknown> = Promise.resolve();
 
   const enqueue = <T>(job: () => Promise<T>): Promise<T> => {
@@ -178,7 +285,7 @@ export function createEncryptedFileSecretStore(opts: {
           return await cipher.decrypt(new Uint8Array(Buffer.from(encoded, 'base64')));
         } catch (error) {
           if (error instanceof SecretStoreUnavailableError) throw error;
-          return undefined;
+          throw new SecretDecryptError(key);
         }
       });
     },
@@ -187,6 +294,13 @@ export function createEncryptedFileSecretStore(opts: {
       assertKey(key);
       return enqueue(async () => {
         const encrypted = await cipher.encrypt(value);
+        const verified = await cipher.decrypt(encrypted);
+        if (verified !== value) {
+          throw new Error('Secret encryption round-trip verification failed');
+        }
+        if (ensureOsKeyDurable !== undefined) {
+          await ensureOsKeyDurable();
+        }
         const entries = await readEntries(filePath);
         entries[key] = Buffer.from(encrypted).toString('base64');
         await writeEntriesAtomically(filePath, entries);

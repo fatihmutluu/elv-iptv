@@ -405,6 +405,7 @@ describe('createDesktopDownloadManager bulk hardening (Wave Q3-B)', () => {
     const postMgr = createDesktopDownloadManager({
       downloadsDir: postDir,
       fetch: postFetch,
+      lookup: async () => ['93.184.216.34'],
       checkFreeSpace: async () => 300 * 1024 * 1024,
       progressThrottleMs: 0,
     });
@@ -471,6 +472,7 @@ describe('createDesktopDownloadManager bulk hardening (Wave Q3-B)', () => {
     const manager = createDesktopDownloadManager({
       downloadsDir,
       fetch: mixedFetch,
+      lookup: async () => ['93.184.216.34'],
       idleTimeoutMs: 60,
       progressThrottleMs: 0,
     });
@@ -538,6 +540,7 @@ describe('createDesktopDownloadManager bulk hardening (Wave Q3-B)', () => {
     const manager = createDesktopDownloadManager({
       downloadsDir,
       fetchForSource,
+      lookup: async () => ['93.184.216.34'],
       acquireConnection,
       progressThrottleMs: 0,
     });
@@ -710,6 +713,7 @@ describe('createDesktopDownloadManager bulk hardening (Wave Q3-B)', () => {
     const manager = createDesktopDownloadManager({
       downloadsDir,
       checkFreeSpace: async () => null,
+      lookup: async () => ['93.184.216.34'],
       fetch: async () =>
         new Response(new Uint8Array(6).fill(0x11), {
           status: 200,

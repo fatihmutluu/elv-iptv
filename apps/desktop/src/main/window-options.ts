@@ -56,7 +56,7 @@ export function buildWindowOptions(
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
       ...(additionalArguments.length > 0 ? { additionalArguments } : {}),
     },
   };

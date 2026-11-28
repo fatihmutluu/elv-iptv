@@ -20,6 +20,7 @@ import {
   type ProfileContextValue,
   useProfile,
 } from './shared';
+import { broadcastSessionGuardEvent } from './shared/session-guard-channel';
 import type { CatalogUiCache, NavUtility } from './shell';
 
 /** Props of {@link AppShellProfileOverlays}. */
@@ -64,59 +65,137 @@ export function useShellProfileEffects(params: {
   readonly catalog: CatalogService;
   readonly appForeground: boolean;
   readonly playTargetRef: MutableRefObject<PlayTarget | null>;
+  readonly multiViewSeedRef?: MutableRefObject<PlayTarget | null>;
   readonly onResetTransientMemory: () => void;
   readonly onStopPlayback: () => void;
+  readonly onCloseMultiView?: () => void;
+  readonly onClosePopout?: () => void;
 }): void {
-  const { profile, catalog, appForeground, playTargetRef, onResetTransientMemory, onStopPlayback } =
-    params;
+  const {
+    profile,
+    catalog,
+    appForeground,
+    playTargetRef,
+    multiViewSeedRef,
+    onResetTransientMemory,
+    onStopPlayback,
+    onCloseMultiView,
+    onClosePopout,
+  } = params;
   const prevProfileIdRef = useRef(profile.activeProfileId);
   const prevUnlockedRef = useRef(profile.parentalUnlocked);
+  const prevLoadErrorRef = useRef(profile.parentalLoadError);
   const prevForegroundRef = useRef(appForeground);
-  const callbacksRef = useRef({ onResetTransientMemory, onStopPlayback });
-  callbacksRef.current = { onResetTransientMemory, onStopPlayback };
+  const callbacksRef = useRef({
+    onResetTransientMemory,
+    onStopPlayback,
+    onCloseMultiView,
+    onClosePopout,
+  });
+  callbacksRef.current = {
+    onResetTransientMemory,
+    onStopPlayback,
+    onCloseMultiView,
+    onClosePopout,
+  };
 
   useEffect(() => {
     const prevId = prevProfileIdRef.current;
     const prevUnlocked = prevUnlockedRef.current;
+    const prevLoadError = prevLoadErrorRef.current;
     prevProfileIdRef.current = profile.activeProfileId;
     prevUnlockedRef.current = profile.parentalUnlocked;
+    prevLoadErrorRef.current = profile.parentalLoadError;
 
     if (prevId !== profile.activeProfileId) {
       callbacksRef.current.onResetTransientMemory();
       if (playTargetRef.current !== null) {
         callbacksRef.current.onStopPlayback();
       }
+      if (multiViewSeedRef?.current !== null) {
+        callbacksRef.current.onCloseMultiView?.();
+      }
+      callbacksRef.current.onClosePopout?.();
+      broadcastSessionGuardEvent({ type: 'profile-switch', profileId: profile.activeProfileId });
       return;
     }
 
-    if (prevUnlocked && !profile.parentalUnlocked && playTargetRef.current !== null) {
-      const playing = playTargetRef.current;
-      const playingIdentity = targetIdentityKey(playing);
-      const checkPromise =
-        playing.catchup !== undefined && catalog.resolveCatchupStream !== undefined
-          ? catalog.resolveCatchupStream(playing.itemKey, {
-              startMs: playing.catchup.startMs,
-              stopMs: playing.catchup.stopMs,
-              ...(playing.catchup.hasArchive !== undefined
-                ? { hasArchive: playing.catchup.hasArchive }
-                : {}),
-              title: playing.catchup.programmeTitle,
-            })
-          : catalog.resolveStream(playing.itemKey);
-      void checkPromise
-        .then((res) => {
-          if (
-            !res.ok &&
-            res.error.code === 'parental-locked' &&
-            playTargetRef.current !== null &&
-            targetIdentityKey(playTargetRef.current) === playingIdentity
-          ) {
-            callbacksRef.current.onStopPlayback();
-          }
-        })
-        .catch(() => undefined);
+    if (!prevLoadError && profile.parentalLoadError) {
+      if (playTargetRef.current !== null) {
+        callbacksRef.current.onStopPlayback();
+      }
+      if (multiViewSeedRef?.current !== null) {
+        callbacksRef.current.onCloseMultiView?.();
+      }
+      callbacksRef.current.onClosePopout?.();
+      broadcastSessionGuardEvent({ type: 'parental-relock', profileId: profile.activeProfileId });
+      return;
     }
-  }, [catalog, playTargetRef, profile.activeProfileId, profile.parentalUnlocked]);
+
+    if (prevUnlocked && !profile.parentalUnlocked) {
+      broadcastSessionGuardEvent({ type: 'parental-relock', profileId: profile.activeProfileId });
+      if (profile.parentalLoadError) {
+        if (playTargetRef.current !== null) callbacksRef.current.onStopPlayback();
+        if (multiViewSeedRef?.current !== null) callbacksRef.current.onCloseMultiView?.();
+        callbacksRef.current.onClosePopout?.();
+        return;
+      }
+      if (
+        multiViewSeedRef?.current !== null &&
+        (profile.parentalSettings?.enabled ||
+          (profile.parentalLocks?.length ?? 0) > 0 ||
+          profile.activeProfile?.isKids)
+      ) {
+        callbacksRef.current.onCloseMultiView?.();
+      }
+      if (playTargetRef.current !== null) {
+        const playing = playTargetRef.current;
+        const playingIdentity = targetIdentityKey(playing);
+        const checkPromise =
+          playing.catchup !== undefined && catalog.resolveCatchupStream !== undefined
+            ? catalog.resolveCatchupStream(playing.itemKey, {
+                startMs: playing.catchup.startMs,
+                stopMs: playing.catchup.stopMs,
+                ...(playing.catchup.hasArchive !== undefined
+                  ? { hasArchive: playing.catchup.hasArchive }
+                  : {}),
+                title: playing.catchup.programmeTitle,
+              })
+            : catalog.resolveStream(playing.itemKey);
+        void checkPromise
+          .then((res) => {
+            if (
+              !res.ok &&
+              (res.error.code === 'parental-locked' ||
+                res.error.code === 'source-excluded' ||
+                res.error.code === 'parental-state-unavailable') &&
+              playTargetRef.current !== null &&
+              targetIdentityKey(playTargetRef.current) === playingIdentity
+            ) {
+              callbacksRef.current.onStopPlayback();
+            }
+          })
+          .catch(() => {
+            if (
+              playTargetRef.current !== null &&
+              targetIdentityKey(playTargetRef.current) === playingIdentity
+            ) {
+              callbacksRef.current.onStopPlayback();
+            }
+          });
+      }
+    }
+  }, [
+    catalog,
+    multiViewSeedRef,
+    playTargetRef,
+    profile.activeProfile?.isKids,
+    profile.activeProfileId,
+    profile.parentalLoadError,
+    profile.parentalLocks?.length,
+    profile.parentalSettings?.enabled,
+    profile.parentalUnlocked,
+  ]);
 
   useEffect(() => {
     const wasForeground = prevForegroundRef.current;
@@ -155,11 +234,13 @@ export function useShellSourceControls(params: {
     profileId: profile.activeProfileId,
     parentalUnlocked: profile.parentalUnlocked,
     excludedSourceIds,
+    parentalLoadError: profile.parentalLoadError,
   });
   profileScopeRef.current = {
     profileId: profile.activeProfileId,
     parentalUnlocked: profile.parentalUnlocked,
     excludedSourceIds,
+    parentalLoadError: profile.parentalLoadError,
   };
   const onRefreshCatalogNow = useCallback(async () => {
     for (const s of sourcesRef.current) {
@@ -273,6 +354,7 @@ export function AppShellProfileOverlays({
     hasGuardPin,
     guardPinProfileId,
     parentalUnlocked,
+    parentalLoadError,
     profilePickerOpen,
     pinDialog,
     switchProfile,
@@ -286,7 +368,7 @@ export function AppShellProfileOverlays({
   } = useProfile();
 
   const handleSelectProfile = (targetId: string) => {
-    if (targetId === activeProfileId) {
+    if (targetId === activeProfileId || parentalLoadError) {
       closeProfilePicker();
       return;
     }
@@ -328,6 +410,7 @@ export function AppShellProfileOverlays({
         <PinEntryOverlay
           mode={pinDialog.mode}
           {...(pinDialog.title !== undefined ? { title: pinDialog.title } : {})}
+          {...(pinDialog.verifyOnly ? { verifyOnly: true } : {})}
           onVerify={(pin) =>
             pinDialog.verifyOnly
               ? verifyParentalPin(pin, pinDialog.profileId)

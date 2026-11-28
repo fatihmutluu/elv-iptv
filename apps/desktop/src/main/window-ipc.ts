@@ -14,8 +14,12 @@ import {
   type TrayLabels,
   WINDOW_CHANNELS,
 } from '../shared/window-ipc.ts';
+import { assertTrustedSenderFrame, type TrustedSenderEventLike } from './trusted-sender.ts';
 
-type IpcHandler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
+type IpcHandler = (
+  event: TrustedSenderEventLike & { sender: unknown },
+  ...args: unknown[]
+) => unknown;
 
 /** Minimal `ipcMain` surface used by {@link registerWindowIpc}. */
 export interface WindowIpcMainLike {
@@ -63,6 +67,7 @@ export interface WindowIpcDeps {
   onGetPopoutPayload?(sender: unknown): PopoutLaunchPayload | null;
   onDockPopout?(sender: unknown, payload: PopoutDockPayload): Promise<void> | void;
   onOpenExternalUrl?(url: string): Promise<boolean> | boolean;
+  devOrigin?: string | null;
   log?(line: string): void;
 }
 
@@ -117,15 +122,21 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     });
   };
 
-  ipcMain.handle(WINDOW_CHANNELS.getAlwaysOnTop, ({ sender }) => {
-    const win = getWindowFromSender(sender);
+  const assertTrusted = (event: TrustedSenderEventLike, channel: string): void => {
+    assertTrustedSenderFrame(event, channel, deps.devOrigin, log);
+  };
+
+  ipcMain.handle(WINDOW_CHANNELS.getAlwaysOnTop, async (event) => {
+    assertTrusted(event, WINDOW_CHANNELS.getAlwaysOnTop);
+    const win = getWindowFromSender(event.sender);
     if (!win || win.isDestroyed()) return false;
     watchWindow(win);
     return win.isAlwaysOnTop();
   });
 
-  ipcMain.handle(WINDOW_CHANNELS.setAlwaysOnTop, ({ sender }, enabled) => {
-    const win = getWindowFromSender(sender);
+  ipcMain.handle(WINDOW_CHANNELS.setAlwaysOnTop, async (event, enabled) => {
+    assertTrusted(event, WINDOW_CHANNELS.setAlwaysOnTop);
+    const win = getWindowFromSender(event.sender);
     if (!isAlwaysOnTopFlag(enabled)) {
       log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.setAlwaysOnTop} payload`);
       return win && !win.isDestroyed() ? win.isAlwaysOnTop() : false;
@@ -141,8 +152,9 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     return actual;
   });
 
-  ipcMain.handle(WINDOW_CHANNELS.setAspectRatioLock, ({ sender }, enabled) => {
-    const win = getWindowFromSender(sender);
+  ipcMain.handle(WINDOW_CHANNELS.setAspectRatioLock, async (event, enabled) => {
+    assertTrusted(event, WINDOW_CHANNELS.setAspectRatioLock);
+    const win = getWindowFromSender(event.sender);
     if (!isAspectRatioLockFlag(enabled)) {
       log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.setAspectRatioLock} payload`);
       return win && !win.isDestroyed() ? (aspectRatioLocked.get(win) ?? false) : false;
@@ -153,7 +165,8 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     return enabled;
   });
 
-  ipcMain.handle(WINDOW_CHANNELS.setMinimizeToTray, (_event, enabled, rawLabels) => {
+  ipcMain.handle(WINDOW_CHANNELS.setMinimizeToTray, async (event, enabled, rawLabels) => {
+    assertTrusted(event, WINDOW_CHANNELS.setMinimizeToTray);
     if (!isMinimizeToTrayFlag(enabled)) {
       log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.setMinimizeToTray} payload`);
       return deps.getMinimizeToTray?.() ?? false;
@@ -169,7 +182,8 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     return deps.onSetMinimizeToTray ? deps.onSetMinimizeToTray(enabled, labels) : enabled;
   });
 
-  ipcMain.handle(WINDOW_CHANNELS.openPopout, async (_event, payload) => {
+  ipcMain.handle(WINDOW_CHANNELS.openPopout, async (event, payload) => {
+    assertTrusted(event, WINDOW_CHANNELS.openPopout);
     if (!isPopoutLaunchPayload(payload)) {
       log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.openPopout} payload`);
       return false;
@@ -178,23 +192,27 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     return Boolean(await deps.onOpenPopout(sanitizePopoutLaunchPayload(payload)));
   });
 
-  ipcMain.handle(WINDOW_CHANNELS.closePopout, async () => {
+  ipcMain.handle(WINDOW_CHANNELS.closePopout, async (event) => {
+    assertTrusted(event, WINDOW_CHANNELS.closePopout);
     await deps.onClosePopout?.();
   });
 
-  ipcMain.handle(WINDOW_CHANNELS.getPopoutPayload, ({ sender }) => {
-    return deps.onGetPopoutPayload?.(sender) ?? null;
+  ipcMain.handle(WINDOW_CHANNELS.getPopoutPayload, async (event) => {
+    assertTrusted(event, WINDOW_CHANNELS.getPopoutPayload);
+    return deps.onGetPopoutPayload?.(event.sender) ?? null;
   });
 
-  ipcMain.handle(WINDOW_CHANNELS.dockPopout, async ({ sender }, payload) => {
+  ipcMain.handle(WINDOW_CHANNELS.dockPopout, async (event, payload) => {
+    assertTrusted(event, WINDOW_CHANNELS.dockPopout);
     if (!isPopoutDockPayload(payload)) {
       log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.dockPopout} payload`);
       return;
     }
-    await deps.onDockPopout?.(sender, sanitizePopoutDockPayload(payload));
+    await deps.onDockPopout?.(event.sender, sanitizePopoutDockPayload(payload));
   });
 
-  ipcMain.handle(WINDOW_CHANNELS.openExternalUrl, async (_event, rawUrl) => {
+  ipcMain.handle(WINDOW_CHANNELS.openExternalUrl, async (event, rawUrl) => {
+    assertTrusted(event, WINDOW_CHANNELS.openExternalUrl);
     if (!isAllowedExternalTrailerUrl(rawUrl)) {
       log?.(`window ipc: blocked disallowed ${WINDOW_CHANNELS.openExternalUrl} payload`);
       return false;

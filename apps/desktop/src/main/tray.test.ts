@@ -76,8 +76,8 @@ describe('tray controller (#158)', () => {
     });
 
     expect(controller.isShown()).toBe(false);
-    controller.ensureShown();
-    controller.ensureShown();
+    expect(controller.ensureShown()).toBe(true);
+    expect(controller.ensureShown()).toBe(true);
     expect(created).toHaveLength(1);
     expect(controller.isShown()).toBe(true);
     expect(created[0]?.getTooltip()).toBe('ELV IPTV');
@@ -104,10 +104,63 @@ describe('tray controller (#158)', () => {
     controller.destroy();
 
     // Can re-show after destroy
-    controller.ensureShown();
+    expect(controller.ensureShown()).toBe(true);
     expect(created).toHaveLength(2);
     expect(controller.isShown()).toBe(true);
     controller.destroy();
+  });
+
+  it('catches createTray failure, logs once, marks session unavailable, and returns false without throwing', () => {
+    const logs: string[] = [];
+    const createTray = vi.fn(() => {
+      throw new Error('StatusNotifierWatcher unavailable');
+    });
+
+    const controller = createTrayController({
+      icon: { kind: 'fake-icon' },
+      createTray,
+      buildMenu: (template) => ({ template }),
+      onRestore: vi.fn(),
+      onQuit: vi.fn(),
+      log: (line) => logs.push(line),
+    });
+
+    expect(controller.ensureShown()).toBe(false);
+    expect(controller.isShown()).toBe(false);
+    expect(createTray).toHaveBeenCalledTimes(1);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain('StatusNotifierWatcher unavailable');
+
+    // Subsequent calls return false immediately without retrying or re-logging
+    expect(controller.ensureShown()).toBe(false);
+    expect(createTray).toHaveBeenCalledTimes(1);
+    expect(logs).toHaveLength(1);
+    expect(() => controller.destroy()).not.toThrow();
+  });
+
+  it('cleans up partial tray instance if setToolTip or setContextMenu throws', () => {
+    const logs: string[] = [];
+    const partial = fakeTray();
+    partial.tray.setContextMenu = () => {
+      throw new Error('libappindicator menu error');
+    };
+    const createTray = vi.fn(() => partial.tray);
+
+    const controller = createTrayController({
+      icon: { kind: 'fake-icon' },
+      createTray,
+      buildMenu: (template) => ({ template }),
+      onRestore: vi.fn(),
+      onQuit: vi.fn(),
+      log: (line) => logs.push(line),
+    });
+
+    expect(controller.ensureShown()).toBe(false);
+    expect(partial.isDestroyed()).toBe(true);
+    expect(controller.isShown()).toBe(false);
+    expect(logs).toHaveLength(1);
+    expect(controller.ensureShown()).toBe(false);
+    expect(createTray).toHaveBeenCalledTimes(1);
   });
 
   it('restores a hidden or minimized window, focuses it, and notifies renderer via window:restored', () => {

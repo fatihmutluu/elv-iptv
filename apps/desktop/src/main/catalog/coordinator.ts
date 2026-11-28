@@ -1,5 +1,6 @@
 import type { SecretStore } from '@elv/domain';
 import type { TelemetryRecordRequest } from '../../shared/sync-ipc.ts';
+import { SecretDecryptError } from './secret-store.ts';
 import { isWorkerToMainMessage, type MainToWorkerMessage } from './worker-protocol.ts';
 
 /** Subset of Electron's `UtilityProcess` required by {@link createCatalogCoordinator}. */
@@ -88,14 +89,22 @@ export function createCatalogCoordinator<TPort = unknown>(
         await secrets.delete(msg.key);
         child.postMessage({ type: 'secret-reply', reqId: msg.reqId, ok: true, value: null });
       }
-    } catch {
-      log('catalog coordinator: secret store operation failed');
+    } catch (error) {
+      const isKeyRotated =
+        error instanceof SecretDecryptError ||
+        (error instanceof Error &&
+          (error as { code?: unknown }).code === 'storage/secret-key-rotated');
+      log(
+        isKeyRotated
+          ? 'catalog coordinator: secret decryption failed (key rotated)'
+          : 'catalog coordinator: secret store operation failed',
+      );
       try {
         child.postMessage({
           type: 'secret-reply',
           reqId: msg.reqId,
           ok: false,
-          message: 'secret store failed',
+          message: isKeyRotated ? 'storage/secret-key-rotated' : 'secret store failed',
         });
       } catch {
         // worker already exited

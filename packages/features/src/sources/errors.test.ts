@@ -24,6 +24,7 @@ describe('describeSourceFailure, extractHttpStatus, sanitizeErrorDetail and isEm
       elvError('source-format', 'too-large'),
       elvError('source-format', 'not-m3u'),
       elvError('storage', 'import-in-progress'),
+      elvError('storage', 'secret-key-rotated'),
       elvError('storage', 'secret-store-failed'),
       elvError('storage', 'source-write-failed'),
     ];

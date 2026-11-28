@@ -15,7 +15,9 @@ import {
   createAesGcmTestCipher,
   createEncryptedFileSecretStore,
   createSafeStorageCipher,
+  createWindowsLocalStateDurabilityCheck,
   type SafeStorageLike,
+  SecretDecryptError,
   SecretStoreUnavailableError,
 } from './secret-store.ts';
 
@@ -219,26 +221,159 @@ describe('createEncryptedFileSecretStore', () => {
     await expect(store.get('source.s1.xtream')).rejects.toBeInstanceOf(SecretStoreUnavailableError);
   });
 
-  it('treats corrupted JSON or corrupted entry ciphertext as missing and recovers on next write', async () => {
+  it('throws SecretDecryptError without overwriting ciphertext when entry ciphertext is corrupt or OS key rotated', async () => {
     const dir = makeTempDir();
     const filePath = join(dir, 'secrets.json');
-    const cipher = createAesGcmTestCipher();
-    const store = createEncryptedFileSecretStore({ filePath, cipher });
+    const cipherA = createAesGcmTestCipher();
+    const cipherB = createAesGcmTestCipher();
+    const storeA = createEncryptedFileSecretStore({ filePath, cipher: cipherA });
 
+    // Corrupted JSON file still recovers cleanly on next write
     writeFileSync(filePath, '{not-json');
-    expect(await store.get('source.s1.xtream')).toBeUndefined();
+    expect(await storeA.get('source.s1.xtream')).toBeUndefined();
 
-    await store.set('source.s1.xtream', 'fresh-value');
-    expect(await store.get('source.s1.xtream')).toBe('fresh-value');
+    await storeA.set('source.s1.xtream', 'fresh-value');
+    expect(await storeA.get('source.s1.xtream')).toBe('fresh-value');
+    const savedBeforeRotation = readFileSync(filePath, 'utf8');
 
-    writeFileSync(
+    // Simulating OS key rotation (new cipher key) throws SecretDecryptError and preserves ciphertext on disk
+    const storeB = createEncryptedFileSecretStore({ filePath, cipher: cipherB });
+    await expect(storeB.get('source.s1.xtream')).rejects.toSatisfy((err: unknown) => {
+      return err instanceof SecretDecryptError && err.code === 'storage/secret-key-rotated';
+    });
+    expect(readFileSync(filePath, 'utf8')).toBe(savedBeforeRotation);
+
+    // Corrupted entry ciphertext also throws SecretDecryptError and preserves file content
+    const corruptPayload = JSON.stringify({
+      version: 1,
+      entries: { 'source.s1.xtream': 'bm90LWEtdmFsaWQtY2lwaGVydGV4dA==' },
+    });
+    writeFileSync(filePath, corruptPayload);
+    await expect(storeA.get('source.s1.xtream')).rejects.toBeInstanceOf(SecretDecryptError);
+    expect(readFileSync(filePath, 'utf8')).toBe(corruptPayload);
+
+    // Explicit user re-save still recovers cleanly
+    await storeA.set('source.s1.xtream', 're-entered-value');
+    expect(await storeA.get('source.s1.xtream')).toBe('re-entered-value');
+  });
+
+  it('verifies round-trip decryption and optional ensureOsKeyDurable before writing secrets.json', async () => {
+    const dir = makeTempDir();
+    const filePath = join(dir, 'secrets.json');
+
+    // Broken cipher returning wrong plaintext on decrypt must abort before writing secrets.json
+    const brokenCipher: CipherPort = {
+      isAvailable: async () => true,
+      encrypt: async () => new Uint8Array([1, 2, 3]),
+      decrypt: async () => 'wrong-plaintext',
+    };
+    const brokenStore = createEncryptedFileSecretStore({ filePath, cipher: brokenCipher });
+    await expect(brokenStore.set('source.s1.xtream', 'expected')).rejects.toThrow(/round-trip/i);
+    expect(existsSync(filePath)).toBe(false);
+
+    // ensureOsKeyDurable hook runs before writing secrets.json
+    const order: string[] = [];
+    const base = createAesGcmTestCipher();
+    const orderedStore = createEncryptedFileSecretStore({
       filePath,
-      JSON.stringify({
-        version: 1,
-        entries: { 'source.s1.xtream': 'bm90LWEtdmFsaWQtY2lwaGVydGV4dA==' },
-      }),
-    );
-    expect(await store.get('source.s1.xtream')).toBeUndefined();
+      cipher: {
+        isAvailable: () => base.isAvailable(),
+        encrypt: async (p) => {
+          order.push('encrypt');
+          return base.encrypt(p);
+        },
+        decrypt: async (ct) => {
+          order.push('decrypt-verify');
+          return base.decrypt(ct);
+        },
+      },
+      ensureOsKeyDurable: async () => {
+        expect(existsSync(filePath)).toBe(false);
+        order.push('durable-check');
+      },
+    });
+    await orderedStore.set('source.s1.xtream', 'secret-val');
+    expect(order).toEqual(['encrypt', 'decrypt-verify', 'durable-check']);
+    expect(existsSync(filePath)).toBe(true);
+  });
+
+  it('createWindowsLocalStateDurabilityCheck verifies os_crypt.encrypted_key on win32 with bounded backoff and no-ops on non-win32', async () => {
+    const dir = makeTempDir();
+    const localStatePath = join(dir, 'Local State');
+
+    // Non-win32 is an immediate no-op without waiting
+    const nonWinSleep = vi.fn(async () => undefined);
+    const macCheck = createWindowsLocalStateDurabilityCheck(localStatePath, {
+      platform: 'darwin',
+      sleep: nonWinSleep,
+    });
+    await macCheck();
+    expect(nonWinSleep).not.toHaveBeenCalled();
+
+    // Win32 polls until Local State appears with os_crypt.encrypted_key, then caches durability
+    let polls = 0;
+    const sleepCalls: number[] = [];
+    const winCheck = createWindowsLocalStateDurabilityCheck(localStatePath, {
+      platform: 'win32',
+      maxWaitMs: 250,
+      initialDelayMs: 25,
+      sleep: async (ms) => {
+        sleepCalls.push(ms);
+        polls += 1;
+        if (polls === 2) {
+          writeFileSync(
+            localStatePath,
+            JSON.stringify({ os_crypt: { encrypted_key: 'RFBBUEk=' } }),
+            'utf8',
+          );
+        }
+      },
+    });
+    await winCheck();
+    expect(sleepCalls).toEqual([25, 50]);
+    // Cached after verified durable — zero extra waits
+    await winCheck();
+    expect(sleepCalls).toEqual([25, 50]);
+
+    // Bounded wait when Local State never flushes: logs warning and returns cleanly without blocking forever
+    const missingDir = makeTempDir();
+    const missingSleep: number[] = [];
+    const logs: string[] = [];
+    const missingCheck = createWindowsLocalStateDurabilityCheck(join(missingDir, 'Local State'), {
+      platform: 'win32',
+      maxWaitMs: 100,
+      initialDelayMs: 25,
+      sleep: async (ms) => {
+        missingSleep.push(ms);
+      },
+      log: (line) => logs.push(line),
+    });
+    await missingCheck();
+    expect(missingSleep.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(100);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).not.toContain(missingDir);
+
+    // Corrupt/truncated Local State JSON logs explicit warning and stays unconfirmed until repaired
+    const corruptDir = makeTempDir();
+    const corruptPath = join(corruptDir, 'Local State');
+    writeFileSync(corruptPath, '{"os_crypt": {"encrypted_key":', 'utf8');
+    const corruptLogs: string[] = [];
+    const corruptCheck = createWindowsLocalStateDurabilityCheck(corruptPath, {
+      platform: 'win32',
+      maxWaitMs: 20,
+      initialDelayMs: 10,
+      sleep: async () => undefined,
+      log: (line) => corruptLogs.push(line),
+    });
+    await corruptCheck();
+    expect(corruptLogs).toHaveLength(1);
+    expect(corruptLogs[0]).toMatch(/parse|corrupt|truncated/i);
+    expect(corruptLogs[0]).not.toContain(corruptDir);
+
+    // Repair Local State -> subsequent check confirms durability without logging another warning
+    writeFileSync(corruptPath, JSON.stringify({ os_crypt: { encrypted_key: 'RFBBUEk=' } }), 'utf8');
+    await corruptCheck();
+    expect(corruptLogs).toHaveLength(1);
   });
 
   it('rethrows non-ENOENT readFile errors instead of treating unreadable secrets.json as empty', async () => {

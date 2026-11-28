@@ -4,6 +4,7 @@ import {
   type CatalogPortMessage,
   isCatalogConnectMessage,
 } from '../../shared/catalog-ipc.ts';
+import { isTrustedSenderFrame, type TrustedSenderEventLike } from '../trusted-sender.ts';
 import type { CatalogCoordinator } from './coordinator.ts';
 
 /** Subset of Electron's `WebContents` used by {@link registerCatalogIpc}. */
@@ -21,7 +22,7 @@ export interface CatalogWebContentsLike<TPort = unknown> {
 }
 
 type CatalogIpcListener<TPort> = (
-  event: { sender: CatalogWebContentsLike<TPort> },
+  event: TrustedSenderEventLike & { sender: CatalogWebContentsLike<TPort> },
   ...args: unknown[]
 ) => unknown;
 
@@ -35,6 +36,7 @@ export interface CatalogIpcMainLike<TPort = unknown> {
 export interface CatalogIpcDeps<TPort = unknown> {
   ipcMain: CatalogIpcMainLike<TPort>;
   coordinator: CatalogCoordinator<TPort>;
+  devOrigin?: string | null;
   log: (line: string) => void;
 }
 
@@ -107,7 +109,12 @@ export function registerCatalogIpc<TPort = unknown>(deps: CatalogIpcDeps<TPort>)
     }
   });
 
-  const onConnect: CatalogIpcListener<TPort> = ({ sender }, message) => {
+  const onConnect: CatalogIpcListener<TPort> = (event, message) => {
+    if (!isTrustedSenderFrame(event, deps.devOrigin)) {
+      log(`catalog ipc: rejected untrusted sender on ${CATALOG_CHANNELS.connect}`);
+      return;
+    }
+    const { sender } = event;
     if (!isCatalogConnectMessage(message)) {
       log(`catalog ipc: dropped an invalid ${CATALOG_CHANNELS.connect} message`);
       return;

@@ -22,6 +22,7 @@ import {
   safeUnlink,
   writeIndexAtomically,
 } from './download-io.ts';
+import type { DownloadDnsLookup } from './download-redirect.ts';
 import {
   type ActiveDownloadJob,
   type DownloadAbortReason,
@@ -40,7 +41,13 @@ const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
 export interface DesktopDownloadManagerOptions {
   readonly downloadsDir: string;
   readonly fetch?: typeof globalThis.fetch;
-  readonly fetchForSource?: (sourceId: string, url: string, init: RequestInit) => Promise<Response>;
+  readonly fetchForSource?: (
+    sourceId: string,
+    url: string,
+    init: RequestInit,
+    initialHost?: string,
+  ) => Promise<Response>;
+  readonly lookup?: DownloadDnsLookup;
   readonly resolveStream?: (
     itemKey: string,
     sourceId: string,
@@ -76,7 +83,7 @@ export interface DesktopDownloadManager extends DownloadManagerPort {
 export function createDesktopDownloadManager(
   options: DesktopDownloadManagerOptions,
 ): DesktopDownloadManager {
-  const { downloadsDir, log, resolveStream, fetchForSource, acquireConnection } = options;
+  const { downloadsDir, log, resolveStream, fetchForSource, acquireConnection, lookup } = options;
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const checkFreeSpace = options.checkFreeSpace ?? defaultCheckFreeSpace;
   const now = options.now ?? (() => Date.now());
@@ -240,6 +247,7 @@ export function createDesktopDownloadManager(
     sources,
     fetchImpl,
     fetchForSource,
+    lookup,
     resolveStream,
     acquireConnection,
     checkFreeSpace,

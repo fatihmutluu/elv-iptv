@@ -1,4 +1,5 @@
 import type { CatalogService } from '@elv/data';
+import { createProfileScopedElvMethods } from './profile-scoped-elv-methods';
 import {
   createProfileScopedBrowseMethods,
   filterByItemKey,
@@ -31,18 +32,10 @@ function filterAndSliceBySourceId<T extends { readonly sourceId: string }>(
   return filtered.slice(0, safeLimit);
 }
 
-function mergeExcludedSources(
-  callerExcluded: readonly string[] | undefined,
-  profileExcluded: ReadonlySet<string>,
-): readonly string[] | undefined {
-  if (profileExcluded.size === 0) return callerExcluded;
-  return Array.from(new Set([...(callerExcluded ?? []), ...profileExcluded]));
-}
-
 /**
  * Wraps a {@link CatalogService} so every catalog read, stream resolution, and user-state
  * read/write automatically inherits the active profile ID, temporary parental-unlock state,
- * and per-profile source exclusions unless explicitly overridden by the caller.
+ * per-profile source exclusions, and strict fail-closed withholding on `parentalLoadError`.
  */
 export function createProfileScopedCatalog(
   catalog: CatalogService,
@@ -100,12 +93,6 @@ export function createProfileScopedCatalog(
   const getRating = c.getRating?.bind(c);
   const listRatings = c.listRatings?.bind(c);
   const listRatingMap = c.listRatingMap?.bind(c);
-  const searchElvItemKeysByAlias = c.searchElvItemKeysByAlias?.bind(c);
-  const listElvImdbGenres = c.listElvImdbGenres?.bind(c);
-  const listElvItemsByImdbGenre = c.listElvItemsByImdbGenre?.bind(c);
-  const getElvRecommendations = c.getElvRecommendations?.bind(c);
-  const listElvFranchiseItems = c.listElvFranchiseItems?.bind(c);
-  const listElvPersonLibraryItems = c.listElvPersonLibraryItems?.bind(c);
   const excludedFor = (effectivePid: string, scope: ProfileCatalogScope) =>
     resolveExcludedSourceIds(c, effectivePid, scope);
 
@@ -146,6 +133,7 @@ export function createProfileScopedCatalog(
       ? {
           listReminders: async (profileId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const pid = profileId ?? scope.profileId;
             const [excluded, rows] = await Promise.all([
               excludedFor(pid, scope),
@@ -165,7 +153,9 @@ export function createProfileScopedCatalog(
             return upsertReminder({
               ...input,
               profileId: input.profileId ?? scope.profileId,
-              parentalUnlocked: input.parentalUnlocked ?? scope.parentalUnlocked,
+              parentalUnlocked: scope.parentalLoadError
+                ? false
+                : (input.parentalUnlocked ?? scope.parentalUnlocked),
             });
           },
         }
@@ -220,6 +210,7 @@ export function createProfileScopedCatalog(
       ? {
           listContinueWatching: async (limit, profileId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const pid = profileId ?? scope.profileId;
             const excluded = await excludedFor(pid, scope);
             const fetchLimit = excluded.size > 0 ? resolveExcludedFetchLimit(limit) : limit;
@@ -235,6 +226,7 @@ export function createProfileScopedCatalog(
       ? {
           listWatched: async (limit, profileId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const pid = profileId ?? scope.profileId;
             const excluded = await excludedFor(pid, scope);
             const fetchLimit = excluded.size > 0 ? resolveExcludedFetchLimit(limit) : limit;
@@ -295,6 +287,7 @@ export function createProfileScopedCatalog(
       ? {
           listFavorites: async (limit, profileId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const pid = profileId ?? scope.profileId;
             const excluded = await excludedFor(pid, scope);
             const fetchLimit = excluded.size > 0 ? resolveExcludedFetchLimit(limit) : limit;
@@ -310,6 +303,7 @@ export function createProfileScopedCatalog(
       ? {
           listFavoriteKeys: async (profileId) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const pid = profileId ?? scope.profileId;
             const [excluded, keys] = await Promise.all([
               excludedFor(pid, scope),
@@ -325,6 +319,7 @@ export function createProfileScopedCatalog(
       ? {
           listMyListNewEpisodes: async (limit, profileId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const pid = profileId ?? scope.profileId;
             const excluded = await excludedFor(pid, scope);
             const fetchLimit = excluded.size > 0 ? resolveExcludedFetchLimit(limit) : limit;
@@ -379,6 +374,7 @@ export function createProfileScopedCatalog(
       ? {
           listRecentChannels: async (limit, profileId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const pid = profileId ?? scope.profileId;
             const excluded = await excludedFor(pid, scope);
             const fetchLimit = excluded.size > 0 ? resolveExcludedFetchLimit(limit) : limit;
@@ -433,8 +429,9 @@ export function createProfileScopedCatalog(
       : {}),
     ...(listCustomGroups
       ? {
-          listCustomGroups: (profileId, opts) => {
+          listCustomGroups: async (profileId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             return listCustomGroups(profileId ?? scope.profileId, {
               ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
@@ -460,130 +457,12 @@ export function createProfileScopedCatalog(
     ...(c.removeChannelFromCustomGroup
       ? { removeChannelFromCustomGroup: c.removeChannelFromCustomGroup.bind(c) }
       : {}),
-    ...(c.getVodEnrichment ? { getVodEnrichment: c.getVodEnrichment.bind(c) } : {}),
-    ...(c.enrichVodItem ? { enrichVodItem: c.enrichVodItem.bind(c) } : {}),
-    ...(c.getElvEnrichmentForKeys
-      ? { getElvEnrichmentForKeys: c.getElvEnrichmentForKeys.bind(c) }
-      : {}),
-    ...(c.getElvTitleDetail ? { getElvTitleDetail: c.getElvTitleDetail.bind(c) } : {}),
-    ...(c.enrichElvPriorityKeys ? { enrichElvPriorityKeys: c.enrichElvPriorityKeys.bind(c) } : {}),
-    ...(c.runElvBackgroundMatching
-      ? { runElvBackgroundMatching: c.runElvBackgroundMatching.bind(c) }
-      : {}),
-    ...(c.recordPlaybackQuality ? { recordPlaybackQuality: c.recordPlaybackQuality.bind(c) } : {}),
-    ...(c.recordPlaybackVariantFailure
-      ? { recordPlaybackVariantFailure: c.recordPlaybackVariantFailure.bind(c) }
-      : {}),
-    ...(c.setElvManualMatch ? { setElvManualMatch: c.setElvManualMatch.bind(c) } : {}),
-    ...(c.wipeElvEnrichment ? { wipeElvEnrichment: c.wipeElvEnrichment.bind(c) } : {}),
-    ...(searchElvItemKeysByAlias
-      ? {
-          searchElvItemKeysByAlias: async (query, opts) => {
-            const scope = getScope();
-            const excluded = await excludedFor(scope.profileId, scope);
-            const mergedExcluded = mergeExcludedSources(opts?.excludedSourceIds, excluded);
-            const nextOpts =
-              mergedExcluded !== undefined ? { ...opts, excludedSourceIds: mergedExcluded } : opts;
-            const keys = await searchElvItemKeysByAlias(query, nextOpts);
-            return excluded.size === 0
-              ? keys
-              : keys.filter((k) => !isKeyFromExcludedSource(k, excluded));
-          },
-        }
-      : {}),
-    ...(listElvImdbGenres
-      ? {
-          listElvImdbGenres: async (kind, opts) => {
-            const scope = getScope();
-            const merged = mergeParentalOpts(opts, scope);
-            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
-            const mergedExcluded = mergeExcludedSources(opts?.excludedSourceIds, excluded);
-            const nextOpts =
-              mergedExcluded !== undefined
-                ? { ...merged, excludedSourceIds: mergedExcluded }
-                : merged;
-            return listElvImdbGenres(kind, nextOpts);
-          },
-        }
-      : {}),
-    ...(listElvItemsByImdbGenre
-      ? {
-          listElvItemsByImdbGenre: async (kind, genre, opts) => {
-            const scope = getScope();
-            const merged = mergeParentalOpts(opts, scope);
-            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
-            const mergedExcluded = mergeExcludedSources(opts?.excludedSourceIds, excluded);
-            const nextOpts =
-              mergedExcluded !== undefined
-                ? { ...merged, excludedSourceIds: mergedExcluded }
-                : merged;
-            return filterBySourceId(await listElvItemsByImdbGenre(kind, genre, nextOpts), excluded);
-          },
-        }
-      : {}),
-    ...(getElvRecommendations
-      ? {
-          getElvRecommendations: async (opts) => {
-            const scope = getScope();
-            const merged = mergeParentalOpts(opts, scope);
-            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
-            const mergedExcluded = mergeExcludedSources(opts.excludedSourceIds, excluded);
-            const nextOpts =
-              mergedExcluded !== undefined
-                ? { ...merged, excludedSourceIds: mergedExcluded }
-                : merged;
-            const entries = await getElvRecommendations(nextOpts);
-            return excluded.size === 0
-              ? entries
-              : entries.filter((entry) => !excluded.has(entry.item.sourceId));
-          },
-        }
-      : {}),
-    ...(c.refreshElvFeeds ? { refreshElvFeeds: c.refreshElvFeeds.bind(c) } : {}),
-    ...(listElvFranchiseItems
-      ? {
-          listElvFranchiseItems: async (imdbId, opts) => {
-            const scope = getScope();
-            const merged = mergeParentalOpts(opts, scope);
-            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
-            const mergedExcluded = mergeExcludedSources(opts?.excludedSourceIds, excluded);
-            const nextOpts =
-              mergedExcluded !== undefined
-                ? { ...merged, excludedSourceIds: mergedExcluded }
-                : merged;
-            const entries = await listElvFranchiseItems(imdbId, nextOpts);
-            return excluded.size === 0
-              ? entries
-              : entries.filter((entry) => !excluded.has(entry.item.sourceId));
-          },
-        }
-      : {}),
-    ...(listElvPersonLibraryItems
-      ? {
-          listElvPersonLibraryItems: async (person, opts) => {
-            const scope = getScope();
-            const merged = mergeParentalOpts(opts, scope);
-            const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
-            const mergedExcluded = mergeExcludedSources(opts?.excludedSourceIds, excluded);
-            const nextOpts =
-              mergedExcluded !== undefined
-                ? { ...merged, excludedSourceIds: mergedExcluded }
-                : merged;
-            const entries = await listElvPersonLibraryItems(person, nextOpts);
-            return excluded.size === 0
-              ? entries
-              : entries.filter((entry) => !excluded.has(entry.item.sourceId));
-          },
-        }
-      : {}),
-    ...(c.searchElvMatchCandidates
-      ? { searchElvMatchCandidates: c.searchElvMatchCandidates.bind(c) }
-      : {}),
-    ...(c.applyElvFixMatch ? { applyElvFixMatch: c.applyElvFixMatch.bind(c) } : {}),
+    ...createProfileScopedElvMethods(c, getScope),
     ...(listCollections
       ? {
-          listCollections: (profileId, opts) => {
+          listCollections: async (profileId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             return listCollections(profileId ?? scope.profileId, {
               ...opts,
               parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
@@ -622,6 +501,7 @@ export function createProfileScopedCatalog(
       ? {
           listCollectionItems: async (collectionId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const merged = mergeParentalOpts(opts, scope);
             const [excluded, rows] = await Promise.all([
               excludedFor(merged.profileId ?? scope.profileId, scope),
@@ -661,17 +541,33 @@ export function createProfileScopedCatalog(
       : {}),
     ...(listDownloads
       ? {
-          listDownloads: (opts) =>
-            listDownloads({
-              ...opts,
-              profileId: opts?.profileId ?? getScope().profileId,
-            }),
+          listDownloads: async (opts) => {
+            const scope = getScope();
+            if (scope.parentalLoadError) return [];
+            const pid = opts?.profileId ?? scope.profileId;
+            const [excluded, rows] = await Promise.all([
+              excludedFor(pid, scope),
+              listDownloads({
+                ...opts,
+                profileId: pid,
+              }),
+            ]);
+            return filterBySourceId(rows, excluded);
+          },
         }
       : {}),
     ...(getDownload
       ? {
-          getDownload: (itemKey, profileId) =>
-            getDownload(itemKey, profileId ?? getScope().profileId),
+          getDownload: async (itemKey, profileId) => {
+            const scope = getScope();
+            if (scope.parentalLoadError) return null;
+            const pid = profileId ?? scope.profileId;
+            const excluded = await excludedFor(pid, scope);
+            if (isKeyFromExcludedSource(itemKey, excluded)) return null;
+            const row = await getDownload(itemKey, pid);
+            if (row === null) return null;
+            return excluded.has(row.sourceId) ? null : row;
+          },
         }
       : {}),
     ...(upsertDownload
@@ -710,6 +606,7 @@ export function createProfileScopedCatalog(
       ? {
           listRatings: async (opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const pid = opts?.profileId ?? scope.profileId;
             const [excluded, rows] = await Promise.all([
               excludedFor(pid, scope),
@@ -727,6 +624,7 @@ export function createProfileScopedCatalog(
       ? {
           listRatingMap: async (profileId) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return {};
             const pid = profileId ?? scope.profileId;
             const [excluded, map] = await Promise.all([
               excludedFor(pid, scope),

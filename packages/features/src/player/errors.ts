@@ -85,6 +85,16 @@ export function describePlaybackFailure(
       verdict: 'auth-failed',
     };
   }
+  if (
+    error.category === 'storage' &&
+    (error.code === 'secret-key-rotated' || error.code === 'storage/secret-key-rotated')
+  ) {
+    return {
+      messageId: 'source.error.secretKeyRotated',
+      hintId: 'source.hint.secretKeyRotated',
+      verdict: 'auth-failed',
+    };
+  }
   const diagnosis = diagnosePlaybackFailure({ ...context, error });
   const isDrmError = diagnosis.verdict === 'unknown' && error.code === 'drm';
   const verdict: PlaybackVerdict = isDrmError ? 'codec-unsupported' : diagnosis.verdict;

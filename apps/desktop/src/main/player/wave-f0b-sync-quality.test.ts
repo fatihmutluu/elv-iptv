@@ -439,9 +439,11 @@ describe('Wave F0B IPC validation and dispatch (#59, #239)', () => {
     });
     const openFn = handlers.get(PLAYER_CHANNELS.open);
     if (!openFn) throw new Error('expected open handler');
-    const { engineId } = (await openFn({ sender: owner })) as { engineId: string };
+    const senderFrame: { url: string; top?: unknown } = { url: 'app://elv/index.html' };
+    senderFrame.top = senderFrame;
+    const { engineId } = (await openFn({ sender: owner, senderFrame })) as { engineId: string };
     const cmdFn = listeners.get(PLAYER_CHANNELS.command);
-    for (const msg of valid) cmdFn?.({ sender: owner }, { ...msg, engineId });
+    for (const msg of valid) cmdFn?.({ sender: owner, senderFrame }, { ...msg, engineId });
     dispose();
 
     expect(calls).toEqual([

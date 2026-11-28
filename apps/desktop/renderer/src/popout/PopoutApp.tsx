@@ -1,14 +1,17 @@
 import { type CatalogService, createCoalescedCatalog } from '@elv/data';
-import type { KeymapStore } from '@elv/domain';
+import { createPlaybackGuard, type KeymapStore } from '@elv/domain';
 import {
   AppProviders,
   createLazyCatalog,
+  createProfileScopedCatalog,
   DEFAULT_AUTO_HIDE_OSD_MS,
   KeymapProvider,
-  noopPlaybackGuard,
   PlayerScreen,
   type PlayTarget,
+  type ProfileCatalogScope,
   ProfileProvider,
+  SESSION_GUARD_CHANNEL,
+  SESSION_GUARD_STORAGE_KEY,
   usePreferences,
   useProfile,
   type VideoHost,
@@ -17,6 +20,7 @@ import { resolveLocale } from '@elv/i18n';
 import { UiAdaptersProvider, useTheme } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import type { CatalogBridge } from '../../../src/shared/catalog-ipc.ts';
 import type { PopoutLaunchPayload, WindowBridge } from '../../../src/shared/window-ipc.ts';
 import { attachMouseBackGuard } from '../browser-back.ts';
 import { createDesktopCatalog } from '../catalog/index.ts';
@@ -30,11 +34,33 @@ import {
   buildPopoutDockPayloadFromTarget,
 } from './popout-controller.ts';
 
+const EMPTY_EXCLUDED_SOURCES: ReadonlySet<string> = new Set<string>();
+
+type IncomingSessionGuardEvent =
+  | { readonly type: 'parental-relock'; readonly profileId?: string }
+  | { readonly type: 'profile-switch'; readonly profileId?: string }
+  | { readonly type: 'source-deleted'; readonly sourceId: string };
+
+function parseSessionGuardEvent(raw: unknown): IncomingSessionGuardEvent | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const rec = raw as { type?: unknown; profileId?: unknown; sourceId?: unknown };
+  const type = rec.type;
+  if (type === 'parental-relock' || type === 'profile-switch') {
+    const profileId = typeof rec.profileId === 'string' ? rec.profileId : undefined;
+    return profileId !== undefined ? { type, profileId } : { type };
+  }
+  if (type === 'source-deleted' && typeof rec.sourceId === 'string' && rec.sourceId.length > 0) {
+    return { type, sourceId: rec.sourceId };
+  }
+  return null;
+}
+
 /** Props of {@link PopoutPlayerStage}. */
 export interface PopoutPlayerStageProps {
   readonly catalog: CatalogService;
   readonly videoHost: VideoHost;
   readonly windowBridge: WindowBridge | undefined;
+  readonly catalogBridge?: Pick<CatalogBridge, 'onChanged'> | undefined;
 }
 
 interface PopoutSessionState {
@@ -47,45 +73,54 @@ interface PopoutSessionState {
  * Full-featured standalone Desktop Popout player stage (`#158`, Wave P3):
  * mounts the complete `<PlayerScreen>` with zero-reload live engine adoption (`adoptEngineId`),
  * full user preferences, volume slider, timeshift/cache seek, tracks, subtitles, `⋮` overflow
- * menu (including Always-on-Top), channel drawer, and zero-reload Dock-back handoff.
+ * menu (including Always-on-Top), channel drawer, zero-reload Dock-back handoff, and cross-window
+ * parental relock, profile-switch, and source-deletion teardown.
  */
 export function PopoutPlayerStage({
   catalog,
   videoHost,
   windowBridge,
+  catalogBridge,
 }: PopoutPlayerStageProps): ReactElement {
   const theme = useTheme();
   const preferences = usePreferences();
+  const profile = useProfile();
   const prefs = preferences.preferences;
   const [session, setSession] = useState<PopoutSessionState | null>(null);
+  const [excludedSourceIds, setExcludedSourceIds] = useState<ReadonlySet<string> | undefined>(() =>
+    typeof catalog.listSources === 'function' ? undefined : EMPTY_EXCLUDED_SOURCES,
+  );
   const closingRef = useRef(false);
-
-  const applyLaunchPayload = useCallback((next: PopoutLaunchPayload): void => {
-    closingRef.current = false;
-    setSession((prev) => ({
-      key: (prev?.key ?? 0) + 1,
-      target: buildPlayTargetFromPopoutLaunch(next),
-      ...(next.transferEngineId !== undefined ? { adoptEngineId: next.transferEngineId } : {}),
-    }));
-  }, []);
+  const mountedRef = useRef(true);
+  const pendingRelockRef = useRef<{ readonly profileId?: string } | null>(null);
+  const sessionRef = useRef<PopoutSessionState | null>(session);
+  sessionRef.current = session;
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const profileScopeRef = useRef<ProfileCatalogScope>({
+    profileId: profile.activeProfileId,
+    parentalUnlocked: profile.parentalUnlocked === true,
+    parentalLoadError: profile.parentalLoadError === true,
+    ...(excludedSourceIds !== undefined ? { excludedSourceIds } : {}),
+  });
+  profileScopeRef.current = {
+    profileId: profile.activeProfileId,
+    parentalUnlocked: profile.parentalUnlocked === true,
+    parentalLoadError: profile.parentalLoadError === true,
+    ...(excludedSourceIds !== undefined ? { excludedSourceIds } : {}),
+  };
 
   useEffect(() => {
-    if (!windowBridge) return;
-    let active = true;
-    void windowBridge
-      .getPopoutPayload()
-      .then((initial) => {
-        if (active && initial) applyLaunchPayload(initial);
-      })
-      .catch(() => undefined);
-    const offPayload = windowBridge.onPopoutPayload((next) => {
-      if (active) applyLaunchPayload(next);
-    });
+    mountedRef.current = true;
     return () => {
-      active = false;
-      offPayload();
+      mountedRef.current = false;
     };
-  }, [applyLaunchPayload, windowBridge]);
+  }, []);
+
+  const scopedCatalog = useMemo(
+    () => createProfileScopedCatalog(catalog, () => profileScopeRef.current),
+    [catalog],
+  );
 
   const handleTargetChange = useCallback((nextTarget: PlayTarget): void => {
     setSession((prev) => (prev ? { ...prev, target: nextTarget } : null));
@@ -109,16 +144,278 @@ export function PopoutPlayerStage({
     void windowBridge?.closePopout().catch(() => undefined);
   }, [windowBridge]);
 
+  const playbackGuard = useMemo(
+    () =>
+      createPlaybackGuard((deletedSourceId) => {
+        if (sessionRef.current?.target.sourceId === deletedSourceId) {
+          sessionRef.current = null;
+          setSession(null);
+          handleExit();
+        }
+      }),
+    [handleExit],
+  );
+
+  const stopAndExit = useCallback((): void => {
+    const sid = sessionRef.current?.target.sourceId;
+    sessionRef.current = null;
+    setSession(null);
+    if (sid) {
+      void playbackGuard.stopIfUsingSource(sid);
+    }
+    handleExit();
+  }, [handleExit, playbackGuard]);
+
+  const validateTargetAccess = useCallback(
+    (target: PlayTarget, overrideProfileId?: string): void => {
+      if (profileRef.current.parentalLoadError === true) {
+        stopAndExit();
+        return;
+      }
+      const lockedOpts = {
+        profileId: overrideProfileId ?? profileRef.current.activeProfileId,
+        parentalUnlocked: false,
+      };
+      const checkPromise =
+        target.catchup !== undefined &&
+        typeof catalog.resolveCatchupStream === 'function' &&
+        typeof scopedCatalog.resolveCatchupStream === 'function'
+          ? scopedCatalog.resolveCatchupStream(
+              target.itemKey,
+              {
+                startMs: target.catchup.startMs,
+                stopMs: target.catchup.stopMs,
+                ...(target.catchup.hasArchive !== undefined
+                  ? { hasArchive: target.catchup.hasArchive }
+                  : {}),
+                title: target.catchup.programmeTitle,
+              },
+              lockedOpts,
+            )
+          : typeof catalog.resolveStream === 'function'
+            ? scopedCatalog.resolveStream(target.itemKey, lockedOpts)
+            : null;
+      if (!checkPromise) return;
+      const itemKeySnapshot = target.itemKey;
+      void checkPromise
+        .then((res) => {
+          if (!mountedRef.current || sessionRef.current?.target.itemKey !== itemKeySnapshot) return;
+          if (!res.ok) {
+            stopAndExit();
+          }
+        })
+        .catch(() => {
+          if (mountedRef.current && sessionRef.current?.target.itemKey === itemKeySnapshot) {
+            stopAndExit();
+          }
+        });
+    },
+    [catalog, scopedCatalog, stopAndExit],
+  );
+
+  const applyLaunchPayload = useCallback(
+    (next: PopoutLaunchPayload): void => {
+      const target = buildPlayTargetFromPopoutLaunch(next);
+      if (profileRef.current.parentalLoadError === true) {
+        stopAndExit();
+        return;
+      }
+      const pendingRelock = pendingRelockRef.current;
+      pendingRelockRef.current = null;
+      closingRef.current = false;
+      const nextSession: PopoutSessionState = {
+        key: (sessionRef.current?.key ?? 0) + 1,
+        target,
+        ...(next.transferEngineId !== undefined ? { adoptEngineId: next.transferEngineId } : {}),
+      };
+      sessionRef.current = nextSession;
+      setSession(nextSession);
+      if (pendingRelock !== null || profileRef.current.parentalUnlocked !== true) {
+        validateTargetAccess(target, pendingRelock?.profileId);
+      }
+    },
+    [stopAndExit, validateTargetAccess],
+  );
+
+  useEffect(() => {
+    if (!windowBridge) return;
+    let active = true;
+    void windowBridge
+      .getPopoutPayload()
+      .then((initial) => {
+        if (active && initial) applyLaunchPayload(initial);
+      })
+      .catch(() => undefined);
+    const offPayload = windowBridge.onPopoutPayload((next) => {
+      if (active) applyLaunchPayload(next);
+    });
+    return () => {
+      active = false;
+      offPayload();
+    };
+  }, [applyLaunchPayload, windowBridge]);
+
+  // Keep excludedSourceIds synced with active profile for profile-scoped catalog queries.
+  useEffect(() => {
+    if (typeof catalog.listSources !== 'function') {
+      setExcludedSourceIds(EMPTY_EXCLUDED_SOURCES);
+      return;
+    }
+    let active = true;
+    void catalog
+      .listSources()
+      .then((sources) => {
+        if (!active) return;
+        const excluded = new Set<string>();
+        for (const s of sources) {
+          if (s.excludedProfileIds?.includes(profile.activeProfileId)) {
+            excluded.add(s.id);
+          }
+        }
+        setExcludedSourceIds(excluded);
+      })
+      .catch(() => {
+        if (active) setExcludedSourceIds(undefined);
+      });
+    return () => {
+      active = false;
+    };
+  }, [catalog, profile.activeProfileId, profile.profileRevision]);
+
+  // Fail closed immediately if local profile/parental storage becomes unreadable.
+  useEffect(() => {
+    if (profile.parentalLoadError === true) {
+      stopAndExit();
+    }
+  }, [profile.parentalLoadError, stopAndExit]);
+
+  // Cross-window session guard (BroadcastChannel primary + localStorage storage-event fallback).
+  useEffect(() => {
+    let active = true;
+    const handleGuardEvent = (event: IncomingSessionGuardEvent): void => {
+      if (!active) return;
+      if (event.type === 'profile-switch') {
+        stopAndExit();
+        return;
+      }
+      if (event.type === 'source-deleted') {
+        void playbackGuard.stopIfUsingSource(event.sourceId);
+        return;
+      }
+      profileRef.current.lockParentalNow?.();
+      if (profileRef.current.parentalLoadError === true) {
+        stopAndExit();
+        return;
+      }
+      const current = sessionRef.current;
+      if (!current) {
+        pendingRelockRef.current =
+          event.profileId !== undefined ? { profileId: event.profileId } : {};
+        return;
+      }
+      validateTargetAccess(current.target, event.profileId);
+    };
+
+    interface BroadcastChannelLike {
+      onmessage: ((event: { data: unknown }) => void) | null;
+      close(): void;
+    }
+    const host = globalThis as unknown as {
+      BroadcastChannel?: new (name: string) => BroadcastChannelLike;
+      addEventListener?: (
+        type: string,
+        listener: (e: { key?: string; newValue?: string | null }) => void,
+      ) => void;
+      removeEventListener?: (
+        type: string,
+        listener: (e: { key?: string; newValue?: string | null }) => void,
+      ) => void;
+    };
+
+    let channel: BroadcastChannelLike | null = null;
+    if (typeof host.BroadcastChannel === 'function') {
+      try {
+        channel = new host.BroadcastChannel(SESSION_GUARD_CHANNEL);
+        channel.onmessage = (msg) => {
+          const parsed = parseSessionGuardEvent(msg.data);
+          if (parsed) handleGuardEvent(parsed);
+        };
+      } catch {
+        channel = null;
+      }
+    }
+
+    const onStorage = (ev: { key?: string; newValue?: string | null }): void => {
+      if (ev.key !== SESSION_GUARD_STORAGE_KEY || typeof ev.newValue !== 'string') return;
+      try {
+        const parsed = parseSessionGuardEvent(JSON.parse(ev.newValue));
+        if (parsed) handleGuardEvent(parsed);
+      } catch {
+        // Ignore malformed storage payloads.
+      }
+    };
+    const hasStorageListener =
+      typeof host.addEventListener === 'function' && typeof host.removeEventListener === 'function';
+    if (hasStorageListener) {
+      host.addEventListener?.('storage', onStorage);
+    }
+
+    return () => {
+      active = false;
+      channel?.close();
+      if (hasStorageListener) {
+        host.removeEventListener?.('storage', onStorage);
+      }
+    };
+  }, [playbackGuard, stopAndExit, validateTargetAccess]);
+
+  // Also close Popout if the playing source disappears or becomes excluded during a catalog mutation.
+  const effectiveCatalogBridge =
+    catalogBridge ?? (typeof window === 'undefined' ? undefined : window.elv?.catalog);
+  useEffect(() => {
+    if (!effectiveCatalogBridge || typeof effectiveCatalogBridge.onChanged !== 'function') {
+      return;
+    }
+    let active = true;
+    const unsub = effectiveCatalogBridge.onChanged(() => {
+      if (!active || typeof catalog.listSources !== 'function') return;
+      void catalog
+        .listSources()
+        .then((sources) => {
+          if (!active) return;
+          const excluded = new Set<string>();
+          for (const s of sources) {
+            if (s.excludedProfileIds?.includes(profileRef.current.activeProfileId)) {
+              excluded.add(s.id);
+            }
+          }
+          setExcludedSourceIds(excluded);
+          const sid = sessionRef.current?.target.sourceId;
+          if (!sid) return;
+          if (!sources.some((s) => s.id === sid) || excluded.has(sid)) {
+            void playbackGuard.stopIfUsingSource(sid);
+          }
+        })
+        .catch(() => {
+          if (active) setExcludedSourceIds(undefined);
+        });
+    });
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, [catalog, effectiveCatalogBridge, playbackGuard]);
+
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]} testID="popout-root">
       {session ? (
         <PlayerScreen
           key={session.key}
-          catalog={catalog}
+          catalog={scopedCatalog}
           videoHost={videoHost}
           target={session.target}
           viewMode="full"
-          playbackGuard={noopPlaybackGuard}
+          playbackGuard={playbackGuard}
           autoHideOsdMs={DEFAULT_AUTO_HIDE_OSD_MS}
           autoEnterPip={prefs.autoEnterPip}
           multiViewSupported={false}
@@ -207,11 +504,17 @@ function PopoutWithKeymap({
   keymapStore,
   videoHost,
   windowBridge,
+  catalogBridge,
 }: PopoutWithKeymapProps): ReactElement {
   const profile = useProfile();
   return (
     <KeymapProvider activeProfileId={profile.activeProfileId} keymapStore={keymapStore}>
-      <PopoutPlayerStage catalog={catalog} videoHost={videoHost} windowBridge={windowBridge} />
+      <PopoutPlayerStage
+        catalog={catalog}
+        videoHost={videoHost}
+        windowBridge={windowBridge}
+        catalogBridge={catalogBridge}
+      />
     </KeymapProvider>
   );
 }
@@ -235,6 +538,7 @@ export function PopoutApp(): ReactElement {
   );
   const videoHost = useMemo(() => createDesktopVideoHost(), []);
   const windowBridge = typeof window === 'undefined' ? undefined : window.elv?.window;
+  const catalogBridge = typeof window === 'undefined' ? undefined : window.elv?.catalog;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -267,6 +571,7 @@ export function PopoutApp(): ReactElement {
             keymapStore={keymapStore}
             videoHost={videoHost}
             windowBridge={windowBridge}
+            catalogBridge={catalogBridge}
           />
         </ProfileProvider>
       </AppProviders>

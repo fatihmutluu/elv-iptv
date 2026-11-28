@@ -283,6 +283,12 @@ describe('createDesktopArtworkCache (#405)', () => {
 });
 
 describe('registerArtworkIpc (#405)', () => {
+  function trustedEvent(url = 'app://elv/index.html') {
+    const frame: { url: string; top: unknown } = { url, top: undefined };
+    frame.top = frame;
+    return { senderFrame: frame };
+  }
+
   it('registers artwork:clear, artwork:resolve, artwork:set-limit, and artwork:stats handlers, validates input, and disposes cleanly', async () => {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
     const ipcMain = {
@@ -315,30 +321,54 @@ describe('registerArtworkIpc (#405)', () => {
       ARTWORK_CHANNELS.stats,
     ]);
 
-    await handlers.get(ARTWORK_CHANNELS.clear)?.({});
+    const ev = trustedEvent();
+    await handlers.get(ARTWORK_CHANNELS.clear)?.(ev);
     expect(cache.clear).toHaveBeenCalledTimes(1);
 
     expect(
-      await handlers.get(ARTWORK_CHANNELS.resolve)?.({}, 'https://cdn.example/poster.jpg'),
+      await handlers.get(ARTWORK_CHANNELS.resolve)?.(ev, 'https://cdn.example/poster.jpg'),
     ).toBe(resolvedUrl);
     expect(cache.resolve).toHaveBeenCalledWith('https://cdn.example/poster.jpg');
 
-    expect(await handlers.get(ARTWORK_CHANNELS.resolve)?.({}, 123)).toBeNull();
+    expect(await handlers.get(ARTWORK_CHANNELS.resolve)?.(ev, 123)).toBeNull();
     expect(cache.resolve).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledTimes(1);
 
-    await handlers.get(ARTWORK_CHANNELS.setLimit)?.({}, 512 * 1024 * 1024);
+    await handlers.get(ARTWORK_CHANNELS.setLimit)?.(ev, 512 * 1024 * 1024);
     expect(cache.setLimitBytes).toHaveBeenCalledWith(512 * 1024 * 1024);
 
-    await handlers.get(ARTWORK_CHANNELS.setLimit)?.({}, 1024 * 1024 * 1024);
+    await handlers.get(ARTWORK_CHANNELS.setLimit)?.(ev, 1024 * 1024 * 1024);
     expect(cache.setLimitBytes).toHaveBeenLastCalledWith(512 * 1024 * 1024);
 
-    await handlers.get(ARTWORK_CHANNELS.setLimit)?.({}, 'bad');
+    await handlers.get(ARTWORK_CHANNELS.setLimit)?.(ev, 'bad');
     expect(cache.setLimitBytes).toHaveBeenCalledTimes(2);
     expect(log).toHaveBeenCalledTimes(2);
 
-    const stats = await handlers.get(ARTWORK_CHANNELS.stats)?.({});
+    const stats = await handlers.get(ARTWORK_CHANNELS.stats)?.(ev);
     expect(stats).toEqual({ bytes: 42, entries: 1, maxBytes: 128 * 1024 * 1024 });
+
+    // Rejects missing senderFrame, subframes, and untrusted origins across all artwork channels
+    const topFrame = trustedEvent().senderFrame;
+    const badEvents = [
+      {},
+      { senderFrame: null },
+      { senderFrame: { url: 'app://elv/index.html', top: topFrame } },
+      trustedEvent('https://evil.example/'),
+    ];
+    for (const bad of badEvents) {
+      await expect(handlers.get(ARTWORK_CHANNELS.clear)?.(bad)).rejects.toThrow(
+        /untrusted sender/i,
+      );
+      await expect(
+        handlers.get(ARTWORK_CHANNELS.resolve)?.(bad, 'https://cdn.example/poster.jpg'),
+      ).rejects.toThrow(/untrusted sender/i);
+      await expect(
+        handlers.get(ARTWORK_CHANNELS.setLimit)?.(bad, 128 * 1024 * 1024),
+      ).rejects.toThrow(/untrusted sender/i);
+      await expect(handlers.get(ARTWORK_CHANNELS.stats)?.(bad)).rejects.toThrow(
+        /untrusted sender/i,
+      );
+    }
 
     dispose();
     expect(handlers.size).toBe(0);
