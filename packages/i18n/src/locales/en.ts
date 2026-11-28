@@ -144,6 +144,9 @@ export const enMessages = {
   'source.error.secretStore': 'Secure credential storage is unavailable on this device.',
   'source.hint.secretStore':
     'Ensure OS keychain or screen lock encryption is enabled and restart the app.',
+  'source.error.secretKeyRotated':
+    'Saved source credentials could not be unlocked after a system key change.',
+  'source.hint.secretKeyRotated': 'Re-enter your source credentials in Sources to restore access.',
   'source.error.storage': 'Could not save catalog data to local storage.',
   'source.hint.storage': 'Check available disk space and try refreshing the source.',
   'nav.home': 'Home',

@@ -341,8 +341,17 @@ describe('createLanPairingServer (#50)', () => {
 });
 
 describe('LAN pairing IPC and preload bridge (#50)', () => {
+  function trustedFrame(url = 'app://elv/index.html') {
+    const frame: { url: string; top: unknown } = { url, top: undefined };
+    frame.top = frame;
+    return frame;
+  }
+
   it('bridges startSession, payload delivery, and stopSession cleanly between preload and main', async () => {
-    const handlers = new Map<string, (event: { sender: unknown }, ...args: unknown[]) => unknown>();
+    const handlers = new Map<
+      string,
+      (event: { sender: unknown; senderFrame?: unknown }, ...args: unknown[]) => unknown
+    >();
     const rendererListeners = new Map<string, Set<(event: unknown, ...args: unknown[]) => void>>();
 
     const sender = {
@@ -363,7 +372,13 @@ describe('LAN pairing IPC and preload bridge (#50)', () => {
     const ipcHandle = registerLanPairingIpc({
       ipcMain: {
         handle: (channel, listener) => {
-          handlers.set(channel, listener);
+          handlers.set(
+            channel,
+            listener as (
+              event: { sender: unknown; senderFrame?: unknown },
+              ...args: unknown[]
+            ) => unknown,
+          );
         },
         removeHandler: (channel) => {
           handlers.delete(channel);
@@ -376,7 +391,7 @@ describe('LAN pairing IPC and preload bridge (#50)', () => {
       invoke: async (channel, ...args) => {
         const fn = handlers.get(channel);
         if (!fn) throw new Error(`missing handler ${channel}`);
-        return fn({ sender }, ...args);
+        return fn({ sender, senderFrame: trustedFrame() }, ...args);
       },
       on: (channel, listener) => {
         let set = rendererListeners.get(channel);
@@ -422,5 +437,56 @@ describe('LAN pairing IPC and preload bridge (#50)', () => {
 
     expect(handlers.has(LAN_PAIRING_CHANNELS.start)).toBe(false);
     expect(handlers.has(LAN_PAIRING_CHANNELS.stop)).toBe(false);
+  });
+
+  it('rejects untrusted senderFrame, missing senderFrame, and subframes on LAN pairing IPC channels', async () => {
+    const handlers = new Map<
+      string,
+      (event: { sender: unknown; senderFrame?: unknown }, ...args: unknown[]) => unknown
+    >();
+    const server = trackServer(
+      createLanPairingServer({ bindHost: '127.0.0.1', advertiseHost: '127.0.0.1' }),
+    );
+    const log = vi.fn();
+    const ipcHandle = registerLanPairingIpc({
+      ipcMain: {
+        handle: (channel, listener) => {
+          handlers.set(
+            channel,
+            listener as (
+              event: { sender: unknown; senderFrame?: unknown },
+              ...args: unknown[]
+            ) => unknown,
+          );
+        },
+        removeHandler: (channel) => {
+          handlers.delete(channel);
+        },
+      },
+      server,
+      log,
+    });
+
+    const top = trustedFrame();
+    const badEvents = [
+      { sender: {} },
+      { sender: {}, senderFrame: null },
+      { sender: {}, senderFrame: { url: 'app://elv/index.html', top } },
+      { sender: {}, senderFrame: trustedFrame('https://evil.example/') },
+    ];
+    try {
+      for (const ev of badEvents) {
+        await expect(
+          handlers.get(LAN_PAIRING_CHANNELS.start)?.(ev, { locale: 'en' }),
+        ).rejects.toThrow(/untrusted sender/i);
+        await expect(handlers.get(LAN_PAIRING_CHANNELS.stop)?.(ev)).rejects.toThrow(
+          /untrusted sender/i,
+        );
+      }
+      expect(server.isActive()).toBe(false);
+      expect(log).toHaveBeenCalledTimes(badEvents.length * 2);
+    } finally {
+      await ipcHandle.dispose();
+    }
   });
 });

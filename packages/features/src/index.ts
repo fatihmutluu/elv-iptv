@@ -107,12 +107,16 @@ export * from './screensaver';
 export * from './search';
 export * from './settings';
 export {
+  createProfileScopedCatalog,
   type DetailCastMember,
   type DetailTarget,
   detailTargetFromItem,
   type KeymapContextValue,
   KeymapProvider,
   type KeymapProviderProps,
+  type ProfileCatalogScope,
+  SESSION_GUARD_CHANNEL,
+  SESSION_GUARD_STORAGE_KEY,
   useKeymap,
 } from './shared';
 export * from './shell';

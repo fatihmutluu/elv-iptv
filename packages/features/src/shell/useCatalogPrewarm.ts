@@ -24,6 +24,72 @@ const MAX_HOME_SOURCES = 3;
 const CATALOG_CONTINUE_LIMIT = 24;
 const PREWARM_CATALOG_RAILS = 4;
 const MAX_LIVE_FAVORITES = 200;
+const LIVE_FAVORITES_BATCH_SIZE = 8;
+const BACKGROUND_IDLE_TIMEOUT_MS = 120;
+const BACKGROUND_YIELD_FALLBACK_MS = 50;
+
+type WarmTarget = 'home' | 'live' | 'movie' | 'series';
+
+type RequestIdleCallbackLike = (
+  callback: () => void,
+  options?: { readonly timeout?: number },
+) => number;
+type CancelIdleCallbackLike = (handle: number) => void;
+
+function createIdleYield(cleanups?: Set<() => void>): Promise<void> {
+  const g = globalThis as typeof globalThis & {
+    requestIdleCallback?: RequestIdleCallbackLike;
+    cancelIdleCallback?: CancelIdleCallbackLike;
+  };
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    let idleHandle: number | undefined;
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearScheduled = (): void => {
+      if (idleHandle !== undefined) {
+        const h = idleHandle;
+        idleHandle = undefined;
+        g.cancelIdleCallback?.(h);
+      }
+      if (fallbackTimer !== undefined) {
+        const t = fallbackTimer;
+        fallbackTimer = undefined;
+        clearTimeout(t);
+      }
+    };
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearScheduled();
+      cleanups?.delete(cancel);
+      resolve();
+    };
+    const scheduleTimer = (delayMs: number): void => {
+      const timer = setTimeout(finish, delayMs);
+      if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
+        (timer as { unref?: () => void }).unref?.();
+      }
+      fallbackTimer = timer;
+    };
+    const cancel = (): void => {
+      finish();
+    };
+    if (typeof g.requestIdleCallback === 'function') {
+      idleHandle = g.requestIdleCallback(finish, { timeout: BACKGROUND_IDLE_TIMEOUT_MS });
+      scheduleTimer(BACKGROUND_IDLE_TIMEOUT_MS);
+    } else {
+      scheduleTimer(BACKGROUND_YIELD_FALLBACK_MS);
+    }
+    cleanups?.add(cancel);
+  });
+}
+
+function resolvePrimaryWarmTarget(activeTab: string | undefined): WarmTarget {
+  if (activeTab === 'live') return 'live';
+  if (activeTab === 'movie' || activeTab === 'movies') return 'movie';
+  if (activeTab === 'series') return 'series';
+  return 'home';
+}
 
 /** Inputs for {@link runCatalogPrewarm}. */
 export interface RunCatalogPrewarmOptions {
@@ -31,10 +97,12 @@ export interface RunCatalogPrewarmOptions {
   readonly sources: readonly SourceRow[];
   readonly uiCache: CatalogUiCache;
   readonly isCancelled: () => boolean;
-  /** Optional active tab hint so background tabs warm first while the visible tab loads itself. */
+  /** Active tab warmed immediately before yielding to idle for non-visible tabs. */
   readonly activeTab?: string;
   /** Whether multi-version movie grouping is enabled for the Movies discovery cache (`#404`). */
   readonly groupVodVersions?: boolean;
+  /** Optional scheduler invoked between the active tab and background tabs (injectable for tests). */
+  readonly yieldToIdle?: () => Promise<void>;
 }
 
 /** Options for {@link useCatalogPrewarm}. */
@@ -49,6 +117,7 @@ export interface UseCatalogPrewarmOptions {
   readonly activeTab?: string;
   readonly enabled?: boolean;
   readonly groupVodVersions?: boolean;
+  readonly yieldToIdle?: () => Promise<void>;
 }
 
 function pickFirstCategory(lists: readonly (readonly CategoryRow[])[]): CategoryRow | null {
@@ -97,6 +166,7 @@ export async function runCatalogPrewarm({
   isCancelled,
   activeTab,
   groupVodVersions = false,
+  yieldToIdle = createIdleYield,
 }: RunCatalogPrewarmOptions): Promise<void> {
   if (sources.length === 0 || isCancelled()) return;
 
@@ -248,23 +318,46 @@ export async function runCatalogPrewarm({
     const [rawKeys, rawRows] = await Promise.all([getFavKeys(), getFavRows()]);
     if (!stillValid() || uiCache.getLive()?.hasLoadedFavorites) return;
     const readyIds = new Set(activeSources.map((s) => s.id));
-    const liveFavs = rawRows.filter((r) => r.kind === 'live' && readyIds.has(r.sourceId));
-    const resolved = await Promise.all(
-      liveFavs.map(async (fav, idx): Promise<ItemRow | null> => {
-        if (!catalog.itemDetail) return fallbackLiveItem(fav, idx);
-        const detail = await catalog.itemDetail(fav.itemKey).catch(() => null);
-        return detail && detail.kind === 'live' ? detail : null;
-      }),
-    );
-    if (!stillValid() || uiCache.getLive()?.hasLoadedFavorites) return;
-    const nextChannels: ItemRow[] = [];
-    const seen = new Set<string>();
-    for (const ch of resolved) {
-      if (ch && !seen.has(ch.key)) {
-        seen.add(ch.key);
-        nextChannels.push(ch);
+    const uniqueLiveFavs: FavoriteRow[] = [];
+    const seenFavKeys = new Set<string>();
+    for (const row of rawRows) {
+      if (row.kind === 'live' && readyIds.has(row.sourceId) && !seenFavKeys.has(row.itemKey)) {
+        seenFavKeys.add(row.itemKey);
+        uniqueLiveFavs.push(row);
       }
     }
+
+    const nextChannels: ItemRow[] = [];
+    const seen = new Set<string>();
+    if (!catalog.itemDetail) {
+      for (let idx = 0; idx < uniqueLiveFavs.length; idx += 1) {
+        const fav = uniqueLiveFavs[idx];
+        if (!fav) continue;
+        const ch = fallbackLiveItem(fav, idx);
+        if (!seen.has(ch.key)) {
+          seen.add(ch.key);
+          nextChannels.push(ch);
+        }
+      }
+    } else {
+      for (let start = 0; start < uniqueLiveFavs.length; start += LIVE_FAVORITES_BATCH_SIZE) {
+        if (!stillValid() || uiCache.getLive()?.hasLoadedFavorites) return;
+        const chunk = uniqueLiveFavs.slice(start, start + LIVE_FAVORITES_BATCH_SIZE);
+        const chunkResolved = await Promise.all(
+          chunk.map(async (fav): Promise<ItemRow | null> => {
+            const detail = await catalog.itemDetail?.(fav.itemKey).catch(() => null);
+            return detail && detail.kind === 'live' ? detail : null;
+          }),
+        );
+        for (const ch of chunkResolved) {
+          if (ch && !seen.has(ch.key)) {
+            seen.add(ch.key);
+            nextChannels.push(ch);
+          }
+        }
+      }
+    }
+    if (!stillValid() || uiCache.getLive()?.hasLoadedFavorites) return;
     const nextKeys = new Set<string>(rawKeys);
     for (const ch of nextChannels) nextKeys.add(ch.key);
     uiCache.setLiveFavorites(nextKeys, nextChannels);
@@ -314,11 +407,34 @@ export async function runCatalogPrewarm({
     });
   };
 
-  if (activeTab !== 'home') await warmHome();
-  await warmLive();
-  await warmCatalogKind('movie');
-  await warmCatalogKind('series');
-  if (activeTab === 'home') await warmHome();
+  const warmTarget = (target: WarmTarget): Promise<void> => {
+    if (target === 'home') return warmHome();
+    if (target === 'live') return warmLive();
+    return warmCatalogKind(target);
+  };
+
+  const isTargetWarm = (target: WarmTarget): boolean => {
+    if (target === 'home') return uiCache.getHome() !== null;
+    if (target === 'live') {
+      const live = uiCache.getLive();
+      return Boolean(live?.hasLoadedCategories && live?.hasLoadedFavorites);
+    }
+    const cacheOpts = target === 'movie' && groupVodVersions ? { groupVersions: true } : undefined;
+    return uiCache.getCatalog(target, cacheOpts) !== null;
+  };
+
+  const primaryTarget = resolvePrimaryWarmTarget(activeTab);
+  const allTargets: readonly WarmTarget[] = ['home', 'live', 'movie', 'series'];
+  const backgroundTargets = allTargets.filter((target) => target !== primaryTarget);
+
+  await warmTarget(primaryTarget);
+  if (!stillValid() || backgroundTargets.every(isTargetWarm)) return;
+
+  await yieldToIdle();
+  for (const target of backgroundTargets) {
+    if (!stillValid()) return;
+    await warmTarget(target);
+  }
 }
 
 /**
@@ -336,6 +452,7 @@ export function useCatalogPrewarm({
   activeTab,
   enabled = true,
   groupVodVersions = false,
+  yieldToIdle,
 }: UseCatalogPrewarmOptions): void {
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
@@ -344,6 +461,8 @@ export function useCatalogPrewarm({
   useEffect(() => {
     if (!enabled || sources.length === 0) return undefined;
     let cancelled = false;
+    const idleCleanups = new Set<() => void>();
+    const scheduleIdle = yieldToIdle ?? (() => createIdleYield(idleCleanups));
     void Promise.resolve()
       .then(() =>
         runCatalogPrewarm({
@@ -352,12 +471,15 @@ export function useCatalogPrewarm({
           uiCache,
           isCancelled: () => cancelled,
           groupVodVersions,
+          yieldToIdle: scheduleIdle,
           ...(activeTabRef.current !== undefined ? { activeTab: activeTabRef.current } : {}),
         }),
       )
       .catch(() => undefined);
     return () => {
       cancelled = true;
+      for (const cleanup of [...idleCleanups]) cleanup();
+      idleCleanups.clear();
     };
   }, [
     catalog,
@@ -369,5 +491,6 @@ export function useCatalogPrewarm({
     profileKey,
     sources,
     uiCache,
+    yieldToIdle,
   ]);
 }

@@ -1,13 +1,5 @@
 import { resolveAccountPoolKey, type SourceRow, type StreamRequest } from '@elv/data';
-import {
-  type DnsFamilyPreference,
-  elvError,
-  err,
-  type FetchLike,
-  type HttpRequestOptions,
-  ok,
-  type Result,
-} from '@elv/domain';
+import { type DnsFamilyPreference, elvError, err, ok, type Result } from '@elv/domain';
 import { type ConnectionTracker, createConnectionTracker } from '@elv/playback';
 import {
   type CatalogClientMessage,
@@ -15,11 +7,12 @@ import {
   isCatalogWorkerMessage,
 } from '../../shared/catalog-ipc.ts';
 import {
-  createDesktopHttpClient,
+  createDesktopSingleHopTransport,
   type DesktopHttpClientOptions,
 } from '../../utility/legacy-tls-http.ts';
 import type { CatalogCoordinator } from '../catalog/coordinator.ts';
 import type { ResolvedDownloadStream } from './download-manager.ts';
+import { classifyDownloadHost, DownloadRedirectError } from './download-redirect.ts';
 
 /** Subset of Electron's `MessagePortMain` used by {@link createDesktopDownloadDeps}. */
 interface DownloadCatalogPortLike {
@@ -57,8 +50,8 @@ interface SourceTransportEntry {
 }
 
 const SOURCE_CACHE_TTL_MS = 60_000;
-const CUSTOM_TRANSPORT_IDLE_MS = 600_000;
 const DEFAULT_RPC_TIMEOUT_MS = 15_000;
+const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
 
 interface PendingRpcEntry {
   readonly resolve: (value: unknown) => void;
@@ -254,6 +247,61 @@ function asyncIterableToReadableStream(
   });
 }
 
+type RawFetchBody =
+  | AsyncIterable<Uint8Array>
+  | {
+      getReader(): {
+        read(): Promise<{ done: boolean; value?: Uint8Array }>;
+        cancel?(reason?: unknown): Promise<void>;
+        releaseLock(): void;
+      };
+    };
+
+function isAsyncIterableBody(body: RawFetchBody): body is AsyncIterable<Uint8Array> {
+  return typeof (body as Partial<AsyncIterable<Uint8Array>>)[Symbol.asyncIterator] === 'function';
+}
+
+function rawBodyToReadableStream(body: RawFetchBody): ReadableStream<Uint8Array> {
+  if (body instanceof ReadableStream) return body as ReadableStream<Uint8Array>;
+  if (isAsyncIterableBody(body)) return asyncIterableToReadableStream(body);
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await reader.read();
+        if (next.done) {
+          controller.close();
+          reader.releaseLock();
+          return;
+        }
+        if (next.value !== undefined) controller.enqueue(next.value);
+      } catch (error) {
+        reader.releaseLock();
+        controller.error(error);
+      }
+    },
+    async cancel() {
+      await reader.cancel?.().catch(() => undefined);
+      reader.releaseLock();
+    },
+  });
+}
+
+async function cancelRawBody(body: RawFetchBody): Promise<void> {
+  if (isAsyncIterableBody(body)) {
+    await body[Symbol.asyncIterator]()
+      .return?.()
+      .catch(() => undefined);
+    return;
+  }
+  const reader = body.getReader();
+  try {
+    await reader.cancel?.().catch(() => undefined);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 function isResultStreamRequest(raw: unknown): raw is Result<StreamRequest> {
   if (typeof raw !== 'object' || raw === null || !('ok' in raw)) return false;
   return typeof (raw as { ok: unknown }).ok === 'boolean';
@@ -269,7 +317,12 @@ export function createDesktopDownloadDeps(deps: DesktopDownloadDepsOptions): {
     sourceId: string,
     signal?: AbortSignal,
   ) => Promise<Result<ResolvedDownloadStream>>;
-  readonly fetchForSource: (sourceId: string, url: string, init: RequestInit) => Promise<Response>;
+  readonly fetchForSource: (
+    sourceId: string,
+    url: string,
+    init: RequestInit,
+    initialHost?: string,
+  ) => Promise<Response>;
   readonly acquireConnection: (
     sourceId: string,
     signal?: AbortSignal,
@@ -283,15 +336,7 @@ export function createDesktopDownloadDeps(deps: DesktopDownloadDepsOptions): {
     deps.rpcTimeoutMs > 0
       ? deps.rpcTimeoutMs
       : DEFAULT_RPC_TIMEOUT_MS;
-  const desktopHttp = createDesktopHttpClient(
-    ((url, init) =>
-      fetchImpl(url, {
-        ...(init.headers !== undefined ? { headers: init.headers } : {}),
-        ...(init.signal !== undefined ? { signal: init.signal } : {}),
-        ...(init.redirect !== undefined ? { redirect: init.redirect } : {}),
-      })) as FetchLike,
-    deps.httpClientOptions,
-  );
+  const singleHopTransport = createDesktopSingleHopTransport(deps.httpClientOptions);
 
   const sourceTransport = new Map<string, SourceTransportEntry>();
   const sourceAccountKeys = new Map<string, string>();
@@ -396,7 +441,12 @@ export function createDesktopDownloadDeps(deps: DesktopDownloadDepsOptions): {
       }
     },
 
-    async fetchForSource(sourceId: string, url: string, init: RequestInit): Promise<Response> {
+    async fetchForSource(
+      sourceId: string,
+      url: string,
+      init: RequestInit,
+      initialHost?: string,
+    ): Promise<Response> {
       const transport = await refreshSourceMetadata(sourceId, init.signal ?? undefined);
       const hasCustomTransport =
         transport !== null &&
@@ -408,34 +458,43 @@ export function createDesktopDownloadDeps(deps: DesktopDownloadDepsOptions): {
         return fetchImpl(url, init);
       }
 
+      if (
+        transport.hostOverride !== undefined &&
+        classifyDownloadHost(transport.hostOverride) === 'metadata'
+      ) {
+        throw new DownloadRedirectError('ssrf-blocked', 'disallowed host override');
+      }
+
       const headers = normalizeHeadersInit(init.headers);
-      const reqOpts: HttpRequestOptions = {
+      const res = await singleHopTransport.fetchHop({
+        url,
         headers,
-        redirect: 'follow',
-        idleTimeoutMs: CUSTOM_TRANSPORT_IDLE_MS,
         ...(init.signal !== null && init.signal !== undefined ? { signal: init.signal } : {}),
         ...(transport.allowLegacyTls ? { allowLegacyTls: true } : {}),
         ...(transport.dnsFamily !== undefined ? { dnsFamily: transport.dnsFamily } : {}),
         ...(transport.hostOverride !== undefined ? { hostOverride: transport.hostOverride } : {}),
-      };
-      const res = await desktopHttp.get(url, reqOpts);
-      if (!res.ok) {
-        const httpMatch = /^http-(\d{3})$/.exec(res.error.code);
-        if (httpMatch?.[1]) {
-          return new Response(null, { status: Number(httpMatch[1]) });
-        }
-        if (res.error.code === 'aborted') {
-          throw new DOMException('Aborted', 'AbortError');
-        }
-        throw new Error(res.error.code);
-      }
-      const stream = asyncIterableToReadableStream(res.value.body);
-      const response = new Response(stream, {
-        status: res.value.status,
-        headers: res.value.headers,
+        ...(initialHost !== undefined ? { initialHost } : {}),
       });
-      if (res.value.finalUrl) {
-        Object.defineProperty(response, 'url', { value: res.value.finalUrl, configurable: true });
+      const resHeaders = new Headers();
+      res.headers.forEach((value, key) => {
+        resHeaders.append(key, value);
+      });
+      const status = res.status >= 200 && res.status <= 599 ? res.status : 502;
+      let body: ReadableStream<Uint8Array> | null = null;
+      const rawBody = res.body;
+      if (NULL_BODY_STATUSES.has(status) || rawBody === null || rawBody === undefined) {
+        if (rawBody !== null && rawBody !== undefined) {
+          await cancelRawBody(rawBody);
+        }
+      } else {
+        body = rawBodyToReadableStream(rawBody);
+      }
+      const response = new Response(body, {
+        status,
+        headers: resHeaders,
+      });
+      if (typeof res.url === 'string' && res.url.length > 0) {
+        Object.defineProperty(response, 'url', { value: res.url, configurable: true });
       }
       return response;
     },

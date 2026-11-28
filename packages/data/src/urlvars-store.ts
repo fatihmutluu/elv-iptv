@@ -1,4 +1,5 @@
 import { elvError, err, ok, type Result, type SecretStore } from '@elv/domain';
+import { isSecretKeyRotatedError } from './secret-errors';
 import type { UrlVars } from './templates';
 
 const utf8 = new TextEncoder();
@@ -54,10 +55,15 @@ function parseManifest(parsed: Record<string, unknown>): { isManifest: boolean; 
   return { isManifest: true, count: n };
 }
 
-async function safeGet(secrets: SecretStore, key: string): Promise<string | undefined> {
+async function safeGet(
+  secrets: SecretStore,
+  key: string,
+  propagateKeyRotated: boolean,
+): Promise<string | undefined> {
   try {
     return await secrets.get(key);
-  } catch {
+  } catch (error) {
+    if (propagateKeyRotated && isSecretKeyRotatedError(error)) throw error;
     return undefined;
   }
 }
@@ -71,7 +77,7 @@ async function safeDelete(secrets: SecretStore, key: string): Promise<void> {
 }
 
 async function readChunkCount(secrets: SecretStore, sourceId: string): Promise<number> {
-  const raw = await safeGet(secrets, urlvarsRootKey(sourceId));
+  const raw = await safeGet(secrets, urlvarsRootKey(sourceId), false);
   if (raw === undefined) return 0;
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -128,7 +134,7 @@ export async function readUrlVars(
   deps: { secrets: SecretStore },
   sourceId: string,
 ): Promise<UrlVars> {
-  const raw = await safeGet(deps.secrets, urlvarsRootKey(sourceId));
+  const raw = await safeGet(deps.secrets, urlvarsRootKey(sourceId), true);
   if (raw === undefined) return emptyUrlVars();
   let parsed: unknown;
   try {
@@ -147,7 +153,7 @@ export async function readUrlVars(
   const out = emptyUrlVars();
   const shards = await Promise.all(
     Array.from({ length: manifest.count }, (_, i) =>
-      safeGet(deps.secrets, urlvarsShardKey(sourceId, i)),
+      safeGet(deps.secrets, urlvarsShardKey(sourceId, i), true),
     ),
   );
   for (const shard of shards) {

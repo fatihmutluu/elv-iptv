@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { dirname } from 'node:path';
 import {
   type CatalogService,
@@ -59,8 +60,31 @@ import { createLocalPlaylistStore } from './local-playlist-store.ts';
 import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.ts';
 
 const SAFE_SOURCE_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
+const SECRET_KEY_ROTATED_CODE = 'storage/secret-key-rotated';
 /** Desktop streams Xtream JSON incrementally in `O(batchSize)` memory, matching `xtream.ts` `DEFAULT_MAX_BODY`. */
 const DESKTOP_MAX_BODY_BYTES = 128 * 1024 * 1024;
+
+const createSecretKeyRotatedError = (): Error =>
+  Object.assign(new Error(SECRET_KEY_ROTATED_CODE), {
+    name: 'SecretDecryptError',
+    code: SECRET_KEY_ROTATED_CODE,
+  });
+
+const isSecretKeyRotatedError = (error: unknown): boolean =>
+  error instanceof Error &&
+  ((error as { code?: unknown }).code === SECRET_KEY_ROTATED_CODE ||
+    error.message === SECRET_KEY_ROTATED_CODE);
+
+const isSecretMissingResult = (value: unknown): boolean => {
+  const rec = value as { ok?: unknown; error?: { category?: unknown; code?: unknown } } | null;
+  return (
+    typeof rec === 'object' &&
+    rec !== null &&
+    rec.ok === false &&
+    rec.error?.category === 'storage' &&
+    rec.error?.code === 'secret-missing'
+  );
+};
 
 /** Subset of Electron's `MessagePortMain` used inside the catalog utility process. */
 export interface WorkerClientPortLike {
@@ -135,9 +159,14 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
   let secretsClosed = false;
   let nextSecretReqId = 0;
 
+  const callSecretContext = new AsyncLocalStorage<{ keyRotated: boolean }>();
   const pendingSecrets = new Map<
     number,
-    { resolve: (value: string | undefined) => void; reject: (reason: Error) => void }
+    {
+      resolve: (value: string | undefined) => void;
+      reject: (reason: Error) => void;
+      ctx: { keyRotated: boolean } | undefined;
+    }
   >();
   const clients = new Map<number, ClientSession>();
   const inFlightCalls = new Set<Promise<void>>();
@@ -147,26 +176,19 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
     msg: { op: 'get' | 'delete'; key: string } | { op: 'set'; key: string; value: string },
   ): Promise<string | undefined> => {
     if (secretsClosed) return Promise.reject(new Error('catalog worker secrets closed'));
-    if (!SECRET_KEY_RE.test(msg.key)) {
-      return Promise.reject(new Error('invalid secret key'));
-    }
+    if (!SECRET_KEY_RE.test(msg.key)) return Promise.reject(new Error('invalid secret key'));
     if (msg.op === 'set' && msg.value.length > maxSecretValueChars) {
       return Promise.reject(new Error('secret value exceeds maximum length'));
     }
     const reqId = ++nextSecretReqId;
+    const ctx = callSecretContext.getStore();
     return new Promise((resolve, reject) => {
-      pendingSecrets.set(reqId, { resolve, reject });
-      if (msg.op === 'set') {
-        parentPort.postMessage({
-          type: 'secret-request',
-          reqId,
-          op: 'set',
-          key: msg.key,
-          value: msg.value,
-        });
-      } else {
-        parentPort.postMessage({ type: 'secret-request', reqId, op: msg.op, key: msg.key });
-      }
+      pendingSecrets.set(reqId, { resolve, reject, ctx });
+      parentPort.postMessage(
+        msg.op === 'set'
+          ? { type: 'secret-request', reqId, op: 'set', key: msg.key, value: msg.value }
+          : { type: 'secret-request', reqId, op: msg.op, key: msg.key },
+      );
     });
   };
 
@@ -620,16 +642,25 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       if (ctl !== undefined) session.controllers.set(reqId, ctl);
 
       const task = (async () => {
+        const secretCtx = { keyRotated: false };
         try {
           const opened = await ensureService();
           if (!opened.ok) {
             safePost(session, { type: 'fault', reqId, error: opened.error });
             return;
           }
-          const value = await executeCall(opened.value, session, reqId, call, ctl);
+          let value = await callSecretContext.run(secretCtx, () =>
+            executeCall(opened.value, session, reqId, call, ctl),
+          );
+          if (secretCtx.keyRotated && isSecretMissingResult(value)) {
+            value = err(elvError('storage', 'secret-key-rotated'));
+          }
           safePost(session, { type: 'result', reqId, value });
-        } catch {
-          const fault: ElvError = elvError('storage', 'sql-failed');
+        } catch (error) {
+          const fault: ElvError =
+            secretCtx.keyRotated || isSecretKeyRotatedError(error)
+              ? elvError('storage', 'secret-key-rotated')
+              : elvError('storage', 'sql-failed');
           safePost(session, { type: 'fault', reqId, error: fault });
         } finally {
           if (ctl !== undefined) session.controllers.delete(reqId);
@@ -718,8 +749,14 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         const pending = pendingSecrets.get(msg.reqId);
         if (!pending) break;
         pendingSecrets.delete(msg.reqId);
-        if (msg.ok) pending.resolve(msg.value ?? undefined);
-        else pending.reject(new Error(msg.message));
+        if (msg.ok) {
+          pending.resolve(msg.value ?? undefined);
+        } else if (msg.message === SECRET_KEY_ROTATED_CODE) {
+          if (pending.ctx !== undefined) pending.ctx.keyRotated = true;
+          pending.reject(createSecretKeyRotatedError());
+        } else {
+          pending.reject(new Error(msg.message));
+        }
         break;
       }
       case 'shutdown':

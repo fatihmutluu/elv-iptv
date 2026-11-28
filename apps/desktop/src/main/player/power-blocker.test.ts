@@ -66,11 +66,17 @@ describe('createPowerBlocker (#135)', () => {
     const powerBlocker = createPowerBlocker(f.api);
     const handlers = new Map<
       string,
-      (ev: { sender: WebContentsLike }, ...a: unknown[]) => unknown
+      (
+        ev: { sender: WebContentsLike; senderFrame?: { url?: string; top?: unknown } | null },
+        ...a: unknown[]
+      ) => unknown
     >();
     const listeners = new Map<
       string,
-      (ev: { sender: WebContentsLike }, ...a: unknown[]) => unknown
+      (
+        ev: { sender: WebContentsLike; senderFrame?: { url?: string; top?: unknown } | null },
+        ...a: unknown[]
+      ) => unknown
     >();
     const ipcMain: IpcMainLike = {
       handle: (c, l) => void handlers.set(c, l),
@@ -119,7 +125,9 @@ describe('createPowerBlocker (#135)', () => {
 
     const openHandler = handlers.get(PLAYER_CHANNELS.open);
     if (!openHandler) throw new Error('missing open handler');
-    const { engineId } = (await openHandler({ sender })) as {
+    const senderFrame: { url: string; top?: unknown } = { url: 'app://elv/index.html' };
+    senderFrame.top = senderFrame;
+    const { engineId } = (await openHandler({ sender, senderFrame })) as {
       engineId: string;
     };
     const emit = (ev: EngineEvent) => {
@@ -142,7 +150,7 @@ describe('createPowerBlocker (#135)', () => {
     expect(f.active.size).toBe(1);
 
     listeners.get(PLAYER_CHANNELS.command)?.(
-      { sender },
+      { sender, senderFrame },
       { engineId, command: { name: 'stop', attempt: 3 } },
     );
     expect(f.active.size).toBe(0);

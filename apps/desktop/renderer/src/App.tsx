@@ -5,6 +5,8 @@ import {
   type ProfilePreferencesManager,
 } from '@elv/domain';
 import {
+  type AppLifecyclePort,
+  type AppLifecycleState,
   AppProviders,
   AppShell,
   type AppShellProps,
@@ -21,6 +23,7 @@ import { createAppI18n, resolveLocale } from '@elv/i18n';
 import { UiAdaptersProvider } from '@elv/ui-kit';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import type { WindowBridge } from '../../src/shared/window-ipc.ts';
 import { attachAccessibilityFonts } from './accessibility-fonts.ts';
 import { attachMouseBackGuard } from './browser-back.ts';
 import {
@@ -78,6 +81,57 @@ const WorkbenchShell = IS_DEV
     )
   : null;
 
+interface VisibilityDocumentLike {
+  readonly visibilityState?: string;
+  addEventListener?(type: string, listener: () => void): void;
+  removeEventListener?(type: string, listener: () => void): void;
+}
+
+/**
+ * Builds the desktop {@link AppLifecyclePort} combining Electron tray hide/restore IPC and
+ * DOM `visibilitychange` so minimizing or hiding to tray triggers immediate parental relock.
+ */
+export function createDesktopAppLifecyclePort(
+  windowBridge: Pick<WindowBridge, 'onHiddenToTray' | 'onWindowRestored'> | undefined,
+  doc: VisibilityDocumentLike | undefined = typeof document === 'undefined' ? undefined : document,
+): AppLifecyclePort {
+  return {
+    subscribe(listener) {
+      let lastState: AppLifecycleState | undefined;
+      const emit = (next: AppLifecycleState): void => {
+        if (next === lastState) return;
+        lastState = next;
+        listener(next);
+      };
+      const offHidden =
+        typeof windowBridge?.onHiddenToTray === 'function'
+          ? windowBridge.onHiddenToTray(() => emit('background'))
+          : undefined;
+      const offRestored =
+        typeof windowBridge?.onWindowRestored === 'function'
+          ? windowBridge.onWindowRestored(() => emit('active'))
+          : undefined;
+      const onVisibilityChange = (): void => {
+        emit(doc?.visibilityState === 'hidden' ? 'background' : 'active');
+      };
+      if (
+        doc !== undefined &&
+        typeof doc.addEventListener === 'function' &&
+        typeof doc.removeEventListener === 'function'
+      ) {
+        doc.addEventListener('visibilitychange', onVisibilityChange);
+      }
+      return () => {
+        offHidden?.();
+        offRestored?.();
+        if (doc !== undefined && typeof doc.removeEventListener === 'function') {
+          doc.removeEventListener('visibilitychange', onVisibilityChange);
+        }
+      };
+    },
+  };
+}
+
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [catalogDisconnected, setCatalogDisconnected] = useState(false);
@@ -113,6 +167,11 @@ function AppRoot() {
 
   const desktopWindow = useMemo<DesktopWindowPort | undefined>(
     () => createDesktopWindowPort(window.elv?.window),
+    [],
+  );
+
+  const appLifecycle = useMemo<AppLifecyclePort>(
+    () => createDesktopAppLifecyclePort(window.elv?.window),
     [],
   );
 
@@ -362,6 +421,7 @@ function AppRoot() {
   } = {
     catalog,
     videoHost,
+    appLifecycle,
     thermalDevice,
     profilePreferences: preferencesStore,
     keymapStore,

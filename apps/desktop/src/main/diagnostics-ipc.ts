@@ -8,8 +8,12 @@ import {
   isExportDiagnosticReportRequest,
   parseReadLogTailMaxLines,
 } from '../shared/diagnostics-ipc.ts';
+import { assertTrustedSenderFrame, type TrustedSenderEventLike } from './trusted-sender.ts';
 
-type IpcHandler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
+type IpcHandler = (
+  event: TrustedSenderEventLike & { sender: unknown },
+  ...args: unknown[]
+) => unknown;
 
 interface DiagnosticsIpcMainLike {
   handle(channel: string, listener: IpcHandler): void;
@@ -37,6 +41,7 @@ export interface DiagnosticsIpcDeps<TWindow = unknown> {
   ): Promise<DiagnosticSaveDialogResult>;
   writeFile?(filePath: string, content: string): Promise<void>;
   writeClipboardText(text: string): void | Promise<void>;
+  devOrigin?: string | null;
   log?(line: string): void;
 }
 
@@ -55,7 +60,8 @@ export function registerDiagnosticsIpc<TWindow = unknown>(
     deps.writeFile ??
     ((filePath: string, content: string) => nodeWriteFile(filePath, content, 'utf8'));
 
-  ipcMain.handle(DIAGNOSTICS_CHANNELS.readLogTail, async (_event, rawMaxLines) => {
+  ipcMain.handle(DIAGNOSTICS_CHANNELS.readLogTail, async (event, rawMaxLines) => {
+    assertTrustedSenderFrame(event, DIAGNOSTICS_CHANNELS.readLogTail, deps.devOrigin, log);
     const maxLines = parseReadLogTailMaxLines(rawMaxLines);
     if (maxLines === null) {
       log?.(`diagnostics ipc: dropped an invalid ${DIAGNOSTICS_CHANNELS.readLogTail} payload`);
@@ -67,13 +73,14 @@ export function registerDiagnosticsIpc<TWindow = unknown>(
 
   ipcMain.handle(
     DIAGNOSTICS_CHANNELS.exportReport,
-    async ({ sender }, rawRequest): Promise<ExportDiagnosticReportReply> => {
+    async (event, rawRequest): Promise<ExportDiagnosticReportReply> => {
+      assertTrustedSenderFrame(event, DIAGNOSTICS_CHANNELS.exportReport, deps.devOrigin, log);
       if (!isExportDiagnosticReportRequest(rawRequest)) {
         log?.(`diagnostics ipc: dropped an invalid ${DIAGNOSTICS_CHANNELS.exportReport} payload`);
         throw new Error('invalid diagnostics:exportReport payload');
       }
       const safeMarkdown = redactText(rawRequest.markdown);
-      const win = getWindowFromSender(sender);
+      const win = getWindowFromSender(event.sender);
       const result = await showSaveDialog(win, {
         defaultPath: DEFAULT_DIAGNOSTIC_REPORT_FILENAME,
         filters: [{ name: 'Markdown', extensions: ['md'] }],
@@ -86,7 +93,8 @@ export function registerDiagnosticsIpc<TWindow = unknown>(
     },
   );
 
-  ipcMain.handle(DIAGNOSTICS_CHANNELS.copyText, async (_event, rawRequest): Promise<boolean> => {
+  ipcMain.handle(DIAGNOSTICS_CHANNELS.copyText, async (event, rawRequest): Promise<boolean> => {
+    assertTrustedSenderFrame(event, DIAGNOSTICS_CHANNELS.copyText, deps.devOrigin, log);
     if (!isCopyDiagnosticTextRequest(rawRequest)) {
       log?.(`diagnostics ipc: dropped an invalid ${DIAGNOSTICS_CHANNELS.copyText} payload`);
       throw new Error('invalid diagnostics:copyText payload');

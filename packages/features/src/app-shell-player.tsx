@@ -229,6 +229,7 @@ export function AppShellPlayerHost(p: AppShellPlayerHostProps): ReactElement | n
         pitchLock={prefs.pitchLock}
         deinterlaceMode="auto"
         onOnlineStreamActiveChange={modes.onMultiViewOnlineStreamChange}
+        onActiveSourceIdsChange={modes.onMultiViewActiveSourceIdsChange}
         onExit={modes.exitMultiView}
       />
     );

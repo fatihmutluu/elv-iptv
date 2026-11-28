@@ -53,6 +53,7 @@ import {
   useElvBackgroundMatcher,
   useProfile,
 } from './shared';
+import { broadcastSessionGuardEvent } from './shared/session-guard-channel';
 import {
   AdaptiveNavShell,
   CrashRecoveryBoundary,
@@ -152,6 +153,7 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
   const [stageKey, setStageKey] = useState(0);
   const [appForeground, setAppForeground] = useState(true);
   const resetToFullModeRef = useRef<(clearAdoption?: boolean) => void>(() => undefined);
+  const closeMultiViewForSourceRef = useRef<(sourceId: string) => void>(() => undefined);
   const userPickedTabRef = useRef(false);
   const userPickedSettingsSectionRef = useRef(false);
   const playTargetRef = useRef(playTarget);
@@ -192,7 +194,7 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
       syncSourcesAndBump: shell.syncSourcesAndBump,
     });
   const mgmtOverlays = useShellManagementOverlays(profile, sources);
-  const profileScopeKey = `${profile.activeProfileId}:${profile.parentalUnlocked ? '1' : '0'}:${profile.profileRevision}`;
+  const profileScopeKey = `${profile.activeProfileId}:${profile.parentalUnlocked ? '1' : '0'}:${profile.parentalLoadError ? '1' : '0'}:${profile.profileRevision}`;
   const elvCacheKey = buildElvCacheFingerprint(preferences.preferences);
   uiCache.setRevision(catalogRevision, locale, profileScopeKey, elvCacheKey);
   const openPlayTarget = useCallback(
@@ -245,6 +247,8 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
         resetToFullModeRef.current(true);
         connectionGuard.releaseActive();
       }
+      closeMultiViewForSourceRef.current(sourceId);
+      broadcastSessionGuardEvent({ type: 'source-deleted', sourceId });
       uiCache.invalidateSource(sourceId);
       setLiveMemory((prev) => clearSourceFromLiveMemory(prev, sourceId));
       setCatalogMemoryByTab((prev) => clearSourceFromCatalogMemory(prev, sourceId));
@@ -273,6 +277,14 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     desktopWindow: props.desktopWindow,
     thermalDevice: props.thermalDevice,
     downloadManager: props.downloadManager,
+    catalog: observedCatalog,
+    getDockPolicy: () => ({
+      ...profileScopeRef.current,
+      parentalRestricted:
+        profile.parentalSettings.enabled ||
+        profile.parentalLocks.length > 0 ||
+        profile.activeProfile.isKids,
+    }),
     videoHost,
     stopActivePlayerRef,
     stopEmbeddedPreviewRef,
@@ -286,6 +298,8 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     onAdoptPlay: connectionGuard.adoptPlay,
   });
   resetToFullModeRef.current = modes.resetToFullMode;
+  closeMultiViewForSourceRef.current = (sourceId: string) =>
+    modes.closeMultiViewForSource(sourceId, sourcesRef.current, connectionGuard.tracker);
   const isBrowsing =
     modes.multiViewSeed === null && (playTarget === null || modes.playerViewMode === 'mini');
   const isFullPlayerActive =
@@ -305,13 +319,19 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     clearSearchSession();
     setHeroScrolled(false);
   }, [clearSearchSession, focusMemory, resetLiveMemory]);
+  const closePopoutWindow = useCallback(() => {
+    void props.desktopWindow?.closePopout?.();
+  }, [props.desktopWindow]);
   useShellProfileEffects({
     profile,
     catalog: observedCatalog,
     appForeground: appForeground && documentVisible,
     playTargetRef,
+    multiViewSeedRef: modes.multiViewSeedRef,
     onResetTransientMemory: resetTransientMemory,
     onStopPlayback: stopActivePlayback,
+    onCloseMultiView: modes.closeMultiView,
+    onClosePopout: closePopoutWindow,
   });
   const importHealth = useImportHealth({
     catalog: observedCatalog,
@@ -558,7 +578,7 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     (!sourcesResolved && !userPickedTab && activeDetail === null);
   const hasHeroOverlay =
     activeDetail !== null || (sourcesResolved && profile.profilesReady && activeTab === 'home');
-  const contentIsolationKey = `${profile.activeProfileId}:${profile.parentalUnlocked ? 'u' : 'l'}`;
+  const contentIsolationKey = `${profile.activeProfileId}:${profile.parentalUnlocked ? 'u' : 'l'}:${profile.parentalLoadError ? 'e' : 'ok'}`;
   const effectiveRefreshToken = refreshToken + profile.profileRevision;
   const effectiveUserStateVersion = userStateVersion + profile.profileRevision;
 

@@ -28,12 +28,12 @@ import {
 import { isAllowedDevNavigation } from '../dev-server.ts';
 import type { PendingPairDeepLinkQueue } from '../pair-deep-link.ts';
 import { isAllowedAppNavigation } from '../security.ts';
+import {
+  assertTrustedSenderFrame,
+  isTrustedSenderFrame,
+  type TrustedSenderEventLike,
+} from '../trusted-sender.ts';
 import type { DesktopSyncService } from './sync-service.ts';
-
-interface SenderFrameLike {
-  readonly url?: string;
-  readonly top?: unknown;
-}
 
 interface SenderWebContentsLike {
   isDestroyed?(): boolean;
@@ -41,9 +41,8 @@ interface SenderWebContentsLike {
   send?(channel: string, ...args: unknown[]): void;
 }
 
-interface SyncIpcEventLike {
+interface SyncIpcEventLike extends TrustedSenderEventLike {
   readonly sender?: SenderWebContentsLike;
-  readonly senderFrame?: SenderFrameLike | null;
 }
 
 type SyncIpcHandler = (event: SyncIpcEventLike, ...args: unknown[]) => unknown;
@@ -69,16 +68,7 @@ export interface RegisterSyncIpcDeps {
  * Fails closed when `event.senderFrame` is `null` or missing (never falls back to `event.sender.getURL()`).
  */
 export function isTrustedSyncIpcEvent(event: SyncIpcEventLike, devOrigin?: string | null): boolean {
-  const frame = event.senderFrame;
-  if (frame === null || frame === undefined) return false;
-  if (frame.top !== undefined && frame.top !== frame) return false;
-  const url = typeof frame.url === 'string' ? frame.url : '';
-  if (url.length === 0) return false;
-  if (isAllowedAppNavigation(url)) return true;
-  if (devOrigin !== null && devOrigin !== undefined && devOrigin.length > 0) {
-    return isAllowedDevNavigation(url, devOrigin);
-  }
-  return false;
+  return isTrustedSenderFrame(event, devOrigin);
 }
 
 function sanitizeStateForIpc(state: SyncAccountStateIpc): SyncAccountStateIpc {
@@ -144,10 +134,7 @@ export function registerSyncIpc(deps: RegisterSyncIpcDeps): () => void {
   const { ipcMain, service, pendingPairDeepLinks, devOrigin, log } = deps;
 
   const assertTrusted = (event: SyncIpcEventLike, channel: string): void => {
-    if (!isTrustedSyncIpcEvent(event, devOrigin)) {
-      log?.(`sync ipc: rejected untrusted sender on ${channel}`);
-      throw new Error(`untrusted sender for ${channel}`);
-    }
+    assertTrustedSenderFrame(event, channel, devOrigin, log);
   };
 
   const broadcastToTrusted = (channel: string, payload: unknown): void => {

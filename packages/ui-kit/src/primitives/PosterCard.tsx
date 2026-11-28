@@ -70,22 +70,6 @@ const NATIVE_SHADOW_REST: ViewStyle = {
   elevation: 6,
 };
 
-const NATIVE_SHADOW_HOVER: ViewStyle = {
-  shadowColor: 'rgba(0, 0, 0, 1)',
-  shadowOffset: { width: 0, height: 10 },
-  shadowOpacity: 0.48,
-  shadowRadius: 18,
-  elevation: 10,
-};
-
-const NATIVE_SHADOW_FOCUS: ViewStyle = {
-  shadowColor: 'rgba(0, 0, 0, 1)',
-  shadowOffset: { width: 0, height: 14 },
-  shadowOpacity: 0.56,
-  shadowRadius: 22,
-  elevation: 14,
-};
-
 function clampProgress(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -194,7 +178,7 @@ function PosterCardInner({
       quickActions.onToggleWatched !== undefined);
   const clamped = progress !== undefined ? clampProgress(progress) : undefined;
   const cardTransition = webTransition(theme, 'transform, opacity');
-  const shadowTransition = webTransition(theme, 'box-shadow');
+  const restShadow = webShadow('0 8px 22px rgba(0, 0, 0, 0.44)');
   const cursor = webCursorPointer();
   const fontFamilyStyle =
     theme.typography.title.fontFamily !== undefined
@@ -244,12 +228,6 @@ function PosterCardInner({
           const showTvFocus = focused === true || (viewport.inputModality === 'tv' && activeFocus);
           const showPointerHover = !showTvFocus && viewport.inputModality === 'pointer' && hovered;
 
-          const frameShadow = showTvFocus
-            ? [NATIVE_SHADOW_FOCUS, webShadow('0 18px 36px rgba(0, 0, 0, 0.72)')]
-            : showPointerHover
-              ? [NATIVE_SHADOW_HOVER, webShadow('0 14px 32px rgba(0, 0, 0, 0.65)')]
-              : [NATIVE_SHADOW_REST, webShadow('0 8px 22px rgba(0, 0, 0, 0.44)')];
-
           return (
             <>
               <View
@@ -260,8 +238,8 @@ function PosterCardInner({
                     borderRadius: theme.radius.card,
                     backgroundColor: theme.colors.bgCard,
                   },
-                  frameShadow,
-                  shadowTransition,
+                  NATIVE_SHADOW_REST,
+                  restShadow,
                 ]}
               >
                 <View style={[styles.artworkClip, { borderRadius: theme.radius.card }]}>

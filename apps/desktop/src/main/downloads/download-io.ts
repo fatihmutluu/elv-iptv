@@ -1,5 +1,15 @@
-import type { WriteStream } from 'node:fs';
-import { mkdir, readFile, rename, stat, statfs, unlink, writeFile } from 'node:fs/promises';
+import { constants as fsConstants, type WriteStream } from 'node:fs';
+import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  stat,
+  statfs,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -187,7 +197,7 @@ export function closeWriteStream(stream: WriteStream, destroy = false): Promise<
     if (destroy) {
       stream.destroy();
     } else {
-      stream.end(finish);
+      stream.end();
     }
   });
 }
@@ -226,14 +236,100 @@ export async function safeUnlink(filePath: string): Promise<void> {
   }
 }
 
-/** Reads the current byte size of a `.part` temp file, or `0` if absent. */
-export async function readPartFileSize(partPath: string): Promise<number> {
-  try {
-    const info = await stat(partPath);
-    return info.isFile() && info.size > 0 ? info.size : 0;
-  } catch {
-    return 0;
+/** Thrown when a `.part` download file path is a symbolic link or non-regular filesystem entry. */
+export class PartFileUnsafeError extends Error {
+  readonly code = 'download-path-invalid' as const;
+
+  constructor(message = 'download part path is not a regular file') {
+    super(message);
+    this.name = 'PartFileUnsafeError';
   }
+}
+
+async function assertRegularOrAbsentPartFile(partPath: string): Promise<number> {
+  try {
+    const info = await lstat(partPath);
+    if (info.isSymbolicLink()) {
+      throw new PartFileUnsafeError('download part path cannot be a symbolic link');
+    }
+    if (!info.isFile()) {
+      throw new PartFileUnsafeError('download part path is not a regular file');
+    }
+    return Math.max(info.size, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return 0;
+    throw error;
+  }
+}
+
+/**
+ * Reads the current byte size of a `.part` temp file via `lstat`, returning `0` if absent and
+ * throwing {@link PartFileUnsafeError} if the path is a symbolic link or non-regular file.
+ */
+export async function readPartFileSize(partPath: string): Promise<number> {
+  return assertRegularOrAbsentPartFile(partPath);
+}
+
+/**
+ * Opens a `.part` file for writing/appending without following symbolic links (`lstat` + `O_NOFOLLOW`
+ * + post-open `fstat` regular-file verification, deferring truncation until after verification).
+ */
+export async function openSafePartWriteStream(
+  partPath: string,
+  appendMode: boolean,
+): Promise<WriteStream> {
+  await assertRegularOrAbsentPartFile(partPath);
+  const noFollow = typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0;
+  const flags = appendMode
+    ? fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_APPEND | noFollow
+    : fsConstants.O_WRONLY | fsConstants.O_CREAT | noFollow;
+
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(partPath, flags, 0o600);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === 'ELOOP' || code === 'EISDIR') {
+      throw new PartFileUnsafeError('download part path cannot be opened safely');
+    }
+    throw error;
+  }
+
+  try {
+    const fdStat = await handle.stat({ bigint: true });
+    const linkStat = await lstat(partPath, { bigint: true });
+    if (
+      linkStat.isSymbolicLink() ||
+      !linkStat.isFile() ||
+      !fdStat.isFile() ||
+      fdStat.dev !== linkStat.dev ||
+      fdStat.ino !== linkStat.ino
+    ) {
+      throw new PartFileUnsafeError('download part path changed or is not a regular file');
+    }
+    if (!appendMode) {
+      await handle.truncate(0);
+    }
+    return handle.createWriteStream({ autoClose: true });
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Verifies via `lstat` immediately before `rename(partPath, finalPath)` that `partPath` is a
+ * regular non-symlink file and `finalPath` is either absent or a regular non-symlink file.
+ */
+export async function assertSafeBeforeDownloadRename(
+  partPath: string,
+  finalPath: string,
+): Promise<void> {
+  const partInfo = await lstat(partPath);
+  if (partInfo.isSymbolicLink() || !partInfo.isFile()) {
+    throw new PartFileUnsafeError('download part path is not a regular file before rename');
+  }
+  await assertRegularOrAbsentPartFile(finalPath);
 }
 
 /** Atomically writes `records` to `<downloadsDir>/index.json` via a temp file + rename. */
@@ -324,7 +420,7 @@ export async function reconcileDownloadsIndex(
 
     if (status === 'downloading' || status === 'queued') {
       status = 'paused';
-      bytesDownloaded = await readPartFileSize(partPath);
+      bytesDownloaded = await readPartFileSize(partPath).catch(() => 0);
       dirty = true;
     } else if (status === 'completed') {
       const verified = await validateManagedDownloadPath(downloadsDir, finalPath);

@@ -1,5 +1,4 @@
 import type {
-  CatalogService,
   CreateProfileInput,
   ParentalLockRecord,
   ParentalSettings,
@@ -9,17 +8,10 @@ import type {
   UpdateParentalSettingsPatch,
   UpdateProfilePatch,
 } from '@elv/data';
-import {
-  elvError,
-  err,
-  type KeymapStore,
-  type ProfilePreferencesManager,
-  type Result,
-} from '@elv/domain';
+import { elvError, err, type Result } from '@elv/domain';
 import {
   createContext,
   type ReactElement,
-  type ReactNode,
   useCallback,
   useContext,
   useEffect,
@@ -27,180 +19,36 @@ import {
   useRef,
   useState,
 } from 'react';
+import {
+  buildGuardPinCandidates,
+  DEFAULT_PROFILE_CONTEXT,
+  DEFAULT_PROFILE_ID,
+  DEFAULT_PROFILE_RECORD,
+  defaultParentalSettings,
+  failClosedParentalSettings,
+  type LoadedParentalSnapshot,
+  type PinDialogMode,
+  type PinDialogRequest,
+  type ProfileContextValue,
+  type ProfileProviderProps,
+  parentalUnavailableError,
+} from './profile-context-helpers';
 
-const DEFAULT_PROFILE_ID = 'default';
-
-/** Fallback default profile used before SQLite profiles resolve or on stub catalogs. */
-export const DEFAULT_PROFILE_RECORD: ProfileRecord = {
-  id: DEFAULT_PROFILE_ID,
-  name: 'Default',
-  avatarToken: 'crimson',
-  isKids: false,
-  isDefault: true,
-  createdAt: 0,
-  updatedAt: 0,
-};
-
-/** Fallback parental settings when no policy row has been persisted yet. */
-export function defaultParentalSettings(profileId = DEFAULT_PROFILE_ID): ParentalSettings {
-  return {
-    profileId,
-    enabled: false,
-    blockAdultKeywords: true,
-    maxRatingAge: null,
-    unlockTimeoutMin: 30,
-    updatedAt: 0,
-  };
-}
-
-/** Active in-tree PIN dialog request rendered at root level inside `AppShell`. */
-export type PinDialogMode = 'verify' | 'create' | 'change' | 'remove';
-
-/** Descriptor for an active PIN entry overlay request. */
-export interface PinDialogRequest {
-  readonly mode: PinDialogMode;
-  readonly title?: string;
-  readonly profileId?: string;
-  /** When `true` in `verify` mode, verifies the PIN without unlocking the active parental session. */
-  readonly verifyOnly?: boolean;
-  readonly onSuccess?: () => void;
-  readonly onCancel?: () => void;
-}
-
-/** Reactive local-profile and parental-control state exposed via {@link useProfile} and {@link useParental}. */
-export interface ProfileContextValue {
-  readonly profiles: readonly ProfileRecord[];
-  readonly activeProfile: ProfileRecord;
-  readonly activeProfileId: string;
-  readonly profilesReady: boolean;
-  readonly profileRevision: number;
-  readonly parentalSettings: ParentalSettings;
-  readonly parentalLocks: readonly ParentalLockRecord[];
-  readonly hasParentalPin: boolean;
-  /** Whether the active profile or a fallback parent/default profile has a PIN configured. */
-  readonly hasGuardPin: boolean;
-  /** Profile ID owning the effective guard PIN (active profile first, else default/parent profile). */
-  readonly guardPinProfileId: string | null;
-  readonly parentalUnlocked: boolean;
-  readonly parentalUnlockExpiresAt: number | null;
-  readonly pinDialog: PinDialogRequest | null;
-  readonly profilePickerOpen: boolean;
-  switchProfile(profileId: string): Promise<void>;
-  createProfile(input: CreateProfileInput): Promise<Result<ProfileRecord>>;
-  updateProfile(id: string, patch: UpdateProfilePatch): Promise<Result<ProfileRecord>>;
-  deleteProfile(id: string): Promise<Result<void>>;
-  verifyParentalPin(pin: string, profileId?: string): Promise<PinVerifyResult>;
-  unlockParental(pin: string, profileId?: string): Promise<PinVerifyResult>;
-  lockParentalNow(): void;
-  updateParentalSettings(patch: UpdateParentalSettingsPatch): Promise<Result<ParentalSettings>>;
-  setParentalLock(
-    input: Omit<SetParentalLockInput, 'profileId'>,
-    locked: boolean,
-  ): Promise<Result<void>>;
-  setParentalPin(pin: string, currentPin?: string, profileId?: string): Promise<Result<void>>;
-  clearParentalPin(currentPin: string, profileId?: string): Promise<Result<void>>;
-  /** Queries whether a specific profile has a parental PIN configured in the catalog. */
-  hasProfilePin(profileId: string): Promise<boolean>;
-  refreshParental(): Promise<void>;
-  refreshProfiles(): Promise<void>;
-  requestParentalUnlock(onSuccess: () => void, options?: { readonly title?: string }): void;
-  openPinDialog(request: PinDialogRequest): void;
-  closePinDialog(cancelled?: boolean): void;
-  openProfilePicker(): void;
-  closeProfilePicker(): void;
-}
-
-const unsupported = () => Promise.resolve(err(elvError('storage', 'unsupported')));
-
-const DEFAULT_PROFILE_CONTEXT: ProfileContextValue = {
-  profiles: [DEFAULT_PROFILE_RECORD],
-  activeProfile: DEFAULT_PROFILE_RECORD,
-  activeProfileId: DEFAULT_PROFILE_ID,
-  profilesReady: false,
-  profileRevision: 0,
-  parentalSettings: defaultParentalSettings(),
-  parentalLocks: [],
-  hasParentalPin: false,
-  hasGuardPin: false,
-  guardPinProfileId: null,
-  parentalUnlocked: false,
-  parentalUnlockExpiresAt: null,
-  pinDialog: null,
-  profilePickerOpen: false,
-  switchProfile: async () => undefined,
-  createProfile: unsupported,
-  updateProfile: unsupported,
-  deleteProfile: unsupported,
-  verifyParentalPin: async () => ({ ok: false, remainingAttempts: 0 }),
-  unlockParental: async () => ({ ok: false, remainingAttempts: 0 }),
-  lockParentalNow: () => undefined,
-  updateParentalSettings: unsupported,
-  setParentalLock: unsupported,
-  setParentalPin: unsupported,
-  clearParentalPin: unsupported,
-  hasProfilePin: async () => false,
-  refreshParental: async () => undefined,
-  refreshProfiles: async () => undefined,
-  requestParentalUnlock: () => undefined,
-  openPinDialog: () => undefined,
-  closePinDialog: () => undefined,
-  openProfilePicker: () => undefined,
-  closeProfilePicker: () => undefined,
+export {
+  DEFAULT_PROFILE_RECORD,
+  defaultParentalSettings,
+  type PinDialogMode,
+  type PinDialogRequest,
+  type ProfileContextValue,
+  type ProfileProviderProps,
 };
 
 const ProfileContext = createContext<ProfileContextValue>(DEFAULT_PROFILE_CONTEXT);
 
-/** Props of {@link ProfileProvider}. */
-export interface ProfileProviderProps {
-  readonly catalog: CatalogService;
-  /** Monotonic external refresh token (e.g. incoming E2EE sync) triggering live profile & parental reload. */
-  readonly externalRefreshToken?: number;
-  readonly profilePreferences?: ProfilePreferencesManager;
-  readonly keymapStore?: KeymapStore;
-  /** Suppresses automatic startup opening of the `"Who's Watching?"` picker while startup overlays are active (`#513`). */
-  readonly suppressAutoProfilePicker?: boolean;
-  readonly onProfileDeleted?: (profileId: string) => void | Promise<void>;
-  readonly onProfileOrLockChange?: (next: {
-    readonly activeProfileId: string;
-    readonly parentalUnlocked: boolean;
-    readonly reason: 'profile-switch' | 'parental-change';
-  }) => void;
-  readonly children: ReactNode;
-}
-
-interface LoadedParentalSnapshot {
-  readonly settings: ParentalSettings;
-  readonly locks: readonly ParentalLockRecord[];
-  readonly hasPin: boolean;
-  readonly guardPinProfileId: string | null;
-}
-
-function buildGuardPinCandidates(
-  activeProfileId: string,
-  profileList: readonly ProfileRecord[],
-): readonly string[] {
-  const candidates: string[] = [activeProfileId];
-  const seen = new Set<string>([activeProfileId]);
-  const defaultProfile = profileList.find((p) => p.isDefault || p.id === DEFAULT_PROFILE_ID);
-  if (defaultProfile && !seen.has(defaultProfile.id)) {
-    seen.add(defaultProfile.id);
-    candidates.push(defaultProfile.id);
-  } else if (!seen.has(DEFAULT_PROFILE_ID)) {
-    seen.add(DEFAULT_PROFILE_ID);
-    candidates.push(DEFAULT_PROFILE_ID);
-  }
-  for (const p of profileList) {
-    if (!p.isKids && !seen.has(p.id)) {
-      seen.add(p.id);
-      candidates.push(p.id);
-    }
-  }
-  return candidates;
-}
-
 /**
  * Manages local viewer profiles (`#15`) and temporary PIN-gated parental unlocks (`#31`)
- * without remounting the navigation shell or flashing blank screens.
+ * without remounting the navigation shell or flashing blank screens. Enters strict fail-closed
+ * withholding whenever storage reads reject so transient faults never disable Kids Mode.
  */
 export function ProfileProvider({
   catalog,
@@ -226,14 +74,16 @@ export function ProfileProvider({
   const [profilesReady, setProfilesReady] = useState(() => !hasAsyncHydration);
   const [profileRevision, setProfileRevision] = useState(0);
 
-  const [parentalSettings, setParentalSettings] = useState<ParentalSettings>(() =>
-    defaultParentalSettings(profilePreferences?.getActiveProfileId() ?? DEFAULT_PROFILE_ID),
-  );
+  const [parentalSettings, setParentalSettings] = useState<ParentalSettings>(() => {
+    const pid = profilePreferences?.getActiveProfileId() ?? DEFAULT_PROFILE_ID;
+    return hasAsyncHydration ? failClosedParentalSettings(pid) : defaultParentalSettings(pid);
+  });
   const [parentalLocks, setParentalLocks] = useState<readonly ParentalLockRecord[]>([]);
   const [hasParentalPin, setHasParentalPin] = useState(false);
   const [guardPinProfileId, setGuardPinProfileId] = useState<string | null>(null);
   const [parentalUnlocked, setParentalUnlocked] = useState(false);
   const [parentalUnlockExpiresAt, setParentalUnlockExpiresAt] = useState<number | null>(null);
+  const [parentalLoadError, setParentalLoadError] = useState(false);
   const [pinDialog, setPinDialog] = useState<PinDialogRequest | null>(null);
   const [profilePickerOpen, setProfilePickerOpen] = useState(false);
 
@@ -246,6 +96,8 @@ export function ProfileProvider({
   parentalSettingsRef.current = parentalSettings;
   const parentalUnlockedRef = useRef(parentalUnlocked);
   parentalUnlockedRef.current = parentalUnlocked;
+  const parentalLoadErrorRef = useRef(parentalLoadError);
+  parentalLoadErrorRef.current = parentalLoadError;
   const guardPinProfileIdRef = useRef<string | null>(guardPinProfileId);
   guardPinProfileIdRef.current = guardPinProfileId;
   const switchSeqRef = useRef(0);
@@ -271,6 +123,36 @@ export function ProfileProvider({
     };
   }, [clearRelockTimer]);
 
+  const enterFailClosedState = useCallback(
+    (profileId: string) => {
+      clearRelockTimer();
+      const wasUnlocked = parentalUnlockedRef.current;
+      const wasError = parentalLoadErrorRef.current;
+      const profileChanged = activeProfileIdRef.current !== profileId;
+      const closedSettings = failClosedParentalSettings(profileId);
+      activeProfileIdRef.current = profileId;
+      parentalLoadErrorRef.current = true;
+      parentalUnlockedRef.current = false;
+      parentalSettingsRef.current = closedSettings;
+      setActiveProfileId(profileId);
+      setParentalLoadError(true);
+      setParentalSettings(closedSettings);
+      setParentalLocks([]);
+      setParentalUnlocked(false);
+      setParentalUnlockExpiresAt(null);
+      setProfilesReady(true);
+      if (!wasError || wasUnlocked || profileChanged) {
+        setProfileRevision((r) => r + 1);
+        onChangeRef.current?.({
+          activeProfileId: profileId,
+          parentalUnlocked: false,
+          reason: profileChanged ? 'profile-switch' : 'parental-change',
+        });
+      }
+    },
+    [clearRelockTimer],
+  );
+
   const fetchParentalSnapshot = useCallback(
     async (
       profileId: string,
@@ -280,13 +162,13 @@ export function ProfileProvider({
       const hasPinFn = catalog.hasParentalPin;
       const [settings, locks, pinFlags] = await Promise.all([
         catalog.getParentalSettings
-          ? catalog.getParentalSettings(profileId).catch(() => defaultParentalSettings(profileId))
+          ? catalog.getParentalSettings(profileId)
           : Promise.resolve(defaultParentalSettings(profileId)),
         catalog.listParentalLocks
-          ? catalog.listParentalLocks(profileId).catch(() => [] as ParentalLockRecord[])
+          ? catalog.listParentalLocks(profileId)
           : Promise.resolve([] as ParentalLockRecord[]),
         hasPinFn
-          ? Promise.all(candidates.map((id) => hasPinFn(id).catch(() => false)))
+          ? Promise.all(candidates.map((id) => hasPinFn(id)))
           : Promise.resolve(candidates.map(() => false)),
       ]);
       const hasPin = pinFlags[0] === true;
@@ -298,17 +180,53 @@ export function ProfileProvider({
   );
 
   const loadParentalStateFor = useCallback(
-    async (profileId: string, overrideList?: readonly ProfileRecord[]): Promise<void> => {
-      const snapshot = await fetchParentalSnapshot(profileId, overrideList ?? profilesRef.current);
-      if (!mountedRef.current || activeProfileIdRef.current !== profileId) return;
-      parentalSettingsRef.current = snapshot.settings;
-      guardPinProfileIdRef.current = snapshot.guardPinProfileId;
-      setParentalSettings(snapshot.settings);
-      setParentalLocks(snapshot.locks);
-      setHasParentalPin(snapshot.hasPin);
-      setGuardPinProfileId(snapshot.guardPinProfileId);
+    async (
+      profileId: string,
+      overrideList?: readonly ProfileRecord[],
+      existingSeq?: number,
+    ): Promise<void> => {
+      const seq = existingSeq ?? ++switchSeqRef.current;
+      try {
+        const snapshot = await fetchParentalSnapshot(
+          profileId,
+          overrideList ?? profilesRef.current,
+        );
+        if (
+          !mountedRef.current ||
+          switchSeqRef.current !== seq ||
+          activeProfileIdRef.current !== profileId
+        ) {
+          return;
+        }
+        const wasError = parentalLoadErrorRef.current;
+        parentalLoadErrorRef.current = false;
+        parentalSettingsRef.current = snapshot.settings;
+        guardPinProfileIdRef.current = snapshot.guardPinProfileId;
+        setParentalLoadError(false);
+        setParentalSettings(snapshot.settings);
+        setParentalLocks(snapshot.locks);
+        setHasParentalPin(snapshot.hasPin);
+        setGuardPinProfileId(snapshot.guardPinProfileId);
+        if (wasError) {
+          setProfileRevision((r) => r + 1);
+          onChangeRef.current?.({
+            activeProfileId: profileId,
+            parentalUnlocked: parentalUnlockedRef.current,
+            reason: 'parental-change',
+          });
+        }
+      } catch {
+        if (
+          !mountedRef.current ||
+          switchSeqRef.current !== seq ||
+          activeProfileIdRef.current !== profileId
+        ) {
+          return;
+        }
+        enterFailClosedState(profileId);
+      }
     },
-    [fetchParentalSnapshot],
+    [enterFailClosedState, fetchParentalSnapshot],
   );
 
   const switchProfileInternal = useCallback(
@@ -324,16 +242,25 @@ export function ProfileProvider({
         if (!mountedRef.current || switchSeqRef.current !== seq) return;
       }
 
-      const snapshot = await fetchParentalSnapshot(targetId, overrideList ?? profilesRef.current);
+      let snapshot: LoadedParentalSnapshot;
+      try {
+        snapshot = await fetchParentalSnapshot(targetId, overrideList ?? profilesRef.current);
+      } catch {
+        if (!mountedRef.current || switchSeqRef.current !== seq) return;
+        enterFailClosedState(targetId);
+        return;
+      }
       if (!mountedRef.current || switchSeqRef.current !== seq) return;
 
       // Atomic batched commit: zero double cache clear, zero double prewarm, zero stale window.
       clearRelockTimer();
+      parentalLoadErrorRef.current = false;
       activeProfileIdRef.current = targetId;
       parentalSettingsRef.current = snapshot.settings;
       parentalUnlockedRef.current = false;
       guardPinProfileIdRef.current = snapshot.guardPinProfileId;
       setActiveProfileId(targetId);
+      setParentalLoadError(false);
       setParentalSettings(snapshot.settings);
       setParentalLocks(snapshot.locks);
       setHasParentalPin(snapshot.hasPin);
@@ -347,14 +274,20 @@ export function ProfileProvider({
         reason: 'profile-switch',
       });
     },
-    [clearRelockTimer, fetchParentalSnapshot, profilePreferences],
+    [clearRelockTimer, enterFailClosedState, fetchParentalSnapshot, profilePreferences],
   );
 
   const refreshProfiles = useCallback(async (): Promise<void> => {
-    const loaded = catalog.listProfiles
-      ? await catalog.listProfiles().catch(() => [DEFAULT_PROFILE_RECORD])
-      : [DEFAULT_PROFILE_RECORD];
-    if (!mountedRef.current) return;
+    const seq = ++switchSeqRef.current;
+    let loaded: readonly ProfileRecord[];
+    try {
+      loaded = catalog.listProfiles ? await catalog.listProfiles() : [DEFAULT_PROFILE_RECORD];
+    } catch {
+      if (!mountedRef.current || switchSeqRef.current !== seq) return;
+      enterFailClosedState(activeProfileIdRef.current);
+      return;
+    }
+    if (!mountedRef.current || switchSeqRef.current !== seq) return;
     const safeList = loaded.length > 0 ? loaded : [DEFAULT_PROFILE_RECORD];
     profilesRef.current = safeList;
     setProfiles(safeList);
@@ -367,10 +300,10 @@ export function ProfileProvider({
       setProfilesReady(true);
       return;
     }
-    await loadParentalStateFor(currentActiveId, safeList);
-    if (!mountedRef.current) return;
+    await loadParentalStateFor(currentActiveId, safeList, seq);
+    if (!mountedRef.current || switchSeqRef.current !== seq) return;
     setProfilesReady(true);
-  }, [catalog, loadParentalStateFor, switchProfileInternal]);
+  }, [catalog, enterFailClosedState, loadParentalStateFor, switchProfileInternal]);
 
   const prevExternalRefreshTokenRef = useRef<number>(externalRefreshToken ?? 0);
   useEffect(() => {
@@ -390,59 +323,71 @@ export function ProfileProvider({
     let cancelled = false;
     const initSeq = ++switchSeqRef.current;
     void (async () => {
-      const [loadedProfiles, savedId] = await Promise.all([
-        catalog.listProfiles
-          ? catalog.listProfiles().catch(() => [DEFAULT_PROFILE_RECORD])
-          : Promise.resolve([DEFAULT_PROFILE_RECORD]),
-        profilePreferences
-          ? profilePreferences.loadActiveProfileId().catch(() => DEFAULT_PROFILE_ID)
-          : Promise.resolve(DEFAULT_PROFILE_ID),
-      ]);
-      if (cancelled || !mountedRef.current || switchSeqRef.current !== initSeq) return;
-      const safeList = loadedProfiles.length > 0 ? loadedProfiles : [DEFAULT_PROFILE_RECORD];
-      const validTarget = safeList.some((p) => p.id === savedId)
-        ? savedId
-        : (safeList[0]?.id ?? DEFAULT_PROFILE_ID);
+      try {
+        const [loadedProfiles, savedId] = await Promise.all([
+          catalog.listProfiles ? catalog.listProfiles() : Promise.resolve([DEFAULT_PROFILE_RECORD]),
+          profilePreferences
+            ? profilePreferences.loadActiveProfileId()
+            : Promise.resolve(DEFAULT_PROFILE_ID),
+        ]);
+        if (cancelled || !mountedRef.current || switchSeqRef.current !== initSeq) return;
+        const safeList = loadedProfiles.length > 0 ? loadedProfiles : [DEFAULT_PROFILE_RECORD];
+        const validTarget = safeList.some((p) => p.id === savedId)
+          ? savedId
+          : (safeList[0]?.id ?? DEFAULT_PROFILE_ID);
 
-      if (profilePreferences && profilePreferences.getActiveProfileId() !== validTarget) {
-        await profilePreferences.switchProfile(validTarget).catch(() => undefined);
-      }
-      if (cancelled || !mountedRef.current || switchSeqRef.current !== initSeq) return;
+        if (profilePreferences && profilePreferences.getActiveProfileId() !== validTarget) {
+          await profilePreferences.switchProfile(validTarget).catch(() => undefined);
+        }
+        if (cancelled || !mountedRef.current || switchSeqRef.current !== initSeq) return;
 
-      const snapshot = await fetchParentalSnapshot(validTarget, safeList);
-      if (cancelled || !mountedRef.current || switchSeqRef.current !== initSeq) return;
+        const snapshot = await fetchParentalSnapshot(validTarget, safeList);
+        if (cancelled || !mountedRef.current || switchSeqRef.current !== initSeq) return;
 
-      const profileChanged = validTarget !== activeProfileIdRef.current;
-      profilesRef.current = safeList;
-      activeProfileIdRef.current = validTarget;
-      parentalSettingsRef.current = snapshot.settings;
-      guardPinProfileIdRef.current = snapshot.guardPinProfileId;
-      setProfiles(safeList);
-      setActiveProfileId(validTarget);
-      setParentalSettings(snapshot.settings);
-      setParentalLocks(snapshot.locks);
-      setHasParentalPin(snapshot.hasPin);
-      setGuardPinProfileId(snapshot.guardPinProfileId);
-      setProfilesReady(true);
-      if (profileChanged) {
-        setProfileRevision((r) => r + 1);
-        onChangeRef.current?.({
-          activeProfileId: validTarget,
-          parentalUnlocked: false,
-          reason: 'profile-switch',
-        });
+        const profileChanged = validTarget !== activeProfileIdRef.current;
+        profilesRef.current = safeList;
+        activeProfileIdRef.current = validTarget;
+        parentalLoadErrorRef.current = false;
+        parentalSettingsRef.current = snapshot.settings;
+        guardPinProfileIdRef.current = snapshot.guardPinProfileId;
+        setProfiles(safeList);
+        setActiveProfileId(validTarget);
+        setParentalLoadError(false);
+        setParentalSettings(snapshot.settings);
+        setParentalLocks(snapshot.locks);
+        setHasParentalPin(snapshot.hasPin);
+        setGuardPinProfileId(snapshot.guardPinProfileId);
+        setProfilesReady(true);
+        if (profileChanged) {
+          setProfileRevision((r) => r + 1);
+          onChangeRef.current?.({
+            activeProfileId: validTarget,
+            parentalUnlocked: false,
+            reason: 'profile-switch',
+          });
+        }
+      } catch {
+        if (cancelled || !mountedRef.current || switchSeqRef.current !== initSeq) return;
+        enterFailClosedState(activeProfileIdRef.current);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [catalog, fetchParentalSnapshot, hasAsyncHydration, profilePreferences]);
+  }, [catalog, enterFailClosedState, fetchParentalSnapshot, hasAsyncHydration, profilePreferences]);
 
   useEffect(() => {
-    if (!profilesReady || suppressAutoProfilePicker || autoPickerEvaluatedRef.current) return;
+    if (
+      !profilesReady ||
+      parentalLoadError ||
+      suppressAutoProfilePicker ||
+      autoPickerEvaluatedRef.current
+    ) {
+      return;
+    }
     autoPickerEvaluatedRef.current = true;
     if (profiles.length >= 2) setProfilePickerOpen(true);
-  }, [profiles.length, profilesReady, suppressAutoProfilePicker]);
+  }, [parentalLoadError, profiles.length, profilesReady, suppressAutoProfilePicker]);
 
   const lockParentalNow = useCallback(() => {
     clearRelockTimer();
@@ -502,9 +447,13 @@ export function ProfileProvider({
       ]);
       if (!mountedRef.current) return res;
 
-      const loaded = catalog.listProfiles
-        ? await catalog.listProfiles().catch(() => [DEFAULT_PROFILE_RECORD])
-        : [DEFAULT_PROFILE_RECORD];
+      let loaded: readonly ProfileRecord[];
+      try {
+        loaded = catalog.listProfiles ? await catalog.listProfiles() : [DEFAULT_PROFILE_RECORD];
+      } catch {
+        if (mountedRef.current) enterFailClosedState(activeProfileIdRef.current);
+        return res;
+      }
       if (!mountedRef.current) return res;
       const safeList = loaded.length > 0 ? loaded : [DEFAULT_PROFILE_RECORD];
       profilesRef.current = safeList;
@@ -517,7 +466,14 @@ export function ProfileProvider({
       }
       return res;
     },
-    [catalog, keymapStore, loadParentalStateFor, profilePreferences, switchProfileInternal],
+    [
+      catalog,
+      enterFailClosedState,
+      keymapStore,
+      loadParentalStateFor,
+      profilePreferences,
+      switchProfileInternal,
+    ],
   );
 
   const verifyParentalPin = useCallback(
@@ -557,11 +513,13 @@ export function ProfileProvider({
   const unlockParental = useCallback(
     async (pin: string, targetProfileId?: string): Promise<PinVerifyResult> => {
       const pid = targetProfileId ?? guardPinProfileIdRef.current ?? activeProfileIdRef.current;
-      if (!catalog.verifyParentalPin) {
+      if (parentalLoadErrorRef.current || !catalog.verifyParentalPin) {
         return { ok: false, remainingAttempts: 0 };
       }
       const res = await catalog.verifyParentalPin(pin, pid);
-      if (!mountedRef.current) return res;
+      if (!mountedRef.current || parentalLoadErrorRef.current) {
+        return { ok: false, remainingAttempts: 0 };
+      }
       if (res.ok && (pid === activeProfileIdRef.current || pid === guardPinProfileIdRef.current)) {
         startParentalUnlockSession();
       }
@@ -572,6 +530,7 @@ export function ProfileProvider({
 
   const updateParentalSettingsAction = useCallback(
     async (patch: UpdateParentalSettingsPatch): Promise<Result<ParentalSettings>> => {
+      if (parentalLoadErrorRef.current) return parentalUnavailableError();
       if (!catalog.updateParentalSettings) return err(elvError('storage', 'unsupported'));
       const pid = activeProfileIdRef.current;
       const res = await catalog.updateParentalSettings(patch, pid);
@@ -595,6 +554,7 @@ export function ProfileProvider({
       input: Omit<SetParentalLockInput, 'profileId'>,
       locked: boolean,
     ): Promise<Result<void>> => {
+      if (parentalLoadErrorRef.current) return parentalUnavailableError();
       if (!catalog.setParentalLock) return err(elvError('storage', 'unsupported'));
       const pid = activeProfileIdRef.current;
       const res = await catalog.setParentalLock({ ...input, profileId: pid }, locked);
@@ -614,6 +574,7 @@ export function ProfileProvider({
 
   const setParentalPinAction = useCallback(
     async (pin: string, currentPin?: string, targetProfileId?: string): Promise<Result<void>> => {
+      if (parentalLoadErrorRef.current) return parentalUnavailableError();
       if (!catalog.setParentalPin) return err(elvError('storage', 'unsupported'));
       const pid = targetProfileId ?? activeProfileIdRef.current;
       const isCreate = currentPin === undefined;
@@ -622,6 +583,7 @@ export function ProfileProvider({
         await loadParentalStateFor(activeProfileIdRef.current);
         if (
           mountedRef.current &&
+          !parentalLoadErrorRef.current &&
           isCreate &&
           (pid === activeProfileIdRef.current || pid === guardPinProfileIdRef.current)
         ) {
@@ -636,13 +598,18 @@ export function ProfileProvider({
   const hasProfilePinAction = useCallback(
     async (profileId: string): Promise<boolean> => {
       if (!catalog.hasParentalPin) return false;
-      return catalog.hasParentalPin(profileId).catch(() => false);
+      try {
+        return await catalog.hasParentalPin(profileId);
+      } catch {
+        return true;
+      }
     },
     [catalog],
   );
 
   const clearParentalPinAction = useCallback(
     async (currentPin: string, targetProfileId?: string): Promise<Result<void>> => {
+      if (parentalLoadErrorRef.current) return parentalUnavailableError();
       if (!catalog.clearParentalPin) return err(elvError('storage', 'unsupported'));
       const pid = targetProfileId ?? activeProfileIdRef.current;
       const res = await catalog.clearParentalPin(currentPin, pid);
@@ -661,6 +628,10 @@ export function ProfileProvider({
     await loadParentalStateFor(activeProfileIdRef.current);
   }, [loadParentalStateFor]);
 
+  const retryParentalLoad = useCallback(async (): Promise<void> => {
+    await refreshProfiles();
+  }, [refreshProfiles]);
+
   const openPinDialog = useCallback((request: PinDialogRequest) => {
     setPinDialog(request);
   }, []);
@@ -674,6 +645,7 @@ export function ProfileProvider({
 
   const requestParentalUnlock = useCallback(
     (onSuccess: () => void, options?: { readonly title?: string }) => {
+      if (parentalLoadErrorRef.current) return;
       if (parentalUnlockedRef.current) {
         onSuccess();
         return;
@@ -712,6 +684,7 @@ export function ProfileProvider({
       guardPinProfileId,
       parentalUnlocked,
       parentalUnlockExpiresAt,
+      parentalLoadError,
       pinDialog,
       profilePickerOpen,
       switchProfile,
@@ -728,6 +701,7 @@ export function ProfileProvider({
       hasProfilePin: hasProfilePinAction,
       refreshParental,
       refreshProfiles,
+      retryParentalLoad,
       requestParentalUnlock,
       openPinDialog,
       closePinDialog,
@@ -747,6 +721,7 @@ export function ProfileProvider({
       guardPinProfileId,
       parentalUnlocked,
       parentalUnlockExpiresAt,
+      parentalLoadError,
       pinDialog,
       profilePickerOpen,
       switchProfile,
@@ -763,6 +738,7 @@ export function ProfileProvider({
       hasProfilePinAction,
       refreshParental,
       refreshProfiles,
+      retryParentalLoad,
       requestParentalUnlock,
       openPinDialog,
       closePinDialog,

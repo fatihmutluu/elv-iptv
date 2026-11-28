@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { isAlwaysOnTopFlag, WINDOW_CHANNELS } from '../shared/window-ipc.ts';
+import type { TrustedSenderEventLike } from './trusted-sender.ts';
 import {
   type AlwaysOnTopWindowLike,
   type ChildZOrderWindowLike,
@@ -7,7 +8,13 @@ import {
   type WindowIpcMainLike,
 } from './window-ipc.ts';
 
-type Handler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
+type Handler = (event: TrustedSenderEventLike & { sender: unknown }, ...args: unknown[]) => unknown;
+
+function trustedFrame(url = 'app://elv/index.html') {
+  const frame: { url: string; top: unknown } = { url, top: undefined };
+  frame.top = frame;
+  return frame;
+}
 
 function fakeIpcMain() {
   const handlers = new Map<string, Handler>();
@@ -19,7 +26,12 @@ function fakeIpcMain() {
     ipcMain,
     handlers,
     invoke: (channel: string, sender: unknown, ...args: unknown[]) =>
-      Promise.resolve(handlers.get(channel)?.({ sender }, ...args)),
+      Promise.resolve(handlers.get(channel)?.({ sender, senderFrame: trustedFrame() }, ...args)),
+    invokeWithEvent: (
+      channel: string,
+      event: TrustedSenderEventLike & { sender: unknown },
+      ...args: unknown[]
+    ) => Promise.resolve(handlers.get(channel)?.(event, ...args)),
   };
 }
 
@@ -442,6 +454,42 @@ describe('window-ipc (#408)', () => {
     expect(received).toHaveLength(1);
     expect(logs).toHaveLength(4);
 
+    dispose();
+  });
+
+  it('rejects missing senderFrame, subframes, and untrusted origins across all window IPC channels', async () => {
+    const ipc = fakeIpcMain();
+    const fw = fakeWindow();
+    const onOpenExternalUrl = vi.fn(() => true);
+    const logs: string[] = [];
+    const dispose = registerWindowIpc({
+      ipcMain: ipc.ipcMain,
+      getWindowFromSender: () => fw.win,
+      onOpenExternalUrl,
+      log: (line) => logs.push(line),
+    });
+
+    const top = trustedFrame();
+    const untrustedEvents = [
+      { sender: fw.sender },
+      { sender: fw.sender, senderFrame: null },
+      { sender: fw.sender, senderFrame: { url: 'app://elv/index.html', top } },
+      { sender: fw.sender, senderFrame: trustedFrame('https://evil.example/') },
+    ];
+    for (const ev of untrustedEvents) {
+      await expect(ipc.invokeWithEvent(WINDOW_CHANNELS.getAlwaysOnTop, ev)).rejects.toThrow(
+        /untrusted sender/i,
+      );
+      await expect(
+        ipc.invokeWithEvent(
+          WINDOW_CHANNELS.openExternalUrl,
+          ev,
+          'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        ),
+      ).rejects.toThrow(/untrusted sender/i);
+    }
+    expect(onOpenExternalUrl).not.toHaveBeenCalled();
+    expect(logs.length).toBe(untrustedEvents.length * 2);
     dispose();
   });
 });

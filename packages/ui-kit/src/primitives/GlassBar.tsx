@@ -44,7 +44,7 @@ export function GlassBar({
 
   const transitionStyle = webTransition(
     theme,
-    'background-color, border-color, backdrop-filter',
+    'background-color, border-color',
     theme.motion.normalMs,
   );
 
@@ -94,7 +94,7 @@ export function GlassBar({
 
   if (adapters.renderBlur) {
     return (
-      <View testID={testID} style={[styles.container, hairlineStyle, style]}>
+      <View testID={testID} style={[styles.container, styles.nativeClip, hairlineStyle, style]}>
         {adapters.renderBlur({
           intensity: 20,
           tintColor: theme.colors.glassBg,
@@ -125,10 +125,13 @@ export function GlassBar({
 const styles = StyleSheet.create({
   container: {
     position: 'relative',
+  },
+  nativeClip: {
     overflow: 'hidden',
   },
   nativeScrim: {
     flexDirection: 'column',
+    overflow: 'hidden',
   },
   content: {
     flex: 1,

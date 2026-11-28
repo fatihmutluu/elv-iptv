@@ -56,10 +56,10 @@ describe('clampWindowBounds (#408)', () => {
     expect(clampWindowBounds(saved, [PRIMARY, SECONDARY_RIGHT])).toEqual(saved);
   });
 
-  it('chooses the display with the largest intersection area and clamps strictly inside its workArea', () => {
+  it('chooses the display with the largest valid intersection area and clamps strictly inside its workArea', () => {
     const straddling: PersistedWindowState = {
       x: 1800,
-      y: -50,
+      y: 50,
       width: 1200,
       height: 800,
       isMaximized: true,
@@ -67,14 +67,14 @@ describe('clampWindowBounds (#408)', () => {
     // 120px on PRIMARY vs 1080px on SECONDARY_RIGHT -> picks SECONDARY_RIGHT and clamps x/y inside it
     expect(clampWindowBounds(straddling, [PRIMARY, SECONDARY_RIGHT])).toEqual({
       x: 1920,
-      y: 0,
+      y: 50,
       width: 1200,
       height: 800,
       isMaximized: true,
     });
   });
 
-  it('clamps windows from a disconnected monitor onto the primary display so they never open off-screen', () => {
+  it('recenters windows from a disconnected monitor onto the primary display instead of edge-clamping', () => {
     const disconnected: PersistedWindowState = {
       x: 2400,
       y: 300,
@@ -83,19 +83,90 @@ describe('clampWindowBounds (#408)', () => {
       isMaximized: false,
     };
     const clamped = clampWindowBounds(disconnected, [PRIMARY]);
-    expect(clamped.x).toBeGreaterThanOrEqual(PRIMARY.workArea.x);
-    expect(clamped.y).toBeGreaterThanOrEqual(PRIMARY.workArea.y);
-    expect(clamped.x + clamped.width).toBeLessThanOrEqual(
-      PRIMARY.workArea.x + PRIMARY.workArea.width,
-    );
-    expect(clamped.y + clamped.height).toBeLessThanOrEqual(
-      PRIMARY.workArea.y + PRIMARY.workArea.height,
-    );
     expect(clamped).toEqual({
-      x: 640,
-      y: 300,
+      x: 320,
+      y: 160,
       width: 1280,
       height: 720,
+      isMaximized: false,
+    });
+  });
+
+  it('recenters on primary when overlap is a sliver (< 100px wide or tall) or titlebar is clipped above workArea.y', () => {
+    // Narrow horizontal sliver (only 50px inside PRIMARY right edge) -> recenters on primary
+    expect(
+      clampWindowBounds({ x: 1870, y: 120, width: 1200, height: 700, isMaximized: false }, [
+        PRIMARY,
+      ]),
+    ).toEqual({
+      x: 320,
+      y: 160,
+      width: 1280,
+      height: 720,
+      isMaximized: false,
+    });
+
+    // Short vertical sliver (only 80px inside PRIMARY bottom edge) -> recenters on primary
+    expect(
+      clampWindowBounds({ x: 200, y: 960, width: 1200, height: 700, isMaximized: false }, [
+        PRIMARY,
+      ]),
+    ).toEqual({
+      x: 320,
+      y: 160,
+      width: 1280,
+      height: 720,
+      isMaximized: false,
+    });
+
+    // Clipped titlebar above PRIMARY workArea.y (y < 0) -> recenters on primary preserving isMaximized
+    expect(
+      clampWindowBounds({ x: 200, y: -40, width: 1200, height: 700, isMaximized: true }, [PRIMARY]),
+    ).toEqual({
+      x: 320,
+      y: 160,
+      width: 1280,
+      height: 720,
+      isMaximized: true,
+    });
+
+    // Clipped titlebar above SMALL_LAPTOP workArea.y (y < 24) -> recenters on SMALL_LAPTOP
+    expect(
+      clampWindowBounds({ x: 100, y: 10, width: 1000, height: 600, isMaximized: false }, [
+        SMALL_LAPTOP,
+      ]),
+    ).toEqual({
+      x: 43,
+      y: 24,
+      width: 1280,
+      height: 720,
+      isMaximized: false,
+    });
+  });
+
+  it('preserves and clamps bounds with >= 100x100 visible intersection and reachable titlebar (including tiny displays)', () => {
+    // Exactly 100x100 visible intersection on PRIMARY with y >= workArea.y -> clamped onto PRIMARY
+    expect(
+      clampWindowBounds({ x: 1820, y: 940, width: 1000, height: 600, isMaximized: false }, [
+        PRIMARY,
+      ]),
+    ).toEqual({
+      x: 920,
+      y: 440,
+      width: 1000,
+      height: 600,
+      isMaximized: false,
+    });
+
+    // Tiny test display (< 100px) uses min(100, workArea.width/height)
+    const tiny: DisplayWorkArea = { workArea: { x: 0, y: 0, width: 80, height: 60 } };
+    expect(
+      clampWindowBounds({ x: 0, y: 0, width: 80, height: 60, isMaximized: false }, [tiny]),
+    ).toEqual({
+      x: 0,
+      y: 0,
+      width: 80,
+      height: 60,
       isMaximized: false,
     });
   });
@@ -200,11 +271,11 @@ describe('loadWindowState & createWindowBoundsController (#408)', () => {
     });
   });
 
-  it('loads valid saved state and clamps it to connected displays', () => {
+  it('loads valid saved state, clamps partial overhangs, and recenters off-screen coordinates', () => {
     const file = tempFile();
     writeFileSync(
       file,
-      JSON.stringify({ x: 3000, y: 50, width: 1200, height: 700, isMaximized: true }),
+      JSON.stringify({ x: 1500, y: 50, width: 1200, height: 700, isMaximized: true }),
       'utf8',
     );
     expect(loadWindowState(file, [PRIMARY])).toEqual({
@@ -212,6 +283,19 @@ describe('loadWindowState & createWindowBoundsController (#408)', () => {
       y: 50,
       width: 1200,
       height: 700,
+      isMaximized: true,
+    });
+
+    writeFileSync(
+      file,
+      JSON.stringify({ x: 3000, y: 50, width: 1200, height: 700, isMaximized: true }),
+      'utf8',
+    );
+    expect(loadWindowState(file, [PRIMARY])).toEqual({
+      x: 320,
+      y: 160,
+      width: 1280,
+      height: 720,
       isMaximized: true,
     });
   });

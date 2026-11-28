@@ -149,6 +149,10 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'source.error.secretStore': 'Bu cihazda güvenli kimlik bilgisi deposu kullanılamıyor.',
   'source.hint.secretStore':
     'İşletim sistemi anahtarlığının veya ekran kilidi şifrelemesinin etkin olduğundan emin olup uygulamayı yeniden başlatın.',
+  'source.error.secretKeyRotated':
+    'Sistem anahtarı değişikliği sonrası kayıtlı kaynak kimlik bilgileri açılamadı.',
+  'source.hint.secretKeyRotated':
+    'Erişimi geri yüklemek için Kaynaklar bölümünden giriş bilgilerinizi yeniden girin.',
   'source.error.storage': 'Katalog verileri yerel depolamaya kaydedilemedi.',
   'source.hint.storage': 'Boş disk alanını kontrol edip kaynağı yenilemeyi deneyin.',
   'nav.home': 'Ana Sayfa',

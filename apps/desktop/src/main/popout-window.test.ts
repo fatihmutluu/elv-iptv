@@ -149,7 +149,7 @@ describe('popout-window (#158)', () => {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
       additionalArguments: ['--elv-presenter=canvas'],
     });
 

@@ -91,6 +91,10 @@ export {
   type ProfileCatalogScope,
 } from './profile-scoped-catalog';
 export {
+  SESSION_GUARD_CHANNEL,
+  SESSION_GUARD_STORAGE_KEY,
+} from './session-guard-channel';
+export {
   type StreamHealthContextValue,
   StreamHealthProvider,
   type StreamHealthProviderProps,

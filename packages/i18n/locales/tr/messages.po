@@ -4618,3 +4618,21 @@ msgstr "{season}. Sezonu indir"
 
 msgid "detail.scopePicker.seasonEpisodesCount"
 msgstr "{count} bölüm"
+
+msgid "parental.reverifyTitle"
+msgstr "Ebeveyn PIN'ini doğrula"
+
+msgid "parental.verifyButton"
+msgstr "Doğrula"
+
+msgid "parental.loadErrorMessage"
+msgstr "Ebeveyn denetimleri yüklenemedi. Ayarlar doğrulanana kadar kısıtlı içerikler gizlenir."
+
+msgid "parental.retryLoad"
+msgstr "Tekrar dene"
+
+msgid "source.error.secretKeyRotated"
+msgstr "Sistem anahtarı değişikliği sonrası kayıtlı kaynak kimlik bilgileri açılamadı."
+
+msgid "source.hint.secretKeyRotated"
+msgstr "Erişimi geri yüklemek için Kaynaklar bölümünden giriş bilgilerinizi yeniden girin."

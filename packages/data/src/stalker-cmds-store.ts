@@ -1,4 +1,5 @@
 import { elvError, err, ok, type Result, type SecretStore } from '@elv/domain';
+import { isSecretKeyRotatedError } from './secret-errors';
 
 const utf8 = new TextEncoder();
 const PROTO_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
@@ -49,10 +50,15 @@ function parseManifest(parsed: Record<string, unknown>): { isManifest: boolean; 
   return { isManifest: true, count: n };
 }
 
-async function safeGet(secrets: SecretStore, key: string): Promise<string | undefined> {
+async function safeGet(
+  secrets: SecretStore,
+  key: string,
+  propagateKeyRotated: boolean,
+): Promise<string | undefined> {
   try {
     return await secrets.get(key);
-  } catch {
+  } catch (error) {
+    if (propagateKeyRotated && isSecretKeyRotatedError(error)) throw error;
     return undefined;
   }
 }
@@ -66,7 +72,7 @@ async function safeDelete(secrets: SecretStore, key: string): Promise<void> {
 }
 
 async function readChunkCount(secrets: SecretStore, sourceId: string): Promise<number> {
-  const raw = await safeGet(secrets, cmdsRootKey(sourceId));
+  const raw = await safeGet(secrets, cmdsRootKey(sourceId), false);
   if (raw === undefined) return 0;
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -117,7 +123,7 @@ export async function loadStalkerCmdMap(
   secrets: SecretStore,
   sourceId: string,
 ): Promise<StalkerCmdMap> {
-  const raw = await safeGet(secrets, cmdsRootKey(sourceId));
+  const raw = await safeGet(secrets, cmdsRootKey(sourceId), true);
   if (raw === undefined) return {};
   let parsed: unknown;
   try {
@@ -134,7 +140,9 @@ export async function loadStalkerCmdMap(
   }
   if (manifest.count === undefined) return {};
   const shards = await Promise.all(
-    Array.from({ length: manifest.count }, (_, i) => safeGet(secrets, cmdsShardKey(sourceId, i))),
+    Array.from({ length: manifest.count }, (_, i) =>
+      safeGet(secrets, cmdsShardKey(sourceId, i), true),
+    ),
   );
   for (const shard of shards) {
     if (shard === undefined) continue;

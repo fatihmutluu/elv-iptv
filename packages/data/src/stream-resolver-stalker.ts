@@ -9,6 +9,7 @@ import {
 } from '@elv/domain';
 import { buildCatchupUrl, createStalkerClient, type StalkerClient } from '@elv/sources';
 import type { PlayableRow } from './queries';
+import { isSecretKeyRotatedError } from './secret-errors';
 import type { SourceRecord } from './sources';
 import {
   loadStalkerCmdMap,
@@ -62,10 +63,16 @@ export function createStalkerResolverState(deps: {
   const secretFor = (sourceId: string): Promise<StalkerSecret | undefined> => {
     let cached = secretCache.get(sourceId);
     if (cached === undefined) {
-      cached = loadStalkerSecret(deps.secrets, sourceId).then((res) => {
-        if (res === undefined) secretCache.delete(sourceId);
-        return res;
-      });
+      cached = loadStalkerSecret(deps.secrets, sourceId).then(
+        (res) => {
+          if (res === undefined) secretCache.delete(sourceId);
+          return res;
+        },
+        (error: unknown) => {
+          secretCache.delete(sourceId);
+          throw error;
+        },
+      );
       secretCache.set(sourceId, cached);
     }
     return cached;
@@ -74,7 +81,10 @@ export function createStalkerResolverState(deps: {
   const cmdsFor = (sourceId: string): Promise<StalkerCmdMap> => {
     let cached = cmdCache.get(sourceId);
     if (cached === undefined) {
-      cached = loadStalkerCmdMap(deps.secrets, sourceId);
+      cached = loadStalkerCmdMap(deps.secrets, sourceId).catch((error: unknown) => {
+        cmdCache.delete(sourceId);
+        throw error;
+      });
       cmdCache.set(sourceId, cached);
     }
     return cached;
@@ -148,9 +158,16 @@ export function createStalkerResolverState(deps: {
       normalizeMulticastUrl,
     ) {
       if (play.providerId === null || play.providerId.trim() === '') return notFound();
-      const loaded = await clientFor(source);
-      if (loaded === undefined) return err(elvError('storage', 'secret-missing'));
-      const cmd = await resolveCmd(source.id, play.streamKind, play.providerId);
+      let loaded: { client: StalkerClient; secret: StalkerSecret } | undefined;
+      let cmd: string;
+      try {
+        loaded = await clientFor(source);
+        if (loaded === undefined) return err(elvError('storage', 'secret-missing'));
+        cmd = await resolveCmd(source.id, play.streamKind, play.providerId);
+      } catch (error) {
+        if (isSecretKeyRotatedError(error)) return err(elvError('storage', 'secret-key-rotated'));
+        throw error;
+      }
       const minted = await loaded.client.createLink(
         play.streamKind,
         cmd,
@@ -185,9 +202,16 @@ export function createStalkerResolverState(deps: {
       normalizeMulticastUrl,
     ) {
       if (providerId === null || providerId.trim() === '') return notFound();
-      const loaded = await clientFor(source);
-      if (loaded === undefined) return err(elvError('storage', 'secret-missing'));
-      const cmd = await resolveCmd(source.id, 'live', providerId);
+      let loaded: { client: StalkerClient; secret: StalkerSecret } | undefined;
+      let cmd: string;
+      try {
+        loaded = await clientFor(source);
+        if (loaded === undefined) return err(elvError('storage', 'secret-missing'));
+        cmd = await resolveCmd(source.id, 'live', providerId);
+      } catch (error) {
+        if (isSecretKeyRotatedError(error)) return err(elvError('storage', 'secret-key-rotated'));
+        throw error;
+      }
       const minted = await loaded.client.createLink('live', cmd);
       if (!minted.ok) return minted;
       const built = buildCatchupUrl({

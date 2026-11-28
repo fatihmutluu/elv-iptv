@@ -6,7 +6,7 @@ import {
   type SourceRow,
   sourceOfKey,
 } from '@elv/data';
-import { elvError, err } from '@elv/domain';
+import { elvError, err, ok } from '@elv/domain';
 
 /** Dynamic active profile and parental-unlock context read at query time. */
 export interface ProfileCatalogScope {
@@ -14,7 +14,12 @@ export interface ProfileCatalogScope {
   readonly parentalUnlocked: boolean;
   /** Optional pre-computed excluded source IDs for `profileId`; derived from `listSources()` when omitted. */
   readonly excludedSourceIds?: ReadonlySet<string>;
+  /** When `true`, parental storage reads failed and all catalog reads/streams fail closed. */
+  readonly parentalLoadError?: boolean;
 }
+
+const failClosedStreamError = () =>
+  err(elvError('auth', 'parental-locked', 'Parental controls could not be loaded'));
 
 /** @internal Merges active profile & parental unlock defaults into query options. */
 export function mergeParentalOpts<T extends ParentalQueryOptions | undefined>(
@@ -24,7 +29,9 @@ export function mergeParentalOpts<T extends ParentalQueryOptions | undefined>(
   return {
     ...opts,
     profileId: opts?.profileId ?? scope.profileId,
-    parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+    parentalUnlocked: scope.parentalLoadError
+      ? false
+      : (opts?.parentalUnlocked ?? scope.parentalUnlocked),
   } as T extends undefined ? ParentalQueryOptions : T & ParentalQueryOptions;
 }
 
@@ -147,19 +154,15 @@ export async function resolveExcludedSourceIds(
   if (scope.excludedSourceIds !== undefined && effectiveProfileId === scope.profileId) {
     return scope.excludedSourceIds;
   }
-  try {
-    const rows = await catalog.listSources();
-    let set: Set<string> | undefined;
-    for (const row of rows) {
-      if (row.excludedProfileIds?.includes(effectiveProfileId)) {
-        if (set === undefined) set = new Set();
-        set.add(row.id);
-      }
+  const rows = await catalog.listSources();
+  let set: Set<string> | undefined;
+  for (const row of rows) {
+    if (row.excludedProfileIds?.includes(effectiveProfileId)) {
+      if (set === undefined) set = new Set();
+      set.add(row.id);
     }
-    return set ?? EMPTY_SOURCE_SET;
-  } catch {
-    return EMPTY_SOURCE_SET;
   }
+  return set ?? EMPTY_SOURCE_SET;
 }
 
 /** Builds profile- and source-exclusion-scoped browse, search, EPG, and stream methods. */
@@ -214,12 +217,14 @@ export function createProfileScopedBrowseMethods(
   return {
     categories: async (sourceId, kind, opts) => {
       const scope = getScope();
+      if (scope.parentalLoadError) return [];
       const merged = mergeParentalOpts(opts, scope);
       const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
       return excluded.has(sourceId) ? [] : c.categories(sourceId, kind, merged);
     },
     items: async (categoryId, offset, limit, opts) => {
       const scope = getScope();
+      if (scope.parentalLoadError) return [];
       const merged = mergeParentalOpts(opts, scope);
       const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
       if (isCategoryFromExcludedSource(categoryId, excluded)) return [];
@@ -229,6 +234,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           liveVariants: async (itemKey, categoryId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (isKeyFromExcludedSource(itemKey, excluded)) return [];
@@ -240,6 +246,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           listLiveVariants: async (itemKey, categoryId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (isKeyFromExcludedSource(itemKey, excluded)) return [];
@@ -251,6 +258,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           itemVersions: async (itemKey, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (isKeyFromExcludedSource(itemKey, excluded)) return [];
@@ -262,6 +270,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           listMergedVodVersions: async (itemKey, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (isKeyFromExcludedSource(itemKey, excluded)) return [];
@@ -273,6 +282,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           findGuideChannelByCleanName: async (sourceId, channelName, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return null;
             const excluded = await excludedFor(scope.profileId, scope);
             if (excluded.has(sourceId)) return null;
             const mergedExcluded =
@@ -291,6 +301,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           allSourcesItems: async (kind, offset, limit, sourceIds, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (excluded.size === 0) return allSourcesItems(kind, offset, limit, sourceIds, merged);
@@ -308,6 +319,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           itemDetail: async (itemKey, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return null;
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (isKeyFromExcludedSource(itemKey, excluded)) return null;
@@ -320,6 +332,9 @@ export function createProfileScopedBrowseMethods(
       ? {
           search: async (query, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) {
+              return { live: [], epg: [], movies: [], series: [], episodes: [] };
+            }
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (opts?.sourceId !== undefined && excluded.has(opts.sourceId)) {
@@ -341,6 +356,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           searchSuggestions: async (options) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const merged = mergeParentalOpts(options, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (options?.sourceId !== undefined && excluded.has(options.sourceId)) return [];
@@ -358,6 +374,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           alphabetIndex: async (input) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const merged = mergeParentalOpts(input, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (input.sourceId !== undefined && excluded.has(input.sourceId)) return [];
@@ -389,6 +406,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           nowNext: async (channelKeys, nowMs, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (excluded.size === 0) return nowNext(channelKeys, nowMs, merged);
@@ -401,6 +419,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           epgWindow: async (channelKeys, fromMs, toMs, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return {};
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (excluded.size === 0) return epgWindow(channelKeys, fromMs, toMs, merged);
@@ -413,6 +432,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           epgSlice: async (sourceId, fromMs, toMs, limit, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return [];
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             return excluded.has(sourceId) ? [] : epgSlice(sourceId, fromMs, toMs, limit, merged);
@@ -423,6 +443,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           channelByNumber: async (num, sourceId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return null;
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (sourceId !== undefined) {
@@ -441,13 +462,21 @@ export function createProfileScopedBrowseMethods(
           },
         }
       : {}),
-    seasons: (seriesId, opts) => c.seasons(seriesId, mergeParentalOpts(opts, getScope())),
-    episodes: (seriesId, season, opts) =>
-      c.episodes(seriesId, season, mergeParentalOpts(opts, getScope())),
+    seasons: async (seriesId, opts) => {
+      const scope = getScope();
+      if (scope.parentalLoadError) return ok([]);
+      return c.seasons(seriesId, mergeParentalOpts(opts, scope));
+    },
+    episodes: async (seriesId, season, opts) => {
+      const scope = getScope();
+      if (scope.parentalLoadError) return [];
+      return c.episodes(seriesId, season, mergeParentalOpts(opts, scope));
+    },
     ...(queryNextEpisode
       ? {
           queryNextEpisode: async (seriesKey, currentItemKey, profileId, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return null;
             const effectivePid = profileId ?? scope.profileId;
             const excluded = await excludedFor(effectivePid, scope);
             if (isKeyFromExcludedSource(seriesKey, excluded)) return null;
@@ -460,6 +489,7 @@ export function createProfileScopedBrowseMethods(
       : {}),
     resolveStream: async (itemKey, opts) => {
       const scope = getScope();
+      if (scope.parentalLoadError) return failClosedStreamError();
       const merged = mergeParentalOpts(opts, scope);
       const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
       if (isKeyFromExcludedSource(itemKey, excluded)) {
@@ -471,6 +501,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           resolveCatchupStream: async (itemKey, programme, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return failClosedStreamError();
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (isKeyFromExcludedSource(itemKey, excluded)) {
@@ -484,6 +515,7 @@ export function createProfileScopedBrowseMethods(
       ? {
           fetchChannelArchiveEpg: async (itemKey, opts) => {
             const scope = getScope();
+            if (scope.parentalLoadError) return failClosedStreamError();
             const merged = mergeParentalOpts(opts, scope);
             const excluded = await excludedFor(merged.profileId ?? scope.profileId, scope);
             if (isKeyFromExcludedSource(itemKey, excluded)) {

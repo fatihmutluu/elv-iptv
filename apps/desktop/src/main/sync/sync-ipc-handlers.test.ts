@@ -134,20 +134,26 @@ function makeStubService() {
 
 describe('registerSyncIpc (#26, #458)', () => {
   it('validates sender frame/origin strictly and rejects untrusted origins or subframes', async () => {
-    const topFrame = { url: 'app://elv/' };
+    const makeTop = (url: string) => {
+      const f: { url: string; top?: unknown } = { url };
+      f.top = f;
+      return f;
+    };
+    const topFrame = makeTop('app://elv/');
     const subFrame = { url: 'app://elv/', top: topFrame };
     expect(isTrustedSyncIpcEvent({ senderFrame: topFrame })).toBe(true);
+    expect(isTrustedSyncIpcEvent({ senderFrame: { url: 'app://elv/' } })).toBe(false);
     expect(isTrustedSyncIpcEvent({ senderFrame: subFrame })).toBe(false);
-    expect(isTrustedSyncIpcEvent({ senderFrame: { url: 'https://evil.example.test/' } })).toBe(
+    expect(isTrustedSyncIpcEvent({ senderFrame: makeTop('https://evil.example.test/') })).toBe(
       false,
     );
     expect(
       isTrustedSyncIpcEvent(
-        { senderFrame: { url: 'http://127.0.0.1:8081/' } },
+        { senderFrame: makeTop('http://127.0.0.1:8081/') },
         'http://127.0.0.1:8081',
       ),
     ).toBe(true);
-    expect(isTrustedSyncIpcEvent({ senderFrame: { url: 'http://127.0.0.1:8081/' } }, null)).toBe(
+    expect(isTrustedSyncIpcEvent({ senderFrame: makeTop('http://127.0.0.1:8081/') }, null)).toBe(
       false,
     );
     // MEDIUM #14: fail closed when senderFrame is null/undefined/empty — NEVER fall back to sender.getURL()
@@ -186,7 +192,9 @@ describe('registerSyncIpc (#26, #458)', () => {
     const trustedSend = vi.fn();
     const untrustedSend = vi.fn();
     const destroyedSend = vi.fn();
-    const trustedEvent = { senderFrame: { url: 'app://elv/' } };
+    const top: { url: string; top?: unknown } = { url: 'app://elv/' };
+    top.top = top;
+    const trustedEvent = { senderFrame: top };
 
     const dispose = registerSyncIpc({
       ipcMain: ipc.ipcMain,

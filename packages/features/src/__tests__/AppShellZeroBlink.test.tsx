@@ -161,10 +161,13 @@ describe('AppShell zero-blink prewarm, startup anti-flash & background/unmount f
       </FormFactorProvider>,
     );
 
-    // Wait for Home + background prewarm of Live, Movies, and Series to settle
+    // Wait for Home + staggered post-paint background prewarm of Live, Movies, and Series to settle
     await waitFor(() => {
       expect(screen.getByTestId('home-hero')).toBeTruthy();
-      expect((catalog.items as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(4);
+      const itemCalls = (catalog.items as jest.Mock).mock.calls;
+      expect(itemCalls.some((c) => c[0] === 'src-1|live|1' && Number(c[2]) > 18)).toBe(true);
+      expect(itemCalls.filter((c) => c[0] === 'src-1|movie|1').length).toBeGreaterThanOrEqual(2);
+      expect(itemCalls.filter((c) => c[0] === 'src-1|series|1').length).toBeGreaterThanOrEqual(2);
     });
 
     // Now block ALL future DB reads — every tab switch must still render synchronously from CatalogUiCache!

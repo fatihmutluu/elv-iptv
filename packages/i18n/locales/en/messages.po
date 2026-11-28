@@ -4618,3 +4618,21 @@ msgstr "Download Season {season}"
 
 msgid "detail.scopePicker.seasonEpisodesCount"
 msgstr "{count} episodes"
+
+msgid "parental.reverifyTitle"
+msgstr "Verify parental PIN"
+
+msgid "parental.verifyButton"
+msgstr "Verify"
+
+msgid "parental.loadErrorMessage"
+msgstr "Parental controls could not be loaded. Restricted content is withheld until settings can be verified."
+
+msgid "parental.retryLoad"
+msgstr "Retry"
+
+msgid "source.error.secretKeyRotated"
+msgstr "Saved source credentials could not be unlocked after a system key change."
+
+msgid "source.hint.secretKeyRotated"
+msgstr "Re-enter your source credentials in Sources to restore access."

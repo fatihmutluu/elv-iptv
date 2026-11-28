@@ -49,6 +49,8 @@ type FlowStep = 'verify' | 'verify-old' | 'create' | 'confirm' | 'remove';
 export interface PinEntryOverlayProps {
   readonly mode: PinDialogMode;
   readonly title?: string;
+  /** When `true` in `verify` mode, labels the submit action as verification rather than session unlock. */
+  readonly verifyOnly?: boolean;
   readonly onVerify?: (pin: string) => Promise<PinVerifyResult>;
   /** Pure PIN verifier used in `change` mode's current-PIN step without unlocking parental state. */
   readonly onVerifyCurrentPin?: (pin: string) => Promise<PinVerifyResult>;
@@ -96,6 +98,7 @@ function PinTvKeyBridge({
 export function PinEntryOverlay({
   mode,
   title,
+  verifyOnly = false,
   onVerify,
   onVerifyCurrentPin,
   onSetPin,
@@ -412,8 +415,8 @@ export function PinEntryOverlay({
     if (step === 'confirm') return i18n.t('parental.confirmPin');
     if (step === 'remove') return i18n.t('parental.removePin');
     if (step === 'verify-old') return i18n.t('parental.changePin');
-    return i18n.t('parental.unlockTitle');
-  }, [i18n, step, title]);
+    return verifyOnly ? i18n.t('parental.reverifyTitle') : i18n.t('parental.unlockTitle');
+  }, [i18n, step, title, verifyOnly]);
 
   const subtitle = useMemo(() => {
     if (step === 'verify-old' || step === 'remove' || step === 'verify') {
@@ -425,7 +428,9 @@ export function PinEntryOverlay({
 
   const submitLabel =
     step === 'verify'
-      ? i18n.t('parental.unlockButton')
+      ? verifyOnly
+        ? i18n.t('parental.verifyButton')
+        : i18n.t('parental.unlockButton')
       : step === 'remove'
         ? i18n.t('parental.removePin')
         : i18n.t('profiles.save');

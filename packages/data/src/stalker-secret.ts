@@ -17,6 +17,7 @@ import {
   type StalkerLinkKind,
 } from '@elv/sources';
 import { sha256Hex } from './credential-fingerprint';
+import { isSecretKeyRotatedError } from './secret-errors';
 import { type SourceRecord, secretKey } from './sources';
 
 export {
@@ -83,7 +84,13 @@ export async function loadStalkerSecret(
   secrets: SecretStore,
   sourceId: string,
 ): Promise<StalkerSecret | undefined> {
-  const raw = await secrets.get(secretKey(sourceId, 'stalker')).catch(() => undefined);
+  let raw: string | undefined;
+  try {
+    raw = await secrets.get(secretKey(sourceId, 'stalker'));
+  } catch (error) {
+    if (isSecretKeyRotatedError(error)) throw error;
+    return undefined;
+  }
   if (raw === undefined) return undefined;
   try {
     const parsed = JSON.parse(raw) as {
@@ -120,7 +127,13 @@ export async function openStalkerClient(
   source: SourceRecord,
   deps: { secrets: SecretStore; http: HttpClient; maxBodyBytes?: number },
 ): Promise<Result<{ client: StalkerClient; secret: StalkerSecret }>> {
-  const secret = await loadStalkerSecret(deps.secrets, source.id);
+  let secret: StalkerSecret | undefined;
+  try {
+    secret = await loadStalkerSecret(deps.secrets, source.id);
+  } catch (error) {
+    if (isSecretKeyRotatedError(error)) return err(elvError('storage', 'secret-key-rotated'));
+    throw error;
+  }
   if (secret === undefined) return err(elvError('storage', 'secret-missing'));
   const options: StalkerClientOptions = {
     http: deps.http,

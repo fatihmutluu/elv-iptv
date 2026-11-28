@@ -72,6 +72,11 @@ describe('describePlaybackFailure, extractHttpStatus & sanitizeErrorDetail (#316
       verdict: 'codec-unsupported',
       evidence: 'code=playback/drm',
     });
+    expect(describePlaybackFailure(elvError('storage', 'secret-key-rotated'))).toEqual({
+      messageId: 'source.error.secretKeyRotated',
+      hintId: 'source.hint.secretKeyRotated',
+      verdict: 'auth-failed',
+    });
     expect(describePlaybackFailure(elvError('storage', 'item-not-found'))).toEqual({
       messageId: 'player.error.itemNotFound',
       hintId: 'player.hint.itemNotFound',

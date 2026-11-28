@@ -284,4 +284,84 @@ describe('normalizeMulticastUrl (#267)', () => {
     }
     clearXtreamSchemeCache(panel.deps.http);
   });
+
+  it('does not cache an empty resolver after resolveLogos when secrets.get throws storage/secret-key-rotated', async () => {
+    const playlist = `#EXTM3U\n${extinf('Rotated Ch', entry(1), `tvg-logo="${logo(1)}"`)}`;
+    const e = await setupM3u(playlist);
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+    const row = (
+      await e.db.all<{ key: string; logo: string | null }>('SELECT key, logo FROM live LIMIT 1')
+    )[0];
+    expect(row?.logo).toContain('{{');
+
+    let secretGets = 0;
+    const rotatedError = Object.assign(new Error('storage/secret-key-rotated'), {
+      name: 'SecretDecryptError',
+      code: 'storage/secret-key-rotated',
+    });
+    const rotatedSecrets = {
+      ...e.secrets,
+      get: async () => {
+        secretGets += 1;
+        throw rotatedError;
+      },
+    };
+
+    const cache = createPlaytimeResolverCache({
+      db: e.db,
+      secrets: rotatedSecrets,
+      http: e.deps.http,
+    });
+
+    // resolveLogos must degrade gracefully without poisoning the resolver cache
+    const withLogos = await cache.resolveLogos(
+      [
+        {
+          id: 1,
+          key: row?.key ?? '',
+          kind: 'live',
+          sourceId: e.sourceId,
+          providerId: null,
+          name: 'Rotated Ch',
+          logo: row?.logo ?? null,
+          rating: null,
+          year: null,
+          num: null,
+        },
+      ],
+      e.sourceId,
+    );
+    expect(withLogos[0]?.logo).toBeNull();
+    expect(secretGets).toBe(1);
+
+    // Subsequent resolveStream MUST re-attempt secret read and return storage/secret-key-rotated (not secret-missing)
+    const streamRes = await cache.resolveStream(row?.key ?? '');
+    expect(secretGets).toBe(2);
+    expect(streamRes.ok).toBe(false);
+    if (!streamRes.ok) {
+      expect(streamRes.error.category).toBe('storage');
+      expect(streamRes.error.code).toBe('secret-key-rotated');
+    }
+
+    // Xtream source also propagates storage/secret-key-rotated instead of secret-missing
+    const panel = await setupPanel(sampleCatalog());
+    expect((await importCatalog(panel.sourceId, panel.deps)).ok).toBe(true);
+    const xRow = (await panel.db.all<{ key: string }>('SELECT key FROM live LIMIT 1'))[0];
+    const xCache = createPlaytimeResolverCache({
+      db: panel.db,
+      secrets: {
+        ...panel.secrets,
+        get: async () => {
+          throw rotatedError;
+        },
+      },
+      http: panel.deps.http,
+    });
+    const xRes = await xCache.resolveStream(xRow?.key ?? '');
+    expect(xRes.ok).toBe(false);
+    if (!xRes.ok) {
+      expect(xRes.error.category).toBe('storage');
+      expect(xRes.error.code).toBe('secret-key-rotated');
+    }
+  });
 });

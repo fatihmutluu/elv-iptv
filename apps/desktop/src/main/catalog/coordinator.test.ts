@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { SecretStore } from '@elv/domain';
 import { describe, expect, it, vi } from 'vitest';
 import { createCatalogCoordinator, type UtilityChildLike } from './coordinator.ts';
+import { SecretDecryptError } from './secret-store.ts';
 import type { MainToWorkerMessage, WorkerToMainMessage } from './worker-protocol.ts';
 
 class FakeChild implements UtilityChildLike {
@@ -355,6 +356,54 @@ describe('createCatalogCoordinator', () => {
       elvServerUrl: '',
     });
 
+    await coordinator.shutdown();
+  });
+
+  it('propagates SecretDecryptError over parentPort as storage/secret-key-rotated', async () => {
+    const children: FakeChild[] = [];
+    const logs: string[] = [];
+    const rotatedStore: SecretStore = {
+      async get(key) {
+        throw new SecretDecryptError(key);
+      },
+      async set() {},
+      async delete() {},
+    };
+
+    const coordinator = createCatalogCoordinator({
+      dbPath: '/tmp/catalog.db',
+      workerPath: '/app/worker.js',
+      secrets: rotatedStore,
+      fork: () => {
+        const c = new FakeChild();
+        children.push(c);
+        return c;
+      },
+      createChannel: () => ({ port1: 'p1', port2: 'p2' }),
+      shutdownTimeoutMs: 20,
+      log: (line) => logs.push(line),
+    });
+
+    const p = coordinator.connectClient();
+    children[0]?.emitWorkerMessage({ type: 'ready' });
+    await p;
+
+    children[0]?.emitWorkerMessage({
+      type: 'secret-request',
+      reqId: 42,
+      op: 'get',
+      key: 'source.s1.xtream',
+    });
+
+    await vi.waitFor(() => {
+      expect(children[0]?.received.at(-1)?.message).toEqual({
+        type: 'secret-reply',
+        reqId: 42,
+        ok: false,
+        message: 'storage/secret-key-rotated',
+      });
+    });
+    expect(logs.join('\n')).toMatch(/key rotated|decrypt/i);
     await coordinator.shutdown();
   });
 });

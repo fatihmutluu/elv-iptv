@@ -24,12 +24,14 @@ function fakeIpcMain() {
     removeHandler: (ch) => void handlers.delete(ch),
     removeListener: (ch, fn) => void listeners.get(ch)?.delete(fn as (...args: unknown[]) => void),
   };
+  const senderFrame: { url: string; top?: unknown } = { url: 'app://elv/index.html' };
+  senderFrame.top = senderFrame;
   return {
     ipcMain,
     invoke: (ch: string, sender: WebContentsLike, ...args: unknown[]) =>
-      Promise.resolve(handlers.get(ch)?.({ sender }, ...args)),
+      Promise.resolve(handlers.get(ch)?.({ sender, senderFrame }, ...args)),
     send: (ch: string, sender: WebContentsLike, ...args: unknown[]) => {
-      for (const l of [...(listeners.get(ch) ?? [])]) l({ sender }, ...args);
+      for (const l of [...(listeners.get(ch) ?? [])]) l({ sender, senderFrame }, ...args);
     },
   };
 }

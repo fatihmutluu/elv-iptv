@@ -115,7 +115,10 @@ vi.mock('@elv/features', () => ({
   KeymapProvider: 'KeymapProvider',
   PlayerScreen: 'PlayerScreen',
   ProfileProvider: 'ProfileProvider',
+  SESSION_GUARD_CHANNEL: 'elv-session-guard',
+  SESSION_GUARD_STORAGE_KEY: 'elv:session-guard',
   createLazyCatalog: () => ({}),
+  createProfileScopedCatalog: <T>(catalog: T) => catalog,
   noopPlaybackGuard: { acquire: () => ({ ok: true }), release: () => undefined },
   usePreferences: () => ({
     preferences: {
