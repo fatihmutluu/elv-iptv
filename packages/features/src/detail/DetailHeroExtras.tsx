@@ -1,6 +1,4 @@
 import {
-  AdaptiveSheet,
-  CtaButton,
   hexToRgba,
   Icon,
   Tooltip,
@@ -8,11 +6,63 @@ import {
   useTheme,
   webBackdropBlur,
   webCursorPointer,
+  webShadow,
   webTransition,
 } from '@elv/ui-kit';
 import { type ComponentRef, memo, type ReactElement, useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+} from 'react-native';
 import type { DetailVersionOption } from './detail-data-helpers';
+
+/**
+ * Registers Escape key and pointer-outside listeners on web for floating detail popovers,
+ * cleaning up automatically on close or unmount.
+ */
+export function attachWebOutsideDismiss(
+  active: boolean,
+  hostRef: { readonly current: unknown },
+  onDismiss: () => void,
+  skipEscapeWhenDomTrapRef?: { readonly current: unknown },
+): (() => void) | undefined {
+  if (!active || Platform.OS !== 'web') return undefined;
+  const win = (
+    globalThis as {
+      window?: {
+        addEventListener?: (type: string, fn: (ev: unknown) => void, capture?: boolean) => void;
+        removeEventListener?: (type: string, fn: (ev: unknown) => void, capture?: boolean) => void;
+      };
+    }
+  ).window;
+  if (typeof win?.addEventListener !== 'function') return undefined;
+
+  const handleKeyDown = (ev: unknown) => {
+    const key = (ev as { key?: string } | null)?.key;
+    if (key !== 'Escape') return;
+    const trapNode = skipEscapeWhenDomTrapRef?.current as { querySelectorAll?: unknown } | null;
+    if (trapNode && typeof trapNode.querySelectorAll === 'function') return;
+    onDismiss();
+  };
+  const handlePointerDown = (ev: unknown) => {
+    const target = (ev as { target?: unknown } | null)?.target;
+    const host = hostRef.current as { contains?: (node: unknown) => boolean } | null;
+    if (host && typeof host.contains === 'function' && host.contains(target)) return;
+    onDismiss();
+  };
+
+  win.addEventListener('keydown', handleKeyDown);
+  win.addEventListener('pointerdown', handlePointerDown, true);
+  return () => {
+    win.removeEventListener?.('keydown', handleKeyDown);
+    win.removeEventListener?.('pointerdown', handlePointerDown, true);
+  };
+}
 
 /** Props of {@link DetailVersionDropdown}. */
 export interface DetailVersionDropdownProps {
@@ -29,9 +79,9 @@ export interface DetailVersionDropdownProps {
 }
 
 /**
- * Compact Cinema Quietude VOD Version Dropdown (`#404`) shown only when `versions.length > 1`.
- * Opens a dark-glass popover listing every available version with active checkmark, hover
- * highlight, click-outside / Escape dismissal, and 10-ft TV D-pad support.
+ * Full-width Cinema Quietude VOD Version Dropdown (`#404`, Wave R2) positioned cleanly beneath
+ * the primary Play CTA only when `versions.length > 1`. Opens a dark-glass popover above the
+ * trigger with active checkmark, hover highlight, click-outside / Escape dismissal, and TV D-pad support.
  */
 export const DetailVersionDropdown = memo(function DetailVersionDropdownInner({
   versions,
@@ -47,8 +97,8 @@ export const DetailVersionDropdown = memo(function DetailVersionDropdownInner({
 }: DetailVersionDropdownProps): ReactElement | null {
   const theme = useTheme();
   const i18n = useI18n();
-  const blur = webBackdropBlur(10);
-  const menuBlur = webBackdropBlur(14);
+  const blur = webBackdropBlur(12);
+  const menuBlur = webBackdropBlur(16);
   const cursor = webCursorPointer();
   const transition = webTransition(theme, 'transform, background-color, border-color, opacity');
   const containerRef = useRef<ComponentRef<typeof View>>(null);
@@ -58,42 +108,7 @@ export const DetailVersionDropdown = memo(function DetailVersionDropdownInner({
     if (!open) setHoveredKey(null);
   }, [open]);
 
-  useEffect(() => {
-    if (!open || Platform.OS !== 'web') return undefined;
-    const win = (
-      globalThis as {
-        window?: {
-          addEventListener?: (type: string, fn: (ev: unknown) => void, capture?: boolean) => void;
-          removeEventListener?: (
-            type: string,
-            fn: (ev: unknown) => void,
-            capture?: boolean,
-          ) => void;
-        };
-      }
-    ).window;
-    if (typeof win?.addEventListener !== 'function') return undefined;
-
-    const handleKeyDown = (ev: unknown) => {
-      const key = (ev as { key?: string } | null)?.key;
-      if (key === 'Escape') onClose();
-    };
-    const handlePointerDown = (ev: unknown) => {
-      const target = (ev as { target?: unknown } | null)?.target;
-      const host = containerRef.current as unknown as {
-        contains?: (node: unknown) => boolean;
-      } | null;
-      if (host && typeof host.contains === 'function' && host.contains(target)) return;
-      onClose();
-    };
-
-    win.addEventListener('keydown', handleKeyDown);
-    win.addEventListener('pointerdown', handlePointerDown, true);
-    return () => {
-      win.removeEventListener?.('keydown', handleKeyDown);
-      win.removeEventListener?.('pointerdown', handlePointerDown, true);
-    };
-  }, [onClose, open]);
+  useEffect(() => attachWebOutsideDismiss(open, containerRef, onClose), [onClose, open]);
 
   if (versions.length <= 1) return null;
 
@@ -105,13 +120,7 @@ export const DetailVersionDropdown = memo(function DetailVersionDropdownInner({
     <View
       ref={containerRef}
       testID="detail-preplay-version-dropdown"
-      style={[
-        styles.dropdownWrap,
-        {
-          marginTop: theme.spacing.sm,
-          zIndex: open ? 40 : 2,
-        },
-      ]}
+      style={[styles.dropdownWrap, { zIndex: open ? 40 : 2 }]}
     >
       {open ? (
         <Pressable
@@ -120,7 +129,18 @@ export const DetailVersionDropdown = memo(function DetailVersionDropdownInner({
           accessibilityLabel={i18n.t('detail.back')}
           focusable={false}
           onPress={onClose}
-          style={styles.dismissBackdrop}
+          style={
+            Platform.OS === 'web'
+              ? ({
+                  position: 'fixed',
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  left: 0,
+                  zIndex: 1,
+                } as unknown as ViewStyle)
+              : styles.dismissBackdrop
+          }
         />
       ) : null}
 
@@ -157,23 +177,26 @@ export const DetailVersionDropdown = memo(function DetailVersionDropdownInner({
             },
           ]}
         >
-          <Icon name="layers" size={14} color={theme.colors.textSecondary} />
-          <Text
-            numberOfLines={1}
-            style={[theme.typography.caption, { color: theme.colors.textMuted }]}
-          >
-            {`${versionPrefix}:`}
-          </Text>
-          <Text
-            numberOfLines={1}
-            style={[
-              theme.typography.caption,
-              { color: theme.colors.textPrimary, fontWeight: '600' },
-            ]}
-          >
-            {activeVersionLabel}
-          </Text>
-          <Icon name="chevronDown" size={14} color={theme.colors.textSecondary} />
+          <View style={styles.controlLabelGroup}>
+            <Icon name="layers" size={16} color={theme.colors.textSecondary} />
+            <Text
+              numberOfLines={1}
+              style={[theme.typography.caption, { color: theme.colors.textMuted }]}
+            >
+              {`${versionPrefix}:`}
+            </Text>
+            <Text
+              numberOfLines={1}
+              style={[
+                theme.typography.title,
+                styles.controlValueText,
+                { color: theme.colors.textPrimary },
+              ]}
+            >
+              {activeVersionLabel}
+            </Text>
+          </View>
+          <Icon name="chevronDown" size={16} color={theme.colors.textSecondary} />
           {triggerFocused ? (
             <View
               pointerEvents="none"
@@ -192,18 +215,21 @@ export const DetailVersionDropdown = memo(function DetailVersionDropdownInner({
       </Tooltip>
 
       {open ? (
-        <View
+        <ScrollView
           testID="detail-preplay-version-menu"
           accessibilityRole="menu"
+          showsVerticalScrollIndicator={false}
           style={[
             styles.menuPopover,
             menuBlur,
+            webShadow('0 18px 48px rgba(0, 0, 0, 0.72)'),
             {
-              borderRadius: theme.radius.button,
-              backgroundColor: theme.colors.bgElevated,
-              borderColor: theme.colors.surfaceBorder,
+              borderRadius: theme.radius.card,
+              backgroundColor: theme.colors.glassBg,
+              borderColor: theme.colors.glassBorder,
             },
           ]}
+          contentContainerStyle={styles.menuListContent}
         >
           {versions.map((option, idx) => {
             const label = option.versionLabel || option.title;
@@ -347,161 +373,17 @@ export const DetailVersionDropdown = memo(function DetailVersionDropdownInner({
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
       ) : null}
     </View>
-  );
-});
-
-/** Props of {@link DetailSynopsisBlock}. */
-export interface DetailSynopsisBlockProps {
-  readonly synopsis: string;
-  readonly canExpand: boolean;
-  readonly expanded: boolean;
-  readonly isTv: boolean;
-  readonly focused: boolean;
-  readonly onToggle?: () => void;
-}
-
-/** Truncated Detail Hero synopsis with an accessible `Read more` / `Show less` trigger (`#398`). */
-export const DetailSynopsisBlock = memo(function DetailSynopsisBlockInner({
-  synopsis,
-  canExpand,
-  expanded,
-  isTv,
-  focused,
-  onToggle,
-}: DetailSynopsisBlockProps): ReactElement {
-  const theme = useTheme();
-  const i18n = useI18n();
-  const cursor = webCursorPointer();
-  const transition = webTransition(theme, 'background-color, opacity');
-  const toggleLabel = expanded ? i18n.t('detail.readLess') : i18n.t('detail.readMore');
-
-  return (
-    <>
-      <Text
-        testID="detail-synopsis"
-        numberOfLines={4}
-        style={[
-          theme.typography.body,
-          styles.synopsis,
-          { color: theme.colors.textSecondary, marginTop: theme.spacing.sm },
-        ]}
-      >
-        {synopsis}
-      </Text>
-      {canExpand && onToggle ? (
-        <Pressable
-          testID="detail-synopsis-toggle"
-          accessibilityRole="button"
-          accessibilityLabel={toggleLabel}
-          focusable={!isTv}
-          onPress={onToggle}
-          style={({ pressed }) => [
-            styles.synopsisToggle,
-            cursor,
-            transition,
-            {
-              marginTop: theme.spacing.xs,
-              borderRadius: theme.radius.button,
-              backgroundColor: focused ? theme.colors.focusFill : 'transparent',
-              opacity: pressed ? 0.75 : 1,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              theme.typography.caption,
-              { color: theme.colors.textPrimary, fontWeight: '600' },
-            ]}
-          >
-            {toggleLabel}
-          </Text>
-          {focused ? (
-            <View
-              pointerEvents="none"
-              testID="detail-synopsis-toggle-focus-ring"
-              style={[
-                styles.synopsisFocusRing,
-                {
-                  borderRadius: theme.radius.button,
-                  borderWidth: theme.focus.ringWidth,
-                  borderColor: theme.colors.focusRingColor,
-                },
-              ]}
-            />
-          ) : null}
-        </Pressable>
-      ) : null}
-    </>
-  );
-});
-
-/** Props of {@link DetailSynopsisSheet}. */
-export interface DetailSynopsisSheetProps {
-  readonly visible: boolean;
-  readonly title: string;
-  readonly synopsis: string;
-  readonly isTv: boolean;
-  readonly onDismiss: () => void;
-}
-
-/**
- * TV-safe accessible `AdaptiveSheet` modal reader for long Detail synopses (`#398`).
- * Keeps full untruncated plot text scrollable without disturbing 10-ft TV D-pad traversal or
- * desktop hero geometry.
- */
-export const DetailSynopsisSheet = memo(function DetailSynopsisSheetInner({
-  visible,
-  title,
-  synopsis,
-  isTv,
-  onDismiss,
-}: DetailSynopsisSheetProps): ReactElement {
-  const theme = useTheme();
-  const i18n = useI18n();
-
-  return (
-    <AdaptiveSheet
-      visible={visible}
-      testID="detail-synopsis-sheet"
-      title={i18n.t('detail.synopsisTitle')}
-      popoverWidth={440}
-      onDismiss={onDismiss}
-    >
-      <Text
-        numberOfLines={2}
-        style={[theme.typography.h2, { color: theme.colors.textPrimary, marginBottom: 8 }]}
-      >
-        {title}
-      </Text>
-      <ScrollView style={styles.synopsisScroll} showsVerticalScrollIndicator>
-        <Text
-          testID="detail-synopsis-full"
-          style={[theme.typography.body, { color: theme.colors.textSecondary }]}
-        >
-          {synopsis}
-        </Text>
-      </ScrollView>
-      <View style={[styles.sheetFooter, { marginTop: theme.spacing.md }]}>
-        <CtaButton
-          testID="detail-synopsis-close"
-          variant="secondary"
-          label={i18n.t('detail.readLess')}
-          focusable={!isTv}
-          focused={isTv}
-          onPress={onDismiss}
-        />
-      </View>
-    </AdaptiveSheet>
   );
 });
 
 const styles = StyleSheet.create({
   dropdownWrap: {
     position: 'relative',
-    alignSelf: 'flex-start',
+    width: '100%',
+    alignSelf: 'stretch',
   },
   dismissBackdrop: {
     position: 'absolute',
@@ -514,13 +396,26 @@ const styles = StyleSheet.create({
   controlBtn: {
     position: 'relative',
     zIndex: 2,
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderWidth: 1,
-    minHeight: 34,
+    minHeight: 48,
+  },
+  controlLabelGroup: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 0,
+  },
+  controlValueText: {
+    flexShrink: 1,
+    fontWeight: '600',
   },
   focusRing: {
     position: 'absolute',
@@ -531,14 +426,16 @@ const styles = StyleSheet.create({
   },
   menuPopover: {
     position: 'absolute',
-    top: '100%',
+    bottom: '100%',
     left: 0,
-    marginTop: 6,
-    minWidth: 200,
-    maxWidth: 320,
-    padding: 4,
+    right: 0,
+    marginBottom: 6,
+    maxHeight: 240,
     borderWidth: 1,
-    zIndex: 3,
+    zIndex: 5,
+  },
+  menuListContent: {
+    padding: 4,
     gap: 2,
   },
   menuOption: {
@@ -549,7 +446,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    minHeight: 34,
+    minHeight: 36,
   },
   menuOptionContent: {
     flex: 1,
@@ -577,27 +474,5 @@ const styles = StyleSheet.create({
     bottom: -2,
     left: -2,
     right: -2,
-  },
-  synopsisScroll: {
-    maxHeight: 280,
-  },
-  synopsis: {
-    maxWidth: 640,
-  },
-  synopsisToggle: {
-    position: 'relative',
-    alignSelf: 'flex-start',
-    paddingVertical: 4,
-    paddingHorizontal: 6,
-  },
-  synopsisFocusRing: {
-    position: 'absolute',
-    top: -2,
-    bottom: -2,
-    left: -2,
-    right: -2,
-  },
-  sheetFooter: {
-    alignItems: 'flex-end',
   },
 });

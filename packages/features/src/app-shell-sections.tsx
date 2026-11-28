@@ -228,6 +228,13 @@ export function AppShellStage(p: AppShellStageProps): ReactElement {
         preferredSubtitleLang={p.preferences.preferences.preferredSubtitleLang}
         vodEnrichmentEnabled={false}
         elvPreferences={p.preferences.preferences}
+        detailTrailerMuted={p.preferences.preferences.detailTrailerMuted}
+        trailerPreviewSuppressed={p.suppressEmbeddedPreview === true}
+        onToggleDetailTrailerMuted={() => {
+          void p.preferences.updatePreferences({
+            detailTrailerMuted: !p.preferences.preferences.detailTrailerMuted,
+          });
+        }}
         onSearchPerson={p.onSearchPerson}
         onBack={p.onPopDetail}
         onPlay={handleStagePlay}

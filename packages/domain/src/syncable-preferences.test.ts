@@ -41,6 +41,7 @@ describe('syncable-preferences (Product Decision #40)', () => {
       preferredAudioLanguages: ['tr', 'en'],
       preferredSubtitleLanguages: ['en'],
       autoPlayNextEpisode: false,
+      detailTrailerMuted: false,
       autoSubtitlesOnSkipBack: true,
       seekStepSec: 15,
       homeLayout: [
@@ -85,6 +86,7 @@ describe('syncable-preferences (Product Decision #40)', () => {
     expect(extracted.themePreset).toBe('midnightGold');
     expect(extracted.locale).toBe('tr');
     expect(extracted.fontScale).toBe(1.1);
+    expect(extracted.detailTrailerMuted).toBe(false);
     expect(extracted.seekStepSec).toBe(15);
     expect(extracted.homeLayout).toEqual(snapshot.homeLayout);
 
@@ -162,6 +164,7 @@ describe('syncable-preferences (Product Decision #40)', () => {
       preferredAudioLanguages: ['tr', 'en', 'und', 42],
       preferredSubtitleLanguages: ['de'],
       autoPlayNextEpisode: false,
+      detailTrailerMuted: false,
       autoSubtitlesOnSkipBack: true,
       seekStepSec: 30,
       homeLayout: [
@@ -211,6 +214,7 @@ describe('syncable-preferences (Product Decision #40)', () => {
       preferredAudioLanguages: ['tr', 'en'],
       preferredSubtitleLanguages: ['de'],
       autoPlayNextEpisode: false,
+      detailTrailerMuted: false,
       seekStepSec: 30,
       homeLayout: [
         { id: 'live', visible: true },

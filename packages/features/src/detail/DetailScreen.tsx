@@ -16,7 +16,6 @@ import {
 } from '../shared';
 import { PersonLibraryModal } from '../shared/PersonLibraryModal';
 import { DetailEpisodeRow } from './DetailEpisodeRow';
-import { DetailSynopsisSheet } from './DetailHeroExtras';
 import {
   DetailListFooterSlot,
   DetailListHeaderSlot,
@@ -24,6 +23,7 @@ import {
   type DetailListSlotsValue,
 } from './DetailListHeader';
 import { DetailScopePicker, type DetailScopePickerMode } from './DetailScopePicker';
+import { DetailSynopsisSheet } from './DetailSynopsisBlock';
 import { DetailTrailerModal } from './DetailTrailerModal';
 import {
   buildEpisodePlayTarget,
@@ -52,6 +52,9 @@ export interface DetailScreenProps {
   readonly preferredSubtitleLang?: string;
   readonly vodEnrichmentEnabled?: boolean;
   readonly elvPreferences?: ElvModePreferences;
+  readonly detailTrailerMuted?: boolean;
+  readonly trailerPreviewSuppressed?: boolean;
+  readonly onToggleDetailTrailerMuted?: () => void;
   readonly onBack: () => void;
   readonly onPlay: (target: PlayTarget) => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
@@ -88,6 +91,9 @@ export function DetailScreen({
   userStateVersion = 0,
   vodEnrichmentEnabled = false,
   elvPreferences,
+  detailTrailerMuted = true,
+  trailerPreviewSuppressed = false,
+  onToggleDetailTrailerMuted,
   onBack,
   onPlay,
   onOpenDetail,
@@ -183,6 +189,8 @@ export function DetailScreen({
   const extras = useDetailExtrasState({
     target,
     plot: data.plot,
+    isPortrait,
+    fontScale: theme.fontScale,
     cast: data.cast,
     director: data.director,
     versions: data.versions,
@@ -396,6 +404,12 @@ export function DetailScreen({
   );
 
   const anyModalOpen = activePerson !== null || trailerOpen || scopePickerMode !== null;
+  const trailerPreviewActive =
+    isActiveScope &&
+    !trailerPreviewSuppressed &&
+    !anyModalOpen &&
+    !extras.synopsisExpanded &&
+    !extras.versionMenuOpen;
   const {
     tvNav,
     focusedHeroSlot,
@@ -516,6 +530,8 @@ export function DetailScreen({
         heroWatched,
         heroDownloadState: dl.heroDownloadState,
         hasTrailer,
+        detailTrailerMuted,
+        trailerPreviewActive,
         primaryAction,
         focusedHeroSlot,
         focusedRowId: tvNav.focusedRowId,
@@ -533,6 +549,7 @@ export function DetailScreen({
         onPressHeroWatched: handlePressHeroWatched,
         onPressHeroDownload: handlePressHeroDownload,
         onOpenTrailer: handleOpenTrailer,
+        ...(onToggleDetailTrailerMuted !== undefined ? { onToggleDetailTrailerMuted } : {}),
         onSelectVersion: handleSelectVersion,
         onSelectPerson: handleSelectPerson,
         ...(onSearchPerson !== undefined ? { onSearchPerson } : {}),
@@ -560,6 +577,7 @@ export function DetailScreen({
     [
       activeVersion,
       data,
+      detailTrailerMuted,
       dl.heroDownloadState,
       elvPreferences,
       extras,
@@ -585,6 +603,7 @@ export function DetailScreen({
       isTv,
       onBack,
       onSearchPerson,
+      onToggleDetailTrailerMuted,
       padX,
       posterRailWidth,
       primaryAction,
@@ -596,6 +615,7 @@ export function DetailScreen({
       relatedQuickActions.watchedOverrides,
       seasons.length,
       target,
+      trailerPreviewActive,
       tvNav.focusedCol,
       tvNav.focusedRowId,
     ],
@@ -632,7 +652,7 @@ export function DetailScreen({
       </DetailListSlotsContext.Provider>
 
       <DetailSynopsisSheet
-        visible={extras.synopsisExpanded && extras.canExpandSynopsis}
+        visible={extras.synopsisExpanded && extras.trimmedPlot.length > 0 && (isTv || isPortrait)}
         title={data.title}
         synopsis={extras.trimmedPlot}
         isTv={isTv}

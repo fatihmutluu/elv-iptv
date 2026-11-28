@@ -9,6 +9,8 @@ export interface DetailHeroBackdropProps {
   readonly backdropUri: string | null;
   readonly posterUri: string | null;
   readonly isPortraitFallback: boolean;
+  /** Optional background trailer preview layered above artwork and below Cinema scrims. */
+  readonly trailerPreview?: ReactElement | null;
 }
 
 /**
@@ -22,9 +24,10 @@ export function DetailHeroBackdrop({
   backdropUri,
   posterUri,
   isPortraitFallback,
+  trailerPreview = null,
 }: DetailHeroBackdropProps): ReactElement {
   return (
-    <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.backdropClip]}>
+    <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, styles.backdropClip]}>
       {isPortraitFallback && posterUri !== null ? (
         <BlurredAmbientBackdrop testID="detail-hero-backdrop-ambient" uri={posterUri} />
       ) : (
@@ -38,8 +41,25 @@ export function DetailHeroBackdrop({
           style={StyleSheet.absoluteFill}
         />
       )}
-      <Scrim direction="bottom" intensity="strong" testID="detail-hero-scrim-bottom" />
-      <Scrim direction="left" intensity="strong" testID="detail-hero-scrim-left" />
+      {trailerPreview}
+      <Scrim
+        direction="top"
+        intensity="default"
+        testID="detail-hero-scrim-top"
+        style={styles.scrimLayer}
+      />
+      <Scrim
+        direction="bottom"
+        intensity="strong"
+        testID="detail-hero-scrim-bottom"
+        style={styles.scrimLayer}
+      />
+      <Scrim
+        direction="left"
+        intensity="strong"
+        testID="detail-hero-scrim-left"
+        style={styles.scrimLayer}
+      />
     </View>
   );
 }
@@ -84,6 +104,7 @@ export function DetailHeroPosterCard({
 
 const styles = StyleSheet.create({
   backdropClip: { overflow: 'hidden' },
+  scrimLayer: { zIndex: 1 },
   posterCard: {
     aspectRatio: 2 / 3,
     borderWidth: 1,

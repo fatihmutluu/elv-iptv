@@ -4930,3 +4930,12 @@ msgstr "Quick search"
 
 msgid "search.popup.suggestions"
 msgstr "Suggestions"
+
+msgid "detail.seeMoreInline"
+msgstr "see more..."
+
+msgid "detail.trailer.mute"
+msgstr "Mute preview"
+
+msgid "detail.trailer.unmute"
+msgstr "Unmute preview"

@@ -47,6 +47,7 @@ export const SYNCABLE_PREFERENCE_KEYS = [
   'preferredAudioLanguages',
   'preferredSubtitleLanguages',
   'autoPlayNextEpisode',
+  'detailTrailerMuted',
   'seekStepSec',
   'homeLayout',
   'elvModeEnabled',
@@ -158,6 +159,7 @@ export function extractSyncablePreferences(
     preferredAudioLanguages: [...snapshot.preferredAudioLanguages],
     preferredSubtitleLanguages: [...snapshot.preferredSubtitleLanguages],
     autoPlayNextEpisode: snapshot.autoPlayNextEpisode,
+    detailTrailerMuted: snapshot.detailTrailerMuted,
     seekStepSec: snapshot.seekStepSec,
     homeLayout: snapshot.homeLayout.map((s) => ({ id: s.id, visible: s.visible })),
     elvModeEnabled: snapshot.elvModeEnabled,
@@ -227,6 +229,9 @@ export function sanitizeInitialPreferencesPatch(raw: unknown): PreferencesPatch 
 
   if (typeof raw.autoPlayNextEpisode === 'boolean') {
     patch.autoPlayNextEpisode = raw.autoPlayNextEpisode;
+  }
+  if (typeof raw.detailTrailerMuted === 'boolean') {
+    patch.detailTrailerMuted = raw.detailTrailerMuted;
   }
   if (typeof raw.seekStepSec === 'number' && SEEK_STEP_SECS.has(raw.seekStepSec)) {
     patch.seekStepSec = raw.seekStepSec as SeekStepSecPref;

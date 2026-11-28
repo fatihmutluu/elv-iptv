@@ -6,8 +6,15 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { memo, type ReactElement, useCallback } from 'react';
-import { type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, useRef } from 'react';
+import {
+  type LayoutChangeEvent,
+  Pressable,
+  type ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import type { DetailCastMember, PersonLibraryModalPerson } from '../shared';
 import { splitDirectorNames } from '../shared/PersonLibraryModal';
 
@@ -40,6 +47,7 @@ function DetailCastStripInner({
 }: DetailCastStripProps): ReactElement | null {
   const theme = useTheme();
   const i18n = useI18n();
+  const scrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const handleLayout = useCallback(
     (e: LayoutChangeEvent) => {
       onLayoutY?.(e.nativeEvent.layout.y);
@@ -48,17 +56,26 @@ function DetailCastStripInner({
   );
   const directors = splitDirectorNames(director);
   const hasDirector = directors.length > 0;
+  const castOffset = directors.length;
+  const focusedCastIdx =
+    isTv && focusedIndex !== null && focusedIndex >= castOffset ? focusedIndex - castOffset : -1;
+
+  useEffect(() => {
+    if (focusedCastIdx < 0) return;
+    const x = Math.max(0, focusedCastIdx * (84 + theme.spacing.md) - padX);
+    scrollRef.current?.scrollTo({ x, animated: !theme.reduceMotion });
+  }, [focusedCastIdx, padX, theme.reduceMotion, theme.spacing.md]);
+
   if (cast.length === 0 && !hasDirector) return null;
 
   const cursor = webCursorPointer();
   const transition = webTransition(theme, 'transform, opacity, background-color');
-  const castOffset = directors.length;
 
   return (
     <View
       testID="detail-cast"
       onLayout={handleLayout}
-      style={[styles.section, { marginTop: theme.spacing.lg }]}
+      style={[styles.section, { marginTop: theme.spacing.md }]}
     >
       <Text
         numberOfLines={1}
@@ -138,6 +155,7 @@ function DetailCastStripInner({
 
       {cast.length > 0 ? (
         <HorizontalRailScroll
+          scrollRef={scrollRef}
           testID="detail-cast-strip"
           isTv={isTv}
           showArrows={!isTv}

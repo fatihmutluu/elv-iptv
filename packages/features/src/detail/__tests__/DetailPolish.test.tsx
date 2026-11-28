@@ -287,19 +287,16 @@ describe('DetailScreen technical badges, pre-play selectors, expandable synopsis
         itemKey: movie.key,
       });
 
-      // Expandable synopsis opens modal reader sheet and toggles Read more / Show less
+      // Expandable synopsis renders inline see-more trigger and opens floating popover on desktop
       const toggle = screen.getByTestId('detail-synopsis-toggle');
-      expect(toggle).toHaveTextContent('Read more');
+      expect(toggle).toHaveTextContent('see more...');
       await fireEvent.press(toggle);
-      expect(screen.getByTestId('detail-synopsis-sheet')).toBeTruthy();
-      expect(screen.getByTestId('detail-synopsis-full')).toHaveTextContent(LONG_SYNOPSIS);
-      expect(screen.getByTestId('detail-synopsis-close')).toHaveTextContent('Show less');
-      expect(
-        screen.getByTestId('detail-synopsis-toggle', { includeHiddenElements: true }),
-      ).toHaveTextContent('Show less');
-
-      await fireEvent.press(screen.getByTestId('detail-synopsis-close'));
+      expect(screen.getByTestId('detail-synopsis-popover')).toBeTruthy();
       expect(screen.queryByTestId('detail-synopsis-sheet')).toBeNull();
+      expect(screen.getByTestId('detail-synopsis-full')).toHaveTextContent(LONG_SYNOPSIS);
+
+      await fireEvent.press(screen.getByTestId('detail-synopsis-popover-close'));
+      expect(screen.queryByTestId('detail-synopsis-popover')).toBeNull();
 
       // Clickable director & cast invoke onSearchPerson with accessible labels
       const directorBtn = screen.getByTestId('detail-director-link');

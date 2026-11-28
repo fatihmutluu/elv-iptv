@@ -5,12 +5,14 @@ import { splitDirectorNames } from '../shared/PersonLibraryModal';
 import type { DetailRichCastMember } from './DetailCastStrip';
 import type { DetailHeroFocusSlot } from './DetailHero';
 import type { DetailVersionOption } from './detail-data-helpers';
-import { SYNOPSIS_EXPAND_THRESHOLD } from './detail-preplay';
+import { computeSynopsisCharBudget, truncateSynopsisForInline } from './detail-preplay';
 
 /** Options for {@link useDetailExtrasState}. */
 export interface UseDetailExtrasStateOptions {
   readonly target: DetailTarget;
   readonly plot: string | null;
+  readonly isPortrait?: boolean;
+  readonly fontScale?: number;
   readonly cast?: readonly DetailRichCastMember[];
   readonly director?: string | null;
   readonly versions?: readonly DetailVersionOption[];
@@ -41,6 +43,8 @@ export interface DetailExtrasState {
 export function useDetailExtrasState({
   target,
   plot,
+  isPortrait = false,
+  fontScale = 1,
   cast,
   director,
   versions = [],
@@ -78,7 +82,8 @@ export function useDetailExtrasState({
   const dismissSynopsis = useCallback(() => setSynopsisExpanded(false), []);
 
   const trimmedPlot = plot?.trim() ?? '';
-  const canExpandSynopsis = trimmedPlot.length >= SYNOPSIS_EXPAND_THRESHOLD;
+  const synopsisCharBudget = computeSynopsisCharBudget(0, fontScale, isPortrait);
+  const canExpandSynopsis = truncateSynopsisForInline(trimmedPlot, synopsisCharBudget).truncated;
 
   const resolvedDirector = director !== undefined ? director : (target.director ?? null);
   const resolvedCast: readonly DetailRichCastMember[] =

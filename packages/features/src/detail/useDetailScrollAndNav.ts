@@ -18,12 +18,12 @@ const SCROLL_FROST_THRESHOLD = 24;
 
 /** Action slot identifiers rendered in the Detail Hero circular icon bar. */
 export type DetailHeroActionSlot =
+  | 'trailer'
   | 'mylist'
   | 'like'
   | 'dislike'
   | 'watched'
-  | 'download'
-  | 'trailer';
+  | 'download';
 
 /** Options for {@link useDetailScrollAndNav}. */
 export interface UseDetailScrollAndNavOptions {
@@ -115,12 +115,12 @@ export function useDetailScrollAndNav({
 
   const heroActionSlots = useMemo<readonly DetailHeroActionSlot[]>(
     () => [
+      ...(hasTrailer ? (['trailer'] as const) : []),
       'mylist',
       'like',
       'dislike',
       'watched',
       ...(showHeroDownload ? (['download'] as const) : []),
-      ...(hasTrailer ? (['trailer'] as const) : []),
     ],
     [hasTrailer, showHeroDownload],
   );

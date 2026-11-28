@@ -2,11 +2,11 @@ import { createAppI18n } from '@elv/i18n';
 import { I18nProvider, ThemeProvider, ViewportProvider } from '@elv/ui-kit';
 import { render, screen } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
-import { computeHeroHeight } from '../../shared';
 import { DetailHero } from '../DetailHero';
+import { computeDetailHeroHeight } from '../detail-preplay';
 
 describe('DetailHero height', () => {
-  it('matches DetailHero minHeight to computeHeroHeight for desktop and portrait viewports', async () => {
+  it('matches DetailHero minHeight to computeDetailHeroHeight (~76% desktop/TV, comfortable portrait)', async () => {
     const i18n = createAppI18n('en');
     const primaryAction = {
       kind: 'movie' as const,
@@ -60,7 +60,8 @@ describe('DetailHero height', () => {
     );
 
     const desktopHeroStyle = StyleSheet.flatten(screen.getByTestId('detail-hero').props.style);
-    expect(desktopHeroStyle.minHeight).toBe(computeHeroHeight(900, false, false, true));
+    expect(desktopHeroStyle.minHeight).toBe(computeDetailHeroHeight(900, false, false, true));
+    expect(desktopHeroStyle.minHeight).toBe(Math.round(900 * 0.76));
     await desktopView.unmount();
 
     const portraitView = await render(
@@ -102,7 +103,9 @@ describe('DetailHero height', () => {
     );
 
     const portraitHeroStyle = StyleSheet.flatten(screen.getByTestId('detail-hero').props.style);
-    expect(portraitHeroStyle.minHeight).toBe(computeHeroHeight(844, true, false, true));
+    expect(portraitHeroStyle.minHeight).toBe(computeDetailHeroHeight(844, true, false, false));
+    expect(portraitHeroStyle.minHeight).toBeGreaterThanOrEqual(460);
+    expect(portraitHeroStyle.minHeight).toBeLessThanOrEqual(540);
     await portraitView.unmount();
   });
 });

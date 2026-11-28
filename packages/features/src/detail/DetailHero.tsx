@@ -13,18 +13,19 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { memo, type ReactElement } from 'react';
+import { memo, type ReactElement, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { computeHeroHeight } from '../shared';
 import type { DetailTechnicalMeta } from '../shared/detail-target';
 import { DetailHeroBackdrop, DetailHeroPosterCard } from './DetailHeroBackdrop';
-import { DetailSynopsisBlock, DetailVersionDropdown } from './DetailHeroExtras';
+import { DetailVersionDropdown } from './DetailHeroExtras';
+import { DetailHeroTrailerPreview } from './DetailHeroTrailerPreview';
+import { DetailSynopsisBlock } from './DetailSynopsisBlock';
 import type { DetailVersionOption } from './detail-data-helpers';
 import {
   buildTechnicalBadges,
+  computeDetailHeroHeight,
   detailProgressRatio,
   type PrimaryPlayAction,
-  SYNOPSIS_EXPAND_THRESHOLD,
 } from './detail-model';
 import { formatCompactVotes } from './detail-trailer-utils';
 
@@ -52,8 +53,14 @@ export interface DetailHeroDownloadState {
 export interface DetailHeroProps {
   readonly kind: 'movie' | 'series';
   readonly title: string;
+  readonly titleKey?: string;
   readonly backdropUri: string | null;
   readonly posterUri?: string | null;
+  readonly trailerStreamUrl?: string | null;
+  readonly trailerYoutubeId?: string | null;
+  readonly detailTrailerMuted?: boolean;
+  readonly trailerPreviewActive?: boolean;
+  readonly onToggleDetailTrailerMuted?: () => void;
   readonly year: number | null;
   readonly rating: number | null;
   readonly votes?: number | null;
@@ -79,6 +86,7 @@ export interface DetailHeroProps {
   readonly onSelectVersion?: (key: string) => void;
   readonly synopsisExpanded?: boolean;
   readonly onToggleSynopsis?: () => void;
+  readonly onDismissSynopsis?: () => void;
   readonly onBack: () => void;
   readonly onPlayPrimary: () => void;
   readonly onToggleMyList: () => void;
@@ -90,6 +98,8 @@ export interface DetailHeroProps {
   readonly padX: number;
   readonly focusedSlot: DetailHeroFocusSlot | null;
 }
+
+const NOOP_MUTE_HANDLER = (): void => undefined;
 
 function resolvePlayLabel(action: PrimaryPlayAction, t: AppI18n['t']): string {
   if (action.kind === 'movie') {
@@ -105,8 +115,14 @@ function resolvePlayLabel(action: PrimaryPlayAction, t: AppI18n['t']): string {
 function DetailHeroInner({
   kind,
   title,
+  titleKey,
   backdropUri,
   posterUri = null,
+  trailerStreamUrl = null,
+  trailerYoutubeId = null,
+  detailTrailerMuted = true,
+  trailerPreviewActive = false,
+  onToggleDetailTrailerMuted,
   year,
   rating,
   votes = null,
@@ -132,6 +148,7 @@ function DetailHeroInner({
   onSelectVersion,
   synopsisExpanded = false,
   onToggleSynopsis,
+  onDismissSynopsis,
   onBack,
   onPlayPrimary,
   onToggleMyList,
@@ -146,7 +163,7 @@ function DetailHeroInner({
   const theme = useTheme();
   const i18n = useI18n();
   const viewport = useViewport();
-  const heroHeight = computeHeroHeight(
+  const heroHeight = computeDetailHeroHeight(
     viewport.height,
     isPortrait,
     isTv,
@@ -160,8 +177,7 @@ function DetailHeroInner({
       : undefined;
   const trimmedPlot = plot?.trim() ?? '';
   const synopsis = trimmedPlot.length > 0 ? trimmedPlot : i18n.t('detail.noSynopsis');
-  const canExpandSynopsis =
-    onToggleSynopsis !== undefined && trimmedPlot.length >= SYNOPSIS_EXPAND_THRESHOLD;
+  const canExpandSynopsis = onToggleSynopsis !== undefined && trimmedPlot.length > 0;
   const technicalBadges = buildTechnicalBadges(technicalMeta);
   const trimmedBackdrop = backdropUri?.trim() || null;
   const trimmedPoster = posterUri?.trim() || null;
@@ -173,6 +189,42 @@ function DetailHeroInner({
   const glassBlur = webBackdropBlur(12);
   const transition = webTransition(theme, 'transform, background-color, border-color, opacity');
   const cursor = webCursorPointer();
+
+  const isNarrowPortrait = isPortrait && viewport.width < 370;
+  const actionIconSize = isNarrowPortrait ? (viewport.width < 330 ? 40 : 44) : 48;
+  const showVersionDropdown =
+    versions !== undefined &&
+    versions.length > 1 &&
+    activeVersionKey !== undefined &&
+    activeVersionLabel !== undefined &&
+    onToggleVersionMenu !== undefined &&
+    onCloseVersionMenu !== undefined &&
+    onSelectVersion !== undefined;
+
+  const resolvedTitleKey = titleKey ?? title;
+  const hasPreviewTrailer = Boolean(trailerStreamUrl || trailerYoutubeId);
+  const [trailerPlaying, setTrailerPlaying] = useState(false);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset elevated mute toggle whenever title changes or preview stops
+  useEffect(() => {
+    setTrailerPlaying(false);
+  }, [hasPreviewTrailer, resolvedTitleKey, trailerPreviewActive]);
+
+  const trailerPreview = hasPreviewTrailer ? (
+    <DetailHeroTrailerPreview
+      titleKey={resolvedTitleKey}
+      trailerStreamUrl={trailerStreamUrl}
+      trailerYoutubeId={trailerYoutubeId}
+      muted={detailTrailerMuted}
+      active={trailerPreviewActive}
+      topOffset={topClearance + 12}
+      rightOffset={padX}
+      isTv={isTv}
+      hideMuteButton
+      onPlayingChange={setTrailerPlaying}
+      onToggleMuted={onToggleDetailTrailerMuted ?? NOOP_MUTE_HANDLER}
+    />
+  ) : null;
 
   return (
     <View
@@ -193,9 +245,10 @@ function DetailHeroInner({
         backdropUri={trimmedBackdrop}
         posterUri={trimmedPoster}
         isPortraitFallback={isPortraitFallback}
+        trailerPreview={trailerPreview}
       />
 
-      <View style={styles.foreground}>
+      <View pointerEvents="box-none" style={styles.foreground}>
         <Pressable
           testID="detail-back"
           accessibilityRole="button"
@@ -254,6 +307,7 @@ function DetailHeroInner({
         </Pressable>
 
         <View
+          pointerEvents="box-none"
           style={[
             styles.spacer,
             isPortraitFallback && isPortrait ? { minHeight: theme.spacing.md } : undefined,
@@ -261,7 +315,7 @@ function DetailHeroInner({
         />
 
         {isPortraitFallback && isPortrait && trimmedPoster !== null ? (
-          <View style={{ marginBottom: theme.spacing.sm }}>
+          <View pointerEvents="box-none" style={{ marginBottom: theme.spacing.sm }}>
             <DetailHeroPosterCard
               posterUri={trimmedPoster}
               title={title}
@@ -284,23 +338,54 @@ function DetailHeroInner({
 
         <View
           testID="detail-hero-bottom"
+          pointerEvents="box-none"
           style={[
             styles.heroBottom,
             {
               flexDirection: isPortrait ? 'column' : 'row',
-              alignItems: isPortrait ? 'stretch' : 'flex-start',
+              alignItems: isPortrait ? 'stretch' : 'flex-end',
               gap: isPortrait ? theme.spacing.md : theme.spacing.lg,
             },
           ]}
         >
           <View
             testID="detail-hero-actions"
-            style={[styles.actionsCol, { width: isPortrait ? '100%' : 230, gap: theme.spacing.sm }]}
+            style={[
+              styles.actionsCol,
+              {
+                width: isPortrait ? '100%' : 338,
+                gap: 10,
+                zIndex: versionMenuOpen ? 30 : 2,
+              },
+            ]}
           >
-            <View testID="detail-hero-icon-row" style={[styles.iconRow, { gap: theme.spacing.sm }]}>
+            <View
+              testID="detail-hero-icon-row"
+              style={[
+                styles.iconRow,
+                {
+                  gap: isNarrowPortrait ? 4 : 10,
+                  justifyContent: isNarrowPortrait ? 'space-between' : 'flex-start',
+                },
+              ]}
+            >
+              {onPressTrailer !== undefined ? (
+                <IconButton
+                  testID="detail-trailer"
+                  icon="film"
+                  size={actionIconSize}
+                  tooltipPlacement="top"
+                  accessibilityLabel={i18n.t('detail.action.trailer')}
+                  focusable={!isTv}
+                  focused={isTv && focusedSlot === 'trailer'}
+                  onPress={onPressTrailer}
+                />
+              ) : null}
               <IconButton
                 testID="detail-mylist"
                 icon={inMyList ? 'check' : 'plus'}
+                size={actionIconSize}
+                tooltipPlacement="top"
                 active={inMyList}
                 accessibilityLabel={inMyList ? i18n.t('home.inMyList') : i18n.t('home.addToList')}
                 focusable={!isTv}
@@ -312,6 +397,8 @@ function DetailHeroInner({
                   <IconButton
                     testID="detail-like"
                     icon={userRating === 'like' ? 'likeFilled' : 'like'}
+                    size={actionIconSize}
+                    tooltipPlacement="top"
                     active={userRating === 'like'}
                     accessibilityLabel={
                       userRating === 'like' ? i18n.t('rating.clearLike') : i18n.t('rating.like')
@@ -323,6 +410,8 @@ function DetailHeroInner({
                   <IconButton
                     testID="detail-dislike"
                     icon={userRating === 'dislike' ? 'dislikeFilled' : 'dislike'}
+                    size={actionIconSize}
+                    tooltipPlacement="top"
                     active={userRating === 'dislike'}
                     accessibilityLabel={
                       userRating === 'dislike'
@@ -338,6 +427,8 @@ function DetailHeroInner({
               <IconButton
                 testID="detail-watched"
                 icon="check"
+                size={actionIconSize}
+                tooltipPlacement="top"
                 active={watched}
                 accessibilityLabel={
                   kind === 'series'
@@ -354,21 +445,13 @@ function DetailHeroInner({
                 <IconButton
                   testID="detail-download"
                   icon={downloadState.icon}
+                  size={actionIconSize}
+                  tooltipPlacement="top"
                   active={downloadState.active}
                   accessibilityLabel={downloadState.label}
                   focusable={!isTv}
                   focused={isTv && focusedSlot === 'download'}
                   onPress={onPressDownload}
-                />
-              ) : null}
-              {onPressTrailer !== undefined ? (
-                <IconButton
-                  testID="detail-trailer"
-                  icon="film"
-                  accessibilityLabel={i18n.t('detail.action.trailer')}
-                  focusable={!isTv}
-                  focused={isTv && focusedSlot === 'trailer'}
-                  onPress={onPressTrailer}
                 />
               ) : null}
             </View>
@@ -409,13 +492,53 @@ function DetailHeroInner({
                 </View>
               ) : null}
             </View>
+
+            {showVersionDropdown ? (
+              <DetailVersionDropdown
+                versions={versions}
+                activeVersionKey={activeVersionKey}
+                activeVersionLabel={activeVersionLabel}
+                open={versionMenuOpen}
+                isTv={isTv}
+                focused={versionFocused}
+                tvHighlightedIndex={versionMenuIndex}
+                onToggleOpen={onToggleVersionMenu}
+                onClose={onCloseVersionMenu}
+                onSelectVersion={onSelectVersion}
+              />
+            ) : null}
           </View>
 
           <View
             testID="detail-hero-meta"
-            style={[styles.metaCol, !isPortrait ? styles.metaColFlex : undefined]}
+            style={[
+              styles.metaCol,
+              !isPortrait ? styles.metaColFlex : undefined,
+              { zIndex: synopsisExpanded ? 30 : 2 },
+            ]}
           >
-            <View style={[styles.metaRow, { gap: theme.spacing.sm }]}>
+            <DetailSynopsisBlock
+              title={title}
+              synopsis={synopsis}
+              canExpand={canExpandSynopsis}
+              expanded={synopsisExpanded}
+              isTv={isTv}
+              isPortrait={isPortrait}
+              focused={synopsisFocused}
+              {...(onToggleSynopsis !== undefined ? { onToggle: onToggleSynopsis } : {})}
+              {...(onDismissSynopsis !== undefined ? { onDismiss: onDismissSynopsis } : {})}
+            />
+
+            <View style={[styles.metaRow, { marginTop: theme.spacing.sm, gap: theme.spacing.sm }]}>
+              {genres && genres.length > 0 ? (
+                <Text
+                  testID="detail-genres"
+                  numberOfLines={1}
+                  style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+                >
+                  {genres.join(' · ')}
+                </Text>
+              ) : null}
               {rating !== null && Number.isFinite(rating) ? (
                 <Text
                   testID="detail-rating"
@@ -489,15 +612,6 @@ function DetailHeroInner({
                   testID="detail-watched-badge"
                 />
               ) : null}
-              {genres && genres.length > 0 ? (
-                <Text
-                  testID="detail-genres"
-                  numberOfLines={1}
-                  style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
-                >
-                  {genres.join(' · ')}
-                </Text>
-              ) : null}
               {technicalBadges.map((badge) => (
                 <MicroPill
                   key={badge.key}
@@ -506,36 +620,6 @@ function DetailHeroInner({
                 />
               ))}
             </View>
-
-            <DetailSynopsisBlock
-              synopsis={synopsis}
-              canExpand={canExpandSynopsis}
-              expanded={synopsisExpanded}
-              isTv={isTv}
-              focused={synopsisFocused}
-              {...(onToggleSynopsis !== undefined ? { onToggle: onToggleSynopsis } : {})}
-            />
-
-            {versions !== undefined &&
-            versions.length > 1 &&
-            activeVersionKey !== undefined &&
-            activeVersionLabel !== undefined &&
-            onToggleVersionMenu !== undefined &&
-            onCloseVersionMenu !== undefined &&
-            onSelectVersion !== undefined ? (
-              <DetailVersionDropdown
-                versions={versions}
-                activeVersionKey={activeVersionKey}
-                activeVersionLabel={activeVersionLabel}
-                open={versionMenuOpen}
-                isTv={isTv}
-                focused={versionFocused}
-                tvHighlightedIndex={versionMenuIndex}
-                onToggleOpen={onToggleVersionMenu}
-                onClose={onCloseVersionMenu}
-                onSelectVersion={onSelectVersion}
-              />
-            ) : null}
           </View>
 
           {isPortraitFallback && !isPortrait && trimmedPoster !== null ? (
@@ -548,14 +632,41 @@ function DetailHeroInner({
           ) : null}
         </View>
       </View>
+
+      {hasPreviewTrailer && trailerPreviewActive && trailerPlaying ? (
+        <View
+          pointerEvents="box-none"
+          testID="detail-trailer-mute-anchor"
+          style={[
+            styles.trailerMuteAnchor,
+            {
+              top: topClearance + 12,
+              right: padX,
+            },
+          ]}
+        >
+          <IconButton
+            testID="detail-trailer-mute-toggle"
+            icon={detailTrailerMuted ? 'volumeMute' : 'audio'}
+            size={44}
+            tooltipPlacement="left"
+            accessibilityLabel={
+              detailTrailerMuted ? i18n.t('detail.trailer.unmute') : i18n.t('detail.trailer.mute')
+            }
+            focusable={!isTv}
+            onPress={onToggleDetailTrailerMuted ?? NOOP_MUTE_HANDLER}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
 
 /**
- * Full-bleed Cinema Quietude 2-column Detail Hero (`UI_UX_PHILOSOPHY.md` §1 & §3).
- * Pairs circular frosted action icons and a full-width primary Play/Resume CTA on the left
- * (`230px` Landscape) with clean metadata and synopsis on the right, stacking smoothly on Portrait.
+ * Full-bleed Cinema Quietude v3 spotlight Detail Hero (`UI_UX_PHILOSOPHY.md` §1 & §3).
+ * Pairs 6 circular frosted action icons fitted to the exact width of an enlarged primary Play CTA
+ * (`338px` Landscape) plus conditional full-width Version dropdown beneath Play on the left with
+ * prominent synopsis (and inline overflowing `"see more..."` popover) above compact metadata on the right.
  */
 export const DetailHero = memo(DetailHeroInner);
 DetailHero.displayName = 'DetailHero';
@@ -563,6 +674,7 @@ DetailHero.displayName = 'DetailHero';
 const styles = StyleSheet.create({
   container: { position: 'relative', zIndex: 10 },
   foreground: { position: 'relative', zIndex: 2, flex: 1, justifyContent: 'space-between' },
+  trailerMuteAnchor: { position: 'absolute', zIndex: 6 },
   backButton: {
     position: 'relative',
     alignSelf: 'flex-start',
@@ -577,9 +689,9 @@ const styles = StyleSheet.create({
   spacer: { minHeight: 52, flexGrow: 1 },
   heroBottom: { width: '100%' },
   actionsCol: { flexShrink: 0 },
-  iconRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
+  iconRow: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', width: '100%' },
   ctaWrap: { width: '100%' },
-  playCta: { width: '100%', alignSelf: 'stretch' },
+  playCta: { width: '100%', alignSelf: 'stretch', minHeight: 54, paddingVertical: 14 },
   progressTrack: { height: 3, width: '100%', overflow: 'hidden', marginTop: 6 },
   progressFill: { height: '100%' },
   metaCol: { minWidth: 0 },
