@@ -54,7 +54,7 @@ export {
 } from './horizontal-rail-drag';
 export { IconButton, type IconButtonProps } from './IconButton';
 export { MicroPill, type MicroPillProps, type MicroPillTone } from './MicroPill';
-export { PosterCard, type PosterCardProps, type PosterCardQuickActions } from './PosterCard';
+export { PosterCard, type PosterCardHoverRect, type PosterCardProps } from './PosterCard';
 export { Scrim, type ScrimDirection, type ScrimProps } from './Scrim';
 export { SkeletonBox, type SkeletonBoxProps } from './SkeletonBox';
 export { Surface, type SurfaceProps, type SurfaceTone } from './Surface';

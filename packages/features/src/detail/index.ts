@@ -8,6 +8,7 @@ export {
   type DetailScopePickerProps,
 } from './DetailScopePicker';
 export { DetailScreen, type DetailScreenProps } from './DetailScreen';
+export { DetailTrailerModal, type DetailTrailerModalProps } from './DetailTrailerModal';
 export {
   type BuildDetailNavRowsInput,
   type BuildEpisodePlayTargetInput,

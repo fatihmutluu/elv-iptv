@@ -103,6 +103,10 @@ import {
 } from './queries-variants';
 import { type CatalogRatingsOpsMethods, createCatalogRatingsOpsMethods } from './ratings-repo';
 import { listRecentChannels, recordRecentChannel } from './recent-channels-repo';
+import {
+  type CatalogRecommendationDismissalsOpsMethods,
+  createCatalogRecommendationDismissalsOpsMethods,
+} from './recommendation-dismissals-repo';
 import { latestImportHealth, type SourceImportHealth } from './runs';
 import {
   querySearch,
@@ -233,7 +237,8 @@ export interface CatalogService
     Partial<CatalogRatingsOpsMethods>,
     Partial<CatalogSourceMutationMethods>,
     Partial<CatalogSyncStateOpsMethods>,
-    Partial<CatalogLiveFoldersOpsMethods> {
+    Partial<CatalogLiveFoldersOpsMethods>,
+    Partial<CatalogRecommendationDismissalsOpsMethods> {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Adds a local sandboxed M3U source from raw bytes (`#51`). */
@@ -476,6 +481,11 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     playtime,
   });
   const ratingsOpsMethods = createCatalogRatingsOpsMethods({ db, clock, playtime, syncUserData });
+  const recommendationDismissalsOpsMethods = createCatalogRecommendationDismissalsOpsMethods({
+    db,
+    clock,
+    syncUserData,
+  });
   const liveFoldersOpsMethods = createCatalogLiveFoldersOpsMethods({ db, clock, syncUserData });
   const syncStateOpsMethods = createCatalogSyncStateOpsMethods({ db, playtime, syncUserData });
   const seriesWatchedOpsMethods = createCatalogSeriesWatchedOpsMethods({
@@ -763,6 +773,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     ...elvOpsMethods,
     ...newEpisodesOpsMethods,
     ...ratingsOpsMethods,
+    ...recommendationDismissalsOpsMethods,
     ...liveFoldersOpsMethods,
     ...sourceMutationMethods,
     ...syncStateOpsMethods,

@@ -529,6 +529,18 @@ export function createDesktopCatalogFromBridge(
     listRatings: (opts) => (bridge.listRatings ? bridge.listRatings(opts) : Promise.resolve([])),
     listRatingMap: (profileId) =>
       bridge.listRatingMap ? bridge.listRatingMap(profileId) : Promise.resolve({}),
+    dismissRecommendation: (itemKey, kind, profileId) =>
+      bridge.dismissRecommendation
+        ? bridge.dismissRecommendation(itemKey, kind, profileId)
+        : Promise.resolve(),
+    restoreRecommendation: (itemKey, profileId) =>
+      bridge.restoreRecommendation
+        ? bridge.restoreRecommendation(itemKey, profileId)
+        : Promise.resolve(),
+    listDismissedRecommendationKeys: (profileId) =>
+      bridge.listDismissedRecommendationKeys
+        ? bridge.listDismissedRecommendationKeys(profileId)
+        : Promise.resolve([]),
     getElvEnrichmentForKeys: async (itemKeys) => {
       if (!bridge.getElvEnrichmentForKeys || itemKeys.length === 0) {
         return new Map<string, ElvItemEnrichment>();

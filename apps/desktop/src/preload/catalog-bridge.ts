@@ -14,6 +14,7 @@ import {
 } from '../shared/catalog-ipc.ts';
 import { createCatalogBridgeWaveE1Ops } from './catalog-bridge-wave-e1.ts';
 import { createCatalogBridgeWaveQ7Ops } from './catalog-bridge-wave-q7.ts';
+import { createCatalogBridgeWaveR3Ops } from './catalog-bridge-wave-r3.ts';
 
 /** Subset of the preload's `MessagePort` transferred from main; never crosses `contextBridge`. */
 export interface PreloadClientPortLike {
@@ -764,6 +765,7 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       callValue({ method: 'listRatingMap', ...(profileId === undefined ? {} : { profileId }) }),
     ...createCatalogBridgeWaveE1Ops(callValue),
     ...createCatalogBridgeWaveQ7Ops(callResult, callValue, notifyOnOk, emitChanged),
+    ...createCatalogBridgeWaveR3Ops(callValue),
     flushPendingWrites: () => callValue({ method: 'flushPendingWrites' }),
     onChanged: (listener) => {
       changedListeners.add(listener);

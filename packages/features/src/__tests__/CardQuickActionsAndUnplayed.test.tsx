@@ -9,7 +9,14 @@ import { ok } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import { I18nProvider, ThemeProvider, ViewportProvider } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import type { ReactNode } from 'react';
+import { Platform } from 'react-native';
 import { CatalogDiscoveryScreen, DetailScreen, HomeScreen } from '../index';
+import type { PlayTarget } from '../ports/play-target';
+import type { DetailTarget } from '../shared';
+import { PosterHoverPreviewProvider } from '../shared/PosterHoverPreviewContext';
+import { PosterHoverPreviewHost } from '../shared/PosterHoverPreviewHost';
+import { HOVER_PREVIEW_OPEN_DELAY_MS } from '../shared/poster-hover-preview-model';
 
 const SOURCE: SourceRow = {
   id: 's1',
@@ -113,47 +120,94 @@ function createTestCatalog(overrides: Partial<CatalogService> = {}): CatalogServ
   } as unknown as CatalogService;
 }
 
-describe('Desktop card hover quick-actions & series watched badges (#409, #502)', () => {
-  it('shows all-watched checkmark without numeric unplayed counts on Series cards in HomeScreen and supports pointer hover quick-actions', async () => {
+function DesktopHoverShell({
+  catalog,
+  onPlay = jest.fn(),
+  onOpenDetail = jest.fn(),
+  children,
+}: {
+  readonly catalog: CatalogService;
+  readonly onPlay?: (target: PlayTarget) => void;
+  readonly onOpenDetail?: (target: DetailTarget) => void;
+  readonly children: ReactNode;
+}) {
+  const i18n = createAppI18n('en');
+  return (
+    <I18nProvider i18n={i18n}>
+      <ThemeProvider>
+        <ViewportProvider
+          value={{ formFactor: 'desktop', orientation: 'landscape', inputModality: 'pointer' }}
+        >
+          <PosterHoverPreviewProvider catalog={catalog} catalogRevision={1}>
+            {children}
+            <PosterHoverPreviewHost onPlay={onPlay} onOpenDetail={onOpenDetail} />
+          </PosterHoverPreviewProvider>
+        </ViewportProvider>
+      </ThemeProvider>
+    </I18nProvider>
+  );
+}
+
+describe('Desktop card hover preview & series watched badges (#409, #502, Wave R3)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('shows all-watched checkmark without numeric unplayed counts on Series cards and opens Expanded Hover Preview without legacy bottom-right buttons', async () => {
+    const osReplacer = jest.replaceProperty(Platform, 'OS', 'web');
     const catalog = createTestCatalog();
     const onPlay = jest.fn();
     const onOpenDetail = jest.fn();
-    const i18n = createAppI18n('en');
 
-    await render(
-      <I18nProvider i18n={i18n}>
-        <ThemeProvider>
-          <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
-            <HomeScreen
-              catalog={catalog}
-              sources={[SOURCE]}
-              refreshToken={0}
-              onPlay={onPlay}
-              onOpenTab={jest.fn()}
-              onOpenDetail={onOpenDetail}
-              onOpenSources={jest.fn()}
-            />
-          </ViewportProvider>
-        </ThemeProvider>
-      </I18nProvider>,
-    );
+    try {
+      await render(
+        <DesktopHoverShell catalog={catalog} onPlay={onPlay} onOpenDetail={onOpenDetail}>
+          <HomeScreen
+            catalog={catalog}
+            sources={[SOURCE]}
+            refreshToken={0}
+            onPlay={onPlay}
+            onOpenTab={jest.fn()}
+            onOpenDetail={onOpenDetail}
+            onOpenSources={jest.fn()}
+          />
+        </DesktopHoverShell>,
+      );
 
-    await waitFor(() => {
-      expect(screen.getByTestId('home-series-item-1-watched-badge')).toBeTruthy();
-    });
-    expect(screen.queryByTestId('home-series-item-0-unplayed')).toBeNull();
-    expect(screen.queryByTestId('home-series-item-0-watched-badge')).toBeNull();
-    expect(screen.queryByTestId('home-series-item-1-unplayed')).toBeNull();
+      await waitFor(() => {
+        expect(screen.getByTestId('home-series-item-1-watched-badge')).toBeTruthy();
+      });
+      expect(screen.queryByTestId('home-series-item-0-unplayed')).toBeNull();
+      expect(screen.queryByTestId('home-series-item-0-watched-badge')).toBeNull();
+      expect(screen.queryByTestId('home-series-item-1-unplayed')).toBeNull();
 
-    const movieCard = screen.getByTestId('home-movies-item-0');
-    await fireEvent(movieCard, 'hoverIn');
-    const playBtn = screen.getByTestId('home-movies-item-0-quick-play');
-    await fireEvent.press(playBtn, { stopPropagation: jest.fn(), preventDefault: jest.fn() });
-    expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({ itemKey: MOVIE_1.key }));
-    expect(onOpenDetail).not.toHaveBeenCalled();
+      const movieCard = screen.getByTestId('home-movies-item-0');
+      await fireEvent(movieCard, 'pointerEnter');
+      expect(screen.queryByTestId('home-movies-item-0-quick-play')).toBeNull();
+      expect(screen.queryByTestId('home-movies-item-0-quick-favorite')).toBeNull();
+      expect(screen.queryByTestId('home-movies-item-0-quick-watched')).toBeNull();
+
+      await act(async () => {
+        jest.advanceTimersByTime(HOVER_PREVIEW_OPEN_DELAY_MS);
+        await Promise.resolve();
+      });
+
+      const playBtn = screen.getByTestId('hover-preview-play');
+      await fireEvent.press(playBtn);
+      expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({ itemKey: MOVIE_1.key }));
+      expect(onOpenDetail).not.toHaveBeenCalled();
+    } finally {
+      osReplacer.restore();
+    }
   });
 
-  it('unwatches an all-episodes-watched series on HomeScreen with nextWatched=false, optimistic badge clear, and rollback on failure', async () => {
+  it('unwatches an all-episodes-watched series via Hover Preview with optimistic badge clear and rollback on failure', async () => {
+    const osReplacer = jest.replaceProperty(Platform, 'OS', 'web');
     let rejectUnwatch!: (err: Error) => void;
     const setWatched = jest.fn(
       () =>
@@ -162,49 +216,54 @@ describe('Desktop card hover quick-actions & series watched badges (#409, #502)'
         }),
     );
     const catalog = createTestCatalog({ setWatched });
-    const i18n = createAppI18n('en');
 
-    await render(
-      <I18nProvider i18n={i18n}>
-        <ThemeProvider>
-          <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
-            <HomeScreen
-              catalog={catalog}
-              sources={[SOURCE]}
-              refreshToken={0}
-              onPlay={jest.fn()}
-              onOpenTab={jest.fn()}
-              onOpenDetail={jest.fn()}
-              onOpenSources={jest.fn()}
-            />
-          </ViewportProvider>
-        </ThemeProvider>
-      </I18nProvider>,
-    );
+    try {
+      await render(
+        <DesktopHoverShell catalog={catalog}>
+          <HomeScreen
+            catalog={catalog}
+            sources={[SOURCE]}
+            refreshToken={0}
+            onPlay={jest.fn()}
+            onOpenTab={jest.fn()}
+            onOpenDetail={jest.fn()}
+            onOpenSources={jest.fn()}
+          />
+        </DesktopHoverShell>,
+      );
 
-    await waitFor(() => {
-      expect(screen.getByTestId('home-series-item-1-watched-badge')).toBeTruthy();
-    });
+      await waitFor(() => {
+        expect(screen.getByTestId('home-series-item-1-watched-badge')).toBeTruthy();
+      });
 
-    await fireEvent(screen.getByTestId('home-series-item-1'), 'hoverIn');
-    const watchedBtn = screen.getByTestId('home-series-item-1-quick-watched');
-    expect(watchedBtn.props.accessibilityState?.selected).toBe(true);
+      await fireEvent(screen.getByTestId('home-series-item-1'), 'pointerEnter');
+      await act(async () => {
+        jest.advanceTimersByTime(HOVER_PREVIEW_OPEN_DELAY_MS);
+        await Promise.resolve();
+      });
 
-    await fireEvent.press(watchedBtn, { stopPropagation: jest.fn(), preventDefault: jest.fn() });
-    expect(setWatched).toHaveBeenCalledWith(SERIES_2.key, false);
-    expect(screen.queryByTestId('home-series-item-1-watched-badge')).toBeNull();
-    expect(screen.queryByTestId('home-series-item-1-unplayed')).toBeNull();
+      const watchedBtn = screen.getByTestId('hover-preview-watched');
+      expect(watchedBtn.props.accessibilityState?.selected).toBe(true);
 
-    await act(async () => {
-      rejectUnwatch(new Error('sqlite-busy'));
-      await Promise.resolve();
-    });
-    await waitFor(() => {
-      expect(screen.getByTestId('home-series-item-1-watched-badge')).toBeTruthy();
-    });
+      await fireEvent.press(watchedBtn);
+      expect(setWatched).toHaveBeenCalledWith(SERIES_2.key, false);
+      expect(screen.queryByTestId('home-series-item-1-watched-badge')).toBeNull();
+      expect(screen.queryByTestId('home-series-item-1-unplayed')).toBeNull();
+
+      await act(async () => {
+        rejectUnwatch(new Error('sqlite-busy'));
+        await Promise.resolve();
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('home-series-item-1-watched-badge')).toBeTruthy();
+      });
+    } finally {
+      osReplacer.restore();
+    }
   });
 
-  it('optimistically toggles Favorite & Watched on CatalogDiscoveryScreen and rolls back on rejection', async () => {
+  it('optimistically toggles Favorite & Watched via Hover Preview on CatalogDiscoveryScreen and rolls back on rejection', async () => {
+    const osReplacer = jest.replaceProperty(Platform, 'OS', 'web');
     let rejectFav!: (err: Error) => void;
     let rejectWatched!: (err: Error) => void;
     const toggleFavorite = jest.fn(
@@ -222,77 +281,76 @@ describe('Desktop card hover quick-actions & series watched badges (#409, #502)'
     const catalog = createTestCatalog({ toggleFavorite, setWatched });
     const onPlay = jest.fn();
     const onOpenDetail = jest.fn();
-    const i18n = createAppI18n('en');
 
-    await render(
-      <I18nProvider i18n={i18n}>
-        <ThemeProvider>
-          <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
-            <CatalogDiscoveryScreen
-              kind="movie"
-              catalog={catalog}
-              sources={[SOURCE]}
-              refreshToken={0}
-              onPlay={onPlay}
-              onOpenDetail={onOpenDetail}
-              onOpenSources={jest.fn()}
-            />
-          </ViewportProvider>
-        </ThemeProvider>
-      </I18nProvider>,
-    );
+    try {
+      await render(
+        <DesktopHoverShell catalog={catalog} onPlay={onPlay} onOpenDetail={onOpenDetail}>
+          <CatalogDiscoveryScreen
+            kind="movie"
+            catalog={catalog}
+            sources={[SOURCE]}
+            refreshToken={0}
+            onPlay={onPlay}
+            onOpenDetail={onOpenDetail}
+            onOpenSources={jest.fn()}
+          />
+        </DesktopHoverShell>,
+      );
 
-    await waitFor(() => {
-      expect(screen.getByTestId('catalog-rail-0-item-0')).toBeTruthy();
-    });
+      await waitFor(() => {
+        expect(screen.getByTestId('catalog-rail-0-item-0')).toBeTruthy();
+      });
 
-    await fireEvent(screen.getByTestId('catalog-rail-0-item-0'), 'hoverIn');
+      await fireEvent(screen.getByTestId('catalog-rail-0-item-0'), 'pointerEnter');
+      expect(screen.queryByTestId('catalog-rail-0-item-0-quick-play')).toBeNull();
+      await act(async () => {
+        jest.advanceTimersByTime(HOVER_PREVIEW_OPEN_DELAY_MS);
+        await Promise.resolve();
+      });
 
-    // Quick-play plays movie without opening DetailScreen
-    await fireEvent.press(screen.getByTestId('catalog-rail-0-item-0-quick-play'), {
-      stopPropagation: jest.fn(),
-      preventDefault: jest.fn(),
-    });
-    expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({ itemKey: MOVIE_1.key }));
-    expect(onOpenDetail).not.toHaveBeenCalled();
+      // Optimistic Favorite toggle -> true -> rollback on rejection -> false
+      const favBtn = screen.getByTestId('hover-preview-mylist');
+      expect(favBtn.props.accessibilityState?.selected).toBe(false);
+      await fireEvent.press(favBtn);
+      expect(screen.getByTestId('hover-preview-mylist').props.accessibilityState?.selected).toBe(
+        true,
+      );
 
-    // Optimistic Favorite toggle -> true -> rollback on rejection -> false
-    const favBtn = screen.getByTestId('catalog-rail-0-item-0-quick-favorite');
-    expect(favBtn.props.accessibilityState?.selected).toBe(false);
-    await fireEvent.press(favBtn, { stopPropagation: jest.fn(), preventDefault: jest.fn() });
-    expect(
-      screen.getByTestId('catalog-rail-0-item-0-quick-favorite').props.accessibilityState?.selected,
-    ).toBe(true);
+      await act(async () => {
+        rejectFav(new Error('sqlite-busy'));
+        await Promise.resolve();
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('hover-preview-mylist').props.accessibilityState?.selected).toBe(
+          false,
+        );
+      });
 
-    await act(async () => {
-      rejectFav(new Error('sqlite-busy'));
-      await Promise.resolve();
-    });
-    await waitFor(() => {
-      expect(
-        screen.getByTestId('catalog-rail-0-item-0-quick-favorite').props.accessibilityState
-          ?.selected,
-      ).toBe(false);
-    });
+      // Optimistic Watched toggle -> true -> rollback on rejection -> false
+      const watchedBtn = screen.getByTestId('hover-preview-watched');
+      expect(watchedBtn.props.accessibilityState?.selected).toBe(false);
+      await fireEvent.press(watchedBtn);
+      expect(screen.getByTestId('hover-preview-watched').props.accessibilityState?.selected).toBe(
+        true,
+      );
 
-    // Optimistic Watched toggle -> true -> rollback on rejection -> false
-    const watchedBtn = screen.getByTestId('catalog-rail-0-item-0-quick-watched');
-    expect(watchedBtn.props.accessibilityState?.selected).toBe(false);
-    await fireEvent.press(watchedBtn, { stopPropagation: jest.fn(), preventDefault: jest.fn() });
-    expect(
-      screen.getByTestId('catalog-rail-0-item-0-quick-watched').props.accessibilityState?.selected,
-    ).toBe(true);
+      await act(async () => {
+        rejectWatched(new Error('sqlite-busy'));
+        await Promise.resolve();
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('hover-preview-watched').props.accessibilityState?.selected).toBe(
+          false,
+        );
+      });
 
-    await act(async () => {
-      rejectWatched(new Error('sqlite-busy'));
-      await Promise.resolve();
-    });
-    await waitFor(() => {
-      expect(
-        screen.getByTestId('catalog-rail-0-item-0-quick-watched').props.accessibilityState
-          ?.selected,
-      ).toBe(false);
-    });
+      // Play button on hover preview plays movie directly without opening DetailScreen
+      await fireEvent.press(screen.getByTestId('hover-preview-play'));
+      expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({ itemKey: MOVIE_1.key }));
+      expect(onOpenDetail).not.toHaveBeenCalled();
+    } finally {
+      osReplacer.restore();
+    }
   });
 
   it('shows all-watched checkmarks without numeric unplayed counts in CatalogDiscoveryScreen rails, CategoryGridView, and DetailRelatedRail', async () => {

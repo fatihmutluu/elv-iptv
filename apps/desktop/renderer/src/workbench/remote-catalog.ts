@@ -148,6 +148,21 @@ export function createWorkbenchRemoteCatalog(
     return (data as { value: T }).value;
   }
 
+  async function rpcVoid(method: string, args: unknown[]): Promise<void> {
+    const res = await fetchImpl(`${config.baseUrl}/rpc`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ method, args: trimUndefinedArgs(args) }),
+    });
+    if (!res.ok) {
+      throw new Error(`workbench bridge ${method} failed with HTTP ${res.status}`);
+    }
+    const data: unknown = await res.json();
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      throw new Error(`workbench bridge ${method} returned invalid payload`);
+    }
+  }
+
   async function rpcResult<T>(
     method: string,
     args: unknown[],
@@ -325,6 +340,12 @@ export function createWorkbenchRemoteCatalog(
     toggleFavorite: (input) => rpcResult('toggleFavorite', [input]),
     listFavorites: (limit, profileId) => rpcQuery('listFavorites', [limit, profileId]),
     listFavoriteKeys: (profileId) => rpcQuery('listFavoriteKeys', [profileId]),
+    dismissRecommendation: (itemKey, kind, profileId) =>
+      rpcVoid('dismissRecommendation', [itemKey, kind, profileId]),
+    restoreRecommendation: (itemKey, profileId) =>
+      rpcVoid('restoreRecommendation', [itemKey, profileId]),
+    listDismissedRecommendationKeys: (profileId) =>
+      rpcQuery('listDismissedRecommendationKeys', [profileId]),
     close: async () => undefined,
   };
 }

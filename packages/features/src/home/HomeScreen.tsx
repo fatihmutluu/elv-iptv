@@ -7,7 +7,6 @@ import {
   normalizeHomeLayout,
 } from '@elv/domain';
 import {
-  type ContextMenuAnchor,
   TvFocusAnchor,
   useContextMenu,
   useI18n,
@@ -32,13 +31,7 @@ import {
   View,
 } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
-import {
-  type DetailTarget,
-  hasManagedDownload,
-  useCatalogUiCache,
-  useDownloads,
-  useRouteActive,
-} from '../shared';
+import { type DetailTarget, useCatalogUiCache, useRouteActive } from '../shared';
 import { AmbientBackdrop } from '../shared/AmbientBackdrop';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
 import { HOME_HERO_AUTO_ROTATE_MS, useHomeHeroAutoRotate } from './HomeHeroBackdrop';
@@ -49,7 +42,6 @@ import {
   HomeSectionsList,
 } from './HomeRail';
 import { computeHomeLayout, HomeEmptyState, HomeSkeleton } from './HomeSkeleton';
-import { buildHomeCardContextMenuItems, useHomeRecentChannels } from './home-context-menu';
 import { buildElvShowcaseEntries, filterOutDislikedItems } from './home-elv-helpers';
 import {
   buildHeroSlides,
@@ -63,6 +55,7 @@ import {
   resolveHomeLivePlayTarget,
 } from './home-model';
 import { useHomeData } from './useHomeData';
+import { useHomeRailContextMenu, useHomeRecentChannels } from './useHomeRailContextMenu';
 import { buildHomeNavRows, type HomeNavRowId, useTvHomeNavigation } from './useTvHomeNavigation';
 
 /** Props of {@link HomeScreen}. */
@@ -170,12 +163,12 @@ export function HomeScreen({
   const railYRef = useRef(new Map<HomeNavRowId, number>());
 
   const visibleMovies = useMemo(
-    () => filterOutDislikedItems(data.movies, data.ratingByKey),
-    [data.movies, data.ratingByKey],
+    () => filterOutDislikedItems(data.movies, data.ratingByKey, data.dismissedKeys),
+    [data.dismissedKeys, data.movies, data.ratingByKey],
   );
   const visibleSeries = useMemo(
-    () => filterOutDislikedItems(data.series, data.ratingByKey),
-    [data.series, data.ratingByKey],
+    () => filterOutDislikedItems(data.series, data.ratingByKey, data.dismissedKeys),
+    [data.dismissedKeys, data.ratingByKey, data.series],
   );
   const elvShowcaseEntries = useMemo(
     () =>
@@ -185,8 +178,16 @@ export function HomeScreen({
         t: i18n.t,
         progressByKey: data.progressByKey,
         ratingByKey: data.ratingByKey,
+        dismissedKeys: data.dismissedKeys,
       }),
-    [data.elvRecommendations, data.progressByKey, data.ratingByKey, elvPrefs, i18n],
+    [
+      data.dismissedKeys,
+      data.elvRecommendations,
+      data.progressByKey,
+      data.ratingByKey,
+      elvPrefs,
+      i18n,
+    ],
   );
 
   const heroSlides = useMemo(
@@ -356,10 +357,42 @@ export function HomeScreen({
     toggleMyList,
     toggleWatched,
     toggleRating,
+    dismissRecommendation,
     removeFromContinueWatching,
     dismissNewEpisode,
     markNewEpisodeWatched,
   } = data;
+  const handleDismissRecommendation = useCallback(
+    (entry: HomeRailEntry) => dismissRecommendation(entry),
+    [dismissRecommendation],
+  );
+  const handleHoverPlayPoster = useCallback(
+    (entry: HomeRailEntry, index: number) => {
+      if (entry.kind === 'series') {
+        const cw = data.continueWatching.find((r) => r.seriesKey === entry.itemKey);
+        if (cw) {
+          onPlay(
+            buildVodPlayTarget({
+              itemKey: cw.itemKey,
+              sourceId: cw.sourceId,
+              title: cw.title,
+              kind: 'episode',
+              logo: cw.logo ?? entry.posterUri ?? entry.backdropUri,
+              subtitle: cw.subtitle,
+              seriesKey: entry.itemKey,
+              season: cw.season,
+              episode: cw.episode,
+              positionMs: cw.positionMs,
+              watched: cw.watched,
+            }),
+          );
+          return;
+        }
+      }
+      activateEntry(entry, index);
+    },
+    [activateEntry, data.continueWatching, onPlay],
+  );
   const handleRemoveFromContinue = useCallback(
     (entry: HomeRailEntry) => void removeFromContinueWatching(entry.itemKey),
     [removeFromContinueWatching],
@@ -409,7 +442,7 @@ export function HomeScreen({
   );
   const handleQuickToggleFavorite = useCallback(
     (entry: HomeRailEntry) =>
-      void toggleMyList({
+      toggleMyList({
         sourceId: entry.sourceId,
         itemKey: entry.itemKey,
         kind: entry.kind,
@@ -422,12 +455,12 @@ export function HomeScreen({
   );
   const handleQuickToggleRating = useCallback(
     (entry: HomeRailEntry, next: RatingValue) =>
-      void toggleRating({ ...entry, logo: entry.posterUri ?? entry.backdropUri }, next),
+      toggleRating({ ...entry, logo: entry.posterUri ?? entry.backdropUri }, next),
     [toggleRating],
   );
   const handleQuickToggleWatched = useCallback(
     (entry: HomeRailEntry, currentWatched: boolean) =>
-      void toggleWatched(
+      toggleWatched(
         {
           sourceId: entry.sourceId,
           itemKey: entry.itemKey,
@@ -572,92 +605,26 @@ export function HomeScreen({
     for (const spec of buildHomeRailSpecs(i18n.t)) map.set(spec.id, spec);
     return map;
   }, [i18n]);
-  const downloads = useDownloads();
-  const openRailContextMenu = useCallback(
-    (railId: HomeRailId, entry: HomeRailEntry, index: number, anchor?: ContextMenuAnchor) => {
-      const isFavorite = data.favoriteKeys.has(entry.itemKey);
-      const isWatched =
-        data.watchedOverrides.get(entry.itemKey) ??
-        (entry.watched ||
-          (entry.kind === 'series' &&
-            data.unplayedBySeriesKey.get(entry.itemKey)?.watched === true));
-      const canDownloadMovie = downloads.supported && entry.kind === 'movie';
-      const isDownloaded =
-        canDownloadMovie && hasManagedDownload(downloads.byItemKey.get(entry.itemKey));
-      const items = buildHomeCardContextMenuItems({
-        railId,
-        entry,
-        index,
-        isFavorite,
-        isWatched,
-        isRecent: recentChannelKeys.has(entry.itemKey),
-        currentRating: data.ratingByKey.get(entry.itemKey) ?? null,
-        isDownloaded,
-        t: i18n.t,
-        onPlay: activateEntry,
-        ...(onOpenDetail !== undefined ? { onOpenDetail: handleOpenEntryDetail } : {}),
-        onRemoveFromContinue: handleRemoveFromContinue,
-        ...(catalog.removeRecentChannel !== undefined
-          ? { onRemoveFromRecent: handleRemoveFromRecent }
-          : {}),
-        onDismissNewEpisode: handleDismissNewEpisode,
-        onMarkNewEpisodeWatched: handleMarkNewEpisodeWatched,
-        onToggleFavorite: handleQuickToggleFavorite,
-        onToggleWatched: handleQuickToggleWatched,
-        onToggleRating: handleQuickToggleRating,
-        ...(onOpenMultiView !== undefined ? { onOpenMultiView: handleOpenLiveMultiView } : {}),
-        ...(onOpenPopout !== undefined ? { onOpenPopout: handleOpenLivePopout } : {}),
-        ...(canDownloadMovie
-          ? {
-              onDownload: (e: HomeRailEntry) => {
-                void downloads.enqueue({
-                  sourceId: e.sourceId,
-                  itemKey: e.itemKey,
-                  kind: 'movie',
-                  title: e.title,
-                  poster: e.posterUri ?? e.backdropUri ?? null,
-                });
-              },
-              onDeleteDownload: (e: HomeRailEntry) => {
-                void downloads.remove(e.itemKey);
-              },
-            }
-          : {}),
-      });
-      if (items.length === 0) return;
-      contextMenu.openContextMenu({
-        title: entry.title,
-        ...(entry.subtitle ? { subtitle: entry.subtitle } : {}),
-        ...(anchor !== undefined ? { anchor } : {}),
-        items,
-      });
-    },
-    [
-      activateEntry,
-      catalog.removeRecentChannel,
-      contextMenu,
-      data.favoriteKeys,
-      data.ratingByKey,
-      data.unplayedBySeriesKey,
-      data.watchedOverrides,
-      downloads,
-      handleOpenEntryDetail,
-      handleDismissNewEpisode,
-      handleMarkNewEpisodeWatched,
-      handleOpenLiveMultiView,
-      handleOpenLivePopout,
-      handleQuickToggleFavorite,
-      handleQuickToggleRating,
-      handleQuickToggleWatched,
-      handleRemoveFromContinue,
-      handleRemoveFromRecent,
-      i18n.t,
-      onOpenDetail,
-      onOpenMultiView,
-      onOpenPopout,
-      recentChannelKeys,
-    ],
-  );
+  const openRailContextMenu = useHomeRailContextMenu({
+    catalog,
+    favoriteKeys: data.favoriteKeys,
+    watchedOverrides: data.watchedOverrides,
+    unplayedBySeriesKey: data.unplayedBySeriesKey,
+    ratingByKey: data.ratingByKey,
+    recentChannelKeys,
+    onPlay: activateEntry,
+    ...(onOpenDetail !== undefined ? { onOpenDetail: handleOpenEntryDetail } : {}),
+    onRemoveFromContinue: handleRemoveFromContinue,
+    onRemoveFromRecent: handleRemoveFromRecent,
+    onDismissNewEpisode: handleDismissNewEpisode,
+    onMarkNewEpisodeWatched: handleMarkNewEpisodeWatched,
+    onToggleFavorite: handleQuickToggleFavorite,
+    onToggleWatched: handleQuickToggleWatched,
+    onToggleRating: handleQuickToggleRating,
+    onDismissRecommendation: handleDismissRecommendation,
+    ...(onOpenMultiView !== undefined ? { onOpenMultiView: handleOpenLiveMultiView } : {}),
+    ...(onOpenPopout !== undefined ? { onOpenPopout: handleOpenLivePopout } : {}),
+  });
   const focusedAmbientEntry = useMemo(() => {
     if (
       !isTv ||
@@ -755,14 +722,18 @@ export function HomeScreen({
             focusedCol={tvNav.focusedCol}
             favoriteKeys={data.favoriteKeys}
             watchedOverrides={data.watchedOverrides}
+            ratingByKey={data.ratingByKey}
             unplayedBySeriesKey={data.unplayedBySeriesKey}
             onOpenTab={onOpenTab}
             onPressWideItem={activateEntry}
             onPressPosterItem={activatePosterEntry}
+            onOpenDetail={handleOpenEntryDetail}
             onContextMenuItem={openRailContextMenu}
-            onQuickPlay={activateEntry}
+            onQuickPlay={handleHoverPlayPoster}
             onQuickToggleFavorite={handleQuickToggleFavorite}
             onQuickToggleWatched={handleQuickToggleWatched}
+            onQuickToggleRating={handleQuickToggleRating}
+            onDismissRecommendation={handleDismissRecommendation}
             onLayoutY={recordRailY}
           />
         </ScrollView>

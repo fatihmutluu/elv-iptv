@@ -87,4 +87,59 @@ describe('createObservedCatalog user-state mutation invalidation (#512)', () => 
 
     expect(syncSourcesAndBump).not.toHaveBeenCalled();
   });
+
+  it('invokes onUserStateMutated when dismissRecommendation or restoreRecommendation resolves and skips on rejection', async () => {
+    const onUserStateMutated = vi.fn();
+    const syncSourcesAndBump = vi.fn(async () => undefined);
+    const playbackGuard = createPlaybackGuard(() => undefined);
+
+    const dismissRecommendation = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('invalid kind'));
+    const restoreRecommendation = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('db failed'));
+    const listDismissedRecommendationKeys = vi.fn(async () => ['m:s1:1']);
+
+    const base = {
+      addSource: vi.fn(),
+      addSourceFromLink: vi.fn(),
+      removeSource: vi.fn(),
+      importSource: vi.fn(),
+      listSources: vi.fn(async () => []),
+      categories: vi.fn(async () => []),
+      items: vi.fn(async () => []),
+      seasons: vi.fn(async () => ok([])),
+      episodes: vi.fn(async () => []),
+      resolveStream: vi.fn(),
+      close: vi.fn(async () => undefined),
+      dismissRecommendation,
+      restoreRecommendation,
+      listDismissedRecommendationKeys,
+    } as unknown as CatalogService;
+
+    const observed = createObservedCatalog(
+      base,
+      playbackGuard,
+      syncSourcesAndBump,
+      onUserStateMutated,
+    );
+
+    await observed.dismissRecommendation?.('m:s1:1', 'movie', 'default');
+    expect(onUserStateMutated).toHaveBeenCalledTimes(1);
+    await expect(observed.dismissRecommendation?.('m:s1:2', 'invalid' as 'movie')).rejects.toThrow(
+      'invalid kind',
+    );
+    expect(onUserStateMutated).toHaveBeenCalledTimes(1);
+
+    await observed.restoreRecommendation?.('m:s1:1', 'default');
+    expect(onUserStateMutated).toHaveBeenCalledTimes(2);
+    await expect(observed.restoreRecommendation?.('m:s1:2')).rejects.toThrow('db failed');
+    expect(onUserStateMutated).toHaveBeenCalledTimes(2);
+
+    expect(await observed.listDismissedRecommendationKeys?.('default')).toEqual(['m:s1:1']);
+    expect(onUserStateMutated).toHaveBeenCalledTimes(2);
+  });
 });

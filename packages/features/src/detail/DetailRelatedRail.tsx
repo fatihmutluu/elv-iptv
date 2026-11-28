@@ -1,22 +1,9 @@
-import type { ItemRow, SeriesUnplayedSummary, WatchProgressRow } from '@elv/data';
-import {
-  HorizontalRailScroll,
-  PosterCard,
-  type PosterCardQuickActions,
-  useI18n,
-  useTheme,
-} from '@elv/ui-kit';
-import {
-  type ComponentRef,
-  memo,
-  type ReactElement,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-} from 'react';
+import type { ItemRow, RatingValue, SeriesUnplayedSummary, WatchProgressRow } from '@elv/data';
+import { HorizontalRailScroll, PosterCard, useI18n, useTheme } from '@elv/ui-kit';
+import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, useRef } from 'react';
 import { type LayoutChangeEvent, type ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatVodMeta, resolveSeriesBadgeProps } from '../shared';
+import { useItemRowPosterHoverPreview } from '../shared/PosterHoverPreviewContext';
 import { detailProgressRatio } from './detail-model';
 
 /** Props of {@link DetailRelatedRail}. */
@@ -25,6 +12,7 @@ export interface DetailRelatedRailProps {
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
   readonly favoriteKeys?: ReadonlySet<string>;
   readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
   readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly cardWidth: number;
   readonly gap: number;
@@ -33,8 +21,10 @@ export interface DetailRelatedRailProps {
   readonly focusedIndex: number | null;
   readonly onPressItem: (item: ItemRow) => void;
   readonly onQuickPlay?: (item: ItemRow) => void;
-  readonly onQuickToggleFavorite?: (item: ItemRow) => void;
-  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onQuickToggleFavorite?: (item: ItemRow) => unknown;
+  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => unknown;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => unknown;
+  readonly onDismissRecommendation?: (item: ItemRow) => unknown;
   readonly onLayoutY?: (y: number) => void;
 }
 
@@ -44,20 +34,18 @@ interface RelatedPosterItemProps {
   readonly progress: WatchProgressRow | undefined;
   readonly isFavorite: boolean;
   readonly watchedOverride: boolean | undefined;
+  readonly currentRating: RatingValue | null;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly cardWidth: number;
   readonly isTv: boolean;
   readonly focused: boolean;
   readonly watchedLabel: string;
-  readonly formatQuickPlay: (title: string) => string;
-  readonly addToListLabel: string;
-  readonly inMyListLabel: string;
-  readonly markWatchedLabel: string;
-  readonly markUnwatchedLabel: string;
   readonly onPressItem: (item: ItemRow) => void;
   readonly onQuickPlay?: (item: ItemRow) => void;
-  readonly onQuickToggleFavorite?: (item: ItemRow) => void;
-  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onQuickToggleFavorite?: (item: ItemRow) => unknown;
+  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => unknown;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => unknown;
+  readonly onDismissRecommendation?: (item: ItemRow) => unknown;
 }
 
 const RelatedPosterItem = memo(function RelatedPosterItemInner({
@@ -66,67 +54,46 @@ const RelatedPosterItem = memo(function RelatedPosterItemInner({
   progress,
   isFavorite,
   watchedOverride,
+  currentRating,
   unplayedSummary,
   cardWidth,
   isTv,
   focused,
   watchedLabel,
-  formatQuickPlay,
-  addToListLabel,
-  inMyListLabel,
-  markWatchedLabel,
-  markUnwatchedLabel,
   onPressItem,
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onQuickToggleRating,
+  onDismissRecommendation,
 }: RelatedPosterItemProps): ReactElement {
   const handlePress = useCallback(() => {
     onPressItem(item);
   }, [item, onPressItem]);
+
+  const handleHoverPlay = useCallback(() => {
+    if (onQuickPlay) onQuickPlay(item);
+    else onPressItem(item);
+  }, [item, onPressItem, onQuickPlay]);
 
   const isSeries = item.kind === 'series';
   const progressWatched = progress?.watched === true;
   const effectiveWatched =
     watchedOverride ?? (progressWatched || (isSeries && unplayedSummary?.watched === true));
 
-  const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
-    if (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched) return undefined;
-    return {
-      ...(onQuickPlay !== undefined
-        ? {
-            onPlay: () => onQuickPlay(item),
-            playLabel: formatQuickPlay(item.name),
-          }
-        : {}),
-      ...(onQuickToggleFavorite !== undefined
-        ? {
-            isFavorite,
-            onToggleFavorite: () => onQuickToggleFavorite(item),
-            favoriteLabel: isFavorite ? inMyListLabel : addToListLabel,
-          }
-        : {}),
-      ...(onQuickToggleWatched !== undefined
-        ? {
-            isWatched: effectiveWatched,
-            onToggleWatched: () => onQuickToggleWatched(item, effectiveWatched),
-            watchedLabel: effectiveWatched ? markUnwatchedLabel : markWatchedLabel,
-          }
-        : {}),
-    };
-  }, [
-    addToListLabel,
-    effectiveWatched,
-    formatQuickPlay,
-    inMyListLabel,
-    isFavorite,
+  const hoverHandlers = useItemRowPosterHoverPreview({
     item,
-    markUnwatchedLabel,
-    markWatchedLabel,
-    onQuickPlay,
-    onQuickToggleFavorite,
-    onQuickToggleWatched,
-  ]);
+    cardWidth,
+    isFavorite,
+    watched: effectiveWatched,
+    userRating: currentRating,
+    onPlay: handleHoverPlay,
+    onOpenDetail: handlePress,
+    ...(onQuickToggleFavorite !== undefined ? { onToggleFavorite: onQuickToggleFavorite } : {}),
+    ...(onQuickToggleWatched !== undefined ? { onToggleWatched: onQuickToggleWatched } : {}),
+    ...(onQuickToggleRating !== undefined ? { onToggleRating: onQuickToggleRating } : {}),
+    ...(onDismissRecommendation !== undefined ? { onDismissRecommendation } : {}),
+  });
 
   const meta = formatVodMeta(item.year, item.rating);
   const ratio =
@@ -151,7 +118,7 @@ const RelatedPosterItem = memo(function RelatedPosterItemInner({
       {...(ratio !== undefined ? { progress: ratio } : {})}
       {...(badge !== undefined ? { badge } : {})}
       {...seriesBadge}
-      {...(quickActions !== undefined ? { quickActions } : {})}
+      {...hoverHandlers}
       width={cardWidth}
       maxDecodePx={320}
       focusable={!isTv}
@@ -166,6 +133,7 @@ function DetailRelatedRailInner({
   progressByKey,
   favoriteKeys,
   watchedOverrides,
+  ratingByKey,
   unplayedBySeriesKey,
   cardWidth,
   gap,
@@ -176,6 +144,8 @@ function DetailRelatedRailInner({
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
+  onQuickToggleRating,
+  onDismissRecommendation,
   onLayoutY,
 }: DetailRelatedRailProps): ReactElement | null {
   const theme = useTheme();
@@ -195,18 +165,9 @@ function DetailRelatedRailInner({
     [onLayoutY],
   );
 
-  const formatQuickPlay = useCallback(
-    (title: string) => i18n.t('card.quickPlay', { title }),
-    [i18n],
-  );
-
   if (items.length === 0) return null;
 
   const watchedLabel = i18n.t('home.watchedBadge');
-  const addToListLabel = i18n.t('home.addToList');
-  const inMyListLabel = i18n.t('home.inMyList');
-  const markWatchedLabel = i18n.t('home.markWatched');
-  const markUnwatchedLabel = i18n.t('home.markUnwatched');
 
   return (
     <View
@@ -247,20 +208,18 @@ function DetailRelatedRailInner({
             progress={progressByKey.get(item.key)}
             isFavorite={favoriteKeys?.has(item.key) ?? false}
             watchedOverride={watchedOverrides?.get(item.key)}
+            currentRating={ratingByKey?.get(item.key) ?? null}
             unplayedSummary={unplayedBySeriesKey?.get(item.key)}
             cardWidth={cardWidth}
             isTv={isTv}
             focused={isTv && focusedIndex === index}
             watchedLabel={watchedLabel}
-            formatQuickPlay={formatQuickPlay}
-            addToListLabel={addToListLabel}
-            inMyListLabel={inMyListLabel}
-            markWatchedLabel={markWatchedLabel}
-            markUnwatchedLabel={markUnwatchedLabel}
             onPressItem={onPressItem}
             {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
             {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
             {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
+            {...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {})}
+            {...(onDismissRecommendation !== undefined ? { onDismissRecommendation } : {})}
           />
         ))}
       </HorizontalRailScroll>

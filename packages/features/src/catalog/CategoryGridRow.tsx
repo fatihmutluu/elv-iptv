@@ -9,7 +9,6 @@ import {
   type ContextMenuAnchor,
   Icon,
   PosterCard,
-  type PosterCardQuickActions,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
   useContextMenu,
@@ -18,7 +17,7 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { memo, type ReactElement, useCallback, useMemo } from 'react';
+import { memo, type ReactElement, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   type CatalogLayoutMetrics,
@@ -29,6 +28,7 @@ import {
   resolveSeriesBadgeProps,
   useDownloads,
 } from '../shared';
+import { useItemRowPosterHoverPreview } from '../shared/PosterHoverPreviewContext';
 import { buildCatalogPosterContextMenuItems } from './catalog-context-menu';
 import { computeProgressRatio } from './catalog-model';
 
@@ -42,11 +42,6 @@ interface GridPosterSlotProps {
   readonly currentRating: RatingValue | null;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly watchedLabel: string;
-  readonly formatQuickPlay: (title: string) => string;
-  readonly addToListLabel: string;
-  readonly inMyListLabel: string;
-  readonly markWatchedLabel: string;
-  readonly markUnwatchedLabel: string;
   readonly cardWidth: number;
   readonly posterHeight: number;
   readonly isTv: boolean;
@@ -56,6 +51,7 @@ interface GridPosterSlotProps {
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
+  readonly onDismissRecommendation?: (item: ItemRow) => void;
 }
 
 const GridPosterSlot = memo(function GridPosterSlotInner({
@@ -68,11 +64,6 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
   currentRating,
   unplayedSummary,
   watchedLabel,
-  formatQuickPlay,
-  addToListLabel,
-  inMyListLabel,
-  markWatchedLabel,
-  markUnwatchedLabel,
   cardWidth,
   posterHeight,
   isTv,
@@ -82,6 +73,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
   onQuickToggleFavorite,
   onQuickToggleWatched,
   onQuickToggleRating,
+  onDismissRecommendation,
 }: GridPosterSlotProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -118,6 +110,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
           ...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {}),
           ...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {}),
           ...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {}),
+          ...(onDismissRecommendation !== undefined ? { onDismissRecommendation } : {}),
           ...(canDownloadMovie
             ? {
                 onDownload: (it: ItemRow) => {
@@ -145,6 +138,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
       i18n,
       isFavorite,
       item,
+      onDismissRecommendation,
       onOpenDetail,
       onQuickPlay,
       onQuickToggleFavorite,
@@ -154,46 +148,26 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
     ],
   );
 
-  const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
-    if (!item || (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched)) {
-      return undefined;
-    }
-    return {
-      ...(onQuickPlay !== undefined
-        ? {
-            onPlay: () => onQuickPlay(item, categoryId),
-            playLabel: formatQuickPlay(item.name),
-          }
-        : {}),
-      ...(onQuickToggleFavorite !== undefined
-        ? {
-            isFavorite,
-            onToggleFavorite: () => onQuickToggleFavorite(item),
-            favoriteLabel: isFavorite ? inMyListLabel : addToListLabel,
-          }
-        : {}),
-      ...(onQuickToggleWatched !== undefined
-        ? {
-            isWatched: effectiveWatched,
-            onToggleWatched: () => onQuickToggleWatched(item, effectiveWatched),
-            watchedLabel: effectiveWatched ? markUnwatchedLabel : markWatchedLabel,
-          }
-        : {}),
-    };
-  }, [
-    addToListLabel,
-    categoryId,
-    effectiveWatched,
-    formatQuickPlay,
-    inMyListLabel,
-    isFavorite,
+  const handleHoverPlay = useCallback(() => {
+    if (!item) return;
+    if (onQuickPlay) onQuickPlay(item, categoryId);
+    else handlePress();
+  }, [categoryId, handlePress, item, onQuickPlay]);
+
+  const hoverHandlers = useItemRowPosterHoverPreview({
     item,
-    markUnwatchedLabel,
-    markWatchedLabel,
-    onQuickPlay,
-    onQuickToggleFavorite,
-    onQuickToggleWatched,
-  ]);
+    categoryId,
+    cardWidth,
+    isFavorite,
+    watched: effectiveWatched,
+    userRating: currentRating,
+    onPlay: handleHoverPlay,
+    onOpenDetail: handlePress,
+    ...(onQuickToggleFavorite !== undefined ? { onToggleFavorite: onQuickToggleFavorite } : {}),
+    ...(onQuickToggleWatched !== undefined ? { onToggleWatched: onQuickToggleWatched } : {}),
+    ...(onQuickToggleRating !== undefined ? { onToggleRating: onQuickToggleRating } : {}),
+    ...(onDismissRecommendation !== undefined ? { onDismissRecommendation } : {}),
+  });
 
   if (!item) {
     return (
@@ -233,7 +207,7 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
       {...(ratio !== undefined ? { progress: ratio } : {})}
       {...(badge !== undefined ? { badge } : {})}
       {...seriesBadge}
-      {...(quickActions !== undefined ? { quickActions } : {})}
+      {...hoverHandlers}
       width={cardWidth}
       maxDecodePx={320}
       focusable={!isTv}
@@ -263,6 +237,7 @@ export interface GridRowViewProps {
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
+  readonly onDismissRecommendation?: (item: ItemRow) => void;
 }
 
 /**
@@ -287,17 +262,9 @@ export const GridRowView = memo(function GridRowViewInner({
   onQuickToggleFavorite,
   onQuickToggleWatched,
   onQuickToggleRating,
+  onDismissRecommendation,
 }: GridRowViewProps): ReactElement {
-  const i18n = useI18n();
   const posterHeight = Math.round(layout.gridCardWidth * 1.5);
-  const formatQuickPlay = useCallback(
-    (title: string) => i18n.t('card.quickPlay', { title }),
-    [i18n],
-  );
-  const addToListLabel = i18n.t('home.addToList');
-  const inMyListLabel = i18n.t('home.inMyList');
-  const markWatchedLabel = i18n.t('home.markWatched');
-  const markUnwatchedLabel = i18n.t('home.markUnwatched');
 
   return (
     <View
@@ -326,11 +293,6 @@ export const GridRowView = memo(function GridRowViewInner({
             currentRating={item ? (ratingByKey?.get(item.key) ?? null) : null}
             unplayedSummary={item ? unplayedBySeriesKey?.get(item.key) : undefined}
             watchedLabel={watchedLabel}
-            formatQuickPlay={formatQuickPlay}
-            addToListLabel={addToListLabel}
-            inMyListLabel={inMyListLabel}
-            markWatchedLabel={markWatchedLabel}
-            markUnwatchedLabel={markUnwatchedLabel}
             cardWidth={layout.gridCardWidth}
             posterHeight={posterHeight}
             isTv={layout.isTv}
@@ -340,6 +302,7 @@ export const GridRowView = memo(function GridRowViewInner({
             {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
             {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
             {...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {})}
+            {...(onDismissRecommendation !== undefined ? { onDismissRecommendation } : {})}
           />
         );
       })}

@@ -8,7 +8,6 @@ import type {
   RatingValue,
   SeriesUnplayedSummary,
   SourceRow,
-  UserItemKind,
   WatchProgressRow,
 } from '@elv/data';
 import { DEFAULT_ELV_MODE_PREFERENCES, type ElvModePreferences } from '@elv/domain';
@@ -19,6 +18,7 @@ import {
   type HydratedVodCollection,
   mergeHydratedCollections,
   useCatalogUiCache,
+  useDismissedRecommendationsState,
   useProfile,
   useSeriesUnplayedCounts,
 } from '../shared';
@@ -29,10 +29,14 @@ import {
   applyHomeRemoveNewEpisode,
   applyHomeRestoreNewEpisode,
   applyHomeWatchedUpdate,
+  buildHomeFavoriteRow,
+  buildHomeWatchedProgressRow,
   collectUnifiedLiveKeys,
   EMPTY_HOME_SNAPSHOT,
   fetchHomeKindCategory,
   fetchHydratedCollections,
+  type HomeToggleMyListTarget,
+  type HomeToggleWatchedTarget,
   mergeOptimisticHomeSnapshot,
   releaseInFlightKey,
 } from './home-data-helpers';
@@ -58,26 +62,6 @@ export interface UseHomeDataOptions {
   readonly elvPreferences?: ElvModePreferences;
 }
 
-interface ToggleMyListTarget {
-  readonly sourceId: string;
-  readonly itemKey: string;
-  readonly kind: UserItemKind;
-  readonly title: string;
-  readonly logo?: string | null;
-  readonly year?: number | null;
-  readonly rating?: number | null;
-}
-
-interface ToggleWatchedTarget {
-  readonly sourceId: string;
-  readonly itemKey: string;
-  readonly kind: UserItemKind;
-  readonly title: string;
-  readonly subtitle?: string | null;
-  readonly logo?: string | null;
-  readonly durationMs?: number;
-}
-
 type HomeSnapshot = CachedHomeSnapshot;
 
 /** Bounded Home dataset and live optimistic user-state mutations returned by {@link useHomeData}. */
@@ -90,9 +74,16 @@ export interface HomeDataState extends HomeSnapshot {
   readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
   readonly ratingByKey: ReadonlyMap<string, RatingValue>;
-  readonly toggleMyList: (target: ToggleMyListTarget) => Promise<void>;
-  readonly toggleWatched: (target: ToggleWatchedTarget, nextWatched: boolean) => Promise<void>;
+  readonly dismissedKeys: ReadonlySet<string>;
+  readonly toggleMyList: (target: HomeToggleMyListTarget) => Promise<boolean>;
+  readonly toggleWatched: (
+    target: HomeToggleWatchedTarget,
+    nextWatched: boolean,
+  ) => Promise<boolean>;
   readonly toggleRating: (target: RatingToggleTarget, next: RatingValue) => Promise<boolean>;
+  readonly dismissRecommendation: (
+    target: Pick<HomeRailEntry, 'itemKey' | 'kind'>,
+  ) => Promise<boolean>;
   readonly removeFromContinueWatching: (itemKey: string) => Promise<void>;
   readonly dismissNewEpisode: (episodeKey: string) => Promise<void>;
   readonly markNewEpisodeWatched: (entry: HomeRailEntry) => Promise<void>;
@@ -396,7 +387,7 @@ export function useHomeData({
   );
 
   const toggleMyList = useCallback(
-    async (target: ToggleMyListTarget): Promise<void> => {
+    async (target: HomeToggleMyListTarget): Promise<boolean> => {
       const key = target.itemKey;
       const gen = (favGenByKeyRef.current.get(key) ?? 0) + 1;
       favGenByKeyRef.current.set(key, gen);
@@ -410,17 +401,7 @@ export function useHomeData({
       favInFlightRef.current.set(key, activeInFlight + 1);
 
       const nextFav = !snapRef.current.favoriteKeys.has(key);
-      const addedRow: FavoriteRow = {
-        profileId: activeProfileIdRef.current,
-        sourceId: target.sourceId,
-        itemKey: key,
-        kind: target.kind,
-        title: target.title,
-        logo: target.logo ?? null,
-        year: target.year ?? null,
-        rating: target.rating ?? null,
-        addedAt: Date.now(),
-      };
+      const addedRow = buildHomeFavoriteRow(activeProfileIdRef.current, target, Date.now());
       applyFavState(key, nextFav, addedRow);
       const favInput = {
         sourceId: target.sourceId,
@@ -434,28 +415,33 @@ export function useHomeData({
       if (!catalog.setFavorite && !catalog.toggleFavorite) {
         committedFavRef.current.set(key, { inList: nextFav, row: nextFav ? addedRow : undefined });
         releaseInFlightKey(favInFlightRef.current, key);
-        return;
+        return true;
       }
       try {
         const res = catalog.setFavorite
           ? await catalog.setFavorite(favInput, nextFav)
           : await catalog.toggleFavorite?.(favInput);
-        if (!mountedRef.current || !res) return;
+        if (!res) return false;
+        if (!mountedRef.current) return res.ok;
         if (res.ok) {
           committedFavRef.current.set(key, {
             inList: res.value,
             row: res.value ? addedRow : undefined,
           });
           setElvRecsTick((t) => t + 1);
-        } else if (favGenByKeyRef.current.get(key) === gen) {
+          return true;
+        }
+        if (favGenByKeyRef.current.get(key) === gen) {
           const base = committedFavRef.current.get(key);
           applyFavState(key, base?.inList ?? false, base?.row);
         }
+        return false;
       } catch {
         if (mountedRef.current && favGenByKeyRef.current.get(key) === gen) {
           const base = committedFavRef.current.get(key);
           applyFavState(key, base?.inList ?? false, base?.row);
         }
+        return false;
       } finally {
         releaseInFlightKey(favInFlightRef.current, key);
       }
@@ -493,7 +479,7 @@ export function useHomeData({
   }, []);
 
   const toggleWatched = useCallback(
-    async (target: ToggleWatchedTarget, nextWatched: boolean): Promise<void> => {
+    async (target: HomeToggleWatchedTarget, nextWatched: boolean): Promise<boolean> => {
       const key = target.itemKey;
       const gen = (watchedGenByKeyRef.current.get(key) ?? 0) + 1;
       watchedGenByKeyRef.current.set(key, gen);
@@ -511,29 +497,13 @@ export function useHomeData({
       watchedInFlightRef.current.set(key, activeInFlight + 1);
 
       const durationMs = target.durationMs ?? 0;
-      const nextRow: WatchProgressRow = existing
-        ? {
-            ...existing,
-            watched: nextWatched,
-            positionMs: nextWatched ? existing.positionMs : 0,
-            updatedAt: Date.now(),
-          }
-        : {
-            profileId: activeProfileIdRef.current,
-            sourceId: target.sourceId,
-            itemKey: key,
-            kind: target.kind,
-            title: target.title,
-            subtitle: target.subtitle ?? null,
-            logo: target.logo ?? null,
-            seriesKey: null,
-            season: null,
-            episode: null,
-            positionMs: nextWatched ? durationMs : 0,
-            durationMs,
-            watched: nextWatched,
-            updatedAt: Date.now(),
-          };
+      const nextRow = buildHomeWatchedProgressRow(
+        activeProfileIdRef.current,
+        target,
+        existing,
+        nextWatched,
+        Date.now(),
+      );
       applyWatchedState(key, nextRow, undefined);
       setWatchedOverrideForKey(key, nextWatched);
 
@@ -545,7 +515,7 @@ export function useHomeData({
           override: nextWatched,
         });
         releaseInFlightKey(watchedInFlightRef.current, key);
-        return;
+        return true;
       }
       try {
         const res = useSave
@@ -561,7 +531,8 @@ export function useHomeData({
               watched: true,
             })
           : await catalog.setWatched?.(key, nextWatched);
-        if (!mountedRef.current || !res) return;
+        if (!res) return false;
+        if (!mountedRef.current) return res.ok;
         if (res.ok) {
           committedWatchedRef.current.set(key, {
             row: nextRow,
@@ -570,17 +541,21 @@ export function useHomeData({
           });
           if (target.kind === 'series') setUnplayedTick((t) => t + 1);
           setElvRecsTick((t) => t + 1);
-        } else if (watchedGenByKeyRef.current.get(key) === gen) {
+          return true;
+        }
+        if (watchedGenByKeyRef.current.get(key) === gen) {
           const base = committedWatchedRef.current.get(key);
           applyWatchedState(key, base?.row, base?.cwRow);
           setWatchedOverrideForKey(key, base?.override);
         }
+        return false;
       } catch {
         if (mountedRef.current && watchedGenByKeyRef.current.get(key) === gen) {
           const base = committedWatchedRef.current.get(key);
           applyWatchedState(key, base?.row, base?.cwRow);
           setWatchedOverrideForKey(key, base?.override);
         }
+        return false;
       } finally {
         releaseInFlightKey(watchedInFlightRef.current, key);
       }
@@ -750,6 +725,25 @@ export function useHomeData({
     },
     [rawToggleRating],
   );
+  const { dismissedKeys, dismissRecommendation: rawDismissRecommendation } =
+    useDismissedRecommendationsState({
+      catalog,
+      refreshToken,
+      userStateVersion,
+      profileKey: activeProfileId,
+    });
+  const dismissRecommendation = useCallback(
+    async (target: Pick<HomeRailEntry, 'itemKey' | 'kind'>): Promise<boolean> => {
+      if (target.kind !== 'movie' && target.kind !== 'series') return false;
+      const ok = await rawDismissRecommendation({ key: target.itemKey, kind: target.kind });
+      if (ok) {
+        uiCacheRef.current?.clearHome?.();
+        setElvRecsTick((t) => t + 1);
+      }
+      return ok;
+    },
+    [rawDismissRecommendation],
+  );
 
   return useMemo<HomeDataState>(
     () => ({
@@ -762,16 +756,20 @@ export function useHomeData({
       unplayedBySeriesKey,
       watchedOverrides,
       ratingByKey,
+      dismissedKeys,
       toggleMyList,
       toggleWatched,
       toggleRating,
+      dismissRecommendation,
       removeFromContinueWatching,
       dismissNewEpisode,
       markNewEpisodeWatched,
     }),
     [
       collections,
+      dismissedKeys,
       dismissNewEpisode,
+      dismissRecommendation,
       elvRecommendations,
       hasLoaded,
       loading,

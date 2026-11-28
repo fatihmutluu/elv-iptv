@@ -565,6 +565,14 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     removeRecentChannel: async (itemKey, profileId) =>
       (await open()).removeRecentChannel?.(itemKey, profileId) ?? false,
     clearRecentChannels: async (profileId) => (await open()).clearRecentChannels?.(profileId) ?? 0,
+    dismissRecommendation: async (itemKey, kind, profileId) => {
+      await (await open()).dismissRecommendation?.(itemKey, kind, profileId);
+    },
+    restoreRecommendation: async (itemKey, profileId) => {
+      await (await open()).restoreRecommendation?.(itemKey, profileId);
+    },
+    listDismissedRecommendationKeys: async (profileId) =>
+      (await open()).listDismissedRecommendationKeys?.(profileId) ?? [],
     listLiveFavoriteFolders: async (profileId, opts) =>
       (await open()).listLiveFavoriteFolders?.(profileId, opts) ?? [],
     createLiveFavoriteFolder: (input) =>

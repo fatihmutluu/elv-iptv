@@ -6,10 +6,33 @@ import type {
   ItemRow,
   MyListNewEpisodeRow,
   SourceRow,
+  UserItemKind,
   WatchProgressRow,
 } from '@elv/data';
 import type { CachedHomeSnapshot, HydratedVodCollection } from '../shared';
 import { HOME_LIVE_RAIL_LIMIT } from './home-model';
+
+/** Target payload for optimistic `My List` toggles on Home. */
+export interface HomeToggleMyListTarget {
+  readonly sourceId: string;
+  readonly itemKey: string;
+  readonly kind: UserItemKind;
+  readonly title: string;
+  readonly logo?: string | null;
+  readonly year?: number | null;
+  readonly rating?: number | null;
+}
+
+/** Target payload for optimistic watched-status toggles on Home. */
+export interface HomeToggleWatchedTarget {
+  readonly sourceId: string;
+  readonly itemKey: string;
+  readonly kind: UserItemKind;
+  readonly title: string;
+  readonly subtitle?: string | null;
+  readonly logo?: string | null;
+  readonly durationMs?: number;
+}
 
 const HOME_FAVORITES_LIMIT = 250;
 const HOME_COLLECTIONS_LIMIT = 20;
@@ -184,6 +207,60 @@ export function applyHomeFavUpdate(
     ? currentNewEpisodes
     : currentNewEpisodes.filter((ep) => ep.seriesKey !== itemKey);
   return { ...prev, favoriteKeys: nextKeys, favorites: nextFavs, newEpisodes: nextNewEpisodes };
+}
+
+/** Builds a `FavoriteRow` for optimistic Home My List toggles. */
+export function buildHomeFavoriteRow(
+  profileId: string,
+  target: HomeToggleMyListTarget,
+  nowMs: number,
+): FavoriteRow {
+  return {
+    profileId,
+    sourceId: target.sourceId,
+    itemKey: target.itemKey,
+    kind: target.kind,
+    title: target.title,
+    logo: target.logo ?? null,
+    year: target.year ?? null,
+    rating: target.rating ?? null,
+    addedAt: nowMs,
+  };
+}
+
+/** Builds a `WatchProgressRow` for optimistic Home watched toggles. */
+export function buildHomeWatchedProgressRow(
+  profileId: string,
+  target: HomeToggleWatchedTarget,
+  existing: WatchProgressRow | undefined,
+  nextWatched: boolean,
+  nowMs: number,
+): WatchProgressRow {
+  const durationMs = target.durationMs ?? 0;
+  if (existing) {
+    return {
+      ...existing,
+      watched: nextWatched,
+      positionMs: nextWatched ? existing.positionMs : 0,
+      updatedAt: nowMs,
+    };
+  }
+  return {
+    profileId,
+    sourceId: target.sourceId,
+    itemKey: target.itemKey,
+    kind: target.kind,
+    title: target.title,
+    subtitle: target.subtitle ?? null,
+    logo: target.logo ?? null,
+    seriesKey: null,
+    season: null,
+    episode: null,
+    positionMs: nextWatched ? durationMs : 0,
+    durationMs,
+    watched: nextWatched,
+    updatedAt: nowMs,
+  };
 }
 
 /** Applies an optimistic Watched update to a {@link CachedHomeSnapshot}. */

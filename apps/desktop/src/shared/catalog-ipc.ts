@@ -153,6 +153,11 @@ import {
   isWaveP7OpsRpcCall,
 } from './catalog-ipc-wave-p7-guards.ts';
 import { type CatalogWaveP9OpsRpcCall, isWaveP9OpsRpcCall } from './catalog-ipc-wave-p9-guards.ts';
+import {
+  type CatalogBridgeWaveR3Ops,
+  type CatalogWaveR3OpsRpcCall,
+  isWaveR3OpsRpcCall,
+} from './catalog-ipc-wave-r3-guards.ts';
 
 /** IPC channels used to establish and fence a renderer's catalog `MessagePort`. */
 export const CATALOG_CHANNELS = Object.freeze({
@@ -322,7 +327,8 @@ export type CatalogRpcMethodCall =
   | CatalogWaveF5bOpsRpcCall
   | CatalogWaveP7OpsRpcCall
   | CatalogWaveP9OpsRpcCall
-  | CatalogWaveQ7OpsRpcCall;
+  | CatalogWaveQ7OpsRpcCall
+  | CatalogWaveR3OpsRpcCall;
 
 /** Preload to utility process over `MessagePort`. */
 export type CatalogClientMessage =
@@ -359,7 +365,8 @@ export interface CatalogBridge
     CatalogBridgeWaveE2Ops,
     CatalogBridgeWaveF5bOps,
     CatalogBridgeWaveP7Ops,
-    CatalogBridgeWaveQ7Ops {
+    CatalogBridgeWaveQ7Ops,
+    CatalogBridgeWaveR3Ops {
   open(): Promise<Result<void>>;
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
@@ -737,7 +744,8 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isWaveF5bOpsRpcCall(x) ||
         isWaveP7OpsRpcCall(x) ||
         isWaveP9OpsRpcCall(x) ||
-        isWaveQ7OpsRpcCall(x)
+        isWaveQ7OpsRpcCall(x) ||
+        isWaveR3OpsRpcCall(x)
       );
   }
 }

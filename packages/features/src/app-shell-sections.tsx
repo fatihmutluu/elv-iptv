@@ -57,6 +57,7 @@ import { ProfilesAndParentalPanel } from './profiles';
 import { SearchScreen } from './search';
 import { SettingsScreen, type SettingsSection } from './settings';
 import { type DetailTarget, DownloadsProvider, isElvFeatureActive, useDownloads } from './shared';
+import { PosterHoverPreviewProvider } from './shared/PosterHoverPreviewContext';
 import {
   type BrowseFocusMemory,
   BrowseFocusMemoryProvider,
@@ -612,13 +613,18 @@ export function AppShellExitToast({ visible }: { readonly visible: boolean }): R
   );
 }
 
-/** Composes the shell-level reactive providers (`RouteActive`, UI cache, focus memory, downloads). */
+/** Composes the shell-level reactive providers (`RouteActive`, UI cache, focus memory, downloads, hover preview). */
 export function AppShellContextProviders({
   routeActive,
   uiCache,
   focusMemory,
   downloadManager,
   catalog,
+  catalogRevision = 0,
+  elvEnrichActive = false,
+  hoverPreviewDisabled = false,
+  hoverPreviewDismissKey,
+  onHoverPreviewUserStateMutated,
   profileId,
   children,
 }: {
@@ -627,6 +633,11 @@ export function AppShellContextProviders({
   readonly focusMemory: BrowseFocusMemory;
   readonly downloadManager?: DownloadManagerPort;
   readonly catalog: CatalogService;
+  readonly catalogRevision?: number;
+  readonly elvEnrichActive?: boolean;
+  readonly hoverPreviewDisabled?: boolean;
+  readonly hoverPreviewDismissKey?: string | number;
+  readonly onHoverPreviewUserStateMutated?: () => void;
   readonly profileId: string;
   readonly children: ReactNode;
 }): ReactElement {
@@ -639,7 +650,20 @@ export function AppShellContextProviders({
             catalog={catalog}
             profileId={profileId}
           >
-            {children}
+            <PosterHoverPreviewProvider
+              catalog={catalog}
+              catalogRevision={catalogRevision}
+              elvEnrichActive={elvEnrichActive}
+              disabled={hoverPreviewDisabled}
+              {...(hoverPreviewDismissKey !== undefined
+                ? { dismissKey: hoverPreviewDismissKey }
+                : {})}
+              {...(onHoverPreviewUserStateMutated !== undefined
+                ? { onUserStateMutated: onHoverPreviewUserStateMutated }
+                : {})}
+            >
+              {children}
+            </PosterHoverPreviewProvider>
           </DownloadsProvider>
         </BrowseFocusMemoryProvider>
       </CatalogUiCacheProvider>

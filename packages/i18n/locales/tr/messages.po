@@ -4939,3 +4939,18 @@ msgstr "Önizleme sesini kapat"
 
 msgid "detail.trailer.unmute"
 msgstr "Önizleme sesini aç"
+
+msgid "card.dontRecommend"
+msgstr "Bir daha önerme"
+
+msgid "card.dontRecommendDone"
+msgstr "Önerilerden gizlendi"
+
+msgid "card.hoverPlay"
+msgstr "Oynat"
+
+msgid "card.hoverTrailer"
+msgstr "Fragman"
+
+msgid "card.hoverUnavailable"
+msgstr "Fragman yok"

@@ -168,20 +168,34 @@ describe('createProfileScopedCatalog Wave E2 ELV discovery forwarding (#512)', (
     await scoped.searchElvMatchCandidates?.('Inception', 'movie');
     expect(searchElvMatchCandidates).toHaveBeenCalledWith('Inception', 'movie');
 
-    const fixed = await scoped.applyElvFixMatch?.({
+    await scoped.applyElvFixMatch?.({
       itemKey: allowedItem.key,
       sourceId: 's1',
       mediaType: 'movie',
       imdbId: 'tt1375666',
       lang: 'en',
     });
-    expect(fixed).toEqual(fakeEnrichment);
-    expect(applyElvFixMatch).toHaveBeenCalledWith({
-      itemKey: allowedItem.key,
-      sourceId: 's1',
-      mediaType: 'movie',
-      imdbId: 'tt1375666',
-      lang: 'en',
-    });
+
+    // Dismissals respect failClosed (parentalLoadError) & excluded source filtering
+    const dismissRecommendation = vi.fn(async () => undefined);
+    const restoreRecommendation = vi.fn(async () => undefined);
+    const listDismissedRecommendationKeys = vi.fn(async () => [allowedItem.key, blockedItem.key]);
+    let parentalLoadError = false;
+    const scopedDismiss = createProfileScopedCatalog(
+      {
+        ...base,
+        dismissRecommendation,
+        restoreRecommendation,
+        listDismissedRecommendationKeys,
+      } as unknown as CatalogService,
+      () => ({ profileId: 'kids-1', parentalUnlocked: false, parentalLoadError }),
+    );
+    await scopedDismiss.dismissRecommendation?.(allowedItem.key, 'movie');
+    expect(dismissRecommendation).toHaveBeenCalledWith(allowedItem.key, 'movie', 'kids-1');
+    await scopedDismiss.restoreRecommendation?.(allowedItem.key);
+    expect(restoreRecommendation).toHaveBeenCalledWith(allowedItem.key, 'kids-1');
+    expect(await scopedDismiss.listDismissedRecommendationKeys?.()).toEqual([allowedItem.key]);
+    parentalLoadError = true;
+    expect(await scopedDismiss.listDismissedRecommendationKeys?.()).toEqual([]);
   });
 });

@@ -57,8 +57,10 @@ interface DetailListHeaderProps {
 /** Props of {@link DetailListFooterSlot}. */
 interface DetailListFooterProps {
   readonly data: DetailDataState;
+  readonly relatedItems?: readonly ItemRow[];
   readonly favoriteKeys: ReadonlySet<string>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
+  readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
   readonly cardWidth: number;
   readonly gap: number;
   readonly padX: number;
@@ -66,8 +68,10 @@ interface DetailListFooterProps {
   readonly focusedIndex: number | null;
   readonly onPressItem: (item: ItemRow) => void;
   readonly onQuickPlay: (item: ItemRow) => void;
-  readonly onQuickToggleFavorite: (item: ItemRow) => void;
-  readonly onQuickToggleWatched: (item: ItemRow, currentWatched: boolean) => void;
+  readonly onQuickToggleFavorite: (item: ItemRow) => unknown;
+  readonly onQuickToggleWatched: (item: ItemRow, currentWatched: boolean) => unknown;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => unknown;
+  readonly onDismissRecommendation?: (item: ItemRow) => unknown;
 }
 
 /** Combined slot props supplied to the `FlatList` header/footer via context. */
@@ -246,10 +250,11 @@ export function DetailListFooterSlot(): ReactElement | null {
   const f = slots.footer;
   return (
     <DetailRelatedRail
-      items={f.data.related}
+      items={f.relatedItems ?? f.data.related}
       progressByKey={f.data.relatedProgressByKey}
       favoriteKeys={f.favoriteKeys}
       watchedOverrides={f.watchedOverrides}
+      {...(f.ratingByKey !== undefined ? { ratingByKey: f.ratingByKey } : {})}
       unplayedBySeriesKey={f.data.relatedUnplayedBySeriesKey}
       cardWidth={f.cardWidth}
       gap={f.gap}
@@ -260,6 +265,12 @@ export function DetailListFooterSlot(): ReactElement | null {
       onQuickPlay={f.onQuickPlay}
       onQuickToggleFavorite={f.onQuickToggleFavorite}
       onQuickToggleWatched={f.onQuickToggleWatched}
+      {...(f.onQuickToggleRating !== undefined
+        ? { onQuickToggleRating: f.onQuickToggleRating }
+        : {})}
+      {...(f.onDismissRecommendation !== undefined
+        ? { onDismissRecommendation: f.onDismissRecommendation }
+        : {})}
     />
   );
 }

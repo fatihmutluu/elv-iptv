@@ -7,14 +7,7 @@ import type {
   WatchProgressRow,
 } from '@elv/data';
 import { DEFAULT_ELV_MODE_PREFERENCES, type ElvModePreferences } from '@elv/domain';
-import {
-  type ContextMenuAnchor,
-  PosterCard,
-  type PosterCardQuickActions,
-  useContextMenu,
-  useI18n,
-  useTheme,
-} from '@elv/ui-kit';
+import { type ContextMenuAnchor, PosterCard, useContextMenu, useI18n, useTheme } from '@elv/ui-kit';
 import {
   type ComponentRef,
   type MutableRefObject,
@@ -37,6 +30,7 @@ import {
   resolveSeriesBadgeProps,
   useDownloads,
 } from '../shared';
+import { useItemRowPosterHoverPreview } from '../shared/PosterHoverPreviewContext';
 import { CatalogEmptyState } from './CatalogChrome';
 import type { CategoryGridAccess, CategoryGridMeta } from './CategoryGridView';
 import { buildCatalogPosterContextMenuItems } from './catalog-context-menu';
@@ -65,6 +59,7 @@ export interface CatalogQuickFilterGridProps {
   readonly favoriteKeys: ReadonlySet<string>;
   readonly watchedOverrides: ReadonlyMap<string, boolean>;
   readonly ratingByKey?: ReadonlyMap<string, RatingValue>;
+  readonly dismissedKeys?: ReadonlySet<string>;
   readonly focusedGridPos?: GridFocusPosition | null;
   readonly onGridMetaChange?: (meta: CategoryGridMeta) => void;
   readonly gridAccessRef?: MutableRefObject<CategoryGridAccess>;
@@ -73,6 +68,7 @@ export interface CatalogQuickFilterGridProps {
   readonly onQuickToggleFavorite?: (item: ItemRow) => unknown;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => unknown;
   readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => unknown;
+  readonly onDismissRecommendation?: (item: ItemRow) => unknown;
 }
 
 interface QuickFilterPosterItemProps {
@@ -85,19 +81,16 @@ interface QuickFilterPosterItemProps {
   readonly currentRating: RatingValue | null;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly watchedLabel: string;
-  readonly formatQuickPlay: (title: string) => string;
-  readonly addToListLabel: string;
-  readonly inMyListLabel: string;
-  readonly markWatchedLabel: string;
-  readonly markUnwatchedLabel: string;
   readonly cardWidth: number;
   readonly isTv: boolean;
   readonly focused: boolean;
+  readonly showContextDismiss: boolean;
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
-  readonly onQuickToggleFavorite?: (item: ItemRow) => void;
-  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
-  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
+  readonly onQuickToggleFavorite?: (item: ItemRow) => unknown;
+  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => unknown;
+  readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => unknown;
+  readonly onDismissRecommendation?: (item: ItemRow) => unknown;
 }
 
 const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
@@ -110,19 +103,16 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
   currentRating,
   unplayedSummary,
   watchedLabel,
-  formatQuickPlay,
-  addToListLabel,
-  inMyListLabel,
-  markWatchedLabel,
-  markUnwatchedLabel,
   cardWidth,
   isTv,
   focused,
+  showContextDismiss,
   onOpenDetail,
   onQuickPlay,
   onQuickToggleFavorite,
   onQuickToggleWatched,
   onQuickToggleRating,
+  onDismissRecommendation,
 }: QuickFilterPosterItemProps): ReactElement {
   const i18n = useI18n();
   const { openContextMenu } = useContextMenu();
@@ -156,6 +146,9 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
           ...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {}),
           ...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {}),
           ...(onQuickToggleRating !== undefined ? { onQuickToggleRating } : {}),
+          ...(showContextDismiss && onDismissRecommendation !== undefined
+            ? { onDismissRecommendation }
+            : {}),
           ...(canDownloadMovie
             ? {
                 onDownload: (it: ItemRow) => {
@@ -182,52 +175,38 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
       i18n,
       isFavorite,
       item,
+      onDismissRecommendation,
       onOpenDetail,
       onQuickPlay,
       onQuickToggleFavorite,
       onQuickToggleRating,
       onQuickToggleWatched,
       openContextMenu,
+      showContextDismiss,
     ],
   );
 
-  const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
-    if (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched) return undefined;
-    return {
-      ...(onQuickPlay !== undefined
-        ? {
-            onPlay: () => onQuickPlay(item, ''),
-            playLabel: formatQuickPlay(item.name),
-          }
-        : {}),
-      ...(onQuickToggleFavorite !== undefined
-        ? {
-            isFavorite,
-            onToggleFavorite: () => onQuickToggleFavorite(item),
-            favoriteLabel: isFavorite ? inMyListLabel : addToListLabel,
-          }
-        : {}),
-      ...(onQuickToggleWatched !== undefined
-        ? {
-            isWatched: effectiveWatched,
-            onToggleWatched: () => onQuickToggleWatched(item, effectiveWatched),
-            watchedLabel: effectiveWatched ? markUnwatchedLabel : markWatchedLabel,
-          }
-        : {}),
-    };
-  }, [
-    addToListLabel,
-    effectiveWatched,
-    formatQuickPlay,
-    inMyListLabel,
-    isFavorite,
+  const handleHoverPlay = useCallback(() => {
+    if (onQuickPlay) onQuickPlay(item, '');
+    else handlePress();
+  }, [handlePress, item, onQuickPlay]);
+
+  const hoverHandlers = useItemRowPosterHoverPreview({
     item,
-    markUnwatchedLabel,
-    markWatchedLabel,
-    onQuickPlay,
-    onQuickToggleFavorite,
-    onQuickToggleWatched,
-  ]);
+    cardWidth,
+    isFavorite,
+    watched: effectiveWatched,
+    userRating: currentRating,
+    allowDismissRecommendation: showContextDismiss,
+    onPlay: handleHoverPlay,
+    onOpenDetail: handlePress,
+    ...(onQuickToggleFavorite !== undefined ? { onToggleFavorite: onQuickToggleFavorite } : {}),
+    ...(onQuickToggleWatched !== undefined ? { onToggleWatched: onQuickToggleWatched } : {}),
+    ...(onQuickToggleRating !== undefined ? { onToggleRating: onQuickToggleRating } : {}),
+    ...(showContextDismiss && onDismissRecommendation !== undefined
+      ? { onDismissRecommendation }
+      : {}),
+  });
 
   const meta = formatVodMeta(item.year, item.rating);
   const ratio = !effectiveWatched ? computeProgressRatio(progress) : undefined;
@@ -249,7 +228,7 @@ const QuickFilterPosterItem = memo(function QuickFilterPosterItemInner({
       {...(ratio !== undefined ? { progress: ratio } : {})}
       {...(badge !== undefined ? { badge } : {})}
       {...seriesBadge}
-      {...(quickActions !== undefined ? { quickActions } : {})}
+      {...hoverHandlers}
       width={cardWidth}
       maxDecodePx={320}
       focusable={!isTv}
@@ -279,6 +258,7 @@ export function CatalogQuickFilterGrid({
   favoriteKeys,
   watchedOverrides,
   ratingByKey,
+  dismissedKeys,
   focusedGridPos = null,
   onGridMetaChange,
   gridAccessRef,
@@ -287,6 +267,7 @@ export function CatalogQuickFilterGrid({
   onQuickToggleFavorite,
   onQuickToggleWatched,
   onQuickToggleRating,
+  onDismissRecommendation,
 }: CatalogQuickFilterGridProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -319,6 +300,7 @@ export function CatalogQuickFilterGrid({
     userStateVersion,
     localRefreshTick: picksRefreshTick,
     elvPrefs,
+    ...(dismissedKeys !== undefined ? { dismissedKeys } : {}),
     i18n,
   });
 
@@ -380,7 +362,7 @@ export function CatalogQuickFilterGrid({
   }, [filter]);
 
   const handleToggleFavorite = useCallback(
-    (item: ItemRow) => {
+    (item: ItemRow): Promise<boolean> => {
       if (filter === 'mylist') {
         setOptimisticRemovedFavKeys((prev) => {
           const next = new Set(prev);
@@ -391,63 +373,94 @@ export function CatalogQuickFilterGrid({
       try {
         const result = onQuickToggleFavorite?.(item);
         if (result !== undefined && typeof (result as PromiseLike<unknown>).then === 'function') {
-          void Promise.resolve(result)
-            .then((ok) => {
-              if (!mountedRef.current) return;
-              if (filter === 'mylist' && ok === false) restoreRemovedFavKey(item.key);
-              if (filter === 'elvPicks' && ok !== false) bumpPicksIfActive();
-            })
-            .catch(() => {
+          return Promise.resolve(result).then(
+            (ok) => {
+              if (mountedRef.current) {
+                if (filter === 'mylist' && ok === false) restoreRemovedFavKey(item.key);
+                if (filter === 'elvPicks' && ok !== false) bumpPicksIfActive();
+              }
+              return ok !== false;
+            },
+            () => {
               if (mountedRef.current && filter === 'mylist') restoreRemovedFavKey(item.key);
-            });
-        } else {
-          bumpPicksIfActive();
+              return false;
+            },
+          );
         }
+        bumpPicksIfActive();
+        return Promise.resolve(true);
       } catch {
         if (filter === 'mylist') restoreRemovedFavKey(item.key);
+        return Promise.resolve(false);
       }
     },
     [bumpPicksIfActive, filter, onQuickToggleFavorite, restoreRemovedFavKey],
   );
 
   const handleToggleWatched = useCallback(
-    (item: ItemRow, currentWatched: boolean) => {
+    (item: ItemRow, currentWatched: boolean): Promise<boolean> => {
       try {
         const result = onQuickToggleWatched?.(item, currentWatched);
         if (result !== undefined && typeof (result as PromiseLike<unknown>).then === 'function') {
-          void Promise.resolve(result)
-            .then((ok) => {
+          return Promise.resolve(result).then(
+            (ok) => {
               if (mountedRef.current && ok !== false) bumpPicksIfActive();
-            })
-            .catch(() => undefined);
-        } else {
-          bumpPicksIfActive();
+              return ok !== false;
+            },
+            () => false,
+          );
         }
+        bumpPicksIfActive();
+        return Promise.resolve(true);
       } catch {
-        // Ignore synchronous callback errors; keep current picks intact.
+        return Promise.resolve(false);
       }
     },
     [bumpPicksIfActive, onQuickToggleWatched],
   );
 
   const handleToggleRating = useCallback(
-    (item: ItemRow, next: RatingValue) => {
+    (item: ItemRow, next: RatingValue): Promise<boolean> => {
       try {
         const result = onQuickToggleRating?.(item, next);
         if (result !== undefined && typeof (result as PromiseLike<unknown>).then === 'function') {
-          void Promise.resolve(result)
-            .then((ok) => {
+          return Promise.resolve(result).then(
+            (ok) => {
               if (mountedRef.current && ok !== false) bumpPicksIfActive();
-            })
-            .catch(() => undefined);
-        } else {
-          bumpPicksIfActive();
+              return ok !== false;
+            },
+            () => false,
+          );
         }
+        bumpPicksIfActive();
+        return Promise.resolve(true);
       } catch {
-        // Ignore synchronous callback errors; keep current picks intact.
+        return Promise.resolve(false);
       }
     },
     [bumpPicksIfActive, onQuickToggleRating],
+  );
+
+  const handleDismissRecommendation = useCallback(
+    (item: ItemRow): Promise<boolean> => {
+      try {
+        const result = onDismissRecommendation?.(item);
+        if (result !== undefined && typeof (result as PromiseLike<unknown>).then === 'function') {
+          return Promise.resolve(result).then(
+            (ok) => {
+              if (mountedRef.current && ok !== false) bumpPicksIfActive();
+              return ok !== false;
+            },
+            () => false,
+          );
+        }
+        bumpPicksIfActive();
+        return Promise.resolve(true);
+      } catch {
+        return Promise.resolve(false);
+      }
+    },
+    [bumpPicksIfActive, onDismissRecommendation],
   );
 
   const reasonByKey = useMemo<ReadonlyMap<string, string>>(() => {
@@ -488,11 +501,6 @@ export function CatalogQuickFilterGrid({
       ? focusedGridPos.row * layout.gridColumns + focusedGridPos.col
       : -1;
 
-  const formatQuickPlay = useCallback(
-    (title: string) => i18n.t('card.quickPlay', { title }),
-    [i18n],
-  );
-
   const isSettled = filter === 'mylist' ? favoriteLoaded : elvPicksData.loaded;
   if (isSettled && items.length === 0) {
     return (
@@ -510,10 +518,6 @@ export function CatalogQuickFilterGrid({
   }
 
   const watchedLabel = i18n.t('home.watchedBadge');
-  const addToListLabel = i18n.t('home.addToList');
-  const inMyListLabel = i18n.t('home.inMyList');
-  const markWatchedLabel = i18n.t('home.markWatched');
-  const markUnwatchedLabel = i18n.t('home.markUnwatched');
 
   return (
     <ScrollView
@@ -544,14 +548,10 @@ export function CatalogQuickFilterGrid({
             currentRating={ratingByKey?.get(item.key) ?? null}
             unplayedSummary={unplayedBySeriesKey?.get(item.key)}
             watchedLabel={watchedLabel}
-            formatQuickPlay={formatQuickPlay}
-            addToListLabel={addToListLabel}
-            inMyListLabel={inMyListLabel}
-            markWatchedLabel={markWatchedLabel}
-            markUnwatchedLabel={markUnwatchedLabel}
             cardWidth={layout.gridCardWidth}
             isTv={layout.isTv}
             focused={index === focusedIndex}
+            showContextDismiss={filter === 'elvPicks'}
             onOpenDetail={onOpenDetail}
             {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
             {...(onQuickToggleFavorite !== undefined
@@ -562,6 +562,9 @@ export function CatalogQuickFilterGrid({
               : {})}
             {...(onQuickToggleRating !== undefined
               ? { onQuickToggleRating: handleToggleRating }
+              : {})}
+            {...(filter === 'elvPicks' && onDismissRecommendation !== undefined
+              ? { onDismissRecommendation: handleDismissRecommendation }
               : {})}
           />
         );

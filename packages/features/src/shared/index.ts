@@ -85,6 +85,7 @@ export {
   createPagedListSource,
   type PagedListSource,
 } from './paged-list-source';
+export { translateHoverCardWithFn } from './poster-hover-preview-model';
 export {
   createProfileScopedCatalog,
   filterSourcesForProfile,
@@ -101,7 +102,10 @@ export {
   useChannelHealthStatus,
   useStreamHealth,
 } from './stream-health-context';
-export { useCardQuickActionsState } from './useCardQuickActionsState';
+export {
+  useCardQuickActionsState,
+  useDismissedRecommendationsState,
+} from './useCardQuickActionsState';
 export { useElvBackgroundMatcher, useElvEnrichmentForKeys } from './useElvModeEnrichment';
 export {
   RouteActiveProvider,

@@ -27,6 +27,7 @@ export interface UseElvPicksDataOptions {
   readonly userStateVersion: number;
   readonly localRefreshTick: number;
   readonly elvPrefs: ElvModePreferences;
+  readonly dismissedKeys?: ReadonlySet<string>;
   readonly i18n: AppI18n;
 }
 
@@ -50,6 +51,7 @@ export function useElvPicksData({
   userStateVersion,
   localRefreshTick,
   elvPrefs,
+  dismissedKeys,
   i18n,
 }: UseElvPicksDataOptions): ElvPicksDataState {
   const { activeProfileId } = useProfile();
@@ -112,11 +114,16 @@ export function useElvPicksData({
 
   const picks = useMemo<readonly PresentedElvPick[]>(() => {
     if (!enabled || rawPicks.length === 0) return [];
-    return rawPicks.map((entry) => ({
-      item: applyElvCardPresentation(entry.item, entry.enrichment, elvPrefs, i18n.locale),
-      reasonLabel: formatElvRecommendationReason(entry.reason, i18n.t),
-    }));
-  }, [elvPrefs, enabled, i18n, rawPicks]);
+    const out: PresentedElvPick[] = [];
+    for (const entry of rawPicks) {
+      if (dismissedKeys?.has(entry.item.key)) continue;
+      out.push({
+        item: applyElvCardPresentation(entry.item, entry.enrichment, elvPrefs, i18n.locale),
+        reasonLabel: formatElvRecommendationReason(entry.reason, i18n.t),
+      });
+    }
+    return out;
+  }, [dismissedKeys, elvPrefs, enabled, i18n, rawPicks]);
 
   return useMemo<ElvPicksDataState>(
     () => ({ picks, loaded, progressByKey }),

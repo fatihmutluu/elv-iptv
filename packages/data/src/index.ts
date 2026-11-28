@@ -97,6 +97,15 @@ export {
   recordRecentChannel,
   removeRecentChannel,
 } from './recent-channels-repo';
+export {
+  type CatalogRecommendationDismissalsOpsMethods,
+  dismissRecommendation,
+  listDismissedRecommendationKeys,
+  MAX_RECOMMENDATION_DISMISSAL_KEY_CHARS,
+  MAX_RECOMMENDATION_DISMISSAL_KEYS,
+  type RecommendationDismissalKind,
+  restoreRecommendation,
+} from './recommendation-dismissals-repo';
 export * from './reminders-repo';
 export {
   latestImportHealth,

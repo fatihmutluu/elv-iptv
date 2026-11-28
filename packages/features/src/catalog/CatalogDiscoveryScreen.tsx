@@ -181,10 +181,33 @@ export function CatalogDiscoveryScreen({
         });
         return;
       }
+      if (item.kind === 'series' && onPlay) {
+        const cw = discovery.continueItems.find((row) => row.seriesKey === item.key);
+        if (cw) {
+          onPlay({
+            itemKey: cw.itemKey,
+            sourceId: cw.sourceId,
+            title: cw.title,
+            kind: 'vod',
+            itemKind: 'episode',
+            startPositionMs: cw.positionMs,
+            ...(cw.logo !== null
+              ? { logo: cw.logo }
+              : item.logo !== null
+                ? { logo: item.logo }
+                : {}),
+            ...(cw.subtitle !== null ? { subtitle: cw.subtitle } : {}),
+            seriesKey: item.key,
+            ...(cw.season !== null ? { season: cw.season } : {}),
+            ...(cw.episode !== null ? { episode: cw.episode } : {}),
+          });
+          return;
+        }
+      }
       const target = detailTargetFromItem(item, categoryId);
       if (target) onOpenDetail(target);
     },
-    [onOpenDetail, onPlay],
+    [discovery.continueItems, onOpenDetail, onPlay],
   );
   const handleQuickToggleFavorite = useCallback(
     async (item: ItemRow): Promise<boolean> => {
@@ -209,6 +232,13 @@ export function CatalogDiscoveryScreen({
       return ok;
     },
     [quickActionsState.toggleRating, uiCache],
+  );
+  const handleQuickDismissRecommendation = useCallback(
+    async (item: ItemRow): Promise<void> => {
+      await quickActionsState.dismissRecommendation(item);
+      uiCache?.clearHome?.();
+    },
+    [quickActionsState.dismissRecommendation, uiCache],
   );
   const handleResumeContinue = useCallback(
     (row: WatchProgressRow) => {
@@ -361,16 +391,20 @@ export function CatalogDiscoveryScreen({
   });
 
   const presentedRailItemsByCategoryId = useMemo<ReadonlyMap<string, readonly ItemRow[]>>(() => {
-    if (!elvNeedsEnrichment) {
+    const dismissed = quickActionsState.dismissedKeys;
+    if (!elvNeedsEnrichment && dismissed.size === 0) {
       return discovery.railItemsByCategoryId;
     }
     const next = new Map<string, readonly ItemRow[]>();
     for (const [catId, rows] of discovery.railItemsByCategoryId) {
+      const visible = dismissed.size > 0 ? rows.filter((item) => !dismissed.has(item.key)) : rows;
       next.set(
         catId,
-        presentElvCatalogItems(rows, elvEnrichment.enrichmentByKey, elvPrefs, i18n.locale, {
-          isKeyLookupPending: elvEnrichment.isKeyLookupPending,
-        }),
+        elvNeedsEnrichment
+          ? presentElvCatalogItems(visible, elvEnrichment.enrichmentByKey, elvPrefs, i18n.locale, {
+              isKeyLookupPending: elvEnrichment.isKeyLookupPending,
+            })
+          : visible,
       );
     }
     return next;
@@ -381,6 +415,7 @@ export function CatalogDiscoveryScreen({
     elvNeedsEnrichment,
     elvPrefs,
     i18n.locale,
+    quickActionsState.dismissedKeys,
   ]);
 
   const railEntries = useMemo<CatalogRailNavEntry[]>(() => {
@@ -671,6 +706,7 @@ export function CatalogDiscoveryScreen({
               onQuickToggleFavorite={handleQuickToggleFavorite}
               onQuickToggleWatched={handleQuickToggleWatched}
               onQuickToggleRating={handleQuickToggleRating}
+              onDismissRecommendation={handleQuickDismissRecommendation}
               onGridMetaChange={setGridMeta}
               gridAccessRef={gridAccessRef}
             />
@@ -689,6 +725,7 @@ export function CatalogDiscoveryScreen({
               favoriteKeys={quickActionsState.favoriteKeys}
               watchedOverrides={quickActionsState.watchedOverrides}
               ratingByKey={quickActionsState.ratingByKey}
+              dismissedKeys={quickActionsState.dismissedKeys}
               focusedGridPos={tvNav.focusedGridPos}
               onGridMetaChange={setGridMeta}
               gridAccessRef={gridAccessRef}
@@ -697,6 +734,7 @@ export function CatalogDiscoveryScreen({
               onQuickToggleFavorite={handleQuickToggleFavorite}
               onQuickToggleWatched={handleQuickToggleWatched}
               onQuickToggleRating={handleQuickToggleRating}
+              onDismissRecommendation={handleQuickDismissRecommendation}
             />
           ) : (
             <CatalogRailsBody
@@ -724,6 +762,7 @@ export function CatalogDiscoveryScreen({
               onQuickToggleFavorite={handleQuickToggleFavorite}
               onQuickToggleWatched={handleQuickToggleWatched}
               onQuickToggleRating={handleQuickToggleRating}
+              onDismissRecommendation={handleQuickDismissRecommendation}
               onSeeAll={handleSelectCategory}
               onLoadMore={discovery.loadMoreCategories}
               onLayoutContinueY={recordContinueY}

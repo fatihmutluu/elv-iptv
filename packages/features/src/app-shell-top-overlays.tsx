@@ -21,6 +21,7 @@ import { useTvHomeChannelsSync } from './app-shell-tv-channels';
 import { AppShellRootOverlays, type useAppShellWaveF7b } from './app-shell-wave-f7b';
 import type { WaveF9Controller } from './app-shell-wave-f9';
 import type { AppShellDesktopErgonomics } from './app-shell-wave-q7';
+import { DetailTrailerModal } from './detail';
 import type { LiveTabMemory } from './live';
 import type { LanPairingPort } from './ports/lan-pairing-host';
 import type { PlayDeepLinkTarget } from './ports/play-deep-link';
@@ -30,10 +31,12 @@ import type { SourceImportHost } from './ports/source-import-host';
 import type { TrailerExternalPort } from './ports/trailer-port';
 import type { TvHomeChannelsPort } from './ports/tv-home-channels';
 import type { DesktopUpdaterPort } from './ports/updater-port';
+import type { VideoHost } from './ports/video-host';
 import { ProfileAvatarBadge } from './profiles';
 import type { useOledScreensaver } from './screensaver';
 import { SearchPopupOverlay } from './search';
 import type { DetailTarget, ProfileContextValue } from './shared';
+import { PosterHoverPreviewHost } from './shared/PosterHoverPreviewHost';
 import {
   type NavDestination,
   type NavUtility,
@@ -350,10 +353,13 @@ function AppShellTopOverlays(props: {
 /** Combined root & top-bar overlay stack rendered inside `AppShell` outside the stage `<AdaptiveNavShell>`. */
 export function AppShellAllOverlays(props: {
   readonly isBrowsing: boolean;
+  readonly hasRootOverlay?: boolean;
   readonly exitToastVisible: boolean;
   readonly topOverlays: ShellTopOverlaysState;
   readonly profile: ProfileContextValue;
   readonly catalog: CatalogService;
+  readonly videoHost?: VideoHost;
+  readonly trailerExternal?: TrailerExternalPort;
   readonly effectiveRefreshToken: number;
   readonly effectiveUserStateVersion: number;
   readonly searchQuery: string;
@@ -374,6 +380,14 @@ export function AppShellAllOverlays(props: {
 }): ReactElement {
   return (
     <>
+      <PosterHoverPreviewHost
+        {...(props.videoHost !== undefined ? { videoHost: props.videoHost } : {})}
+        {...(props.trailerExternal !== undefined ? { trailerExternal: props.trailerExternal } : {})}
+        suppressed={!props.isBrowsing || props.hasRootOverlay === true}
+        onPlay={props.onPlay}
+        onOpenDetail={props.onOpenDetail}
+        renderTrailerModal={(modalProps) => <DetailTrailerModal {...modalProps} />}
+      />
       <AppShellTopOverlays
         isBrowsing={props.isBrowsing}
         topOverlays={props.topOverlays}

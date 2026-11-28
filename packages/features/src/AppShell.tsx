@@ -602,6 +602,11 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
       focusMemory={focusMemory}
       {...(props.downloadManager !== undefined ? { downloadManager: props.downloadManager } : {})}
       catalog={observedCatalog}
+      catalogRevision={catalogRevision}
+      elvEnrichActive={isElvFeatureActive(preferences.preferences, 'elvEnrichMetadata')}
+      hoverPreviewDisabled={!isBrowsing || hasRootOverlay || isTv}
+      hoverPreviewDismissKey={`${activeTab}:${activeDetail?.itemKey ?? ''}:${contentIsolationKey}:${playTarget?.itemKey ?? ''}`}
+      onHoverPreviewUserStateMutated={handleFavoritesMutated}
       profileId={profile.activeProfileId}
     >
       <View style={styles.root} onTouchStart={oledScreensaver.recordActivity}>
@@ -718,10 +723,15 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
         />
         <AppShellAllOverlays
           isBrowsing={isBrowsing}
+          hasRootOverlay={hasRootOverlay}
           exitToastVisible={exitToastVisible}
           topOverlays={topOverlays}
           profile={profile}
           catalog={observedCatalog}
+          videoHost={videoHost}
+          {...(props.trailerExternal !== undefined
+            ? { trailerExternal: props.trailerExternal }
+            : {})}
           effectiveRefreshToken={effectiveRefreshToken}
           effectiveUserStateVersion={effectiveUserStateVersion}
           searchQuery={searchQuery}

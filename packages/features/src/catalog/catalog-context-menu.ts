@@ -1,7 +1,7 @@
 import type { ItemRow, RatingValue, WatchProgressRow } from '@elv/data';
 import type { ContextMenuItem } from '@elv/ui-kit';
 import type { DetailTarget } from '../shared';
-import { detailTargetFromItem } from '../shared';
+import { detailTargetFromItem, translateHoverCardWithFn } from '../shared';
 import { detailTargetFromProgress } from './catalog-model';
 
 /** Minimal translation signature required by catalog context-menu builders. */
@@ -23,6 +23,7 @@ export interface BuildCatalogPosterContextMenuInput {
   readonly onQuickToggleFavorite?: (item: ItemRow) => void;
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onQuickToggleRating?: (item: ItemRow, next: RatingValue) => void;
+  readonly onDismissRecommendation?: (item: ItemRow) => void;
   readonly onDownload?: (item: ItemRow) => void;
   readonly onDeleteDownload?: (item: ItemRow) => void;
 }
@@ -41,6 +42,7 @@ export function buildCatalogPosterContextMenuItems({
   onQuickToggleFavorite,
   onQuickToggleWatched,
   onQuickToggleRating,
+  onDismissRecommendation,
   onDownload,
   onDeleteDownload,
 }: BuildCatalogPosterContextMenuInput): ContextMenuItem[] {
@@ -128,6 +130,16 @@ export function buildCatalogPosterContextMenuItems({
         onSelect: () => onDownload(item),
       });
     }
+  }
+
+  if (onDismissRecommendation && (item.kind === 'movie' || item.kind === 'series')) {
+    items.push({
+      id: 'dontRecommend',
+      label: translateHoverCardWithFn(i18n.t, 'card.dontRecommend'),
+      icon: 'ban',
+      testID: 'context-menu-dont-recommend',
+      onSelect: () => onDismissRecommendation(item),
+    });
   }
 
   return items;
