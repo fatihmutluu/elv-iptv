@@ -9,6 +9,7 @@ import {
   VAULT_SCHEMA_VERSION,
   type VaultSnapshot,
 } from './vault-merge';
+import { validateAndUpgradeVaultSnapshot } from './vault-validate';
 
 describe('vault-merge and episode bitfields', () => {
   it('encodes, decodes, and unions watched-episode bitfields compactly', () => {
@@ -504,5 +505,92 @@ describe('vault-merge and episode bitfields', () => {
     expect(lr.profiles?.find((p) => p.id === 'kids')?.name).toBe('Junior');
     expect(lr.profiles?.find((p) => p.id === 'kids')?.parentalMaxRating).toBe('G');
     expect(lr.profiles?.find((p) => p.id === 'default')?.pinHash).toBe('v1:salt123:digest123');
+  });
+
+  it('merges liveFavoriteFolders with LWW and tombstone semantics while staying backwards compatible (Wave Q7-B)', () => {
+    const legacy = createEmptyVaultSnapshot(100);
+    expect(legacy.liveFavoriteFolders).toBeUndefined();
+
+    const local: VaultSnapshot = {
+      ...createEmptyVaultSnapshot(500),
+      liveFavoriteFolders: [
+        {
+          id: 'lff_sports',
+          name: 'Sports',
+          channelKeys: ['x:s1:live:1', 'x:s2:live:10'],
+          sortOrder: 0,
+          updatedAt: 300,
+        },
+        {
+          id: 'lff_news',
+          name: 'News',
+          channelKeys: ['x:s1:live:2'],
+          sortOrder: 1,
+          updatedAt: 400,
+        },
+      ],
+    };
+    const remote: VaultSnapshot = {
+      ...createEmptyVaultSnapshot(600),
+      liveFavoriteFolders: [
+        {
+          id: 'lff_sports',
+          name: 'Live Sports',
+          channelKeys: ['x:s2:live:10'],
+          sortOrder: 0,
+          updatedAt: 550,
+        },
+        {
+          id: 'lff_news',
+          name: 'News',
+          channelKeys: [],
+          sortOrder: 1,
+          updatedAt: 580,
+          deleted: true,
+        },
+        {
+          id: 'lff_kids',
+          name: 'Cartoons',
+          channelKeys: ['x:s1:live:9'],
+          sortOrder: 0,
+          profileId: 'kids',
+          updatedAt: 520,
+        },
+      ],
+    };
+
+    const lr = mergeVaultSnapshots(local, remote);
+    const rl = mergeVaultSnapshots(remote, local);
+    expect(lr).toEqual(rl);
+    expect(lr.liveFavoriteFolders).toHaveLength(3);
+    expect(lr.liveFavoriteFolders?.find((f) => f.id === 'lff_sports')).toMatchObject({
+      name: 'Live Sports',
+      channelKeys: ['x:s2:live:10'],
+      updatedAt: 550,
+    });
+    expect(lr.liveFavoriteFolders?.find((f) => f.id === 'lff_news')?.deleted).toBe(true);
+    expect(lr.liveFavoriteFolders?.find((f) => f.id === 'lff_kids')?.profileId).toBe('kids');
+
+    // Backwards-compatible merge with legacy snapshot (undefined liveFavoriteFolders)
+    expect(mergeVaultSnapshots(legacy, remote).liveFavoriteFolders).toEqual(
+      [...(remote.liveFavoriteFolders ?? [])].sort((a, b) => a.id.localeCompare(b.id)),
+    );
+
+    // Validator accepts valid liveFavoriteFolders and rejects malformed payloads
+    expect(validateAndUpgradeVaultSnapshot(lr).liveFavoriteFolders).toEqual(lr.liveFavoriteFolders);
+    expect(() =>
+      validateAndUpgradeVaultSnapshot({
+        ...createEmptyVaultSnapshot(100),
+        liveFavoriteFolders: [{ id: '', name: 'Bad', channelKeys: [], sortOrder: 0, updatedAt: 1 }],
+      }),
+    ).toThrow('Invalid vault snapshot structure');
+    expect(() =>
+      validateAndUpgradeVaultSnapshot({
+        ...createEmptyVaultSnapshot(100),
+        liveFavoriteFolders: [
+          { id: 'f1', name: 'Bad', channelKeys: [123], sortOrder: 0, updatedAt: 1 },
+        ],
+      }),
+    ).toThrow('Invalid vault snapshot structure');
   });
 });

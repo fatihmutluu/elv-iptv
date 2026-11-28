@@ -11,17 +11,8 @@ import { StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { VideoHost } from '../ports/video-host';
-import {
-  computeCatalogLayout,
-  useCatalogUiCache,
-  useKeymap,
-  useProfile,
-  useStreamHealth,
-} from '../shared';
-import { ChannelManagementOverlay } from './ChannelManagementOverlay';
-import { buildCatchupPlayTarget } from './catchup-reminder-model';
+import { computeCatalogLayout, useKeymap, useStreamHealth } from '../shared';
 import { EpgGridView } from './EpgGridView';
-import { EpgProgrammeDetailModal } from './EpgProgrammeDetailModal';
 import { LiveChannelsGrid } from './LiveChannelsGrid';
 import {
   LiveCategoryBar,
@@ -32,15 +23,19 @@ import {
   LiveNumberPad,
   LiveTvKeyBridge,
 } from './LiveChrome';
-import { LiveContextMenu } from './LiveContextMenu';
+import type { LiveFavoriteFolderModalMode } from './LiveFavoriteFolderModal';
+import { buildLiveFavoriteFolderSlots, LiveFavoriteFolderStrip } from './LiveFavoriteFolderStrip';
 import { LivePreviewBanner } from './LivePreviewBanner';
+import { LiveScreenOverlays } from './LiveScreenOverlays';
 import type { LiveSplitOverlayKind } from './LiveSplitPlayerControls';
 import { LiveWatchStage } from './LiveWatchStage';
 import type { LiveMode, LiveTabMemory } from './live-model';
 import { buildSourceBadgeMap } from './source-badge';
 import { useLiveCatalog } from './useLiveCatalog';
+import { useLiveFavoriteFolders } from './useLiveFavoriteFolders';
 import { useLiveLastChannelKey } from './useLiveLastChannelKey';
 import { useLiveNumpadOverlay } from './useLiveNumberJump';
+import { useLiveScreenActions } from './useLiveScreenActions';
 import { useLiveTwoStepPreview } from './useLiveTwoStepPreview';
 import {
   type LiveWatchControl,
@@ -116,16 +111,16 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
-  const uiCache = useCatalogUiCache();
   const keymap = useKeymap();
-  const profile = useProfile();
   const { idleProbeController } = useStreamHealth();
   useEffect(() => () => idleProbeController.abortAll('navigation'), [idleProbeController]);
   const layout = useMemo(() => computeCatalogLayout(viewport, theme), [theme, viewport]);
   const tabMem = useLiveTabMemory(memory, onMemoryChange, defaultLiveMode);
   const { memory: activeMemory, memoryRef, updateMemory } = tabMem;
   const [guideRefreshTick, setGuideRefreshTick] = useState(0);
+  const [localFavoritesTick, setLocalFavoritesTick] = useState(0);
   const [channelManagerOpen, setChannelManagerOpen] = useState(false);
+  const [folderModal, setFolderModal] = useState<LiveFavoriteFolderModalMode | null>(null);
   const [splitOverlay, setSplitOverlay] = useState<LiveSplitOverlayKind>(null);
   const [contextMenu, setContextMenu] = useState<{
     readonly channel: ItemRow;
@@ -173,7 +168,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     catalog,
     sources: readySources,
     refreshToken: refreshToken + guideRefreshTick,
-    userStateVersion,
+    userStateVersion: userStateVersion + localFavoritesTick,
     ...(onFavoritesMutated !== undefined ? { onFavoritesMutated } : {}),
     mode,
     selectedCategoryId: activeMemory.categoryId,
@@ -186,17 +181,47 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     ...(clockFn !== undefined ? { now: clockFn } : {}),
   });
 
+  const handleFolderFavoritesMutated = useCallback(() => {
+    setLocalFavoritesTick((n) => n + 1);
+    onFavoritesMutated?.();
+  }, [onFavoritesMutated]);
+
+  const favFolders = useLiveFavoriteFolders({
+    catalog,
+    favoriteChannels: live.favoriteChannels,
+    refreshToken: refreshToken + guideRefreshTick,
+    userStateVersion: userStateVersion + localFavoritesTick,
+    hasReadySources: readySources.length > 0,
+    onFavoritesMutated: handleFolderFavoritesMutated,
+  });
+
+  const stageFavoriteChannels = favFolders.supported
+    ? favFolders.filteredFavoriteChannels
+    : live.favoriteChannels;
+  const stageFavoriteSource = favFolders.supported
+    ? favFolders.filteredFavoriteSource
+    : live.favoriteSource;
+  const stageFavoritesVersion = favFolders.supported
+    ? live.favoritesVersion + favFolders.filteredVersion
+    : live.favoritesVersion;
+
   const numpad = useLiveNumpadOverlay(live);
   numpadResolvedRef.current = numpad.notifyChannelResolved;
 
   const activeFavoriteIdx = useMemo(() => {
-    if (live.favoriteChannels.length === 0) return -1;
+    if (stageFavoriteChannels.length === 0) return -1;
     const key = live.activeChannel?.key ?? activeMemory.activeChannelKey;
-    const found = key ? live.favoriteChannels.findIndex((c) => c.key === key) : -1;
+    const found = key ? stageFavoriteChannels.findIndex((c) => c.key === key) : -1;
     return Math.max(found, 0);
-  }, [activeMemory.activeChannelKey, live.activeChannel?.key, live.favoriteChannels]);
+  }, [activeMemory.activeChannelKey, live.activeChannel?.key, stageFavoriteChannels]);
   const activeFavoriteChannel =
-    activeFavoriteIdx >= 0 ? (live.favoriteChannels[activeFavoriteIdx] ?? null) : null;
+    activeFavoriteIdx >= 0
+      ? (stageFavoriteChannels[activeFavoriteIdx] ?? null)
+      : live.favoriteChannels.length > 0
+        ? (live.favoriteChannels.find((c) => c.key === live.activeChannel?.key) ??
+          live.favoriteChannels[0] ??
+          null)
+        : null;
 
   const {
     preview,
@@ -255,6 +280,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
       setSplitOverlay(null);
       setContextMenu(null);
       setDetailModal(null);
+      setFolderModal(null);
       updateMemory({ mode: nextMode });
     },
     [clearTwoStepPreview, idleProbeController, numpad.close, updateMemory],
@@ -273,51 +299,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     },
     [],
   );
-  const handleWatchCatchup = useCallback(
-    (channel: ItemRow, index: number, programme: ProgrammeRow, hasArchive?: boolean) => {
-      const liveTarget = live.buildPlayTarget(
-        channel,
-        index,
-        mode === 'favorites' ? 'favorites' : 'category',
-      );
-      const target = buildCatchupPlayTarget({
-        channel,
-        programme,
-        liveTarget,
-        ...(hasArchive !== undefined ? { hasArchive } : {}),
-      });
-      releasePreviewAndDispatch(() => onPlay(target));
-    },
-    [live, mode, onPlay, releasePreviewAndDispatch],
-  );
   const previousChannel = live.previousChannel;
-  const handleJumpPreviousChannel = useCallback(() => {
-    if (mode === 'favorites' || previousChannel === null) return;
-    let idx = 0;
-    const src = live.channelSource;
-    if (src !== null) {
-      const n = src.count();
-      for (let i = 0; i < n; i++) {
-        if (src.get(i)?.key === previousChannel.key) {
-          idx = i;
-          break;
-        }
-      }
-    }
-    handleWatchAndPlay(previousChannel, idx);
-  }, [handleWatchAndPlay, live.channelSource, mode, previousChannel]);
-
-  useLiveLastChannelKey({
-    enabled:
-      mode !== 'favorites' &&
-      previousChannel !== null &&
-      contextMenu === null &&
-      detailModal === null &&
-      !channelManagerOpen &&
-      !numpad.open,
-    keymapOverrides: keymap.overrides,
-    onJumpPreviousChannel: handleJumpPreviousChannel,
-  });
   const handleBrowseChannels = useCallback(() => handleSelectMode('channels'), [handleSelectMode]);
   const handleReorderFavorite = useCallback(
     (fromIdx: number, toIdx: number) => void live.reorderFavorite(fromIdx, toIdx),
@@ -326,40 +308,6 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   const contextFavIndex = contextMenu
     ? live.favoriteChannels.findIndex((c) => c.key === contextMenu.channel.key)
     : -1;
-  const handleMoveContextFavorite = useCallback(
-    (dir: 'up' | 'down') => {
-      if (contextFavIndex >= 0) {
-        void live.reorderFavorite(contextFavIndex, contextFavIndex + (dir === 'up' ? -1 : 1));
-      }
-    },
-    [contextFavIndex, live.reorderFavorite],
-  );
-  const targetScope = mode === 'favorites' ? 'favorites' : 'category';
-  const handleContextMultiView = useCallback(
-    (ch: ItemRow, idx: number) => {
-      if (mode === 'favorites') return handleMultiViewFromFavorites(ch, idx);
-      if (onOpenMultiView === undefined) return;
-      const target = live.buildPlayTarget(ch, idx, targetScope);
-      releasePreviewAndDispatch(() => onOpenMultiView(target));
-    },
-    [
-      handleMultiViewFromFavorites,
-      live,
-      mode,
-      onOpenMultiView,
-      releasePreviewAndDispatch,
-      targetScope,
-    ],
-  );
-  const handleContextPopout = useCallback(
-    (ch: ItemRow, idx: number) => {
-      if (mode === 'favorites') return handlePopoutFromFavorites(ch, idx);
-      if (onOpenPopout === undefined) return;
-      const target = live.buildPlayTarget(ch, idx, targetScope);
-      releasePreviewAndDispatch(() => onOpenPopout(target));
-    },
-    [handlePopoutFromFavorites, live, mode, onOpenPopout, releasePreviewAndDispatch, targetScope],
-  );
   const handleToggleFavorite = useCallback(
     (ch: ItemRow) => void live.toggleFavorite(ch),
     [live.toggleFavorite],
@@ -368,54 +316,44 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     setGuideRefreshTick((n) => n + 1);
     onChannelsMutated?.();
   }, [onChannelsMutated]);
-  const performHideChannel = useCallback(
-    (channel: ItemRow) => {
-      if (!catalog.setChannelOverride) return;
-      void catalog
-        .setChannelOverride({
-          itemKey: channel.key,
-          sourceId: channel.sourceId,
-          isHidden: true,
-        })
-        .then((res) => {
-          if (!res.ok) return;
-          uiCache?.invalidateSource(channel.sourceId);
-          handleChannelsMutated();
-        });
-    },
-    [catalog, handleChannelsMutated, uiCache],
-  );
-  const handleHideChannel = useCallback(
-    (channel: ItemRow) => {
-      if (profile.hasGuardPin && !profile.parentalUnlocked) {
-        profile.requestParentalUnlock(() => performHideChannel(channel));
-        return;
-      }
-      performHideChannel(channel);
-    },
-    [performHideChannel, profile],
-  );
-  const handleOpenChannelManager = useCallback(() => {
-    setContextMenu(null);
-    setDetailModal(null);
-    if (profile.hasGuardPin && !profile.parentalUnlocked) {
-      profile.requestParentalUnlock(() => setChannelManagerOpen(true));
-      return;
-    }
-    setChannelManagerOpen(true);
-  }, [profile]);
-  useEffect(() => {
-    if (channelManagerOpen && profile.hasGuardPin && !profile.parentalUnlocked) {
-      setChannelManagerOpen(false);
-    }
-  }, [channelManagerOpen, profile.hasGuardPin, profile.parentalUnlocked]);
-  const hideChannelProps = useMemo(
-    () =>
-      catalog.setChannelOverride !== undefined
-        ? { onHideChannel: handleHideChannel, onManageChannels: handleOpenChannelManager }
-        : {},
-    [catalog.setChannelOverride, handleHideChannel, handleOpenChannelManager],
-  );
+  const {
+    handleWatchCatchup,
+    handleJumpPreviousChannel,
+    handleMoveContextFavorite,
+    handleContextMultiView,
+    handleContextPopout,
+    hideChannelProps,
+  } = useLiveScreenActions({
+    catalog,
+    live,
+    mode,
+    contextFavIndex,
+    channelManagerOpen,
+    setChannelManagerOpen,
+    setContextMenu,
+    setDetailModal,
+    onPlay,
+    ...(onOpenMultiView !== undefined ? { onOpenMultiView } : {}),
+    ...(onOpenPopout !== undefined ? { onOpenPopout } : {}),
+    handleWatchAndPlay,
+    handleMultiViewFromFavorites,
+    handlePopoutFromFavorites,
+    releasePreviewAndDispatch,
+    handleChannelsMutated,
+  });
+
+  useLiveLastChannelKey({
+    enabled:
+      mode !== 'favorites' &&
+      previousChannel !== null &&
+      contextMenu === null &&
+      detailModal === null &&
+      folderModal === null &&
+      !channelManagerOpen &&
+      !numpad.open,
+    keymapOverrides: keymap.overrides,
+    onJumpPreviousChannel: handleJumpPreviousChannel,
+  });
   const handleToggleActiveFavorite = useCallback(() => {
     const ch =
       mode === 'favorites'
@@ -453,17 +391,37 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   );
   const handleSelectZapIndex = useCallback(
     (idx: number) => {
-      const ch = live.favoriteSource.get(idx);
+      const ch = stageFavoriteSource.get(idx);
       if (ch) live.tuneChannel(ch, idx);
     },
-    [live.favoriteSource, live.tuneChannel],
+    [live.tuneChannel, stageFavoriteSource],
   );
   const handleOpenZapContextMenu = useCallback(
     (idx: number) => {
-      const ch = live.favoriteSource.get(idx);
+      const ch = stageFavoriteSource.get(idx);
       if (ch) handleOpenContextMenu(ch, idx, live.nowNextByKey.get(ch.key)?.now ?? null);
     },
-    [handleOpenContextMenu, live.favoriteSource, live.nowNextByKey],
+    [handleOpenContextMenu, live.nowNextByKey, stageFavoriteSource],
+  );
+  const handleOpenMoveToFolder = useCallback((channel: ItemRow) => {
+    setFolderModal({ kind: 'move', channel });
+  }, []);
+  const folderSlots = useMemo(
+    () =>
+      favFolders.supported
+        ? buildLiveFavoriteFolderSlots(favFolders.folders, favFolders.activeFolderFilter)
+        : [],
+    [favFolders.activeFolderFilter, favFolders.folders, favFolders.supported],
+  );
+  const handleActivateFolderSlot = useCallback(
+    (idx: number) => {
+      const slot = folderSlots[idx];
+      if (!slot) return;
+      if (slot.kind === 'filter') favFolders.setActiveFolderFilter(slot.filter);
+      else if (slot.kind === 'manage') setFolderModal({ kind: 'manage', folder: slot.folder });
+      else setFolderModal({ kind: 'create' });
+    },
+    [favFolders.setActiveFolderFilter, folderSlots],
   );
 
   const hasReadySources = readySources.length > 0;
@@ -483,10 +441,13 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     hasOpenSourcesCta: !hasReadySources,
     mode,
     categoryCount: live.categories.length,
-    channelCount: mode === 'favorites' ? live.favoriteChannels.length : live.channelCount,
+    channelCount: mode === 'favorites' ? stageFavoriteChannels.length : live.channelCount,
     hasBody,
     zapDrawerOpen: activeMemory.zapDrawerOpen,
     numpadOpen: numpad.open,
+    folderSlotCount: folderSlots.length,
+    hasAnyFavorites: live.favoriteChannels.length > 0,
+    onActivateFolderSlot: handleActivateFolderSlot,
     onSelectMode: handleSelectMode,
     onSelectCategoryIndex: handleSelectCategoryIndex,
     onToggleSort: handleToggleSort,
@@ -504,7 +465,8 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
 
-  const anyOverlayOpen = contextMenu !== null || detailModal !== null || channelManagerOpen;
+  const anyOverlayOpen =
+    contextMenu !== null || detailModal !== null || channelManagerOpen || folderModal !== null;
   const childOwnsTvKeys =
     !numpad.open &&
     !anyOverlayOpen &&
@@ -697,8 +659,27 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
               <LiveWatchStage
                 activeChannel={activeFavoriteChannel}
                 activeChannelIndex={Math.max(0, activeFavoriteIdx)}
-                channelSource={live.favoriteSource}
-                sourceVersion={live.favoritesVersion}
+                channelSource={stageFavoriteSource}
+                sourceVersion={stageFavoritesVersion}
+                hasAnyFavorites={live.favoriteChannels.length > 0}
+                drawerHeader={
+                  favFolders.supported ? (
+                    <LiveFavoriteFolderStrip
+                      folders={favFolders.folders}
+                      activeFilter={favFolders.activeFolderFilter}
+                      isTv={layout.isTv}
+                      focusedSlotIndex={tvNav.focusedFolderIndex}
+                      onSelectFilter={favFolders.setActiveFolderFilter}
+                      onRequestCreate={() => setFolderModal({ kind: 'create' })}
+                      onRequestManage={(folder) => setFolderModal({ kind: 'manage', folder })}
+                    />
+                  ) : null
+                }
+                emptyDrawerMessage={
+                  favFolders.supported && favFolders.activeFolderFilter !== 'all'
+                    ? i18n.t('live.folders.emptyFolder')
+                    : null
+                }
                 nowNextByKey={live.nowNextByKey}
                 nowNextVersion={live.nowNextVersion}
                 zapDrawerOpen={activeMemory.zapDrawerOpen}
@@ -713,7 +694,9 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                 onToggleFavorite={handleToggleFavorite}
                 onBrowseChannels={handleBrowseChannels}
                 onSelectChannel={live.tuneChannel}
-                onReorderFavorite={handleReorderFavorite}
+                {...(favFolders.activeFolderFilter === 'all'
+                  ? { onReorderFavorite: handleReorderFavorite }
+                  : {})}
                 onOpenContextMenu={handleOpenContextMenu}
                 onWatchFullscreen={handleWatchFromFavorites}
                 {...(onOpenMultiView !== undefined
@@ -732,49 +715,40 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
         </View>
       )}
 
-      <LiveContextMenu
-        visible={contextMenu !== null}
-        channel={contextMenu?.channel ?? null}
-        channelIndex={contextMenu?.index ?? 0}
-        programme={contextMenu?.programme ?? null}
-        isFavorite={contextMenu !== null && live.favoriteKeys.has(contextMenu.channel.key)}
+      <LiveScreenOverlays
+        catalog={catalog}
+        readySources={readySources}
         isTv={layout.isTv}
         cleanChannelTitles={cleanChannelTitles}
+        nowMs={nowMs ?? Date.now()}
+        favoriteKeys={live.favoriteKeys}
+        favoriteCount={live.favoriteChannels.length}
+        contextMenu={contextMenu}
+        contextFavIndex={contextFavIndex}
+        detailModal={detailModal}
+        channelManagerOpen={channelManagerOpen}
+        folderModal={folderModal}
+        folders={favFolders.folders}
+        assignmentByItemKey={favFolders.assignmentByItemKey}
         onPlay={mode === 'favorites' ? handleWatchFromFavorites : handleWatchAndPlay}
         {...(onOpenMultiView !== undefined ? { onOpenMultiView: handleContextMultiView } : {})}
         {...(onOpenPopout !== undefined ? { onOpenPopout: handleContextPopout } : {})}
         onToggleFavorite={handleToggleFavorite}
-        canMoveUp={contextFavIndex > 0}
-        canMoveDown={contextFavIndex >= 0 && contextFavIndex < live.favoriteChannels.length - 1}
+        {...(favFolders.supported ? { onMoveToFolder: handleOpenMoveToFolder } : {})}
         onMoveFavorite={handleMoveContextFavorite}
         onShowProgrammeDetails={handleShowProgrammeDetails}
         {...hideChannelProps}
-        onClose={() => setContextMenu(null)}
-      />
-
-      <ChannelManagementOverlay
-        visible={channelManagerOpen}
-        catalog={catalog}
-        sources={readySources}
-        onMutated={handleChannelsMutated}
-        onClose={() => setChannelManagerOpen(false)}
-      />
-
-      <EpgProgrammeDetailModal
-        visible={detailModal !== null}
-        channel={detailModal?.channel ?? null}
-        channelIndex={detailModal?.index ?? 0}
-        programme={detailModal?.programme ?? null}
-        nowMs={nowMs ?? Date.now()}
-        isFavorite={detailModal !== null && live.favoriteKeys.has(detailModal.channel.key)}
-        isTv={layout.isTv}
-        cleanChannelTitles={cleanChannelTitles}
-        catalog={catalog}
-        onTuneChannel={mode === 'favorites' ? handleWatchFromFavorites : handleWatchAndPlay}
         onWatchCatchup={handleWatchCatchup}
-        onToggleFavorite={handleToggleFavorite}
         {...(onReminderChanged !== undefined ? { onReminderChanged } : {})}
-        onClose={() => setDetailModal(null)}
+        onChannelsMutated={handleChannelsMutated}
+        onAssignFolder={favFolders.moveChannelToFolder}
+        onCreateFolder={favFolders.createFolder}
+        onRenameFolder={favFolders.renameFolder}
+        onDeleteFolder={favFolders.deleteFolder}
+        onCloseContextMenu={() => setContextMenu(null)}
+        onCloseDetailModal={() => setDetailModal(null)}
+        onCloseChannelManager={() => setChannelManagerOpen(false)}
+        onCloseFolderModal={() => setFolderModal(null)}
       />
     </View>
   );

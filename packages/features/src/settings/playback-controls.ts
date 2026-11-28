@@ -276,6 +276,12 @@ export function activatePlaybackControl(
     });
     return;
   }
+  if (controlId === 'toggle-auto-replace-single-connection') {
+    void preferences.updatePreferences({
+      autoReplaceSingleConnection: !preferences.preferences.autoReplaceSingleConnection,
+    });
+    return;
+  }
   if (controlId === 'toggle-filter-sdh') {
     void preferences.updatePreferences({
       filterSdhSubtitles: !preferences.preferences.filterSdhSubtitles,

@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
     coverage: {
       provider: 'v8',
       include: [
@@ -13,7 +13,7 @@ export default defineConfig({
         'src/gate/driver.ts',
         'src/workbench/remote-catalog.ts',
       ],
-      exclude: ['src/**/*.test.ts'],
+      exclude: ['src/**/*.test.{ts,tsx}'],
       reporter: ['text-summary'],
       thresholds: { lines: 90 },
     },

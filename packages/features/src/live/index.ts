@@ -51,6 +51,15 @@ export {
   type LiveNumberPadProps,
 } from './LiveChrome';
 export { LiveContextMenu, type LiveContextMenuProps } from './LiveContextMenu';
+export {
+  LiveFavoriteFolderModal,
+  type LiveFavoriteFolderModalMode,
+  type LiveFavoriteFolderModalProps,
+} from './LiveFavoriteFolderModal';
+export {
+  LiveFavoriteFolderStrip,
+  type LiveFavoriteFolderStripProps,
+} from './LiveFavoriteFolderStrip';
 export { LiveHealthBadge } from './LiveHealthBadge';
 export { LivePreviewBanner, type LivePreviewBannerProps } from './LivePreviewBanner';
 export { LiveScreen, type LiveScreenProps } from './LiveScreen';
@@ -121,6 +130,12 @@ export {
   type UseLiveCatalogOptions,
   useLiveCatalog,
 } from './useLiveCatalog';
+export {
+  type LiveFavoriteFolderFilter,
+  type LiveFavoriteFoldersState,
+  type UseLiveFavoriteFoldersOptions,
+  useLiveFavoriteFolders,
+} from './useLiveFavoriteFolders';
 export { type LiveNumberJumpState, useLiveNumberJump } from './useLiveNumberJump';
 export {
   type LiveTvHeaderRow,

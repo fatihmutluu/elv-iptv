@@ -38,6 +38,10 @@ import { useSyncDirtyCatalog } from './app-shell-sync-hooks';
 import { useTvHomeChannelsSync } from './app-shell-tv-channels';
 import { AppShellRootOverlays, useAppShellWaveF7b } from './app-shell-wave-f7b';
 import { useWaveF9Controller } from './app-shell-wave-f9';
+import {
+  AppShellProfileAndKeymapProviders,
+  useAppShellDesktopErgonomics,
+} from './app-shell-wave-q7';
 import type { CatalogTabMemory } from './catalog';
 import { recordChannelTune } from './live';
 import type { PlayTarget } from './ports/play-target';
@@ -48,8 +52,6 @@ import {
   buildElvCacheFingerprint,
   type DetailTarget,
   isElvFeatureActive,
-  KeymapProvider,
-  ProfileProvider,
   useElvBackgroundMatcher,
   useProfile,
 } from './shared';
@@ -73,47 +75,32 @@ export type { AppShellProps, AppTab };
 
 /** Top-level Cinema Quietude shell (`Home`, `Live`, `Movies`, `Series` + `Search`, `Settings`, `DetailScreen`, `PlayerScreen`). */
 export function AppShell(props: AppShellProps): ReactElement {
-  const preferences = usePreferences();
   const syncCatalog = useSyncDirtyCatalog(props.catalog, props.syncAccount);
-  const profilePrefs = props.profilePreferences ?? preferences.profilePreferences;
-  const keymapStore = props.keymapStore ?? preferences.keymapStore;
   const [suppressAutoPicker, setSuppressAutoPicker] = useState(true);
   return (
-    <ProfileProvider
+    <AppShellProfileAndKeymapProviders
       catalog={syncCatalog}
       suppressAutoProfilePicker={suppressAutoPicker}
       {...(props.externalRefreshToken !== undefined
         ? { externalRefreshToken: props.externalRefreshToken }
         : {})}
-      {...(profilePrefs !== undefined ? { profilePreferences: profilePrefs } : {})}
-      {...(keymapStore !== undefined ? { keymapStore } : {})}
+      {...(props.profilePreferences !== undefined
+        ? { profilePreferences: props.profilePreferences }
+        : {})}
+      {...(props.keymapStore !== undefined ? { keymapStore: props.keymapStore } : {})}
     >
-      <AppShellWithKeymap
+      <AppShellContent
         {...props}
         catalog={syncCatalog}
         onSuppressAutoProfilePickerChange={setSuppressAutoPicker}
       />
-    </ProfileProvider>
+    </AppShellProfileAndKeymapProviders>
   );
 }
 
 type AppShellInternalProps = AppShellProps & {
   readonly onSuppressAutoProfilePickerChange: (s: boolean) => void;
 };
-
-function AppShellWithKeymap(props: AppShellInternalProps): ReactElement {
-  const preferences = usePreferences();
-  const profile = useProfile();
-  const keymapStore = props.keymapStore ?? preferences.keymapStore;
-  return (
-    <KeymapProvider
-      activeProfileId={profile.activeProfileId}
-      {...(keymapStore !== undefined ? { keymapStore } : {})}
-    >
-      <AppShellContent {...props} />
-    </KeymapProvider>
-  );
-}
 
 function AppShellContent(props: AppShellInternalProps): ReactElement {
   const { catalog, videoHost, appLifecycle, onPlaybackGuardReady } = props;
@@ -124,12 +111,12 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
   const preferences = usePreferences();
   const profile = useProfile();
   const stopEmbeddedPreviewRef = useRef<(() => Promise<void>) | null>(null);
-  const handleRegisterStopPreview = useCallback((stop: (() => Promise<void>) | null) => {
-    stopEmbeddedPreviewRef.current = stop;
+  const handleRegisterStopPreview = useCallback((s: (() => Promise<void>) | null) => {
+    stopEmbeddedPreviewRef.current = s;
   }, []);
   const stopActivePlayerRef = useRef<(() => Promise<void>) | null>(null);
-  const handleRegisterStopActivePlayer = useCallback((stop: (() => Promise<void>) | null) => {
-    stopActivePlayerRef.current = stop;
+  const handleRegisterStopActivePlayer = useCallback((s: (() => Promise<void>) | null) => {
+    stopActivePlayerRef.current = s;
   }, []);
   const hasProfileOverlay = profile.profilePickerOpen || profile.pinDialog !== null;
   useShellArtworkCacheLimit(preferences.preferences.artworkCacheLimitMb);
@@ -227,9 +214,11 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     [setLiveMemory],
   );
   const interceptOpenPlayTargetRef = useRef<(enriched: PlayTarget) => void>(openPlayTarget);
+  const stopOtherStreamRef = useRef<(streamId: string) => void>(() => undefined);
   const connectionGuard = useConnectionLimitGuard({
     sourcesRef,
     enrichTarget: enrichPlayTargetAccountKey,
+    autoReplaceSingleConnection: preferences.preferences.autoReplaceSingleConnection,
     ...(props.connectionTracker !== undefined
       ? { connectionTracker: props.connectionTracker }
       : {}),
@@ -238,6 +227,9 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     }, []),
     onAdoptTarget: openPlayTarget,
     onReplaceTarget: replacePlayTarget,
+    onStopOtherStream: useCallback((streamId: string) => {
+      stopOtherStreamRef.current(streamId);
+    }, []),
   });
   const stopForSource = useCallback(
     (sourceId: string): void => {
@@ -298,6 +290,10 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     onAdoptPlay: connectionGuard.adoptPlay,
   });
   resetToFullModeRef.current = modes.resetToFullMode;
+  stopOtherStreamRef.current = () => {
+    if (modes.multiViewSeedRef.current !== null) modes.closeMultiView();
+    void stopEmbeddedPreviewRef.current?.();
+  };
   closeMultiViewForSourceRef.current = (sourceId: string) =>
     modes.closeMultiViewForSource(sourceId, sourcesRef.current, connectionGuard.tracker);
   const isBrowsing =
@@ -382,16 +378,23 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
       setSettingsSection('appearance');
     selectTab('settings', false);
   }, [selectTab, sourcesRef]);
-  const openSources = useCallback(() => {
-    userPickedSettingsSectionRef.current = true;
-    setSettingsSection('sources');
-    selectTab('settings', true);
-  }, [selectTab]);
-  const openProfilesSettings = useCallback(() => {
-    userPickedSettingsSectionRef.current = true;
-    setSettingsSection('profiles');
-    selectTab('settings', true);
-  }, [selectTab]);
+  const openSettingsSection = useCallback(
+    (section: SettingsSection) => {
+      userPickedSettingsSectionRef.current = true;
+      setSettingsSection(section);
+      selectTab('settings', true);
+    },
+    [selectTab],
+  );
+  const openSources = useCallback(() => openSettingsSection('sources'), [openSettingsSection]);
+  const openProfilesSettings = useCallback(
+    () => openSettingsSection('profiles'),
+    [openSettingsSection],
+  );
+  const openAccountSettings = useCallback(
+    () => openSettingsSection('account'),
+    [openSettingsSection],
+  );
   const handlePrepareIncomingLocalPlaylist = useCallback(() => {
     if (playTargetRef.current !== null) {
       connectionGuard.releaseActive();
@@ -487,10 +490,8 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
   const handleReminderChanged = useCallback(() => setReminderVersion((v) => v + 1), []);
   // biome-ignore lint/correctness/useExhaustiveDependencies: locale updates translated reminder timing text on live language switch
   const formatReminderTimingText = useCallback(
-    (startsInMinutes: number) =>
-      startsInMinutes <= 0
-        ? i18n.t('epg.reminderStartingNow')
-        : i18n.t('epg.reminderStartsIn', { minutes: startsInMinutes }),
+    (m: number) =>
+      m <= 0 ? i18n.t('epg.reminderStartingNow') : i18n.t('epg.reminderStartsIn', { minutes: m }),
     [i18n, locale],
   );
   const reminders = useProgrammeReminders({
@@ -504,7 +505,6 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     formatTimingText: formatReminderTimingText,
     ...(props.reminderHost !== undefined ? { reminderHost: props.reminderHost } : {}),
   });
-  const bumpStageKey = useCallback(() => setStageKey((k) => k + 1), []);
   const clearAllCaches = useCallback(() => {
     uiCache.clear();
     shell.bumpCatalogRevision();
@@ -515,11 +515,6 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     setPlayTarget(null);
     openSources();
   }, [openSources]);
-  const openAccountSettings = useCallback(() => {
-    userPickedSettingsSectionRef.current = true;
-    setSettingsSection('account');
-    selectTab('settings', true);
-  }, [selectTab]);
   const waveF7b = useAppShellWaveF7b({
     catalog: observedCatalog,
     preferences,
@@ -532,7 +527,7 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     onReleaseConnection: stopActivePlayback,
     onProgressSaved: bumpUserState,
     stageKey,
-    bumpStageKey,
+    bumpStageKey: useCallback(() => setStageKey((k) => k + 1), []),
     clearCaches: clearAllCaches,
     switchSource: switchSourceOnCrash,
   });
@@ -564,13 +559,27 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     suppressFirstRunOverlays: onboarding.suppressLegacyWaveF9Overlays,
   });
   interceptOpenPlayTargetRef.current = waveF7b.externalHandoff.interceptPlayTarget;
-  const hasRootOverlay =
+  const hasOtherRootOverlay =
     hasProfileOverlay ||
     mgmtOverlays.anyOpen ||
+    connectionGuard.pending !== null ||
+    oledScreensaver.state.active ||
     waveF7b.anyOverlayOpen ||
     waveF9.hasOverlay ||
     onboarding.hasOverlay ||
     (isTv && reminders.activeBanner !== null);
+  const desktopErgonomics = useAppShellDesktopErgonomics({
+    isPlayerOpen: isFullPlayerActive,
+    hasOtherModalOverlay: hasOtherRootOverlay,
+    preferences,
+    profile,
+    catalog: observedCatalog,
+    uiCache,
+    onBumpUserState: bumpUserState,
+    onSelectTab: selectTab,
+    onOpenSettingsSection: openSettingsSection,
+  });
+  const hasRootOverlay = hasOtherRootOverlay || desktopErgonomics.anyOverlayOpen;
   const crashProps = waveF7b.crashProps;
   const isResolvingInitialSources =
     !profile.profilesReady ||
@@ -635,13 +644,12 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
     ...(props.sourceImportHost !== undefined ? { sourceImportHost: props.sourceImportHost } : {}),
     ...(props.lanPairing !== undefined ? { lanPairing: props.lanPairing } : {}),
     ...(props.trailerExternal !== undefined ? { trailerExternal: props.trailerExternal } : {}),
+    ...(props.updater !== undefined ? { updater: props.updater } : {}),
+    ...(observedCatalog.clearRecentChannels !== undefined
+      ? { onClearRecentChannels: desktopErgonomics.onClearRecentChannels }
+      : {}),
     onTelemetryOptInChange: waveF9.onTelemetryOptInChange,
   };
-  const onOpenDetailFromPlayer = (target: DetailTarget) => {
-    onPlayerExit();
-    openDetail(target);
-  };
-
   return (
     <AppShellContextProviders
       routeActive={documentVisible && appForeground}
@@ -757,7 +765,10 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
           onPlaybackActiveChange={setPlayerPlaybackActive}
           onRegisterStopActivePlayer={handleRegisterStopActivePlayer}
           onTargetChange={onPlayerTargetChange}
-          onOpenDetail={onOpenDetailFromPlayer}
+          onOpenDetail={(target) => {
+            onPlayerExit();
+            openDetail(target);
+          }}
           onExit={onPlayerExit}
         />
         <AppShellRootOverlays
@@ -771,6 +782,7 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
           oledScreensaver={oledScreensaver}
           wave={waveF7b}
           waveF9={waveF9}
+          desktopErgonomics={desktopErgonomics}
         />
         <AppShellOnboardingOverlays onboarding={onboarding} />
       </View>

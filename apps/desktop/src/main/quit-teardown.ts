@@ -21,6 +21,7 @@ export interface QuitTeardownDeps {
   diagnosticsIpc?: (() => void) | undefined;
   errorTelemetry?: (() => void) | undefined;
   syncIpc?: (() => void) | undefined;
+  updaterIpc?: (() => void) | undefined;
   downloadsIpc?: (() => void) | undefined;
   downloadManager?: QuitDisposable | undefined;
   mediaBridge?: QuitDisposable | undefined;
@@ -162,6 +163,10 @@ export function createQuitTeardown(deps: QuitTeardownDeps): QuitTeardownControll
       const syncIpc = deps.syncIpc;
       deps.syncIpc = undefined;
       if (syncIpc) runSafe('syncIpc', syncIpc);
+
+      const updaterIpc = deps.updaterIpc;
+      deps.updaterIpc = undefined;
+      if (updaterIpc) runSafe('updaterIpc', updaterIpc);
 
       const downloadsIpc = deps.downloadsIpc;
       deps.downloadsIpc = undefined;

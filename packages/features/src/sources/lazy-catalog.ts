@@ -562,6 +562,41 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
           ? cat.deleteDownload(itemKey, profileId)
           : err(elvError('storage', 'unsupported'));
       }),
+    removeRecentChannel: async (itemKey, profileId) =>
+      (await open()).removeRecentChannel?.(itemKey, profileId) ?? false,
+    clearRecentChannels: async (profileId) => (await open()).clearRecentChannels?.(profileId) ?? 0,
+    listLiveFavoriteFolders: async (profileId, opts) =>
+      (await open()).listLiveFavoriteFolders?.(profileId, opts) ?? [],
+    createLiveFavoriteFolder: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.createLiveFavoriteFolder
+          ? cat.createLiveFavoriteFolder(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    renameLiveFavoriteFolder: (id, name, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.renameLiveFavoriteFolder
+          ? cat.renameLiveFavoriteFolder(id, name, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    deleteLiveFavoriteFolder: (id, profileId) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.deleteLiveFavoriteFolder
+          ? cat.deleteLiveFavoriteFolder(id, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    assignLiveFavoriteFolder: (input) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.assignLiveFavoriteFolder
+          ? cat.assignLiveFavoriteFolder(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    listLiveFavoriteFolderAssignments: async (profileId) =>
+      (await open()).listLiveFavoriteFolderAssignments?.(profileId) ?? [],
     flushPendingWrites: async () => {
       if (cached === undefined) return;
       const cat = await cached.catch(() => undefined);

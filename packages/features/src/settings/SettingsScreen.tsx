@@ -31,6 +31,7 @@ import {
   useState,
 } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import type { DesktopUpdaterPort } from '../ports/updater-port';
 import { useRouteActive } from '../shared';
 import { ElvModeInteractivePreview } from '../shared/ElvModeInteractivePreview';
 import { AboutLicensesPanel } from './AboutLicensesPanel';
@@ -129,6 +130,10 @@ export interface SettingsScreenProps {
   readonly onRefreshCatalogNow?: () => Promise<void> | void;
   /** Triggers an immediate TV guide refresh from Live TV settings. */
   readonly onRefreshGuideNow?: () => Promise<void> | void;
+  /** Clears recently watched live channels for the active profile (`Wave Q7`). */
+  readonly onClearRecentChannels?: () => Promise<void> | void;
+  /** Optional store-gated desktop auto-updater port rendered inside About & Licenses (`Wave Q7`). */
+  readonly updater?: DesktopUpdaterPort;
   /** @deprecated Removed from Live TV settings in Wave P7; kept optional for AppShell compatibility. */
   readonly onOpenChannelManagement?: () => void;
   /** Opens the Multi-Guide & Channel Mapper overlay lifted to `AppShell` root (`#30`). */
@@ -231,6 +236,8 @@ export function SettingsScreen({
   onTelemetryOptInChange,
   onRefreshCatalogNow,
   onRefreshGuideNow,
+  onClearRecentChannels,
+  updater,
   elvPreviewSlot,
 }: SettingsScreenProps): ReactElement {
   const theme = useTheme();
@@ -248,9 +255,13 @@ export function SettingsScreen({
   } | null>(null);
   const [catalogRefreshStatus, setCatalogRefreshStatus] = useState<RefreshStatus>('idle');
   const [guideRefreshStatus, setGuideRefreshStatus] = useState<RefreshStatus>('idle');
+  const [clearRecentStatus, setClearRecentStatus] = useState<'idle' | 'clearing' | 'cleared'>(
+    'idle',
+  );
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const catalogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const guideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearRecentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<ComponentRef<typeof View> | null>(null);
   const mountedRef = useRef(true);
 
@@ -261,6 +272,7 @@ export function SettingsScreen({
       if (clearTimerRef.current !== null) clearTimeout(clearTimerRef.current);
       if (catalogTimerRef.current !== null) clearTimeout(catalogTimerRef.current);
       if (guideTimerRef.current !== null) clearTimeout(guideTimerRef.current);
+      if (clearRecentTimerRef.current !== null) clearTimeout(clearRecentTimerRef.current);
     };
   }, []);
 
@@ -379,6 +391,28 @@ export function SettingsScreen({
       });
   }, [guideRefreshStatus, onRefreshGuideNow]);
 
+  const handleClearRecentChannels = useCallback(() => {
+    if (!onClearRecentChannels || clearRecentStatus === 'clearing') return;
+    setClearRecentStatus('clearing');
+    if (clearRecentTimerRef.current !== null) {
+      clearTimeout(clearRecentTimerRef.current);
+      clearRecentTimerRef.current = null;
+    }
+    void Promise.resolve(onClearRecentChannels()).then(
+      () => {
+        if (!mountedRef.current) return;
+        setClearRecentStatus('cleared');
+        clearRecentTimerRef.current = setTimeout(() => {
+          clearRecentTimerRef.current = null;
+          if (mountedRef.current) setClearRecentStatus('idle');
+        }, REFRESHED_FEEDBACK_MS);
+      },
+      () => {
+        if (mountedRef.current) setClearRecentStatus('idle');
+      },
+    );
+  }, [clearRecentStatus, onClearRecentChannels]);
+
   const handleActivateControl = useCallback(
     (sec: PreferenceSettingsSection, controlId: string) => {
       if (sec === 'appearance') {
@@ -413,13 +447,18 @@ export function SettingsScreen({
         onOpenDropdown: (id) => setOpenTvDropdownId(id),
         onRefreshCatalogNow: handleRefreshCatalogNow,
         onRefreshGuideNow: handleRefreshGuideNow,
+        ...(onClearRecentChannels !== undefined
+          ? { onClearRecentChannels: handleClearRecentChannels }
+          : {}),
       });
     },
     [
       handleClearArtworkCache,
+      handleClearRecentChannels,
       handleRefreshCatalogNow,
       handleRefreshGuideNow,
       handleSetArtworkCacheLimitMb,
+      onClearRecentChannels,
       onTelemetryOptInChange,
       platformFormFactor,
       preferences,
@@ -464,6 +503,7 @@ export function SettingsScreen({
     showConfirmExitOnBack,
     preservePaneOnBlur: hasTransientOverlay,
     elvModeEnabled,
+    showClearRecentChannels: onClearRecentChannels !== undefined,
     ...(preferences !== undefined ? { homeLayout: preferences.preferences.homeLayout } : {}),
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
@@ -546,6 +586,9 @@ export function SettingsScreen({
         }
         onRefreshCatalogNow={handleRefreshCatalogNow}
         onRefreshGuideNow={handleRefreshGuideNow}
+        {...(onClearRecentChannels !== undefined
+          ? { onClearRecentChannels: handleClearRecentChannels, clearRecentStatus }
+          : {})}
         catalogRefreshStatus={catalogRefreshStatus}
         guideRefreshStatus={guideRefreshStatus}
         openTvDropdownId={
@@ -575,7 +618,7 @@ export function SettingsScreen({
         renderFeedback(embeddedSlot)
       ) : null
     ) : (
-      <AboutLicensesPanel>
+      <AboutLicensesPanel {...(updater !== undefined ? { updater } : {})}>
         {renderLicenses ? renderLicenses(embeddedSlot) : null}
       </AboutLicensesPanel>
     );

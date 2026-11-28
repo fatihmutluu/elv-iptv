@@ -26,6 +26,7 @@ import {
   type CrashRecoverableWindow,
   WINDOW_TITLE,
 } from './window-options.ts';
+import { attachWindowZoomAndReloadGuard, type WindowZoomWindowLike } from './window-zoom.ts';
 
 /** Dedicated bounds persistence file for the standalone popout player (`#158`). */
 export const POPOUT_STATE_FILENAME = 'popout-window-state.json';
@@ -63,6 +64,8 @@ export interface PopoutBrowserWindowLike
     BrowserBackGuardWindow['webContents'] &
     CrashRecoverableWindow['webContents'] & {
       send(channel: string, ...args: unknown[]): void;
+      setZoomLevel?(level: number): void;
+      removeListener?(event: string, listener: (...args: unknown[]) => void): unknown;
     };
 }
 
@@ -73,6 +76,10 @@ export interface PopoutWindowControllerDeps {
   readonly popoutStatePath: string;
   readonly screen: BoundsScreenLike;
   readonly devOrigin?: string | null;
+  readonly isPackaged?: boolean;
+  readonly platform?: NodeJS.Platform;
+  readonly getZoomLevel?: () => number;
+  readonly onSetZoomLevel?: (level: number) => number;
   readonly presenter?: PresenterKind;
   readonly getMainWindow: () => TrayRestorableWindow | null | undefined;
   readonly createWindow: (options: BrowserWindowConstructorOptions) => PopoutBrowserWindowLike;
@@ -135,10 +142,13 @@ export function createPopoutWindowController(
 ): PopoutWindowController {
   let popoutWindow: PopoutBrowserWindowLike | undefined;
   let boundsController: WindowBoundsController | undefined;
+  let disposeZoomGuard: (() => void) | undefined;
   let currentPayload: PopoutLaunchPayload | null = null;
   const popoutUrl = buildPopoutUrl(deps.appBaseUrl);
 
   const cleanupPopout = (): void => {
+    disposeZoomGuard?.();
+    disposeZoomGuard = undefined;
     boundsController?.dispose();
     boundsController = undefined;
     popoutWindow = undefined;
@@ -189,6 +199,12 @@ export function createPopoutWindowController(
         deps.devOrigin ? { devOrigin: deps.devOrigin } : undefined,
       );
       attachBrowserBackGuard(win);
+      disposeZoomGuard = attachWindowZoomAndReloadGuard(win as unknown as WindowZoomWindowLike, {
+        isPackaged: deps.isPackaged ?? deps.devOrigin === null,
+        ...(deps.platform === undefined ? {} : { platform: deps.platform }),
+        getZoomLevel: () => deps.getZoomLevel?.() ?? 0,
+        onSetZoomLevel: (next) => deps.onSetZoomLevel?.(next) ?? next,
+      });
       attachRendererCrashRecovery(win, {
         gate: false,
         reloadUrl: popoutUrl,

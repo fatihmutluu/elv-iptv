@@ -1,9 +1,11 @@
 import {
+  clampZoomLevel,
   isAlwaysOnTopFlag,
   isAspectRatioLockFlag,
   isMinimizeToTrayFlag,
   isPopoutDockPayload,
   isPopoutLaunchPayload,
+  isZoomLevel,
   type PopoutDockPayload,
   type PopoutLaunchPayload,
   type TrayLabels,
@@ -18,8 +20,71 @@ export interface WindowIpcRendererLike {
   removeListener(channel: string, listener: (event: unknown, ...args: unknown[]) => void): unknown;
 }
 
+/** Subset of Electron's `webFrame` used to apply persisted desktop UI zoom inside preload. */
+export interface WindowWebFrameLike {
+  setZoomLevel(level: number): void;
+}
+
+/** Minimal DOM document surface for `DOMContentLoaded` zoom sync inside preload. */
+export interface ZoomSyncDocumentLike {
+  readonly readyState?: string;
+  addEventListener?(type: string, listener: () => void): void;
+  removeEventListener?(type: string, listener: () => void): void;
+}
+
+/**
+ * Applies the persisted desktop UI zoom level via `webFrame.setZoomLevel` immediately, again on
+ * `DOMContentLoaded`, and on every live `window:zoom-level-changed` event so zoom never resets
+ * across routes or resizes. Returns an idempotent teardown function.
+ */
+export function syncInitialZoomLevel(
+  ipc: WindowIpcRendererLike,
+  webFrame: WindowWebFrameLike,
+  doc: ZoomSyncDocumentLike | undefined = typeof document === 'undefined' ? undefined : document,
+): () => void {
+  let disposed = false;
+
+  const queryAndApply = (): void => {
+    void ipc
+      .invoke(WINDOW_CHANNELS.getZoomLevel)
+      .then((reply) => {
+        if (!disposed && isZoomLevel(reply)) {
+          webFrame.setZoomLevel(clampZoomLevel(reply));
+        }
+      })
+      .catch(() => undefined);
+  };
+
+  const onZoomChanged = (_event: unknown, level: unknown): void => {
+    if (!disposed && isZoomLevel(level)) {
+      webFrame.setZoomLevel(clampZoomLevel(level));
+    }
+  };
+
+  const onDomContentLoaded = (): void => {
+    if (!disposed) queryAndApply();
+  };
+
+  ipc.on(WINDOW_CHANNELS.zoomLevelChanged, onZoomChanged);
+  queryAndApply();
+
+  if (doc !== undefined && typeof doc.addEventListener === 'function') {
+    doc.addEventListener('DOMContentLoaded', onDomContentLoaded);
+  }
+
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    ipc.removeListener(WINDOW_CHANNELS.zoomLevelChanged, onZoomChanged);
+    doc?.removeEventListener?.('DOMContentLoaded', onDomContentLoaded);
+  };
+}
+
 /** Builds the frozen `window.elv.window` bridge inside the sandboxed Electron preload (`#408`, `#332`, `#158`). */
-export function createWindowBridge(ipc: WindowIpcRendererLike): WindowBridge {
+export function createWindowBridge(
+  ipc: WindowIpcRendererLike,
+  webFrame?: WindowWebFrameLike,
+): WindowBridge {
   const bridge: WindowBridge = {
     async setAlwaysOnTop(enabled: boolean): Promise<boolean> {
       const reply = await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, enabled);
@@ -121,6 +186,34 @@ export function createWindowBridge(ipc: WindowIpcRendererLike): WindowBridge {
     async openExternalUrl(url: string): Promise<boolean> {
       const reply = await ipc.invoke(WINDOW_CHANNELS.openExternalUrl, url);
       return reply === true;
+    },
+    async getZoomLevel(): Promise<number> {
+      const reply = await ipc.invoke(WINDOW_CHANNELS.getZoomLevel);
+      if (!isZoomLevel(reply)) {
+        throw new Error('window:get-zoom-level returned an unexpected reply');
+      }
+      return clampZoomLevel(reply);
+    },
+    async setZoomLevel(level: number): Promise<number> {
+      const reply = await ipc.invoke(WINDOW_CHANNELS.setZoomLevel, clampZoomLevel(level));
+      if (!isZoomLevel(reply)) {
+        throw new Error('window:set-zoom-level returned an unexpected reply');
+      }
+      const clamped = clampZoomLevel(reply);
+      webFrame?.setZoomLevel(clamped);
+      return clamped;
+    },
+    onZoomLevelChanged(listener: (level: number) => void): () => void {
+      const wrapped = (_event: unknown, level: unknown): void => {
+        if (!isZoomLevel(level)) return;
+        const clamped = clampZoomLevel(level);
+        webFrame?.setZoomLevel(clamped);
+        listener(clamped);
+      };
+      ipc.on(WINDOW_CHANNELS.zoomLevelChanged, wrapped);
+      return () => {
+        ipc.removeListener(WINDOW_CHANNELS.zoomLevelChanged, wrapped);
+      };
     },
   };
   return Object.freeze(bridge);

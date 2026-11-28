@@ -38,6 +38,18 @@ export {
   sanitizeStackSignature,
 } from './CrashRecoveryBoundary';
 export {
+  type CommandPaletteItem,
+  type CommandPaletteSettingsSection,
+  type CommandPaletteTab,
+  DesktopCommandPalette,
+  type DesktopCommandPaletteProps,
+  filterCommandPaletteItems,
+} from './DesktopCommandPalette';
+export {
+  DesktopShortcutSheet,
+  type DesktopShortcutSheetProps,
+} from './DesktopShortcutSheet';
+export {
   PrivacyConsentOverlay,
   type PrivacyConsentOverlayProps,
 } from './PrivacyConsentOverlay';
@@ -54,6 +66,16 @@ export {
   type UseConnectionLimitGuardOptions,
   useConnectionLimitGuard,
 } from './useConnectionLimitGuard';
+export {
+  type DesktopShellKeyEventLike,
+  type DesktopShellShortcutAction,
+  type DesktopShellShortcutGuardState,
+  formatShortcutModifier,
+  isMacPlatform,
+  matchDesktopShellShortcut,
+  type UseDesktopShellShortcutsOptions,
+  useDesktopShellShortcuts,
+} from './useDesktopShellShortcuts';
 export {
   type UseGuideAutoRefreshOptions,
   useGuideAutoRefresh,

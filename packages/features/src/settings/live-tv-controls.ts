@@ -119,6 +119,7 @@ export interface LiveTvControlActions {
   readonly onOpenDropdown?: (id: 'catalog-refresh-dropdown' | 'guide-refresh-dropdown') => void;
   readonly onRefreshCatalogNow?: () => void;
   readonly onRefreshGuideNow?: () => void;
+  readonly onClearRecentChannels?: () => void;
 }
 
 /** Applies a TV D-pad activation on a Live TV & Guide settings control. */
@@ -137,6 +138,10 @@ export function activateLiveTvControl(
   }
   if (controlId === 'guide-refresh-now') {
     actions?.onRefreshGuideNow?.();
+    return;
+  }
+  if (controlId === 'clear-recent-channels') {
+    actions?.onClearRecentChannels?.();
     return;
   }
   if (!preferences) return;

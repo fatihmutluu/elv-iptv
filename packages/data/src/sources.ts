@@ -271,6 +271,7 @@ const FINAL_DELETE_TABLES = [
   'my_list_new_episodes',
   'continue_watching_dismissals',
   'ratings',
+  'live_favorite_folder_items',
 ] as const;
 
 /** Every table with a `source_id` column; {@link removeSource} clears them all (no foreign keys). */

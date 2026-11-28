@@ -4654,3 +4654,258 @@ msgstr "{active}/{max} bağlantı"
 
 msgid "sources.account.connectionsMax"
 msgstr "{max} bağlantı"
+
+msgid "desktop.dropZone.title"
+msgstr "İçe aktarmak için M3U listesini bırakın"
+
+msgid "desktop.dropZone.subtitle"
+msgstr "Kaynaklar ekranında açmak için bırakın"
+
+msgid "desktop.dropZone.formats"
+msgstr "64 MiB’a kadar .m3u, .m3u8 ve .m3u.gz dosyalarını destekler"
+
+msgid "desktop.shortcuts.title"
+msgstr "Klavye kısayolları"
+
+msgid "desktop.shortcuts.subtitle"
+msgstr "Gezinirken istediğiniz zaman ? veya F1 tuşuna basın."
+
+msgid "desktop.shortcuts.close"
+msgstr "Klavye kısayollarını kapat"
+
+msgid "desktop.shortcuts.group.navigation"
+msgstr "Gezinme"
+
+msgid "desktop.shortcuts.group.search"
+msgstr "Arama ve komutlar"
+
+msgid "desktop.shortcuts.group.display"
+msgstr "Görünüm ve yakınlaştırma"
+
+msgid "desktop.shortcuts.group.player"
+msgstr "Oynatıcı"
+
+msgid "desktop.shortcuts.item.back"
+msgstr "Geri git"
+
+msgid "desktop.shortcuts.item.mouseBack"
+msgstr "Fare geri tuşu"
+
+msgid "desktop.shortcuts.item.closeOverlay"
+msgstr "Katmanı veya pencereyi kapat"
+
+msgid "desktop.shortcuts.item.commandPalette"
+msgstr "Komut paletini aç"
+
+msgid "desktop.shortcuts.item.search"
+msgstr "Aramaya git"
+
+msgid "desktop.shortcuts.item.shortcutSheet"
+msgstr "Klavye kısayollarını göster/gizle"
+
+msgid "desktop.shortcuts.item.zoomIn"
+msgstr "Yakınlaştır"
+
+msgid "desktop.shortcuts.item.zoomOut"
+msgstr "Uzaklaştır"
+
+msgid "desktop.shortcuts.item.zoomReset"
+msgstr "Yakınlaştırmayı sıfırla"
+
+msgid "desktop.shortcuts.item.playPause"
+msgstr "Oynat / Duraklat"
+
+msgid "desktop.shortcuts.item.seekStep"
+msgstr "Geri / ileri sar"
+
+msgid "desktop.shortcuts.item.seekCoarse"
+msgstr "Uzun geri / ileri sar"
+
+msgid "desktop.shortcuts.item.fullscreen"
+msgstr "Tam ekranı aç/kapat"
+
+msgid "desktop.shortcuts.item.mute"
+msgstr "Sesi kapat / aç"
+
+msgid "desktop.shortcuts.item.tracks"
+msgstr "Ses ve altyazılar"
+
+msgid "desktop.shortcuts.item.alwaysOnTop"
+msgstr "Pencereyi üstte sabitle"
+
+msgid "desktop.shortcuts.item.channels"
+msgstr "Kanal listesini aç/kapat"
+
+msgid "desktop.shortcuts.item.prevChannel"
+msgstr "Önceki kanal"
+
+msgid "desktop.shortcuts.item.infoStats"
+msgstr "Yayın bilgisi / istatistikler"
+
+msgid "desktop.palette.title"
+msgstr "Komut paleti"
+
+msgid "desktop.palette.placeholder"
+msgstr "Bir ekrana, ayara veya eyleme git…"
+
+msgid "desktop.palette.close"
+msgstr "Komut paletini kapat"
+
+msgid "desktop.palette.empty"
+msgstr "Eşleşen komut bulunamadı"
+
+msgid "desktop.palette.hint"
+msgstr "↑↓ gezin · Enter çalıştır · Esc kapat"
+
+msgid "desktop.palette.group.tabs"
+msgstr "Git"
+
+msgid "desktop.palette.group.settings"
+msgstr "Ayarlar"
+
+msgid "desktop.palette.group.actions"
+msgstr "Eylemler"
+
+msgid "desktop.palette.action.toggleElvMode"
+msgstr "ELV Modunu aç/kapat"
+
+msgid "desktop.palette.action.elvModeOn"
+msgstr "ELV Modunu kapat"
+
+msgid "desktop.palette.action.elvModeOff"
+msgstr "ELV Modunu aç"
+
+msgid "desktop.palette.action.lockParental"
+msgstr "Ebeveyn denetimlerini kilitle"
+
+msgid "desktop.palette.action.cycleTheme"
+msgstr "Tema ön ayarını değiştir"
+
+msgid "desktop.palette.action.openShortcuts"
+msgstr "Klavye kısayollarını aç"
+
+msgid "settings.playback.autoReplaceSingleConnection"
+msgstr "Tek bağlantılı hesaplarda yayını otomatik değiştir"
+
+msgid "settings.playback.autoReplaceSingleConnectionDesc"
+msgstr "1 bağlantılı kaynakta başka bir kanala geçerken aktif yerel yayını otomatik durdur."
+
+msgid "settings.liveTv.clearRecentChannels"
+msgstr "Son izlenen kanallar geçmişi"
+
+msgid "settings.liveTv.clearRecentChannelsDesc"
+msgstr "Aktif profil için son izlenen Canlı TV kanalları listesini temizle."
+
+msgid "settings.liveTv.clearRecentChannelsAction"
+msgstr "Son kanalları temizle"
+
+msgid "settings.liveTv.clearRecentChannelsCleared"
+msgstr "Temizlendi"
+
+msgid "live.context.removeFromRecent"
+msgstr "Son İzlenenlerden Kaldır"
+
+msgid "live.folders.all"
+msgstr "Tümü"
+
+msgid "live.folders.unfiled"
+msgstr "Klasörsüz"
+
+msgid "live.folders.createTooltip"
+msgstr "Yeni favori klasörü"
+
+msgid "live.folders.createTitle"
+msgstr "Yeni favori klasörü"
+
+msgid "live.folders.renameTitle"
+msgstr "Klasörü yeniden adlandır"
+
+msgid "live.folders.deleteTitle"
+msgstr "Klasörü sil"
+
+msgid "live.folders.deleteBody"
+msgstr "\"{name}\" klasöründeki kanallar Favoriler içinde Klasörsüz altında kalır."
+
+msgid "live.folders.namePlaceholder"
+msgstr "Klasör adı (örn. Spor, Haber)"
+
+msgid "live.folders.moveToFolder"
+msgstr "Klasöre taşı…"
+
+msgid "live.folders.addToFolder"
+msgstr "Klasöre ekle…"
+
+msgid "live.folders.moveModalTitle"
+msgstr "Klasöre taşı"
+
+msgid "live.folders.createAndMove"
+msgstr "Oluştur ve taşı"
+
+msgid "live.folders.createFolder"
+msgstr "Klasör oluştur"
+
+msgid "live.folders.manageFolder"
+msgstr "Klasörü yönet"
+
+msgid "live.folders.rename"
+msgstr "Yeniden adlandır"
+
+msgid "live.folders.delete"
+msgstr "Sil"
+
+msgid "live.folders.save"
+msgstr "Kaydet"
+
+msgid "live.folders.cancel"
+msgstr "İptal"
+
+msgid "live.folders.emptyFolder"
+msgstr "Bu klasörde henüz favori kanal yok."
+
+msgid "live.folders.currentBadge"
+msgstr "Mevcut"
+
+msgid "settings.updates.title"
+msgstr "Yazılım güncellemeleri"
+
+msgid "settings.updates.currentVersion"
+msgstr "Sürüm {version}"
+
+msgid "settings.updates.check"
+msgstr "Güncellemeleri denetle"
+
+msgid "settings.updates.checking"
+msgstr "Güncellemeler denetleniyor…"
+
+msgid "settings.updates.upToDate"
+msgstr "Güncel"
+
+msgid "settings.updates.available"
+msgstr "{version} sürümü hazır"
+
+msgid "settings.updates.download"
+msgstr "Güncellemeyi indir"
+
+msgid "settings.updates.downloading"
+msgstr "Güncelleme indiriliyor (%{percent})"
+
+msgid "settings.updates.downloaded"
+msgstr "{version} sürümü kuruluma hazır"
+
+msgid "settings.updates.restartInstall"
+msgstr "Yeniden başlat ve kur"
+
+msgid "settings.updates.openReleasePage"
+msgstr "Sürüm sayfasını aç"
+
+msgid "settings.updates.releaseNotes"
+msgstr "Yenilikler"
+
+msgid "settings.updates.error"
+msgstr "Güncellemeler denetlenemedi. Daha sonra tekrar deneyin."
+
+msgid "settings.updates.errorChecksum"
+msgstr "Güncelleme doğrulaması başarısız oldu. Sürüm sayfasından doğrudan indirin."
+
+msgid "settings.updates.installing"
+msgstr "Güncelleme hazırlanıyor…"

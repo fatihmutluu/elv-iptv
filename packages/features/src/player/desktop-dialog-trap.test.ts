@@ -403,4 +403,88 @@ describe('attachDesktopDialogTrap (#283)', () => {
     teardown();
     expect(panel.hasAttribute('tabindex')).toBe(false);
   });
+
+  it('keeps backdrop inside overlay wrapper non-inert while isolating background siblings and handles document/window Escape (BLOCKER-3, MAJOR-9)', () => {
+    const winListeners = new Map<string, Set<(e: DialogKeyEventLike) => void>>();
+    const docListeners = new Map<string, Set<(e: DialogKeyEventLike) => void>>();
+    const fakeWin = {
+      addEventListener: (type: string, fn: (e: DialogKeyEventLike) => void) => {
+        const set = winListeners.get(type) ?? new Set();
+        set.add(fn);
+        winListeners.set(type, set);
+      },
+      removeEventListener: (type: string, fn: (e: DialogKeyEventLike) => void) => {
+        winListeners.get(type)?.delete(fn);
+      },
+    };
+    const doc = Object.assign(createMockDoc(), {
+      defaultView: fakeWin,
+      addEventListener: (type: string, fn: (e: DialogKeyEventLike) => void) => {
+        const set = docListeners.get(type) ?? new Set();
+        set.add(fn);
+        docListeners.set(type, set);
+      },
+      removeEventListener: (type: string, fn: (e: DialogKeyEventLike) => void) => {
+        docListeners.get(type)?.delete(fn);
+      },
+    });
+
+    const appBackground = createMockEl(doc, { id: 'app-background' });
+    const overlayWrapper = createMockEl(doc, { id: 'overlay-wrapper' });
+    const backdrop = createMockEl(doc, {
+      id: 'backdrop',
+      tagName: 'DIV',
+      attrs: { tabindex: '-1', 'aria-hidden': 'true' },
+      tabIndex: -1,
+    });
+    const dialogPanel = createMockEl(doc, { id: 'dialog-panel' });
+    const closeBtn = createMockEl(doc, { id: 'close-btn', tagName: 'BUTTON', tabIndex: 0 });
+    const bodyText = createMockEl(doc, { id: 'body-text', tagName: 'P' });
+
+    append(doc.body, appBackground, overlayWrapper);
+    append(overlayWrapper, backdrop, dialogPanel);
+    append(dialogPanel, closeBtn, bodyText);
+
+    const onEscape = vi.fn();
+    const teardown = attachDesktopDialogTrap(overlayWrapper, { doc, onEscape });
+
+    // Background sibling outside overlay IS inert, while backdrop inside overlay stays interactive!
+    expect(appBackground.inert).toBe(true);
+    expect(backdrop.inert).toBe(false);
+    // Focusable elements exclude aria-hidden/tabIndex=-1 backdrop and land on closeBtn
+    expect(getFocusableDialogElements(overlayWrapper).map((e) => (e as MockElement).id)).toEqual([
+      'close-btn',
+    ]);
+    expect(doc.activeElement).toBe(closeBtn);
+
+    // Synthetic Escape dispatched on window (e.g. from attachMouseBackGuard / Alt+ArrowLeft / Mouse Back) closes modal once!
+    doc.activeElement = bodyText;
+    const winPrevent = vi.fn();
+    for (const fn of [...(winListeners.get('keydown') ?? [])]) {
+      fn({ key: 'Escape', preventDefault: winPrevent });
+    }
+    expect(onEscape).toHaveBeenCalledTimes(1);
+    expect(winPrevent).toHaveBeenCalledTimes(1);
+
+    // Document-level Escape when body has focus also closes modal once
+    doc.activeElement = doc.body;
+    const docPrevent = vi.fn();
+    for (const fn of [...(docListeners.get('keydown') ?? [])]) {
+      fn({ key: 'Escape', preventDefault: docPrevent });
+    }
+    expect(onEscape).toHaveBeenCalledTimes(2);
+    expect(docPrevent).toHaveBeenCalledTimes(1);
+
+    // Same Escape event bubbling through overlayWrapper -> doc -> win fires onEscape strictly ONCE
+    const sharedEvent: DialogKeyEventLike = { key: 'Escape', preventDefault: vi.fn() };
+    for (const fn of [...(overlayWrapper.listeners.get('keydown') ?? [])]) fn(sharedEvent);
+    for (const fn of [...(docListeners.get('keydown') ?? [])]) fn(sharedEvent);
+    for (const fn of [...(winListeners.get('keydown') ?? [])]) fn(sharedEvent);
+    expect(onEscape).toHaveBeenCalledTimes(3);
+
+    teardown();
+    expect(appBackground.inert).toBe(false);
+    expect(winListeners.get('keydown')?.size ?? 0).toBe(0);
+    expect(docListeners.get('keydown')?.size ?? 0).toBe(0);
+  });
 });

@@ -25,7 +25,37 @@ export const WINDOW_CHANNELS = Object.freeze({
   dockPopout: 'window:dock-popout',
   popoutDocked: 'window:popout-docked',
   openExternalUrl: 'window:open-external-url',
+  getZoomLevel: 'window:get-zoom-level',
+  setZoomLevel: 'window:set-zoom-level',
+  zoomLevelChanged: 'window:zoom-level-changed',
 } as const);
+
+/** Minimum persisted desktop UI zoom level (Electron `webContents.setZoomLevel` units). */
+export const MIN_WINDOW_ZOOM_LEVEL = -3;
+
+/** Maximum persisted desktop UI zoom level (Electron `webContents.setZoomLevel` units). */
+export const MAX_WINDOW_ZOOM_LEVEL = 4;
+
+/** Discrete step applied by `Ctrl/Cmd +` and `Ctrl/Cmd -` desktop zoom shortcuts. */
+export const ZOOM_LEVEL_STEP = 0.5;
+
+/** Clamps a finite zoom level into `[-3, 4]` rounded to the nearest `0.5` step (non-finite -> `0`). */
+export function clampZoomLevel(level: number): number {
+  if (typeof level !== 'number' || !Number.isFinite(level)) return 0;
+  const clamped = Math.min(MAX_WINDOW_ZOOM_LEVEL, Math.max(MIN_WINDOW_ZOOM_LEVEL, level));
+  const stepped = Math.round(clamped / ZOOM_LEVEL_STEP) * ZOOM_LEVEL_STEP;
+  return stepped === 0 ? 0 : stepped;
+}
+
+/** Validates a finite zoom level payload within `[MIN_WINDOW_ZOOM_LEVEL, MAX_WINDOW_ZOOM_LEVEL]`. */
+export function isZoomLevel(x: unknown): x is number {
+  return (
+    typeof x === 'number' &&
+    Number.isFinite(x) &&
+    x >= MIN_WINDOW_ZOOM_LEVEL &&
+    x <= MAX_WINDOW_ZOOM_LEVEL
+  );
+}
 
 /** Localized context menu labels for the desktop system tray (`#158`). */
 export interface TrayLabels {
@@ -75,6 +105,9 @@ export interface WindowBridge {
   onWindowRestored(listener: () => void): () => void;
   onHiddenToTray(listener: () => void): () => void;
   openExternalUrl?(url: string): Promise<boolean>;
+  getZoomLevel?(): Promise<number>;
+  setZoomLevel?(level: number): Promise<number>;
+  onZoomLevelChanged?(listener: (level: number) => void): () => void;
 }
 
 const ALLOWED_EXTERNAL_TRAILER_HOSTS = new Set([

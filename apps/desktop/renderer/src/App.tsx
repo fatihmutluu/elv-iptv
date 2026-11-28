@@ -11,9 +11,11 @@ import {
   AppShell,
   type AppShellProps,
   createLazyCatalog,
+  type DesktopUpdaterPort,
   type DesktopWindowPort,
   type DiagnosticsPort,
   type LanPairingPort,
+  type PickedPlaylistFile,
   type ReminderHostPort,
   type SourceImportHost,
   type ThermalDevicePort,
@@ -32,6 +34,7 @@ import {
   subscribeCatalogDisconnected,
 } from './CatalogCrashBanner.tsx';
 import { createDesktopCatalog } from './catalog/index.ts';
+import { DesktopM3uDropZone } from './DesktopM3uDropZone.tsx';
 import { createDesktopDiagnosticsPort } from './diagnostics-port.ts';
 import { createDesktopDownloadsPort } from './downloads/desktop-downloads-port.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
@@ -57,6 +60,7 @@ import {
 } from './sync/desktop-sync-ports.ts';
 import { createDesktopTrailerExternalPort } from './trailer-external-port.ts';
 import { attachDeadHostOnlineReset, createDesktopUiAdapters } from './ui/desktop-adapters.tsx';
+import { createDesktopUpdaterPort } from './updater-port.ts';
 import { shouldMountWorkbench } from './workbench/presets.ts';
 
 declare const __DEV__: boolean;
@@ -284,24 +288,46 @@ function AppRoot() {
     });
   }, []);
 
+  const droppedPlaylistListenersRef = useRef(new Set<(file: PickedPlaylistFile) => void>());
+  const handleDroppedPlaylistFile = useCallback((file: PickedPlaylistFile) => {
+    for (const listener of [...droppedPlaylistListenersRef.current]) listener(file);
+  }, []);
+
   const sourceImportHost = useMemo<SourceImportHost | undefined>(() => {
     const sourcesBridge = window.elv?.sources;
-    if (!sourcesBridge) return undefined;
     return {
-      readClipboardText: () => sourcesBridge.readClipboardText(),
-      pickPlaylistFile: () => sourcesBridge.pickPlaylistFile(),
-      ...(typeof sourcesBridge.consumePendingPlaylistFiles === 'function'
+      readClipboardText: () =>
+        sourcesBridge ? sourcesBridge.readClipboardText() : Promise.resolve(null),
+      pickPlaylistFile: () =>
+        sourcesBridge ? sourcesBridge.pickPlaylistFile() : Promise.resolve(null),
+      ...(sourcesBridge && typeof sourcesBridge.consumePendingPlaylistFiles === 'function'
         ? {
             consumePendingPlaylistFiles: () => sourcesBridge.consumePendingPlaylistFiles(),
           }
         : {}),
-      ...(typeof sourcesBridge.onOpenPlaylistFile === 'function'
+      ...(sourcesBridge && typeof sourcesBridge.ackPlaylistFile === 'function'
         ? {
-            onOpenPlaylistFile: (listener) => sourcesBridge.onOpenPlaylistFile(listener),
+            ackPlaylistFile: (deliveryId: string) => sourcesBridge.ackPlaylistFile?.(deliveryId),
           }
         : {}),
+      onOpenPlaylistFile: (listener) => {
+        droppedPlaylistListenersRef.current.add(listener);
+        const offNative =
+          sourcesBridge && typeof sourcesBridge.onOpenPlaylistFile === 'function'
+            ? sourcesBridge.onOpenPlaylistFile(listener)
+            : undefined;
+        return () => {
+          droppedPlaylistListenersRef.current.delete(listener);
+          offNative?.();
+        };
+      },
     };
   }, []);
+
+  const desktopUpdater = useMemo<DesktopUpdaterPort | undefined>(
+    () => (window.elv?.updater ? createDesktopUpdaterPort(window.elv.updater) : undefined),
+    [],
+  );
 
   const lanPairing = useMemo<LanPairingPort | undefined>(
     () => createDesktopLanPairingPort(window.elv?.lanPairing),
@@ -433,6 +459,7 @@ function AppRoot() {
     pendingPairUri,
     onPairUriHandled: handlePairUriHandled,
     ...(desktopWindow === undefined ? {} : { desktopWindow }),
+    ...(desktopUpdater === undefined ? {} : { updater: desktopUpdater }),
     ...(sourceImportHost === undefined ? {} : { sourceImportHost }),
     ...(lanPairing === undefined ? {} : { lanPairing }),
     ...(desktopSync.syncAccount === undefined ? {} : { syncAccount: desktopSync.syncAccount }),
@@ -457,7 +484,14 @@ function AppRoot() {
             />
           ) : null}
           <View style={appStyles.shell}>
-            <AppShell {...shellProps} />
+            <DesktopM3uDropZone
+              onPlaylistFile={handleDroppedPlaylistFile}
+              {...(window.elv?.sources?.readDroppedPlaylistFile !== undefined
+                ? { readDroppedPlaylistFile: window.elv.sources.readDroppedPlaylistFile }
+                : {})}
+            >
+              <AppShell {...shellProps} />
+            </DesktopM3uDropZone>
           </View>
         </View>
       </AppProviders>

@@ -65,6 +65,14 @@ export function createProfileScopedCatalog(
   const clearTrackPreference = c.clearTrackPreference?.bind(c);
   const recordRecentChannel = c.recordRecentChannel?.bind(c);
   const listRecentChannels = c.listRecentChannels?.bind(c);
+  const removeRecentChannel = c.removeRecentChannel?.bind(c);
+  const clearRecentChannels = c.clearRecentChannels?.bind(c);
+  const listLiveFavoriteFolders = c.listLiveFavoriteFolders?.bind(c);
+  const createLiveFavoriteFolder = c.createLiveFavoriteFolder?.bind(c);
+  const renameLiveFavoriteFolder = c.renameLiveFavoriteFolder?.bind(c);
+  const deleteLiveFavoriteFolder = c.deleteLiveFavoriteFolder?.bind(c);
+  const assignLiveFavoriteFolder = c.assignLiveFavoriteFolder?.bind(c);
+  const listLiveFavoriteFolderAssignments = c.listLiveFavoriteFolderAssignments?.bind(c);
   const listChannelOverrides = c.listChannelOverrides?.bind(c);
   const setChannelOverride = c.setChannelOverride?.bind(c);
   const clearChannelOverride = c.clearChannelOverride?.bind(c);
@@ -636,6 +644,113 @@ export function createProfileScopedCatalog(
               if (!isKeyFromExcludedSource(k, excluded)) out[k] = v;
             }
             return out;
+          },
+        }
+      : {}),
+    ...(removeRecentChannel
+      ? {
+          removeRecentChannel: (itemKey, profileId) =>
+            removeRecentChannel(itemKey, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(clearRecentChannels
+      ? {
+          clearRecentChannels: (profileId) =>
+            clearRecentChannels(profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(listLiveFavoriteFolders
+      ? {
+          listLiveFavoriteFolders: async (profileId, opts) => {
+            const scope = getScope();
+            if (scope.parentalLoadError) return [];
+            const pid = profileId ?? scope.profileId;
+            const [excluded, rows] = await Promise.all([
+              excludedFor(pid, scope),
+              listLiveFavoriteFolders(pid, {
+                ...opts,
+                parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+              }),
+            ]);
+            if (excluded.size === 0 || rows.length === 0 || !listLiveFavoriteFolderAssignments) {
+              return rows;
+            }
+            const assignments = await listLiveFavoriteFolderAssignments(pid);
+            const allowedCounts = new Map<string, number>();
+            for (const a of assignments) {
+              if (!isKeyFromExcludedSource(a.itemKey, excluded)) {
+                allowedCounts.set(a.folderId, (allowedCounts.get(a.folderId) ?? 0) + 1);
+              }
+            }
+            return rows.map((row) => ({
+              ...row,
+              itemCount: Math.min(row.itemCount, allowedCounts.get(row.id) ?? 0),
+            }));
+          },
+        }
+      : {}),
+    ...(createLiveFavoriteFolder
+      ? {
+          createLiveFavoriteFolder: (input) =>
+            createLiveFavoriteFolder({
+              ...input,
+              profileId: input.profileId ?? getScope().profileId,
+            }),
+        }
+      : {}),
+    ...(renameLiveFavoriteFolder
+      ? {
+          renameLiveFavoriteFolder: async (id, name, profileId, opts) => {
+            const scope = getScope();
+            const pid = profileId ?? scope.profileId;
+            const res = await renameLiveFavoriteFolder(id, name, pid, {
+              ...opts,
+              parentalUnlocked: opts?.parentalUnlocked ?? scope.parentalUnlocked,
+            });
+            if (!res.ok || !listLiveFavoriteFolderAssignments) return res;
+            const excluded = await excludedFor(pid, scope);
+            if (excluded.size === 0) return res;
+            const assignments = await listLiveFavoriteFolderAssignments(pid);
+            let allowed = 0;
+            for (const a of assignments) {
+              if (a.folderId === res.value.id && !isKeyFromExcludedSource(a.itemKey, excluded)) {
+                allowed += 1;
+              }
+            }
+            return {
+              ok: true,
+              value: { ...res.value, itemCount: Math.min(res.value.itemCount, allowed) },
+            };
+          },
+        }
+      : {}),
+    ...(deleteLiveFavoriteFolder
+      ? {
+          deleteLiveFavoriteFolder: (id, profileId) =>
+            deleteLiveFavoriteFolder(id, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(assignLiveFavoriteFolder
+      ? {
+          assignLiveFavoriteFolder: (input) =>
+            assignLiveFavoriteFolder({
+              ...input,
+              profileId: input.profileId ?? getScope().profileId,
+            }),
+        }
+      : {}),
+    ...(listLiveFavoriteFolderAssignments
+      ? {
+          listLiveFavoriteFolderAssignments: async (profileId) => {
+            const scope = getScope();
+            if (scope.parentalLoadError) return [];
+            const pid = profileId ?? scope.profileId;
+            const [excluded, rows] = await Promise.all([
+              excludedFor(pid, scope),
+              listLiveFavoriteFolderAssignments(pid),
+            ]);
+            if (excluded.size === 0) return rows;
+            return rows.filter((r) => !isKeyFromExcludedSource(r.itemKey, excluded));
           },
         }
       : {}),

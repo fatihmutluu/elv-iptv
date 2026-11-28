@@ -26,6 +26,12 @@ export interface LiveContextMenuProps {
   readonly onOpenMultiView?: (channel: ItemRow, index: number) => void;
   readonly onOpenPopout?: (channel: ItemRow, index: number) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
+  /** Optional extension slot for assigning or moving a live channel to a favorite folder (`Wave Q7-B`). */
+  readonly onMoveToFolder?: (channel: ItemRow) => void;
+  /** Marks this channel as belonging to the Recent Channels list (`Wave Q7-B`). */
+  readonly isRecent?: boolean;
+  /** Removes this channel from the Recent Channels list when `isRecent` is `true` (`Wave Q7-B`). */
+  readonly onRemoveFromRecent?: () => void;
   readonly canMoveUp?: boolean;
   readonly canMoveDown?: boolean;
   readonly onMoveFavorite?: (direction: 'up' | 'down') => void;
@@ -47,6 +53,8 @@ interface ContextActionItem {
     | 'multiview'
     | 'popout'
     | 'favorite'
+    | 'moveToFolder'
+    | 'removeFromRecent'
     | 'moveUp'
     | 'moveDown'
     | 'details'
@@ -85,6 +93,9 @@ export function LiveContextMenu({
   onOpenMultiView,
   onOpenPopout,
   onToggleFavorite,
+  onMoveToFolder,
+  isRecent = false,
+  onRemoveFromRecent,
   canMoveUp = false,
   canMoveDown = false,
   onMoveFavorite,
@@ -146,6 +157,30 @@ export function LiveContextMenu({
         run: () => {
           onClose();
           onToggleFavorite(channel);
+        },
+      });
+    }
+    if (onMoveToFolder !== undefined) {
+      list.push({
+        id: 'moveToFolder',
+        testID: 'live-context-move-to-folder',
+        icon: 'layers',
+        label: i18n.t(isFavorite ? 'live.folders.moveToFolder' : 'live.folders.addToFolder'),
+        run: () => {
+          onClose();
+          onMoveToFolder(channel);
+        },
+      });
+    }
+    if (isRecent && onRemoveFromRecent !== undefined) {
+      list.push({
+        id: 'removeFromRecent',
+        testID: 'live-context-remove-from-recent',
+        icon: 'trash',
+        label: i18n.t('live.context.removeFromRecent'),
+        run: () => {
+          onClose();
+          onRemoveFromRecent();
         },
       });
     }
@@ -218,13 +253,16 @@ export function LiveContextMenu({
     channelIndex,
     i18n,
     isFavorite,
+    isRecent,
     onClose,
     onHideChannel,
     onManageChannels,
     onMoveFavorite,
+    onMoveToFolder,
     onOpenMultiView,
     onOpenPopout,
     onPlay,
+    onRemoveFromRecent,
     onShowProgrammeDetails,
     onToggleFavorite,
     programme,

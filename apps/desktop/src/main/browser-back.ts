@@ -25,6 +25,7 @@ interface BrowserBackWebContentsLike {
 export interface BrowserBackGuardWindow {
   isDestroyed(): boolean;
   on(event: 'app-command', listener: (event: AppCommandEventLike, cmd: string) => void): unknown;
+  on(event: 'swipe', listener: (event: AppCommandEventLike, direction: string) => void): unknown;
   readonly webContents: BrowserBackWebContentsLike;
 }
 
@@ -42,9 +43,9 @@ function dispatchEscapeKey(contents: BrowserBackWebContentsLike): void {
 }
 
 /**
- * Intercepts Electron `app-command` `'browser-backward'` / `'browser-forward'` and in-place history
- * navigation, keeping Chromium's navigation history cleared and routing Back into the renderer as
- * an `Escape` key press (or optional `onBack` callback) (#139).
+ * Intercepts Electron `app-command` `'browser-backward'` / `'browser-forward'`, macOS trackpad
+ * `swipe` left, and in-place history navigation, keeping Chromium's navigation history cleared
+ * and routing Back into the renderer as an `Escape` key press (or optional `onBack` callback) (#139).
  */
 export function attachBrowserBackGuard(win: BrowserBackGuardWindow, onBack?: () => void): void {
   const triggerBack = (): void => {
@@ -62,6 +63,17 @@ export function attachBrowserBackGuard(win: BrowserBackGuardWindow, onBack?: () 
       event.preventDefault?.();
     }
   });
+
+  try {
+    win.on('swipe', (event, direction) => {
+      if (direction === 'left') {
+        event?.preventDefault?.();
+        triggerBack();
+      }
+    });
+  } catch {
+    // Ignore hosts/fakes without macOS trackpad swipe event support.
+  }
 
   win.webContents.on('will-navigate', (details) => {
     if (details.isInPlace === true || details.isSameDocument === true) {

@@ -234,6 +234,8 @@ const SOURCE_TEST_TABLES: Record<string, string> = {
     "(profile_id, series_key, source_id, dismissed_at) VALUES ('default', ?, ?, 1)",
   ratings:
     "(profile_id, source_id, item_key, kind, value, title, updated_at) VALUES ('default', ?, ?, 'movie', 'like', 'Film', 1)",
+  live_favorite_folder_items:
+    "(folder_id, profile_id, source_id, item_key, position, added_at) VALUES ('lff1', 'default', ?, ?, 0, 1)",
 };
 
 const SOURCE_ID_FIRST_TABLES = new Set([
@@ -244,6 +246,7 @@ const SOURCE_ID_FIRST_TABLES = new Set([
   'failover_group_members',
   'downloads',
   'ratings',
+  'live_favorite_folder_items',
 ]);
 
 const KEY_FIRST_TABLES = new Set([
@@ -263,6 +266,9 @@ async function seedSourceTables(
   includeProgrammesNext: boolean,
 ): Promise<string[]> {
   let runId = 1;
+  await db.run(
+    "INSERT OR IGNORE INTO live_favorite_folders (id, profile_id, name, name_fold, sort_order, created_at, updated_at) VALUES ('lff1', 'default', 'Sports', 'sports', 0, 1, 1)",
+  );
   const entries = Object.entries(SOURCE_TEST_TABLES).filter(
     ([table]) => includeProgrammesNext || table !== 'programmes_next',
   );

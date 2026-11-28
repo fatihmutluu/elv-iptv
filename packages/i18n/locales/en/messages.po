@@ -4654,3 +4654,258 @@ msgstr "{active}/{max} {max, plural, one {connection} other {connections}}"
 
 msgid "sources.account.connectionsMax"
 msgstr "{max, plural, one {# connection} other {# connections}}"
+
+msgid "desktop.dropZone.title"
+msgstr "Drop M3U playlist to import"
+
+msgid "desktop.dropZone.subtitle"
+msgstr "Release to open the playlist in Sources"
+
+msgid "desktop.dropZone.formats"
+msgstr "Supports .m3u, .m3u8, and .m3u.gz up to 64 MiB"
+
+msgid "desktop.shortcuts.title"
+msgstr "Keyboard shortcuts"
+
+msgid "desktop.shortcuts.subtitle"
+msgstr "Press ? or F1 any time while browsing."
+
+msgid "desktop.shortcuts.close"
+msgstr "Close keyboard shortcuts"
+
+msgid "desktop.shortcuts.group.navigation"
+msgstr "Navigation"
+
+msgid "desktop.shortcuts.group.search"
+msgstr "Search & commands"
+
+msgid "desktop.shortcuts.group.display"
+msgstr "Display & zoom"
+
+msgid "desktop.shortcuts.group.player"
+msgstr "Player"
+
+msgid "desktop.shortcuts.item.back"
+msgstr "Go back"
+
+msgid "desktop.shortcuts.item.mouseBack"
+msgstr "Mouse back button"
+
+msgid "desktop.shortcuts.item.closeOverlay"
+msgstr "Close overlay or modal"
+
+msgid "desktop.shortcuts.item.commandPalette"
+msgstr "Open command palette"
+
+msgid "desktop.shortcuts.item.search"
+msgstr "Jump to search"
+
+msgid "desktop.shortcuts.item.shortcutSheet"
+msgstr "Toggle keyboard shortcuts"
+
+msgid "desktop.shortcuts.item.zoomIn"
+msgstr "Zoom in"
+
+msgid "desktop.shortcuts.item.zoomOut"
+msgstr "Zoom out"
+
+msgid "desktop.shortcuts.item.zoomReset"
+msgstr "Reset zoom"
+
+msgid "desktop.shortcuts.item.playPause"
+msgstr "Play / Pause"
+
+msgid "desktop.shortcuts.item.seekStep"
+msgstr "Seek back / forward"
+
+msgid "desktop.shortcuts.item.seekCoarse"
+msgstr "Long seek back / forward"
+
+msgid "desktop.shortcuts.item.fullscreen"
+msgstr "Toggle fullscreen"
+
+msgid "desktop.shortcuts.item.mute"
+msgstr "Mute / Unmute"
+
+msgid "desktop.shortcuts.item.tracks"
+msgstr "Audio & subtitles"
+
+msgid "desktop.shortcuts.item.alwaysOnTop"
+msgstr "Pin window on top"
+
+msgid "desktop.shortcuts.item.channels"
+msgstr "Toggle channel list"
+
+msgid "desktop.shortcuts.item.prevChannel"
+msgstr "Previous channel"
+
+msgid "desktop.shortcuts.item.infoStats"
+msgstr "Stream info / stats"
+
+msgid "desktop.palette.title"
+msgstr "Command palette"
+
+msgid "desktop.palette.placeholder"
+msgstr "Jump to a screen, setting, or action…"
+
+msgid "desktop.palette.close"
+msgstr "Close command palette"
+
+msgid "desktop.palette.empty"
+msgstr "No matching commands"
+
+msgid "desktop.palette.hint"
+msgstr "↑↓ to navigate · Enter to run · Esc to close"
+
+msgid "desktop.palette.group.tabs"
+msgstr "Go to"
+
+msgid "desktop.palette.group.settings"
+msgstr "Settings"
+
+msgid "desktop.palette.group.actions"
+msgstr "Actions"
+
+msgid "desktop.palette.action.toggleElvMode"
+msgstr "Toggle ELV Mode"
+
+msgid "desktop.palette.action.elvModeOn"
+msgstr "Disable ELV Mode"
+
+msgid "desktop.palette.action.elvModeOff"
+msgstr "Enable ELV Mode"
+
+msgid "desktop.palette.action.lockParental"
+msgstr "Lock parental controls"
+
+msgid "desktop.palette.action.cycleTheme"
+msgstr "Cycle theme preset"
+
+msgid "desktop.palette.action.openShortcuts"
+msgstr "Open keyboard shortcuts"
+
+msgid "settings.playback.autoReplaceSingleConnection"
+msgstr "Auto-replace stream on single-connection accounts"
+
+msgid "settings.playback.autoReplaceSingleConnectionDesc"
+msgstr "Automatically stop the active local stream when tuning another channel on a 1-connection source."
+
+msgid "settings.liveTv.clearRecentChannels"
+msgstr "Recent channels history"
+
+msgid "settings.liveTv.clearRecentChannelsDesc"
+msgstr "Clear your recently watched Live TV channels list for the active profile."
+
+msgid "settings.liveTv.clearRecentChannelsAction"
+msgstr "Clear recent channels"
+
+msgid "settings.liveTv.clearRecentChannelsCleared"
+msgstr "Cleared"
+
+msgid "live.context.removeFromRecent"
+msgstr "Remove from Recent"
+
+msgid "live.folders.all"
+msgstr "All"
+
+msgid "live.folders.unfiled"
+msgstr "Unfiled"
+
+msgid "live.folders.createTooltip"
+msgstr "New favorite folder"
+
+msgid "live.folders.createTitle"
+msgstr "New favorite folder"
+
+msgid "live.folders.renameTitle"
+msgstr "Rename folder"
+
+msgid "live.folders.deleteTitle"
+msgstr "Delete folder"
+
+msgid "live.folders.deleteBody"
+msgstr "Channels in \"{name}\" will stay in your Favorites under Unfiled."
+
+msgid "live.folders.namePlaceholder"
+msgstr "Folder name (e.g. Sports, News)"
+
+msgid "live.folders.moveToFolder"
+msgstr "Move to folder…"
+
+msgid "live.folders.addToFolder"
+msgstr "Add to folder…"
+
+msgid "live.folders.moveModalTitle"
+msgstr "Move to folder"
+
+msgid "live.folders.createAndMove"
+msgstr "Create & move"
+
+msgid "live.folders.createFolder"
+msgstr "Create folder"
+
+msgid "live.folders.manageFolder"
+msgstr "Manage folder"
+
+msgid "live.folders.rename"
+msgstr "Rename"
+
+msgid "live.folders.delete"
+msgstr "Delete"
+
+msgid "live.folders.save"
+msgstr "Save"
+
+msgid "live.folders.cancel"
+msgstr "Cancel"
+
+msgid "live.folders.emptyFolder"
+msgstr "No favorite channels in this folder yet."
+
+msgid "live.folders.currentBadge"
+msgstr "Current"
+
+msgid "settings.updates.title"
+msgstr "Software updates"
+
+msgid "settings.updates.currentVersion"
+msgstr "Version {version}"
+
+msgid "settings.updates.check"
+msgstr "Check for updates"
+
+msgid "settings.updates.checking"
+msgstr "Checking for updates…"
+
+msgid "settings.updates.upToDate"
+msgstr "Up to date"
+
+msgid "settings.updates.available"
+msgstr "Version {version} is available"
+
+msgid "settings.updates.download"
+msgstr "Download update"
+
+msgid "settings.updates.downloading"
+msgstr "Downloading update ({percent}%)"
+
+msgid "settings.updates.downloaded"
+msgstr "Version {version} is ready to install"
+
+msgid "settings.updates.restartInstall"
+msgstr "Restart & install"
+
+msgid "settings.updates.openReleasePage"
+msgstr "Open release page"
+
+msgid "settings.updates.releaseNotes"
+msgstr "What’s new"
+
+msgid "settings.updates.error"
+msgstr "Could not check for updates. Try again later."
+
+msgid "settings.updates.errorChecksum"
+msgstr "Update verification failed. Download directly from the release page."
+
+msgid "settings.updates.installing"
+msgstr "Preparing update…"

@@ -23,6 +23,7 @@ import {
 import type { Result, SecretStore } from '@elv/domain';
 import { decodeEpisodeBitfield, type SyncProfileRecord, type VaultSnapshot } from '@elv/sync';
 import type { CatalogRpcMethodCall } from '../../shared/catalog-ipc.ts';
+import { applyDesktopLiveFavoriteFolders } from './snapshot-live-folders-helpers.ts';
 import { applyDesktopSources } from './snapshot-source-helpers.ts';
 
 /** RPC caller callback used by desktop snapshot export and apply helpers. */
@@ -694,6 +695,10 @@ export async function applyDesktopMergedSnapshot(
         if (res?.ok) mutated = true;
       }
     }
+  }
+
+  if (await applyDesktopLiveFavoriteFolders(snapshot, call)) {
+    mutated = true;
   }
 
   if (mutated) {

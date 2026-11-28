@@ -2,6 +2,7 @@
 export interface PickedPlaylistFile {
   readonly name: string;
   readonly bytes: Uint8Array;
+  readonly deliveryId?: string;
 }
 
 /**
@@ -14,4 +15,5 @@ export interface SourceImportHost {
   pickPlaylistFile?: () => Promise<PickedPlaylistFile | null>;
   readonly consumePendingPlaylistFiles?: () => Promise<readonly PickedPlaylistFile[]>;
   readonly onOpenPlaylistFile?: (listener: (file: PickedPlaylistFile) => void) => () => void;
+  readonly ackPlaylistFile?: (deliveryId: string) => Promise<void> | void;
 }

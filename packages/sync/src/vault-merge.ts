@@ -62,6 +62,15 @@ export interface SyncCollection extends SyncTombstoneMeta {
   readonly sortOrder?: number;
 }
 
+/** Cross-source per-profile Live TV favorite folder synced across devices (`F-11`). */
+export interface SyncLiveFavoriteFolder extends SyncTombstoneMeta {
+  readonly id: string;
+  readonly name: string;
+  readonly channelKeys: readonly string[];
+  readonly sortOrder: number;
+  readonly profileId?: string;
+}
+
 /** Tombstone-aware playback resume entry for movies, episodes, or channels. */
 export interface SyncWatchProgress extends SyncTombstoneMeta {
   readonly key: string;
@@ -134,6 +143,7 @@ export interface VaultSnapshot {
   readonly continueWatchingDismissals?: readonly SyncContinueWatchingDismissal[];
   readonly ratings?: readonly SyncRatingRecord[];
   readonly profiles?: readonly SyncProfileRecord[];
+  readonly liveFavoriteFolders?: readonly SyncLiveFavoriteFolder[];
   readonly initialPreferences?: Readonly<Record<string, unknown>>;
   readonly initialPreferencesUpdatedAt?: number;
 }
@@ -390,6 +400,11 @@ export function mergeVaultSnapshots(local: VaultSnapshot, remote: VaultSnapshot)
     remote.profiles ?? [],
     (p) => p.id,
   );
+  const mergedLiveFavoriteFolders = mergeKeyedCollection(
+    local.liveFavoriteFolders ?? [],
+    remote.liveFavoriteFolders ?? [],
+    (f) => f.id,
+  );
   return {
     schemaVersion: VAULT_SCHEMA_VERSION,
     updatedAt: Math.max(local.updatedAt, remote.updatedAt),
@@ -423,6 +438,9 @@ export function mergeVaultSnapshots(local: VaultSnapshot, remote: VaultSnapshot)
     ...(mergedDismissals.length > 0 ? { continueWatchingDismissals: mergedDismissals } : {}),
     ...(mergedRatings.length > 0 ? { ratings: mergedRatings } : {}),
     ...(mergedProfiles.length > 0 ? { profiles: mergedProfiles } : {}),
+    ...(mergedLiveFavoriteFolders.length > 0
+      ? { liveFavoriteFolders: mergedLiveFavoriteFolders }
+      : {}),
     ...mergeInitialPreferences(local, remote),
   };
 }

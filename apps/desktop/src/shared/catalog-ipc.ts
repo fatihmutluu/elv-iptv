@@ -115,6 +115,11 @@ import {
   MAX_ITEM_KEY_CHARS,
 } from './catalog-ipc-guards.ts';
 import {
+  type CatalogBridgeWaveQ7Ops,
+  type CatalogWaveQ7OpsRpcCall,
+  isWaveQ7OpsRpcCall,
+} from './catalog-ipc-guards-q7.ts';
+import {
   type CatalogBridgeRatingsOps,
   type CatalogRatingsOpsRpcCall,
   isRatingsOpsRpcCall,
@@ -316,7 +321,8 @@ export type CatalogRpcMethodCall =
   | CatalogWaveE2OpsRpcCall
   | CatalogWaveF5bOpsRpcCall
   | CatalogWaveP7OpsRpcCall
-  | CatalogWaveP9OpsRpcCall;
+  | CatalogWaveP9OpsRpcCall
+  | CatalogWaveQ7OpsRpcCall;
 
 /** Preload to utility process over `MessagePort`. */
 export type CatalogClientMessage =
@@ -352,7 +358,8 @@ export interface CatalogBridge
     CatalogBridgeWaveE1Ops,
     CatalogBridgeWaveE2Ops,
     CatalogBridgeWaveF5bOps,
-    CatalogBridgeWaveP7Ops {
+    CatalogBridgeWaveP7Ops,
+    CatalogBridgeWaveQ7Ops {
   open(): Promise<Result<void>>;
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
@@ -729,7 +736,8 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isWaveE2OpsRpcCall(x) ||
         isWaveF5bOpsRpcCall(x) ||
         isWaveP7OpsRpcCall(x) ||
-        isWaveP9OpsRpcCall(x)
+        isWaveP9OpsRpcCall(x) ||
+        isWaveQ7OpsRpcCall(x)
       );
   }
 }

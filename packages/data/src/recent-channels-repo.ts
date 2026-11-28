@@ -159,3 +159,31 @@ export async function listRecentChannels(
   );
   return mapped.filter((r) => !restricted.has(r.key)).slice(0, clamped);
 }
+
+/**
+ * Removes a single recently watched channel entry for `(profileId, itemKey)` (`Wave Q7-B`).
+ * Returns `true` when a row was deleted, or `false` when the key is invalid or not present.
+ */
+export async function removeRecentChannel(
+  db: SqlDriver,
+  itemKey: string,
+  profileId?: string,
+): Promise<boolean> {
+  if (!isSafeRecentChannelKey(itemKey)) return false;
+  const key = itemKey.trim();
+  const profile = normalizeProfileId(profileId);
+  const res = await db.run('DELETE FROM recent_channels WHERE profile_id = ? AND item_key = ?', [
+    profile,
+    key,
+  ]);
+  return res.changes > 0;
+}
+
+/**
+ * Deletes all recently watched channel entries for `profileId` and returns the deleted row count (`Wave Q7-B`).
+ */
+export async function clearRecentChannels(db: SqlDriver, profileId?: string): Promise<number> {
+  const profile = normalizeProfileId(profileId);
+  const res = await db.run('DELETE FROM recent_channels WHERE profile_id = ?', [profile]);
+  return res.changes;
+}

@@ -49,7 +49,7 @@ import {
   HomeSectionsList,
 } from './HomeRail';
 import { computeHomeLayout, HomeEmptyState, HomeSkeleton } from './HomeSkeleton';
-import { buildHomeCardContextMenuItems } from './home-context-menu';
+import { buildHomeCardContextMenuItems, useHomeRecentChannels } from './home-context-menu';
 import { buildElvShowcaseEntries, filterOutDislikedItems } from './home-elv-helpers';
 import {
   buildHeroSlides,
@@ -204,6 +204,8 @@ export function HomeScreen({
     if (heroIndex >= heroSlides.length && heroSlides.length > 0) setHeroIndex(0);
   }, [heroIndex, heroSlides.length, setHeroIndex]);
 
+  const { visibleRecentChannels, recentChannelKeys, handleRemoveFromRecent } =
+    useHomeRecentChannels(data.recentChannels, catalog, uiCache);
   const newEpisodeBadgeLabel = i18n.t('home.newEpisodeBadge');
   const railSets = useMemo(
     () =>
@@ -212,7 +214,7 @@ export function HomeScreen({
         elvShowcase: elvShowcaseEntries,
         newEpisodes: data.newEpisodes ?? [],
         newEpisodeBadgeLabel,
-        recentChannels: data.recentChannels ?? [],
+        recentChannels: visibleRecentChannels,
         liveItems: data.liveItems,
         liveCategoryName: data.liveCategory?.name ?? null,
         nowNextByKey: data.nowNextByKey,
@@ -221,7 +223,14 @@ export function HomeScreen({
         series: visibleSeries,
         progressByKey: data.progressByKey,
       }),
-    [data, elvShowcaseEntries, newEpisodeBadgeLabel, visibleMovies, visibleSeries],
+    [
+      data,
+      elvShowcaseEntries,
+      newEpisodeBadgeLabel,
+      visibleMovies,
+      visibleRecentChannels,
+      visibleSeries,
+    ],
   );
 
   const effectiveHomeLayout = useMemo(
@@ -581,12 +590,16 @@ export function HomeScreen({
         index,
         isFavorite,
         isWatched,
+        isRecent: recentChannelKeys.has(entry.itemKey),
         currentRating: data.ratingByKey.get(entry.itemKey) ?? null,
         isDownloaded,
         t: i18n.t,
         onPlay: activateEntry,
         ...(onOpenDetail !== undefined ? { onOpenDetail: handleOpenEntryDetail } : {}),
         onRemoveFromContinue: handleRemoveFromContinue,
+        ...(catalog.removeRecentChannel !== undefined
+          ? { onRemoveFromRecent: handleRemoveFromRecent }
+          : {}),
         onDismissNewEpisode: handleDismissNewEpisode,
         onMarkNewEpisodeWatched: handleMarkNewEpisodeWatched,
         onToggleFavorite: handleQuickToggleFavorite,
@@ -621,6 +634,7 @@ export function HomeScreen({
     },
     [
       activateEntry,
+      catalog.removeRecentChannel,
       contextMenu,
       data.favoriteKeys,
       data.ratingByKey,
@@ -636,10 +650,12 @@ export function HomeScreen({
       handleQuickToggleRating,
       handleQuickToggleWatched,
       handleRemoveFromContinue,
+      handleRemoveFromRecent,
       i18n.t,
       onOpenDetail,
       onOpenMultiView,
       onOpenPopout,
+      recentChannelKeys,
     ],
   );
   const focusedAmbientEntry = useMemo(() => {

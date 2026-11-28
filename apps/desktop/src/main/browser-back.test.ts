@@ -7,14 +7,14 @@ import {
 } from './browser-back.ts';
 
 function createFakeWindow(opts: { destroyed?: boolean; contentsDestroyed?: boolean } = {}) {
-  const winListeners = new Map<string, Array<(event: AppCommandEventLike, cmd: string) => void>>();
+  const winListeners = new Map<string, Array<(event: AppCommandEventLike, arg: string) => void>>();
   const wcListeners = new Map<string, Array<(event: WillNavigateEventLike) => void>>();
   const sentInputs: Array<{ type: 'keyDown' | 'keyUp'; keyCode: string }> = [];
   const clearNavHistory = vi.fn();
 
   const win: BrowserBackGuardWindow = {
     isDestroyed: () => opts.destroyed === true,
-    on(event, listener) {
+    on(event: string, listener: (event: AppCommandEventLike, arg: string) => void) {
       const list = winListeners.get(event) ?? [];
       list.push(listener);
       winListeners.set(event, list);
@@ -45,6 +45,13 @@ function createFakeWindow(opts: { destroyed?: boolean; contentsDestroyed?: boole
       const preventDefault = vi.fn();
       for (const l of winListeners.get('app-command') ?? []) {
         l({ preventDefault }, cmd);
+      }
+      return preventDefault;
+    },
+    emitSwipe(direction: string) {
+      const preventDefault = vi.fn();
+      for (const l of winListeners.get('swipe') ?? []) {
+        l({ preventDefault }, direction);
       }
       return preventDefault;
     },
@@ -132,5 +139,28 @@ describe('attachBrowserBackGuard', () => {
     deadContents.emitAppCommand('browser-backward');
     expect(deadContents.sentInputs).toEqual([]);
     expect(deadContents.clearNavHistory).not.toHaveBeenCalled();
+  });
+
+  it('triggers Back on macOS trackpad swipe left and ignores other swipe directions (Wave Q7)', () => {
+    const fake = createFakeWindow();
+    attachBrowserBackGuard(fake.win);
+
+    fake.emitSwipe('right');
+    fake.emitSwipe('up');
+    fake.emitSwipe('down');
+    expect(fake.sentInputs).toEqual([]);
+
+    const prev = fake.emitSwipe('left');
+    expect(prev).toHaveBeenCalledTimes(1);
+    expect(fake.clearNavHistory).toHaveBeenCalledTimes(1);
+    expect(fake.sentInputs).toEqual([
+      { type: 'keyDown', keyCode: 'Escape' },
+      { type: 'keyUp', keyCode: 'Escape' },
+    ]);
+
+    const dead = createFakeWindow({ destroyed: true });
+    attachBrowserBackGuard(dead.win);
+    dead.emitSwipe('left');
+    expect(dead.sentInputs).toEqual([]);
   });
 });

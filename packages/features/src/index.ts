@@ -86,6 +86,11 @@ export type {
   TvHomeProgramKind,
 } from './ports/tv-home-channels';
 export type {
+  DesktopUpdaterPort,
+  DesktopUpdateState,
+  DesktopUpdateStatus,
+} from './ports/updater-port';
+export type {
   AdoptedPlaybackSession,
   OpenVideoEngine,
   PipSourceRect,

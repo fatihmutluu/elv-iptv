@@ -289,6 +289,7 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
     },
     setLiveCategories(categories) {
       live = {
+        ...live,
         categories,
         favoriteKeys: live?.favoriteKeys ?? new Set(),
         favoriteChannels: live?.favoriteChannels ?? [],
@@ -298,11 +299,25 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
     },
     setLiveFavorites(favoriteKeys, favoriteChannels) {
       live = {
+        ...live,
         categories: live?.categories ?? [],
         favoriteKeys,
         favoriteChannels,
         hasLoadedCategories: live?.hasLoadedCategories ?? false,
         hasLoadedFavorites: true,
+      };
+    },
+    setLiveFavoriteFolders(favoriteFolders, favoriteFolderAssignments) {
+      live = {
+        ...live,
+        categories: live?.categories ?? [],
+        favoriteKeys: live?.favoriteKeys ?? new Set(),
+        favoriteChannels: live?.favoriteChannels ?? [],
+        hasLoadedCategories: live?.hasLoadedCategories ?? false,
+        hasLoadedFavorites: live?.hasLoadedFavorites ?? false,
+        favoriteFolders,
+        favoriteFolderAssignments,
+        hasLoadedFavoriteFolders: true,
       };
     },
 
@@ -403,11 +418,20 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
         for (const key of live.favoriteKeys) {
           if (!itemKeyBelongsToSource(key, sourceId)) nextFavKeys.add(key);
         }
+        let nextAssignments = live.favoriteFolderAssignments;
+        if (nextAssignments !== undefined) {
+          const pruned = new Map<string, string>();
+          for (const [k, fid] of nextAssignments) {
+            if (!itemKeyBelongsToSource(k, sourceId)) pruned.set(k, fid);
+          }
+          nextAssignments = pruned;
+        }
         live = {
           ...live,
           categories: live.categories.filter((c) => c.row.sourceId !== sourceId),
           favoriteKeys: nextFavKeys,
           favoriteChannels: live.favoriteChannels.filter((c) => c.sourceId !== sourceId),
+          ...(nextAssignments !== undefined ? { favoriteFolderAssignments: nextAssignments } : {}),
         };
       }
       liveFirstChannels.deleteWhere((catId) => catId.startsWith(catPrefix));

@@ -4,6 +4,7 @@ import type {
   SyncCustomGroup,
   SyncEpisodeBitfield,
   SyncKeyedFlag,
+  SyncLiveFavoriteFolder,
   SyncProfileRecord,
   SyncRatingRecord,
   SyncSourceRecord,
@@ -302,6 +303,22 @@ export function reconcileLocalSnapshotWithBaseline(
     nowMs,
   );
   const profiles = reconcileProfiles(fresh.profiles, previous.profiles, nowMs);
+  const liveFavoriteFolders =
+    fresh.liveFavoriteFolders !== undefined || previous.liveFavoriteFolders !== undefined
+      ? reconcileKeyedItems<SyncLiveFavoriteFolder>(
+          fresh.liveFavoriteFolders ?? [],
+          previous.liveFavoriteFolders ?? [],
+          (f) => f.id,
+          (f) =>
+            stableJson({
+              name: f.name,
+              profileId: profileScope(f.profileId),
+              sortOrder: f.sortOrder,
+              channelKeys: f.channelKeys,
+            }),
+          nowMs,
+        )
+      : undefined;
 
   return {
     ...fresh,
@@ -318,5 +335,8 @@ export function reconcileLocalSnapshotWithBaseline(
     ...(dismissals.length > 0 ? { continueWatchingDismissals: dismissals } : {}),
     ...(ratings.length > 0 ? { ratings } : {}),
     ...(profiles !== undefined && profiles.length > 0 ? { profiles } : {}),
+    ...(liveFavoriteFolders !== undefined && liveFavoriteFolders.length > 0
+      ? { liveFavoriteFolders }
+      : {}),
   };
 }

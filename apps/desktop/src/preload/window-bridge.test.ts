@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WINDOW_CHANNELS } from '../shared/window-ipc.ts';
-import { createWindowBridge, type WindowIpcRendererLike } from './window-bridge.ts';
+import {
+  createWindowBridge,
+  syncInitialZoomLevel,
+  type WindowIpcRendererLike,
+  type WindowWebFrameLike,
+} from './window-bridge.ts';
 
 function fakeIpcRenderer() {
   const listeners = new Map<string, Set<(event: unknown, ...args: unknown[]) => void>>();
@@ -159,5 +164,74 @@ describe('createWindowBridge (#408)', () => {
     expect(fake.listenerCount(WINDOW_CHANNELS.popoutDocked)).toBe(0);
     expect(fake.listenerCount(WINDOW_CHANNELS.windowRestored)).toBe(0);
     expect(fake.listenerCount(WINDOW_CHANNELS.hiddenToTray)).toBe(0);
+  });
+
+  it('forwards zoom level get/set/changed and syncs initial + live zoom to webFrame (Wave Q7)', async () => {
+    const fake = fakeIpcRenderer();
+    const appliedZooms: number[] = [];
+    const webFrame: WindowWebFrameLike = {
+      setZoomLevel: (level) => {
+        appliedZooms.push(level);
+      },
+    };
+    const bridge = createWindowBridge(fake.ipc, webFrame);
+
+    fake.invoke.mockResolvedValueOnce(1.5);
+    expect(await bridge.getZoomLevel?.()).toBe(1.5);
+    expect(fake.invoke).toHaveBeenLastCalledWith(WINDOW_CHANNELS.getZoomLevel);
+
+    fake.invoke.mockResolvedValueOnce(2);
+    expect(await bridge.setZoomLevel?.(1.9)).toBe(2);
+    expect(fake.invoke).toHaveBeenLastCalledWith(WINDOW_CHANNELS.setZoomLevel, 2);
+    expect(appliedZooms).toEqual([2]);
+
+    fake.invoke.mockResolvedValueOnce('bad');
+    await expect(bridge.getZoomLevel?.()).rejects.toThrow('unexpected reply');
+
+    fake.invoke.mockResolvedValueOnce(99);
+    await expect(bridge.setZoomLevel?.(1)).rejects.toThrow('unexpected reply');
+
+    const seen: number[] = [];
+    const off = bridge.onZoomLevelChanged?.((level) => seen.push(level));
+    fake.emit(WINDOW_CHANNELS.zoomLevelChanged, -1.5);
+    fake.emit(WINDOW_CHANNELS.zoomLevelChanged, 'bogus');
+    fake.emit(WINDOW_CHANNELS.zoomLevelChanged, 10);
+    expect(seen).toEqual([-1.5]);
+    expect(appliedZooms).toEqual([2, -1.5]);
+    off?.();
+    expect(fake.listenerCount(WINDOW_CHANNELS.zoomLevelChanged)).toBe(0);
+
+    // syncInitialZoomLevel applies persisted zoom on init, DOMContentLoaded, and live events
+    const domListeners = new Map<string, Set<() => void>>();
+    const fakeDoc = {
+      readyState: 'loading',
+      addEventListener: (type: string, fn: () => void) => {
+        const set = domListeners.get(type) ?? new Set();
+        set.add(fn);
+        domListeners.set(type, set);
+      },
+      removeEventListener: (type: string, fn: () => void) => {
+        domListeners.get(type)?.delete(fn);
+      },
+    };
+    appliedZooms.length = 0;
+    fake.invoke.mockResolvedValueOnce(1);
+    fake.invoke.mockResolvedValueOnce(1);
+    const stopSync = syncInitialZoomLevel(fake.ipc, webFrame, fakeDoc);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(appliedZooms).toEqual([1]);
+
+    for (const fn of domListeners.get('DOMContentLoaded') ?? []) fn();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(appliedZooms).toEqual([1, 1]);
+
+    fake.emit(WINDOW_CHANNELS.zoomLevelChanged, 2.5);
+    expect(appliedZooms).toEqual([1, 1, 2.5]);
+
+    stopSync();
+    expect(fake.listenerCount(WINDOW_CHANNELS.zoomLevelChanged)).toBe(0);
+    expect(domListeners.get('DOMContentLoaded')?.size ?? 0).toBe(0);
   });
 });

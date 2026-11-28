@@ -5,6 +5,7 @@ import type { useProgrammeReminders } from './app-shell-reminders';
 import { AppShellExitToast } from './app-shell-sections';
 import { buildShellCrashProps } from './app-shell-state';
 import { AppShellWaveF9Overlays, type WaveF9Controller } from './app-shell-wave-f9';
+import { type AppShellDesktopErgonomics, AppShellDesktopOverlays } from './app-shell-wave-q7';
 import { ConnectionLimitDialog } from './player/ConnectionLimitDialog';
 import {
   ExternalHandoffErrorToast,
@@ -111,6 +112,7 @@ export function AppShellRootOverlays(props: {
   readonly oledScreensaver: ReturnType<typeof useOledScreensaver>;
   readonly wave: ReturnType<typeof useAppShellWaveF7b>;
   readonly waveF9?: WaveF9Controller;
+  readonly desktopErgonomics?: AppShellDesktopErgonomics;
 }): ReactElement {
   const {
     exitToastVisible,
@@ -123,6 +125,7 @@ export function AppShellRootOverlays(props: {
     oledScreensaver,
     wave,
     waveF9,
+    desktopErgonomics,
   } = props;
   return (
     <>
@@ -157,6 +160,9 @@ export function AppShellRootOverlays(props: {
       />
       <ExternalHandoffErrorToast visible={wave.externalHandoff.handoffErrorVisible} />
       <AppShellWaveF9Overlays waveF9={waveF9} />
+      <AppShellDesktopOverlays
+        {...(desktopErgonomics !== undefined ? { desktop: desktopErgonomics } : {})}
+      />
       <OledScreensaverOverlay state={oledScreensaver.state} onWake={oledScreensaver.wake} />
     </>
   );

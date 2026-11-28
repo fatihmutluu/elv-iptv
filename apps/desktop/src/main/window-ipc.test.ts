@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isAlwaysOnTopFlag, WINDOW_CHANNELS } from '../shared/window-ipc.ts';
+import {
+  clampZoomLevel,
+  isAlwaysOnTopFlag,
+  isZoomLevel,
+  MAX_WINDOW_ZOOM_LEVEL,
+  MIN_WINDOW_ZOOM_LEVEL,
+  WINDOW_CHANNELS,
+  ZOOM_LEVEL_STEP,
+} from '../shared/window-ipc.ts';
 import type { TrustedSenderEventLike } from './trusted-sender.ts';
 import {
   type AlwaysOnTopWindowLike,
@@ -88,6 +96,9 @@ function fakeWindow(children: ChildZOrderWindowLike[] = []) {
       send: (channel, ...args) => {
         sent.push({ channel, args });
       },
+      setZoomLevel: (level: number) => {
+        setCalls.push(['setZoomLevel', level]);
+      },
     },
   };
   return {
@@ -126,7 +137,25 @@ describe('window-ipc (#408)', () => {
       dockPopout: 'window:dock-popout',
       popoutDocked: 'window:popout-docked',
       openExternalUrl: 'window:open-external-url',
+      getZoomLevel: 'window:get-zoom-level',
+      setZoomLevel: 'window:set-zoom-level',
+      zoomLevelChanged: 'window:zoom-level-changed',
     });
+    expect(MIN_WINDOW_ZOOM_LEVEL).toBe(-3);
+    expect(MAX_WINDOW_ZOOM_LEVEL).toBe(4);
+    expect(ZOOM_LEVEL_STEP).toBe(0.5);
+    expect(clampZoomLevel(1.26)).toBe(1.5);
+    expect(clampZoomLevel(99)).toBe(4);
+    expect(clampZoomLevel(-99)).toBe(-3);
+    expect(clampZoomLevel(Number.NaN)).toBe(0);
+    expect(Object.is(clampZoomLevel(-0.1), 0)).toBe(true);
+    expect(isZoomLevel(0)).toBe(true);
+    expect(isZoomLevel(-3)).toBe(true);
+    expect(isZoomLevel(4)).toBe(true);
+    expect(isZoomLevel(4.5)).toBe(false);
+    expect(isZoomLevel(-3.5)).toBe(false);
+    expect(isZoomLevel(Number.NaN)).toBe(false);
+    expect(isZoomLevel('1')).toBe(false);
     expect(isAlwaysOnTopFlag(true)).toBe(true);
     expect(isAlwaysOnTopFlag(false)).toBe(true);
     expect(isAlwaysOnTopFlag('true')).toBe(false);
@@ -491,5 +520,56 @@ describe('window-ipc (#408)', () => {
     expect(onOpenExternalUrl).not.toHaveBeenCalled();
     expect(logs.length).toBe(untrustedEvents.length * 2);
     dispose();
+  });
+
+  it('persists, applies, broadcasts, and validates window zoom IPC channels (Wave Q7)', async () => {
+    const ipc = fakeIpcMain();
+    const fw = fakeWindow();
+    const logs: string[] = [];
+    let zoom = 0.5;
+    const dispose = registerWindowIpc({
+      ipcMain: ipc.ipcMain,
+      getWindowFromSender: (s) => (s === fw.sender ? fw.win : null),
+      getZoomLevel: () => zoom,
+      onSetZoomLevel: (next) => {
+        zoom = next;
+        return zoom;
+      },
+      log: (line) => logs.push(line),
+    });
+
+    expect(await ipc.invoke(WINDOW_CHANNELS.getZoomLevel, fw.sender)).toBe(0.5);
+
+    expect(await ipc.invoke(WINDOW_CHANNELS.setZoomLevel, fw.sender, 1.3)).toBe(1.5);
+    expect(zoom).toBe(1.5);
+    expect(fw.setCalls).toContainEqual(['setZoomLevel', 1.5]);
+    expect(fw.sent).toEqual([{ channel: WINDOW_CHANNELS.zoomLevelChanged, args: [1.5] }]);
+
+    // Clamps out-of-range finite values cleanly
+    expect(await ipc.invoke(WINDOW_CHANNELS.setZoomLevel, fw.sender, 10)).toBe(4);
+    expect(await ipc.invoke(WINDOW_CHANNELS.setZoomLevel, fw.sender, -10)).toBe(-3);
+
+    // Drops non-finite / non-number payloads and logs
+    expect(await ipc.invoke(WINDOW_CHANNELS.setZoomLevel, fw.sender, 'big')).toBe(-3);
+    expect(await ipc.invoke(WINDOW_CHANNELS.setZoomLevel, fw.sender, Number.NaN)).toBe(-3);
+    expect(logs).toHaveLength(2);
+
+    // Rejects untrusted sender frames
+    await expect(
+      ipc.invokeWithEvent(WINDOW_CHANNELS.getZoomLevel, {
+        sender: fw.sender,
+        senderFrame: trustedFrame('https://evil.example/'),
+      }),
+    ).rejects.toThrow(/untrusted sender/i);
+    await expect(
+      ipc.invokeWithEvent(
+        WINDOW_CHANNELS.setZoomLevel,
+        { sender: fw.sender, senderFrame: trustedFrame('https://evil.example/') },
+        1,
+      ),
+    ).rejects.toThrow(/untrusted sender/i);
+
+    dispose();
+    expect(ipc.handlers.size).toBe(0);
   });
 });
