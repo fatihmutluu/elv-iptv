@@ -1,4 +1,4 @@
-/** English messages for Wave E2 ELV Mode Discovery, Rich Detail, Trailers & In-Player X-Ray (`#512`, `#352`, `#459`). */
+/** English messages for Wave E2 ELV Mode Discovery, Rich Detail & Trailers (`#512`, `#459`). */
 export const enWaveE2Messages = {
   'home.section.elvShowcase': 'Trending & Picks for You',
   'catalog.elvPicks.emptyTitle': 'Building your personal picks',
@@ -45,11 +45,4 @@ export const enWaveE2Messages = {
   'person.role.director': 'Director',
   'person.role.cast': 'Cast',
   'person.close': 'Close',
-  'player.xray.button': 'X-Ray',
-  'player.xray.title': 'X-Ray',
-  'player.xray.cast': 'Cast',
-  'player.xray.director': 'Director',
-  'player.xray.episode': 'Now playing',
-  'player.xray.viewLibrary': 'View in library',
-  'player.xray.empty': 'No cast metadata available for this title.',
 } as const;

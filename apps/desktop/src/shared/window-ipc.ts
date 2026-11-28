@@ -9,11 +9,8 @@ export {
   sanitizePopoutLaunchPayload,
 } from './popout-ipc.ts';
 
-/** IPC channels exposed by main for desktop window, tray, and popout controls (`#408`, `#332`, `#158`). */
+/** IPC channels exposed by main for desktop window, tray, and popout controls (`#332`, `#158`). */
 export const WINDOW_CHANNELS = Object.freeze({
-  setAlwaysOnTop: 'window:set-always-on-top',
-  getAlwaysOnTop: 'window:get-always-on-top',
-  alwaysOnTopChanged: 'window:always-on-top-changed',
   setAspectRatioLock: 'window:set-aspect-ratio-lock',
   setMinimizeToTray: 'window:set-minimize-to-tray',
   windowRestored: 'window:restored',
@@ -89,11 +86,8 @@ export function sanitizeTrayLabels(labels: TrayLabels): TrayLabels {
   };
 }
 
-/** Frozen `window.elv.window` bridge exposed by the Electron preload (`#408`, `#332`, `#158`). */
+/** Frozen `window.elv.window` bridge exposed by the Electron preload (`#332`, `#158`). */
 export interface WindowBridge {
-  setAlwaysOnTop(enabled: boolean): Promise<boolean>;
-  getAlwaysOnTop(): Promise<boolean>;
-  onAlwaysOnTopChanged(listener: (enabled: boolean) => void): () => void;
   setAspectRatioLock(enabled: boolean): Promise<boolean>;
   setMinimizeToTray(enabled: boolean, labels?: TrayLabels): Promise<boolean>;
   openPopout(payload: PopoutLaunchPayload): Promise<boolean>;
@@ -135,11 +129,6 @@ export function isAllowedExternalTrailerUrl(x: unknown): x is string {
   } catch {
     return false;
   }
-}
-
-/** Validates the boolean payload sent over `window:set-always-on-top` and `window:always-on-top-changed`. */
-export function isAlwaysOnTopFlag(x: unknown): x is boolean {
-  return typeof x === 'boolean';
 }
 
 /** Validates the boolean payload sent over `window:set-aspect-ratio-lock` (`#332`). */

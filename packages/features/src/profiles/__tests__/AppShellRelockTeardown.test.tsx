@@ -212,9 +212,11 @@ describe('AppShell Multi-View & Popout teardown on relock, profile switch, and s
 
     await waitFor(() => expect(screen.getByTestId('player-screen')).toBeTruthy());
 
-    // Enter Multi-View from Player OSD
-    await waitFor(() => expect(screen.getByTestId('player-multiview-button')).toBeTruthy());
-    await fireEvent.press(screen.getByTestId('player-multiview-button'));
+    // Enter Multi-View from Player Settings
+    await waitFor(() => expect(screen.getByTestId('player-settings-button')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('player-settings-button'));
+    await waitFor(() => expect(screen.getByTestId('player-settings-multiview')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('player-settings-multiview'));
     await waitFor(() => expect(screen.getByTestId('multiview-stage')).toBeTruthy());
 
     // Backgrounding triggers lockParentalNow -> Multi-View closes & parental-relock broadcasts
@@ -292,8 +294,10 @@ describe('AppShell Multi-View & Popout teardown on relock, profile switch, and s
     // Play a live channel and enter Multi-View, then delete its source via playbackGuard
     await waitFor(() => expect(screen.getByTestId('home-live-item-0')).toBeTruthy());
     await fireEvent.press(screen.getByTestId('home-live-item-0'));
-    await waitFor(() => expect(screen.getByTestId('player-multiview-button')).toBeTruthy());
-    await fireEvent.press(screen.getByTestId('player-multiview-button'));
+    await waitFor(() => expect(screen.getByTestId('player-settings-button')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('player-settings-button'));
+    await waitFor(() => expect(screen.getByTestId('player-settings-multiview')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('player-settings-multiview'));
     await waitFor(() => expect(screen.getByTestId('multiview-stage')).toBeTruthy());
 
     await act(async () => {
@@ -425,8 +429,10 @@ describe('AppShell Multi-View & Popout teardown on relock, profile switch, and s
       await Promise.resolve();
       await Promise.resolve();
     });
-    await waitFor(() => expect(screen.getByTestId('player-multiview-button')).toBeTruthy());
-    await fireEvent.press(screen.getByTestId('player-multiview-button'));
+    await waitFor(() => expect(screen.getByTestId('player-settings-button')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('player-settings-button'));
+    await waitFor(() => expect(screen.getByTestId('player-settings-multiview')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('player-settings-multiview'));
     await waitFor(() => expect(screen.getByTestId('multiview-stage')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('multiview-empty-slot')).toBeTruthy());
     await fireEvent.press(screen.getByTestId('multiview-empty-slot'));

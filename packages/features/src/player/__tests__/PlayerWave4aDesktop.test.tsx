@@ -196,12 +196,13 @@ describe('Wave 4A desktop host-key forwarding (#420) and opt-in Deinterlace (#13
     expect(d.toggleMute).toHaveBeenCalledTimes(2);
     expect(screen.getByTestId('player-mute-button').props.accessibilityLabel).toBe('Mute');
 
-    // tracks toggles TrackPickerModal open & closed
-    expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+    // tracks toggles Settings directly on Subtitles sub-view open & closed
+    expect(screen.queryByTestId('player-settings-panel')).toBeNull();
     await d.emitHostKey('tracks');
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-sub-s:1')).toBeTruthy();
     await d.emitHostKey('tracks');
-    expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+    expect(screen.queryByTestId('player-settings-panel')).toBeNull();
 
     // fullscreen & back remain intact
     await d.emitHostKey('fullscreen');
@@ -255,9 +256,10 @@ describe('Wave 4A desktop host-key forwarding (#420) and opt-in Deinterlace (#13
     expect(screen.queryByTestId('player-deinterlace-toggle')).toBeNull();
     await unsupported.view.unmount();
 
-    // 2) Engine with setDeinterlace -> toggles true/false and resets to false on itemKey change
+    // 2) Engine with setDeinterlace -> toggles true/false inside Advanced settings and resets to false on itemKey change
     const supported = await mountDesktopPlayer({ target: VOD_TARGET, withDeinterlace: true });
     await fireEvent.press(screen.getByTestId('player-settings-button'));
+    await fireEvent.press(screen.getByTestId('player-settings-row-advanced'));
     const toggle = screen.getByTestId('player-deinterlace-toggle');
     expect(toggle.props.accessibilityRole).toBe('switch');
     expect(toggle.props.accessibilityState).toEqual({ checked: false });
@@ -291,6 +293,7 @@ describe('Wave 4A desktop host-key forwarding (#420) and opt-in Deinterlace (#13
     });
 
     await fireEvent.press(screen.getByTestId('player-settings-button'));
+    await fireEvent.press(screen.getByTestId('player-settings-row-advanced'));
     expect(screen.getByTestId('player-deinterlace-toggle').props.accessibilityState).toEqual({
       checked: false,
     });

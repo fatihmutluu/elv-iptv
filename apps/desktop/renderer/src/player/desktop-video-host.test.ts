@@ -91,9 +91,6 @@ function fakePlayerBridge() {
 
 function fakeWindowBridge(): WindowBridge {
   return {
-    setAlwaysOnTop: vi.fn(async (flag: boolean) => flag),
-    getAlwaysOnTop: vi.fn(async () => false),
-    onAlwaysOnTopChanged: () => () => undefined,
     setAspectRatioLock: vi.fn(async (flag: boolean) => flag),
     setMinimizeToTray: vi.fn(async (flag: boolean) => flag),
     openPopout: vi.fn(async () => true),

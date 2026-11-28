@@ -257,15 +257,11 @@ export function usePlayerSubtitlesSuite(params: {
     [clearPendingExternal, serviceRef, showFeedback, startPendingExternal],
   );
 
-  const trackPickerProps = {
+  const settingsSheetProps = {
     dualSubtitles: supportsDualSubtitles,
     ...(supportsDualSubtitles ? { onSelectSecondarySubtitle: selectSecondarySubtitle } : {}),
     ...(canPickSubtitleFile ? { onPickSubtitleFile: handlePickSubtitleFile } : {}),
     ...(canLoadSubtitleUrl ? { onLoadSubtitleUrl: openUrlOverlay } : {}),
-  };
-
-  const settingsSheetProps = {
-    ...trackPickerProps,
     ...(supportsSubtitleStyling
       ? { subtitleStyle, onChangeSubtitleStyle: changeSubtitleStyle }
       : {}),
@@ -295,7 +291,6 @@ export function usePlayerSubtitlesSuite(params: {
       onClose: closeUrlOverlay,
     },
     controlsProps,
-    trackPickerProps,
     settingsSheetProps,
   };
 }

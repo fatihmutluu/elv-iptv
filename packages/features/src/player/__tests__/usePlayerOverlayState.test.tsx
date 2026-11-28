@@ -31,8 +31,8 @@ async function renderOverlay(overrides: Partial<Parameters<typeof usePlayerOverl
         hasService: true,
         showRetry: false,
         hasSettings: true,
-        hasInfo: true,
         hasChannelList: true,
+        hasWindowModeMenu: true,
         hasNextEpisode: false,
         hasPreviousChannel: false,
         autoHideOsdMs: 3_500,
@@ -49,13 +49,12 @@ async function renderOverlay(overrides: Partial<Parameters<typeof usePlayerOverl
   return { manual, hook, cancelScrub };
 }
 
-describe('usePlayerOverlayState 3-tier OSD and supplement sheets (#391, #58, #57)', () => {
+describe('usePlayerOverlayState 3-tier OSD and supplement sheets (#391, #57, Wave R4)', () => {
   it('starts in controls or hidden tier, auto-hides progress at 2000ms and controls at 3500ms', async () => {
     const { manual, hook } = await renderOverlay({ initialOsdHidden: true, autoHideOsdMs: 3_500 });
     expect(hook.result.current.publicState.osdTier).toBe('hidden');
     expect(hook.result.current.publicState.osdHidden).toBe(true);
 
-    // Lightweight peek enters 'progress' and auto-hides after 2000ms
     await act(async () => {
       hook.result.current.showProgressOsd();
     });
@@ -73,7 +72,6 @@ describe('usePlayerOverlayState 3-tier OSD and supplement sheets (#391, #58, #57
     expect(hook.result.current.publicState.osdTier).toBe('hidden');
     expect(hook.result.current.publicState.osdHidden).toBe(true);
 
-    // Full 'controls' tier uses 3500ms and showProgressOsd never downgrades it
     await act(async () => {
       hook.result.current.showControlsOsd();
     });
@@ -99,56 +97,49 @@ describe('usePlayerOverlayState 3-tier OSD and supplement sheets (#391, #58, #57
     await hook.unmount();
   });
 
-  it('keeps settings, tracks, info, and channelList mutually exclusive and pauses auto-hide', async () => {
+  it('keeps settings, windowMode, and channelList mutually exclusive and pauses auto-hide', async () => {
     const { manual, hook } = await renderOverlay({ autoHideOsdMs: 3_500 });
 
     await act(async () => {
-      hook.result.current.publicState.openInfo();
+      hook.result.current.publicState.openWindowMode();
     });
-    expect(hook.result.current.publicState.infoOpen).toBe(true);
+    expect(hook.result.current.publicState.windowModeOpen).toBe(true);
     expect(hook.result.current.publicState.channelListOpen).toBe(false);
     expect(hook.result.current.publicState.settingsOpen).toBe(false);
-    expect(hook.result.current.publicState.tracksOpen).toBe(false);
     expect(hook.result.current.publicState.osdTier).toBe('controls');
 
-    // Auto-hide is paused while Info sheet is open
+    // Auto-hide is paused while Window Mode popover is open
     await act(async () => {
       manual.advance(10_000);
     });
     expect(hook.result.current.publicState.osdTier).toBe('controls');
-    expect(hook.result.current.publicState.infoOpen).toBe(true);
+    expect(hook.result.current.publicState.windowModeOpen).toBe(true);
 
-    // Opening Channel List closes Info mutually exclusively
+    // Opening Channel List closes Window Mode mutually exclusively
     await act(async () => {
       hook.result.current.publicState.openChannelList();
     });
     expect(hook.result.current.publicState.channelListOpen).toBe(true);
-    expect(hook.result.current.publicState.infoOpen).toBe(false);
+    expect(hook.result.current.publicState.windowModeOpen).toBe(false);
 
-    // Opening Settings closes Channel List
+    // Opening Settings (Subtitles view) closes Channel List
     await act(async () => {
-      hook.result.current.publicState.openSettings();
+      hook.result.current.publicState.openSettings('subtitles');
     });
     expect(hook.result.current.publicState.settingsOpen).toBe(true);
+    expect(hook.result.current.publicState.settingsMenu.view).toBe('subtitles');
     expect(hook.result.current.publicState.channelListOpen).toBe(false);
 
-    // Opening Tracks closes Settings
+    // toggleWindowMode opens and closes Window Mode cleanly and closes Settings
     await act(async () => {
-      hook.result.current.publicState.openTracks();
+      hook.result.current.publicState.toggleWindowMode();
     });
-    expect(hook.result.current.publicState.tracksOpen).toBe(true);
+    expect(hook.result.current.publicState.windowModeOpen).toBe(true);
     expect(hook.result.current.publicState.settingsOpen).toBe(false);
-
-    // toggleInfo opens and closes Info cleanly
     await act(async () => {
-      hook.result.current.publicState.toggleInfo();
+      hook.result.current.publicState.toggleWindowMode();
     });
-    expect(hook.result.current.publicState.infoOpen).toBe(true);
-    expect(hook.result.current.publicState.tracksOpen).toBe(false);
-    await act(async () => {
-      hook.result.current.publicState.toggleInfo();
-    });
-    expect(hook.result.current.publicState.infoOpen).toBe(false);
+    expect(hook.result.current.publicState.windowModeOpen).toBe(false);
 
     // toggleChannelList opens and closes Channel List cleanly
     await act(async () => {
@@ -168,19 +159,20 @@ describe('usePlayerOverlayState 3-tier OSD and supplement sheets (#391, #58, #57
       formFactor: 'phone',
       tracks: EMPTY_TRACKS,
       hasTracks: false,
+      hasWindowModeMenu: false,
       autoHideOsdMs: 3_500,
     });
 
     await act(async () => {
-      mobile.hook.result.current.publicState.openInfo();
+      mobile.hook.result.current.publicState.openSettings();
     });
-    expect(mobile.hook.result.current.publicState.infoOpen).toBe(true);
+    expect(mobile.hook.result.current.publicState.settingsOpen).toBe(true);
 
     await act(async () => {
       mobile.hook.result.current.publicState.lockControls();
     });
     expect(mobile.hook.result.current.publicState.locked).toBe(true);
-    expect(mobile.hook.result.current.publicState.infoOpen).toBe(false);
+    expect(mobile.hook.result.current.publicState.settingsOpen).toBe(false);
     expect(mobile.hook.result.current.publicState.osdTier).toBe('hidden');
     expect(mobile.hook.result.current.publicState.osdHidden).toBe(true);
 

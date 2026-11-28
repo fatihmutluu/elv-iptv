@@ -28,7 +28,6 @@ afterEach(() => {
 
 function fakePopoutWindow() {
   let destroyed = false;
-  let pinned = true;
   let bounds = { x: 100, y: 100, width: 640, height: 360 };
   const sent: Array<{ channel: string; args: unknown[] }> = [];
   const loadedUrls: string[] = [];
@@ -72,11 +71,6 @@ function fakePopoutWindow() {
     setTitle: (title: string) => {
       calls.push(`title:${title}`);
     },
-    setAlwaysOnTop: (flag: boolean, level?: 'normal' | 'floating') => {
-      pinned = flag;
-      calls.push(`aot:${flag}:${level ?? ''}`);
-    },
-    isAlwaysOnTop: () => pinned,
     show: () => {
       calls.push('show');
     },
@@ -140,7 +134,7 @@ function fakeMainWindow() {
 }
 
 describe('popout-window (#158)', () => {
-  it('builds hardened native-chrome popout window options with 960x540 default, 480x270 minimums, maximizable, and alwaysOnTop false by default', () => {
+  it('builds hardened native-chrome popout window options with 960x540 default, 480x270 minimums, and maximizable enabled', () => {
     const opts = buildPopoutWindowOptions('/app/preload.js', { presenter: 'canvas' });
     expect(opts.width).toBe(960);
     expect(opts.height).toBe(540);
@@ -151,7 +145,6 @@ describe('popout-window (#158)', () => {
     expect(opts.frame).toBe(true);
     expect(opts.titleBarStyle).toBeUndefined();
     expect(opts.maximizable).toBe(true);
-    expect(opts.alwaysOnTop).toBe(false);
     expect(opts.webPreferences).toMatchObject({
       preload: '/app/preload.js',
       contextIsolation: true,
@@ -160,9 +153,6 @@ describe('popout-window (#158)', () => {
       backgroundThrottling: true,
       additionalArguments: ['--elv-presenter=canvas'],
     });
-
-    const pinnedOpts = buildPopoutWindowOptions('/app/preload.js', { pinned: true });
-    expect(pinnedOpts.alwaysOnTop).toBe(true);
   });
 
   it('creates hardened popout window, persists separate bounds, updates existing popout, and docks back cleanly', () => {
@@ -211,7 +201,6 @@ describe('popout-window (#158)', () => {
     expect(pop.wcListeners.has('will-navigate')).toBe(true);
     expect(pop.wcListeners.has('render-process-gone')).toBe(true);
     expect(pop.loadedUrls).toEqual(['app://elv/?popout=1']);
-    expect(pop.calls).toContain('aot:false:floating');
     expect(pop.calls).toContain('menuBar:false');
 
     // Pull payload returns sanitized payload ONLY to popout webContents
@@ -231,7 +220,6 @@ describe('popout-window (#158)', () => {
       kind: 'movie' as const,
       title: 'Cinema Feature',
       resumePositionMs: 12_345,
-      pinned: false,
     };
     expect(controller.open(payload2)).toBe(true);
     expect(createdWins).toHaveLength(1);
@@ -239,7 +227,6 @@ describe('popout-window (#158)', () => {
       channel: WINDOW_CHANNELS.popoutPayload,
       args: [payload2],
     });
-    expect(pop.calls).toContain('aot:false:floating');
 
     // Resizing popout persists bounds to dedicated popout-window-state.json on close
     pop.resizeTo({ x: 300, y: 200, width: 800, height: 450 });

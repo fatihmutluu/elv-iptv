@@ -18,7 +18,6 @@ export function fakeAppWindow(content: Rect = { x: 100, y: 50, width: 1280, heig
     zoom: 1,
     minimized: false,
     maximized: false,
-    alwaysOnTop: false,
     visible: true,
     fullscreen: false,
     simpleFullscreen: false,
@@ -35,19 +34,14 @@ export function fakeAppWindow(content: Rect = { x: 100, y: 50, width: 1280, heig
     maximize: () => {
       state.maximized = true;
     },
-    isAlwaysOnTop: () => state.alwaysOnTop,
-    setAlwaysOnTop: (flag) => {
-      state.alwaysOnTop = flag;
-    },
     isVisible: () => state.visible,
     isFullScreen: () => state.fullscreen,
     setFullScreen: (flag) => {
       state.fullscreenCalls.push(flag);
       state.fullscreen = flag;
-      // Simulate Windows/Electron unmaximizing or resetting topmost on fullscreen transition:
+      // Simulate Windows/Electron unmaximizing on fullscreen transition:
       if (flag) {
         state.maximized = false;
-        state.alwaysOnTop = false;
       }
     },
     isSimpleFullScreen: () => state.simpleFullscreen,
@@ -89,7 +83,6 @@ export function fakeVideoWindow(hwnd = 0x1234abcd) {
     destroyed: false,
     shows: 0,
     hides: 0,
-    alwaysOnTopCalls: [] as unknown[][],
     moveTopCalls: 0,
   };
   const handle = Buffer.alloc(8);
@@ -119,9 +112,6 @@ export function fakeVideoWindow(hwnd = 0x1234abcd) {
       emit('closed');
     },
     getNativeWindowHandle: () => handle,
-    setAlwaysOnTop: (flag, level, relativeLevel) => {
-      state.alwaysOnTopCalls.push([flag, level, relativeLevel]);
-    },
     moveTop: () => {
       state.moveTopCalls += 1;
     },

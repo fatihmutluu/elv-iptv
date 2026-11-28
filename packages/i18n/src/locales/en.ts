@@ -27,6 +27,7 @@ import { enWaveQ7cMessages } from './en-wave-q7c';
 import { enWaveR1Messages } from './en-wave-r1';
 import { enWaveR2Messages } from './en-wave-r2';
 import { enWaveR3Messages } from './en-wave-r3';
+import { enWaveR4Messages } from './en-wave-r4';
 
 /** English (source) message catalog. Every other locale must define the exact same keys. */
 export const enMessages = {
@@ -517,8 +518,6 @@ export const enMessages = {
   'catalog.sortAlpha': 'A–Z',
   'catalog.sortAlphaLabel': 'Sort alphabetically',
   'catalog.sortDefaultLabel': 'Default order',
-  'player.alwaysOnTop': 'Pin window on top',
-  'player.exitAlwaysOnTop': 'Unpin window',
   'player.audioDevice': 'Audio output',
   'player.audioDeviceAuto': 'System default',
   'card.quickPlay': 'Play {title}',
@@ -537,7 +536,6 @@ export const enMessages = {
   'player.endsAt': 'Ends at {time}',
   'player.remainingTime': 'Remaining',
   'player.totalDuration': 'Total duration',
-  'player.timeDisplayMode': 'Time display',
   'player.timeDisplayToggleHint': 'Tap time to switch between total, remaining, and end time',
   'player.sleepTimer': 'Sleep timer',
   'player.sleepTimerOff': 'Off',
@@ -547,10 +545,6 @@ export const enMessages = {
   'player.sleepTimerStop': 'Stop playback',
   'player.sleepTimerPause': 'Pause playback',
   'player.sleepTimerEnded': 'Playback stopped by sleep timer',
-  'player.chapters': 'Chapters',
-  'player.prevChapter': 'Previous chapter',
-  'player.nextChapter': 'Next chapter',
-  'player.chapterCount': '{count} chapters',
   'player.stillWatchingTitle': 'Are you still watching?',
   'player.stillWatchingBody': 'Playback will stop in {seconds}s to save bandwidth.',
   'player.stillWatchingContinue': 'Keep watching',
@@ -751,6 +745,7 @@ export const enMessages = {
   ...enWaveR1Messages,
   ...enWaveR2Messages,
   ...enWaveR3Messages,
+  ...enWaveR4Messages,
 } as const;
 
 /** Valid message identifier across all supported locales. */

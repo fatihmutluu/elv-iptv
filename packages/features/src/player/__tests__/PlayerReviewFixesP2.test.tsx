@@ -245,11 +245,12 @@ describe('Wave P2 review fixes (P0/P1/P2 #699)', () => {
       expect(nowNext).toHaveBeenCalledWith(['ch:0'], EPOCH_NOW);
     });
 
-    // Open Info sheet via Player Settings -> 50% progress derived from wallClock
+    // Open Stats HUD via Player Settings -> 50% progress derived from wallClock
     await fireEvent.press(screen.getByTestId('player-settings-button'));
-    await fireEvent.press(screen.getByTestId('player-info-button'));
+    await fireEvent.press(screen.getByTestId('player-stats-toggle'));
+    await fireEvent.press(screen.getByTestId('player-settings-close'));
     expect(
-      StyleSheet.flatten(screen.getByTestId('player-info-progress-fill').props.style)?.width,
+      StyleSheet.flatten(screen.getByTestId('player-stats-progress-fill').props.style)?.width,
     ).toBe('50%');
 
     // Open Channel drawer -> schedule fetch also uses wallClock
@@ -277,11 +278,11 @@ describe('Wave P2 review fixes (P0/P1/P2 #699)', () => {
       p.manual.advance(350);
     });
 
-    // P1 #6: KEY_INFO toggles PlayerInfoSheet cleanly
+    // P1 #6: KEY_INFO toggles PlayerStatsHud cleanly
     await act(async () => p.keys.tap(KEY_INFO));
-    expect(screen.getByTestId('player-info-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-stats-hud')).toBeTruthy();
     await act(async () => p.keys.tap(KEY_INFO));
-    expect(screen.queryByTestId('player-info-panel')).toBeNull();
+    expect(screen.queryByTestId('player-stats-hud')).toBeNull();
 
     // P1 #6 + P0 #3: KEY_GUIDE opens PlayerChannelDrawer; Back closes it; re-open & Down scrolls + Select zaps
     await act(async () => p.keys.tap(KEY_GUIDE));
@@ -420,17 +421,19 @@ describe('Wave P2 review fixes (P0/P1/P2 #699)', () => {
     expect(screen.getByTestId('player-brightness-dim-overlay')).toBeTruthy();
     await fireEvent.press(screen.getByTestId('player-unlock-button'));
 
-    // P1 #9 + P1 #10: Open Settings -> dim overlay STILL stays mounted, and autoPlayNextEpisode toggle works!
+    // P1 #9 + P1 #10: Open Settings -> Advanced -> dim overlay STILL stays mounted, and autoPlayNextEpisode toggle works!
     await fireEvent.press(screen.getByTestId('player-settings-button'));
     expect(
       screen.getByTestId('player-brightness-dim-overlay', { includeHiddenElements: true }),
     ).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('player-settings-row-advanced'));
     const autoPlayToggle = screen.getByTestId('player-auto-play-next-toggle');
     expect(autoPlayToggle).toHaveTextContent(/Auto-play next episode/);
     await fireEvent.press(autoPlayToggle);
     expect(mobile.onToggleAutoPlayNextEpisode).toHaveBeenCalledTimes(1);
 
     // P2: Set speed 1.5x, then switch to another item -> speed UI & controls reset to 1x
+    await fireEvent.press(screen.getByTestId('player-settings-back'));
     await fireEvent.press(screen.getByTestId('player-settings-row-speed'));
     await fireEvent.press(screen.getByTestId('player-settings-speed-1.5'));
     expect(mobile.setSpeed).toHaveBeenLastCalledWith(expect.any(Number), 1.5);

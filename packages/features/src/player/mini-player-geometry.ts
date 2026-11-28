@@ -1,6 +1,32 @@
 /** Docked screen corner for the floating in-app mini-player. */
 export type MiniPlayerCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
+/** Perimeter edge or corner identifier for native OS mini-player resizing. */
+export type MiniPlayerResizeEdge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
+/** OS CSS resize cursor corresponding to a {@link MiniPlayerResizeEdge}. */
+export type MiniPlayerResizeCursor = 'ns-resize' | 'ew-resize' | 'nwse-resize' | 'nesw-resize';
+
+/** Position and dimensions of the floating mini-player container. */
+export interface MiniPlayerRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Viewport and inset constraints used when resizing the floating mini-player. */
+export interface MiniPlayerViewport {
+  readonly width: number;
+  readonly height: number;
+  readonly safeArea?: MiniPlayerSafeArea;
+  readonly overscan?: MiniPlayerOverscan;
+  readonly isPortraitPhone?: boolean;
+  readonly isTv?: boolean;
+  readonly minWidth?: number;
+  readonly maxWidth?: number;
+}
+
 /** Safe-area insets honored when positioning the floating mini-player. */
 export interface MiniPlayerSafeArea {
   readonly top?: number;
@@ -197,4 +223,111 @@ export function computeResizedWidthFromDrag(
   const deltaFromY = (ySign * dy * 16) / 9;
   const deltaW = Math.abs(deltaFromX) >= Math.abs(deltaFromY) ? deltaFromX : deltaFromY;
   return Math.round(startWidth + deltaW);
+}
+
+/** Maps any perimeter {@link MiniPlayerResizeEdge} to its OS-native CSS resize cursor. */
+export function resizeCursorForEdge(edge: MiniPlayerResizeEdge): MiniPlayerResizeCursor {
+  switch (edge) {
+    case 'n':
+    case 's':
+      return 'ns-resize';
+    case 'e':
+    case 'w':
+      return 'ew-resize';
+    case 'nw':
+    case 'se':
+      return 'nwse-resize';
+    case 'ne':
+    case 'sw':
+      return 'nesw-resize';
+  }
+}
+
+function clampCoord(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function rawDeltaWidthForEdge(edge: MiniPlayerResizeEdge, deltaX: number, deltaY: number): number {
+  switch (edge) {
+    case 'e':
+      return deltaX;
+    case 'w':
+      return -deltaX;
+    case 's':
+      return (deltaY * 16) / 9;
+    case 'n':
+      return (-deltaY * 16) / 9;
+    case 'se':
+    case 'sw':
+    case 'ne':
+    case 'nw': {
+      const xSign = edge === 'ne' || edge === 'se' ? 1 : -1;
+      const ySign = edge === 'sw' || edge === 'se' ? 1 : -1;
+      const dxW = xSign * deltaX;
+      const dyW = (ySign * deltaY * 16) / 9;
+      return Math.abs(dxW) >= Math.abs(dyW) ? dxW : dyW;
+    }
+  }
+}
+
+/**
+ * Computes `16:9` aspect-locked mini-player bounds resized from any perimeter edge or corner,
+ * anchored to the opposite edge/corner, clamped to `[minWidth, maxWidth]`, and bounded inside
+ * viewport safe-area insets.
+ */
+export function computeEdgeResizedMiniBounds(
+  start: MiniPlayerRect,
+  edge: MiniPlayerResizeEdge,
+  deltaX: number,
+  deltaY: number,
+  viewport: MiniPlayerViewport,
+): MiniPlayerRect {
+  const safeArea = viewport.safeArea ?? { top: 0, right: 0, bottom: 0, left: 0 };
+  const overscan = viewport.overscan ?? { x: 0, y: 0 };
+  const bounds = computeMiniPlayerBounds(
+    viewport.width,
+    viewport.height,
+    safeArea,
+    overscan,
+    viewport.isPortraitPhone === true,
+  );
+  const availW = Math.max(1, bounds.right - bounds.left);
+  const availH = Math.max(1, bounds.bottom - bounds.top);
+  const boundsMaxW = Math.min(availW, Math.floor((availH * 16) / 9));
+  const defaultMaxW = clampMiniPlayerWidth(
+    viewport.maxWidth ?? MINI_PLAYER_MAX_WIDTH,
+    viewport.width,
+    viewport.height,
+    viewport.isTv === true,
+  );
+  const minWidth = Math.max(1, Math.min(viewport.minWidth ?? MINI_PLAYER_MIN_WIDTH, boundsMaxW));
+  const maxWidth = Math.max(minWidth, Math.min(defaultMaxW, boundsMaxW));
+
+  const startWidth =
+    Number.isFinite(start.width) && start.width > 0 ? Math.round(start.width) : minWidth;
+  const startHeight =
+    Number.isFinite(start.height) && start.height > 0
+      ? Math.round(start.height)
+      : miniPlayerHeightForWidth(startWidth);
+  const startX = Number.isFinite(start.x) ? Math.round(start.x) : bounds.left;
+  const startY = Number.isFinite(start.y) ? Math.round(start.y) : bounds.top;
+
+  const dx = Number.isFinite(deltaX) ? deltaX : 0;
+  const dy = Number.isFinite(deltaY) ? deltaY : 0;
+  const requestedWidth = Math.round(startWidth + rawDeltaWidthForEdge(edge, dx, dy));
+  const width = clampCoord(requestedWidth, minWidth, maxWidth);
+  const height = Math.min(availH, miniPlayerHeightForWidth(width));
+
+  const startRight = startX + startWidth;
+  const startBottom = startY + startHeight;
+  const anchorsRight = edge === 'w' || edge === 'nw' || edge === 'sw';
+  const anchorsBottom = edge === 'n' || edge === 'nw' || edge === 'ne';
+
+  const rawX = anchorsRight ? startRight - width : startX;
+  const rawY = anchorsBottom ? startBottom - height : startY;
+
+  const x = clampCoord(rawX, bounds.left, Math.max(bounds.left, bounds.right - width));
+  const y = clampCoord(rawY, bounds.top, Math.max(bounds.top, bounds.bottom - height));
+
+  return { x, y, width, height };
 }

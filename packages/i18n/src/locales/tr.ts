@@ -28,6 +28,7 @@ import { trWaveQ7cMessages } from './tr-wave-q7c';
 import { trWaveR1Messages } from './tr-wave-r1';
 import { trWaveR2Messages } from './tr-wave-r2';
 import { trWaveR3Messages } from './tr-wave-r3';
+import { trWaveR4Messages } from './tr-wave-r4';
 
 /** Turkish (`tr`) message catalog. */
 export const trMessages: Readonly<Record<MessageId, string>> = {
@@ -531,8 +532,6 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'catalog.sortAlpha': 'A–Z',
   'catalog.sortAlphaLabel': 'Alfabetik sırala',
   'catalog.sortDefaultLabel': 'Varsayılan sıralama',
-  'player.alwaysOnTop': 'Pencereyi üstte tut',
-  'player.exitAlwaysOnTop': 'Sabitlemeyi kaldır',
   'player.audioDevice': 'Ses çıkışı',
   'player.audioDeviceAuto': 'Sistem varsayılanı',
   'card.quickPlay': '{title} oynat',
@@ -551,7 +550,6 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.endsAt': 'Bitiş {time}',
   'player.remainingTime': 'Kalan süre',
   'player.totalDuration': 'Toplam süre',
-  'player.timeDisplayMode': 'Süre gösterimi',
   'player.timeDisplayToggleHint': 'Toplam, kalan ve bitiş saati arasında geçmek için süreye dokun',
   'player.sleepTimer': 'Uyku zamanlayıcı',
   'player.sleepTimerOff': 'Kapalı',
@@ -561,10 +559,6 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.sleepTimerStop': 'Oynatmayı durdur',
   'player.sleepTimerPause': 'Duraklat',
   'player.sleepTimerEnded': 'Uyku zamanlayıcı oynatmayı durdurdu',
-  'player.chapters': 'Bölümler',
-  'player.prevChapter': 'Önceki bölüm',
-  'player.nextChapter': 'Sonraki bölüm',
-  'player.chapterCount': '{count} bölüm',
   'player.stillWatchingTitle': 'Hâlâ izliyor musunuz?',
   'player.stillWatchingBody': 'Bant genişliğini korumak için oynatma {seconds} sn içinde duracak.',
   'player.stillWatchingContinue': 'İzlemeye devam et',
@@ -767,4 +761,5 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   ...trWaveR1Messages,
   ...trWaveR2Messages,
   ...trWaveR3Messages,
+  ...trWaveR4Messages,
 };

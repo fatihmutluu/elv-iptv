@@ -3,7 +3,6 @@ import type { AndroidDecoderMode, DefaultResizeModePref } from '@elv/domain';
 import { type AppI18n, resolveLanguageLabel } from '@elv/i18n';
 import {
   type BufferHealth,
-  type ChapterInfo,
   type MediaTracks,
   type PlaybackClock,
   type PlaybackState,
@@ -19,7 +18,6 @@ import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { AudioDeviceInfo, VideoResizeMode } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import type { SettingsMenuState } from './settings-menu-nav';
-import type { TrackPickerCursor } from './track-picker-nav';
 import type { TvOsdAction } from './tv-osd-nav';
 
 /** Progressive 3-tier OSD visibility state (`#391`). */
@@ -113,13 +111,10 @@ export function stepVolume(current: number, delta = 5): number {
 
 /** Live mutable snapshot shared with synchronous key handlers in `usePlayerControls`. */
 export interface PlayerOverlayLive {
-  tracksOpen: boolean;
-  pickerCursor: TrackPickerCursor;
   settingsOpen: boolean;
   settingsMenu: SettingsMenuState;
-  infoOpen: boolean;
+  windowModeOpen: boolean;
   channelListOpen: boolean;
-  canOpenInfo: boolean;
   canOpenChannelList: boolean;
   locked: boolean;
   osdTier: OsdTier;
@@ -149,12 +144,9 @@ export interface PlayerOverlayStateParams {
   hasService: boolean;
   showRetry: boolean;
   hasSettings: boolean;
-  hasInfo?: boolean | undefined;
   hasChannelList?: boolean | undefined;
-  hasXray?: boolean | undefined;
   hasPitchLock?: boolean | undefined;
   hasAudioNormalization?: boolean | undefined;
-  hasAutoSubtitlesOnSkipBack?: boolean | undefined;
   hasAutoPlayNextEpisode?: boolean | undefined;
   hasAudioDevice?: boolean | undefined;
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
@@ -172,15 +164,11 @@ export interface PlayerOverlayStateParams {
   qualityVariants?: readonly LiveVariantOption[] | undefined;
   hasVideoDecoder?: boolean | undefined;
   androidDecoderMode?: AndroidDecoderMode | undefined;
-  chapters?: readonly ChapterInfo[] | undefined;
   hasSleepTimer?: boolean | undefined;
   sleepTimerMinutes?: number | undefined;
-  hasTimeDisplay?: boolean | undefined;
-  hasAlwaysOnTop?: boolean | undefined;
-  hasMiniPlayer?: boolean | undefined;
   hasPip?: boolean | undefined;
   hasMultiView?: boolean | undefined;
-  hasPopout?: boolean | undefined;
+  hasWindowModeMenu?: boolean | undefined;
   hasNextEpisode: boolean;
   hasPreviousChannel: boolean;
   hasBackToLive?: boolean;
@@ -252,9 +240,9 @@ export function canAutoHideOsd(
   statusKind: PlaybackStatus['kind'],
   live: Pick<
     PlayerOverlayLive,
-    'osdHidden' | 'tracksOpen' | 'settingsOpen' | 'locked' | 'tvOsdFocused' | 'tvScrubberFocused'
+    'osdHidden' | 'settingsOpen' | 'locked' | 'tvOsdFocused' | 'tvScrubberFocused'
   > &
-    Partial<Pick<PlayerOverlayLive, 'osdTier' | 'infoOpen' | 'channelListOpen'>>,
+    Partial<Pick<PlayerOverlayLive, 'osdTier' | 'windowModeOpen' | 'channelListOpen'>>,
   isScrubbing: boolean,
 ): boolean {
   const isHidden = live.osdTier !== undefined ? live.osdTier === 'hidden' : live.osdHidden;
@@ -262,9 +250,8 @@ export function canAutoHideOsd(
     statusKind === 'playing' &&
     !isHidden &&
     !isScrubbing &&
-    !live.tracksOpen &&
     !live.settingsOpen &&
-    live.infoOpen !== true &&
+    live.windowModeOpen !== true &&
     live.channelListOpen !== true &&
     !live.locked &&
     !live.tvOsdFocused &&

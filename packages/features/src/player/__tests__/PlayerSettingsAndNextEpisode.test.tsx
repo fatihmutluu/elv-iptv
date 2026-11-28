@@ -240,7 +240,7 @@ describe('PlayerSettingsSheet 2-level menu', () => {
     await view.rerender(
       settingsEl({
         preset: 'highContrast',
-        menuState: { view: 'root', index: 2 },
+        menuState: { view: 'advanced', index: 0 },
         deinterlace: false,
         onToggleDeinterlace,
       }),
@@ -259,7 +259,7 @@ describe('PlayerSettingsSheet 2-level menu', () => {
     await view.rerender(
       settingsEl({
         preset: 'highContrast',
-        menuState: { view: 'root', index: 3 },
+        menuState: { view: 'advanced', index: 0 },
         deinterlace: true,
         onToggleDeinterlace,
         i18n: createAppI18n('tr'),
@@ -269,6 +269,17 @@ describe('PlayerSettingsSheet 2-level menu', () => {
     expect(toggleTr.props.accessibilityState).toEqual({ checked: true });
     expect(toggleTr).toHaveTextContent(/Deinterlace/);
     expect(toggleTr).toHaveTextContent(/Açık/);
+    expect(flatStyle('player-deinterlace-toggle')?.borderColor).toBe(hcTheme.colors.focusRingColor);
+
+    await view.rerender(
+      settingsEl({
+        preset: 'highContrast',
+        menuState: { view: 'root', index: 2 },
+        deinterlace: true,
+        onToggleDeinterlace,
+        i18n: createAppI18n('tr'),
+      }),
+    );
     expect(flatStyle('player-stats-toggle')?.borderColor).toBe(hcTheme.colors.focusRingColor);
 
     await view.unmount();

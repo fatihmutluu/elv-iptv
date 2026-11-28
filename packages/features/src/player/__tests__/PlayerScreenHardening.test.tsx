@@ -221,8 +221,8 @@ describe('PlayerScreen PR 5 hardening', () => {
       });
     });
 
-    await fireEvent.press(screen.getByTestId('player-tracks-button'));
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+    await fireEvent.press(screen.getByTestId('player-subtitles-button'));
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
 
     await act(async () => {
       (hostKeyListener as ((key: string) => void) | undefined)?.('close');
@@ -230,12 +230,13 @@ describe('PlayerScreen PR 5 hardening', () => {
     expect(onExit).toHaveBeenCalledTimes(1);
     expect(onChangeIndex).not.toHaveBeenCalled();
 
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
     await act(async () => {
       hostKeyListener?.('back');
       hostKeyListener?.('back');
+      hostKeyListener?.('back');
     });
-    expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+    expect(screen.queryByTestId('player-settings-panel')).toBeNull();
     expect(onExit).toHaveBeenCalledTimes(2);
 
     await view.unmount();

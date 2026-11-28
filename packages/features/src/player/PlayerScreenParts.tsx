@@ -47,8 +47,6 @@ export { DesktopDockedTopBar, PlayerLockedOverlay, type PlayerOsdProps };
 
 /** Builds optional capability-gated props for `PlayerSettingsSheet` from `PlayerScreen` state. */
 export function buildSettingsSheetOptionalProps(opts: {
-  readonly alwaysOnTop: boolean;
-  readonly hostToggleAlwaysOnTop: (() => void) | undefined;
   readonly activeDeinterlaceMode: DeinterlaceMode;
   readonly cycleDeinterlaceMode: (() => void) | undefined;
   readonly hostSetDeinterlace: ((enabled: boolean) => void) | undefined;
@@ -67,15 +65,10 @@ export function buildSettingsSheetOptionalProps(opts: {
   readonly showAndroidDecoder: boolean;
   readonly activeDecoderMode: AndroidDecoderMode | undefined;
   readonly handleSelectAndroidDecoderMode: (mode: AndroidDecoderMode) => void;
-  readonly onMinimizeToMiniPlayer?: (() => void) | undefined;
   readonly onEnterPip?: (() => void) | undefined;
   readonly onEnterMultiView?: (() => void) | undefined;
-  readonly onPopoutPlayer?: (() => void) | undefined;
 }) {
   return {
-    ...(opts.hostToggleAlwaysOnTop
-      ? { alwaysOnTop: opts.alwaysOnTop, onToggleAlwaysOnTop: opts.hostToggleAlwaysOnTop }
-      : {}),
     ...(opts.cycleDeinterlaceMode
       ? {
           deinterlaceMode: opts.activeDeinterlaceMode,
@@ -112,12 +105,8 @@ export function buildSettingsSheetOptionalProps(opts: {
           onSelectAndroidDecoderMode: opts.handleSelectAndroidDecoderMode,
         }
       : {}),
-    ...(opts.onMinimizeToMiniPlayer !== undefined
-      ? { onMinimizeToMiniPlayer: opts.onMinimizeToMiniPlayer }
-      : {}),
     ...(opts.onEnterPip !== undefined ? { onEnterPip: opts.onEnterPip } : {}),
     ...(opts.onEnterMultiView !== undefined ? { onEnterMultiView: opts.onEnterMultiView } : {}),
-    ...(opts.onPopoutPlayer !== undefined ? { onPopoutPlayer: opts.onPopoutPlayer } : {}),
   };
 }
 
@@ -283,7 +272,6 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
         muted={muted}
         volume={volume}
         playbackSpeed={playbackSpeed}
-        chapters={p.chapters}
         timeDisplayMode={p.timeDisplayMode}
         wallClock={p.wallClock}
         nowNext={p.nowNext}

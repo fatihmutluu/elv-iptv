@@ -33,7 +33,6 @@ export type AppWindowEvent =
   | 'unmaximize'
   | 'enter-full-screen'
   | 'leave-full-screen'
-  | 'always-on-top-changed'
   | 'minimize'
   | 'restore'
   | 'show'
@@ -46,8 +45,6 @@ export interface AppWindowLike {
   isMinimized(): boolean;
   isMaximized?(): boolean;
   maximize?(): void;
-  isAlwaysOnTop?(): boolean;
-  setAlwaysOnTop?(flag: boolean): void;
   isVisible(): boolean;
   isFullScreen(): boolean;
   setFullScreen(flag: boolean): void;
@@ -71,7 +68,6 @@ export interface VideoWindowLike {
   isDestroyed(): boolean;
   destroy(): void;
   getNativeWindowHandle(): Buffer;
-  setAlwaysOnTop?(flag: boolean, level?: 'normal' | 'floating', relativeLevel?: number): void;
   moveTop?(): void;
   on(event: VideoWindowEvent, listener: () => void): unknown;
   removeListener?(event: VideoWindowEvent, listener: () => void): unknown;

@@ -2,7 +2,6 @@ import type { NowNextEntry } from '@elv/data';
 import type { TvClockMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type {
-  ChapterInfo,
   MediaTracks,
   PlaybackClock,
   PlaybackService,
@@ -40,11 +39,11 @@ export interface PlayerOsdProps {
   isPausedOrEnded: boolean;
   canZap: boolean;
   hasTracks: boolean;
+  hasSubtitles?: boolean;
+  hasAudio?: boolean;
   hasPreviousChannel?: boolean;
   isChannelPreview?: boolean;
   hasNextEpisodeAction?: boolean;
-  hasXray?: boolean;
-  xrayOpen?: boolean;
   canLock?: boolean;
   showRetry: boolean;
   isTv: boolean;
@@ -52,9 +51,7 @@ export interface PlayerOsdProps {
   muted?: boolean;
   volume?: number;
   isFullscreen?: boolean;
-  alwaysOnTop?: boolean;
   playbackSpeed?: number;
-  chapters?: readonly ChapterInfo[] | undefined;
   timeDisplayMode?: VodEndTimeDisplayMode | undefined;
   videoInfo?: StreamVideoInfo | undefined;
   tracks?: MediaTracks;
@@ -69,10 +66,9 @@ export interface PlayerOsdProps {
   tvOsdFocused: boolean;
   tvScrubberFocused?: boolean;
   tvOsdAction: TvOsdAction;
-  tracksOpen: boolean;
   settingsOpen?: boolean;
   settingsView?: SettingsMenuView;
-  infoOpen?: boolean;
+  windowModeOpen?: boolean;
   channelListOpen?: boolean;
   previewPositionMs?: number | undefined;
   i18n: AppI18n;
@@ -86,23 +82,19 @@ export interface PlayerOsdProps {
   onScrubbingChange?: (scrubbing: boolean) => void;
   onCycleTimeDisplayMode?: () => void;
   onFineScrubHaptic?: (kind: 'tier' | 'origin') => void;
-  onOpenTracks: () => void;
+  onOpenSubtitles: () => void;
+  onOpenAudio: () => void;
   onOpenSettings?: () => void;
   onOpenSpeed?: () => void;
   onToggleResizeMode?: () => void;
-  onToggleInfo?: () => void;
+  onToggleWindowMode?: () => void;
   onToggleChannelList?: () => void;
-  onToggleXray?: () => void;
   onPlayNextEpisode?: () => void;
-  onPrevChapter?: () => void;
-  onNextChapter?: () => void;
   onToggleMute?: () => void;
   onSetVolume?: (volume: number) => void;
   onToggleFullscreen?: () => void;
-  onToggleAlwaysOnTop?: () => void;
   onMinimizeToMiniPlayer?: () => void;
   onEnterPip?: () => void;
-  onEnterMultiView?: () => void;
   onPopoutPlayer?: () => void;
   onDockPopout?: () => void;
   onLock?: () => void;
@@ -140,10 +132,10 @@ export function deduplicateOsdTitle(title: string, subtitle: string | null): str
 }
 
 /**
- * Unified borderless Minimalist Cinema top bar (`Product Decision #40`):
- * bare `×` close + bold stacked Title/Subtitle left; bare icon strip right (`Subtitles`,
- * `Audio/Volume` popover on desktop, `Aspect`, `Fullscreen`, `1×`, `⋮`). Portrait phone caps
- * top-right icons to `Subtitles`, `Lock`, `⋮`.
+ * Unified borderless Minimalist Cinema top bar (`Wave R4`):
+ * scaled `×` close + bold Title/Subtitle left; scaled utility strip right (`Subtitles`, `Audio`,
+ * `Mute/Volume`, `Aspect`, merged `Window Mode`, `PiP`, `Fullscreen`, `1×`, `Lock`, `⋮`).
+ * Portrait phone caps top-right controls cleanly to `Subtitles`, `Audio`, `Lock`, `⋮`.
  */
 export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean }): ReactElement {
   const theme = useTheme();
@@ -162,6 +154,12 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
   } = p;
   const isDesktop = p.isDesktop ?? viewport.formFactor === 'desktop';
   const isPortraitPhone = viewport.formFactor === 'phone' && viewport.orientation === 'portrait';
+  const isCompactDesktop = isDesktop && viewport.width > 0 && viewport.width < 680;
+  const isNarrow =
+    isPortraitPhone || (!isTv && !isDesktop && viewport.width > 0 && viewport.width < 540);
+  const topBtnSize = isCompactDesktop ? 40 : isNarrow ? 44 : 52;
+  const topIconSize = isCompactDesktop ? 22 : isNarrow ? 24 : 28;
+
   const volumeBridge = useSafeHoverBridge({
     disabled: !isDesktop || isPortraitPhone || p.onSetVolume === undefined,
   });
@@ -174,6 +172,17 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
   const isFocused = (action: TvOsdAction): boolean =>
     isTv && p.tvOsdFocused && p.tvOsdAction === action;
 
+  const showSubtitles = service !== null && (p.hasSubtitles ?? p.hasTracks);
+  const showAudio =
+    service !== null &&
+    (p.hasAudio ??
+      (p.tracks !== undefined
+        ? p.hasTracks &&
+          (p.tracks.audio.length > 0 ||
+            (p.tracks.programs?.length ?? 0) > 1 ||
+            p.tracks.subtitles.length === 0)
+        : p.hasTracks));
+
   const trimmedSubtitle = p.subtitle?.trim();
   const showStatus = p.statusKind !== 'playing' && p.statusLine.trim().length > 0;
   const nowProg = !isVod ? (p.nowNext?.now ?? null) : null;
@@ -185,17 +194,23 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
         : null;
   const displayTitle = deduplicateOsdTitle(p.title, topSubtitle);
   const safeFontScale = Number.isFinite(theme.fontScale) ? theme.fontScale : 1;
-  const titleFontSize = Math.round((isTv ? 28 : isPortraitPhone ? 20 : 24) * safeFontScale);
+  const titleFontSize = Math.round(
+    (isTv ? 30 : isPortraitPhone || isCompactDesktop ? 20 : 26) * safeFontScale,
+  );
   const titleFontFamily = theme.typography.h1.fontFamily;
+
+  const canMinimize = p.onMinimizeToMiniPlayer !== undefined;
+  const canPopout = isDesktop && p.onPopoutPlayer !== undefined;
+  const hasMergedWindowPopover = canMinimize && canPopout;
 
   return (
     <View style={styles.osdTopRow}>
       <OsdButton
         testID="player-back"
         icon="close"
-        iconSize={isTv ? 24 : 22}
+        iconSize={topIconSize}
         variant="bare"
-        size={isTv ? 44 : 40}
+        size={topBtnSize}
         accessibilityLabel={i18n.t('player.close')}
         {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.back } : {})}
         onPress={p.onExit}
@@ -272,18 +287,39 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
       </View>
 
       <View style={styles.utilityCluster}>
-        {p.hasTracks && service !== null ? (
+        {showSubtitles ? (
           <OsdButton
-            testID="player-tracks-button"
+            testID="player-subtitles-button"
             icon="subtitles"
             variant="bare"
-            size={38}
-            accessibilityLabel={i18n.t('player.tracks')}
-            {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.tracks } : {})}
-            active={p.tracksOpen}
-            onPress={p.onOpenTracks}
+            size={topBtnSize}
+            iconSize={topIconSize}
+            accessibilityLabel={i18n.t('player.subtitleTracks')}
+            {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.subtitles } : {})}
+            active={
+              settingsOpen &&
+              (p.settingsView === 'subtitles' || p.settingsView === 'subtitleSettings')
+            }
+            onPress={p.onOpenSubtitles}
             isTv={isTv}
-            tvFocused={isFocused('tracks')}
+            tvFocused={isFocused('subtitles')}
+          />
+        ) : null}
+
+        {showAudio ? (
+          <OsdButton
+            testID="player-audio-button"
+            icon="audio"
+            variant="bare"
+            size={topBtnSize}
+            iconSize={topIconSize}
+            accessibilityLabel={i18n.t('player.audioTracks')}
+            active={
+              settingsOpen && (p.settingsView === 'audio' || p.settingsView === 'audioSettings')
+            }
+            onPress={p.onOpenAudio}
+            isTv={isTv}
+            tvFocused={isFocused('audio')}
           />
         ) : null}
 
@@ -297,7 +333,8 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
                 testID="player-mute-button"
                 icon={muted ? 'volumeMute' : 'audio'}
                 variant="bare"
-                size={38}
+                size={topBtnSize}
+                iconSize={topIconSize}
                 accessibilityLabel={muted ? i18n.t('player.unmute') : i18n.t('player.mute')}
                 tooltipPlacement="left"
                 tooltipDisabled={volumeBridge.open}
@@ -350,45 +387,10 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
             testID="player-aspect-button"
             icon="aspect"
             variant="bare"
-            size={38}
+            size={topBtnSize}
+            iconSize={topIconSize}
             accessibilityLabel={i18n.t('player.aspect')}
             onPress={p.onToggleResizeMode}
-            isTv={isTv}
-          />
-        ) : null}
-
-        {!isPortraitPhone && service !== null && p.onMinimizeToMiniPlayer !== undefined ? (
-          <OsdButton
-            testID="player-minimize-button"
-            icon="miniplayer"
-            variant="bare"
-            size={38}
-            accessibilityLabel={i18n.t('player.miniPlayer.minimize')}
-            onPress={p.onMinimizeToMiniPlayer}
-            isTv={isTv}
-          />
-        ) : null}
-
-        {!isPortraitPhone && service !== null && p.onEnterPip !== undefined ? (
-          <OsdButton
-            testID="player-pip-button"
-            icon="pip"
-            variant="bare"
-            size={38}
-            accessibilityLabel={i18n.t('player.pip.enter')}
-            onPress={p.onEnterPip}
-            isTv={isTv}
-          />
-        ) : null}
-
-        {!isPortraitPhone && service !== null && p.onEnterMultiView !== undefined ? (
-          <OsdButton
-            testID="player-multiview-button"
-            icon="multiview"
-            variant="bare"
-            size={38}
-            accessibilityLabel={i18n.t('player.multiView.enter')}
-            onPress={p.onEnterMultiView}
             isTv={isTv}
           />
         ) : null}
@@ -398,19 +400,39 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
             testID="player-dock-popout-button"
             icon="dock"
             variant="bare"
-            size={38}
+            size={topBtnSize}
+            iconSize={topIconSize}
             accessibilityLabel={i18n.t('player.popout.dock')}
             onPress={p.onDockPopout}
             isTv={isTv}
           />
-        ) : !isPortraitPhone && isDesktop && service !== null && p.onPopoutPlayer !== undefined ? (
+        ) : !isPortraitPhone && service !== null && (canMinimize || canPopout) ? (
           <OsdButton
-            testID="player-popout-button"
-            icon="popout"
+            testID="player-window-mode-button"
+            icon="miniplayer"
             variant="bare"
-            size={38}
-            accessibilityLabel={i18n.t('player.popout.open')}
-            onPress={p.onPopoutPlayer}
+            size={topBtnSize}
+            iconSize={topIconSize}
+            accessibilityLabel={i18n.t('player.windowMode')}
+            active={hasMergedWindowPopover && p.windowModeOpen === true}
+            onPress={
+              hasMergedWindowPopover
+                ? (p.onToggleWindowMode ?? p.onMinimizeToMiniPlayer ?? (() => undefined))
+                : (p.onMinimizeToMiniPlayer ?? p.onPopoutPlayer ?? (() => undefined))
+            }
+            isTv={isTv}
+          />
+        ) : null}
+
+        {!isPortraitPhone && service !== null && p.onEnterPip !== undefined ? (
+          <OsdButton
+            testID="player-pip-button"
+            icon="pip"
+            variant="bare"
+            size={topBtnSize}
+            iconSize={topIconSize}
+            accessibilityLabel={i18n.t('player.pip.enter')}
+            onPress={p.onEnterPip}
             isTv={isTv}
           />
         ) : null}
@@ -420,7 +442,8 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
             testID="player-fullscreen-button"
             icon={isFullscreen ? 'fullscreenExit' : 'fullscreen'}
             variant="bare"
-            size={38}
+            size={topBtnSize}
+            iconSize={topIconSize}
             accessibilityLabel={
               isFullscreen ? i18n.t('player.exitFullscreen') : i18n.t('player.enterFullscreen')
             }
@@ -434,7 +457,7 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
           <OsdButton
             testID="player-speed-button"
             variant="bare"
-            compact
+            compact={isNarrow || isCompactDesktop}
             tabularLabel
             label={formatPlaybackSpeed(playbackSpeed)}
             accessibilityLabel={`${i18n.t('player.speed')}: ${formatPlaybackSpeed(playbackSpeed)}`}
@@ -449,7 +472,8 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
             testID="player-lock-button"
             icon="lock"
             variant="bare"
-            size={38}
+            size={topBtnSize}
+            iconSize={topIconSize}
             accessibilityLabel={i18n.t('player.lockControls')}
             onPress={p.onLock}
             isTv={isTv}
@@ -461,7 +485,8 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
             testID="player-settings-button"
             icon="dots"
             variant="bare"
-            size={38}
+            size={topBtnSize}
+            iconSize={topIconSize}
             accessibilityLabel={i18n.t('player.settings')}
             active={settingsOpen}
             onPress={p.onOpenSettings}
@@ -490,7 +515,7 @@ const styles = StyleSheet.create({
   volumeWrap: { position: 'relative', flexDirection: 'row', alignItems: 'center' },
   volumePopoverFloatingBridge: {
     position: 'absolute',
-    top: 38,
+    top: 52,
     right: 0,
     paddingTop: 6,
     zIndex: 40,

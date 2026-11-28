@@ -127,8 +127,9 @@ describe('PlayerScreen review fixes (TV Live OSD, double-tap, scrub cancel, focu
       engine.emit({ attempt, type: 'tracks', tracks: TRACKS });
     });
 
-    // Select enters Live TV OSD focus (lands on 'tracks') -> Right moves to 'settings' -> Select opens Settings
+    // Select enters Live TV OSD focus (lands on 'subtitles') -> Right x2 moves to 'settings' -> Select opens Settings
     await act(async () => keys.tap(KEY_SELECT));
+    await act(async () => keys.tap(KEY_RIGHT));
     await act(async () => keys.tap(KEY_RIGHT));
     await act(async () => keys.tap(KEY_SELECT));
     expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
@@ -140,9 +141,13 @@ describe('PlayerScreen review fixes (TV Live OSD, double-tap, scrub cancel, focu
       selected: true,
     });
 
-    // Left moves 'settings' -> 'tracks' -> 'prevChannel' -> Select jumps to ch:0
+    // Left moves 'settings' -> 'audio' -> 'subtitles' -> 'prevChannel' -> Select jumps to ch:0
     await act(async () => keys.tap(KEY_LEFT));
-    expect(screen.getByTestId('player-tracks-button').props.accessibilityState).toMatchObject({
+    expect(screen.getByTestId('player-audio-button').props.accessibilityState).toMatchObject({
+      selected: true,
+    });
+    await act(async () => keys.tap(KEY_LEFT));
+    expect(screen.getByTestId('player-subtitles-button').props.accessibilityState).toMatchObject({
       selected: true,
     });
     await act(async () => keys.tap(KEY_LEFT));

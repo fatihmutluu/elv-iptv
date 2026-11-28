@@ -220,12 +220,6 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
       : typeof window === 'undefined'
         ? undefined
         : window.elv?.player;
-  const resolveWindowBridge = (): WindowBridge | undefined =>
-    deps && 'windowBridge' in deps
-      ? deps.windowBridge
-      : typeof window === 'undefined'
-        ? undefined
-        : window.elv?.window;
   const resolvePresenterKind = (): PresenterKind | undefined =>
     deps && 'presenterKind' in deps
       ? deps.presenterKind
@@ -263,23 +257,6 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
         }
       }
     });
-    const windowBridge = resolveWindowBridge();
-    let alwaysOnTop = windowBridge ? await windowBridge.getAlwaysOnTop().catch(() => false) : false;
-    const alwaysOnTopListeners = new Set<(pinned: boolean) => void>();
-    const notifyAlwaysOnTop = (pinned: boolean): void => {
-      if (alwaysOnTop === pinned) return;
-      alwaysOnTop = pinned;
-      for (const listener of [...alwaysOnTopListeners]) {
-        try {
-          listener(pinned);
-        } catch {
-          // isolate always-on-top subscribers
-        }
-      }
-    };
-    let offWindowAlwaysOnTop = windowBridge?.onAlwaysOnTopChanged((pinned) => {
-      notifyAlwaysOnTop(pinned);
-    });
     if (initialPrimary) {
       for (const owner of mediaSessionOwners) owner.setMediaSessionPrimary(false);
     }
@@ -303,9 +280,6 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
       offTelemetry?.();
       offPresenterOverlay();
       overlayModeListeners.clear();
-      offWindowAlwaysOnTop?.();
-      offWindowAlwaysOnTop = undefined;
-      alwaysOnTopListeners.clear();
     };
     const engine = {
       ...boundEngine,
@@ -394,23 +368,6 @@ export function createDesktopVideoHost(deps?: DesktopVideoHostDeps): VideoHost {
       setAudioDevice: (name: string) => rawEngine.setAudioDevice(name),
       onAudioDevicesChange: (listener: Parameters<typeof rawEngine.onAudioDevicesChange>[0]) =>
         rawEngine.onAudioDevicesChange(listener),
-      ...(windowBridge
-        ? {
-            toggleAlwaysOnTop: () => {
-              void windowBridge
-                .setAlwaysOnTop(!alwaysOnTop)
-                .then((pinned) => notifyAlwaysOnTop(pinned))
-                .catch(() => undefined);
-            },
-            isAlwaysOnTop: () => alwaysOnTop,
-            onAlwaysOnTopChange: (listener: (pinned: boolean) => void) => {
-              alwaysOnTopListeners.add(listener);
-              return () => {
-                alwaysOnTopListeners.delete(listener);
-              };
-            },
-          }
-        : {}),
       onHostKey: (listener: (key: DesktopHostKey) => void) => {
         activeHostKeyListener = listener;
         const offUi = rawEngine.onUi((event) =>

@@ -9,17 +9,28 @@ import {
   webTransition,
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import {
+  Animated,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+} from 'react-native';
 import {
   clampMiniPlayerWidth,
   computeCornerPosition,
+  computeEdgeResizedMiniBounds,
   computeMiniPlayerBounds,
-  computeResizedWidthFromDrag,
-  inwardResizeCorner,
   MINI_PLAYER_DRAG_THRESHOLD_PX,
   MINI_PLAYER_SNAP_DURATION_MS,
   type MiniPlayerCorner,
+  type MiniPlayerPosition,
+  type MiniPlayerRect,
+  type MiniPlayerResizeEdge,
   miniPlayerHeightForWidth,
+  resizeCursorForEdge,
   snapToNearestCorner,
 } from './mini-player-geometry';
 
@@ -35,6 +46,8 @@ const MIN_MINI_WIDTH = 220;
 const MAX_MINI_WIDTH_DEFAULT = 320;
 const MAX_MINI_WIDTH_TV = 360;
 const PORTRAIT_BOTTOM_TAB_CLEARANCE = 68;
+const RESIZE_EDGE_THICKNESS = 8;
+const RESIZE_CORNER_SIZE = 14;
 
 /**
  * Computes a `16:9` floating corner frame honoring `safeArea`, `overscan`, and portrait phone
@@ -116,8 +129,40 @@ function extractPointerCoords(event: unknown): PointerCoords | null {
   return { clientX: x, clientY: y };
 }
 
+function subscribeWebPointerSession(
+  win: WebWindowEvents,
+  onMove: (event: unknown) => void,
+  onEnd: () => void,
+  activeCleanupRef: { current: (() => void) | null },
+): () => void {
+  const usePointer = supportsPointerEvents();
+  const cleanup = () => {
+    if (usePointer) {
+      win.removeEventListener('pointermove', onMove);
+      win.removeEventListener('pointerup', onEnd);
+      win.removeEventListener('pointercancel', onEnd);
+    } else {
+      win.removeEventListener('mousemove', onMove);
+      win.removeEventListener('mouseup', onEnd);
+    }
+    if (activeCleanupRef.current === cleanup) {
+      activeCleanupRef.current = null;
+    }
+  };
+  activeCleanupRef.current = cleanup;
+  if (usePointer) {
+    win.addEventListener('pointermove', onMove);
+    win.addEventListener('pointerup', onEnd);
+    win.addEventListener('pointercancel', onEnd);
+  } else {
+    win.addEventListener('mousemove', onMove);
+    win.addEventListener('mouseup', onEnd);
+  }
+  return cleanup;
+}
+
 /**
- * Interactive drag-to-move, velocity-projected corner-snapping, and corner-pinned 16:9
+ * Interactive drag-to-move, velocity-projected corner-snapping, and OS edge/corner 16:9
  * resize controller for the floating in-app mini-player.
  */
 export function useMiniPlayerController(params: {
@@ -166,6 +211,7 @@ export function useMiniPlayerController(params: {
 
   const [corner, setCorner] = useState<MiniPlayerCorner>('bottom-right');
   const [customWidth, setCustomWidth] = useState<number | null>(null);
+  const [freePos, setFreePos] = useState<MiniPlayerPosition | null>(null);
 
   const width =
     customWidth !== null
@@ -173,14 +219,28 @@ export function useMiniPlayerController(params: {
       : baseFrame.width;
   const height = miniPlayerHeightForWidth(width);
   const dockedPos = computeCornerPosition(corner, width, height, bounds);
+  const effectivePos: MiniPlayerPosition =
+    freePos !== null
+      ? {
+          left: Math.max(
+            bounds.left,
+            Math.min(Math.max(bounds.left, bounds.right - width), freePos.left),
+          ),
+          top: Math.max(
+            bounds.top,
+            Math.min(Math.max(bounds.top, bounds.bottom - height), freePos.top),
+          ),
+        }
+      : dockedPos;
 
   const animPosRef = useRef<Animated.ValueXY | null>(null);
   if (animPosRef.current === null) {
-    animPosRef.current = new Animated.ValueXY({ x: dockedPos.left, y: dockedPos.top });
+    animPosRef.current = new Animated.ValueXY({ x: effectivePos.left, y: effectivePos.top });
   }
   const animPos = animPosRef.current;
 
   const isDraggingRef = useRef(false);
+  const isResizingRef = useRef(false);
   const snappingRef = useRef(false);
   const snapTargetRef = useRef<{ readonly left: number; readonly top: number } | null>(null);
   const suppressExpandUntilRef = useRef(0);
@@ -191,10 +251,13 @@ export function useMiniPlayerController(params: {
     corner,
     width,
     height,
-    dockedPos,
+    effectivePos,
     bounds,
     viewportWidth,
     viewportHeight,
+    safeArea,
+    overscan,
+    isPortraitPhone,
     isTv,
     reduceMotion,
   });
@@ -202,10 +265,13 @@ export function useMiniPlayerController(params: {
     corner,
     width,
     height,
-    dockedPos,
+    effectivePos,
     bounds,
     viewportWidth,
     viewportHeight,
+    safeArea,
+    overscan,
+    isPortraitPhone,
     isTv,
     reduceMotion,
   };
@@ -219,15 +285,16 @@ export function useMiniPlayerController(params: {
       snappingRef.current = false;
       snapTargetRef.current = null;
       isDraggingRef.current = false;
+      isResizingRef.current = false;
       suppressExpandUntilRef.current = 0;
       return;
     }
-    if (isDraggingRef.current) return;
+    if (isDraggingRef.current || isResizingRef.current) return;
     if (
       snappingRef.current &&
       snapTargetRef.current !== null &&
-      snapTargetRef.current.left === dockedPos.left &&
-      snapTargetRef.current.top === dockedPos.top
+      snapTargetRef.current.left === effectivePos.left &&
+      snapTargetRef.current.top === effectivePos.top
     ) {
       return;
     }
@@ -235,8 +302,8 @@ export function useMiniPlayerController(params: {
     snapAnimRef.current = null;
     snappingRef.current = false;
     snapTargetRef.current = null;
-    animPos.setValue({ x: dockedPos.left, y: dockedPos.top });
-  }, [animPos, dockedPos.left, dockedPos.top, enabled]);
+    animPos.setValue({ x: effectivePos.left, y: effectivePos.top });
+  }, [animPos, effectivePos.left, effectivePos.top, enabled]);
 
   useEffect(() => {
     return () => {
@@ -246,6 +313,8 @@ export function useMiniPlayerController(params: {
       snapAnimRef.current = null;
       snappingRef.current = false;
       snapTargetRef.current = null;
+      isDraggingRef.current = false;
+      isResizingRef.current = false;
     };
   }, []);
 
@@ -255,19 +324,25 @@ export function useMiniPlayerController(params: {
     return Date.now() < until;
   }, []);
 
+  const beginPointerSession = useCallback((): WebWindowEvents | null => {
+    if (stateRef.current.isTv) return null;
+    const win = readWebWindow();
+    if (win === null) return null;
+    cleanupListenersRef.current?.();
+    snapAnimRef.current?.stop();
+    snapAnimRef.current = null;
+    snappingRef.current = false;
+    snapTargetRef.current = null;
+    return win;
+  }, []);
+
   const startDrag = useCallback(
     (startX: number, startY: number): void => {
-      if (stateRef.current.isTv) return;
-      const win = readWebWindow();
+      const win = beginPointerSession();
       if (win === null) return;
-      cleanupListenersRef.current?.();
-      snapAnimRef.current?.stop();
-      snapAnimRef.current = null;
-      snappingRef.current = false;
-      snapTargetRef.current = null;
 
-      const startLeft = stateRef.current.dockedPos.left;
-      const startTop = stateRef.current.dockedPos.top;
+      const startLeft = stateRef.current.effectivePos.left;
+      const startTop = stateRef.current.effectivePos.top;
       let curLeft = startLeft;
       let curTop = startTop;
       let lastX = startX;
@@ -276,6 +351,7 @@ export function useMiniPlayerController(params: {
       let vx = 0;
       let vy = 0;
       let maxDist = 0;
+      let cleanup: (() => void) | undefined;
       isDraggingRef.current = true;
 
       const handleMove = (event: unknown) => {
@@ -297,7 +373,7 @@ export function useMiniPlayerController(params: {
       };
 
       const handleEnd = () => {
-        cleanup();
+        cleanup?.();
         isDraggingRef.current = false;
         if (maxDist >= MINI_PLAYER_DRAG_THRESHOLD_PX) {
           suppressExpandUntilRef.current = Date.now() + SUPPRESS_EXPAND_WINDOW_MS;
@@ -313,6 +389,7 @@ export function useMiniPlayerController(params: {
           cur.bounds,
         );
         const target = computeCornerPosition(nextCorner, cur.width, cur.height, cur.bounds);
+        setFreePos(null);
         if (cur.reduceMotion) {
           snappingRef.current = false;
           snapTargetRef.current = null;
@@ -338,100 +415,61 @@ export function useMiniPlayerController(params: {
         }
       };
 
-      const usePointer = supportsPointerEvents();
-      const cleanup = () => {
-        if (usePointer) {
-          win.removeEventListener('pointermove', handleMove);
-          win.removeEventListener('pointerup', handleEnd);
-          win.removeEventListener('pointercancel', handleEnd);
-        } else {
-          win.removeEventListener('mousemove', handleMove);
-          win.removeEventListener('mouseup', handleEnd);
-        }
-        if (cleanupListenersRef.current === cleanup) {
-          cleanupListenersRef.current = null;
-        }
-      };
-
-      cleanupListenersRef.current = cleanup;
-      if (usePointer) {
-        win.addEventListener('pointermove', handleMove);
-        win.addEventListener('pointerup', handleEnd);
-        win.addEventListener('pointercancel', handleEnd);
-      } else {
-        win.addEventListener('mousemove', handleMove);
-        win.addEventListener('mouseup', handleEnd);
-      }
+      cleanup = subscribeWebPointerSession(win, handleMove, handleEnd, cleanupListenersRef);
     },
-    [animPos],
+    [animPos, beginPointerSession],
   );
 
-  const startResize = useCallback((startX: number, startY: number): void => {
-    if (stateRef.current.isTv) return;
-    const win = readWebWindow();
-    if (win === null) return;
-    cleanupListenersRef.current?.();
-    snapAnimRef.current?.stop();
-    snapAnimRef.current = null;
-    snappingRef.current = false;
-    snapTargetRef.current = null;
+  const startResize = useCallback(
+    (edge: MiniPlayerResizeEdge, startX: number, startY: number): void => {
+      const win = beginPointerSession();
+      if (win === null) return;
 
-    const startWidth = stateRef.current.width;
-    const lockedCorner = stateRef.current.corner;
+      const startRect: MiniPlayerRect = {
+        x: stateRef.current.effectivePos.left,
+        y: stateRef.current.effectivePos.top,
+        width: stateRef.current.width,
+        height: stateRef.current.height,
+      };
+      let cleanup: (() => void) | undefined;
+      isResizingRef.current = true;
 
-    const handleMove = (event: unknown) => {
-      const coords = extractPointerCoords(event);
-      if (coords === null) return;
-      const dx = coords.clientX - startX;
-      const dy = coords.clientY - startY;
-      const targetWidth = computeResizedWidthFromDrag(lockedCorner, startWidth, dx, dy);
-      const cur = stateRef.current;
-      const clamped = clampMiniPlayerWidth(
-        targetWidth,
-        cur.viewportWidth,
-        cur.viewportHeight,
-        cur.isTv,
-      );
-      setCustomWidth(clamped);
-    };
+      const handleMove = (event: unknown) => {
+        const coords = extractPointerCoords(event);
+        if (coords === null) return;
+        const dx = coords.clientX - startX;
+        const dy = coords.clientY - startY;
+        const cur = stateRef.current;
+        const next = computeEdgeResizedMiniBounds(startRect, edge, dx, dy, {
+          width: cur.viewportWidth,
+          height: cur.viewportHeight,
+          safeArea: cur.safeArea,
+          overscan: cur.overscan,
+          isPortraitPhone: cur.isPortraitPhone,
+          isTv: cur.isTv,
+        });
+        setCustomWidth(next.width);
+        setFreePos({ left: next.x, top: next.y });
+        animPos.setValue({ x: next.x, y: next.y });
+      };
 
-    const handleEnd = () => {
-      cleanup();
-      suppressExpandUntilRef.current = Date.now() + SUPPRESS_EXPAND_WINDOW_MS;
-    };
+      const handleEnd = () => {
+        cleanup?.();
+        isResizingRef.current = false;
+        suppressExpandUntilRef.current = Date.now() + SUPPRESS_EXPAND_WINDOW_MS;
+      };
 
-    const usePointer = supportsPointerEvents();
-    const cleanup = () => {
-      if (usePointer) {
-        win.removeEventListener('pointermove', handleMove);
-        win.removeEventListener('pointerup', handleEnd);
-        win.removeEventListener('pointercancel', handleEnd);
-      } else {
-        win.removeEventListener('mousemove', handleMove);
-        win.removeEventListener('mouseup', handleEnd);
-      }
-      if (cleanupListenersRef.current === cleanup) {
-        cleanupListenersRef.current = null;
-      }
-    };
-
-    cleanupListenersRef.current = cleanup;
-    if (usePointer) {
-      win.addEventListener('pointermove', handleMove);
-      win.addEventListener('pointerup', handleEnd);
-      win.addEventListener('pointercancel', handleEnd);
-    } else {
-      win.addEventListener('mousemove', handleMove);
-      win.addEventListener('mouseup', handleEnd);
-    }
-  }, []);
+      cleanup = subscribeWebPointerSession(win, handleMove, handleEnd, cleanupListenersRef);
+    },
+    [animPos, beginPointerSession],
+  );
 
   return {
     corner,
     width,
     height,
-    left: dockedPos.left,
-    top: dockedPos.top,
+    left: effectivePos.left,
+    top: effectivePos.top,
     animPos,
     startDrag,
     startResize,
@@ -450,34 +488,43 @@ export interface FloatingMiniPlayerChromeProps {
   readonly onExpand: () => void;
   readonly onClose: () => void;
   readonly onDragStart?: ((clientX: number, clientY: number) => void) | undefined;
-  readonly onResizeStart?: ((clientX: number, clientY: number) => void) | undefined;
+  readonly onResizeStart?:
+    | ((edge: MiniPlayerResizeEdge, clientX: number, clientY: number) => void)
+    | undefined;
   readonly shouldSuppressExpand?: (() => boolean) | undefined;
 }
 
-function resizeGripPositionStyle(gripCorner: MiniPlayerCorner): ViewStyle {
-  switch (gripCorner) {
-    case 'top-left':
-      return { top: 0, left: 0, cursor: 'nwse-resize' } as unknown as ViewStyle;
-    case 'top-right':
-      return { top: 0, right: 0, cursor: 'nesw-resize' } as unknown as ViewStyle;
-    case 'bottom-left':
-      return { bottom: 0, left: 0, cursor: 'nesw-resize' } as unknown as ViewStyle;
-    case 'bottom-right':
-      return { bottom: 0, right: 0, cursor: 'nwse-resize' } as unknown as ViewStyle;
-  }
+interface ResizeZoneSpec {
+  readonly edge: MiniPlayerResizeEdge;
+  readonly style: ViewStyle;
 }
+
+const EDGE = RESIZE_EDGE_THICKNESS;
+const CORNER = RESIZE_CORNER_SIZE;
+const RESIZE_ZONES: readonly ResizeZoneSpec[] = (
+  [
+    ['n', { top: 0, left: 0, right: 0, height: EDGE, zIndex: 4 }],
+    ['s', { bottom: 0, left: 0, right: 0, height: EDGE, zIndex: 4 }],
+    ['w', { top: 0, bottom: 0, left: 0, width: EDGE, zIndex: 4 }],
+    ['e', { top: 0, bottom: 0, right: 0, width: EDGE, zIndex: 4 }],
+    ['nw', { top: 0, left: 0, width: CORNER, height: CORNER, zIndex: 5 }],
+    ['ne', { top: 0, right: 0, width: CORNER, height: CORNER, zIndex: 5 }],
+    ['sw', { bottom: 0, left: 0, width: CORNER, height: CORNER, zIndex: 5 }],
+    ['se', { bottom: 0, right: 0, width: CORNER, height: CORNER, zIndex: 5 }],
+  ] as ReadonlyArray<readonly [MiniPlayerResizeEdge, ViewStyle]>
+).map(([edge, box]) => ({ edge, style: { position: 'absolute', ...box } }));
 
 /**
  * Cinema Quietude v2 floating corner mini-player overlay controls (`#233`):
- * compact channel title pill, draggable surface, inward-corner resize grip, and accessible
- * Expand & Close actions layered over the non-focusable persistent video surface.
+ * compact channel title pill, draggable surface, 8 invisible OS edge/corner resize zones,
+ * and accessible Expand & Close actions layered over the non-focusable persistent video surface.
  */
 export function FloatingMiniPlayerChrome({
   title,
   subtitle,
   isLive,
   isTv,
-  corner = 'bottom-right',
+  corner: _corner = 'bottom-right',
   i18n,
   onExpand,
   onClose,
@@ -487,10 +534,9 @@ export function FloatingMiniPlayerChrome({
 }: FloatingMiniPlayerChromeProps): ReactElement {
   const theme = useTheme();
   const [focusedButton, setFocusedButton] = useState<'expand' | 'close' | null>(null);
-  const [resizeHovered, setResizeHovered] = useState(false);
   const pointer = !isTv ? webCursorPointer() : undefined;
   const transition = webTransition(theme, 'background-color, border-color, opacity');
-  const gripCorner = inwardResizeCorner(corner);
+  const isWeb = (Platform.OS as string) === 'web';
 
   const handleSurfacePointerDown = (event: unknown) => {
     if (isTv || !onDragStart) return;
@@ -498,13 +544,13 @@ export function FloatingMiniPlayerChrome({
     if (coords !== null) onDragStart(coords.clientX, coords.clientY);
   };
 
-  const handleResizePointerDown = (event: unknown) => {
+  const handleResizePointerDown = (edge: MiniPlayerResizeEdge, event: unknown) => {
     if (isTv || !onResizeStart) return;
     const e = event as { stopPropagation?: () => void; preventDefault?: () => void } | null;
     e?.stopPropagation?.();
     e?.preventDefault?.();
     const coords = extractPointerCoords(event);
-    if (coords !== null) onResizeStart(coords.clientX, coords.clientY);
+    if (coords !== null) onResizeStart(edge, coords.clientX, coords.clientY);
   };
 
   const handleSurfacePress = () => {
@@ -537,24 +583,9 @@ export function FloatingMiniPlayerChrome({
           : { onMouseDown: handleSurfacePointerDown }) as Record<string, unknown>)
       : {};
 
-  const resizePointerProps =
-    !isTv && onResizeStart !== undefined
-      ? ((usePointerEvents
-          ? { onPointerDown: handleResizePointerDown }
-          : { onMouseDown: handleResizePointerDown }) as Record<string, unknown>)
-      : {};
-
-  const actionsOnLeft = !isTv && gripCorner === 'top-right';
-  const titleClearLeft = !isTv && gripCorner === 'bottom-left';
-  const titleClearRight = !isTv && gripCorner === 'bottom-right';
-
   return (
     <View testID="mini-player-chrome" pointerEvents="box-none" style={styles.overlay}>
-      <View
-        testID="mini-player-top-row"
-        style={[styles.topRow, actionsOnLeft ? styles.topRowActionsLeft : null]}
-        pointerEvents="box-none"
-      >
+      <View testID="mini-player-top-row" style={styles.topRow} pointerEvents="box-none">
         <Pressable
           testID="mini-player-surface-tap"
           accessibilityRole="button"
@@ -562,10 +593,10 @@ export function FloatingMiniPlayerChrome({
           focusable={false}
           accessible={!isTv}
           onPress={handleSurfacePress}
-          style={styles.tapArea}
+          style={styles.overlay}
           {...dragPointerProps}
         />
-        <View style={styles.actionsRow}>
+        <View testID="mini-player-actions-row" style={styles.actionsRow}>
           <Tooltip content={i18n.t('player.miniPlayer.expand')} placement="top" disabled={isTv}>
             <Pressable
               testID="mini-player-expand"
@@ -606,8 +637,6 @@ export function FloatingMiniPlayerChrome({
           testID="mini-player-title-bar"
           style={[
             styles.titleBar,
-            titleClearLeft ? styles.titleBarClearLeft : null,
-            titleClearRight ? styles.titleBarClearRight : null,
             {
               backgroundColor: theme.colors.glassBg,
               borderTopColor: theme.colors.glassBorder,
@@ -646,46 +675,28 @@ export function FloatingMiniPlayerChrome({
         </View>
       </Tooltip>
 
-      {!isTv ? (
-        <View
-          pointerEvents="box-none"
-          style={[styles.resizeHandleWrap, resizeGripPositionStyle(gripCorner)]}
-        >
-          <Tooltip content={i18n.t('player.mini.resize')} placement="top" disabled={isTv}>
-            <Pressable
-              testID="mini-player-resize-handle"
-              accessibilityRole="adjustable"
-              accessibilityLabel={i18n.t('player.mini.resize')}
-              focusable={false}
-              onHoverIn={() => setResizeHovered(true)}
-              onHoverOut={() => setResizeHovered(false)}
-              style={[
-                styles.resizeHandle,
-                transition,
-                {
-                  backgroundColor: resizeHovered
-                    ? theme.colors.actionGlassHoverBg
-                    : theme.colors.glassBg,
-                  borderColor: resizeHovered ? theme.colors.accent : theme.colors.glassBorder,
-                  borderRadius: theme.radius.button,
-                },
-              ]}
-              {...resizePointerProps}
-            >
-              <View
-                style={[
-                  styles.resizeGripDot,
-                  {
-                    backgroundColor: resizeHovered
-                      ? theme.colors.accent
-                      : theme.colors.textSecondary,
-                  },
-                ]}
+      {!isTv
+        ? RESIZE_ZONES.map((zone) => {
+            const resizeProps = (
+              usePointerEvents
+                ? { onPointerDown: (ev: unknown) => handleResizePointerDown(zone.edge, ev) }
+                : { onMouseDown: (ev: unknown) => handleResizePointerDown(zone.edge, ev) }
+            ) as Record<string, unknown>;
+            const cursorStyle = isWeb
+              ? ({ cursor: resizeCursorForEdge(zone.edge) } as unknown as ViewStyle)
+              : undefined;
+            return (
+              <Pressable
+                key={zone.edge}
+                testID={`mini-player-resize-${zone.edge}`}
+                focusable={false}
+                accessible={false}
+                style={[zone.style, cursorStyle]}
+                {...resizeProps}
               />
-            </Pressable>
-          </Tooltip>
-        </View>
-      ) : null}
+            );
+          })
+        : null}
     </View>
   );
 }
@@ -706,21 +717,11 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     padding: 8,
   },
-  topRowActionsLeft: {
-    justifyContent: 'flex-start',
-  },
-  tapArea: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-  },
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    zIndex: 2,
+    zIndex: 6,
   },
   iconButton: {
     width: 40,
@@ -739,12 +740,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  titleBarClearLeft: {
-    paddingLeft: 32,
-  },
-  titleBarClearRight: {
-    paddingRight: 32,
-  },
   liveDot: {
     width: 7,
     height: 7,
@@ -757,22 +752,5 @@ const styles = StyleSheet.create({
   },
   titleText: {
     fontWeight: '600',
-  },
-  resizeHandleWrap: {
-    position: 'absolute',
-    zIndex: 4,
-    padding: 4,
-  },
-  resizeHandle: {
-    width: 22,
-    height: 22,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  resizeGripDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 2,
   },
 });

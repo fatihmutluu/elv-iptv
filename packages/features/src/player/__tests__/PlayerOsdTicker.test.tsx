@@ -62,7 +62,6 @@ function osdProps(overrides: Partial<Parameters<typeof PlayerOsd>[0]> = {}) {
     isTv: false,
     tvOsdFocused: false,
     tvOsdAction: 'playPause' as const,
-    tracksOpen: false,
     i18n: createAppI18n('en'),
     service: null,
     clock,
@@ -71,7 +70,8 @@ function osdProps(overrides: Partial<Parameters<typeof PlayerOsd>[0]> = {}) {
     onSeekBack: jest.fn(),
     onSeekForward: jest.fn(),
     onSeekRatio: jest.fn(),
-    onOpenTracks: jest.fn(),
+    onOpenSubtitles: jest.fn(),
+    onOpenAudio: jest.fn(),
     onPrev: jest.fn(),
     onNext: jest.fn(),
     onRetry: jest.fn(),
@@ -209,7 +209,7 @@ describe('VodProgressBar and OsdClock gated ticking', () => {
     await view.unmount();
   });
 
-  it('hides the default TV focus ring on Retry while the track picker is open', async () => {
+  it('hides the default TV focus ring on Retry while Settings is open', async () => {
     const fake = createFakeService(PAUSED);
     const view = await render(
       <PlayerOsd {...osdProps({ service: fake.service, isTv: true, showRetry: true })} />,
@@ -219,7 +219,7 @@ describe('VodProgressBar and OsdClock gated ticking', () => {
     });
     await view.rerender(
       <PlayerOsd
-        {...osdProps({ service: fake.service, isTv: true, showRetry: true, tracksOpen: true })}
+        {...osdProps({ service: fake.service, isTv: true, showRetry: true, settingsOpen: true })}
       />,
     );
     expect(screen.getByTestId('player-retry').props.accessibilityState).toMatchObject({

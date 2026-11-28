@@ -16,13 +16,12 @@ describe('@elv/i18n Wave C1 cinema player, sleep timer, screensaver, scrub & tra
       ['player.aspect.stretch', 'Stretch', 'Uzat'],
       ['player.remainingTime', 'Remaining', 'Kalan süre'],
       ['player.totalDuration', 'Total duration', 'Toplam süre'],
-      ['player.timeDisplayMode', 'Time display', 'Süre gösterimi'],
       [
         'player.timeDisplayToggleHint',
         'Tap time to switch between total, remaining, and end time',
         'Toplam, kalan ve bitiş saati arasında geçmek için süreye dokun',
       ],
-      // #118 Sleep Timer, Chapters & Still Watching
+      // #118 Sleep Timer & Still Watching
       ['player.sleepTimer', 'Sleep timer', 'Uyku zamanlayıcı'],
       ['player.sleepTimerOff', 'Off', 'Kapalı'],
       ['player.sleepTimerAction', 'When timer ends', 'Süre dolunca'],
@@ -33,9 +32,6 @@ describe('@elv/i18n Wave C1 cinema player, sleep timer, screensaver, scrub & tra
         'Playback stopped by sleep timer',
         'Uyku zamanlayıcı oynatmayı durdurdu',
       ],
-      ['player.chapters', 'Chapters', 'Bölümler'],
-      ['player.prevChapter', 'Previous chapter', 'Önceki bölüm'],
-      ['player.nextChapter', 'Next chapter', 'Sonraki bölüm'],
       ['player.stillWatchingTitle', 'Are you still watching?', 'Hâlâ izliyor musunuz?'],
       ['player.stillWatchingContinue', 'Keep watching', 'İzlemeye devam et'],
       ['player.stillWatchingStop', 'Stop now', 'Şimdi durdur'],
@@ -111,7 +107,7 @@ describe('@elv/i18n Wave C1 cinema player, sleep timer, screensaver, scrub & tra
     }
   });
 
-  it('interpolates Wave C1 time, sleep timer, chapter count, and still-watching placeholders in EN and TR', () => {
+  it('interpolates Wave C1 time, sleep timer, and still-watching placeholders in EN and TR', () => {
     const en = createAppI18n('en');
     const tr = createAppI18n('tr');
 
@@ -123,9 +119,6 @@ describe('@elv/i18n Wave C1 cinema player, sleep timer, screensaver, scrub & tra
 
     expect(en.t('player.sleepTimerRemaining', { minutes: 14 })).toBe('14m left');
     expect(tr.t('player.sleepTimerRemaining', { minutes: 14 })).toBe('14 dk kaldı');
-
-    expect(en.t('player.chapterCount', { count: 8 })).toBe('8 chapters');
-    expect(tr.t('player.chapterCount', { count: 8 })).toBe('8 bölüm');
 
     expect(en.t('player.stillWatchingBody', { seconds: 45 })).toBe(
       'Playback will stop in 45s to save bandwidth.',

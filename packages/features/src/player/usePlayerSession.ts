@@ -2,7 +2,6 @@ import type { CatalogService } from '@elv/data';
 import { type AccessibilityFontFamily, type DeinterlaceMode, originOf } from '@elv/domain';
 import {
   type AttemptToken,
-  type ChapterInfo,
   createPlaybackService,
   EMPTY_TRACKS,
   type MediaTracks,
@@ -46,7 +45,6 @@ interface PlaybackUiSlice {
   readonly status: PlaybackStatus;
   readonly tracks: MediaTracks;
   readonly videoInfo: StreamVideoInfo | undefined;
-  readonly chapters: readonly ChapterInfo[] | undefined;
   readonly droppedFrames: number | undefined;
   readonly surfaceRecreationToken: number;
   readonly audioDelayMs: number;
@@ -60,7 +58,6 @@ const OPENING_PLAYBACK_SLICE: PlaybackUiSlice = {
   status: OPENING_STATUS,
   tracks: EMPTY_TRACKS,
   videoInfo: undefined,
-  chapters: undefined,
   droppedFrames: undefined,
   surfaceRecreationToken: 0,
   audioDelayMs: 0,
@@ -386,7 +383,6 @@ export function usePlayerSession(params: {
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : null;
   const [inPip, setInPip] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [alwaysOnTop, setAlwaysOnTop] = useState(false);
   const [overlayMode, setOverlayMode] = useState<'floating' | 'docked'>(
     isDesktop ? 'docked' : 'floating',
   );
@@ -411,17 +407,6 @@ export function usePlayerSession(params: {
     const subscribeFullscreen = openedEngine.onFullscreenChange;
     if (subscribeFullscreen === undefined) return;
     return subscribeFullscreen((next) => setIsFullscreen(next));
-  }, [openedEngine]);
-
-  useEffect(() => {
-    if (openedEngine === null) {
-      setAlwaysOnTop(false);
-      return;
-    }
-    setAlwaysOnTop(openedEngine.isAlwaysOnTop?.() === true);
-    const subscribePin = openedEngine.onAlwaysOnTopChange;
-    if (subscribePin === undefined) return;
-    return subscribePin((next) => setAlwaysOnTop(next));
   }, [openedEngine]);
 
   useEffect(() => {
@@ -519,7 +504,6 @@ export function usePlayerSession(params: {
       status: st,
       tracks: tr,
       videoInfo: vi,
-      chapters: ch,
       droppedFrames: df,
       surfaceRecreationToken: token,
       audioDelayMs: rawAudioDelay,
@@ -536,7 +520,6 @@ export function usePlayerSession(params: {
       prev.status === st &&
       prev.tracks === tr &&
       prev.videoInfo === vi &&
-      prev.chapters === ch &&
       prev.droppedFrames === df &&
       prev.surfaceRecreationToken === token &&
       prev.audioDelayMs === audioDelayMs &&
@@ -550,7 +533,6 @@ export function usePlayerSession(params: {
       status: st,
       tracks: tr,
       videoInfo: vi,
-      chapters: ch,
       droppedFrames: df,
       surfaceRecreationToken: token,
       audioDelayMs,
@@ -564,7 +546,6 @@ export function usePlayerSession(params: {
     status,
     tracks,
     videoInfo,
-    chapters,
     droppedFrames,
     surfaceRecreationToken,
     audioDelayMs,
@@ -579,7 +560,6 @@ export function usePlayerSession(params: {
     status,
     tracks,
     videoInfo,
-    chapters,
     droppedFrames,
     surfaceRecreationToken,
     audioDelayMs,
@@ -588,7 +568,6 @@ export function usePlayerSession(params: {
     externalPlaybackActive,
     inPip,
     isFullscreen,
-    alwaysOnTop,
     overlayMode,
     audioDevices,
     activeAudioDevice,

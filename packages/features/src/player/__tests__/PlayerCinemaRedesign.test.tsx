@@ -419,15 +419,15 @@ describe('Cinema Quietude v2 player redesign end-to-end (#391, #58, #394, #114, 
       expect(screen.getByTestId('player-stream-badge-hdr')).toHaveTextContent('HDR10');
       expect(screen.getByTestId('player-stream-badge-audio')).toHaveTextContent('5.1');
 
-      // Press 'i' -> opens non-blocking PlayerInfoSheet without pausing playback
+      // Press 'i' -> opens non-blocking PlayerStatsHud (with merged Programme & Stream Info) without pausing playback
       await web.emitKey('keydown', { key: 'i' });
-      expect(screen.getByTestId('player-info-panel')).toBeTruthy();
-      expect(screen.getByTestId('player-info-badge-hdr')).toHaveTextContent('HDR10');
+      expect(screen.getByTestId('player-stats-hud')).toBeTruthy();
+      expect(screen.getByTestId('player-stats-badge-hdr')).toHaveTextContent('HDR10');
       expect(p.engine.commands.some((c) => c.name === 'pause')).toBe(false);
 
-      // Press 'i' again -> closes PlayerInfoSheet cleanly
+      // Press 'i' again -> closes PlayerStatsHud cleanly
       await web.emitKey('keydown', { key: 'i' });
-      expect(screen.queryByTestId('player-info-panel')).toBeNull();
+      expect(screen.queryByTestId('player-stats-hud')).toBeNull();
 
       await p.view.unmount();
     } finally {
@@ -691,7 +691,7 @@ describe('Cinema Quietude v2 player redesign end-to-end (#391, #58, #394, #114, 
     await waitFor(() => {
       expect(screen.getByTestId('player-live-now-next')).toBeTruthy();
     });
-    // Portrait phone hides StreamBadgePills so the top header stays sleek 2-line (badges live in Info & Settings)
+    // Portrait phone hides StreamBadgePills so the top header stays sleek 2-line (badges live in Stats HUD)
     expect(screen.queryByTestId('player-stream-badge-res')).toBeNull();
     expect(screen.queryByTestId('player-stream-badge-fps')).toBeNull();
     // Live prev/next are sleek circular icon buttons with accessible labels (no text children)
@@ -699,7 +699,7 @@ describe('Cinema Quietude v2 player redesign end-to-end (#391, #58, #394, #114, 
     const nextBtn = screen.getByTestId('player-next');
     expect(prevBtn.props.accessibilityLabel).toBe('Prev');
     expect(nextBtn.props.accessibilityLabel).toBe('Next');
-    expect(StyleSheet.flatten(prevBtn.props.style)?.width).toBe(44);
+    expect(StyleSheet.flatten(prevBtn.props.style)?.width).toBe(48);
     expect(screen.getByTestId('player-channel-list-button')).toBeTruthy();
     expect(screen.getByTestId('osd-clock')).toBeTruthy();
     await live.view.unmount();

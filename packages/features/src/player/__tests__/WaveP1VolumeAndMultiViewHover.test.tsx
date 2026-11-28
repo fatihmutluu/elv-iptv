@@ -41,7 +41,6 @@ describe('Wave P1 volume safe-hover bridge and MultiViewTileCard hover', () => {
               volume={70}
               tvOsdFocused={false}
               tvOsdAction="playPause"
-              tracksOpen={false}
               i18n={i18n}
               service={{} as never}
               clock={{ now: () => 0 }}
@@ -50,7 +49,8 @@ describe('Wave P1 volume safe-hover bridge and MultiViewTileCard hover', () => {
               onSeekBack={jest.fn()}
               onSeekForward={jest.fn()}
               onSeekRatio={jest.fn()}
-              onOpenTracks={jest.fn()}
+              onOpenSubtitles={jest.fn()}
+              onOpenAudio={jest.fn()}
               onToggleMute={jest.fn()}
               onSetVolume={jest.fn()}
               onPrev={jest.fn()}
@@ -70,7 +70,7 @@ describe('Wave P1 volume safe-hover bridge and MultiViewTileCard hover', () => {
     const bridge = screen.getByTestId('player-volume-popover-bridge');
     expect(screen.getByTestId('player-volume-popover')).toBeTruthy();
     const bridgeStyle = StyleSheet.flatten(bridge.props.style);
-    expect(bridgeStyle).toMatchObject({ top: 38, paddingTop: 6 });
+    expect(bridgeStyle).toMatchObject({ top: 52, paddingTop: 6 });
 
     await view.unmount();
   });

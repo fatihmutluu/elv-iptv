@@ -278,41 +278,43 @@ describe('Wave 3B Player TV focus, hidden-OSD passthrough, live controls, atomic
     expect(screen.getByTestId('player-osd')).toBeTruthy();
     expect(tv.engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(100_000);
 
-    // Hide OSD -> Info while hidden wakes OSD AND opens Programme Info sheet immediately (#58)
+    // Hide OSD -> Info while hidden wakes OSD AND opens Stats HUD (with merged programme info) immediately (#58)
     await act(async () => tv.keys.tap(KEY_UP));
-    expect(screen.queryByTestId('player-info-panel')).toBeNull();
+    expect(screen.queryByTestId('player-stats-hud')).toBeNull();
     await act(async () => tv.keys.tap(KEY_INFO));
     expect(screen.getByTestId('player-osd', { includeHiddenElements: true })).toBeTruthy();
-    expect(screen.getByTestId('player-info-panel')).toBeTruthy();
-    await act(async () => tv.keys.tap(KEY_BACK));
-    expect(screen.queryByTestId('player-info-panel')).toBeNull();
+    expect(screen.getByTestId('player-stats-hud')).toBeTruthy();
+    await act(async () => tv.keys.tap(KEY_INFO));
+    expect(screen.queryByTestId('player-stats-hud')).toBeNull();
 
-    // Hide OSD -> Captions opens TrackPicker focused on subtitles column
+    // Hide OSD -> Captions opens Settings directly on Subtitles view
     await act(async () => tv.keys.tap(KEY_UP));
     await act(async () => tv.keys.tap(KEY_CAPTIONS));
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
-    expect(screen.getByTestId('player-subtitle-track-s:1').props.accessibilityState).toMatchObject({
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-sub-s:1').props.accessibilityState).toMatchObject({
       selected: true,
     });
-    await act(async () => tv.keys.tap(KEY_BACK)); // close tracks (restores focus to 'tracks')
+    await act(async () => tv.keys.tap(KEY_BACK)); // step up to root
+    await act(async () => tv.keys.tap(KEY_BACK)); // close settings (restores focus to 'subtitles')
     await act(async () => tv.keys.tap(KEY_BACK)); // blur OSD
 
-    // Hide OSD -> AudioTrack opens TrackPicker focused on audio column
+    // Hide OSD -> AudioTrack opens Settings directly on Audio view
     await act(async () => tv.keys.tap(KEY_UP));
     await act(async () => tv.keys.tap(KEY_AUDIO_TRACK));
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
-    expect(screen.getByTestId('player-audio-track-a:1').props.accessibilityState).toMatchObject({
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-audio-a:1').props.accessibilityState).toMatchObject({
       selected: true,
     });
-    await act(async () => tv.keys.tap(KEY_BACK));
-    await act(async () => tv.keys.tap(KEY_BACK));
+    await act(async () => tv.keys.tap(KEY_BACK)); // step up to root
+    await act(async () => tv.keys.tap(KEY_BACK)); // close settings
+    await act(async () => tv.keys.tap(KEY_BACK)); // blur OSD
 
-    // Hide OSD -> Menu only wakes OSD without opening tracks
+    // Hide OSD -> Menu only wakes OSD without opening settings
     await act(async () => tv.keys.tap(KEY_UP));
     expect(screen.queryByTestId('player-osd')).toBeNull();
     await act(async () => tv.keys.tap(KEY_MENU));
     expect(screen.getByTestId('player-osd')).toBeTruthy();
-    expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+    expect(screen.queryByTestId('player-settings-panel')).toBeNull();
 
     // Next on VOD plays next episode
     await act(async () => tv.keys.tap(KEY_NEXT));
@@ -454,28 +456,31 @@ describe('Wave 3B Player TV focus, hidden-OSD passthrough, live controls, atomic
       screen.getByTestId('player-tv-focus-anchor', { includeHiddenElements: true });
     expect(getAnchor().props.hasTVPreferredFocus).toBe(true);
 
-    // Focus OSD ('tracks') -> Select opens TrackPicker -> anchor hasTVPreferredFocus becomes false
+    // Focus OSD ('subtitles') -> Select opens Settings on Subtitles -> anchor hasTVPreferredFocus becomes false
     await act(async () => tv.keys.tap(KEY_DOWN));
     await act(async () => tv.keys.tap(KEY_SELECT));
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-sub-s:1')).toBeTruthy();
     expect(getAnchor().props.hasTVPreferredFocus).toBe(false);
 
-    // Back closes TrackPicker -> restores TV OSD focus to 'tracks' AND re-enables anchor hasTVPreferredFocus
+    // Back twice closes Subtitles -> root -> closed, restores TV OSD focus to 'subtitles' & re-enables anchor
     await act(async () => tv.keys.tap(KEY_BACK));
-    expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+    await act(async () => tv.keys.tap(KEY_BACK));
+    expect(screen.queryByTestId('player-settings-panel')).toBeNull();
     expect(getAnchor().props.hasTVPreferredFocus).toBe(true);
-    expect(screen.getByTestId('player-tracks-button').props.accessibilityState).toMatchObject({
+    expect(screen.getByTestId('player-subtitles-button').props.accessibilityState).toMatchObject({
       selected: true,
     });
 
-    // Move Right to 'settings' -> Select opens Settings -> anchor hasTVPreferredFocus becomes false
+    // Move Right x2 to 'settings' -> Select opens Settings -> anchor hasTVPreferredFocus becomes false
+    await act(async () => tv.keys.tap(KEY_RIGHT));
     await act(async () => tv.keys.tap(KEY_RIGHT));
     await act(async () => tv.keys.tap(KEY_SELECT));
     expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
     expect(getAnchor().props.hasTVPreferredFocus).toBe(false);
 
-    // Navigate to Stats row (index 10 on VOD TV: subtitles, audio, audioDelay, subtitleDelay, subtitleStyle, speed, sleepTimer, aspect, timeDisplay, info, stats)
-    for (let i = 0; i < 10; i += 1) await act(async () => tv.keys.tap(KEY_DOWN));
+    // Navigate to Stats row (index 5 on streamlined VOD TV: subtitles, audio, speed, aspect, sleepTimer, stats)
+    for (let i = 0; i < 5; i += 1) await act(async () => tv.keys.tap(KEY_DOWN));
     // First Select toggles Stats ON; duplicate Select < 220ms later is SUPPRESSED (stays ON!)
     await act(async () => tv.keys.tap(KEY_SELECT));
     expect(screen.getByTestId('player-stats-hud', { includeHiddenElements: true })).toBeTruthy();
@@ -538,30 +543,41 @@ describe('Wave 3B Player TV focus, hidden-OSD passthrough, live controls, atomic
     await view.unmount();
   });
 
-  it('#130 review #3: drops duplicate Select bursts 5ms apart across TrackPicker/Settings/submenu opens while directional moves reset immediately', async () => {
+  it('#130 review #3: drops duplicate Select bursts 5ms apart across Subtitles/Settings/submenu opens while directional moves reset immediately', async () => {
     const tv = await mountTvScreen({ withTracks: true });
+    const subCallsInitial = tv.engine.commands.filter(
+      (c) => c.name === 'selectSubtitleTrack',
+    ).length;
 
-    // Duplicate Select 5ms apart when opening TrackPicker must NOT immediately select audio track a:1
+    // Duplicate Select 5ms apart when opening Subtitles view from OSD must NOT trigger an extra selectSubtitleTrack
     await act(async () => tv.keys.tap(KEY_DOWN));
     await act(async () => {
       tv.keys.tap(KEY_SELECT);
       tv.manual.advance(5);
       tv.keys.tap(KEY_SELECT);
     });
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
-    expect(tv.engine.commands.filter((c) => c.name === 'selectAudioTrack')).toHaveLength(0);
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-sub-s:1')).toBeTruthy();
+    expect(tv.engine.commands.filter((c) => c.name === 'selectSubtitleTrack')).toHaveLength(
+      subCallsInitial,
+    );
 
-    // Directional Down resets the guard immediately so intentional Select picks a:2 without waiting 220ms
+    // Directional Down resets the guard immediately so intentional Select picks s:2 without waiting 220ms
     await act(async () => {
       tv.keys.tap(KEY_DOWN);
       tv.keys.tap(KEY_SELECT);
     });
-    expect(tv.engine.commands.filter((c) => c.name === 'selectAudioTrack').at(-1)?.trackId).toBe(
-      'a:2',
+    expect(tv.engine.commands.filter((c) => c.name === 'selectSubtitleTrack')).toHaveLength(
+      subCallsInitial + 1,
+    );
+    expect(tv.engine.commands.filter((c) => c.name === 'selectSubtitleTrack').at(-1)?.trackId).toBe(
+      's:2',
     );
     await act(async () => tv.keys.tap(KEY_BACK));
+    await act(async () => tv.keys.tap(KEY_BACK));
 
-    // Move Right to 'settings' -> duplicate Select 5ms apart opens Settings root WITHOUT entering Subtitles submenu
+    // Move Right x2 to 'settings' -> duplicate Select 5ms apart opens Settings root WITHOUT entering Subtitles submenu
+    await act(async () => tv.keys.tap(KEY_RIGHT));
     await act(async () => tv.keys.tap(KEY_RIGHT));
     await act(async () => {
       tv.keys.tap(KEY_SELECT);
@@ -572,7 +588,7 @@ describe('Wave 3B Player TV focus, hidden-OSD passthrough, live controls, atomic
     expect(screen.getByTestId('player-settings-row-subtitles')).toBeTruthy();
     expect(screen.queryByTestId('player-settings-sub-off')).toBeNull();
 
-    // After >= 220ms, duplicate Select 5ms apart entering Subtitles submenu must NOT immediately select Off
+    // After >= 220ms, duplicate Select 5ms apart entering Subtitles submenu must NOT immediately select s:1
     const subCallsBefore = tv.engine.commands.filter(
       (c) => c.name === 'selectSubtitleTrack',
     ).length;

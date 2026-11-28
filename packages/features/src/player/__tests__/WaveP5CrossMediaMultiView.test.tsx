@@ -243,13 +243,14 @@ describe('Wave P5 — Cross-Media Multi-View & Offline Downloads Picker', () => 
         ),
       );
 
-      await waitFor(() => expect(screen.getByTestId('player-multiview-button')).toBeTruthy());
-      await fireEvent.press(screen.getByTestId('player-multiview-button'));
-      expect(onEnterMultiView).toHaveBeenCalledWith(target);
+      await waitFor(() => expect(screen.getByTestId('player-settings-button')).toBeTruthy());
+      expect(screen.queryByTestId('player-multiview-button')).toBeNull();
 
-      // Overflow settings menu also exposes Multi-View on VOD as well as Live TV
+      // Overflow settings menu exposes Multi-View on VOD as well as Live TV
       await fireEvent.press(screen.getByTestId('player-settings-button'));
       await waitFor(() => expect(screen.getByTestId('player-settings-multiview')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-settings-multiview'));
+      expect(onEnterMultiView).toHaveBeenCalledWith(target);
 
       if (target.isLocalOffline === true) {
         await waitFor(() => expect(loadSpy).toHaveBeenCalled());

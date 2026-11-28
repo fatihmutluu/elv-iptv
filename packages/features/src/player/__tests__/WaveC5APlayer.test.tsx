@@ -43,7 +43,7 @@ describe('Wave C5A Player & Gapless Queue (#243, #205)', () => {
       wrap(
         <PlayerSettingsSheet
           visible
-          menuState={{ view: 'root', index: 0 }}
+          menuState={{ view: 'advanced', index: 0 }}
           tracks={EMPTY_TRACKS}
           isVod
           deinterlaceMode="bwdif"

@@ -26,10 +26,9 @@ import {
 } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { LiveChannelPlaylist, PlayableEntry } from '../ports/play-target';
+import { ChannelDrawerScheduleBox } from './ChannelDrawerScheduleBox';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
-import { formatProgrammeWindow } from './PlayerInfoSheet';
 
-/** Default sliding window size materialized around the focused channel (`#57`). */
 const CHANNEL_DRAWER_WINDOW_SIZE = 25;
 const CHANNEL_ROW_PITCH = 46;
 const MAX_CACHED_SCHEDULES = 60;
@@ -135,7 +134,8 @@ function ChannelDrawerTvKeyFallback({
 
 /**
  * In-player live Channel & Schedule Drawer (`#57`): flex-docked on `desktop` (HWND-safe),
- * left glass panel on TV/landscape, and `AdaptiveSheet` on portrait mobile/tablet.
+ * left glass panel with click-outside backdrop on floating desktop/TV/landscape, and
+ * `AdaptiveSheet` on portrait mobile/tablet.
  */
 export function PlayerChannelDrawer({
   visible,
@@ -435,9 +435,7 @@ export function PlayerChannelDrawer({
                 }}
                 style={[
                   styles.filterTab,
-                  {
-                    borderBottomColor: active ? theme.colors.accent : 'transparent',
-                  },
+                  { borderBottomColor: active ? theme.colors.accent : 'transparent' },
                   !isTv ? webCursorPointer() : undefined,
                 ]}
               >
@@ -565,65 +563,7 @@ export function PlayerChannelDrawer({
           </ScrollView>
 
           {focusedEntry !== undefined ? (
-            <View
-              testID="player-channel-drawer-schedule"
-              style={[
-                styles.scheduleBox,
-                {
-                  backgroundColor: theme.colors.bgSurface,
-                  borderTopColor: theme.colors.surfaceBorder,
-                },
-              ]}
-            >
-              {focusedSchedule?.now != null ? (
-                <>
-                  <View style={styles.scheduleLine}>
-                    <Text style={[theme.typography.micro, { color: theme.colors.accent }]}>
-                      {i18n.t('player.nowPlaying')}
-                    </Text>
-                    <Text
-                      style={[
-                        theme.typography.caption,
-                        TABULAR_NUMS_STYLE,
-                        { color: theme.colors.textMuted },
-                      ]}
-                    >
-                      {formatProgrammeWindow(focusedSchedule.now.start, focusedSchedule.now.stop)}
-                    </Text>
-                  </View>
-                  <Text
-                    numberOfLines={1}
-                    style={[theme.typography.caption, { color: theme.colors.textPrimary }]}
-                  >
-                    {focusedSchedule.now.title}
-                  </Text>
-                  {focusedSchedule.next != null ? (
-                    <View style={styles.upNextLine}>
-                      <Text style={[theme.typography.micro, { color: theme.colors.textMuted }]}>
-                        {i18n.t('player.upNext')}
-                      </Text>
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          theme.typography.caption,
-                          styles.flex1,
-                          { color: theme.colors.textSecondary },
-                        ]}
-                      >
-                        {focusedSchedule.next.title}
-                      </Text>
-                    </View>
-                  ) : null}
-                </>
-              ) : (
-                <Text
-                  numberOfLines={1}
-                  style={[theme.typography.caption, { color: theme.colors.textMuted }]}
-                >
-                  {i18n.t('player.noProgrammeInfo')}
-                </Text>
-              )}
-            </View>
+            <ChannelDrawerScheduleBox schedule={focusedSchedule} i18n={i18n} />
           ) : null}
         </>
       )}
@@ -636,18 +576,54 @@ export function PlayerChannelDrawer({
       onKeyDown: handleKeyDown,
       ...(isWebDesktop ? { role: 'dialog', 'aria-modal': false, 'aria-label': headerTitle } : {}),
     } as Record<string, unknown>;
+    if (!dockedMode) {
+      const backdropWebProps = isWebDesktop
+        ? ({ tabIndex: -1 } as Record<string, unknown>)
+        : undefined;
+      return (
+        <View
+          ref={desktopPanelRef}
+          testID="player-channel-drawer-overlay"
+          pointerEvents="box-none"
+          style={styles.overlayRoot}
+        >
+          <Pressable
+            testID="player-channel-drawer-backdrop"
+            accessible={false}
+            aria-hidden
+            focusable={false}
+            {...backdropWebProps}
+            onPress={onClose}
+            style={StyleSheet.absoluteFill}
+          />
+          <View
+            testID="player-channel-drawer-desktop"
+            {...keyProps}
+            style={[
+              styles.desktopFloating,
+              {
+                backgroundColor: theme.colors.glassBg,
+                borderRightColor: theme.colors.glassBorder,
+              },
+              webBackdropBlur(20),
+            ]}
+          >
+            {content}
+          </View>
+        </View>
+      );
+    }
     return (
       <View
         ref={desktopPanelRef}
         testID="player-channel-drawer-desktop"
         {...keyProps}
         style={[
-          dockedMode ? styles.desktopDocked : styles.desktopFloating,
+          styles.desktopDocked,
           {
-            backgroundColor: dockedMode ? theme.colors.bgElevated : theme.colors.glassBg,
+            backgroundColor: theme.colors.bgElevated,
             borderRightColor: theme.colors.glassBorder,
           },
-          !dockedMode ? webBackdropBlur(20) : undefined,
         ]}
       >
         {content}
@@ -739,10 +715,7 @@ const styles = StyleSheet.create({
     gap: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  filterTab: {
-    paddingVertical: 6,
-    borderBottomWidth: 2,
-  },
+  filterTab: { paddingVertical: 6, borderBottomWidth: 2 },
   flex1: { flex: 1 },
   list: { flex: 1, maxHeight: 360 },
   row: {
@@ -756,18 +729,4 @@ const styles = StyleSheet.create({
   logo: { width: 32, height: 32, flexShrink: 0 },
   channelNum: { minWidth: 26, fontWeight: '700' },
   emptyBox: { paddingVertical: 24, alignItems: 'center' },
-  scheduleBox: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    gap: 4,
-    borderRadius: 6,
-  },
-  scheduleLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  upNextLine: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
 });

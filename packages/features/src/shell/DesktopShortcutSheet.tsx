@@ -134,11 +134,6 @@ function buildShortcutGroups(mac: boolean): readonly ShortcutGroupSpec[] {
           keys: ['C'],
         },
         {
-          id: 'always-on-top',
-          labelKey: 'desktop.shortcuts.item.alwaysOnTop',
-          keys: ['T'],
-        },
-        {
           id: 'channels',
           labelKey: 'desktop.shortcuts.item.channels',
           keys: ['G'],

@@ -158,16 +158,14 @@ describe('Wave F6 pure models (PiP, Multi-View, Settings nav)', () => {
     expect(moveMultiViewGridFocus(0, 0, 'right')).toBe(0);
   });
 
-  it('routes Wave F6 root actions in Player Settings menu', () => {
+  it('routes Multi-View on root and PiP inside Advanced settings in Player Settings menu', () => {
     const opts = {
       isVod: false,
       hasAspect: true,
-      hasMiniPlayer: true,
       hasPip: true,
       hasMultiView: true,
-      hasPopout: true,
     };
-    // Root order: subtitles(0), audio(1), aspect(2), miniPlayer(3), pip(4), multiView(5), popout(6), stats(7)
+    // Root order: subtitles(0), audio(1), aspect(2), multiView(3), stats(4), advanced(5)
     expect(
       routeSettingsMenuKey(
         { kind: 'press', key: 'select', time: 0 },
@@ -175,15 +173,7 @@ describe('Wave F6 pure models (PiP, Multi-View, Settings nav)', () => {
         EMPTY_TRACKS,
         opts,
       ),
-    ).toEqual({ kind: 'minimizeToMiniPlayer' });
-    expect(
-      routeSettingsMenuKey(
-        { kind: 'press', key: 'select', time: 0 },
-        { view: 'root', index: 4 },
-        EMPTY_TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'enterPip' });
+    ).toEqual({ kind: 'enterMultiView' });
     expect(
       routeSettingsMenuKey(
         { kind: 'press', key: 'select', time: 0 },
@@ -191,14 +181,14 @@ describe('Wave F6 pure models (PiP, Multi-View, Settings nav)', () => {
         EMPTY_TRACKS,
         opts,
       ),
-    ).toEqual({ kind: 'enterMultiView' });
+    ).toEqual({ kind: 'state', state: { view: 'advanced', index: 0 } });
     expect(
       routeSettingsMenuKey(
         { kind: 'press', key: 'select', time: 0 },
-        { view: 'root', index: 6 },
+        { view: 'advanced', index: 0 },
         EMPTY_TRACKS,
         opts,
       ),
-    ).toEqual({ kind: 'popoutPlayer' });
+    ).toEqual({ kind: 'enterPip' });
   });
 });

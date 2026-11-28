@@ -16,7 +16,6 @@ type ElvBooleanFeatureFlag =
   | 'elvMergeVersions'
   | 'elvEnrichMetadata'
   | 'elvSmartRecommendations'
-  | 'elvXrayEnabled'
   | 'elvLiveEnhance'
   | 'elvVerifyRealQuality';
 

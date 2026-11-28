@@ -40,7 +40,6 @@ import {
   useAndroidDecoderModeSync,
   useInitialTrackSelection,
 } from './usePlayerTrackAndDecoderSync';
-import { usePlayerXRay } from './usePlayerXRay';
 import { usePlayerTvPan } from './useTvPanGesture';
 import { useWatchProgressSync } from './useWatchProgressSync';
 
@@ -165,8 +164,8 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     waveF7aLoadOptionsRef: refs.waveF7aLoadOptionsRef,
     onServiceReady: handoff.onServiceReady,
   });
-  const { sessionState, activeService, status, tracks, videoInfo, chapters } = session;
-  const { surfaceRecreationToken, inPip, isFullscreen, alwaysOnTop, overlayMode } = session;
+  const { sessionState, activeService, status, tracks, videoInfo } = session;
+  const { surfaceRecreationToken, inPip, isFullscreen, overlayMode } = session;
   const { audioDevices, activeAudioDevice, subtitleDelayMs, externalPlaybackActive } = session;
 
   const { flushProgress, flushEndedProgress } = useWatchProgressSync({
@@ -281,7 +280,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     activeTarget,
     status,
     tracks,
-    chapters,
     openedEngine,
     catalogRef,
     wallClockRef: refs.wallClockRef,
@@ -336,20 +334,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     activeTarget.kind === 'live',
     isPausedOrEndedStatus,
   );
-  const pauseForXray = useCallback(() => {
-    serviceRef.current?.pause();
-  }, [serviceRef]);
-  const xray = usePlayerXRay({
-    catalog,
-    activeTarget,
-    statusKind: status.kind,
-    elvModeEnabled: props.elvModeEnabled === true,
-    elvXrayEnabled: props.elvXrayEnabled === true,
-    locale: i18n.locale,
-    suppressed: inPip || isMini || props.externalOverlayOpen === true,
-    onPausePlayback: pauseForXray,
-    ...(props.onOpenDetail !== undefined ? { onOpenDetail: props.onOpenDetail } : {}),
-  });
 
   const controls = usePlayerControls({
     formFactor,
@@ -360,9 +344,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     showRetry,
     hasService: activeService !== null,
     hasSettings: activeService !== null,
-    hasInfo: activeService !== null,
     hasChannelList: canZap,
-    hasXray: xray.eligible && xray.hasCast,
     hasNextEpisode: !isCatchup && (nextEpisodeVisible || nextEpisode !== undefined),
     hasPreviousChannel,
     hasBackToLive: isCatchup,
@@ -390,7 +372,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     ...subtitlesSuite.controlsProps,
     onJumpToChannel: jumpToChannel,
     onToggleFullscreen: openedEngine?.toggleFullscreen,
-    onToggleAlwaysOnTop: openedEngine?.toggleAlwaysOnTop,
     audioDevices,
     activeAudioDevice,
     onSelectAudioDevice: openedEngine?.setAudioDevice !== undefined ? selectAudioDevice : undefined,
@@ -415,14 +396,9 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onResizeModeChange: extras.handleResizeModeChange,
     onAudioTrackSelected: extras.handleAudioTrackSelected,
     onSubtitleTrackSelected: extras.handleSubtitleTrackSelected,
-    chapters,
-    onSelectChapter: extras.handleSelectChapter,
-    onPrevChapter: (chapters?.length ?? 0) > 0 ? extras.handlePrevChapter : undefined,
-    onNextChapter: (chapters?.length ?? 0) > 0 ? extras.handleNextChapter : undefined,
     sleepTimerMinutes: extras.sleepTimer.active ? extras.sleepTimer.totalMinutes : 0,
     onSelectSleepTimer: extras.selectSleepTimer,
     onToggleSleepTimerAction: extras.toggleSleepTimerAction,
-    onCycleTimeDisplayMode: extras.handleCycleTimeDisplayMode,
     onUserActivity: extras.stillWatching.recordUserActivity,
     previewChannelActive: previewTarget !== null,
     onConfirmPreviewChannel: handoff.confirmPreviewChannel,
@@ -433,14 +409,9 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onEnterPip: handleEnterPip,
     onEnterMultiView: handleEnterMultiView,
     onPopoutPlayer: handlePopoutPlayer,
-    onToggleXray: xray.toggleStrip,
     tvBackMinimizesLive: tvBackMinimizesLive ?? Platform.OS === 'ios',
     externalOverlayOpen:
-      isMini ||
-      props.externalOverlayOpen === true ||
-      subtitlesSuite.urlOverlayOpen ||
-      xray.selectedPerson !== null ||
-      (isTv && xray.stripVisible),
+      isMini || props.externalOverlayOpen === true || subtitlesSuite.urlOverlayOpen,
   });
   refs.hostKeyRef.current = controls.handleHostKey;
   refs.cancelScrubRef.current = controls.cancelScrub;
@@ -503,13 +474,10 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   });
 
   const anySheetOpen =
-    controls.tracksOpen ||
     controls.settingsOpen ||
-    controls.infoOpen ||
+    controls.windowModeOpen ||
     controls.channelListOpen ||
-    subtitlesSuite.urlOverlayOpen ||
-    xray.selectedPerson !== null ||
-    (isTv && xray.stripVisible);
+    subtitlesSuite.urlOverlayOpen;
   const recordActivity = extras.stillWatching.recordUserActivity;
   usePlayerTvPan({
     openedEngine,
@@ -580,18 +548,12 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     activeService,
     clock,
     timers,
-    wallClock,
     isTv,
     formFactor,
     i18n,
     useDockedDesktopLayout,
     canZap,
     tracks,
-    videoInfo,
-    nowNext,
-    chapters,
-    alwaysOnTop,
-    hostToggleAlwaysOnTop: openedEngine?.toggleAlwaysOnTop,
     hostSetDeinterlace: openedEngine?.setDeinterlace,
     hostSetAudioDevice: openedEngine?.setAudioDevice,
     audioDevices,
@@ -609,7 +571,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     controls,
     qualitySheetProps: quality.sheetProps,
     syncAndQualitySheetProps: syncAndQuality.sheetProps,
-    subtitlesTrackPickerProps: subtitlesSuite.trackPickerProps,
     subtitlesSettingsSheetProps: subtitlesSuite.settingsSheetProps,
     onRecordUserActivity: extras.stillWatching.recordUserActivity,
     onPlayNextEpisode: (expectedKey) => handoff.handlePlayNextEpisode(expectedKey, nextEpisode),
@@ -620,8 +581,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onEnterPip: handleEnterPip,
     onEnterMultiView: handleEnterMultiView,
     onPopoutPlayer: handlePopoutPlayer,
-    xray,
-    xrayCatalog: catalog,
   });
 
   const osdProps = buildPlayerOsdProps({
@@ -636,8 +595,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     liveTimeShiftSupported: activeTarget.kind === 'live' && liveTimeShift.supported,
     canZap,
     hasTracks,
-    hasXray: xray.eligible && xray.hasCast,
-    xrayOpen: xray.stripVisible,
     hasPreviousChannel,
     nextEpisode,
     nextEpisodeVisible,
@@ -645,8 +602,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     isTv,
     isDesktop,
     isFullscreen,
-    alwaysOnTop,
-    chapters,
     timeDisplayMode: extras.timeDisplayMode,
     videoInfo,
     tracks,
@@ -660,22 +615,17 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     controls,
     hostToggleMute: openedEngine?.toggleMute,
     hostToggleFullscreen: openedEngine?.toggleFullscreen,
-    hostToggleAlwaysOnTop: openedEngine?.toggleAlwaysOnTop,
     onMinimizeToMiniPlayer: props.onMinimizeToMiniPlayer,
     onEnterPip: handleEnterPip,
-    onEnterMultiView: handleEnterMultiView,
     onPopoutPlayer: handlePopoutPlayer,
     onDockPopout: handleDockPopout,
     onExit,
-    onToggleXray: xray.toggleStrip,
     onCycleTimeDisplayMode: extras.handleCycleTimeDisplayMode,
     onFineScrubHaptic: props.onFineScrubHaptic,
     onPlayNextEpisode: () => {
       extras.stillWatching.recordUserActivity();
       handoff.handlePlayNextEpisode(undefined, nextEpisode);
     },
-    onPrevChapter: extras.handlePrevChapter,
-    onNextChapter: extras.handleNextChapter,
     onJumpPreviousChannel: handoff.handleJumpPreviousChannel,
     onBackToLive: handoff.handleBackToLive,
     onPrev: () => {
@@ -689,6 +639,12 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onRetry: handleRetryWithParental,
   });
 
+  const dismissOpenSheets = (): void => {
+    controls.closeSettings();
+    controls.closeWindowMode();
+    controls.closeChannelList();
+  };
+
   return (
     <PlayerScreenStage
       isTv={isTv}
@@ -697,6 +653,10 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       isMini={isMini}
       externalPlaybackActive={externalPlaybackActive}
       isVod={activeTarget.kind === 'vod'}
+      title={previewTarget?.title ?? activeTarget.title}
+      subtitle={previewTarget !== null ? previewTarget.subtitle : activeTarget.subtitle}
+      nowNext={nowNext}
+      nowMs={wallClock()}
       useDockedDesktopLayout={useDockedDesktopLayout}
       hideDesktopCursor={hideDesktopCursor}
       anySheetOpen={anySheetOpen}
@@ -719,6 +679,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       desktopWebProps={desktopWebProps}
       surfaceNode={surfaceNode}
       {...overlayNodes}
+      onDismissOpenSheets={dismissOpenSheets}
       externalSubtitleOverlay={subtitlesSuite.externalSubtitleOverlay}
       externalSubtitleFeedback={subtitlesSuite.feedback?.kind ?? null}
       passthroughFallbackVisible={displayAudioSync.passthroughFallbackVisible}

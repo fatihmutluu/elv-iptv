@@ -77,19 +77,6 @@ const EXPECTED_PAIRS: ReadonlyArray<readonly [MessageId, string, string]> = [
   ['person.role.director', 'Director', 'Yönetmen'],
   ['person.role.cast', 'Cast', 'Oyuncu'],
   ['person.close', 'Close', 'Kapat'],
-
-  // In-Player X-Ray (#352) (7)
-  ['player.xray.button', 'X-Ray', 'X-Ray'],
-  ['player.xray.title', 'X-Ray', 'X-Ray'],
-  ['player.xray.cast', 'Cast', 'Oyuncular'],
-  ['player.xray.director', 'Director', 'Yönetmen'],
-  ['player.xray.episode', 'Now playing', 'Şu an oynatılıyor'],
-  ['player.xray.viewLibrary', 'View in library', 'Kütüphanede gör'],
-  [
-    'player.xray.empty',
-    'No cast metadata available for this title.',
-    'Bu yapım için oyuncu bilgisi bulunamadı.',
-  ],
 ];
 
 const WAVE_E2_KEYS: readonly MessageId[] = EXPECTED_PAIRS.map(([id]) => id);
@@ -129,9 +116,9 @@ function parsePoEntries(raw: string): Record<string, string> {
   return entries;
 }
 
-describe('Wave E2 ELV Mode Discovery & X-Ray i18n (#512, #352, #459)', () => {
-  it('defines all 51 EN and TR keys with strict parity, .po sync, and clean copy', () => {
-    expect(WAVE_E2_KEYS).toHaveLength(51);
+describe('Wave E2 ELV Mode Discovery i18n (#512, #459)', () => {
+  it('defines all 44 EN and TR keys with strict parity, .po sync, and clean copy', () => {
+    expect(WAVE_E2_KEYS).toHaveLength(44);
     expect(Object.keys(enWaveE2Messages).sort()).toEqual([...WAVE_E2_KEYS].sort());
     expect(Object.keys(trWaveE2Messages).sort()).toEqual([...WAVE_E2_KEYS].sort());
 

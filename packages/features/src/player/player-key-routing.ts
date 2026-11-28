@@ -2,7 +2,6 @@ import type { LiveVariantOption } from '@elv/data';
 import type { AndroidDecoderMode, DefaultResizeModePref, SeekStepSecPref } from '@elv/domain';
 import type { KeyEvent, KeymapOverrides, RemappableActionId } from '@elv/focus-core';
 import type {
-  ChapterInfo,
   MediaTracks,
   PlaybackClock,
   PlaybackService,
@@ -17,9 +16,12 @@ import { evaluateRemappedEvent } from '../shared';
 import type { ChannelDigitBuffer } from './channel-digit-entry';
 import type { PlayerOverlayLive } from './player-overlay-model';
 import { COARSE_SEEK_MS, type ScrubController, STEP_SEEK_MS } from './scrub-controller';
-import { routeSettingsMenuKey, type SettingsMenuState } from './settings-menu-nav';
+import {
+  routeSettingsMenuKey,
+  type SettingsMenuState,
+  type SettingsMenuView,
+} from './settings-menu-nav';
 import type { SubtitleStyleField } from './subtitle-style-helpers';
-import { routePickerKey, type TrackPickerColumn, type TrackPickerCursor } from './track-picker-nav';
 import {
   clampTvOsdAction,
   routeTvOsdKey,
@@ -34,12 +36,12 @@ export interface PlayerControlsParams {
   status: PlaybackStatus;
   tracks: MediaTracks;
   hasTracks: boolean;
+  hasSubtitles?: boolean;
+  hasAudio?: boolean;
   showRetry: boolean;
   hasService: boolean;
   hasSettings?: boolean;
-  hasInfo?: boolean;
   hasChannelList?: boolean;
-  hasXray?: boolean;
   hasNextEpisode?: boolean;
   hasPreviousChannel?: boolean;
   hasBackToLive?: boolean;
@@ -63,7 +65,6 @@ export interface PlayerControlsParams {
   onJumpPreviousChannel?: () => void;
   onJumpToChannel?: (channelNumber: number) => void;
   onToggleFullscreen?: (() => void) | undefined;
-  onToggleAlwaysOnTop?: (() => void) | undefined;
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
   onSelectAudioDevice?: ((name: string) => void) | undefined;
@@ -80,7 +81,6 @@ export interface PlayerControlsParams {
   onToggleMute?: (() => void) | undefined;
   onSetVolume?: ((volume: number) => void) | undefined;
   onPersistVolume?: ((volume: number) => void) | undefined;
-  onToggleAutoSubtitlesOnSkipBack?: (() => void) | undefined;
   onToggleAutoPlayNextEpisode?: (() => void) | undefined;
   onChannelListMove?: ((delta: 1 | -1) => void) | undefined;
   onChannelListSwitchTab?: ((dir: -1 | 1) => void) | undefined;
@@ -102,14 +102,9 @@ export interface PlayerControlsParams {
   hasSubtitleStyle?: boolean | undefined;
   onStepSubtitleStyle?: ((field: SubtitleStyleField, delta: -1 | 1) => void) | undefined;
   onResetSubtitleStyle?: (() => void) | undefined;
-  chapters?: readonly ChapterInfo[] | undefined;
-  onSelectChapter?: ((startMs: number) => void) | undefined;
-  onPrevChapter?: (() => void) | undefined;
-  onNextChapter?: (() => void) | undefined;
   sleepTimerMinutes?: number | undefined;
   onSelectSleepTimer?: ((minutes: number) => void) | undefined;
   onToggleSleepTimerAction?: (() => void) | undefined;
-  onCycleTimeDisplayMode?: (() => void) | undefined;
   onUserActivity?: (() => void) | undefined;
   stillWatchingVisible?: boolean | undefined;
   onStillWatchingKey?: ((key: KeyEvent['key']) => void) | undefined;
@@ -120,14 +115,13 @@ export interface PlayerControlsParams {
   onEnterPip?: (() => void) | undefined;
   onEnterMultiView?: (() => void) | undefined;
   onPopoutPlayer?: (() => void) | undefined;
-  onToggleXray?: (() => void) | undefined;
   tvBackMinimizesLive?: boolean | undefined;
   /** When `true`, suspends player remote/keyboard shortcuts while a root overlay is open. */
   externalOverlayOpen?: boolean | undefined;
 }
 
 /** Builds shared {@link SettingsMenuOptions} from live {@link PlayerControlsParams}. */
-export function readSettingsMenuOptionsFromControls(p: PlayerControlsParams, canOpenInfo: boolean) {
+export function readSettingsMenuOptionsFromControls(p: PlayerControlsParams) {
   const isVod = p.activeTarget.kind === 'vod';
   return {
     isVod,
@@ -135,7 +129,6 @@ export function readSettingsMenuOptionsFromControls(p: PlayerControlsParams, can
     hasDeinterlace: p.onSetDeinterlace !== undefined || p.onCycleDeinterlaceMode !== undefined,
     hasPitchLock: p.onTogglePitchLock !== undefined,
     hasAudioNormalization: p.onToggleAudioNormalization !== undefined,
-    hasAutoSubtitlesOnSkipBack: isVod && p.onToggleAutoSubtitlesOnSkipBack !== undefined,
     hasAutoPlayNextEpisode: isVod && p.onToggleAutoPlayNextEpisode !== undefined,
     hasAudioDevice: (p.audioDevices?.length ?? 0) > 0 && p.onSelectAudioDevice !== undefined,
     ...(p.audioDevices !== undefined ? { audioDevices: p.audioDevices } : {}),
@@ -149,7 +142,7 @@ export function readSettingsMenuOptionsFromControls(p: PlayerControlsParams, can
     canPickSubtitleFile: p.canPickSubtitleFile === true,
     canLoadSubtitleUrl: p.canLoadSubtitleUrl === true,
     hasVideoQuality:
-      (p.tracks.videoQualities?.length ?? 0) > 0 && p.onSelectVideoQuality !== undefined,
+      (p.tracks.videoQualities?.length ?? 0) > 1 && p.onSelectVideoQuality !== undefined,
     ...(p.selectedVideoQualityId !== undefined
       ? { selectedVideoQualityId: p.selectedVideoQualityId }
       : {}),
@@ -161,17 +154,10 @@ export function readSettingsMenuOptionsFromControls(p: PlayerControlsParams, can
     hasVideoDecoder:
       p.androidDecoderMode !== undefined && p.onSelectAndroidDecoderMode !== undefined,
     ...(p.androidDecoderMode !== undefined ? { androidDecoderMode: p.androidDecoderMode } : {}),
-    hasChapters: isVod && (p.chapters?.length ?? 0) > 0,
-    ...(p.chapters !== undefined ? { chapters: p.chapters } : {}),
     hasSleepTimer: p.onSelectSleepTimer !== undefined,
     ...(p.sleepTimerMinutes !== undefined ? { sleepTimerMinutes: p.sleepTimerMinutes } : {}),
-    hasTimeDisplay: p.onCycleTimeDisplayMode !== undefined,
-    hasInfo: canOpenInfo,
-    hasAlwaysOnTop: p.onToggleAlwaysOnTop !== undefined,
-    hasMiniPlayer: p.onMinimizeToMiniPlayer !== undefined,
     hasPip: p.onEnterPip !== undefined,
     hasMultiView: p.onEnterMultiView !== undefined,
-    hasPopout: p.onPopoutPlayer !== undefined,
   };
 }
 
@@ -184,7 +170,6 @@ export interface OverlayKeyRouteDeps {
   readonly hasDeinterlace?: boolean;
   readonly hasPitchLock?: boolean;
   readonly hasAudioNormalization?: boolean;
-  readonly hasAutoSubtitlesOnSkipBack?: boolean;
   readonly hasAutoPlayNextEpisode?: boolean;
   readonly hasAudioDevice?: boolean;
   readonly audioDevices?: readonly AudioDeviceInfo[];
@@ -204,16 +189,10 @@ export interface OverlayKeyRouteDeps {
   readonly activeQualityKey?: string;
   readonly hasVideoDecoder?: boolean;
   readonly androidDecoderMode?: AndroidDecoderMode;
-  readonly hasChapters?: boolean;
-  readonly chapters?: readonly ChapterInfo[];
   readonly hasSleepTimer?: boolean;
   readonly sleepTimerMinutes?: number;
-  readonly hasTimeDisplay?: boolean;
-  readonly hasAlwaysOnTop?: boolean;
-  readonly hasMiniPlayer?: boolean;
   readonly hasPip?: boolean;
   readonly hasMultiView?: boolean;
-  readonly hasPopout?: boolean;
   readonly playbackSpeed: number;
   readonly state: PlayerOverlayLive;
   readonly service: PlaybackService | null;
@@ -222,29 +201,22 @@ export interface OverlayKeyRouteDeps {
   readonly allowTvSelect: () => boolean;
   readonly showOsd: () => void;
   readonly toggleStats: () => void;
-  readonly toggleInfo?: () => void;
-  readonly toggleAlwaysOnTop?: () => void;
-  readonly toggleTimeDisplayMode?: () => void;
   readonly toggleChannelList?: () => void;
   readonly toggleResizeMode: () => void;
   readonly toggleDeinterlace?: () => void;
   readonly togglePitchLock?: () => void;
   readonly toggleAudioNormalization?: () => void;
-  readonly toggleAutoSubtitlesOnSkipBack?: () => void;
   readonly toggleAutoPlayNextEpisode?: () => void;
-  readonly onMinimizeToMiniPlayer?: (() => void) | undefined;
   readonly onEnterPip?: (() => void) | undefined;
   readonly onEnterMultiView?: (() => void) | undefined;
-  readonly onPopoutPlayer?: (() => void) | undefined;
   readonly onChannelListMove?: (delta: 1 | -1) => void;
   readonly onChannelListSwitchTab?: ((dir: -1 | 1) => void) | undefined;
   readonly onChannelListSelect?: () => void;
   readonly togglePlayPause: () => void;
-  readonly openTracks: (preferredColumn?: TrackPickerColumn) => void;
-  readonly closeTracks: () => void;
+  readonly closeWindowMode?: () => void;
+  readonly openSettings?: ((view?: SettingsMenuView) => void) | undefined;
   readonly closeSettings: () => void;
   readonly updateSettingsMenu: (next: SettingsMenuState) => void;
-  readonly updatePickerCursor: (cursor: TrackPickerCursor) => void;
   readonly focusTvOsd: (action: TvOsdAction) => void;
   readonly blurTvOsd: () => void;
   readonly focusTvScrubber: () => void;
@@ -259,7 +231,6 @@ export interface OverlayKeyRouteDeps {
   readonly loadSubtitleUrl?: (() => void) | undefined;
   readonly stepSubtitleStyle?: ((field: SubtitleStyleField, delta: -1 | 1) => void) | undefined;
   readonly resetSubtitleStyle?: (() => void) | undefined;
-  readonly selectChapter?: ((startMs: number) => void) | undefined;
   readonly selectSleepTimer?: ((minutes: number) => void) | undefined;
   readonly toggleSleepTimerAction?: (() => void) | undefined;
   readonly selectAudioDevice?: ((name: string) => void) | undefined;
@@ -271,11 +242,33 @@ export interface OverlayKeyRouteDeps {
   readonly onExit: () => void;
   readonly onJumpPreviousChannel?: (() => void) | undefined;
   readonly keymapOverrides?: KeymapOverrides | undefined;
-  readonly openSettings?: (() => void) | undefined;
   readonly seekBy?: ((deltaMs: number) => void) | undefined;
   readonly stepSeekMs?: number | undefined;
   readonly zapBy?: ((delta: 1 | -1) => void) | undefined;
   readonly toggleMute?: (() => void) | undefined;
+}
+
+function isSettingsInSubtitlesFamily(view: SettingsMenuView): boolean {
+  return view === 'subtitles' || view === 'subtitleSettings';
+}
+
+function isSettingsInAudioFamily(view: SettingsMenuView): boolean {
+  return view === 'audio' || view === 'audioSettings';
+}
+
+function toggleSettingsTrackSection(section: 'subtitles' | 'audio', d: OverlayKeyRouteDeps): void {
+  const s = d.state;
+  const matches =
+    section === 'subtitles'
+      ? isSettingsInSubtitlesFamily(s.settingsMenu.view)
+      : isSettingsInAudioFamily(s.settingsMenu.view);
+  if (s.settingsOpen && matches) {
+    d.closeSettings();
+  } else if (d.openSettings !== undefined) {
+    d.openSettings(section);
+  } else {
+    d.showOsd();
+  }
 }
 
 function executeRemappedPlayerAction(
@@ -330,7 +323,7 @@ function executeRemappedPlayerAction(
           else d.service?.selectAudioTrack(nextTrack.id);
         }
       } else {
-        d.openTracks('audio');
+        d.openSettings?.('audio');
       }
       return true;
     }
@@ -349,7 +342,7 @@ function executeRemappedPlayerAction(
           }
         }
       } else {
-        d.openTracks('subtitles');
+        d.openSettings?.('subtitles');
       }
       return true;
     }
@@ -357,11 +350,7 @@ function executeRemappedPlayerAction(
       d.toggleMute?.();
       return true;
     case 'player.openInfo':
-      if (d.toggleInfo !== undefined && s.canOpenInfo) d.toggleInfo();
-      else {
-        d.showOsd();
-        d.toggleStats();
-      }
+      d.toggleStats();
       return true;
     default:
       return false;
@@ -375,7 +364,7 @@ function executeRemappedPlayerAction(
  */
 export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps): boolean {
   const s = d.state;
-  const anySheetOpen = s.settingsOpen || s.tracksOpen || s.channelListOpen || s.infoOpen;
+  const anySheetOpen = s.settingsOpen || s.windowModeOpen || s.channelListOpen;
   if (
     !anySheetOpen &&
     d.keymapOverrides !== undefined &&
@@ -397,12 +386,7 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       return true;
     }
     if (event.key === 'info') {
-      if (d.toggleInfo !== undefined && s.canOpenInfo) {
-        d.toggleInfo();
-      } else {
-        d.showOsd();
-        d.toggleStats();
-      }
+      d.toggleStats();
       return true;
     }
     if (event.key === 'guide') {
@@ -412,18 +396,16 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       return true;
     }
     if (event.key === 'captions' || event.key === 'audioTrack') {
-      d.openTracks(event.key === 'captions' ? 'subtitles' : 'audio');
+      toggleSettingsTrackSection(event.key === 'captions' ? 'subtitles' : 'audio', d);
       return true;
     }
     if (event.key === 'colorRed') {
-      if (s.tracksOpen && s.pickerCursor.column === 'subtitles') d.closeTracks();
-      else if (s.hasTracks) d.openTracks('subtitles');
+      if (s.hasTracks) toggleSettingsTrackSection('subtitles', d);
       else d.showOsd();
       return true;
     }
     if (event.key === 'colorGreen') {
-      if (s.tracksOpen && s.pickerCursor.column === 'audio') d.closeTracks();
-      else if (s.hasTracks) d.openTracks('audio');
+      if (s.hasTracks) toggleSettingsTrackSection('audio', d);
       else d.showOsd();
       return true;
     }
@@ -431,7 +413,6 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       if (d.toggleMute !== undefined) {
         d.toggleMute();
       } else {
-        d.showOsd();
         d.toggleStats();
       }
       return true;
@@ -454,17 +435,21 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       } else if (!d.isVod && d.toggleChannelList !== undefined && s.canOpenChannelList) {
         d.digitBuf.cancel();
         d.toggleChannelList();
+      } else if (s.windowModeOpen) {
+        d.closeWindowMode?.();
       } else if (s.settingsOpen) {
         d.closeSettings();
-      } else if (s.tracksOpen) {
-        d.closeTracks();
       } else if (s.hasTracks) {
-        d.openTracks();
+        d.openSettings?.('subtitles');
       } else {
         d.showOsd();
       }
       return true;
     }
+  }
+
+  if (s.windowModeOpen) {
+    return true;
   }
 
   if (s.settingsOpen) {
@@ -475,7 +460,6 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       hasDeinterlace: d.hasDeinterlace === true,
       hasPitchLock: d.hasPitchLock === true,
       hasAudioNormalization: d.hasAudioNormalization === true,
-      hasAutoSubtitlesOnSkipBack: d.hasAutoSubtitlesOnSkipBack === true,
       hasAutoPlayNextEpisode: d.hasAutoPlayNextEpisode === true,
       hasAudioDevice: d.hasAudioDevice === true,
       ...(d.audioDevices !== undefined ? { audioDevices: d.audioDevices } : {}),
@@ -497,44 +481,30 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       ...(d.activeQualityKey !== undefined ? { activeQualityKey: d.activeQualityKey } : {}),
       hasVideoDecoder: d.hasVideoDecoder === true,
       ...(d.androidDecoderMode !== undefined ? { androidDecoderMode: d.androidDecoderMode } : {}),
-      hasChapters: d.hasChapters === true,
-      ...(d.chapters !== undefined ? { chapters: d.chapters } : {}),
       hasSleepTimer: d.hasSleepTimer === true,
       ...(d.sleepTimerMinutes !== undefined ? { sleepTimerMinutes: d.sleepTimerMinutes } : {}),
-      hasTimeDisplay: d.hasTimeDisplay === true,
-      hasInfo: s.canOpenInfo,
-      hasAlwaysOnTop: d.hasAlwaysOnTop === true,
-      hasMiniPlayer: d.hasMiniPlayer === true,
       hasPip: d.hasPip === true,
       hasMultiView: d.hasMultiView === true,
-      hasPopout: d.hasPopout === true,
     });
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'close') d.closeSettings();
     else if (intent?.kind === 'state') d.updateSettingsMenu(intent.state);
     else if (intent?.kind === 'toggleResizeMode') d.toggleResizeMode();
-    else if (intent?.kind === 'toggleTimeDisplayMode') d.toggleTimeDisplayMode?.();
-    else if (intent?.kind === 'toggleInfo') d.toggleInfo?.();
-    else if (intent?.kind === 'toggleAlwaysOnTop') d.toggleAlwaysOnTop?.();
     else if (intent?.kind === 'toggleDeinterlace') d.toggleDeinterlace?.();
     else if (intent?.kind === 'togglePitchLock') d.togglePitchLock?.();
     else if (intent?.kind === 'toggleAudioNormalization') d.toggleAudioNormalization?.();
-    else if (intent?.kind === 'toggleAutoSubtitlesOnSkipBack') d.toggleAutoSubtitlesOnSkipBack?.();
     else if (intent?.kind === 'toggleAutoPlayNextEpisode') d.toggleAutoPlayNextEpisode?.();
-    else if (intent?.kind === 'minimizeToMiniPlayer') {
-      d.closeSettings();
-      d.onMinimizeToMiniPlayer?.();
-    } else if (intent?.kind === 'enterPip') {
+    else if (intent?.kind === 'enterPip') {
       d.closeSettings();
       d.onEnterPip?.();
     } else if (intent?.kind === 'enterMultiView') {
       d.closeSettings();
       d.onEnterMultiView?.();
-    } else if (intent?.kind === 'popoutPlayer') {
-      d.closeSettings();
-      d.onPopoutPlayer?.();
     } else if (intent?.kind === 'toggleStats') d.toggleStats();
-    else if (intent?.kind === 'audio') {
+    else if (intent?.kind === 'program') {
+      if (d.selectProgram !== undefined) d.selectProgram(intent.id);
+      else d.service?.selectProgram?.(intent.id);
+    } else if (intent?.kind === 'audio') {
       if (d.selectAudio !== undefined) d.selectAudio(intent.id);
       else d.service?.selectAudioTrack(intent.id);
     } else if (intent?.kind === 'audioDelay') d.adjustAudioDelay?.(intent.deltaMs, intent.reset);
@@ -544,7 +514,6 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     else if (intent?.kind === 'videoQuality') d.selectVideoQuality?.(intent.id);
     else if (intent?.kind === 'quality') d.selectQualityVariant?.(intent.itemKey);
     else if (intent?.kind === 'videoDecoder') d.selectAndroidDecoderMode?.(intent.mode);
-    else if (intent?.kind === 'chapter') d.selectChapter?.(intent.startMs);
     else if (intent?.kind === 'sleepTimer') d.selectSleepTimer?.(intent.minutes);
     else if (intent?.kind === 'toggleSleepTimerAction') d.toggleSleepTimerAction?.();
     else if (intent?.kind === 'subtitle') {
@@ -562,31 +531,6 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     return true;
   }
 
-  if (s.tracksOpen) {
-    const intent = routePickerKey(event, s.pickerCursor, s.tracks, {
-      dualSubtitles: d.hasDualSubtitles === true,
-      canPickSubtitleFile: d.canPickSubtitleFile === true,
-      canLoadSubtitleUrl: d.canLoadSubtitleUrl === true,
-    });
-    if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
-    if (intent?.kind === 'move') d.updatePickerCursor(intent.cursor);
-    else if (intent?.kind === 'program') {
-      if (d.selectProgram !== undefined) d.selectProgram(intent.id);
-      else d.service?.selectProgram?.(intent.id);
-    } else if (intent?.kind === 'audio') {
-      if (d.selectAudio !== undefined) d.selectAudio(intent.id);
-      else d.service?.selectAudioTrack(intent.id);
-    } else if (intent?.kind === 'subtitle') {
-      if (d.selectSubtitle !== undefined) d.selectSubtitle(intent.id);
-      else d.service?.selectSubtitleTrack(intent.id);
-    } else if (intent?.kind === 'secondarySubtitle') {
-      if (d.selectSecondarySubtitle !== undefined) d.selectSecondarySubtitle(intent.id);
-      else d.service?.selectSecondarySubtitleTrack(intent.id);
-    } else if (intent?.kind === 'pickSubtitleFile') d.pickSubtitleFile?.();
-    else if (intent?.kind === 'loadSubtitleUrl') d.loadSubtitleUrl?.();
-    return true;
-  }
-
   if (s.channelListOpen) {
     if (
       (event.kind === 'press' || event.kind === 'repeat') &&
@@ -598,10 +542,6 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     } else if (event.kind === 'press' && event.key === 'select') {
       if (d.allowTvSelect()) d.onChannelListSelect?.();
     }
-    return true;
-  }
-
-  if (s.infoOpen) {
     return true;
   }
 
@@ -646,21 +586,20 @@ export interface HostKeyRouteDeps {
   readonly liveTimeShiftSupported?: boolean;
   readonly state: Pick<
     PlayerOverlayLive,
-    'locked' | 'tracksOpen' | 'settingsOpen' | 'infoOpen' | 'channelListOpen'
+    'locked' | 'settingsOpen' | 'settingsMenu' | 'windowModeOpen' | 'channelListOpen'
   >;
   readonly handleBack: () => void;
   readonly onStop?: (() => void) | undefined;
   readonly toggleFullscreen: () => void;
   readonly toggleResizeMode?: (() => void) | undefined;
-  readonly toggleAlwaysOnTop?: (() => void) | undefined;
   readonly togglePlayPause: () => void;
   readonly seekBy: (deltaMs: number) => void;
   readonly stepSeekMs?: number | undefined;
   readonly stepVolumeBy?: ((delta: number) => void) | undefined;
   readonly toggleMute?: (() => void) | undefined;
-  readonly openTracks: () => void;
-  readonly closeTracks: () => void;
-  readonly toggleInfo?: (() => void) | undefined;
+  readonly openSubtitles: () => void;
+  readonly closeSettings: () => void;
+  readonly toggleStats?: (() => void) | undefined;
   readonly toggleChannelList?: (() => void) | undefined;
   readonly zapBy: (delta: 1 | -1) => void;
   readonly onJumpPreviousChannel?: (() => void) | undefined;
@@ -670,11 +609,7 @@ export interface HostKeyRouteDeps {
 export function routeHostKey(key: HostKey, d: HostKeyRouteDeps): void {
   const { state } = d;
   const canUseShortcuts =
-    !state.locked &&
-    !state.tracksOpen &&
-    !state.settingsOpen &&
-    !state.infoOpen &&
-    !state.channelListOpen;
+    !state.locked && !state.settingsOpen && !state.windowModeOpen && !state.channelListOpen;
   switch (key) {
     case 'back':
       d.handleBack();
@@ -717,23 +652,23 @@ export function routeHostKey(key: HostKey, d: HostKeyRouteDeps): void {
     case 'mute':
       if (canUseShortcuts) d.toggleMute?.();
       return;
-    case 'tracks':
-      if (!state.locked && !state.settingsOpen && !state.infoOpen && !state.channelListOpen) {
-        if (state.tracksOpen) d.closeTracks();
-        else d.openTracks();
+    case 'tracks': {
+      const inSubtitles =
+        state.settingsOpen && isSettingsInSubtitlesFamily(state.settingsMenu.view);
+      if (!state.locked && !state.windowModeOpen && !state.channelListOpen) {
+        if (inSubtitles) d.closeSettings();
+        else if (!state.settingsOpen) d.openSubtitles();
       }
       return;
+    }
     case 'info':
-      if (!state.locked) d.toggleInfo?.();
+      if (!state.locked) d.toggleStats?.();
       return;
     case 'channel-list':
       if (!state.locked && !d.isVod) d.toggleChannelList?.();
       return;
     case 'prev-channel':
       if (canUseShortcuts && !d.isVod) d.onJumpPreviousChannel?.();
-      return;
-    case 'always-on-top':
-      if (canUseShortcuts) d.toggleAlwaysOnTop?.();
       return;
     case 'aspect':
       if (canUseShortcuts) d.toggleResizeMode?.();

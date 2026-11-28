@@ -320,23 +320,23 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
       engine.emit({ attempt, type: 'tracks', tracks: MULTI_TRACKS });
     });
 
-    expect(screen.getByTestId('player-tracks-button').props.accessibilityLabel).toBe(
-      'Ses ve Altyazı',
-    );
+    expect(screen.getByTestId('player-subtitles-button').props.accessibilityLabel).toBe('Altyazı');
+    expect(screen.getByTestId('player-audio-button').props.accessibilityLabel).toBe('Ses');
 
-    // Open TrackPicker via TV VOD shortcut: Down focuses OSD tracks button -> Center opens picker
+    // Focus OSD ('subtitles') -> Right focuses 'audio' -> Center opens Audio tracks
     await act(async () => {
       keys.tap(KEYCODE_DPAD_DOWN);
+    });
+    await act(async () => {
+      keys.tap(KEYCODE_DPAD_RIGHT);
     });
     await act(async () => {
       keys.tap(KEYCODE_DPAD_CENTER);
     });
 
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
-    expect(screen.getByTestId('player-audio-track-a:1')).toHaveTextContent('Türkçe');
-    expect(screen.getByTestId('player-audio-track-a:2')).toHaveTextContent('İngilizce');
-    expect(screen.getByTestId('player-subtitle-off')).toHaveTextContent('Kapalı');
-    expect(screen.getByTestId('player-subtitle-track-s:1')).toHaveTextContent('Türkçe');
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-audio-a:1')).toHaveTextContent('Türkçe');
+    expect(screen.getByTestId('player-settings-audio-a:2')).toHaveTextContent('İngilizce');
 
     // Move Down to English audio (a:2) and select; position stays 0:25 and no reload is issued
     await act(async () => {
@@ -349,13 +349,26 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
       'a:2',
     );
     expect(engine.commands.filter((c) => c.name === 'load')).toHaveLength(1);
-    expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('0:25');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:35');
+    expect(
+      screen.getByTestId('player-progress-time-current', { includeHiddenElements: true }),
+    ).toHaveTextContent('0:25');
+    expect(
+      screen.getByTestId('player-progress-time', { includeHiddenElements: true }),
+    ).toHaveTextContent('1:35');
 
-    // Move Right to Subtitles column -> Down to Turkish subtitle (s:1) -> select
+    // Close Audio view back to OSD, step Left to Subtitles button -> Center opens Subtitles view
     await act(async () => {
-      keys.tap(KEYCODE_DPAD_RIGHT);
+      keys.tap(KEYCODE_BACK);
+      keys.tap(KEYCODE_BACK);
     });
+    await act(async () => {
+      keys.tap(KEYCODE_DPAD_LEFT);
+      keys.tap(KEYCODE_DPAD_CENTER);
+    });
+    expect(screen.getByTestId('player-settings-sub-off')).toHaveTextContent('Kapalı');
+    expect(screen.getByTestId('player-settings-sub-s:1')).toHaveTextContent('Türkçe');
+
+    // Move Down to Turkish subtitle (s:1) -> select
     await act(async () => {
       keys.tap(KEYCODE_DPAD_DOWN);
     });
@@ -385,12 +398,13 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
       null,
     );
 
-    // Back closes TrackPickerModal and restores TV OSD focus to 'tracks' without exiting (#130)
+    // Back x2 closes Settings and restores TV OSD focus to 'subtitles' without exiting (#130)
     await act(async () => {
       keys.tap(KEYCODE_BACK);
+      keys.tap(KEYCODE_BACK);
     });
-    expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
-    expect(screen.getByTestId('player-tracks-button').props.accessibilityState).toMatchObject({
+    expect(screen.queryByTestId('player-settings-panel')).toBeNull();
+    expect(screen.getByTestId('player-subtitles-button').props.accessibilityState).toMatchObject({
       selected: true,
     });
     expect(onExit).not.toHaveBeenCalled();

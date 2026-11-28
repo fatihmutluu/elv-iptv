@@ -158,21 +158,22 @@ describe('Wave F7A PlayerScreen live display/audio sync, per-refresh-rate delay,
       expect(engine.commands).toContainEqual({ name: 'setAudioDelay', attempt: 1, delayMs: -75 });
     });
 
-    // Manual A/V sync +50 ms persists +50 as manual baseline while applying effective -25 ms!
+    // Manual A/V sync +100 ms persists +100 as manual baseline while applying effective +25 ms at 23.976 fps (-75 offset)!
     await fireEvent.press(screen.getByTestId('player-settings-button'));
-    await fireEvent.press(await screen.findByTestId('player-settings-row-audio-delay'));
-    await fireEvent.press(await screen.findByTestId('player-settings-audio-delay-plus-50'));
+    await fireEvent.press(await screen.findByTestId('player-settings-row-audio'));
+    await fireEvent.press(await screen.findByTestId('player-settings-open-audio-settings'));
+    await fireEvent.press(await screen.findByTestId('player-settings-audio-delay-plus-100'));
 
     await waitFor(() => {
-      expect(engine.commands).toContainEqual({ name: 'setAudioDelay', attempt: 1, delayMs: -25 });
+      expect(engine.commands).toContainEqual({ name: 'setAudioDelay', attempt: 1, delayMs: 25 });
       expect(saveTrackPreference).toHaveBeenCalledWith({
         scopeKey: LIVE_TARGET.itemKey,
         sourceId: LIVE_TARGET.sourceId,
-        audioDelayMs: 50,
+        audioDelayMs: 100,
       });
     });
 
-    // When video frame rate switches to 50 fps (+50 offset), manual baseline (+50) combines -> +100 ms!
+    // When video frame rate switches to 50 fps (+50 offset), manual baseline (+100) combines -> +150 ms!
     await act(async () => {
       engine.emit({
         attempt: 1,
@@ -182,7 +183,7 @@ describe('Wave F7A PlayerScreen live display/audio sync, per-refresh-rate delay,
     });
 
     await waitFor(() => {
-      expect(engine.commands).toContainEqual({ name: 'setAudioDelay', attempt: 1, delayMs: 100 });
+      expect(engine.commands).toContainEqual({ name: 'setAudioDelay', attempt: 1, delayMs: 150 });
     });
 
     // Desktop passthrough fallback notice pill appears on event and auto-hides cleanly

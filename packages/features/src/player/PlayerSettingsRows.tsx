@@ -305,6 +305,13 @@ export function SettingsRadioRow({
       {item.disabledHint !== undefined ? (
         <MicroPill label={item.disabledHint} tone="neutral" />
       ) : null}
+      {item.trailingIcon !== undefined ? (
+        <Icon
+          name={item.trailingIcon}
+          size={16}
+          color={activeHover ? theme.colors.accent : theme.colors.textMuted}
+        />
+      ) : null}
       {item.selected ? <Icon name="check" size={16} color={theme.colors.accent} /> : null}
     </Pressable>
   );

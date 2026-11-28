@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   clampZoomLevel,
-  isAlwaysOnTopFlag,
+  isAspectRatioLockFlag,
+  isMinimizeToTrayFlag,
   isZoomLevel,
   MAX_WINDOW_ZOOM_LEVEL,
   MIN_WINDOW_ZOOM_LEVEL,
@@ -10,10 +11,9 @@ import {
 } from '../shared/window-ipc.ts';
 import type { TrustedSenderEventLike } from './trusted-sender.ts';
 import {
-  type AlwaysOnTopWindowLike,
-  type ChildZOrderWindowLike,
   registerWindowIpc,
   type WindowIpcMainLike,
+  type WindowIpcWindowLike,
 } from './window-ipc.ts';
 
 type Handler = (event: TrustedSenderEventLike & { sender: unknown }, ...args: unknown[]) => unknown;
@@ -43,54 +43,13 @@ function fakeIpcMain() {
   };
 }
 
-function fakeChild(visible = true) {
-  let destroyed = false;
-  const calls: unknown[][] = [];
-  const child: ChildZOrderWindowLike = {
-    isDestroyed: () => destroyed,
-    isVisible: () => visible,
-    setAlwaysOnTop: (flag, level, relativeLevel) => {
-      calls.push(['setAlwaysOnTop', flag, level, relativeLevel]);
-    },
-    moveTop: () => {
-      calls.push(['moveTop']);
-    },
-  };
-  return {
-    child,
-    calls,
-    destroy: () => {
-      destroyed = true;
-    },
-  };
-}
-
-function fakeWindow(children: ChildZOrderWindowLike[] = []) {
-  let pinned = false;
+function fakeWindow() {
   let destroyed = false;
   const setCalls: unknown[][] = [];
   const sent: Array<{ channel: string; args: unknown[] }> = [];
-  const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   const sender = { id: 1 };
-  const win: AlwaysOnTopWindowLike = {
+  const win: WindowIpcWindowLike = {
     isDestroyed: () => destroyed,
-    isAlwaysOnTop: () => pinned,
-    setAlwaysOnTop: (flag, level) => {
-      pinned = flag;
-      setCalls.push([flag, level]);
-    },
-    getChildWindows: () => children,
-    on: (event, listener) => {
-      let set = listeners.get(event);
-      if (!set) {
-        set = new Set();
-        listeners.set(event, set);
-      }
-      set.add(listener as (...args: unknown[]) => void);
-    },
-    removeListener: (event, listener) => {
-      listeners.get(event)?.delete(listener as (...args: unknown[]) => void);
-    },
     webContents: {
       isDestroyed: () => destroyed,
       send: (channel, ...args) => {
@@ -106,26 +65,16 @@ function fakeWindow(children: ChildZOrderWindowLike[] = []) {
     sender,
     setCalls,
     sent,
-    emitAlwaysOnTopChanged: (nextPinned: boolean) => {
-      pinned = nextPinned;
-      for (const listener of [...(listeners.get('always-on-top-changed') ?? [])]) {
-        listener({}, nextPinned);
-      }
-    },
-    listenerCount: () => listeners.get('always-on-top-changed')?.size ?? 0,
     destroy: () => {
       destroyed = true;
     },
   };
 }
 
-describe('window-ipc (#408)', () => {
-  it('exposes exact frozen WINDOW_CHANNELS and boolean guard', () => {
+describe('window-ipc (#332, #158)', () => {
+  it('exposes exact frozen WINDOW_CHANNELS and payload guards', () => {
     expect(Object.isFrozen(WINDOW_CHANNELS)).toBe(true);
     expect(WINDOW_CHANNELS).toEqual({
-      setAlwaysOnTop: 'window:set-always-on-top',
-      getAlwaysOnTop: 'window:get-always-on-top',
-      alwaysOnTopChanged: 'window:always-on-top-changed',
       setAspectRatioLock: 'window:set-aspect-ratio-lock',
       setMinimizeToTray: 'window:set-minimize-to-tray',
       windowRestored: 'window:restored',
@@ -156,114 +105,10 @@ describe('window-ipc (#408)', () => {
     expect(isZoomLevel(-3.5)).toBe(false);
     expect(isZoomLevel(Number.NaN)).toBe(false);
     expect(isZoomLevel('1')).toBe(false);
-    expect(isAlwaysOnTopFlag(true)).toBe(true);
-    expect(isAlwaysOnTopFlag(false)).toBe(true);
-    expect(isAlwaysOnTopFlag('true')).toBe(false);
-    expect(isAlwaysOnTopFlag(1)).toBe(false);
-    expect(isAlwaysOnTopFlag(null)).toBe(false);
-  });
-
-  it('toggles always-on-top with floating level, syncs child presenter z-order, and emits changed event', async () => {
-    const ipc = fakeIpcMain();
-    const child = fakeChild(true);
-    const hiddenChild = fakeChild(false);
-    const fw = fakeWindow([child.child, hiddenChild.child]);
-    const logs: string[] = [];
-
-    const dispose = registerWindowIpc({
-      ipcMain: ipc.ipcMain,
-      getWindowFromSender: (s) => (s === fw.sender ? fw.win : null),
-      log: (line) => logs.push(line),
-    });
-
-    expect(await ipc.invoke(WINDOW_CHANNELS.getAlwaysOnTop, fw.sender)).toBe(false);
-
-    expect(await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, fw.sender, true)).toBe(true);
-    expect(fw.setCalls).toEqual([[true, 'floating']]);
-    expect(child.calls).toEqual([['setAlwaysOnTop', true, 'floating', 1], ['moveTop']]);
-    expect(hiddenChild.calls).toEqual([['setAlwaysOnTop', true, 'floating', 1]]);
-    expect(fw.sent).toEqual([{ channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [true] }]);
-    expect(await ipc.invoke(WINDOW_CHANNELS.getAlwaysOnTop, fw.sender)).toBe(true);
-
-    // Repeating same value does not spam duplicate changed events.
-    expect(await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, fw.sender, true)).toBe(true);
-    expect(fw.sent).toHaveLength(1);
-
-    // Unpinning resets both main and child HWNDs cleanly.
-    expect(await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, fw.sender, false)).toBe(false);
-    expect(fw.setCalls).toEqual([
-      [true, 'floating'],
-      [false, 'floating'],
-    ]);
-    expect(child.calls.at(-1)).toEqual(['setAlwaysOnTop', false, 'normal', undefined]);
-    expect(fw.sent).toEqual([
-      { channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [true] },
-      { channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [false] },
-    ]);
-
-    expect(logs).toEqual([]);
-    dispose();
-    expect(ipc.handlers.size).toBe(0);
-  });
-
-  it('drops invalid payloads and handles missing or destroyed windows cleanly', async () => {
-    const ipc = fakeIpcMain();
-    const fw = fakeWindow();
-    const log = vi.fn();
-
-    const dispose = registerWindowIpc({
-      ipcMain: ipc.ipcMain,
-      getWindowFromSender: (s) => (s === fw.sender ? fw.win : null),
-      log,
-    });
-
-    expect(await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, fw.sender, 'yes')).toBe(false);
-    expect(fw.setCalls).toEqual([]);
-    expect(log).toHaveBeenCalledTimes(1);
-
-    expect(await ipc.invoke(WINDOW_CHANNELS.getAlwaysOnTop, { id: 999 })).toBe(false);
-    expect(await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, { id: 999 }, true)).toBe(false);
-
-    fw.destroy();
-    expect(await ipc.invoke(WINDOW_CHANNELS.getAlwaysOnTop, fw.sender)).toBe(false);
-    expect(await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, fw.sender, true)).toBe(false);
-
-    dispose();
-  });
-
-  it('syncs external always-on-top-changed events (e.g. fullscreen exit restore) without duplicate pushes', async () => {
-    const ipc = fakeIpcMain();
-    const child = fakeChild(true);
-    const fw = fakeWindow([child.child]);
-
-    const dispose = registerWindowIpc({
-      ipcMain: ipc.ipcMain,
-      getWindowFromSender: (s) => (s === fw.sender ? fw.win : null),
-    });
-
-    // Initial getAlwaysOnTop attaches the window listener cleanly
-    expect(await ipc.invoke(WINDOW_CHANNELS.getAlwaysOnTop, fw.sender)).toBe(false);
-    expect(fw.listenerCount()).toBe(1);
-
-    // Pin via IPC
-    expect(await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, fw.sender, true)).toBe(true);
-    expect(fw.sent).toEqual([{ channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [true] }]);
-
-    // Electron/Windows emits always-on-top-changed(false) on fullscreen entry, then (true) on exit restore
-    fw.emitAlwaysOnTopChanged(false);
-    fw.emitAlwaysOnTopChanged(false);
-    fw.emitAlwaysOnTopChanged(true);
-
-    expect(fw.sent).toEqual([
-      { channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [true] },
-      { channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [false] },
-      { channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [true] },
-    ]);
-    expect(child.calls.at(-2)).toEqual(['setAlwaysOnTop', true, 'floating', 1]);
-    expect(child.calls.at(-1)).toEqual(['moveTop']);
-
-    dispose();
-    expect(fw.listenerCount()).toBe(0);
+    expect(isAspectRatioLockFlag(true)).toBe(true);
+    expect(isAspectRatioLockFlag('true')).toBe(false);
+    expect(isMinimizeToTrayFlag(false)).toBe(true);
+    expect(isMinimizeToTrayFlag(1)).toBe(false);
   });
 
   it('validates and forwards window:set-aspect-ratio-lock to onSetAspectRatioLock (#332)', async () => {
@@ -339,7 +184,6 @@ describe('window-ipc (#408)', () => {
         title: 'News HD',
         logo: 'https://user:secret@cdn.example.test/logo.png?token=abc&size=2x',
         resumePositionMs: 1200,
-        pinned: true,
         transferEngineId: 'engine-4',
       }),
     ).toBe(true);
@@ -350,7 +194,6 @@ describe('window-ipc (#408)', () => {
         title: 'News HD',
         logo: 'https://cdn.example.test/logo.png?size=2x',
         resumePositionMs: 1200,
-        pinned: true,
         transferEngineId: 'engine-4',
       },
     ]);
@@ -506,7 +349,10 @@ describe('window-ipc (#408)', () => {
       { sender: fw.sender, senderFrame: trustedFrame('https://evil.example/') },
     ];
     for (const ev of untrustedEvents) {
-      await expect(ipc.invokeWithEvent(WINDOW_CHANNELS.getAlwaysOnTop, ev)).rejects.toThrow(
+      await expect(
+        ipc.invokeWithEvent(WINDOW_CHANNELS.setAspectRatioLock, ev, true),
+      ).rejects.toThrow(/untrusted sender/i);
+      await expect(ipc.invokeWithEvent(WINDOW_CHANNELS.getZoomLevel, ev)).rejects.toThrow(
         /untrusted sender/i,
       );
       await expect(
@@ -518,7 +364,7 @@ describe('window-ipc (#408)', () => {
       ).rejects.toThrow(/untrusted sender/i);
     }
     expect(onOpenExternalUrl).not.toHaveBeenCalled();
-    expect(logs.length).toBe(untrustedEvents.length * 2);
+    expect(logs.length).toBe(untrustedEvents.length * 3);
     dispose();
   });
 

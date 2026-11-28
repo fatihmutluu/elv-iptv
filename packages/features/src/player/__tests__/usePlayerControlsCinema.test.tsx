@@ -40,12 +40,10 @@ async function setupControls(opts: {
   initialOsdHidden?: boolean;
   initialVolume?: number;
   autoSubtitlesOnSkipBack?: boolean;
-  hasInfo?: boolean;
   hasChannelList?: boolean;
   onSetVolume?: jest.Mock;
   onPersistVolume?: jest.Mock;
   onToggleMute?: jest.Mock;
-  onToggleAutoSubtitlesOnSkipBack?: jest.Mock;
 }) {
   const manual = createManualClock();
   const keys = createFakeAndroidKeys();
@@ -87,7 +85,6 @@ async function setupControls(opts: {
         showRetry: false,
         hasService: true,
         hasSettings: true,
-        hasInfo: opts.hasInfo ?? true,
         hasChannelList: opts.hasChannelList ?? opts.kind === 'live',
         initialOsdHidden: opts.initialOsdHidden,
         autoHideOsdMs: 3_500,
@@ -96,7 +93,6 @@ async function setupControls(opts: {
         onPersistVolume: opts.onPersistVolume,
         onToggleMute: opts.onToggleMute,
         autoSubtitlesOnSkipBack: p.autoSubtitlesOnSkipBack ?? opts.autoSubtitlesOnSkipBack,
-        onToggleAutoSubtitlesOnSkipBack: opts.onToggleAutoSubtitlesOnSkipBack,
         serviceRef,
         clockRef,
         timersRef,
@@ -160,9 +156,9 @@ describe('usePlayerControls cinema ergonomics (#391, #58, #394, #114, #57)', () 
     expect(d.hook.result.current.muted).toBe(false);
     expect(d.hook.result.current.volume).toBe(80);
 
-    // Open Info sheet -> handleWheelVolume returns false without changing volume
+    // Open Settings sheet -> handleWheelVolume returns false without changing volume
     await act(async () => {
-      d.hook.result.current.openInfo();
+      d.hook.result.current.openSettings();
     });
     await act(async () => {
       handled = d.hook.result.current.handleWheelVolume(-120);
@@ -260,12 +256,11 @@ describe('usePlayerControls cinema ergonomics (#391, #58, #394, #114, #57)', () 
     await live.hook.unmount();
   });
 
-  it('routes desktop shortcuts (i, Shift+I, g), host keys (info, channel-list), and Back step-down cleanly (#58, #57)', async () => {
+  it('routes desktop shortcuts (i, Shift+I, g), host keys (info, channel-list), and Back step-down cleanly (#58, #57, Wave R4)', async () => {
     jest.replaceProperty(Platform, 'OS', 'android' as typeof Platform.OS);
     const live = await setupControls({
       kind: 'live',
       formFactor: 'desktop',
-      hasInfo: true,
       hasChannelList: true,
       initialOsdHidden: true,
     });
@@ -274,26 +269,23 @@ describe('usePlayerControls cinema ergonomics (#391, #58, #394, #114, #57)', () 
       e: Record<string, unknown>,
     ) => void;
 
-    // Plain 'i' toggles Info sheet
+    // Plain 'i' toggles merged Stats & Info HUD
     await act(async () => {
       onKeyDown({ key: 'i', preventDefault: jest.fn() });
     });
-    expect(live.hook.result.current.infoOpen).toBe(true);
-    expect(live.hook.result.current.statsVisible).toBe(false);
+    expect(live.hook.result.current.statsVisible).toBe(true);
 
-    // Back closes Info without exiting
-    await act(async () => {
-      live.hook.result.current.handleBack();
-    });
-    expect(live.hook.result.current.infoOpen).toBe(false);
-    expect(live.onExitRef.current).not.toHaveBeenCalled();
-
-    // Shift+I toggles Stats HUD without opening Info
+    // Shift+I also toggles merged Stats HUD off cleanly
     await act(async () => {
       onKeyDown({ key: 'I', shiftKey: true, preventDefault: jest.fn() });
     });
+    expect(live.hook.result.current.statsVisible).toBe(false);
+
+    // HostKey 'info' toggles merged Stats HUD cleanly
+    await act(async () => {
+      live.hook.result.current.handleHostKey('info');
+    });
     expect(live.hook.result.current.statsVisible).toBe(true);
-    expect(live.hook.result.current.infoOpen).toBe(false);
 
     // Plain 'g' opens Channel List on Live
     await act(async () => {
@@ -308,16 +300,11 @@ describe('usePlayerControls cinema ergonomics (#391, #58, #394, #114, #57)', () 
     expect(live.hook.result.current.channelListOpen).toBe(false);
     expect(live.onExitRef.current).not.toHaveBeenCalled();
 
-    // HostKey 'info' and 'channel-list' toggle the corresponding sheets
-    await act(async () => {
-      live.hook.result.current.handleHostKey('info');
-    });
-    expect(live.hook.result.current.infoOpen).toBe(true);
+    // HostKey 'channel-list' toggles Channel List open and closed
     await act(async () => {
       live.hook.result.current.handleHostKey('channel-list');
     });
     expect(live.hook.result.current.channelListOpen).toBe(true);
-    expect(live.hook.result.current.infoOpen).toBe(false);
     await act(async () => {
       live.hook.result.current.handleHostKey('channel-list');
     });

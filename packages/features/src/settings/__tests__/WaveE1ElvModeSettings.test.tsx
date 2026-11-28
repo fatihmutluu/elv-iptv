@@ -106,7 +106,7 @@ describe('Settings -> ELV Mode Panel (Wave E1 #511)', () => {
     jest.restoreAllMocks();
   });
 
-  it('renders ELV Mode tab, previewSlot at top, master switch off by default with 8 disabled sub-controls, and enables all 8 controls when toggled on', async () => {
+  it('renders ELV Mode tab, previewSlot at top, master switch off by default with 7 disabled sub-controls, and enables all 7 controls when toggled on', async () => {
     const store = createMemoryPreferencesStore();
     await render(
       <ElvSettingsHarness
@@ -122,6 +122,7 @@ describe('Settings -> ELV Mode Panel (Wave E1 #511)', () => {
     expect(screen.getByTestId('settings-tab-elvMode')).toBeTruthy();
     expect(screen.getByTestId('settings-panel-elvMode')).toBeTruthy();
     expect(screen.getByTestId('elv-preview-slot-probe')).toBeTruthy();
+    expect(screen.queryByTestId('settings-elv-xray')).toBeNull();
 
     const master = screen.getByTestId('settings-elv-master-toggle');
     expect(master.props.accessibilityRole).toBe('switch');
@@ -133,7 +134,6 @@ describe('Settings -> ELV Mode Panel (Wave E1 #511)', () => {
       'settings-elv-title-format',
       'settings-elv-category-source',
       'settings-elv-smart-recs',
-      'settings-elv-xray',
       'settings-elv-live-enhance',
       'settings-elv-verify-quality',
     ] as const;
@@ -142,7 +142,7 @@ describe('Settings -> ELV Mode Panel (Wave E1 #511)', () => {
       expect(screen.getByTestId(id).props.accessibilityState.disabled).toBe(true);
     }
 
-    // Enable master switch -> all 8 sub-controls unlock immediately
+    // Enable master switch -> all 7 sub-controls unlock immediately; removed X-Ray stays absent
     await fireEvent.press(master);
     await waitFor(() => {
       expect(
@@ -152,13 +152,13 @@ describe('Settings -> ELV Mode Panel (Wave E1 #511)', () => {
         expect(screen.getByTestId(id).props.accessibilityState.disabled).toBe(false);
       }
     });
+    expect(screen.queryByTestId('settings-elv-xray')).toBeNull();
 
-    // Toggle all 6 boolean sub-switches
+    // Toggle all 5 boolean sub-switches
     const togglePairs = [
       ['settings-elv-merge-versions', 'elvMergeVersions'],
       ['settings-elv-enrich-metadata', 'elvEnrichMetadata'],
       ['settings-elv-smart-recs', 'elvSmartRecommendations'],
-      ['settings-elv-xray', 'elvXrayEnabled'],
       ['settings-elv-live-enhance', 'elvLiveEnhance'],
       ['settings-elv-verify-quality', 'elvVerifyRealQuality'],
     ] as const;

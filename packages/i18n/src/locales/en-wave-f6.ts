@@ -37,8 +37,6 @@ export const enWaveF6Messages = {
   // #158 Desktop Popout Player Window & System Tray
   'player.popout.open': 'Pop out player',
   'player.popout.dock': 'Return to main window',
-  'player.popout.pin': 'Always on top',
-  'player.popout.unpin': 'Unpin window',
   'player.popout.close': 'Close popout',
   'settings.desktop.minimizeToTrayTitle': 'Minimize to system tray',
   'settings.desktop.minimizeToTrayDescription':

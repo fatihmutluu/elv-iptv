@@ -1,277 +1,40 @@
 import type { MediaTracks } from '@elv/playback';
 import { describe, expect, it } from 'vitest';
-import {
-  activatePickerCursor,
-  clampPickerCursor,
-  initialPickerCursor,
-  movePickerCursor,
-  routePickerKey,
-} from './track-picker-nav';
+import { buildSubtitleColumnEntries } from './track-picker-nav';
 
-const TRACKS: MediaTracks = {
-  audio: [
-    { id: 'a:1', language: 'tur' },
-    { id: 'a:2', language: 'eng' },
-    { id: 'a:3', language: 'deu' },
-  ],
+const DUAL_TRACKS: MediaTracks = {
+  audio: [{ id: 'a:1', language: 'eng' }],
   subtitles: [
-    { id: 's:1', language: 'tur' },
-    { id: 's:2', language: 'eng' },
+    { id: 's:1', language: 'eng' },
+    { id: 's:2', language: 'tur' },
+    { id: 'ext:1', language: 'deu', label: 'German External', external: true },
   ],
-  selectedAudioId: 'a:2',
-  selectedSubtitleId: 's:2',
+  selectedAudioId: 'a:1',
+  selectedSubtitleId: 's:1',
+  selectedSecondarySubtitleId: 's:2',
 };
 
-const NO_AUDIO: MediaTracks = { ...TRACKS, audio: [], selectedAudioId: null };
-
-describe('initialPickerCursor', () => {
-  it('starts on the selected audio track', () => {
-    expect(initialPickerCursor(TRACKS)).toEqual({ column: 'audio', index: 1 });
+describe('track-picker-nav buildSubtitleColumnEntries', () => {
+  it('builds primary Off + tracks without dual/external options', () => {
+    expect(buildSubtitleColumnEntries(DUAL_TRACKS)).toEqual([
+      { kind: 'primaryOff' },
+      { kind: 'primaryTrack', track: DUAL_TRACKS.subtitles[0], trackIndex: 0 },
+      { kind: 'primaryTrack', track: DUAL_TRACKS.subtitles[1], trackIndex: 1 },
+      { kind: 'primaryTrack', track: DUAL_TRACKS.subtitles[2], trackIndex: 2 },
+    ]);
   });
 
-  it('falls back to the first audio row when the selection is unknown', () => {
-    expect(initialPickerCursor({ ...TRACKS, selectedAudioId: 'zz' })).toEqual({
-      column: 'audio',
-      index: 0,
+  it('appends secondary subtitle rows (disabling active primary) and external subtitle actions', () => {
+    const entries = buildSubtitleColumnEntries(DUAL_TRACKS, {
+      dualSubtitles: true,
+      canPickSubtitleFile: true,
+      canLoadSubtitleUrl: true,
     });
-  });
-
-  it('starts on the selected subtitle row (Off is row 0) without audio', () => {
-    expect(initialPickerCursor(NO_AUDIO)).toEqual({ column: 'subtitles', index: 2 });
-    expect(initialPickerCursor({ ...NO_AUDIO, selectedSubtitleId: null })).toEqual({
-      column: 'subtitles',
-      index: 0,
-    });
-    expect(initialPickerCursor({ ...NO_AUDIO, selectedSubtitleId: 'zz' })).toEqual({
-      column: 'subtitles',
-      index: 0,
-    });
-  });
-
-  it('honors preferredColumn for captions/audioTrack shortcut opening', () => {
-    expect(initialPickerCursor(TRACKS, 'subtitles')).toEqual({ column: 'subtitles', index: 2 });
-    expect(initialPickerCursor(TRACKS, 'audio')).toEqual({ column: 'audio', index: 1 });
-    expect(initialPickerCursor(NO_AUDIO, 'audio')).toEqual({ column: 'subtitles', index: 2 });
-  });
-});
-
-describe('clampPickerCursor', () => {
-  it('returns the same cursor object when it is still valid', () => {
-    const cursor = { column: 'audio', index: 2 } as const;
-    expect(clampPickerCursor(cursor, TRACKS)).toBe(cursor);
-  });
-
-  it('clamps an audio index past the end after the list shrinks', () => {
-    const shrunk: MediaTracks = { ...TRACKS, audio: [{ id: 'a:1', language: 'tur' }] };
-    expect(clampPickerCursor({ column: 'audio', index: 2 }, shrunk)).toEqual({
-      column: 'audio',
-      index: 0,
-    });
-  });
-
-  it('moves to the subtitle selection when the audio column disappears', () => {
-    expect(clampPickerCursor({ column: 'audio', index: 2 }, NO_AUDIO)).toEqual({
-      column: 'subtitles',
-      index: 2,
-    });
-  });
-
-  it('clamps a subtitle index to the Off row plus subtitle count', () => {
-    const fewer: MediaTracks = { ...TRACKS, subtitles: [], selectedSubtitleId: null };
-    expect(clampPickerCursor({ column: 'subtitles', index: 2 }, fewer)).toEqual({
-      column: 'subtitles',
-      index: 0,
-    });
-  });
-
-  it('clamps a negative index to zero', () => {
-    expect(clampPickerCursor({ column: 'subtitles', index: -3 }, TRACKS)).toEqual({
-      column: 'subtitles',
-      index: 0,
-    });
-  });
-});
-
-describe('movePickerCursor', () => {
-  it('moves down and up within the audio column and stops at both ends', () => {
-    expect(movePickerCursor({ column: 'audio', index: 1 }, TRACKS, 'down')).toEqual({
-      column: 'audio',
-      index: 2,
-    });
-    expect(movePickerCursor({ column: 'audio', index: 2 }, TRACKS, 'down')).toEqual({
-      column: 'audio',
-      index: 2,
-    });
-    expect(movePickerCursor({ column: 'audio', index: 0 }, TRACKS, 'up')).toEqual({
-      column: 'audio',
-      index: 0,
-    });
-  });
-
-  it('counts the Off row in the subtitle column', () => {
-    expect(movePickerCursor({ column: 'subtitles', index: 1 }, TRACKS, 'down')).toEqual({
-      column: 'subtitles',
-      index: 2,
-    });
-    expect(movePickerCursor({ column: 'subtitles', index: 2 }, TRACKS, 'down')).toEqual({
-      column: 'subtitles',
-      index: 2,
-    });
-  });
-
-  it('jumps right to the selected subtitle row and left to the selected audio row', () => {
-    expect(movePickerCursor({ column: 'audio', index: 0 }, TRACKS, 'right')).toEqual({
-      column: 'subtitles',
-      index: 2,
-    });
-    expect(
-      movePickerCursor(
-        { column: 'audio', index: 0 },
-        { ...TRACKS, selectedSubtitleId: null },
-        'right',
-      ),
-    ).toEqual({ column: 'subtitles', index: 0 });
-    expect(movePickerCursor({ column: 'subtitles', index: 0 }, TRACKS, 'left')).toEqual({
-      column: 'audio',
-      index: 1,
-    });
-  });
-
-  it('keeps the index when pressing Left in audio or Right in subtitles', () => {
-    const inAudio = { column: 'audio', index: 2 } as const;
-    const inSubs = { column: 'subtitles', index: 1 } as const;
-    expect(movePickerCursor(inAudio, TRACKS, 'left')).toBe(inAudio);
-    expect(movePickerCursor(inSubs, TRACKS, 'right')).toBe(inSubs);
-  });
-
-  it('ignores Left when there is no audio column', () => {
-    const cursor = { column: 'subtitles', index: 1 } as const;
-    expect(movePickerCursor(cursor, NO_AUDIO, 'left')).toBe(cursor);
-  });
-
-  it('clamps a stale cursor before moving', () => {
-    expect(movePickerCursor({ column: 'audio', index: 5 }, NO_AUDIO, 'up')).toEqual({
-      column: 'subtitles',
-      index: 1,
-    });
-  });
-});
-
-describe('activatePickerCursor', () => {
-  it('selects the audio track under the cursor', () => {
-    expect(activatePickerCursor({ column: 'audio', index: 2 }, TRACKS)).toEqual({
-      kind: 'audio',
-      id: 'a:3',
-    });
-  });
-
-  it('selects Off on subtitle row 0 and the subtitle track below it', () => {
-    expect(activatePickerCursor({ column: 'subtitles', index: 0 }, TRACKS)).toEqual({
-      kind: 'subtitle',
-      id: null,
-    });
-    expect(activatePickerCursor({ column: 'subtitles', index: 1 }, TRACKS)).toEqual({
-      kind: 'subtitle',
-      id: 's:1',
-    });
-  });
-
-  it('activates the clamped row for a stale cursor', () => {
-    expect(activatePickerCursor({ column: 'audio', index: 9 }, NO_AUDIO)).toEqual({
-      kind: 'subtitle',
-      id: 's:2',
-    });
-  });
-});
-
-describe('routePickerKey', () => {
-  it('moves on arrow presses and up/down repeats, activates on select, and ignores horizontal repeats', () => {
-    const cur = { column: 'audio', index: 0 } as const;
-    expect(routePickerKey({ key: 'down', kind: 'repeat', time: 0 }, cur, TRACKS)).toEqual({
-      kind: 'move',
-      cursor: { column: 'audio', index: 1 },
-    });
-    expect(routePickerKey({ key: 'right', kind: 'repeat', time: 0 }, cur, TRACKS)).toBeNull();
-    expect(routePickerKey({ key: 'right', kind: 'press', time: 0 }, cur, TRACKS)).toEqual({
-      kind: 'move',
-      cursor: { column: 'subtitles', index: 2 },
-    });
-    expect(routePickerKey({ key: 'select', kind: 'press', time: 0 }, cur, TRACKS)).toEqual({
-      kind: 'audio',
-      id: 'a:1',
-    });
-    expect(routePickerKey({ key: 'play', kind: 'press', time: 0 }, cur, TRACKS)).toBeNull();
-  });
-});
-
-describe('multi-program MPEG-TS picker navigation (#304)', () => {
-  const MULTI_PROGRAM: MediaTracks = {
-    programs: [
-      { id: 'p:101', label: 'News HD', serviceName: 'News HD', programNumber: 101 },
-      { id: 'p:102', label: 'Sports HD', serviceName: 'Sports HD', programNumber: 102 },
-    ],
-    selectedProgramId: 'p:102',
-    audio: [
-      { id: 'a:101-1', language: 'eng', programId: 'p:101' },
-      { id: 'a:102-1', language: 'tur', programId: 'p:102' },
-      { id: 'a:102-2', language: 'eng', programId: 'p:102' },
-    ],
-    subtitles: [
-      { id: 's:101-1', language: 'eng', programId: 'p:101' },
-      { id: 's:102-1', language: 'tur', programId: 'p:102' },
-    ],
-    selectedAudioId: 'a:102-2',
-    selectedSubtitleId: 's:102-1',
-  };
-
-  it('traverses [program, audio, subtitles] left/right and activates program selection', () => {
-    const start = initialPickerCursor(MULTI_PROGRAM);
-    expect(start).toEqual({ column: 'audio', index: 1 });
-
-    const toProgram = movePickerCursor(start, MULTI_PROGRAM, 'left');
-    expect(toProgram).toEqual({ column: 'program', index: 1 });
-    expect(movePickerCursor(toProgram, MULTI_PROGRAM, 'left')).toEqual(toProgram);
-
-    const upProgram = movePickerCursor(toProgram, MULTI_PROGRAM, 'up');
-    expect(upProgram).toEqual({ column: 'program', index: 0 });
-    expect(activatePickerCursor(upProgram, MULTI_PROGRAM)).toEqual({
-      kind: 'program',
-      id: 'p:101',
-    });
-
-    const backToAudio = movePickerCursor(upProgram, MULTI_PROGRAM, 'right');
-    expect(backToAudio).toEqual({ column: 'audio', index: 1 });
-    expect(activatePickerCursor(backToAudio, MULTI_PROGRAM)).toEqual({
-      kind: 'audio',
-      id: 'a:102-2',
-    });
-
-    const toSubs = movePickerCursor(backToAudio, MULTI_PROGRAM, 'right');
-    expect(toSubs).toEqual({ column: 'subtitles', index: 1 });
-    expect(activatePickerCursor(toSubs, MULTI_PROGRAM)).toEqual({
-      kind: 'subtitle',
-      id: 's:102-1',
-    });
-  });
-
-  it('clamps cleanly out of program column when programs disappear mid-stream', () => {
-    expect(clampPickerCursor({ column: 'program', index: 1 }, TRACKS)).toEqual({
-      column: 'audio',
-      index: 1,
-    });
-    expect(clampPickerCursor({ column: 'program', index: 1 }, NO_AUDIO)).toEqual({
-      column: 'subtitles',
-      index: 2,
-    });
-  });
-
-  it('routes D-pad select on program column via routePickerKey', () => {
-    expect(
-      routePickerKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { column: 'program', index: 0 },
-        MULTI_PROGRAM,
-      ),
-    ).toEqual({ kind: 'program', id: 'p:101' });
+    expect(entries).toHaveLength(10);
+    expect(entries[4]).toEqual({ kind: 'secondaryOff' });
+    expect(entries[5]).toMatchObject({ kind: 'secondaryTrack', disabled: true });
+    expect(entries[6]).toMatchObject({ kind: 'secondaryTrack', disabled: false });
+    expect(entries[8]).toEqual({ kind: 'pickSubtitleFile' });
+    expect(entries[9]).toEqual({ kind: 'loadSubtitleUrl' });
   });
 });

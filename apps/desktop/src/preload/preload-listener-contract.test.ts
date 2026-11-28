@@ -85,16 +85,6 @@ const VALID_SYNC_STATE = {
 
 const LISTENER_CASES: readonly ListenerCase[] = [
   {
-    name: 'window-bridge.onAlwaysOnTopChanged',
-    channel: WINDOW_CHANNELS.alwaysOnTopChanged,
-    payloadArgs: [true],
-    expectedArgCount: 1,
-    bind: (ipc) => {
-      const b = createWindowBridge(ipc);
-      return (cb) => b.onAlwaysOnTopChanged(cb);
-    },
-  },
-  {
     name: 'window-bridge.onZoomLevelChanged',
     channel: WINDOW_CHANNELS.zoomLevelChanged,
     payloadArgs: [1.5],
@@ -337,7 +327,7 @@ describe('Preload listener ownership & IPC error propagation contracts (F-14 #1)
     const lanBridge = createLanPairingBridge(mock.ipc);
     const updaterBridge = createUpdaterBridge(mock.ipc);
 
-    await expect(windowBridge.getAlwaysOnTop()).rejects.toBe(boom);
+    await expect(windowBridge.setAspectRatioLock(true)).rejects.toBe(boom);
     await expect(windowBridge.setZoomLevel?.(1)).rejects.toBe(boom);
     await expect(sourcesBridge.readClipboardText()).rejects.toBe(boom);
     await expect(sourcesBridge.pickPlaylistFile()).rejects.toBe(boom);

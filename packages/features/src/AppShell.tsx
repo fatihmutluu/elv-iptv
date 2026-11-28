@@ -715,10 +715,6 @@ function AppShellContent(props: AppShellInternalProps): ReactElement {
           onPlaybackActiveChange={setPlayerPlaybackActive}
           onRegisterStopActivePlayer={handleRegisterStopActivePlayer}
           onTargetChange={onPlayerTargetChange}
-          onOpenDetail={(target) => {
-            onPlayerExit();
-            openDetail(target);
-          }}
           onExit={onPlayerExit}
         />
         <AppShellAllOverlays

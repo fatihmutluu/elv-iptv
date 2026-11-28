@@ -12,8 +12,8 @@ import { ConnectionLimitDialog } from '../ConnectionLimitDialog';
 import { PlayerChannelDrawer } from '../PlayerChannelDrawer';
 import { PlayerOsdTopBar } from '../PlayerOsdTopBar';
 import { PlayerScreen } from '../PlayerScreen';
+import { PlayerSettingsSheet } from '../PlayerSettingsSheet';
 import { StillWatchingPrompt } from '../StillWatchingPrompt';
-import { TrackPickerModal } from '../TrackPickerModal';
 import { VodProgressBar } from '../VodProgressBar';
 import { createFakeAndroidKeys, createManualClock } from './player-test-harness';
 
@@ -64,7 +64,7 @@ describe('Player Wave C4B (#62, #163, #133, #416)', () => {
               isTv
               tvOsdFocused={false}
               tvOsdAction="playPause"
-              tracksOpen={false}
+              settingsOpen={false}
               i18n={i18n}
               service={null}
               clock={{ now: () => 0 }}
@@ -73,7 +73,8 @@ describe('Player Wave C4B (#62, #163, #133, #416)', () => {
               onSeekBack={jest.fn()}
               onSeekForward={jest.fn()}
               onSeekRatio={jest.fn()}
-              onOpenTracks={jest.fn()}
+              onOpenSubtitles={jest.fn()}
+              onOpenAudio={jest.fn()}
               onPrev={jest.fn()}
               onNext={jest.fn()}
               onRetry={jest.fn()}
@@ -105,7 +106,7 @@ describe('Player Wave C4B (#62, #163, #133, #416)', () => {
     );
 
     const titleStyle = flattenTextStyle(screen.getByTestId('osd-title').props.style);
-    expect(titleStyle.fontSize).toBe(Math.round(28 * 1.2));
+    expect(titleStyle.fontSize).toBe(Math.round(30 * 1.2));
     expect(titleStyle.fontFamily).toBeDefined();
 
     await waitFor(() => {
@@ -208,17 +209,19 @@ describe('Player Wave C4B (#62, #163, #133, #416)', () => {
       engine.emit({ attempt: loadAttempt, type: 'tracks', tracks: TEST_TRACKS });
     });
 
-    // Color Red wakes hidden OSD and toggles TrackPicker on subtitles
+    // Color Red wakes hidden OSD and toggles Settings on subtitles
     await act(async () => keys.tap(KEYCODE_PROG_RED));
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-sub-s1')).toBeTruthy();
     await act(async () => keys.tap(KEYCODE_PROG_RED));
-    expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+    expect(screen.queryByTestId('player-settings-panel')).toBeNull();
 
-    // Color Green toggles TrackPicker on audio
+    // Color Green toggles Settings on audio
     await act(async () => keys.tap(KEYCODE_PROG_GREEN));
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-audio-a1')).toBeTruthy();
     await act(async () => keys.tap(KEYCODE_PROG_GREEN));
-    expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+    expect(screen.queryByTestId('player-settings-panel')).toBeNull();
 
     // Color Yellow toggles mute (matching DEFAULT_KEY_BINDINGS['player.toggleMute'])
     await act(async () => keys.tap(KEYCODE_PROG_YELLOW));
@@ -329,14 +332,18 @@ describe('Player Wave C4B (#62, #163, #133, #416)', () => {
               onKeepWatching={jest.fn()}
               onStopNow={jest.fn()}
             />
-            <TrackPickerModal
+            <PlayerSettingsSheet
+              visible
+              menuState={{ view: 'subtitles', index: 0 }}
               tracks={{ audio: [], subtitles: [], selectedAudioId: null, selectedSubtitleId: null }}
-              cursor={{ column: 'subtitles', index: 0 }}
+              statsVisible={false}
               isTv
               formFactor="tv"
               i18n={i18n}
+              onOpenView={jest.fn()}
               onSelectAudio={jest.fn()}
               onSelectSubtitle={jest.fn()}
+              onToggleStats={jest.fn()}
               onClose={jest.fn()}
             />
           </ThemeProvider>
@@ -344,24 +351,32 @@ describe('Player Wave C4B (#62, #163, #133, #416)', () => {
       </ViewportProvider>,
     );
 
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('0:00');
-    expect(screen.getByTestId('player-progress-time-end').props.accessibilityLabel).toBe(
-      '0:00 remaining',
-    );
+    expect(
+      screen.getByTestId('player-progress-time', { includeHiddenElements: true }),
+    ).toHaveTextContent('0:00');
+    expect(
+      screen.getByTestId('player-progress-time-end', { includeHiddenElements: true }).props
+        .accessibilityLabel,
+    ).toBe('0:00 remaining');
 
-    const connStyle = flattenViewStyle(screen.getByTestId('connection-limit-dialog').props.style);
+    const connStyle = flattenViewStyle(
+      screen.getByTestId('connection-limit-dialog', { includeHiddenElements: true }).props.style,
+    );
     expect(connStyle.paddingHorizontal).toBe(100);
     expect(connStyle.paddingVertical).toBe(80);
 
     const stillStyle = flattenViewStyle(
-      screen.getByTestId('player-still-watching-prompt').props.style,
+      screen.getByTestId('player-still-watching-prompt', { includeHiddenElements: true }).props
+        .style,
     );
     expect(stillStyle.paddingHorizontal).toBe(104);
     expect(stillStyle.paddingVertical).toBe(84);
 
-    const tracksStyle = flattenViewStyle(screen.getByTestId('player-tracks-panel').props.style);
-    expect(tracksStyle.paddingHorizontal).toBe(128);
-    expect(tracksStyle.paddingBottom).toBe(76);
+    const sheetPanelStyle = flattenViewStyle(
+      screen.getByTestId('player-settings-sheet-panel').props.style,
+    );
+    expect(sheetPanelStyle.top).toBe(120);
+    expect(sheetPanelStyle.right).toBe(96);
 
     service.dispose();
     await view.unmount();

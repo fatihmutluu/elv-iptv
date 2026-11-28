@@ -268,12 +268,14 @@ describe('Wave F6 Desktop Tray & Popout (#158), Persistent Mini-Player (#233) & 
 
       // Launch live channel -> full player active
       await fireEvent.press(screen.getByTestId('home-live-item-0'));
-      await waitFor(() => expect(screen.getByTestId('player-minimize-button')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-button')).toBeTruthy());
       expect(openEngineSpy).toHaveBeenCalledTimes(1);
       expect(tracker.activeCount(accountKey)).toBe(1);
 
-      // Minimize to floating corner mini-player -> browse shell renders alongside mini-player with ZERO stream reconnect!
-      await fireEvent.press(screen.getByTestId('player-minimize-button'));
+      // Minimize to floating corner mini-player via merged Window Mode popover -> ZERO stream reconnect!
+      await fireEvent.press(screen.getByTestId('player-window-mode-button'));
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-mini')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-window-mode-mini'));
       await waitFor(() => {
         expect(screen.getByTestId('app-shell')).toBeTruthy();
         expect(screen.getByTestId('floating-mini-player')).toBeTruthy();
@@ -282,7 +284,7 @@ describe('Wave F6 Desktop Tray & Popout (#158), Persistent Mini-Player (#233) & 
 
       // Expand back to fullscreen -> still ZERO stream reconnect!
       await fireEvent.press(screen.getByTestId('mini-player-expand'));
-      await waitFor(() => expect(screen.getByTestId('player-popout-button')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-button')).toBeTruthy());
       expect(openEngineSpy).toHaveBeenCalledTimes(1);
 
       // Trigger desktop window restored -> OSD remains visible
@@ -291,8 +293,10 @@ describe('Wave F6 Desktop Tray & Popout (#158), Persistent Mini-Player (#233) & 
       });
       expect(screen.getByTestId('player-osd')).toBeTruthy();
 
-      // Popout player -> local connection slot MUST be 0 before openPopout runs!
-      await fireEvent.press(screen.getByTestId('player-popout-button'));
+      // Popout player via merged Window Mode popover -> local connection slot MUST be 0 before openPopout runs!
+      await fireEvent.press(screen.getByTestId('player-window-mode-button'));
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-popout')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-window-mode-popout'));
       await waitFor(() => expect(openPopout).toHaveBeenCalledTimes(1));
       expect(trackerCountAtPopoutOpen).toBe(0);
       expect(screen.getByTestId('app-shell')).toBeTruthy();

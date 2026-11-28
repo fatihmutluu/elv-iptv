@@ -2,19 +2,20 @@ import { DEFAULT_SUBTITLE_STYLE } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import type { MediaTracks } from '@elv/playback';
 import { describe, expect, it } from 'vitest';
-import { clampSettingsMenu, routeSettingsMenuKey, settingsRowCount } from './settings-menu-nav';
+import {
+  clampSettingsMenu,
+  routeSettingsMenuKey,
+  settingsRowCount,
+  subtitleSettingsMenuEntries,
+} from './settings-menu-nav';
+import { buildSubtitleSettingsExtraItems } from './settings-sheet-radio-items';
 import {
   formatSubtitleStyleSummary,
   isValidExternalSubtitleHttpUrl,
   SUBTITLE_STYLE_ROW_COUNT,
   stepSubtitleStyleField,
 } from './subtitle-style-helpers';
-import {
-  activatePickerCursor,
-  buildSubtitleColumnEntries,
-  clampPickerCursor,
-  routePickerKey,
-} from './track-picker-nav';
+import { buildSubtitleColumnEntries } from './track-picker-nav';
 
 const DUAL_TRACKS: MediaTracks = {
   audio: [{ id: 'a:1', language: 'eng' }],
@@ -28,92 +29,44 @@ const DUAL_TRACKS: MediaTracks = {
   selectedSecondarySubtitleId: 's:2',
 };
 
-describe('Wave F4 track-picker-nav dual & external subtitles (#32, #402)', () => {
-  it('appends secondary subtitle rows (marking active primary disabled) and external subtitle actions', () => {
-    const opts = {
+describe('Wave F4 / Wave R4 2-level subtitleSettings styling & dual/external subtitles (#32, #402)', () => {
+  it('builds secondary subtitle rows and external actions in buildSubtitleColumnEntries', () => {
+    const entries = buildSubtitleColumnEntries(DUAL_TRACKS, {
       dualSubtitles: true,
       canPickSubtitleFile: true,
       canLoadSubtitleUrl: true,
-    };
-    const entries = buildSubtitleColumnEntries(DUAL_TRACKS, opts);
-    // 1 primaryOff + 3 primary + 1 secondaryOff + 3 secondary + 2 external actions = 10
+    });
     expect(entries).toHaveLength(10);
     expect(entries[4]).toEqual({ kind: 'secondaryOff' });
     expect(entries[5]).toMatchObject({ kind: 'secondaryTrack', disabled: true });
-    expect(entries[6]).toMatchObject({ kind: 'secondaryTrack', disabled: false });
     expect(entries[8]).toEqual({ kind: 'pickSubtitleFile' });
     expect(entries[9]).toEqual({ kind: 'loadSubtitleUrl' });
-
-    // Selecting disabled secondary track (same as primary s:1) returns null
-    expect(activatePickerCursor({ column: 'subtitles', index: 5 }, DUAL_TRACKS, opts)).toBeNull();
-    // Selecting secondary Off clears secondary subtitle
-    expect(activatePickerCursor({ column: 'subtitles', index: 4 }, DUAL_TRACKS, opts)).toEqual({
-      kind: 'secondarySubtitle',
-      id: null,
-    });
-    // Selecting another secondary track selects it
-    expect(activatePickerCursor({ column: 'subtitles', index: 7 }, DUAL_TRACKS, opts)).toEqual({
-      kind: 'secondarySubtitle',
-      id: 'ext:1',
-    });
-    // Selecting external file picker / URL rows emits their actions
-    expect(activatePickerCursor({ column: 'subtitles', index: 8 }, DUAL_TRACKS, opts)).toEqual({
-      kind: 'pickSubtitleFile',
-    });
-    expect(activatePickerCursor({ column: 'subtitles', index: 9 }, DUAL_TRACKS, opts)).toEqual({
-      kind: 'loadSubtitleUrl',
-    });
-
-    // TV D-pad routing reaches external action rows cleanly
-    const moved = routePickerKey(
-      { key: 'down', kind: 'press', time: 0 },
-      { column: 'subtitles', index: 8 },
-      DUAL_TRACKS,
-      opts,
-    );
-    expect(moved).toEqual({ kind: 'move', cursor: { column: 'subtitles', index: 9 } });
-    expect(
-      routePickerKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { column: 'subtitles', index: 9 },
-        DUAL_TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'loadSubtitleUrl' });
-    // Clamping drops back when dual/external options turn off
-    expect(clampPickerCursor({ column: 'subtitles', index: 9 }, DUAL_TRACKS)).toEqual({
-      column: 'subtitles',
-      index: 3,
-    });
   });
-});
 
-describe('Wave F4 settings-menu-nav subtitle styling & dual/external subtitles (#32, #402)', () => {
-  it('routes Left/Right/Select inside subtitleStyle sub-view and resets on row 5', () => {
+  it('routes Left/Right/Select inside subtitleSettings style rows and returns back to subtitles', () => {
     const opts = { hasSubtitleStyle: true };
-    expect(settingsRowCount('subtitleStyle', DUAL_TRACKS, opts)).toBe(SUBTITLE_STYLE_ROW_COUNT);
-    expect(settingsRowCount('subtitleStyle', DUAL_TRACKS, { hasSubtitleStyle: false })).toBe(0);
+    expect(settingsRowCount('subtitleSettings', DUAL_TRACKS, opts)).toBe(SUBTITLE_STYLE_ROW_COUNT);
+    expect(settingsRowCount('subtitleSettings', DUAL_TRACKS, { hasSubtitleStyle: false })).toBe(0);
     expect(
-      clampSettingsMenu({ view: 'subtitleStyle', index: 2 }, DUAL_TRACKS, {
+      clampSettingsMenu({ view: 'subtitleSettings', index: 2 }, DUAL_TRACKS, {
         hasSubtitleStyle: false,
       }),
-    ).toEqual({ view: 'root', index: 0 });
+    ).toEqual({ view: 'subtitles', index: 1 });
 
-    // Enter subtitleStyle from root index 2 (subtitles, audio, subtitleStyle)
+    // From subtitles row 4 (Off + 3 primary tracks + Subtitle settings link) -> enters subtitleSettings
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 2 },
+        { view: 'subtitles', index: 4 },
         DUAL_TRACKS,
         opts,
       ),
-    ).toEqual({ kind: 'state', state: { view: 'subtitleStyle', index: 0 } });
+    ).toEqual({ kind: 'state', state: { view: 'subtitleSettings', index: 0 } });
 
-    // Left / Right / Select step fontSize on row 0
     expect(
       routeSettingsMenuKey(
         { key: 'right', kind: 'press', time: 0 },
-        { view: 'subtitleStyle', index: 0 },
+        { view: 'subtitleSettings', index: 0 },
         DUAL_TRACKS,
         opts,
       ),
@@ -121,7 +74,7 @@ describe('Wave F4 settings-menu-nav subtitle styling & dual/external subtitles (
     expect(
       routeSettingsMenuKey(
         { key: 'left', kind: 'press', time: 0 },
-        { view: 'subtitleStyle', index: 1 },
+        { view: 'subtitleSettings', index: 1 },
         DUAL_TRACKS,
         opts,
       ),
@@ -129,17 +82,17 @@ describe('Wave F4 settings-menu-nav subtitle styling & dual/external subtitles (
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'subtitleStyle', index: 4 },
+        { view: 'subtitleSettings', index: 4 },
         DUAL_TRACKS,
         opts,
       ),
     ).toEqual({ kind: 'stepSubtitleStyle', field: 'verticalPosition', delta: 1 });
 
-    // Row 5 (Reset): Select emits resetSubtitleStyle, Left returns to root index 2
+    // Row 5 (Reset): Select emits resetSubtitleStyle, Left or Back returns to subtitles opener row (4)
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'subtitleStyle', index: 5 },
+        { view: 'subtitleSettings', index: 5 },
         DUAL_TRACKS,
         opts,
       ),
@@ -147,21 +100,19 @@ describe('Wave F4 settings-menu-nav subtitle styling & dual/external subtitles (
     expect(
       routeSettingsMenuKey(
         { key: 'left', kind: 'press', time: 0 },
-        { view: 'subtitleStyle', index: 5 },
+        { view: 'subtitleSettings', index: 5 },
         DUAL_TRACKS,
         opts,
       ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 2 } });
-
-    // Back from any subtitleStyle row returns to root index 2
+    ).toEqual({ kind: 'state', state: { view: 'subtitles', index: 4 } });
     expect(
       routeSettingsMenuKey(
         { key: 'back', kind: 'press', time: 0 },
-        { view: 'subtitleStyle', index: 2 },
+        { view: 'subtitleSettings', index: 2 },
         DUAL_TRACKS,
         opts,
       ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 2 } });
+    ).toEqual({ kind: 'state', state: { view: 'subtitles', index: 4 } });
   });
 
   it('cycles every SubtitleStyleConfig field cleanly and formats localized summary', () => {
@@ -191,5 +142,87 @@ describe('Wave F4 settings-menu-nav subtitle styling & dual/external subtitles (
     expect(isValidExternalSubtitleHttpUrl('data:text/plain;base64,QQ==')).toBe(false);
     expect(isValidExternalSubtitleHttpUrl('')).toBe(false);
     expect(isValidExternalSubtitleHttpUrl('https://example.invalid/sub\r\n.srt')).toBe(false);
+  });
+
+  it('aligns multi-program MPEG-TS subtitleSettingsMenuEntries and buildSubtitleSettingsExtraItems per selected program', () => {
+    const i18n = createAppI18n('en');
+    const multiProgramBase: MediaTracks = {
+      programs: [
+        { id: 'p:1', label: 'News HD', serviceName: 'News HD' },
+        { id: 'p:2', label: 'Cinema HD', serviceName: 'Cinema HD' },
+      ],
+      audio: [
+        { id: 'a:1', programId: 'p:1', language: 'eng' },
+        { id: 'a:2', programId: 'p:2', language: 'eng' },
+      ],
+      subtitles: [
+        { id: 's:1', programId: 'p:1', language: 'eng' },
+        { id: 's:2', programId: 'p:2', language: 'eng' },
+        { id: 's:3', programId: 'p:2', language: 'tur' },
+        { id: 'ext:1', language: 'deu', label: 'German External', external: true },
+      ],
+      selectedProgramId: 'p:1',
+      selectedAudioId: 'a:1',
+      selectedSubtitleId: 's:1',
+      selectedSecondarySubtitleId: 'ext:1',
+    };
+
+    const opts = {
+      hasSubtitleDelay: true,
+      hasSubtitleStyle: true,
+      hasDualSubtitles: true,
+      canPickSubtitleFile: true,
+      canLoadSubtitleUrl: true,
+    };
+
+    const p1Extra = buildSubtitleSettingsExtraItems({
+      tracks: multiProgramBase,
+      dualSubtitles: true,
+      i18n,
+      onSelectSecondarySubtitle: () => undefined,
+      onPickSubtitleFile: () => undefined,
+      onLoadSubtitleUrl: () => undefined,
+    });
+    const p1NavExtra = subtitleSettingsMenuEntries(multiProgramBase, opts).filter(
+      (e) => e.kind !== 'delayStep' && e.kind !== 'styleField' && e.kind !== 'styleReset',
+    );
+    expect(p1Extra).toHaveLength(p1NavExtra.length);
+    expect(p1Extra.map((item) => item.testID)).toEqual([
+      'player-settings-secondary-sub-off',
+      'player-settings-secondary-sub-s:1',
+      'player-settings-secondary-sub-ext:1',
+      'player-settings-external-sub-pick',
+      'player-settings-external-sub-url',
+    ]);
+    // Unfiltered program 2 English track is excluded, so English on program 1 has no '#1' suffix
+    expect(p1Extra[1]?.label).toBe('English');
+    expect(p1Extra[1]?.disabled).toBe(true);
+
+    const p2Tracks: MediaTracks = {
+      ...multiProgramBase,
+      selectedProgramId: 'p:2',
+      selectedAudioId: 'a:2',
+      selectedSubtitleId: 's:3',
+    };
+    const p2Extra = buildSubtitleSettingsExtraItems({
+      tracks: p2Tracks,
+      dualSubtitles: true,
+      i18n,
+      onSelectSecondarySubtitle: () => undefined,
+      onPickSubtitleFile: () => undefined,
+      onLoadSubtitleUrl: () => undefined,
+    });
+    const p2NavExtra = subtitleSettingsMenuEntries(p2Tracks, opts).filter(
+      (e) => e.kind !== 'delayStep' && e.kind !== 'styleField' && e.kind !== 'styleReset',
+    );
+    expect(p2Extra).toHaveLength(p2NavExtra.length);
+    expect(p2Extra.map((item) => item.testID)).toEqual([
+      'player-settings-secondary-sub-off',
+      'player-settings-secondary-sub-s:2',
+      'player-settings-secondary-sub-s:3',
+      'player-settings-secondary-sub-ext:1',
+      'player-settings-external-sub-pick',
+      'player-settings-external-sub-url',
+    ]);
   });
 });

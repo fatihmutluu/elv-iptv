@@ -455,7 +455,6 @@ describe('player-overlay-model', () => {
     it('evaluates canAutoHideOsd, isPromiseLike, and hasTargetMetaChanged cleanly', () => {
       const clear = {
         osdHidden: false,
-        tracksOpen: false,
         settingsOpen: false,
         locked: false,
         tvOsdFocused: false,
@@ -465,7 +464,7 @@ describe('player-overlay-model', () => {
       expect(canAutoHideOsd('paused', clear, false)).toBe(false);
       expect(canAutoHideOsd('playing', { ...clear, tvOsdFocused: true }, false)).toBe(false);
       expect(canAutoHideOsd('playing', clear, true)).toBe(false);
-      expect(canAutoHideOsd('playing', { ...clear, infoOpen: true }, false)).toBe(false);
+      expect(canAutoHideOsd('playing', { ...clear, windowModeOpen: true }, false)).toBe(false);
       expect(canAutoHideOsd('playing', { ...clear, channelListOpen: true }, false)).toBe(false);
       expect(canAutoHideOsd('playing', { ...clear, osdTier: 'hidden' }, false)).toBe(false);
       expect(canAutoHideOsd('playing', { ...clear, osdTier: 'progress' }, false)).toBe(true);

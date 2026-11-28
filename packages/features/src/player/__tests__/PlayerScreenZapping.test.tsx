@@ -239,7 +239,7 @@ describe('PlayerScreen zapping and failure handling', () => {
     await view.unmount();
   });
 
-  it('opens TrackPickerModal on live TV via Menu without colliding with Up/Down channel zapping', async () => {
+  it('opens Audio tracks inside Settings on live TV via AudioTrack key without colliding with Up/Down channel zapping', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
     const keys = createFakeAndroidKeys();
@@ -313,7 +313,8 @@ describe('PlayerScreen zapping and failure handling', () => {
     await act(async () => {
       keys.tap(KEYCODE_AUDIO_TRACK);
     });
-    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-audio-a:1')).toBeTruthy();
 
     await act(async () => {
       keys.tap(KEYCODE_DPAD_DOWN);

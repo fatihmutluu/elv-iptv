@@ -11,10 +11,10 @@ import { VodProgressBar } from './VodProgressBar';
 export { type PlayerOsdProps, PlayerOsdTopBar };
 
 /**
- * Unified borderless Minimalist Cinema bottom bar (`Product Decision #40`):
- * Row 1: full-width hairline timeline (`VodProgressBar` or `LiveNowNextStrip`).
- * Row 2: centered transport trio (`skipBack10` / translucent glass `Play/Pause` / `skipForward10`)
- * with balanced left utilities and bottom-right dark-glass CTA pill (`Next Episode` / `Channels`).
+ * Unified borderless Minimalist Cinema bottom bar (`Wave R4`):
+ * Row 1: full-width interactive timeline (`VodProgressBar` or `LiveNowNextStrip`).
+ * Row 2: bold 1.7–2× transport trio (`skipBack10` / glass `Play/Pause` / `skipForward10`)
+ * balanced against live clock/previous-channel on left and scaled pill CTAs on right.
  */
 export function PlayerOsdBottomBar(
   p: PlayerOsdProps & { readonly docked?: boolean },
@@ -27,14 +27,14 @@ export function PlayerOsdBottomBar(
     isVod,
     service,
     settingsOpen = false,
-    infoOpen = false,
+    windowModeOpen = false,
     channelListOpen = false,
   } = p;
   const isDesktop = p.isDesktop ?? viewport.formFactor === 'desktop';
   const isPortrait = !isTv && viewport.orientation === 'portrait';
   const isNarrow =
     (!isTv && !isDesktop && isPortrait) || (!isTv && viewport.width > 0 && viewport.width < 540);
-  const anySheetOpen = p.tracksOpen || settingsOpen || infoOpen || channelListOpen;
+  const anySheetOpen = settingsOpen || windowModeOpen || channelListOpen;
   const isFocused = (action: TvOsdAction): boolean =>
     isTv && p.tvOsdFocused && p.tvOsdAction === action;
   const showPrevChannelBtn =
@@ -42,7 +42,6 @@ export function PlayerOsdBottomBar(
     service !== null &&
     p.hasPreviousChannel === true &&
     p.onJumpPreviousChannel !== undefined;
-  const hasChapters = isVod && (p.chapters?.length ?? 0) > 0;
   const showNextEpisodePill =
     isVod &&
     p.isCatchup !== true &&
@@ -54,14 +53,22 @@ export function PlayerOsdBottomBar(
   const showAnyActionPill = showNextEpisodePill || showBackToLivePill || showChannelsPill;
   const showLiveTimeShiftSeek = !isVod && p.liveTimeShiftSupported === true && service !== null;
 
+  const seekSize = isNarrow ? 52 : 68;
+  const seekIconSize = isNarrow ? 30 : 40;
+  const playSize = isNarrow ? 60 : 80;
+  const playIconSize = isNarrow ? 30 : 40;
+  const zapSize = isNarrow ? 48 : 60;
+  const zapIconSize = isNarrow ? 26 : 34;
+
   const actionPillsNode = (
     <>
       {showBackToLivePill && p.onBackToLive !== undefined ? (
         <OsdButton
           testID="player-back-to-live"
           variant="pill-cta"
+          compact={isNarrow}
           icon="play"
-          iconSize={14}
+          iconSize={isNarrow ? 14 : 18}
           label={i18n.t('player.backToLive')}
           accessibilityLabel={i18n.t('player.backToLive')}
           onPress={p.onBackToLive}
@@ -73,6 +80,7 @@ export function PlayerOsdBottomBar(
         <OsdButton
           testID="player-next-episode-pill"
           variant="pill-cta"
+          compact={isNarrow}
           label={i18n.t('player.nextEpisodeCta')}
           accessibilityLabel={i18n.t('player.nextEpisodeCta')}
           onPress={p.onPlayNextEpisode}
@@ -84,6 +92,7 @@ export function PlayerOsdBottomBar(
         <OsdButton
           testID="player-channel-list-button"
           variant="pill-cta"
+          compact={isNarrow}
           label={i18n.t('player.channelsCta')}
           accessibilityLabel={i18n.t('player.channelList')}
           {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.channelList } : {})}
@@ -118,7 +127,6 @@ export function PlayerOsdBottomBar(
           label={i18n.t('player.progressLabel')}
           previewPositionMs={p.previewPositionMs}
           dimmed={isPortrait && anySheetOpen}
-          chapters={p.chapters}
           timeDisplayMode={p.timeDisplayMode}
           i18n={i18n}
           onCycleTimeDisplayMode={p.onCycleTimeDisplayMode}
@@ -165,7 +173,7 @@ export function PlayerOsdBottomBar(
             i18n={i18n}
             isTv={isTv}
             tvFocused={isFocused('jumpToLive')}
-            compact
+            compact={isNarrow}
             {...(p.onJumpToLiveEdge !== undefined ? { onPress: p.onJumpToLiveEdge } : {})}
           />
           {showPrevChannelBtn && p.onJumpPreviousChannel !== undefined ? (
@@ -173,50 +181,12 @@ export function PlayerOsdBottomBar(
               testID="player-prev-channel"
               variant="bare"
               icon="prevChannel"
-              size={38}
+              size={isNarrow ? 44 : 52}
+              iconSize={isNarrow ? 22 : 26}
               accessibilityLabel={i18n.t('player.jumpPreviousChannel')}
               onPress={p.onJumpPreviousChannel}
               isTv={isTv}
               tvFocused={isFocused('prevChannel')}
-            />
-          ) : null}
-          {isVod && service !== null && p.hasXray === true && p.onToggleXray !== undefined ? (
-            <OsdButton
-              testID="player-xray-button"
-              variant="pill-cta"
-              icon="info"
-              iconSize={14}
-              compact
-              label={i18n.t('player.xray.button')}
-              accessibilityLabel={i18n.t('player.xray.button')}
-              active={p.xrayOpen === true}
-              onPress={p.onToggleXray}
-              isTv={isTv}
-              tvFocused={isFocused('xray')}
-            />
-          ) : null}
-          {!isNarrow && hasChapters && p.onPrevChapter !== undefined ? (
-            <OsdButton
-              testID="player-prev-chapter"
-              variant="bare"
-              icon="skipPrev"
-              iconSize={18}
-              size={36}
-              accessibilityLabel={i18n.t('player.prevChapter')}
-              onPress={p.onPrevChapter}
-              isTv={isTv}
-            />
-          ) : null}
-          {!isNarrow && hasChapters && p.onNextChapter !== undefined ? (
-            <OsdButton
-              testID="player-next-chapter"
-              variant="bare"
-              icon="skipNext"
-              iconSize={18}
-              size={36}
-              accessibilityLabel={i18n.t('player.nextChapter')}
-              onPress={p.onNextChapter}
-              isTv={isTv}
             />
           ) : null}
           {p.showRetry ? (
@@ -224,7 +194,7 @@ export function PlayerOsdBottomBar(
               testID="player-retry"
               variant="pill-cta"
               icon="refresh"
-              compact
+              compact={isNarrow}
               label={i18n.t('player.retry')}
               onPress={p.onRetry}
               isTv={isTv}
@@ -237,15 +207,15 @@ export function PlayerOsdBottomBar(
           ) : null}
         </View>
 
-        <View style={[styles.transportCenter, { gap: isTv ? 24 : 20 }]}>
+        <View style={[styles.transportCenter, { gap: isTv ? 28 : isNarrow ? 16 : 24 }]}>
           {isVod && service !== null ? (
             <>
               <OsdButton
                 testID="player-seek-back"
                 icon="skipBack10"
                 variant="bare"
-                size={44}
-                iconSize={26}
+                size={seekSize}
+                iconSize={seekIconSize}
                 accessibilityLabel={i18n.t('player.seekBack')}
                 {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.seekBack } : {})}
                 onPress={p.onSeekBack}
@@ -256,8 +226,8 @@ export function PlayerOsdBottomBar(
                 testID="player-play-pause"
                 variant="glass-primary"
                 circular
-                size={isTv ? 54 : 48}
-                iconSize={isTv ? 24 : 20}
+                size={playSize}
+                iconSize={playIconSize}
                 loading={p.isBuffering === true}
                 icon={p.isPausedOrEnded ? 'play' : 'pause'}
                 accessibilityLabel={
@@ -272,8 +242,8 @@ export function PlayerOsdBottomBar(
                 testID="player-seek-forward"
                 icon="skipForward10"
                 variant="bare"
-                size={44}
-                iconSize={26}
+                size={seekSize}
+                iconSize={seekIconSize}
                 accessibilityLabel={i18n.t('player.seekForward')}
                 {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.seekForward } : {})}
                 onPress={p.onSeekForward}
@@ -288,8 +258,8 @@ export function PlayerOsdBottomBar(
                   testID="player-prev"
                   icon="chevronLeft"
                   variant="bare"
-                  size={44}
-                  iconSize={24}
+                  size={zapSize}
+                  iconSize={zapIconSize}
                   accessibilityLabel={i18n.t('player.prevChannel')}
                   onPress={p.onPrev}
                   isTv={isTv}
@@ -300,8 +270,8 @@ export function PlayerOsdBottomBar(
                   testID="player-seek-back"
                   icon="skipBack10"
                   variant="bare"
-                  size={44}
-                  iconSize={26}
+                  size={seekSize}
+                  iconSize={seekIconSize}
                   accessibilityLabel={i18n.t('player.seekBack')}
                   {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.seekBack } : {})}
                   onPress={p.onSeekBack}
@@ -314,8 +284,8 @@ export function PlayerOsdBottomBar(
                   testID="player-play-pause"
                   variant="glass-primary"
                   circular
-                  size={isTv ? 54 : 48}
-                  iconSize={isTv ? 24 : 20}
+                  size={playSize}
+                  iconSize={playIconSize}
                   loading={p.isBuffering === true}
                   icon={p.isPausedOrEnded ? 'play' : 'pause'}
                   accessibilityLabel={
@@ -332,8 +302,8 @@ export function PlayerOsdBottomBar(
                   testID="player-seek-forward"
                   icon="skipForward10"
                   variant="bare"
-                  size={44}
-                  iconSize={26}
+                  size={seekSize}
+                  iconSize={seekIconSize}
                   accessibilityLabel={i18n.t('player.seekForward')}
                   {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.seekForward } : {})}
                   onPress={p.onSeekForward}
@@ -346,8 +316,8 @@ export function PlayerOsdBottomBar(
                   testID="player-next"
                   icon="chevronRight"
                   variant="bare"
-                  size={44}
-                  iconSize={24}
+                  size={zapSize}
+                  iconSize={zapIconSize}
                   accessibilityLabel={i18n.t('player.nextChannel')}
                   onPress={p.onNext}
                   isTv={isTv}
@@ -407,7 +377,6 @@ export function DesktopCinemaBar(p: PlayerOsdProps): ReactElement {
           muted={muted}
           volume={volume}
           playbackSpeed={playbackSpeed}
-          chapters={p.chapters}
           timeDisplayMode={p.timeDisplayMode}
           wallClock={p.wallClock}
           nowNext={p.nowNext}

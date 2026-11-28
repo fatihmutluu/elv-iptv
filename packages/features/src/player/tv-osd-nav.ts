@@ -11,23 +11,21 @@ export type TvOsdAction =
   | 'backToLive'
   | 'prevChannel'
   | 'channelList'
-  | 'xray'
-  | 'info'
-  | 'tracks'
+  | 'subtitles'
+  | 'audio'
   | 'settings'
   | 'nextEpisode'
   | 'retry';
 
-/** Which OSD buttons are mounted; mirrors the guards in `PlayerOsd`. */
+/** Which OSD buttons are mounted; mirrors the guards in `PlayerOsdTopBar` and `PlayerOsdBottomBar`. */
 export interface TvOsdAvailability {
   readonly isVod: boolean;
   readonly hasService: boolean;
-  readonly hasTracks: boolean;
+  readonly hasSubtitles?: boolean;
+  readonly hasAudio?: boolean;
   readonly showRetry: boolean;
   readonly hasSettings?: boolean;
-  readonly hasInfo?: boolean;
   readonly hasChannelList?: boolean;
-  readonly hasXray?: boolean;
   readonly hasNextEpisode?: boolean;
   readonly hasPreviousChannel?: boolean;
   readonly hasBackToLive?: boolean;
@@ -44,9 +42,8 @@ const ORDER: readonly TvOsdAction[] = [
   'backToLive',
   'prevChannel',
   'channelList',
-  'xray',
-  'info',
-  'tracks',
+  'subtitles',
+  'audio',
   'settings',
   'nextEpisode',
   'retry',
@@ -67,12 +64,10 @@ export function availableTvOsdActions(a: TvOsdAvailability): TvOsdAction[] {
         return !a.isVod && a.hasService && a.hasPreviousChannel === true;
       case 'channelList':
         return !a.isVod && a.hasService && a.hasChannelList === true;
-      case 'xray':
-        return a.isVod && a.hasService && a.hasXray === true;
-      case 'info':
-        return a.hasService && a.hasInfo === true;
-      case 'tracks':
-        return a.hasTracks && a.hasService;
+      case 'subtitles':
+        return a.hasService && a.hasSubtitles === true;
+      case 'audio':
+        return a.hasService && a.hasAudio === true;
       case 'settings':
         return a.hasService && a.hasSettings === true;
       case 'nextEpisode':
@@ -85,9 +80,10 @@ export function availableTvOsdActions(a: TvOsdAvailability): TvOsdAction[] {
   });
 }
 
-/** Action focused when the OSD bar gains TV focus: tracks, then play/pause, then back. */
+/** Action focused when the OSD bar gains TV focus: subtitles, audio, play/pause, then back. */
 export function initialTvOsdAction(available: readonly TvOsdAction[]): TvOsdAction {
-  if (available.includes('tracks')) return 'tracks';
+  if (available.includes('subtitles')) return 'subtitles';
+  if (available.includes('audio')) return 'audio';
   return available.includes('playPause') ? 'playPause' : 'back';
 }
 

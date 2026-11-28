@@ -219,7 +219,7 @@ describe('Wave P3 — Zero-Reload Detached Popout & Seamless Multi-View Handoff'
     expect(adopted.loadSpy).not.toHaveBeenCalled();
     expect(catalog.resolveStream).not.toHaveBeenCalled();
     // Dock replaces Detach button; no top-right pin button exists
-    expect(screen.queryByTestId('player-popout-button')).toBeNull();
+    expect(screen.queryByTestId('player-window-mode-button')).toBeNull();
     expect(screen.getByTestId('player-dock-popout-button').props.accessibilityLabel).toBe(
       'Return to main window',
     );
@@ -315,13 +315,15 @@ describe('Wave P3 — Zero-Reload Detached Popout & Seamless Multi-View Handoff'
 
       // Start Channel 1 in fullscreen PlayerScreen
       await fireEvent.press(screen.getByTestId('home-live-item-0'));
-      await waitFor(() => expect(screen.getByTestId('player-multiview-button')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('player-settings-button')).toBeTruthy());
       expect(openSpy).toHaveBeenCalledTimes(1);
       const tile1Engine = openedEngines[0];
       if (tile1Engine === undefined) throw new Error('expected tile1Engine');
 
-      // Enter Multi-View -> adopts live Tile 1 with ZERO new videoHost.open(), ZERO stop(), ZERO release()!
-      await fireEvent.press(screen.getByTestId('player-multiview-button'));
+      // Enter Multi-View via Settings -> adopts live Tile 1 with ZERO new videoHost.open(), ZERO stop(), ZERO release()!
+      await fireEvent.press(screen.getByTestId('player-settings-button'));
+      await waitFor(() => expect(screen.getByTestId('player-settings-multiview')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-settings-multiview'));
       await waitFor(() => expect(screen.getByTestId('multiview-stage')).toBeTruthy());
       await waitFor(() => expect(screen.getByTestId('multiview-tile-0')).toBeTruthy());
 
@@ -394,9 +396,11 @@ describe('Wave P3 — Zero-Reload Detached Popout & Seamless Multi-View Handoff'
       expect(tile1Engine.stopSpy).not.toHaveBeenCalled();
       expect(openSpy).toHaveBeenCalledTimes(2);
 
-      // Re-enter Multi-View and press Back/Exit -> also hands off Tile 1 back to PlayerScreen without reload!
-      await waitFor(() => expect(screen.getByTestId('player-multiview-button')).toBeTruthy());
-      await fireEvent.press(screen.getByTestId('player-multiview-button'));
+      // Re-enter Multi-View via Settings and press Back/Exit -> also hands off Tile 1 back to PlayerScreen without reload!
+      await waitFor(() => expect(screen.getByTestId('player-settings-button')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-settings-button'));
+      await waitFor(() => expect(screen.getByTestId('player-settings-multiview')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-settings-multiview'));
       await waitFor(() => expect(screen.getByTestId('multiview-exit-button')).toBeTruthy());
       await fireEvent.press(screen.getByTestId('multiview-exit-button'));
       await waitFor(() => expect(screen.getByTestId('player-screen')).toBeTruthy());
@@ -458,11 +462,13 @@ describe('Wave P3 — Zero-Reload Detached Popout & Seamless Multi-View Handoff'
 
       await waitFor(() => expect(screen.getByTestId('home-live-item-0')).toBeTruthy());
       await fireEvent.press(screen.getByTestId('home-live-item-0'));
-      await waitFor(() => expect(screen.getByTestId('player-popout-button')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-button')).toBeTruthy());
       expect(openSpy).toHaveBeenCalledTimes(1);
 
-      // Detach -> parks engine & forwards transferEngineId without stopping/releasing!
-      await fireEvent.press(screen.getByTestId('player-popout-button'));
+      // Detach via merged Window Mode popover -> parks engine & forwards transferEngineId without stopping/releasing!
+      await fireEvent.press(screen.getByTestId('player-window-mode-button'));
+      await waitFor(() => expect(screen.getByTestId('player-window-mode-popout')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('player-window-mode-popout'));
       await waitFor(() => expect(openPopout).toHaveBeenCalledTimes(1));
       expect(parked.parkForTransfer).toHaveBeenCalledTimes(1);
       expect(openPopout).toHaveBeenCalledWith(

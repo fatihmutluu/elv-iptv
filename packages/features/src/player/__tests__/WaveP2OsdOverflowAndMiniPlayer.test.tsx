@@ -166,7 +166,6 @@ describe('Wave P2 — Aspect Fade Badge, Context-Aware Overflow Menu & Interacti
       visible: true,
       menuState: { view: 'root' as const, index: 0 },
       tracks: EMPTY_TRACKS,
-      chapters: [{ id: 'c1', title: 'Intro', startMs: 0, endMs: 60_000 }],
       qualityVariants: [
         { key: 'q1', title: 'HD', qualityLabel: '1080p', qualityRank: 1080 },
         { key: 'q2', title: 'SD', qualityLabel: '720p', qualityRank: 720 },
@@ -180,7 +179,6 @@ describe('Wave P2 — Aspect Fade Badge, Context-Aware Overflow Menu & Interacti
       onSelectAudio: jest.fn(),
       onSelectSubtitle: jest.fn(),
       onToggleResizeMode: jest.fn(),
-      onCycleTimeDisplayMode: jest.fn(),
       onTogglePitchLock: jest.fn(),
       onToggleAutoPlayNextEpisode: jest.fn(),
       onEnterMultiView: jest.fn(),
@@ -190,7 +188,7 @@ describe('Wave P2 — Aspect Fade Badge, Context-Aware Overflow Menu & Interacti
       onClose: jest.fn(),
     };
 
-    // Live TV root menu
+    // Live TV root menu (clean essential rows, zero chapters/time display)
     const liveView = await render(wrap(<PlayerSettingsSheet {...commonProps} isVod={false} />));
     expect(screen.queryByTestId('player-pitch-lock-toggle')).toBeNull();
     expect(screen.queryByTestId('player-time-display-toggle')).toBeNull();
@@ -232,18 +230,27 @@ describe('Wave P2 — Aspect Fade Badge, Context-Aware Overflow Menu & Interacti
       ),
     ).toEqual({ kind: 'sleepTimer', minutes: 0 });
 
-    // VOD root menu shows VOD-only rows and hides Live-only rows (autoSubtitlesOnSkipBack removed in Wave P7)
+    // VOD root menu shows Speed + Multi-View + Advanced settings (pitchLock & autoPlayNext moved to level-2 Advanced)
     const vodView = await render(wrap(<PlayerSettingsSheet {...commonProps} isVod />));
-    expect(screen.getByTestId('player-pitch-lock-toggle')).toBeTruthy();
-    expect(screen.getByTestId('player-time-display-toggle')).toBeTruthy();
     expect(screen.getByTestId('player-settings-row-speed')).toBeTruthy();
-    expect(screen.getByTestId('player-settings-row-chapters')).toBeTruthy();
+    expect(screen.getByTestId('player-settings-row-advanced')).toBeTruthy();
+    expect(screen.queryByTestId('player-time-display-toggle')).toBeNull();
+    expect(screen.queryByTestId('player-settings-row-chapters')).toBeNull();
     expect(screen.queryByTestId('player-auto-subtitles-skip-back-toggle')).toBeNull();
-    expect(screen.getByTestId('player-auto-play-next-toggle')).toBeTruthy();
     expect(screen.queryByTestId('player-settings-row-quality')).toBeNull();
     // Wave P5: Cross-media Multi-View is available on Movies & Series as well as Live TV
     expect(screen.getByTestId('player-settings-multiview')).toBeTruthy();
     await vodView.unmount();
+
+    // VOD Advanced settings sub-view exposes Pitch Lock & Auto-play Next Episode
+    const vodAdvanced = await render(
+      wrap(
+        <PlayerSettingsSheet {...commonProps} isVod menuState={{ view: 'advanced', index: 0 }} />,
+      ),
+    );
+    expect(screen.getByTestId('player-pitch-lock-toggle')).toBeTruthy();
+    expect(screen.getByTestId('player-auto-play-next-toggle')).toBeTruthy();
+    await vodAdvanced.unmount();
 
     // VOD sleep timer sub-view shows Pause action toggle
     const vodSleep = await render(
@@ -348,8 +355,8 @@ describe('Wave P2 — Aspect Fade Badge, Context-Aware Overflow Menu & Interacti
       expect(initialStyle.width).toBe(320);
       expect(initialStyle.height).toBe(180);
 
-      // Resize handle drags left by 80px (docked bottom-right -> inward grip top-left) -> grows to 400x225
-      const resizeHandle = screen.getByTestId('mini-player-resize-handle');
+      // West resize edge drags left by 80px (docked bottom-right) -> grows cleanly to 400x225
+      const resizeHandle = screen.getByTestId('mini-player-resize-w');
       await fireEvent(resizeHandle, 'pointerDown', {
         clientX: 944,
         clientY: 524,
@@ -383,7 +390,7 @@ describe('Wave P2 — Aspect Fade Badge, Context-Aware Overflow Menu & Interacti
     }
   });
 
-  it('keeps actionsRow and titleBar clear of the inward resize grip in every docked corner', async () => {
+  it('mounts 8 perimeter OS resize zones while keeping actionsRow and titleBar unobstructed in every docked corner', async () => {
     const i18n = createAppI18n('en');
     const baseProps = {
       title: 'Channel One',
@@ -397,41 +404,18 @@ describe('Wave P2 — Aspect Fade Badge, Context-Aware Overflow Menu & Interacti
       onResizeStart: jest.fn(),
     };
 
-    // Docked bottom-right -> grip top-left -> actions stay top-right, titleBar default padding
-    const br = await render(
-      wrap(<FloatingMiniPlayerChrome {...baseProps} corner="bottom-right" />),
-    );
-    expect(StyleSheet.flatten(screen.getByTestId('mini-player-top-row').props.style)).toMatchObject(
-      { justifyContent: 'flex-end' },
-    );
-    expect(
-      StyleSheet.flatten(screen.getByTestId('mini-player-title-bar').props.style).paddingLeft,
-    ).toBeUndefined();
-    expect(
-      StyleSheet.flatten(screen.getByTestId('mini-player-title-bar').props.style).paddingRight,
-    ).toBeUndefined();
-    await br.unmount();
-
-    // Docked bottom-left -> grip top-right -> actions shift to top-left so Close is never covered
-    const bl = await render(wrap(<FloatingMiniPlayerChrome {...baseProps} corner="bottom-left" />));
-    expect(StyleSheet.flatten(screen.getByTestId('mini-player-top-row').props.style)).toMatchObject(
-      { justifyContent: 'flex-start' },
-    );
-    await bl.unmount();
-
-    // Docked top-right -> grip bottom-left -> titleBar gets left clearance (32px)
-    const tr = await render(wrap(<FloatingMiniPlayerChrome {...baseProps} corner="top-right" />));
-    expect(
-      StyleSheet.flatten(screen.getByTestId('mini-player-title-bar').props.style),
-    ).toMatchObject({ paddingLeft: 32 });
-    await tr.unmount();
-
-    // Docked top-left -> grip bottom-right -> titleBar gets right clearance (32px)
-    const tl = await render(wrap(<FloatingMiniPlayerChrome {...baseProps} corner="top-left" />));
-    expect(
-      StyleSheet.flatten(screen.getByTestId('mini-player-title-bar').props.style),
-    ).toMatchObject({ paddingRight: 32 });
-    await tl.unmount();
+    for (const corner of ['bottom-right', 'bottom-left', 'top-right', 'top-left'] as const) {
+      const rendered = await render(
+        wrap(<FloatingMiniPlayerChrome {...baseProps} corner={corner} />),
+      );
+      expect(
+        StyleSheet.flatten(screen.getByTestId('mini-player-top-row').props.style),
+      ).toMatchObject({ justifyContent: 'flex-end' });
+      for (const edge of ['n', 's', 'w', 'e', 'nw', 'ne', 'sw', 'se'] as const) {
+        expect(screen.getByTestId(`mini-player-resize-${edge}`)).toBeTruthy();
+      }
+      await rendered.unmount();
+    }
   });
 
   it('runs corner-snap Animated.timing without cancelling on frame 0, binds only PointerEvent listeners when supported, and expires expand suppression after 250ms', async () => {

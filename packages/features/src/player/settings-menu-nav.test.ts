@@ -1,17 +1,24 @@
 import type { MediaTracks } from '@elv/playback';
 import { describe, expect, it } from 'vitest';
 import {
+  advancedSettingsItems,
+  audioMenuEntries,
+  audioSettingsMenuEntries,
   clampSettingsMenu,
   formatPlaybackSpeed,
+  getParentSettingsView,
   initialSettingsMenu,
   normalizeAudioDeviceChoices,
   PLAYBACK_SPEED_OPTIONS,
-  rootIndexForSettingsView,
+  parentStateForSettingsView,
+  rootIndexForSettingsViewOptions,
   routeSettingsMenuKey,
   SETTINGS_ROOT_ITEMS,
   type SettingsMenuState,
-  settingsRootItems,
+  settingsRootItemsFromOptions,
   settingsRowCount,
+  subtitleMenuEntries,
+  subtitleSettingsMenuEntries,
 } from './settings-menu-nav';
 
 const TRACKS: MediaTracks = {
@@ -29,19 +36,49 @@ const TRACKS: MediaTracks = {
 
 const EMPTY_AUDIO: MediaTracks = { ...TRACKS, audio: [], selectedAudioId: null };
 
-describe('settings-menu-nav', () => {
-  it('initializes root or sub-view state at index 0 and exposes root item order', () => {
+describe('settings-menu-nav (Wave R4 streamlined 2-level hierarchy)', () => {
+  it('initializes root and sub-view states and exposes streamlined root items', () => {
     expect(SETTINGS_ROOT_ITEMS).toEqual(['subtitles', 'audio', 'aspect', 'stats']);
     expect(initialSettingsMenu()).toEqual({ view: 'root', index: 0 });
-    expect(initialSettingsMenu('audio')).toEqual({ view: 'audio', index: 0 });
-    expect(initialSettingsMenu('subtitles')).toEqual({ view: 'subtitles', index: 0 });
+    expect(initialSettingsMenu('audio', undefined, TRACKS)).toEqual({ view: 'audio', index: 1 });
+    expect(initialSettingsMenu('subtitles', undefined, TRACKS)).toEqual({
+      view: 'subtitles',
+      index: 2,
+    });
+    expect(settingsRootItemsFromOptions({ isVod: false })).toEqual([
+      'subtitles',
+      'audio',
+      'aspect',
+      'stats',
+    ]);
+    expect(settingsRootItemsFromOptions({ isVod: true })).toEqual([
+      'subtitles',
+      'audio',
+      'speed',
+      'aspect',
+      'stats',
+    ]);
   });
 
-  it('computes row counts for root, subtitles (including Off), and audio views', () => {
+  it('computes row counts and enforces videoQualities.length > 1 guard', () => {
     expect(settingsRowCount('root', TRACKS)).toBe(4);
     expect(settingsRowCount('subtitles', TRACKS)).toBe(3);
     expect(settingsRowCount('audio', TRACKS)).toBe(2);
     expect(settingsRowCount('audio', EMPTY_AUDIO)).toBe(0);
+
+    const singleQuality: MediaTracks = {
+      ...TRACKS,
+      videoQualities: [{ id: 'v:1080', label: '1080p', width: 1920, height: 1080 }],
+    };
+    expect(
+      settingsRootItemsFromOptions({ isVod: true, hasVideoQuality: true }, singleQuality),
+    ).not.toContain('videoQuality');
+    expect(settingsRowCount('videoQuality', singleQuality, { hasVideoQuality: true })).toBe(0);
+    expect(
+      clampSettingsMenu({ view: 'videoQuality', index: 1 }, singleQuality, {
+        hasVideoQuality: true,
+      }),
+    ).toEqual({ view: 'root', index: 0 });
   });
 
   it('clamps indices cleanly and preserves identity when already in bounds', () => {
@@ -65,57 +102,21 @@ describe('settings-menu-nav', () => {
     });
   });
 
-  it('routes root keys: up/down moves, right/select enters sub-views on selected row, stats toggles, back closes', () => {
+  it('routes root navigation, audio/subtitle selections, speed, and back/parent hierarchy', () => {
     const root0: SettingsMenuState = { view: 'root', index: 0 };
     expect(routeSettingsMenuKey({ key: 'down', kind: 'press', time: 0 }, root0, TRACKS)).toEqual({
       kind: 'state',
       state: { view: 'root', index: 1 },
-    });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'down', kind: 'repeat', time: 0 },
-        { view: 'root', index: 1 },
-        TRACKS,
-      ),
-    ).toEqual({
-      kind: 'state',
-      state: { view: 'root', index: 2 },
-    });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'up', kind: 'press', time: 0 },
-        { view: 'root', index: 0 },
-        TRACKS,
-      ),
-    ).toEqual({
-      kind: 'state',
-      state: { view: 'root', index: 0 },
     });
     expect(routeSettingsMenuKey({ key: 'left', kind: 'press', time: 0 }, root0, TRACKS)).toBeNull();
     expect(routeSettingsMenuKey({ key: 'back', kind: 'press', time: 0 }, root0, TRACKS)).toEqual({
       kind: 'close',
     });
 
-    // Enter subtitles via select or right -> lands on selected subtitle (index 2 for s:2)
+    // Subtitles & Audio entry
     expect(routeSettingsMenuKey({ key: 'select', kind: 'press', time: 0 }, root0, TRACKS)).toEqual({
       kind: 'state',
       state: { view: 'subtitles', index: 2 },
-    });
-    expect(routeSettingsMenuKey({ key: 'right', kind: 'press', time: 0 }, root0, TRACKS)).toEqual({
-      kind: 'state',
-      state: { view: 'subtitles', index: 2 },
-    });
-
-    // Enter audio via select or right -> lands on selected audio (index 1 for a:2)
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 1 },
-        TRACKS,
-      ),
-    ).toEqual({
-      kind: 'state',
-      state: { view: 'audio', index: 1 },
     });
     expect(
       routeSettingsMenuKey(
@@ -128,7 +129,7 @@ describe('settings-menu-nav', () => {
       state: { view: 'audio', index: 1 },
     });
 
-    // Aspect row (index 2 on Live): select toggles resizeMode, right ignored
+    // Aspect & Stats
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
@@ -138,30 +139,13 @@ describe('settings-menu-nav', () => {
     ).toEqual({ kind: 'toggleResizeMode' });
     expect(
       routeSettingsMenuKey(
-        { key: 'right', kind: 'press', time: 0 },
-        { view: 'root', index: 2 },
-        TRACKS,
-      ),
-    ).toBeNull();
-
-    // Stats row (index 3 on Live): select toggles, right ignored
-    expect(
-      routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
         { view: 'root', index: 3 },
         TRACKS,
       ),
     ).toEqual({ kind: 'toggleStats' });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'right', kind: 'press', time: 0 },
-        { view: 'root', index: 3 },
-        TRACKS,
-      ),
-    ).toBeNull();
-  });
 
-  it('routes sub-view keys: up/down clamps, select picks audio/subtitle, left or back returns to root row', () => {
+    // Selections inside subtitles and audio
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
@@ -178,21 +162,6 @@ describe('settings-menu-nav', () => {
     ).toEqual({ kind: 'subtitle', id: 's:1' });
     expect(
       routeSettingsMenuKey(
-        { key: 'left', kind: 'press', time: 0 },
-        { view: 'subtitles', index: 2 },
-        TRACKS,
-      ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 0 } });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'back', kind: 'press', time: 0 },
-        { view: 'subtitles', index: 1 },
-        TRACKS,
-      ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 0 } });
-
-    expect(
-      routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
         { view: 'audio', index: 0 },
         TRACKS,
@@ -205,323 +174,83 @@ describe('settings-menu-nav', () => {
         EMPTY_AUDIO,
       ),
     ).toBeNull();
-    expect(
-      routeSettingsMenuKey(
-        { key: 'left', kind: 'press', time: 0 },
-        { view: 'audio', index: 1 },
-        TRACKS,
-      ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 1 } });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'back', kind: 'press', time: 0 },
-        { view: 'audio', index: 1 },
-        TRACKS,
-      ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 1 } });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'right', kind: 'press', time: 0 },
-        { view: 'audio', index: 0 },
-        TRACKS,
-      ),
-    ).toBeNull();
-    expect(
-      routeSettingsMenuKey(
-        { key: 'play', kind: 'press', time: 0 },
-        { view: 'root', index: 0 },
-        TRACKS,
-      ),
-    ).toBeNull();
+
+    // Parent view mapping
+    expect(getParentSettingsView('root')).toBeNull();
+    expect(getParentSettingsView('subtitleSettings')).toBe('subtitles');
+    expect(getParentSettingsView('audioSettings')).toBe('audio');
+    expect(getParentSettingsView('videoDecoder')).toBe('advanced');
+    expect(getParentSettingsView('speed')).toBe('root');
   });
 
-  it('supports VOD playback speed submenu (0.5x-2x) with D-pad navigation and clamping', () => {
+  it('supports VOD playback speed, sleepTimer, and multi-program MPEG-TS selection (#304)', () => {
     expect(PLAYBACK_SPEED_OPTIONS).toEqual([0.5, 0.75, 1, 1.25, 1.5, 2]);
-    expect(initialSettingsMenu('speed', { playbackSpeed: 1.5 })).toEqual({
-      view: 'speed',
-      index: 4,
-    });
-    expect(formatPlaybackSpeed(1)).toBe('1×');
     expect(formatPlaybackSpeed(1.25)).toBe('1.25×');
-    expect(settingsRootItems(false)).toEqual(['subtitles', 'audio', 'aspect', 'stats']);
-    expect(settingsRootItems(true)).toEqual(['subtitles', 'audio', 'speed', 'aspect', 'stats']);
-    expect(settingsRowCount('root', TRACKS, { isVod: true })).toBe(5);
-    expect(settingsRowCount('speed', TRACKS, { isVod: true })).toBe(6);
-
-    // Clamping speed view on non-VOD returns to root
-    expect(clampSettingsMenu({ view: 'speed', index: 2 }, TRACKS, { isVod: false })).toEqual({
-      view: 'root',
-      index: 0,
-    });
-
-    // Enter speed from root index 2 on VOD -> lands on current playbackSpeed (1.5 -> index 4)
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 2 },
-        TRACKS,
-        { isVod: true, playbackSpeed: 1.5 },
-      ),
-    ).toEqual({
-      kind: 'state',
-      state: { view: 'speed', index: 4 },
-    });
-
-    // Select speed option emits speed intent
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'speed', index: 5 },
+        { view: 'speed', index: 4 },
         TRACKS,
         { isVod: true, playbackSpeed: 1 },
       ),
-    ).toEqual({ kind: 'speed', rate: 2 });
+    ).toEqual({ kind: 'speed', rate: 1.5 });
 
-    // Left / Back from speed returns to root index 2
+    const sleepOpts = { isVod: true, hasSleepTimer: true, sleepTimerMinutes: 30 };
+    expect(settingsRowCount('sleepTimer', TRACKS, sleepOpts)).toBe(10);
+    expect(initialSettingsMenu('sleepTimer', sleepOpts)).toEqual({ view: 'sleepTimer', index: 3 });
     expect(
       routeSettingsMenuKey(
-        { key: 'left', kind: 'press', time: 0 },
-        { view: 'speed', index: 2 },
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'sleepTimer', index: 0 },
         TRACKS,
-        { isVod: true },
+        sleepOpts,
       ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 2 } });
+    ).toEqual({ kind: 'toggleSleepTimerAction' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'sleepTimer', index: 4 },
+        TRACKS,
+        sleepOpts,
+      ),
+    ).toEqual({ kind: 'sleepTimer', minutes: 45 });
 
-    // Aspect on VOD is index 3, Stats on VOD is index 4
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 3 },
-        TRACKS,
-        { isVod: true },
-      ),
-    ).toEqual({ kind: 'toggleResizeMode' });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 4 },
-        TRACKS,
-        { isVod: true },
-      ),
-    ).toEqual({ kind: 'toggleStats' });
-  });
-
-  it('omits aspect row when hasAspect is false (desktop) and keeps stats/clamping indices exact (#440)', () => {
-    expect(settingsRootItems(false, false)).toEqual(['subtitles', 'audio', 'stats']);
-    expect(settingsRootItems(true, false)).toEqual(['subtitles', 'audio', 'speed', 'stats']);
-    expect(settingsRowCount('root', TRACKS, { isVod: false, hasAspect: false })).toBe(3);
-    expect(settingsRowCount('root', TRACKS, { isVod: true, hasAspect: false })).toBe(4);
-    expect(clampSettingsMenu({ view: 'root', index: 9 }, TRACKS, { hasAspect: false })).toEqual({
-      view: 'root',
-      index: 2,
-    });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 2 },
-        TRACKS,
-        { isVod: false, hasAspect: false },
-      ),
-    ).toEqual({ kind: 'toggleStats' });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 3 },
-        TRACKS,
-        { isVod: true, hasAspect: false },
-      ),
-    ).toEqual({ kind: 'toggleStats' });
-  });
-
-  it('includes deinterlace row right before stats only when hasDeinterlace is true (#131)', () => {
-    expect(settingsRootItems(false, true, true)).toEqual([
-      'subtitles',
-      'audio',
-      'aspect',
-      'deinterlace',
-      'stats',
-    ]);
-    expect(settingsRootItems(false, false, true)).toEqual([
-      'subtitles',
-      'audio',
-      'deinterlace',
-      'stats',
-    ]);
-    expect(settingsRootItems(true, true, true)).toEqual([
-      'subtitles',
-      'audio',
-      'speed',
-      'aspect',
-      'deinterlace',
-      'stats',
-    ]);
-    expect(settingsRootItems(true, false, true)).toEqual([
-      'subtitles',
-      'audio',
-      'speed',
-      'deinterlace',
-      'stats',
-    ]);
-
-    expect(
-      settingsRowCount('root', TRACKS, { isVod: false, hasAspect: false, hasDeinterlace: true }),
-    ).toBe(4);
-    expect(
-      settingsRowCount('root', TRACKS, { isVod: true, hasAspect: false, hasDeinterlace: true }),
-    ).toBe(5);
-    expect(
-      clampSettingsMenu({ view: 'root', index: 9 }, TRACKS, {
-        hasAspect: false,
-        hasDeinterlace: true,
-      }),
-    ).toEqual({ view: 'root', index: 3 });
-
-    // On desktop Live (no aspect, with deinterlace): index 2 is deinterlace, index 3 is stats
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 2 },
-        TRACKS,
-        { isVod: false, hasAspect: false, hasDeinterlace: true },
-      ),
-    ).toEqual({ kind: 'toggleDeinterlace' });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'right', kind: 'press', time: 0 },
-        { view: 'root', index: 2 },
-        TRACKS,
-        { isVod: false, hasAspect: false, hasDeinterlace: true },
-      ),
-    ).toBeNull();
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 3 },
-        TRACKS,
-        { isVod: false, hasAspect: false, hasDeinterlace: true },
-      ),
-    ).toEqual({ kind: 'toggleStats' });
-
-    // On desktop VOD (no aspect, with deinterlace): index 3 is deinterlace, index 4 is stats
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 3 },
-        TRACKS,
-        { isVod: true, hasAspect: false, hasDeinterlace: true },
-      ),
-    ).toEqual({ kind: 'toggleDeinterlace' });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 4 },
-        TRACKS,
-        { isVod: true, hasAspect: false, hasDeinterlace: true },
-      ),
-    ).toEqual({ kind: 'toggleStats' });
-  });
-
-  it('includes autoSubtitlesOnSkipBack row before stats when enabled (#114)', () => {
-    expect(settingsRootItems(true, true, false, true)).toEqual([
-      'subtitles',
-      'audio',
-      'speed',
-      'aspect',
-      'autoSubtitlesOnSkipBack',
-      'stats',
-    ]);
-    expect(settingsRootItems(true, false, true, true)).toEqual([
-      'subtitles',
-      'audio',
-      'speed',
-      'deinterlace',
-      'autoSubtitlesOnSkipBack',
-      'stats',
-    ]);
-    expect(
-      settingsRowCount('root', TRACKS, {
-        isVod: true,
-        hasAspect: false,
-        hasDeinterlace: true,
-        hasAutoSubtitlesOnSkipBack: true,
-      }),
-    ).toBe(6);
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 4 },
-        TRACKS,
-        {
-          isVod: true,
-          hasAspect: false,
-          hasDeinterlace: true,
-          hasAutoSubtitlesOnSkipBack: true,
-        },
-      ),
-    ).toEqual({ kind: 'toggleAutoSubtitlesOnSkipBack' });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'right', kind: 'press', time: 0 },
-        { view: 'root', index: 4 },
-        TRACKS,
-        {
-          isVod: true,
-          hasAspect: false,
-          hasDeinterlace: true,
-          hasAutoSubtitlesOnSkipBack: true,
-        },
-      ),
-    ).toBeNull();
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 5 },
-        TRACKS,
-        {
-          isVod: true,
-          hasAspect: false,
-          hasDeinterlace: true,
-          hasAutoSubtitlesOnSkipBack: true,
-        },
-      ),
-    ).toEqual({ kind: 'toggleStats' });
-  });
-
-  it('includes autoPlayNextEpisode before stats on VOD and emits toggleAutoPlayNextEpisode on Select (#392)', () => {
-    const opts = {
-      isVod: true,
-      hasAspect: false,
-      hasDeinterlace: false,
-      hasAutoSubtitlesOnSkipBack: true,
-      hasAutoPlayNextEpisode: true,
+    const multiProgram: MediaTracks = {
+      programs: [
+        { id: 'p:101', label: 'News HD', serviceName: 'News HD', programNumber: 101 },
+        { id: 'p:102', label: 'Sports HD', serviceName: 'Sports HD', programNumber: 102 },
+      ],
+      selectedProgramId: 'p:102',
+      audio: [
+        { id: 'a:101-1', language: 'eng', programId: 'p:101' },
+        { id: 'a:102-1', language: 'tur', programId: 'p:102' },
+      ],
+      subtitles: [
+        { id: 's:101-1', language: 'eng', programId: 'p:101' },
+        { id: 's:102-1', language: 'tur', programId: 'p:102' },
+      ],
+      selectedAudioId: 'a:102-1',
+      selectedSubtitleId: 's:102-1',
     };
-    expect(settingsRootItems(true, false, false, true, true)).toEqual([
-      'subtitles',
+    expect(audioMenuEntries(multiProgram).map((e) => e.kind)).toEqual([
+      'program',
+      'program',
       'audio',
-      'speed',
-      'autoSubtitlesOnSkipBack',
-      'autoPlayNextEpisode',
-      'stats',
     ]);
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 4 },
-        TRACKS,
-        opts,
+        { view: 'audio', index: 0 },
+        multiProgram,
       ),
-    ).toEqual({ kind: 'toggleAutoPlayNextEpisode' });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 5 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'toggleStats' });
+    ).toEqual({ kind: 'program', id: 'p:101' });
+    expect(subtitleMenuEntries(multiProgram).map((e) => e.kind)).toEqual([
+      'primaryOff',
+      'primaryTrack',
+    ]);
   });
 
-  it('supports audioDevice submenu with auto normalization, active focus, and clamping (#408)', () => {
+  it('navigates 2-level subtitles -> subtitleSettings, audio -> audioSettings, and advanced -> videoDecoder', () => {
     const devices = [
       { name: 'auto', description: 'Autoselect' },
       { name: 'wasapi/hdmi', description: 'HDMI' },
@@ -538,100 +267,171 @@ describe('settings-menu-nav', () => {
     const opts = {
       isVod: true,
       hasAspect: false,
+      hasDeinterlace: true,
+      hasPitchLock: true,
+      hasAudioNormalization: true,
+      hasAutoPlayNextEpisode: true,
       hasAudioDevice: true,
       audioDevices: devices,
       activeAudioDevice: 'wasapi/usb',
+      hasAudioDelay: true,
+      hasSubtitleDelay: true,
+      hasSubtitleStyle: true,
+      hasDualSubtitles: true,
+      canPickSubtitleFile: true,
+      canLoadSubtitleUrl: true,
+      hasVideoDecoder: true,
+      androidDecoderMode: 'hardware' as const,
+      hasPip: true,
+      hasMultiView: true,
     };
-    expect(settingsRootItems(true, false, false, false, false, true)).toEqual([
+
+    // Root contains ONLY streamlined items (last item is 'advanced')
+    expect(settingsRootItemsFromOptions(opts, TRACKS)).toEqual([
       'subtitles',
       'audio',
-      'audioDevice',
       'speed',
+      'multiView',
       'stats',
+      'advanced',
     ]);
-    expect(rootIndexForSettingsView('audioDevice', true, false, false, false, false, true)).toBe(2);
-    expect(settingsRowCount('audioDevice', TRACKS, opts)).toBe(3);
-    expect(settingsRowCount('audioDevice', TRACKS, { hasAudioDevice: false })).toBe(0);
-    expect(initialSettingsMenu('audioDevice', opts)).toEqual({ view: 'audioDevice', index: 2 });
-    expect(initialSettingsMenu('audioDevice', { ...opts, activeAudioDevice: 'auto' })).toEqual({
-      view: 'audioDevice',
-      index: 0,
+    expect(advancedSettingsItems(opts)).toEqual([
+      'deinterlace',
+      'videoDecoder',
+      'audioNormalization',
+      'pitchLock',
+      'autoPlayNextEpisode',
+      'pip',
+    ]);
+
+    // Subtitles -> trailing openSubtitleSettings row -> enters subtitleSettings
+    const subEntries = subtitleMenuEntries(TRACKS, opts);
+    expect(subEntries.at(-1)).toEqual({ kind: 'openSubtitleSettings' });
+    const enterSubSettings = routeSettingsMenuKey(
+      { key: 'select', kind: 'press', time: 0 },
+      { view: 'subtitles', index: subEntries.length - 1 },
+      TRACKS,
+      opts,
+    );
+    expect(enterSubSettings).toEqual({
+      kind: 'state',
+      state: { view: 'subtitleSettings', index: 2 },
     });
-    expect(
-      clampSettingsMenu({ view: 'audioDevice', index: 1 }, TRACKS, { hasAudioDevice: false }),
-    ).toEqual({ view: 'root', index: 0 });
 
-    // Open audioDevice from root index 2 -> lands on active device (index 2)
+    // subtitleSettings contains delay (5) + style (6) + secondary (3) + external (2) = 16
+    const subSettingsEntries = subtitleSettingsMenuEntries(TRACKS, opts);
+    expect(subSettingsEntries.slice(0, 5)).toEqual([
+      { kind: 'delayStep', step: -500 },
+      { kind: 'delayStep', step: -100 },
+      { kind: 'delayStep', step: 0 },
+      { kind: 'delayStep', step: 100 },
+      { kind: 'delayStep', step: 500 },
+    ]);
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 2 },
+        { view: 'subtitleSettings', index: 0 },
         TRACKS,
         opts,
       ),
-    ).toEqual({ kind: 'state', state: { view: 'audioDevice', index: 2 } });
-
-    // Select row 0 -> 'auto'; select row 1 -> 'wasapi/hdmi'; left/back -> root index 2
+    ).toEqual({ kind: 'subtitleDelay', deltaMs: -500 });
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'audioDevice', index: 0 },
+        { view: 'subtitleSettings', index: 2 },
         TRACKS,
         opts,
       ),
-    ).toEqual({ kind: 'audioDevice', name: 'auto' });
+    ).toEqual({ kind: 'subtitleDelay', deltaMs: 0, reset: true });
+    // Right/Left on style row steps field; Back goes to subtitles
+    expect(
+      routeSettingsMenuKey(
+        { key: 'right', kind: 'press', time: 0 },
+        { view: 'subtitleSettings', index: 5 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'stepSubtitleStyle', field: 'fontSize', delta: 1 });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'back', kind: 'press', time: 0 },
+        { view: 'subtitleSettings', index: 5 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({
+      kind: 'state',
+      state: { view: 'subtitles', index: subEntries.length - 1 },
+    });
+
+    // Audio -> trailing openAudioSettings row -> enters audioSettings
+    const audEntries = audioMenuEntries(TRACKS, opts);
+    expect(audEntries.at(-1)).toEqual({ kind: 'openAudioSettings' });
+    const enterAudioSettings = routeSettingsMenuKey(
+      { key: 'select', kind: 'press', time: 0 },
+      { view: 'audio', index: audEntries.length - 1 },
+      TRACKS,
+      opts,
+    );
+    expect(enterAudioSettings).toEqual({
+      kind: 'state',
+      state: { view: 'audioSettings', index: 2 },
+    });
+    const audioSettings = audioSettingsMenuEntries(opts);
+    expect(audioSettings.map((e) => e.kind)).toEqual([
+      'delayStep',
+      'delayStep',
+      'delayStep',
+      'delayStep',
+      'delayStep',
+      'deviceAuto',
+      'device',
+      'device',
+      'audioNormalization',
+      'pitchLock',
+    ]);
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'audioDevice', index: 1 },
+        { view: 'audioSettings', index: 6 },
         TRACKS,
         opts,
       ),
     ).toEqual({ kind: 'audioDevice', name: 'wasapi/hdmi' });
     expect(
       routeSettingsMenuKey(
-        { key: 'back', kind: 'press', time: 0 },
-        { view: 'audioDevice', index: 1 },
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'audioSettings', index: 8 },
         TRACKS,
         opts,
       ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 2 } });
-  });
-
-  it('supports Android videoDecoder sub-view navigation, clamping, and selection (#411)', () => {
-    const opts = {
-      isVod: true,
-      hasAspect: true,
-      hasVideoDecoder: true,
-      androidDecoderMode: 'hardware' as const,
-    };
-    expect(settingsRootItems(true, true, false, false, false, false, true)).toEqual([
-      'subtitles',
-      'audio',
-      'speed',
-      'videoDecoder',
-      'aspect',
-      'stats',
-    ]);
-    expect(
-      rootIndexForSettingsView('videoDecoder', true, true, false, false, false, false, true),
-    ).toBe(3);
-    expect(settingsRowCount('videoDecoder', TRACKS, opts)).toBe(3);
-    expect(settingsRowCount('videoDecoder', TRACKS, { hasVideoDecoder: false })).toBe(0);
-    expect(initialSettingsMenu('videoDecoder', opts)).toEqual({ view: 'videoDecoder', index: 1 });
-    expect(
-      clampSettingsMenu({ view: 'videoDecoder', index: 2 }, TRACKS, { hasVideoDecoder: false }),
-    ).toEqual({ view: 'root', index: 0 });
-
+    ).toEqual({ kind: 'toggleAudioNormalization' });
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 3 },
+        { view: 'audioSettings', index: 9 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'togglePitchLock' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'left', kind: 'press', time: 0 },
+        { view: 'audioSettings', index: 6 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'audio', index: audEntries.length - 1 } });
+
+    // Advanced -> videoDecoder -> back returns to advanced row 1!
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'advanced', index: 1 },
         TRACKS,
         opts,
       ),
     ).toEqual({ kind: 'state', state: { view: 'videoDecoder', index: 1 } });
-
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
@@ -640,136 +440,17 @@ describe('settings-menu-nav', () => {
         opts,
       ),
     ).toEqual({ kind: 'videoDecoder', mode: 'software' });
-
     expect(
       routeSettingsMenuKey(
-        { key: 'left', kind: 'press', time: 0 },
+        { key: 'back', kind: 'press', time: 0 },
         { view: 'videoDecoder', index: 2 },
         TRACKS,
         opts,
       ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 3 } });
-  });
-
-  it('supports Wave C1 chapters, sleepTimer, timeDisplay, info, and alwaysOnTop routing (#118, #160)', () => {
-    const chapters = [
-      { id: 'c:0', title: 'Intro', startMs: 0, endMs: 30_000 },
-      { id: 'c:1', title: 'Act 1', startMs: 30_000, endMs: 120_000 },
-    ];
-    const opts = {
-      isVod: true,
-      hasChapters: true,
-      chapters,
-      hasSleepTimer: true,
-      sleepTimerMinutes: 30,
-      sleepTimerAction: 'stop' as const,
-      hasAspect: true,
-      hasTimeDisplay: true,
-      hasInfo: true,
-      hasAlwaysOnTop: true,
-    };
-
-    // Row counts for new sub-views
-    expect(settingsRowCount('chapters', TRACKS, opts)).toBe(2);
-    expect(settingsRowCount('chapters', TRACKS, { hasChapters: false })).toBe(0);
-    // sleepTimer has action toggle row (index 0) + 9 presets = 10 rows
-    expect(settingsRowCount('sleepTimer', TRACKS, opts)).toBe(10);
-    expect(settingsRowCount('sleepTimer', TRACKS, { hasSleepTimer: false })).toBe(0);
-
-    // initialSettingsMenu lands on active sleep timer preset (30 -> index 3: action + [0,15,30])
-    expect(initialSettingsMenu('sleepTimer', opts)).toEqual({ view: 'sleepTimer', index: 3 });
-    expect(initialSettingsMenu('chapters', opts)).toEqual({ view: 'chapters', index: 0 });
-    expect(
-      clampSettingsMenu({ view: 'chapters', index: 1 }, TRACKS, { hasChapters: false }),
-    ).toEqual({ view: 'root', index: 0 });
-    expect(
-      clampSettingsMenu({ view: 'sleepTimer', index: 2 }, TRACKS, { hasSleepTimer: false }),
-    ).toEqual({ view: 'root', index: 0 });
-
-    // Enter chapters (root index 3: subtitles, audio, speed, chapters)
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 3 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'state', state: { view: 'chapters', index: 0 } });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'chapters', index: 1 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'chapter', startMs: 30_000 });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'back', kind: 'press', time: 0 },
-        { view: 'chapters', index: 1 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 3 } });
-
-    // Enter sleepTimer (root index 4) -> toggle action at index 0, pick 45 min at index 4
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 4 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'state', state: { view: 'sleepTimer', index: 3 } });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'sleepTimer', index: 0 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'toggleSleepTimerAction' });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'sleepTimer', index: 4 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'sleepTimer', minutes: 45 });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'left', kind: 'press', time: 0 },
-        { view: 'sleepTimer', index: 4 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'state', state: { view: 'root', index: 4 } });
-
-    // Root action rows: timeDisplay (index 6), info (index 7), alwaysOnTop (index 8)
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 6 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'toggleTimeDisplayMode' });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 7 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'toggleInfo' });
-    expect(
-      routeSettingsMenuKey(
-        { key: 'select', kind: 'press', time: 0 },
-        { view: 'root', index: 8 },
-        TRACKS,
-        opts,
-      ),
-    ).toEqual({ kind: 'toggleAlwaysOnTop' });
+    ).toEqual({ kind: 'state', state: { view: 'advanced', index: 1 } });
+    expect(parentStateForSettingsView('advanced', TRACKS, opts)).toEqual({
+      view: 'root',
+      index: rootIndexForSettingsViewOptions('advanced', opts, TRACKS),
+    });
   });
 });

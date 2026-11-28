@@ -25,7 +25,6 @@ describe('popout-controller & desktop shell ports (#158, #34)', () => {
       title: 'Live News',
       subtitle: 'HD',
       sourceId: 's1',
-      pinned: true,
     };
     expect(buildPopoutDockPayload(livePayload, 45_000)).toEqual({
       itemKey: 'live:s1:ch1',
@@ -104,9 +103,6 @@ describe('popout-controller & desktop shell ports (#158, #34)', () => {
     const onHiddenToTray = vi.fn(() => () => undefined);
 
     const port = createDesktopWindowPort({
-      setAlwaysOnTop: async (f) => f,
-      getAlwaysOnTop: async () => false,
-      onAlwaysOnTopChanged: () => () => undefined,
       setAspectRatioLock: async (f) => f,
       setMinimizeToTray,
       openPopout,
