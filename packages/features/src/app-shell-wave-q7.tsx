@@ -100,6 +100,7 @@ export function useAppShellDesktopErgonomics(opts: {
   readonly onBumpUserState: () => void;
   readonly onSelectTab: (tab: AppTab, focusContent?: boolean) => void;
   readonly onOpenSettingsSection: (section: SettingsSection) => void;
+  readonly onOpenSearchPopup?: () => void;
 }): AppShellDesktopErgonomics {
   const {
     isPlayerOpen,
@@ -111,6 +112,7 @@ export function useAppShellDesktopErgonomics(opts: {
     onBumpUserState,
     onSelectTab,
     onOpenSettingsSection,
+    onOpenSearchPopup,
   } = opts;
   const i18n = useI18n();
   const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
@@ -136,8 +138,12 @@ export function useAppShellDesktopErgonomics(opts: {
   }, []);
   const openSearch = useCallback(() => {
     if (commandPaletteOpenRef.current || shortcutSheetOpenRef.current) return;
+    if (onOpenSearchPopup) {
+      onOpenSearchPopup();
+      return;
+    }
     onSelectTab('search', true);
-  }, [onSelectTab]);
+  }, [onOpenSearchPopup, onSelectTab]);
 
   useDesktopShellShortcuts({
     isPlayerOpen,

@@ -98,26 +98,41 @@ function makeDownloadManager(notifyOnlinePlaybackActive: jest.Mock): DownloadMan
 }
 
 describe('Offline zero-connection bypass & online playback download sync', () => {
-  it('exposes 5 primary destinations including Library right after Series', () => {
+  it('exposes 4 primary destinations and 3 right-aligned utilities including bookmark Library', () => {
     const i18n = createAppI18n('en');
     const nav = buildShellNavigation({
       t: i18n.t,
       activeTab: 'library',
       hasActiveDetail: false,
       onOpenSearch: jest.fn(),
-      onOpenSettings: jest.fn(),
+      onOpenLibrary: jest.fn(),
     });
-    expect(nav.destinations.map((d) => d.id)).toEqual([
-      'home',
-      'live',
-      'movie',
-      'series',
-      'library',
-    ]);
-    expect(nav.destinations[4]).toMatchObject({
+    expect(nav.destinations.map((d) => d.id)).toEqual(['home', 'live', 'movie', 'series']);
+    expect(nav.utilities[0]).toMatchObject({
+      id: 'search',
+      icon: 'search',
+      testID: 'nav-utility-search',
+      activateOnSelectOnly: true,
+    });
+    expect(nav.utilities[1]).toMatchObject({
       id: 'library',
-      icon: 'library',
-      testID: 'nav-tab-library',
+      icon: 'bookmarkFilled',
+      active: true,
+      testID: 'nav-utility-library',
+    });
+
+    const inactiveNav = buildShellNavigation({
+      t: i18n.t,
+      activeTab: 'home',
+      hasActiveDetail: false,
+      onOpenSearch: jest.fn(),
+      onOpenLibrary: jest.fn(),
+    });
+    expect(inactiveNav.utilities[1]).toMatchObject({
+      id: 'library',
+      icon: 'bookmark',
+      active: false,
+      testID: 'nav-utility-library',
     });
   });
 

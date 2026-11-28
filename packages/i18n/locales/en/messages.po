@@ -4909,3 +4909,24 @@ msgstr "Update verification failed. Download directly from the release page."
 
 msgid "settings.updates.installing"
 msgstr "Preparing update…"
+
+msgid "profile.menu.profiles"
+msgstr "Profiles"
+
+msgid "profile.menu.addNew"
+msgstr "Add new"
+
+msgid "profile.menu.editProfiles"
+msgstr "Edit profiles"
+
+msgid "profile.menu.signOut"
+msgstr "Sign out"
+
+msgid "search.viewAll"
+msgstr "View all"
+
+msgid "search.popup.title"
+msgstr "Quick search"
+
+msgid "search.popup.suggestions"
+msgstr "Suggestions"

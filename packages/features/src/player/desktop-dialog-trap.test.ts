@@ -487,4 +487,45 @@ describe('attachDesktopDialogTrap (#283)', () => {
     expect(winListeners.get('keydown')?.size ?? 0).toBe(0);
     expect(docListeners.get('keydown')?.size ?? 0).toBe(0);
   });
+
+  it('does not steal focus on hover-open when initialFocus is none while preserving Escape handling', () => {
+    const docListeners = new Map<string, Set<(e: DialogKeyEventLike) => void>>();
+    const doc = Object.assign(createMockDoc(), {
+      addEventListener: (type: string, fn: (e: DialogKeyEventLike) => void) => {
+        const set = docListeners.get(type) ?? new Set();
+        set.add(fn);
+        docListeners.set(type, set);
+      },
+      removeEventListener: (type: string, fn: (e: DialogKeyEventLike) => void) => {
+        docListeners.get(type)?.delete(fn);
+      },
+    });
+    const prevTrigger = createMockEl(doc, { id: 'hover-trigger', tagName: 'BUTTON', tabIndex: 0 });
+    const otherFocused = createMockEl(doc, { id: 'other-control', tagName: 'INPUT', tabIndex: 0 });
+    const hoverPanel = createMockEl(doc, { id: 'hover-panel' });
+    const menuItem = createMockEl(doc, { id: 'menu-item', tagName: 'BUTTON', tabIndex: 0 });
+    append(doc.body, prevTrigger, otherFocused, hoverPanel);
+    append(hoverPanel, menuItem);
+
+    doc.activeElement = otherFocused;
+    const onEscape = vi.fn();
+    const teardown = attachDesktopDialogTrap(hoverPanel, {
+      doc,
+      modal: false,
+      initialFocus: 'none',
+      onEscape,
+    });
+
+    expect(doc.activeElement).toBe(otherFocused);
+    expect(hoverPanel.getAttribute('tabindex')).toBeNull();
+
+    for (const fn of [...(docListeners.get('keydown') ?? [])]) {
+      fn({ key: 'Escape', preventDefault: vi.fn() });
+    }
+    expect(onEscape).toHaveBeenCalledTimes(1);
+
+    doc.activeElement = prevTrigger;
+    teardown();
+    expect(doc.activeElement).toBe(prevTrigger);
+  });
 });

@@ -1,6 +1,22 @@
-import { type ContextMenuAnchor, Icon, MicroPill, useI18n, useTheme } from '@elv/ui-kit';
-import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
-import { type LayoutChangeEvent, Platform, StyleSheet, Text, View } from 'react-native';
+import {
+  type ContextMenuAnchor,
+  Icon,
+  MicroPill,
+  useI18n,
+  useTheme,
+  useViewport,
+  webCursorPointer,
+  webTransition,
+} from '@elv/ui-kit';
+import {
+  type ComponentRef,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import { type LayoutChangeEvent, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { LibraryRailSection } from './LibraryRailSection';
 import type {
   LibraryCardItem,
@@ -39,6 +55,9 @@ export interface LibraryEditorialTabsProps {
   readonly dragController?: LibraryFolderDragController;
   readonly onRenameCollection?: (collectionId: string, currentName: string) => void;
   readonly onDeleteCollection?: (collectionId: string, name: string) => void;
+  readonly canCreateCollection?: boolean;
+  readonly createCollectionFocused?: boolean;
+  readonly onOpenCreateCollection?: () => void;
   readonly onPressCard: (item: LibraryCardItem) => void;
   readonly onContextMenuLive: (item: LibraryCardItem, anchor?: ContextMenuAnchor) => void;
   readonly onContextMenuVod: (
@@ -70,6 +89,9 @@ export function LibraryEditorialTabs({
   dragController,
   onRenameCollection,
   onDeleteCollection,
+  canCreateCollection = false,
+  createCollectionFocused = false,
+  onOpenCreateCollection,
   onPressCard,
   onContextMenuLive,
   onContextMenuVod,
@@ -77,6 +99,8 @@ export function LibraryEditorialTabs({
 }: LibraryEditorialTabsProps): ReactElement {
   const i18n = useI18n();
   const theme = useTheme();
+  const viewport = useViewport();
+  const isTouch = viewport.inputModality === 'touch';
 
   const draggingCollected =
     activeTab === 'following' &&
@@ -107,6 +131,7 @@ export function LibraryEditorialTabs({
   }, [dragController, showGeneralFallbackDropZone]);
 
   if (activeTab === 'following') {
+    const showCreateTrigger = canCreateCollection && onOpenCreateCollection !== undefined;
     const hasFollowing =
       favPartition.live.length > 0 ||
       favPartition.series.length > 0 ||
@@ -114,13 +139,24 @@ export function LibraryEditorialTabs({
       collectionRails.length > 0;
     if (!hasFollowing) {
       return (
-        <LibraryEmptyNotice
-          testID="library-empty-following"
-          icon="plus"
-          title={i18n.t('library.emptyFollowingTitle')}
-          body={i18n.t('library.emptyFollowingBody')}
-          padX={padX}
-        />
+        <View testID="library-following-empty" style={styles.railsStack}>
+          <LibraryEmptyNotice
+            testID="library-empty-following"
+            icon="plus"
+            title={i18n.t('library.emptyFollowingTitle')}
+            body={i18n.t('library.emptyFollowingBody')}
+            padX={padX}
+          />
+          {showCreateTrigger ? (
+            <LibraryCreateCollectionTrigger
+              padX={padX}
+              isTv={isTv}
+              isTouch={isTouch}
+              focused={createCollectionFocused}
+              onPress={onOpenCreateCollection}
+            />
+          ) : null}
+        </View>
       );
     }
 
@@ -272,6 +308,16 @@ export function LibraryEditorialTabs({
             onSeeAll={() => onSeeAll({ railId: col.railId, title: col.title, kind: 'poster' })}
           />
         ))}
+
+        {showCreateTrigger ? (
+          <LibraryCreateCollectionTrigger
+            padX={padX}
+            isTv={isTv}
+            isTouch={isTouch}
+            focused={createCollectionFocused}
+            onPress={onOpenCreateCollection}
+          />
+        ) : null}
       </View>
     );
   }
@@ -470,6 +516,98 @@ export function LibraryEditorialTabs({
   );
 }
 
+function LibraryCreateCollectionTrigger({
+  padX,
+  isTv,
+  isTouch,
+  focused,
+  onPress,
+}: {
+  readonly padX: number;
+  readonly isTv: boolean;
+  readonly isTouch: boolean;
+  readonly focused: boolean;
+  readonly onPress: () => void;
+}): ReactElement {
+  const theme = useTheme();
+  const i18n = useI18n();
+  const cursor = webCursorPointer();
+  const transition = webTransition(theme, 'transform, background-color, border-color, opacity');
+  const [hovered, setHovered] = useState(false);
+  const handleHoverIn = useCallback(() => setHovered(true), []);
+  const handleHoverOut = useCallback(() => setHovered(false), []);
+  const label = i18n.t('library.collections.create');
+  const showTvFocus = isTv && focused;
+
+  return (
+    <View
+      testID="library-create-collection-footer"
+      style={[styles.createCollectionFooter, { paddingHorizontal: padX }]}
+    >
+      <Pressable
+        testID="library-create-collection-btn"
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        focusable={!isTv}
+        onPress={onPress}
+        onHoverIn={handleHoverIn}
+        onHoverOut={handleHoverOut}
+        style={({ pressed }) => [
+          styles.createCollectionBtn,
+          cursor,
+          transition,
+          {
+            minHeight: isTouch ? 44 : 40,
+            borderRadius: theme.radius.button,
+            borderWidth: 1,
+            borderColor:
+              hovered && !showTvFocus ? theme.colors.hoverRingBorder : theme.colors.surfaceBorder,
+            backgroundColor: showTvFocus
+              ? theme.colors.focusFill
+              : hovered
+                ? theme.colors.subtleHighlight
+                : 'transparent',
+            opacity: pressed ? 0.8 : 1,
+            transform: [{ scale: showTvFocus ? theme.focus.buttonScale : 1 }],
+          },
+        ]}
+      >
+        <Icon
+          name="plus"
+          size={16}
+          color={showTvFocus || hovered ? theme.colors.textPrimary : theme.colors.textSecondary}
+        />
+        <Text
+          numberOfLines={1}
+          style={[
+            theme.typography.caption,
+            styles.createCollectionLabel,
+            {
+              color: showTvFocus || hovered ? theme.colors.textPrimary : theme.colors.textSecondary,
+            },
+          ]}
+        >
+          {label}
+        </Text>
+        {showTvFocus ? (
+          <View
+            pointerEvents="none"
+            testID="library-create-collection-btn-focus-ring"
+            style={[
+              styles.createFocusRing,
+              {
+                borderRadius: theme.radius.button + 4,
+                borderWidth: theme.focus.ringWidth,
+                borderColor: theme.colors.focusRingColor,
+              },
+            ]}
+          />
+        ) : null}
+      </Pressable>
+    </View>
+  );
+}
+
 function LibraryEmptyNotice({
   testID,
   icon,
@@ -509,6 +647,29 @@ function LibraryEmptyNotice({
 const styles = StyleSheet.create({
   railsStack: { gap: 22 },
   ratingGroup: { gap: 14 },
+  createCollectionFooter: {
+    paddingTop: 4,
+    alignItems: 'flex-start',
+  },
+  createCollectionBtn: {
+    position: 'relative',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  createCollectionLabel: {
+    fontWeight: '600',
+  },
+  createFocusRing: {
+    position: 'absolute',
+    top: -4,
+    bottom: -4,
+    left: -4,
+    right: -4,
+  },
   emptyBox: {
     borderWidth: 1,
     alignItems: 'flex-start',

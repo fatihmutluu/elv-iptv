@@ -58,67 +58,85 @@ export function UtilitiesRow({
             : 'transparent';
 
         return (
-          <Tooltip key={util.id} content={util.label} placement="bottom" disabled={isTv || isTouch}>
-            <Pressable
-              testID={utilTestId}
-              accessibilityRole="tab"
-              accessibilityLabel={util.label}
-              accessibilityState={{ selected }}
-              {...(isTv ? { focusable: false } : {})}
-              onHoverIn={() => setHoveredId(util.id)}
-              onHoverOut={() => setHoveredId((prev) => (prev === util.id ? null : prev))}
-              onPress={() => {
-                util.onPress();
-                onExitNavFocus?.();
-              }}
-              style={[
-                iconOnly ? styles.iconOnlyItem : styles.utilityItem,
-                needsTouchTarget ? styles.touchTarget : null,
-                itemWebTransition,
-                itemWebCursor,
-                {
-                  borderRadius: iconOnly ? 999 : theme.radius.button,
-                  borderWidth: isTv ? theme.focus.ringWidth : 0,
-                  borderColor: tvFocused ? theme.colors.focusRingColor : 'transparent',
-                  backgroundColor: bgColor,
-                },
-              ]}
+          <View
+            key={util.id}
+            ref={util.triggerRef as never}
+            testID={`${utilTestId}-trigger`}
+            {...(util.onPointerEnter !== undefined ? { onPointerEnter: util.onPointerEnter } : {})}
+            {...(util.onPointerLeave !== undefined ? { onPointerLeave: util.onPointerLeave } : {})}
+          >
+            <Tooltip
+              content={util.label}
+              placement="bottom"
+              disabled={isTv || isTouch || Boolean(util.disableTooltip)}
             >
-              <View style={styles.utilityContent}>
-                {util.renderIcon ? (
-                  util.renderIcon({ focused: tvFocused, selected })
-                ) : (
-                  <Icon name={util.icon} size={isTv ? 20 : 18} color={fgColor} />
-                )}
+              <Pressable
+                testID={utilTestId}
+                accessibilityRole="tab"
+                accessibilityLabel={util.label}
+                accessibilityState={{ selected }}
+                {...(isTv ? { focusable: false } : {})}
+                onHoverIn={(event) => {
+                  setHoveredId(util.id);
+                  util.onHoverIn?.(event);
+                }}
+                onHoverOut={(event) => {
+                  setHoveredId((prev) => (prev === util.id ? null : prev));
+                  util.onHoverOut?.(event);
+                }}
+                onPress={() => {
+                  util.onPress();
+                  onExitNavFocus?.();
+                }}
+                style={[
+                  iconOnly ? styles.iconOnlyItem : styles.utilityItem,
+                  needsTouchTarget ? styles.touchTarget : null,
+                  itemWebTransition,
+                  itemWebCursor,
+                  {
+                    borderRadius: iconOnly ? 999 : theme.radius.button,
+                    borderWidth: isTv ? theme.focus.ringWidth : 0,
+                    borderColor: tvFocused ? theme.colors.focusRingColor : 'transparent',
+                    backgroundColor: bgColor,
+                  },
+                ]}
+              >
+                <View style={styles.utilityContent}>
+                  {util.renderIcon ? (
+                    util.renderIcon({ focused: tvFocused, selected })
+                  ) : (
+                    <Icon name={util.icon} size={isTv ? 20 : 18} color={fgColor} />
+                  )}
+                  {showLabel ? (
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        labelWebTransition,
+                        {
+                          ...(bodyFontFamily ? { fontFamily: bodyFontFamily } : {}),
+                          fontSize: labelFontSize,
+                          lineHeight: Math.round(labelFontSize * 1.3),
+                          fontWeight: selected ? '700' : '500',
+                          color: fgColor,
+                        },
+                      ]}
+                    >
+                      {util.label}
+                    </Text>
+                  ) : null}
+                </View>
                 {showLabel ? (
-                  <Text
-                    numberOfLines={1}
+                  <View
+                    testID={`${utilTestId}-underline`}
                     style={[
-                      labelWebTransition,
-                      {
-                        ...(bodyFontFamily ? { fontFamily: bodyFontFamily } : {}),
-                        fontSize: labelFontSize,
-                        lineHeight: Math.round(labelFontSize * 1.3),
-                        fontWeight: selected ? '700' : '500',
-                        color: fgColor,
-                      },
+                      styles.activeUnderline,
+                      { backgroundColor: selected ? theme.colors.accent : 'transparent' },
                     ]}
-                  >
-                    {util.label}
-                  </Text>
+                  />
                 ) : null}
-              </View>
-              {showLabel ? (
-                <View
-                  testID={`${utilTestId}-underline`}
-                  style={[
-                    styles.activeUnderline,
-                    { backgroundColor: selected ? theme.colors.accent : 'transparent' },
-                  ]}
-                />
-              ) : null}
-            </Pressable>
-          </Tooltip>
+              </Pressable>
+            </Tooltip>
+          </View>
         );
       })}
     </View>

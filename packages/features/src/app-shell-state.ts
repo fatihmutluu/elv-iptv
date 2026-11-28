@@ -10,8 +10,8 @@ import type { NavDestination, NavUtility } from './shell';
 
 export { createObservedCatalog } from './app-shell-observed-catalog';
 
-/** Primary top-level destination tabs (`Home`, `Live`, `Movies`, `Series`, `Library`). */
-export type PrimaryNavTab = 'home' | BrowseKind | 'library';
+/** Primary top-level destination tabs (`Home`, `Live`, `Movies`, `Series`). */
+export type PrimaryNavTab = 'home' | BrowseKind;
 
 /** Top-level shell tab identifier. */
 export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'library' | 'search' | 'settings';
@@ -21,44 +21,47 @@ function buildShellDestinations(labels: {
   readonly live: string;
   readonly movies: string;
   readonly series: string;
-  readonly library: string;
 }): readonly NavDestination<PrimaryNavTab>[] {
   return [
     { id: 'home', label: labels.home, icon: 'home', testID: 'nav-tab-home' },
     { id: 'live', label: labels.live, icon: 'tv', testID: 'nav-tab-live' },
     { id: 'movie', label: labels.movies, icon: 'film', testID: 'nav-tab-movie' },
     { id: 'series', label: labels.series, icon: 'series', testID: 'nav-tab-series' },
-    { id: 'library', label: labels.library, icon: 'library', testID: 'nav-tab-library' },
   ];
 }
 
 function buildShellUtilities(input: {
   readonly searchLabel: string;
-  readonly settingsLabel: string;
+  readonly libraryLabel: string;
   readonly activeTab: string;
   readonly hasActiveDetail: boolean;
+  readonly searchActive?: boolean;
   readonly onOpenSearch: () => void;
-  readonly onOpenSettings: () => void;
+  readonly onOpenLibrary: () => void;
   readonly profileUtility?: NavUtility;
 }): readonly NavUtility[] {
+  const libraryActive = input.activeTab === 'library' && !input.hasActiveDetail;
+  const searchActive =
+    Boolean(input.searchActive) || (input.activeTab === 'search' && !input.hasActiveDetail);
   const list: NavUtility[] = [
     {
       id: 'search',
       label: input.searchLabel,
       icon: 'search',
-      active: input.activeTab === 'search' && !input.hasActiveDetail,
+      active: searchActive,
       showLabel: false,
-      testID: 'nav-tab-search',
+      activateOnSelectOnly: true,
+      testID: 'nav-utility-search',
       onPress: input.onOpenSearch,
     },
     {
-      id: 'settings',
-      label: input.settingsLabel,
-      icon: 'settings',
-      active: input.activeTab === 'settings',
+      id: 'library',
+      label: input.libraryLabel,
+      icon: libraryActive ? 'bookmarkFilled' : 'bookmark',
+      active: libraryActive,
       showLabel: false,
-      testID: 'nav-tab-settings',
-      onPress: input.onOpenSettings,
+      testID: 'nav-utility-library',
+      onPress: input.onOpenLibrary,
     },
   ];
   if (input.profileUtility !== undefined) {
@@ -262,13 +265,14 @@ export function buildShellCrashProps(input: {
   };
 }
 
-/** Builds the canonical 5+2 `AdaptiveNavShell` destinations and utilities in one call. */
+/** Builds the canonical 4+3 `AdaptiveNavShell` destinations (`Home | Live | Movies | Series`) and utilities (`Search`, `Library`, `Profile`). */
 export function buildShellNavigation(input: {
   readonly t: AppI18n['t'];
   readonly activeTab: string;
   readonly hasActiveDetail: boolean;
+  readonly searchActive?: boolean;
   readonly onOpenSearch: () => void;
-  readonly onOpenSettings: () => void;
+  readonly onOpenLibrary: () => void;
   readonly profileUtility?: NavUtility;
 }) {
   return {
@@ -277,15 +281,15 @@ export function buildShellNavigation(input: {
       live: input.t('nav.live'),
       movies: input.t('nav.movies'),
       series: input.t('nav.series'),
-      library: input.t('nav.library'),
     }),
     utilities: buildShellUtilities({
       searchLabel: input.t('nav.search'),
-      settingsLabel: input.t('nav.settings'),
+      libraryLabel: input.t('nav.library'),
       activeTab: input.activeTab,
       hasActiveDetail: input.hasActiveDetail,
+      ...(input.searchActive !== undefined ? { searchActive: input.searchActive } : {}),
       onOpenSearch: input.onOpenSearch,
-      onOpenSettings: input.onOpenSettings,
+      onOpenLibrary: input.onOpenLibrary,
       ...(input.profileUtility !== undefined ? { profileUtility: input.profileUtility } : {}),
     }),
   };

@@ -1,6 +1,6 @@
 import type { DownloadRecord } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   type DownloadedSeriesGroup,
   LIBRARY_SUB_TABS,
@@ -162,18 +162,50 @@ export function useTvLibraryNavigation({
   const [tvZone, setTvZone] = useState<'create-collection' | 'tabs' | 'content'>('tabs');
   const [tvRowIdx, setTvRowIdx] = useState(0);
   const [tvColIdx, setTvColIdx] = useState(0);
-
-  const resetFocus = useCallback(() => {
-    setTvZone('tabs');
-    setTvRowIdx(0);
-    setTvColIdx(0);
-  }, []);
+  const hasBottomCreate = canCreateCollection && activeTab === 'following';
+  const effectiveTvZone =
+    tvZone === 'create-collection' && !hasBottomCreate
+      ? 'tabs'
+      : tvZone === 'content' && navRails.length === 0
+        ? 'tabs'
+        : tvZone;
 
   const clampedRowIdx =
     navRails.length === 0 ? 0 : Math.min(Math.max(0, tvRowIdx), navRails.length - 1);
 
+  const tvZoneRef = useRef(effectiveTvZone);
+  const tvRowIdxRef = useRef(clampedRowIdx);
+  const tvColIdxRef = useRef(tvColIdx);
+  tvZoneRef.current = effectiveTvZone;
+  tvRowIdxRef.current = clampedRowIdx;
+  tvColIdxRef.current = tvColIdx;
+
+  const updateZone = useCallback((next: 'create-collection' | 'tabs' | 'content') => {
+    tvZoneRef.current = next;
+    setTvZone(next);
+  }, []);
+  const updateRowIdx = useCallback((next: number) => {
+    tvRowIdxRef.current = next;
+    setTvRowIdx(next);
+  }, []);
+  const updateColIdx = useCallback((next: number) => {
+    tvColIdxRef.current = next;
+    setTvColIdx(next);
+  }, []);
+
+  const resetFocus = useCallback(() => {
+    updateZone('tabs');
+    updateRowIdx(0);
+    updateColIdx(0);
+  }, [updateColIdx, updateRowIdx, updateZone]);
+
   const handleTvKey = useCallback(
     (event: KeyEvent): boolean => {
+      const currentZone = tvZoneRef.current;
+      const currentRowIdx =
+        navRails.length === 0 ? 0 : Math.min(Math.max(0, tvRowIdxRef.current), navRails.length - 1);
+      const currentColIdx = tvColIdxRef.current;
+
       const isMenuTrigger =
         (event.kind === 'press' && (event.key === 'menu' || event.key === 'info')) ||
         (event.kind === 'long' && event.key === 'select');
@@ -184,7 +216,7 @@ export function useTvLibraryNavigation({
           return true;
         }
         const eps = selectedSeriesGroup.episodes;
-        const idx = eps.length === 0 ? -1 : Math.min(Math.max(0, tvRowIdx), eps.length - 1);
+        const idx = eps.length === 0 ? -1 : Math.min(Math.max(0, currentRowIdx), eps.length - 1);
         if (isMenuTrigger && idx >= 0) {
           const ep = eps[idx];
           if (ep) onOpenDownloadedMenu(ep);
@@ -193,11 +225,11 @@ export function useTvLibraryNavigation({
         if (event.kind !== 'press' && event.kind !== 'repeat') return false;
         if (event.key === 'up') {
           if (idx <= 0) onFocusTopNav?.();
-          else setTvRowIdx(idx - 1);
+          else updateRowIdx(idx - 1);
           return true;
         }
         if (event.key === 'down' && idx < eps.length - 1) {
-          setTvRowIdx(idx + 1);
+          updateRowIdx(idx + 1);
           return true;
         }
         if (event.key === 'select' && idx >= 0) {
@@ -214,7 +246,9 @@ export function useTvLibraryNavigation({
           return true;
         }
         const idx =
-          seeAllItems.length === 0 ? -1 : Math.min(Math.max(0, tvColIdx), seeAllItems.length - 1);
+          seeAllItems.length === 0
+            ? -1
+            : Math.min(Math.max(0, currentColIdx), seeAllItems.length - 1);
         if (isMenuTrigger && idx >= 0) {
           const item = seeAllItems[idx];
           if (!item) return false;
@@ -225,20 +259,20 @@ export function useTvLibraryNavigation({
         }
         if (event.kind !== 'press' && event.kind !== 'repeat') return false;
         if (event.key === 'left' && idx > 0) {
-          setTvColIdx(idx - 1);
+          updateColIdx(idx - 1);
           return true;
         }
         if (event.key === 'right' && idx < seeAllItems.length - 1) {
-          setTvColIdx(idx + 1);
+          updateColIdx(idx + 1);
           return true;
         }
         if (event.key === 'up') {
           if (idx <= 0) onFocusTopNav?.();
-          else setTvColIdx(Math.max(0, idx - 4));
+          else updateColIdx(Math.max(0, idx - 4));
           return true;
         }
         if (event.key === 'down' && idx < seeAllItems.length - 1) {
-          setTvColIdx(Math.min(seeAllItems.length - 1, idx + 4));
+          updateColIdx(Math.min(seeAllItems.length - 1, idx + 4));
           return true;
         }
         if (event.key === 'select' && idx >= 0) {
@@ -246,7 +280,7 @@ export function useTvLibraryNavigation({
           if (!item) return false;
           if (seeAll.kind === 'downloaded-series') {
             onSelectSeriesGroup(item.id);
-            setTvRowIdx(0);
+            updateRowIdx(0);
           } else {
             onPressCard(item);
           }
@@ -256,22 +290,27 @@ export function useTvLibraryNavigation({
       }
 
       if (event.kind === 'press' && event.key === 'back') {
-        if (tvZone === 'content' || tvZone === 'create-collection') {
-          setTvZone('tabs');
+        if (currentZone === 'content' || currentZone === 'create-collection') {
+          updateZone('tabs');
           return true;
         }
         onFocusTopNav?.();
         return true;
       }
 
-      if (tvZone === 'create-collection') {
+      if (currentZone === 'create-collection') {
         if (event.kind !== 'press' && event.kind !== 'repeat') return false;
         if (event.key === 'up') {
-          onFocusTopNav?.();
+          if (navRails.length > 0) {
+            updateZone('content');
+            updateRowIdx(navRails.length - 1);
+            updateColIdx(0);
+          } else {
+            updateZone('tabs');
+          }
           return true;
         }
         if (event.key === 'down') {
-          setTvZone('tabs');
           return true;
         }
         if (event.key === 'select') {
@@ -281,7 +320,7 @@ export function useTvLibraryNavigation({
         return false;
       }
 
-      if (tvZone === 'tabs') {
+      if (currentZone === 'tabs') {
         if (event.kind !== 'press' && event.kind !== 'repeat') return false;
         const tabIdx = LIBRARY_SUB_TABS.indexOf(activeTab);
         if (event.key === 'left' && tabIdx > 0) {
@@ -295,29 +334,25 @@ export function useTvLibraryNavigation({
           return true;
         }
         if (event.key === 'up') {
-          if (canCreateCollection && activeTab === 'following') {
-            setTvZone('create-collection');
-            return true;
-          }
           onFocusTopNav?.();
           return true;
         }
         if (event.key === 'down') {
           if (navRails.length > 0) {
-            setTvZone('content');
-            setTvRowIdx(0);
-            setTvColIdx(0);
+            updateZone('content');
+            updateRowIdx(0);
+            updateColIdx(0);
             return true;
           }
-          if (canCreateCollection && activeTab === 'following') {
-            setTvZone('create-collection');
+          if (hasBottomCreate) {
+            updateZone('create-collection');
             return true;
           }
         }
         return false;
       }
 
-      const rail = navRails[clampedRowIdx];
+      const rail = navRails[currentRowIdx];
       if (!rail) return false;
       const railLen =
         rail.kind === 'collection-actions'
@@ -327,7 +362,7 @@ export function useTvLibraryNavigation({
             : rail.kind === 'downloaded-series'
               ? (rail.seriesGroups?.length ?? 0)
               : (rail.items?.length ?? 0);
-      const col = railLen === 0 ? 0 : Math.min(Math.max(0, tvColIdx), railLen - 1);
+      const col = railLen === 0 ? 0 : Math.min(Math.max(0, currentColIdx), railLen - 1);
 
       if (isMenuTrigger) {
         if (rail.kind === 'active-download' && rail.activeRecord) {
@@ -354,27 +389,32 @@ export function useTvLibraryNavigation({
 
       if (event.kind !== 'press' && event.kind !== 'repeat') return false;
       if (event.key === 'up') {
-        if (clampedRowIdx <= 0) {
-          setTvZone('tabs');
+        if (currentRowIdx <= 0) {
+          updateZone('tabs');
           return true;
         }
-        setTvRowIdx(clampedRowIdx - 1);
-        setTvColIdx(0);
+        updateRowIdx(currentRowIdx - 1);
+        updateColIdx(0);
         return true;
       }
       if (event.key === 'down') {
-        if (clampedRowIdx < navRails.length - 1) {
-          setTvRowIdx(clampedRowIdx + 1);
-          setTvColIdx(0);
+        if (currentRowIdx < navRails.length - 1) {
+          updateRowIdx(currentRowIdx + 1);
+          updateColIdx(0);
+          return true;
+        }
+        if (hasBottomCreate) {
+          updateZone('create-collection');
+          return true;
         }
         return true;
       }
       if (event.key === 'left' && col > 0) {
-        setTvColIdx(col - 1);
+        updateColIdx(col - 1);
         return true;
       }
       if (event.key === 'right' && col < railLen - 1) {
-        setTvColIdx(col + 1);
+        updateColIdx(col + 1);
         return true;
       }
       if (event.key === 'select') {
@@ -392,7 +432,7 @@ export function useTvLibraryNavigation({
           const group = rail.seriesGroups?.[col];
           if (group) {
             onSelectSeriesGroup(group.groupId);
-            setTvRowIdx(0);
+            updateRowIdx(0);
           }
           return true;
         }
@@ -404,8 +444,7 @@ export function useTvLibraryNavigation({
     },
     [
       activeTab,
-      canCreateCollection,
-      clampedRowIdx,
+      hasBottomCreate,
       navRails,
       onCloseSeeAll,
       onDeleteCollection,
@@ -424,19 +463,19 @@ export function useTvLibraryNavigation({
       seeAll,
       seeAllItems,
       selectedSeriesGroup,
-      tvColIdx,
-      tvRowIdx,
-      tvZone,
+      updateColIdx,
+      updateRowIdx,
+      updateZone,
     ],
   );
 
   return {
-    tvZone,
+    tvZone: effectiveTvZone,
     tvRowIdx,
     tvColIdx,
     clampedRowIdx,
     resetFocus,
-    setTvRowIdx,
+    setTvRowIdx: updateRowIdx,
     handleTvKey,
   };
 }

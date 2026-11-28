@@ -1,3 +1,4 @@
+export { SearchPopupOverlay, type SearchPopupOverlayProps } from './SearchPopupOverlay';
 export { SearchResultsSection, type SearchResultsSectionProps } from './SearchResultsSection';
 export { SearchScreen, type SearchScreenProps } from './SearchScreen';
 export {
@@ -21,6 +22,19 @@ export {
   sanitizeSearchQuery,
   stepSearchFocus,
 } from './search-model';
+export {
+  buildSearchPopupNavRows,
+  buildSearchPopupSuggestions,
+  SEARCH_POPUP_RAIL_LIMIT,
+  SEARCH_POPUP_SUGGESTION_LIMIT,
+  type SearchPopupFocusPosition,
+  type SearchPopupFocusStepResult,
+  type SearchPopupNavDirection,
+  type SearchPopupNavRowDescriptor,
+  type SearchPopupNavRowId,
+  type SearchPopupSuggestion,
+  stepSearchPopupFocus,
+} from './search-popup-model';
 export {
   type CatalogSearchState,
   type UseCatalogSearchOptions,

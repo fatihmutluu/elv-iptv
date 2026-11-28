@@ -2,7 +2,6 @@ import type { BrowseKind, CatalogService, SourceRow } from '@elv/data';
 import type { DownloadRecord } from '@elv/domain';
 import {
   type ContextMenuAnchor,
-  CtaButton,
   EditorialCategoryBar,
   type EditorialCategoryItem,
   TvFocusAnchor,
@@ -12,7 +11,15 @@ import {
   useTheme,
   useViewport,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useMemo, useState } from 'react';
+import {
+  type ComponentRef,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import {
@@ -108,6 +115,7 @@ export function LibraryScreen({
   const [seeAll, setSeeAll] = useState<LibrarySeeAllState | null>(null);
   const [selectedSeriesGroupId, setSelectedSeriesGroupId] = useState<string | null>(null);
   const [collectionModal, setCollectionModal] = useState<LibraryCollectionModalState | null>(null);
+  const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
 
   const dlPartition = useMemo(
     () => partitionLibraryDownloads(downloads.records),
@@ -501,6 +509,18 @@ export function LibraryScreen({
     [selectSubTab, tv],
   );
 
+  useEffect(() => {
+    if (
+      isTv &&
+      isActiveScope &&
+      seeAll === null &&
+      selectedSeriesGroup === null &&
+      tv.tvZone === 'create-collection'
+    ) {
+      scrollViewRef.current?.scrollToEnd({ animated: !theme.reduceMotion });
+    }
+  }, [isActiveScope, isTv, seeAll, selectedSeriesGroup, theme.reduceMotion, tv.tvZone]);
+
   const tabItems = useMemo<readonly EditorialCategoryItem[]>(
     () => [
       { id: 'following', label: i18n.t('library.tabFollowing'), testID: 'library-tab-following' },
@@ -521,11 +541,6 @@ export function LibraryScreen({
     if (focusedRailId !== `collection-actions-${collectionId}`) return null;
     return tv.tvColIdx === 0 ? 'rename' : 'delete';
   };
-  const showCreateCollectionCta =
-    activeTab === 'following' &&
-    seeAll === null &&
-    selectedSeriesGroup === null &&
-    canCreateCollection;
   const focusedActiveIdx =
     isTv &&
     isActiveScope &&
@@ -541,6 +556,7 @@ export function LibraryScreen({
       ) : null}
 
       <ScrollView
+        ref={scrollViewRef}
         testID="library-scroll"
         {...(isTv ? { focusable: false } : {})}
         showsVerticalScrollIndicator={false}
@@ -555,17 +571,6 @@ export function LibraryScreen({
             <Text style={[theme.typography.h1, { color: theme.colors.textPrimary }]}>
               {i18n.t('library.title')}
             </Text>
-            {showCreateCollectionCta ? (
-              <CtaButton
-                testID="library-create-collection-btn"
-                variant="secondary"
-                icon="plus"
-                label={i18n.t('library.collections.create')}
-                focusable={!isTv}
-                focused={isTv && isActiveScope && tv.tvZone === 'create-collection'}
-                onPress={handleOpenCreateCollection}
-              />
-            ) : null}
           </View>
           <EditorialCategoryBar
             testID="library-subtabs"
@@ -698,6 +703,9 @@ export function LibraryScreen({
             dragController={dragController}
             onRenameCollection={handleOpenRenameCollection}
             onDeleteCollection={handleOpenDeleteCollection}
+            canCreateCollection={canCreateCollection}
+            createCollectionFocused={isTv && isActiveScope && tv.tvZone === 'create-collection'}
+            onOpenCreateCollection={handleOpenCreateCollection}
             onPressCard={handlePressCard}
             onContextMenuLive={openLiveContextMenu}
             onContextMenuVod={openVodContextMenu}

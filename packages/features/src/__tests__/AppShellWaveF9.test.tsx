@@ -179,9 +179,9 @@ describe('AppShell Wave F9 integration', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('nav-tab-profile')).toBeTruthy();
+        expect(screen.getByTestId('nav-utility-profile')).toBeTruthy();
       });
-      await fireEvent.press(screen.getByTestId('nav-tab-profile'));
+      await fireEvent.press(screen.getByTestId('nav-utility-profile'));
 
       // Simulate incoming E2EE sync inserting a new profile directly in SQLite
       const created = await env.catalog.createProfile?.({
@@ -204,6 +204,52 @@ describe('AppShell Wave F9 integration', () => {
       await waitFor(() => {
         expect(screen.getByText('SyncedGuest')).toBeTruthy();
       });
+    } finally {
+      await view?.unmount();
+      await env.cleanup();
+    }
+  });
+
+  it('calls syncAccount.signOut() when Sign out is pressed inside ProfileDropdownMenu while cloud account is signed in', async () => {
+    const env = await openTestShell();
+    const prefsStore = createMemoryPreferencesStore({
+      welcomeDismissed: true,
+      privacyConsentAnswered: true,
+    });
+    const signedInState: SyncAccountState = {
+      status: 'signed_in',
+      email: 'viewer@example.test',
+      lastSyncedAtIso: '2026-11-28T00:00:00.000Z',
+      pendingRecoveryCode: null,
+      errorCode: null,
+    };
+    const syncAccount: SyncAccountPort = {
+      ...createSignedOutSyncPort(),
+      getState: jest.fn(() => signedInState),
+    };
+
+    let view: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      view = await render(
+        <AppProviders preferencesStore={prefsStore}>
+          <FormFactorProvider value="desktop">
+            <I18nProvider i18n={createAppI18n('en')}>
+              <AppShell catalog={env.catalog} videoHost={env.videoHost} syncAccount={syncAccount} />
+            </I18nProvider>
+          </FormFactorProvider>
+        </AppProviders>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('nav-utility-profile')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('nav-utility-profile'));
+      await waitFor(() => {
+        expect(screen.getByTestId('profile-menu-sign-out')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('profile-menu-sign-out'));
+
+      expect(syncAccount.signOut).toHaveBeenCalledTimes(1);
     } finally {
       await view?.unmount();
       await env.cleanup();

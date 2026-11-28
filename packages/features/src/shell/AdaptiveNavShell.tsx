@@ -10,7 +10,7 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useMemo, useRef, useState } from 'react';
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, type TextStyle, View } from 'react-native';
 import { useRouteActive } from '../shared';
 import { AmbientTvClock } from '../shared/AmbientTvClock';
@@ -20,6 +20,7 @@ import type { AdaptiveNavShellProps } from './types';
 interface UnifiedNavItem {
   readonly id: string;
   readonly active: boolean;
+  readonly activateOnSelectOnly: boolean;
   readonly activate: () => void;
 }
 
@@ -77,11 +78,13 @@ export function AdaptiveNavShell<TId extends string = string>({
       ...destinations.map((dest) => ({
         id: dest.id,
         active: dest.id === activeId,
+        activateOnSelectOnly: false,
         activate: () => onSelectDestination(dest.id),
       })),
       ...utilities.map((util) => ({
         id: util.id,
         active: Boolean(util.active) || util.id === activeId,
+        activateOnSelectOnly: Boolean(util.activateOnSelectOnly),
         activate: util.onPress,
       })),
     ],
@@ -89,13 +92,19 @@ export function AdaptiveNavShell<TId extends string = string>({
   );
 
   const [fallbackFocusedIndex, setFallbackFocusedIndex] = useState(0);
+  const [selectOnlyHighlightIndex, setSelectOnlyHighlightIndex] = useState<number | null>(null);
   const activeUnifiedIndex = unifiedItems.findIndex((item) => item.active);
+  useEffect(() => {
+    if (!navFocused) setSelectOnlyHighlightIndex(null);
+  }, [navFocused]);
   const resolvedTvFocusedIndex =
-    activeUnifiedIndex >= 0
-      ? activeUnifiedIndex
-      : unifiedItems.length > 0
-        ? Math.min(fallbackFocusedIndex, unifiedItems.length - 1)
-        : -1;
+    selectOnlyHighlightIndex !== null && selectOnlyHighlightIndex < unifiedItems.length
+      ? selectOnlyHighlightIndex
+      : activeUnifiedIndex >= 0
+        ? activeUnifiedIndex
+        : unifiedItems.length > 0
+          ? Math.min(fallbackFocusedIndex, unifiedItems.length - 1)
+          : -1;
   const focusedItemId =
     isTv && navFocused && resolvedTvFocusedIndex >= 0
       ? unifiedItems[resolvedTvFocusedIndex]?.id
@@ -125,11 +134,27 @@ export function AdaptiveNavShell<TId extends string = string>({
       const delta = event.key === 'right' ? 1 : -1;
       const nextIdx = (baseIdx + delta + items.length) % items.length;
       pendingNavIndexRef.current = nextIdx;
-      setFallbackFocusedIndex(nextIdx);
-      items[nextIdx]?.activate();
+      const target = items[nextIdx];
+      if (target?.activateOnSelectOnly) {
+        setSelectOnlyHighlightIndex(nextIdx);
+      } else {
+        setSelectOnlyHighlightIndex(null);
+        setFallbackFocusedIndex(nextIdx);
+        target?.activate();
+      }
       return true;
     }
-    if (event.kind === 'press' && (event.key === 'down' || event.key === 'select')) {
+    if (event.kind === 'press' && event.key === 'down') {
+      setSelectOnlyHighlightIndex(null);
+      onExitNavFocusRef.current?.();
+      return true;
+    }
+    if (event.kind === 'press' && event.key === 'select') {
+      const focused = unifiedItemsRef.current[pendingNavIndexRef.current];
+      if (focused?.activateOnSelectOnly) {
+        focused.activate();
+        return true;
+      }
       onExitNavFocusRef.current?.();
       return true;
     }

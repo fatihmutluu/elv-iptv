@@ -300,14 +300,20 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
           {i18n.t('live.favoritesEmptyBody')}
         </Text>
         {onBrowseChannels ? (
-          <CtaButton
-            testID="live-browse-channels"
-            label={i18n.t('live.browseChannels')}
-            variant="primary"
-            focusable={!layout.isTv}
-            focused={layout.isTv && focusedControl === 'browse'}
-            onPress={onBrowseChannels}
-          />
+          <View
+            testID="live-favorites-empty-actions"
+            style={[styles.emptyActions, { marginTop: theme.spacing.sm }]}
+          >
+            <CtaButton
+              testID="live-browse-channels"
+              label={i18n.t('live.browseChannels')}
+              variant="primary"
+              focusable={!layout.isTv}
+              focused={layout.isTv && focusedControl === 'browse'}
+              onPress={onBrowseChannels}
+              style={styles.emptyBrowseCta}
+            />
+          </View>
         ) : null}
       </View>
     );
@@ -607,8 +613,17 @@ const styles = StyleSheet.create({
   stageDesktop: { flex: 1, flexDirection: 'row', overflow: 'hidden' },
   desktopMainCol: { flex: 1, minWidth: 0 },
   previewSurfaceDesktop: { flex: 1, minHeight: 160, overflow: 'hidden' },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  emptyWrap: {
+    flex: 1,
+    width: '100%',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
   emptyBody: { maxWidth: 420 },
+  emptyActions: { width: '100%', alignItems: 'center', justifyContent: 'center' },
+  emptyBrowseCta: { alignSelf: 'center' },
   centerText: { textAlign: 'center' },
   floatingOverlayChrome: {
     position: 'absolute',

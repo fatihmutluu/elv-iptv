@@ -2,6 +2,7 @@ import type { CatalogService, SourceRow } from '@elv/data';
 import {
   type MutableRefObject,
   type ReactElement,
+  type RefObject,
   useCallback,
   useEffect,
   useMemo,
@@ -26,22 +27,70 @@ import type { CatalogUiCache, NavUtility } from './shell';
 /** Props of {@link AppShellProfileOverlays}. */
 export interface AppShellProfileOverlaysProps {
   readonly onOpenProfilesSettings: () => void;
+  readonly startInAdd?: boolean;
+  readonly onConsumeStartInAdd?: () => void;
+}
+
+/** Options extending {@link buildShellProfileUtility} with dropdown hover/click wiring. */
+export interface ShellProfileUtilityOptions {
+  readonly menuOpen?: boolean;
+  readonly disableTooltip?: boolean;
+  readonly triggerRef?: RefObject<unknown>;
+  readonly onPointerEnter?: (event?: unknown) => void;
+  readonly onPointerLeave?: (event?: unknown) => void;
+  readonly onPress?: () => void;
 }
 
 /**
- * Builds the quiet top-right profile avatar utility button opening the "Who's Watching?"
- * profile selector & editor (`UI_UX_PHILOSOPHY.md` §2.1, Wave P7).
+ * Switches to `targetId`, prompting the parental/guard PIN dialog first when switching out of
+ * Kids Mode or while parental controls are locked (`#15`, `#31`).
  */
-export function buildShellProfileUtility(profile: ProfileContextValue): NavUtility | undefined {
+export function selectProfileWithPinGate(profile: ProfileContextValue, targetId: string): void {
+  if (targetId === profile.activeProfileId || profile.parentalLoadError) {
+    profile.closeProfilePicker();
+    return;
+  }
+  const needsPinGate =
+    (profile.activeProfile.isKids || profile.parentalSettings.enabled) &&
+    profile.hasGuardPin &&
+    !profile.parentalUnlocked;
+  if (needsPinGate) {
+    profile.closeProfilePicker();
+    profile.openPinDialog({
+      mode: 'verify',
+      profileId: profile.guardPinProfileId ?? profile.activeProfileId,
+      verifyOnly: true,
+      onSuccess: () => {
+        void profile.switchProfile(targetId);
+      },
+    });
+    return;
+  }
+  void profile.switchProfile(targetId);
+}
+
+/**
+ * Builds the quiet top-right profile avatar utility button opening the frosted Profile menu
+ * (`UI_UX_PHILOSOPHY.md` §2.1, Wave R1).
+ */
+export function buildShellProfileUtility(
+  profile: ProfileContextValue,
+  options?: ShellProfileUtilityOptions,
+): NavUtility | undefined {
   if (profile.profiles.length === 0) return undefined;
   const active = profile.activeProfile;
   return {
     id: 'profile',
     label: active.name,
     icon: 'profile',
-    active: profile.profilePickerOpen,
+    active: Boolean(options?.menuOpen) || profile.profilePickerOpen,
     showLabel: false,
-    testID: 'nav-tab-profile',
+    activateOnSelectOnly: true,
+    testID: 'nav-utility-profile',
+    ...(options?.disableTooltip !== undefined ? { disableTooltip: options.disableTooltip } : {}),
+    ...(options?.triggerRef !== undefined ? { triggerRef: options.triggerRef } : {}),
+    ...(options?.onPointerEnter !== undefined ? { onPointerEnter: options.onPointerEnter } : {}),
+    ...(options?.onPointerLeave !== undefined ? { onPointerLeave: options.onPointerLeave } : {}),
     renderIcon: () => (
       <ProfileAvatarBadge
         name={active.name}
@@ -52,7 +101,7 @@ export function buildShellProfileUtility(profile: ProfileContextValue): NavUtili
         testID="nav-profile-avatar"
       />
     ),
-    onPress: profile.openProfilePicker,
+    onPress: options?.onPress ?? profile.openProfilePicker,
   };
 }
 
@@ -345,48 +394,25 @@ export function useShellManagementOverlays(
  */
 export function AppShellProfileOverlays({
   onOpenProfilesSettings,
+  startInAdd = false,
+  onConsumeStartInAdd,
 }: AppShellProfileOverlaysProps): ReactElement | null {
+  const profile = useProfile();
   const {
     profiles,
-    activeProfile,
     activeProfileId,
-    parentalSettings,
-    hasGuardPin,
-    guardPinProfileId,
-    parentalUnlocked,
-    parentalLoadError,
     profilePickerOpen,
     pinDialog,
-    switchProfile,
     verifyParentalPin,
     unlockParental,
     setParentalPin,
     clearParentalPin,
-    openPinDialog,
     closePinDialog,
     closeProfilePicker,
-  } = useProfile();
+  } = profile;
 
   const handleSelectProfile = (targetId: string) => {
-    if (targetId === activeProfileId || parentalLoadError) {
-      closeProfilePicker();
-      return;
-    }
-    const needsPinGate =
-      (activeProfile.isKids || parentalSettings.enabled) && hasGuardPin && !parentalUnlocked;
-    if (needsPinGate) {
-      closeProfilePicker();
-      openPinDialog({
-        mode: 'verify',
-        profileId: guardPinProfileId ?? activeProfileId,
-        verifyOnly: true,
-        onSuccess: () => {
-          void switchProfile(targetId);
-        },
-      });
-      return;
-    }
-    void switchProfile(targetId);
+    selectProfileWithPinGate(profile, targetId);
   };
 
   if (!profilePickerOpen && pinDialog === null) return null;
@@ -397,6 +423,8 @@ export function AppShellProfileOverlays({
         <ProfilePickerOverlay
           profiles={profiles}
           activeProfileId={activeProfileId}
+          startInAdd={startInAdd}
+          {...(onConsumeStartInAdd !== undefined ? { onConsumeStartInAdd } : {})}
           onSelectProfile={handleSelectProfile}
           onManageInSettings={() => {
             closeProfilePicker();

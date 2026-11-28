@@ -58,6 +58,9 @@ const EXPECTED_ICON_NAMES: readonly IconName[] = [
   'library',
   'likeFilled',
   'dislikeFilled',
+  'bookmark',
+  'bookmarkFilled',
+  'ban',
 ];
 
 const FILLED_ICONS: ReadonlySet<IconName> = new Set([
@@ -70,6 +73,7 @@ const FILLED_ICONS: ReadonlySet<IconName> = new Set([
   'skipNext',
   'likeFilled',
   'dislikeFilled',
+  'bookmarkFilled',
 ]);
 
 function assertValidShape(shape: IconShape): void {
@@ -193,5 +197,21 @@ describe('ICON_PATHS', () => {
       expect(spec.shapes.length).toBeGreaterThanOrEqual(2);
     }
     expect(ICON_PATHS.multiview.shapes).toHaveLength(4);
+  });
+
+  it('defines crisp Wave R1 bookmark, bookmarkFilled, and ban icons', () => {
+    expect(ICON_PATHS.bookmark.viewBox).toBe('0 0 24 24');
+    expect(ICON_PATHS.bookmark.filled).toBeUndefined();
+    expect(ICON_PATHS.bookmark.shapes.length).toBeGreaterThanOrEqual(1);
+
+    expect(ICON_PATHS.bookmarkFilled.viewBox).toBe('0 0 24 24');
+    expect(ICON_PATHS.bookmarkFilled.filled).toBe(true);
+    expect(ICON_PATHS.bookmarkFilled.shapes.length).toBeGreaterThanOrEqual(1);
+    expect(ICON_PATHS.bookmarkFilled.shapes[0]?.fill).toBe('currentColor');
+
+    expect(ICON_PATHS.ban.viewBox).toBe('0 0 24 24');
+    expect(ICON_PATHS.ban.filled).toBeUndefined();
+    expect(ICON_PATHS.ban.shapes.length).toBeGreaterThanOrEqual(2);
+    expect(ICON_PATHS.ban.shapes.some((shape) => shape.kind === 'circle')).toBe(true);
   });
 });

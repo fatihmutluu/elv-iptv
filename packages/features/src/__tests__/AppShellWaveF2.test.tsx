@@ -306,8 +306,9 @@ describe('AppShell Wave F2 (#273 Android TV Home Channels & Deep-Link + #60 Sett
       </AppProviders>,
     );
 
-    await waitFor(() => expect(screen.getByTestId('nav-tab-settings')).toBeTruthy());
-    await fireEvent.press(screen.getByTestId('nav-tab-settings'));
+    await waitFor(() => expect(screen.getByTestId('nav-utility-profile')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('nav-utility-profile'));
+    await fireEvent.press(screen.getByTestId('profile-menu-settings'));
     await waitFor(() => expect(screen.getByTestId('settings-tab-liveTv')).toBeTruthy());
     await act(async () => {
       await fireEvent.press(screen.getByTestId('settings-tab-liveTv'));

@@ -56,7 +56,10 @@ export type IconName =
   | 'multiview'
   | 'miniplayer'
   | 'popout'
-  | 'dock';
+  | 'dock'
+  | 'bookmark'
+  | 'bookmarkFilled'
+  | 'ban';
 
 /** Single SVG primitive shape within a 24x24 icon viewBox. */
 export type IconShape =
@@ -278,6 +281,9 @@ export const ICON_PATHS: Readonly<Record<IconName, IconSpec>> = {
     p('M21 3 11 13'),
     p('M11 7v6h6'),
   ),
+  bookmark: stroke(p('M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z')),
+  bookmarkFilled: filled(fp('M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z')),
+  ban: stroke(c(12, 12, 9), p('M5.64 5.64 18.36 18.36')),
 };
 
 /** Ordered list of every icon identifier registered in {@link ICON_PATHS}. */

@@ -69,7 +69,8 @@ const KIND_MESSAGE_ID: Readonly<Record<UserItemKind, MessageId>> = {
  * Full-bleed edge-to-edge Cinema Quietude Hero Spotlight (`UI_UX_PHILOSOPHY.md` §1 & §3).
  * Routes backdrop art through `ArtworkImage` (`maxDecodePx={960}`), layers strong bottom + left
  * dynamic scrims, leaves safe top clearance for the overlay `AdaptiveNavShell`, and exposes
- * primary Play/Resume CTA, live My List toggle, VOD Watched toggle, and carousel dots.
+ * primary Play/Resume CTA, circular Details (`i`) button, live My List toggle, VOD Watched toggle,
+ * and carousel dots.
  */
 export function HomeHero({
   slides,
@@ -269,11 +270,10 @@ export function HomeHero({
               onPress={() => onPlaySlide(slide)}
             />
             {canOpenDetails ? (
-              <CtaButton
+              <IconButton
                 testID="home-hero-details"
-                variant="secondary"
                 icon="info"
-                label={i18n.t('home.details')}
+                accessibilityLabel={i18n.t('home.details')}
                 focusable={!isTv}
                 focused={isTv && focusedAction === 'details'}
                 onPress={() => onOpenDetails(slide)}

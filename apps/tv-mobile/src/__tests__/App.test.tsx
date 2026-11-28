@@ -495,7 +495,9 @@ describe('App', () => {
     expect(screen.getByTestId('nav-tab-live')).toBeOnTheScreen();
     expect(screen.getByTestId('nav-tab-movie')).toBeOnTheScreen();
     expect(screen.getByTestId('nav-tab-series')).toBeOnTheScreen();
-    expect(screen.getByTestId('nav-tab-settings')).toBeOnTheScreen();
+    expect(screen.getByTestId('nav-utility-search')).toBeOnTheScreen();
+    expect(screen.getByTestId('nav-utility-library')).toBeOnTheScreen();
+    expect(screen.getByTestId('nav-utility-profile')).toBeOnTheScreen();
     expect(screen.getByTestId('settings-tab-sources')).toBeOnTheScreen();
     expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
     await view.unmount();
@@ -634,7 +636,8 @@ describe('App', () => {
     expect(settingsRead).toHaveBeenCalledWith('elv.preferences.v1');
     expect(screen.getByTestId('nav-tab-home')).toBeOnTheScreen();
     expect(screen.getByTestId('nav-tab-live')).toBeOnTheScreen();
-    expect(screen.getByTestId('nav-tab-settings')).toBeOnTheScreen();
+    expect(screen.getByTestId('nav-utility-library')).toBeOnTheScreen();
+    expect(screen.getByTestId('nav-utility-profile')).toBeOnTheScreen();
     expect(screen.getByTestId('settings-tab-sources')).toBeOnTheScreen();
 
     await view.unmount();

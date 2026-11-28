@@ -202,9 +202,15 @@ describe('AppShell Profiles & Parental Integration (#15, #31)', () => {
         </AppProviders>,
       );
 
+      // Wait for boot & dismiss auto startup picker when multiple profiles exist
+      await waitFor(() => {
+        expect(screen.getByTestId('profile-picker-close')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('profile-picker-close'));
+
       // Default profile is English and sees both General and 18+ Adult categories in Live -> Channels
       await waitFor(() => {
-        expect(screen.getByTestId('nav-tab-profile')).toBeTruthy();
+        expect(screen.getByTestId('nav-utility-profile')).toBeTruthy();
         expect(screen.getByTestId('nav-tab-home')).toHaveTextContent('Home');
       });
 
@@ -216,14 +222,14 @@ describe('AppShell Profiles & Parental Integration (#15, #31)', () => {
         expect(screen.getByText('18+ Adult')).toBeTruthy();
       });
 
-      // Open ProfilePickerOverlay from top-right utility avatar and switch to Kids
-      await fireEvent.press(screen.getByTestId('nav-tab-profile'));
-      expect(screen.getByTestId('profile-picker-overlay')).toBeTruthy();
-      await fireEvent.press(screen.getByTestId(`profile-picker-card-${kidsId}`));
+      // Open ProfileDropdownMenu from top-right utility avatar and switch to Kids
+      await fireEvent.press(screen.getByTestId('nav-utility-profile'));
+      expect(screen.getByTestId('profile-dropdown-menu')).toBeTruthy();
+      await fireEvent.press(screen.getByTestId(`profile-menu-item-${kidsId}`));
 
       // Locale flips to Turkish (Kids preference) and 18+ Adult category is filtered out cleanly!
       await waitFor(() => {
-        expect(screen.queryByTestId('profile-picker-overlay')).toBeNull();
+        expect(screen.queryByTestId('profile-dropdown-menu')).toBeNull();
         expect(screen.getByTestId('nav-tab-home')).toHaveTextContent('Ana Sayfa');
       });
 
@@ -533,8 +539,9 @@ describe('AppShell Profiles & Parental Integration (#15, #31)', () => {
       );
 
       // Go to Settings -> Profiles & Parental and unlock with PIN 1234
-      await waitFor(() => expect(screen.getByTestId('nav-tab-settings')).toBeTruthy());
-      await fireEvent.press(screen.getByTestId('nav-tab-settings'));
+      await waitFor(() => expect(screen.getByTestId('nav-utility-profile')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('nav-utility-profile'));
+      await fireEvent.press(screen.getByTestId('profile-menu-settings'));
       await waitFor(() => expect(screen.getByTestId('settings-tab-profiles')).toBeTruthy());
       await fireEvent.press(screen.getByTestId('settings-tab-profiles'));
       await waitFor(() => expect(screen.getByTestId('parental-unlock-button')).toBeTruthy());
@@ -560,7 +567,8 @@ describe('AppShell Profiles & Parental Integration (#15, #31)', () => {
       await waitFor(() => {
         expect(releaseSpy).toHaveBeenCalled();
       });
-      await fireEvent.press(screen.getByTestId('nav-tab-settings'));
+      await fireEvent.press(screen.getByTestId('nav-utility-profile'));
+      await fireEvent.press(screen.getByTestId('profile-menu-settings'));
       await waitFor(() => {
         expect(screen.getByTestId('parental-status-badge')).toHaveTextContent('Locked');
       });

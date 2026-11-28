@@ -33,6 +33,9 @@ export interface ProfilePickerOverlayProps {
   /** Retained for caller compatibility; Wave P7 manages profiles inline inside this overlay. */
   readonly onManageInSettings?: () => void;
   readonly onClose: () => void;
+  /** Optional flag opening directly onto the 2-step profile creation flow (`+ Add new`). */
+  readonly startInAdd?: boolean;
+  readonly onConsumeStartInAdd?: () => void;
   readonly testID?: string;
 }
 
@@ -53,6 +56,8 @@ export function ProfilePickerOverlay({
   activeProfileId,
   onSelectProfile,
   onClose,
+  startInAdd = false,
+  onConsumeStartInAdd,
   testID = 'profile-picker-overlay',
 }: ProfilePickerOverlayProps): ReactElement {
   const theme = useTheme();
@@ -140,6 +145,18 @@ export function ProfilePickerOverlay({
       setSubModal({ kind: 'add-type', selectedIsKids: false });
     });
   }, [runProtected]);
+
+  const consumedStartInAddRef = useRef(false);
+  useEffect(() => {
+    if (!startInAdd) {
+      consumedStartInAddRef.current = false;
+      return;
+    }
+    if (consumedStartInAddRef.current) return;
+    consumedStartInAddRef.current = true;
+    onConsumeStartInAdd?.();
+    openAddFlow();
+  }, [onConsumeStartInAdd, openAddFlow, startInAdd]);
 
   const openEditModal = useCallback(
     (profile: ProfileRecord) => {

@@ -93,8 +93,9 @@ describe('AppShell Settings -> About & Licenses', () => {
         );
 
         expect(screen.getByTestId('nav-tab-home')).toBeTruthy();
-        expect(screen.getByTestId('nav-tab-settings').props.accessibilityLabel).toBe('Settings');
-        expect(screen.getByTestId('nav-tab-settings').props.accessibilityState.selected).toBe(true);
+        expect(screen.getByTestId('nav-utility-search').props.accessibilityLabel).toBe('Search');
+        expect(screen.getByTestId('nav-utility-library').props.accessibilityLabel).toBe('Library');
+        expect(screen.getByTestId('nav-tab-home').props.accessibilityState.selected).toBe(false);
 
         await fireEvent.press(screen.getByTestId('settings-tab-licenses'));
 
@@ -153,7 +154,7 @@ describe('AppShell Settings -> About & Licenses', () => {
       // Start on empty catalog (Settings -> Sources content pane)
       expect(screen.getByTestId('sources-screen')).toBeTruthy();
 
-      // Back -> Settings sidebar -> Back -> Top Nav -> Left -> Search -> Right -> Settings
+      // Back -> Settings sidebar -> Back -> Top Nav -> Left highlights Profile (without leaving Settings)
       await pressKey(KEYCODE_BACK);
       expect(
         screen.getByTestId('settings-tv-focus-anchor', { includeHiddenElements: true }),
@@ -165,10 +166,8 @@ describe('AppShell Settings -> About & Licenses', () => {
       ).toBeTruthy();
 
       await pressKey(KEYCODE_DPAD_LEFT);
-      expect(screen.getByTestId('nav-tab-search').props.accessibilityState.selected).toBe(true);
-
-      await pressKey(KEYCODE_DPAD_RIGHT);
-      expect(screen.getByTestId('nav-tab-settings').props.accessibilityState.selected).toBe(true);
+      expect(screen.queryByTestId('profile-dropdown-menu')).toBeNull();
+      expect(screen.getByTestId('settings-screen')).toBeTruthy();
 
       // Down enters Settings sidebar -> Down moves from Sources to About & Licenses
       await pressKey(KEYCODE_DPAD_DOWN);
@@ -206,12 +205,11 @@ describe('AppShell Settings -> About & Licenses', () => {
       ).toBeTruthy();
       expect(screen.queryByTestId('notices-list-ring')).toBeNull();
 
-      // Back again returns cleanly to Top Nav on Settings tab
+      // Back again returns cleanly to Top Nav
       await pressKey(KEYCODE_BACK);
       expect(
         screen.getByTestId('nav-tv-focus-anchor', { includeHiddenElements: true }),
       ).toBeTruthy();
-      expect(screen.getByTestId('nav-tab-settings').props.accessibilityState.selected).toBe(true);
     } finally {
       await view?.unmount();
       await env.cleanup();

@@ -245,6 +245,33 @@ describe('Live Favorites, Editorial Categories & Embedded Live Preview', () => {
       expect(screen.getByTestId('live-favorites-empty')).toBeTruthy();
       expect(screen.getByTestId('live-browse-channels')).toBeTruthy();
     });
+    const emptyWrap = screen.getByTestId('live-favorites-empty');
+    const emptyStyle = StyleSheet.flatten(emptyWrap.props.style);
+    expect(emptyStyle.flexDirection).toBe('column');
+    expect(emptyStyle.alignItems).toBe('center');
+    expect(emptyStyle.justifyContent).toBe('center');
+    expect(emptyStyle.width).toBe('100%');
+    expect(emptyStyle.flex).toBe(1);
+
+    const serialized = JSON.stringify(view.toJSON());
+    const idxTitle = serialized.indexOf('No favorite channels yet');
+    const idxBody = serialized.indexOf('Star channels in Channels or TV Guide to watch them here.');
+    const idxBrowse = serialized.indexOf('"live-browse-channels"');
+    expect(idxTitle).toBeGreaterThan(-1);
+    expect(idxBody).toBeGreaterThan(idxTitle);
+    expect(idxBrowse).toBeGreaterThan(idxBody);
+
+    const browseBtnStyle = StyleSheet.flatten(
+      screen.getByTestId('live-browse-channels').props.style,
+    );
+    expect(browseBtnStyle.alignSelf).not.toBe('flex-start');
+
+    const ctaWrapStyle = StyleSheet.flatten(
+      screen.getByTestId('live-favorites-empty-actions').props.style,
+    );
+    expect(ctaWrapStyle.marginTop).toBeGreaterThan(0);
+    expect(ctaWrapStyle.alignItems).toBe('center');
+
     expect(screen.queryByTestId('live-prev-channel')).toBeNull();
     expect(screen.queryByTestId('live-toggle-numpad')).toBeNull();
 
@@ -675,5 +702,55 @@ describe('Live Favorites, Editorial Categories & Embedded Live Preview', () => {
     });
 
     await view.unmount();
+  });
+
+  it('keeps live-favorites-empty vertically stacked and full-width across Desktop, TV, and Mobile Portrait', async () => {
+    const viewports: readonly ViewportOverride[] = [
+      DESKTOP_VIEWPORT,
+      TV_VIEWPORT,
+      {
+        formFactor: 'phone',
+        orientation: 'portrait',
+        inputModality: 'touch',
+        width: 390,
+        height: 844,
+      },
+    ];
+    for (const vp of viewports) {
+      const { catalog } = createStatefulFavoriteCatalog([]);
+      const view = await renderLive(
+        <LiveScreen
+          catalog={catalog}
+          sources={[makeSource()]}
+          refreshToken={0}
+          memory={{ ...EMPTY_LIVE_MEMORY, mode: 'favorites' }}
+          onPlay={jest.fn()}
+          onOpenSources={jest.fn()}
+          nowMs={NOW_MS}
+        />,
+        { viewport: vp },
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('live-favorites-empty')).toBeTruthy();
+        expect(screen.getByTestId('live-browse-channels')).toBeTruthy();
+      });
+
+      const emptyStyle = StyleSheet.flatten(screen.getByTestId('live-favorites-empty').props.style);
+      expect(emptyStyle.flexDirection).toBe('column');
+      expect(emptyStyle.width).toBe('100%');
+      expect(emptyStyle.alignItems).toBe('center');
+
+      const serialized = JSON.stringify(view.toJSON());
+      const idxTitle = serialized.indexOf('No favorite channels yet');
+      const idxBody = serialized.indexOf(
+        'Star channels in Channels or TV Guide to watch them here.',
+      );
+      const idxBrowse = serialized.indexOf('"live-browse-channels"');
+      expect(idxTitle).toBeLessThan(idxBody);
+      expect(idxBody).toBeLessThan(idxBrowse);
+
+      await view.unmount();
+    }
   });
 });
