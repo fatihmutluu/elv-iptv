@@ -36,6 +36,7 @@ describe('preferences codec', () => {
       useTextureView: false,
       autoSubtitlesOnSkipBack: false,
       autoPlayNextEpisode: true,
+      detailTrailerMuted: true,
       playerVolume: 100,
       preferredAudioLang: '',
       preferredSubtitleLang: '',

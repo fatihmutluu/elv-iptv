@@ -3,7 +3,7 @@ import { Pressable, type StyleProp, StyleSheet, View, type ViewStyle } from 'rea
 import { Icon, type IconName } from '../icons';
 import { useTheme, webBackdropBlur, webCursorPointer, webShadow, webTransition } from '../theme';
 import { useViewport } from '../viewport';
-import { Tooltip } from './Tooltip';
+import { Tooltip, type TooltipPlacement } from './Tooltip';
 
 /** Props of {@link IconButton}. */
 export interface IconButtonProps {
@@ -11,6 +11,8 @@ export interface IconButtonProps {
   accessibilityLabel: string;
   /** Optional pointer-only hover tooltip override. Defaults to `accessibilityLabel`; pass `false` to disable. */
   tooltip?: string | false | undefined;
+  /** Preferred hover tooltip placement relative to the button (defaults to `'top'`). */
+  tooltipPlacement?: TooltipPlacement;
   active?: boolean;
   size?: number;
   onPress?: () => void;
@@ -38,6 +40,7 @@ export function IconButton({
   icon,
   accessibilityLabel,
   tooltip,
+  tooltipPlacement,
   active = false,
   size = 40,
   onPress,
@@ -164,6 +167,7 @@ export function IconButton({
   return (
     <Tooltip
       content={resolvedTooltip}
+      {...(tooltipPlacement !== undefined ? { placement: tooltipPlacement } : {})}
       disabled={disabled}
       testID={testID ? `${testID}-tooltip` : undefined}
     >

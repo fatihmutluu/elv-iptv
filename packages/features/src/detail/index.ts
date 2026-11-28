@@ -1,4 +1,8 @@
 export {
+  DetailHeroTrailerPreview,
+  type DetailHeroTrailerPreviewProps,
+} from './DetailHeroTrailerPreview';
+export {
   DetailScopePicker,
   type DetailScopePickerMode,
   type DetailScopePickerProps,
@@ -26,3 +30,17 @@ export {
   resolveSeriesPrimaryEpisode,
   type SeriesPrimaryEpisodeSelection,
 } from './detail-model';
+export {
+  buildYoutubeCommand,
+  buildYoutubeListeningHandshake,
+  buildYoutubeMuteCommand,
+  DETAIL_TRAILER_AUTOPLAY_DELAY_MS,
+  DETAIL_TRAILER_PRELOAD_DELAY_MS,
+  type HeroTrailerSource,
+  parseYoutubePlayerMessageEvent,
+  type ResolveHeroTrailerSourceInput,
+  resolveHeroTrailerSource,
+  type TrailerPreviewPhase,
+  YOUTUBE_NOCOOKIE_ORIGIN,
+  type YoutubeIframeCommandFunc,
+} from './detail-trailer-preview-model';

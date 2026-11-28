@@ -146,6 +146,7 @@ export interface PreferencesSnapshot
   readonly useTextureView: boolean;
   readonly autoSubtitlesOnSkipBack: boolean;
   readonly autoPlayNextEpisode: boolean;
+  readonly detailTrailerMuted: boolean;
   readonly playerVolume: number;
 }
 
@@ -160,6 +161,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   useTextureView: false,
   autoSubtitlesOnSkipBack: false,
   autoPlayNextEpisode: true,
+  detailTrailerMuted: true,
   playerVolume: 100,
   preferredAudioLang: '',
   preferredSubtitleLang: '',
@@ -295,6 +297,10 @@ export function parsePreferences(
     typeof parsed.autoPlayNextEpisode === 'boolean'
       ? parsed.autoPlayNextEpisode
       : defaults.autoPlayNextEpisode;
+  const detailTrailerMuted =
+    typeof parsed.detailTrailerMuted === 'boolean'
+      ? parsed.detailTrailerMuted
+      : defaults.detailTrailerMuted;
   const playerVolume =
     typeof parsed.playerVolume === 'number' && Number.isFinite(parsed.playerVolume)
       ? clampPlayerVolume(parsed.playerVolume)
@@ -310,6 +316,7 @@ export function parsePreferences(
     useTextureView,
     autoSubtitlesOnSkipBack,
     autoPlayNextEpisode,
+    detailTrailerMuted,
     playerVolume,
     ...parseExtendedPreferences(parsed, defaults),
     ...parseWaveF9Preferences(parsed, defaults),
@@ -322,6 +329,10 @@ export function parsePreferences(
  * in UTF-8 byte length. Returns `storage/preferences-too-large` if the serialized payload exceeds budget.
  */
 export function serializePreferences(snapshot: PreferencesSnapshot): Result<string> {
+  const detailTrailerMuted =
+    typeof snapshot.detailTrailerMuted === 'boolean'
+      ? snapshot.detailTrailerMuted
+      : DEFAULT_PREFERENCES.detailTrailerMuted;
   const payload = JSON.stringify({
     version: PREFERENCES_SCHEMA_VERSION,
     themePreset: snapshot.themePreset,
@@ -336,6 +347,9 @@ export function serializePreferences(snapshot: PreferencesSnapshot): Result<stri
     useTextureView: Boolean(snapshot.useTextureView),
     autoSubtitlesOnSkipBack: Boolean(snapshot.autoSubtitlesOnSkipBack),
     autoPlayNextEpisode: Boolean(snapshot.autoPlayNextEpisode),
+    ...(detailTrailerMuted === DEFAULT_PREFERENCES.detailTrailerMuted
+      ? {}
+      : { detailTrailerMuted }),
     playerVolume:
       typeof snapshot.playerVolume === 'number' && Number.isFinite(snapshot.playerVolume)
         ? clampPlayerVolume(snapshot.playerVolume)
@@ -370,6 +384,10 @@ function mergeCandidate(base: PreferencesSnapshot, patch: PreferencesPatch): Pre
     typeof patch.autoPlayNextEpisode === 'boolean'
       ? patch.autoPlayNextEpisode
       : base.autoPlayNextEpisode;
+  const detailTrailerMuted =
+    typeof patch.detailTrailerMuted === 'boolean'
+      ? patch.detailTrailerMuted
+      : base.detailTrailerMuted;
   const playerVolume =
     typeof patch.playerVolume === 'number' && Number.isFinite(patch.playerVolume)
       ? clampPlayerVolume(patch.playerVolume)
@@ -384,6 +402,7 @@ function mergeCandidate(base: PreferencesSnapshot, patch: PreferencesPatch): Pre
     useTextureView,
     autoSubtitlesOnSkipBack,
     autoPlayNextEpisode,
+    detailTrailerMuted,
     playerVolume,
     ...mergeExtendedPreferences(base, patch),
     ...mergeWaveF9Preferences(base, patch),
@@ -421,6 +440,10 @@ function mergeRawCandidate(
       typeof patch.autoPlayNextEpisode === 'boolean'
         ? patch.autoPlayNextEpisode
         : base.autoPlayNextEpisode,
+    detailTrailerMuted:
+      typeof patch.detailTrailerMuted === 'boolean'
+        ? patch.detailTrailerMuted
+        : base.detailTrailerMuted,
     playerVolume:
       typeof patch.playerVolume === 'number' && Number.isFinite(patch.playerVolume)
         ? clampPlayerVolume(patch.playerVolume)

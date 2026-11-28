@@ -262,4 +262,41 @@ describe('Tooltip & IconButton integration', () => {
     await fireEvent(screen.getByTestId('toggle-tip'), 'pointerEnter');
     expect(screen.getByTestId('toggle-tip-bubble')).toBeTruthy();
   });
+
+  it('forwards tooltipPlacement prop on IconButton to Tooltip positioning', async () => {
+    jest.replaceProperty(Platform, 'OS', 'web');
+
+    await render(
+      <ViewportProvider
+        value={{ formFactor: 'desktop', inputModality: 'pointer', orientation: 'landscape' }}
+      >
+        <IconButton
+          icon="film"
+          accessibilityLabel="Watch trailer"
+          tooltipPlacement="top"
+          testID="ib-top"
+        />
+        <IconButton
+          icon="plus"
+          accessibilityLabel="Add to My list"
+          tooltipPlacement="bottom"
+          testID="ib-bottom"
+        />
+      </ViewportProvider>,
+    );
+
+    await fireEvent(screen.getByTestId('ib-top-tooltip'), 'pointerEnter');
+    await act(async () => {
+      jest.advanceTimersByTime(330);
+    });
+    const topStyle = flat(screen.getByTestId('ib-top-tooltip-bubble').props.style);
+    expect(topStyle.bottom).toBe('100%');
+
+    await fireEvent(screen.getByTestId('ib-bottom-tooltip'), 'pointerEnter');
+    await act(async () => {
+      jest.advanceTimersByTime(330);
+    });
+    const bottomStyle = flat(screen.getByTestId('ib-bottom-tooltip-bubble').props.style);
+    expect(bottomStyle.top).toBe('100%');
+  });
 });

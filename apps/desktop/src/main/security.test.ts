@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { APP_ORIGIN } from './app-protocol.ts';
 import {
   isAllowedAppNavigation,
+  isAllowedTrailerEmbedUrl,
   lockDownSession,
   lockDownWebContents,
   type NavigationEventLike,
@@ -33,9 +34,14 @@ function createFakeWebContents() {
     openWindow() {
       return windowOpenHandler?.();
     },
-    emitNavigation(event: 'will-navigate' | 'will-redirect' | 'will-frame-navigate', url: string) {
+    emitNavigation(
+      event: 'will-navigate' | 'will-redirect' | 'will-frame-navigate',
+      url: string,
+      isMainFrame?: boolean,
+    ) {
       const preventDefault = vi.fn();
-      const details: NavigationEventLike = { url, preventDefault };
+      const details: NavigationEventLike =
+        isMainFrame === undefined ? { url, preventDefault } : { url, isMainFrame, preventDefault };
       for (const listener of listeners.get(event) ?? []) {
         if (event === 'will-frame-navigate') {
           (listener as (details: NavigationEventLike) => void)(details);
@@ -118,6 +124,81 @@ describe('lockDownWebContents', () => {
       expect(fake.emitNavigation('will-navigate', `${APP_ORIGIN}/`)).toBe(false);
       expect(fake.emitNavigation('will-navigate', 'http://127.0.0.1:8081/')).toBe(true);
     }
+  });
+
+  it('allows canonical youtube-nocookie trailer embeds ONLY on subframe will-frame-navigate while keeping top-level navigation locked down', () => {
+    const fake = createFakeWebContents();
+    lockDownWebContents(fake.contents, { devOrigin: 'http://127.0.0.1:8081' });
+
+    const embedUrl =
+      'https://www.youtube-nocookie.com/embed/8g18jFHCLXk?autoplay=1&mute=1&enablejsapi=1';
+
+    // Top-level navigation and redirects remain strictly locked to app://elv (+ devOrigin)
+    expect(fake.emitNavigation('will-navigate', embedUrl)).toBe(true);
+    expect(fake.emitNavigation('will-redirect', embedUrl)).toBe(true);
+    expect(fake.emitNavigation('will-frame-navigate', embedUrl, true)).toBe(true);
+
+    // Subframe navigation to canonical youtube-nocookie embed is allowed ONLY when isMainFrame === false (fail-closed)
+    expect(fake.emitNavigation('will-frame-navigate', embedUrl, false)).toBe(false);
+    expect(fake.emitNavigation('will-frame-navigate', embedUrl)).toBe(true);
+
+    // All other external subframe navigations stay blocked
+    for (const blocked of [
+      'https://www.youtube.com/embed/8g18jFHCLXk',
+      'https://youtube-nocookie.com/embed/8g18jFHCLXk',
+      'https://www.youtube-nocookie.com/watch?v=8g18jFHCLXk',
+      'https://www.youtube-nocookie.com/embed/short',
+      'http://www.youtube-nocookie.com/embed/8g18jFHCLXk',
+      'https://user:pass@www.youtube-nocookie.com/embed/8g18jFHCLXk',
+      'https://www.youtube-nocookie.com:8443/embed/8g18jFHCLXk',
+      'https://www.youtube-nocookie.com:443/embed/8g18jFHCLXk',
+      'https://attacker.example/embed/8g18jFHCLXk',
+      'file:///etc/passwd',
+    ]) {
+      expect(fake.emitNavigation('will-frame-navigate', blocked, false)).toBe(true);
+    }
+  });
+});
+
+describe('isAllowedTrailerEmbedUrl', () => {
+  it('accepts canonical HTTPS www.youtube-nocookie.com/embed/<11-char-id> URLs', () => {
+    expect(isAllowedTrailerEmbedUrl('https://www.youtube-nocookie.com/embed/8g18jFHCLXk')).toBe(
+      true,
+    );
+    expect(
+      isAllowedTrailerEmbedUrl(
+        'https://www.youtube-nocookie.com/embed/abc_123-XYZ?autoplay=1&mute=1&controls=0&rel=0&playsinline=1&modestbranding=1&iv_load_policy=3&disablekb=1&fs=0&loop=1&playlist=abc_123-XYZ&enablejsapi=1',
+      ),
+    ).toBe(true);
+    expect(isAllowedTrailerEmbedUrl('HTTPS://WWW.YOUTUBE-NOCOOKIE.COM/embed/8g18jFHCLXk#t=5')).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    '',
+    'not a url',
+    'http://www.youtube-nocookie.com/embed/8g18jFHCLXk',
+    'https://youtube-nocookie.com/embed/8g18jFHCLXk',
+    'https://www.youtube.com/embed/8g18jFHCLXk',
+    'https://www.youtube-nocookie.com.evil.example/embed/8g18jFHCLXk',
+    'https://www.youtube-nocookie.com/watch?v=8g18jFHCLXk',
+    'https://www.youtube-nocookie.com/EMBED/8g18jFHCLXk',
+    'https://www.youtube-nocookie.com/embed/short',
+    'https://www.youtube-nocookie.com/embed/toolong12345',
+    'https://www.youtube-nocookie.com/embed/8g18jFHCLXk/',
+    'https://www.youtube-nocookie.com/embed/8g18jFHCLXk/extra',
+    'https://www.youtube-nocookie.com/watch/../embed/8g18jFHCLXk',
+    'https://user:pass@www.youtube-nocookie.com/embed/8g18jFHCLXk',
+    'https://user@www.youtube-nocookie.com/embed/8g18jFHCLXk',
+    'https://www.youtube-nocookie.com:443/embed/8g18jFHCLXk',
+    'https://www.youtube-nocookie.com:8443/embed/8g18jFHCLXk',
+    ' https://www.youtube-nocookie.com/embed/8g18jFHCLXk',
+    'https://www.youtube-nocookie.com/embed/8g18jFHCLXk\n',
+    'file:///etc/passwd',
+    'javascript:alert(1)',
+  ])('rejects %s', (url) => {
+    expect(isAllowedTrailerEmbedUrl(url)).toBe(false);
   });
 });
 

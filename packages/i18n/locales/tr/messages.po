@@ -4930,3 +4930,12 @@ msgstr "Hızlı arama"
 
 msgid "search.popup.suggestions"
 msgstr "Öneriler"
+
+msgid "detail.seeMoreInline"
+msgstr "devamını gör..."
+
+msgid "detail.trailer.mute"
+msgstr "Önizleme sesini kapat"
+
+msgid "detail.trailer.unmute"
+msgstr "Önizleme sesini aç"

@@ -24,6 +24,8 @@ interface DetailListHeaderProps {
   readonly heroWatched: boolean;
   readonly heroDownloadState: DetailHeroDownloadState | undefined;
   readonly hasTrailer: boolean;
+  readonly detailTrailerMuted: boolean;
+  readonly trailerPreviewActive: boolean;
   readonly primaryAction: PrimaryPlayAction;
   readonly focusedHeroSlot: DetailHeroFocusSlot | null;
   readonly focusedRowId: DetailNavRowId | null;
@@ -41,6 +43,7 @@ interface DetailListHeaderProps {
   readonly onPressHeroWatched: () => void;
   readonly onPressHeroDownload: () => void;
   readonly onOpenTrailer: () => void;
+  readonly onToggleDetailTrailerMuted?: () => void;
   readonly onSelectVersion: (key: string) => void;
   readonly onSelectPerson: (person: PersonLibraryModalPerson) => void;
   readonly onSearchPerson?: (name: string) => void;
@@ -90,6 +93,8 @@ const DetailListHeader = memo(function DetailListHeaderInner({
   heroWatched,
   heroDownloadState,
   hasTrailer,
+  detailTrailerMuted,
+  trailerPreviewActive,
   primaryAction,
   focusedHeroSlot,
   focusedRowId,
@@ -107,6 +112,7 @@ const DetailListHeader = memo(function DetailListHeaderInner({
   onPressHeroWatched,
   onPressHeroDownload,
   onOpenTrailer,
+  onToggleDetailTrailerMuted,
   onSelectVersion,
   onSelectPerson,
   onSearchPerson,
@@ -124,8 +130,14 @@ const DetailListHeader = memo(function DetailListHeaderInner({
       <DetailHero
         kind={target.kind}
         title={data.title}
+        titleKey={target.itemKey}
         backdropUri={data.backdropUri}
         posterUri={data.posterUri}
+        trailerStreamUrl={data.trailerStreamUrl}
+        trailerYoutubeId={data.trailerYoutubeId}
+        detailTrailerMuted={detailTrailerMuted}
+        trailerPreviewActive={trailerPreviewActive}
+        {...(onToggleDetailTrailerMuted !== undefined ? { onToggleDetailTrailerMuted } : {})}
         year={data.year}
         rating={data.rating}
         votes={data.votes}
@@ -159,6 +171,7 @@ const DetailListHeader = memo(function DetailListHeaderInner({
           : {})}
         synopsisExpanded={extras.synopsisExpanded}
         onToggleSynopsis={extras.toggleSynopsis}
+        onDismissSynopsis={extras.dismissSynopsis}
         onBack={onBack}
         onPlayPrimary={onPlayPrimary}
         onToggleMyList={onToggleMyList}

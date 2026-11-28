@@ -11,9 +11,9 @@ import type { DetailTarget } from '../shared';
 export { mergeVodEnrichment } from './detail-data-helpers';
 export {
   buildTechnicalBadges,
+  computeDetailHeroHeight,
   type DescribedDetailError,
   describeDetailSeasonsError,
-  SYNOPSIS_EXPAND_THRESHOLD,
 } from './detail-preplay';
 
 /** Resolved primary Play / Resume action displayed in the Detail Hero CTA. */
