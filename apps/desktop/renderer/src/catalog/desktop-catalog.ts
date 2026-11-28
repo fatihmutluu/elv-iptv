@@ -191,6 +191,14 @@ export function createDesktopCatalogFromBridge(
           : {}),
       }),
     setWatched: (itemKey, watched, profileId) => bridge.setWatched(itemKey, watched, profileId),
+    setSeasonWatched: (seriesKey, season, watched, profileId) =>
+      bridge.setSeasonWatched
+        ? bridge.setSeasonWatched(seriesKey, season, watched, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    setSeriesWatched: (seriesKey, watched, profileId) =>
+      bridge.setSeriesWatched
+        ? bridge.setSeriesWatched(seriesKey, watched, profileId)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
     getProgress: (itemKey, profileId) => bridge.getProgress(itemKey, profileId),
     listContinueWatching: (limit, profileId, opts) =>
       bridge.listContinueWatching(limit, profileId, opts),

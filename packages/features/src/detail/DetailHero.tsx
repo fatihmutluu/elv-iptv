@@ -335,20 +335,22 @@ function DetailHeroInner({
                   />
                 </>
               ) : null}
-              {kind === 'movie' ? (
-                <IconButton
-                  testID="detail-watched"
-                  icon="check"
-                  active={watched}
-                  accessibilityLabel={
-                    watched ? i18n.t('home.markUnwatched') : i18n.t('home.markWatched')
-                  }
-                  focusable={!isTv}
-                  focused={isTv && focusedSlot === 'watched'}
-                  onPress={onToggleWatched}
-                />
-              ) : null}
-              {kind === 'movie' && downloadState !== undefined && onPressDownload !== undefined ? (
+              <IconButton
+                testID="detail-watched"
+                icon="check"
+                active={watched}
+                accessibilityLabel={
+                  kind === 'series'
+                    ? i18n.t('detail.scopePicker.watchedAction')
+                    : watched
+                      ? i18n.t('home.markUnwatched')
+                      : i18n.t('home.markWatched')
+                }
+                focusable={!isTv}
+                focused={isTv && focusedSlot === 'watched'}
+                onPress={onToggleWatched}
+              />
+              {downloadState !== undefined && onPressDownload !== undefined ? (
                 <IconButton
                   testID="detail-download"
                   icon={downloadState.icon}
@@ -480,7 +482,7 @@ function DetailHeroInner({
                   {i18n.t('detail.seasonsCount', { count: seasonsCount })}
                 </Text>
               ) : null}
-              {kind === 'movie' && watched ? (
+              {watched ? (
                 <MicroPill
                   label={i18n.t('home.watchedBadge')}
                   tone="success"

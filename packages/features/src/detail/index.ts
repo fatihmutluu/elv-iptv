@@ -1,3 +1,8 @@
+export {
+  DetailScopePicker,
+  type DetailScopePickerMode,
+  type DetailScopePickerProps,
+} from './DetailScopePicker';
 export { DetailScreen, type DetailScreenProps } from './DetailScreen';
 export {
   type BuildDetailNavRowsInput,
@@ -8,20 +13,16 @@ export {
   buildEpisodePlayTarget,
   buildMoviePlayTarget,
   buildPrimaryPlayAction,
+  computeEpisodeRowMetrics,
   type DescribedDetailError,
+  type DetailEpisodeFocusAction,
   type DetailNavRowDescriptor,
   type DetailNavRowId,
   describeDetailSeasonsError,
   detailProgressRatio,
+  type EpisodeRowMetrics,
   formatEpisodeDuration,
   type PrimaryPlayAction,
   resolveSeriesPrimaryEpisode,
   type SeriesPrimaryEpisodeSelection,
 } from './detail-model';
-export {
-  buildEpisodeChunks,
-  EPISODE_CHUNK_SIZE,
-  EPISODE_CHUNK_THRESHOLD,
-  type EpisodeChunk,
-  resolveInitialEpisodeChunkIndex,
-} from './episode-chunks';

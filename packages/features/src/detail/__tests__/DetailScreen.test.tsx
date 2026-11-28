@@ -489,10 +489,10 @@ describe('DetailScreen', () => {
         expect(screen.getByTestId('detail-related-rail')).toBeTruthy();
       });
 
-      // Hydrated synopsis from itemDetail (series.plot) + seasons count + no movie-only watched toggle
+      // Hydrated synopsis from itemDetail (series.plot) + seasons count + series Hero watched scope button
       expect(screen.getByTestId('detail-synopsis')).toHaveTextContent(/orbital lighthouse crew/);
       expect(screen.getByTestId('detail-seasons-count')).toHaveTextContent('2 seasons');
-      expect(screen.queryByTestId('detail-watched')).toBeNull();
+      expect(screen.getByTestId('detail-watched')).toBeTruthy();
       expect(screen.getByTestId('detail-cast')).toBeTruthy();
       expect(screen.getByTestId('detail-cast-strip-scroll')).toBeTruthy();
       expect(screen.getByTestId('detail-seasons-bar-rail-scroll')).toBeTruthy();

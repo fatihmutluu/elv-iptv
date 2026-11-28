@@ -1,21 +1,30 @@
 import {
   type CatalogService,
   type CategoryRow,
+  cleanVodTitle,
   DEFAULT_PROFILE_ID,
+  type ElvTitleRecord,
+  type EpisodeRow,
+  type ItemDetailRow,
   type ItemRow,
   type MergedVodVariant,
   type SeasonRow,
+  type SeriesUnplayedSummary,
   UNRELIABLE_FAIL_COUNT_THRESHOLD,
   type VodEnrichmentRecord,
   type VodVersionOption,
   type WatchProgressRow,
 } from '@elv/data';
+import { type ElvModePreferences, formatElvDisplayTitle } from '@elv/domain';
 import {
   batchLoadProgressByKeys,
   type CachedDetailSeasonsState,
   type CachedDetailSnapshot,
   type DetailTarget,
+  resolveElvLocalizedSynopsis,
+  resolveElvLocalizedValue,
 } from '../shared';
+import type { DetailRichCastMember } from './DetailCastStrip';
 
 const RELATED_LIMIT = 12;
 
@@ -147,6 +156,104 @@ export function buildOptimisticWatchedRow(
   };
 }
 
+/** Builds an optimistic episode {@link WatchProgressRow} for per-episode or bulk watched toggles. */
+export function buildOptimisticEpisodeWatchedRow(
+  prevRow: WatchProgressRow | undefined,
+  nextWatched: boolean,
+  meta: {
+    readonly sourceId: string;
+    readonly seriesKey: string;
+    readonly episode: EpisodeRow;
+    readonly fallbackTitle: string;
+    readonly logo: string | null;
+    readonly profileId?: string;
+  },
+): WatchProgressRow {
+  const durationMs =
+    prevRow !== undefined && prevRow.durationMs > 0
+      ? prevRow.durationMs
+      : meta.episode.durationSec !== null &&
+          Number.isFinite(meta.episode.durationSec) &&
+          meta.episode.durationSec > 0
+        ? Math.round(meta.episode.durationSec * 1000)
+        : 0;
+  if (prevRow !== undefined) {
+    return {
+      ...prevRow,
+      watched: nextWatched,
+      positionMs: nextWatched ? durationMs : 0,
+      durationMs,
+      updatedAt: Date.now(),
+    };
+  }
+  const trimmedEpTitle = meta.episode.title?.trim() ?? '';
+  return {
+    profileId: meta.profileId ?? DEFAULT_PROFILE_ID,
+    sourceId: meta.sourceId,
+    itemKey: meta.episode.key,
+    kind: 'episode',
+    title: trimmedEpTitle.length > 0 ? trimmedEpTitle : meta.fallbackTitle,
+    subtitle: null,
+    logo: meta.logo,
+    seriesKey: meta.seriesKey,
+    season: meta.episode.season,
+    episode: meta.episode.episode,
+    positionMs: nextWatched ? durationMs : 0,
+    durationMs,
+    watched: nextWatched,
+    updatedAt: Date.now(),
+  };
+}
+
+/** Returns `true` when `episodes` is non-empty and every episode is marked watched. */
+export function areEpisodesAllWatched(
+  episodes: readonly EpisodeRow[] | undefined,
+  progressByKey: ReadonlyMap<string, WatchProgressRow>,
+): boolean {
+  if (episodes === undefined || episodes.length === 0) return false;
+  return episodes.every((ep) => progressByKey.get(ep.key)?.watched === true);
+}
+
+/**
+ * Computes whether a series is fully watched, preferring optimistic `bulkOverride`, then
+ * authoritative DB `dbSummary`, and falling back to loaded episodes only when all seasons are
+ * hydrated in memory.
+ */
+export function computeSeriesWatchedState(input: {
+  readonly bulkOverride: boolean | null;
+  readonly dbSummary: SeriesUnplayedSummary | null;
+  readonly totalSeasonsCount: number;
+  readonly episodesBySeason: ReadonlyMap<number, readonly EpisodeRow[]>;
+  readonly currentEpisodes: readonly EpisodeRow[];
+  readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
+}): boolean {
+  const {
+    bulkOverride,
+    dbSummary,
+    totalSeasonsCount,
+    episodesBySeason,
+    currentEpisodes,
+    progressByKey,
+  } = input;
+  if (bulkOverride !== null) return bulkOverride;
+  if (dbSummary !== null) return dbSummary.watched === true;
+  if (totalSeasonsCount > 0 && episodesBySeason.size < totalSeasonsCount) {
+    return false;
+  }
+  let seen = 0;
+  for (const eps of episodesBySeason.values()) {
+    for (const ep of eps) {
+      seen += 1;
+      if (progressByKey.get(ep.key)?.watched !== true) return false;
+    }
+  }
+  for (const ep of currentEpisodes) {
+    seen += 1;
+    if (progressByKey.get(ep.key)?.watched !== true) return false;
+  }
+  return seen > 0;
+}
+
 /** Provider-supplied VOD detail metadata inputs prior to optional enrichment fill (`#215`). */
 export interface DetailMetadataFields {
   readonly year: number | null;
@@ -240,5 +347,137 @@ export function mapMergedVodVariantToOption(variant: MergedVodVariant): DetailVe
     isFake4k: variant.isFake4k,
     failCount: variant.failCount,
     isUnreliable: variant.failCount >= UNRELIABLE_FAIL_COUNT_THRESHOLD,
+  };
+}
+
+function nonEmptyUrl(v: string | null | undefined): string | null {
+  const t = v?.trim();
+  return t && t.length > 0 ? t : null;
+}
+
+/** Resolved display metadata derived from provider row, optional VOD enrichment, and ELV Mode. */
+export interface DerivedDetailPresentation {
+  readonly rawTitle: string;
+  readonly title: string;
+  readonly posterUri: string | null;
+  readonly backdropUri: string | null;
+  readonly year: number | null;
+  readonly rating: number | null;
+  readonly votes: number | null;
+  readonly runtimeMin: number | null;
+  readonly director: string | null;
+  readonly cast: readonly DetailRichCastMember[];
+  readonly trailerStreamUrl: string | null;
+  readonly trailerYoutubeId: string | null;
+  readonly plot: string | null;
+  readonly genres: readonly string[];
+}
+
+/** Pure derivation of display title, artwork, ratings, cast, and trailer URLs for `useDetailData`. */
+export function deriveDetailPresentation(input: {
+  readonly target: DetailTarget;
+  readonly detailRow: ItemDetailRow | null;
+  readonly enrichment: VodEnrichmentRecord | null;
+  readonly vodEnrichmentEnabled: boolean;
+  readonly elvEnrichActive: boolean;
+  readonly elvPosterLookupPending: boolean;
+  readonly activeElvTitle: ElvTitleRecord | null;
+  readonly elvTitleFormat: ElvModePreferences['elvTitleFormat'];
+  readonly locale: string;
+}): DerivedDetailPresentation {
+  const {
+    target,
+    detailRow,
+    enrichment,
+    vodEnrichmentEnabled,
+    elvEnrichActive,
+    elvPosterLookupPending,
+    activeElvTitle,
+    elvTitleFormat,
+    locale,
+  } = input;
+  const rawTitle = detailRow?.name ?? target.title;
+  const rawPosterUri = nonEmptyUrl(target.posterUri) ?? nonEmptyUrl(detailRow?.logo);
+  const providerYear = target.year ?? detailRow?.year ?? null;
+  const providerRating = target.rating ?? detailRow?.rating ?? null;
+  const providerPlot = detailRow?.plot ?? target.overview ?? null;
+  const mergedMeta = mergeVodEnrichment(
+    {
+      year: providerYear,
+      rating: providerRating,
+      genres: target.genres ?? [],
+      plot: providerPlot,
+    },
+    vodEnrichmentEnabled ? enrichment : null,
+  );
+  const localCleaned =
+    elvEnrichActive && activeElvTitle === null ? cleanVodTitle(rawTitle, providerYear) : null;
+  const title =
+    activeElvTitle !== null
+      ? formatElvDisplayTitle({
+          originalTitle: activeElvTitle.originalTitle,
+          englishTitle: activeElvTitle.englishTitle,
+          localizedTitle: resolveElvLocalizedValue(activeElvTitle.localizedTitles, locale),
+          fallbackTitle: rawTitle,
+          format: elvTitleFormat,
+        })
+      : localCleaned !== null && localCleaned.cleanTitle.length > 0
+        ? localCleaned.cleanTitle
+        : rawTitle;
+  const elvPoster = nonEmptyUrl(activeElvTitle?.posterUrl);
+  const elvBackdrop = nonEmptyUrl(activeElvTitle?.backdropUrl);
+  const posterUri = elvPoster ?? (elvPosterLookupPending ? null : rawPosterUri);
+  const backdropUri =
+    elvBackdrop ??
+    nonEmptyUrl(target.backdropUri) ??
+    nonEmptyUrl((detailRow as { backdrop?: string | null } | null)?.backdrop);
+  const year =
+    activeElvTitle?.year != null && Number.isFinite(activeElvTitle.year)
+      ? activeElvTitle.year
+      : (mergedMeta.year ?? localCleaned?.releaseYear ?? null);
+  const rating =
+    activeElvTitle?.rating != null && Number.isFinite(activeElvTitle.rating)
+      ? activeElvTitle.rating
+      : mergedMeta.rating;
+  const elvSynopsis =
+    activeElvTitle !== null ? resolveElvLocalizedSynopsis(activeElvTitle.synopses, locale) : null;
+  const plot = elvSynopsis ?? mergedMeta.plot;
+  const genres =
+    activeElvTitle !== null && activeElvTitle.genres.length > 0
+      ? activeElvTitle.genres
+      : mergedMeta.genres;
+  const votes =
+    activeElvTitle?.votes != null && Number.isFinite(activeElvTitle.votes)
+      ? activeElvTitle.votes
+      : null;
+  const runtimeMin =
+    activeElvTitle?.runtimeMin != null && Number.isFinite(activeElvTitle.runtimeMin)
+      ? activeElvTitle.runtimeMin
+      : null;
+  const director = activeElvTitle?.director?.trim() || target.director?.trim() || null;
+  const cast: readonly DetailRichCastMember[] =
+    activeElvTitle !== null && activeElvTitle.cast.length > 0
+      ? activeElvTitle.cast.map((m) => ({
+          ...(m.personId ? { personId: m.personId } : {}),
+          name: m.name,
+          ...(m.character ? { role: m.character } : {}),
+          ...(m.portraitUrl ? { avatarUri: m.portraitUrl } : {}),
+        }))
+      : (target.cast ?? []);
+  return {
+    rawTitle,
+    title,
+    posterUri,
+    backdropUri,
+    year,
+    rating,
+    votes,
+    runtimeMin,
+    director,
+    cast,
+    trailerStreamUrl: activeElvTitle?.trailerStreamUrl ?? null,
+    trailerYoutubeId: activeElvTitle?.trailerYoutubeId ?? null,
+    plot,
+    genres,
   };
 }

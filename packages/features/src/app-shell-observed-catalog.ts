@@ -63,6 +63,8 @@ export function createObservedCatalog(
   const removeItemFromCollection = wrapUserStateMutation(c.removeItemFromCollection);
   const reorderCollectionItems = wrapUserStateMutation(c.reorderCollectionItems);
   const setWatched = wrapUserStateMutation(c.setWatched);
+  const setSeasonWatched = wrapUserStateMutation(c.setSeasonWatched);
+  const setSeriesWatched = wrapUserStateMutation(c.setSeriesWatched);
   const toggleFavorite = wrapUserStateMutation(c.toggleFavorite);
   const setFavorite = wrapUserStateMutation(c.setFavorite);
   const setRating = wrapUserStateMutation(c.setRating);
@@ -228,6 +230,8 @@ export function createObservedCatalog(
     ...(c.itemDetail ? { itemDetail: c.itemDetail.bind(c) } : {}),
     ...(c.saveProgress ? { saveProgress: c.saveProgress.bind(c) } : {}),
     ...(setWatched ? { setWatched } : {}),
+    ...(setSeasonWatched ? { setSeasonWatched } : {}),
+    ...(setSeriesWatched ? { setSeriesWatched } : {}),
     ...(c.getProgress ? { getProgress: c.getProgress.bind(c) } : {}),
     ...(c.listContinueWatching ? { listContinueWatching: c.listContinueWatching.bind(c) } : {}),
     ...(c.listWatched ? { listWatched: c.listWatched.bind(c) } : {}),

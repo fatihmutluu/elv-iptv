@@ -11,8 +11,11 @@ import {
 } from '../../preload/downloads-bridge.ts';
 import {
   DOWNLOADS_CHANNELS,
+  isDownloadEnqueueBatchRequest,
   isDownloadEnqueueRequest,
   isDownloadRecord,
+  isDownloadRecordListResult,
+  MAX_DOWNLOAD_RECORDS,
 } from '../../shared/downloads-ipc.ts';
 import { createDesktopDownloadManager, type DesktopDownloadManager } from './download-manager.ts';
 import { type DownloadsIpcMainLike, registerDownloadsIpc } from './ipc.ts';
@@ -203,5 +206,113 @@ describe('downloads IPC, preload bridge, and desktop port', () => {
       streamUrl: 'https://example.test/m.mp4',
     });
     expect(enqueueRes.ok).toBe(false);
+  });
+
+  it('validates lazy streamUrl, seriesKey, batch payload bounds (1..500), and round-trips enqueueBatch', async () => {
+    expect(MAX_DOWNLOAD_RECORDS).toBe(5_000);
+
+    const lazyEp = {
+      sourceId: 'src-1',
+      itemKey: 'x:src-1:episode:55',
+      kind: 'episode' as const,
+      title: 'Episode 1',
+      seriesKey: 'x:src-1:series:10',
+      seriesTitle: 'Sample Show',
+      season: 1,
+      episodeNum: 1,
+    };
+    expect(isDownloadEnqueueRequest(lazyEp)).toBe(true);
+    expect(isDownloadEnqueueRequest({ ...lazyEp, streamUrl: '' })).toBe(false);
+    expect(isDownloadEnqueueRequest({ ...lazyEp, streamUrl: null })).toBe(false);
+    expect(isDownloadEnqueueRequest({ ...lazyEp, seriesKey: 'a'.repeat(513) })).toBe(false);
+    expect(isDownloadEnqueueRequest({ ...lazyEp, seriesKey: 'bad\nkey' })).toBe(false);
+
+    expect(isDownloadEnqueueBatchRequest([])).toBe(false);
+    expect(isDownloadEnqueueBatchRequest([lazyEp])).toBe(true);
+    expect(isDownloadEnqueueBatchRequest(Array.from({ length: 501 }, () => lazyEp))).toBe(false);
+    expect(isDownloadEnqueueBatchRequest([lazyEp, { ...lazyEp, kind: 'live' }])).toBe(false);
+
+    expect(
+      isDownloadRecordListResult({
+        ok: false,
+        error: { category: 'storage', code: 'download-queue-full' },
+      }),
+    ).toBe(true);
+
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Length': '6' });
+      res.end(Buffer.from('epdata'));
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const addr = server.address();
+    const baseUrl = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+
+    const downloadsDir = await mkdtemp(path.join(tmpdir(), 'elv-dl-batch-ipc-'));
+    tempDirs.push(downloadsDir);
+    const manager = createDesktopDownloadManager({
+      downloadsDir,
+      progressThrottleMs: 0,
+      resolveStream: async (itemKey) => ({
+        ok: true,
+        value: { url: `${baseUrl}/${encodeURIComponent(itemKey)}.mp4` },
+      }),
+    });
+    managers.push(manager);
+
+    type TestHandler = Parameters<DownloadsIpcMainLike['handle']>[1];
+    const handlers = new Map<string, TestHandler>();
+    const ipcMain: DownloadsIpcMainLike = {
+      handle: (ch, fn) => void handlers.set(ch, fn),
+      removeHandler: (ch) => void handlers.delete(ch),
+    };
+    const dispose = registerDownloadsIpc({ ipcMain, manager });
+
+    const batchHandler = handlers.get(DOWNLOADS_CHANNELS.enqueueBatch);
+    expect(batchHandler).toBeDefined();
+    await expect(
+      Promise.resolve(batchHandler?.({ senderFrame: { url: 'https://evil.example/' } }, [lazyEp])),
+    ).rejects.toThrow('untrusted sender');
+
+    const trustedFrame = { url: 'app://elv/' };
+    const ipcRenderer: DownloadsIpcRendererLike = {
+      invoke: (channel, ...args) => {
+        const handler = handlers.get(channel);
+        if (!handler) return Promise.reject(new Error(`missing handler ${channel}`));
+        return Promise.resolve(handler({ senderFrame: trustedFrame }, ...args));
+      },
+      on: () => undefined,
+      removeListener: () => undefined,
+    };
+
+    const bridge = createDownloadsBridge(ipcRenderer);
+    const port = createDesktopDownloadsPort(bridge);
+
+    const batchRes = await port.enqueueBatch?.([
+      lazyEp,
+      { ...lazyEp, itemKey: 'x:src-1:episode:56', title: 'Episode 2', episodeNum: 2 },
+    ]);
+    expect(batchRes?.ok).toBe(true);
+    if (batchRes?.ok) {
+      expect(batchRes.value).toHaveLength(2);
+      expect(batchRes.value[0]?.seriesKey).toBe('x:src-1:series:10');
+      expect(isDownloadRecordListResult(batchRes)).toBe(true);
+    }
+
+    for (let i = 0; i < 40; i += 1) {
+      const all = await port.list();
+      if (all.length === 2 && all.every((r) => r.status === 'completed')) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const done = await port.list();
+    expect(done.every((r) => r.status === 'completed')).toBe(true);
+    expect(done.every((r) => r.seriesKey === 'x:src-1:series:10')).toBe(true);
+
+    dispose();
+    expect(handlers.size).toBe(0);
+
+    const fallback = createDesktopDownloadsPort(undefined);
+    const fbBatch = await fallback.enqueueBatch?.([lazyEp]);
+    expect(fbBatch?.ok).toBe(false);
   });
 });

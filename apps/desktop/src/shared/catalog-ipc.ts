@@ -121,6 +121,11 @@ import {
   isRefreshMyListNewEpisodesOptions,
 } from './catalog-ipc-ratings-guards.ts';
 import {
+  type CatalogBridgeSeriesWatchedOps,
+  type CatalogSeriesWatchedOpsRpcCall,
+  isSeriesWatchedOpsRpcCall,
+} from './catalog-ipc-series-watched-guards.ts';
+import {
   type CatalogBridgeWaveE1Ops,
   type CatalogWaveE1OpsRpcCall,
   isLiveVariantsIpcOptions,
@@ -306,6 +311,7 @@ export type CatalogRpcMethodCall =
   | CatalogEpgOpsRpcCall
   | CatalogFailoverOpsRpcCall
   | CatalogRatingsOpsRpcCall
+  | CatalogSeriesWatchedOpsRpcCall
   | CatalogWaveE1OpsRpcCall
   | CatalogWaveE2OpsRpcCall
   | CatalogWaveF5bOpsRpcCall
@@ -342,6 +348,7 @@ export interface CatalogBridge
     CatalogBridgeEpgOps,
     CatalogBridgeFailoverOps,
     CatalogBridgeRatingsOps,
+    CatalogBridgeSeriesWatchedOps,
     CatalogBridgeWaveE1Ops,
     CatalogBridgeWaveE2Ops,
     CatalogBridgeWaveF5bOps,
@@ -717,6 +724,7 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isEpgOpsRpcCall(x) ||
         isFailoverOpsRpcCall(x) ||
         isRatingsOpsRpcCall(x) ||
+        isSeriesWatchedOpsRpcCall(x) ||
         isWaveE1OpsRpcCall(x) ||
         isWaveE2OpsRpcCall(x) ||
         isWaveF5bOpsRpcCall(x) ||

@@ -1,44 +1,40 @@
-import {
-  type CatalogService,
-  cleanVodTitle,
-  type ElvFranchiseLibraryItem,
-  type ElvTitleRecord,
-  type EpisodeRow,
-  type ItemDetailRow,
-  type RatingValue,
-  type SeasonRow,
-  type SeriesUnplayedSummary,
-  type VodEnrichmentRecord,
-  type VodVersionOption,
-  type WatchProgressRow,
+import type {
+  CatalogService,
+  ElvFranchiseLibraryItem,
+  EpisodeRow,
+  ItemDetailRow,
+  RatingValue,
+  SeasonRow,
+  SeriesUnplayedSummary,
+  VodVersionOption,
+  WatchProgressRow,
 } from '@elv/data';
 import {
   DEFAULT_ELV_MODE_PREFERENCES,
   type ElvModePreferences,
   elvError,
-  formatElvDisplayTitle,
   type Result,
 } from '@elv/domain';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type DetailTarget,
   isElvFeatureActive,
-  resolveElvLocalizedSynopsis,
-  resolveElvLocalizedValue,
   useCatalogUiCache,
-  useElvEnrichmentForKeys,
   useSeriesUnplayedCounts,
 } from '../shared';
 import type { DetailRichCastMember } from './DetailCastStrip';
 import {
+  areEpisodesAllWatched,
+  computeSeriesWatchedState,
   type DetailSeasonsState,
   type DetailSnapshot,
   type DetailVersionOption,
+  deriveDetailPresentation,
   emptyDetailSnapshot,
   fetchRelatedDetailItems,
   mapMergedVodVariantToOption,
-  mergeVodEnrichment,
 } from './detail-data-helpers';
+import { useDetailEnrichment } from './useDetailEnrichment';
 import { useDetailMutations } from './useDetailMutations';
 import { useDetailSeasonLoader } from './useDetailSeasonLoader';
 
@@ -78,11 +74,18 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly relatedUnplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly versions: readonly DetailVersionOption[];
   readonly userRating: RatingValue | null;
+  readonly resolvedSeriesId: number | undefined;
+  readonly isSeriesWatched: boolean;
+  readonly isSeasonWatched: (season: number) => boolean;
+  readonly getCachedSeasonEpisodes: (season: number) => readonly EpisodeRow[] | undefined;
   readonly selectSeason: (season: number) => void;
   readonly retrySeasons: () => void;
   readonly toggleMyList: () => Promise<void>;
   readonly toggleWatched: () => Promise<void>;
   readonly toggleRating: (next: RatingValue) => Promise<void>;
+  readonly toggleEpisodeWatched: (episode: EpisodeRow) => Promise<void>;
+  readonly markSeasonWatched: (season: number, watched: boolean) => Promise<boolean>;
+  readonly markSeriesWatched: (watched: boolean) => Promise<boolean>;
 }
 
 /**
@@ -119,10 +122,18 @@ export function useDetailData({
   );
   const [seasonsRetryToken, setSeasonsRetryToken] = useState(0);
   const [versions, setVersions] = useState<readonly DetailVersionOption[]>([]);
-  const [enrichment, setEnrichment] = useState<VodEnrichmentRecord | null>(null);
-  const [elvTitleDetail, setElvTitleDetail] = useState<ElvTitleRecord | null>(null);
-  const [franchiseItems, setFranchiseItems] = useState<readonly ElvFranchiseLibraryItem[]>([]);
   const [userRating, setUserRatingState] = useState<RatingValue | null>(null);
+  const [seriesBulkWatched, setSeriesBulkWatched] = useState<boolean | null>(null);
+  const seriesBulkWatchedRef = useRef<boolean | null>(null);
+  const [seriesUnplayedSummary, setSeriesUnplayedSummary] = useState<SeriesUnplayedSummary | null>(
+    null,
+  );
+  const seriesUnplayedSummaryRef = useRef<SeriesUnplayedSummary | null>(null);
+  const [seasonBulkOverrides, setSeasonBulkOverrides] = useState<ReadonlyMap<number, boolean>>(
+    () => new Map(),
+  );
+  const seasonBulkOverridesRef = useRef<ReadonlyMap<number, boolean>>(seasonBulkOverrides);
+  const bulkWatchedInFlightRef = useRef(0);
 
   const mountedRef = useRef(true);
   const snapRef = useRef(snap);
@@ -217,11 +228,16 @@ export function useDetailData({
 
     if (itemChanged) {
       setVersions([]);
-      setEnrichment(null);
-      setElvTitleDetail(null);
-      setFranchiseItems([]);
       userRatingRef.current = null;
       setUserRatingState(null);
+      seriesBulkWatchedRef.current = null;
+      setSeriesBulkWatched(null);
+      seriesUnplayedSummaryRef.current = null;
+      setSeriesUnplayedSummary(null);
+      const emptyOverrides = new Map<number, boolean>();
+      seasonBulkOverridesRef.current = emptyOverrides;
+      setSeasonBulkOverrides(emptyOverrides);
+      bulkWatchedInFlightRef.current = 0;
       myListGenRef.current += 1;
       myListInFlightRef.current = 0;
       watchedGenRef.current += 1;
@@ -249,6 +265,14 @@ export function useDetailData({
       }
     } else if (seriesVersionChanged) {
       cancelPrewarm();
+      seriesBulkWatchedRef.current = null;
+      setSeriesBulkWatched(null);
+      seriesUnplayedSummaryRef.current = null;
+      setSeriesUnplayedSummary(null);
+      const emptyOverrides = new Map<number, boolean>();
+      seasonBulkOverridesRef.current = emptyOverrides;
+      setSeasonBulkOverrides(emptyOverrides);
+      bulkWatchedInFlightRef.current = 0;
       seriesIdRef.current = effectiveSeriesKey === target.itemKey ? target.catalogId : undefined;
       episodesBySeasonRef.current = new Map();
       updateSnap(
@@ -369,15 +393,33 @@ export function useDetailData({
       }
     };
 
+    const fetchSeriesSummary = (): Promise<SeriesUnplayedSummary | null> =>
+      target.kind === 'series' && typeof catalog.listSeriesUnplayedCounts === 'function'
+        ? catalog
+            .listSeriesUnplayedCounts([effectiveSeriesKey])
+            .then((rows) => rows.find((r) => r.seriesKey === effectiveSeriesKey) ?? null)
+            .catch(() => null)
+        : Promise.resolve(null);
+
     const run = async () => {
       if (seriesVersionChanged) {
-        const seriesDetail =
+        const [seriesDetail, versionSummary] = await Promise.all([
           effectiveSeriesKey === target.itemKey && target.catalogId !== undefined
-            ? null
+            ? Promise.resolve(null)
             : catalog.itemDetail
-              ? await catalog.itemDetail(effectiveSeriesKey).catch(() => null)
-              : null;
+              ? catalog.itemDetail(effectiveSeriesKey).catch(() => null)
+              : Promise.resolve(null),
+          fetchSeriesSummary(),
+        ]);
         if (isStale()) return;
+        if (bulkWatchedInFlightRef.current === 0) {
+          seriesUnplayedSummaryRef.current = versionSummary;
+          setSeriesUnplayedSummary(versionSummary);
+          if (versionSummary !== null) {
+            seriesBulkWatchedRef.current = null;
+            setSeriesBulkWatched(null);
+          }
+        }
         await loadSeriesSeasonsAndEpisodes(seriesDetail, null, true);
         return;
       }
@@ -395,6 +437,7 @@ export function useDetailData({
         relatedResult,
         fetchedRating,
         altSeriesDetail,
+        fetchedSeriesUnplayed,
       ] = await Promise.all([
         catalog.itemDetail ? catalog.itemDetail(target.itemKey).catch(() => null) : null,
         catalog.listFavoriteKeys ? catalog.listFavoriteKeys().catch(() => [] as string[]) : [],
@@ -414,6 +457,7 @@ export function useDetailData({
         target.kind === 'series' && !useTargetSeriesDirectly && catalog.itemDetail
           ? catalog.itemDetail(effectiveSeriesKey).catch(() => null)
           : null,
+        fetchSeriesSummary(),
       ]);
       if (isStale()) return;
 
@@ -423,6 +467,14 @@ export function useDetailData({
       if (myListInFlightRef.current === 0) committedMyListRef.current = isFav;
       if (target.kind === 'movie' && watchedInFlightRef.current === 0) {
         committedMovieProgressRef.current = fetchedMovieProg;
+      }
+      if (target.kind === 'series' && bulkWatchedInFlightRef.current === 0) {
+        seriesUnplayedSummaryRef.current = fetchedSeriesUnplayed;
+        setSeriesUnplayedSummary(fetchedSeriesUnplayed);
+        if (fetchedSeriesUnplayed !== null) {
+          seriesBulkWatchedRef.current = null;
+          setSeriesBulkWatched(null);
+        }
       }
       if (ratingInFlightRef.current === 0) {
         committedRatingRef.current = fetchedRating;
@@ -471,78 +523,17 @@ export function useDetailData({
     userStateVersion,
   ]);
 
-  const elvTargetKeys = useMemo(() => [target.itemKey], [target.itemKey]);
-  const elvEnrichment = useElvEnrichmentForKeys(catalog, elvTargetKeys, {
-    enabled: elvEnrichActive,
-    lang: locale,
-    catalogRevision: refreshToken,
-  });
-  const elvItemEnrichment = elvEnrichment.enrichmentByKey.get(target.itemKey);
-  const elvPosterLookupPending =
-    elvEnrichActive && elvEnrichment.isKeyLookupPending(target.itemKey);
-  const matchedImdbId = elvItemEnrichment?.imdbId ?? null;
-
-  useEffect(() => {
-    if (!elvEnrichActive || matchedImdbId === null || catalog.getElvTitleDetail === undefined) {
-      setElvTitleDetail(null);
-      return undefined;
-    }
-    let cancelled = false;
-    const ac = new AbortController();
-    void catalog
-      .getElvTitleDetail(matchedImdbId, { lang: locale, signal: ac.signal })
-      .then((rec) => {
-        if (!cancelled && mountedRef.current && rec !== null) setElvTitleDetail(rec);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-      ac.abort();
-    };
-  }, [catalog, elvEnrichActive, locale, matchedImdbId]);
-
-  useEffect(() => {
-    if (
-      !elvPrefs.elvModeEnabled ||
-      matchedImdbId === null ||
-      catalog.listElvFranchiseItems === undefined
-    ) {
-      setFranchiseItems([]);
-      return undefined;
-    }
-    let cancelled = false;
-    void catalog
-      .listElvFranchiseItems(matchedImdbId)
-      .then((rows) => {
-        if (!cancelled && mountedRef.current) setFranchiseItems(rows);
-      })
-      .catch(() => {
-        if (!cancelled && mountedRef.current) setFranchiseItems([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [catalog, elvPrefs.elvModeEnabled, matchedImdbId]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken triggers opt-in enrichment refresh on source sync
-  useEffect(() => {
-    if (vodEnrichmentEnabled !== true) {
-      setEnrichment(null);
-      return undefined;
-    }
-    if (target.kind !== 'movie' && target.kind !== 'series') return undefined;
-    if (typeof catalog.enrichVodItem !== 'function') return undefined;
-    let cancelled = false;
-    void catalog
-      .enrichVodItem(target.itemKey, { enabled: true })
-      .then((record) => {
-        if (!cancelled && mountedRef.current) setEnrichment(record);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [catalog, refreshToken, target.itemKey, target.kind, vodEnrichmentEnabled]);
+  const { enrichment, activeElvTitle, elvPosterLookupPending, matchedImdbId, franchiseItems } =
+    useDetailEnrichment({
+      catalog,
+      target,
+      elvPrefs,
+      elvEnrichActive,
+      vodEnrichmentEnabled: vodEnrichmentEnabled === true,
+      locale,
+      refreshToken,
+      mountedRef,
+    });
 
   const selectSeason = useCallback(
     (season: number) => {
@@ -574,100 +565,56 @@ export function useDetailData({
     setSeasonsRetryToken((n) => n + 1);
   }, [updateSnap]);
 
-  const nonEmptyUrl = (v: string | null | undefined): string | null => {
-    const t = v?.trim();
-    return t && t.length > 0 ? t : null;
-  };
-  const rawTitle = snap.detailRow?.name ?? target.title;
-  const rawPosterUri = nonEmptyUrl(target.posterUri) ?? nonEmptyUrl(snap.detailRow?.logo);
-  const providerYear = target.year ?? snap.detailRow?.year ?? null;
-  const providerRating = target.rating ?? snap.detailRow?.rating ?? null;
-  const providerPlot = snap.detailRow?.plot ?? target.overview ?? null;
-  const providerGenres = target.genres;
-
-  const mergedMeta = useMemo(
+  const {
+    rawTitle,
+    title,
+    posterUri,
+    backdropUri,
+    year,
+    rating,
+    votes,
+    runtimeMin,
+    director,
+    cast,
+    trailerStreamUrl,
+    trailerYoutubeId,
+    plot,
+    genres,
+  } = useMemo(
     () =>
-      mergeVodEnrichment(
-        {
-          year: providerYear,
-          rating: providerRating,
-          genres: providerGenres ?? [],
-          plot: providerPlot,
-        },
-        vodEnrichmentEnabled === true ? enrichment : null,
-      ),
-    [enrichment, providerGenres, providerPlot, providerRating, providerYear, vodEnrichmentEnabled],
+      deriveDetailPresentation({
+        target,
+        detailRow: snap.detailRow,
+        enrichment,
+        vodEnrichmentEnabled: vodEnrichmentEnabled === true,
+        elvEnrichActive,
+        elvPosterLookupPending,
+        activeElvTitle,
+        elvTitleFormat: elvPrefs.elvTitleFormat,
+        locale,
+      }),
+    [
+      activeElvTitle,
+      elvEnrichActive,
+      elvPosterLookupPending,
+      elvPrefs.elvTitleFormat,
+      enrichment,
+      locale,
+      snap.detailRow,
+      target,
+      vodEnrichmentEnabled,
+    ],
   );
-  const activeElvTitle = elvEnrichActive
-    ? (elvTitleDetail ?? elvItemEnrichment?.title ?? null)
-    : null;
-  const localCleanedTitle = useMemo(
-    () =>
-      elvEnrichActive && activeElvTitle === null ? cleanVodTitle(rawTitle, providerYear) : null,
-    [activeElvTitle, elvEnrichActive, providerYear, rawTitle],
-  );
-  const title =
-    activeElvTitle !== null
-      ? formatElvDisplayTitle({
-          originalTitle: activeElvTitle.originalTitle,
-          englishTitle: activeElvTitle.englishTitle,
-          localizedTitle: resolveElvLocalizedValue(activeElvTitle.localizedTitles, locale),
-          fallbackTitle: rawTitle,
-          format: elvPrefs.elvTitleFormat,
-        })
-      : localCleanedTitle !== null && localCleanedTitle.cleanTitle.length > 0
-        ? localCleanedTitle.cleanTitle
-        : rawTitle;
-  const elvPoster = nonEmptyUrl(activeElvTitle?.posterUrl);
-  const elvBackdrop = nonEmptyUrl(activeElvTitle?.backdropUrl);
-  const posterUri = elvPoster ?? (elvPosterLookupPending ? null : rawPosterUri);
-  const backdropUri =
-    elvBackdrop ??
-    nonEmptyUrl(target.backdropUri) ??
-    nonEmptyUrl((snap.detailRow as { backdrop?: string | null } | null)?.backdrop);
-  const year =
-    activeElvTitle?.year != null && Number.isFinite(activeElvTitle.year)
-      ? activeElvTitle.year
-      : (mergedMeta.year ?? localCleanedTitle?.releaseYear ?? null);
-  const rating =
-    activeElvTitle?.rating != null && Number.isFinite(activeElvTitle.rating)
-      ? activeElvTitle.rating
-      : mergedMeta.rating;
-  const elvSynopsis =
-    activeElvTitle !== null ? resolveElvLocalizedSynopsis(activeElvTitle.synopses, locale) : null;
-  const plot = elvSynopsis ?? mergedMeta.plot;
-  const genres =
-    activeElvTitle !== null && activeElvTitle.genres.length > 0
-      ? activeElvTitle.genres
-      : mergedMeta.genres;
-  const votes =
-    activeElvTitle?.votes != null && Number.isFinite(activeElvTitle.votes)
-      ? activeElvTitle.votes
-      : null;
-  const runtimeMin =
-    activeElvTitle?.runtimeMin != null && Number.isFinite(activeElvTitle.runtimeMin)
-      ? activeElvTitle.runtimeMin
-      : null;
-  const director = activeElvTitle?.director?.trim() || target.director?.trim() || null;
-  const cast = useMemo<readonly DetailRichCastMember[]>(() => {
-    if (activeElvTitle !== null && activeElvTitle.cast.length > 0) {
-      return activeElvTitle.cast.map((m) => ({
-        ...(m.personId ? { personId: m.personId } : {}),
-        name: m.name,
-        ...(m.character ? { role: m.character } : {}),
-        ...(m.portraitUrl ? { avatarUri: m.portraitUrl } : {}),
-      }));
-    }
-    return target.cast ?? [];
-  }, [activeElvTitle, target.cast]);
-  const trailerStreamUrl = activeElvTitle?.trailerStreamUrl ?? null;
-  const trailerYoutubeId = activeElvTitle?.trailerYoutubeId ?? null;
 
   const mutationRefs = useMemo(
     () => ({
       mountedRef,
       snapRef,
       activeItemKeyRef,
+      activeSeriesKeyRef,
+      activeSeriesSourceIdRef,
+      seriesIdRef,
+      episodesBySeasonRef,
       myListGenRef,
       myListInFlightRef,
       committedMyListRef,
@@ -678,10 +625,21 @@ export function useDetailData({
       ratingGenRef,
       ratingInFlightRef,
       committedRatingRef,
+      seriesBulkWatchedRef,
+      seriesUnplayedSummaryRef,
+      seasonBulkOverridesRef,
+      bulkWatchedInFlightRef,
     }),
     [],
   );
-  const { toggleMyList, toggleWatched, toggleRating } = useDetailMutations({
+  const {
+    toggleMyList,
+    toggleWatched,
+    toggleRating,
+    toggleEpisodeWatched,
+    markSeasonWatched,
+    markSeriesWatched,
+  } = useDetailMutations({
     catalog,
     target,
     title,
@@ -692,7 +650,61 @@ export function useDetailData({
     refs: mutationRefs,
     updateSnap,
     setUserRating: setUserRatingState,
+    setSeriesBulkWatched,
+    setSeasonBulkOverrides,
   });
+
+  const getCachedSeasonEpisodes = useCallback(
+    (season: number): readonly EpisodeRow[] | undefined => episodesBySeasonRef.current.get(season),
+    [],
+  );
+
+  const isSeasonWatched = useCallback(
+    (season: number): boolean => {
+      const eps =
+        episodesBySeasonRef.current.get(season) ??
+        (snap.selectedSeason === season ? snap.episodes : undefined);
+      if (eps && eps.length > 0) return areEpisodesAllWatched(eps, snap.episodeProgressByKey);
+      const seasonOverride = seasonBulkOverrides.get(season);
+      if (seasonOverride !== undefined) return seasonOverride;
+      if (seriesBulkWatched !== null) return seriesBulkWatched;
+      return seriesUnplayedSummary?.watched === true;
+    },
+    [
+      seasonBulkOverrides,
+      seriesBulkWatched,
+      seriesUnplayedSummary,
+      snap.episodeProgressByKey,
+      snap.episodes,
+      snap.selectedSeason,
+    ],
+  );
+
+  const totalSeasonsCount =
+    snap.seasonsState.kind === 'ready' ? snap.seasonsState.seasons.length : 0;
+  const isSeriesWatched = useMemo(
+    () =>
+      computeSeriesWatchedState({
+        bulkOverride: seriesBulkWatched,
+        dbSummary: seriesUnplayedSummary,
+        totalSeasonsCount,
+        episodesBySeason: episodesBySeasonRef.current,
+        currentEpisodes: snap.episodes,
+        progressByKey: snap.episodeProgressByKey,
+      }),
+    [
+      seriesBulkWatched,
+      seriesUnplayedSummary,
+      snap.episodeProgressByKey,
+      snap.episodes,
+      totalSeasonsCount,
+    ],
+  );
+
+  const resolvedSeriesId =
+    effectiveSeriesKey === target.itemKey
+      ? (target.catalogId ?? snap.detailRow?.id ?? seriesIdRef.current)
+      : seriesIdRef.current;
 
   const relatedSeriesKeys = useMemo(
     () => snap.related.filter((item) => item.kind === 'series').map((item) => item.key),
@@ -727,11 +739,18 @@ export function useDetailData({
       relatedUnplayedBySeriesKey,
       versions,
       userRating,
+      resolvedSeriesId,
+      isSeriesWatched,
+      isSeasonWatched,
+      getCachedSeasonEpisodes,
       selectSeason,
       retrySeasons,
       toggleMyList,
       toggleWatched,
       toggleRating,
+      toggleEpisodeWatched,
+      markSeasonWatched,
+      markSeriesWatched,
     };
   }, [
     backdropUri,
@@ -739,17 +758,24 @@ export function useDetailData({
     director,
     franchiseItems,
     genres,
+    getCachedSeasonEpisodes,
+    isSeasonWatched,
+    isSeriesWatched,
+    markSeasonWatched,
+    markSeriesWatched,
     matchedImdbId,
     plot,
     posterUri,
     rating,
     rawTitle,
     relatedUnplayedBySeriesKey,
+    resolvedSeriesId,
     retrySeasons,
     runtimeMin,
     selectSeason,
     snap,
     title,
+    toggleEpisodeWatched,
     toggleMyList,
     toggleRating,
     toggleWatched,

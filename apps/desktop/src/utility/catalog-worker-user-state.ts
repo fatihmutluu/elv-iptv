@@ -9,6 +9,8 @@ export type CatalogUserStateRpcCall = Extract<
     method:
       | 'saveProgress'
       | 'setWatched'
+      | 'setSeasonWatched'
+      | 'setSeriesWatched'
       | 'getProgress'
       | 'listContinueWatching'
       | 'listWatched'
@@ -55,6 +57,14 @@ export async function executeUserStateRpcCall(
     case 'setWatched':
       return service.setWatched
         ? service.setWatched(call.itemKey, call.watched, call.profileId)
+        : err(elvError('storage', 'unsupported'));
+    case 'setSeasonWatched':
+      return service.setSeasonWatched
+        ? service.setSeasonWatched(call.seriesKey, call.season, call.watched, call.profileId)
+        : err(elvError('storage', 'unsupported'));
+    case 'setSeriesWatched':
+      return service.setSeriesWatched
+        ? service.setSeriesWatched(call.seriesKey, call.watched, call.profileId)
         : err(elvError('storage', 'unsupported'));
     case 'getProgress':
       return service.getProgress ? service.getProgress(call.itemKey, call.profileId) : null;

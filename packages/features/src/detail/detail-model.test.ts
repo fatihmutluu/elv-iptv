@@ -3,13 +3,14 @@ import { elvError } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import { describe, expect, it } from 'vitest';
 import type { DetailTarget } from '../shared';
-import { buildOptimisticWatchedRow } from './detail-data-helpers';
+import { buildOptimisticEpisodeWatchedRow, buildOptimisticWatchedRow } from './detail-data-helpers';
 import {
   buildDetailNavRows,
   buildEpisodePlayTarget,
   buildMoviePlayTarget,
   buildPrimaryPlayAction,
   buildTechnicalBadges,
+  computeEpisodeRowMetrics,
   describeDetailSeasonsError,
   detailProgressRatio,
   formatEpisodeDuration,
@@ -532,8 +533,7 @@ describe('detail-model', () => {
         buildDetailNavRows({
           heroActionCount: 1,
           seasonsCount: 2,
-          episodeChunksCount: 4,
-          episodesCount: 30,
+          episodesCount: 100,
           hasSeasonsError: false,
           relatedCount: 4,
         }),
@@ -542,8 +542,7 @@ describe('detail-model', () => {
         { id: 'hero-actions', count: 1, orientation: 'horizontal' },
         { id: 'hero-play', count: 1, orientation: 'horizontal' },
         { id: 'seasons', count: 2, orientation: 'horizontal' },
-        { id: 'episode-chunks', count: 4, orientation: 'horizontal' },
-        { id: 'episodes', count: 30, orientation: 'vertical' },
+        { id: 'episodes', count: 100, orientation: 'vertical' },
         { id: 'related', count: 4, orientation: 'horizontal' },
       ]);
 
@@ -551,7 +550,6 @@ describe('detail-model', () => {
         buildDetailNavRows({
           heroActionCount: 1,
           seasonsCount: 0,
-          episodeChunksCount: 4,
           episodesCount: 0,
           hasSeasonsError: true,
           relatedCount: 0,
@@ -646,6 +644,52 @@ describe('detail-model', () => {
         profileId: 'kids-42',
       });
       expect(row.profileId).toBe('kids-42');
+    });
+
+    it('computes deterministic episode row height + gap metrics for portrait, desktop, and TV', () => {
+      const portrait = computeEpisodeRowMetrics(true, false);
+      const desktop = computeEpisodeRowMetrics(false, false);
+      const tv = computeEpisodeRowMetrics(false, true);
+
+      expect(portrait.rowHeight + portrait.gap).toBe(portrait.itemStride);
+      expect(desktop.rowHeight + desktop.gap).toBe(desktop.itemStride);
+      expect(tv.rowHeight + tv.gap).toBe(tv.itemStride);
+      expect(portrait.rowHeight).toBeLessThan(desktop.rowHeight);
+      expect(tv.gap).toBeGreaterThan(desktop.gap);
+    });
+
+    it('builds optimistic episode watched rows preserving seriesKey, season, episode, and duration', () => {
+      const ep = makeEpisode({ key: 'x:s1:ep:42', season: 2, episode: 5, durationSec: 1800 });
+      const marked = buildOptimisticEpisodeWatchedRow(undefined, true, {
+        sourceId: 's1',
+        seriesKey: 'x:s1:series:301',
+        episode: ep,
+        fallbackTitle: 'Starlight Harbor',
+        logo: 'https://img.invalid/bg.jpg',
+        profileId: 'p1',
+      });
+      expect(marked).toMatchObject({
+        profileId: 'p1',
+        sourceId: 's1',
+        itemKey: 'x:s1:ep:42',
+        kind: 'episode',
+        seriesKey: 'x:s1:series:301',
+        season: 2,
+        episode: 5,
+        positionMs: 1_800_000,
+        durationMs: 1_800_000,
+        watched: true,
+      });
+
+      const unmarked = buildOptimisticEpisodeWatchedRow(marked, false, {
+        sourceId: 's1',
+        seriesKey: 'x:s1:series:301',
+        episode: ep,
+        fallbackTitle: 'Starlight Harbor',
+        logo: null,
+      });
+      expect(unmarked.watched).toBe(false);
+      expect(unmarked.positionMs).toBe(0);
     });
 
     it('merges key-free VOD enrichment non-destructively without overwriting provider fields (#215)', () => {

@@ -2,12 +2,14 @@ import type { DownloadEnqueueInput, DownloadRecord, Result } from '@elv/domain';
 import {
   DOWNLOADS_CHANNELS,
   type DownloadsBridge,
+  isDownloadEnqueueBatchRequest,
   isDownloadEnqueueRequest,
   isDownloadKeyRequest,
   isDownloadListRequest,
   isDownloadOnlinePlaybackRequest,
   isDownloadRecord,
   isDownloadRecordList,
+  isDownloadRecordListResult,
   isDownloadRecordResult,
   isDownloadVoidResult,
 } from '../shared/downloads-ipc.ts';
@@ -56,6 +58,21 @@ export function createDownloadsBridge(ipc: DownloadsIpcRendererLike): DownloadsB
       const reply = await ipc.invoke(DOWNLOADS_CHANNELS.enqueue, input);
       if (!isDownloadRecordResult(reply)) {
         throw new Error(`${DOWNLOADS_CHANNELS.enqueue} returned an unexpected reply`);
+      }
+      return reply;
+    },
+
+    async enqueueBatch(
+      inputs: readonly DownloadEnqueueInput[],
+    ): Promise<Result<readonly DownloadRecord[]>> {
+      if (!isDownloadEnqueueBatchRequest(inputs)) {
+        throw new Error(
+          `${DOWNLOADS_CHANNELS.enqueueBatch} received invalid download batch payload`,
+        );
+      }
+      const reply = await ipc.invoke(DOWNLOADS_CHANNELS.enqueueBatch, inputs);
+      if (!isDownloadRecordListResult(reply)) {
+        throw new Error(`${DOWNLOADS_CHANNELS.enqueueBatch} returned an unexpected reply`);
       }
       return reply;
     },

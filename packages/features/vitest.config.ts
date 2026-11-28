@@ -13,7 +13,6 @@ export default defineConfig({
         'src/catalog/catalog-model.ts',
         'src/catalog/virtual-grid-math.ts',
         'src/detail/detail-model.ts',
-        'src/detail/episode-chunks.ts',
         'src/search/search-model.ts',
         'src/browse/browse-model.ts',
         'src/player/errors.ts',

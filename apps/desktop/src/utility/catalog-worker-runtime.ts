@@ -442,6 +442,8 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return service.resolveStream(call.itemKey, call.opts);
       case 'saveProgress':
       case 'setWatched':
+      case 'setSeasonWatched':
+      case 'setSeriesWatched':
       case 'getProgress':
       case 'listContinueWatching':
       case 'listWatched':

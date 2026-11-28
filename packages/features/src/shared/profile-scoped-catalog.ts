@@ -51,6 +51,8 @@ export function createProfileScopedCatalog(
   const c = catalog;
   const saveProgress = c.saveProgress?.bind(c);
   const setWatched = c.setWatched?.bind(c);
+  const setSeasonWatched = c.setSeasonWatched?.bind(c);
+  const setSeriesWatched = c.setSeriesWatched?.bind(c);
   const getProgress = c.getProgress?.bind(c);
   const listContinueWatching = c.listContinueWatching?.bind(c);
   const listWatched = c.listWatched?.bind(c);
@@ -194,6 +196,18 @@ export function createProfileScopedCatalog(
       ? {
           setWatched: (itemKey, watched, profileId) =>
             setWatched(itemKey, watched, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(setSeasonWatched
+      ? {
+          setSeasonWatched: (seriesKey, season, watched, profileId) =>
+            setSeasonWatched(seriesKey, season, watched, profileId ?? getScope().profileId),
+        }
+      : {}),
+    ...(setSeriesWatched
+      ? {
+          setSeriesWatched: (seriesKey, watched, profileId) =>
+            setSeriesWatched(seriesKey, watched, profileId ?? getScope().profileId),
         }
       : {}),
     ...(getProgress

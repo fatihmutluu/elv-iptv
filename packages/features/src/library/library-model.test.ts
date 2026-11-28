@@ -462,6 +462,60 @@ describe('library-model', () => {
     }
   });
 
+  it('prefers explicit record.seriesKey over itemKey/title heuristics to fix 4-part Xtream keys and same-title collisions', () => {
+    const remake1999 = makeDownload({
+      id: 'r1',
+      sourceId: 's1',
+      itemKey: 'x:s1:episode:9001',
+      kind: 'episode',
+      title: 'Pilot',
+      seriesKey: 'x:s1:series:100',
+      seriesTitle: 'Remake',
+      season: 1,
+      episodeNum: 1,
+      totalBytes: 120,
+    });
+    const remake2024 = makeDownload({
+      id: 'r2',
+      sourceId: 's1',
+      itemKey: 'x:s1:episode:9002',
+      kind: 'episode',
+      title: 'Pilot',
+      seriesKey: '  x:s1:series:200  ',
+      seriesTitle: 'Remake',
+      season: 1,
+      episodeNum: 1,
+      totalBytes: 240,
+    });
+    const legacyFallback = makeDownload({
+      id: 'r3',
+      sourceId: 's1',
+      itemKey: 'x:s1:episode:42:1:1',
+      kind: 'episode',
+      title: 'Legacy',
+      seriesKey: '   ',
+      seriesTitle: 'Severance',
+      season: 1,
+      episodeNum: 1,
+      totalBytes: 100,
+    });
+
+    const knownSeriesByTitle = new Map<string, string>([['s1|remake', 'x:s1:series:wrong']]);
+    expect(deriveSeriesKeyFromEpisodeRecord(remake1999, knownSeriesByTitle)).toBe(
+      'x:s1:series:100',
+    );
+    expect(deriveSeriesKeyFromEpisodeRecord(remake2024, knownSeriesByTitle)).toBe(
+      'x:s1:series:200',
+    );
+    expect(deriveSeriesKeyFromEpisodeRecord(legacyFallback, knownSeriesByTitle)).toBe(
+      'x:s1:series:42',
+    );
+
+    const groups = groupDownloadedSeries([remake1999, remake2024], { knownSeriesByTitle });
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.seriesKey).sort()).toEqual(['x:s1:series:100', 'x:s1:series:200']);
+  });
+
   it('builds detail and play targets including zero-connection offline episode play target', () => {
     const ep = makeDownload({
       itemKey: 'x:s1:episode:42:1:3',

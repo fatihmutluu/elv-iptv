@@ -25,6 +25,7 @@ import {
   type UserItemKind,
   type WatchProgressRow,
 } from './user-state-helpers';
+import { lookupParentSeriesKeyForUnwatch } from './user-state-series';
 
 export { listSeriesUnplayedCounts, type SeriesUnplayedSummary } from './user-state-unplayed';
 export { DEFAULT_PROFILE_ID, type FavoriteRow, type UserItemKind, type WatchProgressRow };
@@ -243,26 +244,43 @@ export async function setItemWatched(
   const normalizedProfile = normalizeProfileId(profileId);
   const updatedAt = Math.round(clock());
   const versionGroupKey = await lookupMovieVersionGroupKey(db, itemKey);
-  const sql = watched
-    ? 'UPDATE watch_progress SET watched = 1, updated_at = ? WHERE profile_id = ? AND item_key = ?'
-    : 'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND item_key = ?';
-  const result = await db.run(sql, [updatedAt, normalizedProfile, itemKey]);
+  if (!watched) {
+    await db.transaction(async (tx) => {
+      const parentSeriesKey = await lookupParentSeriesKeyForUnwatch(tx, normalizedProfile, itemKey);
+      await tx.run(
+        'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND item_key = ?',
+        [updatedAt, normalizedProfile, itemKey],
+      );
+      if (versionGroupKey !== null) {
+        await tx.run(
+          'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND version_group_key = ?',
+          [updatedAt, normalizedProfile, versionGroupKey],
+        );
+      }
+      await tx.run(
+        'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND series_key = ?',
+        [updatedAt, normalizedProfile, itemKey],
+      );
+      if (parentSeriesKey !== null && parentSeriesKey !== itemKey) {
+        await tx.run(
+          'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND item_key = ?',
+          [updatedAt, normalizedProfile, parentSeriesKey],
+        );
+      }
+    });
+    return ok(undefined);
+  }
+  const result = await db.run(
+    'UPDATE watch_progress SET watched = 1, updated_at = ? WHERE profile_id = ? AND item_key = ?',
+    [updatedAt, normalizedProfile, itemKey],
+  );
   if (versionGroupKey !== null) {
     await db.run(
-      watched
-        ? 'UPDATE watch_progress SET watched = 1, updated_at = ?, preferred_item_key = COALESCE(preferred_item_key, ?) WHERE profile_id = ? AND version_group_key = ?'
-        : 'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND version_group_key = ?',
-      watched
-        ? [updatedAt, itemKey, normalizedProfile, versionGroupKey]
-        : [updatedAt, normalizedProfile, versionGroupKey],
+      'UPDATE watch_progress SET watched = 1, updated_at = ?, preferred_item_key = COALESCE(preferred_item_key, ?) WHERE profile_id = ? AND version_group_key = ?',
+      [updatedAt, itemKey, normalizedProfile, versionGroupKey],
     );
   }
-  if (!watched) {
-    await db.run(
-      'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND series_key = ?',
-      [updatedAt, normalizedProfile, itemKey],
-    );
-  } else if (result.changes === 0) {
+  if (result.changes === 0) {
     const seed = await lookupCatalogItemForWatched(db, itemKey);
     if (seed !== null) {
       await db.run(INSERT_WATCHED_SEED, [
